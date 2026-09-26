@@ -70,9 +70,14 @@ import { increaseDecimals, decreaseDecimals, toggleThousands } from "./lib/numbe
 import { modelSaveState } from "./lib/modelSaveState.js";
 import { readZoom, writeZoom } from "./lib/sheetZoom.js";
 import { readAutoColor, writeAutoColor } from "./lib/sheetColorMode.js";
-import { readLocalSheet, writeLocalSheet, loadCloudSheet, saveCloudSheet } from "./lib/modelStore.js";
+import {
+  readLocalSheet, writeLocalSheet, loadCloudSheet, saveCloudSheet,
+  readLocalOrgIndex, writeLocalOrgIndex, touchLocalOrgIndex, removeLocalOrgIndexEntry,
+  listOrgWorkbooksCloud, loadOrgWorkbookCloud, saveOrgWorkbookCloud, renameOrgWorkbookCloud, deleteOrgWorkbookCloud,
+} from "./lib/modelStore.js";
 import { listProjects, reconcileProjects, onProjectsChanged } from "../../shared/projects/projects.js";
 import FileMenu from "./components/FileMenu.jsx";
+import OrgWorkbookPicker from "./components/OrgWorkbookPicker.jsx";
 import { addSheetFromCsvText, sheetToCsv } from "./lib/csvIO.js";
 // spreadsheet-live-data-refs — the project's own data (site plan + comps), exposed read-only as
 // Site.*/Plan.*/Comp.* formula names (lib/projectRefs.js's own header). `onSiteModelChanged` is a
@@ -129,6 +134,12 @@ function EmptyProjectState({ onGoDashboard }) {
 export default function ModelApp({
   isActive, shellModule, onShellSwitch, authControl, accountActive, userId,
   projectId, crossProject, onNavigate, onGoDashboard, onNewProject, onSelectOrg,
+  // ORG SCOPE (NEW-1, B1912209) — standing in the Organization, not any project (route.js's
+  // `org` field; mutually exclusive with `projectId`/`crossProject` by construction — see
+  // `orgMode` below). Unlike a project's single workbook, Organization holds SEVERAL — the
+  // picker (`OrgWorkbookPicker.jsx`) chooses one before this component's existing grid/ribbon/
+  // File-menu UI (unchanged, reused verbatim) has anything to show.
+  org = false,
 }) {
   const { value: workbook, commit, undo, redo, reset, canUndo, canRedo } = useUndoableState(createWorkbook());
   // STAGE 3 (NEW-1) — which sheet TAB is currently being VIEWED. Deliberately kept OUTSIDE the
@@ -264,12 +275,22 @@ export default function ModelApp({
   // second copy of these four lines.
   const onOpenFind = useCallback(() => { setFindShowReplace(false); setFindOpen(true); setNameManagerOpen(false); setInconsistencyPanelOpen(false); }, []);
   const onOpenReplace = useCallback(() => { setFindShowReplace(true); setFindOpen(true); setNameManagerOpen(false); setInconsistencyPanelOpen(false); }, []);
-  // B1007280 — sheet zoom is a per-project VIEW preference (like a browser's own zoom level),
+  // ORG SCOPE (NEW-1) — hoisted above the view-preference hooks below so they can key on the
+  // right thing (a project id, or an org workbook id) without reordering any hook relative to
+  // the rest of this component. `orgMode` requires `projectId` to be null BY CONSTRUCTION
+  // (route.js never sets `org` and `projectId` together — invariant §14, docs/DATA.md), checked
+  // here too rather than trusted blindly. The fuller org-scope block further down
+  // (openOrgWorkbook/openWorkbook/storageKey, the workbook list + its CRUD) builds on these two.
+  const orgMode = !!org && !crossProject && !projectId;
+  const [orgWorkbookId, setOrgWorkbookId] = useState(null);
+  const viewPrefsKey = orgMode ? orgWorkbookId : projectId;
+
+  // B1007280 — sheet zoom is a per-workbook VIEW preference (like a browser's own zoom level),
   // never sheet DATA: it doesn't ride the undo stack and doesn't sync to the cloud, so two
   // people (or two tabs) looking at the same model have no reason to share a zoom level.
-  const [zoom, setZoom] = useState(() => readZoom(projectId));
-  useEffect(() => { setZoom(readZoom(projectId)); }, [projectId]);
-  const onZoomChange = useCallback((z) => { setZoom(z); writeZoom(projectId, z); }, [projectId]);
+  const [zoom, setZoom] = useState(() => readZoom(viewPrefsKey));
+  useEffect(() => { setZoom(readZoom(viewPrefsKey)); }, [viewPrefsKey]);
+  const onZoomChange = useCallback((z) => { setZoom(z); writeZoom(viewPrefsKey, z); }, [viewPrefsKey]);
 
   // STAGE 3 (NEW-2) — the input/formula/cross-sheet-link colour toggle. Same "view preference,
   // not sheet data" treatment as zoom: never through undo/redo, never synced to the cloud (a
@@ -277,11 +298,11 @@ export default function ModelApp({
   // — UNLIKE painter/filterOn — persisted across a reload, because it's a standing display
   // choice ("I turned this off because I use my own font colours") rather than a mid-task
   // gesture that would be confusing to find still armed after a reload.
-  const [autoColor, setAutoColorState] = useState(() => readAutoColor(projectId));
-  useEffect(() => { setAutoColorState(readAutoColor(projectId)); }, [projectId]);
+  const [autoColor, setAutoColorState] = useState(() => readAutoColor(viewPrefsKey));
+  useEffect(() => { setAutoColorState(readAutoColor(viewPrefsKey)); }, [viewPrefsKey]);
   const onAutoColorToggle = useCallback(() => {
-    setAutoColorState((v) => { const next = !v; writeAutoColor(projectId, next); return next; });
-  }, [projectId]);
+    setAutoColorState((v) => { const next = !v; writeAutoColor(viewPrefsKey, next); return next; });
+  }, [viewPrefsKey]);
 
   // STAGE 2 — THE RIBBON (B1007281). Format Painter's captured source ({format, style} — see
   // sheetModel.js's paintedStyleAt) while armed, or null. AutoFilter's on/off switch and its
@@ -290,11 +311,11 @@ export default function ModelApp({
   // synced — but UNLIKE zoom, deliberately NOT persisted across a reload either: a stray armed
   // painter or an active filter surviving a reload would be confusing ("why did my cells just
   // repaint themselves") in a way an unchanged zoom level never is, so both simply reset with
-  // the project.
+  // the workbook.
   const [painter, setPainter] = useState(null); // { source: {format, style} } | null
   const [filterOn, setFilterOn] = useState(false);
   const [columnFilters, setColumnFilters] = useState(() => new Map());
-  useEffect(() => { setPainter(null); setFilterOn(false); setColumnFilters(new Map()); }, [projectId]);
+  useEffect(() => { setPainter(null); setFilterOn(false); setColumnFilters(new Map()); }, [viewPrefsKey]);
   // Format Painter needs the CURRENT selection at the moment a click/drag settles (SheetView's
   // onSelectionSettled), not the value selRange held when the painter was armed — a ref mirror,
   // the same pattern zoomRef (SheetView.jsx) already uses for exactly this reason.
@@ -303,23 +324,95 @@ export default function ModelApp({
 
   const openProject = !crossProject && !!projectId;
 
+  // ORG SCOPE (NEW-1), continued from `orgMode`/`orgWorkbookId` above (hoisted for the view-
+  // preference hooks). A stray prop combination (org true but projectId also somehow set) falls
+  // through `orgMode`'s own guard to the plain empty state in the render below, rather than
+  // silently mis-happening on whatever `projectId` last named (the "URL is a hint, not an
+  // address" trap B1020928 warns against).
+  const [orgWorkbooks, setOrgWorkbooks] = useState(() => readLocalOrgIndex(userId));
+  const [orgListLoading, setOrgListLoading] = useState(false);
+  const [orgListNotice, setOrgListNotice] = useState(null);
+  const openOrgWorkbook = orgMode && !!orgWorkbookId;
+  // The umbrella "is a workbook actually open" condition — a project's own single workbook, or a
+  // chosen org workbook. Mutually exclusive by construction (`orgMode` already requires no
+  // `projectId`), so `storageKey` below is never ambiguous about which one it names.
+  const openWorkbook = openProject || openOrgWorkbook;
+  const storageKey = openProject ? projectId : (openOrgWorkbook ? orgWorkbookId : null);
+  const orgWorkbookName = useMemo(
+    () => orgWorkbooks.find((w) => w.id === orgWorkbookId)?.name || "Untitled workbook",
+    [orgWorkbooks, orgWorkbookId],
+  );
+  // Leaving Organization (switching tabs elsewhere, or picking a project) always drops back to
+  // the workbook list — never carry a stale workbook selection into a context that no longer
+  // names it.
+  useEffect(() => { if (!orgMode) setOrgWorkbookId(null); }, [orgMode]);
+  // The workbook LIST: local cache first (instant, and all a signed-out account has), then
+  // reconciled against the cloud (source of truth once reachable) — the same "local first, then
+  // reconcile" shape the single-workbook load effect below uses for CONTENT, applied here to the
+  // LIST of what exists. A workbook this device created but hasn't synced yet stays in the merged
+  // list even if the cloud fetch doesn't (yet) know about it.
+  useEffect(() => {
+    if (!orgMode) return undefined;
+    setOrgWorkbooks(readLocalOrgIndex(userId));
+    setOrgListNotice(null);
+    let live = true;
+    setOrgListLoading(true);
+    (async () => {
+      const r = await listOrgWorkbooksCloud();
+      if (!live) return;
+      if (r.ok) {
+        const cloudIds = new Set(r.rows.map((w) => w.id));
+        const localOnly = readLocalOrgIndex(userId).filter((w) => !cloudIds.has(w.id));
+        const merged = [...r.rows, ...localOnly].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        setOrgWorkbooks(merged);
+        writeLocalOrgIndex(userId, merged);
+      } else if (r.reason === "not-provisioned") {
+        setOrgListNotice("Cloud backup for organization workbooks isn't turned on yet — saved on this device only.");
+      }
+    })().finally(() => { if (live) setOrgListLoading(false); });
+    return () => { live = false; };
+  }, [orgMode, userId]);
+
+  const onOrgCreate = useCallback(() => {
+    const id = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : `wb-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const name = "Untitled workbook";
+    const wb = createWorkbook();
+    writeLocalSheet(userId, id, wb);
+    setOrgWorkbooks(touchLocalOrgIndex(userId, { id, name, updatedAt: Date.now() }));
+    setOrgWorkbookId(id);
+    if (userId) saveOrgWorkbookCloud({ uid: userId, id, name, sheet: wb, expected: null }).catch(() => {});
+  }, [userId]);
+  const onOrgOpen = useCallback((id) => setOrgWorkbookId(id), []);
+  const onOrgRename = useCallback((id, name) => {
+    setOrgWorkbooks(touchLocalOrgIndex(userId, { id, name, updatedAt: Date.now() }));
+    if (userId) renameOrgWorkbookCloud(userId, id, name).catch(() => {});
+  }, [userId]);
+  const onOrgDelete = useCallback((id) => {
+    setOrgWorkbooks(removeLocalOrgIndexEntry(userId, id));
+    setOrgWorkbookId((cur) => (cur === id ? null : cur));
+    if (userId) deleteOrgWorkbookCloud(userId, id).catch(() => {});
+  }, [userId]);
+  const onBackToOrgWorkbooks = useCallback(() => setOrgWorkbookId(null), []);
+
   /* ---- load: local first (synchronous, always available), then reconcile against the cloud.
-   * Local wins whenever it already exists on this device — see the file header for why. */
+   * Local wins whenever it already exists on this device — see the file header for why. Reads
+   * `storageKey` (a project id, or an org workbook id — never both, see `openWorkbook` above);
+   * the cloud half branches on which one is actually open. */
   useEffect(() => {
     loadTokenRef.current += 1;
     const token = loadTokenRef.current;
     cloudVersionRef.current = null;
     setStatus("idle");
     setCloudConfirmed(false);
-    if (!openProject) { const wb = createWorkbook(); reset(wb); setActiveSheetId(wb.activeSheetId); setReady(false); return undefined; }
-    const local = readLocalSheet(userId, projectId);
+    if (!openWorkbook) { const wb = createWorkbook(); reset(wb); setActiveSheetId(wb.activeSheetId); setReady(false); return undefined; }
+    const local = readLocalSheet(userId, storageKey);
     const initialWorkbook = local ? migrateWorkbook(local) : createWorkbook();
     reset(initialWorkbook);
     setActiveSheetId(initialWorkbook.activeSheetId);
     setReady(true);
     let live = true;
     (async () => {
-      const r = await loadCloudSheet(projectId);
+      const r = openProject ? await loadCloudSheet(projectId) : await loadOrgWorkbookCloud(orgWorkbookId);
       if (!live || loadTokenRef.current !== token) return;
       if (r.ok) {
         cloudVersionRef.current = r.version;
@@ -344,26 +437,31 @@ export default function ModelApp({
     })();
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, openProject, userId]);
+  }, [storageKey, openWorkbook, openProject, projectId, orgWorkbookId, userId]);
 
   /* Write-through local save on every commit — never debounced (the stored copy must never
    * be staler than the screen: a tab close a moment after typing must not lose that edit). */
   useEffect(() => {
-    if (!ready || !openProject) return;
-    if (!writeLocalSheet(userId, projectId, workbook)) setStatus("error");
-  }, [workbook, ready, openProject, projectId, userId]);
+    if (!ready || !openWorkbook) return;
+    if (!writeLocalSheet(userId, storageKey, workbook)) setStatus("error");
+  }, [workbook, ready, openWorkbook, storageKey, userId]);
 
   /* Best-effort, debounced cloud push through the guarded save path. Reads `status` without
    * depending on it — this must fire only on a WORKBOOK change, not on every status transition
    * the push itself causes (that would restart the debounce on its own "saving" flag). */
   useEffect(() => {
-    if (!ready || !openProject || !userId) return undefined;
+    if (!ready || !openWorkbook || !userId) return undefined;
     if (status === "not-provisioned") return undefined; // stop hammering a table that isn't there yet
     clearTimeout(pushTimer.current);
     pushTimer.current = setTimeout(async () => {
       setStatus("saving");
-      const r = await saveCloudSheet({ uid: userId, projectId, sheet: workbook, expected: cloudVersionRef.current });
-      if (r.ok) { cloudVersionRef.current = r.version; setCloudConfirmed(true); setStatus("saved"); }
+      const r = openProject
+        ? await saveCloudSheet({ uid: userId, projectId, sheet: workbook, expected: cloudVersionRef.current })
+        : await saveOrgWorkbookCloud({ uid: userId, id: orgWorkbookId, name: orgWorkbookName, sheet: workbook, expected: cloudVersionRef.current });
+      if (r.ok) {
+        cloudVersionRef.current = r.version; setCloudConfirmed(true); setStatus("saved");
+        if (!openProject) setOrgWorkbooks(touchLocalOrgIndex(userId, { id: orgWorkbookId, name: orgWorkbookName, updatedAt: Date.now() }));
+      }
       else if (r.reason === "not-provisioned") setStatus("not-provisioned");
       else if (r.reason === "conflict") setStatus("conflict");
       else if (r.reason === "unavailable") setStatus("idle");
@@ -371,7 +469,7 @@ export default function ModelApp({
     }, CLOUD_PUSH_DEBOUNCE_MS);
     return () => clearTimeout(pushTimer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workbook, ready, openProject, projectId, userId]);
+  }, [workbook, ready, openWorkbook, openProject, projectId, orgWorkbookId, orgWorkbookName, userId]);
 
   // Ctrl/Cmd+Z / Ctrl/Cmd+Shift+Z (or +Y), Ctrl+G (Name Box), Ctrl+F / Ctrl+H (Find/Replace) —
   // SheetView deliberately leaves every Ctrl/Cmd chord alone so this can own them, gated on
@@ -503,10 +601,11 @@ export default function ModelApp({
   const [pendingXlsxImport, setPendingXlsxImport] = useState(null); // { file, sheetCount } | null
 
   const currentFileBaseName = useCallback(() => {
+    if (openOrgWorkbook) return sanitizeFilename(orgWorkbookName);
     let name = "Workbook";
     if (projectId) { try { const p = listProjects().find((pp) => pp.id === projectId); if (p?.name) name = p.name; } catch (_) {} }
     return sanitizeFilename(name);
-  }, [projectId]);
+  }, [projectId, openOrgWorkbook, orgWorkbookName]);
 
   const onExportXlsx = useCallback(async () => {
     setFileBusy(true);
@@ -852,13 +951,17 @@ export default function ModelApp({
         onDashboard={onGoDashboard}
         currentProject={currentProject}
         cross={crossProject}
-        onSelectProject={(id) => onNavigate?.({ projectId: id, cross: false })}
+        // ORG SCOPE (NEW-1) — passed through like every other org-capable workspace; the
+        // breadcrumb reads "Organization" (never a blank/half-built crumb) while `currentProject`
+        // stays null, matching Notes/Library/Scheduler's own treatment exactly.
+        org={org}
+        onSelectProject={(id) => onNavigate?.({ projectId: id, cross: false, org: false })}
         onNewProject={onNewProject}
         onSelectOrg={onSelectOrg}
         planSlot={conceptCrumb}
         authControl={authControl}
         accountActive={accountActive}
-        saveState={openProject ? modelSaveState(status, accountActive, cloudConfirmed) : null}
+        saveState={openWorkbook ? modelSaveState(status, accountActive, cloudConfirmed) : null}
         saveDetail={
           status === "not-provisioned" ? "Cloud backup for Spreadsheet isn't turned on yet — saved on this device only."
           : status === "conflict" ? "This spreadsheet changed elsewhere — reload to see the latest (your edits here stayed on this device)."
@@ -876,8 +979,19 @@ export default function ModelApp({
         // riding the Home ribbon's own width-aware collapse (lib/ribbonLayout.js no longer lists
         // an "audit" group at all — see its header). `AuditGroup` is the SAME component/buttons/
         // testids Stage 3 shipped, just reused from a different call site with the same `ctx`.
-        toolbarContent={openProject ? (
+        toolbarContent={openWorkbook ? (
           <>
+            {/* ORG SCOPE (NEW-1) — the one door back to the workbook list; a project's own
+                single workbook has no list to return to, so this never renders there. */}
+            {openOrgWorkbook && (
+              <button
+                type="button"
+                data-testid="org-workbook-back"
+                onClick={onBackToOrgWorkbooks}
+                title="Back to your organization's workbook list"
+                style={{ height: 30, padding: "0 10px", borderRadius: RADIUS.md, border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: "var(--chrome-text)", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
+              >‹ Workbooks</button>
+            )}
             <FileMenu
               ref={fileMenuRef}
               busy={fileBusy}
@@ -898,9 +1012,7 @@ export default function ModelApp({
         ) : undefined}
       />
 
-      {!openProject ? (
-        <EmptyProjectState onGoDashboard={onGoDashboard} />
-      ) : (
+      {openWorkbook ? (
         <>
           {/* Round 3 visual pass (B1087904, owner verbatim: "rerun the loop to make it
               pretty, also i dont like the square edging"). The ribbon and formula bar used to be
@@ -1025,6 +1137,20 @@ export default function ModelApp({
           />
           <CommandPalette open={paletteOpen} ctx={ctx} onClose={() => setPaletteOpen(false)} />
         </>
+      ) : orgMode ? (
+        // ORG SCOPE (NEW-1) — Organization holds SEVERAL workbooks (unlike a project's one), so
+        // this is the list to choose from before the grid above has anything to show.
+        <OrgWorkbookPicker
+          workbooks={orgWorkbooks}
+          loading={orgListLoading}
+          notice={orgListNotice}
+          onOpen={onOrgOpen}
+          onCreate={onOrgCreate}
+          onRename={onOrgRename}
+          onDelete={onOrgDelete}
+        />
+      ) : (
+        <EmptyProjectState onGoDashboard={onGoDashboard} />
       )}
     </div>
   );

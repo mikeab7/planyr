@@ -16,7 +16,7 @@ import ModuleLoader from "../shared/ui/ModuleLoader.jsx";
 import AccountControl from "./AccountControl.jsx";
 import { useProfile } from "../shared/profile/useProfile.js";
 import { setTelemetryModule } from "../shared/telemetry/clientErrors.js";
-import { useHashRoute, unknownModuleSlug, isAdminRoute, isDesignRoute, isDashboardRoute, readRoute, buildHash, INITIAL_HASH_EMPTY } from "./route.js";
+import { useHashRoute, unknownModuleSlug, isAdminRoute, isDesignRoute, isDashboardRoute, readRoute, buildHash, INITIAL_HASH_EMPTY, ORG_CAPABLE_MODULES, reviewOpenTarget } from "./route.js";
 import { pageTitle } from "./pageTitle.js";
 import { writeLastRoute, seedBootRoute } from "./lastRoute.js";
 import { isFreshRoutelessBoot, firstLandingRedirect, resolveHasAnyProjects } from "./firstLanding.js";
@@ -253,17 +253,22 @@ export default function Shell() {
   // breadcrumb's "Dashboard" / "select project" simply change the hash; only the two
   // *side-effecting* actions still need a signal: creating a new project (born in the
   // Site Planner) and opening a specific review file (Document Review is lazy-mounted).
-  // ORG SCOPE (NEW-1, extended B1020930) — Notes, Library and now Schedule are meaningful
-  // there (Site/Review/Model have no org-scoped content to show), so switching tabs while
+  // ORG SCOPE (NEW-1, extended B1020930, B1912209) — Notes, Library, Schedule, Spreadsheet
+  // (`model`) and Review (`doc-review`) are all meaningful there now (Site Planner still has no
+  // org-scoped content — there is no parcel to draw without a project), so switching tabs while
   // standing in Organization keeps org scope only when the target module can actually show it;
   // any other tab drops back to that module's plain, no-project state. Schedule at org scope
   // renders `AgendaView` (a lightweight local surface Scheduler.jsx renders INSTEAD of the
-  // embedded Gantt iframe — never a route into the walled `public/sequence/index.html`), so it
-  // was safe to add here without touching the embedded scheduler at all. Site/Review/Model
-  // are still simply never OFFERED a way into org scope (no `onSelectOrg` wiring for them);
-  // this is what makes a stray "#/org/site" URL, if ever hand-typed, degrade harmlessly rather
-  // than needing its own guard everywhere.
-  const ORG_CAPABLE_MODULES = new Set(["notes", "library", "scheduler"]);
+  // embedded Gantt iframe — never a route into the walled `public/sequence/index.html`); Model
+  // (`ModelApp.jsx`) renders `OrgWorkbookPicker` instead of its usual single-project workbook;
+  // Review (`DocReview.jsx`) opens an org-filed drawing exactly like a project-filed one, backed
+  // by the SAME `doc_reviews` row + `orgScope` flag Library's own org browsing already reads —
+  // none of the three touch a walled/embedded surface, so this was safe to extend without
+  // touching any of their content models. Site Planner is still simply never OFFERED a way into
+  // org scope (no `onSelectOrg` wiring for it); this is what makes a stray "#/org/site" URL, if
+  // ever hand-typed, degrade harmlessly rather than needing its own guard everywhere.
+  // (ORG_CAPABLE_MODULES itself now lives in route.js — the single source of truth — so it's
+  // directly unit-testable without rendering this whole component.)
   const switchModule = (id) => navigate({ module: id, org: org && ORG_CAPABLE_MODULES.has(id) });
   // NEW-1 (B1213312) — the Dashboard is not a `{module, projectId, cross, org}` value (see
   // route.js's isDashboardRoute), so it can't be reached through `navigate()`'s partial-merge
@@ -298,9 +303,13 @@ export default function Shell() {
   // `openAtPage` (B848848 — the comps "open source brochure" link) jumps to a specific page
   // once the review has loaded, instead of resuming wherever it was last left open.
   const openReviewInDocReview = (row, { page } = {}) => {
-    const pid = row && (row.project_id ?? row.projectId ?? null);
+    // ORG SCOPE (NEW-1) — `reviewOpenTarget` (route.js) reads the row's `orgScope` flag FIRST,
+    // never falling back to a project id for an org-filed file (project_id is null for both an
+    // org-filed and a genuinely unfiled row, and those are different destinations —
+    // docs/DATA.md invariant §14).
+    const { projectId: pid, org: orgScoped } = reviewOpenTarget(row);
     setDocIntent({ kind: "open-review", row, openAtPage: page || null, token: Date.now() });
-    navigate({ module: "doc-review", projectId: pid || null, cross: false, org: false });
+    navigate({ module: "doc-review", projectId: pid || null, cross: false, org: orgScoped });
   };
   // B1161792 (NEW-1) — the Dashboard's "Needs attention" card rows click through to the exact
   // task, not just its project. Same shape as openReviewInDocReview above: the Dashboard isn't

@@ -1184,7 +1184,7 @@ export default function ProjectBreadcrumb({
            the Organization, both branches of that sentence needed a third case.
            NEW-4/B1343203 — compact mode keeps the same title/tooltip, so the full name is still
            one hover (or a screen reader) away even while the visible chip reads "…". */
-        title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes, library and agenda" : currentProject ? "Switch project" : "Choose a project or organization"}
+        title={cross ? "Browsing all projects" : org ? "Browsing your organization's notes, library, agenda, spreadsheets and drawings" : currentProject ? "Switch project" : "Choose a project or organization"}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={crumbCompact ? `Switch project — currently ${projectLabel}` : undefined}

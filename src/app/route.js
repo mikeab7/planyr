@@ -154,6 +154,29 @@ export function buildHash({ module = DEFAULT_MODULE, projectId = null, cross = f
   return `#/${slug}`;
 }
 
+// ORG SCOPE (NEW-1, extended B1020930, B1912209) — the single source of truth for "which
+// modules can show org-scoped content." Shell.jsx's `switchModule` reads this to decide
+// whether a tab switch keeps org scope; AppHeader.jsx's own `orgVisibleTabs` decides which
+// tabs even render at org scope and is kept in step with this set by hand (a different file,
+// a different concern — one decides ROUTING, the other decides the TAB STRIP — see that file's
+// own comment). Site Planner is the one module never offered a way in: there is no parcel to
+// draw without a project.
+export const ORG_CAPABLE_MODULES = new Set(["notes", "library", "scheduler", "model", "doc-review"]);
+
+// ORG SCOPE (NEW-1) — pure resolution of "where should opening this Library/Dashboard row
+// navigate", used by Shell.jsx's `openReviewInDocReview`. A row's `orgScope` flag (already
+// carried on every row Library/reviewStore.js hands out — reviewStore.js's `FULL` select
+// extracts it straight from `doc_reviews.data`) is read FIRST, never falling back to a project
+// id for an org-filed row: `project_id` is null for BOTH an org-filed file and a genuinely
+// unfiled one, and those are different destinations (docs/DATA.md invariant §14) — reading
+// `project_id` before `orgScope` is exactly the "URL is a hint, not an address" conflation this
+// repo's org-scope work guards against everywhere else it appears.
+export function reviewOpenTarget(row) {
+  const orgScoped = !!(row && row.orgScope);
+  const projectId = orgScoped ? null : ((row && (row.project_id ?? row.projectId)) || null);
+  return { projectId, org: orgScoped };
+}
+
 export function sameRoute(a, b) {
   return !!a && !!b && a.module === b.module && (a.projectId || null) === (b.projectId || null)
     && !!a.cross === !!b.cross && !!a.org === !!b.org;

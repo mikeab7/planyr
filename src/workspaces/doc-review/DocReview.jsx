@@ -66,7 +66,11 @@ const deviceDpr = () => (typeof window !== "undefined" && window.devicePixelRati
 const PAL = { paper: "var(--surface-page)", ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chrome: "var(--chrome-bg)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)", ember: "var(--accent)" };
 const uid = () => "m" + Math.random().toString(36).slice(2, 9);
 const today = () => new Date().toISOString().slice(0, 10);
-const newMeta = () => ({ title: "", projectId: null, project: "", discipline: "", item: "", revision: "", docDate: today() });
+// ORG SCOPE (NEW-1, B1912209) — `orgScope` sits beside `projectId`, mutually exclusive with it
+// exactly like Notes' page/Library's file (docs/DATA.md invariant §14) — never a sentinel
+// `projectId`. Omitted-when-false is NOT this field's convention (unlike Notes' `orgScope`,
+// this one rides through `buildSnapshot`'s plain object spread every time, so it stays explicit).
+const newMeta = () => ({ title: "", projectId: null, project: "", discipline: "", item: "", revision: "", docDate: today(), orgScope: false });
 
 const TOOLS = [
   { id: "select",    label: "Select",    hint: "Click a markup to select; drag to move; double-click a text note or callout to edit; Delete removes it." },
@@ -171,6 +175,11 @@ export default function DocReview({
   // no project → pick-a-project); `onNavigate` writes the hash to change it; `crossProject`
   // is the all-projects browse mode.
   projectId = null, onNavigate, crossProject = false,
+  // ORG SCOPE (NEW-1, B1912209) — standing in the Organization, not any project (mutually
+  // exclusive with `projectId`/`crossProject` by construction). Reachable the same way it is
+  // from every other workspace (the breadcrumb's "🏢 Organization" row); opening an org-filed
+  // drawing from the org-scoped Library carries this through Shell's `openReviewInDocReview`.
+  org = false,
   // Keep-alive: false while this workspace is mounted but hidden behind another tab. The
   // once-bound window key handlers MUST no-op then (a hidden Review eating Delete would
   // silently delete markups), and a PDF that finished loading while hidden re-fits on show.
@@ -937,7 +946,11 @@ export default function DocReview({
   const buildSnapshot = useCallback(() => ({
     id: reviewId, kind: "single", updatedAt: Date.now(), // stamp so the local mirror + cloud data carry a consistent updatedAt (reconcile)
     title: (meta.title || "").trim() || composeTitle(meta),
-    project: meta.project, projectId: meta.projectId, discipline: meta.discipline,
+    // ORG SCOPE (NEW-1) — `orgScope` must ride this snapshot exactly like every other meta
+    // field: `data` becomes `{ ...record, schemaVersion }` in reviewStore.js's `reviewRowFor`,
+    // so a field missing from THIS object is a field the next autosave silently drops from the
+    // stored row, whatever it held before.
+    project: meta.project, projectId: meta.projectId, orgScope: meta.orgScope === true, discipline: meta.discipline,
     item: meta.item, revision: meta.revision, docDate: meta.docDate,
     sources: isStoredSource(source) ? [{ srcId: source.srcId, name: source.name, size: source.size || 0, storageKey: source.storageKey || null, driveKey: source.driveKey || null, oversize: !!source.oversize }] : [],
     single: { srcId: source?.srcId || null, fileName, numPages, page, markups, calByPage, calInfo },
@@ -962,13 +975,18 @@ export default function DocReview({
     // the previous PDF as last-doc is the right resume. (setReviewId + setSource are batched in
     // loadSingleReview, so this effect sees both together — no stale-source window.)
     if (source && source.name && !isPdfName(source.name)) return;
+    // ORG SCOPE (NEW-1) — the org bucket is separate from every legacy global pointer (lastDoc.js's
+    // own header): a doc opened while standing in Organization must never become the GLOBAL "last
+    // single id"/"last mode", which the plain (non-org) resume path reads unconditionally — that
+    // would leak an org-filed doc into "no project chosen" on this same device.
+    if (org) { if (mode === "review") writeLastDoc(null, { id: reviewId, mode: "review" }, true); return; }
     try { localStorage.setItem("planyr:docreview:lastSingleId", reviewId); } catch (_) {}
     if (mode === "review") writeLastDoc(meta.projectId, { id: reviewId, mode: "review" });
-  }, [bootResolved, reviewId, meta.projectId, mode, source]);
+  }, [bootResolved, reviewId, meta.projectId, mode, source, org]);
   useEffect(() => {
-    if (!bootResolved) return;
+    if (!bootResolved || org) return;
     try { localStorage.setItem("planyr:docreview:lastMode", mode); } catch (_) {}
-  }, [bootResolved, mode]);
+  }, [bootResolved, mode, org]);
 
   const loadTok = useRef(0); // a newer open supersedes an in-flight single-review load (B52)
   const openInFlightRef = useRef(false); // an openReview is running — the project-switch resume must stand down
@@ -1073,7 +1091,7 @@ export default function DocReview({
     if (!(src && src.name && !isPdfName(src.name))) {
       currentUid().then((uid) => recordOpen(uid, { id: rec.id, projectId: openProjectId })).catch(() => {});
     }
-    setMeta({ title: rec.title || "", projectId: openProjectId, project: rec.project || "", discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "" });
+    setMeta({ title: rec.title || "", projectId: openProjectId, project: rec.project || "", orgScope: rec.orgScope === true, discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "" });
     if (openProjectId) onNavigate?.({ projectId: openProjectId }); // reflect the open file's project in the URL + breadcrumb (Work Item A)
     setSource(src ? { srcId: src.srcId, name: src.name, size: src.size || 0, storageKey: src.storageKey || null, driveKey: src.driveKey || null, oversize: !!src.oversize } : null);
     setMarkups(sanitizeMarkups(s.markups)); setCalByPage(s.calByPage || {}); setCalInfo(s.calInfo || {}); // sanitize: a corrupted/partial saved review can't crash the overlay
@@ -1154,12 +1172,45 @@ export default function DocReview({
   // resume guard see the CURRENT route when a slow candidate's loadReview() finally settles.
   const routeIdRef = useRef(projectId);
   routeIdRef.current = projectId;
+  // ORG SCOPE (NEW-1) — mirrors routeIdRef exactly, for the same reason (the boot-resume
+  // effect's resumeAllowedForRoute check below needs the LIVE route, not its own mount-time
+  // closure).
+  const routeOrgRef = useRef(org);
+  routeOrgRef.current = org;
   useEffect(() => {
     const prev = prevProjectRef.current;
     prevProjectRef.current = projectId;
-    if (!booted.current || projectId === prev || !projectId) return;
+    if (!booted.current) return;
     if (docIntent && docIntent.token !== lastConsumedDocToken) return; // a specific open is incoming — it wins
     if (openInFlightRef.current) return; // an open is mid-flight — ITS navigate caused this change; it owns the outcome
+    // ORG SCOPE (NEW-1) — Organization is a real destination, exactly like a project, checked
+    // FIRST: falling through to the plain `projectId` comparison below would read Organization
+    // as indistinguishable from "no project chosen" (docs/DATA.md invariant §14 — never let a
+    // `projectId` fallback stand in for it). Reachable in one click from ANY project's Review
+    // (the breadcrumb's "🏢 Organization" row) followed by switching back to the Review tab —
+    // Review stays mounted the whole time (keep-alive), so without this branch the canvas would
+    // keep showing the prior project's drawing under an "Organization" breadcrumb.
+    if (org) {
+      if (meta.orgScope === true) return; // the open doc already belongs to Organization
+      const entry = readLastDoc(null, true);
+      const openId = mode === "stitch" ? ((pendingStitch && pendingStitch.id) || null) : reviewId;
+      if (entry && entry.id === openId) return; // that doc is already on screen
+      if (entry) { openReview({ id: entry.id }); return; } // openReview flushes the outgoing doc first (B447)
+      if (mode !== "review" || source || markups.length > 0 || meta.projectId || meta.orgScope) {
+        (async () => { try { await saveNow(); } catch (_) {} setMode("review"); resetSingle(); })();
+      }
+      return;
+    }
+    if (!projectId) {
+      // "No project chosen" — the one other case that reads as `projectId === null`. An
+      // org-scoped doc must not linger once the breadcrumb no longer names Organization; a
+      // genuinely unfiled doc is left exactly as before (this branch used to be unreachable
+      // with a real prior project on screen — there was no UI path INTO "no project" from one —
+      // Organization is that new path).
+      if (meta.orgScope === true) { (async () => { try { await saveNow(); } catch (_) {} setMode("review"); resetSingle(); })(); }
+      return;
+    }
+    if (projectId === prev) return;
     if (meta.projectId === projectId) return; // the open doc already belongs here (its own open navigated us)
     const entry = readLastDoc(projectId);
     const openId = mode === "stitch" ? ((pendingStitch && pendingStitch.id) || null) : reviewId;
@@ -1172,7 +1223,7 @@ export default function DocReview({
       (async () => { try { await saveNow(); } catch (_) {} setMode("review"); resetSingle(); })();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  }, [projectId, org]);
 
   // Consume the Shell's cross-workspace "open this review" intent (NEW-1). A file clicked in
   // the GLOBAL Project Files panel switches here AND hands us the review; because this
@@ -1205,6 +1256,7 @@ export default function DocReview({
         routeProjectId: projectId,
         map: bootPointers.current.map,
         legacy: bootPointers.current.legacy,
+        org,
       });
       if (!candidates.length) return;
       const uid = await currentUid();
@@ -1226,7 +1278,7 @@ export default function DocReview({
         // On a deep link the projectId prop lands a beat after mount, so the closed-over value can
         // still be null while loadReview() is in flight — guarding on that stale null waved a
         // projectId-less orphan through resumeAllowedForRoute() and let it clobber the right doc.
-        if (!rec || !resumeAllowedForRoute(routeIdRef.current, rec.projectId || null)) continue;
+        if (!rec || !resumeAllowedForRoute(routeIdRef.current, rec.projectId || null, routeOrgRef.current, rec.orgScope === true)) continue;
         // Route by the RECORD's kind (an entry's stored mode could be stale if re-filed).
         if (rec.kind === "stitch") { setPendingStitch(rec); setMode("stitch"); return; }
         if (rec.kind === "single") { await loadSingleReview(rec); return; }
@@ -2049,7 +2101,11 @@ export default function DocReview({
         onDashboard={onGoDashboard}
         currentProject={markupProject}
         cross={crossProject}
-        onSelectProject={(id) => onNavigate?.({ projectId: id, cross: false })}
+        // ORG SCOPE (NEW-1) — passed through like every other org-capable workspace; the
+        // breadcrumb reads "Organization" (never a blank/half-built crumb) while `currentProject`
+        // stays null, matching Notes/Library/Scheduler's own treatment exactly.
+        org={org}
+        onSelectProject={(id) => onNavigate?.({ projectId: id, cross: false, org: false })}
         onNewProject={onNewProject}
         onSelectOrg={onSelectOrg}
         centerContent={
@@ -2213,10 +2269,12 @@ export default function DocReview({
         onDashboard={onGoDashboard}
         currentProject={markupProject}
         cross={crossProject}
+        // ORG SCOPE (NEW-1) — see the stitch-mode header above for the full note.
+        org={org}
         // cross:false is load-bearing (same fix as the Library): navigate() merges with
         // the live route and buildHash drops projectId while cross is true, so picking a
         // project from the breadcrumb in "All projects" mode was a silent no-op.
-        onSelectProject={(id) => onNavigate?.({ projectId: id, cross: false })}
+        onSelectProject={(id) => onNavigate?.({ projectId: id, cross: false, org: false })}
         onNewProject={onNewProject}
         onSelectOrg={onSelectOrg}
         // The compact Row-1 CloudSyncBadge (NEW-1) reads this normalized state; docSaveState

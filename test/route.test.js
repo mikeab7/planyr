@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseRoute, buildHash, sameRoute, unknownModuleSlug, isAdminRoute, isDashboardRoute, DEFAULT_MODULE } from "../src/app/route.js";
+import { parseRoute, buildHash, sameRoute, unknownModuleSlug, isAdminRoute, isDashboardRoute, DEFAULT_MODULE, ORG_CAPABLE_MODULES, reviewOpenTarget } from "../src/app/route.js";
 
 describe("parseRoute", () => {
   it("empty / root hash falls back to the default module, no project (isDashboardRoute is the real Dashboard signal)", () => {
@@ -150,6 +150,8 @@ describe("round-trip parse <-> build", () => {
     { module: "doc-review", projectId: null, cross: true, org: false },
     { module: "notes", projectId: null, cross: false, org: true },
     { module: "library", projectId: null, cross: false, org: true },
+    { module: "model", projectId: null, cross: false, org: true },
+    { module: "doc-review", projectId: null, cross: false, org: true },
   ]) {
     it(`${JSON.stringify(r)} survives build->parse`, () => {
       expect(parseRoute(buildHash(r))).toEqual(r);
@@ -166,5 +168,46 @@ describe("sameRoute", () => {
     expect(sameRoute({ module: "site-planner" }, { module: "doc-review" })).toBe(false);
     expect(sameRoute({ module: "doc-review", cross: true }, { module: "doc-review", cross: false })).toBe(false);
     expect(sameRoute({ module: "notes", org: true }, { module: "notes", org: false })).toBe(false);
+  });
+});
+
+// ORG SCOPE (NEW-1, extended B1020930, B1912209) — the single source of truth Shell.jsx's
+// `switchModule` and AppHeader.jsx's tab strip both read, so this is the one place a future
+// org-capable module gets added (or a regression silently drops one) without rendering either
+// component.
+describe("ORG_CAPABLE_MODULES", () => {
+  it("names exactly the five modules that can show org-scoped content today", () => {
+    expect(ORG_CAPABLE_MODULES).toEqual(new Set(["notes", "library", "scheduler", "model", "doc-review"]));
+  });
+  it("Site Planner is never org-capable — there is no parcel to draw without a project", () => {
+    expect(ORG_CAPABLE_MODULES.has("site-planner")).toBe(false);
+  });
+});
+
+// ORG SCOPE (NEW-1, B1912209) — the pure resolution Shell.jsx's `openReviewInDocReview` uses.
+// The red-proof this guards: `project_id` is null for BOTH an org-filed row and a genuinely
+// unfiled one, so reading it BEFORE `orgScope` (the bug this closes) would resolve an org-filed
+// file into "no project" instead of Organization — never a real project id (that part was
+// already correct), but the wrong scope entirely.
+describe("reviewOpenTarget", () => {
+  it("an org-filed row resolves to org scope, never a project id", () => {
+    expect(reviewOpenTarget({ id: "r1", orgScope: true, project_id: null })).toEqual({ projectId: null, org: true });
+  });
+  it("a project-filed row resolves to that project, org false", () => {
+    expect(reviewOpenTarget({ id: "r1", orgScope: false, project_id: "proj-1" })).toEqual({ projectId: "proj-1", org: false });
+    expect(reviewOpenTarget({ id: "r1", projectId: "proj-1" })).toEqual({ projectId: "proj-1", org: false }); // camelCase shape too
+  });
+  it("an unfiled row (neither org nor project) resolves to no project, org false — never a sentinel", () => {
+    expect(reviewOpenTarget({ id: "r1", orgScope: false, project_id: null })).toEqual({ projectId: null, org: false });
+    expect(reviewOpenTarget({ id: "r1" })).toEqual({ projectId: null, org: false });
+  });
+  it("orgScope wins even if a stale project_id is also present on the row", () => {
+    // Should never happen (docs/DATA.md invariant §14 — mutually exclusive at every write
+    // site), but if it ever did, org must win rather than silently routing to a project.
+    expect(reviewOpenTarget({ id: "r1", orgScope: true, project_id: "proj-1" })).toEqual({ projectId: null, org: true });
+  });
+  it("a missing/null row never throws", () => {
+    expect(reviewOpenTarget(null)).toEqual({ projectId: null, org: false });
+    expect(reviewOpenTarget(undefined)).toEqual({ projectId: null, org: false });
   });
 });

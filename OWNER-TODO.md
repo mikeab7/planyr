@@ -5,7 +5,24 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-09-22._
+_Last updated: 2026-09-26._
+
+## 🧮 One database script to run so your new Organization Spreadsheet saves to the cloud (B1912208)
+
+> **What you asked for:** the Organization now has its own Spreadsheet tab and Review (markup) tab, alongside
+> Notes, Library and the agenda that were already there. You can already create and use organization-level
+> workbooks and mark up drawings there — but until this one step is done, a fresh organization workbook only
+> saves **on the one device you made it on**, not to the cloud, so it wouldn't show up if you opened Planyr
+> on your phone or another computer. (Review/markup for Organization drawings already saves to the cloud —
+> nothing needed there.)
+>
+> - [ ] **Run one SQL script in your Supabase dashboard.** I'll send you the file (`org_model_sheets.sql`)
+>       directly. Open your Supabase project → SQL Editor → paste the whole file in → Run. It only adds a
+>       brand-new, empty table for organization spreadsheets — it doesn't touch any of your existing plans,
+>       spreadsheets, notes, or drawings. Safe to run more than once if you're ever unsure whether it went
+>       through.
+> - **Nothing is broken today** — organization spreadsheets work right now, just device-only until this runs.
+>   Once it's done, tell a Claude session and it'll confirm the cloud save badge turns on.
 
 ## 🔑 One Supabase key would turn on an automatic safety check for deleted plans (B1805153)
 
