@@ -182,3 +182,39 @@ jobs:
         env:
           BASE_URL: "http://localhost:4173/"
         run: node ui-audit/verify-notes-table-click.mjs
+      # Critical interaction lane (B1857904/B1857905, reliability programme R2). A SMALL,
+      # deterministic subset of e2e/ — reused, not duplicated — wired into the required build so a
+      # real interaction regression can no longer merge silently, closing the gap the reliability
+      # brief exists to close. Deliberately narrow: the full Playwright e2e suite (playwright.config.js,
+      # e2e.yml) stays OUT of the required build on purpose (see the Signature-budget gate's own
+      # comment above) — this is not that suite, it is two already-proven-reliable specs
+      # (playwright.critical.config.js / e2e/critical-contracts.json name exactly which, and why).
+      # Reuses the same preview server and Chromium install every gate above this one already paid
+      # for. No signed-in dependency — both contracts run fully logged out.
+      #
+      # Same two-part shape e2e.yml already uses for the broad suite, and for the same reason: the
+      # raw `playwright test` exit code alone can't tell "a required contract never ran" (e.g. its
+      # file quietly stopped matching) from "everything that ran passed" — only
+      # checkRequiredContracts() (scripts/lib/e2eDrift.mjs) asks that question directly. `set +e` so
+      # the JSON report is always produced before the gate script renders the real verdict; the gate
+      # script's own exit code is what this step lives or dies by. --require-complete refuses a
+      # filtered/sharded run outright (today's invocation carries no --grep/--project/--shard, so
+      # this never fires here — see assessCompleteness()'s own header for why config.grep itself
+      # can't be trusted for this).
+      #
+      # PROVEN reliable before wiring (2026-09-27): 8 consecutive full local runs, 0 flakes.
+      # PROVEN this gate actually catches a regression: on a disposable local build with the
+      # exact bug this lane guards against reintroduced (src/workspaces/site-planner/lib/keyContract.js's
+      # FIELD-scope refusal forced to allow), both contracts read "failed" and the gate exited
+      # non-zero; reverted, rebuilt, and confirmed green again. Separately proven the gate refuses a
+      # contract whose file goes missing/renamed (manifest pointed at a nonexistent file → "absent",
+      # non-zero) — both required by this stage's own acceptance criteria.
+      - name: Critical interaction lane (small deterministic contracts — B1857904/B1857905, R2)
+        env:
+          BASE_URL: "http://localhost:4173/"
+          PLAYWRIGHT_JSON_OUTPUT_NAME: critical-results.json
+        run: |
+          set +e
+          npx playwright test --config=playwright.critical.config.js --reporter=list,json
+          echo "raw suite exit: $?"
+          node scripts/e2e-drift-gate.mjs --report critical-results.json --lane critical --contracts e2e/critical-contracts.json --require-complete

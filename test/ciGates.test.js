@@ -103,14 +103,14 @@ describe("jobSteps() against .github/ci-gates.yml — the actual gate list", () 
   it("parses without refusing, and every step is a plain run: gate (no uses:)", () => {
     const res = jobSteps(readGates(), "build");
     expect(res.ok, res.unparsed.join("; ")).toBe(true);
-    expect(res.steps.length).toBe(22);
+    expect(res.steps.length).toBe(23);
     expect(res.steps.every((s) => s.run != null && s.uses == null)).toBe(true);
   });
 
-  it("keeps the same order build.yml's gates ran in before the migration (npm ci → lint → … → visual regression → notes placement → notes table click — NEW-1)", () => {
+  it("keeps the same order build.yml's gates ran in before the migration (npm ci → lint → … → visual regression → notes placement → notes table click → critical interaction lane — NEW-1/R2)", () => {
     const names = jobSteps(readGates(), "build").steps.map((s) => s.name);
     expect(names[0]).toBe("Generated-index touch guard (branches must never touch MAP.md / BACKLOG_OPEN.md / docs/UI-INVENTORY.md — NEW-1)");
-    expect(names.at(-1)).toBe("Notes table click (a table is always content, never blank canvas — NEW-1, 2026-09-26)");
+    expect(names.at(-1)).toBe("Critical interaction lane (small deterministic contracts — B1857904/B1857905, R2)");
     const idx = (n) => names.findIndex((x) => x.startsWith(n));
     expect(idx("Lint")).toBeLessThan(idx("Mint gate"));
     expect(idx("Mint gate")).toBeLessThan(idx("Test ("));
@@ -123,6 +123,9 @@ describe("jobSteps() against .github/ci-gates.yml — the actual gate list", () 
     // Same server/browser reuse reasoning for the table-click gate, and it belongs after the
     // placement gate it shares fixtures' conventions with.
     expect(idx("Notes placement surface")).toBeLessThan(idx("Notes table click"));
+    // The critical interaction lane reuses the same server/browser too, so it belongs last —
+    // after every other browser-driven gate has already had its chance to fail first.
+    expect(idx("Notes table click")).toBeLessThan(idx("Critical interaction lane"));
   });
 
   it("reads a plain inline run: verbatim", () => {
@@ -158,10 +161,10 @@ describe("splitSteps / classifyInfra — gates vs CI-only plumbing", () => {
     ]);
   });
 
-  it("ci-gates.yml's real steps split into 22 gates + 0 infra", () => {
+  it("ci-gates.yml's real steps split into 23 gates + 0 infra", () => {
     const { steps } = jobSteps(readGates(), "build");
     const { gates, infra } = splitSteps(steps);
-    expect(gates.length).toBe(22);
+    expect(gates.length).toBe(23);
     expect(infra.length).toBe(0);
   });
 
@@ -266,9 +269,9 @@ describe("resolveStepEnv — one gate's env:, given the global secret resolution
 });
 
 describe("scripts/ci-parity.mjs --list — the two files actually wire together (integration, no gates run)", () => {
-  it("reports 22 gates from ci-gates.yml and 5 infra steps from build.yml", () => {
+  it("reports 23 gates from ci-gates.yml and 5 infra steps from build.yml", () => {
     const out = execFileSync("node", ["scripts/ci-parity.mjs", "--list"], { cwd: REPO, encoding: "utf8" });
-    expect(out).toContain("Gates (22), in order, read from .github/ci-gates.yml:");
+    expect(out).toContain("Gates (23), in order, read from .github/ci-gates.yml:");
     expect(out).toContain("Infra steps NOT covered (5)");
     expect(out).toContain("Checkout (actions/checkout)");
     expect(out).toContain("Upload visual regression diffs (actions/upload-artifact)");
@@ -281,7 +284,7 @@ describe("scripts/ci-parity.mjs --list — the two files actually wire together 
 
   it("--docs-only --list reports only the DOCS_ONLY_GATE_NAMES subset, and names the total it's drawn from", () => {
     const out = execFileSync("node", ["scripts/ci-parity.mjs", "--list", "--docs-only"], { cwd: REPO, encoding: "utf8" });
-    expect(out).toContain(`Gates (${DOCS_ONLY_GATE_NAMES.length} of 22, docs-only mode)`);
+    expect(out).toContain(`Gates (${DOCS_ONLY_GATE_NAMES.length} of 23, docs-only mode)`);
     for (const name of DOCS_ONLY_GATE_NAMES) expect(out).toContain(name);
     // a full-build-only gate must NOT show up in the docs-only listing
     expect(out).not.toContain("Lint (fails the build");
@@ -292,7 +295,7 @@ describe("scripts/ci-parity.mjs --list — the two files actually wire together 
     const out = execFileSync("node", ["scripts/ci-parity.mjs", "--list"], {
       cwd: REPO, encoding: "utf8", env: { ...process.env, CI_DOCS_ONLY: "true" },
     });
-    expect(out).toContain(`Gates (${DOCS_ONLY_GATE_NAMES.length} of 22, docs-only mode)`);
+    expect(out).toContain(`Gates (${DOCS_ONLY_GATE_NAMES.length} of 23, docs-only mode)`);
   });
 });
 

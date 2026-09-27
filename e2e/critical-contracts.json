@@ -1,0 +1,56 @@
+{
+  "$comment": [
+    "CRITICAL INTERACTION CONTRACT MANIFEST (B1857905, reliability programme R2).",
+    "",
+    "Maps a stable contract id (never renamed by a line-number shift or a comment edit — see",
+    "R1's 'identity based on source line numbers' caution in docs/RELIABILITY-PROGRAMME.md) to the",
+    "existing e2e spec file that proves it. playwright.critical.config.js reads this file to decide",
+    "which specs to run; scripts/lib/e2eDrift.mjs's checkRequiredContracts() reads it to decide",
+    "whether every contract's cases ran and ALL PASSED — no failure, no skip, no flaky retry-pass",
+    "counts as proof (spec.ok alone was never enough evidence; see R1's collectCases fix).",
+    "",
+    "DELIBERATELY SMALL TO START, per R2's own 'begin small, expand by risk' instruction: two",
+    "contracts, both already-existing REAL specs reused as-is (never duplicated), neither needing",
+    "the seeded test account, so this lane runs identically whether or not",
+    "E2E_EMAIL/E2E_PASSWORD are configured (proven: e2e/auth.setup.js's own case skips cleanly and",
+    "is not part of either contract).",
+    "",
+    "PROVEN RELIABLE BEFORE WIRING (2026-09-27): 8 consecutive full runs against a real local",
+    "build/preview in this sandbox, 0 flakes, 0 unexplained failures.",
+    "",
+    "⛔ TWO CASES ARE DELIBERATELY EXCLUDED, NAMED HERE SO THE GAP IS NEVER SILENT — the same",
+    "discipline e2e/known-red.json uses for its own debt, applied to a lane that otherwise carries",
+    "no ledger at all (a critical-lane failure is ALWAYS fatal by design; there is no amnesty).",
+    "Both are PRE-EXISTING test staleness on main, unrelated to this session's work, reproduced",
+    "deterministically (5/5 runs each) before being excluded — never assumed:",
+    "  - 'a refused Delete explains where the keystroke went' (inspector-key-scope.spec.js:188) —",
+    "    asserts a toast that NEW-1/B754752 deliberately retired ('A FIELD REFUSAL IS NEVER HINTED,",
+    "    FULL STOP', src/workspaces/site-planner/lib/keyContract.js). The safety property the test",
+    "    exists to prove (Delete never reaches the plan from inside the field) still holds — only",
+    "    the retired toast assertion fails.",
+    "  - 'drag the Fill-opacity slider, then Ctrl+Z WITHOUT deselecting still undoes it'",
+    "    (ctrlz-undo.spec.js:97) — `input[type=\"range\"]` is not found in the property panel;",
+    "    the Fill-opacity control has moved or been restructured since this spec was written.",
+    "Retiring or repairing either is R3 work (source-assertion triage / known-failure retirement),",
+    "out of scope for R2. Tracked on B1857905.",
+    "",
+    "Adding a contract here is a deliberate act, same spirit as known-red.json's --allow-grow",
+    "--item: name the id, the file, and the backlog item that owns expanding this lane. Removing",
+    "one narrows required coverage and should be rare and explained on its item."
+  ],
+  "version": 1,
+  "contracts": [
+    {
+      "id": "REL-02-undo-redo",
+      "file": "e2e/ctrlz-undo.spec.js",
+      "item": "B1857905",
+      "why": "Ctrl+Z must peel one vertex mid-draw (Bluebeam parity) and never silently revert a committed shape or the wrong one; owner-reported."
+    },
+    {
+      "id": "REL-03-field-key-scope",
+      "file": "e2e/inspector-key-scope.spec.js",
+      "item": "B1857905",
+      "why": "a keystroke typed into an inspector field must never delete the plan; owner-reported and reproduced on his real rows (FM 359 / Concept A)."
+    }
+  ]
+}
