@@ -101,6 +101,9 @@ const ParcelInfoCard = lazy(() => import("./components/ParcelInfoCard.jsx"));
 import { PanelErrorBoundary } from "./components/LazyPanel.jsx";
 import { makeParcelDisplayLayer, makeSnapshotLayer, parcelDisplayIsImageOnly, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
 import { siteBoundaryInfo, siteDrawParcels } from "./lib/siteBoundary.js";
+// B1923744 — the pure zoom-gate/filter/reproject-outcome half of "draw the record's own active
+// parcel boundary alongside the pin at close zoom" (see the render site below for the Leaflet half).
+import { showActiveParcelAt, activeDrawParcels, reprojectParcelRing } from "./lib/activeParcelBoundary.js";
 import { geocodeAddress } from "./lib/geocode.js";
 import { compAnchorFromSelection, parcelAnchorFromSelection } from "./lib/compParcelAnchor.js";
 import { statusToken, darken } from "../../shared/ui/statusTokens.js";
@@ -2430,6 +2433,9 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   // received the press, so Leaflet emits no `click` and opening the site silently
   // fails; fewer rebuilds = fewer swallowed clicks (B64).
   const showPlans = (zoom ?? 0) >= PLAN_ZOOM;
+  // B1923744 — a much lighter reveal than PLAN_ZOOM (see lib/activeParcelBoundary.js): the
+  // record's own active parcel boundary joins the pin well before the full plan swap.
+  const showActiveParcel = showActiveParcelAt(zoom, showPlans);
   // NEW-2 (B834577) — this map sits the plan directly OVER the aerial (unlike the planner canvas,
   // which draws on a blank sheet), so a near-opaque element fill blots out the photo underneath.
   // Matches the fill this file ALREADY uses for a translucent-over-aerial overlay — the parcel
@@ -2559,6 +2565,35 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         const marker = L.marker([lat, lon], { icon: sitePinIcon(status, active), interactive: !selectMode, keyboard: false, zIndexOffset: zBase, riseOnHover: true });
         if (!selectMode) marker.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top" });
         marker.addTo(group);
+
+        // B1923744 — at PARCEL_ZOOM and above, also draw the record's OWN active/selected
+        // parcel(s) alongside the pin — self-contained geometry already on the record, never an
+        // external/county GIS source. No active, georeferenced parcel → pin only, no error (a
+        // site with no parcel yet, or a parcel drawn in some other plan's frame, is not a
+        // failure). Leaflet's marker pane paints above the overlay pane by default, so the pin
+        // and its tooltip/click stay on top of this boundary regardless of add order.
+        if (showActiveParcel) {
+          activeDrawParcels(drawParcels).forEach((p) => {
+            ops.push(() => {
+              const { ok, latlngs } = reprojectParcelRing(p.points, lat, lon, feetToLatLng);
+              if (!ok) {
+                // LOUD-FAILURE — a parcel that exists and is selected but can't be reprojected
+                // is a real defect, never a silent pin-only fallback (that fallback is reserved
+                // for "no active parcel", which this is not).
+                reportClientEvent(
+                  "map-active-parcel-reproject-failed",
+                  `${name}: active parcel ${p.id || "?"} could not be reprojected to lat/long`,
+                  { siteId: site.id, parcelId: p.id || null }
+                );
+                return;
+              }
+              L.polygon(latlngs, {
+                color: PAL.accent, weight: 2, fillColor: PAL.accent, fillOpacity: 0.08,
+                interactive: false, className: "map-site-feature map-active-parcel-boundary",
+              }).addTo(group);
+            });
+          });
+        }
       }
     });
     group.addTo(map);
@@ -2580,7 +2615,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     if (pressedRef.current) { pendingRebuildRef.current = build; return; }
     build();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sites, parcelSummary, activeSiteId, selectMode, showPlans, showSitesLayer, nameFilter]);
+  }, [sites, parcelSummary, activeSiteId, selectMode, showPlans, showActiveParcel, showSitesLayer, nameFilter]);
 
   // NEW-COMPS — leasing-comp markers: a sibling layer to the site-pin one above, deliberately
   // simpler (always a flat point marker, no zoom-dependent footprint rendering — a comp has no
