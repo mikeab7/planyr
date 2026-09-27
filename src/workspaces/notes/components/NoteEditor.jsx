@@ -1972,6 +1972,28 @@ const NoteEditor = forwardRef(function NoteEditor({
      * pair is dispatched synchronously, so ProseMirror's history groups them into ONE undo step;
      * that is asserted rather than assumed in `verify-notes-pending-caret`. */
     editor.commands.addNoteAnchorAt({ x: at.x, y: at.y, w: at.w });
+    /* ⛔ REAL DOM FOCUS HAS TO LAND IN THIS SAME TICK, NOT WHENEVER THE BROWSER GETS TO IT
+     * (B1928816, owner report 2026-09-27: a brand-new page's first box kept only the FIRST
+     * character typed). `addNoteAnchorAt`'s own `.focus(at + 2, …)` already ran above and moved
+     * ProseMirror's OWN selection into the new box correctly — but Tiptap's `focus` command
+     * (`@tiptap/core`'s `commands/focus.ts`) never calls the browser's real
+     * `view.focus()` synchronously; it schedules it inside a `requestAnimationFrame` callback
+     * ("For React we have to focus asynchronously… otherwise wild things happen"). This character
+     * is inserted below through a direct command either way, so it lands regardless — but every
+     * character AFTER this one is a real keystroke the browser routes to whatever element
+     * currently holds DOM focus, and on the very first placement of a freshly opened page
+     * nothing has focused the editor yet. If that rAF hasn't fired before the next keystroke
+     * arrives — measured: reliably true the instant a frame is delayed, e.g. by other work
+     * already in flight — every following character is dispatched to `document.body` and lost
+     * in total silence. Once the editor holds real focus this can never happen again (`view.focus()`
+     * on an already-focused element is a no-op), which is why a second box on the same page, or
+     * clicking back into the first one, never reproduces this. Calling ProseMirror's own
+     * `view.focus()` here is synchronous (`prosemirror-view`'s `EditorView.focus` — no rAF, no
+     * setTimeout) and safe to call after the selection is already set: it only re-syncs the DOM
+     * selection to the CURRENT ProseMirror selection (`selectionToDOM`), it does not move the
+     * selection itself or scroll anywhere new — the box is already on screen at the exact point
+     * pressed (NEW-10's own guarantee, unchanged). */
+    if (!editor.isDestroyed && !editor.view.hasFocus()) editor.view.focus();
     if (text) editor.commands.insertContent(text);
     return true;
   }, [editor]);

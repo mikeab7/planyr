@@ -166,6 +166,20 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1367776 — B1928816: a brand-new Notes page's first box keeps every character typed, on the real `planyr.io` deploy
+
+**Why this needs its own live pass.** Timing/race bugs are a mandatory LIVE-VERIFY class per `CLAUDE.md` — the mechanism (a `requestAnimationFrame`-deferred `view.focus()` racing the next real keystroke) is fully proven and fixed against a locally-built preview server this session, including a forced, deterministic reproduction (delaying `requestAnimationFrame` to simulate a busier real tab) that goes red on unmodified code and green after the fix — see B1928816's own record for the full mechanism and the sandbox proof. What that cannot confirm is that the SAME fix behaves identically on the actual deployed Cloudflare Pages bundle, under the actual bundling/minification `origin/main` produces. No named `Blocker:` applies — this needs no sign-in and no external GIS host, only a deploy to exist, so this session intends to close it directly once the merge is live rather than leaving it for someone else.
+
+**What was verified BEFORE this V# was opened (this session, against a local preview build, not `planyr.io`):** `ui-audit/verify-notes-in-sheet-placement.mjs` §20, driven against `npx vite preview` — every character of "DELTA" and "CHARLIE" lands, `document.activeElement` stays inside the editor after every keydown, a second box on the same page is unaffected, a word-then-Enter two-line box round-trips, and every box survives a reload — all under a forced 500ms `requestAnimationFrame` delay. The identical script against unmodified code (fix reverted) reproduces the owner's exact symptom: the box holds only `"D"`, every later keydown reads `document.activeElement === BODY`.
+
+**Steps, each with a named expected result. Read the served chunk hash in the SAME observation as each result (per the owner's live-measurement rule).**
+1. Confirm the merge commit has actually deployed: `GET /repos/mikeab7/planyr/commits/<sha>/check-runs` for the "Cloudflare Pages" check, or read the served chunk hash on `planyr.io` directly. **Expect:** the check-run is `completed`/`success` for this PR's merge commit, or the served `Notes-*.js`/`NoteEditor-*.js` chunk hash matches this PR's own build output.
+2. On `planyr.io` (logged out — WebKit, not Chromium, per this file's own "WebKit reaches external hosts where Chromium cannot" note above), open Notes, create a brand-new page ("+ Page"), double-click an empty spot on the sheet, and type "DELTA" immediately with no pause. **Expect:** the box holds `"DELTA"` in full, not `"D"`.
+3. Repeat step 2 with `window.requestAnimationFrame` delayed by an injected script (the same forced-race technique §20 uses), to prove the fix holds even on a bundle whose minified code differs from the local preview build. **Expect:** the box still holds `"DELTA"` in full.
+4. Reload the page. **Expect:** the box's full text survives.
+
+Stopping rule: closes on either (a) all four steps PASS on the real `planyr.io` deploy, recorded here with the date and the commit sha actually served, or (b) a genuine defect is found, in which case it reopens B1928816 (STANDING RULE #2 — a live report is evidence, not something to argue away) rather than being closed on a null.
+
 ### V1345744 — B1885600: 17 newly-wired Florida county parcel endpoints (Jacksonville + Polk/Lakeland markets) select real parcels on production, and the FL/GA state line holds `Blocker: live-GIS`
 
 **⛔ DATED LIVE RESULTS, recorded 2026-09-24, self-verified against `planyr.io` (build b9722c7) from THIS sandbox using WebKit** (not Chromium — see the "🤖 Self-verification" note above on why WebKit reaches `planyr.io` and real ArcGIS Online hosts from here when Chromium's TLS handshake cannot; `proxy:{server:process.env.HTTPS_PROXY}`, `ignoreHTTPSErrors:true`, logged-out). This SUPERSEDES relying on the dispatch's own pre-supplied numbers — every result below was independently driven through the real Map Finder search box on the real production site, this session:
