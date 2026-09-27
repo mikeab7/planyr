@@ -207,3 +207,9 @@ ui-audit/_shots/
 # discover-county-parcels.mjs's own machine-readable dump — regenerated on every run; the durable
 # record of what it found lives in counties.js / countiesProvenance.js / docs/STATEWIDE-PARCELS.md.
 ui-audit/discover-county-parcels-results.json
+
+# playwright.critical.config.js's own JSON reporter output (only written when CI=1, e.g. via
+# `npm run ci-parity`) — regenerated on every run of the critical interaction lane, never a
+# durable record; landed untracked at the repo root on every ci-parity run this session, worth
+# closing at the root now that it's been seen twice.
+/critical-results.json

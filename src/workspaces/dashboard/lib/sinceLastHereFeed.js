@@ -36,7 +36,8 @@
  * B1373536 below — which is why it keeps its `tsApprox` treatment and this one does not exist to
  * need it.
  * ⛔ HOW THE REMAINING SNAPSHOT-DIFFED KIND IS TIMESTAMPED, and why it is not `windowStartMs`
- * (B1373536, 2026-09-08). `schedule-slip` has no exact occurrence time — re-confirmed against
+ * (B1373536, 2026-09-08; upper-bound source widened by B1927952, 2026-09-27 — see the note at the
+ * end of this bullet). `schedule-slip` has no exact occurrence time — re-confirmed against
  * production before that fix, not assumed: `public.planar_data` carries NO `updated_at` column, and
  * no task object in the live document carries a temporal field of any kind (32 distinct task keys;
  * none records when a field last changed). The first cut stamped it at `windowStartMs` — the OLDEST
@@ -46,13 +47,20 @@
  * enough to overflow the cap loses 100% of their schedule rows, every time — measured at 3 of 3 on
  * a one-month absence (back when a second snapshot-diffed kind, `tasks-completed`, still existed).
  * The honest fix has two independent halves, because either alone still fails:
- *   (a) STAMP AT A MEASURED UPPER BOUND, not the floor. `public.planar_history` is an append-only
- *       ring of dated writes of this same document, so its newest `created_at` is a real, observed
- *       moment: the schedule was last written THEN, and a change we detect by diff therefore
- *       happened at or before it. `scheduleLastWriteAt` carries that in (one indexed row, no blob).
- *       Where it is unavailable the bound loosens to `now`, never tightens to a guess. Either way
- *       the row is marked `tsApprox` and carries its real `tsEarliest`/`tsLatest` interval, so no
- *       consumer can mistake the point for an exact stamp.
+ *   (a) STAMP AT A MEASURED UPPER BOUND, not the floor. `scheduleLastWriteAt`
+ *       (`dashboardScheduleFetch.js`) is a real, observed moment the schedule was last written, so
+ *       a change we detect by diff happened at or before it — but that moment now comes from EITHER
+ *       of two sources depending on the account, and this file stays agnostic to which. For an
+ *       unflipped account it is still `public.planar_history`'s newest `created_at` (an append-only
+ *       ring of dated writes of the whole document) — a genuine upper bound, since the snapshot
+ *       write postdates whatever edit it captured. For a rows-authoritative account (B1927952) it is
+ *       `max(updated_at)` across the per-schedule rows — an EXACT write instant, not inferred, but
+ *       still treated as an upper bound HERE because "exact write time" is not "exact cause": the
+ *       write that moved a task's `end` date could be the same write that touched an unrelated
+ *       field, so the row this file diffs out could still have happened slightly before the stamp
+ *       it's given. Where no source is available the bound loosens to `now`, never tightens to a
+ *       guess. Either way the row is marked `tsApprox` and carries its real `tsEarliest`/`tsLatest`
+ *       interval, so no consumer can mistake the point for an exact stamp.
  *   (b) CAP FAIRLY ACROSS KINDS. (a) alone is not enough: a schedule last written early in a long
  *       window legitimately stamps old, and would be cut again for an honest reason. So the cap
  *       reserves one slot per event kind present before any kind takes a second, then fills what is

@@ -49,10 +49,44 @@ async function pgGet(env, table, params) {
   return r.json();
 }
 
+/* ⛔ B1927952 (NEW-2, 2026-09-27) — a SECOND reader of the retired planar_data blob, found by
+ * AUDIT-FIRST while chasing the Dashboard's identical bug (dashboardScheduleFetch.js). This tool
+ * connector is the ONLY other place outside public/sequence/index.html that reads schedule data
+ * directly (a grep for every planar_data/hs-v1/planar_history mention outside the embed turned up
+ * nothing else that actually queries the table — see BACKLOG.md B1927952 for the full list).
+ * Once an account is flipped to schedule_account_index.rows_authoritative = true
+ * (schedules_authority_flip.sql), this table stops being written and freezes — so
+ * list_projects/get_project/get_site_layout/get_schedule would have kept answering an LLM's
+ * questions about Michael's own schedule from the 2026-09-22 snapshot forever, the same defect,
+ * a different surface. Same shape as src/shared/schedule/scheduleSource.js's client-side
+ * resolver, reimplemented here against pgGet's REST-param style rather than the supabase-js
+ * client (this Cloudflare Pages Function has no import path into src/). */
+async function isScheduleRowsAuthoritative(env) {
+  const rows = await pgGet(env, "schedule_account_index", [["select", "rows_authoritative"]]);
+  return !!(rows && rows[0] && rows[0].rows_authoritative);
+}
+
+async function fetchScheduleProjectsFromRows(env) {
+  const rows = await pgGet(env, "schedules", [["select", "id,data"], ["deleted_at", "is.null"]]);
+  const projects = {};
+  for (const row of rows || []) {
+    if (!row || row.id == null) continue;
+    projects[String(row.id)] = row.data;
+  }
+  return projects;
+}
+
 /* Scheduler read — same main Supabase project since B408; routed through the shared pgGet
  * choke point (owner-scoped automatically, GET-only) now that planar_data carries a real
- * user_id (B778/NEW-1). No second query path. */
+ * user_id (B778/NEW-1). No second query path. Checks the authority flag first (B1927952) and, on
+ * a flipped account, composes the answer from public.schedules instead of the legacy blob — same
+ * "compose { [id]: data } from non-deleted rows" shape scheduleSource.js uses, so every existing
+ * consumer of `scheduleProjects` here (liveScheduleNameMap, resolveScheduleProject,
+ * summarizeScheduleProject) needs no change. */
 async function fetchScheduleData(env) {
+  if (await isScheduleRowsAuthoritative(env)) {
+    return await fetchScheduleProjectsFromRows(env);
+  }
   const rows = await pgGet(env, "planar_data", [["key", `eq.${SEQ_KEY}`], ["select", "value"]]);
   return (rows && rows[0] && rows[0].value && rows[0].value.projects) || {};
 }
