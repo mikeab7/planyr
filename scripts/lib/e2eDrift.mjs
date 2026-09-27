@@ -164,6 +164,37 @@ export function compare({ cases, entries, lane }) {
   };
 }
 
+/** Whether every REQUIRED contract in a manifest (e2e/critical-contracts.json) ran and fully
+ * passed (B1857904/B1857905, reliability programme R2 — see docs/RELIABILITY-PROGRAMME.md).
+ *
+ * This is a DIFFERENT question from `compare()`'s known-red diff. `compare()` asks "did anything
+ * fail that wasn't already known-red" — it is silent about a contract that never ran at all
+ * (skipped, filtered out, its whole file failed to load), because with zero ledger entries for
+ * the critical lane there is nothing for an absent case to be "absent FROM". This function asks
+ * the complementary question directly: for each contract, did EVERY case belonging to its file
+ * run, and did every one of them read "passed" — never "failed", "skipped" (a required case that
+ * merely didn't execute proves nothing), or "flaky" (a retry-pass is not proof of stable
+ * behavior; the brief's own required parser/gate table: "Required test passed after a retry →
+ * Flaky/non-green for critical lane").
+ *
+ * Matched by FILE, not by individual case id — a contract's manifest entry names the spec file
+ * that proves it (playwright.critical.config.js already curates which cases within that file are
+ * actually part of the contract, via its own grepInvert), so every case this function sees that
+ * belongs to that file is already meant to be required. */
+export function checkRequiredContracts({ cases, contracts }) {
+  const results = (contracts || []).map((c) => {
+    const mine = (cases || []).filter((x) => x.file === c.file);
+    let status;
+    if (!mine.length) status = "absent";
+    else if (mine.some((x) => x.status === "failed")) status = "failed";
+    else if (mine.some((x) => x.status === "skipped")) status = "skipped";
+    else if (mine.some((x) => x.status === "flaky")) status = "flaky";
+    else status = "complete";
+    return { id: c.id, file: c.file, item: c.item ?? null, status, caseCount: mine.length };
+  });
+  return { ok: results.every((r) => r.status === "complete"), results };
+}
+
 /** Structural rules a committed ledger must satisfy. Returns a list of problems (empty = fine). */
 export function validateLedger(entries) {
   const bad = [];

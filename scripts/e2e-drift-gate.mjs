@@ -49,7 +49,7 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { collectCases, compare, nextLedger, validateLedger, assessCompleteness } from "./lib/e2eDrift.mjs";
+import { collectCases, compare, nextLedger, validateLedger, assessCompleteness, checkRequiredContracts } from "./lib/e2eDrift.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -66,10 +66,13 @@ const ITEM = argOf("--item") || null;
 // about them by default; it exists so a future required lane (the critical-interaction lane, R2 —
 // see docs/RELIABILITY-PROGRAMME.md) can demand a full run without a second script.
 const REQUIRE_COMPLETE = has("--require-complete");
+// B1857905 — R2. A manifest of REQUIRED contracts (e2e/critical-contracts.json shape); when given,
+// every contract must have run and fully passed or the gate refuses, independent of any ledger.
+const CONTRACTS_PATH = argOf("--contracts");
 
 const die = (msg, extra = []) => { console.error(`✗ ${msg}`); for (const l of extra) console.error(`  ${l}`); process.exit(2); };
 
-if (!["ci", "local"].includes(LANE)) die(`unknown lane "${LANE}" — expected ci or local.`);
+if (!["ci", "local", "critical"].includes(LANE)) die(`unknown lane "${LANE}" — expected ci, local, or critical.`);
 if (!REPORT) die("--report <playwright json report> is required.", [
   "Produce one with:  npx playwright test --reporter=json > report.json",
   "A gate with no report to read must never pass by default.",
@@ -112,6 +115,26 @@ const bad = validateLedger(ledger.entries);
 if (bad.length) die(`e2e/known-red.json is malformed — refusing to judge a run against a ledger that is not sound.`, bad.slice(0, 10));
 
 const { novel, stale, staleIntermittent, absent, failed, knownRed, ran, skipped } = compare({ cases, entries: ledger.entries, lane: LANE });
+
+/* ---- Required-contract manifest (B1857905, R2) — independent of the ledger, never skippable */
+if (CONTRACTS_PATH) {
+  if (!existsSync(CONTRACTS_PATH)) die(`no contract manifest at ${CONTRACTS_PATH} — NOT OBSERVING.`);
+  let manifest;
+  try { manifest = JSON.parse(readFileSync(CONTRACTS_PATH, "utf8")); }
+  catch (e) { die(`could not read ${CONTRACTS_PATH} as JSON (${e.message}).`); }
+  const { ok: contractsOk, results: contractResults } = checkRequiredContracts({ cases, contracts: manifest.contracts });
+  console.log(`Required-contract manifest (${CONTRACTS_PATH}) — ${manifest.contracts.length} contract(s):`);
+  for (const r of contractResults) {
+    console.log(`  ${r.status === "complete" ? "✓" : "✗"} ${r.id} (${r.file}) — ${r.status}${r.caseCount ? ` [${r.caseCount} case(s)]` : ""}`);
+  }
+  if (!contractsOk) {
+    die("one or more required contracts did not fully pass — refusing to proceed.", [
+      "A required contract must have run and every one of its cases must read \"passed\" — absent,",
+      "skipped, failed, and flaky (a retry-pass) all count as non-green for this lane.",
+    ]);
+  }
+  console.log("  all required contracts complete.\n");
+}
 
 /* ---- --update: the ledger may SHRINK freely and GROW only deliberately ----------------- */
 if (UPDATE) {

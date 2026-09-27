@@ -10,7 +10,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { collectCases, compare, nextLedger, validateLedger, assessCompleteness } from "../scripts/lib/e2eDrift.mjs";
+import { collectCases, compare, nextLedger, validateLedger, assessCompleteness, checkRequiredContracts } from "../scripts/lib/e2eDrift.mjs";
 
 /** A minimal Playwright JSON report, shaped exactly as the real reporter emits it.
  *
@@ -433,5 +433,88 @@ describe("assessCompleteness — a filtered/diagnostic run says so, honestly", (
     // today's runs.
     const v = assessCompleteness({ config: { shard: null, argv: ["node", "cli.js", "test", "--reporter=list,json,html"] } });
     expect(v.full).toBe(true);
+  });
+});
+
+/* ---- B1857905 — checkRequiredContracts: R2's critical-interaction manifest check --------------
+ *
+ * A DIFFERENT question from compare()'s known-red diff (see this function's own header in
+ * scripts/lib/e2eDrift.mjs). compare() is silent about a contract that never ran at all, because
+ * with zero ledger entries for the critical lane there is nothing for an absent case to be
+ * "absent FROM". This is the direct check: for each contract, did every one of its cases run and
+ * read "passed" — never failed, skipped, or flaky (a retry-pass is not proof of stable behavior).
+ */
+describe("checkRequiredContracts — R2's required-contract manifest check", () => {
+  const contracts = [
+    { id: "REL-A", file: "e2e/a.spec.js", item: "B1" },
+    { id: "REL-B", file: "e2e/b.spec.js", item: "B1" },
+  ];
+
+  it("is ok when every contract's cases all passed", () => {
+    const cases = [
+      { id: "e2e/a.spec.js:1 › x", file: "e2e/a.spec.js", status: "passed" },
+      { id: "e2e/a.spec.js:2 › y", file: "e2e/a.spec.js", status: "passed" },
+      { id: "e2e/b.spec.js:1 › z", file: "e2e/b.spec.js", status: "passed" },
+    ];
+    const v = checkRequiredContracts({ cases, contracts });
+    expect(v.ok).toBe(true);
+    expect(v.results).toEqual([
+      { id: "REL-A", file: "e2e/a.spec.js", item: "B1", status: "complete", caseCount: 2 },
+      { id: "REL-B", file: "e2e/b.spec.js", item: "B1", status: "complete", caseCount: 1 },
+    ]);
+  });
+
+  it("marks a contract ABSENT when no case from its file ran at all — a renamed/missing file", () => {
+    // The case this catches that a raw `playwright test` exit code cannot: zero files matching one
+    // testMatch pattern among several does not by itself fail the run, so nothing else here would
+    // ever notice a required contract's file quietly stopped matching.
+    const cases = [{ id: "e2e/b.spec.js:1 › z", file: "e2e/b.spec.js", status: "passed" }];
+    const v = checkRequiredContracts({ cases, contracts });
+    expect(v.ok).toBe(false);
+    expect(v.results.find((r) => r.id === "REL-A")).toMatchObject({ status: "absent", caseCount: 0 });
+  });
+
+  it("marks a contract FAILED when any of its cases failed", () => {
+    const cases = [
+      { id: "e2e/a.spec.js:1 › x", file: "e2e/a.spec.js", status: "passed" },
+      { id: "e2e/a.spec.js:2 › y", file: "e2e/a.spec.js", status: "failed" },
+      { id: "e2e/b.spec.js:1 › z", file: "e2e/b.spec.js", status: "passed" },
+    ];
+    const v = checkRequiredContracts({ cases, contracts });
+    expect(v.ok).toBe(false);
+    expect(v.results.find((r) => r.id === "REL-A").status).toBe("failed");
+    expect(v.results.find((r) => r.id === "REL-B").status).toBe("complete");
+  });
+
+  it("marks a contract SKIPPED when a case merely did not run — never counted as proof", () => {
+    const cases = [
+      { id: "e2e/a.spec.js:1 › x", file: "e2e/a.spec.js", status: "passed" },
+      { id: "e2e/a.spec.js:2 › y", file: "e2e/a.spec.js", status: "skipped" },
+      { id: "e2e/b.spec.js:1 › z", file: "e2e/b.spec.js", status: "passed" },
+    ];
+    const v = checkRequiredContracts({ cases, contracts });
+    expect(v.ok).toBe(false);
+    expect(v.results.find((r) => r.id === "REL-A").status).toBe("skipped");
+  });
+
+  it("marks a contract FLAKY when a case passed only after a retry — a retry-pass is not proof", () => {
+    const cases = [
+      { id: "e2e/a.spec.js:1 › x", file: "e2e/a.spec.js", status: "flaky" },
+      { id: "e2e/b.spec.js:1 › z", file: "e2e/b.spec.js", status: "passed" },
+    ];
+    const v = checkRequiredContracts({ cases, contracts });
+    expect(v.ok).toBe(false);
+    expect(v.results.find((r) => r.id === "REL-A").status).toBe("flaky");
+  });
+
+  it("the committed critical-contracts.json manifest is well-formed and each file exists", () => {
+    const manifest = JSON.parse(readFileSync(new URL("../e2e/critical-contracts.json", import.meta.url), "utf8"));
+    expect(Array.isArray(manifest.contracts)).toBe(true);
+    expect(manifest.contracts.length).toBeGreaterThan(0);
+    for (const c of manifest.contracts) {
+      expect(c.id, "contract has no id").toMatch(/^REL-\d+/);
+      expect(c.file, `${c.id} has no file`).toMatch(/^e2e\/[\w.-]+\.spec\.js$/);
+      expect(c.item, `${c.id} has no owning backlog item`).toMatch(/^B\d+$/);
+    }
   });
 });

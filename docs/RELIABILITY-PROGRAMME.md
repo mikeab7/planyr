@@ -1,10 +1,10 @@
 # Reliability programme (R0–R9) — status and durable brief
 
-> **Read this file when picking up reliability-programme work (R2 onward).** It exists so the
-> next session does not have to rediscover what R0/R1 already measured, and so the full R2–R9
-> scope survives even though only R0+R1 shipped in the session that filed it. Cross-referenced
-> from `BACKLOG.md` (**B1857904** — R1, shipped this session; **B1857905** — R2–R9, recorded and
-> not started).
+> **Read this file when picking up reliability-programme work (R3 onward).** It exists so the
+> next session does not have to rediscover what R0/R1/R2 already measured, and so the full R3–R9
+> scope survives even though only R0–R2 have shipped. Cross-referenced from `BACKLOG.md`
+> (**B1857904** — R1, shipped 2026-09-22/23; **B1923456** — R2, shipped 2026-09-27;
+> **B1857905** — R3–R9, recorded and not started).
 
 ## What this is
 
@@ -149,34 +149,79 @@ refuses a filtered run (exit 2, names the reason).
 **Verify:** sandbox (unit tests + the mutation proof above are sufficient proof; no live-only
 class from `CLAUDE.md`'s `LIVE-VERIFY` list applies to a parser/status fix with no UI surface).
 
-## Stage gate — what must be true before R2 starts
+## R2 — critical interaction lane: **SHIPPED 2026-09-27 (B1923456)**
 
-Per the dispatch brief: *"Continue into R2 only after inspecting concurrent changes to the same CI
-files and proving the chosen interaction tests reliable."* Concretely, before starting R2 a session
-must:
+R0 refresh confirmed the stage gate below was clear before any wiring began: zero open PRs; the
+coordination-warning feature paths (CAS 409, Notes double-click, side-parking grip snap, polygon
+crop, Row 2 box treatment, Schedule cross-project task binding) had already merged with no file
+overlap; `.github/ci-gates.yml` / `build.yml` / `e2e.yml` / `playwright.config.js` /
+`scripts/ci-parity.mjs` had no concurrent in-flight edits from any other session.
 
-1. Re-fetch `origin/main` and re-list open PRs; check specifically for any PR touching
-   `.github/ci-gates.yml`, `.github/workflows/build.yml`, `.github/workflows/e2e.yml`,
-   `playwright.config.js`, or `scripts/ci-parity.mjs` — R2 adds a new Playwright config and wires a
-   new lane into the required build, so a collision here is real, not theoretical.
-2. Build the small critical-interaction manifest (`REL-01` … `REL-09` in the original brief below)
-   incrementally, and for **each** new spec, run it enough times (not once) to show it is not
-   flaky before it goes anywhere near the required `build` check — a critical lane that is itself
-   unreliable is worse than the gap it was meant to close.
-3. Only then extend `.github/ci-gates.yml` / `playwright.critical.config.js` and wire completeness
-   into the required build.
+**Contracts shipped: two, not the brief's full `REL-01`…`REL-09` set** — deliberately small, per R2's
+own "begin small, expand by risk" instruction. Both reuse existing, already-written logged-out specs
+as-is:
 
-**Do not start** (until their own stated preconditions hold, independently of R2): planner state
-extraction (R6 — gated on B217540 per the existing decomposition plan), persistence engine
-rewrites, scheduler build migration (R8), schema changes, production data mutation, or a React
-upgrade. None of these were touched this session.
+| Contract | Spec file | What it proves |
+|---|---|---|
+| `REL-02-undo-redo` | `e2e/ctrlz-undo.spec.js` | Ctrl+Z Bluebeam parity (peels one vertex mid-draw; never reverts the wrong shape) |
+| `REL-03-field-key-scope` | `e2e/inspector-key-scope.spec.js` | a keystroke typed into an inspector field never reaches/deletes the plan |
 
-## R2–R9 — recorded, not started
+Neither needs `E2E_EMAIL`/`E2E_PASSWORD` — both run fully logged out, so the lane behaves identically
+whether or not the seeded test account is configured.
+
+**The flake-proving pass earned its keep.** 5 consecutive full runs of both files together
+reproduced the exact same 2 failures every time — deterministic, not flaky, and both **pre-existing
+staleness on `main`, unrelated to this work**:
+- `ctrlz-undo.spec.js:97` — the Fill-opacity slider (`input[type="range"]`) is no longer found in the
+  property panel; it has moved or been restructured since the spec was written.
+- `inspector-key-scope.spec.js:188` — asserts a toast that `keyContract.js`'s own `NEW-1/B754752`
+  comment says was deliberately retired ("A FIELD REFUSAL IS NEVER HINTED, FULL STOP").
+
+Both are named and excluded (via `playwright.critical.config.js`'s baked-in `grepInvert`, not a
+silent skip) and cross-filed as R3 work on **B1857905**. The remaining 13 cases then ran clean 3
+more times (8 runs total, 0 failures) before anything was wired into the required build.
+
+**Infrastructure — extends R1's mechanism, no second framework:**
+- `e2e/critical-contracts.json` (new) — the manifest: stable contract id → spec file → owning item.
+- `playwright.critical.config.js` (new) — reads the manifest for `testMatch`; no signed-in `setup`
+  project dependency; `retries: 0`.
+- `scripts/lib/e2eDrift.mjs`'s new `checkRequiredContracts()` — a contract is `"complete"` only if
+  every case in its file read `"passed"`; `"absent"`/`"failed"`/`"skipped"`/`"flaky"` are all
+  non-green. This catches the one gap a raw `playwright test` exit code cannot: a contract's file
+  quietly matching zero tests (renamed, moved) does not by itself fail a Playwright run.
+- `scripts/e2e-drift-gate.mjs` — `--lane` accepts `critical`; new `--contracts <manifest>` flag.
+- `.github/ci-gates.yml` — one new required gate, last in the list, reusing the already-running
+  preview server and already-installed Chromium every browser-driven gate above it already paid for.
+
+**Mutation-proven on a disposable build, exactly as required, then reverted:** a missing/renamed
+contract (manifest pointed at a nonexistent file) → gate exit 2; a real regression (temporarily
+forced `keyContract.js`'s FIELD-scope guard to `allow: true` — the exact bug this suite exists to
+catch) → rebuilt → both contracts read `"failed"`, gate exit 2 → reverted, rebuilt, confirmed green
+again. `checkRequiredContracts()` itself mutation-proven at the unit level too.
+
+Full evidence, file list, and verification commands are on **B1923456** in
+`docs/archive/BACKLOG-DONE.md`.
+
+## Stage gate for R3 — what must be true before it starts
+
+R3 (retire the known-red GIS-identify family + source-assertion triage) is now unblocked — R2's
+critical lane exists. It additionally inherits the two newly-found stale cases above. Per the
+brief's own sequencing, R3/R4 can proceed in parallel; R5 has no hard dependency on R2/R3; R7 can
+begin on a small stable leaf now that R2 has landed; R8 is gated on R2's interaction protections
+existing, which they now do.
+
+**Do not start** (until their own stated preconditions hold): planner state extraction (R6 — gated
+on B217540 per the existing decomposition plan), persistence engine rewrites, scheduler build
+migration (R8's actual build-entry work — its precondition is now clear, but the work itself is
+still unstarted), schema changes, production data mutation, or a React upgrade.
+
+## R3–R9 — recorded, not started
 
 The full original brief is preserved below verbatim so no detail is lost between sessions. Treat
 its file paths, line-count figures, and "reviewed commit" references as a **2026-09-20 snapshot**,
-superseded by whatever R0 measures fresh at the start of whichever session picks up R2 — the brief
-says this about itself ("Refresh changed facts only; do not restart a broad architecture audit").
+superseded by whatever a fresh R0-style check measures at the start of whichever session picks up
+R3 — the brief says this about itself ("Refresh changed facts only; do not restart a broad
+architecture audit").
 
 <details>
 <summary>Full original brief (2026-09-20) — click to expand</summary>
