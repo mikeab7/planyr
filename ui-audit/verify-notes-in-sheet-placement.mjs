@@ -226,6 +226,12 @@ await section("1 · a fresh page shows the placeholder, and it vanishes the mome
   await pacedWait(page, 900);
   const after = await page.evaluate(() => document.querySelector('[data-testid="note-empty-placeholder"]'));
   ok("the placeholder is gone once a box exists", after === null);
+  /* ⛔ B1928816 — "the placeholder vanished" is NOT "the word landed". A count/presence check
+   * here is exactly the gap that let the first box keep only its first character while this
+   * section stayed green: it never once read the box's own text. Read the STORED document, not
+   * just the DOM, per carry-forward trap 6. */
+  const text = await page.evaluate(() => document.querySelector(".planyr-anchor")?.textContent || null);
+  ok("the box holds every character typed, not just the first", text === "FIRST", `read: ${JSON.stringify(text)}`);
 });
 
 /* ═══ 2 · SINGLE CLICK ON BLANK SHEET DESELECTS — IT DOES NOT PLACE ═══════════════════════════ */
@@ -818,6 +824,96 @@ await section("19 · a page whose stored sketch holds two connected boxes opens 
     ok("...and the connection between them", markdown.includes("Connected boxes:") && /Acquisition.*→.*Title review/.test(markdown));
   }
   await ctx.close();
+});
+
+/* ═══ 20 · B1928816 — THE FIRST BOX ON A BRAND-NEW PAGE KEPT ONLY ITS FIRST CHARACTER ══════════
+ *
+ * ⛔ THE MECHANISM, so a future session does not re-diagnose it. `commitPendingPlace`
+ * (NoteEditor.jsx) turns an armed caret into a real box via `editor.commands.addNoteAnchorAt`,
+ * whose `typing` branch ends in Tiptap's own `.focus(at + 2, …)` — and Tiptap's `focus` command
+ * (`@tiptap/core`'s `commands/focus.ts`) defers the REAL browser `view.focus()` call to a
+ * `requestAnimationFrame` callback; it never focuses synchronously. `commitPendingPlace` then
+ * immediately inserts the first character through `editor.commands.insertContent(text)`, a
+ * direct command that lands regardless of DOM focus — so the first character is never at risk.
+ * Every character AFTER that is a REAL keystroke the browser routes to whatever currently holds
+ * DOM focus. On the very first placement of a freshly opened page nothing has focused the editor
+ * yet, so if that rAF has not fired before the next keydown arrives, every following character
+ * is dispatched to `document.body` and silently lost. Once real focus lands (once, ever, for
+ * that open editor) this can never happen again — which is why a second box on the same page,
+ * or clicking back into the first one, never reproduces it, and why the OWNER's own report named
+ * exactly the FIRST box on a brand-new page as the failing case.
+ *
+ * ⛔ WHY THIS SECTION FORCES THE RACE RATHER THAN HOPING FOR IT. A fast, idle headless run can
+ * complete a `requestAnimationFrame` well inside the gap between two Playwright-dispatched
+ * keystrokes, which is exactly why this bug shipped and stayed green here — reproducing it
+ * honestly needs the SAME kind of deterministic instrument this repo already uses for other
+ * async races (the manually-gated fake network the push-reentrancy tests use): delaying
+ * `requestAnimationFrame` by a fixed amount is a controlled way to simulate "the browser had
+ * other work queued ahead of this frame," which is what a real, busier, signed-in production tab
+ * does on every keystroke (autosave bookkeeping, sync, telemetry) and a bare local sandbox does
+ * not. The no-delay cases below still run too, so a regression that breaks the FAST path as well
+ * is caught without needing the delay at all.
+ */
+await section("20 · a brand-new page's first box keeps every character, even when a frame is late", async (page) => {
+  /* Simulate a browser with other work already queued ahead of the next paint — this is what
+   * makes the race in `commitPendingPlace` deterministic instead of a matter of luck. */
+  await page.evaluate(() => {
+    const real = window.requestAnimationFrame.bind(window);
+    window.requestAnimationFrame = (cb) => window.setTimeout(() => real(cb), 500);
+  });
+
+  await page.evaluate(() => {
+    window.__keyLog = [];
+    window.addEventListener("keydown", (e) => {
+      const ae = document.activeElement;
+      window.__keyLog.push({ key: e.key, inEditor: !!(ae && ae.closest && ae.closest('[data-testid="note-body"]')) });
+    }, { capture: true });
+  });
+
+  const body = await bodyRect(page);
+  await dbl(page, Math.round(body.left + 100), Math.round(body.top + 40), "case 20a");
+  await page.keyboard.type("DELTA", { delay: 0 });
+  await pacedWait(page, 700);
+  const text1 = await page.evaluate(() => document.querySelector(".planyr-anchor")?.textContent || null);
+  ok("every character lands, even with a delayed animation frame", text1 === "DELTA", `read: ${JSON.stringify(text1)}`);
+  const log = await page.evaluate(() => window.__keyLog);
+  ok("every keydown after the first was routed into the editor, never document.body",
+    log.slice(1).every((e) => e.inEditor), JSON.stringify(log));
+
+  /* Typing immediately, with no pause at all after the double-click — the exact gesture from
+   * the owner's own repro, still under the delayed frame. */
+  const p2x = Math.round(body.left + 400);
+  const p2y = Math.round(body.top + 250);
+  await page.mouse.move(p2x, p2y);
+  await page.mouse.dblclick(p2x, p2y);
+  await page.keyboard.type("CHARLIE", { delay: 0 });
+  await pacedWait(page, 700);
+  const boxes = await page.evaluate(() => [...document.querySelectorAll(".planyr-anchor")].map((el) => el.textContent));
+  ok("a second box on the same page also keeps every character (no regression)",
+    boxes.includes("DELTA") && boxes.includes("CHARLIE"), JSON.stringify(boxes));
+
+  /* A word then Enter for a second line, still the very first box's own gesture pattern. */
+  const p3x = Math.round(body.left + 100);
+  const p3y = Math.round(body.top + 450);
+  await page.mouse.move(p3x, p3y);
+  await page.mouse.dblclick(p3x, p3y);
+  await page.keyboard.type("LINEONE", { delay: 0 });
+  await page.keyboard.press("Enter");
+  await page.keyboard.type("LINETWO", { delay: 0 });
+  await pacedWait(page, 700);
+  const twoLine = await page.evaluate(() => {
+    const nodes = [...document.querySelectorAll(".planyr-anchor")];
+    const el = nodes.find((n) => n.textContent.includes("LINEONE"));
+    return el ? el.innerText : null;
+  });
+  ok("a word then Enter keeps both lines", !!twoLine && twoLine.includes("LINEONE") && twoLine.includes("LINETWO"), JSON.stringify(twoLine));
+
+  await pacedWait(page, 700);   // clear the save debounce before reloading
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="note-body"]', { timeout: 20000 });
+  await pacedWait(page, 800);
+  const afterReload = await page.evaluate(() => [...document.querySelectorAll(".planyr-anchor")].map((el) => el.textContent));
+  ok("every box's full text survives a reload", afterReload.includes("DELTA") && afterReload.includes("CHARLIE"), JSON.stringify(afterReload));
 });
 
 await browser.close();
