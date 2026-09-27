@@ -608,6 +608,11 @@ export function validateComp(draft) {
   const errors = [];
   if (!isCompType(draft?.compType)) errors.push("Pick a comp type.");
   if (!validAnchor(draft?.anchor)) errors.push("Drop a pin or select a parcel.");
+  // NEW-5 (2026-09-22 live test) — a Lease comp with no rent period saved 200 ok on this check
+  // alone (period is never defaulted/guessed, on purpose) and then threw the raw
+  // `comps_lease_rate_period_check`/`comps_lease_rate_requires_period` Postgres text at the user.
+  // Blocked here, before any insert, the same way a missing comp type already is.
+  if (draft?.compType === "lease" && !draft?.leaseRatePeriod) errors.push("Pick a rent period (MO or YR).");
   return errors;
 }
 
@@ -812,6 +817,14 @@ export function draftToComp(d) {
     leaseRate: num(d.leaseRate), leaseTi: num(d.leaseTi), leaseSizeSf: num(d.leaseSizeSf),
     leaseFreeRentMonths: num(d.leaseFreeRentMonths), leaseEscalationPct: num(d.leaseEscalationPct),
     leaseOpex: num(d.leaseOpex),
+    // NEW-5 (2026-09-22 live test) — an unset Per reads as the literal empty string in the draft
+    // (never defaulted — see compSheetColumns.js's own comment on why a rate period is never
+    // guessed) and `compToRow` forwards it unchanged; `comps_lease_rate_period_check` accepts NULL
+    // but not `''`, so ANY comp type's untouched, not-applicable `leaseRatePeriod` field raised the
+    // same raw constraint error the moment it reached an insert. Same treatment as `compDate`
+    // above: a blank draft string becomes `null`, never the empty string, before it can reach a
+    // Postgres column with a CHECK constraint.
+    leaseRatePeriod: d.leaseRatePeriod || null,
     // ⛔ NEW-5 (owner decision, 2026-09-02) — an empty draft string must become `null`, never the
     // literal `""` `compToRow` would otherwise forward straight into a Postgres `date` column
     // (which rejects an empty string with a real error, not a null). This was DEAD CODE UNTIL

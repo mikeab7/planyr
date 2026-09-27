@@ -236,6 +236,38 @@ export function polyPointsToRect(pts) {
   return { x: b.minX, y: b.minY, w: b.maxX - b.minX, h: b.maxY - b.minY };
 }
 
+/* ---- Rect/poly coexistence (NEW-3, live-test 2026-09-22) -----------------------------------
+ * Saving one shape used to DISCARD the other's last-drawn value outright: switch a saved polygon
+ * to Rectangle and press Done, and the polygon's points never reached the persisted `crop` object
+ * at all — reopening and switching back to Polygon re-derived a plain bounding-box quad, not the
+ * original hand-drawn shape. `savedRectOf`/`savedPtsOf` read whichever fields are present on a
+ * crop object REGARDLESS of its active `kind`, so `ImageCropTool` can seed both a rect draft and a
+ * poly draft from storage and carry the inactive one forward on commit as a DORMANT extra field —
+ * `{kind:'rect', x,y,w,h, pts:[...]}` or `{kind:'poly', pts:[...], x,y,w,h}`. Both DB CHECK branches
+ * (site_plan_overlays_crop_poly.sql) only require the ACTIVE kind's own fields and place no
+ * restriction on extra keys, so this needs no migration; a legacy row with only one shape's fields
+ * simply has no dormant value to carry, exactly as before. */
+export function savedRectOf(crop) {
+  if (!crop) return null;
+  if (Number.isFinite(crop.x) && Number.isFinite(crop.y) && Number.isFinite(crop.w) && Number.isFinite(crop.h)) {
+    return { x: crop.x, y: crop.y, w: crop.w, h: crop.h };
+  }
+  return null;
+}
+export function savedPtsOf(crop) {
+  return crop && Array.isArray(crop.pts) ? crop.pts : null;
+}
+
+// A closed 4-vertex ring exactly covering the full image is "no crop" — lets Polygon mode's own
+// "Reset to full page" (NEW-4) collapse to null on commit, the same way Rectangle's already does.
+export function isFullImagePoly(pts, imgW, imgH) {
+  if (!Array.isArray(pts) || pts.length !== 4 || !(imgW > 0) || !(imgH > 0)) return false;
+  const r = polyPointsToRect(pts);
+  if (!r) return false;
+  return Math.abs(r.x) < 0.5 && Math.abs(r.y) < 0.5 &&
+    Math.abs(r.x + r.w - imgW) < 0.5 && Math.abs(r.y + r.h - imgH) < 0.5;
+}
+
 // The ONE crop-shape validator a DB row reader (or any future writer) runs through — accepts
 // null (full image), a legacy-or-explicit rect, or a poly; rejects anything else, so a malformed
 // value can never reach rendering as though it were a real crop. `overlayCrop.test.js` is the
@@ -254,14 +286,25 @@ export function isValidCropShape(crop) {
 // Dispatches normalizeCrop (rect) / normalizePolyCrop by kind, and stamps the discriminator
 // going forward — a NEW rect commit from the tool now writes `{kind:'rect', x,y,w,h}` explicitly
 // (only an old, already-persisted row is ever missing the key). Returns null for "no crop."
+//
+// NEW-3 (2026-09-22 live test) — this is the WRITE PATH'S OWN normalizer (SitePlanner.jsx's
+// `setOverlayCrop` calls it on every commit), so it must preserve a dormant shape exactly like
+// `ImageCropTool`'s own `commit()` does — rebuilding a "clean" object from only the active kind's
+// fields would silently strip the dormant field the tool had just carried forward.
 export function normalizeCropShape(crop, imgW, imgH) {
   if (!crop) return null;
   if (cropKind(crop) === "poly") {
     const pts = normalizePolyCrop(crop.pts, imgW, imgH);
-    return pts ? { kind: "poly", pts } : null;
+    const savedRect = savedRectOf(crop);
+    const dormantRect = savedRect ? normalizeCrop(savedRect, imgW, imgH) : null;
+    if (!pts) return dormantRect ? { kind: "rect", ...dormantRect } : null;
+    return { kind: "poly", pts, ...(dormantRect || {}) };
   }
   const rect = normalizeCrop(crop, imgW, imgH);
-  return rect ? { kind: "rect", ...rect } : null;
+  const savedPts = savedPtsOf(crop);
+  const dormantPts = savedPts ? normalizePolyCrop(savedPts, imgW, imgH) : null;
+  return rect ? { kind: "rect", ...rect, ...(dormantPts ? { pts: dormantPts } : {}) }
+    : (dormantPts ? { kind: "poly", pts: dormantPts } : null);
 }
 
 // THE single clip-path value for either shape, in IMAGE-LOCAL pixel coordinates — exactly the

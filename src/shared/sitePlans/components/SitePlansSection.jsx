@@ -33,7 +33,9 @@ import {
   fetchAllOverlays, insertOverlay, updateOverlay, deleteOverlay,
   fetchOverlayCompPoints, commitOverlayPlacementWithComps,
   fetchDeletedOverlays, restoreOverlay, permanentlyDeleteOverlay,
+  countLiveOverlaysForProject,
 } from "../lib/sitePlanOverlayStore.js";
+import { countLiveCompsForProject } from "../../comps/lib/compsStore.js";
 import { overlayPlaced } from "../lib/sitePlanOverlays.js";
 import { imagePointToLatLon } from "../lib/overlayGeoref.js";
 import { friendlySaveError } from "../lib/overlayErrors.js";
@@ -573,6 +575,11 @@ export default function SitePlansSection({
   // Comps list's own "+ Site plan" button (no comp open yet — order (a), upload-first) trigger the
   // same upload flow this component owns.
   focusedProjectId = null, focusedCompId = null, onStartPinExistingComp, startUploadRef,
+  // NEW-6 (bug fix, 2026-09-27) — fires once, right after a FRESH upload's own project id is
+  // known (whether the owner picked one or this module just resolved/minted a tracked site for
+  // it — see confirmPage), so MapFinder can focus this plan's card with no comp having been
+  // created. Never fires for "Change page" on an already-existing overlay.
+  onOverlayProjectResolved,
   // B1310209 (NEW-2) — a ref to the map's own relatively-positioned host element (the box the
   // Comps rail and the Layers panel are already children of in MapFinder.jsx), so the docked
   // Adjust panel can portal straight onto the map instead of rendering wherever this component
@@ -614,7 +621,16 @@ export default function SitePlansSection({
   useEffect(() => { if (activeOverlayId) setAdjustOpen(true); }, [activeOverlayId]);
   // B1310208 — switching to a different comp (a different plan) must never leave the PREVIOUS
   // plan's Adjust panel standing open over the map with nothing in the rail pointing at it.
-  useEffect(() => { setAdjustOpen(false); }, [focusedProjectId]);
+  // NEW-6 exception: a fresh upload's own `confirmPage` sets `adjustOpen(true)` for THIS overlay
+  // in the SAME batch that resolves its project id (which changes `focusedProjectId` here too) —
+  // without this exception this effect fired right after and closed the panel it had just opened,
+  // a visible open-then-instantly-close flash. `justOpenedOverlayIdRef` names the one overlay this
+  // effect must not act against on the very next `focusedProjectId` change it causes.
+  useEffect(() => {
+    const focused = focusedProjectId ? overlaysRef.current.find((o) => o.projectId === focusedProjectId) : null;
+    if (focused && focused.id === justOpenedOverlayIdRef.current) { justOpenedOverlayIdRef.current = null; return; }
+    setAdjustOpen(false);
+  }, [focusedProjectId]);
   // NEW-1 (this item, regression from B1310209) — `open` gates whether this component's own JSX
   // return is `null` (below), which the DOM-rendered Adjust panel follows; reporting `open &&
   // adjustOpen` rather than the bare flag keeps MapFinder from believing the panel is still on
@@ -676,6 +692,8 @@ export default function SitePlansSection({
   // owner's own "Site" control below, never by this function) permanently opts an overlay OUT —
   // "once he has separated them, they stay separated."
   const resolveAttemptedRef = useRef(new Set());
+  // NEW-6 — see the `focusedProjectId` auto-close effect above for why this exists.
+  const justOpenedOverlayIdRef = useRef(null);
   const resolveOverlaySite = async (o) => {
     if (o.projectId || o.siteLinkDeclined || !overlayPlaced(o)) return null;
     const { resolveOrCreateTrackedSiteForOverlay } = await import("../../../workspaces/site-planner/lib/storage.js");
@@ -965,7 +983,33 @@ export default function SitePlansSection({
         const { data } = await updateOverlay(overlay.id, { ...overlay, rasterKey });
         overlay = data || overlay;
       }
-      await reload();
+      // NEW-6 — a fresh upload placed with no project chosen used to resolve/mint its tracked
+      // ("market record") site only through reload()'s own fire-and-forget sweep below, which
+      // patches the overlay's projectId asynchronously with nothing in this function (or
+      // MapFinder, which decides whether the Records rail shows this plan's card) ever learning
+      // the id it picked — so the card was unreachable unless a comp on the same parcel happened
+      // to get logged too (compSiteMatch.js's own location match). Resolve THIS overlay's site
+      // synchronously here instead — marking it attempted first so the sweep below doesn't ALSO
+      // resolve it — and hand the id back up to MapFinder (onOverlayProjectResolved) so it can
+      // focus this plan's card immediately, with no comp involved.
+      const isNewUpload = !f.overlayId;
+      let resolvedProjectId = overlay.projectId || null;
+      let resolvedInline = false;
+      if (isNewUpload && !overlay.projectId && !overlay.siteLinkDeclined && overlayPlaced(overlay)) {
+        resolveAttemptedRef.current.add(overlay.id);
+        try {
+          const groupId = await resolveOverlaySite(overlay);
+          if (groupId) {
+            await patchAndReload(overlay, { projectId: groupId });
+            resolvedInline = true;
+            resolvedProjectId = groupId;
+            overlay = { ...overlay, projectId: groupId };
+          }
+        } catch (e) {
+          console.error("[sitePlanOverlays] site resolve failed:", e);
+        }
+      }
+      if (!resolvedInline) await reload();
       setAdjustOpen(true);
       // NEW-17 — only arm "Editing on map" when the overlay actually has a full, drawable
       // placement (overlayPlaced requires center + a non-null scale); arming it on anything less
@@ -975,6 +1019,16 @@ export default function SitePlansSection({
       // just leaves the row honestly unplaced; its own "Place on map" button (below) already
       // self-heals by seeding a placement before arming.
       if (overlayPlaced(overlay)) onActivateOverlay && onActivateOverlay(overlay.id);
+      // NEW-6 — tell MapFinder which project this freshly-placed plan ended up on (whether the
+      // owner picked one or it was just resolved above), so the Records rail can focus this
+      // plan's own card with no comp having been created. Reuses the existing
+      // `focusedComp?.projectId ?? focusedTrackedProjectId ?? null` composition — a comp's own
+      // projectId still wins whenever one is open. `justOpenedOverlayIdRef` is set first so the
+      // `focusedProjectId` change this triggers doesn't immediately close the panel just opened above.
+      if (isNewUpload && resolvedProjectId) {
+        justOpenedOverlayIdRef.current = overlay.id;
+        onOverlayProjectResolved && onOverlayProjectResolved(resolvedProjectId);
+      }
       // A multi-file drop queues the rest — place them one after another through the same flow
       // rather than a second modal; each still gets its own title/date/page pick.
       if (f.queue && f.queue.length) pickFile(f.queue[0], { queue: f.queue.slice(1) });
@@ -1126,6 +1180,28 @@ export default function SitePlansSection({
   // matching this row's own confirm-dialog copy below ("Comps pinned to it keep their location
   // but lose the link back"), which used to be untrue (the delete was refused instead). See
   // comps_site_plan_overlay_delete_reverts_to_pin.sql for the full mechanism and reasoning.
+  // NEW-6 Part B — an auto-created tracked ("market record") site is otherwise permanent and
+  // invisible once its last plan (and last comp) are gone. Mirrors CompsPanel.jsx's own
+  // purgeForever tidy-up (countLiveCompsForProject + binOrphanedTrackedSite) exactly, INCLUDING
+  // where it fires: PERMANENT delete only, never ordinary soft-delete — a soft-deleted overlay is
+  // restorable for 30 days (storage.js's own comment on this same deliberate scoping), and
+  // `countLiveOverlaysForProject` already excludes it, so retiring the tracked site at soft-delete
+  // time would strand a later restore with no site to reattach to. Best-effort, never blocks or
+  // reports a failure over this: `binOrphanedTrackedSite` already refuses unless the site is still
+  // `role:"tracked"` and genuinely empty, so it's safe to call speculatively.
+  const maybeRetireTrackedSite = async (projectId) => {
+    if (!projectId) return;
+    try {
+      const [liveOverlays, liveComps] = await Promise.all([
+        countLiveOverlaysForProject(projectId),
+        countLiveCompsForProject(projectId),
+      ]);
+      if (liveOverlays === 0 && liveComps === 0) {
+        const { binOrphanedTrackedSite } = await import("../../../workspaces/site-planner/lib/storage.js");
+        await binOrphanedTrackedSite(projectId);
+      }
+    } catch (_) { /* best-effort tidy-up */ }
+  };
   const remove = async (o) => {
     const { error } = await deleteOverlay(o.id);
     if (error) { console.error("[sitePlanOverlays] delete failed:", error); setPanelError(friendlySaveError(error)); }
@@ -1151,6 +1227,9 @@ export default function SitePlansSection({
   const purgeForever = async (o) => {
     const { error } = await permanentlyDeleteOverlay(o.id);
     if (error) { console.error("[sitePlanOverlays] permanent delete failed:", error); setPanelError(friendlySaveError(error)); }
+    // NEW-6 Part B — `o` here is a raw trash-select row (fetchDeletedOverlays doesn't run
+    // rowToOverlay), so its owning site is `project_id`, not `projectId`.
+    else if (o.project_id) await maybeRetireTrackedSite(o.project_id);
     await loadTrash();
   };
 
@@ -1420,19 +1499,26 @@ export default function SitePlansSection({
     {/* B1134754 NEW-21 — cropping an ALREADY-PLACED overlay. A simple centered overlay (this
         panel has no existing modal primitive) rather than a second bespoke crop surface. */}
     {cropTarget && (
-      <div style={{
+      <div data-testid="site-plan-crop-modal" style={{
         position: "fixed", inset: 0, zIndex: 2000, background: "rgba(0,0,0,0.35)", // design-exempt: modal backdrop scrim — no backdrop-color token exists repo-wide yet
         display: "flex", alignItems: "center", justifyContent: "center",
       }} onPointerDown={(e) => { if (e.target === e.currentTarget) setCropTarget(null); }}>
         <div style={{
           background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: RADIUS.lg, padding: 14,
           boxShadow: "0 8px 32px rgba(0,0,0,0.35)", // design-exempt: no shadow-color token yet repo-wide (matches model/FindReplaceBar.jsx's own popPanel precedent)
+          maxWidth: "96vw", maxHeight: "94vh", overflowY: "auto",
         }}>
           <div style={{ fontSize: FONT_SIZE.control, fontWeight: 600, marginBottom: 8, color: "var(--text-primary)" }}>
             Crop “{cropTarget.overlay.docTitle || "this site plan"}”
           </div>
+          {/* NEW-2 (2026-09-22 live test) — a fixed 720×520 default viewport centred on a short
+              window (e.g. 1191×521) pushed the shape-toggle row above y=0 and the Done/Cancel row
+              past the bottom, with nothing to scroll to reach either. Same fix as the Site tab's
+              OverlayCropDialog: size the tool's viewport off the real window, with the same floors. */}
           <ImageCropTool
             src={cropTarget.src} imgW={cropTarget.overlay.imgW} imgH={cropTarget.overlay.imgH} crop={cropTarget.overlay.crop}
+            maxWidth={Math.max(420, typeof window !== "undefined" ? window.innerWidth - 80 : 900)}
+            maxHeight={Math.max(320, typeof window !== "undefined" ? window.innerHeight - 220 : 640)}
             onCommit={commitCrop} onCancel={() => setCropTarget(null)}
           />
         </div>

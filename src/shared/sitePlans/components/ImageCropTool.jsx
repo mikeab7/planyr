@@ -58,7 +58,7 @@ import {
   clampCropRect, normalizeCrop, isFullCrop,
   clampPolyPoints, normalizePolyCrop, isUsablePoly, cropKind,
   rectToPolyPoints, MIN_POLY_VERTICES, MAX_POLY_VERTICES,
-  constrainOctant, nearestOnSegment,
+  constrainOctant, nearestOnSegment, savedRectOf, savedPtsOf, isFullImagePoly,
 } from "../../../workspaces/site-planner/lib/overlayCrop.js";
 import { worldToScreen, screenToWorld, zoomAround, panBy, fitView } from "../../viewport/viewportTransform.js";
 import { wheelZoomFactor } from "../../viewport/viewAnchor.js";
@@ -96,6 +96,13 @@ const HANDLE_CURSOR = {
 const fullRect = (imgW, imgH) => ({ x: 0, y: 0, w: imgW, h: imgH });
 const clampToImage = (v, max) => Math.min(Math.max(0, v), max);
 
+// Shared style for the footer's small underlined text actions (Clear polygon / Reset to full page).
+const linkButtonStyle = (disabled) => ({
+  border: "none", background: "none", padding: 0, cursor: disabled ? "default" : "pointer",
+  fontSize: FONT_SIZE.label, color: disabled ? "var(--text-secondary)" : "var(--accent)",
+  opacity: disabled ? 0.5 : 1, textDecoration: "underline",
+});
+
 // This tool's chrome (scrim / handles / rule-of-thirds) is DELIBERATELY fixed dark-on-photo,
 // independent of the app's light/dark theme — the same convention every competent photo
 // cropper uses (Lightroom, Photoshop): it has to read consistently over an arbitrary uploaded
@@ -120,18 +127,31 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
   const initialKind = crop ? cropKind(crop) : "rect";
   const [mode, setMode] = useState(initialKind);
 
-  // Rect draft — seeded from `crop` when it's a rect (legacy or explicit), else the full image.
-  const [draft, setDraft] = useState(() => (initialKind === "rect" && crop ? clampCropRect(crop, imgW, imgH) : fullRect(imgW, imgH)));
+  // NEW-3 (live-test 2026-09-22) — whatever this overlay ALREADY had saved for each shape, read
+  // regardless of which one is currently active. Captured once at mount so a shape drawn before
+  // this tool opened is never lost by switching to the other one and saving — see overlayCrop.js's
+  // `savedRectOf`/`savedPtsOf` header for the coexisting-shape design.
+  const initialRectRef = useRef(savedRectOf(crop));
+  const initialPtsRef = useRef(savedPtsOf(crop));
+  const hadAnySavedShape = !!(initialRectRef.current || initialPtsRef.current);
 
-  // Poly draft — seeded from `crop` when it's a poly; otherwise from the RECT's own four corners
-  // (whatever rect is on hand, or the full image), pre-closed, so switching to Polygon for the
-  // first time on a plain rect crop hands you an editable quad instead of an empty draw.
+  // Rect draft — seeded from whatever rect was already saved (any kind), else the full image.
+  const [draft, setDraft] = useState(() => (
+    initialRectRef.current ? clampCropRect(initialRectRef.current, imgW, imgH) : fullRect(imgW, imgH)
+  ));
+
+  // Poly draft — seeded from a saved polygon when one exists; otherwise, if THIS overlay already
+  // had a rect crop, from that rect's own four corners (pre-closed, so switching to Polygon for
+  // the first time on a plain rect crop hands you an editable quad instead of an empty draw). A
+  // genuinely uncropped overlay (NEW-4) gets neither seed — Polygon opens straight into an empty,
+  // open draw so the first click places vertex 1, rather than a closed full-frame quad that
+  // swallows clicks until "Clear polygon" is found.
   const [polyPts, setPolyPts] = useState(() => {
-    if (initialKind === "poly" && crop) return clampPolyPoints(crop.pts, imgW, imgH) || [];
-    const seedRect = initialKind === "rect" && crop ? clampCropRect(crop, imgW, imgH) : fullRect(imgW, imgH);
-    return rectToPolyPoints(seedRect) || [];
+    if (initialPtsRef.current) return clampPolyPoints(initialPtsRef.current, imgW, imgH) || [];
+    if (!hadAnySavedShape) return [];
+    return rectToPolyPoints(initialRectRef.current || fullRect(imgW, imgH)) || [];
   });
-  const [polyClosed, setPolyClosed] = useState(true); // false only while actively placing vertices
+  const [polyClosed, setPolyClosed] = useState(hadAnySavedShape); // NEW-4: open/drawing when nothing was saved yet
   const [selectedVertex, setSelectedVertex] = useState(null); // index, closed mode only
 
   const [dragType, setDragType] = useState(null); // rect handle key while a gesture is live, else null
@@ -285,19 +305,37 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
 
   const commit = () => {
     if (mode === "poly") {
-      const pts = normalizePolyCrop(polyPts, imgW, imgH);
-      onCommit(pts ? { kind: "poly", pts } : null);
+      // NEW-4: a closed ring exactly covering the full image (Polygon's own "Reset to full page")
+      // is "no crop", same as a full-page rect.
+      const pts = isFullImagePoly(polyPts, imgW, imgH) ? null : normalizePolyCrop(polyPts, imgW, imgH);
+      // NEW-3: carry the DORMANT rect forward (only if this overlay already had one) so switching
+      // to Polygon and saving never erases a previously-saved rectangle.
+      const dormantRect = initialRectRef.current ? normalizeCrop(draft, imgW, imgH) : null;
+      if (!pts) { onCommit(dormantRect ? { kind: "rect", ...dormantRect } : null); return; }
+      onCommit({ kind: "poly", pts, ...(dormantRect || {}) });
     } else {
       const rect = normalizeCrop(draft, imgW, imgH);
-      onCommit(rect ? { kind: "rect", ...rect } : null);
+      // NEW-3: carry the DORMANT polygon forward (only if this overlay already had one).
+      const dormantPts = initialPtsRef.current ? normalizePolyCrop(polyPts, imgW, imgH) : null;
+      onCommit(rect ? { kind: "rect", ...rect, ...(dormantPts ? { pts: dormantPts } : {}) }
+        : (dormantPts ? { kind: "poly", pts: dormantPts } : null));
     }
   };
   const reset = () => {
     if (mode === "poly") { pushPolyUndo(); setPolyPts([]); setPolyClosed(false); setSelectedVertex(null); }
     else setDraft(fullRect(imgW, imgH));
   };
+  // NEW-4 — Polygon's own "Reset to full page" (distinct from "Clear polygon", which starts a
+  // fresh hand-trace): a closed quad over the whole image, collapsing to crop:null on commit.
+  const resetPolyToFull = () => {
+    pushPolyUndo();
+    setPolyPts(rectToPolyPoints(fullRect(imgW, imgH)));
+    setPolyClosed(true);
+    setSelectedVertex(null);
+  };
   const canCommit = mode === "poly" ? (polyClosed && isUsablePoly(polyPts, imgW, imgH)) : true;
   const isReset = mode === "poly" ? polyPts.length === 0 : isFullCrop(draft, imgW, imgH);
+  const isPolyFull = mode === "poly" && isFullImagePoly(polyPts, imgW, imgH);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -569,11 +607,14 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
         <span style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <button onClick={reset} disabled={isReset} style={{
-            border: "none", background: "none", padding: 0, cursor: isReset ? "default" : "pointer",
-            fontSize: FONT_SIZE.label, color: isReset ? "var(--text-secondary)" : "var(--accent)",
-            opacity: isReset ? 0.5 : 1, textDecoration: "underline",
-          }}>{mode === "poly" ? "Clear polygon" : "Reset to full page"}</button>
+          <button onClick={reset} disabled={isReset} style={linkButtonStyle(isReset)}>
+            {mode === "poly" ? "Clear polygon" : "Reset to full page"}
+          </button>
+          {mode === "poly" && (
+            <button onClick={resetPolyToFull} disabled={isPolyFull} style={linkButtonStyle(isPolyFull)}>
+              Reset to full page
+            </button>
+          )}
           <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)" }}>
             Scroll to zoom · Space+drag or middle-drag to pan
           </span>

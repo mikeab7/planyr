@@ -39,3 +39,17 @@ describe("SitePlansSection.jsx — a locked overlay refuses a crop edit (B115436
     expect(body).toMatch(/overlayPlaced\(o\) && o\.locked/);
   });
 });
+
+describe("SitePlansSection.jsx — the crop modal fits any window (NEW-2, live test 2026-09-22)", () => {
+  it("the outer card caps itself to the viewport and scrolls rather than centering off-screen", () => {
+    const start = panelSrc.indexOf('data-testid="site-plan-crop-modal"');
+    const body = panelSrc.slice(start, panelSrc.indexOf("<ImageCropTool", start));
+    expect(body).toMatch(/maxWidth: "96vw", maxHeight: "94vh", overflowY: "auto"/);
+  });
+  it("ImageCropTool is sized off the real window, same floors as the Site tab's OverlayCropDialog", () => {
+    const start = panelSrc.indexOf('data-testid="site-plan-crop-modal"');
+    const body = panelSrc.slice(start, panelSrc.indexOf("onCommit={commitCrop}", start));
+    expect(body).toMatch(/maxWidth=\{Math\.max\(420, typeof window !== "undefined" \? window\.innerWidth - 80 : 900\)\}/);
+    expect(body).toMatch(/maxHeight=\{Math\.max\(320, typeof window !== "undefined" \? window\.innerHeight - 220 : 640\)\}/);
+  });
+});
