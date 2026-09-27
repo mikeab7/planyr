@@ -72,9 +72,12 @@ async function readZoom(page, box) {
   return Math.log2(360 / (degPerPx * 256));
 }
 
+// The STATUS pin (sitePinIcon) carries divIcon className "map-site-feature"; the full-plan
+// view's own name-TAG marker (sitePlanLabelHtml) carries an empty className — same marker pane,
+// so a bare ".leaflet-marker-icon" count can't tell "pin" from "plan swapped in its name tag".
 const domCounts = (page) => page.evaluate(() => ({
   boundaries: document.querySelectorAll(".map-active-parcel-boundary").length,
-  pins: document.querySelectorAll(".leaflet-marker-pane .leaflet-marker-icon").length,
+  pins: document.querySelectorAll(".leaflet-marker-pane .leaflet-marker-icon.map-site-feature").length,
 }));
 
 async function open(account) {
@@ -85,7 +88,10 @@ async function open(account) {
   await assertMeasurable(page, "verify-active-parcel-boundary");
   const errs = [];
   page.on("pageerror", (e) => errs.push(String(e)));
-  await page.goto(BASE, { waitUntil: "load" });
+  // With sites seeded, the default route lands on the Dashboard, not the Map — go straight to
+  // the Site module's map route (a signed-out account with zero sites lands here by default,
+  // which is why this wasn't needed in verify-landing-view.mjs's zero/one-site cases there).
+  await page.goto(new URL("#/site", BASE).toString(), { waitUntil: "load" });
   await page.waitForSelector(".leaflet-container", { timeout: 20000 });
   await page.waitForTimeout(1800);
   return { ctx, page, errs };
@@ -143,15 +149,35 @@ async function zoomInUntil(page, box, predicate, maxSteps = 40) {
   await ctx.close();
 }
 
+/* Zoom in one small notch at a time, checking EVERY step, up to (but stopping at) the full-plan
+ * swap (pins hits 0) or a step ceiling — rather than jumping to one target zoom, which a single
+ * wheel gesture can overshoot past the PARCEL_ZOOM..PLAN_ZOOM band entirely. Returns the worst
+ * (max) boundary count seen anywhere along the way, so a false positive at ANY intermediate
+ * zoom is caught, not just at wherever the loop happened to land. */
+async function zoomStepwiseNoBoundaryUntilFullPlan(page, box, maxSteps = 60) {
+  let maxBoundaries = 0;
+  let lastCounts = await domCounts(page);
+  let lastZoom = await readZoom(page, box);
+  for (let i = 0; i < maxSteps; i++) {
+    lastCounts = await domCounts(page);
+    lastZoom = await readZoom(page, box);
+    maxBoundaries = Math.max(maxBoundaries, lastCounts.boundaries);
+    if (lastCounts.pins === 0) break; // reached the full-plan swap — nothing left to check
+    await page.mouse.move(box.x + box.w / 2, box.y + box.h / 2);
+    await page.mouse.wheel(0, -60);
+    await page.waitForTimeout(220);
+  }
+  return { maxBoundaries, lastCounts, lastZoom };
+}
+
 // ── B — an INACTIVE-only parcel: pin only, at every zoom, never a boundary ─────────────────────
 {
   const { ctx, page, errs } = await open("B_inactive");
   const box = await mapBox(page);
-  const atReveal = await zoomInUntil(page, box, (z) => z != null && z >= 13.5, 40);
+  const swept = await zoomStepwiseNoBoundaryUntilFullPlan(page, box);
   await page.screenshot({ path: OUT + "active-parcel-b-inactive.png" });
-  ok("B · an inactive-only parcel never draws a boundary, even well past the reveal zoom",
-     atReveal.counts.boundaries === 0, `zoom ${atReveal.zoom?.toFixed(2)} · ${JSON.stringify(atReveal.counts)}`);
-  ok("B · the pin itself is unaffected", atReveal.counts.pins === 1, JSON.stringify(atReveal.counts));
+  ok("B · an inactive-only parcel never draws a boundary at ANY zoom on the way to the full-plan swap",
+     swept.maxBoundaries === 0, `up to zoom ${swept.lastZoom?.toFixed(2)} · ended ${JSON.stringify(swept.lastCounts)}`);
   ok("B · no page errors", errs.length === 0, errs[0] || "");
   await ctx.close();
 }
@@ -160,10 +186,10 @@ async function zoomInUntil(page, box, predicate, maxSteps = 40) {
 {
   const { ctx, page, errs } = await open("C_none");
   const box = await mapBox(page);
-  const atReveal = await zoomInUntil(page, box, (z) => z != null && z >= 13.5, 40);
+  const swept = await zoomStepwiseNoBoundaryUntilFullPlan(page, box);
   await page.screenshot({ path: OUT + "active-parcel-c-none.png" });
-  ok("C · a record with no parcel at all stays pin-only — not a failure, no boundary",
-     atReveal.counts.boundaries === 0 && atReveal.counts.pins === 1, JSON.stringify(atReveal.counts));
+  ok("C · a record with no parcel at all stays pin-only at every zoom — not a failure, no boundary",
+     swept.maxBoundaries === 0, `up to zoom ${swept.lastZoom?.toFixed(2)} · ended ${JSON.stringify(swept.lastCounts)}`);
   ok("C · no page errors", errs.length === 0, errs[0] || "");
   await ctx.close();
 }
