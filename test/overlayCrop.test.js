@@ -9,7 +9,7 @@ import {
   cropClipRectScreen, cropTrimFeet, cropFromTrimFeet,
   MIN_POLY_VERTICES, MAX_POLY_VERTICES, cropKind, polygonAreaPx, clampPolyPoints, isUsablePoly, normalizePolyCrop,
   rectToPolyPoints, polyPointsToRect, isValidCropShape, normalizeCropShape, clipPathValueForCrop,
-  constrainOctant, nearestOnSegment,
+  constrainOctant, nearestOnSegment, savedRectOf, savedPtsOf, isFullImagePoly,
 } from "../src/workspaces/site-planner/lib/overlayCrop.js";
 
 describe("clampCropRect", () => {
@@ -198,6 +198,51 @@ describe("rectToPolyPoints / polyPointsToRect — reversible, one-step shape con
   });
 });
 
+describe("savedRectOf / savedPtsOf — NEW-3 (2026-09-22 live test): read whichever shape a crop object carries, regardless of `kind`", () => {
+  it("null crop has neither", () => {
+    expect(savedRectOf(null)).toBe(null);
+    expect(savedPtsOf(null)).toBe(null);
+  });
+  it("a legacy no-kind rect reads as a rect", () => {
+    expect(savedRectOf({ x: 1, y: 2, w: 10, h: 10 })).toEqual({ x: 1, y: 2, w: 10, h: 10 });
+    expect(savedPtsOf({ x: 1, y: 2, w: 10, h: 10 })).toBe(null);
+  });
+  it("an explicit rect-kind crop reads as a rect", () => {
+    expect(savedRectOf({ kind: "rect", x: 1, y: 2, w: 10, h: 10 })).toEqual({ x: 1, y: 2, w: 10, h: 10 });
+  });
+  it("a poly-kind crop reads its pts", () => {
+    const pts = [[0, 0], [10, 0], [10, 10]];
+    expect(savedPtsOf({ kind: "poly", pts })).toBe(pts);
+    expect(savedRectOf({ kind: "poly", pts })).toBe(null);
+  });
+  it("a coexisting crop (poly active, dormant rect fields alongside) reads BOTH", () => {
+    const pts = [[0, 0], [10, 0], [10, 10]];
+    const crop = { kind: "poly", pts, x: 1, y: 2, w: 10, h: 10 };
+    expect(savedPtsOf(crop)).toBe(pts);
+    expect(savedRectOf(crop)).toEqual({ x: 1, y: 2, w: 10, h: 10 });
+  });
+  it("a rect crop with non-finite fields has no saved rect", () => {
+    expect(savedRectOf({ x: 1, y: NaN, w: 10, h: 10 })).toBe(null);
+  });
+});
+
+describe("isFullImagePoly — NEW-4: a closed 4-vertex ring covering the whole image is 'no crop', same as a full-page rect", () => {
+  it("the exact 4 corners of the image are a full-image poly", () => {
+    expect(isFullImagePoly([[0, 0], [1000, 0], [1000, 800], [0, 800]], 1000, 800)).toBe(true);
+  });
+  it("a real hand-traced polygon (even one bounding the whole image) is not, if it isn't the exact 4-corner quad", () => {
+    expect(isFullImagePoly([[0, 0], [1000, 0], [1000, 800], [500, 400], [0, 800]], 1000, 800)).toBe(false);
+  });
+  it("a smaller quad is not full", () => {
+    expect(isFullImagePoly([[10, 10], [990, 10], [990, 790], [10, 790]], 1000, 800)).toBe(false);
+  });
+  it("null/empty/bad input is not full", () => {
+    expect(isFullImagePoly(null, 1000, 800)).toBe(false);
+    expect(isFullImagePoly([], 1000, 800)).toBe(false);
+    expect(isFullImagePoly([[0, 0], [1000, 0], [1000, 800], [0, 800]], 0, 0)).toBe(false);
+  });
+});
+
 describe("isValidCropShape — the DB-row reader's guard against a malformed crop reaching render", () => {
   it("null is always valid (full image)", () => {
     expect(isValidCropShape(null)).toBe(true);
@@ -235,6 +280,25 @@ describe("normalizeCropShape — dispatches by kind and stamps the discriminator
   });
   it("null in, null out", () => {
     expect(normalizeCropShape(null, 1000, 800)).toBe(null);
+  });
+
+  it("NEW-3 (2026-09-22 live test): preserves a dormant rect alongside an active polygon (the write path must not strip what ImageCropTool already carried forward)", () => {
+    const pts = [[100, 100], [400, 100], [250, 400]];
+    expect(normalizeCropShape({ kind: "poly", pts, x: 10, y: 10, w: 500, h: 400 }, 1000, 800))
+      .toEqual({ kind: "poly", pts, x: 10, y: 10, w: 500, h: 400 });
+  });
+  it("NEW-3: preserves a dormant polygon alongside an active rect", () => {
+    const pts = [[100, 100], [400, 100], [250, 400]];
+    expect(normalizeCropShape({ kind: "rect", x: 10, y: 10, w: 500, h: 400, pts }, 1000, 800))
+      .toEqual({ kind: "rect", x: 10, y: 10, w: 500, h: 400, pts });
+  });
+  it("NEW-3: a full-page rect with a dormant polygon falls back to the polygon, rather than discarding everything", () => {
+    const pts = [[100, 100], [400, 100], [250, 400]];
+    expect(normalizeCropShape({ kind: "rect", x: 0, y: 0, w: 1000, h: 800, pts }, 1000, 800))
+      .toEqual({ kind: "poly", pts });
+  });
+  it("NEW-3: a plain crop with neither dormant field behaves exactly as before (no regression)", () => {
+    expect(normalizeCropShape({ x: 10, y: 10, w: 500, h: 400 }, 1000, 800)).toEqual({ kind: "rect", x: 10, y: 10, w: 500, h: 400 });
   });
 });
 

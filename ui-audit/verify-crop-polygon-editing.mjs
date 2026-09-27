@@ -135,9 +135,12 @@ check("Crop… opens the tool on the real sheet", (await d.count()) === 1);
     viewportBox.w >= 700 && viewportBox.h >= 500, JSON.stringify(viewportBox));
 }
 
+// NEW-4 (2026-09-22 live test) — this overlay was just uploaded and has no crop at all yet, so
+// Polygon mode now opens ready to draw directly (no pre-seeded closed quad to clear first).
 await d.locator("button", { hasText: "Polygon" }).click();
-await d.locator("button", { hasText: "Clear polygon" }).click();
 await page.waitForTimeout(150);
+check("[setup] Polygon on a freshly uploaded overlay opens with Clear polygon already disabled (nothing to clear)",
+  await d.locator("button", { hasText: "Clear polygon" }).isDisabled());
 
 /* ---- helpers ------------------------------------------------------------------------------------ */
 const doFit = async () => { await d.locator('[data-testid="crop-zoom-fit"]').click(); await page.waitForTimeout(150); };
@@ -371,11 +374,93 @@ await page.waitForTimeout(300);
 const afterRoundTrip = await storedCrop();
 check("the poly crop survives a Rectangle<->Polygon round trip unchanged", !!(afterRoundTrip && afterRoundTrip.kind === "poly" && afterRoundTrip.pts.length === 6));
 
+/* ---- NEW-3 (2026-09-22 live test) — switching shapes ACROSS A SAVE must not destroy the other
+ * shape's last value. The block above only proves same-session recovery (no Done pressed on the
+ * OTHER shape in between); this is the actual reported repro: switch to Rectangle, press Done,
+ * reopen, switch back to Polygon, and the original hand-traced polygon must still be there. -------- */
+{
+  // Case A: switch to Rectangle and press Done with NO rect ever drawn — before this fix, that
+  // unconditionally wrote crop:null, destroying the polygon. The rect draft defaults to the full
+  // image (a no-op crop), so committing it with nothing drawn is correctly a no-op too: the
+  // original polygon is left in place rather than replaced with nothing.
+  await page.locator(`[data-testid="overlay-crop-${ov.id}"] [data-testid="overlay-crop-open"]`).click();
+  await page.waitForTimeout(500);
+  await d.locator("button", { hasText: "Rectangle" }).click();
+  await page.waitForTimeout(150);
+  await d.locator("button", { hasText: "Done" }).click();
+  await page.waitForTimeout(300);
+  const afterBareSwitch = await storedCrop();
+  check("switching to Rectangle and pressing Done with no rect drawn no longer destroys the polygon",
+    !!(afterBareSwitch && afterBareSwitch.kind === "poly" && afterBareSwitch.pts.length === 6), JSON.stringify(afterBareSwitch));
+}
+{
+  // Case B: actually DRAW a real rect (drag the full-page draft smaller) and save it — proves the
+  // polygon survives as a DORMANT field across a genuine rect commit, not just a no-op one.
+  await page.locator(`[data-testid="overlay-crop-${ov.id}"] [data-testid="overlay-crop-open"]`).click();
+  await page.waitForTimeout(500);
+  await d.locator("button", { hasText: "Rectangle" }).click();
+  await page.waitForTimeout(150);
+  await doFit();
+  const rib = await imgBox();
+  const dragFrom = { x: rib.x + rib.width * 0.5, y: rib.y + rib.height * 0.5 };
+  await page.mouse.move(dragFrom.x, dragFrom.y);
+  await page.mouse.down();
+  await page.mouse.move(dragFrom.x + rib.width * 0.3, dragFrom.y + rib.height * 0.3, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(150);
+  check("[setup] the rect draft is no longer the full page after dragging it", await d.locator("button", { hasText: "Reset to full page" }).isEnabled());
+  await d.locator("button", { hasText: "Done" }).click();
+  await page.waitForTimeout(300);
+  const afterRealRectSave = await storedCrop();
+  check("drawing and saving a REAL rectangle commits kind:'rect'", !!(afterRealRectSave && afterRealRectSave.kind === "rect"), JSON.stringify(afterRealRectSave));
+  check("…and still carries the polygon forward as a dormant field, rather than discarding it",
+    !!(afterRealRectSave && Array.isArray(afterRealRectSave.pts) && afterRealRectSave.pts.length === 6), JSON.stringify(afterRealRectSave));
+
+  await page.locator(`[data-testid="overlay-crop-${ov.id}"] [data-testid="overlay-crop-open"]`).click();
+  await page.waitForTimeout(500);
+  await d.locator("button", { hasText: "Polygon", exact: true }).click();
+  await page.waitForTimeout(150);
+  check("reopening and switching to Polygon AFTER a real Rectangle SAVE recovers the exact 6-vertex trace (not a fresh 4-corner bbox quad)",
+    (await vertexCount()) === 6, `circles=${await vertexCount()}`);
+  await d.locator("button", { hasText: "Done" }).click();
+  await page.waitForTimeout(300);
+  const afterPolySaveAgain = await storedCrop();
+  check("saving Polygon again still commits the recovered 6-vertex shape", !!(afterPolySaveAgain && afterPolySaveAgain.kind === "poly" && afterPolySaveAgain.pts.length === 6));
+}
+
 /* ---- reset to the full sheet --------------------------------------------------------------------- */
 await page.locator(`[data-testid="overlay-crop-${ov.id}"] [data-testid="overlay-crop-reset"]`).click();
 await page.waitForTimeout(300);
 const afterReset = await storedCrop();
 check("Reset returns the full, uncropped sheet", afterReset === null);
+
+/* ---- NEW-4 (2026-09-22 live test) — with the overlay genuinely uncropped, Polygon mode must open
+ * ready to draw (not a closed full-frame quad whose interior swallows the first several clicks). -- */
+await page.locator(`[data-testid="overlay-crop-${ov.id}"] [data-testid="overlay-crop-open"]`).click();
+await page.waitForTimeout(500);
+await d.locator("button", { hasText: "Polygon", exact: true }).click();
+await page.waitForTimeout(150);
+check("Polygon mode on a genuinely uncropped overlay opens with ZERO vertices (no pre-seeded closed quad)",
+  (await d.locator("svg circle").count()) === 0, `circles=${await d.locator("svg circle").count()}`);
+await doFit();
+box = await imgBox();
+{ const p = at(0.2, 0.2); await page.mouse.click(p.x, p.y); await page.waitForTimeout(150); }
+check("the FIRST click after entering Polygon on an uncropped plan places a real vertex 1 (not swallowed)",
+  (await d.locator("svg circle").count()) === 1, `circles=${await d.locator("svg circle").count()}`);
+
+/* ---- NEW-4: Polygon's own "Reset to full page" (distinct from "Clear polygon") saves crop null,
+ * exactly like Rectangle's ------------------------------------------------------------------------- */
+await d.locator("button", { hasText: "Clear polygon" }).click(); // drop the one leftover point from the check above
+await page.waitForTimeout(150);
+for (const [fx, fy] of [[0.3, 0.3], [0.7, 0.3], [0.7, 0.7]]) { const p = at(fx, fy); await page.mouse.click(p.x, p.y); await page.waitForTimeout(80); }
+{ const p = at(0.3, 0.3); await page.mouse.click(p.x, p.y); await page.waitForTimeout(150); } // close on the first vertex
+check("[setup] a real 3-vertex polygon drawn and closed", (await vertexCount()) === 3, `count=${await vertexCount()}`);
+await d.locator("button", { hasText: "Reset to full page" }).click();
+await page.waitForTimeout(150);
+await d.locator("button", { hasText: "Done" }).click();
+await page.waitForTimeout(300);
+const afterPolyFullReset = await storedCrop();
+check("Polygon mode's own 'Reset to full page' saves crop null, exactly like Rectangle's", afterPolyFullReset === null, JSON.stringify(afterPolyFullReset));
 
 /* ---- 8b. the dialog stays fully reachable on a short/narrow viewport (a laptop, not a monitor) --- */
 {

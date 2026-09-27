@@ -702,11 +702,28 @@ describe("comps: create/edit validation", () => {
     expect(validateComp({ compType: "land", compDate: null, anchor: { kind: "pin", lat: 1, lon: 1 } })).toEqual([]);
   });
 
-  it("B843664: OpEx is never required — blank, absent, or present, a lease comp with type+anchor always validates clean", () => {
-    const base = { compType: "lease", compDate: "2026-08-01", anchor: { kind: "pin", lat: 1, lon: 1 } };
+  it("B843664: OpEx is never required — blank, absent, or present, a lease comp with type+anchor+period always validates clean", () => {
+    const base = { compType: "lease", compDate: "2026-08-01", anchor: { kind: "pin", lat: 1, lon: 1 }, leaseRatePeriod: "annual" };
     expect(validateComp(base)).toEqual([]);
     expect(validateComp({ ...base, leaseOpex: null })).toEqual([]);
     expect(validateComp({ ...base, leaseOpex: 2.5 })).toEqual([]);
+  });
+
+  it("NEW-5 (2026-09-22 live test): a Lease comp with no rent period is blocked before any insert, whether or not a rate was typed", () => {
+    const base = { compType: "lease", compDate: "2026-08-01", anchor: { kind: "pin", lat: 1, lon: 1 } };
+    expect(validateComp(base)).toEqual(["Pick a rent period (MO or YR)."]);
+    expect(validateComp({ ...base, leaseRatePeriod: "" })).toEqual(["Pick a rent period (MO or YR)."]);
+    expect(validateComp({ ...base, leaseRate: 7.5 })).toEqual(["Pick a rent period (MO or YR)."]);
+    expect(validateComp({ ...base, leaseRatePeriod: "monthly" })).toEqual([]);
+    expect(validateComp({ ...base, leaseRatePeriod: "annual" })).toEqual([]);
+    // A non-lease comp never needs a rent period at all.
+    expect(validateComp({ compType: "land", compDate: "2026-08-01", anchor: { kind: "pin", lat: 1, lon: 1 } })).toEqual([]);
+  });
+
+  it("NEW-5 (2026-09-22 live test): draftToComp never forwards an empty-string rent period — it becomes null for every comp type", () => {
+    expect(draftToComp({ compType: "land", leaseRatePeriod: "" }).leaseRatePeriod).toBeNull();
+    expect(draftToComp({ compType: "lease", leaseRatePeriod: "" }).leaseRatePeriod).toBeNull();
+    expect(draftToComp({ compType: "lease", leaseRatePeriod: "monthly" }).leaseRatePeriod).toBe("monthly");
   });
 });
 

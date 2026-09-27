@@ -37,6 +37,20 @@ export async function fetchDeletedOverlays() {
   return { data: data || [], error: null };
 }
 
+/** How many LIVE (non-deleted) overlays still point at a given owning site (project_id) — mirrors
+ * comps/lib/compsStore.js's countLiveCompsForProject exactly, used by the same "is the tracked
+ * site this plan/comp minted now orphaned" tidy-up on the overlay side (SitePlansSection.jsx's
+ * remove/purgeForever). RLS-scoped like every other read here, so a teammate's own overlay
+ * outside this user's visibility is invisible to this count too — best-effort, never a global
+ * truth. Returns 0 on any read failure rather than throwing, since the caller treats "0
+ * remaining" and "couldn't tell" the same way (skip). */
+export async function countLiveOverlaysForProject(projectId) {
+  if (!supabase || !projectId) return 0;
+  const { count, error } = await supabase.from(TABLE).select("id", { count: "exact", head: true }).eq("project_id", projectId).is("deleted_at", null);
+  if (error) return 0;
+  return count || 0;
+}
+
 export async function insertOverlay(overlay) {
   if (!supabase) return { data: null, error: new Error("Supabase not configured") };
   const { data: auth } = await supabase.auth.getUser();

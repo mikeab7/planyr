@@ -905,6 +905,13 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   // reach SitePlansSection's upload flow the same way `commitPlacementRef`/`dropIntakeRef` do.
   const [focusedComp, setFocusedComp] = useState(null);
   const startOverlayUploadRef = useRef(null);
+  // NEW-6 (bug fix, 2026-09-27) — "+ Site plan" → "Place on map" with no project chosen used to
+  // mint a tracked ("market record") site asynchronously with nothing here ever learning its id,
+  // so the Records rail never focused the just-placed plan's own card (its "Adjust" reachable
+  // only) unless a comp on the same parcel happened to get logged too. SitePlansSection now
+  // resolves that id synchronously and reports it here via `onOverlayProjectResolved`; a comp's
+  // own `focusedComp.projectId` still wins whenever one is open.
+  const [focusedTrackedProjectId, setFocusedTrackedProjectId] = useState(null);
 
   // Bumped whenever a placement commit recomputes pinned comps' positions (B972512-HARDENING
   // item 1), so the open comps panel/map markers refetch immediately instead of waiting for its
@@ -4919,9 +4926,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                     rasterFailedIds={rasterFailedIds}
                     zoomBelowGate={zoom != null && zoom < SITE_PLAN_MIN_ZOOM}
                     onZoomToOverlay={zoomToOverlay}
-                    focusedProjectId={focusedComp?.projectId ?? null}
+                    focusedProjectId={focusedComp?.projectId ?? focusedTrackedProjectId ?? null}
                     focusedCompId={focusedComp?.id ?? null}
                     onStartPinExistingComp={pinExistingCompOnOverlay}
+                    onOverlayProjectResolved={setFocusedTrackedProjectId}
                     startUploadRef={startOverlayUploadRef}
                     mapHostRef={mapHostRef}
                     onAdjustOpenChange={setSitePlanAdjustOpen}
