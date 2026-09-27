@@ -1,3 +1,19 @@
+### V1367776 — B1928816: a brand-new Notes page's first box keeps every character typed, on the real `planyr.io` deploy ✅ **PASSED 2026-09-27 — self-verified via WebKit against real production `planyr.io`, commit `26471ea4b` (PR #1860's own merge commit)**
+
+**Why this needed its own live pass.** Timing/race bugs are a mandatory LIVE-VERIFY class per `CLAUDE.md` — the mechanism (a `requestAnimationFrame`-deferred `view.focus()` racing the next real keystroke) was fully proven and fixed against a locally-built preview server in the same session, including a forced, deterministic reproduction (delaying `requestAnimationFrame` to simulate a busier real tab) that went red on unmodified code and green after the fix. What that alone could not confirm is that the same fix behaves identically on the actual deployed Cloudflare Pages bundle. No named `Blocker:` applied — the mechanism needs no sign-in and no external GIS host, only a deploy to exist, so this session closed it directly once the merge went live rather than leaving it parked.
+
+**Deploy confirmed before measuring.** `GET /repos/mikeab7/planyr/commits/26471ea4b.../check-runs` showed the "Cloudflare Pages" check `completed`/`success` for this PR's own merge commit before any live check ran.
+
+**Method.** `webkit.launch({ proxy: { server: process.env.HTTPS_PROXY }, ... })` against `https://planyr.io` (Chromium's TLS handshake fails against external hosts from this sandbox; WebKit's does not — see this file's own standing note), logged out, real trusted mouse/keyboard input (`page.mouse.dblclick` + `page.keyboard.type`), run twice: once with no artificial delay, once with `window.requestAnimationFrame` monkey-patched to add a 500ms delay (the same forced-race technique the sandbox harness — `ui-audit/verify-notes-in-sheet-placement.mjs` §20 — uses, reproduced here against the real deployed bundle rather than a local preview build).
+
+**Result (both runs, same observation as the served chunk hashes below):**
+1. Deploy check: **PASS** — `Cloudflare Pages: completed/success` for commit `26471ea4b8a12504bc5ecca35f64a898a62781e5`.
+2. New page → double-click → type "DELTA" immediately, no forced delay: **PASS** — box holds `"DELTA"` in full. Served chunks: `assets/Notes-mzqJ7iKK.js`, `assets/NoteEditor-B7eyQcVQ.js`.
+3. Same gesture with `requestAnimationFrame` delayed 500ms (the condition that reliably reproduced the bug against unmodified code in the sandbox): **PASS** — box still holds `"DELTA"` in full, same served chunk hashes as step 2 (confirming both runs hit the same deployed build, not a stale cached tab).
+4. Reload: **PASS** — both boxes ("DELTA" and a second box, "CHARLIE," placed to also confirm no regression) survive in full: `["DELTA","CHARLIE"]`.
+
+**Observed result: the fix holds on the real production deploy, under both the ordinary case and the forced race that reproduced the defect pre-fix — no residual pending.** Moved straight to Done. See `docs/archive/BACKLOG-DONE.md`'s **B1928816** for the shipped change and the sandbox-side red/green proof.
+
 ### V1339792 — B1874896: Site Analysis "Activate layer" toggle relabel — GIS overlay wiring re-verified live ✅ **PASSED 2026-09-24 — self-verified headless Chromium against real GIS endpoints**
 
 **Added** 2026-09-24 · **Cadence** once (feature acceptance) · **Method:** `node ui-audit/verify-analysis.mjs` + `node ui-audit/verify-road-authority.mjs` against a local `vite preview` build, headless Chromium.
