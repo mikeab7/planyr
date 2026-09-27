@@ -5,7 +5,7 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-09-26._
+_Last updated: 2026-09-27._
 
 ## 🧮 One database script to run so your new Organization Spreadsheet saves to the cloud (B1912208)
 
@@ -905,6 +905,28 @@ a look-ahead at what that study will produce, clearly labelled as screening and 
       Pick one: **(a)** keep the loop hunting (deeper/focused laps); **(b)** pivot to a roadmap feature (e.g. GIS layer
       caching — the documented Track-1 next item); **(c)** wind the loop down for now. Default until he says: **(a) keep
       hunting** at a focused, lower-cadence pace.
+
+## Run this SQL (one-click in Supabase) — marks your old schedule backup as "retired" (B1927953)
+
+> **Background, so this makes sense.** A while back your Schedule module moved from storing your whole
+> account's schedules in one big file to storing each schedule as its own row — that's already done and
+> working, it's what powers the Schedule tab and the Reports tab today. The OLD big file didn't get
+> deleted — on purpose, as a safety copy — it's just sitting there unused, frozen at whatever it looked
+> like the moment of the switch (2026-09-25). I found that a couple of OTHER things in the app (your
+> Dashboard's schedule cards, and the connector that lets an AI assistant look up your project info) were
+> still quietly reading that OLD frozen copy instead of the current one — I already fixed both of those
+> this session, so this part is done and nothing more is needed there.
+>
+> **What this script does:** it stamps that old frozen copy with a note saying "retired, use the new
+> rows instead" and the date. It does **not delete anything** — your old backup stays exactly where it
+> is, still restorable if it's ever needed. This is just a label, so if anything else ever tries to read
+> that old file by mistake in the future, it gets a clear signal instead of quietly showing stale numbers
+> like the two things I just fixed did.
+> - [ ] **Run the file I'm sending you** (`retire-old-schedule-backup.sql`) in Supabase → SQL Editor →
+>       paste the whole thing in → Run. Safe to run more than once — it does nothing the second time.
+> - **Nothing is broken today and nothing is urgent** — this is a safety label, not a bug fix. I didn't
+>   run it myself this session because I was told to make no changes to your account's data this round;
+>   it's entirely optional and can wait as long as you like, or a future session can run it for you.
 
 ## Run this SQL (one-click in Supabase) — closes Team-sharing security gaps
 > **All for the main app project `lyeqzkuiwngunutlkkmi`; safe + idempotent (just re-run the whole file). These

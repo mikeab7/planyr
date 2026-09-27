@@ -260,6 +260,10 @@ commit;
 --   2. Compare public.schedules_recompose_to_planar_data(p_user_id) against the live
 --      planar_data.value for that user (minus __rev) -- must be jsonb-equal.
 --   3. update public.schedule_account_index set rows_authoritative = true where user_id = p_user_id;
+--   4. (B1927952, schedules_blob_retirement_stamp.sql) select
+--      public.schedules_stamp_retired_blob('<user_id>'::uuid);   -- marks the now-retired blob
+--      _retiredAt/_supersededBy so a stray direct reader gets a loud signal instead of a
+--      plausible-looking stale snapshot. Never removes the row -- see that file's own header.
 --
 -- HOW TO ROLL AN ACCOUNT BACK:
 --   select public.schedules_rollback_to_blob('<user_id>'::uuid);

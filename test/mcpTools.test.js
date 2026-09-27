@@ -33,6 +33,12 @@ const SCHED = [{ value: { __rev: 4, projects: {
   9: { id: 9, name: "Kilgore", tasks: [] },
 } } }];
 
+// B1927952 (NEW-2) — the account-index row that decides whether fetchScheduleData reads
+// public.schedules instead of the retired planar_data blob. Every existing test in this file
+// (written before this item) implicitly assumes the un-flipped/blob path, so this defaults to
+// `rows_authoritative: false` — tests that need the flipped path pass their own override.
+const SCHEDULE_ACCOUNT_INDEX_UNFLIPPED = [{ rows_authoritative: false }];
+
 /** URL-substring router that also RECORDS every (url, method) for the invariant test. */
 function makeFetch(overrides = {}) {
   const calls = [];
@@ -43,6 +49,8 @@ function makeFetch(overrides = {}) {
     }
     const u = String(url);
     const ok = (body) => new Response(JSON.stringify(body), { status: 200 });
+    if (u.includes("schedule_account_index")) return ok(SCHEDULE_ACCOUNT_INDEX_UNFLIPPED);
+    if (u.includes("/rest/v1/schedules")) return ok([]); // only reached on a flipped account; overridden per-test
     if (u.includes("planar_data")) return ok(SCHED);
     if (u.includes("/rest/v1/sites")) {
       // NB: match ?id= / &id= / group_id= precisely — a bare "id=eq." also hits "user_id=eq."
@@ -185,6 +193,69 @@ describe("get_site_layout / get_schedule", () => {
     vi.stubGlobal("fetch", makeFetch());
     const out = parse(await callTool(ENV, { name: "get_schedule", arguments: { project: "nope" } }));
     expect(out.availableSchedules).toContainEqual({ id: 9, name: "Kilgore" });
+  });
+});
+
+// B1927952 (NEW-2) — RED-PROOF: on a flipped account, fetchScheduleData must read
+// public.schedules, never the retired planar_data blob (SCHED above), even though both tables
+// are populated in these fixtures on purpose — a route that silently kept reading the blob would
+// pass every OTHER test in this file (they never flip the account) and only show up here.
+describe("get_schedule — rows-authoritative account (B1927952)", () => {
+  const SCHEDULES_ROWS = [
+    { id: 3, deleted_at: null, data: { id: 3, name: "Goose Creek", tasks: [
+      { id: 1, name: "Grading", start: "2026-05-01", end: "2026-06-01", duration: 31, health: "green", percentComplete: 100, parentId: null, predecessors: [] },
+      { id: 2, name: "Utilities", start: "2026-06-02", end: "2026-06-25", duration: 23, health: "red", percentComplete: 40, parentId: 1, predecessors: [1] },
+      { id: 3, name: "Paving", start: "2026-08-01", end: "2026-09-01", duration: 31, health: "gray", percentComplete: 0, parentId: null, predecessors: [{ id: 2, type: "FS", lag: 0 }] },
+      // The ROWS' own extra task — absent from the blob (SCHED) above. Its presence in the
+      // result is what proves rows, not the blob, were read.
+      { id: 4, name: "Landscaping (rows-only)", start: "2026-09-02", end: "2026-09-10", duration: 8, health: "gray", percentComplete: 0, parentId: null, predecessors: [] },
+    ] } },
+    // A soft-deleted schedule that must never resurface.
+    { id: 31, deleted_at: "2026-09-25T17:58:00Z", data: { id: 31, name: "Operations (Copy)", tasks: [] } },
+  ];
+
+  function makeFlippedFetch(overrides = {}) {
+    return makeFetch({
+      schedule_account_index: () => new Response(JSON.stringify([{ rows_authoritative: true }]), { status: 200 }),
+      // Mirrors the real PostgREST `deleted_at=is.null` filter the fix always sends — the stub
+      // is URL-substring routed and doesn't parse query params, so it applies the same filter
+      // the real server would, rather than trusting the code under test to re-filter client-side
+      // (it deliberately doesn't, same as every other pgGet call in this module).
+      "/rest/v1/schedules": () => new Response(JSON.stringify(SCHEDULES_ROWS.filter((r) => !r.deleted_at)), { status: 200 }),
+      ...overrides,
+    });
+  }
+
+  it("RED-PROOF: reads public.schedules, not the planar_data blob — the rows-only task is present", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-15T00:00:00Z"));
+    vi.stubGlobal("fetch", makeFlippedFetch());
+    let out;
+    try {
+      out = parse(await callTool(ENV, { name: "get_schedule", arguments: { project: "goose" } }));
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(out.taskCount).toBe(4); // blob (SCHED) only has 3 — 4 proves the rows were read
+    expect(out.tasks.map((t) => t.name)).toContain("Landscaping (rows-only)");
+  });
+
+  it("a soft-deleted schedule (id 31, 'Operations (Copy)') never appears as an available schedule", async () => {
+    vi.stubGlobal("fetch", makeFlippedFetch());
+    const out = parse(await callTool(ENV, { name: "get_schedule", arguments: { project: "nope" } }));
+    expect(out.availableSchedules.map((s) => s.id)).toEqual([3]);
+  });
+
+  it("zero live schedules on a flipped account → an empty, not a crashing, availableSchedules list", async () => {
+    vi.stubGlobal("fetch", makeFlippedFetch({ "/rest/v1/schedules": () => new Response(JSON.stringify([]), { status: 200 }) }));
+    const out = parse(await callTool(ENV, { name: "get_schedule", arguments: { project: "anything" } }));
+    expect(out.availableSchedules).toEqual([]);
+  });
+
+  it("an un-flipped account (the default stub) still reads the blob, unaffected by this fix", async () => {
+    vi.stubGlobal("fetch", makeFetch());
+    const out = parse(await callTool(ENV, { name: "get_schedule", arguments: { project: "kilgore" } }));
+    expect(out).toMatchObject({ id: 9, name: "Kilgore", taskCount: 0 }); // only exists in the blob (SCHED)
   });
 });
 
