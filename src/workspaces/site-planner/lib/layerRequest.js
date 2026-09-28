@@ -197,7 +197,12 @@ export function wireRasterStatus(layer, {
   const origOnRemove = layer.onRemove;
   layer.onRemove = function (m) { clearStall(); if (origOnRemove) return origOnRemove.call(this, m); };
   // 'load' = the export <img> landed → loaded; ask the proxy how old the served copy is.
-  layer.on("load", () => { settled = true; clearStall(); onStatus(k, "loaded"); if (proxy) reportAge(); });
+  // ⛔ B1933584 — gated on isActive() like every other late-arriving callback in this function
+  // (the stall watchdog above, the requesterror handler below). Without it, an export request still
+  // in flight when the layer is toggled off/released reports "loaded" for a layer that no longer
+  // exists the moment its underlying <img> finishes downloading — a LOUD-FAILURE violation (a
+  // status claiming a torn-down layer is live) this was the one exception to.
+  layer.on("load", () => { if (!isActive()) return; settled = true; clearStall(); onStatus(k, "loaded"); if (proxy) reportAge(); });
   // esri-leaflet re-fires 'loading' when it re-requests (pan/zoom); re-arm the watchdog and drop
   // back to neutral "loading" so a stale "slow" can clear itself once the source recovers.
   layer.on("loading", () => { settled = false; onStatus(k, "loading"); armStall(); });

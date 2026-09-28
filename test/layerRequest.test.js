@@ -185,6 +185,33 @@ describe("wireRasterStatus — never a false 'loaded'; honest 'slow' on a silent
     expect(onStatus.states()).not.toContain("slow");
   });
 
+  /* ⛔ B1933584 — the CONFIRMED defect: unlike the watchdog above and the requesterror handler
+   * below, 'load' never checked isActive() at all. An export request still in flight when a layer
+   * is toggled off/released still reports "loaded" the moment its underlying <img> finishes
+   * downloading — a LOUD-FAILURE violation (a status claiming a torn-down layer is live), and the
+   * one inconsistency in an otherwise fully-gated function. */
+  it("⛔ a 'load' arriving after the layer is no longer active must NOT report 'loaded'", () => {
+    const l = fakeLayer(); const t = fakeTimers(); const onStatus = statusSpy();
+    wireRasterStatus(l, { k: "fema", label: "FEMA", onStatus, isActive: () => false, setTimer: t.setTimer, clearTimer: t.clearTimer });
+    l.emit("load");
+    expect(onStatus.states()).not.toContain("loaded");
+  });
+
+  it("a 'load' while still active still reports 'loaded' — the isActive gate doesn't break the honest case", () => {
+    const l = fakeLayer(); const t = fakeTimers(); const onStatus = statusSpy();
+    wireRasterStatus(l, { k: "fema", label: "FEMA", onStatus, isActive: () => true, setTimer: t.setTimer, clearTimer: t.clearTimer });
+    l.emit("load");
+    expect(onStatus.states()).toContain("loaded");
+  });
+
+  it("a 'load' while active reports the age on a PROXY layer too, unaffected by the isActive gate", () => {
+    let ages = 0;
+    const l = fakeLayer(); const t = fakeTimers();
+    wireRasterStatus(l, { k: "fema", label: "FEMA", proxy: true, isActive: () => true, onStatus: statusSpy(), reportAge: () => { ages += 1; }, setTimer: t.setTimer, clearTimer: t.clearTimer });
+    l.emit("load");
+    expect(ages).toBe(1);
+  });
+
   it("RASTER_STALL_MS is a sane, generous default (well past a healthy load, under a minute)", () => {
     expect(RASTER_STALL_MS).toBeGreaterThanOrEqual(8000);
     expect(RASTER_STALL_MS).toBeLessThanOrEqual(60000);
