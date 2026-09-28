@@ -1336,6 +1336,31 @@ const layerBands = (refs) => {
   return m;
 };
 
+/* NEW-1 (B1933584) — the ONE way to actually tear down whatever an overlay ref holds. A
+ * role-split layer's ref (`rasterComposite`, above) is a plain `{__pfParts, setOpacity}` object —
+ * it is NOT a Leaflet layer, has no `_map`/`_currentImage`/`eachLayer` of its own, and
+ * `tileLifecycle.releaseLayer(map, composite)` is a silent no-op on it: `map.removeLayer` returns
+ * immediately (the composite was never itself added to `map._layers`), so the composite's two REAL
+ * esri-leaflet layers stay fully attached to the map — still bound to `moveend`, still painting —
+ * with nothing left anywhere that references them.
+ *
+ * `syncOverlayLayers`'s own toggle-off path always unwrapped `__pfParts` before this existed as a
+ * named export (see the `release` helper below, which now just calls this). The bug this closes is
+ * a SECOND caller that held one of these refs across its own surface's lifecycle and skipped that
+ * unwrap: `MapFinder.jsx`'s "give memory back while the Map view is hidden" effect called
+ * `tileLifecycle.releaseLayer` directly on `overlayRefs.current[key]`, so a role-split layer (FEMA,
+ * BKDD's two role-split rows) switched ON, then hidden by a view switch, left its two real layers
+ * silently attached forever — invisible while the map is genuinely `display:none`, but with their
+ * `moveend`/`_update` wiring intact, so returning to the Map view and panning/zooming (crossing
+ * FEMA's own street-level scale gate, for instance) paints them again with no tracked ref anywhere,
+ * checkbox unchecked or not. Any caller that owns one of these refs across a lifecycle boundary of
+ * its own — not just `syncOverlayLayers`'s internal toggle-off — must release it through here. */
+export function releaseOverlayRef(map, lyr) {
+  if (!lyr || lyr === "pending") return;
+  if (lyr.__pfParts) lyr.__pfParts.forEach((p) => { if (p) releaseLayer(map, p); });
+  else releaseLayer(map, lyr);
+}
+
 export function syncOverlayLayers(map, overlays, refs, opts = {}) {
   /* NEW-1 — panes come from the STACKING MODEL (lib/mapStack.js), not from a caller's
    * preference. `panes` names the host pane per band; a surface with no site elements (the
@@ -1396,10 +1421,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
    * A build still "pending" has no layer yet: clearing the slot IS its abort, because every async
    * branch re-checks `refs[k] === "pending"` before it adds. */
   const release = (k, lyr) => {
-    if (lyr && lyr !== "pending") {
-      if (lyr.__pfParts) lyr.__pfParts.forEach((p) => { if (p) releaseLayer(map, p); });
-      else releaseLayer(map, lyr);
-    }
+    releaseOverlayRef(map, lyr);
     refs[k] = null;
     delete bands[k];
     onStatus && onStatus(k, null);

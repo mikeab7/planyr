@@ -10,10 +10,11 @@ import {
 } from "./lib/locateMe.js";
 import { ensureSnapshot, getSnapshot, snapshotVintage, onSnapshotChange, featureAtPoint, preferSnapshotForDisplay } from "./lib/parcelSnapshot.js";
 import { recordSourceResult, filterHealthyCandidates, isSourceOpen, isStatewideBackup, suppressRedundantStatewide } from "./lib/sourceHealth.js";
-import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService } from "./lib/layers.js";
+import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, releaseOverlayRef } from "./lib/layers.js";
+import { isDiagArmed } from "./lib/diagArm.js";
 import { PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL } from "./lib/mapStack.js";
 import { tileCacheLimit } from "./lib/tileBudget.js";
-import { boundTileCache, capTileCache, releaseLayer, armBlankTileHeal } from "./lib/tileLifecycle.js";
+import { boundTileCache, capTileCache, armBlankTileHeal } from "./lib/tileLifecycle.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { BASEMAPS, FINDER_BASEMAP_CHOICES } from "./lib/basemaps.js";
 // B427410 (×2) — the ONE gate for the "Road names" overlay below, shared with LayerPanel's
@@ -2344,9 +2345,17 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
      eviction with no visual consequence: the two basemap layers are squeezed to a token ceiling
      (a hidden map needs no look-ahead ring), and every esri raster OVERLAY this map holds — a
      DUPLICATE set of the planner's, each keeping a painted full-viewport <img> alive — is torn
-     down through the same `releaseLayer` the planner uses at toggle-off. `syncOverlayLayers`
-     rebuilds whatever is still enabled on the way back in (the sync effect above re-runs on
-     `visible`), so nothing is lost and no quality changes; the tiles simply re-fetch. */
+     down through `releaseOverlayRef` (layers.js), the SAME composite-aware teardown
+     `syncOverlayLayers` uses at toggle-off. `syncOverlayLayers` rebuilds whatever is still enabled
+     on the way back in (the sync effect above re-runs on `visible`), so nothing is lost and no
+     quality changes; the tiles simply re-fetch.
+     ⛔ B1933584 — this used to call `tileLifecycle.releaseLayer` DIRECTLY on `overlayRefs.current[key]`,
+     which is a no-op for a role-split layer's ref (a plain `{__pfParts, setOpacity}` object, not a
+     Leaflet layer — see `releaseOverlayRef`'s own header). FEMA (and BKDD's two role-split rows) left
+     switched ON when this map was hidden would leak their two real esri-leaflet layers, fully
+     attached and still wired to `moveend`, forever — invisible while genuinely hidden, but painting
+     again the moment the user returned to Map view and panned/zoomed past FEMA's own scale gate,
+     with the Layers-panel checkbox reading unchecked the whole time (the owner's exact report). */
   useEffect(() => {
     if (visible) return;
     const map = mapRef.current;
@@ -2357,10 +2366,53 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     for (const key of Object.keys(overlayRefs.current)) {
       const layer = overlayRefs.current[key];
       if (!layer) continue;
-      try { releaseLayer(map, layer); } catch (_) {}
+      try { releaseOverlayRef(map, layer); } catch (_) {}
       delete overlayRefs.current[key];
     }
   }, [visible]);
+
+  /* ⛔ NEW-1 (B1933584) — read-only overlay-leak diagnostic (STANDING RULE #2 disposition:
+   * "instrument it so it captures itself when he hits it"). The leak above was found by reading the
+   * source, not by reproducing it live, so the next time Michael sees a layer painting over a
+   * checkbox that reads off, THIS answers it in one console line instead of re-guessing from source
+   * again: `window.__mapOverlayAudit()`. Gated by `isDiagArmed` (armable on the real signed-in
+   * production tab via `?planyrDiag=1` or `window.__PLANYR_E2E` — see diagArm.js — never just an
+   * E2E-only flag, because the tab that needs this is his, not a headless one) so it is reachable
+   * exactly where the bug lives. Read-only: it walks the live Leaflet map and the app's own
+   * bookkeeping and reports what it finds; it changes nothing. Reports, for THIS map: which overlay
+   * keys the panel currently shows ON, which of those this surface is actually tracking a live layer
+   * for, and — the leak this exists to catch — any raster layer still attached to the map that
+   * nothing in the app's own bookkeeping points at any more, named back to its registry row by its
+   * own service URL. */
+  useEffect(() => {
+    const hook = () => {
+      if (!isDiagArmed(window)) return null;
+      const map = mapRef.current;
+      const tracked = Object.keys(overlayRefs.current || {}).filter((k) => overlayRefs.current[k]);
+      const trackedLayers = new Set();
+      const collect = (l) => { if (!l || l === "pending") return; trackedLayers.add(l); if (l.__pfParts) l.__pfParts.forEach(collect); };
+      tracked.forEach((k) => collect(overlayRefs.current[k]));
+      const orphans = [];
+      if (map && typeof map.eachLayer === "function") {
+        map.eachLayer((l) => {
+          const url = l && l.options && l.options.url;
+          if (!url || trackedLayers.has(l)) return;
+          const entry = Object.entries(ALL_LAYERS).find(([, cfg]) => cfg.url && String(url).indexOf(cfg.url) !== -1);
+          orphans.push({ key: entry ? entry[0] : null, label: entry ? entry[1].label : null, url, hasPaintedImage: !!l._currentImage });
+        });
+      }
+      return {
+        surface: "map",
+        on: Object.keys(overlays || {}).filter((k) => overlays[k] && overlays[k].on),
+        tracked,
+        pending: tracked.filter((k) => overlayRefs.current[k] === "pending"),
+        orphanCount: orphans.length,
+        orphans,
+      };
+    };
+    window.__mapOverlayAudit = hook;
+    return () => { if (window.__mapOverlayAudit === hook) window.__mapOverlayAudit = null; };
+  }, [overlays]);
 
   /* Hover identify for the RASTER-painted layers (NEW-2). The vector overlays answer a hover
      from their own features (a tooltip bound as they draw — see featureHover.js / vectorOverlay.js),

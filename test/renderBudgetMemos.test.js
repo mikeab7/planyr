@@ -273,7 +273,14 @@ describe("NEW-6 — the Map view's Leaflet map is capped like the planner's", ()
 
   it("hiding the map sheds tiles and releases the duplicate raster overlays", () => {
     expect(finder).toContain("capTileCache(layer, HIDDEN_TILE_CAP)");
-    expect(finder).toContain("releaseLayer(map, layer)");
+    // B1933584 — was the raw `tileLifecycle.releaseLayer(map, layer)`, which is a silent no-op
+    // on a role-split layer's ref (a plain `{__pfParts, setOpacity}` composite, never itself added
+    // to the map) — FEMA left ON when this map hid leaked its two real esri-leaflet layers forever,
+    // still wired to `moveend`, painting again on the next zoom with the checkbox reading OFF.
+    // `releaseOverlayRef` (layers.js) is the composite-aware fix, shared with `syncOverlayLayers`'s
+    // own toggle-off path.
+    expect(finder).not.toMatch(/\breleaseLayer\(map, layer\)/);
+    expect(finder).toContain("releaseOverlayRef(map, layer)");
     expect(finder).toContain("delete overlayRefs.current[key];");
   });
 

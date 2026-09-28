@@ -262,13 +262,25 @@ describe("NEW-1 — layers.js honours the lift and rebuilds when it flips", () =
     // The half of a role-split layer that is not `refs[k]` must be released too, or it keeps its
     // tiles and its in-flight request (the resurrection releaseLayer exists to stop). Sharing the
     // helper is what stops the rebuild path from re-deriving that rule and getting it wrong.
+    //
+    // B1933584 — the composite-unwrap logic moved OUT of this inline closure and into the
+    // exported `releaseOverlayRef`, so a SECOND caller (MapFinder.jsx's own hidden-view teardown)
+    // can reuse the exact same rule instead of re-deriving it and getting it wrong — which is
+    // precisely what MapFinder's own copy had done (see layers.js's `releaseOverlayRef` header).
+    // This is a STRONGER form of "one release path, not two": there is now exactly one
+    // IMPLEMENTATION, shared across TWO callers, not just one call site inside this file.
     const at = layers.indexOf("const release = (k, lyr) => {");
     expect(at, "the shared release helper is gone").toBeGreaterThan(-1);
-    const block = layers.slice(at, at + 500);
-    expect(block).toContain("__pfParts");
-    expect(block).toContain("releaseLayer");
-    expect(block).toMatch(/lyr !== "pending"/); // a pending build has no layer — clearing the slot IS its abort
+    const block = layers.slice(at, at + 200);
+    expect(block).toContain("releaseOverlayRef(map, lyr)");
     expect(block).toMatch(/delete bands\[k\]/);
+
+    const exportAt = layers.indexOf("export function releaseOverlayRef(map, lyr) {");
+    expect(exportAt, "releaseOverlayRef is gone").toBeGreaterThan(-1);
+    const exportBlock = layers.slice(exportAt, exportAt + 300);
+    expect(exportBlock).toContain("__pfParts");
+    expect(exportBlock).toContain("releaseLayer");
+    expect(exportBlock).toMatch(/lyr === "pending"/); // a pending build has no layer — clearing the slot IS its abort
     /* A CENSUS OF TEARDOWN SITES, not a style check — it goes red the moment someone adds a
      * teardown, so each one has to be a deliberate, named entry here.
      *   1. the "Show above plan" band REBUILD
