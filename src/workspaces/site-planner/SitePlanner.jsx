@@ -16179,6 +16179,32 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [planLabel, setPlanLabel] = useState(() => restored?.name || "Concept A");
   const commitSiteLabel = (v) => { const n = (v || "").trim() || "Untitled site"; setSiteLabel(n); onRenameSite?.(groupId, n); };
   const commitPlanLabel = (v) => { const n = (v || "").trim() || "Untitled plan"; setPlanLabel(n); onRenamePlan?.(siteId, n); };
+  // B1934528 — `siteLabel` is captured once at mount from `restored.site` and otherwise only
+  // moves through `commitSiteLabel` above, so a rename that lands on THIS project through any
+  // other door (the header breadcrumb renaming a project row while this plan sits in the
+  // hidden/Map mode, another tab, or a cloud pull that brings in another device's rename) left it
+  // stale for the rest of this mount — reported live: the top breadcrumb showed the new project
+  // name (it resolves live off the sites list, ProjectBreadcrumb.jsx's own `resolveCurrentName`)
+  // while Compose exhibit's title block/header line, the PDF/PNG/KMZ filenames and the Yield
+  // panel header (all of which read this state directly) kept printing the old one.
+  // `storage.js`'s `notifySitesListChanged()` fires this SAME synthetic "planarfit:sites:v1"
+  // storage event on every rename (local or pulled from the cloud) and on every cloud pull —
+  // ProjectBreadcrumb already resyncs off it, so re-reading the group's authoritative name here
+  // (`loadSite` resolves it per plan, per `projectName.js`) is the identical answer, not a second
+  // derivation. Safe to run unconditionally: nothing in this component binds `siteLabel` to a
+  // live-typed input, so there is no in-progress edit this could ever clobber.
+  useEffect(() => {
+    if (!siteId) return;
+    const resync = () => {
+      const fresh = loadSite(siteId);
+      const name = fresh && (fresh.site || fresh.name);
+      if (!name) return;
+      setSiteLabel((prev) => (name !== prev ? name : prev));
+    };
+    const onStorage = (e) => { if (!e.key || e.key.startsWith("planarfit:sites")) resync(); };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [siteId]);
   const siteName = `${siteLabel} · ${planLabel}`; // used for export filenames / print header
   /* Keep the save metadata current (so the first non-blank save is fully formed).
    * NEW-1 — assigned during RENDER, not in a passive effect, and `origin` reads the live STATE
@@ -16549,8 +16575,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // `doPrint`'s 7th argument (the "Stats band" toggle) never reached the actual PDF even though
   // the live compose PREVIEW (a separate, direct `buildComposedSheet` call) honored it — a real
   // pre-existing bug, found and fixed incidentally while adding the 8th (Fit-to-frame page).
-  const exportPDF = (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null) =>
-    withExportSheet((x) => x.exportPDF(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride));
+  const exportPDF = (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true) =>
+    withExportSheet((x) => x.exportPDF(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride, includeBuildingsTable));
 
   /* ------------ export frame geometry (stays here — the print-frame drag reads it) ----
      devExtent also seeds the initial print crop, so it can't live in the lazy chunk. */
@@ -16729,6 +16755,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Gates the "Print map layers" checkbox so there's no dead control when no such layer is live.
   const mapLayersPrintable = Object.keys(ALL_LAYERS).some((id) => overlays?.[id]?.on); // B739 raster + B745 vector — any live layer prints
   const aerialAvailable = !!(origin && basemapOn) || !!mapRef; // B765985 — gates the compose screen's "Aerial imagery" toggle
+  const buildingsTablePrintable = els.some(isBuilding); // B1934529 — no dead "Buildings table" control on a plan with nothing to list
   const startPrintMove = (e) => {
     e.stopPropagation();
     const fp = p2f(e.clientX, e.clientY);
@@ -16797,6 +16824,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const composeKey = composeMode && printFrame
     ? [printPaper, printOrient, printFrame.cx, printFrame.cy, printFrame.wFt, printFrame.hFt,
       settings.showDims !== false, settings.showAreas !== false, showAerial, printOverlay, printMapLayers, settings.printPreparedBy || "", settings.printMetricsBand !== false,
+      settings.printBuildingsTable !== false,
       composePageOverride ? `${composePageOverride.w}x${composePageOverride.h}` : ""].join("|")
     : null;
   useEffect(() => {
@@ -16807,7 +16835,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       try {
         const scaleText = printScale ? scaleLabel(printScale) : "";
         const preparedBy = (settings.printPreparedBy || "").trim();
-        const composed = await withExportSheet((x) => x.buildComposedSheet(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false, composePageOverride));
+        const composed = await withExportSheet((x) => x.buildComposedSheet(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false, composePageOverride, settings.printBuildingsTable !== false));
         if (cancelled) return;
         if (!composed) { setComposePreviewUrl(null); return; }
         const url = URL.createObjectURL(new Blob([composed.sheetSvg], { type: "image/svg+xml" }));
@@ -16865,7 +16893,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     try {
       const scaleText = printScale ? scaleLabel(printScale) : "";
       const preparedBy = (settings.printPreparedBy || "").trim();
-      await exportPDF(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false, composePageOverride);
+      await exportPDF(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false, composePageOverride, settings.printBuildingsTable !== false);
       cancelPrint();
     } finally { setComposeDownloading(false); }
   };
@@ -25410,11 +25438,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           )}
 
           {/* The compose screen (B765985) — a full-screen surface, not an overlay: nothing of the
-              canvas is visible or reachable while this is up. See PrintCompose.jsx. The printed
-              buildings table (B197) — and this screen's "Buildings table" section that reviewed
-              its CLEAR/SLAB values before printing — were removed in B1804993; per-building
+              canvas is visible or reachable while this is up. See PrintCompose.jsx. The B197
+              printed buildings table — and this screen's old "Buildings table" section that
+              reviewed CLEAR/SLAB values before printing — were removed in B1804993; per-building
               overrides are still set on the building itself (Properties → Structure) or from
-              Standards → Buildings' "Defaults by building size" tier table. */}
+              Standards → Buildings' "Defaults by building size" tier table. B1934529 brought the
+              printed table back as a compact "Buildings" content toggle (default on) — a small
+              corner inset (lib/sheetFurniture.js `buildingsPlate`), never the old full-width
+              column; see buildingSfTable.js for the row values (the SAME numbers the canvas
+              labels and the Yield panel already show). */}
           {composeMode && (
             <LazyPanel name="Compose exhibit" minHeight={400} label="Loading…">
               <PrintCompose
@@ -25432,6 +25464,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 overlayPrintable={overlayPrintable} printOverlay={printOverlay} onTogglePrintOverlay={setPrintOverlay}
                 mapLayersPrintable={mapLayersPrintable} printMapLayers={printMapLayers} onToggleMapLayers={setPrintMapLayers}
                 showMetricsBand={settings.printMetricsBand !== false} onToggleMetricsBand={(v) => setSettings((s) => ({ ...s, printMetricsBand: v }))}
+                buildingsTablePrintable={buildingsTablePrintable} showBuildingsTable={settings.printBuildingsTable !== false} onToggleBuildingsTable={(v) => setSettings((s) => ({ ...s, printBuildingsTable: v }))}
                 onReposition={exitToReposition} onCancel={cancelPrint} onDownload={doPrint}
                 downloading={composeDownloading}
               />

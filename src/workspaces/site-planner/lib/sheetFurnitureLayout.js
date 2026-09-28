@@ -13,7 +13,7 @@
  * as `exportSheet.js`'s other helpers (see the site-planner folder pointer).
  * Behaviour is UNCHANGED: these are the same functions, moved.
  */
-import { furnitureMetrics, pickScaleBar, scaleBarPlate, northArrowPlate, r2 } from "./sheetFurniture.js";
+import { furnitureMetrics, pickScaleBar, scaleBarPlate, northArrowPlate, buildingsPlate, r2 } from "./sheetFurniture.js";
 
 const translate = (tx, ty, inner) => `<g transform="translate(${r2(tx)},${r2(ty)})">${inner}</g>`;
 
@@ -44,24 +44,35 @@ function cornerCost(corner, fr, pw, ph, inset, obstacles) {
 // Choose a corner for the (larger) scale bar and a DIFFERENT corner for the north
 // arrow, each minimizing overlap with plan content. Defaults to bar=br / north=tl
 // when no obstacles are given (preserves the historical layout + its tests).
-export function chooseFurnitureCorners({ x, y, w, h, inset, bar, north, obstacles }) {
+//
+// `buildings` (B1934529, optional) — the compact Buildings SF inset, placed in a THIRD corner,
+// distinct from whichever two the bar/north took, still minimizing overlap with plan content.
+// Passing it never changes the bar/north result (their own ranking is computed first, exactly as
+// before this existed) — it only ever adds a `buildings` key to the return value, so every
+// existing caller that never passes it sees byte-identical behaviour.
+export function chooseFurnitureCorners({ x, y, w, h, inset, bar, north, buildings, obstacles }) {
   const fr = { x, y, w, h };
-  if (!obstacles || !obstacles.length) {
-    return {
-      bar: { ...cornerXY("br", fr, bar.plateW, bar.plateH, inset), corner: "br" },
-      north: { ...cornerXY("tl", fr, north.plateW, north.plateH, inset), corner: "tl" },
-    };
-  }
-  const rank = (pw, ph, exclude) => CORNERS
-    .filter((c) => c !== exclude)
-    .map((c) => ({ c, cost: cornerCost(c, fr, pw, ph, inset, obstacles) }))
+  const rank = (pw, ph, excluded) => CORNERS
+    .filter((c) => !excluded.includes(c))
+    .map((c) => ({ c, cost: cornerCost(c, fr, pw, ph, inset, obstacles || []) }))
     .sort((a, b) => a.cost - b.cost);
-  const barC = rank(bar.plateW, bar.plateH, null)[0].c; // bar first — larger, harder to fit
-  const northC = rank(north.plateW, north.plateH, barC)[0].c;
-  return {
+  let barC, northC;
+  if (!obstacles || !obstacles.length) {
+    // No content to weigh — keep the historical defaults exactly as they were.
+    barC = "br"; northC = "tl";
+  } else {
+    barC = rank(bar.plateW, bar.plateH, [])[0].c; // bar first — larger, harder to fit
+    northC = rank(north.plateW, north.plateH, [barC])[0].c;
+  }
+  const result = {
     bar: { ...cornerXY(barC, fr, bar.plateW, bar.plateH, inset), corner: barC },
     north: { ...cornerXY(northC, fr, north.plateW, north.plateH, inset), corner: northC },
   };
+  if (buildings) {
+    const bldgC = rank(buildings.plateW, buildings.plateH, [barC, northC])[0].c;
+    result.buildings = { ...cornerXY(bldgC, fr, buildings.plateW, buildings.plateH, inset), corner: bldgC };
+  }
+  return result;
 }
 
 // EXPORT furniture for a frame {x,y,w,h} (export viewBox user units): a north arrow
@@ -70,7 +81,11 @@ export function chooseFurnitureCorners({ x, y, w, h, inset, bar, north, obstacle
 // labels (pass the app's f0). `obstacles` (optional) = plan-content boxes in frame
 // units. Returns geometry + markup so the safe-area / no-clip / no-occlude guarantees
 // are unit-testable.
-export function furnitureLayout({ x, y, w, h, ftPerUnit, fmtFeet, pal = {}, bearingDeg = 0, obstacles = null }) {
+// `buildingRows`/`buildingTotal` (B1934529, optional) — when `buildingRows` is a non-empty
+// array, a compact Buildings SF inset is built and placed in a third no-occlude corner; omitted
+// (or empty — a plan with no buildings) → no plate is built and `furnitureLayout` returns exactly
+// what it always has, so every existing caller is unaffected.
+export function furnitureLayout({ x, y, w, h, ftPerUnit, fmtFeet, pal = {}, bearingDeg = 0, obstacles = null, buildingRows = null, buildingTotal = 0, fmtSf }) {
   const refS = Math.min(w, h);
   // The EXPORT frame's user unit is "one foot × the live zoom", not a screen pixel — so the
   // absolute px floors are off here (NEW-1 / V481(f)). Everything the furniture draws is then
@@ -80,18 +95,23 @@ export function furnitureLayout({ x, y, w, h, ftPerUnit, fmtFeet, pal = {}, bear
   const { feet, lengthU } = pickScaleBar({ frameW: w, ftPerUnit });
   const sb = scaleBarPlate({ lengthU, feet, m, pal, fmtFeet });
   const na = northArrowPlate({ m, pal, bearingDeg });
-  const place = chooseFurnitureCorners({ x, y, w, h, inset, bar: sb, north: na, obstacles });
-  return {
+  const bp = buildingRows && buildingRows.length ? buildingsPlate({ rows: buildingRows, total: buildingTotal, m, pal, fmtSf }) : null;
+  const place = chooseFurnitureCorners({ x, y, w, h, inset, bar: sb, north: na, buildings: bp, obstacles });
+  const out = {
     refS, inset, m, feet, lengthU,
     scaleBar: { ...sb, tx: place.bar.tx, ty: place.bar.ty, corner: place.bar.corner },
     north: { ...na, arrowH: m.arrowH, tx: place.north.tx, ty: place.north.ty, corner: place.north.corner },
   };
+  if (bp) out.buildings = { ...bp, tx: place.buildings.tx, ty: place.buildings.ty, corner: place.buildings.corner };
+  return out;
 }
 
 export function buildSheetFurnitureSvg(opts) {
   const L = furnitureLayout(opts);
-  return translate(L.scaleBar.tx, L.scaleBar.ty, L.scaleBar.markup) +
+  let s = translate(L.scaleBar.tx, L.scaleBar.ty, L.scaleBar.markup) +
     translate(L.north.tx, L.north.ty, L.north.markup);
+  if (L.buildings) s += translate(L.buildings.tx, L.buildings.ty, L.buildings.markup);
+  return s;
 }
 
 // ON-SCREEN furniture for the live canvas (viewport vw×vh, user units = screen px):

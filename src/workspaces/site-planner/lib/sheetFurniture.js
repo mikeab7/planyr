@@ -152,6 +152,43 @@ export function scaleBarPlate({ lengthU, feet, m, pal = {}, fmtFeet = (n) => Str
   return { markup: s, plateW, plateH };
 }
 
+// Compact "Buildings" inset (B1934529) — one line per building plus a Total row, on the SAME
+// card look as the scale bar / north arrow plates (chromeCardColors + furnitureMetrics), sized
+// to its own content so a one-building plan gets a small card, not a fixed-width column (the
+// B1804993 full-width table this replaces). `rows`: [{ name, sf }], already in DISPLAY order;
+// `total`: the plan's whole building SF — passed in rather than summed here so the printed total
+// can never silently disagree with the number the Yield panel/canvas already agree on
+// (buildingSfTable.js is the ONE place that sums it). Returns { markup, plateW, plateH }.
+export function buildingsPlate({ rows = [], total = 0, m, pal = {}, fmtSf = (n) => Math.round(n).toLocaleString() }) {
+  const ink = pal.ink || "#2c2a26";
+  const muted = pal.muted || "#8a8473";
+  const { fill: plate, line } = chromeCardColors(pal);
+  const rowFs = m.fs * 0.92;
+  const rowH = m.fs * 1.55;
+  const rowText = (name, sf) => `${name} — ${fmtSf(sf)} SF`;
+  const lines = [...rows.map((r) => rowText(r.name, r.sf)), rowText("Total", total)];
+  const charW = rowFs * 0.6; // matches this codebase's other text-width estimates (metricsRowsFor)
+  const headerW = "BUILDINGS".length * m.unitFs * 0.72;
+  const contentW = lines.reduce((w, s) => Math.max(w, s.length * charW), headerW);
+  const plateW = contentW + 2 * m.pad;
+  const headBase = m.pad + m.unitFs;
+  let cy = headBase + rowH * 0.9;
+  let s = "";
+  rows.forEach((r) => {
+    s += `<text x="${r2(m.pad)}" y="${r2(cy)}" font-size="${r2(rowFs)}" fill="${ink}">${esc(r.name)} — <tspan font-weight="700" font-variant-numeric="tabular-nums slashed-zero">${esc(fmtSf(r.sf))} SF</tspan></text>`;
+    cy += rowH;
+  });
+  const dividerY = cy - rowH * 0.62;
+  const totalBase = cy + rowH * 0.02;
+  const plateH = totalBase + m.pad * 0.6;
+  let head = `<rect x="0" y="0" width="${r2(plateW)}" height="${r2(plateH)}" rx="${r2(m.rx)}" fill="${plate}" stroke="${line}" stroke-width="${r2(m.plateStroke)}"/>`;
+  head += `<text x="${r2(m.pad)}" y="${r2(headBase)}" font-size="${r2(m.unitFs)}" font-weight="700" letter-spacing="${r2(m.unitFs * 0.15)}" fill="${muted}">BUILDINGS</text>`;
+  s = head + s;
+  s += `<line x1="${r2(m.pad)}" y1="${r2(dividerY)}" x2="${r2(plateW - m.pad)}" y2="${r2(dividerY)}" stroke="${line}" stroke-width="${r2(m.plateStroke)}"/>`;
+  s += `<text x="${r2(m.pad)}" y="${r2(totalBase)}" font-size="${r2(rowFs)}" font-weight="700" fill="${ink}">${rowText("Total", total)}</text>`;
+  return { markup: s, plateW, plateH };
+}
+
 // North arrow as a classic two-tone surveyor's needle (NOT a chunky filled triangle
 // or a compass rose): a slim elongated kite split down its spine — the west half a
 // thin hairline outline, the east half filled with one neutral ink colour — with a
