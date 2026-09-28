@@ -133,9 +133,11 @@ describe("buildSinceLastHereFeed — plans", () => {
 });
 
 describe("buildSinceLastHereFeed — schedule", () => {
+  // B1939344 — `linkedSiteName` set, so the subline's project half is the qualified
+  // "<Project> / <Schedule>" label (crossScheduleLabel), not the bare schedule name.
   const scheduleProjects = {
     p1: {
-      id: "p1", name: "Goose Creek", linkedSiteId: "s9",
+      id: "p1", name: "Goose Creek", linkedSiteId: "s9", linkedSiteName: "Goose Creek",
       tasks: [{ id: "t1", name: "Grading permit", end: "2026-10-05", health: "yellow", parentId: null }],
     },
   };
@@ -149,7 +151,7 @@ describe("buildSinceLastHereFeed — schedule", () => {
     const row = feed.rows[0];
     expect(row.kind).toBe("schedule-slip");
     expect(row.parts.some((p) => p.bold && p.text === "Grading permit")).toBe(true);
-    expect(row.subline).toBe("Goose Creek · +4d");
+    expect(row.subline).toBe("Goose Creek / Goose Creek · +4d");
     // ⛔ WAS `expect(row.ts).toBe(TWO_DAYS_AGO)` — this line PINNED the defect the 2026-09-08
     // adversarial review found. Stamping at the window FLOOR sorts a schedule row below every
     // real-stamped event in the window, so the cap deleted 100% of them (3 of 3 measured on a
@@ -166,8 +168,38 @@ describe("buildSinceLastHereFeed — schedule", () => {
       scheduleProjects,
       prevSnapshot: { plans: {}, tasks: { p1: { t1: { end: "2026-10-10", health: "yellow", name: "Grading permit" } } } },
     }));
-    expect(feed.rows[0].subline).toBe("Goose Creek · -5d");
+    expect(feed.rows[0].subline).toBe("Goose Creek / Goose Creek · -5d");
     expect(feed.rows[0].parts.some((p) => p.text.includes("moved up"))).toBe(true);
+  });
+
+  // B1939344 (NEW-1) — the RED-PROOF for this feed: two schedules named identically under
+  // different projects must produce distinct sublines. On unmodified main both read
+  // "Master Schedule · <n>d" — indistinguishable.
+  it("RED-PROOF (fails on unmodified main): two same-named schedules under different projects slip into distinct sublines", () => {
+    const sameNamed = {
+      p1: {
+        id: "p1", name: "Master Schedule", linkedSiteId: "s1", linkedSiteName: "Goose Creek",
+        tasks: [{ id: "t1", name: "Grading permit", end: "2026-10-05", health: "yellow", parentId: null }],
+      },
+      p2: {
+        id: "p2", name: "Master Schedule", linkedSiteId: "s2", linkedSiteName: "Grand Port",
+        tasks: [{ id: "t2", name: "Foundation start", end: "2026-11-01", health: "yellow", parentId: null }],
+      },
+    };
+    const feed = buildSinceLastHereFeed(baseArgs({
+      scheduleProjects: sameNamed,
+      prevSnapshot: {
+        plans: {},
+        tasks: {
+          p1: { t1: { end: "2026-10-01", health: "yellow", name: "Grading permit" } },
+          p2: { t2: { end: "2026-10-25", health: "yellow", name: "Foundation start" } },
+        },
+      },
+    }));
+    const byTask = Object.fromEntries(feed.rows.map((r) => [r.parts.find((p) => p.bold)?.text, r.subline]));
+    expect(byTask["Grading permit"]).toBe("Goose Creek / Master Schedule · +4d");
+    expect(byTask["Foundation start"]).toBe("Grand Port / Master Schedule · +7d");
+    expect(byTask["Grading permit"]).not.toBe(byTask["Foundation start"]);
   });
 
   // ── FEED-2, B1405456 (2026-09-08 adversarial review) ──────────────────────────────────────

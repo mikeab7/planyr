@@ -79,7 +79,7 @@ function FeedRow({ row, now, handlers, compsRatePeriod }) {
       <KindTile kind={row.kind} glyph={meta.glyph} accent={meta.accent} />
       <div style={{ minWidth: 0, flex: 1 }}>
         <Sentence parts={row.parts} />
-        <div style={{ marginTop: 2, fontFamily: MONO_FONT, fontSize: 10.5, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <div title={subline} style={{ marginTop: 2, fontFamily: MONO_FONT, fontSize: 10.5, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {subline}
         </div>
       </div>

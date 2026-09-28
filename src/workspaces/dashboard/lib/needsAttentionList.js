@@ -19,7 +19,13 @@
  * dispatch that ordered this card was explicit that days-past-due must never be silently
  * substituted, so this module refuses to compute anything from `t.end` as a proxy for the sort
  * key — a task with no stamp simply isn't "needs attention" yet, full stop.
+ *
+ * B1939344 (NEW-1) — `projectName` is the QUALIFIED "<Project> / <Schedule>" label
+ * (`crossScheduleLabel`, `src/shared/schedule/scheduleOwnership.js`), not the bare schedule name —
+ * see scheduleHealth.js's own header for why a bare name is ambiguous on this account and why this
+ * is the SAME helper the Reports tab already uses, not a second hand-copy.
  */
+import { crossScheduleLabel } from "../../../shared/schedule/scheduleOwnership.js";
 
 const MS_PER_DAY = 86400000;
 
@@ -93,7 +99,7 @@ export function needsAttentionList(projectsMap, nowMs = Date.now()) {
         taskId: t.id,
         taskName: (t.name && String(t.name).trim()) || `Task #${t.id}`,
         projectId: p.id,
-        projectName: (p && typeof p.name === "string" && p.name.trim()) || "Untitled schedule",
+        projectName: crossScheduleLabel(p),
         linkedSiteId: p?.linkedSiteId || null,
         dueDate: t.end || null,
         waiting: succ[t.id] || 0,

@@ -6,16 +6,18 @@ const daysAgo = (n) => new Date(NOW - n * 86400000).toISOString();
 
 describe("needsAttentionList", () => {
   it("returns one row per stamped leaf task, across every project, sorted DESC by days since stamped", () => {
+    // B1939344 — `linkedSiteName` set on both, so `projectName` resolves to the qualified
+    // "<Project> / <Schedule>" label (crossScheduleLabel), not the bare schedule name.
     const projects = {
       1: {
-        id: 1, name: "Goose Creek", linkedSiteId: "g1",
+        id: 1, name: "Goose Creek", linkedSiteId: "g1", linkedSiteName: "Goose Creek",
         tasks: [
           { id: 1, name: "Zoning letter", end: "2026-09-10", parentId: null, needsAttentionSince: daysAgo(3) },
           { id: 2, name: "Phase 1 ESA", end: "2026-09-01", parentId: null, needsAttentionSince: daysAgo(20) },
         ],
       },
       2: {
-        id: 2, name: "Grand Port", linkedSiteId: "g2",
+        id: 2, name: "Grand Port", linkedSiteId: "g2", linkedSiteName: "Grand Port",
         tasks: [
           { id: 10, name: "Survey", end: "2026-08-15", parentId: null, needsAttentionSince: daysAgo(9) },
           { id: 11, name: "Not stamped", end: "2026-08-01", parentId: null, needsAttentionSince: null },
@@ -25,7 +27,39 @@ describe("needsAttentionList", () => {
     const rows = needsAttentionList(projects, NOW);
     expect(rows.map((r) => r.taskName)).toEqual(["Phase 1 ESA", "Survey", "Zoning letter"]);
     expect(rows.map((r) => r.days)).toEqual([20, 9, 3]);
-    expect(rows[0].projectName).toBe("Goose Creek");
+    expect(rows[0].projectName).toBe("Goose Creek / Goose Creek");
+  });
+
+  // B1939344 (NEW-1) — the exact shape the owner's own account hit: two schedules sharing a name
+  // ("Master Schedule") under different projects. On unmodified main both rows' `projectName` read
+  // the identical bare string, which is the defect this item ships against.
+  it("RED-PROOF (fails on unmodified main): two schedules named identically under different projects produce distinct projectName strings", () => {
+    const projects = {
+      1: {
+        id: 1, name: "Master Schedule", linkedSiteId: "g1", linkedSiteName: "Goose Creek",
+        tasks: [{ id: 1, name: "Zoning letter", end: "2026-09-10", parentId: null, needsAttentionSince: daysAgo(3) }],
+      },
+      2: {
+        id: 2, name: "Master Schedule", linkedSiteId: "g2", linkedSiteName: "Grand Port",
+        tasks: [{ id: 10, name: "Survey", end: "2026-08-15", parentId: null, needsAttentionSince: daysAgo(9) }],
+      },
+    };
+    const rows = needsAttentionList(projects, NOW);
+    const byTask = Object.fromEntries(rows.map((r) => [r.taskName, r.projectName]));
+    expect(byTask["Zoning letter"]).toBe("Goose Creek / Master Schedule");
+    expect(byTask["Survey"]).toBe("Grand Port / Master Schedule");
+    expect(byTask["Zoning letter"]).not.toBe(byTask["Survey"]);
+  });
+
+  it("an org-owned schedule's rows are prefixed 'Organization', never a bare schedule name", () => {
+    const projects = {
+      5: {
+        id: 5, name: "Pursuits", ownerKind: "org",
+        tasks: [{ id: 1, name: "Follow up", end: "2026-09-01", parentId: null, needsAttentionSince: daysAgo(2) }],
+      },
+    };
+    const rows = needsAttentionList(projects, NOW);
+    expect(rows[0].projectName).toBe("Organization / Pursuits");
   });
 
   it("never substitutes days-past-due — a task with no stamp is simply absent", () => {
