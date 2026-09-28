@@ -2756,7 +2756,7 @@ function schedulesForOwner(projects, ownerKey) {
 
 // ── Display label ────────────────────────────────────────────────────────────────────────────────
 //
-// NEW-1 (owner report 2026-09-16, direct follow-on to B1696640/B1696641/PR #1741) — a notice that
+// NEW-1 (owner report 2026-09-16, direct follow-on to B1696640/B1696641/PR 1741) — a notice that
 // names a schedule by its OWN name is still ambiguous even with a row ID attached, because two
 // different Planyr projects can each hold a schedule named "Master Schedule" (the owner's live
 // account does exactly this). "<Project> / <Schedule>" is the one label that disambiguates both
@@ -2774,7 +2774,7 @@ function schedulesForOwner(projects, ownerKey) {
 // sinceLastHereFeed.js) rendered a bare schedule name, and the owner's own account has four
 // schedules all named "Master Schedule" under four different projects — indistinguishable on the
 // Dashboard even though the Reports tab (public/sequence/index.html) has disambiguated them since
-// PR #1849. A second hand-copy of this exact join is precisely the "one-answer function"
+// PR 1849. A second hand-copy of this exact join is precisely the "one-answer function"
 // duplication docs/DATA.md forbids, so it now ships to both consumers from the one place `ownerOf`/
 // `ORG_OWNER_LABEL` already live.
 

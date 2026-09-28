@@ -22,7 +22,7 @@
  * `src/shared/schedule/scheduleOwnership.js`), not the bare schedule name: two different projects
  * can each hold a schedule named "Master Schedule" (the owner's own account has four), which a bare
  * name can't tell apart. This is the SAME label the Reports tab (public/sequence/index.html) has
- * used since PR #1849 — one shared helper, not a second hand-copy.
+ * used since PR 1849 — one shared helper, not a second hand-copy.
  */
 import { crossScheduleLabel } from "../../../shared/schedule/scheduleOwnership.js";
 
