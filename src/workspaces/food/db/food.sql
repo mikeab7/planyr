@@ -540,6 +540,122 @@ alter table public.food_visits add constraint food_visits_rating_ambiance_check
 --   select numeric_precision, numeric_scale from information_schema.columns
 --     where table_name = 'food_visits' and column_name = 'rating';                    -- expect 4, 2
 
+-- ── food_dishes: per-dish ratings inside a visit (B1873008, 2026-09-27 owner chat block —
+-- "he logs a visit... The dish never gets captured. He wants to enter the individual dishes he
+-- had and rate each one"). ONE new table, deliberately: `food_dish_wishlist` (NEW-3 above) is the
+-- opposite lifecycle (a dish not yet had, surviving across visits) and cannot also hold a dish
+-- ALREADY had and scored; `food_visits.what_i_had`/`what_was_good` stay exactly as they are
+-- (read production first: zero of 185 rows ever used either free-text column — that is the design
+-- evidence this table replaces in practice, not a reason to touch the columns themselves).
+--
+-- ⛔ `food_visits.rating` IS NEVER TOUCHED BY THIS TABLE. No trigger, no view, no client code this
+-- item ships writes back to `food_visits.rating` from a dish score — the visit's own rating stays
+-- exactly what the owner typed, forever. Verified non-destructive before shipping: a checksum over
+-- all 185 existing rows' (id, rating) pairs was taken immediately before this migration and
+-- confirmed identical immediately after (this migration issues zero ALTER/UPDATE against
+-- food_visits — see the plain `create table` shape below, and test/foodModule.test.js's structural
+-- guard that this file's food_dishes section contains no `food_visits` write statement).
+--
+-- SCORE SCALE: HALF-POINT steps, 1.0-10.0 — the owner's OWN existing scale for 185 real ratings
+-- (13 distinct values, 52 fractional, all clean halves before food_visits was later widened to
+-- quarter-points for a different reason). numeric(3,1) is exactly enough precision for a
+-- half-point value up to 10.0 (3 total digits, 1 after the decimal — "10.0" fits; see the
+-- food_visits.rating history above for why numeric(3,2) would overflow at exactly 10, a trap this
+-- table avoids by using one fewer decimal place, matching the half- not quarter-point brief).
+--
+-- PLACE_ID is DENORMALISED FROM THE VISIT, kept correct by a trigger rather than trusted from the
+-- client (a client bug/tamper attempt could otherwise send a mismatched place_id) — see
+-- food_dishes_before_write() below. Nullable exactly as food_visits.place_id is (a manual-pin
+-- visit's dishes carry place_id = null too; they're still reachable by visit_id, which every
+-- dish-list query in the app groups by rather than by place_id alone).
+--
+-- ⛔ `photo_path` FROM THE ORIGINAL BRIEF IS DELIBERATELY NOT INCLUDED (CONSTRAINT-CAPTURE) — this
+-- module's own CLAUDE.md pointer lists "photo upload" under "Explicitly out of scope — do not
+-- build, do not scaffold"; a column that exists only to be filled by a future upload path IS that
+-- scaffolding. Flagged in the PR/session reply rather than silently built or silently dropped.
+create table if not exists public.food_dishes (
+  id           uuid primary key default gen_random_uuid(),
+  user_id      uuid not null references auth.users(id) on delete cascade,
+  visit_id     uuid not null references public.food_visits(id) on delete cascade,
+  place_id     text references public.food_places(id) on delete set null, -- denormalised from the visit; see the sync trigger below
+  name         text not null,
+  course       text,        -- starter | entree | side | dessert | drink | null
+  score        numeric(3,1),-- 1.0-10.0, HALF-POINT steps only (see header) — independent of food_visits.rating
+  order_again  text,        -- yes | maybe | no | null — the dish-level analogue of food_visits.would_return, never merged with it
+  price_cents  integer,     -- money in cents; formatted at the display edge only
+  note         text,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+  constraint food_dishes_name_len check (char_length(btrim(name)) > 0),
+  constraint food_dishes_score_check check (score is null or (score >= 1.0 and score <= 10.0 and (score * 2) = round(score * 2))),
+  constraint food_dishes_course_check check (course is null or course in ('starter','entree','side','dessert','drink')),
+  constraint food_dishes_order_again_check check (order_again is null or order_again in ('yes','maybe','no')),
+  constraint food_dishes_price_check check (price_cents is null or price_cents >= 0)
+);
+
+create index if not exists food_dishes_user_idx  on public.food_dishes (user_id);
+create index if not exists food_dishes_visit_idx on public.food_dishes (visit_id);
+create index if not exists food_dishes_place_idx on public.food_dishes (place_id) where place_id is not null;
+-- Case/whitespace-insensitive lookup by (place, dish name) — this is what "a dish had more than
+-- once, latest score wins, earlier ones are history" (lib/dishAggregates.js) queries against, and
+-- what the food_dish_wishlist auto-done match (below) looks a saved dish name up by.
+create index if not exists food_dishes_place_name_idx on public.food_dishes (place_id, lower(btrim(name))) where place_id is not null;
+
+alter table public.food_dishes enable row level security;
+
+drop policy if exists "Users select own food_dishes" on public.food_dishes;
+drop policy if exists "Users insert own food_dishes" on public.food_dishes;
+drop policy if exists "Users update own food_dishes" on public.food_dishes;
+drop policy if exists "Users delete own food_dishes" on public.food_dishes;
+
+create policy "Users select own food_dishes" on public.food_dishes
+  for select to authenticated using ((select auth.uid()) = user_id);
+create policy "Users insert own food_dishes" on public.food_dishes
+  for insert to authenticated with check ((select auth.uid()) = user_id);
+create policy "Users update own food_dishes" on public.food_dishes
+  for update to authenticated using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);
+create policy "Users delete own food_dishes" on public.food_dishes
+  for delete to authenticated using ((select auth.uid()) = user_id);
+-- No anon policy at all -> a signed-out request sees zero rows, exactly like food_visits.
+
+-- Runs SECURITY INVOKER (the default) — under the CALLER's own RLS, so it can only ever resolve
+-- a visit the caller can already SELECT. A visit_id naming someone else's real visit (a
+-- forged/mismatched client write) resolves to NO row under that RLS scope, so this raises a loud
+-- exception (LOUD-FAILURE) rather than silently writing a null/wrong place_id.
+create or replace function public.food_dishes_before_write()
+returns trigger language plpgsql set search_path = public as $$
+declare
+  v_user_id uuid;
+  v_place_id text;
+begin
+  select user_id, place_id into v_user_id, v_place_id from public.food_visits where id = new.visit_id;
+  if v_user_id is null then
+    raise exception 'food_dishes: visit % not found or not visible to this user', new.visit_id;
+  end if;
+  if v_user_id <> new.user_id then
+    raise exception 'food_dishes: visit % does not belong to this user', new.visit_id;
+  end if;
+  new.place_id := v_place_id;
+  return new;
+end;
+$$;
+
+drop trigger if exists food_dishes_sync_place on public.food_dishes;
+create trigger food_dishes_sync_place before insert or update of visit_id on public.food_dishes
+  for each row execute function public.food_dishes_before_write();
+
+drop trigger if exists food_dishes_touch on public.food_dishes;
+create trigger food_dishes_touch before update on public.food_dishes
+  for each row execute function public.food_visits_touch_updated_at(); -- reuses the existing generic updated_at trigger — no reason for a second copy
+
+alter function public.food_dishes_before_write() set search_path = public, pg_temp;
+
+-- Verify (read-only; safe to run any time) -----------------------------------
+--   select relrowsecurity from pg_class where oid = 'public.food_dishes'::regclass;    -- expect true
+--   select polname from pg_policy where polrelid = 'public.food_dishes'::regclass;     -- 4 owner-only rows, no anon
+--   select numeric_precision, numeric_scale from information_schema.columns
+--     where table_name = 'food_dishes' and column_name = 'score';                      -- expect 3, 1
+
 -- B1205298 (2026-09-05 db-hygiene sweep) — pin search_path on the three functions this file
 -- defines. All three are already SECURITY INVOKER (no privilege-escalation exposure — the
 -- Supabase advisor's function_search_path_mutable WARN is about an unqualified identifier

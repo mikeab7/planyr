@@ -26,6 +26,16 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
   `project_id` and joins nothing team-shaped, so it's exempt by construction. Proven with a
   self-rolling-back SQL test (`db/test/food_rls.test.sql`): anon sees zero visits, a second
   signed-in user sees zero of the owner's visits and can't update them either.
+- `food_dishes` (B1873008, 2026-09-27) — per-dish ratings on a visit: name, course, score
+  (numeric(3,1), HALF-point steps, 1.0–10.0 — the owner's own original scale, distinct from
+  `food_visits.rating`'s later-widened quarter-point steps), order_again, price_cents, note.
+  Owner-only RLS, own-row, the same four-policy shape as `food_visits`. `place_id` is
+  **denormalised from the visit by a DB trigger** (`food_dishes_before_write()`) — never trusted
+  from the client, and it raises loudly on a forged/cross-user `visit_id` rather than writing a
+  wrong value. `food_visits.rating`/`what_i_had`/`what_was_good` are **never touched** by this
+  table — a dish's score is its own; see `lib/dishAggregates.js`'s own header. Also finally wires
+  up `food_dish_wishlist`'s UI (auto-marks a matching open entry done on save) — the piece NEW-3
+  below deliberately held back.
 - A **manual pin** ("no dataset has the taco truck") is a `food_visits` row with `place_id`
   null and `custom_name`/`custom_lat`/`custom_lon` set — never a row minted in `food_places`,
   which stays service-role-write-only. `lib/foodStore.js`'s `manualPinsFromVisits` groups a
@@ -47,8 +57,8 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
   per place (one per dish), unique per (user, place, dish) case/whitespace-insensitive.
   `lib/foodStore.js`'s `fetchAllDishWishlist`/`addDishWishlist`/`removeDishWishlist`/
   `markDishDone`/`dishWishlistByPlaceId`/`dishWishlistByManualKey` — data layer + RLS shipped and
-  proven (`db/test/food_rls.test.sql` tests 12-16); the VisitPanel UI wiring (under "Order again")
-  is the one piece deliberately held back this session — see `BACKLOG.md` for why.
+  proven (`db/test/food_rls.test.sql` tests 12-16); the VisitPanel UI wiring is now shipped by
+  B1873008 (above) — saving a real dish under "Dishes" auto-marks a matching open entry done.
 - **Fallback for what the snapshot misses:** `lib/overpass.js` queries OpenStreetMap's
   Overpass API — free, no key. Cached per bbox for the session and **never called from a
   pan/zoom handler**, only from an explicit "search live for more here" press (`FoodMap.jsx`)
@@ -64,8 +74,19 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
 - `components/VisitPanel.jsx` — click a pin, see past visits, log another. A right-side panel,
   never a dialog box (`window.prompt`/`confirm` are banned app-wide).
 - `components/VisitList.jsx` — every visit, searchable by name, sortable by date/rating/cost.
+- `components/DishesSection.jsx` (B1873008) — the place-detail Dishes table, its inline add/edit
+  row, "The order," and the per-dish history view. Also mounts inside an editing `VisitCard` for
+  the "add dishes under this visit" flow.
+- `components/ScoreMeter.jsx` (B1873008) — the per-dish score control (half-point, 1.0–10.0). A
+  deliberate sibling of `VisitPanel.jsx`'s own `RatingSlider`, not a replacement — see its own
+  header for why the two stayed separate.
 - `lib/foodStore.js` — the one seam to Supabase: place/visit queries, visit CRUD, the manual-
-  pin grouping and the logged-id set the map colors pins by.
+  pin grouping and the logged-id set the map colors pins by. Also the dish CRUD (`fetchAllDishes`/
+  `insertDish`/`updateDish`/`deleteDish`) — every write strips any client-supplied `place_id`,
+  since the DB trigger is the only source of truth for it.
+- `lib/dishAggregates.js` (B1873008) — pure reads over already-fetched `food_dishes` rows: latest-
+  score-wins grouping, "best dish here," "the order," a visit's own mean dish score. No Supabase
+  import, no write call — the one file that proves a dish score can never overwrite a visit rating.
 - `lib/overpass.js` — the Overpass fallback (see above).
 - `lib/searchQuality.js` (B709696/B709697, 2026-08-23) — filters/ranks the whole-snapshot search
   RPC's candidates before they reach the dropdown: a word-coverage "strong match" gate (so a

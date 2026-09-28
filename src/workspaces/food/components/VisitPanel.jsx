@@ -97,8 +97,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import BottomSheet from "./BottomSheet.jsx";
+import DishesSection from "./DishesSection.jsx";
 import { colorForRating, textColorForRating } from "../lib/ratingColor.js";
 import { computeVisitAggregates, orderAgainEntries } from "../lib/visitAggregates.js";
+import { meanDishScoreForVisit, dishRowsForTable, bestDishRow } from "../lib/dishAggregates.js";
 import { formatVisitDate, formatRelativeDate, formatMonthYear } from "../lib/dateFormat.js";
 import { directionsUrl } from "../lib/directions.js";
 import { formatCategory, formatAddress, formatCityFromAddress } from "../lib/formatPlace.js";
@@ -386,7 +388,7 @@ function PanelHeader({ manualNameEditable, manualName, onManualNameChange, name,
  * cannot see his average food score, his ambiance average, how many times he has been, when he
  * last went, or what he typically spends"). Four tiles, tabular-nums so digits don't jitter as
  * they change; a missing ambiance/cost average reads as an em dash, never a misleading 0. */
-function ScoreStrip({ aggregates }) {
+function ScoreStrip({ aggregates, bestDish }) {
   const { avgFood, avgAmbiance, visitCount, avgCost, lastVisitDate, firstVisitDate } = aggregates;
   const tiles = [
     { key: "food", label: "Food", hero: true, text: avgFood == null ? "—" : avgFood.toFixed(1) },
@@ -396,6 +398,7 @@ function ScoreStrip({ aggregates }) {
   ];
   const lastLine = lastVisitDate ? `Last ${formatVisitDate(lastVisitDate)} · ${formatRelativeDate(lastVisitDate)}` : null;
   const firstLine = firstVisitDate ? `Since ${formatMonthYear(firstVisitDate)}` : null;
+  const bestDishLine = bestDish ? `Best dish: ${bestDish.name} (${Number(bestDish.latestScore)})` : null;
   return (
     <div data-testid="food-score-strip" style={{ padding: "6px 16px 4px" }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 7 }}>
@@ -416,9 +419,9 @@ function ScoreStrip({ aggregates }) {
           </div>
         ))}
       </div>
-      {(lastLine || firstLine) && (
+      {(lastLine || firstLine || bestDishLine) && (
         <div style={{ marginTop: 6, fontSize: 11.5, color: "var(--text-tertiary)" }}>
-          {[lastLine, firstLine].filter(Boolean).join(" · ")}
+          {[lastLine, firstLine, bestDishLine].filter(Boolean).join(" · ")}
         </div>
       )}
     </div>
@@ -529,7 +532,7 @@ function ActionsRow({ everVisited, onOpenForm, wishlisted, onToggleWishlist, wis
  * `VisitForm` inline, replacing the card's own content in place (never a modal). `editing` is
  * OWNED BY THE PARENT (PastVisitsSection/VisitPanel), not local state here, so VisitPanel can
  * enforce "only one form open at a time" against the log-a-new-visit form. */
-function VisitCard({ visit, onDelete, editing, onOpenEdit, onCloseEdit, onSubmitEdit, pending }) {
+function VisitCard({ visit, onDelete, editing, onOpenEdit, onCloseEdit, onSubmitEdit, pending, dishesWithDate, onSaveDish, onDeleteDish, dishPending }) {
   const menuBtnRef = useRef(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -537,6 +540,10 @@ function VisitCard({ visit, onDelete, editing, onOpenEdit, onCloseEdit, onSubmit
   const hasRating = visit.rating != null;
   const hasAmbiance = visit.rating_ambiance != null;
   const hasWouldReturn = visit.would_return === true;
+  // Read-only, next to (never instead of) the visit's own rating — the brief's own rule that a
+  // dish score never overwrites/derives the visit rating; this is purely a "these two diverge"
+  // signal, computed fresh from whatever dishes are attached to THIS visit.
+  const avgDishScore = onSaveDish ? meanDishScoreForVisit(dishesWithDate || [], visit.id) : null;
 
   const closeMenu = () => { setMenuOpen(false); setConfirming(false); };
 
@@ -547,6 +554,12 @@ function VisitCard({ visit, onDelete, editing, onOpenEdit, onCloseEdit, onSubmit
           initial={visit} submitLabel="Save changes" pending={pending}
           onCancel={onCloseEdit} onSubmit={onSubmitEdit} onSaved={onCloseEdit}
         />
+        {onSaveDish && (
+          <DishesSection
+            dishesWithDate={(dishesWithDate || []).filter((d) => d.visit_id === visit.id)}
+            visits={[visit]} onSaveDish={onSaveDish} onDeleteDish={onDeleteDish} pending={dishPending}
+          />
+        )}
       </div>
     );
   }
@@ -560,6 +573,11 @@ function VisitCard({ visit, onDelete, editing, onOpenEdit, onCloseEdit, onSubmit
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
         <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center", flex: 1, minWidth: 0 }}>
           {hasRating && <Chip label="Food" value={visit.rating} />}
+          {avgDishScore != null && (
+            <span data-testid="food-visit-avg-dish-score" style={{ fontSize: 10.5, color: "var(--text-tertiary)" }}>
+              dishes avg {avgDishScore.toFixed(1)}
+            </span>
+          )}
           {hasAmbiance && <Chip label="Ambiance" value={visit.rating_ambiance} />}
           {hasWouldReturn && <WouldReturnChip />}
           {!hasRating && !hasAmbiance && !hasWouldReturn && <span style={{ color: "var(--text-tertiary)", fontSize: 12 }}>—</span>}
@@ -641,7 +659,7 @@ function VisitCard({ visit, onDelete, editing, onOpenEdit, onCloseEdit, onSubmit
   );
 }
 
-function PastVisitsSection({ pastVisits, onDelete, onEditVisit, editingVisitId, onOpenEdit, onCloseEdit, pending }) {
+function PastVisitsSection({ pastVisits, onDelete, onEditVisit, editingVisitId, onOpenEdit, onCloseEdit, pending, dishesWithDate, onSaveDish, onDeleteDish, dishPending }) {
   if (!pastVisits.length) return null;
   return (
     <div data-testid="food-past-visits">
@@ -654,6 +672,7 @@ function PastVisitsSection({ pastVisits, onDelete, onEditVisit, editingVisitId, 
           editing={editingVisitId === v.id} pending={pending}
           onOpenEdit={() => onOpenEdit(v.id)} onCloseEdit={onCloseEdit}
           onSubmitEdit={onEditVisit ? (fields) => onEditVisit(v.id, fields) : undefined}
+          dishesWithDate={dishesWithDate} onSaveDish={onSaveDish} onDeleteDish={onDeleteDish} dishPending={dishPending}
         />
       ))}
     </div>
@@ -675,6 +694,7 @@ export default function VisitPanel({
   place, pastVisits, onClose, onSubmitVisit, onDeleteVisit, onEditVisit, pending, error,
   manualNameEditable, manualName, onManualNameChange,
   wishlisted, onToggleWishlist, onSheetHeightChange,
+  dishesWithDate, onSaveDish, onDeleteDish, dishPending, openDishWishlistNames,
 }) {
   const isMobile = useIsMobile();
   const [adding, setAdding] = useState(false); // NEW-2: never auto-opens, even on a never-visited place
@@ -693,6 +713,7 @@ export default function VisitPanel({
   const everVisited = visits.length > 0;
   const aggregates = useMemo(() => computeVisitAggregates(visits), [visits]);
   const orderAgain = useMemo(() => orderAgainEntries(visits), [visits]);
+  const bestDish = useMemo(() => bestDishRow(dishRowsForTable(dishesWithDate || [])), [dishesWithDate]);
   const wishlistDisabled = manualNameEditable && !(manualName || "").trim();
 
   // NEW-1 (2026-08-27 owner block) — "when I click log this visit, it should not make it seem
@@ -764,11 +785,19 @@ export default function VisitPanel({
             ✓ Visit saved
           </div>
         )}
-        {everVisited && <ScoreStrip aggregates={aggregates} />}
+        {everVisited && <ScoreStrip aggregates={aggregates} bestDish={bestDish} />}
         {!everVisited && !adding && <EmptyStateNote />}
       </div>
 
       {everVisited && <OrderAgain entries={orderAgain} />}
+
+      {everVisited && onSaveDish && (
+        <DishesSection
+          dishesWithDate={dishesWithDate || []} visits={visits}
+          onSaveDish={onSaveDish} onDeleteDish={onDeleteDish} pending={dishPending}
+          openWishlistNames={openDishWishlistNames}
+        />
+      )}
 
       {error && (
         <div role="alert" style={{ margin: "8px 16px 0", padding: "8px 10px", borderRadius: 8, background: "var(--danger-bg, rgba(220,38,38,0.1))", color: "var(--danger-text, var(--danger))", fontSize: 12 }}>
@@ -788,6 +817,7 @@ export default function VisitPanel({
       <PastVisitsSection
         pastVisits={visits} onDelete={onDeleteVisit} onEditVisit={onEditVisit} pending={pending}
         editingVisitId={editingVisitId} onOpenEdit={handleOpenEdit} onCloseEdit={handleCloseEdit}
+        dishesWithDate={dishesWithDate} onSaveDish={onSaveDish} onDeleteDish={onDeleteDish} dishPending={dishPending}
       />
     </>
   );

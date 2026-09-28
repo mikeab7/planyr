@@ -297,3 +297,44 @@ export function dishWishlistByManualKey(rows) {
   }
   return groups;
 }
+
+/** ── Per-dish ratings (B1873008, 2026-09-27) ──────────────────────────────────────────────────
+ *  food_dishes: a dish actually HAD at a visit, with its own score/course/price/order-again/note
+ *  — the opposite of food_dish_wishlist above (a dish NOT YET had). `place_id` is DENORMALISED
+ *  FROM THE VISIT by a database trigger (db/food.sql's food_dishes_before_write) — never sent
+ *  from here even when the caller already has it handy, so a client bug can never write a
+ *  mismatched place_id. Fetched in full per signed-in user, the same small-personal-table
+ *  pattern as every other table in this module. */
+
+export async function fetchAllDishes() {
+  if (!supabase) return { data: [], error: null };
+  const { data, error } = await supabase.from("food_dishes").select("*").order("created_at", { ascending: false });
+  return { data: data || [], error };
+}
+
+export async function insertDish(dish) {
+  if (!supabase) return { data: null, error: new Error("Supabase not configured") };
+  const { data: auth } = await supabase.auth.getUser();
+  const uid = auth?.user?.id;
+  if (!uid) return { data: null, error: new Error("Sign in to add a dish") };
+  const { place_id: _ignored, ...rest } = dish; // place_id is DB-derived, never client-supplied — see header
+  const { data, error } = await supabase
+    .from("food_dishes")
+    .insert({ ...rest, user_id: uid })
+    .select()
+    .single();
+  return { data, error };
+}
+
+export async function updateDish(id, patch) {
+  if (!supabase) return { data: null, error: new Error("Supabase not configured") };
+  const { place_id: _ignoredPlace, visit_id: _ignoredVisit, ...rest } = patch; // both DB-derived/fixed — never re-sent
+  const { data, error } = await supabase.from("food_dishes").update(rest).eq("id", id).select().single();
+  return { data, error };
+}
+
+export async function deleteDish(id) {
+  if (!supabase) return { error: new Error("Supabase not configured") };
+  const { error } = await supabase.from("food_dishes").delete().eq("id", id);
+  return { error };
+}

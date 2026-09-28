@@ -313,8 +313,8 @@
       "note": "Seeded at 0 so the FIRST measurement of a brand-new route lands through `npm run perf:ratchet` with a stated reason, exactly like any other baseline move \u2014 a hand-typed seed is the thing that step exists to prevent. WHAT THIS NUMBER DOES AND DOES NOT INCLUDE, because it is the whole reason the split is load-bearing: it counts the notebook TREE and its chrome, and deliberately NOT the rich-text engine. Notes.jsx pulls components/NoteEditor.jsx (and through it the only @tiptap imports in the module) via a lazy() import inside a Suspense, so the engine is a separate on-demand chunk of ~464 KB that a user pays for only when a page is actually opened, and the rail paints first. A future rise in THIS metric therefore means something moved onto the static path that belongs behind that boundary \u2014 most likely a new static import of the editor, or a shared module that got hoisted. test/notesModule.test.js source-scans for the first case; this budget is the backstop for the second."
     },
     "foodRouteJsBytes": {
-      "baseline": 864821,
-      "target": 864821,
+      "baseline": 942597,
+      "target": 942597,
       "unit": "bytes",
       "what": "Total JS a plain Food route must download: the entry chunk plus FoodApp and its static-import closure.",
       "note": "Seeded at 0 (B568400, the same precedent as notesRouteJsBytes) so the FIRST measurement of this brand-new route lands through `npm run perf:ratchet` with a stated reason, exactly like any other baseline move -- a hand-typed seed is the thing that step exists to prevent. This route is measured SEPARATELY from siteRouteJsBytes/notesRouteJsBytes/largestChunkBytes by design: the owner's explicit ask was that a personal restaurant tracker never share a metric with, or draw headroom from, the routes the actual product depends on. leaflet (the map vendor chunk) is reused from the existing shared map-vendor split -- that's what it's for -- but nothing from site-planner may come with it (this module has zero imports from src/workspaces/site-planner, source-guarded by test/foodModule.test.js)."
@@ -912,6 +912,17 @@
           "commit": "02107353e4eeda596bd88519f28d14975bd403c5",
           "sourceHash": "48db8bf3ce4a9695",
           "reason": "Third pass wiring 34 more Georgia county parcel endpoints (real idField/addrField/label/layerUrl/help strings) -- legitimate, unavoidable growth from real product data, not bloat. This branch's own attributable cost is +18.4 KB (ci-parity base-ref attribution); the rest of the ceiling breach is pre-existing drift on main from the second Georgia pass (B1873776), which never ratcheted."
+        },
+        {
+          "metric": "bundle.foodRouteJsBytes",
+          "from": 864821,
+          "to": 942597,
+          "direction": "raise",
+          "item": "B1873008",
+          "date": "2026-09-27",
+          "commit": "d0e44079dd40327d4402a9e6bba8ef6bcfac78fb",
+          "sourceHash": "7e2ea6152f0324dd",
+          "reason": "New feature, not a regression: per-dish ratings (ScoreMeter.jsx, DishesSection.jsx, dishAggregates.js) inside the Food module's place-detail panel and visit editor. No new npm dependency added; nothing here duplicates existing food-module UI (ScoreMeter/DishesSection are new surface area, not bloat in existing files). +76.0 KB, inside the existing headroom band."
         }
       ]
     }
