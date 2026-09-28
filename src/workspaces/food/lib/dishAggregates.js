@@ -90,6 +90,49 @@ export function formatCents(cents) {
   return `$${(Number(cents) / 100).toFixed(2)}`;
 }
 
+/** A dish score (a Postgres numeric(4,2), quarter-point steps 1.00-10.00 — see db/food.sql),
+ *  trimmed of trailing zeros for display: 8.00 -> "8", 8.50 -> "8.5", 8.25 -> "8.25". Number()
+ *  does this for free (it's a plain binary float once coerced — 0.25/0.5/0.75 are all exact in
+ *  IEEE754, so no rounding trap the way 0.1/0.3 would be) — this just names the pattern and
+ *  handles the null/non-finite/string-from-PostgREST cases every other numeric read site here
+ *  already coerces (see ratingColor.js's own header). Returns null for "no score yet" so a
+ *  caller's own em-dash/placeholder logic decides how that renders, never a fabricated "0". */
+export function formatScore(score) {
+  if (score == null) return null;
+  const n = Number(score);
+  if (!Number.isFinite(n)) return null;
+  return String(n);
+}
+
+/** The dish-row score CHIP's three-tier ramp (NEW-1, 2026-09-28 redesign) — DELIBERATELY NOT
+ *  ratingColor.js's 10-step place-rating ramp. That ramp is a map-pin gradient meant to be read
+ *  from across a whole screen of pins; a dish chip sits in a dense list where a coarser, plainer
+ *  signal reads faster: high = accent-filled, mid = a tinted accent chip, low = plain neutral
+ *  gray — never red, which this app reserves for genuine danger (KEY DECISIONS, root CLAUDE.md).
+ *  Cutoffs (>=8 high, >=5 mid, else low) split the 1-10 scale into three roughly even, sensible
+ *  score bands — "great," "fine," "skip it" — not a measured/owner-picked boundary, so treat a
+ *  request to move them as a real design decision, not a bug. */
+export function dishScoreTier(score) {
+  if (score == null) return null;
+  const n = Number(score);
+  if (!Number.isFinite(n)) return null;
+  if (n >= 8) return "high";
+  if (n >= 5) return "mid";
+  return "low";
+}
+
+/** A pure mirror of db/food.sql's food_dishes_score_check — "null, or between 1.0 and 10.0 at an
+ *  exact quarter-point step." Exists so a test can assert the DB rule's boundary behaviour
+ *  (8.25/8.5/8/10/1 accepted; 8.3/8.125/0.75/10.25 rejected) without a live database, and so a
+ *  future change to one is easy to catch against the other. Nothing in the app calls this to
+ *  GATE a write — the client-side slider/nudge math (ScoreMeter.jsx's clampScore) already can't
+ *  produce an off-step value in the first place; this is the DB rule's own JS-readable twin. */
+export function scoreSatisfiesQuarterStep(score) {
+  if (score == null) return true;
+  const n = Number(score);
+  return Number.isFinite(n) && n >= 1 && n <= 10 && n * 4 === Math.round(n * 4);
+}
+
 /** THE ORDER's own "copy as plain text" button — one line per dish (with its price, when
  *  known), a trailing total line only when at least one entry actually has a price. */
 export function theOrderAsText(entries) {
