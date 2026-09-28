@@ -69,6 +69,7 @@ export default function PrintCompose({
   overlayPrintable, printOverlay, onTogglePrintOverlay,
   mapLayersPrintable, printMapLayers, onToggleMapLayers,
   showMetricsBand, onToggleMetricsBand,
+  buildingsTablePrintable, showBuildingsTable, onToggleBuildingsTable,
   onReposition, onCancel, onDownload,
   downloading,
 }) {
@@ -153,6 +154,7 @@ export default function PrintCompose({
             {aerialAvailable && <ContentToggle label="Aerial imagery" title="The satellite/aerial backdrop" checked={showAerial} onChange={onToggleAerial} />}
             {overlayPrintable && <ContentToggle label="Placed reference overlay" title="The placed site-plan overlay — exactly as shown (scale, position, rotation, opacity)" checked={printOverlay} onChange={onTogglePrintOverlay} />}
             {mapLayersPrintable && <ContentToggle label="Map / GIS layers" title="The live map layers (floodplain, pipelines, utilities…), exactly as shown on the map" checked={printMapLayers} onChange={onToggleMapLayers} />}
+            {buildingsTablePrintable && <ContentToggle label="Buildings table" title="A small corner inset listing each building's name and square footage, plus a total — the same numbers the map labels and the Yield panel show" checked={showBuildingsTable} onChange={onToggleBuildingsTable} />}
             <ContentToggle label="Stats band" title="The stormwater required-vs-provided bars, the site-metrics line and the screening disclaimer printed below the plan. Off reclaims that space for the plan image." checked={showMetricsBand} onChange={onToggleMetricsBand} />
           </Section>
         </div>

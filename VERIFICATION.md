@@ -166,6 +166,31 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1370832 — B1934528: renaming a project updates Compose exhibit's title/header and the default PDF filename `Blocker: auth`
+
+**Why this needs a live pass even though the mechanism is fully proven headlessly.** The fix makes `siteLabel` resync off the same "planarfit:sites" storage event `pullCloud()` fires on every cloud sync — the mutation-tested e2e spec (`e2e/exhibit-project-name.spec.js`) proves the LOCAL mechanism (a rename via the header dropdown, in either Map or Plan mode, on an already-open plan) works and fails identically without the fix. What it cannot drive from this sandbox is a rename arriving from a **different device** via a real cloud pull, which needs a signed-in account.
+
+**Steps, each with a named expected result:**
+1. Sign in on planyr.io. Open a project (any real one, or a fresh throwaway) and note its name.
+2. Rename it — either from the header's project-switcher dropdown, or from the Map view's Sites list. **Expect:** the top breadcrumb shows the new name immediately (this already worked before this fix).
+3. Without reloading, open the same plan (if you were on the Map) and use **File ▾ → Download PDF / pick frame… → Continue ➜** to reach Compose exhibit. **Expect:** the title block's "Project" field and the header line above the sheet preview both show the NEW name.
+4. Download the PDF. **Expect:** the printed sheet's title block shows the new name, and the downloaded filename starts with the new name (`YYYY.MM.DD New Name - Plan Name.pdf`).
+5. **The cross-device leg**: on a SECOND device or browser signed into the same account, rename the same project. Back on the first device (already sitting on that plan, not reloaded), wait a few seconds for the background sync, then repeat step 3. **Expect:** the new name appears without a manual reload.
+6. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes when steps 1–5 confirm on a real signed-in account, dated — or a step fails and is filed as a recurrence against B1934528, per STANDING RULE #2.
+
+### V1370833 — B1934529: the printed Buildings SF inset shows correct numbers on a real plan and never overlaps other exhibit content `Blocker: auth`
+
+**Why this needs a live pass.** PDF/export parity is a mandatory LIVE-VERIFY class. The sandbox proof (`ui-audit/verify-print-sheet.mjs`) confirms the mechanism on a synthetic fixture — the toggle adds/removes exactly the inset and the plan box is unaffected — but not how the inset actually reads over a real plan's aerial imagery and drawn geometry, at a real paper size.
+
+**Steps, each with a named expected result — on a real plan with at least two buildings (a throwaway duplicate is fine, never one of Michael's real plans if it would be edited):**
+1. Open the plan, reach Compose exhibit (**File ▾ → Download PDF / pick frame… → Continue ➜**). **Expect:** a "Buildings table" toggle appears in the Content section, ON by default.
+2. With the toggle on, check the live preview. **Expect:** a small compact card, tucked in a corner of the plan, listing each building's number and SF (comma-formatted, matching the number on that building's own on-canvas label) and a Total row — never a full-width column, never overlapping the scale bar, the north arrow, or the title block.
+3. Turn the toggle off. **Expect:** the inset disappears and the plan graphic does not visibly shift or resize.
+4. Download the PDF with the toggle on. **Expect:** the same inset prints correctly, legible, in a sensible corner that doesn't sit on top of a building or the parcel boundary.
+5. Compare the inset's Total against the Yield panel's own "Building" line for the same plan. **Expect:** identical numbers.
+6. Read the served chunk hash in the same observation as each result. Discard any throwaway plan afterward and say exactly what was created/removed.
+- **Stopping rule:** closes when steps 1–5 confirm on a real signed-in account, dated — or a step fails and is filed as a recurrence against B1934529, per STANDING RULE #2.
 ### V1376304 — B1940000: the redesigned dish editor and dish rows work end to end on a real signed-in account `Blocker: auth`
 
 **Why this needs a real pass.** `DishesSection` only renders once a place has at least one real visit, and adding/editing/deleting a dish is owner-only RLS — both need a signed-in account, and this sandbox's proxy CORS-blocks the Supabase auth handshake (the same wall V1337904 already named for this feature's first pass, B1873008). So nothing about the redesigned editor markup, the nudge buttons, the order-again block, the kebab menu, or the row layout was ever reachable in a real browser this session — only the pure math (`clampScore`/`nudgeScore`/`scoreSatisfiesQuarterStep`) and the static render output (`react-dom/server`, no interactivity) were provable without one.
