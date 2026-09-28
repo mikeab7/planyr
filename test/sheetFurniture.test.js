@@ -207,6 +207,36 @@ describe("chooseFurnitureCorners — no-occlude placement (NEW-1)", () => {
     expect(p.north.corner).toBe("tl");
   });
 
+  it("omitting `buildings` entirely returns no buildings key — every pre-existing caller unaffected (B1934529)", () => {
+    const p = chooseFurnitureCorners({ ...fr, bar, north, obstacles: null });
+    expect(p.buildings).toBeUndefined();
+  });
+
+  it("a THIRD plate (buildings) takes a corner distinct from both bar and north", () => {
+    const buildings = { plateW: 140, plateH: 60 };
+    const p = chooseFurnitureCorners({ ...fr, bar, north, buildings, obstacles: null });
+    expect(p.buildings).toBeDefined();
+    expect(p.buildings.corner).not.toBe(p.bar.corner);
+    expect(p.buildings.corner).not.toBe(p.north.corner);
+  });
+
+  it("adding a third plate never changes the bar's own cost-minimizing corner", () => {
+    const buildings = { plateW: 140, plateH: 60 };
+    // Occupy three of the four corners, leaving only "tr" genuinely clear for the bar.
+    const obstacles = [
+      { x: 0, y: 0, w: 300, h: 300 },     // tl
+      { x: 0, y: 500, w: 300, h: 300 },   // bl
+      { x: 700, y: 500, w: 300, h: 300 }, // br
+    ];
+    const withoutBuildings = chooseFurnitureCorners({ ...fr, bar, north, obstacles });
+    const withBuildings = chooseFurnitureCorners({ ...fr, bar, north, buildings, obstacles });
+    expect(withoutBuildings.bar.corner).toBe("tr");
+    expect(withBuildings.bar.corner).toBe(withoutBuildings.bar.corner);
+    expect(withBuildings.north.corner).toBe(withoutBuildings.north.corner);
+    // All three plates land in genuinely distinct corners (guaranteed structurally).
+    expect(new Set([withBuildings.bar.corner, withBuildings.north.corner, withBuildings.buildings.corner]).size).toBe(3);
+  });
+
   it("places furniture away from plan content, in two different corners", () => {
     // A building occupying the center + bottom-right (where the bar would default).
     const obstacles = [{ x: 350, y: 300, w: 600, h: 480 }];
@@ -222,6 +252,94 @@ describe("chooseFurnitureCorners — no-occlude placement (NEW-1)", () => {
     const barBox = { x: p.bar.tx, y: p.bar.ty, w: bar.plateW, h: bar.plateH };
     const ov = (a, b) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
     expect(ov(barBox, obstacles[0])).toBe(0); // a clear corner exists and was chosen
+  });
+});
+
+// ── B1934529 — the compact "Buildings" SF inset, a third corner plate in the same family ──
+import { buildingsPlate } from "../src/workspaces/site-planner/lib/sheetFurniture.js";
+
+describe("buildingsPlate — sized to its own content, same card look as the other plates", () => {
+  const m = furnitureMetrics(695, { unitIsPx: false });
+  const rows = [{ name: "Building 1", sf: 1176940 }, { name: "Building 2", sf: 245574 }];
+
+  it("renders every row's name and formatted SF, plus a Total row", () => {
+    const p = buildingsPlate({ rows, total: 1176940 + 245574, m });
+    expect(p.markup).toContain("Building 1");
+    expect(p.markup).toContain("1,176,940");
+    expect(p.markup).toContain("Building 2");
+    expect(p.markup).toContain("245,574");
+    expect(p.markup).toContain("Total");
+    expect(p.markup).toContain("1,422,514");
+    expect(p.markup).toContain("BUILDINGS");
+  });
+
+  it("is sized to its content — more/longer rows make a taller/wider plate, not a fixed box", () => {
+    const one = buildingsPlate({ rows: [rows[0]], total: rows[0].sf, m });
+    const two = buildingsPlate({ rows, total: rows[0].sf + rows[1].sf, m });
+    expect(two.plateH).toBeGreaterThan(one.plateH);
+    const longName = buildingsPlate({ rows: [{ name: "Building 1", sf: 999999999 }], total: 999999999, m });
+    expect(longName.plateW).toBeGreaterThanOrEqual(one.plateW);
+  });
+
+  it("positive, finite dimensions even with a single small building", () => {
+    const p = buildingsPlate({ rows: [{ name: "Building 1", sf: 100 }], total: 100, m });
+    expect(p.plateW).toBeGreaterThan(0);
+    expect(p.plateH).toBeGreaterThan(0);
+  });
+
+  it("draws exactly one plate <rect> (the card background) plus a divider <line>", () => {
+    const p = buildingsPlate({ rows, total: 1422514, m });
+    expect((p.markup.match(/<rect /g) || []).length).toBe(1);
+    expect((p.markup.match(/<line /g) || []).length).toBe(1);
+  });
+
+  it("follows the caller's theme like the other plates (chromeCardColors), print fallback otherwise", () => {
+    const themed = buildingsPlate({ rows, total: 1422514, m, pal: { plateFill: "rgba(1,2,3,0.9)" } });
+    expect(themed.markup).toContain('fill="rgba(1,2,3,0.9)"');
+    const printed = buildingsPlate({ rows, total: 1422514, m, pal: {} });
+    expect(printed.markup).toMatch(/fill="rgba\(249,\s*248,\s*244,\s*0\.84\)"/);
+  });
+});
+
+describe("furnitureLayout / buildSheetFurnitureSvg — the buildings inset joins the corner set (B1934529)", () => {
+  const rows = [{ name: "Building 1", sf: 500000 }];
+
+  it("omitting buildingRows changes nothing — byte-identical to the pre-existing two-plate layout", () => {
+    const withoutRows = furnitureLayout(frame);
+    const withEmptyRows = furnitureLayout({ ...frame, buildingRows: [] });
+    expect(withoutRows.buildings).toBeUndefined();
+    expect(withEmptyRows.buildings).toBeUndefined();
+    expect(withEmptyRows.scaleBar.corner).toBe(withoutRows.scaleBar.corner);
+    expect(withEmptyRows.north.corner).toBe(withoutRows.north.corner);
+  });
+
+  it("non-empty buildingRows adds a third plate, wholly inside the safe area, disjoint from the other two", () => {
+    const L = furnitureLayout({ ...frame, buildingRows: rows, buildingTotal: 500000 });
+    expect(L.buildings).toBeDefined();
+    const left = frame.x, right = frame.x + frame.w, top = frame.y, bot = frame.y + frame.h;
+    expect(L.buildings.tx).toBeGreaterThan(left - 1e-6);
+    expect(L.buildings.ty).toBeGreaterThan(top - 1e-6);
+    expect(L.buildings.tx + L.buildings.plateW).toBeLessThan(right + 1e-6);
+    expect(L.buildings.ty + L.buildings.plateH).toBeLessThan(bot + 1e-6);
+    const boxes = [
+      { x: L.scaleBar.tx, y: L.scaleBar.ty, w: L.scaleBar.plateW, h: L.scaleBar.plateH },
+      { x: L.north.tx, y: L.north.ty, w: L.north.plateW, h: L.north.plateH },
+      { x: L.buildings.tx, y: L.buildings.ty, w: L.buildings.plateW, h: L.buildings.plateH },
+    ];
+    for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i], b = boxes[j];
+      const disjoint = a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
+      expect(disjoint).toBe(true);
+    }
+  });
+
+  it("buildSheetFurnitureSvg emits a third group only when there ARE building rows", () => {
+    const without = buildSheetFurnitureSvg({ ...frame, fmtFeet: (n) => String(n) });
+    expect(without.match(/<g transform="translate\(/g)?.length).toBe(2);
+    const withBuildings = buildSheetFurnitureSvg({ ...frame, fmtFeet: (n) => String(n), buildingRows: rows, buildingTotal: 500000 });
+    expect(withBuildings.match(/<g transform="translate\(/g)?.length).toBe(3);
+    expect(withBuildings).toContain("Building 1");
+    expect(withBuildings).toContain("BUILDINGS");
   });
 });
 

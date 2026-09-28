@@ -39,6 +39,7 @@ import {
   feetExtentToBbox, aerialTileGrid, pickAerialTileZoom, deepenZoomFor,
 } from "./arcgis.js";
 import { siteToFeatures, buildKmz, kmzFilename, KMZ_MIME } from "./kmzExport.js";
+import { buildingSfRows } from "./buildingSfTable.js";
 import { buildSheetFurnitureSvg } from "./sheetFurnitureLayout.js";
 import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp, pageSizeForFit } from "./printSheet.js";
 export { pageSizeForFit };
@@ -193,13 +194,13 @@ export function createExportSheet(ctx) {
   // `paper`/`orient` (the last two args) name the sheet the plan is headed for, so the label
   // tier can size itself to that paper. Omitted → the notional letter-landscape box (the PNG
   // case, and any caller that just wants the plan SVG).
-  const buildExportSvg = (frame, includeOverlay, paper, exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, sheetPaper, sheetOrient, includeMetrics = true, pageOverride = null) =>
+  const buildExportSvg = (frame, includeOverlay, paper, exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, sheetPaper, sheetOrient, includeMetrics = true, pageOverride = null, includeBuildingsTable = true) =>
     withFullRender(
-      () => buildExportSvgRaw(frame, includeOverlay, paper, exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays),
+      () => buildExportSvgRaw(frame, includeOverlay, paper, exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, includeBuildingsTable),
       sheetLabelPpfFor(frame, sheetPaper, sheetOrient, includeMetrics, pageOverride),
     );
 
-  const buildExportSvgRaw = (frame, includeOverlay = true, paper = PAL.paper, exportAerial = null, exportOverlays = null, includeMapLayers = true, exportVectorOverlays = null) => {
+  const buildExportSvgRaw = (frame, includeOverlay = true, paper = PAL.paper, exportAerial = null, exportOverlays = null, includeMapLayers = true, exportVectorOverlays = null, includeBuildingsTable = true) => {
     if (!svgRef.current) return null;
     const fe = exportFeetExtent(frame);
     if (!fe) return null;
@@ -417,7 +418,13 @@ export function createExportSheet(ctx) {
     // was pressed — a dark-inked or dark-plated scale bar on a PDF would be worse than the
     // on-screen bug this fixes. Passing no pal lets scaleBarPlate/northArrowPlate fall back to
     // their own fixed, print-safe ink/plate defaults (sheetFurniture.js), same as they always have.
-    furn.innerHTML = buildSheetFurnitureSvg({ x, y, w, h, ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: {}, obstacles });
+    // B1934529 — the compact "Buildings" SF inset, same corner-placement family as the scale bar
+    // / north arrow above (a THIRD no-occlude corner). `includeBuildingsTable` is the compose
+    // screen's own Content toggle (default on); a plan with no buildings never reserves a plate
+    // regardless of the toggle (buildingSfRows returns an empty rows array, and furnitureLayout
+    // treats that identically to omitting it — no corner spent, nothing drawn).
+    const bldgTable = includeBuildingsTable ? buildingSfRows(els) : { rows: [], total: 0 };
+    furn.innerHTML = buildSheetFurnitureSvg({ x, y, w, h, ftPerUnit: 1 / view.ppf, fmtFeet: f0, pal: {}, obstacles, buildingRows: bldgTable.rows, buildingTotal: bldgTable.total, fmtSf: f0 });
     root.appendChild(furn);
     return { clone, w, h };
   };
@@ -1049,7 +1056,7 @@ export function createExportSheet(ctx) {
    * reserves no height for the band at all — the plan reclaims the freed strip rather than
    * leaving a gap — and `buildPrintSheetSvg` omits the band (bars, metrics line AND the
    * disclaimer note, which is part of the band, not a separate thing being evaded). */
-  const buildComposedSheet = async (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null) => {
+  const buildComposedSheet = async (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true) => {
     const exportAerial = await exportAerialForFrame(printFrame); // B735/B839 — capture the live basemap (a Leaflet <div> the SVG can't clone) as a frame-exact image: stitched cached tiles, or the dynamic /export fallback
     const exportOverlays = exportOverlaysForFrame(printFrame); // B739 — capture the live GIS raster layers (floodplain, pipelines, …) for the print frame
     await warmTerrainForFrame(); // NEW-1 — the persistent cache tier is async now; make sure the frame's terrain tiles are resident before the SYNC capture below
@@ -1057,7 +1064,7 @@ export function createExportSheet(ctx) {
     // NEW-1 (B1783056) — `pageOverride` (Fit-to-frame page) replaces the standard paper/orient
     // page lookup everywhere below that would otherwise re-derive it, so the label tier and the
     // final page geometry can never disagree about which page this sheet is actually printing to.
-    const built = buildExportSvg(printFrame, includeOverlay, "#ffffff", exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, paper, orient, includeMetricsBand, pageOverride); // force WHITE paper for print/PDF; paper/orient size the label tier (NEW-1)
+    const built = buildExportSvg(printFrame, includeOverlay, "#ffffff", exportAerial, exportOverlays, includeMapLayers, exportVectorOverlays, paper, orient, includeMetricsBand, pageOverride, includeBuildingsTable); // force WHITE paper for print/PDF; paper/orient size the label tier (NEW-1)
     if (!built) return null;
     // Embed the aerial + GIS overlays (and any placed overlay) as data URLs; DROP any we can't
     // fetch so a cross-origin image can't taint the canvas and abort the whole export (B202). A
@@ -1094,13 +1101,13 @@ export function createExportSheet(ctx) {
     return { sheetSvg, layout, aerialDropped, overlaysDropped };
   };
 
-  const exportPDF = async (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null) => {
+  const exportPDF = async (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true) => {
     const now = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
     const t0 = now();
     const mark = (label) => { try { console.debug(`[pdf] ${label}: ${Math.round(now() - t0)}ms`); } catch (_) {} };
     setExportingPDF(true);
     try {
-      const composed = await buildComposedSheet(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride);
+      const composed = await buildComposedSheet(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride, includeBuildingsTable);
       if (!composed) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
       const { sheetSvg, layout, aerialDropped, overlaysDropped } = composed;
       mark("composed sheet");
