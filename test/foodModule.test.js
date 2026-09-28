@@ -10,6 +10,8 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import { MODULE_BY_SLUG, SLUG_BY_MODULE, parseRoute, buildHash } from "../src/app/route.js";
 import { MODULE_ACCENT } from "../src/shared/ui/moduleAccent.js";
@@ -24,9 +26,12 @@ import {
 import {
   withVisitDate, dishesForVisitIds, groupDishesByName, dishRowsForTable, bestDishRow,
   theOrderEntries, theOrderTotalCents, formatCents, theOrderAsText, meanDishScoreForVisit,
-  matchingOpenDishWishlist,
+  matchingOpenDishWishlist, formatScore, dishScoreTier, scoreSatisfiesQuarterStep,
 } from "../src/workspaces/food/lib/dishAggregates.js";
-import { DISH_SCORE_MIN, DISH_SCORE_MAX, DISH_SCORE_STEP, DISH_SCORE_TICKS } from "../src/workspaces/food/components/ScoreMeter.jsx";
+import ScoreMeter, {
+  DISH_SCORE_MIN, DISH_SCORE_MAX, DISH_SCORE_STEP, DISH_SCORE_TICKS, clampScore, nudgeScore,
+} from "../src/workspaces/food/components/ScoreMeter.jsx";
+import DishesSection from "../src/workspaces/food/components/DishesSection.jsx";
 import { roundKey, queryFor, fromElement } from "../src/workspaces/food/lib/overpass.js";
 import { RATING_COLORS, RATING_TEXT, colorForRating, textColorForRating } from "../src/workspaces/food/lib/ratingColor.js";
 import { formatCategory, formatAddress, formatCityFromAddress } from "../src/workspaces/food/lib/formatPlace.js";
@@ -3025,6 +3030,71 @@ describe("db/food.sql — food_dishes: a new table, additive only, never touchin
   });
 });
 
+/* NEW-1 (2026-09-28 redesign) — food_dishes.score: HALF-point -> QUARTER-point. The inline
+ * `create table` block above still reads numeric(3,1)/halves — that is CORRECT and untouched
+ * (this repo's own convention: never rewrite an already-shipped `create table`'s history, append
+ * a forward ALTER instead — the food_visits.rating/rating_ambiance section earlier in this same
+ * file did the identical half-to-quarter widen the identical way). The live migration was run and
+ * verified against production (lyeqzkuiwngunutlkkmi) before this shipped: a checksum over every
+ * existing food_dishes row (id + trim_scale(score)) and over every food_visits row (id +
+ * trim_scale(rating)) matched EXACTLY before and after the ALTER — see this SQL file's own header
+ * comment on the migration for the recorded values. */
+describe("db/food.sql — NEW-1: food_dishes.score widened to numeric(4,2), quarter-point steps", () => {
+  const sql = src("db/food.sql");
+  // This section is the LAST thing in the file — slice to the end rather than pin a second,
+  // easy-to-typo boundary string.
+  const section = sql.slice(sql.indexOf("-- ── food_dishes.score: QUARTER-POINT"));
+
+  it("found the NEW-1 migration section (the scan below is not vacuous)", () => {
+    expect(section.length).toBeGreaterThan(100);
+  });
+
+  it("widens the column to numeric(4,2) — never numeric(3,2), which overflows at exactly 10.00", () => {
+    expect(section).toMatch(/alter table public\.food_dishes alter column score type numeric\(4,2\) using score::numeric\(4,2\);/);
+    // Strip full-line `--` comments first — this section's own header explains WHY not
+    // numeric(3,2) in prose (mentioning it by name), same as the food_visits precedent above;
+    // only an occurrence in real DDL counts.
+    const ddlOnly = section.split("\n").filter((line) => !line.trim().startsWith("--")).join("\n");
+    expect(ddlOnly).not.toMatch(/numeric\(3,2\)/);
+  });
+
+  it("the new constraint is quarter-point (score * 4), replacing the half-point (score * 2) check — same 1.0-10.0 bounds", () => {
+    expect(section).toMatch(/alter table public\.food_dishes drop constraint if exists food_dishes_score_check;/);
+    expect(section).toMatch(/add constraint food_dishes_score_check\s*\n\s*check \(score is null or \(score >= 1\.0 and score <= 10\.0 and \(score \* 4\) = round\(score \* 4\)\)\);/);
+  });
+
+  it("⛔ NO ROW IS TOUCHED — this section issues ZERO update/delete against food_dishes or food_visits, only ALTER/DROP/ADD CONSTRAINT (a pure widen)", () => {
+    expect(section).not.toMatch(/update public\.food_dishes/i);
+    expect(section).not.toMatch(/delete from public\.food_dishes/i);
+    expect(section).not.toMatch(/update public\.food_visits/i);
+    expect(section).not.toMatch(/delete from public\.food_visits/i);
+  });
+
+  it("idempotent (the drop-then-add constraint shape, matching every other constraint widen in this file)", () => {
+    expect(section).toMatch(/drop constraint if exists food_dishes_score_check;\nalter table public\.food_dishes add constraint food_dishes_score_check/);
+  });
+});
+
+describe("scoreSatisfiesQuarterStep — a pure JS mirror of the DB check, so the boundary table is a unit test, not a live-DB-only claim", () => {
+  it("⛔ PROVE IT — accepts 8.25, 8.5, 8, 10, 1; rejects 8.3, 8.125, 0.75, 10.25 (verified live against production too — see db/food.sql's own header)", () => {
+    expect(scoreSatisfiesQuarterStep(8.25)).toBe(true);
+    expect(scoreSatisfiesQuarterStep(8.5)).toBe(true);
+    expect(scoreSatisfiesQuarterStep(8)).toBe(true);
+    expect(scoreSatisfiesQuarterStep(10)).toBe(true);
+    expect(scoreSatisfiesQuarterStep(1)).toBe(true);
+    expect(scoreSatisfiesQuarterStep(8.3)).toBe(false);
+    expect(scoreSatisfiesQuarterStep(8.125)).toBe(false);
+    expect(scoreSatisfiesQuarterStep(0.75)).toBe(false);
+    expect(scoreSatisfiesQuarterStep(10.25)).toBe(false);
+  });
+
+  it("null passes (nullable column) — a string (PostgREST's own numeric encoding) is coerced the same as every other numeric read in this module", () => {
+    expect(scoreSatisfiesQuarterStep(null)).toBe(true);
+    expect(scoreSatisfiesQuarterStep("8.25")).toBe(true);
+    expect(scoreSatisfiesQuarterStep("8.3")).toBe(false);
+  });
+});
+
 describe("foodStore — dish CRUD never sends a client-supplied place_id (the DB trigger is the only source of truth)", () => {
   const foodStore = src("lib/foodStore.js");
   const insertFn = foodStore.slice(foodStore.indexOf("export async function insertDish"), foodStore.indexOf("export async function updateDish"));
@@ -3186,68 +3256,149 @@ describe("FoodApp — saveDish never touches food_visits.rating or any visit fie
   });
 });
 
-describe("ScoreMeter — the per-dish score control: HALF-point steps, a native slider (never a grid of buttons)", () => {
-  it("min 1, max 10, step 0.5 — the owner's own existing scale, distinct from the visit rating's quarter-point step", () => {
+describe("ScoreMeter — REDESIGN (NEW-1, 2026-09-28): QUARTER-point steps, minus/plus nudge buttons, a readable numeral, and the 'Not rated over a filled track' bug killed", () => {
+  it("min 1, max 10, step 0.25 — the redesign's scale change, ticks unchanged", () => {
     expect(DISH_SCORE_MIN).toBe(1);
     expect(DISH_SCORE_MAX).toBe(10);
-    expect(DISH_SCORE_STEP).toBe(0.5);
+    expect(DISH_SCORE_STEP).toBe(0.25);
     expect(DISH_SCORE_TICKS).toEqual([1, 3, 5, 7, 9, 10]);
   });
 
-  it("⛔ exactly ONE <input type=\"range\"> and no per-value <button> grid — the owner already rejected 'individual buttons for 20 options' for the visit rating (2026-08-18); the dish brief's own 'click a segment' language is the same rejected shape", () => {
+  it("⛔ STILL exactly ONE <input type=\"range\"> and no per-value <button> grid — the owner already rejected 'individual buttons for 20 options' for the visit rating (2026-08-18); the minus/plus NUDGE buttons step the existing slider, they are not that rejected shape", () => {
     const meter = src("components/ScoreMeter.jsx");
     const body = meter.slice(meter.indexOf("export default function ScoreMeter"));
     const rangeInputs = body.match(/type="range"/g) || [];
     expect(rangeInputs).toHaveLength(1);
-    // No array of per-stop clickable buttons — the "meter" look is a CSS background, not a DOM of buttons.
-    expect(body).not.toMatch(/\.map\(.*<button/s);
+    // The tick-label .map() renders plain <span> ticks, never a button grid.
+    const ticksMapStart = body.indexOf("DISH_SCORE_TICKS.map");
+    expect(body.slice(ticksMapStart, ticksMapStart + 300)).not.toMatch(/<button/);
+    // Exactly three real <button> elements total (minus, plus, Clear) — never one per score stop.
+    expect((body.match(/<button/g) || []).length).toBe(3);
     expect(meter).toMatch(/step=\{DISH_SCORE_STEP\}/);
   });
 
-  it("Clear sets the value back to null (unrated), matching the visit rating slider's own Clear affordance", () => {
+  it("Clear sets the value back to null, matching the visit rating slider's own Clear affordance", () => {
     const meter = src("components/ScoreMeter.jsx");
     expect(meter).toMatch(/data-testid="dish-score-clear"/);
     expect(meter).toMatch(/onClick=\{\(\) => onChange\(null\)\}/);
   });
+
+  describe("clampScore / nudgeScore — pure functions, the exact math the minus/plus buttons and the slider both call", () => {
+    it("clampScore snaps to the nearest quarter point and clamps at both ends", () => {
+      expect(clampScore(8.3)).toBe(8.25);
+      expect(clampScore(11)).toBe(10);
+      expect(clampScore(0)).toBe(1);
+      expect(clampScore(5)).toBe(5);
+    });
+
+    it("⛔ PROVE IT — the minus/plus buttons move the value by EXACTLY 0.25 and clamp at 1 and 10", () => {
+      expect(nudgeScore(5, 0.25)).toBe(5.25);
+      expect(nudgeScore(5, -0.25)).toBe(4.75);
+      expect(nudgeScore(9.75, 0.25)).toBe(10); // clamp at the ceiling
+      expect(nudgeScore(10, 0.25)).toBe(10); // already at the ceiling — stays put, never overshoots
+      expect(nudgeScore(1.25, -0.25)).toBe(1); // clamp at the floor
+      expect(nudgeScore(1, -0.25)).toBe(1);
+    });
+
+    it("from an UNSET score, either nudge button ESTABLISHES a rating at the floor rather than jumping past it", () => {
+      expect(nudgeScore(null, 0.25)).toBe(DISH_SCORE_MIN);
+      expect(nudgeScore(null, -0.25)).toBe(DISH_SCORE_MIN);
+    });
+  });
+
+  describe("rendered output (react-dom/server — no DOM needed, real component code)", () => {
+    const render = (value) => renderToStaticMarkup(createElement(ScoreMeter, { value, onChange: () => {} }));
+
+    it("⛔ THE BUG THIS KILLS — an UNSET score shows an em dash, a caption that says nothing is set, and the track in its NEUTRAL state, never the string 'Not rated' over a filled bar", () => {
+      const html = render(null);
+      expect(html).not.toMatch(/Not rated/);
+      expect(html).toContain('data-score-state="unset"');
+      expect(html).toContain(">—<"); // the em-dash numeral
+      expect(html).toContain("not set yet"); // the caption — never silent, never "quarter steps" while unset
+      expect(html).not.toContain("quarter steps");
+      // The thumb sits at the scale's own floor (nothing filled before it) and the track is the
+      // flat neutral colour, never the striped accent meter.
+      expect(html).toMatch(/<input[^>]*value="1"/);
+      expect(html).toContain("var(--border-default)"); // the neutral track fill
+    });
+
+    it("a SET score shows a large numeral trimmed of trailing zeros, right-aligned beside '/ 10', and the 'quarter steps' caption", () => {
+      const wholeNumber = render(8);
+      expect(wholeNumber).toContain('data-score-state="set"');
+      expect(wholeNumber).toContain(">8<");
+      expect(wholeNumber).not.toContain(">8.00<");
+      expect(wholeNumber).toContain("quarter steps");
+      expect(wholeNumber).toContain("/ 10");
+
+      expect(render(8.5)).toContain(">8.5<");
+      expect(render(8.25)).toContain(">8.25<");
+    });
+  });
 });
 
-describe("DishesSection — inline editors only (no dialog box), Enter/Esc contract, sortable table, THE ORDER", () => {
+describe("DishesSection — REDESIGN (NEW-1, 2026-09-28): field hierarchy, score-chip-left rows, kebab menu (Edit/History/Delete)", () => {
   const section = src("components/DishesSection.jsx");
 
   it("no window.prompt/confirm/alert anywhere in this file", () => {
     expect(section).not.toMatch(/window\.(prompt|confirm|alert)\(/);
   });
 
-  it("Enter commits (and, only when adding a NEW dish, reopens a blank row); Escape cancels", () => {
-    const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function DishDisplayRow"));
+  it("Enter commits (and, only when adding a NEW dish, reopens a blank row); Escape cancels — unchanged by the redesign", () => {
+    const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function ScoreChip"));
     expect(editRow).toMatch(/if \(e\.key === "Escape"\) \{ e\.preventDefault\(\); onCancel\(\); \}/);
     expect(editRow).toMatch(/if \(e\.key === "Enter" && e\.target\.tagName !== "TEXTAREA"\) \{ e\.preventDefault\(\); commit\(!initial\); \}/);
     expect(editRow).toMatch(/if \(ok && andReopen\) reset\(\);/);
   });
 
-  it("the hint line names both keys, so the behaviour isn't a hidden affordance", () => {
-    expect(section).toMatch(/Enter saves\{!initial \? " and starts another" : ""\} · Esc cancels/);
+  it("the dish name is the editor's HERO field — transparent background, no box, a 2px accent underline — never the same filled-grey box as every other field (the shipped defect)", () => {
+    const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function ScoreChip"));
+    const nameInput = editRow.slice(editRow.indexOf('data-testid="dish-name-input"') - 400, editRow.indexOf('data-testid="dish-name-input"') + 400);
+    expect(nameInput).toMatch(/background: "transparent"/);
+    expect(nameInput).toMatch(/borderBottom: "2px solid var\(--accent-food\)"/);
+    expect(nameInput).toMatch(/fontWeight: 600/);
   });
 
   it("the dish name field autocompletes against existing dish names at this place AND open (not-done) wishlist names, via a native <datalist> (no custom dropdown widget)", () => {
-    const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function DishDisplayRow"));
+    const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function ScoreChip"));
     expect(editRow).toMatch(/const suggestions = \[\.\.\.new Set\(\[\.\.\.existingNames, \.\.\.openWishlistNames\]\)\];/);
     expect(editRow).toMatch(/<datalist id=\{listId\}>/);
   });
 
+  it("Course and Price share a row — Course flexes, Price is a fixed narrow field", () => {
+    const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function ScoreChip"));
+    expect(editRow).toMatch(/flex: 1, minWidth: 0[\s\S]{0,80}?Course/);
+    expect(editRow).toMatch(/flex: "0 0 92px"[\s\S]{0,80}?Price/);
+  });
+
   it("price is entered in dollars and stored as ROUNDED integer cents", () => {
-    const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function DishDisplayRow"));
+    const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function ScoreChip"));
     expect(editRow).toMatch(/price_cents: price === "" \? null : Math\.round\(Number\(price\) \* 100\),/);
   });
 
-  it("order-again is a three-way segmented control with a glyph AND a fill for every state — 'no' is neutral (chrome-muted), never a red/danger token", () => {
-    const control = section.slice(section.indexOf("const ORDER_AGAIN_OPTIONS"), section.indexOf("function DishHistoryPanel"));
-    expect(control).toMatch(/glyph: "✓"/);
-    expect(control).toMatch(/glyph: "✕"/);
-    expect(control).not.toMatch(/var\(--danger/);
+  it("⛔ every field label is small-caps, 10px (FONT_SIZE.micro), letter-spaced, in the secondary text token", () => {
+    expect(section).toMatch(/const FIELD_LABEL_STYLE = \{[\s\S]{0,220}?fontSize: FONT_SIZE\.micro,[\s\S]{0,220}?textTransform: "uppercase"/);
   });
 
-  it("sortable by score (default), name, price, last had", () => {
+  it("Order it again — now carries its own label (the shipped defect: three buttons with nothing saying what they answer), and EVERY selected state uses the SAME accent fill (previously only 'yes' got the real fill)", () => {
+    const control = section.slice(section.indexOf("const ORDER_AGAIN_OPTIONS"), section.indexOf("function DishHistoryPanel"));
+    expect(control).toMatch(/Order it again\?/);
+    expect(control).toMatch(/glyph: "✓"/);
+    expect(control).toMatch(/glyph: "~"/);
+    expect(control).toMatch(/glyph: "✕"/);
+    expect(control).not.toMatch(/var\(--danger/);
+    expect(control).not.toMatch(/chrome-muted/); // no more "yes is real, the others are a lesser fill"
+    expect(control).toMatch(/minHeight: minH/); // >= 46 desktop / 54 phone, computed once
+  });
+
+  it("the buttons row: ADD mode gets 'Save & add another' (primary) + 'Save & close' + Cancel; EDIT mode gets only 'Save' (primary) + Cancel — an owner decision, not a guess", () => {
+    const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function ScoreChip"));
+    expect(editRow).toMatch(/\{initial \? "Save" : "Save & add another"\}/);
+    expect(editRow).toMatch(/!initial && \(/); // "Save & close" only renders when adding
+    expect(editRow).toMatch(/data-testid="dish-save-close-btn"/);
+    expect(editRow).toMatch(/data-testid="dish-cancel-btn"/);
+  });
+
+  it("sortable by score (default), name, price, last had — unchanged", () => {
     expect(section).toMatch(/const \[sortKey, setSortKey\] = useState\("score"\);/);
     expect(section).toMatch(/score: \(a, b\) => \(Number\(b\.latestScore \?\? -1\) - Number\(a\.latestScore \?\? -1\)\)/);
     expect(section).toMatch(/<option value="name">Sort: name<\/option>/);
@@ -3255,7 +3406,7 @@ describe("DishesSection — inline editors only (no dialog box), Enter/Esc contr
     expect(section).toMatch(/<option value="last">Sort: last had<\/option>/);
   });
 
-  it("THE ORDER shows only latest order_again='yes' dishes, with a Copy button, and only renders when non-empty", () => {
+  it("THE ORDER shows only latest order_again='yes' dishes, with a Copy button, and only renders when non-empty — unchanged", () => {
     expect(section).toMatch(/data-testid="food-the-order"/);
     expect(section).toMatch(/orderEntries\.length > 0 &&/);
     expect(section).toMatch(/data-testid="food-the-order-copy"/);
@@ -3270,17 +3421,86 @@ describe("DishesSection — inline editors only (no dialog box), Enter/Esc contr
     expect(section).toMatch(/const targetVisitId = visits\[0\]\.id;/);
   });
 
-  it("deleting a dish requires a second confirming tap — inline, never window.confirm", () => {
-    expect(section).toMatch(/data-testid="dish-delete-btn"/);
-    expect(section).toMatch(/data-testid="dish-delete-confirm"/);
-    expect(section).toMatch(/const \[confirmingDelete, setConfirmingDelete\] = useState\(false\);/);
-  });
-
-  it("every interactive control clears the 44px touch-target floor (phone-width capture surface)", () => {
+  it("every interactive control clears the 32px floor (a control below it carries className=\"tap-target\", the app's own hit-area-without-growing-the-box mechanism)", () => {
     const minHeights = [...section.matchAll(/minHeight:\s*(\d+)/g)].map((m) => Number(m[1]));
     expect(minHeights.length).toBeGreaterThan(0);
-    expect(minHeights.every((h) => h >= 32)).toBe(true); // 32 for compact chips (sort select, order-again), 44 for primary actions
+    expect(minHeights.every((h) => h >= 32)).toBe(true);
     expect(section).toMatch(/minHeight: 44/);
+  });
+
+  describe("⛔ REMOVE THE BARE X, DROP THE PENCIL — delete and edit both moved into the row's kebab menu", () => {
+    it("the OLD bare-delete testids are gone", () => {
+      expect(section).not.toMatch(/dish-delete-btn/);
+      expect(section).not.toMatch(/dish-row-edit-btn/); // the standalone pencil button
+    });
+
+    it("delete lives ONLY inside DishKebabMenu — the row/editor bodies contain no delete testid at all", () => {
+      const kebab = section.slice(section.indexOf("function DishKebabMenu"), section.indexOf("function DishDisplayRow"));
+      expect(kebab).toMatch(/data-testid="dish-row-delete"/);
+      expect(kebab).toMatch(/data-testid="dish-row-delete-confirm"/);
+      expect(kebab).toMatch(/data-testid="dish-row-delete-cancel"/);
+
+      const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function ScoreChip"));
+      expect(editRow).not.toMatch(/delete/i);
+
+      const displayRow = section.slice(section.indexOf("function DishDisplayRow"), section.indexOf("const SORTS"));
+      // Sliced up to the <DishKebabMenu> tag itself, so its own onDelete={onDeleteDish} prop
+      // plumbing (which necessarily NAMES delete) falls outside this slice — only a directly
+      // rendered delete AFFORDANCE (a testid, a button) in the row's own body would trip this.
+      const displayRowOwnBody = displayRow.slice(0, displayRow.indexOf("<DishKebabMenu"));
+      expect(displayRowOwnBody).not.toMatch(/data-testid="[^"]*delete/i);
+    });
+
+    it("delete requires a second confirming tap inside the kebab, never window.confirm", () => {
+      const kebab = section.slice(section.indexOf("function DishKebabMenu"), section.indexOf("function DishDisplayRow"));
+      expect(kebab).toMatch(/const \[confirmingDelete, setConfirmingDelete\] = useState\(false\);/);
+      expect(kebab).toMatch(/confirmingDelete \?/);
+    });
+
+    it("clicking the row opens the editor (row onClick={onOpenEdit}) — this is what makes the pencil redundant", () => {
+      const displayRow = section.slice(section.indexOf("function DishDisplayRow"), section.indexOf("const SORTS"));
+      expect(displayRow).toMatch(/data-testid="dish-row" data-dish-scored=\{[^}]*\} onClick=\{onOpenEdit\}/);
+    });
+
+    it("History is wired to render ONLY when the dish has more than one rating (row.history.length > 0) — owner decision: kept, not dropped, moved off the row click into the kebab", () => {
+      const displayRow = section.slice(section.indexOf("function DishDisplayRow"), section.indexOf("const SORTS"));
+      expect(displayRow).toMatch(/hasHistory=\{row\.history\.length > 0\}/);
+      const kebab = section.slice(section.indexOf("function DishKebabMenu"), section.indexOf("function DishDisplayRow"));
+      expect(kebab).toMatch(/\{hasHistory && \([\s\S]{0,120}?data-testid="dish-row-history"/);
+    });
+  });
+
+  describe("rendered rows (react-dom/server, via the real exported DishesSection — no DOM needed) — the score chip on the left, the unscored dashed state, and no stray delete control anywhere in the closed markup", () => {
+    const visits = [{ id: "v1", visited_on: "2026-01-01" }];
+    const renderWith = (dishesWithDate) => renderToStaticMarkup(createElement(DishesSection, {
+      dishesWithDate, visits, onSaveDish: () => {}, onDeleteDish: () => {}, pending: false,
+    }));
+
+    it("a SCORED dish (round-tripped through a PostgREST-style string score, like the real API returns) renders the trimmed quarter-point numeral in the chip, on the LEFT of the row", () => {
+      const html = renderWith([{ id: "d1", visit_id: "v1", name: "Queso", score: "8.25", updated_at: "2026-01-01T00:00:00Z" }]);
+      expect(html).toMatch(/data-testid="dish-row"[\s\S]{0,600}data-testid="dish-score-chip"/); // chip is the FIRST thing in the row (allowing for the row div's own long inline style attribute)
+      expect(html).toMatch(/data-score-tier="high"[^>]*>8\.25</);
+    });
+
+    it("an UNSCORED dish renders a DASHED row: an em-dash chip, 'Not scored yet' in accent text, and a 'Score it' button — never a bare score of any kind", () => {
+      const html = renderWith([{ id: "d1", visit_id: "v1", name: "Mystery dish", score: null, updated_at: "2026-01-01T00:00:00Z" }]);
+      expect(html).toMatch(/data-score-tier="unset"[^>]*>—</);
+      expect(html).toContain("Not scored yet");
+      expect(html).toContain('data-testid="dish-score-it-btn"');
+      expect(html).toContain('data-dish-scored="false"');
+    });
+
+    it("no bare delete control anywhere in the rendered (closed-menu) markup — the kebab is the only door", () => {
+      const html = renderWith([{ id: "d1", visit_id: "v1", name: "Ribs", score: 7, updated_at: "2026-01-01T00:00:00Z" }]);
+      expect(html).not.toMatch(/delete/i);
+      expect(html).toContain('data-testid="dish-row-kebab"');
+    });
+
+    it("round trip: a saved 8.25 reads back and DISPLAYS as \"8.25\" (not 8.250, not 8.3)", () => {
+      const html = renderWith([{ id: "d1", visit_id: "v1", name: "Elote", score: "8.25", updated_at: "2026-01-01T00:00:00Z" }]);
+      expect(html).toContain(">8.25<");
+      expect(html).not.toContain("8.250");
+    });
   });
 });
 

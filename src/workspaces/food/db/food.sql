@@ -669,3 +669,28 @@ alter function public.food_dishes_before_write() set search_path = public, pg_te
 alter function public.food_places_in_bounds_sampled(double precision, double precision, double precision, double precision, integer, integer) set search_path = public, pg_temp;
 alter function public.food_places_search_by_name_raw(text, integer, double precision, double precision) set search_path = public, pg_temp;
 alter function public.food_places_search_by_name(text, integer, double precision, double precision) set search_path = public, pg_temp;
+
+-- ── food_dishes.score: QUARTER-POINT steps (NEW-1, second pass on B1873008, owner-approved
+-- editor/row redesign, 2026-09-28). Widens numeric(3,1) (one decimal, half-point-capable — the
+-- scale food_dishes shipped with) to numeric(4,2) (two decimals, quarter-point-capable) and
+-- loosens the halves-only CHECK to a quarters-only one — the identical shape as the
+-- food_visits.rating/rating_ambiance widen above, including the SAME numeric(4,2)-not-
+-- numeric(3,2) reasoning: numeric(3,2) has only one digit of room before the decimal point (max
+-- 9.99) and would raise "numeric field overflow" on a real value of exactly 10.00.
+--
+-- Every existing food_dishes.score value is a half step (or null) — half steps trivially satisfy
+-- the new quarter-point check (N*2=round(N*2) implies N*4=round(N*4)) — so this is a pure widen,
+-- no row's value moves. Verified non-destructive on production before shipping: a scale-
+-- independent checksum (md5 over every row's id + trim_scale(score), immune to the display-
+-- padding difference between numeric(3,1) and numeric(4,2)) over all 5 existing food_dishes rows,
+-- and the identical checksum over all 185 food_visits.rating values (untouched by this migration
+-- — see the header on the food_dishes table above: food_visits.rating is never touched by this
+-- table), both matched EXACTLY before and after this ALTER. Idempotent: safe to re-run.
+alter table public.food_dishes alter column score type numeric(4,2) using score::numeric(4,2);
+alter table public.food_dishes drop constraint if exists food_dishes_score_check;
+alter table public.food_dishes add constraint food_dishes_score_check
+  check (score is null or (score >= 1.0 and score <= 10.0 and (score * 4) = round(score * 4)));
+
+-- Verify (read-only; safe to run any time) -----------------------------------
+--   select numeric_precision, numeric_scale from information_schema.columns
+--     where table_name = 'food_dishes' and column_name = 'score';               -- expect 4, 2
