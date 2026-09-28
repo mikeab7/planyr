@@ -1,0 +1,54 @@
+{
+  "_comment": "Real parcel rings for NEW-1 (owner report: selected parcel boundary moves relative to the aerial as you zoom). `schlipf` is the EXACT production record the report is about (site smuh3gjf2cdj, 'Schlipf'/'Concept A', parcel psmuh3gjf2cdj_0), pulled read-only from planyr_production on 2026-09-28 with the owner's explicit go-ahead to touch that plan for this investigation — nothing on the real record was changed. `harris` is a second, different-county real parcel for the adjacent-cases table. See test/mapLockRealParcel.test.js.",
+  "schlipf": {
+    "_source": "planyr_production site smuh3gjf2cdj / parcel psmuh3gjf2cdj_0 — situs 'HWY 90 E/PEDERSON (N LINE RR TRACKS)', Waller County, GIS_AREA 449.715 ac / LEGAL_AREA 454.447 ac per the county's own WCAD/TxGIO record (shoelace area of these exact points is 451.36 ac, matching the app's own displayed acreage and the owner's report verbatim)",
+    "origin": { "lat": 29.794719001244022, "lon": -95.86483129911 },
+    "points": [
+      { "x": -2650.594842937638, "y": -2121.8656964298852 },
+      { "x": -2650.9564325216415, "y": -2164.1973019031043 },
+      { "x": -2651.2693356319883, "y": -2200.764543043588 },
+      { "x": -2654.650625288683, "y": -2596.398210474087 },
+      { "x": -2624.6711476876712, "y": -2596.660718807509 },
+      { "x": -2405.321512060452, "y": -2598.3898003214376 },
+      { "x": -588.6108950611318, "y": -2612.66006128988 },
+      { "x": 2475.373372027218, "y": -2636.823640946918 },
+      { "x": 2478.9576643384444, "y": -2636.7988706514448 },
+      { "x": 2509.790721121415, "y": -2637.0941213378583 },
+      { "x": 2602.324057414067, "y": -2637.820432373983 },
+      { "x": 2602.7676452621445, "y": -2607.9172587303538 },
+      { "x": 2603.06431954944, "y": -2587.8960151281576 },
+      { "x": 2632.630958641831, "y": -2588.0489077385523 },
+      { "x": 2636.3166099296936, "y": -1890.5073006778764 },
+      { "x": 2638.3491989214667, "y": -1505.8508665594336 },
+      { "x": 2638.61227669907, "y": -1429.4059889084137 },
+      { "x": 2641.0824745016944, "y": -711.5421932152783 },
+      { "x": 2643.5535264486334, "y": 6.477057511061752 },
+      { "x": 2649.8574279589884, "y": 1488.1142829196456 },
+      { "x": 2652.3626458541708, "y": 2077.0753788996026 },
+      { "x": 2654.650625284179, "y": 2614.8370984921257 },
+      { "x": 2432.3143166509058, "y": 2614.816598923855 },
+      { "x": 550.984509607299, "y": 2637.6300543398625 },
+      { "x": 550.982516590386, "y": 2637.366122417944 },
+      { "x": 530.8109428535272, "y": 94.57337645146475 },
+      { "x": 162.93625134282576, "y": 94.8617939687231 },
+      { "x": -228.66184857436284, "y": 95.17355821097549 },
+      { "x": -2577.863234037938, "y": 97.12984326450827 },
+      { "x": -2608.6723746539856, "y": 97.1566065881551 },
+      { "x": -2631.629327040004, "y": 97.17596728495326 },
+      { "x": -2644.4893886184454, "y": -1447.4359273386208 },
+      { "x": -2647.023078139416, "y": -1703.9740549064368 }
+    ]
+  },
+  "harris": {
+    "_source": "https://www.gis.hctx.net/arcgis/rest/services/HCAD/Parcels/MapServer/identify (HCAD's own service, the layer lib/counties.js's `harris` entry uses) — 2026-09-28, a small residential lot, 0.191 ac",
+    "origin": { "lat": 29.685014772623813, "lon": -95.51991635632241 },
+    "points": [
+      { "x": -34.25, "y": 40.88 },
+      { "x": -33.36, "y": -80.45 },
+      { "x": 34.03, "y": -81.19 },
+      { "x": 36.09, "y": 39.91 },
+      { "x": 31.74, "y": 39.97 },
+      { "x": -34.25, "y": 40.88 }
+    ]
+  }
+}
