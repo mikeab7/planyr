@@ -21,6 +21,12 @@ import {
   manualGroupKey, wishlistedPlaceIds, manualWishlistFromRows,
   dishWishlistByPlaceId, dishWishlistByManualKey,
 } from "../src/workspaces/food/lib/foodStore.js";
+import {
+  withVisitDate, dishesForVisitIds, groupDishesByName, dishRowsForTable, bestDishRow,
+  theOrderEntries, theOrderTotalCents, formatCents, theOrderAsText, meanDishScoreForVisit,
+  matchingOpenDishWishlist,
+} from "../src/workspaces/food/lib/dishAggregates.js";
+import { DISH_SCORE_MIN, DISH_SCORE_MAX, DISH_SCORE_STEP, DISH_SCORE_TICKS } from "../src/workspaces/food/components/ScoreMeter.jsx";
 import { roundKey, queryFor, fromElement } from "../src/workspaces/food/lib/overpass.js";
 import { RATING_COLORS, RATING_TEXT, colorForRating, textColorForRating } from "../src/workspaces/food/lib/ratingColor.js";
 import { formatCategory, formatAddress, formatCityFromAddress } from "../src/workspaces/food/lib/formatPlace.js";
@@ -2307,15 +2313,19 @@ describe("VisitPanel — score strip (block 2), only when the place has at least
   });
 
   it("is gated on everVisited — never renders for a zero-visit place", () => {
-    expect(panel).toMatch(/\{everVisited && <ScoreStrip aggregates=\{aggregates\} \/>\}/);
+    expect(panel).toMatch(/\{everVisited && <ScoreStrip aggregates=\{aggregates\} bestDish=\{bestDish\} \/>\}/);
   });
 
-  it("shows a last-visit (formatted + relative) and a first-visit (month/year) facts line, omitted entirely when neither date exists", () => {
+  it("shows a last-visit (formatted + relative), a first-visit (month/year), and a best-dish (B1873008) facts line, omitted entirely when none of the three exist", () => {
     const strip = panel.slice(panel.indexOf("function ScoreStrip"), panel.indexOf("/* Order again"));
     expect(strip).toMatch(/formatVisitDate\(lastVisitDate\)/);
     expect(strip).toMatch(/formatRelativeDate\(lastVisitDate\)/);
     expect(strip).toMatch(/formatMonthYear\(firstVisitDate\)/);
-    expect(strip).toMatch(/\{\(lastLine \|\| firstLine\) && \(/);
+    // B1873008 — "best dish here" joins the SAME single facts line (PANEL-BREVITY: at most one
+    // short line per group, never a second line for one more fact) rather than a line of its own.
+    expect(strip).toMatch(/bestDishLine = bestDish \? `Best dish: \$\{bestDish\.name\} \(\$\{Number\(bestDish\.latestScore\)\}\)` : null;/);
+    expect(strip).toMatch(/\{\(lastLine \|\| firstLine \|\| bestDishLine\) && \(/);
+    expect(strip).toMatch(/\[lastLine, firstLine, bestDishLine\]\.filter\(Boolean\)\.join\(" · "\)/);
   });
 });
 
@@ -2411,7 +2421,7 @@ describe("VisitPanel — Empty state (block 6, never visited): no score strip, n
   });
 
   it("PastVisitsSection itself renders nothing at zero visits — no 'Past visits · 0' heading", () => {
-    expect(panel).toMatch(/function PastVisitsSection\(\{ pastVisits, onDelete, onEditVisit, editingVisitId, onOpenEdit, onCloseEdit, pending \}\) \{\s*if \(!pastVisits\.length\) return null;/);
+    expect(panel).toMatch(/function PastVisitsSection\(\{ pastVisits, onDelete, onEditVisit, editingVisitId, onOpenEdit, onCloseEdit, pending, dishesWithDate, onSaveDish, onDeleteDish, dishPending \}\) \{\s*if \(!pastVisits\.length\) return null;/);
   });
 });
 
@@ -2958,5 +2968,355 @@ describe("NEW-1 (2026-08-27 owner block) — saving a visit gives an unmistakabl
     const peekBlock = panel.slice(panel.indexOf("<div ref={peekRef}>"), panel.indexOf("{everVisited && <OrderAgain"));
     expect(peekBlock).toMatch(/data-testid="food-save-confirmation"/);
     expect(peekBlock).not.toMatch(/position:\s*"absolute"/);
+  });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════════════════════
+ * B1873008 — Dishes and per-dish ratings inside the existing Food module
+ * ═══════════════════════════════════════════════════════════════════════════════════════════ */
+
+describe("db/food.sql — food_dishes: a new table, additive only, never touching food_visits", () => {
+  const sql = src("db/food.sql");
+  const section = sql.slice(sql.indexOf("create table if not exists public.food_dishes"), sql.indexOf("-- B1205298"));
+
+  it("the food_dishes section issues ZERO writes against food_visits — the visit's own rating is never touched by this table", () => {
+    expect(section).not.toMatch(/alter table public\.food_visits/);
+    expect(section).not.toMatch(/update public\.food_visits/i);
+  });
+
+  it("score is numeric(3,1), HALF-point steps only (the owner's own existing 185-real-rating scale, not the visit's quarter-point scale)", () => {
+    expect(section).toMatch(/score\s+numeric\(3,1\)/);
+    expect(section).toMatch(/constraint food_dishes_score_check check \(score is null or \(score >= 1\.0 and score <= 10\.0 and \(score \* 2\) = round\(score \* 2\)\)\)/);
+  });
+
+  it("course and order_again are constrained to their exact named sets, or null", () => {
+    expect(section).toMatch(/constraint food_dishes_course_check check \(course is null or course in \('starter','entree','side','dessert','drink'\)\)/);
+    expect(section).toMatch(/constraint food_dishes_order_again_check check \(order_again is null or order_again in \('yes','maybe','no'\)\)/);
+  });
+
+  it("⛔ CONSTRAINT-CAPTURE: no photo_path column — the module's own CLAUDE.md bans scaffolding photo upload", () => {
+    expect(section).not.toMatch(/photo_path/);
+  });
+
+  it("visit_id cascades on delete (deleting a visit deletes its dishes) and place_id is denormalised, never authoritative on its own", () => {
+    expect(section).toMatch(/visit_id\s+uuid not null references public\.food_visits\(id\) on delete cascade/);
+    expect(section).toMatch(/place_id\s+text references public\.food_places\(id\) on delete set null/);
+  });
+
+  it("RLS enabled, four owner-only policies (select/insert/update/delete), no anon policy", () => {
+    expect(section).toMatch(/alter table public\.food_dishes enable row level security;/);
+    expect(section).toMatch(/for select to authenticated using \(\(select auth\.uid\(\)\) = user_id\)/);
+    expect(section).toMatch(/for insert to authenticated with check \(\(select auth\.uid\(\)\) = user_id\)/);
+    expect(section).toMatch(/for update to authenticated using \(\(select auth\.uid\(\)\) = user_id\) with check \(\(select auth\.uid\(\)\) = user_id\)/);
+    expect(section).toMatch(/for delete to authenticated using \(\(select auth\.uid\(\)\) = user_id\)/);
+    expect(section).not.toMatch(/to anon/);
+  });
+
+  it("food_dishes_before_write() derives place_id from the visit and raises LOUDLY on a cross-user/forged visit_id (LOUD-FAILURE)", () => {
+    expect(section).toMatch(/create or replace function public\.food_dishes_before_write\(\)/);
+    expect(section).toMatch(/raise exception 'food_dishes: visit % not found or not visible to this user', new\.visit_id;/);
+    expect(section).toMatch(/raise exception 'food_dishes: visit % does not belong to this user', new\.visit_id;/);
+    expect(section).toMatch(/new\.place_id := v_place_id;/);
+  });
+
+  it("reuses the EXISTING food_visits_touch_updated_at trigger function rather than defining a second copy", () => {
+    expect(section).toMatch(/create trigger food_dishes_touch before update on public\.food_dishes\s*\n\s*for each row execute function public\.food_visits_touch_updated_at\(\);/);
+    expect(section).not.toMatch(/create (or replace )?function public\.food_dishes_touch/);
+  });
+});
+
+describe("foodStore — dish CRUD never sends a client-supplied place_id (the DB trigger is the only source of truth)", () => {
+  const foodStore = src("lib/foodStore.js");
+  const insertFn = foodStore.slice(foodStore.indexOf("export async function insertDish"), foodStore.indexOf("export async function updateDish"));
+  const updateFn = foodStore.slice(foodStore.indexOf("export async function updateDish"), foodStore.indexOf("export async function deleteDish"));
+
+  it("insertDish strips place_id from the payload before writing", () => {
+    expect(insertFn).toMatch(/const \{ place_id: _ignored, \.\.\.rest \} = dish;/);
+    expect(insertFn).toMatch(/\.insert\(\{ \.\.\.rest, user_id: uid \}\)/);
+  });
+
+  it("updateDish strips both place_id and visit_id — a dish's place/visit are fixed at creation, never re-pointed from a plain edit", () => {
+    expect(updateFn).toMatch(/const \{ place_id: _ignoredPlace, visit_id: _ignoredVisit, \.\.\.rest \} = patch;/);
+    expect(updateFn).toMatch(/\.update\(rest\)/);
+  });
+
+  it("fetchAllDishes/insertDish/updateDish/deleteDish are all exported", () => {
+    expect(foodStore).toMatch(/export async function fetchAllDishes\(\)/);
+    expect(foodStore).toMatch(/export async function deleteDish\(id\)/);
+  });
+});
+
+describe("dishAggregates — a dish's score is its OWN; food_visits.rating is never derived from it", () => {
+  it("dishesForVisitIds filters by visit membership only — works identically for a real place_id and a manual pin (neither has a place_id on food_dishes in the manual case)", () => {
+    const dishes = [
+      { id: "d1", visit_id: "v1", name: "Queso" },
+      { id: "d2", visit_id: "v2", name: "Tacos" },
+      { id: "d3", visit_id: "v3", name: "Chips" },
+    ];
+    expect(dishesForVisitIds(dishes, ["v1", "v3"]).map((d) => d.id)).toEqual(["d1", "d3"]);
+  });
+
+  it("groupDishesByName is case/whitespace-insensitive and sorts each group NEWEST FIRST by visit date", () => {
+    const dishes = withVisitDate(
+      [
+        { id: "d1", visit_id: "v1", name: "queso" },
+        { id: "d2", visit_id: "v2", name: "  Queso  " },
+      ],
+      new Map([["v1", { visited_on: "2026-01-01" }], ["v2", { visited_on: "2026-06-01" }]])
+    );
+    const groups = groupDishesByName(dishes);
+    expect(groups.size).toBe(1);
+    expect(groups.get("queso").map((d) => d.id)).toEqual(["d2", "d1"]); // newest (v2) first
+  });
+
+  it("⛔ A DISH HAD TWICE SHOWS ITS LATEST SCORE, and the earlier instance survives as history — never discarded (the brief's own core rule)", () => {
+    const dishes = withVisitDate(
+      [
+        { id: "old", visit_id: "v1", name: "Pad Thai", score: 6, note: "too sweet" },
+        { id: "new", visit_id: "v2", name: "Pad Thai", score: 9, note: "much better" },
+      ],
+      new Map([["v1", { visited_on: "2026-01-01" }], ["v2", { visited_on: "2026-08-01" }]])
+    );
+    const rows = dishRowsForTable(dishes);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].latestScore).toBe(9);
+    expect(rows[0].timesHad).toBe(2);
+    expect(rows[0].history).toHaveLength(1);
+    expect(rows[0].history[0].id).toBe("old");
+    expect(rows[0].history[0].score).toBe(6); // the OLD score is not discarded, just no longer the displayed one
+  });
+
+  it("bestDishRow picks the highest LATEST score across a place's deduped dish rows; null when nothing is scored", () => {
+    const dishes = withVisitDate(
+      [
+        { id: "d1", visit_id: "v1", name: "Queso", score: 7 },
+        { id: "d2", visit_id: "v1", name: "Brisket", score: 9.5 },
+        { id: "d3", visit_id: "v1", name: "Chips", score: null },
+      ],
+      new Map([["v1", { visited_on: "2026-01-01" }]])
+    );
+    const rows = dishRowsForTable(dishes);
+    expect(bestDishRow(rows).name).toBe("Brisket");
+    expect(bestDishRow(dishRowsForTable(withVisitDate([{ id: "d1", visit_id: "v1", name: "Chips", score: null }], new Map()))))
+      .toBeNull();
+  });
+
+  it("theOrderEntries reads ONLY the latest order_again — a dish marked 'no' on its most recent visit drops out even if an earlier visit said 'yes'", () => {
+    const dishes = withVisitDate(
+      [
+        { id: "old", visit_id: "v1", name: "Ceviche", order_again: "yes", price_cents: 1400 },
+        { id: "new", visit_id: "v2", name: "Ceviche", order_again: "no", price_cents: 1500 },
+        { id: "d2", visit_id: "v2", name: "Guac", order_again: "yes", price_cents: 900 },
+      ],
+      new Map([["v1", { visited_on: "2026-01-01" }], ["v2", { visited_on: "2026-06-01" }]])
+    );
+    const rows = dishRowsForTable(dishes);
+    const order = theOrderEntries(rows);
+    expect(order.map((r) => r.name)).toEqual(["Guac"]);
+    expect(theOrderTotalCents(order)).toBe(900);
+  });
+
+  it("removing a dish from 'the order' (deleting it) never alters any visit's own rating — dishAggregates has no write path at all, only reads", () => {
+    // Structural: every exported function in this file is a pure computation over its arguments —
+    // proven by construction: the module contains no Supabase import and no `update`/`insert` call.
+    const lib = src("lib/dishAggregates.js");
+    expect(lib).not.toMatch(/^import/m);
+    expect(lib).not.toMatch(/\.update\(|\.insert\(/);
+  });
+
+  it("formatCents / theOrderAsText format money at the display edge only — stored values stay integer cents", () => {
+    expect(formatCents(1250)).toBe("$12.50");
+    expect(formatCents(null)).toBeNull();
+    const entries = [{ name: "Queso", price_cents: 900 }, { name: "Tacos", price_cents: null }];
+    expect(theOrderAsText(entries)).toBe("Queso — $9.00\nTacos\nTotal: $9.00");
+    expect(theOrderAsText([{ name: "Chips" }])).toBe("Chips"); // no prices at all -> no trailing total line
+  });
+
+  it("meanDishScoreForVisit is read-only and scoped to ONE visit — never mixes another visit's dishes into the mean", () => {
+    const dishes = [
+      { visit_id: "v1", score: 8 }, { visit_id: "v1", score: 6 }, { visit_id: "v2", score: 2 },
+    ];
+    expect(meanDishScoreForVisit(dishes, "v1")).toBe(7);
+    expect(meanDishScoreForVisit(dishes, "v3")).toBeNull(); // no dishes at all for this visit -> null, never 0
+  });
+
+  it("matchingOpenDishWishlist finds an open (not done) wishlist row by case/whitespace-insensitive name at the SAME place, and ignores a done one", () => {
+    const wishlist = [
+      { id: "w1", place_id: "p1", dish_name: "  Pad Thai ", done: false },
+      { id: "w2", place_id: "p1", dish_name: "Tom Yum", done: true },
+    ];
+    expect(matchingOpenDishWishlist(wishlist, { placeId: "p1" }, "pad thai", manualGroupKey)?.id).toBe("w1");
+    expect(matchingOpenDishWishlist(wishlist, { placeId: "p1" }, "Tom Yum", manualGroupKey)).toBeNull(); // done -> not matched
+    expect(matchingOpenDishWishlist(wishlist, { placeId: "p2" }, "Pad Thai", manualGroupKey)).toBeNull(); // different place
+  });
+
+  it("matchingOpenDishWishlist works for a manual pin identity too, keyed the same way every other manual-pin table already is", () => {
+    const wishlist = [{ id: "w1", place_id: null, custom_name: "Taco Truck", custom_lat: 29.8, custom_lon: -95.4, dish_name: "Al Pastor", done: false }];
+    const identity = { customName: "Taco Truck", customLat: 29.8, customLon: -95.4 };
+    expect(matchingOpenDishWishlist(wishlist, identity, "al pastor", manualGroupKey)?.id).toBe("w1");
+  });
+});
+
+describe("FoodApp — saveDish never touches food_visits.rating or any visit field (structural proof)", () => {
+  const app = src("FoodApp.jsx");
+  const saveDishFn = app.slice(app.indexOf("const saveDish = useCallback"), app.indexOf("const removeDish = useCallback"));
+
+  it("saveDish calls only insertDish/updateDish (food_dishes) — never updateVisit, never setVisits", () => {
+    expect(saveDishFn).toMatch(/await updateDish\(id, rest\) : await insertDish\(rest\)/);
+    expect(saveDishFn).not.toMatch(/updateVisit\(/);
+    expect(saveDishFn).not.toMatch(/setVisits\(/);
+  });
+
+  it("on a NEW dish (no id), matches the saved name against any OPEN food_dish_wishlist row for the same place/pin and marks it done", () => {
+    expect(saveDishFn).toMatch(/if \(!id && selected\) \{/);
+    expect(saveDishFn).toMatch(/matchingOpenDishWishlist\(dishWishlist, identity, data\?\.name, manualGroupKey\)/);
+    expect(saveDishFn).toMatch(/if \(match\) await markDishDone\(match\.id, true\);/);
+  });
+
+  it("editing an EXISTING dish (id present) never re-checks the wishlist match — that only applies to a first-time save", () => {
+    const matchBlock = saveDishFn.slice(saveDishFn.indexOf("if (!id && selected)"), saveDishFn.indexOf("await reloadDishes();"));
+    expect(matchBlock).toMatch(/^if \(!id && selected\) \{/);
+  });
+
+  it("dishes/dishWishlist are fetched ONLY when signed in (accountActive), the same gating every other table in this module already uses", () => {
+    const reloadDishesFn = app.slice(app.indexOf("const reloadDishes = useCallback"), app.indexOf("useEffect(() => { reloadDishes(); }"));
+    expect(reloadDishesFn).toMatch(/if \(!accountActive\) \{ setDishes\(\[\]\); return; \}/);
+    const reloadDishWishlistFn = app.slice(app.indexOf("const reloadDishWishlist = useCallback"), app.indexOf("useEffect(() => { reloadDishWishlist(); }"));
+    expect(reloadDishWishlistFn).toMatch(/if \(!accountActive\) \{ setDishWishlist\(\[\]\); return; \}/);
+  });
+});
+
+describe("ScoreMeter — the per-dish score control: HALF-point steps, a native slider (never a grid of buttons)", () => {
+  it("min 1, max 10, step 0.5 — the owner's own existing scale, distinct from the visit rating's quarter-point step", () => {
+    expect(DISH_SCORE_MIN).toBe(1);
+    expect(DISH_SCORE_MAX).toBe(10);
+    expect(DISH_SCORE_STEP).toBe(0.5);
+    expect(DISH_SCORE_TICKS).toEqual([1, 3, 5, 7, 9, 10]);
+  });
+
+  it("⛔ exactly ONE <input type=\"range\"> and no per-value <button> grid — the owner already rejected 'individual buttons for 20 options' for the visit rating (2026-08-18); the dish brief's own 'click a segment' language is the same rejected shape", () => {
+    const meter = src("components/ScoreMeter.jsx");
+    const body = meter.slice(meter.indexOf("export default function ScoreMeter"));
+    const rangeInputs = body.match(/type="range"/g) || [];
+    expect(rangeInputs).toHaveLength(1);
+    // No array of per-stop clickable buttons — the "meter" look is a CSS background, not a DOM of buttons.
+    expect(body).not.toMatch(/\.map\(.*<button/s);
+    expect(meter).toMatch(/step=\{DISH_SCORE_STEP\}/);
+  });
+
+  it("Clear sets the value back to null (unrated), matching the visit rating slider's own Clear affordance", () => {
+    const meter = src("components/ScoreMeter.jsx");
+    expect(meter).toMatch(/data-testid="dish-score-clear"/);
+    expect(meter).toMatch(/onClick=\{\(\) => onChange\(null\)\}/);
+  });
+});
+
+describe("DishesSection — inline editors only (no dialog box), Enter/Esc contract, sortable table, THE ORDER", () => {
+  const section = src("components/DishesSection.jsx");
+
+  it("no window.prompt/confirm/alert anywhere in this file", () => {
+    expect(section).not.toMatch(/window\.(prompt|confirm|alert)\(/);
+  });
+
+  it("Enter commits (and, only when adding a NEW dish, reopens a blank row); Escape cancels", () => {
+    const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function DishDisplayRow"));
+    expect(editRow).toMatch(/if \(e\.key === "Escape"\) \{ e\.preventDefault\(\); onCancel\(\); \}/);
+    expect(editRow).toMatch(/if \(e\.key === "Enter" && e\.target\.tagName !== "TEXTAREA"\) \{ e\.preventDefault\(\); commit\(!initial\); \}/);
+    expect(editRow).toMatch(/if \(ok && andReopen\) reset\(\);/);
+  });
+
+  it("the hint line names both keys, so the behaviour isn't a hidden affordance", () => {
+    expect(section).toMatch(/Enter saves\{!initial \? " and starts another" : ""\} · Esc cancels/);
+  });
+
+  it("the dish name field autocompletes against existing dish names at this place AND open (not-done) wishlist names, via a native <datalist> (no custom dropdown widget)", () => {
+    const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function DishDisplayRow"));
+    expect(editRow).toMatch(/const suggestions = \[\.\.\.new Set\(\[\.\.\.existingNames, \.\.\.openWishlistNames\]\)\];/);
+    expect(editRow).toMatch(/<datalist id=\{listId\}>/);
+  });
+
+  it("price is entered in dollars and stored as ROUNDED integer cents", () => {
+    const editRow = section.slice(section.indexOf("function DishEditRow"), section.indexOf("function DishDisplayRow"));
+    expect(editRow).toMatch(/price_cents: price === "" \? null : Math\.round\(Number\(price\) \* 100\),/);
+  });
+
+  it("order-again is a three-way segmented control with a glyph AND a fill for every state — 'no' is neutral (chrome-muted), never a red/danger token", () => {
+    const control = section.slice(section.indexOf("const ORDER_AGAIN_OPTIONS"), section.indexOf("function DishHistoryPanel"));
+    expect(control).toMatch(/glyph: "✓"/);
+    expect(control).toMatch(/glyph: "✕"/);
+    expect(control).not.toMatch(/var\(--danger/);
+  });
+
+  it("sortable by score (default), name, price, last had", () => {
+    expect(section).toMatch(/const \[sortKey, setSortKey\] = useState\("score"\);/);
+    expect(section).toMatch(/score: \(a, b\) => \(Number\(b\.latestScore \?\? -1\) - Number\(a\.latestScore \?\? -1\)\)/);
+    expect(section).toMatch(/<option value="name">Sort: name<\/option>/);
+    expect(section).toMatch(/<option value="price">Sort: price<\/option>/);
+    expect(section).toMatch(/<option value="last">Sort: last had<\/option>/);
+  });
+
+  it("THE ORDER shows only latest order_again='yes' dishes, with a Copy button, and only renders when non-empty", () => {
+    expect(section).toMatch(/data-testid="food-the-order"/);
+    expect(section).toMatch(/orderEntries\.length > 0 &&/);
+    expect(section).toMatch(/data-testid="food-the-order-copy"/);
+    expect(section).toMatch(/navigator\?\.clipboard\?\.writeText/);
+  });
+
+  it("a section with zero visits renders nothing — dishes only ever exist under a real visit", () => {
+    expect(section).toMatch(/if \(!visits \|\| !visits\.length\) return null;/);
+  });
+
+  it("a new dish added from PLACE DETAIL attaches to the MOST RECENT visit (visits\\[0\\]) — the documented, deliberate default", () => {
+    expect(section).toMatch(/const targetVisitId = visits\[0\]\.id;/);
+  });
+
+  it("deleting a dish requires a second confirming tap — inline, never window.confirm", () => {
+    expect(section).toMatch(/data-testid="dish-delete-btn"/);
+    expect(section).toMatch(/data-testid="dish-delete-confirm"/);
+    expect(section).toMatch(/const \[confirmingDelete, setConfirmingDelete\] = useState\(false\);/);
+  });
+
+  it("every interactive control clears the 44px touch-target floor (phone-width capture surface)", () => {
+    const minHeights = [...section.matchAll(/minHeight:\s*(\d+)/g)].map((m) => Number(m[1]));
+    expect(minHeights.length).toBeGreaterThan(0);
+    expect(minHeights.every((h) => h >= 32)).toBe(true); // 32 for compact chips (sort select, order-again), 44 for primary actions
+    expect(section).toMatch(/minHeight: 44/);
+  });
+});
+
+describe("VisitPanel — Dishes section wired into place detail (only when everVisited) and into an editing visit card", () => {
+  const panel = src("components/VisitPanel.jsx");
+
+  it("place detail renders DishesSection only once the place has at least one visit", () => {
+    expect(panel).toMatch(/\{everVisited && onSaveDish && \(\s*<DishesSection/);
+  });
+
+  it("a visit's own mean dish score is shown next to (never replacing) its Food chip, read-only", () => {
+    const cardBlock = panel.slice(panel.indexOf("function VisitCard"), panel.indexOf("function PastVisitsSection"));
+    expect(cardBlock).toMatch(/const avgDishScore = onSaveDish \? meanDishScoreForVisit\(dishesWithDate \|\| \[\], visit\.id\) : null;/);
+    expect(cardBlock).toMatch(/data-testid="food-visit-avg-dish-score"/);
+    expect(cardBlock).toMatch(/\{hasRating && <Chip label="Food" value=\{visit\.rating\} \/>\}/); // the chip itself is untouched
+  });
+
+  it("editing a past visit reveals its own DishesSection, scoped to only that visit's dishes — the 'visit editor gains dish rows' brief", () => {
+    const cardBlock = panel.slice(panel.indexOf("function VisitCard"), panel.indexOf("function PastVisitsSection"));
+    expect(cardBlock).toMatch(/dishesWithDate=\{\(dishesWithDate \|\| \[\]\)\.filter\(\(d\) => d\.visit_id === visit\.id\)\}/);
+    expect(cardBlock).toMatch(/visits=\{\[visit\]\}/);
+  });
+
+  it("'Best dish here' surfaces in the score strip's facts line, derived from dishRowsForTable/bestDishRow — never a second aggregate engine", () => {
+    expect(panel).toMatch(/const bestDish = useMemo\(\(\) => bestDishRow\(dishRowsForTable\(dishesWithDate \|\| \[\]\)\), \[dishesWithDate\]\);/);
+  });
+});
+
+describe("B1873008 — the module is STILL an unlisted, URL-only Easter egg (no new tab, no nav entrance)", () => {
+  it("AppHeader still gets showModuleTabs={false} on the food route — this item added no navigation surface", () => {
+    const app = src("FoodApp.jsx");
+    expect(app).toMatch(/showModuleTabs=\{false\}/);
+  });
+
+  it("no route/module-list file was taught a new 'dishes' slug — dishes live entirely inside the existing /food route", () => {
+    const route = read(REPO, "src", "app", "route.js");
+    expect(route).not.toMatch(/dish/i);
   });
 });

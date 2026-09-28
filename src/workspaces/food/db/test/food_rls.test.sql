@@ -29,6 +29,8 @@ declare
   -- that table ambiguous the moment both are referenced together.
   test_place_id text := 'rlstest:food:place1';
   visit_id uuid;
+  dish_id uuid;
+  dish_place text;
   n int;
   rep text := '';
   passed int := 0;
@@ -195,6 +197,79 @@ begin
     execute 'reset role'; execute 'set local request.jwt.claims = default';
     passed := passed + 1; rep := rep || 'PASS 16: a duplicate dish (case/whitespace-insensitive) is refused by the unique index. ' || E'\n';
   end;
+
+  -- ---------- Test 17: owner (A) can add a dish under their own visit, and
+  -- place_id is AUTO-SYNCED from the visit by food_dishes_before_write() —
+  -- never trusted from the client (B1873008, 2026-09-27) --------------------
+  execute 'set local role authenticated';
+  execute format('set local request.jwt.claims = %L', json_build_object('sub', ua, 'role', 'authenticated')::text);
+  insert into public.food_dishes (user_id, visit_id, name, score) values (ua, visit_id, 'Queso', 8.5) returning id into dish_id;
+  execute 'reset role'; execute 'set local request.jwt.claims = default';
+  select place_id into dish_place from public.food_dishes where id = dish_id;
+  if dish_place = test_place_id then passed := passed + 1; rep := rep || 'PASS 17: owner adds a dish; place_id auto-synced from the visit (never client-supplied). ' || E'\n';
+  else failed := failed + 1; rep := rep || format('FAIL 17: dish place_id = %s, expected %s.', dish_place, test_place_id) || E'\n'; end if;
+
+  -- ---------- Test 18: a QUARTER-point score (8.3) is refused; HALF-point
+  -- (already inserted above, 8.5) is the scale this table actually uses ------
+  begin
+    execute 'set local role authenticated';
+    execute format('set local request.jwt.claims = %L', json_build_object('sub', ua, 'role', 'authenticated')::text);
+    insert into public.food_dishes (user_id, visit_id, name, score) values (ua, visit_id, 'Bad Score Dish', 8.3);
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    failed := failed + 1; rep := rep || 'FAIL 18: a quarter-point dish score (8.3) was accepted (should violate the half-point check). ' || E'\n';
+  exception when check_violation then
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    passed := passed + 1; rep := rep || 'PASS 18: a quarter-point dish score (8.3) is refused by the half-point CHECK constraint. ' || E'\n';
+  end;
+
+  -- ---------- Test 19: anon reads food_dishes (expect 0 rows) --------------
+  execute 'set local role anon'; execute 'set local request.jwt.claims = default';
+  select count(*) into n from public.food_dishes where id = dish_id;
+  execute 'reset role';
+  if n = 0 then passed := passed + 1; rep := rep || 'PASS 19: anon (signed out) sees ZERO food_dishes rows. ' || E'\n';
+  else failed := failed + 1; rep := rep || format('FAIL 19: anon food_dishes read returned %s rows, expected 0.', n) || E'\n'; end if;
+
+  -- ---------- Test 20: a DIFFERENT signed-in user (B) reads A's food_dishes -
+  execute 'set local role authenticated';
+  execute format('set local request.jwt.claims = %L', json_build_object('sub', ub, 'role', 'authenticated')::text);
+  select count(*) into n from public.food_dishes where id = dish_id;
+  execute 'reset role'; execute 'set local request.jwt.claims = default';
+  if n = 0 then passed := passed + 1; rep := rep || 'PASS 20: a DIFFERENT signed-in user (B) sees ZERO of A''s food_dishes rows. ' || E'\n';
+  else failed := failed + 1; rep := rep || format('FAIL 20: user B saw %s of A''s food_dishes rows, expected 0.', n) || E'\n'; end if;
+
+  -- ---------- Test 21: user B cannot mint a dish against A's visit_id, even
+  -- naming themself as user_id — B's own RLS can't see A's visit at all, so
+  -- food_dishes_before_write() finds no row and raises LOUDLY (never a silent
+  -- null/wrong place_id) ------------------------------------------------------
+  begin
+    execute 'set local role authenticated';
+    execute format('set local request.jwt.claims = %L', json_build_object('sub', ub, 'role', 'authenticated')::text);
+    insert into public.food_dishes (user_id, visit_id, name, score) values (ub, visit_id, 'Hijacked Dish', 6);
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    failed := failed + 1; rep := rep || 'FAIL 21: user B inserted a dish against A''s visit_id (should be refused). ' || E'\n';
+  exception when others then
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    passed := passed + 1; rep := rep || 'PASS 21: user B cannot attach a dish to A''s visit_id — the ownership trigger refuses it. ' || E'\n';
+  end;
+
+  -- ---------- Test 22: owner (A) can mark a dish DONE — an in-place UPDATE,
+  -- proving the update policy + the updated_at touch trigger both fire -------
+  execute 'set local role authenticated';
+  execute format('set local request.jwt.claims = %L', json_build_object('sub', ua, 'role', 'authenticated')::text);
+  update public.food_dishes set score = 9.0, order_again = 'yes' where id = dish_id;
+  get diagnostics n = row_count;
+  execute 'reset role'; execute 'set local request.jwt.claims = default';
+  if n = 1 then passed := passed + 1; rep := rep || 'PASS 22: owner can edit their own dish (score/order_again) via UPDATE. ' || E'\n';
+  else failed := failed + 1; rep := rep || format('FAIL 22: dish edit touched %s rows, expected 1.', n) || E'\n'; end if;
+
+  -- ---------- Test 23: deleting the visit CASCADES to its dishes ------------
+  execute 'set local role authenticated';
+  execute format('set local request.jwt.claims = %L', json_build_object('sub', ua, 'role', 'authenticated')::text);
+  delete from public.food_visits where id = visit_id;
+  execute 'reset role'; execute 'set local request.jwt.claims = default';
+  select count(*) into n from public.food_dishes where id = dish_id;
+  if n = 0 then passed := passed + 1; rep := rep || 'PASS 23: deleting a visit cascades to its dishes (on delete cascade). ' || E'\n';
+  else failed := failed + 1; rep := rep || format('FAIL 23: %s dish row(s) survived deleting their visit, expected 0.', n) || E'\n'; end if;
 
   -- ---------- cleanup + report (rollback via exception) ---------------------
   raise exception E'\n==== FOOD RLS TEST REPORT: % passed, % failed ====\n%', passed, failed, rep;

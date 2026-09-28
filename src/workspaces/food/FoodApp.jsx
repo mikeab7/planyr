@@ -22,7 +22,10 @@ import {
   insertVisit, updateVisit, deleteVisit, manualPinsFromVisits, loggedPlaceIds, avgRatingByPlaceId,
   searchPlacesByName, fetchAllWishlist, addWishlist, removeWishlist, wishlistedPlaceIds,
   manualWishlistFromRows, manualGroupKey,
+  fetchAllDishes, insertDish, updateDish, deleteDish,
+  fetchAllDishWishlist, markDishDone,
 } from "./lib/foodStore.js";
+import { withVisitDate, matchingOpenDishWishlist } from "./lib/dishAggregates.js";
 import { searchOverpass } from "./lib/overpass.js";
 import { RADIUS } from "../../shared/ui/radius.js";
 
@@ -34,6 +37,9 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   const [overpassPlaces, setOverpassPlaces] = useState([]);
   const [visits, setVisits] = useState([]);
   const [wishlist, setWishlist] = useState([]); // "want to try" flags (B669312) — food_wishlist rows
+  const [dishes, setDishes] = useState([]); // per-dish ratings (B1873008) — food_dishes rows
+  const [dishWishlist, setDishWishlist] = useState([]); // dish-level "want to try" (NEW-3) — food_dish_wishlist rows
+  const [dishPending, setDishPending] = useState(false);
   const [placeNames, setPlaceNames] = useState({}); // id -> {name, lat, lon}
   const [selected, setSelected] = useState(null); // {kind:'place'|'manualPin'|'newPin', ...}
   const [pinMode, setPinMode] = useState(false);
@@ -83,6 +89,25 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     setWishlist(data);
   }, [accountActive]);
   useEffect(() => { reloadWishlist(); }, [reloadWishlist]);
+
+  // Per-dish ratings (B1873008) — every dish the signed-in user has ever logged, fetched in full
+  // like every other small personal table in this module (visits, wishlist, dish wishlist).
+  const reloadDishes = useCallback(async () => {
+    if (!accountActive) { setDishes([]); return; }
+    const { data } = await fetchAllDishes();
+    setDishes(data);
+  }, [accountActive]);
+  useEffect(() => { reloadDishes(); }, [reloadDishes]);
+
+  // Dish-level "want to try" (NEW-3, 2026-08-23) — the data layer already existed; this item
+  // finally wires it up (see this module's CLAUDE.md pointer for why it was deliberately held
+  // back until there was a real "save a dish" flow to auto-clear it from).
+  const reloadDishWishlist = useCallback(async () => {
+    if (!accountActive) { setDishWishlist([]); return; }
+    const { data } = await fetchAllDishWishlist();
+    setDishWishlist(data);
+  }, [accountActive]);
+  useEffect(() => { reloadDishWishlist(); }, [reloadDishWishlist]);
 
   // A name/lat/lon lookup for every place he's logged OR flagged (which can be well outside
   // whatever the map currently shows) — the union of both tables' place_ids, one batch fetch.
@@ -135,6 +160,31 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     if (selected.kind === "manualPin") return visits.filter((v) => selected.pin.visitIds.includes(v.id));
     return [];
   }, [selected, visits]);
+
+  // Per-dish ratings (B1873008) scoped to whatever place/pin is currently selected — dishes are
+  // matched by VISIT MEMBERSHIP, never by place_id alone, so this works identically for a
+  // snapshot place (real place_id) and a manual pin (place_id always null): both already resolve
+  // to a visitIds list above. `visitsById` attaches each dish's own visit date for "latest wins"
+  // ordering (dishAggregates.js's withVisitDate) without a second query.
+  const visitsById = useMemo(() => new Map(visits.map((v) => [v.id, v])), [visits]);
+  const dishesForSelected = useMemo(() => {
+    if (!visitsForSelected.length) return [];
+    const ids = new Set(visitsForSelected.map((v) => v.id));
+    return withVisitDate(dishes.filter((d) => ids.has(d.visit_id)), visitsById);
+  }, [dishes, visitsForSelected, visitsById]);
+
+  // Outstanding (not-yet-struck-done) food_dish_wishlist names for the currently selected place/
+  // pin — the dish-name autocomplete's suggestion source, and what a saved dish name is matched
+  // against to auto-clear the wishlist entry (see saveDish below).
+  const openDishWishlistNamesForSelected = useMemo(() => {
+    if (!selected) return [];
+    return dishWishlist
+      .filter((w) => !w.done)
+      .filter((w) => (selected.kind === "place" ? w.place_id === selected.place.id
+        : selected.kind === "manualPin" ? !w.place_id && manualGroupKey(w.custom_name, w.custom_lat, w.custom_lon) === manualGroupKey(selected.pin.name, selected.pin.lat, selected.pin.lon)
+          : false))
+      .map((w) => w.dish_name);
+  }, [selected, dishWishlist]);
 
   // List view rows: every logged visit, PLUS every flagged-but-unvisited place (B669312 — "flagged
   // places appear there [in the list]"). A wishlist-only row carries no visit facts (rating/cost/
@@ -297,6 +347,39 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     await reloadVisits(); // replaces the optimistic row with the server-confirmed one
     return true;
   }, [visits, reloadVisits]);
+
+  // Save a dish — insert (fields.visit_id set, no id) or edit-in-place (fields.id set). Returns
+  // a boolean like submitVisit/editVisit above, for DishesSection's own save-then-clear/reopen
+  // logic. On a successful NEW dish, matches it against any OPEN food_dish_wishlist row for the
+  // same place/pin (case/whitespace-insensitive dish name) and marks that row done — the brief's
+  // own "saving a dish whose name matches an open wishlist entry marks it done" rule. Never
+  // touches food_visits.rating — this is the one function in this module that writes food_dishes,
+  // and it writes nothing else.
+  const saveDish = useCallback(async (fields) => {
+    setDishPending(true); setError(null);
+    const { id, ...rest } = fields;
+    const { data, error: err } = id ? await updateDish(id, rest) : await insertDish(rest);
+    setDishPending(false);
+    if (err) { setError(err.message || "Couldn't save that dish."); return false; }
+    if (!id && selected) {
+      const identity = selected.kind === "place"
+        ? { placeId: selected.place.id }
+        : selected.kind === "manualPin"
+          ? { customName: selected.pin.name, customLat: selected.pin.lat, customLon: selected.pin.lon }
+          : null;
+      const match = identity && matchingOpenDishWishlist(dishWishlist, identity, data?.name, manualGroupKey);
+      if (match) await markDishDone(match.id, true);
+    }
+    await reloadDishes();
+    await reloadDishWishlist();
+    return true;
+  }, [selected, dishWishlist, reloadDishes, reloadDishWishlist]);
+
+  const removeDish = useCallback(async (id) => {
+    const { error: err } = await deleteDish(id);
+    if (err) { setError(err.message || "Couldn't delete that dish."); return; }
+    await reloadDishes();
+  }, [reloadDishes]);
 
   const searchHere = useCallback(async () => {
     if (!bounds) return;
@@ -480,6 +563,11 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
             wishlisted={wishlistedForSelected}
             onToggleWishlist={accountActive ? toggleWishlist : undefined}
             onSheetHeightChange={setSheetHeightPx}
+            dishesWithDate={dishesForSelected}
+            onSaveDish={accountActive ? saveDish : undefined}
+            onDeleteDish={removeDish}
+            dishPending={dishPending}
+            openDishWishlistNames={openDishWishlistNamesForSelected}
           />
         )}
       </div>
