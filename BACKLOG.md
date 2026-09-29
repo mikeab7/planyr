@@ -5256,6 +5256,40 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
+### B1962672 — Crop dialog: "Reset to full page" in Polygon mode left a dead Done button `[Site Planner / overlays]` (bug) #site-planner #ui  *(Owner walk of the crop tool on planyr.io, 2026-09-29, NEW-1. Minted from reserved block B1962672–B1962687 / V1398976. DEDUPE-FIRST: no prior item covers it; B1838704/B1783328 are the tool itself, untouched.)*
+
+`[x]` **Fixed, with the choice stated.** Polygon-mode Reset used to EMPTY the trace, and Done is (correctly) disabled with no polygon, silently. Now Reset never empties anything: it puts the overlay back to the whole page (both shapes; Polygon shows the closed full-page quad), so **Done stays live and saves "no crop"**. Chosen over "leave Done disabled and explain" because Reset means "show me the whole sheet" and the only sensible commit of that is exactly what Done then does; the deliberate start-over action is the separate **Clear polygon**, and *that* state now says in plain words why Done is off ("Place at least 3 points, then close the polygon to save" / "Close the polygon (click the first point or press Enter) to save") next to the button and as its tooltip. `ImageCropTool.jsx` `resetAll` / `clearPoly` / `doneWhy`.
+- Verify: live — **V1398976** (sandbox walk PASSED; signed-in Chrome pass pending).
+- Files: `src/shared/sitePlans/components/ImageCropTool.jsx`, `ui-audit/verify-crop-tool-walkthrough.mjs`.
+
+### B1962673 — "Reset to full page" only reset the shape you were standing on `[Site Planner / overlays]` (bug) #site-planner #ui  *(NEW-2 of the same walk.)*
+
+`[x]` **Chose "reset the overlay", per the owner's mental model.** One Reset, always shown, enabled whenever ANY crop (rectangle or polygon) is saved or drawn; from either mode it sets both shapes to the full page, so Rectangle → Reset → Done saves `crop: null` and switching back to Polygon shows the full-page quad, not the old polygon. `commit` also never carries a "full page" stand-in as a dormant shape. The tooltip says "Removes the whole crop — rectangle and polygon". The two harnesses that had encoded the old behaviour (`verify-site-tab-overlay-crop.mjs` step 8, which expected Rectangle+Done to clear a polygon and so had been silently red) were corrected to the new contract.
+- Verify: live — **V1398976**.
+
+### B1962674 — Crop dialog had no discoverable way to pan or zoom in between `[Site Planner / overlays]` (bug) #site-planner #ui  *(NEW-3.)*
+
+`[x]` Added, all on screen: a **✋ Pan tool** toggle (left-drag moves the picture; a pan no longer drops a polygon point where the mouse comes up — a click-after-drag bug found by the walk, fixed with a guard that also covers Space+drag), **arrow keys** (Shift = ×4) to pan, **− / slider / +** zoom (log slider, about the middle of the view; `+`/`-` keys too) between Fit and 100%. Scroll-wheel zoom, Space+drag and middle-drag unchanged. Footer hint rewritten (replaces the old one-line hint; no net growth). Keyboard focus is now kept inside the tool when a button disables itself (Undo/Redo at the end of history dropped focus to `<body>` and killed Ctrl+Z / arrows). Scrollbars deliberately NOT built (the brief allowed "or").
+- Verify: live — **V1398976**.
+- Files: `ImageCropTool.jsx`, `src/workspaces/site-planner/lib/cropHistory.js` (pure slider mapping), `test/cropHistory.test.js`.
+
+### B1962675 — Crop dialog undo had no redo and no button `[Site Planner / overlays]` (bug) #site-planner #ui  *(NEW-4.)*
+
+`[x]` One undo/redo history for BOTH shapes (`lib/cropHistory.js`, pure, unit-tested): **↶ Undo / ↷ Redo buttons** in the toolbar (disabled when empty), **Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y** (Cmd on a Mac), working in Rectangle mode too (it was Polygon-only). A snapshot is tagged with its mode so undo also returns you to the mode the change was made in. A rectangle drag / vertex drag pushes its undo frame on first real movement, not on the press, so a plain click leaves no do-nothing step now that Undo is a visible button.
+- Verify: live — **V1398976**.
+
+### B1962676 — Crop dialog fit a landscape sheet into a short band with dead space `[Site Planner / overlays]` (bug) #site-planner #ui  *(NEW-5.)*
+
+`[x]` The dialog is now 96% × 94% of the window and `ImageCropTool` gained a **`fill`** mode: the viewport takes whatever is left under the title (measured with a ResizeObserver, no more `innerHeight - 220` guess) and Fit re-runs on resize until the user zooms/pans by hand. Fit also no longer caps at native size (a small image is enlarged to the room available; `FIT_MAX` 8). Measured on a 3000×1800 sheet at a 1440×900 window: the sheet fills the full window height and ~89% of its width (the rest is the sheet's own aspect ratio), dialog 96%×94%.
+- Verify: live — **V1398976**.
+- Files: `src/workspaces/site-planner/components/OverlayCropDialog.jsx` (still lazy), `ImageCropTool.jsx`.
+
+### B1962677 — Crop: thin left/right rectangle grips, and the expanded OVERLAYS row collapsed on reload `[Site Planner / overlays]` (bug) #site-planner #ui  *(NEW-6, two small ones.)*
+
+`[x]` **(a)** The four mid-edge grips now share ONE footprint (long side × the corner grips' own thickness, visible like the corners); test asserts left/right are the top/bottom grips turned 90° and none is thinner than a corner. **(b)** The expanded overlay row is remembered per plan in `sessionStorage` (`planyr:selOverlay:<siteId>`, wrapped in try/catch — a per-viewer convenience only), so a reload leaves Crop… one click away. An unknown/stale id simply opens nothing.
+- Verify: live — **V1398976**.
+- Files: `ImageCropTool.jsx`, `src/workspaces/site-planner/SitePlanner.jsx`.
+
 ### B1953795 — Scheduler / Dashboard stale copies: seven "same fact, two stores" bugs now read ONE answer `[Scheduler + Dashboard + Shell]` (bug) #scheduler #persistence #gantt #export  *(Owner block 2026-09-29, "[FIX] One source of truth" — verdict-A audit group. Minted **B1953795 / V1390098** from the dispatch; the entityStateCopy guard (PR 1873) already named this id for the Agenda entry. Branch `claude/ecstatic-johnson-u24l6b-scheduler`.)*
 
 `[x]` **S1 — "Has a schedule" hint never cleared.** The hint (`scheduleProjectId` on every plan of a group) was written only from three one-shot iframe messages, so unlink (`if (!groupId) return`), relink X→Y, delete, and a site with two schedules all left a stale calendar icon. Now DERIVED: `src/shared/schedule/scheduleLinkHints.js` (`planScheduleHintSync`) recomputes every group's wanted hint from the FULL schedule list the iframe already posts on every data change (`planar:nav-state`, schedule `linkedSiteId`/`ownerKind` through the one `ownerOf` answer) and `Scheduler.jsx` writes only where the stored hint disagrees. Stale hints already on disk heal on the next Scheduler open (source wins; a hint still pointing at one of a two-schedule site's live schedules is kept; an empty/unloaded list never clears anything).
