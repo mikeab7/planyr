@@ -22,26 +22,83 @@
  */
 import { supabase } from "./supabase.js";
 import { planThumbnailSvg } from "./planThumbnail.js";
+import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 
 async function persistThumbnail(siteId, svg) {
-  if (!supabase || !siteId) return;
+  if (!supabase || !siteId) return { ok: false, error: "not ready" };
   try {
-    await supabase
+    // supabase-js REPORTS a failed write as `{ error }` (it does not throw) - the old code read
+    // neither, so a rejected update looked exactly like success. (A-B1953794, LOUD-FAILURE.)
+    const { error } = await supabase
       .from("sites")
       .update({ thumbnail_svg: svg, thumbnail_updated_at: new Date().toISOString() })
       .eq("id", siteId);
-  } catch (_) {
-    // best-effort — a lost thumbnail write just means the next save (or the Dashboard's own
-    // lazy fallback) tries again; it never blocks or reports against the real content save.
+    return error ? { ok: false, error: error.message || String(error) } : { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e && e.message) || String(e) };
   }
 }
 
-/** Refresh one plan's stored thumbnail from a live in-memory model (real els/parcels). Never
- * throws, never returns anything the caller needs to check — call it and move on. */
+/* A-B1953794 - the thumbnail must follow ELEMENT-CONTENT saves. cloudUpsert's header signature
+ * deliberately excludes elements (element edits return `skipped`), so keying the refresh on
+ * `!skipped` left the thumbnail stale after any element-only edit. This refresher is keyed on the
+ * RENDERED SVG itself: after a quiet period it renders the model and writes only if the picture
+ * differs from the last one it persisted for that plan - exact by construction (no second
+ * "did content change" predicate to drift), and a burst of edits costs one render + one write.
+ * A failed write is REPORTED (telemetry) and the remembered picture is NOT advanced, so the very
+ * next save retries. Injectable so the timing/failure contract is unit-testable. */
+export function createThumbnailRefresher({
+  render = (m) => planThumbnailSvg(m) || "",
+  persist = persistThumbnail,
+  report = reportClientEvent,
+  setTimer = (fn, ms) => setTimeout(fn, ms),
+  clearTimer = (t) => clearTimeout(t),
+  delayMs = 3000,
+} = {}) {
+  const timers = new Map();   // siteId -> pending timer
+  const latest = new Map();   // siteId -> newest model handed to schedule()
+  const lastSvg = new Map();  // siteId -> svg last persisted successfully
+  async function flush(id) {
+    timers.delete(id);
+    const model = latest.get(id);
+    latest.delete(id);
+    if (!model) return { skipped: true };
+    let svg;
+    try { svg = render(model); } catch (e) {
+      report("thumbnail-refresh-failed", "plan thumbnail render threw", { id, error: (e && e.message) || String(e) });
+      return { ok: false };
+    }
+    if (lastSvg.get(id) === svg) return { skipped: true };
+    const r = await persist(id, svg);
+    if (r && r.ok) { lastSvg.set(id, svg); return { ok: true }; }
+    report("thumbnail-refresh-failed", "plan thumbnail write failed - the Dashboard card may show an older picture until the next save", { id, error: (r && r.error) || "" });
+    return { ok: false };
+  }
+  return {
+    schedule(model) {
+      if (!model || !model.id) return;
+      const id = model.id;
+      latest.set(id, model);
+      if (timers.has(id)) clearTimer(timers.get(id));
+      timers.set(id, setTimer(() => { flush(id); }, delayMs));
+    },
+    flush,
+    _lastSvg: lastSvg,
+  };
+}
+const defaultRefresher = createThumbnailRefresher();
+
+/** Debounced refresh from a live in-memory model (real els/parcels). Call after ANY successful
+ * cloud save - element-only saves included. Never throws. */
+export function scheduleThumbnailRefresh(model) { defaultRefresher.schedule(model); }
+
+/** Immediate refresh (kept for callers that want it now). Never throws. */
 export async function refreshSiteThumbnailFromModel(model) {
   if (!model || !model.id) return;
   const svg = planThumbnailSvg(model) || "";
-  await persistThumbnail(model.id, svg);
+  const r = await persistThumbnail(model.id, svg);
+  if (r.ok) defaultRefresher._lastSvg.set(model.id, svg);
+  else reportClientEvent("thumbnail-refresh-failed", "plan thumbnail write failed", { id: model.id, error: r.error || "" });
 }
 
 /** Lazily render + store a thumbnail for a plan that doesn't have one yet, from the cloud's own
@@ -63,7 +120,8 @@ export async function generateAndStoreThumbnail(siteId) {
     const header = { settings: (headerRow && headerRow.data && headerRow.data.settings) || {} };
     const model = rowsToModel(header, r.rows);
     const svg = planThumbnailSvg(model) || "";
-    await persistThumbnail(siteId, svg);
+    const w = await persistThumbnail(siteId, svg);
+    if (!w.ok) reportClientEvent("thumbnail-refresh-failed", "lazy plan thumbnail write failed", { id: siteId, error: w.error || "" });
     return svg;
   } catch (_) {
     return null;

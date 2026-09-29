@@ -510,13 +510,15 @@ export async function pushSiteToCloud(id) {
   // server now holds would read as a LOCAL edit at the next push (silently undoing the adoption), so
   // patch it here. The caller (the planner) gets `r.adopted` to update its live canvas state.
   if (r && r.ok && r.adopted && r.merged) adoptHeaderIntoMirror(id, r.merged);
-  // NEW-1 (2026-09-08) — refresh the Dashboard's cached plan thumbnail on every REAL save (never
-  // on a skipped/no-op push — cloudUpsertCore returns skipped:true when nothing actually changed).
-  // Fire-and-forget: a thumbnail is a rendering convenience, never user data, so it must not add
-  // latency to — or ever fail — an ordinary save. Dynamically imported so this stays off
-  // storage.js's own dependency graph until a save actually happens.
-  if (r && r.ok && !r.skipped) {
-    import("./siteThumbnail.js").then(({ refreshSiteThumbnailFromModel }) => refreshSiteThumbnailFromModel(m)).catch(() => {});
+  // NEW-1 (2026-09-08) / A-B1953794 - refresh the Dashboard's cached plan thumbnail after every
+  // successful save, INCLUDING `skipped` ones: cloudUpsert's header signature excludes elements,
+  // so an element-only edit is reported skipped although the drawing changed. The refresher is
+  // debounced and only writes when the rendered picture differs (siteThumbnail.js), so a no-op
+  // save costs one cheap render. Fire-and-forget; failures are reported there (LOUD-FAILURE), never
+  // added to the save's own latency. Dynamically imported to stay off storage.js's graph.
+  if (r && r.ok) {
+    import("./siteThumbnail.js").then(({ scheduleThumbnailRefresh }) => scheduleThumbnailRefresh(m))
+      .catch((e) => reportClientEvent("thumbnail-refresh-failed", "thumbnail module failed to load", { id, error: (e && e.message) || String(e) }));
   }
   return r;
 }
