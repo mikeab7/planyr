@@ -91,7 +91,7 @@ import { makeLabelFrame } from "./lib/exportLabelScale.js";
 import { orderLayersByPriority, LAYER_STAGE_SIZE } from "./lib/layerSchedule.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
-import { loadEasementRules, saveEasementRules, defaultJurForCounty } from "./lib/easementRules.js";
+import { loadEasementRules, saveEasementRules, defaultJurForCounty, resolveEasementJur } from "./lib/easementRules.js";
 import { requestCriteria, wasRequested } from "./lib/criteriaRequests.js";
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
 /* ⛔ NEW-1..NEW-4 — `lib/groundElevation.js` and `lib/drainageTiming.js` are reached ONLY by the
@@ -445,7 +445,7 @@ import {
   isEstimatedWseSrc, estWseNote,
   wseProvLabel, ffeBasisText,
 } from "./lib/floodplainMitigation.js";
-import { loadFloodplainRules, saveFloodplainRules, defaultFloodJurForAuthority, defaultFloodJurForCounty, floodJurCounty, triggerClasses, offsetSurfaceBasis, bfeDataRequirementFor } from "./lib/floodplainRules.js";
+import { loadFloodplainRules, ruleSignature, saveFloodplainRules, defaultFloodJurForAuthority, defaultFloodJurForCounty, floodJurCounty, triggerClasses, offsetSurfaceBasis, bfeDataRequirementFor } from "./lib/floodplainRules.js";
 import { loadPondCriteria, checkPondCriteria } from "./lib/pondCriteriaRules.js";
 import { GRADING_RULES, chipLabel as gradingChipLabel } from "./lib/gradingRules.js";
 import { loadBuildabilityRules, assessBuildability, requiredFfe, suggestedFfe, OUTSIDE_FLOODPLAIN_FFE_NOTE, SITE_BASED_FFE_NOTE } from "./lib/buildability.js";
@@ -1167,7 +1167,7 @@ const ringHash = (ring) => {
 function mitigationForFootprint(fp, zones, rule, elev, zonesSig) {
   const sig = [
     fp.id, fp.ring.length, ringHash(fp.ring), polyArea(fp.ring).toFixed(0),
-    fp.padElevFt ?? "", zonesSig, rule ? `${rule.trigger}|${rule.ratio}|${rule.verified}` : "",
+    fp.padElevFt ?? "", zonesSig, ruleSignature(rule),
     elev.padElevFt ?? "", elev.existGradeFt ?? "", elev.bfeFt ?? "", elev.derivedBfeFt ?? "", elev.derivedXsWselFt ?? "", elev.derivedWse02Ft ?? "", elev.wse02Ft ?? "", elev.avgFillDepthFt ?? "",
     // B807 — the async-arriving derived 1% MUST be in the sig, or a value that lands
     // after the first compute silently never re-prices (the stale-memo trap).
@@ -1198,7 +1198,7 @@ function mitigationForFootprint(fp, zones, rule, elev, zonesSig) {
  * feature targets. */
 const _pondFactsMemo = new Map();
 function pondFloodFacts(ring, zones, rule, { bfeFt, bfeSrc, existGradeFt, derivedBfeFt, derivedXsWselFt, derivedWse1pctFt, derivedWse1pctSrc }, zonesSig) {
-  const sig = [ring.length, ringHash(ring), zonesSig, rule ? rule.trigger : "", bfeFt ?? "", bfeSrc ?? "", existGradeFt ?? "", derivedBfeFt ?? "", derivedXsWselFt ?? "", derivedWse1pctFt ?? ""].join("~");
+  const sig = [ring.length, ringHash(ring), zonesSig, ruleSignature(rule), bfeFt ?? "", bfeSrc ?? "", existGradeFt ?? "", derivedBfeFt ?? "", derivedXsWselFt ?? "", derivedWse1pctFt ?? "", derivedWse1pctSrc ?? ""].join("~");
   if (_pondFactsMemo.has(sig)) {
     const hit = _pondFactsMemo.get(sig);
     _pondFactsMemo.delete(sig); _pondFactsMemo.set(sig, hit);
@@ -2858,7 +2858,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // placeholder width) — the Easement rules panel renders that as "no criteria on file", not
   // as a fabricated 20 ft. The county-heal effect below re-derives this the moment a real
   // county resolves.
-  const [jurKey, setJurKey] = useState(() => defaultJurForCounty(restored?.county));
+  // A-B1953794 — NOT state: derived from the plan's healed county at read time (declared below,
+  // beside `siteCounty`); a hand-pick persists in settings.easementJurOverride.
   // ⛔ B877440/B877441 — UI-only status for the "Request criteria" action a no-data jurisdiction
   // state offers (the Easement rules panel below, and the Detention verdict row further down).
   // Declared here (rather than beside its furthest consumer) so it's initialized before EITHER
@@ -15903,6 +15904,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Site (location) vs Plan (layout) labels — editable from the header.
   const groupId = restored?.groupId || siteId;
   const siteCounty = restored?.county || null;
+  const jurKey = resolveEasementJur(settings.easementJurOverride, siteCounty, easeRules);
+  const setJurKey = (k) => setSettings((sx) => {
+    const next = { ...sx };
+    if (k) next.easementJurOverride = k; else delete next.easementJurOverride; // empty pick = back to derived
+    return next;
+  });
   // `origin` is declared once near the top (geographic basemap state).
   // Resolve taxing jurisdictions + rate for the selected parcel (graceful-degrade).
   const [taxInfo, setTaxInfo] = useState(null);
@@ -16268,10 +16275,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const wrong = restored?.county ?? null;
       if (restored) restored.county = key; // metaRef re-reads restored.county every render
       metaRef.current = { ...metaRef.current, county: key }; // flush below must not save the stale meta
-      // A plan that had NO county (the un-located "Start blank" case) also has no easement/flood
-      // jurisdiction default, so seed one now. A county CORRECTION never touches it — that would
-      // clobber a choice the user may have made deliberately.
-      if (!wrong) setJurKey(defaultJurForCounty(key));
+      // The easement jurisdiction is DERIVED from this healed county at read time (jurKey above);
+      // an explicit pick lives in settings.easementJurOverride and is never touched by a heal.
       setCountyHealTick((n) => n + 1);     // re-render the consumers (siteCounty & friends)
       flushSite();                          // persist the healed row to the device mirror
       try { cloudPushWithWatchdog(siteId); } catch (_) {}

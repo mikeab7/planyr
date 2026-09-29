@@ -25,27 +25,8 @@
  * real fact ("last touched"), just a coarser one than a real edit.
  */
 
-// rows: [{ site_id, updated_at }] — every LIVE element row's site + edit time (any kind; the
-// caller reads only the two columns, not the geometry). Returns { [siteId]: msEpoch }, the most
-// recent live element edit for that PLAN. A site with zero live element rows is simply absent.
-export function summarizeElementRecency(rows) {
-  const out = {};
-  for (const r of (rows || [])) {
-    if (!r || !r.site_id || !r.updated_at) continue;
-    const ms = new Date(r.updated_at).getTime();
-    if (!Number.isFinite(ms)) continue;
-    if (!(r.site_id in out) || ms > out[r.site_id]) out[r.site_id] = ms;
-  }
-  return out;
-}
-
-const headerMs = (s) => {
-  const v = s && s.updatedAt;
-  if (typeof v === "number") return Number.isFinite(v) ? v : null;
-  if (!v) return null;
-  const ms = new Date(v).getTime();
-  return Number.isFinite(ms) ? ms : null;
-};
+import { summarizeElementRecency, planRecencyMs, pickRepresentativePlan } from "../../../shared/projects/projectModel.js";
+export { summarizeElementRecency, planRecencyMs, pickRepresentativePlan };
 
 // sites: every PLAN this user can see (the full, ungrouped list — NOT the one-representative-
 // per-group list the panel renders). elementRecencyBySite: summarizeElementRecency's output.
@@ -56,8 +37,7 @@ export function groupRecencyMs(sites, elementRecencyBySite) {
   for (const s of (sites || [])) {
     if (!s || !s.id) continue;
     const gid = s.groupId || s.id;
-    const perPlan = elementRecencyBySite && elementRecencyBySite[s.id];
-    const ms = perPlan != null ? perPlan : headerMs(s);
+    const ms = planRecencyMs(s, elementRecencyBySite);
     if (ms == null) continue;
     if (!(gid in out) || ms > out[gid]) out[gid] = ms;
   }
@@ -82,3 +62,4 @@ export function lastEditedLabel(ms, now = Date.now()) {
   const sameYear = d.getFullYear() === new Date(now).getFullYear();
   return d.toLocaleDateString(undefined, sameYear ? { month: "short", day: "numeric" } : { month: "short", day: "numeric", year: "numeric" });
 }
+

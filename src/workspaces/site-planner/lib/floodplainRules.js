@@ -287,6 +287,23 @@ export const defaultFloodJurForCounty = (county) =>
   ] || null);
 
 /* The zone classes a rule's trigger obligates (feeds computeMitigation). */
+/* A-B1953794 — ONE memo-key answer for "which rule is this?". Memo keys used to hand-list
+ * `trigger|ratio|verified`, which Harris / Fort Bend / Waller share, so switching the jurisdiction
+ * served a stale result (Waller's floodwayBufferFt never re-priced). The signature is derived from
+ * the rule's FULL structural content (every own field, key-sorted), so a field added to a rule
+ * can never be silently left out of a key. Cached per rule object (WeakMap) — the metrics pass
+ * asks per element per render. */
+const _ruleSigCache = new WeakMap();
+export function ruleSignature(rule) {
+  if (!rule || typeof rule !== "object") return "";
+  const hit = _ruleSigCache.get(rule);
+  if (hit !== undefined) return hit;
+  const sig = JSON.stringify(rule, (k, v) => (v && typeof v === "object" && !Array.isArray(v)
+    ? Object.keys(v).sort().reduce((o, kk) => { o[kk] = v[kk]; return o; }, {}) : v));
+  _ruleSigCache.set(rule, sig);
+  return sig;
+}
+
 export const triggerClasses = (rule) =>
   rule && rule.trigger === "1pct_plus_02pct" ? ["1pct", "02pct"] : ["1pct"];
 

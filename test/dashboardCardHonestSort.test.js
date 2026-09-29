@@ -19,9 +19,9 @@ describe("NeedsAttentionCard — bulk-stamp honesty renders", () => {
   // event), one task stamped uniquely today (a genuine post-rollout transition).
   const bulkStamp = "2026-09-06T18:57:08.194Z";
   const bulkTasks = Array.from({ length: 25 }, (_, i) => ({
-    id: i + 1, name: `Bulk task ${i + 1}`, parentId: null, end: "2026-08-13", needsAttentionSince: bulkStamp,
+    id: i + 1, name: `Bulk task ${i + 1}`, parentId: null, end: "2026-08-13", health: "red", needsAttentionSince: bulkStamp,
   }));
-  const genuineTask = { id: 999, name: "Fresh real transition", parentId: null, end: "2026-09-09", needsAttentionSince: "2026-09-09T05:00:21.887Z" };
+  const genuineTask = { id: 999, name: "Fresh real transition", parentId: null, end: "2026-09-09", health: "red", needsAttentionSince: "2026-09-09T05:00:21.887Z" };
   const projects = { 1: { id: 1, name: "Test Project", tasks: [...bulkTasks, genuineTask] } };
   const rows = needsAttentionList(projects, NOW);
 

@@ -12,14 +12,14 @@ describe("needsAttentionList", () => {
       1: {
         id: 1, name: "Goose Creek", linkedSiteId: "g1", linkedSiteName: "Goose Creek",
         tasks: [
-          { id: 1, name: "Zoning letter", end: "2026-09-10", parentId: null, needsAttentionSince: daysAgo(3) },
-          { id: 2, name: "Phase 1 ESA", end: "2026-09-01", parentId: null, needsAttentionSince: daysAgo(20) },
+          { id: 1, name: "Zoning letter", end: "2026-09-10", parentId: null, health: "red", needsAttentionSince: daysAgo(3) },
+          { id: 2, name: "Phase 1 ESA", end: "2026-09-01", parentId: null, health: "red", needsAttentionSince: daysAgo(20) },
         ],
       },
       2: {
         id: 2, name: "Grand Port", linkedSiteId: "g2", linkedSiteName: "Grand Port",
         tasks: [
-          { id: 10, name: "Survey", end: "2026-08-15", parentId: null, needsAttentionSince: daysAgo(9) },
+          { id: 10, name: "Survey", end: "2026-08-15", parentId: null, health: "red", needsAttentionSince: daysAgo(9) },
           { id: 11, name: "Not stamped", end: "2026-08-01", parentId: null, needsAttentionSince: null },
         ],
       },
@@ -37,11 +37,11 @@ describe("needsAttentionList", () => {
     const projects = {
       1: {
         id: 1, name: "Master Schedule", linkedSiteId: "g1", linkedSiteName: "Goose Creek",
-        tasks: [{ id: 1, name: "Zoning letter", end: "2026-09-10", parentId: null, needsAttentionSince: daysAgo(3) }],
+        tasks: [{ id: 1, name: "Zoning letter", end: "2026-09-10", parentId: null, health: "red", needsAttentionSince: daysAgo(3) }],
       },
       2: {
         id: 2, name: "Master Schedule", linkedSiteId: "g2", linkedSiteName: "Grand Port",
-        tasks: [{ id: 10, name: "Survey", end: "2026-08-15", parentId: null, needsAttentionSince: daysAgo(9) }],
+        tasks: [{ id: 10, name: "Survey", end: "2026-08-15", parentId: null, health: "red", needsAttentionSince: daysAgo(9) }],
       },
     };
     const rows = needsAttentionList(projects, NOW);
@@ -55,16 +55,38 @@ describe("needsAttentionList", () => {
     const projects = {
       5: {
         id: 5, name: "Pursuits", ownerKind: "org",
-        tasks: [{ id: 1, name: "Follow up", end: "2026-09-01", parentId: null, needsAttentionSince: daysAgo(2) }],
+        tasks: [{ id: 1, name: "Follow up", end: "2026-09-01", parentId: null, health: "red", needsAttentionSince: daysAgo(2) }],
       },
     };
     const rows = needsAttentionList(projects, NOW);
     expect(rows[0].projectName).toBe("Organization / Pursuits");
   });
 
-  it("never substitutes days-past-due — a task with no stamp is simply absent", () => {
-    const projects = { 1: { id: 1, name: "P", tasks: [{ id: 1, name: "Overdue but unstamped", end: "2020-01-01", parentId: null }] } };
-    expect(needsAttentionList(projects, NOW)).toEqual([]);
+  it("never substitutes days-past-due for 'since' — a task that is not red is absent whatever its stamp; a red task with no stamp lists as sinceKnown:false", () => {
+    const projects = { 1: { id: 1, name: "P", tasks: [
+      { id: 1, name: "Overdue, no rules, not red", end: "2020-01-01", parentId: null },
+      { id: 2, name: "Red, never stamped", parentId: null, health: "red" },
+    ] } };
+    const rows = needsAttentionList(projects, NOW);
+    expect(rows.map((r) => r.taskName)).toEqual(["Red, never stamped"]);
+    expect(rows[0].sinceKnown).toBe(false);
+    expect(rows[0].days).toBe(0);
+    expect(rows[0].bulkStamped).toBe(false);
+  });
+
+  // B1953795 (S5) — RED-PROOF (fails on main, which trusted the stamp): the stamp is only written while
+  // the Scheduler iframe is mounted, so a task edited/completed elsewhere kept a stale stamp, and a
+  // task that turned overdue while the Scheduler was closed had none. Membership is decided at READ
+  // time by the grid's own rules; the stamp only supplies "since".
+  it("S5: a STALE stamp on a task that is no longer red (completed) is dropped; an unstamped task the rules make red is listed", () => {
+    const rules = { healthRules: [{ id: "r", when: [{ field: "finish", op: "pastDueAtLeast", value: 1 }], whenCombinator: "AND", color: "red",
+      unless: [{ field: "status", op: "is", value: "green" }], unlessCombinator: "OR" }] };
+    const projects = { 1: { id: 1, name: "P", tasks: [
+      { id: 1, name: "Stale stamp, now 100% done", end: "2026-08-01", percentComplete: 100, health: "gray", parentId: null, needsAttentionSince: daysAgo(30) },
+      { id: 2, name: "Overdue, never stamped", end: "2026-08-01", percentComplete: 0, health: "gray", parentId: null },
+    ] } };
+    const rows = needsAttentionList(projects, NOW, rules);
+    expect(rows.map((r) => r.taskName)).toEqual(["Overdue, never stamped"]);
   });
 
   it("excludes summary/parent rows — only leaves are counted, even if a parent carries the field", () => {
@@ -72,8 +94,8 @@ describe("needsAttentionList", () => {
       1: {
         id: 1, name: "P",
         tasks: [
-          { id: 1, name: "Parent", parentId: null, needsAttentionSince: daysAgo(5) },
-          { id: 2, name: "Child", parentId: 1, needsAttentionSince: daysAgo(1) },
+          { id: 1, name: "Parent", parentId: null, health: "red", needsAttentionSince: daysAgo(5) },
+          { id: 2, name: "Child", parentId: 1, health: "red", needsAttentionSince: daysAgo(1) },
         ],
       },
     };
@@ -86,7 +108,7 @@ describe("needsAttentionList", () => {
       1: {
         id: 1, name: "P",
         tasks: [
-          { id: 1, name: "Blocker", parentId: null, needsAttentionSince: daysAgo(4) },
+          { id: 1, name: "Blocker", parentId: null, health: "red", needsAttentionSince: daysAgo(4) },
           { id: 2, name: "Downstream A", parentId: null, predecessors: [{ id: 1, type: "FS", lag: 0 }] },
           { id: 3, name: "Downstream B", parentId: null, predecessors: [1] },
           { id: 4, name: "Unrelated", parentId: null, predecessors: [] },
@@ -117,14 +139,14 @@ describe("needsAttentionList", () => {
       1: {
         id: 1, name: "Goose Creek",
         tasks: [
-          { id: 1, name: "Bulk A", parentId: null, needsAttentionSince: sharedStamp },
-          { id: 2, name: "Genuinely new", parentId: null, needsAttentionSince: null }, // overwritten below with a unique stamp
+          { id: 1, name: "Bulk A", parentId: null, health: "red", needsAttentionSince: sharedStamp },
+          { id: 2, name: "Genuinely new", parentId: null, health: "red", needsAttentionSince: null }, // overwritten below with a unique stamp
         ],
       },
       2: {
         id: 2, name: "Grand Port",
         tasks: [
-          { id: 10, name: "Bulk B", parentId: null, needsAttentionSince: sharedStamp },
+          { id: 10, name: "Bulk B", parentId: null, health: "red", needsAttentionSince: sharedStamp },
         ],
       },
     };
@@ -145,8 +167,8 @@ describe("needsAttentionList", () => {
       1: {
         id: 1, name: "P",
         tasks: [
-          { id: 1, name: "Zero waiting", parentId: null, needsAttentionSince: sharedStamp },
-          { id: 2, name: "Blocks two", parentId: null, needsAttentionSince: sharedStamp },
+          { id: 1, name: "Zero waiting", parentId: null, health: "red", needsAttentionSince: sharedStamp },
+          { id: 2, name: "Blocks two", parentId: null, health: "red", needsAttentionSince: sharedStamp },
           { id: 3, name: "A downstream of Blocks two", parentId: null, predecessors: [2] },
           { id: 4, name: "B downstream of Blocks two", parentId: null, predecessors: [2] },
         ],

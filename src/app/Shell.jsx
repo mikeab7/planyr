@@ -318,9 +318,10 @@ export default function Shell() {
   // requested task is stashed here (token-stamped so a repeat click on the same task re-fires)
   // and handed to Scheduler.jsx once it mounts and the embedded iframe is ready.
   const [scheduleTaskIntent, setScheduleTaskIntent] = useState(null);
-  const openTaskInScheduler = ({ linkedSiteId, taskId }) => {
-    if (linkedSiteId == null || taskId == null) return;
-    setScheduleTaskIntent({ siteId: linkedSiteId, taskId, token: Date.now() });
+  const openTaskInScheduler = ({ linkedSiteId, taskId, taskSid }) => {
+    if (linkedSiteId == null || (taskId == null && taskSid == null)) return;
+    // B1953795 (S3) — `taskSid` (the task's stable identity) wins over the positional `taskId` in the iframe.
+    setScheduleTaskIntent({ siteId: linkedSiteId, taskId: taskId ?? null, taskSid: taskSid ?? null, token: Date.now() });
     navigate({ module: "scheduler", projectId: linkedSiteId, cross: false, org: false });
   };
   // NEW-COMPS-CARD — same shape as openTaskInScheduler above: the Dashboard's Comps card click-

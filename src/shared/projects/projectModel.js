@@ -433,3 +433,56 @@ export function relTime(ts, now = Date.now()) {
   if (day < 30) return `${Math.floor(day / 7)}w ago`;
   return new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
+
+/* B1953794 - pure answers shared by the Site Planner AND the Dashboard. They live HERE (a module
+ * both already load, with no imports) rather than in site-planner/lib: a module imported by both
+ * routes becomes its own shared chunk, which the Site-route chunk allowlist (NEW-8) rightly
+ * refuses. siteRecency.js / siteModel.js re-export them, so there is still ONE implementation. */
+
+/* "Is this element a standalone building?" (B122). A "building" flagged `dogEar` is an attached
+ * bump-out piece: it counts toward building SF but is NOT a building. */
+export const isBuilding = (el) => !!el && el.type === "building" && !el.dogEar;
+
+// rows: [{ site_id, updated_at }] - every LIVE element row's site + edit time. Returns
+// { [siteId]: msEpoch }, the most recent live element edit for that PLAN.
+export function summarizeElementRecency(rows) {
+  const out = {};
+  for (const r of (rows || [])) {
+    if (!r || !r.site_id || !r.updated_at) continue;
+    const ms = new Date(r.updated_at).getTime();
+    if (!Number.isFinite(ms)) continue;
+    if (!(r.site_id in out) || ms > out[r.site_id]) out[r.site_id] = ms;
+  }
+  return out;
+}
+
+export const planHeaderMs = (s) => {
+  const v = s && (s.updatedAt != null ? s.updatedAt : s.updated_at);
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (!v) return null;
+  const ms = new Date(v).getTime();
+  return Number.isFinite(ms) ? ms : null;
+};
+
+/* THE one answer to "how recently was this PLAN worked on": latest live element edit, else its
+ * header time (local {updatedAt: ms} or cloud {updated_at: iso}). Element edits never bump the
+ * cloud header, so element recency wins; with no element data it falls back to the header, which
+ * locally IS bumped on every content save. */
+export function planRecencyMs(plan, elementRecencyBySite) {
+  if (!plan) return null;
+  const perPlan = elementRecencyBySite && plan.id != null ? elementRecencyBySite[plan.id] : null;
+  return perPlan != null ? perPlan : planHeaderMs(plan);
+}
+
+/* THE one answer to "which plan represents this project?" (Map Sites list + Dashboard). Most
+ * recently worked-on wins; ties (and plans with no time) keep input order. */
+export function pickRepresentativePlan(plans, elementRecencyBySite) {
+  let best = null, bestMs = -Infinity;
+  for (const p of plans || []) {
+    if (!p) continue;
+    const ms = planRecencyMs(p, elementRecencyBySite);
+    const v = ms == null ? -Infinity : ms;
+    if (best === null || v > bestMs) { best = p; bestMs = v; }
+  }
+  return best;
+}

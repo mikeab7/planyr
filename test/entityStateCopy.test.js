@@ -35,8 +35,6 @@ const STALE_OK = /\/\/\s*stale-ok:\s*\S+/;
 
 // Exact `file :: trimmed line` copies, each with WHY it is not a bug (or which item fixes it).
 const KNOWN_COPIES = {
-  "src/workspaces/site-planner/SitePlanner.jsx :: const [jurKey, setJurKey] = useState(() => defaultJurForCounty(restored?.county));":
-    "easement jurisdiction seeded from county — fixed by B1953794 (derive at read time + persisted override)",
 };
 // Whole-file exemptions for rule 2: per-device VIEW prefs / drafts only that component writes,
 // or stores that are re-synced by a subscribe in the same file.
@@ -53,7 +51,6 @@ const VIEW_PREF_FILES = {
 // Rule-2 copies awaiting their fix; each entry is REMOVED by the item named (dead entries fail).
 const PENDING_FIX_FILES = {
   "src/workspaces/site-planner/MapFinder.jsx": "acctPrefs — B1953793",
-  "src/workspaces/scheduler/components/AgendaView.jsx": "agenda items — B1953795",
   "src/workspaces/site-planner/SitePlanner.jsx": "rule tables — B1953793 (smoothZoom/stdDraft are view prefs)",
 };
 
