@@ -1,4 +1,4 @@
-import { Fragment, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { validateName, announceNameNotice } from "../../shared/names/nameCore.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -123,7 +123,7 @@ import { lastEditedLabel } from "./lib/siteRecency.js";
 // B855952/B855953/B855954 (NEW-1/NEW-2/NEW-3) — the Sites panel's cross-device arrangement (group
 // order, collapse state, pinned sites, row sort) lives in the SAME account-scope store Standards'
 // "Save for all projects" uses (see lib/userPrefs.js's `sitesPanel` header) — never a new mechanism.
-import { loadUserPrefs, saveUserPrefs, readMirror, setSitesPanelPref } from "./lib/userPrefs.js";
+import { loadUserPrefs, updateUserPrefs, getPrefsSnapshot, subscribePrefs, setSitesPanelPref } from "./lib/userPrefs.js";
 import { adminBoundariesVisible, attachAdminBoundaries } from "./lib/adminBoundaryGate.js";
 import { compHeadline, compFieldRows, compDateLabel } from "../../shared/comps/lib/comps.js";
 import { loadCompsRatePeriod } from "../../shared/comps/lib/compsRatePeriodPrefs.js";
@@ -1258,16 +1258,17 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   // load-then-commit shape SitePlanner.jsx's `userPrefs`/`commitUserPrefs` already uses for
   // Standards — instant local paint from the mirror, replaced by the real cross-device value once
   // the account row loads, LOUD (never silent) on a failed write.
-  const [acctPrefs, setAcctPrefs] = useState(() => readMirror());
-  const acctPrefsRef = useRef(acctPrefs);
-  acctPrefsRef.current = acctPrefs;
+  // B1953793 — read from the ONE shared prefs store (never a private useState copy), so a pin made
+  // in the header switcher / another tab shows here without a reload.
+  const acctPrefs = useSyncExternalStore(subscribePrefs, getPrefsSnapshot, getPrefsSnapshot);
   const sitesPanelPrefs = acctPrefs.sitesPanel;
   const [prefsSaveWarn, setPrefsSaveWarn] = useState(null);
   const prefsSaveWarnTimer = useRef(null);
   useEffect(() => () => clearTimeout(prefsSaveWarnTimer.current), []);
-  const commitAcctPrefs = (next) => {
-    setAcctPrefs(next);
-    saveUserPrefs(myUid, next).then((res) => {
+  // `reducer` runs on the freshest prefs (mirror now, account row at write time) — only the keys it
+  // touches change, so a stale view can never revert another surface's key (B1953793).
+  const commitAcctPrefs = (reducer) => {
+    updateUserPrefs(myUid, reducer).then((res) => {
       // "Not signed in" is the ordinary, expected state for arranging this panel signed out (the
       // header's own "Cloud off" chip already says so) — never a failure to warn about on every
       // single pin/collapse/drag. LOUD-FAILURE is for a SIGNED-IN write that genuinely couldn't
@@ -1278,7 +1279,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       prefsSaveWarnTimer.current = setTimeout(() => setPrefsSaveWarn(null), 7000);
     });
   };
-  const patchSitesPanel = (patch) => commitAcctPrefs(setSitesPanelPref(acctPrefsRef.current, patch));
+  const patchSitesPanel = (patch) => commitAcctPrefs((p) => setSitesPanelPref(p, patch));
   const groupCollapsedFor = (st) => !!sitesPanelPrefs.collapsed[st];
   const toggleGroup = (st) => patchSitesPanel({ collapsed: { ...sitesPanelPrefs.collapsed, [st]: !groupCollapsedFor(st) } });
   // NEW-2 — pinned site ids, most-recently-pinned first. A pinned site LEAVES its status group
@@ -1428,7 +1429,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   // mirror / signed-out default is what `loadUserPrefs` already returns for that case).
   useEffect(() => {
     let live = true;
-    loadUserPrefs(myUid).then((res) => { if (live) setAcctPrefs(res.prefs); });
+    loadUserPrefs(myUid).then(() => { /* the load writes the shared mirror; subscribers re-render */ });
     return () => { live = false; };
   }, [myUid]);
   // Open the per-project menu and refresh the team list so newly-created teams appear.

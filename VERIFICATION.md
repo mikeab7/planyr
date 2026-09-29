@@ -166,6 +166,18 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1390096 — B1953793: a pin / rule / folder rename made in one place shows in every other view and tab, and nothing is reverted `Blocker: auth`
+
+Sandbox-proven (logged out, unit): `test/prefsSingleSource.test.js` (12 tests, red on the pre-fix tree). **Still needs a signed-in, two-tab pass** for the account-row leg (the sandbox cannot sign in).
+**Steps** (use a throwaway project; note the served chunk hash in the same observation as each result):
+1. Sign in; open the app in Tab A on the Map view (Sites panel visible) and Tab B on the Site Planner canvas. **Expect:** both load.
+2. In Tab B's header project switcher, pin project X. **Expect (Tab A, not reloaded):** X moves into Tab A's Pinned section within a moment.
+3. In Tab A, collapse the Complete group. Reload Tab B. **Expect:** X is still pinned AND the group is still collapsed (neither change reverted the other).
+4. In Tab B, save a Standards default for all projects; in Tab A (opened before) pin project Y. **Expect:** after reload of both, the standards default AND both pins are present.
+5. Tab A: Site Planner floodplain rules, set Harris ratio 1.5. Tab B (opened earlier): tick "verified" on Fort Bend. **Expect:** Tab B shows Harris 1.5 without reload; after reload both edits persist.
+6. Library: pin folder F, rename F in its project, return to Library Home. **Expect:** the pinned card shows the new name; delete F and it falls back to the old name (not blank).
+- **Stopping rule:** closes on a dated pass of 1–6, or a failed step filed as a recurrence on B1953793.
+
 ### V1389504 — B1953200: a rename from any door reaches every display, incl. across devices `Blocker: auth`
 
 Sandbox-proven (logged out): `e2e/names-matrix.spec.js` (red-proofed) + `test/namesSingleSource.test.js`. **Still needs a signed-in pass** for the cloud-pull leg.

@@ -13,7 +13,8 @@
  * import affordance here is a pointer, not a drop zone.
  */
 import { useEffect, useState } from "react";
-import { listPins, removePin, subscribePins } from "../../../shared/pins/pinStore.js";
+import { listPins, removePin, subscribePins, pinnedFolderLabel } from "../../../shared/pins/pinStore.js";
+import { listFolders } from "../lib/folders.js";
 import { listRecents } from "../../../shared/recents/recentDocs.js";
 import { listReviews } from "../../doc-review/lib/reviewStore.js";
 import { listProjects as listLocalProjects } from "../../../shared/projects/projects.js";
@@ -66,14 +67,14 @@ function FileCard({ pin, doc, missing = !doc, projectName, when, onOpen, onUnpin
 
 /* One pinned FOLDER chip-card. Existence is validated on click (the Library's ghost-
  * selection guard falls back to "All files" if the folder is gone). */
-function FolderCard({ pin, projectName, onOpen, onUnpin }) {
+function FolderCard({ pin, label, projectName, onOpen, onUnpin }) {
   return (
     <div style={{ ...cardBase, cursor: "default", padding: "7px 9px" }}>
       <button onClick={onOpen} title="Open this folder in its project"
         style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8, textAlign: "left", border: "none", background: "transparent", padding: 0, fontFamily: "inherit", cursor: "pointer" }}>
         <span aria-hidden style={{ flex: "none", color: "var(--accent-library-text)" }}>📁</span>
         <span style={{ minWidth: 0 }}>
-          <span style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pin.label || "Folder"}</span>
+          <span style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label || pin.label || "Folder"}</span>
           {projectName && <span style={{ display: "block", fontSize: 10.5, color: "var(--text-tertiary)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{projectName}</span>}
         </span>
       </button>
@@ -87,6 +88,9 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
   const [recents, setRecents] = useState([]);
   const [reviews, setReviews] = useState([]);   // doc_reviews rows, for names/projects on cards
   const [loading, setLoading] = useState(true);
+  // B1953793 — pinned folders show their LIVE name (a rename must not leave a stale pin-time
+  // snapshot); `pin.label` is only the fallback when the folder can't be resolved.
+  const [folderNames, setFolderNames] = useState(() => new Map());
   // B1340368 — a resolved doc's OWN project can be dead (soft-deleted or fully purged) even
   // though the doc_reviews row itself is fine, exactly the "Last document" card's own bug on
   // this workspace's own Pinned/Recent surfaces: a pin or recent whose doc resolves fine still
@@ -148,6 +152,15 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
   }, [pins, recents, reviews, active]);
 
   const pinnedFolders = pins.filter((p) => p.type === "folder");
+  const pinnedFolderProjectKey = [...new Set(pinnedFolders.map((p) => p.projectId).filter(Boolean))].sort().join(",");
+  useEffect(() => {
+    if (!active || !pinnedFolderProjectKey) return;
+    let live = true;
+    Promise.all(pinnedFolderProjectKey.split(",").map((pid) => listFolders(pid).catch(() => [])))
+      .then((lists) => { if (live) setFolderNames(new Map(lists.flat().map((f) => [f.id, f]))); })
+      .catch(() => { /* fallback to the pin-time label */ });
+    return () => { live = false; };
+  }, [pinnedFolderProjectKey, active, pins]);
   const pinnedFiles = pins.filter((p) => p.type === "file");
   const projectIsDead = (pid) => !!pid && deadProjectIds.has(pid);
   // Recents: skip entries that no longer resolve to a review, OR whose filed project is dead
@@ -178,7 +191,7 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
             {pinnedFolders.length > 0 && (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 8, marginBottom: pinnedFiles.length ? 8 : 0 }}>
                 {pinnedFolders.map((p) => (
-                  <FolderCard key={`folder:${p.id}`} pin={p} projectName={projName(p.projectId)}
+                  <FolderCard key={`folder:${p.id}`} pin={p} label={pinnedFolderLabel(p, folderNames)} projectName={projName(p.projectId)}
                     onOpen={() => onOpenFolder?.({ projectId: p.projectId, folderId: p.id })}
                     onUnpin={() => removePin(uid, { type: "folder", id: p.id })} />
                 ))}

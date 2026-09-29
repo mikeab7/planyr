@@ -14,8 +14,11 @@
  * A pin is { type: "folder"|"file", id, projectId, label }:
  *   • folder pins → a project_folders row id; clicking navigates to that project + folder.
  *   • file pins   → a doc_reviews row id;      clicking opens the drawing in Review.
- * `label` is a display-name snapshot taken at pin time, so a pin stays legible (and loudly
- * "missing", never silently dropped) even if its target can't be resolved later.
+ * `label` is a display-name snapshot taken at pin time — INTENTIONALLY only a FALLBACK (B1953793):
+ * it keeps a pin legible (and loudly "missing", never silently dropped) when its target can't be
+ * resolved (folder deleted, offline). Wherever the target CAN be resolved, the live name wins —
+ * folder pins via `pinnedFolderLabel` below, file pins via the resolved doc — so a rename shows
+ * on the pin without unpin/re-pin.
  */
 import { supabase } from "../../workspaces/site-planner/lib/supabase.js";
 import { getUser } from "../../workspaces/site-planner/lib/auth.js";
@@ -69,6 +72,14 @@ export function dedupePins(pins) {
 export function planPinMigration(localPins, cloudPins) {
   const inCloud = new Set((cloudPins || []).map(pinKey));
   return dedupePins(localPins || []).filter((p) => !inCloud.has(pinKey(p)));
+}
+
+/** The name a pinned FOLDER should display: the live folder's current name when it resolves
+ * (`foldersById` = Map id -> { name, trashed? }), else the pin-time snapshot, else "Folder". */
+export function pinnedFolderLabel(pin, foldersById) {
+  const f = foldersById && typeof foldersById.get === "function" ? foldersById.get(pin && pin.id) : null;
+  if (f && !f.trashed && typeof f.name === "string" && f.name.trim()) return f.name;
+  return (pin && pin.label) || "Folder";
 }
 
 // UNCHANGED (sync, operates on an already-loaded list).

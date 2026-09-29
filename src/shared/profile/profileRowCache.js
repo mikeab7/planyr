@@ -7,9 +7,11 @@
  * slice of this row on mount, independently).
  *
  * This is the one place that actually talks to the table for a casual LOAD. Every SAVE path
- * still does its own fresh read-modify-write immediately before its upsert — correctness there
- * (merging a patch into whatever the row currently holds) matters more than sharing a cache
- * would help, so writes are untouched — and each save calls `invalidateProfileRow` after a
+ * does its own fresh read-modify-write immediately before its upsert (B1953793: `updatePrefs`
+ * in userPrefsStore.js joined the dashboard/comps writers here — the older `savePrefsRaw` wrote
+ * a whole in-memory bag and was the lost-update bug; it is no longer used by UI writers) —
+ * correctness there (merging a patch into whatever the row currently holds, NEVER this cache)
+ * matters more than sharing a cache would help, so writes bypass it — and each save calls `invalidateProfileRow` after a
  * successful write so the NEXT load is never served a pre-write value for the rest of the
  * cache window.
  *

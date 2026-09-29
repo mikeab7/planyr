@@ -254,6 +254,34 @@ export function saveFloodplainRules(rules, store) {
   } catch (_) {}
 }
 
+/** B1953793 — fresh read-modify-write of ONE jurisdiction. Reads the stored map NOW (not a
+ * mount-time copy), merges `patch` into that jurisdiction's stored record only, writes back, and
+ * returns the freshly loaded full map. Every other jurisdiction is carried through byte-for-byte,
+ * so a stale tab can never revert another tab's edit. Notifies same-tab subscribers. */
+export function patchFloodplainRule(jurKey, patch, store) {
+  try {
+    const s = store || (typeof localStorage !== "undefined" ? localStorage : null);
+    if (s) {
+      let raw = {};
+      try { raw = JSON.parse(s.getItem(LS)) || {}; } catch (_) { raw = {}; }
+      raw[jurKey] = { ...(raw[jurKey] || {}), ...patch };
+      s.setItem(LS, JSON.stringify(raw));
+      notifyRules();
+    }
+  } catch (_) {}
+  return loadFloodplainRules(store);
+}
+
+const ruleListeners = new Set();
+function notifyRules() { ruleListeners.forEach((l) => { try { l(); } catch (_) {} }); }
+/** Subscribe to changes of the stored rules — same-tab writes and other tabs (`storage` event). */
+export function subscribeFloodplainRules(cb) {
+  ruleListeners.add(cb);
+  const on = (e) => { if (!e || e.key === null || e.key === LS) cb(); };
+  if (typeof window !== "undefined" && window.addEventListener) window.addEventListener("storage", on);
+  return () => { ruleListeners.delete(cb); if (typeof window !== "undefined" && window.removeEventListener) window.removeEventListener("storage", on); };
+}
+
 /* Best-guess rules key from the RESOLVED drainage authority (detentionRules.js ids) —
  * richer than a bare county guess because the drainage identify already separates COH
  * (city + ETJ) from unincorporated Harris. User can override in the UI (B74 pattern).

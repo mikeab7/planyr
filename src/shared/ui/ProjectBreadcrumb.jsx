@@ -427,10 +427,22 @@ export default function ProjectBreadcrumb({
    * the cloud genuinely disagrees with this device. */
   const [pinnedIds, setPinnedIds] = useState(() => readPinnedFromMirror());
   const [opened, setOpened] = useState(() => readOpenedMap()); // { id: lastOpenedMs } — the ONE sort/display field, see projectSwitcherModel
-  const acctPrefsRef = useRef(null); // the full account-prefs object, once a load resolves
+  // B1953793 — no private copy of the whole prefs bag any more (the stale `acctPrefsRef` was the
+  // lost-update source). The pin list follows the SHARED mirror: this tab's own writes announce
+  // themselves with PREFS_CHANGED_EVENT (userPrefsStore.notifyPrefs) and other tabs through the
+  // browser's `storage` event — listened for here WITHOUT importing the store (bundle rule above).
+  useEffect(() => {
+    const sync = () => setPinnedIds((cur) => {
+      const next = readPinnedFromMirror();
+      return cur.length === next.length && cur.every((id, i) => id === next[i]) ? cur : next;
+    });
+    const onStorage = (e) => { if (!e || e.key === null || e.key === "planyr:userPrefs:v1") sync(); };
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("planyr:userPrefs-changed", sync);
+    return () => { window.removeEventListener("storage", onStorage); window.removeEventListener("planyr:userPrefs-changed", sync); };
+  }, []);
   const refreshPins = () => {
     loadUserPrefsMod().then((mod) => mod.loadPrefsRaw(activeUid())).then(({ prefs }) => {
-      acctPrefsRef.current = prefs;
       const next = prefs.sitesPanel.pinned;
       setPinnedIds((cur) => (cur.length === next.length && cur.every((id, i) => id === next[i]) ? cur : next));
     }).catch(() => {});
@@ -441,11 +453,7 @@ export default function ProjectBreadcrumb({
   // same transient toast the rename/delete failures already use below (`flashToast`).
   const commitPinned = (nextIds) => {
     setPinnedIds(nextIds);
-    loadUserPrefsMod().then((mod) => {
-      const next = mod.setSitesPanelPref(acctPrefsRef.current, { pinned: nextIds });
-      acctPrefsRef.current = next;
-      return mod.savePrefsRaw(activeUid(), next);
-    }).then((res) => {
+    loadUserPrefsMod().then((mod) => mod.updatePrefs(activeUid(), (p) => mod.setSitesPanelPref(p, { pinned: nextIds }))).then((res) => {
       if (res.ok || res.error === "not signed in") return;
       // No literal "⚠" here — this file's own NEW-3 rule: a text warning glyph resolves to a
       // colour emoji on most platforms, which is why every other warning in this file is a
