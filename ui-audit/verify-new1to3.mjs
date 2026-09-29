@@ -61,7 +61,7 @@ await shot("new1to3-map-breadcrumb.png");
 // ── 2. Dropdown opens (portal), has search + All projects + recents + New project ──
 await projCrumb.click();
 await page.waitForTimeout(400);
-const search = page.locator('input[placeholder="Search projects…"]');
+const search = page.locator('input[placeholder="Search projects"]');
 await ok("Dropdown search field present", await search.isVisible());
 /* NEW-1 (2026-08-11) — INVERTED DELIBERATELY. This used to assert the pinned "All projects
  * (Dashboard)" row was VISIBLE. The owner had it removed as a duplicate: it called the same
@@ -79,7 +79,7 @@ await ok("Recent projects newest-edited first", order[0] >= 0 && order[0] < orde
 await ok("Relative timestamps shown", rowTexts.some((t) => /ago/.test(t)), rowTexts.find((t) => /ago/.test(t)) || "");
 // portal-mounted: the menu lives at <body> > div, not inside <header>
 const portaled = await page.evaluate(() => {
-  const inp = document.querySelector('input[placeholder="Search projects…"]');
+  const inp = document.querySelector('input[placeholder="Search projects"]');
   if (!inp) return false;
   return !inp.closest("header"); // escaped the header's stacking context
 });

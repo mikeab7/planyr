@@ -62,7 +62,7 @@ describe("the wiring, read off the real source", () => {
 
   it("the compact affordance still opens the SAME switcher — never a dead-end glyph", () => {
     const projectBtnBlock = crumb.slice(crumb.indexOf('data-testid="project-crumb"'), crumb.indexOf("NEW-4 (B1343203) — an always-mounted"));
-    expect(projectBtnBlock).toContain('onClick={() => setOpen((o) => !o)}');
+    expect(projectBtnBlock).toContain('onClick={toggleOpen}');
     // NEW-3's own rule (a text ellipsis is at the mercy of the platform font) applies here too —
     // a real drawn SVG icon, never a "…"/"⋯" character rendered as the crumb's own content.
     expect(projectBtnBlock).toContain("<CollapsedCrumbIcon />");
