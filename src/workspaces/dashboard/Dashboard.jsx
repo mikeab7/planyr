@@ -67,7 +67,7 @@ import { fetchScheduleProjects, fetchScheduleLastWriteAt } from "./lib/dashboard
 import { fetchAllElementRecency } from "./lib/dashboardElementRecencyFetch.js";
 import { fetchElementsForSites } from "./lib/dashboardYieldFetch.js";
 import { yieldBySite, buildingCountBySite } from "./lib/buildingYield.js";
-import { summarizeElementRecency } from "../site-planner/lib/siteRecency.js";
+import { summarizeElementRecency } from "../../shared/projects/projectModel.js";
 import { groupProjectsByGroupId, pipelineCounts, goingQuiet, recentProjects } from "./lib/dashboardPipeline.js";
 import { summarizeScheduleHealth } from "./lib/scheduleHealth.js";
 import { needsAttentionList } from "./lib/needsAttentionList.js";

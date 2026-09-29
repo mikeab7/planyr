@@ -11,7 +11,7 @@
  * is both correct and entirely clipper-free.
  */
 
-import { isBuilding } from "../../site-planner/lib/buildingPredicate.js";
+import { isBuilding } from "../../../shared/projects/projectModel.js";
 
 function rectAreaSqft(el) {
   return Math.abs((el?.w || 0) * (el?.h || 0));

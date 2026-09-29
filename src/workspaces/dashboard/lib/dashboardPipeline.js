@@ -15,7 +15,7 @@
  * it" without a second read of `sites`.
  */
 
-import { pickRepresentativePlan } from "../../site-planner/lib/siteRecency.js";
+import { pickRepresentativePlan } from "../../../shared/projects/projectModel.js";
 
 const DEFAULT_STATUS = "pursuit"; // siteStatus.js's own new-site default
 const DEFAULT_ROLE = "pursuit";   // role has no legacy split — absent means "pursuit" (B843792)
