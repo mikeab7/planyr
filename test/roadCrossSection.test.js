@@ -167,85 +167,55 @@ describe("bandLayout — offsets from the real drawn centerline", () => {
   });
 });
 
-describe("bandStripeMarks — the simplified striping convention", () => {
+describe("bandStripeMarks — the simplified striping convention (NO yellow anywhere)", () => {
+  const T = (w = 12) => ({ type: "travel", w });
+  const noYellow = (marks) => expect(marks.every((m) => !String(m.style).startsWith("yellow"))).toBe(true);
   it("a single-lane road has no internal seams", () => {
     expect(bandStripeMarks(makeXSection([{ type: "travel", w: 24 }]))).toEqual([]);
   });
-  it("an undivided 2-lane road gets ONE double-yellow seam at the true centerline", () => {
-    const marks = bandStripeMarks(makeXSection([{ type: "travel", w: 12 }, { type: "travel", w: 12 }]));
+  it("an undivided 2-lane road: its centre seam is the same white dash as any lane line", () => {
+    const marks = bandStripeMarks(makeXSection([T(), T()]));
     expect(marks).toHaveLength(1);
-    expect(marks[0]).toMatchObject({ style: "yellow-double" });
+    expect(marks[0]).toMatchObject({ style: "white-dash" });
     expect(marks[0].atOffset).toBeCloseTo(0, 9);
   });
-  it("an undivided 4-lane road (no median) gets exactly ONE double-yellow, at the centermost seam", () => {
-    const marks = bandStripeMarks(makeXSection([
-      { type: "travel", w: 12 }, { type: "travel", w: 12 }, { type: "travel", w: 12 }, { type: "travel", w: 12 },
-    ]));
-    expect(marks).toHaveLength(3);
-    const yellows = marks.filter((m) => m.style === "yellow-double");
-    expect(yellows).toHaveLength(1);
-    expect(yellows[0].atOffset).toBeCloseTo(0, 9);
-    expect(marks.filter((m) => m.style === "white-dash")).toHaveLength(2);
+  it("undivided 4-lane (even) and 3/5-lane (odd) roads: every travel seam is white-dash, no double line", () => {
+    for (const n of [3, 4, 5]) {
+      const marks = bandStripeMarks(makeXSection(Array.from({ length: n }, () => T())));
+      expect(marks).toHaveLength(n - 1);
+      expect(marks.every((m) => m.style === "white-dash")).toBe(true);
+      noYellow(marks);
+    }
   });
-  it("the owner's 4-lane divided example: yellow-solid both sides of the median, dashed within each pair", () => {
+  it("odd undivided lane count is symmetric and deterministic now the centre tie-break is gone", () => {
+    const x = makeXSection([T(), T(), T()]);
+    const marks = bandStripeMarks(x);
+    expect(marks.map((m) => m.atOffset).sort((a, b) => a - b)).toEqual([-6, 6]);
+    expect(bandStripeMarks(x)).toEqual(marks);
+    expect(bandStripeMarks(makeXSection([T(), T(), T()].reverse()))).toEqual(marks);
+  });
+  it("the owner's 4-lane divided example: NO line beside the median, dashed within each pair", () => {
     const marks = bandStripeMarks(makeXSection(OWNER_EXAMPLE));
-    // seams: travel|travel, travel|median, median|travel, travel|travel = 4 seams
-    expect(marks).toHaveLength(4);
-    expect(marks[0].style).toBe("white-dash");
-    expect(marks[1].style).toBe("yellow-solid");
-    expect(marks[2].style).toBe("yellow-solid");
-    expect(marks[3].style).toBe("white-dash");
-  });
-  it("a centre-turn-lane road gets solid yellow on both its edges, not double-yellow", () => {
-    const marks = bandStripeMarks(makeXSection([{ type: "travel", w: 12 }, { type: "turnLane", w: 12 }, { type: "travel", w: 12 }]));
     expect(marks).toHaveLength(2);
-    expect(marks.every((m) => m.style === "yellow-solid")).toBe(true);
+    expect(marks.every((m) => m.style === "white-dash")).toBe(true);
+    noYellow(marks);
+    // neither remaining seam sits on a median edge (median is 20' wide, centred: edges at +-10)
+    expect(marks.every((m) => Math.abs(Math.abs(m.atOffset) - 10) > 1e-6)).toBe(true);
   });
-  it("a shoulder or parking-lane edge is solid white, never yellow", () => {
+  it("a centre-turn-lane road: both edges are white dashes, never yellow", () => {
+    const marks = bandStripeMarks(makeXSection([T(), { type: "turnLane", w: 12 }, T()]));
+    expect(marks).toHaveLength(2);
+    expect(marks.every((m) => m.style === "white-dash")).toBe(true);
+    noYellow(marks);
+  });
+  it("a shoulder or parking-lane edge is solid white", () => {
     const marks = bandStripeMarks(makeXSection([{ type: "travel", w: 12 }, { type: "shoulder", w: 8 }]));
     expect(marks).toEqual([{ atOffset: expect.any(Number), style: "white-solid" }]);
   });
   it("flank (outside-curb) bands never contribute a seam", () => {
-    const marks = bandStripeMarks(makeXSection([{ type: "sidewalk", w: 5 }, { type: "travel", w: 12 }, { type: "travel", w: 12 }, { type: "sidewalk", w: 5 }]));
+    const marks = bandStripeMarks(makeXSection([{ type: "sidewalk", w: 5 }, T(), T(), { type: "sidewalk", w: 5 }]));
     expect(marks).toHaveLength(1); // only the travel/travel seam
-    expect(marks[0].style).toBe("yellow-double");
-  });
-
-  /* NEW-5 (owner-measured repro) — three undivided 12' travel lanes, no median/turn-lane: there is
-   * no seam exactly at the centerline (an ODD lane count), so two candidate seams (±6') tie for
-   * "nearest 0". The fix picks the more-positive-offset seam on a tie, deterministically — a
-   * property of the offset VALUES, never of which seam this module's own loop happened to build
-   * first (see chooseCenterSeam's header for why that distinction actually matters). */
-  describe("odd undivided lane count — the NEW-5 tie-break fix", () => {
-    it("three equal-width undivided lanes: exactly one double-yellow, at the more-positive tied offset, never both and never neither", () => {
-      const marks = bandStripeMarks(makeXSection([{ type: "travel", w: 12 }, { type: "travel", w: 12 }, { type: "travel", w: 12 }]));
-      expect(marks).toHaveLength(2);
-      const yellows = marks.filter((m) => m.style === "yellow-double");
-      expect(yellows).toHaveLength(1);
-      expect(yellows[0].atOffset).toBeCloseTo(6, 9);
-      const dashes = marks.filter((m) => m.style === "white-dash");
-      expect(dashes).toHaveLength(1);
-      expect(dashes[0].atOffset).toBeCloseTo(-6, 9);
-    });
-    it("is deterministic across repeated calls on the identical input (no reliance on object/array iteration quirks)", () => {
-      const x = makeXSection([{ type: "travel", w: 12 }, { type: "travel", w: 12 }, { type: "travel", w: 12 }]);
-      const a = bandStripeMarks(x), b = bandStripeMarks(x);
-      expect(a).toEqual(b);
-    });
-    it("five equal-width undivided lanes: still exactly one double-yellow, at the centermost tied seam", () => {
-      const marks = bandStripeMarks(makeXSection([
-        { type: "travel", w: 12 }, { type: "travel", w: 12 }, { type: "travel", w: 12 }, { type: "travel", w: 12 }, { type: "travel", w: 12 },
-      ]));
-      const yellows = marks.filter((m) => m.style === "yellow-double");
-      expect(yellows).toHaveLength(1);
-      expect(Math.abs(yellows[0].atOffset)).toBeCloseTo(6, 9); // the pair of seams nearest 0, not the outer ±18 pair
-    });
-    it("a genuine tie can only arise from a left-right symmetric section, so reversing the (symmetric) band list changes nothing — reordering can never flip the result", () => {
-      const bands = [{ type: "travel", w: 12 }, { type: "travel", w: 12 }, { type: "travel", w: 12 }];
-      const marks = bandStripeMarks(makeXSection(bands));
-      const reversed = bandStripeMarks(makeXSection([...bands].reverse()));
-      expect(reversed).toEqual(marks);
-    });
+    expect(marks[0].style).toBe("white-dash");
   });
 });
 
@@ -260,7 +230,7 @@ describe("bandStripeMarksWithWidth — NEW-1's per-seam legibility width", () =>
     expect(edgeSeams).toHaveLength(2);
     for (const s of edgeSeams) expect(s.minBandFt).toBe(2);
     // the travel/travel seam: both bands are 12'
-    const centerSeam = withWidth.find((m) => m.style === "yellow-double");
+    const centerSeam = withWidth.find((m) => m.style === "white-dash");
     expect(centerSeam.minBandFt).toBe(12);
   });
 });
@@ -507,5 +477,18 @@ describe("outside-curb band placement — the geometry the NEW-2 canvas fix reli
       expect(Math.max(e.from, e.to)).toBeLessThanOrEqual(half + 1e-9);
       expect(Math.min(e.from, e.to)).toBeGreaterThanOrEqual(-half - 1e-9);
     }
+  });
+});
+
+describe("NEW-1 — no yellow in any road cross-section renderer (source guard)", () => {
+  it("neither the canvas seam painter nor the dialog preview carries the yellow stroke or a yellow style", async () => {
+    const { readFileSync } = await import("node:fs");
+    for (const f of ["src/workspaces/site-planner/components/RoadCrossSectionDialog.jsx", "src/workspaces/site-planner/lib/roadCrossSection.js"]) {
+      expect(readFileSync(f, "utf8"), f).not.toMatch(/e6b800|"yellow-/i);
+    }
+    const sp = readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
+    const at = sp.indexOf("const drawSeam = (offFt");
+    expect(at).toBeGreaterThan(0);
+    expect(sp.slice(at, at + 1500)).not.toMatch(/e6b800|yellow/i);
   });
 });

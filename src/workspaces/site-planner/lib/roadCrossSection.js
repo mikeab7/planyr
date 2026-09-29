@@ -63,7 +63,7 @@ export const DEFAULT_BAND_TYPE = "travel";
 // PondSection.jsx already uses for a diagram that isn't literally "this token's usual meaning".
 // Travel/turn-lane bands deliberately carry NO distinct fill: undifferentiated asphalt, same as
 // every road today, cued instead by lane striping (bandStripeMarks) — matching how a real cross
-// section reads (a turn lane is asphalt with yellow hatching, not a different-colored surface).
+// section reads (a turn lane is asphalt, not a different-colored surface).
 export const BAND_FILL_TOKEN = {
   median: "var(--success-text)",
   shoulder: "var(--text-tertiary)",
@@ -293,55 +293,29 @@ export function bandLayout(xsection) {
 }
 
 /* Lane-marking seams between adjacent WITHIN-CURB bands — a deliberately simplified striping
- * convention for visual clarity (this is a site-planning screening tool, not a striping plan):
- *   • either side of a median or a centre turn lane → solid yellow (the opposing-flow edge)
- *   • two adjacent travel lanes with a median/turn-lane anywhere in the section → dashed white
- *     (both are the same direction of travel, separated only by a lane line)
- *   • two adjacent travel lanes with NO median/turn-lane anywhere (a fully undivided road) → the ONE
- *     seam nearest the road's real centerline (offset 0) is double solid yellow (the opposing-flow
- *     split); every other travel/travel seam is dashed white
- *   • the edge of a shoulder / parking lane / bike lane → solid white
- * An EVEN undivided lane count always has one seam exactly at offset 0, which wins outright. An ODD
- * undivided lane count (NEW-5, owner-reported: three 12' lanes painted the double-yellow a whole lane
- * off-center depending on how the bands happened to be listed) has no true center seam — two
- * candidates tie for "nearest 0", symmetric about it. `chooseCenterSeam` breaks that tie by the
- * OFFSET VALUE alone (the more positive of the tied seams wins, every time), never by which one this
- * function's own loop happened to build first — a tie can only arise when the section is itself
- * left-right symmetric (see test/roadCrossSection.test.js's own derivation), so this makes the
- * choice a property of the geometry, not an accident of array iteration order. */
-function chooseCenterSeam(seams) {
-  const dashSeams = seams.filter((s) => s.style === "white-dash");
-  if (!dashSeams.length) return;
-  const minAbs = Math.min(...dashSeams.map((s) => Math.abs(s.atOffset)));
-  const tied = dashSeams.filter((s) => Math.abs(Math.abs(s.atOffset) - minAbs) < 1e-9);
-  tied.reduce((best, s) => (s.atOffset > best.atOffset ? s : best), tied[0]).style = "yellow-double";
-}
-
+ * convention for visual clarity (this is a site-planning screening tool, not a striping plan).
+ * NO YELLOW anywhere (owner, 2026-09-29: "just get rid of the yellow"):
+ *   • beside a median → NO line at all (the median's own band and the curb already show it)
+ *   • a seam touching a centre turn lane, and any two adjacent travel lanes → dashed white, the
+ *     same lane line every other seam gets (so an undivided road's centre seam is no longer special
+ *     and the old odd-lane-count centre-seam tie-break, NEW-5, is gone with it)
+ *   • the edge of a shoulder / parking lane / bike lane → solid white */
 function stripeSeams(xsection) {
   const { edges } = bandLayout(xsection);
   const within = edges.filter((e) => bandTypeOf(e.band.type).withinCurb);
   if (within.length < 2) return [];
-  const hasSplit = within.some((e) => e.band.type === "median" || e.band.type === "turnLane");
   const seams = [];
   for (let i = 0; i < within.length - 1; i++) {
     const a = within[i], b = within[i + 1];
+    if (a.band.type === "median" || b.band.type === "median") continue;
     const atOffset = a.to; // == b.from
-    let style;
-    if (a.band.type === "median" || b.band.type === "median" || a.band.type === "turnLane" || b.band.type === "turnLane") {
-      style = "yellow-solid";
-    } else if (a.band.type === "travel" && b.band.type === "travel") {
-      style = "white-dash"; // resolved to yellow-double below for the undivided case's center seam
-    } else {
-      style = "white-solid";
-    }
-    seams.push({ atOffset, style, i, minBandFt: Math.min(a.band.w, b.band.w) });
+    const laneLine = a.band.type === "turnLane" || b.band.type === "turnLane" || (a.band.type === "travel" && b.band.type === "travel");
+    seams.push({ atOffset, style: laneLine ? "white-dash" : "white-solid", i, minBandFt: Math.min(a.band.w, b.band.w) });
   }
-  if (!hasSplit) chooseCenterSeam(seams);
   return seams;
 }
 
-// Returns [{ atOffset, style }], style one of "yellow-solid" | "white-dash" | "yellow-double" |
-// "white-solid", in section order. The dialog's preview reads this — no per-seam width in it.
+// Returns [{ atOffset, style }], style one of "white-dash" | "white-solid", in section order. The dialog's preview reads this — no per-seam width in it.
 export function bandStripeMarks(xsection) {
   return stripeSeams(xsection).map(({ atOffset, style }) => ({ atOffset, style }));
 }

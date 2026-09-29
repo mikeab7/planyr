@@ -30696,13 +30696,11 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
           const drawSeam = (offFt, key, style) => {
             const line = offsetPolyline(xsDense, offFt);
             if (!line || line.length < 2) return null;
-            return <polyline key={key} points={toPts(line)} fill="none" stroke={style.startsWith("yellow") ? "#e6b800" : "#f2f2f2"} strokeWidth={markW} strokeDasharray={style === "white-dash" ? `${8 * lfK} ${6 * lfK}` : undefined} pointerEvents="none" />;
+            return <polyline key={key} points={toPts(line)} fill="none" stroke="#f2f2f2" strokeWidth={markW} strokeDasharray={style === "white-dash" ? `${8 * lfK} ${6 * lfK}` : undefined} pointerEvents="none" />;
           };
           const laneMarks = bandStripeMarksWithWidth(el.xsection)
             .filter((m) => m.minBandFt * ppf >= XSEC_STRIPE_MIN_PX)
-            .flatMap((m, i) => m.style === "yellow-double"
-              ? [drawSeam(m.atOffset + 0.25, `xm${i}a`, m.style), drawSeam(m.atOffset - 0.25, `xm${i}b`, m.style)]
-              : [drawSeam(m.atOffset, `xm${i}`, m.style)]).filter(Boolean);
+            .map((m, i) => drawSeam(m.atOffset, `xm${i}`, m.style)).filter(Boolean);
           if (bandFillsIn.length || laneMarks.length) {
             rparts.push(
               <g key="xsec" clipPath={`url(#${clipId})`}>

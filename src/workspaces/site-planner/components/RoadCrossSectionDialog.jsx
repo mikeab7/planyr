@@ -129,8 +129,6 @@ function BandWidthInput({ value, onCommit, ariaLabel = "Band width, feet", testI
 }
 
 const STRIPE_STYLE = {
-  "yellow-solid": { stroke: "#e6b800", dash: undefined, w: 1.6 },
-  "yellow-double": { stroke: "#e6b800", dash: undefined, w: 1.6, double: true },
   "white-dash": { stroke: "#f2f2f2", dash: "10 8", w: 1.4 },
   "white-solid": { stroke: "#f2f2f2", dash: undefined, w: 1.4 },
 };
@@ -304,14 +302,6 @@ function XSectionPreview({ xsection, activeIndex }) {
           const x = xOf(m.atOffset);
           const st = STRIPE_STYLE[m.style];
           if (!st) return null;
-          if (st.double) {
-            return (
-              <g key={i}>
-                <line x1={x - 1.1} y1={swatchTop} x2={x - 1.1} y2={swatchBottom} stroke={st.stroke} strokeWidth={st.w} />
-                <line x1={x + 1.1} y1={swatchTop} x2={x + 1.1} y2={swatchBottom} stroke={st.stroke} strokeWidth={st.w} />
-              </g>
-            );
-          }
           return <line key={i} x1={x} y1={swatchTop} x2={x} y2={swatchBottom} stroke={st.stroke} strokeWidth={st.w} strokeDasharray={st.dash} />;
         })}
 
