@@ -306,6 +306,17 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > `test/namesSingleSource.test.js` (fails on `useState` seeded from a name) and
 > `e2e/names-matrix.spec.js` (every entry point × every display, red-proofed).
 >
+> **⛔ STANDING RULE — ALL SHARED DATA HAS ONE SOURCE OF TRUTH; NEVER COPY SHARED DATA INTO COMPONENT STATE
+> (owner rule, 2026-09-29, generalising the names rule above after the B1953792 audit found ~27 more
+> stale-copy sites).** Any value more than one surface can change — acreage, counts, status, owner,
+> jurisdiction, dates, account prefs, rule tables, filing facts — lives in ONE home; every reader reads it
+> through one selector/subscribe (never a `useState`/`useRef`/module cache seeded once from it); every
+> writer goes through one function that does a fresh read-modify-write of only the keys it changed; a
+> derived value is computed at read time, never persisted next to its source; a snapshot that is
+> intentional (issued revision, history, export) is labelled as such in code. Inventory + verdicts:
+> `docs/audit-single-source-of-truth.md`. Guard: `test/entityStateCopy.test.js` (fails on a new seeded
+> copy; escape is an inline `// stale-ok: <reason>`).
+>
 > **📋 `BACKLOG.md` = the single source of truth for open bugs & feature requests — KEEP IT LEAN.** Every run,
 > work the **🔲 Open** items. **The moment an item ships, MOVE its whole block to `docs/archive/BACKLOG-DONE.md` that same
 > session — never mark it done in place** (marking-done-in-place is exactly what bloated this file). The next
