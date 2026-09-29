@@ -239,12 +239,12 @@ const LEGACY_RULE_FIELD_MAP = {
 // configured rule (finish 1+ days overdue → red, no complete rule) mis-colored 212 of his 557 real
 // leaf tasks red, because marking a task Complete only ever writes `health:"green"` and never
 // touches `percentComplete` (verified: HealthPicker → commit → applyUpdate → `updateTask(id,
-// {health:val})`, no percentComplete write, anywhere). PR #1178 patched this as an emergency global
+// {health:val})`, no percentComplete write, anywhere). PR 1178 patched this as an emergency global
 // hardcode (`if (task.health==="green") return "green"` ahead of the whole rule engine). This
 // migration is the real fix: every migrated attention-color (non-green) rule gets the same
 // protection back as a VISIBLE, EDITABLE `unless` clause instead of invisible behavior — exactly
 // what the rebuilt language exists to make expressible. computeDisplayHealth below no longer
-// carries the global short-circuit; if PR #1178 lands first, its hardcode is redundant with this
+// carries the global short-circuit; if PR 1178 lands first, its hardcode is redundant with this
 // and should be removed as part of reconciling this branch.
 const RULE_COMPLETE_PAUSED_GUARD = [{field:"status", op:"is", value:"green"}, {field:"status", op:"is", value:"paused"}];
 const migrateRule = r => {
@@ -353,6 +353,7 @@ export {
   isCompleteTask, leafPercent, rolledPercentMap, effectivePercentComplete, completionDelta, cascadeDelta,
   RULE_FIELDS, RULE_FIELD_BY_K, RULE_OPS, evalFieldCondition, evalConditionGroup, evalRule,
   migrateRule, migrateCfRulesToHealthRules, DEFAULT_HEALTH_RULES, getHealthRules, evalHealthRules,
+  opsForField, HEALTH_CONDITIONS, HEALTH_CONDITION_BY_KEY, evalHealthCondition, LEGACY_RULE_FIELD_MAP, RULE_COMPLETE_PAUSED_GUARD,
 };
 
 /** The grid's display health for a LEAF task (no meeting/deadline blocks — see header). `now` = "YYYY-MM-DD". */

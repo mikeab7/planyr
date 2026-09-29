@@ -4823,12 +4823,12 @@ const LEGACY_RULE_FIELD_MAP = {
 // configured rule (finish 1+ days overdue → red, no complete rule) mis-colored 212 of his 557 real
 // leaf tasks red, because marking a task Complete only ever writes `health:"green"` and never
 // touches `percentComplete` (verified: HealthPicker → commit → applyUpdate → `updateTask(id,
-// {health:val})`, no percentComplete write, anywhere). PR #1178 patched this as an emergency global
+// {health:val})`, no percentComplete write, anywhere). PR 1178 patched this as an emergency global
 // hardcode (`if (task.health==="green") return "green"` ahead of the whole rule engine). This
 // migration is the real fix: every migrated attention-color (non-green) rule gets the same
 // protection back as a VISIBLE, EDITABLE `unless` clause instead of invisible behavior — exactly
 // what the rebuilt language exists to make expressible. computeDisplayHealth below no longer
-// carries the global short-circuit; if PR #1178 lands first, its hardcode is redundant with this
+// carries the global short-circuit; if PR 1178 lands first, its hardcode is redundant with this
 // and should be removed as part of reconciling this branch.
 const RULE_COMPLETE_PAUSED_GUARD = [{field:"status", op:"is", value:"green"}, {field:"status", op:"is", value:"paused"}];
 const migrateRule = r => {
@@ -4950,7 +4950,7 @@ const evalHealthRules = (task, settings, NOW, taskById) => {
 const computeDisplayHealth = (task, settings, taskById) => {
   if (!task) return task?.health;
   // ⛔ B785744 SUPERSEDES the global "Complete beats all" short-circuit that briefly lived here
-  // (PR #1178/B780448, an emergency hardcode for the same live regression: "if the finish date is
+  // (PR 1178/B780448, an emergency hardcode for the same live regression: "if the finish date is
   // in the past, it should be marked red... UNLESS I click task complete, ... I CAN OVERRIDE IN
   // THAT SCENARIO"). Per that fix's own owner instruction, once an UNLESS clause is expressible the
   // hardcode becomes a visible, editable RULE, not invisible behavior baked into this function — see

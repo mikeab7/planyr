@@ -44,6 +44,7 @@ export {
   isCompleteTask, leafPercent, rolledPercentMap, effectivePercentComplete, completionDelta, cascadeDelta,
   RULE_FIELDS, RULE_FIELD_BY_K, RULE_OPS, evalFieldCondition, evalConditionGroup, evalRule,
   migrateRule, migrateCfRulesToHealthRules, DEFAULT_HEALTH_RULES, getHealthRules, evalHealthRules,
+  opsForField, HEALTH_CONDITIONS, HEALTH_CONDITION_BY_KEY, evalHealthCondition, LEGACY_RULE_FIELD_MAP, RULE_COMPLETE_PAUSED_GUARD,
 };
 
 /** The grid's display health for a LEAF task (no meeting/deadline blocks — see header). \`now\` = "YYYY-MM-DD". */
