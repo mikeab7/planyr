@@ -29,6 +29,7 @@
  * visited," never competing with the rating pills' own fill colours).
  */
 import { useMemo, useState } from "react";
+import { manualPinKey } from "../lib/foodStore.js";
 import { colorForRating, textColorForRating } from "../lib/ratingColor.js";
 
 const SORTS = {
@@ -50,7 +51,7 @@ const SORTS = {
 // Same identity FoodApp/FoodMap/VisitPanel already use — a row's OWN key, for comparing against
 // the shared `selectedKey` prop.
 function rowKey(v) {
-  return v.place_id ? `place:${v.place_id}` : `pin:${v.custom_name}`;
+  return v.place_id ? `place:${v.place_id}` : manualPinKey(v.custom_name, v.custom_lat, v.custom_lon);
 }
 
 function fieldStyle() {

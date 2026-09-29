@@ -21,7 +21,7 @@ import {
   supabaseConfigured, fetchPlacesInBounds, fetchAllVisits, fetchPlacesByIds,
   insertVisit, updateVisit, deleteVisit, manualPinsFromVisits, loggedPlaceIds, avgRatingByPlaceId,
   searchPlacesByName, fetchAllWishlist, addWishlist, removeWishlist, wishlistedPlaceIds,
-  manualWishlistFromRows, manualGroupKey,
+  manualWishlistFromRows, manualGroupKey, manualPinKey,
   fetchAllDishes, insertDish, updateDish, deleteDish,
   fetchAllDishWishlist, markDishDone,
 } from "./lib/foodStore.js";
@@ -408,7 +408,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   // `custom_name` — matching this repo's existing precedent of disambiguating manual pins by
   // name alone (see the List `onSelect` handler below, unchanged by this item).
   const selectedKey = selected?.kind === "place" ? `place:${selected.place.id}`
-    : selected?.kind === "manualPin" ? `pin:${selected.pin.name}`
+    : selected?.kind === "manualPin" ? manualPinKey(selected.pin.name, selected.pin.lat, selected.pin.lon)
     : null;
 
   // B651872 (×3) — a place selected from search (never visited, never flagged) draws ONLY from
@@ -538,7 +538,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
                 openPlace({ id: v.place_id, name: p.name, lat: p.lat, lon: p.lon });
                 if (p.lat != null && p.lon != null) flyTo({ lat: p.lat, lon: p.lon });
               } else if (!v.place_id) {
-                const pin = { name: v.custom_name, lat: v.custom_lat, lon: v.custom_lon, visitIds: visits.filter((x) => !x.place_id && x.custom_name === v.custom_name).map((x) => x.id) };
+                const pin = { name: v.custom_name, lat: v.custom_lat, lon: v.custom_lon, visitIds: visits.filter((x) => !x.place_id && manualGroupKey(x.custom_name, x.custom_lat, x.custom_lon) === manualGroupKey(v.custom_name, v.custom_lat, v.custom_lon)).map((x) => x.id) };
                 openManualPin(pin);
                 if (pin.lat != null && pin.lon != null) flyTo({ lat: pin.lat, lon: pin.lon });
               }
@@ -548,7 +548,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
 
         {selected && (
           <VisitPanel
-            key={selected.kind === "place" ? `place:${selected.place.id}` : selected.kind === "manualPin" ? `pin:${selected.pin.key || selected.pin.name}` : "new-pin"}
+            key={selected.kind === "place" ? `place:${selected.place.id}` : selected.kind === "manualPin" ? manualPinKey(selected.pin.name, selected.pin.lat, selected.pin.lon) : "new-pin"}
             place={panelPlace}
             pastVisits={visitsForSelected}
             onClose={closePanel}
