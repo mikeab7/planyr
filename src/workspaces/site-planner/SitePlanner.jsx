@@ -3,6 +3,7 @@ import { flushSync, createPortal } from "react-dom";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { useProjectName, usePlanName, renameProjectChecked, renamePlanChecked } from "../../shared/names/names.js";
 import { loadSite, saveSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
 import { relTime } from "../../shared/projects/projectModel.js";
 import { collectAssetRefs, releasePlanForOverlay } from "./lib/sharedAssetRefs.js";
@@ -16173,38 +16174,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return () => { cancelled = true; dropOutlines(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identifyMode, origin]);
-  const [siteLabel, setSiteLabel] = useState(() => restored?.site || restored?.name || "Untitled site");
-  // A brand-new blank site is the first plan of its own group → "Concept A"
-  // (NEW-1/NEW-2 lettered-concept default; the label stays user-editable).
-  const [planLabel, setPlanLabel] = useState(() => restored?.name || "Concept A");
-  const commitSiteLabel = (v) => { const n = (v || "").trim() || "Untitled site"; setSiteLabel(n); onRenameSite?.(groupId, n); };
-  const commitPlanLabel = (v) => { const n = (v || "").trim() || "Untitled plan"; setPlanLabel(n); onRenamePlan?.(siteId, n); };
-  // B1934528 — `siteLabel` is captured once at mount from `restored.site` and otherwise only
-  // moves through `commitSiteLabel` above, so a rename that lands on THIS project through any
-  // other door (the header breadcrumb renaming a project row while this plan sits in the
-  // hidden/Map mode, another tab, or a cloud pull that brings in another device's rename) left it
-  // stale for the rest of this mount — reported live: the top breadcrumb showed the new project
-  // name (it resolves live off the sites list, ProjectBreadcrumb.jsx's own `resolveCurrentName`)
-  // while Compose exhibit's title block/header line, the PDF/PNG/KMZ filenames and the Yield
-  // panel header (all of which read this state directly) kept printing the old one.
-  // `storage.js`'s `notifySitesListChanged()` fires this SAME synthetic "planarfit:sites:v1"
-  // storage event on every rename (local or pulled from the cloud) and on every cloud pull —
-  // ProjectBreadcrumb already resyncs off it, so re-reading the group's authoritative name here
-  // (`loadSite` resolves it per plan, per `projectName.js`) is the identical answer, not a second
-  // derivation. Safe to run unconditionally: nothing in this component binds `siteLabel` to a
-  // live-typed input, so there is no in-progress edit this could ever clobber.
-  useEffect(() => {
-    if (!siteId) return;
-    const resync = () => {
-      const fresh = loadSite(siteId);
-      const name = fresh && (fresh.site || fresh.name);
-      if (!name) return;
-      setSiteLabel((prev) => (name !== prev ? name : prev));
-    };
-    const onStorage = (e) => { if (!e.key || e.key.startsWith("planarfit:sites")) resync(); };
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, [siteId]);
+  // ⛔ NAMES HAVE ONE SOURCE OF TRUTH (shared/names/names.js) — `siteLabel`/`planLabel` are READ
+  // from it on every render, never seeded into state (that was B1934528: a copy taken at mount that
+  // every other rename door missed, patched once with a storage-event listener and now gone).
+  // The store re-reads on the app's one "list moved" signal, so a rename from the Map row menu,
+  // the breadcrumb, another tab or a cloud pull reaches this component with no listener here.
+  const siteLabel = useProjectName(groupId, restored?.site || restored?.name || "Untitled site");
+  // A brand-new blank site is the first plan of its own group → "Concept A" (lettered default).
+  const planLabel = usePlanName(siteId, restored?.name || "Concept A");
+  // In-flight typing buffer for the plan-name field ONLY (null = not editing → show the store's name).
+  const [planDraft, setPlanDraft] = useState(null);
+  // Validation + visible rejection live in the shared rename functions; an empty name is refused
+  // with a notice and the old name stays (it used to be silently saved as "Untitled site").
+  const commitPlanLabel = (v) => { setPlanDraft(null); renamePlanChecked(siteId, v, async (id, n) => onRenamePlan?.(id, n)); };
   const siteName = `${siteLabel} · ${planLabel}`; // used for export filenames / print header
   /* Keep the save metadata current (so the first non-blank save is fully formed).
    * NEW-1 — assigned during RENDER, not in a passive effect, and `origin` reads the live STATE
@@ -20605,7 +20587,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       </button>
         <AnchoredMenu open={planMenu} onClose={() => { setPlanMenu(false); setPlanDelArm(null); setPlanPurgeArm(null); }} anchorRef={planAnchor} placement="below-left" gap={8} width={284} panelStyle={{ ...menuPanel, padding: 10 }}>
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, marginBottom: 5 }}>Plan name</div>
-          <input value={planLabel} onChange={(e) => setPlanLabel(e.target.value)} onBlur={(e) => commitPlanLabel(e.target.value)}
+          <input value={planDraft ?? planLabel} onChange={(e) => setPlanDraft(e.target.value)} onBlur={(e) => commitPlanLabel(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }} style={{ ...numInput, width: "100%", fontFamily: "inherit" }} data-testid="plan-name-input" />
           {/* ⛔ NEW-3 (B385042) — THE CURRENT PLAN'S NAME APPEARED THREE TIMES AT ONCE.
               Owner: *"it says Concept A three times here. Let's fix that. That seems like a waste."*
@@ -20900,11 +20882,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // The breadcrumb is now the ONLY project control (the center "Site ▾" was removed), so its
   // rename has to do everything the old inline Site-name editor did. For the CURRENT project
-  // route through commitSiteLabel so the Row-1 header label updates live; any other project
-  // renames its site group directly. Both ultimately call renameSiteGroup. (header consolidation)
+  // every project (current or not) renames through the shared checked rename, so the header
+  // label updates live off the names store. Both ultimately call renameSiteGroup. (header consolidation)
   const renameProjectFromHeader = (id, name) => {
-    if (id === groupId) commitSiteLabel(name);
-    else onRenameSite?.(id, name);
+    renameProjectChecked(id, name, async (gid, n) => onRenameSite?.(gid, n));
   };
   // Normalize the planner's save status into the breadcrumb's at-risk vocabulary (B193).
   const headerSaveState = (() => {

@@ -166,6 +166,15 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1389504 — B1953200: a rename from any door reaches every display, incl. across devices `Blocker: auth`
+
+Sandbox-proven (logged out): `e2e/names-matrix.spec.js` (red-proofed) + `test/namesSingleSource.test.js`. **Still needs a signed-in pass** for the cloud-pull leg.
+**Steps:**
+1. Sign in on planyr.io, open a throwaway project's plan. **Expect:** note breadcrumb name.
+2. On a second browser signed into the same account, rename that project from the Map list. Back on the first (not reloaded), wait for background sync. **Expect:** breadcrumb, plan header, and Compose exhibit title block show the new name; the PDF filename starts with it.
+3. Rename it to blank on either device. **Expect:** a red notice "needs a name", old name kept.
+4. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–3, or a failed step filed as a recurrence on B1953200.
 ### V1389040 — B1952736: the restyled project switcher opens already-ordered, lines up, and keeps its footer in view on a real signed-in account `Blocker: auth`
 
 **Why this needs a live pass even though the layout is fully measured headlessly.** `ui-audit/verify-project-switcher-restyle.mjs` drives the real dropdown signed in against a STUB Supabase (65 projects, 57 deleted) and measures every acceptance point. What a stub cannot supply is his real account: his real pins, real recency and real bin.

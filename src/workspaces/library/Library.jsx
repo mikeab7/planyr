@@ -22,6 +22,7 @@
  * persistence) and the Library (browsing/filing) legitimately share it. Lazy-loaded by
  * the shell, so opening Review never pulls the Library in and vice-versa.
  */
+import { useProjectName } from "../../shared/names/names.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import FileBrowser from "./components/FileBrowser.jsx";
@@ -242,10 +243,8 @@ export default function Library({
 
   // The breadcrumb project name resolves from the local site list (instant; the per-user
   // cloud cache feeds it), falling back to the id. { id, name } | null.
-  let projectName = "";
-  if (projectId) {
-    try { const p = listLocalProjects().find((pp) => pp.id === projectId); if (p) projectName = p.name; } catch (_) {}
-  }
+  // ONE source of truth for the name (shared/names) — re-reads on every rename, from any door.
+  const projectName = useProjectName(projectId, "");
   const libraryProject = projectId ? { id: projectId, name: projectName || "Untitled project" } : null;
 
   // Folder mode only makes sense with a project + signed in; FileBrowser gates its own

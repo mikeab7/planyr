@@ -294,6 +294,18 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > rediscovering a dead end at full price. A brief that says what to do without saying what has already been
 > tried is an incomplete brief.
 >
+> **⛔ STANDING RULE — NAMES HAVE ONE SOURCE OF TRUTH; NEVER COPY A NAME INTO COMPONENT STATE
+> (owner rule, 2026-09-29, after B1934528: the exhibit kept the old project name because
+> SitePlanner seeded `siteLabel` once at mount).** A project's name is the group's authoritative
+> `site` and a plan's is its record's `name`; every display reads them through
+> `src/shared/names/names.js` (`useProjectName` / `usePlanName`), which re-reads on the app's one
+> `onProjectsChanged` signal, and every rename goes through `renameProjectChecked` /
+> `renamePlanChecked` (validate → the one storage write → a visible notice on rejection or failure;
+> an empty name is refused, never defaulted). Derived strings (PDF filename, exhibit title, tab
+> title) are computed from the selector at render/export time, never cached. Guards:
+> `test/namesSingleSource.test.js` (fails on `useState` seeded from a name) and
+> `e2e/names-matrix.spec.js` (every entry point × every display, red-proofed).
+>
 > **📋 `BACKLOG.md` = the single source of truth for open bugs & feature requests — KEEP IT LEAN.** Every run,
 > work the **🔲 Open** items. **The moment an item ships, MOVE its whole block to `docs/archive/BACKLOG-DONE.md` that same
 > session — never mark it done in place** (marking-done-in-place is exactly what bloated this file). The next
