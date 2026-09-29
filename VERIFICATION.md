@@ -166,6 +166,15 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1394448 — B1958144: designed road sections (median, lane striping, ROW lines) show on the real Silvestri and Richfield plans `Blocker: real-data`
+
+Sandbox-proven (logged out, seeded plan): `e2e/road-xsection-paint-order.spec.js` (red pre-fix), `ui-audit/verify-road-xsection-paint-order.mjs` (3 zooms + the real exported sheet). **Still needs the owner's real signed-in plans**, which carry the 5-band section (Silvestri "Concept D - Sylvestri Retail" road e1455126cfrjkf; Richfield Concept A road e1454943jjatdk).
+**Steps (on a throwaway DUPLICATE of each plan, never the real one):**
+1. Open the duplicate, zoom to the road. **Expect:** median band, lane striping and the width dimension are visible on the road, not one plain grey strip.
+2. Select the road, then click empty ground. **Expect:** decoration stays on top in both states.
+3. Export a PDF of the frame containing the road. **Expect:** median and striping appear on the sheet.
+4. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–3 on both plans, or a failed step re-opens B1958144 with a `Recurrence:` line.
 ### V1390098 — B1953795: Scheduler/Dashboard one-answer fixes (Complete, Has-a-schedule, since-last-here, health cards, Agenda, owner rename) on a real signed-in account `Blocker: real-data`
 
 Sandbox-proven (logged out): the unit suites named on B1953795 and `ui-audit/verify-schedule-completion.mjs` (red on main, ALL PASS here). **Still needs a signed-in pass on a THROWAWAY duplicate schedule/project (constraint 7 — never a real one)** for the parts that need a real schedule document, the Shell + embed, or a printed PDF.
