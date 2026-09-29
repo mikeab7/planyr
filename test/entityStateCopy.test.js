@@ -53,7 +53,6 @@ const VIEW_PREF_FILES = {
 // Rule-2 copies awaiting their fix; each entry is REMOVED by the item named (dead entries fail).
 const PENDING_FIX_FILES = {
   "src/workspaces/site-planner/MapFinder.jsx": "acctPrefs — B1953793",
-  "src/workspaces/scheduler/components/AgendaView.jsx": "agenda items — B1953795",
   "src/workspaces/site-planner/SitePlanner.jsx": "rule tables — B1953793 (smoothZoom/stdDraft are view prefs)",
 };
 

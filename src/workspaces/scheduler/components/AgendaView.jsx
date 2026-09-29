@@ -90,7 +90,7 @@ function AgendaRow({ item, onToggle, onEdit, onDelete }) {
 /** `scope` is the account id (or "local" signed out) — one list per account, never per project;
  *  this view only ever renders when the app is at org scope. */
 export default function AgendaView({ scope }) {
-  const [items, setItems] = useState(() => readAgenda(scope));
+  const [items, setItems] = useState(() => readAgenda(scope)); // stale-ok: re-read on every storage change via subscribeAgenda below; every write is a fresh read-modify-write (mutateAgenda)
   const [showDone, setShowDone] = useState(false);
   const [draftText, setDraftText] = useState("");
   const [draftDate, setDraftDate] = useState("");
