@@ -11,6 +11,8 @@
  * is both correct and entirely clipper-free.
  */
 
+import { isBuilding } from "../../site-planner/lib/buildingPredicate.js";
+
 function rectAreaSqft(el) {
   return Math.abs((el?.w || 0) * (el?.h || 0));
 }
@@ -63,7 +65,7 @@ export function buildingCountBySite(rows) {
   for (const r of rows || []) {
     if (!r || !r.site_id || !r.data) continue;
     if (!bySite.has(r.site_id)) bySite.set(r.site_id, 0);
-    if (r.data.type === "building") bySite.set(r.site_id, bySite.get(r.site_id) + 1);
+    if (isBuilding(r.data)) bySite.set(r.site_id, bySite.get(r.site_id) + 1);
   }
   const out = {};
   for (const [siteId, n] of bySite) out[siteId] = n;

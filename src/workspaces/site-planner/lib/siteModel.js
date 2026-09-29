@@ -31,6 +31,7 @@ import { dogEarGeom, dogEarSize, isDogEarSide,
   wallStripBox, wallKidBox, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost,
   sideOfBondedBox, localToWorld, sidewalkSpanForBumps, sideParkAlongRun, sideParkStack,
   SIDE_PARK_PIN_TOL_FT } from "./dogEar.js";
+import { isBuilding } from "./buildingPredicate.js";
 import { createIdMinter, randomIdSalt } from "../../../shared/ids.js";
 import { layoutZoneByKind, boxExtentAlong, zoneAlongExtent, zoneDepthExtent, alongLenIsChainEcho, usableCourtSpan, anchoredAlongSpan } from "./dockZones.js";
 import { roadCenterline, dedupeRoadVertices, repairBakedRadii, simplifyRoadVertices, ROAD_SIMPLIFY_TOL_FT, ROAD_VERTEX_COLLAPSE_FT } from "./roadGeometry.js";
@@ -1652,7 +1653,7 @@ export function parcelOutline(parcels) {
 export const elementsOf = (m) => m.els || [];
 // B122 — a "building" element that is an actual standalone building, excluding the
 // attached dog-ear / bump-out pieces (stored as type "building" too, flagged `dogEar`).
-export const isBuilding = (el) => !!el && el.type === "building" && !el.dogEar;
+export { isBuilding };
 // B122 — map of building id → its display number ("Building N"). Every building STILL
 // derives its number by placement order (the order buildings appear in `els`) unless it
 // carries an explicit `buildingNumber` (NEW-1 — set from the Properties panel; see

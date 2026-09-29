@@ -40,12 +40,40 @@ export function summarizeElementRecency(rows) {
 }
 
 const headerMs = (s) => {
-  const v = s && s.updatedAt;
+  const v = s && (s.updatedAt != null ? s.updatedAt : s.updated_at);
   if (typeof v === "number") return Number.isFinite(v) ? v : null;
   if (!v) return null;
   const ms = new Date(v).getTime();
   return Number.isFinite(ms) ? ms : null;
 };
+
+/* A-B1953794 — THE one answer to "how recently was this PLAN worked on": its latest live element
+ * edit, else its header time (accepts a local record {updatedAt: ms} or a cloud row
+ * {updated_at: iso}). groupRecencyMs and pickRepresentativePlan both read it, so the Sites panel's
+ * "last edited" and the plan a project shows can never disagree about which plan is newest.
+ * DESIGN CHOICE (documented): element recency wins over the header because element edits never
+ * bump `sites.updated_at` (see header). With no element data (signed out / not yet fetched) it
+ * falls back to the header time — locally that IS bumped on every content save (storage.js). */
+export function planRecencyMs(plan, elementRecencyBySite) {
+  if (!plan) return null;
+  const perPlan = elementRecencyBySite && plan.id != null ? elementRecencyBySite[plan.id] : null;
+  return perPlan != null ? perPlan : headerMs(plan);
+}
+
+/* A-B1953794 — THE one answer to "which plan represents this project?" (the Map's Sites list and
+ * the Dashboard's Pursuits/Pipeline/Locations rows both call it). `plans` = one project's plans.
+ * Most recently worked-on wins; ties (and plans with no time at all) keep input order, so the
+ * choice is deterministic. */
+export function pickRepresentativePlan(plans, elementRecencyBySite) {
+  let best = null, bestMs = -Infinity;
+  for (const p of plans || []) {
+    if (!p) continue;
+    const ms = planRecencyMs(p, elementRecencyBySite);
+    const v = ms == null ? -Infinity : ms;
+    if (best === null || v > bestMs) { best = p; bestMs = v; }
+  }
+  return best;
+}
 
 // sites: every PLAN this user can see (the full, ungrouped list — NOT the one-representative-
 // per-group list the panel renders). elementRecencyBySite: summarizeElementRecency's output.
@@ -56,8 +84,7 @@ export function groupRecencyMs(sites, elementRecencyBySite) {
   for (const s of (sites || [])) {
     if (!s || !s.id) continue;
     const gid = s.groupId || s.id;
-    const perPlan = elementRecencyBySite && elementRecencyBySite[s.id];
-    const ms = perPlan != null ? perPlan : headerMs(s);
+    const ms = planRecencyMs(s, elementRecencyBySite);
     if (ms == null) continue;
     if (!(gid in out) || ms > out[gid]) out[gid] = ms;
   }

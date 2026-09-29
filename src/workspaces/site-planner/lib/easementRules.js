@@ -24,6 +24,12 @@ export function loadEasementRules() {
 }
 export function saveEasementRules(rules) { try { localStorage.setItem(LS, JSON.stringify(rules)); } catch (_) {} }
 
+/* A-B1953794 — the ONE answer to "which easement jurisdiction applies?". Derived at read time from
+ * the plan's (healed) county; an explicit user pick (`override`, persisted in plan settings) stays
+ * an override and wins; an override naming a record that no longer exists is ignored, not obeyed. */
+export const resolveEasementJur = (override, county, rules) =>
+  (override && (!rules || rules[override]) ? override : null) || defaultJurForCounty(county);
+
 /* Best-guess jurisdiction key for a county (user can override in the UI).
  * NEW-4 — the key is NORMALISED first. This lookup was raw, so the two production rows storing
  * `"Harris"` resolved to `"generic"` instead of `"coh"` — silently, because a missing key returns

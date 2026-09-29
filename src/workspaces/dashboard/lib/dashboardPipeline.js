@@ -15,12 +15,14 @@
  * it" without a second read of `sites`.
  */
 
+import { pickRepresentativePlan } from "../../site-planner/lib/siteRecency.js";
+
 const DEFAULT_STATUS = "pursuit"; // siteStatus.js's own new-site default
 const DEFAULT_ROLE = "pursuit";   // role has no legacy split — absent means "pursuit" (B843792)
 const OPEN_STATUSES = new Set(["pursuit", "active", "onhold"]);
 
 /** `siteRows` — the raw `sites` table rows (one per plan). Returns one summary per `group_id`. */
-export function groupProjectsByGroupId(siteRows) {
+export function groupProjectsByGroupId(siteRows, elementRecencyBySite) {
   const byGroup = new Map();
   for (const row of siteRows || []) {
     if (!row) continue;
@@ -31,7 +33,9 @@ export function groupProjectsByGroupId(siteRows) {
   }
   const out = [];
   for (const [groupId, rows] of byGroup) {
-    const newest = rows.reduce((a, b) => (Date.parse(b.updated_at || 0) > Date.parse(a.updated_at || 0) ? b : a));
+    // A-B1953794 — the SAME chooser the Map's Sites list uses (siteRecency.js), so both surfaces
+    // show one project through one plan; content edits count (element recency), not just headers.
+    const newest = pickRepresentativePlan(rows, elementRecencyBySite);
     out.push({
       groupId,
       // B1161793 (NEW-2) — the representative PLAN's own row id, distinct from `groupId` (which
