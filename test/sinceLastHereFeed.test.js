@@ -138,14 +138,14 @@ describe("buildSinceLastHereFeed — schedule", () => {
   const scheduleProjects = {
     p1: {
       id: "p1", name: "Goose Creek", linkedSiteId: "s9", linkedSiteName: "Goose Creek",
-      tasks: [{ id: "t1", name: "Grading permit", end: "2026-10-05", health: "yellow", parentId: null }],
+      tasks: [{ id: "t1", _sid: "st1", name: "Grading permit", end: "2026-10-05", health: "yellow", parentId: null }],
     },
   };
 
   it("reports a milestone that slipped, naming the project and the day count", () => {
     const feed = buildSinceLastHereFeed(baseArgs({
       scheduleProjects,
-      prevSnapshot: { plans: {}, tasks: { p1: { t1: { end: "2026-10-01", health: "yellow", name: "Grading permit" } } } },
+      prevSnapshot: { plans: {}, tasks: { p1: { "sid:st1": { end: "2026-10-01", health: "yellow", name: "Grading permit" } } } },
     }));
     expect(feed.rows).toHaveLength(1);
     const row = feed.rows[0];
@@ -166,7 +166,7 @@ describe("buildSinceLastHereFeed — schedule", () => {
   it("reports a milestone pulled in earlier as a negative slip", () => {
     const feed = buildSinceLastHereFeed(baseArgs({
       scheduleProjects,
-      prevSnapshot: { plans: {}, tasks: { p1: { t1: { end: "2026-10-10", health: "yellow", name: "Grading permit" } } } },
+      prevSnapshot: { plans: {}, tasks: { p1: { "sid:st1": { end: "2026-10-10", health: "yellow", name: "Grading permit" } } } },
     }));
     expect(feed.rows[0].subline).toBe("Goose Creek / Goose Creek · -5d");
     expect(feed.rows[0].parts.some((p) => p.text.includes("moved up"))).toBe(true);
@@ -179,11 +179,11 @@ describe("buildSinceLastHereFeed — schedule", () => {
     const sameNamed = {
       p1: {
         id: "p1", name: "Master Schedule", linkedSiteId: "s1", linkedSiteName: "Goose Creek",
-        tasks: [{ id: "t1", name: "Grading permit", end: "2026-10-05", health: "yellow", parentId: null }],
+        tasks: [{ id: "t1", _sid: "st1", name: "Grading permit", end: "2026-10-05", health: "yellow", parentId: null }],
       },
       p2: {
         id: "p2", name: "Master Schedule", linkedSiteId: "s2", linkedSiteName: "Grand Port",
-        tasks: [{ id: "t2", name: "Foundation start", end: "2026-11-01", health: "yellow", parentId: null }],
+        tasks: [{ id: "t2", _sid: "st2", name: "Foundation start", end: "2026-11-01", health: "yellow", parentId: null }],
       },
     };
     const feed = buildSinceLastHereFeed(baseArgs({
@@ -191,8 +191,8 @@ describe("buildSinceLastHereFeed — schedule", () => {
       prevSnapshot: {
         plans: {},
         tasks: {
-          p1: { t1: { end: "2026-10-01", health: "yellow", name: "Grading permit" } },
-          p2: { t2: { end: "2026-10-25", health: "yellow", name: "Foundation start" } },
+          p1: { "sid:st1": { end: "2026-10-01", health: "yellow", name: "Grading permit" } },
+          p2: { "sid:st2": { end: "2026-10-25", health: "yellow", name: "Foundation start" } },
         },
       },
     }));
@@ -213,11 +213,11 @@ describe("buildSinceLastHereFeed — schedule", () => {
     const manyTasks = {
       p1: {
         id: "p1", name: "Goose Creek", linkedSiteId: "s9",
-        tasks: [1, 2, 3, 4, 5, 6].map((n) => ({ id: `t${n}`, name: `Task ${n}`, end: "2026-10-05", health: "green", parentId: null })),
+        tasks: [1, 2, 3, 4, 5, 6].map((n) => ({ id: `t${n}`, _sid: `st${n}`, name: `Task ${n}`, end: "2026-10-05", health: "green", parentId: null })),
       },
     };
     const prevTasks = {};
-    for (let n = 1; n <= 6; n++) prevTasks[`t${n}`] = { end: "2026-10-05", health: "yellow", name: `Task ${n}` };
+    for (let n = 1; n <= 6; n++) prevTasks[`sid:st${n}`] = { end: "2026-10-05", health: "yellow", name: `Task ${n}` };
     const feed = buildSinceLastHereFeed(baseArgs({
       scheduleProjects: manyTasks,
       prevSnapshot: { plans: {}, tasks: { p1: prevTasks } },
@@ -242,14 +242,14 @@ describe("buildSinceLastHereFeed — schedule", () => {
       p1: {
         id: "p1", name: "Goose Creek", linkedSiteId: "s9",
         tasks: [
-          { id: "parent", name: "Phase 1", end: "2026-10-20", health: "yellow", parentId: null },
-          { id: "t1", name: "Grading permit", end: "2026-10-09", health: "yellow", parentId: "parent" },
+          { id: "parent", _sid: "sparent", name: "Phase 1", end: "2026-10-20", health: "yellow", parentId: null },
+          { id: "t1", _sid: "st1", name: "Grading permit", end: "2026-10-09", health: "yellow", parentId: "parent" },
         ],
       },
     };
     const feed = buildSinceLastHereFeed(baseArgs({
       scheduleProjects: withParent,
-      prevSnapshot: { plans: {}, tasks: { p1: { parent: { end: "2026-10-01", name: "Phase 1" }, t1: { end: "2026-10-05", name: "Grading permit" } } } },
+      prevSnapshot: { plans: {}, tasks: { p1: { "sid:sparent": { end: "2026-10-01", name: "Phase 1" }, "sid:st1": { end: "2026-10-05", name: "Grading permit" } } } },
     }));
     // parent's own end moved too, but only the leaf's slip should surface
     expect(feed.rows.map((r) => r.kind)).toEqual(["schedule-slip"]);
@@ -409,9 +409,9 @@ describe("buildSinceLastHereFeed — schedule events survive a long absence (B13
         p1: {
           id: "p1", name: "Bain Industrial", linkedSiteId: "s1",
           tasks: [
-            { id: 1, name: "Site civil permit", end: "2026-10-01", health: "amber" },
-            { id: 2, name: "Foundation start", end: "2026-11-15", health: "amber" },
-            { id: 3, name: "TCO", end: "2027-02-01", health: "green" },
+            { id: 1, _sid: "s1", name: "Site civil permit", end: "2026-10-01", health: "amber" },
+            { id: 2, _sid: "s2", name: "Foundation start", end: "2026-11-15", health: "amber" },
+            { id: 3, _sid: "s3", name: "TCO", end: "2027-02-01", health: "green" },
           ],
         },
       },
@@ -419,9 +419,9 @@ describe("buildSinceLastHereFeed — schedule events survive a long absence (B13
         plans: {},
         tasks: {
           p1: {
-            1: { end: "2026-09-10", health: "amber", name: "Site civil permit" },
-            2: { end: "2026-10-20", health: "amber", name: "Foundation start" },
-            3: { end: "2027-02-01", health: "amber", name: "TCO" },
+            "sid:s1": { end: "2026-09-10", health: "amber", name: "Site civil permit" },
+            "sid:s2": { end: "2026-10-20", health: "amber", name: "Foundation start" },
+            "sid:s3": { end: "2027-02-01", health: "amber", name: "TCO" },
           },
         },
       },
@@ -487,5 +487,54 @@ describe("buildSinceLastHereFeed — schedule events survive a long absence (B13
       if (r.kind === "schedule-slip") continue;
       expect(r.tsApprox).toBeUndefined();
     }
+  });
+});
+
+// B1953795 (S3) — RED-PROOF (fails on main): the snapshot was keyed by the positional task `id`. Inserting
+// one row above shifted every id below it, so main compared "the task that is now id 3" against "the task
+// that WAS id 3" and announced a slip for every row beneath the insert; and the row's click target carried
+// that positional id, opening the wrong task. Keyed by the stable `_sid`, an insert is invisible.
+describe("buildSinceLastHereFeed — schedule snapshot identity (B1953795 S3)", () => {
+  const before = { p1: { id: "p1", name: "Goose Creek", linkedSiteId: "s9", tasks: [
+    { id: 1, _sid: "A", name: "Alpha", end: "2026-10-01", parentId: null },
+    { id: 2, _sid: "B", name: "Bravo", end: "2026-10-10", parentId: null },
+    { id: 3, _sid: "C", name: "Charlie", end: "2026-10-20", parentId: null },
+  ] } };
+  it("inserting a row above shifts every id but reports NO false slip", () => {
+    const first = buildSinceLastHereFeed(baseArgs({ scheduleProjects: before }));
+    // a NEW row is inserted at the top: A,B,C become ids 2,3,4 — no date changed on any of them
+    const after = { p1: { ...before.p1, tasks: [
+      { id: 1, _sid: "NEW", name: "Inserted", end: "2026-09-30", parentId: null },
+      { id: 2, _sid: "A", name: "Alpha", end: "2026-10-01", parentId: null },
+      { id: 3, _sid: "B", name: "Bravo", end: "2026-10-10", parentId: null },
+      { id: 4, _sid: "C", name: "Charlie", end: "2026-10-20", parentId: null },
+    ] } };
+    const second = buildSinceLastHereFeed(baseArgs({ scheduleProjects: after, prevSnapshot: { plans: {}, tasks: first.nextSnapshot?.tasks ?? first.snapshot?.tasks ?? first.nextTasks ?? {} } }));
+    expect(second.rows.filter((r) => r.kind === "schedule-slip")).toEqual([]);
+  });
+  it("a real slip after an insert is attributed to the RIGHT task, with a click target carrying its stable sid", () => {
+    const first = buildSinceLastHereFeed(baseArgs({ scheduleProjects: before }));
+    const after = { p1: { ...before.p1, tasks: [
+      { id: 1, _sid: "NEW", name: "Inserted", end: "2026-09-30", parentId: null },
+      { id: 2, _sid: "A", name: "Alpha", end: "2026-10-01", parentId: null },
+      { id: 3, _sid: "B", name: "Bravo", end: "2026-10-14", parentId: null },   // Bravo slipped 4 days
+      { id: 4, _sid: "C", name: "Charlie", end: "2026-10-20", parentId: null },
+    ] } };
+    const second = buildSinceLastHereFeed(baseArgs({ scheduleProjects: after, prevSnapshot: { plans: {}, tasks: first.nextSnapshot?.tasks ?? first.snapshot?.tasks ?? first.nextTasks ?? {} } }));
+    const slips = second.rows.filter((r) => r.kind === "schedule-slip");
+    expect(slips).toHaveLength(1);
+    expect(slips[0].parts.some((p) => p.bold && p.text === "Bravo")).toBe(true);
+    expect(slips[0].open).toMatchObject({ kind: "task", taskSid: "B", taskId: 3 });
+    expect(slips[0].id).toBe("schedule-slip:p1:B");
+  });
+  it("an OLD positional snapshot (bare numeric keys) never yields a false slip — it is treated as a first visit for tasks", () => {
+    const old = { p1: { 1: { end: "2026-08-01", name: "x" }, 2: { end: "2026-08-01", name: "y" }, 3: { end: "2026-08-01", name: "z" } } };
+    const feed = buildSinceLastHereFeed(baseArgs({ scheduleProjects: before, prevSnapshot: { plans: {}, tasks: old } }));
+    expect(feed.rows.filter((r) => r.kind === "schedule-slip")).toEqual([]);
+  });
+  it("a task with no stable _sid is neither snapshotted nor diffed", () => {
+    const legacy = { p1: { id: "p1", name: "P", tasks: [{ id: 1, name: "No sid", end: "2026-10-01", parentId: null }] } };
+    const feed = buildSinceLastHereFeed(baseArgs({ scheduleProjects: legacy, prevSnapshot: { plans: {}, tasks: { p1: { 1: { end: "2026-09-01", name: "No sid" } } } } }));
+    expect(feed.rows).toEqual([]);
   });
 });

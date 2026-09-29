@@ -4555,6 +4555,19 @@ const ownerListOf = t => {
   });
   return out;
 };
+// B1953795 (S7) -- ONE normalizer for the owner <-> contact NAME link. A task's owner is a name string and
+// a contact is settings.contacts[].name; every place that decides "is this the same person" (the picker,
+// ensureContacts, and the rename/delete cascade) compares through ownerKey, so a legacy 'jon smith' on a
+// task and the contact 'Jon Smith' are the same link everywhere. Display casing is NEVER rewritten: a
+// name keeps the casing its author typed; only a rename to a NEW name replaces it.
+const ownerKey = n => String(n == null ? "" : n).trim().toLowerCase();
+const ownerHas = (list, name) => { const k = ownerKey(name); return (Array.isArray(list) ? list : []).some(n => ownerKey(n) === k); };
+const renameOwnerIn = (list, oldName, newName) => {
+  const ok = ownerKey(oldName); const seen = new Set(); const out = [];
+  (Array.isArray(list) ? list : []).forEach(n => { const v = ownerKey(n) === ok ? newName : n; const k = ownerKey(v); if (seen.has(k)) return; seen.add(k); out.push(v); });
+  return out;
+};
+const removeOwnerFrom = (list, goneName) => { const ok = ownerKey(goneName); return (Array.isArray(list) ? list : []).filter(n => ownerKey(n) !== ok); };
 const OWNER_JOIN = "; ";   // NEVER a comma — a comma is a name character (NEW-2) and export/re-import
                            // must not recreate one owner's junk-contact bug through a joined cell.
 const ownerJoin = list => (Array.isArray(list) ? list : []).join(OWNER_JOIN);
@@ -4603,6 +4616,56 @@ let NOW = fdLocal(new Date()); // local "today"; refreshed live by App (focus / 
 // A missing NUMBER field reads as 0 (matches how percentComplete has always been treated: `pct =
 // task.percentComplete || 0`), so "% Complete is at least 100" behaves identically whether the field
 // is absent or explicitly 0.
+/* @shared-engine:begin — mirrored VERBATIM in src/shared/schedule/healthEngine.js (the Dashboard
+ * consumes that module); test/scheduleHealthEngineParity.test.js fails if the two drift. Edit BOTH. */
+// ── B1953795 (S2) — "Complete" has ONE answer. A task's completion lives in two stored fields
+// (`health === "green"` from the status pill, `percentComplete` from the % cell); leaf writers used to
+// update only one, and readers picked whichever they liked. Now every reader asks these functions and
+// every writer goes through completionDelta, so the two can never disagree. Stored data is untouched
+// (non-destructive): the effective values are computed at read time.
+//   complete   = not paused, and (status green OR % >= 100)
+//   effective % = 100 when status green, else the stored % (clamped); a PARENT row's % is derived at
+//                 read time from its leaf descendants (duration-weighted), never its stale stored leftover.
+const isCompleteTask = t => !!t && t.health !== "paused" && (t.health === "green" || (Number(t.percentComplete) || 0) >= 100);
+const leafPercent = t => !t ? 0 : t.health === "green" ? 100 : Math.max(0, Math.min(100, Math.round(Number(t.percentComplete) || 0)));
+const _pctMapCache = new WeakMap();
+const rolledPercentMap = all => {
+  if (!Array.isArray(all)) return {};
+  const hit = _pctMapCache.get(all); if (hit) return hit;
+  const byId = {}; const kids = {};
+  all.forEach(t => { if (!t) return; byId[t.id] = t; if (t.parentId != null) (kids[t.parentId] = kids[t.parentId] || []).push(t); });
+  const map = {};
+  const acc = (id, stack) => {   // -> [weightedSum, weight] over LEAF descendants
+    const ch = kids[id];
+    if (!ch || stack.has(id)) { const t = byId[id]; const w = Math.max(1, Number(t && t.duration) || 0); return [leafPercent(t) * w, w]; }
+    stack.add(id); let sum = 0, wt = 0;
+    for (const c of ch) { const [a, b] = acc(c.id, stack); sum += a; wt += b; }
+    stack.delete(id); return [sum, wt];
+  };
+  Object.keys(kids).forEach(k => { const t = byId[k]; if (!t) return; const [a, b] = acc(t.id, new Set()); map[t.id] = b ? Math.round(a / b) : leafPercent(t); });
+  _pctMapCache.set(all, map);
+  return map;
+};
+const effectivePercentComplete = (t, all) => { if (!t) return 0; if (all) { const m = rolledPercentMap(all); if (m[t.id] != null) return m[t.id]; } return leafPercent(t); };
+// Writer side: given a task's PREVIOUS state and an update patch, the extra fields that keep both
+// stores consistent. green => % 100; % >= 100 => green; % < 100 on a green task => un-green (gray);
+// leaving a complete state via a status pick resets a 100 to 0 (a typed 40 is never touched).
+const completionDelta = (prev, updates) => {
+  const extra = {};
+  if (!prev || !updates) return extra;
+  if ("health" in updates && updates.health !== prev.health) {
+    if (updates.health === "green") { if ((Number(prev.percentComplete) || 0) < 100 && !("percentComplete" in updates)) extra.percentComplete = 100; }
+    else if (isCompleteTask(prev) && !("percentComplete" in updates) && (Number(prev.percentComplete) || 0) >= 100) extra.percentComplete = 0;
+  } else if ("percentComplete" in updates && !("health" in updates)) {
+    const pct = Number(updates.percentComplete) || 0;
+    if (pct >= 100 && prev.health !== "green") extra.health = "green";
+    else if (pct < 100 && prev.health === "green") extra.health = "gray";
+  }
+  return extra;
+};
+// A status set on a PARENT cascades to every descendant; this is the % each descendant takes with it
+// (green => 100, anything else clears a 100 so "un-complete the parent" un-completes its tasks too).
+const cascadeDelta = (t, health) => health === "green" ? { percentComplete: 100 } : ((Number(t && t.percentComplete) || 0) >= 100 ? { percentComplete: 0 } : {});
 const RULE_FIELDS = [
   {k:"finish",          label:"Finish date",   type:"date"},
   {k:"start",           label:"Start date",    type:"date"},
@@ -4658,7 +4721,7 @@ const evalFieldCondition = (cond, task, NOW, taskById) => {
     if (!preds.length || !taskById) return false;
     return preds.some(p => {
       const pt = taskById[p?.id];
-      return !!pt && !!pt.end && (pt.percentComplete||0) < 100 && dif(pt.end, NOW) >= 1;
+      return !!pt && !!pt.end && !isCompleteTask(pt) && dif(pt.end, NOW) >= 1;
     });
   }
   const ftype = RULE_FIELD_BY_K[field]?.type;
@@ -4677,7 +4740,7 @@ const evalFieldCondition = (cond, task, NOW, taskById) => {
     }
   }
   if (ftype === "status") {
-    const raw = task.health;
+    const raw = isCompleteTask(task) ? "green" : task.health;   // B1953795 - 100% reads as Complete (green)
     switch (op) {
       case "is":    return raw === value;
       case "isNot": return raw !== value;
@@ -4712,7 +4775,7 @@ const evalFieldCondition = (cond, task, NOW, taskById) => {
   // number: percentComplete/cost/budget/actualCost — a missing value reads as 0 (matches the
   // long-standing `task.percentComplete || 0` convention), EXCEPT the two blank tests, whose job
   // is to distinguish "truly unset" from "explicitly 0".
-  const raw = task[field];
+  const raw = (field === "percentComplete" && task.health === "green") ? 100 : task[field];   // B1953795 - green means 100
   const isBlank = raw === "" || raw == null;
   const num = isBlank || isNaN(raw) ? 0 : Number(raw);
   switch (op) {
@@ -4760,12 +4823,12 @@ const LEGACY_RULE_FIELD_MAP = {
 // configured rule (finish 1+ days overdue → red, no complete rule) mis-colored 212 of his 557 real
 // leaf tasks red, because marking a task Complete only ever writes `health:"green"` and never
 // touches `percentComplete` (verified: HealthPicker → commit → applyUpdate → `updateTask(id,
-// {health:val})`, no percentComplete write, anywhere). PR #1178 patched this as an emergency global
+// {health:val})`, no percentComplete write, anywhere). PR 1178 patched this as an emergency global
 // hardcode (`if (task.health==="green") return "green"` ahead of the whole rule engine). This
 // migration is the real fix: every migrated attention-color (non-green) rule gets the same
 // protection back as a VISIBLE, EDITABLE `unless` clause instead of invisible behavior — exactly
 // what the rebuilt language exists to make expressible. computeDisplayHealth below no longer
-// carries the global short-circuit; if PR #1178 lands first, its hardcode is redundant with this
+// carries the global short-circuit; if PR 1178 lands first, its hardcode is redundant with this
 // and should be removed as part of reconciling this branch.
 const RULE_COMPLETE_PAUSED_GUARD = [{field:"status", op:"is", value:"green"}, {field:"status", op:"is", value:"paused"}];
 const migrateRule = r => {
@@ -4800,7 +4863,7 @@ const HEALTH_CONDITION_BY_KEY = Object.fromEntries(HEALTH_CONDITIONS.map(c => [c
 
 // Pure. `taskById` is only read by "predecessorLate" — every other condition looks at `task` alone.
 const evalHealthCondition = (type, days, task, NOW, taskById) => {
-  const pct = task.percentComplete || 0;
+  const pct = leafPercent(task);
   switch (type) {
     case "finishPastDays":
       if (!task.end || pct >= 100) return false;
@@ -4819,7 +4882,7 @@ const evalHealthCondition = (type, days, task, NOW, taskById) => {
       if (!preds.length || !taskById) return false;
       return preds.some(p => {
         const pt = taskById[p?.id];
-        return !!pt && !!pt.end && (pt.percentComplete||0) < 100 && dif(pt.end, NOW) >= 1;
+        return !!pt && !!pt.end && !isCompleteTask(pt) && dif(pt.end, NOW) >= 1;
       });
     }
     case "noOwner":
@@ -4868,6 +4931,7 @@ const evalHealthRules = (task, settings, NOW, taskById) => {
   for (const r of rules) { const c = evalRule(r, task, NOW, taskById); if (c) return c; }
   return null;
 };
+/* @shared-engine:end */
 
 // Compute display health. ⛔ RULES-DECIDE (2026-08-25, owner correction — supersedes the earlier
 // "RULES-ALWAYS-WIN" pass on this same item, which kept `healthOverride` as a fallback for when no
@@ -4886,7 +4950,7 @@ const evalHealthRules = (task, settings, NOW, taskById) => {
 const computeDisplayHealth = (task, settings, taskById) => {
   if (!task) return task?.health;
   // ⛔ B785744 SUPERSEDES the global "Complete beats all" short-circuit that briefly lived here
-  // (PR #1178/B780448, an emergency hardcode for the same live regression: "if the finish date is
+  // (PR 1178/B780448, an emergency hardcode for the same live regression: "if the finish date is
   // in the past, it should be marked red... UNLESS I click task complete, ... I CAN OVERRIDE IN
   // THAT SCENARIO"). Per that fix's own owner instruction, once an UNLESS clause is expressible the
   // hardcode becomes a visible, editable RULE, not invisible behavior baked into this function — see
@@ -4900,17 +4964,18 @@ const computeDisplayHealth = (task, settings, taskById) => {
   // B817 — a meeting-bound task surfaces its schedule risk BEFORE it slips: infeasible = red (a genuine
   // alert), ≤2 working days of float to the agenda deadline = at-risk yellow. Reads the cascade-derived
   // fields (no body lookup). Opt-in (only fires on bound rows); complete/paused rows are exempt.
-  if (task.meetingBound && (task.percentComplete||0) < 100 && task.health !== "green" && task.health !== "paused") {
+  if (task.meetingBound && !isCompleteTask(task) && task.health !== "paused") {
     if (task.meetingInfeasible) return "red";
     if (task.meetingDeadline && difBD(NOW, task.meetingDeadline) <= 2) return "yellow";
   }
   // Deadline rows (deadlineForTaskId): the row's date IS the call/file-by deadline — infeasible
   // (predecessors land after it) = red; within 2 working days = at-risk yellow. Same exemptions.
-  if (task.deadlineForTaskId != null && (task.percentComplete||0) < 100 && task.health !== "green" && task.health !== "paused") {
+  if (task.deadlineForTaskId != null && !isCompleteTask(task) && task.health !== "paused") {
     if (task.deadlineInfeasible) return "red";
     if (task.end && difBD(NOW, task.end) >= 0 && difBD(NOW, task.end) <= 2) return "yellow";
   }
-  return task.health;
+  // B1953795 (S2) - a task at 100% IS complete: show green even if its status pill was never set.
+  return isCompleteTask(task) ? "green" : task.health;
 };
 
 // B1161792 (NEW-1, Planyr Dashboard "Needs attention" card) — stamp/clear `needsAttentionSince`
@@ -6324,7 +6389,7 @@ function ContactPicker({ owners, seedText, contacts, onOwnersChange, onClose, va
   ).slice(0, 6);
 
   const trimmed = query.trim();
-  const isNewName = trimmed.length > 0 && !contacts.some(c => c.name.toLowerCase() === trimmed.toLowerCase());
+  const isNewName = trimmed.length > 0 && !contacts.some(c => ownerKey(c.name) === ownerKey(trimmed));
   const atCap = chips.length >= OWNER_CAP;
   const totalItems = suggestions.length + (isNewName ? 1 : 0);
 
@@ -6418,8 +6483,8 @@ function ContactPicker({ owners, seedText, contacts, onOwnersChange, onClose, va
     const liveTrimmed = String(queryRef.current || "").trim();
     if (liveTrimmed) {
       const lower = liveTrimmed.toLowerCase();
-      const existing = contacts.find(c => c.name.toLowerCase() === lower);
-      const already = liveChips.some(n => n.toLowerCase() === lower);
+      const existing = contacts.find(c => ownerKey(c.name) === lower);
+      const already = liveChips.some(n => ownerKey(n) === lower);
       if (existing && !already) writeThrough([...liveChips, existing.name]);
     }
     closeEditor();
@@ -6525,7 +6590,7 @@ function ContactPicker({ owners, seedText, contacts, onOwnersChange, onClose, va
       // Only accept the prefix prediction when the typed text isn't ALREADY an exact contact —
       // typing "Sam" exactly (with "Samuel Jones" also on file) must add Sam, not the longer ghost.
       if (ghostText && prediction && isNewName) { addChip(prediction.name); return; }
-      const existing = contacts.find(c => c.name.toLowerCase() === trimmed.toLowerCase());
+      const existing = contacts.find(c => ownerKey(c.name) === ownerKey(trimmed));
       if (existing) { addChip(existing.name); return; }
       attemptCreate(trimmed);
       return;
@@ -6642,8 +6707,8 @@ function ContactsPanel({ data, setData, onClose }) {
         Object.entries(d.projects).forEach(([pid, proj]) => {
           projects[pid] = {...proj, tasks: (proj.tasks||[]).map(t => {
             const list = ownerListOf(t);
-            if (!list.includes(oldName)) return t;
-            return {...t, responsibleParty: list.map(n => n === oldName ? nm : n)};
+            if (!ownerHas(list, oldName)) return t;   // B1953795 (S7) -- case-insensitive link, same as the picker / ensureContacts
+            return {...t, responsibleParty: renameOwnerIn(list, oldName, nm)};
           })};
         });
       }
@@ -6663,8 +6728,8 @@ function ContactsPanel({ data, setData, onClose }) {
         Object.entries(d.projects).forEach(([pid, proj]) => {
           projects[pid] = {...proj, tasks: (proj.tasks||[]).map(t => {
             const list = ownerListOf(t);
-            if (!list.includes(goneName)) return t;
-            return {...t, responsibleParty: list.filter(n => n !== goneName)};
+            if (!ownerHas(list, goneName)) return t;
+            return {...t, responsibleParty: removeOwnerFrom(list, goneName)};
           })};
         });
       }
@@ -7348,7 +7413,7 @@ function SuggestionsView({data, updateTask, setData, rows, setRows, loading, onC
   const previewProject = (tasks, tId, patch) => {
     let ts = tasks.map(t => {
       if (t.id !== tId) return t;
-      const u = { ...t, ...patch };
+      const u = { ...t, ...patch, ...completionDelta(t, patch) };
       // Editing a predecessor clears any manual pin so the cascade controls the start — mirror updateTask
       // here, else the preview cascades a PINNED task in place while the real apply moves it (the preview lies).
       if ('predecessors' in patch) delete u.pinnedStart;
@@ -7369,7 +7434,7 @@ function SuggestionsView({data, updateTask, setData, rows, setRows, loading, onC
     if ('health' in patch) {
       const desc = (id, all) => { const k = all.filter(t => t.parentId === id); return [...k.map(x => x.id), ...k.flatMap(x => desc(x.id, all))]; };
       const ids = new Set(desc(tId, ts));
-      if (ids.size) { const extra = patch.health === 'green' ? { percentComplete: 100 } : {}; ts = ts.map(t => ids.has(t.id) ? { ...t, health: patch.health, ...extra } : t); }
+      if (ids.size) { ts = ts.map(t => ids.has(t.id) ? { ...t, health: patch.health, ...cascadeDelta(t, patch.health) } : t); }
     }
     if ('duration' in patch || 'start' in patch || 'end' in patch || 'predecessors' in patch || 'meetingBound' in patch || 'meetingBodyId' in patch || 'pinnedMeetingDate' in patch || 'minMeetingsAfter' in patch) {
       ts = recomputeSchedule(ts);
@@ -8566,16 +8631,16 @@ function App() {
       const ensureContacts = d => {
         if (!d?.projects) return d;
         const existing = (d.settings?.contacts || []);
-        const existingNames = new Set(existing.map(c => String(c?.name || '').toLowerCase()));
+        const existingNames = new Set(existing.map(c => ownerKey(c?.name)));
         const seen = new Set();
         Object.values(d.projects).forEach(proj => {
           ((proj && Array.isArray(proj.tasks)) ? proj.tasks : []).forEach(t => {
             // NEW-1 — owner is a LIST now; derive a contact for every name in it, not just one.
             ownerListOf(t).forEach(rp => {
-              if (rp && !existingNames.has(rp.toLowerCase()) && !seen.has(rp.toLowerCase())) {
+              if (rp && !existingNames.has(ownerKey(rp)) && !seen.has(ownerKey(rp))) {
                 existing.push({ id: Date.now() + existing.length + seen.size, name: rp, email: '' });
-                existingNames.add(rp.toLowerCase());
-                seen.add(rp.toLowerCase());
+                existingNames.add(ownerKey(rp));
+                seen.add(ownerKey(rp));
               }
             });
           });
@@ -9264,7 +9329,7 @@ function App() {
       (d.projects[pid]?.tasks || []).forEach(t => { if (t.meetingBound && t.start) _prevBoundStart[t.id] = t.start; });
       let tasks = d.projects[pid].tasks.map(t => {
         if (t.id !== taskId) return t;
-        const u = {...t, ...updates};
+        const u = {...t, ...updates, ...completionDelta(t, updates)};   // B1953795 (S2) — keep status + % consistent on every leaf edit
         // ⛔ RULES-DECIDE (2026-08-25, owner correction) — RETIRED: a directly-picked status (StatusPicker /
         // context menu / grid cell / master-view cell) used to auto-stamp the override flag on every
         // plain color pick, silently opting the task out of automation forever — that's the exact
@@ -9318,12 +9383,11 @@ function App() {
         };
         const descIds = new Set(getDescIds(taskId, tasks));
         if (descIds.size > 0) {
-          const extra = updates.health === 'green' ? {percentComplete: 100} : {};
           // ⛔ RULES-DECIDE (2026-08-25, owner correction): this cascade used to also set the
           // override flag on every descendant so it couldn't immediately be undone by a firing
           // rule. That flag is gone — a rule now decides every
           // cascaded descendant's displayed color exactly like any other task, same as the parent.
-          tasks = tasks.map(t => descIds.has(t.id) ? {...t, health: updates.health, ...extra} : t);
+          tasks = tasks.map(t => descIds.has(t.id) ? {...t, health: updates.health, ...cascadeDelta(t, updates.health)} : t);
         }
       }
       if (touchesSchedule(updates)) {   // B835 (recurrence ×2) — fires for durValue/durUnit (typed duration) + pinnedStart/pinnedEnd (unpin/unlock) too, not just {duration}/{start}
@@ -10476,7 +10540,11 @@ function App() {
         // Only route home when a delete actually happens — deleteProject refuses to remove the LAST
         // project, so routing unconditionally kicked the user to the Dashboard on a no-op.
         if (wasActive && projCount > 1) setData(d => ({ ...d, section: "reports" }));
-      } else if (m.type === "planar:nav-select-task" && m.siteId != null && m.taskId != null) {
+      } else if (m.type === "planar:nav-select-task" && m.siteId != null && (m.taskId != null || m.taskSid != null)) {
+        // B1953795 (S3) — a caller that knows the task's STABLE `_sid` (the Dashboard feeds) sends it; a task
+        // `id` is a row position that shifts on every insert above it, so an id sent from a stale read (or
+        // from stored data renumbered on load) can name a DIFFERENT task. With a sid we resolve the CURRENT
+        // id here and never fall back to the positional id.
         // B1161792 (NEW-1) — the Dashboard's "Needs attention" card jumping straight to one task,
         // not just its project. Resolve the schedule linked to the Site Planner project (same
         // lookup planar:nav-select-by-site uses above), then reuse the existing internal
@@ -10493,12 +10561,17 @@ function App() {
         const linkedForTask = latestData.current ? Object.values(latestData.current.projects || {}).filter(p => p && p.linkedSiteId != null && p.linkedSiteId === m.siteId) : [];
         const preferredForTask = latestData.current && latestData.current.lastActiveBySite ? latestData.current.lastActiveBySite[m.siteId] : null;
         const preferredScheduleForTask = preferredForTask != null ? linkedForTask.find(p => p.id === preferredForTask) : null;
-        const hasTask = (p) => p && Array.isArray(p.tasks) && p.tasks.some(t => t.id === m.taskId);
+        const bySid = m.taskSid != null;
+        const hasTask = (p) => p && Array.isArray(p.tasks) && p.tasks.some(t => bySid ? t._sid === m.taskSid : t.id === m.taskId);
         const match = (hasTask(preferredScheduleForTask) && preferredScheduleForTask)
           || linkedForTask.find(hasTask)
           || preferredScheduleForTask
           || linkedForTask[0];
-        if (match) goToTask(match.id, m.taskId);
+        if (match) {
+          const target = bySid ? match.tasks.find(t => t._sid === m.taskSid) : null;
+          if (bySid && !target) setData(d => ({ ...d, section: "projects", aPid: match.id }));   // task gone: land on its schedule, never a wrong row
+          else goToTask(match.id, bySid ? target.id : m.taskId);
+        }
       }
     };
     window.addEventListener("message", onMsg);
@@ -10775,7 +10848,7 @@ function App() {
     // section header is the qualified crossScheduleLabel, never the bare name.
     const rows = Object.values(data.projects).map(p =>
       `<h2>${escapeHtml(crossScheduleLabel(p))}</h2><table><tr><th>ID</th><th>Task</th><th>Start</th><th>End</th><th>Dur</th><th>Status</th><th>%</th><th>Owner</th></tr>` +
-      p.tasks.map(t => { const h = HEALTH[t.health] || HEALTH.gray; const pct = t.health==="green" ? 100 : (t.percentComplete||0); return `<tr><td>${escapeHtml(t.id)}</td><td>${escapeHtml(t.name)}</td><td>${escapeHtml(fmtD(t.start))}</td><td>${escapeHtml(fmtD(t.end))}</td><td>${Number(t.duration)||0}d</td><td style="color:${escapeHtml(h.dot)}">${escapeHtml(h.label)}</td><td>${pct}%</td><td>${escapeHtml(ownerJoin(ownerListOf(t))||"—")}</td></tr>`; }).join("") +
+      p.tasks.map(t => { const h = HEALTH[t.health] || HEALTH.gray; const pct = effectivePercentComplete(t, p.tasks); return `<tr><td>${escapeHtml(t.id)}</td><td>${escapeHtml(t.name)}</td><td>${escapeHtml(fmtD(t.start))}</td><td>${escapeHtml(fmtD(t.end))}</td><td>${Number(t.duration)||0}d</td><td style="color:${escapeHtml(h.dot)}">${escapeHtml(h.label)}</td><td>${pct}%</td><td>${escapeHtml(ownerJoin(ownerListOf(t))||"—")}</td></tr>`; }).join("") +
       `</table>`).join("");
     // Title from the real data, not a hardcoded legacy project name / old brand:
     // a single project uses its name, multiple use the Planyr brand.
@@ -13200,7 +13273,11 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
       }
       updateTask(id,{[col]:p});
     }
-    else if (col==="percentComplete") updateTask(id,{percentComplete:Math.max(0,Math.min(100,parseInt(val)||0))});
+    else if (col==="percentComplete") {
+      const pt = tasks.find(x => x.id === id);
+      if (pt && pt.hasChildren) { showToast("% Complete on a parent row rolls up from its tasks — edit the tasks (or set the parent's status to cascade)."); return; }
+      updateTask(id,{percentComplete:Math.max(0,Math.min(100,parseInt(val)||0))});
+    }
     else if (col==="duration") {
       // B615: parse the typed unit — days/weeks = working days, months/years = calendar-real.
       // An unparseable string surfaces a VISIBLE inline error, never silently coercing to 0.
@@ -13424,7 +13501,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
         case 'start': case 'end': { if(!t[colKey]){ val=''; break; } const [y,m,d]=t[colKey].split('-'); val=`${String(+m).padStart(2,'0')}/${String(+d).padStart(2,'0')}/${(y||'').slice(2)}`; break; }  // empty date → measure nothing, not the literal "NaN/NaN/"
         case 'duration': val = `${t.duration}d`; break;
         case 'health': val = HEALTH[t.health]?.label||''; break;
-        case 'percentComplete': val = `${t.percentComplete||0}%`; break;
+        case 'percentComplete': val = `${t._pct ?? effectivePercentComplete(t, proj?.tasks)}%`; break;
         case 'responsibleParty': val = ownerDisplayParts(ownerListOf(t)).label; break;
         case 'predecessors': val = fmtPreds(normPreds(t.predecessors)); break;
         case 'successors': val = String((succMap[t.id]||[]).length>0?(succMap[t.id]||[]).join(', '):''); break;
@@ -14659,9 +14736,9 @@ function Cell({task, col, colMasterIdxs, edit, setEdit, commit, commitAndAdvance
       return (
         <span style={{...s,gap:6}}>
           <span style={{width:50,height:3,background:"#e2e8f0",borderRadius:2,overflow:"hidden",flexShrink:0}}>
-            <span style={{width:`${task.percentComplete}%`,height:"100%",background:(HEALTH[task.health]||HEALTH.gray).dot,display:"block"}} />
+            <span style={{width:`${effectivePercentComplete(task, proj?.tasks)}%`,height:"100%",background:(HEALTH[task.health]||HEALTH.gray).dot,display:"block"}} />
           </span>
-          <span style={{...mono,fontSize:11,color:"var(--mut)"}}>{task.percentComplete}%</span>
+          <span style={{...mono,fontSize:11,color:"var(--mut)"}} title={task.hasChildren ? "Rolled up from this row's tasks" : undefined}>{effectivePercentComplete(task, proj?.tasks)}%</span>
         </span>
       );
     case "responsibleParty": {
@@ -15313,7 +15390,7 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
                     // diamond's own identity, NOT the row fill, and its border is a darker slate
                     // than the fill so the diamond reads even if a fill matches its gray.
                     const hue = "#94a3b8";
-                    const done = displayHealth === "green" || (task.percentComplete||0) >= 100;
+                    const done = displayHealth === "green" || isCompleteTask(task);
                     return <div data-gantt-bar={task.id} style={{position:"absolute",left:bx-3,top:ROW_H-10.5,width:6,height:6,transform:"rotate(45deg)",background:done?hue:"#fff",border:"1.25px solid #475569",boxSizing:"border-box",zIndex:5}} />;
                   })()}
                   {(() => { const bl=settings?.barLabels; if(!bl) return null;
@@ -15383,7 +15460,7 @@ function GanttView({tasks, updateTask, pxPerDay, onZoomChange, scrollRef, onScro
                     // of the summary brackets — and the row fill stays pure background decoration.
                     const hue  = "#94a3b8";   // neutral identity, independent of task.rowColor (B222)
                     const EDGE = "#475569";   // hairline edge, darker than the fill → legible on any fill
-                    const pct = displayHealth === "green" ? 100 : Math.max(0, Math.min(100, task.percentComplete||0));
+                    const pct = displayHealth === "green" ? 100 : leafPercent(task);
                     const top = ROW_H - LEAF_H - 1;
                     const barW = Math.max(bw, 9);   // min-width floor: a 0% bar can't collapse to a sliver
                     const base = {position:"absolute",left:bx,top,height:LEAF_H,width:barW,zIndex:5,borderRadius:LEAF_H/2,boxSizing:"border-box"};
@@ -16805,7 +16882,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
             cur = p.tasks.find(x => x.id === cur.parentId) || null;
           }
           const isLeaf = !childIds.has(t.id);
-          return {...t, projName: p.name, projId: p.id, projOwnerLabel: ownerLabel, projLabel, depth, isLeaf, _disp: dispOf(t, !isLeaf, rolled, byId)};
+          return {...t, projName: p.name, projId: p.id, projOwnerLabel: ownerLabel, projLabel, depth, isLeaf, _disp: dispOf(t, !isLeaf, rolled, byId), _pct: effectivePercentComplete(t, p.tasks)};
         });
     });
   }, [data.projects, masterHealthFilter, data.settings, NOW]);
@@ -16895,7 +16972,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
         case "health":      av = HEALTH_ORDER[a._disp]??5; bv = HEALTH_ORDER[b._disp]??5; break;  // rolled for parents (B486-out)
         case "id":          av = a.id;                           bv = b.id;                         break;
         case "duration":    av = a.duration;                     bv = b.duration;                   break;
-        case "percentComplete": av = a.percentComplete||0;       bv = b.percentComplete||0;         break;
+        case "percentComplete": av = a._pct ?? effectivePercentComplete(a);  bv = b._pct ?? effectivePercentComplete(b);         break;
         case "start":       av = a.start;                        bv = b.start;                      break;
         case "end":         av = a.end;                          bv = b.end;                        break;
         // B1873360 — sorts on the qualified label (two schedules can share a bare name), with
@@ -16947,7 +17024,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
         case 'end': val = fmtD(t.end); break;
         case 'duration': val = fmtTaskDuration(t, !t.isLeaf)||`${t.duration}d`; break;   // match the unit-aware cell display (B463072: a summary prints its ROLLED span)
         case 'health': val = HEALTH[t.health]?.label||''; break;
-        case 'percentComplete': val = `${t.percentComplete||0}%`; break;
+        case 'percentComplete': val = `${t._pct ?? effectivePercentComplete(t, proj?.tasks)}%`; break;
         case 'responsibleParty': val = ownerDisplayParts(ownerListOf(t)).label; break;
         case 'notes': val = t.notes?.length>0?`${t.notes.length} entr`:'+ Add'; break;
         case 'parent': {
@@ -17106,7 +17183,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
         return <td key={col.k} style={{...tdBase,cursor:"text"}} onClick={onCellClick} onDoubleClick={()=>openEdit({id:t.id,projId:t.projId,col:"percentComplete"})}>
           {isE(t,"percentComplete")
             ? <input {...NO_AUTOFILL} autoFocus style={{display:"block",width:"100%",height:"18px",border:"none",borderBottom:"1.5px solid var(--blue)",outline:"none",background:"transparent",fontSize:12,fontFamily:"inherit",color:"var(--txt)",padding:"0 2px"}} defaultValue={localEdit?.initChar ?? (t.percentComplete||0)} onBlur={e=>commit(t,"percentComplete",e.target.value)} onKeyDown={e=>{if(e.key==="Enter")commit(t,"percentComplete",e.target.value);if(e.key==="Escape")setLocalEdit(null);}} />
-            : <span style={{color:"var(--mut)"}}>{t.percentComplete||0}%</span>}
+            : <span style={{color:"var(--mut)"}}>{t._pct ?? effectivePercentComplete(t)}%</span>}
         </td>;
       case "responsibleParty": {
         const { label, title } = ownerDisplayParts(ownerListOf(t));
@@ -17556,7 +17633,7 @@ function buildGanttSVG(projects, svgWidth, orientation, opts = {}) {
     // B210/B211 — match the on-screen Gantt: navy depth-stepped brackets for summaries,
     // a single gray fill treatment (hollow → partial → solid) for task status.
     const GRAY="#94a3b8";
-    const pct = t.health==="green" ? 100 : Math.max(0, Math.min(100, t.percentComplete||0));
+    const pct = leafPercent(t);
     let barSvg;
     if(blank){
       barSvg="";   // unscheduled — no geometry; an "Unscheduled" tag is added to labelLayer below
@@ -17867,7 +17944,7 @@ function buildPDFHtml(cfg, data, forPreview) {
   const cellVal = (t,k,tasks,projId) => {    switch(k){
       case "start": case "end": return fmtD(t[k]);
       case "duration": return `${t.duration}d`;
-      case "percentComplete": return `${displayHealthOf(t,tasks)==="green" ? 100 : (t.percentComplete||0)}%`;  // match the Gantt bar's green→100 convention
+      case "percentComplete": return `${displayHealthOf(t,tasks)==="green" ? 100 : effectivePercentComplete(t, tasks)}%`;  // match the Gantt bar's green→100 convention
       case "predecessors": return (t.predecessors||[]).map(p=>p.id||p).join(", ");
       case "health":{if(isExpandedParentOf(t,tasks,projId)) return "";const dh=displayHealthOf(t,tasks);const h=HC[dh]||{l:dh,c:"#94a3b8"};return `<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:7px;height:7px;border-radius:50%;background:${h.c};flex-shrink:0;display:inline-block"></span>${escapeHtml(h.l)}</span>`;}
       case "name":{const dep=getDepth(tasks,t.id);const ind=dep*14;const fw=dep===0?700:dep===1?600:400;const fs=dep===0?10.5:dep===1?10:9.5;const isP=tasks.some(x=>x.parentId===t.id);const key=projId+":"+t.id;const col=collapsedSet.has(key);const tri=(forPreview&&isP)?`<span class="pl-tri${col?"":" open"}" data-collapse="${key}" title="${col?"Expand":"Collapse"}">${col?"\u25B8":"\u25BE"}</span>`:"";return `<span class="pl-name" style="padding-left:${ind}px;font-weight:${fw};font-size:${fs}px">${tri}${escapeHtml(t.name)}</span>`;}
@@ -17909,7 +17986,7 @@ function buildPDFHtml(cfg, data, forPreview) {
     const cellText=(t,k,tasks,projId)=>{ switch(k){
       case "start": case "end": return fmtD(t[k]);
       case "duration": return `${t.duration}d`;
-      case "percentComplete": return `${displayHealthOf(t,tasks)==="green" ? 100 : (t.percentComplete||0)}%`;  // match the Gantt bar's green→100 convention
+      case "percentComplete": return `${displayHealthOf(t,tasks)==="green" ? 100 : effectivePercentComplete(t, tasks)}%`;  // match the Gantt bar's green→100 convention
       case "predecessors": return (t.predecessors||[]).map(p=>p.id||p).join(", ");
       case "health": { if(isExpandedParentOf(t,tasks,projId)) return ""; const dh=displayHealthOf(t,tasks); const h=HC[dh]; return h?h.l:(dh||""); }
       case "name": return t.name==null?"":String(t.name);

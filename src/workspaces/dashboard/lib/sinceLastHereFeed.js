@@ -267,8 +267,16 @@ function buildScheduleEvents({ scheduleProjects, prevTaskSnapshot, windowStartMs
 
     for (const t of leaves) {
       if (!t || t.id == null) continue;
-      nextProject[t.id] = { end: t.end || null, name: (t.name && String(t.name).trim()) || "" };
-      const prev = prevProject[t.id];
+      // B1953795 (S3) — snapshots are keyed by the task's STABLE `_sid`, never its `id` (a row position:
+      // inserting a row shifts every id below it, which read as a "slip" for every row and made the
+      // click-through open the wrong task). A task with no `_sid` has no stable identity, so it is
+      // neither snapshotted nor diffed — never a false slip. An OLD positional snapshot (bare numeric
+      // keys) simply never matches a "sid:" key, so its first read after this fix reports nothing and
+      // rewrites the snapshot in the new shape.
+      if (t._sid == null) continue;
+      const key = `sid:${t._sid}`;
+      nextProject[key] = { end: t.end || null, name: (t.name && String(t.name).trim()) || "" };
+      const prev = prevProject[key];
       if (!prev) continue;
 
       if (prev.end && t.end && prev.end !== t.end) {
@@ -277,9 +285,9 @@ function buildScheduleEvents({ scheduleProjects, prevTaskSnapshot, windowStartMs
         if (oldMs != null && newMs != null) {
           const days = Math.round((newMs - oldMs) / MS_PER_DAY);
           if (days !== 0) {
-            const taskName = nextProject[t.id].name || `Task #${t.id}`;
+            const taskName = nextProject[key].name || `Task #${t.id}`;
             rows.push({
-              id: `schedule-slip:${p.id}:${t.id}`,
+              id: `schedule-slip:${p.id}:${t._sid}`,
               kind: "schedule-slip",
               ts: approxTs,
               tsApprox: true,
@@ -291,7 +299,7 @@ function buildScheduleEvents({ scheduleProjects, prevTaskSnapshot, windowStartMs
                 { text: days > 0 ? ` slipped ${days} day${days === 1 ? "" : "s"}` : ` moved up ${-days} day${-days === 1 ? "" : "s"}` },
               ],
               subline: `${projectName} · ${days > 0 ? "+" : ""}${days}d`,
-              open: { kind: "task", linkedSiteId: p.linkedSiteId || null, taskId: t.id },
+              open: { kind: "task", linkedSiteId: p.linkedSiteId || null, taskId: t.id, taskSid: t._sid },
             });
           }
         }

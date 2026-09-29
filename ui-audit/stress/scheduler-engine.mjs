@@ -3,6 +3,7 @@
 // Copied VERBATIM so the stress harness exercises the real code paths.
 // Keep in sync if the source changes.
 
+import { cascadeDelta } from "../../src/shared/schedule/healthEngine.js";
 export const fd = d => d.toISOString().slice(0,10);
 export const fdLocal = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 export const pd = s => new Date(s + "T12:00:00");
@@ -24,6 +25,19 @@ export const ownerListOf = t => {
   });
   return out;
 };
+// B1953795 (S7) -- ONE normalizer for the owner <-> contact NAME link. A task's owner is a name string and
+// a contact is settings.contacts[].name; every place that decides "is this the same person" (the picker,
+// ensureContacts, and the rename/delete cascade) compares through ownerKey, so a legacy 'jon smith' on a
+// task and the contact 'Jon Smith' are the same link everywhere. Display casing is NEVER rewritten: a
+// name keeps the casing its author typed; only a rename to a NEW name replaces it.
+export const ownerKey = n => String(n == null ? "" : n).trim().toLowerCase();
+export const ownerHas = (list, name) => { const k = ownerKey(name); return (Array.isArray(list) ? list : []).some(n => ownerKey(n) === k); };
+export const renameOwnerIn = (list, oldName, newName) => {
+  const ok = ownerKey(oldName); const seen = new Set(); const out = [];
+  (Array.isArray(list) ? list : []).forEach(n => { const v = ownerKey(n) === ok ? newName : n; const k = ownerKey(v); if (seen.has(k)) return; seen.add(k); out.push(v); });
+  return out;
+};
+export const removeOwnerFrom = (list, goneName) => { const ok = ownerKey(goneName); return (Array.isArray(list) ? list : []).filter(n => ownerKey(n) !== ok); };
 export const OWNER_JOIN = "; ";
 export const ownerJoin = list => (Array.isArray(list) ? list : []).join(OWNER_JOIN);
 export const ownerDisplayParts = list => {
@@ -1308,8 +1322,8 @@ export const getDescIds = (id, all) => {
 export const recolorBranch = (tasks, taskId, health) => {
   const descIds = new Set(getDescIds(taskId, tasks));
   if (descIds.size === 0) return tasks;
-  const extra = health === 'green' ? { percentComplete: 100 } : {};
-  return tasks.map(t => descIds.has(t.id) ? { ...t, health, ...extra } : t);
+  // B1953795 (S2): green => 100; any other status clears a 100 (the one shared cascadeDelta).
+  return tasks.map(t => descIds.has(t.id) ? { ...t, health, ...cascadeDelta(t, health) } : t);
 };
 
 // Export filename — matches the Site Planner's PDF/PNG naming ("YYYY.MM.DD {Project} - {Plan}");

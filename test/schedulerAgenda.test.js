@@ -201,3 +201,54 @@ describe("agendaStore — local per-scope persistence", () => {
     } finally { globalThis.window = saved; }
   });
 });
+
+// B1953795 (S6) — RED-PROOF (fails on main, which has no mutateAgenda and whose view did
+// `writeAgenda(wholeStaleList)`): two tabs must not lose each other's items.
+import { mutateAgenda, subscribeAgenda } from "../src/workspaces/scheduler/lib/agendaStore.js";
+describe("agendaStore — fresh read-modify-write + subscribe (B1953795 S6)", () => {
+  beforeEach(() => { stubWindow(); });
+
+  it("tab A's edit made from a STALE view keeps the item tab B added in between", () => {
+    const a = createAgendaItem({ text: "A's item" }, 1000);
+    writeAgenda([a], "u");
+    const staleViewOfTabA = readAgenda("u");                                  // tab A loaded here...
+    mutateAgenda("u", (cur) => [...cur, createAgendaItem({ text: "B's item" }, 2000)]);   // ...tab B adds one
+    // tab A now toggles ITS item: the op is applied to a FRESH read, not to staleViewOfTabA
+    const r = mutateAgenda("u", (cur) => cur.map((x) => (x.id === a.id ? toggleAgendaItem(x, 3000) : x)));
+    expect(r.ok).toBe(true);
+    expect(staleViewOfTabA).toHaveLength(1);
+    expect(readAgenda("u").map((x) => x.text).sort()).toEqual(["A's item", "B's item"]);
+  });
+  it("delete by id removes only that item even if another tab reordered/added", () => {
+    const a = createAgendaItem({ text: "a" }, 1), b = createAgendaItem({ text: "b" }, 2);
+    writeAgenda([a, b], "u");
+    mutateAgenda("u", (cur) => [...cur, createAgendaItem({ text: "c" }, 3)]);
+    mutateAgenda("u", (cur) => deleteAgendaItem(cur, a.id));
+    expect(readAgenda("u").map((x) => x.text)).toEqual(["b", "c"]);
+  });
+  it("a failed write returns ok:false with the UNTOUCHED stored list (rollback) and writes nothing", () => {
+    writeAgenda([createAgendaItem({ text: "kept" }, 1)], "u");
+    window.localStorage.setItem = () => { throw new Error("quota"); };
+    const r = mutateAgenda("u", (cur) => [...cur, createAgendaItem({ text: "lost" }, 2)]);
+    expect(r.ok).toBe(false);
+    expect(r.items.map((x) => x.text)).toEqual(["kept"]);
+  });
+  it("subscribeAgenda fires on a same-tab mutate and on a cross-tab storage event, and unsubscribes", () => {
+    const listeners = {};
+    window.addEventListener = (t, f) => { (listeners[t] = listeners[t] || []).push(f); };
+    window.removeEventListener = (t, f) => { listeners[t] = (listeners[t] || []).filter((x) => x !== f); };
+    window.dispatchEvent = (e) => { (listeners[e.type] || []).forEach((f) => f(e)); };
+    globalThis.CustomEvent = class { constructor(type, init) { this.type = type; this.detail = init && init.detail; } };
+    let n = 0;
+    const off = subscribeAgenda("u", () => { n++; });
+    mutateAgenda("u", (cur) => [...cur, createAgendaItem({ text: "x" }, 1)]);
+    expect(n).toBe(1);
+    (listeners.storage || []).forEach((f) => f({ key: "planyr:agenda:v1:u" }));
+    expect(n).toBe(2);
+    (listeners.storage || []).forEach((f) => f({ key: "planyr:agenda:v1:other" }));
+    expect(n).toBe(2);
+    off();
+    mutateAgenda("u", (cur) => [...cur, createAgendaItem({ text: "y" }, 2)]);
+    expect(n).toBe(2);
+  });
+});
