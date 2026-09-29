@@ -85,6 +85,7 @@ import { loadSite, loadPlansOfGroup, getCurrentSiteId } from "../../site-planner
 import { pickResumeTarget } from "../../site-planner/lib/bootResume.js";
 import { siteAcres } from "../../site-planner/lib/siteBoundary.js";
 import { elementsOf, isBuilding, buildingNumbers } from "../../site-planner/lib/siteModel.js";
+import { siteFromRows } from "./planRowsSource.js";
 
 export { RESERVED_NAME_PREFIXES };
 
@@ -148,6 +149,14 @@ function loadOpenSite(projectId) {
   } catch (_) { return null; }
 }
 
+/** The id of the plan (concept/scheme) currently OPEN for `projectId` — the one `loadOpenSite` reads —
+ *  or `null` when none resolves. Exposed so ModelApp fetches the ROWS of exactly the plan the formula
+ *  names quote (B1953797, H2), never a second "which plan is open" answer. */
+export function openPlanId(projectId) {
+  const site = loadOpenSite(projectId);
+  return site && site.id ? site.id : null;
+}
+
 /** The open concept/scheme's own NAME (e.g. "Concept A (copy)") — never the project's name, which
  *  is a separate field (`site.site`, see storage.js's `siteNameOf`). Exposed so a caller outside
  *  this module (ModelApp.jsx's header — spreadsheet-concept-crumb, NEW-1) can show which scheme is
@@ -174,11 +183,41 @@ export function openConceptName(projectId) {
  *  reference never consulted which plan was active in the first place. Resolve the OPEN concept the
  *  same way `SitePlannerApp` itself does — see `loadOpenSite` above, the one resolution this and
  *  `openConceptName` both use, so there is no second "which scheme is open" answer to drift from it. */
-function siteEntries(projectId) {
+function siteEntries(projectId, planRows) {
   const out = {};
   const put = (name, value, sourceLabel) => { out[name.toLowerCase()] = { name, computed: true, value, sourceLabel }; };
 
-  const site = loadOpenSite(projectId);
+  let site = loadOpenSite(projectId);
+
+  /* B1953797 (H2) — A SIGNED-IN PLAN'S GEOMETRY LIVES IN ELEMENT ROWS, NOT IN THE LOCAL MIRROR. For a
+   * plan this device has not opened, the mirror is a slim header (`parcels: []`), which used to read
+   * `#REF!` "no parcels drawn yet" on a 40-acre plan; for one it opened last week it quoted last week.
+   * `planRows` is the caller's fetch state for THIS open plan (planRowsSource.js): while it is loading
+   * or failed, Site.Acres / the known buildings are an explicit #N/A naming why — "not fetched" never
+   * reads as "nothing drawn" or as zero — and once ready the rows are canonical over the mirror.
+   * `undefined` (signed out / no cloud) keeps the mirror as the one authority, exactly as before. */
+  if (site && planRows && planRows.planId === site.id) {
+    if (planRows.status !== "ready") {
+      const why = planRows.status === "loading"
+        ? "Site plan — loading from your account…"
+        : "Site plan — couldn't load from your account (Site.* is unavailable until it does)";
+      put("Site.Acres", naErr(), why);
+      put("Site.County", site.county || refErr(), "Site plan · county");
+      // Buildings this device already knows by position keep a name (so a reference to one reads
+      // #N/A "loading", not a misleading #NAME? "no such building"); their NUMBERS are unknown.
+      const known = elementsOf(site);
+      const knownNums = buildingNumbers(known);
+      for (const el of known) {
+        if (!isBuilding(el)) continue;
+        const n = knownNums.get(el.id);
+        if (!n) continue;
+        put(`Plan.Building${n}.SF`, naErr(), why);
+        put(`Plan.Building${n}.Footprint`, naErr(), why);
+      }
+      return out;
+    }
+    site = siteFromRows(site, planRows.rows);
+  }
 
   // A site record with NO parcels drawn yet — or none currently ACTIVE (deactivated by a split,
   // a delete-and-undo, …) — is functionally "no site plan" for acreage purposes: `siteAcres`
@@ -280,9 +319,9 @@ function compEntries(comps, projectId) {
  *  `Comp.<title>.*` — ready to spread into a sheet's own `ctx.names` (sheetEngine.js). `comps` is
  *  the caller's own already-fetched, unfiltered comps list (or `undefined`/`null` — no comps
  *  fetched yet just means no `Comp.*` names resolve, exactly like a project with no comps at all). */
-export function buildProjectNames(projectId, { comps } = {}) {
+export function buildProjectNames(projectId, { comps, planRows } = {}) {
   let site = {};
-  try { site = siteEntries(projectId); } catch (_) { site = {}; }
+  try { site = siteEntries(projectId, planRows); } catch (_) { site = {}; }
   let comp = {};
   try { comp = compEntries(comps, projectId); } catch (_) { comp = {}; }
   return { ...site, ...comp };
