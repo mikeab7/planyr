@@ -79,7 +79,7 @@ function AttentionRow({ row, maxDays, showBar, onOpen }) {
       style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0", cursor: "pointer", borderRadius: RADIUS.sm }}
     >
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: "none", width: 32 }}>
-        <span style={{ fontSize: 14, fontWeight: 700, color: "var(--accent)", lineHeight: 1 }}>{row.days}{row.bulkStamped ? "+" : ""}</span>
+        <span style={{ fontSize: 14, fontWeight: 700, color: "var(--accent)", lineHeight: 1 }}>{row.sinceKnown === false ? "new" : <>{row.days}{row.bulkStamped ? "+" : ""}</>}</span>
         <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", color: "var(--text-secondary)" }}>DAYS</span>
       </div>
       <div style={{ minWidth: 0, flex: 1 }}>

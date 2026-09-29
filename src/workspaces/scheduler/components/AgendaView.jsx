@@ -14,7 +14,7 @@ import {
   RECURRENCE_PRESETS, presetIdFor, recurrenceForPresetId, todayISO, bucketFor,
   createAgendaItem, toggleAgendaItem, updateAgendaItem, deleteAgendaItem, sortAgendaItems,
 } from "../lib/agendaModel.js";
-import { readAgenda, writeAgenda } from "../lib/agendaStore.js";
+import { readAgenda, mutateAgenda, subscribeAgenda } from "../lib/agendaStore.js";
 
 const BUCKET_LABEL = { overdue: "Overdue", today: "Today", upcoming: "Upcoming", someday: "Someday" };
 const BUCKET_ORDER = ["overdue", "today", "upcoming", "someday"];
@@ -100,16 +100,38 @@ export default function AgendaView({ scope }) {
   // never carries the previous account's items over in memory.
   useEffect(() => { setItems(readAgenda(scope)); }, [scope]);
 
-  const persist = (next) => { setItems(next); writeAgenda(next, scope); };
+  // B1953795 (S6) - storage is the truth; the view re-reads whenever it changes (this tab or another),
+  // and every edit is a fresh read-modify-write of one item by id -- never "write my whole stale list".
+  const [saveError, setSaveError] = useState(false);
+  useEffect(() => subscribeAgenda(scope, () => setItems(readAgenda(scope))), [scope]);
+  const apply = (fn) => {
+    const r = mutateAgenda(scope, fn);
+    setItems(r.items);            // on a failed write this is the untouched stored list = rollback
+    setSaveError(!r.ok);          // LOUD-FAILURE: a failed save is shown, never a silent "saved"
+    return r.ok;
+  };
 
   const addItem = () => {
     if (!draftText.trim()) return;
     const item = createAgendaItem({ text: draftText, date: draftDate || null, recurrence: recurrenceForPresetId(draftRecurrence) });
-    persist([...items, item]);
-    setDraftText(""); setDraftDate(""); setDraftRecurrence("none");
+    if (apply((cur) => [...cur, item])) { setDraftText(""); setDraftDate(""); setDraftRecurrence("none"); }
   };
 
-  const today = useMemo(() => todayISO(), []);
+  // B1953795 (S6) - "today" must roll over at midnight (the bucket an item sits in -- Overdue / Today --
+  // was frozen at mount). Re-arm a timer for the next local midnight each time it fires.
+  const [today, setToday] = useState(() => todayISO());
+  useEffect(() => {
+    let timer;
+    const arm = () => {
+      const now = new Date();
+      const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 1);
+      timer = setTimeout(() => { setToday(todayISO()); arm(); }, Math.max(1000, next - now));
+    };
+    arm();
+    const onVis = () => { if (document.visibilityState === "visible") setToday(todayISO()); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { clearTimeout(timer); document.removeEventListener("visibilitychange", onVis); };
+  }, []);
   const open = useMemo(() => sortAgendaItems(items.filter((it) => !it.done)), [items]);
   const done = useMemo(() => sortAgendaItems(items.filter((it) => it.done)), [items]);
   const buckets = useMemo(() => {
@@ -168,6 +190,12 @@ export default function AgendaView({ scope }) {
           <Button size="md" data-testid="agenda-add-submit" onClick={addItem} accent="var(--accent-schedule)" onAccent="var(--on-accent-schedule)">＋ Add</Button>
         </div>
 
+        {saveError && (
+          <p role="alert" data-testid="agenda-save-error" style={{ fontSize: 13, color: "var(--danger-text)", margin: "0 0 12px" }}>
+            Couldn't save that change — this browser refused the write (storage full or blocked). The list above is what is actually saved.
+          </p>
+        )}
+
         {items.length === 0 && (
           <p data-testid="agenda-empty" style={{ fontSize: 13, color: "var(--text-secondary)" }}>
             Nothing here yet. Add a line above — it's visible to your whole organization, in
@@ -184,9 +212,9 @@ export default function AgendaView({ scope }) {
               <AgendaRow
                 key={it.id}
                 item={it}
-                onToggle={() => persist(items.map((x) => (x.id === it.id ? toggleAgendaItem(x) : x)))}
-                onEdit={(patch) => persist(updateAgendaItem(items, it.id, patch))}
-                onDelete={() => persist(deleteAgendaItem(items, it.id))}
+                onToggle={() => apply((cur) => cur.map((x) => (x.id === it.id ? toggleAgendaItem(x) : x)))}
+                onEdit={(patch) => apply((cur) => updateAgendaItem(cur, it.id, patch))}
+                onDelete={() => apply((cur) => deleteAgendaItem(cur, it.id))}
               />
             ))}
           </div>
@@ -207,9 +235,9 @@ export default function AgendaView({ scope }) {
               <AgendaRow
                 key={it.id}
                 item={it}
-                onToggle={() => persist(items.map((x) => (x.id === it.id ? toggleAgendaItem(x) : x)))}
-                onEdit={(patch) => persist(updateAgendaItem(items, it.id, patch))}
-                onDelete={() => persist(deleteAgendaItem(items, it.id))}
+                onToggle={() => apply((cur) => cur.map((x) => (x.id === it.id ? toggleAgendaItem(x) : x)))}
+                onEdit={(patch) => apply((cur) => updateAgendaItem(cur, it.id, patch))}
+                onDelete={() => apply((cur) => deleteAgendaItem(cur, it.id))}
               />
             ))}
           </div>

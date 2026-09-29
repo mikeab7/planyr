@@ -63,7 +63,7 @@ import { buildCompsCardData } from "./lib/compsCardModel.js";
 import { fetchRecentComps } from "./lib/dashboardCompsRecentFetch.js";
 import { fetchRecentNotePages } from "./lib/dashboardNotesRecentFetch.js";
 import { fetchLastTouchedDoc } from "./lib/dashboardDocFetch.js";
-import { fetchScheduleProjects, fetchScheduleLastWriteAt } from "./lib/dashboardScheduleFetch.js";
+import { fetchScheduleProjects, fetchScheduleSettings, fetchScheduleLastWriteAt } from "./lib/dashboardScheduleFetch.js";
 import { fetchAllElementRecency } from "./lib/dashboardElementRecencyFetch.js";
 import { fetchElementsForSites } from "./lib/dashboardYieldFetch.js";
 import { yieldBySite, buildingCountBySite } from "./lib/buildingYield.js";
@@ -209,6 +209,8 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
   const [compsForMap, setCompsForMap] = useState([]);
   const [doc, setDoc] = useState(null);
   const [scheduleProjects, setScheduleProjects] = useState(null);
+  // B1953795 (S4/S5) — the schedule doc's settings (healthRules), so the health cards use the grid's own rules.
+  const [scheduleSettings, setScheduleSettings] = useState(null);
   // B1366384 (NEW-1) — "Since you were last here". `sinceLastHere` holds the already-built feed
   // + its header span string, computed ONCE per mount alongside everything else (see the effect
   // below) rather than re-derived on every render, so the card's "since X" doesn't creep forward
@@ -252,6 +254,7 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
         fetchRecentComps(sinceIso),
         fetchRecentNotePages(userId, windowStartMs),
         fetchScheduleLastWriteAt(),
+        fetchScheduleSettings().then((v) => { if (live) setScheduleSettings(v); return v; }),
       ]);
       if (!live) return;
       const siteRows = results[0].status === "fulfilled" ? results[0].value || [] : [];
@@ -298,7 +301,7 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
 
   const projects = useMemo(() => groupProjectsByGroupId(sites), [sites]);
   const yieldBySiteMap = useMemo(() => yieldBySite(yieldRows), [yieldRows]);
-  const needsAttentionRows = useMemo(() => (scheduleProjects ? needsAttentionList(scheduleProjects) : []), [scheduleProjects]);
+  const needsAttentionRows = useMemo(() => (scheduleProjects ? needsAttentionList(scheduleProjects, Date.now(), scheduleSettings) : []), [scheduleProjects, scheduleSettings]);
   const pursuitsRows = useMemo(() => pursuitsTable(projects, quietDaysByGroup), [projects, quietDaysByGroup]);
 
   const cardData = useMemo(() => ({
@@ -309,14 +312,14 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
     pursuitsTable: { rows: pursuitsRows, yieldBySite: yieldBySiteMap },
     goingQuiet: { rows: goingQuiet(projects) },
     compsSummary: { data: buildCompsCardData(comps, compsPeriod) },
-    scheduleHealth: { rows: scheduleProjects ? summarizeScheduleHealth(scheduleProjects) : [] },
+    scheduleHealth: { rows: scheduleProjects ? summarizeScheduleHealth(scheduleProjects, Date.now(), scheduleSettings) : [] },
     sinceLastHere: { feed: sinceLastHere?.feed || null },
   }), [projects, sites, doc, comps, scheduleProjects, needsAttentionRows, pursuitsRows, yieldBySiteMap, sinceLastHere, compsPeriod, jumpBackInCount]);
 
   const openProject = (p) => onNavigate?.({ module: "site-planner", projectId: p.groupId, cross: false, org: false });
   const openSchedule = (p) => onNavigate?.({ module: "scheduler", projectId: p.linkedSiteId, cross: false, org: false });
   const openDoc = (d) => onOpenReviewInDocReview?.({ id: d.id, project_id: d.projectId });
-  const openTask = (row) => onOpenTaskInScheduler?.({ linkedSiteId: row.linkedSiteId, taskId: row.taskId });
+  const openTask = (row) => onOpenTaskInScheduler?.({ linkedSiteId: row.linkedSiteId, taskId: row.taskId, taskSid: row.taskSid ?? null });
   // Deep-links to the comp ITSELF (main's Comps-card behaviour, kept over this branch's older
   // open-the-linked-plan route): MapFinder's `focusCompId` effect opens the Comps tab with the
   // panel on that comp, which is strictly more specific than landing on its plan.

@@ -416,7 +416,7 @@ describe("anti-drift: the guards still exist in the real source (public/sequence
     expect(src).toMatch(/const srcTasks = Array\.isArray\(proj\.tasks\) \? proj\.tasks : \[\];/);
   });
   it("ensureContacts coerces non-string contact names and derives one contact per owner in the list", () => {
-    expect(src).toMatch(/String\(c\?\.name \|\| ''\)\.toLowerCase\(\)/);
+    expect(src).toMatch(/existing\.map\(c => ownerKey\(c\?\.name\)\)/);   // B1953795 (S7): the ONE owner-name normalizer (trim + lower-case, null-safe)
     // NEW-1 — Owner is a LIST now; ensureContacts derives a contact for every name in it (ownerListOf
     // itself does the string→array coercion this test used to look for directly).
     expect(src).toMatch(/ownerListOf\(t\)\.forEach\(rp => \{/);
@@ -617,7 +617,7 @@ describe("anti-drift: the schedule-output fixes still exist in the real source",
     expect(src).toMatch(/<title>\$\{escapeHtml\(scheduleExportName\(selProjs\)\)\}<\/title>/);
   });
   it("the web snapshot guards percent/duration and escapes the status color", () => {
-    expect(src).toMatch(/const pct = t\.health==="green" \? 100 : \(t\.percentComplete\|\|0\)/);
+    expect(src).toMatch(/const pct = leafPercent\(t\);/);   // B1953795 (S2): the one completion answer (green => 100, else clamped stored %)
     expect(src).toMatch(/\$\{Number\(t\.duration\)\|\|0\}d/);
     expect(src).toMatch(/style="color:\$\{escapeHtml\(h\.dot\)\}"/);
   });
@@ -642,7 +642,7 @@ describe("anti-drift: the schedule-output fixes still exist in the real source",
     // route through the same displayHealthOf(t,tasks) the (already-fixed, #1074) Status column
     // uses. Verified live in ui-audit/verify-schedule-export-health-colours.mjs's
     // "Rolled Complete Parent" / "Auto Rollup Collapsed Parent" (control) percentComplete checks.
-    expect(src).toMatch(/return `\$\{displayHealthOf\(t,tasks\)==="green" \? 100 : \(t\.percentComplete\|\|0\)\}%`/);
+    expect(src).toMatch(/return `\$\{displayHealthOf\(t,tasks\)==="green" \? 100 : effectivePercentComplete\(t, tasks\)\}%`/);
   });
   it("MasterView uses rolled health for parents (shared helper) and live deps", () => {
     // NEW (group-header-rule-rollup): computeRolledHealth now takes `settings` too, so a leaf
@@ -1813,8 +1813,8 @@ describe("anti-drift: the round-3 scheduler fixes still exist in the real source
     expect(src).toMatch(/if \(applyLoadedData\) applyLoadedData\(parsed\); else setData\(parsed\);/);    // doRestore
   });
   it("D1: a contact rename/delete propagates to every task's owner LIST (NEW-1)", () => {
-    expect(src).toMatch(/return \{\.\.\.t, responsibleParty: list\.map\(n => n === oldName \? nm : n\)\};/);
-    expect(src).toMatch(/return \{\.\.\.t, responsibleParty: list\.filter\(n => n !== goneName\)\};/);
+    expect(src).toMatch(/return \{\.\.\.t, responsibleParty: renameOwnerIn\(list, oldName, nm\)\};/);
+    expect(src).toMatch(/return \{\.\.\.t, responsibleParty: removeOwnerFrom\(list, goneName\)\};/);
   });
   it("D2 (B613): the rebuilt notes panel edits notes by id and guards the dismiss", () => {
     // The B613 rebuild replaced the free-text bulk editor (which matched notes by text to avoid
@@ -3661,7 +3661,7 @@ describe("anti-drift: the NEW-schedule-health engine exists VERBATIM in src + mi
     // from this retirement. The owner overruled keeping ANY producer of the flag: "stop writing the
     // flag on any status interaction - dot, pill, right-click, updateTask cascade, all of it."
     expect(src).not.toMatch(/healthOverride:\s*true/);
-    expect(src).toMatch(/tasks = tasks\.map\(t => descIds\.has\(t\.id\) \? \{\.\.\.t, health: updates\.health, \.\.\.extra\} : t\)/);
+    expect(src).toMatch(/tasks = tasks\.map\(t => descIds\.has\(t\.id\) \? \{\.\.\.t, health: updates\.health, \.\.\.cascadeDelta\(t, updates\.health\)\} : t\)/);
   });
   it("#1085 gap CLOSED: updateTask's cascade lived only in a React closure with no unit test — recolorBranch is now a real, directly-tested pure mirror of it", () => {
     // The mirror (E.getDescIds / E.recolorBranch) is a byte-identical extraction of the closure

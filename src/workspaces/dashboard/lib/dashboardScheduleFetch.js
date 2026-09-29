@@ -51,6 +51,28 @@ export async function fetchScheduleProjects() {
   }
 }
 
+/** The schedule document's `settings` (its `healthRules` — the SAME rules the grid evaluates), or
+ * null when unknown / the read failed. B1953795 (S4/S5): the Dashboard's health cards evaluate
+ * through the shared rule engine with these. Rows-authoritative accounts keep settings on
+ * `schedule_account_index`; every other account on the legacy blob (json-path select, so the
+ * ~350 KB document is not fetched a second time). */
+export async function fetchScheduleSettings() {
+  if (!supabase) return null;
+  try {
+    if (await isScheduleRowsAuthoritative(supabase)) {
+      const { data, error } = await supabase.from("schedule_account_index").select("settings").maybeSingle();
+      if (error || !data) return null;
+      return data.settings && typeof data.settings === "object" ? data.settings : null;
+    }
+    const { data, error } = await supabase.from("planar_data").select("settings:value->settings").eq("key", SCHEDULE_KEY).maybeSingle();
+    if (error || !data) return null;
+    const st = data.settings ?? data.value?.settings;
+    return st && typeof st === "object" ? st : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 /** The moment this account's schedule data was last WRITTEN, in ms — or null when unknown.
  *
  * ⛔ B1927952 — ON A ROWS-AUTHORITATIVE ACCOUNT THIS IS NOW AN EXACT WRITE TIME, NOT AN UPPER
