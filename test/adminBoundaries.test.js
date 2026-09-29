@@ -11,8 +11,12 @@ import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ADMIN_BOUNDARY_MAX_ZOOM, adminBoundariesVisible } from "../src/workspaces/site-planner/lib/adminBoundaryGate.js";
+import { PARCEL_MINZOOM } from "../src/workspaces/site-planner/lib/parcelDisplayZoom.js";
 import {
   ADMIN1_MIN_ZOOM,
+  ADMIN1_DETAIL_MIN_ZOOM,
+  COUNTRY_MAX_ZOOM,
+  admin1Style,
   adminBoundaryLevels as levelsAt,
   decodeRing,
   decodeAsset,
@@ -23,35 +27,60 @@ const adminBoundaryLevels = (z) => levelsAt(z, ADMIN_BOUNDARY_MAX_ZOOM);
 const here = dirname(fileURLToPath(import.meta.url));
 const asset = JSON.parse(readFileSync(resolve(here, "../public/geo/admin-boundaries.json"), "utf8"));
 
-describe("NEW-1 · the wide-zoom boundary band", () => {
-  it("shows nothing at site working zoom — the whole point of the gate", () => {
-    for (const z of [8, 10, 14, 15, 17, 19, 21]) {
-      expect(adminBoundaryLevels(z)).toEqual({ country: false, admin1: false });
+describe("NEW-1 · the boundary band (revised 2026-09-29: states survive to zoom 12)", () => {
+  it("shows nothing once parcels and site work own the screen (13+)", () => {
+    for (const z of [13, 14, 15, 17, 19, 21]) {
+      expect(adminBoundaryLevels(z)).toEqual({ country: false, admin1: false, detail: false });
       expect(adminBoundariesVisible(z)).toBe(false);
     }
   });
 
-  it("shows countries across the whole wide band, states only once they can resolve", () => {
-    expect(adminBoundaryLevels(3)).toEqual({ country: true, admin1: false });
-    expect(adminBoundaryLevels(4)).toEqual({ country: true, admin1: false });
-    expect(adminBoundaryLevels(5)).toEqual({ country: true, admin1: true });
-    expect(adminBoundaryLevels(7)).toEqual({ country: true, admin1: true });
+  it("keeps STATE outlines on through zoom 12 inclusive — the owner ask (fails on the old band, which ended at 7)", () => {
+    for (const z of [5, 6, 7, 8, 9, 10, 11, 12]) {
+      expect(adminBoundaryLevels(z).admin1).toBe(true);
+      expect(adminBoundariesVisible(z)).toBe(true);
+    }
+    expect(ADMIN_BOUNDARY_MAX_ZOOM).toBe(12);
   });
 
-  it("closes the band exactly at the OLD zoom floor, so nothing new appears at any zoom that was already reachable", () => {
-    // B1102/NEW-6 lowered the map's minZoom from 8 to 3. Everything z8+ was reachable
-    // before this feature and must look exactly as it did.
-    expect(ADMIN_BOUNDARY_MAX_ZOOM).toBe(7);
-    expect(adminBoundariesVisible(8)).toBe(false);
+  it("leaves the COUNTRY band exactly as it was: through zoom 7, off from 8", () => {
+    for (const z of [3, 4, 5, 6, 7]) expect(adminBoundaryLevels(z).country).toBe(true);
+    for (const z of [8, 9, 12]) expect(adminBoundaryLevels(z).country).toBe(false);
+    expect(COUNTRY_MAX_ZOOM).toBe(7);
+  });
+
+  it("states join the countries only once they can resolve (5), and use the fine geometry from 8", () => {
+    expect(adminBoundaryLevels(3)).toEqual({ country: true, admin1: false, detail: false });
+    expect(adminBoundaryLevels(4)).toEqual({ country: true, admin1: false, detail: false });
+    expect(adminBoundaryLevels(5)).toEqual({ country: true, admin1: true, detail: false });
+    expect(adminBoundaryLevels(7)).toEqual({ country: true, admin1: true, detail: false });
+    expect(adminBoundaryLevels(8)).toEqual({ country: false, admin1: true, detail: true });
+    expect(adminBoundaryLevels(12)).toEqual({ country: false, admin1: true, detail: true });
     expect(ADMIN1_MIN_ZOOM).toBeGreaterThan(3);
-    expect(ADMIN1_MIN_ZOOM).toBeLessThanOrEqual(ADMIN_BOUNDARY_MAX_ZOOM);
+    expect(ADMIN1_DETAIL_MIN_ZOOM).toBe(COUNTRY_MAX_ZOOM + 1);
+  });
+
+  it("ends one zoom before parcels draw, so the line never shares a screen with site work", () => {
+    expect(ADMIN_BOUNDARY_MAX_ZOOM).toBe(PARCEL_MINZOOM - 2);
+    expect(adminBoundariesVisible(PARCEL_MINZOOM - 1)).toBe(false);
   });
 
   it("treats a not-yet-reported zoom as 'nothing', never as zoom 0", () => {
     for (const z of [null, undefined, NaN]) {
-      // NaN is a number but no comparison against it is true, so it also reads as off.
       expect(adminBoundariesVisible(z)).toBe(false);
+      expect(adminBoundaryLevels(z, ADMIN_BOUNDARY_MAX_ZOOM).admin1).toBe(false);
     }
+  });
+});
+
+describe("NEW-1 · the state line steps back as it survives into closer zooms", () => {
+  it("is quieter (fainter AND thinner) at 10-12 than at 8-9, and than the wide zooms", () => {
+    const wide = admin1Style(6), mid = admin1Style(8), near = admin1Style(11);
+    expect(mid.line.opacity).toBeLessThan(wide.line.opacity);
+    expect(near.line.opacity).toBeLessThan(mid.line.opacity);
+    expect(near.casing.opacity).toBeLessThan(mid.casing.opacity);
+    expect(near.line.weight).toBeLessThan(mid.line.weight);
+    expect(admin1Style(12)).toEqual(admin1Style(10));
   });
 });
 
@@ -109,5 +138,28 @@ describe("NEW-1 · the committed boundary asset", () => {
       rings.some((r) => r.some(([lat, lng]) => lat > latLo && lat < latHi && lng > lngLo && lng < lngHi));
     expect(spanning(15, 32, -117, -87)).toBe(true); // Mexico
     expect(spanning(49, 70, -140, -60)).toBe(true); // Canada
+  });
+});
+
+describe("NEW-1 · the close-zoom (1:10m) state asset", () => {
+  const detail = JSON.parse(readFileSync(resolve(here, "../public/geo/admin1-detail.json"), "utf8"));
+  const lines = decodeAsset(detail).admin1;
+  const pts = lines.flat();
+
+  it("is present, US-only, and small enough to fetch lazily", () => {
+    expect(detail.format).toBe("planyr-admin-boundaries-v1");
+    expect(lines.length).toBeGreaterThan(50);
+    expect(JSON.stringify(detail).length).toBeLessThan(150 * 1024);
+  });
+
+  it("keeps real borders — the Sabine (TX/LA) and the Red River (TX/OK) are present", () => {
+    const near = (lat, lng, tol = 0.15) => pts.some(([la, lo]) => Math.abs(la - lat) < tol && Math.abs(lo - lng) < tol);
+    expect(near(31.0, -93.55)).toBe(true); // Sabine River, TX/LA
+    expect(near(33.9, -97.0, 0.3)).toBe(true); // Red River, TX/OK
+  });
+
+  it("does NOT draw the Gulf coast as a state line (a 1:10m shoreline would cut through the bay)", () => {
+    const gulf = pts.filter(([la, lo]) => la < 29.7 && la > 26 && lo < -93.9 && lo > -97.5);
+    expect(gulf.length).toBe(0);
   });
 });

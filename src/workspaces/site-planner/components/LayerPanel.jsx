@@ -83,6 +83,7 @@ export default function LayerPanel({
    * note) → not shown. `opacity`/`onOpacityChange` are optional: a host that hasn't wired them
    * gets the checkbox with no slider, same "absent → not shown" discipline as everywhere else. */
   placeNames = null,
+  cityNames = null,  // NEW-2 — { value, onChange }: the finder's own-canvas city/town name layer
   // B1091(×2) — the county this SITE is actually in (the saved site record's own county), kept
   // separate from `county` above, which is the layer-registry key / lookup selector. Only
   // used as the fallback when no identify has resolved. Absent (map finder) → null.
@@ -982,7 +983,7 @@ export default function LayerPanel({
         <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", marginTop: 5, fontSize: 11.5 }}>
           <input type="checkbox" checked={!!placeNames.value} onChange={(e) => placeNames.onChange(e.target.checked)} />
           <span style={{ flex: 1 }}>Road names</span>
-          <RowInfo label="Road names" sections={[{ text: "Road, highway and rail names drawn OVER the aerial by the imagery provider's transportation reference layer — part of the base layer, not a separate overlay. It does not carry city, town or landmark names. Only visible once you're zoomed in past neighborhood scale. Use the see-through slider below to fade it, or turn it off for a clean picture of the ground." }]} />
+          <RowInfo label="Road names" sections={[{ text: "Road, highway and rail names drawn OVER the aerial by the imagery provider's transportation reference layer — part of the base layer, not a separate overlay. It does not carry city, town or landmark names — those are the separate \"City names\" row. Only visible once you're zoomed in past neighborhood scale. Use the see-through slider below to fade it, or turn it off for a clean picture of the ground." }]} />
         </label>
       )}
       {/* B427410 (×3) — Owner, verbatim: "I kinda want road names to just be there… right now
@@ -1014,6 +1015,18 @@ export default function LayerPanel({
             {dormantZoomLine(placeNamesLevels)}
           </button>
         )
+      )}
+      {/* NEW-2 (2026-09-29) — "City names": owner, "we should show cities on the map." A separate
+          row from Road names because it is a separate layer: our own canvas of city/town labels
+          (lib/placeNamesLayer.js), not part of the imagery provider's tile set. Zoom-aware and
+          self-thinning (see placeNamesGate.js), so it carries no opacity slider and no dormant
+          note — it simply steps back before parcels draw. Finder-only, like `placeNames`. */}
+      {cityNames && (
+        <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", marginTop: 5, fontSize: 11.5 }}>
+          <input type="checkbox" checked={!!cityNames.value} onChange={(e) => cityNames.onChange(e.target.checked)} />
+          <span style={{ flex: 1 }}>City names</span>
+          <RowInfo label="City names" sections={[{ text: "City and town names drawn over the map — the biggest cities first, smaller towns as you zoom in. They fade out as you reach parcel and site-plan zoom so nothing sits on your plan." }]} />
+        </label>
       )}
     </div>
   );

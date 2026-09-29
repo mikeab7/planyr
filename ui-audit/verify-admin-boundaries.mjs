@@ -147,10 +147,11 @@ const askedFor = (frag) => asked.some((u) => u.includes(frag));
 
 console.log("\nNEW-1 · wide-zoom state + country outlines\n");
 
-/* ---- 1. nothing is fetched at boot ---------------------------------------------------- */
-ok("at site zoom, the geometry asset is never requested", !askedFor("geo/admin-boundaries.json"));
-ok("at site zoom, the boundary layer chunk is never requested", !askedFor("adminBoundaryLayer"));
-
+/* ---- 1. lazy contract (NEW-1 revised 2026-09-29) --------------------------------------
+ * The band now reaches zoom 12, and this map can boot INSIDE it, so "nothing is fetched at boot"
+ * is no longer the promise. What still holds: the layer is a SEPARATE lazy chunk (never part of
+ * the boot bundle — asserted by its own request appearing), and NOTHING is requested at site
+ * working zoom (13+) — checked below by zooming in and counting requests. */
 const map = page.locator(".leaflet-container").first();
 const zoomOut = page.locator(".leaflet-control-zoom-out").first();
 const zoomIn = page.locator(".leaflet-control-zoom-in").first();
@@ -162,20 +163,24 @@ const click = async (btn, times) => {
   await page.waitForTimeout(800);
 };
 
-/* ---- 2. site zoom: nothing drawn ------------------------------------------------------ */
+/* ---- 2. site zoom: nothing drawn, nothing fetched ------------------------------------- */
+await click(zoomIn, 12);            // from wherever the map booted to well past the band's end
+const geoBefore = asked.filter((u) => u.includes("geo/")).length;
+await click(zoomIn, 1); await click(zoomOut, 1); // moving around at site zoom
 await map.screenshot({ path: `${OUT}site-zoom.png` });
 const atSite = (await inkAndPane(page)).ink;
+ok("at site zoom, no boundary geometry is requested", asked.filter((u) => u.includes("geo/")).length === geoBefore);
 
 /* ---- 3. zoom out to the floor (clamps at 3): countries only --------------------------- */
-await click(zoomOut, 10);           // more than enough to hit the min-zoom floor from any start
+await click(zoomOut, 20);           // more than enough to hit the min-zoom floor from any start
 await page.waitForTimeout(1500);    // the chunk + asset land on the first crossing
 await map.screenshot({ path: `${OUT}zoom-floor.png` });
 const floor = await inkAndPane(page);
 
 ok("zooming out requests the geometry asset", askedFor("geo/admin-boundaries.json"));
-ok("zooming out requests the boundary layer chunk", askedFor("adminBoundaryLayer"));
+ok("the boundary layer is its own lazy chunk (never in the boot bundle)", askedFor("adminBoundaryLayer"));
 ok("boundaries are ON SCREEN at the widest zoom", floor.ink > 2000, `${floor.ink} lit px`);
-ok("boundaries are ABSENT at site working zoom", atSite === 0, `${atSite} lit px before any zoom-out`);
+ok("boundaries are ABSENT at site working zoom", atSite === 0, `${atSite} lit px at site zoom`);
 ok("the pane they are drawn in is really on screen", !!floor.pane && floor.pane.w > 400 && floor.pane.h > 300
   && floor.pane.visibility === "visible" && floor.pane.display !== "none",
   floor.pane ? `${floor.pane.w}x${floor.pane.h} ${floor.pane.visibility}` : "(no pane)");
@@ -195,8 +200,28 @@ ok("state outlines join the countries once they can resolve",
   states.levels === "country admin1", `data-levels="${states.levels}"`);
 ok("and the added level really reaches the raster", states.ink > 2000, `${states.ink} lit px`);
 
+/* ---- 4b. NEW-1 (2026-09-29): states SURVIVE into the metro zooms ---------------------- */
+const stamp = () => page.evaluate(() => { const p = document.querySelector(".leaflet-adminboundaries-pane"); return p ? { levels: p.dataset.levels, detail: p.dataset.detail } : null; });
+await click(zoomIn, 3);             // zoom 5 → 8: countries stop, the fine state geometry takes over
+await map.screenshot({ path: `${OUT}zoom-8-detail.png` });
+const z8 = await stamp(); const z8ink = (await inkAndPane(page)).ink;
+ok("zoom 8: countries are gone, state lines remain (the old band ended at 7)", z8?.levels === "admin1", JSON.stringify(z8));
+ok("zoom 8: the fine 1:10m geometry is the one on screen", z8?.detail === "1", JSON.stringify(z8));
+ok("zoom 8: the fine asset was requested (and only now)", askedFor("geo/admin1-detail.json"));
+ok("zoom 8: the state line reaches the raster", z8ink > 0, `${z8ink} lit px`);
+await click(zoomIn, 4);             // zoom 12 — the last zoom with a state line
+await map.screenshot({ path: `${OUT}zoom-12.png` });
+const z12 = await stamp();
+ok("zoom 12 (whole metro in view): the state line is still drawn", z12?.levels === "admin1", JSON.stringify(z12));
+await click(zoomIn, 1);             // zoom 13 — gone, one step before parcels draw
+const z13 = await stamp(); const z13ink = (await inkAndPane(page)).ink;
+ok("zoom 13: gone — parcels and site work own the screen from here", z13?.levels === "" && z13ink === 0, `${JSON.stringify(z13)} ${z13ink} lit px`);
+await click(zoomOut, 1);
+await click(zoomOut, 8);            // back to the floor so step 5 counts from a known zoom
+await click(zoomIn, 2);             // zoom 5, as before this block
+
 /* ---- 5. back in to site zoom: gone again ---------------------------------------------- */
-await click(zoomIn, 10);            // zoom 5 → 15, well inside the old floor of 8
+await click(zoomIn, 10);            // zoom 5 → 15, well past the new band (ends at 12)
 await map.screenshot({ path: `${OUT}back-to-site.png` });
 const back = await inkAndPane(page);
 ok("boundaries disappear again on the way back in to site zoom", back.ink === 0 && back.levels === "",

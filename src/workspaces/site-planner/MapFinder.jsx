@@ -125,6 +125,7 @@ import { lastEditedLabel } from "./lib/siteRecency.js";
 // "Save for all projects" uses (see lib/userPrefs.js's `sitesPanel` header) — never a new mechanism.
 import { loadUserPrefs, updateUserPrefs, getPrefsSnapshot, subscribePrefs, setSitesPanelPref } from "./lib/userPrefs.js";
 import { adminBoundariesVisible, attachAdminBoundaries } from "./lib/adminBoundaryGate.js";
+import { placeNamesVisible, attachPlaceNames } from "./lib/placeNamesGate.js";
 import { compHeadline, compFieldRows, compDateLabel } from "../../shared/comps/lib/comps.js";
 import { loadCompsRatePeriod } from "../../shared/comps/lib/compsRatePeriodPrefs.js";
 import { compMarkerSvg, compMarkerSize, compMarkerColor } from "../../shared/comps/lib/compMarkerIcon.js";
@@ -191,9 +192,12 @@ const MAP_PIN_SHADOW = "0 1px 5px rgba(0,0,0,0.45)"; // design-exempt: no shadow
 // layer below clamps fetches to that ceiling (minus the retina offset).
 /* B427410 (×2) — this is Esri's TRANSPORTATION reference layer: road, highway and rail
  * names + shields, drawn faint over the imagery. It carries NO city/landmark names — those
- * live in a different Esri service (Reference/World_Boundaries_and_Places) that this app does
- * not use. The panel row this feeds is named "Road names" for exactly that reason — do not
- * relabel it back to anything implying place/city names without switching the source too. */
+ * live in a different Esri service (Reference/World_Boundaries_and_Places) that this app
+ * deliberately does NOT use (it also draws its own boundary lines, which would double up with
+ * the state outlines). The panel row this feeds is named "Road names" for exactly that reason
+ * — do not relabel it back to anything implying place/city names without switching the source
+ * too. City / town names are a SEPARATE row ("City names", NEW-2 2026-09-29), drawn by our own
+ * canvas layer from our own dataset: lib/placeNamesLayer.js, gated by lib/placeNamesGate.js. */
 const LABELS_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}";
 
 /* B427410 (×3) — THE DEFAULT OPACITY, MEASURED, NOT COPIED FROM THE TIER MODEL. The old fixed
@@ -687,6 +691,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   };
   const [basemap, setBasemap] = useState("esri");
   const [labels, setLabels] = useState(true);
+  // NEW-2 (2026-09-29) — the "City names" row (own canvas layer, not a tile overlay). On by default.
+  const [cityNames, setCityNames] = useState(true);
   // B427410 (×3) — the owner's own opacity control over the road-names overlay (`opacityControl`,
   // the same slider every other Layers-panel row uses). Session-only, matching every other row's
   // opacity (layerPrefs.js keeps opacity out of the persisted per-site record on purpose). The
@@ -2241,6 +2247,25 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   useEffect(() => {
     if (wideZoom && mapRef.current) attachAdminBoundaries(mapRef.current);
   }, [wideZoom]);
+
+  /* City / town names (NEW-2, 2026-09-29). Same shape as the boundary attach above: one boolean
+     derived from the live zoom (names live in zooms 3..13 and are gone once parcels draw at 14 —
+     lib/placeNamesGate.js), the layer + datasets behind a dynamic import so nothing rides the
+     boot bundle and nothing is fetched at site working zoom. `cityWantRef` closes the race where
+     the row is switched off while the chunk is still loading. */
+  const cityVisible = placeNamesVisible(zoom);
+  const cityRef = useRef(null);
+  const cityWantRef = useRef(false);
+  useEffect(() => {
+    const map = mapRef.current;
+    cityWantRef.current = cityNames && cityVisible;
+    if (!map) return;
+    if (cityWantRef.current) {
+      attachPlaceNames(map).then((c) => { if (c) { cityRef.current = c; c.setEnabled(cityWantRef.current); } });
+    } else if (cityRef.current) {
+      cityRef.current.setEnabled(false);
+    }
+  }, [cityNames, cityVisible]);
 
   /* overlay layers (FEMA, NWI, TxRRC, local utilities) — toggle + opacity.
      The add/remove/opacity logic is shared with the planner (one source). The
@@ -5081,6 +5106,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                  the owner can dial it from crisp default down to faint rather than only on/off. */
               basemap={{ value: basemap, onChange: setBasemap, choices: FINDER_BASEMAP_CHOICES }}
               placeNames={{ value: labels, onChange: setLabels, opacity: labelsOpacity, onOpacityChange: setLabelsOpacity }}
+              cityNames={{ value: cityNames, onChange: setCityNames }}
               /* NEW-2 — which STATE the map is looking at, so a Texas-only source is named as
                  "not available in Colorado" rather than offered as a toggle that produces an
                  empty map. The view centre is the best state fact the finder has (there is no
