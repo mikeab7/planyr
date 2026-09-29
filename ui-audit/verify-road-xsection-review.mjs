@@ -117,13 +117,13 @@ const decorationOf = (id) => page.evaluate((elId) => {
     polygons: allPolys.length,
     clippedPolygons: clippedPolys.length,
     unclippedPolygons: allPolys.length - clippedPolys.length,
-    // Lane-marking seams use a fixed hardcoded stroke ("#e6b800" yellow / "#f2f2f2" near-white,
+    // Lane-marking seams use a fixed hardcoded stroke ("#f2f2f2" near-white — no yellow, B<PENDING>;
     // SitePlanner.jsx's drawSeam); the road's own two face-of-curb stripe lines (drawn regardless of
     // any xsection) use the theme stroke token instead, so filtering on color isolates the
     // xsection-specific seams from the road's ordinary curb-stripe polylines living in the same <g>.
     laneMarkPolylines: [...g.querySelectorAll("polyline")].filter((p) => {
       const s = p.getAttribute("stroke");
-      return s === "#e6b800" || s === "#f2f2f2";
+      return s === "#f2f2f2";
     }).length,
     dashedRowLines: [...g.querySelectorAll('polyline[stroke="var(--text-tertiary)"]')].filter((p) => p.getAttribute("stroke-dasharray")).length,
     rowLabel: [...g.querySelectorAll("text")].map((t) => t.textContent).find((t) => /R\.O\.W\./.test(t)) || null,

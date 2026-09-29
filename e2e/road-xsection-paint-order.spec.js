@@ -54,7 +54,7 @@ const order = (page) => page.evaluate(() => {
         return {
           id, decoAfterSurface: !!(deco && idx(deco) > idx(surface)),
           bandFills: deco ? deco.querySelectorAll("polygon").length : 0,
-          laneMarks: deco ? [...deco.querySelectorAll("polyline")].filter((p) => ["#e6b800", "#f2f2f2"].includes(p.getAttribute("stroke"))).length : 0,
+          laneMarks: deco ? [...deco.querySelectorAll("polyline")].filter((p) => p.getAttribute("stroke") === "#f2f2f2").length : 0,
         };
       }),
     };
@@ -68,6 +68,10 @@ const expectDecoAboveSurface = (clusters, id, { minFills }) => {
   expect(m.bandFills, `${id}: band fills present`).toBeGreaterThanOrEqual(minFills);
   expect(m.laneMarks, `${id}: lane striping present`).toBeGreaterThan(0);
 };
+
+/* NEW-1 (owner 2026-09-29: "just get rid of the yellow") — no #e6b800 stroke inside ANY data-road-deco group. */
+const yellowStrokes = (page) => page.evaluate(() => [...document.querySelectorAll("[data-road-deco] *")]
+  .filter((n) => ["stroke", "fill"].some((a) => /e6b800/i.test(n.getAttribute(a) || ""))).length);
 
 test.describe("road cross-section decoration paints above its cluster's fill (B1788912 regression)", () => {
   test("a lone designed road", async ({ page }) => {
@@ -92,5 +96,13 @@ test.describe("road cross-section decoration paints above its cluster's fill (B1
   test("the selected (lifted) designed road", async ({ page }) => {
     await open(page, [designed("dsg", 0, 5)], "dsg");
     expectDecoAboveSurface(await order(page), "dsg", { minFills: 1 });
+  });
+
+  test("no yellow stroke anywhere in a road's decoration — divided boulevard, 2-lane, 3-lane", async ({ page }) => {
+    const two = road("two", 300, 6, { bands: [{ type: "travel", w: 12 }, { type: "travel", w: 12 }] });
+    const three = road("three", 600, 7, { bands: [{ type: "travel", w: 12 }, { type: "travel", w: 12 }, { type: "travel", w: 12 }] });
+    await open(page, [designed("dsg", 0, 5), two, three]);
+    expect(await page.evaluate(() => document.querySelectorAll("[data-road-deco]").length)).toBeGreaterThanOrEqual(3);
+    expect(await yellowStrokes(page)).toBe(0);
   });
 });

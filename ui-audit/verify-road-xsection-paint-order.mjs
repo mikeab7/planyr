@@ -37,7 +37,7 @@ for (let z = 0; z < 3; z++) {
     const surf = document.querySelector('[data-testid="road-network-surface"]');
     const deco = document.querySelector('[data-road-deco="dsg"]') || document.querySelector('[data-el-id="dsg"]');
     return { after: all.indexOf(deco) > all.indexOf(surf), fills: deco.querySelectorAll("polygon").length,
-      marks: [...deco.querySelectorAll("polyline")].filter((p) => ["#e6b800", "#f2f2f2"].includes(p.getAttribute("stroke"))).length };
+      marks: [...deco.querySelectorAll("polyline")].filter((p) => p.getAttribute("stroke") === "#f2f2f2").length };
   });
   console.log(`zoom step ${z}: decoration above fill=${r.after} bandFills=${r.fills} laneMarks=${r.marks}`);
   if (!r.after) fail++;
@@ -56,7 +56,7 @@ const exp = await page.evaluate(async () => {
   if (!html) return null;
   const surf = html.indexOf('data-export="road-network"');
   const deco = html.indexOf('data-road-deco="dsg"');
-  return { surf, deco, marks: (html.slice(deco).match(/#e6b800|#f2f2f2/g) || []).length };
+  return { surf, deco, marks: (html.slice(deco).match(/#f2f2f2/g) || []).length };
 });
 console.log("export sheet:", JSON.stringify(exp));
 if (!exp || exp.surf < 0 || exp.deco < exp.surf || exp.marks < 1) { console.log("❌ PDF-PARITY: decoration missing or under the fill on the exported sheet"); fail++; }
