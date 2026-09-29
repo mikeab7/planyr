@@ -507,6 +507,7 @@ const cleanText = (v) => { const s = (v == null ? "" : String(v)).trim(); return
 import { resolveDraftStepBack } from "./lib/drafts.js";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { FONT_SIZE, SPACE, CONTROL_H } from "../../shared/ui/designTokens.js";
+import { parcelKey as parcelKeyOf, storedParcelKey } from "./lib/parcelIdentity.js";
 // B845584 — the element context-menu rebuild's own 14px/1.3-stroke icon family (see that file's
 // header for why it is separate from icons.jsx's 24px/stroke-2 idiom). Two names collide with
 // icons.jsx's existing exports (Duplicate, Delete/Lock-ish), so they are aliased at the import site.
@@ -15980,14 +15981,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const candidates = suppressRedundantStatewide(healthy, realPrimaries, STATEWIDE_KEYS);
     return { candidates, realPrimaries };
   };
-  // Stable per-lot key: the CAD OBJECTID when present, else the first vertex — so a
-  // re-click on the same lot toggles it, and we never add the same lot twice.
-  const parcelGisKey = (attrs, rings) => {
-    const oid = attrs?.OBJECTID ?? attrs?.objectid ?? attrs?.OID;
-    if (oid != null) return `oid:${oid}`;
-    const p = rings?.[0]?.[0];
-    return p ? `geo:${p[0].toFixed(6)},${p[1].toFixed(6)}` : `geo:${uid()}`;
-  };
+  // Stable per-lot key (lib/parcelIdentity.js — the ONE resolver, shared with the Map view): the CAD
+  // OBJECTID (incl. table-prefixed joined-layer ids), else a hash of the whole ring set — never one vertex.
+  const parcelGisKey = (attrs, rings) => parcelKeyOf(attrs, rings, { fallback: () => `geo:${uid()}` });
   // rings (4326) → planner parcels in the site frame, each carrying its gisKey + attrs.
   // Every outer part of a multipart parcel ("TRS 3 & 5") becomes its own parcel (B36c),
   // locked by default like every county-pulled lot (B99).
@@ -16170,7 +16166,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         return;
       }
       // Already in the plan from before → select + inform, never add a duplicate.
-      const dupe = (stateRef.current.parcels || []).filter((p) => p.gisKey === key);
+      const dupe = (stateRef.current.parcels || []).filter((p) => storedParcelKey(p) === key); // recomputed from attrs — legacy geo: gisKeys still match
       if (dupe.length) {
         setSel({ kind: "parcel", id: dupe[dupe.length - 1].id });
         setIdentifyRes({ already: true, addr });
