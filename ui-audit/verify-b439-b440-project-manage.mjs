@@ -49,7 +49,7 @@ const openPicker = async () => {
     const proj = btns.find(b => b.getAttribute('aria-haspopup') === 'menu' && /▾/.test(b.innerText));
     if (proj) proj.click();
   });
-  await page.waitForSelector('input[placeholder="Search projects…"]', { timeout: 5000 });
+  await page.waitForSelector('input[placeholder="Search projects"]', { timeout: 5000 });
   await page.waitForTimeout(150);
 };
 const closePicker = async () => { await page.keyboard.press("Escape").catch(() => {}); await page.waitForTimeout(150); };
@@ -92,7 +92,7 @@ try {
 
   // the dropdown stays open while the manage menu is up (the gotcha: a click in the
   // second portal must not be read as an outside-click that closes the parent)
-  const dropdownStillOpen = await page.evaluate(() => !!document.querySelector('input[placeholder="Search projects…"]'));
+  const dropdownStillOpen = await page.evaluate(() => !!document.querySelector('input[placeholder="Search projects"]'));
   ok("Parent switcher dropdown stays open under the manage menu", dropdownStillOpen);
 
   // Rename inline → commit on Enter → store relabeled

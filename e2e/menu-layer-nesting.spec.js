@@ -38,7 +38,7 @@ async function boot(page) {
   await page.goto("/#/site");
   await expect(page.getByTestId("project-crumb")).toBeVisible({ timeout: 30_000 });
 }
-const search = (page) => page.locator('input[placeholder="Search projects…"]');
+const search = (page) => page.locator('input[placeholder="Search projects"]');
 
 async function openPicker(page) {
   await page.getByTestId("project-crumb").click();

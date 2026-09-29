@@ -86,7 +86,7 @@ try {
     ok("malformed nav-state: ErrorBoundary does NOT appear", !(await boundaryShown(page)));
     ok("malformed nav-state: no real page errors", sink.real().length === 0, sink.real()[0] || "");
     const panel = await page.evaluate(() => {
-      const input = document.querySelector('input[placeholder="Search projects…"]');
+      const input = document.querySelector('input[placeholder="Search projects"]');
       return input ? (input.parentElement?.innerText || "") : "(picker closed)";
     });
     ok("malformed nav-state: the valid projects still render", /Goose Creek/.test(panel) && /Grand Port/.test(panel), `panel="${panel.replace(/\s+/g, " ").slice(0, 90)}"`);

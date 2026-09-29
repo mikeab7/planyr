@@ -15,7 +15,7 @@
  * building's rendered box (did it NOT move).
  *
  * It also exercises the class the report predicted in a DIFFERENT AnchoredMenu-hosted field: the
- * project switcher's "Search projects…" box, which carries `autoFocus`. That one WAS broken —
+ * project switcher's "Search projects" box, which carries `autoFocus`. That one WAS broken —
  * `AnchoredMenu.jsx` hid its unplaced panel with `visibility:hidden`, which is unfocusable per spec,
  * so React's one-shot commit-time `.focus()` silently landed on nothing and left real focus on the
  * trigger button; a `<button>` carries no field latch, so an Arrow key reached the canvas as CHROME
@@ -135,7 +135,7 @@ try {
   }
 
   /* ── ARM 2 — the OTHER portalled input the report asked to be exercised: the project switcher's
-   *    autoFocus'd "Search projects…" box. Confirms the AnchoredMenu opacity fix: real DOM focus
+   *    autoFocus'd "Search projects" box. Confirms the AnchoredMenu opacity fix: real DOM focus
    *    must land there (not the trigger button), and arrows there must not nudge either. ──────── */
   {
     const { ctx, page } = await newPage();
@@ -151,7 +151,7 @@ try {
 
     const active = await page.evaluate(() => ({ tag: document.activeElement?.tagName, placeholder: document.activeElement?.placeholder }));
     check("PROJECT SEARCH · autoFocus lands real DOM focus in the field (AnchoredMenu opacity fix)",
-      active.tag === "INPUT" && active.placeholder === "Search projects…", JSON.stringify(active));
+      active.tag === "INPUT" && active.placeholder === "Search projects", JSON.stringify(active));
 
     await page.keyboard.press("ArrowLeft");
     await pacedWait(page, 300);

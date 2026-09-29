@@ -359,7 +359,7 @@ test.describe("NEW-2 — renaming a project and pressing Enter must never naviga
     const input = await startRowRename(page, "grp-aldine", "Aldine Bender 1 RENAMED (blur)");
     // Click away onto a neutral control (the search field) — never onto another project's own
     // row, which would be a deliberate, correct navigation, not a click-away.
-    await page.getByPlaceholder("Search projects…").click();
+    await page.getByPlaceholder("Search projects").click();
     await waitForStoreName(page, "grp-aldine", "Aldine Bender 1 RENAMED (blur)");
 
     expect(await rowOrder(page)).toEqual(before);

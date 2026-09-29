@@ -71,7 +71,7 @@ export default function AnchoredMenu({
   // `pos` is still null and (below) the panel used to be hidden with `visibility:hidden` so it can't
   // flash at the wrong spot before `place()` has measured it. A `visibility:hidden` ancestor is NOT a
   // focusable area per spec, so the `.focus()` call was a silent no-op: focus stayed on the anchor
-  // button. Confirmed live (the project switcher's "Search projects…" box, which carries `autoFocus`):
+  // button. Confirmed live (the project switcher's "Search projects" box, which carries `autoFocus`):
   // `document.activeElement` stayed the trigger `<button>` after opening it, and a `<button>` has no
   // text-entry state at all — so an Arrow (or Delete) that would have been swallowed by a genuinely
   // focused field instead read as CHROME scope with nothing latched to a field, and reached the

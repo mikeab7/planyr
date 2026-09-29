@@ -52,7 +52,7 @@ const openPickerAndReadPanel = async () => {
   });
   await page.waitForTimeout(400);
   return page.evaluate(() => {
-    const input = document.querySelector('input[placeholder="Search projects…"]');
+    const input = document.querySelector('input[placeholder="Search projects"]');
     return input ? (input.parentElement?.innerText || "") : "(picker did not open)";
   });
 };

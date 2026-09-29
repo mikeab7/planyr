@@ -907,3 +907,15 @@ kbd {
   border-right-color: var(--text-secondary);
   border-bottom-color: var(--text-secondary);
 }
+
+/* NEW-1 (project switcher restyle) — the breadcrumb project dropdown's rows. Hover is a very light
+   gray; the current row carries a faint tint; the pin button is invisible at rest and appears on row
+   hover or keyboard focus (`:focus-within` keeps it reachable without a mouse). Plain CSS rather than
+   React hover state so the reveal costs no re-render and needs no mount-time state. */
+.psw-row { background: transparent; }
+.psw-row:hover, .psw-row[data-menu-open="1"] { background: color-mix(in srgb, var(--hover-ghost) 55%, transparent); }
+.psw-row[data-current="1"] { background: var(--hover-menu); }
+.psw-row .psw-pin { opacity: 0; transition: opacity .1s; }
+.psw-row:hover .psw-pin, .psw-row:focus-within .psw-pin { opacity: 1; }
+.psw-row .psw-pin:hover { background: var(--hover-menu); color: var(--text-primary); }
+.psw-panel button:hover:not(:disabled) { filter: none; }
