@@ -19,6 +19,7 @@ import {
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { scheduleSaveState } from "./lib/saveState.js";
 import { ScheduleCenter, ScheduleActions } from "./components/ScheduleToolbar.jsx";
+import { planScheduleHintSync } from "../../shared/schedule/scheduleLinkHints.js";
 import { listProjects, warmProjectsIfEmpty, suggestNameMatch, onProjectsChanged } from "../../shared/projects/projects.js";
 import { resolveControlledId } from "../../shared/projects/projectModel.js";
 import LinkSchedulePanel from "./components/LinkSchedulePanel.jsx";
@@ -225,6 +226,15 @@ export default function Scheduler({
       // the anti-ping-pong suppression has done its job (B1050).
       dashboardIntentRef.current = false;
       setProjects(nav.projects);
+      // B1953795 (S1) — the "Has a schedule" hint is DERIVED from the schedules' own links on every
+      // nav-state (not from one-shot link events), so unlink / relink / delete / two-schedule sites
+      // all converge and stale hints already on disk heal. Source wins; never clears on an empty list.
+      try {
+        for (const op of planScheduleHintSync(nav.projects, listProjects())) {
+          onScheduleLinkChanged?.(op.groupId, { scheduleProjectId: op.scheduleProjectId, name: op.name });
+        }
+        setSiteProjects(listProjects());
+      } catch (_) {}
       setActiveId(nav.activeId);
       setSection(nav.section);
       // B851 ×4 — this IS the confirmation the render gate fail-closes on: a genuine nav-state
@@ -397,7 +407,7 @@ export default function Scheduler({
     if (scheduleTaskIntent.token === appliedTaskIntentRef.current) return;
     if (scheduleTaskIntent.siteId !== projectId) return;
     appliedTaskIntentRef.current = scheduleTaskIntent.token;
-    post({ type: "planar:nav-select-task", siteId: scheduleTaskIntent.siteId, taskId: scheduleTaskIntent.taskId });
+    post({ type: "planar:nav-select-task", siteId: scheduleTaskIntent.siteId, taskId: scheduleTaskIntent.taskId, taskSid: scheduleTaskIntent.taskSid ?? null });
   }, [ready, scheduleTaskIntent, projectId]);
 
   // Project-aware header tabs (the cross-module payoff): when the route carries a Site Planner

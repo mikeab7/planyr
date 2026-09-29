@@ -47,7 +47,7 @@ function Sentence({ parts }) {
 function openTarget(row, handlers) {
   const o = row.open || {};
   if (o.kind === "project" && o.groupId) return () => handlers.onOpenProject?.({ groupId: o.groupId });
-  if (o.kind === "task") return () => handlers.onOpenTask?.({ linkedSiteId: o.linkedSiteId, taskId: o.taskId });
+  if (o.kind === "task") return () => handlers.onOpenTask?.({ linkedSiteId: o.linkedSiteId, taskId: o.taskId, taskSid: o.taskSid ?? null });
   if (o.kind === "schedule") return () => handlers.onOpenSchedule?.({ linkedSiteId: o.linkedSiteId });
   if (o.kind === "comp") return () => handlers.onOpenComp?.(o.comp);
   if (o.kind === "note") return () => handlers.onOpenNote?.({ pageId: o.pageId, projectId: o.projectId, orgScope: o.orgScope });

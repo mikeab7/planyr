@@ -50,7 +50,6 @@ const VIEW_PREF_FILES = {
 };
 // Rule-2 copies awaiting their fix; each entry is REMOVED by the item named (dead entries fail).
 const PENDING_FIX_FILES = {
-  "src/workspaces/scheduler/components/AgendaView.jsx": "agenda items — B1953795",
   "src/workspaces/site-planner/SitePlanner.jsx": "smoothZoom/stdDraft are view prefs; pondCriteria/buildRules/criteriaOverrides are read-only seeds (rule tables fixed — B1953793)",
 };
 

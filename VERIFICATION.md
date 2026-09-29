@@ -177,6 +177,20 @@ Sandbox-proven (logged out, unit): `test/prefsSingleSource.test.js` (12 tests, r
 5. Tab A: Site Planner floodplain rules, set Harris ratio 1.5. Tab B (opened earlier): tick "verified" on Fort Bend. **Expect:** Tab B shows Harris 1.5 without reload; after reload both edits persist.
 6. Library: pin folder F, rename F in its project, return to Library Home. **Expect:** the pinned card shows the new name; delete F and it falls back to the old name (not blank).
 - **Stopping rule:** closes on a dated pass of 1–6, or a failed step filed as a recurrence on B1953793.
+### V1390098 — B1953795: Scheduler/Dashboard one-answer fixes (Complete, Has-a-schedule, since-last-here, health cards, Agenda, owner rename) on a real signed-in account `Blocker: real-data`
+
+Sandbox-proven (logged out): the unit suites named on B1953795 and `ui-audit/verify-schedule-completion.mjs` (red on main, ALL PASS here). **Still needs a signed-in pass on a THROWAWAY duplicate schedule/project (constraint 7 — never a real one)** for the parts that need a real schedule document, the Shell + embed, or a printed PDF.
+**Steps, each with a named expected result:**
+1. In a throwaway schedule, mark a leaf Complete via the status pill. **Expect:** its `% Comp` cell (add the column from the grid's column menu) reads 100% and the Gantt bar is solid. Pick In Progress. **Expect:** % returns to 0% and the bar hollow. Type 100 in % on an OVERDUE leaf. **Expect:** status dot turns green, not red Needs Attn.
+2. Collapse a parent whose children are 100% / 50% at equal duration. **Expect:** the parent % shows 75%. Try typing a % on the parent. **Expect:** a toast says it rolls up from its tasks and nothing changes.
+3. Export the grid to PDF and open the print/Gantt exhibit for the same schedule. **Expect:** the % column and Gantt bars match steps 1-2 (green ⇒ 100, derived parent %), identical to the screen.
+4. In the Shell, link the throwaway schedule to project A, then Unlink it (schedule menu), open the project switcher. **Expect:** A's calendar icon disappears within a moment of the Scheduler updating. Relink it to project B. **Expect:** icon on B only. Delete the schedule. **Expect:** no icon on either. Give one project two schedules, delete one. **Expect:** the icon stays.
+5. Dashboard: open it with that throwaway schedule containing overdue tasks and a custom health rule (e.g. yellow within 10 days). **Expect:** Schedule health counts equal the grid's own Complete / Needs Attn. / In-progress counts for the same schedule, and the Needs-attention card lists exactly the grid's red leaves — including ones that turned red while the Scheduler was closed (shown as "new"), and NOT one you just completed elsewhere.
+6. Dashboard "Since you were last here": note it, then in the Scheduler insert a row near the top and move NO dates; return to the Dashboard. **Expect:** no schedule-slip rows. Now move one milestone 4 days. **Expect:** exactly one slip row naming that milestone; clicking it opens THAT task in the Scheduler.
+7. Agenda (org scope): open it in two browser tabs, add an item in each, edit/complete one in tab 1. **Expect:** neither tab loses the other's item and both update without a reload. Leave a tab open across midnight (or change the system date). **Expect:** items move from Today to Overdue without a reload.
+8. Contacts: give a task the owner `jon smith` (lower-case) and a contact `Jon Smith`; rename the contact to `Jonathan Smith`. **Expect:** the task's owner becomes `Jonathan Smith`, and after a reload no duplicate `jon smith` contact appears.
+9. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes when 1-8 confirm on a real signed-in account, dated with the build hash - or a failing step is filed as a recurrence on B1953795 (STANDING RULE #2).
 ### V1390097 — B1953794: stale-copy fixes hold on a real signed-in account (mitigation re-price, easement jurisdiction, Dashboard vs Map plan, thumbnail) `Blocker: auth`
 
 Sandbox-proven: `test/staleCopyGroupB1953794.test.js` (red-proofed against origin/main). **Still needs a signed-in pass** for the cloud legs.
