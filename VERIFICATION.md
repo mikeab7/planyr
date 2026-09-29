@@ -166,6 +166,19 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1396784 — B1960480: double-tap on blank paper raises the soft keyboard and the first text lands in the new box (real iPhone keyboard)
+
+Sandbox-proven on WebKit (touch emulation, `ui-audit/verify-notes-touch-place.mjs`) — keyboard typing, keydown-less `insertText`, title-focused variant, no scroll. NOT provable here: the real iOS soft keyboard, QuickPath, dictation, IME and autocapitalise.
+**Steps (real iPhone, a throwaway page):**
+1. Open a page, double-tap blank paper. **Expect:** the keyboard rises immediately and the shift key is on.
+2. Type "hello" (autocapitalise on). **Expect:** "Hello" appears in a NEW box at the tapped spot.
+3. Focus the page title, then double-tap blank paper. **Expect:** keyboard stays up, next letters go into the box, title unchanged.
+4. Double-tap blank paper on a page with an existing box, then tap a predictive suggestion / dictate / insert an emoji. **Expect:** it lands in the new box, not the old one.
+5. Empty page. **Expect:** the prompt reads "Double-tap anywhere to start a note."
+6. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1960480.
+
+
 ### V1390099 — B1953796: Doc Review autosave keeps its folder; filing in Review clears "Needs filing"; Model/Food/Library stay fresh `Blocker: auth`
 
 Sandbox-proven only as pure logic (`test/reviewPreserveFields.test.js`, `test/staleCopyFixes.test.js`). All cloud legs need a signed-in pass on THROWAWAY data (never a real plan/file).

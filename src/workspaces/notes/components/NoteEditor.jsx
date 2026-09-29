@@ -37,7 +37,10 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import { noteExtensions, EMPTY_DOC } from "../lib/notesExtensions.js";
 import { ANCHOR_MIN_HEIGHT, anchorExtent, anchorExtentLeft, anchorExtentTop, anchorExtentX, anchorPosAtSelection, fitAnchorBox, placeAnchor } from "../lib/notesAnchorNode.js";
 import { edgePoint as arrowEdgePoint } from "../lib/notesArrows.js";
-import { isBlankDoublePress } from "../lib/notesBlankPaper.js";
+import {
+  isBlankDoublePress, BLANK_DBLTAP_TOUCH_PX, isTouchPointerType, isCoarsePointerDevice,
+  isTextInsertInputType,
+} from "../lib/notesBlankPaper.js";
 import { migrateFlowBody, migrateSketchesToBoxes } from "../lib/notesFlowMigration.js";
 import {
   applyMarquee, boxesInMarquee, latchGesture, marqueeRect, moveSelection, nudgeDelta,
@@ -1954,6 +1957,14 @@ const NoteEditor = forwardRef(function NoteEditor({
    * Escape, Enter, an arrow, Backspace, a click elsewhere — simply forgets the point, silently,
    * because nothing has happened yet and there is nothing to report. */
   const [pendingPlace, setPendingPlace] = useState(null);
+  /* The pointer type of the most recent press anywhere — the blank-paper handlers run on the
+   * compat MOUSE events, which no longer say whether a finger or a mouse made them. */
+  const lastPointerTypeRef = useRef("mouse");
+  useEffect(() => {
+    const note = (e) => { lastPointerTypeRef.current = e.pointerType || "mouse"; };
+    window.addEventListener("pointerdown", note, { capture: true, passive: true });
+    return () => window.removeEventListener("pointerdown", note, { capture: true });
+  }, []);
   const pendingRef2 = useRef(null);
   pendingRef2.current = pendingPlace;
 
@@ -1965,6 +1976,7 @@ const NoteEditor = forwardRef(function NoteEditor({
   const commitPendingPlace = useCallback((text) => {
     const at = pendingRef2.current;
     if (!at || !editor || editor.isDestroyed) return false;
+    pendingRef2.current = null;     // synchronously: a keydown AND its beforeinput must not both commit
     setPendingPlace(null);
     /* ⛔ TWO COMMANDS RATHER THAN ONE `content:` ARGUMENT, DELIBERATELY. `addNoteAnchorAt` only
      * puts the caret INSIDE the new box on its no-content path, and a box you have just started
@@ -2032,6 +2044,15 @@ const NoteEditor = forwardRef(function NoteEditor({
         return;
       }
       const printable = e.key.length === 1;
+      if (printable && pendingRef2.current?.touch) {
+        /* ⛔ ON TOUCH THE BROWSER'S OWN INSERTION IS LEFT TO HAPPEN (NEW-1, iOS review). Swallowing
+         * the key and inserting it through a command tells the soft keyboard nothing was typed, so
+         * its autocapitalise / autocorrect context desyncs from the field. Instead: make the box
+         * (selection and DOM focus move into it, synchronously) and let the keystroke's default
+         * action put the character there. */
+        commitPendingPlace();
+        return;
+      }
       if (printable) {
         e.preventDefault();
         e.stopPropagation();
@@ -2068,11 +2089,37 @@ const NoteEditor = forwardRef(function NoteEditor({
       e.stopPropagation();
       commitPendingPlace(text);
     };
+    /* ⛔ TEXT THAT ARRIVES WITHOUT A PRINTABLE KEYDOWN (NEW-1, iOS review). Predictive-bar taps,
+     * QuickPath swipe, dictation, emoji (`key.length` 2) and IME composition report `Unidentified`
+     * / 229 or no keydown at all, so the keydown catch above never sees them and ProseMirror would
+     * insert at the OLD hidden selection — into a previously edited box, out of sight. Make the
+     * box first (selection + DOM focus move into it synchronously), carrying the text; IME
+     * composition starts the box empty and stays native so the IME is not disturbed. */
+    const onBeforeInput = (e) => {
+      if (!pendingRef2.current || !isTextInsertInputType(e.inputType)) return;
+      /* A plain text insertion carries its text: build the note with it and cancel the native
+       * insertion — measured on WebKit, moving the selection inside `beforeinput` does NOT move
+       * where the browser then inserts (it went into the OLD box). Composition is different: it
+       * cannot be cancelled and re-issued without breaking the IME, so it commits empty on
+       * `compositionstart` below (before the insertion point is decided) and is left native. */
+      if ((e.inputType === "insertText" || e.inputType === "insertReplacementText") && e.data) {
+        e.preventDefault();
+        e.stopPropagation();
+        commitPendingPlace(e.data);
+        return;
+      }
+      if (e.inputType === "insertCompositionText" || e.inputType === "insertFromComposition") commitPendingPlace();
+    };
+    const onCompositionStart = () => { if (pendingRef2.current) commitPendingPlace(); };
     window.addEventListener("keydown", onKey, { capture: true });
     window.addEventListener("paste", onPaste, { capture: true });
+    window.addEventListener("beforeinput", onBeforeInput, { capture: true });
+    window.addEventListener("compositionstart", onCompositionStart, { capture: true });
     return () => {
       window.removeEventListener("keydown", onKey, { capture: true });
       window.removeEventListener("paste", onPaste, { capture: true });
+      window.removeEventListener("beforeinput", onBeforeInput, { capture: true });
+      window.removeEventListener("compositionstart", onCompositionStart, { capture: true });
     };
   }, [pendingPlace, editor, commitPendingPlace, cancelPendingPlace]);
 
@@ -2157,7 +2204,22 @@ const NoteEditor = forwardRef(function NoteEditor({
       ? { left: Math.round(clientX - matRect.left), top: Math.round(clientY - matRect.top - lineH / 2), height: lineH }
       : null;
     if (!caret) return;                       // unmeasured — never guess where to draw a caret
-    setPendingPlace({ ...point, caret });
+    const touch = isTouchPointerType(lastPointerTypeRef.current);
+    setPendingPlace({ ...point, caret, touch });
+    /* ⛔ ON TOUCH ONLY, THE EDITOR IS FOCUSED RIGHT HERE, INSIDE THE TAP (NEW-1, iOS review). iOS
+     * raises the soft keyboard only for an editable focused synchronously within the gesture; with
+     * nothing focused after a double-tap no keyboard ever came up, so no keydown could ever arrive
+     * (and with the page title focused the next characters went into the TITLE). The NEW-10
+     * objection below (focus scrolls the view) was measured when the mat was a scroller; the mat
+     * is overflow:hidden + one transform now, and this guard restores any ancestor scroll the
+     * focus caused anyway, so the view cannot move. Desktop keeps the no-focus behaviour. */
+    if (touch) {
+      dom.setAttribute("data-pending-place", "1");   // hide the native caret before the first paint
+      const saved = [];
+      for (let n = dom.parentElement; n; n = n.parentElement) saved.push([n, n.scrollTop, n.scrollLeft]);
+      dom.focus({ preventScroll: true });
+      for (const [n, t, l] of saved) { if (n.scrollTop !== t) n.scrollTop = t; if (n.scrollLeft !== l) n.scrollLeft = l; }
+    }
     /* ⛔ AND IT DELIBERATELY DOES NOT FOCUS THE EDITOR (NEW-10). The first version called
      * `dom.focus({ preventScroll: true })` here so the keystroke would reach ProseMirror — and
      * MEASURED, on a long scrolled note, that press moved the view from scrollTop 500 to 138 and
@@ -3014,7 +3076,10 @@ const NoteEditor = forwardRef(function NoteEditor({
       return;
     }
     const press = { t: e.timeStamp || Date.now(), x: e.clientX, y: e.clientY };
-    const doublePress = e.detail >= 2 || isBlankDoublePress(lastBlankPressRef.current, press);
+    const doublePress = e.detail >= 2 || isBlankDoublePress(
+      lastBlankPressRef.current, press,
+      isTouchPointerType(lastPointerTypeRef.current) ? { px: BLANK_DBLTAP_TOUCH_PX } : undefined,
+    );
     lastBlankPressRef.current = doublePress ? null : press;   // consumed, or the new "previous"
     e.preventDefault();
     e.stopPropagation();
@@ -4988,7 +5053,7 @@ const NoteEditor = forwardRef(function NoteEditor({
                   color: "var(--text-tertiary)", fontStyle: "italic", fontSize: "inherit",
                 }}
               >
-                Double-click anywhere to start a note.
+                {isCoarsePointerDevice() ? "Double-tap anywhere to start a note." : "Double-click anywhere to start a note."}
               </div>
             ) : null}
             {band ? (

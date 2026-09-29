@@ -9,7 +9,8 @@
  */
 import { describe, expect, it } from "vitest";
 import {
-  BLANK_DBLTAP_MS, BLANK_DBLTAP_PX, isBlankDoublePress,
+  BLANK_DBLTAP_MS, BLANK_DBLTAP_PX, BLANK_DBLTAP_TOUCH_PX, isBlankDoublePress,
+  isTouchPointerType, isTextInsertInputType,
 } from "../src/workspaces/notes/lib/notesBlankPaper.js";
 
 describe("isBlankDoublePress — the pair, reconstructed", () => {
@@ -35,5 +36,20 @@ describe("isBlankDoublePress — the pair, reconstructed", () => {
     expect(isBlankDoublePress(first, { t: NaN, x: 500, y: 300 })).toBe(false);
     // A clock that went backwards is not a gesture.
     expect(isBlankDoublePress(first, { t: 900, x: 500, y: 300 })).toBe(false);
+  });
+});
+
+describe("touch double-tap (NEW-1, iPhone review)", () => {
+  const first = { t: 1000, x: 500, y: 300 };
+  it("a finger's wider slop still pairs; the mouse slop does not", () => {
+    const next = { t: 1150, x: 515, y: 312 };
+    expect(isBlankDoublePress(first, next)).toBe(false);
+    expect(isBlankDoublePress(first, next, { px: BLANK_DBLTAP_TOUCH_PX })).toBe(true);
+  });
+  it("classifies pointer types and text-arriving input types", () => {
+    expect(isTouchPointerType("touch")).toBe(true);
+    expect(isTouchPointerType("mouse")).toBe(false);
+    for (const t of ["insertText", "insertReplacementText", "insertCompositionText", "insertFromComposition"]) expect(isTextInsertInputType(t)).toBe(true);
+    for (const t of ["deleteContentBackward", "insertFromPaste", "historyUndo", "formatBold"]) expect(isTextInsertInputType(t)).toBe(false);
   });
 });
