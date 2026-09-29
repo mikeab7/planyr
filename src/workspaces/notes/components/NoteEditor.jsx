@@ -3076,10 +3076,9 @@ const NoteEditor = forwardRef(function NoteEditor({
       return;
     }
     const press = { t: e.timeStamp || Date.now(), x: e.clientX, y: e.clientY };
-    const doublePress = e.detail >= 2 || isBlankDoublePress(
-      lastBlankPressRef.current, press,
-      isTouchPointerType(lastPointerTypeRef.current) ? { px: BLANK_DBLTAP_TOUCH_PX } : undefined,
-    );
+    const doublePress = e.detail >= 2 || isBlankDoublePress(lastBlankPressRef.current, press)
+      || (isTouchPointerType(lastPointerTypeRef.current)
+        && isBlankDoublePress(lastBlankPressRef.current, press, { px: BLANK_DBLTAP_TOUCH_PX }));
     lastBlankPressRef.current = doublePress ? null : press;   // consumed, or the new "previous"
     e.preventDefault();
     e.stopPropagation();
