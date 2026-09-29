@@ -188,6 +188,16 @@ Sandbox-proven: `test/mapPinSymbol.test.js`, `test/mapNoteMarkerIcon.test.js`; h
 5. Hover a site pin and a note pin. **Expect:** the tooltip appears above the circle, not on it.
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1875520.
 
+### V1406976 — B1976336: Select-parcels outlines survive zoom in/out near Cartersville GA and only Georgia sources are queried `Blocker: live-GIS`
+
+Sandbox-proven: `test/parcelDisplaySourcesForView.test.js` (8). **Still needs live county hosts** (egress-blocked here).
+**Steps** (signed-in Chrome, planyr.io; read the served chunk hash in the same observation; clear the resource-timing buffer before each zoom):
+1. Map, centre 34.20 / -84.83, press Select parcels. **Expect:** Bartow outlines draw; no "Statewide parcel outlines are slow" banner.
+2. Zoom out one step, then in one step. **Expect:** ≤ ~12 ArcGIS `/query` requests per step (only Bartow and Fulton services, 6 tiles each), none to Texas/Colorado/Alaska/California hosts; outlines redraw fully; imagery tiles stay loaded (no grey squares).
+3. Attribution strip. **Expect:** no Harris County / Texas credits.
+4. Pan east across Augusta (GA/SC line). **Expect:** only GA and SC sources requested. Then a Houston view. **Expect:** Harris + TxGIO only; a Denver view: Colorado only.
+5. Turn Select parcels off. **Expect:** all outline layers removed.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1976336.
 ### V1400816 — B1964512: clicking Chambers lots along Gordon Speer Chambers Pkwy adds exactly the lot under the cursor `Blocker: live-GIS`
 
 Sandbox-proven: `test/parcelIdentity.test.js` (9; the pre-fix rule collides on the real 20887/15328 lots). **Still needs the live Chambers CAD service** (egress-blocked here).
