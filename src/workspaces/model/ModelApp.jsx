@@ -86,9 +86,11 @@ import { addSheetFromCsvText, sheetToCsv } from "./lib/csvIO.js";
 // `onProjectsChanged` shape exactly) so a live edit made in the still-mounted Site Planner tab
 // recalculates a formula here without a reload. `fetchAllComps` is the same async/Supabase-only
 // read CompsPanel.jsx uses — there is no synchronous comps cache anywhere in this repo.
-import { buildProjectNames, openConceptName } from "./lib/projectRefs.js";
-import { onSiteModelChanged } from "../site-planner/lib/storage.js";
+import { buildProjectNames, openConceptName, openPlanId } from "./lib/projectRefs.js";
+import { onSiteModelChanged, isCloudActive } from "../site-planner/lib/storage.js";
 import { onCompsChanged } from "../../shared/comps/lib/compsChanged.js";
+import { supabase } from "../site-planner/lib/supabase.js";
+import { fetchPlanRowsForModel, planRowsLoading, planRowsReady, planRowsError, rowsSignature } from "./lib/planRowsSource.js";
 import { fetchProjectNameComps } from "./lib/projectCompsFetch.js";
 
 const CLOUD_PUSH_DEBOUNCE_MS = 800;
@@ -226,7 +228,56 @@ export default function ModelApp({
     });
     return () => { off(); clearTimeout(siteTickTimer.current); };
   }, []);
-  const projectNames = useMemo(() => buildProjectNames(projectId, { comps }), [projectId, comps, siteTick]);
+  /* B1953797 (H2) — a SIGNED-IN plan's geometry is element ROWS, not the local mirror (which is a slim
+   * header on any device that has not opened the plan). Fetch the open plan's rows so Site.Acres /
+   * Plan.BuildingN.SF read the same source of truth the Map and Dashboard do, with an explicit
+   * loading / error state (projectRefs.js turns those into a labelled #N/A — never #REF! or a stale
+   * number for "not fetched"). Refreshes on: plan/project change · a site-content notification
+   * (`siteTick` — the Site Planner's own commits, remote rows applied there included) · the tab
+   * regaining focus · a realtime change on the plan's element rows (best effort — the focus/tick paths
+   * are the floor). Signed out: `null` → the local mirror stays the one authority, as before. */
+  const [planRows, setPlanRows] = useState(null);
+  const [rowsTick, setRowsTick] = useState(0);
+  const cloudOn = isCloudActive();
+  const openPlan = useMemo(() => (cloudOn ? openPlanId(projectId) : null), [cloudOn, projectId, siteTick, _projectsTick]);
+  useEffect(() => {
+    if (!openPlan) { setPlanRows(null); return undefined; }
+    let live = true;
+    // First look at a plan (or a different plan) is LOADING; a refresh of the same plan keeps what it
+    // has (stale-while-revalidate) so the sheet does not flicker to #N/A on every commit.
+    setPlanRows((cur) => (cur && cur.planId === openPlan ? cur : planRowsLoading(openPlan)));
+    const t = window.setTimeout(async () => {
+      const r = await fetchPlanRowsForModel(openPlan);
+      if (!live) return;
+      setPlanRows((cur) => {
+        if (!r.ok) return planRowsError(openPlan, r.error);
+        if (cur && cur.planId === openPlan && cur.status === "ready" && rowsSignature(cur.rows) === rowsSignature(r.rows)) return cur;
+        return planRowsReady(openPlan, r.rows);
+      });
+    }, 250);
+    return () => { live = false; window.clearTimeout(t); };
+  }, [openPlan, siteTick, rowsTick]);
+  useEffect(() => {
+    if (!openPlan) return undefined;
+    const bump = () => setRowsTick((n) => n + 1);
+    const onVis = () => { if (document.visibilityState === "visible") bump(); };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", bump);
+    let ch = null, debounce = 0;
+    try {
+      if (supabase) {
+        ch = supabase.channel(`model-plan-rows:${openPlan}`)
+          .on("postgres_changes", { event: "*", schema: "public", table: "site_elements", filter: "site_id=eq." + openPlan },
+            () => { clearTimeout(debounce); debounce = window.setTimeout(bump, 800); })
+          .subscribe();
+      }
+    } catch (_) { /* realtime is a bonus: focus + siteTick keep the numbers current without it */ }
+    return () => {
+      document.removeEventListener("visibilitychange", onVis); window.removeEventListener("focus", bump); clearTimeout(debounce);
+      try { if (ch && supabase) supabase.removeChannel(ch); } catch (_) {}
+    };
+  }, [openPlan]);
+  const projectNames = useMemo(() => buildProjectNames(projectId, { comps, planRows }), [projectId, comps, siteTick, _projectsTick, planRows]);
   // spreadsheet-concept-crumb (NEW-1) — the header dropped the concept/scheme segment the Site tab
   // shows (Map / Project / Concept ▾), so once a project held more than one concept there was no
   // way to tell, from this tab alone, which scheme's geometry Site.*/Plan.* were quoting — exactly

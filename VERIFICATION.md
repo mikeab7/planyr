@@ -11125,6 +11125,23 @@ records its own live verify" mechanism) or a future sandbox with different egres
 
 *(minted **V1351376** alongside **B1895376**; `Cadence: once`)*
 
+### V1390100 — B1953797: two tabs/devices changing DIFFERENT plan settings keep BOTH; an idle open tab adopts the other's change; Model's Site.Acres / Plan.Building1.SF read the real plan on a device that never opened it `Blocker: auth`
+
+**Why this needs a real pass.** Concurrency / multi-writer is a mandatory LIVE-VERIFY class, and the sandbox's proxy CORS-blocks the Supabase sign-in handshake, so the real two-browser round trip (and the realtime channel on `site_elements`) cannot be driven here. **What sandbox verification DID prove, headless and red-first:** `test/headerTwoWriter.test.js` (two module instances of `cloudSync.js` = two tabs, one CAS-faithful in-memory `sites` table) reproduces the loss on untouched `origin/main` (`expected 'harris' to be 'waller'`) and passes after; `test/headerLocalMirror.test.js` proves the same loss/fix for two tabs sharing one local mirror; `test/modelPlanRows.test.js` proves Model reads rows (slim header + rows → 40 ac, not `#REF!`; loading / error → labelled `#N/A`, never zero). **NOT verified here:** the React adoption path (`applyAdoptedHeader`), the focus/visible/45 s refresh timers, the realtime channel, and the Model fetch against the real PostgREST + RLS.
+
+**Use a throwaway DUPLICATE of a real plan — never a real plan (owner constraint #7) — and say exactly what was touched. Read the served chunk hash in the SAME observation as each result.**
+1. Sign in on Browser A and Browser B (two profiles, or two devices). Open the SAME throwaway plan on both. **Expect:** both show identical Settings (note the Flood-mitigation jurisdiction and the setback).
+2. On A: change Flood-mitigation **jurisdiction** to a different value. Wait ~5 s (saved). On B (do NOT reload; leave it idle and untouched): switch to another window and back, or wait up to ~45 s with the tab visible. **Expect:** B's jurisdiction changes to A's value by itself and a brief "Updated from another session: this plan's settings changed." notice appears; nothing on B's canvas moved.
+3. Repeat the setup (both tabs in sync). On A: change the jurisdiction. On B, **immediately** (before B has refreshed) change the **setback**. Reload BOTH. **Expect:** on both, the jurisdiction is A's value AND the setback is B's value — neither edit was lost.
+4. Same-leaf clash: both tabs at the same start; A sets the setback to 40, B sets it to 30, both within a few seconds. **Expect:** the LAST writer's value wins on both after reload (no error banner); `client_errors` has a `cloud-conflict-healed` row whose `conflicts` includes `settings.setback` (or it merged cleanly with no conflict if the writes did not overlap).
+5. Two tabs of ONE browser on the same signed-in plan: change a different setting in each, in turn. **Expect:** after reload both changes are present.
+6. Model, second device: on a device/profile that has NEVER opened the plan (or after clearing site data), sign in and go straight to Model on that project, with `=Site.Acres` and `=Plan.Building1.SF` in cells. **Expect:** briefly `#N/A` (hover/trace marker reads "loading from your account…"), then the plan's real acreage and building 1's footprint — never `#REF!` "no parcels drawn yet" and never 0 for a plan that has parcels.
+7. On the device from step 6, edit the plan on the OTHER device (move/resize a building, add a parcel), then focus the Model tab. **Expect:** the two cells update to the new numbers within a few seconds without a reload.
+8. With devtools offline (or the network blocked to `rest/v1/site_elements`), reload Model on a plan that has a stale local copy. **Expect:** the cells read `#N/A` (trace marker: "couldn't load from your account"), NOT last week's numbers.
+- **Stopping rule:** closes when steps 2, 3, 6 and 7 all read as expected on `planyr.io` (chunk hash noted), or a specific residual is filed as a recurrence against B1953797, per STANDING RULE #2. Step 4's clash wording and step 8 are informational unless they show a lost edit / a stale number.
+
+*(minted **V1390100** alongside **B1953797**; `Cadence: once`)*
+
 ## ✅ Verified / ❌ Failed — history
 
 > Passed/failed items are archived to **`VERIFICATION-DONE.md`** to keep this file fast.
