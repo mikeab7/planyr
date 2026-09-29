@@ -1482,3 +1482,9 @@ B1368; `onSheet` + below the content → `focusEndOfSheet`, B1550976) instead of
 INTO IT"*, is separately **flaky on base and head alike** (the harness's own typed markers lose
 characters — `FIRSTSECOND` came back as `FRSTSECOND`/`FSTSECOND`); it appears and disappears across
 consecutive runs of the SAME build, so diff identities, never counts. Carried by **B1597762**.
+
+## Touch placement on WebKit (B1960480, 2026-09-29)
+
+- On a touch press the blank-paper handlers run on the COMPAT mouse events, which no longer say who made them — `lastPointerTypeRef` (window `pointerdown` capture) carries the pointer type. Touch arms focus the editor synchronously (iOS raises the keyboard only for a focus inside the tap).
+- **Moving the selection inside `beforeinput` does NOT move where WebKit then inserts** (measured: text went into the OLD box). So a data-carrying `insertText` is cancelled and re-inserted through `commitPendingPlace(text)`; only the touch KEYDOWN path and IME composition are left native.
+- `ui-audit/verify-notes-touch-place.mjs` is the WebKit touch harness (`npx playwright install webkit`). `verify-notes-pending-caret` / `verify-notes-free-placement` predate boxes-only (a single click no longer arms) and fail identically on untouched `main` (29 / 36 ⛔) — stale, not a regression signal; `verify-notes-in-sheet-placement` is the live desktop check (needs `PW_CHROME` pointing at an installed chromium).
