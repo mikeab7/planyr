@@ -110,6 +110,45 @@ function schedulesForOwner(projects, ownerKey) {
   return scheduleList(projects).filter((p) => ownerKeyOf(p) === ownerKey);
 }
 
+// ── Display label ────────────────────────────────────────────────────────────────────────────────
+//
+// NEW-1 (owner report 2026-09-16, direct follow-on to B1696640/B1696641/PR 1741) — a notice that
+// names a schedule by its OWN name is still ambiguous even with a row ID attached, because two
+// different Planyr projects can each hold a schedule named "Master Schedule" (the owner's live
+// account does exactly this). "<Project> / <Schedule>" is the one label that disambiguates both
+// axes at once — which project, and which of that project's schedules. Never degrades to a bare
+// schedule name: an org-owned schedule prints the fixed ORG_OWNER_LABEL, and a site-owned schedule
+// whose cached `linkedSiteName` hasn't caught up yet still gets a left half that can't be mistaken
+// for a real project's name, rather than silently falling back to the ambiguous case this exists
+// to close.
+//
+// ⛔ MOVED HERE FROM public/sequence/index.html (B1939344, 2026-09-28). It used to live OUTSIDE the
+// SCHEDULE-OWNERSHIP sync block with a comment saying it had "no reason to be duplicated" in the
+// canonical module, because only the Scheduler's own in-page notices needed it. That judgement
+// broke the moment a SECOND consumer needed the identical label: the Dashboard's Schedule health /
+// Needs Attention / "Since you were last here" cards (scheduleHealth.js / needsAttentionList.js /
+// sinceLastHereFeed.js) rendered a bare schedule name, and the owner's own account has four
+// schedules all named "Master Schedule" under four different projects — indistinguishable on the
+// Dashboard even though the Reports tab (public/sequence/index.html) has disambiguated them since
+// PR 1849. A second hand-copy of this exact join is precisely the "one-answer function"
+// duplication docs/DATA.md forbids, so it now ships to both consumers from the one place `ownerOf`/
+// `ORG_OWNER_LABEL` already live.
+
+// The two halves crossScheduleLabel joins, exposed separately for anything that needs to SORT or
+// GROUP on the owner and the schedule name independently (e.g. MasterView's "Group by project"
+// ordering) without re-parsing the joined "<owner> / <name>" string — a project or schedule name
+// that itself contains " / " would otherwise make that parse ambiguous.
+function scheduleLabelParts(schedule) {
+  const name = (schedule && schedule.name) || "Untitled schedule";
+  const owner = ownerOf(schedule);
+  const ownerLabel = owner.kind === OWNER_KIND_ORG ? ORG_OWNER_LABEL : (owner.siteName || "an unnamed project");
+  return { ownerLabel, name };
+}
+function crossScheduleLabel(schedule) {
+  const { ownerLabel, name } = scheduleLabelParts(schedule);
+  return `${ownerLabel} / ${name}`;
+}
+
 // Split every schedule into the three groups the Schedule tab's list renders, in the order it
 // renders them: the routed project's own schedules first, then the organization's, then everything
 // belonging to some OTHER project. `siteId` null (no routed project) leaves `here` empty and puts
@@ -292,6 +331,7 @@ export {
   ORG_OWNER_KEY, ORG_OWNER_LABEL, OWNER_KIND_SITE, OWNER_KIND_ORG,
   ownerOf, ownerKeyOf, isOrgOwned, isSiteOwned,
   scheduleList, schedulesForOwner, partitionSchedules,
+  scheduleLabelParts, crossScheduleLabel,
   migrateScheduleOwnership, pruneOrphanScheduleRefs, pruneScheduleRefs, normalizeScheduleOwnership,
   normalizeName, nameCollision, validateNewSchedule, suggestScheduleName,
   describeScheduleDelete,

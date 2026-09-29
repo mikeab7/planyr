@@ -166,7 +166,16 @@ export function GoingQuietCard({ rows, onOpenProject }) {
   );
 }
 
-/* ── Schedule health ──────────────────────────────────────────────────────────────────────── */
+/* ── Schedule health ──────────────────────────────────────────────────────────────────────── *
+ * B1939344 (NEW-1) — `p.name` is now the qualified "<Project> / <Schedule>" label
+ * (scheduleHealth.js), roughly double the length of a bare schedule name. Layout decision: keep
+ * the existing single-line ellipsis truncation (this row already had it, and the row's flex
+ * layout — name `flex:1, minWidth:0` beside a fixed-width overdue count — already holds at any
+ * card width without reflowing or crowding the count) and add a native `title` tooltip carrying
+ * the FULL label, so a truncated name is still reachable on hover/long-press rather than lost. A
+ * second line or a "project above schedule" stack was considered and rejected: this card can list
+ * several schedules, and doubling every row's height would cost more vertical space than a single
+ * long name is worth (PANEL-BREVITY). */
 export function ScheduleHealthCard({ rows, onOpenSchedule }) {
   if (!rows.length) return <div style={EMPTY}>No schedules yet.</div>;
   return (
@@ -182,7 +191,7 @@ export function ScheduleHealthCard({ rows, onOpenSchedule }) {
         return (
           <div key={p.id ?? p.name}>
             <ClickableRow onClick={clickable ? () => onOpenSchedule?.(p) : undefined}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+              <span title={p.name} style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
               <span style={MUTED}>{p.overdue > 0 ? `${p.overdue} overdue` : "on track"}</span>
             </ClickableRow>
             <div style={{ display: "flex", height: 6, borderRadius: RADIUS.pill, overflow: "hidden" }}>

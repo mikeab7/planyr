@@ -15,6 +15,7 @@ import {
   ORG_OWNER_KEY, OWNER_KIND_SITE, OWNER_KIND_ORG,
   ownerOf, ownerKeyOf, isOrgOwned, isSiteOwned,
   schedulesForOwner, partitionSchedules,
+  scheduleLabelParts, crossScheduleLabel,
   migrateScheduleOwnership, pruneOrphanScheduleRefs, pruneScheduleRefs, normalizeScheduleOwnership,
   nameCollision, validateNewSchedule, suggestScheduleName, describeScheduleDelete,
 } from "../src/shared/schedule/scheduleOwnership.js";
@@ -100,6 +101,72 @@ describe("invariant 4 — the unowned state is unrepresentable", () => {
 
   it("an explicit org owner wins over a stale link left by an older build", () => {
     expect(ownerOf({ ownerKind: OWNER_KIND_ORG, linkedSiteId: GOOSE }).kind).toBe(OWNER_KIND_ORG);
+  });
+});
+
+// B1939344 (NEW-1) — crossScheduleLabel/scheduleLabelParts moved INTO this module from
+// public/sequence/index.html so the Dashboard's Schedule health / Needs Attention / "Since you
+// were last here" cards can share the exact same "<Project> / <Schedule>" label the Reports tab
+// has used since PR #1849, instead of a second hand-copy. This is the first time these functions
+// are exercised by a plain `vitest` unit test rather than only a source-pattern check against the
+// scheduler HTML page (test/schedulerEngine.test.js, which tests a separate hand-maintained mirror,
+// ui-audit/stress/scheduler-engine.mjs).
+describe("crossScheduleLabel / scheduleLabelParts — the qualified '<Project> / <Schedule>' label", () => {
+  it("RED-PROOF (fails on unmodified main): two schedules named identically under different projects must not produce the same string", () => {
+    const a = { name: "Master Schedule", linkedSiteId: GOOSE, linkedSiteName: "Goose Creek" };
+    const b = { name: "Master Schedule", linkedSiteId: GRAND, linkedSiteName: "Grand Port" };
+    expect(crossScheduleLabel(a)).toBe("Goose Creek / Master Schedule");
+    expect(crossScheduleLabel(b)).toBe("Grand Port / Master Schedule");
+    expect(crossScheduleLabel(a)).not.toBe(crossScheduleLabel(b));
+  });
+
+  it("the owner's real four same-named 'Master Schedule' rows (ids 1/2/3/6) each get their own distinct label", () => {
+    const schedules = [
+      { id: 1, name: "Master Schedule", linkedSiteId: GOOSE, linkedSiteName: "Goose Creek" },
+      { id: 2, name: "Master Schedule", linkedSiteId: GRAND, linkedSiteName: "Grand Port" },
+      { id: 3, name: "Master Schedule", linkedSiteId: SOUTH, linkedSiteName: "8 South" },
+      { id: 6, name: "Master Schedule", linkedSiteId: PAPPA, linkedSiteName: "Pappadoupolos" },
+    ];
+    const labels = schedules.map(crossScheduleLabel);
+    expect(new Set(labels).size).toBe(4);
+    expect(labels).toEqual([
+      "Goose Creek / Master Schedule",
+      "Grand Port / Master Schedule",
+      "8 South / Master Schedule",
+      "Pappadoupolos / Master Schedule",
+    ]);
+  });
+
+  it("an org-owned schedule always prints the fixed 'Organization' label, never a bare name", () => {
+    expect(crossScheduleLabel({ name: "Pursuits", ownerKind: OWNER_KIND_ORG })).toBe("Organization / Pursuits");
+    expect(crossScheduleLabel({ name: "Operations", ownerKind: OWNER_KIND_ORG })).toBe("Organization / Operations");
+  });
+
+  it("a site-owned schedule with no cached linkedSiteName yet falls back to a left half that can't be mistaken for a real project", () => {
+    expect(crossScheduleLabel({ name: "Master Schedule", linkedSiteId: GOOSE, linkedSiteName: null }))
+      .toBe("an unnamed project / Master Schedule");
+    expect(crossScheduleLabel({ name: "Master Schedule", linkedSiteId: GOOSE, linkedSiteName: "" }))
+      .toBe("an unnamed project / Master Schedule");
+  });
+
+  it("a nameless schedule keeps the existing 'Untitled schedule' fallback, qualified by its owner", () => {
+    expect(crossScheduleLabel({ linkedSiteId: GOOSE, linkedSiteName: "Goose Creek" })).toBe("Goose Creek / Untitled schedule");
+    expect(crossScheduleLabel({ name: "", ownerKind: OWNER_KIND_ORG })).toBe("Organization / Untitled schedule");
+  });
+
+  it("never throws on junk input, and still names something", () => {
+    for (const junk of [null, undefined, 0, "x", []]) {
+      expect(() => crossScheduleLabel(junk)).not.toThrow();
+      expect(crossScheduleLabel(junk)).toContain("Untitled schedule");
+    }
+  });
+
+  it("scheduleLabelParts exposes the two halves crossScheduleLabel joins with ' / ', for sort/group use", () => {
+    const schedule = { name: "Master Schedule", linkedSiteId: GOOSE, linkedSiteName: "Goose Creek" };
+    const { ownerLabel, name } = scheduleLabelParts(schedule);
+    expect(ownerLabel).toBe("Goose Creek");
+    expect(name).toBe("Master Schedule");
+    expect(crossScheduleLabel(schedule)).toBe(`${ownerLabel} / ${name}`);
   });
 });
 

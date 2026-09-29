@@ -32,6 +32,18 @@ describe("scheduler inline schedule-ownership module", () => {
     expect(body).not.toMatch(/^\s*import\s/m);
   });
 
+  // B1939344 — crossScheduleLabel/scheduleLabelParts moved INTO this sync block from a standalone
+  // copy further down public/sequence/index.html; this pins them staying inside the markers so a
+  // future edit can't silently move them back out (which would un-guard them from the drift check
+  // above — a general full-text diff, but only for whatever the markers actually enclose).
+  it("crossScheduleLabel/scheduleLabelParts moved INTO the sync block and are still exported by the canonical module", () => {
+    const src = readFileSync(resolve(ROOT, "src/shared/schedule/scheduleOwnership.js"), "utf8");
+    const body = ownershipBody(src, "source module");
+    expect(body).toMatch(/function scheduleLabelParts\(schedule\)/);
+    expect(body).toMatch(/function crossScheduleLabel\(schedule\)/);
+    expect(src).toMatch(/export \{[\s\S]*scheduleLabelParts, crossScheduleLabel[\s\S]*\};/);
+  });
+
   it("the embedded app actually USES the inlined module on every load path", () => {
     const html = readFileSync(resolve(ROOT, "public/sequence/index.html"), "utf8");
     // All four paths that turn a stored/imported/seeded blob into live state — a schedule that

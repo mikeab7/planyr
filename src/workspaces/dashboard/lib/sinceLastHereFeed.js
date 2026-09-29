@@ -93,6 +93,7 @@
 
 import { compHeadlineRate, formatRateValue, DEFAULT_LEASE_PERIOD, countyNameWords } from "./compsCardModel.js";
 import { shortenDisplayName } from "../../../shared/projects/projectModel.js";
+import { crossScheduleLabel } from "../../../shared/schedule/scheduleOwnership.js";
 
 // B1407824 — how far a name in this feed's own sentence/subline can run before it's shortened
 // (shortenDisplayName's contract: a name at or under this stays untouched; a longer one is cut
@@ -247,7 +248,11 @@ function buildPlanEvents({ sites, buildingCountBySite, sqftBySite, prevPlanSnaps
  * ⛔ Deliberately does NOT also report a task's `.health` flipping to `"green"` as "completed" —
  * see this module's header (FEED-2, 2026-09-08 review): that field is a user-set status label with
  * no completion timestamp behind it, not a recorded event, and reporting it as one can announce a
- * batch of tasks "closed" when nobody finished anything. */
+ * batch of tasks "closed" when nobody finished anything.
+ *
+ * B1939344 (NEW-1) — `projectName` (used in the row's subline) is the QUALIFIED
+ * "<Project> / <Schedule>" label (`crossScheduleLabel`), not the bare schedule name — see
+ * scheduleHealth.js's own header for why a bare name is ambiguous on this account. */
 function buildScheduleEvents({ scheduleProjects, prevTaskSnapshot, windowStartMs, approxTs, tsLatest }) {
   const rows = [];
   const nextTasks = {};
@@ -258,7 +263,7 @@ function buildScheduleEvents({ scheduleProjects, prevTaskSnapshot, windowStartMs
     const leaves = leafTasks(tasks);
     const prevProject = (prevTaskSnapshot && prevTaskSnapshot[p.id]) || {};
     const nextProject = {};
-    const projectName = (p.name && String(p.name).trim()) || "Untitled schedule";
+    const projectName = crossScheduleLabel(p);
 
     for (const t of leaves) {
       if (!t || t.id == null) continue;

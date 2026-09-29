@@ -50,36 +50,61 @@ describe("summarizeProjectHealth", () => {
 });
 
 describe("summarizeScheduleHealth", () => {
+  // B1939344 (NEW-1) — `name` is the qualified "<Project> / <Schedule>" label (crossScheduleLabel),
+  // not the bare schedule name: project 1 is site-owned (a name + a linkedSiteName), project 2 is
+  // org-owned (no linkedSiteId at all).
   const projectsMap = {
-    "1": { id: 1, name: "Goose Creek", linkedSiteId: "smqfy48tlk9j", tasks: [{ id: 1, health: "gray", end: daysAgo(5) }] },
+    "1": { id: 1, name: "Master Schedule", linkedSiteId: "smqfy48tlk9j", linkedSiteName: "Goose Creek", tasks: [{ id: 1, health: "gray", end: daysAgo(5) }] },
     "2": { id: 2, name: "Healthy Project", linkedSiteId: null, tasks: [{ id: 1, health: "green", end: daysAgo(5) }] },
     "3": { id: 3, name: "Empty Schedule", tasks: [] },
   };
 
   it("reads the projects MAP (keyed by string id), not an array", () => {
     const out = summarizeScheduleHealth(projectsMap, NOW);
-    expect(out.map((p) => p.name).sort()).toEqual(["Goose Creek", "Healthy Project"]);
+    expect(out.map((p) => p.name).sort()).toEqual(["Goose Creek / Master Schedule", "Organization / Healthy Project"]);
   });
 
   it("drops a schedule with zero leaf tasks entirely (an empty project is not a health row)", () => {
     const out = summarizeScheduleHealth(projectsMap, NOW);
-    expect(out.find((p) => p.name === "Empty Schedule")).toBeUndefined();
+    expect(out.find((p) => p.id === 3)).toBeUndefined();
   });
 
   it("carries linkedSiteId through for the Site Planner cross-link, null when never linked", () => {
     const out = summarizeScheduleHealth(projectsMap, NOW);
-    expect(out.find((p) => p.name === "Goose Creek").linkedSiteId).toBe("smqfy48tlk9j");
-    expect(out.find((p) => p.name === "Healthy Project").linkedSiteId).toBe(null);
+    expect(out.find((p) => p.id === 1).linkedSiteId).toBe("smqfy48tlk9j");
+    expect(out.find((p) => p.id === 2).linkedSiteId).toBe(null);
   });
 
   it("sorts the worst overdue-share schedule first", () => {
     const out = summarizeScheduleHealth(projectsMap, NOW);
-    expect(out[0].name).toBe("Goose Creek"); // 100% overdue vs. 0%
+    expect(out[0].id).toBe(1); // 100% overdue vs. 0%
   });
 
-  it("an unnamed project falls back to a readable placeholder, never a blank title", () => {
+  it("names each row with the qualified '<Project> / <Schedule>' label, never a bare (possibly ambiguous) name — B1939344", () => {
+    const out = summarizeScheduleHealth(projectsMap, NOW);
+    expect(out.find((p) => p.id === 1).name).toBe("Goose Creek / Master Schedule");
+    expect(out.find((p) => p.id === 2).name).toBe("Organization / Healthy Project");
+  });
+
+  it("RED-PROOF (fails on unmodified main): two schedules named identically under different projects come back as distinct rows — B1939344", () => {
+    const sameNamed = {
+      "1": { id: 1, name: "Master Schedule", linkedSiteId: "g1", linkedSiteName: "Goose Creek", tasks: [{ id: 1, health: "gray", end: daysAgo(5) }] },
+      "2": { id: 2, name: "Master Schedule", linkedSiteId: "g2", linkedSiteName: "Grand Port", tasks: [{ id: 1, health: "gray", end: daysAgo(5) }] },
+    };
+    const out = summarizeScheduleHealth(sameNamed, NOW);
+    const names = out.map((p) => p.name).sort();
+    expect(new Set(names).size).toBe(2);
+    expect(names).toEqual(["Goose Creek / Master Schedule", "Grand Port / Master Schedule"]);
+  });
+
+  it("an unnamed, org-owned project falls back to a readable placeholder, never a blank title", () => {
     const out = summarizeScheduleHealth({ "1": { tasks: [{ id: 1, health: "gray", end: daysAgo(1) }] } }, NOW);
-    expect(out[0].name).toBe("Untitled schedule");
+    expect(out[0].name).toBe("Organization / Untitled schedule");
+  });
+
+  it("an unnamed, site-owned project qualifies 'Untitled schedule' with the real project name", () => {
+    const out = summarizeScheduleHealth({ "1": { linkedSiteId: "g1", linkedSiteName: "Goose Creek", tasks: [{ id: 1, health: "gray", end: daysAgo(1) }] } }, NOW);
+    expect(out[0].name).toBe("Goose Creek / Untitled schedule");
   });
 
   it("handles a missing/malformed projects map without throwing", () => {

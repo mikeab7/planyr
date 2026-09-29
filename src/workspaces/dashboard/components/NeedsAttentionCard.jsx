@@ -55,12 +55,20 @@ function AttentionBar({ fraction }) {
   );
 }
 
+// B1939344 (NEW-1) — `row.projectName` is now the qualified "<Project> / <Schedule>" label
+// (needsAttentionList.js), roughly double a bare schedule name's length. Layout decision: the
+// sub-line already truncates the WHOLE composed string with a single-line ellipsis (name · due ·
+// waiting), so the row's height and the day-count/bar layout beside it are untouched — only the
+// tooltip is new, carrying the full composed sub-line so a truncated one is still reachable on
+// hover/long-press. A per-row title (rather than truncating each segment separately) keeps this a
+// one-line change and matches ScheduleHealthCard's own choice for the identical trade-off.
 function AttentionRow({ row, maxDays, showBar, onOpen }) {
   const dueLabel = row.dueDate ? formatShortDate(row.dueDate) : null;
   // B1411504 — a bulk-stamped row's `days` is a floor, not an exact count (see
   // needsAttentionList.js's own header); the "+" says so without a sentence, and the tooltip
   // carries the one plain-English fact behind it for anyone who hovers.
   const stampLabel = row.bulkStamped ? formatShortDate(row.stampedAt) : null;
+  const sublineText = `${row.projectName} · ${dueLabel ? `due ${dueLabel}` : "no due date"} · ${row.waiting} waiting`;
   return (
     <div
       onClick={() => onOpen?.(row)}
@@ -76,8 +84,8 @@ function AttentionRow({ row, maxDays, showBar, onOpen }) {
       </div>
       <div style={{ minWidth: 0, flex: 1 }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.taskName}</div>
-        <div style={{ ...MUTED, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {row.projectName} · {dueLabel ? `due ${dueLabel}` : "no due date"} · {row.waiting} waiting
+        <div title={sublineText} style={{ ...MUTED, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {sublineText}
         </div>
       </div>
       {showBar && <AttentionBar fraction={attentionBarFraction(row.days, maxDays)} />}
@@ -141,7 +149,7 @@ export function NeedsAttentionCard({ rows, onOpenTask }) {
         </div>
       )}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border-default)" }}>
-        <div style={{ ...MUTED, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <div title={totals.map((t) => `${t.projectName} ${t.count}`).join(" · ")} style={{ ...MUTED, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {totals.map((t) => `${t.projectName} ${t.count}`).join(" · ")}
         </div>
         <Button size="sm" variant="ghost" onClick={() => setShowAll(true)}>Show all {rows.length}</Button>

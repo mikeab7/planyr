@@ -17,7 +17,14 @@
  * "At-risk" (due soon) is this card's OWN heuristic — not read from any configured rule — so it
  * is deliberately named "at-risk" rather than "yellow"/"due soon", the words the grid itself
  * uses for its (possibly differently-configured) warning state.
+ *
+ * B1939344 (NEW-1) — `name` is the QUALIFIED "<Project> / <Schedule>" label (`crossScheduleLabel`,
+ * `src/shared/schedule/scheduleOwnership.js`), not the bare schedule name: two different projects
+ * can each hold a schedule named "Master Schedule" (the owner's own account has four), which a bare
+ * name can't tell apart. This is the SAME label the Reports tab (public/sequence/index.html) has
+ * used since PR 1849 — one shared helper, not a second hand-copy.
  */
+import { crossScheduleLabel } from "../../../shared/schedule/scheduleOwnership.js";
 
 const MS_PER_DAY = 86400000;
 const AT_RISK_WINDOW_DAYS = 7;
@@ -59,7 +66,7 @@ export function summarizeScheduleHealth(projectsMap, nowMs = Date.now()) {
   return projects
     .map((p) => ({
       id: p?.id ?? null,
-      name: (p && typeof p.name === "string" && p.name.trim()) || "Untitled schedule",
+      name: crossScheduleLabel(p),
       linkedSiteId: p?.linkedSiteId || null,
       ...summarizeProjectHealth(p, nowMs),
     }))
