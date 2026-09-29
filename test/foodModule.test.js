@@ -1329,7 +1329,7 @@ describe("selected-place highlight — unmistakable pin, tied panel, centred pan
   it("FoodApp computes ONE selectedKey and hands the identical string to both FoodMap and VisitList", () => {
     const app = src("FoodApp.jsx");
     expect(app).toMatch(/const selectedKey = selected\?\.kind === "place" \? `place:\$\{selected\.place\.id\}`/);
-    expect(app).toMatch(/: selected\?\.kind === "manualPin" \? `pin:\$\{selected\.pin\.name\}`/);
+    expect(app).toMatch(/: selected\?\.kind === "manualPin" \? manualPinKey\(selected\.pin\.name, selected\.pin\.lat, selected\.pin\.lon\)/); // B1953796: one key incl. lat/lon
     const matches = [...app.matchAll(/selectedKey=\{selectedKey\}/g)];
     expect(matches.length).toBe(2); // <FoodMap> and <VisitList>, both fed the same value
   });
@@ -1347,7 +1347,7 @@ describe("selected-place highlight — unmistakable pin, tied panel, centred pan
   it("every addPin call carries a stable key matching selectedKey's own scheme — his places, the reference snapshot, and overpass results alike", () => {
     const map = src("components/FoodMap.jsx");
     expect(map).toMatch(/key: `place:\$\{p\.id\}`/);
-    expect(map).toMatch(/key: `pin:\$\{pin\.name\}`/);
+    expect(map).toMatch(/key: manualPinKey\(pin\.name, pin\.lat, pin\.lon\)/); // B1953796
     // The reference-snapshot AND overpass passes both key by place id too (loggedIds already
     // excludes anything drawn above, so there's no double-draw to worry about).
     const refKeys = [...map.matchAll(/key: `place:\$\{p\.id\}`/g)];

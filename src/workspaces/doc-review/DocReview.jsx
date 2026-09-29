@@ -70,7 +70,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 // exactly like Notes' page/Library's file (docs/DATA.md invariant §14) — never a sentinel
 // `projectId`. Omitted-when-false is NOT this field's convention (unlike Notes' `orgScope`,
 // this one rides through `buildSnapshot`'s plain object spread every time, so it stays explicit).
-const newMeta = () => ({ title: "", projectId: null, project: "", discipline: "", item: "", revision: "", docDate: today(), orgScope: false });
+const newMeta = () => ({ title: "", projectId: null, project: "", discipline: "", item: "", revision: "", docDate: today(), orgScope: false, folderId: null, sourceFile: "" });
 
 const TOOLS = [
   { id: "select",    label: "Select",    hint: "Click a markup to select; drag to move; double-click a text note or callout to edit; Delete removes it." },
@@ -952,6 +952,8 @@ export default function DocReview({
     // stored row, whatever it held before.
     project: meta.project, projectId: meta.projectId, orgScope: meta.orgScope === true, discipline: meta.discipline,
     item: meta.item, revision: meta.revision, docDate: meta.docDate,
+    // B1953796 - folderId / sourceFile are written by fileNewReview and must ride every autosave.
+    ...(meta.folderId ? { folderId: meta.folderId } : {}), ...(meta.sourceFile ? { sourceFile: meta.sourceFile } : {}),
     sources: isStoredSource(source) ? [{ srcId: source.srcId, name: source.name, size: source.size || 0, storageKey: source.storageKey || null, driveKey: source.driveKey || null, oversize: !!source.oversize }] : [],
     single: { srcId: source?.srcId || null, fileName, numPages, page, markups, calByPage, calInfo },
   }), [reviewId, meta, source, fileName, numPages, page, markups, calByPage, calInfo]);
@@ -1091,7 +1093,7 @@ export default function DocReview({
     if (!(src && src.name && !isPdfName(src.name))) {
       currentUid().then((uid) => recordOpen(uid, { id: rec.id, projectId: openProjectId })).catch(() => {});
     }
-    setMeta({ title: rec.title || "", projectId: openProjectId, project: rec.project || "", orgScope: rec.orgScope === true, discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "" });
+    setMeta({ title: rec.title || "", projectId: openProjectId, project: rec.project || "", orgScope: rec.orgScope === true, discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "", folderId: rec.folderId || null, sourceFile: rec.sourceFile || "" });
     if (openProjectId) onNavigate?.({ projectId: openProjectId }); // reflect the open file's project in the URL + breadcrumb (Work Item A)
     setSource(src ? { srcId: src.srcId, name: src.name, size: src.size || 0, storageKey: src.storageKey || null, driveKey: src.driveKey || null, oversize: !!src.oversize } : null);
     setMarkups(sanitizeMarkups(s.markups)); setCalByPage(s.calByPage || {}); setCalInfo(s.calInfo || {}); // sanitize: a corrupted/partial saved review can't crash the overlay

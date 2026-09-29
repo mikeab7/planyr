@@ -175,6 +175,21 @@ Sandbox-proven (logged out, seeded plan): `e2e/road-xsection-paint-order.spec.js
 3. Export a PDF of the frame containing the road. **Expect:** median and striping appear on the sheet.
 4. Read the served chunk hash in the same observation as each result.
 - **Stopping rule:** closes on a dated pass of 1–3 on both plans, or a failed step re-opens B1958144 with a `Recurrence:` line.
+### V1390099 — B1953796: Doc Review autosave keeps its folder; filing in Review clears "Needs filing"; Model/Food/Library stay fresh `Blocker: auth`
+
+Sandbox-proven only as pure logic (`test/reviewPreserveFields.test.js`, `test/staleCopyFixes.test.js`). All cloud legs need a signed-in pass on THROWAWAY data (never a real plan/file).
+**Steps:**
+1. Signed in, in Library drop a throwaway PDF on folder "03. Survey"; open it in Review; draw one markup; wait for "Saved". Reload, reopen Library. **Expect:** the file is still in "03. Survey" (not moved to a discipline folder).
+2. Drop a throwaway file with no project so it lands in "Needs filing"; open it in Review, choose project + discipline. Return to Library (no reload). **Expect:** it is out of "Needs filing" and under the chosen project/category.
+3. In Model, type `=Comp.<title>.RentPSF` for a throwaway comp; change that comp's rate in Site Planner's Comps panel; go back to Model. **Expect:** the cell shows the new rate without a reload.
+4. Signed out, build a workbook on a throwaway project; sign in. **Expect:** the workbook is there and saves to the cloud.
+5. Two tabs on Library: file "x.pdf" in tab A, then drop "x.pdf" in tab B. **Expect:** tab B offers the duplicate choice (not a silent second copy).
+6. Two manual food pins with the same name at different spots: click each. **Expect:** each shows only its own visits.
+7. Org workbook: rename in tab A; type in a still-old tab B. **Expect:** the name stays as renamed.
+8. After the owner runs `site_plan_overlays_comp_county_sync.sql`: move a throwaway plan with a pinned comp across a county line. **Expect:** the comp's county updates.
+9. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–8, or a failed step filed as a recurrence on B1953796.
+
 ### V1389504 — B1953200: a rename from any door reaches every display, incl. across devices `Blocker: auth`
 
 Sandbox-proven (logged out): `e2e/names-matrix.spec.js` (red-proofed) + `test/namesSingleSource.test.js`. **Still needs a signed-in pass** for the cloud-pull leg.

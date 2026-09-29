@@ -293,6 +293,7 @@
  * already visited before it ever reaches this file, so "flagged and visited" never renders twice.
  */
 import { useEffect, useRef, useState } from "react";
+import { manualPinKey } from "../lib/foodStore.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { colorForRating } from "../lib/ratingColor.js";
@@ -889,7 +890,7 @@ export default function FoodMap({
       addPin(p.lat, p.lon, colorForRating(p.avgRating) || COLORS.logged, p.name, () => onSelectPlace?.(p), { key: `place:${p.id}` });
     }
     for (const pin of manualPins || []) {
-      addPin(pin.lat, pin.lon, colorForRating(pin.avgRating) || COLORS.manual, pin.name, () => onSelectManualPin?.(pin), { key: `pin:${pin.name}` });
+      addPin(pin.lat, pin.lon, colorForRating(pin.avgRating) || COLORS.manual, pin.name, () => onSelectManualPin?.(pin), { key: manualPinKey(pin.name, pin.lat, pin.lon) });
     }
     // Flagged-but-unvisited places/pins — FoodApp already excludes anything also visited, so
     // there's never a double-draw here. Survives the zoomed-out gate below (drawn here, outside
@@ -898,7 +899,7 @@ export default function FoodMap({
       addHollowPin(p.lat, p.lon, p.name, () => onSelectPlace?.(p), { key: `place:${p.id}` });
     }
     for (const pin of wishlistManualPins || []) {
-      addHollowPin(pin.lat, pin.lon, pin.name, () => onSelectManualPin?.(pin), { key: `pin:${pin.name}` });
+      addHollowPin(pin.lat, pin.lon, pin.name, () => onSelectManualPin?.(pin), { key: manualPinKey(pin.name, pin.lat, pin.lon) });
     }
 
     // The reference snapshot — a lookup table he reaches into once zoomed to a neighbourhood,
