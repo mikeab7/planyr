@@ -30,9 +30,10 @@
  * #1D9E75, and the warm-coral/cool-blue split stays legible for red-green-colorblind
  * viewers); On&nbsp;Hold = amber; Complete = neutral gray; Dead = the SAME neutral
  * gray (distinguished from Complete by glyph + strike, not hue). Pursuit and Active
- * are glyphless SOLID DISCS — color and size alone distinguish them (the map pin is a
- * plain circle, B1628913 — no ground-ring progress sweep); the colorblind-safe second
- * cue is the glyph on the settled stages: pause ‖ = On Hold, check ✓ = Complete, ✕ = Dead.
+ * carry a small warehouse glyph on the map pin (NEW-1, 2026-09-29 — supersedes "glyphless
+ * solid discs, size tracks importance": every map pin is now ONE size, status sets color, glyph,
+ * opacity and z); the colorblind-safe second cue on the settled stages is pause ‖ = On Hold,
+ * check ✓ = Complete, ✕ = Dead.
  */
 // Per-state fields:
 //   color / darkColor — canonical status hex. Map pins use `color` directly (the
@@ -42,15 +43,14 @@
 //     mode so the badge doesn't go muddy. Keep the two in sync (B234 / B320).
 //   glyph  — the DOM text glyph (chips / list dots / menu); "" = a plain solid disc
 //            (Pursuit / Active).
-//   shape  — the MAP glyph selector → an inline white SVG in sitePinIcon; "" = none.
+//   shape  — the MAP glyph selector → the white glyph in mapPinSymbol.js; "" = the warehouse (Pursuit/Active).
 //   dim    — true for the recessive settled stages (Complete / Dead); pairs with the
 //            reduced mapOpacity so loudness tracks importance.
 //   hollow / dashed / struck — DOM badge treatment (hollow = outline-only dot — now
 //     always false, see rule 2; struck = strike-through label for a killed deal).
-//   --- map-pin only (read solely by sitePinIcon) ---
-//   halo       — width (px) of the white outer keyline/halo that keeps the pin
-//                legible over busy imagery; scales with importance.
-//   tier       — relative pin size (1 = largest/Pursuit → smallest/Dead).
+//   --- map-pin only ---
+//   halo, tier — LEGACY size/keyline scaling; the map pin no longer reads them (NEW-1: one size
+//                for every status). Kept only so nothing else that may read them breaks.
 //   mapOpacity — pin opacity (settled stages recede).
 //   z          — base Leaflet zIndexOffset so the important stages render ON TOP
 //                (a Complete pin must never occlude a Pursuit pin where they overlap).

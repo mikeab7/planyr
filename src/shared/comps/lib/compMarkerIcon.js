@@ -1,5 +1,5 @@
 /* compMarkerIcon — the map marker for a leasing comp. Deliberately a DIFFERENT silhouette from
- * sitePinIcon (site-planner/MapFinder.jsx — a plain solid circle, colored by status; B1628913)
+ * sitePinIcon (site-planner/MapFinder.jsx — one-size symbol circle, colored by status; NEW-1)
  * so a comp can never be mistaken for a project pin on the same map: a small flat rotated TAG
  * shape (a comp has no status, so no size-tier/glyph machinery), colored by comp type so the
  * three kinds read apart at a glance. Pure — no Leaflet import here, so this is unit-testable;

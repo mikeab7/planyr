@@ -108,7 +108,7 @@ import { siteBoundaryInfo, siteDrawParcels } from "./lib/siteBoundary.js";
 import { showActiveParcelAt, activeDrawParcels, reprojectParcelRing } from "./lib/activeParcelBoundary.js";
 import { geocodeAddress } from "./lib/geocode.js";
 import { compAnchorFromSelection, parcelAnchorFromSelection } from "./lib/compParcelAnchor.js";
-import { statusToken, darken } from "../../shared/ui/statusTokens.js";
+import { statusToken } from "../../shared/ui/statusTokens.js";
 /* lib/sharing.js is loaded ON DEMAND, and the reason is a budget one. This module is the
    ONLY importer of it, and both of its functions are already reached through an `await`
    inside `doShare` — so deferring it is mechanical, changes no behaviour, and takes its
@@ -134,6 +134,7 @@ import { parcelLocationText, siteplanLocationText, pinFallbackText } from "../..
 // and adds only its own marker, editor and layer. It is NOT the Notes WORKSPACE
 // (src/workspaces/notes) — see shared/mapNotes/db/map_notes.sql's header for why that split holds.
 import { mapNoteMarkerSvg, mapNoteMarkerSize } from "../../shared/mapNotes/lib/mapNoteMarkerIcon.js";
+import { sitePinSvg, pinHitBox, pinHtml, PIN_KEYLINE_R } from "../../shared/mapNotes/lib/mapPinSymbol.js";
 import { emptyMapNote, mapNoteHeadline } from "../../shared/mapNotes/lib/mapNotes.js";
 import { fetchAllMapNotes, insertMapNote, updateMapNote, deleteMapNote } from "../../shared/mapNotes/lib/mapNotesStore.js";
 // B834580 — the SAME time-sliced-paint primitive B802400 round 5 built for the contour layer
@@ -341,87 +342,24 @@ function reportBlankTileHealed(map, layerId) {
  * over a busy aerial. The module accent colors (Site/Schedule/Markup) are
  * deliberately NOT used here — they belong to the tab row. */
 
-// The status glyph as an inline WHITE SVG (crisp at every size/zoom + on retina;
-// never raster). Keyed off the token `shape`, drawn CENTERED on (cx,cy) so it sits
-// dead-center in the bulb. Only the SETTLED stages carry a glyph (the colorblind-safe
-// second cue); Pursuit and Active are glyphless solid discs — color + size alone
-// distinguish them (B433). "" → no glyph.
-function statusGlyph(shape, cx, cy) {
-  const n = (v) => +v.toFixed(2);
-  switch (shape) {
-    case "pause":   // On hold — two bars.
-      return `<rect x="${n(cx - 3.3)}" y="${n(cy - 5)}" width="2.6" height="10" rx="1" fill="#fff"/><rect x="${n(cx + 0.7)}" y="${n(cy - 5)}" width="2.6" height="10" rx="1" fill="#fff"/>`;
-    case "check":   // Complete.
-      return `<polyline points="${n(cx - 5)},${n(cy - 0.3)} ${n(cx - 1.6)},${n(cy + 3.4)} ${n(cx + 5.4)},${n(cy - 4.4)}" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
-    case "x":       // Dead (only shown when explicitly surfaced).
-      return `<path d="M${n(cx - 3.4)},${n(cy - 3.4)} L${n(cx + 3.4)},${n(cy + 3.4)} M${n(cx + 3.4)},${n(cy - 3.4)} L${n(cx - 3.4)},${n(cy + 3.4)}" stroke="#fff" stroke-width="2" stroke-linecap="round"/>`;
-    default: return "";
-  }
-}
-
-/* Status map pin (B434; superseded by B1628913/NEW-2 — "just a circle") — a small color
- * BULB, nothing else. The owner, verbatim: "keep the top piece of it exactly the same, but
- * just make it a circle instead of a pin." The bulb at the top of the old precision pin WAS
- * that top piece, and it was already a circle — so removing the stalk and ground ring below
- * it is the whole change. Everything about how a status LOOKS is untouched: bulb FILL color,
- * glyph, size tier, opacity and z-order all still read from statusToken (statusTokens.js),
- * and still vary WITH importance (Pursuit loudest/largest → Dead quietest/smallest).
- *  • SOLID bulb + a WHITE keyline (the white disc/halo behind it) — the standing rule:
- *    never a transparent/hollow primary marker on the aerial (B433). A soft white halo
- *    on every stroke keeps it legible over both bright (tan/developed) and dark (water/
- *    forest) tiles; no drop-shadow (it flashes on re-render) EXCEPT a single subtle one
- *    on the open site.
- *  • ⛔ THE ANCHOR MOVED WITH THE SHAPE. The old ground ring's center sat at the viewBox's
- *    bottom edge on purpose, so it mapped to the hit box's BOTTOM-center at every size
- *    tier. With the ring gone, the CIRCLE's own center is what must sit on the site's
- *    coordinate — so the anchor is now the hit box's CENTER, and the art is positioned
- *    inside the (still fixed) hit box so the bulb's rendered center always lands there,
- *    whatever the size tier.
- *  • A FIXED hit box for every state (unchanged from the old pin) → the tap target never
- *    shrinks or drifts when status/size change.
- *  • The glyph (‖/✓/✕) rides inside the bulb as the colorblind-safe second cue; Pursuit
- *    and Active are glyphless solid discs — color + size carry them. (The progress sweep
- *    that used to ride the ground ring is gone with the ring, not reintroduced as a ring
- *    drawn around the circle — the owner asked for a circle, not a circle with a ring.)
- * `active` = the currently-open site (a small size bump + a subtle drop-shadow + top z). */
+/* Status map pin — NEW-1 (owner-approved mockup 2026-09-29, "C · Symbol circle, revised") — ONE
+ * SIZE symbol circle for every status (pure builders: shared/mapNotes/lib/mapPinSymbol.js).
+ * SUPERSEDES B433/B1628913's "Pursuit and Active are glyphless discs, size tracks importance":
+ * status now sets color, glyph (Pursuit/Active = a small warehouse; On hold/Complete/Dead = the
+ * pause/check/x marks), map opacity and z-order — never size. Solid disc + white keyline, no
+ * drop-shadow (B850016, B433's never-hollow rule still holds).
+ *  • `active` = the currently-open site: a ring OUTSIDE the circle (circle size unchanged) plus
+ *    top z. This replaces the old 1.15× bump + drop-shadow.
+ *  • The anchor is the circle CENTRE, in a fixed hit box that never changes with status/open. */
 function sitePinIcon(status, active) {
   const t = statusToken(status);
-  // Fixed hit box ≥ the old tap target (~32×41) so it never regresses when the art shrinks.
-  const HIT_W = 34, HIT_H = 46;
-  // Size tracks importance; the open site gets a small bump (1.15×) on top of its tier.
-  const vs = 0.80 * (t.tier || 1) * (active ? 1.15 : 1);
-  const w = +(26 * vs).toFixed(1), h = +(34 * vs).toFixed(1);
-  const op = t.mapOpacity ?? 1;
-  const halo = t.halo || 2;
-  const col = t.color, edge = darken(col, 0.26);
-  // viewBox 0 0 26 34, unchanged from the old pin, so the bulb + glyph geometry below is
-  // untouched — only the stalk/ring that used to occupy the rest of this box are gone.
-  const CX = 13, BULB_CY = 10.5, BULB_R = 6.8;
-  // White keyline/halo underlay for the bulb → legible over any imagery.
-  const whiteHalo = `<circle cx="${CX}" cy="${BULB_CY}" r="${(BULB_R + halo).toFixed(1)}" fill="#fff"/>`;
-  // Bulb: solid fill + a thin same-hue edge for crispness; the white disc behind is the
-  // white keyline. The glyph (settled stages only) rides centered inside the bulb.
-  const bulb = `<circle cx="${CX}" cy="${BULB_CY}" r="${BULB_R}" fill="${col}" stroke="${edge}" stroke-width="0.6"/>`;
-  const shapeSvg = whiteHalo + bulb + statusGlyph(t.shape, CX, BULB_CY);
-  const shadow = active ? "filter:drop-shadow(0 1px 2px rgba(0,0,0,0.38));" : "";
-  // Position the art so the BULB's own rendered center — not the svg box's corner — lands
-  // on the hit box's center, which is now the anchor (see header). `vs` is the same uniform
-  // scale the width/height attributes apply against the fixed viewBox (w = 26*vs, h = 34*vs),
-  // so CX*vs / BULB_CY*vs is exactly where the bulb renders inside this <svg>.
-  const left = +(HIT_W / 2 - CX * vs).toFixed(1);
-  const top = +(HIT_H / 2 - BULB_CY * vs).toFixed(1);
-  const html =
-    `<div style="position:relative;width:${HIT_W}px;height:${HIT_H}px;opacity:${op};${shadow}">` +
-    `<svg width="${w}" height="${h}" viewBox="0 0 26 34" ` +
-    `style="position:absolute;left:${left}px;top:${top}px;overflow:visible">` +
-    shapeSvg +
-    `</svg></div>`;
+  const { size, anchor } = pinHitBox();
   return L.divIcon({
     className: "map-site-feature", // NEW-3 — a stable hook for verifying the decoupling
-    html,
-    iconSize: [HIT_W, HIT_H],
-    iconAnchor: [HIT_W / 2, HIT_H / 2],
-    tooltipAnchor: [0, -((BULB_R + halo) * vs + 4)],
+    html: pinHtml(sitePinSvg(status, !!active), !!active, t.mapOpacity ?? 1),
+    iconSize: size,
+    iconAnchor: anchor,
+    tooltipAnchor: [0, -(PIN_KEYLINE_R + 4)],
   });
 }
 
@@ -2722,9 +2660,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
 
   /* B1372144 — the MAP NOTES layer. Same construction as the comps layer above and gated the same
    * way: ONLY on its own "Notes" checkbox (B831778's rule — what is PAINTED is never a function of
-   * which tab is active), plus the same "don't rebuild mid-press" deferral. The marker is a third
-   * silhouette (a bubble, in the Notes accent) so a note can never be read as a comp or a site —
-   * see shared/mapNotes/lib/mapNoteMarkerIcon.js. */
+   * which tab is active), plus the same "don't rebuild mid-press" deferral. The marker is the same
+   * one-size symbol circle a site uses, in the Notes accent with a page glyph (NEW-1 — supersedes the
+   * old speech-bubble silhouette); the note whose editor is open wears the ring. See
+   * shared/mapNotes/lib/mapNoteMarkerIcon.js. */
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
@@ -2734,19 +2673,20 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       const group = L.layerGroup();
       (showNotesLayer ? mapNotes : []).forEach((n) => {
         if (!n?.anchor || typeof n.anchor.lat !== "number" || typeof n.anchor.lon !== "number") return;
-        const { size, anchor: iconAnchor } = mapNoteMarkerSize(false);
+        const isOpen = editingNote?.id != null && editingNote.id === n.id; // ring on the note being edited
+        const { size, anchor: iconAnchor } = mapNoteMarkerSize(isOpen);
         // The marker carries its own note id so a check (or a future "focus this note" path) can
         // address ONE note rather than guessing from marker order. Deliberately `data-note-id` and
         // NOT the canvas census's `data-feature` vocabulary: that names drawn PLAN features on the
         // planner SVG, and a Leaflet map marker is not one of them (COUNT-EVERY-KIND).
         const icon = L.divIcon({
           className: "map-note-feature",
-          html: `<span data-note-id="${String(n.id).replace(/"/g, "")}">${mapNoteMarkerSvg()}</span>`,
+          html: `<span data-note-id="${String(n.id).replace(/"/g, "")}"${isOpen ? ' data-open="1"' : ""}>${pinHtml(mapNoteMarkerSvg({ selected: isOpen }), isOpen)}</span>`,
           iconSize: size, iconAnchor,
         });
         const marker = L.marker([n.anchor.lat, n.anchor.lon], { icon, interactive: !selectMode && !placingCompPin, keyboard: false, riseOnHover: true });
         if (!selectMode && !placingCompPin) {
-          marker.on("click", () => setEditingNote(n)).bindTooltip(mapNoteHeadline(n), { direction: "top" });
+          marker.on("click", () => setEditingNote(n)).bindTooltip(mapNoteHeadline(n), { direction: "top", offset: [0, -(PIN_KEYLINE_R + 2)] });
         }
         marker.addTo(group);
       });
@@ -2756,7 +2696,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     if (pressedRef.current) { pendingNotesRebuildRef.current = build; return; }
     build();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapNotes, selectMode, placingCompPin, showNotesLayer]);
+  }, [mapNotes, selectMode, placingCompPin, showNotesLayer, editingNote?.id]);
 
   const flyToSite = (site) => {
     if (site.origin && mapRef.current) mapRef.current.flyTo([site.origin.lat, site.origin.lon], 17, { duration: 0.7 });
