@@ -24,6 +24,7 @@ import { cloudUpsert } from "../../site-planner/lib/cloudSync.js";
 import { casUpsert, keepaliveCasPush, isMissingVersionColumn, isMissingColumn } from "../../../shared/cloud/optimisticUpsert.js";
 import { makeWriteSerializer } from "../../../shared/cloud/serializeWrites.js";
 import { STATUSES, STATUS_META, statusOf, ROLES, DEFAULT_ROLE } from "../../site-planner/lib/siteModel.js";
+import { categoryFor, FILE_STATES } from "../../../shared/files/fileFacts.js";
 import { uploadFileInChunks } from "../../../shared/files/chunkedUpload.js";
 
 export const BUCKET = "doc-review-files";
@@ -119,7 +120,30 @@ export function stripFileExt(name = "") {
 // clobbered. Until db/optimistic_concurrency.sql adds the column, every write degrades to a
 // plain upsert (today's behaviour) and this stays empty.
 const reviewVersions = {};
-export function clearReviewVersions() { for (const k of Object.keys(reviewVersions)) delete reviewVersions[k]; }
+export function clearReviewVersions() { for (const k of Object.keys(reviewVersions)) delete reviewVersions[k]; for (const k of Object.keys(reviewStored)) delete reviewStored[k]; }
+
+// B1953796 — PRESERVE-UNKNOWN-FIELDS. `doc_reviews.data` is a jsonb the autosave REPLACES wholesale
+// (casUpsert), and the editors' snapshot builders list only the fields they own. Any field a
+// snapshot doesn't carry (folderId, sourceFile, placed, sfile, ...) was therefore silently dropped
+// on the first markup save. The stored record is remembered here next to its CAS version (same
+// moments, same lifetime) and merged UNDER the incoming snapshot at the one write choke point:
+// the snapshot wins for every key it carries, the stored value survives for every key it doesn't.
+const reviewStored = {};
+export function rememberStoredReview(id, rec) {
+  if (!id) return;
+  if (rec && typeof rec === "object") reviewStored[id] = { ...rec }; else delete reviewStored[id];
+}
+/* Repair of rows already damaged by the old drop (fill ONLY empty fields, never overwrite): the
+ * original filename survives in file_facts.source_file. Pure; returns the same object when nothing to fill. */
+export function fillEmptyFromFacts(rec, factsRow) {
+  if (!rec || !factsRow) return rec;
+  if (!rec.sourceFile && factsRow.source_file) return { ...rec, sourceFile: factsRow.source_file };
+  return rec;
+}
+export function mergeOntoStored(record, stored) {
+  if (!stored || typeof stored !== "object") return { ...record };
+  return { ...stored, ...record };
+}
 
 // B528: serialize cloud writes per review id so a tab can't race ITSELF (debounced autosave +
 // a visibility/unmount/manual flush firing together) into a false self-conflict that locks out
@@ -129,7 +153,66 @@ export function clearReviewVersions() { for (const k of Object.keys(reviewVersio
 const serializeReviewWrite = makeWriteSerializer();
 export function upsertReview(record) {
   if (!record || !record.id) return upsertReviewCore(record); // no id → nothing to serialize on; core returns the error
-  return serializeReviewWrite(record.id, () => upsertReviewCore(record));
+  return serializeReviewWrite(record.id, async () => {
+    const res = await upsertReviewCore(record);
+    if (!res || !res.ok) return res;
+    // B1953796 (R2) — the ONE place doc_reviews' filing facts fan out to file_facts. Every writer
+    // (ReviewsBar autosave, refileReview, the Library) funnels through here, so the Library index
+    // can never keep answering with the pre-edit project / discipline / needs-filing state.
+    const sync = await syncFileFactsForReview(record);
+    if (!sync.ok) return { ok: false, error: sync.error, factsSyncFailed: true }; // the review itself IS saved; retry is idempotent
+    return res;
+  });
+}
+
+/* ---- B1953796 (R2): filing facts live on the review; file_facts is kept in step by ONE function ---- */
+const filedSig = {}; // review id -> the filing signature last known to be mirrored into file_facts
+export function filingSignature(rec) {
+  if (!rec) return "";
+  return JSON.stringify([rec.projectId || null, rec.orgScope === true, rec.discipline || "", rec.item || "", rec.revision || "", rec.docDate || ""]);
+}
+export function rememberFiledSignature(id, rec) { if (id) { if (rec) filedSig[id] = filingSignature(rec); else delete filedSig[id]; } }
+/* Pure: the file_facts column patch a review's filing facts imply, given the existing facts row.
+ * category is re-derived ONLY when the existing one was itself the derived value (a user-typed /
+ * auto-filer override stays); a superseded state is never touched. */
+export function factsPatchFor(existing, rec) {
+  const discipline = rec.discipline || "Other";
+  const scoped = !!(rec.orgScope === true || rec.projectId);
+  const needsFiling = !(scoped && rec.discipline);
+  const patch = {
+    project_id: rec.orgScope === true ? null : (rec.projectId || null),
+    discipline, item: rec.item || "", revision: rec.revision || "", doc_date: rec.docDate || null,
+    needs_filing: needsFiling,
+  };
+  const ex = existing || {};
+  if (ex.state !== FILE_STATES.SUPERSEDED) patch.state = needsFiling ? FILE_STATES.NEEDS_FILING : FILE_STATES.FILED;
+  const derivedBefore = categoryFor(ex.discipline || "Other", ex.item || "", ex.sheet_title || "");
+  if (!ex.category || ex.category === derivedBefore) patch.category = categoryFor(discipline, rec.item || "", ex.sheet_title || "");
+  return patch;
+}
+export async function syncFileFactsForReview(rec) {
+  if (!supabase || !rec || !rec.id) return { ok: true, skipped: true };
+  const sig = filingSignature(rec);
+  if (filedSig[rec.id] === undefined) { filedSig[rec.id] = sig; return { ok: true, skipped: true }; } // never loaded → not a filing edit
+  if (filedSig[rec.id] === sig) return { ok: true, skipped: true };
+  const missing = (m) => /relation|does not exist|schema cache|column/i.test(m || "");
+  try {
+    const sel = async (cols) => supabase.from("file_facts").select(cols).eq("id", rec.id).maybeSingle();
+    const r1 = await sel("id,discipline,item,sheet_title,category,state");
+    const r2 = r1.error && missing(r1.error.message) ? await sel("id,discipline,item,sheet_title") : r1;
+    if (r2.error) return missing(r2.error.message) ? { ok: true, skipped: true } : { ok: false, error: `Saved, but the Library index couldn't be updated (${r2.error.message}). It will retry on the next save.` };
+    if (!r2.data) { filedSig[rec.id] = sig; return { ok: true, skipped: true }; } // never indexed → nothing stale to correct
+    const patch = factsPatchFor(r2.data, rec);
+    const upd = async (p) => supabase.from("file_facts").update(p).eq("id", rec.id);
+    const u1 = await upd(patch);
+    const { category: _c, state: _s, ...core } = patch;
+    const u2 = u1.error && missing(u1.error.message) ? await upd(core) : u1;
+    if (u2.error) return { ok: false, error: `Saved, but the Library index couldn't be updated (${u2.error.message}). It will retry on the next save.` };
+    filedSig[rec.id] = sig;
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: `Saved, but the Library index couldn't be updated (${(e && e.message) || "network error"}). It will retry on the next save.` };
+  }
 }
 
 // B714 — the core column payload a review save sends (pure; exported for tests). team_id rides
@@ -144,7 +227,7 @@ export function reviewRowFor(record, { isNew = false } = {}) {
     project: record.project || null,
     discipline: record.discipline || null,
     updated_at: new Date(record.updatedAt || Date.now()).toISOString(),
-    data: { ...record, schemaVersion: REVIEW_SCHEMA },
+    data: { ...mergeOntoStored(record, isNew ? null : reviewStored[record.id]), schemaVersion: REVIEW_SCHEMA },
   };
   if (isNew) row.team_id = record.teamId || null;
   return row;
@@ -206,11 +289,11 @@ async function upsertReviewCore(record) {
     let error = await plainUpsert("id", false);
     if (isPkMismatch(error && error.message)) // pre-PK-change DB: target is (user_id,id)
       error = await plainUpsert("user_id,id", true);
-    if (!error) writeDraft(uid, base.data);
+    if (!error) { rememberStoredReview(record.id, base.data); writeDraft(uid, base.data); }
     return { ok: !error, error: error ? error.message : null };
   }
   if (r.conflict) return { ok: false, conflict: true }; // another session advanced this review — caller prompts a reload
-  if (r.ok) { reviewVersions[record.id] = r.version; writeDraft(uid, base.data); return { ok: true }; }
+  if (r.ok) { reviewVersions[record.id] = r.version; rememberStoredReview(record.id, base.data); writeDraft(uid, base.data); return { ok: true }; }
   return { ok: false, error: r.error || "save failed" };
 }
 
@@ -246,7 +329,17 @@ export async function loadReview(id, { includeDeleted = false } = {}) {
   if (error || !data) return null;
   if (data.deleted_at && !includeDeleted) return null; // in the Recently-deleted bin — not openable
   if (data.version != null) reviewVersions[id] = data.version; // remember it for the next save's CAS guard (B314)
-  const rec = data.data || null;
+  let rec = data.data || null;
+  if (rec && !rec.sourceFile && !includeDeleted) { // B1953796 - repair a row an old autosave stripped (empty-only fill)
+    try {
+      const { data: fr } = await supabase.from("file_facts").select("source_file").eq("id", id).maybeSingle();
+      const fixed = fillEmptyFromFacts(rec, fr);
+      if (fixed !== rec) rec = fixed;
+    } catch (_) { /* repair is best-effort; the row is untouched */ }
+  }
+  rememberStoredReview(id, rec);
+  rememberFiledSignature(id, rec); // R2 - the baseline a later filing edit is compared against
+  // B1953796 - what the next autosave must preserve (fields its snapshot doesn't carry)
   // Overlay the authoritative team_id column so a subsequent save preserves the share (the
   // record's own field can lag); null = private.
   if (rec && "team_id" in data) rec.teamId = data.team_id || null;
@@ -336,6 +429,7 @@ export async function markReviewPlaced(id) {
  * (reconcile(cloud, draft)) reopen a deleted review from its stale local copy. */
 export async function deleteReview(id) {
   if (!supabase || !id) return { ok: false };
+  delete reviewStored[id];
   delete reviewVersions[id]; // the row advances server-side; drop the stale CAS token (B314)
   const { data, error } = await supabase.from("doc_reviews")
     .update({ deleted_at: new Date().toISOString() }).eq("id", id).select("id");
@@ -348,6 +442,7 @@ export async function deleteReview(id) {
 // Bring a soft-deleted review back (NEW-F3) — the "Restore" / undo-toast action.
 export async function restoreReview(id) {
   if (!supabase || !id) return { ok: false };
+  delete reviewStored[id];
   delete reviewVersions[id]; // force a fresh CAS token on the next load (B314)
   const { data, error } = await supabase.from("doc_reviews")
     .update({ deleted_at: null }).eq("id", id).select("id");
@@ -379,6 +474,7 @@ export const shouldDeleteBytes = ({ guardOk, sharedByOther }) => guardOk === tru
  * team-admin on a shared review). Cleanup failures surface via orphaned/cleanupFailed (NEW-4). */
 export async function purgeReview(id) {
   if (!supabase || !id) return { ok: false };
+  delete reviewStored[id];
   delete reviewVersions[id]; // stop tracking a removed review's version (B314)
   const uid = await currentUid();
   let orphaned = 0;       // # source files whose byte-cleanup didn't confirm
@@ -495,6 +591,10 @@ export async function unfileReviewsForDeletedProject(groupId) {
       const { error } = await supabase.from("doc_reviews").update({ project_id: null, data: patchedData }).eq("id", row.id);
       if (error) lastError = error.message || "unfile failed"; else unfiled += 1;
     }
+    // R2 - the index mirrors the same fact: these files are back in "Needs filing".
+    const { error: fErr } = await supabase.from("file_facts").update({ project_id: null, needs_filing: true, state: FILE_STATES.NEEDS_FILING }).eq("project_id", groupId).neq("state", FILE_STATES.SUPERSEDED);
+    if (fErr && !/relation|does not exist|schema cache|column/i.test(fErr.message || "")) lastError = lastError || fErr.message || "index update failed";
+    for (const row of rows) rememberFiledSignature(row.id, null);
     return lastError ? { ok: false, unfiled, error: lastError } : { ok: true, unfiled };
   } catch (e) {
     return { ok: false, unfiled: 0, error: (e && e.message) || "unfile threw" };

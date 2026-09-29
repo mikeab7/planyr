@@ -5,7 +5,17 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-09-27._
+_Last updated: 2026-09-29._
+
+## 🗺 One database script so comps follow their county when you move a site plan (B1953796)
+
+> **What changed:** when you drag a site plan across a county line, the comps pinned on it already moved with
+> it, but they kept their old county. The app now works out the new county and sends it along — but the
+> database needs one small update to accept it. Until you run it, everything else keeps working exactly as before.
+>
+> - [ ] **Run one SQL script in your Supabase dashboard.** I'll hand you the file
+>       (`site_plan_overlays_comp_county_sync.sql`). Supabase project → SQL Editor → paste → Run. It only
+>       replaces one existing function; touches no data; safe to run more than once.
 
 ## 🧮 One database script to run so your new Organization Spreadsheet saves to the cloud (B1912208)
 
