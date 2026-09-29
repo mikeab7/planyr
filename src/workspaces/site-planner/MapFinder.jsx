@@ -141,6 +141,7 @@ import { fetchAllMapNotes, insertMapNote, updateMapNote, deleteMapNote } from ".
 // list of paint ops so no batch exceeds budget" decision; the scheduling policy (a MessageChannel
 // macrotask, see scheduleSaveSitesFrame below) is caller glue, same as terrainLayers.js's own.
 import { runBudgeted, PAINT_FRAME_BUDGET_MS } from "./lib/paintSchedule.js";
+import { parcelKey as parcelKeyOf } from "./lib/parcelIdentity.js";
 
 // Theme tokens (var(--…)) — MapFinder is DOM/inline-style only, so CSS vars resolve
 // and the panel themes live with no re-render. (B318)
@@ -3116,8 +3117,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   /* Stable per-parcel key (county-namespaced — OBJECTIDs are only unique within one
      CAD layer, so a multi-county assembly could otherwise collide). */
   const parcelKey = (county, rings, attrs) => {
-    const oid = attrs.OBJECTID ?? attrs.objectid ?? `${rings[0][0][0].toFixed(6)},${rings[0][0][1].toFixed(6)}`;
-    return `${county}:${oid}`;
+    return parcelKeyOf(attrs, rings, { namespace: county });
   };
 
   /* B441 — find the parcel outline already DRAWN under a click, with zero network.

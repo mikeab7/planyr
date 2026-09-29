@@ -166,6 +166,16 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1400816 — B1964512: clicking Chambers lots along Gordon Speer Chambers Pkwy adds exactly the lot under the cursor `Blocker: live-GIS`
+
+Sandbox-proven: `test/parcelIdentity.test.js` (9; the pre-fix rule collides on the real 20887/15328 lots). **Still needs the live Chambers CAD service** (egress-blocked here).
+**Steps** (a THROWAWAY duplicate plan in the Grand Port group — never Concept A; note the served chunk hash in the same observation):
+1. Duplicate a Grand Port plan, open it, turn on Identify/add-parcel mode. **Expect:** mode active.
+2. Click lot 20887, then 15328 (share a corner). **Expect:** each click adds exactly the lot under the cursor; two lots present.
+3. Click 6496, then 25153 (the two 2.35 AC strips). **Expect:** each adds only its own lot.
+4. Re-click 15328. **Expect:** only 15328 is removed; 20887, 6496, 25153 remain.
+5. Exit and re-enter identify mode; click an already-present lot (e.g. one of the plan's 6 legacy `geo:` lots). **Expect:** it is selected as "already in plan", no duplicate added.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1964512.
 ### V1390096 — B1953793: a pin / rule / folder rename made in one place shows in every other view and tab, and nothing is reverted `Blocker: auth`
 
 Sandbox-proven (logged out, unit): `test/prefsSingleSource.test.js` (12 tests, red on the pre-fix tree). **Still needs a signed-in, two-tab pass** for the account-row leg (the sandbox cannot sign in).
