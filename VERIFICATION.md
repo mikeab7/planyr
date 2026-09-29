@@ -166,6 +166,17 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1404560 — B1973920 + B1973921: state lines survive to metro zoom and city names read well over the real aerial, without covering a plan `Blocker: live-GIS`
+
+Sandbox-proven (`ui-audit/verify-admin-boundaries.mjs` 19/19, `ui-audit/verify-place-names.mjs` 15/15, `test/adminBoundaries.test.js`, `test/placeNames.test.js`): band edges, lazy fetches, gone at 14, row toggle. **Still needs planyr.io with the real imagery** (this environment's browser cannot load tile hosts, so the base was blank).
+**Steps** (note the served chunk hash in the same observation as each result):
+1. Site → map view on the Esri aerial, zoomed to the whole-US view. **Expect:** country + state lines and big-city names (Houston, Dallas…) legible, not fighting the imagery.
+2. Zoom to the Houston metro (state line region not in view is fine — pan toward the Texas/Louisiana line at zoom 9–12). **Expect:** the state line is still there through zoom 12, thin and faint enough that it does not compete with road names; it follows the real border (Sabine River), not a jagged cut.
+3. Pan the Houston/Katy area at zoom 10–12. **Expect:** Katy, Sugar Land, Baytown, Pearland, Conroe, Brookshire appear as you zoom in; names are legible on the aerial; nothing overlaps.
+4. With a plan/site pin loaded, zoom from 12 → 14. **Expect:** names fade at 13 and are gone at 14; the plan and parcels are never covered by a name at any zoom.
+5. Layers panel → City names off, then on. **Expect:** names clear/return; Road names row unaffected.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1973920 / B1973921.
+
 ### V1340416 — B1875520: site + note pins are one-size symbol circles; the open one wears a ring `Blocker: auth`
 
 Sandbox-proven: `test/mapPinSymbol.test.js`, `test/mapNoteMarkerIcon.test.js`; headless local build showed 5 status pins at identical size with the warehouse/pause/check/x glyphs. **Still needs planyr.io, signed in, on the aerial** (imagery + saved notes are unreachable from the sandbox).

@@ -481,7 +481,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   the repo-root `test/` suite `panLockInvariant` (2 of its 4 cases go red on the passive-effect model). This is
   VIEWPORT-STABLE in `/CLAUDE.md`, which the effect predated and violated.
 - **Wide-zoom political boundaries (NEW-1):** `adminBoundaryGate.js` is the leaf gate (imports
-  nothing) — the zoom CEILING (`ADMIN_BOUNDARY_MAX_ZOOM` 7) plus the cached dynamic import, exactly
+  nothing) — the zoom CEILING (`ADMIN_BOUNDARY_MAX_ZOOM` 12 — revised 2026-09-29 from 7: state lines survive through metro zoom, countries still stop at 7; parcels draw at 14) plus the cached dynamic import, exactly
   the `terrainGate.js` / `terrainLazy.js` shape and for the same reason. **This is the repo's first
   MAX-zoom gate** — every other one (`TERRAIN_MIN_ZOOM`, the registry's `minZoom` fields) means
   "appear once you zoom IN"; boundaries are orientation furniture and run the other way, so don't
@@ -497,7 +497,18 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   repo-root script build-admin-boundaries), a public/ ASSET rather than a module precisely so it is
   charged against no bundle budget. 1:110m admin-1 is **US states only** — Canada and Mexico read at
   the country level by design. Guards: ui-audit verify-admin-boundaries (network + rendered pixels)
-  + the repo-root `test/` suite adminBoundaries.
+  + the repo-root `test/` suite adminBoundaries. From zoom 8 the state lines come from a second asset,
+  `public/geo/admin1-detail.json` (NE 1:10m US, coast edges stripped so no state line cuts the bay,
+  shared borders drawn once; build script build-admin-detail), fetched lazily only then; `admin1Style`
+  makes the line quieter at 8+ and again at 10+.
+- **City names (NEW-2, 2026-09-29):** `placeNamesGate.js` (leaf: band 3..13, gone at 14 = parcels; cached
+  dynamic import) · `placeNamesData.js` (pure: tiers, opacity, collision `layoutLabels`) · `placeNamesLayer.js`
+  (own canvas in pane z260, below the vector pane, `pointer-events:none`, stamps `data-count`/`data-names`).
+  Own dataset (`public/geo/place-names.json` backbone + `place-names-towns.json`, fetched only at zoom >= 9;
+  build script build-place-names) rather than Esri's Boundaries_and_Places tiles, which draw their own
+  boundary lines and would double up with the state outlines. The finder's "City names" row is separate
+  from "Road names" (Esri transportation tiles, no city names). Guards: the repo-root `test/` suite placeNames
+  + ui-audit verify-place-names.
 - **B1141/B1142 — the drawing is WELDED to the basemap, and the weld is MEASURED, never assumed.**
   `mapLock.js` (`tileNwFeet` / `basemapWrapPoint` / `registrationShift` / `sanitizeShift`) computes how
   far the drawing sits from the imagery; `SitePlanner` applies it as a CSS translate on the SVG canvas
