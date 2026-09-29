@@ -20,7 +20,7 @@ const SHARE_LOADERS = { loadPrefs: loadUserPrefs, listTeams: listMyTeams };
 import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, initHistoryStore, loadSitesList, loadPlansOfGroup, renameSiteGroup, deleteSiteGroup as storageDeleteSiteGroup, repairSplitProjectNames, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount, stageLegacySite, discardLegacySite } from "./lib/storage.js";
 import { cloudParcelRows, cloudElementRecency } from "./lib/cloudSync.js";
 import { summarizeParcelRows } from "./lib/parcelSummary.js";
-import { summarizeElementRecency, groupRecencyMs } from "./lib/siteRecency.js";
+import { summarizeElementRecency, groupRecencyMs, pickRepresentativePlan } from "./lib/siteRecency.js";
 import { STATUS_META, roleOf } from "./lib/siteModel.js";
 import { isPinnedMapReference } from "./lib/overlayOrder.js";
 import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
@@ -1130,12 +1130,15 @@ export default function App({
   // itself regardless of role (the `act` override below runs unconditionally), matching the
   // existing pattern for a site not yet in `siteGroups` at all.
   const siteGroups = useMemo(() => {
+    const plansByGroup = new Map();
+    sites.forEach((s) => { if (roleOf(s) !== "pursuit") return; const g = groupOf(s); if (!plansByGroup.has(g)) plansByGroup.set(g, []); plansByGroup.get(g).push(s); });
+    // A-B1953794 — the same representative chooser the Dashboard uses (siteRecency.js).
     const byGroup = new Map();
-    sites.forEach((s) => { if (roleOf(s) !== "pursuit") return; const g = groupOf(s); if (!byGroup.has(g)) byGroup.set(g, s); });
+    for (const [g, plans] of plansByGroup) byGroup.set(g, pickRepresentativePlan(plans, elementRecency));
     const act = activeSiteId && sites.find((s) => s.id === activeSiteId);
     if (act) byGroup.set(groupOf(act), act);
     return [...byGroup.values()];
-  }, [sites, activeSiteId]); // stable identity → doesn't force MapFinder to re-render every parent render
+  }, [sites, activeSiteId, elementRecency]); // stable identity → doesn't force MapFinder to re-render every parent render
 
   // Refresh the map's site list when we land back on it (after the planner has
   // autosaved the latest edits) — and, signed in, the canonical parcel summary too, so a
