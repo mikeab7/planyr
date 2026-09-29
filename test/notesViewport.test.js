@@ -15,7 +15,7 @@ import { describe, expect, it } from "vitest";
 import {
   VIEW_ZOOM_DEFAULT, VIEW_ZOOM_MAX, VIEW_ZOOM_MIN, VIEW_ZOOM_STEPS,
   clampViewZoom, fitView, frameView, normalizeView, panBy, parseView, serializeView,
-  stepZoom, toViewport, toWorkspace, viewKey, zoomAbout, zoomForWheel, zoomKeyIntent, zoomLabel,
+  stepZoom, toViewport, toWorkspace, viewKey, wheelIntent, wheelNativeAxis, zoomAbout, zoomForWheel, zoomKeyIntent, zoomLabel,
 } from "../src/workspaces/notes/lib/notesViewport.js";
 
 const V = (x, y, z) => ({ x, y, z });
@@ -263,5 +263,78 @@ describe("zoomLabel", () => {
     expect(zoomLabel(1.25)).toBe("125%");
     expect(zoomLabel(0.1)).toBe("10%");
     expect(zoomLabel(8)).toBe("800%");
+  });
+});
+
+/* ⛔ NEW-1 (2026-09-29) — A PLAIN WHEEL ZOOMS AT THE CURSOR, LIKE THE SITE PLAN. The decision table
+ * lives in `wheelIntent`; the DOM half (a wheel over a scrollable table/menu is left alone) is driven
+ * in a real browser by `ui-audit/verify-notes-canvas.mjs` §2. */
+describe("wheelIntent — what a wheel event means over the canvas", () => {
+  it("⛔ RED-PROOF: a plain wheel-UP is a zoom, not a scroll (the pre-change rule panned)", () => {
+    expect(wheelIntent({ deltaY: -100 })).toEqual({ kind: "zoom", deltaY: -100 });
+    expect(wheelIntent({ deltaY: 100 })).toEqual({ kind: "zoom", deltaY: 100 });
+  });
+
+  it("wheel up zooms IN and wheel down zooms OUT, the site plan's direction", () => {
+    const z = 1;
+    expect(zoomForWheel(z, wheelIntent({ deltaY: -100 }).deltaY)).toBeGreaterThan(z);
+    expect(zoomForWheel(z, wheelIntent({ deltaY: 100 }).deltaY)).toBeLessThan(z);
+  });
+
+  it("Ctrl/⌘+wheel and a trackpad pinch (a ctrlKey wheel) still zoom", () => {
+    expect(wheelIntent({ deltaY: -4, ctrlKey: true }).kind).toBe("zoom");
+    expect(wheelIntent({ deltaY: 4, metaKey: true }).kind).toBe("zoom");
+  });
+
+  it("Ctrl+wheel zooms even over something that scrolls itself — page zoom is still suppressed", () => {
+    expect(wheelIntent({ deltaY: -4, ctrlKey: true, ownsWheel: true }).kind).toBe("zoom");
+  });
+
+  it("Shift+wheel PANS vertically, whether the OS reports it as deltaY (Windows) or deltaX (macOS)", () => {
+    expect(wheelIntent({ deltaY: 120, shiftKey: true })).toEqual({ kind: "pan", dx: 0, dy: 120 });
+    expect(wheelIntent({ deltaX: 120, deltaY: 0, shiftKey: true })).toEqual({ kind: "pan", dx: 0, dy: 120 });
+  });
+
+  it("a mostly-sideways swipe pans horizontally and never zooms", () => {
+    expect(wheelIntent({ deltaX: 60, deltaY: 4 })).toEqual({ kind: "pan", dx: 60, dy: 0 });
+    expect(wheelIntent({ deltaX: -60, deltaY: 0 }).kind).toBe("pan");
+  });
+
+  it("a line/page-mode delta is normalised before it is spent as a pan", () => {
+    expect(wheelIntent({ deltaY: 3, deltaMode: 1, shiftKey: true }).dy).toBe(48);
+    expect(wheelIntent({ deltaY: 1, deltaMode: 2, shiftKey: true }).dy).toBe(400);
+  });
+
+  it("a wheel over something that scrolls itself is left NATIVE and changes nothing here", () => {
+    for (const e of [{ deltaY: 100 }, { deltaY: -100 }, { deltaX: 80 }, { deltaY: 100, shiftKey: true }]) {
+      expect(wheelIntent({ ...e, ownsWheel: true })).toEqual({ kind: "native" });
+    }
+  });
+
+  it("wheelNativeAxis mirrors what the browser scrolls: Shift → x, dominant delta otherwise", () => {
+    expect(wheelNativeAxis({ deltaY: 100 })).toBe("y");
+    expect(wheelNativeAxis({ deltaX: 100, deltaY: 3 })).toBe("x");
+    expect(wheelNativeAxis({ deltaY: 100, shiftKey: true })).toBe("x");
+  });
+
+  it("⛔ THE POINT UNDER THE CURSOR STAYS UNDER THE CURSOR through a wheel step, both axes, within 1px", () => {
+    for (const view of [V(0, 0, 1), V(340, 910, 1.5), V(-250, -80, 0.4), V(1200, 40, 3)]) {
+      for (const at of [{ x: 10, y: 10 }, { x: 600, y: 300 }, { x: 1100, y: 600 }]) {
+        for (const deltaY of [-240, -100, -10, 10, 100, 240]) {
+          const under = toWorkspace(view, at);
+          const intent = wheelIntent({ deltaY });
+          const next = zoomAbout(view, at, zoomForWheel(view.z, intent.deltaY));
+          const now = toViewport(next, under);
+          expect(Math.abs(now.x - at.x)).toBeLessThanOrEqual(1);
+          expect(Math.abs(now.y - at.y)).toBeLessThanOrEqual(1);
+          expect(next.z === view.z).toBe(false);
+        }
+      }
+    }
+  });
+
+  it("wheel zoom is smooth within the clamp and lands on it at both ends, like Ctrl+wheel", () => {
+    expect(zoomForWheel(VIEW_ZOOM_MAX, wheelIntent({ deltaY: -100 }).deltaY)).toBe(VIEW_ZOOM_MAX);
+    expect(zoomForWheel(VIEW_ZOOM_MIN, wheelIntent({ deltaY: 100 }).deltaY)).toBe(VIEW_ZOOM_MIN);
   });
 });

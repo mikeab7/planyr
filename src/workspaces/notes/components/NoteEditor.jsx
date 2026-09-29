@@ -48,7 +48,7 @@ import {
 } from "../lib/notesMarquee.js";
 import {
   fitView, frameView, normalizeView, panBy, stepZoom, toWorkspace,
-  VIEW_ZOOM_DEFAULT, zoomAbout, zoomForWheel, zoomKeyIntent, zoomLabel,
+  VIEW_ZOOM_DEFAULT, wheelIntent, wheelNativeAxis, zoomAbout, zoomForWheel, zoomKeyIntent, zoomLabel,
 } from "../lib/notesViewport.js";
 import { HIGHLIGHT_COLORS, SIZES, TEXT_COLORS } from "../lib/notesFormatPalette.js";
 import { PASTE_MODES } from "../lib/notesPastePlain.js";
@@ -205,6 +205,27 @@ export const noteTitleFontPx = (narrow) => (narrow ? TITLE_DEFAULT_PX.narrow : T
  *
  * PDF-PARITY: lib/notesPrint.js mirrors this list construct for construct, on paper.
  * Add a construct here and add it there in the same commit. */
+/** ⛔ IS THE POINTER OVER SOMETHING THAT SCROLLS ITSELF ON THIS AXIS? (NEW-1 — the wheel must not
+ *  hijack a wide table, a code block or an open list.) Walks from the event target up to (not
+ *  including) the canvas. An element counts only if it can REALLY scroll on the axis the browser
+ *  would use — a wrapper whose content fits is not an owner, so the wheel over an ordinary table
+ *  still zooms. `[data-wheelscroll]` and menu/list/dialog roles opt out unconditionally, mirroring
+ *  the site plan's own `[data-wheelscroll]` exemption. */
+function wheelOwnerUnder(target, boundary, axis) {
+  for (let el = target instanceof Element ? target : null; el && el !== boundary; el = el.parentElement) {
+    if (el.hasAttribute("data-wheelscroll")) return true;
+    const role = el.getAttribute("role");
+    if (role === "menu" || role === "listbox" || role === "dialog") return true;
+    const cs = getComputedStyle(el);
+    if (axis === "x") {
+      if ((cs.overflowX === "auto" || cs.overflowX === "scroll") && el.scrollWidth > el.clientWidth + 1) return true;
+    } else if ((cs.overflowY === "auto" || cs.overflowY === "scroll") && el.scrollHeight > el.clientHeight + 1) {
+      return true;
+    }
+  }
+  return false;
+}
+
 const EDITOR_CSS = `
 /* ⛔ THE NOTE'S DENSITY, AND IT IS THE ONE PLACE THE NUMBER LIVES (NEW-SPACING-1/3).
    It was a hard-coded 1.65 here — which measured as 15px text in a 24.75px line box, while
@@ -3439,27 +3460,41 @@ const NoteEditor = forwardRef(function NoteEditor({
 
   /* ---- GESTURES ------------------------------------------------------------------------------
    *
-   * ⛔ THE WHEEL DOES TWO THINGS AND THE BROWSER'S OWN ZOOM DOES NEITHER. Ctrl/⌘+wheel zooms at
-   * the cursor; a plain wheel PANS, which is what the scroller used to do for free and now has to
-   * be done by hand because the viewport no longer scrolls. A trackpad's horizontal swipe arrives
-   * as `deltaX` on the same event, so two-finger panning in both axes falls out of it.
+   * ⛔ A PLAIN WHEEL ZOOMS AT THE CURSOR, EXACTLY AS ON THE SITE PLAN (NEW-1, owner 2026-09-29) —
+   * the decision table is `wheelIntent` (`lib/notesViewport.js`, unit-tested; read its header for
+   * what the site plan does and how this matches it). Ctrl/⌘+wheel and a trackpad pinch still zoom;
+   * Shift+wheel and a mostly-sideways swipe PAN, because the viewport does not scroll and a plain
+   * wheel no longer moves it.
    *
-   * ⛔ NON-PASSIVE AND `preventDefault`ED, deliberately — the whole point is that Chrome's own
-   * page zoom does not ALSO fire on Ctrl+wheel. Attached by hand for exactly that reason: React's
-   * `onWheel` is passive and cannot cancel. */
+   * ⛔ THE WHEEL MUST NOT HIJACK WHAT SCROLLS ITSELF. The listener sits on the canvas only, so the
+   * toolbar menus, the rail, the outline/history panes and dialogs (all outside this element or
+   * portaled) never see it. What can be INSIDE it is a wide table (`.tableWrapper`), a code block, or
+   * an open list — `wheelOwnerUnder` asks the DOM whether the pointer is over something that would
+   * really scroll on the axis this event scrolls, and if so the event is left ALONE (not
+   * `preventDefault`ed) so the browser scrolls that element. `[data-wheelscroll]` is the same opt-out
+   * the site plan uses.
+   *
+   * ⛔ NON-PASSIVE AND `preventDefault`ED for every case it handles, deliberately — the whole point
+   * is that Chrome's own page zoom does not ALSO fire on Ctrl+wheel. Attached by hand for exactly
+   * that reason: React's `onWheel` is passive and cannot cancel. */
   useEffect(() => {
     const sc = scrollerRef.current;
     if (!sc) return undefined;
     const onWheel = (e) => {
+      const ownsWheel = !(e.ctrlKey || e.metaKey)
+        && wheelOwnerUnder(e.target, sc, wheelNativeAxis(e));
+      const intent = wheelIntent({
+        deltaX: e.deltaX, deltaY: e.deltaY, deltaMode: e.deltaMode,
+        ctrlKey: e.ctrlKey, metaKey: e.metaKey, shiftKey: e.shiftKey, ownsWheel,
+      });
+      if (intent.kind === "native") return;
       e.preventDefault();
-      if (e.ctrlKey || e.metaKey) {
-        zoomTo(zoomForWheel(viewRef.current.z, e.deltaY, { deltaMode: e.deltaMode }), { x: e.clientX, y: e.clientY });
+      if (intent.kind === "zoom") {
+        if (!intent.deltaY) return;
+        zoomTo(zoomForWheel(viewRef.current.z, intent.deltaY, { deltaMode: e.deltaMode }), { x: e.clientX, y: e.clientY });
         return;
       }
-      /* A line/page delta is a different unit; normalise before spending it as pixels, the same
-       * way the zoom curve does. */
-      const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
-      setView(panBy(viewRef.current, { dx: -e.deltaX * k, dy: -e.deltaY * k }));
+      setView(panBy(viewRef.current, { dx: -intent.dx, dy: -intent.dy }));
     };
     sc.addEventListener("wheel", onWheel, { passive: false });
     return () => sc.removeEventListener("wheel", onWheel);

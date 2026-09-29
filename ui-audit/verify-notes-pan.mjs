@@ -381,7 +381,10 @@ for (const grip of GRIPS) {
      * movement that was supposed to happen is worth nothing. */
     const g = await geometry(page);
     await page.mouse.move(g.mat.l + 120, g.mat.t + g.mat.h / 2);
+    /* Shift+wheel is the vertical pan since a plain wheel zooms (NEW-1, 2026-09-29). */
+    await page.keyboard.down("Shift");
     for (let i = 0; i < 8; i += 1) await page.mouse.wheel(0, 60);
+    await page.keyboard.up("Shift");
     await pacedWait(page, 250);
   }
   /* ⛔ PRESS THE GRIP'S VISIBLE MIDDLE, NOT ITS GEOMETRIC ONE (trap 18, and
