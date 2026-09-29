@@ -6,17 +6,16 @@
  * for the actual Supabase call). `value.projects` is a MAP keyed by string project id, not an
  * array; each project holds `{ id, name, linkedSiteId, tasks: [...] }`.
  *
- * ⛔ This is a SIMPLIFIED, independent heuristic, not a re-implementation of the embedded app's
- * full Automation rule engine (`evalHealthRules`/`computeDisplayHealth`, public/sequence/
- * index.html ~3769-3912). Replicating that engine's per-account configurable rules here would
- * duplicate a lot of logic this card doesn't need to own. What IS replicated exactly is the one
- * rule virtually every schedule has — "overdue" — because the owner-visible number this card
- * shows should agree with the grid's own definition of overdue, not a re-guessed one:
- *   overdue = task.end is set, health is not "green"/"paused", and end is at least 1 full
- *             calendar day in the past.
- * "At-risk" (due soon) is this card's OWN heuristic — not read from any configured rule — so it
- * is deliberately named "at-risk" rather than "yellow"/"due soon", the words the grid itself
- * uses for its (possibly differently-configured) warning state.
+ * B1953795 (S4) — THE SAME RULES THE GRID USES. This card used to run its own "simplified
+ * independent heuristic" (a fixed 7-day at-risk window; complete = status green only), so it
+ * disagreed with the grid and with the Needs-attention card whenever the account had custom health
+ * rules or the grid's own 3-day default. It now evaluates every leaf task through the shared rule
+ * engine (`src/shared/schedule/healthEngine.js` — the Scheduler's own text, kept identical by
+ * test/scheduleHealthEngineParity.test.js) using the account's `settings.healthRules`, so:
+ *   complete = displays green (status green OR 100%), overdue = displays red ("Needs Attn."),
+ *   atRisk = displays yellow, paused/other = onTrack.
+ * `settings` is the schedule document's `settings` (dashboardScheduleFetch.fetchScheduleSettings).
+ * Not covered (meeting-bound / deadline-row risk blocks): see healthEngine.js's header.
  *
  * B1939344 (NEW-1) — `name` is the QUALIFIED "<Project> / <Schedule>" label (`crossScheduleLabel`,
  * `src/shared/schedule/scheduleOwnership.js`), not the bare schedule name: two different projects
@@ -25,14 +24,12 @@
  * used since PR 1849 — one shared helper, not a second hand-copy.
  */
 import { crossScheduleLabel } from "../../../shared/schedule/scheduleOwnership.js";
+import { displayHealth } from "../../../shared/schedule/healthEngine.js";
 
-const MS_PER_DAY = 86400000;
-const AT_RISK_WINDOW_DAYS = 7;
-
-function calendarDayDiff(fromIso, toMs) {
-  const fromMs = Date.parse(fromIso);
-  if (Number.isNaN(fromMs)) return null;
-  return Math.round((toMs - fromMs) / MS_PER_DAY);
+/** Local "YYYY-MM-DD" for `nowMs` — the same "today" the grid's rule engine is handed. */
+function localIso(nowMs) {
+  const d = new Date(nowMs);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 /** Leaf tasks only — a summary/parent row's own start/end/health can be a stale rollup, so
@@ -43,32 +40,34 @@ function leafTasks(tasks) {
   return tasks.filter((t) => t && !parentIds.has(t.id));
 }
 
-/** One project's { complete, overdue, atRisk, onTrack, total }. `nowMs` is injectable for tests. */
-export function summarizeProjectHealth(project, nowMs = Date.now()) {
+/** One project's { complete, overdue, atRisk, onTrack, total }. `nowMs` is injectable for tests;
+ * `settings` = the schedule document's settings (its healthRules), the same the grid evaluates. */
+export function summarizeProjectHealth(project, nowMs = Date.now(), settings = null) {
   const tasks = Array.isArray(project?.tasks) ? project.tasks : [];
   const leaves = leafTasks(tasks);
+  const byId = {}; tasks.forEach((t) => { if (t) byId[t.id] = t; });
+  const today = localIso(nowMs);
   let complete = 0, overdue = 0, atRisk = 0, onTrack = 0;
   for (const t of leaves) {
-    if (t.health === "green") { complete++; continue; }
-    if (t.health === "paused") { onTrack++; continue; }
-    const days = t.end ? calendarDayDiff(t.end, nowMs) : null;
-    if (days != null && days >= 1) { overdue++; continue; }
-    if (days != null && days >= -AT_RISK_WINDOW_DAYS) { atRisk++; continue; }
-    onTrack++;
+    const h = displayHealth(t, settings || {}, today, byId);
+    if (h === "green") complete++;
+    else if (h === "red") overdue++;
+    else if (h === "yellow") atRisk++;
+    else onTrack++;
   }
   return { complete, overdue, atRisk, onTrack, total: leaves.length };
 }
 
 /** All projects with at least one task, sorted with the least-healthy (highest overdue share)
  * first — the ones that need a look are the ones worth seeing without scrolling. */
-export function summarizeScheduleHealth(projectsMap, nowMs = Date.now()) {
+export function summarizeScheduleHealth(projectsMap, nowMs = Date.now(), settings = null) {
   const projects = projectsMap && typeof projectsMap === "object" ? Object.values(projectsMap) : [];
   return projects
     .map((p) => ({
       id: p?.id ?? null,
       name: crossScheduleLabel(p),
       linkedSiteId: p?.linkedSiteId || null,
-      ...summarizeProjectHealth(p, nowMs),
+      ...summarizeProjectHealth(p, nowMs, settings),
     }))
     .filter((p) => p.total > 0)
     .sort((a, b) => (b.overdue / b.total || 0) - (a.overdue / a.total || 0));

@@ -26,6 +26,7 @@
  * is the SAME helper the Reports tab already uses, not a second hand-copy.
  */
 import { crossScheduleLabel } from "../../../shared/schedule/scheduleOwnership.js";
+import { displayHealth } from "../../../shared/schedule/healthEngine.js";
 
 const MS_PER_DAY = 86400000;
 
@@ -83,20 +84,31 @@ function leafTasks(tasks) {
  * independent, organic transition landing on the same millisecond as another is not a real
  * possibility, so sharing IS the bulk-event signature. The card renders those with a "+" — "at
  * least this many days" — instead of a bare number that implies precision it doesn't have. */
-export function needsAttentionList(projectsMap, nowMs = Date.now()) {
+export function needsAttentionList(projectsMap, nowMs = Date.now(), settings = null) {
   const projects = projectsMap && typeof projectsMap === "object" ? Object.values(projectsMap) : [];
   const rows = [];
+  const d0 = new Date(nowMs);
+  const today = `${d0.getFullYear()}-${String(d0.getMonth() + 1).padStart(2, "0")}-${String(d0.getDate()).padStart(2, "0")}`;
   for (const p of projects) {
     const tasks = Array.isArray(p?.tasks) ? p.tasks : [];
     const leaves = leafTasks(tasks);
     const succ = successorCounts(tasks);
+    const byId = {}; tasks.forEach((t) => { if (t) byId[t.id] = t; });
     for (const t of leaves) {
-      if (!t || !t.needsAttentionSince) continue;
-      const sinceMs = Date.parse(t.needsAttentionSince);
-      if (Number.isNaN(sinceMs)) continue;
-      const days = Math.max(0, Math.floor((nowMs - sinceMs) / MS_PER_DAY));
+      if (!t) continue;
+      // B1953795 (S5) — WHETHER a task needs attention is decided at READ time by the same rules the
+      // grid uses; the stored stamp (written only while the Scheduler is mounted, so stale otherwise)
+      // now supplies only "since when". A stamped-but-no-longer-red task is dropped; a red task with
+      // no stamp yet is listed with `sinceKnown:false` rather than being invisible until the
+      // Scheduler is next opened.
+      if (displayHealth(t, settings || {}, today, byId) !== "red") continue;
+      const sinceMs = t.needsAttentionSince ? Date.parse(t.needsAttentionSince) : NaN;
+      const sinceKnown = !Number.isNaN(sinceMs);
+      const days = sinceKnown ? Math.max(0, Math.floor((nowMs - sinceMs) / MS_PER_DAY)) : 0;
       rows.push({
+        sinceKnown,
         taskId: t.id,
+        taskSid: t._sid ?? null,   // B1953795 (S3) — stable identity for the click-through
         taskName: (t.name && String(t.name).trim()) || `Task #${t.id}`,
         projectId: p.id,
         projectName: crossScheduleLabel(p),
@@ -104,13 +116,13 @@ export function needsAttentionList(projectsMap, nowMs = Date.now()) {
         dueDate: t.end || null,
         waiting: succ[t.id] || 0,
         days,
-        stampedAt: t.needsAttentionSince,
+        stampedAt: sinceKnown ? t.needsAttentionSince : null,
       });
     }
   }
   const stampCounts = new Map();
-  for (const r of rows) stampCounts.set(r.stampedAt, (stampCounts.get(r.stampedAt) || 0) + 1);
-  for (const r of rows) r.bulkStamped = stampCounts.get(r.stampedAt) > 1;
+  for (const r of rows) if (r.stampedAt) stampCounts.set(r.stampedAt, (stampCounts.get(r.stampedAt) || 0) + 1);
+  for (const r of rows) r.bulkStamped = !!r.stampedAt && stampCounts.get(r.stampedAt) > 1;
 
   return rows.sort((a, b) => b.days - a.days || b.waiting - a.waiting || a.taskName.localeCompare(b.taskName));
 }

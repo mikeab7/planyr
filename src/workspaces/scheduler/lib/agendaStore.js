@@ -43,3 +43,35 @@ export function writeAgenda(items, scope) {
   try { st.setItem(key(scope), JSON.stringify(items)); return true; }
   catch (e) { fail("write", key(scope), e); return false; }
 }
+
+// -- B1953795 (S6) -- the stored list is the ONE truth; a view is a subscriber, never a copy it writes back.
+// The view used to hold the list in React state and `writeAgenda(wholeList)` on every edit, so two tabs
+// (or a tab + a stale render) overwrote each other's items. Now every operation is a fresh
+// read-modify-write against storage (`mutateAgenda`), and views subscribe (`subscribeAgenda`) to the
+// cross-tab `storage` event plus a same-tab notification, so they always re-read the truth.
+const CHANGED_EVENT = "planyr:agenda-changed";
+
+/** Fresh read -> `fn(items)` -> write. Returns `{ ok, items }`: `items` is what storage holds AFTER the
+ * op (the new list on success, the untouched fresh list on a failed write -- the caller re-renders from
+ * it, i.e. rollback -- and `ok:false` tells it to show the error). `fn` may return the same array to no-op. */
+export function mutateAgenda(scope, fn) {
+  const fresh = readAgenda(scope);
+  let next;
+  try { next = fn(fresh); } catch (e) { fail("mutate", key(scope), e); return { ok: false, items: fresh }; }
+  if (next === fresh) return { ok: true, items: fresh };
+  if (!writeAgenda(next, scope)) return { ok: false, items: fresh };
+  try { window.dispatchEvent(new CustomEvent(CHANGED_EVENT, { detail: { scope: scope || "local" } })); } catch (_) {}
+  return { ok: true, items: next };
+}
+
+/** Call `cb()` whenever this scope's list changes -- in this tab (via mutateAgenda) or another
+ * (the browser's `storage` event). Returns the unsubscribe function. */
+export function subscribeAgenda(scope, cb) {
+  if (typeof window === "undefined") return () => {};
+  const k = key(scope);
+  const onStorage = (e) => { if (e.key === k || e.key === null) cb(); };
+  const onLocal = (e) => { if (!e.detail || e.detail.scope === (scope || "local")) cb(); };
+  window.addEventListener("storage", onStorage);
+  window.addEventListener(CHANGED_EVENT, onLocal);
+  return () => { window.removeEventListener("storage", onStorage); window.removeEventListener(CHANGED_EVENT, onLocal); };
+}
