@@ -68,7 +68,8 @@ function installRoutes(page) {
 
 async function domState(page) {
   return page.evaluate(() => ({
-    vectorPaths: document.querySelectorAll(".leaflet-overlay-pane path").length,
+    // B1976336 — outlines paint on a canvas now, so count the outlines actually DRAWN (on the map) (armed diagnostic)
+    vectorPaths: (window.__mapParcelDisplay && (window.__mapParcelDisplay() || {}).drawn) || 0,
     parcelImg: document.querySelectorAll(".leaflet-overlay-pane img[src*='gis.hctx.net']").length,
     zoomTip: document.querySelector('[data-testid="select-parcels-tip"]')?.textContent || "",
   }));
@@ -77,6 +78,7 @@ async function domState(page) {
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
 await assertMeasurable(page, "verify-parcel-display-regimes");
+await page.addInitScript(() => { window.__PLANYR_E2E = true; });
 const pageErrors = [];
 page.on("pageerror", (e) => pageErrors.push(String(e)));
 await page.addInitScript(seedThrowawaySite());

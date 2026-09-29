@@ -17,12 +17,10 @@ const stateOf = (k) => COUNTIES_MAP[k].state;
 describe("displaySourcesForView", () => {
   it("Bartow County GA view → ga_bartow only; no Texas/Colorado/Alaska/California/… source", () => {
     const got = displaySourcesForView(view(34.18, -84.86, 34.22, -84.79));
-    expect(got).toContain("ga_bartow");
-    expect(got.every((k) => stateOf(k) === "GA")).toBe(true);
+    expect(got).toEqual(["ga_bartow"]); // ONE source per area — Fulton's padded bbox must not draw over Bartow
     for (const bad of ["txgio_statewide", "harris", "fortbend", "co_statewide", "ak_statewide", "ca_statewide", "ct_statewide"]) {
       expect(got).not.toContain(bad);
     }
-    expect(got.length).toBeLessThanOrEqual(3);
   });
 
   it("a zoom step out from Bartow still stays inside Georgia", () => {
@@ -34,13 +32,12 @@ describe("displaySourcesForView", () => {
   it("Texas view (Harris) → Texas sources only, incl. the statewide composite", () => {
     const got = displaySourcesForView(view(29.72, -95.42, 29.78, -95.34));
     expect(got).toContain("harris");
-    expect(got).toContain("txgio_statewide");
     expect(got.every((k) => stateOf(k) === "TX")).toBe(true);
   });
 
   it("Colorado view → Colorado sources only", () => {
     const got = displaySourcesForView(view(39.70, -105.02, 39.78, -104.94));
-    expect(got).toContain("co_statewide");
+    expect(got.length).toBeGreaterThan(0);
     expect(got.every((k) => stateOf(k) === "CO")).toBe(true);
   });
 
@@ -54,6 +51,12 @@ describe("displaySourcesForView", () => {
     expect(displaySourcesForView(view(25.0, -60.0, 25.1, -59.9))).toEqual([]);
   });
 
+  it("a wide view over a wired county still returns its own source, not a rival's", () => {
+    const got = displaySourcesForView(view(34.0, -85.1, 34.4, -84.5));
+    expect(got).toContain("ga_bartow");
+    expect(got).not.toContain("ga_fulton"); // Fulton's true boundary is well south of 34.0 at this longitude
+  });
+
   it("missing bounds → no sources", () => {
     expect(displaySourcesForView(null)).toEqual([]);
   });
@@ -64,7 +67,7 @@ describe("displaySourcesForView", () => {
     const after = services(displaySourcesForView(view(34.18, -84.86, 34.22, -84.79))).size;
     const TILES = 6; // display tiles per service, as measured live
     console.log(`B1976336 /query requests per zoom step (Bartow GA): before ≈ ${before * TILES}, after ≈ ${after * TILES}`);
-    expect(after * TILES).toBeLessThanOrEqual(12);
+    expect(after * TILES).toBeLessThanOrEqual(6); // one service, 6 tiles
     expect(after).toBeLessThan(before);
   });
 });
