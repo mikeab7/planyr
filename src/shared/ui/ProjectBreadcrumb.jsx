@@ -68,6 +68,7 @@ import {
   listDeletedProjects, restoreDeletedProject, purgeDeletedProject, purgeExpiredDeletedProjects,
   DELETED_RETENTION_DAYS, activeUid,
 } from "../projects/projects.js";
+import { validateName, announceNameNotice } from "../names/nameCore.js";
 import { resolveCurrentName, withCurrentProject, unionProjectLists, resolveControlledId as resolveControlledIdPure, hasSavedProjectRecord, applyFrozenOrder, reorderWithCurrentAndPinned } from "../projects/projectModel.js";
 import { crumbNeedsCompact } from "./breadcrumbFit.js";
 import { noteEffectRun } from "../../app/renderLoopProbe.js";
@@ -679,7 +680,7 @@ export default function ProjectBreadcrumb({
     // closes below), not to whatever now sits at the row's on-screen position. See the ref's own
     // comment near its declaration.
     pendingRefocusIdRef.current = id;
-    if (!v) return; // reject empty/whitespace-only — keep the prior name
+    if (!v) { announceNameNotice(validateName(v, "project").error); return; } // reject empty/whitespace-only LOUDLY — keep the prior name
     const resolvedId = resolveControlledId(id); // no-ops to `id` unchanged when uncontrolled
     /* B1358128 — SAME RULE AS DELETE (see doDelete): a row that names a REAL project is renamed
      * as a PROJECT, and its linked schedule is renamed alongside it. Bridging alone renamed only

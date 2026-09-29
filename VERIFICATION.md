@@ -166,6 +166,16 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1389504 — B1953200: a rename from any door reaches every display, incl. across devices `Blocker: auth`
+
+Sandbox-proven (logged out): `e2e/names-matrix.spec.js` (red-proofed) + `test/namesSingleSource.test.js`. **Still needs a signed-in pass** for the cloud-pull leg.
+**Steps:**
+1. Sign in on planyr.io, open a throwaway project's plan. **Expect:** note breadcrumb name.
+2. On a second browser signed into the same account, rename that project from the Map list. Back on the first (not reloaded), wait for background sync. **Expect:** breadcrumb, plan header, and Compose exhibit title block show the new name; the PDF filename starts with it.
+3. Rename it to blank on either device. **Expect:** a red notice "needs a name", old name kept.
+4. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–3, or a failed step filed as a recurrence on B1953200.
+
 ### V1370832 — B1934528: renaming a project updates Compose exhibit's title/header and the default PDF filename `Blocker: auth`
 
 **Why this needs a live pass even though the mechanism is fully proven headlessly.** The fix makes `siteLabel` resync off the same "planarfit:sites" storage event `pullCloud()` fires on every cloud sync — the mutation-tested e2e spec (`e2e/exhibit-project-name.spec.js`) proves the LOCAL mechanism (a rename via the header dropdown, in either Map or Plan mode, on an already-open plan) works and fails identically without the fix. What it cannot drive from this sandbox is a rename arriving from a **different device** via a real cloud pull, which needs a signed-in account.

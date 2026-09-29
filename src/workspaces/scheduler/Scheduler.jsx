@@ -19,7 +19,7 @@ import {
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { scheduleSaveState } from "./lib/saveState.js";
 import { ScheduleCenter, ScheduleActions } from "./components/ScheduleToolbar.jsx";
-import { listProjects, warmProjectsIfEmpty, suggestNameMatch } from "../../shared/projects/projects.js";
+import { listProjects, warmProjectsIfEmpty, suggestNameMatch, onProjectsChanged } from "../../shared/projects/projects.js";
 import { resolveControlledId } from "../../shared/projects/projectModel.js";
 import LinkSchedulePanel from "./components/LinkSchedulePanel.jsx";
 import NewScheduleModal from "./components/NewScheduleModal.jsx";
@@ -99,6 +99,8 @@ export default function Scheduler({
   // tab that lands straight on the Schedule still has the list. listProjects() is a local read.
   const [siteProjects, setSiteProjects] = useState(() => { try { return listProjects(); } catch (_) { return []; } });
   useEffect(() => { (async () => { try { await warmProjectsIfEmpty(); setSiteProjects(listProjects()); } catch (_) {} })(); }, []);
+  // A rename (or any change to the project list) from any door re-reads the one shared list.
+  useEffect(() => onProjectsChanged(() => { try { setSiteProjects(listProjects()); } catch (_) {} }), []);
   // B1050 — the user pressed Dashboard: the route is being cleared, but the iframe hasn't reported
   // section "reports" back yet. Suppress the carry-OUT adoption for exactly that window, or it would
   // re-adopt the site we just cleared and put the trapping panel straight back up. Cleared by the

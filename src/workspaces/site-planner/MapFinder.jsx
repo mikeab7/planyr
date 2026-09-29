@@ -1,4 +1,5 @@
 import { Fragment, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { validateName, announceNameNotice } from "../../shared/names/nameCore.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote, countyBboxIntersectsView } from "./lib/counties.js";
@@ -1356,7 +1357,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const commitRename = (id, raw, original) => {
     const name = (raw || "").trim();
     setRenaming(null);
-    if (name && name !== original) onRenameSiteRef.current && onRenameSiteRef.current(id, name);
+    if (!name) { announceNameNotice(validateName(name, "project").error); return; }
+    if (name !== original) onRenameSiteRef.current && onRenameSiteRef.current(id, name);
   };
   const cancelRename = () => { skipRenameBlurRef.current = true; setRenaming(null); };
   /* NEW-1 — every entry point that starts a rename goes through here, not through a bare

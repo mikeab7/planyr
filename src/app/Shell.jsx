@@ -24,6 +24,7 @@ import { installBuildSkewWatch, shouldOfferReload, shouldEscalate, fetchServedBu
 import { reloadFresh, isChunkRecoveryStuck, subscribeChunkRecoveryStuck } from "./chunkReload.js";
 import { RADIUS } from "../shared/ui/radius.js";
 import FloatingNotice from "../shared/ui/FloatingNotice.jsx";
+import NameNoticeHost from "../shared/names/NameNoticeHost.jsx";
 import { mayResumeLastSite } from "../workspaces/site-planner/lib/bootResume.js";
 import HelpReportControl from "./HelpReportControl.jsx";
 import { retryQueuedReports } from "../shared/reports/reportsStore.js";
@@ -722,6 +723,7 @@ export default function Shell() {
     <div style={{ height: "100%", overflow: "hidden", display: "flex", flexDirection: "column", background: CHROME }}>
       {/* No shell-level header — each workspace renders AppHeader internally
           so it can own its toolbar-slot content without prop-drilling through here. */}
+      <NameNoticeHost />
       <UpdateBanner
         reason={updateReason}
         onReload={() => reloadFresh()}

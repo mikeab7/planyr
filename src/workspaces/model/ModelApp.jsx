@@ -37,6 +37,7 @@
  * at load (`status: "diverged"`, a loud red badge + an explicit banner) — v1 still doesn't
  * merge, but it can no longer clobber another device's saved work in total silence.
  */
+import { useProjectName, projectNameOf } from "../../shared/names/names.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import { CRUMB_MIN_W } from "../../shared/ui/ProjectBreadcrumb.jsx";
@@ -603,7 +604,7 @@ export default function ModelApp({
   const currentFileBaseName = useCallback(() => {
     if (openOrgWorkbook) return sanitizeFilename(orgWorkbookName);
     let name = "Workbook";
-    if (projectId) { try { const p = listProjects().find((pp) => pp.id === projectId); if (p?.name) name = p.name; } catch (_) {} }
+    if (projectId) name = projectNameOf(projectId, "") || name;
     return sanitizeFilename(name);
   }, [projectId, openOrgWorkbook, orgWorkbookName]);
 
@@ -915,8 +916,7 @@ export default function ModelApp({
     zoom, onZoomChange,
   };
 
-  let projectName = "";
-  if (projectId) { try { const p = listProjects().find((pp) => pp.id === projectId); if (p) projectName = p.name; } catch (_) {} }
+  const projectName = useProjectName(projectId, ""); // shared/names — the one live source
   const currentProject = projectId ? { id: projectId, name: projectName || "Untitled project" } : null;
 
   // spreadsheet-concept-crumb (NEW-1) — a trailing breadcrumb crumb, same slot/geometry the Site
