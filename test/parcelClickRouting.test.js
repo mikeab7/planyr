@@ -19,7 +19,7 @@ const SP = readFileSync(join(here, "../src/workspaces/site-planner/SitePlanner.j
 // The in-planner parcel-identify region: from the outline/candidate refs through the end of
 // `quickAddAt`, i.e. everything this fix touched.
 const start = SP.indexOf("const identifyTok = useRef(0);");
-const end = SP.indexOf("const [siteLabel, setSiteLabel] = useState");
+const end = SP.indexOf("const siteLabel = useProjectName(");
 if (start < 0 || end < 0) throw new Error("parcelClickRouting.test.js: identify region markers moved — update the slice");
 const region = SP.slice(start, end);
 

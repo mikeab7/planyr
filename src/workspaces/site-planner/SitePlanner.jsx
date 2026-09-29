@@ -16186,7 +16186,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [planDraft, setPlanDraft] = useState(null);
   // Validation + visible rejection live in the shared rename functions; an empty name is refused
   // with a notice and the old name stays (it used to be silently saved as "Untitled site").
-  const commitSiteLabel = (v) => { renameProjectChecked(groupId, v, async (id, n) => onRenameSite?.(id, n)); };
   const commitPlanLabel = (v) => { setPlanDraft(null); renamePlanChecked(siteId, v, async (id, n) => onRenamePlan?.(id, n)); };
   const siteName = `${siteLabel} · ${planLabel}`; // used for export filenames / print header
   /* Keep the save metadata current (so the first non-blank save is fully formed).
@@ -20883,8 +20882,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // The breadcrumb is now the ONLY project control (the center "Site ▾" was removed), so its
   // rename has to do everything the old inline Site-name editor did. For the CURRENT project
-  // route through commitSiteLabel so the Row-1 header label updates live; any other project
-  // renames its site group directly. Both ultimately call renameSiteGroup. (header consolidation)
+  // every project (current or not) renames through the shared checked rename, so the header
+  // label updates live off the names store. Both ultimately call renameSiteGroup. (header consolidation)
   const renameProjectFromHeader = (id, name) => {
     renameProjectChecked(id, name, async (gid, n) => onRenameSite?.(gid, n));
   };
