@@ -108,7 +108,7 @@ await page.waitForSelector('[data-testid="planner-canvas"]', { timeout: 20000 })
 await page.waitForTimeout(800);
 
 const decorationOf = (id) => page.evaluate((elId) => {
-  const g = document.querySelector(`[data-el-id="${elId}"]`);
+  const g = document.querySelector(`[data-road-deco="${elId}"]`) || document.querySelector(`[data-el-id="${elId}"]`); // decoration lives in the cluster's own paint item (B1788912 fix)
   if (!g) return null;
   const clippedG = g.querySelector("g[clip-path]");
   const allPolys = [...g.querySelectorAll("polygon")];

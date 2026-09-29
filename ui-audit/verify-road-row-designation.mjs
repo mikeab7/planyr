@@ -171,7 +171,7 @@ await page.screenshot({ path: OUT + "02-canvas-row-lines-zoom1.png" });
 
 // ---- 4. NEW-2 — outside-curb bands (the two parkways) actually paint, unclipped ---------------
 const decoration = await page.evaluate((id) => {
-  const g = document.querySelector(`[data-el-id="${id}"]`);
+  const g = document.querySelector(`[data-road-deco="${id}"]`) || document.querySelector(`[data-el-id="${id}"]`); // decoration lives in the cluster's own paint item (B1788912 fix)
   if (!g) return null;
   const allPolys = [...g.querySelectorAll("polygon")];
   const clippedG = g.querySelector("g[clip-path]");
@@ -186,7 +186,7 @@ check(decoration && decoration.unclipped === 2, "B773730 fix: both parkway bands
 
 // ---- 5. NEW-1 — the ROW boundary lines + label render on the canvas ---------------------------
 const rowGeom = await page.evaluate((id) => {
-  const g = document.querySelector(`[data-el-id="${id}"]`);
+  const g = document.querySelector(`[data-road-deco="${id}"]`) || document.querySelector(`[data-el-id="${id}"]`); // decoration lives in the cluster's own paint item (B1788912 fix)
   if (!g) return null;
   const dashedTertiary = [...g.querySelectorAll('polyline[stroke="var(--text-tertiary)"]')].filter((p) => p.getAttribute("stroke-dasharray"));
   const texts = [...g.querySelectorAll("text")].map((t) => t.textContent);
@@ -210,7 +210,7 @@ check(await rowToggle.count() === 1, "the View ▾ menu carries a \"ROW lines\" 
 await rowToggle.uncheck();
 await page.waitForTimeout(300);
 const afterHide = await page.evaluate((id) => {
-  const g = document.querySelector(`[data-el-id="${id}"]`);
+  const g = document.querySelector(`[data-road-deco="${id}"]`) || document.querySelector(`[data-el-id="${id}"]`); // decoration lives in the cluster's own paint item (B1788912 fix)
   const dashedTertiary = [...g.querySelectorAll('polyline[stroke="var(--text-tertiary)"]')].filter((p) => p.getAttribute("stroke-dasharray"));
   const hasLabel = [...g.querySelectorAll("text")].some((t) => /R\.O\.W\./.test(t.textContent));
   return { dashedTertiaryCount: dashedTertiary.length, hasLabel };
@@ -220,7 +220,7 @@ await page.screenshot({ path: OUT + "04-canvas-row-lines-hidden.png" });
 await rowToggle.check();
 await page.waitForTimeout(300);
 const afterRestore = await page.evaluate((id) => {
-  const g = document.querySelector(`[data-el-id="${id}"]`);
+  const g = document.querySelector(`[data-road-deco="${id}"]`) || document.querySelector(`[data-el-id="${id}"]`); // decoration lives in the cluster's own paint item (B1788912 fix)
   const dashedTertiary = [...g.querySelectorAll('polyline[stroke="var(--text-tertiary)"]')].filter((p) => p.getAttribute("stroke-dasharray"));
   return dashedTertiary.length;
 }, road.id);
@@ -274,7 +274,7 @@ if (rowFieldCount >= 1) {
 const exportHtml = await page.evaluate(async () => (window.__plannerExportSvg ? await window.__plannerExportSvg() : null));
 check(!!exportHtml, "the export-sheet self-audit hook is reachable (window.__plannerExportSvg)");
 if (exportHtml) {
-  const groupMatch = new RegExp(`data-el-id="${road.id}"[\\s\\S]*?</g>\\s*</g>`).exec(exportHtml);
+  const groupMatch = new RegExp(`data-road-deco="${road.id}"[\\s\\S]*?</g>\\s*</g>`).exec(exportHtml) || new RegExp(`data-el-id="${road.id}"[\\s\\S]*?</g>\\s*</g>`).exec(exportHtml); // decoration group first (B1788912 fix)
   const exportedGroup = groupMatch ? groupMatch[0] : exportHtml;
   check(exportHtml.includes(`data-el-id="${road.id}"`), "the road appears in the exported sheet");
   check(/R\.O\.W\./.test(exportedGroup), "PDF-PARITY: the \"R.O.W.\" label is present in the exported SVG", /R\.O\.W\./.test(exportedGroup) ? "found" : "not found");
