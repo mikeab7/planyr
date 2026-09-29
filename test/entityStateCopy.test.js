@@ -35,8 +35,6 @@ const STALE_OK = /\/\/\s*stale-ok:\s*\S+/;
 
 // Exact `file :: trimmed line` copies, each with WHY it is not a bug (or which item fixes it).
 const KNOWN_COPIES = {
-  "src/workspaces/site-planner/SitePlanner.jsx :: const [jurKey, setJurKey] = useState(() => defaultJurForCounty(restored?.county));":
-    "easement jurisdiction seeded from county — fixed by B1953794 (derive at read time + persisted override)",
 };
 // Whole-file exemptions for rule 2: per-device VIEW prefs / drafts only that component writes,
 // or stores that are re-synced by a subscribe in the same file.
