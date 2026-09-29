@@ -40,20 +40,87 @@ export function labelFont(minZoom) {
   return { px: 11.5, weight: 600 };
 }
 
-/* Greedy collision pass. `candidates` is in importance order and already projected:
- * [{ name, x, y, minZoom }]. `measure(name, font)` → text width in px (injected so this stays
- * DOM-free). A label is kept only if its box (with a small pad) overlaps no kept box; the
- * viewport [0,w]×[0,h] is the cull. Capped so a dense metro cannot turn into a wall of text. */
-export function layoutLabels(candidates, measure, w, h, { pad = 3, max = 90 } = {}) {
+/* A place's identity across frames — name plus its exact coordinates (the same name can sit in
+ * several states). Used to remember which labels are showing (hysteresis) and to fade them. */
+export const placeKey = (p) => `${p.name}|${p.lat}|${p.lng}`;
+
+/* Priority order for the collision pass — TOTAL and independent of input order (NEW-1 amend,
+ * 2026-09-29). Tier first (lower minZoom = bigger place), then a label already showing beats a
+ * newcomer of the same tier, then name and coordinates so ties never depend on array order. The
+ * datasets carry no population, so tier is the importance signal and name is the tie-break. */
+function byPriority(isHeld) {
+  return (a, b) => {
+    if (a.minZoom !== b.minZoom) return a.minZoom - b.minZoom;
+    const ha = isHeld(a) ? 0 : 1, hb = isHeld(b) ? 0 : 1;
+    if (ha !== hb) return ha - hb;
+    if (a.name !== b.name) return a.name < b.name ? -1 : 1;
+    const la = a.lat ?? 0, lb = b.lat ?? 0; if (la !== lb) return la - lb;
+    const oa = a.lng ?? 0, ob = b.lng ?? 0; if (oa !== ob) return oa - ob;
+    return (a.x - b.x) || (a.y - b.y) || 0;
+  };
+}
+
+/* Greedy collision pass. `candidates` are projected: [{ name, x, y, minZoom, lat?, lng?, key? }] in
+ * ANY order — the pass sorts them by importance itself. `measure(name, font)` → text width in px
+ * (injected so this stays DOM-free). A label is kept only if its box overlaps no kept box; the
+ * viewport [0,w]×[0,h] is the cull. Capped so a dense metro cannot turn into a wall of text.
+ *
+ * HYSTERESIS: `held` is the set of keys already on screen. A held label is boxed with a smaller
+ * pad, so it survives the edge of a collision that a newcomer would lose — a name does not flicker
+ * out because a neighbour drifted a pixel. Importance still wins: a held small town yields to a
+ * bigger city, and among same-tier equals the held one is placed first. */
+export function layoutLabels(candidates, measure, w, h, { pad = 3, max = 90, held = null } = {}) {
+  const heldKey = (c) => !!held && held.has(c.key ?? placeKey(c));
   const kept = [];
-  for (const c of candidates) {
+  for (const c of candidates.slice().sort(byPriority(heldKey))) {
     if (kept.length >= max) break;
     const font = labelFont(c.minZoom);
     const tw = measure(c.name, font);
-    const box = { x0: c.x - tw / 2 - pad, x1: c.x + tw / 2 + pad, y0: c.y - font.px / 2 - pad, y1: c.y + font.px / 2 + pad };
+    const p = heldKey(c) ? Math.min(pad, 1) : pad;
+    const box = { x0: c.x - tw / 2 - p, x1: c.x + tw / 2 + p, y0: c.y - font.px / 2 - p, y1: c.y + font.px / 2 + p };
     if (box.x1 < 0 || box.x0 > w || box.y1 < 0 || box.y0 > h) continue;
     if (kept.some((k) => box.x0 < k.box.x1 && box.x1 > k.box.x0 && box.y0 < k.box.y1 && box.y1 > k.box.y0)) continue;
     kept.push({ ...c, font, box });
   }
   return kept;
+}
+
+/* ── Zoom animation + fade (NEW-1 amend, 2026-09-29) ──────────────────────────────────────────
+ * Leaflet animates the imagery with a CSS transition — 0.25 s, cubic-bezier(0,0,.25,1) — on a
+ * translate+scale transform, then fires zoomend. CSS interpolates the transform's components
+ * linearly in eased time, so any ground point's screen position is exactly
+ * lerp(position-in-the-start-view, position-in-the-end-view, ease(t)). Drawing labels at that
+ * lerp pins them to the ground for the whole animation while the text itself is never scaled. */
+export const ZOOM_ANIM_MS = 250;
+export const FADE_MS = 160;
+
+export function zoomEase(u) {
+  if (!(u > 0)) return 0;
+  if (u >= 1) return 1;
+  const X = (t) => 3 * (1 - t) * t * t * 0.25 + t * t * t;   // x(t) of cubic-bezier(0,0,.25,1)
+  const Y = (t) => 3 * (1 - t) * t * t + t * t * t;          // y(t)
+  let lo = 0, hi = 1;
+  for (let i = 0; i < 32; i++) { const m = (lo + hi) / 2; if (X(m) < u) lo = m; else hi = m; }
+  return Y((lo + hi) / 2);
+}
+
+export const lerpPoint = (a, b, p) => ({ x: a.x + (b.x - a.x) * p, y: a.y + (b.y - a.y) * p });
+
+/* Move `cur` toward `target` by dtMs at a fixed rate (full 0→1 in FADE_MS). */
+export function stepScalar(cur, target, dtMs) {
+  const d = Math.max(0, dtMs) / FADE_MS;
+  return target > cur ? Math.min(target, cur + d) : Math.max(target, cur - d);
+}
+
+/* One fade tick over the tracked labels ({ a: 0..1 } per key): wanted ones rise, the rest fall and
+ * are dropped once invisible. Returns true while anything is still mid-fade (keep animating). */
+export function stepFade(tracked, wantedKeys, dtMs) {
+  let busy = false;
+  for (const [k, e] of tracked) {
+    const target = wantedKeys.has(k) ? 1 : 0;
+    e.a = stepScalar(e.a, target, dtMs);
+    if (e.a <= 0 && target === 0) { tracked.delete(k); continue; }
+    if (e.a !== target) busy = true;
+  }
+  return busy;
 }

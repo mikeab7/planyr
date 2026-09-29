@@ -509,6 +509,13 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   boundary lines and would double up with the state outlines. The finder's "City names" row is separate
   from "Road names" (Esri transportation tiles, no city names). Guards: the repo-root `test/` suite placeNames
   + ui-audit verify-place-names.
+- **Zoom animation of our own canvases (B1978048):** Leaflet animates tiles/markers/its renderers on a zoom but NOT a hand-drawn
+  canvas (it moves state to the end view at once; its stock canvas renderer CSS-scales the bitmap 1×→2× then snaps back). Both
+  lazy layers (`placeNamesLayer.js`, `adminBoundaryLayer.js`) therefore draw their own canvas and re-project every frame through
+  `zoomTracker.js` (lerp start view → end view, progress read off a hidden `leaflet-zoom-animated` sentinel so it shares the tiles'
+  exact transition clock). Never put a text/hairline canvas in a Leaflet-scaled renderer, and never transform these canvases.
+  Labels also fade and use collision hysteresis (`layoutLabels` `held`; priority is order-independent). Guards: test/placeNames +
+  the mid-zoom sections of verify-place-names / verify-admin-boundaries (real Leaflet markers as the oracle).
 - **B1141/B1142 — the drawing is WELDED to the basemap, and the weld is MEASURED, never assumed.**
   `mapLock.js` (`tileNwFeet` / `basemapWrapPoint` / `registrationShift` / `sanitizeShift`) computes how
   far the drawing sits from the imagery; `SitePlanner` applies it as a CSS translate on the SVG canvas

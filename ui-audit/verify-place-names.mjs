@@ -59,6 +59,7 @@ const setView = (lat, lng, z) => page.evaluate(([la, lo, zz]) => {
     }
   }
   if (!map) return false;
+  window.__pnMap = map;
   map.setView([la, lo], zz, { animate: false });
   return true;
 }, [lat, lng, z]);
@@ -106,6 +107,73 @@ const geoBefore = asked.filter((u) => u.includes("geo/place-names")).length;
 await setView(29.79, -95.82, 16); await read(); await setView(29.79, -95.81, 17); await read();
 ok("at site working zoom, no name data is requested", asked.filter((u) => u.includes("geo/place-names")).length === geoBefore);
 ok("the pane sits below the vector-overlay pane (400) and cannot take a click", z14 && Number(z14.z) < 400 && z14.pe === "none", `z-index ${z14?.z} pointer-events ${z14?.pe}`);
+
+
+/* NEW-1 amend (2026-09-29) — names ride the ground THROUGH a zoom animation, at constant text size.
+ *
+ * ORACLE, independent of the code under test: real Leaflet markers dropped on the same places.
+ * Leaflet itself animates a marker with the same CSS transition it gives the imagery, so a marker's
+ * live on-screen rect IS where the ground is on every frame. Each sampled frame the harness draws
+ * the layer synchronously (drawSync) and reads label position + type size against that marker in
+ * the SAME callback — no frame of skew. KNOWN-GOOD ARM: the markers must actually MOVE during the
+ * animation (else this measured a non-animation and is VOID), and labels must be present.
+ * (Sandbox has no imagery, so tiles are absent; markers carry the truth instead.) */
+await setView(29.79, -95.62, 10); await read();
+await page.addScriptTag({ path: new URL("../node_modules/leaflet/dist/leaflet.js", import.meta.url).pathname });
+const sampleZoom = async (label, act) => {
+  await setView(29.79, -95.62, 10); await read();
+  await page.evaluate(() => {
+    const map = window.__pnMap, pane = document.querySelector(".leaflet-placenames-pane"), ctl = pane.__placeNames;
+    window.__pnMarkers && window.__pnMarkers.forEach((m) => m.remove());
+    ctl.drawSync(performance.now());
+    window.__pnMarkers = pane.__drawn.filter((d) => d.a > 0.99).slice(0, 6).map((d) => {
+      const m = window.L.marker([d.lat, d.lng], { icon: window.L.divIcon({ className: "", html: '<i style="display:block;width:6px;height:6px"></i>', iconSize: [6, 6], iconAnchor: [3, 3] }), interactive: false, keyboard: false }).addTo(map);
+      m.__key = d.key; return m;
+    });
+    window.__pnS = []; const cont = map.getContainer(), canvas = pane.querySelector("canvas"); let n = 0;
+    const tick = (ts) => {
+      ctl.drawSync(ts);
+      const cr = cont.getBoundingClientRect(), frame = { t: ts, zoom: map.getZoom(), tf: getComputedStyle(canvas).transform, cw: canvas.style.width, rows: [] };
+      for (const m of window.__pnMarkers) {
+        const d = pane.__drawn.find((x) => x.key === m.__key); if (!d) continue;
+        const r = m._icon.getBoundingClientRect();
+        frame.rows.push({ t: ts, zoom: map.getZoom(), a: d.a, key: m.__key, dx: d.x - (r.left + r.width / 2 - cr.left), dy: d.y - (r.top + r.height / 2 - cr.top), mx: r.left + r.width / 2 - cr.left, px: d.px });
+      }
+      window.__pnS.push(frame);
+      if (++n < 60) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  await act();
+  await page.waitForTimeout(1300);
+  const frames = await page.evaluate(() => window.__pnS);
+  const rows = frames.flatMap((f) => f.rows);
+  const dev = Math.max(0, ...rows.map((r) => Math.hypot(r.dx, r.dy)));
+  const byKey = {}; for (const r of rows) (byKey[r.key] = byKey[r.key] || []).push(r);
+  const travel = Math.max(0, ...Object.values(byKey).map((a) => Math.max(...a.map((r) => r.mx)) - Math.min(...a.map((r) => r.mx))));
+  const sizeStable = Object.values(byKey).every((a) => new Set(a.map((r) => r.px)).size === 1);
+  const unscaled = frames.every((f) => f.tf === "none" || /^matrix\(1, 0, 0, 1, /.test(f.tf));
+  ok(`${label}: known-good arm — labels present and the ground actually moved (≥ 20 units)`, rows.length >= 20 && travel >= 20, `${rows.length} samples, travel ${travel.toFixed(0)}`);
+  const worst = rows.reduce((w, r) => (Math.hypot(r.dx, r.dy) > Math.hypot(w.dx, w.dy) ? r : w), rows[0] || { dx: 0, dy: 0 });
+  ok(`${label}: every label sits on its ground point on every frame of the zoom (≤ 2 units)`, dev <= 2, `worst ${dev.toFixed(2)}${dev > 2 ? ` ${JSON.stringify(worst)}` : ""}`);
+  ok(`${label}: type size never changes and the canvas is never scaled`, sizeStable && unscaled);
+};
+const zoomBtn = (sel) => async () => { await page.locator(sel).first().click(); };
+await sampleZoom("zoom-in button", zoomBtn(".leaflet-control-zoom-in"));
+await sampleZoom("zoom-out button", zoomBtn(".leaflet-control-zoom-out"));
+await sampleZoom("mouse wheel in", async () => { await page.mouse.move(700, 400); await page.mouse.wheel(0, -120); });
+await sampleZoom("mouse wheel out", async () => { await page.mouse.move(500, 300); await page.mouse.wheel(0, 240); });
+await sampleZoom("double-click zoom", async () => { await page.mouse.dblclick(600, 380); });
+const fade = await page.evaluate(async () => {
+  const pane = document.querySelector(".leaflet-placenames-pane"), ctl = pane.__placeNames, map = window.__pnMap;
+  map.setView([29.79, -95.62], 9, { animate: false }); await new Promise((r) => setTimeout(r, 800));
+  const before = new Set(pane.__drawn.map((d) => d.key)); const seen = [];
+  map.setView([29.79, -95.62], 11, { animate: false });
+  await new Promise((res) => { let n = 0; const t = (ts) => { ctl.drawSync(ts); seen.push(pane.__drawn.filter((d) => !before.has(d.key)).map((d) => d.a)); if (++n < 30) requestAnimationFrame(t); else res(); }; requestAnimationFrame(t); });
+  return seen;
+});
+const partial = fade.flat().some((a) => a > 0.05 && a < 0.95);
+ok("names that appear FADE in (some frame between invisible and full), not pop", partial, `${fade.flat().filter((a) => a > 0.05 && a < 0.95).length} in-between samples`);
 
 /* Layers-panel row: exists, on by default, and toggling it off clears the canvas. */
 await setView(29.79, -95.82, 11); await read();

@@ -227,6 +227,53 @@ const back = await inkAndPane(page);
 ok("boundaries disappear again on the way back in to site zoom", back.ink === 0 && back.levels === "",
   `${back.ink} lit px, data-levels="${back.levels}"`);
 
+/* ---- 5b. NEW-1 amend (2026-09-29): the lines ride the ground through a zoom, at constant width -----
+ * Leaflet's stock canvas renderer CSS-scaled its bitmap during the 0.25 s zoom animation (measured:
+ * a matrix scale running 1 → 2, then snapping back), so the hairlines and casing fattened and
+ * re-thinned on every zoom. The layer now draws its own canvas and re-projects each frame.
+ * ORACLE: real Leaflet markers (animated by Leaflet's own CSS transition, exactly like the imagery)
+ * at fixed places vs the layer's own projection that frame; plus the canvas must never be scaled and
+ * must never go blank mid-zoom. KNOWN-GOOD ARM: the markers must actually move (else VOID). */
+await page.addScriptTag({ path: new URL("../node_modules/leaflet/dist/leaflet.js", import.meta.url).pathname });
+const setMapView = (lat, lng, z) => page.evaluate(([la, lo, zz]) => {
+  const el = document.querySelector(".leaflet-container");
+  const key = Object.keys(el).find((k) => k.startsWith("__reactFiber"));
+  let f = el[key], m = null;
+  for (let n = 0; f && n < 60 && !m; n++, f = f.return) for (let h = f.memoizedState; h && !m; h = h.next) { const c = h.memoizedState && h.memoizedState.current; if (c && typeof c.setView === "function" && typeof c.getZoom === "function") m = c; }
+  if (!m) return false; window.__abMap = m; m.setView([la, lo], zz, { animate: false }); return true;
+}, [lat, lng, z]);
+const sampleAdminZoom = async (label, from, act, at = [31, -97]) => {
+  await setMapView(at[0], at[1], from); await page.waitForTimeout(1500);
+  await page.evaluate(() => {
+    const map = window.__abMap, pane = document.querySelector(".leaflet-adminboundaries-pane"), ctl = pane.__adminBoundaries, canvas = pane.querySelector("canvas");
+    window.__abMarkers && window.__abMarkers.forEach((m) => m.remove());
+    window.__abMarkers = [[31, -97], [33, -100], [29, -95], [35, -92]].map((ll) => window.L.marker(ll, { icon: window.L.divIcon({ className: "", html: '<i style="display:block;width:6px;height:6px"></i>', iconSize: [6, 6], iconAnchor: [3, 3] }), interactive: false, keyboard: false }).addTo(map));
+    window.__abS = []; const cont = map.getContainer(); let n = 0;
+    const tick = (ts) => {
+      ctl.drawSync(ts);
+      const cr = cont.getBoundingClientRect(), d = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+      let ink = 0; for (let i = 3; i < d.length; i += 64) if (d[i] > 8) ink++;
+      const rows = window.__abMarkers.map((m) => { const r = m._icon.getBoundingClientRect(), a = pane.__at(m.getLatLng()); return { dx: a.x - (r.left + r.width / 2 - cr.left), dy: a.y - (r.top + r.height / 2 - cr.top), mx: r.left + r.width / 2 - cr.left }; });
+      window.__abS.push({ tf: getComputedStyle(canvas).transform, ink, rows });
+      if (++n < 60) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  await act();
+  await page.waitForTimeout(1300);
+  const frames = await page.evaluate(() => window.__abS);
+  const rows = frames.flatMap((f) => f.rows);
+  const dev = Math.max(0, ...rows.map((r) => Math.hypot(r.dx, r.dy)));
+  const travel = Math.max(...rows.map((r) => r.mx)) - Math.min(...rows.map((r) => r.mx));
+  ok(`${label}: known-good arm — the ground actually moved (≥ 20 units) and lines were drawn`, travel >= 20 && frames.some((f) => f.ink > 50), `travel ${travel.toFixed(0)}, max ink samples ${Math.max(...frames.map((f) => f.ink))}`);
+  ok(`${label}: the drawing's projection tracks the moving ground on every frame (≤ 2 units)`, dev <= 2, `worst ${dev.toFixed(2)}`);
+  ok(`${label}: the canvas is never scaled (hairlines keep their width)`, frames.every((f) => f.tf === "none" || /^matrix\(1, 0, 0, 1, /.test(f.tf)), [...new Set(frames.map((f) => f.tf.slice(0, 18)))].slice(0, 3).join(" | "));
+  ok(`${label}: never blank mid-zoom (ink on every frame)`, frames.every((f) => f.ink > 0), `${frames.filter((f) => f.ink === 0).length} blank frames`);
+};
+await sampleAdminZoom("zoom-in button (6→7)", 6, async () => { await page.locator(".leaflet-control-zoom-in").first().click(); });
+await sampleAdminZoom("zoom-out button (7→6)", 7, async () => { await page.locator(".leaflet-control-zoom-out").first().click(); });
+await sampleAdminZoom("mouse wheel in (8→, on the Texas–Louisiana line)", 8, async () => { await page.mouse.move(700, 400); await page.mouse.wheel(0, -120); }, [30.3, -93.74]);
+
 /* ---- 6. the layer never steals a click, and never sits over site geometry -------------- */
 ok("the boundary pane cannot take a click from the map", floor.pane?.pointerEvents === "none", floor.pane?.pointerEvents);
 ok("the boundary pane sits below the vector-overlay pane (400) and every marker",

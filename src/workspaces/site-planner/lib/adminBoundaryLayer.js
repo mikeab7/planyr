@@ -14,9 +14,14 @@
  * scale in Texas downloads none of it.
  *
  * CANVAS, NOT SVG. 346 rings over ~11,800 points would be 692 individually-transformed
- * SVG <path> nodes re-laid-out on every pan frame. Leaflet's canvas renderer draws the
- * whole set into one bitmap, which is the right instrument for many non-interactive
- * lines and keeps a continental pan cheap.
+ * SVG <path> nodes re-laid-out on every pan frame — one bitmap is the right instrument.
+ *
+ * OUR OWN CANVAS, NOT LEAFLET'S RENDERER (NEW-1 amend, 2026-09-29). Leaflet's `L.canvas` keeps a
+ * pan cheap but, on a zoom, CSS-scales its bitmap (measured: its canvas ran 1× → 2× over the 0.25 s
+ * animation, then snapped back) — so the hairlines and their casing visibly fattened and re-thinned
+ * on every zoom. This layer draws its own canvas and, during a zoom, re-projects every vertex each
+ * frame between the start and end views (zoomTracker.js) — lines ride the ground and stay the same
+ * width, like the city names. ~30k vertices is a few multiplies each; bounding boxes cull rings.
  *
  * SUBORDINATE BY CONSTRUCTION, three ways over:
  *   1. Its own pane at z-index 250 — above the imagery tiles (200), below the vector
@@ -33,6 +38,7 @@ import L from "leaflet";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { ADMIN_BOUNDARY_MAX_ZOOM } from "./adminBoundaryGate.js";
 import { adminBoundaryLevels, admin1Style, decodeAsset } from "./adminBoundaryData.js";
+import { createZoomTracker, toUnit } from "./zoomTracker.js";
 
 const ASSET = "geo/admin-boundaries.json";
 const DETAIL_ASSET = "geo/admin1-detail.json";
@@ -64,7 +70,7 @@ function loadRings(asset = ASSET) {
   return rings.get(asset);
 }
 
-/* One controller per map. Holds the two level groups and swaps them in/out on zoom. */
+/* One controller per map. Holds the level groups and redraws them every move / zoom frame. */
 const attached = new WeakMap();
 
 export function attachAdminBoundaries(map) {
@@ -77,44 +83,73 @@ export function attachAdminBoundaries(map) {
     pane.style.zIndex = String(PANE_Z);
     pane.style.pointerEvents = "none";
   }
-  const renderer = L.canvas({ pane: PANE, padding: 0.5 });
+  const pane = map.getPane(PANE);
+  const canvas = L.DomUtil.create("canvas", "", pane);
+  canvas.style.pointerEvents = "none";
+  canvas.setAttribute("aria-hidden", "true");
+  const ctx = canvas.getContext("2d");
   const groups = {};  // country · admin1 (coarse) · admin1Detail (fine, loaded on demand)
-  let destroyed = false, detailRequested = false;
+  let destroyed = false, detailRequested = false, raf = 0;
 
-  const buildGroup = (lines, style) => {
-    const group = L.layerGroup();
-    const polys = [];
-    for (const ring of lines || []) {
-      const casing = L.polyline(ring, { ...style.casing, renderer, pane: PANE, interactive: false, lineJoin: "round" }).addTo(group);
-      const line = L.polyline(ring, { ...style.line, renderer, pane: PANE, interactive: false, lineJoin: "round" }).addTo(group);
-      polys.push([casing, line]);
+  /* A group is a list of rings in UNIT web-mercator, flat [x0,y0,x1,y1,…], with a bounding box —
+   * projected once here, so a frame is two multiplies per vertex (zoomTracker.js). */
+  const buildGroup = (lines) => (lines || []).map((ring) => {
+    const u = new Float64Array(ring.length * 2);
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    ring.forEach((ll, i) => {
+      const [x, y] = toUnit(map, ll);
+      u[2 * i] = x; u[2 * i + 1] = y;
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+    });
+    return { u, box: [x0, y0, x1, y1] };
+  });
+
+  const tracker = createZoomTracker(map, pane, { onStart: () => schedule(), onEnd: () => schedule() });
+
+  const strokeGroup = (group, f, w, h, casing, line) => {
+    for (const st of [casing, line]) {
+      ctx.beginPath();
+      for (const r of group) {
+        const a = f.unit(r.box[0], r.box[1]), b = f.unit(r.box[2], r.box[3]);
+        if (b.x < -20 || a.x > w + 20 || b.y < -20 || a.y > h + 20) continue; // ring bbox is off-screen
+        const u = r.u;
+        let p = f.unit(u[0], u[1]);
+        ctx.moveTo(p.x, p.y);
+        for (let i = 2; i < u.length; i += 2) { p = f.unit(u[i], u[i + 1]); ctx.lineTo(p.x, p.y); }
+      }
+      ctx.globalAlpha = st.opacity; ctx.strokeStyle = st.color; ctx.lineWidth = st.weight;
+      ctx.stroke();
     }
-    group._pairs = polys;
-    return group;
-  };
-  const build = (decoded) => {
-    groups.country = buildGroup(decoded.country, COUNTRY_STYLE);
-    groups.admin1 = buildGroup(decoded.admin1, admin1Style(map.getZoom()));
-  };
-  const restyle = (group, style) => {
-    for (const [c, l] of group._pairs || []) { c.setStyle(style.casing); l.setStyle(style.line); }
   };
 
-  /* Add/remove whole level groups to match the gate. Leaflet skips drawing a layer that
-   * is not on the map, so an out-of-band level costs nothing per frame.
+  /* Draw one frame. Which levels are on comes from the zoom being DRAWN (the end zoom during an
+   * animation), so the gate answers to where the zoom is heading.
    *
    * The pane is stamped with what is currently drawn — `data-levels` (country / admin1) and
    * `data-detail` ("1" when the fine geometry is the one on screen) — the same trick the
    * flood panel uses with `data-surface`: it gives a headless check something OURS to assert
-   * against instead of reaching into Leaflet. A mirror of what was drawn, never the source. */
-  const sync = () => {
+   * against instead of reaching into Leaflet. A mirror of what was drawn, never the source.
+   * `pane.__at(latlng)` is this frame's projection, read by the mid-zoom check. */
+  const draw = (ts) => {
+    raf = 0;
     if (destroyed) return;
-    const z = map.getZoom();
-    const want = adminBoundaryLevels(z, ADMIN_BOUNDARY_MAX_ZOOM);
-    if (want.detail && !detailRequested) {
+    const size = map.getSize();
+    const dpr = window.devicePixelRatio || 1;
+    if (canvas.width !== Math.round(size.x * dpr) || canvas.height !== Math.round(size.y * dpr)) {
+      canvas.width = Math.round(size.x * dpr); canvas.height = Math.round(size.y * dpr);
+      canvas.style.width = `${size.x}px`; canvas.style.height = `${size.y}px`;
+    }
+    L.DomUtil.setPosition(canvas, map.containerPointToLayerPoint([0, 0]));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, size.x, size.y);
+    ctx.lineJoin = "round"; ctx.lineCap = "round";
+
+    const f = tracker.frame(typeof ts === "number" ? ts : performance.now());
+    const want = adminBoundaryLevels(f.zoom, ADMIN_BOUNDARY_MAX_ZOOM);
+    if (want.detail && !detailRequested && groups.country) {
       detailRequested = true;
       loadRings(DETAIL_ASSET).then(
-        (d) => { if (!destroyed) { groups.admin1Detail = buildGroup(d.admin1, admin1Style(map.getZoom())); sync(); } },
+        (d) => { if (!destroyed) { groups.admin1Detail = buildGroup(d.admin1); schedule(); } },
         () => { detailRequested = false; }, // already reported; the next zoom step retries
       );
     }
@@ -124,32 +159,38 @@ export function attachAdminBoundaries(map) {
       admin1: want.admin1 && !(want.detail && detailReady),
       admin1Detail: want.admin1 && want.detail && detailReady,
     };
+    const style = admin1Style(f.zoom);
     const drawn = [];
-    for (const key of Object.keys(groups)) {
-      const on = map.hasLayer(groups[key]);
-      if (show[key] && !on) groups[key].addTo(map);
-      else if (!show[key] && on) map.removeLayer(groups[key]);
-      if (show[key]) drawn.push(key === "admin1Detail" ? "admin1" : key);
-    }
-    if (groups.admin1 && show.admin1) restyle(groups.admin1, admin1Style(z));
-    if (groups.admin1Detail && show.admin1Detail) restyle(groups.admin1Detail, admin1Style(z));
-    const pane = map.getPane(PANE);
-    if (pane) { pane.dataset.levels = drawn.join(" "); pane.dataset.detail = show.admin1Detail ? "1" : "0"; }
+    if (show.country && groups.country) { strokeGroup(groups.country, f, size.x, size.y, COUNTRY_STYLE.casing, COUNTRY_STYLE.line); drawn.push("country"); }
+    if (show.admin1 && groups.admin1) { strokeGroup(groups.admin1, f, size.x, size.y, style.casing, style.line); drawn.push("admin1"); }
+    if (show.admin1Detail) { strokeGroup(groups.admin1Detail, f, size.x, size.y, style.casing, style.line); drawn.push("admin1"); }
+    ctx.globalAlpha = 1;
+    pane.dataset.levels = drawn.join(" ");
+    pane.dataset.detail = show.admin1Detail ? "1" : "0";
+    pane.__at = f.at;
+    if (f.animating) schedule();
   };
+  const schedule = () => { if (!raf && !destroyed) raf = requestAnimationFrame(draw); };
+  const onMove = () => schedule();
+  map.on("move zoom moveend zoomend resize", onMove);
 
   const controller = {
-    sync,
+    sync: schedule,
+    drawSync(ts) { if (raf) { cancelAnimationFrame(raf); raf = 0; } draw(ts); }, // headless checks: draw NOW, on the caller's frame
     destroy() {
       destroyed = true;
-      map.off("zoomend", sync);
-      for (const g of Object.values(groups)) { try { map.removeLayer(g); } catch (_) { /* map already torn down */ } }
+      if (raf) cancelAnimationFrame(raf);
+      map.off("move zoom moveend zoomend resize", onMove);
+      tracker.destroy();
+      try { canvas.remove(); } catch (_) { /* map already torn down */ }
       attached.delete(map);
     },
   };
   attached.set(map, controller);
+  pane.__adminBoundaries = controller; // test-only handle (ui-audit/verify-admin-boundaries.mjs); nothing in the app reads it
 
   loadRings().then(
-    (decoded) => { if (!destroyed) { build(decoded); map.on("zoomend", sync); sync(); } },
+    (decoded) => { if (!destroyed) { groups.country = buildGroup(decoded.country); groups.admin1 = buildGroup(decoded.admin1); schedule(); } },
     () => { attached.delete(map); }, // already reported; a later zoom-out re-attaches and retries
   );
   return controller;
