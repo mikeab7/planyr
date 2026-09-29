@@ -2785,28 +2785,46 @@ export function countyBboxIntersectsView(key, bounds) {
  * The display-path twin of B1457152 (which narrowed the CLICK path only): select mode used to add a
  * display layer for EVERY wired source in the country, so one zoom near Cartersville GA fired ~400
  * `/query` tile requests across 65 services (Texas, Alaska, Connecticut…), starved the imagery and
- * attributed Harris County on a Georgia map. Rule: a per-county source qualifies only if its
- * registered bbox intersects the view; a statewide composite (no bbox) qualifies only for a state
- * actually in view, found by asking the SAME nationwide geometry `candidateCountiesForPoint` uses
- * at a sample grid over the view. A view over a state with no source returns []. `bounds` is a
- * plain `{south, west, north, east}`. Pure — the caller adds what's returned and removes the rest.
- * Mirrors the click path's narrowing, so what you SEE still equals what you can SELECT (B137). */
+ * attributed Harris County on a Georgia map.
+ *
+ * ONE SOURCE PER AREA (amendment, measured live after the first cut: Fulton County's layer drew on
+ * top of Bartow's). A per-county bbox is a padded RECTANGLE — Fulton's reaches Bartow's ground — so
+ * the county half asks the same nationwide county GEOMETRY the click path does
+ * (`candidateCountiesForPoint`, which already narrows a confidently-resolved point to its own
+ * county) at a sample grid over the view, never a rectangle test. A statewide composite qualifies
+ * only for ground no county source covers; the caller adds it for a county whose live layer fails.
+ * Only while the geometry asset is not yet resident does it fall back to bbox overlap (the old
+ * over-inclusive-but-bounded answer) so the first frame is never empty. A view over a state with no
+ * source returns []. `bounds` is a plain `{south, west, north, east}`. Pure. Mirrors the click
+ * path's narrowing, so what you SEE still equals what you can SELECT (B137). */
 export function displaySourcesForView(bounds) {
   if (!bounds) return [];
   const out = new Set();
-  const N = 4; // (N+1)² sample points — enough to catch every state a screen-sized view can span
+  const N = 8; // (N+1)² sample points
+  let pending = false;
   for (let i = 0; i <= N; i++) {
     for (let j = 0; j <= N; j++) {
       const lat = bounds.south + ((bounds.north - bounds.south) * i) / N;
       const lng = bounds.west + ((bounds.east - bounds.west) * j) / N;
-      candidateCountiesForPoint(lat, lng).forEach((k) => { if (COUNTIES_MAP[k] && COUNTIES_MAP[k].statewide) out.add(k); });
+      const a = resolveCounty(lat, lng);
+      if (a && a.status === "pending") pending = true;
+      const cands = candidateCountiesForPoint(lat, lng).filter((k) => COUNTIES_MAP[k]);
+      const county = cands.filter((k) => !COUNTIES_MAP[k].statewide);
+      if (county.length) county.forEach((k) => out.add(k));
+      else cands.forEach((k) => out.add(k)); // statewide composites: only where no county source covers the point
     }
   }
-  Object.entries(COUNTIES_MAP).forEach(([k, c]) => {
-    if (!c.statewide && c.bbox && countyBboxIntersectsView(k, bounds)) out.add(k);
-  });
+  if (pending) {
+    Object.entries(COUNTIES_MAP).forEach(([k, c]) => {
+      if (!c.statewide && c.bbox && countyBboxIntersectsView(k, bounds)) out.add(k);
+    });
+  }
   return [...out];
 }
+
+/* B1976336 — the statewide composite(s) that back a county whose own layer failed. */
+export const statewideKeysForState = (state) =>
+  Object.entries(COUNTIES_MAP).filter(([, c]) => c.statewide && (!c.state || c.state === state)).map(([k]) => k);
 
 export function candidateCountiesForPoint(lat, lng) {
   const entries = Object.entries(COUNTIES_MAP);

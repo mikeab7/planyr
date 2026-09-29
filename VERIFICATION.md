@@ -211,6 +211,8 @@ Sandbox-proven: `test/parcelDisplaySourcesForView.test.js` (8). **Still needs li
 3. Attribution strip. **Expect:** no Harris County / Texas credits.
 4. Pan east across Augusta (GA/SC line). **Expect:** only GA and SC sources requested. Then a Houston view. **Expect:** Harris + TxGIO only; a Denver view: Colorado only.
 5. Turn Select parcels off. **Expect:** all outline layers removed.
+6. (Amendment, build after 2aaa1c4) Back at 34.20 / -84.83 turn Select parcels on. **Expect:** the tab stays responsive (a screenshot/click answers within a couple of seconds, no 30 s stall) and only ONE source draws (Bartow; no Fulton `Tax_Parcels` request).
+7. Zoom 15 → 14 → 15 → 14, then in the console (`?planyrDiag=1`) run `window.__mapParcelDisplay()`. **Expect:** `sources` = ["ga_bartow"], `held` in the low thousands and back near its starting number after returning to the same zoom (not growing every step); overlay pane holds a `<canvas>` and no thousands of `<path>` nodes.
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1976336.
 ### V1400816 — B1964512: clicking Chambers lots along Gordon Speer Chambers Pkwy adds exactly the lot under the cursor `Blocker: live-GIS`
 

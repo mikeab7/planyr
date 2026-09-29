@@ -2,7 +2,7 @@ import { Fragment, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, 
 import { validateName, announceNameNotice } from "../../shared/names/nameCore.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote, countyBboxIntersectsView, displaySourcesForView } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState } from "./lib/counties.js";
 import { landingView, milesBetween, CLUSTER_RADIUS_MI, locatedPoints } from "./lib/landingView.js";
 import { decideTargetOf, orderVerbs, verbLabel } from "./lib/decideBar.js";
 import {
@@ -2934,6 +2934,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       });
       recordSourceResult(key, false);
       downDisplaysRef.current.add(key);
+      setTimeout(syncDisplaysToView, 0); // B1976336 — bring in the statewide backup for this county
       // B1164656 (NEW-1/NEW-2) — a county with a loaded Drive PARCEL SNAPSHOT has a real fallback
       // better than the generic statewide outline: its OWN saved copy, which the click path now
       // (NEW-1, `snapshotHitAt` in `handleClick`) resolves a lot from too. Show it, and say so —
@@ -2991,10 +2992,35 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     if (!map || !selectModeRef.current) return;
     const b = map.getBounds();
     const want = new Set(displaySourcesForView({ south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() }));
+    // A county whose own live layer failed is backed by its state's statewide composite (the
+    // composite is otherwise drawn only where no county source exists — one source per area).
+    downDisplaysRef.current.forEach((k) => {
+      if (want.has(k)) statewideKeysForState(COUNTIES_MAP[k] && COUNTIES_MAP[k].state).forEach((sk) => want.add(sk));
+    });
     wantedDisplaysRef.current = want;
     Object.keys(displaysRef.current).forEach((k) => { if (!want.has(k)) removeDisplay(k); });
     want.forEach((k) => { if (layerUrlsRef.current[k]) addDisplay(k); });
   };
+  /* B1976336 — read-only diagnostic: which parcel sources are drawing and how many outline features
+   * each holds right now. Gated at CALL time by `isDiagArmed` (see diagArm.js), writes nothing. The
+   * "features held stays bounded to the view across a zoom cycle" acceptance reads this. */
+  useEffect(() => {
+    const hook = () => {
+      if (!isDiagArmed(window)) return null;
+      const seen = new Set();
+      const layers = [];
+      Object.entries(displaysRef.current).forEach(([key, fl]) => {
+        if (!fl || seen.has(fl)) return;
+        seen.add(fl);
+        let held = 0, drawn = 0;
+        try { if (typeof fl.eachFeature === "function") fl.eachFeature((l) => { held++; if (mapRef.current && mapRef.current.hasLayer(l)) drawn++; }); } catch (_) {}
+        layers.push({ key, url: displaySrcRef.current[key] && displaySrcRef.current[key].url, held, drawn });
+      });
+      return { sources: layers.map((l) => l.key), layers, held: layers.reduce((n, l) => n + l.held, 0), drawn: layers.reduce((n, l) => n + l.drawn, 0) };
+    };
+    window.__mapParcelDisplay = hook;
+    return () => { if (window.__mapParcelDisplay === hook) window.__mapParcelDisplay = null; };
+  }, []);
   const clearDisplays = () => {
     wantedDisplaysRef.current = null;
     const map = mapRef.current;

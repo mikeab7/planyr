@@ -153,7 +153,8 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
   await page.waitForTimeout(1200);
   await page.locator('[data-testid="map-toolbar-select-parcels"]').first().click();
   await page.waitForTimeout(1500);
-  const paths = await page.locator(".leaflet-overlay-pane path").count();
+  // B1976336 — parcel outlines now paint on a canvas (one bitmap, no <path> per lot)
+  const paths = await page.locator(".leaflet-overlay-pane path, .leaflet-overlay-pane canvas").count();
   expect("Harris renders vector parcel outlines (unaffected by the raster-layer fix)", paths > 0, `${paths} path nodes`);
   expect("no uncaught page errors", pageErrors.length === 0, `${pageErrors.length} errors`);
   await page.close();
@@ -175,7 +176,9 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
   await page.locator('[data-testid="map-toolbar-select-parcels"]').first().click();
 
   let sawNonZero = false, regressedToZero = false, sawComplete = false;
-  for (let i = 0; i < 40; i++) { // 40 * 150ms = 6s, comfortably past the 3s mocked export delay
+  // B1976336 — the statewide backup now comes in only once the county's own layer is declared down
+  // (8 s hang-guard), so the window covers guard + the 3 s mocked export: 100 * 150ms = 15s.
+  for (let i = 0; i < 100; i++) {
     await page.waitForTimeout(150);
     const state = await page.evaluate(() => {
       const img = document.querySelector(".leaflet-overlay-pane img[src*='feature.geographic.texas.gov']");
@@ -212,7 +215,8 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
   await page.locator('[data-testid="map-toolbar-select-parcels"]').first().click();
   await page.waitForTimeout(9000); // past the 8s hang-guard
   const notice = await page.locator('[data-testid="map-source-notice"], [role="status"]').first().innerText().catch(() => "");
-  const paths = await page.locator(".leaflet-overlay-pane path").count();
+  // B1976336 — parcel outlines now paint on a canvas (one bitmap, no <path> per lot)
+  const paths = await page.locator(".leaflet-overlay-pane path, .leaflet-overlay-pane canvas").count();
   console.log(`  notice: ${JSON.stringify(notice)}`);
   expect("Chambers falls back to its cached Drive snapshot and draws it (vector layer)", paths > 0, `${paths} path nodes`);
   expect("no uncaught page errors", pageErrors.length === 0, `${pageErrors.length} errors`);

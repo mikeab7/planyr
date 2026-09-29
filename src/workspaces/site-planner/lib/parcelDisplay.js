@@ -29,6 +29,7 @@ import * as EL from "esri-leaflet";
 import L from "leaflet";
 import { STATEWIDE_PARCEL_LAYER } from "./counties.js";
 import { getSnapshot, featuresForView, onSnapshotChange } from "./parcelSnapshot.js";
+import { pruneToLiveCells } from "./parcelPrune.js";
 import { guardRasterOpacity } from "./parcelOpacityGuard.js";
 import { PARCEL_MINZOOM, PARCEL_VECTOR_MINZOOM, parcelDisplayRegimeForZoom, parcelUrlSupportsImageExport, MAPSERVER_LAYER_RE } from "./parcelDisplayZoom.js";
 
@@ -37,16 +38,43 @@ export { PARCEL_MINZOOM, PARCEL_VECTOR_MINZOOM, parcelDisplayRegimeForZoom, parc
 // `opts` overrides the defaults below (e.g. a tighter `minZoom` for the "close" regime of
 // `makeParcelAdaptiveLayer`); every existing single-argument caller is unaffected.
 export function makeParcelLayer(url, opts) {
-  return EL.featureLayer({
+  /* B1976336 — TWO MEASURED COSTS, both found on Michael's Bartow view (17,282 <path> nodes held
+   * after ONE zoom step, only 27 distinct `d`, tab unresponsive for 30 s):
+   *  · a CANVAS renderer instead of one SVG <path> per lot: thousands of outlines become one bitmap
+   *    (no DOM node per parcel). `interactive:false` and the client-side hit test (`eachFeature` →
+   *    geometry) are untouched, so click-to-select is unchanged (B137). The renderer leaves the map
+   *    with the layer so no empty canvas is left behind.
+   *  · `pruneToLiveCells` — esri-leaflet 3.0.19 NEVER releases a feature once fetched: `cellLeave`
+   *    only removes when `!_activeCells[key]`, but `_removeCell` sets `_activeCells[key]` (for reuse)
+   *    just before calling it, so the test can never pass, and `cacheLayers:false` therefore changes
+   *    nothing (measured). A zoom-out/zoom-in cycle accumulated the union of every tile ever fetched.
+   *    After each move we drop every feature that belongs only to cells that are no longer current,
+   *    and forget those cells so they are re-requested if the view returns. Features held track the
+   *    view. */
+  const renderer = L.canvas({ padding: 0.3 });
+  const layer = EL.featureLayer({
     url,
     minZoom: PARCEL_MINZOOM,
     simplifyFactor: 0.5,
     precision: 6,
     fields: ["OBJECTID"],
     interactive: false, // purely visual; clicks go to the map/canvas for add/remove
+    renderer,
     style: () => ({ color: "#a21caf", weight: 1.3, opacity: 0.95, fillOpacity: 0 }),
     ...opts,
   });
+  let mapRef = null;
+  let timer = null;
+  const prune = () => { timer = null; if (layer._map) pruneToLiveCells(layer); };
+  const onMoved = () => { if (timer) clearTimeout(timer); timer = setTimeout(prune, 0); };
+  layer.on("add", () => { mapRef = layer._map; if (mapRef) mapRef.on("moveend zoomend", onMoved); });
+  layer.on("remove", () => {
+    if (mapRef) mapRef.off("moveend zoomend", onMoved);
+    mapRef = null;
+    if (timer) { clearTimeout(timer); timer = null; }
+    try { renderer.remove(); } catch (_) {}
+  });
+  return layer;
 }
 
 const trimUrl = (u) => String(u || "").replace(/\/+$/, "");
