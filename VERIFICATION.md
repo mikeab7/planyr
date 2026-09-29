@@ -180,6 +180,28 @@ Sandbox-proven (logged out, throwaway seeded plan with a generated 3000×1800 sh
 8. Read the served chunk hash in the same observation as each result.
 - **Stopping rule:** closes when 1-7 confirm on a real signed-in account with the build hash, or a failing step is filed as a recurrence on the matching B# (STANDING RULE #2).
 
+### V1396784 — B1960480: double-tap on blank paper raises the soft keyboard and the first text lands in the new box (real iPhone keyboard)
+
+Sandbox-proven on WebKit (touch emulation, `ui-audit/verify-notes-touch-place.mjs`) — keyboard typing, keydown-less `insertText`, title-focused variant, no scroll. NOT provable here: the real iOS soft keyboard, QuickPath, dictation, IME and autocapitalise.
+**Steps (real iPhone, a throwaway page):**
+1. Open a page, double-tap blank paper. **Expect:** the keyboard rises immediately and the shift key is on.
+2. Type "hello" (autocapitalise on). **Expect:** "Hello" appears in a NEW box at the tapped spot.
+3. Focus the page title, then double-tap blank paper. **Expect:** keyboard stays up, next letters go into the box, title unchanged.
+4. Double-tap blank paper on a page with an existing box, then tap a predictive suggestion / dictate / insert an emoji. **Expect:** it lands in the new box, not the old one.
+5. Empty page. **Expect:** the prompt reads "Double-tap anywhere to start a note."
+6. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1960480.
+
+
+### V1394448 — B1958144: designed road sections (median, lane striping, ROW lines) show on the real Silvestri and Richfield plans `Blocker: real-data`
+
+Sandbox-proven (logged out, seeded plan): `e2e/road-xsection-paint-order.spec.js` (red pre-fix), `ui-audit/verify-road-xsection-paint-order.mjs` (3 zooms + the real exported sheet). **Still needs the owner's real signed-in plans**, which carry the 5-band section (Silvestri "Concept D - Sylvestri Retail" road e1455126cfrjkf; Richfield Concept A road e1454943jjatdk).
+**Steps (on a throwaway DUPLICATE of each plan, never the real one):**
+1. Open the duplicate, zoom to the road. **Expect:** median band, lane striping and the width dimension are visible on the road, not one plain grey strip.
+2. Select the road, then click empty ground. **Expect:** decoration stays on top in both states.
+3. Export a PDF of the frame containing the road. **Expect:** median and striping appear on the sheet.
+4. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–3 on both plans, or a failed step re-opens B1958144 with a `Recurrence:` line.
 ### V1390098 — B1953795: Scheduler/Dashboard one-answer fixes (Complete, Has-a-schedule, since-last-here, health cards, Agenda, owner rename) on a real signed-in account `Blocker: real-data`
 
 Sandbox-proven (logged out): the unit suites named on B1953795 and `ui-audit/verify-schedule-completion.mjs` (red on main, ALL PASS here). **Still needs a signed-in pass on a THROWAWAY duplicate schedule/project (constraint 7 — never a real one)** for the parts that need a real schedule document, the Shell + embed, or a printed PDF.

@@ -56,8 +56,8 @@ describe("D3 — the berm ring is drawn INWARD, over the pond, inside the outlin
     // which shares this same rung for the identical reason. It is no longer guaranteed to sit
     // UNDER a building: an untouched plan re-stacks by creation order now, and a berm ring drawn
     // after a building can legitimately paint over it, same as any other element.
-    const elsNormal = src.indexOf("elPaintItems.normal.map((it) =>");
-    const elsLifted = src.indexOf("elPaintItems.lifted.map((it) =>");
+    const elsNormal = src.indexOf("elPaintItems.normal.map(renderPaintItem)");
+    const elsLifted = src.indexOf("elPaintItems.lifted.map(renderPaintItem)");
     const bermLayer = src.indexOf('data-testid="pond-berm-ring-layer"');
     expect(elsNormal).toBeGreaterThan(-1);
     expect(elsLifted).toBeGreaterThan(elsNormal);
