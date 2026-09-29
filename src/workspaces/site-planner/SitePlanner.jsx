@@ -2366,7 +2366,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * buildings here"), so it belongs to the plan, not to the session. */
   const [layerAbove, setLayerAbove] = useState(() => sanitizeLayerAbove(restored?.layerAbove));
   const prevAboveSig = useRef(aboveSig(sanitizeLayerAbove(restored?.layerAbove)));
-  const [selOverlay, setSelOverlay] = useState(null);   // id of the overlay shown in the panel
+  // NEW-6 (2026-09-29): the expanded OVERLAYS row is remembered per plan for the tab session, so a
+  // reload does not collapse it and hide Crop… behind an extra click. Per-viewer convenience only —
+  // the stored id is used purely to pick which row is open, so a stale/unknown id just opens nothing.
+  const selOverlayKey = siteId ? "planyr:selOverlay:" + siteId : null;
+  const [selOverlay, setSelOverlay] = useState(() => {   // id of the overlay shown in the panel
+    try { return (selOverlayKey && sessionStorage.getItem(selOverlayKey)) || null; } catch (_) { return null; }
+  });
+  useEffect(() => {
+    if (!selOverlayKey) return;
+    try { if (selOverlay) sessionStorage.setItem(selOverlayKey, selOverlay); else sessionStorage.removeItem(selOverlayKey); } catch (_) {}
+  }, [selOverlay, selOverlayKey]);
   // Transient editor state for the ONE expanded overlay row (B575 opacity field draft + B576 scale
   // picker mode/paired fields). Keyed by overlay id; `null` = follow the overlay's stored values.
   // Reset whenever the expanded overlay changes so a fresh row derives its display from the model.

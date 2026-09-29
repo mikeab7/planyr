@@ -65,7 +65,8 @@ const openPlan = async () => {
   await page.locator('button[title^="Zoom to fit"]').first().click(); // the panel narrows the canvas — frame the sheet in what's left
   await page.waitForTimeout(700);
 };
-const expandRow = async (name) => { await page.locator("button", { hasText: name }).first().click(); await page.waitForTimeout(400); };
+// NEW-6: the expanded row now survives a reload, so this is idempotent — clicking an open row would COLLAPSE it.
+const expandRow = async (name) => { if (await page.locator('[data-testid="overlay-crop-open"]').count()) return; await page.locator("button", { hasText: name }).first().click(); await page.waitForTimeout(400); };
 const stored = (id) => page.evaluate((id) => {
   const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
   const o = raw.C1 && raw.C1.sheetOverlays.find((x) => x.id === id);
@@ -128,7 +129,7 @@ await page.waitForTimeout(600);
 const dlg = page.locator('[data-testid="overlay-crop-dialog"]');
 check("Crop… opens the crop tool dialog", (await dlg.count()) === 1);
 await dlg.locator("button", { hasText: "Polygon" }).click();
-await dlg.locator("button", { hasText: "Clear polygon" }).click();
+{ const clr = dlg.locator("button", { hasText: "Clear polygon" }); if (await clr.isEnabled()) await clr.click(); } // an uncropped overlay opens on an empty trace (Clear is disabled — nothing to clear)
 await page.waitForTimeout(200);
 const box = await dlg.locator("img").first().boundingBox();
 const at = (fx, fy) => ({ x: box.x + fx * box.width, y: box.y + fy * box.height });
@@ -259,9 +260,10 @@ await openPlan();
   const pts = await d.locator("circle").count();
   check("re-opening shows the existing polygon, editable (3 vertex handles)", pts === 3, `circles=${pts}`);
   await d.locator("button", { hasText: "Rectangle" }).click();
+  await d.locator('[data-testid="crop-reset"]').click(); // NEW-2 (2026-09-29): Reset clears the OVERLAY's crop, polygon included, from either mode
   await d.locator("button", { hasText: "Done" }).click();
   const sR = await waitStored("ovA", (s) => s && (s.crop === null || (s.crop && s.crop.kind !== "poly")));
-  check("switching to Rectangle (full page) and Done commits no crop — full sheet", sR && sR.crop === null, JSON.stringify(sR && sR.crop));
+  check("Rectangle → Reset to full page → Done commits no crop — full sheet (polygon cleared too)", sR && sR.crop === null, JSON.stringify(sR && sR.crop));
   // A real rect via the trim fields, then Reset crop.
   const f = page.locator('input[aria-label="Crop Left edge"]');
   await f.fill("200");
