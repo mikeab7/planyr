@@ -5256,7 +5256,7 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
-### B1960480 — iPhone: double-tap on blank paper never raised the keyboard; first text landed in the wrong place `[Notes]` (bug) #notes #touch  *(Claude Code dispatch block "NEW-1," 2026-09-29, adversarial iPhone review)*
+### B1960480 — iPhone: double-tap on blank paper never raised the keyboard; first text landed in the wrong place `[Notes]` (bug) #notes #mobile  *(Claude Code dispatch block "NEW-1," 2026-09-29, adversarial iPhone review)*
 
 `[x]` Fixed in `NoteEditor.jsx` + `lib/notesBlankPaper.js`: on a TOUCH press the editor is focused synchronously inside the tap (a scroll-restoring guard around `focus({preventScroll})`), so the soft keyboard rises and a focused title no longer swallows the text; the touch keydown path lets the browser's own insertion happen after the box is made (keyboard autocapitalise stays in sync); text arriving with no printable keydown (predictive bar, QuickPath, dictation, emoji, IME) is caught on `beforeinput`/`compositionstart` and lands in the NEW box; touch double-tap slop is 28 instead of 6; the empty-page prompt says "Double-tap" on a coarse pointer. Desktop mouse path unchanged (no focus at arm, keydown preventDefault as before).
 - Verify: live — sandbox proves it on WebKit (`ui-audit/verify-notes-touch-place.mjs`, 17 arms green); real soft keyboard / IME / autocapitalise cannot be driven here → V1396784.
