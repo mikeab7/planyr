@@ -177,6 +177,20 @@ Sandbox-proven (`ui-audit/verify-admin-boundaries.mjs` 19/19, `ui-audit/verify-p
 5. Layers panel → City names off, then on. **Expect:** names clear/return; Road names row unaffected.
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1973920 / B1973921.
 
+### V1408688 — B1978048: city names + state lines ride the ground through a zoom, fade instead of popping, and never stretch `Blocker: live-GIS`
+
+Sandbox-proven: `ui-audit/verify-place-names.mjs` 31/31 and `ui-audit/verify-admin-boundaries.mjs` 31/31 (each frame of 5 zoom gestures vs real Leaflet markers; mutation-proofed), `test/placeNames.test.js`. **Still needs planyr.io with real imagery at a real frame rate** — the sandbox has no tiles and a software-rendered browser, and cannot do a real pinch.
+**Steps** (read the served chunk hash in the same observation as each result):
+1. Site → map view (aerial), around Houston–Katy at zoom 9–11. Zoom in and out with the mouse wheel, then the + / − buttons, then double-click. **Expect:** every name stays glued to its town through the animation (no lead, lag or slide), text stays the same crisp size, names that appear/disappear fade briefly, none pops.
+2. Nudge the zoom back and forth one step and pan slightly at a spot where two names nearly touch. **Expect:** the same name does not flicker in and out; the bigger place always wins the overlap.
+3. Pan by dragging. **Expect:** names move exactly with the map, no lag.
+4. Whole-US view → zoom into a state border (Texas/Louisiana line, zoom 8–12). **Expect:** the state line stays the same thin width through each zoom step (it does not fatten mid-zoom and thin again) and follows the imagery.
+5. Trackpad/touch pinch on the map (laptop trackpad or phone). **Expect:** names and lines follow the pinch with no jump at release.
+6. Layers panel → City names off/on. **Expect:** names fade out/in; Road names unaffected.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1978048 (step 5 is the one leg the sandbox cannot exercise at all).
+
+*(minted **V1408688** alongside **B1978048**; `Cadence: once`)*
+
 ### V1340416 — B1875520: site + note pins are one-size symbol circles; the open one wears a ring `Blocker: auth`
 
 Sandbox-proven: `test/mapPinSymbol.test.js`, `test/mapNoteMarkerIcon.test.js`; headless local build showed 5 status pins at identical size with the warehouse/pause/check/x glyphs. **Still needs planyr.io, signed in, on the aerial** (imagery + saved notes are unreachable from the sandbox).

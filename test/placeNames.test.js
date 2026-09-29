@@ -7,7 +7,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PLACE_NAMES_MAX_ZOOM, placeNamesVisible } from "../src/workspaces/site-planner/lib/placeNamesGate.js";
 import { PARCEL_MINZOOM } from "../src/workspaces/site-planner/lib/parcelDisplayZoom.js";
-import { decodePlaces, placesForZoom, placeNamesOpacity, layoutLabels, TOWNS_MIN_ZOOM } from "../src/workspaces/site-planner/lib/placeNamesData.js";
+import { decodePlaces, placesForZoom, placeNamesOpacity, layoutLabels, TOWNS_MIN_ZOOM, placeKey, zoomEase, lerpPoint, stepScalar, stepFade, FADE_MS } from "../src/workspaces/site-planner/lib/placeNamesData.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const load = (f) => decodePlaces(JSON.parse(readFileSync(resolve(here, "../public/geo", f), "utf8")));
@@ -74,6 +74,85 @@ describe("NEW-2 · collision pass", () => {
     expect(layoutLabels([{ name: "Far", x: -500, y: 10, minZoom: 3 }], measure, 800, 600)).toEqual([]);
     const dense = Array.from({ length: 500 }, (_, i) => ({ name: "T" + i, x: (i % 25) * 30, y: Math.floor(i / 25) * 25, minZoom: 10 }));
     expect(layoutLabels(dense, measure, 800, 600, { max: 40 }).length).toBeLessThanOrEqual(40);
+  });
+});
+
+describe("NEW-1 (amend) · stable priority — a collision is decided by importance, never by input order", () => {
+  const measure = (name) => name.length * 7;
+  const big = { name: "Houston", x: 100, y: 100, minZoom: 3 };
+  const small = { name: "Bellaire", x: 108, y: 102, minZoom: 9 };
+  it("higher tier wins whichever order the candidates arrive in", () => {
+    for (const order of [[big, small], [small, big]]) {
+      expect(layoutLabels(order, measure, 800, 600).map((l) => l.name)).toEqual(["Houston"]);
+    }
+  });
+  it("same-tier ties break deterministically (name, then position), in every permutation", () => {
+    const a = { name: "Alvin", x: 100, y: 100, minZoom: 9, lat: 29.4, lng: -95.2 };
+    const b = { name: "Brazoria", x: 104, y: 101, minZoom: 9, lat: 29.0, lng: -95.5 };
+    const c = { name: "Clute", x: 102, y: 99, minZoom: 9, lat: 29.0, lng: -95.4 };
+    const perms = [[a, b, c], [a, c, b], [b, a, c], [b, c, a], [c, a, b], [c, b, a]];
+    const outs = perms.map((p) => layoutLabels(p, measure, 800, 600).map((l) => l.name).join());
+    expect(new Set(outs).size).toBe(1);
+    expect(outs[0]).toBe("Alvin");
+  });
+  it("the drawn set never depends on the array's order", () => {
+    const pts = Array.from({ length: 60 }, (_, i) => ({ name: "P" + i, x: (i * 37) % 500, y: (i * 53) % 300, minZoom: 3 + (i % 4) * 2, lat: i, lng: -i }));
+    const ref = layoutLabels(pts, measure, 800, 600).map((l) => l.name).sort();
+    const rev = layoutLabels(pts.slice().reverse(), measure, 800, 600).map((l) => l.name).sort();
+    expect(rev).toEqual(ref);
+  });
+});
+
+describe("NEW-1 (amend) · hysteresis — a label already showing survives the edge of a collision", () => {
+  const measure = (name) => name.length * 7;
+  // Two same-tier labels a hair apart: from scratch the alphabetically-first wins and the other
+  // is rejected; once both are HELD they keep their places through the same near-touch.
+  const gap = (dx) => [
+    { name: "Aaa", x: 100, y: 100, minZoom: 9, lat: 1, lng: 1 },
+    { name: "Bbb", x: 100 + 21 + 2 * 3 + dx, y: 100, minZoom: 9, lat: 1, lng: 2 },
+  ];
+  it("from scratch, two labels closer than the full pad cannot both show", () => {
+    expect(layoutLabels(gap(-2), measure, 800, 600).length).toBe(1);
+  });
+  it("a held label is kept where a newcomer would have been dropped", () => {
+    const cands = gap(-2).map((c) => ({ ...c, key: placeKey(c) }));
+    const out = layoutLabels(cands, measure, 800, 600, { held: new Set([cands[0].key, cands[1].key]) });
+    expect(out.length).toBe(2);
+  });
+  it("a held lower-priority label still yields to a higher tier (importance is never overridden)", () => {
+    const big = { name: "Houston", x: 100, y: 100, minZoom: 3, lat: 1, lng: 1 };
+    const held = { name: "Bellaire", x: 108, y: 102, minZoom: 9, lat: 1, lng: 2 };
+    const out = layoutLabels([held, big], measure, 800, 600, { held: new Set([placeKey(held)]) });
+    expect(out.map((l) => l.name)).toEqual(["Houston"]);
+  });
+  it("among equals, the held one is preferred over a newcomer", () => {
+    const a = { name: "Aaa", x: 100, y: 100, minZoom: 9, lat: 1, lng: 1 };
+    const b = { name: "Bbb", x: 104, y: 100, minZoom: 9, lat: 1, lng: 2 };
+    expect(layoutLabels([a, b], measure, 800, 600, { held: new Set([placeKey(b)]) }).map((l) => l.name)).toEqual(["Bbb"]);
+  });
+});
+
+describe("NEW-1 (amend) · zoom-animation maths (mirrors Leaflet's 0.25s cubic-bezier(0,0,.25,1))", () => {
+  it("eases from 0 to 1, monotonic, front-loaded like the tiles", () => {
+    expect(zoomEase(0)).toBe(0); expect(zoomEase(1)).toBe(1);
+    let prev = 0;
+    for (let i = 1; i <= 20; i++) { const v = zoomEase(i / 20); expect(v).toBeGreaterThanOrEqual(prev); prev = v; }
+    expect(zoomEase(0.5)).toBeGreaterThan(0.5);
+    expect(zoomEase(-1)).toBe(0); expect(zoomEase(2)).toBe(1);
+  });
+  it("lerps a screen point between the start-view and end-view projections", () => {
+    expect(lerpPoint({ x: 0, y: 10 }, { x: 100, y: 30 }, 0.25)).toEqual({ x: 25, y: 15 });
+  });
+  it("fades a label toward its target at a fixed rate and drops it once gone", () => {
+    expect(stepScalar(0, 1, FADE_MS / 2)).toBeCloseTo(0.5, 5);
+    expect(stepScalar(1, 0, FADE_MS * 3)).toBe(0);
+    const tracked = new Map([["a", { a: 1 }], ["b", { a: 0.05 }]]);
+    const busy = stepFade(tracked, new Set(["a"]), FADE_MS);
+    expect(tracked.has("b")).toBe(false);
+    expect(tracked.get("a").a).toBe(1);
+    expect(busy).toBe(false);
+    tracked.set("c", { a: 0 });
+    expect(stepFade(tracked, new Set(["a", "c"]), FADE_MS / 4)).toBe(true);
   });
 });
 
