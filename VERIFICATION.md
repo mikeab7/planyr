@@ -166,6 +166,17 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1390096 — B1953793: a pin / rule / folder rename made in one place shows in every other view and tab, and nothing is reverted `Blocker: auth`
+
+Sandbox-proven (logged out, unit): `test/prefsSingleSource.test.js` (12 tests, red on the pre-fix tree). **Still needs a signed-in, two-tab pass** for the account-row leg (the sandbox cannot sign in).
+**Steps** (use a throwaway project; note the served chunk hash in the same observation as each result):
+1. Sign in; open the app in Tab A on the Map view (Sites panel visible) and Tab B on the Site Planner canvas. **Expect:** both load.
+2. In Tab B's header project switcher, pin project X. **Expect (Tab A, not reloaded):** X moves into Tab A's Pinned section within a moment.
+3. In Tab A, collapse the Complete group. Reload Tab B. **Expect:** X is still pinned AND the group is still collapsed (neither change reverted the other).
+4. In Tab B, save a Standards default for all projects; in Tab A (opened before) pin project Y. **Expect:** after reload of both, the standards default AND both pins are present.
+5. Tab A: Site Planner floodplain rules, set Harris ratio 1.5. Tab B (opened earlier): tick "verified" on Fort Bend. **Expect:** Tab B shows Harris 1.5 without reload; after reload both edits persist.
+6. Library: pin folder F, rename F in its project, return to Library Home. **Expect:** the pinned card shows the new name; delete F and it falls back to the old name (not blank).
+- **Stopping rule:** closes on a dated pass of 1–6, or a failed step filed as a recurrence on B1953793.
 ### V1398976 — B1962672–B1962677: the overlay Crop tool walked end to end on Michael's signed-in Chrome (Reset, pan/zoom, undo/redo, fill, reload) `Blocker: auth`
 
 Sandbox-proven (logged out, throwaway seeded plan with a generated 3000×1800 sheet, real pointer + key events, foreground tab, known-good arm): `node ui-audit/verify-crop-tool-walkthrough.mjs` ALL PASS (58 checks), plus `verify-crop-polygon-editing.mjs` and `verify-site-tab-overlay-crop.mjs` still all-pass, `test/cropHistory.test.js`. Nothing touched a real plan or the locked Goose Creek master plan (`sms93j3sfc04`); the throwaway existed only in the sandbox browser's local storage and was discarded with it. **Still needs the signed-in pass** because the brief's walk (real upload, cloud-saved overlay, hard reload of a cloud plan) needs the account.

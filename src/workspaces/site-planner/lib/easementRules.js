@@ -18,11 +18,43 @@ export const DEFAULT_EASEMENT_RULES = {
 
 const clone = () => JSON.parse(JSON.stringify(DEFAULT_EASEMENT_RULES));
 
-export function loadEasementRules() {
-  try { const v = JSON.parse(localStorage.getItem(LS)); return v ? { ...clone(), ...v } : clone(); }
+export function loadEasementRules(store) {
+  try {
+    const s = store || localStorage;
+    const v = JSON.parse(s.getItem(LS));
+    if (!v) return clone();
+    // PER-JURISDICTION merge (B1953793): a stored record fills over its seed field by field, so a
+    // patch-shaped record never drops the seed's label/note and a seed correction still reaches it.
+    const out = clone();
+    for (const [k, r] of Object.entries(v)) out[k] = { ...(out[k] || {}), ...(r || {}) };
+    return out;
+  }
   catch (_) { return clone(); }
 }
 export function saveEasementRules(rules) { try { localStorage.setItem(LS, JSON.stringify(rules)); } catch (_) {} }
+
+/** B1953793 — fresh read-modify-write of ONE jurisdiction (see floodplainRules.patchFloodplainRule). */
+export function patchEasementRule(key, patch, store) {
+  try {
+    const s = store || (typeof localStorage !== "undefined" ? localStorage : null);
+    if (s) {
+      let raw = {};
+      try { raw = JSON.parse(s.getItem(LS)) || {}; } catch (_) { raw = {}; }
+      raw[key] = { ...(raw[key] || {}), ...patch };
+      s.setItem(LS, JSON.stringify(raw));
+      notifyEase();
+    }
+  } catch (_) {}
+  return loadEasementRules(store);
+}
+const easeListeners = new Set();
+function notifyEase() { easeListeners.forEach((l) => { try { l(); } catch (_) {} }); }
+export function subscribeEasementRules(cb) {
+  easeListeners.add(cb);
+  const on = (e) => { if (!e || e.key === null || e.key === LS) cb(); };
+  if (typeof window !== "undefined" && window.addEventListener) window.addEventListener("storage", on);
+  return () => { easeListeners.delete(cb); if (typeof window !== "undefined" && window.removeEventListener) window.removeEventListener("storage", on); };
+}
 
 /* A-B1953794 — the ONE answer to "which easement jurisdiction applies?". Derived at read time from
  * the plan's (healed) county; an explicit user pick (`override`, persisted in plan settings) stays

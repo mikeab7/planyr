@@ -77,6 +77,34 @@ export function readMirror() {
 export function writeMirror(prefs) {
   if (!hasLS()) return;
   try { localStorage.setItem(MIRROR_KEY, JSON.stringify(prefs)); } catch { /* quota / private mode */ }
+  notifyPrefs();
+}
+
+/* ---------------------------------------------------------------- the ONE shared, subscribable copy
+ * (B1953793) Every reader of the account prefs (the header's pin list, the Map Sites panel, the
+ * Site Planner Standards panel) reads THIS snapshot through `useSyncExternalStore`, never its own
+ * useState copy. The mirror key is the shared medium: same-tab writes notify via `notifyPrefs`,
+ * other tabs arrive through the browser's `storage` event. */
+export const PREFS_CHANGED_EVENT = "planyr:userPrefs-changed";
+const listeners = new Set();
+let snapRaw = Symbol("unset");
+let snapVal = null;
+export function notifyPrefs() {
+  listeners.forEach((l) => { try { l(); } catch { /* a bad subscriber never blocks the rest */ } });
+  try { if (typeof window !== "undefined" && window.dispatchEvent) window.dispatchEvent(new Event(PREFS_CHANGED_EVENT)); } catch { /* no window */ }
+}
+/** Stable snapshot: the SAME object until the mirror's raw text changes (useSyncExternalStore-safe). */
+export function getPrefsSnapshot() {
+  let raw = null;
+  if (hasLS()) { try { raw = localStorage.getItem(MIRROR_KEY); } catch { raw = null; } }
+  if (raw !== snapRaw || snapVal === null) { snapRaw = raw; snapVal = readMirror(); }
+  return snapVal;
+}
+export function subscribePrefs(cb) {
+  listeners.add(cb);
+  const onStorage = (e) => { if (!e || e.key === null || e.key === MIRROR_KEY) cb(); };
+  if (typeof window !== "undefined" && window.addEventListener) window.addEventListener("storage", onStorage);
+  return () => { listeners.delete(cb); if (typeof window !== "undefined" && window.removeEventListener) window.removeEventListener("storage", onStorage); };
 }
 
 /**
@@ -103,6 +131,8 @@ export async function loadPrefsRaw(uid) {
  * cloud failure is REPORTED (LOUD-FAILURE), not swallowed.
  */
 export async function savePrefsRaw(uid, prefs) {
+  // NOTE (B1953793): writes the WHOLE bag it is handed — safe only for a caller whose bag is
+  // provably fresh. UI writers use `updatePrefs` (per-change read-modify-write) instead.
   const next = normalize(prefs);
   writeMirror(next);
   if (!supabase || !uid) return { ok: false, prefs: next, error: "not signed in" };
@@ -110,6 +140,36 @@ export async function savePrefsRaw(uid, prefs) {
   if (error) return { ok: false, prefs: next, error: error.message };
   invalidateProfileRow(uid);
   return { ok: true, prefs: next };
+}
+
+/**
+ * FRESH read-modify-write of only what `reducer` changes (B1953793 — the lost-update fix).
+ * `reducer(prefs) -> prefs` is applied (1) to the newest on-device mirror immediately, so the UI
+ * is instant in every view, then (2) to the account row READ FRESH right now (not any in-memory
+ * or cached copy), and that result is upserted — so a key this caller never touched (a dashboard
+ * layout, a pin made in another tab) is carried through, never reverted by a stale bag.
+ * Writes are serialised so two quick edits land in order. LOUD-FAILURE: { ok:false, error }.
+ * A failed cloud write leaves the on-device mirror (the caller says "saved on this computer only").
+ */
+let writeChain = Promise.resolve();
+export function updatePrefs(uid, reducer) {
+  const local = normalize(reducer(readMirror()));
+  writeMirror(local);
+  if (!supabase || !uid) return Promise.resolve({ ok: false, prefs: local, error: "not signed in" });
+  const run = async () => {
+    try {
+      const { data: row, error: readErr } = await supabase.from("profiles").select("prefs").eq("id", uid).maybeSingle();
+      if (readErr) return { ok: false, prefs: local, error: readErr.message };
+      const next = normalize(reducer(normalize(row?.prefs)));
+      const { error } = await supabase.from("profiles").upsert({ id: uid, prefs: next, updated_at: new Date().toISOString() }, { onConflict: "id" });
+      if (error) return { ok: false, prefs: local, error: error.message };
+      invalidateProfileRow(uid);
+      return { ok: true, prefs: next };
+    } catch (e) { return { ok: false, prefs: local, error: e?.message || "prefs save failed" }; }
+  };
+  const p = writeChain.then(run, run);
+  writeChain = p.catch(() => {});
+  return p;
 }
 
 /* ---------------------------------------------------------------- pure edits */

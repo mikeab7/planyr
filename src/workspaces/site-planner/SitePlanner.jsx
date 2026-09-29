@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, useId, memo, Fragment, lazy, Suspense } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, useId, memo, Fragment, lazy, Suspense, useSyncExternalStore } from "react";
 import { flushSync, createPortal } from "react-dom";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import L from "leaflet";
@@ -91,7 +91,7 @@ import { makeLabelFrame } from "./lib/exportLabelScale.js";
 import { orderLayersByPriority, LAYER_STAGE_SIZE } from "./lib/layerSchedule.js";
 import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
-import { loadEasementRules, saveEasementRules, defaultJurForCounty, resolveEasementJur } from "./lib/easementRules.js";
+import { loadEasementRules, patchEasementRule, subscribeEasementRules, defaultJurForCounty, resolveEasementJur } from "./lib/easementRules.js";
 import { requestCriteria, wasRequested } from "./lib/criteriaRequests.js";
 import { sampleProfile, ditchStats } from "./lib/elevation.js";
 /* ⛔ NEW-1..NEW-4 — `lib/groundElevation.js` and `lib/drainageTiming.js` are reached ONLY by the
@@ -176,7 +176,7 @@ import ColorField from "../../shared/ui/ColorField.jsx";
 /* LAZY (B1064 tranche a). The Standards footer renders only while the Standards panel is the
  * open one, docked or floating — never at first paint. */
 const StandardsBar = lazy(() => import("./components/StandardsBar.jsx"));
-import { loadUserPrefs, saveUserPrefs, applyPrefs, readMirror, setStandardPref, getStandardPref } from "./lib/userPrefs.js";
+import { loadUserPrefs, updateUserPrefs, applyPrefs, getPrefsSnapshot, subscribePrefs, setStandardPref, getStandardPref } from "./lib/userPrefs.js";
 import {
   PARCEL_STD_KEYS, TYPE_STD_KEYS, MEASURE_STD_KEYS, applyAllStandards, allStandardsImpact, appliedObjectsLabel,
   EMPTY_STD_DRAFT, draftParcelValue, draftTypeValue, draftMeasureValue, withParcelDraft, withTypeDraft, withMeasureDraft,
@@ -445,7 +445,7 @@ import {
   isEstimatedWseSrc, estWseNote,
   wseProvLabel, ffeBasisText,
 } from "./lib/floodplainMitigation.js";
-import { loadFloodplainRules, ruleSignature, saveFloodplainRules, defaultFloodJurForAuthority, defaultFloodJurForCounty, floodJurCounty, triggerClasses, offsetSurfaceBasis, bfeDataRequirementFor } from "./lib/floodplainRules.js";
+import { loadFloodplainRules, ruleSignature, patchFloodplainRule, subscribeFloodplainRules, defaultFloodJurForAuthority, defaultFloodJurForCounty, floodJurCounty, triggerClasses, offsetSurfaceBasis, bfeDataRequirementFor } from "./lib/floodplainRules.js";
 import { loadPondCriteria, checkPondCriteria } from "./lib/pondCriteriaRules.js";
 import { GRADING_RULES, chipLabel as gradingChipLabel } from "./lib/gradingRules.js";
 import { loadBuildabilityRules, assessBuildability, requiredFfe, suggestedFfe, OUTSIDE_FLOODPLAIN_FFE_NOTE, SITE_BASED_FFE_NOTE } from "./lib/buildability.js";
@@ -2850,10 +2850,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [tracePts, setTracePts] = useState([]);
   const [evidenceBusy, setEvidenceBusy] = useState(false);
   const [routeMode, setRouteMode] = useState(null); // utility routing: {util, snapTo, stage, source, width, ruleNote}
-  const [easeRules, setEaseRules] = useState(loadEasementRules);
+  const [easeRules, setEaseRules] = useState(loadEasementRules); // stale-ok: re-synced by subscribeEasementRules on the next line (B1953793)
+  useEffect(() => subscribeEasementRules(() => setEaseRules(loadEasementRules())), []);
   // B707/B709/B710 — the floodplain-suite rule files (editable, verified-flagged,
   // localStorage-persisted; the easementRules pattern).
-  const [floodRules, setFloodRules] = useState(loadFloodplainRules);
+  const [floodRules, setFloodRules] = useState(loadFloodplainRules); // stale-ok: re-synced by subscribeFloodplainRules on the next line (B1953793)
+  // B1953793 — pick up another tab's / surface's rule edit instead of holding a mount-time copy.
+  useEffect(() => subscribeFloodplainRules(() => setFloodRules(loadFloodplainRules())), []);
   const [pondCriteria] = useState(loadPondCriteria);
   const [buildRules] = useState(loadBuildabilityRules);
   // NEW-A1 — per-jurisdiction detention-criteria overrides (registry defaults are cited;
@@ -15769,7 +15772,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       derivedWse100: floodGeo?.derivedWse100 || null, // B807 — FBCDD Atlas-14 DRAFT 1% WSE (Fort Bend, per-watershed)
       hasDockElements: els.some((e) => e && (e.truckCourt || e.forCourt)), // NEW-1(c) — gate the dock-drop row
       onChange: (patch) => setSettings((sx) => ({ ...sx, floodMitigation: { ...(sx.floodMitigation || {}), ...patch } })),
-      onRuleChange: (jk, patch) => setFloodRules((r) => { const next = { ...r, [jk]: { ...r[jk], ...patch } }; saveFloodplainRules(next); return next; }),
+      onRuleChange: (jk, patch) => setFloodRules(patchFloodplainRule(jk, patch)),
     },
     watersheds: drainCtxData?.watershedOverlays || [],
     mudDistricts: (drainCtxData?.authority?.overlays || []).filter((o) => o.kind === "mud"),
@@ -19543,7 +19546,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
   };
 
-  const setRule = (key, patch) => setEaseRules((r) => { const next = { ...r, [key]: { ...r[key], ...patch } }; saveEasementRules(next); return next; });
+  const setRule = (key, patch) => setEaseRules(patchEasementRule(key, patch));
   const startWaterRoute = () => {
     // ⛔ B877440 — `jurKey` is null when no easement criteria are on file (no auto-detect match,
     // no manual pick). Never fabricate a width off `easeRules.generic`'s Houston-style placeholder
@@ -20315,7 +20318,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * The account layer is a real cross-machine store (public.profiles.prefs, own-row RLS — see
    * lib/userPrefs.js). Signed out, the "All" scope falls back to a machine-local mirror and SAYS
    * so rather than passing a per-computer value off as a cross-machine default. */
-  const [userPrefs, setUserPrefs] = useState(() => applyPrefs(readMirror()));
+  // B1953793 — the ONE shared prefs store, not a mount-time copy: a pin/collapse made elsewhere
+  // (header switcher, Map Sites panel, another tab) is visible here and can never be reverted by us.
+  const prefsSnap = useSyncExternalStore(subscribePrefs, getPrefsSnapshot, getPrefsSnapshot);
+  const userPrefs = useMemo(() => applyPrefs(prefsSnap), [prefsSnap]);
   // NEW-1 — now that `userPrefs` exists, fold the account default into `buildingRules`
   // (declared far above, before this state existed). See that declaration's own comment.
   buildingRules = normalizeRules(settings.buildingRules ?? getStandardPref(userPrefs, "buildingStyle", "rules"));
@@ -20324,16 +20330,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let live = true;
     loadUserPrefs(activeUid()).then((res) => {
       if (!live) return;
-      setUserPrefs(res.prefs);
       setPrefsSource(res.source);
     });
     return () => { live = false; };
   }, [accountActive]);
   const cloudPrefsReady = prefsSource === "cloud";
   // Persist an account-scope preference change, LOUDLY on failure (never a silent "saved").
-  const commitUserPrefs = (next) => {
-    setUserPrefs(next);
-    saveUserPrefs(activeUid(), next).then((res) => {
+  // `reducer(prefs) -> prefs` is applied to the freshest prefs at write time (updatePrefs), so only
+  // the keys it changes are written — never this render's whole bag.
+  const commitUserPrefs = (reducer) => {
+    updateUserPrefs(activeUid(), reducer).then((res) => {
       if (!res.ok) flashWarn(`⚠ Saved on this computer only — couldn't reach your account (${res.error}).`, 7000);
     });
   };
@@ -20429,16 +20435,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const saveStdForAllProjects = () => {
     // Promote what the panel currently SHOWS to the account, then drop this plan's own copies so
     // the plan keeps following the account default when it changes later (the old promote rule).
-    let up = userPrefs;
-    PARCEL_STD_KEYS.forEach((k) => { up = setStandardPref(up, "parcelStyle", k, parcelStdValue(k) ?? null); });
-    MEASURE_STD_KEYS.forEach((k) => { up = setStandardPref(up, "measureStyle", k, measureStdValueUI(k) ?? null); });
-    Object.keys(TYPE).forEach((t) => TYPE_STD_KEYS.forEach((k) => { up = setStandardPref(up, "typeStyles", k, typeStdValue(t, k) ?? null, t); }));
+    // Values are captured NOW (what the panel shows); the reducer applies them onto fresh prefs.
+    const parcelVals = PARCEL_STD_KEYS.map((k) => [k, parcelStdValue(k) ?? null]);
+    const measureVals = MEASURE_STD_KEYS.map((k) => [k, measureStdValueUI(k) ?? null]);
+    const typeVals = [];
+    Object.keys(TYPE).forEach((t) => TYPE_STD_KEYS.forEach((k) => { typeVals.push([t, k, typeStdValue(t, k) ?? null]); }));
     // NEW-1 — the building-program tier table rides the SAME "Save for all projects" button
     // (it isn't part of `stdDraft`; it commits straight to `settings.buildingRules`, like the
     // sibling structural-grid fields), so whatever this plan currently shows is what a
     // brand-new project starts with.
-    up = setStandardPref(up, "buildingStyle", "rules", buildingRules);
-    commitUserPrefs(up);
+    const rulesNow = buildingRules;
+    commitUserPrefs((base) => {
+      let up = base;
+      parcelVals.forEach(([k, v]) => { up = setStandardPref(up, "parcelStyle", k, v); });
+      measureVals.forEach(([k, v]) => { up = setStandardPref(up, "measureStyle", k, v); });
+      typeVals.forEach(([t, k, v]) => { up = setStandardPref(up, "typeStyles", k, v, t); });
+      return setStandardPref(up, "buildingStyle", "rules", rulesNow);
+    });
     setSettings((s) => { const { buildingRules: _drop, ...rest } = s; return { ...rest, parcelStyle: {}, typeStyles: {}, measureStyle: {} }; });
     clearStdDraft();
     flashStdToast("Saved as your defaults for all projects", null, 3500);
@@ -29264,7 +29277,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <RoadCrossSectionDialog
               mode={xsDialog.mode} initialXSection={initial} lengthFt={lengthFt}
               presets={userPrefs.roadCrossSectionPresets}
-              onSavePreset={(next) => commitUserPrefs({ ...userPrefs, roadCrossSectionPresets: next })}
+              onSavePreset={(next) => commitUserPrefs((p) => ({ ...p, roadCrossSectionPresets: next }))}
               onCancel={() => setXsDialog(null)}
               onApply={(xsection) => {
                 if (xsDialog.mode === "edit" && editEl) setRoadXSection(editEl, xsection);

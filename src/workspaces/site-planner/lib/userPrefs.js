@@ -28,13 +28,16 @@ import {
   readMirror,
   loadPrefsRaw,
   savePrefsRaw,
+  updatePrefs,
+  getPrefsSnapshot,
+  subscribePrefs,
   setStandardPref,
   getStandardPref,
   setSitesPanelPref,
   _normalizePrefs,
 } from "./userPrefsStore.js";
 
-export { EMPTY_PREFS, readMirror, setStandardPref, getStandardPref, setSitesPanelPref, _normalizePrefs };
+export { EMPTY_PREFS, readMirror, getPrefsSnapshot, subscribePrefs, setStandardPref, getStandardPref, setSitesPanelPref, _normalizePrefs };
 
 /** Publish the plan-style half into the style resolver so every surface picks it up at once. */
 export function applyPrefs(prefs) {
@@ -65,5 +68,12 @@ export async function loadUserPrefs(uid) {
  */
 export async function saveUserPrefs(uid, prefs) {
   const result = await savePrefsRaw(uid, prefs);
+  return { ...result, prefs: applyPrefs(result.prefs) };
+}
+
+/** Fresh read-modify-write of only what `reducer` changes (see userPrefsStore.updatePrefs); the
+ * result is also published into the canvas style resolvers. B1953793. */
+export async function updateUserPrefs(uid, reducer) {
+  const result = await updatePrefs(uid, reducer);
   return { ...result, prefs: applyPrefs(result.prefs) };
 }
