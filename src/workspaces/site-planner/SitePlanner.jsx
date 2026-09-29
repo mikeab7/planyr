@@ -22920,8 +22920,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [sel, multi]);
   const elPaintItems = useMemo(() => {
     const elItems = [...drawEls].sort(byZ).map((el) => ({ kind: "el", z: zOrder(el), el, lifted: liftedElIds.has(el.id) }));
+    const drawById = new Map(drawEls.map((el) => [el.id, el]));
     const roadItems = roadRegionPaths.map((r, i) => ({
       kind: "road", z: roadNet.regions[i] ? roadNet.regions[i].zKey : 0, i, r,
+      // The member roads' decoration paints right after this cluster's fill (see renderElPx).
+      members: r.ids.map((id) => drawById.get(id)).filter(Boolean).sort(byZ),
       lifted: r.ids.some((id) => liftedElIds.has(id)),
     }));
     const merged = [...elItems, ...roadItems];
@@ -22930,6 +22933,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       lifted: merged.filter((it) => it.lifted).sort((a, b) => a.z - b.z),
     };
   }, [drawEls, roadRegionPaths, roadNet, liftedElIds]);
+  /* One item of the unified stack. A road cluster paints its dissolved fill, THEN its member roads'
+     decoration (band fills, lane marks, ROW lines, curb stripes, labels) on top of it — the decoration
+     can never sit under the composite it decorates (see renderElPx's `roadPass`). */
+  const renderPaintItem = (it) => (it.kind === "el"
+    ? <ElNode key={`el-${it.el.id}`} el={it.el} f2p={f2p} isSel={sel?.kind === "el" && sel.id === it.el.id} tool={tool} settings={settings} H={elHandlers} nb={elNeighbors.get(it.el.id)} dimHidden={dimSuppressed?.has(it.el.id) || false} roadNet={roadNet} lf={labelFrame} editingCorners={editingCorners} />
+    : (
+      <Fragment key={`rc-${it.i}-${it.r.ids[0]}`}>
+        {renderRoadRegion(it.r, it.i)}
+        {it.members.map((el) => (
+          <ElNode key={`deco-${el.id}`} el={el} f2p={f2p} isSel={sel?.kind === "el" && sel.id === el.id} tool={tool} settings={settings} H={elHandlers} nb={elNeighbors.get(el.id)} dimHidden={dimSuppressed?.has(el.id) || false} roadNet={roadNet} lf={labelFrame} editingCorners={editingCorners} roadPass="deco" />
+        ))}
+      </Fragment>
+    ));
   // NEW-4 — corners the app had to draw TIGHTER than the road's own civil minimum. `arcCorner`
   // feasibility-clamps a corner's radius to half the shorter adjacent leg; that clamp is geometrically
   // necessary (without it two corners overrun each other and the strip self-intersects) but it used to
@@ -23988,18 +24004,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   this is the `normal` half. `renderRoadRegion` replaces the old fixed
                   `road-network-layer` group — same markup, one region at a time now instead of all
                   of them in one unconditional block. */}
-              {elPaintItems.normal.map((it) => it.kind === "el"
-                ? <ElNode key={`el-${it.el.id}`} el={it.el} f2p={f2p} isSel={sel?.kind === "el" && sel.id === it.el.id} tool={tool} settings={settings} H={elHandlers} nb={elNeighbors.get(it.el.id)} dimHidden={dimSuppressed?.has(it.el.id) || false} roadNet={roadNet} lf={labelFrame} editingCorners={editingCorners} />
-                : renderRoadRegion(it.r, it.i))}
+              {elPaintItems.normal.map(renderPaintItem)}
               {/* NEW-2 — the LIFTED tier: whatever is selected right now (an element, or a road
                   cluster with a selected member) paints AFTER every unselected item, so it reads
                   above the whole drawing while selected and drops back into `normal` the instant it
                   is deselected. Purely a render-order choice — no `z` is written by selecting
                   something, and this is keyed on `sel`/`multi` only (VIEW-INDEPENDENT-ONCE: it must
                   never recompute on a pan or a zoom). */}
-              {elPaintItems.lifted.map((it) => it.kind === "el"
-                ? <ElNode key={`el-${it.el.id}`} el={it.el} f2p={f2p} isSel={sel?.kind === "el" && sel.id === it.el.id} tool={tool} settings={settings} H={elHandlers} nb={elNeighbors.get(it.el.id)} dimHidden={dimSuppressed?.has(it.el.id) || false} roadNet={roadNet} lf={labelFrame} editingCorners={editingCorners} />
-                : renderRoadRegion(it.r, it.i))}
+              {elPaintItems.lifted.map(renderPaintItem)}
               {/* NEW-4 — civil radius conflict flags. A corner the leg is too short to carry gets marked
                   ON THE PLAN, so a non-compliant turn can't hide until someone selects the road. Review
                   chrome: data-export="skip" keeps it out of the PDF a consultant receives. */}
@@ -30422,7 +30434,7 @@ function resolveDockPlan(el, settings, dogEars) {
    `ElNode`'s memo is sound. `isSel`/`dimHidden` are likewise pre-resolved booleans rather than the
    whole `sel` object and the whole suppressed-id Set, so a selection change re-renders the two
    elements it concerns instead of all of them. */
-function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb, startDimMove, onDimNumberDown, onElContext, dimHidden, roadNet, lf = null, editingCorners = false) {
+function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb, startDimMove, onDimNumberDown, onElContext, dimHidden, roadNet, lf = null, editingCorners = false, roadPass = null) {
   // NEW-2 — the junction vertices whose corners render SHARP, read off the road-network data this
   // renderer already receives (renderElPx is module-level, so it cannot close over the memo).
   const sharpFor = (e) => (roadNet && roadNet.junctionVerts && e && e.id != null ? roadNet.junctionVerts.get(e.id) : undefined);
@@ -30580,9 +30592,26 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
     // clickable/draggable — pointerEvents="all" hits an unpainted path), the texture overlay, and the
     // trimmed inner curb stripes.
     const inNetwork = !!(roadNet && roadNet.memberIds && roadNet.memberIds.has(el.id));
+    /* B1788912 REGRESSION FIX — a road's decoration (band fills, lane striping, ROW lines, texture,
+       inner curb stripes, width dimension, inline label) is drawn ON its cluster's dissolved pavement,
+       so it must paint AFTER that composite. Elements stack in creation order (B1788912) and a cluster
+       takes its NEWEST member's z, so a road's own node always paints at-or-before its cluster's fill
+       and the fill buried every designed section ("the designed road sections just show as a single
+       road"). Two passes now: the ordinary element node paints only the invisible HIT target at the
+       road's own z (`roadPass` null); the decoration pass (`roadPass === "deco"`) is rendered by the
+       cluster's paint item, immediately after its fill. A road outside the network paints both here. */
+    if (inNetwork && roadPass !== "deco") {
+      return (
+        <g key={el.id} data-el-id={el.id} data-feature={`el:${el.id}`} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: (tool === "select" && !editingCorners) ? (el.locked ? "pointer" : "move") : "crosshair" }}
+          onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
+          onContextMenu={(e) => { if (onElContext) onElContext(e, el.id); }}>
+          {dPath && <path key="hit" d={dPath} fill="none" stroke="none" pointerEvents="all" />}
+        </g>
+      );
+    }
     if (dPath) {
       if (inNetwork) {
-        rparts.push(<path key="hit" d={dPath} fill="none" stroke="none" pointerEvents="all" />);
+        // decoration pass: the hit target is already provided by the element's own node.
       } else {
         // Pavement+curb surface = bufferPolyline of the tessellated centerline at travelW + 2 curbs.
         rparts.push(<path key="surf" d={dPath} fill={st.fill} fillOpacity={fillOp} stroke="none" />);
@@ -30772,7 +30801,7 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
     // pavement) so it doesn't sit on the drawn centerline; default rides the centerline as before.
     rparts.push(...inlineLabelEls(roadDenseCenterline(el, settings, sharpFor(el)), el.inlineLabel, st.stroke, el.labelSpacing || INLINE_LABEL_SPACING.road, ppf, f2p, `il${el.id}-`, { size: el.labelSize, halo: el.labelHalo, place: labelPlaceOf(el), lf, insetFt: labelPlaceOf(el) === "inside" ? Math.max(0, (+el.travelW || 0) / 4) : 0 }));
     return (
-      <g key={el.id} data-el-id={el.id} data-feature={`el:${el.id}`} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: (tool === "select" && !editingCorners) ? (el.locked ? "pointer" : "move") : "crosshair" }}
+      <g key={el.id} data-el-id={roadPass === "deco" ? undefined : el.id} data-road-deco={roadPass === "deco" ? el.id : undefined} data-feature={`el:${el.id}`} filter={st.shadow ? "url(#bldgShadow)" : undefined} style={{ cursor: (tool === "select" && !editingCorners) ? (el.locked ? "pointer" : "move") : "crosshair" }}
         onPointerDown={(e) => startMoveEl(e, el.id)} onDoubleClick={(e) => onElDouble && onElDouble(e, el.id)}
         onContextMenu={(e) => { if (onElContext) onElContext(e, el.id); }}>{rparts}</g>
     );
@@ -31127,8 +31156,8 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
  *      an array that changes on every model edit (harmless) OR, worse, tempt someone to key the
  *      memo on `el` alone, which draws stale curbs when a NEIGHBOUR moves.
  */
-const ElNode = memo(function ElNode({ el, f2p, isSel, tool, settings, H, nb, dimHidden, roadNet, lf, editingCorners }) {
-  return renderElPx(el, f2p, isSel, tool, settings, H.startMoveEl, H.onElDouble, nb, H.startDimMove, H.onDimNumberDown, H.onElContext, dimHidden, roadNet, lf, editingCorners);
+const ElNode = memo(function ElNode({ el, f2p, isSel, tool, settings, H, nb, dimHidden, roadNet, lf, editingCorners, roadPass = null }) {
+  return renderElPx(el, f2p, isSel, tool, settings, H.startMoveEl, H.onElDouble, nb, H.startDimMove, H.onDimNumberDown, H.onElContext, dimHidden, roadNet, lf, editingCorners, roadPass);
 });
 
 /* ----------------------------- small UI ----------------------------- */
