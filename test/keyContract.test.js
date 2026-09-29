@@ -582,7 +582,7 @@ describe("no component keydown handler routes around keyScope", () => {
  * element (and every descendant) UNFOCUSABLE per spec. React applies a JSX `autoFocus` prop with one
  * synchronous `.focus()` call at the render that inserts the node — which, on first mount, is
  * exactly the render where `pos` is still null. So every `autoFocus` consumer of this component (the
- * project switcher's "Search projects…" box, confirmed live; the project breadcrumb's inline rename
+ * project switcher's "Search projects" box, confirmed live; the project breadcrumb's inline rename
  * editor, by the same mechanism) silently left real DOM focus on the TRIGGER BUTTON, and a `<button>`
  * carries no field-latch at all — so an Arrow key (or, unexercised but structurally identical,
  * Delete) reached the canvas as CHROME scope with `fieldEdit:false`. Confirmed with the guard proven

@@ -93,9 +93,9 @@ const sitesReads = () => wire.filter((w) => w.table === "sites" && w.method === 
 const softDeletes = () => sitesWrites().filter((w) => w.method === "PATCH" && (w.body || "").includes("deleted_at"));
 
 const openPicker = async () => {
-  if (await page.$('input[placeholder="Search projects…"]')) return;
+  if (await page.$('input[placeholder="Search projects"]')) return;
   await page.click('[data-testid="project-crumb"]');
-  await page.waitForSelector('input[placeholder="Search projects…"]', { timeout: 8000 });
+  await page.waitForSelector('input[placeholder="Search projects"]', { timeout: 8000 });
   await page.waitForTimeout(400);
 };
 const closePicker = async () => { await page.keyboard.press("Escape").catch(() => {}); await page.waitForTimeout(250); };
@@ -170,7 +170,7 @@ try {
     await page.waitForTimeout(800);
     ok("CONTROL: Cancel writes nothing", softDeletes().length === before, `${softDeletes().length - before} write(s)`);
     // ...and the dropdown is still open behind the row menu — the property the whole bug turned on.
-    ok("the parent dropdown survives a press inside its own per-row menu", !!(await page.$('input[placeholder="Search projects…"]')));
+    ok("the parent dropdown survives a press inside its own per-row menu", !!(await page.$('input[placeholder="Search projects"]')));
     await closePicker();
   }
 

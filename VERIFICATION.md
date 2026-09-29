@@ -175,6 +175,20 @@ Sandbox-proven (logged out): `e2e/names-matrix.spec.js` (red-proofed) + `test/na
 3. Rename it to blank on either device. **Expect:** a red notice "needs a name", old name kept.
 4. Read the served chunk hash in the same observation as each result.
 - **Stopping rule:** closes on a dated pass of 1–3, or a failed step filed as a recurrence on B1953200.
+### V1389040 — B1952736: the restyled project switcher opens already-ordered, lines up, and keeps its footer in view on a real signed-in account `Blocker: auth`
+
+**Why this needs a live pass even though the layout is fully measured headlessly.** `ui-audit/verify-project-switcher-restyle.mjs` drives the real dropdown signed in against a STUB Supabase (65 projects, 57 deleted) and measures every acceptance point. What a stub cannot supply is his real account: his real pins, real recency and real bin.
+
+**Steps, each with a named expected result:**
+1. Sign in on planyr.io, open any project, click the project name in the top breadcrumb. **Expect:** the panel is white with a full-width `Search projects` field on top and no orange ring when you click into it.
+2. Watch the first moment the list appears (repeat the open 3 times, closing between). **Expect:** the pinned projects are ALREADY under the `PINNED` label the instant it opens — they never appear in the plain list and then jump up.
+3. **Expect:** the current project is first, bold, faintly tinted, and its time column reads `Current` (no time). Under `PINNED` and `RECENT`, the times only ever get older going down each group (e.g. 1h, 4h, 21h, 1d, 3d).
+4. **Expect:** exactly one scroll bar (the list); `+ New project` and `Recently deleted (N)` stay in view at the bottom whatever the list length, and N equals the real count.
+5. Look down the right edge. **Expect:** the calendar icon (projects with a schedule), the time and the three-dot menu each sit in the same column on every row.
+6. Hover a row, click the pin at the left of its right-hand cluster. **Expect:** it is invisible until hover; clicking moves the row between PINNED and RECENT immediately and does not open the project; the icon is outline for Pin, filled for Unpin. Reload and reopen. **Expect:** the pin persisted, same first-frame order.
+7. Type part of a project name in search. **Expect:** rows filter and the matched text is highlighted. Click `Recently deleted (N)`. **Expect:** the restore view replaces the list, footer still visible, `‹ Projects` returns.
+8. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes when steps 1–7 confirm on a real signed-in account, dated — or a step fails and is filed as a recurrence against B1952736, per STANDING RULE #2.
 
 ### V1370832 — B1934528: renaming a project updates Compose exhibit's title/header and the default PDF filename `Blocker: auth`
 

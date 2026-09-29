@@ -64,12 +64,16 @@ describe("NEW-2 — one rename entry point, and it is reachable without a mouse"
   });
 
   it("hover only changes the kebab's COLOUR — presentation is never the hit-test gate", () => {
-    expect(crumb).toMatch(/color: active \? "var\(--text-secondary\)" : "var\(--text-tertiary\)"/);
+    // Restyle (NEW-1): the kebab is a constant-colour button; the row's hover wash is CSS (.psw-row:hover).
+    expect(crumb).toMatch(/const KEBAB_BTN = \{[^}]*color: "var\(--text-tertiary\)"/);
+    expect(crumb).not.toMatch(/canManage\s*&&\s*active\s*\?/);
   });
 
   it("the row's timestamp / 'current' marker is no longer swapped out BY the kebab", () => {
     // Both render now, side by side; hovering a row used to hide when it was last edited.
-    expect(crumb).toMatch(/relTime\(p\.updatedAt\)/);
+    // Restyle (NEW-1): the time reads off the one shared `lastOpenedAt` field, in its own slot.
+    expect(crumb).toMatch(/relTimeShort\(lastOpenedAt\(p, opened\)\)/);
+    expect(crumb).toMatch(/cur \? "Current"/);
   });
 
   it("`editingWhere` is removed, since one id no longer addresses two editors", () => {
@@ -111,10 +115,12 @@ describe("NEW-3 — real SVG icons, inheriting their row's colour", () => {
     expect(crumb).not.toContain("⚠");      // ⚠
   });
 
-  it("the disclosure triangles are DELIBERATELY left as text glyphs", () => {
-    // Owner's own call: "a disclosure triangle as a text glyph is defensible". They are monochrome
-    // text on every platform and inherit colour already, so they are not the reported defect.
-    expect(crumb).toMatch(/binOpen \? "▾" : "▸"/);
+  it("the crumb's own ▾ caret is DELIBERATELY left as a text glyph", () => {
+    // Owner's own call: "a disclosure triangle as a text glyph is defensible". It is monochrome
+    // text on every platform and inherits colour already, so it is not the reported defect.
+    // (The bin's ▾/▸ toggle triangle went with the footer restyle — the footer link now uses a drawn
+    // RestoreIcon and swaps the list for the bin view instead of expanding inline.)
+    expect(crumb).toMatch(/opacity: 0\.6, fontSize: 11, flex: "none" \}\}>▾</);
   });
 });
 
