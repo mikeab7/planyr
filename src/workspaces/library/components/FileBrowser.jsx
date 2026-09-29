@@ -207,6 +207,15 @@ export default function FileBrowser({
   // revalidates the (cheap, token-guarded) file index instead of showing a stale list.
   // A hidden browser skips the fetch; the next activation runs it.
   useEffect(() => { if (isActive) refresh(); }, [signedIn, isActive]); // eslint-disable-line react-hooks/exhaustive-deps
+  // B1953796 (R8) — another tab/device may have filed or deleted files while this one sat open.
+  // Revalidate whenever the tab regains focus / becomes visible again (refresh is token-guarded).
+  useEffect(() => {
+    if (!isActive || !signedIn) return undefined;
+    const onBack = () => { if (typeof document === "undefined" || document.visibilityState === "visible") refresh(); };
+    window.addEventListener("focus", onBack);
+    document.addEventListener("visibilitychange", onBack);
+    return () => { window.removeEventListener("focus", onBack); document.removeEventListener("visibilitychange", onBack); };
+  }, [signedIn, isActive]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const projName = (id) => (projects.find((p) => p.id === id) || {}).name || projectName || "";
 
@@ -294,14 +303,19 @@ export default function FileBrowser({
   // then files the new one in its place; `"keepBoth"` skips the screen entirely and files a
   // second, independent copy.
   const fileOne = async ({ pid, discipline, item_, docDate, blob, fileName, facts, needsFiling, folderId = null, onProgress = null, org = false, dupChoice = null }) => {
+    // R8 - the duplicate screen reads the list AS IT IS NOW, not the copy loaded when this tab last
+    // refreshed (a second tab may have just filed the same name). A failed read falls back to the
+    // held list rather than blocking the upload.
+    let liveReviews = reviews;
+    try { const fresh = await fetchReviews(); if (fresh && fresh.ok) liveReviews = fresh.rows; } catch (_) { /* keep held list */ }
     if (!dupChoice) {
-      const dup = findDuplicateReview(reviews, { projectId: pid, orgScope: org, sourceFile: fileName });
+      const dup = findDuplicateReview(liveReviews, { projectId: pid, orgScope: org, sourceFile: fileName });
       if (dup) {
         if (isRapidRepeatUpload(dup)) return { ok: true, id: dup.id, collapsedInto: dup.id };
         return { ok: false, duplicate: dup };
       }
     } else if (dupChoice === "replace") {
-      const dup = findDuplicateReview(reviews, { projectId: pid, orgScope: org, sourceFile: fileName });
+      const dup = findDuplicateReview(liveReviews, { projectId: pid, orgScope: org, sourceFile: fileName });
       if (dup) { try { await deleteReview(dup.id); } catch (_) { /* best-effort — the new file still files */ } }
     }
     const r = await fileNewReview({ projectId: pid, project: pid ? projName(pid) : "", discipline, item: item_, docDate, blob, fileName, folderId, onProgress, orgScope: org });
@@ -646,12 +660,17 @@ export default function FileBrowser({
     const discipline = DISCIPLINES.find((d) => d.toLowerCase() === typed.toLowerCase()) || typed;
     const pid = f.projectId || projectId;
     const res = await refileReview(f.id, { projectId: pid, project: projName(pid), discipline });
+    if (!res || !res.ok) { // R2 - a failed refile writes NOTHING to the index, and says so
+      setMoveNotice(`Couldn't file "${f.title || "this file"}" — ${(res && res.error) || "the save failed"}. Nothing was changed.`);
+      return;
+    }
     // Update the index row's category/state too so the tree moves it immediately. Preserve the
     // REAL upload filename (B685) — never the extension-less title: source_file is what isPdfFile
     // reads to decide open-in-Review vs. download, so writing f.title here would make a re-filed
     // PDF look like a non-PDF (empty stays empty → legacy PDFs still read as PDF).
-    try { await upsertFileFacts(toFactsRow({ projectId: pid, discipline, item: f.item, category: sel.category || undefined, needsFiling: false }, { id: f.id, reviewId: f.id, sourceFile: f.sourceFile || "" })); } catch (_) {}
-    if (res.ok) {
+    const ff = await upsertFileFacts(toFactsRow({ projectId: pid, discipline, item: f.item, category: sel.category || undefined, needsFiling: false }, { id: f.id, reviewId: f.id, sourceFile: f.sourceFile || "" })).catch((e) => ({ ok: false, error: e && e.message }));
+    if (ff && ff.ok === false) setMoveNotice(`Filed, but the Library index wasn't updated (${ff.error || "write failed"}) — refresh and try again if the file looks misplaced.`);
+    {
       // Move the Drive BYTES to match the confirmed discipline (B662 review #3): the upload
       // landed where the ORIGINAL read pointed (often the Drawings fallback for "Other");
       // filing is only done when the physical copy follows the decision. Failure is loud —

@@ -39,6 +39,8 @@ import { countLiveCompsForProject } from "../../comps/lib/compsStore.js";
 import { overlayPlaced } from "../lib/sitePlanOverlays.js";
 import { imagePointToLatLon } from "../lib/overlayGeoref.js";
 import { friendlySaveError } from "../lib/overlayErrors.js";
+import { withResolvedCounties } from "../lib/overlayCompCounty.js";
+import { notifyCompsChanged } from "../../comps/lib/compsChanged.js";
 import { uploadOverlayRaster, downloadOverlayRasterUrl } from "../lib/overlayRasterStorage.js";
 import ImageCropTool from "./ImageCropTool.jsx";
 import { hasCrop } from "../../../workspaces/site-planner/lib/overlayCrop.js";
@@ -766,6 +768,8 @@ export default function SitePlansSection({
       const ll = imagePointToLatLon(next, next.imgW, next.imgH, p.sitePlanPoint.x, p.sitePlanPoint.y);
       return ll && Number.isFinite(ll.lat) && Number.isFinite(ll.lon) ? { id: p.id, lat: ll.lat, lon: ll.lon } : null;
     }).filter(Boolean);
+    // B1953796 (R9) — a plan moved across a county line must carry its pinned comps' county too.
+    if (compPositions.length) { const withCounty = await withResolvedCounties(compPositions); compPositions.splice(0, compPositions.length, ...withCounty); }
 
     // Item 7: carries the version this client last saw — the RPC refuses (and reports
     // `conflict`) if the row changed elsewhere since, rather than silently clobbering a
@@ -813,6 +817,7 @@ export default function SitePlansSection({
         // (CompsPanel's own cross-device polling, which is otherwise the only thing that would
         // eventually pick this up).
         compsChangedRef.current && compsChangedRef.current();
+        notifyCompsChanged(); // R4 - the Model workspace's Comp.* names re-read too
       }
     }
   });

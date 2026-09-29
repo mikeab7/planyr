@@ -72,7 +72,7 @@ import { modelSaveState } from "./lib/modelSaveState.js";
 import { readZoom, writeZoom } from "./lib/sheetZoom.js";
 import { readAutoColor, writeAutoColor } from "./lib/sheetColorMode.js";
 import {
-  readLocalSheet, writeLocalSheet, loadCloudSheet, saveCloudSheet,
+  readLocalSheet, writeLocalSheet, decideAnonAdoption, loadCloudSheet, saveCloudSheet,
   readLocalOrgIndex, writeLocalOrgIndex, touchLocalOrgIndex, removeLocalOrgIndexEntry,
   listOrgWorkbooksCloud, loadOrgWorkbookCloud, saveOrgWorkbookCloud, renameOrgWorkbookCloud, deleteOrgWorkbookCloud,
 } from "./lib/modelStore.js";
@@ -88,6 +88,7 @@ import { addSheetFromCsvText, sheetToCsv } from "./lib/csvIO.js";
 // read CompsPanel.jsx uses — there is no synchronous comps cache anywhere in this repo.
 import { buildProjectNames, openConceptName, openPlanId } from "./lib/projectRefs.js";
 import { onSiteModelChanged, isCloudActive } from "../site-planner/lib/storage.js";
+import { onCompsChanged } from "../../shared/comps/lib/compsChanged.js";
 import { supabase } from "../site-planner/lib/supabase.js";
 import { fetchPlanRowsForModel, planRowsLoading, planRowsReady, planRowsError, rowsSignature } from "./lib/planRowsSource.js";
 import { fetchProjectNameComps } from "./lib/projectCompsFetch.js";
@@ -200,14 +201,24 @@ export default function ModelApp({
   // `siteTick` bumps on a DEBOUNCED site-content-changed notification, so a burst of drag-frame
   // saves in the (possibly hidden) Site Planner tab recomputes the site model once, not per save.
   const [comps, setComps] = useState([]);
+  // B1953796 (R4) — comps are re-read on project switch AND whenever a comp is written elsewhere
+  // (the Site Planner's Comps panel, same mounted app) or this workspace becomes active/visible
+  // again, so Comp.<title>.* never quotes a stale rate. Token-guarded: the newest read wins.
+  const compsReq = useRef(0);
+  const refetchComps = useCallback(async () => {
+    const tok = ++compsReq.current;
+    const { data, error } = await fetchProjectNameComps();
+    if (tok === compsReq.current && !error) setComps(data || []); // a FAILED read keeps the last-known list
+  }, []);
+  useEffect(() => { refetchComps(); }, [projectId, refetchComps]);
+  useEffect(() => { if (isActive) refetchComps(); }, [isActive, refetchComps]);
   useEffect(() => {
-    let live = true;
-    (async () => {
-      const { data } = await fetchProjectNameComps();
-      if (live) setComps(data || []);
-    })();
-    return () => { live = false; };
-  }, [projectId]);
+    const off = onCompsChanged(refetchComps);
+    const onVis = () => { if (document.visibilityState === "visible") refetchComps(); };
+    window.addEventListener("focus", onVis);
+    document.addEventListener("visibilitychange", onVis);
+    return () => { off(); window.removeEventListener("focus", onVis); document.removeEventListener("visibilitychange", onVis); };
+  }, [refetchComps]);
   const [siteTick, setSiteTick] = useState(0);
   const siteTickTimer = useRef(0);
   useEffect(() => {
@@ -469,7 +480,16 @@ export default function ModelApp({
       if (r.ok) {
         cloudVersionRef.current = r.version;
         setCloudConfirmed(true);
-        if (!local && r.sheet) {
+        // R3 — a workbook made signed-out (scope "local") is adopted once into this account's scope.
+        const anon = openProject && userId && !local ? readLocalSheet(null, storageKey) : null;
+        const adoption = decideAnonAdoption({ userId, userLocal: local, cloudSheet: r.sheet, cloudOk: true, anonLocal: anon,
+          diverges: anon && r.sheet ? sheetsDiverge(migrateWorkbook(anon), migrateWorkbook(r.sheet)) : false });
+        if (adoption === "adopt") {
+          const adopted = migrateWorkbook(anon); // the write-through + debounced push effects persist it under this account
+          reset(adopted);
+          setActiveSheetId(adopted.activeSheetId);
+        } else if (!local && r.sheet) {
+          if (adoption === "diverged") setStatus("diverged");
           const cloudWorkbook = migrateWorkbook(r.sheet);
           reset(cloudWorkbook);
           setActiveSheetId(cloudWorkbook.activeSheetId);

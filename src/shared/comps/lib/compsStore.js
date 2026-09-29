@@ -13,6 +13,7 @@
  */
 import { supabase } from "../../../workspaces/site-planner/lib/supabase.js";
 import { compToRow, rowToComp } from "./comps.js";
+import { notifyCompsChanged } from "./compsChanged.js";
 
 export { supabase };
 
@@ -64,6 +65,7 @@ export async function insertComp(comp) {
   if (!uid) return { data: null, error: new Error("Sign in to add a comp") };
   const { data, error } = await supabase.from(TABLE).insert(compToRow(comp)).select(SELECT_COLS).single();
   if (error) return { data: null, error };
+  notifyCompsChanged();
   return { data: rowToComp(data), error: null };
 }
 
@@ -79,6 +81,7 @@ export async function insertComps(comps) {
   if (!uid) return { data: null, error: new Error("Sign in to add comps") };
   const { data, error } = await supabase.from(TABLE).insert(comps.map(compToRow)).select(SELECT_COLS);
   if (error) return { data: null, error };
+  notifyCompsChanged();
   return { data: (data || []).map(rowToComp), error: null };
 }
 
@@ -89,6 +92,7 @@ export async function updateComp(id, comp) {
   const { data, error } = await supabase.from(TABLE).update(compToRow(comp)).eq("id", id).select(SELECT_COLS).maybeSingle();
   if (error) return { data: null, error };
   if (!data) return { data: null, error: new Error("Not saved — you can only edit comps you entered") };
+  notifyCompsChanged();
   return { data: rowToComp(data), error: null };
 }
 
@@ -101,6 +105,7 @@ export async function deleteComp(id) {
   const { data, error } = await supabase.from(TABLE).update({ deleted_at: new Date().toISOString() }).eq("id", id).select("id");
   if (error) return { error };
   if (!Array.isArray(data) || !data.length) return { error: new Error("Not deleted — you can only remove comps you entered") };
+  notifyCompsChanged();
   return { error: null };
 }
 
@@ -110,6 +115,7 @@ export async function restoreComp(id) {
   const { data, error } = await supabase.from(TABLE).update({ deleted_at: null }).eq("id", id).select("id");
   if (error) return { error };
   if (!Array.isArray(data) || !data.length) return { error: new Error("Not restored — you can only restore comps you entered") };
+  notifyCompsChanged();
   return { error: null };
 }
 

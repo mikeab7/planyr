@@ -64,6 +64,17 @@ export function readLocalSheet(userId, projectId) {
   } catch (_) { return null; }
 }
 
+/** B1953796 (R3) — a workbook built signed OUT lives under the "local" scope and, without this,
+ *  was invisible the moment the user signed in (their own scope is empty; the cloud has none).
+ *  Pure decision, one place: adopt the signed-out copy ONLY when the user's own scope is empty AND
+ *  the cloud has nothing; never overwrite a non-empty user/cloud workbook — when the signed-out copy
+ *  differs from what's there, report "diverged" so the caller surfaces it (nothing is deleted). */
+export function decideAnonAdoption({ userId, userLocal, cloudSheet, cloudOk, anonLocal, diverges }) {
+  if (!userId || !anonLocal || userLocal || !cloudOk) return "none";
+  if (!cloudSheet) return "adopt";
+  return diverges ? "diverged" : "none";
+}
+
 /** Write-through, synchronous, every commit — never debounced (B400176's rule: the stored
  *  copy must never be staler than the screen). Returns false on a storage failure so the
  *  caller can surface it (LOUD-FAILURE) rather than silently believing it saved. */
@@ -217,10 +228,17 @@ export async function loadOrgWorkbookCloud(id) {
   return { ok: true, sheet: data.data, version: data.version ?? null, name: data.name || null };
 }
 
+/** B1953796 (R6) — the org workbook NAME has ONE writer after creation: renameOrgWorkbookCloud.
+ *  A content save carries `name` only on an INSERT (expected == null, the row doesn't exist yet), so
+ *  a stale tab's autosave can never revert another tab's rename. Pure; exported for tests. */
+export function orgContentRow({ id, name, sheet, expected }) {
+  return expected == null ? { id, name, data: sheet } : { id, data: sheet };
+}
+
 async function upsertOrgCore({ uid, id, name, sheet, expected }) {
   // Same shape as upsertCore above, minus the ensureProjectExists guard — an org workbook has no
   // project row to confirm against, so there's nothing to block a first save on.
-  const r = await casUpsert(supabase, ORG_TABLE, { uid, id, row: { id, name, data: sheet }, expected, conflictTarget: ORG_CONFLICT_TARGET });
+  const r = await casUpsert(supabase, ORG_TABLE, { uid, id, row: orgContentRow({ id, name, sheet, expected }), expected, conflictTarget: ORG_CONFLICT_TARGET });
   if (r.degrade) {
     const res = await degradeUpsert(supabase, ORG_TABLE, { row: { id, user_id: uid, name, data: sheet }, conflictTarget: ORG_CONFLICT_TARGET });
     return res.ok

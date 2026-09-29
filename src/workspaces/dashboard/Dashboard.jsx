@@ -67,6 +67,7 @@ import { fetchScheduleProjects, fetchScheduleSettings, fetchScheduleLastWriteAt 
 import { fetchAllElementRecency } from "./lib/dashboardElementRecencyFetch.js";
 import { fetchElementsForSites } from "./lib/dashboardYieldFetch.js";
 import { yieldBySite, buildingCountBySite } from "./lib/buildingYield.js";
+import { summarizeElementRecency } from "../../shared/projects/projectModel.js";
 import { groupProjectsByGroupId, pipelineCounts, goingQuiet, recentProjects } from "./lib/dashboardPipeline.js";
 import { summarizeScheduleHealth } from "./lib/scheduleHealth.js";
 import { needsAttentionList } from "./lib/needsAttentionList.js";
@@ -129,6 +130,7 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
   // dashboardPrefs.js's loadDashboardLayout) never re-adds them; see dashboardLayout.js's own
   // header for the full reasoning.
   const [dismissed, setDismissed] = useState([]);
+  const [elementRecencyBySite, setElementRecencyBySite] = useState({}); // A-B1953794 — feeds the one representative-plan chooser
   // NEW-1 (2026-09-17) — how many recent projects the Jump-back-in card lists; a per-user
   // preference persisted alongside the layout (see lib/dashboardPrefs.js).
   const [jumpBackInCount, setJumpBackInCount] = useState(JUMP_BACK_IN_COUNT_DEFAULT);
@@ -263,7 +265,9 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
       const recentComps = results[6].status === "fulfilled" ? results[6].value || [] : [];
       const recentNotePages = results[7].status === "fulfilled" ? results[7].value || [] : [];
       const scheduleLastWriteAt = results[8].status === "fulfilled" ? results[8].value : null;
-      const openPursuits = pursuitsTable(groupProjectsByGroupId(siteRows), {});
+      const elementRecencyMap = summarizeElementRecency(elementRecencyRows);
+      setElementRecencyBySite(elementRecencyMap);
+      const openPursuits = pursuitsTable(groupProjectsByGroupId(siteRows, elementRecencyMap), {});
       const pursuitSiteIds = [...new Set(openPursuits.map((p) => p.siteId).filter(Boolean))];
       const elementRows = await fetchElementsForSites(pursuitSiteIds).catch(() => []);
       if (!live) return;
@@ -299,7 +303,7 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
-  const projects = useMemo(() => groupProjectsByGroupId(sites), [sites]);
+  const projects = useMemo(() => groupProjectsByGroupId(sites, elementRecencyBySite), [sites, elementRecencyBySite]);
   const yieldBySiteMap = useMemo(() => yieldBySite(yieldRows), [yieldRows]);
   const needsAttentionRows = useMemo(() => (scheduleProjects ? needsAttentionList(scheduleProjects, Date.now(), scheduleSettings) : []), [scheduleProjects, scheduleSettings]);
   const pursuitsRows = useMemo(() => pursuitsTable(projects, quietDaysByGroup), [projects, quietDaysByGroup]);

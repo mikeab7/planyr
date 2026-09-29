@@ -180,6 +180,31 @@ Sandbox-proven (logged out): the unit suites named on B1953795 and `ui-audit/ver
 8. Contacts: give a task the owner `jon smith` (lower-case) and a contact `Jon Smith`; rename the contact to `Jonathan Smith`. **Expect:** the task's owner becomes `Jonathan Smith`, and after a reload no duplicate `jon smith` contact appears.
 9. Read the served chunk hash in the same observation as each result.
 - **Stopping rule:** closes when 1-8 confirm on a real signed-in account, dated with the build hash - or a failing step is filed as a recurrence on B1953795 (STANDING RULE #2).
+### V1390097 — B1953794: stale-copy fixes hold on a real signed-in account (mitigation re-price, easement jurisdiction, Dashboard vs Map plan, thumbnail) `Blocker: auth`
+
+Sandbox-proven: `test/staleCopyGroupB1953794.test.js` (red-proofed against origin/main). **Still needs a signed-in pass** for the cloud legs.
+**Steps (throwaway project only):**
+1. Open a plan on a floodplain site with a building; in Flood mitigation switch the jurisdiction Fort Bend to Waller and back. **Expect:** floodway acres/flag change with Waller (buffer applied) and return exactly on Fort Bend; the exported PDF matches the panel.
+2. On a plan whose county is Fort Bend, open Easement rules, pick a jurisdiction by hand, reload. **Expect:** the pick is still selected; clear it to "auto" and the water-line width follows the county.
+3. Make a project with plans A and B; edit only B's buildings, add two bump-outs to B, go to Dashboard and Map. **Expect:** both show plan B's name/yield; the Dashboard building count equals the planner's (bump-outs not counted).
+4. After the edit in 3, wait ~5 s, open the Dashboard's recent-plans card. **Expect:** B's thumbnail shows the new buildings without a header change; in DevTools with the sites update blocked, a `thumbnail-refresh-failed` event is recorded and the next save retries.
+5. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B1953794.
+### V1390099 — B1953796: Doc Review autosave keeps its folder; filing in Review clears "Needs filing"; Model/Food/Library stay fresh `Blocker: auth`
+
+Sandbox-proven only as pure logic (`test/reviewPreserveFields.test.js`, `test/staleCopyFixes.test.js`). All cloud legs need a signed-in pass on THROWAWAY data (never a real plan/file).
+**Steps:**
+1. Signed in, in Library drop a throwaway PDF on folder "03. Survey"; open it in Review; draw one markup; wait for "Saved". Reload, reopen Library. **Expect:** the file is still in "03. Survey" (not moved to a discipline folder).
+2. Drop a throwaway file with no project so it lands in "Needs filing"; open it in Review, choose project + discipline. Return to Library (no reload). **Expect:** it is out of "Needs filing" and under the chosen project/category.
+3. In Model, type `=Comp.<title>.RentPSF` for a throwaway comp; change that comp's rate in Site Planner's Comps panel; go back to Model. **Expect:** the cell shows the new rate without a reload.
+4. Signed out, build a workbook on a throwaway project; sign in. **Expect:** the workbook is there and saves to the cloud.
+5. Two tabs on Library: file "x.pdf" in tab A, then drop "x.pdf" in tab B. **Expect:** tab B offers the duplicate choice (not a silent second copy).
+6. Two manual food pins with the same name at different spots: click each. **Expect:** each shows only its own visits.
+7. Org workbook: rename in tab A; type in a still-old tab B. **Expect:** the name stays as renamed.
+8. After the owner runs `site_plan_overlays_comp_county_sync.sql`: move a throwaway plan with a pinned comp across a county line. **Expect:** the comp's county updates.
+9. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–8, or a failed step filed as a recurrence on B1953796.
+
 ### V1389504 — B1953200: a rename from any door reaches every display, incl. across devices `Blocker: auth`
 
 Sandbox-proven (logged out): `e2e/names-matrix.spec.js` (red-proofed) + `test/namesSingleSource.test.js`. **Still needs a signed-in pass** for the cloud-pull leg.
