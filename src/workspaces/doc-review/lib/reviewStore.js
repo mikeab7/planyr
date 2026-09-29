@@ -197,14 +197,17 @@ export async function syncFileFactsForReview(rec) {
   if (filedSig[rec.id] === sig) return { ok: true, skipped: true };
   const missing = (m) => /relation|does not exist|schema cache|column/i.test(m || "");
   try {
-    let { data: ex, error } = await supabase.from("file_facts").select("id,discipline,item,sheet_title,category,state").eq("id", rec.id).maybeSingle();
-    if (error && missing(error.message)) ({ data: ex, error } = await supabase.from("file_facts").select("id,discipline,item,sheet_title").eq("id", rec.id).maybeSingle());
-    if (error) return missing(error.message) ? { ok: true, skipped: true } : { ok: false, error: `Saved, but the Library index couldn't be updated (${error.message}). It will retry on the next save.` };
-    if (!ex) { filedSig[rec.id] = sig; return { ok: true, skipped: true }; } // never indexed → nothing stale to correct
-    const patch = factsPatchFor(ex, rec);
-    let { error: uerr } = await supabase.from("file_facts").update(patch).eq("id", rec.id);
-    if (uerr && missing(uerr.message)) { const { category, state, ...core } = patch; ({ error: uerr } = await supabase.from("file_facts").update(core).eq("id", rec.id)); }
-    if (uerr) return { ok: false, error: `Saved, but the Library index couldn't be updated (${uerr.message}). It will retry on the next save.` };
+    const sel = async (cols) => supabase.from("file_facts").select(cols).eq("id", rec.id).maybeSingle();
+    const r1 = await sel("id,discipline,item,sheet_title,category,state");
+    const r2 = r1.error && missing(r1.error.message) ? await sel("id,discipline,item,sheet_title") : r1;
+    if (r2.error) return missing(r2.error.message) ? { ok: true, skipped: true } : { ok: false, error: `Saved, but the Library index couldn't be updated (${r2.error.message}). It will retry on the next save.` };
+    if (!r2.data) { filedSig[rec.id] = sig; return { ok: true, skipped: true }; } // never indexed → nothing stale to correct
+    const patch = factsPatchFor(r2.data, rec);
+    const upd = async (p) => supabase.from("file_facts").update(p).eq("id", rec.id);
+    const u1 = await upd(patch);
+    const { category: _c, state: _s, ...core } = patch;
+    const u2 = u1.error && missing(u1.error.message) ? await upd(core) : u1;
+    if (u2.error) return { ok: false, error: `Saved, but the Library index couldn't be updated (${u2.error.message}). It will retry on the next save.` };
     filedSig[rec.id] = sig;
     return { ok: true };
   } catch (e) {
