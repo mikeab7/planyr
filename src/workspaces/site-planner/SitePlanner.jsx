@@ -4,7 +4,7 @@ import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useProjectName, usePlanName, renameProjectChecked, renamePlanChecked } from "../../shared/names/names.js";
-import { loadSite, saveSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
+import { loadSite, saveSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
 import { relTime } from "../../shared/projects/projectModel.js";
 import { collectAssetRefs, releasePlanForOverlay } from "./lib/sharedAssetRefs.js";
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
@@ -26,6 +26,7 @@ import { createNameResolver, describeElement, SELF_ACTOR } from "./lib/editorNam
 import { toastForSyncEvent, describeCoalescedLabel } from "./lib/conflictToasts.js";
 import { listMembers, currentIdentity } from "./lib/teams.js";
 import { multiwriterEnabled } from "./lib/multiwriter.js";
+import { applyLeafPatches } from "./lib/headerMerge.js";
 import { presenceParties, presenceDisplayName, relativeAgo } from "./lib/presencePill.js";
 import { loadProfile } from "./lib/profile.js";
 import { commitElements, fetchElements, keepaliveCommit } from "./lib/elementApi.js";
@@ -3959,6 +3960,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // than leave the badge spinning forever. Tied to the actual in-flight push (not the debounce),
   // so sustained editing never false-triggers it. Reused by autosave + the manual Retry.
   const drainSaveArmed = useRef(false); // NEW-4 — is a drainage check waiting to charge a save leg?
+  /* B1953797 (H1) — apply ANOTHER writer's plan-header change (settings / layerOverrides / layerAbove /
+   * origin) to this open canvas. `patches` are exactly the leaves that moved from this tab's copy to
+   * the server's ({ path:["settings",…], value }), so a leaf this tab is editing in the same instant is
+   * never overwritten. Device-local `snap` is never adopted. The on-device mirror was already patched by
+   * storage.js; the autosave's header-signature check then sees nothing new to push. Reached from the
+   * stale-CAS heal (a push's `adopted`) AND the focus/visibility refresh below — one apply, two feeders. */
+  const applyAdoptedHeader = (patches) => {
+    if (!patches || !patches.length) return;
+    const under = (k) => patches.filter((p) => p.path[0] === k).map((p) => ({ path: p.path.slice(1), value: p.value }));
+    const st = under("settings"), lo = under("layerOverrides"), la = under("layerAbove"), og = under("origin");
+    if (st.length) setSettings((cur) => { const next = applyLeafPatches(cur, st); return next === cur ? cur : { ...next, snap: cur.snap }; });
+    if (lo.length) setLayerOverrides((cur) => sanitizeLayerOverrides(applyLeafPatches(cur || {}, lo)));
+    if (la.length) setLayerAbove((cur) => sanitizeLayerAbove(applyLeafPatches(cur || {}, la)));
+    if (og.length) setOrigin((cur) => normalizeOrigin(applyLeafPatches(cur, og)));
+    flashWarn("Updated from another session: this plan's settings changed.", 5000);
+  };
   const cloudPushWithWatchdog = (id) => {
     setSaveStatus("saving");
     const wd = setTimeout(() => setCloudSaveFailed(true), 6000);
@@ -3977,6 +3994,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return pushSiteToCloud(id)
       .then((c) => {
         clearTimeout(wd); stamp();
+        if (c && c.ok && c.adopted) applyAdoptedHeader(c.adopted); // B1953797 — the heal merged another writer's header changes
         setSaveStatus(c.ok ? "saved" : "unsaved");
         // NEW-1 — an unresolved conflict gets its OWN banner (below), never the generic
         // "didn't reach the cloud, will retry" one: retrying from this tab's still-stale local
@@ -4107,6 +4125,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }, 400);
     return () => { clearTimeout(t); if (microT) clearTimeout(microT); };
   }, [siteId, parcels, els, measures, callouts, markups, settings, sheetOverlays, deletedIds, layerOverrides, layerAbove]);
+  /* B1953797 (H1) — INBOUND plan-header path: an open, signed-in tab asks the cloud (one header row,
+   * no elements) whether another writer changed this plan's settings, on focus / tab-visible / a slow
+   * visible-tab tick, and adopts the change per leaf through the ONE apply above. Read-only + no push,
+   * so an idle tab that adopts writes nothing back. Not realtime on purpose: nothing here assumes the
+   * `sites` table is in a realtime publication, and a header change is rare and human-paced. */
+  const headerRefreshBusy = useRef(false);
+  const applyAdoptedHeaderRef = useRef(null); applyAdoptedHeaderRef.current = applyAdoptedHeader;
+  useEffect(() => {
+    if (!siteId) return undefined;
+    const check = async () => {
+      if (headerRefreshBusy.current || !isCloudActive() || document.visibilityState !== "visible" || deletedSelfRef.current) return;
+      headerRefreshBusy.current = true;
+      try {
+        const r = await refreshPlanHeaderFromCloud(siteId);
+        if (r && r.ok && r.changed) applyAdoptedHeaderRef.current(r.adopted);
+      } catch (e) {
+        reportClientEvent("header-refresh-failed", "plan-header refresh threw", { id: siteId, error: (e && e.message) || "" });
+      } finally { headerRefreshBusy.current = false; }
+    };
+    const onVis = () => { if (document.visibilityState === "visible") check(); };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", check);
+    const iv = setInterval(check, 45000);
+    return () => { document.removeEventListener("visibilitychange", onVis); window.removeEventListener("focus", check); clearInterval(iv); };
+  }, [siteId]);
   // Manual "Retry now" for the loud cloud-save-failure banner (B125) — also the escape from a
   // watchdog escalation (B455/NEW-7).
   const retryCloudSave = () => {
