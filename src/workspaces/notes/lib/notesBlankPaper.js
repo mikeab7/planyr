@@ -30,6 +30,31 @@
 export const BLANK_DBLTAP_MS = 450;
 /** How far the pointer may wander between the two presses and still be one double-click. */
 export const BLANK_DBLTAP_PX = 6;
+/** A fingertip is not a mouse: two taps "at the same place" routinely land a couple of
+ *  centimetres-of-finger apart, and iOS does not always raise `detail: 2` on the compat mouse
+ *  events. Used instead of `BLANK_DBLTAP_PX` when the press came from a touch pointer. */
+export const BLANK_DBLTAP_TOUCH_PX = 28;
+
+/** True for a pointer that is a finger / stylus rather than a mouse. */
+export const isTouchPointerType = (t) => t === "touch" || t === "pen";
+
+/** True when the primary input is coarse (a phone/tablet) — drives "Double-tap" wording. */
+export function isCoarsePointerDevice() {
+  try {
+    return typeof window !== "undefined" && !!window.matchMedia?.("(pointer: coarse)").matches;
+  } catch { return false; }
+}
+
+/**
+ * Which `inputType`s are TEXT ARRIVING (as opposed to deleting / formatting / history). These are
+ * the ones that mean "start the note here" when a caret is armed but no keydown produced them:
+ * predictive-bar taps, QuickPath swipe, dictation, emoji and IME composition all reach the page as
+ * `beforeinput`/composition with a keydown of `Unidentified`/229 — or none at all.
+ */
+export function isTextInsertInputType(t) {
+  return t === "insertText" || t === "insertReplacementText" || t === "insertFromComposition"
+    || t === "insertCompositionText" || t === "insertFromYank" || t === "insertTranspose";
+}
 
 /**
  * ⛔ THE PAIR IS RECONSTRUCTED, NEVER LEFT TO THE BROWSER ALONE (carry-forward traps 31 and 32).
