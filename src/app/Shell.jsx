@@ -614,6 +614,14 @@ export default function Shell() {
     });
     return () => { live = false; };
   }, [projectId, cross, org, gateRecheck]);
+  // B1953796 (R9) — the gate above ran once per projectId; a project deleted from another tab while
+  // this one sat open stayed editable. Re-check whenever this tab regains focus.
+  useEffect(() => {
+    const onBack = () => { if (document.visibilityState === "visible") setGateRecheck((n) => n + 1); };
+    window.addEventListener("focus", onBack);
+    document.addEventListener("visibilitychange", onBack);
+    return () => { window.removeEventListener("focus", onBack); document.removeEventListener("visibilitychange", onBack); };
+  }, []);
   const projectBlocked = projectGate.id === projectId && (projectGate.status === "deleted" || projectGate.status === "missing");
   const restoreBlockedProject = async () => {
     // Restore the WHOLE group the routed id belongs to (every sibling plan), same as the

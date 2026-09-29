@@ -208,6 +208,26 @@ function resolveScheduleProject(projects, wanted) {
 
 const FACT_SELECT = "id,review_id,category,discipline,item,sheet_number,sheet_title,revision,doc_date,source_file,match_confidence,needs_filing,state,updated_at";
 
+/* B1953796 (R2) — file_facts keeps a COPY of facts that live on doc_reviews (project, deleted).
+ * Read them from the review at read time: drop facts whose review is soft-deleted, and let the
+ * review's CURRENT project win over the index copy. Facts with no matching review row (legacy /
+ * never-reviewed) are kept as-is. Pure over its inputs; exported for tests. */
+export function applyReviewTruth(factRows, reviewRows) {
+  const byId = new Map((reviewRows || []).map((r) => [String(r.id), r]));
+  const out = [];
+  for (const f of factRows || []) {
+    const r = byId.get(String(f.review_id || f.id));
+    if (!r) { out.push(f); continue; }
+    if (r.deleted_at) continue;
+    out.push({ ...f, project_id: r.project_id || null });
+  }
+  return out;
+}
+async function truthFor(env, factRows) {
+  const reviews = await pgGet(env, "doc_reviews", [["select", "id,project_id,deleted_at"]]);
+  return applyReviewTruth(factRows, reviews);
+}
+
 /* Group drawing-index rows category → discipline; flag the newest row per sheet_number.
  * Rows must arrive doc_date-descending (the query orders them). */
 function groupFacts(rows) {
@@ -243,10 +263,11 @@ export const TOOLS = [
       "List ALL of the owner's Planyr projects (industrial real-estate deals) in one call: id, name, deal status (pursuit/active/onhold/complete/dead), counties, number of site plans, map origin (lat/lon), drawing counts from the document library, linked construction schedule, and last-updated time. Also lists scheduler-only projects that have no site plan yet. Start here.",
     inputSchema: { type: "object", properties: {}, required: [] },
     async handler(env) {
-      const [siteRows, factRows] = await Promise.all([
+      const [siteRows, rawFacts] = await Promise.all([
         fetchSitesLight(env),
-        pgGet(env, "file_facts", [["select", "project_id,needs_filing,state"]]),
+        pgGet(env, "file_facts", [["select", "id,review_id,project_id,needs_filing,state"]]),
       ]);
+      const factRows = await truthFor(env, rawFacts);
       const projects = groupSitesIntoProjects(siteRows);
       let scheduleProjects = null, scheduleBackendError = null;
       try { scheduleProjects = await fetchScheduleData(env); }
@@ -302,11 +323,12 @@ export const TOOLS = [
           : { error: `"${args.project}" is ambiguous.`, candidates: res.candidates };
       }
       const p = res.project;
-      const [fullRows, factRows, reviewRows] = await Promise.all([
+      const [fullRows, rawFacts, reviewRows] = await Promise.all([
         pgGet(env, "sites", [["select", "id,site,name,county,updated_at,data"], ["group_id", `eq.${p.id}`]]),
-        pgGet(env, "file_facts", [["select", FACT_SELECT], ["project_id", `eq.${p.id}`], ["order", "doc_date.desc.nullslast"]]),
-        pgGet(env, "doc_reviews", [["select", "id,title,kind,discipline,item,revision,doc_date,updated_at"], ["project_id", `eq.${p.id}`], ["order", "updated_at.desc"]]),
+        pgGet(env, "file_facts", [["select", FACT_SELECT + ",project_id"], ["order", "doc_date.desc.nullslast"]]),
+        pgGet(env, "doc_reviews", [["select", "id,title,kind,discipline,item,revision,doc_date,updated_at"], ["project_id", `eq.${p.id}`], ["deleted_at", "is.null"], ["order", "updated_at.desc"]]),
       ]);
+      const factRows = (await truthFor(env, rawFacts)).filter((f) => f.project_id === p.id);
       // A groupless site (project id = site id) has no group_id to match on.
       const rows = fullRows.length ? fullRows : await pgGet(env, "sites", [["select", "id,site,name,county,updated_at,data"], ["id", `eq.${p.id}`]]);
 
@@ -397,19 +419,20 @@ export const TOOLS = [
       if (!q) throw new InvalidParams("query is empty after removing PostgREST-reserved characters , ( ) % *");
       const limit = String(Math.min(Math.max(Number(args.limit) || 40, 1), 200));
       const like = `*${q}*`;
-      const [facts, reviews, driveFiles, siteRows] = await Promise.all([
+      const [rawFacts, reviews, driveFiles, siteRows] = await Promise.all([
         pgGet(env, "file_facts", [
-          ["select", FACT_SELECT],
+          ["select", FACT_SELECT + ",project_id"],
           ["or", `(sheet_title.ilike.${like},source_file.ilike.${like},item.ilike.${like},sheet_number.ilike.${like})`],
           ["limit", limit],
         ]),
         pgGet(env, "doc_reviews", [
           ["select", "id,title,kind,project_id,discipline,item,revision,doc_date,updated_at"],
-          ["title", `ilike.${like}`], ["limit", limit],
+          ["title", `ilike.${like}`], ["deleted_at", "is.null"], ["limit", limit],
         ]),
         pgGet(env, "drive_files", [["select", "planyr_key,name,updated_at"], ["name", `ilike.${like}`], ["limit", limit]]),
         fetchSitesLight(env),
       ]);
+      const facts = await truthFor(env, rawFacts);
       const nameOf = new Map(groupSitesIntoProjects(siteRows).map((p) => [p.id, p.name]));
       const proj = (pid) => (pid ? { projectId: pid, projectName: nameOf.get(pid) || null } : { projectId: null, projectName: null });
       return {
