@@ -59,6 +59,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   CURRENT resolvable tree (`depth`), never the STAMPED lineage depth (`lineageDepth`, used only by
   `parcelSplitNames` to keep the letter/digit alternation correct once the parent is gone) — read
   `siteModel.parcelDisplayInfo`'s header before touching either field.
+- **`parcelIdentity.js` (B1964512) — THE one "which county lot is this?" key, shared by `SitePlanner.jsx` identify-and-add and `MapFinder.jsx` Select-parcels.** Exact `OBJECTID` → else a key ending `.OBJECTID` (prefer `…TaxParcels…` over a joined accounts table; Chambers publishes only prefixed names) → else a hash of the WHOLE ring set, never the first vertex (neighbouring lots share corners). A stored parcel is matched by `storedParcelKey(pc)` recomputed from its `attrs`, not its stored `gisKey`, so legacy `geo:` rows are still recognised. Guard: the repo-root `test/` suite **parcelIdentity** (replays the pre-fix rule on the real Grand Port lots).
 - **⛔ `projectName.js` (B1415–B1418) — A PROJECT'S NAME HAS ONE AUTHORITATIVE VALUE PER GROUP, and every
   plan's `site` field is a DERIVED MIRROR of it. Read it before touching any rename path.** The name was
   denormalized across a group's plans with nothing keeping the copies in agreement, so a rename that ran

@@ -5256,7 +5256,7 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
-### B1964512 — Clicking a Chambers County lot grabs or drops its NEIGHBOUR: parcel identity key collides on shared corners `[site-planner/parcels]` (bug) #site-planner #parcels *(Owner report 2026-09-28, Grand Port `smqfy2r7pdec`, Concept A, phone.)*
+### B1964512 — Clicking a Chambers County lot grabs or drops its NEIGHBOUR: parcel identity key collides on shared corners `[site-planner/parcels]` (bug) #site-planner #persistence *(Owner report 2026-09-28, Grand Port `smqfy2r7pdec`, Concept A, phone.)*
 
 `[x]` **Root cause (measured from live `site_elements`):** `parcelGisKey` read only a bare `OBJECTID`; Chambers' joined layer publishes `ChambersCADWeb.DBO.TaxParcels.OBJECTID`/`…Accounts.OBJECTID`, so every lot fell to the first-vertex key, and neighbouring strip lots share corners (20887 and 15328 both `geo:-94.872878,29.810689`). `quickAddAt` then either toggled the neighbour OFF (added this session) or SELECTED it instead of adding (added earlier).
 `[x]` **Fix:** one shared resolver `lib/parcelIdentity.js` used by BOTH `SitePlanner.jsx` (`parcelGisKey`) and `MapFinder.jsx` (`parcelKey`, county-namespaced as before): exact OBJECTID/objectid/OID → else a key ending `.OBJECTID`, preferring the geometry table (`TaxParcels`) over the joined accounts table → else a HASH OF THE WHOLE normalised ring set (rotation/winding/closing-vertex independent, all multipart parts), never one vertex. Dupe check now compares `storedParcelKey(p)` (recomputed from stored attrs) so Grand Port's 6 stored `geo:` parcels are still recognised — no rows rewritten. `identifyAddedRef` uses the same key function (single call site).
