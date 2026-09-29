@@ -54,6 +54,13 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 ---
 
 ## 🔲 Open
+### B1953792 — Sweep: every stale copy of shared data (beyond names) `[architecture]` (bug) #persistence #sync  *(Claude Code dispatch block "NEW-1," 2026-09-29, follow-on to B1953200. Minted from this branch's block B1953792–B1953807. DEDUPE-FIRST: B1934528/B1953200 cover NAMES only; the master-report merge-by-name fix (#1849) re-checked and clean.)*
+`[ ]` Audit of 27 verdict-A stale/conflicting copies, fixed by module group; guard + standing rule generalise the names rule to all shared data.
+- Verify: sandbox (umbrella; each group item carries its own Verify/V#)
+- Inventory: `docs/audit-single-source-of-truth.md` (A/B/C per row). Group items: B1953793 (prefs/rules/pins) · B1953794 (site-planner calc) · B1953795 (scheduler/dashboard) · B1953796 (review/library/model/food) · B1953797 (plan header merge + Model site reads).
+- Guard: `test/entityStateCopy.test.js` (rule 1: entity-field seeds; rule 2: `read*/load*` seeds; argued lists only shrink). CLAUDE.md standing rule added.
+- Constraint check: nothing here contradicts `## Owner product constraints`.
+
 
 ### B1945760 — The Dashboard's schedule cards name four different schedules "Master Schedule" `[Dashboard]` (bug) #dashboard #scheduler  *(Claude Code dispatch block, "NEW-1," 2026-09-28, direct follow-on to B1927952 (PR merged as `1b00966`, live on build `d3bc142`) — owner-account-measured on planyr.io, signed in, read off `document.body.innerText`: Schedule health lists `Operations 3 overdue / Pursuits 1 overdue / MUD v PID 5 overdue / Master Schedule 15 overdue / Master Schedule 5 overdue / Master Schedule 7 overdue / Master Schedule on track / Richfield on track / TAS Land Sale on track / Untitled site on track` — four bare "Master Schedule" rows, and per `public.schedules` those four are ids 1 (Goose Creek), 2 (Grand Port), 3 (8 South) and 6 (Pappadoupolos). Minted **B1945760 / V1382064** from this branch's reserved block B1945760–B1945775 · V1382064–V1382079 against freshly-fetched `origin/main` 7969254. DEDUPE-FIRST — searched Open/⏳Verify/Done/Done-archive for "Master Schedule", "crossScheduleLabel", "qualified label", "scheduleHealth.js" + "bare name": B1873360/B1873361 (Done, archived) built `crossScheduleLabel` and wired it into the Reports tab and every other in-scheduler notice; none of those PRs touched the Dashboard, which reads the same project objects through its own independent `scheduleHealth.js`/`needsAttentionList.js`/`sinceLastHereFeed.js`. Net-new.)*
 
