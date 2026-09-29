@@ -140,7 +140,7 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
   it("B528: Doc Review upsertReview serializes per-id writes (no false self-conflict)", () => {
     const src = read("../src/workspaces/doc-review/lib/reviewStore.js");
     expect(src).toMatch(/makeWriteSerializer/);
-    expect(src).toMatch(/serializeReviewWrite\(record\.id, \(\) => upsertReviewCore\(record\)\)/);
+    expect(src).toMatch(/serializeReviewWrite\(record\.id, async \(\) => \{\s*const res = await upsertReviewCore\(record\);/); // B1953796: wrapper also fans filing facts out
   });
 
   it("B529: Site Planner cloudUpsert serializes per-id writes (no false self-conflict)", () => {

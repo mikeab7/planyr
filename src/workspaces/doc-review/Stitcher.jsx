@@ -39,7 +39,7 @@ import { RADIUS } from "../../shared/ui/radius.js";
 const PAL = { paper: "var(--surface-page)", ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chrome: "var(--chrome-bg)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)", ember: "var(--accent)" };
 const uid = () => "s" + Math.random().toString(36).slice(2, 9);
 const today = () => new Date().toISOString().slice(0, 10);
-const newMeta = () => ({ title: "", projectId: null, project: "", discipline: "", item: "", revision: "", docDate: today() });
+const newMeta = () => ({ title: "", projectId: null, project: "", discipline: "", item: "", revision: "", docDate: today(), orgScope: false });
 const ID = { A: 1, B: 0, e: 0, f: 0 };
 const DBOX = { w: 380, h: 256 }; // detail "cloud" popup viewing box (px) — stable module const (B350)
 // Pure stitch geometry (fwd/inv/solveM/sheetBBox + the B300/B301 alignment guards) lives
@@ -708,7 +708,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const buildSnapshot = useCallback(() => ({
     id: reviewId, kind: "stitch", updatedAt: Date.now(), // stamp so the local mirror + cloud data carry a consistent updatedAt (reconcile)
     title: (meta.title || "").trim() || composeTitle(meta),
-    project: meta.project, projectId: meta.projectId, discipline: meta.discipline,
+    project: meta.project, projectId: meta.projectId, orgScope: meta.orgScope === true, discipline: meta.discipline,
     item: meta.item, revision: meta.revision, docDate: meta.docDate,
     sources: pdfs.filter(isStoredSource).map((p) => ({ srcId: p.srcId, name: p.name, size: p.size || 0, storageKey: p.storageKey || null, driveKey: p.driveKey || null, oversize: !!p.oversize })),
     stitch: {
@@ -807,7 +807,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     const failed = []; // sources that wouldn't download / pages that wouldn't raster — reported, not swallowed
     try {
       setReviewId(rec.id);
-      setMeta({ title: rec.title || "", projectId: rec.projectId || null, project: rec.project || "", discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "" });
+      setMeta({ title: rec.title || "", projectId: rec.projectId || null, project: rec.project || "", orgScope: rec.orgScope === true, discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "" });
       const st = rec.stitch || {};
       setMeasures(st.measures || []); setFtPerUnit(st.ftPerUnit || 0);
       if (st.view) setView(st.view);
