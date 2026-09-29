@@ -142,7 +142,6 @@ export function attachPlaceNames(map) {
     const busy = stepFade(tracked, wanted, dt) || layerA !== targetA || f.animating;
 
     const shownNow = [];
-    let ink = 0;
     if (layerA > 0) {
       ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
       const onImagery = tone === "imagery";
@@ -157,7 +156,6 @@ export function attachPlaceNames(map) {
         ctx.strokeText(e.p.name, pt.x, pt.y);
         ctx.fillStyle = onImagery ? "#fff" : "#1f2937";
         ctx.fillText(e.p.name, pt.x, pt.y);
-        ink++;
         shownNow.push({ key, name: e.p.name, lat: e.p.lat, lng: e.p.lng, x: pt.x, y: pt.y, px: font.px, a: layerA * e.a });
       }
     }
