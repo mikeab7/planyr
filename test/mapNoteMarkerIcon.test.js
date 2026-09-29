@@ -1,4 +1,4 @@
-/* mapNoteMarkerIcon — the map-note marker (NEW-1).
+/* mapNoteMarkerIcon — the map-note marker (NEW-1; re-shaped to the shared symbol circle 2026-09-29).
  *
  * The brief asks for a marker "visually distinct from a comp marker". That is the thing under test
  * here, and it is asserted against the REAL comp marker rather than described in a comment: three
@@ -18,27 +18,27 @@ describe("the note marker is distinct from a comp marker", () => {
     }
   });
 
-  it("uses a different SHAPE, not just a different hue — a bubble with a tail, never a rotated tag", () => {
+  it("uses a different SHAPE — a circle, never the comp's rotated tag", () => {
     const note = mapNoteMarkerSvg();
     expect(note).not.toMatch(/rotate\(45/);      // the comp tag's signature
     expect(compMarkerSvg("lease")).toMatch(/rotate\(45/);
-    expect(note).toMatch(/<path d="M /);          // the tail
+    expect(note).toMatch(/<circle /);
   });
 
-  it("anchors at the TAIL TIP, while a comp tag anchors at its centre", () => {
+  it("anchors at the circle CENTRE, like a comp tag (NEW-1 — was the bubble's tail tip)", () => {
     const { size, anchor } = mapNoteMarkerSize(false);
-    expect(anchor).toEqual([size[0] / 2, size[1]]);       // bottom-centre = the tail's point
+    expect(anchor).toEqual([size[0] / 2, size[1] / 2]);
     const comp = compMarkerSize(false);
-    expect(comp.anchor).toEqual([comp.size[0] / 2, comp.size[0] / 2]); // centre
+    expect(comp.anchor).toEqual([comp.size[0] / 2, comp.size[0] / 2]);
   });
 });
 
 describe("the note marker follows the map-marker rules", () => {
   it("is solid-filled with a hard white keyline — never hollow over aerial imagery (B434)", () => {
     const svg = mapNoteMarkerSvg();
-    expect(svg).toContain(`fill="${PALETTES.light.onAccentNotes}"`);
+    expect(svg).toContain('fill="#fff"');   // white keyline + glyph
     expect(svg).toContain(`fill="${NOTE_MARKER_COLOR}"`);
-    expect(svg).not.toMatch(/fill="none"/);
+    expect(svg).not.toMatch(/<circle[^>]*fill="none"/);   // no hollow ring on an unopened pin
   });
 
   it("carries no drop-shadow halo (B850016 — a blur is exactly the glow the owner rejected)", () => {
@@ -50,15 +50,8 @@ describe("the note marker follows the map-marker rules", () => {
     expect(NOTE_MARKER_COLOR).toBe(PALETTES.light.accentNotes);
   });
 
-  it("grows when selected, keeping the tail anchored", () => {
-    const a = mapNoteMarkerSize(false), b = mapNoteMarkerSize(true);
-    expect(b.size[0]).toBeGreaterThan(a.size[0]);
-    expect(b.size[1]).toBeGreaterThan(a.size[1]);
-    expect(b.anchor).toEqual([b.size[0] / 2, b.size[1]]);
-  });
-
-  it("declares a viewBox matching its own size, so Leaflet's iconSize cannot crop it", () => {
-    const { size } = mapNoteMarkerSize(false);
-    expect(mapNoteMarkerSvg()).toContain(`viewBox="0 0 ${size[0]} ${size[1]}"`);
+  it("selected adds a ring but keeps the anchor and the hit box", () => {
+    expect(mapNoteMarkerSize(true)).toEqual(mapNoteMarkerSize(false));
+    expect(mapNoteMarkerSvg({ selected: true })).toContain('stroke-width="3.2"');
   });
 });

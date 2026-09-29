@@ -166,6 +166,17 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1340416 — B1875520: site + note pins are one-size symbol circles; the open one wears a ring `Blocker: auth`
+
+Sandbox-proven: `test/mapPinSymbol.test.js`, `test/mapNoteMarkerIcon.test.js`; headless local build showed 5 status pins at identical size with the warehouse/pause/check/x glyphs. **Still needs planyr.io, signed in, on the aerial** (imagery + saved notes are unreachable from the sandbox).
+**Steps** (note the served chunk hash in the same observation as each result):
+1. Open Site → map view, Sites + Notes layers on, zoomed out on the aerial. **Expect:** every site pin and every note pin is the same size circle with a white outline that reads on the imagery; Pursuit/Active show a small warehouse, notes show a page mark in magenta; Complete/Dead are faded.
+2. Zoom in and out. **Expect:** pins stay one size regardless of status.
+3. Open a site's plan, return to the map. **Expect:** that site's pin has a ring outside the circle, circle no bigger than its neighbours; it stays on top of nearby pins.
+4. Click a note pin. **Expect:** the editor opens and that note wears the ring; close it — the ring goes. Pin sits exactly on the note's spot (centre-anchored), not offset above it.
+5. Hover a site pin and a note pin. **Expect:** the tooltip appears above the circle, not on it.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1875520.
+
 ### V1400816 — B1964512: clicking Chambers lots along Gordon Speer Chambers Pkwy adds exactly the lot under the cursor `Blocker: live-GIS`
 
 Sandbox-proven: `test/parcelIdentity.test.js` (9; the pre-fix rule collides on the real 20887/15328 lots). **Still needs the live Chambers CAD service** (egress-blocked here).
