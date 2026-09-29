@@ -2781,6 +2781,33 @@ export function countyBboxIntersectsView(key, bounds) {
   return minLat <= bounds.north && maxLat >= bounds.south && minLng <= bounds.east && maxLng >= bounds.west;
 }
 
+/* B1976336 (NEW-1) — WHICH PARCEL SOURCES MAY THE "SELECT PARCELS" OUTLINE LAYER DRAW FOR THIS VIEW?
+ * The display-path twin of B1457152 (which narrowed the CLICK path only): select mode used to add a
+ * display layer for EVERY wired source in the country, so one zoom near Cartersville GA fired ~400
+ * `/query` tile requests across 65 services (Texas, Alaska, Connecticut…), starved the imagery and
+ * attributed Harris County on a Georgia map. Rule: a per-county source qualifies only if its
+ * registered bbox intersects the view; a statewide composite (no bbox) qualifies only for a state
+ * actually in view, found by asking the SAME nationwide geometry `candidateCountiesForPoint` uses
+ * at a sample grid over the view. A view over a state with no source returns []. `bounds` is a
+ * plain `{south, west, north, east}`. Pure — the caller adds what's returned and removes the rest.
+ * Mirrors the click path's narrowing, so what you SEE still equals what you can SELECT (B137). */
+export function displaySourcesForView(bounds) {
+  if (!bounds) return [];
+  const out = new Set();
+  const N = 4; // (N+1)² sample points — enough to catch every state a screen-sized view can span
+  for (let i = 0; i <= N; i++) {
+    for (let j = 0; j <= N; j++) {
+      const lat = bounds.south + ((bounds.north - bounds.south) * i) / N;
+      const lng = bounds.west + ((bounds.east - bounds.west) * j) / N;
+      candidateCountiesForPoint(lat, lng).forEach((k) => { if (COUNTIES_MAP[k] && COUNTIES_MAP[k].statewide) out.add(k); });
+    }
+  }
+  Object.entries(COUNTIES_MAP).forEach(([k, c]) => {
+    if (!c.statewide && c.bbox && countyBboxIntersectsView(k, bounds)) out.add(k);
+  });
+  return [...out];
+}
+
 export function candidateCountiesForPoint(lat, lng) {
   const entries = Object.entries(COUNTIES_MAP);
   const within = entries

@@ -2,7 +2,7 @@ import { Fragment, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, 
 import { validateName, announceNameNotice } from "../../shared/names/nameCore.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote, countyBboxIntersectsView } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote, countyBboxIntersectsView, displaySourcesForView } from "./lib/counties.js";
 import { landingView, milesBetween, CLUSTER_RADIUS_MI, locatedPoints } from "./lib/landingView.js";
 import { decideTargetOf, orderVerbs, verbLabel } from "./lib/decideBar.js";
 import {
@@ -2711,7 +2711,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     let cancelled = false;
     Object.entries(COUNTIES_MAP).forEach(([key, cfg]) => {
       resolveLayerUrl(cfg.layerUrl || cfg.mapServer)
-        .then((url) => { if (!cancelled) { layerUrlsRef.current[key] = url; if (selectModeRef.current) addDisplay(key); } })
+        .then((url) => { if (!cancelled) { layerUrlsRef.current[key] = url; if (selectModeRef.current) syncDisplaysToView(); } })
         .catch(() => {}); // a single county being down must not break the others
     });
     return () => { cancelled = true; };
@@ -2774,6 +2774,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const addDisplay = (key) => {
     const map = mapRef.current;
     if (!map || displaysRef.current[key]) return;
+    // B1976336 — never add a layer for a source that cannot reach the current view.
+    if (wantedDisplaysRef.current && !wantedDisplaysRef.current.has(key)) return;
 
     // B629 — prefer the Drive PARCEL SNAPSHOT when this county's cached copy is loaded AND the live
     // source can't itself draw current selectable outlines (an image-only statewide source — Waller).
@@ -2954,7 +2956,22 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     else wireDisplayHealth(fl, "vector");
     fl.addTo(map); // NEW-3 — listeners are wired above; only now does the first request fire
   };
+  /* B1976336 (NEW-1) — the display layer set follows the VIEW: only sources whose bbox (or, for a
+   * statewide composite, whose state) is in view are drawn; layers that left the view are removed
+   * (which also drops their in-flight tile work and their attribution). Runs on entering select
+   * mode, after each moveend, and as each source's URL resolves. */
+  const wantedDisplaysRef = useRef(null);
+  const syncDisplaysToView = () => {
+    const map = mapRef.current;
+    if (!map || !selectModeRef.current) return;
+    const b = map.getBounds();
+    const want = new Set(displaySourcesForView({ south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() }));
+    wantedDisplaysRef.current = want;
+    Object.keys(displaysRef.current).forEach((k) => { if (!want.has(k)) removeDisplay(k); });
+    want.forEach((k) => { if (layerUrlsRef.current[k]) addDisplay(k); });
+  };
   const clearDisplays = () => {
+    wantedDisplaysRef.current = null;
     const map = mapRef.current;
     const seen = new Set(); // NEW-2 — aliased keys share ONE layer; remove it once
     Object.values(displaysRef.current).forEach((fl) => {
@@ -3045,8 +3062,12 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       // Warm the cached parcel snapshots (instant from IndexedDB, SWR-refresh from Drive) so a
       // county whose live server is down still draws + clicks from the local copy (B629).
       CLIENT_SNAPSHOT_COUNTIES.forEach((c) => { ensureSnapshot(c).catch(() => {}); });
-      Object.keys(layerUrlsRef.current).forEach(addDisplay);
+      syncDisplaysToView();
       map.getContainer().style.cursor = ADD_CURSOR;
+      let t = null;
+      const onViewMoved = () => { clearTimeout(t); t = setTimeout(syncDisplaysToView, 200); };
+      map.on("moveend", onViewMoved);
+      return () => { clearTimeout(t); map.off("moveend", onViewMoved); };
     } else {
       clearDisplays();
       map.getContainer().style.cursor = "";
