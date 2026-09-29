@@ -13,6 +13,8 @@ import { normCountyKey } from "../../../shared/gis/countyKeys.js";
 import { normalizeRenameStampForWrite } from "./projectName.js";
 import { fetchParcelSummaries, fetchElementRecency } from "./elementApi.js";
 import { cloudSitesKey } from "./activeUser.js";
+import { headerSlice, mergeHeader, sameHeader } from "./headerMerge.js";
+import { createSiteModel } from "./siteModel.js";
 
 // Per-tab memory of the `version` we last synced for each site, so a save can be a
 // compare-and-swap that REJECTS a stale write instead of silently clobbering (B314).
@@ -30,11 +32,26 @@ const siteVersions = {};
 // advances on a REAL header change (meta/settings/overlays), not on element edits — element recency
 // lives on the site_elements rows.
 const lastHeaderSig = {};
+// B1953797 (H1) — per-tab MERGE BASE for the header keys that move as whole objects (settings, origin,
+// layerOverrides, layerAbove): the slice of the header this tab last saw IN SYNC with the server
+// (seeded by cloudList, advanced by every successful push and every adopted refresh). It is what turns
+// "whose copy is newer" (whole-object last-write-wins — the bug) into "which LEAVES did THIS tab
+// change" (a three-way merge, see headerMerge.js). Module-scope = naturally per-tab, like siteVersions.
+const headerBase = {};
+// …and the header slice of the newest row a PULL (`cloudList`) has SEEN per site. A pull refreshes the
+// CAS token (`siteVersions`) on every call, so without this a stale tab that pulled mid-session would
+// push cleanly at the fresh version and overwrite a change it never adopted. A push consults it: if the
+// pulled header differs from the base, the other writer's change is merged in BEFORE writing.
+const pulledHeader = {};
 export function clearSiteVersions() {
   for (const k of Object.keys(siteVersions)) delete siteVersions[k];
   for (const k of Object.keys(lastHeaderSig)) delete lastHeaderSig[k];
+  for (const k of Object.keys(headerBase)) delete headerBase[k];
+  for (const k of Object.keys(pulledHeader)) delete pulledHeader[k];
 }
 export const _siteVersions = siteVersions; // test seam (read/seed in unit tests)
+export const _headerBase = headerBase; // test seam
+export const _pulledHeader = pulledHeader; // test seam
 export const _lastHeaderSig = lastHeaderSig; // test seam
 // The signature: the slim header exactly as a push would store it, minus the volatile updatedAt.
 // Exported for tests and for cloudList's seeding (sig of the row the cloud already has).
@@ -196,6 +213,20 @@ export function cloudUpsert(uid, model) {
 
 async function cloudUpsertCore(uid, model, isRetry) {
   if (!supabase || !uid || !model || !model.id) return { ok: false, error: "not ready" };
+  /* B1953797 (H1) — a pull (`cloudList`) refreshes the CAS token every time it runs, so a stale tab
+   * that pulled mid-session would push "cleanly" and overwrite a header change it never adopted. If the
+   * last pulled header differs from this tab's base, merge it in first (same rule as the conflict heal). */
+  let preAdopted = null;
+  if (!isRetry && headerBase[model.id] && pulledHeader[model.id]) {
+    try {
+      const hm = mergeHeader(headerBase[model.id], headerSlice(model), pulledHeader[model.id]);
+      if (!hm.noBase && (hm.changedFromMine || hm.conflicts.length)) {
+        model = { ...model, ...hm.merged };
+        if (hm.changedFromMine) preAdopted = hm.adopted;
+        if (hm.conflicts.length) reportClientEvent("cloud-conflict-healed", "a pulled header change was merged before pushing (sites)", { id: model.id, noBase: false, adopted: hm.adopted.map((x) => x.path.join(".")), conflicts: hm.conflicts.map((x) => x.join(".")) });
+      }
+    } catch (e) { reportClientEvent("header-merge-failed", "pre-push header merge threw — pushing this tab's header as-is", { id: model.id, error: (e && e.message) || "" }); }
+  }
   const m = slimForCloud(model);
   // B672 recurrence (Observation A) — identical header content already synced → skip the write
   // entirely (see lastHeaderSig above). Only when a version token exists (a prior sync happened
@@ -213,7 +244,10 @@ async function cloudUpsertCore(uid, model, isRetry) {
     const { team_id, ...noTeam } = row;
     r = await casUpsert(supabase, "sites", { uid, id: m.id, row: noTeam, expected: siteVersions[m.id] });
   }
-  if (r.ok) { siteVersions[m.id] = r.version; lastHeaderSig[m.id] = sig; return { ok: true }; }
+  if (r.ok) {
+    siteVersions[m.id] = r.version; lastHeaderSig[m.id] = sig; headerBase[m.id] = headerSlice(m); delete pulledHeader[m.id];
+    return preAdopted ? { ok: true, adopted: preAdopted, merged: headerSlice(m) } : { ok: true };
+  }
   if (r.conflict) {
     // B672 — a stale header write self-heals SILENTLY: refresh the CAS token from the live row and
     // re-push ONCE (whole-header last-write-wins — the header is rarely-contended meta/settings/
@@ -223,8 +257,32 @@ async function cloudUpsertCore(uid, model, isRetry) {
     if (!isRetry) {
       const fresh = await fetchSiteForReconcile(uid, m.id); // refreshes siteVersions[m.id]
       if (fresh !== null) {
-        reportClientEvent("cloud-conflict-healed", "stale header CAS → refetched version, re-pushing (sites)", { id: m.id });
-        return cloudUpsertCore(uid, model, true);
+        /* B1953797 (H1) — THE HEAL IS A THREE-WAY MERGE, NOT A WHOLE-HEADER RE-PUSH. Refreshing only the
+         * version token and re-sending THIS tab's whole model reverted whatever the other writer had
+         * changed in `settings` (jurisdiction, drainage, Standards…) — silently, by design of the
+         * previous comment here ("whole-header last-write-wins"). Re-apply only what THIS tab changed
+         * since its base onto the fresh server copy; adopt everything else from the server. A same-leaf
+         * clash keeps this tab's edit and is REPORTED. The caller gets `adopted` so its live UI and
+         * local mirror follow the merged header (otherwise the next push would read the adoption as a
+         * local edit and undo it). */
+        let toPush = model, adopted = null, res = null;
+        try {
+          res = mergeHeader(headerBase[m.id], headerSlice(model), headerSlice(createSiteModel(fresh)));
+          if (!res.noBase && (res.changedFromMine || res.keptMine.length)) toPush = { ...model, ...res.merged };
+          if (res.changedFromMine) adopted = res.adopted;
+        } catch (e) {
+          reportClientEvent("header-merge-failed", "three-way header merge threw — falling back to the whole-header re-push", { id: m.id, error: (e && e.message) || "" });
+        }
+        const paths = (l) => (l || []).map((p) => (Array.isArray(p) ? p : p.path).join("."));
+        reportClientEvent("cloud-conflict-healed", "stale header CAS → refetched version, merged header per key, re-pushing (sites)", {
+          id: m.id,
+          noBase: !!(res && res.noBase),
+          adopted: paths(res && res.adopted),
+          conflicts: paths(res && res.conflicts),
+        });
+        const r2 = await cloudUpsertCore(uid, toPush, true);
+        if (r2 && r2.ok && adopted) return { ...r2, adopted, merged: headerSlice(toPush) };
+        return r2;
       }
       // NEW-1 (2026-09-20) — the reconcile fetch came back with NOTHING (RLS hides this row from
       // this account entirely) AND this tab has never once held a confirmed version for it. This
@@ -299,6 +357,57 @@ export async function fetchSiteForReconcile(uid, id) {
   if (r.error || !r.data || !r.data.data) return null;
   if (r.data.version != null) siteVersions[id] = r.data.version; // refresh the CAS token → the next push isn't a false stale-version conflict
   return r.data.data;
+}
+
+/* B1953797 (H1) — THE INBOUND PATH FOR PLAN-HEADER STATE. Until now nothing brought another
+ * writer's header change (settings, origin, layerOverrides, layerAbove) into an OPEN tab: realtime
+ * only watches `site_elements`, and the cross-tab storage fold is skipped when cloud-active and never
+ * folded settings anyway. So a tab kept showing — and eventually re-pushing — a stale copy.
+ *
+ * `refreshHeaderFromCloud(uid, id, live)` is a ONE-ROW header read (no element rows, no push): if the
+ * server's `version` is not the one this tab already holds, three-way-merge the server's header keys
+ * against THIS tab's live copy from its base and report what to adopt. Called on focus / visibility /
+ * a slow visible-tab tick by the planner (the DB's `sites` table is deliberately not assumed to be in
+ * a realtime publication). No second "is this mine?" implementation: an echo of THIS tab's own write is
+ * recognised by the CAS version token it already advanced (`siteVersions`), the same token the push
+ * path uses — a different fact from `isOwnWrite`'s element-row authorship, which is untouched.
+ *
+ * Returns { ok, unchanged? , changed, adopted:[{path,value}], merged, dirty, conflicts }.
+ *   changed — at least one leaf moved from this tab's copy to the server's (apply `adopted` to the UI).
+ *   dirty   — this tab still holds local edits the server lacks (a push is still owed); when false the
+ *             header signature is advanced so the adoption itself never triggers a redundant write.
+ * With no merge base (this tab never saw a synced copy) nothing can be attributed to the other writer,
+ * so NOTHING is adopted and the token is left alone — the next conflict heal reports `noBase`. */
+export async function refreshHeaderFromCloud(uid, id, live) {
+  if (!supabase || !uid || !id || !live) return { ok: false, error: "not ready" };
+  let r;
+  try { r = await supabase.from("sites").select("data, version").eq("id", id).maybeSingle(); }
+  catch (e) { return { ok: false, error: (e && e.message) || "header refresh threw" }; }
+  if (r.error) return { ok: false, error: r.error.message || "header refresh failed" };
+  if (!r.data || !r.data.data) return { ok: false, error: "absent" };
+  const version = r.data.version;
+  if (version == null) return { ok: true, unchanged: true, changed: false, skipped: "no-version-column" };
+  const base = headerBase[id];
+  // Same version AND nothing a pull saw but this tab never adopted → genuinely nothing to do. (A pull
+  // refreshes the token, so the version alone cannot tell "already adopted" from "seen, not adopted".)
+  const pulledUnadopted = !!(base && pulledHeader[id] && !sameHeader(pulledHeader[id], base));
+  if (siteVersions[id] === version && !pulledUnadopted) return { ok: true, unchanged: true, changed: false };
+  if (!base) {
+    reportClientEvent("header-refresh-no-base", "a newer header exists but this tab has no merge base — nothing adopted (the next push heal will merge)", { id });
+    return { ok: true, changed: false, noBase: true };
+  }
+  const theirs = headerSlice(createSiteModel(r.data.data));
+  const res = mergeHeader(base, headerSlice(live), theirs);
+  siteVersions[id] = version;   // we have now SEEN this version: the next push is a clean CAS at it
+  headerBase[id] = theirs;      // …and the server's header is this tab's new sync point
+  delete pulledHeader[id];
+  const dirty = res.keptMine.length > 0;
+  if (!dirty) { try { lastHeaderSig[id] = headerSig({ ...live, ...res.merged }); } catch (_) {} }
+  if (res.changedFromMine)
+    reportClientEvent("header-adopted", "another writer's header change was adopted into this open tab", {
+      id, paths: res.adopted.map((p) => p.path.join(".")), dirty,
+    });
+  return { ok: true, changed: res.changedFromMine, adopted: res.adopted, merged: res.merged, dirty, conflicts: res.conflicts };
 }
 
 // Pure: turn a DELETE … .select() result into a typed outcome (exported for unit tests).
@@ -694,6 +803,14 @@ export async function cloudList(uid) {
     // the shape a local push would send). If the local copy turns out identical, even the boot
     // re-push skips — no per-load version churn. Any real local difference still pushes.
     if (r.version != null && m.id != null) { try { lastHeaderSig[m.id] = headerSig(m); } catch (_) {} }
+    // B1953797 — and the merge BASE for the header keys, from the very same row (normalised the way a
+    // live model is, so a base/mine comparison never sees a phantom difference from normalisation).
+    // The base is only SEEDED here (first sight of the plan this session) — never advanced by a later
+    // pull: this tab's UI/mirror may not have adopted what the pull just saw, and moving the base
+    // would relabel the other writer's change as this tab's own edit. `pulledHeader` remembers it.
+    if (r.version != null && m.id != null) {
+      try { const sl = headerSlice(createSiteModel(m)); if (!headerBase[m.id]) headerBase[m.id] = sl; pulledHeader[m.id] = sl; } catch (_) {}
+    }
     return m;
   }).filter(Boolean);
 }

@@ -40,6 +40,7 @@ import { DEFAULT_ROAD_CLASS, roadClassOf } from "./roadClasses.js";
 import { ensureZ, migrateBandForce } from "./zOrder.js";
 import { normCountyKey } from "../../../shared/gis/countyKeys.js";
 import { nameAuthority, renameStamp } from "./projectName.js";
+import { headerSlice, mergeHeader, MERGEABLE_HEADER_KEYS } from "./headerMerge.js";
 // B927105 — the schema-version + status constants live in siteStatus.js (dependency-free) so a
 // caller that only needs a status label (doc-review/lib/reviewStore.js, siteListLight.js)
 // doesn't have to import this whole module's heavy geometry graph. Re-exported below so this
@@ -1352,7 +1353,7 @@ function healSrc(chosen, other) {
 // so a deliberate delete is NOT undone by a stale/other copy that still has the item.
 // (Items not yet wired to record a tombstone keep the old union behavior — still no data
 // loss, just the recoverable "delete can reappear once" trade-off until they adopt it.)
-export function mergeSiteContent(a, b) {
+export function mergeSiteContent(a, b, opts) {
   const A = createSiteModel(a || {});
   const B = createSiteModel(b || {});
   const newer = toMs(A.updatedAt) >= toMs(B.updatedAt) ? A : B; // B559: type-safe (ISO string OR ms number)
@@ -1387,6 +1388,17 @@ export function mergeSiteContent(a, b) {
   // pulls. Resolving the name pair through the SAME `nameAuthority` the list/read paths already
   // trust makes a stamped rename win here too, regardless of which side `newer` picked for
   // everything else; an ambiguous or unstamped pair (no rename in play) falls through unchanged.
+  /* B1953797 (H1) — the whole-object header keys (settings, origin, layerOverrides, layerAbove) are NOT
+   * plain "newer copy wins" scalars either: `settings` alone carries setback, stalls, Standards, the
+   * flood-mitigation jurisdiction, drainage… so two writers each touching a DIFFERENT setting lost one
+   * of the two edits to whichever copy had the newer `updatedAt`. When the caller can name the header
+   * BASE its writer last saw in sync (`opts.headerBase`; `a` = that writer's copy, `b` = the other
+   * copy), those keys are merged per leaf (headerMerge.js): this writer's own edits are kept, the other
+   * copy's changes are adopted. Without a base nothing can be attributed, so the old rule stands. */
+  if (opts && opts.headerBase) {
+    const hm = mergeHeader(opts.headerBase, headerSlice(A), headerSlice(B));
+    if (!hm.noBase) for (const k of MERGEABLE_HEADER_KEYS) merged[k] = hm.merged[k];
+  }
   const nameAuth = nameAuthority([A, B]);
   if (!nameAuth.ambiguous && nameAuth.name != null) {
     merged.site = nameAuth.name;

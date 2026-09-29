@@ -10,7 +10,8 @@
  */
 import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding, toMs, countJunkEntries,
   shareMirrorOf, withShareMirror, normRole } from "./siteModel.js";
-import { cloudUpsert, cloudDelete, cloudDeleteGroup, cloudHardDelete, cloudPurgeOnePlan, cloudRestore, cloudDeletedRows, cloudCheckDeleted, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile } from "./cloudSync.js";
+import { cloudUpsert, cloudDelete, cloudDeleteGroup, cloudHardDelete, cloudPurgeOnePlan, cloudRestore, cloudDeletedRows, cloudCheckDeleted, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile, refreshHeaderFromCloud } from "./cloudSync.js";
+import { headerSlice } from "./headerMerge.js";
 import { reconcileGroupNames, resolveNameFor, groupKeyOf, maxStampOf, nameAuthority, renameStamp } from "./projectName.js";
 import { idbGet, idbPut, idbAvailable, idbDelete, idbDeleteByPrefix } from "./localDb.js";
 import { idbKeysReleasableOnPlanDelete, idbKeysHeldByOtherPlans } from "./sharedAssetRefs.js";
@@ -504,6 +505,11 @@ export async function pushSiteToCloud(id) {
   const m = loadSite(id);
   if (!m) return { ok: false, error: "missing" };
   const r = await cloudUpsert(activeUid(), m);
+  // B1953797 (H1) — the stale-CAS heal merged another writer's header changes into what it pushed.
+  // The local mirror still holds the pre-merge header, and a mirror that disagrees with what the
+  // server now holds would read as a LOCAL edit at the next push (silently undoing the adoption), so
+  // patch it here. The caller (the planner) gets `r.adopted` to update its live canvas state.
+  if (r && r.ok && r.adopted && r.merged) adoptHeaderIntoMirror(id, r.merged);
   // NEW-1 (2026-09-08) / A-B1953794 - refresh the Dashboard's cached plan thumbnail after every
   // successful save, INCLUDING `skipped` ones: cloudUpsert's header signature excludes elements,
   // so an element-only edit is reported skipped although the drawing changed. The refresher is
@@ -642,6 +648,25 @@ export async function binOrphanedTrackedSite(id) {
   const m = loadSite(id);
   if (!m || normRole(m.role, null) !== "tracked" || !isEmptySite(m)) return { ok: false, skipped: true };
   return cloudDelete(activeUid(), id);
+}
+
+// B1953797 (H1) — write an adopted (merged) header slice into the local mirror. Only the governed
+// header keys are touched; everything else in the stored record is left exactly as it is.
+function adoptHeaderIntoMirror(id, slice) {
+  try { saveSite({ id, ...slice }); } catch (e) { reportClientEvent("header-adopt-mirror-failed", "an adopted header could not be written to the on-device copy", { id, error: (e && e.message) || "" }); }
+}
+// B1953797 (H1) — the INBOUND path for plan-header state. Ask the cloud whether ANOTHER writer changed
+// this plan's header (settings, origin, layerOverrides, layerAbove) since this tab last synced; if so,
+// merge it against this tab's local copy per leaf and patch the mirror. Resolves the cloud result
+// ({ ok, changed, adopted:[{path,value}], merged, dirty }) so the open planner can apply `adopted` to
+// its live state. No-op (unchanged) logged out; never pushes.
+export async function refreshPlanHeaderFromCloud(id) {
+  if (!activeUid() || !id) return { ok: true, skipped: true, changed: false };
+  const live = loadSite(id);
+  if (!live) return { ok: false, error: "missing", changed: false };
+  const r = await refreshHeaderFromCloud(activeUid(), id, live);
+  if (r && r.ok && r.changed && r.merged) adoptHeaderIntoMirror(id, r.merged);
+  return r;
 }
 
 // B473 — push a LIVE in-memory model to the cloud, NOT by id. Used when the on-device write FAILED
@@ -1662,6 +1687,13 @@ export async function purgeExpiredDeletedProjects({ days = DELETED_RETENTION_DAY
 // since I last synced" (fold my change in — so a stale tab can't thin it, B127). Each browser
 // tab is its own JS module instance, so this map is naturally per-tab.
 const lastSeenAt = {};
+// B1953797 (H1) — the per-TAB merge BASE for the whole-object header keys (settings, origin,
+// layerOverrides, layerAbove): the header this tab last OPENED or WROTE. It is what lets the cross-tab
+// fold below merge per leaf ("which settings did THIS tab change?") instead of taking the whole
+// `settings` object from whichever copy has the newer `updatedAt`. Only a plan OPEN (`persistHeal`) and
+// this tab's own saves advance it — an incidental `loadSite` (a route probe, the cloud push) must not,
+// or a stale planner would inherit another tab's header as "its own base" and read it as a local edit.
+const lastSeenHeader = {};
 // ⛔ B662048 — `updatedAt` MUST be MONOTONIC WITHIN A TAB, or "newest plan" resolution silently
 // picks the OLDER one. `Date.now()` is millisecond-resolution, and `duplicatePlan`'s real call
 // order (`handleDuplicate`: `flushSite()` on the SOURCE plan, immediately followed by
@@ -1770,6 +1802,7 @@ export function loadSite(id, { persistHeal = false } = {}) {
   const authority = resolveNameFor(m, Object.values(all).filter((s) => s && s.id !== id && groupKeyOf(s) === groupKeyOf(m)));
   if (authority) m = { ...m, ...authority };
   lastSeenAt[id] = m.updatedAt || 0; // we are now in sync with the stored copy
+  if (persistHeal || !lastSeenHeader[id]) lastSeenHeader[id] = headerSlice(m); // B1953797 — see lastSeenHeader
   /* NEW-2 — PERSIST the repair when the plan is actually being OPENED.
    * A heal that lives only in memory is precisely why the owner's plan kept "fixing itself" on
    * screen while the STORED copy stayed torn: the canvas is initialised from the already-repaired
@@ -1845,7 +1878,7 @@ export function saveSite(partial, { skipHistory = false } = {}) {
   // blind overwrite, so a stale tab can't drop the other tab's work. A single-tab writer always
   // matches (no fold → plain replace → deletes still stick).
   if (existing && (existing.updatedAt || 0) > (lastSeenAt[partial.id] || 0)) {
-    merged = mergeSiteContent(createSiteModel(merged), existing); // our scalars + union of content
+    merged = mergeSiteContent(createSiteModel(merged), existing, { headerBase: lastSeenHeader[partial.id] }); // our scalars + union of content; B1953797 — header keys per leaf
   }
   if (existing && !skipHistory) snapshotVersion(existing); // back up the prior version before overwriting (rollback safety net, B126); the immediate per-edit write skips this (B458)
   let model = { ...createSiteModel(merged), updatedAt: nextUpdatedAt() };
@@ -1942,6 +1975,7 @@ export function saveSite(partial, { skipHistory = false } = {}) {
   }
   sites[partial.id] = model;
   lastSeenAt[partial.id] = model.updatedAt;
+  lastSeenHeader[partial.id] = headerSlice(model); // B1953797 — this tab's own write is its new base
   const ok = writeSites(sites);
   if (ok) {
     notifySiteModelChanged(partial.id);
