@@ -2839,11 +2839,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [tracePts, setTracePts] = useState([]);
   const [evidenceBusy, setEvidenceBusy] = useState(false);
   const [routeMode, setRouteMode] = useState(null); // utility routing: {util, snapTo, stage, source, width, ruleNote}
-  const [easeRules, setEaseRules] = useState(loadEasementRules);
+  const [easeRules, setEaseRules] = useState(loadEasementRules); // stale-ok: re-synced by subscribeEasementRules on the next line (B1953793)
   useEffect(() => subscribeEasementRules(() => setEaseRules(loadEasementRules())), []);
   // B707/B709/B710 — the floodplain-suite rule files (editable, verified-flagged,
   // localStorage-persisted; the easementRules pattern).
-  const [floodRules, setFloodRules] = useState(loadFloodplainRules);
+  const [floodRules, setFloodRules] = useState(loadFloodplainRules); // stale-ok: re-synced by subscribeFloodplainRules on the next line (B1953793)
   // B1953793 — pick up another tab's / surface's rule edit instead of holding a mount-time copy.
   useEffect(() => subscribeFloodplainRules(() => setFloodRules(loadFloodplainRules())), []);
   const [pondCriteria] = useState(loadPondCriteria);

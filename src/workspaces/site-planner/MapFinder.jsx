@@ -1428,9 +1428,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   // Re-runs once `myUid` resolves from null → a real id (or stays null, signed out — the local
   // mirror / signed-out default is what `loadUserPrefs` already returns for that case).
   useEffect(() => {
-    let live = true;
     loadUserPrefs(myUid).then(() => { /* the load writes the shared mirror; subscribers re-render */ });
-    return () => { live = false; };
   }, [myUid]);
   // Open the per-project menu and refresh the team list so newly-created teams appear.
   const openSiteMenu = (s, x, y) => { setStatusMenu({ site: s, x, y }); refreshTeams(); };

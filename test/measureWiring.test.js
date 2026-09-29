@@ -60,7 +60,8 @@ describe("NEW-1: measurements are styled through the ONE resolver, on every mode
     expect(SP).toMatch(/applyAllStandards\(beforeParcels, beforeEls, stdParcelValues\(\), Object\.keys\(TYPE\), \{ measures: beforeMeasures, measureValues: stdMeasureValues\(\) \}\)/);
     expect(SP).toMatch(/setMeasures\(res\.measures\)/);
     // "Save for all projects" promotes the measurement defaults to the account scope too
-    expect(SP).toMatch(/MEASURE_STD_KEYS\.forEach\(\(k\) => \{ up = setStandardPref\(up, "measureStyle", k, measureStdValueUI\(k\) \?\? null\); \}\)/);
+    expect(SP).toMatch(/MEASURE_STD_KEYS\.map\(\(k\) => \[k, measureStdValueUI\(k\) \?\? null\]\)/);
+    expect(SP).toMatch(/measureVals\.forEach\(\(\[k, v\]\) => \{ up = setStandardPref\(up, "measureStyle", k, v\); \}\)/);
   });
   it("double-click a measurement still opens its Properties (parity with every other object)", () => {
     // NEW-2 — via the ONE shared action, which is what the root-level dblclick resolver calls too.
