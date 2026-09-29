@@ -149,6 +149,50 @@ export function zoomForWheel(current, deltaY, { deltaMode = 0 } = {}) {
   return clampViewZoom(clampViewZoom(current) * Math.exp(-px / 400));
 }
 
+/** ⛔ WHAT A WHEEL EVENT MEANS OVER THE NOTES CANVAS (NEW-1, owner 2026-09-29, verbatim: *"mouse
+ *  scroll up or down should correspond to zoom like it does on the site plan view but for the
+ *  notebook module"*).
+ *
+ *  THE SITE PLAN'S RULE, which this matches rather than reinvents (`SitePlanner.jsx`'s `onWheel`):
+ *  a PLAIN wheel zooms about the cursor, wheel up = in, wheel down = out, no modifier needed, and a
+ *  scrollable overlay panel (`[data-wheelscroll]`) is exempt and scrolls itself. The feel differs in
+ *  one respect on purpose: the site plan takes ×1.12 per notch, Notes keeps its existing
+ *  proportional curve (`zoomForWheel`, e^(−Δ/400)) — a mouse detent (Δ≈100) is ×1.28, a trackpad's
+ *  small deltas stay continuous — so Ctrl+wheel, pinch and plain wheel are ONE curve, not two.
+ *
+ *  Because a plain wheel no longer scrolls, moving around a long note needs an explicit way:
+ *   · Shift+wheel PANS — vertically for an ordinary wheel (macOS reports Shift+wheel as deltaX with
+ *     deltaY 0, so the non-zero one is taken), the site plan has no such modifier so this is added;
+ *   · a wheel event that is mostly SIDEWAYS (a trackpad's horizontal swipe, a tilt wheel) pans
+ *     horizontally — nobody swiping sideways means "zoom";
+ *   · drag/middle-drag/space-drag, the scrollbar-free keys and the pill are unchanged.
+ *  Ctrl/⌘+wheel and a trackpad pinch (which arrives as Ctrl+wheel) still zoom exactly as before.
+ *
+ *  `ownsWheel` is the caller's DOM answer to "is the pointer over something that scrolls itself in
+ *  the direction this event would scroll" (a wide table, a code block, an open menu list). It wins
+ *  over everything except Ctrl/⌘, which is a zoom request and whose browser default (page zoom) is
+ *  suppressed regardless.
+ *
+ *  @returns {{kind:"zoom", deltaY:number}|{kind:"pan", dx:number, dy:number}|{kind:"native"}}
+ */
+export function wheelIntent({ deltaX = 0, deltaY = 0, deltaMode = 0, ctrlKey = false, metaKey = false,
+  shiftKey = false, ownsWheel = false } = {}) {
+  if (ctrlKey || metaKey) return { kind: "zoom", deltaY };
+  if (ownsWheel) return { kind: "native" };
+  /* A line/page delta is a different unit; normalise before spending it as pixels. */
+  const k = deltaMode === 1 ? 16 : deltaMode === 2 ? 400 : 1;
+  if (shiftKey) return { kind: "pan", dx: 0, dy: (deltaY || deltaX) * k };
+  if (Math.abs(deltaX) > Math.abs(deltaY)) return { kind: "pan", dx: deltaX * k, dy: 0 };
+  return { kind: "zoom", deltaY };
+}
+
+/** Which axis the browser would scroll a scrollable element on for this event — what the caller
+ *  asks the DOM about. Shift+wheel is horizontal natively; otherwise the dominant delta wins. */
+export function wheelNativeAxis({ deltaX = 0, deltaY = 0, shiftKey = false } = {}) {
+  if (shiftKey) return "x";
+  return Math.abs(deltaX) > Math.abs(deltaY) ? "x" : "y";
+}
+
 /** The next rung up or down. Snaps onto the ladder from anywhere, so a level reached by a wheel
  *  (which lands between rungs) still steps to a recognisable number. */
 export function stepZoom(current, direction) {

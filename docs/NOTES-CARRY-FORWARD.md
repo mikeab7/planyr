@@ -574,6 +574,22 @@ Two more found since, each worth its own line because each returned a confident 
    down: it is not the APP's debounce that outlives the check here, it is a DEPENDENCY's internal
    async simulation.
 
+46. **⛔ A PLAIN WHEEL ZOOMS NOW — SO A HARNESS THAT "PANS" WITH `mouse.wheel(0, n)` IS SILENTLY
+   ZOOMING (B1983600, 2026-09-29).** The owner asked for the site plan's wheel: plain wheel zooms at
+   the cursor. Vertical pan is **Shift+wheel**; a mostly-sideways delta still pans. Every Notes
+   harness that moved the view with a bare vertical wheel had to change (`verify-notes-canvas`
+   §5/§6/§7 use `panWheel`; `verify-notes-width-matrix` and `verify-notes-pan` use Shift). Two more
+   traps found doing it: **(a)** `mouse.wheel(300, 300)` is NOT a diagonal pan — equal deltas fail the
+   "mostly sideways" test and zoom; **(b)** a wheel over a wide table / code block that genuinely
+   scrolls must be left native, and the listener is on the canvas only, so toolbar menus, the rail
+   and dialogs never see it — a code block INSIDE a placed box wraps (nothing to scroll), so it cannot
+   be used as the "owns the wheel" arm; use a wide table with explicit `colwidth`s. The decision is
+   pure (`wheelIntent`, `lib/notesViewport.js`); the DOM half is `wheelOwnerUnder` in `NoteEditor.jsx`.
+   ⚠ `verify-notes-canvas` §3/§4/§8 had also gone stale against the boxes-only model (the fixture's
+   flow body migrates into ONE box, so "creates nothing" means "still the baseline box count"); fixed
+   in the same commit. `verify-notes-pan` still fails at its own section 0 on untouched main
+   (geometry precondition) — pre-existing, not touched here.
+
 See also `ui-audit/TRAPS.md`, and the named rules **FOREGROUND-OR-VOID** (a background tab cannot
 be measured — not its clock, not its pixels) and **COUNT-EVERY-KIND**.
 

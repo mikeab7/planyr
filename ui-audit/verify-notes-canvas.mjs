@@ -9,7 +9,7 @@
  *
  * ⛔ WHAT IT COVERS, one section each:
  *   1. wheel zoom, ANCHORED AT THE CURSOR — the point under the pointer stays under the pointer
- *   2. plain wheel and two-finger swipe PAN, both axes
+ *   2. PLAIN WHEEL ZOOMS at the cursor (like the site plan); Shift+wheel and a sideways swipe PAN
  *   3. MIDDLE-mouse drag pan, from on top of the page
  *   4. SPACE + drag pan, and that space still types a space when the caret is in text
  *   5. Ctrl+= · Ctrl+− · Ctrl+0 (100%) · Ctrl+9 (fit the page)
@@ -17,6 +17,8 @@
  *   7. the workspace is UNBOUNDED — the page can be pushed past every edge
  *   8. B1393 — double-click on blank paper INSIDE the sheet places a box AT THE CLICK POINT, at a
  *      far-out zoom, at 100%, and at a far-in zoom
+ *   9. the plain wheel does NOT hijack what scrolls itself: a wide table, a code block, an open
+ *      toolbar menu, the notebook rail — they scroll, and the zoom does not move
  *
  * ⛔ WHAT IT CANNOT COVER HEADLESS, STATED RATHER THAN FOLDED INTO A PASS:
  *   · a REAL two-finger trackpad pinch. macOS/Windows deliver it to the page as a Ctrl+wheel,
@@ -43,6 +45,8 @@ const PAGE_KEY = "planyr:notes:page:v1:local:p1";
 /* An anchored zoom is arithmetic, so the tolerance is for rounding and for the browser's own
  * sub-pixel rasterisation of a scaled layer — not for a policy. */
 const ANCHOR_TOL = 2;
+/* The fixture's 24 flow paragraphs migrate into ONE box when the page opens (NEW-1, 2026-09-22). */
+const BASE_BOXES = 1;
 /* A box is placed at the point pressed; the tolerance is the anchor's own border and rounding,
  * the same number `verify-notes-in-sheet-placement` uses and for the same reason. */
 const POS_TOL = 6;
@@ -64,6 +68,13 @@ const cannot = (label, why) => {
 };
 
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
+
+/** ⛔ A PLAIN VERTICAL WHEEL ZOOMS NOW (NEW-1, 2026-09-29), so a harness that wants to PAN the way it
+ *  used to must say so: Shift+wheel is the vertical pan, a sideways delta the horizontal one. */
+const panWheel = async (page, dx, dy) => {
+  if (dy) { await page.keyboard.down("Shift"); await page.mouse.wheel(0, dy); await page.keyboard.up("Shift"); }
+  if (dx) await page.mouse.wheel(dx, 0);
+};
 
 const P = (t) => ({ type: "paragraph", content: t ? [{ type: "text", text: t }] : [] });
 const DOC = {
@@ -159,9 +170,9 @@ async function bringIntoView(page, w) {
   return false;
 }
 
-async function section(name, fn) {
+async function section(name, fn, doc) {
   console.log(`\n── ${name} ──`);
-  const page = await openPage();
+  const page = await openPage(doc ? { doc } : {});
   try {
     await fn(page);
   } catch (e) {
@@ -224,19 +235,48 @@ await section("1 · wheel zoom is anchored at the cursor", async (page) => {
     "the browser synthesises it from the OS; a driver cannot reproduce the decay curve");
 });
 
-/* ── 2 · PLAIN WHEEL AND TWO-FINGER SWIPE PAN ───────────────────────────────────────────────── */
-await section("2 · plain wheel pans, both axes, and never zooms", async (page) => {
+/* ── 2 · PLAIN WHEEL ZOOMS; SHIFT+WHEEL AND A SIDEWAYS SWIPE PAN ───────────────────────────── */
+await section("2 · a plain wheel zooms at the cursor (like the site plan); Shift+wheel and a sideways swipe pan", async (page) => {
   const m = await matRect(page);
-  await page.mouse.move(m.left + m.width / 2, m.top + m.height / 2);
+  const at = { x: m.left + m.width / 2 + 120, y: m.top + 260 };
+  await page.mouse.move(at.x, at.y);
 
-  const before = await sheetRect(page);
+  /* ⛔ THE RED-PROOF ARM: on the pre-change build a plain wheel-up moved the page (a pan) and left
+   * the zoom at exactly 1.0; this is the row that fails there. */
+  const under = await workspaceOf(page, at.x, at.y);
   const z0 = (await view(page)).z;
+  await page.mouse.wheel(0, -120);
+  await pacedWait(page, 250);
+  const zUp = (await view(page)).z;
+  ok("⛔ a plain wheel-UP zooms IN", zUp > z0 + 0.05, `${z0.toFixed(3)} → ${zUp.toFixed(3)}`);
+  const now = await screenOf(page, under.x, under.y);
+  ok("and the point under the pointer stays under the pointer",
+    Math.hypot(now.x - at.x, now.y - at.y) <= ANCHOR_TOL, `moved ${Math.hypot(now.x - at.x, now.y - at.y).toFixed(2)}px`);
+  await page.mouse.wheel(0, 240);
+  await pacedWait(page, 250);
+  const zDown = (await view(page)).z;
+  ok("a plain wheel-DOWN zooms OUT", zDown < zUp - 0.05, `${zUp.toFixed(3)} → ${zDown.toFixed(3)}`);
+  await pacedWait(page, 700);          // past the persist debounce
+  const stored = await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("planyr:notes:view:")));
+  ok("the wheel-reached level is persisted like any other", stored.length === 1, stored.join(", ") || "nothing stored");
+
+  /* The pill reads the level the wheel reached. */
+  const pill = await page.evaluate(() => document.querySelector('[data-testid="note-zoom-level"]')?.textContent?.trim());
+  ok("the zoom pill's percentage follows the wheel", pill === `${Math.round(zDown * 100)}%`,
+    `pill ${JSON.stringify(pill)} vs view ${(zDown * 100).toFixed(0)}%`);
+
+  await page.keyboard.press("Control+0");
+  await pacedWait(page, 250);
+  const before = await sheetRect(page);
+  const zPan = (await view(page)).z;
+  await page.keyboard.down("Shift");
   for (let i = 0; i < 5; i += 1) await page.mouse.wheel(0, 60);
+  await page.keyboard.up("Shift");
   await pacedWait(page, 250);
   const afterV = await sheetRect(page);
-  ok("a plain wheel moves the page UP the screen", afterV.top < before.top - 50,
+  ok("Shift+wheel moves the page UP the screen", afterV.top < before.top - 50,
     `top ${before.top.toFixed(0)} → ${afterV.top.toFixed(0)}`);
-  ok("and does not change the zoom", Math.abs((await view(page)).z - z0) < 1e-6);
+  ok("and does not change the zoom", Math.abs((await view(page)).z - zPan) < 1e-6);
 
   const beforeH = await sheetRect(page);
   for (let i = 0; i < 5; i += 1) await page.mouse.wheel(60, 0);
@@ -244,8 +284,9 @@ await section("2 · plain wheel pans, both axes, and never zooms", async (page) 
   const afterH = await sheetRect(page);
   ok("a two-finger sideways swipe moves the page LEFT", afterH.left < beforeH.left - 20,
     `left ${beforeH.left.toFixed(0)} → ${afterH.left.toFixed(0)}`);
+  ok("and does not change the zoom either", Math.abs((await view(page)).z - zPan) < 1e-6);
 
-  known("the page really moved (a zero reading would make every row above vacuous)",
+  known("the page really moved (a zero reading would make every pan row above vacuous)",
     Math.abs(afterH.left - before.left) > 20 || Math.abs(afterV.top - before.top) > 20);
 });
 
@@ -269,7 +310,9 @@ await section("3 · middle-mouse drag pans, from on top of the page", async (pag
     `Δview ${(v1.x - v0.x).toFixed(1)}, ${(v1.y - v0.y).toFixed(1)} against a pointer of −120, +72`);
   ok("and it does not change the zoom", Math.abs(v1.z - v0.z) < 1e-6);
   const boxes = await page.evaluate(() => document.querySelectorAll(".planyr-anchor").length);
-  ok("a middle-drag over the page creates nothing", boxes === 0, `${boxes} boxes`);
+  /* The fixture's flow paragraphs migrate into ONE box on open (NEW-1, 2026-09-22), so "nothing was
+   * created" is a comparison against that baseline, not against zero. */
+  ok("a middle-drag over the page creates nothing", boxes === BASE_BOXES, `${boxes} boxes (baseline ${BASE_BOXES})`);
 });
 
 /* ── 4 · SPACE + DRAG PAN ───────────────────────────────────────────────────────────────────── */
@@ -278,8 +321,17 @@ await section("4 · space+drag pans, and space still types when the caret is in 
   const from = { x: s.left + s.width / 2, y: s.top + 200 };
 
   /* First the half that must NOT happen: with the caret in the writing, space is a space. */
-  await page.mouse.click(s.left + 60, s.top + 140);
-  await pacedWait(page, 150);
+  /* The writing lives in the migrated box now (NEW-1, 2026-09-22), so aim at ITS first line rather
+   * than at blank paper, where a press only arms a placement caret. */
+  const line = await page.evaluate(() => {
+    const r = document.querySelector(".planyr-anchor p").getBoundingClientRect();
+    return { x: r.left + 40, y: r.top + r.height / 2 };
+  });
+  /* Press 1 SELECTS a box; press 2 (a separate click, past the double-click budget) ENTERS it. */
+  await page.mouse.click(line.x, line.y);
+  await pacedWait(page, 600);
+  await page.mouse.click(line.x, line.y);
+  await pacedWait(page, 250);
   const textBefore = await page.evaluate(() => document.querySelector('[data-testid="note-body"]').textContent.length);
   await page.keyboard.press("Space");
   await pacedWait(page, 200);
@@ -307,7 +359,7 @@ await section("4 · space+drag pans, and space still types when the caret is in 
     Math.abs((v1.x - v0.x) + 108) <= 2 && Math.abs((v1.y - v0.y) - 60) <= 2,
     `Δview ${(v1.x - v0.x).toFixed(1)}, ${(v1.y - v0.y).toFixed(1)} against a pointer of +108, −60`);
   const boxes = await page.evaluate(() => document.querySelectorAll(".planyr-anchor").length);
-  ok("a space+drag creates nothing", boxes === 0, `${boxes} boxes`);
+  ok("a space+drag creates nothing", boxes === BASE_BOXES, `${boxes} boxes (baseline ${BASE_BOXES})`);
 });
 
 /* ── 5 · THE KEYBOARD ───────────────────────────────────────────────────────────────────────── */
@@ -328,7 +380,7 @@ await section("5 · Ctrl+= · Ctrl+− · Ctrl+0 · Ctrl+9", async (page) => {
    * level — a Ctrl+0 that leaves the page off-screen is not a reset. */
   const m = await matRect(page);
   await page.mouse.move(m.left + 200, m.top + 200);
-  for (let i = 0; i < 6; i += 1) await page.mouse.wheel(300, 300);
+  for (let i = 0; i < 6; i += 1) await panWheel(page, 300, 300);
   await pacedWait(page, 250);
   await page.keyboard.press("Control+0");
   await pacedWait(page, 300);
@@ -356,7 +408,7 @@ await section("6 · the view is remembered per page and survives a reload", asyn
   await page.keyboard.down("Control");
   await page.mouse.wheel(0, -300);
   await page.keyboard.up("Control");
-  for (let i = 0; i < 4; i += 1) await page.mouse.wheel(0, 90);
+  for (let i = 0; i < 4; i += 1) await panWheel(page, 0, 90);
   await pacedWait(page, 700);            // past the persist debounce
   const before = await view(page);
 
@@ -390,7 +442,7 @@ await section("7 · the page can be pushed past every edge — there is no hard 
     await page.keyboard.press("Control+0");
     await pacedWait(page, 250);
     await page.mouse.move(centre.x, centre.y);
-    for (let i = 0; i < 14; i += 1) await page.mouse.wheel(dx, dy);
+    for (let i = 0; i < 14; i += 1) await panWheel(page, dx, dy);
     await pacedWait(page, 300);
     const s = await sheetRect(page);
     ok(`the page can be pushed ${label} of the window`, test(s),
@@ -486,11 +538,14 @@ for (const [label, zoomTo] of [
         const r = el.getBoundingClientRect();
         return { text: el.textContent.trim(), left: r.left, top: r.top };
       }));
+      /* Only the box that holds the typing is the one this gesture made — the migrated flow box is
+       * the fixture's own baseline. */
+      const made = boxes.filter((b) => b.text === "here");
       ok(`${label} (${(v.z * 100).toFixed(0)}%): exactly ONE box was created and holds the typing`,
-        boxes.length === 1 && boxes[0].text.includes("here"),
-        `${boxes.length} box(es): ${boxes.map((b) => b.text).join(" / ") || "none"}`);
-      if (boxes.length === 1) {
-        const got = await workspaceOf(page, boxes[0].left, boxes[0].top);
+        made.length === 1 && boxes.length === BASE_BOXES + 1,
+        `${boxes.length} box(es), ${made.length} holding "here"`);
+      if (made.length === 1) {
+        const got = await workspaceOf(page, made[0].left, made[0].top);
         const dx = Math.abs(got.x - blank.x);
         const dy = Math.abs(got.y - blank.y);
         ok(`${label} (${(v.z * 100).toFixed(0)}%): it landed ON the click point`,
@@ -503,6 +558,128 @@ for (const [label, zoomTo] of [
   if (page._errs.length) ok(`${label}: no console errors`, false, page._errs.slice(0, 2).join(" | "));
   await page.context().close();
 }
+
+/* ── 9 · THE PLAIN WHEEL MUST NOT HIJACK WHAT SCROLLS ITSELF (NEW-1) ───────────────────────── */
+const cell = (t, w) => ({ type: "tableCell", attrs: { colwidth: [w] }, content: [P(t)] });
+const WIDE_DOC = {
+  type: "doc",
+  content: [
+    P("Above the table."),
+    { type: "table", content: [
+      { type: "tableRow", content: [cell("alpha", 700), cell("bravo", 700)] },
+      { type: "tableRow", content: [cell("charlie", 700), cell("delta", 700)] },
+    ] },
+    { type: "codeBlock", content: [{ type: "text", text: "x".repeat(400) }] },
+    ...Array.from({ length: 14 }, (_, i) => P(`Trailing paragraph ${i + 1} so the note is tall.`)),
+  ],
+};
+await section("9 · the wheel over a wide table, a code block, an open menu and the rail scrolls THEM, not the zoom", async (page) => {
+  const zoom = async () => (await view(page)).z;
+  const centreOf = (sel) => page.evaluate((q) => {
+    const el = document.querySelector(q);
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.left + Math.min(r.width / 2, 200), y: r.top + r.height / 2 };
+  }, sel);
+
+  /* Known-good arm: over blank canvas, the very same wheel DOES zoom — so a "zoom unchanged" row
+   * below is about the element owning the wheel, never about a canvas that could not zoom. */
+  const m = await matRect(page);
+  await page.mouse.move(m.right - 30, m.top + 200);
+  const z0 = await zoom();
+  await page.mouse.wheel(0, -120);
+  await pacedWait(page, 250);
+  known("over the blank canvas the same plain wheel zooms (the arms below are not vacuous)", (await zoom()) > z0 + 0.05);
+  await page.keyboard.press("Control+0");
+  await pacedWait(page, 300);
+
+  const tbl = await page.evaluate(() => {
+    const w = document.querySelector(".tableWrapper");
+    return w ? { sw: w.scrollWidth, cw: w.clientWidth, cs: getComputedStyle(w).overflowX } : null;
+  });
+  ok("precondition: the fixture's table genuinely overflows its wrapper sideways",
+    !!tbl && tbl.sw > tbl.cw + 20 && tbl.cs === "auto", JSON.stringify(tbl));
+
+  if (tbl && tbl.sw > tbl.cw + 20) {
+    const at = await centreOf(".tableWrapper table");
+    const zBefore = await zoom();
+    const vBefore = await view(page);
+    await page.mouse.move(at.x, at.y);
+    await page.keyboard.down("Shift");
+    await page.mouse.wheel(0, 200);
+    await page.keyboard.up("Shift");
+    await pacedWait(page, 300);
+    const sl = await page.evaluate(() => document.querySelector(".tableWrapper").scrollLeft);
+    const vAfter = await view(page);
+    ok("Shift+wheel over the wide table scrolls the TABLE sideways", sl > 20, `scrollLeft ${sl}`);
+    ok("and neither zoom nor pan of the canvas moved", Math.abs(vAfter.z - zBefore) < 1e-6
+      && Math.abs(vAfter.x - vBefore.x) < 1e-6 && Math.abs(vAfter.y - vBefore.y) < 1e-6,
+      `view ${JSON.stringify(vBefore)} → ${JSON.stringify(vAfter)}`);
+
+    await page.evaluate(() => { document.querySelector(".tableWrapper").scrollLeft = 0; });
+    await page.mouse.move(at.x, at.y);
+    await page.mouse.wheel(90, 0);
+    await pacedWait(page, 300);
+    const sl2 = await page.evaluate(() => document.querySelector(".tableWrapper").scrollLeft);
+    ok("a sideways swipe over the wide table scrolls the TABLE too", sl2 > 20 && Math.abs((await zoom()) - zBefore) < 1e-6,
+      `scrollLeft ${sl2}`);
+
+    /* And the converse, so this is not "the table swallows everything": a plain VERTICAL wheel over
+     * a table that only scrolls sideways has nothing to scroll and must zoom like anywhere else. */
+    await page.evaluate(() => { document.querySelector(".tableWrapper").scrollLeft = 0; });
+    await page.mouse.move(at.x, at.y);
+    await page.mouse.wheel(0, -120);
+    await pacedWait(page, 250);
+    ok("a plain vertical wheel over the same table (nothing to scroll that way) still zooms",
+      (await zoom()) > zBefore + 0.05, `${zBefore.toFixed(3)} → ${(await zoom()).toFixed(3)}`);
+  }
+
+  cannot("a wheel over a code block that overflows sideways",
+    "inside a placed box a code block wraps (nothing to scroll), so it cannot be made to overflow here; "
+    + "the wide-table arm above exercises the same generic 'element that really scrolls owns the wheel' rule");
+
+  /* An open toolbar menu (portaled outside the canvas). */
+  await page.keyboard.press("Control+0");
+  await pacedWait(page, 300);
+  await page.click('[data-testid="nt-font"]');
+  await pacedWait(page, 250);
+  const menu = await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="nt-font-menu"]');
+    return el ? { sh: el.scrollHeight, ch: el.clientHeight } : null;
+  });
+  ok("precondition: the Font menu is open", !!menu, JSON.stringify(menu));
+  if (menu) {
+    const at = await centreOf('[data-testid="nt-font-menu"]');
+    const zBefore = await zoom();
+    const vBefore = await view(page);
+    await page.mouse.move(at.x, at.y);
+    await page.mouse.wheel(0, -120);
+    await pacedWait(page, 300);
+    const vAfter = await view(page);
+    ok("the wheel over the open Font menu never zooms or pans the canvas beneath it",
+      Math.abs(vAfter.z - zBefore) < 1e-6 && Math.abs(vAfter.x - vBefore.x) < 1e-6 && Math.abs(vAfter.y - vBefore.y) < 1e-6,
+      `view ${JSON.stringify(vBefore)} → ${JSON.stringify(vAfter)}`);
+  }
+  await page.keyboard.press("Escape");
+  await pacedWait(page, 150);
+
+  /* The notebook rail. */
+  const rail = await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="notes-tree"] [role="tree"]') || document.querySelector('[role="tree"]');
+    return el ? { sh: el.scrollHeight, ch: el.clientHeight } : null;
+  });
+  if (rail) {
+    const at = await centreOf('[role="tree"]');
+    const zBefore = await zoom();
+    await page.mouse.move(at.x, at.y);
+    await page.mouse.wheel(0, 120);
+    await pacedWait(page, 300);
+    ok("the wheel over the notebook rail never zooms the canvas", Math.abs((await zoom()) - zBefore) < 1e-6,
+      `zoom ${zBefore.toFixed(3)} → ${(await zoom()).toFixed(3)}`);
+  } else {
+    ok("the notebook rail is present to be tested", false, "no [role=tree] found");
+  }
+}, WIDE_DOC);
 
 /* ── verdict ────────────────────────────────────────────────────────────────────────────────── */
 await browser.close();

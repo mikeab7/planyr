@@ -734,8 +734,10 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   same units — which is why every computation that used to reason in scroll terms kept its
   arithmetic when `note-mat` went to `overflow: hidden`.
   **Zoom is ANCHORED AT THE CURSOR** (10%–800%; the site planner's own rule, reused not
-  reinvented): wheel zooms at the pointer, plain wheel/trackpad pans, middle-mouse and space+drag
-  pan from anywhere, pinch zooms, Ctrl+= / Ctrl+− / Ctrl+0 (100%) / Ctrl+9 (fit the page) — and
+  reinvented): **a PLAIN wheel zooms at the pointer (B1983600 — matches the site plan; `wheelIntent`
+  in `lib/notesViewport.js` is the decision table), Shift+wheel and a mostly-sideways swipe pan**,
+  and a wheel over something that scrolls itself (a wide table) is left native; middle-mouse and
+  space+drag pan from anywhere, pinch and Ctrl+wheel zoom, Ctrl+= / Ctrl+− / Ctrl+0 (100%) / Ctrl+9 (fit the page) — and
   the browser's own zoom is `preventDefault`ed for all of them. The view is a **ref**, written
   straight onto the layer's `transform` by `applyView()` and re-asserted in a layout effect, so a
   pan re-renders NOTHING (VIEW-INDEPENDENT-ONCE by construction) and no other render can drop it.

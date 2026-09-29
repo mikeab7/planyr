@@ -410,7 +410,10 @@ async function knownGoodArm(pg) {
   // A real wheel over the mat — the app's own scroll/pan path, not a driver actionability scroll.
   const mat = await pg.locator('[data-testid="note-mat"]').boundingBox();
   await pg.mouse.move(mat.x + mat.width / 2, mat.y + mat.height / 2);
+  /* Shift+wheel is the vertical pan since a plain wheel zooms (NEW-1, 2026-09-29). */
+  await pg.keyboard.down("Shift");
   for (let i = 0; i < 8; i += 1) await pg.mouse.wheel(0, 40);
+  await pg.keyboard.up("Shift");
   await pacedWait(pg, 300);
   const got = analyse((await stopRecording(pg)).samples, ["body"]);
   const moved = !got.body.missing && Math.abs(got.body.netY) > 20;
@@ -636,7 +639,10 @@ row("8a", "Page SCROLLED DOWN · LEFT widen", (pg) =>
     prep: async (page) => {
       const mat = await page.locator('[data-testid="note-mat"]').boundingBox();
       await page.mouse.move(mat.x + mat.width / 2, mat.y + mat.height / 2);
+      /* Shift+wheel is the vertical pan since a plain wheel zooms (NEW-1, 2026-09-29). */
+      await page.keyboard.down("Shift");
       for (let i = 0; i < 10; i += 1) await page.mouse.wheel(0, 60);
+      await page.keyboard.up("Shift");
       await pacedWait(page, 300);
     },
   }));
