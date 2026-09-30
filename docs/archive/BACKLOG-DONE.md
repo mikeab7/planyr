@@ -17054,6 +17054,13 @@ Each shrink case also carries a **vacuity guard** that fails rather than scoring
 - Verify: live — **V1400816** ✅ PASSED 2026-09-29 (owner's signed-in Chrome, throwaway plan; see `docs/archive/VERIFICATION-DONE.md`). Disposition: reproduced-and-fixed; live pass confirmed each click adds/removes only the lot under the cursor.
 - Files: `src/workspaces/site-planner/lib/parcelIdentity.js`, `SitePlanner.jsx`, `MapFinder.jsx`, `test/parcelIdentity.test.js`.
 
+### B1875168 — Map scale bar label looks drawn twice (ghosted) — ✅ Done 2026-09-30
+- Module: Site · Tags: #map #theme · Verify: sandbox
+- Cause: Leaflet's vendor `.leaflet-control-scale-line` ships `text-shadow: 1px 1px #fff` (dark-on-white look). Our override restyled it light-on-`--surface-overlay` but never cleared the shadow, so the white offset read as a second copy of the label.
+- Fix: `text-shadow: none` on the `:root .leaflet-container .leaflet-control-scale-line` rule in `src/index.css`. Checked the zoom bar and attribution overrides: vendor Leaflet sets no text-shadow on either, nothing to clear.
+- Sandbox verify (built app, Playwright, tab visible): computed `text-shadow` = `none` in light and dark; the same page with the vendor shadow re-injected computes `rgb(255,255,255) 1px 1px 0px` (known-bad arm, proves the probe sees it). Before/after crops at 3x taken for both themes.
+- Owner product constraints check: nothing built here contradicts a listed constraint.
+- Files: `src/index.css`.
 ### B1986032 — Site Analysis "Activate layer" zooms the owner OUT of the view he was working in `[Site Planner / Site Analysis]` (bug) #site-planner #gis #ui  *(owner chat 2026-09-30, verbatim: "On the Georgia parcel, on the analysis tab, clicking activate or whatever still zoomed me out". DEDUPE-FIRST: B190 created the toggle and its frame-to-site behaviour; B1874896 (#1846) only relabeled it "Activate layer" and left the framing untouched. This AMENDS B190's framing rule; not a recurrence of a shipped fix.)*
 
 - **What he sees.** He is looking at his site on the Site tab, opens the Analysis panel, clicks "◍ Activate layer" on a finding, and the canvas jumped out to a much wider view. He did not ask to move. The layer should just turn on where he is.

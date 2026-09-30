@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>DFW city limits + ETJ map harness (NEW-1)</title>
+    <link rel="stylesheet" href="/node_modules/leaflet/dist/leaflet.css" />
+  </head>
+  <body style="margin:0">
+    <div id="map" style="width:1200px;height:800px"></div>
+    <script type="module">
+      import L from "leaflet";
+      import { JURISDICTIONS } from "/src/workspaces/site-planner/lib/layers.js";
+      import { cachedVectorLayer } from "/src/workspaces/site-planner/lib/vectorOverlay.js";
+      const q = new URLSearchParams(location.search);
+      const map = L.map("map", { center: [Number(q.get("lat") || 32.8), Number(q.get("lng") || -96.8)], zoom: Number(q.get("z") || 10), zoomControl: false });
+      map.createPane("bnd"); map.getPane("bnd").style.zIndex = 450;
+      map.createPane("boundarylabels"); map.getPane("boundarylabels").style.zIndex = 460;
+      window.__status = {};
+      window.__layers = {};
+      for (const k of ["jur_city", "jur_etj"]) {
+        const lyr = cachedVectorLayer(k, JURISDICTIONS[k], 1, "bnd", (id, state, msg) => { window.__status[id] = { state, msg }; }, { interactive: false });
+        lyr.addTo(map); window.__layers[k] = lyr;
+      }
+      window.__map = map; window.__READY__ = true;
+    </script>
+  </body>
+</html>
