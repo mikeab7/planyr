@@ -27,7 +27,7 @@ import LazyPanel from "./LazyPanel.jsx";
 import InterfaceSettings from "../../../shared/ui/InterfaceSettings.jsx";
 
 const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", paper: "var(--surface-raised)" };
-const field = { width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 13, border: `1px solid ${PAL.line}`, borderRadius: RADIUS.md, color: PAL.ink, fontFamily: "inherit", marginTop: 6 };
+const field = { width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 13, border: `1px solid ${PAL.line}`, borderRadius: RADIUS.md, background: "var(--surface-field)", color: PAL.ink, fontFamily: "inherit", marginTop: 6 };
 const btn = (primary) => ({ padding: "9px 14px", fontSize: 13, borderRadius: RADIUS.md, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: `1px solid ${primary ? PAL.accent : PAL.line}`, background: primary ? PAL.accent : "var(--surface-raised)", color: primary ? "var(--on-accent)" : PAL.ink });
 const linkBtn = { border: "none", background: "transparent", color: PAL.accent, cursor: "pointer", fontSize: 12, fontFamily: "inherit", padding: "6px 2px" };
 const s = (v) => (v == null ? "" : String(v)).trim();

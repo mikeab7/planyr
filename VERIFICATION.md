@@ -166,6 +166,17 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1423104 — B1998016: dark theme on a phone — Settings > Profile fields are dark with readable text; no white panels in Schedule/Review `Blocker: auth`
+
+Sandbox-proven: `ui-audit/verify-theme-surface-contrast.mjs` (dark+light × phone+desktop × signed-out + signed-in fixture: 0 failures after, 8 before) and `test/themeFieldSurface.test.js`. **Pending** a real signed-in phone.
+**Steps** (planyr.io, dark theme, iPhone; read the served chunk hash in the same observation):
+1. Account menu > Profile. **Expect:** First name / Last name / Organization are dark fields with clearly readable text.
+2. Sign-in form (signed out). **Expect:** Email/Password dark fields, readable text and placeholder.
+3. Schedule, then Review. **Expect:** no white panel or page ground; open a calibration popup in Review and a Stitcher panel if reachable — dark surfaces.
+4. Open a parcel with a jurisdiction note. **Expect:** amber-tinted strip in the dark palette, not a cream slab.
+5. Switch to light theme, repeat 1–3. **Expect:** unchanged from before.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1998016.
+
 ### V1417521 — B1992435: the southern and eastern DFW ETJs paint and name correctly, and uncovered counties still say "unavailable" `Blocker: none — run on planyr.io once the build is deployed`
 
 Sandbox-proven (live services, real overlay engine in Chromium, 2026-09-30): `ui-audit/audit-dfw-etj-gaps.mjs` (Denton/Fort Worth checks skipped — browser-only hosts), `ui-audit/verify-dfw-etj-map.mjs` 9/9 (stand-ins for the two browser-only hosts), `test/dfwEtjGaps.test.js` 52/52, weekly verifier clean for every reachable row. **Still needs the deployed app.**
