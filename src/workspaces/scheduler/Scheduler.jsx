@@ -20,6 +20,7 @@ import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { scheduleSaveState } from "./lib/saveState.js";
 import { ScheduleCenter, ScheduleActions } from "./components/ScheduleToolbar.jsx";
 import { planScheduleHintSync } from "../../shared/schedule/scheduleLinkHints.js";
+import { allProjectNames } from "../../shared/names/names.js";
 import { listProjects, warmProjectsIfEmpty, suggestNameMatch, onProjectsChanged } from "../../shared/projects/projects.js";
 import { resolveControlledId } from "../../shared/projects/projectModel.js";
 import LinkSchedulePanel from "./components/LinkSchedulePanel.jsx";
@@ -394,6 +395,16 @@ export default function Scheduler({
       );
     } catch (_) {}
   };
+
+  // NEW-1 (B1991040) — hand the embedded page every project's LIVE name so it resolves a schedule's
+  // "<Project> / <Schedule>" label by linked id at read time (the stored `linkedSiteName` is only a
+  // fallback). Re-sent on every "project list moved" (`siteProjects` re-reads on that signal) and
+  // whenever the page (re)confirms it is up, so a rename made anywhere reaches an open Schedule tab.
+  useEffect(() => {
+    if (!ready && !navConfirmed) return;
+    post({ type: "planar:site-names", names: allProjectNames() });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, navConfirmed, siteProjects]);
 
   // B1161792 (NEW-1) — apply a pending "jump to this task" request once the iframe is ready.
   // `scheduleTaskIntent.token` makes a repeat click on the SAME task re-fire (Shell stamps a

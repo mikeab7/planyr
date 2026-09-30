@@ -305,6 +305,12 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > title) are computed from the selector at render/export time, never cached. Guards:
 > `test/namesSingleSource.test.js` (fails on `useState` seeded from a name) and
 > `e2e/names-matrix.spec.js` (every entry point × every display, red-proofed).
+> **THE RULE ALSO COVERS OTHER TABLES (B1991040, 2026-09-30):** a stored copy of a project's name
+> (`schedules.linked_site_name`, `doc_reviews.project`, a title composed from it) is only ever the
+> FALLBACK for a link that cannot be resolved — every display resolves it by id at read time
+> (`scheduleOwnership.liveSiteName`, `reviewNaming.liveReviewProject`), an auto-composed title follows
+> the rename and a typed one never moves. `test/nameCopiesGuard.test.js` fails on any new
+> project/plan-name-like SQL column that isn't declared with its read-time rule.
 >
 > **⛔ STANDING RULE — ALL SHARED DATA HAS ONE SOURCE OF TRUTH; NEVER COPY SHARED DATA INTO COMPONENT STATE
 > (owner rule, 2026-09-29, generalising the names rule above after the B1953792 audit found ~27 more

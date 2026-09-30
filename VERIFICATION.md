@@ -166,6 +166,27 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1416128 — B1991040: a project rename reaches schedule + review labels (Dashboard, Reports, Review lists) `Blocker: auth`
+
+Sandbox-proven: `test/nameCopiesGuard.test.js` (live-name rule, the production row verbatim in both title shapes, typed-title-untouched, column guard) and `e2e/names-matrix.spec.js` (the Schedule tab receives the LIVE name and again after a rename). **Needs a signed-in pass on real data** (the Dashboard reads the account's schedules/reviews from the cloud).
+**Steps:**
+1. Run the two SQL files (`schedules_linked_site_name_backfill_20260930.sql`, then `doc_reviews_project_name_backfill_20260930.sql`) — **step 1 (preview) of each first**; expect schedule id 6 and review rvmqzs201bfcc2d listed, the review's title kind "auto (name-first)", any hand-typed title "typed — left alone". Then run step 2.
+2. On planyr.io open the Dashboard. **Expect:** Schedule Health shows "Papadopoulos / Master Schedule", matching Jump Back In; "Last document" shows the new name.
+3. Rename that project again to a throwaway name from the Map row menu, return to the Dashboard **without** running SQL. **Expect:** both cards show the throwaway name (read-time resolution), then rename it back.
+4. Open Review → Saved reviews. **Expect:** that review's row reads "… Papadopoulos …"; a review with a typed title keeps it.
+5. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 2–4, or a failed step is filed as a recurrence on B1991040.
+
+### V1416129 — B1991041: renaming a brand-new project works signed in `Blocker: auth`
+
+Sandbox-proven logged-out (both entry points, reload; red on main). **The signed-in leg** exercises `ensureProjectRow` → push → `rename_site_group`.
+**Steps:**
+1. Signed in on planyr.io: Map → project switcher → "+ New project" (don't draw). **Expect:** opens as "Untitled site".
+2. Switcher → row menu → Rename → a throwaway name → Enter. **Expect:** no red "didn't match any project" toast; the name shows in the breadcrumb, the plan header and the Compose exhibit.
+3. Reload, then navigate to the Map. **Expect:** the project is still listed under the new name (it no longer vanishes).
+4. Delete the throwaway project. Read the served chunk hash in the same observation.
+- **Stopping rule:** closes on a dated pass of 1–3, or a failure is filed as a recurrence on B1991041.
+
 ### V1404560 — B1973920 + B1973921: state lines survive to metro zoom and city names read well over the real aerial, without covering a plan `Blocker: live-GIS`
 
 Sandbox-proven (`ui-audit/verify-admin-boundaries.mjs` 19/19, `ui-audit/verify-place-names.mjs` 15/15, `test/adminBoundaries.test.js`, `test/placeNames.test.js`): band edges, lazy fetches, gone at 14, row toggle. **Still needs planyr.io with the real imagery** (this environment's browser cannot load tile hosts, so the base was blank).
