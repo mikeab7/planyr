@@ -72,6 +72,7 @@ import { attachRasterIdentifyLazy } from "./lib/rasterIdentifyLazy.js";
 import { NUM_FONT, TABULAR_NUMS } from "../../shared/theme/typography.js";
 import { isTextControl, PICKER_TAGS } from "../../shared/keyboard/keyScope.js";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
+import { startClickAck } from "../../shared/ui/clickAck.js";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import FloatingNotice from "../../shared/ui/FloatingNotice.jsx";
 import { menuPanelStyle, MenuItem } from "../../shared/ui/controls.jsx";
@@ -1933,7 +1934,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         else placeCompPinAtRef.current(e.latlng);
         return;
       }
-      if (selectModeRef.current) { handleClick(e.latlng); return; }
+      // NEW-1 — ring at the cursor the moment the click lands; handleClick clears it on every exit.
+      if (selectModeRef.current) { handleClick(e.latlng, e.originalEvent ? startClickAck(e.originalEvent.clientX, e.originalEvent.clientY) : null); return; }
       // A background click (nothing else claimed it) deselects a site plan armed for editing —
       // its own image click already stops propagation before this ever runs (B848496 NEW-2).
       if (activeOverlayIdRef.current) setActiveOverlayId(null);
@@ -3271,7 +3273,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     return null;
   };
 
-  const handleClick = async (latlng) => {
+  const handleClick = async (latlng, ack = null) => {
     // Auto-route: figure out which configured county/counties could contain this
     // point, then identify against each one's CAD service and use whatever answers.
     // No county pre-selection required; a border straddle queries both and we take
@@ -3291,6 +3293,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       setErr(gap
         ? `${gap} You can still trace the lot from the Aerial underlay.`
         : "Parcel services are still loading — give it a second and click again.");
+      ack?.empty("No lot here");
       return;
     }
     setErr(""); setFallbackOffer(null); setBackupNotice(null); setCachedNotice(null); setLocateFar(false);
@@ -3372,6 +3375,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
          * real answer about this point, and a county with no wired source (`gap`) is a coverage fact
          * — neither is a reason to offer "start the plan here anyway", which exists for the case
          * where the service that WOULD have answered is down. */
+        ack?.empty(res.responded === 0 ? "Couldn't reach the county server" : "No lot here");
         if (res.responded === 0) failUnavailable("The county parcel server isn't responding right now — try again in a moment, or start the plan here and draw the boundary yourself.", latlng);
         else setErr(gap
           ? `${gap} You can still trace the lot from the Aerial underlay.`
@@ -3407,6 +3411,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       failUnavailable(humanizeError(e), latlng); // NEW-4 — a thrown lookup is an outage too
     } finally {
       setBusy(false);
+      ack?.done(); // no-op when a "no lot here" tag already took over the ring
     }
   };
 
