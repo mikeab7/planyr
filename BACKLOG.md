@@ -5256,6 +5256,17 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
+### B1986032 — Site Analysis "Activate layer" zooms the owner OUT of the view he was working in `[Site Planner / Site Analysis]` (bug) #site-planner #gis #ui  *(owner chat 2026-09-30, verbatim: "On the Georgia parcel, on the analysis tab, clicking activate or whatever still zoomed me out". DEDUPE-FIRST: B190 created the toggle and its frame-to-site behaviour; B1874896 (#1846) only relabeled it "Activate layer" and left the framing untouched. This AMENDS B190's framing rule; not a recurrence of a shipped fix.)*
+
+- **What he sees.** He is looking at his site on the Site tab, opens the Analysis panel, clicks "◍ Activate layer" on a finding, and the canvas jumped out to a much wider view. He did not ask to move. The layer should just turn on where he is.
+- **Where it came from.** `toggleAnalysisLayer` called `frameToActiveParcels()` on every enable; that helper padded the active-parcel bbox by `marginFrac = 0.6` per side and fit it, so on any site he was already looking at it always landed wider.
+`[x]` **Rule built (`lib/activateFraming.js`, one helper, `frameToActiveParcels` kept as the single call site):** site already on screen → the view object is returned untouched (nothing moves); site fully off screen → pan to centre at the CURRENT scale; the only scale change is zooming IN just past a scale-gated layer's own gate (`layerMinZoom` + `GATE_CLEARANCE`, FEMA/NWI), about the canvas centre. Never out. Deactivate never moves the view (unchanged). No active parcels → no-op. "Visible canvas" is the measured canvas `size`, which already excludes a docked panel.
+`[x]` **Copy:** button tooltip "(frames to the site)" removed; panel footer "framed to the site" removed, so neither promises a reframe that no longer happens (replaces, not adds).
+`[x]` **Georgia path checked:** no Georgia-specific code or layer-load callback reframes. The only `requestFit`/`setFitReq` callers are workspace-activate, parcel draw/import and the Fit button; `layers.js` has no `fitBounds`/`requestFit`. Guarded by source assertions.
+- Guard: `test/activateFraming.test.js` — close view unchanged (identity), off-screen pans at same scale, gated layer zooms in only, ten activations in a row don't drift, no-parcel no-op, and source guards. **Red-proof:** the pre-fix margin-fit math is replayed in the test and lands at a smaller `ppf` than the close view. Full unit suite (938 files) and build green.
+- Verify: live — **V1411120** (`Blocker: real-data` — the owner's Georgia plan).
+- Owner product constraints check: nothing here contradicts a listed constraint.
+
 ### B1973920 — State lines vanish too early when zooming in: now survive through metro zoom `[site-planner / map]` (feature) #site-planner #gis  *(Owner ask 2026-09-29, NEW-1: "the state boundaries should survive more zoom ins.")*
 
 `[x]` **Band revised, deliberately reversing the old "zoom >= 8: nothing" rule.** State outlines now draw at zoom 5 through 12 inclusive (`ADMIN_BOUNDARY_MAX_ZOOM` 7 → 12); off from 13. **Why 12/13 and not later:** `PARCEL_MINZOOM` is 14 (`parcelDisplayZoom.js`), so 13 is the last zoom before any parcel draws — the line is gone one step earlier so it never shares a screen with parcels/site work, and nothing is fetched there. **Country outlines unchanged** (through zoom 7) — inside one country they add nothing.
