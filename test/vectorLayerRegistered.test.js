@@ -20,11 +20,13 @@ import { GIS_SOURCES } from "../src/shared/gis/sources.js";
 
 const vectorRows = Object.entries(ALL_LAYERS).filter(([, c]) => c.kind === "vector");
 
-/* Rows that are STILL on the live (uncached) path because they have no VECTOR_SOURCES entry. Since this fix
- * `layers.js` draws them through the live esri layer instead of failing, so they are not dead — but they
- * skip the cache, the name labels and the hover identify. SHRINK-ONLY: register a row and delete it here;
- * never add to this list to make a new row pass (register it). Found by this guard on 2026-09-30. */
-const LIVE_PATH_ONLY = ["co_city", "co_isd", "co_road", "co_metro_districts", "co_water_districts", "mhfd_drainage", "mhfd_easements"];
+/* Rows KNOWN to have no VECTOR_SOURCES entry. Per B685200 (owner rule, 2026-08-22) an unregistered vector row is
+ * a deliberate, honest state — it reports "unregistered" and the panel says no data source is wired up — so
+ * `layers.js` must NOT silently reroute it (test/layerRegistryDrift.test.js pins that). These seven are the
+ * Colorado rows found by this guard on 2026-09-30; they draw nothing on a Colorado site. SHRINK-ONLY: register
+ * a row and delete it here; never add to this list to make a NEW row pass — register it (Georgia's two rows
+ * shipped unregistered in #1895 exactly because nothing forced the question). */
+const KNOWN_UNREGISTERED = ["co_city", "co_isd", "co_road", "co_metro_districts", "co_water_districts", "mhfd_drainage", "mhfd_easements"];
 
 describe("every vector layer row has a registered vector source", () => {
   it("the census sees vector rows at all (a guard that finds none is vacuous)", () => {
@@ -32,21 +34,11 @@ describe("every vector layer row has a registered vector source", () => {
     expect(vectorRows.map(([k]) => k)).toEqual(expect.arrayContaining(["jur_county", "ga_county", "ga_city"]));
   });
   it("no vector row is missing from VECTOR_SOURCES", () => {
-    const missing = vectorRows.map(([k]) => k).filter((k) => !VECTOR_SOURCES[k] && !LIVE_PATH_ONLY.includes(k));
-    expect(missing, `layers.js vector rows with no VECTOR_SOURCES entry — register them in vectorLayers.js (do NOT add to LIVE_PATH_ONLY): ${missing.join(", ")}`).toEqual([]);
+    const missing = vectorRows.map(([k]) => k).filter((k) => !VECTOR_SOURCES[k] && !KNOWN_UNREGISTERED.includes(k));
+    expect(missing, `layers.js vector rows with no VECTOR_SOURCES entry — register them in vectorLayers.js (do NOT add to KNOWN_UNREGISTERED): ${missing.join(", ")}`).toEqual([]);
   });
-  it("the live-path allowlist is exact, shrink-only, and every row on it has a url to draw from", () => {
-    for (const k of LIVE_PATH_ONLY) {
-      expect(VECTOR_SOURCES[k], `${k} is now registered — remove it from LIVE_PATH_ONLY`).toBeUndefined();
-      expect(ALL_LAYERS[k]?.url, `${k} has no url, so the live path cannot draw it`).toBeTruthy();
-    }
-  });
-  it("layers.js draws an unregistered vector row through the live layer instead of failing (the actual bug)", async () => {
-    const { readFileSync } = await import("node:fs");
-    const src = readFileSync(new URL("../src/workspaces/site-planner/lib/layers.js", import.meta.url), "utf8");
-    const branch = src.slice(src.indexOf('cfg.kind === "vector"'), src.indexOf('cfg.kind === "vectorLine"'));
-    expect(branch).toMatch(/else if \(cfg\.url\)/);
-    expect(branch).toMatch(/buildFeatureLayer\(cfg/);
+  it("the known-unregistered list is exact and shrink-only", () => {
+    for (const k of KNOWN_UNREGISTERED) expect(VECTOR_SOURCES[k], `${k} is now registered — remove it from KNOWN_UNREGISTERED`).toBeUndefined();
   });
   it("each registered source queries the service its layer row names", () => {
     for (const [k, cfg] of vectorRows) {
