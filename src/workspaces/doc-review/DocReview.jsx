@@ -2806,11 +2806,11 @@ export default function DocReview({
       {/* tool hint */}
       {pdfRef.current && addLeaderFor ? (
         <div style={{ flex: "none", padding: "5px 12px", background: PAL.chrome, borderTop: `1px solid var(--chrome-divider)`, color: PAL.chromeMuted, fontSize: 11, fontFamily: "system-ui, sans-serif" }}>
-          <b style={{ color: PAL.ember }}>Add Leader:</b> click where the new leader should point — Esc to cancel.
+          <b style={{ color: "var(--accent-review-text)" }}>Add Leader:</b> click where the new leader should point — Esc to cancel.
         </div>
       ) : pdfRef.current && curTool && (
         <div style={{ flex: "none", padding: "5px 12px", background: PAL.chrome, borderTop: `1px solid var(--chrome-divider)`, color: PAL.chromeMuted, fontSize: 11, fontFamily: "system-ui, sans-serif" }}>
-          <b style={{ color: PAL.ember }}>{curTool.label}:</b> {curTool.hint}{err && <span style={{ color: "var(--warn-text)", marginLeft: 10 }}>{err}</span>}
+          <b style={{ color: "var(--accent-review-text)" }}>{curTool.label}:</b> {curTool.hint}{err && <span style={{ color: "var(--warn-text)", marginLeft: 10 }}>{err}</span>}
         </div>
       )}
 
