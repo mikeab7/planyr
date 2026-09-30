@@ -27,6 +27,7 @@ import L from "leaflet";
 import { gisCache } from "./gisCache.js";
 import { VECTOR_SOURCES, fetchCached, decideVectorOrImage, pickTier, snapBbox, vectorKey, styleFor, identifyRows, hitFeature } from "./vectorLayers.js";
 import { labelAnchors, placeLabels, labelsVisible, titleCaseName } from "./boundaryLabels.js";
+import { placeNamesShown, placeNameKey } from "./placeNamesGate.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./pipelineCorridor.js";
 import { ftypeLabel } from "./nhdFlowline.js";
 import { pointSymbolOptions } from "./layerRequest.js";
@@ -255,7 +256,11 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
     clearLabels();
     if (!map || !anchors.length || !labelsVisible(source.labelZoom, map.getZoom())) return;
     const size = map.getSize();
-    const placed = placeLabels(anchors, {
+    /* ⛔ ONE LABEL PER CITY — the city-limits layer skips every name the City-names canvas layer is already
+     * drawing (see placeNamesGate.js). Filtered BEFORE placement so the names that remain get the freed room. */
+    const drawnElsewhere = source.id === "jur_city" ? placeNamesShown(map) : null;
+    const wanted = drawnElsewhere && drawnElsewhere.size ? anchors.filter((a) => !drawnElsewhere.has(placeNameKey(a.name))) : anchors;
+    const placed = placeLabels(wanted, {
       project: (lng, lat) => { try { return map.latLngToContainerPoint([lat, lng]); } catch (_) { return null; } },
       viewW: size.x, viewH: size.y,
     });
@@ -358,6 +363,7 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
     }
     L.LayerGroup.prototype.onAdd.call(this, m);
     m.on("moveend", refresh);
+    if (source.id === "jur_city") m.on("pf:placenames", refreshLabels);   // the canvas layer's names changed → re-place ours
     report("loading");
     refresh();
     return this;
@@ -366,6 +372,7 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
     seq++; // invalidate in-flight fetches / onFresh swaps
     closeIdentify(); // the popover must not outlive the layer
     m.off("moveend", refresh);
+    if (source.id === "jur_city") m.off("pf:placenames", refreshLabels);
     L.LayerGroup.prototype.onRemove.call(this, m);
     map = null; lastKey = null;
   };
