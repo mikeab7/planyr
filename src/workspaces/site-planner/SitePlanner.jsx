@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, useId, memo, Fragment, lazy, Suspense, useSyncExternalStore } from "react";
 import { flushSync, createPortal } from "react-dom";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
+import { startClickAck } from "../../shared/ui/clickAck.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useProjectName, usePlanName, renameProjectChecked, renamePlanChecked } from "../../shared/names/names.js";
@@ -166,6 +167,8 @@ import AppHeader from "../../shared/ui/AppHeader.jsx";
    above already imports this file. */
 import { CRUMB_MIN_W } from "../../shared/ui/ProjectBreadcrumb.jsx";
 import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.jsx";
+import { activateLayerView, activeParcelBox } from "./lib/activateFraming.js";
+import { layerMinZoom, GATE_CLEARANCE } from "./lib/layerZoomGate.js";
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 /* B1449 — the anchored render (the zoom half of B1440's increment) + the proportional wheel factor.
    `viewAnchor.js` holds the proof that an anchored frame lands exactly where a direct one would. */
@@ -6344,31 +6347,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return () => { stop(); };
   }, [fitReq]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* Frame the planner view to the ACTIVE parcels (+ margin) so a just-enabled
-     constraint overlay is on-screen — FEMA/NWI are scale-gated and only draw zoomed
-     in. The margin keeps nearby constraints (a pipeline just off the parcel) visible.
-     Used by the Site Analysis "show on map" toggle (B190). */
-  const frameToActiveParcels = useCallback((marginFrac = 0.6) => {
-    const pts = [];
-    parcels.forEach((pc) => { if (pc.active !== false && (pc.points?.length || 0) >= 3) pts.push(...pc.points); });
-    if (pts.length === 0) return;
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    pts.forEach((p) => { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); });
-    const bw = Math.max(maxX - minX, 10), bh = Math.max(maxY - minY, 10);
-    minX -= bw * marginFrac; maxX += bw * marginFrac; minY -= bh * marginFrac; maxY += bh * marginFrac;
-    const ebw = maxX - minX, ebh = maxY - minY, pad = 40;
-    const ppf = Math.max(0.02, Math.min(8, Math.min((size.w - pad * 2) / ebw, (size.h - pad * 2) / ebh)));
-    setView({ ppf, offX: pad - minX * ppf + (size.w - pad * 2 - ebw * ppf) / 2, offY: pad - minY * ppf + (size.h - pad * 2 - ebh * ppf) / 2 });
-  }, [parcels, size, setView]);
+  /* Bring a just-activated Site Analysis layer into view WITHOUT taking the owner anywhere he did
+     not ask to go (NEW-1). The old body fitted the active parcels + a 60% margin on every enable,
+     which on a site he was already looking at always landed wider than where he was.
+     Now (lib/activateFraming.js): site already on screen → the view is left exactly as it is;
+     site off screen → pan to centre it at the CURRENT scale; the only scale change is zooming IN
+     just past a scale-gated layer's own gate (FEMA / NWI). Never out. The single framing helper —
+     do not fork a second. */
+  const frameToActiveParcels = useCallback((layerId) => {
+    const box = activeParcelBox(parcels);
+    if (!box) return;
+    const minZ = layerMinZoom(ALL_LAYERS[layerId]);
+    const minPpf = origin && typeof minZ === "number" ? zoomToPpf(minZ + GATE_CLEARANCE, origin.lat) : null;
+    setView((v) => activateLayerView({ view: v, size, box, minPpf }));
+  }, [parcels, size, setView, origin]);
 
   /* Toggle a shared GIS overlay from a Site Analysis constraint card (B190). Writes
      the same app-shared `overlays` state the Layers panel uses (one source of truth) —
      so syncOverlayLayers paints it on the map. On enable: ensure the basemap is on for
-     geographic context, then frame to the active parcels so it isn't offscreen. */
+     geographic context, then make sure the site is on screen (never zooming out). Deactivate
+     never moves the view. */
   const toggleAnalysisLayer = useCallback((layerId, wantOn) => {
     if (!layerId) return;
     setOverlays && setOverlays((o) => ({ ...o, [layerId]: { ...(o[layerId] || { opacity: ALL_LAYERS[layerId]?.opacity ?? 0.7 }), on: wantOn } }));
-    if (wantOn) { ensureBasemapOn(); frameToActiveParcels(); }
+    if (wantOn) { ensureBasemapOn(); frameToActiveParcels(layerId); }
   }, [setOverlays, frameToActiveParcels, ensureBasemapOn]);
 
   /* ⛔ REMOVED (B-VTX-SEL) — this used to auto-select "the single restored parcel so its handles
@@ -7397,8 +7399,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // AND the on-parcel press, so clicking an already-added lot can toggle it back off
   // (the parcel polygon's own handler stops propagation, so it must call this directly).
   const beginIdentifyPress = (e) => {
+    // NEW-1 — acknowledge the press AT THE CURSOR before anything else runs (plain DOM, so it paints
+    // on the next frame instead of waiting on this component's render). Cleared by onUp: a drag
+    // becomes a pan (cancel), a click hands it to quickAddAt, which holds it until the lot lands.
+    const ack = startClickAck(e.clientX, e.clientY);
     setPanning(true);
-    drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY, tapIdentify: p2f(e.clientX, e.clientY), downX: e.clientX, downY: e.clientY };
+    drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY, tapIdentify: p2f(e.clientX, e.clientY), downX: e.clientX, downY: e.clientY, ack };
     capturePidRef.current = e.pointerId;
     try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
   };
@@ -9785,8 +9791,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // click → add (or toggle) the lot under it; any real drag just panned to find more.
     if (d && d.mode === "pan" && d.tapIdentify
         && Math.hypot(e.clientX - d.downX, e.clientY - d.downY) <= PARCEL_CLICK_SLOP_PX) {
-      quickAddAt(d.tapIdentify);
-    }
+      quickAddAt(d.tapIdentify, d.ack);
+    } else if (d && d.ack) d.ack.cancel(); // NEW-1 — a real drag (a pan) is not a click: drop the ring
     // B416: committing a building reshape that flipped its long-side axis can leave a
     // dock-zone stack (court → trailer → buffer) stranded on a side that is no longer a
     // dock side. Prune it on release (not during the live drag, so a drag past-square-and-
@@ -15937,6 +15943,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [addrQuery, setAddrQuery] = useState(""); // B384: the "Add by address" text field in the ＋ Add parcel menu
   const [addrBusy, setAddrBusy] = useState(false); // geocode in flight
   const identifyTok = useRef(0);
+  const ackRef = useRef(null); // NEW-1 — the click acknowledgement (ring at the cursor) of the identify in flight
   const outlineLayersRef = useRef({});          // county key -> the lit outline layer for that county, while identify mode is on
   const identifyAddedRef = useRef(new Map());   // gisKey -> [parcel ids] added THIS session, so a re-click toggles it off
   // NEW-1 (parcel routing, owner report 2026-08-22 — Jordan/Colorado) — `resolveCountyLayer` used to
@@ -16120,10 +16127,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // preview-then-confirm) — click more lots to add more; re-click a lot you just added
   // to toggle it off. The info card then shows that lot's appraisal + the jurisdiction
   // lookup. The SINGLE add path (shared `parcelsFromRings`) every parcel-add reuses.
-  const quickAddAt = async (fp) => {
-    if (!origin) { setIdentifyRes({ error: "This plan isn't georeferenced — bring the parcel in from the map." }); return; }
+  const quickAddAt = async (fp, ack = null) => {
+    if (!origin) { ack?.cancel(); setIdentifyRes({ error: "This plan isn't georeferenced — bring the parcel in from the map." }); return; }
     const tok = ++identifyTok.current; // a later click supersedes this one (B53)
-    setJurInfo(null); setIdentifyRes({ busy: true });
+    /* NEW-1 — the ring belongs to THIS click: a newer click (or Add-by-address) supersedes it, and
+     * every way out below settles it, so it can never outlive its answer. `setRes` is the one exit. */
+    ackRef.current?.cancel(); ackRef.current = ack;
+    let settled = false;
+    const setRes = (r) => {
+      settled = true;
+      if (tok === identifyTok.current) {
+        if (r && r.error) ack?.empty(r.noLot ? "No lot here" : "Couldn't get that lot"); else ack?.done();
+      }
+      setIdentifyRes(r);
+    };
+    /* NEW-1 — the county request goes out BEFORE the busy-state render. Setting state first made React
+     * render this whole component (a ~150 ms long task on a real plan) ahead of the fetch, so the query
+     * started ~190 ms late. The busy text now paints in a following task — and only if no answer beat it. */
+    setTimeout(() => { if (!settled && tok === identifyTok.current) { setJurInfo(null); setIdentifyRes({ busy: true }); } }, 0);
     try {
       const [lat, lng] = feetToLatLng(fp, origin.lat, origin.lon);
       // NEW-1 (parcel routing) — candidates for THIS point, not the site's frozen county.
@@ -16131,7 +16152,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (tok !== identifyTok.current) return;
       if (!candidates.length) {
         const gap = noParcelSourceNote(countyIdentity(lat, lng));
-        setIdentifyRes({ error: gap ? `${gap} You can still trace the lot from the aerial.` : "Parcel services are still loading — give it a second and click again." });
+        setRes({ error: gap ? `${gap} You can still trace the lot from the aerial.` : "Parcel services are still loading — give it a second and click again." });
         return;
       }
       const res = await identifyParcelEager(candidates, lng, lat, {
@@ -16142,15 +16163,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // NEW-2 — say the TRUE reason instead of blaming the user's aim: a healthy source
         // genuinely found no lot here, this county has no parcel source wired at all, or every
         // source that could have answered this point was unreachable this click.
-        if (res.responded === 0) { setIdentifyRes({ error: "The parcel server for this area isn't responding right now — try again in a moment." }); return; }
+        if (res.responded === 0) { setRes({ error: "The parcel server for this area isn't responding right now — try again in a moment." }); return; }
         const gap = noParcelSourceNote(countyIdentity(lat, lng));
-        setIdentifyRes({ error: gap ? `${gap} You can still trace the lot from the aerial.` : "No parcel right there — click directly on a lot (zoom in if the outlines aren't showing)." });
+        setRes({ error: gap ? `${gap} You can still trace the lot from the aerial.` : "No parcel right there — click directly on a lot (zoom in if the outlines aren't showing).", noLot: true });
         return;
       }
       const hit = res.hits[0]; // first county whose service answered owns the lot
       const feat = hit.feature;
       const rings = outerRingsLngLat(feat); // every part of a multipart parcel
-      if (!rings.length) { setIdentifyRes({ error: "That record has no polygon shape — try an adjacent lot." }); return; }
+      if (!rings.length) { setRes({ error: "That record has no polygon shape — try an adjacent lot." }); return; }
       const attrs = feat.attributes || {};
       const addr = situsAddress(attrs); // NEW-2 — the SITUS, never the owner's mailing address (shared ladder)
       const key = parcelGisKey(attrs, rings);
@@ -16162,26 +16183,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         setParcels((a) => a.filter((p) => !ids.includes(p.id)));
         tombstone(ids); // NEW-1 — the toggled-off identify lot(s) stay gone across a merge + a multipart lot's ≥2 drop doesn't trip the thin-clobber guard
         setSel(null); setIdentAdded(identifyAddedRef.current.size);
-        setIdentifyRes({ removed: true, addr });
+        setRes({ removed: true, addr });
         return;
       }
       // Already in the plan from before → select + inform, never add a duplicate.
       const dupe = (stateRef.current.parcels || []).filter((p) => storedParcelKey(p) === key); // recomputed from attrs — legacy geo: gisKeys still match
       if (dupe.length) {
         setSel({ kind: "parcel", id: dupe[dupe.length - 1].id });
-        setIdentifyRes({ already: true, addr });
+        setRes({ already: true, addr });
         return;
       }
       const pcs = parcelsFromRings(rings, addr, attrs);
-      if (!pcs.length) { setIdentifyRes({ error: "That record has no usable polygon — try an adjacent lot." }); return; }
+      if (!pcs.length) { setRes({ error: "That record has no usable polygon — try an adjacent lot." }); return; }
       pushHistory();
       setParcels((a) => [...a, ...pcs]);
       identifyAddedRef.current.set(key, pcs.map((p) => p.id));
       setIdentAdded(identifyAddedRef.current.size);
       setSel({ kind: "parcel", id: pcs[pcs.length - 1].id });
       // `ring` (largest part) drives the jurisdiction/road tests; keep attrs for the card.
-      setIdentifyRes({ added: true, attrs, rings, ring: largestRingLngLat(feat), lng, lat, addr });
-    } catch (e) { if (tok === identifyTok.current) setIdentifyRes({ error: humanizeError(e) }); }
+      setRes({ added: true, attrs, rings, ring: largestRingLngLat(feat), lng, lat, addr });
+    } catch (e) { if (tok === identifyTok.current) setRes({ error: humanizeError(e) }); }
   };
   // B384 — "Add by address": geocode a typed address (biased to the plan's origin), project the
   // hit into the site's feet frame, and run the SAME identify-and-add path (quickAddAt) the click
