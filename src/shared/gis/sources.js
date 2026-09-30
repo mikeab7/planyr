@@ -663,9 +663,111 @@ export const GIS_SOURCES = {
     fields: { name: null },
     coverage: "metro",
     tier: "production",
-    lastVerified: "2026-08-05",
+    lastVerified: "2026-09-30",
+    /* ⛔ NEW-1 (DFW) — THIS LAYER IS A 2018 SNAPSHOT. `editingInfo.dataLastEditDate` on the hosted
+     * copy reads 2018-09-13, i.e. five years BEFORE SB 2038 (2023) let landowners petition out of an
+     * ETJ. It answers, and it is the only Fort Worth ETJ reachable from this app's environment
+     * (the city's own current layer — mapit.fortworthtexas.gov/…/OpenData_Boundaries/MapServer/1,
+     * edited 2026-09-04 — is on a host the build sandbox's egress policy denies, so it could not be
+     * fixture-verified). Swap the URL, not the shape, when that host is verified. The tooltip states
+     * this date (`dataLastEdited`) rather than "current edition". */
+    dataLastEdited: "2018-09-13",
     // NEW-1 — no fixture existed; same ETJ-is-outside-the-limits rule as Austin above.
     // Live 2026-08-05: 2 in the southern ETJ ring.
+  },
+
+  /* ⛔ NEW-1 (DFW, 2026-09-30) — "WIRE ALL THE CITY LIMITS AND ETJs WITHIN 50 MILES OF DALLAS."
+   *
+   * THE FINDING THAT SHAPES THE REST: NCTCOG DOES NOT PUBLISH AN ETJ LAYER. Its open-data hub
+   * (data-nctcoggis.hub.arcgis.com) lists 195 datasets in its DCAT catalogue and none is an ETJ; its
+   * Boundaries service carries Cities Region (2025), counties, ISDs and MPO areas only. The brief's
+   * preferred source does not exist for ETJ. Its city limits (`Boundaries/MapServer/6`) do exist but
+   * sit on geospatial.nctcog.org, which the build sandbox's egress policy denies — and the statewide
+   * TxGIO `city` row above already answers DFW city limits (Dallas verified 2026-09-30).
+   *
+   * So DFW ETJ comes from the fallback the brief named: the publishers themselves. Each row below
+   * is a county-published, multi-city ETJ table on ArcGIS Online (CORS `*`, verified from an
+   * `Origin: https://planyr.io` request 2026-09-30). `dataLastEdited` is the publisher's own
+   * `editingInfo.dataLastEditDate` — the vintage the layer tooltip states.
+   *
+   * `roster` is the HONEST bound on what a row can answer (NEW-1a): a city outside every routed
+   * roster reads "ETJ not mapped", never "no ETJ". `completeCounties` is the stronger, separate
+   * claim — that a county with NO hit in this row is genuinely outside every city's ETJ — and it is
+   * made ONLY where the publisher IS that county's own GIS office and the roster is a plausible
+   * whole. Everywhere else a point with no city and no ETJ hit reads UNAVAILABLE, not unincorporated
+   * (see `etjPointCoverage` in jurisdiction.js). `nameSplit`/`nameStrip` are the publisher's own
+   * naming quirks as data (`lib/etjNames.js`). */
+  etj_collin: {
+    key: "etj_collin",
+    label: "ETJ — Collin County & neighbors",
+    provider: "Collin County GIS (CollinGIS)",
+    serviceUrl: "https://services1.arcgis.com/fdWXd5OobWR1E3er/arcgis/rest/services/ETJs/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "CITY" },
+    nameStrip: ["^(?:Grayson|Hunt)Co-"],
+    coverage: "metro",
+    tier: "production",
+    lastVerified: "2026-09-30",
+    dataLastEdited: "2026-09-26",
+    // 35 polygons, distinct names read live 2026-09-30 (after `nameStrip`). Re-check with
+    // `node ui-audit/audit-dfw-etj-coverage.mjs` — do not hand-edit.
+    roster: [
+      "Allen", "Anna", "Blue Ridge", "Caddo Mills", "Celeste", "Celina", "Fairview", "Farmersville",
+      "Fate", "Frisco", "Garland", "Greenville", "Hebron", "Howe", "Josephine", "Lavon",
+      "Lowry Crossing", "Lucas", "McKinney", "Melissa", "Murphy", "Nevada", "New Hope", "Parker",
+      "Princeton", "Prosper", "Rockwall", "Royse City", "Saint Paul", "Trenton", "Van Alstyne",
+      "Weston", "Wylie",
+    ],
+    rosterCheckedAt: "2026-09-30",
+    completeCounties: ["Collin"],
+  },
+  etj_rockwall: {
+    key: "etj_rockwall",
+    label: "ETJ — Rockwall County",
+    provider: "Rockwall County GIS",
+    serviceUrl: "https://services9.arcgis.com/9RjmpzvuPPeYSNdf/arcgis/rest/services/ETJs/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "CITY" },
+    coverage: "metro",
+    tier: "production",
+    lastVerified: "2026-09-30",
+    dataLastEdited: "2026-06-25",
+    // 6 polygons, read live 2026-09-30. "McLendon-Chisholm" is the town's own spelling.
+    roster: ["Fate", "Heath", "McLendon-Chisholm", "Rockwall", "Royse City", "Wylie"],
+    rosterCheckedAt: "2026-09-30",
+    completeCounties: ["Rockwall"],
+  },
+  etj_denton: {
+    key: "etj_denton",
+    label: "ETJ — Denton County",
+    provider: "Denton County GIS",
+    serviceUrl: "https://services.arcgis.com/oTsZYNubyv7xK5yP/arcgis/rest/services/_ETJ/FeatureServer/1",
+    layerId: null, // the URL already includes the layer index (the weekly verifier appends layerId otherwise)
+    geometryType: "polygon",
+    fields: { name: "CITY" },
+    /* Denton County publishes a strip BOTH cities claim as ONE feature named "A/B" (8 of 41:
+     * "Denton/Cross Roads", "Dish/Ponder", …) and a second Denton polygon "Denton Div 2". Both are
+     * read as data — an overlap is reported as BOTH claims, never resolved (`lib/etjNames.js`). */
+    nameSplit: "/",
+    nameStrip: ["\\s+Div\\s*\\d+$"],
+    coverage: "metro",
+    tier: "production",
+    lastVerified: "2026-09-30",
+    /* ⚠ 2022-08-02 — OLDER THAN SB 2038. Every ETJ released by petition since 2023 is still drawn
+     * here. Shown in the tooltip; the mitigation is the date, not a claim of currency. Denton County
+     * is deliberately NOT in `completeCounties`: the roster omits cities (Flower Mound, Highland
+     * Village, Corinth …) whose ETJ status this layer cannot speak to. */
+    dataLastEdited: "2022-08-02",
+    roster: [
+      "Argyle", "Aubrey", "Bartonville", "Celina", "Copper Canyon", "Cross Roads", "Denton", "Dish",
+      "Draper", "Fort Worth", "Frisco", "Hackberry", "Hickory Creek", "Justin", "Krugerville", "Krum",
+      "Lake Dallas", "Lakewood Village", "Lewisville", "Little Elm", "New Fairview", "North Lake", "Northlake",
+      "Oak Point", "Pilot Point", "Ponder", "Prosper", "Providence Village", "Roanoke", "Sanger",
+      "Shady Shores", "The Colony", "Trophy Club",
+    ],
+    rosterCheckedAt: "2026-09-30",
   },
 
   // ---- Drainage / detention resolver sources (B629) ----
@@ -1555,7 +1657,7 @@ export const SOURCE_STATE_SCOPE = {
   // (the RRC, the PUC's CCN construct, TCEQ, TxDOT, TEA, TxGIO) or a Texas-region study.
   oilgas: ["TX"], pipelines: ["TX"], ccnWater: ["TX"], ccnSewer: ["TX"], lpst: ["TX"],
   growthFaults: ["TX"], aadt: ["TX"], county: ["TX"], city: ["TX"], road: ["TX"], isd: ["TX"],
-  etj_hgac: ["TX"], etj_austin: ["TX"], etj_fortworth: ["TX"], etj_baytown: ["TX"], city_baytown: ["TX"], mud: ["TX"], bkdd: ["TX"],
+  etj_hgac: ["TX"], etj_austin: ["TX"], etj_fortworth: ["TX"], etj_collin: ["TX"], etj_rockwall: ["TX"], etj_denton: ["TX"], etj_baytown: ["TX"], city_baytown: ["TX"], mud: ["TX"], bkdd: ["TX"],
   hcfcdChannels: ["TX"], hcfcdWatersheds: ["TX"], hcfcdMaapnext: ["TX"],
   fbcddWse02: ["TX"], fbcddWse100: ["TX"],
   bkddStreams: ["TX"], bkddAllStreams: ["TX"], bkddEasements: ["TX"], bkddEasements107: ["TX"],
@@ -1589,7 +1691,7 @@ export function sourceCoversState(entry, state) {
 
 // Keys grouped by the surface that consumes them (handy for the audit + tests).
 export const ANALYSIS_KEYS = ["flood", "wetlands", "oilgas", "pipelines"];
-export const JURISDICTION_KEYS = ["county", "city", "road", "isd", "etj_hgac", "etj_austin", "etj_fortworth"];
+export const JURISDICTION_KEYS = ["county", "city", "road", "isd", "etj_hgac", "etj_austin", "etj_fortworth", "etj_collin", "etj_rockwall", "etj_denton"];
 export const DETENTION_KEYS = ["mud", "hcfcdChannels", "hcfcdWatersheds"]; // B629 drainage resolver
 
 /* Look a row up by key (throws on a typo so a bad reference fails fast, not silently). */
@@ -1698,6 +1800,10 @@ export const SOURCE_FIXTURE_REACH = {
   etj_hgac: ["regional", "The H-GAC 13-county region; probing it in Dallas would assert a guaranteed zero."],
   etj_austin: ["regional", "One city's 2-mile ETJ ring."],
   etj_fortworth: ["regional", "One city's ETJ."],
+  // NEW-1 (DFW) — county-published ETJ tables. Regional: one county (plus the neighbours it names).
+  etj_collin: ["regional", "Collin County and the cities that reach into it — probing it in Houston would assert a guaranteed zero."],
+  etj_rockwall: ["regional", "Rockwall County only — six ETJ polygons."],
+  etj_denton: ["regional", "Denton County and the cities that reach into it."],
   // NEW-1a — Baytown's own ETJ ring, added because H-GAC's regional mosaic omits Baytown. It is one
   // city's ETJ, a few km across; two points inside it (one also inside the city limits, one not) is
   // the most separation this layer HAS, exactly as with the Austin and Fort Worth rows.

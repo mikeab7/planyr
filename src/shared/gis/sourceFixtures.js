@@ -245,6 +245,29 @@ export const SOURCE_FIXTURES = {
     { label: "Fort Worth ETJ (far south)", point: [-97.2384, 32.4832], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
   ],
   },
+  /* NEW-1 (DFW, 2026-09-30) — every point below was queried live 2026-09-30 before it was written
+   * down. An ETJ is the ring OUTSIDE a city's limits, so each point is also asserted to be in NO
+   * city (`test/dfwEtjCoverage.test.js` / `ui-audit/audit-dfw-etj-coverage.mjs` carry that half). */
+  etj_collin: {
+  fixtures: [
+    { label: "Prosper ETJ (north of Frisco)", point: [-96.8961, 33.23255], expectMinCount: 1 },
+    { label: "Celina ETJ (north Collin)", point: [-96.72706, 33.32056], expectMinCount: 1 },
+  ],
+  },
+  etj_rockwall: {
+  fixtures: [
+    // Interior points of two of the six published polygons, each verified live 2026-09-30 to be in
+    // that polygon and in no TxGIO city.
+    { label: "Heath ETJ", point: [-96.4638, 32.815], expectMinCount: 1 },
+    { label: "Royse City ETJ", point: [-96.27454, 33.02009], expectMinCount: 1 },
+  ],
+  },
+  etj_denton: {
+  fixtures: [
+    { label: "Little Elm ETJ", point: [-96.93688, 33.20664], expectMinCount: 1 },
+    { label: "Sanger ETJ", point: [-97.2088, 33.37143], expectMinCount: 1 },
+  ],
+  },
   mud: {
   fixtures: [
     // Bridgeland/Cypress — dense MUD country; ≥1 district polygon at any envelope here.

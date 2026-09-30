@@ -40,6 +40,8 @@ import { resolveCounty } from "./countyPolygons.js";
 import { formatJurisdictionLabel } from "./jurisdictionLabel.js";
 /* NEW-1 (Georgia) — the pure Georgia facts: envelope, consolidated city-counties, the county-governs note. */
 import { GA_ENVELOPE, georgiaConsolidatedFor, GA_COUNTY_GOVERNS_NOTE, GA_CONSOLIDATED_NOTE } from "./georgiaJurisdiction.js";
+/* NEW-1 (DFW ETJ) — the one reader of a publisher's ETJ name column (overlap splits, prefix strips). */
+import { etjNamesOf } from "./etjNames.js";
 /* ⛔ NEW-2 — A SHARE IS AN AREA FRACTION ON THE REAL RING. Read `jurisdictionShare.js`'s header
  * before touching how membership is decided here: point/vertex sampling measured 75% where the
  * area is 96.2% on the owner's own Goose Creek parcel, and 70–85% where it is 99% at Grand Port. */
@@ -196,7 +198,45 @@ export const ETJ_SOURCES = [
     fields: { name: null }, nameConst: "Fort Worth",
     ttl: 7 * 24 * 3600 * 1000,
     sourceName: "City of Fort Worth GIS", coverage: "City of Fort Worth ETJ",
-    note: "City of Fort Worth ETJ. Dallas is landlocked (~no ETJ); other DFW cities publish separately — add as rows. Screening only.",
+    dataLastEdited: GIS_SOURCES.etj_fortworth.dataLastEdited,
+    note: "City of Fort Worth ETJ — a 2018 snapshot (the city's current layer is not reachable from the build environment). Dallas is landlocked (~no ETJ). Screening only.",
+  },
+  /* ⛔ NEW-1 (DFW) — the county-published multi-city ETJ tables. See the registry rows in
+   * `shared/gis/sources.js` for WHY NCTCOG is not among them (it publishes no ETJ layer) and for
+   * what `roster` / `completeCounties` do and do not claim. Each row reads the registry, so the
+   * endpoint lives in one place. */
+  {
+    id: "etj_collin", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
+    region: "Collin County", bbox: [32.8, -97.0, 33.6, -95.9],
+    url: GIS_SOURCES.etj_collin.serviceUrl,
+    fields: GIS_SOURCES.etj_collin.fields, nameStrip: GIS_SOURCES.etj_collin.nameStrip,
+    roster: GIS_SOURCES.etj_collin.roster, completeCounties: GIS_SOURCES.etj_collin.completeCounties,
+    ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "Collin County GIS", dataLastEdited: GIS_SOURCES.etj_collin.dataLastEdited,
+    coverage: "Collin County and the cities that reach into it",
+    note: "Collin County GIS's ETJ table. Screening only; verify with the city.",
+  },
+  {
+    id: "etj_rockwall", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
+    region: "Rockwall County", bbox: [32.75, -96.65, 33.15, -96.2],
+    url: GIS_SOURCES.etj_rockwall.serviceUrl,
+    fields: GIS_SOURCES.etj_rockwall.fields,
+    roster: GIS_SOURCES.etj_rockwall.roster, completeCounties: GIS_SOURCES.etj_rockwall.completeCounties,
+    ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "Rockwall County GIS", dataLastEdited: GIS_SOURCES.etj_rockwall.dataLastEdited,
+    coverage: "Rockwall County",
+    note: "Rockwall County GIS's ETJ table. Screening only; verify with the city.",
+  },
+  {
+    id: "etj_denton", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
+    region: "Denton County", bbox: [32.9, -97.5, 33.5, -96.7],
+    url: GIS_SOURCES.etj_denton.serviceUrl,
+    fields: GIS_SOURCES.etj_denton.fields, nameSplit: GIS_SOURCES.etj_denton.nameSplit, nameStrip: GIS_SOURCES.etj_denton.nameStrip,
+    roster: GIS_SOURCES.etj_denton.roster,
+    ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "Denton County GIS", dataLastEdited: GIS_SOURCES.etj_denton.dataLastEdited,
+    coverage: "Denton County and the cities that reach into it — a 2022 edition",
+    note: "Denton County GIS's ETJ table (2022 edition — older than SB 2038). Overlap strips claimed by two cities are reported as BOTH. Screening only; verify with the city.",
   },
 ];
 
@@ -232,6 +272,48 @@ export function etjCoverageFor(cityName, lat, lng) {
   const srcs = etjSourcesForPoint(lat, lng);
   if (!srcs.length) return "no-layer";                                    // outside every covered metro
   return srcs.some((s) => etjSourceCovers(s, cityName)) ? "covered" : "not-mapped";
+}
+
+/* ⛔ NEW-1 (DFW ETJ) — WHEN IS "NO ETJ HIT" A POSITIVE FINDING?
+ *
+ * "Unincorporated" is only a true positive when the ETJ data actually COVERS the point — a point
+ * that no polygon contains, in a county whose ETJ tables we do not hold, has told us nothing. The
+ * pre-existing code read that silence as "no ETJ here", which in DFW is the false-clean this item
+ * exists to prevent: most of Tarrant, Dallas, Denton, Ellis, Johnson, Kaufman and Parker counties
+ * have ETJ rings this app cannot see, and a rural point in one of them said "Unincorporated".
+ *
+ * So inside the 50-mile DFW zone a no-hit point is:
+ *   • `complete`     — its county is declared complete by a routed source's `completeCounties`
+ *                      (the publisher IS that county's GIS office). Only here may an empty ETJ
+ *                      answer stand as "unincorporated".
+ *   • `unavailable`  — anything else, including an unknown county. "ETJ data unavailable".
+ * Outside the zone the answer is `n/a` and NOTHING CHANGES — Houston, Austin and the rest of Texas
+ * keep the behaviour they had. (Extending the same honesty statewide is a separate, larger change;
+ * it would re-label every rural point outside a metro and is filed, not smuggled in here.)
+ * Pure. */
+export const DFW_ZONE = Object.freeze({ lat: 32.7767, lng: -96.7970, radiusMiles: 50 }); // Dallas City Hall
+export function distanceMiles(lat1, lng1, lat2, lng2) {
+  const R = 3958.7613, rad = Math.PI / 180;
+  const dLat = (lat2 - lat1) * rad, dLng = (lng2 - lng1) * rad;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+export function inDfwZone(lat, lng) {
+  return Number.isFinite(lat) && Number.isFinite(lng)
+    && distanceMiles(lat, lng, DFW_ZONE.lat, DFW_ZONE.lng) <= DFW_ZONE.radiusMiles;
+}
+export function etjPointCoverage(lat, lng, countyNames) {
+  if (!inDfwZone(lat, lng)) return { status: "n/a", reason: "outside the DFW coverage zone" };
+  const counties = (Array.isArray(countyNames) ? countyNames : []).filter(Boolean);
+  const complete = etjSourcesForPoint(lat, lng).flatMap((s) => s.completeCounties || []);
+  const hit = counties.find((c) => complete.some((k) => samePlace(k, c)));
+  if (hit) return { status: "complete", county: hit };
+  return {
+    status: "unavailable",
+    reason: counties.length
+      ? `no complete ETJ data for ${counties.join(" + ")} County`
+      : "county could not be determined",
+  };
 }
 
 /* NEW-5 — the COUNTY role becomes region-routed too, exactly the way ETJ already is.
@@ -565,6 +647,16 @@ export function normalizeFeature(source, attrs) {
    * read as "City of Baytown". A source that declares `fullPurposeOnly` classifies as `full`; one
    * that declares neither classifies as `unknown` and is never upgraded. */
   if (source.role === "city") out.limitClass = classifyCityLimit(source, attrs).id;
+  /* NEW-1 (DFW ETJ) — an ETJ feature may name MORE THAN ONE city (a strip both claim is one
+   * polygon "Denton/Cross Roads"). `names` is the full list; `name` stays the first, for every
+   * caller that only wants one. Rules are registry data (`etjNames.js`), and a source that declares
+   * none behaves exactly as before. */
+  if (source.role === "etj") {
+    const col = source.fields && source.fields.name;
+    const names = etjNamesOf(source, col ? attrs?.[col] : null);
+    if (names.length > 1) out.names = names; // only an overlap carries the list; the common shape is unchanged
+    out.name = names.length ? names[0] : null;
+  }
   return out;
 }
 
@@ -789,11 +881,14 @@ export function cityAreasFromFeatures(src, features, rings, ref, opts = {}) {
     const n = normalizeFeature(src, f.attrs || {});
     if (n.name == null || n.name === "") continue;
     const cls = n.limitClass || CITY_LIMIT_CLASSES.unknown.id;
-    const key = placeKey(n.name) + "|" + cls;
-    const g = groups.get(key) || { name: String(n.name), class: cls, polys: [], uniqueIds: [] };
-    g.polys.push(...esriPolygons(f.geometry));
-    if (n.uniqueId) g.uniqueIds.push(String(n.uniqueId));
-    groups.set(key, g);
+    // NEW-1 (DFW ETJ) — an overlap polygon counts toward EVERY city that claims it.
+    for (const nm of (n.names && n.names.length ? n.names : [n.name])) {
+      const key = placeKey(nm) + "|" + cls;
+      const g = groups.get(key) || { name: String(nm), class: cls, polys: [], uniqueIds: [] };
+      g.polys.push(...esriPolygons(f.geometry));
+      if (n.uniqueId) g.uniqueIds.push(String(n.uniqueId));
+      groups.set(key, g);
+    }
   }
   /* ⛔ A SOURCE THAT ANSWERED WITHOUT GEOMETRY HAS NOT MEASURED ANYTHING, and saying "0% in the
    * city" off that is the worst possible failure of this module — a confident negative. Features
@@ -948,7 +1043,7 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
       const kept = src.role === "city"
         ? feats.filter((f) => (f.limitClass || CITY_LIMIT_CLASSES.unknown.id) === CITY_LIMIT_CLASSES.full.id)
         : feats;
-      const names = uniq(kept.map((f) => f.name).filter((v) => v != null && v !== "").map(String));
+      const names = uniq(kept.flatMap((f) => (f.names && f.names.length ? f.names : [f.name])).filter((v) => v != null && v !== "").map(String));
       return { names, error: r.error || null, ageMs: r.ageMs, ts: r.ts, stale: q.stale };
     }));
     const names = uniq(parts.flatMap((p) => p.names));
@@ -1176,6 +1271,18 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
    * that means "no ETJ here". Those are opposite facts and they imply different floodplain rules. */
   out.etjUnmappedCities = uniq(out.city.filter((c) => etjCoverageFor(c, lat, lng) === "not-mapped"
     && !out.etj.some((e) => samePlace(e, c))));
+  /* ⛔ NEW-1 (DFW ETJ) — the coverage verdict, and the one flag that keeps a silent miss from
+   * reading as "unincorporated". It is set only when ETJ was ASKED (a caller that passes `roles`
+   * without "etj" is not claiming anything), only when no ETJ polygon was hit (a hit is a positive
+   * finding wherever it is), and — for a failed lookup — regardless of coverage: a fetch that
+   * failed says nothing about the point at all. Outside the DFW zone it stays false. */
+  const etjAsked = roles.includes("etj");
+  const etjSrc = out.sources.find((x) => x && x.id === "etj");
+  const etjFailed = !!etjSrc && etjSrc.state === "failed";
+  out.etjCoverage = etjAsked ? etjPointCoverage(lat, lng, out.county) : { status: "n/a", reason: "etj not requested" };
+  out.etjUnavailable = etjAsked && inDfwZone(lat, lng) && !out.etj.length
+    && (out.cityContainment === "none" || out.cityContainment === "partial") // in a city's limits the ETJ question does not arise
+    && (etjFailed || out.etjCoverage.status === "unavailable");
   // Back-compat boolean. It can only ever be TRUE on a positive containment answer — an unknown
   // reads false here, and callers that need to tell the two apart read `cityContainment`.
   out.unincorporated = out.cityContainment === "none";
@@ -1372,7 +1479,9 @@ export function formatJurisdictionBadge(j, opts = {}) {
       ? "rest (couldn't check ETJ)"
       : (j.etjUnmappedCities || []).length
         ? `rest outside it (no ETJ published for City of ${j.etjUnmappedCities[0]})`
-        : "rest unincorporated";
+        : j.etjUnavailable
+          ? "rest outside it (ETJ data unavailable)"   // NEW-1 (DFW) — never "unincorporated" off a silent miss
+          : "rest unincorporated";
 
   /* ⛔ NEW-1a — the SPLIT site, and BOTH halves have to be named correctly.
    *
@@ -1421,6 +1530,9 @@ export function formatJurisdictionBadge(j, opts = {}) {
     unclassifiedCities: touchCities,
     cityUnresolved: containmentUnknown || cityState === "failed",
     etjUnresolved: etjState === "failed",
+    // NEW-1 (DFW) — "no city, and the ETJ data cannot speak to this point". Keeps the lead from
+    // saying "Unincorporated", which would be a positive finding nothing established.
+    etjUnavailable: !!j.etjUnavailable && !etjs.length,
     countyUnresolved: countyState === "failed",
   });
   const { text, jur, county, isd, tail, shape } = label;
@@ -1466,6 +1578,9 @@ export function formatJurisdictionBadge(j, opts = {}) {
     cityShareMethod: j.cityShareMethod || null,
     citySharePct: splitShare != null ? splitShare : (coreCities.length ? shareOfCity(coreCities[0]) : null),
     etjUnmappedCities: j.etjUnmappedCities || [],
+    // NEW-1 (DFW) — carried as data so a consumer never parses the label for it.
+    etjUnavailable: !!j.etjUnavailable && !etjs.length,
+    etjCoverage: j.etjCoverage || null,
     // B209507 — what the badge could NOT establish, carried explicitly so a consumer (the floodplain
     // administrator especially) can refuse to settle rather than reading silence as absence.
     unresolvedRoles,

@@ -148,6 +148,10 @@ function leadFor(model, shape) {
     const cs = list(model.counties);
     return cs.length ? `Unincorporated ${cs.map((c) => `${c} County`).join(PEER_SEP)}, GA` : "Unincorporated, GA";
   }
+  /* ⛔ NEW-1 (DFW ETJ) — "Unincorporated" is a POSITIVE finding, and it is only made when the ETJ data
+   * actually covers the point. Where it does not (or the lookup failed) the lead says what WAS
+   * established — not in any city's limits — and the ETJ slot below says the rest. */
+  if (model.etjUnavailable) return "Outside city limits";
   return "Unincorporated";
 }
 
@@ -179,6 +183,8 @@ function etjSlotFor(model, shape) {
   if (etj.length) return `${etj[0]} ETJ`;
   // "We could not check" and "there is no ETJ here" are OPPOSITE facts that imply different
   // floodplain rules (B209507). Silence is only ever the second one.
+  // NEW-1 (DFW) — the coverage gap, stated in its own slot so the pill can drop it whole.
+  if (model.etjUnavailable && shape === "unincorporated") return "ETJ data unavailable";
   if (model.etjUnresolved) return "Couldn't check ETJ";
   return null;
 }

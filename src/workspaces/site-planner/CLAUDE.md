@@ -629,6 +629,19 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   fed it to `assessAdministrator` as `cityLabel` — under the new grammar that returns
   `"Humble · Houston ETJ"`, which matches no rule record, so the CITY's floodplain ordinance is never
   raised and the site is priced on the county's. Read `governingCityOf(badge)` instead.
+  **⛔ (8) NEW-1 / B1992432 — DFW ETJ, AND "NO ETJ HIT" IS ONLY A FINDING WHERE THE DATA COVERS THE POINT.**
+  **NCTCOG publishes NO ETJ layer** (its hub's 195-dataset catalogue has none) — do not go looking for one.
+  DFW ETJ comes from county publishers (`etj_collin` / `etj_rockwall` / `etj_denton` beside the older Fort
+  Worth row), each a `GIS_SOURCES` row → an `ETJ_SOURCES` row → a sub-source of the drawn `jur_etj` layer
+  (`query.sources`, bbox-filtered per view; ANY in-view source failing fails the pull, so a partial answer is
+  never cached as "no ETJ"). Two separate claims, never conflated: `roster` = which cities a source can name
+  (→ "ETJ not mapped") and `completeCounties` = counties where an empty answer really means unincorporated
+  (→ `etjPointCoverage`). Inside the 50-mile DFW circle (`DFW_ZONE`) a no-city/no-ETJ point outside a complete
+  county, or a failed ETJ lookup, sets `etjUnavailable` and the label reads "Outside city limits · ETJ data
+  unavailable" — **never "Unincorporated"**; outside the circle behaviour is unchanged (statewide is B1992434).
+  A publisher's naming quirks are registry data read by `lib/etjNames.js`: an overlap strip "A/B" is TWO ETJ
+  claims and both are reported. Re-check with **audit-dfw-etj-coverage** (live fixtures + count floor),
+  **audit-etj-coverage** (roster drift) and **verify-dfw-etj-map** (paints, labels).
   Guards: the repo-root `test/` suites **jurisdiction** (86), **jurisdictionShapes** (11 — real parcel
   geometry through the real query builder against RECORDED real agency answers, one fixture per
   jurisdiction SHAPE, mutation-checked two ways), **jurisdictionLabel** (18 — the shapes, the grammar,

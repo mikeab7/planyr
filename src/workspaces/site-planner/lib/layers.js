@@ -591,9 +591,10 @@ export const JURISDICTIONS = {
     group: "jurisdiction", order: 2,
   },
   jur_etj: {
-    kind: "vector", label: "City ETJ (Houston region)",
+    kind: "vector", label: "City ETJ (Houston & Dallas–Fort Worth)",
     url: HGAC_ETJ.url, minZoom: 9, color: "#1d4ed8", dash: true, weight: 1.6, opacity: 0.4, // B761: same hue as city, dashed
-    note: "City ETJ across the H-GAC 13-county region — blank elsewhere (there is no statewide ETJ layer). ETJ = a city's reach OUTSIDE its limits; not annexation and not utility service.",
+    noLiveFallback: true, // NEW-1 (DFW): several services drawn as one — see vectorLayers.js jur_etj
+    note: "City ETJ — Houston region (H-GAC + Baytown), Dallas–Fort Worth (Collin, Rockwall and Denton counties, Fort Worth) and Austin. Blank elsewhere: there is no statewide ETJ layer, and NCTCOG publishes none. A blank inside those areas is NOT proof of no ETJ. ETJ = a city's reach OUTSIDE its limits; not annexation and not utility service.",
     // NEW-1 stacking role (lib/mapStack.js): Boundary outlines (dashed).
     role: "line",
     states: ["TX"],
@@ -994,6 +995,15 @@ export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDE
  * state, never a fabricated date). Keyed by layer id, so the per-county utility
  * layers (spread into JLAYERS) are covered too. When the GIS-cache work (B96)
  * lands, fold this together with the refreshed-age stamp into one surface. */
+/* NEW-1 (DFW ETJ) — the ETJ layer's vintage line, composed from the registry's own dated rows. Each
+ * publisher's edition differs (Collin edited days ago, Fort Worth's hosted copy in 2018), and an ETJ is
+ * the boundary SB 2038 (2023) lets landowners petition out of — so a single "current edition" would be a
+ * claim nobody made. Rows without a `dataLastEdited` (H-GAC, Austin, Baytown) say "current edition",
+ * which is what they were already recorded as. */
+export function etjVintageText() {
+  return "ETJ — " + ETJ_SOURCES.map((r) => `${String(r.sourceName || r.id).replace(/ \(.*\)$/, "")}: ${r.dataLastEdited ? `edited ${r.dataLastEdited}` : "current edition"}`).join(" · ");
+}
+
 export const LAYER_VINTAGE = {
   // Statewide overlays
   fema: "Effective date varies by FIRM panel",
@@ -1021,7 +1031,9 @@ export const LAYER_VINTAGE = {
   // Jurisdiction boundaries
   jur_county: "TxDOT county boundaries — current edition",
   jur_city: "TxGIO city limits — current edition",
-  jur_etj: "H-GAC ETJ — current edition",
+  // NEW-1 (DFW) — built from the registry's own dated rows, never a hand-typed "current edition":
+  // the publishers' editions differ by eight years and the tooltip must say so.
+  jur_etj: etjVintageText(),
   jur_isd: "TEA school districts — SY 2022-23 edition",
   jur_mud: "TCEQ water districts (via HARC) — current edition",
   jur_road_authority: "TxDOT Roadway Inventory — current edition",
@@ -1538,7 +1550,9 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           interactive: !!opts.identifyOk,
           identifyOk: opts.identifyOk,
           labelPane: lyrLabelPane, // a layer's name labels ride in its own band (mapStack)
-          buildFallback: () => {
+          // NEW-1 (DFW ETJ) — a multi-service layer has no single service to fall back to; a row that
+          // says so (`noLiveFallback`) reports FAILED instead of repainting one publisher's slice.
+          buildFallback: cfg.noLiveFallback ? null : () => {
             const fb = buildFeatureLayer(cfg, st.opacity, lyrPane, { interactive: !!opts.identifyOk, identifyOk: opts.identifyOk });
             // esri-leaflet FeatureLayers have no setOpacity (raster-only) — same
             // flat-style shim the primary esriFeature branch installs below, so the

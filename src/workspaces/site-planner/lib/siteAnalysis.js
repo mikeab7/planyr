@@ -781,9 +781,11 @@ export function analyzeSource(source, rings, opts = {}) {
 export function buildJurisdictionFinding(j) {
   const rows = [];
   rows.push(["County", j.county.length ? j.county.join(" + ") : "—", j.ages.county]);
-  rows.push(["City", j.unincorporated ? "Unincorporated" : j.city.join(" + "), j.ages.city]);
+  // NEW-1 (DFW ETJ) — "Unincorporated" and "not in a city ETJ" are POSITIVE findings; where the ETJ
+  // data cannot speak to the point (or the lookup failed) they read "unavailable" instead.
+  rows.push(["City", j.unincorporated ? (j.etjUnavailable ? "Outside city limits" : "Unincorporated") : j.city.join(" + "), j.ages.city]);
   const etjState = (j.sources.find((s) => s.id === "etj") || {}).state;
-  rows.push(["ETJ", j.etj.length ? j.etj.map((n) => `${n} ETJ`).join(" + ") : (etjState === "unavailable" ? "no ETJ layer for this area" : "not in a city ETJ"), j.ages.etj]);
+  rows.push(["ETJ", j.etj.length ? j.etj.map((n) => `${n} ETJ`).join(" + ") : (j.etjUnavailable ? "ETJ data unavailable here" : etjState === "unavailable" ? "no ETJ layer for this area" : "not in a city ETJ"), j.ages.etj]);
   // B764: the school district (ISD) — the biggest single line on most Texas tax bills. Only
   // rows out when the identify actually ran ISD (j.isd present), so older callers are unchanged.
   if (Array.isArray(j.isd)) rows.push(["School district", j.isd.length ? j.isd.join(" + ") : "—", j.ages.isd]);
@@ -876,6 +878,9 @@ export function deriveZoning(j, state = null) {
   else if (cities.length) summary = `Within ${j.city.join(", ")} — city zoning likely applies; confirm the district + entitlement path.`;
   else if (etj.includes("houston")) summary = "Houston ETJ — no zoning, but city subdivision/platting authority applies in the ETJ.";
   else if (etj.length) summary = `${j.etj.join(", ")} ETJ — no zoning, but the city's subdivision/platting authority applies in the ETJ; confirm with the city.`;
+  // NEW-1 (DFW ETJ) — outside every city's limits but the ETJ data cannot say whether a city's platting
+  // authority reaches here: that is not the "no zoning, county only" sentence's finding to make.
+  else if (j.unincorporated && j.etjUnavailable) summary = "Outside city limits — a city's ETJ (platting authority) may still reach here; the ETJ data does not cover this area. Confirm with the county and the nearest city.";
   else if (j.unincorporated) summary = UNINCORPORATED_ZONING[st] || UNINCORPORATED_ZONING.unknown;
   else summary = "Confirm zoning with the jurisdiction.";
   return {
