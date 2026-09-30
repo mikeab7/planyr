@@ -166,6 +166,26 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1417521 — B1992435: the southern and eastern DFW ETJs paint and name correctly, and uncovered counties still say "unavailable" `Blocker: none — run on planyr.io once the build is deployed`
+
+Sandbox-proven (live services, real overlay engine in Chromium, 2026-09-30): `ui-audit/audit-dfw-etj-gaps.mjs` (Denton/Fort Worth checks skipped — browser-only hosts), `ui-audit/verify-dfw-etj-map.mjs` 9/9 (stand-ins for the two browser-only hosts), `test/dfwEtjGaps.test.js` 52/52, weekly verifier clean for every reachable row. **Still needs the deployed app.**
+**Steps** (read the served chunk hash in the same observation as each result):
+1. Site → map finder, Layers → "City limits & ETJ" on, pan to Waxahachie/Midlothian at metro zoom. **Expect:** dashed ETJ lines and labels for Waxahachie, Midlothian, Red Oak, Ennis, Maypearl, Palmer; further west Cleburne, Godley, Alvarado, Mansfield, Burleson.
+2. Pan east to Forney/Terrell and south to Corsicana. **Expect:** "Forney ETJ" and "Talty ETJ" draw; "Corsicana ETJ" and "Blooming Grove ETJ" draw; nothing at Terrell (no current data — blank is not proof of no ETJ).
+3. Drop a site at 32.30, -96.99 (Maypearl ETJ). **Expect:** header "City of Maypearl ETJ · Ellis County".
+4. Drop a site at 32.62, -96.60 (Seagoville ETJ). **Expect:** "City of Seagoville ETJ · Dallas County".
+5. Drop a site at 32.72, -96.50 (Forney ETJ). **Expect:** "City of Forney ETJ · Kaufman County".
+6. Drop a site at 32.58, -97.21 (Mansfield ETJ, overlapping Fort Worth's). **Expect:** the header names BOTH ("ETJ crosses City of Fort Worth + City of Mansfield") — an overlap is never resolved to one.
+7. Drop a site in Parker County near Weatherford (32.76, -97.80 is outside the circle; use 32.85, -97.55 — Parker/Tarrant line). **Expect:** "Outside city limits · ETJ data unavailable" — never "Unincorporated".
+8. Regression: Collin (33.10, -96.50) still "Unincorporated · Collin County"; Houston unchanged.
+9. **Denton County, current (browser hosts).** Pan to the Denton/Cross Roads/Aubrey area. **Expect:** ETJ lines and names from the county's own table; a strip labelled "ETJ undetermined (disputed)" (there are five); hovering it says "Undetermined (disputed) — ETJ".
+10. Drop a site inside one of those strips. **Expect:** header "ETJ undetermined (disputed) · Denton County" — no city named, never "Unincorporated"; the Site Analysis ETJ row says "claimed by <city> and <city>".
+11. Drop a site in Denton's "DIV 2" polygon (TYPE 'DIV 2'). **Expect:** "City of Denton ETJ · Denton County".
+12. Fort Worth: pan over the ETJ south-west of the city. **Expect:** dashed ETJ lines; where the city marks SB 2038 release areas, DOTTED lines labelled "Fort Worth ETJ release area (SB 2038)". Drop a site inside one. **Expect:** "Fort Worth ETJ release area (SB 2038) · Tarrant County" — never "City of Fort Worth ETJ" and never "Unincorporated".
+13. From a browser with the hosts reachable run `BASE_URL=https://planyr.io node ui-audit/verify-dfw-etj-browser-hosts.mjs`. **Expect:** all Denton / Fort Worth assertions pass (40 / 5 / 1; 81); it prints the release layer's fields and the NCTCOG `Boundaries/Boundaries` layer list — record them on B1992433.
+14. **One label per city.** Zoom to the Lewisville / Carrollton / Flower Mound area at metro zoom (10–13) with City limits on and the City names row on. **Expect:** every city name appears ONCE — Lewisville, Flower Mound, Carrollton, Coppell, Southlake, The Colony each a single label; toggling the City names row off makes the city-limits labels return for those cities, and back on removes the duplicates again.
+15. **The freeze, if it recurs.** Zoom in and out around the 5-mile scale with City limits & ETJ on, on a cold cache (clear site data first). **Expect:** the map stays responsive; the layers draw within a second or two. If it stalls, open the admin telemetry and look for `boundary-paint-slow` (main thread — check `features`/`vertices`) or `boundary-load-slow` (a slow publisher — check `sourceMs` for the id that took seconds); record which on B1992435. **A stall with NO such report means the cause is elsewhere — file it, do not close.**
+- **Stopping rule:** closes on a dated pass of 1–15, or a failed step filed as a recurrence on B1992435.
 ### V1416048 — B1990960: a Georgia site draws county lines + city limits, names its governing body, says the county governs, and shows no Texas numbers `Blocker: live-GIS`
 
 Sandbox-proven: `test/georgiaJurisdiction.test.js` (16, red on pre-change main), registry audit + fixtures, and the DCA county/city layers queried live from the build sandbox 2026-09-30 (159 counties, 538 municipalities, the fixture points recorded on B1990960). **Still needs planyr.io in a real browser** (the map tile/GIS hosts are egress-blocked here, so the drawn lines and the in-app badge were not seen).

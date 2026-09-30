@@ -283,8 +283,13 @@ describe("etjSourcesForPoint — region routing (Houston stays one query)", () =
   it("an Austin point routes only to the Austin source", () => {
     expect(etjSourcesForPoint(30.27, -97.74).map((s) => s.id)).toEqual(["etj_austin"]);
   });
-  it("a Dallas–Fort Worth point routes only to the Fort Worth source", () => {
-    expect(etjSourcesForPoint(32.75, -97.33).map((s) => s.id)).toEqual(["etj_fortworth"]);
+  it("a Dallas–Fort Worth point routes to the Fort Worth source and only to the DFW publishers", () => {
+    // NEW-2 (DFW gaps): the Johnson County SUD compile also reaches this far north, so it is no longer
+    // "only" Fort Worth — but it is still only DFW-area servers, never Houston's or Austin's.
+    const ids = etjSourcesForPoint(32.75, -97.33).map((s) => s.id);
+    expect(ids).toContain("etj_fortworth");
+    expect(ids).not.toContain("etj_hgac");
+    expect(ids).not.toContain("etj_austin");
   });
   it("a point outside every covered metro routes to nothing (honest no-coverage)", () => {
     expect(etjSourcesForPoint(31.76, -106.49)).toEqual([]); // El Paso

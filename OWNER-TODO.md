@@ -7,18 +7,6 @@
 
 _Last updated: 2026-09-30._
 
-## 🌐 Let the Claude sessions reach four Dallas-area map servers (B1992433)
-
-> **What this is:** the Dallas–Fort Worth city-limits + ETJ layers are built, but four public county/city map
-> servers are blocked from where Claude Code sessions run, so I could not test them and did not wire them in.
-> Until they are, Tarrant County (beyond Fort Worth), Dallas County, Ellis, Johnson, Kaufman and Parker read
-> "ETJ data unavailable" rather than a guess — safe, but not useful. Fort Worth's own ETJ map is also only a
-> 2018 copy today; its current one is on one of the blocked servers.
->
-> - [ ] **In the Claude Code cloud environment's settings → Network access → allowed domains, add:**
->       `geospatial.nctcog.org`, `mapit.fortworthtexas.gov`, `mapit.tarrantcounty.com`, `gis.dentoncounty.gov`.
->       Then tell me and I'll verify and wire each one (no new code — just a data row each).
-
 ## 🗺 One database script so comps follow their county when you move a site plan (B1953796)
 
 > **What changed:** when you drag a site plan across a county line, the comps pinned on it already moved with
