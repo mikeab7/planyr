@@ -151,7 +151,7 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isL
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); onToggleLayer(f.mapLayer, !layerOn); }}
-                          title={layerOn ? "Deactivate this layer on the map" : "Activate this layer on the map (frames to the site)"}
+                          title={layerOn ? "Deactivate this layer on the map" : "Activate this layer on the map"}
                           aria-pressed={layerOn}
                           style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, letterSpacing: "0.02em", padding: "2px 7px", borderRadius: RADIUS.pill, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 3, border: `1px solid ${layerOn ? "#1d4ed8" : line}`, background: layerOn ? "#1d4ed8" : "transparent", color: layerOn ? "#fff" : muted }}>
                           {layerOn ? "◉ Deactivate layer" : "◍ Activate layer"}
@@ -210,7 +210,7 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isL
       </div>
 
       <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${line}`, fontSize: 10.5, color: muted, lineHeight: 1.5 }}>
-        Screening only — desktop GIS sources, not a survey or a legal determination. Each finding carries its own source, age, and caveat (tap to expand). Tap <b style={{ color: "var(--info-text)" }}>◍ Activate layer</b> on a finding to show that layer on the map, framed to the site. An <b>unknown</b> is never an all-clear.
+        Screening only — desktop GIS sources, not a survey or a legal determination. Each finding carries its own source, age, and caveat (tap to expand). Tap <b style={{ color: "var(--info-text)" }}>◍ Activate layer</b> on a finding to show that layer on the map. An <b>unknown</b> is never an all-clear.
       </div>
     </div>
   );
