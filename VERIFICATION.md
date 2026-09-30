@@ -192,16 +192,6 @@ Sandbox-proven 2026-09-30: `test/louisianaParishes.test.js` (146, red-proofed), 
 5. Check the response headers for `Access-Control-Allow-Origin`. **Expect:** present; if absent the host needs the exact hostname added to `ALLOWED_HOSTS` in `functions/gis-proxy/[[path]].js`.
 - **Stopping rule:** closes when each of the 10 rows is recorded as wired, rejected (with the reason) or still-blocked (with what stopped it); Calcasieu and Jefferson especially may not stay silent.
 
-### V1411120 — B1986032: "Activate layer" never zooms out and never moves a view that already shows the site `Blocker: real-data`
-
-Sandbox-proven: `test/activateFraming.test.js` (pure view rule incl. red-proof against the old margin fit), full unit suite, build. **Still needs** the owner's real Georgia plan (signed in).
-**Steps** (read the served chunk hash in the same observation as each result; use a throwaway duplicate of the plan):
-1. Open the Georgia plan, zoom to a close working view of the parcel, open Analysis. **Expect:** parcel visible, panel shows findings.
-2. Click **◍ Activate layer** on each resolved finding in turn. **Expect:** the view does not move at all (same zoom, same position) and the layer paints (or shows its own "zoom in" note).
-3. Click **◉ Deactivate layer** on one. **Expect:** view still does not move.
-4. Pan so the site is fully off-screen, click Activate. **Expect:** the site comes back centred at the same or a closer scale, never wider.
-5. Zoom far out (below FEMA's draw level), click Activate on the flood finding. **Expect:** it zooms IN just enough for the layer to draw, never out.
-- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1986032.
 ### V1413360 — B1988272: clicking lots at Grand Port shows an acknowledgement under the cursor at once `Blocker: real-data`
 
 Sandbox-proven: `e2e/click-ack.spec.js` (red on main, green here), `test/clickAck.test.js`, `ui-audit/measure-click-to-row.mjs`. **Still needs the real Chambers CAD server and Michael's real plan data.**
