@@ -19829,6 +19829,14 @@ _(new `Verify: live` items land here after implementation.)_
 - Proof: `test/surfaceSelected.test.js` (no literal at call sites; text-primary on token 15.20:1 light, 10.57:1 dark).
 - Constraint check: nothing here contradicts `## Owner product constraints`.
 
+### B1998016 — Dark mode: form fields render white with near-white text (Settings > Profile, sign-in/sign-up, Account) + app-wide sweep `[Site Planner]` (bug) #ui #site-planner #doc-review #scheduler
+`[x]` Owner report (iPhone Safari, dark): Settings > Profile First/Last/Organization boxes solid white, typed text near-invisible. Cause: AuthPanel `field` set `color: var(--text-primary)` but no `background`, and `index.css` declared no `color-scheme` and no base fill for controls, so every unstyled input/select/textarea got the UA white. Fix at the source: `color-scheme: light|dark` in the two theme blocks; new solid `--surface-field` token in BOTH blocks; a zero-specificity `:where(input…, select, textarea)` base rule (a component's own background still wins); AuthPanel `field` names the token. **NEW-2 sweep (folded into this item):** real hits — Stitcher tray/right panel/tray rows/two popovers (`#fff` → `--surface-raised`), DocReview calibration popup (same), Scheduler page ground (`#f6f8fa` → `--surface-page`), ParcelInfoCard note strip (`#fdf6e7` cream → `--warn-bg/--warn-border/--warn-text`). Left intentionally: DocReview review-sheet + inline text editor (drawing paper, takes the markup's own dark colour), PrintCompose (print paper), ErrorBoundary and SitePlanner save banners (fixed light-on-dark / dark-on-amber pairs, both halves fixed). A repo-wide scan for light literal `background:` fills found nothing else.
+- BEFORE the fix (harness `ui-audit/verify-theme-surface-contrast.mjs`, dark/phone, 1.2:1 vs 4.5 needed): sign-in Email, sign-in Password, sign-up First name / Last name / Organization, Settings>Profile Organization, Settings>Account New password; plus `<html>` `color-scheme` = `normal` in all 8 runs. AFTER: 0 failures, color-scheme follows theme in all runs (2 themes × phone/desktop × signed-out/signed-in fixture). Before/after crops: `docs/evidence/B1998016/`.
+- Proof: `ui-audit/verify-theme-surface-contrast.mjs` (browser, kept in repo; `--report` lists without failing) + `test/themeFieldSurface.test.js` (CI-runnable).
+- Not reached by the harness: project-menu popovers (breadcrumb crumb absent in the fixture) and the Stitcher itself (needs a loaded PDF) — covered by the token swap + V1423104.
+- Verify: live (V1423104)
+- Constraint check: nothing here contradicts `## Owner product constraints`.
+
 ## 🕓 Later / Roadmap
 
 *Deliberately deferred. Do **not** action these unless moved up to 🔲 Open.*

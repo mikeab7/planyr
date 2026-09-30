@@ -53,6 +53,9 @@
 
 :root {
   --font: "Inter", system-ui, sans-serif;  /* the one UI face — swap here only */
+  /* B1998016 — tell the browser which palette the NATIVE controls (field fill, select popup, scrollbars,
+     iOS Safari's form widgets) should use; without it a dark theme still gets light-scheme controls. */
+  color-scheme: light;
 
   /* ============================================================================
      THEME TOKENS — LIGHT (defaults). Dark overrides live in [data-theme="dark"].
@@ -79,6 +82,9 @@
      consumer of the pair (cards throughout the app) picks up the wider separation for free. */
   --surface-page:   #E7EBF0;
   --surface-raised: #FFFFFF;
+  /* B1998016 — the fill of a text field / select / textarea. Own token (not --surface-raised) so a field
+     can sit slightly recessed inside a raised card. Solid, defined in BOTH theme blocks. */
+  --surface-field:  #FFFFFF;
   --surface-selected: #fbf3ee;  /* B1873392 — solid selected/active row fill (was a literal in 4 components) */
   /* NEW-1 (owner chat, 2026-09-08) — floating panels over the map (Layers/View/Comps/Adjust) used
      to be TRANSLUCENT ("frosted"), and the owner reported the aerial reading through them as
@@ -364,6 +370,7 @@
 }
 
 [data-theme="dark"] {
+  color-scheme: dark;   /* B1998016 — see :root */
   /* Surfaces — Model Round 4: moved darker in step with the light theme's move (see that
      definition's header), keeping the two themes' page/card separation proportionally matched
      rather than fixing only the theme the live report happened to measure.
@@ -376,6 +383,7 @@
      ground. */
   --surface-page:   #0A0C0F;
   --surface-raised: #1D2027;
+  --surface-field:  #14171C;    /* B1998016 — recessed below --surface-raised; text-primary on it ≈ 15:1 */
   --surface-selected: #432e2a;  /* B1873392 — accent 18% over --surface-raised, solid */
   /* NEW-1 — opaque, matching the light-theme fix above (was a translucent "frosted" card). */
   --surface-overlay: rgb(24, 27, 33);
@@ -551,6 +559,15 @@ input, textarea {
 }
 
 input, select, button, textarea { font-family: inherit; }
+
+/* B1998016 — BASE fill for every text-like control. A component that sets `color` from a theme token but
+   no `background` used to get the browser's default WHITE field, so in dark theme the typed value was
+   near-white on white (Settings > Profile). `:where()` keeps specificity at zero, so any component's own
+   inline/class background still wins; checkbox/radio/range/color are excluded (they are not text fields). */
+:where(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="image"]), select, textarea) {
+  background-color: var(--surface-field);
+  color: var(--text-primary);
+}
 
 /* Dialog inputs (e.g. the auth modal) double their placeholder as a hint; the UA default
    gray fails AA on the white panel, so pin it to a token that clears 4.5:1 in both themes. */

@@ -166,6 +166,17 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1423104 — B1998016: dark theme on a phone — Settings > Profile fields are dark with readable text; no white panels in Schedule/Review `Blocker: auth`
+
+Sandbox-proven: `ui-audit/verify-theme-surface-contrast.mjs` (dark+light × phone+desktop × signed-out + signed-in fixture: 0 failures after, 8 before) and `test/themeFieldSurface.test.js`. **Pending** a real signed-in phone.
+**Steps** (planyr.io, dark theme, iPhone; read the served chunk hash in the same observation):
+1. Account menu > Profile. **Expect:** First name / Last name / Organization are dark fields with clearly readable text.
+2. Sign-in form (signed out). **Expect:** Email/Password dark fields, readable text and placeholder.
+3. Schedule, then Review. **Expect:** no white panel or page ground; open a calibration popup in Review and a Stitcher panel if reachable — dark surfaces.
+4. Open a parcel with a jurisdiction note. **Expect:** amber-tinted strip in the dark palette, not a cream slab.
+5. Switch to light theme, repeat 1–3. **Expect:** unchanged from before.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1998016.
+
 ### V1416048 — B1990960: a Georgia site draws county lines + city limits, names its governing body, says the county governs, and shows no Texas numbers `Blocker: live-GIS`
 
 Sandbox-proven: `test/georgiaJurisdiction.test.js` (16, red on pre-change main), registry audit + fixtures, and the DCA county/city layers queried live from the build sandbox 2026-09-30 (159 counties, 538 municipalities, the fixture points recorded on B1990960). **Still needs planyr.io in a real browser** (the map tile/GIS hosts are egress-blocked here, so the drawn lines and the in-app badge were not seen).
