@@ -5264,12 +5264,6 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
-### B1873392 — Dark mode: selected rows in project menu / sites list / markup list unreadable `[Site Planner]` (bug) #ui #site-planner #doc-review
-`[x]` Selected/active rows used the literal `#fbf3ee` fill under theme-token text (light-on-light in dark). Now one solid token `--surface-selected` (light #fbf3ee unchanged; dark #432e2a) at MapFinder status rows, team-share rows, active sites-list row, and DocReview selected markup row. SitePlanner.jsx SVG crop rect left alone (canvas overlay, not a menu row).
-- Verify: live (V1338288)
-- Proof: `test/surfaceSelected.test.js` (no literal at call sites; text-primary on token 15.20:1 light, 10.57:1 dark).
-- Constraint check: nothing here contradicts `## Owner product constraints`.
-
 ### B1992432 — DFW city limits + ETJ layers (50 mi of Dallas) and the "unavailable, not unincorporated" rule `[site-planner / map + jurisdiction]` (feature) #gis #site-planner  *(Owner ask 2026-09-30, NEW-1: "wire all the city limits and ETJs within a 50 mile radius of Dallas.")*
 
 `[x]` **THE SOURCE FINDING, FIRST — NCTCOG DOES NOT PUBLISH AN ETJ LAYER.** Its hub (`data-nctcoggis.hub.arcgis.com`) lists 195 datasets in its DCAT catalogue; none is an ETJ (and none mentions "extraterritorial"). Its Boundaries service carries Cities Region (2025), counties, ISDs, MPO — the brief's preferred ETJ source does not exist. NCTCOG's own server (`geospatial.nctcog.org`) is also denied by this build environment's egress policy, so its city limits could not be probed either. Fallback used, per the brief: the publishers themselves. **Sources recorded** (all ArcGIS Online, CORS `*` from `Origin: https://planyr.io`, checked 2026-09-30): Collin County GIS `ETJs` (33 city names, edited 2026-09-26) · Rockwall County GIS `ETJs` (6, edited 2026-06-25) · Denton County GIS `_ETJ/1` (33 names, **2022-08-02 — older than SB 2038**) · City of Fort Worth ETJ (already registered; **hosted copy is a 2018-09-13 snapshot** — the city's current layer, `mapit.fortworthtexas.gov/…/OpenData_Boundaries/MapServer/1`, is on a host this environment cannot reach). **City limits: the statewide TxGIO row already covered DFW** — Dallas verified; cross-checked against TxDOT City Boundaries (a 2020 edition): both return 205 cities in the circle and differ on ~5, mostly spelling ("Saint Paul"/"St. Paul"), so TxGIO stays the source.
@@ -19814,6 +19808,12 @@ _(new `Verify: live` items land here after implementation.)_
 - Verify: live — **V1408688** (`Blocker: live-GIS` — feel over real aerial at real frame rates; the sandbox has no imagery and a software-rendered browser).
 - Owner product constraints check: nothing here contradicts a listed constraint.
 - Not built, said plainly: touch **pinch**-zoom was not exercised (Playwright has no real pinch primitive); Leaflet drives pinch through per-frame state moves (`_move`), which the state-based path draws correctly, but that is reasoning, not a measurement — it is a step in V1408688.
+
+### B1873392 — Dark mode: selected rows in project menu / sites list / markup list unreadable `[Site Planner]` (bug) #ui #site-planner #doc-review
+`[x]` Selected/active rows used the literal `#fbf3ee` fill under theme-token text (light-on-light in dark). Now one solid token `--surface-selected` (light #fbf3ee unchanged; dark #432e2a) at MapFinder status rows, team-share rows, active sites-list row, and DocReview selected markup row. SitePlanner.jsx SVG crop rect left alone (canvas overlay, not a menu row).
+- Verify: live (V1338288)
+- Proof: `test/surfaceSelected.test.js` (no literal at call sites; text-primary on token 15.20:1 light, 10.57:1 dark).
+- Constraint check: nothing here contradicts `## Owner product constraints`.
 
 ## 🕓 Later / Roadmap
 

@@ -166,11 +166,6 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
-### V1338288 — B1873392: selected menu rows readable in dark theme `Blocker: live-GIS`
-Sandbox done: unit test proves token in both themes (15.20:1 / 10.57:1), no literal at call sites. Pending (Map, planyr.io):
-1. Dark theme: open a project row's menu → checked status row shows visible label on a tinted band. Expected: readable.
-2. Same menu, shared team row → readable tinted band.
-3. Light theme: both look as before (cream band).
 ### V1417520 — B1992432: City limits + ETJ paint with labels around Dallas, and site screening names the ETJ (or says "unavailable") `Blocker: none — run on planyr.io once the build is deployed`
 
 Sandbox-proven (live services, real overlay engine in Chromium, 2026-09-30): `ui-audit/audit-dfw-etj-coverage.mjs` 8/8, `ui-audit/verify-dfw-etj-map.mjs` 7/7, `test/dfwEtjCoverage.test.js` 19/19, roster drift audit clean. **Still needs the deployed app** (the real Layers panel, the real basemap, the real header badge) — none of which the standalone harness includes.
@@ -1597,6 +1592,12 @@ state exactly what was created/touched. Never touch one of Michael's real plans.
 2. **A real signed-in boot against the real Supabase**, where `applyUser`'s cloud pull takes real network time and can deliver the `INITIAL_SESSION` / `SIGNED_IN` pair with real-world spacing.
 
 ---
+
+### V1338288 — B1873392: selected menu rows readable in dark theme `Blocker: live-GIS`
+Sandbox done: unit test proves token in both themes (15.20:1 / 10.57:1), no literal at call sites. Pending (Map, planyr.io):
+1. Dark theme: open a project row's menu → checked status row shows visible label on a tinted band. Expected: readable.
+2. Same menu, shared team row → readable tinted band.
+3. Light theme: both look as before (cream band).
 
 ## THE CHECKLIST — run this on Michael's signed-in Chrome, on `planyr.io`
 
