@@ -175,6 +175,15 @@ Sandbox-proven: `test/activateNeverMoves.test.js` (the real handler body, three 
 3. **Very wide view.** Zoom far out (below where flood / wetlands draw). Click Activate on Floodplain and Wetlands. **Expect:** the view does not zoom in or out; those cards show the read-only "Not showing at this zoom — zoom in N levels" line, visible without opening the card.
 4. **Deactivate.** Click ◉ Deactivate layer on each layer turned on above. **Expect:** the view still does not move and the note disappears.
 - **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B1986032.
+### V1413904 — B1988816: every site's map pin sits inside its own parcel (Katz, Rankin Rd) `Blocker: real-data`
+
+Sandbox-proven: `test/siteAnchor.test.js` (L-shaped fixture, centroid outside -> anchor inside with clearance; holes; multi-parcel; sliver). **Still needs Michael's real signed-in Katz site.**
+**Steps** (read-only — no edits to any plan; read the served chunk hash in the same observation):
+1. Site tab -> Map view, no project selected. Zoom to the Katz site near Rankin Rd / I-45 N. **Expect:** the orange marker sits inside the outlined parcel, in the wide part, not in the lower-left notch.
+2. Zoom in past the point where the parcel outline appears, then further to the full plan. **Expect:** the marker (then the name tag) stays inside the outline the whole way, at one consistent spot.
+3. Click the Show-on-map arrow for Katz in the Sites list. **Expect:** the map centres on that same inside point.
+4. Spot-check two ordinary rectangular sites. **Expect:** their pins have not visibly moved from where they were.
+- **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B1988816.
 
 ### V1423104 — B1998016: dark theme on a phone — Settings > Profile fields are dark with readable text; no white panels in Schedule/Review `Blocker: auth`
 

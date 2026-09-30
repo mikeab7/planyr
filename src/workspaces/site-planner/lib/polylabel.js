@@ -45,8 +45,8 @@ export function signedDist(p, ring) {
 }
 
 const SQRT2 = Math.SQRT2;
-const cellOf = (x, y, h, ring) => {
-  const d = signedDist({ x, y }, ring);
+const cellOf = (x, y, h, ring, dist = signedDist) => {
+  const d = dist({ x, y }, ring);
   return { x, y, h, d, max: d + h * SQRT2 };   // `max` bounds the best possible d inside this cell
 };
 
@@ -59,8 +59,36 @@ const cellOf = (x, y, h, ring) => {
  *          falls back to the bounding-box centre rather than throwing.
  */
 export function polylabel(ring, precision) {
+  return search(ring, precision, signedDist, true);
+}
+
+/* Same search over a ring WITH HOLES (a parcel's save-and-except carve-outs): a point inside a hole
+ * is outside the land, and the clearance is measured to the nearest edge of the outer ring OR any
+ * hole. Memoised per outer-ring array + holes array identity, so callers should pass stable arrays. */
+const holeCache = new WeakMap();
+export function signedDistWithHoles(p, ring, holes) {
+  const dOuter = signedDist(p, ring);
+  let d = dOuter;
+  for (const h of holes) {
+    const dh = signedDist(p, h);            // >0 inside the hole = outside the land
+    d = Math.min(d, -dh);
+  }
+  return d;
+}
+export function polylabelWithHoles(ring, holes) {
+  const hs = (holes || []).filter((h) => Array.isArray(h) && h.length >= 3);
+  if (!hs.length) return polylabel(ring);
   if (!Array.isArray(ring) || ring.length < 3) return null;
-  const cached = cache.get(ring);
+  const c = holeCache.get(ring);
+  if (c && c.holes === holes) return c.out;
+  const out = search(ring, undefined, (p, r) => signedDistWithHoles(p, r, hs), false);
+  holeCache.set(ring, { holes, out });
+  return out;
+}
+
+function search(ring, precision, dist, useCache) {
+  if (!Array.isArray(ring) || ring.length < 3) return null;
+  const cached = useCache ? cache.get(ring) : null;
   if (cached && precision == null) return cached;
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -76,7 +104,7 @@ export function polylabel(ring, precision) {
   const prec = precision != null ? precision : Math.max(0.25, cellSize / 200);
 
   // Seed a coarse grid, then refine the most promising cell first (best-first quadtree search).
-  let best = cellOf(centre.x, centre.y, 0, ring);
+  let best = cellOf(centre.x, centre.y, 0, ring, dist);
   const queue = [];
   const push = (c) => { queue.push(c); };
   const popBest = () => {
@@ -89,7 +117,7 @@ export function polylabel(ring, precision) {
   };
   const half = cellSize / 2;
   for (let x = minX; x < maxX; x += cellSize) {
-    for (let y = minY; y < maxY; y += cellSize) push(cellOf(x + half, y + half, half, ring));
+    for (let y = minY; y < maxY; y += cellSize) push(cellOf(x + half, y + half, half, ring, dist));
   }
 
   let guard = 20000;                       // hard bound: a pathological ring can never spin forever
@@ -98,13 +126,13 @@ export function polylabel(ring, precision) {
     if (c.d > best.d) best = c;
     if (c.max - best.d <= prec) continue;  // this branch can no longer beat the incumbent
     const q = c.h / 2;
-    push(cellOf(c.x - q, c.y - q, q, ring));
-    push(cellOf(c.x + q, c.y - q, q, ring));
-    push(cellOf(c.x - q, c.y + q, q, ring));
-    push(cellOf(c.x + q, c.y + q, q, ring));
+    push(cellOf(c.x - q, c.y - q, q, ring, dist));
+    push(cellOf(c.x + q, c.y - q, q, ring, dist));
+    push(cellOf(c.x - q, c.y + q, q, ring, dist));
+    push(cellOf(c.x + q, c.y + q, q, ring, dist));
   }
 
   const out = best.d > 0 ? { x: best.x, y: best.y } : centre;
-  if (precision == null) cache.set(ring, out);
+  if (useCache && precision == null) cache.set(ring, out);
   return out;
 }
