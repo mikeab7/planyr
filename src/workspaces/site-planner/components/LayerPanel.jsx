@@ -215,7 +215,7 @@ export default function LayerPanel({
   const slotOutOfState = (slot) => (slot.kind === "merge"
     ? slot.members.length > 0 && slot.members.every(([, cfg]) => outOfState(cfg))
     : outOfState(slot.entry[1]));
-  const STATE_NAME = { TX: "Texas", CO: "Colorado" };
+  const STATE_NAME = { TX: "Texas", CO: "Colorado", FL: "Florida", GA: "Georgia" };
   const hereName = STATE_NAME[siteState] || "this state";
   const outOfStateReason = (cfg) => {
     const only = (cfg.states || []).map((c) => STATE_NAME[c] || c).join(" / ");
