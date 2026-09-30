@@ -66,7 +66,7 @@
 | Indiana (IN) | county assessor by default since a 2008 reform; a handful of larger townships above a population threshold retain their own elected township assessor | blocked-in-sandbox | [Parcel Boundaries of Indiana (Indiana Geographic Information Office, Data Harvest)](https://gisdata.in.gov/server/rest/services/Hosted/Parcel_Boundaries_of_Indiana_Current/FeatureServer/0) | gov | blocked (sandbox policy) | — | — | — | — | — | ✅ (Verify: live — gisdata.in.gov) |
 | Kansas (KS) | county | no-free-source | none found | — | — | — | — | — | — | — | — |
 | Kentucky (KY) | county | no-free-source | none found | — | — | — | — | — | — | — | — |
-| Louisiana (LA) | parish (64 parishes, each with an elected parish assessor — no county, no appraisal-district concept) | no-free-source **at STATE level; 2 parishes wired individually** | none found statewide — see the county-level tables for `la_eastbatonrouge` and `la_orleans` (B1574256) | — | — | — | — | — | — | — | — |
+| Louisiana (LA) | parish (64 parishes, each with an elected parish assessor — no county, no appraisal-district concept) | no-free-source **at STATE level; 26 parishes wired individually** (2 first-party + 24 from the 2026-09-30 pass, mostly third-party republications) | none found statewide — see "Louisiana parishes — 64-parish dispatch, 2026-09-30" at the end of this file | — | — | — | — | — | — | — | — |
 | Massachusetts (MA) | city/town (351 cities/towns; counties have no assessing function) | measured-reachable | [Massachusetts Property Tax Parcels (MassGIS, EOTSS)](https://services1.arcgis.com/hGdibHYSPO59RG1h/arcgis/rest/services/Massachusetts_Property_Tax_Parcels/FeatureServer/0) | gov | yes (200, 119ms) | 2,559,319 | esriGeometryPolygon | parcelId=`PROP_ID`, owner=`OWNER1`, situsAddress=`SITE_ADDR`, landArea=`LOT_SIZE`, appraisedValue=`LAND_VAL` | lat 98% · lon 100% of state | 5684ms, 2000 feat. | ✅ |
 | Maryland (MD) | state-run — SDAT (Dept. of Assessments & Taxation) runs 24 local offices directly; not independent county assessors | blocked-in-sandbox | [MD iMAP — Parcel Boundaries (SDAT-sourced, monthly)](https://mdgeodata.md.gov/imap/rest/services/PlanningCadastre/MD_ParcelBoundaries/MapServer/0) | gov | blocked (sandbox policy) | — | — | — | — | — | ✅ (Verify: live — mdgeodata.md.gov) |
 | Maine (ME) | town/municipality (482 towns); Unorganized Territory assessed directly by Maine Revenue Services | measured-reachable | ["Maine Parcels Organized Towns", layer 10 (the ONLY layer on this service)](https://services1.arcgis.com/RbMX0mRVOFNTdLzd/ArcGIS/rest/services/Maine_Parcels_Organized_Towns/FeatureServer/10) | agol | yes (200, 158–174ms) | 708,382 | esriGeometryPolygon | parcelId=`STATE_ID`, owner=absent, situsAddress=`PROP_LOC`, landArea=absent, appraisedValue=absent | lat 98% · lon 102% of state | 378ms, 2000 feat. | ✅ |
@@ -210,7 +210,7 @@ because the link test is not sound in one direction: Rhode Island's own statewid
 - **Kansas (KS):** RETRACTED, corrected 2026-09-08 from the owner's own browser (not this sandbox): services.kansasgis.org root has ZERO services; its folders are FIRSTNET, ORKA, Utilities, water, wimas, wizard, and ORKA — the one folder that could plausibly hold parcels — holds only KS_ORKA_Extras and sketch. No parcel mosaic exists there. This replaces the prior 'not confirmed either way' finding, which is now a confirmed no.
 - **Kentucky (KY):** Kentucky's own open-data portal (opengisdata.ky.gov) files every parcel dataset per-county with no combined statewide layer; DOR Mapping Services page describes supporting individual county PVAs, not running one central layer.
 - **Louisiana (LA):** LAGIC / LSU Atlas / LA Division of Administration GIS / LA Tax Commission checked — no state-run parcel aggregation found. qpublic.net/la is a private directory of parish links, not a state service.
-  **Individual parishes DO publish, and are wired one at a time** — East Baton Rouge (B1455634) and Orleans (B1574256, `gis.nola.gov`, found by route 3 after 1 and 2 came up empty). The statewide finding is unchanged; the parish-level one is not the same question. **⛔ Louisiana has PARISHES, not counties, and that is load-bearing rather than cosmetic:** the nationwide geometry asset names these rows "Orleans Parish"/"East Baton Rouge Parish", and until B1574257 `countyKeyForName` stripped only the word "County" from a display name — so NO Louisiana point could be turned back into its configured key, silently. Any future parish wired here must keep the designation out of the key (`la_orleans`) and IN every user-facing label ("Orleans Parish, LA").
+  **Individual parishes DO publish, and are wired one at a time** — East Baton Rouge (B1455634), Orleans (B1574256, `gis.nola.gov`, found by route 3 after 1 and 2 came up empty), and 24 more on 2026-09-30 (see "Louisiana parishes" at the end of this file; a `Parcels - LA - Statewide 2020` LandGrid item exists but is token-gated). The statewide finding is unchanged; the parish-level one is not the same question. **⛔ Louisiana has PARISHES, not counties, and that is load-bearing rather than cosmetic:** the nationwide geometry asset names these rows "Orleans Parish"/"East Baton Rouge Parish", and until B1574257 `countyKeyForName` stripped only the word "County" from a display name — so NO Louisiana point could be turned back into its configured key, silently. Any future parish wired here must keep the designation out of the key (`la_orleans`) and IN every user-facing label ("Orleans Parish, LA").
 - **Massachusetts (MA):** Best-in-class of the whole probe: full schema (id/owner/situs/area/value), 2.56M parcels, semi-annual refresh.
 - **Maryland (MD):** MEASURED LIVE FROM THE OWNER'S OWN BROWSER (2026-09-08), not this sandbox — mdgeodata.md.gov is blocked here. 'Parcel Boundaries', polygon, 117 fields: ACCTID, ADDRESS, ACRES, LANDAREA, NFMTTLVL (total value). Owner NAME is absent — only owner MAILING ADDRESS (OWNADD1 etc); the app leaves owner absent rather than fabricating it from the mailing fields.
 - **Maine (ME):** ⛔ CORRECTED 2026-09-10 (B1455632). The `shape-mismatch` finding above read layer 0 of this service (which does need the ADB join for owner/value) and never checked layer 10, the service's ONLY OTHER layer — confirmed live from this sandbox: `esriGeometryPolygon`, 708,382 features, fields TOWN/COUNTY/STATE_ID/MAP_BK_LOT/PROP_LOC — everything the app's id/situs lookup needs, no join required. Owner and appraised value are still absent (they genuinely do live only in the un-joined ADB table) — left absent, never fabricated. **⛔ COVERAGE CAVEAT, stated plainly per the dispatch's own instruction: "Organized Towns" excludes Maine's UNORGANIZED TERRITORY — roughly HALF the state's LAND AREA (the North Woods) but almost none of its parcels (a handful of residents, no municipal government to assess them). This is NOT full statewide coverage; do not let it read as such anywhere in the app or in future docs.** The publisher's currency disclaimer ("data for many towns is more than fifteen years old") still applies to the organized-town data this layer DOES carry.
@@ -928,3 +928,184 @@ asset — a real increase, and the price of routing barrier islands correctly in
 shape, just a different `CO_NO` and a county seat to confirm — whenever a market needs one; their
 boundary geometry is already correct in the rebuilt asset regardless of whether a parcel source is
 wired for them yet.
+
+### Louisiana parishes — 64-parish dispatch, 2026-09-30 (NEW-1, owner: "wire up Louisiana's parcels from their GIS servers")
+
+Louisiana has **no statewide parcel layer** (LAGIC, LSU Atlas, LA Division of Administration GIS and
+the LA Tax Commission were already checked — see the Louisiana per-state note above), so this pass went
+parish by parish through all 64. **⛔ Louisiana has PARISHES, not counties:** every key drops the
+designation (`la_calcasieu`, never `la_calcasieuparish`), every label keeps it ("Calcasieu Parish, LA"),
+multi-word names squish with no underscore (`la_stjohnthebaptist`) — guarded, for every wired row, by
+`test/louisianaParishes.test.js` (key shape, label, bbox inside Louisiana, `countyKeyForName("<Name>
+Parish", "LA")` back to the key, and a point INSIDE each parish resolving to that parish's source).
+
+**Outcome for all 64:** **2** already wired (East Baton Rouge B1455634, Orleans B1574256) · **24 wired
+now** (table below) · **10** with a real candidate on a parish-owned host this sandbox's egress blocks →
+"Candidates needing a live measurement" below (V1413377) · **6** measured and REJECTED, with the reason (West Baton Rouge's stale 2018 copy is recorded with its first-party lead in the blocked table) ·
+**22** not found by any reachable route. The 38 unwired parishes are **never** "no source" — each says
+which routes were tried.
+
+**Routes tried (this sandbox reaches only `*.arcgis.com`; every parish-owned host is a policy 403 at the
+CONNECT tunnel — re-confirmed 2026-09-30 for 17 of them, including `maps.brla.gov`, so route 3 could
+not be executed here):**
+1. **ArcGIS Hub dataset API** (`hub.arcgis.com/api/v3/datasets`) — `"<P> Parish parcels"`, `"<P> Parish tax
+   parcels Louisiana"`, `"<P> Parish assessor"`, filtered to parcel-titled datasets that name the parish and
+   Louisiana (the stock `discover-county-parcels.mjs` run on the 30 priority parishes queried "<P> County" and
+   returned only wrong-state noise plus Ascension/Terrebonne/St. Mary — its wording is wrong for parishes).
+2. **ArcGIS Online item search** (`www.arcgis.com/sharing/rest/search`), Feature Service AND Map Service, the
+   same three wordings for every parish, plus a 30-query pass on the parish names most likely to be
+   missed. Then a **service-directory walk of every org that surfaced** (Westwood/CSRS `FqQ2BQIKVGpUWqAa`,
+   `1fGAZVgZnPx4zcNH`, `fe3XWHMASK948q2c`, DesireLine `LJwIycC0yIuqCBxq`, …) — which is how Calcasieu, St.
+   Bernard, St. John the Baptist, St. Martin and Plaquemines were found: their names are not what a search
+   for "<P> Parish parcels" returns.
+3. **The ArcGIS Online catalog of `GDITAdmin`'s "Parcels - LA - <Parish>" items** — a 31-parish directory
+   (title `Parcels - LA - X Parish`) whose `url` is each parish's OWN REST endpoint. This is the route-3
+   substitute: it names the parish-owned host without touching it. It is where every blocked candidate below
+   comes from. It also lists a **"Parcels - LA - Statewide 2020 (minus 6 parishes)"** item
+   (`services8.arcgis.com/g1eUGM6NUcD0Fk5p/.../LandGrid_Parcels/FeatureServer/0`, owner Jim.Mitchell_lsfmo) —
+   **measured: `Token Required`.** It is not a public statewide layer, and it is a 2020, commercial (LandGrid)
+   extract; recorded so nobody re-hunts it.
+4. **Direct probing of parish hostnames** — blocked here (see above); the candidate table is what a browser
+   with open egress needs to run.
+
+Every wired row passed ALL of: a count query; a polygon geometry type; an extent (`outSR=4326`) that
+matches the parish; ≥15 of ~24 in-parish grid probe points answering (misses are marsh, water or road); three
+widely spread hits carrying a real id + owner/situs; **a 1 km box around each parish seat holding real
+parcels (the Minnehaha "city-hole" trap — it is what rejected Vermilion and Livingston's 2018 copy)**; the
+production `lookupParcels` path returning the right parcel for an id search and (where an address column
+exists) an address search; and the app's own owner/situs/acreage resolvers run over ~25 real attribute
+bags. The per-row numbers and the three spread hits are in `countiesProvenance.js`.
+
+#### Wired now — 24 parishes
+
+⛔ **Most of these are NOT the parish's own server** — the house standard (the Paulding GA precedent) is to say
+so. "Third-party republication" means an engineering/consulting firm's ArcGIS Online copy of the assessor's
+roll (Westwood/CSRS, DesireLine): fresh, parish-wide and queryable, but a private account that can be
+deleted (the 2026-09-12 TxGIO incident is the precedent — see `counties.js`), so **each row is also a
+candidate to swap for the parish's own host the day it is measured**; the first-party URL, where one is
+known, is in the blocked-candidates table.
+
+| Parish | Key | Parcels | Source class | Layer edited | Id column | Address column |
+|---|---|---|---|---|---|---|
+| Ascension | `la_ascension` | 48,115 | third-party republication | 2026-06-15 | `PARCEL_NO` | `LOCATION_1` |
+| Assumption | `la_assumption` | 14,275 | third-party republication | 2026-05-29 | `PIN` | — (none) |
+| Iberville | `la_iberville` | 17,471 | third-party republication | 2026-06-15 | `ParcelNumb` | `Street_Nam` |
+| St. Charles | `la_stcharles` | 34,253 | third-party republication | 2026-06-15 | `PI_CODE` (pinned) | `Address` |
+| St. James | `la_stjames` | 10,301 | third-party republication | 2026-06-15 | `PIN` | `Physical_A` |
+| St. John the Baptist | `la_stjohnthebaptist` | 26,805 | third-party republication | 2026-06-15 | `PARCEL_ID` | `PAR_ADDR` |
+| St. Bernard | `la_stbernard` | 22,764 | third-party republication | 2026-06-15 | `ParcelNumb` | `Street_Nam` |
+| St. Martin | `la_stmartin` | 44,228 | third-party republication | 2026-05-29 | `PARCEL_NO` | `STREET_NAM` |
+| Plaquemines | `la_plaquemines` | 18,008 | third-party republication | 2026-06-15 | `ASSESSID` (pinned) | — (none) |
+| St. Tammany | `la_sttammany` | 135,083 | assessor's content, individual account | 2026-06-02 | `REID` (pinned) | `Physical_A` |
+| Lafayette | `la_lafayette` | 116,693 | vendor republication | 2025-12-10 | `parcelnumb` (pinned) | `address` |
+| Acadia | `la_acadia` | 46,577 | assessor's own account | 2026-09-22 | `PARCEL_NO` | — (none) |
+| East Feliciana | `la_eastfeliciana` | 16,762 | assessor's own account | 2026-09-25 | `PIN_Number` (pinned) | — (none) |
+| Caddo | `la_caddo` | 140,086 | regional council of governments | n/a (no editingInfo) | `PARCELID` (pinned) | — (none) |
+| Bossier | `la_bossier` | 75,290 | regional council of governments | n/a (no editingInfo) | `Assessment` (pinned) | — (none) |
+| Webster | `la_webster` | 55,625 | regional council of governments | n/a (no editingInfo) | `ParcelNumb` (pinned) | `Street_Nam` |
+| St. Mary | `la_stmary` | 43,610 | levee/drainage district | n/a (no editingInfo) | `PIN` (pinned) | `STREET_NAM` |
+| Terrebonne | `la_terrebonne` | 55,364 | third-party republication | 2026-03-05 | `ACCT_NUM` | — (none) |
+| Lafourche | `la_lafourche` | 56,246 | levee/drainage district | 2024-01-15 | `parcelnumb` | `street_nam` |
+| Allen | `la_allen` | 17,706 | third-party republication | 2023-01-26 | `ParcelID` | `par_addres` |
+| Cameron | `la_cameron` | 11,918 | third-party republication | 2023-03-13 | `PARCELNUMB` (pinned) | `ADDRESS` |
+| Natchitoches | `la_natchitoches` | 29,443 | third-party republication | 2023-07-19 | `PARCEL_ID` | `SITUS` |
+| Tangipahoa | `la_tangipahoa` | 75,019 | third-party republication | 2026-09-03 | `Assessment` (pinned) | `Address` |
+| Livingston | `la_livingston` | 79,656 | parish government's own org | n/a (no editingInfo) | `ParcelNumber` | `Par_Address` |
+
+Field-mapping notes that a reader of the table would otherwise miss (each is also in the row's provenance):
+- **`idField` is PINNED where `detectField` would have picked a wrong column** — the parish FIPS code `geoid`
+  (Lafayette, Cameron's `GEOID`), the row id `FID` (St. Charles), `OBJECTID` (East Feliciana, Tangipahoa,
+  Bossier's `OBJECTID_1`), the synthetic `PARCEL_ID` = "PARCEL_"+REID (St. Tammany), a map-derived `PIN`
+  (Webster), a sequential row number (St. Mary).
+- **Situs vs mailing (B1196).** Four schemas broke the shared owner/situs ladder in `appraisal.js` and it was
+  fixed at the ONE implementation, not per parish: Cameron's `ADDRESS_SO` = "county" (a source flag listed
+  before the real `ADDRESS`), Natchitoches' `M_ADDRESSN`/`M_STREETNM` (the owner's MAILING address), Regrid's
+  JSON `original_address`, and Livingston's `~` null. St. James' `TAXPAYER`, Ascension's `OWNERNAME_`,
+  Acadia's `OWNERS` and Assumption's `Taxpayer` were owner columns no resolver claimed (now a strict
+  FALLBACK — a layer with a real `Owner` column resolves exactly as before). A bare house NUMBER on the generic
+  rung is no longer a situs (Lafourche, St. Mary, St. John, St. Bernard, Iberville, Webster publish the address
+  split in two). Where no whole-line situs column exists the card title falls back to what the user searched
+  — a stated, honest degrade — and the address search runs on the street-name column.
+- **Attribute-light rows, wired on the Virginia/Hawaii precedent (boundary + id, NOT an owner source):**
+  Plaquemines (owner column empty on every sampled row), St. Tammany (REID/Assessment/Physical_A only),
+  East Feliciana, Caddo, Terrebonne. **Bossier** carries the owner name in `Assessme_1`, which no shared
+  resolver claims — a known gap, not fixed here.
+- **Shared service:** Lafayette rides the ES2 vendor layer that also holds Vermilion; the row is scoped
+  `geoid='22055'`.
+
+#### Measured and REJECTED — 6 parishes (each is a finding about a candidate, never "no source")
+
+| Parish | Candidate | Why rejected |
+|---|---|---|
+| Vermilion | ES2 `Parish_Parcels__All_`, geoid 22113 (44,509 features, extent matches) | ⛔ **City-hole:** a point query at Abbeville (the parish seat) and at Delcambre returns ZERO features while Kaplan/Erath/Gueydan return parcels; `owner` is empty on ~25%. Count and extent both pass — only a query at the seat sees it. |
+| St. Landry | `StLandryParcels` (62,139; org fe3XWHMASK948q2c, owner `daviddcbudtest`) | Fields are PARCEL/BLOCK/acreage only — no owner, no situs — on a test-named account. |
+| Richland | `RichlandParcels` (18,753; same org) | Edited 2021-04-22; test-named account. |
+| Bienville | `Bienville(Parcels)(2018)` (18,032) | 2018 vintage in its own title; edited 2021. |
+| Evangeline | ES2 `Parcel_Search_Widget_AGOL` / `Evangeline_Parish_Parcels_(Public_View)` | `Token Required` — not public. |
+| Ouachita | City of Monroe `Public_Parcels` (92,073; extent matches) | Only `Parcel_ID`/`RPID`, and 4 of 53 in-parish probe points answered — a partial fabric. Held, not wired; the parish police jury's own inventory app (`malma.maps.arcgis.com`) is unmeasured. |
+
+Also measured and passed over inside PARISHES THAT ARE WIRED (or blocked), so they are not re-tried:
+Calcasieu's `Calcasieu_Tax_Parcels` (Westwood org; 26,401 — covers only the Lake Charles/Sulphur half, extent
+−93.73..−93.30) and `CalcParcels` (155,923; org fe3XWHMASK948q2c, owner `daviddcbudtest`, no editing date — a
+test-named account whose 16/16 coverage is real but whose provenance cannot be stated); Jefferson's Westwood
+`Jefferson_Parish_Tax_Parcels` (156,471 — zoning/lot schema with **no owner and no situs**, 5/16 probe points);
+Lafayette's LED `2023_Parcels_Lafayette_Parish` (its `Name` column is the parcel NUMBER); Livingston's
+`Livingston_Parish_Assessor_Parcels` (5,541 features dated 2/21/2018, Denham Springs corner only) and the
+parish's own `Lots` layer (23,938; hit 0 of 16); Tangipahoa's older `Parcels` (73,475; 2022); East Feliciana's
+`EastFelParcels` (560,226; 2020).
+
+#### Candidates needing a live measurement from Michael's browser — 10 parishes (V1413377)
+
+Each is a REAL parish-owned or assessor-consortium REST endpoint, taken from `GDITAdmin`'s catalog or the
+Hub API; **none could be probed here (CONNECT 403), so none is wired and none is dropped.** For each: open
+`<URL>?f=json` (layer metadata: geometry type, fields, `maxRecordCount`), then `/query?where=1=1&returnCountOnly=true&f=json`,
+then `/query?where=1=1&returnExtentOnly=true&outSR=4326&f=json`, then the point query below. **What to confirm:**
+polygon geometry · count plausible for the parish · extent matches the parish · a point query returns a real
+parcel with an id, an owner and a SITUS (not the mailing address) · a point at the parish seat is not a hole ·
+and — because none of these hosts has been checked — whether the response carries an `Access-Control-Allow-Origin`
+header (if not, the host goes through `functions/gis-proxy/[[path]].js` after adding the EXACT hostname to
+`ALLOWED_HOSTS`).
+
+| Parish | Exact REST URL | Point to query (lat, lng) | Notes |
+|---|---|---|---|
+| **Calcasieu** (#1) | `https://lak-dc-arcgis2.cppj.net/arcgis/rest/services/HubLayers/Parcels/FeatureServer/0` (Calcasieu Parish Police Jury; AGOL item owner `giscppj`, updated 2026) · alt `https://gis2.totaland.com/ArcGIS/rest/services/CPPJ/CPPJ_Group2/MapServer/21` | 30.2266, −93.2174 (Lake Charles) · 30.2427, −93.2454 (Westlake industrial) · 30.2360, −93.3775 (Sulphur) | The only reachable copies are partial (26,401, Lake Charles half) or unattributable (155,923). |
+| **Jefferson** (#2) | `https://jpgis.jeffparish.net/server/rest/services/Parcels/MapServer` (AGOL item owner `rlongsrsa`, 2026 — pick the parcel layer) · alt `https://eweb.jeffparish.net/arcgis/rest/services/SCP/MPN/MapServer/3` | 29.9435, −90.2034 (Harahan) · 29.9569, −90.1893 (Elmwood) · 29.9511, −90.1670 (Metairie) | Confirm owner + situs columns exist — the reachable Westwood copy has neither. |
+| **Iberia** | `https://gis.iberiagov.net/server/rest/services/Parcels/AssessorServiceMay2020/MapServer/0` | 30.0035, −91.8188 (New Iberia) | Title says May 2020 — confirm vintage. |
+| **Rapides** | `https://gissrv1.romlc.net/arcgis/rest/services/WebMaps/LA_Assessors/MapServer/0` | 31.3113, −92.4451 (Alexandria) | `LA_Assessors` is a shared multi-parish assessor-consortium service — layer index = parish. |
+| **Avoyelles** | same host, `.../LA_Assessors/MapServer/2` | 31.1152, −92.0654 (Marksville) | |
+| **Grant** | same host, `.../LA_Assessors/MapServer/9` | 31.5588, −92.5548 (Colfax) | |
+| **Lincoln** | same host, `.../LA_Assessors/MapServer/4` | 32.5293, −92.6377 (Ruston) | |
+| **West Baton Rouge** (+ Iberville, already wired from another source) | same host, `.../LA_Assessors/MapServer/1` (layer title "Iberville & West Baton Rouge Parishes") | 30.4515, −91.2101 (Port Allen) | Confirm the layer carries a parish field to scope on. The only reachable copy, `WBRParcels` (12,026 features, org fe3XWHMASK948q2c), was edited 2018-04-24 — outside the repo's 5-year bar, so not wired. |
+| **Catahoula** | `https://www.efsedge.com/arcgis/rest/services/Catahoula_Parish/Parcels/FeatureServer/1` | 31.7146, −91.8590 (Harrisonburg) | `efsedge.com` is a vendor host. |
+| **Vernon** | `https://www.efsedge.com/arcgis/rest/services/Vernon_Parish/Vernon_Vector/MapServer/19` | 31.1657, −93.2846 (Leesville) | |
+
+**Also worth measuring — first-party hosts for parishes that are wired from a third-party copy today**
+(a swap is a one-line `layerUrl` change once measured): Ascension `https://geo.apgov.us/apgarc/rest/services/Maps/AscensionGeneralDetails/MapServer/5` ·
+St. James `https://gisviewer.stjamesla.com/arcgis/rest/services/TaxViewer/MapServer/4` ·
+St. Bernard `https://lucity.sbpg.net/arcgis/rest/services/ComDev/Parcels3/MapServer/0` (FeatureServer variant advertises Query) ·
+St. Tammany `https://gisportal.stpgov.org/arcgis/rest/services/CarlData/MapServer/1` ·
+Lafayette `https://webgis.lafayetteassessor.com/arcgis/rest/services/Sidwell/TaxParcelPublic/MapServer/0` ·
+Terrebonne `https://gis.tpcg.org/server/rest/services/SAS/webmap_public/MapServer/0` ·
+Allen `https://gis3.totaland.com/arcgis/rest/services/Allen/AllenReference2/MapServer/14` ·
+Tangipahoa `https://tangis.tangipahoa.org/server/rest/services/Cadastral/TaxParcel_A/MapServer/0` (also `TaxParcelAssessment_A`) ·
+Bossier/Caddo/Natchitoches via the same `romlc` service (`/7`, `/3`, `/5`).
+
+#### Not found by any reachable route — 22 parishes
+
+Beauregard · Caldwell · Claiborne · Concordia · De Soto · East Carroll · Franklin · Jackson · Jefferson Davis ·
+La Salle · Madison · Morehouse · Pointe Coupee · Red River · Sabine · St. Helena · Tensas · Union · Washington ·
+West Carroll · West Feliciana · Winn.
+
+**Recorded as NOT FOUND ON 2026-09-30 by routes 1, 2 and 3-substitute above — never as "no source".** For each:
+the Hub API and the AGOL item search (Feature Service + Map Service, three wordings) returned only
+wrong-parish, wrong-state or non-parcel hits (e.g. "Concordia" returned Concordia, **Missouri**; every
+`Tax Parcels` hit was East Baton Rouge's or Lafayette's; "St. Helena"/"Tensas"/"Red River" returned other
+parishes' services); none of the 22 has a `Parcels - LA - <Parish>` item in the `GDITAdmin` catalog (31
+parishes, listed above); and route 4 (their own hostnames, and the assessor viewers most of them link — many
+of these parishes use qPublic/Schneider, Atlas or another private vendor viewer with no public REST service,
+which is a legitimate "not found") is blocked by this sandbox's egress. **What would find them:** a session
+with open egress running route 3 against each parish assessor's own site and reading the map viewer's network
+calls for the ArcGIS REST endpoint (the route that found Orleans).
+
+**Not attempted: nothing.** All 64 parishes have an outcome above. The numbers are the record — 2 + 24 + 10
+(blocked candidates, incl. West Baton Rouge) + 6 (rejected) + 22 (not found) = 64.
