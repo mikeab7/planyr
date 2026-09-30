@@ -166,6 +166,17 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1413360 — B1988272: clicking lots at Grand Port shows an acknowledgement under the cursor at once `Blocker: real-data`
+
+Sandbox-proven: `e2e/click-ack.spec.js` (red on main, green here), `test/clickAck.test.js`, `ui-audit/measure-click-to-row.mjs`. **Still needs the real Chambers CAD server and Michael's real plan data.**
+**Steps** (THROWAWAY "Concept A (copy)" in the Grand Port group — never Concept A; read the served chunk hash in the same observation):
+1. Open the copy → Parcel tools → Click a lot on the map. **Expect:** cursor is the +.
+2. Press on lot 1. **Expect:** a ring appears under the cursor on the very next frame and the cursor reads busy; the ring holds until the lot row lands, then vanishes. Note click-to-row time.
+3. Repeat on two more lots. **Expect:** ring instantly each time; report the three click-to-row times (~1.5 s expected — the county server is the floor).
+4. Click on a road / no lot. **Expect:** ring turns into "No lot here" and leaves.
+5. Drag the map. **Expect:** no ring left behind after release.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1988272.
+
 ### V1404560 — B1973920 + B1973921: state lines survive to metro zoom and city names read well over the real aerial, without covering a plan `Blocker: live-GIS`
 
 Sandbox-proven (`ui-audit/verify-admin-boundaries.mjs` 19/19, `ui-audit/verify-place-names.mjs` 15/15, `test/adminBoundaries.test.js`, `test/placeNames.test.js`): band edges, lazy fetches, gone at 14, row toggle. **Still needs planyr.io with the real imagery** (this environment's browser cannot load tile hosts, so the base was blank).
