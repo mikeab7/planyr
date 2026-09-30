@@ -166,6 +166,7 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+<<<<<<< HEAD
 ### V1419600 — B1994512: Florida/Georgia pipeline layers draw on planyr.io and a no-hit FL/GA site reads "Not confirmed", never "clear" `Blocker: live-GIS`
 
 Sandbox-proven: `test/eiaPipelineScreen.test.js` (61, red-proofed) and `ui-audit/verify-eia-pipelines.mjs` (27/27 on the built app; EIA responses relayed live through curl because this sandbox's Chromium cannot open remote origins). **Still needs a real browser on the real origin** — CORS from planyr.io, the lines over live aerial, and the real county parcel services.
@@ -190,6 +191,8 @@ Sandbox-proven: `test/activateFraming.test.js` (pure view rule incl. red-proof a
 4. Pan so the site is fully off-screen, click Activate. **Expect:** the site comes back centred at the same or a closer scale, never wider.
 5. Zoom far out (below FEMA's draw level), click Activate on the flood finding. **Expect:** it zooms IN just enough for the layer to draw, never out.
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1986032.
+=======
+>>>>>>> origin/main
 ### V1413360 — B1988272: clicking lots at Grand Port shows an acknowledgement under the cursor at once `Blocker: real-data`
 
 Sandbox-proven: `e2e/click-ack.spec.js` (red on main, green here), `test/clickAck.test.js`, `ui-audit/measure-click-to-row.mjs`. **Still needs the real Chambers CAD server and Michael's real plan data.**
