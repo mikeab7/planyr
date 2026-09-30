@@ -30,6 +30,20 @@ describe("theme-aware form controls", () => {
   it("no hard-coded white side panels / popovers remain in the Stitcher", () => {
     expect(/background: "#fff"/.test(readFileSync("src/workspaces/doc-review/Stitcher.jsx", "utf8"))).toBe(false);
   });
+  it("B2001568: no light-only literal colours in the Stitcher's style objects (SVG paper attributes are exempt)", () => {
+    const src = readFileSync("src/workspaces/doc-review/Stitcher.jsx", "utf8");
+    for (const lit of ["#5a554a", "#b45309", "#b3361b", "#15803d", "#d6a64a", "#fbf7ec", "#fffbeb", "#8a6d1f", "#c7b88f", "#dc2626"]) {
+      const styled = new RegExp(`(color|background|border)[^\\n=]*?["'\`]?${lit}`, "i");
+      const hits = src.split("\n").filter((l) => styled.test(l) && !/\b(fill|stroke)=/.test(l));
+      expect(hits, lit).toEqual([]);
+    }
+    expect(/rgba\(255,255,255,0\.97\)/.test(src)).toBe(false);
+  });
+  it("B2001568: the sweep loads real drawings and fails when it cannot", () => {
+    const h = readFileSync("ui-audit/verify-theme-surface-contrast.mjs", "utf8");
+    for (const state of ["review-calibrate-popup", "stitch-placed-unaligned", "stitch-detail-popover", "stitch-calibrate-popup", "site-parcel-card-strip"]) expect(h).toContain(state);
+    expect(h).toMatch(/DRAWING_SKIPS\.length\)\s*\?\s*0\s*:\s*1|!DRAWING_SKIPS\.length\) \? 0 : 1/);
+  });
   it("the browser sweep harness is still in the repo", () => {
     expect(existsSync("ui-audit/verify-theme-surface-contrast.mjs")).toBe(true);
   });

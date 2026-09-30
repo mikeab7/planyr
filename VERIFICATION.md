@@ -176,6 +176,15 @@ Sandbox-proven: `test/siteAnchor.test.js` (L-shaped fixture, centroid outside ->
 4. Spot-check two ordinary rectangular sites. **Expect:** their pins have not visibly moved from where they were.
 - **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B1988816.
 
+### V1426656 — B2001568: dark theme, Stitcher empty state readable; Review calibration popup dark with a readable field `Blocker: none — run on planyr.io once the build is deployed`
+
+Sandbox-proven: `ui-audit/verify-theme-surface-contrast.mjs` with REAL drawings loaded (28 failures before, 0 after; dark + light × phone + desktop) and `test/themeFieldSurface.test.js`. Review's calibration popup and main screen were already confirmed fine on planyr.io before this fix (owner-side live check, 2026-09-30).
+**Steps** (planyr.io, real dark theme via Settings, not a forced attribute; read the served chunk hash in the same observation):
+1. Review > Stitch. **Expect:** "Drop a whole set — it stitches itself" and the line under it are clearly readable light-grey on the dark canvas.
+2. Drop a multi-page PDF; click a grouped plan; add a second raw page. **Expect:** tray rows, Placed sheets, "Not aligned", Align/Remove and Details are dark surfaces with readable text; the Composite key is dark.
+3. Review, open any PDF, Calibrate, click two points. **Expect:** the "Real length" popup is dark with a readable field.
+- **Stopping rule:** closes on a dated pass of 1–3, or a failed step filed as a recurrence on B2001568.
+
 ### V1423104 — B1998016: dark theme on a phone — Settings > Profile fields are dark with readable text; no white panels in Schedule/Review `Blocker: auth`
 
 Sandbox-proven: `ui-audit/verify-theme-surface-contrast.mjs` (dark+light × phone+desktop × signed-out + signed-in fixture: 0 failures after, 8 before) and `test/themeFieldSurface.test.js`. **Pending** a real signed-in phone.
