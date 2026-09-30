@@ -892,6 +892,9 @@ kbd {
   border-color: var(--border-default);
   color: var(--chrome-text);
   border-radius: var(--radius-md);
+  /* Leaflet's vendor rule ships `text-shadow: 1px 1px #fff` for its original dark-on-white look;
+   * on our light-on-overlay text that white offset reads as a ghosted second copy of the label. */
+  text-shadow: none;
 }
 :root .leaflet-container .leaflet-control-attribution {
   background: var(--surface-overlay);
