@@ -5256,6 +5256,20 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
+### B1989504 — "Start your site" card covers the middle of the map on phone and stays up while drawing `[site-planner]` (bug) #site-planner #mobile *(Owner report 2026-09-30, iPhone Safari: "Obv not how it should work.")*
+
+`[x]` **Reproduced on main first** (`e2e/start-hint-placement.spec.js`, run against the pre-change build): on a phone-width new site the card was a full-width box across the middle of the map (overlap assertion red), and it STAYED UP after Draw new parcel was armed from the rail menu (the owner's second case — the hint used to be gated only on "nothing drawn yet", never on the active tool). Desktop: same centred box, same red.
+`[x]` **Fix.** The card is now a compact strip docked to the top edge (phone: between the Panels/Tools edge tabs, under the View/Layers row; desktop: top-left of the canvas), with no full-size wrapper — nothing invisible left over the canvas. It shows only while nothing has started a site: any parcel/element/reference, an armed tool (Draw new parcel included), an identify pass, an open Add menu or an open calibration removes it. One tap on ✕ dismisses it and it stays dismissed on this device (`planarfit:startHintDismissed`, try/catch). No contradiction with `## Owner product constraints`.
+`[x]` **Sandbox proof:** `e2e/start-hint-placement.spec.js` — 4 cases × phone (390×844, emulated touch Chromium, NOT a real iPhone) and desktop (1440×900): box outside the middle half of the canvas, canvas centre answers to the canvas, Draw new parcel (rail menu AND the card's own option) removes it, dismiss persists across reload. Red on main, 8/8 green here; full vitest green.
+Verify: live — see V1414592 (real planyr.io at phone width; real-iPhone look).
+Stopping rule: closes when V1414592 passes on the deployed build, or the owner confirms on his phone.
+
+### B1989505 — Rewrite "Start your site" so the three ways to start read as different things `[site-planner]` (task) #site-planner #mobile *(Owner request 2026-09-30, NEW-2)*
+
+`[x]` Steps 1 and 3 read as the same thing (both routed through "Parcel tools ▾"; step 1 also bundled address search; "right rail" is a collapsed "Tools" tab on phone). Replaced the three sentences with four short, distinct, TAPPABLE options (each starts its action): **Click a lot on the map** (county record; same vocabulary as the Parcel tools menu) · **Search an address** · **Trace your boundary** · **Use a screenshot** (opens the file picker; place & calibrate follows). No menu paths, no "right rail". Sentence removed (PANEL-BREVITY spirit): the old three-line numbered paragraph. Covered by the same spec as B1989504 (`start-hint-draw` starts Draw; asserted on both viewports).
+Verify: live — see V1414592.
+Stopping rule: as B1989504.
+
 ### B1988272 — Clicking a lot at Grand Port takes 1.5–2 s before the app shows it heard the click `[site-planner / parcels]` (bug) #site-planner #parcel #perf #gis *(Owner report 2026-09-29, Grand Port / Chambers County: "it's slow to seem like it knows that I clicked on the parcels.")*
 
 `[x]` **Measured before any change (owner's Chrome, build 2aaa1c4, throwaway "Concept A (copy)"):** lot row at 1.47–2.0 s after pointerdown; 0–189 ms nothing on screen (a 152 ms long task), a `Querying county GIS…` span at 189 ms, ~1.2–1.4 s waiting on the county server (`gisdata.pandai.com` Chambers `MapServer/0/query`), row + record panel at ~1.47 s. **The county server is the floor** (any query returning a row is ~0.9–1.3 s regardless of geometry or field list; only `returnCountOnly` is fast, 71 ms). Ruled out: national fan-out (one Chambers query per click) and the outline layer.
