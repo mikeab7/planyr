@@ -166,6 +166,20 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1416048 — B1990960: a Georgia site draws county lines + city limits, names its governing body, says the county governs, and shows no Texas numbers `Blocker: live-GIS`
+
+Sandbox-proven: `test/georgiaJurisdiction.test.js` (16, red on pre-change main), registry audit + fixtures, and the DCA county/city layers queried live from the build sandbox 2026-09-30 (159 counties, 538 municipalities, the fixture points recorded on B1990960). **Still needs planyr.io in a real browser** (the map tile/GIS hosts are egress-blocked here, so the drawn lines and the in-app badge were not seen).
+**Steps** (signed-in Chrome, planyr.io; read the served chunk hash in the same observation as each result):
+1. Open a Georgia site in a wired county — e.g. Gwinnett or Fulton. **Expect:** the header badge names the governing body ("City of X, GA · … County" or "Unincorporated … County, GA"); the word ETJ appears nowhere in the badge or its hover.
+2. Layers panel → jurisdiction group. **Expect:** "County boundaries (Georgia)" and "City limits (Georgia)" rows are live; toggle each. County lines draw at region zoom, city limits at city zoom, following the real boundaries; the Texas county/city/ETJ rows are shown as not applicable here.
+3. Hover the ETJ row's not-applicable reason. **Expect:** it says Georgia cities have no reach beyond their limits (not "no equivalent wired yet").
+4. Pan so a site sits inside a city that spans two counties (Atlanta: Fulton/DeKalb) or a site straddles a county line. **Expect:** both counties are named, joined as peers.
+5. Open a site in Athens (Clarke), Augusta (Richmond), Columbus (Muscogee) or Macon (Bibb). **Expect:** one consolidated government ("Athens-Clarke County, GA (consolidated)"), never "city + unincorporated".
+6. Yield/pond panel on a Georgia site. **Expect:** detention reads "Georgia — Detention criteria not yet available in Georgia" (N/A in the verdict strip), no acre-feet number, no HCFCD/Harris channel wording — including on a site in **Harris County, Georgia** or **Montgomery County, Georgia**.
+7. Attribution strip on the Georgia view. **Expect:** Georgia credits only; no Harris County / TxGIO.
+8. Sanity: open a Katy (Texas) site and a Denver (Colorado) site. **Expect:** badge and layers exactly as before.
+- **Stopping rule:** closes on a dated pass of 1–8, or a failed step filed as a recurrence on B1990960.
+
 ### V1417520 — B1992432: City limits + ETJ paint with labels around Dallas, and site screening names the ETJ (or says "unavailable") `Blocker: none — run on planyr.io once the build is deployed`
 
 Sandbox-proven (live services, real overlay engine in Chromium, 2026-09-30): `ui-audit/audit-dfw-etj-coverage.mjs` 8/8, `ui-audit/verify-dfw-etj-map.mjs` 7/7, `test/dfwEtjCoverage.test.js` 19/19, roster drift audit clean. **Still needs the deployed app** (the real Layers panel, the real basemap, the real header badge) — none of which the standalone harness includes.

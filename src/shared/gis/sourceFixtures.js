@@ -157,6 +157,24 @@ export const SOURCE_FIXTURES = {
     { label: "Grand Junction (Mesa)", point: [-108.5506, 39.0639], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
   ],
   },
+  countyGa: {
+  fixtures: [
+    // NEW-1 (Georgia) · live 2026-09-30 from the build sandbox: 159 county polygons statewide (Georgia's full roster).
+    { label: "Downtown Atlanta (Fulton)", point: [-84.388, 33.749], expectMinCount: 1 }, // live: Fulton
+    { label: "Savannah (Chatham)", point: [-81.09, 32.08], expectMinCount: 1 }, // live: Chatham
+    { label: "Augusta (Richmond)", point: [-81.97, 33.47], expectMinCount: 1 }, // live: Richmond
+    { label: "Unincorporated Gwinnett", point: [-83.95, 34.02], expectMinCount: 1 }, // live: Gwinnett
+  ],
+  },
+  cityGa: {
+  fixtures: [
+    // NEW-1 (Georgia) · live 2026-09-30: 538 municipal polygons statewide.
+    { label: "City of Atlanta", point: [-84.388, 33.749], expectMinCount: 1 }, // live: Atlanta
+    { label: "Savannah", point: [-81.09, 32.08], expectMinCount: 1 }, // live: Savannah
+    { label: "Athens-Clarke County (consolidated)", point: [-83.3776, 33.9519], expectMinCount: 1 }, // live: Athens-Clarke County
+    { label: "Macon-Bibb County (consolidated)", point: [-83.63, 32.84], expectMinCount: 1 }, // live: Macon-Bibb County
+  ],
+  },
   city: {
   fixtures: [
     { label: "City of Houston", point: [-95.37, 29.76], expectMinCount: 1 },
@@ -775,6 +793,17 @@ export const SOURCE_DOCS = {
     "The Colorado counterpart of the `city` row (TxGIO). Inside a polygon = inside a municipality; " +
     "outside = unincorporated county. A boundary means the municipality HAS JURISDICTION — never " +
     "proof it serves or will connect utilities.",
+  },
+  countyGa: {
+  notes:
+    "The Georgia counterpart of `county` / `countyCo`. DCA statewide counties (159, TIGER-derived). A point in NO polygon is " +
+    "not in Georgia (the routing envelope also holds SC/AL/FL/NC/TN ground) — point-in-polygon decides, never the envelope.",
+  },
+  cityGa: {
+  notes:
+    "The Georgia counterpart of `city`. DCA municipal limits (538). Georgia has NO ETJ: outside a city's limits the county " +
+    "governs. Consolidated governments publish under their consolidated names (Athens-Clarke County, Augusta-Richmond " +
+    "County, Macon-Bibb County; Columbus is plain 'Columbus'). A boundary means the city HAS JURISDICTION — never proof it serves utilities.",
   },
   isdCo: {
   notes:

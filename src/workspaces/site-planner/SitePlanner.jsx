@@ -13003,7 +13003,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        * marks each rejection handled, because a `tok` supersede can return before the await and an
        * un-awaited rejection would otherwise surface as an unhandled one. */
       const zoneAUnstudied = (floodGeo.zones || []).some((z) => z.unstudiedA && z.zone === "A");
-      const inHarris = (ctx?.authority?.jurisdiction?.county || []).some((c) => /harris/i.test(String(c)));
+      const inHarris = ctx?.authority?.jurisdiction?.state !== "GA" // NEW-1 — Harris County, GEORGIA is not Texas's Harris
+        && (ctx?.authority?.jurisdiction?.county || []).some((c) => /harris/i.test(String(c)));
       const [ptLat, ptLng] = feetToLatLng(bfePt, origin.lat, origin.lon);
       const ebfeP = zoneAUnstudied ? leg("ebfe", sampleEbfePoint(ptLat, ptLng)) : null;
       const maapP = zoneAUnstudied && inHarris ? leg("maapnext", sampleMaapnextWse(ptLat, ptLng)) : null;
@@ -13232,7 +13233,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // to "hcfcd" ONLY for Harris, so it's sufficient evidence on its own). An effective coh/hcfcd
   // authority outside Harris — e.g. a user override on a Fort Bend site — must NOT surface the
   // control, and a STORED channel answer is ignored (not cleared) there, with a visible note.
-  const drainCountyHarris = (drainCtxData?.authority?.jurisdiction?.county || []).some((c) => /harris/i.test(String(c)));
+  const drainCountyHarris = drainCtxData?.authority?.jurisdiction?.state !== "GA" // NEW-1 — Harris County, GEORGIA is not HCFCD's Harris
+    && (drainCtxData?.authority?.jurisdiction?.county || []).some((c) => /harris/i.test(String(c)));
   const drainChannelRelevant = drainCtxData?.authority?.channelAuthority === "hcfcd"
     || (drainCountyHarris && (drainAuthorityId === "coh" || drainAuthorityId === "hcfcd"));
   const chanOverride = drainChannelRelevant ? chanOverrideStored : undefined;
@@ -13320,13 +13322,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     : null;
   const detReq = siteStateId === "CO"
     ? computeRequiredDetention({ ...detReqInputsCo, authorityId: null })
+    // NEW-1 (Georgia) — no modeled Georgia criteria: the guard's named "not available in Georgia yet"
+    // carrier, regardless of whatever the (Texas-shaped) drainage context resolved.
+    : siteStateId === "GA"
+    ? computeRequiredDetention({ ...detReqInputs, authorityId: null })
     : drainCtxData && siteSqft > 0 && drainAuthorityId
       ? computeRequiredDetention({ ...detReqInputs, authorityId: drainAuthorityId })
       : drainCtxData && siteSqft > 0 && drainCountyUnmodeled
         ? { ...computeRequiredDetention({ ...detReqInputs, authorityId: null }), governingCounty: drainCountyUnmodeled }
         : null;
   // A boundary straddle leaves primary null — compute EVERY candidate, labeled (never default).
-  const detReqCandidates = siteStateId !== "CO" && drainCtxData && siteSqft > 0 && !drainAuthorityId && drainCtxData.authority?.ambiguous?.length
+  const detReqCandidates = siteStateId !== "CO" && siteStateId !== "GA" && drainCtxData && siteSqft > 0 && !drainAuthorityId && drainCtxData.authority?.ambiguous?.length
     ? drainCtxData.authority.ambiguous[0].candidates.filter(Boolean).map((aid) => ({ aid, r: computeRequiredDetention({ ...detReqInputs, authorityId: aid }) }))
     : null;
   // Tier + regime need flood facts — a FAILED flood query is an unknown, never "clean".
@@ -32482,12 +32488,17 @@ function DrainagePanel({
                 // also the only moment this branch can be reached, so there is no first-paint gap.
                 coMhfd && req.panelLine
                   ? req.panelLine
-                  : `${coSubject} — confirm the criteria your town has adopted.`,
+                  // NEW-1 (Georgia) — the named "not available in Georgia yet" state; one line, the why rides the ⓘ.
+                  : (req.flags || []).includes("georgia-not-wired")
+                    ? req.headline // PANEL-BREVITY: the carrier's own headline, so no new literal is added here
+                    : `${coSubject} — confirm the criteria your town has adopted.`,
                 "co-detention",
                 // The explanation rides the lazily-loaded Colorado tier (with the rest of the
                 // Colorado prose). Until it lands, the visible line and its verdict are already
                 // correct — only the ⓘ fills in a moment later.
-                d.coDetail
+                (req.flags || []).includes("georgia-not-wired")
+                  ? req.detail
+                  : d.coDetail
                   ? `${d.coDetail}${d.coRegime ? ` Reviewing regime: ${d.coRegime.label} (${d.coRegime.criteria}). ${d.coRegime.note}` : ""}`
                   : null,
               ));

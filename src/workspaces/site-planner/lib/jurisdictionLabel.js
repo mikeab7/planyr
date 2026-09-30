@@ -128,16 +128,36 @@ function leadFor(model, shape) {
      * same separator. Asserted in test/jurisdictionLabel.test.js. */
     return [cities, model.remainderLabel].filter(Boolean);
   }
-  if (gov.length) return gov.map((c) => `City of ${c}`).join(PEER_SEP);
+  if (gov.length) {
+    /* NEW-1 (Georgia) — "City of X, GA". A consolidated city-county (Athens-Clarke, Augusta-Richmond,
+     * Columbus-Muscogee, Macon-Bibb) is ONE government, so it is named as itself — never "City of
+     * Athens-Clarke County" and never "city + unincorporated". */
+    if (isGa(model)) {
+      const isCons = (c) => !!(model.consolidated && sameName(c, model.consolidated.city));
+      const named = gov.map((c) => (isCons(c) ? model.consolidated.label : `City of ${c}`));
+      return `${named.join(PEER_SEP)}, GA${gov.some(isCons) ? " (consolidated)" : ""}`;
+    }
+    return gov.map((c) => `City of ${c}`).join(PEER_SEP);
+  }
   // ⛔ THE ITEM ITSELF: an ETJ leads, and "Unincorporated" is NOT printed beside it. An ETJ is
   // unincorporated land by definition, so the word adds nothing and reads as a contradiction.
   if (etj.length) return etjLeadText(etj);
+  /* NEW-1 (Georgia) — no ETJ exists there, and outside city limits the COUNTY governs, so the lead names
+   * the county: "Unincorporated Gwinnett County, GA". Without a county (a failed lookup) it stays honest. */
+  if (isGa(model)) {
+    const cs = list(model.counties);
+    return cs.length ? `Unincorporated ${cs.map((c) => `${c} County`).join(PEER_SEP)}, GA` : "Unincorporated, GA";
+  }
   /* ⛔ NEW-1 (DFW ETJ) — "Unincorporated" is a POSITIVE finding, and it is only made when the ETJ data
    * actually covers the point. Where it does not (or the lookup failed) the lead says what WAS
    * established — not in any city's limits — and the ETJ slot below says the rest. */
   if (model.etjUnavailable) return "Outside city limits";
   return "Unincorporated";
 }
+
+// NEW-1 (Georgia) — a state-aware model carries `state: "GA"` (set only on a point-in-polygon confirmed Georgia site).
+const isGa = (model) => String(model.state || "").toUpperCase() === "GA";
+const sameName = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
 
 /* ⛔ B689904 — TWO ETJs NAMED TOGETHER ARE NEVER CO-EQUAL PEERS. A point can be in at most one
  * city's ETJ (Local Gov't Code ch. 42 APPORTIONS an overlap between the two cities — it does not
@@ -213,7 +233,13 @@ export function formatJurisdictionLabel(model = {}) {
   ].filter(Boolean);
   const tail = touches.length ? touches.join("; ") : null;
 
-  const chain = [jur, county, isd].filter(Boolean).join(SLOT_SEP);
+  /* NEW-1 (Georgia) — the county is already IN the lead when Georgia's county is the governing body
+   * (unincorporated: "Unincorporated Gwinnett County, GA") or the city IS the county (consolidated), so
+   * printing it again as its own slot would say the same thing twice. The `county` field is unchanged. */
+  const countyInLead = isGa(model) && county && (
+    (shape === "unincorporated" && counties.length > 0)
+    || (model.consolidated && list(model.governingCities).some((c) => sameName(c, model.consolidated.city))));
+  const chain = [jur, countyInLead ? null : county, isd].filter(Boolean).join(SLOT_SEP);
   const text = tail ? `${chain}${TOUCH_SEP}${tail}` : chain;
   /* NEW-2 (B371361) — `slots` is handed back, not just joined away. The header pill has to be able
    * to SHORTEN this line when the row is tight, and it must drop whole facts rather than characters

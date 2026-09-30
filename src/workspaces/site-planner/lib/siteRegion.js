@@ -20,9 +20,15 @@
 export const STATE_ENVELOPES = {
   TX: [25.5, -107.0, 36.8, -93.3],
   CO: [36.9, -109.2, 41.1, -101.9],
+  /* NEW-1 (Georgia). Generous like the others, so it also holds edges of SC / AL / FL / NC / TN — which
+   * is fine HERE: this answers "which state's RULES may apply", and a wrong "GA" only ever HIDES a Texas
+   * number (fail-closed). Which counties/cities a point is IN is decided by point-in-polygon in
+   * `jurisdiction.js`, never by this box. It overlaps neither TX nor CO. Keep in sync with
+   * `georgiaJurisdiction.GA_ENVELOPE_BOX` (test/georgiaJurisdiction.test.js asserts it). */
+  GA: [30.3, -85.7, 35.1, -80.7],
 };
 
-/* "TX" | "CO" | null. Null for a site with no coordinates (every legacy saved plan) and for one
+/* "TX" | "CO" | "GA" | null. Null for a site with no coordinates (every legacy saved plan) and for one
  * outside both envelopes — and null behaves exactly as the app did before Colorado existed. The
  * guard fires on a POSITIVE Colorado answer, never on the absence of one. */
 export function siteState({ lat = null, lng = null, lon = null } = {}) {
@@ -35,3 +41,4 @@ export function siteState({ lat = null, lng = null, lon = null } = {}) {
 }
 
 export const isColorado = (pt) => siteState(pt) === "CO";
+export const isGeorgia = (pt) => siteState(pt) === "GA";

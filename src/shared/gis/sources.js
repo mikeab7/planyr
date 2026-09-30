@@ -429,6 +429,57 @@ export const GIS_SOURCES = {
     tier: "production",
     lastVerified: "2026-07-29",
   },
+  /* NEW-1 (Georgia) — the Georgia counterpart of `county` / `countyCo`. Its OWN row with
+   * `states: ["GA"]`; the Texas and Colorado rows are untouched. VERIFIED LIVE 2026-09-30 from the
+   * build sandbox: 159 county polygons (Georgia's full roster), ArcGIS-Online hosted with
+   * `access-control-allow-origin: *` (CORS-clean from planyr.io, no key).
+   * SOURCE CHOICE, in the owner's order of preference: (1) STATE — Georgia Department of Community
+   * Affairs (DCA, the agency that maintains Georgia's municipal and county boundary sets), item
+   * "Counties" `Counties_2018`; TIGER-derived attributes (STATEFP=13, GEOID, NAME, NAMELSAD). The "2018"
+   * is the vintage of the shapefile, not a staleness risk: Georgia's 159-county roster has not changed
+   * since 1932. (2) Census TIGERweb was the fallback and was tried FIRST-LOOK: tigerweb.geo.census.gov
+   * answers 403 at this sandbox's egress ("CONNECT tunnel failed"), so it could not be verified live —
+   * and per the verify-before-you-wire house rule it is NOT wired. Rejected: GIO `Georgia_Gen2` (160
+   * rows, a 2017 population-choropleth product, not a boundary layer); Esri "USA Counties Generalized"
+   * (generalized geometry, third-party republication).
+   * Point fixtures live 2026-09-30: Atlanta → Fulton, Lawrenceville → Gwinnett, Athens → Clarke,
+   * Augusta → Richmond, Columbus → Muscogee, Macon → Bibb, Savannah → Chatham; North Augusta SC → none. */
+  countyGa: {
+    key: "countyGa",
+    label: "County boundaries (Georgia)",
+    provider: "Georgia Department of Community Affairs (DCA) — statewide counties",
+    serviceUrl: "https://services2.arcgis.com/Gqyymy5JISeLzyNM/arcgis/rest/services/Counties_2018/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "NAME", fips: "GEOID", full: "NAMELSAD" },
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-09-30",
+  },
+  /* NEW-1 (Georgia) — Georgia incorporated places (city limits). Georgia DCA's "Georgia Municipal
+   * Boundaries (as of September 2026)" (`Municipal_Boundaries`): the state agency's own current set,
+   * 538 municipal polygons, `GEOID` = the Census place FIPS (13 + place code). Hosted ArcGIS Online, CORS-open.
+   * Live 2026-09-30: Atlanta 1 · Lawrenceville 1 · Athens-Clarke County 1 · Augusta-Richmond County 1 ·
+   * Macon-Bibb County 1 · Columbus 1 · Savannah 1 · a point in unincorporated Gwinnett (-83.95, 34.02) 0.
+   * The three consolidated governments are published under their consolidated names, which is why
+   * `georgiaJurisdiction.GA_CONSOLIDATED` exists. A Georgia city has no limited-purpose or strip
+   * annexation class to carry: the layer holds municipal limits and nothing else, so the row declares
+   * `fullPurposeOnly` (NEW-1 cityLimitClass rule). */
+  cityGa: {
+    key: "cityGa",
+    label: "City limits (Georgia)",
+    provider: "Georgia Department of Community Affairs (DCA) — municipal boundaries",
+    serviceUrl: "https://services2.arcgis.com/Gqyymy5JISeLzyNM/arcgis/rest/services/Municipal_Boundaries/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "cityname", fips: "GEOID" },
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    fullPurposeOnly: true,
+    lastVerified: "2026-09-30",
+  },
   city: {
     key: "city",
     label: "City limits",
