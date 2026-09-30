@@ -133,11 +133,12 @@ describe("a point inside each wired parish resolves to THAT parish's source (NEW
   });
 
   it("a parish with nothing wired says so by name instead of borrowing a neighbour", () => {
-    // Calcasieu (Lake Charles) is deliberately NOT wired — its source is on a host this sandbox
-    // cannot reach (docs/STATEWIDE-PARCELS.md "Candidates needing a live measurement").
-    const id = countyIdentity(30.2266, -93.2174);
+    // Pointe Coupee (New Roads) is on the 2026-09-30 NOT-FOUND list — no source was reachable by any
+    // route (docs/STATEWIDE-PARCELS.md "Louisiana parishes"). When one is wired, move this to another
+    // parish still on that list; the rule (name it, never borrow a neighbour) is what is guarded.
+    const id = countyIdentity(30.6996, -91.4368);
     expect(id.status).toBe("no-source");
-    expect(id.name).toBe("Calcasieu Parish");
+    expect(id.name).toBe("Pointe Coupee Parish");
     expect(id.key).toBeNull();
   });
 });
