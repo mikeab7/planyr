@@ -93,7 +93,9 @@ export function jurisdictionShapeOf(model = {}) {
   if (model.cityUnresolved) return "unknown";
   if (part.length) return "split";
   if (gov.length) return etj.length ? "in-city-etj" : "in-city";
-  if (etj.length) return "etj";
+  // NEW-2 (DFW gaps) — a disputed strip or an SB 2038 release area is an ETJ FINDING (the ground is marked as
+  // ETJ ground by the publisher), never "unincorporated" and never a plain city's ETJ.
+  if (etj.length || model.etjUndetermined || list(model.etjReleased).length) return "etj";
   return "unincorporated";
 }
 
@@ -132,6 +134,10 @@ function leadFor(model, shape) {
   // ⛔ THE ITEM ITSELF: an ETJ leads, and "Unincorporated" is NOT printed beside it. An ETJ is
   // unincorporated land by definition, so the word adds nothing and reads as a contradiction.
   if (etj.length) return etjLeadText(etj);
+  /* ⛔ NEW-2 (DFW gaps) — no city is named, and none is invented. "Undetermined" is the publisher's own word
+   * for a strip two cities claim; the claimants stay in the structured result, not on the badge. */
+  if (model.etjUndetermined) return "ETJ undetermined (disputed)";
+  if (list(model.etjReleased).length) return releasedText(list(model.etjReleased));
   /* ⛔ NEW-1 (DFW ETJ) — "Unincorporated" is a POSITIVE finding, and it is only made when the ETJ data
    * actually covers the point. Where it does not (or the lookup failed) the lead says what WAS
    * established — not in any city's limits — and the ETJ slot below says the rest. */
@@ -146,6 +152,9 @@ function leadFor(model, shape) {
  * (two cities that both hold the whole site, two counties) — using it here said exactly that about
  * an ETJ pair, which is the one thing that is never true. So a second name changes the VERB, not
  * just the join: "crosses X + Y", never "X ETJ + Y ETJ". */
+/* NEW-2 — an SB 2038 release area: released OR petitioned, the layer does not say — so the badge says only that
+ * the city's own layer marks the ground, and never that it is still (or no longer) ETJ. */
+const releasedText = (cities) => `${cities.join(PEER_SEP)} ETJ release area (SB 2038)`;
 function etjLeadText(etj) {
   if (etj.length > 1) return `ETJ crosses ${etj.map((c) => `City of ${c}`).join(PEER_SEP)}`;
   return `City of ${etj[0]} ETJ`;
@@ -156,7 +165,13 @@ function etjLeadText(etj) {
  * about, in a second costume. */
 function etjSlotFor(model, shape) {
   const etj = list(model.etjCities);
-  if (shape === "etj") return null;                 // already the lead
+  if (shape === "etj") {
+    // NEW-2 — the lead already carries the first finding; a SECOND kind of finding gets its own slot.
+    const extra = [];
+    if (etj.length && model.etjUndetermined) extra.push("another ETJ claim undetermined (disputed)");
+    if ((etj.length || model.etjUndetermined) && list(model.etjReleased).length) extra.push(releasedText(list(model.etjReleased)));
+    return extra.length ? extra : null;
+  }
   if (shape === "split") return null;               // the remainder label already names it
   // ⛔ B689904 — same apportionment rule as the lead form above, just without the "City of" repeat.
   if (etj.length > 1) return `ETJ crosses ${etj.join(PEER_SEP)}`;

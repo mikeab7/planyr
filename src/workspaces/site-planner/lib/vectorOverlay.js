@@ -173,7 +173,10 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
     fill: true, fillColor: lineColor, fillOpacity: interactive ? 0.02 : 0,
     className: "pf-boundary-hit",
   });
-  const baseStyle = (feature) => (isPointFeature(feature) ? pointStyle() : lineStyle());
+  // NEW-2 — an SB 2038 release area draws DOTTED (line style, never opacity, is what separates a kind of line):
+  // solid = city limits, dashed = ETJ, dotted = a release area.
+  const baseStyle = (feature) => (isPointFeature(feature) ? pointStyle()
+    : feature && feature.properties && feature.properties._release ? { ...lineStyle(), dashArray: "2 5" } : lineStyle());
 
   const group = L.layerGroup([], { pane });
   const nameOf = (feature) => {
@@ -257,7 +260,8 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
       viewW: size.x, viewH: size.y,
     });
     for (const p of placed) {
-      const text = source.id === "jur_etj" ? `${p.name} ETJ` : p.name;
+      // NEW-2 — a disputed strip and a release area already carry their full wording; never "… ETJ ETJ".
+      const text = source.id === "jur_etj" ? (/^Undetermined/.test(p.name) ? "ETJ undetermined (disputed)" : /release area/.test(p.name) ? p.name : `${p.name} ETJ`) : p.name;
       const icon = L.divIcon({ className: "", html: labelHtml(text, { uppercase: source.id === "jur_county" }), iconSize: [0, 0] });
       const mk = L.marker([p.lat, p.lng], { icon, interactive: false, keyboard: false, pane: labelPaneName });
       group.addLayer(mk);
