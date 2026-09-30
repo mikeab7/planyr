@@ -5256,6 +5256,13 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
+### B1873392 — Dark mode: selected rows in project menu / sites list / markup list unreadable `[Site Planner]` (bug) #ui #site-planner #doc-review
+`[x]` Selected/active rows used the literal `#fbf3ee` fill under theme-token text (light-on-light in dark). Now one solid token `--surface-selected` (light #fbf3ee unchanged; dark #432e2a) at MapFinder status rows, team-share rows, active sites-list row, and DocReview selected markup row. SitePlanner.jsx SVG crop rect left alone (canvas overlay, not a menu row).
+- Verify: live (V1338288)
+- Proof: `test/surfaceSelected.test.js` (no literal at call sites; text-primary on token 15.20:1 light, 10.57:1 dark).
+- Constraint check: nothing here contradicts `## Owner product constraints`.
+
+
 ### B1973920 — State lines vanish too early when zooming in: now survive through metro zoom `[site-planner / map]` (feature) #site-planner #gis  *(Owner ask 2026-09-29, NEW-1: "the state boundaries should survive more zoom ins.")*
 
 `[x]` **Band revised, deliberately reversing the old "zoom >= 8: nothing" rule.** State outlines now draw at zoom 5 through 12 inclusive (`ADMIN_BOUNDARY_MAX_ZOOM` 7 → 12); off from 13. **Why 12/13 and not later:** `PARCEL_MINZOOM` is 14 (`parcelDisplayZoom.js`), so 13 is the last zoom before any parcel draws — the line is gone one step earlier so it never shares a screen with parcels/site work, and nothing is fetched there. **Country outlines unchanged** (through zoom 7) — inside one country they add nothing.

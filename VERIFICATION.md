@@ -166,6 +166,12 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1338288 — B1873392: selected menu rows readable in dark theme `Blocker: live-GIS`
+Sandbox done: unit test proves token in both themes (15.20:1 / 10.57:1), no literal at call sites. Pending (Map, planyr.io):
+1. Dark theme: open a project row's menu → checked status row shows visible label on a tinted band. Expected: readable.
+2. Same menu, shared team row → readable tinted band.
+3. Light theme: both look as before (cream band).
+
 ### V1404560 — B1973920 + B1973921: state lines survive to metro zoom and city names read well over the real aerial, without covering a plan `Blocker: live-GIS`
 
 Sandbox-proven (`ui-audit/verify-admin-boundaries.mjs` 19/19, `ui-audit/verify-place-names.mjs` 15/15, `test/adminBoundaries.test.js`, `test/placeNames.test.js`): band edges, lazy fetches, gone at 14, row toggle. **Still needs planyr.io with the real imagery** (this environment's browser cannot load tile hosts, so the base was blank).
