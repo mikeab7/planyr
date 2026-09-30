@@ -166,15 +166,6 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
-### V1411120 — B1986032: Activate / Deactivate layer NEVER moves the view — close view, off-screen view, very wide view `Blocker: real-data`
-
-Sandbox-proven: `test/activateNeverMoves.test.js` (the real handler body, three views × Activate and Deactivate, red-proofed against the first cut), full unit suite, build. **Earlier pass, superseded:** on 2026-09-30 Cowork passed a first gate on build `5263066` (close view, Floodplain then Wetlands, view unchanged) — that measured the first rule (which still panned/zoomed in two cases); it is kept as history and does NOT close this gate. **Still needs** the owner's real Georgia plan (signed in).
-**Steps** (read the served chunk hash in the same observation as each result; throwaway duplicate of the plan; record the parcel outline's screen position and the scale bar before AND after every click):
-1. **Close view.** Zoom to a close working view of the parcel, open Analysis. Click **◍ Activate layer** on each resolved finding in turn. **Expect:** the parcel outline and scale bar do not move at all after any click; each layer's overlay paints (or the card shows "Not showing at this zoom — zoom in N levels").
-2. **Off-screen view.** Pan until the parcel is entirely off-screen. Click Activate on each resolved finding again. **Expect:** the view does not move — no pan back to the site, no zoom; the site stays off-screen.
-3. **Very wide view.** Zoom far out (below where flood / wetlands draw). Click Activate on Floodplain and Wetlands. **Expect:** the view does not zoom in or out; those cards show the read-only "Not showing at this zoom — zoom in N levels" line, visible without opening the card.
-4. **Deactivate.** Click ◉ Deactivate layer on each layer turned on above. **Expect:** the view still does not move and the note disappears.
-- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B1986032.
 ### V1413904 — B1988816: every site's map pin sits inside its own parcel (Katz, Rankin Rd) `Blocker: real-data`
 
 Sandbox-proven: `test/siteAnchor.test.js` (L-shaped fixture, centroid outside -> anchor inside with clearance; holes; multi-parcel; sliver). **Still needs Michael's real signed-in Katz site.**
