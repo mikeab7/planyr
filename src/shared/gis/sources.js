@@ -693,7 +693,7 @@ export const GIS_SOURCES = {
     label: "ETJ — Denton County",
     provider: "Denton County GIS",
     serviceUrl: "https://services.arcgis.com/oTsZYNubyv7xK5yP/arcgis/rest/services/_ETJ/FeatureServer/1",
-    layerId: 1,
+    layerId: null, // the URL already includes the layer index (the weekly verifier appends layerId otherwise)
     geometryType: "polygon",
     fields: { name: "CITY" },
     /* Denton County publishes a strip BOTH cities claim as ONE feature named "A/B" (8 of 41:
