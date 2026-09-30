@@ -166,6 +166,20 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1419600 — B1994512: Florida/Georgia pipeline layers draw on planyr.io and a no-hit FL/GA site reads "Not confirmed", never "clear" `Blocker: live-GIS`
+
+Sandbox-proven: `test/eiaPipelineScreen.test.js` (61, red-proofed) and `ui-audit/verify-eia-pipelines.mjs` (27/27 on the built app; EIA responses relayed live through curl because this sandbox's Chromium cannot open remote origins). **Still needs a real browser on the real origin** — CORS from planyr.io, the lines over live aerial, and the real county parcel services.
+**Steps** (signed-in Chrome, planyr.io; read the served chunk hash in the same observation):
+1. Open a **Georgia** plan (metro Atlanta, e.g. 33.75 / -84.39), open Layers. **Expect:** four rows — "Gas pipelines (approx.)", "Petroleum product pipelines (approx.)", "Crude oil pipelines (approx.)", "Gas liquids pipelines (approx.)" — in the main list; the Texas-only layers sit under "not available in Georgia".
+2. Click ⓘ on each row. **Expect:** "Approximate — major transmission lines only. No local gas mains or gathering lines…" and the title-commitment / ALTA survey / **Georgia 811** line.
+3. Toggle all four on at parcel zoom, then zoom out a few steps. **Expect:** gas (orange) and petroleum (ochre) lines draw across metro Atlanta with no console CORS error; crude and gas-liquids read "None mapped in this view — not proof there are none".
+4. Same on a **Florida** plan (e.g. Marion County 29.36 / -82.40). **Expect:** the gas line (Florida Gas Transmission) draws; ⓘ names **Sunshine 811**, never Georgia's.
+5. Open Analysis on a parcel with no line within a mile (downtown Atlanta). **Expect:** Pipelines card = **NOT CONFIRMED**, text says "not 'clear'" and names the title commitment, an ALTA survey and Georgia 811; **never** "None found" or "No mapped RRC pipelines". The wells / LPST / faults cards read "Not available in Georgia yet".
+6. Analysis on a parcel on a mapped line (Marion County FL). **Expect:** **PRESENT**, "Approximate", operator "Florida Gas Trans Co", Sunshine 811.
+7. Open a **Texas** plan (Chambers County). **Expect:** none of the four rows in the main list; Pipelines card still "No mapped RRC pipelines crossing the site" with the Railroad Commission source.
+8. Network tab on steps 5–6. **Expect:** no request to `gis.rrc.texas.gov`; EIA requests to `services2.arcgis.com/FiaPA4ga0iQKduv3`.
+- **Follow-up carried here:** the endpoints are Esri's unmodified republication of the EIA layers (EIA's own host was egress-blocked from the build session). From a machine that can reach `atlas.eia.gov`, confirm EIA's own service URL, layer id, CORS and `/query`; if verified, swap each registry row's `serviceUrl` (one line each) and drop the `monitored-exception` tier.
+- **Stopping rule:** closes on a dated pass of 1–8, or a failed step filed as a recurrence on B1994512.
 ### V1413360 — B1988272: clicking lots at Grand Port shows an acknowledgement under the cursor at once `Blocker: real-data`
 
 Sandbox-proven: `e2e/click-ack.spec.js` (red on main, green here), `test/clickAck.test.js`, `ui-audit/measure-click-to-row.mjs`. **Still needs the real Chambers CAD server and Michael's real plan data.**

@@ -60,6 +60,39 @@ export const SOURCE_FIXTURES = {
     { label: "El Paso, TX", point: [-106.485, 31.7619], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
   ],
   },
+  // NEW-1 (FL/GA pipelines) — every count below was taken LIVE 2026-09-30 against the row's own
+  // serviceUrl (esriGeometryEnvelope, inSR 4326, returnCountOnly). expectMinCount is deliberately 1
+  // (presence, not a magnitude) — the EIA layers are schematic and get re-edited.
+  eiaGas: {
+  fixtures: [
+    { label: "Tallahassee, FL", bbox: [-84.3, 30.3, -84.0, 30.6], expectMinCount: 1 }, // live 2026-09-30: 9
+    { label: "Ocala–Citrus corridor, FL (Florida Gas Transmission / Sabal Trail)", bbox: [-82.6, 28.6, -81.6, 29.6], expectMinCount: 1 }, // live 2026-09-30: 24
+    { label: "Tampa, FL", bbox: [-82.6, 27.8, -82.2, 28.2], expectMinCount: 1 }, // live 2026-09-30: 11
+    { label: "Savannah, GA", bbox: [-81.2, 31.9, -80.9, 32.2], expectMinCount: 1 }, // live 2026-09-30: 7
+    { label: "Metro Atlanta, GA", bbox: [-84.6, 33.5, -84.1, 34.0], expectMinCount: 1 }, // live 2026-09-30: 5
+  ],
+  },
+  eiaPetroleum: {
+  fixtures: [
+    { label: "Metro Atlanta, GA (Colonial / Plantation)", bbox: [-84.6, 33.5, -84.1, 34.0], expectMinCount: 1 }, // live 2026-09-30: 5
+    { label: "Augusta, GA", bbox: [-82.3, 33.3, -81.8, 33.7], expectMinCount: 1 }, // live 2026-09-30: 2
+    { label: "Tampa–Orlando, FL", bbox: [-82.0, 27.8, -81.0, 28.8], expectMinCount: 1 }, // live 2026-09-30: 2
+  ],
+  },
+  eiaCrude: {
+  fixtures: [
+    { label: "Houston, TX (service-alive probe — no crude line crosses FL/GA)", bbox: [-95.1, 29.6, -94.8, 29.9], expectMinCount: 1 }, // live 2026-09-30: 1
+    { label: "St. James, LA", bbox: [-91.0, 30.0, -90.6, 30.3], expectMinCount: 1 }, // live 2026-09-30: 6
+    { label: "Cushing, OK", bbox: [-97.0, 35.8, -96.6, 36.2], expectMinCount: 1 }, // live 2026-09-30: 19
+  ],
+  },
+  eiaHgl: {
+  fixtures: [
+    { label: "Dixie line, west-central GA", bbox: [-85.1, 32.5, -84.8, 32.8], expectMinCount: 1 }, // live 2026-09-30: 2 (Dixie vertex at -84.96, 32.63)
+    { label: "Mont Belvieu, TX (service-alive probe)", bbox: [-94.98, 29.75, -94.78, 29.9], expectMinCount: 1 }, // live 2026-09-30: 14
+  ],
+  },
+
   ccnWater: {
   fixtures: [
     // Cypress — dense CCN country (same point the `mud` fixture uses); a county-clipped or
@@ -534,6 +567,32 @@ export const SOURCE_DOCS = {
   notes:
     "RRC T-4 permit routes are SCHEMATIC, deliberately low-resolution — never a surveyed " +
     "alignment. Retired source: www.gis.hctx.net/arcgishcpid/…/TXRRC/Pipelines.",
+  },
+  eiaGas: {
+  tierReason:
+    "EIA's own ArcGIS host (atlas.eia.gov) and geo.dot.gov are denied by the build sandbox's egress policy, so " +
+    "EIA's service could not be verified live; this is Esri U.S. Federal Datasets' unmodified republication " +
+    "(item 9833ca6c…, credited to EIA, 'Data modification: None'). Swap to EIA's own service once verifiable.",
+  notes:
+    "Major natural-gas TRANSMISSION only — no local distribution mains; gathering lines are not reliably mapped. " +
+    "Schematic geometry (miles of error on some segments). Never a 'clear'.",
+  },
+  eiaPetroleum: {
+  tierReason:
+    "Same as eiaGas — Esri U.S. Federal Datasets republication of the EIA layer (item c745d9f4…); EIA's own host is egress-blocked.",
+  notes:
+    "Petroleum product lines (Colonial, Plantation, Kinder Morgan Central Florida…). Very schematic — Colonial is a handful of " +
+    "vertices across Georgia. Never a 'clear'.",
+  },
+  eiaCrude: {
+  tierReason:
+    "Same as eiaGas — Esri U.S. Federal Datasets republication of the EIA layer (item bb2aee97…); EIA's own host is egress-blocked.",
+  notes: "Crude trunk lines. None cross FL/GA as of 2026-09-30, so an empty answer there is expected and is still 'not confirmed'.",
+  },
+  eiaHgl: {
+  tierReason:
+    "Same as eiaGas — Esri U.S. Federal Datasets republication of the EIA layer (item 25e6c301…); EIA's own host is egress-blocked.",
+  notes: "Hydrocarbon gas liquids lines. Only Dixie (Enterprise) crosses Georgia. Never a 'clear'.",
   },
   ccnWater: {
   notes:

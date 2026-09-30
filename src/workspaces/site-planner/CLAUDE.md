@@ -400,6 +400,16 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   callout and measurement grips. Guards: the repo-root `test/` suite **handleLayerOrder** (source
   order + the ex-inline drag-starters) and the e2e spec **references-handle-layer** (real render:
   every grip answers `elementsFromPoint`, with parcel geometry proven to be stacked underneath).
+- **FL/GA pipelines (B1994512) — `siteRegion.js` now answers TX · CO · FL · GA (FL/GA are OUTLINES, not
+  boxes) and `siteAnalysis.runSiteAnalysis` asks the state FIRST.** A source whose registry row is scoped
+  to other states is never queried for a site positively in another (`sourceCoversState`): it becomes an
+  `unconfirmed` "Not available in <State> yet" finding, because a Texas service asked about a Florida
+  coordinate answers "nothing" and used to render as "No mapped RRC pipelines" — a false clean. FL/GA
+  pipelines come from the four EIA registry rows (`eiaGas`/`eiaPetroleum`/`eiaCrude`/`eiaHgl`, Layers
+  rows `eia_*`, approximate + transmission-only) folded into ONE card whose outcomes are `present` ·
+  `unconfirmed` · `unavailable` and **never `absent`** (`eiaPipelineScreen.js` = boot-safe constants;
+  `eiaPipelineScreenCopy.js` = wording + combiner, lazy — keep prose out of the leaf). Guards:
+  the repo-root `test/` suite **eiaPipelineScreen** + the ui-audit harness **verify-eia-pipelines** (both mutation-proven).
 - **Colorado (NEW-5/7/8):** `coloradoRegions.js` is THE guard — a network-free site→state
   resolution (it must hold when every GIS endpoint is down, which is exactly when a site falls
   through to a default), the four drainage regimes (MHFD covers 6 of the 9 target counties;

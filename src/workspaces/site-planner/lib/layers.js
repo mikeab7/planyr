@@ -130,6 +130,31 @@ function reportCacheAge(lyr, k, onStatus) {
   } catch (_) { /* age is optional */ }
 }
 
+/* NEW-1 (FL/GA pipelines) — the four EIA transmission-pipeline rows share one shape, built here so
+ * the "approximate" wording, the state scope and the 811 pointer cannot drift apart across them.
+ * ⛔ `states: ["FL","GA"]` is load-bearing: a Texas site must never be offered the approximate EIA
+ * layer as a stand-in for the authoritative TxRRC one (the panel demotes it as "not available in
+ * Texas", exactly like every other out-of-state row). The URL comes from the registry — never inline. */
+const EIA_APPROX_INFO = "Approximate — major transmission lines only. No local gas mains or gathering lines, and geometry can be miles off.";
+const EIA_APPROX_CAVEAT = "Not a survey and not complete. Confirm with the title commitment (easements), an ALTA survey and an 811 locate — Sunshine 811 in Florida, Georgia 811 in Georgia.";
+const eiaPipelineRow = (regKey, { label, color, order, title }) => ({
+  kind: "esriFeature", label,
+  source: "US EIA (via Esri U.S. Federal Datasets)",
+  url: GIS_SOURCES[regKey].serviceUrl, minZoom: 9, color, weight: 2.2, opacity: 0.8,
+  hoverIdentify: true, canvasIdentify: true, hoverTitle: title + " (approximate)", hoverSource: "US EIA",
+  hoverFields: [{ names: ["Pipename", "PIPENAME"] }, { names: ["Operator", "Opername", "OPERATOR"] }],
+  sublabel: EIA_APPROX_INFO,
+  // NEW-1 — an empty view on an APPROXIMATE, transmission-only map is not evidence of absence, so this row never says "No features".
+  emptyMsg: "None mapped in this view — not proof there are none.",
+  note: "US Energy Information Administration Energy Atlas — national, transmission-only. Loads zoomed in.",
+  infoCaveat: EIA_APPROX_CAVEAT,
+  // NEW-1 stacking role (lib/mapStack.js): pipeline centrelines.
+  role: "line",
+  states: ["FL", "GA"],
+  group: "environmental", order,
+});
+
+
 export const STATEWIDE = {
   fema: {
     label: "FEMA flood zones",
@@ -260,6 +285,10 @@ export const STATEWIDE = {
     states: ["TX"],
     group: "environmental", order: 4,
   },
+  eia_gas: eiaPipelineRow("eiaGas", { label: "Gas pipelines (approx.)", title: "Natural gas pipeline", color: "#c2410c", order: 8 }),
+  eia_petroleum: eiaPipelineRow("eiaPetroleum", { label: "Petroleum product pipelines (approx.)", title: "Petroleum product pipeline", color: "#a16207", order: 9 }),
+  eia_crude: eiaPipelineRow("eiaCrude", { label: "Crude oil pipelines (approx.)", title: "Crude oil pipeline", color: "#7c2d12", order: 10 }),
+  eia_hgl: eiaPipelineRow("eiaHgl", { label: "Gas liquids pipelines (approx.)", title: "Hydrocarbon gas liquids pipeline", color: "#be185d", order: 11 }),
   ccn_service: {
     // Public-data screening PHASE 1 — water & sewer CCN service areas ("who holds the
     // certificate to serve this site"). The Site Analysis Water/Sewer CCN cards drive this
@@ -980,6 +1009,10 @@ export const LAYER_VINTAGE = {
   txrrc_pipe: "RRC permit data — continuously updated",
   txrrc_pipe_easement: "Assumed buffer off RRC T-4 routes — not a recorded width",
   txrrc_wells: "RRC permit data — continuously updated",
+  eia_gas: "EIA Energy Atlas — data edited mid-2025, periodically refreshed",
+  eia_petroleum: "EIA Energy Atlas — data edited mid-2025, periodically refreshed",
+  eia_crude: "EIA Energy Atlas — data edited mid-2025, periodically refreshed",
+  eia_hgl: "EIA Energy Atlas — data edited mid-2025, periodically refreshed",
   ccn_service: "PUC CCN (via Harris County GIS) — Dec 2023 edition",
   env_lpst: "TCEQ LPST — continuously updated",
   env_cleanups: "EPA Cleanups in My Community (FRS) — periodically updated",
@@ -1190,7 +1223,7 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
   lyr.on("load", () => {
     tries = 0;
     const n = featureLayerCount(lyr);
-    onStatus && onStatus(k, n === 0 ? "empty" : "loaded", n === 0 ? "No features in this view." : null);
+    onStatus && onStatus(k, n === 0 ? "empty" : "loaded", n === 0 ? ((cfg && cfg.emptyMsg) || "No features in this view.") : null);
   });
   lyr.on("requesterror", (e) => {
     const code = e && e.error && (e.error.code ?? e.error.httpStatus);
