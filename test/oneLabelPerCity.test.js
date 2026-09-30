@@ -35,7 +35,7 @@ describe("the seam is wired at both ends (source guards)", () => {
   });
   it("the city-limits overlay FILTERS those names before placement, and re-places when the set changes", () => {
     const s = src("vectorOverlay.js");
-    expect(s).toMatch(/source\.id === "jur_city" \? placeNamesShown\(map\)/);
+    expect(s).toMatch(/isCityLimitsId\(source\.id\) \? placeNamesShown\(map\)/); // B1990960: the shared helper (jur_city + ga_city)
     expect(s).toMatch(/anchors\.filter\(\(a\) => !drawnElsewhere\.has\(placeNameKey\(a\.name\)\)\)/);
     expect(s).toMatch(/m\.on\("pf:placenames", refreshLabels\)/);
     expect(s).toMatch(/m\.off\("pf:placenames", refreshLabels\)/);
