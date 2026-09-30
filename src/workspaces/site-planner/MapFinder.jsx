@@ -104,6 +104,7 @@ const ParcelInfoCard = lazy(() => import("./components/ParcelInfoCard.jsx"));
 import { PanelErrorBoundary } from "./components/LazyPanel.jsx";
 import { makeParcelDisplayLayer, makeSnapshotLayer, parcelDisplayIsImageOnly, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
 import { siteBoundaryInfo, siteDrawParcels } from "./lib/siteBoundary.js";
+import { siteAnchorLatLon } from "./lib/siteAnchor.js";
 // B1923744 — the pure zoom-gate/filter/reproject-outcome half of "draw the record's own active
 // parcel boundary alongside the pin at close zoom" (see the render site below for the Leaflet half).
 import { showActiveParcelAt, activeDrawParcels, reprojectParcelRing } from "./lib/activeParcelBoundary.js";
@@ -2511,7 +2512,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       // hiding it outright was the B365 default and is exactly what made a site marked
       // dead read as "disappeared entirely." It still recedes via STATUS_TOKENS' size/
       // opacity/z-order, it just never vanishes.
-      const { lat, lon } = site.origin;
+      const { lat, lon } = site.origin; // the plan's feet-frame origin: polygons/elements below are projected about THIS
       const active = site.id === activeSiteId;
       const name = site.site || site.name || "Site";
       // B849344/NEW-1 — canonical boundary + acreage, never the dead `site.parcels` mirror; and
@@ -2530,6 +2531,9 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       // `site.parcels`: drawing the boundary from a different source than the number describes
       // it is exactly the "picture and number disagree" failure this fix exists to close.
       const drawParcels = siteDrawParcels(site, parcelSummary);
+      // NEW-1 — the marker/name tag sit at a point INSIDE the parcel (siteAnchor.js), not at the frame
+      // origin, which on a notched/L-shaped parcel can fall on the neighbour's land.
+      const anchor = siteAnchorLatLon(site, drawParcels) || { lat, lon };
       if (showPlans && drawParcels.length) {
         const t = statusToken(status);
         // Boundary ALWAYS carries the project status color; the open site is
@@ -2579,7 +2583,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         // matching an existing treatment rather than inventing a new one. Non-interactive (a name
         // tag, not a second click target — the same `interactive:false` pattern this file already
         // uses for the geolocate dot below) and HTML-escaped: a site name is user-entered text.
-        L.marker([lat, lon], {
+        L.marker([anchor.lat, anchor.lon], {
           icon: L.divIcon({ className: "", html: sitePlanLabelHtml(name), iconSize: [0, 0], iconAnchor: [0, 0] }),
           interactive: false, keyboard: false, zIndexOffset: active ? 1000 : 0,
         }).addTo(siteGroup);
@@ -2588,7 +2592,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         // (Pursuit on top → Complete at the bottom) so a settled pin never occludes a
         // pursuit where they overlap; the open site floats above its tier (B365).
         const zBase = (statusToken(status).z || 100) + (active ? 1000 : 0);
-        const marker = L.marker([lat, lon], { icon: sitePinIcon(status, active), interactive: !selectMode, keyboard: false, zIndexOffset: zBase, riseOnHover: true });
+        const marker = L.marker([anchor.lat, anchor.lon], { icon: sitePinIcon(status, active), interactive: !selectMode, keyboard: false, zIndexOffset: zBase, riseOnHover: true });
         if (!selectMode) marker.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top" });
         marker.addTo(group);
 
@@ -2726,7 +2730,9 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   }, [mapNotes, selectMode, placingCompPin, showNotesLayer, editingNote?.id]);
 
   const flyToSite = (site) => {
-    if (site.origin && mapRef.current) mapRef.current.flyTo([site.origin.lat, site.origin.lon], 17, { duration: 0.7 });
+    if (!site.origin || !mapRef.current) return;
+    const a = siteAnchorLatLon(site, siteDrawParcels(site, parcelSummary)) || site.origin; // NEW-1 — fly to the parcel's visual centre, same point as the pin
+    mapRef.current.flyTo([a.lat, a.lon], 17, { duration: 0.7 });
   };
 
   /* Resolve EVERY CAD county's parcel-layer URL once (no county pre-selection):
