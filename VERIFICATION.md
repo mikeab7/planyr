@@ -166,6 +166,32 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1413376 — B1988288: parcels click, search and card in the 24 newly wired Louisiana parishes `Blocker: live-GIS`
+
+Sandbox-proven 2026-09-30: `test/louisianaParishes.test.js` (146, red-proofed), and — because ArcGIS Online IS reachable here — the production `lookupParcels` (id + address search) and `queryAtPoint` (click) paths returned the right parcel for all 24 (owner/id/situs read off real attribute bags). **Still needs a real browser on the deployed planyr.io origin** (the cross-origin fetch, the drawn parcel lines, the card in the UI); the sandbox proved the endpoints, not the browser's CORS handling of `utility.arcgis.com` (Caddo, Bossier, Webster, St. Mary, Livingston) or the layer rendering.
+**Steps** (throwaway plan/site only; read the served chunk hash in the same observation as each result):
+1. Map → search **200 Ravenswood Ln, Lafayette**, then click that lot. **Expect:** the lot outlines and the card shows owner **HARRINGTON DONALD R / HARRINGTON NITA H**, account **6105835**, an acreage, title "200 RAVENSWOOD LN".
+2. Search **11102 Highway 16** (Tangipahoa Parish, near Amite). **Expect:** owner **WALKER SANDRA F**, account **6037992**.
+3. Search **8427 Beechwood Dr** (Livingston Parish, Denham Springs area). **Expect:** owner **LYNCH, AIMEE HOPE**, account **0011338**, title "8427 BEECHWOOD DR".
+4. Search **245 Pioneer Dr** (St. Charles Parish, Hahnville). **Expect:** owner **JACKSON, MURPHY J., JR.**, title "245 PIONEER DR" — and NOT the mailing address.
+5. Search **1859 Viola St** (St. Tammany Parish, Covington). **Expect:** account **44323**, title "1859 VIOLA ST", NO owner row (attribute-light source, by design).
+6. Click a lot near downtown **Shreveport** (32.5252, −93.7502, Caddo). **Expect:** a parcel outlines and the card shows an Account/ID like **141615000000500** and an acreage, no owner (attribute-light).
+7. Click in **Gonzales** (Ascension, 30.2383, −90.9201) and **Chalmette** (St. Bernard, 29.9427, −89.9634). **Expect:** a lot with an owner name in each; no situs title (split-address source) — the card falls back to the searched address.
+8. Click in **Lake Charles** (Calcasieu, 30.2266, −93.2174) and **Harahan** (Jefferson, 29.9435, −90.2034). **Expect:** "Calcasieu Parish — no parcel data wired here yet." / "Jefferson Parish — …" — named, never a neighbouring parish's parcel.
+9. Open the Network tab during 1, 3 and 6. **Expect:** the parcel requests succeed (200, no CORS error) from `services*.arcgis.com` and `utility.arcgis.com`.
+- **Stopping rule:** closes on a dated pass of 1–9, or a failed step filed as a recurrence on B1988288.
+
+### V1413377 — B1988288: measure the 10 blocked Louisiana parish endpoints (incl. Calcasieu and Jefferson) from a browser with open egress `Blocker: live-GIS`
+
+`docs/STATEWIDE-PARCELS.md` → "Candidates needing a live measurement from Michael's browser" lists, per parish, the EXACT REST URL (parish-owned or assessor-consortium hosts — `cppj.net`, `jeffparish.net`, `iberiagov.net`, `romlc.net`, `efsedge.com`), a point to query and what to confirm. **No sandbox check is possible: every host is a 403 at the CONNECT tunnel here.** Also measure the first-party alternates listed under it (Ascension `geo.apgov.us`, St. James `gisviewer.stjamesla.com`, St. Bernard `lucity.sbpg.net`, St. Tammany `gisportal.stpgov.org`, Lafayette `webgis.lafayetteassessor.com`, Terrebonne `gis.tpcg.org`, Allen `gis3.totaland.com`, Tangipahoa `tangis.tangipahoa.org`).
+**Steps** (per host, in a browser on any network that reaches it; record each result in `docs/STATEWIDE-PARCELS.md` under the Louisiana section and — for a passing host — wire it in `counties.js`):
+1. Open `<URL>?f=json`. **Expect:** a layer with `geometryType: esriGeometryPolygon` and owner/parcel-id/situs-shaped field names. Record the field list.
+2. Open `<URL>/query?where=1%3D1&returnCountOnly=true&f=json`. **Expect:** a count plausible for the parish (Calcasieu ≈ 100k+, Jefferson ≈ 150k+).
+3. Open `<URL>/query?where=1%3D1&returnExtentOnly=true&outSR=4326&f=json`. **Expect:** an extent matching the parish (Calcasieu ≈ −93.76..−92.88 / 30.05..30.50; Jefferson ≈ −90.28..−89.97 / 29.18..30.06).
+4. Query the listed point with `geometry=<lng>,<lat>&geometryType=esriGeometryPoint&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=*&returnGeometry=false&f=json`. **Expect:** a real parcel with an id, an owner and a SITUS column (not the mailing address); repeat at the parish seat and one rural point — none may be empty (the city-hole trap).
+5. Check the response headers for `Access-Control-Allow-Origin`. **Expect:** present; if absent the host needs the exact hostname added to `ALLOWED_HOSTS` in `functions/gis-proxy/[[path]].js`.
+- **Stopping rule:** closes when each of the 10 rows is recorded as wired, rejected (with the reason) or still-blocked (with what stopped it); Calcasieu and Jefferson especially may not stay silent.
+
 ### V1411120 — B1986032: "Activate layer" never zooms out and never moves a view that already shows the site `Blocker: real-data`
 
 Sandbox-proven: `test/activateFraming.test.js` (pure view rule incl. red-proof against the old margin fit), full unit suite, build. **Still needs** the owner's real Georgia plan (signed in).
