@@ -167,8 +167,7 @@ import AppHeader from "../../shared/ui/AppHeader.jsx";
    above already imports this file. */
 import { CRUMB_MIN_W } from "../../shared/ui/ProjectBreadcrumb.jsx";
 import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.jsx";
-import { activateLayerView, activeParcelBox } from "./lib/activateFraming.js";
-import { layerMinZoom, GATE_CLEARANCE } from "./lib/layerZoomGate.js";
+import { layerVisibility, dormantZoomLine } from "./lib/layerZoomGate.js";
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 /* B1449 — the anchored render (the zoom half of B1440's increment) + the proportional wheel factor.
    `viewAnchor.js` holds the proof that an anchored frame lands exactly where a direct one would. */
@@ -6347,31 +6346,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return () => { stop(); };
   }, [fitReq]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* Bring a just-activated Site Analysis layer into view WITHOUT taking the owner anywhere he did
-     not ask to go (NEW-1). The old body fitted the active parcels + a 60% margin on every enable,
-     which on a site he was already looking at always landed wider than where he was.
-     Now (lib/activateFraming.js): site already on screen → the view is left exactly as it is;
-     site off screen → pan to centre it at the CURRENT scale; the only scale change is zooming IN
-     just past a scale-gated layer's own gate (FEMA / NWI). Never out. The single framing helper —
-     do not fork a second. */
-  const frameToActiveParcels = useCallback((layerId) => {
-    const box = activeParcelBox(parcels);
-    if (!box) return;
-    const minZ = layerMinZoom(ALL_LAYERS[layerId]);
-    const minPpf = origin && typeof minZ === "number" ? zoomToPpf(minZ + GATE_CLEARANCE, origin.lat) : null;
-    setView((v) => activateLayerView({ view: v, size, box, minPpf }));
-  }, [parcels, size, setView, origin]);
-
   /* Toggle a shared GIS overlay from a Site Analysis constraint card (B190). Writes
      the same app-shared `overlays` state the Layers panel uses (one source of truth) —
-     so syncOverlayLayers paints it on the map. On enable: ensure the basemap is on for
-     geographic context, then make sure the site is on screen (never zooming out). Deactivate
-     never moves the view. */
+     so syncOverlayLayers paints it on the map. On enable it makes sure the basemap is on for
+     geographic context and NOTHING ELSE: activating or deactivating a layer NEVER moves the
+     view — no pan, no zoom in, no zoom out (owner, 2026-09-30: "The activate layer button
+     shouldn't move the screen anywhere."; supersedes the B190 frame-to-site rule and B1986032's
+     first cut). A scale-gated layer that cannot draw at the current zoom says so on its card
+     (`analysisLayerZoomNote`) instead of the map moving. Do NOT add a setView / requestFit here. */
   const toggleAnalysisLayer = useCallback((layerId, wantOn) => {
     if (!layerId) return;
     setOverlays && setOverlays((o) => ({ ...o, [layerId]: { ...(o[layerId] || { opacity: ALL_LAYERS[layerId]?.opacity ?? 0.7 }), on: wantOn } }));
-    if (wantOn) { ensureBasemapOn(); frameToActiveParcels(layerId); }
-  }, [setOverlays, frameToActiveParcels, ensureBasemapOn]);
+    if (wantOn) ensureBasemapOn();
+  }, [setOverlays, ensureBasemapOn]);
+
+  /* The card's read-only note for an ON layer the current zoom suppresses — the same
+     `layerVisibility` answer the Layers panel row shows, reported here so the owner is told why
+     nothing painted rather than the map jumping. Text only: no click, no zoom. */
+  const analysisLayerZoomNote = useCallback((layerId) => {
+    if (!origin || !layerId || !overlays?.[layerId]?.on) return null;
+    const v = layerVisibility({ cfg: ALL_LAYERS[layerId], on: true, zoom: ppfToZoom(view.ppf, origin.lat), status: layerStatus?.[layerId] });
+    return v.state === "dormant-zoom" ? dormantZoomLine(v.levels) : null;
+  }, [origin, overlays, view.ppf, layerStatus]);
 
   /* ⛔ REMOVED (B-VTX-SEL) — this used to auto-select "the single restored parcel so its handles
    * are ready to use". It ran on every MOUNT, not just the moment a parcel was first drawn, so
@@ -9472,7 +9468,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // B673 — zoom the canvas to a set of elements (the conflict toast's "Show" action) and select
   // them all, so the highlight makes "which elements are they talking about" unmistakable for a
-  // coalesced notice as much as a single one. Same framing math as frameToActiveParcels, over the
+  // coalesced notice as much as a single one. Same framing math as `fit`, over the
   // UNION bbox with generous margin for context. `members` is a list of { kind, id }.
   const zoomToElements = (members) => {
     const list = Array.isArray(members) ? members : [];
@@ -21358,7 +21354,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <>
                     <LazyPanel name="Site Analysis" minHeight={220} label="Loading site analysis…">
                       <SiteAnalysis rings={rings} acres={acres} parcelCount={act.length} PAL={PAL} chip={chip}
-                        isLayerOn={(id) => !!overlays?.[id]?.on} onToggleLayer={toggleAnalysisLayer} layerStatus={layerStatus}
+                        isLayerOn={(id) => !!overlays?.[id]?.on} onToggleLayer={toggleAnalysisLayer} layerStatus={layerStatus} layerZoomNote={analysisLayerZoomNote}
                         onFindings={(fs) => { const w = fs && fs.find((f) => f.id === "wetlands"); setAnalysisWetlands(w ? w.status : null); }} />
                     </LazyPanel>
                     {/* NEW-1 (2026-09-05, owner directive) — Analysis screens, Drainage decides:

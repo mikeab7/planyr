@@ -3484,15 +3484,3 @@ Sandbox-proven: `test/parcelIdentity.test.js` (9; the pre-fix rule collides on t
 
 **Result:** ✅ PASSED, recorded from the owner's report. Throwaway plan "Concept B" (`smunisjn4ny7`) in the Grand Port group, since binned to Recently deleted; Concept A and Concept A (copy) untouched. Identify mode, real clicks: (1) 20887 in plan → "already in plan", selected 20887 (acct 13376). (2) 15328 in plan → selected 15328 (acct 10096). (3) both deleted, then 15328 → added (`oid:3642195`), 20887 → added (`oid:3642194`), re-click 15328 → removed ONLY 15328, 20887 stayed (confirmed in `site_elements`). (4) the two 2.35 AC strips: 25153 → selected 25153 (acct 14964), 6496 → selected 6496 (acct 4358). (5) re-click 20887 → removed only it. Also: strip lots re-added on Concept A ~4:20 PM with distinct `oid:` keys and no duplicates. The served chunk hash was not stated in this report. `Cadence: once` — closed.
 
-### V1411120 — B1986032: "Activate layer" never zooms out and never moves a view that already shows the site ✅ **PASSED 2026-09-30 for the stay-put case (steps 1–3) — live-verified by Cowork on real production `planyr.io`, build `5263066` (the merge commit itself); off-screen pan and zoom-in-to-gate (steps 4–5) NOT exercised live**
-
-Sandbox-proven: `test/activateFraming.test.js` (pure view rule incl. red-proof against the old margin fit), full unit suite, build. **Still needs** the owner's real Georgia plan (signed in).
-**Steps** (read the served chunk hash in the same observation as each result; use a throwaway duplicate of the plan):
-1. Open the Georgia plan, zoom to a close working view of the parcel, open Analysis. **Expect:** parcel visible, panel shows findings.
-2. Click **◍ Activate layer** on each resolved finding in turn. **Expect:** the view does not move at all (same zoom, same position) and the layer paints (or shows its own "zoom in" note).
-3. Click **◉ Deactivate layer** on one. **Expect:** view still does not move.
-4. Pan so the site is fully off-screen, click Activate. **Expect:** the site comes back centred at the same or a closer scale, never wider.
-5. Zoom far out (below FEMA's draw level), click Activate on the flood finding. **Expect:** it zooms IN just enough for the layer to draw, never out.
-- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1986032.
-- **Live result (Cowork, recorded 2026-09-30):** Georgia plan, Concept A. Zoomed to a close working view of the parcel, opened Analysis, clicked Activate layer on Floodplain then Wetlands. The parcel outline stayed in exactly the same screen position and the scale bar did not change after either click; both layers switched to Deactivate and their overlay images were in the page. Both layers turned back off afterwards, view still unchanged.
-- **Accepted / not accepted:** steps 1–3 accepted as PASS. Steps 4 (site off-screen → pan, never wider) and 5 (far-out zoom → zoom in only) were not run live and are covered by `test/activateFraming.test.js` only. Closed on the owner's instruction to record the stay-put pass; the residual is a unit-test-only claim, not a live one, and is stated as such. `Cadence: once`.
