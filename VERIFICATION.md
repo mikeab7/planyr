@@ -166,6 +166,16 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1413904 — B1988816: every site's map pin sits inside its own parcel (Katz, Rankin Rd) `Blocker: real-data`
+
+Sandbox-proven: `test/siteAnchor.test.js` (L-shaped fixture, centroid outside -> anchor inside with clearance; holes; multi-parcel; sliver). **Still needs Michael's real signed-in Katz site.**
+**Steps** (read-only — no edits to any plan; read the served chunk hash in the same observation):
+1. Site tab -> Map view, no project selected. Zoom to the Katz site near Rankin Rd / I-45 N. **Expect:** the orange marker sits inside the outlined parcel, in the wide part, not in the lower-left notch.
+2. Zoom in past the point where the parcel outline appears, then further to the full plan. **Expect:** the marker (then the name tag) stays inside the outline the whole way, at one consistent spot.
+3. Click the Show-on-map arrow for Katz in the Sites list. **Expect:** the map centres on that same inside point.
+4. Spot-check two ordinary rectangular sites. **Expect:** their pins have not visibly moved from where they were.
+- **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B1988816.
+
 ### V1423104 — B1998016: dark theme on a phone — Settings > Profile fields are dark with readable text; no white panels in Schedule/Review `Blocker: auth`
 
 Sandbox-proven: `ui-audit/verify-theme-surface-contrast.mjs` (dark+light × phone+desktop × signed-out + signed-in fixture: 0 failures after, 8 before) and `test/themeFieldSurface.test.js`. **Pending** a real signed-in phone.
