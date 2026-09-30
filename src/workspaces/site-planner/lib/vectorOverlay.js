@@ -25,7 +25,7 @@
  */
 import L from "leaflet";
 import { gisCache } from "./gisCache.js";
-import { VECTOR_SOURCES, fetchCached, decideVectorOrImage, pickTier, snapBbox, vectorKey, styleFor, identifyRows, hitFeature } from "./vectorLayers.js";
+import { VECTOR_SOURCES, isCountyLinesId, isCityLimitsId, fetchCached, decideVectorOrImage, pickTier, snapBbox, vectorKey, styleFor, identifyRows, hitFeature } from "./vectorLayers.js";
 import { labelAnchors, placeLabels, labelsVisible, titleCaseName } from "./boundaryLabels.js";
 import { placeNamesShown, placeNameKey } from "./placeNamesGate.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
@@ -259,7 +259,7 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
     const size = map.getSize();
     /* ⛔ ONE LABEL PER CITY — the city-limits layer skips every name the City-names canvas layer is already
      * drawing (see placeNamesGate.js). Filtered BEFORE placement so the names that remain get the freed room. */
-    const drawnElsewhere = source.id === "jur_city" ? placeNamesShown(map) : null;
+    const drawnElsewhere = isCityLimitsId(source.id) ? placeNamesShown(map) : null;
     const wanted = drawnElsewhere && drawnElsewhere.size ? anchors.filter((a) => !drawnElsewhere.has(placeNameKey(a.name))) : anchors;
     const placed = placeLabels(wanted, {
       project: (lng, lat) => { try { return map.latLngToContainerPoint([lat, lng]); } catch (_) { return null; } },
@@ -268,7 +268,7 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
     for (const p of placed) {
       // NEW-2 — a disputed strip and a release area already carry their full wording; never "… ETJ ETJ".
       const text = source.id === "jur_etj" ? (/^Undetermined/.test(p.name) ? "ETJ undetermined (disputed)" : /release area/.test(p.name) ? p.name : `${p.name} ETJ`) : p.name;
-      const icon = L.divIcon({ className: "", html: labelHtml(text, { uppercase: source.id === "jur_county" }), iconSize: [0, 0] });
+      const icon = L.divIcon({ className: "", html: labelHtml(text, { uppercase: isCountyLinesId(source.id) }), iconSize: [0, 0] });
       const mk = L.marker([p.lat, p.lng], { icon, interactive: false, keyboard: false, pane: labelPaneName });
       group.addLayer(mk);
       labelMarkers.push(mk);
@@ -397,7 +397,7 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
     }
     L.LayerGroup.prototype.onAdd.call(this, m);
     m.on("moveend", refresh);
-    if (source.id === "jur_city") m.on("pf:placenames", refreshLabels);   // the canvas layer's names changed → re-place ours
+    if (isCityLimitsId(source.id)) m.on("pf:placenames", refreshLabels);   // the canvas layer's names changed → re-place ours
     report("loading");
     refresh();
     return this;
@@ -406,7 +406,7 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
     seq++; // invalidate in-flight fetches / onFresh swaps
     closeIdentify(); // the popover must not outlive the layer
     m.off("moveend", refresh);
-    if (source.id === "jur_city") m.off("pf:placenames", refreshLabels);
+    if (isCityLimitsId(source.id)) m.off("pf:placenames", refreshLabels);
     L.LayerGroup.prototype.onRemove.call(this, m);
     map = null; lastKey = null;
   };

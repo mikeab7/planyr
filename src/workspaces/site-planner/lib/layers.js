@@ -1566,7 +1566,19 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           },
         });
         if (lyr) { lyr.addTo(map); refs[k] = lyr; }
-        else fail(k, cfg, `${cfg.label}: no vector source registered`, "unregistered"); // registry drift — loud, never a silent no-op
+        else if (cfg.url) {
+          /* B1990960 (recurrence) — `cachedVectorLayer` documents "null when no registry row exists
+           * (caller keeps its old path)", but this caller used to FAIL instead, so a vector row with no
+           * VECTOR_SOURCES entry drew nothing at all (Georgia's two rows, and seven Colorado rows). The
+           * old path is the live esri-leaflet layer — uncached, but it draws, retries and reports
+           * status. test/vectorLayerRegistered.test.js keeps the list of rows still on it explicit. */
+          const fb = buildFeatureLayer(cfg, st.opacity, lyrPane, { interactive: !!opts.identifyOk, identifyOk: opts.identifyOk });
+          fb.setOpacity = (oo) => { try { fb.setStyle({ opacity: oo }); } catch (_) {} };
+          attachFeatureRetry(fb, k, cfg, onStatus);
+          onStatus && onStatus(k, "loading");
+          fb.addTo(map); refs[k] = fb;
+        }
+        else fail(k, cfg, `${cfg.label}: no vector source registered`, "unregistered"); // no url either — registry drift, loud, never a silent no-op
       } else if (cfg.kind === "vectorLine") {
         // Cached pipeline vector layer (B751): crisp commodity-colored polylines when zoomed in,
         // the agency /export raster (imageFallback) when zoomed far out — switch re-evaluated per
