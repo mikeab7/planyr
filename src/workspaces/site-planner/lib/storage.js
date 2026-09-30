@@ -16,7 +16,7 @@ import { reconcileGroupNames, resolveNameFor, groupKeyOf, maxStampOf, nameAuthor
 import { idbGet, idbPut, idbAvailable, idbDelete, idbDeleteByPrefix } from "./localDb.js";
 import { idbKeysReleasableOnPlanDelete, idbKeysHeldByOtherPlans } from "./sharedAssetRefs.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
-import { DELETED_RETENTION_DAYS } from "../../../shared/projects/projectModel.js";
+import { DELETED_RETENTION_DAYS, wasProjectFreshlyMinted } from "../../../shared/projects/projectModel.js";
 // B927105 — WHICH ACCOUNT the store is bound to is now a leaf module (activeUser.js) that a
 // caller who only needs to read/set it (the shell, the project breadcrumb) can import WITHOUT
 // pulling in the rest of this file's heavy siteModel/cloudSync graph. Re-exported here so every
@@ -1131,7 +1131,9 @@ export function renameSiteGroup(idOrGroup, site, _afterMaterialize = false) {
    * (the same idempotent, deleted-refusing `ensureProjectRow` every non-planner write uses), then
    * falls through to the ordinary rename below. A project the cloud already has but this device
    * hasn't pulled is left untouched by it (created:false) and renamed by the RPC as before. */
-  if (!localPlans.length && !_afterMaterialize) {
+  if (!localPlans.length && !_afterMaterialize && wasProjectFreshlyMinted(groupId)) {
+    // ONLY a project this device just minted through the lazy "New project" flow (the cross-reload
+    // `freshProjects` hint) — an id nobody minted stays the harmless no-op it always was.
     if (!activeUid()) {
       const saved = saveSite({ id: groupId, groupId, site: name, name: "Concept A", origin: null, county: null, parcels: [], els: [], measures: [], settings: {} });
       if (!saved) return Promise.resolve({ ok: false, groupId, name, error: "Couldn't save the new name on this device — try again in a moment." });

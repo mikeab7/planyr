@@ -811,7 +811,8 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     const failed = []; // sources that wouldn't download / pages that wouldn't raster — reported, not swallowed
     try {
       setReviewId(rec.id);
-      setMeta({ title: isAutoTitle(rec) ? "" : (rec.title || ""), projectId: rec.projectId || null, project: liveReviewProject(rec, storedProjectName), orgScope: rec.orgScope === true, discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "" });
+      const liveProj = liveReviewProject(rec, storedProjectName); // B1991040 — resolved by id, never the stored copy
+      setMeta({ title: isAutoTitle(rec) ? "" : (rec.title || ""), projectId: rec.projectId || null, project: liveProj, orgScope: rec.orgScope === true, discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "" });
       const st = rec.stitch || {};
       setMeasures(st.measures || []); setFtPerUnit(st.ftPerUnit || 0);
       if (st.view) setView(st.view);

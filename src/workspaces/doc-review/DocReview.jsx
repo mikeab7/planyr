@@ -1097,7 +1097,8 @@ export default function DocReview({
     if (!(src && src.name && !isPdfName(src.name))) {
       currentUid().then((uid) => recordOpen(uid, { id: rec.id, projectId: openProjectId })).catch(() => {});
     }
-    setMeta({ title: isAutoTitle(rec) ? "" : (rec.title || ""), projectId: openProjectId, project: liveReviewProject({ ...rec, projectId: openProjectId }, storedProjectName), orgScope: rec.orgScope === true, discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "", folderId: rec.folderId || null, sourceFile: rec.sourceFile || "" });
+    const liveProj = liveReviewProject({ ...rec, projectId: openProjectId }, storedProjectName); // B1991040 — the project label is resolved by id, never the stored copy
+    setMeta({ title: isAutoTitle(rec) ? "" : (rec.title || ""), projectId: openProjectId, project: liveProj, orgScope: rec.orgScope === true, discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "", folderId: rec.folderId || null, sourceFile: rec.sourceFile || "" });
     if (openProjectId) onNavigate?.({ projectId: openProjectId }); // reflect the open file's project in the URL + breadcrumb (Work Item A)
     setSource(src ? { srcId: src.srcId, name: src.name, size: src.size || 0, storageKey: src.storageKey || null, driveKey: src.driveKey || null, oversize: !!src.oversize } : null);
     setMarkups(sanitizeMarkups(s.markups)); setCalByPage(s.calByPage || {}); setCalInfo(s.calInfo || {}); // sanitize: a corrupted/partial saved review can't crash the overlay
