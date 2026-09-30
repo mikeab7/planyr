@@ -29,6 +29,7 @@
  *
  * Screening only — never a design number. Confirm with your engineer and the
  * reviewing authority. */
+import { GA_DETENTION_HEADLINE, GA_DETENTION_DETAIL } from "./georgiaJurisdiction.js";
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import {
   identifyJurisdiction,
@@ -560,7 +561,7 @@ export function computeRequiredDetention(args = {}) {
     hcfcdMethod = null, // null (default → outfall-type minimum) | "pcpm" (→ 0.65 HCFCD PCPM methods baseline)
     hcfcdApplicable = true, // B789 — false when the identify county excludes Harris: HCFCD ends at the Harris line, so neither the greater-of candidate nor the PCPM deferral may price
     onDate = null,
-    siteState = null, // NEW-8 — "TX" | "CO" | null. The region guard below; null keeps pre-Colorado behaviour exactly.
+    siteState = null, // NEW-8 — "TX" | "CO" | "GA" | null. The region guard below; null keeps pre-Colorado behaviour exactly.
     /* NEW-1 (B1105) — the COLORADO REGIME SEAM, and it is deliberately fail-CLOSED.
      *
      * `coRegime` is the regime id from `coloradoRegions.coloradoRegimeFor()` ("mhfd" | "larimer" |
@@ -597,6 +598,23 @@ export function computeRequiredDetention(args = {}) {
    *
    * `siteState` null (a plan with no coordinates, every legacy saved plan) behaves exactly as
    * before — the guard fires on a POSITIVE Colorado answer, never on the absence of one. */
+  /* NEW-1 (Georgia) — the same hard guard for a POSITIVE Georgia answer. Georgia has no modeled detention
+   * criteria at all, so there is no regime to hand off to: the only correct output is the named
+   * "not available in Georgia yet" state. Above the authority lookup on purpose, so a manual Texas
+   * reviewer override on a Georgia site cannot leak a Texas rate. Never a number, never a blank. */
+  if (String(siteState || "").toUpperCase() === "GA") {
+    return {
+      kind: "unavailable",
+      requiredAcFt: null, bandAcFt: null, rateAcFtPerAc: null,
+      basis: "detention criteria not yet available for Georgia",
+      headline: GA_DETENTION_HEADLINE,
+      verdictSubject: "Georgia detention", // yieldVerdicts.unavailableDetentionRow's subject — else it reads "Colorado detention"
+      detail: GA_DETENTION_DETAIL,
+      rule: null, governing: null,
+      flags: ["georgia-not-wired", "no-criteria-modeled"],
+      caveat: SCREENING_CAVEAT,
+    };
+  }
   if (String(siteState || "").toUpperCase() === "CO") {
     /* The ORIGINAL hard guard's carrier, factored so the two exits below cannot drift apart (and so
      * its strings appear ONCE on the boot path — the site-route bundle budget is measured in a few
@@ -1622,8 +1640,14 @@ export const BKDD_OVERLAY_DETAIL =
  * city, so `city` alone can't tell membership from a frontage sliver), or null when
  * the centroid wasn't tested / the lookup failed. A legacy stored check predating
  * the field passes undefined. */
-export function authorityForJurisdiction({ city = [], etj = [], county = [], unincorporated = true, cityCentroid } = {}) {
+export function authorityForJurisdiction({ city = [], etj = [], county = [], unincorporated = true, cityCentroid, state = null } = {}) {
   const out = { primary: null, channelAuthority: null, overlays: [], ambiguous: [], flags: [] };
+  /* ⛔ NEW-1 (Georgia) — A GEORGIA COUNTY NAME IS NOT A TEXAS COUNTY NAME. Georgia has a Harris County and a
+   * Montgomery County; matched by bare name below, they would hand a Georgia site HCFCD (Harris County
+   * Flood Control District) as its channel authority and Montgomery County TX's detention rules. On a
+   * positively-Georgia answer there is NO modeled authority — the named "not available in Georgia yet"
+   * state — and nothing below runs. */
+  if (String(state || "").toUpperCase() === "GA") { out.flags.push("georgia-not-wired", "no-criteria-modeled"); return out; }
   const counties = county.map((c) => String(c).toLowerCase());
   const cities = city.map((c) => String(c).toLowerCase());
   const etjs = etj.map((c) => String(c).toLowerCase());
@@ -2026,6 +2050,8 @@ export function slimDrainageContext(ctx) {
         city: a.jurisdiction?.city || [],
         county: a.jurisdiction?.county || [],
         etj: a.jurisdiction?.etj || [],
+        // NEW-1 (Georgia) — rides the slim so a reloaded readout re-derives the SAME (no-Texas-authority) answer.
+        ...(a.jurisdiction?.state ? { state: a.jurisdiction.state } : {}),
         // B823 — the centroid-membership fact rides the slim so the rehydrated authority
         // re-derivation (B788) can apply the materially-inside gate. Written as array-or-null
         // when the check KNEW it; a legacy slim simply lacks the key (JSON drops undefined),
@@ -2073,7 +2099,7 @@ export function slimDrainageContext(ctx) {
  * this to split a stored check's derived facts (replaced by a fresh re-derivation) from
  * its query-outcome facts (mud overlays, jurisdiction-partial, …), which describe the
  * check-time fetches and can't be re-derived from the raw jurisdiction names. */
-const AUTHORITY_DERIVED_FLAGS = new Set(["houston-etj", "no-criteria-modeled", "city-criteria-unverified"]);
+const AUTHORITY_DERIVED_FLAGS = new Set(["houston-etj", "no-criteria-modeled", "city-criteria-unverified", "georgia-not-wired"]);
 const AUTHORITY_DERIVED_OVERLAY_KINDS = new Set(["etj", "municipal"]);
 
 /* Rebuild a read-context-shaped object from a slim summary: re-derive the rule record
@@ -2109,6 +2135,7 @@ export function hydrateDrainageContext(slim) {
     city: a.jurisdiction?.city || [],
     county: a.jurisdiction?.county || [],
     etj: a.jurisdiction?.etj || [],
+    state: a.jurisdiction?.state || null, // NEW-1 (Georgia)
     // B823 — pass the stored centroid fact through (undefined on a legacy slim → the
     // materially-inside gate fails open; see authorityForJurisdiction).
     cityCentroid: a.jurisdiction?.cityCentroid,
