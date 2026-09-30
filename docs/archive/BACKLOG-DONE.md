@@ -17053,3 +17053,11 @@ Each shrink case also carries a **vacuity guard** that fails rather than scoring
 - Owner product constraints check: nothing built here contradicts a listed constraint.
 - Verify: live — **V1400816** ✅ PASSED 2026-09-29 (owner's signed-in Chrome, throwaway plan; see `docs/archive/VERIFICATION-DONE.md`). Disposition: reproduced-and-fixed; live pass confirmed each click adds/removes only the lot under the cursor.
 - Files: `src/workspaces/site-planner/lib/parcelIdentity.js`, `SitePlanner.jsx`, `MapFinder.jsx`, `test/parcelIdentity.test.js`.
+
+### B1875168 — Map scale bar label looks drawn twice (ghosted) — ✅ Done 2026-09-30
+- Module: Site · Tags: #map #theme · Verify: sandbox
+- Cause: Leaflet's vendor `.leaflet-control-scale-line` ships `text-shadow: 1px 1px #fff` (dark-on-white look). Our override restyled it light-on-`--surface-overlay` but never cleared the shadow, so the white offset read as a second copy of the label.
+- Fix: `text-shadow: none` on the `:root .leaflet-container .leaflet-control-scale-line` rule in `src/index.css`. Checked the zoom bar and attribution overrides: vendor Leaflet sets no text-shadow on either, nothing to clear.
+- Sandbox verify (built app, Playwright, tab visible): computed `text-shadow` = `none` in light and dark; the same page with the vendor shadow re-injected computes `rgb(255,255,255) 1px 1px 0px` (known-bad arm, proves the probe sees it). Before/after crops at 3x taken for both themes.
+- Owner product constraints check: nothing built here contradicts a listed constraint.
+- Files: `src/index.css`.
