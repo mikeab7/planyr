@@ -19823,6 +19823,12 @@ _(new `Verify: live` items land here after implementation.)_
 - Owner product constraints check: nothing here contradicts a listed constraint.
 - Not built, said plainly: touch **pinch**-zoom was not exercised (Playwright has no real pinch primitive); Leaflet drives pinch through per-frame state moves (`_move`), which the state-based path draws correctly, but that is reasoning, not a measurement — it is a step in V1408688.
 
+### B1873392 — Dark mode: selected rows in project menu / sites list / markup list unreadable `[Site Planner]` (bug) #ui #site-planner #doc-review
+`[x]` Selected/active rows used the literal `#fbf3ee` fill under theme-token text (light-on-light in dark). Now one solid token `--surface-selected` (light #fbf3ee unchanged; dark #432e2a) at MapFinder status rows, team-share rows, active sites-list row, and DocReview selected markup row. SitePlanner.jsx SVG crop rect left alone (canvas overlay, not a menu row).
+- Verify: live (V1338288)
+- Proof: `test/surfaceSelected.test.js` (no literal at call sites; text-primary on token 15.20:1 light, 10.57:1 dark).
+- Constraint check: nothing here contradicts `## Owner product constraints`.
+
 ## 🕓 Later / Roadmap
 
 *Deliberately deferred. Do **not** action these unless moved up to 🔲 Open.*

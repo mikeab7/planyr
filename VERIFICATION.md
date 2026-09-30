@@ -1607,6 +1607,12 @@ state exactly what was created/touched. Never touch one of Michael's real plans.
 
 ---
 
+### V1338288 — B1873392: selected menu rows readable in dark theme `Blocker: live-GIS`
+Sandbox done: unit test proves token in both themes (15.20:1 / 10.57:1), no literal at call sites. Pending (Map, planyr.io):
+1. Dark theme: open a project row's menu → checked status row shows visible label on a tinted band. Expected: readable.
+2. Same menu, shared team row → readable tinted band.
+3. Light theme: both look as before (cream band).
+
 ## THE CHECKLIST — run this on Michael's signed-in Chrome, on `planyr.io`
 
 **⛔ STEP 0, and it is not optional (owner correction, 2026-09-03, B1112449/B1112450).** A tab can silently keep serving a pre-deploy cached bundle, and a stale tab's own reload can reload the SAME stale chunks. So the chunk name is read **in the same `evaluate` as every result below** — never in a separate call, and never inherited from another tab that was "confirmed fresh" minutes earlier. **Open a brand-new tab**, go to a real project's Site view, let it settle, then run the single expression below.

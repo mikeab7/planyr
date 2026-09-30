@@ -4085,7 +4085,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         onFocus={() => setHoverRow(s.id)}
         onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setHoverRow((r) => (r === s.id ? null : r)); }}
         onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); openSiteMenu(s, e.clientX, e.clientY); }}
-        style={{ display: "flex", alignItems: "center", gap: 8, height: rowH, padding: "0 12px", cursor: "pointer", position: "relative", borderLeft: `3px solid ${isActive ? PAL.accent : "transparent"}`, background: isActive ? "#fbf3ee" : "transparent" }}>
+        style={{ display: "flex", alignItems: "center", gap: 8, height: rowH, padding: "0 12px", cursor: "pointer", position: "relative", borderLeft: `3px solid ${isActive ? PAL.accent : "transparent"}`, background: isActive ? "var(--surface-selected)" : "transparent" }}>
         {showStatusDot && (
           <button title={`Status: ${STATUS_META[st]?.label || st} — click to change`} aria-label="Set status"
             onClick={(e) => { e.stopPropagation(); openSiteMenu(s, e.clientX, e.clientY); }}
@@ -5315,7 +5315,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               return (
                 <button key={st} onClick={() => setStatus(statusMenu.site.id, st)}
                   style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
-                    background: cur ? "#fbf3ee" : "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: cur ? 700 : 500, textDecoration: t.struck ? "line-through" : "none" }}>
+                    background: cur ? "var(--surface-selected)" : "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: cur ? 700 : 500, textDecoration: t.struck ? "line-through" : "none" }}>
                   <span style={{ width: 15, height: 15, flex: "none", display: "grid", placeItems: "center", borderRadius: RADIUS.pill,
                     border: `1.5px solid ${t.color}`, background: t.hollow ? "var(--surface-raised)" : t.color, color: t.hollow ? t.color : "#fff", fontSize: 9, lineHeight: 1 }}>{t.glyph}</span>
                   <span style={{ flex: 1 }}>{STATUS_META[st]?.label || st}</span>
@@ -5384,7 +5384,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                       <button key={tm.id} disabled={shareBusy} onClick={() => doShare(s, on ? null : tm.id)}
                         title={on ? `Stop sharing with ${tm.name}` : `Share this project with ${tm.name}`}
                         style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
-                          background: on ? "#fbf3ee" : "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: on ? 700 : 500 }}>
+                          background: on ? "var(--surface-selected)" : "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: on ? 700 : 500 }}>
                         <span style={{ width: 15, height: 15, flex: "none", display: "grid", placeItems: "center", color: PAL.accent, lineHeight: 0 }}>
                           <ShareGlyph />
                         </span>
