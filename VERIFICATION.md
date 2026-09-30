@@ -166,6 +166,19 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1417520 — B1992432: City limits + ETJ paint with labels around Dallas, and site screening names the ETJ (or says "unavailable") `Blocker: none — run on planyr.io once the build is deployed`
+
+Sandbox-proven (live services, real overlay engine in Chromium, 2026-09-30): `ui-audit/audit-dfw-etj-coverage.mjs` 8/8, `ui-audit/verify-dfw-etj-map.mjs` 7/7, `test/dfwEtjCoverage.test.js` 19/19, roster drift audit clean. **Still needs the deployed app** (the real Layers panel, the real basemap, the real header badge) — none of which the standalone harness includes.
+**Steps** (read the served chunk hash in the same observation as each result):
+1. Site → map finder, pan to Dallas and zoom out until the whole metro (well past 50 miles) is in view. Layers → "City limits & ETJ" on. **Expect:** solid blue city lines and DASHED blue ETJ lines over the whole metro; the ETJ dashes reach out through Collin, Rockwall, Denton and around Fort Worth; nothing is cut off at a circle.
+2. Zoom in to metro level (Dallas–Plano–Frisco–McKinney). **Expect:** ETJ names ("Prosper ETJ", "Celina ETJ", "Fort Worth ETJ") and city names both label; hovering an ETJ line names it ("<City> — ETJ").
+3. Layers → ⓘ on "City limits & ETJ". **Expect:** the vintage line names each publisher and its edit date (Collin 2026-09-26, Rockwall 2026-06-25, Denton 2022-08-02, Fort Worth 2018-09-13) — not "current edition".
+4. Drop a site pin (or draw a site) at 33.23255, -96.8961 (Prosper's ETJ, in no city). **Expect:** header reads "City of Prosper ETJ · Collin County"; the ETJ tooltip carries the vintage + SB 2038 caveat.
+5. Drop a site at 33.10, -96.50 (Collin County, no city, no ETJ). **Expect:** "Unincorporated · Collin County".
+6. Drop a site at 32.30, -96.75 (Ellis County, no city). **Expect:** "Outside city limits · ETJ data unavailable · Ellis County" — NOT "Unincorporated".
+7. Drop a site at downtown Dallas (32.7767, -96.7970). **Expect:** "City of Dallas · Dallas County".
+8. Regression: a Houston site (29.76, -95.37) with the same layer on. **Expect:** Houston-area ETJ still draws and the badge is unchanged.
+- **Stopping rule:** closes on a dated pass of 1–8, or a failed step filed as a recurrence on B1992432.
 ### V1413360 — B1988272: clicking lots at Grand Port shows an acknowledgement under the cursor at once `Blocker: real-data`
 
 Sandbox-proven: `e2e/click-ack.spec.js` (red on main, green here), `test/clickAck.test.js`, `ui-audit/measure-click-to-row.mjs`. **Still needs the real Chambers CAD server and Michael's real plan data.**
