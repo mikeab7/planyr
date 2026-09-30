@@ -919,3 +919,47 @@ kbd {
 .psw-row:hover .psw-pin, .psw-row:focus-within .psw-pin { opacity: 1; }
 .psw-row .psw-pin:hover { background: var(--hover-menu); color: var(--text-primary); }
 .psw-panel button:hover:not(:disabled) { filter: none; }
+
+
+/* NEW-1 — instant click acknowledgement (src/shared/ui/clickAck.js). Anchored at the cursor, holds
+ * until the lot lands or fails; the tag says "no lot here" instead of vanishing silently. */
+.click-ack {
+  position: fixed;
+  z-index: 100000;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.click-ack__ring {
+  position: absolute;
+  left: -16px;
+  top: -16px;
+  width: 32px;
+  height: 32px;
+  box-sizing: border-box;
+  border: 3px solid var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--planner-raised);
+  animation: click-ack-pulse 0.9s ease-out infinite;
+}
+.click-ack__tag {
+  position: absolute;
+  left: 14px;
+  top: -14px;
+  white-space: nowrap;
+  padding: 4px 8px;
+  border: 1px solid var(--planner-border);
+  border-radius: var(--radius-md);
+  background: var(--planner-raised);
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 12px; /* design-exempt: single-use cursor tag, sized to sit beside a 32px ring */
+}
+html.click-ack-busy, html.click-ack-busy * { cursor: progress !important; }
+@keyframes click-ack-pulse {
+  0% { transform: scale(0.55); opacity: 1; }
+  100% { transform: scale(1.15); opacity: 0.55; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .click-ack__ring { animation: none; }
+}
