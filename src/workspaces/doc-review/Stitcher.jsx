@@ -1076,7 +1076,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
 
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
         {/* tray */}
-        <div style={{ flex: "none", width: 168, background: "#fff", borderRight: `1px solid ${PAL.line}`, overflowY: "auto", padding: 8 }}>
+        <div style={{ flex: "none", width: 168, background: "var(--surface-raised)", borderRight: `1px solid ${PAL.line}`, overflowY: "auto", padding: 8 }}>
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 6 }}>
             <div style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>{showAllPages || !anyGroups ? "Sheets" : "Logical sheets"}</div>
             {anyGroups && <button onClick={() => setShowAllPages((v) => !v)} style={{ fontSize: 10, color: PAL.accent, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}>{showAllPages ? "grouped" : "all pages"}</button>}
@@ -1102,7 +1102,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
             </button>
           ) : (
             <button key={t.key} data-testid="stitch-tray-row" onClick={() => addSheet(t.pdf, t.page)} title={`${t.pdf.name} · page ${t.page}`}
-              style={{ display: "flex", alignItems: "baseline", gap: 3, width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 3, borderRadius: RADIUS.sm, cursor: "pointer", fontFamily: "inherit", fontSize: 11, border: `1px solid ${PAL.line}`, background: "#fff", color: PAL.ink, overflow: "hidden" }}>
+              style={{ display: "flex", alignItems: "baseline", gap: 3, width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 3, borderRadius: RADIUS.sm, cursor: "pointer", fontFamily: "inherit", fontSize: 11, border: `1px solid ${PAL.line}`, background: "var(--surface-raised)", color: PAL.ink, overflow: "hidden" }}>
               <span style={{ flex: "none", fontWeight: 700, color: PAL.muted }}>+</span>
               <MiddleTruncate text={`${t.pdf.name.replace(/\.pdf$/i, "")} · p${t.page}`} title={`${t.pdf.name} · page ${t.page}`} />
             </button>
@@ -1203,7 +1203,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
           </svg>
           {/* Inline Calibrate entry (B304) — replaces window.prompt; validates the typed length. */}
           {calInput && (
-            <div style={{ position: "absolute", left: calPos.x, top: calPos.y, transform: "translate(-50%, -135%)", zIndex: 5, width: 214, background: "#fff", border: `1px solid ${PAL.accent}`, borderRadius: 8, padding: "7px 9px", boxShadow: "0 6px 20px rgba(0,0,0,0.28)", fontFamily: "system-ui, sans-serif" }}>
+            <div style={{ position: "absolute", left: calPos.x, top: calPos.y, transform: "translate(-50%, -135%)", zIndex: 5, width: 214, background: "var(--surface-raised)", border: `1px solid ${PAL.accent}`, borderRadius: 8, padding: "7px 9px", boxShadow: "0 6px 20px rgba(0,0,0,0.28)", fontFamily: "system-ui, sans-serif" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={{ fontSize: 11, color: PAL.muted, whiteSpace: "nowrap" }}>Real length</span>
                 <input autoFocus value={calInput.value}
@@ -1311,7 +1311,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
           const left = Math.max(8, Math.min((detail.screen?.x || 200) - PW / 2, (typeof window !== "undefined" ? window.innerWidth : 1200) - PW - 8));
           const top = Math.max(8, Math.min((detail.screen?.y || 200) + 18, (typeof window !== "undefined" ? window.innerHeight : 800) - DBOX.h - 96));
           return (
-            <div style={{ position: "fixed", left, top, zIndex: 30, width: PW, background: "#fff", border: `1px solid ${PAL.accent}`, borderRadius: 10, boxShadow: "0 12px 34px rgba(0,0,0,0.34)", fontFamily: "system-ui, sans-serif", overflow: "hidden" }}>
+            <div style={{ position: "fixed", left, top, zIndex: 30, width: PW, background: "var(--surface-raised)", border: `1px solid ${PAL.accent}`, borderRadius: 10, boxShadow: "0 12px 34px rgba(0,0,0,0.34)", fontFamily: "system-ui, sans-serif", overflow: "hidden" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", background: "var(--chrome-bg)", borderBottom: "1px solid var(--chrome-divider)" }}>
                 <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--chrome-text)" }}>☁ {detail.title}</span>
                 <div style={{ flex: 1 }} />
@@ -1345,7 +1345,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         })()}
 
         {/* right panel: placed sheets + takeoff */}
-        <div style={{ flex: "none", width: 220, background: "#fff", borderLeft: `1px solid ${PAL.line}`, overflowY: "auto", padding: 12, fontFamily: "system-ui, sans-serif" }}>
+        <div style={{ flex: "none", width: 220, background: "var(--surface-raised)", borderLeft: `1px solid ${PAL.line}`, overflowY: "auto", padding: 12, fontFamily: "system-ui, sans-serif" }}>
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, marginBottom: 6 }}>Placed sheets · {placed.length}</div>
           {placed.map((s, i) => {
             const isAligning = align && align.sheetId === s.id;

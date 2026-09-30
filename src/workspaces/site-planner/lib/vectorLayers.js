@@ -23,6 +23,10 @@
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { pipelineStyleFor } from "./pipelineCommodity.js";
 import { isShadedXSubtype } from "./floodZone.js";
+/* NEW-1 (DFW ETJ) — the ETJ layer draws EVERY routed ETJ source, from the same list the identify
+ * routes by, so the line you see is the line the screening reports (the B176 invariant). */
+import { ETJ_SOURCES, normalizeFeature } from "./jurisdiction.js";
+import { etjNamesOf } from "./etjNames.js";
 
 // ---------------------------------------------------------------------------
 // Source registry — one row per layer. `query` drives the vector pull (endpoint,
@@ -251,16 +255,26 @@ export const VECTOR_SOURCES = {
   },
   jur_etj: {
     id: "jur_etj",
-    label: "City ETJ (Houston region)",
+    label: "City ETJ (Houston & Dallas–Fort Worth)",
+    // NEW-1 (DFW) — every feature is normalised to a `CITY` property at fetch time (see
+    // `fetchVectorFeatures`' multi-source branch), so ONE label field serves every publisher.
     labelField: "CITY",
-    titleCaseLabel: true, // H-GAC publishes ALL-CAPS city names
-    labelZoom: { min: 10, max: 13 },
+    labelZoom: { min: 9, max: 13 },
     nameTemplate: "{name} — ETJ",
-    identifyNote: "This city's ETJ (extraterritorial jurisdiction) — its limited reach OUTSIDE its city limits. Not annexation and not utility service. Screening only.",
-    sourceName: "H-GAC (Houston-Galveston Area Council)",
-    liveFallback: true,
+    identifyNote: "This city's ETJ (extraterritorial jurisdiction) — its limited reach OUTSIDE its city limits. Not annexation and not utility service. Where two cities' ETJ claims overlap, both are named. Screening only.",
+    sourceName: "H-GAC · county, city and district publishers (see the layer\u2019s vintage line)",
+    /* No live single-service fallback: the drawn layer is now SEVERAL services, and the old
+     * fallback repainted only H-GAC's — which is empty in Dallas, i.e. a blank layer that reads as
+     * "no ETJ here". A failed pull with nothing cached reports FAILED instead (LOUD-FAILURE). */
+    liveFallback: false,
     query: {
-      url: GIS_SOURCES.etj_hgac.serviceUrl + "/query",
+      // One entry per routed ETJ source (bbox-filtered per view — a Houston pan never touches the
+      // Collin server). Same rows the identify reads: jurisdiction.js ETJ_SOURCES.
+      sources: ETJ_SOURCES.map((r) => ({
+        id: r.id, url: r.url + "/query", bbox: r.bbox,
+        nameCol: (r.fields && r.fields.name) || null, row: r,
+      })),
+      keyRev: 2, // the list of sources changed — bust every earlier single-source entry
       outFields: ["CITY"],
       where: "1=1",
       pageSize: 1000,
@@ -268,13 +282,15 @@ export const VECTOR_SOURCES = {
       ttl: 14 * 24 * 3600 * 1000, // ETJ is volatile-ish (SB2038 releases, annexations)
       minVectorZoom: 0,
       maxAreaDeg: Infinity,
+      // Bbox-scoped (was one region-wide "all" entry when H-GAC was the only source): the union of
+      // seven publishers does not fit one 512 KB cache entry, and a view only needs its own.
       tiers: [
-        // The whole 13-county H-GAC region fits ONE entry (608 features, ~200 KB @0.001°).
-        { maxZoom: 12, scope: "all", offsetDeg: 0.001, precision: 4 },
+        { maxZoom: 10, scope: "bbox", offsetDeg: 0.003, precision: 3, cellDeg: 1 },
+        { maxZoom: 12, scope: "bbox", offsetDeg: 0.001, precision: 4, cellDeg: 0.5 },
         { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
       ],
     },
-    note: "City ETJ across the H-GAC 13-county region.",
+    note: "City ETJ — Houston region (H-GAC, Baytown), Dallas–Fort Worth (twelve publishers, see docs/DFW-ETJ-COVERAGE.md), Austin.",
   },
   jur_isd: {
     id: "jur_isd",
@@ -493,8 +509,58 @@ async function defaultFetchJson(url, { timeoutMs = null } = {}) {
  * the server says `exceededTransferLimit === true` AND we're under the feature cap —
  * bumping the offset by the page size each round. Hard-caps at maxFeatures and flags
  * `truncated` when there was more than we kept. `fetchJson` is injected. */
+/* NEW-1 (DFW ETJ) — a source whose `query.sources` is a LIST is fetched as several services and
+ * merged. Each service is queried only when its own bbox meets the view (an "all"-scope pull, with no
+ * bbox, asks every one), every feature is reduced to `{ CITY, _src }` — the city name(s) read through
+ * `etjNamesOf` so a publisher's overlap strip ("Denton/Cross Roads") stays ONE polygon labelled with
+ * BOTH claims — and ANY in-view service failing fails the whole pull. That last part is deliberate:
+ * a partial answer would be cached for the full TTL and read as "no ETJ here" for the county that
+ * failed, which is the false-clean this layer exists to prevent. A failed REFRESH keeps the last-good
+ * copy (SWR); only a cold failure surfaces, and it surfaces loudly. */
+/* The drawn layer's view of one publisher row + one attribute set, from the SAME `normalizeFeature` the identify
+ * reads. `names` is always an array (a release area's is its constant). */
+function normalizeEtjFeature(row, attrs) {
+  const n = normalizeFeature(row, attrs);
+  return { names: n.names && n.names.length ? n.names : (n.name ? [n.name] : []), undetermined: !!n.undetermined, claimants: n.claimants || [] };
+}
+
+async function fetchMultiSourceFeatures(source, bbox, opts) {
+  const q = source.query;
+  const meets = (b, v) => !v || (b[0] <= v.n && b[2] >= v.s && b[1] <= v.e && b[3] >= v.w);
+  const subs = q.sources.filter((sub) => meets(sub.bbox, bbox));
+  const sourceMs = {};
+  const parts = await Promise.all(subs.map(async (sub) => {
+    // Every column the row's identify reads (NAME AND CITY on Denton's table); "*" when the row names none.
+    const cols = Object.values((sub.row && sub.row.fields) || {}).filter(Boolean);
+    const subSource = { ...source, query: { ...q, sources: undefined, url: sub.url, outFields: cols.length ? cols : ["*"], where: (sub.row && sub.row.where) || q.where } };
+    // One retry: with a dozen small publishers behind one layer, a single 5xx/blip must not blank a metro.
+    // A second failure still fails the pull (see the block comment above).
+    let res;
+    const t0 = Date.now();
+    try { res = await fetchVectorFeatures(subSource, bbox, opts); }
+    catch (_) { await new Promise((r) => setTimeout(r, opts.retryDelayMs ?? 700)); res = await fetchVectorFeatures(subSource, bbox, opts); }
+    sourceMs[sub.id] = Date.now() - t0;   // per-publisher wall time, so a SLOW publisher is attributable, not guessed
+    const { features, truncated } = res;
+    const out = [];
+    for (const f of features) {
+      // The ONE reader of a publisher's name (identify uses it too) — so a disputed strip and a release area are
+      // named identically on the map and in the screening.
+      const n = normalizeEtjFeature(sub.row, f.attributes || {});
+      const label = sub.row.release ? `${sub.row.nameConst || "Fort Worth"} ETJ release area (SB 2038)`
+        : n.undetermined ? "Undetermined (disputed)" : n.names.join(" / ");
+      out.push({ geometry: f.geometry, attributes: {
+        CITY: label, _src: sub.id, ...(sub.row.release ? { _release: true } : {}),
+        ...(n.undetermined ? { _undetermined: true, CLAIMANTS: n.claimants.join(" / ") } : {}),
+      } });
+    }
+    return { out, truncated };
+  }));
+  return { features: parts.flatMap((p) => p.out), truncated: parts.some((p) => p.truncated), sourceMs };
+}
+
 export async function fetchVectorFeatures(source, bbox, { fetchJson = defaultFetchJson, maxFeatures, tier = null } = {}) {
   const q = source.query;
+  if (Array.isArray(q.sources)) return fetchMultiSourceFeatures(source, bbox, { fetchJson, maxFeatures, tier });
   const cap = maxFeatures ?? q.maxFeatures;
   const features = [];
   let offset = 0;
@@ -881,13 +947,14 @@ export async function fetchCached(source, bbox, { cache, fetchJson = defaultFetc
   const effBbox = tier && tier.scope !== "all" && tier.cellDeg ? snapBbox(bbox, tier.cellDeg) : bbox;
   const key = vectorKey(source, effBbox, tier);
   const fetcher = async () => {
-    const { features, truncated } = await fetchVectorFeatures(source, tier && tier.scope === "all" ? null : effBbox, { fetchJson, tier });
+    const { features, truncated, sourceMs } = await fetchVectorFeatures(source, tier && tier.scope === "all" ? null : effBbox, { fetchJson, tier });
     const fc = featuresToGeoJson(features, { source });
     const out = tier ? fc : simplifyGeoJson(fc);
     // Surface the maxFeatures cap on the stored payload (B707): a capped pull is an
     // UNDERCOUNT — consumers (the mitigation engine) must flag it, never read it as
     // "everything". Silent truncation is the fabricated-all-clear class.
     if (truncated) out.truncated = true;
+    if (sourceMs) out.sourceMs = sourceMs;   // multi-source layers: how long each publisher took (rides the cached payload)
     return out;
   };
   const { cached, stale, fresh } = cache.swr(key, fetcher, { ttl: source.query.ttl, onFresh });

@@ -2696,7 +2696,7 @@ export default function DocReview({
                 // behaviour — no preventDefault needed).
                 const isCallout = !!editing.calloutTip || (editing.id && markups.find((m) => m.id === editing.id)?.kind === "callout");
                 const color = editing.id ? (readProp(markups.find((m) => m.id === editing.id) || {}, "fontColor") || "#1a1a1a") : (propStyle.fontColor ?? columnMeta("fontColor")?.default ?? "#1a1a1a");
-                const commonStyle = { position: "absolute", left: editing.pt.x * view.scale, top: editing.pt.y * view.scale - 14, font: "600 12px ui-sans-serif, system-ui, sans-serif", padding: "1px 4px", border: `1px solid ${PAL.accent}`, borderRadius: 4, background: "#fff", color, zIndex: 5 };
+                const commonStyle = { position: "absolute", left: editing.pt.x * view.scale, top: editing.pt.y * view.scale - 14, font: "600 12px ui-sans-serif, system-ui, sans-serif", padding: "1px 4px", border: `1px solid ${PAL.accent}`, borderRadius: 4, background: "#fff", /* B1998016: intentional — sits on the drawing paper and takes the markup's own (dark) font colour */ color, zIndex: 5 };
                 const onKeyDown = (ev) => {
                   ev.stopPropagation();
                   if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); closeEditor(true); }
@@ -2724,7 +2724,7 @@ export default function DocReview({
               })()}
               {/* Inline Calibrate entry (B304) — replaces window.prompt; validates the typed length. */}
               {calInput && (
-                <div style={{ position: "absolute", left: calInput.x, top: calInput.y, transform: "translate(-50%, -135%)", zIndex: 6, width: 214, background: "#fff", border: `1px solid ${PAL.accent}`, borderRadius: 8, padding: "7px 9px", boxShadow: "0 6px 20px rgba(0,0,0,0.28)", fontFamily: "system-ui, sans-serif" }}>
+                <div style={{ position: "absolute", left: calInput.x, top: calInput.y, transform: "translate(-50%, -135%)", zIndex: 6, width: 214, background: "var(--surface-raised)", border: `1px solid ${PAL.accent}`, borderRadius: 8, padding: "7px 9px", boxShadow: "0 6px 20px rgba(0,0,0,0.28)", fontFamily: "system-ui, sans-serif" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <span style={{ fontSize: 11, color: PAL.muted, whiteSpace: "nowrap" }}>Real length</span>
                     <input autoFocus value={calInput.value}
@@ -2771,7 +2771,7 @@ export default function DocReview({
             {pageMarks.length === 0
               ? <div style={{ fontSize: 11.5, color: PAL.muted, marginBottom: 10 }}>Nothing on this sheet yet.</div>
               : <div style={{ marginBottom: 10 }}>{pageMarks.map((m) => (
-                  <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 2px 2px 6px", borderRadius: 6, background: m.id === sel ? "#fbf3ee" : "transparent" }}>
+                  <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 2px 2px 6px", borderRadius: 6, background: m.id === sel ? "var(--surface-selected)" : "transparent" }}>
                     <button onClick={() => { setTool("select"); selectOne(m.id); }} title="Select this markup on the sheet"
                       style={{ flex: 1, minWidth: 0, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0", border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, textAlign: "left", color: "inherit" }}>
                       <span style={{ color: PAL.muted, textTransform: "capitalize", flex: "none" }}>{m.kind}</span>

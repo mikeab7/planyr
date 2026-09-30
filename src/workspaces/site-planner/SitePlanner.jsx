@@ -167,6 +167,8 @@ import AppHeader from "../../shared/ui/AppHeader.jsx";
    above already imports this file. */
 import { CRUMB_MIN_W } from "../../shared/ui/ProjectBreadcrumb.jsx";
 import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.jsx";
+import { activateLayerView, activeParcelBox } from "./lib/activateFraming.js";
+import { layerMinZoom, GATE_CLEARANCE } from "./lib/layerZoomGate.js";
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 /* B1449 — the anchored render (the zoom half of B1440's increment) + the proportional wheel factor.
    `viewAnchor.js` holds the proof that an anchored frame lands exactly where a direct one would. */
@@ -6345,31 +6347,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return () => { stop(); };
   }, [fitReq]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* Frame the planner view to the ACTIVE parcels (+ margin) so a just-enabled
-     constraint overlay is on-screen — FEMA/NWI are scale-gated and only draw zoomed
-     in. The margin keeps nearby constraints (a pipeline just off the parcel) visible.
-     Used by the Site Analysis "show on map" toggle (B190). */
-  const frameToActiveParcels = useCallback((marginFrac = 0.6) => {
-    const pts = [];
-    parcels.forEach((pc) => { if (pc.active !== false && (pc.points?.length || 0) >= 3) pts.push(...pc.points); });
-    if (pts.length === 0) return;
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    pts.forEach((p) => { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); });
-    const bw = Math.max(maxX - minX, 10), bh = Math.max(maxY - minY, 10);
-    minX -= bw * marginFrac; maxX += bw * marginFrac; minY -= bh * marginFrac; maxY += bh * marginFrac;
-    const ebw = maxX - minX, ebh = maxY - minY, pad = 40;
-    const ppf = Math.max(0.02, Math.min(8, Math.min((size.w - pad * 2) / ebw, (size.h - pad * 2) / ebh)));
-    setView({ ppf, offX: pad - minX * ppf + (size.w - pad * 2 - ebw * ppf) / 2, offY: pad - minY * ppf + (size.h - pad * 2 - ebh * ppf) / 2 });
-  }, [parcels, size, setView]);
+  /* Bring a just-activated Site Analysis layer into view WITHOUT taking the owner anywhere he did
+     not ask to go (NEW-1). The old body fitted the active parcels + a 60% margin on every enable,
+     which on a site he was already looking at always landed wider than where he was.
+     Now (lib/activateFraming.js): site already on screen → the view is left exactly as it is;
+     site off screen → pan to centre it at the CURRENT scale; the only scale change is zooming IN
+     just past a scale-gated layer's own gate (FEMA / NWI). Never out. The single framing helper —
+     do not fork a second. */
+  const frameToActiveParcels = useCallback((layerId) => {
+    const box = activeParcelBox(parcels);
+    if (!box) return;
+    const minZ = layerMinZoom(ALL_LAYERS[layerId]);
+    const minPpf = origin && typeof minZ === "number" ? zoomToPpf(minZ + GATE_CLEARANCE, origin.lat) : null;
+    setView((v) => activateLayerView({ view: v, size, box, minPpf }));
+  }, [parcels, size, setView, origin]);
 
   /* Toggle a shared GIS overlay from a Site Analysis constraint card (B190). Writes
      the same app-shared `overlays` state the Layers panel uses (one source of truth) —
      so syncOverlayLayers paints it on the map. On enable: ensure the basemap is on for
-     geographic context, then frame to the active parcels so it isn't offscreen. */
+     geographic context, then make sure the site is on screen (never zooming out). Deactivate
+     never moves the view. */
   const toggleAnalysisLayer = useCallback((layerId, wantOn) => {
     if (!layerId) return;
     setOverlays && setOverlays((o) => ({ ...o, [layerId]: { ...(o[layerId] || { opacity: ALL_LAYERS[layerId]?.opacity ?? 0.7 }), on: wantOn } }));
-    if (wantOn) { ensureBasemapOn(); frameToActiveParcels(); }
+    if (wantOn) { ensureBasemapOn(); frameToActiveParcels(layerId); }
   }, [setOverlays, frameToActiveParcels, ensureBasemapOn]);
 
   /* ⛔ REMOVED (B-VTX-SEL) — this used to auto-select "the single restored parcel so its handles
@@ -13002,7 +13003,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        * marks each rejection handled, because a `tok` supersede can return before the await and an
        * un-awaited rejection would otherwise surface as an unhandled one. */
       const zoneAUnstudied = (floodGeo.zones || []).some((z) => z.unstudiedA && z.zone === "A");
-      const inHarris = (ctx?.authority?.jurisdiction?.county || []).some((c) => /harris/i.test(String(c)));
+      const inHarris = ctx?.authority?.jurisdiction?.state !== "GA" // NEW-1 — Harris County, GEORGIA is not Texas's Harris
+        && (ctx?.authority?.jurisdiction?.county || []).some((c) => /harris/i.test(String(c)));
       const [ptLat, ptLng] = feetToLatLng(bfePt, origin.lat, origin.lon);
       const ebfeP = zoneAUnstudied ? leg("ebfe", sampleEbfePoint(ptLat, ptLng)) : null;
       const maapP = zoneAUnstudied && inHarris ? leg("maapnext", sampleMaapnextWse(ptLat, ptLng)) : null;
@@ -13231,7 +13233,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // to "hcfcd" ONLY for Harris, so it's sufficient evidence on its own). An effective coh/hcfcd
   // authority outside Harris — e.g. a user override on a Fort Bend site — must NOT surface the
   // control, and a STORED channel answer is ignored (not cleared) there, with a visible note.
-  const drainCountyHarris = (drainCtxData?.authority?.jurisdiction?.county || []).some((c) => /harris/i.test(String(c)));
+  const drainCountyHarris = drainCtxData?.authority?.jurisdiction?.state !== "GA" // NEW-1 — Harris County, GEORGIA is not HCFCD's Harris
+    && (drainCtxData?.authority?.jurisdiction?.county || []).some((c) => /harris/i.test(String(c)));
   const drainChannelRelevant = drainCtxData?.authority?.channelAuthority === "hcfcd"
     || (drainCountyHarris && (drainAuthorityId === "coh" || drainAuthorityId === "hcfcd"));
   const chanOverride = drainChannelRelevant ? chanOverrideStored : undefined;
@@ -13319,13 +13322,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     : null;
   const detReq = siteStateId === "CO"
     ? computeRequiredDetention({ ...detReqInputsCo, authorityId: null })
+    // NEW-1 (Georgia) — no modeled Georgia criteria: the guard's named "not available in Georgia yet"
+    // carrier, regardless of whatever the (Texas-shaped) drainage context resolved.
+    : siteStateId === "GA"
+    ? computeRequiredDetention({ ...detReqInputs, authorityId: null })
     : drainCtxData && siteSqft > 0 && drainAuthorityId
       ? computeRequiredDetention({ ...detReqInputs, authorityId: drainAuthorityId })
       : drainCtxData && siteSqft > 0 && drainCountyUnmodeled
         ? { ...computeRequiredDetention({ ...detReqInputs, authorityId: null }), governingCounty: drainCountyUnmodeled }
         : null;
   // A boundary straddle leaves primary null — compute EVERY candidate, labeled (never default).
-  const detReqCandidates = siteStateId !== "CO" && drainCtxData && siteSqft > 0 && !drainAuthorityId && drainCtxData.authority?.ambiguous?.length
+  const detReqCandidates = siteStateId !== "CO" && siteStateId !== "GA" && drainCtxData && siteSqft > 0 && !drainAuthorityId && drainCtxData.authority?.ambiguous?.length
     ? drainCtxData.authority.ambiguous[0].candidates.filter(Boolean).map((aid) => ({ aid, r: computeRequiredDetention({ ...detReqInputs, authorityId: aid }) }))
     : null;
   // Tier + regime need flood facts — a FAILED flood query is an unknown, never "clean".
@@ -16086,7 +16093,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           ? `ETJ boundaries: ${layerVintage("jur_etj") || "vintage unknown"}. ETJs shrink as landowners opt out (SB 2038) — screening only, verify before relying on an ETJ answer.`
           : null;
         // B689905 — carried through so the tooltip never claims a parcel that isn't there.
-        const badge = { ...b, ageMs: j.ages?.county ?? j.ages?.city ?? j.ages?.etj ?? null, sourceName: "TxDOT / TxGIO / H-GAC", etjNote, parcelBased: hasParcel };
+        const badge = { ...b, ageMs: j.ages?.county ?? j.ages?.city ?? j.ages?.etj ?? null, sourceName: "TxDOT / TxGIO / county & city ETJ publishers", etjNote, parcelBased: hasParcel };
         /* NEW-2 — CACHE ONLY A RESOLVED ANSWER. This cache is keyed on parcel geometry and lives for
          * the session, so caching a badge whose ETJ lookup failed pinned that site to "couldn't
          * check" until a reload, on a source measured flaky at exactly this. An unresolved badge is
@@ -21628,8 +21635,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <div style={{ marginTop: 7, borderTop: "1px dashed var(--planner-border)", paddingTop: 6 }}>
                               {jurInfo.error ? <span style={{ color: PAL.warn }}>{jurInfo.error}</span> : <>
                                 {jurRow("County", jurInfo.j.county.length ? jurInfo.j.county.join(" + ") : "—", jurInfo.j.ages.county)}
-                                {jurRow("City", jurInfo.j.unincorporated ? "Unincorporated" : jurInfo.j.city.join(" + "), jurInfo.j.ages.city)}
-                                {jurRow("ETJ", jurInfo.j.etj.length ? jurInfo.j.etj.map((n) => `${n} ETJ`).join(" + ") : ((jurInfo.j.sources.find((s) => s.id === "etj") || {}).state === "unavailable" ? "no ETJ layer here (Houston/Austin/DFW covered)" : "not in a city ETJ"), jurInfo.j.ages.etj)}
+                                {jurRow("City", jurInfo.j.unincorporated ? (jurInfo.j.etjUnavailable ? "Outside city limits" : "Unincorporated") : jurInfo.j.city.join(" + "), jurInfo.j.ages.city)}
+                                {jurRow("ETJ", jurInfo.j.etj.length ? jurInfo.j.etj.map((n) => `${n} ETJ`).join(" + ") : ((jurInfo.j.etjUndetermined || []).length ? "ETJ undetermined (disputed)" : (jurInfo.j.etjReleased || []).length ? `${jurInfo.j.etjReleased.join(" + ")} ETJ release area (SB 2038)` : jurInfo.j.etjUnavailable ? "ETJ data unavailable here" : (jurInfo.j.sources.find((s) => s.id === "etj") || {}).state === "unavailable" ? "no ETJ layer here (Houston/Austin/DFW covered)" : "not in a city ETJ"), jurInfo.j.ages.etj)}
                                 {Array.isArray(jurInfo.j.isd) && jurRow("School dist.", jurInfo.j.isd.length ? jurInfo.j.isd.join(" + ") : "—", jurInfo.j.ages.isd)}
                                 {jurRow("Road maint.", jurInfo.road.authorities.length ? jurInfo.road.authorities.join(" · ") + (jurInfo.road.nearest?.route ? ` (${jurInfo.road.nearest.route})` : "") : "unknown", jurInfo.road.ageMs)}
                                 {jurInfo.j.straddle && <div style={{ color: PAL.warn, marginTop: 3 }}>⚑ Straddles a boundary — touches multiple jurisdictions.</div>}
@@ -32481,12 +32488,17 @@ function DrainagePanel({
                 // also the only moment this branch can be reached, so there is no first-paint gap.
                 coMhfd && req.panelLine
                   ? req.panelLine
-                  : `${coSubject} — confirm the criteria your town has adopted.`,
+                  // NEW-1 (Georgia) — the named "not available in Georgia yet" state; one line, the why rides the ⓘ.
+                  : (req.flags || []).includes("georgia-not-wired")
+                    ? req.headline // PANEL-BREVITY: the carrier's own headline, so no new literal is added here
+                    : `${coSubject} — confirm the criteria your town has adopted.`,
                 "co-detention",
                 // The explanation rides the lazily-loaded Colorado tier (with the rest of the
                 // Colorado prose). Until it lands, the visible line and its verdict are already
                 // correct — only the ⓘ fills in a moment later.
-                d.coDetail
+                (req.flags || []).includes("georgia-not-wired")
+                  ? req.detail
+                  : d.coDetail
                   ? `${d.coDetail}${d.coRegime ? ` Reviewing regime: ${d.coRegime.label} (${d.coRegime.criteria}). ${d.coRegime.note}` : ""}`
                   : null,
               ));

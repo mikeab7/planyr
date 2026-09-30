@@ -781,9 +781,15 @@ export function analyzeSource(source, rings, opts = {}) {
 export function buildJurisdictionFinding(j) {
   const rows = [];
   rows.push(["County", j.county.length ? j.county.join(" + ") : "—", j.ages.county]);
-  rows.push(["City", j.unincorporated ? "Unincorporated" : j.city.join(" + "), j.ages.city]);
+  // NEW-1 (DFW ETJ) — "Unincorporated" and "not in a city ETJ" are POSITIVE findings; where the ETJ
+  // data cannot speak to the point (or the lookup failed) they read "unavailable" instead.
+  rows.push(["City", j.unincorporated ? (j.etjUnavailable ? "Outside city limits" : "Unincorporated") : j.city.join(" + "), j.ages.city]);
   const etjState = (j.sources.find((s) => s.id === "etj") || {}).state;
-  rows.push(["ETJ", j.etj.length ? j.etj.map((n) => `${n} ETJ`).join(" + ") : (etjState === "unavailable" ? "no ETJ layer for this area" : "not in a city ETJ"), j.ages.etj]);
+  // NEW-2 — a disputed strip lists its CLAIMANTS as claims (never as an answer); a release area names the city.
+  const undet = (j.etjUndetermined || []).length
+    ? `ETJ undetermined (disputed)${(j.etjUndetermined || []).flatMap((u) => u.claimants || []).length ? " — claimed by " + [...new Set((j.etjUndetermined || []).flatMap((u) => u.claimants || []))].join(" and ") : ""}` : null;
+  const rel = (j.etjReleased || []).length ? (j.etjReleased || []).map((n) => `${n} ETJ release area (SB 2038)`).join(" + ") : null;
+  rows.push(["ETJ", [j.etj.length ? j.etj.map((n) => `${n} ETJ`).join(" + ") : null, undet, rel].filter(Boolean).join(" · ") || (j.etjUnavailable ? "ETJ data unavailable here" : etjState === "unavailable" ? "no ETJ layer for this area" : "not in a city ETJ"), j.ages.etj]);
   // B764: the school district (ISD) — the biggest single line on most Texas tax bills. Only
   // rows out when the identify actually ran ISD (j.isd present), so older callers are unchanged.
   if (Array.isArray(j.isd)) rows.push(["School district", j.isd.length ? j.isd.join(" + ") : "—", j.ages.isd]);
@@ -876,6 +882,11 @@ export function deriveZoning(j, state = null) {
   else if (cities.length) summary = `Within ${j.city.join(", ")} — city zoning likely applies; confirm the district + entitlement path.`;
   else if (etj.includes("houston")) summary = "Houston ETJ — no zoning, but city subdivision/platting authority applies in the ETJ.";
   else if (etj.length) summary = `${j.etj.join(", ")} ETJ — no zoning, but the city's subdivision/platting authority applies in the ETJ; confirm with the city.`;
+  // NEW-1 (DFW ETJ) — outside every city's limits but the ETJ data cannot say whether a city's platting
+  // authority reaches here: that is not the "no zoning, county only" sentence's finding to make.
+  else if ((j.etjUndetermined || []).length) summary = "ETJ undetermined (disputed) — two cities' claims overlap here and the county has not resolved them; confirm platting authority with the county and both cities.";
+  else if ((j.etjReleased || []).length) summary = "Inside an SB 2038 ETJ release area — the city's layer marks it as released or petitioned for release; confirm the current status and platting authority with the city.";
+  else if (j.unincorporated && j.etjUnavailable) summary = "Outside city limits — a city's ETJ (platting authority) may still reach here; the ETJ data does not cover this area. Confirm with the county and the nearest city.";
   else if (j.unincorporated) summary = UNINCORPORATED_ZONING[st] || UNINCORPORATED_ZONING.unknown;
   else summary = "Confirm zoning with the jurisdiction.";
   return {

@@ -80,21 +80,31 @@ describe("VECTOR_SOURCES — boundary rows (B694)", () => {
     for (const id of ["jur_county", "jur_city", "jur_etj"]) {
       const s = VECTOR_SOURCES[id];
       expect(s.id).toBe(id);
-      expect(s.liveFallback).toBe(true);
       expect(s.labelField).toBeTruthy();
       expect(s.labelZoom.min).toBeLessThan(s.labelZoom.max);
-      expect(s.query.url).toMatch(/\/query$/);
       expect(s.query.tiers.length).toBeGreaterThan(1);
       expect(s.query.tiers[s.query.tiers.length - 1].maxZoom).toBeUndefined(); // catch-all fine tier
     }
+    // county + city are single-service rows with the previous esri-leaflet live fallback.
+    for (const id of ["jur_county", "jur_city"]) {
+      expect(VECTOR_SOURCES[id].liveFallback).toBe(true);
+      expect(VECTOR_SOURCES[id].query.url).toMatch(/\/query$/);
+    }
+    /* NEW-1 (DFW ETJ) — the ETJ row is SEVERAL services drawn as one, so it has no single URL and
+     * deliberately NO live fallback (the old one repainted only H-GAC's slice, which is empty in
+     * Dallas — a blank that reads as "no ETJ here"). A cold failure reports FAILED instead. */
+    expect(VECTOR_SOURCES.jur_etj.liveFallback).toBe(false);
+    expect(VECTOR_SOURCES.jur_etj.query.url).toBeUndefined();
+    expect(VECTOR_SOURCES.jur_etj.query.sources.length).toBeGreaterThan(1);
+    for (const sub of VECTOR_SOURCES.jur_etj.query.sources) expect(sub.url).toMatch(/\/query$/);
     // The identify's exact column names (jurisdiction.js) — one source of truth.
     expect(VECTOR_SOURCES.jur_county.labelField).toBe("CNTY_NM");
     expect(VECTOR_SOURCES.jur_city.labelField).toBe("city_name");
-    expect(VECTOR_SOURCES.jur_etj.labelField).toBe("CITY");
-    expect(VECTOR_SOURCES.jur_etj.titleCaseLabel).toBe(true);
-    // County + ETJ coarse tiers are source-level ("all"); city is always bbox-scoped.
+    expect(VECTOR_SOURCES.jur_etj.labelField).toBe("CITY"); // every publisher's name is normalised to CITY at fetch
+    // County's coarse tier is source-level ("all"); city and ETJ are always bbox-scoped (the ETJ
+    // union of seven publishers no longer fits one cache entry).
     expect(VECTOR_SOURCES.jur_county.query.tiers[0].scope).toBe("all");
-    expect(VECTOR_SOURCES.jur_etj.query.tiers[0].scope).toBe("all");
+    expect(VECTOR_SOURCES.jur_etj.query.tiers.every((t) => t.scope === "bbox")).toBe(true);
     expect(VECTOR_SOURCES.jur_city.query.tiers.every((t) => t.scope === "bbox")).toBe(true);
   });
   it("boundaries are always vector: no minVectorZoom / area gate can flip them to image", () => {

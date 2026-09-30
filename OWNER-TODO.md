@@ -5,7 +5,7 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-09-29._
+_Last updated: 2026-09-30._
 
 ## 🗺 One database script so comps follow their county when you move a site plan (B1953796)
 

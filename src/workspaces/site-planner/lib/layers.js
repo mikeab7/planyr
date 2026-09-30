@@ -591,12 +591,15 @@ export const JURISDICTIONS = {
     group: "jurisdiction", order: 2,
   },
   jur_etj: {
-    kind: "vector", label: "City ETJ (Houston region)",
+    kind: "vector", label: "City ETJ (Houston & Dallas–Fort Worth)",
     url: HGAC_ETJ.url, minZoom: 9, color: "#1d4ed8", dash: true, weight: 1.6, opacity: 0.4, // B761: same hue as city, dashed
-    note: "City ETJ across the H-GAC 13-county region — blank elsewhere (there is no statewide ETJ layer). ETJ = a city's reach OUTSIDE its limits; not annexation and not utility service.",
+    noLiveFallback: true, // NEW-1 (DFW): several services drawn as one — see vectorLayers.js jur_etj
+    note: "City ETJ — Houston region (H-GAC + Baytown), Dallas–Fort Worth (Collin, Rockwall, Denton, Dallas, Ellis, Johnson, Grayson and Kaufman-side publishers, Fort Worth, Mansfield, Corsicana) and Austin. Blank elsewhere: there is no statewide ETJ layer, and NCTCOG publishes none. A blank inside those areas — most of Tarrant, Parker, Wise, Hill, Henderson, Van Zandt — is NOT proof of no ETJ. ETJ = a city's reach OUTSIDE its limits; not annexation and not utility service.",
     // NEW-1 stacking role (lib/mapStack.js): Boundary outlines (dashed).
     role: "line",
     states: ["TX"],
+    // NEW-1 (Georgia) — the panel's out-of-state reason for a state that has no such thing at all.
+    noEquivalentIn: { GA: "Georgia cities have no reach beyond their limits — the county governs outside them. Not a gap in Planyr." },
     group: "jurisdiction", order: 2,
   },
   jur_isd: {
@@ -867,6 +870,25 @@ export const AHJ_LAYERS = {
   // completely different fact from "nothing here". LayerPanel does the scoping; nothing here
   // filters by location itself.
   // =========================================================================
+  /* NEW-1 (Georgia) — county lines and city limits for Georgia sites. Each is its OWN row reading its
+   * own registry row (`countyGa` / `cityGa`, both DCA, live-probed 2026-09-30), `states: ["GA"]` so the
+   * Texas rows demote on a Georgia view and these demote on a Texas one — and the attribution each layer
+   * contributes is Georgia's alone. Georgia has NO ETJ, so there is deliberately no Georgia ETJ row. */
+  ga_county: {
+    kind: "vector", label: "County boundaries (Georgia)", source: "Georgia DCA",
+    url: GIS_SOURCES.countyGa.serviceUrl, states: ["GA"],
+    minZoom: 6, color: "#374151", weight: 1.6, opacity: 0.4,
+    note: "Georgia county lines (DCA, all 159 counties). Outside city limits the county is the zoning and permitting authority. A has-jurisdiction boundary, not a service area.",
+    role: "line", group: "jurisdiction", order: 1,
+  },
+  ga_city: {
+    kind: "vector", label: "City limits (Georgia)", source: "Georgia DCA",
+    url: GIS_SOURCES.cityGa.serviceUrl, states: ["GA"],
+    minZoom: 9, color: "#1d4ed8", weight: 1.6, opacity: 0.4,
+    note: "Georgia municipal boundaries (DCA). Inside = in the city; outside = unincorporated county. NOT proof of utility service.",
+    infoCaveat: "A boundary means the city HAS JURISDICTION here — not that it serves or will connect utilities to a parcel.",
+    role: "line", group: "jurisdiction", order: 2,
+  },
   co_city: {
     kind: "vector", label: "City limits (Colorado)", source: "Colorado DOLA (via State of Colorado OIT GIS)",
     url: GIS_SOURCES.cityCo.serviceUrl, states: ["CO"],
@@ -973,6 +995,15 @@ export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDE
  * state, never a fabricated date). Keyed by layer id, so the per-county utility
  * layers (spread into JLAYERS) are covered too. When the GIS-cache work (B96)
  * lands, fold this together with the refreshed-age stamp into one surface. */
+/* NEW-1 (DFW ETJ) — the ETJ layer's vintage line, composed from the registry's own dated rows. Each
+ * publisher's edition differs (Collin edited days ago, Fort Worth's hosted copy in 2018), and an ETJ is
+ * the boundary SB 2038 (2023) lets landowners petition out of — so a single "current edition" would be a
+ * claim nobody made. Rows without a `dataLastEdited` (H-GAC, Austin, Baytown) say "current edition",
+ * which is what they were already recorded as. */
+export function etjVintageText() {
+  return "ETJ — " + ETJ_SOURCES.map((r) => `${String(r.sourceName || r.id).replace(/ \(.*\)$/, "")}: ${r.dataLastEdited ? `edited ${r.dataLastEdited}` : "current edition"}`).join(" · ");
+}
+
 export const LAYER_VINTAGE = {
   // Statewide overlays
   fema: "Effective date varies by FIRM panel",
@@ -1000,7 +1031,9 @@ export const LAYER_VINTAGE = {
   // Jurisdiction boundaries
   jur_county: "TxDOT county boundaries — current edition",
   jur_city: "TxGIO city limits — current edition",
-  jur_etj: "H-GAC ETJ — current edition",
+  // NEW-1 (DFW) — built from the registry's own dated rows, never a hand-typed "current edition":
+  // the publishers' editions differ by eight years and the tooltip must say so.
+  jur_etj: etjVintageText(),
   jur_isd: "TEA school districts — SY 2022-23 edition",
   jur_mud: "TCEQ water districts (via HARC) — current edition",
   jur_road_authority: "TxDOT Roadway Inventory — current edition",
@@ -1517,7 +1550,9 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           interactive: !!opts.identifyOk,
           identifyOk: opts.identifyOk,
           labelPane: lyrLabelPane, // a layer's name labels ride in its own band (mapStack)
-          buildFallback: () => {
+          // NEW-1 (DFW ETJ) — a multi-service layer has no single service to fall back to; a row that
+          // says so (`noLiveFallback`) reports FAILED instead of repainting one publisher's slice.
+          buildFallback: cfg.noLiveFallback ? null : () => {
             const fb = buildFeatureLayer(cfg, st.opacity, lyrPane, { interactive: !!opts.identifyOk, identifyOk: opts.identifyOk });
             // esri-leaflet FeatureLayers have no setOpacity (raster-only) — same
             // flat-style shim the primary esriFeature branch installs below, so the

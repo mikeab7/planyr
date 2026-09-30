@@ -54,9 +54,9 @@ export const DETAILS_MAX_HEIGHT = 190;
 export const LEGAL_MAX_HEIGHT = 92;
 
 const noticeStyle = {
-  marginBottom: 8, padding: "6px 8px", background: "#fdf6e7",
-  border: "1px solid #e6c478", borderRadius: 6, fontSize: 11,
-  color: "#8a5a00", lineHeight: 1.4,
+  marginBottom: 8, padding: "6px 8px", background: "var(--warn-bg)",
+  border: "1px solid var(--warn-border)", borderRadius: 6, fontSize: 11,
+  color: "var(--warn-text)", lineHeight: 1.4,
 };
 
 // A value that IS a link (B1455632 — Nevada's per-parcel "County record" deep link, the one

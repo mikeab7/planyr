@@ -400,6 +400,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   callout and measurement grips. Guards: the repo-root `test/` suite **handleLayerOrder** (source
   order + the ex-inline drag-starters) and the e2e spec **references-handle-layer** (real render:
   every grip answers `elementsFromPoint`, with parcel geometry proven to be stacked underneath).
+- **Georgia (B1990960):** `georgiaJurisdiction.js` holds the pure facts — the routing envelope (**routes only; point-in-polygon against the DCA county layer decides "is this Georgia"**, so SC/AL/FL ground yields no badge), the consolidated city-counties (Athens-Clarke, Augusta-Richmond, Columbus-Muscogee, Macon-Bibb…), and the "not available in Georgia yet" detention text. Georgia has **no ETJ**: the county governs outside city limits, so the label says so and the ETJ role is silent. ⛔ Georgia has a **Harris County and a Montgomery County** — never match a county by bare name without the confirmed state (`authorityForJurisdiction({state})`). Guard: the repo-root `test/` suite **georgiaJurisdiction**.
 - **Colorado (NEW-5/7/8):** `coloradoRegions.js` is THE guard — a network-free site→state
   resolution (it must hold when every GIS endpoint is down, which is exactly when a site falls
   through to a default), the four drainage regimes (MHFD covers 6 of the 9 target counties;
@@ -628,6 +629,34 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   fed it to `assessAdministrator` as `cityLabel` — under the new grammar that returns
   `"Humble · Houston ETJ"`, which matches no rule record, so the CITY's floodplain ordinance is never
   raised and the site is priced on the county's. Read `governingCityOf(badge)` instead.
+  **⛔ (8) NEW-1 / B1992432 — DFW ETJ, AND "NO ETJ HIT" IS ONLY A FINDING WHERE THE DATA COVERS THE POINT.**
+  **NCTCOG publishes NO ETJ layer** (its hub's 195-dataset catalogue has none) — do not go looking for one.
+  DFW ETJ comes from county publishers (`etj_collin` / `etj_rockwall` / `etj_denton` beside the older Fort
+  Worth row), each a `GIS_SOURCES` row → an `ETJ_SOURCES` row → a sub-source of the drawn `jur_etj` layer
+  (`query.sources`, bbox-filtered per view; ANY in-view source failing fails the pull, so a partial answer is
+  never cached as "no ETJ"). Two separate claims, never conflated: `roster` = which cities a source can name
+  (→ "ETJ not mapped") and `completeCounties` = counties where an empty answer really means unincorporated
+  (→ `etjPointCoverage`). Inside the 50-mile DFW circle (`DFW_ZONE`) a no-city/no-ETJ point outside a complete
+  county, or a failed ETJ lookup, sets `etjUnavailable` and the label reads "Outside city limits · ETJ data
+  unavailable" — **never "Unincorporated"**; outside the circle behaviour is unchanged (statewide is B1992434).
+  A publisher's naming quirks are registry data read by `lib/etjNames.js`: an overlap strip "A/B" is TWO ETJ
+  claims and both are reported. Re-check with **audit-dfw-etj-coverage** (live fixtures + count floor),
+  **audit-etj-coverage** (roster drift) and **verify-dfw-etj-map** (paints, labels).
+  **(9) NEW-2 / B1992435 — THE SECOND SWEEP, and what it added to the rule.** Twelve more publishers (Dallas
+  County, Ellis + Waxahachie, the Johnson SUD compile, Grayson, Forney, Talty, Mansfield, Sunnyvale, Corsicana,
+  Blooming Grove; Fort Worth swapped 2018 → 2025). **The per-county table is the DFW county-table module in the repo-root
+  `ui-audit/lib/` folder (its generated form is `docs/DFW-ETJ-COVERAGE.md`) — one list, unit-tested against the
+  registry by the **dfwEtjCounties** suite; update it in the same commit as any ETJ row.** New mechanics: a row's optional `where` withholds polygons a spatial join could not
+  confirm (Dallas County: 10 of 48) and rides BOTH the identify and the drawn layer; and **ANY routed ETJ source
+  failing blocks a "no ETJ" finding** (`etjSourceErrors`) — the role's `state` only reads "failed" when ALL
+  failed, which a dozen publishers made unsafe. No new row declares a county complete: only Collin and Rockwall
+  do. **Three outcomes are neither a city nor a miss: a county-marked "Undetermined" strip → "ETJ undetermined
+  (disputed)" (never a city, never unincorporated, claimants kept as claims, `undeterminedNames` on the row); an
+  ETJ feature whose name cannot be read → flagged the same way, never dropped; and an SB 2038 release area (a
+  `release: true` row — geometry only, its attributes unread) → "release area", drawn dotted, never a plain ETJ and
+  never counted in the parcel-share pass.** Denton County's and Fort Worth's servers are unreachable from the build
+  sandbox but CORS-clean from planyr.io: their fixtures are asserted from a browser by the
+  **verify-dfw-etj-browser-hosts** harness (exits 2, not 0, where a host is unreachable). The spatial-join tool lives in the repo-root `ui-audit/tools/` folder (Python + shapely).
   Guards: the repo-root `test/` suites **jurisdiction** (86), **jurisdictionShapes** (11 — real parcel
   geometry through the real query builder against RECORDED real agency answers, one fixture per
   jurisdiction SHAPE, mutation-checked two ways), **jurisdictionLabel** (18 — the shapes, the grammar,

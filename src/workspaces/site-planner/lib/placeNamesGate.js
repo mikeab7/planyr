@@ -35,3 +35,27 @@ export function attachPlaceNames(map) {
   }
   return loading.then((m) => m.attachPlaceNames(map), () => null);
 }
+
+/* ⛔ ONE LABEL PER CITY (NEW-2, 2026-09-30 — owner-reported live on planyr.io: Lewisville, Flower Mound, Carrollton,
+ * Coppell, Southlake, The Colony and Hebron each read TWICE, stacked).
+ *
+ * Two independent passes label a city in the same zoom band (10-13): this layer's canvas names and the
+ * city-limits overlay's own labels. Neither knew about the other. The canvas layer is the better instrument
+ * (hysteresis, fades, its own zoom animation), so IT keeps every name it is showing, and the city-limits layer
+ * drops exactly those — a city the canvas layer left out (collision, not in its dataset) still gets the boundary
+ * label, so no city LOSES its name.
+ *
+ * This registry is the seam. It lives in THIS leaf (imports nothing, already on the boot path) because the
+ * canvas layer is a lazy chunk nothing on the boot path may static-import, and the overlay must be able to ask
+ * without importing it. `setPlaceNamesShown` also fires `pf:placenames` on the map so the overlay re-places
+ * its labels the moment the canvas layer's set changes (the two settle on different frames). */
+const shownByMap = new WeakMap();
+export const placeNameKey = (name) => String(name == null ? "" : name).trim().toLowerCase();
+export function setPlaceNamesShown(map, names) {
+  if (!map) return;
+  shownByMap.set(map, names instanceof Set ? names : new Set(names || []));
+  try { map.fire && map.fire("pf:placenames"); } catch (_) { /* a torn-down map must not throw from a draw frame */ }
+}
+/* The set of (placeNameKey-normalised) names the canvas layer is currently drawing on `map`; empty when it is
+ * off, not attached, or not yet loaded. Never null, so a caller needs no guard. */
+export const placeNamesShown = (map) => (map && shownByMap.get(map)) || new Set();

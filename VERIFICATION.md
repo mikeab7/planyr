@@ -176,6 +176,64 @@ Sandbox-proven: `test/siteAnchor.test.js` (L-shaped fixture, centroid outside ->
 4. Spot-check two ordinary rectangular sites. **Expect:** their pins have not visibly moved from where they were.
 - **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B1988816.
 
+### V1423104 — B1998016: dark theme on a phone — Settings > Profile fields are dark with readable text; no white panels in Schedule/Review `Blocker: auth`
+
+Sandbox-proven: `ui-audit/verify-theme-surface-contrast.mjs` (dark+light × phone+desktop × signed-out + signed-in fixture: 0 failures after, 8 before) and `test/themeFieldSurface.test.js`. **Pending** a real signed-in phone.
+**Steps** (planyr.io, dark theme, iPhone; read the served chunk hash in the same observation):
+1. Account menu > Profile. **Expect:** First name / Last name / Organization are dark fields with clearly readable text.
+2. Sign-in form (signed out). **Expect:** Email/Password dark fields, readable text and placeholder.
+3. Schedule, then Review. **Expect:** no white panel or page ground; open a calibration popup in Review and a Stitcher panel if reachable — dark surfaces.
+4. Open a parcel with a jurisdiction note. **Expect:** amber-tinted strip in the dark palette, not a cream slab.
+5. Switch to light theme, repeat 1–3. **Expect:** unchanged from before.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1998016.
+
+### V1417521 — B1992435: the southern and eastern DFW ETJs paint and name correctly, and uncovered counties still say "unavailable" `Blocker: none — run on planyr.io once the build is deployed`
+
+Sandbox-proven (live services, real overlay engine in Chromium, 2026-09-30): `ui-audit/audit-dfw-etj-gaps.mjs` (Denton/Fort Worth checks skipped — browser-only hosts), `ui-audit/verify-dfw-etj-map.mjs` 9/9 (stand-ins for the two browser-only hosts), `test/dfwEtjGaps.test.js` 52/52, weekly verifier clean for every reachable row. **Still needs the deployed app.**
+**Steps** (read the served chunk hash in the same observation as each result):
+1. Site → map finder, Layers → "City limits & ETJ" on, pan to Waxahachie/Midlothian at metro zoom. **Expect:** dashed ETJ lines and labels for Waxahachie, Midlothian, Red Oak, Ennis, Maypearl, Palmer; further west Cleburne, Godley, Alvarado, Mansfield, Burleson.
+2. Pan east to Forney/Terrell and south to Corsicana. **Expect:** "Forney ETJ" and "Talty ETJ" draw; "Corsicana ETJ" and "Blooming Grove ETJ" draw; nothing at Terrell (no current data — blank is not proof of no ETJ).
+3. Drop a site at 32.30, -96.99 (Maypearl ETJ). **Expect:** header "City of Maypearl ETJ · Ellis County".
+4. Drop a site at 32.62, -96.60 (Seagoville ETJ). **Expect:** "City of Seagoville ETJ · Dallas County".
+5. Drop a site at 32.72, -96.50 (Forney ETJ). **Expect:** "City of Forney ETJ · Kaufman County".
+6. Drop a site at 32.58, -97.21 (Mansfield ETJ, overlapping Fort Worth's). **Expect:** the header names BOTH ("ETJ crosses City of Fort Worth + City of Mansfield") — an overlap is never resolved to one.
+7. Drop a site in Parker County near Weatherford (32.76, -97.80 is outside the circle; use 32.85, -97.55 — Parker/Tarrant line). **Expect:** "Outside city limits · ETJ data unavailable" — never "Unincorporated".
+8. Regression: Collin (33.10, -96.50) still "Unincorporated · Collin County"; Houston unchanged.
+9. **Denton County, current (browser hosts).** Pan to the Denton/Cross Roads/Aubrey area. **Expect:** ETJ lines and names from the county's own table; a strip labelled "ETJ undetermined (disputed)" (there are five); hovering it says "Undetermined (disputed) — ETJ".
+10. Drop a site inside one of those strips. **Expect:** header "ETJ undetermined (disputed) · Denton County" — no city named, never "Unincorporated"; the Site Analysis ETJ row says "claimed by <city> and <city>".
+11. Drop a site in Denton's "DIV 2" polygon (TYPE 'DIV 2'). **Expect:** "City of Denton ETJ · Denton County".
+12. Fort Worth: pan over the ETJ south-west of the city. **Expect:** dashed ETJ lines; where the city marks SB 2038 release areas, DOTTED lines labelled "Fort Worth ETJ release area (SB 2038)". Drop a site inside one. **Expect:** "Fort Worth ETJ release area (SB 2038) · Tarrant County" — never "City of Fort Worth ETJ" and never "Unincorporated".
+13. From a browser with the hosts reachable run `BASE_URL=https://planyr.io node ui-audit/verify-dfw-etj-browser-hosts.mjs`. **Expect:** all Denton / Fort Worth assertions pass (40 / 5 / 1; 81); it prints the release layer's fields and the NCTCOG `Boundaries/Boundaries` layer list — record them on B1992433.
+14. **One label per city.** Zoom to the Lewisville / Carrollton / Flower Mound area at metro zoom (10–13) with City limits on and the City names row on. **Expect:** every city name appears ONCE — Lewisville, Flower Mound, Carrollton, Coppell, Southlake, The Colony each a single label; toggling the City names row off makes the city-limits labels return for those cities, and back on removes the duplicates again.
+15. **The freeze, if it recurs.** Zoom in and out around the 5-mile scale with City limits & ETJ on, on a cold cache (clear site data first). **Expect:** the map stays responsive; the layers draw within a second or two. If it stalls, open the admin telemetry and look for `boundary-paint-slow` (main thread — check `features`/`vertices`) or `boundary-load-slow` (a slow publisher — check `sourceMs` for the id that took seconds); record which on B1992435. **A stall with NO such report means the cause is elsewhere — file it, do not close.**
+- **Stopping rule:** closes on a dated pass of 1–15, or a failed step filed as a recurrence on B1992435.
+### V1416048 — B1990960: a Georgia site draws county lines + city limits, names its governing body, says the county governs, and shows no Texas numbers `Blocker: live-GIS`
+
+Sandbox-proven: `test/georgiaJurisdiction.test.js` (16, red on pre-change main), registry audit + fixtures, and the DCA county/city layers queried live from the build sandbox 2026-09-30 (159 counties, 538 municipalities, the fixture points recorded on B1990960). **Still needs planyr.io in a real browser** (the map tile/GIS hosts are egress-blocked here, so the drawn lines and the in-app badge were not seen).
+**Steps** (signed-in Chrome, planyr.io; read the served chunk hash in the same observation as each result):
+1. Open a Georgia site in a wired county — e.g. Gwinnett or Fulton. **Expect:** the header badge names the governing body ("City of X, GA · … County" or "Unincorporated … County, GA"); the word ETJ appears nowhere in the badge or its hover.
+2. Layers panel → jurisdiction group. **Expect:** "County boundaries (Georgia)" and "City limits (Georgia)" rows are live; toggle each. County lines draw at region zoom, city limits at city zoom, following the real boundaries; the Texas county/city/ETJ rows are shown as not applicable here.
+3. Hover the ETJ row's not-applicable reason. **Expect:** it says Georgia cities have no reach beyond their limits (not "no equivalent wired yet").
+4. Pan so a site sits inside a city that spans two counties (Atlanta: Fulton/DeKalb) or a site straddles a county line. **Expect:** both counties are named, joined as peers.
+5. Open a site in Athens (Clarke), Augusta (Richmond), Columbus (Muscogee) or Macon (Bibb). **Expect:** one consolidated government ("Athens-Clarke County, GA (consolidated)"), never "city + unincorporated".
+6. Yield/pond panel on a Georgia site. **Expect:** detention reads "Georgia — Detention criteria not yet available in Georgia" (N/A in the verdict strip), no acre-feet number, no HCFCD/Harris channel wording — including on a site in **Harris County, Georgia** or **Montgomery County, Georgia**.
+7. Attribution strip on the Georgia view. **Expect:** Georgia credits only; no Harris County / TxGIO.
+8. Sanity: open a Katy (Texas) site and a Denver (Colorado) site. **Expect:** badge and layers exactly as before.
+- **Stopping rule:** closes on a dated pass of 1–8, or a failed step filed as a recurrence on B1990960.
+
+### V1417520 — B1992432: City limits + ETJ paint with labels around Dallas, and site screening names the ETJ (or says "unavailable") `Blocker: none — run on planyr.io once the build is deployed`
+
+Sandbox-proven (live services, real overlay engine in Chromium, 2026-09-30): `ui-audit/audit-dfw-etj-coverage.mjs` 8/8, `ui-audit/verify-dfw-etj-map.mjs` 7/7, `test/dfwEtjCoverage.test.js` 19/19, roster drift audit clean. **Still needs the deployed app** (the real Layers panel, the real basemap, the real header badge) — none of which the standalone harness includes.
+**Steps** (read the served chunk hash in the same observation as each result):
+1. Site → map finder, pan to Dallas and zoom out until the whole metro (well past 50 miles) is in view. Layers → "City limits & ETJ" on. **Expect:** solid blue city lines and DASHED blue ETJ lines over the whole metro; the ETJ dashes reach out through Collin, Rockwall, Denton and around Fort Worth; nothing is cut off at a circle.
+2. Zoom in to metro level (Dallas–Plano–Frisco–McKinney). **Expect:** ETJ names ("Prosper ETJ", "Celina ETJ", "Fort Worth ETJ") and city names both label; hovering an ETJ line names it ("<City> — ETJ").
+3. Layers → ⓘ on "City limits & ETJ". **Expect:** the vintage line names each publisher and its edit date (Collin 2026-09-26, Rockwall 2026-06-25, Denton 2022-08-02, Fort Worth 2018-09-13) — not "current edition".
+4. Drop a site pin (or draw a site) at 33.23255, -96.8961 (Prosper's ETJ, in no city). **Expect:** header reads "City of Prosper ETJ · Collin County"; the ETJ tooltip carries the vintage + SB 2038 caveat.
+5. Drop a site at 33.10, -96.50 (Collin County, no city, no ETJ). **Expect:** "Unincorporated · Collin County".
+6. Drop a site at 32.30, -96.75 (Ellis County, no city). **Expect:** "Outside city limits · ETJ data unavailable · Ellis County" — NOT "Unincorporated".
+7. Drop a site at downtown Dallas (32.7767, -96.7970). **Expect:** "City of Dallas · Dallas County".
+8. Regression: a Houston site (29.76, -95.37) with the same layer on. **Expect:** Houston-area ETJ still draws and the badge is unchanged.
+- **Stopping rule:** closes on a dated pass of 1–8, or a failed step filed as a recurrence on B1992432.
 ### V1413360 — B1988272: clicking lots at Grand Port shows an acknowledgement under the cursor at once `Blocker: real-data`
 
 Sandbox-proven: `e2e/click-ack.spec.js` (red on main, green here), `test/clickAck.test.js`, `ui-audit/measure-click-to-row.mjs`. **Still needs the real Chambers CAD server and Michael's real plan data.**
@@ -1589,6 +1647,12 @@ state exactly what was created/touched. Never touch one of Michael's real plans.
 2. **A real signed-in boot against the real Supabase**, where `applyUser`'s cloud pull takes real network time and can deliver the `INITIAL_SESSION` / `SIGNED_IN` pair with real-world spacing.
 
 ---
+
+### V1338288 — B1873392: selected menu rows readable in dark theme `Blocker: live-GIS`
+Sandbox done: unit test proves token in both themes (15.20:1 / 10.57:1), no literal at call sites. Pending (Map, planyr.io):
+1. Dark theme: open a project row's menu → checked status row shows visible label on a tinted band. Expected: readable.
+2. Same menu, shared team row → readable tinted band.
+3. Light theme: both look as before (cream band).
 
 ## THE CHECKLIST — run this on Michael's signed-in Chrome, on `planyr.io`
 
