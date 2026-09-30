@@ -642,6 +642,21 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   A publisher's naming quirks are registry data read by `lib/etjNames.js`: an overlap strip "A/B" is TWO ETJ
   claims and both are reported. Re-check with **audit-dfw-etj-coverage** (live fixtures + count floor),
   **audit-etj-coverage** (roster drift) and **verify-dfw-etj-map** (paints, labels).
+  **(9) NEW-2 / B1992435 — THE SECOND SWEEP, and what it added to the rule.** Twelve more publishers (Dallas
+  County, Ellis + Waxahachie, the Johnson SUD compile, Grayson, Forney, Talty, Mansfield, Sunnyvale, Corsicana,
+  Blooming Grove; Fort Worth swapped 2018 → 2025). **The per-county table is the DFW county-table module in the repo-root
+  `ui-audit/lib/` folder (its generated form is `docs/DFW-ETJ-COVERAGE.md`) — one list, unit-tested against the
+  registry by the **dfwEtjCounties** suite; update it in the same commit as any ETJ row.** New mechanics: a row's optional `where` withholds polygons a spatial join could not
+  confirm (Dallas County: 10 of 48) and rides BOTH the identify and the drawn layer; and **ANY routed ETJ source
+  failing blocks a "no ETJ" finding** (`etjSourceErrors`) — the role's `state` only reads "failed" when ALL
+  failed, which a dozen publishers made unsafe. No new row declares a county complete: only Collin and Rockwall
+  do. **Three outcomes are neither a city nor a miss: a county-marked "Undetermined" strip → "ETJ undetermined
+  (disputed)" (never a city, never unincorporated, claimants kept as claims, `undeterminedNames` on the row); an
+  ETJ feature whose name cannot be read → flagged the same way, never dropped; and an SB 2038 release area (a
+  `release: true` row — geometry only, its attributes unread) → "release area", drawn dotted, never a plain ETJ and
+  never counted in the parcel-share pass.** Denton County's and Fort Worth's servers are unreachable from the build
+  sandbox but CORS-clean from planyr.io: their fixtures are asserted from a browser by the
+  **verify-dfw-etj-browser-hosts** harness (exits 2, not 0, where a host is unreachable). The spatial-join tool lives in the repo-root `ui-audit/tools/` folder (Python + shapely).
   Guards: the repo-root `test/` suites **jurisdiction** (86), **jurisdictionShapes** (11 — real parcel
   geometry through the real query builder against RECORDED real agency answers, one fixture per
   jurisdiction SHAPE, mutation-checked two ways), **jurisdictionLabel** (18 — the shapes, the grammar,

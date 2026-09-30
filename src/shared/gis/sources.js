@@ -598,7 +598,7 @@ export const GIS_SOURCES = {
     label: "City limits — City of Baytown",
     provider: "City of Baytown GIS",
     serviceUrl: "https://services8.arcgis.com/2iaYWEMdQLPv0ZUw/arcgis/rest/services/City_of_Baytown_Citizen_Map_WFL1/FeatureServer/12",
-    layerId: 12,
+    layerId: null, // the URL already includes the layer index (weekly verifier appended it a second time)
     geometryType: "polygon",
     /* ⛔ NEW-1 — THREE JURISDICTION CLASSES IN ONE TABLE, and 24 of the 38 polygons are NOT full-
      * purpose limits. Counted live 2026-08-12: CITY 14 · LIMITED ANNEXATION 12 · StripAnnex 12.
@@ -630,7 +630,7 @@ export const GIS_SOURCES = {
     label: "ETJ — City of Baytown",
     provider: "City of Baytown GIS",
     serviceUrl: "https://services8.arcgis.com/2iaYWEMdQLPv0ZUw/arcgis/rest/services/City_of_Baytown_Citizen_Map_WFL1/FeatureServer/11",
-    layerId: 11,
+    layerId: null, // the URL already includes the layer index (weekly verifier appended it a second time)
     geometryType: "polygon",
     fields: { name: null },
     coverage: "city",
@@ -656,24 +656,43 @@ export const GIS_SOURCES = {
   etj_fortworth: {
     key: "etj_fortworth",
     label: "ETJ — Fort Worth",
-    provider: "City of Fort Worth GIS",
-    serviceUrl: "https://services3.arcgis.com/dViPBrlsejmXK64z/arcgis/rest/services/Fort_Worth_ETJ/FeatureServer/0",
+    provider: "City of Fort Worth (open-data boundaries service)",
+    /* ⛔ NEW-2 (DFW gaps) — THE CITY'S OWN CURRENT LAYER. History, so nobody re-derives it: the registry
+     * carried a 2018 hosted copy (`Fort_Worth_ETJ`, 50 polygons); the first DFW sweep swapped in a 2025 city-
+     * staff copy from a bond webmap (79 polygons, edited 2025-03-25) because the city's own host was denied by
+     * the build sandbox's egress policy. The owner then probed it from a planyr.io tab: it answers and is
+     * CORS-clean — 81 polygons, DATESTAMP max 2026-09-01, no name column (every polygon is Fort Worth; the
+     * `nameConst` supplies it). The same data is also published at Planning_Development/Zoning/MapServer/60.
+     * From the sandbox this host is UNREACHABLE (403 at the egress proxy) — the weekly verifier from CI and
+     * `ui-audit/verify-dfw-etj-browser-hosts.mjs` (browser context) are what exercise it. */
+    serviceUrl: "https://mapit.fortworthtexas.gov/ags/rest/services/CIVIC/OpenData_Boundaries/MapServer/1",
     layerId: null,
     geometryType: "polygon",
     fields: { name: null },
     coverage: "metro",
     tier: "production",
     lastVerified: "2026-09-30",
-    /* ⛔ NEW-1 (DFW) — THIS LAYER IS A 2018 SNAPSHOT. `editingInfo.dataLastEditDate` on the hosted
-     * copy reads 2018-09-13, i.e. five years BEFORE SB 2038 (2023) let landowners petition out of an
-     * ETJ. It answers, and it is the only Fort Worth ETJ reachable from this app's environment
-     * (the city's own current layer — mapit.fortworthtexas.gov/…/OpenData_Boundaries/MapServer/1,
-     * edited 2026-09-04 — is on a host the build sandbox's egress policy denies, so it could not be
-     * fixture-verified). Swap the URL, not the shape, when that host is verified. The tooltip states
-     * this date (`dataLastEdited`) rather than "current edition". */
-    dataLastEdited: "2018-09-13",
-    // NEW-1 — no fixture existed; same ETJ-is-outside-the-limits rule as Austin above.
-    // Live 2026-08-05: 2 in the southern ETJ ring.
+    dataLastEdited: "2026-09-01",
+    browserVerified: { date: "2026-09-30", by: "owner's browser, planyr.io tab", features: 81 },
+  },
+  /* ⛔ NEW-2 (DFW gaps) — FORT WORTH'S "ETJ RELEASE AREA" LAYER (SB 2038, 2023: a landowner may petition out of
+   * an ETJ). Reachable from the owner's browser (2026-09-30); its ATTRIBUTES were not read, so this row uses
+   * geometry only and makes NO claim about whether a release is effective or pending. A point inside a release
+   * area is therefore never reported as a plain Fort Worth ETJ — it reads "Fort Worth ETJ release area
+   * (SB 2038)" and the reader is sent to the city. That is deliberately the conservative reading of an
+   * unknown schema; once `ui-audit/verify-dfw-etj-browser-hosts.mjs` reports the fields, tighten it. */
+  etj_release_fortworth: {
+    key: "etj_release_fortworth",
+    label: "ETJ release areas — Fort Worth (SB 2038)",
+    provider: "City of Fort Worth (planning & development service)",
+    serviceUrl: "https://mapit.fortworthtexas.gov/ags/rest/services/Planning_Development/PlanningDevelopment/MapServer/120",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: null },
+    coverage: "city",
+    tier: "production",
+    lastVerified: "2026-09-30",
+    browserVerified: { date: "2026-09-30", by: "owner's browser, planyr.io tab", features: null },
   },
 
   /* ⛔ NEW-1 (DFW, 2026-09-30) — "WIRE ALL THE CITY LIMITS AND ETJs WITHIN 50 MILES OF DALLAS."
@@ -742,32 +761,228 @@ export const GIS_SOURCES = {
   etj_denton: {
     key: "etj_denton",
     label: "ETJ — Denton County",
-    provider: "Denton County GIS",
-    serviceUrl: "https://services.arcgis.com/oTsZYNubyv7xK5yP/arcgis/rest/services/_ETJ/FeatureServer/1",
-    layerId: null, // the URL already includes the layer index (the weekly verifier appends layerId otherwise)
+    provider: "Denton County GIS (city ETJ permits service)",
+    /* ⛔ NEW-2 (DFW gaps) — THE COUNTY'S OWN CURRENT LAYER, replacing the 2022 hosted edition
+     * (`_ETJ/1`, dataLastEditDate 2022-08-02). Probed from the owner's browser on planyr.io 2026-09-30:
+     * 40 polygons, `last_edited_date` max 2026-09-24, fields NAME / TYPE / CITY / INC_MUNI, CORS-clean. From
+     * the build sandbox the host is UNREACHABLE (403 at the egress proxy).
+     *
+     * SCHEMA, from the 2022 edition that carried the same four columns (read live 2026-09-30): `NAME` is the
+     * city; `TYPE` is 'ETJ' or 'DIV 2'. **"Undetermined" IS THE COUNTY'S OWN WORD FOR A DISPUTED STRIP** — the
+     * eight such polygons in the 2022 edition all have NAME='Undetermined' and put the two CLAIMANTS in `CITY`
+     * ("Denton/Cross Roads", "Frisco/Hackberry", "Dish/Ponder" …); the current edition has five. They are NEVER
+     * assigned to a city and NEVER read as unincorporated: the badge says "ETJ undetermined (disputed)"; the
+     * claimants ride the structured result (`etjUndetermined[].claimants`) and the layer tooltip as CLAIMS.
+     * 'DIV 2' is Denton's second ETJ division (NAME 'Denton'): it is a Denton ETJ polygon like any other, so
+     * it is reported as "Denton" ETJ and `TYPE` is not filtered on. */
+    serviceUrl: "https://gis.dentoncounty.gov/arcgis/rest/services/CityETJPermits_GC/MapServer/3",
+    layerId: null,
     geometryType: "polygon",
-    fields: { name: "CITY" },
-    /* Denton County publishes a strip BOTH cities claim as ONE feature named "A/B" (8 of 41:
-     * "Denton/Cross Roads", "Dish/Ponder", …) and a second Denton polygon "Denton Div 2". Both are
-     * read as data — an overlap is reported as BOTH claims, never resolved (`lib/etjNames.js`). */
-    nameSplit: "/",
+    fields: { name: "NAME", claimants: "CITY" },
+    undeterminedNames: ["Undetermined"],
     nameStrip: ["\\s+Div\\s*\\d+$"],
     coverage: "metro",
     tier: "production",
     lastVerified: "2026-09-30",
-    /* ⚠ 2022-08-02 — OLDER THAN SB 2038. Every ETJ released by petition since 2023 is still drawn
-     * here. Shown in the tooltip; the mitigation is the date, not a claim of currency. Denton County
-     * is deliberately NOT in `completeCounties`: the roster omits cities (Flower Mound, Highland
-     * Village, Corinth …) whose ETJ status this layer cannot speak to. */
-    dataLastEdited: "2022-08-02",
+    dataLastEdited: "2026-09-24",
+    browserVerified: { date: "2026-09-30", by: "owner's browser, planyr.io tab", features: 40, undetermined: 5, divTwo: 1 },
+    /* NO `roster` and NO `completeCounties`: the city names in the current edition were not enumerated, so
+     * nothing here claims which cities it carries (`rosterUnknown` makes "ETJ not mapped" the answer for a
+     * city it cannot be shown to carry). Denton County stays "unavailable" on a miss. */
+    rosterUnknown: true,
+  },
+
+  /* ⛔ NEW-2 (DFW gaps, 2026-09-30) — the second sweep. Found by (1) ArcGIS Online search by city and
+   * county, every layer inside every service, kept only where the polygon extent reaches the 50-mile
+   * circle; (2) county / utility-district / appraisal-district organisations; (3) SPATIAL JOIN where a
+   * publisher gives no usable name (the city is the TxGIO limit its polygon abuts — flagged, never
+   * guessed). None claims a county COMPLETE: each is a compile by a county office, a utility district,
+   * a consultant or a city planner, and several say so ("Need to Research", "Unofficial"). A hit is a
+   * positive finding; a miss in these counties stays "ETJ data unavailable". */
+  etj_dallasco: {
+    key: "etj_dallasco",
+    label: "ETJ — Dallas County",
+    provider: "Dallas County GIS",
+    serviceUrl: "https://services3.arcgis.com/zqe2kwz79KUqUvxC/arcgis/rest/services/Dallas_County_ETJ/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    // The layer's own `NAME` column reads "ETJ" on every row; the city is in `City` (Wilmer, Combine, …).
+    fields: { name: "City" },
+    /* 10 of 48 polygons do not abut a city limit of the name they carry (spatial join against TxGIO,
+     * tolerance ≈ 40 m): OBJECTID 8, 71, 72 ("Wilmer" beside Lancaster), 14 ("Wilmer", no adjacent city),
+     * 68 ("Seagoville", none), 69 ("Hutchins", none), 157, 161 ("Wylie" beside Rowlett), 159 ("Wylie"
+     * beside Garland/Rowlett), 162 ("Wylie" beside Rowlett/Dallas). They may be real ETJ pieces that do
+     * not touch the limits, or mislabels — this app cannot tell which, so it does not GUESS: they are
+     * withheld from the drawn layer and the identify, and a point only they contain reads "ETJ data
+     * unavailable". Re-run `ui-audit/audit-dfw-etj-gaps.mjs --join` to re-derive the list. */
+    where: "OBJECTID NOT IN (8,14,68,69,71,72,157,159,161,162)",
+    withheld: { objectIds: [8, 14, 68, 69, 71, 72, 157, 159, 161, 162], reason: "polygon does not abut a city limit of the name it carries (spatial join, 2026-09-30)" },
+    coverage: "county",
+    tier: "production",
+    lastVerified: "2026-09-30",
+    dataLastEdited: "2024-02-06",
+    roster: ["Combine", "Ferris", "Hutchins", "Lancaster", "Seagoville", "Wilmer", "Wylie"],
+    rosterCheckedAt: "2026-09-30",
+  },
+  etj_ellis: {
+    key: "etj_ellis",
+    label: "ETJ — Ellis County",
+    provider: "Ellis County ETJ compilation (City of Waxahachie planning, on ArcGIS Online)",
+    serviceUrl: "https://services5.arcgis.com/akgXEW2N2FkwmHEV/arcgis/rest/services/ETJ_Expansion_Map/FeatureServer/8",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "Municipality" },
+    /* A COMPILATION, and it says so: `EllisCo_Source` reads "Need to Research" on 14 polygons and
+     * "Unnoficial" on 3. Waxahachie's own ETJ is a separate layer (below), and Ferris, Italy, Milford,
+     * Garrett and Bardwell are absent — so Ellis County is NOT declared complete. */
+    coverage: "county",
+    tier: "production",
+    lastVerified: "2026-09-30",
+    dataLastEdited: "2026-02-02",
+    roster: ["Ennis", "Maypearl", "Midlothian", "Oak Leaf", "Ovilla", "Palmer", "Pecan Hill", "Red Oak"],
+    rosterCheckedAt: "2026-09-30",
+  },
+  etj_waxahachie: {
+    key: "etj_waxahachie",
+    label: "ETJ — Waxahachie",
+    provider: "City of Waxahachie planning (on ArcGIS Online)",
+    serviceUrl: "https://services5.arcgis.com/akgXEW2N2FkwmHEV/arcgis/rest/services/ETJ_Expansion_Map/FeatureServer/5",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: null },
+    coverage: "city",
+    tier: "production",
+    lastVerified: "2026-09-30",
+    dataLastEdited: "2026-02-02",
+  },
+  etj_johnson: {
+    key: "etj_johnson",
+    label: "ETJ — Johnson County & Tarrant-side cities",
+    provider: "Johnson County Special Utility District (JCSUD)",
+    serviceUrl: "https://services5.arcgis.com/qRnKFQAA2HvGQNbR/arcgis/rest/services/Operations_Map_WFL5/FeatureServer/22",
+    layerId: null, // the URL already includes the layer index
+    geometryType: "polygon",
+    // All-caps names ("JOSHUA", "RIO VISTA") → title-cased. A utility district's own 2025 ETJ compile,
+    // not a county or city publication — a hit is a finding, a miss is not.
+    fields: { name: "NAME" },
+    titleCaseName: true,
+    coverage: "metro",
+    tier: "production",
+    lastVerified: "2026-09-30",
+    dataLastEdited: "2026-09-01",
     roster: [
-      "Argyle", "Aubrey", "Bartonville", "Celina", "Copper Canyon", "Cross Roads", "Denton", "Dish",
-      "Draper", "Fort Worth", "Frisco", "Hackberry", "Hickory Creek", "Justin", "Krugerville", "Krum",
-      "Lake Dallas", "Lakewood Village", "Lewisville", "Little Elm", "New Fairview", "North Lake", "Northlake",
-      "Oak Point", "Pilot Point", "Ponder", "Prosper", "Providence Village", "Roanoke", "Sanger",
-      "Shady Shores", "The Colony", "Trophy Club",
+      "Alvarado", "Briaroaks", "Burleson", "Cleburne", "Coyote Flats", "Cresson", "Cross Timber", "Crowley",
+      "Fort Worth", "Godley", "Grand Prairie", "Grandview", "Joshua", "Keene", "Mansfield", "Midlothian",
+      "Rio Vista", "Venus",
     ],
     rosterCheckedAt: "2026-09-30",
+  },
+  etj_grayson: {
+    key: "etj_grayson",
+    label: "ETJ — Grayson County",
+    provider: "Grayson County thoroughfare-plan consultant layer (on ArcGIS Online)",
+    serviceUrl: "https://services.arcgis.com/z8PunAra8x6Evxcv/arcgis/rest/services/Thoroughfare_Plan_2024_07_24_WFL1/FeatureServer/13",
+    layerId: null, // the URL already includes the layer index
+    geometryType: "polygon",
+    fields: { name: "ETJ" },
+    titleCaseName: true,
+    coverage: "county",
+    tier: "production",
+    lastVerified: "2026-09-30",
+    dataLastEdited: "2024-07-24",
+    roster: [
+      "Bells", "Collinsville", "Denison", "Dorchester", "Gunter", "Howe", "Pilot Point", "Pottsboro", "Sadler",
+      "Sherman", "Southmayd", "Tioga", "Tom Bean", "Van Alstyne", "Whitesboro", "Whitewright",
+    ],
+    rosterCheckedAt: "2026-09-30",
+  },
+  etj_corsicana: {
+    key: "etj_corsicana",
+    label: "ETJ — Corsicana",
+    provider: "City of Corsicana GIS (publisher gives no city name)",
+    serviceUrl: "https://services8.arcgis.com/V3MtivrTOPqThQ57/arcgis/rest/services/UB_2026_2D/FeatureServer/3",
+    layerId: null, // the URL already includes the layer index
+    geometryType: "polygon",
+    /* NAMED BY SPATIAL JOIN, NOT BY THE PUBLISHER: the layer is titled just "ETJ". Its one polygon abuts
+     * TxGIO's Corsicana limits over 33.7% of its outline (next best: Retreat 4.3%, Oak Valley 2.5%) —
+     * unambiguous, but an inference, so it is recorded here rather than buried. */
+    fields: { name: null },
+    nameBy: "spatial-join (TxGIO city limits, 2026-09-30)",
+    coverage: "city",
+    tier: "production",
+    lastVerified: "2026-09-30",
+    dataLastEdited: "2026-05-08",
+  },
+  etj_bloominggrove: {
+    key: "etj_bloominggrove",
+    label: "ETJ — Blooming Grove",
+    provider: "Blooming Grove planning consultant layer (on ArcGIS Online)",
+    serviceUrl: "https://services3.arcgis.com/XwNXOHGy8HyH02Ce/arcgis/rest/services/Blooming_Grove_Community_Assets/FeatureServer/3",
+    layerId: null, // the URL already includes the layer index
+    geometryType: "polygon",
+    fields: { name: null },
+    coverage: "city",
+    tier: "production",
+    lastVerified: "2026-09-30",
+    dataLastEdited: "2024-10-30",
+  },
+  etj_forney: {
+    key: "etj_forney",
+    label: "ETJ — Forney",
+    provider: "Kaufman-area planning consultant layer (on ArcGIS Online)",
+    serviceUrl: "https://services7.arcgis.com/k1eQaOGZAVVR0bMw/arcgis/rest/services/Future_land_use/FeatureServer/43",
+    layerId: null, // the URL already includes the layer index
+    geometryType: "polygon",
+    fields: { name: null },
+    // The layer mixes the city limit (TYPE 'City') with its ETJ pieces (TYPE 'etj', CITY blank). The 7 ETJ pieces abut TxGIO's Forney limits (25.3%; next best Mesquite 0.4%) — named by that join, not by the publisher.
+    where: "TYPE = 'etj'",
+    nameBy: "spatial-join (TxGIO city limits, 2026-09-30)",
+    coverage: "city",
+    tier: "production",
+    lastVerified: "2026-09-30",
+    dataLastEdited: "2025-04-10",
+  },
+  etj_talty: {
+    key: "etj_talty",
+    label: "ETJ — Talty",
+    provider: "Kaufman-area planning consultant layer (on ArcGIS Online)",
+    serviceUrl: "https://services7.arcgis.com/k1eQaOGZAVVR0bMw/arcgis/rest/services/Future_land_use/FeatureServer/42",
+    layerId: null, // the URL already includes the layer index
+    geometryType: "polygon",
+    fields: { name: null },
+    nameBy: "spatial-join (TxGIO city limits, 2026-09-30) — abuts Talty 42.2%, next best Mesquite 1.1%",
+    coverage: "city",
+    tier: "production",
+    lastVerified: "2026-09-30",
+    dataLastEdited: "2025-04-10",
+  },
+  etj_mansfield: {
+    key: "etj_mansfield",
+    label: "ETJ — Mansfield",
+    provider: "City of Mansfield GIS",
+    serviceUrl: "https://services8.arcgis.com/tUwpuhPn5EkXI11P/arcgis/rest/services/Mansfield_Basemap_for_Tyler_EPL/FeatureServer/9",
+    layerId: null, // the URL already includes the layer index
+    geometryType: "polygon",
+    fields: { name: null },
+    coverage: "city",
+    tier: "production",
+    lastVerified: "2026-09-30",
+    dataLastEdited: "2026-05-27",
+  },
+  etj_sunnyvale: {
+    key: "etj_sunnyvale",
+    label: "ETJ — Sunnyvale",
+    provider: "Town of Sunnyvale GIS",
+    serviceUrl: "https://services5.arcgis.com/ecWT8iam2AWjfm3E/arcgis/rest/services/ETJ/FeatureServer/0",
+    layerId: null, // the URL already includes the layer index
+    geometryType: "polygon",
+    fields: { name: null },
+    // Named by its PUBLISHER (the Town of Sunnyvale's own org). A spatial join alone would not settle it — the two polygons abut Dallas 21% / Sunnyvale 5%, because Dallas surrounds Sunnyvale — so this is recorded, not inferred.
+    nameBy: "publisher (Town of Sunnyvale GIS)",
+    coverage: "city",
+    tier: "production",
+    lastVerified: "2026-09-30",
+    dataLastEdited: "2024-04-29",
   },
 
   // ---- Drainage / detention resolver sources (B629) ----
@@ -1657,7 +1872,7 @@ export const SOURCE_STATE_SCOPE = {
   // (the RRC, the PUC's CCN construct, TCEQ, TxDOT, TEA, TxGIO) or a Texas-region study.
   oilgas: ["TX"], pipelines: ["TX"], ccnWater: ["TX"], ccnSewer: ["TX"], lpst: ["TX"],
   growthFaults: ["TX"], aadt: ["TX"], county: ["TX"], city: ["TX"], road: ["TX"], isd: ["TX"],
-  etj_hgac: ["TX"], etj_austin: ["TX"], etj_fortworth: ["TX"], etj_collin: ["TX"], etj_rockwall: ["TX"], etj_denton: ["TX"], etj_baytown: ["TX"], city_baytown: ["TX"], mud: ["TX"], bkdd: ["TX"],
+  etj_hgac: ["TX"], etj_austin: ["TX"], etj_fortworth: ["TX"], etj_collin: ["TX"], etj_rockwall: ["TX"], etj_denton: ["TX"], etj_release_fortworth: ["TX"], etj_dallasco: ["TX"], etj_ellis: ["TX"], etj_waxahachie: ["TX"], etj_johnson: ["TX"], etj_grayson: ["TX"], etj_corsicana: ["TX"], etj_bloominggrove: ["TX"], etj_forney: ["TX"], etj_talty: ["TX"], etj_mansfield: ["TX"], etj_sunnyvale: ["TX"], etj_baytown: ["TX"], city_baytown: ["TX"], mud: ["TX"], bkdd: ["TX"],
   hcfcdChannels: ["TX"], hcfcdWatersheds: ["TX"], hcfcdMaapnext: ["TX"],
   fbcddWse02: ["TX"], fbcddWse100: ["TX"],
   bkddStreams: ["TX"], bkddAllStreams: ["TX"], bkddEasements: ["TX"], bkddEasements107: ["TX"],
@@ -1691,7 +1906,7 @@ export function sourceCoversState(entry, state) {
 
 // Keys grouped by the surface that consumes them (handy for the audit + tests).
 export const ANALYSIS_KEYS = ["flood", "wetlands", "oilgas", "pipelines"];
-export const JURISDICTION_KEYS = ["county", "city", "road", "isd", "etj_hgac", "etj_austin", "etj_fortworth", "etj_collin", "etj_rockwall", "etj_denton"];
+export const JURISDICTION_KEYS = ["county", "city", "road", "isd", "etj_hgac", "etj_austin", "etj_fortworth", "etj_collin", "etj_rockwall", "etj_denton", "etj_release_fortworth", "etj_dallasco", "etj_ellis", "etj_waxahachie", "etj_johnson", "etj_grayson", "etj_corsicana", "etj_bloominggrove", "etj_forney", "etj_talty", "etj_mansfield", "etj_sunnyvale"];
 export const DETENTION_KEYS = ["mud", "hcfcdChannels", "hcfcdWatersheds"]; // B629 drainage resolver
 
 /* Look a row up by key (throws on a typo so a bad reference fails fast, not silently). */
@@ -1804,6 +2019,19 @@ export const SOURCE_FIXTURE_REACH = {
   etj_collin: ["regional", "Collin County and the cities that reach into it — probing it in Houston would assert a guaranteed zero."],
   etj_rockwall: ["regional", "Rockwall County only — six ETJ polygons."],
   etj_denton: ["regional", "Denton County and the cities that reach into it."],
+  // NEW-2 (DFW gaps)
+  etj_release_fortworth: ["regional", "The release areas inside Fort Worth's ETJ."],
+  etj_dallasco: ["regional", "Dallas County's ETJ table — the small southern/eastern cities only."],
+  etj_ellis: ["regional", "Ellis County's ETJ compilation (eight cities)."],
+  etj_waxahachie: ["local", "One city's ETJ ring."],
+  etj_johnson: ["regional", "A Johnson-County utility district's compile of eighteen cities' ETJs."],
+  etj_grayson: ["regional", "Grayson County's cities' ETJs (the southern part is inside the 50-mile circle)."],
+  etj_corsicana: ["local", "One city's ETJ ring."],
+  etj_bloominggrove: ["local", "One small town's ETJ ring."],
+  etj_forney: ["local", "One city's ETJ ring."],
+  etj_talty: ["local", "One town's ETJ ring."],
+  etj_mansfield: ["local", "One city's ETJ ring."],
+  etj_sunnyvale: ["local", "One town's ETJ ring."],
   // NEW-1a — Baytown's own ETJ ring, added because H-GAC's regional mosaic omits Baytown. It is one
   // city's ETJ, a few km across; two points inside it (one also inside the city limits, one not) is
   // the most separation this layer HAS, exactly as with the Austin and Fort Worth rows.
