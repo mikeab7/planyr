@@ -270,3 +270,18 @@ describe("Fort Worth: the city's own current layer, and SB 2038 release areas th
     expect(features[0].attributes).toEqual({ CITY: "Fort Worth ETJ release area (SB 2038)", _src: "etj_release_fortworth", _release: true });
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+describe("a slow publisher is attributable — per-source wall time rides the payload (NEW-2, freeze instrumentation)", () => {
+  it("the multi-source pull returns each queried publisher's wall time, keyed by registry id", async () => {
+    const fetchJson = async (u) => { if (u.includes("Dallas_County_ETJ")) await new Promise((r) => setTimeout(r, 30)); return { features: [] }; };
+    const r = await fetchVectorFeatures(VECTOR_SOURCES.jur_etj, { w: -96.9, s: 32.5, e: -96.4, n: 33.0 }, { fetchJson, retryDelayMs: 0 });
+    expect(Object.keys(r.sourceMs)).toEqual(expect.arrayContaining(["etj_dallasco", "etj_collin"]));
+    expect(r.sourceMs.etj_dallasco).toBeGreaterThanOrEqual(25);
+    for (const ms of Object.values(r.sourceMs)) expect(Number.isFinite(ms)).toBe(true);
+  });
+  it("a single-service layer (counties, cities) is untouched — no sourceMs key", async () => {
+    const r = await fetchVectorFeatures(VECTOR_SOURCES.jur_city, { w: -97.1, s: 33.0, e: -96.9, n: 33.1 }, { fetchJson: async () => ({ features: [] }) });
+    expect(r.sourceMs).toBeUndefined();
+  });
+});

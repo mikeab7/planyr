@@ -28,6 +28,7 @@ import { gisCache } from "./gisCache.js";
 import { VECTOR_SOURCES, fetchCached, decideVectorOrImage, pickTier, snapBbox, vectorKey, styleFor, identifyRows, hitFeature } from "./vectorLayers.js";
 import { labelAnchors, placeLabels, labelsVisible, titleCaseName } from "./boundaryLabels.js";
 import { placeNamesShown, placeNameKey } from "./placeNamesGate.js";
+import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./pipelineCorridor.js";
 import { ftypeLabel } from "./nhdFlowline.js";
 import { pointSymbolOptions } from "./layerRequest.js";
@@ -274,13 +275,43 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
     }
   };
 
+  /* ⛔ A FREEZE THAT CANNOT BE REPRODUCED HERE MUST CAPTURE ITSELF WHERE IT HAPPENS (STANDING RULE #2). The owner saw
+   * the map stall for "several seconds" when a boundary layer redrew after a zoom, at the 5-mile scale; measured in
+   * headless Chromium with the new ETJ sources' full volume there was NO main-thread task over 50 ms and no frame
+   * gap over 33 ms (`ui-audit/measure-etj-redraw.mjs`). Rather than close that as "not reproducible", a slow paint
+   * or a slow load now reports itself through the app's own telemetry with everything needed to attribute it:
+   * the layer, the zoom, the feature and vertex counts, and — for the multi-publisher ETJ layer — each publisher's
+   * wall time. Throttled to one report per layer per 30 s; never throws into a paint. */
+  const SLOW_PAINT_MS = 150, SLOW_LOAD_MS = 3000;
+  let lastSlowReport = 0;
+  const reportSlow = (kind, ms, fc, extra) => {
+    const now = Date.now();
+    if (now - lastSlowReport < 30000) return;
+    lastSlowReport = now;
+    try {
+      let coords = 0;
+      for (const f of (fc && fc.features) || []) {
+        const c = f.geometry && f.geometry.coordinates;
+        if (Array.isArray(c)) for (const ring of c) coords += Array.isArray(ring) ? ring.length : 0;
+      }
+      reportClientEvent(kind, `${cfg.label}: ${Math.round(ms)} ms`, {
+        layer: k, ms: Math.round(ms), zoom: map ? map.getZoom() : null,
+        features: (fc && fc.features && fc.features.length) || 0, vertices: coords,
+        sourceMs: (fc && fc.sourceMs) || null, ...extra,
+      });
+    } catch (_) { /* telemetry must never break a paint */ }
+  };
+
   const paint = (fc, ts, stale) => {
+    const t0 = performance.now();
     geo.clearLayers();
     lastFc = fc || null; // B1092 — kept so a non-Leaflet surface can hit-test what's painted
     const n = (fc && fc.features && fc.features.length) || 0;
     if (n) geo.addData(fc);
     anchors = source.labelField && fc ? labelAnchors(fc, { labelField: source.labelField, titleCase: !!source.titleCaseLabel }) : [];
     refreshLabels();
+    const paintMs = performance.now() - t0;
+    if (paintMs > SLOW_PAINT_MS) reportSlow("boundary-paint-slow", paintMs, fc, { labels: labelMarkers.length });
     report(n ? "loaded" : "empty", n ? null : "No boundaries in this view.", { ts: ts ?? null, stale: !!stale });
   };
 
@@ -328,6 +359,7 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
     const key = vectorKey(source, eff, tier);
     if (key === lastKey) { refreshLabels(); return; }
     const mySeq = ++seq;
+    const loadT0 = performance.now();
     try {
       const r = await fetchCached(source, bbox, {
         cache, zoom,
@@ -346,6 +378,8 @@ export function cachedVectorLayer(k, cfg, initialOpacity, pane, onStatus, opts =
       if (mySeq !== seq || !map || fellBack) return;
       lastKey = key;
       lastVectorError = null; // a successful pull heals any earlier blip — never latch into the fallback
+      const loadMs = performance.now() - loadT0;
+      if (loadMs > SLOW_LOAD_MS && !r.stale) reportSlow("boundary-load-slow", loadMs, r.data, { cold: true });
       paint(r.data, r.ts, r.stale);
     } catch (e) {
       if (mySeq !== seq || !map || fellBack) return; // a superseded request's failure must not poison the live one (or latch lastVectorError)

@@ -528,6 +528,7 @@ async function fetchMultiSourceFeatures(source, bbox, opts) {
   const q = source.query;
   const meets = (b, v) => !v || (b[0] <= v.n && b[2] >= v.s && b[1] <= v.e && b[3] >= v.w);
   const subs = q.sources.filter((sub) => meets(sub.bbox, bbox));
+  const sourceMs = {};
   const parts = await Promise.all(subs.map(async (sub) => {
     // Every column the row's identify reads (NAME AND CITY on Denton's table); "*" when the row names none.
     const cols = Object.values((sub.row && sub.row.fields) || {}).filter(Boolean);
@@ -535,8 +536,10 @@ async function fetchMultiSourceFeatures(source, bbox, opts) {
     // One retry: with a dozen small publishers behind one layer, a single 5xx/blip must not blank a metro.
     // A second failure still fails the pull (see the block comment above).
     let res;
+    const t0 = Date.now();
     try { res = await fetchVectorFeatures(subSource, bbox, opts); }
     catch (_) { await new Promise((r) => setTimeout(r, opts.retryDelayMs ?? 700)); res = await fetchVectorFeatures(subSource, bbox, opts); }
+    sourceMs[sub.id] = Date.now() - t0;   // per-publisher wall time, so a SLOW publisher is attributable, not guessed
     const { features, truncated } = res;
     const out = [];
     for (const f of features) {
@@ -552,7 +555,7 @@ async function fetchMultiSourceFeatures(source, bbox, opts) {
     }
     return { out, truncated };
   }));
-  return { features: parts.flatMap((p) => p.out), truncated: parts.some((p) => p.truncated) };
+  return { features: parts.flatMap((p) => p.out), truncated: parts.some((p) => p.truncated), sourceMs };
 }
 
 export async function fetchVectorFeatures(source, bbox, { fetchJson = defaultFetchJson, maxFeatures, tier = null } = {}) {
@@ -944,13 +947,14 @@ export async function fetchCached(source, bbox, { cache, fetchJson = defaultFetc
   const effBbox = tier && tier.scope !== "all" && tier.cellDeg ? snapBbox(bbox, tier.cellDeg) : bbox;
   const key = vectorKey(source, effBbox, tier);
   const fetcher = async () => {
-    const { features, truncated } = await fetchVectorFeatures(source, tier && tier.scope === "all" ? null : effBbox, { fetchJson, tier });
+    const { features, truncated, sourceMs } = await fetchVectorFeatures(source, tier && tier.scope === "all" ? null : effBbox, { fetchJson, tier });
     const fc = featuresToGeoJson(features, { source });
     const out = tier ? fc : simplifyGeoJson(fc);
     // Surface the maxFeatures cap on the stored payload (B707): a capped pull is an
     // UNDERCOUNT — consumers (the mitigation engine) must flag it, never read it as
     // "everything". Silent truncation is the fabricated-all-clear class.
     if (truncated) out.truncated = true;
+    if (sourceMs) out.sourceMs = sourceMs;   // multi-source layers: how long each publisher took (rides the cached payload)
     return out;
   };
   const { cached, stale, fresh } = cache.swr(key, fetcher, { ttl: source.query.ttl, onFresh });
