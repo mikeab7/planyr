@@ -1566,7 +1566,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           },
         });
         if (lyr) { lyr.addTo(map); refs[k] = lyr; }
-        else fail(k, cfg, `${cfg.label}: no vector source registered`, "unregistered"); // registry drift — loud, never a silent no-op
+        else fail(k, cfg, `${cfg.label}: no vector source registered`, "unregistered"); // registry drift — loud, never a silent no-op (B685200: an owner-set contract — do not reroute)
       } else if (cfg.kind === "vectorLine") {
         // Cached pipeline vector layer (B751): crisp commodity-colored polylines when zoomed in,
         // the agency /export raster (imageFallback) when zoomed far out — switch re-evaluated per
