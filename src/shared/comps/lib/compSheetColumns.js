@@ -302,7 +302,7 @@ export const SHEET_COLUMNS = [
   // and year built are physical characteristics of the improvement, not the deal's location, and
   // grouping them with the street address read as if they were the same kind of fact.
   simpleColumn({ key: "clearHeightFt", label: "Clear Ht (ft)", fullLabel: "Clear height (ft)", group: "BUILDING", width: 68, align: "right", kind: "number", appliesTo: (t) => t === "building_sale" || t === "lease" }),
-  simpleColumn({ key: "yearBuilt", label: "Yr Built", fullLabel: "Year built", group: "BUILDING", width: 60, align: "right", kind: "number", appliesTo: (t) => t === "building_sale" || t === "lease" }),
+  simpleColumn({ key: "yearBuilt", label: "Yr Built", fullLabel: "Year built", group: "BUILDING", width: 60, align: "right", kind: "number", noThousands: true, appliesTo: (t) => t === "building_sale" || t === "lease" }),
 
   // DEAL — facts about the transaction: when, how long.
   // B986096-HARDENING-25 — `editHint` becomes the edit `<input>`'s native `placeholder` while a
@@ -532,7 +532,8 @@ export function cellState(col, draft) {
   }
   const raw = col.getValue(draft);
   if (col.kind === "select") return { state: "editable", text: optionLabel(optionsForColumn(col, draft.compType), raw), raw: raw || "" };
-  if (col.kind === "number") return { state: "editable", text: formatNumberDisplay(raw), raw: raw ?? "" };
+  // NEW-1 — a YEAR is not a quantity: "1,999" is wrong. `noThousands` shows the digits as typed.
+  if (col.kind === "number") return { state: "editable", text: col.noThousands ? (raw ?? "") : formatNumberDisplay(raw), raw: raw ?? "" };
   if (col.kind === "date") {
     // HARDENING-8 — `raw` (ISO, what's actually stored) is never shown; the REST display and
     // the edit box both use mm/dd/yy, this app's own convention, so an unchanged edit round-trips

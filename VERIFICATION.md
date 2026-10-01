@@ -166,6 +166,16 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1432448 — B2007360: every field on a pasted Lease, Building sale and Land comp accepts an edit on a phone `Blocker: none — run on planyr.io once the build is deployed`
+
+Sandbox-proven: `test/compMobileLayout.test.js` + `ui-audit/verify-comp-mobile-every-field.mjs` (touch tap at each row's centre, 85/85; 30 rows were dead before). **Not provable here:** a real iPhone keyboard rising on tap. **Use a throwaway paste; Close without saving (or delete any saved test comp).** Read the served chunk hash in the same observation.
+**Steps** (phone-width view of planyr.io, Site tab → Records → ＋ Paste comps):
+1. Paste "Lease, Houston TX 77032, 322,322 SF" plus a second throwaway line. **Expect:** comp 1 is a Lease.
+2. Tap each row in turn — Deal name, Size, Clear Ht, Yr Built, Rate, OpEx, Escal, Commence, Term, Free, TI, Landlord, Tenant, Notes — by tapping the middle of the row, empty or filled. **Expect:** an input opens with the keyboard (number pad for numbers); type, Done; the value shows. Type, Unit, Per, Basis open their pickers; Location arms the map.
+3. Tap › then ‹. **Expect:** every value you entered is still there; Yr Built reads 1999, not 1,999.
+4. Repeat with a Building sale line ("Katy building sale, $4,200,000, 62,000 SF") and a Land line ("West Hardy tract, 3.2 AC, $850,000") — including Price, NOI, Cap (Cap/NOI/Price: one is computed from the other two and is read-only by design).
+- **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B2007360.
+
 ### V1413904 — B1988816: every site's map pin sits inside its own parcel (Katz, Rankin Rd) `Blocker: real-data`
 
 Sandbox-proven: `test/siteAnchor.test.js` (L-shaped fixture, centroid outside -> anchor inside with clearance; holes; multi-parcel; sliver). **Still needs Michael's real signed-in Katz site.**

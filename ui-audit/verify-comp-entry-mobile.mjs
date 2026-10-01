@@ -38,7 +38,7 @@ async function openEntrySheetWithThreeComps(page) {
   await page.goto(`${BASE}#/site`, { waitUntil: "domcontentloaded", timeout: 20000 });
   await pacedWait(page, 2500);
   await assertMeasurable(page, "verify-comp-entry-mobile");
-  await page.getByRole("tab", { name: /^Comps/ }).first().click();
+  await page.getByRole("tab", { name: /^Records/ }).first().click();
   await pacedWait(page, 400);
   await page.getByText("＋ Paste comps", { exact: true }).click();
   await pacedWait(page, 300);

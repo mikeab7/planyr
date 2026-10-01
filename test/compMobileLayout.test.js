@@ -110,3 +110,64 @@ describe("compMobileLayout: breakpoint is a single named constant", () => {
     expect(MOBILE_BREAKPOINT_PX).toBeGreaterThan(768); // both 390px and 768px phones/tablets must land in the transposed layout
   });
 });
+
+// NEW-1 (2026-10-01, iPhone Safari): "some fields on the mobile comp sheet can't be edited".
+// Every row mobileSections()/neededToSave emit, for every comp type, must render a control that
+// opens an editor from a tap ANYWHERE on the row (not just the value text), and an edit must land
+// in the same draft the desktop grid uses (applyCellEdit). Server-render the real sheet — no DOM
+// needed to read the structure, and it fails on the pre-fix sheet, where text/number/date rows
+// were inert <div>s whose only live part was an 8px "—".
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import CompEntryMobileSheet from "../src/shared/comps/components/CompEntryMobileSheet.jsx";
+import { applyCellEdit, cellState } from "../src/shared/comps/lib/compSheetColumns.js";
+
+function renderSheet(compType) {
+  const row = rowOf(compType);
+  return renderToStaticMarkup(createElement(CompEntryMobileSheet, {
+    rows: [row], overlaysById: {}, locationCellText: () => "", onCommitField: () => {}, onSetToday: () => {},
+    onResolvePeriod: () => {}, armedRowId: null, onArm: () => {}, onFocusAnchor: () => {}, onSave: () => {},
+    onCancel: () => {}, saving: false, saveError: null, readyRows: [], rowIsReady: () => false, pasteBox: null,
+  }));
+}
+function rowMarkup(html, key) {
+  const m = html.match(new RegExp(`<(div|label|button)[^>]*data-field-key="${key}"[^>]*>`));
+  return m && m[0];
+}
+
+describe("compMobileLayout: every field row is tappable (NEW-1)", () => {
+  for (const t of ["lease", "building_sale", "land"]) {
+    it(`${t}: each emitted column renders an editor-opening row, or is read-only by design`, () => {
+      const html = renderSheet(t);
+      const cols = [...neededToSaveColumns(t), ...mobileSections(t).flatMap((s) => s.cols)];
+      for (const col of cols) {
+        const tag = rowMarkup(html, col.key);
+        expect(tag, `${t}/${col.key} has no data-field-key row`).toBeTruthy();
+        const kind = tag.match(/data-field-editor="(\w+)"/)?.[1];
+        if (col.kind === "derived") expect(kind, `${t}/${col.key}`).toBe("readonly");
+        else if (col.kind === "action") expect(kind, `${t}/${col.key}`).toBe("action");
+        else if (col.kind === "select") expect(kind, `${t}/${col.key}`).toBe("select");
+        else {
+          expect(kind, `${t}/${col.key}`).toBe("text");
+          // the WHOLE row is the control: a focusable button-role with its own click target
+          expect(tag, `${t}/${col.key} row must be a role=button tap target`).toMatch(/role="button"/);
+        }
+      }
+    });
+    it(`${t}: an edit on every editable column lands in the draft via applyCellEdit`, () => {
+      const cols = [...neededToSaveColumns(t), ...mobileSections(t).flatMap((s) => s.cols)]
+        .filter((c) => ["text", "number", "date"].includes(c.kind) && cellState(c, draftOf(t)).state === "editable");
+      for (const col of cols) {
+        const raw = col.kind === "date" ? "6/1/26" : col.kind === "number" ? "12" : "abc";
+        const next = applyCellEdit(col, draftOf(t), raw);
+        expect(col.getValue(next), `${t}/${col.key}`).not.toBe(col.getValue(draftOf(t)));
+      }
+    });
+  }
+  it("a year is shown as typed, never thousands-separated", () => {
+    const col = SHEET_COLUMNS[columnIndex("yearBuilt")];
+    expect(cellState(col, draftOf("lease", { yearBuilt: "1999" })).text).toBe("1999");
+    const price = SHEET_COLUMNS[columnIndex("price")];
+    expect(cellState(price, applyCellEdit(price, draftOf("land"), "12345")).text).toBe("12,345");
+  });
+});
