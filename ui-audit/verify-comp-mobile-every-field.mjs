@@ -19,7 +19,8 @@
 import { chromium } from "playwright";
 import { readFixture } from "./lib/fixtureSeeding.mjs";
 import { fixtureSeed } from "./lib/planFixture.mjs";
-import { assertMeasurable, pacedWait } from "./lib/tabTiming.mjs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { pacedWait } from "./lib/tabTiming.mjs";
 import { mobileSections, neededToSaveColumns, mobileLabel } from "../src/shared/comps/lib/compMobileLayout.js";
 
 const arg = (f, d) => { const i = process.argv.indexOf(f); return i > -1 ? process.argv[i + 1] : d; };
