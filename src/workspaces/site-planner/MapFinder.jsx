@@ -105,6 +105,7 @@ import { PanelErrorBoundary } from "./components/LazyPanel.jsx";
 import { makeParcelDisplayLayer, makeSnapshotLayer, parcelDisplayIsImageOnly, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
 import { siteBoundaryInfo, siteDrawParcels } from "./lib/siteBoundary.js";
 import { siteAnchorLatLon } from "./lib/siteAnchor.js";
+import { pinClusterOffsets, pinOffsetsSig } from "./lib/pinCluster.js";
 // B1923744 — the pure zoom-gate/filter/reproject-outcome half of "draw the record's own active
 // parcel boundary alongside the pin at close zoom" (see the render site below for the Leaflet half).
 import { showActiveParcelAt, activeDrawParcels, reprojectParcelRing } from "./lib/activeParcelBoundary.js";
@@ -1667,6 +1668,28 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   // buckets here at all, so a null `status` on one can never be defaulted into "Pursuit."
   const pursuitSites = useMemo(() => sites.filter((s) => roleOf(s) === "pursuit"), [sites]);
 
+  // NEW-1 — pins that sit on the SAME ground (a parcel-anchored comp, a note on that parcel, the
+  // site's own pin: all resolve to the parcel centre) get nudged apart in SCREEN pixels so none hides
+  // another and each stays clickable at any zoom. Priority: site, then comps, then notes; the first
+  // keeps its true spot. Only what is actually painted counts (layer checkboxes + name filter).
+  // Held by signature so the three marker effects rebuild only when an offset really changes.
+  const pinOffsetsRef = useRef(new Map());
+  const pinOffsets = useMemo(() => {
+    const pts = [];
+    if (showSitesLayer) for (const s of pursuitSites.filter(passName)) {
+      if (!s.origin) continue;
+      const a = siteAnchorLatLon(s, siteDrawParcels(s, parcelSummary)) || s.origin;
+      pts.push({ id: `site:${s.id}`, lat: a.lat, lon: a.lon });
+    }
+    if (showCompsLayer) for (const c of comps) if (c?.anchor) pts.push({ id: `comp:${c.id}`, lat: c.anchor.lat, lon: c.anchor.lon });
+    if (showNotesLayer) for (const n of mapNotes) if (n?.anchor) pts.push({ id: `note:${n.id}`, lat: n.anchor.lat, lon: n.anchor.lon });
+    const next = pinClusterOffsets(pts);
+    return pinOffsetsSig(next) === pinOffsetsSig(pinOffsetsRef.current) ? pinOffsetsRef.current : next;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pursuitSites, parcelSummary, comps, mapNotes, showSitesLayer, showCompsLayer, showNotesLayer, nameFilter]);
+  pinOffsetsRef.current = pinOffsets;
+  const shiftAnchor = (anchor, id) => { const o = pinOffsets.get(id); return o ? [anchor[0] - o[0], anchor[1] - o[1]] : anchor; };
+
   const clearHilites = () => {
     const map = mapRef.current;
     Object.values(hilitesRef.current).forEach((p) => map && map.removeLayer(p));
@@ -2650,7 +2673,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       (showCompsLayer ? comps : []).forEach((c) => {
         if (!c?.anchor || typeof c.anchor.lat !== "number" || typeof c.anchor.lon !== "number") return;
         const { size, anchor } = compMarkerSize(false);
-        const icon = L.divIcon({ className: "map-comp-feature", html: compMarkerSvg(c.compType), iconSize: size, iconAnchor: anchor });
+        const icon = L.divIcon({ className: "map-comp-feature", html: compMarkerSvg(c.compType), iconSize: size, iconAnchor: shiftAnchor(anchor, `comp:${c.id}`) });
         const marker = L.marker([c.anchor.lat, c.anchor.lon], { icon, interactive: !selectMode && !placingCompPin, keyboard: false, riseOnHover: true });
         const tip = `${c.title || compHeadline(c, compsRatePeriod)} · ${c.compDate || ""}`;
         if (!selectMode && !placingCompPin) {
@@ -2672,7 +2695,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     if (pressedRef.current) { pendingCompsRebuildRef.current = build; return; }
     build();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comps, selectMode, placingCompPin, showCompsLayer, compsRatePeriod]);
+  }, [comps, selectMode, placingCompPin, showCompsLayer, compsRatePeriod, pinOffsets]);
 
   /* B1372144 — the MAP NOTES layer. Same construction as the comps layer above and gated the same
    * way: ONLY on its own "Notes" checkbox (B831778's rule — what is PAINTED is never a function of
@@ -2698,7 +2721,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         const icon = L.divIcon({
           className: "map-note-feature",
           html: `<span data-note-id="${String(n.id).replace(/"/g, "")}"${isOpen ? ' data-open="1"' : ""}>${pinHtml(mapNoteMarkerSvg({ selected: isOpen }), isOpen)}</span>`,
-          iconSize: size, iconAnchor,
+          iconSize: size, iconAnchor: shiftAnchor(iconAnchor, `note:${n.id}`),
         });
         const marker = L.marker([n.anchor.lat, n.anchor.lon], { icon, interactive: !selectMode && !placingCompPin, keyboard: false, riseOnHover: true });
         if (!selectMode && !placingCompPin) {
@@ -2712,7 +2735,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     if (pressedRef.current) { pendingNotesRebuildRef.current = build; return; }
     build();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapNotes, selectMode, placingCompPin, showNotesLayer, editingNote?.id]);
+  }, [mapNotes, selectMode, placingCompPin, showNotesLayer, editingNote?.id, pinOffsets]);
 
   const flyToSite = (site) => {
     if (!site.origin || !mapRef.current) return;
