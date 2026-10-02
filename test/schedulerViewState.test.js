@@ -47,7 +47,7 @@ function makeSandbox() {
   const localStorage = makeStorage();
   const fn = new Function(
     "sessionStorage", "localStorage",
-    `${viewStateSrc}\nreturn { VIEW_TAB_KEYS, VIEW_PREF_KEYS, VIEW_TRANSIENT_KEYS, VIEW_STATE_KEYS, loadTabView, saveTabView, loadViewPrefs, saveViewPrefs, coreChanged, stripViewState, persistViewState, resolveViewState };`
+    `${viewStateSrc}\nreturn { VIEW_TAB_KEYS, VIEW_PREF_KEYS, VIEW_TRANSIENT_KEYS, VIEW_STATE_KEYS, loadTabView, saveTabView, loadViewPrefs, saveViewPrefs, coreChanged, stripViewState, persistViewState, resolveViewState, applyTaskFocus, loadTaskFocus, stripTaskViewFields };`
   );
   const mod = fn(sessionStorage, localStorage);
   return { ...mod, sessionStorage, localStorage };
@@ -274,5 +274,94 @@ describe("source-guarded — the fix is actually wired into the App component, n
       const line = SRC.slice(lineStart, i);
       expect(line, `checkpoint save for "${label}" must strip view state`).toMatch(/stripViewState\(/);
     }
+  });
+});
+
+
+/* NEW-1 (2026-10-02) — Focus must HOLD. `focused` stays out of the cloud payload (2026-09-17 fix) but
+ * is kept per browser in localStorage (planar:taskFocus:v1) and re-applied on every doc that enters
+ * memory. Red-proof: on the commit before this change a fresh load of the same doc has no focused. */
+describe("per-task Focus survives a reload without ever entering the cloud payload", () => {
+  const group = (id, extra = {}) => ({ id, name: "G" + id, parentId: null, ...extra });
+  const docWith = (tasks1, tasks2 = []) => ({
+    ...BASE_DOC,
+    projects: { 1: { id: 1, name: "A", tasks: tasks1 }, 2: { id: 2, name: "B", tasks: tasks2 } },
+  });
+  // Simulates one tab session: resolve a freshly loaded doc, apply a toggle, run the app's persist effect.
+  function toggle(sb, doc, pid, taskId, value) {
+    const next = { ...doc, projects: { ...doc.projects, [pid]: { ...doc.projects[pid],
+      tasks: doc.projects[pid].tasks.map(t => t.id === taskId ? { ...t, focused: value } : t) } } };
+    sb.persistViewState(doc, next);
+    return next;
+  }
+
+  it("a focused group is still focused after a simulated reload (fresh doc + same localStorage)", () => {
+    const sb = makeSandbox();
+    let live = sb.resolveViewState(docWith([group(10), group(11), { id: 12, parentId: 10 }]));
+    live = toggle(sb, live, 1, 10, true);
+    const cloud = sb.stripViewState(live);                       // what the cloud holds — no focused
+    expect(JSON.stringify(cloud)).not.toContain("focused");
+    const reloaded = sb.resolveViewState(JSON.parse(JSON.stringify(cloud)));
+    const t = id => reloaded.projects[1].tasks.find(x => x.id === id);
+    expect(t(10).focused).toBe(true);
+    expect(t(11).focused).toBeFalsy();                           // untouched groups stay off
+  });
+
+  it("two schedules keep independent Focus state", () => {
+    const sb = makeSandbox();
+    let live = sb.resolveViewState(docWith([group(10)], [group(10), group(20)]));
+    live = toggle(sb, live, 1, 10, true);
+    live = toggle(sb, live, 2, 20, true);
+    const r = sb.resolveViewState(JSON.parse(JSON.stringify(sb.stripViewState(live))));
+    expect(r.projects[1].tasks.find(x => x.id === 10).focused).toBe(true);
+    expect(r.projects[2].tasks.find(x => x.id === 10).focused).toBeFalsy();   // same task id, other schedule
+    expect(r.projects[2].tasks.find(x => x.id === 20).focused).toBe(true);
+  });
+
+  it("turning Focus off (or a flow clearing it, e.g. open-row jump) is remembered too", () => {
+    const sb = makeSandbox();
+    let live = sb.resolveViewState(docWith([group(10)]));
+    live = toggle(sb, live, 1, 10, true);
+    live = toggle(sb, live, 1, 10, false);
+    expect(sb.loadTaskFocus()).toEqual({});
+    const r = sb.resolveViewState(JSON.parse(JSON.stringify(sb.stripViewState(live))));
+    expect(r.projects[1].tasks[0].focused).toBeFalsy();
+  });
+
+  it("an incoming remote doc (no `focused`) cannot wipe local Focus; an explicit local value still wins", () => {
+    const sb = makeSandbox();
+    let live = sb.resolveViewState(docWith([group(10), group(11)]));
+    live = toggle(sb, live, 1, 10, true);
+    const remote = docWith([group(10), group(11)]);               // as merged off the cloud
+    expect(sb.applyTaskFocus(remote).projects[1].tasks[0].focused).toBe(true);
+    const explicitOff = docWith([group(10, { focused: false }), group(11)]);
+    expect(sb.applyTaskFocus(explicitOff).projects[1].tasks[0].focused).toBe(false);
+  });
+
+  it("silently ignores and prunes ids that no longer exist; tolerates corrupt storage", () => {
+    const sb = makeSandbox();
+    sb.localStorage.setItem("planar:taskFocus:v1", JSON.stringify({ 1: [10, 999], 77: [1] }));
+    const r = sb.applyTaskFocus(docWith([group(10)]));
+    expect(r.projects[1].tasks[0].focused).toBe(true);
+    sb.persistViewState(null, r);
+    expect(sb.loadTaskFocus()[1]).toEqual([10]);
+    sb.localStorage.setItem("planar:taskFocus:v1", "{not json");
+    expect(() => sb.applyTaskFocus(docWith([group(10)]))).not.toThrow();
+  });
+
+  it("applying Focus never changes the cloud payload (no __rev bump source)", () => {
+    const sb = makeSandbox();
+    const base = docWith([group(10)]);
+    sb.localStorage.setItem("planar:taskFocus:v1", JSON.stringify({ 1: [10] }));
+    expect(JSON.stringify(sb.stripViewState(sb.resolveViewState(base)))).toBe(JSON.stringify(sb.stripViewState(base)));
+  });
+
+  it("a persist with an unchanged projects tree does no work (VIEW-INDEPENDENT-ONCE)", () => {
+    const sb = makeSandbox();
+    const d = sb.resolveViewState(docWith([group(10)]));
+    let writes = 0;
+    const orig = sb.localStorage.setItem; sb.localStorage.setItem = (k, v) => { if (k === "planar:taskFocus:v1") writes++; orig(k, v); };
+    sb.persistViewState(d, { ...d, aPid: 2 });
+    expect(writes).toBe(0);
   });
 });

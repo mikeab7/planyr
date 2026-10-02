@@ -166,6 +166,17 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1440896 — B2015808: each schedule group's Focus holds across leaving the module, switching schedules, and a hard reload `Blocker: auth`
+
+Sandbox-proven: `test/schedulerViewState.test.js` (7 new, red on pre-change source) and the real `/sequence/` page in headless Chromium (focus → reload → still focused → off → reload → still off; store `planar:taskFocus:v1` written/cleared). Pending: the signed-in cloud path (a real merge/refresh from the cloud).
+**Steps** (planyr.io, signed in; use a THROWAWAY duplicate schedule, never a real one; read the served chunk hash in the same observation):
+1. In the duplicate schedule click Focus on two different groups. **Expect:** each hides its completed / paused / not-started children and its pill reads "Show all tasks…".
+2. Switch to another module, then back. **Expect:** both groups still focused, no flash of everything expanded.
+3. Switch to a different schedule and back. **Expect:** same two groups focused; the other schedule's groups untouched.
+4. Hard reload (Ctrl+Shift+R). **Expect:** both still focused; Version History shows no new entry and no "Merged in changes…" toast appeared from toggling.
+5. Un-focus one group, reload. **Expect:** it stays expanded; the other stays focused.
+- **Stopping rule:** closes on a dated pass of 1-5, or a failed step filed as a recurrence on B2015808.
+
 ### V1438832 — B2013744/B2013745: a note, a comp and the site on one parcel are each clickable on the map, and the exported KMZ has three distinct pins `Blocker: auth`
 
 Sandbox-proven: `ui-audit/verify-pin-overlap.mjs` (real Leaflet from the app's marker modules: red arm comp reachable 0/49, fixed arm 49/49 + note + site reachable), `test/pinCluster.test.js`, `test/compKmlExport.test.js` NEW-2 block (red-proved). **Not provable here:** the real signed-in map holding Michael's two throwaways. **Use ONLY the throwaways already on his account — comp "ZZ KML test - safe to delete" and map note "ZZ KML map note - safe to delete" (APN 0481850000004); DO NOT delete them — the Cowork chat does.** Read the served chunk hash in the same observation as each result.
