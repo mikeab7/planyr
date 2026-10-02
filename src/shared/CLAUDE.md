@@ -739,6 +739,14 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   silently discard every unsaved row with no prompt at all — now routes through `requestClose`,
   arming an inline (never `window.confirm`) "Discard N unsaved comps?" / Keep-editing prompt
   whenever the sheet holds rows, staying instant/silent when it's empty.
+  **B2010352–B2010355 (KMZ export + paste notes):** `lib/siteRecordKml.js` is the PURE assembler behind
+  the right-click "Export KMZ" (MapFinder only gathers inputs): the balloon is `compFieldRows` verbatim with
+  Location first — adds no row of its own — and a comp is always one pin; its parcel outline rides with the comp (named
+  "… — comp parcel") unless the site's own boundary is the same parcel (then drawn once, the site's);
+  the record's map notes are a Notes folder of pins. `compLocationFor` (`compLocationText.js`) is the ONE
+  Location resolver (panel + export; the APN is never a Location). `compParse.js` reads the unclaimed leftover
+  per comma-segment: consumed type/connector words ("lease", "at", "executed") never reach Notes, a leading
+  name becomes the Title.
   KML import (B849233) is a SEPARATE staging table, `db/comp_import_drafts.sql`
   (`public.comp_import_drafts`, owner-only RLS — no team visibility at all, unlike `comps` itself,
   until promoted) — `lib/kmlImport.js` is the pure, hand-rolled Placemark parser (a Point is a

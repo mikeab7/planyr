@@ -108,7 +108,7 @@ import { siteAnchorLatLon } from "./lib/siteAnchor.js";
 // B1923744 — the pure zoom-gate/filter/reproject-outcome half of "draw the record's own active
 // parcel boundary alongside the pin at close zoom" (see the render site below for the Leaflet half).
 import { showActiveParcelAt, activeDrawParcels, reprojectParcelRing } from "./lib/activeParcelBoundary.js";
-import { geocodeAddress } from "./lib/geocode.js";
+import { geocodeAddress, reverseGeocodeLatLon } from "./lib/geocode.js";
 import { compAnchorFromSelection, parcelAnchorFromSelection } from "./lib/compParcelAnchor.js";
 import { statusToken } from "../../shared/ui/statusTokens.js";
 /* lib/sharing.js is loaded ON DEMAND, and the reason is a budget one. This module is the
@@ -128,10 +128,9 @@ import { lastEditedLabel } from "./lib/siteRecency.js";
 import { loadUserPrefs, updateUserPrefs, getPrefsSnapshot, subscribePrefs, setSitesPanelPref } from "./lib/userPrefs.js";
 import { adminBoundariesVisible, attachAdminBoundaries } from "./lib/adminBoundaryGate.js";
 import { placeNamesVisible, attachPlaceNames } from "./lib/placeNamesGate.js";
-import { compHeadline, compFieldRows, compDateLabel } from "../../shared/comps/lib/comps.js";
+import { compHeadline } from "../../shared/comps/lib/comps.js";
 import { loadCompsRatePeriod } from "../../shared/comps/lib/compsRatePeriodPrefs.js";
-import { compMarkerSvg, compMarkerSize, compMarkerColor } from "../../shared/comps/lib/compMarkerIcon.js";
-import { parcelLocationText, siteplanLocationText, pinFallbackText } from "../../shared/comps/lib/compLocationText.js";
+import { compMarkerSvg, compMarkerSize } from "../../shared/comps/lib/compMarkerIcon.js";
 // B1372144 (map notes) — a note is a comp's ANCHOR with a note's payload. It reuses this file's
 // existing ground-first plumbing wholesale (the dropped pin, the parcel selection, the decide bar)
 // and adds only its own marker, editor and layer. It is NOT the Notes WORKSPACE
@@ -1468,38 +1467,27 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     return { name: rec.label ? rec.label.split(" ·")[0].trim() : null, state: rec.state || null };
   };
 
-  // Outer ring(s) of a comp's parcel-anchor GeoJSON (Polygon | MultiPolygon), already WGS84
-  // lon/lat — holes are dropped (a real property boundary carrying a donut hole is rare, and this
-  // export's own polygon+pin pairing only ever needs the outer shape). Never throws on a malformed
-  // shape — just contributes nothing, which degrades to the comp's plain pin.
-  const compParcelRings = (geom) => {
-    if (!geom) return [];
-    if (geom.type === "Polygon") return geom.coordinates?.[0] ? [geom.coordinates[0]] : [];
-    if (geom.type === "MultiPolygon") return (geom.coordinates || []).map((poly) => poly?.[0]).filter(Boolean);
-    return [];
-  };
-
-  // One comp -> its balloon (a card of every populated field, grouped exactly as `compFieldRows`
-  // already orders them for the panel/detail view — never a second, drifting field list) + its
-  // geometry input for `siteRecordFeatures`.
-  const compKmlBalloon = (c) => {
-    const loc = c.anchor?.kind === "parcel" ? parcelLocationText(c.anchor, countyDisplayName)
-      : c.anchor?.kind === "site_plan" ? siteplanLocationText(c.anchor, overlaysById)
-      : pinFallbackText(c.anchor, countyEntryFor);
-    const headRows = [];
-    if (loc) headRows.push({ label: "Location", value: loc });
-    headRows.push({ label: "Executed", value: compDateLabel(c.compDate) });
-    return [{ heading: c.title || compHeadline(c, compsRatePeriod), rows: headRows }, { rows: compFieldRows(c, compsRatePeriod) }];
-  };
-  const compToKmlFeatureInput = (c, balloonHtmlFn) => {
-    const name = c.title || compHeadline(c, compsRatePeriod);
-    const iconColor = compMarkerColor(c.compType);
-    const balloon = balloonHtmlFn(compKmlBalloon(c));
-    if (c.anchor?.kind === "parcel" && c.anchor.parcelGeom) {
-      const rings = compParcelRings(c.anchor.parcelGeom);
-      if (rings.length) return { name, polygonRings: rings, iconColor, lineColor: iconColor, balloon };
+  // B2010352 (NEW-1/2/3) — the balloon/feature assembly lives in the PURE shared/comps/lib/
+  // siteRecordKml.js now (it was closures here, unreachable by any test). This file only gathers
+  // inputs. `compLocationText` below is the panel's Location for a comp: the reverse-geocoded
+  // address from the same persisted cache the comp panel reads (fetched + persisted when absent),
+  // through the one resolver `compLocationFor` — never the APN.
+  const compLocationText = async (c) => {
+    const { compLocationFor } = await import("../../shared/comps/lib/compLocationText.js");
+    const { pinCacheKey, readPinAddrStorage, persistPinAddr } = await import("../../shared/comps/lib/pinAddrCache.js");
+    let resolvedAddress = null;
+    const key = c.anchor && c.anchor.kind !== "site_plan" ? pinCacheKey(c.anchor) : null;
+    if (key) {
+      resolvedAddress = readPinAddrStorage()[key] || null;
+      if (!resolvedAddress) {
+        try {
+          const ans = await reverseGeocodeLatLon(c.anchor.lat, c.anchor.lon);
+          resolvedAddress = ans?.label || null;
+          if (resolvedAddress) persistPinAddr(key, resolvedAddress);
+        } catch { resolvedAddress = null; } // falls back to county/coordinates, exactly as the panel does
+      }
     }
-    return { name, point: [c.anchor.lon, c.anchor.lat], iconColor, balloon };
+    return compLocationFor(c.anchor, { overlaysById, countyEntry: countyEntryFor, resolvedAddress });
   };
 
   // Right-click a comp marker (the green diamond, or any other comp type) -> export its OWNING
@@ -1510,7 +1498,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const exportCompSiteRecordKmz = async (comp) => {
     setCompMenu(null);
     try {
-      const { siteRecordFeatures, balloonHtml, buildKmz, kmzFilename, KMZ_MIME } = await import("../../shared/comps/lib/kmlExport.js");
+      const { buildKmz, kmzFilename, KMZ_MIME } = await import("../../shared/comps/lib/kmlExport.js");
+      const { siteRecordKmlFeatures } = await import("../../shared/comps/lib/siteRecordKml.js");
       const download = (bytes, filename) => {
         const blob = new Blob([bytes], { type: KMZ_MIME });
         const a = document.createElement("a");
@@ -1519,6 +1508,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         a.click();
         URL.revokeObjectURL(a.href);
       };
+
+      // The panel's Location text for each exported comp, resolved up front (see compLocationText).
+      const locations = new Map();
+      const loadLocations = (list) => Promise.all(list.map(async (c) => { locations.set(c.id, await compLocationText(c)); }));
 
       // `sites` (the `siteGroups` prop) is filtered to role === "pursuit" — most comps' owning
       // sites are "tracked" market-intel records that never appear there, so the lookup needs the
@@ -1535,7 +1528,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       // alone, and SAY so (never a silent narrower export).
       if (!site) {
         const name = comp.title || compHeadline(comp, compsRatePeriod);
-        const feats = siteRecordFeatures({ parcel: { rings: [] }, comps: [compToKmlFeatureInput(comp, balloonHtml)] });
+        await loadLocations([comp]);
+        const feats = siteRecordKmlFeatures({
+          siteName: name, site: null, boundary: { known: false, hasBoundary: false, acres: 0, rings: [] },
+          comps: [comp], locationFor: () => locations.get(comp.id), ratePeriod: compsRatePeriod,
+        });
         download(buildKmz(name, feats), kmzFilename(name));
         setErr(`This comp isn't linked to a site record yet — exported just "${name}" on its own.`);
         return;
@@ -1557,6 +1554,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       const parcelRings = projPt ? parcelRows.map((p, i) => ({
         ring: p.points.map(projPt),
         name: p.addr || (parcelRows.length > 1 ? `${siteName} (parcel ${i + 1})` : siteName),
+        acct: p.acct || null,
       })) : [];
 
       // Best-effort: the project's filed documents, listed by NAME only (never the file itself —
@@ -1571,36 +1569,23 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         documents = (rows || []).filter((r) => r.project_id === comp.projectId).map((r) => ({ name: r.sfile || r.title || "Untitled file" }));
       } catch { documents = null; }
 
-      const siteRows = [
-        { label: "Role", value: roleOf(site) === "tracked" ? "Tracked" : "Pursuit" },
-        { label: "Status", value: STATUS_META[statusOf(site)]?.label || statusOf(site) },
-      ];
-      if (site.county) siteRows.push({ label: "County", value: countyDisplayName(site.county) });
-      siteRows.push({ label: "Acreage", value: boundary.known ? (boundary.hasBoundary ? `${boundary.acres.toFixed(2)} AC` : "No boundary drawn yet") : "Unknown" });
-      if (site.origin) siteRows.push({ label: "Coordinates", value: `${site.origin.lat.toFixed(5)}, ${site.origin.lon.toFixed(5)}` });
-      const siteSections = [{ heading: siteName, rows: siteRows }];
-      const siteNotes = (mapNotes || []).filter((n) => n.projectId && n.projectId === comp.projectId);
-      if (siteNotes.length) {
-        siteSections.push({ heading: "Notes", lines: siteNotes.map((n) => `${n.title ? `${n.title} — ` : ""}${n.body || ""}`.trim()).filter(Boolean) });
-      }
-      if (documents) {
-        siteSections.push(documents.length
-          ? { heading: "Documents", links: documents.map((d) => ({ label: d.name, url: null })) }
-          : { heading: "Documents", lines: ["No documents on file."] });
-      }
-      siteSections.push({
-        heading: `Comps on this site record (${siblingComps.length})`,
-        lines: siblingComps.map((c) => `${c.title || compHeadline(c, compsRatePeriod)} — ${compDateLabel(c.compDate)}`),
-      });
+      await loadLocations(siblingComps);
 
-      const features = siteRecordFeatures({
-        parcel: {
-          rings: parcelRings,
-          fallbackPoint: !parcelRings.length && site.origin ? [site.origin.lon, site.origin.lat] : null,
-          name: siteName,
-          balloon: balloonHtml(siteSections),
+      const features = siteRecordKmlFeatures({
+        siteName,
+        site: {
+          role: roleOf(site) === "tracked" ? "Tracked" : "Pursuit",
+          status: STATUS_META[statusOf(site)]?.label || statusOf(site),
+          county: site.county ? countyDisplayName(site.county) : null,
+          origin: site.origin || null,
         },
-        comps: siblingComps.map((c) => compToKmlFeatureInput(c, balloonHtml)),
+        boundary: { known: boundary.known, hasBoundary: boundary.hasBoundary, acres: boundary.acres, rings: parcelRings },
+        comps: siblingComps,
+        locationFor: (c) => locations.get(c.id),
+        ratePeriod: compsRatePeriod,
+        notes: mapNotes || [],
+        projectId: comp.projectId,
+        documents,
       });
       if (!features.length) { setErr("Nothing to export yet — this site record has no boundary and no located comps."); return; }
       download(buildKmz(siteName, features), kmzFilename(siteName));
