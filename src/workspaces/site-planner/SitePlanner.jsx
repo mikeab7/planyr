@@ -213,7 +213,7 @@ import { bestMeasurer } from "../../shared/markup/textWrap.js"; // B548818 — m
 import { CROSS_BAND_BEHIND, CROSS_BAND_FRONT } from "./lib/paintOrder.js"; // B548819 — ONE name for the cross-band command
 import { nearestRectPerimeterPoint, calloutCornerRadius } from "../../shared/markup/geometry.js";
 import { calloutDblZone } from "../../shared/markup/hitTest.js";
-import { COUNTIES, COUNTIES_MAP, countyKeyForName, resolveTaxRates, candidateCountiesForPoint, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, countyKeyForName, resolveTaxRates, candidateCountiesForPoint, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote, displayFloorForPoint } from "./lib/counties.js";
 import { lookupParcels } from "./lib/parcelQuery.js";
 import {
   resolveLayerUrl,
@@ -12999,7 +12999,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        * marks each rejection handled, because a `tok` supersede can return before the await and an
        * un-awaited rejection would otherwise surface as an unhandled one. */
       const zoneAUnstudied = (floodGeo.zones || []).some((z) => z.unstudiedA && z.zone === "A");
-      const inHarris = ctx?.authority?.jurisdiction?.state !== "GA" // NEW-1 — Harris County, GEORGIA is not Texas's Harris
+      const inHarris = ctx?.authority?.jurisdiction?.state !== "GA" && ctx?.authority?.jurisdiction?.state !== "CA" // NEW-1 — Harris County, GEORGIA is not Texas's Harris (and no California county is either)
         && (ctx?.authority?.jurisdiction?.county || []).some((c) => /harris/i.test(String(c)));
       const [ptLat, ptLng] = feetToLatLng(bfePt, origin.lat, origin.lon);
       const ebfeP = zoneAUnstudied ? leg("ebfe", sampleEbfePoint(ptLat, ptLng)) : null;
@@ -13229,7 +13229,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // to "hcfcd" ONLY for Harris, so it's sufficient evidence on its own). An effective coh/hcfcd
   // authority outside Harris — e.g. a user override on a Fort Bend site — must NOT surface the
   // control, and a STORED channel answer is ignored (not cleared) there, with a visible note.
-  const drainCountyHarris = drainCtxData?.authority?.jurisdiction?.state !== "GA" // NEW-1 — Harris County, GEORGIA is not HCFCD's Harris
+  const drainCountyHarris = drainCtxData?.authority?.jurisdiction?.state !== "GA" && drainCtxData?.authority?.jurisdiction?.state !== "CA" // NEW-1 — Harris County, GEORGIA is not HCFCD's Harris (nor is any California county)
     && (drainCtxData?.authority?.jurisdiction?.county || []).some((c) => /harris/i.test(String(c)));
   const drainChannelRelevant = drainCtxData?.authority?.channelAuthority === "hcfcd"
     || (drainCountyHarris && (drainAuthorityId === "coh" || drainAuthorityId === "hcfcd"));
@@ -13320,7 +13320,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     ? computeRequiredDetention({ ...detReqInputsCo, authorityId: null })
     // NEW-1 (Georgia) — no modeled Georgia criteria: the guard's named "not available in Georgia yet"
     // carrier, regardless of whatever the (Texas-shaped) drainage context resolved.
-    : siteStateId === "GA"
+    : siteStateId === "GA" || siteStateId === "CA" // NEW-1 (California) — same carrier, "not available in California yet"
     ? computeRequiredDetention({ ...detReqInputs, authorityId: null })
     : drainCtxData && siteSqft > 0 && drainAuthorityId
       ? computeRequiredDetention({ ...detReqInputs, authorityId: drainAuthorityId })
@@ -13328,7 +13328,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         ? { ...computeRequiredDetention({ ...detReqInputs, authorityId: null }), governingCounty: drainCountyUnmodeled }
         : null;
   // A boundary straddle leaves primary null — compute EVERY candidate, labeled (never default).
-  const detReqCandidates = siteStateId !== "CO" && siteStateId !== "GA" && drainCtxData && siteSqft > 0 && !drainAuthorityId && drainCtxData.authority?.ambiguous?.length
+  const detReqCandidates = siteStateId !== "CO" && siteStateId !== "GA" && siteStateId !== "CA" && drainCtxData && siteSqft > 0 && !drainAuthorityId && drainCtxData.authority?.ambiguous?.length
     ? drainCtxData.authority.ambiguous[0].candidates.filter(Boolean).map((aid) => ({ aid, r: computeRequiredDetention({ ...detReqInputs, authorityId: aid }) }))
     : null;
   // Tier + regime need flood facts — a FAILED flood query is an unknown, never "clean".
@@ -21603,7 +21603,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       onClick={() => { setIdentifyMode(false); setIdentifyRes(null); setJurInfo(null); }} title="Stop adding parcels">
                       {identAdded > 0 ? `Adding lots — ${identAdded} added · Done` : "Click lit-up lots to add · Done"}
                     </button>
-                    {origin && ppfToZoom(view.ppf, origin.lat) < PARCEL_MINZOOM && (
+                    {origin && ppfToZoom(view.ppf, origin.lat) < Math.max(PARCEL_MINZOOM, displayFloorForPoint(origin.lat, origin.lon)) && ( // NEW-2 — a dense statewide source (California) declares a higher floor
                       <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.4, marginTop: 5 }}>Zoom in to see the county parcel lines light up (a click still adds the lot).</div>
                     )}
                   </>
@@ -32485,14 +32485,14 @@ function DrainagePanel({
                 coMhfd && req.panelLine
                   ? req.panelLine
                   // NEW-1 (Georgia) — the named "not available in Georgia yet" state; one line, the why rides the ⓘ.
-                  : (req.flags || []).includes("georgia-not-wired")
+                  : (req.flags || []).some((f) => f === "georgia-not-wired" || f === "california-not-wired")
                     ? req.headline // PANEL-BREVITY: the carrier's own headline, so no new literal is added here
                     : `${coSubject} — confirm the criteria your town has adopted.`,
                 "co-detention",
                 // The explanation rides the lazily-loaded Colorado tier (with the rest of the
                 // Colorado prose). Until it lands, the visible line and its verdict are already
                 // correct — only the ⓘ fills in a moment later.
-                (req.flags || []).includes("georgia-not-wired")
+                (req.flags || []).some((f) => f === "georgia-not-wired" || f === "california-not-wired")
                   ? req.detail
                   : d.coDetail
                   ? `${d.coDetail}${d.coRegime ? ` Reviewing regime: ${d.coRegime.label} (${d.coRegime.criteria}). ${d.coRegime.note}` : ""}`

@@ -599,7 +599,10 @@ export const JURISDICTIONS = {
     role: "line",
     states: ["TX"],
     // NEW-1 (Georgia) — the panel's out-of-state reason for a state that has no such thing at all.
-    noEquivalentIn: { GA: "Georgia cities have no reach beyond their limits — the county governs outside them. Not a gap in Planyr." },
+    noEquivalentIn: {
+      GA: "Georgia cities have no reach beyond their limits — the county governs outside them. Not a gap in Planyr.",
+      CA: "California cities have no reach beyond their limits — the county governs outside them. Not a gap in Planyr.", // NEW-1 (California)
+    },
     group: "jurisdiction", order: 2,
   },
   jur_isd: {
@@ -886,6 +889,25 @@ export const AHJ_LAYERS = {
     url: GIS_SOURCES.cityGa.serviceUrl, states: ["GA"],
     minZoom: 9, color: "#1d4ed8", weight: 1.6, opacity: 0.4,
     note: "Georgia municipal boundaries (DCA). Inside = in the city; outside = unincorporated county. NOT proof of utility service.",
+    infoCaveat: "A boundary means the city HAS JURISDICTION here — not that it serves or will connect utilities to a parcel.",
+    role: "line", group: "jurisdiction", order: 2,
+  },
+  /* NEW-1 (California) — county lines and city limits for California sites. Each is its OWN row reading its own
+   * registry row (`countyCa` / `cityCa`, both CDT State Geoportal, live-probed 2026-10-02), `states: ["CA"]` so
+   * the Texas rows demote on a California view and these demote on a Texas one — and the attribution each layer
+   * contributes is California's alone. California has NO ETJ, so there is deliberately no California ETJ row. */
+  ca_county: {
+    kind: "vector", label: "County boundaries (California)", source: "California CDT State Geoportal",
+    url: GIS_SOURCES.countyCa.serviceUrl, states: ["CA"],
+    minZoom: 6, color: "#374151", weight: 1.6, opacity: 0.4,
+    note: "California county lines (CDT State Geoportal, all 58 counties). Outside city limits the county is the zoning and permitting authority. A has-jurisdiction boundary, not a service area.",
+    role: "line", group: "jurisdiction", order: 1,
+  },
+  ca_city: {
+    kind: "vector", label: "City limits (California)", source: "California CDT State Geoportal",
+    url: GIS_SOURCES.cityCa.serviceUrl, states: ["CA"],
+    minZoom: 9, color: "#1d4ed8", weight: 1.6, opacity: 0.4,
+    note: "California incorporated-city limits (CDT State Geoportal, 482 cities). Inside = in the city; outside = unincorporated county. Spheres of influence are planning lines, not jurisdiction, and are not shown. NOT proof of utility service.",
     infoCaveat: "A boundary means the city HAS JURISDICTION here — not that it serves or will connect utilities to a parcel.",
     role: "line", group: "jurisdiction", order: 2,
   },

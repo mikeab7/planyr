@@ -480,6 +480,69 @@ export const GIS_SOURCES = {
     fullPurposeOnly: true,
     lastVerified: "2026-09-30",
   },
+  /* NEW-1 (California) — the California counterpart of `county` / `countyCo` / `countyGa`. Its OWN row with
+   * `states: ["CA"]`; the Texas, Colorado and Georgia rows are untouched. VERIFIED LIVE 2026-10-02 from the
+   * build sandbox: exactly 58 county polygons (California's full roster), one per county, ArcGIS-Online hosted
+   * with `access-control-allow-origin: *` (CORS-clean from planyr.io, no key). Data last edited 2026-09-21.
+   * SOURCE CHOICE, in the owner's order of preference — STATE AGENCY FIRST: (1) California Department of
+   * Technology (CDT, org `CDT_GIS`), the State Geoportal's "California County Boundaries and Identifiers"
+   * (built on the CDTFA tax-boundary set; carries the Census GEOID, so `CENSUS_GEOID` = the 5-digit state+county
+   * FIPS "06037"). `CDT_NAME_SHORT` is the bare county name ("Los Angeles"); `CDTFA_COUNTY` is the long form
+   * ("Los Angeles County") and would print "… County County" in the badge, so it is not the name field.
+   * REJECTED, each measured live: CAL FIRE `California_County_Boundaries` (state agency, but 61 features —
+   * it splits island counties into separate rows, so it is not one-row-per-county); CAL OES
+   * `Counties_in_California` (58 rows, but an emergency-management mutual-aid-region product whose
+   * geometry was last edited 2025-05); CDFW `cnty_basicplus_multipart_wm` (a wildlife-agency basemap
+   * product); CDT's older `California_County_Boundaries` (69 features — multipart islands, a 2023 edit);
+   * every `ucirvine` / personal-account / "copy" republication (third party, no provenance). Census
+   * TIGERweb was not tried: tigerweb.geo.census.gov answers 403 at this sandbox's egress and the
+   * verify-before-you-wire rule forbids an unmeasured source.
+   * Point fixtures live 2026-10-02: downtown Los Angeles → Los Angeles · Ontario → San Bernardino ·
+   * Bloomington → San Bernardino · Stockton and Tracy → San Joaquin · San Francisco → San Francisco ·
+   * Reno NV, Las Vegas NV, Tijuana MX, Portland OR, Yuma AZ → none (no county polygon, so "not California"). */
+  countyCa: {
+    key: "countyCa",
+    label: "County boundaries (California)",
+    provider: "California Department of Technology (CDT) — State Geoportal county boundaries",
+    serviceUrl: "https://services3.arcgis.com/uknczv4rpevve42E/arcgis/rest/services/California_County_Boundaries_and_Identifiers_Blue_Version_view/FeatureServer/1",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "CDT_NAME_SHORT", fips: "CENSUS_GEOID", full: "CDTFA_COUNTY" },
+    coverage: "california",
+    states: ["CA"],
+    tier: "production",
+    lastVerified: "2026-10-02",
+  },
+  /* NEW-1 (California) — California incorporated cities (city limits). The same CDT State Geoportal item
+   * family: "California City Boundaries and Identifiers" (`California_Cities_and_Identifiers_Blue_Version_view`
+   * layer 2), 549 features: 482 incorporated cities (California's roster) + 66 OFFSHORE water polygons
+   * (`OFFSHORE` = 'bay' | 'ocean', the same cities' tidal-water jurisdiction as separate rows) + one
+   * 'Mountain House' row with no Census place type (an unincorporated community — NOT a city, and a "City of
+   * Mountain House" badge would be false). The `where` below keeps exactly the 482 land rows: verified live,
+   * count 482, 482 distinct names. Last edited 2026-09-21. A California city has no limited-purpose or strip
+   * annexation class to carry, so the row declares `fullPurposeOnly` (NEW-1 cityLimitClass rule).
+   * Live 2026-10-02: Los Angeles · Ontario (San Bernardino Co.) · Stockton · Tracy · San Francisco → 1 each;
+   * unincorporated Bloomington (-117.3958, 34.07) → 0; Reno / Las Vegas / Tijuana / Portland / Yuma → 0.
+   * NAME QUIRK, recorded not hidden: `CDT_NAME_SHORT` carries three legal names — "San Buenaventura" (Ventura),
+   * "El Paso de Robles" (Paso Robles), "Saint Helena" (St. Helena); `californiaJurisdiction.CA_CITY_DISPLAY`
+   * maps them to the names people use. REJECTED: CDFA `California_City_Boundaries` (798 features — more than the 482
+   * incorporated cities, so not a city-limits-only layer; 2025-09 vintage); CDT's "…with Coastal Buffers" (offshore buffers as
+   * the geometry); `iecfrpp` / `vivian.spidle` / `RiyaDebnath822` and the other personal-account copies. */
+  cityCa: {
+    key: "cityCa",
+    label: "City limits (California)",
+    provider: "California Department of Technology (CDT) — State Geoportal city boundaries",
+    serviceUrl: "https://services3.arcgis.com/uknczv4rpevve42E/arcgis/rest/services/California_Cities_and_Identifiers_Blue_Version_view/FeatureServer/2",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "CDT_NAME_SHORT", fips: "CENSUS_GEOID" },
+    where: "CENSUS_PLACE_TYPE IS NOT NULL AND OFFSHORE IS NULL",
+    coverage: "california",
+    states: ["CA"],
+    tier: "production",
+    fullPurposeOnly: true,
+    lastVerified: "2026-10-02",
+  },
   city: {
     key: "city",
     label: "City limits",

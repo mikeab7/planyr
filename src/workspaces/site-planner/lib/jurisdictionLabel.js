@@ -137,7 +137,7 @@ function leadFor(model, shape) {
     if (isGa(model)) {
       const isCons = (c) => !!(model.consolidated && sameName(c, model.consolidated.city));
       const named = gov.map((c) => (isCons(c) ? model.consolidated.label : `City of ${c}`));
-      return `${named.join(PEER_SEP)}, GA${gov.some(isCons) ? " (consolidated)" : ""}`;
+      return `${named.join(PEER_SEP)}, ${stateAbbr(model)}${gov.some(isCons) ? " (consolidated)" : ""}`;
     }
     return gov.map((c) => `City of ${c}`).join(PEER_SEP);
   }
@@ -152,7 +152,7 @@ function leadFor(model, shape) {
    * the county: "Unincorporated Gwinnett County, GA". Without a county (a failed lookup) it stays honest. */
   if (isGa(model)) {
     const cs = list(model.counties);
-    return cs.length ? `Unincorporated ${cs.map((c) => `${c} County`).join(PEER_SEP)}, GA` : "Unincorporated, GA";
+    return cs.length ? `Unincorporated ${cs.map((c) => `${c} County`).join(PEER_SEP)}, ${stateAbbr(model)}` : `Unincorporated, ${stateAbbr(model)}`;
   }
   /* ⛔ NEW-1 (DFW ETJ) — "Unincorporated" is a POSITIVE finding, and it is only made when the ETJ data
    * actually covers the point. Where it does not (or the lookup failed) the lead says what WAS
@@ -161,8 +161,11 @@ function leadFor(model, shape) {
   return "Unincorporated";
 }
 
-// NEW-1 (Georgia) — a state-aware model carries `state: "GA"` (set only on a point-in-polygon confirmed Georgia site).
-const isGa = (model) => String(model.state || "").toUpperCase() === "GA";
+/* NEW-1 (Georgia, California) — a state-aware model carries `state: "GA" | "CA"` (set only on a point-in-polygon
+ * confirmed site). Both are "no ETJ — the county governs outside city limits" states with the same label grammar, so
+ * the one predicate (still named `isGa` for the call sites above) covers both and `stateAbbr` prints which. */
+const isGa = (model) => ["GA", "CA"].includes(String(model.state || "").toUpperCase());
+const stateAbbr = (model) => String(model.state || "").toUpperCase();
 const sameName = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
 
 /* ⛔ B689904 — TWO ETJs NAMED TOGETHER ARE NEVER CO-EQUAL PEERS. A point can be in at most one

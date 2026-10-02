@@ -869,7 +869,7 @@ export function deriveZoning(j, state = null) {
   const src = ANALYSIS_SOURCES.find((s) => s.id === "zoning");
   const cities = (j.city || []).map((c) => String(c).toLowerCase());
   const etj = (j.etj || []).map((c) => String(c).toLowerCase());
-  const st = state === "CO" ? "CO" : state === "TX" ? "TX" : null;
+  const st = state === "CO" ? "CO" : state === "TX" ? "TX" : state === "CA" ? "CA" : null; // NEW-1 (California) — a state we positively identify states its OWN doctrine
   let summary;
   // ⛔ NEW-5 (2026-09-05, owner-reported) — `j.unincorporated` used to be checked FIRST, so it won
   // on every non-Houston ETJ site (an ETJ IS unincorporated land by definition — jurisdictionLabel.js's
@@ -894,7 +894,7 @@ export function deriveZoning(j, state = null) {
     status: "info", summary, detail: [], rows: null,
     sourceName: "Derived from jurisdiction", ageMs: null, ts: null,
     // NEW-1 — the shared caveat names City of Houston, which is Texas trivia on a Colorado card.
-    error: null, caveat: st === "CO" ? CO_ZONING_CAVEAT : src.caveat, verified: false,
+    error: null, caveat: st === "CO" ? CO_ZONING_CAVEAT : st === "CA" ? CA_ZONING_CAVEAT : src.caveat, verified: false,
   };
 }
 
@@ -903,8 +903,13 @@ export function deriveZoning(j, state = null) {
 const UNINCORPORATED_ZONING = {
   TX: "Unincorporated — Texas counties have no zoning; subdivision platting still applies.",
   CO: "Unincorporated — Colorado counties DO zone (C.R.S. 30-28-111), so this land is zoned by the county, not unzoned. Confirm the district and whether your use is by right, a rezone, or a Use by Special Review.",
+  CA: "Unincorporated — California counties DO zone, so this land is zoned by the county, not unzoned. Confirm the district and whether your use is by right, a rezone, or a conditional use permit.",
   unknown: "Unincorporated — county zoning authority varies by state. Confirm with the county before assuming the land is unzoned.",
 };
+
+const CA_ZONING_CAVEAT =
+  "Zoning is jurisdiction-specific. California cities (including charter cities under their own charters) and counties each zone " +
+  "their own territory; confirm the district and the entitlement path with whoever reviews the plat.";
 
 const CO_ZONING_CAVEAT =
   "Zoning is jurisdiction-specific. Colorado home-rule municipalities (Art. XX) and counties each zone their own territory; " +
