@@ -176,16 +176,6 @@ Sandbox-proven: `test/compMobileLayout.test.js` + `ui-audit/verify-comp-mobile-e
 4. Repeat with a Building sale line ("Katy building sale, $4,200,000, 62,000 SF") and a Land line ("West Hardy tract, 3.2 AC, $850,000") — including Price, NOI, Cap (Cap/NOI/Price: one is computed from the other two and is read-only by design).
 - **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B2007360.
 
-### V1413904 — B1988816: every site's map pin sits inside its own parcel (Katz, Rankin Rd) `Blocker: real-data`
-
-Sandbox-proven: `test/siteAnchor.test.js` (L-shaped fixture, centroid outside -> anchor inside with clearance; holes; multi-parcel; sliver). **Still needs Michael's real signed-in Katz site.**
-**Steps** (read-only — no edits to any plan; read the served chunk hash in the same observation):
-1. Site tab -> Map view, no project selected. Zoom to the Katz site near Rankin Rd / I-45 N. **Expect:** the orange marker sits inside the outlined parcel, in the wide part, not in the lower-left notch.
-2. Zoom in past the point where the parcel outline appears, then further to the full plan. **Expect:** the marker (then the name tag) stays inside the outline the whole way, at one consistent spot.
-3. Click the Show-on-map arrow for Katz in the Sites list. **Expect:** the map centres on that same inside point.
-4. Spot-check two ordinary rectangular sites. **Expect:** their pins have not visibly moved from where they were.
-- **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B1988816.
-
 ### V1426656 — B2001568: dark theme, Stitcher empty state readable; Review calibration popup dark with a readable field `Blocker: none — run on planyr.io once the build is deployed`
 
 Sandbox-proven: `ui-audit/verify-theme-surface-contrast.mjs` with REAL drawings loaded (28 failures before, 0 after; dark + light × phone + desktop) and `test/themeFieldSurface.test.js`. Review's calibration popup and main screen were already confirmed fine on planyr.io before this fix (owner-side live check, 2026-09-30).
