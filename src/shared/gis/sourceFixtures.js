@@ -175,6 +175,25 @@ export const SOURCE_FIXTURES = {
     { label: "Macon-Bibb County (consolidated)", point: [-83.63, 32.84], expectMinCount: 1 }, // live: Macon-Bibb County
   ],
   },
+  countyCa: {
+  fixtures: [
+    // NEW-1 (California) · live 2026-10-02 from the build sandbox: exactly 58 county polygons statewide.
+    { label: "Downtown Los Angeles (Los Angeles)", point: [-118.2437, 34.0522], expectMinCount: 1 }, // live: Los Angeles
+    { label: "Ontario (San Bernardino)", point: [-117.5931, 34.0633], expectMinCount: 1 }, // live: San Bernardino
+    { label: "Stockton (San Joaquin)", point: [-121.2908, 37.9577], expectMinCount: 1 }, // live: San Joaquin
+    { label: "San Francisco (consolidated)", point: [-122.4194, 37.7749], expectMinCount: 1 }, // live: San Francisco
+  ],
+  },
+  cityCa: {
+  fixtures: [
+    // NEW-1 (California) · live 2026-10-02: 482 incorporated-city polygons statewide (offshore water rows and the
+    // unincorporated community of Mountain House withheld by the row's `where`).
+    { label: "City of Los Angeles", point: [-118.2437, 34.0522], expectMinCount: 1 }, // live: Los Angeles
+    { label: "City of Ontario", point: [-117.5931, 34.0633], expectMinCount: 1 }, // live: Ontario
+    { label: "City of Tracy", point: [-121.426, 37.7397], expectMinCount: 1 }, // live: Tracy
+    { label: "City and County of San Francisco", point: [-122.4194, 37.7749], expectMinCount: 1 }, // live: San Francisco
+  ],
+  },
   city: {
   fixtures: [
     { label: "City of Houston", point: [-95.37, 29.76], expectMinCount: 1 },
@@ -889,6 +908,18 @@ export const SOURCE_DOCS = {
     "The Georgia counterpart of `city`. DCA municipal limits (538). Georgia has NO ETJ: outside a city's limits the county " +
     "governs. Consolidated governments publish under their consolidated names (Athens-Clarke County, Augusta-Richmond " +
     "County, Macon-Bibb County; Columbus is plain 'Columbus'). A boundary means the city HAS JURISDICTION — never proof it serves utilities.",
+  },
+  countyCa: {
+  notes:
+    "The California counterpart of `county` / `countyCo` / `countyGa`. CDT State Geoportal counties (58, one row per county). A point in NO " +
+    "polygon is not in California (the routing envelope also holds NV/OR/AZ/Baja ground) — point-in-polygon decides, never the envelope.",
+  },
+  cityCa: {
+  notes:
+    "The California counterpart of `city`. CDT State Geoportal city boundaries (482 incorporated cities, land rows only). California cities " +
+    "have NO ETJ: outside a city's limits the county governs. San Francisco is the one consolidated city-county. Spheres of influence " +
+    "(LAFCO) are planning boundaries, not jurisdiction, and are deliberately not carried. A boundary means the city HAS JURISDICTION — " +
+    "never proof it serves or will connect utilities.",
   },
   isdCo: {
   notes:

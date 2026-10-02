@@ -175,6 +175,29 @@ Sandbox-proven: `ui-audit/verify-pin-overlap.mjs` (real Leaflet from the app's m
 3. Right-click the comp -> Export KMZ, open doc.kml. **Expect:** the site pin, the comp pin and the note pin have three DISTINCT `<coordinates>` (within ~10 m of each other); the site pin is still the parcel centroid.
 - **Stopping rule:** closes on a dated pass of 1-3, or a failed step filed as a recurrence on B2013744 (1-2) / B2013745 (3).
 
+### V1435952 — B2010864: a California site draws county lines + city limits, names its governing body, says the county governs, and shows no Texas numbers `Blocker: live-GIS`
+
+Sandbox-proven: `test/californiaJurisdiction.test.js` (25, 26 of 46 California tests red on pre-change `src`), registry audit + fixtures, the CDT county/city layers queried live from the build sandbox 2026-10-02 (58 counties, 482 incorporated cities, the named points recorded on B2010864), the REAL jurisdiction code run against those live endpoints at nine named points, and `ui-audit/verify-california-lines.mjs` (built app in Chromium: both Layers rows present, no "no vector source registered" toast, the CDT service answers 200, geometry drawn, header badge `City of Ontario, CA · San Bernardino County`, with a known-good Texas arm). **Still needs the DEPLOYED planyr.io build in a signed-in browser** — merged is not live.
+**Steps** (planyr.io; read the served chunk hash in the same observation as each result):
+1. Open (or start) a site at an Ontario, CA industrial address. **Expect:** header badge `City of Ontario, CA · San Bernardino County`; the word ETJ appears nowhere in the badge or its hover.
+2. Layers panel → Jurisdictions on that site. **Expect:** `County boundaries (California)` and `City limits (California)` rows; turn each on — **county lines and city limits DRAW** (no "no vector source registered" toast — the Georgia failure); the Texas county/city/ETJ rows are folded under "not available in California"; the ETJ row's reason says California cities have no reach beyond their limits.
+3. Site in unincorporated Bloomington (San Bernardino County). **Expect:** `Unincorporated San Bernardino County, CA` — never "ETJ not mapped".
+4. A downtown San Francisco site. **Expect:** `City and County of San Francisco, CA (consolidated)`, never "city + unincorporated".
+5. Downtown Los Angeles, Stockton, Tracy. **Expect:** `City of Los Angeles, CA · Los Angeles County`, `City of Stockton, CA · San Joaquin County`, `City of Tracy, CA · San Joaquin County`.
+6. Yield/pond panel on a California site — including one in **Orange County, CA** or **Trinity County, CA**. **Expect:** detention reads `Detention criteria not yet available in California` (N/A in the verdict strip), no acre-feet number, no HCFCD/Harris channel wording.
+7. Attribution strip on the California view. **Expect:** California credits only; no Harris County / TxGIO.
+8. Sanity — a Las Vegas, NV site and a Reno, NV site. **Expect:** NO California badge and no "California" wording anywhere (the routing outline keeps Nevada out); a Katy (Texas), Denver (Colorado) and Atlanta (Georgia) site look exactly as before.
+- **Stopping rule:** closes on a dated pass of 1–8, or a failed step filed as a recurrence on B2010864.
+
+### V1435953 — B2010865: California parcels — click returns the APN, the outline draws only where a dense cell fits, and a California view queries only California `Blocker: live-GIS`
+
+Sandbox-proven: the live endpoint re-measured (13,138,000 parcels, edited 2026-05-28, `maxRecordCount` 2,000); the app's own point query at (-117.6030, 34.0260) → APN 011328215 / SAN BERNARDINO / 2525 E RIVERSIDE DR; `test/californiaParcels.test.js` (21); `ui-audit/verify-parcel-display-california.mjs` (built app, mocked service honouring the real 2,000 cap — red when the outline floor is removed). **Still needs the DEPLOYED build against the real service in a browser.**
+**Steps** (planyr.io, Map view → Select parcels):
+1. Fly to an Ontario, CA industrial address (e.g. 2525 E Riverside Dr). Zoom in until the purple outlines appear. **Expect:** outlines start at the close-in zoom (the tip says "Zoom in a little to see the lines" while out), and no Texas, Colorado or Georgia parcel service is asked for in the Network tab (only the `…svcs5.arcgis.com/…/CA_Statewide_Parcels_Public_view` host).
+2. Click a lot. **Expect:** Account / ID is the APN (e.g. `011328215`), NOT a short database number; the situs address `2525 E RIVERSIDE DR`; the County row `SAN BERNARDINO` under details; owner and appraised value ABSENT (never 0, never blank).
+3. Zoom out one level at a time in a dense city (San Francisco's Mission). **Expect:** outlines vanish below the close-in zoom rather than appearing as a random partial scatter; clicking a lot still works at EVERY zoom.
+4. Pan across the Nevada line at Lake Tahoe. **Expect:** California and Nevada outlines only — nothing else.
+- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2010865.
 ### V1435440 — B2010352–B2010355: the KMZ export of a parcel-anchored comp reads right, and a typed comp line saves with sensible Notes `Blocker: auth`
 
 Sandbox-proven: `test/compKmlExport.test.js` (doc.kml string for lease, land and building-sale fixtures × site-boundary-only / comp-parcel-only / both; map notes) + `test/compParse.test.js` (8 NEW-4 cases). **Not provable here:** the real signed-in export of Michael's throwaway comp (needs his account + the reverse-geocode cache). **Use ONLY the throwaway comp "ZZ KML test - safe to delete" (APN 0481850000004) already on Michael's account; DO NOT delete it — the Cowork chat does.** Read the served chunk hash in the same observation as each result.
@@ -2993,6 +3016,8 @@ Signed in, at 1600×465, on the Site Planner map:
 
 **Result:** ⏳ pending — needs a real signed-in browser session with real located/unlocated data, and a network that can reach `server.arcgisonline.com`; neither is reachable from this sandbox. `Cadence: once`.
 ### V995616 — B1372352: California's and Rhode Island's official statewide parcel layers answer, and the app renders/selects a parcel from each `Blocker: live-GIS`
+
+> **2026-10-02 — California half, sandbox result recorded (B2010865 / V1435953):** re-measured live — still HTTP 200, 13,138,000 features, polygon, `maxRecordCount` 2,000, data last edited 2026-05-28, CORS-open; the app's own point query returns APN `011328215` / SAN BERNARDINO / `2525 E RIVERSIDE DR` at an Ontario parcel. Two defects the earlier "wired" claim missed were found and fixed (Account/ID showed the OBJECTID row number; dense views drew silently short — now a measured zoom-17 outline floor). **The app-level California render/select pass for steps 3 remains with V1435953** (deployed build). **The Rhode Island half is untouched and still pending.**
 
 **Why this needs its own live pass, and why the two halves are NOT symmetric.** GIS endpoint behaviour is a mandatory LIVE-VERIFY class, so the app-level render/select check is live for both states. But their reachability standing here is different and must not be blurred:
 

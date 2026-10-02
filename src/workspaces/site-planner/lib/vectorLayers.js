@@ -26,8 +26,8 @@ import { isShadedXSubtype } from "./floodZone.js";
 /* B1990960 — the Georgia county / city rows behave exactly like the Texas ones (county names in capitals, city
  * names de-duplicated against the place-names layer). ONE definition, shared with the export path below in
  * exportSheet.js so screen and PDF cannot drift (PDF-PARITY). */
-export const isCountyLinesId = (id) => id === "jur_county" || id === "ga_county";
-export const isCityLimitsId = (id) => id === "jur_city" || id === "ga_city";
+export const isCountyLinesId = (id) => id === "jur_county" || id === "ga_county" || id === "ca_county";
+export const isCityLimitsId = (id) => id === "jur_city" || id === "ga_city" || id === "ca_city";
 
 /* NEW-1 (DFW ETJ) — the ETJ layer draws EVERY routed ETJ source, from the same list the identify
  * routes by, so the line you see is the line the screening reports (the B176 invariant). */
@@ -318,6 +318,66 @@ export const VECTOR_SOURCES = {
       ],
     },
     note: "Georgia city limits (DCA).",
+  },
+  /* NEW-1 (California) — THE CALIFORNIA ROWS' VECTOR SOURCES, registered in the SAME commit as their layers.rows
+   * (the Georgia rows shipped without this and drew nothing — B1990960 recurrence; `vectorLayerRegistered`
+   * now fails the build on that). Same B176 invariant: endpoints come from the GIS_SOURCES rows the
+   * jurisdiction identify uses. Probed live 2026-10-02 with the loader's exact query: 58 counties in ONE
+   * statewide pull (~232 KB at the statewide tier's tolerance); a 1-degree Los Angeles city cell 128 features /
+   * ~82 KB (under the 512 KB entry cap). California has no ETJ, so there is no ETJ source. */
+  ca_county: {
+    id: "ca_county",
+    label: "County boundaries (California)",
+    labelField: "CDT_NAME_SHORT",
+    labelZoom: { min: 6, max: 11 },
+    nameTemplate: "{name} County",
+    identifyNote: "This county has jurisdiction here (it can tax/regulate) — outside city limits it is the zoning and permitting authority. A boundary is not a utility service area. Screening only.",
+    sourceName: "California CDT State Geoportal",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.countyCa.serviceUrl + "/query",
+      outFields: ["CDT_NAME_SHORT", "CENSUS_GEOID"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 30 * 24 * 3600 * 1000, // California's 58-county roster has not changed since 1913
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        // ONE statewide entry serves every low/mid zoom instantly (58 features, ~232 KB).
+        { maxZoom: 11, scope: "all", offsetDeg: 0.002, precision: 4 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "California county lines (CDT State Geoportal).",
+  },
+  ca_city: {
+    id: "ca_city",
+    label: "City limits (California)",
+    labelField: "CDT_NAME_SHORT",
+    labelZoom: { min: 10, max: 13 },
+    nameTemplate: "{name} — city limits",
+    identifyNote: "Inside this line is in the city (it has jurisdiction — can tax/regulate); outside is unincorporated county. NOT proof of utility service. Screening only.",
+    sourceName: "California CDT State Geoportal",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.cityCa.serviceUrl + "/query",
+      outFields: ["CDT_NAME_SHORT", "CENSUS_GEOID"],
+      // Land rows only — the registry row's own `where` (offshore water polygons and Mountain House withheld).
+      where: GIS_SOURCES.cityCa.where,
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 14 * 24 * 3600 * 1000, // annexations move city limits occasionally
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      // Same bbox-only tiering as the Texas / Georgia city rows (a statewide pull is too heavy for one entry).
+      tiers: [
+        { maxZoom: 10, scope: "bbox", offsetDeg: 0.003, precision: 3, cellDeg: 1 },
+        { maxZoom: 12, scope: "bbox", offsetDeg: 0.001, precision: 4, cellDeg: 0.5 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "California city limits (CDT State Geoportal).",
   },
   jur_etj: {
     id: "jur_etj",
