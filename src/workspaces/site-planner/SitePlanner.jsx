@@ -241,6 +241,7 @@ import { loadDeed, deedNow } from "./lib/deedLazy.js";
  * once someone drops a deed or survey file, so it has no business on the boot path; the same
  * treatment B1123 gave the title reader and B1042 gave the export path. */
 import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip, easementStyle, easementPatternId, encumbranceStyle, encumbrancePatternId, DEFAULT_EASE_FILL_OPACITY, DEFAULT_EASE_HATCH, ENCUMBRANCE_DEFAULT } from "./lib/easements.js";
+import { deedTrace, deedGapText } from "./lib/deedGap.js";
 import { HATCH_OPTIONS, hatchSpec } from "../../shared/style/hatchPatterns.js";
 // NEW-EASE-STYLE — the ONE renderer that turns a hatch catalog spec (shared/style/hatchPatterns.js)
 // into an SVG <pattern>. MODULE-SCOPE (never defined inside SitePlanner's render body — a component
@@ -19246,13 +19247,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
 
   // Build a polygon encumbrance markup from a traverse anchored at `pob`. A tract
-  // boundary is ALWAYS a polygon — if the calls don't close, the last→first edge
-  // carries the gap (shown honestly) rather than being redrawn as a corridor.
+  // boundary is ALWAYS a polygon, drawn EXACTLY as written (deedGap.js): the last course ends where its
+  // bearing and distance put it, and any misclosure above rounding noise is its own gap segment — never
+  // absorbed into the closing edge. `closed` is still the screening tolerance (promotability / OCR), it
+  // just no longer decides what is drawn.
   const buildEncumbranceMarkup = (calls, pob, { label, except, group }) => {
     const { callsToPath, pathCloses, misclosure } = deedLib();
     const path = callsToPath(calls, pob);
     const closed = pathCloses(path);
-    const ring = closed ? path.slice(0, -1) : path;
+    const ring = deedTrace({ centerline: path, pts: path }).ring;
     if (ring.length < 3) return null;
     return {
       mk: {
@@ -19282,11 +19285,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (asEasement) {
       const path = callsToPath(main.calls, pob);
       const closed = pathCloses(path);
+      // As written (deedGap.js): the last course's endpoint is kept, so a misclosing description's gap is the
+      // polygon's closing edge rather than being absorbed into it.
+      const eTrace = deedTrace({ centerline: path, pts: path });
       const mk = closed
-        ? makeEasement({ mode: "boundary", pts: path.slice(0, -1) })
+        ? makeEasement({ mode: "boundary", pts: eTrace.ring })
         : makeEasement({ mode: "centerline", centerline: path, width: mbWidth });
       setPobMode(null);
       commitEasement(mk);
+      if (closed && eTrace.gap) flashWarn(`⚠ This easement description does not close — it misses by ${eTrace.gap.ft.toFixed(eTrace.gap.ft >= 10 ? 1 : 2)}′. The last edge of the shape carries that gap; verify the calls.`, 9000);
       if (tracts.length > 1) flashWarn(`Plotted the main tract as an easement — its ${tracts.length - 1} save-and-except exception(s) were not carved. Use “Plot on canvas” to include the holes.`, 8000);
       return;
     }
@@ -19312,7 +19319,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const gap = built.gap;
     const closeNote = !built.closed
       ? ` ⚠ Traverse does NOT close (gap ≈ ${gap.toFixed(1)}′) — plotted as drawn; verify the calls.`
-      : (gap > 1 ? ` Traverse misclosure ≈ ${gap.toFixed(1)}′.` : "");
+      : (gap > 1 ? ` Traverse misclosure ≈ ${gap.toFixed(1)}′ — the red dashed line is the gap.` : "");
     const exNote = exMarks.length ? ` +${exMarks.length} save-and-except hole${exMarks.length > 1 ? "s" : ""}.` : "";
     let overlapNote = "";
     if (hits.length) {
@@ -23341,16 +23348,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   );
                 }
                 if (m.kind === "encumbrance") {
-                  const ring = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
+                  // As written (deedGap.js): the ring keeps the last course's true endpoint and any misclosure
+                  // draws as its own red dashed segment instead of being absorbed into the closing edge.
+                  const trace = deedTrace(m);
+                  const ring = trace.ring.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
                   const cen = (m.centerline || []).map(f2p);
-                  const ctr = centroid(m.pts), cp = f2p(ctr);
+                  const ctr = centroid(trace.ring), cp = f2p(ctr);
+                  const gapSeg = trace.gap ? { a: f2p(trace.gap.from), b: f2p(trace.gap.to) } : null;
                   return (
                     <g key={m.id} data-markup={m.id} style={mkCursor} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
                       {isSel && <polygon points={ring} fill="none" stroke={SEL_BLUE} strokeWidth={2} data-export="skip" pointerEvents="none" />}
                       {/* NEW-EASE-STYLE — encumbrance shares the easement appearance model
                           (fill/stroke/fillOpacity/hatch, editable in Properties); see
                           easements.js's encumbranceStyle/ENCUMBRANCE_DEFAULT header. */}
-                      <polygon data-testid={m.except ? "deed-except" : "deed-boundary"} points={ring} fill={`url(#${encumbrancePatternId(m)})`} stroke={stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} pointerEvents="all" />
+                      <polygon data-testid={m.except ? "deed-except" : "deed-boundary"} points={ring} fill={`url(#${encumbrancePatternId(m)})`} stroke={gapSeg ? "none" : stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} pointerEvents="all" />
+                      {/* The courses as written, then the misclosure as its OWN line (not part of the boundary stroke). */}
+                      {gapSeg && <polyline data-testid="deed-courses" points={trace.path.map(f2p).map((q) => `${q.x},${q.y}`).join(" ")} fill="none" stroke={stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} strokeLinejoin="round" pointerEvents="none" />}
+                      {gapSeg && <line data-testid="deed-gap" x1={gapSeg.a.x} y1={gapSeg.a.y} x2={gapSeg.b.x} y2={gapSeg.b.y} stroke={PAL.dangerText} strokeWidth={strokeZoom(Math.max(sw, 2.2), zk)} strokeDasharray={dashZoom("6 4", zk)} strokeLinecap="butt" pointerEvents="none"><title>{`${deedGapText(trace).text} ${deedGapText(trace).precision}`}</title></line>}
                       {/* centerline + per-call bearing/distance labels */}
                       {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={stroke} strokeWidth={strokeZoom(0.8, zk)} strokeDasharray={dashZoom("4 3", zk)} opacity={0.7} pointerEvents="none" />}
                       {labelPpf > 0.12 && (m.calls || []).map((c, i) => {
@@ -26533,8 +26547,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {selMarkup.kind === "encumbrance" && (() => {
                   const hasParcel = parcels.some((p) => p.active !== false && (p.points?.length || 0) >= 3);
                   const dm = deedMainOf(deedGroupMembers(selMarkup), selMarkup);
+                  const gapInfo = deedGapText(deedTrace(selMarkup));
                   return (
                     <div style={{ marginTop: 6, paddingTop: 8, borderTop: BORDER_1 }}>
+                      {/* The misclosure in plain words, with the precision ratio; the canvas draws it as a red dashed line. */}
+                      <div data-testid="deed-closure" style={{ fontSize: 11.5, lineHeight: 1.5, marginBottom: 8, fontWeight: 700, color: gapInfo.closes ? PAL.text : PAL.dangerText }}>
+                        {gapInfo.closes ? "" : "⚠ "}{gapInfo.text}{gapInfo.precision ? ` ${gapInfo.precision}.` : ""}
+                      </div>
                       <button style={{ ...chip, width: "100%", fontWeight: 700 }} disabled={!!selMarkup.locked}
                         onClick={() => alignDeedToParcel(dm.id)}>
                         📐 {hasParcel ? "Align to county parcel" : "Rotate to grid north"}

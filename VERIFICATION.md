@@ -166,6 +166,16 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1444352 — B2019264: Grand Port Tract 1 shows a red dashed gap line on its west side and the panel names the 31.4 ft miss `Blocker: real-data`
+
+Sandbox-proven: `test/deedGap.test.js` (real Tract 1 + hole calls), `ui-audit/verify-deed-gap.mjs` (seeded copy of the real calls, real browser: gap line, none on the 0.01 ft hole, panel wording, export carries it). **Not provable here:** the owner's real saved plan. Run on a **THROWAWAY duplicate of Grand Port Concept A — never Concept A itself** (CLAUDE.md owner constraint 7), and say exactly what was touched.
+**Steps** (planyr.io, signed in; read the served chunk hash in the same observation):
+1. Duplicate Grand Port Concept A; open the duplicate. **Expect:** Tract 1 – 94.53 Acres draws its 13 courses as written and an extra short RED DASHED line on its west side, matching the surveyor's error exhibit; no extra line on the save-and-except hole.
+2. Click Tract 1 (Properties). **Expect:** "This description does not close — it misses by 31.4 ft. The red dashed line is the gap." and "Precision 1:312".
+3. Align to county parcel (or Rotate), then undo. **Expect:** the gap line moves with the deed and keeps its length.
+4. File → export PDF. **Expect:** the red dashed gap line is on the sheet.
+- **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B2019264.
+
 ### V1438832 — B2013744/B2013745: a note, a comp and the site on one parcel are each clickable on the map, and the exported KMZ has three distinct pins `Blocker: auth`
 
 Sandbox-proven: `ui-audit/verify-pin-overlap.mjs` (real Leaflet from the app's marker modules: red arm comp reachable 0/49, fixed arm 49/49 + note + site reachable), `test/pinCluster.test.js`, `test/compKmlExport.test.js` NEW-2 block (red-proved). **Not provable here:** the real signed-in map holding Michael's two throwaways. **Use ONLY the throwaways already on his account — comp "ZZ KML test - safe to delete" and map note "ZZ KML map note - safe to delete" (APN 0481850000004); DO NOT delete them — the Cowork chat does.** Read the served chunk hash in the same observation as each result.
