@@ -31,7 +31,7 @@ const KNOWN_UNREGISTERED = ["co_city", "co_isd", "co_road", "co_metro_districts"
 describe("every vector layer row has a registered vector source", () => {
   it("the census sees vector rows at all (a guard that finds none is vacuous)", () => {
     expect(vectorRows.length).toBeGreaterThan(5);
-    expect(vectorRows.map(([k]) => k)).toEqual(expect.arrayContaining(["jur_county", "ga_county", "ga_city"]));
+    expect(vectorRows.map(([k]) => k)).toEqual(expect.arrayContaining(["jur_county", "ga_county", "ga_city", "ca_county", "ca_city"]));
   });
   it("no vector row is missing from VECTOR_SOURCES", () => {
     const missing = vectorRows.map(([k]) => k).filter((k) => !VECTOR_SOURCES[k] && !KNOWN_UNREGISTERED.includes(k));
@@ -56,5 +56,15 @@ describe("every vector layer row has a registered vector source", () => {
     expect(VECTOR_SOURCES.ga_city.labelField).toBe(GIS_SOURCES.cityGa.fields.name);
     expect(VECTOR_SOURCES.ga_county.nameTemplate).toMatch(/County/);
     for (const k of ["ga_county", "ga_city"]) expect(JSON.stringify(VECTOR_SOURCES[k])).not.toMatch(/Texas|TxDOT|TxGIO|CNTY_NM|city_name/);
+  });
+  it("the California rows read the CDT registry rows, filter to land rows, and query only California fields", () => {
+    expect(VECTOR_SOURCES.ca_county.query.url).toBe(GIS_SOURCES.countyCa.serviceUrl + "/query");
+    expect(VECTOR_SOURCES.ca_city.query.url).toBe(GIS_SOURCES.cityCa.serviceUrl + "/query");
+    expect(VECTOR_SOURCES.ca_county.labelField).toBe(GIS_SOURCES.countyCa.fields.name);
+    expect(VECTOR_SOURCES.ca_city.labelField).toBe(GIS_SOURCES.cityCa.fields.name);
+    // the drawn city layer must withhold exactly what the identify withholds (offshore water + Mountain House)
+    expect(VECTOR_SOURCES.ca_city.query.where).toBe(GIS_SOURCES.cityCa.where);
+    expect(VECTOR_SOURCES.ca_county.nameTemplate).toMatch(/County/);
+    for (const k of ["ca_county", "ca_city"]) expect(JSON.stringify(VECTOR_SOURCES[k])).not.toMatch(/Texas|TxDOT|TxGIO|CNTY_NM|city_name|cityname|"NAME"/);
   });
 });

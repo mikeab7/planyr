@@ -307,7 +307,11 @@ export const APPR_FIELDS = [
   // key in `apprRows`' used-key bookkeeping; the VALUE always comes from `situsAddress`.
   [SITUS_FIELD, "Situs address"],
   // ...|parcel_?id matches CCAD's Parcel_Id; |account matches CCAD's Account.
-  [/(hcad_?num|^acct|account|parcel_?id|prop_?id|geo_?id|quick_?ref|^pid)/i, "Account / ID"],
+  // ...|parcel_?apn matches California's statewide PARCEL_APN (the assessor parcel number IS the account id there).
+  [/(hcad_?num|^acct|account|parcel_?id|parcel_?apn|prop_?id|geo_?id|quick_?ref|^pid)/i, "Account / ID"],
+  // Statewide layers such as California's name the county in a column (COUNTYNAME); shown in the panel's
+  // collapsed tail. Exact-name match so no other source's county CODE column is swept in.
+  [/^county_?name$/i, "County"],
   // ...|land_?size_?ac matches FBCAD's LANDSIZEAC (acres) — NOT LANDSIZEFT (square feet);
   // ^acre matches CCAD's Acres.
   [/(gis_?acre|calc_?acre|legal_?acre|^acre|acreage|deed_?acre|legal_?area|gis_?area|land_?size_?ac)/i, "Acreage"],

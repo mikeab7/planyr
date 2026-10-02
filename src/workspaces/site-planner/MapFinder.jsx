@@ -2,7 +2,7 @@ import { Fragment, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, 
 import { validateName, announceNameNotice } from "../../shared/names/nameCore.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState, displayFloorForView } from "./lib/counties.js";
 import { landingView, milesBetween, CLUSTER_RADIUS_MI, locatedPoints } from "./lib/landingView.js";
 import { decideTargetOf, orderVerbs, verbLabel } from "./lib/decideBar.js";
 import {
@@ -2777,6 +2777,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
    * own comment above) without flickering on every ordinary pan. */
   const SLOW_DISPLAY_NOTICE_MS = 2500;
   const [slowDisplayKeys, setSlowDisplayKeys] = useState(() => new Set());
+  const [outlineFloor, setOutlineFloor] = useState(PARCEL_MINZOOM); // NEW-2 — the zoom the outlines in THIS view start at (a dense statewide source declares a higher one)
   const markDisplaySlow = (key, slow) => {
     setSlowDisplayKeys((prev) => {
       if (prev.has(key) === slow) return prev; // no-op — never a fresh Set (and a render) for nothing
@@ -3006,6 +3007,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       if (want.has(k)) statewideKeysForState(COUNTIES_MAP[k] && COUNTIES_MAP[k].state).forEach((sk) => want.add(sk));
     });
     wantedDisplaysRef.current = want;
+    setOutlineFloor(Math.max(PARCEL_MINZOOM, displayFloorForView({ south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() })));
     Object.keys(displaysRef.current).forEach((k) => { if (!want.has(k)) removeDisplay(k); });
     want.forEach((k) => { if (layerUrlsRef.current[k]) addDisplay(k); });
   };
@@ -5281,7 +5283,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                   the statewide layer, which is never pulled on a hiccup and so never times out on
                   its own). Says so plainly instead of leaving a blank map that reads as "no data
                   here" while a click already works. */}
-              {zoom != null && zoom < PARCEL_MINZOOM
+              {zoom != null && zoom < outlineFloor
                 ? "Click any lot on the map to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines."
                 : slowDisplayKeys.size > 0
                 ? "Parcel outlines are still loading here — clicking a lot already adds it (＋). Hover an added lot and click to remove it (−)."

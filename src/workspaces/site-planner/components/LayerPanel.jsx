@@ -215,7 +215,7 @@ export default function LayerPanel({
   const slotOutOfState = (slot) => (slot.kind === "merge"
     ? slot.members.length > 0 && slot.members.every(([, cfg]) => outOfState(cfg))
     : outOfState(slot.entry[1]));
-  const STATE_NAME = { TX: "Texas", CO: "Colorado", GA: "Georgia" };
+  const STATE_NAME = { TX: "Texas", CO: "Colorado", GA: "Georgia", CA: "California" };
   const hereName = STATE_NAME[siteState] || "this state";
   const outOfStateReason = (cfg) => {
     // NEW-1 (Georgia) — a layer can say the concept does not EXIST in this state (Georgia has no ETJ),

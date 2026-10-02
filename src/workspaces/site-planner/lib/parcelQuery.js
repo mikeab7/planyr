@@ -9,7 +9,7 @@
  * can't leak into a neighbouring county.
  */
 import { resolveLayerUrl, getLayerInfo, queryFeatures } from "./arcgis.js";
-import { COUNTIES, detectField, statewideFallbackFor, STATEWIDE_PARCEL_LAYER } from "./counties.js";
+import { COUNTIES, COUNTIES_MAP, detectField, statewideFallbackFor, STATEWIDE_PARCEL_LAYER } from "./counties.js";
 import { recordSourceResult } from "./sourceHealth.js";
 import { isPlaceholderValue } from "./appraisal.js";
 
@@ -79,7 +79,10 @@ export function resolveSearchField(fields, kind, hint, pinned) {
 export function idAttrFor(county, attrs) {
   if (!attrs) return null;
   const fields = Object.keys(attrs).map((name) => ({ name }));
-  const c = COUNTIES[county];
+  /* NEW-2 (California) — a STATEWIDE source lives only in COUNTIES_MAP (it has no per-county config row), so its
+   * pinned id column has to be read from there too: without this, `ca_statewide`'s pin was inert and the card
+   * showed the layer's OBJECTID row number as the parcel's account id. */
+  const c = COUNTIES[county] || COUNTIES_MAP[county];
   const field = resolveSearchField(fields, "id", c?.idField, !!c?.pinIdField);
   if (!field || !(field in attrs) || isPlaceholderValue(attrs[field])) return null;
   return String(attrs[field]);

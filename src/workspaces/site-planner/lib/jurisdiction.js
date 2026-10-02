@@ -40,6 +40,9 @@ import { resolveCounty } from "./countyPolygons.js";
 import { formatJurisdictionLabel } from "./jurisdictionLabel.js";
 /* NEW-1 (Georgia) — the pure Georgia facts: envelope, consolidated city-counties, the county-governs note. */
 import { GA_ENVELOPE, georgiaConsolidatedFor, GA_COUNTY_GOVERNS_NOTE, GA_CONSOLIDATED_NOTE } from "./georgiaJurisdiction.js";
+/* NEW-1 (California) — the California twin: envelope, the one consolidated city-county (San Francisco), the
+ * county-governs note, and the three legal city names the CDT layer publishes. Same shape, same rules. */
+import { inCaliforniaEnvelope, CA_CITY_DISPLAY, californiaConsolidatedFor, CA_COUNTY_GOVERNS_NOTE, CA_CONSOLIDATED_NOTE } from "./californiaJurisdiction.js";
 /* NEW-1 (DFW ETJ) — the one reader of a publisher's ETJ name column (overlap splits, prefix strips). */
 import { etjNamesOf } from "./etjNames.js";
 /* ⛔ NEW-2 — A SHARE IS AN AREA FRACTION ON THE REAL RING. Read `jurisdictionShare.js`'s header
@@ -99,6 +102,31 @@ export const JURISDICTION_SOURCES = {
     ttl: 7 * 24 * 3600 * 1000,
     sourceName: "Georgia DCA municipal boundaries",
     note: "Georgia city limits (DCA). A point in no city is unincorporated — the county governs (Georgia has no ETJ). Screening only — verify with the city.",
+  },
+  /* NEW-1 (California) — CDT State Geoportal counties. Same `role: "county"`, so every downstream consumer
+   * reads it identically; only endpoint and field names differ. Routed to by `countySourcesForPoint` inside
+   * the California envelope, never by default. */
+  countyCa: {
+    id: "countyCa", role: "county", label: "County", kind: "polygon",
+    url: GIS_SOURCES.countyCa.serviceUrl,
+    fields: { name: "CDT_NAME_SHORT", fips: "CENSUS_GEOID" },
+    ttl: 30 * 24 * 3600 * 1000,
+    sourceName: "California CDT statewide county boundaries",
+    note: "California county boundary (CDT State Geoportal). Screening only — verify with the jurisdiction.",
+  },
+  /* NEW-1 (California) — CDT incorporated-city limits (land rows only: the registry row's `where` withholds
+   * the offshore water polygons and the unincorporated community of Mountain House). Full-purpose only. */
+  cityCa: {
+    id: "cityCa", role: "city", label: "City limits", kind: "polygon",
+    url: GIS_SOURCES.cityCa.serviceUrl,
+    fields: { name: "CDT_NAME_SHORT", fips: "CENSUS_GEOID" },
+    where: GIS_SOURCES.cityCa.where,
+    nameDisplay: CA_CITY_DISPLAY,
+    fullPurposeOnly: GIS_SOURCES.cityCa.fullPurposeOnly,
+    needGeometry: true,
+    ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "California CDT city boundaries",
+    note: "California city limits (CDT State Geoportal). A point in no city is unincorporated — the county governs (California cities have no ETJ). Screening only — verify with the city.",
   },
   city: {
     id: "city", role: "city", label: "City limits", kind: "polygon",
@@ -455,6 +483,9 @@ export function countySourcesForPoint(lat, lng) {
    * (`identifyJurisdiction` flags an empty, error-free answer as `notInGeorgia`). Overlaps neither TX
    * nor CO, so those two resolve exactly as they always did. */
   if (inEnvelope(GA_ENVELOPE, lat, lng)) return [JURISDICTION_SOURCES.countyGa];
+  /* NEW-1 (California) — same contract as Georgia's: the envelope only ROUTES (it also holds NV / OR / AZ /
+   * Baja ground); the CDT layer answering with a polygon is what says "California". Overlaps none of TX / CO / GA. */
+  if (inCaliforniaEnvelope(lat, lng)) return [JURISDICTION_SOURCES.countyCa];
   return []; // honest "no live county-boundary source configured here" — see countyAtPoint's offline floor
 }
 
@@ -497,6 +528,7 @@ export function citySourcesForPoint(lat, lng) {
   /* NEW-1 (Georgia) — inside the Georgia envelope the city role is DCA's municipal layer and nothing
    * else (none of the Texas rows can answer here, and TX_ENVELOPE does not reach it). */
   if (inEnvelope(GA_ENVELOPE, lat, lng)) return [JURISDICTION_SOURCES.cityGa];
+  if (inCaliforniaEnvelope(lat, lng)) return [JURISDICTION_SOURCES.cityCa]; // NEW-1 (California) — likewise
   return CITY_SOURCES.filter((s) => {
     if (s.bbox) return bboxHas(s.bbox, lat, lng);
     if (s === JURISDICTION_SOURCES.city) return inEnvelope(TX_ENVELOPE, lat, lng); // the un-bboxed TxGIO statewide row
@@ -744,6 +776,8 @@ export function normalizeFeature(source, attrs) {
   if ((out.name == null || out.name === "") && source.nameConst) out.name = source.nameConst;
   // Some sources publish the name ALL-CAPS (e.g. H-GAC ETJ `CITY`) → title-case it.
   if (out.name != null && out.name !== "" && source.titleCaseName) out.name = titleCase(out.name);
+  // NEW-1 (California) — a source may map a layer's LEGAL names onto the names people use (display only).
+  if (out.name != null && source.nameDisplay && source.nameDisplay[out.name]) out.name = source.nameDisplay[out.name];
   /* ⛔ NEW-1 — THE JURISDICTION CLASS TRAVELS WITH THE FEATURE, from here on. Baytown's one
    * city-limits table mixes full-purpose limits with limited-purpose and strip annexation, and a
    * consumer that reads only `name` cannot tell them apart — which is how 24 of 38 polygons came to
@@ -1146,7 +1180,7 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
       /* NEW-1 (Georgia) — Georgia has NO ETJ, so "no ETJ layer for this area yet" would be a false
        * promise of a coming feature (and would put ETJ wording on a Georgia site). The role is simply
        * not applicable there: silent, like every other role with nothing to ask. */
-      out.sources.push({ id: role, state: "unavailable", ageMs: null, msg: role === "etj" && !inEnvelope(GA_ENVELOPE, lat, lng) ? "No ETJ layer for this area yet." : null });
+      out.sources.push({ id: role, state: "unavailable", ageMs: null, msg: role === "etj" && !inEnvelope(GA_ENVELOPE, lat, lng) && !inCaliforniaEnvelope(lat, lng) ? "No ETJ layer for this area yet." : null });
       return;
     }
     opts.onStatus && opts.onStatus(role, "loading");
@@ -1362,6 +1396,16 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
     if (out.county.length) out.state = "GA";
     else if (cs && cs.state === "empty") { out.notInGeorgia = true; out.city = []; out.cityAll = []; out.citySome = []; out.cityCentroid = []; }
   }
+  /* ⛔ NEW-1 (California) — THE SAME RULE AS GEORGIA'S ABOVE: POINT-IN-POLYGON DECIDES "IS THIS CALIFORNIA",
+   * NEVER THE ENVELOPE. The routing box holds Reno / Las Vegas's edge, southern Oregon, the Colorado River's
+   * Arizona bank and Tijuana. County role routed to the CDT layer + answered WITHOUT error + no county =
+   * not California: nothing to report, and `unincorporated` is never guessed. A FAILED lookup stays an outage. */
+  const caCountySrc = countySourcesForPoint(lat, lng)[0] === JURISDICTION_SOURCES.countyCa;
+  if (caCountySrc && roles.includes("county")) {
+    const cs = out.sources.find((x) => x && x.id === "county");
+    if (out.county.length) out.state = "CA";
+    else if (cs && cs.state === "empty") { out.notInCalifornia = true; out.city = []; out.cityAll = []; out.citySome = []; out.cityCentroid = []; }
+  }
   /* ⛔ B209506 — ONE DEFINITION OF "WHAT CITY IS THIS IN", AND IT IS CONTAINMENT.
    *
    * `unincorporated` was `out.city.length === 0` — the RING union, i.e. every city that so much as
@@ -1487,6 +1531,7 @@ export function formatJurisdictionBadge(j, opts = {}) {
   // NEW-1 (Georgia) — the point sat in the Georgia routing envelope but in no Georgia county (SC / AL / FL
   // ground): there is no Georgia jurisdiction to name, and guessing "Unincorporated" would be a fabrication.
   if (j.notInGeorgia) return null;
+  if (j.notInCalifornia) return null; // NEW-1 (California) — the same, for NV / OR / AZ / Baja ground inside the routing box
   const cities = uniq((j.city || []).filter((v) => v != null && v !== "").map(String));
   // B209506 — dedupe an ETJ against the city limits by PLACE, not by string. "HOUSTON" from H-GAC and
   // "Houston" from TxGIO are the same city, and a case-sensitive compare rendered both.
@@ -1653,8 +1698,11 @@ export function formatJurisdictionBadge(j, opts = {}) {
   // NEW-2 — the share the split lead states, taken from the same measurement the split came from,
   // so the words and the number cannot disagree.
   const splitShare = partCities.length ? shareOfCity(partCities[0]) : null;
-  const gaState = j.state === "GA" ? "GA" : null;
-  const gaConsolidated = gaState ? georgiaConsolidatedFor(counties, coreCities) : null;
+  /* NEW-1 (Georgia, California) — "GA" | "CA" on a point-in-polygon-confirmed site, else null. The field names
+   * (`gaState`, `gaNote`) predate California and are kept: they are consumed by the badge component and tests. */
+  const gaState = j.state === "GA" ? "GA" : j.state === "CA" ? "CA" : null;
+  const gaConsolidated = gaState === "GA" ? georgiaConsolidatedFor(counties, coreCities)
+    : gaState === "CA" ? californiaConsolidatedFor(counties, coreCities) : null;
   const label = formatJurisdictionLabel({
     state: gaState,
     consolidated: gaConsolidated,
@@ -1695,7 +1743,7 @@ export function formatJurisdictionBadge(j, opts = {}) {
     // NEW-1 (Georgia) — "GA" on a confirmed Georgia site, plus the consolidated city-county it sits in
     // (or null) and the one tooltip note that says the county governs (no ETJ exists there).
     state: gaState, consolidated: gaConsolidated,
-    gaNote: gaState ? [GA_COUNTY_GOVERNS_NOTE, gaConsolidated ? GA_CONSOLIDATED_NOTE : ""].filter(Boolean).join(" ") : null,
+    gaNote: gaState ? [gaState === "CA" ? CA_COUNTY_GOVERNS_NOTE : GA_COUNTY_GOVERNS_NOTE, gaConsolidated ? (gaState === "CA" ? CA_CONSOLIDATED_NOTE : GA_CONSOLIDATED_NOTE) : ""].filter(Boolean).join(" ") : null,
     /* NEW-2 (B371361) — the label's SLOTS, in reading order, so a consumer that has to SHORTEN the
      * line (the header pill at a laptop width) drops whole facts instead of cutting a sentence
      * mid-word. It is the same principle as the two fields above: nothing reads back out of the
@@ -1778,6 +1826,7 @@ export async function countyAtPoint(lng, lat, opts = {}) {
   const src = countySourcesForPoint(lat, lng)[0];
   const isCo = src === JURISDICTION_SOURCES.countyCo;
   const isGa = src === JURISDICTION_SOURCES.countyGa; // NEW-1 (Georgia)
+  const isCa = src === JURISDICTION_SOURCES.countyCa; // NEW-1 (California)
   /* ⛔ B1551618 (2026-09-11) — a point outside both TX and CO now has NO live source at all
    * (`countySourcesForPoint` returns `[]`), which used to mean this fired the live TxDOT query
    * anyway (it always returned features: [] for an out-of-state point, wasting a request to an
@@ -1815,18 +1864,18 @@ export async function countyAtPoint(lng, lat, opts = {}) {
     }
     // B1551618 — `state` used to be a binary isCo?"CO":"TX", which mislabeled every point outside
     // both TX and CO (and whose offline geometry ALSO couldn't answer, e.g. mid-load) as Texas.
-    return { name: null, key: null, fips: null, state: isCo ? "CO" : isGa ? "GA" : src ? "TX" : null, ageMs: r.ageMs, error: r.error ? humanize(r.error) : null };
+    return { name: null, key: null, fips: null, state: isCo ? "CO" : isGa ? "GA" : isCa ? "CA" : src ? "TX" : null, ageMs: r.ageMs, error: r.error ? humanize(r.error) : null };
   }
   // B792 — fips rides along (48157 = Fort Bend, …) so persistence-side callers can
   // cross-check parcel attributes against the boundary answer. (Colorado's GEOID20 is the
   // same 5-digit state+county FIPS, so the field means the same thing on both sources.)
   // NEW-1 (Georgia) — Georgia county keys are `ga_<slug>`; unwired counties get no key (never a Texas one).
-  const nameMap = isCo ? CO_COUNTY_NAME_TO_KEY : isGa ? {} : COUNTY_NAME_TO_KEY;
+  const nameMap = isCo ? CO_COUNTY_NAME_TO_KEY : (isGa || isCa) ? {} : COUNTY_NAME_TO_KEY; // NEW-1 — GA / CA county keys: none wired, never a Texas one
   return {
     name: String(feat.name),
     key: nameMap[String(feat.name).toLowerCase()] || null,
     fips: feat.fips ? String(feat.fips) : null,
-    state: isCo ? "CO" : isGa ? "GA" : "TX",
+    state: isCo ? "CO" : isGa ? "GA" : isCa ? "CA" : "TX",
     ageMs: r.ageMs, ts: r.ts,
   };
 }

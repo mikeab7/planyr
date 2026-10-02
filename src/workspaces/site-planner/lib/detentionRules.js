@@ -30,6 +30,7 @@
  * Screening only — never a design number. Confirm with your engineer and the
  * reviewing authority. */
 import { GA_DETENTION_HEADLINE, GA_DETENTION_DETAIL } from "./georgiaJurisdiction.js";
+import { CA_DETENTION_HEADLINE, CA_DETENTION_DETAIL } from "./californiaJurisdiction.js"; // NEW-1 (California)
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import {
   identifyJurisdiction,
@@ -561,7 +562,7 @@ export function computeRequiredDetention(args = {}) {
     hcfcdMethod = null, // null (default → outfall-type minimum) | "pcpm" (→ 0.65 HCFCD PCPM methods baseline)
     hcfcdApplicable = true, // B789 — false when the identify county excludes Harris: HCFCD ends at the Harris line, so neither the greater-of candidate nor the PCPM deferral may price
     onDate = null,
-    siteState = null, // NEW-8 — "TX" | "CO" | "GA" | null. The region guard below; null keeps pre-Colorado behaviour exactly.
+    siteState = null, // NEW-8 — "TX" | "CO" | "GA" | "CA" | null. The region guard below; null keeps pre-Colorado behaviour exactly.
     /* NEW-1 (B1105) — the COLORADO REGIME SEAM, and it is deliberately fail-CLOSED.
      *
      * `coRegime` is the regime id from `coloradoRegions.coloradoRegimeFor()` ("mhfd" | "larimer" |
@@ -612,6 +613,21 @@ export function computeRequiredDetention(args = {}) {
       detail: GA_DETENTION_DETAIL,
       rule: null, governing: null,
       flags: ["georgia-not-wired", "no-criteria-modeled"],
+      caveat: SCREENING_CAVEAT,
+    };
+  }
+  /* NEW-1 (California) — the same hard guard for a POSITIVE California answer: no modeled criteria, so the only
+   * correct output is the named "not available in California yet" state — never a Texas number. */
+  if (String(siteState || "").toUpperCase() === "CA") {
+    return {
+      kind: "unavailable",
+      requiredAcFt: null, bandAcFt: null, rateAcFtPerAc: null,
+      basis: "detention criteria not yet available for California",
+      headline: CA_DETENTION_HEADLINE,
+      verdictSubject: "California detention", // yieldVerdicts.unavailableDetentionRow's subject
+      detail: CA_DETENTION_DETAIL,
+      rule: null, governing: null,
+      flags: ["california-not-wired", "no-criteria-modeled"],
       caveat: SCREENING_CAVEAT,
     };
   }
@@ -1648,6 +1664,8 @@ export function authorityForJurisdiction({ city = [], etj = [], county = [], uni
    * positively-Georgia answer there is NO modeled authority — the named "not available in Georgia yet"
    * state — and nothing below runs. */
   if (String(state || "").toUpperCase() === "GA") { out.flags.push("georgia-not-wired", "no-criteria-modeled"); return out; }
+  // NEW-1 (California) — California has an Orange County and a Trinity County too; same rule, same carrier.
+  if (String(state || "").toUpperCase() === "CA") { out.flags.push("california-not-wired", "no-criteria-modeled"); return out; }
   const counties = county.map((c) => String(c).toLowerCase());
   const cities = city.map((c) => String(c).toLowerCase());
   const etjs = etj.map((c) => String(c).toLowerCase());
@@ -2099,7 +2117,7 @@ export function slimDrainageContext(ctx) {
  * this to split a stored check's derived facts (replaced by a fresh re-derivation) from
  * its query-outcome facts (mud overlays, jurisdiction-partial, …), which describe the
  * check-time fetches and can't be re-derived from the raw jurisdiction names. */
-const AUTHORITY_DERIVED_FLAGS = new Set(["houston-etj", "no-criteria-modeled", "city-criteria-unverified", "georgia-not-wired"]);
+const AUTHORITY_DERIVED_FLAGS = new Set(["houston-etj", "no-criteria-modeled", "city-criteria-unverified", "georgia-not-wired", "california-not-wired"]);
 const AUTHORITY_DERIVED_OVERLAY_KINDS = new Set(["etj", "municipal"]);
 
 /* Rebuild a read-context-shaped object from a slim summary: re-derive the rule record
