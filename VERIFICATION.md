@@ -166,6 +166,16 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1440896 — B2015808: each schedule group's Focus holds across leaving the module, switching schedules, and a hard reload `Blocker: auth`
+
+Sandbox-proven: `test/schedulerViewState.test.js` (7 new, red on pre-change source) and the real `/sequence/` page in headless Chromium (focus → reload → still focused → off → reload → still off; store `planar:taskFocus:v1` written/cleared). Pending: the signed-in cloud path (a real merge/refresh from the cloud).
+**Steps** (planyr.io, signed in; use a THROWAWAY duplicate schedule, never a real one; read the served chunk hash in the same observation):
+1. In the duplicate schedule click Focus on two different groups. **Expect:** each hides its completed / paused / not-started children and its pill reads "Show all tasks…".
+2. Switch to another module, then back. **Expect:** both groups still focused, no flash of everything expanded.
+3. Switch to a different schedule and back. **Expect:** same two groups focused; the other schedule's groups untouched.
+4. Hard reload (Ctrl+Shift+R). **Expect:** both still focused; Version History shows no new entry and no "Merged in changes…" toast appeared from toggling.
+5. Un-focus one group, reload. **Expect:** it stays expanded; the other stays focused.
+- **Stopping rule:** closes on a dated pass of 1-5, or a failed step filed as a recurrence on B2015808.
 ### V1444352 — B2019264: Grand Port Tract 1 shows a red dashed gap line on its west side and the panel names the 31.4 ft miss `Blocker: real-data`
 
 Sandbox-proven: `test/deedGap.test.js` (real Tract 1 + hole calls), `ui-audit/verify-deed-gap.mjs` (seeded copy of the real calls, real browser: gap line, none on the 0.01 ft hole, panel wording, export carries it). **Not provable here:** the owner's real saved plan. Run on a **THROWAWAY duplicate of Grand Port Concept A — never Concept A itself** (CLAUDE.md owner constraint 7), and say exactly what was touched.
