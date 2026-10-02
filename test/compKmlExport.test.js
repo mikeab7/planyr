@@ -188,3 +188,53 @@ describe("map notes — the record's notes export as pins in a Notes folder", ()
     expect(build(LEASE, { projectId: "s1", notes: [] })).not.toContain("<name>Notes</name>");
   });
 });
+
+/* NEW-2 (B2013745) — owner-measured 2026-10-02 on build 6246ba3: the site pin, the comp pin and the
+ * note pin of one parcel all wrote <coordinates>-95.28189496,29.62385608</coordinates>; Earth / My
+ * Maps open only the top pin of a stack. A parcel anchor's lat/lon IS the parcel's assembly centre,
+ * and the site pin is the ring centroid, so the three genuinely coincide. */
+describe("NEW-2 — no two pins in doc.kml share a coordinate", () => {
+  const SITE = { role: "Tracked", status: "Pursuit", county: "Harris County", origin: { lat: 29.85, lon: -95.5 } };
+  // site ring + comp anchor at the ring's centre + a note anchored at the same point
+  const RING = CLOSED_RING.map(([x, y]) => [x, y]);
+  const note = { id: "n1", title: "ZZ note", body: "hello", projectId: "s1", anchor: { kind: "parcel", lat: 29.85, lon: -95.5, parcelApn: "0481850000004" } };
+  const kml = buildSiteRecordKml({
+    siteName: "ZZ site", site: SITE, boundary: { known: true, hasBoundary: true, acres: 22.48, rings: [{ ring: RING, name: "ZZ site", acct: "0481850000004" }] },
+    comps: [LEASE], locationFor: () => PANEL_LOCATION, ratePeriod: "monthly", notes: [note], projectId: "s1",
+  });
+  const pins = [...kml.matchAll(/<Placemark><name>([^<]*)<\/name>(?:(?!<\/Placemark>).)*?<Point><coordinates>([^<]*)<\/coordinates>/g)].map((m) => ({ name: m[1], c: m[2] }));
+  it("the fixture really has a site pin, a comp pin and a note pin", () => {
+    expect(pins.map((p) => p.name)).toEqual(expect.arrayContaining(["ZZ site", LEASE.title, "ZZ note"]));
+    expect(pins.length).toBe(3);
+  });
+  it("all three coordinates are distinct", () => expect(new Set(pins.map((p) => p.c)).size).toBe(3));
+  it("the site pin keeps its exact true spot (the ring centroid) — the others move, it does not", () => {
+    const site = pins.find((p) => p.name === "ZZ site");
+    expect(site.c).toMatch(/^-95\.5,29\.85\d*$|^-95\.49\d+,29\.85\d*$|^-95\.50\d+,29\.85\d*$/);
+  });
+  it("the nudge is small (under ~25 m) and deterministic (same input, same file)", () => {
+    const [sx, sy] = pins[0].c.split(",").map(Number);
+    for (const p of pins.slice(1)) {
+      const [x, y] = p.c.split(",").map(Number);
+      expect(Math.hypot((y - sy) * 111320, (x - sx) * 111320 * Math.cos(sy * Math.PI / 180))).toBeLessThan(25);
+    }
+    expect(buildSiteRecordKml({
+      siteName: "ZZ site", site: SITE, boundary: { known: true, hasBoundary: true, acres: 22.48, rings: [{ ring: RING, name: "ZZ site", acct: "0481850000004" }] },
+      comps: [LEASE], locationFor: () => PANEL_LOCATION, ratePeriod: "monthly", notes: [note], projectId: "s1",
+    })).toBe(kml);
+  });
+  it("pins that are NOT coincident are left exactly where they are", () => {
+    const far = { ...note, anchor: { ...note.anchor, lat: 29.8512, lon: -95.4988 } };
+    const k2 = buildSiteRecordKml({ siteName: "ZZ site", site: SITE, boundary: noBoundary, comps: [{ ...LEASE, anchor: { kind: "pin", lat: 29.86, lon: -95.51 } }], locationFor: () => null, notes: [far], projectId: "s1" });
+    expect(k2).toContain("<coordinates>-95.51,29.86</coordinates>");
+    expect(k2).toContain("<coordinates>-95.4988,29.8512</coordinates>");
+  });
+  it("separateCoincidentPins: ten stacked pins all end up distinct; polygons untouched", async () => {
+    const { separateCoincidentPins } = await import("../src/shared/comps/lib/siteRecordKml.js");
+    const f = Array.from({ length: 10 }, (_, i) => ({ geom: "point", name: `p${i}`, coord: [-95.5, 29.85] }));
+    const out = separateCoincidentPins([...f, { geom: "polygon", name: "poly", rings: [RING] }]);
+    expect(new Set(out.slice(0, 10).map((x) => x.coord.join(","))).size).toBe(10);
+    expect(out[0].coord).toEqual([-95.5, 29.85]);
+    expect(out[10].rings).toBe(out[10].rings);
+  });
+});

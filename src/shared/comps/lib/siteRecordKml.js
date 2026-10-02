@@ -16,6 +16,11 @@
  *     comp's parcel. When both exist and are the same parcel it is drawn ONCE (the site's). The site
  *     balloon never claims "No boundary drawn yet" while the file holds an outline for that record:
  *     it reports the acreage it can compute, labelled for what it is ("Comp parcel: 22.48 AC").
+ *  5. NO TWO PINS SHARE A COORDINATE (B2013745). A parcel-anchored comp, a note on that parcel and the
+ *     site's own centroid pin all resolve to the parcel centre, and Earth / My Maps can open only the
+ *     top pin of a stack. Every pin keeps its TRUE anchor (site = ring centroid, comp = its own
+ *     point, note = its own point); only pins that genuinely coincide are nudged, deterministically
+ *     (`separateCoincidentPins`) — the first in file order (site, comps, notes) stays put.
  *  4. NOTES: the record's map notes (linked by project, or anchored inside the exported outlines /
  *     on their APN) are a Notes folder of pins — title + body in the balloon, escaped like every
  *     other balloon string.
@@ -196,7 +201,31 @@ export function siteRecordKmlFeatures({ siteName, site = null, boundary = {}, co
       description: balloonHtml([{ heading: mapNoteHeadline(n), lines: String(n.body || "").split("\n").filter((l) => l.trim()) }]),
     }));
   }
-  return features;
+  return separateCoincidentPins(features);
+}
+
+const M_PER_DEG = 111320;
+/** Slot k (k >= 1) around a coincident pin: 6 per ring, ~8 m per ring, starting due east. Deterministic. */
+export function pinSlotOffsetMetres(k) {
+  const ring = Math.ceil(k / 6), a = (((k - 1) % 6) / 6) * 2 * Math.PI;
+  return [Math.cos(a) * 8 * ring, Math.sin(a) * 8 * ring]; // [east m, north m]
+}
+
+/** Nudge pins that sit within `epsM` of an earlier pin so every Placemark opens in Earth. Polygons
+ * are untouched; the first pin of a cluster keeps its exact coordinate; the input is not mutated. */
+export function separateCoincidentPins(features, { epsM = 3 } = {}) {
+  const clusters = [];
+  return features.map((f) => {
+    if (f.geom !== "point" || !Array.isArray(f.coord)) return f;
+    const [lon, lat] = f.coord;
+    const near = (c) => Math.hypot((c.lat - lat) * M_PER_DEG, (c.lon - lon) * M_PER_DEG * Math.cos((lat * Math.PI) / 180)) <= epsM;
+    let c = clusters.find(near);
+    if (!c) { c = { lat, lon, n: 0 }; clusters.push(c); }
+    const k = c.n++;
+    if (!k) return f;
+    const [dx, dy] = pinSlotOffsetMetres(k);
+    return { ...f, coord: [c.lon + dx / (M_PER_DEG * Math.cos((c.lat * Math.PI) / 180)), c.lat + dy / M_PER_DEG] };
+  });
 }
 
 /** The finished doc.kml text — what the .kmz carries. */

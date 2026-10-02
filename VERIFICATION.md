@@ -166,6 +166,15 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1438832 — B2013744/B2013745: a note, a comp and the site on one parcel are each clickable on the map, and the exported KMZ has three distinct pins `Blocker: auth`
+
+Sandbox-proven: `ui-audit/verify-pin-overlap.mjs` (real Leaflet from the app's marker modules: red arm comp reachable 0/49, fixed arm 49/49 + note + site reachable), `test/pinCluster.test.js`, `test/compKmlExport.test.js` NEW-2 block (red-proved). **Not provable here:** the real signed-in map holding Michael's two throwaways. **Use ONLY the throwaways already on his account — comp "ZZ KML test - safe to delete" and map note "ZZ KML map note - safe to delete" (APN 0481850000004); DO NOT delete them — the Cowork chat does.** Read the served chunk hash in the same observation as each result.
+**Steps** (planyr.io, signed in as Michael, Map view, Comps and Notes layers both ON):
+1. Zoom to 17 centred on 29.62316598,-95.28208917. **Expect:** the comp marker and the note marker are drawn side by side (not stacked); `elementFromPoint` at each marker's centre returns that marker (`.map-comp-feature` / `.map-note-feature`).
+2. Right-click the comp marker. **Expect:** its menu opens (Export KMZ). Click the note marker. **Expect:** the note editor opens. Zoom out and in a few levels. **Expect:** the gap between them stays; both stay clickable.
+3. Right-click the comp -> Export KMZ, open doc.kml. **Expect:** the site pin, the comp pin and the note pin have three DISTINCT `<coordinates>` (within ~10 m of each other); the site pin is still the parcel centroid.
+- **Stopping rule:** closes on a dated pass of 1-3, or a failed step filed as a recurrence on B2013744 (1-2) / B2013745 (3).
+
 ### V1435440 — B2010352–B2010355: the KMZ export of a parcel-anchored comp reads right, and a typed comp line saves with sensible Notes `Blocker: auth`
 
 Sandbox-proven: `test/compKmlExport.test.js` (doc.kml string for lease, land and building-sale fixtures × site-boundary-only / comp-parcel-only / both; map notes) + `test/compParse.test.js` (8 NEW-4 cases). **Not provable here:** the real signed-in export of Michael's throwaway comp (needs his account + the reverse-geocode cache). **Use ONLY the throwaway comp "ZZ KML test - safe to delete" (APN 0481850000004) already on Michael's account; DO NOT delete it — the Cowork chat does.** Read the served chunk hash in the same observation as each result.
