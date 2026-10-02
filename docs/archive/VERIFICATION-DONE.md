@@ -3497,3 +3497,15 @@ Sandbox-proven: `test/activateNeverMoves.test.js` (the real handler body, three 
 - **Live result (Cowork, recorded 2026-09-30):** Georgia plan, Concept A. Floodplain Activate layer clicked in all three views — close, very wide, and with the site fully off-screen. In each case the parcel outline kept exactly the same screen position, the scale bar did not change, and the button switched to Deactivate. Layer turned back off afterwards.
 - **Accepted:** steps 1–3 for the Floodplain finding (the layer whose gate differs most from a close view) — view never moved in any of the three views. Closed on the owner's instruction.
 - **Not separately reported live, stated rather than assumed:** Wetlands and the other resolved findings (steps 1–3 named "each resolved finding"; only Floodplain was reported), the view being unchanged specifically on the Deactivate click (step 4 — the report says only that the layer was turned back off), and the visibility of the card's "Not showing at this zoom" line in the very-wide view. Those rest on `test/activateNeverMoves.test.js` (real handler, all three views, Activate and Deactivate — the handler is layer-independent). `Cadence: once`.
+
+### V1413904 — B1988816: every site's map pin sits inside its own parcel (Katz, Rankin Rd) `Blocker: real-data`
+
+Sandbox-proven: `test/siteAnchor.test.js` (L-shaped fixture, centroid outside -> anchor inside with clearance; holes; multi-parcel; sliver). **Still needs Michael's real signed-in Katz site.**
+**Steps** (read-only — no edits to any plan; read the served chunk hash in the same observation):
+1. Site tab -> Map view, no project selected. Zoom to the Katz site near Rankin Rd / I-45 N. **Expect:** the orange marker sits inside the outlined parcel, in the wide part, not in the lower-left notch.
+2. Zoom in past the point where the parcel outline appears, then further to the full plan. **Expect:** the marker (then the name tag) stays inside the outline the whole way, at one consistent spot.
+3. Click the Show-on-map arrow for Katz in the Sites list. **Expect:** the map centres on that same inside point.
+4. Spot-check two ordinary rectangular sites. **Expect:** their pins have not visibly moved from where they were.
+- **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B1988816.
+**Observed result: PASSED 2026-10-02, build `4d472ef`, Michael's signed-in Chrome (Site tab overview map).** The Katz circle sits inside the northern block of the parcel, well clear of the edges — checked visually and by point-in-polygon against the drawn outline. Reported as steps 1 and the pin placement; steps 2 (zoom into the plan), 3 (Sites-list fly-to) and 4 (ordinary rectangular sites unmoved) were not separately reported live — they rest on `test/siteAnchor.test.js` (rectangle stays at its centroid; fly-to shares the pin's helper). Moved to Done. See `docs/archive/BACKLOG-DONE.md` **B1988816**.
+
