@@ -22,3 +22,5 @@ the Review root's `saveDocFile`, which writes to the Library (guard: the source 
 
 **Versions:** every Save stores the new bytes under a NEW source id (a new Drive key) and keeps the previous
 source in the review record (`sources[1..]`) — bytes are never overwritten and `purgeReview` cleans them all.
+**Version history (B2034128):** see the version module and the history sheet in the folder pointer one level up; the Review root
+opens an earlier version read-only (`file.readOnly` → this editor hides every editing tool), Restore, Save a copy.

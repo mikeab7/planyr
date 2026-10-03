@@ -21,7 +21,7 @@ const when = (d) => { try { return d ? new Date(d).toLocaleString() : ""; } catc
 const initialsOf = (n) => String(n || "").split(/\s+/).map((w) => w[0] || "").join("").slice(0, 3).toUpperCase();
 const newCommentId = () => `c-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
-export default function DocEditor({ file, author = "Reviewer", notice = "", onSave, onDirty }) {
+export default function DocEditor({ file, author = "Reviewer", notice = "", onSave, onDirty, onHistory, versionBar = null }) {
   const [model, setModel] = useState(null);
   const [err, setErr] = useState("");
   useEffect(() => {
@@ -31,11 +31,12 @@ export default function DocEditor({ file, author = "Reviewer", notice = "", onSa
   }, [file]);
   if (err) return (<div className="dre-root"><style>{DOC_EDITOR_CSS}</style><div className="dre-note err" data-testid="doc-editor-error" role="alert">“{file.name}” couldn’t be opened here. {err}</div></div>);
   if (!model) return (<div className="dre-root"><style>{DOC_EDITOR_CSS}</style><div className="dre-note" data-testid="doc-editor-loading">Opening “{file.name}”…</div></div>);
-  return <Surface key={file.key || file.name} file={file} model={model} author={author} notice={notice} onSave={onSave} onDirty={onDirty} />;
+  return <Surface key={file.key || file.name} file={file} model={model} author={author} notice={notice} onSave={onSave} onDirty={onDirty} onHistory={onHistory} versionBar={versionBar} />;
 }
 
 /* ---------- the editor surface ---------- */
-function Surface({ file, model, author, notice, onSave, onDirty }) {
+function Surface({ file, model, author, notice, onSave, onDirty, onHistory, versionBar }) {
+  const ro = !!file.readOnly; // an earlier saved version: viewable, never editable (B2022929)
   const plain = model.mode === "plain";
   const [comments, setComments] = useState(model.comments || []);
   const [trackOn, setTrackOn] = useState(false);
@@ -54,8 +55,9 @@ function Surface({ file, model, author, notice, onSave, onDirty }) {
     extensions,
     content: model.doc,
     immediatelyRender: false,
+    editable: !ro,
     editorProps: {
-      attributes: { class: plain ? "dre-page plain" : "dre-page", "data-testid": "doc-editor-page", spellcheck: "true", "aria-label": `Editing ${file.name}` },
+      attributes: { class: plain ? "dre-page plain" : "dre-page", "data-testid": "doc-editor-page", spellcheck: "true", "aria-label": ro ? `${file.versionLabel || "Earlier version"} of ${file.name} (read-only)` : `Editing ${file.name}` },
       ...(plain ? {
         handleKeyDown: (view, e) => { if (e.key === "Tab" && !e.shiftKey && !e.ctrlKey && !e.metaKey) { view.dispatch(view.state.tr.insertText("\t")); return true; } return false; },
         clipboardTextParser: (text, $ctx, _plain, view) => {
@@ -113,9 +115,19 @@ function Surface({ file, model, author, notice, onSave, onDirty }) {
 
   return (
     <div className="dre-root" data-testid="doc-editor" data-kind={file.kind} data-dirty={dirty ? "1" : "0"}
-      onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); doSave(false); } }}>
+      onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); if (!ro) doSave(false); } }}>
       <style>{DOC_EDITOR_CSS}</style>
-      <Toolbar editor={editor} plain={plain} trackOn={trackOn} setTrackOn={setTrackOn} findOpen={findOpen} setFindOpen={setFindOpen}
+      {ro && (
+        <div className="dre-note warn dre-ver" role="status" data-testid="doc-readonly-banner" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+          <b data-testid="doc-readonly-label">{file.versionLabel || "Earlier version"}</b>
+          <span>Read-only — editing tools are hidden.</span>
+          <span style={{ flex: 1 }} />
+          {versionBar && <Button size="sm" variant="primary" disabled={versionBar.busy} onClick={versionBar.onRestore} data-testid="ro-restore">Restore this version</Button>}
+          {versionBar && <Button size="sm" variant="ghost" disabled={versionBar.busy} onClick={versionBar.onCopy} data-testid="ro-copy">Save a copy</Button>}
+          {versionBar && <Button size="sm" variant="ghost" disabled={versionBar.busy} onClick={versionBar.onBack} data-testid="ro-back">Back to latest</Button>}
+        </div>
+      )}
+      <Toolbar ro={ro} onHistory={onHistory} editor={editor} plain={plain} trackOn={trackOn} setTrackOn={setTrackOn} findOpen={findOpen} setFindOpen={setFindOpen}
         paneOpen={paneOpen} setPaneOpen={setPaneOpen} changeCount={changes.length} commentCount={comments.length}
         saveLabel={saveLabel} saving={status.kind === "saving"} onSave={() => doSave(false)} onSaveAsWord={plain ? () => doSave(true) : null}
         onStartComment={() => {
@@ -131,7 +143,7 @@ function Surface({ file, model, author, notice, onSave, onDirty }) {
       <div className="dre-body">
         <div className="dre-scroll"><EditorContent editor={editor} /></div>
         {!plain && paneOpen && (
-          <ReviewPane editor={editor} changes={changes} comments={comments} setComments={setComments} author={author}
+          <ReviewPane ro={ro} editor={editor} changes={changes} comments={comments} setComments={setComments} author={author}
             pending={pending} setPending={setPending} onTouch={() => setDirty(true)} />
         )}
       </div>
@@ -140,7 +152,7 @@ function Surface({ file, model, author, notice, onSave, onDirty }) {
 }
 
 /* ---------- toolbar ---------- */
-function Toolbar({ editor, plain, trackOn, setTrackOn, findOpen, setFindOpen, paneOpen, setPaneOpen, changeCount, commentCount, saveLabel, saving, onSave, onSaveAsWord, onStartComment }) {
+function Toolbar({ ro, onHistory, editor, plain, trackOn, setTrackOn, findOpen, setFindOpen, paneOpen, setPaneOpen, changeCount, commentCount, saveLabel, saving, onSave, onSaveAsWord, onStartComment }) {
   const run = (fn) => () => { fn(editor.chain().focus()).run(); };
   const ts = editor.getAttributes("textStyle") || {};
   const styleValue = plain ? "" : editor.isActive("heading", { level: 1 }) ? "h1" : editor.isActive("heading", { level: 2 }) ? "h2" : editor.isActive("heading", { level: 3 }) ? "h3" : editor.getAttributes("paragraph").pStyle === "Title" ? "title" : "body";
@@ -154,11 +166,11 @@ function Toolbar({ editor, plain, trackOn, setTrackOn, findOpen, setFindOpen, pa
   return (
     <div className="dre-bar" role="toolbar" aria-label="Document tools" data-testid="doc-toolbar">
       <div className="dre-group">
-        <Btn title="Undo" onClick={run((c) => c.undo())} disabled={!editor.can().undo()}>↶</Btn>
-        <Btn title="Redo" onClick={run((c) => c.redo())} disabled={!editor.can().redo()}>↷</Btn>
+        {!ro && <Btn title="Undo" onClick={run((c) => c.undo())} disabled={!editor.can().undo()}>↶</Btn>}
+        {!ro && <Btn title="Redo" onClick={run((c) => c.redo())} disabled={!editor.can().redo()}>↷</Btn>}
         <Btn title="Find and replace" active={findOpen} onClick={() => setFindOpen(!findOpen)}>Find</Btn>
       </div>
-      {!plain && (<>
+      {!plain && !ro && (<>
         <span className="dre-sep" />
         <div className="dre-group">
           <select className="dre-select" aria-label="Paragraph style" value={styleValue} onChange={(e) => setStyle(e.target.value)}>
@@ -209,8 +221,9 @@ function Toolbar({ editor, plain, trackOn, setTrackOn, findOpen, setFindOpen, pa
       </>)}
       <span style={{ flex: 1 }} />
       <div className="dre-group">
-        {onSaveAsWord && <Btn title="Save a copy as a Word document (formatting, comments)" onClick={onSaveAsWord} testid="save-as-word">Save as Word document</Btn>}
-        <Button size="sm" variant="primary" disabled={saving} onClick={onSave} data-testid="doc-save">{saving ? "Saving…" : saveLabel}</Button>
+        {onHistory && <Btn title="Version history — see earlier saved versions" onClick={onHistory} testid="doc-history">Version history</Btn>}
+        {!ro && onSaveAsWord && <Btn title="Save a copy as a Word document (formatting, comments)" onClick={onSaveAsWord} testid="save-as-word">Save as Word document</Btn>}
+        {!ro && <Button size="sm" variant="primary" disabled={saving} onClick={onSave} data-testid="doc-save">{saving ? "Saving…" : saveLabel}</Button>}
       </div>
     </div>
   );
@@ -274,7 +287,7 @@ function FindBar({ editor, onClose }) {
 }
 
 /* ---------- review pane: changes + comments ---------- */
-function ReviewPane({ editor, changes, comments, setComments, author, pending, setPending, onTouch }) {
+function ReviewPane({ ro, editor, changes, comments, setComments, author, pending, setPending, onTouch }) {
   const [draft, setDraft] = useState("");
   const [replyFor, setReplyFor] = useState(null); const [replyText, setReplyText] = useState("");
   const apply = (tr) => { editor.view.dispatch(tr); onTouch(); };
@@ -308,13 +321,13 @@ function ReviewPane({ editor, changes, comments, setComments, author, pending, s
           <div key={c.key} className="dre-card" data-testid="change-card" data-kind={c.kind} style={{ marginTop: 6 }}>
             <div><b className={c.kind === "ins" ? "dre-ins" : "dre-del"}>{c.kind === "ins" ? "Inserted" : "Deleted"}</b> “{c.text.slice(0, 80)}”</div>
             <div className="dre-meta">{c.author || "Unknown"}{c.date ? ` · ${when(c.date)}` : ""}</div>
-            <div className="dre-row">
+            {!ro && <div className="dre-row">
               <Button size="sm" variant="ghost" onClick={() => apply(acceptChange(editor.state, c.key))} data-testid="accept-change">Accept</Button>
               <Button size="sm" variant="ghost" onClick={() => apply(rejectChange(editor.state, c.key))} data-testid="reject-change">Reject</Button>
-            </div>
+            </div>}
           </div>
         ))}
-        {changes.length > 1 && (
+        {changes.length > 1 && !ro && (
           <div className="dre-row">
             <Button size="sm" variant="ghost" onClick={() => apply(acceptAll(editor.state))} data-testid="accept-all">Accept all</Button>
             <Button size="sm" variant="ghost" onClick={() => apply(rejectAll(editor.state))} data-testid="reject-all">Reject all</Button>
@@ -350,7 +363,7 @@ function ReviewPane({ editor, changes, comments, setComments, author, pending, s
                 <textarea rows={2} aria-label="Reply" autoFocus value={replyText} onChange={(e) => setReplyText(e.target.value)} data-testid="reply-input" />
                 <div className="dre-row"><Button size="sm" variant="primary" onClick={() => reply(c.id)} disabled={!replyText.trim()} data-testid="reply-add">Reply</Button><Button size="sm" variant="ghost" onClick={() => { setReplyFor(null); setReplyText(""); }}>Cancel</Button></div>
               </div>
-            ) : (
+            ) : ro ? null : (
               <div className="dre-row">
                 <Button size="sm" variant="ghost" onClick={() => setReplyFor(c.id)} data-testid="reply-open">Reply</Button>
                 <Button size="sm" variant="ghost" onClick={() => resolve(c.id)} data-testid="resolve-comment">{c.resolved ? "Reopen" : "Resolve"}</Button>

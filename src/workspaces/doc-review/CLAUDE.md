@@ -37,6 +37,8 @@ internals in `/docs/REFERENCE.md` (Document Review persistence section).
   ⚠ Whether the owner's own drawings carry layers at all is **unknown from the sandbox** — his PDFs'
   bytes are not reachable there — which is why the fixture is a hand-built two-layer PDF and why
   **V287376's first step is "does the Layers button ever appear?"**.
+- `docVersions.js` + `components/VersionHistorySheet.jsx` (B2034128) — Version history for one file: pure list / `saveVersion` / `restoreVersion`
+  over the record's `sources[1..]` (each entry stamped `savedAt`/`savedBy`; append-only, no new table); the sheet only lists and asks.
 - `reviewStore.js` — all persistence I/O (Supabase `doc_reviews` + Drive-first file storage);
   `usePersistence.js` — the data-loss hook (first-edit save, honest badge, flush on unload).
 - `lastDoc.js` — per-PROJECT "last document reviewed" map + legacy-pointer fallback and the
