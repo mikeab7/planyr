@@ -166,6 +166,19 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1457120 — B2032032: phone Settings drills in (menu → section), Profile fields are labelled, Save is only active when something changed `Blocker: auth`
+
+Sandbox-proven (logged in via a seeded session + mocked profile row): `e2e/settings-drill-in.spec.js` (red on the pre-change source) and `test/settingsForm.test.js`. Pending: the real signed-in account on planyr.io, on a phone.
+**Steps** (planyr.io on a phone, signed in; read the served chunk hash in the same observation):
+1. Avatar menu → Settings. **Expect:** a menu page only — your name and email under a green initial, four rows with chevrons (Profile, Team, Account & security, Interface), and a separate red "Sign out" row; no form fields.
+2. Tap Profile. **Expect:** the menu is gone; "‹ Settings" at left, "Profile" centred; First name / Last name side by side and Organization below, each with a visible label above it; the button reads a greyed "Save" and cannot be tapped.
+3. Change Organization. **Expect:** the button turns orange and reads "Save changes". Change it back to what it was. **Expect:** greyed "Save" again.
+4. Change it, tap "‹ Settings". **Expect:** "Discard changes?" with Discard / Keep editing. Keep editing stays on the page with your edit. Back again → Discard returns to the menu; reopen Profile — the old value is back.
+5. Change it, tap Save changes, then reload and reopen Profile. **Expect:** the new value is there and the button is greyed "Save".
+6. Avatar menu → Profile (not Settings). **Expect:** lands directly on the Profile page.
+7. Widen to a desktop window. **Expect:** the section list sits beside the form (unchanged), labels and the greyed/orange Save apply, and Sign out is red text, not a filled button.
+- **Stopping rule:** closes on a dated pass of 1-7, or a failed step filed as a recurrence on B2032032.
+
 ### V1448016 — B2022928: a Word file opened in Review keeps tracked changes + comments through Save, in the Library and in Microsoft Word `Blocker: auth`
 
 Sandbox-proven: `test/docEditorDocx.test.js` (20) + `test/docEditorOpenSave.test.js` (12) + `ui-audit/verify-doc-editor.mjs` (29, real Chromium, logged out: open fixture, real typing, Track Changes, comment/reply/resolve, accept one change, find/replace, Save → the bytes handed to the Library path re-parsed and checked, .txt byte-exact, .doc → new .docx, 0 downloads, 390-wide no sideways scroll, PDF still on the canvas). Pending: everything that needs a signed-in account and the real Library, plus Microsoft Word itself (**not available in the sandbox; its LibreOffice has no Writer module**).
@@ -194,7 +207,7 @@ Sandbox-proven: `test/parcelOutlineSet.test.js`, `test/chambersLotRecord.test.js
 
 Sandbox-proven: `e2e/touch-no-autofocus-account.spec.js` (touch viewport, red on pre-change source) and `test/accountNoAutofocus.test.js`. Pending: the signed-in Settings sections (sign-in is CORS-blocked here).
 **Steps** (planyr.io on an iPhone, signed in; read the served chunk hash in the same observation):
-1. Avatar menu → Settings. **Expect:** Profile shows, no field focused, no keyboard.
+1. Avatar menu → Settings (since B2032032: the Settings menu page), then tap Profile. **Expect:** Profile shows, no field focused, no keyboard.
 2. Tap Team, Account & security, Interface in turn, then Profile again. **Expect:** no keyboard at any point.
 3. Tap the first-name field. **Expect:** the keyboard appears only now.
 4. Close, sign out, tap Sign in. **Expect:** no keyboard until a field is tapped.
