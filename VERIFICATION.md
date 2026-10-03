@@ -166,6 +166,17 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1449712 — B2024624–B2024627: click-a-lot at Grand Port draws one outline source, no flash, no freeze, owner filled `Blocker: real-data`
+
+Sandbox-proven: `test/parcelOutlineSet.test.js`, `test/chambersLotRecord.test.js`, and `ui-audit/verify-click-a-lot-outlines.mjs` (seeded Chambers plan, hosts mocked; before/after numbers on B2024624–B2024626). **Not provable here:** the real Chambers imagery/tiles, the owner's larger plan, and the reported view jump. Run on the throwaway **"Concept A (copy)"** in the Grand Port group — **never Concept A** (CLAUDE.md owner constraint 7); first remove the two test lots (Parcel 18, Parcel 19) it already holds, and say exactly what was touched. Open the app with `?planyrDiag=1` and read the served chunk hash in the same observation.
+**Steps:**
+1. Parcel tools → Click a lot on the map; then `window.__plannerParcelOutlines()` in the console. **Expect:** `mounted` lists only Chambers (plus, only if Chambers is failing, the statewide composite); resource timing shows no requests to other counties' / states' parcel hosts.
+2. Watch the map while panning/zooming north of the strip lots toward I-10. **Expect:** no gold outlines flashing in, no doubled lines; blue Chambers lines stay until the new image replaces them.
+3. Before and after step 1, read `window.__plannerView()`/the view-change recorder. **Expect:** the view does not zoom out or re-centre when the mode opens (this is the unreproduced part of B2024624 — if it still jumps, record the recorder output on B2024624).
+4. Click two lots north of Grand Port (e.g. labelled 15835, 11232). **Expect:** "Added parcel", the owner shown (15835 → BARBERS HILL EDUCATION FOUNDATION), the plan name is the owner (not "Parcel N"), Account/ID is the CAD account (00321-02000-00100-100001), not 2933785. Use `PerformanceObserver('longtask')`: **Expect** no long task over 100 ms after the add.
+5. Look at the new chips against the lot numbers. **Expect (B2024627):** the chip is not sitting on the county's lot number — if it is, that item stays open.
+6. Re-click one added lot. **Expect:** only that lot is removed.
+- **Stopping rule:** closes on a dated pass of 1–6 (step 3/5 failures filed on B2024624/B2024627), or a failed step filed as a recurrence.
 ### V1440896 — B2015808: each schedule group's Focus holds across leaving the module, switching schedules, and a hard reload `Blocker: auth`
 
 Sandbox-proven: `test/schedulerViewState.test.js` (7 new, red on pre-change source) and the real `/sequence/` page in headless Chromium (focus → reload → still focused → off → reload → still off; store `planar:taskFocus:v1` written/cleared). Pending: the signed-in cloud path (a real merge/refresh from the cloud).
