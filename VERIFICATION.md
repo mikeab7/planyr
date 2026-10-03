@@ -175,6 +175,14 @@ Sandbox-proven, both engines: `ui-audit/verify-nav-arrows.mjs` (and `ENGINE=webk
 4. Select a project (tab set changes) and repeat 1–2. **Expect:** same.
 5. Rotate to landscape and back. **Expect:** arrows update, no tab cut off.
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2043888.
+### V1466448 — B2041360: Site-map hint no longer follows you to the Dashboard (phone) `Blocker: auth`
+
+Sandbox-proven (logged-out, seeded local site, real Chromium): `e2e/mapfinder-notice-leak.spec.js` — 6 workspace destinations, red on the unfixed build, green on the fix. Pending: the owner's phone, signed in on planyr.io. **Steps** (read the served chunk hash, `document.querySelectorAll('script[src]')`, in the same observation):
+1. Phone: Site → the map view → tap **+ Select parcels**. **Expect:** the dark hint "Click any lot on the map to add it (＋)…" appears bottom-centre.
+2. Without turning Select parcels off, open the avatar/wordmark and go to the **Dashboard**. **Expect:** the hint is gone; nothing about the Site map appears over Jump back in / Pipeline / Comps.
+3. Repeat from the Dashboard to Schedule, Library, Notes, Spreadsheet. **Expect:** no Site-map hint on any of them.
+4. Return to Site → map. **Expect:** the hint is back only if Select parcels is still on (the mode is kept on purpose).
+- **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B2041360.
 
 ### V1464320 — B2039232: an open file has a Close (×) back to the sheet index; unsaved Word/text edits ask first; reload after Close stays on the index `Blocker: auth`
 

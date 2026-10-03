@@ -23623,7 +23623,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           sync — elements are per-row rev-guarded, the header self-heals a stale CAS (cloudUpsert). */}
       {/* B673 — its successor: the loud-but-NON-BLOCKING per-element conflict toasts (both sides of
           a collision get told, with Show / Restore actions; nothing is ever silently overwritten). */}
-      <ToastHost toasts={toasts} onDismiss={dismissToast} />
+      {active && <ToastHost toasts={toasts} onDismiss={dismissToast} />}
       {/* B455/NEW-7 + B464/B466 (NEW-1/NEW-3) — single-active-editor read-only banner, now LOUD and
           ACTIONABLE. Another tab of this browser is the active editor, so this tab is read-only and
           its edits are NOT syncing to the cloud (they ARE kept on this device — B458). Reloading does

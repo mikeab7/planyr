@@ -5254,7 +5254,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             map keeps painting over the planner. See the map<->plan reset effect below, which is
             the other half of this fix (it now clears this state on the flip, in both directions,
             instead of relying on the gate alone). */}
-        {visible && backupNotice && !err && (
+        {visible && isActive && backupNotice && !err && (
           <FloatingNotice testId="parcel-backup-notice" maxWidth="min(420px, calc(100vw - 16px))">
             <div style={{ background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45, pointerEvents: "none" }}>
               <b>Statewide backup source.</b> {backupNotice.county} county’s own parcel server is unavailable, so this lot came from the all-Texas TxGIO layer — accurate for selection, but it may lag recent county updates.
@@ -5265,7 +5265,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             snapshot because the live county server was unreachable (B629). Same honesty as the
             statewide-backup notice: a possibly-staler local copy is never mistaken for a live record. */}
         {/* NEW-1 (B1462256) — gated on `visible` too, same reason as the backup notice above. */}
-        {visible && cachedNotice && !err && !backupNotice && (
+        {visible && isActive && cachedNotice && !err && !backupNotice && (
           <FloatingNotice testId="parcel-cached-notice" maxWidth="min(420px, calc(100vw - 16px))">
             <div style={{ background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45, pointerEvents: "none" }}>
               <b>Cached copy{fmtAsOf(cachedNotice.asOf)}.</b> {cachedNotice.county} county’s live parcel server is unavailable, so this lot came from Planyr’s saved snapshot — accurate for selection, but it may lag recent county updates.
@@ -5282,8 +5282,13 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         {/* NEW-1 (B1462256, owner screenshot) — gated on `visible` too: this is the ONE
             explanation anywhere in the app for how "+ Select parcels" works, and it kept
             rendering over a project's planner because `selectMode` was never reset on LEAVING
-            the map (only on returning to it) — see the reset effect below. */}
-        {visible && !err && selectMode && (
+            the map (only on returning to it) — see the reset effect below.
+            NEW-1 (B2041360, owner iPhone screenshot 2026-10-03) — and on `isActive` too: leaving
+            the Site WORKSPACE for the Dashboard (or any module) keeps this component mounted with
+            `visible` still true, and the portal paints over the other module. The reset effect is
+            deliberately NOT keyed on `isActive` (peeking at another tab must not wipe a parcel
+            selection), so the state survives and only the RENDER is gated. */}
+        {visible && isActive && !err && selectMode && (
           <FloatingNotice maxWidth="min(420px, calc(100vw - 16px))">
             <div data-testid="select-parcels-tip" style={{ background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "6px 11px", fontSize: FONT_SIZE.control, color: PAL.ink, lineHeight: 1.4, pointerEvents: "none" }}>
               {/* NEW-5 (B849588) — "Click a lot on the map" is the same phrase the Site Planner's
