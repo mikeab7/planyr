@@ -5269,6 +5269,16 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
+### B2021248 — Opening Settings (Profile) on a phone pops the keyboard over the panel `[Settings / Account]` (bug) #ui #mobile #auth  *(Owner report 2026-10-03 (NEW-1), iPhone Safari, signed in: avatar menu → Settings → Profile; first-name field took focus by itself and the keyboard covered the lower half. DEDUPE-FIRST: searched Open/⏳Verify/Done for keyboard/autofocus/Settings — only B1026274 (a11y audit, different question). Net-new.)*
+
+`[x]` **Cause (AUDIT-FIRST, confirmed in code):** `AuthPanel.jsx`'s shared `Wrap` moved focus into the dialog on open by focusing the FIRST `INPUT` — on Settings that is the Profile first-name field (and the sign-in email field on the signed-out forms). No `autoFocus` prop was involved. Section switches never refocus; Team's `autoFocus` inputs only mount after a deliberate Rename / Create tap.
+`[x]` **Fix:** new `shared/ui/coarsePointer.js` (`isCoarsePointer`, `(pointer: coarse)`). `Wrap` focuses the dialog container instead of an input on a coarse pointer, and Settings (`focusFirstInput={false}`) never focuses an input on any device. Desktop sign-in forms keep their email autofocus (typing is the only purpose).
+- **Sweep of every other autofocus site (what was done):** CHANGED to skip on coarse pointer — project switcher "Search projects" (`ProjectBreadcrumb`), Report-a-problem textarea (`HelpReportControl`), `SetLocationDialog` search, `ShortcutsPage` search, `NewScheduleModal` name. LEFT (user just tapped to edit that exact field, keyboard is the point) — rename inputs (ProjectBreadcrumb `RenameInput`, MapFinder, TeamPanel rename/create, SitePlansSection, FolderTree, ScheduleOwnerList, OrgWorkbookPicker), callout/markup text editors (SitePlanner, DocReview, Stitcher calibration), spreadsheet cell/name/tab editors (model/*), CompEntryGrid, food dialogs, MapNoteEditor, Notes editor/QuickOpen/CommandPalette (keyboard-invoked palettes). LEFT, not a text field — LinkSchedulePanel focuses a `<select>`.
+- Guard: `e2e/touch-no-autofocus-account.spec.js` (390x844, hasTouch+isMobile so `(pointer: coarse)` is true; asserts `activeElement` is never input/textarea/contenteditable on open and across sign-in/create-account tabs; known-good arm: desktop sign-in still focuses email) — RED on pre-change source (activeElement was the input), green after. Source guard `test/accountNoAutofocus.test.js`.
+- Not reachable here: the signed-in Settings sections (sign-in is CORS-blocked in the sandbox); they share the same `Wrap` and `focusFirstInput={false}`, asserted at source. Click-through logged as **V1446336**.
+- Verify: live — **V1446336** (`Blocker: auth`). **Stopping rule:** closes on a dated pass of V1446336, or a recurrence filed here.
+- Owner product constraints check: nothing here contradicts a listed constraint.
+
 
 ### B2015808 — Schedule "Focus" toggles reset every time you come back to the page `[scheduler]` (bug) #scheduler #persistence  *(Owner report 2026-10-02 (NEW-1): "the focus button on the schedule module doesn't hold ... It should just hold whatever the last status was.")*
 

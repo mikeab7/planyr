@@ -166,6 +166,16 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1446336 — B2021248: opening Settings, and switching between its sections, never raises the phone keyboard `Blocker: auth`
+
+Sandbox-proven: `e2e/touch-no-autofocus-account.spec.js` (touch viewport, red on pre-change source) and `test/accountNoAutofocus.test.js`. Pending: the signed-in Settings sections (sign-in is CORS-blocked here).
+**Steps** (planyr.io on an iPhone, signed in; read the served chunk hash in the same observation):
+1. Avatar menu → Settings. **Expect:** Profile shows, no field focused, no keyboard.
+2. Tap Team, Account & security, Interface in turn, then Profile again. **Expect:** no keyboard at any point.
+3. Tap the first-name field. **Expect:** the keyboard appears only now.
+4. Close, sign out, tap Sign in. **Expect:** no keyboard until a field is tapped.
+- **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B2021248.
+
 ### V1440896 — B2015808: each schedule group's Focus holds across leaving the module, switching schedules, and a hard reload `Blocker: auth`
 
 Sandbox-proven: `test/schedulerViewState.test.js` (7 new, red on pre-change source) and the real `/sequence/` page in headless Chromium (focus → reload → still focused → off → reload → still off; store `planar:taskFocus:v1` written/cleared). Pending: the signed-in cloud path (a real merge/refresh from the cloud).
