@@ -81,8 +81,8 @@
       "note": "Was 3094689 before NEW-9 removed the boot-time idle prefetch of the other workspaces, and 2270513 before B1042 deferred the export path + the LERC codec. Ceiling ratcheted 2400000 -> 2320000 with that landing. STILL ABOVE TARGET, and dynamic imports alone cannot close the rest \u2014 see largestChunkBytes.note for the measured floor, plus ~200 KB of Supabase client in the shared entry chunk (auth-js/realtime-js/phoenix/storage-js) that only a signed-in-verifiable change can defer. CEILING RAISED 2320000 -> 2332000 by B1130/B1131 (2026-07-30), and this is the justification the standing rule demands, stated in full because raising a ceiling is a product decision. WHAT SHIPPED: two owner-reported defects on the Electric layer \u2014 substations painting as broken-image glyphs labelled \"Mark\" (a GeoJSON point with no pointToLayer falling through to L.Icon.Default), and no way to hover a line or substation to learn what it is. WHAT WAS PAID FIRST, measured: the feature started at +20.2 KB on this metric and was cut to +7.4 KB by four optimizations before any number here was touched \u2014 (1) the raster identify glue + state machine moved behind a dynamic import (rasterIdentifyLazy.js), (2) the vector hover/identify attach layer and its wording engine likewise (featureHoverAttach.js, imported at layer-toggle time), (3) identifyCapable moved into this file so layers.js can gate on it without pulling the identify module onto the boot path, (4) the L.Icon.Default fallback rendered from a ~400-byte inline SVG pin instead of leaflet's three PNGs, which Vite base64-inlines at ~6 KB (both Vite-5 ways of emitting them as files were tried; ?no-inline is Vite 6 and new URL(...) against node_modules emits nothing). WHY A RAISE WAS STILL NEEDED: main was already at 2262.9 KB against a 2265.6 KB ceiling \u2014 2.7 KB of headroom \u2014 so this metric now trips on essentially ANY feature, which is a headroom problem rather than a regression in this PR. The residual ~7 KB is SitePlanner.jsx's hover card + effect, the geometry-aware point styling, and the per-layer hoverIdentify flags: all synchronous, all on this route, none deferrable by import(). NOTE THE CONTRAST, which is the honest read: largestChunkBytes was NOT raised \u2014 the same four optimizations brought it back under its existing ceiling (1719.5 -> 1706.8 KB). B1064 remains the metric owner for closing the real gap. NEW-1 (2026-07-30) RETIRED THE HAND-PINNED CEILING ON THIS METRIC, which is the honest fix for the paragraph immediately above: three PRs failed on 0.8-0.9% breaches of a ceiling pinned 0.06% over measured, and the answer to that is a policy, not a fourth hand-typed number. The ceiling is now DERIVED from `baseline` + the shared `headroom` band, and the baseline moves only through `npm run perf:ratchet` with a reason recorded in `ratchetLog`."
     },
     "siteRouteChunks": {
-      "ceiling": 30,
-      "target": 30,
+      "ceiling": 31,
+      "target": 31,
       "measured": 14,
       "unit": "chunks",
       "what": "How many JS chunks a plain Site route pulls.",
@@ -256,6 +256,7 @@
         "time, and it is reached only from the shortcuts page's own lazy chunk, never from the",
         "Site route's boot path. The Site route downloads the SAME BYTES it always did (this module",
         "was previously inlined into SitePlannerApp's own chunk), in one more file.",
+        "GREW BY ONE ON 2026-10-03 (B2016112, free pinch zoom on the browse maps): `freePinchZoom` (src/shared/map/freePinchZoom.js, ~0.9 KB) has a STATIC Site Planner consumer (MapFinder.jsx) and two lazy ones (the Dashboard Locations card and the Food map), so Rollup gives it its own chunk — the fourteenth instance of the identical mechanical reason; the Site route downloads the same bytes in one more file.",
         "GREW BY TWO ON 2026-10-03 (B2014992, Dashboard Locations pins inside their parcel): `siteAnchor` (site-planner/lib/siteAnchor.js, the ONE pin-placement helper, with polylabel/mapLock) and `parcelArea` (its small leaf) each gained a second, lazy consumer (the Dashboard Locations card) alongside the static Site Planner one — the twelfth/thirteenth instance of the identical mechanical reason; the Site route downloads the same bytes in two more files. Worst-case sizing: the measured count may be lower.",
         "GREW BY ONE ON 2026-09-29 (B1953200, names have one source of truth): `names` (src/shared/names/names.js, ~1.3 KB) has a STATIC Site Planner consumer and lazy Library/Model ones — the eleventh instance of the identical mechanical reason; the Site route downloads the same bytes in one more file.",
         "GREW BY ONE ON 2026-09-15 (B1631939, the header project switcher's pin-to-top feature),",
@@ -307,7 +308,8 @@
         "userPrefsStore",
         "names",
         "siteAnchor",
-        "parcelArea"
+        "parcelArea",
+        "freePinchZoom"
       ]
     },
     "notesRouteJsBytes": {

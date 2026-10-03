@@ -187,6 +187,18 @@ Sandbox-proven: `ui-audit/verify-food-satellite-toggle.mjs` (real Esri tiles, de
 6. Open a place's detail sheet on a phone. **Expect:** the map credit does not paint through the sheet.
 - **Stopping rule:** closes on a dated pass of 1-6, or a failed step filed as a recurrence on B2025280.
 
+### V1441200 — B2016112: pinching Map Finder on a real phone settles exactly where the fingers stop `Blocker: real-data`
+
+Sandbox-proven (dev server, visible tab, real CDP two-finger touch events, all three maps): `ui-audit/verify-free-pinch-zoom.mjs` + `test/freePinchZoom.test.js`. Pending: a real finger on real glass.
+**Steps** (planyr.io on his phone, Map Finder / `#/map`; read the served chunk hash in the same observation):
+1. Pinch out slowly and stop mid-way. **Expect:** the map stays exactly where the fingers stopped — scale bar reads an in-between distance, not a jump to the next 100/200/500 step.
+2. Pinch back in and stop between levels. **Expect:** same, no snap on release.
+3. Double-tap the map. **Expect:** exactly one full level in.
+4. Tap the +/− buttons. **Expect:** exactly one full level each tap.
+5. Zoom in past where parcels / place names used to appear. **Expect:** they appear at the same point as before; imagery is slightly soft between levels (accepted).
+- **Stopping rule:** closes on a dated pass of 1-5, or a failed step filed as a recurrence on B2016112.
+
+
 ### V1440080 — B2014992: every pin on the Dashboard Locations map sits inside its own parcel (Katz in particular) `Blocker: auth`
 
 Sandbox-proven: `test/dashboardParcelAnchors.test.js` (5, red on pre-change source). Pending: the signed-in dashboard against real parcels. Read-only — change nothing.
