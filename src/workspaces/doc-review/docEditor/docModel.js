@@ -14,11 +14,20 @@ export async function loadModel(file) {
   const buf = await file.blob.arrayBuffer();
   if (file.kind === "docx") { const r = readDocx(new Uint8Array(buf)); return { mode: "docx", ...r }; }
   if (file.kind === "doc") {
-    const { docToText: legacyText } = await import("../../../shared/files/docText.js");
-    const text = await legacyText(buf); // throws a friendly, specific error for unsupported .doc variants
-    const { doc } = txtToDoc(text);
-    doc.content = doc.content.map((p) => ({ ...p, attrs: { ...emptyAttrs } }));
-    return { mode: "docx", doc, comments: [], meta: { warnings: [] }, files: blankPackage(), converted: true };
+    // Lazy: the .doc readers load only when a .doc is opened. Formatting first; if the structure can't be read, fall back to the
+    // text-only reader and SAY SO (never a quiet downgrade). Both throw a friendly, specific error for unsupported .doc variants.
+    const { readDocStructure, describeDocImport } = await import("../../../shared/files/docStructure.js");
+    try {
+      const { doc, report, defaults, media } = readDocStructure(buf);
+      return { mode: "docx", doc, comments: [], meta: { warnings: [] }, files: blankPackage({ ...defaults, media }), converted: true, docNote: describeDocImport(report), docReport: report };
+    } catch (structureErr) {
+      const { docToText: legacyText } = await import("../../../shared/files/docText.js");
+      const text = await legacyText(buf);
+      const { doc } = txtToDoc(text);
+      doc.content = doc.content.map((p) => ({ ...p, attrs: { ...emptyAttrs } }));
+      const why = structureErr && structureErr.message ? ` (${structureErr.message})` : "";
+      return { mode: "docx", doc, comments: [], meta: { warnings: [`This .doc’s formatting could not be read${why}, so only its text came across. Saving still creates a new .docx; the original .doc is kept.`] }, files: blankPackage(), converted: true, docNote: "Word 97–2003 file — only its text opened here. Saving creates a new .docx next to it; the original .doc is kept.", docReport: null };
+    }
   }
   const { text, encoding, eol } = decodeText(new Uint8Array(buf));
   const { doc, trailing } = txtToDoc(text);

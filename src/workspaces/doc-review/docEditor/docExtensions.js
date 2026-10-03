@@ -19,7 +19,7 @@ const ParagraphFacts = Extension.create({
     return [
       { types: ["paragraph", "heading"], attributes: {
         pStyle: { default: null, rendered: true, parseHTML: (el) => el.getAttribute("data-pstyle"), renderHTML: (a) => (a.pStyle ? { "data-pstyle": a.pStyle } : {}) },
-        pprx: attr(""), pMark: attr(null),
+        pprx: attr(""), pMark: attr(null), pFmt: attr(null),
       } },
       { types: ["bulletList", "orderedList"], attributes: { numId: attr(null) } },
     ];
@@ -58,6 +58,14 @@ const TrackDel = Mark.create({
   parseHTML() { return [{ tag: "del[data-track]" }]; },
   renderHTML({ mark }) { const a = mark.attrs; return ["del", { "data-track": a.id, class: "dre-del", title: `Deleted by ${a.author || "someone"}${a.date ? " · " + new Date(a.date).toLocaleString() : ""}` }, 0]; },
 });
+// A tracked FORMATTING change on a run (Word's rPrChange): the text keeps its CURRENT look; `old` holds the previous
+// run properties verbatim so Reject can restore them and an un-acted change is written back unchanged.
+const TrackFmt = Mark.create({
+  name: "trackFmt", inclusive: false, excludes: "",
+  addAttributes() { return { ...trackAttrs(), old: { default: "" } }; },
+  parseHTML() { return [{ tag: "span[data-track-fmt]" }]; },
+  renderHTML({ mark }) { const a = mark.attrs; return ["span", { "data-track-fmt": a.id, class: "dre-fmt", title: `Formatted by ${a.author || "someone"}${a.date ? " · " + new Date(a.date).toLocaleString() : ""}` }, 0]; },
+});
 const CommentMark = Mark.create({
   name: "comment", inclusive: false, excludes: "",
   addAttributes() { return { id: { default: "" } }; },
@@ -77,10 +85,10 @@ export function docExtensions({ plain = false } = {}) {
     TextStyleKit.configure({ backgroundColor: false, lineHeight: false }),
     Highlight.configure({ multicolor: true }), Superscript, Subscript,
     TextAlign.configure({ types: ["heading", "paragraph"] }),
-    Table.configure({ resizable: false }).extend({ addAttributes() { return { ...(this.parent?.() || {}), tblpr: attr(""), gridCols: attr([]) }; } }),
+    Table.configure({ resizable: false }).extend({ addAttributes() { return { ...(this.parent?.() || {}), tblpr: attr(""), gridCols: attr([]), gridChange: attr("") }; } }),
     withAttrs(TableRow, { trpr: attr("") }),
     withAttrs(TableCell, { tcpr: attr("") }),
     withAttrs(TableHeader, { tcpr: attr("") }),
-    ParagraphFacts, DocImage, DocRaw, DocRawBlock, TrackIns, TrackDel, CommentMark,
+    ParagraphFacts, DocImage, DocRaw, DocRawBlock, TrackIns, TrackDel, TrackFmt, CommentMark,
   ];
 }
