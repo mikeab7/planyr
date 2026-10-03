@@ -422,7 +422,6 @@ export default function DocReview({
   const [docFile, setDocFile] = useState(null);
   // Close (NEW-1): the editor reports unsaved edits up; Close asks Save / Discard / Cancel when there are any.
   const narrow = useNarrow(); // phone width: the toolbar strip scrolls sideways, so Close also gets its own always-visible bar
-  const [docDirty, setDocDirty] = useState(false);
   const [closePrompt, setClosePrompt] = useState(null); // null | "ask" | "saving"
   const docSaveRef = useRef(null); // the editor's own Save, resolves true once the bytes reached the Library
   const [docNotice, setDocNotice] = useState(""); // one-line outcome carried across the open that follows a "save as new"
