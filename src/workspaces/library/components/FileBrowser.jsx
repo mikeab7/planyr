@@ -20,7 +20,7 @@
 import { docKindOf } from "../../doc-review/docEditor/docKind.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  fetchProjects, fetchReviews, fetchFileFacts, fileNewReview, refileReview,
+  fetchProjects, fetchReviews, fetchFileFacts, fileNewReview,
   upsertFileFacts, deleteReview, restoreReview, purgeReview, listDeletedReviews,
   purgeExpiredDeleted, loadReview, getShareLink, DISCIPLINES,
   downloadFromDrive, downloadSource,
@@ -28,6 +28,7 @@ import {
 import { friendlySaveError } from "../../../shared/sitePlans/lib/overlayErrors.js";
 import { toFactsRow, mergeFactsIntoReviews, findDuplicateReview, isRapidRepeatUpload } from "../../doc-review/lib/fileIndex.js";
 import { fileWarn } from "../../doc-review/lib/sourceState.js";
+import { fileReviewIntoProject } from "../lib/fileIntoProject.js";
 import { buildFilingPlan } from "../../../shared/files/disciplineSplit.js";
 import { splitPdfByPlan } from "../../doc-review/lib/pdfSplit.js";
 import {
@@ -38,7 +39,6 @@ import {
 import {
   resolveDrawingTarget, subtreeIds, displayLabel, matchDropPathToFolder,
 } from "../../../shared/folders/folderTree.js";
-import { moveDriveFileToFolder } from "../lib/folders.js";
 import {
   QUEUE_STATUS, makeQueueItems, splitQueue, runPool,
   dropItemsToEntries, flattenEntries, partitionAccepted, isPdfName, fileRelDirs,
@@ -664,35 +664,14 @@ export default function FileBrowser({
     const typed = (sel.discipline || f.discipline || "Civil").trim();
     const discipline = DISCIPLINES.find((d) => d.toLowerCase() === typed.toLowerCase()) || typed;
     const pid = f.projectId || projectId;
-    const res = await refileReview(f.id, { projectId: pid, project: projName(pid), discipline });
-    if (!res || !res.ok) { // R2 - a failed refile writes NOTHING to the index, and says so
-      setMoveNotice(`Couldn't file "${f.title || "this file"}" — ${(res && res.error) || "the save failed"}. Nothing was changed.`);
+    const res = await fileReviewIntoProject({ f, projectId: pid, projectName: projName(pid), discipline, category: sel.category });
+    if (!res.ok) { // R2 - a failed refile writes NOTHING to the index, and says so
+      setMoveNotice(`Couldn't file "${f.title || "this file"}" — ${res.error}. Nothing was changed.`);
       return;
     }
-    // Update the index row's category/state too so the tree moves it immediately. Preserve the
-    // REAL upload filename (B685) — never the extension-less title: source_file is what isPdfFile
-    // reads to decide open-in-Review vs. download, so writing f.title here would make a re-filed
-    // PDF look like a non-PDF (empty stays empty → legacy PDFs still read as PDF).
-    const ff = await upsertFileFacts(toFactsRow({ projectId: pid, discipline, item: f.item, category: sel.category || undefined, needsFiling: false }, { id: f.id, reviewId: f.id, sourceFile: f.sourceFile || "" })).catch((e) => ({ ok: false, error: e && e.message }));
-    if (ff && ff.ok === false) setMoveNotice(`Filed, but the Library index wasn't updated (${ff.error || "write failed"}) — refresh and try again if the file looks misplaced.`);
-    {
-      // Move the Drive BYTES to match the confirmed discipline (B662 review #3): the upload
-      // landed where the ORIGINAL read pointed (often the Drawings fallback for "Other");
-      // filing is only done when the physical copy follows the decision. Failure is loud —
-      // the metadata is filed either way, so the notice says exactly what's still pending.
-      try {
-        const rec = await loadReview(f.id);
-        const keys = ((rec && rec.sources) || []).map((s) => s && s.driveKey).filter(Boolean);
-        for (const k of keys) {
-          const mv = await moveDriveFileToFolder(pid, k, discipline);
-          if (mv && mv.ok === false) { setMoveNotice(`Filed as ${discipline}, but the Google Drive copy couldn't be moved (${mv.error || "move failed"}) — it stays in its old folder.`); break; }
-        }
-      } catch (_) {
-        setMoveNotice(`Filed as ${discipline}, but the Google Drive copy couldn't be moved — it stays in its old folder.`);
-      }
-      setRefileSel((s) => { const n = { ...s }; delete n[f.id]; return n; });
-      refresh();
-    }
+    if (res.notice) setMoveNotice(res.notice);
+    setRefileSel((s) => { const n = { ...s }; delete n[f.id]; return n; });
+    refresh();
   };
 
   // ---- empty / no-project states ------------------------------------------

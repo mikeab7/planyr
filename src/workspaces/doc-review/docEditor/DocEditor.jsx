@@ -21,7 +21,7 @@ const when = (d) => { try { return d ? new Date(d).toLocaleString() : ""; } catc
 const initialsOf = (n) => String(n || "").split(/\s+/).map((w) => w[0] || "").join("").slice(0, 3).toUpperCase();
 const newCommentId = () => `c-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
-export default function DocEditor({ file, author = "Reviewer", notice = "", onSave, onDirty, onHistory, versionBar = null }) {
+export default function DocEditor({ file, author = "Reviewer", notice = "", onSave, onDirty, onHistory, versionBar = null, saveRef }) {
   const [model, setModel] = useState(null);
   const [err, setErr] = useState("");
   useEffect(() => {
@@ -31,11 +31,11 @@ export default function DocEditor({ file, author = "Reviewer", notice = "", onSa
   }, [file]);
   if (err) return (<div className="dre-root"><style>{DOC_EDITOR_CSS}</style><div className="dre-note err" data-testid="doc-editor-error" role="alert">“{file.name}” couldn’t be opened here. {err}</div></div>);
   if (!model) return (<div className="dre-root"><style>{DOC_EDITOR_CSS}</style><div className="dre-note" data-testid="doc-editor-loading">Opening “{file.name}”…</div></div>);
-  return <Surface key={file.key || file.name} file={file} model={model} author={author} notice={notice} onSave={onSave} onDirty={onDirty} onHistory={onHistory} versionBar={versionBar} />;
+  return <Surface key={file.key || file.name} file={file} model={model} author={author} notice={notice} onSave={onSave} onDirty={onDirty} onHistory={onHistory} versionBar={versionBar} saveRef={saveRef} />;
 }
 
 /* ---------- the editor surface ---------- */
-function Surface({ file, model, author, notice, onSave, onDirty, onHistory, versionBar }) {
+function Surface({ file, model, author, notice, onSave, onDirty, onHistory, versionBar, saveRef }) {
   const ro = !!file.readOnly; // an earlier saved version: viewable, never editable (B2022929)
   const plain = model.mode === "plain";
   const [comments, setComments] = useState(model.comments || []);
@@ -93,21 +93,29 @@ function Surface({ file, model, author, notice, onSave, onDirty, onHistory, vers
     return () => window.removeEventListener("beforeunload", h);
   }, [dirty]);
 
+  // Resolves true only when the bytes reached the Library (the host's Close-with-unsaved-edits prompt waits on it).
   const doSave = useCallback(async (asNew) => {
-    if (!editor || !onSave) return;
+    if (!editor || !onSave) return false;
     setStatus({ kind: "saving", msg: "Saving to the Library…" });
     try {
       const built = buildSave({ model, file, json: editor.getJSON(), comments, author, asNew, files: filesRef.current });
       const { name, mode, note } = built;
       const blob = new Blob([built.bytes], { type: built.mime });
       const res = await onSave({ blob, name, mode });
-      if (!res || !res.ok) { setStatus({ kind: "error", msg: (res && res.error) || "Couldn’t save. Your edits are still here — try again." }); return; }
+      if (!res || !res.ok) { setStatus({ kind: "error", msg: (res && res.error) || "Couldn’t save. Your edits are still here — try again." }); return false; }
       if (mode === "replace") setDirty(false);
-      setStatus({ kind: "saved", msg: res.message || note || (res.local ? "Saved on this device only — sign in to put it in the Library." : "Saved to the Library.") });
+      setStatus({ kind: "saved", msg: res.message || (res.local ? (note || "Saved on this device only — sign in to put it in the Library.") : [note, res.where || "Saved to the Library."].filter(Boolean).join(" ")) });
+      return true;
     } catch (e) {
       setStatus({ kind: "error", msg: `Couldn’t save: ${e && e.message ? e.message : "unknown error"}. Your edits are still here.` });
+      return false;
     }
   }, [editor, onSave, file, model, comments, author]);
+  useEffect(() => {
+    if (!saveRef) return undefined;
+    saveRef.current = () => doSave(false);
+    return () => { saveRef.current = null; };
+  }, [saveRef, doSave]);
 
   if (!editor) return <div className="dre-root"><style>{DOC_EDITOR_CSS}</style></div>;
   const changes = plain ? [] : listChanges(editor.state.doc);

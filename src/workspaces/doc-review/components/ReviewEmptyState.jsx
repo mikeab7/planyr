@@ -88,6 +88,7 @@ export function ReviewEmptyStateView({ projectId = null, org = false, busy = fal
         {status}
         <div style={{ marginTop: SPACE.xl, textAlign: "center" }}>
           <button type="button" data-testid="empty-upload-no-project" onClick={onUpload} style={linkBtn}>Upload a file without a project</button>
+          <div data-testid="empty-unfiled-note" style={{ fontSize: FONT_SIZE.control, color: "var(--text-secondary)" }}>It will be kept under Unfiled in the Library.</div>
         </div>
       </div>
     );

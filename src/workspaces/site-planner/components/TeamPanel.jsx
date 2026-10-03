@@ -41,7 +41,7 @@ const sectionLabel = { fontSize: FONT_SIZE.label, fontWeight: 700, textTransform
 const card = { background: "var(--surface-field)", border: `1px solid ${PAL.line}`, borderRadius: RADIUS.lg, overflow: "hidden" };
 const avatar = { width: AV, height: AV, flex: "none", borderRadius: RADIUS.pill, display: "grid", placeItems: "center", fontSize: FONT_SIZE.emphasis, fontWeight: 700, background: "var(--hover-ghost)", color: PAL.ink, boxSizing: "border-box" };
 const moreBtn = (touch) => ({ width: touch ? 44 : 36, height: touch ? 44 : 36, flex: "none", display: "grid", placeItems: "center end", background: "transparent", border: "none", borderRadius: RADIUS.md, color: PAL.ink, fontSize: 20 /* design-exempt: the ⋯ glyph size, scaled to its own 44px touch target */, fontWeight: 700, lineHeight: 1, cursor: "pointer", fontFamily: "inherit", padding: touch ? "0 4px 0 0" : 0, margin: touch ? "-6px -8px -6px 0" : "0 -4px 0 0" });
-const linkBtnStyle = { background: "none", border: "none", color: PAL.accent, fontSize: FONT_SIZE.emphasis, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", padding: "6px 4px", whiteSpace: "nowrap" };
+const linkBtnStyle = { background: "none", border: "none", color: PAL.accent, fontSize: FONT_SIZE.control, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", padding: 0, whiteSpace: "nowrap", flex: "none" };
 const infoBtn = { width: 22, height: 22, flex: "none", borderRadius: RADIUS.pill, border: `1px solid ${PAL.muted}`, background: "transparent", color: PAL.muted, fontSize: FONT_SIZE.control, fontWeight: 700, fontStyle: "italic", fontFamily: "Georgia, serif", cursor: "pointer", padding: 0, display: "grid", placeItems: "center" };
 const switchTrack = (on) => ({ position: "relative", width: 44, height: 26, flex: "none", borderRadius: RADIUS.pill, border: `1px solid ${on ? PAL.accent : PAL.line}`, background: on ? PAL.accent : "var(--hover-ghost)", cursor: "pointer", padding: 0, margin: "0 -4px 0 0" });
 const switchKnob = (on) => ({ position: "absolute", top: 2, left: on ? 20 : 2, width: 20, height: 20, borderRadius: RADIUS.pill, background: on ? "var(--on-accent)" : PAL.muted, transition: "left .12s" });
@@ -251,8 +251,11 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
     ];
   };
 
-  const Row = ({ r, first }) => (
-    <div data-team-row={r.kind} data-team-row-role={r.role} style={{ position: "relative", display: "flex", alignItems: "center", gap: 12, padding: `${narrow ? 10 : 9}px ${GUTTER}px ${narrow ? 10 : 9}px ${GUTTER}px`, minHeight: narrow ? 56 : 52 }}>
+  // A render FUNCTION, not a component: a component defined here is a new type every render, so the
+  // click that opens the ⋯ menu remounted the row and detached the very button the menu anchors to
+  // (B2038784 amendment — the menu measured a detached node and stayed at left:-9999px, opacity 0).
+  const renderRow = (r, first) => (
+    <div key={`${r.kind}:${r.id}`} data-team-row={r.kind} data-team-row-role={r.role} style={{ position: "relative", display: "flex", alignItems: "center", gap: 12, padding: `${narrow ? 10 : 9}px ${GUTTER}px ${narrow ? 10 : 9}px ${GUTTER}px`, minHeight: narrow ? 56 : 52 }}>
       {!first && <div aria-hidden="true" style={{ position: "absolute", top: 0, right: 0, left: GUTTER + AV + 12, height: 1, background: PAL.line }} />}
       {r.kind === "invite"
         ? <span aria-hidden="true" style={{ ...avatar, border: `1.5px dashed ${PAL.muted}`, background: "transparent", color: PAL.muted }}><EnvelopeIcon /></span>
@@ -261,13 +264,18 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
         <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {r.name}{r.isYou && <span style={{ fontWeight: 400, color: PAL.muted }}> · You</span>}
         </div>
-        <div style={{ fontSize: 12, color: PAL.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          {r.kind === "invite" ? `${r.role === "admin" ? "Admin" : "Member"} · not joined yet` : r.email}
+        <div style={{ fontSize: 12, color: PAL.muted, display: "flex", alignItems: "baseline", gap: 4, minWidth: 0 }}>
+          <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>
+            {r.kind === "invite" ? `${r.role === "admin" ? "Admin" : "Member"} · not joined yet` : r.email}
+          </span>
+          {r.kind === "invite" && canManage(r, isAdmin) && !narrow && (
+            <>
+              <span aria-hidden="true">·</span>
+              <button data-team-resend style={linkBtnStyle} disabled={busy} onClick={() => doResend(r)}>Resend invite</button>
+            </>
+          )}
         </div>
       </div>
-      {r.kind === "invite" && canManage(r, isAdmin) && !narrow && (
-        <button data-team-resend style={{ ...linkBtnStyle }} disabled={busy} onClick={() => doResend(r)}>Resend invite</button>
-      )}
       {canManage(r, isAdmin) && (
         <button data-team-more aria-label={`Options for ${r.name}`} aria-haspopup="menu" disabled={busy} onClick={(e) => openMenu(r, e.currentTarget)} style={moreBtn(narrow)}>⋯</button>
       )}
@@ -277,7 +285,7 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
   const rosterSections = sections.map((s) => (
     <div key={s.id} data-team-section={s.id} style={{ marginTop: SECTION_GAP }}>
       <div style={sectionLabel}>{s.label}</div>
-      <div style={card}>{s.rows.map((r, i) => <Row key={`${r.kind}:${r.id}`} r={r} first={i === 0} />)}</div>
+      <div style={card}>{s.rows.map((r, i) => renderRow(r, i === 0))}</div>
     </div>
   ));
 
@@ -316,7 +324,7 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
 
   const teamMenu = isAdmin && !renaming && (
     <>
-      <button ref={menuRef} data-team-menu aria-label="Team settings" aria-haspopup="menu" style={{ ...moreBtn(narrow), border: `1px solid ${PAL.line}`, borderRadius: RADIUS.md, width: narrow ? 44 : 36 }} disabled={busy} onClick={() => setMenuOpen((o) => !o)}>⋯</button>
+      <button ref={menuRef} data-team-menu aria-label="Team settings" aria-haspopup="menu" style={{ ...moreBtn(narrow), margin: 0, border: `1px solid ${PAL.line}`, borderRadius: RADIUS.md, width: narrow ? 44 : 36 }} disabled={busy} onClick={() => setMenuOpen((o) => !o)}>⋯</button>
       <AnchoredMenu open={menuOpen} onClose={() => setMenuOpen(false)} anchorRef={menuRef} placement="below-right" width={180} zIndex={6000} panelStyle={{ background: "var(--surface-raised)", border: `1px solid ${PAL.line}`, borderRadius: RADIUS.md, boxShadow: "0 12px 32px rgba(0,0,0,0.22)", overflow: "hidden" }}>
         <button style={menuItem(false)} onClick={startRename}>Rename team</button>
         <button style={{ ...menuItem(true), borderBottom: "none" }} onClick={() => { setMenuOpen(false); setConfirmDelete(true); }}>Delete team</button>

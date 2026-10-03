@@ -8,6 +8,7 @@ internals in `/docs/REFERENCE.md` (Document Review persistence section).
 - `DocReview.jsx` — workspace root (lazy chunk). `Stitcher.jsx` — multi-sheet stitch/align.
 - `docEditor/` — Word/text files open in an editable DOCUMENT editor instead of the canvas (NEW-1) — see its own `CLAUDE.md`.
 - `components/ReviewEmptyState.jsx` — nothing-open screen: pick a project → its current set (rows come from the shared sheet-index module under `src/shared/files/`).
+- `components/CloseFileDialog.jsx` + `DocReview.jsx` `requestClose`/`closeNow` — Close (×) on the open file's name (phone: its own "‹ Close" bar) → back to the index; unsaved Word/text edits ask Save / Discard / Cancel, and a project switch over a dirty file asks the same (Cancel navigates back). `lib/unfiled.js` — which rows are "Unfiled" (no project, no Organization) + the honest "where did it save" sentence.
 
 **Key `lib/`**
 - **⛔ `layerVisibilityReads.js` (B503184) — WHAT "HIDDEN" MEANS IN THIS WORKSPACE, and it is NOT the
