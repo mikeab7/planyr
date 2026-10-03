@@ -5270,7 +5270,7 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 ## ⏳ Verify — awaiting live confirmation
 
 
-### B2014992 — Dashboard Locations map pins use the saved origin, so they can sit off irregular parcels (Katz) `[Dashboard / map]` (bug) #dashboard #map #parcel  *(Owner chat block 2026-10-03 (NEW-1); amends B1988816, which fixed the Site tab map and left this path.)*
+### B2014992 — Dashboard Locations map pins use the saved origin, so they can sit off irregular parcels (Katz) `[Dashboard / map]` (bug) #dashboard #site-planner #parcel  *(Owner chat block 2026-10-03 (NEW-1); amends B1988816, which fixed the Site tab map and left this path.)*
 
 `[x]` **Cause (AUDIT-FIRST):** dashboard project rows (`fetchSiteSummaries`) carry only `data->origin`; `mapMarkers` plotted that. On a notched/L-shaped parcel the origin can be outside it.
 `[x]` **Fix:** `dashboard/lib/dashboardParcelFetch.js` reads `site_elements` kind=parcel for just the plotted projects' representative plans (read-only, paged, once per set of plotted plans); `dashboardParcelAnchors.displayPointsByGroup` runs the ONE shared helper `siteAnchorLatLon` (no second placement routine); `mapMarkers(projects, comps, displayPoints)` uses that point, else the saved origin (no-boundary sites, failed fetch, not-yet-loaded). No stored data rewritten; no recompute per render/zoom (derived once per fetch; helper also memoises per ring). Fit-on-load still frames from origins (parcel-scale difference only).
