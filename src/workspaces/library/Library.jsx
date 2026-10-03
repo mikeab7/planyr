@@ -318,6 +318,7 @@ export default function Library({
           // Click a file → open it in Review (cross-workspace). The Shell intent switches the
           // tab AND hands Review the row, which DocReview's docIntent effect consumes on mount.
           onOpenReview={(row) => onOpenReviewInDocReview?.(row)}
+          onOpenHistory={(row) => onOpenReviewInDocReview?.(row, { history: true })}
           onNavigate={onNavigate}
           folderMode={folderMode}
           folderRows={folderRows}
