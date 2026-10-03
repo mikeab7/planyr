@@ -5270,6 +5270,16 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 ## ⏳ Verify — awaiting live confirmation
 
 
+### B2014992 — Dashboard Locations map pins use the saved origin, so they can sit off irregular parcels (Katz) `[Dashboard / map]` (bug) #dashboard #site-planner #parcel  *(Owner chat block 2026-10-03 (NEW-1); amends B1988816, which fixed the Site tab map and left this path.)*
+
+`[x]` **Cause (AUDIT-FIRST):** dashboard project rows (`fetchSiteSummaries`) carry only `data->origin`; `mapMarkers` plotted that. On a notched/L-shaped parcel the origin can be outside it.
+`[x]` **Fix:** `dashboard/lib/dashboardParcelFetch.js` reads `site_elements` kind=parcel for just the plotted projects' representative plans (read-only, paged, once per set of plotted plans); `dashboardParcelAnchors.displayPointsByGroup` runs the ONE shared helper `siteAnchorLatLon` (no second placement routine); `mapMarkers(projects, comps, displayPoints)` uses that point, else the saved origin (no-boundary sites, failed fetch, not-yet-loaded). No stored data rewritten; no recompute per render/zoom (derived once per fetch; helper also memoises per ring). Fit-on-load still frames from origins (parcel-scale difference only).
+- **Other origin-positioned paths audited:** Site tab pins + fly-to (already via helper, B1988816); `MapFinder` frame-origin projections (a coordinate frame, not a pin — correct); `landingView` market clustering and `compSiteMatch`/`overlaySiteMatch` proximity matching (miles-scale, not placement — left); `siteRecordKml` coordinates row (a labelled "Coordinates" figure, left); `SiteReviewModal` lat/lon text (display of the saved origin, left). No mini-map or card thumbnail positions a site from origin.
+- Guard: `test/dashboardParcelAnchors.test.js` (5; notched site's pin == helper point and inside the ring while the origin is outside; no-boundary falls back to origin; red on pre-change `dashboardMapMarkers.js`).
+- Not done: an in-browser screenshot of the dashboard card with a test parcel — the card needs a signed-in Supabase read, which the sandbox cannot do.
+- Verify: live — **V1440080** (`Blocker: auth`). **Stopping rule:** closes on a dated pass of V1440080, or a recurrence filed here.
+- Owner product constraints check: nothing here contradicts a listed constraint.
+
 ### B2015808 — Schedule "Focus" toggles reset every time you come back to the page `[scheduler]` (bug) #scheduler #persistence  *(Owner report 2026-10-02 (NEW-1): "the focus button on the schedule module doesn't hold ... It should just hold whatever the last status was.")*
 
 `[x]` **Cause (AUDIT-FIRST, matches the brief):** the 2026-09-17 fix (`TASK_VIEW_FIELDS` / `stripViewState`) removed `focused` from every cloud write to stop false-conflict `__rev` bumps, and its design note said view-only state should move "per-tab/local" — the strip shipped, the local store never did. `focused` therefore lived only in memory.
