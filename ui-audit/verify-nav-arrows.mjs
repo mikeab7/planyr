@@ -7,7 +7,8 @@
  * the landing is still within [0,max]. Known-good arm: the desktop run must report ZERO chevrons.
  * Run: npx vite --port 5199 & BASE_URL=http://localhost:5199/ node ui-audit/verify-nav-arrows.mjs */
 import { chromium, webkit } from "playwright";
-import { assertMeasurable, pacedWait } from "./lib/tabTiming.mjs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { pacedWait } from "./lib/tabTiming.mjs";
 
 const BASE = process.env.BASE_URL || "http://localhost:5199/";
 const EXEC = process.env.PW_CHROME || undefined;
