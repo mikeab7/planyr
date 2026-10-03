@@ -213,7 +213,7 @@ import { bestMeasurer } from "../../shared/markup/textWrap.js"; // B548818 — m
 import { CROSS_BAND_BEHIND, CROSS_BAND_FRONT } from "./lib/paintOrder.js"; // B548819 — ONE name for the cross-band command
 import { nearestRectPerimeterPoint, calloutCornerRadius } from "../../shared/markup/geometry.js";
 import { calloutDblZone } from "../../shared/markup/hitTest.js";
-import { COUNTIES, COUNTIES_MAP, countyKeyForName, resolveTaxRates, candidateCountiesForPoint, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote, displayFloorForPoint } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, countyKeyForName, resolveTaxRates, candidateCountiesForPoint, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote, displayFloorForPoint, displaySourcesForView, statewideKeysForState, isStatewideLayerUrl, loadCountyPolygons } from "./lib/counties.js";
 import { lookupParcels } from "./lib/parcelQuery.js";
 import {
   resolveLayerUrl,
@@ -227,6 +227,7 @@ import {
 import { filterHealthyCandidates, recordSourceResult, suppressRedundantStatewide } from "./lib/sourceHealth.js";
 import { apprRows, apprAll, apprVal, findAttr, situsAddress, ownerName, parcelPanelRows } from "./lib/appraisal.js";
 import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
+import { createOutlineSet } from "./lib/parcelOutlineSet.js";
 import { geocodeAddress } from "./lib/geocode.js";
 import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackLineStyle, setbackChipStyle, SETBACK_LINE } from "./lib/planStyle.js";
 import { byZAsc, nextZ, sortByZ, Z_GAP, withMissingZ } from "./lib/zOrder.js";
@@ -4970,8 +4971,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const liveIds = idsOf(liveModel), mergedIds = idsOf(merged), tomb = new Set(merged.deletedIds || []);
       const droppedLive = [...liveIds].filter((id) => !mergedIds.has(id) && !tomb.has(id));
       if (droppedLive.length) reportClientEvent("merge-dropped-live", "cross-tab merge dropped a live item with no tombstone", { id: siteId, dropped: droppedLive.slice(0, 5) });
-      setParcels(merged.parcels); setEls(merged.els); setMeasures(merged.measures);
-      setCallouts(merged.callouts); setMarkups(merged.markups); setSheetOverlays(merged.sheetOverlays); setDeletedIds(merged.deletedIds);
+      /* B2024625 — adopt only the collections that ACTUALLY differ. This fold also hears the app's own
+       * synthetic same-tab `storage` event (notifyProjectsChanged, fired after a save), and it used to hand EVERY
+       * collection a fresh array each time — a new `els` identity with identical contents re-ran the whole
+       * dissolved road network (~300 ms on a 58-element plan, ~1.5 s at 4× CPU) right after the first lot was
+       * added. A real cross-tab difference is still adopted, per collection, exactly as before. */
+      const adopt = (key, set) => { if (JSON.stringify(merged[key]) !== JSON.stringify(liveModel[key])) set(merged[key]); };
+      adopt("parcels", setParcels); adopt("els", setEls); adopt("measures", setMeasures);
+      adopt("callouts", setCallouts); adopt("markups", setMarkups); adopt("sheetOverlays", setSheetOverlays); adopt("deletedIds", setDeletedIds);
     };
     window.addEventListener("storage", onStore);
     return () => window.removeEventListener("storage", onStore);
@@ -15947,7 +15954,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [addrBusy, setAddrBusy] = useState(false); // geocode in flight
   const identifyTok = useRef(0);
   const ackRef = useRef(null); // NEW-1 — the click acknowledgement (ring at the cursor) of the identify in flight
-  const outlineLayersRef = useRef({});          // county key -> the lit outline layer for that county, while identify mode is on
+  const outlineLayersRef = useRef(null);        // the outline set (lib/parcelOutlineSet.js) while identify mode is on — also read by the E2E hook below
   const identifyAddedRef = useRef(new Map());   // gisKey -> [parcel ids] added THIS session, so a re-click toggles it off
   // NEW-1 (parcel routing, owner report 2026-08-22 — Jordan/Colorado) — `resolveCountyLayer` used to
   // resolve ONCE against `siteCounty`, the county recorded when the site was CREATED, and cache that
@@ -16238,25 +16245,49 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // selects them) instead of going dark, exactly like the Map view already does.
   useEffect(() => {
     if (!origin) return;
-    const dropOutlines = () => {
-      const map = geoMapRef.current;
-      Object.keys(outlineLayersRef.current).forEach((k) => { try { map?.removeLayer(outlineLayersRef.current[k]); } catch (_) {} });
-      outlineLayersRef.current = {};
-    };
-    if (!identifyMode) { identifyAddedRef.current = new Map(); setIdentAdded(0); dropOutlines(); return; }
+    if (!identifyMode) { identifyAddedRef.current = new Map(); setIdentAdded(0); return; }
     ensureBasemapOn(); // make sure the aerial is on so the lit outlines have context
-    let cancelled = false;
-    const addOutline = (key, url) => {
-      const map = geoMapRef.current;
-      if (cancelled || !url || !map || outlineLayersRef.current[key]) return;
-      try { const fl = makeParcelDisplayLayer(url); fl.addTo(map); outlineLayersRef.current[key] = fl; } catch (_) {}
-    };
-    Object.keys(COUNTIES_MAP).forEach((key) => {
-      resolveOneCountyLayer(key).then((url) => addOutline(key, url)).catch(() => {});
+    /* B2024624 — ONE source per AREA, following the VIEW (lib/parcelOutlineSet.js). This used
+     * to mount every county source in the country (36+ full-viewport images) and the statewide
+     * composite sat under the county's own layer, flashing gold whenever the county image reloaded. */
+    const set = createOutlineSet({
+      getMap: () => geoMapRef.current,
+      boundsOf: (m) => { const b = m.getBounds(); return { south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() }; },
+      resolveUrl: (key) => resolveOneCountyLayer(key),
+      makeLayer: makeParcelDisplayLayer,
+      sourcesForView: displaySourcesForView,
+      statewideKeysForState,
+      stateOf: (k) => COUNTIES_MAP[k] && COUNTIES_MAP[k].state,
+      isStatewideUrl: isStatewideLayerUrl,
     });
-    return () => { cancelled = true; dropOutlines(); };
+    outlineLayersRef.current = set;
+    let map = null, poll = null, tries = 0;
+    const onMoved = () => set.sync();
+    // The aerial may only be mounting now (basemap was off) — wait for the map, then follow its view.
+    const attach = () => {
+      poll = null;
+      const m = geoMapRef.current;
+      if (!m) { if (++tries < 40) poll = setTimeout(attach, 250); return; }
+      map = m; m.on("moveend", onMoved); set.sync();
+    };
+    attach();
+    // Until the county geometry is resident the view answer is bbox-overlap (over-inclusive); re-ask once it lands so a neighbour's layer is released.
+    Promise.resolve(loadCountyPolygons()).then(() => set.sync(), () => {});
+    return () => {
+      if (poll) clearTimeout(poll);
+      if (map) map.off("moveend", onMoved);
+      set.dispose();
+      outlineLayersRef.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identifyMode, origin]);
+  /* B2024624 — read-only diagnostic: which outline sources the click-a-lot mode has mounted. Gated at CALL
+   * time (diagArm.js), writes nothing; the acceptance for "no nationwide fan-out" reads this. */
+  useEffect(() => {
+    const hook = () => (isDiagArmed(window) && outlineLayersRef.current ? { mounted: outlineLayersRef.current.mounted() } : null);
+    window.__plannerParcelOutlines = hook;
+    return () => { if (window.__plannerParcelOutlines === hook) window.__plannerParcelOutlines = null; };
+  }, []);
   // ⛔ NAMES HAVE ONE SOURCE OF TRUTH (shared/names/names.js) — `siteLabel`/`planLabel` are READ
   // from it on every render, never seeded into state (that was B1934528: a copy taken at mount that
   // every other rename door missed, patched once with a storage-event listener and now gone).
