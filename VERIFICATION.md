@@ -176,6 +176,18 @@ Sandbox-proven, both engines: `ui-audit/verify-nav-arrows.mjs` (and `ENGINE=webk
 5. Rotate to landscape and back. **Expect:** arrows update, no tab cut off.
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2043888.
 
+### V1459216 — B2034128: Version history lists, opens read-only and restores earlier saved versions of a document, against the real cloud record `Blocker: auth`
+
+Sandbox-proven: `test/docVersions.test.js` (16) + `ui-audit/verify-version-history.mjs` (14, real Chromium, logged out, in-session versions): three saves → three rows newest first, middle opens labelled "Earlier version — <date>" and not editable, Restore → fourth version + the three originals still listed, restore-the-previous-latest → fifth, phone width fits, PDF shows one version, no download. NOT proven here: the list round-tripping through the signed-in `doc_reviews` record and Drive.
+**Steps** (planyr.io, signed in; use a THROWAWAY copy of a real `.docx` and a `.txt`, never an original; read the served chunk hash in the same observation):
+1. Open the throwaway `.docx` from the Library, type a sentence, Save; change it, Save again. Press **Version history** in the toolbar. **Expect:** three rows, newest first, the top one "Latest"; the two newest show today's date/time, your name and a size; the oldest says "Date not recorded" only if the file was saved before this feature.
+2. Tap **Open (read-only)** on the middle row. **Expect:** page shows the middle save's text, banner "Earlier version — <date>", no Save / formatting / Track changes, typing does nothing; no file downloads.
+3. Tap **Restore this version**. **Expect:** it reopens editable with the middle text; Version history now lists FOUR rows, top one tagged "restored from an earlier version", the three older ones unchanged. Reload and reopen from the Library: still four rows, the latest has the restored text.
+4. Open an earlier row, press **Save a copy**. **Expect:** a NEW file "<name> (copy of <date>).docx" appears in the Library next to the original; the original and its versions are unchanged.
+5. In the Library, press **Versions** on the `.txt` row. **Expect:** Review opens with the history sheet showing; repeat steps 1-3 for the `.txt`.
+6. Press **Versions** on a PDF row. **Expect:** one row and the note that drawings keep one stored file; no Open/Restore.
+7. On an iPhone-width window (or a phone) open the history. **Expect:** a bottom sheet that fits the screen; no sideways scroll.
+- **Stopping rule:** closes on a dated pass of 1-7, or a failed step filed as a recurrence on B2034128.
 ### V1463872 — B2038784: Settings › Team grouped by role, phone + desktop, Resend invite `Blocker: real-data`
 
 Sandbox-proven (seeded session + stateful mocked teams/members/invites): `e2e/team-settings-layout.spec.js` and `test/teamRoster.test.js`. Pending: the real signed-in account with real team data. **Resend must be tried ONLY against a throwaway invite you create for this check — never Ryan's real one.** Note: the app sends no email, so "Invite resent" confirms the invite is still pending and unchanged; it does not deliver mail.

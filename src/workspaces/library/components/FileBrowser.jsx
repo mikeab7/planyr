@@ -88,7 +88,7 @@ export default function FileBrowser({
   // ORG SCOPE (NEW-1) — a real, distinct browse scope alongside a project and cross-project:
   // files filed to the Organization, never mixed with "unfiled" project files.
   orgScope = false,
-  onOpenReview, onNavigate, indexProvider = null,
+  onOpenReview, onOpenHistory, onNavigate, indexProvider = null,
   /* Unified Library (B650 follow-on) — "folder mode": the left column shows the project's REAL
    * folder tree (the `folderRail` node, a FolderTree) instead of the derived category tree, and
    * the file list filters to the selected folder's subtree. Files place by the SAME resolver the
@@ -575,6 +575,8 @@ export default function FileBrowser({
     if (!isPdfFile(f) && !isDocFile(f)) { setPendingDl(f); return; }
     const r = reviews.find((x) => x.id === f.id); onOpenReview?.(r || f);
   };
+  // B2022929 — "Version history": opens the file in Review with the history sheet already showing.
+  const openHistory = (f) => { const r = reviews.find((x) => x.id === f.id); onOpenHistory?.(r || f); };
   // Fetch a stored file's bytes (Drive-first, Supabase-fallback — the same read-back order the
   // Review canvas uses) and save it to disk. Failure is loud (a banner), never a dead click.
   // Only ever called from the pendingDl confirmation's own Download button (B1456896) — never
@@ -1013,6 +1015,8 @@ export default function FileBrowser({
                   )}
                   {pdfRow && spatial && !mapped && <button onClick={() => onOpenReview && open(f)} title="Open to place this drawing on the map"
                     style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Place</button>}
+                  {onOpenHistory && (pdfRow || docRow) && <button onClick={() => openHistory(f)} title="Version history — see earlier saved versions" data-testid="library-version-history"
+                    style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Versions</button>}
                   <button onClick={() => (share[f.id] ? closeShare(f.id) : startShare(f.id))} title="Get a shareable link"
                     style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--border-default)", background: share[f.id] ? "var(--hover-menu)" : "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Share</button>
                   {pendingDel === f.id ? (
