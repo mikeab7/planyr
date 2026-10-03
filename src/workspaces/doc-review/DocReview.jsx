@@ -28,6 +28,11 @@ import { liveProjectIds, openableProjectId } from "../../shared/projects/docProj
 import { classifySource, sourceUnavailableMessage } from "./lib/sourceState.js";
 import { cacheSourceBytes, getSourceBytes } from "./lib/sessionBytes.js";
 import { isPdfName } from "../../shared/files/uploadQueue.js";
+import ReviewEmptyState from "./components/ReviewEmptyState.jsx";
+// Upload links also take Word / plain text; those are handed to the single open path and get today's
+// NON-download fallback (the banner's own Download button) — rendering them is a separate item.
+const REVIEW_ACCEPT = "application/pdf,.pdf,.docx,.doc,.txt,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,text/plain";
+const isWordOrTextName = (n) => /\.(docx|doc|txt)$/i.test(n || "");
 import { onAuthChange } from "../site-planner/lib/auth.js";
 import { listProjects as listLocalProjects } from "../../shared/projects/projects.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
@@ -692,8 +697,15 @@ export default function DocReview({
     // file would otherwise be read via arrayBuffer() and only then fail). Surface the reject on
     // BOTH the inline empty-state hint (err) AND the top banner (openErr) so it shows whether or
     // not a document is already open (B446 — the drop-over-open path renders no empty state).
+    if (file.size && isWordOrTextName(file.name)) {
+      // Not shown on the markup canvas: explain, and offer the explicit Download (never automatic).
+      setErr(""); setOpenErr("");
+      setNonPdfOffer({ name: file.name, blob: file });
+      setRedrop(`“${file.name}” isn’t a PDF, so it can’t be shown on the markup canvas. Download it, or find it anytime in the Library.`);
+      return;
+    }
     if (!file.size || !(/\.pdf$/i.test(file.name) || file.type === "application/pdf")) {
-      const msg = `“${file.name || "that file"}” isn’t a PDF we can open — drop a .pdf file.`;
+      const msg = `“${file.name || "that file"}” isn’t a file we can open here — use a PDF (Word and text files can be downloaded, not marked up).`;
       setErr(msg); setOpenErr(msg); return;
     }
     setBusy(true); setBusyLabel(file.name || "PDF"); setErr(""); setOpenErr(""); // opening a PDF → show the review canvas, with a clear "Opening…" overlay
@@ -2297,8 +2309,8 @@ export default function DocReview({
         accountActive={accountActive}
         toolbarContent={
           <>
-            <button style={chromeBtn()} title={fileName ? "Open another PDF" : "Open a PDF"} onClick={() => fileRef.current?.click()}>{fileName ? "Open…" : "Open PDF…"}</button>
-            <input ref={fileRef} type="file" accept="application/pdf,.pdf" style={{ display: "none" }} onChange={(e) => { openFile(e.target.files?.[0]); e.target.value = ""; }} />
+            <button style={chromeBtn()} title="Open a PDF (Word and text files can be downloaded)" onClick={() => fileRef.current?.click()}>Open…</button>
+            <input ref={fileRef} type="file" accept={REVIEW_ACCEPT} data-testid="review-file-input" style={{ display: "none" }} onChange={(e) => { openFile(e.target.files?.[0]); e.target.value = ""; }} />
             <button style={chromeBtn()} title="Compare two revisions of a drawing — see exactly what changed" onClick={() => compareInputRef.current?.click()}>⇄ Compare…</button>
             <button style={chromeBtn()} onClick={() => setMode("stitch")} title="Stitch multiple sheets into one continuous plan">Stitch ▸</button>
             {/* Reviews (file/save this review) lives in the Row-2 tools row (B360). Its own
@@ -2359,30 +2371,16 @@ export default function DocReview({
       )}
 
       {!pdfRef.current ? (
-        // Browsing moved to the Library workspace, so Review's landing is a clean empty state:
-        // browse the Library for a filed drawing, or drop/open an ad-hoc PDF to mark up here.
+        // NEW-1 — project-aware sheet index (pick a project → its current set). Desktop drag-and-drop onto
+        // this area still opens a file, but no drop copy is shown.
         <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); openFile(e.dataTransfer.files?.[0]); }}
-          style={{ flex: 1, position: "relative", display: "grid", placeItems: "center", color: PAL.muted, fontFamily: "system-ui, sans-serif", textAlign: "center", padding: 24 }}>
-          <div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: PAL.ink, marginBottom: 8 }}>No drawing open</div>
-            <div style={{ fontSize: 13.5, marginBottom: 4 }}>{busy ? "Opening…" : "Open a filed drawing from the Library, or drop a construction PDF to review."}</div>
-            <div style={{ fontSize: 12, marginBottom: 14 }}>Calibrate to scale, measure distance/area/count, redline, and roll up a takeoff.</div>
-            <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
-              <button data-testid="empty-open-library" onClick={() => onShellSwitch?.("library")}
-                style={{ fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 700, cursor: "pointer", borderRadius: RADIUS.md, padding: "7px 14px", border: "1px solid var(--accent-library)", background: "var(--accent-library)", color: "var(--on-accent-library)" }}>
-                🗂 Browse the Library
-              </button>
-              <button onClick={() => fileRef.current?.click()}
-                style={{ fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, padding: "7px 14px", border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)" }}>
-                Open PDF…
-              </button>
-              <button data-testid="empty-compare" onClick={() => { setErr(""); compareInputRef.current?.click(); }}
-                style={{ fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, padding: "7px 14px", border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)" }}>
-                ⇄ Compare revisions…
-              </button>
-            </div>
-            {err && <div style={{ color: "var(--danger-text)", marginTop: 10, fontSize: FONT_SIZE.control }}>{err}</div>}
-          </div>
+          style={{ flex: 1, position: "relative", minHeight: 0, overflowY: "auto", color: PAL.muted, fontFamily: "system-ui, sans-serif" }}>
+          <ReviewEmptyState
+            projectId={projectId} org={org} crossProject={crossProject}
+            busy={busy} err={err}
+            onSelectProject={(id) => onNavigate?.({ projectId: id, cross: false, org: false })}
+            onOpenRow={(row) => openReview(row)}
+            onUpload={() => fileRef.current?.click()} />
           {openingOverlay}
         </div>
       ) : (

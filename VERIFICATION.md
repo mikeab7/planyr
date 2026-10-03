@@ -176,6 +176,17 @@ Sandbox-proven: `test/schedulerViewState.test.js` (7 new, red on pre-change sour
 4. Hard reload (Ctrl+Shift+R). **Expect:** both still focused; Version History shows no new entry and no "Merged in changes…" toast appeared from toggling.
 5. Un-focus one group, reload. **Expect:** it stays expanded; the other stays focused.
 - **Stopping rule:** closes on a dated pass of 1-5, or a failed step filed as a recurrence on B2015808.
+### V1447536 — B2022448: Review's empty screen lists the real project's current set, grouped by discipline, and a tap opens the sheet `Blocker: auth`
+
+Sandbox-proven: `test/reviewEmptyState.test.js` (both states, grouping, latest-revision, Other group, zero/no-project cases), `ui-audit/verify-review-empty-state.mjs` (390 wide: no horizontal overflow, targets ≥ 44). **Not provable here:** real signed-in drawing lists.
+**Steps** (planyr.io, signed in; read the served chunk hash in the same observation; a throwaway project is fine, nothing is written):
+1. Open Review with no drawing and no project selected. **Expect:** "Pick a project" with a card per project, each with a drawing count; no Browse the Library / Open PDF… / Compare revisions buttons on the screen.
+2. Tap a project with drawings. **Expect:** breadcrumb shows it; screen reads "Current set" with Upload file on the right; sheets grouped under CIVIL / STRUCTURAL / etc., latest revision only ("Rev N" right), sheetless files under OTHER by file name.
+3. Tap a sheet row. **Expect:** it opens on the Review canvas (same as clicking it in Library).
+4. Tap Upload file and pick a .docx. **Expect:** no download starts; the amber banner explains and offers its own Download button.
+5. On a phone-width window repeat 1–2. **Expect:** no sideways scroll; rows stack.
+- **Stopping rule:** closes on a dated pass of 1-5, or a failed step filed as a recurrence on B2022448.
+
 ### V1444352 — B2019264: Grand Port Tract 1 shows a red dashed gap line on its west side and the panel names the 31.4 ft miss `Blocker: real-data`
 
 Sandbox-proven: `test/deedGap.test.js` (real Tract 1 + hole calls), `ui-audit/verify-deed-gap.mjs` (seeded copy of the real calls, real browser: gap line, none on the 0.01 ft hole, panel wording, export carries it). **Not provable here:** the owner's real saved plan. Run on a **THROWAWAY duplicate of Grand Port Concept A — never Concept A itself** (CLAUDE.md owner constraint 7), and say exactly what was touched.
