@@ -166,6 +166,15 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1468976 — B2043888: phone tab-strip chevrons page cleanly and clamp at both ends `Blocker: real-device (iOS elastic overscroll — not producible headless)`
+
+Sandbox-proven, both engines: `ui-audit/verify-nav-arrows.mjs` (and `ENGINE=webkit`), 31/31; `test/scrollStrip.test.js`. The original overshoot did NOT reproduce headless, so this is the live confirmation. **Steps** (planyr.io on the iPhone, Map with no project; read the served chunk hash in the same observation):
+1. Swipe the second row (Site, Schedule, …) to the far right by finger, then tap the LEFT arrow. **Expect:** it lands with Site flush against the left edge — no gap beside it — and the left arrow is gone.
+2. Tap the RIGHT arrow until it disappears. **Expect:** the last item sits flush against the right edge, nothing cut off, and the left arrow is showing.
+3. Fling the strip hard past either end and let it settle. **Expect:** the arrows match where it came to rest (none stale).
+4. Select a project (tab set changes) and repeat 1–2. **Expect:** same.
+5. Rotate to landscape and back. **Expect:** arrows update, no tab cut off.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2043888.
 ### V1466448 — B2041360: Site-map hint no longer follows you to the Dashboard (phone) `Blocker: auth`
 
 Sandbox-proven (logged-out, seeded local site, real Chromium): `e2e/mapfinder-notice-leak.spec.js` — 6 workspace destinations, red on the unfixed build, green on the fix. Pending: the owner's phone, signed in on planyr.io. **Steps** (read the served chunk hash, `document.querySelectorAll('script[src]')`, in the same observation):
