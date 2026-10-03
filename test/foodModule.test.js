@@ -890,11 +890,16 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     const map = src("components/FoodMap.jsx");
     expect(map).toMatch(/const FLY_DURATION_SEC = 1\.5;/);
     expect(map).toMatch(/duration: FLY_DURATION_SEC/);
-    // Not a bounds-fit — zoomSnap/zoomDelta stay Leaflet's untouched defaults, and the target
-    // zoom passed to flyTo is always a literal integer (Math.max of two integers), never
+    // Not a bounds-fit — the target zoom passed to flyTo is Math.max(current, literal), never
     // computed from a fitBounds call anywhere in this file.
-    expect(map).not.toMatch(/zoomSnap:/);
-    expect(map).not.toMatch(/zoomDelta:/);
+    // NEW-1 (B2016112, owner-approved free pinch zoom): this block USED to assert there is no
+    // `zoomSnap:`/`zoomDelta:` here. That encoded only "the integer-zoom path wasn't the grey-tile
+    // cause" (B651872), never a requirement for integer zoom. The map now spreads
+    // FREE_ZOOM_OPTIONS (zoomSnap 0, zoomDelta 1) so a pinch lands where the fingers stop; the
+    // grey-tile fixes asserted below (fixed flyTo duration, long-jump setView) are independent
+    // of snap and are re-measured with fractional zoom in ui-audit/verify-free-pinch-zoom.mjs.
+    expect(map).toMatch(/\.\.\.FREE_ZOOM_OPTIONS/);
+    expect(map).not.toMatch(/zoomDelta:/); // the +/- step stays Leaflet's 1 via FREE_ZOOM_OPTIONS, never hand-set here
     expect(map).not.toMatch(/\.fitBounds\(/); // no fitBounds CALL anywhere — the word appears only in this item's own explanatory comment
     expect(map).toMatch(/const targetZoom = Math\.max\(map\.getZoom\(\), FLY_TO_ZOOM\);/);
   });

@@ -25,6 +25,7 @@ import { turnstileEnabled } from "../../../shared/turnstile/turnstileConfig.js";
 const TeamPanel = lazy(() => import("./TeamPanel.jsx"));
 import LazyPanel from "./LazyPanel.jsx";
 import InterfaceSettings from "../../../shared/ui/InterfaceSettings.jsx";
+import { isCoarsePointer } from "../../../shared/ui/coarsePointer.js";
 
 const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", paper: "var(--surface-raised)" };
 const field = { width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 13, border: `1px solid ${PAL.line}`, borderRadius: RADIUS.md, background: "var(--surface-field)", color: PAL.ink, fontFamily: "inherit", marginTop: 6 };
@@ -32,7 +33,9 @@ const btn = (primary) => ({ padding: "9px 14px", fontSize: 13, borderRadius: RAD
 const linkBtn = { border: "none", background: "transparent", color: PAL.accent, cursor: "pointer", fontSize: 12, fontFamily: "inherit", padding: "6px 2px" };
 const s = (v) => (v == null ? "" : String(v)).trim();
 
-function Wrap({ onClose, children, msg, width = 360, title = "Account" }) {
+// NEW-1 (touch keyboard): on a coarse pointer a text field never takes focus just because a panel
+// opened — initial focus goes to the dialog container (keeps the trap + screen-reader announcement).
+function Wrap({ onClose, children, msg, width = 360, title = "Account", focusFirstInput = true }) {
   const panelRef = useRef(null);
   // Modal a11y (B530 + focus management): Escape-to-close, AND — because role=dialog /
   // aria-modal do NOT actually trap focus in browsers — move focus INTO the dialog on
@@ -45,7 +48,10 @@ function Wrap({ onClose, children, msg, width = 360, title = "Account" }) {
       ? Array.from(panel.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')).filter((el) => el.offsetParent !== null)
       : [];
     const init = getFocusable();
-    (init.find((el) => el.tagName === "INPUT") || init[0] || panel)?.focus(); // focus in
+    // Focus in. Typing-first forms (sign-in) focus their first field on desktop only; Settings
+    // never does, and a coarse pointer never does (see isCoarsePointer).
+    const wantInput = focusFirstInput && !isCoarsePointer();
+    (wantInput ? (init.find((el) => el.tagName === "INPUT") || init[0] || panel) : panel)?.focus();
     const onKey = (e) => {
       if (e.key === "Escape") { onClose && onClose(); return; }
       if (e.key !== "Tab" || !panel) return;
@@ -60,7 +66,7 @@ function Wrap({ onClose, children, msg, width = 360, title = "Account" }) {
       document.removeEventListener("keydown", onKey, true);
       try { opener && opener.focus && opener.focus(); } catch (_) { /* opener gone — fine */ }
     };
-  }, [onClose]);
+  }, [onClose, focusFirstInput]);
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 5000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
       <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} style={{ background: PAL.paper, borderRadius: RADIUS.lg, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width, maxWidth: "92vw", maxHeight: "88vh", overflowY: "auto", outline: "none" }}>
@@ -193,7 +199,7 @@ function AccountView({ user, profileApi, initialTab, onClose }) {
   );
 
   return (
-    <Wrap onClose={onClose} msg={msg} width={560} title="Settings">
+    <Wrap onClose={onClose} msg={msg} width={560} title="Settings" focusFirstInput={false}>
       <div className="settings-shell" style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
         <nav className="settings-nav" aria-label="Settings sections">{SECTIONS.map(navBtn)}</nav>
         <div style={{ flex: 1, minWidth: 0 }}>
