@@ -178,6 +178,14 @@ Sandbox-proven: `ui-audit/verify-food-satellite-toggle.mjs` (real Esri tiles, de
 6. Open a place's detail sheet on a phone. **Expect:** the map credit does not paint through the sheet.
 - **Stopping rule:** closes on a dated pass of 1-6, or a failed step filed as a recurrence on B2025280.
 
+### V1440080 — B2014992: every pin on the Dashboard Locations map sits inside its own parcel (Katz in particular) `Blocker: auth`
+
+Sandbox-proven: `test/dashboardParcelAnchors.test.js` (5, red on pre-change source). Pending: the signed-in dashboard against real parcels. Read-only — change nothing.
+**Steps** (planyr.io, signed in; read the served chunk hash in the same observation):
+1. Open the Dashboard and zoom the Locations card in on Katz (Rankin Rd / I-45 N, Houston). **Expect:** its pin is on the large L-shaped parcel, not on the neighbouring lots.
+2. Compare with the Site tab map for the same site. **Expect:** the pin is at the same spot.
+3. Pan across the other pipeline pins. **Expect:** each sits inside its own outline; a site with no boundary still shows at its saved location.
+- **Stopping rule:** closes on a dated pass of 1-3, or a failed step filed as a recurrence on B2014992.
 ### V1440896 — B2015808: each schedule group's Focus holds across leaving the module, switching schedules, and a hard reload `Blocker: auth`
 
 Sandbox-proven: `test/schedulerViewState.test.js` (7 new, red on pre-change source) and the real `/sequence/` page in headless Chromium (focus → reload → still focused → off → reload → still off; store `planar:taskFocus:v1` written/cleared). Pending: the signed-in cloud path (a real merge/refresh from the cloud).
