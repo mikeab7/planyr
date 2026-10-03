@@ -17,7 +17,7 @@ import { PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL } from "./lib/ma
 import { tileCacheLimit } from "./lib/tileBudget.js";
 import { boundTileCache, capTileCache, armBlankTileHeal } from "./lib/tileLifecycle.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
-import { BASEMAPS, FINDER_BASEMAP_CHOICES } from "./lib/basemaps.js";
+import { BASEMAPS, FINDER_BASEMAP_CHOICES, ROAD_NAMES_TILES, SITE_PLAN_BASEMAP } from "../../shared/basemaps/basemaps.js";
 // B427410 (×2) — the ONE gate for the "Road names" overlay below, shared with LayerPanel's
 // dormant note so the map's opacity switch and the panel's explanation can't disagree.
 import { PLACE_NAMES_MIN_ZOOM } from "./lib/layerZoomGate.js";
@@ -200,7 +200,7 @@ const MAP_PIN_SHADOW = "0 1px 5px rgba(0,0,0,0.45)"; // design-exempt: no shadow
  * — do not relabel it back to anything implying place/city names without switching the source
  * too. City / town names are a SEPARATE row ("City names", NEW-2 2026-09-29), drawn by our own
  * canvas layer from our own dataset: lib/placeNamesLayer.js, gated by lib/placeNamesGate.js. */
-const LABELS_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}";
+const LABELS_TILES = ROAD_NAMES_TILES.url; // NEW-1 — defined once in shared/basemaps (Food reuses it)
 
 /* B427410 (×3) — THE DEFAULT OPACITY, MEASURED, NOT COPIED FROM THE TIER MODEL. The old fixed
  * 0.4 was never derived for this layer — it matches `layerWeight.js`'s "context" tier ceiling,
@@ -213,7 +213,7 @@ const LABELS_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/Refer
  * the tier ceiling below does not transfer to this layer. Session-only default; the user's own
  * slider (`opacityControl`, wired below) is the rest of the answer — "let me adjust the opacity"
  * was the owner's own fallback ask. */
-const PLACE_NAMES_DEFAULT_OPACITY = 0.85;
+const PLACE_NAMES_DEFAULT_OPACITY = ROAD_NAMES_TILES.defaultOpacity;
 
 /* NEW-MAPCTRL-3 — the narrow-mode full-width search bar's own footprint (`top:8, height:42`
  * where it's rendered below) plus an 8px gap. The bottom-left banner slot (error toast, share
@@ -691,7 +691,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     const c = at || (mapRef.current ? mapRef.current.getCenter() : null);
     setFallbackOffer(c ? { at: { lat: c.lat, lon: c.lon != null ? c.lon : c.lng } } : null);
   };
-  const [basemap, setBasemap] = useState("esri");
+  const [basemap, setBasemap] = useState(SITE_PLAN_BASEMAP.imageryKey);
   const [labels, setLabels] = useState(true);
   // NEW-2 (2026-09-29) — the "City names" row (own canvas layer, not a tile overlay). On by default.
   const [cityNames, setCityNames] = useState(true);

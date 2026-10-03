@@ -15,6 +15,15 @@
   },
   "exemptions": [
     {
+      "id": "B2022448-review-project-cards",
+      "date": "2026-10-03",
+      "surfaces": [
+        "Doc Review (empty state)"
+      ],
+      "count": 1,
+      "reason": "NEW-1 (owner-approved mockup 'Review empty state options', option C) replaced Review's three same-shaped empty-state buttons with a project-aware sheet index. Its primary control is the full-width tappable PROJECT CARD (name over drawing count, thumb-height, bordered, RADIUS.md) — a genuinely new, deliberate shape the owner asked for by name, distinct from the screen's one text link ('Upload a file without a project'/'Upload file'), which is a borderless link-style button, not a card. The old buttons' single shared signature no longer exists on this surface, so the surface's own budget of 1 now covers the text link and the card is the one added shape. Both use only design tokens (RADIUS, FONT_SIZE, CONTROL_H.touch, SPACE); a code fix cannot remove this signature without dropping the card the owner's design calls for, or restyling the link as a card, which would be the wrong reason to change either."
+    },
+    {
       "id": "B1401952-no-location-flag",
       "date": "2026-09-09",
       "surfaces": [

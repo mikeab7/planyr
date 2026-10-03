@@ -73,7 +73,7 @@ import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, a
 // NEW-1 — the per-site "Show above plan" twin of the four above: which GIS layers this site had
 // lifted over the site elements. Its own sparse map, so nothing about layerOverrides changes.
 import { sanitizeLayerAbove, aboveFromOverlays, applyAboveOverrides, aboveSig } from "./lib/layerPrefs.js";
-import { BASEMAPS } from "./lib/basemaps.js";
+import { BASEMAPS, SITE_PLAN_BASEMAP } from "../../shared/basemaps/basemaps.js";
 import {
   ppfToZoom, zoomToPpf, exactContainerPoint,
   basemapWrapPoint, registrationShift, sanitizeShift, tileNwFeet, registrationLayoutMayHaveChanged,
@@ -2732,7 +2732,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Aerial basemap SOURCE (B693): "off" | "esri" | "usgs" — a three-way control in the
   // Layers panel's Basemap group (was a bare on/off checkbox). Located sites default to
   // the Esri aerial, exactly like the old boolean defaulted on.
-  const [basemapSrc, setBasemapSrc] = useState(origin ? "esri" : "off");
+  const [basemapSrc, setBasemapSrc] = useState(origin ? SITE_PLAN_BASEMAP.imageryKey : "off");
   const basemapOn = basemapSrc !== "off" && !!origin;
   const [basemapStatus, setBasemapStatus] = useState(null); // "loading" | "loaded" | "failed" | null — the Basemap row's status dot
   /* NEW-1 / NEW-2 — THE ZOOM THE BACKDROP MAP HAS ACTUALLY COMMITTED TO, which is the zoom every
