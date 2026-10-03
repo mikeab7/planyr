@@ -1,0 +1,158 @@
+/* Shared aerial basemap SOURCE registry (B693) — the single list of free aerial
+ * imagery sources, used by BOTH surfaces: the map finder's Imagery dropdown and the
+ * planner's Basemap control (Off / Aerial / USGS in the shared Layers panel), so the
+ * two never offer different choices. Moved here from MapFinder.jsx when the planner
+ * gained a source picker; the planner's old single-source GEO_BASEMAP constant was
+ * retired into BASEMAPS.esri (same tiles/ceiling/attribution).
+ *
+ * Free aerial sources (no API key). Both are ArcGIS MapServers that support
+ * both XYZ tiles (for the map) and `export` (for the planner underlay capture).
+ * `maxNative` = each provider's native imagery ceiling (Esri z19 ≈ 0.3 m/px; USGS
+ * z16). This is REQUIRED per source and must not be dropped in a refactor: past its
+ * ceiling a provider returns the gray "Map data not yet available" placeholder as an
+ * HTTP 200 (not an error), so Leaflet's error-tile fallback never fires and the whole
+ * view goes blank. The consuming imagery layers clamp fetches to this ceiling (minus
+ * the retina offset) and let maxZoom upscale the deepest real tile beyond it. Any new
+ * source MUST carry its own `maxNative`. (B220 — recurrence of B182)
+ */
+export const BASEMAPS = {
+  esri: {
+    label: "Esri",
+    tiles: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    export: "https://server.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/export",
+    maxNative: 19,
+    attr: "Imagery &copy; Esri, Maxar",
+  },
+  usgs: {
+    label: "USGS",
+    tiles: "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}",
+    export: "https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/export",
+    maxNative: 16,
+    attr: "Imagery &copy; USGS",
+  },
+};
+
+/* The planner Basemap control's choices, in display order. "off" is a planner-only
+ * state (no backdrop — the drafting paper shows); the map finder always has a base. */
+export const PLANNER_BASEMAP_CHOICES = [
+  { key: "off", label: "Off", title: "No aerial — plain drafting background" },
+  { key: "esri", label: "Aerial", title: "Esri World Imagery — sharpest at deep zoom (native to z19)" },
+  { key: "usgs", label: "USGS", title: "USGS imagery — federal source; tops out around neighborhood zoom (native to z16)" },
+];
+
+/* B427410 — the MAP FINDER's basemap choices, and they are DERIVED FROM `BASEMAPS` rather than
+ * written out again.
+ *
+ * Owner: "do I really need one that just says imagery? Should that not maybe be a background
+ * layer itself, so I can choose between Esri or whatever else?" — he is right, and the planner
+ * had already answered it: its aerial source is a row inside the Layers panel's Base & terrain
+ * group. The finder was the surface left behind, with a separate `Imagery` dropdown in its own
+ * strip ABOVE the layer list, divided off from the group the choice belongs to. Passing these
+ * through `LayerPanel`'s existing `basemap` prop is what folds it in, so the two surfaces now
+ * offer the same choice in the same place.
+ *
+ * ⛔ DERIVED, not a second literal. The planner's list is hand-written because it carries an
+ * "off" state that is not a basemap at all (no backdrop — the drafting paper shows). The finder
+ * has no such state: its map always has a base, and an "off" there would just be a blank screen.
+ * Everything else is exactly the registry, so mapping it is what guarantees a source added to
+ * `BASEMAPS` appears on the finder without anyone remembering to add it here too — which is the
+ * mistake the hand-written dropdown was one edit away from making. */
+export const FINDER_BASEMAP_CHOICES = Object.entries(BASEMAPS).map(([key, b]) => ({
+  key,
+  label: b.label,
+  title: b.attr ? `${b.label} imagery — ${b.attr.replace(/&copy;/g, "©")}` : b.label,
+}));
+
+/* ───────────────────────── NEW-1 (Food map) — the SITE PLAN MAP, defined once ─────────────────────────
+ *
+ * Owner: "we should default to the site plan module map for the food module, and a good hybrid
+ * option as an option." One source of truth: the map the Site Plan module opens on is DEFINED HERE
+ * and every surface that wants "the Site Plan map" imports this object — the map finder and the
+ * planner canvas read their default aerial source from `SITE_PLAN_BASEMAP.imageryKey`, the finder
+ * reads its road-names layer from `ROAD_NAMES_TILES`, and /food builds its default from the whole
+ * `SITE_PLAN_BASEMAP`. Change it here and all of them follow. (`test/basemapsShared.test.js` fails
+ * if any of them re-inlines a copy.)
+ *
+ * ⛔ This file lives in `src/shared/`, NOT in site-planner: /food may import nothing from
+ * `src/workspaces/site-planner/` (BUNDLE ISOLATION — see the food CLAUDE.md), and a basemap
+ * registry is exactly the kind of tiny, dependency-free thing that belongs on neutral ground. */
+
+/* Esri's TRANSPORTATION reference layer — road, highway and rail names + shields. No city or
+ * landmark names (those are `PLACE_NAMES_TILES` below). */
+export const ROAD_NAMES_TILES = {
+  url: "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}",
+  maxNative: 19,
+  /* B427410 (×3) — measured: at 0.4 a label's glyph and its white halo fade together into a grey
+   * smudge over busy aerial; at 0.85 it reads as crisp as 1.0. */
+  defaultOpacity: 0.85,
+};
+
+/* Esri's BOUNDARIES-AND-PLACES reference layer — city / neighbourhood / landmark names, drawn
+ * with their own halo. Used by the Hybrid basemap. Same host, same key-less terms as the rest. */
+export const PLACE_NAMES_TILES = {
+  url: "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}",
+  maxNative: 19,
+};
+
+const LABELS_ATTR = "Labels &copy; Esri";
+
+/* The Site Plan module's own map: Esri World Imagery aerial + the road-names overlay at the
+ * finder's default opacity. `imageryKey` names the BASEMAPS entry both Site Plan surfaces default to. */
+export const SITE_PLAN_BASEMAP = {
+  key: "siteplan",
+  label: "Site Plan",
+  title: "The same map the Site Plan module opens on — aerial imagery with road names",
+  imageryKey: "esri",
+  imagery: BASEMAPS.esri,
+  roadNames: { ...ROAD_NAMES_TILES, opacity: ROAD_NAMES_TILES.defaultOpacity },
+  placeNames: null,
+};
+
+/* HYBRID: the same imagery with road names AND place/street names drawn on top at full strength,
+ * so it stays readable at neighbourhood zoom (restaurant-finding zoom). Plain "satellite" was
+ * folded into this and the default — it added nothing over either. */
+export const HYBRID_BASEMAP = {
+  key: "hybrid",
+  label: "Hybrid",
+  title: "Aerial imagery with roads and place names drawn crisp on top",
+  imageryKey: "esri",
+  imagery: BASEMAPS.esri,
+  roadNames: { ...ROAD_NAMES_TILES, opacity: 1 },
+  placeNames: { ...PLACE_NAMES_TILES, opacity: 1 },
+};
+
+/* The choices /food offers, in display order. The FIRST is the default. */
+export const SITE_PLAN_BASEMAP_CHOICES = [SITE_PLAN_BASEMAP, HYBRID_BASEMAP];
+
+/* Resolve a stored/unknown key to a choice — anything unrecognised falls back to the default. */
+export function resolveBasemapChoice(key) {
+  return SITE_PLAN_BASEMAP_CHOICES.find((c) => c.key === key) || SITE_PLAN_BASEMAP;
+}
+
+/* The ordered tile layers a choice is made of (bottom → top), each ready to hand to Leaflet:
+ * `{ id, url, opts }`. Pure, so it is unit-tested without a browser. The B220 rule holds for the
+ * imagery (`maxNativeZoom` = the source's own ceiling — past it Esri answers HTTP 200 with a grey
+ * placeholder), and no entry ever carries a `subdomains` key (a single ArcGIS host has none; an
+ * explicit `subdomains: undefined` crashed /food once — B634981). */
+export function basemapTileLayers(choice) {
+  const c = choice || SITE_PLAN_BASEMAP;
+  const out = [{
+    id: "imagery", url: c.imagery.tiles,
+    opts: { maxZoom: 21, maxNativeZoom: c.imagery.maxNative, attribution: c.imagery.attr, zIndex: 1 },
+  }];
+  if (c.roadNames) {
+    out.push({ id: "roads", url: c.roadNames.url,
+      opts: { maxZoom: 21, maxNativeZoom: c.roadNames.maxNative, opacity: c.roadNames.opacity, zIndex: 2 } });
+  }
+  if (c.placeNames) {
+    out.push({ id: "places", url: c.placeNames.url,
+      opts: { maxZoom: 21, maxNativeZoom: c.placeNames.maxNative, opacity: c.placeNames.opacity, zIndex: 3 } });
+  }
+  return out;
+}
+
+/* The credit line for a choice, composed from the same registry entries (never re-typed). */
+export function basemapAttribution(choice) {
+  const c = choice || SITE_PLAN_BASEMAP;
+  return c.roadNames || c.placeNames ? `${c.imagery.attr} · ${LABELS_ATTR}` : c.imagery.attr;
+}
