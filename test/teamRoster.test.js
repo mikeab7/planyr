@@ -98,6 +98,10 @@ describe("TeamPanel source guards", () => {
     expect(src).not.toMatch(/Make member|Make admin/);
     expect(src).not.toMatch(/type="checkbox"/);
   });
+  it("no component is defined inside TeamPanel's render body (remounting detached the ⋯ menu anchor)", () => {
+    const body = src.slice(src.indexOf("export default function TeamPanel"));
+    expect(body).not.toMatch(/\n\s{2}const [A-Z]\w* = \(\{/);
+  });
   it("Resend goes through resendInvite, never a second invite-row insert", () => {
     expect(src).toMatch(/resendInvite\(sel, iv\.email, iv\.role\)/);
   });
