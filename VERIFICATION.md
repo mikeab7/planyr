@@ -166,6 +166,15 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1466448 — B2041360: Site-map hint no longer follows you to the Dashboard (phone) `Blocker: auth`
+
+Sandbox-proven (logged-out, seeded local site, real Chromium): `e2e/mapfinder-notice-leak.spec.js` — 6 workspace destinations, red on the unfixed build, green on the fix. Pending: the owner's phone, signed in on planyr.io. **Steps** (read the served chunk hash, `document.querySelectorAll('script[src]')`, in the same observation):
+1. Phone: Site → the map view → tap **+ Select parcels**. **Expect:** the dark hint "Click any lot on the map to add it (＋)…" appears bottom-centre.
+2. Without turning Select parcels off, open the avatar/wordmark and go to the **Dashboard**. **Expect:** the hint is gone; nothing about the Site map appears over Jump back in / Pipeline / Comps.
+3. Repeat from the Dashboard to Schedule, Library, Notes, Spreadsheet. **Expect:** no Site-map hint on any of them.
+4. Return to Site → map. **Expect:** the hint is back only if Select parcels is still on (the mode is kept on purpose).
+- **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B2041360.
+
 ### V1463872 — B2038784: Settings › Team grouped by role, phone + desktop, Resend invite `Blocker: real-data`
 
 Sandbox-proven (seeded session + stateful mocked teams/members/invites): `e2e/team-settings-layout.spec.js` and `test/teamRoster.test.js`. Pending: the real signed-in account with real team data. **Resend must be tried ONLY against a throwaway invite you create for this check — never Ryan's real one.** Note: the app sends no email, so "Invite resent" confirms the invite is still pending and unchanged; it does not deliver mail.

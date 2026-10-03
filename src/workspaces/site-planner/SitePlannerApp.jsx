@@ -1300,7 +1300,7 @@ export default function App({
       </div>
       {/* NEW-1 — outside both mode divs so a status-change undo offered on the map survives
           switching into a plan before the toast's own timer runs out. */}
-      <ToastHost toasts={statusToasts} onDismiss={dismissStatusToast} />
+      {isActive && <ToastHost toasts={statusToasts} onDismiss={dismissStatusToast} />}
       {cloudLoading && (
         <div style={{ position: "fixed", inset: 0, zIndex: 4500, background: "rgba(20,18,15,0.35)", display: "grid", placeItems: "center", pointerEvents: "none" }}>
           <div style={{ background: "rgba(25,22,19,0.92)", color: "#ece7db", borderRadius: 10, padding: "10px 18px", fontSize: 13, fontWeight: 600, fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 28px rgba(0,0,0,0.3)" }}>Loading your sites…</div>
