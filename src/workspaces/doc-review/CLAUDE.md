@@ -6,7 +6,7 @@ internals in `/docs/REFERENCE.md` (Document Review persistence section).
 
 **Entry points**
 - `DocReview.jsx` — workspace root (lazy chunk). `Stitcher.jsx` — multi-sheet stitch/align.
-- `components/ReviewEmptyState.jsx` — nothing-open screen: pick a project → its current set (`shared/files/sheetIndex.js`).
+- `components/ReviewEmptyState.jsx` — nothing-open screen: pick a project → its current set (rows come from the shared sheet-index module under `src/shared/files/`).
 
 **Key `lib/`**
 - **⛔ `layerVisibilityReads.js` (B503184) — WHAT "HIDDEN" MEANS IN THIS WORKSPACE, and it is NOT the
