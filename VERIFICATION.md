@@ -179,6 +179,15 @@ Sandbox-proven: `test/docEditorDocx.test.js` (20) + `test/docEditorOpenSave.test
 7. On an iPhone-width window (or a phone), open the same `.docx`. **Expect:** the toolbar wraps, the Review pane sits under the page, and the page never scrolls sideways.
 - **Stopping rule:** closes on a dated pass of 1-7, or a failed step filed as a recurrence on B2022928.
 
+### V1446336 — B2021248: opening Settings, and switching between its sections, never raises the phone keyboard `Blocker: auth`
+
+Sandbox-proven: `e2e/touch-no-autofocus-account.spec.js` (touch viewport, red on pre-change source) and `test/accountNoAutofocus.test.js`. Pending: the signed-in Settings sections (sign-in is CORS-blocked here).
+**Steps** (planyr.io on an iPhone, signed in; read the served chunk hash in the same observation):
+1. Avatar menu → Settings. **Expect:** Profile shows, no field focused, no keyboard.
+2. Tap Team, Account & security, Interface in turn, then Profile again. **Expect:** no keyboard at any point.
+3. Tap the first-name field. **Expect:** the keyboard appears only now.
+4. Close, sign out, tap Sign in. **Expect:** no keyboard until a field is tapped.
+- **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B2021248.
 ### V1450368 — B2025280: /food opens on the Site Plan map, Hybrid is crisp, and pins stay legible on both `Blocker: auth`
 
 Sandbox-proven: `ui-audit/verify-food-satellite-toggle.mjs` (real Esri tiles, desktop + phone), `test/basemapsShared.test.js`, `test/foodModule.test.js`. **Not provable here:** pin legibility over the new imagery with the owner's real logged places (the sandbox cannot sign in, so no places draw).
@@ -190,6 +199,18 @@ Sandbox-proven: `ui-audit/verify-food-satellite-toggle.mjs` (real Esri tiles, de
 5. Search for a restaurant far away (e.g. another city), pick it. **Expect:** the map fills with tiles on arrival, no blank/grey map until you pan.
 6. Open a place's detail sheet on a phone. **Expect:** the map credit does not paint through the sheet.
 - **Stopping rule:** closes on a dated pass of 1-6, or a failed step filed as a recurrence on B2025280.
+
+### V1441200 — B2016112: pinching Map Finder on a real phone settles exactly where the fingers stop `Blocker: real-data`
+
+Sandbox-proven (dev server, visible tab, real CDP two-finger touch events, all three maps): `ui-audit/verify-free-pinch-zoom.mjs` + `test/freePinchZoom.test.js`. Pending: a real finger on real glass.
+**Steps** (planyr.io on his phone, Map Finder / `#/map`; read the served chunk hash in the same observation):
+1. Pinch out slowly and stop mid-way. **Expect:** the map stays exactly where the fingers stopped — scale bar reads an in-between distance, not a jump to the next 100/200/500 step.
+2. Pinch back in and stop between levels. **Expect:** same, no snap on release.
+3. Double-tap the map. **Expect:** exactly one full level in.
+4. Tap the +/− buttons. **Expect:** exactly one full level each tap.
+5. Zoom in past where parcels / place names used to appear. **Expect:** they appear at the same point as before; imagery is slightly soft between levels (accepted).
+- **Stopping rule:** closes on a dated pass of 1-5, or a failed step filed as a recurrence on B2016112.
+
 
 ### V1440080 — B2014992: every pin on the Dashboard Locations map sits inside its own parcel (Katz in particular) `Blocker: auth`
 
