@@ -22,6 +22,8 @@ import { listRecents } from "../../../shared/recents/recentDocs.js";
 import { listReviews } from "../../doc-review/lib/reviewStore.js";
 import { listProjects as listLocalProjects } from "../../../shared/projects/projects.js";
 import { liveProjectIds } from "../../../shared/projects/docProjectLiveness.js";
+import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
+import { RADIUS } from "../../../shared/ui/radius.js";
 import { unfiledRows } from "../../doc-review/lib/unfiled.js";
 import { fileReviewIntoProject } from "../lib/fileIntoProject.js";
 
@@ -97,13 +99,13 @@ export function UnfiledCard({ doc, projects = [], busy = false, onOpen, onMove }
         style={{ flex: "1 1 160px", minWidth: 0, display: "flex", alignItems: "center", gap: 9, textAlign: "left", border: "none", background: "transparent", padding: 0, fontFamily: "inherit", cursor: "pointer", color: "inherit" }}>
         <span aria-hidden style={{ flex: "none", color: "var(--accent-library-text)" }}>📄</span>
         <span style={{ minWidth: 0 }}>
-          <span style={{ display: "block", fontSize: 12.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
-          <span style={{ display: "block", fontSize: 10.5, color: "var(--text-tertiary)", marginTop: 2 }}>{[doc.discipline, fmtWhen(Date.parse(doc.updated_at || "") || 0)].filter(Boolean).join(" · ")}</span>
+          <span style={{ display: "block", fontSize: FONT_SIZE.emphasis, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
+          <span style={{ display: "block", fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", marginTop: 2 }}>{[doc.discipline, fmtWhen(Date.parse(doc.updated_at || "") || 0)].filter(Boolean).join(" · ")}</span>
         </span>
       </button>
       <select aria-label={`Move “${title}” to a project`} data-testid="unfiled-move" disabled={busy || !projects.length} value=""
         onChange={(e) => { if (e.target.value) onMove?.(e.target.value); }}
-        style={{ flex: "0 1 170px", minWidth: 0, maxWidth: "100%", minHeight: 30, fontSize: 12, fontFamily: "inherit", borderRadius: 7, border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-primary)" }}>
+        style={{ flex: "0 1 170px", minWidth: 0, maxWidth: "100%", minHeight: 30, fontSize: FONT_SIZE.control, fontFamily: "inherit", borderRadius: RADIUS.sm, border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-primary)" }}>
         <option value="">{busy ? "Moving…" : projects.length ? "Move to project…" : "No projects yet"}</option>
         {projects.map((p) => <option key={p.id} value={p.id}>{p.name || "Untitled project"}</option>)}
       </select>
@@ -270,9 +272,9 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
         {(unfiled.length > 0 || moveNote) && (
           <>
             <SectionHead>Unfiled</SectionHead>
-            {moveNote && <div role={moveNote.ok ? "status" : "alert"} data-testid="unfiled-note" style={{ fontSize: 12, margin: "0 2px 8px", color: moveNote.ok ? "var(--text-secondary)" : "var(--danger-text)" }}>{moveNote.text}</div>}
+            {moveNote && <div role={moveNote.ok ? "status" : "alert"} data-testid="unfiled-note" style={{ fontSize: FONT_SIZE.control, margin: "0 2px 8px", color: moveNote.ok ? "var(--text-secondary)" : "var(--danger-text)" }}>{moveNote.text}</div>}
             {unfiled.length > 0 && (
-              <div style={{ fontSize: 11.5, color: "var(--text-secondary)", margin: "0 2px 8px" }}>
+              <div style={{ fontSize: FONT_SIZE.control, color: "var(--text-secondary)", margin: "0 2px 8px" }}>
                 Saved from Review with no project selected. Open one, or move it into a project.
               </div>
             )}

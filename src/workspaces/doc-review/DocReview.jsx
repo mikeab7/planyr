@@ -2505,10 +2505,10 @@ export default function DocReview({
       {narrow && fileName && (docFile || pdfRef.current) && mode === "review" && (
         <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "0 8px", minHeight: 44, borderBottom: `1px solid ${PAL.line}`, background: "var(--surface-raised)" }}>
           <button type="button" data-testid="review-close-file" onClick={requestClose} aria-label={`Close ${fileName}`}
-            style={{ flex: "none", minHeight: 44, minWidth: 44, padding: "0 10px", display: "inline-flex", alignItems: "center", gap: 6, background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 700, color: PAL.ink }}>
+            style={{ flex: "none", minHeight: 44, minWidth: 44, padding: "0 10px", display: "inline-flex", alignItems: "center", gap: 6, background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.emphasis, fontWeight: 700, color: PAL.ink }}>
             <span aria-hidden="true" style={{ fontSize: 18, lineHeight: 1 }}>‹</span>Close
           </button>
-          <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, color: PAL.muted }}>{fileName}</span>
+          <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: FONT_SIZE.control, color: PAL.muted }}>{fileName}</span>
         </div>
       )}
 
