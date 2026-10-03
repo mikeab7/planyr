@@ -178,6 +178,17 @@ Sandbox-proven: `test/docVersions.test.js` (16) + `ui-audit/verify-version-histo
 6. Press **Versions** on a PDF row. **Expect:** one row and the note that drawings keep one stored file; no Open/Restore.
 7. On an iPhone-width window (or a phone) open the history. **Expect:** a bottom sheet that fits the screen; no sideways scroll.
 - **Stopping rule:** closes on a dated pass of 1-7, or a failed step filed as a recurrence on B2034128.
+### V1463872 — B2038784: Settings › Team grouped by role, phone + desktop, Resend invite `Blocker: real-data`
+
+Sandbox-proven (seeded session + stateful mocked teams/members/invites): `e2e/team-settings-layout.spec.js` and `test/teamRoster.test.js`. Pending: the real signed-in account with real team data. **Resend must be tried ONLY against a throwaway invite you create for this check — never Ryan's real one.** Note: the app sends no email, so "Invite resent" confirms the invite is still pending and unchanged; it does not deliver mail.
+**Steps** (planyr.io signed in as admin of HIP Houston; read the served chunk hash in the same observation):
+1. Phone: Avatar menu → Team. **Expect:** "‹ Settings" left, "HIP Houston" centred, × right; three equal tiles (Members / Projects / + Invite) with centred contents; no paragraph text anywhere.
+2. **Expect:** ADMINS, MEMBERS and (only if invites exist) INVITED cards, labels lined up with the avatars; your own row says "· You" and has no ⋯; both "Michael Butler" accounts show different emails.
+3. SHARING: **Expect** "Auto-share new site plans" with a switch and an (i); tapping (i) shows the old explanation; the switch's right edge lines up with the ⋯ buttons.
+4. Tap ⋯ on a throwaway member (or one you can safely change). **Expect:** a bottom sheet with their name/email, Admin ✓/Member, then red "Remove from team". Switch their role — they move between sections. Switch back.
+5. Invite a throwaway address (+ Invite). **Expect:** it appears under INVITED as "Member · not joined yet". ⋯ → Resend invite. **Expect:** "Invite resent" and still exactly one row for that address. ⋯ → Cancel invite. **Expect:** the row (and the INVITED section, if empty) disappears.
+6. Desktop window: **Expect** the left nav kept, pane header with name + "N members · N shared projects", orange "+ Invite", team ⋯ (Rename/Delete work); ⋯ on a row opens a dropdown; invited rows show an inline "Resend invite" link.
+- **Stopping rule:** closes on a dated pass of 1-6, or a failed step filed as a recurrence on B2038784.
 
 ### V1457120 — B2032032: phone Settings drills in (menu → section), Profile fields are labelled, Save is only active when something changed `Blocker: auth`
 
