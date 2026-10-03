@@ -41,13 +41,13 @@ const page = await ctx.newPage();
 await assertMeasurable(page, "verify-doc-editor");
 const downloads = []; page.on("download", (d) => downloads.push(d.suggestedFilename()));
 const errors = []; page.on("pageerror", (e) => errors.push(String(e)));
-const open = async (path) => { await page.setInputFiles('input[type="file"]', path); };
+const open = async (path) => { await page.setInputFiles('[data-testid="review-file-input"]', path); };
 const lastSaved = async () => page.evaluate(async () => { const b = window.__saved[window.__saved.length - 1]; if (!b) return null; return { type: b.type, b64: await new Promise((r) => { const fr = new FileReader(); fr.onload = () => r(String(fr.result).split(",")[1]); fr.readAsDataURL(b); }) }; });
 const asBuf = (s) => Buffer.from(s.b64, "base64");
 
 try {
   await page.goto(BASE + "#markup", { waitUntil: "load" });
-  await page.waitForSelector('input[type="file"]', { state: "attached", timeout: 15000 });
+  await page.waitForSelector('[data-testid="review-file-input"]', { state: "attached", timeout: 15000 });
 
   /* ---- known-good arm: a PDF still opens on the drawing canvas ---- */
   await open(PDF);
