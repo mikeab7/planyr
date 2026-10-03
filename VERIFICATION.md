@@ -166,6 +166,16 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1468976 — B2043888: phone tab-strip chevrons page cleanly and clamp at both ends `Blocker: real-device (iOS elastic overscroll — not producible headless)`
+
+Sandbox-proven, both engines: `ui-audit/verify-nav-arrows.mjs` (and `ENGINE=webkit`), 31/31; `test/scrollStrip.test.js`. The original overshoot did NOT reproduce headless, so this is the live confirmation. **Steps** (planyr.io on the iPhone, Map with no project; read the served chunk hash in the same observation):
+1. Swipe the second row (Site, Schedule, …) to the far right by finger, then tap the LEFT arrow. **Expect:** it lands with Site flush against the left edge — no gap beside it — and the left arrow is gone.
+2. Tap the RIGHT arrow until it disappears. **Expect:** the last item sits flush against the right edge, nothing cut off, and the left arrow is showing.
+3. Fling the strip hard past either end and let it settle. **Expect:** the arrows match where it came to rest (none stale).
+4. Select a project (tab set changes) and repeat 1–2. **Expect:** same.
+5. Rotate to landscape and back. **Expect:** arrows update, no tab cut off.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2043888.
+
 ### V1463872 — B2038784: Settings › Team grouped by role, phone + desktop, Resend invite `Blocker: real-data`
 
 Sandbox-proven (seeded session + stateful mocked teams/members/invites): `e2e/team-settings-layout.spec.js` and `test/teamRoster.test.js`. Pending: the real signed-in account with real team data. **Resend must be tried ONLY against a throwaway invite you create for this check — never Ryan's real one.** Note: the app sends no email, so "Invite resent" confirms the invite is still pending and unchanged; it does not deliver mail.

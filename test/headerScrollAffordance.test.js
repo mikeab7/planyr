@@ -47,8 +47,9 @@ describe("ScrollChevron reads the SAME edge state the fade already computes", ()
   });
 
   it("a tap actually pages the row — a real scrollBy, not a decorative click handler", () => {
-    expect(header).toContain("function pageScrollRow(ref, dir) {");
-    expect(header).toMatch(/el\.scrollBy\(\{ left: dir \* el\.clientWidth \* 0\.72, behavior: "smooth" \}\)/);
+    // NAV-ARROWS — paging is the shared absolute/clamped helper (scrollStrip.js), not a relative scrollBy.
+    expect(header).toContain("function pageScrollRow(ref, dir) { pageStrip(ref.current, dir); }");
+    expect(header).not.toMatch(/\.scrollBy\(/);
   });
 
   it("MODULE-SCOPE-COMPONENTS — ScrollChevron is defined at module scope, not inside AppHeader's render body", () => {
@@ -58,7 +59,7 @@ describe("ScrollChevron reads the SAME edge state the fade already computes", ()
   });
 
   it("the chevron itself is a real, focusable, labeled control (built on the shared IconButton, so NEW-1's tap-target floor applies to it too)", () => {
-    const fn = header.slice(header.indexOf("function ScrollChevron("), header.indexOf("const pageScrollRow") === -1 ? header.indexOf("// A \"page\" is") : header.indexOf("const pageScrollRow"));
+    const fn = header.slice(header.indexOf("function ScrollChevron("), header.indexOf("function pageScrollRow("));
     expect(fn).toContain("<IconButton");
     expect(fn).toMatch(/aria-label=\{side === "left" \? "Scroll left" : "Scroll right"\}/);
   });

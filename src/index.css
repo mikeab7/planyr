@@ -743,7 +743,8 @@ input[type="range"] { height: 18px; }
 
 /* Phone header rows scroll sideways but hide the bar (V11) — the swipe is the affordance,
    a 10px bar under a 35px row would eat the chrome. Content stays fully scroll-reachable. */
-.no-hscrollbar { scrollbar-width: none; -ms-overflow-style: none; -webkit-overflow-scrolling: touch; }
+/* NAV-ARROWS — contain: a strip that rubber-bands past its end leaves a blank gap beside the first/last tab while the chevron logic already says "at the end". */
+.no-hscrollbar { scrollbar-width: none; -ms-overflow-style: none; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
 .no-hscrollbar::-webkit-scrollbar { height: 0; width: 0; display: none; }
 
 /* B1343200 (NEW-1) — a control's VISIBLE size can stay compact; its TAP target does not. The
