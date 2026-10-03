@@ -16,7 +16,8 @@
  * (decodable PNGs served for every tile request), no flat grey; the zoom-gate notice flips at
  * MIN_PIN_ZOOM exactly as before. */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
-import { assertMeasurable, pacedWait } from "./lib/tabTiming.mjs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { pacedWait } from "./lib/tabTiming.mjs";
 import { installStubSupabase } from "./lib/stubSupabase.mjs";
 import { fakeTilePng, parseTileUrl } from "./lib/fakeTile.mjs";
 const { chromium } = pw;
