@@ -166,6 +166,19 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1448016 — B2022928: a Word file opened in Review keeps tracked changes + comments through Save, in the Library and in Microsoft Word `Blocker: auth`
+
+Sandbox-proven: `test/docEditorDocx.test.js` (20) + `test/docEditorOpenSave.test.js` (12) + `ui-audit/verify-doc-editor.mjs` (29, real Chromium, logged out: open fixture, real typing, Track Changes, comment/reply/resolve, accept one change, find/replace, Save → the bytes handed to the Library path re-parsed and checked, .txt byte-exact, .doc → new .docx, 0 downloads, 390-wide no sideways scroll, PDF still on the canvas). Pending: everything that needs a signed-in account and the real Library, plus Microsoft Word itself (**not available in the sandbox; its LibreOffice has no Writer module**).
+**Steps** (planyr.io, signed in; use a THROWAWAY copy of a real Word file, never the original; read the served chunk hash in the same observation):
+1. In the Library, upload a `.docx` that already has one tracked insertion, one tracked deletion and one comment (made in Word). Click its row. **Expect:** it opens in Review as an editable document (no drawing canvas, no measure tools), with the insertion, deletion and comment all showing with author and time, and no download starts.
+2. Turn Track changes on, type a sentence, delete a word, add a comment on a selection, reply to the existing comment, accept the existing insertion, press Save. **Expect:** "Saved to the Library." and the header cloud badge settles to saved.
+3. Switch to the Library and back (or hard reload) and open the same row. **Expect:** the typed sentence (as a tracked insertion), the struck-through word, both comments + the reply, and the accepted change as plain text — the saved state, not the original.
+4. Open a `.txt` from the Library, edit a line, Save, reopen. **Expect:** the edit is there; formatting controls are hidden; no download.
+5. Open a `.doc` from the Library, press Save. **Expect:** a one-line note says a new `.docx` is created; a NEW file named `<name>.docx` appears in the Library next to the original `.doc`, which is still there; the editor shows the new `.docx`.
+6. On a machine with Microsoft Word, download the step-2 file from the Library (explicit download) and open it in Word. **Expect:** Word shows the tracked insertion/deletion with the right authors in Review > Track Changes and all comments, replies and the resolved state in the comments pane, with no "unreadable content" repair prompt. Then make a tracked change and a comment IN Word, save, replace the Library file, open it here. **Expect:** both appear in the editor.
+7. On an iPhone-width window (or a phone), open the same `.docx`. **Expect:** the toolbar wraps, the Review pane sits under the page, and the page never scrolls sideways.
+- **Stopping rule:** closes on a dated pass of 1-7, or a failed step filed as a recurrence on B2022928.
+
 ### V1440896 — B2015808: each schedule group's Focus holds across leaving the module, switching schedules, and a hard reload `Blocker: auth`
 
 Sandbox-proven: `test/schedulerViewState.test.js` (7 new, red on pre-change source) and the real `/sequence/` page in headless Chromium (focus → reload → still focused → off → reload → still off; store `planar:taskFocus:v1` written/cleared). Pending: the signed-in cloud path (a real merge/refresh from the cloud).

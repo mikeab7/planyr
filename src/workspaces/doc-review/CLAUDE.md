@@ -6,6 +6,7 @@ internals in `/docs/REFERENCE.md` (Document Review persistence section).
 
 **Entry points**
 - `DocReview.jsx` — workspace root (lazy chunk). `Stitcher.jsx` — multi-sheet stitch/align.
+- `docEditor/` — Word/text files open in an editable DOCUMENT editor instead of the canvas (NEW-1) — see its own `CLAUDE.md`.
 
 **Key `lib/`**
 - **⛔ `layerVisibilityReads.js` (B503184) — WHAT "HIDDEN" MEANS IN THIS WORKSPACE, and it is NOT the

@@ -17,6 +17,7 @@
  * Counts + the tree are metadata-only queries (listReviews + listFileFacts); file bytes
  * load only when a file is opened. Reuses the existing reviewStore / uploadQueue plumbing.
  */
+import { docKindOf } from "../../doc-review/docEditor/docKind.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchProjects, fetchReviews, fetchFileFacts, fileNewReview, refileReview,
@@ -568,8 +569,10 @@ export default function FileBrowser({
   // Legacy files carry no sourceFile — they were always PDFs, so an empty sourceFile reads as
   // "PDF" (opens in Review, as before).
   const isPdfFile = (f) => !f.sourceFile || isPdfName(f.sourceFile);
+  // NEW-1: Word and text files open in Review's document editor, so they are no longer a download-only dead end.
+  const isDocFile = (f) => !!f.sourceFile && !!docKindOf(f.sourceFile);
   const open = (f) => {
-    if (!isPdfFile(f)) { setPendingDl(f); return; }
+    if (!isPdfFile(f) && !isDocFile(f)) { setPendingDl(f); return; }
     const r = reviews.find((x) => x.id === f.id); onOpenReview?.(r || f);
   };
   // Fetch a stored file's bytes (Drive-first, Supabase-fallback — the same read-back order the
@@ -976,11 +979,12 @@ export default function FileBrowser({
             // download (B1456896 — never fires the download itself), and a small type chip (its
             // extension) makes clear it's not a drawing you mark up.
             const pdfRow = isPdfFile(f);
+            const docRow = isDocFile(f);
             const ext = (String(f.sourceFile || "").match(/\.([a-z0-9]+)$/i) || [])[1];
             return (
               <div key={f.id} style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", marginBottom: 6, background: "var(--surface-raised)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                  <button onClick={() => open(f)} title={pdfRow ? "Open to review / mark up" : "Not a PDF — click for a Download option"}
+                  <button onClick={() => open(f)} title={pdfRow ? "Open to review / mark up" : docRow ? "Open in the document editor" : "Not a PDF — click for a Download option"}
                     style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 9, textAlign: "left", border: "none", background: "transparent", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
                     <FileTypeIcon kind={f.kind} />
                     <span style={{ minWidth: 0 }}>
@@ -989,7 +993,7 @@ export default function FileBrowser({
                       </span>
                       <span style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
                         <Badge title="Subcategory (discipline)">{subcategoryOf(f)}</Badge>
-                        {!pdfRow && ext && <Badge tone="old" title="File type — click the row for a Download option">{ext.toUpperCase()}</Badge>}
+                        {!pdfRow && ext && <Badge tone="old" title={docRow ? "File type — opens in the document editor" : "File type — click the row for a Download option"}>{ext.toUpperCase()}</Badge>}
                         {f.sheetNumber && <Badge title="Sheet number / range read off the title block">{f.sheetNumber}</Badge>}
                         {st === FILE_STATES.SUPERSEDED && <Badge tone="old" title="Replaced by a newer revision">superseded</Badge>}
                         {needs && <Badge title="Couldn’t classify confidently">needs filing</Badge>}
