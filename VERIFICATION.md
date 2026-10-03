@@ -166,6 +166,17 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1441200 — B2016112: pinching Map Finder on a real phone settles exactly where the fingers stop `Blocker: real-data`
+
+Sandbox-proven (dev server, visible tab, real CDP two-finger touch events, all three maps): `ui-audit/verify-free-pinch-zoom.mjs` + `test/freePinchZoom.test.js`. Pending: a real finger on real glass.
+**Steps** (planyr.io on his phone, Map Finder / `#/map`; read the served chunk hash in the same observation):
+1. Pinch out slowly and stop mid-way. **Expect:** the map stays exactly where the fingers stopped — scale bar reads an in-between distance, not a jump to the next 100/200/500 step.
+2. Pinch back in and stop between levels. **Expect:** same, no snap on release.
+3. Double-tap the map. **Expect:** exactly one full level in.
+4. Tap the +/− buttons. **Expect:** exactly one full level each tap.
+5. Zoom in past where parcels / place names used to appear. **Expect:** they appear at the same point as before; imagery is slightly soft between levels (accepted).
+- **Stopping rule:** closes on a dated pass of 1-5, or a failed step filed as a recurrence on B2016112.
+
 ### V1440896 — B2015808: each schedule group's Focus holds across leaving the module, switching schedules, and a hard reload `Blocker: auth`
 
 Sandbox-proven: `test/schedulerViewState.test.js` (7 new, red on pre-change source) and the real `/sequence/` page in headless Chromium (focus → reload → still focused → off → reload → still off; store `planar:taskFocus:v1` written/cleared). Pending: the signed-in cloud path (a real merge/refresh from the cloud).

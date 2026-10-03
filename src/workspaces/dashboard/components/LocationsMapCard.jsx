@@ -65,6 +65,7 @@ import { resolveLabelVisibility } from "../lib/labelCollide.js";
 // sources, used by BOTH surfaces"). Importing the entry rather than writing a second literal is
 // what keeps this card's imagery the same provider as the rest of the app by construction.
 import { BASEMAPS } from "../../site-planner/lib/basemaps.js";
+import { FREE_ZOOM_OPTIONS, attachFreeWheelZoom } from "../../../shared/map/freePinchZoom.js";
 
 const MAX_ZOOM = 19;
 const SINGLE_POINT_ZOOM = 13;
@@ -233,8 +234,10 @@ export default function LocationsMapCard({ projects, comps, onOpenProject, onFix
     const first = allMarkers[0];
     const map = L.map(hostRef.current, {
       center: [first.lat, first.lon], zoom: SINGLE_POINT_ZOOM,
-      zoomControl: true, fadeAnimation: false, trackResize: false,
+      zoomControl: true, fadeAnimation: false, trackResize: false, ...FREE_ZOOM_OPTIONS,
     });
+    const detachFreeWheel = attachFreeWheelZoom(L, map); // NEW-1
+    if (typeof window !== "undefined" && window.__PLANYR_E2E) window.__locationsMap = map;
     layerRef.current = L.layerGroup([]).addTo(map);
     mapRef.current = map;
 
@@ -262,7 +265,7 @@ export default function LocationsMapCard({ projects, comps, onOpenProject, onFix
     map.on("moveend", onViewSettled);
     return () => {
       map.off("zoomend", onViewSettled); map.off("moveend", onViewSettled);
-      resizeObserver?.disconnect(); map.remove(); mapRef.current = null; layerRef.current = null;
+      resizeObserver?.disconnect(); detachFreeWheel(); if (window.__locationsMap === map) window.__locationsMap = null; map.remove(); mapRef.current = null; layerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasMap]);

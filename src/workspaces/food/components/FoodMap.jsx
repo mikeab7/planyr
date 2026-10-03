@@ -298,6 +298,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { colorForRating } from "../lib/ratingColor.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
+import { FREE_ZOOM_OPTIONS, attachFreeWheelZoom } from "../../../shared/map/freePinchZoom.js";
 
 // ⛔ B811520 — CARTO STARTED WATERMARKING KEYLESS VOYAGER TILES ("API KEY REQUIRED", stamped
 // diagonally across the map, owner screenshot 2026-08-27). The tiles still return HTTP 200 —
@@ -558,8 +559,10 @@ export default function FoodMap({
     // this always-top-anchored layout — see its comment for the full mechanism and measurement.
     const map = L.map(hostRef.current, {
       center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM, zoomControl: true, fadeAnimation: false, attributionControl: false,
-      trackResize: false,
+      trackResize: false, ...FREE_ZOOM_OPTIONS,
     });
+    const detachFreeWheel = attachFreeWheelZoom(L, map); // NEW-1
+    if (typeof window !== "undefined" && window.__PLANYR_E2E) window.__foodMap = map;
     const canvasRenderer = L.canvas();
     layerRef.current = L.layerGroup([], { renderer: canvasRenderer }).addTo(map);
     mapRef.current = map;
@@ -598,7 +601,7 @@ export default function FoodMap({
       resizeObserver.observe(hostRef.current);
     }
 
-    return () => { resizeObserver?.disconnect(); map.remove(); mapRef.current = null; };
+    return () => { resizeObserver?.disconnect(); detachFreeWheel(); if (window.__foodMap === map) window.__foodMap = null; map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
