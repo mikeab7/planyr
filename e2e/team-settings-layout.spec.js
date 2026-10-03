@@ -88,6 +88,27 @@ async function openTeam(page, phone) {
   return dlg;
 }
 
+
+/* A menu is REALLY open only if it has a real position and is opaque — Playwright's toBeVisible()
+ * passes for left:-9999px / opacity:0 (the B2038784 amendment: row ⋯ menus were "visible" to the
+ * old assertions while unreachable on the live site). */
+async function expectMenuReallyOpen(page, loc) {
+  await expect(loc).toBeVisible();
+  const st = await loc.evaluate((el) => {
+    const m = el.closest(".menu") || el; const cs = getComputedStyle(m); const r = m.getBoundingClientRect();
+    return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, opacity: parseFloat(cs.opacity), pe: cs.pointerEvents, vw: innerWidth, vh: innerHeight };
+  });
+  expect(st.opacity).toBe(1);
+  expect(st.pe).not.toBe("none");
+  expect(st.left).toBeGreaterThanOrEqual(0);
+  expect(st.top).toBeGreaterThanOrEqual(0);
+  expect(st.right).toBeLessThanOrEqual(st.vw);
+  expect(st.bottom).toBeLessThanOrEqual(st.vh);
+  // and it can actually be hit: the centre of its first item answers to the menu, not to something else
+  const hit = await loc.first().evaluate((el) => { const r = el.getBoundingClientRect(); const h = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return !!h && el.contains(h); });
+  expect(hit).toBe(true);
+}
+
 const box = async (loc) => (await loc.boundingBox());
 
 test.describe("phone", () => {
@@ -181,6 +202,7 @@ test.describe("phone", () => {
     const sheet = page.locator("[data-team-sheet]");
     await expect(sheet).toBeVisible();
     await expect(sheet).toContainText("ana@planyr.test");
+    await expectMenuReallyOpen(page, sheet.locator('[data-team-menu-item="Admin"]'));
     if (SHOTS) await page.screenshot({ path: "ui-audit/screens/team-settings-phone-sheet.png" });
     await sheet.locator('[data-team-menu-item="Admin"]').click();
     await expect(dlg.locator('[data-team-section="admins"] [data-team-row]')).toHaveCount(3);
@@ -228,7 +250,7 @@ test.describe("desktop", () => {
     await expect(inv.locator("[data-team-resend]")).toHaveText("Resend invite");
     if (SHOTS) await page.screenshot({ path: "ui-audit/screens/team-settings-desktop.png" });
     await dlg.locator('[data-team-row="member"]').filter({ hasText: "Ana Ruiz" }).locator("[data-team-more]").click();
-    await expect(page.locator("[data-team-dropdown]")).toBeVisible();
+    await expectMenuReallyOpen(page, page.locator('[data-team-dropdown] [data-team-menu-item="Admin"]'));
     await expect(page.locator("[data-team-sheet]")).toHaveCount(0);
     await expect(page.locator('[data-team-dropdown] [data-team-menu-item="Member"]')).toContainText("✓");
     if (SHOTS) await page.screenshot({ path: "ui-audit/screens/team-settings-desktop-menu.png" });
@@ -243,5 +265,45 @@ test.describe("desktop", () => {
     const was = await sw.getAttribute("aria-checked");
     await sw.click();
     await expect(sw).not.toHaveAttribute("aria-checked", was);
+  });
+});
+
+test.describe("desktop, short window (520 tall)", () => {
+  test.use({ viewport: { width: 1280, height: 520 } });
+
+  test("row menus are really open, header ⋯ inside the pane, invite email not cut", async ({ page }) => {
+    test.setTimeout(90_000);
+    const st = freshState();
+    st.invites = [{ id: "inv-1", email: "ryan.baumgartner@hillwood.com", role: "member", created_at: "2026-10-01T00:00:00Z", claimed_at: null }];
+    await mock(page, st);
+    const dlg = await openTeam(page, false);
+    // Header ⋯ sits fully inside the pane: its right edge is within the cards' right edge.
+    const cardR = (await box(dlg.locator('[data-team-section="admins"] > div').nth(1))).x + (await box(dlg.locator('[data-team-section="admins"] > div').nth(1))).width;
+    const hb = await box(dlg.locator("[data-team-menu]"));
+    expect(hb.x + hb.width).toBeLessThanOrEqual(cardR + 0.5);
+    expect(Math.abs((hb.x + hb.width) - cardR)).toBeLessThan(2);
+    // Invite row: the whole email shows, and Resend sits on the second line after the status.
+    const inv = dlg.locator('[data-team-row="invite"]');
+    const nameEl = inv.locator("div > div").first();
+    const cut = await nameEl.evaluate((e) => e.scrollWidth > e.clientWidth);
+    expect(cut).toBe(false);
+    await expect(inv).toContainText("ryan.baumgartner@hillwood.com");
+    const second = inv.locator("[data-team-resend]");
+    await expect(second).toHaveText("Resend invite");
+    const nb = await box(nameEl), rb = await box(second);
+    expect(rb.y).toBeGreaterThan(nb.y + nb.height - 2); // below the email line
+    expect(await second.evaluate((e) => getComputedStyle(e).color)).toBe(await dlg.locator("[data-team-invite]").evaluate((e) => getComputedStyle(e).backgroundColor));
+    if (SHOTS) await page.screenshot({ path: "ui-audit/screens/team-settings-fix-desktop-short.png" });
+    // Every row ⋯ — member, admin, invite — opens a REAL, reachable menu.
+    for (const row of [dlg.locator('[data-team-row="member"]').filter({ hasText: "Ana Ruiz" }), dlg.locator('[data-team-row="member"]').filter({ hasText: "mb.one@planyr.test" }), inv]) {
+      await row.locator("[data-team-more]").click();
+      await expectMenuReallyOpen(page, page.locator("[data-team-dropdown] [data-team-menu-item]").first());
+      if (SHOTS && (await row.getAttribute("data-team-row")) === "invite") await page.screenshot({ path: "ui-audit/screens/team-settings-fix-desktop-short-menu.png" });
+      await page.keyboard.press("Escape");
+    }
+    // …and the role change reachable through it works end to end.
+    await dlg.locator('[data-team-row="member"]').filter({ hasText: "Ana Ruiz" }).locator("[data-team-more]").click();
+    await page.locator('[data-team-dropdown] [data-team-menu-item="Admin"]').click();
+    await expect(dlg.locator('[data-team-section="members"]')).toHaveCount(0);
   });
 });
