@@ -35,7 +35,7 @@ const linkBtn = { border: "none", background: "transparent", color: PAL.accent, 
 
 // NEW-1 (touch keyboard): on a coarse pointer a text field never takes focus just because a panel
 // opened — initial focus goes to the dialog container (keeps the trap + screen-reader announcement).
-function Wrap({ onClose, children, msg, width = 360, title = "Account", focusFirstInput = true, back = null }) {
+function Wrap({ onClose, children, msg, width = 360, title = "Account", focusFirstInput = true, back = null, closeIcon = false }) {
   const panelRef = useRef(null);
   // Modal a11y (B530 + focus management): Escape-to-close, AND — because role=dialog /
   // aria-modal do NOT actually trap focus in browsers — move focus INTO the dialog on
@@ -71,11 +71,14 @@ function Wrap({ onClose, children, msg, width = 360, title = "Account", focusFir
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 5000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
       <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} style={{ background: PAL.paper, borderRadius: RADIUS.lg, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width, maxWidth: "92vw", maxHeight: "88vh", overflowY: "auto", outline: "none" }}>
         {back ? (
-          /* Drilled-in section page (phone Settings): "‹ Settings" back link left, section title centred. */
-          <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: 8, marginBottom: 12 }}>
+          /* Drilled-in section page (phone Settings): "‹ Settings" back link left, section title centred.
+             Equal-width side slots keep the title optically centred; a long title truncates. */
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(72px,1fr) minmax(0,auto) minmax(72px,1fr)", alignItems: "center", gap: 8, marginBottom: 12 }}>
             <button data-settings-back onClick={back.onClick} style={{ ...linkBtn, justifySelf: "start", fontSize: 13, fontWeight: 600, padding: "6px 2px" }}>‹ {back.label}</button>
-            <h2 style={{ margin: 0, fontSize: 16, color: PAL.ink, textAlign: "center" }}>{title}</h2>
-            <button onClick={onClose} aria-label="Close" style={{ ...btn(false), padding: "4px 10px", fontSize: 12, justifySelf: "end" }}>Close <span aria-hidden="true">✕</span></button>
+            <h2 data-settings-title style={{ margin: 0, fontSize: 16, color: PAL.ink, textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{title}</h2>
+            {closeIcon
+              ? <button onClick={onClose} aria-label="Close" data-settings-close style={{ justifySelf: "end", width: 44, height: 44, margin: "-6px -10px -6px 0", display: "grid", placeItems: "center", background: "transparent", border: "none", color: PAL.ink, fontSize: 18, cursor: "pointer", fontFamily: "inherit" }}><span aria-hidden="true">✕</span></button>
+              : <button onClick={onClose} aria-label="Close" style={{ ...btn(false), padding: "4px 10px", fontSize: 12, justifySelf: "end" }}>Close <span aria-hidden="true">✕</span></button>}
           </div>
         ) : (
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
@@ -185,6 +188,7 @@ function AccountView({ user, profileApi, initialTab, onClose }) {
   const [pw, setPw] = useState("");
   const [msg, setMsg] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [teamTitle, setTeamTitle] = useState(null); // Team page: the team name becomes the phone page title
   const [confirm, setConfirm] = useState(null); // null | "back" | "close" — the Discard changes? prompt
   const touched = useRef(false); // don't clobber in-progress edits on a background reload
 
@@ -296,7 +300,7 @@ function AccountView({ user, profileApi, initialTab, onClose }) {
 
   const sectionBody = tab === "team" ? (
     <LazyPanel name="The Team section" minHeight={260} label="Loading team…">
-      <TeamPanel user={user} setMsg={setMsg} />
+      <TeamPanel user={user} setMsg={setMsg} onTitle={setTeamTitle} />
     </LazyPanel>
   ) : tab === "profile" ? (
     <div data-settings-panel="profile">
@@ -376,7 +380,7 @@ function AccountView({ user, profileApi, initialTab, onClose }) {
   // ── Phone, section page: back link + centred title, the section only. No menu on it.
   if (narrow) {
     return (
-      <Wrap onClose={requestClose} msg={msg} width={560} title={section.label} focusFirstInput={false} back={{ label: "Settings", onClick: goBack }}>
+      <Wrap onClose={requestClose} msg={msg} width={560} title={(tab === "team" && teamTitle) || section.label} closeIcon={tab === "team"} focusFirstInput={false} back={{ label: "Settings", onClick: goBack }}>
         <div data-settings-page={section.id}>
           {discardPrompt}
           {sectionBody}
