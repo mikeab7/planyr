@@ -23,7 +23,7 @@ describe("Shell.jsx — org-capable modules come from route.js, never a re-imple
   });
 
   it("openReviewInDocReview resolves org/projectId via reviewOpenTarget, never re-deriving it inline", () => {
-    const start = SRC.indexOf("const openReviewInDocReview = (row, { page } = {}) => {");
+    const start = SRC.indexOf("const openReviewInDocReview = (row, { page, history } = {}) => {");
     const end = SRC.indexOf("\n  };", start);
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);

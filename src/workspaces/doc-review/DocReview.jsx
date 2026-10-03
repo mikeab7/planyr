@@ -29,6 +29,8 @@ import { classifySource, sourceUnavailableMessage } from "./lib/sourceState.js";
 import { cacheSourceBytes, getSourceBytes } from "./lib/sessionBytes.js";
 import { isPdfName } from "../../shared/files/uploadQueue.js";
 import { docKindOf } from "./docEditor/docKind.js";
+import { versionList, saveVersion, restoreVersion, packSource, copyFileName, earlierVersionLabel, versionDateLabel } from "./lib/docVersions.js";
+import VersionHistorySheet from "./components/VersionHistorySheet.jsx";
 import { getUser } from "../site-planner/lib/auth.js";
 import { displayNameFor } from "../../shared/profile/useProfile.js";
 // The document editor (Word / text files) is its own lazy chunk — drawing review never pays for it.
@@ -425,6 +427,10 @@ export default function DocReview({
   const docSaveRef = useRef(null); // the editor's own Save, resolves true once the bytes reached the Library
   const [docNotice, setDocNotice] = useState(""); // one-line outcome carried across the open that follows a "save as new"
   const [docAuthor, setDocAuthor] = useState("Reviewer");
+  const [historyOpen, setHistoryOpen] = useState(false); // B2022929 — the "Version history" sheet
+  const [histBusy, setHistBusy] = useState(false);
+  const [histMsg, setHistMsg] = useState(""); const [histErr, setHistErr] = useState("");
+  const [docDirty, setDocDirty] = useState(false);
   const [priorSources, setPriorSources] = useState([]); // earlier saved versions of this file — kept, never overwritten
   useEffect(() => { let live = true; getUser().then((u) => { if (live && u) setDocAuthor(displayNameFor(null, u) || "Reviewer"); }).catch(() => {}); return () => { live = false; }; }, []);
   const [openErr, setOpenErr] = useState("");      // visible banner when an open no-ops / loadReview returns null (NEW-1) — so it can't fail silently
@@ -753,7 +759,7 @@ export default function DocReview({
       const base = { srcId, name: file.name || "document.pdf", size: file.size };
       sourceRef.current = base;
       cacheSourceBytes(srcId, file); // B448: keep the dropped bytes so a switch/reload mid-upload never loses the backdrop
-      setSource({ ...base, storageKey: null, driveKey: null, oversize: false });
+      setSource({ ...base, ...(keepId ? {} : { savedAt: Date.now(), savedBy: docAuthor }), storageKey: null, driveKey: null, oversize: false });
       // Store Drive-first, Supabase-fallback (B322). The source stays keyless in state until
       // this resolves, and buildSnapshot won't persist a keyless source, so a quick reload
       // mid-upload can't strand the backdrop with an unfetchable pointer (B323).
@@ -794,7 +800,7 @@ export default function DocReview({
     setPdfDoc(null); setNumPages(0); setPage(1); setMarkups([]); setCalByPage({}); setCalInfo({}); setSheetMeta({}); setOpenGroups({}); setDraft(null); clearSelection(); clearHistory();
     setPriorSources([]); setDocNotice("");
     setFileName(file.name);
-    setSource({ ...base, storageKey: null, driveKey: null, oversize: false });
+    setSource({ ...base, savedAt: Date.now(), savedBy: docAuthor, storageKey: null, driveKey: null, oversize: false });
     setDocFile({ blob: file, name: file.name, kind, key: srcId });
     const filing = filingNow(); adoptFiling(filing);
     storeSource(srcId, file, { projectId: filing.projectId, discipline: meta.discipline, fileName: file.name, folderId: meta.folderId || null, orgScope: filing.orgScope }).then(async (r) => {
@@ -802,14 +808,20 @@ export default function DocReview({
       if (!r.ok && !r.oversize && (await cloudReady())) { const m = `Couldn’t save this file to the cloud. ${r.driveError || "Check your connection and drop it again."}`; setErr(m); setOpenErr(m); }
     }).catch(() => {});
   };
+  const docScope = () => ({ projectId: meta.orgScope ? null : meta.projectId, discipline: meta.discipline || "Other", folderId: meta.folderId || null, orgScope: meta.orgScope === true });
+  // The one place a saved/restored version lands in state: it becomes `source`, the entry it replaced joins `priorSources`.
+  const commitVersion = (res) => {
+    setPriorSources(res.prior); setSource(res.source);
+    sourceRef.current = { srcId: res.source.srcId, name: res.source.name };
+    if (!res.local) setTimeout(() => { try { saveNow && saveNow(); } catch (_) {} }, 80);
+  };
   // Called by the editor's Save. mode "replace": a NEW stored version of this file (the old bytes are kept
   // in the record, never overwritten). mode "new": a separate Library file (.doc → .docx, .txt → Word copy).
-  const saveDocFile = async ({ blob, name, mode }) => {
+  const saveDocFile = async ({ blob, name, mode, restoredFrom = null }) => {
     const ready = await cloudReady();
-    // A SAVE files where the open review is filed (its meta), never where the route happens to point — a file opened
-    // unfiled from the Library must not have its new version slip into whichever project is in the URL.
-    const filing = { projectId: meta.orgScope === true ? null : (meta.projectId || null), project: meta.project || "", orgScope: meta.orgScope === true };
-    const scope = { projectId: filing.projectId, discipline: meta.discipline || "Other", folderId: meta.folderId || null, orgScope: filing.orgScope };
+    const scope = docScope();
+    // The banner names where the file is FILED (the open review's own meta), never where the URL points.
+    const filing = { projectId: scope.projectId || null, project: meta.project || "", orgScope: scope.orgScope === true };
     const where = savedPlace(filing);
     if (mode === "new") {
       if (!ready) return { ok: false, error: "Sign in to save a new file to the Library." };
@@ -821,17 +833,62 @@ export default function DocReview({
     }
     const old = source;
     if (!old) return { ok: false, error: "There is no file to save to." };
-    const srcId = newSourceId();
-    cacheSourceBytes(srcId, blob);
-    if (!ready) { setSource({ ...old, srcId, size: blob.size, storageKey: null, driveKey: null }); return { ok: true, local: true }; }
-    const r = await storeSource(srcId, blob, { ...scope, fileName: old.name });
-    if (!r.ok) return { ok: false, error: r.driveError || "Couldn’t upload the saved file. Your edits are still here — try again." };
-    if (isStoredSource(old)) setPriorSources((p) => [{ srcId: old.srcId, name: old.name, size: old.size || 0, storageKey: old.storageKey || null, driveKey: old.driveKey || null, oversize: false, savedAt: Date.now() }, ...p]);
-    setSource({ srcId, name: old.name, size: blob.size, storageKey: null, driveKey: r.driveKey || null, oversize: false });
-    sourceRef.current = { srcId, name: old.name };
-    setTimeout(() => { try { saveNow && saveNow(); } catch (_) {} }, 80);
-    return { ok: true, where };
+    const io = { newId: newSourceId, cache: cacheSourceBytes, store: (id, b) => storeSource(id, b, { ...scope, fileName: old.name }) };
+    const res = await saveVersion({ source: old, prior: priorSources, blob, io, by: docAuthor, online: ready, restoredFrom });
+    if (!res.ok) return { ok: false, error: res.error };
+    commitVersion(res);
+    return res.local ? { ok: true, local: true } : { ok: true, where };
   };
+
+  /* ---- Version history (B2022929): list / open read-only / restore / save a copy. Never deletes, never downloads. ---- */
+  const versions = useMemo(() => versionList(source, priorSources), [source, priorSources]);
+  const isDocFile = !!docFile;
+  const viewingSrcId = docFile && docFile.readOnly ? docFile.versionSrcId : null;
+  const readVersionBytes = async (v) => {
+    const cached = getSourceBytes(v.srcId);
+    if (cached) return cached instanceof Blob ? cached : new Blob([cached]);
+    const src = [source, ...priorSources].find((x) => x && x.srcId === v.srcId);
+    if (!src) return null;
+    let buf = src.driveKey ? await downloadFromDrive(src.driveKey) : null;
+    if (!buf && src.storageKey) buf = await downloadSource(src.storageKey);
+    return buf ? (buf instanceof Blob ? buf : new Blob([buf])) : null;
+  };
+  const histRun = async (fn) => {
+    setHistBusy(true); setHistMsg(""); setHistErr("");
+    try { await fn(); } catch (e) { setHistErr(`Something went wrong: ${e && e.message ? e.message : "unknown error"}. Nothing was changed.`); }
+    finally { setHistBusy(false); }
+  };
+  const openVersion = (v) => histRun(async () => {
+    const blob = await readVersionBytes(v);
+    if (!blob) { setHistErr("Couldn’t read that earlier version. Check your connection and try again."); return; }
+    const name = v.name || (source && source.name) || "document";
+    setDocFile({ blob, name, kind: docKindOf(name), key: `${v.srcId}:ro`, readOnly: true, versionSrcId: v.srcId, versionLabel: earlierVersionLabel(v.savedAt) });
+    setDocNotice(""); setDocDirty(false); setHistoryOpen(false);
+  });
+  const backToLatest = () => histRun(async () => { setDocFile(null); setDocDirty(false); await fetchSourceBytes(source, null); setHistoryOpen(false); });
+  const restoreFromHistory = (v) => histRun(async () => {
+    const ready = await cloudReady();
+    const scope = docScope();
+    const io = { newId: newSourceId, cache: cacheSourceBytes, store: (id, b) => storeSource(id, b, { ...scope, fileName: source.name }), read: readVersionBytes };
+    const res = await restoreVersion({ source, prior: priorSources, version: v, io, by: docAuthor, online: ready });
+    if (!res.ok) { setHistErr(res.error); return; }
+    commitVersion(res);
+    const name = res.source.name;
+    setDocNotice(`Restored the version from ${versionDateLabel(v.savedAt)} as a new latest version. Every earlier version is still in Version history.`);
+    setDocFile({ blob: res.blob, name, kind: docKindOf(name), key: res.source.srcId });
+    setDocDirty(false); setHistoryOpen(false);
+  });
+  const copyFromHistory = (v) => histRun(async () => {
+    if (!(await cloudReady())) { setHistErr("Sign in to save a copy to the Library."); return; }
+    const blob = await readVersionBytes(v);
+    if (!blob) { setHistErr("Couldn’t read that earlier version. Check your connection and try again."); return; }
+    const name = copyFileName(v.name || (source && source.name), v.savedAt);
+    const res = await fileNewReview({ ...docScope(), project: meta.project, blob, fileName: name });
+    if (!res.ok || res.uploadFailed) { setHistErr(res.error || res.driveError || "Couldn’t save the copy to the Library."); return; }
+    setDocNotice(`Saved a copy as “${name}”. The original and all its versions are kept.`);
+    setHistoryOpen(false);
+    await openReview({ id: res.id });
+  });
 
   /* ---- prepare page + fit (B329) ---- */
   const VIEW_MIN = 0.05, VIEW_MAX = 10; // px-per-page-unit clamp for the viewport (10 lets you read
@@ -1040,7 +1097,7 @@ export default function DocReview({
     item: meta.item, revision: meta.revision, docDate: meta.docDate,
     // B1953796 - folderId / sourceFile are written by fileNewReview and must ride every autosave.
     ...(meta.folderId ? { folderId: meta.folderId } : {}), ...(meta.sourceFile ? { sourceFile: meta.sourceFile } : {}),
-    sources: isStoredSource(source) ? [{ srcId: source.srcId, name: source.name, size: source.size || 0, storageKey: source.storageKey || null, driveKey: source.driveKey || null, oversize: !!source.oversize }, ...priorSources] : [],
+    sources: isStoredSource(source) ? [packSource(source), ...priorSources.filter(isStoredSource).map(packSource)] : [], // keeps savedAt/savedBy per version (B2022929)
     single: { srcId: source?.srcId || null, fileName, numPages, page, markups, calByPage, calInfo },
   }), [reviewId, meta, source, priorSources, fileName, numPages, page, markups, calByPage, calInfo]);
   const isEmpty = useCallback(() => !source && markups.length === 0, [source, markups]);
@@ -1189,7 +1246,7 @@ export default function DocReview({
     }
     setMeta({ title: rec.title || "", projectId: openProjectId, project: rec.project || "", orgScope: rec.orgScope === true, discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "", folderId: rec.folderId || null, sourceFile: rec.sourceFile || "" });
     if (openProjectId) onNavigate?.({ projectId: openProjectId }); // reflect the open file's project in the URL + breadcrumb (Work Item A)
-    setSource(src ? { srcId: src.srcId, name: src.name, size: src.size || 0, storageKey: src.storageKey || null, driveKey: src.driveKey || null, oversize: !!src.oversize } : null);
+    setSource(packSource(src));
     setMarkups(sanitizeMarkups(s.markups)); setCalByPage(s.calByPage || {}); setCalInfo(s.calInfo || {}); // sanitize: a corrupted/partial saved review can't crash the overlay
     setSheetMeta({}); setOpenGroups({}); // re-read on load (B266/B348); saved cals preserved
     setFileName(s.fileName || ""); setNumPages(s.numPages || 0); setPage(s.page || 1);
@@ -1375,6 +1432,7 @@ export default function DocReview({
       const targetPage = docIntent.openAtPage;
       const opened = openReview(docIntent.row);
       if (targetPage) opened.then(() => goToPage(targetPage));
+      if (docIntent.openHistory) opened.then(() => setHistoryOpen(true)); // Library row → "Version history"
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docIntent]);
@@ -2451,6 +2509,7 @@ export default function DocReview({
                 save indicator now, so there's no longer a second chip competing here. The old
                 📁 Library door is gone too — the 🗂 Files drawer browses by project + discipline. */}
             <ReviewsBar signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={openReview} onNew={resetSingle} />
+            {(docFile || pdfRef.current) && source && <button style={iconBtn(false)} onClick={() => { setHistMsg(""); setHistErr(""); setHistoryOpen(true); }} title="Version history — see earlier saved versions" data-testid="version-history-open">Versions</button>}
             {/* Drawing/measure tools + zoom controls now live in the right-side tool rail (B330).
                 Undo/Redo stay here as document-history actions, beside the doc-level controls. */}
             {pdfRef.current && <>
@@ -2519,7 +2578,8 @@ export default function DocReview({
       {docFile ? (
         <Suspense fallback={<div style={{ flex: 1, display: "grid", placeItems: "center", color: PAL.muted, fontFamily: "system-ui, sans-serif" }}>Opening “{docFile.name}”…</div>}>
           <div data-testid="doc-editor-host" style={{ flex: 1, display: "flex", minHeight: 0, minWidth: 0, position: "relative" }}>
-            <DocEditor file={docFile} author={docAuthor} notice={docNotice} onSave={saveDocFile} onDirty={setDocDirty} saveRef={docSaveRef} />
+            <DocEditor file={docFile} author={docAuthor} notice={docNotice} onSave={saveDocFile} onDirty={setDocDirty} saveRef={docSaveRef} onHistory={() => { setHistMsg(""); setHistErr(""); setHistoryOpen(true); }}
+              versionBar={docFile.readOnly ? { label: docFile.versionLabel, busy: histBusy, onRestore: () => restoreFromHistory(versions.find((v) => v.srcId === docFile.versionSrcId)), onCopy: () => copyFromHistory(versions.find((v) => v.srcId === docFile.versionSrcId)), onBack: backToLatest } : null} />
           </div>
         </Suspense>
       ) : !pdfRef.current ? (
@@ -3037,6 +3097,11 @@ export default function DocReview({
       {compareFiles ? (
         <CompareView a={compareFiles.a} b={compareFiles.b} onClose={() => setCompareFiles(null)} />
       ) : null}
+      {historyOpen && source && (
+        <VersionHistorySheet fileName={source.name} versions={versions} isDoc={isDocFile} viewingSrcId={viewingSrcId} busy={histBusy}
+          dirty={docDirty && !(docFile && docFile.readOnly)} signedIn={signedIn} message={histMsg} error={histErr}
+          onOpen={openVersion} onRestore={restoreFromHistory} onCopy={copyFromHistory} onBackToLatest={backToLatest} onClose={() => setHistoryOpen(false)} />
+      )}
     </div>
   );
 }

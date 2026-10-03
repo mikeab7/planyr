@@ -303,13 +303,13 @@ export default function Shell() {
   const [docIntent, setDocIntent] = useState(null);
   // `openAtPage` (B848848 — the comps "open source brochure" link) jumps to a specific page
   // once the review has loaded, instead of resuming wherever it was last left open.
-  const openReviewInDocReview = (row, { page } = {}) => {
+  const openReviewInDocReview = (row, { page, history } = {}) => {
     // ORG SCOPE (NEW-1) — `reviewOpenTarget` (route.js) reads the row's `orgScope` flag FIRST,
     // never falling back to a project id for an org-filed file (project_id is null for both an
     // org-filed and a genuinely unfiled row, and those are different destinations —
     // docs/DATA.md invariant §14).
     const { projectId: pid, org: orgScoped } = reviewOpenTarget(row);
-    setDocIntent({ kind: "open-review", row, openAtPage: page || null, token: Date.now() });
+    setDocIntent({ kind: "open-review", row, openAtPage: page || null, openHistory: !!history, token: Date.now() });
     navigate({ module: "doc-review", projectId: pid || null, cross: false, org: orgScoped });
   };
   // B1161792 (NEW-1) — the Dashboard's "Needs attention" card rows click through to the exact
