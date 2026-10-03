@@ -151,6 +151,23 @@ export async function inviteByEmail(teamId, email, role = "member") {
   return { ok: true };
 }
 
+// Resend a PENDING invite (admin action, NEW-1 Team redesign). Goes through the same validated
+// send path as inviteByEmail but with ignoreDuplicates: ON CONFLICT DO NOTHING, so it never adds
+// a second row (one open invite per team+email) and needs no UPDATE policy — team_invites has none
+// (measured on planyr_production 2026-10-03: policies are insert/delete/select only, no triggers).
+// NOTE: the app sends no email today — an invite is a standing row that activates when that email
+// signs in — so this re-asserts the row; it cannot deliver mail. Returns { ok, error }.
+export async function resendInvite(teamId, email, role = "member") {
+  if (!supabase || !teamId) return { ok: false, error: "Cloud not configured." };
+  const e = lower(email);
+  if (!isEmail(e)) return { ok: false, error: "Enter a valid email address." };
+  const r = role === "admin" ? "admin" : "member";
+  const { error } = await supabase.from("team_invites").upsert(
+    { team_id: teamId, email: e, role: r }, { onConflict: "team_id,email", ignoreDuplicates: true });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
 // Activate any invites waiting on the signed-in user's email (existing account invited later).
 // Call on every sign-in. Returns the number of new memberships (0 if none / signed out).
 export async function claimInvites() {
