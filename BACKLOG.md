@@ -5269,6 +5269,16 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
+### B2025280 — Food map: default to the Site Plan module's map, plus a Hybrid option `[Food]` (feature) #food #ui  *(Owner request 2026-10-03 (NEW-1): "The map on the food module is horrible, we should default to the site plan module map for the food module, and a good hybrid option as an option.")*
+
+`[x]` **Built:** the Site Plan map is now defined ONCE in `src/shared/basemaps/basemaps.js` (the registry moved there from `site-planner/lib/basemaps.js`, which is now a pure re-export): `SITE_PLAN_BASEMAP` = Esri World Imagery + the road-names overlay at the finder's default opacity, `HYBRID_BASEMAP` = the same imagery + road names + Esri place/neighbourhood names (`World_Boundaries_and_Places`), both full strength. `MapFinder` (default source, road-names URL + opacity) and `SitePlanner` (default source) read from it too, so a change there reaches /food. `FoodMap.jsx` lost its three inlined tile constants (street/satellite/labels) and builds its layers from `basemapTileLayers()`. The control is a two-segment "Site Plan | Hybrid" switch (plain Satellite folded away — it added nothing over either); last choice remembered in localStorage `planyr:food:basemap`, unknown/blocked storage → Site Plan. Pin keyline is the wide one on every basemap now (all are imagery). Credit composes from the registry ("Imagery © Esri, Maxar · Labels © Esri") and still renders in the existing desktop strip / phone toggle panel, clear of the bottom sheet. /food stays out of the tab strip (untouched). Bundle isolation holds: Food imports `shared/`, nothing from site-planner.
+`[x]` **Why shared and not an import from site-planner:** the food CLAUDE.md forbids any site-planner import (bundle isolation), so the registry moved to neutral ground instead of being copied — the owner's one-source-of-truth rule without breaking that one.
+- Guard: `test/basemapsShared.test.js` (default is the identical shared object; planner module is a pure re-export; FoodMap/MapFinder hold no tile URL of their own; Hybrid = imagery+roads+places stacked in order; every layer Esri axis order, no `subdomains` key, imagery clamped to native ceiling), `test/foodModule.test.js` (the old street/satellite scans rewritten for the new control — 434 pass), `ui-audit/verify-food-satellite-toggle.mjs` (real browser, real Esri tiles, desktop + phone: new-user default, 2 vs 3 layers, tiles painted/opaque after zoom, still painted after pan+zoom, choice persists across reload, repeated switching never crashes, hostile stored value falls back).
+- Sandbox-verified: Houston neighbourhood-zoom screenshots on both basemaps (in the PR). **Not verifiable here:** pins over the new imagery with real data (this sandbox has the cloud off, so no places load).
+- Owner product constraints check: nothing here contradicts a listed constraint.
+- Verify: live — **V1450368** (`Blocker: auth`). **Stopping rule:** closes on a dated pass of V1450368, or a recurrence filed here.
+
+
 
 ### B2015808 — Schedule "Focus" toggles reset every time you come back to the page `[scheduler]` (bug) #scheduler #persistence  *(Owner report 2026-10-02 (NEW-1): "the focus button on the schedule module doesn't hold ... It should just hold whatever the last status was.")*
 

@@ -581,35 +581,12 @@ describe("NEW-4 — food_places_in_bounds_sampled wiring", () => {
  *     snapshot is a lookup he reaches into once zoomed in, never metro-wide content.
  * ═══════════════════════════════════════════════════════════════════════════════════════ */
 describe("NEW-5 (revised) — colourful basemap, no clustering, his places always visible", () => {
-  it("B811520 — FoodMap uses Esri's free, key-less World_Topo_Map tiles — colourful, not the flat-grey Positron, and no CARTO anywhere (watermarked keyless usage, 2026-08-27)", () => {
+  it("NEW-1 — FoodMap carries NO tile URL of its own and no CARTO anywhere: the basemap comes from the shared registry (the Site Plan map), key-less Esri (B811520's watermark lesson stands)", () => {
     const map = src("components/FoodMap.jsx");
-    expect(map).toContain("server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}");
-    expect(map).not.toContain("basemaps.cartocdn.com/light_all");
-    expect(map).not.toMatch(/basemaps\.cartocdn\.com\/rastertiles\/voyager\/\{z\}\/\{x\}\/\{y\}/); // no LIVE cartocdn URL — history-only mentions in comments are fine
-    // Not World_Street_Map — checked live against dense Houston pins and picked against it (see
-    // the header comment); the constant's own url: line is what must not name it.
-    const streetUrlLine = map.slice(map.indexOf("const STREET_TILES = {"), map.indexOf("attribution:", map.indexOf("const STREET_TILES = {")));
-    expect(streetUrlLine).not.toContain("World_Street_Map");
-  });
-
-  it("B811520 — street tile axis order is {z}/{y}/{x}, same as satellite, never Leaflet's own default {z}/{x}/{y} (the exact mistake that crashed the satellite toggle the first time, B634981)", () => {
-    const map = src("components/FoodMap.jsx");
-    const streetBlock = map.slice(map.indexOf("const STREET_TILES = {"), map.indexOf("const STREET_TILES = {") + 400);
-    expect(streetBlock).toMatch(/tile\/\{z\}\/\{y\}\/\{x\}/);
-    expect(streetBlock).not.toMatch(/tile\/\{z\}\/\{x\}\/\{y\}/);
-    expect(streetBlock).not.toMatch(/subdomains/); // no subdomains key — a single ArcGIS host has none (B634981's own lesson)
-    expect(streetBlock).not.toMatch(/url1x/); // Esri tiles have no {r} retina token to strip
-  });
-
-  it("B811520 — the tile attribution credits Esri for BOTH layers, never a standalone OpenStreetMap/CARTO credit (nothing on the page fetches OSM or CARTO tiles any more)", () => {
-    const map = src("components/FoodMap.jsx");
-    const streetBlock = map.slice(map.indexOf("const STREET_TILES = {"), map.indexOf("const STREET_TILES = {") + 900);
-    expect(streetBlock).toMatch(/attribution: "&copy; Esri,/);
-    expect(streetBlock).not.toMatch(/openstreetmap\.org\/copyright/);
-    expect(streetBlock).not.toMatch(/carto\.com\/attributions/);
-    // The live OSM fallback documented for the future is commented-out code, not an active constant.
+    expect(map).not.toMatch(/https?:\/\/[^"'\s]*(arcgisonline|cartocdn|openstreetmap)[^"'\s]*\{z\}/); // no LIVE tile URL template here
+    expect(map).not.toMatch(/\bconst (STREET|SATELLITE|LABELS)_TILES\b/);
     expect(map).not.toMatch(/^const OSM_FALLBACK_TILES/m);
-    expect(map).toMatch(/\/\/\s*const OSM_FALLBACK_TILES = \{/); // present, but commented out
+    expect(map).toMatch(/from "\.\.\/\.\.\/\.\.\/shared\/basemaps\/basemaps\.js"/);
   });
 
   it("clustering is gone — no clusterer module, no import of one, no clustering package added", () => {
@@ -679,38 +656,32 @@ describe("NEW-5 (revised) — colourful basemap, no clustering, his places alway
   });
 });
 
-describe("satellite toggle — one control, two states, reused Esri source, legible pins on imagery", () => {
-  it("ONE toggle button, two states — never a basemap gallery, never a layers panel", () => {
+describe("NEW-1 basemap control — Site Plan (default) + Hybrid, one shared source, remembered, legible pins", () => {
+  it("ONE control with exactly the registry's choices — never a gallery, never a layers panel", () => {
     const map = src("components/FoodMap.jsx");
     expect([...map.matchAll(/data-testid="food-basemap-toggle"/g)]).toHaveLength(1);
-    expect(map).toMatch(/setBasemap\(\(b\) => \(b === "satellite" \? "street" : "satellite"\)\)/);
-    expect(map).not.toMatch(/BASEMAP_CHOICES|basemapGallery|LayerPanel/);
+    expect(map).toMatch(/SITE_PLAN_BASEMAP_CHOICES\.map\(/);
+    expect(map).not.toMatch(/basemapGallery|LayerPanel/);
   });
 
-  it("the satellite source is duplicated from the Site Planner's Esri World Imagery, not imported — BUNDLE ISOLATION", () => {
+  it("the choice is remembered per device and the new-user default is the Site Plan map", () => {
     const map = src("components/FoodMap.jsx");
-    expect(map).toContain("server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile");
-    expect(map).toMatch(/Imagery &copy; Esri, Maxar/);
-    // No API key, no account, no billing — a bare tile URL, same shape as the street source.
-    expect(map).not.toMatch(/apikey|api_key|access_token/i);
-    // BUNDLE ISOLATION — this file may still import nothing from site-planner, even though it
-    // reuses that module's SOURCE VALUES (copied as literals, not through an import edge).
-    expect(map).not.toMatch(/from\s+["'][^"']*site-planner[^"']*["']/);
+    expect(map).toMatch(/useState\(readStoredBasemap\)/);
+    expect(map).toMatch(/localStorage\.setItem\(BASEMAP_STORAGE_KEY, basemap\)/);
+    expect(map).toMatch(/catch \(_\) \{ return SITE_PLAN_BASEMAP\.key; \}/);
   });
 
-  it("the two tile sources are swapped WHOLE on toggle (fresh layer + removal), never `setUrl` on a shared layer", () => {
+  it("the tile layers are swapped WHOLE on change (fresh layers + removal), never `setUrl` on a shared layer", () => {
     const map = src("components/FoodMap.jsx");
     const tileEffect = map.slice(map.indexOf("Basemap tile layer"), map.indexOf("}, [basemap]);"));
-    expect(tileEffect).toMatch(/L\.tileLayer\(url,/);
-    expect(tileEffect).toMatch(/map\.removeLayer\(layer\)/); // the cleanup that removes the PREVIOUS layer
+    expect(tileEffect).toMatch(/L\.tileLayer\(spec\.url, spec\.opts\)/);
+    expect(tileEffect).toMatch(/map\.removeLayer\(layer\)/); // the cleanup that removes the PREVIOUS layers
     expect(map).not.toMatch(/\.setUrl\(/);
   });
 
-  it("satellite mode widens the pin's white keyline stroke so the rating ramp stays legible over photo imagery", () => {
+  it("every basemap is imagery, so the pin's wide white keyline always applies and no addPin hardcodes a thin one", () => {
     const map = src("components/FoodMap.jsx");
-    expect(map).toMatch(/const strokeWeight = basemap === "satellite" \? 3 : 2;/);
-    // Every addPin call must use the computed weight (directly, or via the isSelected ternary
-    // that still falls back to it) — never a value hardcoded back to a constant 2.
+    expect(map).toMatch(/const strokeWeight = 3;/);
     const drawEffect = map.slice(map.indexOf("Redraw markers"), map.indexOf("}, [places, loggedPlaces"));
     expect(drawEffect).toMatch(/weight:\s*(strokeWeight|isSelected \? 4 : strokeWeight)/);
     expect(drawEffect).not.toMatch(/weight:\s*2\b/);
@@ -728,52 +699,24 @@ describe("satellite toggle — one control, two states, reused Esri source, legi
  * defect classes — the harness above is the slower, real-browser proof; both exist because a
  * source scan alone would have missed this bug the first time (an `undefined`-valued object key
  * reads as "present" to any regex that only checks the key exists, not what it maps to). */
-describe("satellite crash fix — no explicit undefined subdomains, mirrors the planner's real config, degrades instead of crashing (B634981)", () => {
-  it("subdomains is only added to the tile-layer options when the source actually declares one — never an explicit `subdomains: undefined`", () => {
+describe("basemap crash fix — no explicit undefined subdomains, degrades instead of crashing (B634981, kept through NEW-1)", () => {
+  it("FoodMap hands Leaflet the shared specs' own options verbatim — it never builds a `subdomains` key itself", () => {
     const map = src("components/FoodMap.jsx");
-    expect(map).toMatch(/if \(source\.subdomains\) opts\.subdomains = source\.subdomains;/);
-    // The exact defect shape: an unconditional key in the options OBJECT LITERAL passed to
-    // L.tileLayer, which is `undefined` for a source with no subdomains and clobbers Leaflet's
-    // own internal default rather than leaving it alone.
-    expect(map).not.toMatch(/L\.tileLayer\([^)]*subdomains:\s*source\.subdomains[^)]*\)/s);
-  });
-
-  it("SATELLITE_TILES declares no subdomains key at all — a single ArcGIS host has none, matching the Site Planner's own layer", () => {
-    const map = src("components/FoodMap.jsx");
-    const satelliteBlock = map.slice(map.indexOf("const SATELLITE_TILES"), map.indexOf("const LABELS_TILES"));
-    expect(satelliteBlock).not.toMatch(/subdomains/);
-  });
-
-  it("mirrors the planner's real config: maxZoom 21 with maxNativeZoom 19 (upscale past Esri's native ceiling, never hard-refuse)", () => {
-    const map = src("components/FoodMap.jsx");
-    expect(map).toMatch(/const SATELLITE_TILES = \{[\s\S]{0,300}?maxZoom: 21, maxNativeZoom: 19,/);
-  });
-
-  it("axis order is {z}/{y}/{x} — Y before X, Esri's convention — for BOTH the imagery and the labels overlay", () => {
-    const map = src("components/FoodMap.jsx");
-    const arcgisUrls = [...map.matchAll(/server\.arcgisonline\.com\/ArcGIS\/rest\/services\/[^"]+"/g)].map((m) => m[0]);
-    expect(arcgisUrls.length).toBeGreaterThanOrEqual(2); // imagery + labels
-    for (const url of arcgisUrls) expect(url).toMatch(/\/tile\/\{z\}\/\{y\}\/\{x\}/);
-  });
-
-  it("a faint labels overlay (World_Transportation) is added ONLY in satellite mode, so street names stay readable over the imagery", () => {
-    const map = src("components/FoodMap.jsx");
-    expect(map).toMatch(/Reference\/World_Transportation\/MapServer\/tile/);
-    expect(map).toMatch(/if \(basemap === "satellite"\) \{/);
-    expect(map).toMatch(/L\.tileLayer\(LABELS_TILES\.url/);
+    const tileEffect = map.slice(map.indexOf("Basemap tile layer"), map.indexOf("}, [basemap]);"));
+    expect(tileEffect.replace(/\/\/.*$/gm, "")).not.toMatch(/subdomains/);
   });
 
   it("the tile-layer mount is wrapped in try/catch — a bad config degrades to an 'Imagery unavailable' state, never crashes the module", () => {
     const map = src("components/FoodMap.jsx");
     expect(map).toMatch(/const \[basemapError, setBasemapError\] = useState\(false\);/);
-    expect(map).toMatch(/try \{[\s\S]{0,300}?const opts = \{ maxZoom: source\.maxZoom, attribution: source\.attribution \};/);
+    expect(map).toMatch(/try \{[\s\S]{0,400}?specs\.forEach/);
     expect(map).toMatch(/\} catch \(err\) \{/);
     expect(map).toMatch(/setBasemapError\(true\)/);
     expect(map).toMatch(/data-testid="food-basemap-error"/);
     expect(map).toContain("Imagery unavailable");
   });
 
-  it("a real headless-browser guard exists for this defect class (ui-audit/verify-food-satellite-toggle.mjs) — proven RED on the pre-fix build and GREEN on the fix", () => {
+  it("a real headless-browser guard exists for this defect class (ui-audit/verify-food-satellite-toggle.mjs)", () => {
     expect(existsSync(join(REPO, "ui-audit", "verify-food-satellite-toggle.mjs"))).toBe(true);
   });
 });
@@ -978,7 +921,7 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     expect(shortBranch).toMatch(/map\.flyTo\(shiftedLatLng, targetZoom, \{ duration: FLY_DURATION_SEC \}\)/);
   });
 
-  it("B811520 — the url1x/retina gate is GONE from the LIVE code, not just unused: Esri's tile URLs (street AND satellite) have no {r} token to strip, so there is nothing left to gate (history-only mentions in prose comments are fine)", () => {
+  it("B811520 — the url1x/retina gate is GONE from the LIVE code, not just unused: Esri's tile URLs have no {r} token to strip, so there is nothing left to gate (history-only mentions in prose comments are fine)", () => {
     const map = src("components/FoodMap.jsx");
     // Neither tile-source object declares a url1x field any more.
     expect(map).not.toMatch(/url1x:\s*"/);
@@ -988,7 +931,7 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     // The gate expression itself is gone from the tile-layer effect — never dead code left behind.
     expect(map).not.toMatch(/narrowViewport && source\.url1x/);
     const tileEffectSrc = map.slice(map.indexOf("Basemap tile layer"), map.indexOf("}, [basemap]);"));
-    expect(tileEffectSrc).toMatch(/const url = source\.url;/);
+    expect(tileEffectSrc).toMatch(/basemapTileLayers\(resolveBasemapChoice\(basemap\)\)/);
   });
 
   it("B651872 (×4) — a real loading treatment tied to the current tile layer's own events, never silent grey", () => {
@@ -1093,10 +1036,9 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
   it("expanding the credit shows the CURRENT basemap's real text (never re-typed) — no 'Leaflet' prefix anywhere", () => {
     const map = src("components/FoodMap.jsx");
     expect(map).toMatch(/data-testid="food-attribution-panel"/);
-    expect(map).toMatch(/dangerouslySetInnerHTML=\{\{ __html: basemap === "satellite" \? SATELLITE_TILES\.attribution : STREET_TILES\.attribution \}\}/);
+    expect(map).toMatch(/dangerouslySetInnerHTML=\{\{ __html: basemapAttribution\(resolveBasemapChoice\(basemap\)\) \}\}/);
     // Sourced from the SAME constants already passed to Leaflet's own `attribution` option —
     // never a second, hand-typed copy that could drift.
-    expect(map).toMatch(/attribution: source\.attribution/); // still fed to the tileLayer options too (harmless, nothing reads it now)
     // Never Leaflet's own `L.control.attribution`/`prefix` mechanism — that's exactly what
     // rendered the unwanted "Leaflet |" text the owner screenshotted (quoted in the header
     // comment above, which is why this checks for the CALL, not the substring).
@@ -1679,11 +1621,11 @@ describe("B668195 — no emoji glyphs in the food map view controls (plain text 
   // range a naive emoji regex would need to sweep) as a false positive.
   const TARGET_EMOJI = ["📍", "🔍", "🗺", "🛰"];
 
-  it("FoodMap.jsx: no emoji in the search-here button, or the street/satellite basemap toggle", () => {
+  it("FoodMap.jsx: no emoji in the search-here button, or the basemap control", () => {
     const map = src("components/FoodMap.jsx");
     for (const glyph of TARGET_EMOJI) expect(map).not.toContain(glyph);
     expect(map).toContain("Search live for more here");
-    expect(map).toMatch(/\{basemap === "satellite" \? "Street" : "Satellite"\}/);
+    expect(map).toMatch(/\{c\.label\}/);
   });
 
   it("FoodApp.jsx: no emoji on the Drop a pin toolbar button", () => {
@@ -1714,7 +1656,7 @@ describe("B668195 — no emoji glyphs in the food map view controls (plain text 
   it("button padding was widened where an emoji was removed, so tap targets don't shrink", () => {
     const map = src("components/FoodMap.jsx");
     expect(map).toMatch(/padding: "7px 20px"/); // search-here (was 7px 16px)
-    expect(map).toMatch(/padding: "7px 18px"/); // basemap toggle (was 7px 14px)
+    expect(map).toMatch(/padding: "7px 14px"/); // basemap control segments (two buttons now, NEW-1)
     const app = src("FoodApp.jsx");
     expect(app).toMatch(/padding: "6px 14px"/); // drop-a-pin toolbar button (was 6px 12px)
   });
