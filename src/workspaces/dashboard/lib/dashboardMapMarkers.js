@@ -37,14 +37,19 @@ export function openPipelineProjects(projects) {
 /** The map's marker list: one entry per LOCATED open project/pursuit, plus one per located comp.
  * `kind` is "active" | "pursuit" | "comp" — the three weights. Anything without a usable lat/lon
  * is left out here (never silently counted as drawn) — see missingLocationCount for its own,
- * explicit accounting. */
-export function mapMarkers(projects, comps) {
+ * explicit accounting. `displayPoints` — optional { [groupId]: {lat, lon} } from
+ * dashboardParcelAnchors.displayPointsByGroup. */
+export function mapMarkers(projects, comps, displayPoints) {
   const out = [];
   for (const p of openPipelineProjects(projects)) {
     if (!hasOrigin(p.origin)) continue;
+    // B-NEW-1 — the pin sits at the parcel's inside point (dashboardParcelAnchors.js, the Site tab
+    // map's helper) when one has been derived; a site with no boundary keeps its saved origin.
+    const at = displayPoints && displayPoints[p.groupId];
+    const pt = hasOrigin(at) ? at : p.origin;
     out.push({
       kind: ACTIVE_STATUSES.has(p.status) ? "active" : "pursuit",
-      id: p.groupId, lat: p.origin.lat, lon: p.origin.lon, name: shortenDisplayName(p.name, MAP_LABEL_MAX_CHARS), project: p,
+      id: p.groupId, lat: pt.lat, lon: pt.lon, name: shortenDisplayName(p.name, MAP_LABEL_MAX_CHARS), project: p,
     });
   }
   for (const c of comps || []) {
