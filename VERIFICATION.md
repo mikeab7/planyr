@@ -166,6 +166,15 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1446336 — B2021248: opening Settings, and switching between its sections, never raises the phone keyboard `Blocker: auth`
+
+Sandbox-proven: `e2e/touch-no-autofocus-account.spec.js` (touch viewport, red on pre-change source) and `test/accountNoAutofocus.test.js`. Pending: the signed-in Settings sections (sign-in is CORS-blocked here).
+**Steps** (planyr.io on an iPhone, signed in; read the served chunk hash in the same observation):
+1. Avatar menu → Settings. **Expect:** Profile shows, no field focused, no keyboard.
+2. Tap Team, Account & security, Interface in turn, then Profile again. **Expect:** no keyboard at any point.
+3. Tap the first-name field. **Expect:** the keyboard appears only now.
+4. Close, sign out, tap Sign in. **Expect:** no keyboard until a field is tapped.
+- **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B2021248.
 ### V1450368 — B2025280: /food opens on the Site Plan map, Hybrid is crisp, and pins stay legible on both `Blocker: auth`
 
 Sandbox-proven: `ui-audit/verify-food-satellite-toggle.mjs` (real Esri tiles, desktop + phone), `test/basemapsShared.test.js`, `test/foodModule.test.js`. **Not provable here:** pin legibility over the new imagery with the owner's real logged places (the sandbox cannot sign in, so no places draw).
