@@ -59,6 +59,8 @@ import { usePalette } from "../../../shared/theme/ThemeProvider.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { ToggleChip } from "../../../shared/ui/controls.jsx";
 import { openPipelineProjects, mapMarkers, missingLocationCount } from "../lib/dashboardMapMarkers.js";
+import { displayPointsByGroup } from "../lib/dashboardParcelAnchors.js";
+import { fetchParcelsForSites } from "../lib/dashboardParcelFetch.js";
 import { resolveLabelVisibility } from "../lib/labelCollide.js";
 // SATELLITE-LABEL-LEGIBILITY — the SAME aerial-imagery registry the Site Planner's own "Aerial"
 // basemap reads (its own `lib/basemaps.js` header: "the single list of free aerial imagery
@@ -213,7 +215,24 @@ export default function LocationsMapCard({ projects, comps, onOpenProject, onFix
   const labelMarkersRef = useRef([]);
 
   const openProjects = useMemo(() => openPipelineProjects(projects), [projects]);
-  const allMarkers = useMemo(() => mapMarkers(projects, comps), [projects, comps]);
+  // B-NEW-1 — pins sit inside their parcel, same point as the Site tab map. Parcel shapes are read
+  // once per set of plotted plans (never per render/zoom); until they arrive, or for a site with no
+  // boundary, a pin stays at its saved origin.
+  const [displayPoints, setDisplayPoints] = useState(null);
+  const plottedSiteKey = useMemo(
+    () => mapMarkers(projects, null).map((m) => m.project.siteId).filter(Boolean).sort().join(","),
+    [projects],
+  );
+  useEffect(() => {
+    if (!plottedSiteKey) return undefined;
+    let live = true;
+    fetchParcelsForSites(plottedSiteKey.split(",")).then((rows) => {
+      if (live) setDisplayPoints(displayPointsByGroup(projects, rows));
+    }).catch(() => {});
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plottedSiteKey]);
+  const allMarkers = useMemo(() => mapMarkers(projects, comps, displayPoints), [projects, comps, displayPoints]);
   const missingCount = useMemo(() => missingLocationCount(projects), [projects]);
   const compsTotal = comps ? comps.length : 0;
   const compsPlotted = useMemo(() => allMarkers.filter((m) => m.kind === "comp").length, [allMarkers]);
