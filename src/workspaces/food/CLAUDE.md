@@ -68,7 +68,7 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
 - `FoodApp.jsx` — workspace root (lazy chunk). Owns view state (map/list), the visit CRUD
   flow, and the manual-pin drop flow. No projects, no cross-workspace navigation — this module
   is deliberately outside the Site Planner's project model.
-- `components/FoodMap.jsx` — Leaflet map (OpenStreetMap tiles, free), canvas-rendered pins
+- `components/FoodMap.jsx` — Leaflet map, canvas-rendered pins; basemap = the shared Site Plan map or Hybrid, defined in the shared basemaps registry under src/shared/ (NEW-1/B2025280 — never inline a tile URL here)
   (not SVG — the snapshot query can return up to ~2,000 points). Logged vs not-yet-logged vs
   manual pins are three distinct colors, per the brief.
 - `components/VisitPanel.jsx` — click a pin, see past visits, log another. A right-side panel,
