@@ -90,10 +90,11 @@ describe("DocReview wiring", () => {
     for (const s of ["empty-open-library", "empty-compare", "Browse the Library", "Calibrate to scale, measure", "drop a construction PDF"]) expect(src).not.toContain(s);
     expect(src).toMatch(/\.docx,\.doc,\.txt/);
   });
-  it("a Word/text pick never auto-downloads: it only sets the offer behind the explicit Download button", () => {
-    const i = src.indexOf("isWordOrTextName(file.name)");
-    const block = src.slice(i, i + 700);
-    expect(block).toContain("setNonPdfOffer");
-    expect(block).not.toMatch(/\.click\(\)|download\s*=/);
+  it("a Word/text pick opens in the document editor (B2022928) and never auto-downloads", () => {
+    expect(src).toContain("if (docKindOf(file.name)) { await openDocFile(file); return; }");
+    const i = src.indexOf("const openDocFile = async");
+    const block = src.slice(i, src.indexOf("const saveDocFile", i));
+    expect(block).toContain("setDocFile");
+    expect(block).not.toMatch(/\.click\(\)|download\s*=|createObjectURL/);
   });
 });
