@@ -166,6 +166,29 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1464320 — B2039232: an open file has a Close (×) back to the sheet index; unsaved Word/text edits ask first; reload after Close stays on the index `Blocker: auth`
+
+Sandbox-proven logged out against the built app: `ui-audit/verify-review-close-file.mjs` (25/25; red on `main`'s build) and `test/reviewCloseFile.test.js`. Pending: the real signed-in account on planyr.io, and a real phone.
+**Steps** (planyr.io signed in; read the served chunk hash in the same observation; use a throwaway copy of a plan/file, never a real one):
+1. Review → Open… a PDF (or reopen a Library drawing). **Expect:** the file name in the toolbar has a × and clicking it returns to "Current set" for that project ("Pick a project" if none is selected); no prompt.
+2. Reload the page. **Expect:** it stays on the index — the closed drawing does not reopen.
+3. Open `planyr-test-delete-me.docx` (do not delete it), type a few words, click ×. **Expect:** "Save changes before closing?" with Save / Discard / Cancel. Cancel → still editing with your words. × again → Discard → the index; reopen the file → your words are gone.
+4. Type again, × → Save. **Expect:** "Saved to the Library…" is recorded and the index shows; reopen → the words are kept.
+5. Reload after closing a Word file. **Expect:** the index, not the Word file.
+6. On a phone: open a PDF, then a Word file. **Expect:** a "‹ Close" bar under the header at all times (no sideways scrolling to find it); tapping returns to the index; the unsaved-changes prompt fits the screen.
+- **Stopping rule:** closes on a dated pass of 1-6, or a failed step filed as a recurrence on B2039232.
+
+### V1464321 — B2039233: a file saved with no project is listed under "Unfiled" in the Library, can be moved into a project, and the banner says where it went `Blocker: auth`
+
+Sandbox-proven: unit + static render only (`test/reviewCloseFile.test.js`) — the sandbox cannot sign in, so the cloud listing and the move are NOT exercised here.
+**Steps** (planyr.io signed in; throwaway file only — `planyr-test-delete-me.docx`, do not delete it):
+1. Review with NO project selected → "Pick a project" shows "It will be kept under Unfiled in the Library." under "Upload a file without a project". Upload the .docx, edit, Save. **Expect:** the banner reads "Saved to the Library under Unfiled — open the Library to move it into a project."
+2. Library tab (no project selected → Home). **Expect:** an **Unfiled** section listing the file (and Recent now lists it too). Click it → it opens in Review.
+3. In Unfiled use "Move to project…" and pick a project. **Expect:** a confirmation line, the row leaves Unfiled, and the file is listed in that project's Library view.
+4. Pick a project in Review's "Current set", upload a PDF from there, Save/leave it. **Expect:** it lands in that project's Library view (not Unfiled).
+5. Repeat step 1 with a no-project PDF. **Expect:** it also appears under Unfiled.
+- **Stopping rule:** closes on a dated pass of 1-5, or a failed step filed as a recurrence on B2039233.
+
 ### V1457120 — B2032032: phone Settings drills in (menu → section), Profile fields are labelled, Save is only active when something changed `Blocker: auth`
 
 Sandbox-proven (logged in via a seeded session + mocked profile row): `e2e/settings-drill-in.spec.js` (red on the pre-change source) and `test/settingsForm.test.js`. Pending: the real signed-in account on planyr.io, on a phone.

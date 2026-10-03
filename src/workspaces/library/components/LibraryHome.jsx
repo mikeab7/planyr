@@ -9,6 +9,9 @@
  *   • RECENT — drawings recently OPENED in Review (local opened-list, not updated_at).
  *   • PROJECTS — every project as a card; click = open that project's Library view.
  *
+ *   • UNFILED (NEW-2) — files saved from Review with no project selected. They belong to no project's view, so
+ *     this is the one place they are listed: open one, or "Move to project…" to file it for real.
+ *
  * Adding files still happens inside a project (auto-filing never guesses a project), so the
  * import affordance here is a pointer, not a drop zone.
  */
@@ -19,6 +22,8 @@ import { listRecents } from "../../../shared/recents/recentDocs.js";
 import { listReviews } from "../../doc-review/lib/reviewStore.js";
 import { listProjects as listLocalProjects } from "../../../shared/projects/projects.js";
 import { liveProjectIds } from "../../../shared/projects/docProjectLiveness.js";
+import { unfiledRows } from "../../doc-review/lib/unfiled.js";
+import { fileReviewIntoProject } from "../lib/fileIntoProject.js";
 
 const SectionHead = ({ children }) => (
   <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-tertiary)", margin: "18px 2px 8px" }}>{children}</div>
@@ -83,11 +88,36 @@ function FolderCard({ pin, label, projectName, onOpen, onUnpin }) {
   );
 }
 
+/* One Unfiled row: the file (opens in Review) + a "Move to project…" picker that files it for real. */
+export function UnfiledCard({ doc, projects = [], busy = false, onOpen, onMove }) {
+  const title = doc.title || doc.sfile || doc.item || "Untitled file";
+  return (
+    <div data-testid="unfiled-row" data-review-id={doc.id} style={{ ...cardBase, cursor: "default", flexWrap: "wrap" }}>
+      <button onClick={onOpen} title="Open in Review"
+        style={{ flex: "1 1 160px", minWidth: 0, display: "flex", alignItems: "center", gap: 9, textAlign: "left", border: "none", background: "transparent", padding: 0, fontFamily: "inherit", cursor: "pointer", color: "inherit" }}>
+        <span aria-hidden style={{ flex: "none", color: "var(--accent-library-text)" }}>📄</span>
+        <span style={{ minWidth: 0 }}>
+          <span style={{ display: "block", fontSize: 12.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
+          <span style={{ display: "block", fontSize: 10.5, color: "var(--text-tertiary)", marginTop: 2 }}>{[doc.discipline, fmtWhen(Date.parse(doc.updated_at || "") || 0)].filter(Boolean).join(" · ")}</span>
+        </span>
+      </button>
+      <select aria-label={`Move “${title}” to a project`} data-testid="unfiled-move" disabled={busy || !projects.length} value=""
+        onChange={(e) => { if (e.target.value) onMove?.(e.target.value); }}
+        style={{ flex: "0 1 170px", minWidth: 0, maxWidth: "100%", minHeight: 30, fontSize: 12, fontFamily: "inherit", borderRadius: 7, border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-primary)" }}>
+        <option value="">{busy ? "Moving…" : projects.length ? "Move to project…" : "No projects yet"}</option>
+        {projects.map((p) => <option key={p.id} value={p.id}>{p.name || "Untitled project"}</option>)}
+      </select>
+    </div>
+  );
+}
+
 export default function LibraryHome({ uid = null, active = true, onOpenFile, onOpenFolder, onPickProject }) {
   const [pins, setPins] = useState([]);
   const [recents, setRecents] = useState([]);
   const [reviews, setReviews] = useState([]);   // doc_reviews rows, for names/projects on cards
   const [loading, setLoading] = useState(true);
+  const [moving, setMoving] = useState(null);   // review id mid-move
+  const [moveNote, setMoveNote] = useState(null); // { ok, text } — said out loud either way, never silent
   // B1953793 — pinned folders show their LIVE name (a rename must not leave a stale pin-time
   // snapshot); `pin.label` is only the fallback when the folder can't be resolved.
   const [folderNames, setFolderNames] = useState(() => new Map());
@@ -169,7 +199,20 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
   const recentCards = recents.map((r) => ({ ...r, doc: byId.get(r.id) }))
     .filter((r) => r.doc && !projectIsDead(docProject(r.doc, r.projectId)))
     .slice(0, 10);
-  const nothingSaved = !pinnedFolders.length && !pinnedFiles.length && !recentCards.length;
+  const unfiled = unfiledRows(reviews);
+  const nothingSaved = !pinnedFolders.length && !pinnedFiles.length && !recentCards.length && !unfiled.length;
+  const moveUnfiled = async (doc, pid) => {
+    const proj = projects.find((p) => p.id === pid);
+    setMoving(doc.id); setMoveNote(null);
+    try {
+      const res = await fileReviewIntoProject({ f: { id: doc.id, item: doc.item || "", sourceFile: doc.sfile || "" }, projectId: pid, projectName: (proj && proj.name) || "", discipline: doc.discipline || "Other" });
+      if (!res.ok) { setMoveNote({ ok: false, text: `Couldn’t move “${doc.title || doc.sfile || "this file"}” — ${res.error}. Nothing was changed.` }); return; }
+      setReviews((rs) => rs.filter((r) => r.id !== doc.id));
+      setMoveNote({ ok: true, text: `Moved “${doc.title || doc.sfile || "the file"}” to ${(proj && proj.name) || "the project"}.${res.notice ? " " + res.notice : ""}` });
+    } catch (e) {
+      setMoveNote({ ok: false, text: `Couldn’t move that file — ${(e && e.message) || "the save failed"}. Nothing was changed.` });
+    } finally { setMoving(null); }
+  };
 
   return (
     <div data-testid="library-home" style={{ flex: 1, minHeight: 0, overflowY: "auto", background: "var(--surface-page)", fontFamily: "system-ui, sans-serif" }}>
@@ -219,6 +262,24 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
               <div key={`recent:${r.id}`} style={{ marginBottom: 6 }}>
                 <FileCard doc={r.doc} projectName={projName(docProject(r.doc, r.projectId))}
                   when={fmtWhen(r.openedAt)} onOpen={() => openDoc(r.id, r.projectId)} />
+              </div>
+            ))}
+          </>
+        )}
+
+        {(unfiled.length > 0 || moveNote) && (
+          <>
+            <SectionHead>Unfiled</SectionHead>
+            {moveNote && <div role={moveNote.ok ? "status" : "alert"} data-testid="unfiled-note" style={{ fontSize: 12, margin: "0 2px 8px", color: moveNote.ok ? "var(--text-secondary)" : "var(--danger-text)" }}>{moveNote.text}</div>}
+            {unfiled.length > 0 && (
+              <div style={{ fontSize: 11.5, color: "var(--text-secondary)", margin: "0 2px 8px" }}>
+                Saved from Review with no project selected. Open one, or move it into a project.
+              </div>
+            )}
+            {unfiled.map((d) => (
+              <div key={`unfiled:${d.id}`} style={{ marginBottom: 6 }}>
+                <UnfiledCard doc={d} projects={projects} busy={moving === d.id}
+                  onOpen={() => openDoc(d.id, null)} onMove={(pid) => moveUnfiled(d, pid)} />
               </div>
             ))}
           </>
