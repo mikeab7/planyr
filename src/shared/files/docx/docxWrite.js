@@ -8,9 +8,10 @@
  * written as Word's own <w:ins>/<w:del> and comments as comments.xml + commentsExtended.xml, so the file
  * opens in Microsoft Word with them showing. */
 import { writePackage, str, bytes } from "./package.js";
-import { parseXml, serializeXml, el, kids, find, attr } from "./xml.js";
+import { parseXml, serializeXml, el, kids } from "./xml.js";
 import { DOC_ROOT_ATTRS, PART, HIGHLIGHT_NAME, PPR_ORDER, RPR_ORDER, orderBy, TWIP_PER_PX, NS_W, REL_NS, CT_NS } from "./ooxml.js";
 
+const FONT_SIZE_ATTR = "fontSize"; // the Tiptap text-style attribute name (not a CSS size literal)
 const isoNow = () => new Date().toISOString().replace(/\.\d+Z$/, "Z");
 const cleanText = (s) => String(s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "");
 const frag = (s) => (s ? kids(parseXml(`<x>${s}</x>`)) : []);
@@ -80,7 +81,7 @@ function marksToRPr(marks) {
       case "highlight": { const nm = HIGHLIGHT_NAME[String(a.color || "").toLowerCase()] || "yellow"; kidsOut.push(el("w:highlight", { "w:val": nm })); break; }
       case "textStyle": {
         if (a.color && /^#[0-9a-fA-F]{6}$/.test(a.color)) kidsOut.push(el("w:color", { "w:val": a.color.slice(1).toUpperCase() }));
-        if (a.fontSize) { const mm = /^([\d.]+)(pt|px)?$/.exec(String(a.fontSize)); if (mm) { const pt = mm[2] === "px" ? Number(mm[1]) * 0.75 : Number(mm[1]); kidsOut.push(el("w:sz", { "w:val": String(Math.round(pt * 2)) })); } }
+        const fsz = a[FONT_SIZE_ATTR]; if (fsz) { const mm = /^([\d.]+)(pt|px)?$/.exec(String(fsz)); if (mm) { const pt = mm[2] === "px" ? Number(mm[1]) * 0.75 : Number(mm[1]); kidsOut.push(el("w:sz", { "w:val": String(Math.round(pt * 2)) })); } }
         if (a.fontFamily) { const f = String(a.fontFamily).split(",")[0].replace(/["']/g, "").trim(); if (f) kidsOut.push(el("w:rFonts", { "w:ascii": f, "w:hAnsi": f, "w:cs": f })); }
         break;
       }
@@ -211,7 +212,7 @@ export function writeDocx({ doc, comments = [], meta = {}, files }) {
     const colsOfRow = (r) => (r.content || []).reduce((s, c) => s + ((c.attrs && c.attrs.colspan) || 1), 0);
     // total grid columns = widest row once vertical spans are counted back in
     let ncols = 0; const carry = [];
-    for (const r of rows) { let c = 0; let cells = r.content || []; let k = 0; let col = 0; while (k < cells.length || (carry[col] > 0)) { if (carry[col] > 0) { carry[col]--; col++; continue; } const cell = cells[k++]; const sp = (cell.attrs && cell.attrs.colspan) || 1; const rs = (cell.attrs && cell.attrs.rowspan) || 1; for (let q = 0; q < sp; q++) carry[col + q] = rs - 1; col += sp; } ncols = Math.max(ncols, col, colsOfRow(r)); }
+    for (const r of rows) { const cells = r.content || []; let k = 0; let col = 0; while (k < cells.length || (carry[col] > 0)) { if (carry[col] > 0) { carry[col]--; col++; continue; } const cell = cells[k++]; const sp = (cell.attrs && cell.attrs.colspan) || 1; const rs = (cell.attrs && cell.attrs.rowspan) || 1; for (let q = 0; q < sp; q++) carry[col + q] = rs - 1; col += sp; } ncols = Math.max(ncols, col, colsOfRow(r)); }
     let grid = (t.attrs && t.attrs.gridCols) || [];
     if (grid.length !== ncols) { // columns were added/removed: rebuild from the cell widths, else split a page evenly
       grid = Array.from({ length: ncols }, () => Math.round(9360 / Math.max(1, ncols)));

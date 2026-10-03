@@ -25,7 +25,7 @@ export const PART = {
 };
 
 // Word's named highlight colours ↔ hex.
-export const HIGHLIGHT = { yellow: "#FFFF00", green: "#00FF00", cyan: "#00FFFF", magenta: "#FF00FF", blue: "#0000FF", red: "#FF0000", darkBlue: "#000080", darkCyan: "#008080", darkGreen: "#008000", darkMagenta: "#800080", darkRed: "#800000", darkYellow: "#808000", darkGray: "#808080", lightGray: "#C0C0C0", black: "#000000", white: "#FFFFFF" };
+export const HIGHLIGHT = { yellow: "#FFFF00", green: "#00FF00", cyan: "#00FFFF", magenta: "#FF00FF", blue: "#0000FF", red: "#FF0000", darkBlue: "#000080", darkCyan: "#008080", darkGreen: "#008000", darkMagenta: "#800080", darkRed: "#800000", darkYellow: "#808000", darkGray: "#808080", lightGray: "#C0C0C0", black: "#000000", white: "#FFFFFF" }; // design-exempt: Word's fixed named highlight palette (file-format data, not UI colour)
 export const HIGHLIGHT_NAME = Object.fromEntries(Object.entries(HIGHLIGHT).map(([k, v]) => [v.toLowerCase(), k]));
 
 // Child order inside <w:pPr> / <w:rPr> (Word is strict about this in places).

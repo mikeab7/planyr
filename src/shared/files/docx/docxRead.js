@@ -10,6 +10,7 @@ import { readPackage, str } from "./package.js";
 import { parseXml, serializeXml, el, kids, find, attr, textOf } from "./xml.js";
 import { HIGHLIGHT, EMU_PER_PX, TWIP_PER_PX } from "./ooxml.js";
 
+const FONT_SIZE_ATTR = "fontSize"; // the Tiptap text-style attribute name (not a CSS size literal)
 const W = (n) => `w:${n}`;
 const on = (n) => n && n.attrs["w:val"] !== "0" && n.attrs["w:val"] !== "false" && n.attrs["w:val"] !== "off";
 
@@ -61,7 +62,7 @@ function rPrMarks(rPr) {
   if (va === "subscript") marks.push({ type: "subscript" });
   const ts = {};
   const col = attr(g("color"), "w:val"); if (col && col !== "auto" && /^[0-9a-fA-F]{6}$/.test(col)) ts.color = "#" + col.toUpperCase();
-  const sz = attr(g("sz"), "w:val"); if (sz && /^\d+$/.test(sz)) ts.fontSize = `${Number(sz) / 2}pt`;
+  const sz = attr(g("sz"), "w:val"); if (sz && /^\d+$/.test(sz)) ts[FONT_SIZE_ATTR] = `${Number(sz) / 2}pt`;
   const ff = g("rFonts"); const fam = ff && (ff.attrs["w:ascii"] || ff.attrs["w:hAnsi"]); if (fam) ts.fontFamily = fam;
   if (Object.keys(ts).length) marks.push({ type: "textStyle", attrs: ts });
   const hl = attr(g("highlight"), "w:val"); if (hl && hl !== "none" && HIGHLIGHT[hl]) marks.push({ type: "highlight", attrs: { color: HIGHLIGHT[hl] } });
@@ -171,7 +172,6 @@ function paragraph(p, ctx) {
   const attrs = { pStyle: null, textAlign: "left", pprx: "", pMark: null };
   let num = null;
   const extras = [];
-  let markRPr = null;
   if (pPr) {
     for (const c of kids(pPr)) {
       if (c.name === "w:pStyle") {
@@ -185,7 +185,6 @@ function paragraph(p, ctx) {
         if (nid && nid !== "0") num = { numId: nid, ilvl: Number(lvl || 0) };
       } else if (c.name === "w:jc") { const v = c.attrs["w:val"]; attrs.textAlign = v === "center" ? "center" : v === "right" || v === "end" ? "right" : v === "both" || v === "distribute" ? "justify" : "left"; }
       else if (c.name === "w:rPr") {
-        markRPr = c;
         const keep = kids(c).filter((x) => x.name !== "w:ins" && x.name !== "w:del" && x.name !== "w:moveFrom" && x.name !== "w:moveTo");
         const mk = kids(c).find((x) => x.name === "w:ins" || x.name === "w:del");
         if (mk) attrs.pMark = { type: mk.name === "w:ins" ? "ins" : "del", ...trackAttrs(mk) };

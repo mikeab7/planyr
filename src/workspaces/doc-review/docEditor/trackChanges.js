@@ -17,7 +17,6 @@ const isoNow = () => new Date().toISOString().replace(/\.\d+Z$/, "Z");
 let seq = 0;
 export const newChangeId = () => `t${Date.now().toString(36)}${(seq++).toString(36)}`;
 
-const isInline = (n) => n.isInline;
 const markOf = (n, type) => n.marks.find((m) => m.type === type) || null;
 
 /* ---------- the fix-up ---------- */
@@ -169,7 +168,6 @@ function resolveOne(tr, change, accept) {
     const pos = change.pos;
     const n = tr.doc.nodeAt(pos);
     if (!n || !n.isTextblock) return;
-    const joins = (kind === "ins") !== accept ? false : false;
     const removeMark = (kind === "ins" && accept) || (kind === "del" && !accept);
     if (removeMark) { tr.setNodeMarkup(pos, undefined, { ...n.attrs, pMark: null }); return; }
     // accept a deleted mark / reject an inserted one → the paragraph merges into the next

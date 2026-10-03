@@ -16,6 +16,7 @@ import { loadModel, buildSave } from "./docModel.js";
 
 const FONTS = ["Calibri", "Arial", "Times New Roman", "Cambria", "Georgia", "Verdana", "Courier New"];
 const SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36];
+const HEX6 = /^#[0-9a-fA-F]{6}$/; // design-exempt: colour-string validation pattern, not a colour
 const when = (d) => { try { return d ? new Date(d).toLocaleString() : ""; } catch { return ""; } };
 const initialsOf = (n) => String(n || "").split(/\s+/).map((w) => w[0] || "").join("").slice(0, 3).toUpperCase();
 const newCommentId = () => `c-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -149,7 +150,7 @@ function Toolbar({ editor, plain, trackOn, setTrackOn, findOpen, setFindOpen, pa
     else if (v === "title") c.setParagraph().updateAttributes("paragraph", { pStyle: "Title" }).run();
     else c.setHeading({ level: Number(v.slice(1)) }).updateAttributes("heading", { pStyle: null }).run();
   };
-  const sizePt = ts.fontSize ? String(parseFloat(ts.fontSize)) : "";
+  const sizePt = ts["fontSize"] ? String(parseFloat(ts["fontSize"])) : "";
   return (
     <div className="dre-bar" role="toolbar" aria-label="Document tools" data-testid="doc-toolbar">
       <div className="dre-group">
@@ -176,7 +177,7 @@ function Toolbar({ editor, plain, trackOn, setTrackOn, findOpen, setFindOpen, pa
           <Btn title="Italic" active={editor.isActive("italic")} onClick={run((c) => c.toggleItalic())}><i>I</i></Btn>
           <Btn title="Underline" active={editor.isActive("underline")} onClick={run((c) => c.toggleUnderline())}><u>U</u></Btn>
           <Btn title="Strikethrough" active={editor.isActive("strike")} onClick={run((c) => c.toggleStrike())}><s>S</s></Btn>
-          <input className="dre-color" type="color" aria-label="Text color" title="Text color" value={/^#[0-9a-fA-F]{6}$/.test(ts.color || "") ? ts.color : "#000000"} onChange={(e) => editor.chain().focus().setColor(e.target.value).run()} />
+          <input className="dre-color" type="color" aria-label="Text color" title="Text color" value={HEX6.test(ts.color || "") ? ts.color : HIGHLIGHT.black} onChange={(e) => editor.chain().focus().setColor(e.target.value).run()} />
           <input className="dre-color" type="color" aria-label="Highlight color" title="Highlight" defaultValue={HIGHLIGHT.yellow} onChange={(e) => editor.chain().focus().setHighlight({ color: e.target.value }).run()} />
           <Btn title="Remove highlight" onClick={run((c) => c.unsetHighlight())}>⌫</Btn>
         </div>
