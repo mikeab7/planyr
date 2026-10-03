@@ -256,6 +256,7 @@
         "time, and it is reached only from the shortcuts page's own lazy chunk, never from the",
         "Site route's boot path. The Site route downloads the SAME BYTES it always did (this module",
         "was previously inlined into SitePlannerApp's own chunk), in one more file.",
+        "GREW BY ONE ON 2026-10-03 (B2016112, free pinch zoom on the browse maps): `freePinchZoom` (src/shared/map/freePinchZoom.js, ~0.9 KB) has a STATIC Site Planner consumer (MapFinder.jsx) and two lazy ones (the Dashboard Locations card and the Food map), so Rollup gives it its own chunk — the fourteenth instance of the identical mechanical reason; the Site route downloads the same bytes in one more file.",
         "GREW BY TWO ON 2026-10-03 (B2014992, Dashboard Locations pins inside their parcel): `siteAnchor` (site-planner/lib/siteAnchor.js, the ONE pin-placement helper, with polylabel/mapLock) and `parcelArea` (its small leaf) each gained a second, lazy consumer (the Dashboard Locations card) alongside the static Site Planner one — the twelfth/thirteenth instance of the identical mechanical reason; the Site route downloads the same bytes in two more files. Worst-case sizing: the measured count may be lower.",
         "GREW BY ONE ON 2026-09-29 (B1953200, names have one source of truth): `names` (src/shared/names/names.js, ~1.3 KB) has a STATIC Site Planner consumer and lazy Library/Model ones — the eleventh instance of the identical mechanical reason; the Site route downloads the same bytes in one more file.",
         "GREW BY ONE ON 2026-09-15 (B1631939, the header project switcher's pin-to-top feature),",
@@ -307,7 +308,8 @@
         "userPrefsStore",
         "names",
         "siteAnchor",
-        "parcelArea"
+        "parcelArea",
+        "freePinchZoom"
       ]
     },
     "notesRouteJsBytes": {
