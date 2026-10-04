@@ -5,7 +5,7 @@ import { startClickAck } from "../../shared/ui/clickAck.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useProjectName, usePlanName, renameProjectChecked, renamePlanChecked } from "../../shared/names/names.js";
-import { loadSite, saveSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
+import { loadSite, saveSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
 import { relTime } from "../../shared/projects/projectModel.js";
 import { collectAssetRefs, releasePlanForOverlay } from "./lib/sharedAssetRefs.js";
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
@@ -27,7 +27,7 @@ import { createNameResolver, describeElement, SELF_ACTOR } from "./lib/editorNam
 import { toastForSyncEvent, describeCoalescedLabel } from "./lib/conflictToasts.js";
 import { listMembers, currentIdentity } from "./lib/teams.js";
 import { multiwriterEnabled } from "./lib/multiwriter.js";
-import { applyLeafPatches } from "./lib/headerMerge.js";
+import { applyLeafPatches, headerSlice, mergeHeader, sameHeader } from "./lib/headerMerge.js";
 import { presenceParties, presenceDisplayName, relativeAgo } from "./lib/presencePill.js";
 import { loadProfile } from "./lib/profile.js";
 import { commitElements, fetchElements, keepaliveCommit } from "./lib/elementApi.js";
@@ -73,7 +73,7 @@ import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, a
 // NEW-1 — the per-site "Show above plan" twin of the four above: which GIS layers this site had
 // lifted over the site elements. Its own sparse map, so nothing about layerOverrides changes.
 import { sanitizeLayerAbove, aboveFromOverlays, applyAboveOverrides, aboveSig } from "./lib/layerPrefs.js";
-import { BASEMAPS, SITE_PLAN_BASEMAP } from "../../shared/basemaps/basemaps.js";
+import { BASEMAPS, SITE_PLAN_BASEMAP, IMAGERY_GRADE } from "../../shared/basemaps/basemaps.js";
 import {
   ppfToZoom, zoomToPpf, exactContainerPoint,
   basemapWrapPoint, registrationShift, sanitizeShift, tileNwFeet, registrationLayoutMayHaveChanged,
@@ -3016,6 +3016,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       geoBaseRef.current = null; geoBackfillRef.current = null;
     }
     geoSrcRef.current = want;
+    // NEW-1 seam fix: gap colour behind the aerial tiles — NOT a tone grade (the planner canvas stays ungraded so it matches the export).
+    try { map.getContainer().classList.toggle(IMAGERY_GRADE.containerClass, !!want); } catch (_) { /* container gone */ }
     if (!want) { setBasemapStatus(null); return; }
     if (geoBaseRef.current || geoBackfillRef.current) return; // already built for this source
     const bm = BASEMAPS[want] || BASEMAPS.esri;
@@ -4953,11 +4955,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // B672 — signed-in tabs converge through the site_elements realtime channel + refetch-replace
       // (rows are canonical); the localStorage union fold below would fight that (it can resurrect
       // an element a row-tombstone just removed). It remains the signed-OUT cross-tab convergence.
-      if (isCloudActive()) return;
       if (busyRef.current) return;
       const stored = loadSite(siteId);
       if (!stored) return;
       const live = liveRef.current || {};
+      /* NEW-1 — the plan HEADER (settings / origin / layer overrides) from another tab of this browser,
+       * merged per leaf against the base this tab last synced (the same mergeHeader the cloud refresh
+       * uses): a leaf this tab has not touched is adopted, one it is editing is kept — never overwritten.
+       * Header only (no element rows), so it is safe for a signed-in tab too, unlike the content union below.
+       * Device-local `snap` is excluded on both sides. */
+      try {
+        const noSnap = (h) => (h && h.settings && "snap" in h.settings ? { ...h, settings: (({ snap, ...r }) => r)(h.settings) } : h);
+        const base = headerBaseOf(siteId);
+        const theirs = noSnap(headerSlice(stored));
+        const mine = noSnap(headerSlice({ settings: live.settings, origin: metaRef.current.origin, layerOverrides: live.layerOverrides, layerAbove: live.layerAbove }));
+        if (sameHeader(theirs, mine)) advanceHeaderBase(siteId, headerSlice(stored)); // in sync → that IS this tab's new base
+        else if (base) {
+          const res = mergeHeader(noSnap(base), mine, theirs);
+          advanceHeaderBase(siteId, headerSlice(stored));
+          if (res.changedFromMine) applyAdoptedHeader(res.adopted);
+        }
+      } catch (_) { /* a header adoption failure must never break the content fold below */ }
+      if (isCloudActive()) return;
       const liveModel = createSiteModel({ id: siteId, ...metaRef.current, ...live, updatedAt: Date.now() });
       const merged = mergeSiteContent(liveModel, stored); // our (newest) scalars + union of content
       // B591 — an id-MEMBERSHIP signature (not just counts): a same-count swap (the other tab
