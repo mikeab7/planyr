@@ -26,15 +26,16 @@
  * own visit history ("filter the list rather than fly the map") — no separate second search
  * box, no separate RPC call; `view === "list"` skips the snapshot lookup entirely.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { rankSearchCandidates } from "../lib/searchQuality.js";
 import { mergeSearchRows, normalizeName } from "../lib/placeIdentity.js";
 import { rankByProximity } from "../lib/searchProximity.js";
+import { createSearchSession, carryOverRows } from "../lib/searchSession.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { SIZE } from "../../../shared/ui/controls.jsx";
 
-const DEBOUNCE_MS = 220;
+const DEBOUNCE_MS = 120; // NEW-1: was 220 — the server answers in tens of ms now, so the wait should not be the slow part
 const MIN_QUERY_LEN = 2;
 const SHOWN_CAP = 10;
 
@@ -59,11 +60,15 @@ export default function SearchBox({
   onRequestLiveSearch, overpassPlaces, onStartDropPinFor,
 }) {
   const [snapshotResults, setSnapshotResults] = useState([]);
+  const [answeredFor, setAnsweredFor] = useState(""); // the (trimmed) query `snapshotResults` answers
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [liveState, setLiveState] = useState("idle"); // idle | pending | done
   const debounceRef = useRef(null);
-  const requestRef = useRef(0);
+  // NEW-1: one session per box — cancels the in-flight request on a newer keystroke, drops out-of-order
+  // answers, and remembers recent answers (same query + same map centre) for instant repeats.
+  const session = useMemo(() => createSearchSession({ run: searchSnapshot }), [searchSnapshot]);
+  useEffect(() => () => session.cancel(), [session]);
   const inputRef = useRef(null); // AnchoredMenu's anchor — the portal positions off this
 
   const trimmed = query.trim();
@@ -73,30 +78,43 @@ export default function SearchBox({
   const center = bounds ? { lat: (bounds.south + bounds.north) / 2, lon: (bounds.west + bounds.east) / 2 } : null;
 
   // Debounced whole-snapshot search — MAP view only; LIST view never fires this RPC at all.
+  // A repeat of a recent query (same map centre) answers from the session cache with no wait and no
+  // request. Otherwise the answer is awaited — but the dropdown never blanks meanwhile: his saved
+  // places and the rows already loaded stay on screen (see `visibleSnapshot` below).
   useEffect(() => {
     if (view !== "map") return undefined;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (trimmed.length < MIN_QUERY_LEN) {
-      setSnapshotResults([]); setLoading(false); setLiveState("idle");
+      session.cancel();
+      setSnapshotResults([]); setAnsweredFor(""); setLoading(false); setLiveState("idle");
       return undefined;
     }
-    setLoading(true);
-    setLiveState("idle");
-    const myRequest = ++requestRef.current;
-    debounceRef.current = setTimeout(async () => {
-      const { data } = await searchSnapshot(trimmed, center);
-      if (myRequest !== requestRef.current) return; // a newer keystroke already superseded this
-      // B709697 — exclude the RPC's own weak/corrupted candidates and rank the rest (see
-      // lib/searchQuality.js for why this is word-coverage + de-rank, not a similarity cutoff).
-      // A place he's already logged or flagged never gets filtered out by this — the search box
-      // must always resolve back to the exact place his own visit/flag history points at.
+    // B709697 — exclude the RPC's own weak/corrupted candidates and rank the rest (see
+    // lib/searchQuality.js for why this is word-coverage + de-rank, not a similarity cutoff).
+    // A place he's already logged or flagged never gets filtered out by this — the search box
+    // must always resolve back to the exact place his own visit/flag history points at.
+    const land = (data) => {
       const protectedIds = new Set([...(loggedIds || []), ...(wishlistIds || [])]);
       setSnapshotResults(rankSearchCandidates(trimmed, data || [], protectedIds));
+      setAnsweredFor(trimmed);
       setLoading(false);
+    };
+    setLiveState("idle");
+    const cached = session.peek(trimmed, center);
+    if (cached) { session.cancel(); land(cached); return undefined; }
+    setLoading(true);
+    debounceRef.current = setTimeout(async () => {
+      const { data, stale } = await session.search(trimmed, center);
+      if (stale) return; // a newer keystroke already superseded this
+      land(data);
     }, DEBOUNCE_MS);
     return () => clearTimeout(debounceRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trimmed, view, searchSnapshot, bounds?.south, bounds?.north, bounds?.west, bounds?.east]);
+  }, [trimmed, view, session, bounds?.south, bounds?.north, bounds?.west, bounds?.east]);
+
+  // Rows to show NOW: once answered, the server's rows; while the next answer is pending, the rows
+  // already loaded that still match what is typed — so typing never empties the list.
+  const visibleSnapshot = carryOverRows(snapshotResults, answeredFor, trimmed, nameMatches);
 
   // A live-search press already fired (FoodApp's existing Overpass wiring, reused as-is) —
   // once its results land, filter them by the CURRENT query and fold matches in.
@@ -109,7 +127,7 @@ export default function SearchBox({
   const manualMatches = view === "map" && trimmed.length >= MIN_QUERY_LEN
     ? (manualPins || []).filter((p) => nameMatches(p.name, q)).map((p) => ({ ...p, kind: "manual", mine: true }))
     : [];
-  const snapshotRanked = snapshotResults.map((p) => ({ ...p, kind: "place", mine: loggedIds?.has(p.id), wishlisted: wishlistIds?.has(p.id) }));
+  const snapshotRanked = visibleSnapshot.map((p) => ({ ...p, kind: "place", mine: loggedIds?.has(p.id), wishlisted: wishlistIds?.has(p.id) }));
   // ONE row per restaurant (B2046224): a restaurant he already has (manual pin, or a place he's
   // logged/flagged) and the snapshot's own record of the same spot are the same row — the surviving
   // row is the one his visits hang off, so picking it opens the EXISTING restaurant. See
@@ -167,9 +185,7 @@ export default function SearchBox({
         }}
       >
         <div data-testid="food-search-results">
-          {loading && <div style={{ padding: "8px 10px", fontSize: 12.5, color: "var(--text-tertiary)" }}>Searching…</div>}
-
-          {!loading && results.map((p) => (
+          {results.map((p) => (
             <button
               key={`${p.kind}:${p.id || p.key || p.name}`} type="button"
               onClick={() => (p.kind === "manual" ? selectManual(p) : selectPlace(p))}
@@ -217,6 +233,9 @@ export default function SearchBox({
               )}
             </button>
           ))}
+
+          {/* NEW-1: BELOW the rows, so the arriving answer never shoves what he is looking at. */}
+          {loading && <div style={{ padding: "8px 10px", fontSize: 12.5, color: "var(--text-tertiary)" }}>Searching…</div>}
 
           {!loading && showLiveOffer && (
             <button
