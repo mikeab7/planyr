@@ -54,16 +54,6 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 ---
 
 ## 🔲 Open
-### B2020064 — Map view: the + / − zoom buttons sat under the Sites panel; a press there opened a site `[site-planner / map-finder]` (bug) #ui #site-planner  *(Owner NEW-1 2026-10-04, planyr.io build 17f94b7, desktop ~1600 wide.)*
-
-`[x]` **Report:** the Leaflet zoom control (bottom-left) was inside the footprint of the left Sites rail, so it could not be clicked and a "zoom out" press opened the Silvestri project.
-`[x]` **Cause:** the rail (z-index above Leaflet's control tier) was capped at "map height − 24" with no knowledge of the zoom stack, so a long site list grew down over it. B427408 moved the control into the bottom-left corner on the assumption the rail only lives at the top.
-`[x]` **Fix:** the rail's height cap now stops above the zoom + locate stack — `sitesRailMaxHeight(topPx)` in `lib/mapChromeStack.js` (map height − its top offset − the existing `ZOOM_CONTROL_CLEARANCE_PX`, floored so the header + a few rows always remain; the list scrolls inside). Same placement system as the rest of the map chrome — no new corner, no z-index raise (the file's own rule). Same cap on phone (open rail) and desktop; collapsed rail never reaches the corner.
-`[x]` **Sandbox proof:** `ui-audit/verify-map-zoom-reachable.mjs` — real `elementFromPoint` hit test at the centre of +, −, and locate, 40 seeded sites, desktop / short desktop / phone × rail open / collapsed; known-good arm requires the open rail to reach its cap or the run is VOID. RED on pre-fix code (short desktop: "+" covered by the rail; rail bottom 502 vs zoom top 484), ALL PASS after. `test/mapChromeStack.test.js` pins the cap arithmetic.
-`[x]` **Constraint check (DoD #4):** no `## Owner product constraints` entry touched.
-- Verify: live — **V1445152** (real signed-in account with his long site list).
-- Stopping rule: closes on a dated pass of V1445152, or Michael saying the buttons now click on his window; a recurrence re-opens THIS item.
-
 ### B2063057 — Cross-device instant sync of the plan header via Supabase Realtime on `sites` (needs an owner go-ahead for a production DB change) `[architecture / sync]` (feature) #site-planner #persistence  *(split from B2063056 — the cross-device option the decision note recommends evaluating, NOT built: `public.sites` is not in the `supabase_realtime` publication (production checked read-only: only `planar_suggestions`, `site_elements`).)*
 
 `[ ]` **Blocker (loud):** needs `alter publication supabase_realtime add table public.sites` on production (outward-facing, not applied without Michael's go-ahead) and a signed-in two-device check the sandbox cannot run. Design is in docs/decisions/instant-cross-tab-sync.md (Option B): a table filter on the EXISTING per-plan channel (0 new connections), one message per header write per other open tab, whole-row payload (size to be measured signed-in), refetch on every re-join, feed into the existing `refreshPlanHeaderFromCloud` → `applyAdoptedHeader`, keep the 45 s tick as fallback.
@@ -5219,6 +5209,16 @@ Both are walled-off compute (Cloud Run); keys server-side only. Until deployed, 
 - Files: `src/shared/brand/BrandMark.jsx` (`plateProps` prop), `src/shared/ui/ModuleLoader.jsx` (`StackMark`, keyframes, removed `SiteSkin`/`SITE_BUILDINGS`), `src/shared/ui/moduleLoaderTheme.js` (`site-planner` skin), `test/moduleLoaderTheme.test.js` (updated for the new kind + the no-caption-label case).
 
 ---
+
+### B2020064 — Map view: the + / − zoom buttons sat under the Sites panel; a press there opened a site `[site-planner / map-finder]` (bug) #ui #site-planner  *(Owner NEW-1 2026-10-04, planyr.io build 17f94b7, desktop ~1600 wide.)*
+
+`[x]` **Report:** the Leaflet zoom control (bottom-left) was inside the footprint of the left Sites rail, so it could not be clicked and a "zoom out" press opened the Silvestri project.
+`[x]` **Cause:** the rail (z-index above Leaflet's control tier) was capped at "map height − 24" with no knowledge of the zoom stack, so a long site list grew down over it. B427408 moved the control into the bottom-left corner on the assumption the rail only lives at the top.
+`[x]` **Fix:** the rail's height cap now stops above the zoom + locate stack — `sitesRailMaxHeight(topPx)` in `lib/mapChromeStack.js` (map height − its top offset − the existing `ZOOM_CONTROL_CLEARANCE_PX`, floored so the header + a few rows always remain; the list scrolls inside). Same placement system as the rest of the map chrome — no new corner, no z-index raise (the file's own rule). Same cap on phone (open rail) and desktop; collapsed rail never reaches the corner.
+`[x]` **Sandbox proof:** `ui-audit/verify-map-zoom-reachable.mjs` — real `elementFromPoint` hit test at the centre of +, −, and locate, 40 seeded sites, desktop / short desktop / phone × rail open / collapsed; known-good arm requires the open rail to reach its cap or the run is VOID. RED on pre-fix code (short desktop: "+" covered by the rail; rail bottom 502 vs zoom top 484), ALL PASS after. `test/mapChromeStack.test.js` pins the cap arithmetic.
+`[x]` **Constraint check (DoD #4):** no `## Owner product constraints` entry touched.
+- Verify: live — **V1445152** (real signed-in account with his long site list).
+- Stopping rule: closes on a dated pass of V1445152, or Michael saying the buttons now click on his window; a recurrence re-opens THIS item.
 
 ## 🎨 UI audit pass — 2026-06-16
 
