@@ -46,6 +46,7 @@
  * Chrome is theme tokens only — no literal colours in this file.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { isCoarsePointerDevice } from "../lib/notesBlankPaper.js";
 import {
   ancestorIds, boundProjectIds, descendantPageIds, displayTitle, findPage, pagesInScope, projectGroups,
   subpagesPhrase, subtreePageIds, trashEntries, unfiledPages,
@@ -116,6 +117,29 @@ const rowBase = {
  * box while writing) is untouched — this removal is the cross-page roll-up only. */
 
 /* ---- primitives ------------------------------------------------------------------------ */
+
+/* ⛔ TOUCH ROUTE TO A ROW'S MENU (NEW-5, iPhone review 2026-09-29). Every page action — rename,
+ * subpage, move, copy, project, export, print, template, delete — lived on a right-click menu, and
+ * iOS Safari never fires `contextmenu` on a long-press (a tree row is `draggable`, so a long-press
+ * starts a DRAG instead). Two touch-only ways in, both opening THE SAME `RowMenu` through the row's
+ * own `onMenu` — no second menu: a visible "⋯" button (44 px), and a ~500 ms long-press. On a coarse
+ * pointer the row is not `draggable` (a long-press is the menu's now; "Move…" in that menu is the
+ * touch way to re-nest). Desktop right-click, Shift+F10 / the ContextMenu key and drag-to-nest are
+ * unchanged — a mouse never sees the "⋯". */
+const ROW_LONG_PRESS_MS = 500;
+const ROW_LONG_PRESS_SLOP = 10;
+function useCoarsePointer() {
+  const [coarse, setCoarse] = useState(() => isCoarsePointerDevice());
+  useEffect(() => {
+    const mq = typeof window !== "undefined" ? window.matchMedia?.("(pointer: coarse)") : null;
+    if (!mq) return undefined;
+    const on = () => setCoarse(!!mq.matches);
+    on();
+    mq.addEventListener?.("change", on);
+    return () => mq.removeEventListener?.("change", on);
+  }, []);
+  return coarse;
+}
 
 function MiniButton({ title, onClick, children, testid, tone = "quiet" }) {
   return (
@@ -449,6 +473,27 @@ function TreeRow({
   const [hover, setHover] = useState(false);
   const ref = useRef(null);
   const weight = depth === 0 ? 650 : depth === 1 ? 600 : 500;
+  const coarse = useCoarsePointer();
+  /* Long-press (touch only): armed on pointerdown, cancelled by travel / a second finger / an early
+   * lift; when it fires, the click that follows the lift is swallowed so it cannot also select. */
+  const pressRef = useRef({ timer: 0, x: 0, y: 0, swallowUntil: 0 });
+  const cancelPress = () => { const p = pressRef.current; if (p.timer) { clearTimeout(p.timer); p.timer = 0; } };
+  useEffect(() => () => { const p = pressRef.current; if (p.timer) clearTimeout(p.timer); }, []);
+  const onPressDown = (e) => {
+    if (e.pointerType !== "touch" || !e.isPrimary || editing || e.target.closest?.("button, input")) { cancelPress(); return; }
+    const p = pressRef.current;
+    cancelPress();
+    p.x = e.clientX; p.y = e.clientY;
+    p.timer = setTimeout(() => {
+      p.timer = 0;
+      p.swallowUntil = performance.now() + 700;
+      onMenu({ x: p.x, y: p.y });
+    }, ROW_LONG_PRESS_MS);
+  };
+  const onPressMove = (e) => {
+    const p = pressRef.current;
+    if (p.timer && Math.hypot(e.clientX - p.x, e.clientY - p.y) > ROW_LONG_PRESS_SLOP) cancelPress();
+  };
 
   const openMenuFromKeyboard = (e) => {
     const box = ref.current?.getBoundingClientRect();
@@ -469,7 +514,11 @@ function TreeRow({
       /* The time a page was last edited is a HOVER, not a column (B1420/B36050) — on every
          row, permanently, it was noise the owner read straight past. */
       title={when ? `${title} — edited ${when}` : title}
-      draggable={!editing}
+      draggable={!editing && !coarse}
+      onPointerDown={onPressDown}
+      onPointerMove={onPressMove}
+      onPointerUp={cancelPress}
+      onPointerCancel={cancelPress}
       onDragStart={onDragStart}
       onDragEnter={onDragEnter}
       onDragOver={onDragOver}
@@ -477,7 +526,10 @@ function TreeRow({
       onDrop={onDrop}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      onClick={onSelect}
+      onClick={(e) => {
+        if (performance.now() < pressRef.current.swallowUntil) { e.preventDefault(); e.stopPropagation(); return; }
+        onSelect(e);
+      }}
       onContextMenu={(e) => { e.preventDefault(); onMenu({ x: e.clientX, y: e.clientY }); }}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(); return; }
@@ -512,6 +564,26 @@ function TreeRow({
           <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: String(title ?? "").trim() ? 1 : 0.55 }}>{displayTitle(title)}</span>
           {confirming ? (
             <ConfirmDelete testid={`notes-del-${id}`} count={confirmCount} onYes={onConfirmDelete} onNo={onCancelDelete} />
+          ) : null}
+          {coarse && !confirming ? (
+            <button
+              type="button"
+              data-testid={`notes-row-more-${id}`}
+              aria-label={`Actions for ${displayTitle(title)}`}
+              aria-haspopup="menu"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(e) => {
+                e.stopPropagation();
+                const r = e.currentTarget.getBoundingClientRect();
+                onMenu({ x: r.left, y: r.bottom });
+              }}
+              style={{
+                flex: "0 0 auto", width: 44, height: 44, margin: "-6px -4px -6px 0", padding: 0,
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                border: "none", borderRadius: RADIUS.control, background: "transparent",
+                color: "inherit", font: "inherit", fontSize: 20, lineHeight: 1, fontWeight: 700, cursor: "pointer",
+              }}
+            >⋯</button>
           ) : null}
         </>
       )}

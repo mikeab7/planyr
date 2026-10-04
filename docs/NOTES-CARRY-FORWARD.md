@@ -1512,3 +1512,9 @@ consecutive runs of the SAME build, so diff identities, never counts. Carried by
 - **TRAP: a tap above the body grows `sheetGrowGap`, which moves the body and the box with it.** Folded into the view (touch + guard window only).
 - **Measure the glyph, not the box:** `ui-audit/verify-notes-touch-landing.mjs` reads a DOM Range over the first character against the tap. Reading the box's own rect would have passed the unfixed build. Seed a view through `planyr:notes:view:v1:local:<id>`; open page 2 through `planyr:notes:activePage:v1:local`.
 - Not provable headless: the keyboard-up `visualViewport` shift and a real fingertip → V1481472.
+
+### Touch routes into the menus (B2061332 / NEW-5, 2026-10-04)
+
+- **iOS Safari fires NO `contextmenu` on a long-press, and a `draggable` row turns a long-press into a drag.** Touch has two routes into the SAME menus: a "⋯" button on each tree row (coarse pointers only) and a 500 ms long-press (travel >10 px cancels — same slop as NEW-2's pan). Rows are not `draggable` on a coarse pointer; `openDocMenuAt` is the right-click handler's body, shared. A selected box gets a top-of-canvas "Delete box" pill on touch (`note-touch-box-bar`).
+- **TRAP: a held touch's lift synthesises a mousedown/click** — the press that opened a menu swallows its own (`longPressSwallowRef` / the row's `swallowUntil`), or releasing the finger selects the row / deselects the box.
+- **Which engine proves what:** Chromium + CDP `Input.dispatchTouchEvent` is a real held touch; WebKit gets dispatched PointerEvents for the hold only. `ui-audit/verify-notes-touch-menus.mjs`.
