@@ -47,12 +47,8 @@ import {
   toggleSelection,
 } from "../lib/notesMarquee.js";
 import {
-<<<<<<< HEAD
-  fitView, frameView, inertiaStep, normalizeView, panBy, panView, pinchView, releaseVelocity, stepZoom, toWorkspace,
+  fitView, frameView, inertiaStep, normalizeView, openingZoom, panBy, panView, pinchView, releaseVelocity, stepZoom, toWorkspace,
   touchTravelled,
-=======
-  fitView, frameView, normalizeView, openingZoom, panBy, stepZoom, toWorkspace,
->>>>>>> origin/main
   VIEW_ZOOM_DEFAULT, wheelIntent, wheelNativeAxis, zoomAbout, zoomForWheel, zoomKeyIntent, zoomLabel,
 } from "../lib/notesViewport.js";
 import { HIGHLIGHT_COLORS, SIZES, TEXT_COLORS } from "../lib/notesFormatPalette.js";

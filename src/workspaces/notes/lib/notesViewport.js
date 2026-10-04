@@ -318,7 +318,6 @@ export function parseView(raw) {
   return normalizeView(obj);
 }
 
-<<<<<<< HEAD
 /* ---- touch: one-finger pan, pinch-with-midpoint, light inertia (NEW-2) ---------------------
  *
  * The mat is `touch-action: none`, so a finger drag produces pointer events and NOTHING ELSE: no
@@ -371,7 +370,8 @@ export function inertiaStep(vel, { friction = 0.92, floor = 0.4 } = {}) {
   const speed = Math.hypot(num(vel?.x), num(vel?.y));
   if (speed < floor) return { delta: { x: 0, y: 0 }, vel: { x: 0, y: 0 }, done: true };
   return { delta: { x: vel.x, y: vel.y }, vel: { x: vel.x * friction, y: vel.y * friction }, done: false };
-=======
+}
+
 /* ---- THE OPENING ZOOM (NEW-4) --------------------------------------------------------------
  *
  * Desktop opens at 100%. A PHONE opens at FIT WIDTH — the whole page width on screen, both edges
@@ -389,5 +389,4 @@ export function openingZoom({ viewport, page } = {}) {
   if (vw > PHONE_VIEWPORT_MAX) return VIEW_ZOOM_DEFAULT;
   const pw = Math.max(1, num(page?.width));
   return clampViewZoom(Math.min((vw - PHONE_PAGE_GUTTER * 2) / pw, PHONE_OPEN_ZOOM_MAX));
->>>>>>> origin/main
 }
