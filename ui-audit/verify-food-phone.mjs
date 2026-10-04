@@ -223,7 +223,7 @@ async function armChain(browser) {
  *   (b) nothing is covering it (elementFromPoint at its centre is the field),
  *   (c) the CARET is in view: the text before the caret, measured with the field's own font, ends inside the field's
  *       visible width (scrollLeft follows the caret) — for a textarea, the caret line is inside the visible height,
- *   (d) no contact-AutoFill hooks: autocomplete is "off" (or a non-contact token) and `name` is not a contact word.
+ *   (d) no contact-AutoFill hooks: autocomplete is a non-standard `x-food-*` token (iOS overrides "off") and `name` is not a contact word.
  * The driver's own actionability scroll would hide a failure (DRIVER-SCROLL-IS-NOT-APP-SCROLL), so the field is brought
  * into reach the way a finger would (an in-page scrollIntoView on the SHEET before the tap), then focused with
  * preventScroll — the browser may not do the app's job for it. KNOWN-GOOD ARM: the Map/List toggle button, a
@@ -294,7 +294,7 @@ async function armFields(browser) {
         const m = await page.locator('[data-testid="food-map"]').boundingBox();
         await page.touchscreen.tap(m.x + m.width * 0.3, m.y + m.height * 0.3);
         await page.waitForTimeout(700);
-        return { sel: 'input[placeholder="Name this place"]' };
+        return { sel: '[data-testid="pin-label-input"]' };
       } },
     ...[
       ["visit form — date", 'input[type="date"]', false, "visit"],
@@ -359,7 +359,8 @@ async function armFields(browser) {
         row(`${tag}: does not extend past the screen edge`, !m.wide, `right=${m.rect.r} vs ${vp.width}`);
         if (f.typed) row(`${tag}: caret in view while typing`, m.caretInView === true, m.caretDetail || "n/a");
         const ac = m.autocomplete, nm = m.name || "";
-        row(`${tag}: no contact-AutoFill hooks`, ac === "off" && !CONTACT_NAMES.test(nm), `autocomplete=${ac} name=${nm || "—"} inputmode=${m.inputmode || "—"} enterkeyhint=${m.enterkeyhint || "—"}`);
+        // B2046224 ×2: "off" is what iOS ignores — the token must be a non-standard x-food-* one.
+        row(`${tag}: no contact-AutoFill hooks`, /^x-food-/.test(ac || "") && !CONTACT_NAMES.test(nm), `autocomplete=${ac} name=${nm || "—"} inputmode=${m.inputmode || "—"} enterkeyhint=${m.enterkeyhint || "—"}`);
       } catch (e) {
         row(tag, false, `probe error: ${String(e.message).split("\n")[0]}`);
       }

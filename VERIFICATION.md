@@ -192,6 +192,21 @@ Sandbox-proven 2026-09-30: `test/louisianaParishes.test.js` (146, red-proofed), 
 4. Query the listed point with `geometry=<lng>,<lat>&geometryType=esriGeometryPoint&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=*&returnGeometry=false&f=json`. **Expect:** a real parcel with an id, an owner and a SITUS column (not the mailing address); repeat at the parish seat and one rural point — none may be empty (the city-hole trap).
 5. Check the response headers for `Access-Control-Allow-Origin`. **Expect:** present; if absent the host needs the exact hostname added to `ALLOWED_HOSTS` in `functions/gis-proxy/[[path]].js`.
 - **Stopping rule:** closes when each of the 10 rows is recorded as wired, rejected (with the reason) or still-blocked (with what stopped it); Calcasieu and Jefferson especially may not stay silent.
+### V1419600 — B1994512: Florida/Georgia pipeline layers draw on planyr.io and a no-hit FL/GA site reads "Not confirmed", never "clear" `Blocker: live-GIS`
+
+Sandbox-proven: `test/eiaPipelineScreen.test.js` (61, red-proofed) and `ui-audit/verify-eia-pipelines.mjs` (27/27 on the built app; EIA responses relayed live through curl because this sandbox's Chromium cannot open remote origins). **Still needs a real browser on the real origin** — CORS from planyr.io, the lines over live aerial, and the real county parcel services.
+**Steps** (signed-in Chrome, planyr.io; read the served chunk hash in the same observation):
+1. Open a **Georgia** plan (metro Atlanta, e.g. 33.75 / -84.39), open Layers. **Expect:** four rows — "Gas pipelines (approx.)", "Petroleum product pipelines (approx.)", "Crude oil pipelines (approx.)", "Gas liquids pipelines (approx.)" — in the main list; the Texas-only layers sit under "not available in Georgia".
+2. Click ⓘ on each row. **Expect:** "Approximate — major transmission lines only. No local gas mains or gathering lines…" and the title-commitment / ALTA survey / **Georgia 811** line.
+3. Toggle all four on at parcel zoom, then zoom out a few steps. **Expect:** gas (orange) and petroleum (ochre) lines draw across metro Atlanta with no console CORS error; crude and gas-liquids read "None mapped in this view — not proof there are none".
+4. Same on a **Florida** plan (e.g. Marion County 29.36 / -82.40). **Expect:** the gas line (Florida Gas Transmission) draws; ⓘ names **Sunshine 811**, never Georgia's.
+5. Open Analysis on a parcel with no line within a mile (downtown Atlanta). **Expect:** Pipelines card = **NOT CONFIRMED**, text says "not 'clear'" and names the title commitment, an ALTA survey and Georgia 811; **never** "None found" or "No mapped RRC pipelines". The wells / LPST / faults cards read "Not available in Georgia yet".
+6. Analysis on a parcel on a mapped line (Marion County FL). **Expect:** **PRESENT**, "Approximate", operator "Florida Gas Trans Co", Sunshine 811.
+7. Open a **Texas** plan (Chambers County). **Expect:** none of the four rows in the main list; Pipelines card still "No mapped RRC pipelines crossing the site" with the Railroad Commission source.
+8. Network tab on steps 5–6. **Expect:** no request to `gis.rrc.texas.gov`; EIA requests to `services2.arcgis.com/FiaPA4ga0iQKduv3`.
+- **Follow-up carried here:** the endpoints are Esri's unmodified republication of the EIA layers (EIA's own host was egress-blocked from the build session). From a machine that can reach `atlas.eia.gov`, confirm EIA's own service URL, layer id, CORS and `/query`; if verified, swap each registry row's `serviceUrl` (one line each) and drop the `monitored-exception` tier.
+- **Stopping rule:** closes on a dated pass of 1–8, or a failed step filed as a recurrence on B1994512.
+
 Sandbox-proven: `test/authPanelSignup.test.js` (15), `e2e/signup-success.spec.js` (4, real built app with Supabase's signup endpoint MOCKED, both session branches, double-submit, placement measured). Not provable here: the real Supabase round trip with Cloudflare Turnstile and a real inbox (the sandbox cannot sign up for real). **Steps** (logged-out window, planyr.io, throwaway address; read the served chunk hash in the SAME observation):
 1. Open Sign up, fill it, pass the Turnstile check, press Create account. **Expect:** the button turns to "Creating account…" and ignores a second press; then the form is REPLACED by "Check your email" naming the address you typed and the sender (Supabase Auth). No password field remains.
 2. Open the email. **Expect:** it is from the sender named on screen; the link confirms the account.
@@ -254,6 +269,37 @@ Sandbox-proven: `test/foodSavedSearchFirst.test.js` red on main, green here. **S
 4. "soma", "tio trompo", "ikes". **Expect:** unchanged — saved first.
 5. Switch Map → List → Map a few times. **Expect:** no `_leaflet_pos` error in the console.
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2070432.
+### V1501920 — B2078592: on a real iPhone there is no floating "Delete box"; press-and-hold inside a box opens the menu with the keyboard kept, and "Delete this box" removes it `Blocker: real-data` (signed-in real device)
+
+Sandbox-proven: `ui-audit/verify-notes-touch-menus.mjs` (WebKit hasTouch+isMobile + Chromium real touch pipeline; red on untouched main). A real held fingertip, iOS's own selection loupe and the real soft keyboard are not producible headless.
+**Steps (real iPhone, a throwaway page):**
+1. Tap into a box and type a few letters. **Expect:** no "Delete box" button or banner anywhere on screen — not while the box is selected, not while typing.
+2. With the keyboard up, press and hold inside the same box for about half a second. **Expect:** the same menu a right-click gives on desktop, including "Delete this box"; the keyboard stays up; the box does not move or start dragging; lifting your finger does not run any menu row.
+3. Choose "Delete this box". **Expect:** the box is gone; Undo brings it back.
+4. In a box, empty its text and press Backspace once more. **Expect:** the empty box disappears (unchanged).
+5. Note whether iOS's own text-selection magnifier ALSO appears over the menu in step 2 (carried from V1484660 step 5; if it does, file it as a recurrence on B2078592).
+6. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–4 (5 recorded), or a failed step filed as a recurrence on B2078592.
+
+### V1501921 — B2078593: on a real iPhone and on desktop, "Hard Cost Pricing" opens at full page width, top near the top of the screen, every time `Blocker: real-data` (signed-in real device, real Organization page)
+
+Sandbox-proven: `ui-audit/verify-notes-open-framing.mjs` (WebKit + Chromium, 390×844 and 1280×800 among the sizes; a view stored by an older build on either kind of device no longer decides the opening; red on untouched main) and `test/notesViewNotPersisted.test.js`. The real page and the real device's leftover storage are not reachable headless.
+**Steps (real iPhone, then desktop; the Organization page "Hard Cost Pricing" — open it only, do not edit it):**
+1. On the iPhone, fully close the tab/app and reopen planyr.io, then open Hard Cost Pricing. **Expect:** the whole page width is on screen — left and right edges and the table's edge — with the page top near the top of the screen; not at 55%, not a third of the way down. (Any view left on that phone by an older build is deleted unread on this open.)
+2. Reload the page on the phone. **Expect:** the same full-width opening again.
+3. Pinch/pan on the phone, open another page, come back to Hard Cost Pricing without reloading. **Expect:** it returns to where you left it (kept for the session only); reload → full width again.
+4. On desktop, open the same page. **Expect:** the same framing — full page width, top near the top; no difference from the phone beyond screen size. If the page is wider than the window it opens shrunk until both edges are visible.
+5. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2078593.
+
+### V1501922 — B2061333: no `page-containment-drift` rows shaped "(0, ~250)" from iPhones after a week on the phone-layout build; keyboard ones arrive as `page-containment-keyboard-reveal` `Blocker: real-data` (needs a week of real iPhone traffic; run on or after 2026-10-11)
+
+Carried from V1484661 step 7, which Michael's 2026-10-04 on-device pass did not cover. A query, not a click-through: Claude-doable once the week has elapsed.
+**Steps:**
+1. Query `client_errors` for kinds `page-containment-drift` and `page-containment-keyboard-reveal` since the NEW-6 deploy (2026-10-04), iPhone user agents only (Supabase `execute_sql`, read-only).
+2. **Expect:** no `page-containment-drift` row shaped "(0, ~250)"; any keyboard-driven ones are filed as `page-containment-keyboard-reveal`. Record the counts and the date range in the entry.
+- **Stopping rule:** closes on a dated query result inside the expectation, or a failed result filed as a recurrence on B2061333.
+
 ### V1474512 — B2050928: Food map controls match — both segmented controls identical, info button md and unclipped, nothing in the toolbar clipped `Blocker: live-GIS (planyr.io is not reachable from the sandbox; no sign-in needed — browsing the map works logged out)`
 
 Sandbox-proven: `ui-audit/ui-inventory.mjs --budget-only` relational gate green on the four Food surfaces (RED on untouched main, named); `test/foodModule.test.js` 426/426. **Steps** (planyr.io at phone width, `#/food`, Map view; read the build from `/version.json` AND the served chunk hash in the same observation; fixtures only — never write to the real food list):
@@ -277,6 +323,19 @@ Sandbox-proven in WebKit-emulated iPhone 15 / SE against a MOCKED Supabase (`ui-
 8. **(amendment — typing, every text field)** With the keyboard up on the iPhone, type a long entry (e.g. `Mizuki Nigiri omakase with extra wasabi…`) in EACH of: the Map-view search box · List-view filter · drop-a-pin name · visit form (date, first dish name, what was good, cost, notes) · edit an old visit · add-a-dish (name, price, note). **Expect, per field:** the text and caret stay on screen and follow what you type (nothing under the keyboard, behind the card or past the screen edge); no field extends past the edge; **no "AutoFill Contact" bar** above the keyboard; the action key reads Search / Next / Done sensibly. Name any field that still fails. (Overlaps V1476080 for the visit form — one pass can close both.)
 9. Desktop browser, full width: every one of those fields looks and types as before.
 - **Stopping rule:** closes on a dated pass of 1–7, or a failed step filed as a recurrence on B2046224.
+### V1497664 — B2046224 (×2): on a real iPhone, the field you type in stays above the keyboard and no "AutoFill Contact" bar appears `Blocker: real-device (no session can raise a real iPhone keyboard or Safari's AutoFill bar)`
+
+Sandbox-proven: `ui-audit/verify-food-ios-keyboard.mjs` models real iOS (layout viewport unchanged, `innerHeight` shrinks with the visual viewport, optional pan) — **RED on the old code for the exact reported field (38/72), 99/99 on the fix**; `verify-food-phone.mjs` 159/159, `verify-food-visit-phone.mjs` 25/25, `test/foodPhone.test.js`. Not provable here: the real keyboard, the real AutoFill bar. **Steps** (iPhone, Safari, planyr.io → Food → Map; read `/version.json` and the served chunk hash in the same check):
+1. Search `Buffalo Grill`, open **The Buffalo Grill** (1301 S Voss Rd). **Expect:** the card opens about half way up, with "Dishes · Sort" visible under the score tiles.
+2. Tap **+ Add a dish**. **Expect:** the keyboard opens, the card slides up to sit on top of the keyboard and fills the screen above it, and the "Dish" field (red underline) is visible above the keyboard with the cursor in it. **No "AutoFill Contact" bar / no own-name suggestion.**
+3. Type a long dish, e.g. `Chicken fried steak with cream gravy and jalapeño mash`. **Expect:** every letter visible as you type.
+4. Tap Price, then Note, typing in each. **Expect:** each one stays visible above the keyboard, and the Done / Save & add another buttons are not on top of it. No AutoFill Contact bar.
+5. Tap Done, close the keyboard. **Expect:** the card drops back to the bottom of the screen.
+6. Tap **Log a visit**; tap Dish, What was good, Cost, Notes in turn (type a few lines in Notes). **Expect:** each field visible above the keyboard while typing; no AutoFill Contact bar on any.
+7. Tap an existing visit card to edit it; tap What was good and Notes. **Expect:** same.
+8. Tap Pin, drop a pin. **Expect:** the place-name field is visible with the keyboard up; no AutoFill Contact bar.
+9. Desktop browser, full width: open the same restaurant. **Expect:** right-hand panel as before, nothing moved.
+- **Stopping rule:** closes on a dated pass of 1–9 from Michael's iPhone; any failed step re-opens B2046224 (×3) with that step number.
 ### V1486288 — B2061600: Select-parcels outlines do not catch when a zoom or pan settles at zoom 14–16 in Bartow County GA `Blocker: real-data`
 
 Sandbox-proven: `ui-audit/verify-parcel-settle-cost.mjs` (z14 moveend settle 103.7 → 0.8 ms, mock at Bartow density), `test/parcelTileLayer.test.js`, and the existing parcel display harnesses. **Not provable here:** Michael's real 63,688-lot Bartow service, his GPU-accelerated Chrome, and how it *feels*. Read the served chunk hash in the SAME observation as the result (CLAUDE.md live-measurement rule).
@@ -358,52 +417,6 @@ Sandbox-proven: `test/teamInviteEmail.test.js` (fake Supabase + fake Resend), `e
 4. Cancel invite. **Expect:** row gone, no row left behind. Existing pending invites (e.g. ryan.baumgartner@hillwood.com) received nothing.
 - **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2049312.
 
-### V1484661 — B2061333: on a real iPhone the caret stays above the keyboard, the essentials are reachable without swiping, and the chrome gets out of the way `Blocker: real-data` (signed-in real device)
-
-Sandbox-proven: `ui-audit/verify-notes-phone-layout.mjs` (WebKit 390x844 with a fake visualViewport for the keyboard; red on untouched main). A real keyboard and a real fingertip are not producible headless.
-**Steps (real iPhone, a throwaway duplicate page):**
-1. Open a long page, tap near the bottom so the keyboard rises, type 10 lines. **Expect:** the line you are typing is always visible above the keyboard.
-2. Look at the toolbar. **Expect:** undo, redo, B, I, U, bullet, numbered, text colour and ⋯ all visible without swiping.
-3. Tap ⋯. **Expect:** a panel with the font, size, alignment, insert menu and the page actions (Find and replace, Page setup, Version history, Export); Find and replace opens the find bar.
-4. With the keyboard up. **Expect:** the row of module tabs is gone, the page did not jump when it went, the help button and zoom control are out of the writing area; dismiss the keyboard and they return.
-5. Select a box and try its grip and a resize handle with a finger. **Expect:** easy to hit without zooming.
-6. Tap toolbar buttons several times. **Expect:** no tooltip stays on screen.
-7. After a week on this build, check `client_errors` for `page-containment-drift` rows from iPhones. **Expect:** none shaped "(0, ~250)"; any keyboard ones now arrive as `page-containment-keyboard-reveal`.
-8. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes on a dated pass of 1–7, or a failed step filed as a recurrence on B2061333.
-### V1484660 — B2061332: on a real iPhone, the page menu and the box menu are reachable (⋯, long-press, Delete box) `Blocker: real-data` (signed-in real device)
-
-Sandbox-proven: `ui-audit/verify-notes-touch-menus.mjs` (Chromium real touch pipeline + WebKit; red on untouched main). A real held fingertip and iOS's own selection loupe are not producible headless.
-**Steps (real iPhone, a throwaway page):**
-1. In the notes list, tap "⋯" on a page. **Expect:** the same menu a right-click gives on desktop; Rename and Delete work.
-2. Press and hold a page row for about half a second. **Expect:** the menu opens; the page does not open and nothing starts dragging.
-3. Press and hold a box in a note. **Expect:** the document menu opens with "Delete this box"; choosing it removes the box (Undo brings it back).
-4. Tap a box so it is selected. **Expect:** a "Delete box" pill at the top of the canvas; pressing it removes the box.
-5. Press and hold inside a box's text. **Expect:** note whether iOS's own text-selection magnifier ALSO appears over the menu (if so, file it as a recurrence here).
-6. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes on a dated pass of 1–4 (5 recorded), or a failed step filed as a recurrence on B2061332.
-### V1484658 — B2061330: on a real iPhone, one finger pans a note, two fingers pinch and follow, the page never stays shifted sideways `Blocker: real-data` (signed-in real device)
-
-Sandbox-proven: `ui-audit/verify-notes-touch-pan.mjs` (Chromium real touch pipeline via CDP + WebKit PointerEvents; red on untouched main). A real finger / iOS rubber-band / system gestures are not producible headless.
-**Steps (real iPhone, a throwaway page):**
-1. Drag one finger on blank paper, on the grey beside the page, and starting on an unselected box's text. **Expect:** the page follows the finger each time; a flick coasts a little and stops.
-2. Tap (no drag) blank paper, then double-tap. **Expect:** same as before — a single tap does not move the page; double-tap places a box.
-3. Select a box (tap it, then use its grip) and drag. **Expect:** the box moves; the page does not pan.
-4. Pinch with two fingers while also moving both. **Expect:** zoom follows the spread and the page travels with your fingers.
-5. Tap into a box near the right edge so the keyboard rises. **Expect:** the page is not left shifted sideways afterwards.
-6. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2061330.
-
-### V1484657 — B2061329: on a real iPhone, tapping into a box keeps the keyboard up and puts the caret where tapped `Blocker: real-data` (signed-in real device)
-
-Sandbox-proven on WebKit (hasTouch + isMobile): `ui-audit/verify-notes-touch-box-tap.mjs`. A real soft keyboard cannot be driven headless.
-**Steps (real iPhone, a throwaway page):**
-1. Double-tap blank paper, type "hello world", then tap inside the word "world". **Expect:** the keyboard does not drop; the caret is where tapped; typing inserts there.
-2. Make a second box; tap from the first box into the second. **Expect:** keyboard stays up, caret in the second box, one tap.
-3. In a box, delete all its text with Backspace, press Backspace once more. **Expect:** the empty box disappears.
-4. Tap a picture box. **Expect:** it selects (handles), no keyboard.
-5. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2061329.
 ### V1468976 — B2043888: phone tab-strip chevrons page cleanly and clamp at both ends `Blocker: real-device (iOS elastic overscroll — not producible headless)`
 
 Sandbox-proven, both engines: `ui-audit/verify-nav-arrows.mjs` (and `ENGINE=webkit`), 31/31; `test/scrollStrip.test.js`. The original overshoot did NOT reproduce headless, so this is the live confirmation. **Steps** (planyr.io on the iPhone, Map with no project; read the served chunk hash in the same observation):
@@ -422,27 +435,6 @@ Sandbox-proven (logged-out, seeded local site, real Chromium): `e2e/mapfinder-no
 4. Return to Site → map. **Expect:** the hint is back only if Select parcels is still on (the mode is kept on purpose).
 - **2026-10-04 WebKit-emulated pass (B2050816, NOT on device, logged-out; chunk `index-BVErCNTL.js` read in the same run):** `node ui-audit/verify-phone-orientations.mjs` (`PLANYR_CASES=notice-leak`) — iPhone SE and iPhone 15, portrait + landscape × Dashboard/Schedule/Review/Library/Notes/Spreadsheet = **24/24 PASS** (hint visible after Select parcels, gone after the switch each time); the same case on the pre-fix build is 0/24 PASS. Steps 1-4 above on a real phone, signed in, remain pending (`Blocker: auth`).
 - **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B2041360.
-
-### V1484656 — B2061328: typing in an open note while the app returns to the foreground / another window pushes never loses either side's text, and the editor stays put `Blocker: auth` (two signed-in windows)
-
-Sandbox-proven: `test/notesOpenPageSync.test.js` (gated fake network, red on main) + `ui-audit/verify-notes-open-page-adopt.mjs` (real editor takes the adopted body in place). The real two-window cloud round-trip needs a signed-in account.
-**Steps (signed in, a throwaway duplicate page — never a real plan):**
-1. Open the same throwaway page in window A and window B. In B, change the FIRST paragraph and wait for "Saved".
-2. In A (not touched since), type a few words in the LAST paragraph and, within a second, switch to another tab/app and back (or click away and back) so the app syncs. **Expect:** the keyboard/caret in A are not dropped; A shows B's first-paragraph change AND its own words.
-3. Wait ~10 s, reload A. **Expect:** both edits present; no "also changed in another window" banner.
-4. Repeat with both windows editing the SAME paragraph. **Expect:** the existing conflict banner (nothing silently lost).
-5. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes on a dated pass of 2–4, or a failed step filed as a recurrence on B2061328.
-### V1484659 — B2061331: a note opens with its top near the top of the canvas, and on a phone both page edges are on screen `Blocker: real-data` (signed-in real device, real notes)
-
-Sandbox-proven: `ui-audit/verify-notes-open-framing.mjs` (WebKit + Chromium, five canvas sizes, three document shapes, CPU-throttled arm; red on untouched main). A real phone's first-paint timing is not producible headless.
-**Steps (real iPhone, signed in, a throwaway duplicate page — never a real plan):**
-1. Open a page you have never panned or zoomed. **Expect:** the sheet's top is right under the toolbar (a small margin), not halfway down; both left and right edges and corners are visible.
-2. Open a long page. **Expect:** same, starting at its top.
-3. Pinch/pan, leave, reopen. **Expect:** your view is restored exactly (not reset to the opening view).
-4. On desktop, open a short page. **Expect:** top near the top of the canvas, page centred sideways.
-5. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2061331.
 
 ### V1464320 — B2039232: an open file has a Close (×) back to the sheet index; unsaved Word/text edits ask first; reload after Close stays on the index `Blocker: auth`
 
@@ -505,7 +497,8 @@ Sandbox-proven (logged in via a seeded session + mocked profile row): `e2e/setti
 
 ### V1448016 — B2022928: a Word file opened in Review keeps tracked changes + comments through Save, in the Library and in Microsoft Word `Blocker: auth`
 
-Sandbox-proven: `test/docEditorDocx.test.js` (20) + `test/docEditorOpenSave.test.js` (12) + `ui-audit/verify-doc-editor.mjs` (29, real Chromium, logged out: open fixture, real typing, Track Changes, comment/reply/resolve, accept one change, find/replace, Save → the bytes handed to the Library path re-parsed and checked, .txt byte-exact, .doc → new .docx, 0 downloads, 390-wide no sideways scroll, PDF still on the canvas). Pending: everything that needs a signed-in account and the real Library, plus Microsoft Word itself (**not available in the sandbox; its LibreOffice has no Writer module**).
+Sandbox-proven: `test/docEditorDocx.test.js` (20) + `test/docEditorOpenSave.test.js` (12) + `ui-audit/verify-doc-editor.mjs` (29, real Chromium, logged out: open fixture, real typing, Track Changes, comment/reply/resolve, accept one change, find/replace, Save → the bytes handed to the Library path re-parsed and checked, .txt byte-exact, .doc → new .docx, 0 downloads, 390-wide no sideways scroll, PDF still on the canvas). Pending: everything that needs a signed-in account and the real Library, plus Microsoft Word itself (**not available in the sandbox**).
+**2026-10-03 additions (B2032656–B2032658):** (a) a second word processor now reads a Planyr-saved file — `ui-audit/verify-docx-libreoffice.mjs`, **21/21 on LibreOffice 24.2.7.2 (NOT Word)**: Word-authored insertion/deletion/format-change/comment kept with their authors and dates, Planyr-made insertion/deletion/comment by their authors, a reply attached to the right parent, heading/table/image/list intact, and every XML part valid against the ISO/IEC 29500 schemas (installing `libreoffice-writer` in the container was all it took; the earlier "no Writer module" was the base image). (b) Word formatting changes are now shown/accepted/rejected/written back (B2032656) and a legacy `.doc` brings its formatting (B2032657) — Word itself still has to confirm steps 8–9 below.
 **Steps** (planyr.io, signed in; use a THROWAWAY copy of a real Word file, never the original; read the served chunk hash in the same observation):
 1. In the Library, upload a `.docx` that already has one tracked insertion, one tracked deletion and one comment (made in Word). Click its row. **Expect:** it opens in Review as an editable document (no drawing canvas, no measure tools), with the insertion, deletion and comment all showing with author and time, and no download starts.
 2. Turn Track changes on, type a sentence, delete a word, add a comment on a selection, reply to the existing comment, accept the existing insertion, press Save. **Expect:** "Saved to the Library." and the header cloud badge settles to saved.
@@ -514,6 +507,8 @@ Sandbox-proven: `test/docEditorDocx.test.js` (20) + `test/docEditorOpenSave.test
 5. Open a `.doc` from the Library, press Save. **Expect:** a one-line note says a new `.docx` is created; a NEW file named `<name>.docx` appears in the Library next to the original `.doc`, which is still there; the editor shows the new `.docx`.
 6. On a machine with Microsoft Word, download the step-2 file from the Library (explicit download) and open it in Word. **Expect:** Word shows the tracked insertion/deletion with the right authors in Review > Track Changes and all comments, replies and the resolved state in the comments pane, with no "unreadable content" repair prompt. Then make a tracked change and a comment IN Word, save, replace the Library file, open it here. **Expect:** both appear in the editor.
 7. On an iPhone-width window (or a phone), open the same `.docx`. **Expect:** the toolbar wraps, the Review pane sits under the page, and the page never scrolls sideways.
+8. (B2032656) In Word, on a THROWAWAY copy, turn Track Changes on, make the first word bold, change one paragraph from Heading 1 to Heading 2, indent another, save, upload to the Library and open it in Review. **Expect:** a "Formatted: Bold", a "Formatted: paragraph style" and a "Formatted: …indent" card, each with your name and time, and a dotted underline on the bold word; no warning bar. Reject the bold one, press Save, open the saved file in Word. **Expect:** the bold is gone, the other two formatting changes are still tracked balloons in Review ▸ Track Changes with your name, and Word shows no "unreadable content" repair prompt. Accept one more in Word. **Expect:** it applies cleanly.
+9. (B2032657) Upload a real old Word `.doc` (a throwaway copy of a deed or a report with a heading, a bulleted list and a table), click it. **Expect:** headings, bold, the list and the table show; the note under the toolbar lists what did not come across. Press Save as .docx, then open the new `.docx` in Word. **Expect:** same look, no repair prompt, and the original `.doc` is still in the Library.
 - **Stopping rule:** closes on a dated pass of 1-7, or a failed step filed as a recurrence on B2022928.
 
 ### V1449712 — B2024624–B2024627: click-a-lot at Grand Port draws one outline source, no flash, no freeze, owner filled `Blocker: real-data`
@@ -794,18 +789,6 @@ Sandbox-proven (logged out, throwaway seeded plan, real pointer + key events, fo
 5. Hard-reload with `?cb=<anything>`. **Expect:** the crop and both kept shapes persist.
 6. Read the served chunk hash in the same observation as each result.
 - **Stopping rule:** closes on a dated pass of 1–5 with the build hash, or a failed step is filed as a recurrence on the matching B# (STANDING RULE #2).
-
-### V1396784 — B1960480: double-tap on blank paper raises the soft keyboard and the first text lands in the new box (real iPhone keyboard)
-
-Sandbox-proven on WebKit (touch emulation, `ui-audit/verify-notes-touch-place.mjs`) — keyboard typing, keydown-less `insertText`, title-focused variant, no scroll. NOT provable here: the real iOS soft keyboard, QuickPath, dictation, IME and autocapitalise.
-**Steps (real iPhone, a throwaway page):**
-1. Open a page, double-tap blank paper. **Expect:** the keyboard rises immediately and the shift key is on.
-2. Type "hello" (autocapitalise on). **Expect:** "Hello" appears in a NEW box at the tapped spot.
-3. Focus the page title, then double-tap blank paper. **Expect:** keyboard stays up, next letters go into the box, title unchanged.
-4. Double-tap blank paper on a page with an existing box, then tap a predictive suggestion / dictate / insert an emoji. **Expect:** it lands in the new box, not the old one.
-5. Empty page. **Expect:** the prompt reads "Double-tap anywhere to start a note."
-6. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1960480.
 
 ### V1481472 — B1960480 (×2): on a real iPhone, a double-tap on blank paper puts the first letter exactly where the finger was `Blocker: real-data` (signed-in real device)
 

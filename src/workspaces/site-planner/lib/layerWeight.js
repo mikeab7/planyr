@@ -62,6 +62,10 @@ export const LAYER_TIER = {
   wetlands: "constraint",          // a 404 permit is a schedule-killer
   txrrc_pipe: "constraint",        // a pipeline crossing the tract
   txrrc_pipe_easement: "constraint", // …and the easement it carries
+  eia_gas: "constraint",           // NEW-1 — FL/GA approximate pipelines: same constraint, lower certainty
+  eia_petroleum: "constraint",
+  eia_crude: "constraint",
+  eia_hgl: "constraint",
   faults: "constraint",            // a growth fault under a slab
   bkdd_easements: "constraint",    // a district easement IS a hard buildable-area constraint
   hcfcd_row: "constraint",         // channel right-of-way, same

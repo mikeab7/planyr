@@ -741,9 +741,15 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   the browser's own zoom is `preventDefault`ed for all of them. The view is a **ref**, written
   straight onto the layer's `transform` by `applyView()` and re-asserted in a layout effect, so a
   pan re-renders NOTHING (VIEW-INDEPENDENT-ONCE by construction) and no other render can drop it.
-  It persists **per page** (`planyr:notes:view:v1:<scope>:<pageId>`), and the opening framing
-  follows the page only until the first size-stable pass or the first thing the person does,
-  whichever comes first — a page that re-centres itself later is "the whole page jumped."
+  **⛔ A note OPENS AT FULL PAGE WIDTH on every device, every time (owner, 2026-10-04, B2078593)** —
+  a saved view may NOT decide how a page opens (his phone opened a page at 55% off a view left in
+  its own localStorage while his desktop framed it differently). The view is kept **in memory only,
+  per page, for the life of the tab** (`readNoteView`/`writeNoteView` in `lib/notesStore.js`; leaving
+  a page and returning in one session restores it; a reload re-frames) and NOTHING is written to
+  storage; views an older build stored (`planyr:notes:view:v1:*`) are deleted on first look. The opening
+  zoom is `openingZoom` (a pure function of viewport + page, both edges on screen on every device).
+  The opening framing follows the page only until the first size-stable pass or the first thing the
+  person does, whichever comes first — a page that re-centres itself later is "the whole page jumped."
   - **⛔ WHAT WENT, AND WHY IT IS A REPLACEMENT RATHER THAN AN ADDITION.** That module scaled
     the sheet with CSS `zoom` while the sheet kept `width: 100%` of the pane, so zooming made the
     letters bigger and the page stayed the same width on screen: **the text RE-WRAPPED.** That is
