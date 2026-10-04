@@ -77,7 +77,7 @@ export async function searchPlacesByName(query, center, signal) {
  *  can reference places far outside whatever the map happens to have in view right now. */
 export async function fetchPlacesByIds(ids) {
   if (!supabase || !ids || ids.length === 0) return { data: [], error: null };
-  const { data, error } = await supabase.from("food_places").select("id,name,lat,lon,category").in("id", ids);
+  const { data, error } = await supabase.from("food_places").select("id,name,lat,lon,category,address").in("id", ids);
   return { data: data || [], error };
 }
 

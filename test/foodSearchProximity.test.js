@@ -57,12 +57,12 @@ describe("rankByProximity", () => {
     expect(out.indexOf("farBest")).toBeLessThan(out.indexOf("nearWeak")); // 0.5 is not
   });
 
-  it("saved vs place-search at a similar distance: the saved place leads; a clearly nearer place still wins", () => {
+  it("saved vs place-search: the saved place leads at a similar distance AND when a clearly nearer place exists (owner 2026-10-04 reversed the old 'nearer still wins')", () => {
     const saved = { id: "s", name: "Cafe Uno", lat: 29.80, lon: -95.82, kind: "manual", mine: true, sim: undefined };
     const placeSame = row("p", "Cafe Uno", 29.8005, -95.82);
     const placeNear = row("n", "Cafe Uno", 29.7858, -95.8245);
     expect(ids(rankByProximity("cafe uno", [placeSame, saved], KATY))).toEqual(["s", "p"]);
-    expect(ids(rankByProximity("cafe uno", [saved, placeNear], KATY))[0]).toBe("n");
+    expect(ids(rankByProximity("cafe uno", [saved, placeNear], KATY))[0]).toBe("s");
   });
 
   it("zoomed far out (whole state in view): distance from the centre still orders them; no view keeps input order", () => {

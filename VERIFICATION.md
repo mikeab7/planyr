@@ -176,6 +176,15 @@ Sandbox-proven: server 220–259 ms → 13–90 ms with identical ordered result
 5. With the box showing a chain (`torchy`), pan the map to another part of town. **Expect:** the nearest branches to the new view lead, as before this change.
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2069808.
 
+### V1493760 — B2070432: Food search shows his saved restaurant first, once, tagged `Blocker: auth`
+
+Sandbox-proven: `test/foodSavedSearchFirst.test.js` red on main, green here. **Steps** (planyr.io signed in, `#/food`, Map view; read the build from `/version.json` with cache:no-store in the SAME check):
+1. Houston-wide view, type "daon". **Expect:** DAO'N Korean Modern Restaurant is row 1 with BEEN HERE, exactly once; no second DAO'N row.
+2. Zoom into a spot far from it (e.g. Dallas) and type "daon" again. **Expect:** same — his DAO'N is still row 1, once.
+3. Repeat at both views for "Captain Tom", "Roadhouse", "El Tiempo". **Expect:** each saved place leads, tagged, once each (El Tiempo shows both his Cantina and Taqueria first).
+4. "soma", "tio trompo", "ikes". **Expect:** unchanged — saved first.
+5. Switch Map → List → Map a few times. **Expect:** no `_leaflet_pos` error in the console.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2070432.
 ### V1474512 — B2050928: Food map controls match — both segmented controls identical, info button md and unclipped, nothing in the toolbar clipped `Blocker: live-GIS (planyr.io is not reachable from the sandbox; no sign-in needed — browsing the map works logged out)`
 
 Sandbox-proven: `ui-audit/ui-inventory.mjs --budget-only` relational gate green on the four Food surfaces (RED on untouched main, named); `test/foodModule.test.js` 426/426. **Steps** (planyr.io at phone width, `#/food`, Map view; read the build from `/version.json` AND the served chunk hash in the same observation; fixtures only — never write to the real food list):
