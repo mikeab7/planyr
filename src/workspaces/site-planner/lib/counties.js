@@ -2815,8 +2815,16 @@ export function countyBboxIntersectsView(key, bounds) {
  * over-inclusive-but-bounded answer) so the first frame is never empty. A view over a state with no
  * source returns []. `bounds` is a plain `{south, west, north, east}`. Pure. Mirrors the click
  * path's narrowing, so what you SEE still equals what you can SELECT (B137). */
+/* NEW-1 (settle cost) — a settle asks this for the SAME view more than once (the source sync, then the
+ * outline-floor hint via `displayFloorForView`), and each ask is 81 county point-in-polygon resolves
+ * (~25 ms measured at a Bartow zoom). One remembered answer per exact view removes the repeats; it is only
+ * kept when the county geometry was resident (a `pending` answer is the transient bbox fallback and must be
+ * recomputed once the asset lands). */
+let _viewSourcesMemo = null;
 export function displaySourcesForView(bounds) {
   if (!bounds) return [];
+  const mk = `${bounds.south}|${bounds.west}|${bounds.north}|${bounds.east}`;
+  if (_viewSourcesMemo && _viewSourcesMemo.key === mk) return _viewSourcesMemo.out.slice();
   const out = new Set();
   const N = 8; // (N+1)² sample points
   let pending = false;
@@ -2837,7 +2845,9 @@ export function displaySourcesForView(bounds) {
       if (!c.statewide && c.bbox && countyBboxIntersectsView(k, bounds)) out.add(k);
     });
   }
-  return [...out];
+  const res = [...out];
+  _viewSourcesMemo = pending ? null : { key: mk, out: res };
+  return res.slice();
 }
 
 /* NEW-2 (California) — a source may declare a HIGHER outline floor than the generic PARCEL_MINZOOM when it cannot
@@ -2863,8 +2873,15 @@ export const displayFloorForPoint = (lat, lng) => Math.max(0, ...candidateCounti
 export const statewideKeysForState = (state) =>
   Object.entries(COUNTIES_MAP).filter(([, c]) => c.statewide && (!c.state || c.state === state)).map(([k]) => k);
 
+/* NEW-1 (settle cost) — `COUNTIES_MAP` is a key-normalising Proxy over ~175 sources, and `Object.entries` on it
+ * costs ~0.23 ms a call; `displaySourcesForView` resolves 81 sample points per settle, so that one line was
+ * ~19 of the ~24 ms. The map is assigned once at load and never mutated (no write to it exists anywhere in
+ * the tree), so the entry list is read once. */
+let _countyEntriesMemo = null;
+const countyEntries = () => _countyEntriesMemo || (_countyEntriesMemo = Object.entries(COUNTIES_MAP));
+
 export function candidateCountiesForPoint(lat, lng) {
-  const entries = Object.entries(COUNTIES_MAP);
+  const entries = countyEntries();
   const within = entries
     .filter(([, c]) => { const b = c.bbox; return b && lat >= b[0] && lat <= b[2] && lng >= b[1] && lng <= b[3]; })
     .map(([k]) => k);
