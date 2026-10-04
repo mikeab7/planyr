@@ -231,8 +231,9 @@ try {
     await roadSlider.fill("0.3");
     await pacedWait(page, 400);
     const liveOpacity = await page.evaluate(() => {
-      const img = document.querySelector('img[src*="World_Transportation"]');
-      return img ? getComputedStyle(img.closest(".leaflet-layer")).opacity : null;
+      // NEW-1 (B2018608): road names are the vector pane now; the slider is that pane's opacity.
+      const pane = document.querySelector(".leaflet-planyrVectorLabels-pane");
+      return pane ? getComputedStyle(pane).opacity : null;
     });
     check("B427410×3 · dragging the slider actually changes the rendered layer's opacity", liveOpacity === "0.3", `rendered opacity=${liveOpacity}`);
     // restore for any later arm of this harness that reasons about the default

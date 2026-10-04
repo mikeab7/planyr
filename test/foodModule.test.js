@@ -935,7 +935,7 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     // The gate expression itself is gone from the tile-layer effect — never dead code left behind.
     expect(map).not.toMatch(/narrowViewport && source\.url1x/);
     const tileEffectSrc = map.slice(map.indexOf("Basemap tile layer"), map.indexOf("}, [basemap]);"));
-    expect(tileEffectSrc).toMatch(/basemapTileLayers\(resolveBasemapChoice\(basemap\)\)/);
+    expect(tileEffectSrc).toMatch(/basemapTileLayers\(choice, \{ dpr: window\.devicePixelRatio \|\| 1 \}\)/);
   });
 
   it("B651872 (×4) — a real loading treatment tied to the current tile layer's own events, never silent grey", () => {
@@ -999,7 +999,7 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     expect(map).toMatch(/data-testid="food-attribution-text"/);
     const textBlock = map.slice(map.indexOf('data-testid="food-attribution-text"') - 100, map.indexOf('data-testid="food-attribution-text"') + 900);
     expect(textBlock).toMatch(/!narrowViewport/); // desktop only — never gated on anything else
-    expect(textBlock).toMatch(/bottom: 6, right: 10/);
+    expect(textBlock).toMatch(/bottom: 6, right: ATTRIBUTION_CLEAR_HELP_RIGHT/);
     expect(textBlock).not.toMatch(/onClick/); // not a button — always visible, nothing to expand
     expect(textBlock).toMatch(/dangerouslySetInnerHTML/); // same trusted attribution HTML, not a collapsed affordance
   });
