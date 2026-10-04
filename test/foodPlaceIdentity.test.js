@@ -152,9 +152,12 @@ describe("wiring (B2046224)", () => {
     expect(search).not.toMatch(/\.\.\.manualMatches,\s*\n\s*\.\.\.snapshotRanked/);
   });
   it("the phone toolbar fills one screen: the search field flexes instead of a fixed width past the edge", () => {
-    expect(app).toMatch(/fill=\{narrow\}/);
-    expect(app).toMatch(/calc\(100vw - 12px\)/);
-    expect(search).toMatch(/width: fill \? "100%" : 220/);
+    // NEW-1 (food controls): one row that fits its slot (width 100%, min-width 0); the search field
+    // takes whatever the Map/List switch and the pin button leave, and the pin label shortens on a phone.
+    expect(app).toMatch(/width: "100%", minWidth: 0/);
+    expect(app).toMatch(/narrow \? "Pin" : "Drop a pin"/);
+    expect(search).toMatch(/flex: "1 1 120px", minWidth: 0, maxWidth: 280/);
+    expect(search).toMatch(/width: "100%"/);
   });
   it("phone selection centres above the bottom sheet: no right-rail shift on narrow", () => {
     expect(map).toMatch(/panelOffsetPx = narrowViewport \? 0 :/);

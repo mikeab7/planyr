@@ -43,10 +43,11 @@ describe("Food header Row 2 — the toolbar zone anchors LEFT when there are no 
 
   it("padding follows the same side the content is anchored to (no dead inset on the empty side)", () => {
     expect(twoZone).toMatch(/paddingLeft:\s*showModuleTabs\s*\?\s*0\s*:\s*6/);
-    expect(twoZone).toMatch(/paddingRight:\s*showModuleTabs\s*\?\s*6\s*:\s*0/);
+    // NEW-1 (food controls): a phone-width no-tabs toolbar fits the row, so it needs its right inset too.
+    expect(twoZone).toMatch(/paddingRight:\s*showModuleTabs\s*\|\|\s*narrow\s*\?\s*6\s*:\s*0/);
   });
 
-  it("the narrow (phone) branch is untouched — still rides the row scroll at its natural width", () => {
-    expect(twoZone).toMatch(/flex:\s*narrow\s*\?\s*"1 0 auto"\s*:\s*1,/);
+  it("a phone WITH module tabs still rides the row scroll at its natural width; a no-tabs route (Food) fits the row", () => {
+    expect(twoZone).toMatch(/flex:\s*narrow && showModuleTabs\s*\?\s*"1 0 auto"\s*:\s*narrow\s*\?\s*"1 1 0"\s*:\s*1,/);
   });
 });

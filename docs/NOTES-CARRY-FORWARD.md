@@ -1519,3 +1519,9 @@ consecutive runs of the SAME build, so diff identities, never counts. Carried by
 - **TRAP: WebKit's native touch caret lands ~2 characters right of the finger** (measured with and without the change). Assert "moved to the tap" (a few characters' tolerance, far from the end), never a glyph-exact position.
 - **TRAP: an empty box cannot be seeded** — the provisional-block prune removes it on load; make one by double-tapping, typing a letter and Backspacing it.
 - `ui-audit/verify-notes-touch-box-tap.mjs` is the harness. On untouched main, `verify-notes-box-selection` (81/131), `-pan`, `-context-menu` (23/27), `-menu-layout` (32/36), `-doubleclick` (12/13) and `-box-drag` already fail — diff failure IDENTITIES against a `git worktree` build of `origin/main`, never "stay green". Harnesses that launch default Chromium need `PW_CHROME=/opt/pw-browsers/chromium-1194/chrome-linux/chrome`.
+
+### Opening framing (B2061331 / NEW-4, 2026-10-04)
+
+- **The first layout pass measures the sheet SHORT (213 px here) and the full height lands ~140 ms later.** Anything that centres the page vertically against the first measurement is a race. `frameView({align:"top"})` is height-independent — use it for opening/Ctrl+0; `fitView` keeps centring. Phones (canvas ≤ 640) open at fit width (`openingZoom`), saved per-page view still wins.
+- **TRAP: an unthrottled run can pass on unfixed code by luck of that race** — a framing harness needs a CPU-throttled arm AND settled-state thresholds (`verify-notes-open-framing.mjs`).
+- **Standing limit:** phone text is 11 px × the opening zoom (~1.0). Readability vs whole-page-width is an owner decision (OWNER-TODO), not a bug.
