@@ -48,6 +48,7 @@ on:
       - main
     paths:
       - "src/workspaces/site-planner/db/**"
+      - "src/workspaces/food/db/**"
   workflow_dispatch:
 
 permissions:
@@ -116,7 +117,9 @@ jobs:
       - name: Run the site-planner SQL guard test suite against the branch
         env:
           DATABASE_URL: ${{ steps.branch.outputs.db_url }}
-        run: node scripts/run-db-tests.mjs --dir src/workspaces/site-planner/db/test
+        run: |
+          node scripts/run-db-tests.mjs --dir src/workspaces/site-planner/db/test
+          node scripts/run-db-tests.mjs --dir src/workspaces/food/db/test
 
       - name: Delete the branch (always, even on failure)
         if: always() && steps.branch.outputs.branch_id != ''
