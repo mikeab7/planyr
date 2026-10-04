@@ -103,6 +103,7 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
   phone shifts for the bottom sheet. `FoodMap` also publishes read-only `data-map-lat/lon/zoom`
   for the repo-root phone harness `verify-food-phone-search` under ui-audit (the phone harness: Chromium iPhone emulation, mocked
   backend; covers duplicate search, map-follow, and the Map/List toggle staying on screen).
+- `lib/searchProximity.js` (B2051664) — orders the merged search list (saved + snapshot + live) nearest the visible map first: text band (exact name/address on top) → in-view → distance from centre, with a small head start for his own places. A bias, never a filter; client-side because the RPC has no viewport parameter. Pure JS.
 - `lib/supabaseClient.js` — this module's own client. See BUNDLE ISOLATION above for why it
   isn't the site-planner's.
 - `db/food.sql` — the applied migration (production, `lyeqzkuiwngunutlkkmi`). `db/test/food_rls.test.sql` — the RLS proof.

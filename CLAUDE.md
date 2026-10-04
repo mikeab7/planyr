@@ -305,6 +305,12 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > title) are computed from the selector at render/export time, never cached. Guards:
 > `test/namesSingleSource.test.js` (fails on `useState` seeded from a name) and
 > `e2e/names-matrix.spec.js` (every entry point × every display, red-proofed).
+> **THE RULE ALSO COVERS OTHER TABLES (B1991040, 2026-09-30):** a stored copy of a project's name
+> (`schedules.linked_site_name`, `doc_reviews.project`, a title composed from it) is only ever the
+> FALLBACK for a link that cannot be resolved — every display resolves it by id at read time
+> (`scheduleOwnership.liveSiteName`, `reviewNaming.liveReviewProject`), an auto-composed title follows
+> the rename and a typed one never moves. `test/nameCopiesGuard.test.js` fails on any new
+> project/plan-name-like SQL column that isn't declared with its read-time rule.
 >
 > **⛔ STANDING RULE — ALL SHARED DATA HAS ONE SOURCE OF TRUTH; NEVER COPY SHARED DATA INTO COMPONENT STATE
 > (owner rule, 2026-09-29, generalising the names rule above after the B1953792 audit found ~27 more
@@ -557,6 +563,14 @@ were split out of this file.
     them out of this work.
 12. **(2026-09-22) Overlay crop is KEEP-INSIDE only.** No keep-outside / hole-punch inverse, on
     either overlay surface. (B1783328.)
+13. **(2026-10-04) Review opens files in TABS, is BLANK when none are open, and the open tabs FOLLOW HIS ACCOUNT between
+    devices.** Michael, verbatim: "it should just be blank, and act like bluebeam with multiple tabs left open if I left
+    tabs open" — this REPLACES the #1920 sheet-index empty state (no heading, buttons, "Pick a project" or sheet index in the
+    blank state) and the #1926 Close (×) (closing is the tab's ×). Then, the same day, superseding his first answer of "per
+    device, like Bluebeam": open tabs (files, order, active tab, page and zoom) are saved to his account so the phone shows what
+    the desktop left open. Last change wins; a Word/txt tab with unsaved edits on a device is never removed by another
+    device; signed out/offline falls back to the local copy. Stored in the existing `profiles.prefs` (`reviewTabs`) — never a
+    new table. Do not reintroduce a landing screen or per-device-only tabs. (See B2058144.)
 
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by

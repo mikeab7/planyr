@@ -824,19 +824,14 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     expect(box).toMatch(/if \(view !== "map"\) return undefined;/);
   });
 
-  it("his own places (manual pins + logged snapshot places) are ranked ahead of everywhere he hasn't been", () => {
+  it("his own places (manual pins + logged snapshot places) stay in the one ranked list, marked, with a distance head start (B2051664 replaced the old absolute 'mine first' order)", () => {
     const box = src("components/SearchBox.jsx");
-    // The merge order is the ranking (lib/searchMerge.js since 2026-10-04): manual pins, then his
-    // logged snapshot places, then the rest — and SearchBox must build its rows through it.
+    // One row per restaurant comes from lib/searchMerge.js (B2064416); the ORDER of that merged list is
+    // lib/searchProximity.js (B2051664) — SearchBox must build its rows through both.
     expect(box).toMatch(/mergeSearchResults\(/);
-    const merge = src("lib/searchMerge.js");
-    const order = merge.slice(merge.indexOf("return [...out.filter"));
-    const manualIdx = order.indexOf('r.kind === "manual"');
-    const mineIdx = order.indexOf('r.kind !== "manual" && isMine(r)');
-    const restIdx = order.indexOf("!isMine(r)");
-    expect(manualIdx).toBeGreaterThanOrEqual(0);
-    expect(manualIdx).toBeLessThan(mineIdx);
-    expect(mineIdx).toBeLessThan(restIdx);
+    expect(box).toMatch(/rankByProximity\(trimmed, merged, bounds\)/);
+    expect(box).toMatch(/mine: loggedIds\?\.has\(p\.id\)/);
+    expect(src("lib/searchProximity.js")).toMatch(/MINE_HEAD_START_KM/);
     // And a result carrying `mine` renders a visible "Been here" mark, not just a sort position.
     expect(box).toMatch(/Been here/);
   });

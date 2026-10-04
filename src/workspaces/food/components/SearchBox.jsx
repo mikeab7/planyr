@@ -4,9 +4,9 @@
  * Searches the WHOLE 100,000+-place, three-metro snapshot by name, never scoped to the current
  * viewport ("the entire point of search is finding a place you cannot see") — backed by
  * `food_places_search_by_name` (db/food.sql), a debounced trigram lookup over a GIN index.
- * His own places (manual pins + anywhere he's logged) rank first and carry a small "You've
- * been here" mark, ahead of the snapshot's relevance order — he is far more often looking for
- * somewhere he's been than somewhere he hasn't.
+ * Results are ordered nearest the visible map first (B2051664, lib/searchProximity.js); his own
+ * places (manual pins + anywhere he's logged) carry a "Been here" mark and a small distance head
+ * start, not an absolute first place.
  *
  * ⛔ THE RESULTS PANEL IS AN AnchoredMenu (fixed 2026-08-18, B632176 — read before ever going back
  * to a plain `position: absolute` div here). Shipped absolutely-positioned inside this
@@ -30,6 +30,7 @@ import { useEffect, useRef, useState } from "react";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { rankSearchCandidates } from "../lib/searchQuality.js";
 import { mergeSearchResults } from "../lib/searchMerge.js";
+import { rankByProximity } from "../lib/searchProximity.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
 
 const DEBOUNCE_MS = 220;
@@ -108,15 +109,19 @@ export default function SearchBox({
   // once its results land, filter them by the CURRENT query and fold matches in.
   const liveMatches = liveState === "done" ? (overpassPlaces || []).filter((p) => nameMatches(p.name, q)) : [];
 
-  // "His own places rank first" — and ONE row per real-world restaurant (owner report, 2026-10-04,
-  // "DAO'N" listed twice): a snapshot/live hit that is a copy of a place he already has is replaced by
-  // his own record, so picking it opens the existing restaurant. See lib/searchMerge.js.
+  // ONE row per real-world restaurant (B2064416, "DAO'N" listed twice): a snapshot/live hit that is a copy
+  // of a place he already has is replaced by his own record (lib/searchMerge.js), so picking it opens the
+  // existing restaurant. THEN the merged list is ordered by the CURRENT map view (B2051664): a strong text
+  // match first, then in-view, then nearest the map centre outward — a bias, never a filter (see
+  // lib/searchProximity.js). Recomputed every render from the live `bounds`, so a pan re-ranks. His own
+  // places keep a small distance head start.
   const snapshotRanked = snapshotResults.map((p) => ({ ...p, kind: "place", mine: loggedIds?.has(p.id), wishlisted: wishlistIds?.has(p.id) }));
-  const results = view === "map" && trimmed.length >= MIN_QUERY_LEN
+  const merged = view === "map" && trimmed.length >= MIN_QUERY_LEN
     ? mergeSearchResults({
-      query: trimmed, manualPins, ownPlaces, loggedIds, wishlistIds, snapshotRanked, liveMatches, cap: SHOWN_CAP,
+      query: trimmed, manualPins, ownPlaces, loggedIds, wishlistIds, snapshotRanked, liveMatches, cap: Infinity,
     })
     : [];
+  const results = rankByProximity(trimmed, merged, bounds).slice(0, SHOWN_CAP);
 
   const settled = !loading && trimmed.length >= MIN_QUERY_LEN;
   const showLiveOffer = view === "map" && settled && liveState === "idle" && results.length < 3 && bounds;
