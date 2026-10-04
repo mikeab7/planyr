@@ -112,6 +112,7 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
   phone (the panel is a bottom sheet) and re-centres above the sheet once it reports its height. Real-browser proof:
   the verify-food-phone harness in the repo-root ui-audit folder (WebKit iPhone descriptors + its foodFixture helper, a fully mocked signed-in
   Supabase — build with `VITE_SUPABASE_URL=https://plnrtestfood123456.supabase.co VITE_SUPABASE_ANON_KEY=fixture-anon`).
+- `lib/searchSession.js` (B2069808) — the search box's request side: cancels the in-flight RPC on a newer query (AbortController), drops out-of-order answers, caches per query + map centre; `carryOverRows` keeps already-loaded rows on screen while the next answer is pending. Pure JS. The RPC body is `food_places_search_by_name_fast` (distance only on rows that can make the cut — see db/food.sql).
 - `lib/searchProximity.js` (B2051664) — orders the merged search list (saved + snapshot + live) nearest the visible map first (B2070432: his saved places that really match LEAD, wherever the map looks): text band (exact name/address on top) → in-view → distance from centre, with a small head start for his own places. A bias, never a filter; client-side because the RPC has no viewport parameter. Pure JS.
 - `lib/supabaseClient.js` — this module's own client. See BUNDLE ISOLATION above for why it
   isn't the site-planner's.
