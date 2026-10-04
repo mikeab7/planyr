@@ -103,3 +103,14 @@ describe("drawParcelTile", () => {
     expect(b).toBeLessThan(Math.max(a * 6, 2));
   });
 });
+
+describe("tile size is independent of the world scale", () => {
+  it("a 512 px tile at map zoom z covers exactly the 2x2 block of 256 px tiles at that zoom", () => {
+    const z = 14, x = 3600, y = 6500; // 512-tile coords
+    const big = tileLngLatBounds(x, y, z, 512, 0);
+    const a = tileLngLatBounds(2 * x, 2 * y, z, 256, 0);
+    const d = tileLngLatBounds(2 * x + 1, 2 * y + 1, z, 256, 0);
+    expect(big[0]).toBeCloseTo(a[0], 9); expect(big[3]).toBeCloseTo(a[3], 9);
+    expect(big[2]).toBeCloseTo(d[2], 9); expect(big[1]).toBeCloseTo(d[1], 9);
+  });
+});

@@ -26,6 +26,9 @@
 export const PARCEL_OUTLINE_STYLE = { color: "#a21caf", weight: 1.3, opacity: 0.95 };
 
 const RAD = Math.PI / 360;
+/* Leaflet's EPSG:3857 world is 256 px wide at zoom 0 whatever the TILE size is; a tile of `size` px at map zoom z
+ * covers world pixels [x*size, (x+1)*size). Keeping the two apart is what lets the layer use big tiles. */
+const WORLD_PX = 256;
 
 /** [w, s, e, n] of a GeoJSON Polygon / MultiPolygon / LineString / MultiLineString, or null. Pure. */
 export function geometryBBox(geom) {
@@ -74,7 +77,7 @@ export function prepareParcel(geometry) {
 /** The lat/lng box a tile covers, padded by `padPx` of its own pixels so a stroke crossing the tile edge
  *  is drawn in BOTH neighbours. Pure. Returns [w, s, e, n]. */
 export function tileLngLatBounds(x, y, z, size = 256, padPx = 2) {
-  const scale = size * Math.pow(2, z);
+  const scale = WORLD_PX * Math.pow(2, z);
   const px0 = x * size - padPx, px1 = (x + 1) * size + padPx, py0 = y * size - padPx, py1 = (y + 1) * size + padPx;
   const lng = (px) => (px / scale) * 360 - 180;
   const lat = (py) => (Math.atan(Math.sinh(Math.PI * (1 - (2 * py) / scale))) * 180) / Math.PI;
@@ -126,7 +129,7 @@ export function drawParcelTile(ctx, index, { x, y, z, size = 256, style = PARCEL
   ctx.clearRect(0, 0, size, size);
   const items = index.query(tileLngLatBounds(x, y, z, size));
   if (!items.length) return 0;
-  const scale = size * Math.pow(2, z), ox = x * size, oy = y * size;
+  const scale = WORLD_PX * Math.pow(2, z), ox = x * size, oy = y * size;
   ctx.beginPath();
   for (let k = 0; k < items.length; k++) {
     const rings = items[k].rings;

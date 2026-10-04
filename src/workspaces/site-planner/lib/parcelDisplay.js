@@ -160,7 +160,7 @@ export function makeParcelLayer(url, opts) {
     mapRef = layer._map;
     if (!mapRef) return;
     mapRef.on("moveend zoomend", onMoved);
-    tiles = new ParcelTiles(index, { pane: "overlayPane", zIndex: 0, minZoom: layer.options.minZoom, maxZoom: 24, tileSize: 256, keepBuffer: 2 });
+    tiles = new ParcelTiles(index, { pane: "overlayPane", zIndex: 0, minZoom: layer.options.minZoom, maxZoom: 24, tileSize: 512, keepBuffer: 1 });
     tiles.addTo(mapRef);
   });
   layer.on("remove", () => {
