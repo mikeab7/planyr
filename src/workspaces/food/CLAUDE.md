@@ -68,7 +68,7 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
 - `FoodApp.jsx` — workspace root (lazy chunk). Owns view state (map/list), the visit CRUD
   flow, and the manual-pin drop flow. No projects, no cross-workspace navigation — this module
   is deliberately outside the Site Planner's project model.
-- `components/FoodMap.jsx` — Leaflet map, canvas-rendered pins; basemap = the shared Site Plan map or Hybrid, defined in the shared basemaps registry under src/shared/ (NEW-1/B2025280 — never inline a tile URL here)
+- `components/FoodMap.jsx` — Leaflet map, canvas-rendered pins; basemap = Satellite (photo only, default) or Hybrid, defined in the shared basemaps registry under src/shared/ (NEW-1/B2025280 — never inline a tile URL here)
   (not SVG — the snapshot query can return up to ~2,000 points). Logged vs not-yet-logged vs
   manual pins are three distinct colors, per the brief.
 - `components/VisitPanel.jsx` — click a pin, see past visits, log another. A right-side panel,
@@ -77,6 +77,14 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
 - `components/DishesSection.jsx` (B1873008) — the place-detail Dishes table, its inline add/edit
   row, "The order," and the per-dish history view. Also mounts inside an editing `VisitCard` for
   the "add dishes under this visit" flow.
+- `lib/keyboardInset.js`, `lib/draftDishes.js`, `lib/noAutofill.js` (B2057920, "Food on a phone") — the
+  covered-by-keyboard height from `visualViewport` (BottomSheet lifts by it), the dishes typed into a
+  NEW visit before it exists (`FoodApp.submitVisit` writes the visit then each dish, all-or-nothing),
+  and the `autocomplete=off` + non-contact `name` props every free-text field spreads (a source sweep in
+  foodPhone.test fails a field that doesn't). There is NO "What I had" input any more; old
+  visits' saved `what_i_had` text stays readable and is never rewritten. At phone width ratings are a
+  1-10 tap grid (`ScoreTapGrid` in ScoreMeter), desktop keeps the slider. Phone harness:
+  verify-food-visit-phone (ui-audit) + its food-panel fixture page.
 - `components/ScoreMeter.jsx` (B1873008) — the per-dish score control (half-point, 1.0–10.0). A
   deliberate sibling of `VisitPanel.jsx`'s own `RatingSlider`, not a replacement — see its own
   header for why the two stayed separate.
@@ -94,6 +102,19 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
   registry-name and confidence de-ranking, corrupted-concatenated-address exclusion, and
   near-duplicate (same real-world spot, multiple sources) collapse. Pure JS, no Supabase import —
   see its own header for the production-measured reasoning behind every threshold.
+- `lib/placeIdentity.js` (B2046224) — pure "is this a restaurant he ALREADY has?": normalised-name
+  (case/apostrophes/punctuation/diacritics-blind) AND within 300 m — never name alone (chains) or distance
+  alone. `mergeSearchRows` gives the search dropdown ONE row per restaurant (a snapshot hit that is really
+  his manual pin shows as the pin), `findExisting` backs `FoodApp.openPlace`, and `addressKey` (B2070432) makes same name + same street address one place even when a source geocoded it kilometres off; `canonicalIdentity` is the
+  SAVE-PATH GUARD every visit save and want-to-try flag resolves through, so no route mints a second record.
+- Phone behaviour (B2046224): the toolbar is exactly one screen wide on a narrow viewport (search field flexes,
+  pin button reads "Pin") so focusing it can't scroll the header row; `FoodMap`'s flyTo has NO horizontal shift on a
+  phone (the panel is a bottom sheet) and re-centres above the sheet once it reports its height. Real-browser proof:
+  the verify-food-phone harness in the repo-root ui-audit folder (WebKit iPhone descriptors + its foodFixture helper, a fully mocked signed-in
+  Supabase — build with `VITE_SUPABASE_URL=https://plnrtestfood123456.supabase.co VITE_SUPABASE_ANON_KEY=fixture-anon`).
+- `lib/searchSession.js` (B2069808) — the search box's request side: cancels the in-flight RPC on a newer query (AbortController), drops out-of-order answers, caches per query + map centre; `carryOverRows` keeps already-loaded rows on screen while the next answer is pending. Pure JS. The RPC body is `food_places_search_by_name_fast` (distance only on rows that can make the cut — see db/food.sql).
+- `lib/searchProximity.js` (B2051664) — orders the merged search list (saved + snapshot + live) nearest the visible map first (B2070432: his saved places that really match LEAD, wherever the map looks): text band (exact name/address on top) → in-view → distance from centre, with a small head start for his own places. A bias, never a filter; client-side because the RPC has no viewport parameter. Pure JS.
+- `lib/warmSearch.js` (B2021648) — once per page load: preconnect to Supabase, resolve the auth session, one throwaway search, so the FIRST real search isn't the slow one. Fire-and-forget.
 - `lib/supabaseClient.js` — this module's own client. See BUNDLE ISOLATION above for why it
   isn't the site-planner's.
 - `db/food.sql` — the applied migration (production, `lyeqzkuiwngunutlkkmi`). `db/test/food_rls.test.sql` — the RLS proof.

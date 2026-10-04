@@ -21,6 +21,7 @@ let SUPABASE_URL = RAW_URL.replace(/\/+$/, "");
 try { if (RAW_URL) SUPABASE_URL = new URL(RAW_URL).origin; } catch (_) {}
 const SUPABASE_ANON = UNDER_VITEST ? "" : ((import.meta.env && import.meta.env.VITE_SUPABASE_ANON_KEY) || "").trim();
 
+export const SUPABASE_ORIGIN = SUPABASE_URL;
 export const supabaseConfigured = () => !!(SUPABASE_URL && SUPABASE_ANON);
 
 export const supabase = supabaseConfigured() ? createClient(SUPABASE_URL, SUPABASE_ANON) : null;

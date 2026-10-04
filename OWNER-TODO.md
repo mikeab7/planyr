@@ -7,6 +7,9 @@
 
 _Last updated: 2026-10-04._
 
+## 📱 Phone: readable text, or the whole page width on screen? (B2061331)
+- [x] ~~**Pick one for how a note opens on your phone.**~~ **Decided 2026-10-04: a note opens showing the whole page width, accepting the smaller text.** That is what it already does (both page edges on screen; a page you have saved a view for still opens exactly as you left it), so nothing changed in the app. Recorded on B2061331. (If the small text ever bothers you, pinch to zoom in — it stays put for that page.)
+
 ## ✉️ Two steps to make team invites actually send email (B2049312)
 
 > **What changed:** Invite and Resend invite now email the person (subject "<you> invited you to <team> on Planyr").

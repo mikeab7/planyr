@@ -1055,6 +1055,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   layer, and this reuses that invariant rather than revisiting it. The pure regime decision
   (`parcelDisplayRegimeForZoom`, `parcelUrlSupportsImageExport`) is split out for the same reason
   `parcelOpacityGuard.js` is: `parcelDisplay.js` imports Leaflet and so cannot be unit-tested.
+- **`parcelTileLayer.js` + `parcelDisplay.js` (B2061600) — the Select-parcels VECTOR outlines are per-tile cached canvases, not one map-sized canvas.** Held lots are inert `ParcelGhost`s (keep `.feature` + `getBounds()`, register NO map events, never go through `map.addLayer` — `createLayers/addLayers/removeLayers` are overridden on the esri featureLayer) so a settle costs what a TILE contains, not what is held (z14 moveend settle 103.7 → 0.8 ms, measured). Anything reading a display layer's children (hit-test, hover, export) must stay on `.feature`/`getBounds()` — never reach for a Path method. Gate: ui-audit `verify-parcel-settle-cost` (deterministic moveend arm) + the repo-root `test/` suite **parcelTileLayer**. ⚠ `vite preview` silently moves to the next port and `kill $!` leaves the child — read the served chunk hash in the same run before trusting an old-vs-new comparison.
 - **`counties.js` — ONE URL MUST NOT CARRY TWO HEALTH POLICIES (NEW-2).** `STATEWIDE_KEYS` answers "is
   this KEY the statewide pseudo-county"; for the display hang-guard that is the wrong question. The
   composite is exempt because pulling it leaves nothing to see or click — a property of the ENDPOINT.

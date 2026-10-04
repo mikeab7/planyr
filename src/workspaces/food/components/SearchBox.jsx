@@ -4,9 +4,9 @@
  * Searches the WHOLE 100,000+-place, three-metro snapshot by name, never scoped to the current
  * viewport ("the entire point of search is finding a place you cannot see") — backed by
  * `food_places_search_by_name` (db/food.sql), a debounced trigram lookup over a GIN index.
- * His own places (manual pins + anywhere he's logged) rank first and carry a small "You've
- * been here" mark, ahead of the snapshot's relevance order — he is far more often looking for
- * somewhere he's been than somewhere he hasn't.
+ * Results are ordered nearest the visible map first (B2051664, lib/searchProximity.js); his own
+ * places (manual pins + anywhere he's logged) carry a "Been here" mark and a small distance head
+ * start, not an absolute first place.
  *
  * ⛔ THE RESULTS PANEL IS AN AnchoredMenu (fixed 2026-08-18, B632176 — read before ever going back
  * to a plain `position: absolute` div here). Shipped absolutely-positioned inside this
@@ -26,36 +26,50 @@
  * own visit history ("filter the list rather than fly the map") — no separate second search
  * box, no separate RPC call; `view === "list"` skips the snapshot lookup entirely.
  */
-import { useEffect, useRef, useState } from "react";
+import { noAutofill } from "../lib/noAutofill.js";
+import { useEffect, useMemo, useRef, useState } from "react";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { rankSearchCandidates } from "../lib/searchQuality.js";
+import { mergeSearchRows, normalizeName } from "../lib/placeIdentity.js";
+import { rankByProximity } from "../lib/searchProximity.js";
+import { createSearchSession, carryOverRows } from "../lib/searchSession.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
+import { SIZE } from "../../../shared/ui/controls.jsx";
 
-const DEBOUNCE_MS = 220;
+const DEBOUNCE_MS = 120; // NEW-1: was 220 — the server answers in tens of ms now, so the wait should not be the slow part
 const MIN_QUERY_LEN = 2;
 const SHOWN_CAP = 10;
 
+// NEW-1 (food controls) — a standalone text field is `md` at the app's standalone-control height and
+// padding (SIZE.md), exactly like the Button beside it in the toolbar — it was a 999 pill with its own
+// padding, so it disagreed with its neighbour on shape AND padding. It takes the row's remaining width
+// (flex, no fixed 220) so on a phone it can never run off the screen's right edge.
 function fieldStyle() {
   return {
-    boxSizing: "border-box", padding: "6px 10px", borderRadius: 999,
+    boxSizing: "border-box", height: SIZE.md.height, padding: SIZE.md.padding, borderRadius: RADIUS.md,
     border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-primary)",
-    font: "inherit", fontSize: 12.5,
+    font: "inherit", fontSize: SIZE.md.fontSize,
   };
 }
 
-const nameMatches = (name, q) => (name || "").toLowerCase().includes(q);
+// Punctuation/case-blind: "daon" finds a manual pin saved as "DAO'N" or "DAO’N" (B2046224).
+const nameMatches = (name, q) => (name || "").toLowerCase().includes(q) || (normalizeName(q) !== "" && normalizeName(name).includes(normalizeName(q)));
 
 export default function SearchBox({
-  query, onQueryChange, view, manualPins, loggedIds, wishlistIds, bounds,
+  query, onQueryChange, view, manualPins, loggedIds, wishlistIds, existing, bounds,
   searchSnapshot, onSelectPlace, onSelectManualPin, onFlyTo,
   onRequestLiveSearch, overpassPlaces, onStartDropPinFor,
 }) {
   const [snapshotResults, setSnapshotResults] = useState([]);
+  const [answeredFor, setAnsweredFor] = useState(""); // the (trimmed) query `snapshotResults` answers
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [liveState, setLiveState] = useState("idle"); // idle | pending | done
   const debounceRef = useRef(null);
-  const requestRef = useRef(0);
+  // NEW-1: one session per box — cancels the in-flight request on a newer keystroke, drops out-of-order
+  // answers, and remembers recent answers (same query + same map centre) for instant repeats.
+  const session = useMemo(() => createSearchSession({ run: searchSnapshot }), [searchSnapshot]);
+  useEffect(() => () => session.cancel(), [session]);
   const inputRef = useRef(null); // AnchoredMenu's anchor — the portal positions off this
 
   const trimmed = query.trim();
@@ -65,48 +79,73 @@ export default function SearchBox({
   const center = bounds ? { lat: (bounds.south + bounds.north) / 2, lon: (bounds.west + bounds.east) / 2 } : null;
 
   // Debounced whole-snapshot search — MAP view only; LIST view never fires this RPC at all.
+  // A repeat of a recent query (same map centre) answers from the session cache with no wait and no
+  // request. Otherwise the answer is awaited — but the dropdown never blanks meanwhile: his saved
+  // places and the rows already loaded stay on screen (see `visibleSnapshot` below).
   useEffect(() => {
     if (view !== "map") return undefined;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (trimmed.length < MIN_QUERY_LEN) {
-      setSnapshotResults([]); setLoading(false); setLiveState("idle");
+      session.cancel();
+      setSnapshotResults([]); setAnsweredFor(""); setLoading(false); setLiveState("idle");
       return undefined;
     }
-    setLoading(true);
-    setLiveState("idle");
-    const myRequest = ++requestRef.current;
-    debounceRef.current = setTimeout(async () => {
-      const { data } = await searchSnapshot(trimmed, center);
-      if (myRequest !== requestRef.current) return; // a newer keystroke already superseded this
-      // B709697 — exclude the RPC's own weak/corrupted candidates and rank the rest (see
-      // lib/searchQuality.js for why this is word-coverage + de-rank, not a similarity cutoff).
-      // A place he's already logged or flagged never gets filtered out by this — the search box
-      // must always resolve back to the exact place his own visit/flag history points at.
+    // B709697 — exclude the RPC's own weak/corrupted candidates and rank the rest (see
+    // lib/searchQuality.js for why this is word-coverage + de-rank, not a similarity cutoff).
+    // A place he's already logged or flagged never gets filtered out by this — the search box
+    // must always resolve back to the exact place his own visit/flag history points at.
+    const land = (data) => {
       const protectedIds = new Set([...(loggedIds || []), ...(wishlistIds || [])]);
       setSnapshotResults(rankSearchCandidates(trimmed, data || [], protectedIds));
+      setAnsweredFor(trimmed);
       setLoading(false);
+    };
+    setLiveState("idle");
+    const cached = session.peek(trimmed, center);
+    if (cached) { session.cancel(); land(cached); return undefined; }
+    setLoading(true);
+    debounceRef.current = setTimeout(async () => {
+      const { data, stale } = await session.search(trimmed, center);
+      if (stale) return; // a newer keystroke already superseded this
+      land(data);
     }, DEBOUNCE_MS);
     return () => clearTimeout(debounceRef.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trimmed, view, searchSnapshot, bounds?.south, bounds?.north, bounds?.west, bounds?.east]);
+  }, [trimmed, view, session, bounds?.south, bounds?.north, bounds?.west, bounds?.east]);
+
+  // Rows to show NOW: once answered, the server's rows; while the next answer is pending, the rows
+  // already loaded that still match what is typed — so typing never empties the list.
+  const visibleSnapshot = carryOverRows(snapshotResults, answeredFor, trimmed, nameMatches);
 
   // A live-search press already fired (FoodApp's existing Overpass wiring, reused as-is) —
   // once its results land, filter them by the CURRENT query and fold matches in.
   const liveMatches = liveState === "done" ? (overpassPlaces || []).filter((p) => nameMatches(p.name, q)) : [];
 
-  // "His own places rank first" — manual pins (never in the snapshot) matched client-side,
-  // plus every snapshot hit he's already logged, ahead of everywhere he hasn't been. Each
-  // bucket keeps the relevance order it already arrived in.
+  // ONE merged list across saved pins, snapshot rows and live rows, ordered by the CURRENT map
+  // view (B2051664): a strong text match first, then in-view, then nearest the map centre
+  // outward — a bias, never a filter (see lib/searchProximity.js). Recomputed every render from
+  // the live `bounds`, so a pan re-ranks. His own places keep a small distance head start.
   const manualMatches = view === "map" && trimmed.length >= MIN_QUERY_LEN
     ? (manualPins || []).filter((p) => nameMatches(p.name, q)).map((p) => ({ ...p, kind: "manual", mine: true }))
     : [];
-  const snapshotRanked = snapshotResults.map((p) => ({ ...p, kind: "place", mine: loggedIds?.has(p.id), wishlisted: wishlistIds?.has(p.id) }));
-  const results = [
-    ...manualMatches,
-    ...snapshotRanked.filter((p) => p.mine),
-    ...snapshotRanked.filter((p) => !p.mine),
-    ...liveMatches.map((p) => ({ ...p, kind: "live" })),
-  ].slice(0, SHOWN_CAP);
+  // His saved places that match by name are ALWAYS candidates, independent of the RPC: it returns a
+  // capped pool (95 "Roadhouse" rows in the snapshot, 60 fetched), so a saved one can simply be absent.
+  const savedPlaceRows = view === "map" && trimmed.length >= MIN_QUERY_LEN
+    ? (existing || []).filter((e) => e.kind === "place" && nameMatches(e.name, q))
+        .map((e) => ({ ...e.ref, kind: "place", mine: !!loggedIds?.has(e.ref.id), wishlisted: !!wishlistIds?.has(e.ref.id) }))
+    : [];
+  const snapshotRanked = [...savedPlaceRows, ...visibleSnapshot.map((p) => ({ ...p, kind: "place", mine: loggedIds?.has(p.id), wishlisted: wishlistIds?.has(p.id) }))];
+  // ONE row per restaurant (B2046224): a restaurant he already has (manual pin, or a place he's
+  // logged/flagged) and the snapshot's own record of the same spot are the same row — the surviving
+  // row is the one his visits hang off, so picking it opens the EXISTING restaurant. See
+  // lib/placeIdentity.js for the match rule (normalised name + proximity, never name alone).
+  const merged = mergeSearchRows({
+    manualRows: manualMatches,
+    snapshotRows: snapshotRanked,
+    liveRows: liveMatches.map((p) => ({ ...p, kind: "live" })),
+    existing: existing || [],
+  });
+  const results = rankByProximity(trimmed, merged, bounds).slice(0, SHOWN_CAP);
 
   const settled = !loading && trimmed.length >= MIN_QUERY_LEN;
   const showLiveOffer = view === "map" && settled && liveState === "idle" && results.length < 3 && bounds;
@@ -129,15 +168,15 @@ export default function SearchBox({
   };
 
   return (
-    <div>
+    <div style={{ flex: "1 1 120px", minWidth: 0, maxWidth: 280 }}>
       <input
         ref={inputRef}
         type="search" value={query} data-testid="food-search-box"
         onChange={(e) => { onQueryChange(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
         placeholder={view === "map" ? "Search restaurants…" : "Filter your visits…"}
-        style={{ ...fieldStyle(), width: 220 }}
-        aria-label="Search restaurants"
+        style={{ ...fieldStyle(), width: "100%" }}
+        aria-label="Search restaurants" {...noAutofill("place-search")} enterKeyHint="search"
       />
       <AnchoredMenu
         open={showDropdown} onClose={() => setOpen(false)} anchorRef={inputRef}
@@ -148,14 +187,12 @@ export default function SearchBox({
         // instead of being swallowed by the backdrop and closing the dropdown first.
         hoverSafe
         panelStyle={{
-          background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: 10,
+          background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: RADIUS.lg,
           boxShadow: "0 10px 28px rgba(0,0,0,0.22)", padding: 6,
         }}
       >
         <div data-testid="food-search-results">
-          {loading && <div style={{ padding: "8px 10px", fontSize: 12.5, color: "var(--text-tertiary)" }}>Searching…</div>}
-
-          {!loading && results.map((p) => (
+          {results.map((p) => (
             <button
               key={`${p.kind}:${p.id || p.key || p.name}`} type="button"
               onClick={() => (p.kind === "manual" ? selectManual(p) : selectPlace(p))}
@@ -203,6 +240,9 @@ export default function SearchBox({
               )}
             </button>
           ))}
+
+          {/* NEW-1: BELOW the rows, so the arriving answer never shoves what he is looking at. */}
+          {loading && <div style={{ padding: "8px 10px", fontSize: 12.5, color: "var(--text-tertiary)" }}>Searching…</div>}
 
           {!loading && showLiveOffer && (
             <button
