@@ -166,6 +166,15 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1469824 — B2051664: Food search lists the places nearest the visible map first (phone, signed in) `Blocker: auth`
+
+Sandbox-proven on fixture rows: `test/foodSearchProximity.test.js`, plus a real-Chromium run of the built app with the search RPC stubbed (Katy first at a Houston-area view; Dallas first after flying there). Pending: the owner's signed-in phone against his real snapshot (read-only — do not log or edit anything). **Steps** (read the served chunk hash in the same observation):
+1. Phone, Food map, zoomed on a neighbourhood. Search a chain name with branches in several cities (e.g. "Torchy's"). **Expect:** branches in the visible area first, nearest the map centre first, then farther ones.
+2. Pan to a different city, re-type the same query. **Expect:** the order re-anchors to the new view.
+3. Search a restaurant you have saved that is far off screen, by exact name. **Expect:** it is at or near the top and tapping it jumps the map there.
+4. Zoom out to the whole state and search. **Expect:** results still appear, ordered by distance from the centre.
+5. Search a name with no match nearby. **Expect:** far matches still listed — never an empty list because the match is off screen.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2051664.
 ### V1468976 — B2043888: phone tab-strip chevrons page cleanly and clamp at both ends `Blocker: real-device (iOS elastic overscroll — not producible headless)`
 
 Sandbox-proven, both engines: `ui-audit/verify-nav-arrows.mjs` (and `ENGINE=webkit`), 31/31; `test/scrollStrip.test.js`. The original overshoot did NOT reproduce headless, so this is the live confirmation. **Steps** (planyr.io on the iPhone, Map with no project; read the served chunk hash in the same observation):

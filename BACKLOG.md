@@ -5279,6 +5279,23 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
+### B2051664 — Food map search: results ordered nearest the visible map first (a bias, never a filter) `[Food]` (feature) #ui  *(Owner chat block NEW-1, 2026-10-04)*
+
+`[x]` **Ask:** the search defaults to the places closest to where the map is currently looking, in order; a specific name/address still wins; saved places and place-search rows both; phone and desktop.
+`[x]` **AUDIT-FIRST — what the provider supports (read from the code):** the only place-search source is `food_places_search_by_name`, a **name-only** trigram RPC with **no viewport/bounds parameter** — just an optional centre point used as a tiebreak after similarity inside its own top-N cut. There is no geocoder anywhere in `/food`. So the bias is **client side**: `lib/searchProximity.js` re-ranks the merged list (saved pins + snapshot rows + live rows) by the CURRENT `bounds` on every render, so a pan re-ranks; `foodStore.SEARCH_RESULT_CAP` 15 → 60 so nearby comparable matches are in the pool.
+`[x]` **Order:** (1) text band — an exact name / full typed address sits above every non-exact match, the rest group into bands of comparable score (0.15 wide); (2) in-view first; (3) distance from the map centre outward; (4) his own places get a 0.2 km head start (replaces the old absolute "his places first", which contradicts nearest-first). Nothing is filtered.
+`[x]` **Tests:** `test/foodSearchProximity.test.js` (12 — Katy-vs-Dallas both ways, exact far name/address on top, just-outside-view still listed, saved vs place at similar distance, whole-state view, no-nearby, pan re-ranks, dedupe collapse intact, wiring); `test/foodModule.test.js` old absolute-order guard re-aimed. Real Chromium (built app, stubbed RPC, fixture rows only): Katy results first at the default view; after flying to Dallas and searching again, Dallas first. No data written.
+`[x]` **Coordination:** no open PR touches Food search (checked); the near-duplicate collapse in `searchQuality.js` runs before the new ranking and is untouched.
+`[x]` **Constraint check:** nothing contradicts an `## Owner product constraints` entry.
+- **NOT built, said loudly → B2051665:** typing a city or street address against the snapshot — the RPC matches names only, so such a query returns nothing from it (saved/live rows only). The ranker already treats a full-address hit as exact when a row carries it.
+- Verify: live — **V1469824** (signed-in phone).
+- Stopping rule: closes on a dated pass of V1469824, or Michael saying the order is right; a wrong order re-opens THIS item with the query and where the map was.
+
+### B2051665 — Food search: snapshot has no address/city search (typing "Dallas" or a street address finds nothing) `[Food]` (feature) #ui  *(FOUND by B2051664's AUDIT-FIRST)*
+
+Owner's NEW-1 expected a far city / full street address to "surface and jump". `food_places_search_by_name` filters `lower(p_query) <% lower(name)` only. **Needs** a new read-only RPC over `food_places.address` (plus an index decision on ~100k rows) applied to production `lyeqzkuiwngunutlkkmi`, then merged into the SearchBox pool — a production schema change, so held for Michael's go-ahead rather than applied from a ranking PR. `lib/searchProximity.js` already ranks such rows correctly.
+- Verify: sandbox. Stopping rule: ships with the RPC, or Michael declines address search.
+
 ### B2043888 — Module tab-strip chevrons: page by an absolute clamped target, snap flush to each end, stay truthful after smooth scroll / rubber-band `[nav / app shell]` (bug) #mobile #ui  *(Owner chat block NAV-ARROWS 2026-10-03, iPhone Safari, planyr.io Map with no project)*
 
 `[x]` **Report:** the phone's module tab strip (Site, Schedule, …) has a ">" chevron; after scrolling, tapping the LEFT arrow "took him too far over" — Site sitting in from the left with empty space beside it and the left arrow gone.
