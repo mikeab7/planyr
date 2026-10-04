@@ -54,7 +54,7 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 ---
 
 ## 🔲 Open
-### B2020064 — Map view: the + / − zoom buttons sat under the Sites panel; a press there opened a site `[site-planner / map-finder]` (bug) #ui #map  *(Owner NEW-1 2026-10-04, planyr.io build 17f94b7, desktop ~1600 wide.)*
+### B2020064 — Map view: the + / − zoom buttons sat under the Sites panel; a press there opened a site `[site-planner / map-finder]` (bug) #ui #site-planner  *(Owner NEW-1 2026-10-04, planyr.io build 17f94b7, desktop ~1600 wide.)*
 
 `[x]` **Report:** the Leaflet zoom control (bottom-left) was inside the footprint of the left Sites rail, so it could not be clicked and a "zoom out" press opened the Silvestri project.
 `[x]` **Cause:** the rail (z-index above Leaflet's control tier) was capped at "map height − 24" with no knowledge of the zoom stack, so a long site list grew down over it. B427408 moved the control into the bottom-left corner on the assumption the rail only lives at the top.
