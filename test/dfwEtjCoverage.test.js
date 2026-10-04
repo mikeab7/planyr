@@ -18,7 +18,7 @@
 import { describe, it, expect } from "vitest";
 import {
   ETJ_SOURCES, etjSourcesForPoint, identifyJurisdiction, formatJurisdictionBadge,
-  etjPointCoverage, inDfwZone, distanceMiles, DFW_ZONE, normalizeFeature, cityAreasFromFeatures,
+  etjPointCoverage, inDfwZone, distanceMiles, DFW_ZONE, normalizeFeature, cityAreasFromFeatures, buildIdentifyParams,
 } from "../src/workspaces/site-planner/lib/jurisdiction.js";
 import { etjNamesOf } from "../src/workspaces/site-planner/lib/etjNames.js";
 import { createGisCache } from "../src/workspaces/site-planner/lib/gisCache.js";
@@ -31,10 +31,11 @@ function makeStore() {
 }
 const freshCache = () => createGisCache({ store: makeStore(), now: () => 1_000_000 });
 
-// Service needles — each is a substring unique to one registry URL.
+// Service needles — each is the URL PATH of one registry row, so a needle can only ever match that row.
+const needleOf = (id) => new URL(ETJ_SOURCES.find((s) => s.id === id).url).pathname;
 const N = {
   county: "Texas_County_Boundaries", city: "Texas_City_Boundaries",
-  collin: "fdWXd5OobWR1E3er", rockwall: "9RjmpzvuPPeYSNdf", denton: "oTsZYNubyv7xK5yP", fortworth: "Fort_Worth_ETJ",
+  collin: needleOf("etj_collin"), rockwall: needleOf("etj_rockwall"), denton: needleOf("etj_denton"), fortworth: needleOf("etj_fortworth"),
 };
 /* routes: { needle: () => features | throws }. An unrouted service THROWS — a test that forgets to
  * route a service the code asked for must fail loudly, exactly as an unreachable one would. */
@@ -48,7 +49,9 @@ function fakeFetch(routes) {
 }
 const attr = (a) => [{ attributes: a }];
 const NONE = () => [];
-const ETJ_ALL_EMPTY = { [N.collin]: NONE, [N.rockwall]: NONE, [N.denton]: NONE, [N.fortworth]: NONE };
+// EVERY registered ETJ service answers "nothing here" unless a test overrides it. Built from the registry, so a
+// newly added publisher can never turn these fixtures into "couldn't check" by being un-routed.
+const ETJ_ALL_EMPTY = Object.fromEntries(ETJ_SOURCES.map((sx) => [needleOf(sx.id), NONE]));
 const ROLES = ["county", "city", "etj"];
 const run = (lng, lat, routes) => identifyJurisdiction(lng, lat, { cache: freshCache(), fetchJson: fakeFetch(routes), roles: ROLES });
 
@@ -59,7 +62,9 @@ describe("routing — every DFW ETJ publisher is reached, and only near its coun
       const row = ETJ_SOURCES.find((s) => s.id === id);
       expect(row, id).toBeTruthy();
       expect(row.url).toBe(GIS_SOURCES[id].serviceUrl);            // one home for the endpoint
-      expect(row.roster.length).toBeGreaterThan(3);
+      // Collin/Rockwall enumerate their cities; Denton's CURRENT edition was probed from a browser only and its city
+      // list was never enumerated, so it declares `rosterUnknown` instead of claiming one (NEW-2).
+      if (id === "etj_denton") expect(row.rosterUnknown).toBe(true); else expect(row.roster.length).toBeGreaterThan(3);
       expect(row.dataLastEdited).toMatch(/^\d{4}-\d{2}-\d{2}$/);   // the tooltip states a date, never "current"
     }
   });
@@ -115,7 +120,7 @@ describe("the four coverage fixtures", () => {
     const boom = () => { throw new Error("HTTP 503"); };
     const j = await run(-96.50, 33.10, {
       [N.county]: () => attr({ CNTY_NM: "Collin" }), [N.city]: NONE,
-      [N.collin]: boom, [N.rockwall]: boom, [N.denton]: boom, [N.fortworth]: boom,
+      ...Object.fromEntries(ETJ_SOURCES.map((sx) => [needleOf(sx.id), boom])),
     });
     expect(j.sources.find((s) => s.id === "etj").state).toBe("failed");
     expect(j.etjUnavailable).toBe(true);
@@ -165,35 +170,75 @@ describe("silence is not a finding — coverage is a claim, checked per county",
 });
 
 // ---------------------------------------------------------------------------------------------
-describe("overlapping ETJ claims are reported as BOTH, never resolved to one", () => {
+describe("a strip two cities claim is DISPUTED — never assigned to a city, never unincorporated", () => {
   const dentonRow = ETJ_SOURCES.find((s) => s.id === "etj_denton");
-  it("Denton County publishes an overlap strip as one feature 'Denton/Cross Roads' → two claims", () => {
-    expect(etjNamesOf(dentonRow, "Denton/Cross Roads")).toEqual(["Denton", "Cross Roads"]);
-    expect(etjNamesOf(dentonRow, "Denton Div 2/Pilot Point")).toEqual(["Denton", "Pilot Point"]);
-    expect(etjNamesOf(dentonRow, "Denton Div 2")).toEqual(["Denton"]);
-    expect(normalizeFeature(dentonRow, { CITY: "Dish/Ponder" }).names).toEqual(["Dish", "Ponder"]);
+  // Denton County's own word (recorded 2026-09-30 from the 2022 edition that carries the same four columns): NAME is
+  // 'Undetermined', and CITY lists the two CLAIMANTS.
+  const UNDET = { NAME: "Undetermined", TYPE: "ETJ", CITY: "Denton/Cross Roads", INC_MUNI: null };
+  it("normalizeFeature flags it, names NO city, and keeps the claimants as claims", () => {
+    const n = normalizeFeature(dentonRow, UNDET);
+    expect(n.undetermined).toBe(true);
+    expect(n.name).toBeNull();
+    expect(n.names).toEqual([]);
+    expect(n.claimants).toEqual(["Denton", "Cross Roads"]);
+    expect(normalizeFeature(dentonRow, { NAME: "Denton Div 2/Sanger".split("/")[0], TYPE: "DIV 2", CITY: "Denton" }).undetermined).toBeUndefined();
   });
-  it("a point in that strip reports BOTH ETJs on the badge", async () => {
+  it("a point in a disputed strip: the ETJ list stays EMPTY, the strip is reported as undetermined, and it is not 'Unincorporated'", async () => {
     const j = await run(-97.2, 33.2, {
-      [N.county]: () => attr({ CNTY_NM: "Denton" }), [N.city]: NONE,
-      ...ETJ_ALL_EMPTY, [N.denton]: () => attr({ CITY: "Denton/Cross Roads" }),
+      [N.county]: () => attr({ CNTY_NM: "Denton" }), [N.city]: NONE, ...ETJ_ALL_EMPTY, [N.denton]: () => attr(UNDET),
     });
-    expect([...j.etj].sort()).toEqual(["Cross Roads", "Denton"]);
-    expect(formatJurisdictionBadge(j).text).toBe("ETJ crosses City of Denton + City of Cross Roads · Denton County");
+    expect(j.etj).toEqual([]);                                   // never assigned to Denton OR Cross Roads
+    expect(j.etjUndetermined).toEqual([{ source: "etj_denton", claimants: ["Denton", "Cross Roads"] }]);
+    expect(j.etjUnavailable).toBe(false);                        // it is a finding, not a gap
+    const b = formatJurisdictionBadge(j);
+    expect(b.text).toBe("ETJ undetermined (disputed) · Denton County");
+    expect(b.text).not.toMatch(/Unincorporated|City of/);
+    expect(b.governingCities).toEqual([]);
   });
-  it("two publishers each claiming the point are unioned and both reported", async () => {
+  it("'DIV 2' is a Denton ETJ division: it reads as Denton ETJ, and TYPE is not filtered on", async () => {
+    const j = await run(-97.15, 33.21, {
+      [N.county]: () => attr({ CNTY_NM: "Denton" }), [N.city]: NONE, ...ETJ_ALL_EMPTY,
+      [N.denton]: () => attr({ NAME: "Denton", TYPE: "DIV 2", CITY: "Denton", INC_MUNI: null }),
+    });
+    expect(j.etj).toEqual(["Denton"]);
+    expect(j.etjUndetermined).toEqual([]);
+    expect(formatJurisdictionBadge(j).text).toBe("City of Denton ETJ · Denton County");
+    expect(buildIdentifyParams(dentonRow, { lng: -97.15, lat: 33.21 }).where).toBeUndefined();   // no TYPE filter
+  });
+  it("a disputed strip ALONGSIDE a named ETJ keeps both facts, each in its own words", async () => {
+    const j = await run(-96.93, 33.207, {
+      [N.county]: () => attr({ CNTY_NM: "Denton" }), [N.city]: NONE, ...ETJ_ALL_EMPTY,
+      [N.collin]: () => attr({ CITY: "Prosper" }), [N.denton]: () => attr(UNDET),
+    });
+    expect(j.etj).toEqual(["Prosper"]);
+    expect(formatJurisdictionBadge(j).text).toBe("City of Prosper ETJ · another ETJ claim undetermined (disputed) · Denton County");
+  });
+  it("two PUBLISHERS each claiming the point are still unioned and both reported (only Denton's own 'Undetermined' is withheld)", async () => {
     const j = await run(-96.93, 33.207, {
       [N.county]: () => attr({ CNTY_NM: "Denton" }), [N.city]: NONE,
-      ...ETJ_ALL_EMPTY, [N.collin]: () => attr({ CITY: "Prosper" }), [N.denton]: () => attr({ CITY: "Little Elm" }),
+      ...ETJ_ALL_EMPTY, [N.collin]: () => attr({ CITY: "Prosper" }), [N.denton]: () => attr({ NAME: "Little Elm", TYPE: "ETJ", CITY: "Little Elm" }),
     });
     expect([...j.etj].sort()).toEqual(["Little Elm", "Prosper"]);
   });
-  it("the area-share path counts an overlap polygon toward EVERY city that claims it", () => {
+  it("an ETJ feature whose name cannot be read is flagged undetermined — never dropped (silence would read as 'no ETJ')", async () => {
+    const j = await run(-97.2, 33.2, {
+      [N.county]: () => attr({ CNTY_NM: "Denton" }), [N.city]: NONE, ...ETJ_ALL_EMPTY, [N.denton]: () => attr({ NAME: "", TYPE: "ETJ", CITY: "" }),
+    });
+    expect(j.etj).toEqual([]);
+    expect((j.etjUndetermined || []).length).toBe(1);
+    expect(formatJurisdictionBadge(j).text).toMatch(/^ETJ undetermined \(disputed\)/);
+  });
+  it("the parcel-share pass counts a disputed polygon toward NO city", () => {
     const ring = [[-97.20, 33.20], [-97.19, 33.20], [-97.19, 33.21], [-97.20, 33.21]];
     const strip = { rings: [[[-97.25, 33.15], [-97.15, 33.15], [-97.15, 33.25], [-97.25, 33.25], [-97.25, 33.15]]] };
-    const res = cityAreasFromFeatures(dentonRow, [{ attrs: { CITY: "Denton/Cross Roads" }, geometry: strip }], [ring], [-97.195, 33.205]);
-    expect(res.rows.map((r) => r.name).sort()).toEqual(["Cross Roads", "Denton"]);
-    for (const r of res.rows) expect(r.share).toBeGreaterThan(0.99);
+    const res = cityAreasFromFeatures(dentonRow, [{ attrs: UNDET, geometry: strip }], [ring], [-97.195, 33.205]);
+    expect(res.rows).toEqual([]);
+  });
+  it("the generic overlap splitter still works for any publisher that declares one (registry data, not code)", () => {
+    const row = { nameSplit: "/", nameStrip: ["\\s+Div\\s*\\d+$"] };
+    expect(etjNamesOf(row, "Denton/Cross Roads")).toEqual(["Denton", "Cross Roads"]);
+    expect(etjNamesOf(row, "Denton Div 2/Pilot Point")).toEqual(["Denton", "Pilot Point"]);
+    expect(etjNamesOf(row, "Denton Div 2")).toEqual(["Denton"]);
   });
 });
 

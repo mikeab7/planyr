@@ -20,7 +20,7 @@
  */
 import L from "leaflet";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
-import { PLACE_NAMES_MAX_ZOOM } from "./placeNamesGate.js";
+import { PLACE_NAMES_MAX_ZOOM, setPlaceNamesShown, placeNameKey } from "./placeNamesGate.js";
 import { decodePlaces, placesForZoom, placeNamesOpacity, layoutLabels, labelFont, placeKey, stepScalar, stepFade, TOWNS_MIN_ZOOM } from "./placeNamesData.js";
 import { createZoomTracker } from "./zoomTracker.js";
 
@@ -77,7 +77,7 @@ export function attachPlaceNames(map) {
    * `wanted` is what the latest layout chose; anything tracked but not wanted fades out where it
    * is (re-projected every frame, so it still rides the map). */
   const tracked = new Map();
-  let wanted = new Set(), layerA = 0, lastTs = 0, dirty = true;
+  let wanted = new Set(), layerA = 0, lastTs = 0, dirty = true, lastShownKey = "";
   /* Zoom animation: see zoomTracker.js. Leaflet does not animate a hand-drawn canvas — it moves its
    * state to the end view at once — so each frame we project every place through the tracker, which
    * lerps start view → end view on the tiles' own transition clock. Names stay on the ground for
@@ -167,6 +167,13 @@ export function attachPlaceNames(map) {
     pane.dataset.names = [...wanted].map((k) => (tracked.get(k) ? tracked.get(k).p.name : "")).join("|");
     pane.dataset.zoom = String(map.getZoom());
     pane.__drawn = shownNow;
+    /* Publish which names are actually on screen (visible enough to read), so the city-limits overlay does not
+     * draw a second copy. Only fires on a CHANGE — the set is tiny and settles between frames. */
+    const shownKey = shownNow.filter((l) => l.a > 0.05).map((l) => placeNameKey(l.name)).sort().join("|");
+    if (shownKey !== lastShownKey) {
+      lastShownKey = shownKey;
+      setPlaceNamesShown(map, shownNow.filter((l) => l.a > 0.05).map((l) => placeNameKey(l.name)));
+    }
     if (busy) schedule();
   };
   const schedule = () => { if (!raf && !destroyed) raf = requestAnimationFrame(draw); };
@@ -188,6 +195,7 @@ export function attachPlaceNames(map) {
       destroyed = true;
       if (raf) cancelAnimationFrame(raf);
       map.off("move zoom moveend zoomend resize", onMove); tracker.destroy();
+      setPlaceNamesShown(map, []);   // the city-limits labels take their names back
       try { canvas.remove(); } catch (_) { /* map already torn down */ }
       attached.delete(map);
     },

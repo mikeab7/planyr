@@ -2,6 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8" />
+    <base href="/" />
     <title>DFW city limits + ETJ map harness (NEW-1)</title>
     <link rel="stylesheet" href="/node_modules/leaflet/dist/leaflet.css" />
   </head>
@@ -11,13 +12,20 @@
       import L from "leaflet";
       import { JURISDICTIONS } from "/src/workspaces/site-planner/lib/layers.js";
       import { cachedVectorLayer } from "/src/workspaces/site-planner/lib/vectorOverlay.js";
+      import { attachPlaceNames } from "/src/workspaces/site-planner/lib/placeNamesGate.js";
       const q = new URLSearchParams(location.search);
       const map = L.map("map", { center: [Number(q.get("lat") || 32.8), Number(q.get("lng") || -96.8)], zoom: Number(q.get("z") || 10), zoomControl: false });
       map.createPane("bnd"); map.getPane("bnd").style.zIndex = 450;
       map.createPane("boundarylabels"); map.getPane("boundarylabels").style.zIndex = 460;
       window.__status = {};
+      // ?perf=1 — record every main-thread long task (>50 ms) so a freeze can be MEASURED, not described.
+      window.__long = [];
+      try { new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__long.push({ start: Math.round(e.startTime), ms: Math.round(e.duration) }); }).observe({ entryTypes: ["longtask"] }); } catch (_) {}
       window.__layers = {};
-      for (const k of ["jur_city", "jur_etj"]) {
+      // ?layers=jur_city,jur_etj (default both); ?placenames=1 mounts the real City-names canvas layer as well.
+      const wanted = (q.get("layers") || "jur_city,jur_etj").split(",");
+      if (q.get("placenames")) attachPlaceNames(map);
+      for (const k of wanted) {
         const lyr = cachedVectorLayer(k, JURISDICTIONS[k], 1, "bnd", (id, state, msg) => { window.__status[id] = { state, msg }; }, { interactive: false });
         lyr.addTo(map); window.__layers[k] = lyr;
       }

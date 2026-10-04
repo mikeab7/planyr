@@ -37,6 +37,13 @@ const { GIS_SOURCES } = await import(path.join(ROOT, "src/shared/gis/sources.js"
 // sits a little under that, so an ordinary edit passes and losing a county's ETJ table (≥ 20 names) fails.
 const MEASURED_FLOORS = { distinctCitiesInRadius: 195 };
 
+/* NEW-2 — Denton County's and Fort Worth's servers are denied by the build sandbox's egress policy (the owner
+ * confirmed both answer from a planyr.io browser tab, 2026-09-30). A check that can only be decided by one of them
+ * is SKIPPED here — printed loudly, never counted as a pass — and is asserted by
+ * `ui-audit/verify-dfw-etj-browser-hosts.mjs` in a browser context. */
+const BROWSER_ONLY = new Set(["etj_denton", "etj_fortworth", "etj_release_fortworth"]);
+let skipped = 0;
+const skip = (name, why) => { skipped++; console.log(`⏭  ${name} — SKIPPED: ${why}`); };
 const memStore = () => { const m = new Map(); return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => { m.set(k, v); }, removeItem: (k) => m.delete(k), get length() { return m.size; }, key: (i) => [...m.keys()][i] ?? null }; };
 const cache = () => createGisCache({ store: memStore(), now: () => Date.now() });
 const results = [];
@@ -63,32 +70,13 @@ const ident = (lng, lat, extra = {}) => J.identifyJurisdiction(lng, lat, { cache
   check("downtown Dallas → City of Dallas", j.city.includes("Dallas") && j.cityContainment === "in", `city=${JSON.stringify(j.city)} county=${JSON.stringify(j.county)}`);
 }
 // 2, 3 — known ETJs, each in NO city
-for (const [label, lng, lat, want] of [["Prosper's ETJ (Collin)", -96.8961, 33.23255, "Prosper"], ["Little Elm's ETJ (Denton)", -96.93688, 33.20664, "Little Elm"]]) {
+for (const [label, lng, lat, want, needs] of [["Prosper's ETJ (Collin)", -96.8961, 33.23255, "Prosper", null], ["Little Elm's ETJ (Denton)", -96.93688, 33.20664, "Little Elm", "etj_denton"]]) {
   const j = await ident(lng, lat);
+  if (needs && (j.etjSourceErrors || []).includes(needs) && !j.etj.includes(want)) { skip(`${label} → ${want} ETJ`, `${needs} is unreachable from this environment`); continue; }
   check(`${label} → ${want} ETJ, in no city`, j.etj.includes(want) && j.city.length === 0 && !j.etjUnavailable, `etj=${JSON.stringify(j.etj)} city=${JSON.stringify(j.city)}`);
 }
-// 4 — overlap: find a live "A/B" polygon in Denton County's table and probe an interior point of it
-{
-  const url = GIS_SOURCES.etj_denton.serviceUrl + "/query?" + qs({ where: "CITY like '%/%'", outFields: "CITY", returnGeometry: "true", outSR: 4326, f: "json" });
-  const j = await getJson(url);
-  let done = false;
-  search:
-  for (const f of (j && j.features) || []) {
-    const claims = etjNamesOf(GIS_SOURCES.etj_denton, f.attributes.CITY);
-    if (claims.length < 2) continue;
-    const ring = f.geometry.rings.reduce((a, b) => (b.length > a.length ? b : a));
-    const cx = ring.reduce((s, p) => s + p[0], 0) / ring.length, cy = ring.reduce((s, p) => s + p[1], 0) / ring.length;
-    for (const t of [0, 0.25, 0.5]) for (const [vx, vy] of [[cx, cy], ...ring.filter((_, i) => i % Math.max(1, Math.floor(ring.length / 8)) === 0)]) {
-      const x = cx + (vx - cx) * t, y = cy + (vy - cy) * t;
-      const r = await ident(x, y);
-      if (claims.every((c) => r.etj.some((e) => J.samePlace(e, c)))) {
-        check(`overlap strip "${f.attributes.CITY}" → both ETJs reported`, true, `etj=${JSON.stringify(r.etj)} @ ${x.toFixed(4)},${y.toFixed(4)}`);
-        done = true; break search;
-      }
-    }
-  }
-  if (!done) check("overlap strip → both ETJs reported", false, "no probe point inside an overlap polygon reported both claims");
-}
+// 4 — the disputed-strip and release-area checks need Denton County's / Fort Worth's servers: browser harness only.
+skip("disputed strip (Denton 'Undetermined') → 'ETJ undetermined (disputed)', never a city", "asserted in ui-audit/verify-dfw-etj-browser-hosts.mjs (5 polygons) and test/dfwEtjCoverage.test.js (recorded shape)");
 // 5 — complete county, nothing there
 {
   const j = await ident(-96.50, 33.10);
@@ -134,6 +122,7 @@ for (const [label, lng, lat, want] of [["Prosper's ETJ (Collin)", -96.8961, 33.2
   }
   // ETJ — every routed source, clipped to the same envelope.
   for (const src of J.ETJ_SOURCES) {
+    if (BROWSER_ONLY.has(src.id)) continue;   // unreachable from here — the count below is a LOWER BOUND
     if (!(src.bbox[0] <= lat + dLat && src.bbox[2] >= lat - dLat && src.bbox[1] <= lng + dLng && src.bbox[3] >= lng - dLng)) continue;
     const col = src.fields && src.fields.name;
     const j = await getJson(src.url + "/query?" + qs({ where: "1=1", geometry: env, geometryType: "esriGeometryEnvelope", inSR: 4326, spatialRel: "esriSpatialRelIntersects", outFields: col || "*", returnGeometry: "true", outSR: 4326, maxAllowableOffset: 0.002, resultRecordCount: 2000, f: "json" }));
@@ -143,10 +132,11 @@ for (const [label, lng, lat, want] of [["Prosper's ETJ (Collin)", -96.8961, 33.2
   const all = new Set([...cities, ...etjCities].map((n) => n.toLowerCase()));
   console.log(`   city limits touching the circle: ${cities.size} · ETJs touching the circle: ${etjCities.size} · distinct cities either way: ${all.size}`);
   console.log(`   ETJ cities: ${[...etjCities].sort().join(", ")}`);
+  if (skipped) console.log("   (Denton / Fort Worth ETJs excluded — browser-only hosts — so this count is a lower bound)");
   check("count check — distinct cities in the radius meets the measured floor", !unresolved && all.size >= MEASURED_FLOORS.distinctCitiesInRadius && MEASURED_FLOORS.distinctCitiesInRadius > 0,
     `${all.size} ≥ ${MEASURED_FLOORS.distinctCitiesInRadius}${unresolved ? " (UNRESOLVED: a service was unreachable)" : ""}`);
 }
 
 const failed = results.filter((r) => !r.ok);
-console.log(failed.length ? `\n${failed.length} of ${results.length} checks FAILED.` : `\nAll ${results.length} DFW coverage checks passed.`);
+console.log(failed.length ? `\n${failed.length} of ${results.length} checks FAILED.` : `\nAll ${results.length} DFW coverage checks passed${skipped ? ` (${skipped} skipped: browser-only hosts)` : ""}.`);
 process.exit(failed.length ? 1 : 0);

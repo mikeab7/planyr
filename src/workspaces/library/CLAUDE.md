@@ -13,6 +13,7 @@ via the Shell `onOpenReviewInDocReview` intent.
   swap-ready API) and the recents list (`/src/shared/recents/`); ☆ pin toggles live on
   FolderTree rows + file cards. Tree expansion persists per project via the shared persisted
   id-set helper in `/src/shared/ui/` (B665 — collapsed by default).
+- `lib/fileIntoProject.js` — `fileReviewIntoProject`, the ONE "put this file into a project" step (re-point review → mirror file index → move the Drive copy); used by FileBrowser's Needs-filing row AND Home's **Unfiled** section (files saved from Review with no project; `UnfiledCard` = Open + Move to project…).
 - `components/FileBrowser.jsx` — the filing machinery (search + sort toolbar, badged list,
   whole-pane drop target, upload tray, needs-filing, refile/share/delete — the facet chips and
   bottom drop card were removed in B697/B699). `folderMode` swaps its left column for the real

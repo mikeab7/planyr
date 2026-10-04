@@ -38,6 +38,11 @@ import { resolveCounty } from "./countyPolygons.js";
  * wording: it owns the four shapes and the three-level separator grammar that keeps a governing
  * authority from being joined to a merely-adjacent city by the same mark. */
 import { formatJurisdictionLabel } from "./jurisdictionLabel.js";
+/* NEW-1 (Georgia) — the pure Georgia facts: envelope, consolidated city-counties, the county-governs note. */
+import { GA_ENVELOPE, georgiaConsolidatedFor, GA_COUNTY_GOVERNS_NOTE, GA_CONSOLIDATED_NOTE } from "./georgiaJurisdiction.js";
+/* NEW-1 (California) — the California twin: envelope, the one consolidated city-county (San Francisco), the
+ * county-governs note, and the three legal city names the CDT layer publishes. Same shape, same rules. */
+import { inCaliforniaEnvelope, CA_CITY_DISPLAY, californiaConsolidatedFor, CA_COUNTY_GOVERNS_NOTE, CA_CONSOLIDATED_NOTE } from "./californiaJurisdiction.js";
 /* NEW-1 (DFW ETJ) — the one reader of a publisher's ETJ name column (overlap splits, prefix strips). */
 import { etjNamesOf } from "./etjNames.js";
 /* ⛔ NEW-2 — A SHARE IS AN AREA FRACTION ON THE REAL RING. Read `jurisdictionShare.js`'s header
@@ -74,6 +79,54 @@ export const JURISDICTION_SOURCES = {
     ttl: 30 * 24 * 3600 * 1000,
     sourceName: "Colorado statewide county boundaries",
     note: "Colorado county boundary. Screening only — verify with the jurisdiction.",
+  },
+  /* NEW-1 (Georgia) — DCA statewide counties. Same `role: "county"` as the Texas and Colorado rows, so
+   * every downstream consumer reads it identically; only endpoint and field names differ. Routed to by
+   * `countySourcesForPoint` inside the Georgia envelope, never by default. */
+  countyGa: {
+    id: "countyGa", role: "county", label: "County", kind: "polygon",
+    url: GIS_SOURCES.countyGa.serviceUrl,
+    fields: { name: "NAME", fips: "GEOID" },
+    ttl: 30 * 24 * 3600 * 1000,
+    sourceName: "Georgia DCA statewide county boundaries",
+    note: "Georgia county boundary (DCA). Screening only — verify with the jurisdiction.",
+  },
+  /* NEW-1 (Georgia) — DCA municipal limits. Full-purpose only (Georgia has no limited-purpose class in
+   * this layer); the city role answers a SHARE, so it needs the polygons. */
+  cityGa: {
+    id: "cityGa", role: "city", label: "City limits", kind: "polygon",
+    url: GIS_SOURCES.cityGa.serviceUrl,
+    fields: { name: "cityname", fips: "GEOID" },
+    fullPurposeOnly: GIS_SOURCES.cityGa.fullPurposeOnly,
+    needGeometry: true,
+    ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "Georgia DCA municipal boundaries",
+    note: "Georgia city limits (DCA). A point in no city is unincorporated — the county governs (Georgia has no ETJ). Screening only — verify with the city.",
+  },
+  /* NEW-1 (California) — CDT State Geoportal counties. Same `role: "county"`, so every downstream consumer
+   * reads it identically; only endpoint and field names differ. Routed to by `countySourcesForPoint` inside
+   * the California envelope, never by default. */
+  countyCa: {
+    id: "countyCa", role: "county", label: "County", kind: "polygon",
+    url: GIS_SOURCES.countyCa.serviceUrl,
+    fields: { name: "CDT_NAME_SHORT", fips: "CENSUS_GEOID" },
+    ttl: 30 * 24 * 3600 * 1000,
+    sourceName: "California CDT statewide county boundaries",
+    note: "California county boundary (CDT State Geoportal). Screening only — verify with the jurisdiction.",
+  },
+  /* NEW-1 (California) — CDT incorporated-city limits (land rows only: the registry row's `where` withholds
+   * the offshore water polygons and the unincorporated community of Mountain House). Full-purpose only. */
+  cityCa: {
+    id: "cityCa", role: "city", label: "City limits", kind: "polygon",
+    url: GIS_SOURCES.cityCa.serviceUrl,
+    fields: { name: "CDT_NAME_SHORT", fips: "CENSUS_GEOID" },
+    where: GIS_SOURCES.cityCa.where,
+    nameDisplay: CA_CITY_DISPLAY,
+    fullPurposeOnly: GIS_SOURCES.cityCa.fullPurposeOnly,
+    needGeometry: true,
+    ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "California CDT city boundaries",
+    note: "California city limits (CDT State Geoportal). A point in no city is unincorporated — the county governs (California cities have no ETJ). Screening only — verify with the city.",
   },
   city: {
     id: "city", role: "city", label: "City limits", kind: "polygon",
@@ -168,13 +221,24 @@ export const ETJ_SOURCES = [
   },
   {
     id: "etj_fortworth", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
-    region: "Dallas–Fort Worth", bbox: [32.2, -98.3, 33.7, -96.5],
+    region: "Dallas–Fort Worth", bbox: [32.4, -97.7, 33.15, -97.1], // = the layer's own extent (NEW-2); it was a whole-metro box
     url: GIS_SOURCES.etj_fortworth.serviceUrl,
     fields: { name: null }, nameConst: "Fort Worth",
     ttl: 7 * 24 * 3600 * 1000,
-    sourceName: "City of Fort Worth GIS", coverage: "City of Fort Worth ETJ",
-    dataLastEdited: GIS_SOURCES.etj_fortworth.dataLastEdited,
-    note: "City of Fort Worth ETJ — a 2018 snapshot (the city's current layer is not reachable from the build environment). Dallas is landlocked (~no ETJ). Screening only.",
+    sourceName: "City of Fort Worth GIS", dataLastEdited: GIS_SOURCES.etj_fortworth.dataLastEdited, coverage: "City of Fort Worth ETJ",
+    note: "City of Fort Worth ETJ from the city's own open-data boundaries service (81 polygons, edited 2026-09-01). Dallas is landlocked (~no ETJ). Screening only.",
+  },
+  /* ⛔ NEW-2 (DFW gaps) — SB 2038 RELEASE AREAS. `release: true` rows are NOT ETJ membership: a point inside one
+   * never reads as a plain Fort Worth ETJ (see `identifyJurisdiction`: `etjReleased`), and the parcel-share
+   * pass never counts them. The row's attributes are unread, so it claims nothing about effectiveness. */
+  {
+    id: "etj_release_fortworth", role: "etj", release: true, label: "ETJ release area (SB 2038)", kind: "polygon",
+    region: "Fort Worth ETJ release areas", bbox: [32.4, -97.7, 33.15, -97.1],
+    url: GIS_SOURCES.etj_release_fortworth.serviceUrl,
+    fields: { name: null }, nameConst: "Fort Worth",
+    ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "City of Fort Worth GIS", coverage: "Fort Worth ETJ release areas",
+    note: "Areas released, or petitioned for release, from Fort Worth's ETJ under SB 2038. Status is the city's to confirm.",
   },
   /* ⛔ NEW-1 (DFW) — the county-published multi-city ETJ tables. See the registry rows in
    * `shared/gis/sources.js` for WHY NCTCOG is not among them (it publishes no ETJ layer) and for
@@ -206,12 +270,99 @@ export const ETJ_SOURCES = [
     id: "etj_denton", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
     region: "Denton County", bbox: [32.9, -97.5, 33.5, -96.7],
     url: GIS_SOURCES.etj_denton.serviceUrl,
-    fields: GIS_SOURCES.etj_denton.fields, nameSplit: GIS_SOURCES.etj_denton.nameSplit, nameStrip: GIS_SOURCES.etj_denton.nameStrip,
-    roster: GIS_SOURCES.etj_denton.roster,
+    fields: GIS_SOURCES.etj_denton.fields, nameStrip: GIS_SOURCES.etj_denton.nameStrip,
+    undeterminedNames: GIS_SOURCES.etj_denton.undeterminedNames, rosterUnknown: true,
     ttl: 7 * 24 * 3600 * 1000,
     sourceName: "Denton County GIS", dataLastEdited: GIS_SOURCES.etj_denton.dataLastEdited,
-    coverage: "Denton County and the cities that reach into it — a 2022 edition",
-    note: "Denton County GIS's ETJ table (2022 edition — older than SB 2038). Overlap strips claimed by two cities are reported as BOTH. Screening only; verify with the city.",
+    coverage: "Denton County and the cities that reach into it",
+    note: "Denton County GIS's own current ETJ table (edited 2026-09-24). Strips the county marks \"Undetermined\" are disputed between two cities and read as such, never assigned. Screening only; verify with the city.",
+  },
+  /* ⛔ NEW-2 (DFW gaps) — see the registry rows for provenance, and for why NONE of these declares a
+   * county complete. `where` (Dallas County) withholds polygons whose name a spatial join could not
+   * confirm; it rides BOTH the identify and the drawn layer, so they cannot disagree. */
+  {
+    id: "etj_dallasco", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
+    region: "Dallas County", bbox: [32.52, -96.81, 33.01, -96.49],
+    url: GIS_SOURCES.etj_dallasco.serviceUrl, fields: GIS_SOURCES.etj_dallasco.fields, where: GIS_SOURCES.etj_dallasco.where,
+    roster: GIS_SOURCES.etj_dallasco.roster, ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "Dallas County GIS", dataLastEdited: GIS_SOURCES.etj_dallasco.dataLastEdited,
+    coverage: "Dallas County's small southern/eastern cities",
+    note: "Dallas County GIS's ETJ table (2024). Ten polygons whose city name could not be confirmed against the adjoining city limits are withheld. Screening only; verify with the city.",
+  },
+  {
+    id: "etj_ellis", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
+    region: "Ellis County", bbox: [32.18, -97.13, 32.58, -96.4],
+    url: GIS_SOURCES.etj_ellis.serviceUrl, fields: GIS_SOURCES.etj_ellis.fields,
+    roster: GIS_SOURCES.etj_ellis.roster, ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "Ellis County ETJ compilation", dataLastEdited: GIS_SOURCES.etj_ellis.dataLastEdited,
+    coverage: "eight Ellis County cities",
+    note: "A compilation whose own source notes include \"Need to Research\" and \"Unofficial\" on some polygons. Screening only; verify with the city.",
+  },
+  {
+    id: "etj_waxahachie", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
+    region: "Waxahachie", bbox: [32.25, -97.03, 32.53, -96.68],
+    url: GIS_SOURCES.etj_waxahachie.serviceUrl, fields: { name: null }, nameConst: "Waxahachie", ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "City of Waxahachie planning", dataLastEdited: GIS_SOURCES.etj_waxahachie.dataLastEdited,
+    coverage: "City of Waxahachie ETJ", note: "City of Waxahachie ETJ (2026). Screening only; verify with the city.",
+  },
+  {
+    id: "etj_johnson", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
+    region: "Johnson County", bbox: [32.18, -97.76, 33.15, -96.86],
+    url: GIS_SOURCES.etj_johnson.serviceUrl, fields: GIS_SOURCES.etj_johnson.fields, titleCaseName: true,
+    roster: GIS_SOURCES.etj_johnson.roster, ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "Johnson County SUD", dataLastEdited: GIS_SOURCES.etj_johnson.dataLastEdited,
+    coverage: "eighteen cities in and around Johnson County",
+    note: "A utility district's compile of city ETJs (2025). Screening only; verify with the city.",
+  },
+  {
+    id: "etj_grayson", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
+    region: "Grayson County", bbox: [33.34, -97.0, 33.89, -96.34],
+    url: GIS_SOURCES.etj_grayson.serviceUrl, fields: GIS_SOURCES.etj_grayson.fields, titleCaseName: true,
+    roster: GIS_SOURCES.etj_grayson.roster, ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "Grayson County thoroughfare-plan layer", dataLastEdited: GIS_SOURCES.etj_grayson.dataLastEdited,
+    coverage: "sixteen Grayson County cities", note: "Grayson County cities' ETJs (2024). Screening only; verify with the city.",
+  },
+  {
+    id: "etj_corsicana", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
+    region: "Corsicana", bbox: [31.98, -96.58, 32.18, -96.33],
+    url: GIS_SOURCES.etj_corsicana.serviceUrl, fields: { name: null }, nameConst: "Corsicana", ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "City of Corsicana GIS", dataLastEdited: GIS_SOURCES.etj_corsicana.dataLastEdited,
+    coverage: "City of Corsicana ETJ (city named by spatial join)", note: "Corsicana ETJ (2026); the publisher names no city — it is the ETJ abutting Corsicana's limits. Screening only.",
+  },
+  {
+    id: "etj_bloominggrove", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
+    region: "Blooming Grove", bbox: [32.04, -96.77, 32.14, -96.67],
+    url: GIS_SOURCES.etj_bloominggrove.serviceUrl, fields: { name: null }, nameConst: "Blooming Grove", ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "Blooming Grove planning layer", dataLastEdited: GIS_SOURCES.etj_bloominggrove.dataLastEdited,
+    coverage: "Blooming Grove ETJ", note: "Blooming Grove ETJ (2024). Screening only; verify with the town.",
+  },
+  {
+    id: "etj_forney", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
+    region: "Forney", bbox: [32.67, -96.53, 32.82, -96.35],
+    url: GIS_SOURCES.etj_forney.serviceUrl, fields: { name: null }, nameConst: "Forney", where: GIS_SOURCES.etj_forney.where, ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "Kaufman-area planning layer (named by spatial join)", dataLastEdited: GIS_SOURCES.etj_forney.dataLastEdited,
+    coverage: "Forney ETJ", note: "Forney ETJ (2025); the publisher leaves the city name blank — named by the abutting city limits. Screening only; verify with the city.",
+  },
+  {
+    id: "etj_talty", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
+    region: "Talty", bbox: [32.64, -96.46, 32.75, -96.34],
+    url: GIS_SOURCES.etj_talty.serviceUrl, fields: { name: null }, nameConst: "Talty", ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "Kaufman-area planning layer (named by spatial join)", dataLastEdited: GIS_SOURCES.etj_talty.dataLastEdited,
+    coverage: "Talty ETJ", note: "Talty ETJ (2025); named by the abutting city limits. Screening only; verify with the town.",
+  },
+  {
+    id: "etj_mansfield", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
+    region: "Mansfield", bbox: [32.43, -97.24, 32.63, -97.04],
+    url: GIS_SOURCES.etj_mansfield.serviceUrl, fields: { name: null }, nameConst: "Mansfield", ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "City of Mansfield GIS", dataLastEdited: GIS_SOURCES.etj_mansfield.dataLastEdited,
+    coverage: "Mansfield ETJ", note: "Mansfield ETJ (2026). Screening only; verify with the city.",
+  },
+  {
+    id: "etj_sunnyvale", role: "etj", label: "ETJ (extraterritorial jurisdiction)", kind: "polygon",
+    region: "Sunnyvale", bbox: [32.72, -96.63, 32.86, -96.48],
+    url: GIS_SOURCES.etj_sunnyvale.serviceUrl, fields: { name: null }, nameConst: "Sunnyvale", ttl: 7 * 24 * 3600 * 1000,
+    sourceName: "Town of Sunnyvale GIS", dataLastEdited: GIS_SOURCES.etj_sunnyvale.dataLastEdited,
+    coverage: "Sunnyvale ETJ", note: "Sunnyvale ETJ (2024), as published by the town. Screening only; verify with the town.",
   },
 ];
 
@@ -239,6 +390,9 @@ export function etjSourcesForPoint(lat, lng) {
  * default, because an undeclared roster is unknown, not empty. Pure. */
 export function etjSourceCovers(source, cityName) {
   if (!source) return false;
+  // NEW-2 — a release-area row carries no city's ETJ; a row whose city list was never enumerated cannot be
+  // shown to carry any particular city (`rosterUnknown`), so it may not claim "covered" by default.
+  if (source.release || source.rosterUnknown) return false;
   if (source.nameConst) return samePlace(source.nameConst, cityName);
   if (Array.isArray(source.roster)) return source.roster.some((n) => samePlace(n, cityName));
   return true;
@@ -324,6 +478,14 @@ const inEnvelope = (env, lat, lng) => Number.isFinite(lat) && Number.isFinite(ln
 export function countySourcesForPoint(lat, lng) {
   if (inEnvelope(CO_ENVELOPE, lat, lng)) return [JURISDICTION_SOURCES.countyCo];
   if (inEnvelope(TX_ENVELOPE, lat, lng)) return [JURISDICTION_SOURCES.county];
+  /* NEW-1 (Georgia) — the envelope only ROUTES. It also holds SC / AL / FL / NC / TN ground, so a hit
+   * here proves nothing about the state: the DCA layer answering with a polygon is what says "Georgia"
+   * (`identifyJurisdiction` flags an empty, error-free answer as `notInGeorgia`). Overlaps neither TX
+   * nor CO, so those two resolve exactly as they always did. */
+  if (inEnvelope(GA_ENVELOPE, lat, lng)) return [JURISDICTION_SOURCES.countyGa];
+  /* NEW-1 (California) — same contract as Georgia's: the envelope only ROUTES (it also holds NV / OR / AZ /
+   * Baja ground); the CDT layer answering with a polygon is what says "California". Overlaps none of TX / CO / GA. */
+  if (inCaliforniaEnvelope(lat, lng)) return [JURISDICTION_SOURCES.countyCa];
   return []; // honest "no live county-boundary source configured here" — see countyAtPoint's offline floor
 }
 
@@ -363,6 +525,10 @@ export const CITY_SOURCES = [
   },
 ];
 export function citySourcesForPoint(lat, lng) {
+  /* NEW-1 (Georgia) — inside the Georgia envelope the city role is DCA's municipal layer and nothing
+   * else (none of the Texas rows can answer here, and TX_ENVELOPE does not reach it). */
+  if (inEnvelope(GA_ENVELOPE, lat, lng)) return [JURISDICTION_SOURCES.cityGa];
+  if (inCaliforniaEnvelope(lat, lng)) return [JURISDICTION_SOURCES.cityCa]; // NEW-1 (California) — likewise
   return CITY_SOURCES.filter((s) => {
     if (s.bbox) return bboxHas(s.bbox, lat, lng);
     if (s === JURISDICTION_SOURCES.city) return inEnvelope(TX_ENVELOPE, lat, lng); // the un-bboxed TxGIO statewide row
@@ -557,6 +723,8 @@ export function buildIdentifyParams(source, geom) {
     returnGeometry: source.kind === "line" || geom.returnGeometry ? "true" : "false",
   };
   if (geom.returnGeometry) p.geometryPrecision = 6;
+  // NEW-2 (DFW gaps) — a row may withhold features it cannot vouch for (`where`); rides the drawn layer too.
+  if (source.where) p.where = source.where;
   /* NEW-1 — a MULTIPOINT geometry: "which cities contain ANY of these points". One query answers
    * the whole-assemblage containment question that a single point cannot (see the parcel-coverage
    * block in `identifyJurisdiction`). Verified live against all three agency services 2026-08-08 —
@@ -608,6 +776,8 @@ export function normalizeFeature(source, attrs) {
   if ((out.name == null || out.name === "") && source.nameConst) out.name = source.nameConst;
   // Some sources publish the name ALL-CAPS (e.g. H-GAC ETJ `CITY`) → title-case it.
   if (out.name != null && out.name !== "" && source.titleCaseName) out.name = titleCase(out.name);
+  // NEW-1 (California) — a source may map a layer's LEGAL names onto the names people use (display only).
+  if (out.name != null && source.nameDisplay && source.nameDisplay[out.name]) out.name = source.nameDisplay[out.name];
   /* ⛔ NEW-1 — THE JURISDICTION CLASS TRAVELS WITH THE FEATURE, from here on. Baytown's one
    * city-limits table mixes full-purpose limits with limited-purpose and strip annexation, and a
    * consumer that reads only `name` cannot tell them apart — which is how 24 of 38 polygons came to
@@ -620,9 +790,27 @@ export function normalizeFeature(source, attrs) {
    * none behaves exactly as before. */
   if (source.role === "etj") {
     const col = source.fields && source.fields.name;
-    const names = etjNamesOf(source, col ? attrs?.[col] : null);
-    if (names.length > 1) out.names = names; // only an overlap carries the list; the common shape is unchanged
-    out.name = names.length ? names[0] : null;
+    const rawName = col ? attrs?.[col] : null;
+    /* ⛔ NEW-2 (DFW gaps) — A DISPUTED STRIP IS NEITHER A CITY NOR A MISS. Denton County writes
+     * NAME='Undetermined' and lists the two claimants in another column. Such a feature names NO city
+     * (`name` null — it can never lead, never dedupe, never become "City of X ETJ") and is flagged
+     * `undetermined`, with the claimants carried as claims. A feature whose name cannot be read at all is
+     * flagged the same way rather than dropped — silence would read as "no ETJ here". */
+    const undet = Array.isArray(source.undeterminedNames)
+      && source.undeterminedNames.some((n) => String(rawName || "").trim().toLowerCase() === String(n).toLowerCase());
+    if (undet) {
+      out.undetermined = true;
+      out.name = null;
+      const cc = source.fields && source.fields.claimants;
+      out.claimants = etjNamesOf({ nameSplit: "/", nameStrip: source.nameStrip }, cc ? attrs?.[cc] : null);
+      out.names = [];
+    } else {
+      const names = etjNamesOf(source, rawName);
+      if (names.length > 1) out.names = names; // only an overlap carries the list; the common shape is unchanged
+      out.name = names.length ? names[0] : null;
+      if (!names.length && col && !source.release) { out.undetermined = true; out.claimants = []; }   // unreadable name → flagged, not dropped
+    }
+    if (source.release) out.release = true;
   }
   return out;
 }
@@ -989,7 +1177,10 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
     if (!srcs.length) {
       // no source for this role/area — e.g. ETJ outside the covered metros (honest, not a guess)
       out[role] = []; out.ages[role] = null;
-      out.sources.push({ id: role, state: "unavailable", ageMs: null, msg: role === "etj" ? "No ETJ layer for this area yet." : null });
+      /* NEW-1 (Georgia) — Georgia has NO ETJ, so "no ETJ layer for this area yet" would be a false
+       * promise of a coming feature (and would put ETJ wording on a Georgia site). The role is simply
+       * not applicable there: silent, like every other role with nothing to ask. */
+      out.sources.push({ id: role, state: "unavailable", ageMs: null, msg: role === "etj" && !inEnvelope(GA_ENVELOPE, lat, lng) && !inCaliforniaEnvelope(lat, lng) ? "No ETJ layer for this area yet." : null });
       return;
     }
     opts.onStatus && opts.onStatus(role, "loading");
@@ -1007,12 +1198,19 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
       const kept = src.role === "city"
         ? feats.filter((f) => (f.limitClass || CITY_LIMIT_CLASSES.unknown.id) === CITY_LIMIT_CLASSES.full.id)
         : feats;
-      const names = uniq(kept.flatMap((f) => (f.names && f.names.length ? f.names : [f.name])).filter((v) => v != null && v !== "").map(String));
-      return { names, error: r.error || null, ageMs: r.ageMs, ts: r.ts, stale: q.stale };
+      // NEW-2 — disputed strips ride their own list; release-area polygons are not ETJ membership at all.
+      const undetermined = kept.filter((f) => f.undetermined).map((f) => ({ source: src.id, claimants: f.claimants || [] }));
+      const released = src.release ? uniq(kept.map((f) => f.name).filter(Boolean).map(String)) : [];
+      const names = src.release ? [] : uniq(kept.flatMap((f) => (f.names && f.names.length ? f.names : [f.name])).filter((v) => v != null && v !== "").map(String));
+      return { names, undetermined, released, error: r.error || null, ageMs: r.ageMs, ts: r.ts, stale: q.stale };
     }));
     const names = uniq(parts.flatMap((p) => p.names));
     const ages = parts.map((p) => p.ageMs).filter((a) => a != null);
     out[role] = names;
+    if (role === "etj") {
+      out.etjUndetermined = parts.flatMap((p) => p.undetermined || []);
+      out.etjReleased = uniq(parts.flatMap((p) => p.released || []));
+    }
     out.ages[role] = ages.length ? Math.min(...ages) : null;
     const errPart = parts.find((p) => p.error);
     /* ⛔ NEW-1 — A ROLE IS "FAILED" ONLY WHEN NOTHING ANSWERED IT. Adding a second city source made
@@ -1025,6 +1223,13 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
     const state = names.length ? "loaded" : allErrored ? "failed" : "empty";
     out.sources.push({ id: role, state, ageMs: out.ages[role], msg: errPart ? humanize(errPart.error) : null,
       degraded: !!errPart && !allErrored });
+    /* ⛔ NEW-2 (DFW gaps) — A "NO ETJ HIT" IS NOT A FINDING WHILE ANY ROUTED ETJ SOURCE FAILED. With one
+     * source per metro that was implicit; with a dozen publishers a point can be routed to several, and
+     * `state` above only reads "failed" when ALL of them did. A Collin point whose Rockwall query died
+     * has not been checked against Rockwall's ETJs. Recorded by id so the degradation is visible. */
+    if (role === "etj") {
+      out.etjSourceErrors = srcs.map((sx, i) => (parts[i] && parts[i].error ? sx.id : null)).filter(Boolean);
+    }
     if (role === "city" && errPart) {
       out.citySourceErrors = srcs
         .map((s, i) => (parts[i] && parts[i].error ? { id: s.id, msg: humanize(parts[i].error) } : null))
@@ -1151,7 +1356,7 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
       out.city = uniq([...out.city, ...(out.cityAll || []), ...out.citySome]);
       // NEW-2 — say which instrument answered. "points" may never state a share (see the badge).
       out.cityShareMethod = "points";
-    } else if ((role === "county" || role === "etj") && shareRings.length) {
+    } else if ((role === "county" || role === "etj") && shareRings.length && srcs.some((sx) => !sx.release)) {
       /* ⛔ B689904 — A TINY EDGE CLIP IS NOT A GOVERNING PEER, and county/ETJ never had the AREA-SHARE
        * screen B793 already gives city limits. The name-union query above (line 880) treats ANY
        * intersection as full membership, so a hand-drawn boundary that pokes a sliver into a
@@ -1161,7 +1366,7 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
        * engine and the SAME CITY_SHARE_MIN floor (0.5%) B793 already proved for the identical shape.
        * A source that cannot be measured (no geometry returned, an outage) leaves the union-query
        * `names` from above untouched — exactly the city fallback's own contract. */
-      const areaParts = await Promise.all(srcs.map((s) =>
+      const areaParts = await Promise.all(srcs.filter((sx) => !sx.release).map((s) =>
         identifyCityShares(s, shareRings, [lng, lat], { ...opts, parcelIds: opts.parcelIds })));
       const merged = mergeCityAreas(areaParts);
       if (merged && areaParts.some(Boolean)) {
@@ -1178,6 +1383,29 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
       }
     }
   }));
+  /* ⛔ NEW-1 (Georgia) — POINT-IN-POLYGON DECIDES WHETHER THIS IS GEORGIA, NEVER THE ENVELOPE.
+   * The routing box holds Augusta's SC bank, Columbus's AL bank, the FL line and parts of NC / TN. When
+   * the county role was routed to DCA's layer, answered WITHOUT error, and found no county, the point is
+   * not in Georgia: there is no Georgia jurisdiction to report, so the result says `notInGeorgia` and
+   * `formatJurisdictionBadge` returns null for it (its documented "nothing to show"). A FAILED county
+   * lookup is NOT this — that is an outage, and stays an outage. A Georgia point that resolves a county
+   * gets `state: "GA"`, which the label reads to say the county governs. */
+  const gaCountySrc = countySourcesForPoint(lat, lng)[0] === JURISDICTION_SOURCES.countyGa;
+  if (gaCountySrc && roles.includes("county")) {
+    const cs = out.sources.find((x) => x && x.id === "county");
+    if (out.county.length) out.state = "GA";
+    else if (cs && cs.state === "empty") { out.notInGeorgia = true; out.city = []; out.cityAll = []; out.citySome = []; out.cityCentroid = []; }
+  }
+  /* ⛔ NEW-1 (California) — THE SAME RULE AS GEORGIA'S ABOVE: POINT-IN-POLYGON DECIDES "IS THIS CALIFORNIA",
+   * NEVER THE ENVELOPE. The routing box holds Reno / Las Vegas's edge, southern Oregon, the Colorado River's
+   * Arizona bank and Tijuana. County role routed to the CDT layer + answered WITHOUT error + no county =
+   * not California: nothing to report, and `unincorporated` is never guessed. A FAILED lookup stays an outage. */
+  const caCountySrc = countySourcesForPoint(lat, lng)[0] === JURISDICTION_SOURCES.countyCa;
+  if (caCountySrc && roles.includes("county")) {
+    const cs = out.sources.find((x) => x && x.id === "county");
+    if (out.county.length) out.state = "CA";
+    else if (cs && cs.state === "empty") { out.notInCalifornia = true; out.city = []; out.cityAll = []; out.citySome = []; out.cityCentroid = []; }
+  }
   /* ⛔ B209506 — ONE DEFINITION OF "WHAT CITY IS THIS IN", AND IT IS CONTAINMENT.
    *
    * `unincorporated` was `out.city.length === 0` — the RING union, i.e. every city that so much as
@@ -1227,13 +1455,20 @@ export async function identifyJurisdiction(lng, lat, opts = {}) {
    * without "etj" is not claiming anything), only when no ETJ polygon was hit (a hit is a positive
    * finding wherever it is), and — for a failed lookup — regardless of coverage: a fetch that
    * failed says nothing about the point at all. Outside the DFW zone it stays false. */
+  /* ⛔ NEW-2 — A POINT IN AN SB 2038 RELEASE AREA IS NOT A PLAIN ETJ. The release layer's attributes are
+   * unread, so it cannot say whether a release is effective; it can only say the city's own layer marks the
+   * ground. The city's ETJ hit is therefore withheld from `out.etj` and reported as `etjReleased`. */
+  out.etjReleased = out.etjReleased || [];
+  out.etjUndetermined = out.etjUndetermined || [];
+  if (out.etjReleased.length) out.etj = out.etj.filter((e) => !out.etjReleased.some((r) => samePlace(r, e)));
   const etjAsked = roles.includes("etj");
   const etjSrc = out.sources.find((x) => x && x.id === "etj");
   const etjFailed = !!etjSrc && etjSrc.state === "failed";
   out.etjCoverage = etjAsked ? etjPointCoverage(lat, lng, out.county) : { status: "n/a", reason: "etj not requested" };
   out.etjUnavailable = etjAsked && inDfwZone(lat, lng) && !out.etj.length
+    && !out.etjUndetermined.length && !out.etjReleased.length   // a disputed strip / release area IS a finding
     && (out.cityContainment === "none" || out.cityContainment === "partial") // in a city's limits the ETJ question does not arise
-    && (etjFailed || out.etjCoverage.status === "unavailable");
+    && (etjFailed || (out.etjSourceErrors || []).length > 0 || out.etjCoverage.status === "unavailable");
   // Back-compat boolean. It can only ever be TRUE on a positive containment answer — an unknown
   // reads false here, and callers that need to tell the two apart read `cityContainment`.
   out.unincorporated = out.cityContainment === "none";
@@ -1293,6 +1528,10 @@ export const samePlace = (a, b) => placeKey(a) === placeKey(b) && placeKey(a) !=
  * Pure → unit-tested; null when there's nothing to show. */
 export function formatJurisdictionBadge(j, opts = {}) {
   if (!j) return null;
+  // NEW-1 (Georgia) — the point sat in the Georgia routing envelope but in no Georgia county (SC / AL / FL
+  // ground): there is no Georgia jurisdiction to name, and guessing "Unincorporated" would be a fabrication.
+  if (j.notInGeorgia) return null;
+  if (j.notInCalifornia) return null; // NEW-1 (California) — the same, for NV / OR / AZ / Baja ground inside the routing box
   const cities = uniq((j.city || []).filter((v) => v != null && v !== "").map(String));
   // B209506 — dedupe an ETJ against the city limits by PLACE, not by string. "HOUSTON" from H-GAC and
   // "Houston" from TxGIO are the same city, and a case-sensitive compare rendered both.
@@ -1459,7 +1698,14 @@ export function formatJurisdictionBadge(j, opts = {}) {
   // NEW-2 — the share the split lead states, taken from the same measurement the split came from,
   // so the words and the number cannot disagree.
   const splitShare = partCities.length ? shareOfCity(partCities[0]) : null;
+  /* NEW-1 (Georgia, California) — "GA" | "CA" on a point-in-polygon-confirmed site, else null. The field names
+   * (`gaState`, `gaNote`) predate California and are kept: they are consumed by the badge component and tests. */
+  const gaState = j.state === "GA" ? "GA" : j.state === "CA" ? "CA" : null;
+  const gaConsolidated = gaState === "GA" ? georgiaConsolidatedFor(counties, coreCities)
+    : gaState === "CA" ? californiaConsolidatedFor(counties, coreCities) : null;
   const label = formatJurisdictionLabel({
+    state: gaState,
+    consolidated: gaConsolidated,
     governingCities: coreCities,
     partialCities: partCities,
     splitClass: partCities.length ? CITY_LIMIT_CLASSES.full.id : null,
@@ -1477,6 +1723,8 @@ export function formatJurisdictionBadge(j, opts = {}) {
     // NEW-1 (DFW) — "no city, and the ETJ data cannot speak to this point". Keeps the lead from
     // saying "Unincorporated", which would be a positive finding nothing established.
     etjUnavailable: !!j.etjUnavailable && !etjs.length,
+    etjUndetermined: (j.etjUndetermined || []).length > 0,
+    etjReleased: j.etjReleased || [],
     countyUnresolved: countyState === "failed",
   });
   const { text, jur, county, isd, tail, shape } = label;
@@ -1492,6 +1740,10 @@ export function formatJurisdictionBadge(j, opts = {}) {
     // NEW-1 — the non-governing tail as its own field, and WHICH of the six shapes this is. A
     // consumer that wants one of them never has to take the label apart to get it.
     tail, shape,
+    // NEW-1 (Georgia) — "GA" on a confirmed Georgia site, plus the consolidated city-county it sits in
+    // (or null) and the one tooltip note that says the county governs (no ETJ exists there).
+    state: gaState, consolidated: gaConsolidated,
+    gaNote: gaState ? [gaState === "CA" ? CA_COUNTY_GOVERNS_NOTE : GA_COUNTY_GOVERNS_NOTE, gaConsolidated ? (gaState === "CA" ? CA_CONSOLIDATED_NOTE : GA_CONSOLIDATED_NOTE) : ""].filter(Boolean).join(" ") : null,
     /* NEW-2 (B371361) — the label's SLOTS, in reading order, so a consumer that has to SHORTEN the
      * line (the header pill at a laptop width) drops whole facts instead of cutting a sentence
      * mid-word. It is the same principle as the two fields above: nothing reads back out of the
@@ -1521,6 +1773,9 @@ export function formatJurisdictionBadge(j, opts = {}) {
     // NEW-1 (DFW) — carried as data so a consumer never parses the label for it.
     etjUnavailable: !!j.etjUnavailable && !etjs.length,
     etjCoverage: j.etjCoverage || null,
+    // NEW-2 — the disputed strips (with their CLAIMANTS as claims, never as an answer) and the release areas.
+    etjUndetermined: j.etjUndetermined || [],
+    etjReleased: j.etjReleased || [],
     // B209507 — what the badge could NOT establish, carried explicitly so a consumer (the floodplain
     // administrator especially) can refuse to settle rather than reading silence as absence.
     unresolvedRoles,
@@ -1570,6 +1825,8 @@ export async function countyAtPoint(lng, lat, opts = {}) {
   // Colorado's boundary layer. Outside Colorado this is the exact TxDOT source it always was.
   const src = countySourcesForPoint(lat, lng)[0];
   const isCo = src === JURISDICTION_SOURCES.countyCo;
+  const isGa = src === JURISDICTION_SOURCES.countyGa; // NEW-1 (Georgia)
+  const isCa = src === JURISDICTION_SOURCES.countyCa; // NEW-1 (California)
   /* ⛔ B1551618 (2026-09-11) — a point outside both TX and CO now has NO live source at all
    * (`countySourcesForPoint` returns `[]`), which used to mean this fired the live TxDOT query
    * anyway (it always returned features: [] for an out-of-state point, wasting a request to an
@@ -1607,17 +1864,18 @@ export async function countyAtPoint(lng, lat, opts = {}) {
     }
     // B1551618 — `state` used to be a binary isCo?"CO":"TX", which mislabeled every point outside
     // both TX and CO (and whose offline geometry ALSO couldn't answer, e.g. mid-load) as Texas.
-    return { name: null, key: null, fips: null, state: isCo ? "CO" : src ? "TX" : null, ageMs: r.ageMs, error: r.error ? humanize(r.error) : null };
+    return { name: null, key: null, fips: null, state: isCo ? "CO" : isGa ? "GA" : isCa ? "CA" : src ? "TX" : null, ageMs: r.ageMs, error: r.error ? humanize(r.error) : null };
   }
   // B792 — fips rides along (48157 = Fort Bend, …) so persistence-side callers can
   // cross-check parcel attributes against the boundary answer. (Colorado's GEOID20 is the
   // same 5-digit state+county FIPS, so the field means the same thing on both sources.)
-  const nameMap = isCo ? CO_COUNTY_NAME_TO_KEY : COUNTY_NAME_TO_KEY;
+  // NEW-1 (Georgia) — Georgia county keys are `ga_<slug>`; unwired counties get no key (never a Texas one).
+  const nameMap = isCo ? CO_COUNTY_NAME_TO_KEY : (isGa || isCa) ? {} : COUNTY_NAME_TO_KEY; // NEW-1 — GA / CA county keys: none wired, never a Texas one
   return {
     name: String(feat.name),
     key: nameMap[String(feat.name).toLowerCase()] || null,
     fips: feat.fips ? String(feat.fips) : null,
-    state: isCo ? "CO" : "TX",
+    state: isCo ? "CO" : isGa ? "GA" : isCa ? "CA" : "TX",
     ageMs: r.ageMs, ts: r.ts,
   };
 }

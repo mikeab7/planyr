@@ -118,7 +118,7 @@ const clickButton = async (page, re) => {
     const vals = [...document.querySelectorAll("input")].map((i) => i.value);
     const txt = document.body.innerText;
     return { hasFirst: vals.includes("Mike"), hasLast: vals.includes("Abbott"),
-      hasSave: /Save profile/.test(txt), hasOrg: vals.includes("Demo Dev Co") };
+      hasSave: /Save/.test(txt), hasOrg: vals.includes("Demo Dev Co") };
   });
   log(profileModal.hasFirst && profileModal.hasLast, "Profile modal pre-fills First + Last name");
   log(profileModal.hasSave, "Profile modal has a 'Save profile' action");

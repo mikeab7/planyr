@@ -23,9 +23,15 @@
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { pipelineStyleFor } from "./pipelineCommodity.js";
 import { isShadedXSubtype } from "./floodZone.js";
+/* B1990960 — the Georgia county / city rows behave exactly like the Texas ones (county names in capitals, city
+ * names de-duplicated against the place-names layer). ONE definition, shared with the export path below in
+ * exportSheet.js so screen and PDF cannot drift (PDF-PARITY). */
+export const isCountyLinesId = (id) => id === "jur_county" || id === "ga_county" || id === "ca_county";
+export const isCityLimitsId = (id) => id === "jur_city" || id === "ga_city" || id === "ca_city";
+
 /* NEW-1 (DFW ETJ) — the ETJ layer draws EVERY routed ETJ source, from the same list the identify
  * routes by, so the line you see is the line the screening reports (the B176 invariant). */
-import { ETJ_SOURCES } from "./jurisdiction.js";
+import { ETJ_SOURCES, normalizeFeature } from "./jurisdiction.js";
 import { etjNamesOf } from "./etjNames.js";
 
 // ---------------------------------------------------------------------------
@@ -253,6 +259,126 @@ export const VECTOR_SOURCES = {
     },
     note: "Texas city limits (TxGIO).",
   },
+  /* B1990960 (recurrence) — THE GEORGIA ROWS' VECTOR SOURCES. #1895 shipped `ga_county` / `ga_city` in
+   * layers.js and the registry rows in sources.js but registered NEITHER here, so `cachedVectorLayer`
+   * returned null and the panel toasted "no vector source registered" — nothing drew on the owner's
+   * signed-in Adairsville site. Same B176 invariant as the Texas rows above: endpoints come from the
+   * GIS_SOURCES rows the jurisdiction identify uses. Probed live 2026-09-30 with the loader's exact query:
+   * 159 counties in ONE 246 KB statewide pull; a 1-degree metro city cell 78 features / 255 KB (under the
+   * 512 KB entry cap); Adairsville answers at parcel zoom. Georgia has no ETJ, so there is no ETJ source. */
+  ga_county: {
+    id: "ga_county",
+    label: "County boundaries (Georgia)",
+    labelField: "NAME",
+    labelZoom: { min: 6, max: 11 },
+    nameTemplate: "{name} County",
+    identifyNote: "This county has jurisdiction here (it can tax/regulate) — outside city limits it is the zoning and permitting authority. A boundary is not a utility service area. Screening only.",
+    sourceName: "Georgia DCA",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.countyGa.serviceUrl + "/query",
+      outFields: ["NAME", "GEOID"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 30 * 24 * 3600 * 1000, // Georgia's 159-county roster has not changed since 1932
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        // ONE statewide entry serves every low/mid zoom instantly (159 features, ~246 KB).
+        { maxZoom: 11, scope: "all", offsetDeg: 0.002, precision: 4 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "Georgia county lines (DCA).",
+  },
+  ga_city: {
+    id: "ga_city",
+    label: "City limits (Georgia)",
+    labelField: "cityname",
+    labelZoom: { min: 10, max: 13 },
+    nameTemplate: "{name} — city limits",
+    identifyNote: "Inside this line is in the city (it has jurisdiction — can tax/regulate); outside is unincorporated county. NOT proof of utility service. Screening only.",
+    sourceName: "Georgia DCA",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.cityGa.serviceUrl + "/query",
+      outFields: ["cityname", "GEOID"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 14 * 24 * 3600 * 1000, // annexations move city limits occasionally
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      // Same bbox-only tiering as the Texas city row (a statewide pull is too heavy for one entry).
+      tiers: [
+        { maxZoom: 10, scope: "bbox", offsetDeg: 0.003, precision: 3, cellDeg: 1 },
+        { maxZoom: 12, scope: "bbox", offsetDeg: 0.001, precision: 4, cellDeg: 0.5 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "Georgia city limits (DCA).",
+  },
+  /* NEW-1 (California) — THE CALIFORNIA ROWS' VECTOR SOURCES, registered in the SAME commit as their layers.rows
+   * (the Georgia rows shipped without this and drew nothing — B1990960 recurrence; `vectorLayerRegistered`
+   * now fails the build on that). Same B176 invariant: endpoints come from the GIS_SOURCES rows the
+   * jurisdiction identify uses. Probed live 2026-10-02 with the loader's exact query: 58 counties in ONE
+   * statewide pull (~232 KB at the statewide tier's tolerance); a 1-degree Los Angeles city cell 128 features /
+   * ~82 KB (under the 512 KB entry cap). California has no ETJ, so there is no ETJ source. */
+  ca_county: {
+    id: "ca_county",
+    label: "County boundaries (California)",
+    labelField: "CDT_NAME_SHORT",
+    labelZoom: { min: 6, max: 11 },
+    nameTemplate: "{name} County",
+    identifyNote: "This county has jurisdiction here (it can tax/regulate) — outside city limits it is the zoning and permitting authority. A boundary is not a utility service area. Screening only.",
+    sourceName: "California CDT State Geoportal",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.countyCa.serviceUrl + "/query",
+      outFields: ["CDT_NAME_SHORT", "CENSUS_GEOID"],
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 30 * 24 * 3600 * 1000, // California's 58-county roster has not changed since 1913
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      tiers: [
+        // ONE statewide entry serves every low/mid zoom instantly (58 features, ~232 KB).
+        { maxZoom: 11, scope: "all", offsetDeg: 0.002, precision: 4 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "California county lines (CDT State Geoportal).",
+  },
+  ca_city: {
+    id: "ca_city",
+    label: "City limits (California)",
+    labelField: "CDT_NAME_SHORT",
+    labelZoom: { min: 10, max: 13 },
+    nameTemplate: "{name} — city limits",
+    identifyNote: "Inside this line is in the city (it has jurisdiction — can tax/regulate); outside is unincorporated county. NOT proof of utility service. Screening only.",
+    sourceName: "California CDT State Geoportal",
+    liveFallback: true,
+    query: {
+      url: GIS_SOURCES.cityCa.serviceUrl + "/query",
+      outFields: ["CDT_NAME_SHORT", "CENSUS_GEOID"],
+      // Land rows only — the registry row's own `where` (offshore water polygons and Mountain House withheld).
+      where: GIS_SOURCES.cityCa.where,
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 14 * 24 * 3600 * 1000, // annexations move city limits occasionally
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      // Same bbox-only tiering as the Texas / Georgia city rows (a statewide pull is too heavy for one entry).
+      tiers: [
+        { maxZoom: 10, scope: "bbox", offsetDeg: 0.003, precision: 3, cellDeg: 1 },
+        { maxZoom: 12, scope: "bbox", offsetDeg: 0.001, precision: 4, cellDeg: 0.5 },
+        { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
+      ],
+    },
+    note: "California city limits (CDT State Geoportal).",
+  },
   jur_etj: {
     id: "jur_etj",
     label: "City ETJ (Houston & Dallas–Fort Worth)",
@@ -262,7 +388,7 @@ export const VECTOR_SOURCES = {
     labelZoom: { min: 9, max: 13 },
     nameTemplate: "{name} — ETJ",
     identifyNote: "This city's ETJ (extraterritorial jurisdiction) — its limited reach OUTSIDE its city limits. Not annexation and not utility service. Where two cities' ETJ claims overlap, both are named. Screening only.",
-    sourceName: "H-GAC · Collin / Rockwall / Denton County GIS · City of Fort Worth · City of Austin · City of Baytown",
+    sourceName: "H-GAC · county, city and district publishers (see the layer\u2019s vintage line)",
     /* No live single-service fallback: the drawn layer is now SEVERAL services, and the old
      * fallback repainted only H-GAC's — which is empty in Dallas, i.e. a blank layer that reads as
      * "no ETJ here". A failed pull with nothing cached reports FAILED instead (LOUD-FAILURE). */
@@ -290,7 +416,7 @@ export const VECTOR_SOURCES = {
         { scope: "bbox", offsetDeg: 0.0002, precision: 5, cellDeg: 0.25 },
       ],
     },
-    note: "City ETJ — Houston region (H-GAC, Baytown), Dallas–Fort Worth (Collin, Rockwall, Denton counties; Fort Worth), Austin.",
+    note: "City ETJ — Houston region (H-GAC, Baytown), Dallas–Fort Worth (twelve publishers, see docs/DFW-ETJ-COVERAGE.md), Austin.",
   },
   jur_isd: {
     id: "jur_isd",
@@ -517,21 +643,45 @@ async function defaultFetchJson(url, { timeoutMs = null } = {}) {
  * a partial answer would be cached for the full TTL and read as "no ETJ here" for the county that
  * failed, which is the false-clean this layer exists to prevent. A failed REFRESH keeps the last-good
  * copy (SWR); only a cold failure surfaces, and it surfaces loudly. */
+/* The drawn layer's view of one publisher row + one attribute set, from the SAME `normalizeFeature` the identify
+ * reads. `names` is always an array (a release area's is its constant). */
+function normalizeEtjFeature(row, attrs) {
+  const n = normalizeFeature(row, attrs);
+  return { names: n.names && n.names.length ? n.names : (n.name ? [n.name] : []), undetermined: !!n.undetermined, claimants: n.claimants || [] };
+}
+
 async function fetchMultiSourceFeatures(source, bbox, opts) {
   const q = source.query;
   const meets = (b, v) => !v || (b[0] <= v.n && b[2] >= v.s && b[1] <= v.e && b[3] >= v.w);
   const subs = q.sources.filter((sub) => meets(sub.bbox, bbox));
+  const sourceMs = {};
   const parts = await Promise.all(subs.map(async (sub) => {
-    const subSource = { ...source, query: { ...q, sources: undefined, url: sub.url, outFields: [sub.nameCol || "*"] } };
-    const { features, truncated } = await fetchVectorFeatures(subSource, bbox, opts);
+    // Every column the row's identify reads (NAME AND CITY on Denton's table); "*" when the row names none.
+    const cols = Object.values((sub.row && sub.row.fields) || {}).filter(Boolean);
+    const subSource = { ...source, query: { ...q, sources: undefined, url: sub.url, outFields: cols.length ? cols : ["*"], where: (sub.row && sub.row.where) || q.where } };
+    // One retry: with a dozen small publishers behind one layer, a single 5xx/blip must not blank a metro.
+    // A second failure still fails the pull (see the block comment above).
+    let res;
+    const t0 = Date.now();
+    try { res = await fetchVectorFeatures(subSource, bbox, opts); }
+    catch (_) { await new Promise((r) => setTimeout(r, opts.retryDelayMs ?? 700)); res = await fetchVectorFeatures(subSource, bbox, opts); }
+    sourceMs[sub.id] = Date.now() - t0;   // per-publisher wall time, so a SLOW publisher is attributable, not guessed
+    const { features, truncated } = res;
     const out = [];
     for (const f of features) {
-      const names = etjNamesOf(sub.row, sub.nameCol ? (f.attributes || {})[sub.nameCol] : null);
-      out.push({ geometry: f.geometry, attributes: { CITY: names.join(" / "), _src: sub.id } });
+      // The ONE reader of a publisher's name (identify uses it too) — so a disputed strip and a release area are
+      // named identically on the map and in the screening.
+      const n = normalizeEtjFeature(sub.row, f.attributes || {});
+      const label = sub.row.release ? `${sub.row.nameConst || "Fort Worth"} ETJ release area (SB 2038)`
+        : n.undetermined ? "Undetermined (disputed)" : n.names.join(" / ");
+      out.push({ geometry: f.geometry, attributes: {
+        CITY: label, _src: sub.id, ...(sub.row.release ? { _release: true } : {}),
+        ...(n.undetermined ? { _undetermined: true, CLAIMANTS: n.claimants.join(" / ") } : {}),
+      } });
     }
     return { out, truncated };
   }));
-  return { features: parts.flatMap((p) => p.out), truncated: parts.some((p) => p.truncated) };
+  return { features: parts.flatMap((p) => p.out), truncated: parts.some((p) => p.truncated), sourceMs };
 }
 
 export async function fetchVectorFeatures(source, bbox, { fetchJson = defaultFetchJson, maxFeatures, tier = null } = {}) {
@@ -923,13 +1073,14 @@ export async function fetchCached(source, bbox, { cache, fetchJson = defaultFetc
   const effBbox = tier && tier.scope !== "all" && tier.cellDeg ? snapBbox(bbox, tier.cellDeg) : bbox;
   const key = vectorKey(source, effBbox, tier);
   const fetcher = async () => {
-    const { features, truncated } = await fetchVectorFeatures(source, tier && tier.scope === "all" ? null : effBbox, { fetchJson, tier });
+    const { features, truncated, sourceMs } = await fetchVectorFeatures(source, tier && tier.scope === "all" ? null : effBbox, { fetchJson, tier });
     const fc = featuresToGeoJson(features, { source });
     const out = tier ? fc : simplifyGeoJson(fc);
     // Surface the maxFeatures cap on the stored payload (B707): a capped pull is an
     // UNDERCOUNT — consumers (the mitigation engine) must flag it, never read it as
     // "everything". Silent truncation is the fabricated-all-clear class.
     if (truncated) out.truncated = true;
+    if (sourceMs) out.sourceMs = sourceMs;   // multi-source layers: how long each publisher took (rides the cached payload)
     return out;
   };
   const { cached, stale, fresh } = cache.swr(key, fetcher, { ttl: source.query.ttl, onFresh });

@@ -126,13 +126,20 @@ describe("fetchLastTouchedDoc — never offers a document whose filed project is
 describe("fetchLastTouchedDoc — B1616656 (×3 recurrence): a project-less, non-PDF document is never a candidate", () => {
   beforeEach(() => { h.docs = []; h.sites = []; h.sitesErr = null; });
 
-  it("THE EXACT REPORTED ROW — project-less, non-PDF (rvmtov1wtr0459a's own real shape: no `sourceFile` mirror, but `sources[0].name` reads the real .txt) — skipped, falls back to the next candidate", async () => {
+  it("THE EXACT REPORTED ROW — project-less, non-PDF (rvmtov1wtr0459a's own real shape: no `sourceFile` mirror, but `sources[0].name` reads the real file name; the row was a .txt then, an .xlsx here — a type the document editor still cannot open) — skipped, falls back to the next candidate", async () => {
     h.docs = [
-      { id: "rvmtov1wtr0459a", title: "2026.09.05 planyr-dupe-check", project: null, project_id: null, updated_at: "2026-09-10T03:58:50Z", deleted_at: null, sources: [{ name: "planyr-dupe-check.txt" }] },
+      { id: "rvmtov1wtr0459a", title: "2026.09.05 planyr-dupe-check", project: null, project_id: null, updated_at: "2026-09-10T03:58:50Z", deleted_at: null, sources: [{ name: "planyr-dupe-check.xlsx" }] },
       { id: "older-pdf", title: "Older PDF", project: null, project_id: null, updated_at: "2026-09-01T00:00:00Z", deleted_at: null, sources: [{ name: "site-plan.pdf" }] },
     ];
     const doc = await fetchLastTouchedDoc();
     expect(doc.id).toBe("older-pdf");
+  });
+
+  it("NEW-1: a project-less Word or text file IS eligible now — the Review document editor opens it, so it is no longer the dead end B1616656 reported", async () => {
+    h.docs = [{ id: "loose-txt", title: "Notes", project: null, project_id: null, updated_at: "2026-09-10T00:00:00Z", deleted_at: null, sources: [{ name: "notes.txt" }] }];
+    expect((await fetchLastTouchedDoc()).id).toBe("loose-txt");
+    h.docs = [{ id: "loose-docx", title: "Memo", project: null, project_id: null, updated_at: "2026-09-10T00:00:00Z", deleted_at: null, sources: [{ name: "memo.DOCX" }] }];
+    expect((await fetchLastTouchedDoc()).id).toBe("loose-docx");
   });
 
   it("project-less AND a PDF — stays eligible, nothing to route to but the canvas can render it", async () => {
@@ -167,8 +174,8 @@ describe("fetchLastTouchedDoc — B1616656 (×3 recurrence): a project-less, non
 
   it("EVERY document in the account is project-less and non-PDF — drops the line entirely (null), never a live-looking dead end", async () => {
     h.docs = [
-      { id: "d1", title: "One", project: null, project_id: null, updated_at: "2026-09-10T00:00:00Z", deleted_at: null, sources: [{ name: "one.txt" }] },
-      { id: "d2", title: "Two", project: null, project_id: null, updated_at: "2026-09-09T00:00:00Z", deleted_at: null, sources: [{ name: "two.docx" }] },
+      { id: "d1", title: "One", project: null, project_id: null, updated_at: "2026-09-10T00:00:00Z", deleted_at: null, sources: [{ name: "one.xlsx" }] },
+      { id: "d2", title: "Two", project: null, project_id: null, updated_at: "2026-09-09T00:00:00Z", deleted_at: null, sources: [{ name: "two.zip" }] },
     ];
     const doc = await fetchLastTouchedDoc();
     expect(doc).toBeNull();

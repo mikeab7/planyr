@@ -59,12 +59,15 @@ import { usePalette } from "../../../shared/theme/ThemeProvider.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { ToggleChip } from "../../../shared/ui/controls.jsx";
 import { openPipelineProjects, mapMarkers, missingLocationCount } from "../lib/dashboardMapMarkers.js";
+import { displayPointsByGroup } from "../lib/dashboardParcelAnchors.js";
+import { fetchParcelsForSites } from "../lib/dashboardParcelFetch.js";
 import { resolveLabelVisibility } from "../lib/labelCollide.js";
 // SATELLITE-LABEL-LEGIBILITY — the SAME aerial-imagery registry the Site Planner's own "Aerial"
 // basemap reads (its own `lib/basemaps.js` header: "the single list of free aerial imagery
 // sources, used by BOTH surfaces"). Importing the entry rather than writing a second literal is
 // what keeps this card's imagery the same provider as the rest of the app by construction.
 import { BASEMAPS } from "../../site-planner/lib/basemaps.js";
+import { FREE_ZOOM_OPTIONS, attachFreeWheelZoom } from "../../../shared/map/freePinchZoom.js";
 
 const MAX_ZOOM = 19;
 const SINGLE_POINT_ZOOM = 13;
@@ -213,7 +216,24 @@ export default function LocationsMapCard({ projects, comps, onOpenProject, onFix
   const labelMarkersRef = useRef([]);
 
   const openProjects = useMemo(() => openPipelineProjects(projects), [projects]);
-  const allMarkers = useMemo(() => mapMarkers(projects, comps), [projects, comps]);
+  // B-NEW-1 — pins sit inside their parcel, same point as the Site tab map. Parcel shapes are read
+  // once per set of plotted plans (never per render/zoom); until they arrive, or for a site with no
+  // boundary, a pin stays at its saved origin.
+  const [displayPoints, setDisplayPoints] = useState(null);
+  const plottedSiteKey = useMemo(
+    () => mapMarkers(projects, null).map((m) => m.project.siteId).filter(Boolean).sort().join(","),
+    [projects],
+  );
+  useEffect(() => {
+    if (!plottedSiteKey) return undefined;
+    let live = true;
+    fetchParcelsForSites(plottedSiteKey.split(",")).then((rows) => {
+      if (live) setDisplayPoints(displayPointsByGroup(projects, rows));
+    }).catch(() => {});
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plottedSiteKey]);
+  const allMarkers = useMemo(() => mapMarkers(projects, comps, displayPoints), [projects, comps, displayPoints]);
   const missingCount = useMemo(() => missingLocationCount(projects), [projects]);
   const compsTotal = comps ? comps.length : 0;
   const compsPlotted = useMemo(() => allMarkers.filter((m) => m.kind === "comp").length, [allMarkers]);
@@ -233,8 +253,10 @@ export default function LocationsMapCard({ projects, comps, onOpenProject, onFix
     const first = allMarkers[0];
     const map = L.map(hostRef.current, {
       center: [first.lat, first.lon], zoom: SINGLE_POINT_ZOOM,
-      zoomControl: true, fadeAnimation: false, trackResize: false,
+      zoomControl: true, fadeAnimation: false, trackResize: false, ...FREE_ZOOM_OPTIONS,
     });
+    const detachFreeWheel = attachFreeWheelZoom(L, map); // NEW-1
+    if (typeof window !== "undefined" && window.__PLANYR_E2E) window.__locationsMap = map;
     layerRef.current = L.layerGroup([]).addTo(map);
     mapRef.current = map;
 
@@ -262,7 +284,7 @@ export default function LocationsMapCard({ projects, comps, onOpenProject, onFix
     map.on("moveend", onViewSettled);
     return () => {
       map.off("zoomend", onViewSettled); map.off("moveend", onViewSettled);
-      resizeObserver?.disconnect(); map.remove(); mapRef.current = null; layerRef.current = null;
+      resizeObserver?.disconnect(); detachFreeWheel(); if (window.__locationsMap === map) window.__locationsMap = null; map.remove(); mapRef.current = null; layerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasMap]);

@@ -21,6 +21,17 @@ const browser = await chromium.launch({ executablePath: process.env.PW_CHROME ||
 try {
   const page = await browser.newPage({ viewport: { width: 1200, height: 800 }, ignoreHTTPSErrors: true });
   await assertMeasurable(page, "verify-dfw-etj-map");
+  /* Denton County's and Fort Worth's servers are denied by the build sandbox's egress policy, and the layer fails a
+   * pull if ANY in-view publisher fails (by design — a partial answer must never be cached as "no ETJ"). Here, and
+   * ONLY here, those two hosts are answered with an empty FeatureCollection so the OTHER publishers' painting can be
+   * asserted. On a machine that can reach them, set REAL_HOSTS=1 and the stand-ins are skipped. */
+  if (!process.env.REAL_HOSTS) {
+    const cors = { "access-control-allow-origin": "*", "content-type": "application/json" };
+    for (const host of ["gis.dentoncounty.gov", "mapit.fortworthtexas.gov"]) {
+      await page.route(`**://${host}/**`, (route) => route.fulfill({ status: 200, headers: cors, body: JSON.stringify({ features: [] }) }));
+    }
+    console.log("   (stand-ins in place for gis.dentoncounty.gov and mapit.fortworthtexas.gov — unreachable from this environment)");
+  }
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   const view = async (lat, lng, z, tag) => {
@@ -51,6 +62,12 @@ try {
   const mid = await view(32.78, -96.8, 10, "z10");
   ok("city + ETJ both loaded (z10)", mid.status.jur_city.state === "loaded" && mid.status.jur_etj.state === "loaded", JSON.stringify(mid.status));
   ok("city-name labels paint at z10", mid.labels.some((t) => !/ ETJ$/.test(t)), `${mid.labels.length} labels: ${mid.labels.slice(0, 10).join(" | ")}`);
+  // NEW-2 — the southern sweep: Ellis / Johnson / Tarrant-side publishers paint too, and the view does not blank
+  // on the ~10 services it now fans out to.
+  const south = await view(32.42, -97.05, 10, "south");
+  ok("south view (Ellis · Johnson · Tarrant) loaded", south.status.jur_city.state === "loaded" && south.status.jur_etj.state === "loaded", JSON.stringify(south.status));
+  const southEtj = south.labels.filter((t) => / ETJ$/.test(t));
+  ok("south ETJ labels from the new publishers paint", ["Ennis ETJ", "Maypearl ETJ", "Midlothian ETJ", "Waxahachie ETJ", "Godley ETJ", "Joshua ETJ", "Mansfield ETJ", "Burleson ETJ", "Cleburne ETJ", "Red Oak ETJ"].filter((n) => southEtj.includes(n)).length >= 3, `${southEtj.length}: ${southEtj.slice(0, 14).join(" | ")}`);
   ok("no page errors", errors.length === 0, errors.join(" | "));
 } finally { await browser.close(); }
 const failed = results.filter((r) => !r.pass);

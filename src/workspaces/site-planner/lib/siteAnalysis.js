@@ -785,7 +785,11 @@ export function buildJurisdictionFinding(j) {
   // data cannot speak to the point (or the lookup failed) they read "unavailable" instead.
   rows.push(["City", j.unincorporated ? (j.etjUnavailable ? "Outside city limits" : "Unincorporated") : j.city.join(" + "), j.ages.city]);
   const etjState = (j.sources.find((s) => s.id === "etj") || {}).state;
-  rows.push(["ETJ", j.etj.length ? j.etj.map((n) => `${n} ETJ`).join(" + ") : (j.etjUnavailable ? "ETJ data unavailable here" : etjState === "unavailable" ? "no ETJ layer for this area" : "not in a city ETJ"), j.ages.etj]);
+  // NEW-2 — a disputed strip lists its CLAIMANTS as claims (never as an answer); a release area names the city.
+  const undet = (j.etjUndetermined || []).length
+    ? `ETJ undetermined (disputed)${(j.etjUndetermined || []).flatMap((u) => u.claimants || []).length ? " — claimed by " + [...new Set((j.etjUndetermined || []).flatMap((u) => u.claimants || []))].join(" and ") : ""}` : null;
+  const rel = (j.etjReleased || []).length ? (j.etjReleased || []).map((n) => `${n} ETJ release area (SB 2038)`).join(" + ") : null;
+  rows.push(["ETJ", [j.etj.length ? j.etj.map((n) => `${n} ETJ`).join(" + ") : null, undet, rel].filter(Boolean).join(" · ") || (j.etjUnavailable ? "ETJ data unavailable here" : etjState === "unavailable" ? "no ETJ layer for this area" : "not in a city ETJ"), j.ages.etj]);
   // B764: the school district (ISD) — the biggest single line on most Texas tax bills. Only
   // rows out when the identify actually ran ISD (j.isd present), so older callers are unchanged.
   if (Array.isArray(j.isd)) rows.push(["School district", j.isd.length ? j.isd.join(" + ") : "—", j.ages.isd]);
@@ -865,7 +869,7 @@ export function deriveZoning(j, state = null) {
   const src = ANALYSIS_SOURCES.find((s) => s.id === "zoning");
   const cities = (j.city || []).map((c) => String(c).toLowerCase());
   const etj = (j.etj || []).map((c) => String(c).toLowerCase());
-  const st = state === "CO" ? "CO" : state === "TX" ? "TX" : null;
+  const st = state === "CO" ? "CO" : state === "TX" ? "TX" : state === "CA" ? "CA" : null; // NEW-1 (California) — a state we positively identify states its OWN doctrine
   let summary;
   // ⛔ NEW-5 (2026-09-05, owner-reported) — `j.unincorporated` used to be checked FIRST, so it won
   // on every non-Houston ETJ site (an ETJ IS unincorporated land by definition — jurisdictionLabel.js's
@@ -880,6 +884,8 @@ export function deriveZoning(j, state = null) {
   else if (etj.length) summary = `${j.etj.join(", ")} ETJ — no zoning, but the city's subdivision/platting authority applies in the ETJ; confirm with the city.`;
   // NEW-1 (DFW ETJ) — outside every city's limits but the ETJ data cannot say whether a city's platting
   // authority reaches here: that is not the "no zoning, county only" sentence's finding to make.
+  else if ((j.etjUndetermined || []).length) summary = "ETJ undetermined (disputed) — two cities' claims overlap here and the county has not resolved them; confirm platting authority with the county and both cities.";
+  else if ((j.etjReleased || []).length) summary = "Inside an SB 2038 ETJ release area — the city's layer marks it as released or petitioned for release; confirm the current status and platting authority with the city.";
   else if (j.unincorporated && j.etjUnavailable) summary = "Outside city limits — a city's ETJ (platting authority) may still reach here; the ETJ data does not cover this area. Confirm with the county and the nearest city.";
   else if (j.unincorporated) summary = UNINCORPORATED_ZONING[st] || UNINCORPORATED_ZONING.unknown;
   else summary = "Confirm zoning with the jurisdiction.";
@@ -888,7 +894,7 @@ export function deriveZoning(j, state = null) {
     status: "info", summary, detail: [], rows: null,
     sourceName: "Derived from jurisdiction", ageMs: null, ts: null,
     // NEW-1 — the shared caveat names City of Houston, which is Texas trivia on a Colorado card.
-    error: null, caveat: st === "CO" ? CO_ZONING_CAVEAT : src.caveat, verified: false,
+    error: null, caveat: st === "CO" ? CO_ZONING_CAVEAT : st === "CA" ? CA_ZONING_CAVEAT : src.caveat, verified: false,
   };
 }
 
@@ -897,8 +903,13 @@ export function deriveZoning(j, state = null) {
 const UNINCORPORATED_ZONING = {
   TX: "Unincorporated — Texas counties have no zoning; subdivision platting still applies.",
   CO: "Unincorporated — Colorado counties DO zone (C.R.S. 30-28-111), so this land is zoned by the county, not unzoned. Confirm the district and whether your use is by right, a rezone, or a Use by Special Review.",
+  CA: "Unincorporated — California counties DO zone, so this land is zoned by the county, not unzoned. Confirm the district and whether your use is by right, a rezone, or a conditional use permit.",
   unknown: "Unincorporated — county zoning authority varies by state. Confirm with the county before assuming the land is unzoned.",
 };
+
+const CA_ZONING_CAVEAT =
+  "Zoning is jurisdiction-specific. California cities (including charter cities under their own charters) and counties each zone " +
+  "their own territory; confirm the district and the entitlement path with whoever reviews the plat.";
 
 const CO_ZONING_CAVEAT =
   "Zoning is jurisdiction-specific. Colorado home-rule municipalities (Art. XX) and counties each zone their own territory; " +

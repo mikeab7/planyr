@@ -41,6 +41,23 @@ describe("NEW-1 (B1462256): every MapFinder FloatingNotice is gated on `visible`
       expect(cond, `condition "${cond}" gates a <FloatingNotice but never checks \`visible\``).toMatch(/\bvisible\b/);
     }
   });
+
+  // NEW-1 (B2041360, owner iPhone screenshot 2026-10-03): `visible` is the map<->plan MODE flip
+  // only; leaving the Site WORKSPACE (Dashboard / any module) leaves it true, and the portal then
+  // paints over the other module. Every call site must ALSO check `isActive`.
+  it("every <FloatingNotice call site's guarding condition ALSO checks `isActive` (the Dashboard-leak guard)", () => {
+    for (const m of [...MF.matchAll(CALL_SITE_RE)]) {
+      const cond = m[1].trim();
+      expect(cond, `condition "${cond}" gates a <FloatingNotice but never checks \`isActive\``).toMatch(/\bisActive\b/);
+    }
+  });
+
+  it("the Site workspace's two ToastHosts are gated on their active flag too", () => {
+    const app = readFileSync(join(here, "../src/workspaces/site-planner/SitePlannerApp.jsx"), "utf8");
+    const planner = readFileSync(join(here, "../src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+    expect(app).toMatch(/\{isActive && <ToastHost toasts=\{statusToasts\}/);
+    expect(planner).toMatch(/\{active && <ToastHost toasts=\{toasts\}/);
+  });
 });
 
 describe("NEW-1 (B1462256): the map<->plan reset effect clears select-mode + both provenance notices on BOTH halves of the flip", () => {
