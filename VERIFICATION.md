@@ -166,6 +166,16 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1446736 — B2021648: the first Food search after opening the page is about as fast as later ones `Blocker: auth`
+Built: warm-up on Food mount (preconnect, session, one throwaway search); unit tests green. Pending, signed in on the phone and desktop, on a fresh page load with the served chunk hash read in the same observation:
+1. Open `#/food`, wait a few seconds, type a query → expected: first results in roughly the time of a later search (~0.25 s), not 1.5–2 s.
+2. Repeat on two more fresh loads; record first vs second `food_places_search_by_name` time (Network: DNS, connect, TLS, wait). Expected: first within ~2× the second.
+
+### V1446737 — B2021649: "dao" no longer lists a saved Dairy Queen `Blocker: auth`
+Built: saved places must pass the word-match rule; unit tests red→green. Pending, signed in with Dairy Queen saved:
+1. Type "dao" → expected: DAO'N Korean first, then real "Dao" names; no Dairy Queen.
+2. Type "dairy" and "da" → expected: the saved Dairy Queen appears, tagged.
+
 ### V1493136 — B2069808: Food search answers faster — saved places show at once, results settle quicker, same matches in the same order `Blocker: auth`
 
 Sandbox-proven: server 220–259 ms → 13–90 ms with identical ordered results (in-database, 7 queries), `test/foodSearchSpeed.test.js` (red on main), mocked-backend browser timings (saved place 839 → 18 ms to first row). Not provable here: the real network + his real saved list + a real phone. **Steps** (signed in, planyr.io `#/food`, Map view, on the phone; read the build from `/version.json` in the SAME observation as the result):
