@@ -13,8 +13,7 @@
       "evidence": {
         "file": "src/shared/schedule/scheduleOwnership.js",
         "contains": "liveSiteName"
-      },
-      "pendingOn": "PR #1892 (B1991040) — evidence lands with it"
+      }
     },
     {
       "id": "C02",
@@ -93,8 +92,7 @@
         "file": "src/workspaces/doc-review/lib/reviewNaming.js",
         "contains": "liveReviewProject"
       },
-      "noDdl": true,
-      "pendingOn": "PR #1892 (B1991040) — evidence lands with it"
+      "noDdl": true
     },
     {
       "id": "C08",
@@ -381,8 +379,7 @@
       "evidence": {
         "file": "src/shared/schedule/scheduleOwnership.js",
         "contains": "liveSiteName"
-      },
-      "pendingOn": "PR #1892 (B1991040) — evidence lands with it"
+      }
     },
     {
       "id": "C27",
