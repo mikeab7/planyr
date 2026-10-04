@@ -176,6 +176,18 @@ Sandbox-proven (`ui-audit/verify-flat-rail-panels.mjs` 0 failing across 14 panel
 4. Overlays with a dropped PDF selected. **Expect:** the selected row shows an accent rule on its left edge, others none; controls on the row all work.
 5. Repeat 1 at desktop width. **Expect:** same, plus the detach icon still pops the panel to a floating card whose header carries the same icon/title/subtitle/↻.
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1996464.
+### V1476304 — B2058144: Review tabs open, switch, restore, and follow the signed-in account between desktop and phone `Blocker: auth`
+
+Sandbox-proven (real Chromium, built app): `ui-audit/verify-review-tabs.mjs` (logged out, 37/37), `ui-audit/verify-review-tabs-sync.mjs` (two contexts signed in as a made-up user against a hermetic fake account, 20/20), `test/reviewTabs.test.js`. Pending: the real account and real devices (the sandbox's fake account cannot show real Supabase row-level security, real timing, or a real phone). **Steps** (planyr.io, desktop + iPhone, signed in; read the served chunk hash in the same observation):
+1. Desktop: Review → Open… three files (two PDFs, one .docx). **Expect:** three tabs in order, last active; no sheet index anywhere.
+2. Desktop: on the first PDF go to page 3 and zoom in. **Expect:** the tab remembers it when you switch away and back.
+3. Reload the desktop. **Expect:** the same three tabs, same active tab, each at its last page and zoom.
+4. iPhone: open Review. **Expect:** the same three tabs, the same active tab at the same page and zoom; the strip scrolls sideways, × only on the active tab.
+5. Desktop: type in the .docx (do not save), then on the phone close the .docx tab. Back on the desktop, focus the window. **Expect:** the .docx tab is STILL there with the text.
+6. Phone: close the second PDF. Desktop: click away and back. **Expect:** the tab is gone on the desktop.
+7. Phone in airplane mode: change a page, then reconnect. **Expect:** the desktop picks up the new page at its next focus.
+8. Close every tab on the desktop, reload. **Expect:** blank Review (no tabs, no index).
+- **Stopping rule:** closes on a dated pass of 1–8, or a failed step filed as a recurrence on B2058144.
 ### V1474944 — B2056784: no full-screen button on iPhone Safari; still present and working on desktop Chrome `Blocker: real-device (iPhone Safari has no Fullscreen API for page elements — cannot be produced headless)`
 
 Sandbox-proven: `test/fullscreenSupport.test.js`, `e2e/fullscreen-gate.spec.js` (API stubbed off at iPhone width; iPad width, standalone and desktop arms). The real-device confirmation is what is left.
