@@ -1429,9 +1429,9 @@ export default function NoteToolbar({
         style={{
           flex: "0 0 auto", minWidth: 32, minHeight: 44, display: "inline-flex", alignItems: "center", gap: 4,
           border: "none", background: "transparent", color: "var(--accent-notes-text)",
-          font: "inherit", fontSize: 22, fontWeight: 650, cursor: "pointer", padding: "0 6px 0 2px", lineHeight: 1,
+          font: "inherit", fontSize: 14, fontWeight: 650, cursor: "pointer", padding: "0 6px 0 2px", lineHeight: 1,
         }}
-      >‹<span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>Notes</span></button>
+      ><svg width="14" height="22" viewBox="0 0 14 22" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 3L3 11l7 8" /></svg><span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>Notes</span></button>
       <Sep />
     </span>
   ) : null;
@@ -1684,7 +1684,7 @@ export default function NoteToolbar({
                   <button key={a.id} type="button" data-testid={`nt-page-${a.id}`} onMouseDown={stop}
                     onClick={() => { setMoreOpen(false); a.run(); }}
                     style={{
-                      minHeight: 44, padding: "0 14px", borderRadius: RADIUS.control, cursor: "pointer", font: "inherit", fontSize: 13.5, fontWeight: 600,
+                      minHeight: 44, padding: "0 14px", borderRadius: RADIUS.control, cursor: "pointer", font: "inherit", fontSize: 13, fontWeight: 600,
                       border: "1px solid var(--border-default)",
                       background: a.active ? "var(--accent-notes)" : "transparent",
                       color: a.active ? "var(--on-accent-notes)" : "var(--text-primary)",
