@@ -51,8 +51,9 @@ export async function signUp(email, password, profile = {}, captchaToken) {
       domain: (String(email).split("@")[1] || "").toLowerCase(),
     });
   }
-  // When email confirmation is on, signUp returns a user but no session yet.
-  return { error: msg, needsConfirm: !!(data && data.user && !data.session) };
+  // When email confirmation is on, signUp returns a user but no session yet. `signedIn` is the
+  // session actually being present — the panel branches on that, not on a build-time flag.
+  return { error: msg, needsConfirm: !!(data && data.user && !data.session), signedIn: !!(data && data.session) };
 }
 
 export async function signIn(email, password) {
