@@ -165,6 +165,14 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V1439184 — B2014096/B2014097/B2014098: sign-up panel — success state, hint placement, Forgot password scoping `Blocker: auth`
+
+Sandbox-proven: `test/authPanelSignup.test.js` (15), `e2e/signup-success.spec.js` (4, real built app with Supabase's signup endpoint MOCKED, both session branches, double-submit, placement measured). Not provable here: the real Supabase round trip with Cloudflare Turnstile and a real inbox (the sandbox cannot sign up for real). **Steps** (logged-out window, planyr.io, throwaway address; read the served chunk hash in the SAME observation):
+1. Open Sign up, fill it, pass the Turnstile check, press Create account. **Expect:** the button turns to "Creating account…" and ignores a second press; then the form is REPLACED by "Check your email" naming the address you typed and the sender (Supabase Auth). No password field remains.
+2. Open the email. **Expect:** it is from the sender named on screen; the link confirms the account.
+3. Reopen Sign up and click into Password. **Expect:** "Min 6 characters" appears directly under the field (not at the panel bottom); on Sign in it never appears; "Forgot password?" is on Sign in only.
+4. When Supabase "Confirm email" is later switched OFF: repeat step 1. **Expect:** the panel closes and you are signed in — no check-your-email screen, no redeploy needed.
+- **Stopping rule:** closes on a dated pass of 1–3 (4 when the setting flips), or a failed step filed as a recurrence on B2014096.
 
 ### V1446736 — B2021648: the first Food search after opening the page is about as fast as later ones `Blocker: auth`
 Built: warm-up on Food mount (preconnect, session, one throwaway search); unit tests green. Pending, signed in on the phone and desktop, on a fresh page load with the served chunk hash read in the same observation:
