@@ -43,7 +43,7 @@ describe("DocReview.jsx — org prop wiring", () => {
   });
 
   it("loadSingleReview reads rec.orgScope into meta — an opened org-filed review keeps its scope on the next save", () => {
-    const start = SRC.indexOf("const loadSingleReview = async (rec) => {");
+    const start = SRC.indexOf("const loadSingleReview = async (rec, opts = {}) => {");
     const end = SRC.indexOf("\n  const resetSingle = ", start);
     expect(start).toBeGreaterThan(-1);
     const body = SRC.slice(start, end);
@@ -57,17 +57,10 @@ describe("DocReview.jsx — org prop wiring", () => {
     for (const m of matches) expect(m).toMatch(/org:\s*false/);
   });
 
-  it("the project-switch effect checks `org` BEFORE falling through to the plain projectId branch (never conflates Organization with \"no project chosen\")", () => {
-    const start = SRC.indexOf("const routeIdRef = useRef(projectId);");
-    const end = SRC.indexOf("// Consume the Shell's cross-workspace", start);
-    expect(start).toBeGreaterThan(-1);
-    expect(end).toBeGreaterThan(start);
-    const body = SRC.slice(start, end);
-    const orgBranchAt = body.indexOf("if (org) {");
-    const plainProjectIdCheckAt = body.indexOf("if (projectId === prev) return;");
-    expect(orgBranchAt).toBeGreaterThan(-1);
-    expect(plainProjectIdCheckAt).toBeGreaterThan(orgBranchAt); // org is checked strictly first
-    expect(body).toMatch(/readLastDoc\(null,\s*true\)/); // resumes from the ORG bucket, never the unfiled one
+  it("NEW-1 (tabs): switching project/Organization from the breadcrumb no longer swaps or closes the open file — no project-switch effect is left to conflate org with \"no project chosen\"", () => {
+    expect(SRC).not.toContain("const routeIdRef = useRef(projectId);");
+    expect(SRC).not.toContain("readLastDoc(");
+    expect(SRC).toContain("tabs are not");
   });
 
   it("the boot-write effects never let an org-scoped doc reach the legacy GLOBAL pointers (which the plain, non-org resume path reads unconditionally)", () => {
@@ -79,9 +72,10 @@ describe("DocReview.jsx — org prop wiring", () => {
     expect(body).toMatch(/writeLastDoc\(null,\s*\{\s*id:\s*reviewId,\s*mode:\s*"review"\s*\},\s*true\)/);
   });
 
-  it("resolveResume/resumeAllowedForRoute calls thread org scope through (boot resume never resolves an org file into a project's bucket, or vice versa)", () => {
-    expect(SRC).toMatch(/resolveResume\(\{\s*routeProjectId:\s*projectId,[^}]*org,?\s*\}\)/s);
-    expect(SRC).toMatch(/resumeAllowedForRoute\(routeIdRef\.current,\s*rec\.projectId \|\| null,\s*routeOrgRef\.current,\s*rec\.orgScope === true\)/);
+  it("NEW-1 (tabs): boot reopens the account/device tab set, never a per-project 'last document' pointer (an org file cannot resolve into a project's bucket)", () => {
+    expect(SRC).not.toContain("resolveResume(");
+    expect(SRC).not.toContain("resumeAllowedForRoute(");
+    expect(SRC).toContain("parseTabs(raw, uid)");
   });
 });
 

@@ -1,14 +1,13 @@
 # Document Review workspace — folder pointer
 
 User-facing name **"Review"** (internal id stays `doc-review`, route `/markup`, data field
-`markups`). Open one drawing + mark it up. Root rules in `/CLAUDE.md`; persistence + filing
+`markups`). Open files in tabs + mark them up. Root rules in `/CLAUDE.md`; persistence + filing
 internals in `/docs/REFERENCE.md` (Document Review persistence section).
 
 **Entry points**
 - `DocReview.jsx` — workspace root (lazy chunk). `Stitcher.jsx` — multi-sheet stitch/align.
 - `docEditor/` — Word/text files open in an editable DOCUMENT editor instead of the canvas (NEW-1) — see its own `CLAUDE.md`.
-- `components/ReviewEmptyState.jsx` — nothing-open screen: pick a project → its current set (rows come from the shared sheet-index module under `src/shared/files/`).
-- `components/CloseFileDialog.jsx` + `DocReview.jsx` `requestClose`/`closeNow` — Close (×) on the open file's name (phone: its own "‹ Close" bar) → back to the index; unsaved Word/text edits ask Save / Discard / Cancel, and a project switch over a dirty file asks the same (Cancel navigates back). `lib/unfiled.js` — which rows are "Unfiled" (no project, no Organization) + the honest "where did it save" sentence.
+- **Tabs (NEW-1, B2058144)** — `components/ReviewTabStrip.jsx` (strip above the toolbar) + `lib/reviewTabs.js` (pure model: open / close-neighbour / reorder / per-device cache / account-copy merge) + `lib/tabSync.js` (tabs follow the ACCOUNT via `profiles.prefs.reviewTabs`, last change wins). `DocReview.jsx` holds ONE review at a time (the active tab) and swaps via `openReview`; Word/txt editors stay mounted-hidden in `docPool` (cursor + undo survive). Review is BLANK with no tab open — no landing screen (owner constraint 13). Close = the tab's ×; `components/CloseFileDialog.jsx` asks Save / Discard / Cancel for an unsaved Word/text tab. `lib/unfiled.js` — which rows are "Unfiled" + the "where did it save" sentence.
 
 **Key `lib/`**
 - **⛔ `layerVisibilityReads.js` (B503184) — WHAT "HIDDEN" MEANS IN THIS WORKSPACE, and it is NOT the

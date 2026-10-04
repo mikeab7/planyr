@@ -38,7 +38,7 @@ import { noteExtensions, EMPTY_DOC } from "../lib/notesExtensions.js";
 import { ANCHOR_MIN_HEIGHT, anchorExtent, anchorExtentLeft, anchorExtentTop, anchorExtentX, anchorPosAtSelection, fitAnchorBox, placeAnchor } from "../lib/notesAnchorNode.js";
 import { edgePoint as arrowEdgePoint } from "../lib/notesArrows.js";
 import {
-  isBlankDoublePress, BLANK_DBLTAP_TOUCH_PX, isTouchPointerType, isCoarsePointerDevice,
+  isBlankDoublePress, BLANK_DBLTAP_TOUCH_PX, isTouchPointerType, isCoarsePointerDevice, touchBoxOrigin,
   isTextInsertInputType,
 } from "../lib/notesBlankPaper.js";
 import { migrateFlowBody, migrateSketchesToBoxes } from "../lib/notesFlowMigration.js";
@@ -99,6 +99,8 @@ const SHEET_MARGIN_X = { narrow: 8, wide: 0 };  // left+right margin, per side
 const SHEET_PAD_TOP = { narrow: 18, wide: 30 };
 /* The gap under the title band, before the body starts. */
 const TITLE_BAND_GAP = 16;
+/** How long a touch placement's own focus may not pan the view (see `touchPlaceGuardRef`). */
+const TOUCH_PLACE_GUARD_MS = 600;
 /* ⛔ HOW MUCH CLEAR AIR THE TOP GRIP IS LEFT WITH AFTER A DRAG THAT SCROLLED IT OUT OF VIEW
  * (B1609184). The grip straddles the page's top edge (`top: -7px; height: 14px`), so putting the
  * edge itself level with the mat's first visible row would still leave the upper half of the grip
@@ -1580,6 +1582,15 @@ const NoteEditor = forwardRef(function NoteEditor({
    * so on that path there is nothing left to announce. `dropEmptyAnchors` keeps its `onDropped`
    * hook (it costs nothing and the command is the only place that knows), with no caller. */
 
+  /* ⛔ A TOUCH PLACEMENT'S FOCUS MUST NOT PAN THE VIEW (NEW-1, 2026-10-04). The touch path focuses
+   * the editor inside the tap so the soft keyboard rises (B1960480); focusing makes ProseMirror ask
+   * `handleScrollToSelection` to keep the caret visible, and the caret it asks about is the EMPTY
+   * page's, up in the top-left corner — so the handler panned the whole canvas by up to ~a screen
+   * edge under the fingertip and the new box landed far from the tap (measured: 35px at 50% zoom, 4.6
+   * to 56px at 200%). Holds a deadline (`performance.now()` ms) before which that handler stands
+   * down; set synchronously by the touch arm / commit, never by anything else. Declared before
+   * `useEditor` because `editorProps` closes over it. */
+  const touchPlaceGuardRef = useRef(0);
   const editor = useEditor({
     extensions,
     content: initialDoc,
@@ -1610,6 +1621,7 @@ const NoteEditor = forwardRef(function NoteEditor({
       handleScrollToSelection: (view) => {
         const sc = scrollerRef.current;
         if (!sc) return true;
+        if (performance.now() < touchPlaceGuardRef.current) return true;   // see `touchPlaceGuardRef`
         let caret;
         try { caret = view.coordsAtPos(view.state.selection.head); } catch { return true; }
         if (!caret) return true;
@@ -1999,6 +2011,7 @@ const NoteEditor = forwardRef(function NoteEditor({
     if (!at || !editor || editor.isDestroyed) return false;
     pendingRef2.current = null;     // synchronously: a keydown AND its beforeinput must not both commit
     setPendingPlace(null);
+    if (at.touch) touchPlaceGuardRef.current = performance.now() + TOUCH_PLACE_GUARD_MS;
     /* ⛔ TWO COMMANDS RATHER THAN ONE `content:` ARGUMENT, DELIBERATELY. `addNoteAnchorAt` only
      * puts the caret INSIDE the new box on its no-content path, and a box you have just started
      * typing into must hold the caret — otherwise the second character goes somewhere else. The
@@ -2188,11 +2201,19 @@ const NoteEditor = forwardRef(function NoteEditor({
     /* ⛔ NARROWED TO FIT, NEVER SLID SIDEWAYS, AND NEVER NUDGED UP. See `placeAnchor` for the
      * measurements that killed the old clamp: a click at x=1010 and a click at x=900 both
      * produced a block at x=884, and the clamped value was written to storage. */
-    const point = placeAnchor({
-      x: (clientX - box.left) / scale,
-      y: (clientY - box.top) / scale,
-      width: dom.offsetWidth,
-    });
+    const touch = isTouchPointerType(lastPointerTypeRef.current);
+    /* The line box and font size are read UNSCALED (computed style is pre-transform), which is
+     * exactly document-space units. */
+    const cs = getComputedStyle(dom);
+    const fontPx = parseFloat(cs.fontSize) || 0;
+    const lineH = Math.round(parseFloat(cs.lineHeight) || 0) || Math.round(fontPx * 1.2) || 18;
+    let tapX = (clientX - box.left) / scale;
+    let tapY = (clientY - box.top) / scale;
+    /* ⛔ ON TOUCH THE STORED POINT IS THE BOX'S CORNER MINUS ITS OWN INSETS, so the FIRST LETTER —
+     * not the box's top-left — lands under the fingertip (NEW-1, 2026-10-04; see `touchBoxOrigin`).
+     * Desktop keeps the corner-at-the-click rule its acceptance test pins. */
+    if (touch) ({ x: tapX, y: tapY } = touchBoxOrigin({ x: tapX, y: tapY, lineH, fontPx }));
+    const point = placeAnchor({ x: tapX, y: tapY, width: dom.offsetWidth });
     /* ⛔ A PRESS ARMS A CARET. IT DOES NOT CREATE ANYTHING (NEW-8, owner report 2026-09-08:
      * *"just because I click outside of the page, it shouldn't automatically open the page up to
      * it. Only once I actually type something. And also, if I click somewhere and then don't type
@@ -2219,13 +2240,12 @@ const NoteEditor = forwardRef(function NoteEditor({
      * at any zoom and any type size. */
     const mat = noteRootRef.current?.querySelector('[data-testid="note-mat"]');
     const matRect = mat?.getBoundingClientRect();
-    const lineH = Math.round(parseFloat(getComputedStyle(dom).lineHeight) || 0)
-      || Math.round(parseFloat(getComputedStyle(dom).fontSize) * 1.2) || 18;
+    /* The caret is drawn in SCREEN pixels, so its height is the line height times the canvas zoom. */
+    const caretH = lineH * scale;
     const caret = matRect
-      ? { left: Math.round(clientX - matRect.left), top: Math.round(clientY - matRect.top - lineH / 2), height: lineH }
+      ? { left: Math.round(clientX - matRect.left), top: Math.round(clientY - matRect.top - caretH / 2), height: Math.round(caretH) }
       : null;
     if (!caret) return;                       // unmeasured — never guess where to draw a caret
-    const touch = isTouchPointerType(lastPointerTypeRef.current);
     setPendingPlace({ ...point, caret, touch });
     /* ⛔ ON TOUCH ONLY, THE EDITOR IS FOCUSED RIGHT HERE, INSIDE THE TAP (NEW-1, iOS review). iOS
      * raises the soft keyboard only for an editable focused synchronously within the gesture; with
@@ -2236,6 +2256,7 @@ const NoteEditor = forwardRef(function NoteEditor({
      * focus caused anyway, so the view cannot move. Desktop keeps the no-focus behaviour. */
     if (touch) {
       dom.setAttribute("data-pending-place", "1");   // hide the native caret before the first paint
+      touchPlaceGuardRef.current = performance.now() + TOUCH_PLACE_GUARD_MS;
       const saved = [];
       for (let n = dom.parentElement; n; n = n.parentElement) saved.push([n, n.scrollTop, n.scrollLeft]);
       dom.focus({ preventScroll: true });
@@ -3132,6 +3153,23 @@ const NoteEditor = forwardRef(function NoteEditor({
    * behind the band's own `<input>` instead of clear of it. Growing the GAP AFTER the band is the
    * one distance that separates them. `0` is the ordinary state and costs nothing, same as before. */
   const [sheetGrowGap, setSheetGrowGap] = useState(0);
+  /* ⛔ A TOUCH PLACEMENT ABOVE THE BODY HOLDS ITS NEW BOX STILL (NEW-1, 2026-10-04). A tap in the
+   * title strip stores a negative `y`; the page then opens `sheetGrowGap` of room between the title
+   * band and the body, which moves the body — and the box with it — DOWN by that much, so the first
+   * letter lands below the fingertip (measured: 4.6px at 200% for a 2-unit overhang, 56px for a
+   * deeper one). While a touch placement is live (`touchPlaceGuardRef`) the same amount is folded
+   * into the view's `y` in this layout effect — VIEWPORT-STABLE (a): the MEASURED delta, in the same
+   * frame as the reflow — so the box stays put and the title band gives way instead. Touch only and
+   * only inside the guard window, so desktop's gap growth behaves exactly as before. */
+  const prevGrowGapRef = useRef(0);
+  useLayoutEffect(() => {
+    const was = prevGrowGapRef.current;
+    prevGrowGapRef.current = sheetGrowGap;
+    const delta = sheetGrowGap - was;
+    if (!delta || performance.now() >= touchPlaceGuardRef.current) return;
+    const v = viewRef.current;
+    setView({ x: v.x, y: v.y + delta * v.z, z: v.z });
+  }, [sheetGrowGap, setView]);
   /* ⛔ AND THE PAGE'S OWN TOP EDGE MOVES FOR A TOP-EDGE SHRINK (B1605664 ×2) — the render mirror of
    * `heightTopPadRef` below, which carries the full reasoning. It is STATE and not an imperative
    * write for the same reason `sheetGrowWidth` above is: `note-sheet` is React-owned, and writing
