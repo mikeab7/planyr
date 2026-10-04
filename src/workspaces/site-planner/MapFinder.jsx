@@ -2170,7 +2170,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     }));
     layer.setZIndex(1);
     layer.addTo(map);
-    map.getContainer().classList.add(IMAGERY_GRADE.containerClass); // seam fix: gap colour behind the aerial (NEW-1)
+    // Seam fix (NEW-1): dark gap colour behind the aerial — added only once a REAL tile has painted, so an
+    // empty/blocked map keeps the ordinary light backdrop it always had.
+    const markGap = () => map.getContainer().classList.add(IMAGERY_GRADE.containerClass);
+    layer.once("tileload", markGap);
     imageryRef.current = layer;
     /* NEW-6 — the SAME explicit ceiling the planner's two layers got in B1121. The Map view has
        its own Leaflet map and was left out of that work, and it is never unmounted (SitePlannerApp
@@ -2190,6 +2193,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     const detachHeal = armBlankTileHeal(layer, { onHeal: reportBlankTileHealed(map, "map-finder-imagery") });
     imageryHealRef.current = detachHeal;
     return () => {
+      layer.off("tileload", markGap);
+      try { map.getContainer().classList.remove(IMAGERY_GRADE.containerClass); } catch (_) { /* container gone */ }
       detachCap(); imageryCapRef.current = null;
       detachHeal(); imageryHealRef.current = null;
       try { map.removeLayer(layer); } catch (_) {}

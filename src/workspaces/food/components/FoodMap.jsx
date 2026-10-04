@@ -582,10 +582,10 @@ export default function FoodMap({
     const map = mapRef.current;
     if (!map) return undefined;
     const choice = resolveBasemapChoice(basemap);
-    map.getContainer().classList.add(IMAGERY_GRADE.containerClass); // seam fix: gap colour behind the aerial (NEW-1)
     const specs = basemapTileLayers(choice, { dpr: window.devicePixelRatio || 1 });
     const layers = [];
     let onLoading, onLoad, loadingLayer, vectorHandle = null;
+    const markGap = () => map.getContainer().classList.add(IMAGERY_GRADE.containerClass);
     try {
       // The raster side is the IMAGERY only (NEW-1/B2018608): no `subdomains` key (B634981), high
       // density on a dpr>1 screen, tone-graded via the layer's className. Roads and labels are the
@@ -595,6 +595,8 @@ export default function FoodMap({
         layers.push(layer);
         if (i === 0) {
           layer.bringToBack(); // stays under the marker layer regardless of add order
+          // Seam fix (NEW-1): dark gap colour behind the aerial, added once a real tile has painted.
+          layer.once("tileload", markGap);
           tileLayerRef.current = layer;
           // B651872 (×4) — the loading pill tracks the imagery layer's own lifecycle, so it never
           // reports stale state from a previous (torn-down) basemap.
@@ -628,6 +630,7 @@ export default function FoodMap({
       if (loadingLayer) { loadingLayer.off("loading", onLoading); loadingLayer.off("load", onLoad); }
       setTilesLoading(false);
       if (vectorHandle) { vectorHandle.remove(); labelsLayerRef.current = null; }
+      try { map.getContainer().classList.remove(IMAGERY_GRADE.containerClass); } catch (_) { /* container gone */ }
       for (const layer of layers) { try { map.removeLayer(layer); } catch (_) { /* already gone */ } }
     };
   // narrowViewport is deliberately NOT a dep: rebuilding the tile layers on every viewport-width
