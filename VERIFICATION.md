@@ -297,9 +297,9 @@ Sandbox-proven (real Chromium, built app): `ui-audit/verify-review-tabs.mjs` (lo
 7. Phone in airplane mode: change a page, then reconnect. **Expect:** the desktop picks up the new page at its next focus.
 8. Close every tab on the desktop, reload. **Expect:** blank Review (no tabs, no index).
 - **Stopping rule:** closes on a dated pass of 1–8, or a failed step filed as a recurrence on B2058144.
-### V1474400 — B2049312: team invite + Resend emails arrive in the inbox `Blocker: real-data (needs RESEND_API_KEY in Cloudflare + team_invite_email.sql run — both Michael's)`
+### V1474400 — B2049312: team invite + Resend emails arrive in the inbox `Blocker: real-data (needs GMAIL_SERVICE_ACCOUNT_JSON + INVITE_SENDER in Cloudflare and the Google delegation set up — Michael's; SQL already applied)`
 
-Sandbox-proven: `test/teamInviteEmail.test.js` (fake Supabase + fake Resend), `e2e/team-settings-layout.spec.js` (mocked send incl. throttle). Pending: a real send. **Steps** (planyr.io, signed in as a team admin; check the served chunk hash in the same observation). Use only the throwaway `mikeabmab+planyrtest@live.com`:
+Sandbox-proven: `test/teamInviteEmail.test.js` (fake Supabase + fake Gmail) and `test/gmailSend.test.js` (real RS256 signature check), `e2e/team-settings-layout.spec.js` (mocked send incl. throttle). Pending: a real send. **Steps** (planyr.io, signed in as a team admin; check the served chunk hash in the same observation). Use only the throwaway `mikeabmab+planyrtest@live.com`:
 1. Settings › Team › + Invite → that address, Member → Send invite. **Expect:** toast "Invite sent to mikeabmab+planyrtest@live.com"; the email lands in his live.com inbox from a planyr.io address, subject "<name> invited you to <team> on Planyr", button opens sign-in with the address prefilled.
 2. On that invite choose Resend invite. **Expect:** toast "Invite email sent again"; a second email arrives; still ONE row in Invited; Resend is disabled for about a minute.
 3. Try Resend again inside the minute via the ⋯ menu. **Expect:** disabled; (server also refuses — a direct POST inside the window returns 429).

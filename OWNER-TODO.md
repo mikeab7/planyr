@@ -10,13 +10,17 @@ _Last updated: 2026-10-04._
 ## 📱 Phone: readable text, or the whole page width on screen? (B2061331)
 - [x] ~~**Pick one for how a note opens on your phone.**~~ **Decided 2026-10-04: a note opens showing the whole page width, accepting the smaller text.** That is what it already does (both page edges on screen; a page you have saved a view for still opens exactly as you left it), so nothing changed in the app. Recorded on B2061331. (If the small text ever bothers you, pinch to zoom in — it stays put for that page.)
 
-## ✉️ Two steps to make team invites actually send email (B2049312)
+## ✉️ Make team invites send email — Google steps only, no new accounts (B2049312)
 
-> **What changed:** Invite and Resend invite now email the person (subject "<you> invited you to <team> on Planyr").
-> Until these two steps are done, Invite still saves the invite and tells you "saved, but the email didn't send".
+> **What changed:** Invite and Resend invite now email the person, through your own Google Workspace (no Resend, no new service). The database part is already done. Until the steps below are, Invite still saves the invite and says "saved, but the email didn't send".
 >
-> - [ ] **Run one SQL script in Supabase** (I'll hand you `team_invite_email.sql`): SQL Editor → paste → Run. Adds a "last emailed" stamp so Resend can't be spammed. Touches no existing invite; safe to re-run.
-> - [ ] **Create a Resend account (resend.com), verify planyr.io there, and add the key to Cloudflare** — Pages → planyr → Settings → Variables and Secrets → Production → add secret **`RESEND_API_KEY`**. Resend will give you a few DNS records to add for planyr.io. Never paste the key in chat or the repo. Optional: `INVITE_FROM` (default `Planyr <no-reply@planyr.io>`).
+> A credential is needed because Planyr's server has to prove to Google that it may send mail as a planyr.io address; Google only allows that with a key you create and approve.
+>
+> 1. **Google Cloud console** → the project already used for Drive → *APIs & Services → Library* → enable **Gmail API**.
+> 2. Same project → *IAM & Admin → Service Accounts → Create* (name it `planyr-invites`, no roles) → open it, copy its **Unique ID** (a long number), then *Keys → Add key → JSON* and download the file. (If key creation is blocked by an organization policy, tell Claude — there's a fallback.)
+> 3. **Google Admin** (admin.google.com) → *Security → Access and data control → API controls → Manage domain-wide delegation → Add new*: Client ID = the Unique ID from step 2, OAuth scope = `https://www.googleapis.com/auth/gmail.send` → Authorize.
+> 4. Decide the sending address: any planyr.io mailbox you already have (e.g. yours). Invites will arrive from "Planyr <that address>". A free alias like no-reply@ works too if it's set up as a "send as" address on a mailbox you already own.
+> 5. **Cloudflare** → Workers & Pages → planyr → *Settings → Variables and Secrets → Production*: add a **secret** named **`GMAIL_SERVICE_ACCOUNT_JSON`** and paste the entire contents of the downloaded file; add a plain **variable** named **`INVITE_SENDER`** = the planyr.io address from step 4. Redeploy (or push any commit) so it takes effect, then delete the downloaded file. Never paste the key in chat or the repo.
 
 ## 🗺 One database script so comps follow their county when you move a site plan (B1953796)
 
