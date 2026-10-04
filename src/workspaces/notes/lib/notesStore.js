@@ -166,7 +166,7 @@ import {
   addPage, allPageIds, copyPageTree, countNodes, dropPages, findPage, migrate, newId, subtreePageIds, purgeTrashEntry, searchTitles, pagesInScope,
   trashEntries, walkPages, withTombstones, SCOPE_ALL, SCOPE_PROJECT, SCOPE_ORG,
 } from "./notesModel.js";
-import { parseView, serializeView, viewKey } from "./notesViewport.js";
+import { parseView, serializeView, viewKey, VIEW_KEY_BASE } from "./notesViewport.js";
 import { ACTIVE_PAGE_KEY_BASE, IGNORED_DUPES_KEY_BASE, TEMPLATES_KEY_BASE } from "./notesKeys.js";
 import { seedTemplateRecords } from "./notesTemplates.js";
 import { countEmptyAnchors, pruneEmptyAnchors } from "./notesAnchorPrune.js";
@@ -303,16 +303,43 @@ export function writeTree(tree) {
  * which stored ONE zoom level for the whole workspace. On a canvas you can pan, the view is a
  * place you left off in a particular document; see `notesViewport.js`'s own header. A failure to
  * read or write it is a no-op at the default framing, never an unreadable page. */
-export function readNoteView(pageId, s = scope) {
+/* ⛔ A NOTE OPENS AT FULL PAGE WIDTH, EVERY TIME — THE VIEW IS NO LONGER PERSISTED (owner, 2026-10-04,
+ * B2078593). Michael's phone opened "Hard Cost Pricing" at 55% with the page's right side off the
+ * screen while his desktop framed the same page differently: both were obeying a view left in THAT
+ * device's localStorage by an earlier pinch/pan (the key never synced — see above — which is exactly
+ * why two devices disagreed). His rule: a note opens at full page width on every device, so a saved
+ * view may not win on open. Decision, stated: the view is kept ONLY IN MEMORY, per page, for the life
+ * of the tab — leaving a page and coming back inside one session returns to where you were; a reload,
+ * a new tab or another device always re-frames to full width. Nothing is written to storage, and any
+ * view an older build stored is deleted the first time it is looked for (`purgeLegacyViews`), so a
+ * stale one can never come back. */
+const sessionViews = new Map();
+let legacyViewsPurged = false;
+export function purgeLegacyViews() {
+  if (legacyViewsPurged) return 0;
+  legacyViewsPurged = true;
   const st = store();
-  if (!st) return null;
-  try { return parseView(st.getItem(viewKey(s, pageId))); } catch (_) { return null; /* a view is not data — a refused read means the default framing, never a banner */ }
+  if (!st) return 0;
+  let n = 0;
+  try {
+    const dead = [];
+    for (let i = 0; i < st.length; i += 1) { const k = st.key(i); if (k && k.startsWith(`${VIEW_KEY_BASE}:`)) dead.push(k); }
+    for (const k of dead) { st.removeItem(k); n += 1; }
+  } catch (e) { legacyViewPurgeError = String(e?.message || e || "unknown"); /* a preference is not data — a dead key is never read; recorded, readable via legacyViewPurgeFailure() */ }
+  return n;
+}
+let legacyViewPurgeError = null;
+/** Why the last legacy-view cleanup failed, or null. A leftover key is never READ, so this is a diagnostic, not a banner. */
+export const legacyViewPurgeFailure = () => legacyViewPurgeError;
+
+export function readNoteView(pageId, s = scope) {
+  purgeLegacyViews();
+  return sessionViews.get(viewKey(s, pageId)) || null;
 }
 
 export function writeNoteView(pageId, view, s = scope) {
-  const st = store();
-  if (!st) return false;
-  try { st.setItem(viewKey(s, pageId), JSON.stringify(serializeView(view))); return true; } catch (_) { return false; /* a view is not data — it simply does not persist */ }
+  sessionViews.set(viewKey(s, pageId), parseView(serializeView(view)));
+  return true;
 }
 
 /* ---- which page was open (NEW-1) --------------------------------------------------------

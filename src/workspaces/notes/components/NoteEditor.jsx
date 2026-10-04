@@ -1340,7 +1340,7 @@ export function placeMenu({ x, y, w, h, viewW, viewH, margin = MENU_MARGIN }) {
   return { left: Math.round(left), top: Math.round(top), flipped: !fitsBelow && fitsAbove };
 }
 
-function DocMenu({ at, editor, onPlainPaste, onClose, onDeleteBox, onClipboardNote, onConvertTable }) {
+function DocMenu({ at, editor, onPlainPaste, onClose, onDeleteBox, onClipboardNote, onConvertTable, pressGuardRef }) {
   const ref = useRef(null);
   const [box, setBox] = useState(null);
   /* ⛔ GATED ON `at`. Registered unconditionally, this effect put a CAPTURE-phase Escape
@@ -1372,7 +1372,13 @@ function DocMenu({ at, editor, onPlainPaste, onClose, onDeleteBox, onClipboardNo
     }));
   }, [at]);
 
-  useEffect(() => { if (box) ref.current?.querySelector("button")?.focus(); }, [box]);
+  /* ⛔ A TOUCH-OPENED MENU LEAVES FOCUS WHERE IT WAS (B2078592). Moving focus to the first row is keyboard
+   * navigation's courtesy on desktop; on a phone it blurs the editor, which DROPS THE SOFT KEYBOARD the
+   * moment you press-and-hold inside the box you are typing in. A finger needs no focus ring on a row
+   * (rows already swallow mousedown so the selection survives), so a menu a finger opened keeps the
+   * editor focused — keyboard up if it was up, down if it was down. Desktop right-click is unchanged. */
+  const touchMenu = !!at?.touch;
+  useEffect(() => { if (box && !touchMenu) ref.current?.querySelector("button")?.focus(); }, [box, touchMenu]);
 
   if (!at || !editor || editor.isDestroyed) return null;
 
@@ -1421,6 +1427,17 @@ function DocMenu({ at, editor, onPlainPaste, onClose, onDeleteBox, onClipboardNo
       data-testid="note-doc-menu"
       data-menu-kind={onDeleteBox ? "box" : "document"}
       data-menu-flipped={box?.flipped ? "1" : undefined}
+      /* ⛔ THE LONG-PRESS THAT OPENED A TOUCH MENU IS STILL ON THE GLASS (B2078592). Lifting the finger
+       * synthesises a mousedown + click at the press point — which is now ON the menu. Unguarded, the
+       * mousedown on the menu's own (non-button) area moved focus off the editor and DROPPED THE KEYBOARD
+       * (measured on a real held touch in Chromium), and the click could land on whichever row sits
+       * under the finger. For a short window after the press the menu swallows both. Touch menus only. */
+      onMouseDownCapture={(e) => {
+        if (!at?.touch) return;
+        if (pressGuardRef && performance.now() < pressGuardRef.current) { e.stopPropagation(); e.preventDefault(); return; }
+        if (!(e.target instanceof Element) || !e.target.closest("button")) e.preventDefault();   // padding/separator: never steal focus
+      }}
+      onClickCapture={(e) => { if (at?.touch && pressGuardRef && performance.now() < pressGuardRef.current) { e.stopPropagation(); e.preventDefault(); } }}
       style={{
         position: "fixed",
         left: box ? box.left : at.x,
@@ -1635,6 +1652,7 @@ const NoteEditor = forwardRef(function NoteEditor({
    * effect below — so it does not wait for the next letter. Held in a ref so the editor config and
    * that effect share ONE implementation. */
   const revealCaretRef = useRef(null);
+  const setViewForE2ERef = useRef(null);   // B2078593 — assigned where `setView` is defined, read only by the __PLANYR_E2E hook
   revealCaretRef.current = (view, { verticalOnly = false } = {}) => {
     const sc = scrollerRef.current;
     if (!sc || !view || view.isDestroyed) return;
@@ -1781,6 +1799,10 @@ const NoteEditor = forwardRef(function NoteEditor({
       /** NEW-7: hand the open editor a body "the sync wrote to storage" — the exact path an adopted
        *  server copy takes. Returns whether the editor took it in place. */
       applyExternal: (json) => applyExternalToOpenNote(pageId, json),
+      /** B2078593 — put the canvas at an exact view ({x, y, z}), as a pan/pinch would. A saved view no
+       *  longer exists to seed through storage (the opening is always full width), so a harness that
+       *  needs "zoomed in 200%" or "panned" states it here. Read-only to shipped sessions: E2E-gated. */
+      setView: (v) => setViewForE2ERef.current?.(v, { persist: false, byUser: true }),
       /** Put the caret at an absolute document position — the only way to state "the very
        *  start of THAT block" without depending on where a click happens to land. */
       caretAt: (pos) => { if (!editor.isDestroyed) editor.chain().focus().setTextSelection(pos).run(); },
@@ -2488,6 +2510,7 @@ const NoteEditor = forwardRef(function NoteEditor({
     if (v.z !== was.z) setZoomPct(v.z);
     if (persist) persistView();
   }, [applyView, persistView]);
+  setViewForE2ERef.current = setView;
 
   /* ⛔ A KEYBOARD OPENING OR CLOSING IS A REASON TO RE-CHECK THE CARET (NEW-6a). The keyboard
    * shrinks the visual viewport after the tap that raised it, with no keystroke to trigger
@@ -4617,7 +4640,7 @@ const NoteEditor = forwardRef(function NoteEditor({
   /* ⛔ ONE ROUTE TO THE DOCUMENT MENU, TWO WAYS IN (NEW-5). The right-click handler and the touch
    * long-press (below) both call this, so there is exactly ONE menu — never a second copy for a
    * phone. Its body is the right-click's, moved verbatim. */
-  const openDocMenuAt = useCallback((target, x, y) => {
+  const openDocMenuAt = useCallback((target, x, y, { touch = false } = {}) => {
     if (!(target instanceof Element)) return;
     /* ⛔ RIGHT-CLICKING A BOX IS STILL RIGHT-CLICKING INSIDE TEXT (B539651), so the box menu
        is the document's plus the box's own action rather than a different menu. The id is
@@ -4649,7 +4672,7 @@ const NoteEditor = forwardRef(function NoteEditor({
        landed inside a table; reading it off the DOM the press hit (rather than off
        `editor.isActive("table")`) keeps it consistent with how the box id above is read. */
     const inTable = !!target.closest("table");
-    setDocMenu({ x, y, boxId: box?.getAttribute("data-anchor-id") || null, inTable });
+    setDocMenu({ x, y, boxId: box?.getAttribute("data-anchor-id") || null, inTable, touch, hadFocus: !!editor && !editor.isDestroyed && editor.view.hasFocus() });
   }, [editor]);
 
   /* ⛔ TOUCH ROUTE TO THE DOCUMENT MENU: LONG-PRESS (NEW-5, iPhone review 2026-09-29). iOS Safari
@@ -4665,6 +4688,7 @@ const NoteEditor = forwardRef(function NoteEditor({
     if (!sc || readOnly) return undefined;
     let timer = 0;
     let start = null;
+    let opened = false;     // this press opened a menu, so its lift owns the compat-event guard
     const cancel = () => { if (timer) { clearTimeout(timer); timer = 0; } start = null; };
     const onDown = (e) => {
       if (e.pointerType !== "touch" || !e.isPrimary) { cancel(); return; }
@@ -4677,7 +4701,8 @@ const NoteEditor = forwardRef(function NoteEditor({
         start = null;
         if (!at || !editor || editor.isDestroyed) return;
         longPressSwallowRef.current = performance.now() + 700;
-        openDocMenuAt(at.target, at.x, at.y);
+        opened = true;
+        openDocMenuAt(at.target, at.x, at.y, { touch: true });
       }, LONG_PRESS_MS);
     };
     const onMove = (e) => {
@@ -4687,7 +4712,11 @@ const NoteEditor = forwardRef(function NoteEditor({
     const swallow = (e) => { if (performance.now() < longPressSwallowRef.current) { e.stopPropagation(); e.preventDefault(); } };
     sc.addEventListener("pointerdown", onDown);
     sc.addEventListener("pointermove", onMove);
-    sc.addEventListener("pointerup", cancel);
+    /* The guard is anchored to the LIFT, not to the moment the menu opened: the synthesised mousedown/click
+     * arrive right after the finger leaves, and a person who lifts at once and taps a row a beat later
+     * must not find that tap eaten. Only while a long-press guard is live (a normal tap sets none). */
+    const lift = () => { cancel(); if (opened || performance.now() < longPressSwallowRef.current) longPressSwallowRef.current = performance.now() + 250; opened = false; };
+    sc.addEventListener("pointerup", lift);
     sc.addEventListener("pointercancel", cancel);
     sc.addEventListener("mousedown", swallow, true);
     sc.addEventListener("click", swallow, true);
@@ -4695,7 +4724,7 @@ const NoteEditor = forwardRef(function NoteEditor({
       cancel();
       sc.removeEventListener("pointerdown", onDown);
       sc.removeEventListener("pointermove", onMove);
-      sc.removeEventListener("pointerup", cancel);
+      sc.removeEventListener("pointerup", lift);
       sc.removeEventListener("pointercancel", cancel);
       sc.removeEventListener("mousedown", swallow, true);
       sc.removeEventListener("click", swallow, true);
@@ -5515,38 +5544,12 @@ const NoteEditor = forwardRef(function NoteEditor({
             and clicking away. That box is one you made and then emptied yourself, it is visibly
             outlined the whole time, and the prune at the storage seam still takes it, silently, as
             it did before B1370546 existed. No toast covers that case any more. */}
-        {/* ⛔ A SELECTED BOX CAN BE DELETED ON A PHONE (NEW-5). With no right-click and no Delete key
-            on a phone, a box that is selected needs its own way out: a small pill pinned to the TOP
-            of the canvas (never the bottom — the soft keyboard covers that) with one 44 px action.
-            Coarse pointers only; the desktop selection model, keys and menu are untouched. It
-            deletes through the same command and the same undo step as the menu's row. */}
-        {selection.size > 0 && !readOnly && isCoarsePointerDevice() ? (
-          <div
-            data-testid="note-touch-box-bar"
-            onMouseDown={(e) => e.preventDefault()}
-            style={{
-              position: "absolute", top: 8, left: "50%", transform: "translateX(-50%)", zIndex: 6,
-              display: "flex", alignItems: "center", gap: 4, padding: 3,
-              background: "var(--surface-raised)", border: "1px solid var(--border-default)",
-              borderRadius: RADIUS.pill, boxShadow: "0 6px 18px rgba(0,0,0,0.18)", // design-exempt: floating-chip shadow, same value as the other canvas overlays
-            }}
-          >
-            <button
-              type="button"
-              data-testid="note-touch-box-delete"
-              onClick={() => {
-                if (!editor || editor.isDestroyed) return;
-                editor.commands.removeNoteAnchors([...selRef.current]);
-                clearSelection();
-                editor.commands.focus(null, { scrollIntoView: false });   // …so undo can reach it (B421489)
-              }}
-              style={{
-                minHeight: 44, minWidth: 44, padding: "0 16px", border: "none", borderRadius: RADIUS.pill,
-                background: "transparent", color: "var(--danger-text)", font: "inherit", fontSize: 14, fontWeight: 700, cursor: "pointer",
-              }}
-            >{selection.size > 1 ? `Delete ${selection.size} boxes` : "Delete box"}</button>
-          </div>
-        ) : null}
+        {/* ⛔ NO FLOATING "DELETE BOX" (owner direction 2026-10-04, B2078592). NEW-5 pinned a Delete pill
+            to the canvas whenever a box was selected; he does not want a banner offering to delete the
+            box he is typing in — nothing destructive sits permanently on screen. On touch a box is
+            deleted from the SAME menu right-click opens (press-and-hold → "Delete this box"), or by
+            Backspace in an empty box. Guard: ui-audit/verify-notes-touch-menus.mjs asserts no such
+            button renders. */}
         {pendingPlace ? (
           <div
             data-testid="note-pending-caret"
@@ -5623,6 +5626,7 @@ const NoteEditor = forwardRef(function NoteEditor({
       <DocMenu
         at={docMenu}
         editor={editor}
+        pressGuardRef={longPressSwallowRef}
         onPlainPaste={pastePlainFromClipboard}
         onClose={() => setDocMenu(null)}
         onClipboardNote={(m) => onPrintNotice?.(m)}
@@ -5631,7 +5635,9 @@ const NoteEditor = forwardRef(function NoteEditor({
         onDeleteBox={docMenu?.boxId ? () => {
           editor.commands.removeNoteAnchors([docMenu.boxId]);
           clearSelection();
-          editor.commands.focus();          // …so Ctrl+Z can reach it (B421489)
+          /* …so Ctrl+Z can reach it (B421489) — except on a touch menu opened with the keyboard DOWN,
+             where focusing would raise it for a gesture that never asked for text entry. */
+          if (!docMenu.touch || docMenu.hadFocus) editor.commands.focus();
         } : null}
         /* NEW-2 — "Convert table to text". Only offered when the right-click actually landed
            inside a table; the command itself also declines on its own if the caret has since

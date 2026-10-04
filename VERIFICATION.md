@@ -195,6 +195,37 @@ Sandbox-proven: `test/foodSavedSearchFirst.test.js` red on main, green here. **S
 4. "soma", "tio trompo", "ikes". **Expect:** unchanged — saved first.
 5. Switch Map → List → Map a few times. **Expect:** no `_leaflet_pos` error in the console.
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2070432.
+### V1501920 — B2078592: on a real iPhone there is no floating "Delete box"; press-and-hold inside a box opens the menu with the keyboard kept, and "Delete this box" removes it `Blocker: real-data` (signed-in real device)
+
+Sandbox-proven: `ui-audit/verify-notes-touch-menus.mjs` (WebKit hasTouch+isMobile + Chromium real touch pipeline; red on untouched main). A real held fingertip, iOS's own selection loupe and the real soft keyboard are not producible headless.
+**Steps (real iPhone, a throwaway page):**
+1. Tap into a box and type a few letters. **Expect:** no "Delete box" button or banner anywhere on screen — not while the box is selected, not while typing.
+2. With the keyboard up, press and hold inside the same box for about half a second. **Expect:** the same menu a right-click gives on desktop, including "Delete this box"; the keyboard stays up; the box does not move or start dragging; lifting your finger does not run any menu row.
+3. Choose "Delete this box". **Expect:** the box is gone; Undo brings it back.
+4. In a box, empty its text and press Backspace once more. **Expect:** the empty box disappears (unchanged).
+5. Note whether iOS's own text-selection magnifier ALSO appears over the menu in step 2 (carried from V1484660 step 5; if it does, file it as a recurrence on B2078592).
+6. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–4 (5 recorded), or a failed step filed as a recurrence on B2078592.
+
+### V1501921 — B2078593: on a real iPhone and on desktop, "Hard Cost Pricing" opens at full page width, top near the top of the screen, every time `Blocker: real-data` (signed-in real device, real Organization page)
+
+Sandbox-proven: `ui-audit/verify-notes-open-framing.mjs` (WebKit + Chromium, 390×844 and 1280×800 among the sizes; a view stored by an older build on either kind of device no longer decides the opening; red on untouched main) and `test/notesViewNotPersisted.test.js`. The real page and the real device's leftover storage are not reachable headless.
+**Steps (real iPhone, then desktop; the Organization page "Hard Cost Pricing" — open it only, do not edit it):**
+1. On the iPhone, fully close the tab/app and reopen planyr.io, then open Hard Cost Pricing. **Expect:** the whole page width is on screen — left and right edges and the table's edge — with the page top near the top of the screen; not at 55%, not a third of the way down. (Any view left on that phone by an older build is deleted unread on this open.)
+2. Reload the page on the phone. **Expect:** the same full-width opening again.
+3. Pinch/pan on the phone, open another page, come back to Hard Cost Pricing without reloading. **Expect:** it returns to where you left it (kept for the session only); reload → full width again.
+4. On desktop, open the same page. **Expect:** the same framing — full page width, top near the top; no difference from the phone beyond screen size. If the page is wider than the window it opens shrunk until both edges are visible.
+5. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2078593.
+
+### V1501922 — B2061333: no `page-containment-drift` rows shaped "(0, ~250)" from iPhones after a week on the phone-layout build; keyboard ones arrive as `page-containment-keyboard-reveal` `Blocker: real-data` (needs a week of real iPhone traffic; run on or after 2026-10-11)
+
+Carried from V1484661 step 7, which Michael's 2026-10-04 on-device pass did not cover. A query, not a click-through: Claude-doable once the week has elapsed.
+**Steps:**
+1. Query `client_errors` for kinds `page-containment-drift` and `page-containment-keyboard-reveal` since the NEW-6 deploy (2026-10-04), iPhone user agents only (Supabase `execute_sql`, read-only).
+2. **Expect:** no `page-containment-drift` row shaped "(0, ~250)"; any keyboard-driven ones are filed as `page-containment-keyboard-reveal`. Record the counts and the date range in the entry.
+- **Stopping rule:** closes on a dated query result inside the expectation, or a failed result filed as a recurrence on B2061333.
+
 ### V1474512 — B2050928: Food map controls match — both segmented controls identical, info button md and unclipped, nothing in the toolbar clipped `Blocker: live-GIS (planyr.io is not reachable from the sandbox; no sign-in needed — browsing the map works logged out)`
 
 Sandbox-proven: `ui-audit/ui-inventory.mjs --budget-only` relational gate green on the four Food surfaces (RED on untouched main, named); `test/foodModule.test.js` 426/426. **Steps** (planyr.io at phone width, `#/food`, Map view; read the build from `/version.json` AND the served chunk hash in the same observation; fixtures only — never write to the real food list):
@@ -288,52 +319,6 @@ Sandbox-proven: `test/teamInviteEmail.test.js` (fake Supabase + fake Resend), `e
 4. Cancel invite. **Expect:** row gone, no row left behind. Existing pending invites (e.g. ryan.baumgartner@hillwood.com) received nothing.
 - **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2049312.
 
-### V1484661 — B2061333: on a real iPhone the caret stays above the keyboard, the essentials are reachable without swiping, and the chrome gets out of the way `Blocker: real-data` (signed-in real device)
-
-Sandbox-proven: `ui-audit/verify-notes-phone-layout.mjs` (WebKit 390x844 with a fake visualViewport for the keyboard; red on untouched main). A real keyboard and a real fingertip are not producible headless.
-**Steps (real iPhone, a throwaway duplicate page):**
-1. Open a long page, tap near the bottom so the keyboard rises, type 10 lines. **Expect:** the line you are typing is always visible above the keyboard.
-2. Look at the toolbar. **Expect:** undo, redo, B, I, U, bullet, numbered, text colour and ⋯ all visible without swiping.
-3. Tap ⋯. **Expect:** a panel with the font, size, alignment, insert menu and the page actions (Find and replace, Page setup, Version history, Export); Find and replace opens the find bar.
-4. With the keyboard up. **Expect:** the row of module tabs is gone, the page did not jump when it went, the help button and zoom control are out of the writing area; dismiss the keyboard and they return.
-5. Select a box and try its grip and a resize handle with a finger. **Expect:** easy to hit without zooming.
-6. Tap toolbar buttons several times. **Expect:** no tooltip stays on screen.
-7. After a week on this build, check `client_errors` for `page-containment-drift` rows from iPhones. **Expect:** none shaped "(0, ~250)"; any keyboard ones now arrive as `page-containment-keyboard-reveal`.
-8. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes on a dated pass of 1–7, or a failed step filed as a recurrence on B2061333.
-### V1484660 — B2061332: on a real iPhone, the page menu and the box menu are reachable (⋯, long-press, Delete box) `Blocker: real-data` (signed-in real device)
-
-Sandbox-proven: `ui-audit/verify-notes-touch-menus.mjs` (Chromium real touch pipeline + WebKit; red on untouched main). A real held fingertip and iOS's own selection loupe are not producible headless.
-**Steps (real iPhone, a throwaway page):**
-1. In the notes list, tap "⋯" on a page. **Expect:** the same menu a right-click gives on desktop; Rename and Delete work.
-2. Press and hold a page row for about half a second. **Expect:** the menu opens; the page does not open and nothing starts dragging.
-3. Press and hold a box in a note. **Expect:** the document menu opens with "Delete this box"; choosing it removes the box (Undo brings it back).
-4. Tap a box so it is selected. **Expect:** a "Delete box" pill at the top of the canvas; pressing it removes the box.
-5. Press and hold inside a box's text. **Expect:** note whether iOS's own text-selection magnifier ALSO appears over the menu (if so, file it as a recurrence here).
-6. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes on a dated pass of 1–4 (5 recorded), or a failed step filed as a recurrence on B2061332.
-### V1484658 — B2061330: on a real iPhone, one finger pans a note, two fingers pinch and follow, the page never stays shifted sideways `Blocker: real-data` (signed-in real device)
-
-Sandbox-proven: `ui-audit/verify-notes-touch-pan.mjs` (Chromium real touch pipeline via CDP + WebKit PointerEvents; red on untouched main). A real finger / iOS rubber-band / system gestures are not producible headless.
-**Steps (real iPhone, a throwaway page):**
-1. Drag one finger on blank paper, on the grey beside the page, and starting on an unselected box's text. **Expect:** the page follows the finger each time; a flick coasts a little and stops.
-2. Tap (no drag) blank paper, then double-tap. **Expect:** same as before — a single tap does not move the page; double-tap places a box.
-3. Select a box (tap it, then use its grip) and drag. **Expect:** the box moves; the page does not pan.
-4. Pinch with two fingers while also moving both. **Expect:** zoom follows the spread and the page travels with your fingers.
-5. Tap into a box near the right edge so the keyboard rises. **Expect:** the page is not left shifted sideways afterwards.
-6. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2061330.
-
-### V1484657 — B2061329: on a real iPhone, tapping into a box keeps the keyboard up and puts the caret where tapped `Blocker: real-data` (signed-in real device)
-
-Sandbox-proven on WebKit (hasTouch + isMobile): `ui-audit/verify-notes-touch-box-tap.mjs`. A real soft keyboard cannot be driven headless.
-**Steps (real iPhone, a throwaway page):**
-1. Double-tap blank paper, type "hello world", then tap inside the word "world". **Expect:** the keyboard does not drop; the caret is where tapped; typing inserts there.
-2. Make a second box; tap from the first box into the second. **Expect:** keyboard stays up, caret in the second box, one tap.
-3. In a box, delete all its text with Backspace, press Backspace once more. **Expect:** the empty box disappears.
-4. Tap a picture box. **Expect:** it selects (handles), no keyboard.
-5. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2061329.
 ### V1468976 — B2043888: phone tab-strip chevrons page cleanly and clamp at both ends `Blocker: real-device (iOS elastic overscroll — not producible headless)`
 
 Sandbox-proven, both engines: `ui-audit/verify-nav-arrows.mjs` (and `ENGINE=webkit`), 31/31; `test/scrollStrip.test.js`. The original overshoot did NOT reproduce headless, so this is the live confirmation. **Steps** (planyr.io on the iPhone, Map with no project; read the served chunk hash in the same observation):
@@ -352,27 +337,6 @@ Sandbox-proven (logged-out, seeded local site, real Chromium): `e2e/mapfinder-no
 4. Return to Site → map. **Expect:** the hint is back only if Select parcels is still on (the mode is kept on purpose).
 - **2026-10-04 WebKit-emulated pass (B2050816, NOT on device, logged-out; chunk `index-BVErCNTL.js` read in the same run):** `node ui-audit/verify-phone-orientations.mjs` (`PLANYR_CASES=notice-leak`) — iPhone SE and iPhone 15, portrait + landscape × Dashboard/Schedule/Review/Library/Notes/Spreadsheet = **24/24 PASS** (hint visible after Select parcels, gone after the switch each time); the same case on the pre-fix build is 0/24 PASS. Steps 1-4 above on a real phone, signed in, remain pending (`Blocker: auth`).
 - **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B2041360.
-
-### V1484656 — B2061328: typing in an open note while the app returns to the foreground / another window pushes never loses either side's text, and the editor stays put `Blocker: auth` (two signed-in windows)
-
-Sandbox-proven: `test/notesOpenPageSync.test.js` (gated fake network, red on main) + `ui-audit/verify-notes-open-page-adopt.mjs` (real editor takes the adopted body in place). The real two-window cloud round-trip needs a signed-in account.
-**Steps (signed in, a throwaway duplicate page — never a real plan):**
-1. Open the same throwaway page in window A and window B. In B, change the FIRST paragraph and wait for "Saved".
-2. In A (not touched since), type a few words in the LAST paragraph and, within a second, switch to another tab/app and back (or click away and back) so the app syncs. **Expect:** the keyboard/caret in A are not dropped; A shows B's first-paragraph change AND its own words.
-3. Wait ~10 s, reload A. **Expect:** both edits present; no "also changed in another window" banner.
-4. Repeat with both windows editing the SAME paragraph. **Expect:** the existing conflict banner (nothing silently lost).
-5. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes on a dated pass of 2–4, or a failed step filed as a recurrence on B2061328.
-### V1484659 — B2061331: a note opens with its top near the top of the canvas, and on a phone both page edges are on screen `Blocker: real-data` (signed-in real device, real notes)
-
-Sandbox-proven: `ui-audit/verify-notes-open-framing.mjs` (WebKit + Chromium, five canvas sizes, three document shapes, CPU-throttled arm; red on untouched main). A real phone's first-paint timing is not producible headless.
-**Steps (real iPhone, signed in, a throwaway duplicate page — never a real plan):**
-1. Open a page you have never panned or zoomed. **Expect:** the sheet's top is right under the toolbar (a small margin), not halfway down; both left and right edges and corners are visible.
-2. Open a long page. **Expect:** same, starting at its top.
-3. Pinch/pan, leave, reopen. **Expect:** your view is restored exactly (not reset to the opening view).
-4. On desktop, open a short page. **Expect:** top near the top of the canvas, page centred sideways.
-5. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2061331.
 
 ### V1464320 — B2039232: an open file has a Close (×) back to the sheet index; unsaved Word/text edits ask first; reload after Close stays on the index `Blocker: auth`
 
@@ -723,18 +687,6 @@ Sandbox-proven (logged out, throwaway seeded plan, real pointer + key events, fo
 5. Hard-reload with `?cb=<anything>`. **Expect:** the crop and both kept shapes persist.
 6. Read the served chunk hash in the same observation as each result.
 - **Stopping rule:** closes on a dated pass of 1–5 with the build hash, or a failed step is filed as a recurrence on the matching B# (STANDING RULE #2).
-
-### V1396784 — B1960480: double-tap on blank paper raises the soft keyboard and the first text lands in the new box (real iPhone keyboard)
-
-Sandbox-proven on WebKit (touch emulation, `ui-audit/verify-notes-touch-place.mjs`) — keyboard typing, keydown-less `insertText`, title-focused variant, no scroll. NOT provable here: the real iOS soft keyboard, QuickPath, dictation, IME and autocapitalise.
-**Steps (real iPhone, a throwaway page):**
-1. Open a page, double-tap blank paper. **Expect:** the keyboard rises immediately and the shift key is on.
-2. Type "hello" (autocapitalise on). **Expect:** "Hello" appears in a NEW box at the tapped spot.
-3. Focus the page title, then double-tap blank paper. **Expect:** keyboard stays up, next letters go into the box, title unchanged.
-4. Double-tap blank paper on a page with an existing box, then tap a predictive suggestion / dictate / insert an emoji. **Expect:** it lands in the new box, not the old one.
-5. Empty page. **Expect:** the prompt reads "Double-tap anywhere to start a note."
-6. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1960480.
 
 ### V1481472 — B1960480 (×2): on a real iPhone, a double-tap on blank paper puts the first letter exactly where the finger was `Blocker: real-data` (signed-in real device)
 
