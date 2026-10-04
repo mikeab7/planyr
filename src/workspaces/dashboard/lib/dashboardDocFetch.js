@@ -56,6 +56,8 @@
  * direction, and every review created going forward (this fix's window included) already
  * populates `sourceFile` correctly, so nothing observed today shows it misfiring on a live path.
  */
+import { withLiveReviewNames } from "../../doc-review/lib/reviewNaming.js";
+import { storedProjectName } from "../../../shared/names/names.js";
 import { supabase } from "../../site-planner/lib/supabase.js";
 import { liveProjectIds, docProjectIsDead } from "../../../shared/projects/docProjectLiveness.js";
 import { isPdfName } from "../../../shared/files/uploadQueue.js";
@@ -84,7 +86,7 @@ export async function fetchLastTouchedDoc() {
   try {
     const { data, error } = await supabase
       .from("doc_reviews")
-      .select("id, title, project, project_id, updated_at, sources:data->sources")
+      .select("id, title, project, project_id, item, doc_date, updated_at, titleAuto:data->titleAuto, sources:data->sources")
       .is("deleted_at", null)
       .order("updated_at", { ascending: false })
       .limit(DOC_CANDIDATE_LIMIT);
@@ -108,7 +110,9 @@ export async function fetchLastTouchedDoc() {
       return candidateIsPdf(d.sources);
     });
     if (!pick) return null;
-    return { id: pick.id, title: pick.title || "Untitled document", project: pick.project || null, projectId: pick.project_id || null, updatedAt: pick.updated_at || null };
+    // NEW-1 (B1991040): the project label + an auto-composed title resolve LIVE by project id.
+    const shown = withLiveReviewNames(pick, storedProjectName);
+    return { id: pick.id, title: shown.title || "Untitled document", project: shown.project || null, projectId: pick.project_id || null, updatedAt: pick.updated_at || null };
   } catch (_) {
     return null;
   }
