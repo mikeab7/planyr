@@ -1520,3 +1520,9 @@ consecutive runs of the SAME build, so diff identities, never counts. Carried by
 - **TRAP: a finger that lifts while still moving flings** (inertia) — hold the finger still before `touchEnd` when measuring travel, or the number includes the coast.
 - **TRAP: the mat can only be scrolled programmatically if its content overflows** — zoom in first (Ctrl+= ×6) before testing the stray-scroll fold. Chromium refused it here; WebKit exercised it.
 - A stray native scroll (browser revealing a caret) is folded into the view and reset to 0; nothing else in the editor depends on the mat's own scroll.
+
+### Opening framing (B2061331 / NEW-4, 2026-10-04)
+
+- **The first layout pass measures the sheet SHORT (213 px here) and the full height lands ~140 ms later.** Anything that centres the page vertically against the first measurement is a race. `frameView({align:"top"})` is height-independent — use it for opening/Ctrl+0; `fitView` keeps centring. Phones (canvas ≤ 640) open at fit width (`openingZoom`), saved per-page view still wins.
+- **TRAP: an unthrottled run can pass on unfixed code by luck of that race** — a framing harness needs a CPU-throttled arm AND settled-state thresholds (`verify-notes-open-framing.mjs`).
+- **Standing limit:** phone text is 11 px × the opening zoom (~1.0). Readability vs whole-page-width is an owner decision (OWNER-TODO), not a bug.

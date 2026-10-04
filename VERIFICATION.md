@@ -166,6 +166,16 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1474512 — B2050928: Food map controls match — both segmented controls identical, info button md and unclipped, nothing in the toolbar clipped `Blocker: live-GIS (planyr.io is not reachable from the sandbox; no sign-in needed — browsing the map works logged out)`
+
+Sandbox-proven: `ui-audit/ui-inventory.mjs --budget-only` relational gate green on the four Food surfaces (RED on untouched main, named); `test/foodModule.test.js` 426/426. **Steps** (planyr.io at phone width, `#/food`, Map view; read the build from `/version.json` AND the served chunk hash in the same observation; fixtures only — never write to the real food list):
+1. Look at the toolbar row. **Expect:** Map | List, Drop a pin and the search field all fit on screen, nothing cut off or scrolling sideways; the search field fills the remaining width.
+2. Compare Map | List with Site Plan | Hybrid (top right of the map). **Expect:** identical shape and height; the selected segment is the same red fill with WHITE text in both (also in dark theme).
+3. Look at the "i" button beside the basemap toggle. **Expect:** a rounded square the same height as the toggle, level with its top edge, fully on screen, not a circle; tapping it opens the credit.
+4. Compare the top edges of the zoom +/− stack (left) and the toggle/"i" (right). **Expect:** same top edge and same distance from the screen sides.
+5. Zoom far out. **Expect:** the hint is a rounded rectangle like the other messages and does NOT overlap the "?" help button; on desktop width the credit line at the bottom-right sits left of the "?" button, not under it.
+6. Switch to List. **Expect:** Date / Rating / Ambiance / Cost / Want to try are matching pill chips; nothing clipped.
+- **Stopping rule:** closes on a dated pass of 1–6, or a failed step filed as a recurrence on B2050928.
 ### V1471312 — B2046224: Food on a phone — one row per restaurant, a pick lands the map on it, the Map/List toggle stays on screen while typing `Blocker: auth`
 
 Sandbox-proven in WebKit-emulated iPhone 15 / SE against a MOCKED Supabase (`ui-audit/verify-food-phone.mjs`, 30/30; 16/33 on the unfixed build) plus `test/foodPlaceIdentity.test.js`. Not provable here: his real signed-in data, Mobile Safari's real keyboard and collapsing toolbar, and the literal "the map did not move" report (it did not reproduce — the pin was mis-centred / under the sheet). **Steps** (planyr.io/#/food on his iPhone, signed in; read the served chunk hash in the same observation; do NOT save anything to the real list — cancel out of the visit form, or use a throwaway restaurant he is happy to delete):
@@ -277,6 +287,17 @@ Sandbox-proven (logged-out, seeded local site, real Chromium): `e2e/mapfinder-no
 4. Return to Site → map. **Expect:** the hint is back only if Select parcels is still on (the mode is kept on purpose).
 - **2026-10-04 WebKit-emulated pass (B2050816, NOT on device, logged-out; chunk `index-BVErCNTL.js` read in the same run):** `node ui-audit/verify-phone-orientations.mjs` (`PLANYR_CASES=notice-leak`) — iPhone SE and iPhone 15, portrait + landscape × Dashboard/Schedule/Review/Library/Notes/Spreadsheet = **24/24 PASS** (hint visible after Select parcels, gone after the switch each time); the same case on the pre-fix build is 0/24 PASS. Steps 1-4 above on a real phone, signed in, remain pending (`Blocker: auth`).
 - **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B2041360.
+
+### V1484659 — B2061331: a note opens with its top near the top of the canvas, and on a phone both page edges are on screen `Blocker: real-data` (signed-in real device, real notes)
+
+Sandbox-proven: `ui-audit/verify-notes-open-framing.mjs` (WebKit + Chromium, five canvas sizes, three document shapes, CPU-throttled arm; red on untouched main). A real phone's first-paint timing is not producible headless.
+**Steps (real iPhone, signed in, a throwaway duplicate page — never a real plan):**
+1. Open a page you have never panned or zoomed. **Expect:** the sheet's top is right under the toolbar (a small margin), not halfway down; both left and right edges and corners are visible.
+2. Open a long page. **Expect:** same, starting at its top.
+3. Pinch/pan, leave, reopen. **Expect:** your view is restored exactly (not reset to the opening view).
+4. On desktop, open a short page. **Expect:** top near the top of the canvas, page centred sideways.
+5. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2061331.
 
 ### V1464320 — B2039232: an open file has a Close (×) back to the sheet index; unsaved Word/text edits ask first; reload after Close stays on the index `Blocker: auth`
 

@@ -47,8 +47,12 @@ import {
   toggleSelection,
 } from "../lib/notesMarquee.js";
 import {
+<<<<<<< HEAD
   fitView, frameView, inertiaStep, normalizeView, panBy, panView, pinchView, releaseVelocity, stepZoom, toWorkspace,
   touchTravelled,
+=======
+  fitView, frameView, normalizeView, openingZoom, panBy, stepZoom, toWorkspace,
+>>>>>>> origin/main
   VIEW_ZOOM_DEFAULT, wheelIntent, wheelNativeAxis, zoomAbout, zoomForWheel, zoomKeyIntent, zoomLabel,
 } from "../lib/notesViewport.js";
 import { HIGHLIGHT_COLORS, SIZES, TEXT_COLORS } from "../lib/notesFormatPalette.js";
@@ -2502,7 +2506,9 @@ const NoteEditor = forwardRef(function NoteEditor({
       return;
     }
     framedSizeRef.current = size;
-    setView(frameView({ viewport: rect, page: size, zoom: VIEW_ZOOM_DEFAULT }),
+    /* NEW-4: top-anchored (independent of the page's eventual height) and, on a phone, FIT WIDTH so
+     * both page edges are on screen. See `frameView`'s `align` and `openingZoom`. */
+    setView(frameView({ viewport: rect, page: size, zoom: openingZoom({ viewport: rect, page: size }), align: "top" }),
       { persist: false, byUser: false });
   });
 
@@ -3452,7 +3458,7 @@ const NoteEditor = forwardRef(function NoteEditor({
     const rect = viewportRect();
     const page = sheetWorkspaceBox();
     if (!rect || !page) return;
-    setView(frameView({ viewport: rect, page, zoom: VIEW_ZOOM_DEFAULT }));
+    setView(frameView({ viewport: rect, page, zoom: VIEW_ZOOM_DEFAULT, align: "top" }));
   }, [setView, viewportRect, sheetWorkspaceBox]);
 
   /** ⛔ "FULL WIDTH" IS THE ONE PRESET WHOSE DEFINITION IS ABOUT THE PANE, so it is the one place
