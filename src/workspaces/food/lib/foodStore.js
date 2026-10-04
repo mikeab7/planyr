@@ -60,14 +60,16 @@ export async function fetchPlaceById(id) {
  *  alphabetical — passing the map's centre reorders those ties by real distance instead. Name
  *  relevance still comes first: a worse name match never outranks a better one just for being
  *  closer (see the RPC's `order by sim desc, distance_km asc` — distance is the TIEBREAK). */
-const SEARCH_RESULT_CAP = 15; // more than the ~10 shown, so client-side "his places first" reordering never runs dry
+const SEARCH_RESULT_CAP = 60; // a pool well past the ~10 shown: the client re-ranks it nearest-the-map-first (lib/searchProximity.js), so the nearby comparable matches must be IN it
 
-export async function searchPlacesByName(query, center) {
+export async function searchPlacesByName(query, center, signal) {
   if (!supabase || !query || !query.trim()) return { data: [], error: null };
-  const { data, error } = await supabase.rpc("food_places_search_by_name", {
+  let call = supabase.rpc("food_places_search_by_name", {
     p_query: query.trim(), p_cap: SEARCH_RESULT_CAP,
     p_center_lat: center?.lat ?? null, p_center_lon: center?.lon ?? null,
   });
+  if (signal) call = call.abortSignal(signal); // NEW-1: a newer keystroke cancels this request (lib/searchSession.js)
+  const { data, error } = await call;
   return { data: data || [], error };
 }
 
@@ -75,7 +77,7 @@ export async function searchPlacesByName(query, center) {
  *  can reference places far outside whatever the map happens to have in view right now. */
 export async function fetchPlacesByIds(ids) {
   if (!supabase || !ids || ids.length === 0) return { data: [], error: null };
-  const { data, error } = await supabase.from("food_places").select("id,name,lat,lon,category").in("id", ids);
+  const { data, error } = await supabase.from("food_places").select("id,name,lat,lon,category,address").in("id", ids);
   return { data: data || [], error };
 }
 

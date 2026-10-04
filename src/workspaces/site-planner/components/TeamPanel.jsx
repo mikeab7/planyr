@@ -24,7 +24,7 @@ import { loadUserPrefs, saveUserPrefs } from "../lib/userPrefs.js";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
-import { groupRoster, canManage, initialsOf, countsLine } from "../lib/teamRoster.js";
+import { groupRoster, canManage, initialsOf, countsLine, resendCooldownMs } from "../lib/teamRoster.js";
 
 const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", paper: "var(--surface-raised)", danger: "var(--danger)" };
 const field = { width: "100%", boxSizing: "border-box", padding: "8px 10px", fontSize: 13, border: `1px solid ${PAL.line}`, borderRadius: 8, color: PAL.ink, fontFamily: "inherit", background: "var(--surface-default)" };
@@ -41,7 +41,7 @@ const sectionLabel = { fontSize: FONT_SIZE.label, fontWeight: 700, textTransform
 const card = { background: "var(--surface-field)", border: `1px solid ${PAL.line}`, borderRadius: RADIUS.lg, overflow: "hidden" };
 const avatar = { width: AV, height: AV, flex: "none", borderRadius: RADIUS.pill, display: "grid", placeItems: "center", fontSize: FONT_SIZE.emphasis, fontWeight: 700, background: "var(--hover-ghost)", color: PAL.ink, boxSizing: "border-box" };
 const moreBtn = (touch) => ({ width: touch ? 44 : 36, height: touch ? 44 : 36, flex: "none", display: "grid", placeItems: "center end", background: "transparent", border: "none", borderRadius: RADIUS.md, color: PAL.ink, fontSize: 20 /* design-exempt: the ⋯ glyph size, scaled to its own 44px touch target */, fontWeight: 700, lineHeight: 1, cursor: "pointer", fontFamily: "inherit", padding: touch ? "0 4px 0 0" : 0, margin: touch ? "-6px -8px -6px 0" : "0 -4px 0 0" });
-const linkBtnStyle = { background: "none", border: "none", color: PAL.accent, fontSize: FONT_SIZE.emphasis, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", padding: "6px 4px", whiteSpace: "nowrap" };
+const linkBtnStyle = { background: "none", border: "none", color: PAL.accent, fontSize: FONT_SIZE.control, fontWeight: 600, cursor: "pointer", fontFamily: "inherit", padding: 0, whiteSpace: "nowrap", flex: "none" };
 const infoBtn = { width: 22, height: 22, flex: "none", borderRadius: RADIUS.pill, border: `1px solid ${PAL.muted}`, background: "transparent", color: PAL.muted, fontSize: FONT_SIZE.control, fontWeight: 700, fontStyle: "italic", fontFamily: "Georgia, serif", cursor: "pointer", padding: 0, display: "grid", placeItems: "center" };
 const switchTrack = (on) => ({ position: "relative", width: 44, height: 26, flex: "none", borderRadius: RADIUS.pill, border: `1px solid ${on ? PAL.accent : PAL.line}`, background: on ? PAL.accent : "var(--hover-ghost)", cursor: "pointer", padding: 0, margin: "0 -4px 0 0" });
 const switchKnob = (on) => ({ position: "absolute", top: 2, left: on ? 20 : 2, width: 20, height: 20, borderRadius: RADIUS.pill, background: on ? "var(--on-accent)" : PAL.muted, transition: "left .12s" });
@@ -179,7 +179,10 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
     const r = await inviteByEmail(sel, email, role);
     setBusy(false);
     if (!r.ok) { say("err", r.error || "Couldn't send the invite."); return; }
-    setEmail(""); setShowInvite(false); say("ok", "Invite sent — it activates when they sign in with that email.");
+    const sentTo = email.trim().toLowerCase();
+    setEmail(""); setShowInvite(false);
+    if (r.emailed) { markSent(sentTo); say("ok", `Invite sent to ${sentTo}`); }
+    else say("err", "Invite saved, but the email didn't send. Try Resend.");
     loadRoster(sel);
   };
 
@@ -197,7 +200,24 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
     setBusy(true); const r = await renameTeam(sel, v); setBusy(false);
     if (r.ok) { say("ok", "Team renamed."); await loadTeams(sel); } else say("err", r.error || "Couldn't rename the team.");
   };
-  const doResend = async (iv) => { setBusy(true); const r = await resendInvite(sel, iv.email, iv.role); setBusy(false); if (!r.ok) say("err", r.error || "Couldn't resend the invite."); else say("ok", "Invite resent"); };
+  // Resend throttle (NEW-1): disabled for ~a minute after any send; the server enforces the same window.
+  const [sentAt, setSentAt] = useState({});   // lower-cased email -> ms of the last send from this tab
+  const [clock, setClock] = useState(() => Date.now());
+  const markSent = (em) => { const t = Date.now(); setSentAt((m) => ({ ...m, [em]: t })); setClock(t); };
+  const cooldown = (iv) => resendCooldownMs(Math.max(sentAt[String(iv.email).toLowerCase()] || 0, Date.parse(iv.lastSentAt || "") || 0), clock);
+  useEffect(() => {
+    const left = Object.values(sentAt).concat(invites.map((i) => Date.parse(i.lastSentAt || "") || 0)).map((t) => resendCooldownMs(t, clock)).filter((x) => x > 0);
+    if (!left.length) return undefined;
+    const id = setTimeout(() => setClock(Date.now()), Math.min(...left) + 50);
+    return () => clearTimeout(id);
+  }, [sentAt, invites, clock]);
+  const doResend = async (iv) => {
+    if (cooldown(iv) > 0) return;
+    setBusy(true); const r = await resendInvite(sel, iv.email); setBusy(false);
+    if (r.ok) { markSent(String(iv.email).toLowerCase()); say("ok", "Invite email sent again"); return; }
+    if (r.throttled) { setSentAt((m) => ({ ...m, [String(iv.email).toLowerCase()]: Date.now() })); setClock(Date.now()); say("err", r.error); return; }
+    say("err", "Invite saved, but the email didn't send. Try Resend.");
+  };
 
   // Escape closes the open ⋯ menu / info popover first, not the whole Settings dialog behind it
   // (the dialog's own Escape handler is a document-level capture; window capture runs before it).
@@ -238,11 +258,11 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
 
   const menuRows = (row) => {
     const item = (label, onClick, opts = {}) => (
-      <button key={label} role="menuitem" data-team-menu-item={label} style={{ ...menuItem(!!opts.danger), minHeight: narrow ? 48 : undefined, display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "none" }} disabled={busy} onClick={() => { closeMenu(); onClick(); }}>
+      <button key={label} role="menuitem" data-team-menu-item={label} style={{ ...menuItem(!!opts.danger), minHeight: narrow ? 48 : undefined, display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "none" }} disabled={busy || !!opts.disabled} onClick={() => { closeMenu(); onClick(); }}>
         <span>{label}</span>{opts.check && <span aria-hidden="true" style={{ color: PAL.accent, fontWeight: 700 }}>✓</span>}
       </button>
     );
-    if (row.kind === "invite") return [item("Resend invite", () => doResend(row)), item("Cancel invite", () => doCancel(row.id), { danger: true })];
+    if (row.kind === "invite") return [item("Resend invite", () => doResend(row), { disabled: cooldown(row) > 0 }), item("Cancel invite", () => doCancel(row.id), { danger: true })];
     return [
       item("Admin", () => row.role !== "admin" && doSetRole(row.id, "admin"), { check: row.role === "admin" }),
       item("Member", () => row.role !== "member" && doSetRole(row.id, "member"), { check: row.role === "member" }),
@@ -251,23 +271,42 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
     ];
   };
 
-  const Row = ({ r, first }) => (
-    <div data-team-row={r.kind} data-team-row-role={r.role} style={{ position: "relative", display: "flex", alignItems: "center", gap: 12, padding: `${narrow ? 10 : 9}px ${GUTTER}px ${narrow ? 10 : 9}px ${GUTTER}px`, minHeight: narrow ? 56 : 52 }}>
+  // A render FUNCTION, not a component: a component defined here is a new type every render, so the
+  // click that opens the ⋯ menu remounted the row and detached the very button the menu anchors to
+  // (B2038784 amendment — the menu measured a detached node and stayed at left:-9999px, opacity 0).
+  const renderRow = (r, first) => (
+    <div key={`${r.kind}:${r.id}`} data-team-row={r.kind} data-team-row-role={r.role} style={{ position: "relative", display: "flex", alignItems: "center", gap: 12, padding: `${narrow ? 10 : 9}px ${GUTTER}px ${narrow ? 10 : 9}px ${GUTTER}px`, minHeight: narrow ? 56 : 52 }}>
       {!first && <div aria-hidden="true" style={{ position: "absolute", top: 0, right: 0, left: GUTTER + AV + 12, height: 1, background: PAL.line }} />}
       {r.kind === "invite"
         ? <span aria-hidden="true" style={{ ...avatar, border: `1.5px dashed ${PAL.muted}`, background: "transparent", color: PAL.muted }}><EnvelopeIcon /></span>
         : <span aria-hidden="true" style={avatar}>{initial(r)}</span>}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          {r.name}{r.isYou && <span style={{ fontWeight: 400, color: PAL.muted }}> · You</span>}
-        </div>
-        <div style={{ fontSize: 12, color: PAL.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          {r.kind === "invite" ? `${r.role === "admin" ? "Admin" : "Member"} · not joined yet` : r.email}
-        </div>
+        {r.kind === "invite" ? (
+          /* An invite's email is the ONLY identifier on the row, so it WRAPS (after the @ if it must)
+             rather than truncating; the status and Resend wrap onto further lines instead of cutting. */
+          <>
+            <div data-team-invite-email style={{ fontSize: 14, fontWeight: 600, overflowWrap: "anywhere", lineHeight: 1.3 }}>
+              {r.email.split("@")[0]}{r.email.includes("@") && <>@<wbr />{r.email.split("@").slice(1).join("@")}</>}
+            </div>
+            <div style={{ fontSize: 12, color: PAL.muted, display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: 4 }}>
+              <span>{r.role === "admin" ? "Admin" : "Member"} · not joined yet</span>
+              {canManage(r, isAdmin) && !narrow && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <button data-team-resend style={linkBtnStyle} disabled={busy || cooldown(r) > 0} onClick={() => doResend(r)}>Resend invite</button>
+                </>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {r.name}{r.isYou && <span style={{ fontWeight: 400, color: PAL.muted }}> · You</span>}
+            </div>
+            <div style={{ fontSize: 12, color: PAL.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.email}</div>
+          </>
+        )}
       </div>
-      {r.kind === "invite" && canManage(r, isAdmin) && !narrow && (
-        <button data-team-resend style={{ ...linkBtnStyle }} disabled={busy} onClick={() => doResend(r)}>Resend invite</button>
-      )}
       {canManage(r, isAdmin) && (
         <button data-team-more aria-label={`Options for ${r.name}`} aria-haspopup="menu" disabled={busy} onClick={(e) => openMenu(r, e.currentTarget)} style={moreBtn(narrow)}>⋯</button>
       )}
@@ -277,7 +316,7 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
   const rosterSections = sections.map((s) => (
     <div key={s.id} data-team-section={s.id} style={{ marginTop: SECTION_GAP }}>
       <div style={sectionLabel}>{s.label}</div>
-      <div style={card}>{s.rows.map((r, i) => <Row key={`${r.kind}:${r.id}`} r={r} first={i === 0} />)}</div>
+      <div style={card}>{s.rows.map((r, i) => renderRow(r, i === 0))}</div>
     </div>
   ));
 
@@ -316,7 +355,7 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
 
   const teamMenu = isAdmin && !renaming && (
     <>
-      <button ref={menuRef} data-team-menu aria-label="Team settings" aria-haspopup="menu" style={{ ...moreBtn(narrow), border: `1px solid ${PAL.line}`, borderRadius: RADIUS.md, width: narrow ? 44 : 36 }} disabled={busy} onClick={() => setMenuOpen((o) => !o)}>⋯</button>
+      <button ref={menuRef} data-team-menu aria-label="Team settings" aria-haspopup="menu" style={narrow ? { ...moreBtn(true), margin: 0, border: `1px solid ${PAL.line}`, borderRadius: RADIUS.md } : { ...moreBtn(false), margin: `0 ${GUTTER - 3}px 0 0` }} disabled={busy} onClick={() => setMenuOpen((o) => !o)}>⋯</button>
       <AnchoredMenu open={menuOpen} onClose={() => setMenuOpen(false)} anchorRef={menuRef} placement="below-right" width={180} zIndex={6000} panelStyle={{ background: "var(--surface-raised)", border: `1px solid ${PAL.line}`, borderRadius: RADIUS.md, boxShadow: "0 12px 32px rgba(0,0,0,0.22)", overflow: "hidden" }}>
         <button style={menuItem(false)} onClick={startRename}>Rename team</button>
         <button style={{ ...menuItem(true), borderBottom: "none" }} onClick={() => { setMenuOpen(false); setConfirmDelete(true); }}>Delete team</button>

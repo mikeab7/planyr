@@ -619,6 +619,11 @@ sat BESIDE the pressed line, not under it. Live copy: `ui-audit/diagnose-notes-o
 
 ---
 
+### Open page vs sync (B2061328 / NEW-7, 2026-10-04)
+
+- **An un-flushed keystroke is invisible to the store's `dirty` flag** (the editor holds it 600 ms in `pendingRef`). `registerOpenNoteDoc` now also carries `hasPending` + `flush`: `seed` flushes the open page BEFORE `planPageSeed`, the adopt loop re-checks pending synchronously with the write, `resolveDivergence` re-merges after its snapshot await, and `emitPagesChanged` treats pending as dirty. An adopted/merged body reaches the OPEN editor through its `applyDocument` transaction (`{external:true}`: no remount, no queued save, caret clamped); the workspace remount is only for a page nobody has open. The lost-update shape this closes: adopt stamps a CLEAN server rev, then the editor's stale document commits cleanly past it.
+- **Test shape:** `test/notesOpenPageSync.test.js` drives the real store with a fake open editor + a "workspace" listener that flushes on remount (real timers, §1 entry 45). `ui-audit/verify-notes-open-page-adopt.mjs` proves the real editor's half (same ProseMirror node, caret, no save queued) with a known-good arm (a page switch DOES replace the node — the route-change arm cannot, Notes stays mounted).
+
 ## 3 · Data facts
 
 **Font and size, as stored (2026-09-08).** A `textStyle` mark's `fontFamily` holds the source's
@@ -658,6 +663,12 @@ position**.
 
 ---
 
+### Touch routes into the menus (B2061332 / NEW-5, 2026-10-04)
+
+- **iOS Safari fires NO `contextmenu` on a long-press, and a `draggable` row turns a long-press into a drag.** Touch has two routes into the SAME menus: a "⋯" button on each tree row (coarse pointers only) and a 500 ms long-press (travel >10 px cancels — same slop as NEW-2's pan). Rows are not `draggable` on a coarse pointer; `openDocMenuAt` is the right-click handler's body, shared. A selected box gets a top-of-canvas "Delete box" pill on touch (`note-touch-box-bar`).
+- **TRAP: a held touch's lift synthesises a mousedown/click** — the press that opened a menu swallows its own (`longPressSwallowRef` / the row's `swallowUntil`), or releasing the finger selects the row / deselects the box.
+- **Which engine proves what:** Chromium + CDP `Input.dispatchTouchEvent` is a real held touch; WebKit gets dispatched PointerEvents for the hold only. `ui-audit/verify-notes-touch-menus.mjs`.
+
 ## 4 · The verification bar that actually held
 
 - **Measure, do not eyeball** — numbers in the reply, not adjectives.
@@ -671,6 +682,13 @@ position**.
   code, which is stronger than planting a synthetic defect.
 
 ---
+
+### Phone layout (B2061333 / NEW-6, 2026-10-04)
+
+- **A phone is `narrow`: the toolbar is ONE non-scrolling row of nine essentials + a "More" panel that drops DOWN** (the keyboard covers the bottom). The desktop row is composed from the same named pieces and is byte-identical to before — the harness compares its DOM to a main build. NEW-9 had removed the phone layout (B849633's row), which is why Bold sat at x=449.
+- **The caret band is the mat ∩ `window.visualViewport`**, never the mat alone (iOS shrinks only the visual viewport). WebKit headless has NO keyboard: the harness installs a FAKE `visualViewport` via `addInitScript` and shrinks it — that proves the arithmetic and wiring, not iOS. The containment guard announces `planyr:viewport-healed` when it pins a keyboard-reveal scroll; the editor listens.
+- **`<html data-notes-typing>` (set on editor focus, phone only) hides `[data-header-row2]`, the help fab and the zoom pill** (rules in `src/index.css`); the mat-top move is measured and folded into the view. Anything that moves the mat's top edge needs the same compensation (VIEWPORT-STABLE).
+- **TRAP: coarse-pointer halos fight each other on small boxes** — a 44 px halo per grip/handle overlaps neighbours; the grip is z-index 2 so it always wins. Probe with `elementFromPoint(...).closest(...)`, not a className test (a child can answer).
 
 ## 5 · The recurring bug families — suspect these first
 
@@ -1458,6 +1476,14 @@ position**.
 
 ---
 
+### Touch pan / pinch (B2061330 / NEW-2, 2026-10-04)
+
+- **A finger drag on the mat produces POINTER events only** (`touch-action: none`) — never the compat mouse events `beginBlankGesture` listens on. Touch has its own pointer-driven pan in the mat's touch effect (slop 10, `lib/notesViewport.js` helpers); the mouse path is untouched. A press on a selected/edited box, a grip/handle, a field or the zoom pill is not a pan.
+- **Which engine proves what:** Chromium + CDP `Input.dispatchTouchEvent` is the real touch pipeline; WebKit only gets dispatched PointerEvents (no real touch-drag primitive). Say so in any report. `ui-audit/verify-notes-touch-pan.mjs`.
+- **TRAP: a finger that lifts while still moving flings** (inertia) — hold the finger still before `touchEnd` when measuring travel, or the number includes the coast.
+- **TRAP: the mat can only be scrolled programmatically if its content overflows** — zoom in first (Ctrl+= ×6) before testing the stray-scroll fold. Chromium refused it here; WebKit exercised it.
+- A stray native scroll (browser revealing a caret) is folded into the view and reset to 0; nothing else in the editor depends on the mat's own scroll.
+
 ## 6 · Where the rest lives
 
 - `src/workspaces/notes/CLAUDE.md` — the module pointer: every file, and the decision behind it.
@@ -1499,8 +1525,29 @@ INTO IT"*, is separately **flaky on base and head alike** (the harness's own typ
 characters — `FIRSTSECOND` came back as `FRSTSECOND`/`FSTSECOND`); it appears and disappears across
 consecutive runs of the SAME build, so diff identities, never counts. Carried by **B1597762**.
 
+### Touch on a box (B2061329 / NEW-3, 2026-10-04)
+
+- **On touch there is NO stage 1.** `focusFromMat` leaves the press to the browser (caret lands at the tap, inside the box) and marks the box selected + editing; `commitPendingPlace` marks a freshly placed box the same way (`addNoteAnchorAt({aid})` names it in the same tick). Desktop keeps stage 1 + blur (B1555152). Backspace on an EMPTY box removes it on touch only (`selectionKeyDown`).
+- **TRAP: WebKit's native touch caret lands ~2 characters right of the finger** (measured with and without the change). Assert "moved to the tap" (a few characters' tolerance, far from the end), never a glyph-exact position.
+- **TRAP: an empty box cannot be seeded** — the provisional-block prune removes it on load; make one by double-tapping, typing a letter and Backspacing it.
+- `ui-audit/verify-notes-touch-box-tap.mjs` is the harness. On untouched main, `verify-notes-box-selection` (81/131), `-pan`, `-context-menu` (23/27), `-menu-layout` (32/36), `-doubleclick` (12/13) and `-box-drag` already fail — diff failure IDENTITIES against a `git worktree` build of `origin/main`, never "stay green". Harnesses that launch default Chromium need `PW_CHROME=/opt/pw-browsers/chromium-1194/chrome-linux/chrome`.
+
 ## Touch placement on WebKit (B1960480, 2026-09-29)
 
 - On a touch press the blank-paper handlers run on the COMPAT mouse events, which no longer say who made them — `lastPointerTypeRef` (window `pointerdown` capture) carries the pointer type. Touch arms focus the editor synchronously (iOS raises the keyboard only for a focus inside the tap).
 - **Moving the selection inside `beforeinput` does NOT move where WebKit then inserts** (measured: text went into the OLD box). So a data-carrying `insertText` is cancelled and re-inserted through `commitPendingPlace(text)`; only the touch KEYDOWN path and IME composition are left native.
 - `ui-audit/verify-notes-touch-place.mjs` is the WebKit touch harness (`npx playwright install webkit`). `verify-notes-pending-caret` / `verify-notes-free-placement` predate boxes-only (a single click no longer arms) and fail identically on untouched `main` (29 / 36 ⛔) — stale, not a regression signal; `verify-notes-in-sheet-placement` is the live desktop check (needs `PW_CHROME` pointing at an installed chromium).
+
+### Where the first letter LANDS vs where the finger WAS (B1960480 ×2, 2026-10-04)
+
+- **The stored `x`/`y` is the box's CORNER, never the first glyph.** Border+padding = 17 across; border+padding+the first paragraph's `margin: 1em` + half a line ≈ 24 down, in DOCUMENT units — so a placement error that GROWS with zoom is this inset, not a coordinate-mixing bug (measured 17/23.8 at 100%, 35/48.6 at 200%). `touchBoxOrigin` (`notesBlankPaper.js`) compensates on TOUCH ONLY; desktop's corner-at-the-click is pinned by `verify-notes-anchor-zoom`. The three numbers are pinned against the stylesheet by `test/notesTouchLanding.test.js` — change the box padding and that goes red.
+- **TRAP: a `focus()` can PAN THE VIEW, and the ×1 scrollTop-restore cannot see it.** The mat is `overflow:hidden` + one transform; ProseMirror's keep-the-caret-visible is `handleScrollToSelection`, which `setView`s. Focusing at arm made it chase the EMPTY page's top-left caret and slide the canvas under the finger (35px at 50%). Suspect this first for any "view moved after a touch" report; `touchPlaceGuardRef` is the stand-down.
+- **TRAP: a tap above the body grows `sheetGrowGap`, which moves the body and the box with it.** Folded into the view (touch + guard window only).
+- **Measure the glyph, not the box:** `ui-audit/verify-notes-touch-landing.mjs` reads a DOM Range over the first character against the tap. Reading the box's own rect would have passed the unfixed build. Seed a view through `planyr:notes:view:v1:local:<id>`; open page 2 through `planyr:notes:activePage:v1:local`.
+- Not provable headless: the keyboard-up `visualViewport` shift and a real fingertip → V1481472.
+
+### Opening framing (B2061331 / NEW-4, 2026-10-04)
+
+- **The first layout pass measures the sheet SHORT (213 px here) and the full height lands ~140 ms later.** Anything that centres the page vertically against the first measurement is a race. `frameView({align:"top"})` is height-independent — use it for opening/Ctrl+0; `fitView` keeps centring. Phones (canvas ≤ 640) open at fit width (`openingZoom`), saved per-page view still wins.
+- **TRAP: an unthrottled run can pass on unfixed code by luck of that race** — a framing harness needs a CPU-throttled arm AND settled-state thresholds (`verify-notes-open-framing.mjs`).
+- **Standing limit:** phone text is 11 px × the opening zoom (~1.0). Readability vs whole-page-width is an owner decision (OWNER-TODO), not a bug.

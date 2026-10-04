@@ -794,6 +794,7 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   `auth.users` capping signups per hour/day (config-toggleable with one UPDATE statement,
   fails OPEN on any error so a bug here can never brick account creation); `db/test/` holds its
   self-rolling-back proof, including a mutation check (raising the cap lifts the block).
+- `basemaps/` (B2018608) — the ONE basemap definition Food + the Site Plan map share: `basemaps.js` (registry, `SITE_PLAN_BASEMAP` (= the Site tab map) + `SATELLITE_BASEMAP` (Food default: photo only, no roads/labels) + `HYBRID_BASEMAP`, `siteStack(zoom)` (the one layer-stack + gate both read), `VECTOR_SOURCE` = the single swappable vector config, `densityTileOptions`, `IMAGERY_GRADE`), `vectorStyle.js` (pure Apple-like MapLibre style, written in Leaflet zoom), `vectorLabelLayer.js` (lazy MapLibre-in-Leaflet helper with raster fallback), and the city-name layer (`placeNames*.js`, `zoomTracker.js` — moved here, site-planner/lib keeps re-exports). Never fork a Food-only copy; the PDF export is never graded. Glyphs: `public/map-assets/fonts`.
 - `projects/`, `profile/`, `cloud/`, `presence/`, `gis/`, `geometry/`, `placement/`.
 
 **Convention:** shared logic is pure and unit-tested; per-host state/wiring stays in the workspace.

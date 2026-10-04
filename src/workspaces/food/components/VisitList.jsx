@@ -18,7 +18,8 @@
  *
  * "What was good" (B634979) gets its own column here too — each row shows THAT visit's own
  * value (never an aggregate; the panel's own accumulated summary is a separate concern, see
- * VisitPanel.jsx's LikedDishes) — same shape as the existing "What I had" column beside it.
+ * VisitPanel.jsx's LikedDishes) — same shape as the "Had" column beside it (NEW-1: that column used to be "What I had"; it now lists the dishes
+ * rated at the visit and falls back to the old saved free text for visits logged before dishes were captured).
  *
  * ⛔ "WANT TO TRY" SHORTLIST (B669312, owner chat block, 2026-08-22). Flagged-but-unvisited places
  * appear as rows here too (FoodApp's `listRows` folds them in, `isWishlist: true`, every visit
@@ -31,6 +32,8 @@
 import { useMemo, useState } from "react";
 import { manualPinKey } from "../lib/foodStore.js";
 import { colorForRating, textColorForRating } from "../lib/ratingColor.js";
+import { ToggleChip } from "../../../shared/ui/controls.jsx";
+import { RADIUS } from "../../../shared/ui/radius.js";
 
 const SORTS = {
   // A dateless visit's key is "" — the empty string, which string-compares BELOW every real
@@ -54,14 +57,6 @@ function rowKey(v) {
   return v.place_id ? `place:${v.place_id}` : manualPinKey(v.custom_name, v.custom_lat, v.custom_lon);
 }
 
-function fieldStyle() {
-  return {
-    boxSizing: "border-box", padding: "6px 10px", borderRadius: 999,
-    border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-primary)",
-    font: "inherit", fontSize: 12.5,
-  };
-}
-
 export default function VisitList({ visits, query, onSelect, selectedKey }) {
   const [sortKey, setSortKey] = useState("date");
   // "Want to try" shortlist filter (B669312) — same chip visual as the sort row, but a FILTER
@@ -82,30 +77,22 @@ export default function VisitList({ visits, query, onSelect, selectedKey }) {
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
         <div style={{ display: "flex", gap: 4 }}>
           {Object.entries(SORTS).map(([key, s]) => (
-            <button
+            <ToggleChip
               key={key} type="button" onClick={() => setSortKey(key)}
-              aria-pressed={sortKey === key}
-              style={{
-                ...fieldStyle(), cursor: "pointer",
-                background: sortKey === key ? "var(--accent-food)" : "var(--surface-page)",
-                color: sortKey === key ? "var(--on-accent-food)" : "var(--text-primary)", fontWeight: sortKey === key ? 700 : 500,
-              }}
+              aria-pressed={sortKey === key} active={sortKey === key}
+              accent="var(--accent-food)" onAccent="var(--on-accent-food)"
             >
               {s.label}
-            </button>
+            </ToggleChip>
           ))}
         </div>
-        <button
-          type="button" onClick={() => setShortlistOnly((s) => !s)} aria-pressed={shortlistOnly}
+        <ToggleChip
+          type="button" onClick={() => setShortlistOnly((s) => !s)} aria-pressed={shortlistOnly} active={shortlistOnly}
+          accent="var(--accent-food)" onAccent="var(--on-accent-food)"
           data-testid="food-list-shortlist-filter"
-          style={{
-            ...fieldStyle(), cursor: "pointer",
-            background: shortlistOnly ? "var(--accent-food)" : "var(--surface-page)",
-            color: shortlistOnly ? "var(--on-accent-food)" : "var(--text-primary)", fontWeight: shortlistOnly ? 700 : 500,
-          }}
         >
           Want to try
-        </button>
+        </ToggleChip>
       </div>
 
       {rows.length === 0 ? (
@@ -124,7 +111,7 @@ export default function VisitList({ visits, query, onSelect, selectedKey }) {
                 <th style={{ padding: "4px 8px", fontWeight: 700 }}>Ambiance</th>
                 <th style={{ padding: "4px 8px", fontWeight: 700 }}>Cost</th>
                 <th style={{ padding: "4px 8px", fontWeight: 700 }}>Date</th>
-                <th style={{ padding: "4px 8px", fontWeight: 700 }}>What I had</th>
+                <th style={{ padding: "4px 8px", fontWeight: 700 }}>Had</th>
                 <th style={{ padding: "4px 8px", fontWeight: 700 }}>What was good</th>
               </tr>
             </thead>
@@ -150,7 +137,7 @@ export default function VisitList({ visits, query, onSelect, selectedKey }) {
                         <span style={{
                           marginLeft: 6, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.03em",
                           color: "var(--accent-food)", background: "transparent", border: "1px solid var(--accent-food)",
-                          borderRadius: 999, padding: "0 5px",
+                          borderRadius: RADIUS.pill, padding: "0 5px",
                         }}>
                           Want to try
                         </span>
@@ -159,7 +146,7 @@ export default function VisitList({ visits, query, onSelect, selectedKey }) {
                     <td style={{ padding: "7px 8px" }}>
                       {v.rating ? (
                         <span style={{
-                          display: "inline-block", borderRadius: 5, padding: "1px 6px", fontWeight: 700,
+                          display: "inline-block", borderRadius: RADIUS.sm, padding: "1px 6px", fontWeight: 700,
                           background: colorForRating(v.rating), color: textColorForRating(v.rating),
                         }}>
                           {/* Number(): rating is a Postgres numeric(4,2) column, so PostgREST's raw
@@ -175,7 +162,7 @@ export default function VisitList({ visits, query, onSelect, selectedKey }) {
                     <td style={{ padding: "7px 8px" }}>
                       {v.rating_ambiance ? (
                         <span style={{
-                          display: "inline-block", borderRadius: 5, padding: "1px 6px", fontWeight: 700,
+                          display: "inline-block", borderRadius: RADIUS.sm, padding: "1px 6px", fontWeight: 700,
                           background: colorForRating(v.rating_ambiance), color: textColorForRating(v.rating_ambiance),
                         }}>
                           {Number(v.rating_ambiance)}/10
@@ -186,7 +173,7 @@ export default function VisitList({ visits, query, onSelect, selectedKey }) {
                     </td>
                     <td style={{ padding: "7px 8px", color: "var(--text-primary)" }}>{v.cost != null ? `$${Number(v.cost).toFixed(2)}` : "—"}</td>
                     <td style={{ padding: "7px 8px", color: "var(--text-secondary)" }}>{v.visited_on || "—"}</td>
-                    <td style={{ padding: "7px 8px", color: "var(--text-secondary)" }}>{v.what_i_had || "—"}</td>
+                    <td style={{ padding: "7px 8px", color: "var(--text-secondary)" }}>{v.dishNames || v.what_i_had || "—"}</td>
                     <td style={{ padding: "7px 8px", color: "var(--text-secondary)" }}>{v.what_was_good || "—"}</td>
                   </tr>
                 );

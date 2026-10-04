@@ -20,6 +20,7 @@ export function groupRoster(members, invites, myUid) {
   }));
   const invited = (invites || []).map((iv) => ({
     kind: "invite", id: iv.id, role: iv.role === "admin" ? "admin" : "member", email: iv.email, name: iv.email,
+    lastSentAt: iv.lastSentAt || null,
   }));
   const sections = [
     { id: "admins", label: "Admins", rows: rows.filter((r) => r.role === "admin") },
@@ -38,4 +39,13 @@ export function countsLine(memberCount, projectCount) {
   const m = `${memberCount} member${memberCount === 1 ? "" : "s"}`;
   const p = `${projectCount} shared project${projectCount === 1 ? "" : "s"}`;
   return `${m} · ${p}`;
+}
+
+/* Resend throttle (NEW-1): how many ms until an invite may be emailed again. The server enforces
+ * the same window (claim_invite_send); this only keeps the button honest. 0 = ready. */
+export const RESEND_WINDOW_MS = 60 * 1000;
+export function resendCooldownMs(lastSent, now = Date.now()) {
+  const t = typeof lastSent === "number" ? lastSent : Date.parse(lastSent || "");
+  if (!Number.isFinite(t)) return 0;
+  return Math.max(0, t + RESEND_WINDOW_MS - now);
 }

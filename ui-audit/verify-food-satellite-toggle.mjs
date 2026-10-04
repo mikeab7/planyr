@@ -4,8 +4,8 @@
  *
  *   B634981 — switching basemap must never crash the module (a TypeError inside Leaflet's
  *   `_getSubdomain` once blanked all of /food). A REAL browser check, not a source scan.
- *   NEW-1   — a new user opens on the SITE PLAN map (imagery + road names), Hybrid adds a place-names
- *   layer, the choice survives a reload, the painted tiles are really opaque (the B651872 "blank until
+ *   NEW-1   — a new user opens on SATELLITE (the photo only — no road/label layer at any zoom, B2070433),
+ *   Hybrid adds the vector roads + place names, the choice survives a reload, the painted tiles are really opaque (the B651872 "blank until
  *   you zoom" symptom), and the pins stay on top. `--shots <dir>` writes a Houston neighbourhood-zoom
  *   screenshot per basemap (desktop + phone).
  *
@@ -15,6 +15,7 @@
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { installFakeVectorSource } from "./lib/fakeVectorTiles.mjs";
 
 const args = process.argv.slice(2);
 const shotsIdx = args.indexOf("--shots");
@@ -25,16 +26,10 @@ if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 const failures = [];
 const check = (label, ok, extra = "") => { console.log(`${ok ? "PASS" : "FAIL"} — ${label}${extra ? ` (${extra})` : ""}`); if (!ok) failures.push(label); };
 
-async function layerUrls(page) {
-  return page.evaluate(() => [...document.querySelectorAll('[data-testid="food-map"] .leaflet-tile-pane .leaflet-layer')].map((l) => {
-    const img = l.querySelector("img.leaflet-tile");
-    return { src: img ? img.src : null, opacity: Number(getComputedStyle(l).opacity) };
-  }));
-}
-
 // Known-good arm (DRIVER-SCROLL §6): the control's two buttons must exist; otherwise the run is void.
 async function open(browser, viewport, label, seed) {
   const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport });
+  if (!args.includes("--live")) await installFakeVectorSource(context); // sandbox cannot reach tiles.openfreemap.org
   const page = await context.newPage();
   const pageErrors = [];
   page.on("pageerror", (e) => pageErrors.push(e.message));
@@ -43,10 +38,17 @@ async function open(browser, viewport, label, seed) {
   await page.goto(`${BASE_URL}/#/food`, { waitUntil: "domcontentloaded", timeout: 30000 });
   await page.waitForSelector('[data-testid="food-map"]', { timeout: 15000 });
   await assertMeasurable(page, "verify-food-satellite-toggle");
-  const have = await page.locator('[data-testid="food-basemap-siteplan"], [data-testid="food-basemap-hybrid"]').count();
+  const have = await page.locator('[data-testid="food-basemap-satellite"], [data-testid="food-basemap-hybrid"]').count();
   if (have !== 2) throw new Error(`VOID RUN (${label}): expected the two basemap buttons, found ${have}`);
   return { context, page, pageErrors };
 }
+
+// Layer census (B2070433): what is actually mounted in the map — the vector roads/labels pane's children,
+// and the number of raster tile layers. Satellite must have zero of the first and exactly one of the second.
+const census = (page) => page.evaluate(() => {
+  const pane = document.querySelector('[data-testid="food-map"] .leaflet-planyrVectorLabels-pane');
+  return { vector: pane ? pane.querySelectorAll("canvas, .maplibregl-map, img").length : 0, tileLayers: document.querySelectorAll('[data-testid="food-map"] .leaflet-tile-pane .leaflet-layer').length };
+});
 
 async function zoomToNeighbourhood(page) {
   for (let i = 0; i < 5; i++) { await page.click(".leaflet-control-zoom-in", { force: true }); await page.waitForTimeout(250); }
@@ -60,41 +62,40 @@ async function main() {
     const { context, page, pageErrors } = await open(browser, viewport, label);
     const pressed = async (k) => (await page.getAttribute(`[data-testid="food-basemap-${k}"]`, "aria-pressed")) === "true";
 
-    check(`${label}: a NEW user opens on the Site Plan map`, await pressed("siteplan") && !(await pressed("hybrid")));
+    check(`${label}: a NEW user opens on Satellite`, await pressed("satellite") && !(await pressed("hybrid")));
+    const metro = await census(page);
+    check(`${label}: Satellite at metro zoom — zero road/label layers, one imagery layer`, metro.vector === 0 && metro.tileLayers === 1, JSON.stringify(metro));
     await zoomToNeighbourhood(page);
-    let layers = await layerUrls(page);
-    check(`${label}: Site Plan = imagery + road names (2 tile layers)`, layers.length === 2 && /World_Imagery/.test(layers[0].src || "") && /World_Transportation/.test(layers[1].src || ""), JSON.stringify(layers.map((l) => l.opacity)));
-    check(`${label}: imagery tiles really painted and opaque (no blank map)`, layers[0].opacity === 1 && layers[0].src && await page.evaluate(() => [...document.querySelectorAll('[data-testid="food-map"] .leaflet-tile-pane img.leaflet-tile')].some((i) => i.naturalWidth > 0)));
-    if (SHOTS) await page.screenshot({ path: `${SHOTS}/food-siteplan-${label}.png` });
-
+    const hood = await census(page);
+    check(`${label}: Satellite at neighbourhood zoom — still zero road/label layers`, hood.vector === 0 && hood.tileLayers === 1, JSON.stringify(hood));
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/food-satellite-hood-${label}.jpg`, type: "jpeg", quality: 82 });
+    check(`${label}: imagery tiles really painted and opaque (no blank map)`, await page.evaluate(() => [...document.querySelectorAll('[data-testid="food-map"] .leaflet-tile-pane img.leaflet-tile')].some((i) => i.naturalWidth > 0)));
     await page.click('[data-testid="food-basemap-hybrid"]', { force: true });
-    await page.waitForTimeout(3500);
-    layers = await layerUrls(page);
-    check(`${label}: Hybrid = imagery + road names + place names (3 layers, labels full strength)`, layers.length === 3 && /World_Boundaries_and_Places/.test(layers[2].src || "") && layers[1].opacity === 1 && layers[2].opacity === 1);
+    await page.waitForTimeout(2500);
     check(`${label}: no crash on switch`, (await page.locator("text=/hit an error and couldn.?t load/i").count()) === 0 && (await page.locator('[data-testid="food-basemap-error"]').count()) === 0 && pageErrors.length === 0, pageErrors.join("|"));
-    if (SHOTS) await page.screenshot({ path: `${SHOTS}/food-hybrid-${label}.png` });
-
-    // Pan + zoom on Hybrid: tiles must stay painted (B651872 symptom), nothing throws.
+    const hy = await census(page);
+    check(`${label}: Hybrid mounts the vector roads/labels pane`, await page.evaluate(() => !!document.querySelector('[data-testid="food-map"] .leaflet-planyrVectorLabels-pane')), JSON.stringify(hy));
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/food-hybrid-hood-${label}.jpg`, type: "jpeg", quality: 82 });
     await page.mouse.move(viewport.width / 2, viewport.height / 2);
     await page.mouse.down(); await page.mouse.move(viewport.width / 2 + 160, viewport.height / 2 + 90, { steps: 8 }); await page.mouse.up();
     await page.click(".leaflet-control-zoom-out", { force: true });
     await page.waitForTimeout(2500);
-    check(`${label}: Hybrid still painted after pan + zoom`, await page.evaluate(() => [...document.querySelectorAll('[data-testid="food-map"] .leaflet-tile-pane img.leaflet-tile')].filter((i) => i.naturalWidth > 0).length > 3));
+    check(`${label}: Hybrid still painted after pan + zoom (B651872)`, await page.evaluate(() => [...document.querySelectorAll('[data-testid="food-map"] .leaflet-tile-pane img.leaflet-tile')].filter((i) => i.naturalWidth > 0).length > 3));
 
-    // Persistence: reload → Hybrid remembered.
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.waitForSelector('[data-testid="food-basemap-hybrid"]', { timeout: 15000 });
     check(`${label}: the choice persists across a reload`, await pressed("hybrid"));
-    // Toggle back and forth (B634981's crash path).
-    for (const k of ["siteplan", "hybrid", "siteplan"]) { await page.click(`[data-testid="food-basemap-${k}"]`, { force: true }); await page.waitForTimeout(400); }
+    for (const k of ["satellite", "hybrid", "satellite"]) { await page.click(`[data-testid="food-basemap-${k}"]`, { force: true }); await page.waitForTimeout(400); }
     check(`${label}: repeated switching never crashes`, (await page.locator('[data-testid="food-map"]').count()) === 1 && pageErrors.length === 0);
     await context.close();
   }
 
-  // Corrupt / hostile stored value falls back to the default instead of crashing.
-  const bad = await open(browser, { width: 1280, height: 800 }, "bad-storage", () => { try { localStorage.setItem("planyr:food:basemap", "street-from-the-old-build"); } catch (_) {} });
-  check("an unrecognised stored choice falls back to the Site Plan map", (await bad.page.getAttribute('[data-testid="food-basemap-siteplan"]', "aria-pressed")) === "true");
-  await bad.context.close();
+  // Corrupt / hostile / legacy stored value (incl. the interim build's "siteplan") lands on Satellite, never a broken state.
+  for (const stored of ["street-from-the-old-build", "siteplan"]) {
+    const bad = await open(browser, { width: 1280, height: 800 }, "bad-storage", `try { localStorage.setItem("planyr:food:basemap", ${JSON.stringify(stored)}); } catch (_) {}`);
+    check(`stored "${stored}" falls back to Satellite`, (await bad.page.getAttribute('[data-testid="food-basemap-satellite"]', "aria-pressed")) === "true");
+    await bad.context.close();
+  }
 
   await browser.close();
   if (failures.length) { console.error(`\nFAIL — ${failures.length} check(s): ${failures.join("; ")}`); process.exit(1); }

@@ -178,3 +178,13 @@ demand, not committed). Three findings worth knowing before touching phone layou
 The phone Properties bottom sheet itself (`propertiesSheet.js`) came back **clean** on every
 combination where it actually renders (5 of 6) — it opens, and the app's own "shift the map so the
 selection stays visible" behavior held in every case measured.
+
+## Permanent case: a Site-map hint must not follow you off Site (B2050816)
+
+`PLANYR_CASES=notice-leak node ui-audit/verify-phone-orientations.mjs` drives iPhone SE and iPhone 15
+(portrait + landscape) × six destinations: fresh load of `#/site` → Select parcels → hint visible →
+switch tab → hint gone. Two things a future session would otherwise rediscover: the sandbox's blocked
+GIS hosts put the map in its error state, which occupies the hint's render slot, so the harness answers
+non-target-origin requests locally; and the hint expires on its own a few seconds after arming, so a
+"gone" reading taken late is VOID (the case enforces a 4 s window). Results are WebKit-emulated, never
+"on device". Last run: 24/24 PASS on production; 0/24 on the pre-fix build (red-proof).

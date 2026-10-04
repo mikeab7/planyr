@@ -298,10 +298,13 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { colorForRating } from "../lib/ratingColor.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
+import { Button, IconButton, SegmentedControl, SIZE } from "../../../shared/ui/controls.jsx";
+import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import { FREE_ZOOM_OPTIONS, attachFreeWheelZoom } from "../../../shared/map/freePinchZoom.js";
 import {
-  SITE_PLAN_BASEMAP, SITE_PLAN_BASEMAP_CHOICES, resolveBasemapChoice, basemapTileLayers, basemapAttribution,
+  SATELLITE_BASEMAP, FOOD_BASEMAP_CHOICES, resolveBasemapChoice, basemapTileLayers, basemapAttribution, IMAGERY_GRADE,
 } from "../../../shared/basemaps/basemaps.js";
+import { addVectorLabels } from "../../../shared/basemaps/vectorLabelLayer.js";
 
 // ⛔ NEW-1 (2026-10-03) — THE BASEMAP IS NO LONGER DEFINED HERE. Owner: "The map on the food module
 // is horrible, we should default to the site plan module map … and a good hybrid option as an
@@ -318,7 +321,7 @@ import {
 const BASEMAP_STORAGE_KEY = "planyr:food:basemap"; // per-user, per-device last choice (NEW-1)
 function readStoredBasemap() {
   try { return resolveBasemapChoice(window.localStorage.getItem(BASEMAP_STORAGE_KEY)).key; }
-  catch (_) { return SITE_PLAN_BASEMAP.key; } // storage blocked → the default, never a crash
+  catch (_) { return SATELLITE_BASEMAP.key; } // storage blocked → the default, never a crash
 }
 
 // Houston, so a first-ever visit opens somewhere useful rather than on the world map.
@@ -375,6 +378,8 @@ const COLORS = {
 // canvas/no-cascade reason as COLORS above, and because sharing it would mean importing across
 // two components for one number — not worth a new shared-constants module for this module's size.
 const PANEL_WIDTH = 340;
+// B2046224 — how long after a phone selection lands the map keeps re-centring as the bottom sheet reports its height.
+const SHEET_SETTLE_MS = 1200;
 // --accent-food, literal for the same canvas reason as COLORS — ties the selected pin's ring
 // and halo to the panel's own accent dot (VisitPanel.jsx), "the eye connects them."
 const SELECTED_ACCENT = "#BE3B22";
@@ -410,15 +415,36 @@ const TOUCH_MIN_TAP_RADIUS = 22;
 
 // NEW-1 (2nd owner block) — the gap between the bottom-anchored notice/search stack and whatever
 // its floor is: the mobile sheet's live top edge (sheetHeightPx) or the plain viewport bottom (0).
-const BOTTOM_STACK_GAP = 12;
+// 14 = the global help button's own corner inset (HelpReportControl's FAB_RIGHT), so the hint stack and
+// that button share one bottom edge instead of sitting 2-3px apart.
+const BOTTOM_STACK_GAP = 14;
 
 // B681520 (×2) — the mobile attribution toggle's own touch target (see the render below for why
 // 44 rather than the old 28): a real circle, not just a hit-test allowance like
 // TOUCH_MIN_TAP_RADIUS above (that one widens invisible canvas hit-testing without changing what's
 // drawn; this button IS the drawn thing, so its box itself is 44x44).
-const ATTRIBUTION_TOGGLE_SIZE = 44;
-// Directly under the basemap toggle (top:12, ~30px tall) with a real gap — never the bottom edge.
-const ATTRIBUTION_TOGGLE_TOP = 54;
+// NEW-1 (food controls) — the info button is now the shared IconButton at the app's standalone-control
+// size (SIZE.md, 30) like every other floating map control; its 44px touch target comes from the
+// primitive's own `tap-target` hit area, not from a bigger drawn box (a drawn 44 circle was the one
+// control on this screen that matched nothing beside it).
+const ATTRIBUTION_TOGGLE_SIZE = SIZE.md.height;
+// The shared inset of every floating control in the top corners. 10 is Leaflet's own control margin,
+// so the zoom stack (top-left, Leaflet-drawn) and the toggle / info button (top-right, ours) share
+// ONE top edge and ONE side inset instead of a 12 beside a 10.
+const FLOAT_INSET = 10;
+const FLOAT_GAP = 8;
+const HELP_CLEARANCE = 14 + SIZE.md.height + FLOAT_GAP;
+// The credit button shares the basemap toggle's top edge (they are one flex row); the credit PANEL it
+// opens drops just below that row — never the bottom edge.
+const ATTRIBUTION_TOGGLE_TOP = FLOAT_INSET;
+// ONE look for every floating message on the map (the zoom hint, the cap notice, the loading and
+// imagery-unavailable statuses, the credit panel): the app's own Toast shape (md, solid, raised
+// surface), the control font role, no faded fill. Position is each caller's business.
+const FLOAT_NOTICE_STYLE = {
+  background: "var(--surface-raised)", color: "var(--text-secondary)", border: "1px solid var(--border-default)",
+  borderRadius: RADIUS.md, padding: "6px 12px", fontSize: FONT_SIZE.control, fontWeight: 600,
+  boxShadow: "0 1px 2px rgba(0,0,0,0.05)", textAlign: "center",
+};
 
 // Mirrors AppHeader.jsx's `useNarrow` pattern: a reactive `matchMedia` read, no touch/mouse
 // event guessing. `pointer: coarse` is true for a touch-primary device (no hover) and false for
@@ -462,7 +488,7 @@ function useNarrowViewport() {
 // measurement of why an italic text glyph can never be centred by nudging padding). A dot + a
 // rounded stem, deliberately not a font character — nothing here depends on any font's metrics.
 // MODULE-SCOPE-COMPONENTS: defined here, not inside FoodMap's render body.
-function InfoGlyph({ size = 15 }) {
+function InfoGlyph({ size = 18 }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
       <circle cx="12" cy="7.6" r="1.6" />
@@ -487,18 +513,30 @@ export default function FoodMap({
   // click is read at event time, not something the resolver effect needs to re-subscribe over).
   const pinIndexRef = useRef([]);
   const [tooSmall, setTooSmall] = useState(false);
-  const [basemap, setBasemap] = useState(readStoredBasemap); // stale-ok: a per-device display preference nothing else writes or reads (NEW-1) — "siteplan" (default) | "hybrid"
+  const [basemap, setBasemap] = useState(readStoredBasemap); // stale-ok: a per-device display preference nothing else writes or reads (NEW-1) — "hybrid" (default) | "satellite"
   const [basemapError, setBasemapError] = useState(false);
   // B651872 (×4) — tied to the CURRENT tile layer's own 'loading'/'load' events (basemap effect
   // below); drives the "Loading imagery…" pill so a genuinely-in-progress screen never reads as
   // simply broken.
   const [tilesLoading, setTilesLoading] = useState(false);
+  const [labelsStatus, setLabelsStatus] = useState("none"); // "none" | "loading" | "ready" | "failed" — the vector roads/labels layer (B2018608)
   // B681520 — the attribution credit panel's open/closed state; the CONTENT it shows is computed
   // fresh from `basemap` on every render, so leaving it open across a basemap toggle just shows
   // the newly-current credit, never a stale one.
   const [attributionOpen, setAttributionOpen] = useState(false);
   const coarsePointer = useCoarsePointer();
   const narrowViewport = useNarrowViewport();
+  // B2046224 — phone centring. On a narrow viewport the detail panel is a BOTTOM SHEET, not the
+  // desktop right rail, so a selection must land centred in the area ABOVE the sheet (horizontally
+  // centred, vertically centred in what the sheet leaves visible) — the old right-rail shift pushed a
+  // phone's pin to the left edge. The sheet's height is only known a beat after the selection (it
+  // measures itself), and a flight is still running by then, so the vertical correction is applied
+  // once the flight settles / the height arrives: `followRef` holds {applied: the sheet height already
+  // compensated} and is disarmed by the first real touch on the map, so it can never fight a pan.
+  const sheetHeightRef = useRef(0);
+  sheetHeightRef.current = narrowViewport ? sheetHeightPx : 0;
+  const followRef = useRef(null); // { applied:number } while a phone selection's centring is live
+  const flyingRef = useRef(false);
 
   // Mount once. The tile layer itself is NOT created here — see the basemap effect below —
   // so toggling satellite never tears down/recreates the map, the marker layer or its handlers.
@@ -576,17 +614,22 @@ export default function FoodMap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return undefined;
-    const specs = basemapTileLayers(resolveBasemapChoice(basemap));
+    const choice = resolveBasemapChoice(basemap);
+    const specs = basemapTileLayers(choice, { dpr: window.devicePixelRatio || 1 });
     const layers = [];
-    let onLoading, onLoad, loadingLayer;
+    let onLoading, onLoad, loadingLayer, vectorHandle = null;
+    const markGap = () => map.getContainer().classList.add(IMAGERY_GRADE.containerClass);
     try {
-      // Every spec comes from the shared registry: no `subdomains` key (B634981), zIndex stacking
-      // imagery < road names < place names, all inside Leaflet's tile pane — under the markers.
+      // The raster side is the IMAGERY only (NEW-1/B2018608): no `subdomains` key (B634981), high
+      // density on a dpr>1 screen, tone-graded via the layer's className. Roads and labels are the
+      // shared VECTOR layer below — its own pane sits above the tile pane and under the pins.
       specs.forEach((spec, i) => {
         const layer = L.tileLayer(spec.url, spec.opts).addTo(map);
         layers.push(layer);
         if (i === 0) {
           layer.bringToBack(); // stays under the marker layer regardless of add order
+          // Seam fix (NEW-1): dark gap colour behind the aerial, added once a real tile has painted.
+          layer.once("tileload", markGap);
           tileLayerRef.current = layer;
           // B651872 (×4) — the loading pill tracks the imagery layer's own lifecycle, so it never
           // reports stale state from a previous (torn-down) basemap.
@@ -596,10 +639,17 @@ export default function FoodMap({
           loadingLayer.on("loading", onLoading);
           loadingLayer.on("load", onLoad);
           setTilesLoading(loadingLayer.isLoading());
-        } else if (spec.id === "roads") {
-          labelsLayerRef.current = layer;
         }
       });
+      // Satellite (the default) carries NO road/label layer at all (`choice.vector` null) — the photo only.
+      // Hybrid is the full vector map. /food draws no basemap POI labels either way: the restaurant pins
+      // ARE the points of interest, and a basemap label under a pin is the collision the owner called out.
+      if (choice.vector) {
+        vectorHandle = addVectorLabels(L, map, { source: choice.vector, mode: "hybrid", includePois: false, onStatus: setLabelsStatus });
+        labelsLayerRef.current = vectorHandle;
+      } else {
+        setLabelsStatus("none");
+      }
       setBasemapError(false);
     } catch (err) {
       console.error("FoodMap: basemap tile layer failed to mount", err);
@@ -608,6 +658,8 @@ export default function FoodMap({
     return () => {
       if (loadingLayer) { loadingLayer.off("loading", onLoading); loadingLayer.off("load", onLoad); }
       setTilesLoading(false);
+      if (vectorHandle) { vectorHandle.remove(); labelsLayerRef.current = null; }
+      try { map.getContainer().classList.remove(IMAGERY_GRADE.containerClass); } catch (_) { /* container gone */ }
       for (const layer of layers) { try { map.removeLayer(layer); } catch (_) { /* already gone */ } }
     };
   // narrowViewport is deliberately NOT a dep: rebuilding the tile layers on every viewport-width
@@ -669,6 +721,34 @@ export default function FoodMap({
   // every case, which could not be fully verified in the time available; the risk of a new, subtler
   // position bug outweighed the polish this session, so the plain revert is what shipped.
 
+  // B2046224 — shift the camera DOWN by half of whatever sheet height is not yet compensated, so the
+  // selected pin sits at the vertical centre of the visible area above the bottom sheet. Incremental
+  // (`applied`) so it is safe to call from several places; a no-op off-phone, mid-flight, or once the
+  // user has touched the map (followRef disarmed).
+  const applySheetCentring = () => {
+    const map = mapRef.current; const f = followRef.current;
+    if (!map || !f || flyingRef.current) return;
+    // The settle window opens when the flight lands: late sheet-height reports (content measuring
+    // itself) inside it still centre; a user dragging the sheet handle later does not drag the map.
+    if (f.until == null) f.until = performance.now() + SHEET_SETTLE_MS;
+    else if (performance.now() > f.until) { followRef.current = null; return; }
+    const h = sheetHeightRef.current;
+    if (!(h > 0) || h === f.applied) return;
+    const delta = (h - f.applied) / 2;
+    f.applied = h;
+    map.panBy([0, delta], { animate: false });
+  };
+  useEffect(() => { applySheetCentring(); }, [sheetHeightPx, narrowViewport]);
+  // The first real touch/click on the map hands control back to the user for good (until the next selection).
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return undefined;
+    const disarm = () => { followRef.current = null; };
+    host.addEventListener("pointerdown", disarm, true);
+    host.addEventListener("wheel", disarm, true);
+    return () => { host.removeEventListener("pointerdown", disarm, true); host.removeEventListener("wheel", disarm, true); };
+  }, []);
+
   // Search or list result selected — fly to it, offset so it lands centred in the area the user
   // can actually SEE (see header comment: the detail panel covers roughly the right third).
   // Keyed on flyToTarget.nonce (not just lat/lon) so re-selecting the SAME result twice in a row
@@ -709,9 +789,13 @@ export default function FoodMap({
     // viewport (where the panel can approach the map's full width) never shifts the target off
     // the visible area entirely in the other direction.
     const containerWidth = map.getSize().x;
-    const panelOffsetPx = Math.min(PANEL_WIDTH, containerWidth * 0.8) / 2;
+    // Desktop: the right-rail panel covers the right side → shift the target left of centre. Phone:
+    // the panel is a bottom sheet → NO horizontal shift (it would hug the left edge); the vertical
+    // correction for the sheet is applied by `applySheetCentring` below once the sheet's height is known.
+    const panelOffsetPx = narrowViewport ? 0 : Math.min(PANEL_WIDTH, containerWidth * 0.8) / 2;
     const targetPoint = map.project([flyToTarget.lat, flyToTarget.lon], targetZoom);
     const shiftedLatLng = map.unproject(targetPoint.add([panelOffsetPx, 0]), targetZoom);
+    followRef.current = narrowViewport ? { applied: 0 } : null;
 
     // B651872 (×4) — beyond LONG_JUMP_METERS, skip the animation entirely: setView with
     // animate:false goes straight through Leaflet's own hard-reset path (_resetView, the SAME
@@ -726,10 +810,14 @@ export default function FoodMap({
       // never the right model here, even when the following setView immediately supersedes it.
       map.invalidateSize({ animate: false, pan: false });
       map.setView(shiftedLatLng, targetZoom, { animate: false });
+      applySheetCentring();
     } else {
+      flyingRef.current = true;
       map.once("moveend", () => {
+        flyingRef.current = false;
         map.invalidateSize({ animate: false, pan: false });
         map.setView(map.getCenter(), map.getZoom(), { reset: true, animate: false });
+        applySheetCentring();
       });
       // B651872 (×3) — fixed duration, not Leaflet's own distance-proportional default; see
       // FLY_DURATION_SEC and the header comment.
@@ -885,7 +973,12 @@ export default function FoodMap({
         () => onSelectPlace?.({ id: selectedKey.slice("place:".length), lat: selectedPlaceInfo.lat, lon: selectedPlaceInfo.lon, name: selectedPlaceInfo.name }),
         { ...REFERENCE_PIN, key: selectedKey }
       );
+      selectedDrawn = true;
     }
+    // B2046224 — read-only probe: the key of the pin currently drawn in the SELECTED style ("" = none
+    // drawn selected). Lets a harness assert "picking it marks it as the selected one" without reading
+    // canvas pixels; nothing in the app reads it.
+    if (hostRef.current) hostRef.current.dataset.selectedPin = selectedKey && selectedDrawn ? selectedKey : "";
   }, [places, loggedPlaces, loggedIds, manualPins, wishlistPlaces, wishlistManualPins, overpassPlaces, tooSmall, basemap, selectedKey, selectedPlaceInfo, onSelectPlace, onSelectManualPin, coarsePointer]);
 
   // B668193 — the coarse-pointer nearest-centre tap resolver. Only ever registered on a coarse
@@ -939,89 +1032,75 @@ export default function FoodMap({
           position: "absolute", left: "50%", transform: "translateX(-50%)", zIndex: 500,
           bottom: (narrowViewport ? sheetHeightPx : 0) + BOTTOM_STACK_GAP,
           display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
-          maxWidth: "calc(100% - 24px)", pointerEvents: "none",
+          // A phone keeps clear of the global help button in the bottom-right corner (a touch-size FAB
+          // plus its inset and a gap each side, kept symmetric so the stack stays centred) — the long
+          // zoom hint used to run underneath it.
+          maxWidth: narrowViewport ? "calc(100% - 136px)" : "calc(100% - 24px)", pointerEvents: "none",
         }}
       >
+        {/* B651872 (×4) — a real loading treatment instead of leaving grey unexplained; tied to the
+            CURRENT tile layer's own loading state (basemap effect above), so it clears itself the
+            moment tiles finish, no timer. NEW-1 (food controls): it joins the one bottom stack with
+            every other map message — it was a lone top-left chip that sat on top of the zoom stack —
+            and so does "Imagery unavailable" (was a top-right chip stacked under the toggle). */}
+        {tilesLoading && (
+          <div data-testid="food-tiles-loading" role="status" style={{ pointerEvents: "auto", ...FLOAT_NOTICE_STYLE }}>
+            Loading imagery…
+          </div>
+        )}
+        {basemapError && (
+          <div data-testid="food-basemap-error" role="status" style={{ pointerEvents: "auto", ...FLOAT_NOTICE_STYLE }}>
+            Imagery unavailable
+          </div>
+        )}
+        {labelsStatus === "failed" && (
+          <div data-testid="food-labels-fallback" role="status" style={{ pointerEvents: "auto", ...FLOAT_NOTICE_STYLE }}>
+            Crisp road labels unavailable — showing basic labels
+          </div>
+        )}
         {tooSmall && (
-          <div data-testid="food-zoomed-out-notice" style={{
-            pointerEvents: "auto",
-            background: "var(--surface-raised)", color: "var(--text-secondary)", border: "1px solid var(--border-default)",
-            borderRadius: 999, padding: "6px 14px", fontSize: 12.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
-            textAlign: "center",
-          }}>
+          <div data-testid="food-zoomed-out-notice" style={{ pointerEvents: "auto", ...FLOAT_NOTICE_STYLE }}>
             {hasOwnPlaces
               ? "Showing places you've been or want to try — zoom in to browse everywhere else"
               : "Zoom in to browse restaurants near you"}
           </div>
         )}
         {showCappedNotice && (
-          <div data-testid="food-capped-notice" style={{
-            pointerEvents: "auto",
-            background: "var(--surface-raised)", color: "var(--text-secondary)", border: "1px solid var(--border-default)",
-            borderRadius: 999, padding: "6px 14px", fontSize: 12.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
-          }}>
+          <div data-testid="food-capped-notice" style={{ pointerEvents: "auto", ...FLOAT_NOTICE_STYLE }}>
             Showing {places.length.toLocaleString()} of {placesTotalMatched.toLocaleString()} here — zoom in for more
           </div>
         )}
         {!tooSmall && onRequestSearchHere && (
-          <button
-            type="button" onClick={onRequestSearchHere} data-testid="food-search-here"
-            style={{
-              pointerEvents: "auto",
-              border: "1px solid var(--border-default)", borderRadius: RADIUS.pill, background: "var(--surface-raised)",
-              color: "var(--text-primary)", font: "inherit", fontSize: 12.5, fontWeight: 700, padding: "7px 20px",
-              cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
-            }}
+          <Button
+            variant="ghost" onClick={onRequestSearchHere} data-testid="food-search-here"
+            style={{ pointerEvents: "auto", height: SIZE.md.height, padding: SIZE.md.padding }}
           >
             Search live for more here
-          </button>
+          </Button>
         )}
       </div>
-      {/* B651872 (×4) — a real loading treatment instead of leaving grey unexplained; tied to the
-          CURRENT tile layer's own loading state (basemap effect above), so it clears itself the
-          moment tiles finish, no timer. */}
-      {tilesLoading && (
-        <div data-testid="food-tiles-loading" role="status" style={{
-          position: "absolute", top: 12, left: 12, zIndex: 500,
-          background: "var(--surface-raised)", color: "var(--text-secondary)", border: "1px solid var(--border-default)",
-          borderRadius: 999, padding: "6px 14px", fontSize: 12.5, fontWeight: 600, boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
-        }}>
-          Loading imagery…
-        </div>
-      )}
-      {basemapError && (
-        <div data-testid="food-basemap-error" role="status" style={{
-          position: "absolute", top: 96, right: 12, zIndex: 500,
-          background: "var(--surface-raised)", color: "var(--text-secondary)", border: "1px solid var(--border-default)",
-          borderRadius: 8, padding: "6px 10px", fontSize: 12, boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
-        }}>
-          Imagery unavailable
-        </div>
-      )}
-      <div
-        role="group" aria-label="Basemap" data-testid="food-basemap-toggle"
-        style={{
-          position: "absolute", top: 12, right: 12, zIndex: 500, display: "flex", overflow: "hidden",
-          border: "1px solid var(--border-default)", borderRadius: RADIUS.pill, background: "var(--surface-raised)",
-          boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
-        }}
-      >
-        {SITE_PLAN_BASEMAP_CHOICES.map((c) => {
-          const on = c.key === basemap;
-          return (
-            <button
-              key={c.key} type="button" onClick={() => setBasemap(c.key)}
-              aria-pressed={on} data-testid={`food-basemap-${c.key}`} title={c.title}
-              style={{
-                border: "none", font: "inherit", fontSize: 12.5, fontWeight: 700, padding: "7px 14px", cursor: "pointer",
-                background: on ? "var(--accent-food)" : "transparent",
-                color: on ? "var(--on-accent)" : "var(--text-primary)",
-              }}
-            >
-              {c.label}
-            </button>
-          );
-        })}
+      {/* The basemap switch is the SAME SegmentedControl as the toolbar's Map | List (one shape, one
+          height, one active colour). It sits on the map's shared corner inset (FLOAT_INSET), the same
+          top edge as Leaflet's zoom stack on the opposite corner. On a phone the credit button sits
+          BESIDE it in one flex row (same height, same top by construction) rather than stacked under
+          it — a stack puts two floating controls on different top edges. */}
+      <div style={{ position: "absolute", top: FLOAT_INSET, right: FLOAT_INSET, zIndex: 500, display: "flex", alignItems: "flex-start", gap: FLOAT_GAP }}>
+        {narrowViewport && (
+          <IconButton
+            size={ATTRIBUTION_TOGGLE_SIZE} onClick={() => setAttributionOpen((o) => !o)}
+            aria-expanded={attributionOpen} aria-label="Map data credit" title="Map data credit"
+            data-testid="food-attribution-toggle"
+            style={{ color: "var(--text-secondary)", fontSize: FONT_SIZE.control }}
+          >
+            <InfoGlyph />
+          </IconButton>
+        )}
+        <SegmentedControl
+          aria-label="Basemap" data-testid="food-basemap-toggle"
+          accent="var(--accent-food)" onAccent="var(--on-accent-food)"
+          options={FOOD_BASEMAP_CHOICES.map((c) => ({ key: c.key, label: c.label, title: c.title, testid: `food-basemap-${c.key}` }))}
+          value={basemap} onChange={setBasemap}
+        />
       </div>
       {/* B681520 (×2) RECURRENCE — owner direction, verbatim: the collapse was never about
           desktop ("we can relocate it" was about the sheet, on mobile). "I'm fine with the full
@@ -1034,10 +1113,12 @@ export default function FoodMap({
         <div
           data-testid="food-attribution-text" role="note"
           style={{
-            position: "absolute", bottom: 6, right: 10, zIndex: 500, maxWidth: "calc(100% - 20px)",
-            color: "var(--text-secondary)", fontSize: 10.5, lineHeight: 1.4, opacity: 0.85,
+            // Clears the global help button (a 30px control on a desktop pointer, 14px from the corner) that
+            // used to sit on top of the credit line.
+            position: "absolute", bottom: 6, right: HELP_CLEARANCE, zIndex: 500, maxWidth: `calc(100% - ${HELP_CLEARANCE + FLOAT_INSET}px)`,
+            color: "var(--text-secondary)", fontSize: FONT_SIZE.label, lineHeight: 1.4,
             background: "var(--surface-raised)", border: "1px solid var(--border-default)",
-            borderRadius: 4, padding: "1px 7px",
+            borderRadius: RADIUS.sm, padding: "1px 7px",
           }}
           // Same trusted, hardcoded HTML this file already passes to Leaflet's own `attribution`
           // option — never user input, safe to render as HTML.
@@ -1057,28 +1138,13 @@ export default function FoodMap({
               the SVG element centres what actually gets seen. Also brought up to the 44x44
               minimum touch target this module already adopted elsewhere (B668193's
               TOUCH_MIN_TAP_RADIUS) — the old 28x28 box was below it. */}
-          <button
-            type="button" onClick={() => setAttributionOpen((o) => !o)}
-            aria-expanded={attributionOpen} aria-label="Map data credit" title="Map data credit"
-            data-testid="food-attribution-toggle"
-            style={{
-              position: "absolute", top: ATTRIBUTION_TOGGLE_TOP, right: 12, zIndex: 500,
-              width: ATTRIBUTION_TOGGLE_SIZE, height: ATTRIBUTION_TOGGLE_SIZE, borderRadius: "50%",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              border: "1px solid var(--border-default)", background: "var(--surface-raised)",
-              color: "var(--text-secondary)", cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
-            }}
-          >
-            <InfoGlyph />
-          </button>
           {attributionOpen && (
             <div
               data-testid="food-attribution-panel" role="note"
               style={{
-                position: "absolute", top: ATTRIBUTION_TOGGLE_TOP + ATTRIBUTION_TOGGLE_SIZE + 8, right: 12, zIndex: 500,
-                maxWidth: "calc(100% - 24px)",
-                background: "var(--surface-raised)", color: "var(--text-secondary)", border: "1px solid var(--border-default)",
-                borderRadius: 8, padding: "8px 10px", fontSize: 11.5, lineHeight: 1.5, boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
+                ...FLOAT_NOTICE_STYLE,
+                position: "absolute", top: ATTRIBUTION_TOGGLE_TOP + ATTRIBUTION_TOGGLE_SIZE + FLOAT_GAP, right: FLOAT_INSET, zIndex: 500,
+                maxWidth: `calc(100% - ${2 * FLOAT_INSET}px)`, fontWeight: 500, lineHeight: 1.5, textAlign: "left",
               }}
               dangerouslySetInnerHTML={{ __html: basemapAttribution(resolveBasemapChoice(basemap)) }}
             />
