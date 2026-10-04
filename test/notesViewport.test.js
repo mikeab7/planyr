@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   VIEW_ZOOM_DEFAULT, VIEW_ZOOM_MAX, VIEW_ZOOM_MIN, VIEW_ZOOM_STEPS,
-  clampViewZoom, fitView, frameView, normalizeView, panBy, parseView, serializeView,
+  clampViewZoom, fitView, frameView, openingZoom, PHONE_OPEN_ZOOM_MAX, PHONE_VIEWPORT_MAX, normalizeView, panBy, parseView, serializeView,
   stepZoom, toViewport, toWorkspace, viewKey, wheelIntent, wheelNativeAxis, zoomAbout, zoomForWheel, zoomKeyIntent, zoomLabel,
 } from "../src/workspaces/notes/lib/notesViewport.js";
 
@@ -336,5 +336,42 @@ describe("wheelIntent — what a wheel event means over the canvas", () => {
   it("wheel zoom is smooth within the clamp and lands on it at both ends, like Ctrl+wheel", () => {
     expect(zoomForWheel(VIEW_ZOOM_MAX, wheelIntent({ deltaY: -100 }).deltaY)).toBe(VIEW_ZOOM_MAX);
     expect(zoomForWheel(VIEW_ZOOM_MIN, wheelIntent({ deltaY: 100 }).deltaY)).toBe(VIEW_ZOOM_MIN);
+  });
+});
+
+describe('NEW-4 — the opening framing: top-anchored, and fit-width on a phone', () => {
+  const viewport = { width: 1232, height: 824 };
+  it('align: "top" puts a SHORT page\'s top edge a small margin below the top, whatever its height', () => {
+    for (const height of [145, 213, 581, 5000]) {
+      const v = frameView({ viewport, page: { x: 0, y: 0, width: 580, height }, zoom: 1, align: 'top' });
+      const top = toViewport(v, { x: 0, y: 0 }).y;
+      expect(top).toBeGreaterThan(0);
+      expect(top).toBeLessThanOrEqual(Math.round(Math.min(viewport.width, viewport.height) * 0.04));
+    }
+  });
+  it('…so a page that GROWS after the first measurement was already framed correctly (height-independent)', () => {
+    const short = frameView({ viewport, page: { x: 0, y: 0, width: 580, height: 213 }, zoom: 1, align: 'top' });
+    const grown = frameView({ viewport, page: { x: 0, y: 0, width: 580, height: 581 }, zoom: 1, align: 'top' });
+    expect(short.y).toBe(grown.y);
+  });
+  it('the default stays centred (Fit wants the whole page centred)', () => {
+    const v = frameView({ viewport, page: { x: 0, y: 0, width: 580, height: 200 }, zoom: 1 });
+    expect(toViewport(v, { x: 0, y: 0 }).y).toBeCloseTo(viewport.height - toViewport(v, { x: 0, y: 200 }).y, 6);
+  });
+  it('desktop opens at 100%; a phone opens at fit width with BOTH edges on screen', () => {
+    expect(openingZoom({ viewport: { width: 1280 }, page: { width: 580 } })).toBe(1);
+    for (const [vw, pw] of [[390, 374], [390, 434], [430, 414], [360, 340]]) {
+      const z = openingZoom({ viewport: { width: vw }, page: { width: pw } });
+      const v = frameView({ viewport: { width: vw, height: 664 }, page: { x: 0, y: 0, width: pw, height: 500 }, zoom: z, align: 'top' });
+      const left = toViewport(v, { x: 0, y: 0 }).x;
+      const right = toViewport(v, { x: pw, y: 0 }).x;
+      expect(left).toBeGreaterThanOrEqual(0);
+      expect(right).toBeLessThanOrEqual(vw);
+    }
+  });
+  it('a page narrower than the screen is shown a little larger, never past the cap; junk is safe', () => {
+    expect(openingZoom({ viewport: { width: 390 }, page: { width: 200 } })).toBe(PHONE_OPEN_ZOOM_MAX);
+    expect(PHONE_VIEWPORT_MAX).toBeGreaterThan(430);
+    expect(Number.isFinite(openingZoom({}))).toBe(true);
   });
 });

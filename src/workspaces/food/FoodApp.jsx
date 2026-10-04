@@ -12,7 +12,7 @@
  * grow because a planner file changed.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import AppHeader from "../../shared/ui/AppHeader.jsx";
+import AppHeader, { useNarrow } from "../../shared/ui/AppHeader.jsx";
 import FoodMap from "./components/FoodMap.jsx";
 import VisitPanel from "./components/VisitPanel.jsx";
 import VisitList from "./components/VisitList.jsx";
@@ -27,9 +27,12 @@ import {
 } from "./lib/foodStore.js";
 import { withVisitDate, matchingOpenDishWishlist } from "./lib/dishAggregates.js";
 import { searchOverpass } from "./lib/overpass.js";
+import { existingRestaurants, findExisting, canonicalIdentity } from "./lib/placeIdentity.js";
 import { RADIUS } from "../../shared/ui/radius.js";
+import { Button, SegmentedControl, SIZE } from "../../shared/ui/controls.jsx";
 
 export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, authControl, accountActive, userId }) {
+  const narrow = useNarrow(); // phone width — the toolbar must fit ONE screen (B2046224)
   const [view, setView] = useState("map"); // "map" | "list"
   const [bounds, setBounds] = useState(null);
   const [places, setPlaces] = useState([]);
@@ -154,6 +157,13 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     [manualWishlistAll, manualPinKeys]
   );
 
+  // Everything he already HAS, flat — the one list search-merge, open-existing and the save guard all
+  // match against (B2046224; lib/placeIdentity.js).
+  const existing = useMemo(
+    () => existingRestaurants({ manualPins, wishlistManualPins, loggedPlaces, wishlistPlaces }),
+    [manualPins, wishlistManualPins, loggedPlaces, wishlistPlaces]
+  );
+
   const visitsForSelected = useMemo(() => {
     if (!selected) return [];
     if (selected.kind === "place") return visits.filter((v) => v.place_id === selected.place.id);
@@ -208,8 +218,16 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     return [...visitRows, ...wishlistOnlyRows];
   }, [visits, wishlist, placeNames, loggedIds, manualPinKeys]);
 
-  const openPlace = useCallback((place) => { setSelected({ kind: "place", place }); setError(null); }, []);
   const openManualPin = useCallback((pin) => { setSelected({ kind: "manualPin", pin }); setError(null); }, []);
+  // B2046224 — opening a snapshot place that is really a restaurant he ALREADY has (a manual pin, or
+  // a place he's logged under another record) opens THAT one, so its past visits show and a save
+  // lands on the existing record instead of minting a second.
+  const openPlace = useCallback((place) => {
+    const hit = findExisting(place, existing);
+    if (hit?.kind === "manual") { setSelected({ kind: "manualPin", pin: hit.ref }); setError(null); return; }
+    if (hit?.kind === "place" && hit.ref.id !== place.id) { setSelected({ kind: "place", place: { ...place, ...hit.ref, address: place.address ?? hit.ref.address } }); setError(null); return; }
+    setSelected({ kind: "place", place }); setError(null);
+  }, [existing]);
   const dropPin = useCallback((lat, lon) => {
     setSelected({ kind: "newPin", lat, lon });
     // manualDraftName is NOT reset here — startDropPinFor (below) may have pre-seeded it from
@@ -250,16 +268,17 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   const submitVisit = useCallback(async (fields) => {
     if (!selected) return false;
     setPending(true); setError(null);
-    const payload = selected.kind === "place"
-      ? { place_id: selected.place.id, ...fields }
-      : selected.kind === "manualPin"
-        ? { place_id: null, custom_name: selected.pin.name, custom_lat: selected.pin.lat, custom_lon: selected.pin.lon, ...fields }
-        : { place_id: null, custom_name: manualDraftName || "Unnamed place", custom_lat: selected.lat, custom_lon: selected.lon, ...fields };
     if (selected.kind === "newPin" && !manualDraftName.trim()) {
       setPending(false);
       setError("Give this place a name first.");
       return false;
     }
+    // B2046224 — the SAVE-PATH GUARD: whatever the selection says, the write lands on the restaurant
+    // he already has when one matches (canonicalIdentity), so no route can mint a second record for
+    // the same place. A manual identity always carries place_id:null; a place identity carries no
+    // custom_* — exactly the two shapes the table already holds.
+    const ident = canonicalIdentity(selected, manualDraftName.trim() || "Unnamed place", existing);
+    const payload = { place_id: null, ...ident, ...fields };
     // NEW-1 (2026-08-27 owner block, verbatim: "when I click log this visit, it should not make
     // it seem like nothing happened") — OPTIMISTIC add, so the Past-visits list, the aggregates,
     // the panel's own visited/not-visited state, and the map pin (a hollow want-to-try pin
@@ -289,7 +308,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     await reloadWishlist();
     if (selected.kind === "newPin") setSelected(null); // the pin now exists as a manual pin; close and let it re-render from data
     return true;
-  }, [selected, manualDraftName, reloadVisits, reloadWishlist, wishlist]);
+  }, [selected, manualDraftName, reloadVisits, reloadWishlist, wishlist, existing]);
 
   // "Want to try" toggle (B669312) — one click on, one click off, working for a snapshot place,
   // an existing manual pin, or a brand-new dropped pin not yet saved anywhere (which needs a
@@ -297,22 +316,22 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   const toggleWishlist = useCallback(async () => {
     if (!selected || !accountActive) return;
     setError(null);
-    if (selected.kind === "place") {
-      const existing = wishlist.find((w) => w.place_id === selected.place.id);
-      const { error: err } = existing ? await removeWishlist(existing.id) : await addWishlist({ place_id: selected.place.id });
-      if (err) { setError(err.message || "Couldn't update that flag."); return; }
-    } else {
-      const name = selected.kind === "manualPin" ? selected.pin.name : manualDraftName;
-      const lat = selected.kind === "manualPin" ? selected.pin.lat : selected.lat;
-      const lon = selected.kind === "manualPin" ? selected.pin.lon : selected.lon;
-      if (!name || !name.trim()) { setError("Give this place a name first."); return; }
-      const key = manualGroupKey(name, lat, lon);
-      const existing = wishlist.find((w) => !w.place_id && manualGroupKey(w.custom_name, w.custom_lat, w.custom_lon) === key);
-      const { error: err } = existing ? await removeWishlist(existing.id) : await addWishlist({ custom_name: name, custom_lat: lat, custom_lon: lon });
-      if (err) { setError(err.message || "Couldn't update that flag."); return; }
-    }
+    if (selected.kind !== "newPin" || manualDraftName.trim()) {
+      // B2046224 — same guard as submitVisit: flag the restaurant he already has, never a twin.
+      const ident = canonicalIdentity(selected, manualDraftName.trim(), existing);
+      if (ident.place_id) {
+        const flagged = wishlist.find((w) => w.place_id === ident.place_id);
+        const { error: err } = flagged ? await removeWishlist(flagged.id) : await addWishlist({ place_id: ident.place_id });
+        if (err) { setError(err.message || "Couldn't update that flag."); return; }
+      } else {
+        const key = manualGroupKey(ident.custom_name, ident.custom_lat, ident.custom_lon);
+        const flagged = wishlist.find((w) => !w.place_id && manualGroupKey(w.custom_name, w.custom_lat, w.custom_lon) === key);
+        const { error: err } = flagged ? await removeWishlist(flagged.id) : await addWishlist({ custom_name: ident.custom_name, custom_lat: ident.custom_lat, custom_lon: ident.custom_lon });
+        if (err) { setError(err.message || "Couldn't update that flag."); return; }
+      }
+    } else { setError("Give this place a name first."); return; }
     await reloadWishlist();
-  }, [selected, accountActive, wishlist, manualDraftName, reloadWishlist]);
+  }, [selected, accountActive, wishlist, manualDraftName, reloadWishlist, existing]);
 
   const removeVisit = useCallback(async (id) => {
     const { error: err } = await deleteVisit(id);
@@ -450,38 +469,29 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
         showModuleTabs={false}
         multiEditOk
         toolbarContent={
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ display: "flex", border: "1px solid var(--border-default)", borderRadius: 8, overflow: "hidden" }}>
-              {["map", "list"].map((v) => (
-                <button
-                  key={v} type="button" onClick={() => setView(v)} aria-pressed={view === v}
-                  style={{
-                    border: "none", padding: "6px 14px", cursor: "pointer", font: "inherit", fontSize: 12.5, fontWeight: 700,
-                    background: view === v ? "var(--accent-food)" : "transparent",
-                    color: view === v ? "var(--on-accent-food)" : "var(--text-primary)",
-                  }}
-                >
-                  {v === "map" ? "Map" : "List"}
-                </button>
-              ))}
-            </div>
+          // NEW-1 (food controls) — ONE row that fits its slot (width 100%, min-width 0) so the search
+          // field takes whatever the Map/List switch and the pin button leave, instead of a fixed
+          // width that ran off a phone's right edge. The switch is the shared SegmentedControl (the same
+          // one the basemap toggle on the map uses) and the pin button is the shared Button — no
+          // hand-built control in this row.
+          <div style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", minWidth: 0 }}>
+            <SegmentedControl
+              aria-label="View" accent="var(--accent-food)" onAccent="var(--on-accent-food)"
+              options={[{ key: "map", label: "Map" }, { key: "list", label: "List" }]} value={view} onChange={setView}
+            />
             {view === "map" && (
-              <button
-                type="button" onClick={togglePinMode} aria-pressed={pinMode}
-                title="Drop a pin for a place not on the map"
-                style={{
-                  border: "1px solid var(--border-default)", borderRadius: RADIUS.md, padding: "6px 14px", cursor: "pointer",
-                  font: "inherit", fontSize: 12.5, fontWeight: 700,
-                  background: pinMode ? "var(--accent-food)" : "transparent",
-                  color: pinMode ? "var(--on-accent-food)" : "var(--text-primary)",
-                }}
+              <Button
+                variant="ghost" active={pinMode} onClick={togglePinMode} aria-pressed={pinMode}
+                accent="var(--accent-food)" onAccent="var(--on-accent-food)"
+                title="Drop a pin for a place not on the map" aria-label="Drop a pin for a place not on the map"
+                style={{ flex: "none", height: SIZE.md.height, padding: SIZE.md.padding, whiteSpace: "nowrap" }}
               >
-                {pinMode ? "Click the map…" : "Drop a pin"}
-              </button>
+                {pinMode ? (narrow ? "Tap map" : "Click the map…") : (narrow ? "Pin" : "Drop a pin")}
+              </Button>
             )}
             <SearchBox
               query={searchQuery} onQueryChange={setSearchQuery} view={view}
-              manualPins={manualPins} loggedIds={loggedIds} wishlistIds={wishlistIds} bounds={bounds}
+              manualPins={manualPins} loggedIds={loggedIds} wishlistIds={wishlistIds} existing={existing} bounds={bounds}
               searchSnapshot={searchPlacesByName} onSelectPlace={openPlace} onSelectManualPin={openManualPin}
               onFlyTo={flyTo} onRequestLiveSearch={searchHere} overpassPlaces={overpassPlaces}
               onStartDropPinFor={startDropPinFor}

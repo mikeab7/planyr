@@ -826,9 +826,12 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
 
   it("his own places (manual pins + logged snapshot places) stay in the one ranked list, marked, with a distance head start (B2051664 replaced the old absolute 'mine first' order)", () => {
     const box = src("components/SearchBox.jsx");
-    const order = box.slice(box.indexOf("const results = rankByProximity("), box.indexOf(".slice(0, SHOWN_CAP)"));
+    // (B2046224: the list is first folded through mergeSearchRows — one row per restaurant — and THEN ordered by
+    // rankByProximity; see test/foodPlaceIdentity.test.js.)
+    const order = box.slice(box.indexOf("const merged = mergeSearchRows({"), box.indexOf(".slice(0, SHOWN_CAP)"));
     expect(order).toContain("manualMatches");
     expect(order).toContain("snapshotRanked");
+    expect(order).toContain("rankByProximity(");
     expect(box).toMatch(/mine: loggedIds\?\.has\(p\.id\)/);
     expect(src("lib/searchProximity.js")).toMatch(/MINE_HEAD_START_KM/);
     // And a result carrying `mine` renders a visible "Been here" mark, not just a sort position.
@@ -997,7 +1000,7 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     expect(map).toMatch(/data-testid="food-attribution-text"/);
     const textBlock = map.slice(map.indexOf('data-testid="food-attribution-text"') - 100, map.indexOf('data-testid="food-attribution-text"') + 900);
     expect(textBlock).toMatch(/!narrowViewport/); // desktop only — never gated on anything else
-    expect(textBlock).toMatch(/bottom: 6, right: ATTRIBUTION_CLEAR_HELP_RIGHT/);
+    expect(textBlock).toMatch(/bottom: 6, right: HELP_CLEARANCE/);
     expect(textBlock).not.toMatch(/onClick/); // not a button — always visible, nothing to expand
     expect(textBlock).toMatch(/dangerouslySetInnerHTML/); // same trusted attribution HTML, not a collapsed affordance
   });
@@ -1007,16 +1010,21 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     expect(map).toMatch(/data-testid="food-attribution-toggle"/);
     const attrBtn = map.slice(map.indexOf('data-testid="food-attribution-toggle"') - 1400, map.indexOf('data-testid="food-attribution-toggle"') + 900);
     expect(attrBtn).toMatch(/narrowViewport/); // gated to mobile, never rendered on desktop too
-    expect(attrBtn).toMatch(/top: ATTRIBUTION_TOGGLE_TOP, right: 12/); // directly under the basemap toggle — never the bottom
-    expect(attrBtn).toMatch(/width: ATTRIBUTION_TOGGLE_SIZE, height: ATTRIBUTION_TOGGLE_SIZE/);
-    expect(attrBtn).toMatch(/borderRadius: "50%"/); // circular, not a rectangular strip
+    // In the SAME flex row as the basemap toggle (one top edge by construction) — never the bottom.
+    expect(attrBtn).toMatch(/top: FLOAT_INSET, right: FLOAT_INSET/);
+    expect(map.indexOf('data-testid="food-attribution-toggle"')).toBeLessThan(map.indexOf('aria-label="Basemap"'));
+    // NEW-1 (food controls) — a standalone control is the shared IconButton (md, SIZE.md height), NOT
+    // a drawn circle; its 44x44 touch target is the primitive's own tap-target hit area.
+    expect(attrBtn).toMatch(/<IconButton/);
+    expect(attrBtn).toMatch(/size=\{ATTRIBUTION_TOGGLE_SIZE\}/);
+    expect(attrBtn).not.toMatch(/borderRadius: "50%"/); // never a circle
     expect(attrBtn).toMatch(/onClick=\{\(\) => setAttributionOpen\(\(o\) => !o\)\}/);
     expect(attrBtn).toMatch(/<InfoGlyph/); // a centred SVG glyph, never a text character
     expect(attrBtn).not.toMatch(/fontStyle:\s*"italic"/);
     expect(attrBtn).not.toMatch(/>\s*i\s*</); // the old literal text "i" glyph is gone
     // The size/position constants themselves: 44x44 (the module's own touch-target minimum,
     // TOUCH_MIN_TAP_RADIUS=22 diameter-equivalent), not the old sub-minimum 28.
-    expect(map).toMatch(/const ATTRIBUTION_TOGGLE_SIZE = 44;/);
+    expect(map).toMatch(/const ATTRIBUTION_TOGGLE_SIZE = SIZE\.md\.height;/);
   });
 
   it("B681520 (×2) — InfoGlyph is a plain SVG whose ink is centred in its own viewBox on both axes, not a font character", () => {
@@ -1064,9 +1072,13 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     // All three now live inside the SAME wrapper, between the map host and the loading pill —
     // no more top:12 notices or a narrowViewport-conditional top/bottom split for the button.
     const stackStart = map.indexOf("NEW-1 (2nd owner block, 2026-08-23) — the zoom-gate notice");
-    const stackEnd = map.indexOf("food-tiles-loading");
+    // NEW-1 (food controls): the loading + imagery-unavailable statuses JOINED this stack (they were
+    // lone top-corner chips), so the stack now ends at the basemap toggle that follows it.
+    const stackEnd = map.indexOf('aria-label="Basemap"');
     expect(stackStart).toBeGreaterThanOrEqual(0);
     const stack = map.slice(stackStart, stackEnd);
+    expect(stack).toMatch(/data-testid="food-tiles-loading"/);
+    expect(stack).toMatch(/data-testid="food-basemap-error"/);
     expect(stack).toMatch(/data-testid="food-zoomed-out-notice"/);
     expect(stack).toMatch(/data-testid="food-capped-notice"/);
     expect(stack).toMatch(/data-testid="food-search-here"/);
@@ -1324,7 +1336,8 @@ describe("selected-place highlight — unmistakable pin, tied panel, centred pan
   it("the fly-to pan offsets the destination by half the panel's width — lands in the VISIBLE area, not the raw map centre", () => {
     const map = src("components/FoodMap.jsx");
     expect(map).toMatch(/const PANEL_WIDTH = 340;/); // matches VisitPanel's own literal width
-    expect(map).toMatch(/const panelOffsetPx = Math\.min\(PANEL_WIDTH, containerWidth \* 0\.8\) \/ 2;/);
+    // Desktop keeps the right-rail shift; on a phone the panel is a bottom sheet, so no horizontal shift (B2046224).
+    expect(map).toMatch(/const panelOffsetPx = narrowViewport \? 0 : Math\.min\(PANEL_WIDTH, containerWidth \* 0\.8\) \/ 2;/);
     expect(map).toMatch(/map\.project\(\[flyToTarget\.lat, flyToTarget\.lon\], targetZoom\)/);
     expect(map).toMatch(/targetPoint\.add\(\[panelOffsetPx, 0\]\)/);
     expect(map).toMatch(/map\.flyTo\(shiftedLatLng, targetZoom, \{ duration: FLY_DURATION_SEC \}\)/);
@@ -1627,13 +1640,14 @@ describe("B668195 — no emoji glyphs in the food map view controls (plain text 
     const map = src("components/FoodMap.jsx");
     for (const glyph of TARGET_EMOJI) expect(map).not.toContain(glyph);
     expect(map).toContain("Search live for more here");
-    expect(map).toMatch(/\{c\.label\}/);
+    expect(map).toMatch(/label: c\.label/); // the basemap SegmentedControl's options carry the plain text labels
   });
 
   it("FoodApp.jsx: no emoji on the Drop a pin toolbar button", () => {
     const app = src("FoodApp.jsx");
     for (const glyph of TARGET_EMOJI) expect(app).not.toContain(glyph);
-    expect(app).toMatch(/\{pinMode \? "Click the map…" : "Drop a pin"\}/);
+    // Plain text labels only — a shorter pair on a phone so the toolbar fits one screen (B2046224).
+    expect(app).toMatch(/\{pinMode \? \(narrow \? "Tap map" : "Click the map…"\) : \(narrow \? "Pin" : "Drop a pin"\)\}/);
   });
 
   it("SearchBox.jsx: no emoji on the live-search or drop-a-pin fallback rows in the dropdown", () => {
@@ -1657,10 +1671,13 @@ describe("B668195 — no emoji glyphs in the food map view controls (plain text 
 
   it("button padding was widened where an emoji was removed, so tap targets don't shrink", () => {
     const map = src("components/FoodMap.jsx");
-    expect(map).toMatch(/padding: "7px 20px"/); // search-here (was 7px 16px)
-    expect(map).toMatch(/padding: "7px 14px"/); // basemap control segments (two buttons now, NEW-1)
+    // NEW-1 (food controls): the three controls now take the app's ONE standalone-control size
+    // (SIZE.md: 30 high, 12px side padding) from the shared primitives instead of three private
+    // paddings — still a >=30px-tall target, and uniform instead of 7/20, 7/14 and 6/14.
+    expect(map).toMatch(/height: SIZE\.md\.height, padding: SIZE\.md\.padding/); // search-here
+    expect(map).toMatch(/<SegmentedControl/); // basemap control segments
     const app = src("FoodApp.jsx");
-    expect(app).toMatch(/padding: "6px 14px"/); // drop-a-pin toolbar button (was 6px 12px)
+    expect(app).toMatch(/padding: SIZE\.md\.padding/); // drop-a-pin toolbar button
   });
 });
 
@@ -1878,9 +1895,9 @@ describe("FoodApp — wishlist state, exclusion of already-visited, and auto-cle
 
   it("toggleWishlist is one click on, one click off — inserts when absent, removes when present, for a place, an existing manual pin, or a not-yet-saved new pin", () => {
     const toggle = app.slice(app.indexOf("const toggleWishlist = useCallback"), app.indexOf("const removeVisit = useCallback"));
-    expect(toggle).toMatch(/existing \? await removeWishlist\(existing\.id\) : await addWishlist\(/);
+    expect(toggle).toMatch(/flagged \? await removeWishlist\(flagged\.id\) : await addWishlist\(/);
     // Requires a name before flagging a brand-new dropped pin — same validation submitVisit uses.
-    expect(toggle).toMatch(/if \(!name \|\| !name\.trim\(\)\) \{ setError\("Give this place a name first\."\); return; \}/);
+    expect(toggle).toMatch(/\} else \{ setError\("Give this place a name first\."\); return; \}/);
   });
 
   it("wires the wishlist toggle and state into VisitPanel, wishlistIds into SearchBox, and both wishlist pin lists into FoodMap", () => {
@@ -1939,11 +1956,11 @@ describe("VisitPanel — the 'Want to try' toggle, reachable with zero visits", 
 describe("VisitList — 'Want to try' shortlist filter chip, same visual pattern as the sort row", () => {
   const list = src("components/VisitList.jsx");
 
-  it("is a FILTER toggle (local state, not a sort), reusing fieldStyle() — never a new control style", () => {
+  it("is a FILTER toggle (local state, not a sort), reusing the shared ToggleChip primitive — never a new control style", () => {
     expect(list).toMatch(/const \[shortlistOnly, setShortlistOnly\] = useState\(false\);/);
     expect(list).toMatch(/if \(shortlistOnly\) filtered = filtered\.filter\(\(v\) => v\.isWishlist\);/);
-    const button = list.slice(list.indexOf('data-testid="food-list-shortlist-filter"') - 200, list.indexOf('data-testid="food-list-shortlist-filter"') + 300);
-    expect(button).toMatch(/\.\.\.fieldStyle\(\),/);
+    const button = list.slice(list.indexOf('data-testid="food-list-shortlist-filter"') - 400, list.indexOf('data-testid="food-list-shortlist-filter"') + 300);
+    expect(button).toMatch(/<ToggleChip/);
   });
 
   it("shows a distinct empty-state message when the shortlist filter is on and empty", () => {
