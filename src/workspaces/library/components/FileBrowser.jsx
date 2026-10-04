@@ -17,6 +17,7 @@
  * Counts + the tree are metadata-only queries (listReviews + listFileFacts); file bytes
  * load only when a file is opened. Reuses the existing reviewStore / uploadQueue plumbing.
  */
+import { subscribeLibraryChanged } from "../../../shared/library/libraryChanged.js";
 import { docKindOf } from "../../doc-review/docEditor/docKind.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -216,6 +217,11 @@ export default function FileBrowser({
     window.addEventListener("focus", onBack);
     document.addEventListener("visibilitychange", onBack);
     return () => { window.removeEventListener("focus", onBack); document.removeEventListener("visibilitychange", onBack); };
+  }, [signedIn, isActive]); // eslint-disable-line react-hooks/exhaustive-deps
+  // B2084480 — a save made in Review (this tab or another) re-reads the list without a reload.
+  useEffect(() => {
+    if (!signedIn || !isActive) return undefined; // hidden: the next activation refetches anyway
+    return subscribeLibraryChanged(() => { refresh(); });
   }, [signedIn, isActive]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const projName = (id) => (projects.find((p) => p.id === id) || {}).name || projectName || "";

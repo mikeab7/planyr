@@ -99,6 +99,7 @@ import { idAttrFor } from "./lib/parcelQuery.js";
 const ParcelInfoCard = lazy(() => import("./components/ParcelInfoCard.jsx"));
 import { PanelErrorBoundary } from "./components/LazyPanel.jsx";
 import { makeParcelDisplayLayer, makeSnapshotLayer, parcelDisplayIsImageOnly, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
+import { layerInDrawRange } from "./lib/parcelDisplayZoom.js"; // V1475200 — the hang-guard may only arm while a layer is inside the zoom range it can draw in
 import { siteBoundaryInfo, siteDrawParcels } from "./lib/siteBoundary.js";
 import { siteAnchorLatLon } from "./lib/siteAnchor.js";
 import { pinClusterOffsets, pinOffsetsSig } from "./lib/pinCluster.js";
@@ -2801,7 +2802,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       const startEvt = "requeststart";
       const errEvt = "requesterror";
       target.on(startEvt, () => {
-        if (!settled && !timer) timer = setTimeout(markDown, DISPLAY_LOAD_TIMEOUT_MS);
+        // V1475200 — below its zoom floor a healthy layer reads its metadata, asks for no cells and never
+        // "loads"; arming the hang-guard then pulled a working county for the statewide picture. See layerInDrawRange.
+        if (!layerInDrawRange(fl)) return;
+        if (!settled && !timer) timer = setTimeout(() => { timer = null; if (layerInDrawRange(fl)) markDown(); }, DISPLAY_LOAD_TIMEOUT_MS);
         // B1427664 — a much shorter "still loading" notice, well inside the 8s hang-guard: a real
         // CAD host that's merely slow (not yet hung) drew nothing and said nothing for up to 8s.
         if (!settled && !slowTimer) {

@@ -1,3 +1,10 @@
+### B2084481 — A .doc and the .docx made from it look identical in the Library `[library]` (bug) #library #ui  *(Owner report 2026-10-04 build 4ca9ff1, dispatch block NEW-2. DEDUPE-FIRST: no prior item for a Home-card type tag; FileBrowser already badges non-PDF extensions (B685) — this brings the Home cards in line.)*
+
+`[x]` **Cause:** the title is built from the file name WITHOUT its extension, so `x.doc` and `x.docx` titled alike, and the Home cards (Recent / Pinned / Unfiled) showed no type at all (only the project list rows carried the extension badge, and only for non-PDFs).
+`[x]` **Fix:** `src/workspaces/library/lib/fileTypeTag.js` (`fileTypeTag(doc)` — extension of the review's source filename, upper-cased; no source filename = a PDF drawing, the same rule as FileBrowser's `isPdfFile`) and a small `TypeTag` chip on `FileCard` and `UnfiledCard` using design tokens. Covered by `test/libraryFreshAndTypeTag.test.js` (DOC / DOCX / TXT / PDF each render their tag; the .doc and .docx rows differ in markup; red with the change reverted).
+- Verify: sandbox — render + unit proof above.
+- Constraint check: nothing here contradicts `## Owner product constraints`.
+
 ### B2078594 — Record the owner on-device pass for the Notes phone fixes `[Notes]` (task) #notes #mobile  *(dispatch block "NEW-1," 2026-10-04)*
 
 `[x]` Michael verified NEW-2, NEW-3, NEW-4, NEW-5 (menus via ⋯ and press-and-hold), NEW-6 and NEW-7 on his iPhone on 2026-10-04 (two changes followed: B2078592, B2078593). Recorded as an owner on-device pass on **V1484656–V1484661** and archived per the VERIFICATION.md rules — EXCEPT the pieces his pass did not cover or replaced, which stay open under new V#s rather than being closed on his behalf: the floating "Delete box" pill (V1484660 step 4, replaced → V1501920, with the iOS-loupe note from step 5), the "saved view is restored exactly" step (V1484659 step 3, reversed → V1501921), and the week-later `client_errors` telemetry step (V1484661 step 7, not part of an on-device pass → V1501922).
