@@ -36,7 +36,10 @@ const STATUS = {
   // "Not connected" is an inert/off state → a QUIET cool neutral (not a warm cream, and never
   // a semantic hue). The five entries above stay their intentional semantic colours (B689).
   pending: { dot: "#4B5263", bg: "#F3F5F8", border: "#E1E5EB", label: "Not connected", glyph: "○" },
+  // NOT SCREENED (Part A, Georgia) — this check has no source for the site's state. Same quiet neutral as
+  // "Not connected" and for the same reason: it is a gap in what Planyr carries, never a finding.
 };
+STATUS.notscreened = { ...STATUS.pending, label: "Not screened", glyph: "◌" }; // same neutral as "Not connected", no new hex
 
 export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isLayerOn, onToggleLayer, layerStatus = {}, layerZoomNote = null, runAnalysis = runSiteAnalysis, onFindings = null }) {
   const [state, setState] = useState({ loading: false, findings: null, error: null, empty: !rings || !rings.length, at: null });

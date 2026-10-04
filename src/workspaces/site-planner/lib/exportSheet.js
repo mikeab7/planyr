@@ -33,7 +33,7 @@ import { ALL_LAYERS, gisProxyEnabled } from "./layers.js";
 // PDF-PARITY for the NEW-1 stacking model: the sheet has to composite the two GIS bands the
 // screen does — fills UNDER the drawn plan, strokes and points OVER it.
 import { rolesOf, exportsOverPlan, exportBandFor, configCanLift, FRONT_BAND_ATTR } from "./mapStack.js";
-import { overlayExportRequest } from "./layerRequest.js";
+import { overlayExportRequest, pointSymbolOptions } from "./layerRequest.js";
 import {
   lngLatRingToFeet, feetToLatLng, aerialPlacement, overlayExportPlacement,
   feetExtentToBbox, aerialTileGrid, pickAerialTileZoom, deepenZoomFor,
@@ -827,6 +827,21 @@ export function createExportSheet(ctx) {
         if (!gj || !gj.geometry) return;
         const style = leafStyle(cfg.styleFn ? cfg.styleFn(gj.properties, 1) : { color: cfg.color, weight: cfg.weight, opacity: 1 });
         features.push(...esriLineFeatures(gj.geometry, style));
+        // Georgia screening — a row that opts in with `printGeometry` prints its POINTS and POLYGONS too, in the
+        // SAME symbology the screen draws (pointSymbolOptions / the row's styleFn at base opacity; the emitter applies
+        // the slider once). Rows that do not opt in print exactly what they always did.
+        if (cfg.printGeometry) {
+          const g = gj.geometry;
+          if (g.type === "Point" || g.type === "MultiPoint") {
+            const o = pointSymbolOptions(cfg, 1);
+            for (const c of (g.type === "Point" ? [g.coordinates] : g.coordinates)) {
+              features.push({ kind: "point", coords: c, style: { stroke: o.color, strokeWidth: o.weight, strokeOpacity: 1, fill: o.fillColor, fillOpacity: o.fillOpacity, radius: o.radius } });
+            }
+          } else if (g.type === "Polygon" || g.type === "MultiPolygon") {
+            const o = cfg.styleFn ? cfg.styleFn(gj.properties, 1) : { color: cfg.color, weight: cfg.weight, opacity: 1, fillColor: cfg.color, fillOpacity: 0 };
+            features.push(...esriPolygonFeatures(g, { stroke: o.color, strokeWidth: o.weight, strokeOpacity: 1, fill: o.fillColor || o.color, fillOpacity: o.fillOpacity ?? 0 }));
+          }
+        }
       });
       return { features };
     }

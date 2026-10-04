@@ -545,6 +545,33 @@ export const TERRAIN = {
     role: "line",
     group: "base", order: 3,
   },
+  ga_slope: {
+    // Georgia screening — slope classes rendered by the 3DEP ImageServer itself (the same service as the
+    // elevation shading), as a custom raster-function chain: Slope (percent rise) → Remap into five classes →
+    // Colormap. ZFactor 1.2 corrects the Web-Mercator export's horizontal stretch at Georgia latitudes
+    // (1/cos 33° ≈ 1.19), so a 10% slope reads as 10% rather than 8%.
+    kind: "esriImage", label: "Slope classes",
+    url: "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer",
+    states: ["GA"],
+    rendering: {
+      rasterFunction: "Colormap",
+      rasterFunctionArguments: {
+        // class 1 (<2%) is fully transparent: flat ground is the answer, not something to paint
+        Colormap: [[1, 0, 0, 0, 0], [2, 253, 224, 71, 255], [3, 249, 115, 22, 255], [4, 220, 38, 38, 255], [5, 127, 29, 29, 255]],
+        Raster: {
+          rasterFunction: "Remap",
+          rasterFunctionArguments: {
+            InputRanges: [0, 2, 2, 5, 5, 10, 10, 15, 15, 10000], OutputValues: [1, 2, 3, 4, 5], AllowUnmatched: false,
+            Raster: { rasterFunction: "Slope", rasterFunctionArguments: { SlopeType: 2, ZFactor: 1.2 } },
+          },
+          outputPixelType: "U8",
+        },
+      },
+    },
+    opacity: 0.55, source: "USGS 3DEP",
+    note: "Slope of the ground, from LiDAR: clear under 2%, yellow 2–5%, orange 5–10%, red 10–15%, dark red over 15%. Computed at the screen's current resolution, so zoomed far out the ground reads flatter than it is — use it at site zoom. Screening only; a survey topo governs grading cost.",
+    role: "area", group: "base", order: 4,
+  },
 };
 
 /* Jurisdiction BOUNDARY overlays (B176) — toggleable district lines for screening:
@@ -911,6 +938,96 @@ export const AHJ_LAYERS = {
     infoCaveat: "A boundary means the city HAS JURISDICTION here — not that it serves or will connect utilities to a parcel.",
     role: "line", group: "jurisdiction", order: 2,
   },
+  /* NEW-1 (Georgia screening, 2026-10-04) — THE GEORGIA SCREENING LAYERS. Each reads its own `GIS_SOURCES` row
+   * (live-verified, CORS-open, production host — see sources.js), declares `states: ["GA"]` so a Texas view lists
+   * none of them and a Georgia view lists them, and carries the honest limits of its data in `note`. Georgia DOT
+   * traffic/truck routes, the coastal-marsh jurisdiction line and SSURGO depth-to-bedrock are NOT here: their hosts
+   * could not be reached from the build sandbox (see BACKLOG) and an unconfirmed URL is how a row ships dead. */
+  ga_hsi: {
+    // PDF-PARITY: points / polygons print too (the esriFeature export branch only prints LINES unless a row opts in)
+    printGeometry: true,
+    kind: "esriFeature", label: "Hazardous sites (Georgia EPD)", source: "Georgia EPD — Hazardous Site Inventory",
+    url: GIS_SOURCES.hsiGa.serviceUrl, states: ["GA"],
+    minZoom: 9, color: "#9a3412", weight: 2, opacity: 0.55, pointRadius: 5,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Hazardous site", hoverSource: "Georgia EPD",
+    hoverFields: [{ names: ["Site_Name"] }, { names: ["Class"], label: "class" }, { names: ["City"] }],
+    note: "Georgia EPD's Hazardous Site Inventory — sites with a reportable release, at EPD's own surveyed coordinates (the July 2025 list). A Phase I ESA PRE-SCREEN, not a substitute; the Class number is EPD's.",
+    role: "point", group: "environmental", order: 8,
+  },
+  ga_nrhp: {
+    // PDF-PARITY: points / polygons print too (the esriFeature export branch only prints LINES unless a row opts in)
+    printGeometry: true,
+    kind: "esriFeature", label: "Historic places (National Register)", source: "National Park Service — National Register of Historic Places",
+    url: GIS_SOURCES.nrhp.serviceUrl, states: ["GA"],
+    minZoom: 11, color: "#6d28d9", weight: 2, opacity: 0.55, pointRadius: 4,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Historic place", hoverSource: "NPS National Register",
+    hoverFields: [{ names: ["RESNAME"] }, { names: ["ResType"], label: "type" }, { names: ["City"] }],
+    note: "National Register listings — one point per listing (a district is one point, not its boundary). Georgia's own SHPO database (GNAHRGIS) is login-only, so recorded-but-unlisted sites are NOT here. A flag to check with the Georgia Historic Preservation Division, not a clearance.",
+    role: "point", group: "environmental", order: 9,
+  },
+  ga_cemeteries: {
+    // PDF-PARITY: points / polygons print too (the esriFeature export branch only prints LINES unless a row opts in)
+    printGeometry: true,
+    kind: "esriFeature", label: "Cemeteries (incomplete)", source: "USGS — GNIS cemeteries",
+    url: GIS_SOURCES.cemeteries.serviceUrl, states: ["GA"],
+    minZoom: 12, color: "#475569", weight: 2, opacity: 0.55, pointRadius: 3.5,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Cemetery", hoverSource: "USGS GNIS",
+    hoverFields: [{ names: ["NAME"] }, { names: ["CITY"] }],
+    note: "INCOMPLETE: recorded cemeteries only. Unrecorded family burial grounds — common on old Georgia farmland — are NOT on this layer, so an empty map is never proof of none. A burial ground on the site is a hard constraint; ask the county and have it surveyed.",
+    role: "point", group: "environmental", order: 10,
+  },
+  ga_crit_habitat: {
+    // PDF-PARITY: points / polygons print too (the esriFeature export branch only prints LINES unless a row opts in)
+    printGeometry: true,
+    kind: "esriFeature", label: "Critical habitat (USFWS)", source: "U.S. Fish & Wildlife Service",
+    url: GIS_SOURCES.critHabitat.serviceUrl, states: ["GA"],
+    minZoom: 8, color: "#15803d", weight: 1.5, opacity: 0.45,
+    // A designated area, drawn as a light fill + outline (a bare outline vanishes over aerial imagery).
+    styleFn: (props, opacity) => ({ color: "#15803d", weight: 1.5, opacity, fillColor: "#15803d", fillOpacity: opacity * 0.5 }), // fill is PROPORTIONAL to the slider — the print path multiplies the same base (PDF-PARITY)
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Critical habitat", hoverSource: "USFWS",
+    hoverFields: [{ names: ["comname"] }, { names: ["sciname"] }, { names: ["listing_status"], label: "status" }],
+    note: "USFWS final critical habitat. It binds FEDERAL actions, not private land directly — but a Corps wetlands permit is a federal action, so it matters wherever there is a stream or wetland. A screen; USFWS IPaC is the authoritative species list.",
+    role: "area", group: "environmental", order: 11,
+  },
+  ga_gopher_tortoise: {
+    // PDF-PARITY: points / polygons print too (the esriFeature export branch only prints LINES unless a row opts in)
+    printGeometry: true,
+    kind: "esriFeature", label: "Gopher tortoise soils (DNR)", source: "Georgia DNR — Wildlife Resources Division",
+    url: GIS_SOURCES.gopherTortoiseGa.serviceUrl, states: ["GA"],
+    minZoom: 12, color: "#a16207", weight: 1, opacity: 0.45,
+    styleFn: (props, opacity) => {
+      const c = { 1: "#7c2d12", 2: "#c2410c", 3: "#f59e0b" }[props && props.Tier] || "#a16207";
+      return { color: c, weight: 0.8, opacity, fillColor: c, fillOpacity: opacity * 0.6 };
+    },
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Tortoise soil", hoverSource: "Georgia DNR",
+    hoverFields: [{ names: ["Tier"], label: "tier" }, { names: ["MUSYM"], label: "soil unit" }],
+    note: "Soils suitable for gopher tortoise burrows, by DNR tier (the tier numbers are DNR's). A MODELED habitat screen, not a survey or a sighting. The gopher tortoise is state-protected in Georgia — if this lights up, a tortoise survey is the only real check. Coastal plain and sandhills only.",
+    role: "area", group: "environmental", order: 12,
+  },
+  ga_trout: {
+    kind: "esriFeature", label: "Trout streams (Georgia DNR)", source: "Georgia DNR — Wildlife Resources Division",
+    url: GIS_SOURCES.troutGa.serviceUrl, states: ["GA"],
+    minZoom: 9, color: "#0f766e", weight: 2, opacity: 0.55,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Trout stream", hoverSource: "Georgia DNR",
+    hoverFields: [{ names: ["Name"] }, { names: ["Basin"], label: "basin" }],
+    note: "Georgia DNR-mapped trout streams (north Georgia). A designated trout stream carries a 50 ft buffer instead of the 25 ft state minimum — turn on \"Stream buffers\" to see it drawn.",
+    role: "line", group: "flood", order: 2,
+    floodTier: "hydrography", agency: "Georgia DNR",
+  },
+  ga_stream_buffers: {
+    // Georgia screening — computed buffer bands off the cached NHD + DNR trout + District-outline geometry (see
+    // vectorOverlay.cachedStreamBufferLayer and lib/georgiaStreamBuffers.js, which holds every rule).
+    kind: "pipelineCorridor", label: "Stream buffers (Georgia)", bufferRule: "ga_streams",
+    source: "USGS NHD + Georgia DNR trout streams + Atlanta Regional Commission (computed)",
+    states: ["GA"],
+    // Vector-only: the bands exist only where the NHD centrelines came back as VECTORS, so the gate is the NHD
+    // source's own `query.minVectorZoom` (test/layerZoomGate pins the two together).
+    minZoom: 12,
+    opacity: 0.55,
+    note: "Assumed buffer bands off the USGS stream centreline: 25 ft each side on every state-waters stream (Georgia Erosion & Sedimentation Act), 50 ft on a DNR trout stream, and 75 ft (50 undisturbed + 25 impervious) inside the Metropolitan North Georgia Water Planning District — the District's MODEL ordinance, the typical local requirement; each county adopts its own, so confirm with the county. Measured from the CENTRELINE, not the bank, so a wide stream's true buffer starts further out. Ephemeral channels, ditches and canals are not buffered. Screening only — a surveyed top-of-bank governs.",
+    role: "area", group: "flood", order: 3,
+    floodTier: "hydrography", agency: "USGS / Georgia DNR",
+  },
   co_city: {
     kind: "vector", label: "City limits (Colorado)", source: "Colorado DOLA (via State of Colorado OIT GIS)",
     url: GIS_SOURCES.cityCo.serviceUrl, states: ["CO"],
@@ -1002,7 +1119,10 @@ export const AHJ_LAYERS = {
 // LISTS the ones for the current jurisdiction.
 export const JLAYERS = {};
 Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
-  Object.entries(j.layers || {}).forEach(([id, cfg]) => { JLAYERS[id] = { ...cfg, county: cty }; }));
+  // Part A (Georgia screening): every per-county group in counties.js is a Texas county (Harris / Fort Bend / Chambers /
+  // Waller), so each row inherits `states: ["TX"]` unless it names its own — one rule, so a county group can never
+  // list itself on a Georgia view just because nobody tagged it.
+  Object.entries(j.layers || {}).forEach(([id, cfg]) => { JLAYERS[id] = { ...cfg, county: cty, states: cfg.states || ["TX"] }; }));
 
 export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS };
 
@@ -1066,6 +1186,15 @@ export const LAYER_VINTAGE = {
   bkdd_easements: "BKDD recorded easements (Quiddity) — current edition",
   bkdd_dmp: "BKDD Drainage Master Plan — study results (advisory)",
   nhd_flowlines: "USGS NHD — collection date varies by area",
+  // Georgia screening (NEW-1) — each stamped with the edition the provider's own layer reported on 2026-10-04.
+  ga_hsi: "Georgia EPD Hazardous Site Inventory — July 2025 list (layer edited 2025-08-04)",
+  ga_nrhp: "NPS National Register — Esri Federal Data copy, edited 2026-10-02",
+  ga_cemeteries: "USGS GNIS cemeteries — recorded sites only; no single edition date",
+  ga_crit_habitat: "USFWS final critical habitat — layer edited 2026-08-31",
+  ga_gopher_tortoise: "Georgia DNR suitable-soils model — layer edited 2026-09-11",
+  ga_trout: "Georgia DNR trout streams — layer edited 2024-12-30",
+  ga_stream_buffers: "Computed from USGS NHD + DNR trout streams + the District outline — not a surveyed buffer",
+  ga_slope: "USGS 3DEP LiDAR — collection date varies by area",
   coh_ww: "City of Houston GIS (test host) — current edition",
   coh_storm: "City of Houston GIS (test host) — current edition",
   coh_water: "City of Houston GIS (test host) — current edition",
