@@ -30,16 +30,21 @@ import { useEffect, useRef, useState } from "react";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { rankSearchCandidates } from "../lib/searchQuality.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
+import { SIZE } from "../../../shared/ui/controls.jsx";
 
 const DEBOUNCE_MS = 220;
 const MIN_QUERY_LEN = 2;
 const SHOWN_CAP = 10;
 
+// NEW-1 (food controls) — a standalone text field is `md` at the app's standalone-control height and
+// padding (SIZE.md), exactly like the Button beside it in the toolbar — it was a 999 pill with its own
+// padding, so it disagreed with its neighbour on shape AND padding. It takes the row's remaining width
+// (flex, no fixed 220) so on a phone it can never run off the screen's right edge.
 function fieldStyle() {
   return {
-    boxSizing: "border-box", padding: "6px 10px", borderRadius: 999,
+    boxSizing: "border-box", height: SIZE.md.height, padding: SIZE.md.padding, borderRadius: RADIUS.md,
     border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-primary)",
-    font: "inherit", fontSize: 12.5,
+    font: "inherit", fontSize: SIZE.md.fontSize,
   };
 }
 
@@ -129,14 +134,14 @@ export default function SearchBox({
   };
 
   return (
-    <div>
+    <div style={{ flex: "1 1 120px", minWidth: 0, maxWidth: 280 }}>
       <input
         ref={inputRef}
         type="search" value={query} data-testid="food-search-box"
         onChange={(e) => { onQueryChange(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
         placeholder={view === "map" ? "Search restaurants…" : "Filter your visits…"}
-        style={{ ...fieldStyle(), width: 220 }}
+        style={{ ...fieldStyle(), width: "100%" }}
         aria-label="Search restaurants"
       />
       <AnchoredMenu
@@ -148,7 +153,7 @@ export default function SearchBox({
         // instead of being swallowed by the backdrop and closing the dropdown first.
         hoverSafe
         panelStyle={{
-          background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: 10,
+          background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: RADIUS.lg,
           boxShadow: "0 10px 28px rgba(0,0,0,0.22)", padding: 6,
         }}
       >

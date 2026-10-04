@@ -11,7 +11,11 @@
     "Tool rail": 2,
     "Left rail + panels (Yield)": 15,
     "Library": 0,
-    "Doc Review (empty state)": 1
+    "Doc Review (empty state)": 1,
+    "Food map (phone)": 9,
+    "Food map — Hybrid (phone)": 9,
+    "Food map (desktop)": 9,
+    "Food list (phone)": 8
   },
   "exemptions": [
     {

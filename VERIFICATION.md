@@ -166,6 +166,16 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1474512 — B2050928: Food map controls match — both segmented controls identical, info button md and unclipped, nothing in the toolbar clipped `Blocker: live-GIS (planyr.io is not reachable from the sandbox; no sign-in needed — browsing the map works logged out)`
+
+Sandbox-proven: `ui-audit/ui-inventory.mjs --budget-only` relational gate green on the four Food surfaces (RED on untouched main, named); `test/foodModule.test.js` 426/426. **Steps** (planyr.io at phone width, `#/food`, Map view; read the build from `/version.json` AND the served chunk hash in the same observation; fixtures only — never write to the real food list):
+1. Look at the toolbar row. **Expect:** Map | List, Drop a pin and the search field all fit on screen, nothing cut off or scrolling sideways; the search field fills the remaining width.
+2. Compare Map | List with Site Plan | Hybrid (top right of the map). **Expect:** identical shape and height; the selected segment is the same red fill with WHITE text in both (also in dark theme).
+3. Look at the "i" button beside the basemap toggle. **Expect:** a rounded square the same height as the toggle, level with its top edge, fully on screen, not a circle; tapping it opens the credit.
+4. Compare the top edges of the zoom +/− stack (left) and the toggle/"i" (right). **Expect:** same top edge and same distance from the screen sides.
+5. Zoom far out. **Expect:** the hint is a rounded rectangle like the other messages and does NOT overlap the "?" help button; on desktop width the credit line at the bottom-right sits left of the "?" button, not under it.
+6. Switch to List. **Expect:** Date / Rating / Ambiance / Cost / Want to try are matching pill chips; nothing clipped.
+- **Stopping rule:** closes on a dated pass of 1–6, or a failed step filed as a recurrence on B2050928.
 ### V1476304 — B2058144: Review tabs open, switch, restore, and follow the signed-in account between desktop and phone `Blocker: auth`
 
 Sandbox-proven (real Chromium, built app): `ui-audit/verify-review-tabs.mjs` (logged out, 37/37), `ui-audit/verify-review-tabs-sync.mjs` (two contexts signed in as a made-up user against a hermetic fake account, 20/20), `test/reviewTabs.test.js`. Pending: the real account and real devices (the sandbox's fake account cannot show real Supabase row-level security, real timing, or a real phone). **Steps** (planyr.io, desktop + iPhone, signed in; read the served chunk hash in the same observation):
