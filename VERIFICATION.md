@@ -176,6 +176,15 @@ Sandbox-proven: `ui-audit/verify-parcel-settle-cost.mjs` (z14 moveend settle 103
 4. Zoom out to 13. **Expect:** outlines hidden with the "zoom in a little to see the lines" hint, unchanged.
 5. Dense Texas check: Katy (29.786 / -95.825, Harris) then a Fort Bend view, Select parcels on, zoom 14–16. **Expect:** outlines draw, no catch, a lot click selects the right lot.
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2061600.
+### V1445360 — B2020272/B2020273: blue my-location marker, heading cone and arrow button on a real iPhone `Blocker: real-device (iOS compass permission prompt and the heading cone need a real phone; the sandbox has no sensors or map tiles)`
+
+Sandbox-proven: `ui-audit/verify-locate-marker.mjs` (colors, ring, pane order, metre-accurate circle at two zooms, cone present/absent, button states) and `test/locateHeading.test.js`. Left for the phone:
+1. On the iPhone in Safari, open `planyr.io` → Site tab; read `/version.json` in the same check. Tap the locate button (arrow icon, bottom-left under +/−). **Expect:** Safari asks for location, then for Motion & Orientation access; the arrow turns solid blue; a blue dot with a white ring appears at your position (NOT orange), with a soft blue circle around it.
+2. Slowly turn your body. **Expect:** a soft blue wedge from the dot points the way the phone faces and swings with you.
+3. Pinch in and out. **Expect:** the soft circle grows and shrinks with the map (real ground size), and fades away when zoomed far out.
+4. Drag the map away. **Expect:** the arrow turns outline-blue; tap it and the map re-centres (solid again). Tap once more. **Expect:** tracking off, dot gone, arrow gray outline.
+5. Tap a parcel under where the dot sits. **Expect:** the parcel still selects (the dot never blocks the tap).
+6. Repeat step 1 but answer **Don't Allow** to the Motion prompt. **Expect:** dot and circle still show, no wedge, no error.
 ### V1479952 — B2061792: a non-closing deed warns on the reader, the plot toast and the panel `Blocker: real-data (the Grand Port group's saved plans)`
 
 Sandbox-proven: `test/deedGap.test.js`, `ui-audit/verify-deed-closure-warning.mjs` (real Tract 1 calls, logged-out). Pending: the same on a real signed-in plan. **Steps** (planyr.io; read the served chunk hash in the same observation; use the throwaway **"Concept A (copy)"** plan in the Grand Port group — NEVER Concept A):

@@ -126,6 +126,8 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
     if (navigator.geolocation) {
       const real = navigator.geolocation.getCurrentPosition;
       navigator.geolocation.getCurrentPosition = (...args) => { window.__geoCalls++; return real.apply(navigator.geolocation, args); };
+      const realW = navigator.geolocation.watchPosition;
+      navigator.geolocation.watchPosition = (...args) => { window.__geoCalls++; return realW.apply(navigator.geolocation, args); };
     }
   });
   await assertMeasurable(page, "verify-locate-me");
@@ -215,6 +217,7 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
   await page.addInitScript(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition = () => { /* the user never answers the native prompt — neither success nor error ever fires */ };
+      navigator.geolocation.watchPosition = () => 1; // the control tracks via watchPosition now — same silence
     }
   });
   await assertMeasurable(page, "verify-locate-me");
@@ -249,6 +252,7 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
   await page.addInitScript(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition = () => { /* a policy-blocked provider: no success, no error, ever */ };
+      navigator.geolocation.watchPosition = () => 1;
     }
   });
   await assertMeasurable(page, "verify-locate-me");
@@ -293,7 +297,7 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
   await page.addInitScript(() => {
     window.__geoCalls = 0;
     if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition = (ok) => {
+      navigator.geolocation.watchPosition = navigator.geolocation.getCurrentPosition = (ok) => {
         window.__geoCalls++;
         // Resolves LATE — long after the cancelling 2nd click below — to prove a stale result
         // arriving after cancel is ignored rather than reviving the spinner or drawing a marker.
@@ -328,7 +332,11 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
     check("cancelling then clicking again starts exactly one new request, not a pile-up", geoCallsAfter1st === 1 && geoCallsAfter3rd === 2, `1st=${geoCallsAfter1st} 3rd=${geoCallsAfter3rd}`);
     await page.waitForTimeout(4200); // let BOTH mocked calls' late resolutions land
     const state = await btn.getAttribute("data-locate-state");
-    check("the control settles back to idle and isn't left spinning by a stale resolution", state === "idle", `state=${state}`);
+    // NEW-1/NEW-2: a genuine fix from the one live request now leaves the control FOLLOWING (not idle);
+    // what must never happen is a stuck spinner or a second marker from the cancelled request.
+    const markers = await page.locator('[data-testid="locate-dot"]').count();
+    const spinningEnd = await btn.evaluate((b) => !!b.style.animation);
+    check("the control settles (following, not spinning) with exactly one marker after the stale resolution", state === "following" && !spinningEnd && markers === 1, `state=${state} spinning=${spinningEnd} markers=${markers}`);
   } else {
     check("a 2nd click while locating cancels immediately (idle, not spinning)", false, "button not visible");
   }
