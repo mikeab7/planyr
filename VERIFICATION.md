@@ -269,6 +269,16 @@ Sandbox-proven: `ui-audit/verify-notes-touch-pan.mjs` (Chromium real touch pipel
 6. Read the served chunk hash in the same observation as each result.
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2061330.
 
+### V1484657 — B2061329: on a real iPhone, tapping into a box keeps the keyboard up and puts the caret where tapped `Blocker: real-data` (signed-in real device)
+
+Sandbox-proven on WebKit (hasTouch + isMobile): `ui-audit/verify-notes-touch-box-tap.mjs`. A real soft keyboard cannot be driven headless.
+**Steps (real iPhone, a throwaway page):**
+1. Double-tap blank paper, type "hello world", then tap inside the word "world". **Expect:** the keyboard does not drop; the caret is where tapped; typing inserts there.
+2. Make a second box; tap from the first box into the second. **Expect:** keyboard stays up, caret in the second box, one tap.
+3. In a box, delete all its text with Backspace, press Backspace once more. **Expect:** the empty box disappears.
+4. Tap a picture box. **Expect:** it selects (handles), no keyboard.
+5. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2061329.
 ### V1468976 — B2043888: phone tab-strip chevrons page cleanly and clamp at both ends `Blocker: real-device (iOS elastic overscroll — not producible headless)`
 
 Sandbox-proven, both engines: `ui-audit/verify-nav-arrows.mjs` (and `ENGINE=webkit`), 31/31; `test/scrollStrip.test.js`. The original overshoot did NOT reproduce headless, so this is the live confirmation. **Steps** (planyr.io on the iPhone, Map with no project; read the served chunk hash in the same observation):
@@ -288,6 +298,16 @@ Sandbox-proven (logged-out, seeded local site, real Chromium): `e2e/mapfinder-no
 - **2026-10-04 WebKit-emulated pass (B2050816, NOT on device, logged-out; chunk `index-BVErCNTL.js` read in the same run):** `node ui-audit/verify-phone-orientations.mjs` (`PLANYR_CASES=notice-leak`) — iPhone SE and iPhone 15, portrait + landscape × Dashboard/Schedule/Review/Library/Notes/Spreadsheet = **24/24 PASS** (hint visible after Select parcels, gone after the switch each time); the same case on the pre-fix build is 0/24 PASS. Steps 1-4 above on a real phone, signed in, remain pending (`Blocker: auth`).
 - **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B2041360.
 
+### V1484656 — B2061328: typing in an open note while the app returns to the foreground / another window pushes never loses either side's text, and the editor stays put `Blocker: auth` (two signed-in windows)
+
+Sandbox-proven: `test/notesOpenPageSync.test.js` (gated fake network, red on main) + `ui-audit/verify-notes-open-page-adopt.mjs` (real editor takes the adopted body in place). The real two-window cloud round-trip needs a signed-in account.
+**Steps (signed in, a throwaway duplicate page — never a real plan):**
+1. Open the same throwaway page in window A and window B. In B, change the FIRST paragraph and wait for "Saved".
+2. In A (not touched since), type a few words in the LAST paragraph and, within a second, switch to another tab/app and back (or click away and back) so the app syncs. **Expect:** the keyboard/caret in A are not dropped; A shows B's first-paragraph change AND its own words.
+3. Wait ~10 s, reload A. **Expect:** both edits present; no "also changed in another window" banner.
+4. Repeat with both windows editing the SAME paragraph. **Expect:** the existing conflict banner (nothing silently lost).
+5. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 2–4, or a failed step filed as a recurrence on B2061328.
 ### V1484659 — B2061331: a note opens with its top near the top of the canvas, and on a phone both page edges are on screen `Blocker: real-data` (signed-in real device, real notes)
 
 Sandbox-proven: `ui-audit/verify-notes-open-framing.mjs` (WebKit + Chromium, five canvas sizes, three document shapes, CPU-throttled arm; red on untouched main). A real phone's first-paint timing is not producible headless.
