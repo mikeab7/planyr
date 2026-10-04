@@ -2721,10 +2721,26 @@ const ORG_OWNER_LABEL = "Organization";
 //   4. Anything else — the organization. Invariant 4: an `ownerKind:"site"` whose site id went
 //      missing lands HERE rather than in a fourth "unowned" state, because that state is exactly
 //      what this model removes.
+//
+// ⛔ NEW-1 (B1991040) — THE LINKED PROJECT'S NAME IS A READ-TIME LOOKUP BY ID, NEVER THE STORED COPY.
+// `linkedSiteName` is a snapshot written when the link was made; renaming the project never touched
+// it, so the Dashboard's Schedule health card printed "Pappadoupolos / Master Schedule" beside a
+// Jump Back In row reading "Papadopoulos" (measured live 2026-09-29, `schedules` id 6). A host
+// registers ONE resolver (id → the project's live name, `shared/names`) and every display below
+// asks it first; the stored copy is now ONLY the fallback for a link whose project this device
+// cannot resolve (not pulled yet, or deleted) — it is never preferred over a live answer.
+let siteNameResolver = null;
+function setSiteNameResolver(fn) { siteNameResolver = typeof fn === "function" ? fn : null; }
+function liveSiteName(siteId, stored) {
+  let live = null;
+  if (siteNameResolver && siteId != null) { try { live = siteNameResolver(siteId); } catch (_) { live = null; } }
+  if (live) return live;
+  return stored != null && stored !== "" ? stored : null;
+}
 function ownerOf(schedule) {
   const s = schedule && typeof schedule === "object" ? schedule : {};
   const siteId = s.linkedSiteId != null && s.linkedSiteId !== "" ? s.linkedSiteId : null;
-  const siteName = s.linkedSiteName != null && s.linkedSiteName !== "" ? s.linkedSiteName : null;
+  const siteName = liveSiteName(siteId, s.linkedSiteName);
   if (s.ownerKind === OWNER_KIND_ORG) return { kind: OWNER_KIND_ORG, siteId: null, siteName: null, key: ORG_OWNER_KEY };
   if (s.ownerKind === OWNER_KIND_SITE && siteId != null) return { kind: OWNER_KIND_SITE, siteId, siteName, key: siteId };
   if (s.ownerKind == null && siteId != null) return { kind: OWNER_KIND_SITE, siteId, siteName, key: siteId };
@@ -10467,6 +10483,22 @@ function App() {
       }, window.location.origin);
     } catch (_) {}
   }, [data, inShell]);
+  // NEW-1 (B1991040) — the shell tells this page every project's LIVE name (planar:site-names) so a
+  // schedule's "<Project> / <Schedule>" label resolves by linked id at read time instead of trusting
+  // the `linkedSiteName` snapshot stored in the document (see scheduleOwnership.js `liveSiteName`).
+  // A render-only tick: nothing here touches `data`, so it can never dirty or write the document.
+  const [, setSiteNamesTick] = React.useState(0);
+  useEffect(() => {
+    const onNames = (e) => {
+      const m = e && e.data;
+      if (!m || m.source !== "planar-shell" || m.type !== "planar:site-names") return;
+      const names = m.names && typeof m.names === "object" ? m.names : {};
+      setSiteNameResolver((id) => (id != null && names[id]) || null);
+      setSiteNamesTick((n) => n + 1);
+    };
+    window.addEventListener("message", onNames);
+    return () => window.removeEventListener("message", onNames);
+  }, []);
   useEffect(() => {
     if (!inShell) return;
     const onMsg = (e) => {
