@@ -11,6 +11,8 @@
  * (lib/supabaseClient.js) instead of reusing site-planner's, so this route's bundle can never
  * grow because a planner file changed.
  */
+import { warmSearchPath } from "./lib/warmSearch.js";
+import { supabase, SUPABASE_ORIGIN } from "./lib/supabaseClient.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import AppHeader, { useNarrow } from "../../shared/ui/AppHeader.jsx";
 import FoodMap from "./components/FoodMap.jsx";
@@ -62,6 +64,12 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   // flyNonceRef's own pattern. Never collides with a real row's uuid (a distinct "optimistic-N"
   // shape), so filtering it back out on rollback can never accidentally remove a real visit.
   const optimisticIdRef = useRef(0);
+
+  // B2021648 — once per page load, take the cold-start steps off the first search (lib/warmSearch.js).
+  useEffect(() => {
+    if (!supabaseConfigured()) return;
+    warmSearchPath({ supabase, search: searchPlacesByName, doc: document, origin: SUPABASE_ORIGIN });
+  }, []);
 
   // Places in the current map viewport — public read, works signed out too.
   useEffect(() => {

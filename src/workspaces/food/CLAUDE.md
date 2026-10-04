@@ -114,6 +114,7 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
   Supabase — build with `VITE_SUPABASE_URL=https://plnrtestfood123456.supabase.co VITE_SUPABASE_ANON_KEY=fixture-anon`).
 - `lib/searchSession.js` (B2069808) — the search box's request side: cancels the in-flight RPC on a newer query (AbortController), drops out-of-order answers, caches per query + map centre; `carryOverRows` keeps already-loaded rows on screen while the next answer is pending. Pure JS. The RPC body is `food_places_search_by_name_fast` (distance only on rows that can make the cut — see db/food.sql).
 - `lib/searchProximity.js` (B2051664) — orders the merged search list (saved + snapshot + live) nearest the visible map first (B2070432: his saved places that really match LEAD, wherever the map looks): text band (exact name/address on top) → in-view → distance from centre, with a small head start for his own places. A bias, never a filter; client-side because the RPC has no viewport parameter. Pure JS.
+- `lib/warmSearch.js` (B2021648) — once per page load: preconnect to Supabase, resolve the auth session, one throwaway search, so the FIRST real search isn't the slow one. Fire-and-forget.
 - `lib/supabaseClient.js` — this module's own client. See BUNDLE ISOLATION above for why it
   isn't the site-planner's.
 - `db/food.sql` — the applied migration (production, `lyeqzkuiwngunutlkkmi`). `db/test/food_rls.test.sql` — the RLS proof.
