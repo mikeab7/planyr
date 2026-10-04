@@ -261,20 +261,31 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
         ? <span aria-hidden="true" style={{ ...avatar, border: `1.5px dashed ${PAL.muted}`, background: "transparent", color: PAL.muted }}><EnvelopeIcon /></span>
         : <span aria-hidden="true" style={avatar}>{initial(r)}</span>}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          {r.name}{r.isYou && <span style={{ fontWeight: 400, color: PAL.muted }}> · You</span>}
-        </div>
-        <div style={{ fontSize: 12, color: PAL.muted, display: "flex", alignItems: "baseline", gap: 4, minWidth: 0 }}>
-          <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>
-            {r.kind === "invite" ? `${r.role === "admin" ? "Admin" : "Member"} · not joined yet` : r.email}
-          </span>
-          {r.kind === "invite" && canManage(r, isAdmin) && !narrow && (
-            <>
-              <span aria-hidden="true">·</span>
-              <button data-team-resend style={linkBtnStyle} disabled={busy} onClick={() => doResend(r)}>Resend invite</button>
-            </>
-          )}
-        </div>
+        {r.kind === "invite" ? (
+          /* An invite's email is the ONLY identifier on the row, so it WRAPS (after the @ if it must)
+             rather than truncating; the status and Resend wrap onto further lines instead of cutting. */
+          <>
+            <div data-team-invite-email style={{ fontSize: 14, fontWeight: 600, overflowWrap: "anywhere", lineHeight: 1.3 }}>
+              {r.email.split("@")[0]}{r.email.includes("@") && <>@<wbr />{r.email.split("@").slice(1).join("@")}</>}
+            </div>
+            <div style={{ fontSize: 12, color: PAL.muted, display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: 4 }}>
+              <span>{r.role === "admin" ? "Admin" : "Member"} · not joined yet</span>
+              {canManage(r, isAdmin) && !narrow && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <button data-team-resend style={linkBtnStyle} disabled={busy} onClick={() => doResend(r)}>Resend invite</button>
+                </>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {r.name}{r.isYou && <span style={{ fontWeight: 400, color: PAL.muted }}> · You</span>}
+            </div>
+            <div style={{ fontSize: 12, color: PAL.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.email}</div>
+          </>
+        )}
       </div>
       {canManage(r, isAdmin) && (
         <button data-team-more aria-label={`Options for ${r.name}`} aria-haspopup="menu" disabled={busy} onClick={(e) => openMenu(r, e.currentTarget)} style={moreBtn(narrow)}>⋯</button>
@@ -324,7 +335,7 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
 
   const teamMenu = isAdmin && !renaming && (
     <>
-      <button ref={menuRef} data-team-menu aria-label="Team settings" aria-haspopup="menu" style={{ ...moreBtn(narrow), margin: 0, border: `1px solid ${PAL.line}`, borderRadius: RADIUS.md, width: narrow ? 44 : 36 }} disabled={busy} onClick={() => setMenuOpen((o) => !o)}>⋯</button>
+      <button ref={menuRef} data-team-menu aria-label="Team settings" aria-haspopup="menu" style={narrow ? { ...moreBtn(true), margin: 0, border: `1px solid ${PAL.line}`, borderRadius: RADIUS.md } : { ...moreBtn(false), margin: `0 ${GUTTER - 3}px 0 0` }} disabled={busy} onClick={() => setMenuOpen((o) => !o)}>⋯</button>
       <AnchoredMenu open={menuOpen} onClose={() => setMenuOpen(false)} anchorRef={menuRef} placement="below-right" width={180} zIndex={6000} panelStyle={{ background: "var(--surface-raised)", border: `1px solid ${PAL.line}`, borderRadius: RADIUS.md, boxShadow: "0 12px 32px rgba(0,0,0,0.22)", overflow: "hidden" }}>
         <button style={menuItem(false)} onClick={startRename}>Rename team</button>
         <button style={{ ...menuItem(true), borderBottom: "none" }} onClick={() => { setMenuOpen(false); setConfirmDelete(true); }}>Delete team</button>
