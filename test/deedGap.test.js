@@ -78,3 +78,45 @@ describe("deedGap — draw the description exactly as written, show the misclosu
     expect(deedTrace({ pts: ring }).gap).toBeNull();
   });
 });
+
+// ── NEW-1 (2026-10-04): one closure rule for every user-facing surface ───────────────────────────────
+import { deedClosure, deedReaderSummary, deedQueueClosure, deedPlotWarning } from "../src/workspaces/site-planner/lib/deedGap.js";
+describe("deed closure wording — one rule (deedTrace.gap), never pathCloses", () => {
+  const p1 = callsToPath(TRACT1, POB);
+  it("RED PROOF: pathCloses calls Tract 1 closed, yet the user-facing wording must not", () => {
+    expect(pathCloses(p1)).toBe(true);
+    const cl = deedClosure(p1);
+    expect(cl.closes).toBe(false);
+    const rd = deedReaderSummary(TRACT1.length, cl).text;
+    expect(rd).not.toMatch(/\bcloses\b/);
+    expect(rd).toContain("⚠ does NOT close");
+    expect(rd).toMatch(/misses by 31\.\d ft/);
+    expect(deedQueueClosure(cl)).not.toMatch(/\bcloses\b/);
+    const toast = deedPlotWarning(cl);
+    expect(toast).toContain("⚠ This description does not close");
+    expect(toast).not.toMatch(/\bcloses\b/);
+  });
+  it("exact-closing deed: silent everywhere", () => {
+    const cl = deedClosure(callsToPath(SQUARE, POB));
+    expect(cl.closes).toBe(true);
+    expect(deedReaderSummary(4, cl).text).toBe("4 calls parsed · closes");
+    expect(deedPlotWarning(cl)).toBe("");
+  });
+  it("a miss between the noise floor and 1 ft warns (no gap > 1 cutoff)", () => {
+    const sq = [{ az: 90, distFt: 100 }, { az: 180, distFt: 100 }, { az: 270, distFt: 100 }, { az: 0, distFt: 99.5 }];
+    const cl = deedClosure(callsToPath(sq, POB));
+    expect(cl.gapFt).toBeCloseTo(0.5, 2);
+    expect(deedPlotWarning(cl)).toContain("misses by 0.50 ft");
+  });
+  it("a hole missing ~0.01 ft is silent; a real hole miss names its tract", () => {
+    expect(deedClosure(callsToPath(HOLE, POB)).closes).toBe(true);
+    const cl = deedClosure(callsToPath(SQUARE, POB));
+    expect(deedPlotWarning(cl, [{ name: "Tract 2", gapFt: 3.2 }])).toContain("Tract 2 (save-and-except) does not close — it misses by 3.20 ft");
+  });
+  it("open traverse beyond 50 ft still reads as not closing, same wording", () => {
+    const open = [{ az: 90, distFt: 100 }, { az: 180, distFt: 100 }, { az: 270, distFt: 100 }, { az: 0, distFt: 20 }];
+    const cl = deedClosure(callsToPath(open, POB));
+    expect(cl.closes).toBe(false);
+    expect(deedReaderSummary(4, cl).text).toContain("⚠ does NOT close — misses by 80.0 ft");
+  });
+});

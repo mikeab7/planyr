@@ -17123,3 +17123,55 @@ Each shrink case also carries a **vacuity guard** that fails rather than scoring
 - **Not covered (stated):** signed-in session and a real phone (collapsing Safari toolbar, real glass) — those stay on V1466448.
 - **Owner product constraints check:** nothing here touches a listed constraint.
 - Verify: sandbox ✅ (above); the on-device pass stays on **V1466448**.
+
+### B1962672 — Crop dialog: "Reset to full page" in Polygon mode left a dead Done button `[Site Planner / overlays]` (bug) #site-planner #ui  *(Owner walk of the crop tool on planyr.io, 2026-09-29, NEW-1. Minted from reserved block B1962672–B1962687 / V1398976. DEDUPE-FIRST: no prior item covers it; B1838704/B1783328 are the tool itself, untouched.)*
+
+`[x]` **Fixed, with the choice stated.** Polygon-mode Reset used to EMPTY the trace, and Done is (correctly) disabled with no polygon, silently. Now Reset never empties anything: it puts the overlay back to the whole page (both shapes; Polygon shows the closed full-page quad), so **Done stays live and saves "no crop"**. Chosen over "leave Done disabled and explain" because Reset means "show me the whole sheet" and the only sensible commit of that is exactly what Done then does; the deliberate start-over action is the separate **Clear polygon**, and *that* state now says in plain words why Done is off ("Place at least 3 points, then close the polygon to save" / "Close the polygon (click the first point or press Enter) to save") next to the button and as its tooltip. `ImageCropTool.jsx` `resetAll` / `clearPoly` / `doneWhy`.
+- Verify: live — **V1398976** (sandbox walk PASSED; signed-in Chrome pass pending).
+- Files: `src/shared/sitePlans/components/ImageCropTool.jsx`, `ui-audit/verify-crop-tool-walkthrough.mjs`.
+
+### B1962673 — "Reset to full page" only reset the shape you were standing on `[Site Planner / overlays]` (bug) #site-planner #ui  *(NEW-2 of the same walk.)*
+
+`[x]` **Chose "reset the overlay", per the owner's mental model.** One Reset, always shown, enabled whenever ANY crop (rectangle or polygon) is saved or drawn; from either mode it sets both shapes to the full page, so Rectangle → Reset → Done saves `crop: null` and switching back to Polygon shows the full-page quad, not the old polygon. `commit` also never carries a "full page" stand-in as a dormant shape. The tooltip says "Removes the whole crop — rectangle and polygon". The two harnesses that had encoded the old behaviour (`verify-site-tab-overlay-crop.mjs` step 8, which expected Rectangle+Done to clear a polygon and so had been silently red) were corrected to the new contract.
+- Verify: live — **V1398976**.
+
+### B1962674 — Crop dialog had no discoverable way to pan or zoom in between `[Site Planner / overlays]` (bug) #site-planner #ui  *(NEW-3.)*
+
+`[x]` Added, all on screen: a **✋ Pan tool** toggle (left-drag moves the picture; a pan no longer drops a polygon point where the mouse comes up — a click-after-drag bug found by the walk, fixed with a guard that also covers Space+drag), **arrow keys** (Shift = ×4) to pan, **− / slider / +** zoom (log slider, about the middle of the view; `+`/`-` keys too) between Fit and 100%. Scroll-wheel zoom, Space+drag and middle-drag unchanged. Footer hint rewritten (replaces the old one-line hint; no net growth). Keyboard focus is now kept inside the tool when a button disables itself (Undo/Redo at the end of history dropped focus to `<body>` and killed Ctrl+Z / arrows). Scrollbars deliberately NOT built (the brief allowed "or").
+- Verify: live — **V1398976**.
+- Files: `ImageCropTool.jsx`, `src/workspaces/site-planner/lib/cropHistory.js` (pure slider mapping), `test/cropHistory.test.js`.
+
+### B1962675 — Crop dialog undo had no redo and no button `[Site Planner / overlays]` (bug) #site-planner #ui  *(NEW-4.)*
+
+`[x]` One undo/redo history for BOTH shapes (`lib/cropHistory.js`, pure, unit-tested): **↶ Undo / ↷ Redo buttons** in the toolbar (disabled when empty), **Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y** (Cmd on a Mac), working in Rectangle mode too (it was Polygon-only). A snapshot is tagged with its mode so undo also returns you to the mode the change was made in. A rectangle drag / vertex drag pushes its undo frame on first real movement, not on the press, so a plain click leaves no do-nothing step now that Undo is a visible button.
+- Verify: live — **V1398976**.
+
+### B1962676 — Crop dialog fit a landscape sheet into a short band with dead space `[Site Planner / overlays]` (bug) #site-planner #ui  *(NEW-5.)*
+
+`[x]` The dialog is now 96% × 94% of the window and `ImageCropTool` gained a **`fill`** mode: the viewport takes whatever is left under the title (measured with a ResizeObserver, no more `innerHeight - 220` guess) and Fit re-runs on resize until the user zooms/pans by hand. Fit also no longer caps at native size (a small image is enlarged to the room available; `FIT_MAX` 8). Measured on a 3000×1800 sheet at a 1440×900 window: the sheet fills the full window height and ~89% of its width (the rest is the sheet's own aspect ratio), dialog 96%×94%.
+- Verify: live — **V1398976**.
+- Files: `src/workspaces/site-planner/components/OverlayCropDialog.jsx` (still lazy), `ImageCropTool.jsx`.
+
+### B1962677 — Crop: thin left/right rectangle grips, and the expanded OVERLAYS row collapsed on reload `[Site Planner / overlays]` (bug) #site-planner #ui  *(NEW-6, two small ones.)*
+
+`[x]` **(a)** The four mid-edge grips now share ONE footprint (long side × the corner grips' own thickness, visible like the corners); test asserts left/right are the top/bottom grips turned 90° and none is thinner than a corner. **(b)** The expanded overlay row is remembered per plan in `sessionStorage` (`planyr:selOverlay:<siteId>`, wrapped in try/catch — a per-viewer convenience only), so a reload leaves Crop… one click away. An unknown/stale id simply opens nothing.
+- Verify: live — **V1398976**.
+- Files: `ImageCropTool.jsx`, `src/workspaces/site-planner/SitePlanner.jsx`.
+- **Closed 2026-10-04:** all six walked live on Michael's signed-in account on builds 17f94b7 and 028d64d — ALL PASS (V1398976). Leftovers filed and shipped as B2066224–B2066227.
+
+
+### B1989504 — "Start your site" card covers the middle of the map on phone and stays up while drawing `[site-planner]` (bug) #site-planner #mobile *(Owner report 2026-09-30, iPhone Safari: "Obv not how it should work.")*
+
+`[x]` **Reproduced on main first** (`e2e/start-hint-placement.spec.js`, run against the pre-change build): on a phone-width new site the card was a full-width box across the middle of the map (overlap assertion red), and it STAYED UP after Draw new parcel was armed from the rail menu (the owner's second case — the hint used to be gated only on "nothing drawn yet", never on the active tool). Desktop: same centred box, same red.
+`[x]` **Fix.** The card is now a compact strip docked to the top edge (phone: between the Panels/Tools edge tabs, under the View/Layers row; desktop: top-left of the canvas), with no full-size wrapper — nothing invisible left over the canvas. It shows only while nothing has started a site: any parcel/element/reference, an armed tool (Draw new parcel included), an identify pass, an open Add menu or an open calibration removes it. One tap on ✕ dismisses it and it stays dismissed on this device (`planarfit:startHintDismissed`, try/catch). No contradiction with `## Owner product constraints`.
+`[x]` **Sandbox proof:** `e2e/start-hint-placement.spec.js` — 4 cases × phone (390×844, emulated touch Chromium, NOT a real iPhone) and desktop (1440×900): box outside the middle half of the canvas, canvas centre answers to the canvas, Draw new parcel (rail menu AND the card's own option) removes it, dismiss persists across reload. Red on main, 8/8 green here; full vitest green.
+Verify: live — see V1414592 (real planyr.io at phone width; real-iPhone look).
+Stopping rule: closes when V1414592 passes on the deployed build, or the owner confirms on his phone.
+
+### B1989505 — Rewrite "Start your site" so the three ways to start read as different things `[site-planner]` (task) #site-planner #mobile *(Owner request 2026-09-30, NEW-2)*
+
+`[x]` Steps 1 and 3 read as the same thing (both routed through "Parcel tools ▾"; step 1 also bundled address search; "right rail" is a collapsed "Tools" tab on phone). Replaced the three sentences with four short, distinct, TAPPABLE options (each starts its action): **Click a lot on the map** (county record; same vocabulary as the Parcel tools menu) · **Search an address** · **Trace your boundary** · **Use a screenshot** (opens the file picker; place & calibrate follows). No menu paths, no "right rail". Sentence removed (PANEL-BREVITY spirit): the old three-line numbered paragraph. Covered by the same spec as B1989504 (`start-hint-draw` starts Draw; asserted on both viewports).
+Verify: live — see V1414592.
+Stopping rule: as B1989504.
+- **Closed 2026-10-04:** live on planyr.io build `a0dda27` (Chromium phone + desktop emulation, not a real iPhone) — card clear of the map centre, starting Draw removes it, ✕ persists across reload (V1414592 PASSED). Disposition (STANDING RULE #2): reproduced and fixed. Real-iPhone Safari look not claimed.
+

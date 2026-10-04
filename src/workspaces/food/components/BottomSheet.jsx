@@ -46,7 +46,7 @@
  * UNDER the keyboard and hid the field being typed into and the Save button. While the keyboard is
  * up (`keyboardInset`, lib/keyboardInset.js) the sheet lifts by exactly the covered height, goes to
  * its "full" snap (the most room above the keyboard) and the focused field is scrolled into view.
- * Measured with a stubbed visualViewport in ui-audit/verify-food-phone.mjs; the real keyboard is
+ * Measured with a stubbed visualViewport in ui-audit/verify-food-visit-phone.mjs; the real keyboard is
  * V1476080 (on device). */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { resolveSnap, heightForSnap } from "../lib/bottomSheetSnap.js";

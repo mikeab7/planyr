@@ -1350,7 +1350,7 @@ export default function AppHeader({
         // B1610640 — see Row 1's identical wrapper comment above: the chevrons move to a
         // non-scrolling `position:relative` wrapper around `row2Ref` so they stop scrolling with
         // the row's own content.
-        <div style={{ position: "relative" }}>
+        <div data-header-row2="1" style={{ position: "relative" }}>
         <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ minHeight: HEADER_ROW_H, display: "flex", alignItems: "center", position: "relative", flexWrap: narrow ? "nowrap" : "wrap", justifyContent: "flex-end", rowGap: 2, borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
           {/* Left zone — module tabs. B1012560: content-sized (`"none"` = `0 0 auto`) and
               never shrinks, same as the 2-zone layout's tabs zone below — primary navigation
@@ -1433,7 +1433,7 @@ export default function AppHeader({
         // The module tab strip stretches the same additional 10px — the same disclosed trade-off
         // the 26→30 move already made, just one more step of it.
         // B1610640 — same non-scrolling wrapper as the branch above; see its comment.
-        <div style={{ position: "relative" }}>
+        <div data-header-row2="1" style={{ position: "relative" }}>
         <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ height: HEADER_ROW_H, display: "flex", alignItems: "center", position: "relative", borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
 
           {/* Module tabs — the planner's own workspace navigation. Omitted entirely on a
@@ -1462,11 +1462,16 @@ export default function AppHeader({
               against, anchor left instead so the controls read as this row's own content. */}
           <div
             style={{
-              flex: narrow ? "1 0 auto" : 1, display: "flex", alignItems: "center",
+              // NEW-1 (food controls) — a standalone route (no module tabs, today only /food) has a
+              // purpose-built toolbar that is designed to FIT the row, so on a phone the slot takes
+              // the row's width (`1 1 0`, min-width 0) rather than its content's natural width. The
+              // `1 0 auto` + scroll behaviour below stays for every route with tabs, whose toolbar
+              // (undo/redo/snap/File…) really is wider than a phone and is meant to be swiped.
+              flex: narrow && showModuleTabs ? "1 0 auto" : narrow ? "1 1 0" : 1, display: "flex", alignItems: "center",
               justifyContent: showModuleTabs ? "flex-end" : "flex-start",
               paddingLeft: showModuleTabs ? 0 : 6,
-              paddingRight: showModuleTabs ? 6 : 0,
-              minWidth: narrow ? "auto" : 0, gap: 4,
+              paddingRight: showModuleTabs || narrow ? 6 : 0,
+              minWidth: narrow && showModuleTabs ? "auto" : 0, gap: 4,
               overflow: narrow ? "visible" : "hidden",
             }}
           >

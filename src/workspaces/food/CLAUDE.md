@@ -84,7 +84,7 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
   foodPhone.test fails a field that doesn't). There is NO "What I had" input any more; old
   visits' saved `what_i_had` text stays readable and is never rewritten. At phone width ratings are a
   1-10 tap grid (`ScoreTapGrid` in ScoreMeter), desktop keeps the slider. Phone harness:
-  verify-food-phone (ui-audit) + its food-panel fixture page.
+  verify-food-visit-phone (ui-audit) + its food-panel fixture page.
 - `components/ScoreMeter.jsx` (B1873008) — the per-dish score control (half-point, 1.0–10.0). A
   deliberate sibling of `VisitPanel.jsx`'s own `RatingSlider`, not a replacement — see its own
   header for why the two stayed separate.
@@ -102,6 +102,16 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
   registry-name and confidence de-ranking, corrupted-concatenated-address exclusion, and
   near-duplicate (same real-world spot, multiple sources) collapse. Pure JS, no Supabase import —
   see its own header for the production-measured reasoning behind every threshold.
+- `lib/placeIdentity.js` (B2046224) — pure "is this a restaurant he ALREADY has?": normalised-name
+  (case/apostrophes/punctuation/diacritics-blind) AND within 300 m — never name alone (chains) or distance
+  alone. `mergeSearchRows` gives the search dropdown ONE row per restaurant (a snapshot hit that is really
+  his manual pin shows as the pin), `findExisting` backs `FoodApp.openPlace`, and `canonicalIdentity` is the
+  SAVE-PATH GUARD every visit save and want-to-try flag resolves through, so no route mints a second record.
+- Phone behaviour (B2046224): the toolbar is exactly one screen wide on a narrow viewport (search field flexes,
+  pin button reads "Pin") so focusing it can't scroll the header row; `FoodMap`'s flyTo has NO horizontal shift on a
+  phone (the panel is a bottom sheet) and re-centres above the sheet once it reports its height. Real-browser proof:
+  the verify-food-phone harness in the repo-root ui-audit folder (WebKit iPhone descriptors + its foodFixture helper, a fully mocked signed-in
+  Supabase — build with `VITE_SUPABASE_URL=https://plnrtestfood123456.supabase.co VITE_SUPABASE_ANON_KEY=fixture-anon`).
 - `lib/searchProximity.js` (B2051664) — orders the merged search list (saved + snapshot + live) nearest the visible map first: text band (exact name/address on top) → in-view → distance from centre, with a small head start for his own places. A bias, never a filter; client-side because the RPC has no viewport parameter. Pure JS.
 - `lib/supabaseClient.js` — this module's own client. See BUNDLE ISOLATION above for why it
   isn't the site-planner's.

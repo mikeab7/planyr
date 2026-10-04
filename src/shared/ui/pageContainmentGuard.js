@@ -47,6 +47,17 @@ export function detectDrift({ scrollX = 0, scrollY = 0, scale = 1 } = {}) {
   };
 }
 
+/** Is the soft keyboard (probably) up in `win`? An editable element is focused and the visual
+ *  viewport is markedly shorter than the layout viewport. */
+export function keyboardUp(win) {
+  try {
+    const vv = win.visualViewport;
+    const a = win.document && win.document.activeElement;
+    const editable = !!(a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)));
+    return !!vv && editable && (win.innerHeight - vv.height) > 120;
+  } catch (_) { return false; }
+}
+
 function readState(win) {
   const vv = win.visualViewport;
   return { scrollX: win.scrollX || 0, scrollY: win.scrollY || 0, scale: vv ? vv.scale : 1 };
@@ -91,9 +102,26 @@ export function installPageContainmentGuard(win = typeof window === "undefined" 
       // means the extra carries what was OBSERVED, not a value already corrected out from under it.
       if (found.extra.scrollDrift) win.scrollTo(0, 0);
       if (found.extra.scaleDrift) resetViewportScale(doc);
+      /* ⛔ NEW-6a — A SCROLL WITH THE KEYBOARD UP IS iOS REVEALING THE FOCUSED FIELD, NOT A STRAY
+       * DRAG. Production `client_errors` held iPhone rows "document scrolled to (0, 244/264/275/276)"
+       * — about a keyboard's height — i.e. iOS scrolling the pinned document to lift the field, and
+       * this guard undoing it. The pin stays (the header must not slide away), but (1) the heal is
+       * ANNOUNCED so the Notes canvas can pan the caret above the keyboard itself — the two now
+       * cooperate instead of fighting — and (2) it reports as its own kind, so a real drag is still
+       * distinguishable from the expected one. Inference, not proof: no real iPhone here. */
+      const kb = keyboardUp(win);
+      if (found.extra.scrollDrift && kb) {
+        try { win.dispatchEvent(new Event("planyr:viewport-healed")); } catch (_) { /* best-effort */ }
+      }
       const now = Date.now();
       if (now - lastReportAt < REPORT_THROTTLE_MS) return;
       lastReportAt = now;
+      if (found.extra.scrollDrift && kb && !found.extra.scaleDrift) {
+        report("page-containment-keyboard-reveal",
+          `document scrolled to (${found.extra.scrollX}, ${found.extra.scrollY}) with the keyboard up — iOS revealing the focused field; pinned back and announced so the canvas can reveal the caret`,
+          { ...found.extra, keyboardUp: true, url: win.location ? win.location.hash : "" });
+        return;
+      }
       report(found.kind, found.message, { ...found.extra, url: win.location ? win.location.hash : "" });
     } catch (_) { /* never throw into the app */ }
   };

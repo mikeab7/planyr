@@ -514,10 +514,14 @@ describe("no dialog boxes anywhere in the module (owner rule)", () => {
      *     layout effect every render, setter returns the previous object unless the value
      *     genuinely changed, so it cannot drift as the caret moves.
      *   `InsertMenu`'s `open` (NEW-1/NEW-9) — replaces the retired `OverflowMenu`'s own flag.
+     *   ⛔ RAISED 16 → 18 (NEW-6b, 2026-10-04) — two transient control-chrome flags for the phone
+     *     "More" panel, neither of which can mirror the editor: `moreOpen` (the panel is open) and
+     *     `moreBox` (where it hangs — `{ top, max }` measured off the bar's own
+     *     `getBoundingClientRect()` and `visualViewport`, so it never exceeds the visible area).
      * If a future change makes any of these read `editor.` at init, the sharp assertion above
      * fails first and this inventory is not what saves it. */
     const states = [...bar.matchAll(/useState\(/g)].length;
-    expect(states, "a mirrored active-state copy drifts the moment the caret moves").toBeLessThanOrEqual(16);
+    expect(states, "a mirrored active-state copy drifts the moment the caret moves").toBeLessThanOrEqual(18);
   });
 });
 

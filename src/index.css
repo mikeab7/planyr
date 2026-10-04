@@ -52,6 +52,9 @@
 * { box-sizing: border-box; }
 
 :root {
+  /* NEW-1 (B2018608): colour the map shows through the hairline gaps between aerial tiles — a dark
+     green-grey instead of Leaflet's default light grey, so a seam reads as a faint dark line, not a white one. */
+  --aerial-gap-bg: #2a3324;
   --font: "Inter", system-ui, sans-serif;  /* the one UI face — swap here only */
   /* B1998016 — tell the browser which palette the NATIVE controls (field fill, select popup, scrollbars,
      iOS Safari's form widgets) should use; without it a dark theme still gets light-scheme controls. */
@@ -704,6 +707,9 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
 
 /* card section headers */
 .sec-head:hover .sec-title { color: var(--text-primary); }
+/* Flat panels (owner NEW-1): a titled Section is a divider-separated group, not a card, so the
+   first one in a panel needs no rule above it (the panel header already draws one). */
+.flat-section:first-child { border-top: none !important; }
 
 /* color swatch inputs — clean rounded chip, no UA chrome */
 input[type="color"] {
@@ -791,6 +797,7 @@ input[type="range"] { height: 18px; }
 
 /* spinner — e.g. the "Preparing PDF…" indicator */
 @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes locate-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
 /* B860 (chat NEW-1) — verdict-changed flash on the Yield → Stormwater readout: a soft
    accent highlight that fades out, so a number that recomputed live (detention, mitigation,
@@ -986,3 +993,57 @@ html.click-ack-busy, html.click-ack-busy * { cursor: progress !important; }
 @media (prefers-reduced-motion: reduce) {
   .click-ack__ring { animation: none; }
 }
+
+/* NEW-1/NEW-2 — shared "my location" control (src/shared/map/locateControl.js). The blue is the
+ * same in both themes on purpose: the dot sits on imagery, not on chrome, and must read as "you
+ * are here" (Apple/Google blue), never as Planyr's orange action color. */
+:root { --locate-blue: #1A73E8; }
+.locate-marker { background: none; border: 0; pointer-events: none; }
+.locate-marker .locate-dot {
+  position: absolute; left: 50%; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px;
+  border-radius: 50%; background: var(--locate-blue); border: 3px solid #fff; box-sizing: border-box;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18), 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+.locate-marker .locate-cone {
+  position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+  background: conic-gradient(from -30deg at 50% 50%, var(--locate-blue) 0deg, var(--locate-blue) 60deg, transparent 60deg);
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, transparent 9px, #000 12px, transparent 32px);
+  mask-image: radial-gradient(circle at 50% 50%, transparent 9px, #000 12px, transparent 32px);
+  opacity: 0.75;
+}
+.locate-marker.locate-glide { transition: transform 0.5s linear; }
+path.locate-accuracy { stroke: var(--locate-blue); stroke-opacity: 0.55; fill: var(--locate-blue); fill-opacity: 0.14; pointer-events: none; }
+.leaflet-control-locate.leaflet-bar a { display: flex; align-items: center; justify-content: center; color: var(--chrome-text); }
+.leaflet-control-locate.leaflet-bar a svg { fill: none; }
+.leaflet-control-locate.leaflet-bar a[data-locate-state="following"] { color: var(--locate-blue); }
+.leaflet-control-locate.leaflet-bar a[data-locate-state="following"] svg { fill: currentColor; }
+.leaflet-control-locate.leaflet-bar a[data-locate-state="located"] { color: var(--locate-blue); }
+
+
+/* ───────── NEW-1 (B2018608) — shared aerial basemap treatment ─────────
+ * Tone grade: slightly darker, slightly desaturated aerial so roads, labels and pins read on top
+ * (the values mirror IMAGERY_GRADE in shared/basemaps/basemaps.js). On-screen layer only — the
+ * Site Plan PDF/image export stitches its own canvas and is never graded. */
+.planyr-imagery-graded { filter: brightness(0.9) saturate(0.8); }
+/* Seam fix: the container colour behind aerial tiles (see --aerial-gap-bg). */
+.leaflet-container.planyr-aerial-bg { background: var(--aerial-gap-bg); }
+
+/* NEW-6c — while the Notes editor has focus on a PHONE, the module-tab row (row 2) steps aside so a
+ * screen with the soft keyboard up has room to write. `NoteEditor.jsx` sets/clears
+ * `data-notes-typing` on <html> (phone width only, on editor focus/blur/unmount); the page actions that
+ * live in that row (Find, Page setup, History, Export) are in the toolbar's "More" sheet meanwhile.
+ * The editor folds the mat's resulting top-edge move into its view so the page does not jump
+ * (VIEWPORT-STABLE). Row 1 — settings, account, sync — stays. */
+html[data-notes-typing="1"] [data-header-row2] { display: none !important; }
+/* …and the floating help button and the zoom pill leave the writing area while typing (NEW-6d). */
+html[data-notes-typing="1"] [data-testid="note-zoom-pill"],
+html[data-notes-typing="1"] [data-testid="help-report-fab"] { display: none !important; }
+
+/* NEW-6d — the header's controls are 28–30 px tall inside 40 px rows. On a coarse pointer each button
+ * gets an invisible hit area the full height of its row (never wider: neighbours are 4 px apart, so a
+ * wider halo would steal their edges). Visible size unchanged. */
+@media (pointer: coarse) {
+  [data-header-zone] button { position: relative; }
+  [data-header-zone] button::after { content: ""; position: absolute; left: 0; right: 0; top: -6px; bottom: -6px; }
+}
+

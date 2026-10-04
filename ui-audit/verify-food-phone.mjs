@@ -1,174 +1,208 @@
 #!/usr/bin/env node
-/* verify-food-phone — NEW-1 (Food on a phone: first visit, dish ratings, keyboard, AutoFill).
+/* verify-food-phone — B2046224 (Food on a phone: search duplicates, map follow, search-bar layout).
  *
- * ENGINE: Playwright WebKit with the iPhone 15 device descriptor (touch, DPR 3). EMULATED, not on
- * device: it cannot open the real iOS keyboard (so the keyboard case stubs window.visualViewport
- * the way iOS behaves — layout viewport unchanged, visual viewport shrinks), cannot show Safari's
- * AutoFill bar (so the AutoFill case asserts the attributes iOS keys off), and cannot do a real
- * finger scroll (so scroll-vs-tap safety is asserted structurally: buttons, not a drag surface).
- * The on-device half is V1476080 in VERIFICATION.md.
+ * ENGINE: Playwright **WebKit** with the iPhone 15 device descriptor (touch, isMobile, DPR 3), against
+ * a build pointed at a MOCKED Supabase origin (ui-audit/lib/foodFixture.mjs). Nothing here touches the
+ * owner's data: every request is answered from the in-memory fixture and every write is recorded, not sent.
+ * Labels: this is WebKit-emulated-iPhone, NOT Mobile Safari. The on-screen keyboard cannot be raised in
+ * headless WebKit — "keyboard up" is EMULATED by shrinking the visual viewport height (setViewportSize).
  *
- * Drives ui-audit/fixtures/food-panel.html (the REAL VisitPanel, in-memory handlers) on a local vite
- * dev server — logged out, no Supabase, no real data.
- * Usage: npx vite --port 5199 & ; node ui-audit/verify-food-phone.mjs [baseUrl]   (exit 1 on any FAIL)
+ * Arms (each prints a row; exit 1 on any FAIL):
+ *   1 DUPLICATE  — search "dao": exactly ONE row for the pair; picking it opens the EXISTING pin
+ *                  (its past visit is on screen) and logging does NOT mint a second record.
+ *   2 MAP-FOLLOW — picking a never-saved restaurant (9 km away) moves the camera so its pin sits in the
+ *                  visible map area (above the bottom sheet), and the panel names it.
+ *   3 LAYOUT     — focus + type in the search field: the Map/List toggle AND the field both stay
+ *                  fully on screen, and each is the topmost thing at its own centre (not clipped / covered).
+ * Controls: a chain ("torchy") keeps both genuinely-different branches; desktop width is unaffected.
+ *
+ * Usage: node ui-audit/verify-food-phone.mjs [baseUrl]   (build with the fixture env first — see foodFixture.mjs)
  */
-import { webkit, devices } from "playwright";
+import { webkit, chromium, devices } from "playwright";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { makeFixture, installFixture } from "./lib/foodFixture.mjs";
 
-const BASE = process.argv[2] || "http://localhost:5199";
-const FIX = `${BASE}/ui-audit/fixtures/food-panel.html`;
+const BASE = process.argv[2] || "http://localhost:4180";
 const results = [];
-const check = (id, ok, detail = "") => { results.push({ id, ok: !!ok, detail }); console.log(`${ok ? "PASS" : "FAIL"}  ${id}${detail ? "  — " + detail : ""}`); };
+const row = (arm, ok, detail) => { results.push({ arm, ok, detail }); console.log(`${ok ? "PASS" : "FAIL"}  ${arm} — ${detail}`); };
 
-// iOS behaviour: the LAYOUT viewport stays put when the keyboard opens; only visualViewport shrinks.
-const VV_STUB = () => {
-  const target = new EventTarget();
-  const vv = Object.assign(target, { width: innerWidth, height: innerHeight, offsetTop: 0, offsetLeft: 0, scale: 1, pageTop: 0, pageLeft: 0 });
-  Object.defineProperty(window, "visualViewport", { value: vv, configurable: true });
-  window.__setKeyboard = (px) => { vv.height = innerHeight - px; vv.dispatchEvent(new Event("resize")); vv.dispatchEvent(new Event("scroll")); };
-};
-
-async function open(browser, url, { desktop = false } = {}) {
-  const ctx = await browser.newContext(desktop
-    ? { viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true }
-    : { ...devices["iPhone 15"], ignoreHTTPSErrors: true });
-  await ctx.addInitScript(VV_STUB);
+async function open(browser, { variant = "plain", device = "iPhone 15", viewport } = {}) {
+  const ctx = await browser.newContext({ ...(device ? devices[device] : {}), ...(viewport ? { viewport } : {}), ignoreHTTPSErrors: true });
   const page = await ctx.newPage();
-  page.setDefaultTimeout(3000);
-  const errs = []; page.on("pageerror", (e) => errs.push(e.message));
-  await page.goto(url, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector('[data-testid="food-actions-row"], [data-testid="food-visit-card"]', { timeout: 15000 });
+  page.__touch = !!device;
+  const state = makeFixture({ variant });
+  const errors = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await installFixture(page, state);
+  await page.goto(`${BASE}/#/food`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="food-map"]', { timeout: 20000 });
   await assertMeasurable(page, "verify-food-phone");
-  await page.waitForTimeout(600);
-  return { ctx, page, errs };
+  await page.waitForFunction(() => !!window.__foodMap, null, { timeout: 10000 });
+  await page.waitForTimeout(600); // initial bounds fetch + visits load
+  return { ctx, page, state, errors };
 }
-const tap = (page, sel) => page.locator(sel).first().tap();
-const rect = (page, sel) => page.locator(sel).first().evaluate((el) => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, bottom: r.bottom }; });
 
-const section = async (fn) => { try { await fn(); } catch (e) { check("section aborted", false, String(e.message).split("\n")[0]); } };
-const browser = await webkit.launch();
+const searchBox = (page) => page.locator('[data-testid="food-search-box"]');
+async function typeInSearch(page, text) {
+  const box = searchBox(page);
+  if (page.__touch) await box.tap(); else await box.click();
+  await page.keyboard.type(text, { delay: 30 });
+  await page.waitForTimeout(700); // debounce + RPC
+}
+const resultNames = (page) => page.locator('[data-testid="food-search-results"] button').evaluateAll((bs) => bs.map((b) => b.innerText.replace(/\s+/g, " ").trim()));
+
+async function pinPoint(page, lat, lon) {
+  return page.evaluate(([la, lo]) => {
+    const m = window.__foodMap; const p = m.latLngToContainerPoint([la, lo]); const s = m.getSize();
+    return { x: p.x, y: p.y, w: s.x, h: s.y, zoom: m.getZoom() };
+  }, [lat, lon]);
+}
+const centre = (page) => page.evaluate(() => { const c = window.__foodMap.getCenter(); return { lat: c.lat, lon: c.lng }; });
+
+async function armDuplicate(browser, variant) {
+  const { ctx, page, state, errors } = await open(browser, { variant });
+  await typeInSearch(page, "dao");
+  const names = await resultNames(page);
+  const daon = names.filter((n) => /dao.?n/i.test(n));
+  row(`1 DUPLICATE (${variant}): one row for the pair`, daon.length === 1, `rows=${JSON.stringify(daon)}`);
+  // Pick EVERY dao row in turn on a fresh page so a duplicate can't hide behind "the first one works".
+  for (let i = 0; i < daon.length; i++) {
+    const pg = i === 0 ? page : (await open(browser, { variant })).page;
+    if (i > 0) await typeInSearch(pg, "dao");
+    await pg.locator('[data-testid="food-search-results"] button').filter({ hasText: /dao.?n/i }).nth(i).tap();
+    await pg.waitForTimeout(600);
+    const panelText = await pg.locator("body").innerText();
+    const hasPast = /noodles/i.test(panelText) || /8\.5/.test(panelText);
+    row(`1 DUPLICATE (${variant}): row ${i + 1} opens the EXISTING restaurant (past visit shown)`, hasPast, `past-visit-visible=${hasPast}`);
+  }
+  // Save path: log a visit from the opened panel and count what was written.
+  const openForm = page.locator('[data-testid="food-log-visit-btn"]').first();
+  if (await openForm.count()) {
+    await openForm.tap(); await page.waitForTimeout(400);
+    await page.getByRole("button", { name: "Log this visit", exact: true }).last().tap();
+    await page.waitForTimeout(900);
+    const posts = state.writes.filter((w) => w.method === "POST");
+    const b = posts[0]?.body;
+    const reusesPin = !!b && b.place_id == null && b.custom_name === state.manualName && Math.abs(b.custom_lat - 29.7380) < 1e-9;
+    row(`1 DUPLICATE (${variant}): logging reuses the existing pin, mints no second record`, posts.length === 1 && reusesPin, `posts=${posts.length} body=${JSON.stringify(b && { place_id: b.place_id, custom_name: b.custom_name, custom_lat: b.custom_lat })}`);
+  } else row(`1 DUPLICATE (${variant}): save-path probe`, false, "no log-visit button found (instrument could not reach the save control)");
+  if (errors.length) row(`1 DUPLICATE (${variant}): no page errors`, false, errors.join(" | "));
+  await ctx.close();
+}
+
+/* Where the pin sits, as a fraction of the area the panel leaves visible. PHONE: the visible area is the
+ * map minus the bottom sheet (full width). DESKTOP: the map minus the 340-wide right rail. The pin must land
+ * near the middle of that area — "inside it" is too loose (a pin hugging the edge passes) so the bound is a
+ * central band. */
+async function visibleArea(page) {
+  return page.evaluate(() => {
+    const host = document.querySelector('[data-testid="food-map"]').getBoundingClientRect();
+    const sheet = document.querySelector('[data-testid="food-bottom-sheet"]');
+    const rail = document.querySelector('[data-testid="food-visit-panel"]');
+    let right = host.width, bottom = host.height, mode = "none";
+    if (sheet) { bottom = Math.max(0, sheet.getBoundingClientRect().top - host.top); mode = "sheet"; }
+    else if (rail) { right = Math.max(0, rail.getBoundingClientRect().left - host.left); mode = "rail"; }
+    return { right, bottom, w: host.width, h: host.height, mode };
+  });
+}
+
+async function armMapFollow(browser, { label, device, viewport }) {
+  const { ctx, page } = await open(browser, { device, viewport });
+  const tapOrClick = (loc) => (device ? loc.tap() : loc.click());
+  const fadis = { lat: 29.6800, lon: -95.4600 };
+  const before = await centre(page);
+  await searchBox(page).click();
+  await page.keyboard.type("fadi", { delay: 30 });
+  await page.waitForTimeout(700);
+  const names = await resultNames(page);
+  row(`2 MAP-FOLLOW (${label}): never-saved restaurant is in the results`, names.some((n) => /fadi/i.test(n)), JSON.stringify(names));
+  await tapOrClick(page.locator('[data-testid="food-search-results"] button').filter({ hasText: /fadi/i }).first());
+  await page.waitForTimeout(3200); // flyTo is capped at 1.5 s; + sheet settle
+  const pt = await pinPoint(page, fadis.lat, fadis.lon);
+  const area = await visibleArea(page);
+  const cx = area.right / 2, cy = area.bottom / 2;
+  const centred = Math.abs(pt.x - cx) <= area.right * 0.2 && Math.abs(pt.y - cy) <= area.bottom * 0.2;
+  const after = await centre(page);
+  const moved = Math.abs(after.lat - before.lat) > 0.01 || Math.abs(after.lon - before.lon) > 0.01;
+  row(`2 MAP-FOLLOW (${label}): camera moved toward the pick`, moved, `centre ${before.lat.toFixed(3)},${before.lon.toFixed(3)} → ${after.lat.toFixed(3)},${after.lon.toFixed(3)}`);
+  row(`2 MAP-FOLLOW (${label}): pin is near the middle of the visible area (${area.mode})`, area.mode !== "none" && centred, `pin=(${pt.x.toFixed(0)},${pt.y.toFixed(0)}) wanted≈(${cx.toFixed(0)},${cy.toFixed(0)}) visible=${area.right.toFixed(0)}x${area.bottom.toFixed(0)} map=${pt.w}x${pt.h} zoom=${pt.zoom}`);
+  const marked = await page.locator('[data-testid="food-map"]').getAttribute("data-selected-pin");
+  row(`2 MAP-FOLLOW (${label}): the pick is marked as the selected pin`, marked === "place:fx-fadis", `data-selected-pin=${JSON.stringify(marked)}`);
+  await ctx.close();
+}
+
+async function armMapFollowFromList(browser) {
+  const { ctx, page } = await open(browser, { variant: "plain" });
+  await page.getByRole("button", { name: "List", exact: true }).tap();
+  await page.waitForTimeout(500);
+  await page.locator("text=/dao.?n/i").first().tap();
+  await page.waitForTimeout(500);
+  await page.getByRole("button", { name: "Map", exact: true }).tap();
+  await page.waitForTimeout(2500);
+  const pt = await pinPoint(page, 29.7380, -95.5300);
+  const area = await visibleArea(page);
+  const ok = area.mode !== "none" && Math.abs(pt.x - area.right / 2) <= area.right * 0.2 && Math.abs(pt.y - area.bottom / 2) <= area.bottom * 0.2;
+  row("2 MAP-FOLLOW (from the list): pick centres the map on that pin", ok, `pin=(${pt.x.toFixed(0)},${pt.y.toFixed(0)}) wanted≈(${(area.right / 2).toFixed(0)},${(area.bottom / 2).toFixed(0)}) mode=${area.mode}`);
+  await ctx.close();
+}
+
+async function armLayout(browser, { label, viewport, device }) {
+  const { ctx, page } = await open(browser, { viewport, device });
+  const measure = async () => page.evaluate(() => {
+    const vv = window.visualViewport; const W = vv ? vv.width : innerWidth; const H = vv ? vv.height : innerHeight;
+    const btn = (t) => [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === t);
+    const input = document.querySelector('[data-testid="food-search-box"]');
+    const rect = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { l: Math.round(r.left), r: Math.round(r.right), t: Math.round(r.top), b: Math.round(r.bottom) }; };
+    const hit = (el) => { if (!el) return false; const r = el.getBoundingClientRect(); const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!e && (e === el || el.contains(e)); };
+    const map = btn("Map"), list = btn("List");
+    return { W, H, toggle: rect(map), list: rect(list), input: rect(input), hit: [hit(map), hit(list), hit(input)] };
+  });
+  const fits = (m, key) => m[key] && m[key].l >= 0 && m[key].r <= m.W + 0.5 && m[key].t >= 0 && m[key].b <= m.H + 0.5;
+  const allOk = (m) => fits(m, "toggle") && fits(m, "list") && fits(m, "input") && m.hit.every(Boolean);
+  const before = await measure();
+  row(`3 LAYOUT (${label}): at rest, toggle + field fully on screen & hittable`, allOk(before), JSON.stringify(before));
+  await typeInSearch(page, "dao");
+  const typed = await measure();
+  row(`3 LAYOUT (${label}): while typing, toggle + field stay fully on screen & hittable`, allOk(typed), JSON.stringify(typed));
+  const scrollX = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1);
+  row(`3 LAYOUT (${label}): no sideways page scroll`, !scrollX, `scrollWidth>innerWidth=${scrollX}`);
+  if (device) {
+    const vp = page.viewportSize();
+    await page.setViewportSize({ width: vp.width, height: Math.round(vp.height * 0.55) }); // EMULATED keyboard-up
+    await page.waitForTimeout(500);
+    const kb = await measure();
+    row(`3 LAYOUT (${label}): keyboard-up (emulated), toggle + field still on screen & hittable`, allOk(kb), JSON.stringify(kb));
+  }
+  await ctx.close();
+}
+
+async function armChain(browser) {
+  const { ctx, page } = await open(browser);
+  await typeInSearch(page, "torchy");
+  const names = (await resultNames(page)).filter((n) => /torchy.*fixture way/i.test(n));
+  row("CONTROL chain: two genuinely different branches stay two rows", names.length === 2, JSON.stringify(names));
+  await ctx.close();
+}
+
+const wk = await webkit.launch();
 try {
-  // ── 1. FIRST VISIT captures dishes + ratings; no "What I had" ─────────────────────────────────
-  await section(async () => {
-    const { ctx, page, errs } = await open(browser, FIX);
-    await tap(page, '[data-testid="food-log-visit-btn"]');
-    await page.waitForTimeout(400);
-    const labels = await page.locator("form label").allInnerTexts();
-    check("1a no 'What I had' field on a new visit", !labels.some((t) => /what i had/i.test(t)), JSON.stringify(labels.map((t) => t.split("\n")[0])));
-    check("1b new visit has a Dishes block with a name field", (await page.locator('[data-testid="visit-dishes"] [data-testid="visit-dish-name"]').count()) >= 1);
-    await page.locator('[data-testid="visit-dish-name"]').first().fill("Brisket plate");
-    // one tap on "8" sets 8
-    const row = page.locator('[data-testid="visit-dish-row"]').first();
-    await row.locator('[data-testid="score-tap-8"]').tap().catch(() => {});
-    const numeral = await row.locator('[data-testid="dish-score-numeral"]').innerText().catch(() => "");
-    check("1c one tap on 8 sets the dish rating to 8", /^8\b/.test(numeral.trim()), JSON.stringify(numeral));
-    // second dish
-    await tap(page, '[data-testid="visit-dish-add"]').catch(() => {});
-    const rows2 = await page.locator('[data-testid="visit-dish-row"]').count();
-    check("1d 'add another dish' gives a second dish row", rows2 === 2, `rows=${rows2}`);
-    if (rows2 === 2) {
-      await page.locator('[data-testid="visit-dish-name"]').nth(1).fill("Queso");
-      await page.locator('[data-testid="visit-dish-row"]').nth(1).locator('[data-testid="score-tap-6"]').tap();
-    }
-    await page.locator('form button[type="submit"]').tap();
-    await page.waitForTimeout(500);
-    const call = await page.evaluate(() => window.__calls.visits[0]);
-    const d = call?.dishes || [];
-    check("1e submit carries both dishes with ratings", d.length === 2 && d[0].name === "Brisket plate" && d[0].score === 8 && d[1].name === "Queso" && d[1].score === 6, JSON.stringify(call?.dishes));
-    check("1f no what_i_had text is written for a new visit", !call?.what_i_had, JSON.stringify(call?.what_i_had));
-    check("1g no page errors", errs.length === 0, errs.join(" | "));
-    await ctx.close();
-  });
+  await armDuplicate(wk, "plain");
+  await armDuplicate(wk, "case");
+  await armDuplicate(wk, "curly");
+  await armMapFollow(wk, { label: "WebKit iPhone 15", device: "iPhone 15" });
+  await armMapFollowFromList(wk);
+  await armLayout(wk, { label: "WebKit iPhone 15", device: "iPhone 15" });
+  await armLayout(wk, { label: "WebKit iPhone SE", device: "iPhone SE" });
+  await armChain(wk);
+} finally { await wk.close(); }
 
-  // ── 2. RATING control is thumb-friendly ───────────────────────────────────────────────────────
-  await section(async () => {
-    const { ctx, page } = await open(browser, FIX);
-    await tap(page, '[data-testid="food-log-visit-btn"]');
-    await page.waitForTimeout(400);
-    const btns = page.locator('[data-testid="visit-dish-row"] [data-testid^="score-tap-"]:not([data-testid="score-tap-grid"])');
-    const n = await btns.count();
-    check("2a rating offers ten tap targets (1–10)", n === 10, `n=${n}`);
-    let minW = 1e9, minH = 1e9;
-    for (let i = 0; i < n; i++) { const r = await btns.nth(i).evaluate((e) => { const b = e.getBoundingClientRect(); return [b.width, b.height]; }); minW = Math.min(minW, r[0]); minH = Math.min(minH, r[1]); }
-    check("2b every rating target is at least 44 x 44", n > 0 && minW >= 44 && minH >= 44, `min ${minW.toFixed(1)}x${minH.toFixed(1)}`);
-    const sliders = await page.locator('[data-testid="visit-dish-row"] input[type="range"]').count();
-    check("2c no drag-slider inside the scrolling phone form's dish rows (a scroll can't mis-set it)", n > 0 && sliders === 0, `sliders=${sliders}`);
-    const foodSliders = await page.locator('form input[type="range"]').count();
-    check("2d visit-level Food/Ambiance ratings are tap targets too on a phone", foodSliders === 0, `range inputs=${foodSliders}`);
-    await ctx.close();
-  });
-
-  // ── 3. KEYBOARD must not cover the field or Save ──────────────────────────────────────────────
-  await section(async () => {
-    const { ctx, page } = await open(browser, FIX);
-    await tap(page, '[data-testid="food-log-visit-btn"]');
-    await page.waitForTimeout(500);
-    const name = page.locator('[data-testid="visit-dish-name"], form input[type="text"]').first();
-    await name.tap();
-    await page.evaluate(() => window.__setKeyboard(336)); // a typical iPhone keyboard height
-    await page.waitForTimeout(700);
-    const vvH = await page.evaluate(() => window.visualViewport.height);
-    const nr = await name.evaluate((el) => el.getBoundingClientRect().bottom);
-    const save = page.locator('form button[type="submit"]');
-    const sr = await save.evaluate((el) => el.getBoundingClientRect().bottom);
-    const sheet = await rect(page, '[data-testid="food-bottom-sheet"]');
-    check("3a focused field is above the keyboard", nr <= vvH, `field bottom ${nr.toFixed(0)} vs visible ${vvH.toFixed(0)}`);
-    check("3b Save is above the keyboard", sr <= vvH, `save bottom ${sr.toFixed(0)} vs visible ${vvH.toFixed(0)}`);
-    check("3c the sheet itself rides above the keyboard", sheet.bottom <= vvH + 1, `sheet bottom ${sheet.bottom.toFixed(0)} vs visible ${vvH.toFixed(0)}`);
-    await page.evaluate(() => window.__setKeyboard(0));
-    await page.waitForTimeout(500);
-    const sheet2 = await rect(page, '[data-testid="food-bottom-sheet"]');
-    const ih = await page.evaluate(() => innerHeight);
-    check("3d keyboard dismissed -> sheet returns to the screen bottom", Math.abs(sheet2.bottom - ih) <= 1, `sheet bottom ${sheet2.bottom.toFixed(0)} vs ${ih}`);
-    await ctx.close();
-  });
-
-  // ── 4. AUTOFILL: nothing here may look like a contact field ───────────────────────────────────
-  await section(async () => {
-    const { ctx, page } = await open(browser, `${FIX}?newpin=1`);
-    await tap(page, '[data-testid="food-log-visit-btn"]');
-    await page.waitForTimeout(400);
-    const fields = await page.locator("form input:not([type=range]):not([type=date]):not([type=number]), form textarea, input[placeholder='Name this place'], form input[type=number]").evaluateAll((els) =>
-      els.map((e) => ({ ph: e.placeholder, ac: e.getAttribute("autocomplete"), nm: e.getAttribute("name"), id: e.id })));
-    const contact = /(^|[^a-z])(name|first|last|full|email|phone|tel|address|street|city|zip|postal|org|company)([^a-z]|$)/i;
-    const bad = fields.filter((f) => f.ac !== "off" || contact.test(f.nm || "") || contact.test(f.id || ""));
-    check("4a every text field opts out of AutoFill (autocomplete=off) with a non-contact name", fields.length >= 3 && bad.length === 0, bad.length ? JSON.stringify(bad) : `${fields.length} fields clean`);
-    await ctx.close();
-  });
-
-  // ── 5. ADJACENT: editing an existing visit; desktop unaffected ────────────────────────────────
-  await section(async () => {
-    const { ctx, page, errs } = await open(browser, `${FIX}?visits=1`);
-    const hadShown = await page.locator('[data-testid="food-visit-card"]').innerText();
-    check("5a old visit still shows its saved 'What I had' text", /Brisket plate, queso/.test(hadShown), JSON.stringify(hadShown.slice(0, 80)));
-    await page.locator('[data-testid="food-visit-card"]').tap();
-    await page.waitForTimeout(400);
-    const editText = await page.locator('[data-testid="food-visit-card-editing"]').innerText();
-    check("5b editing that visit keeps the saved text readable (not dropped)", /Brisket plate, queso/.test(editText), "");
-    check("5c editing does not offer a second, editable 'What I had' box", (await page.locator('[data-testid="food-visit-card-editing"] form label', { hasText: /what i had/i }).count()) === 0);
-    await page.locator('[data-testid="food-visit-card-editing"] form button[type="submit"]').tap();
-    await page.waitForTimeout(400);
-    const edit = await page.evaluate(() => window.__calls.edits[0]);
-    check("5d saving the edit does not overwrite or null the old text", edit && !("what_i_had" in edit.fields), JSON.stringify(edit?.fields));
-    check("5e no page errors editing", errs.length === 0, errs.join(" | "));
-    await ctx.close();
-  });
-  await section(async () => {
-    const { ctx, page } = await open(browser, FIX, { desktop: true });
-    await page.locator('[data-testid="food-log-visit-btn"]').click();
-    await page.waitForTimeout(300);
-    const sheet = await page.locator('[data-testid="food-bottom-sheet"]').count();
-    check("5f desktop still uses the side panel (no bottom sheet)", sheet === 0);
-    const sliders = await page.locator('form input[type="range"]').count();
-    check("5g desktop keeps the slider ratings", sliders >= 2, `range inputs=${sliders}`);
-    check("5h desktop has the Dishes block and no 'What I had'", (await page.locator('[data-testid="visit-dishes"]').count()) === 1 && (await page.locator("form label", { hasText: /what i had/i }).count()) === 0);
-    const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
-    check("5i desktop has no horizontal overflow", !overflow);
-    await ctx.close();
-  });
-} finally {
-  await browser.close();
+const cr = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium", args: ["--ignore-certificate-errors"] });
+try {
+  await armLayout(cr, { label: "Chromium desktop 1440", viewport: { width: 1440, height: 900 }, device: null });
+  await armMapFollow(cr, { label: "Chromium desktop 1440", viewport: { width: 1440, height: 900 }, device: null });
 }
+finally { await cr.close(); }
+
 const failed = results.filter((r) => !r.ok);
-console.log(`\n${results.length - failed.length}/${results.length} passed (WebKit, iPhone 15 descriptor — EMULATED, see header)`);
+console.log(`\n${results.length - failed.length}/${results.length} checks passed.`);
 process.exit(failed.length ? 1 : 0);

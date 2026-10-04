@@ -168,7 +168,7 @@ was never clicked" quietly ships broken.
 
 ### V1476080 — B2057920: Food on a phone — first visit with dish ratings, tap ratings, keyboard, no contact-card AutoFill `Blocker: auth`
 
-Sandbox-proven (Playwright WebKit, iPhone 15 descriptor, EMULATED, logged out, fixture page): `ui-audit/verify-food-phone.mjs` 25/25 (6/21 on the unfixed code) · `test/foodPhone.test.js`. Not reachable there: a signed-in save, the real iOS keyboard, Safari's AutoFill bar, a real finger scroll. **Steps** (iPhone Safari, signed in on planyr.io/#/food; read the served chunk hash — `document.querySelectorAll('script[src]')` or /version.json no-store — in the same observation; use a NEW pin or a throwaway place, never a place with real history):
+Sandbox-proven (Playwright WebKit, iPhone 15 descriptor, EMULATED, logged out, fixture page): `ui-audit/verify-food-visit-phone.mjs` 25/25 (6/21 on the unfixed code) · `test/foodPhone.test.js`. Not reachable there: a signed-in save, the real iOS keyboard, Safari's AutoFill bar, a real finger scroll. **Steps** (iPhone Safari, signed in on planyr.io/#/food; read the served chunk hash — `document.querySelectorAll('script[src]')` or /version.json no-store — in the same observation; use a NEW pin or a throwaway place, never a place with real history):
 1. Tap a place that has never been visited → **Log a visit**. **Expect:** the form opens on a **Dishes** block (a dish field + a 1–10 rating); there is NO "What I had" field anywhere.
 2. Tap the dish field. **Expect:** the keyboard opens and the dish field stays visible above it, and **Log this visit** stays visible above the keyboard without scrolling the page; type a name. **Expect:** no "Autofill Contact" / contact-card suggestion bar appears above the keyboard on this field, the Cost field, the Notes field, or a dropped-pin "Name this place" field.
 3. Dismiss the keyboard, then tap **8** in the dish rating with your thumb. **Expect:** it reads 8 / 10 on the first tap. Put a finger on the rating buttons and scroll the sheet up and down. **Expect:** the rating does not change from scrolling. Tap **+ Add another dish**, name it, tap **6**. **Expect:** a second dish row, rated 6.
@@ -176,6 +176,67 @@ Sandbox-proven (Playwright WebKit, iPhone 15 descriptor, EMULATED, logged out, f
 5. Open an OLDER visit that was logged before this change and has "Had …" text. **Expect:** the text still shows on the card and, in the edit form, as "What I had (saved earlier)" (read-only); change the rating and save. **Expect:** the "Had …" text is unchanged afterward.
 6. Rotate to landscape with the keyboard up in the dish field. **Expect:** the field and Save are still visible; rotate back and dismiss the keyboard. **Expect:** the sheet returns to the bottom edge, nothing stuck high.
 - **Stopping rule:** closes on a dated pass of 1–6, or a failed step filed as a recurrence on B2057920 (name which of: keyboard / AutoFill / rating / first-visit).
+### V1474512 — B2050928: Food map controls match — both segmented controls identical, info button md and unclipped, nothing in the toolbar clipped `Blocker: live-GIS (planyr.io is not reachable from the sandbox; no sign-in needed — browsing the map works logged out)`
+
+Sandbox-proven: `ui-audit/ui-inventory.mjs --budget-only` relational gate green on the four Food surfaces (RED on untouched main, named); `test/foodModule.test.js` 426/426. **Steps** (planyr.io at phone width, `#/food`, Map view; read the build from `/version.json` AND the served chunk hash in the same observation; fixtures only — never write to the real food list):
+1. Look at the toolbar row. **Expect:** Map | List, Drop a pin and the search field all fit on screen, nothing cut off or scrolling sideways; the search field fills the remaining width.
+2. Compare Map | List with Site Plan | Hybrid (top right of the map). **Expect:** identical shape and height; the selected segment is the same red fill with WHITE text in both (also in dark theme).
+3. Look at the "i" button beside the basemap toggle. **Expect:** a rounded square the same height as the toggle, level with its top edge, fully on screen, not a circle; tapping it opens the credit.
+4. Compare the top edges of the zoom +/− stack (left) and the toggle/"i" (right). **Expect:** same top edge and same distance from the screen sides.
+5. Zoom far out. **Expect:** the hint is a rounded rectangle like the other messages and does NOT overlap the "?" help button; on desktop width the credit line at the bottom-right sits left of the "?" button, not under it.
+6. Switch to List. **Expect:** Date / Rating / Ambiance / Cost / Want to try are matching pill chips; nothing clipped.
+- **Stopping rule:** closes on a dated pass of 1–6, or a failed step filed as a recurrence on B2050928.
+### V1471312 — B2046224: Food on a phone — one row per restaurant, a pick lands the map on it, the Map/List toggle stays on screen while typing `Blocker: auth`
+
+Sandbox-proven in WebKit-emulated iPhone 15 / SE against a MOCKED Supabase (`ui-audit/verify-food-phone.mjs`, 30/30; 16/33 on the unfixed build) plus `test/foodPlaceIdentity.test.js`. Not provable here: his real signed-in data, Mobile Safari's real keyboard and collapsing toolbar, and the literal "the map did not move" report (it did not reproduce — the pin was mis-centred / under the sheet). **Steps** (planyr.io/#/food on his iPhone, signed in; read the served chunk hash in the same observation; do NOT save anything to the real list — cancel out of the visit form, or use a throwaway restaurant he is happy to delete):
+1. Tap the search field and type `dao`. **Expect:** ONE DAO'N row (marked "Been here"), not two; the Map / List toggle, the Pin button and the search field are all visible together the whole time the keyboard is up.
+2. Tap that row. **Expect:** the map slides to DAO'N, its pin sits in the middle of the map area ABOVE the card (not at the left edge, not under the card) and is drawn in the larger "selected" style; the card shows its existing past visits.
+3. Clear the search, type a restaurant he has never saved (e.g. `fadi`) and tap it. **Expect:** same centring above the card; the card shows no past visits.
+4. Switch to List, tap any row, switch back to Map. **Expect:** the map is on that restaurant, centred above the card.
+5. Open a restaurant he has saved twice under slightly different spellings (apostrophe / capitalisation) if one exists. **Expect:** still one search row.
+6. Rotate to landscape and back with the field focused. **Expect:** the toggle and field stay on screen.
+7. Desktop browser at full width: toolbar looks as before; picking a result still centres the pin in the area LEFT of the right-hand panel.
+- **Stopping rule:** closes on a dated pass of 1–7, or a failed step filed as a recurrence on B2046224.
+### V1486288 — B2061600: Select-parcels outlines do not catch when a zoom or pan settles at zoom 14–16 in Bartow County GA `Blocker: real-data`
+
+Sandbox-proven: `ui-audit/verify-parcel-settle-cost.mjs` (z14 moveend settle 103.7 → 0.8 ms, mock at Bartow density), `test/parcelTileLayer.test.js`, and the existing parcel display harnesses. **Not provable here:** Michael's real 63,688-lot Bartow service, his GPU-accelerated Chrome, and how it *feels*. Read the served chunk hash in the SAME observation as the result (CLAUDE.md live-measurement rule).
+**Steps:**
+1. Map (#/site), centre 34.20 / -84.83 (his site A010-0202-001), turn Select parcels on. **Expect:** lot outlines draw as before (same colour/weight), only the lots in view.
+2. Zoom between levels 14, 15 and 16 and let each settle; then pan a short distance and let it settle. **Expect:** no visible catch when the map stops moving at any of the three levels (the reported "catch at 15, a clear one at 14" is gone). A brief hold right after zooming OUT while new lots stream in is the separate data-arrival cost (see B2061600) — record it if you see it, do not call it a pass or a fail of this check.
+3. At 14 and again at 16, click one lot. **Expect:** the lot that was under the cursor is selected and highlighted (B137: what you see is what you can select); hover/selected styling unchanged.
+4. Zoom out to 13. **Expect:** outlines hidden with the "zoom in a little to see the lines" hint, unchanged.
+5. Dense Texas check: Katy (29.786 / -95.825, Harris) then a Fort Bend view, Select parcels on, zoom 14–16. **Expect:** outlines draw, no catch, a lot click selects the right lot.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2061600.
+### V1445360 — B2020272/B2020273: blue my-location marker, heading cone and arrow button on a real iPhone `Blocker: real-device (iOS compass permission prompt and the heading cone need a real phone; the sandbox has no sensors or map tiles)`
+
+Sandbox-proven: `ui-audit/verify-locate-marker.mjs` (colors, ring, pane order, metre-accurate circle at two zooms, cone present/absent, button states) and `test/locateHeading.test.js`. Left for the phone:
+1. On the iPhone in Safari, open `planyr.io` → Site tab; read `/version.json` in the same check. Tap the locate button (arrow icon, bottom-left under +/−). **Expect:** Safari asks for location, then for Motion & Orientation access; the arrow turns solid blue; a blue dot with a white ring appears at your position (NOT orange), with a soft blue circle around it.
+2. Slowly turn your body. **Expect:** a soft blue wedge from the dot points the way the phone faces and swings with you.
+3. Pinch in and out. **Expect:** the soft circle grows and shrinks with the map (real ground size), and fades away when zoomed far out.
+4. Drag the map away. **Expect:** the arrow turns outline-blue; tap it and the map re-centres (solid again). Tap once more. **Expect:** tracking off, dot gone, arrow gray outline.
+5. Tap a parcel under where the dot sits. **Expect:** the parcel still selects (the dot never blocks the tap).
+6. Repeat step 1 but answer **Don't Allow** to the Motion prompt. **Expect:** dot and circle still show, no wedge, no error.
+### V1479952 — B2061792: a non-closing deed warns on the reader, the plot toast and the panel `Blocker: real-data (the Grand Port group's saved plans)`
+
+Sandbox-proven: `test/deedGap.test.js`, `ui-audit/verify-deed-closure-warning.mjs` (real Tract 1 calls, logged-out). Pending: the same on a real signed-in plan. **Steps** (planyr.io; read the served chunk hash in the same observation; use the throwaway **"Concept A (copy)"** plan in the Grand Port group — NEVER Concept A):
+1. Parcel tools → Deed / Title, paste the Tract 1 description. **Expect:** the summary line reads in red "⚠ does NOT close — misses by 31.4 ft (1:312)" and never says "closes".
+2. Plot on canvas, click a point of beginning. **Expect:** a red ⚠ toast "This description does not close — it misses by 31.4 ft…", with the red dashed gap line on the canvas.
+3. Select the deed, open Properties. **Expect:** the closure line is red and agrees with step 1.
+4. Paste an exactly-closing description. **Expect:** reader says "closes", plot toast is the plain "Boundary placed.".
+- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2061792.
+
+### V1443696 — B2018608: vector roads + labels basemap (Food + Site Plan map) `Blocker: live-GIS`
+
+Sandbox-proven at dpr 2 against a SYNTHETIC OpenMapTiles fixture (`ui-audit/verify-vector-basemap.mjs`, 28/28); the sandbox cannot reach `tiles.openfreemap.org`, so the **real source, its CORS headers and the real map look are unverified**. **Steps** (planyr.io, read the served chunk hash in the same observation; `node ui-audit/verify-vector-basemap.mjs https://planyr.io --live` runs the mechanical half):
+1. Open `/food` fresh (clear `planyr:food:basemap`) at Houston metro zoom, and the Site tab's Map at the same zoom. **Expect:** /food opens on **Site Plan** and looks IDENTICAL to the Site map — satellite + Planyr's clean white city names, NO road lines. Zoom in past parcel zoom on both: clean thin roads + names appear on both at the same zoom; no "Crisp road labels unavailable" notice (if it shows, OpenFreeMap was blocked/CORS-refused — file that on B2018608).
+2. Tap **Hybrid** on /food at metro zoom, then neighbourhood zoom. **Expect:** freeways/major roads and place names at metro, no edge-to-edge bands; local streets only at neighbourhood zoom; road names follow the road line; no two labels overlap; no heavy black outlines; the aerial is slightly toned.
+3. Pan and zoom (wheel + buttons). **Expect:** labels stay glued to the aerial through the animation; Food pins sit above labels; no blank map after a search jump.
+4. Switch between Site Plan and Hybrid and reload. **Expect:** the choice persists; switching never blanks the map.
+5. Site tab → Map view, Layers → Road names slider (close zoom). **Expect:** the slider fades the roads; parcels / FEMA / draw tools still paint above; at metro zoom still no road lines.
+6. Open a plan, File → Download PDF. **Expect:** the aerial in the PDF is NOT darkened or desaturated.
+7. Look along tile joins at fractional zoom on a 2x display. **Expect:** no light hairlines.
+8. Desktop: the credit reads "…OpenFreeMap © OpenMapTiles data © OpenStreetMap", fully visible beside (not under) the ? button; the "Loading imagery…" pill never overlaps the zoom control.
+- **Stopping rule:** closes on a dated pass of 1–8, or a failed step filed as a recurrence on B2018608.
 ### V1469824 — B2051664: Food search lists the places nearest the visible map first (phone, signed in) `Blocker: auth`
 
 Sandbox-proven on fixture rows: `test/foodSearchProximity.test.js`, plus a real-Chromium run of the built app with the search RPC stubbed (Katy first at a Houston-area view; Dallas first after flying there). Pending: the owner's signed-in phone against his real snapshot (read-only — do not log or edit anything). **Steps** (read the served chunk hash in the same observation):
@@ -206,6 +267,52 @@ Sandbox-proven: `test/teamInviteEmail.test.js` (fake Supabase + fake Resend), `e
 4. Cancel invite. **Expect:** row gone, no row left behind. Existing pending invites (e.g. ryan.baumgartner@hillwood.com) received nothing.
 - **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2049312.
 
+### V1484661 — B2061333: on a real iPhone the caret stays above the keyboard, the essentials are reachable without swiping, and the chrome gets out of the way `Blocker: real-data` (signed-in real device)
+
+Sandbox-proven: `ui-audit/verify-notes-phone-layout.mjs` (WebKit 390x844 with a fake visualViewport for the keyboard; red on untouched main). A real keyboard and a real fingertip are not producible headless.
+**Steps (real iPhone, a throwaway duplicate page):**
+1. Open a long page, tap near the bottom so the keyboard rises, type 10 lines. **Expect:** the line you are typing is always visible above the keyboard.
+2. Look at the toolbar. **Expect:** undo, redo, B, I, U, bullet, numbered, text colour and ⋯ all visible without swiping.
+3. Tap ⋯. **Expect:** a panel with the font, size, alignment, insert menu and the page actions (Find and replace, Page setup, Version history, Export); Find and replace opens the find bar.
+4. With the keyboard up. **Expect:** the row of module tabs is gone, the page did not jump when it went, the help button and zoom control are out of the writing area; dismiss the keyboard and they return.
+5. Select a box and try its grip and a resize handle with a finger. **Expect:** easy to hit without zooming.
+6. Tap toolbar buttons several times. **Expect:** no tooltip stays on screen.
+7. After a week on this build, check `client_errors` for `page-containment-drift` rows from iPhones. **Expect:** none shaped "(0, ~250)"; any keyboard ones now arrive as `page-containment-keyboard-reveal`.
+8. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–7, or a failed step filed as a recurrence on B2061333.
+### V1484660 — B2061332: on a real iPhone, the page menu and the box menu are reachable (⋯, long-press, Delete box) `Blocker: real-data` (signed-in real device)
+
+Sandbox-proven: `ui-audit/verify-notes-touch-menus.mjs` (Chromium real touch pipeline + WebKit; red on untouched main). A real held fingertip and iOS's own selection loupe are not producible headless.
+**Steps (real iPhone, a throwaway page):**
+1. In the notes list, tap "⋯" on a page. **Expect:** the same menu a right-click gives on desktop; Rename and Delete work.
+2. Press and hold a page row for about half a second. **Expect:** the menu opens; the page does not open and nothing starts dragging.
+3. Press and hold a box in a note. **Expect:** the document menu opens with "Delete this box"; choosing it removes the box (Undo brings it back).
+4. Tap a box so it is selected. **Expect:** a "Delete box" pill at the top of the canvas; pressing it removes the box.
+5. Press and hold inside a box's text. **Expect:** note whether iOS's own text-selection magnifier ALSO appears over the menu (if so, file it as a recurrence here).
+6. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–4 (5 recorded), or a failed step filed as a recurrence on B2061332.
+### V1484658 — B2061330: on a real iPhone, one finger pans a note, two fingers pinch and follow, the page never stays shifted sideways `Blocker: real-data` (signed-in real device)
+
+Sandbox-proven: `ui-audit/verify-notes-touch-pan.mjs` (Chromium real touch pipeline via CDP + WebKit PointerEvents; red on untouched main). A real finger / iOS rubber-band / system gestures are not producible headless.
+**Steps (real iPhone, a throwaway page):**
+1. Drag one finger on blank paper, on the grey beside the page, and starting on an unselected box's text. **Expect:** the page follows the finger each time; a flick coasts a little and stops.
+2. Tap (no drag) blank paper, then double-tap. **Expect:** same as before — a single tap does not move the page; double-tap places a box.
+3. Select a box (tap it, then use its grip) and drag. **Expect:** the box moves; the page does not pan.
+4. Pinch with two fingers while also moving both. **Expect:** zoom follows the spread and the page travels with your fingers.
+5. Tap into a box near the right edge so the keyboard rises. **Expect:** the page is not left shifted sideways afterwards.
+6. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2061330.
+
+### V1484657 — B2061329: on a real iPhone, tapping into a box keeps the keyboard up and puts the caret where tapped `Blocker: real-data` (signed-in real device)
+
+Sandbox-proven on WebKit (hasTouch + isMobile): `ui-audit/verify-notes-touch-box-tap.mjs`. A real soft keyboard cannot be driven headless.
+**Steps (real iPhone, a throwaway page):**
+1. Double-tap blank paper, type "hello world", then tap inside the word "world". **Expect:** the keyboard does not drop; the caret is where tapped; typing inserts there.
+2. Make a second box; tap from the first box into the second. **Expect:** keyboard stays up, caret in the second box, one tap.
+3. In a box, delete all its text with Backspace, press Backspace once more. **Expect:** the empty box disappears.
+4. Tap a picture box. **Expect:** it selects (handles), no keyboard.
+5. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2061329.
 ### V1468976 — B2043888: phone tab-strip chevrons page cleanly and clamp at both ends `Blocker: real-device (iOS elastic overscroll — not producible headless)`
 
 Sandbox-proven, both engines: `ui-audit/verify-nav-arrows.mjs` (and `ENGINE=webkit`), 31/31; `test/scrollStrip.test.js`. The original overshoot did NOT reproduce headless, so this is the live confirmation. **Steps** (planyr.io on the iPhone, Map with no project; read the served chunk hash in the same observation):
@@ -224,6 +331,27 @@ Sandbox-proven (logged-out, seeded local site, real Chromium): `e2e/mapfinder-no
 4. Return to Site → map. **Expect:** the hint is back only if Select parcels is still on (the mode is kept on purpose).
 - **2026-10-04 WebKit-emulated pass (B2050816, NOT on device, logged-out; chunk `index-BVErCNTL.js` read in the same run):** `node ui-audit/verify-phone-orientations.mjs` (`PLANYR_CASES=notice-leak`) — iPhone SE and iPhone 15, portrait + landscape × Dashboard/Schedule/Review/Library/Notes/Spreadsheet = **24/24 PASS** (hint visible after Select parcels, gone after the switch each time); the same case on the pre-fix build is 0/24 PASS. Steps 1-4 above on a real phone, signed in, remain pending (`Blocker: auth`).
 - **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B2041360.
+
+### V1484656 — B2061328: typing in an open note while the app returns to the foreground / another window pushes never loses either side's text, and the editor stays put `Blocker: auth` (two signed-in windows)
+
+Sandbox-proven: `test/notesOpenPageSync.test.js` (gated fake network, red on main) + `ui-audit/verify-notes-open-page-adopt.mjs` (real editor takes the adopted body in place). The real two-window cloud round-trip needs a signed-in account.
+**Steps (signed in, a throwaway duplicate page — never a real plan):**
+1. Open the same throwaway page in window A and window B. In B, change the FIRST paragraph and wait for "Saved".
+2. In A (not touched since), type a few words in the LAST paragraph and, within a second, switch to another tab/app and back (or click away and back) so the app syncs. **Expect:** the keyboard/caret in A are not dropped; A shows B's first-paragraph change AND its own words.
+3. Wait ~10 s, reload A. **Expect:** both edits present; no "also changed in another window" banner.
+4. Repeat with both windows editing the SAME paragraph. **Expect:** the existing conflict banner (nothing silently lost).
+5. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 2–4, or a failed step filed as a recurrence on B2061328.
+### V1484659 — B2061331: a note opens with its top near the top of the canvas, and on a phone both page edges are on screen `Blocker: real-data` (signed-in real device, real notes)
+
+Sandbox-proven: `ui-audit/verify-notes-open-framing.mjs` (WebKit + Chromium, five canvas sizes, three document shapes, CPU-throttled arm; red on untouched main). A real phone's first-paint timing is not producible headless.
+**Steps (real iPhone, signed in, a throwaway duplicate page — never a real plan):**
+1. Open a page you have never panned or zoomed. **Expect:** the sheet's top is right under the toolbar (a small margin), not halfway down; both left and right edges and corners are visible.
+2. Open a long page. **Expect:** same, starting at its top.
+3. Pinch/pan, leave, reopen. **Expect:** your view is restored exactly (not reset to the opening view).
+4. On desktop, open a short page. **Expect:** top near the top of the canvas, page centred sideways.
+5. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2061331.
 
 ### V1464320 — B2039232: an open file has a Close (×) back to the sheet index; unsaved Word/text edits ask first; reload after Close stays on the index `Blocker: auth`
 
@@ -563,19 +691,17 @@ Sandbox-proven (logged out, unit): `test/prefsSingleSource.test.js` (12 tests, r
 5. Tab A: Site Planner floodplain rules, set Harris ratio 1.5. Tab B (opened earlier): tick "verified" on Fort Bend. **Expect:** Tab B shows Harris 1.5 without reload; after reload both edits persist.
 6. Library: pin folder F, rename F in its project, return to Library Home. **Expect:** the pinned card shows the new name; delete F and it falls back to the old name (not blank).
 - **Stopping rule:** closes on a dated pass of 1–6, or a failed step filed as a recurrence on B1953793.
-### V1398976 — B1962672–B1962677: the overlay Crop tool walked end to end on Michael's signed-in Chrome (Reset, pan/zoom, undo/redo, fill, reload) `Blocker: auth`
+### V1489552 — B2066224–B2066227: crop-tool leftovers walked on Michael's signed-in Chrome (Done keeps both shapes · Enter closes · Reset holds still · Crop… visible on a short window) `Blocker: auth`
 
-Sandbox-proven (logged out, throwaway seeded plan with a generated 3000×1800 sheet, real pointer + key events, foreground tab, known-good arm): `node ui-audit/verify-crop-tool-walkthrough.mjs` ALL PASS (58 checks), plus `verify-crop-polygon-editing.mjs` and `verify-site-tab-overlay-crop.mjs` still all-pass, `test/cropHistory.test.js`. Nothing touched a real plan or the locked Goose Creek master plan (`sms93j3sfc04`); the throwaway existed only in the sandbox browser's local storage and was discarded with it. **Still needs the signed-in pass** because the brief's walk (real upload, cloud-saved overlay, hard reload of a cloud plan) needs the account.
+Sandbox-proven (logged out, throwaway seeded plan, real pointer + key events, foreground tab, known-good arm per scenario): `node ui-audit/verify-crop-leftovers.mjs` ALL PASS; **7 checks go red on the pre-fix tool**, so it can fail. Not provable here: a signed-in plan's cloud round trip of the saved crop.
 **Steps, on a THROWAWAY duplicate plan with a throwaway upload (constraint 7):**
-1. Site tab → OVERLAYS → expand the row → Crop…. **Expect:** the sheet fills the window (full height, no wide dead bands beyond its own aspect), and the toolbar shows Undo, Redo, ✋ Pan, −, slider, +, Fit, 100%.
-2. Polygon: place 4 points, zoom in with + and the slider, pan with the arrow keys and again with the Pan tool, place 2 more, press Enter. **Expect:** 6 draggable points; no stray point appears where a Pan drag ends.
-3. Drag a point, then Undo button, Redo button, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y. **Expect:** each moves it back/forth; Delete on a selected point removes it and Undo restores it.
-4. Click **Reset to full page** in Polygon mode. **Expect:** Done stays enabled; Done saves an uncropped overlay. Clear polygon instead. **Expect:** Done is greyed with a sentence saying what it needs.
-5. Save a polygon, reopen, switch to Rectangle, Reset to full page, Done. **Expect:** the overlay is uncropped (polygon gone too).
-6. Trim a rectangle, Done, then hard-reload with `?cb=<anything>` on the URL. **Expect:** the crop is still applied and the OVERLAYS row is still expanded.
-7. Rectangle mode: **Expect:** all four side grips look the same weight as each other.
-8. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes when 1-7 confirm on a real signed-in account with the build hash, or a failing step is filed as a recurrence on the matching B# (STANDING RULE #2).
+1. Short window: Site → OVERLAYS, row NOT expanded. **Expect:** Crop… is on the row beside the eye/lock/× without scrolling; it opens the tool.
+2. Rectangle: trim it, Done. Reopen, Polygon, Clear polygon, trace a shape, close, Done. **Expect:** the footer said "Your rectangle is kept too"; reopen → Rectangle → the rectangle you trimmed is still there; Done → the polygon is still there when you switch back.
+3. Start a polygon, press + (or Fit), then Enter. **Expect:** the polygon closes; the zoom button does not fire again.
+4. Switch Rectangle ⇄ Polygon. **Expect:** "Reset to full page" stays put.
+5. Hard-reload with `?cb=<anything>`. **Expect:** the crop and both kept shapes persist.
+6. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–5 with the build hash, or a failed step is filed as a recurrence on the matching B# (STANDING RULE #2).
 
 ### V1396784 — B1960480: double-tap on blank paper raises the soft keyboard and the first text lands in the new box (real iPhone keyboard)
 
@@ -917,6 +1043,17 @@ Stopping rule: this passes and moves to `docs/archive/VERIFICATION-DONE.md` once
 2. Re-run `src/workspaces/site-planner/db/test/security_definer_ownership_audit.test.sql` (paste into the SQL editor, or `execute_sql`) against the same project. **Expect:** all 14 cases PASS — specifically Case 13 now reports `plans=0 foreign=0` for a total stranger to the group, instead of the real counts.
 3. (Optional sanity check — confirms nothing else moved.) Re-run `db/test/sites_cas_ownership_independent.test.sql`. **Expect:** unaffected, still all PASS.
 - **Stopping rule:** closes when step 2 confirms Case 13 flips to PASS against the real deployed function — or it fails and is filed as a recurrence against B1853664, per STANDING RULE #2 (a null result is a FINDING, never a silent close).
+
+### V1421552 — B1996464: flat rail panels show real data correctly (populated Drainage rows, Analysis findings, Overlays with live layers) `Blocker: live-GIS`
+
+Sandbox-proven (`ui-audit/verify-flat-rail-panels.mjs` 0 failing across 14 panel renders; the pre-change build fails it 26 ways; `test/flatRailPanels.test.js`). **Still needs planyr.io where the flood/GIS services answer** — offline the Drainage rows only ever read "not checked yet" and Analysis never loads findings, so the populated states were not seen.
+**Steps** (note the served chunk hash in the same observation as each result):
+1. Site → a georeferenced plan (Silvestri / Concept D) → Drainage on a phone width. **Expect:** one header row (icon, DRAINAGE, site · plan, "Flood data … ↻", ×), no empty strip above it, no inner card; press ↻ and the header line reads "checking…" then an age.
+2. After the check completes: **Expect:** Detention / Mitigation / Buildability are label-left, value-right lines; a short row shows its SHORT/THIN/OK word in tone colour at the right end; the "Rule applied…" amber note and any reconciliation clause run full width under their row; "Buildings in the floodplain" is a divider-separated fold.
+3. Analysis tab after its screen loads. **Expect:** each finding is a divider row (glyph, name, status) — no tinted card — and expanding one indents its detail under the name.
+4. Overlays with a dropped PDF selected. **Expect:** the selected row shows an accent rule on its left edge, others none; controls on the row all work.
+5. Repeat 1 at desktop width. **Expect:** same, plus the detach icon still pops the panel to a floating card whose header carries the same icon/title/subtitle/↻.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1996464.
 
 ### V1308368 — B1838704: a polygon crop made from the Site tab OVERLAYS panel survives a signed-in cloud save, a reload on a second device, and prints clipped `Blocker: auth`
 
@@ -1947,6 +2084,20 @@ Sandbox-proven logged-out (both entry points, reload; red on main). **The signed
 3. Reload, then navigate to the Map. **Expect:** the project is still listed under the new name (it no longer vanishes).
 4. Delete the throwaway project. Read the served chunk hash in the same observation.
 - **Stopping rule:** closes on a dated pass of 1–3, or a failure is filed as a recurrence on B1991041.
+
+### V1489328 — B2064640: a street click in San Francisco and in Las Vegas shows no "not wired" sentence `Blocker: live-GIS (needs the live CAL FIRE / Nevada statewide parcel services, which the sandbox egress blocks)`
+
+Sandbox-proven: `test/statewideCoverageNote.test.js` (identity + sentence against the real committed county polygons). What is left is the real click on the deployed build.
+1. On planyr.io Map view, turn on Select parcels, go to San Francisco (Mission), and read `/version.json` in the same check. Click the street point 37.750733, -122.400883. **Expect:** the tag says "No lot here" and the error line reads "No parcel right there — zoom in and click directly on a lot." — no "no parcel data wired here yet" anywhere.
+2. Repeat in Las Vegas on a street. **Expect:** same wording, no "not wired" sentence.
+3. Click a real lot a few blocks away in each. **Expect:** it selects as before.
+4. Control: click inside an unwired county (e.g. Taylor, MI). **Expect:** "Wayne County — no parcel data wired here yet." still appears.
+### V1445152 — B2020064: Map view zoom +/−/locate buttons clickable with a long Sites list `Blocker: real-data (signed-in account with his long site list on planyr.io)`
+
+Sandbox-proven: `ui-audit/verify-map-zoom-reachable.mjs` (hit test; red pre-fix, green after) and `test/mapChromeStack.test.js`.
+1. On planyr.io, Map view, ~1600-wide window, Sites rail open; read `/version.json` in the same check. **Expect:** the + and − buttons are visible below the rail and clicking them zooms the map (no project opens).
+2. Collapse the rail. **Expect:** same buttons still clickable. Reopen it. **Expect:** the list scrolls inside the rail, which ends above the buttons.
+3. Repeat on a phone-width window with the rail open. **Expect:** buttons clear of the rail and clickable.
 
 ## THE CHECKLIST — run this on Michael's signed-in Chrome, on `planyr.io`
 
@@ -11624,6 +11775,16 @@ records its own live verify" mechanism) or a future sandbox with different egres
 - **Stopping rule:** closes when steps 2–3 both read as expected on `planyr.io` over a real parcel selection, or a specific residual is filed as a recurrence against B1895376, per STANDING RULE #2.
 
 *(minted **V1351376** alongside **B1895376**; `Cadence: once`)*
+
+### V1481216 — B2063056: a plan setting changed in one tab of the same browser appears in the other signed-in tab within seconds, without clobbering what that tab is editing `Blocker: auth`
+
+**Verified headless (logged out):** `e2e/cross-tab-live.spec.js` — rename, building, in-progress edit, header setting (red-proofed). **Pending:** the signed-in leg, where the element union is gated off and only the header path runs.
+**Use a throwaway DUPLICATE plan; read the served chunk hash in the same observation.**
+1. Signed in, open the same throwaway plan in two tabs of one browser; leave B in the background. **Expect:** same Settings in both.
+2. In A change the setback; switch to B without reloading. **Expect:** B shows the new setback and the notice "Updated from another session" within seconds.
+3. In B start typing a different setting (do not commit), change another setting in A. **Expect:** B's in-progress value is untouched.
+4. Reload both. **Expect:** both changes present.
+- **Stopping rule:** closes when steps 2–4 read as expected on `planyr.io`, or a residual is filed as a recurrence against B2063056.
 
 ### V1390100 — B1953797: two tabs/devices changing DIFFERENT plan settings keep BOTH; an idle open tab adopts the other's change; Model's Site.Acres / Plan.Building1.SF read the real plan on a device that never opened it `Blocker: auth`
 

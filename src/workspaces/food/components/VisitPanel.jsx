@@ -414,7 +414,7 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, submitLabel 
 function Chip({ label, value }) {
   return (
     <span style={{
-      display: "inline-block", borderRadius: 5, padding: "2px 7px", fontWeight: 700, fontSize: 11.5,
+      display: "inline-block", borderRadius: RADIUS.sm, padding: "2px 7px", fontWeight: 700, fontSize: 11.5,
       background: colorForRating(value), color: textColorForRating(value),
     }}>
       {label} {Number(value)}/{RATING_MAX}
@@ -425,7 +425,7 @@ function Chip({ label, value }) {
 function WouldReturnChip() {
   return (
     <span style={{
-      display: "inline-block", borderRadius: 5, padding: "2px 7px", fontWeight: 700, fontSize: 11.5,
+      display: "inline-block", borderRadius: RADIUS.sm, padding: "2px 7px", fontWeight: 700, fontSize: 11.5,
       background: "var(--surface-page)", border: "1px solid var(--border-default)", color: "var(--text-secondary)",
     }}>
       Would return
@@ -511,7 +511,7 @@ function ScoreStrip({ aggregates, bestDish }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 7 }}>
         {tiles.map((t) => (
           <div key={t.key} style={{
-            borderRadius: 10, padding: "8px 4px", textAlign: "center", border: "1px solid var(--border-default)",
+            borderRadius: RADIUS.lg, padding: "8px 4px", textAlign: "center", border: "1px solid var(--border-default)",
             background: t.hero ? "color-mix(in srgb, var(--accent-food) 14%, var(--surface-page))" : "var(--surface-page)",
           }}>
             <div style={{
@@ -543,7 +543,7 @@ function OrderAgain({ entries }) {
   if (!entries.length) return null;
   return (
     <div data-testid="food-order-again" style={{
-      margin: "6px 16px 0", padding: "9px 11px", borderRadius: 10,
+      margin: "6px 16px 0", padding: "9px 11px", borderRadius: RADIUS.lg,
       background: "color-mix(in srgb, var(--accent-food) 10%, var(--surface-page))", border: "1px solid var(--border-default)",
     }}>
       <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-tertiary)" }}>
@@ -704,7 +704,7 @@ function VisitCard({ visit, onDelete, editing, onOpenEdit, onCloseEdit, onSubmit
         <AnchoredMenu
           open={menuOpen} onClose={closeMenu} anchorRef={menuBtnRef} placement="below-right" width={190} gap={4}
           panelStyle={{
-            background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: 10,
+            background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: RADIUS.lg,
             boxShadow: "0 10px 28px rgba(0,0,0,0.22)", padding: 6,
           }}
         >

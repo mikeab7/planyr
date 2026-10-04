@@ -1,4 +1,4 @@
-/* Fixture page for ui-audit/verify-food-phone.mjs (NEW-1, Food on a phone). Mounts the REAL
+/* Fixture page for ui-audit/verify-food-visit-phone.mjs (NEW-1, Food on a phone). Mounts the REAL
  * VisitPanel with in-memory handlers so the visit/dish form can be driven signed-out, with no
  * Supabase and no real data. Served only by a local vite dev server — never part of the build.
  * `?visits=1` seeds one existing visit (with legacy "What I had" text) + one dish, for the

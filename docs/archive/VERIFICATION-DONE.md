@@ -3530,3 +3530,29 @@ Sandbox-proven: `test/siteAnchor.test.js` (L-shaped fixture, centroid outside ->
 - **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B1988816.
 **Observed result: PASSED 2026-10-02, build `4d472ef`, Michael's signed-in Chrome (Site tab overview map).** The Katz circle sits inside the northern block of the parcel, well clear of the edges — checked visually and by point-in-polygon against the drawn outline. Reported as steps 1 and the pin placement; steps 2 (zoom into the plan), 3 (Sites-list fly-to) and 4 (ordinary rectangular sites unmoved) were not separately reported live — they rest on `test/siteAnchor.test.js` (rectangle stays at its centroid; fly-to shares the pin's helper). Moved to Done. See `docs/archive/BACKLOG-DONE.md` **B1988816**.
 
+### V1398976 — B1962672–B1962677: the overlay Crop tool walked end to end on Michael's signed-in Chrome (Reset, pan/zoom, undo/redo, fill, reload) `Blocker: auth`
+
+Sandbox-proven (logged out, throwaway seeded plan with a generated 3000×1800 sheet, real pointer + key events, foreground tab, known-good arm): `node ui-audit/verify-crop-tool-walkthrough.mjs` ALL PASS (58 checks), plus `verify-crop-polygon-editing.mjs` and `verify-site-tab-overlay-crop.mjs` still all-pass, `test/cropHistory.test.js`. Nothing touched a real plan or the locked Goose Creek master plan (`sms93j3sfc04`); the throwaway existed only in the sandbox browser's local storage and was discarded with it. **Still needs the signed-in pass** because the brief's walk (real upload, cloud-saved overlay, hard reload of a cloud plan) needs the account.
+**Steps, on a THROWAWAY duplicate plan with a throwaway upload (constraint 7):**
+1. Site tab → OVERLAYS → expand the row → Crop…. **Expect:** the sheet fills the window (full height, no wide dead bands beyond its own aspect), and the toolbar shows Undo, Redo, ✋ Pan, −, slider, +, Fit, 100%.
+2. Polygon: place 4 points, zoom in with + and the slider, pan with the arrow keys and again with the Pan tool, place 2 more, press Enter. **Expect:** 6 draggable points; no stray point appears where a Pan drag ends.
+3. Drag a point, then Undo button, Redo button, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y. **Expect:** each moves it back/forth; Delete on a selected point removes it and Undo restores it.
+4. Click **Reset to full page** in Polygon mode. **Expect:** Done stays enabled; Done saves an uncropped overlay. Clear polygon instead. **Expect:** Done is greyed with a sentence saying what it needs.
+5. Save a polygon, reopen, switch to Rectangle, Reset to full page, Done. **Expect:** the overlay is uncropped (polygon gone too).
+6. Trim a rectangle, Done, then hard-reload with `?cb=<anything>` on the URL. **Expect:** the crop is still applied and the OVERLAYS row is still expanded.
+7. Rectangle mode: **Expect:** all four side grips look the same weight as each other.
+8. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes when 1-7 confirm on a real signed-in account with the build hash, or a failing step is filed as a recurrence on the matching B# (STANDING RULE #2).
+- **PASSED 2026-10-04** on Michael's signed-in account, builds 17f94b7 and 028d64d: all six items (steps 1–7) confirmed, including crop + expanded OVERLAYS row surviving a hard reload both directions. Recorded from the owner's report in the dispatch brief.
+
+### V1414592 — B1989504/B1989505: the "Start your site" card no longer covers the map `Blocker: live-GIS`
+
+Sandbox-proven: `e2e/start-hint-placement.spec.js` (red on main, green here; emulated phone, not a real iPhone). **Still needs the deployed build** (`live-GIS` here means the real planyr.io edge + real basemap tiles; no signed-in data needed).
+**Steps** (new Untitled site, Site tab; read `/version.json` with `cache:'no-store'` and the served chunk hash in the SAME observation):
+1. Phone width (390×844, Playwright device descriptor, WebKit if installable else Chromium — name the engine): open a new blank site. **Expect:** a compact "Start your site" strip at the top, between the Panels and Tools edge tabs; the middle of the map is clear.
+2. Tap the map centre / drag. **Expect:** the map pans, nothing intercepts.
+3. Tools → Parcel tools → Draw new parcel. **Expect:** the strip is gone and stays gone while drawing.
+4. New blank site again → ✕ → reload. **Expect:** strip stays dismissed.
+5. Desktop width: **Expect:** strip top-left, clear of the middle. Real iPhone Safari look (toolbar collapse, safe areas) remains owner-side and is NOT claimed.
+- **PASSED 2026-10-04** on the deployed planyr.io, build `a0dda27` (read from `/version.json`, no-store, in the same run; the served SitePlannerApp chunk was read in the same observation — it changed between two runs, `kkiQbThE` → `BYQ9GlIP`, i.e. the deploy was still rolling, and a first-run screenshot caught the app's own "couldn't finish loading part of the app — likely mid-deploy" banner, which was absent on the second run). **Engine: Chromium (Playwright, headless, visible, rAF-live), Pixel-style emulation with touch — NOT WebKit and NOT a real iPhone.** Phone 390×844 and desktop 1440×900, a new blank site, Site tab: (1) compact "Start your site" strip docked at the top between the Panels/Tools tabs — clear of the middle half of the map, canvas centre answers to the canvas; (2) the card's own "Trace your boundary" starts Draw and the strip is gone; (3) ✕ dismisses with one tap and it stays gone after a reload; (5) desktop: strip top-left, clear of the middle. Steps 2/3 of the original list (pan through the map; rail-menu Draw) are covered by `e2e/start-hint-placement.spec.js` (green in CI and locally), not re-driven live. **NOT claimed:** real iPhone Safari (collapsing toolbar, safe-area insets, real finger).
+

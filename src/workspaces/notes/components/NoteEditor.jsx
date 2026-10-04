@@ -34,6 +34,7 @@
  */
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
+import { TextSelection } from "@tiptap/pm/state";
 import { noteExtensions, EMPTY_DOC } from "../lib/notesExtensions.js";
 import { ANCHOR_MIN_HEIGHT, anchorExtent, anchorExtentLeft, anchorExtentTop, anchorExtentX, anchorPosAtSelection, fitAnchorBox, placeAnchor } from "../lib/notesAnchorNode.js";
 import { edgePoint as arrowEdgePoint } from "../lib/notesArrows.js";
@@ -47,8 +48,9 @@ import {
   toggleSelection,
 } from "../lib/notesMarquee.js";
 import {
-  fitView, frameView, normalizeView, panBy, stepZoom, toWorkspace,
-  VIEW_ZOOM_DEFAULT, wheelIntent, wheelNativeAxis, zoomAbout, zoomForWheel, zoomKeyIntent, zoomLabel,
+  caretRevealDelta, fitView, frameView, inertiaStep, normalizeView, openingZoom, panBy, panView, pinchView, releaseVelocity, stepZoom, toWorkspace,
+  touchTravelled,
+  VIEW_ZOOM_DEFAULT, visibleBand, wheelIntent, wheelNativeAxis, zoomAbout, zoomForWheel, zoomKeyIntent, zoomLabel,
 } from "../lib/notesViewport.js";
 import { HIGHLIGHT_COLORS, SIZES, TEXT_COLORS } from "../lib/notesFormatPalette.js";
 import { PASTE_MODES } from "../lib/notesPastePlain.js";
@@ -65,7 +67,7 @@ import { indentCssRules, listMarkerCssRules } from "../lib/notesIndentLevel.js";
 import {
   readNoteFiles, readNoteImages, readPage, readPageVersions, registerOpenNoteDoc,
   restorePageVersion, snapshotPage, writePage,
-  readNoteView, writeNoteView,
+  readNoteView, writeNoteView, applyExternalToOpenNote,
 } from "../lib/notesStore.js";
 import {
   attachmentIdsInDoc, docToMarkdown, imageIdsInDoc, safeFileName, MD_INLINE_ATTACHMENT_MAX,
@@ -82,6 +84,9 @@ import NoteOutline from "./NoteOutline.jsx";
 import NoteHistory from "./NoteHistory.jsx";
 
 const SAVE_DEBOUNCE_MS = 600;
+/* NEW-5 — a held touch opens the document menu; this is how long, and how far a finger may wobble. */
+const LONG_PRESS_MS = 500;
+const LONG_PRESS_SLOP = 10;
 const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 const SHEET_RADIUS = 12; // RADIUS.lg (shared/ui/radius.js) — a surface that CONTAINS other things (DESIGN.md's shape rule); not folded into the local RADIUS const above because test/notesModule.test.js regex-pins that object's exact two-key shape against controls.jsx's own scale.
 
@@ -600,6 +605,34 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
 .planyr-note [data-testid="note-sheet"] { cursor: auto; }
 .planyr-note [data-testid="note-mat"][data-panning="1"],
 .planyr-note [data-testid="note-mat"][data-panning="1"] * { cursor: grabbing; }
+
+/* ⛔ NEW-6d — FINGER-SIZED TARGETS. On a coarse pointer the box grip (12 px), the eight resize handles
+   (10 px), the connect dot (11 px) and the sheet edge grips (left alone, see the note). The
+   VISIBLE size is unchanged: each gets an invisible 44 px hit area centred on itself (a pseudo-element is
+   part of its element for hit-testing). Mouse pointers never match this block. */
+@media (pointer: coarse) {
+  /* Halos exist only on the SELECTED box, and they must never sit over the box's TEXT: a tap on the first
+     letters is a caret placement (NEW-3) and a tap on the grey is a pan (NEW-2). The grip's halo therefore
+     grows only up and to the LEFT of the grip (off the text, onto the paper edge); the resize / connect
+     halos are centred on their dots, so they are off while the box is being edited. Found on final main:
+     the original centred, always-on 44 px halo swallowed the taps verify-notes-touch-box-tap and
+     touch-pan measure. */
+  .planyr-note .ProseMirror .planyr-anchor[data-selected="1"] .planyr-anchor-grip::after {
+    content: ""; position: absolute; right: 0; bottom: 0; width: 44px; height: 44px;
+  }
+  .planyr-note .ProseMirror .planyr-anchor[data-selected="1"]:not([data-editing="1"]) .planyr-anchor-h::after,
+  .planyr-note .ProseMirror .planyr-anchor[data-selected="1"]:not([data-editing="1"]) .planyr-anchor-connect::after {
+    content: ""; position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%);
+  }
+  /* The grip outranks the resize handles' halos: on a small box the west/north-west handles' 44 px
+     halos land on top of the grip, and the grip is the one control a finger must always be able to
+     reach (it is how a box moves). Cost, stated: a corner handle's halo is partly shadowed by the
+     grip's on a very small box — its own visible square still hits. */
+  .planyr-note .ProseMirror .planyr-anchor-grip { z-index: 2; }
+  /* The sheet's EDGE grips are deliberately NOT enlarged: they sit where a page-edge tap places a box, and
+     every enlargement tried (44 px symmetric, then 36 px outward-only) moved a first letter off the finger
+     by 5 px at 200% zoom in verify-notes-touch-landing. Resizing a page is a deliberate desktop-style act. */
+}
 `;
 
 function EditorStyles() {
@@ -659,8 +692,9 @@ function ZoomPill({ pct, onZoomOut, onZoomIn, onPick, onReset, onFitWidth }) {
     document.addEventListener("keydown", onKey);
     return () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey); };
   }, [open]);
+  const big = isCoarsePointerDevice();            // NEW-6d — a finger-sized target on a phone/tablet
   const btnStyle = {
-    width: 26, height: 26, display: "inline-flex", alignItems: "center", justifyContent: "center",
+    width: big ? 44 : 26, height: big ? 44 : 26, display: "inline-flex", alignItems: "center", justifyContent: "center",
     border: "none", background: "transparent", color: "var(--text-secondary)", cursor: "pointer",
     font: "inherit", fontSize: 14, fontWeight: 700, borderRadius: RADIUS.control,
   };
@@ -699,7 +733,7 @@ function ZoomPill({ pct, onZoomOut, onZoomIn, onPick, onReset, onFitWidth }) {
           role="menu"
           data-testid="note-zoom-menu"
           style={{
-            position: "absolute", right: 0, bottom: 34, zIndex: 31, padding: 4, minWidth: 120,
+            position: "absolute", right: 0, bottom: big ? 52 : 34, zIndex: 31, padding: 4, minWidth: 120,
             display: "flex", flexDirection: "column", gap: 1,
             background: "var(--surface-raised)", border: "1px solid var(--border-default)",
             borderRadius: RADIUS.control, boxShadow: FLOAT_SHADOW,
@@ -1453,6 +1487,7 @@ const NoteEditor = forwardRef(function NoteEditor({
   historyOpen = false, onCloseHistory,
   pageSetupOpen = false, onClosePageSetup,
   findReplaceOpen = false, onCloseFindReplace,
+  onToggleFind, onTogglePageSetup, onToggleHistory,
 }, ref) {
   /* Initial content read ONCE, here. Not in an effect — see fix (2) in the header.
    *
@@ -1476,6 +1511,7 @@ const NoteEditor = forwardRef(function NoteEditor({
   /* The pending snapshot is PLAIN JSON captured at edit time, so the flush never has to
    * ask a possibly-destroyed editor for anything — see fix (1) in the header. */
   const pendingRef = useRef(null);
+  const externalApplyRef = useRef(false);   // NEW-7: set only while a synced body is applied in place
   /* The version snapshot's own copy of the document. Declared beside `pendingRef` because
    * they are written together and read apart — see the unmount effect further down for the
    * hook-cleanup-order bug that is the whole reason there are two of them. */
@@ -1591,6 +1627,28 @@ const NoteEditor = forwardRef(function NoteEditor({
    * down; set synchronously by the touch arm / commit, never by anything else. Declared before
    * `useEditor` because `editorProps` closes over it. */
   const touchPlaceGuardRef = useRef(0);
+  /* ⛔ THE CARET STAYS ABOVE THE KEYBOARD (NEW-6a). The old measurement compared the caret with the
+   * mat's own rect, which on iOS keeps describing the FULL screen while the keyboard covers its
+   * lower part — so a caret behind the keyboard read as visible. The band is now the mat ∩ the
+   * VISUAL viewport (`visibleBand`). It pans, never zooms, and moves only the minimum; it runs on a
+   * keystroke (ProseMirror's own scroll hook) AND on a keyboard open/close or a guard heal — see the
+   * effect below — so it does not wait for the next letter. Held in a ref so the editor config and
+   * that effect share ONE implementation. */
+  const revealCaretRef = useRef(null);
+  revealCaretRef.current = (view, { verticalOnly = false } = {}) => {
+    const sc = scrollerRef.current;
+    if (!sc || !view || view.isDestroyed) return;
+    let caret;
+    try { caret = view.coordsAtPos(view.state.selection.head); } catch { return; }
+    if (!caret) return;
+    const vv = typeof window !== "undefined" ? window.visualViewport : null;
+    const band = visibleBand(sc.getBoundingClientRect(), vv);
+    const delta = caretRevealDelta({ caret, band });
+    const dx = verticalOnly ? 0 : delta.dx;
+    const dy = delta.dy;
+    if (dx || dy) setView({ x: viewRef.current.x + dx, y: viewRef.current.y + dy, z: viewRef.current.z });
+  };
+
   const editor = useEditor({
     extensions,
     content: initialDoc,
@@ -1619,20 +1677,9 @@ const NoteEditor = forwardRef(function NoteEditor({
        * choice and nothing typed may change it. Returning `true` tells ProseMirror this was
        * handled so it does not also try. */
       handleScrollToSelection: (view) => {
-        const sc = scrollerRef.current;
-        if (!sc) return true;
+        if (!scrollerRef.current) return true;
         if (performance.now() < touchPlaceGuardRef.current) return true;   // see `touchPlaceGuardRef`
-        let caret;
-        try { caret = view.coordsAtPos(view.state.selection.head); } catch { return true; }
-        if (!caret) return true;
-        const box = sc.getBoundingClientRect();
-        const pad = 48;                                  // a comfortable band, not the bare edge
-        let dx = 0; let dy = 0;
-        if (caret.top < box.top + pad) dy = caret.top - (box.top + pad);
-        else if (caret.bottom > box.bottom - pad) dy = caret.bottom - (box.bottom - pad);
-        if (caret.left < box.left + pad) dx = caret.left - (box.left + pad);
-        else if (caret.left > box.right - pad) dx = caret.left - (box.right - pad);
-        if (dx || dy) setView({ x: viewRef.current.x + dx, y: viewRef.current.y + dy, z: viewRef.current.z });
+        revealCaretRef.current?.(view);
         return true;
       },
       attributes: {
@@ -1676,6 +1723,7 @@ const NoteEditor = forwardRef(function NoteEditor({
       // flush; `lastDocRef` is the version snapshot's and is never emptied. See the unmount
       // effect below for the cleanup-order bug that separating them fixes.
       lastDocRef.current = { id: pageId, doc };
+      if (externalApplyRef.current) return;   // NEW-7: a body the sync already stored is not an edit
       // ⛔ B1662464 — see `hasUserInputRef`'s own note above. A transaction nobody's keyboard
       // or pointer caused (the mount-time schema settle) updates `lastDocRef` so a REAL edit
       // right after it is never missing context, but it queues nothing: no dirty status, no
@@ -1730,6 +1778,9 @@ const NoteEditor = forwardRef(function NoteEditor({
         const next = state.schema.nodeFromJSON(json);
         view.dispatch(state.tr.replaceWith(0, state.doc.content.size, next.content));
       },
+      /** NEW-7: hand the open editor a body "the sync wrote to storage" — the exact path an adopted
+       *  server copy takes. Returns whether the editor took it in place. */
+      applyExternal: (json) => applyExternalToOpenNote(pageId, json),
       /** Put the caret at an absolute document position — the only way to state "the very
        *  start of THAT block" without depending on where a click happens to land. */
       caretAt: (pos) => { if (!editor.isDestroyed) editor.chain().focus().setTextSelection(pos).run(); },
@@ -1959,18 +2010,33 @@ const NoteEditor = forwardRef(function NoteEditor({
      * the live note. */
     if (readOnly) return undefined;
     return registerOpenNoteDoc(pageId, {
-      applyDocument: (doc) => {
+      /* NEW-7: the same door also takes a body the SYNC wrote to storage behind this editor
+       * (`opts.external`). It is a transaction, so the instance, its keyboard, its undo history and
+       * (clamped) its caret all survive — the old route remounted. External means the text is
+       * ALREADY in storage, so it queues no save and stays out of undo. */
+      applyDocument: (doc, opts) => {
         if (editor.isDestroyed) return { ok: false, error: "the editor closed before the version could be applied" };
+        const external = !!opts?.external;
         try {
           const node = editor.schema.nodeFromJSON(doc);
-          editor.view.dispatch(editor.state.tr.replaceWith(0, editor.state.doc.content.size, node.content));
+          const { from, to } = editor.state.selection;
+          externalApplyRef.current = external;
+          let tr = editor.state.tr.replaceWith(0, editor.state.doc.content.size, node.content);
+          if (external) {
+            const size = tr.doc.content.size;
+            const at = (n) => TextSelection.near(tr.doc.resolve(Math.max(0, Math.min(n, size))));
+            tr = tr.setSelection(TextSelection.between(at(from).$from, at(to).$to)).setMeta("addToHistory", false);
+          }
+          editor.view.dispatch(tr);
           return { ok: true };
         } catch (e) {
           return { ok: false, error: `that version could not be read back (${e?.message || e})` };
-        }
+        } finally { externalApplyRef.current = false; }
       },
+      hasPending: () => !!pendingRef.current,
+      flush,
     });
-  }, [editor, pageId, readOnly]);
+  }, [editor, pageId, readOnly, flush]);
 
   /* ═══ A PRESS ARMS A CARET; THE FIRST KEYSTROKE MAKES THE NOTE (NEW-8) ═══════════════════
    *
@@ -2017,7 +2083,16 @@ const NoteEditor = forwardRef(function NoteEditor({
      * typing into must hold the caret — otherwise the second character goes somewhere else. The
      * pair is dispatched synchronously, so ProseMirror's history groups them into ONE undo step;
      * that is asserted rather than assumed in `verify-notes-pending-caret`. */
-    editor.commands.addNoteAnchorAt({ x: at.x, y: at.y, w: at.w });
+    /* ⛔ NEW-3 — THE NEW BOX IS BORN SELECTED AND BEING EDITED. The press that makes it is
+     * stage 2 of the two-stage model by definition (the caret is already inside), so the next press
+     * into it must not read as a stage-1 "select the box" tap — on a phone that blur dropped the
+     * keyboard on the very first tap back into the box you had just typed in. Named in the same
+     * tick (`aid` is passed in, not minted later by `ensureNoteAnchorIds`) so the state can be set
+     * before any further press exists. */
+    const aid = `a${Date.now().toString(36)}c${Math.floor(Math.random() * 1e6).toString(36)}`;
+    editor.commands.addNoteAnchorAt({ x: at.x, y: at.y, w: at.w, aid });
+    setSelection(new Set([aid]));
+    setEditingId(aid);
     /* ⛔ REAL DOM FOCUS HAS TO LAND IN THIS SAME TICK, NOT WHENEVER THE BROWSER GETS TO IT
      * (B1928816, owner report 2026-09-27: a brand-new page's first box kept only the FIRST
      * character typed). `addNoteAnchorAt`'s own `.focus(at + 2, …)` already ran above and moved
@@ -2414,6 +2489,44 @@ const NoteEditor = forwardRef(function NoteEditor({
     if (persist) persistView();
   }, [applyView, persistView]);
 
+  /* ⛔ A KEYBOARD OPENING OR CLOSING IS A REASON TO RE-CHECK THE CARET (NEW-6a). The keyboard
+   * shrinks the visual viewport after the tap that raised it, with no keystroke to trigger
+   * ProseMirror's own scroll hook. The page-containment guard also announces
+   * `planyr:viewport-healed` when it pins a window scroll iOS made to reveal the field — so the
+   * canvas, not the window, does the revealing and the two stop fighting. Never while a placement
+   * is armed (the caret is then the EMPTY page's top-left one; chasing it is the B1960480 trap). */
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return undefined;
+    let raf = 0;
+    let timer = 0;
+    const run = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        if (editor.isDestroyed || !editor.view.hasFocus() || pendingRef2.current) return;
+        /* A touch placement is still settling (`touchPlaceGuardRef`): panning now would slide the box
+         * out from under the finger that just put it there (`verify-notes-touch-landing` measures it).
+         * Look again once the guard has expired. */
+        const wait = touchPlaceGuardRef.current - performance.now();
+        if (wait > 0) { timer = setTimeout(run, wait + 30); return; }
+        /* VERTICAL ONLY: the keyboard covers the bottom, never the sides. The horizontal comfort band is
+         * ProseMirror's own keystroke hook's business. */
+        revealCaretRef.current?.(editor.view, { verticalOnly: true });
+      });
+    };
+    const vv = typeof window !== "undefined" ? window.visualViewport : null;
+    vv?.addEventListener("resize", run);
+    vv?.addEventListener("scroll", run);
+    window.addEventListener("planyr:viewport-healed", run);
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      if (timer) clearTimeout(timer);
+      vv?.removeEventListener("resize", run);
+      vv?.removeEventListener("scroll", run);
+      window.removeEventListener("planyr:viewport-healed", run);
+    };
+  }, [editor]);
+
   /** The viewport's own box — the element the view is expressed relative to. */
   const viewportRect = useCallback(() => scrollerRef.current?.getBoundingClientRect() || null, []);
 
@@ -2501,7 +2614,9 @@ const NoteEditor = forwardRef(function NoteEditor({
       return;
     }
     framedSizeRef.current = size;
-    setView(frameView({ viewport: rect, page: size, zoom: VIEW_ZOOM_DEFAULT }),
+    /* NEW-4: top-anchored (independent of the page's eventual height) and, on a phone, FIT WIDTH so
+     * both page edges are on screen. See `frameView`'s `align` and `openingZoom`. */
+    setView(frameView({ viewport: rect, page: size, zoom: openingZoom({ viewport: rect, page: size }), align: "top" }),
       { persist: false, byUser: false });
   });
 
@@ -2789,6 +2904,20 @@ const NoteEditor = forwardRef(function NoteEditor({
      * — it is the way back OUT to the box — and getting this wrong would mean Delete eating a
      * whole box while somebody was editing a word in it. */
     if (editingRef.current) {
+      /* ⛔ NEW-3 — BACKSPACE ON AN EMPTY BOX REMOVES IT, ON TOUCH ONLY. With the box-select stage
+       * skipped on a phone there is otherwise no way to delete a box from the keyboard. Desktop is
+       * unchanged (Escape, then Delete, as before). Undoable like any removal. */
+      if (e.key === "Backspace" && isTouchPointerType(lastPointerTypeRef.current)) {
+        const id = String(editingRef.current);
+        const box = [...editor.view.dom.querySelectorAll(".planyr-anchor")].find((n) => n.getAttribute("data-anchor-id") === id);
+        if (box && box.getAttribute("data-empty") === "1") {
+          e.preventDefault();
+          editor.commands.removeNoteAnchors([id]);
+          clearSelection();
+          editor.commands.focus(null, { scrollIntoView: false });
+          return true;
+        }
+      }
       if (e.key !== "Escape") return false;
       e.preventDefault();
       setEditingId(null);
@@ -3031,7 +3160,19 @@ const NoteEditor = forwardRef(function NoteEditor({
       }
       if (id) {
         const alreadySelected = selRef.current.has(String(id)) && selRef.current.size === 1;
-        if (!alreadySelected) {
+        /* ⛔ NEW-3 — ON TOUCH THERE IS NO STAGE 1. A finger tap on a box's text is "put the caret
+         * there and keep the keyboard up"; the select-then-enter pair cost a keyboard dismiss and a
+         * second tap on every box switch, INCLUDING the box you were typing in. Stage 1's blur
+         * exists for one desktop hazard (a stale caret left in flow text swallowing a Backspace that
+         * was meant to delete the SELECTED box — B1555152 / B434416). That hazard cannot arise here:
+         * we do NOT preventDefault, so the browser moves the caret to the tap point INSIDE this box
+         * and this box is marked selected+editing, which routes Backspace to its text. Deleting a box
+         * on touch is Backspace-on-an-empty-box (`selectionKeyDown`) or the NEW-5 menu. A picture
+         * box has no words to enter, so it keeps stage 1 on every device. */
+        const touchEnter = !alreadySelected && isTouchPointerType(lastPointerTypeRef.current)
+          && inBlock.getAttribute("data-anchor-kind") !== "image";
+        if (touchEnter) setSelection(new Set([String(id)]));
+        if (!alreadySelected && !touchEnter) {
           /* Stage 1. Nothing is typed and no caret moves — this press is about the BOX.
            *
            * ⛔ AND THE EDITOR MUST BE BLURRED HERE, NOT LEFT AS IT WAS (B1555152, owner report
@@ -3451,7 +3592,7 @@ const NoteEditor = forwardRef(function NoteEditor({
     const rect = viewportRect();
     const page = sheetWorkspaceBox();
     if (!rect || !page) return;
-    setView(frameView({ viewport: rect, page, zoom: VIEW_ZOOM_DEFAULT }));
+    setView(frameView({ viewport: rect, page, zoom: VIEW_ZOOM_DEFAULT, align: "top" }));
   }, [setView, viewportRect, sheetWorkspaceBox]);
 
   /** ⛔ "FULL WIDTH" IS THE ONE PRESET WHOSE DEFINITION IS ABOUT THE PANE, so it is the one place
@@ -3614,43 +3755,159 @@ const NoteEditor = forwardRef(function NoteEditor({
     window.addEventListener("pointercancel", onUp);
   }, [setView]);
 
-  /* ⛔ PINCH. A trackpad pinch arrives as a Ctrl+wheel (handled above); a real touch pinch is two
-   * pointers, which nothing else here claims. Tracked on the viewport so it works over the page
-   * as well as over blank workspace. */
+  /* ⛔ TOUCH ON THE CANVAS: ONE FINGER PANS, TWO FINGERS PINCH AND FOLLOW (NEW-2, iPhone review
+   * 2026-09-29: *"one finger can't scroll or pan a note"*).
+   *
+   * The mat is `touch-action: none` + `overflow: hidden`, so a finger drag yields POINTER events and
+   * nothing else — in particular no compat mouse events, which is the only thing the blank-paper
+   * pan (`beginBlankGesture`, driven by window mousemove/mouseup) ever listened to. So on a phone
+   * the page simply did not move. This is the pointer-driven counterpart, for `pointerType ===
+   * "touch"` ONLY — the mouse path is untouched. Everything goes through `setView`, the one view
+   * ref (VIEW-INDEPENDENT-ONCE: no second pan mechanism, no per-frame state).
+   *
+   * WHAT A ONE-FINGER DRAG DOES, decided at the press by what is under the finger:
+   *   • on a box that is SELECTED, or the box being EDITED, or any grip/handle/field → NOT a pan.
+   *     A selected box keeps today's behaviour, and a drag in the box being edited selects text
+   *     (decided and stated: text selection wins inside the box you are typing in).
+   *   • anywhere else (paper, grey, text of an unselected box) → pan, once the finger has travelled
+   *     past TOUCH_PAN_SLOP. Below it, it is still a tap and the compat mouse events place/select
+   *     exactly as before.
+   * A pan that really moved swallows the compat mousedown/click a browser may still synthesise on
+   * lift, so lifting a finger after a pan never deselects or arms a placement.
+   *
+   * TWO FINGERS: zoom about the midpoint AND translate with it (`pinchView`). Lifting one finger
+   * hands the pan to the finger that is left, so there is no jump. A light inertia carries a flick
+   * (`releaseVelocity` / `inertiaStep`); any new touch or a view change from elsewhere stops it. */
+  const touchSwallowUntilRef = useRef(0);
   useEffect(() => {
     const sc = scrollerRef.current;
     if (!sc) return undefined;
     const live = new Map();
     let pinch = null;
+    let pan = null;                 // { id, from, startView, latched, samples }
+    let inertia = null;             // { raf, last }
+    const stopInertia = () => { if (inertia) { cancelAnimationFrame(inertia.raf); inertia = null; } };
+    const local = (pt) => { const r = viewportRect(); return r ? { x: pt.x - r.left, y: pt.y - r.top } : pt; };
     const spread = () => {
       const [a, b] = [...live.values()];
-      return { dist: Math.hypot(a.x - b.x, a.y - b.y), mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } };
+      return { dist: Math.hypot(a.x - b.x, a.y - b.y), mid: local({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }) };
+    };
+    /* Pressing one of these is never a pan. A selected / edited box, a box grip or resize handle, a
+     * sheet edge grip, a form control, and the zoom pill all own their own touches. */
+    const ownsTheTouch = (el) => !(el instanceof Element) || !!el.closest(
+      'input, textarea, select, button, a, [data-handle], .planyr-anchor-grip, [class*="planyr-page-width-grip"], [class*="planyr-page-height-grip"], '
+      + '.planyr-anchor[data-selected="1"], .planyr-anchor[data-editing="1"], [data-testid="note-zoom-pill"]');
+    const beginPan = (id, at, latched) => {
+      pan = { id, from: at, startView: { ...viewRef.current }, latched, samples: [{ t: performance.now(), ...at }] };
     };
     const onDown = (e) => {
       if (e.pointerType !== "touch") return;
+      stopInertia();
       live.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (live.size === 2) pinch = { ...spread(), z: viewRef.current.z };
+      if (live.size === 2) {
+        pan = null;
+        pinch = { view: { ...viewRef.current }, ...spread() };
+        touchSwallowUntilRef.current = performance.now() + 500;
+      } else if (live.size === 1 && !ownsTheTouch(e.target)) {
+        beginPan(e.pointerId, { x: e.clientX, y: e.clientY }, false);
+      }
     };
     const onMove = (e) => {
       if (!live.has(e.pointerId)) return;
       live.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (live.size !== 2 || !pinch || !pinch.dist) return;
+      if (live.size === 2 && pinch && pinch.dist) {
+        e.preventDefault();
+        setView(pinchView(pinch, spread()));
+        return;
+      }
+      if (live.size !== 1 || !pan || pan.id !== e.pointerId) return;
+      const at = { x: e.clientX, y: e.clientY };
+      if (!pan.latched) {
+        if (!touchTravelled(pan.from, at)) return;
+        pan.latched = true;
+        sc.setAttribute("data-panning", "1");
+      }
       e.preventDefault();
-      const now = spread();
-      zoomTo(pinch.z * (now.dist / pinch.dist), now.mid);
+      pan.samples.push({ t: performance.now(), ...at });
+      if (pan.samples.length > 8) pan.samples.shift();
+      setView(panView(pan.startView, pan.from, at));
     };
-    const onUp = (e) => { live.delete(e.pointerId); if (live.size < 2) pinch = null; };
+    const onUp = (e) => {
+      if (!live.has(e.pointerId)) return;
+      live.delete(e.pointerId);
+      sc.removeAttribute("data-panning");
+      if (live.size < 2) pinch = null;
+      if (live.size === 1 && !pan) {
+        // One finger of a pinch lifted: the other carries on as a pan from where it is now, no jump.
+        const [[id, at]] = [...live.entries()];
+        beginPan(id, at, true);
+        sc.setAttribute("data-panning", "1");
+        return;
+      }
+      if (!pan || pan.id !== e.pointerId) return;
+      const was = pan;
+      pan = null;
+      if (!was.latched) return;                       // a tap: the compat mouse events own it
+      touchSwallowUntilRef.current = performance.now() + 500;
+      if (e.type === "pointercancel") return;
+      const vel = releaseVelocity(was.samples, performance.now());
+      if (!vel.x && !vel.y) return;
+      /* Inertia carries the CONTENT the way the finger was moving. It stands down the instant the
+       * view is changed by anything else (a new touch, the wheel, a zoom button). */
+      let v = vel;
+      inertia = { raf: 0, last: { ...viewRef.current } };
+      const tick = () => {
+        if (!inertia) return;
+        const cur = viewRef.current;
+        if (cur.x !== inertia.last.x || cur.y !== inertia.last.y || cur.z !== inertia.last.z) { inertia = null; return; }
+        const step = inertiaStep(v);
+        if (step.done) { inertia = null; return; }
+        v = step.vel;
+        setView({ x: cur.x - step.delta.x, y: cur.y - step.delta.y, z: cur.z });
+        inertia.last = { ...viewRef.current };
+        inertia.raf = requestAnimationFrame(tick);
+      };
+      inertia.raf = requestAnimationFrame(tick);
+    };
+    /* A press that follows a real pan/pinch within the swallow window is the browser's synthesised
+     * click for that lift, never the person's tap. Capture, so it never reaches `focusFromMat`. */
+    const swallow = (e) => {
+      if (performance.now() >= touchSwallowUntilRef.current) return;
+      if (!isTouchPointerType(lastPointerTypeRef.current)) return;
+      e.stopPropagation();
+    };
+    /* ⛔ A STRAY NATIVE SCROLL IS FOLDED INTO THE VIEW, THEN RESET. The mat is `overflow: hidden`
+     * but a browser still scrolls it to reveal a focused caret (measured: scrollLeft 33 after a tap
+     * into a box), and nothing ever put it back — the page stayed shifted sideways while the view
+     * model, which assumes 0, drew it somewhere else. Folding keeps exactly what the browser
+     * showed, so nothing visibly jumps, and the model is true again. */
+    const onScroll = () => {
+      const dx = sc.scrollLeft;
+      const dy = sc.scrollTop;
+      if (!dx && !dy) return;
+      sc.scrollLeft = 0;
+      sc.scrollTop = 0;
+      const cur = viewRef.current;
+      setView({ x: cur.x + dx, y: cur.y + dy, z: cur.z }, { byUser: false, persist: false });
+    };
     sc.addEventListener("pointerdown", onDown);
     sc.addEventListener("pointermove", onMove, { passive: false });
     sc.addEventListener("pointerup", onUp);
     sc.addEventListener("pointercancel", onUp);
+    sc.addEventListener("mousedown", swallow, true);
+    sc.addEventListener("click", swallow, true);
+    sc.addEventListener("scroll", onScroll);
     return () => {
+      stopInertia();
       sc.removeEventListener("pointerdown", onDown);
       sc.removeEventListener("pointermove", onMove);
       sc.removeEventListener("pointerup", onUp);
       sc.removeEventListener("pointercancel", onUp);
+      sc.removeEventListener("mousedown", swallow, true);
+      sc.removeEventListener("click", swallow, true);
+      sc.removeEventListener("scroll", onScroll);
     };
-  }, [zoomTo]);
+  }, [setView, viewportRect]);
 
   /* ⛔ THE PAGE GROWS TO HOLD THE BLOCKS — WHICH IS WHY THEY STOP MOVING (NEW-2, round 2).
    *
@@ -4357,6 +4614,94 @@ const NoteEditor = forwardRef(function NoteEditor({
   const [docMenu, setDocMenu] = useState(null);
   const [pasteAt, setPasteAt] = useState(null);
 
+  /* ⛔ ONE ROUTE TO THE DOCUMENT MENU, TWO WAYS IN (NEW-5). The right-click handler and the touch
+   * long-press (below) both call this, so there is exactly ONE menu — never a second copy for a
+   * phone. Its body is the right-click's, moved verbatim. */
+  const openDocMenuAt = useCallback((target, x, y) => {
+    if (!(target instanceof Element)) return;
+    /* ⛔ RIGHT-CLICKING A BOX IS STILL RIGHT-CLICKING INSIDE TEXT (B539651), so the box menu
+       is the document's plus the box's own action rather than a different menu. The id is
+       what tells them apart, and it comes from the DOM the press actually landed on. */
+    const box = target.closest(".planyr-anchor");
+    /* ⛔ A RIGHT-CLICK MUST RESOLVE ITS OWN TARGET (found chasing NEW-2, B649377).
+       ProseMirror only learns where the browser's native right-click actually put the
+       caret through an async `selectionchange` event — measured arriving ~20ms AFTER
+       `contextmenu` has already fired and this handler has already run — so reading
+       `editor.state.selection` here, synchronously, sees wherever the caret was doing
+       BEFORE this click, not where the user just clicked. Confirmed on a plain paragraph
+       with no table involved at all: right-clicking the third line left PM's selection
+       sitting at the document's very first position while the native DOM selection had
+       already moved correctly. Left-click is unaffected (`focusFromMat` places it
+       directly), which is why this went unnoticed until a command — "is the caret inside
+       a table" — actually needed the answer to be right. Resolved and applied by hand
+       here, the way a real editor does; a right-click INSIDE the current selection (e.g.
+       Cut/Copy on a phrase you already selected) is left alone, matching every editor's
+       convention, and a box is untouched (its own selection is separate React state, not
+       PM's, so it was never exposed to this). */
+    if (!box && editor && !editor.isDestroyed) {
+      const hit = editor.view.posAtCoords({ left: x, top: y });
+      if (hit && Number.isFinite(hit.pos)) {
+        const { from, to } = editor.state.selection;
+        if (hit.pos < from || hit.pos > to) editor.commands.setTextSelection(hit.pos);
+      }
+    }
+    /* NEW-2 — "Convert table to text" only makes sense when the right-click actually
+       landed inside a table; reading it off the DOM the press hit (rather than off
+       `editor.isActive("table")`) keeps it consistent with how the box id above is read. */
+    const inTable = !!target.closest("table");
+    setDocMenu({ x, y, boxId: box?.getAttribute("data-anchor-id") || null, inTable });
+  }, [editor]);
+
+  /* ⛔ TOUCH ROUTE TO THE DOCUMENT MENU: LONG-PRESS (NEW-5, iPhone review 2026-09-29). iOS Safari
+   * never fires `contextmenu` on a long-press, so the box menu (Delete this box, Paste as plain
+   * text, Convert table to text, …) had no way in on a phone. A touch held ~500 ms on the page
+   * opens THE SAME menu through `openDocMenuAt`; it is cancelled by more than 10 px of travel (that
+   * is a pan — NEW-2's slop, so the two never both claim a press), a second finger, or lifting
+   * early. The press that opened it swallows its own synthesised mousedown/click so releasing the
+   * finger cannot also deselect or place a box. Touch only: a mouse keeps its right-click. */
+  const longPressSwallowRef = useRef(0);
+  useEffect(() => {
+    const sc = scrollerRef.current;
+    if (!sc || readOnly) return undefined;
+    let timer = 0;
+    let start = null;
+    const cancel = () => { if (timer) { clearTimeout(timer); timer = 0; } start = null; };
+    const onDown = (e) => {
+      if (e.pointerType !== "touch" || !e.isPrimary) { cancel(); return; }
+      if (!(e.target instanceof Element) || !e.target.closest(".ProseMirror")) return;
+      if (e.target.closest("input, textarea, select, button, a, [data-handle], .planyr-anchor-grip")) return;
+      start = { x: e.clientX, y: e.clientY, target: e.target };
+      timer = setTimeout(() => {
+        timer = 0;
+        const at = start;
+        start = null;
+        if (!at || !editor || editor.isDestroyed) return;
+        longPressSwallowRef.current = performance.now() + 700;
+        openDocMenuAt(at.target, at.x, at.y);
+      }, LONG_PRESS_MS);
+    };
+    const onMove = (e) => {
+      if (!start) return;
+      if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > LONG_PRESS_SLOP) cancel();
+    };
+    const swallow = (e) => { if (performance.now() < longPressSwallowRef.current) { e.stopPropagation(); e.preventDefault(); } };
+    sc.addEventListener("pointerdown", onDown);
+    sc.addEventListener("pointermove", onMove);
+    sc.addEventListener("pointerup", cancel);
+    sc.addEventListener("pointercancel", cancel);
+    sc.addEventListener("mousedown", swallow, true);
+    sc.addEventListener("click", swallow, true);
+    return () => {
+      cancel();
+      sc.removeEventListener("pointerdown", onDown);
+      sc.removeEventListener("pointermove", onMove);
+      sc.removeEventListener("pointerup", cancel);
+      sc.removeEventListener("pointercancel", cancel);
+      sc.removeEventListener("mousedown", swallow, true);
+      sc.removeEventListener("click", swallow, true);
+    };
+  }, [editor, readOnly, openDocMenuAt]);
+
   useEffect(() => {
     if (!pasteOffer || !editor || editor.isDestroyed) { setPasteAt(null); return undefined; }
     let live = true;
@@ -4481,6 +4826,49 @@ const NoteEditor = forwardRef(function NoteEditor({
    * other memoised value handed across a boundary. */
   useImperativeHandle(ref, () => ({ exportPage, printPage }), [exportPage, printPage]);
 
+  /* NEW-6b/c — the module-tab row's page actions, as the phone "More" panel's page-action buttons. */
+  const pageActions = useMemo(() => (narrow && !readOnly && onToggleFind ? [
+    { id: "find", label: "Find and replace", run: onToggleFind, active: findReplaceOpen },
+    { id: "setup", label: "Page setup", run: onTogglePageSetup, active: pageSetupOpen },
+    { id: "history", label: "Version history", run: onToggleHistory, active: historyOpen },
+    { id: "export", label: "Export (Markdown)", run: () => exportPage() },
+    { id: "print", label: "Print / save as PDF", run: () => printPage() },
+  ] : undefined), [narrow, readOnly, onToggleFind, onTogglePageSetup, onToggleHistory, findReplaceOpen, pageSetupOpen, historyOpen, exportPage, printPage]);
+
+  /* ⛔ NEW-6c — WHILE THE EDITOR HAS FOCUS ON A PHONE, THE MODULE-TAB ROW STEPS ASIDE. Header + toolbar
+   * took 136 px of every screen and ~194 px was left to write in with the keyboard up. `data-notes-typing`
+   * on <html> is what `index.css` hides row 2 (and the floating help button + zoom pill) on; it is set on
+   * editor focus and cleared on blur/unmount, phone width only. The page actions that live in that row are
+   * in the toolbar's "More" panel meanwhile. VIEWPORT-STABLE: the mat's top edge moves when the row
+   * collapses, so the move is MEASURED around the toggle (before the attribute, then in a layout effect)
+   * and folded into the view — the page does not jump under the finger. */
+  const matTopBeforeRef = useRef(null);
+  const [phoneTyping, setPhoneTyping] = useState(false);
+  useEffect(() => {
+    if (!editor || editor.isDestroyed || !narrow || readOnly) return undefined;
+    const root = document.documentElement;
+    const toggle = (on) => {
+      if (on === (root.dataset.notesTyping === "1")) return;
+      matTopBeforeRef.current = scrollerRef.current ? scrollerRef.current.getBoundingClientRect().top : null;
+      if (on) root.dataset.notesTyping = "1"; else delete root.dataset.notesTyping;
+      setPhoneTyping(on);
+    };
+    const onFocus = () => toggle(true);
+    const onBlur = () => toggle(false);
+    editor.on("focus", onFocus);
+    editor.on("blur", onBlur);
+    if (editor.view.hasFocus()) toggle(true);
+    return () => { editor.off("focus", onFocus); editor.off("blur", onBlur); toggle(false); };
+  }, [editor, narrow, readOnly]);
+  useLayoutEffect(() => {
+    const before = matTopBeforeRef.current;
+    matTopBeforeRef.current = null;
+    const sc = scrollerRef.current;
+    if (before == null || !sc) return;
+    const delta = sc.getBoundingClientRect().top - before;
+    if (delta) setView({ x: viewRef.current.x, y: viewRef.current.y + delta, z: viewRef.current.z }, { persist: false, byUser: false });
+  }, [phoneTyping, setView]);
+
   /* ⛔ NEW-5 — read fresh every render (`shouldRerenderOnTransaction` already re-renders this
    * component on every editor transaction, `setNoteTitleStyle` included), never mirrored into
    * React state — the same "the editor is the one source of truth" rule the toolbar's own
@@ -4555,6 +4943,7 @@ const NoteEditor = forwardRef(function NoteEditor({
         titleDefaultSize={noteTitleFontPx(narrow)}
         arrowMode={!!arrowConnect}
         onToggleArrow={toggleArrowMode}
+        pageActions={pageActions}
       />
       {findReplaceOpen ? (
         <FindReplaceBar
@@ -4638,37 +5027,7 @@ const NoteEditor = forwardRef(function NoteEditor({
         onContextMenu={(e) => {
           if (!(e.target instanceof Element) || !e.target.closest(".ProseMirror")) return;
           e.preventDefault();
-          /* ⛔ RIGHT-CLICKING A BOX IS STILL RIGHT-CLICKING INSIDE TEXT (B539651), so the box menu
-             is the document's plus the box's own action rather than a different menu. The id is
-             what tells them apart, and it comes from the DOM the press actually landed on. */
-          const box = e.target.closest(".planyr-anchor");
-          /* ⛔ A RIGHT-CLICK MUST RESOLVE ITS OWN TARGET (found chasing NEW-2, B649377).
-             ProseMirror only learns where the browser's native right-click actually put the
-             caret through an async `selectionchange` event — measured arriving ~20ms AFTER
-             `contextmenu` has already fired and this handler has already run — so reading
-             `editor.state.selection` here, synchronously, sees wherever the caret was doing
-             BEFORE this click, not where the user just clicked. Confirmed on a plain paragraph
-             with no table involved at all: right-clicking the third line left PM's selection
-             sitting at the document's very first position while the native DOM selection had
-             already moved correctly. Left-click is unaffected (`focusFromMat` places it
-             directly), which is why this went unnoticed until a command — "is the caret inside
-             a table" — actually needed the answer to be right. Resolved and applied by hand
-             here, the way a real editor does; a right-click INSIDE the current selection (e.g.
-             Cut/Copy on a phrase you already selected) is left alone, matching every editor's
-             convention, and a box is untouched (its own selection is separate React state, not
-             PM's, so it was never exposed to this). */
-          if (!box && editor && !editor.isDestroyed) {
-            const hit = editor.view.posAtCoords({ left: e.clientX, top: e.clientY });
-            if (hit && Number.isFinite(hit.pos)) {
-              const { from, to } = editor.state.selection;
-              if (hit.pos < from || hit.pos > to) editor.commands.setTextSelection(hit.pos);
-            }
-          }
-          /* NEW-2 — "Convert table to text" only makes sense when the right-click actually
-             landed inside a table; reading it off the DOM the press hit (rather than off
-             `editor.isActive("table")`) keeps it consistent with how the box id above is read. */
-          const inTable = !!e.target.closest("table");
-          setDocMenu({ x: e.clientX, y: e.clientY, boxId: box?.getAttribute("data-anchor-id") || null, inTable });
+          openDocMenuAt(e.target, e.clientX, e.clientY);
         }}
         data-arrow-mode={arrowConnect ? "1" : undefined}
         ref={scrollerRef}
@@ -5156,6 +5515,38 @@ const NoteEditor = forwardRef(function NoteEditor({
             and clicking away. That box is one you made and then emptied yourself, it is visibly
             outlined the whole time, and the prune at the storage seam still takes it, silently, as
             it did before B1370546 existed. No toast covers that case any more. */}
+        {/* ⛔ A SELECTED BOX CAN BE DELETED ON A PHONE (NEW-5). With no right-click and no Delete key
+            on a phone, a box that is selected needs its own way out: a small pill pinned to the TOP
+            of the canvas (never the bottom — the soft keyboard covers that) with one 44 px action.
+            Coarse pointers only; the desktop selection model, keys and menu are untouched. It
+            deletes through the same command and the same undo step as the menu's row. */}
+        {selection.size > 0 && !readOnly && isCoarsePointerDevice() ? (
+          <div
+            data-testid="note-touch-box-bar"
+            onMouseDown={(e) => e.preventDefault()}
+            style={{
+              position: "absolute", top: 8, left: "50%", transform: "translateX(-50%)", zIndex: 6,
+              display: "flex", alignItems: "center", gap: 4, padding: 3,
+              background: "var(--surface-raised)", border: "1px solid var(--border-default)",
+              borderRadius: RADIUS.pill, boxShadow: "0 6px 18px rgba(0,0,0,0.18)", // design-exempt: floating-chip shadow, same value as the other canvas overlays
+            }}
+          >
+            <button
+              type="button"
+              data-testid="note-touch-box-delete"
+              onClick={() => {
+                if (!editor || editor.isDestroyed) return;
+                editor.commands.removeNoteAnchors([...selRef.current]);
+                clearSelection();
+                editor.commands.focus(null, { scrollIntoView: false });   // …so undo can reach it (B421489)
+              }}
+              style={{
+                minHeight: 44, minWidth: 44, padding: "0 16px", border: "none", borderRadius: RADIUS.pill,
+                background: "transparent", color: "var(--danger-text)", font: "inherit", fontSize: 14, fontWeight: 700, cursor: "pointer",
+              }}
+            >{selection.size > 1 ? `Delete ${selection.size} boxes` : "Delete box"}</button>
+          </div>
+        ) : null}
         {pendingPlace ? (
           <div
             data-testid="note-pending-caret"

@@ -1,5 +1,5 @@
 /* foodPhone — the CI-runnable half of "Food on a phone" (first visit, dish ratings, keyboard,
- * AutoFill). The on-phone half is ui-audit/verify-food-phone.mjs (Playwright WebKit, emulated) and
+ * AutoFill). The on-phone half is ui-audit/verify-food-visit-phone.mjs (Playwright WebKit, emulated) and
  * V1476080 (real device). Each test below is red on the code before this change. */
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
