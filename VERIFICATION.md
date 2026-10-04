@@ -166,16 +166,6 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
-### V1484656 — B2061328: typing in an open note while the app returns to the foreground / another window pushes never loses either side's text, and the editor stays put `Blocker: auth` (two signed-in windows)
-
-Sandbox-proven: `test/notesOpenPageSync.test.js` (gated fake network, red on main) + `ui-audit/verify-notes-open-page-adopt.mjs` (real editor takes the adopted body in place). The real two-window cloud round-trip needs a signed-in account.
-**Steps (signed in, a throwaway duplicate page — never a real plan):**
-1. Open the same throwaway page in window A and window B. In B, change the FIRST paragraph and wait for "Saved".
-2. In A (not touched since), type a few words in the LAST paragraph and, within a second, switch to another tab/app and back (or click away and back) so the app syncs. **Expect:** the keyboard/caret in A are not dropped; A shows B's first-paragraph change AND its own words.
-3. Wait ~10 s, reload A. **Expect:** both edits present; no "also changed in another window" banner.
-4. Repeat with both windows editing the SAME paragraph. **Expect:** the existing conflict banner (nothing silently lost).
-5. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes on a dated pass of 2–4, or a failed step filed as a recurrence on B2061328.
 ### V1445360 — B2020272/B2020273: blue my-location marker, heading cone and arrow button on a real iPhone `Blocker: real-device (iOS compass permission prompt and the heading cone need a real phone; the sandbox has no sensors or map tiles)`
 
 Sandbox-proven: `ui-audit/verify-locate-marker.mjs` (colors, ring, pane order, metre-accurate circle at two zooms, cone present/absent, button states) and `test/locateHeading.test.js`. Left for the phone:
@@ -255,6 +245,16 @@ Sandbox-proven (logged-out, seeded local site, real Chromium): `e2e/mapfinder-no
 - **2026-10-04 WebKit-emulated pass (B2050816, NOT on device, logged-out; chunk `index-BVErCNTL.js` read in the same run):** `node ui-audit/verify-phone-orientations.mjs` (`PLANYR_CASES=notice-leak`) — iPhone SE and iPhone 15, portrait + landscape × Dashboard/Schedule/Review/Library/Notes/Spreadsheet = **24/24 PASS** (hint visible after Select parcels, gone after the switch each time); the same case on the pre-fix build is 0/24 PASS. Steps 1-4 above on a real phone, signed in, remain pending (`Blocker: auth`).
 - **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B2041360.
 
+### V1484656 — B2061328: typing in an open note while the app returns to the foreground / another window pushes never loses either side's text, and the editor stays put `Blocker: auth` (two signed-in windows)
+
+Sandbox-proven: `test/notesOpenPageSync.test.js` (gated fake network, red on main) + `ui-audit/verify-notes-open-page-adopt.mjs` (real editor takes the adopted body in place). The real two-window cloud round-trip needs a signed-in account.
+**Steps (signed in, a throwaway duplicate page — never a real plan):**
+1. Open the same throwaway page in window A and window B. In B, change the FIRST paragraph and wait for "Saved".
+2. In A (not touched since), type a few words in the LAST paragraph and, within a second, switch to another tab/app and back (or click away and back) so the app syncs. **Expect:** the keyboard/caret in A are not dropped; A shows B's first-paragraph change AND its own words.
+3. Wait ~10 s, reload A. **Expect:** both edits present; no "also changed in another window" banner.
+4. Repeat with both windows editing the SAME paragraph. **Expect:** the existing conflict banner (nothing silently lost).
+5. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 2–4, or a failed step filed as a recurrence on B2061328.
 ### V1464320 — B2039232: an open file has a Close (×) back to the sheet index; unsaved Word/text edits ask first; reload after Close stays on the index `Blocker: auth`
 
 Sandbox-proven logged out against the built app: `ui-audit/verify-review-close-file.mjs` (25/25; red on `main`'s build) and `test/reviewCloseFile.test.js`. Pending: the real signed-in account on planyr.io, and a real phone.
