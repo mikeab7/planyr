@@ -49,3 +49,101 @@ Building SF / coverage / parking / acreage: one pure `siteMetrics`, memoized on 
 
 ## Cross-tab liveness inventory (who listens today)
 `storage` handlers: ProjectBreadcrumb, `projects.js onProjectsChanged` (names, Model, Notes, Scheduler subscribe), `pinStore`, `smoothZoom`, `notesStore`, `SitePlanner` (skipped when cloud active), `SitePlannerApp`, `storage.js onSiteModelChanged`. BroadcastChannel: presence only. **No listener** (fixed or argued in the items above): agenda, org workbook index, account prefs mirror, Library sort/open cats (view prefs — accepted), `newProjectSharing` ctx, `coverage` prefs, `colorRecents` (low, view-only — accepted as B).
+
+---
+
+# Part 2 — copies in OTHER DATABASE TABLES and jsonb blobs (B2064896, 2026-10-04)
+
+Part 1 above found stale copies held in component state. The 2026-09-29 live check then found copies the
+component-state guard cannot see: values stored in a second TABLE (`schedules.linked_site_name`,
+`doc_reviews.project`). This pass inventories **every column of every `public` table and every jsonb blob**
+(`sites.data`, `schedules.data`, `doc_reviews.data`, `planar_data`, `site_plan_overlays`, notes/model blobs),
+and — new — compares each stored copy with its source **in production data** (read-only). Instruments:
+`npm run drift-report` (`scripts/drift-report.sql`, 25 checks, one SELECT) and the manifest
+`scripts/denormalisedCopies.json`, which `test/denormalisedCopies.test.js` enforces in CI.
+
+**State of PR #1892 (B1991040/B1991041 — names in `schedules` / `doc_reviews`) when this ran:** open, build
+in progress, conflicted against main. Not duplicated here: its code and backfill files are its own. The
+manifest entries that depend on it (`C01`, `C07`, `C26`) carry `pendingOn: PR #1892`, and the test fails the
+moment their evidence lands without the marker being deleted.
+
+## Production drift, before → after (read-only `drift-report.sql`, 2026-10-04)
+
+| Check | Copy → source | Verdict | Drifted / total **before** | **After** |
+|---|---|---|---|---|
+| D01 | `schedules.linked_site_name` → `sites.site` | A | 1 / 7 | 0 after #1892's backfill |
+| D03 | `schedules.linked_site_id` → a live project | B | 1 / 8 (schedule 24 → deleted project) | reported, kept (restore re-attaches) |
+| D04 | `sites.data.scheduleProjectId` ↔ schedules' links | A | 4 / 22 | converges on next Dashboard load; backfill below |
+| D05 | `sites.data.scheduleProjectName` → `sites.site` | B | 1 / 14 | never displayed — labelled |
+| D06 | `doc_reviews.project` → `sites.site` | A | 1 / 14 | 0 after #1892's backfill |
+| D07 | `doc_reviews` cols ↔ `data` | C | 1 / 36 (an empty draft) | harmless |
+| D08 | `file_facts` item/revision/date/discipline → `doc_reviews` | A | 4 / 9 | 0 after backfill (blanks only) |
+| D09 | `file_facts.source_file` ↔ `data.sourceFile` | C | 0 / 9 conflicting (8 are a blank review side) | n/a |
+| D10 | `site_plan_overlays.doc_title/doc_date` → review | B | 1 / 1 | an editable name — override stays |
+| D11 | `site_plan_overlays.project_id` → review's | B | 1 / 1 | different fact (Map "Site" vs Library filing) |
+| D12 | child `team_id` → project's `team_id` | B | 6 / 22 | **owner decision** (OWNER-TODO.md) |
+| D13 | `sites` cols ↔ `data` | C | 0 / 86 | — |
+| D14 | `sites.site` across a project's plans | A (names, B1953200) | 0 / 57 | — |
+| D15 | `sites.data.status` across a project's plans | **A** | **1 / 57** (8 South: pursuit vs active) | 0 after backfill |
+| D16 | role / dates across a project's plans | C | 0 / 57 | — |
+| D17 | `sites.thumbnail_svg` older than its plan | C | 9 / 59 | event-driven refresh |
+| D18 | `sites.updated_at` ↔ `data.updatedAt` | C | 1 / 86 | different things (server touch vs client edit) |
+| D19 | `sites.data.els` ↔ `site_elements` rows | C | 0 / 86 | rows canonical |
+| D20 | `project_folders` name/trashed ↔ `drive_*` | C | 315 / 9297 | Drive mirror lag, readers use `name/trashed` |
+| D21 | folder rows of a deleted project | B | 3276 / 9468 | purged with the project (30 d) |
+| D22 | `food_dishes.place_id` → visit | C | 0 / 8 | DB trigger |
+| D23 | `profiles.email` → `auth.users.email` | A (latent) | 0 / 9 | trigger added |
+| D24 | `planar_data` blob → `schedules.data` | B | 5 / 10 | frozen legacy after the flip |
+| D25 | `recovery_*` tables | B | — / 6 tables | intentional backups, listed |
+
+The "after" column for the backfilled items is proven on a copy of the data in the PR (see
+`src/workspaces/site-planner/db/single_source_backfill_20261004.sql`, which has a read-only preview and
+is **not** applied by hand).
+
+## Verdicts for the copies found in this pass
+
+**A — fixed (a user can see a stale or conflicting value):**
+- **A1 project status split (D15)** — status is project-level but written by a per-plan loop with no atomic
+  RPC, so a partial write left one project `pursuit` on one plan and `active` on another; Map and Dashboard
+  answered from the element-recency plan, breadcrumb/Library/MCP from the newest header. Fix: ONE answer,
+  `projectModel.groupStatusOf` (newest plan header wins), now read by Map `siteGroups`, Dashboard
+  `groupProjectsByGroupId` and breadcrumb `groupProjects`. (B2064897)
+- **A2 "has a schedule" hint (D04)** — `sites.data.scheduleProjectId` was healed only while the Schedule tab
+  was open. Fix: the Dashboard, which already reads the schedule rows on every visit, heals the hint from
+  them (`planHintHealFromRows`). (B2064898)
+- **A3 filing facts (D08)** — `file_facts` kept blank item/revision/date where the review had values and MCP
+  output showed the blanks. Fix: `applyReviewTruth` takes the review's value first; backfill fills blanks only.
+  (B2064899)
+- **A4 profile email (D23, latent)** — copy written by the insert trigger only. Fix: update trigger
+  `sync_profile_email` + non-destructive backfill. (B2064900)
+- **A5/A6 names in `schedules` / `doc_reviews` (D01/D06)** — #1892 (B1991040); this pass only measures them.
+
+**B — intentional, labelled:** `sites.data.scheduleProjectName` (write-once hint, never shown) ·
+`schedules.linked_site_id` to a deleted project (kept so a restore re-attaches) · overlay `doc_title`
+(user-editable name; an explicit override stays an override), `doc_date`, `project_id`, `locked` (separate
+stores by owner constraint 11) · child `team_id` (sharing is per object, owner decision 2026-08-09; **the six
+differing rows are a product question, not a copy to sync** — see OWNER-TODO.md) · `planar_data` legacy blob ·
+`problem_reports.user_email/build/route` (point-in-time) · folder rows of a deleted project (until purge) ·
+**`recovery_*` snapshot tables** (intentional backups — `recovery_20260822_*`, `recovery_20260905_*`,
+`recovery_b1160480_*`, `recovery_20260912_*`; never read by the app).
+
+**C — caches with a cited invalidation** (each entry names its evidence line in the manifest): `sites`
+column mirrors (trigger + one writer) · `doc_reviews` columns ↔ blob (one upsert) · `file_facts.source_file`
+(loadReview fills the blank side) · `sites.thumbnail_svg` (refresh after every push) · `sites.updated_at`
+vs `data.updatedAt` (different facts) · `sites.data.els` (rows canonical) · `project_folders.drive_*`
+(server-only mirror) · `food_dishes.place_id` (trigger).
+
+**Counts: A 6 (4 fixed here, 2 by #1892) · B 11 · C 11.**
+
+## Adversarial pass — what was tried to break the conclusion
+
+Triggers (`information_schema.triggers`), SECURITY DEFINER RPCs that write a copy (`rename_site_group`,
+`reconcile_site_group_name`, `set_site_group_role`, `set_project_team*`, `schedules_decompose_from_planar_data`,
+`handle_new_user`, `folder_set_drive_meta`, `commit_site_plan_overlay_placement`) and Pages Functions were
+read for a write that fans a value out. Findings: `set_project_team` updates `sites` only — reviews, overlays,
+comps and notes keep their own `team_id` (D12; deliberate); `rename_site_group`/`reconcile_site_group_name`
+touch `updated_at` but not `data.updatedAt` (D18; different facts); no trigger writes a value into a second
+table except the two already declared (`food_dishes` place id, `sites` site mirror). No jsonb field in
+`schedules.data` / `doc_reviews.data` / `site_plan_overlays` duplicates a value that another table owns beyond
+those in the manifest. **Passes: 3** (inventory + production drift → fixes + re-run → adversarial trigger/RPC/
+function read, which found D12 and D18 and no new A).

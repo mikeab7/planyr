@@ -15,7 +15,7 @@
  * it" without a second read of `sites`.
  */
 
-import { pickRepresentativePlan } from "../../../shared/projects/projectModel.js";
+import { pickRepresentativePlan, groupStatusOf } from "../../../shared/projects/projectModel.js";
 
 const DEFAULT_STATUS = "pursuit"; // siteStatus.js's own new-site default
 const DEFAULT_ROLE = "pursuit";   // role has no legacy split — absent means "pursuit" (B843792)
@@ -46,7 +46,7 @@ export function groupProjectsByGroupId(siteRows, elementRecencyBySite) {
       siteId: newest.id,
       name: (newest.site || newest.name || "").trim() || "Untitled",
       county: newest.county || null,
-      status: newest.status || DEFAULT_STATUS,
+      status: groupStatusOf(rows) || DEFAULT_STATUS, // B2064897 — one project, one status (not the representative plan's own)
       role: newest.role || DEFAULT_ROLE,
       updatedAt: newest.updated_at || null,
       planCount: rows.length,

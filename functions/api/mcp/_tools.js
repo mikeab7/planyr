@@ -219,12 +219,19 @@ export function applyReviewTruth(factRows, reviewRows) {
     const r = byId.get(String(f.review_id || f.id));
     if (!r) { out.push(f); continue; }
     if (r.deleted_at) continue;
-    out.push({ ...f, project_id: r.project_id || null });
+    // B2064899 — discipline/item/revision/doc_date are filing facts the review owns too; the index copy
+    // only fills a gap (production 2026-10-04: facts blank for item/revision/date where the review had them).
+    const pick = (rv, fv) => (rv != null && rv !== "" ? rv : fv);
+    out.push({
+      ...f, project_id: r.project_id || null,
+      discipline: pick(r.discipline, f.discipline), item: pick(r.item, f.item),
+      revision: pick(r.revision, f.revision), doc_date: pick(r.doc_date, f.doc_date),
+    });
   }
   return out;
 }
 async function truthFor(env, factRows) {
-  const reviews = await pgGet(env, "doc_reviews", [["select", "id,project_id,deleted_at"]]);
+  const reviews = await pgGet(env, "doc_reviews", [["select", "id,project_id,deleted_at,discipline,item,revision,doc_date"]]);
   return applyReviewTruth(factRows, reviews);
 }
 
