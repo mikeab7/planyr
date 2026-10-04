@@ -104,7 +104,8 @@ await page.waitForTimeout(1500);
 const snap = async () => page.evaluate(() => (window.__mapParcelDisplay && window.__mapParcelDisplay()) || null);
 // In-page settle timer: runs `act()` (synchronous map call that ends in moveend/zoomend), then waits for the next
 // animation frame's callbacks, and returns the elapsed wall time. Paced with MessageChannel/rAF only (never a timer).
-const settleMs = (kind, z) => page.evaluate(async ({ kind, z }) => {
+const METRIC = process.env.METRIC === "wall" ? "wall" : "cpu"; // cpu (default, gated): CPU in the call + rAF callbacks · wall: up to the next frame (includes the vsync wait — informational)
+const settleMs = (kind, z) => page.evaluate(async ({ kind, z, metric }) => {
   const map = window.__mapFinderMap;
   const r0 = window.__rafMs;
   const t0 = performance.now();
@@ -113,8 +114,8 @@ const settleMs = (kind, z) => page.evaluate(async ({ kind, z }) => {
   const sync = performance.now() - t0;
   await new Promise((r) => requestAnimationFrame(() => r())); // flush: the batched redraw callbacks queued above run first
   await new Promise((r) => setTimeout(r, 0));
-  return sync + (window.__rafMs - r0);
-}, { kind, z });
+  return metric === "wall" ? performance.now() - t0 : sync + (window.__rafMs - r0);
+}, { kind, z, metric: METRIC });
 const settleLoaded = async () => { await page.waitForTimeout(2500); };
 const median = (a) => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
 
