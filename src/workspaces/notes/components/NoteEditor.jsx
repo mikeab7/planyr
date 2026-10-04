@@ -4022,7 +4022,17 @@ const NoteEditor = forwardRef(function NoteEditor({
       const blocks = nodes.map((el) => {
         const x = parseFloat(el.getAttribute("data-anchor-x")) || parseFloat(el.style.left) || 0;
         const w = parseFloat(el.getAttribute("data-anchor-w")) || parseFloat(el.style.width);
-        const fit = fitAnchorBox({ x, w, hostWidth: paneWidth });
+        /* ⛔ A BOX RENDERS AT ITS STORED WIDTH, ON EVERY DEVICE (B2078593 ×2, owner iPhone 2026-10-04).
+         * `hostWidth: paneWidth` clamped the rendered width to the SCREEN pane (`note-mat`'s on-screen
+         * width, an UNSCALED number) — but the box lives in workspace coordinates the view transform
+         * then scales. On a phone the pane is ~390 while the page is 1012 wide at 37%, so a stored
+         * 873-wide box was squeezed to 386 (41% of the page instead of 86%) and its table cut off; the
+         * same note on a desktop pane that happened to be wider than the box rendered correctly — so
+         * "the same note lays out differently on my phone". The clamp answered B421490 (a box hanging
+         * off the end of the sheet landing under the Outline panel) from the scroller-era, when the pane
+         * WAS the page; the canvas is unbounded and pannable now, and the STORED width is the person's
+         * intent (this function's own header says so). No `hostWidth` = "unmeasured — never guess". */
+        const fit = fitAnchorBox({ x, w });
         if (Math.round(parseFloat(el.style.width)) !== fit.w) el.style.width = `${fit.w}px`;
         if (Math.round(parseFloat(el.style.left)) !== fit.x) el.style.left = `${fit.x}px`;
         return { x: fit.x, w: fit.w, y: parseFloat(el.style.top) || 0, height: el.offsetHeight };
