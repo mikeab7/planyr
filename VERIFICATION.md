@@ -176,6 +176,15 @@ Sandbox-proven: `test/notesOpenPageSync.test.js` (gated fake network, red on mai
 4. Repeat with both windows editing the SAME paragraph. **Expect:** the existing conflict banner (nothing silently lost).
 5. Read the served chunk hash in the same observation as each result.
 - **Stopping rule:** closes on a dated pass of 2–4, or a failed step filed as a recurrence on B2061328.
+### V1445360 — B2020272/B2020273: blue my-location marker, heading cone and arrow button on a real iPhone `Blocker: real-device (iOS compass permission prompt and the heading cone need a real phone; the sandbox has no sensors or map tiles)`
+
+Sandbox-proven: `ui-audit/verify-locate-marker.mjs` (colors, ring, pane order, metre-accurate circle at two zooms, cone present/absent, button states) and `test/locateHeading.test.js`. Left for the phone:
+1. On the iPhone in Safari, open `planyr.io` → Site tab; read `/version.json` in the same check. Tap the locate button (arrow icon, bottom-left under +/−). **Expect:** Safari asks for location, then for Motion & Orientation access; the arrow turns solid blue; a blue dot with a white ring appears at your position (NOT orange), with a soft blue circle around it.
+2. Slowly turn your body. **Expect:** a soft blue wedge from the dot points the way the phone faces and swings with you.
+3. Pinch in and out. **Expect:** the soft circle grows and shrinks with the map (real ground size), and fades away when zoomed far out.
+4. Drag the map away. **Expect:** the arrow turns outline-blue; tap it and the map re-centres (solid again). Tap once more. **Expect:** tracking off, dot gone, arrow gray outline.
+5. Tap a parcel under where the dot sits. **Expect:** the parcel still selects (the dot never blocks the tap).
+6. Repeat step 1 but answer **Don't Allow** to the Motion prompt. **Expect:** dot and circle still show, no wedge, no error.
 ### V1479952 — B2061792: a non-closing deed warns on the reader, the plot toast and the panel `Blocker: real-data (the Grand Port group's saved plans)`
 
 Sandbox-proven: `test/deedGap.test.js`, `ui-audit/verify-deed-closure-warning.mjs` (real Tract 1 calls, logged-out). Pending: the same on a real signed-in plan. **Steps** (planyr.io; read the served chunk hash in the same observation; use the throwaway **"Concept A (copy)"** plan in the Grand Port group — NEVER Concept A):
@@ -936,6 +945,17 @@ Stopping rule: this passes and moves to `docs/archive/VERIFICATION-DONE.md` once
 2. Re-run `src/workspaces/site-planner/db/test/security_definer_ownership_audit.test.sql` (paste into the SQL editor, or `execute_sql`) against the same project. **Expect:** all 14 cases PASS — specifically Case 13 now reports `plans=0 foreign=0` for a total stranger to the group, instead of the real counts.
 3. (Optional sanity check — confirms nothing else moved.) Re-run `db/test/sites_cas_ownership_independent.test.sql`. **Expect:** unaffected, still all PASS.
 - **Stopping rule:** closes when step 2 confirms Case 13 flips to PASS against the real deployed function — or it fails and is filed as a recurrence against B1853664, per STANDING RULE #2 (a null result is a FINDING, never a silent close).
+
+### V1421552 — B1996464: flat rail panels show real data correctly (populated Drainage rows, Analysis findings, Overlays with live layers) `Blocker: live-GIS`
+
+Sandbox-proven (`ui-audit/verify-flat-rail-panels.mjs` 0 failing across 14 panel renders; the pre-change build fails it 26 ways; `test/flatRailPanels.test.js`). **Still needs planyr.io where the flood/GIS services answer** — offline the Drainage rows only ever read "not checked yet" and Analysis never loads findings, so the populated states were not seen.
+**Steps** (note the served chunk hash in the same observation as each result):
+1. Site → a georeferenced plan (Silvestri / Concept D) → Drainage on a phone width. **Expect:** one header row (icon, DRAINAGE, site · plan, "Flood data … ↻", ×), no empty strip above it, no inner card; press ↻ and the header line reads "checking…" then an age.
+2. After the check completes: **Expect:** Detention / Mitigation / Buildability are label-left, value-right lines; a short row shows its SHORT/THIN/OK word in tone colour at the right end; the "Rule applied…" amber note and any reconciliation clause run full width under their row; "Buildings in the floodplain" is a divider-separated fold.
+3. Analysis tab after its screen loads. **Expect:** each finding is a divider row (glyph, name, status) — no tinted card — and expanding one indents its detail under the name.
+4. Overlays with a dropped PDF selected. **Expect:** the selected row shows an accent rule on its left edge, others none; controls on the row all work.
+5. Repeat 1 at desktop width. **Expect:** same, plus the detach icon still pops the panel to a floating card whose header carries the same icon/title/subtitle/↻.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1996464.
 
 ### V1308368 — B1838704: a polygon crop made from the Site tab OVERLAYS panel survives a signed-in cloud save, a reload on a second device, and prints clipped `Blocker: auth`
 
@@ -1976,6 +1996,13 @@ Sandbox-proven: `e2e/start-hint-placement.spec.js` (red on main, green here; emu
 3. Tools → Parcel tools → Draw new parcel. **Expect:** the strip is gone and stays gone while drawing.
 4. New blank site again → ✕ → reload. **Expect:** strip stays dismissed.
 5. Desktop width: **Expect:** strip top-left, clear of the middle. Real iPhone Safari look (toolbar collapse, safe areas) remains owner-side and is NOT claimed.
+
+### V1445152 — B2020064: Map view zoom +/−/locate buttons clickable with a long Sites list `Blocker: real-data (signed-in account with his long site list on planyr.io)`
+
+Sandbox-proven: `ui-audit/verify-map-zoom-reachable.mjs` (hit test; red pre-fix, green after) and `test/mapChromeStack.test.js`.
+1. On planyr.io, Map view, ~1600-wide window, Sites rail open; read `/version.json` in the same check. **Expect:** the + and − buttons are visible below the rail and clicking them zooms the map (no project opens).
+2. Collapse the rail. **Expect:** same buttons still clickable. Reopen it. **Expect:** the list scrolls inside the rail, which ends above the buttons.
+3. Repeat on a phone-width window with the rail open. **Expect:** buttons clear of the rail and clickable.
 
 ## THE CHECKLIST — run this on Michael's signed-in Chrome, on `planyr.io`
 
