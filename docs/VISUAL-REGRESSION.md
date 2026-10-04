@@ -69,10 +69,10 @@ A locally-rendered baseline — even one captured with the exact CI-pinned Chrom
 
 | surface | theme | viewport | last approved | at commit | note |
 |---|---|---|---|---|---|
-| Map landing page (no project selected) | light | desktop | 2026-09-30 | `66abc024` | Scale bar label no longer ghosted: vendor text-shadow cleared (B1875168) |
-| Map landing page (no project selected) | light | phone | 2026-09-30 | `66abc024` | Scale bar label no longer ghosted: vendor text-shadow cleared (B1875168) |
-| Map landing page (no project selected) | dark | desktop | 2026-09-30 | `66abc024` | Scale bar label no longer ghosted: vendor text-shadow cleared (B1875168) |
-| Map landing page (no project selected) | dark | phone | 2026-09-30 | `66abc024` | Scale bar label no longer ghosted: vendor text-shadow cleared (B1875168) |
+| Map landing page (no project selected) | light | desktop | 2026-10-04 | `c83f7718` | locate button: crosshair replaced by navigation arrow (B2020273) |
+| Map landing page (no project selected) | light | phone | 2026-10-04 | `c83f7718` | locate button: crosshair replaced by navigation arrow (B2020273) |
+| Map landing page (no project selected) | dark | desktop | 2026-10-04 | `c83f7718` | locate button: crosshair replaced by navigation arrow (B2020273) |
+| Map landing page (no project selected) | dark | phone | 2026-10-04 | `c83f7718` | locate button: crosshair replaced by navigation arrow (B2020273) |
 | Site Planner — header + toolbar | light | desktop | 2026-09-29 | `490b1b9d` | B1978048: state/country outlines now drawn on our own canvas at exact sub-pixel positions (Leaflet's renderer rounded every vertex to whole pixels), so hairline antialiasing shifts on every outline pixel; Medellin drops out where it collides with Bogota (same-tier ties now break by name, order-independent). Verified by diff image: outlines + that one label only, nothing else moved. |
 | Site Planner — header + toolbar | light | phone | 2026-09-29 | `490b1b9d` | B1978048: state/country outlines now drawn on our own canvas at exact sub-pixel positions (Leaflet's renderer rounded every vertex to whole pixels), so hairline antialiasing shifts on every outline pixel; Medellin drops out where it collides with Bogota (same-tier ties now break by name, order-independent). Verified by diff image: outlines + that one label only, nothing else moved. |
 | Site Planner — header + toolbar | dark | desktop | 2026-09-29 | `490b1b9d` | B1978048: state/country outlines now drawn on our own canvas at exact sub-pixel positions (Leaflet's renderer rounded every vertex to whole pixels), so hairline antialiasing shifts on every outline pixel; Medellin drops out where it collides with Bogota (same-tier ties now break by name, order-independent). Verified by diff image: outlines + that one label only, nothing else moved. |
