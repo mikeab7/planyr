@@ -78,7 +78,7 @@ export function parcelUrlSupportsImageExport(url) {
 
 /* ONE outline colour for every Planyr-drawn parcel line, the statewide image's server-side
  * recolour, and the lot numbers — so a county never shows a look of its own. */
-export const PARCEL_OUTLINE_COLOR = "#a21caf";
+export const PARCEL_OUTLINE_COLOR = "#a21caf"; // design-exempt: the one parcel-outline colour — canvas strokes, a server-image request and DOM label ink cannot use var(); same value as parcelTileLayer.PARCEL_OUTLINE_STYLE
 export const PARCEL_OUTLINE_RGB = [162, 28, 175];
 export const PARCEL_OUTLINE_WEIGHT = 1.3;
 

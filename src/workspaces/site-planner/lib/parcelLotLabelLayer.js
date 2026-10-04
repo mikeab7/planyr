@@ -17,6 +17,7 @@ import { layoutLotNumbers, clipRingToRect, lotNumberText, resolveLotNumberField,
 import { PARCEL_OUTLINE_COLOR } from "./parcelDisplayZoom.js";
 
 const RELAYOUT_DEBOUNCE_MS = 90;
+const LABEL_HALO = "#fff"; // design-exempt: a number's halo must be white over ANY basemap and theme — no token models "readable over a photo"
 const VIEW_INSET = 6; // keep a number off the very edge of the map
 
 /* A feature's OUTER ring as [{x,y}] in WORLD PIXELS at zoom `z` (pan-independent, so the interior
@@ -131,7 +132,7 @@ export function attachLotNumbers(layer, { hint, getObstacles, getInset } = {}) {
         iconAnchor: [p.w / 2, p.h / 2],
         html: `<span data-lot-no="${esc(p.text)}" style="display:block;width:${p.w}px;text-align:center;white-space:nowrap;pointer-events:none;`
           + `font:600 ${LOT_NO_FONT_PX}px/${p.h}px 'Inter',system-ui,sans-serif;color:${PARCEL_OUTLINE_COLOR};`
-          + `text-shadow:0 0 2px #fff,0 0 2px #fff,0 0 3px #fff,0 0 3px #fff">${esc(p.text)}</span>`,
+          + `text-shadow:0 0 2px ${LABEL_HALO},0 0 2px ${LABEL_HALO},0 0 3px ${LABEL_HALO},0 0 3px ${LABEL_HALO}">${esc(p.text)}</span>`,
       });
       L.marker(ll, { icon: el, interactive: false, keyboard: false, zIndexOffset: -500 }).addTo(group);
     }
