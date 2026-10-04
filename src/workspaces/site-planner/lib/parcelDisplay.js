@@ -30,28 +30,95 @@ import L from "leaflet";
 import { STATEWIDE_PARCEL_LAYER, displayMinZoomForUrl } from "./counties.js";
 import { getSnapshot, featuresForView, onSnapshotChange } from "./parcelSnapshot.js";
 import { pruneToLiveCells } from "./parcelPrune.js";
+import { ParcelIndex, drawParcelTile, prepareParcel, tileLngLatBounds, PARCEL_OUTLINE_STYLE } from "./parcelTileLayer.js";
 import { guardRasterOpacity } from "./parcelOpacityGuard.js";
 import { PARCEL_MINZOOM, PARCEL_VECTOR_MINZOOM, parcelDisplayRegimeForZoom, parcelUrlSupportsImageExport, MAPSERVER_LAYER_RE } from "./parcelDisplayZoom.js";
 
 export { PARCEL_MINZOOM, PARCEL_VECTOR_MINZOOM, parcelDisplayRegimeForZoom, parcelUrlSupportsImageExport };
 
+/* NEW-1 — a held outline is a `ParcelGhost`, not a Leaflet Path. A Path registers `zoom: _project` and
+ * `moveend: _update` on the map, so every held lot was re-projected, re-clipped and re-simplified on every
+ * settle — 75–94 ms at z14 on Michael's Bartow view (16,702 held). A ghost keeps the two things every
+ * consumer reads off a display layer's children (`.feature` for the hit-test / hover / export, and
+ * `getBounds()`), registers no map events, and joins/leaves the tile index exactly when esri-leaflet adds
+ * it to / removes it from the map. The picture comes from `ParcelTiles` below. See parcelTileLayer.js. */
+const ParcelGhost = L.Layer.extend({
+  initialize(geojson, index, onChange) {
+    this.feature = geojson;
+    this.options = {};
+    const prepared = prepareParcel(geojson.geometry);
+    this.bbox = prepared.bbox;
+    this.rings = prepared.rings;
+    this._index = index;
+    this._onChange = onChange;
+  },
+  getBounds() {
+    const b = this.bbox;
+    return b ? L.latLngBounds([b[1], b[0]], [b[3], b[2]]) : L.latLngBounds([]);
+  },
+  addEventParent() { return this; }, // nothing listens to a lot's own events (interactive:false); skips a per-lot parent link
+  setStyle() { return this; }, // style is one constant for the whole layer, drawn per tile
+  onAdd() { this._index.add(this); this._onChange(this.bbox); },
+  onRemove() { this._index.delete(this); this._onChange(this.bbox); },
+});
+
+/* One cached canvas per map tile, drawn from the index (a bbox reject, then only that tile's lots are
+ * projected). A pan reuses tiles already drawn; a zoom settle draws only the tiles it has not. Lots that
+ * arrive or leave later repaint just the tiles they touch, coalesced to one pass per frame. Lives in the
+ * overlay pane so it sits exactly where the old canvas renderer did. */
+const ParcelTiles = L.GridLayer.extend({
+  initialize(index, options) {
+    L.GridLayer.prototype.initialize.call(this, options);
+    this._parcelIndex = index;
+    this._dirty = null;
+    this._flushTimer = null;
+  },
+  createTile(coords) {
+    const tile = L.DomUtil.create("canvas", "leaflet-tile");
+    this._paint(tile, coords);
+    return tile;
+  },
+  _paint(tile, coords) {
+    const size = this.getTileSize();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    if (tile.width !== size.x * dpr) { tile.width = size.x * dpr; tile.height = size.y * dpr; }
+    const ctx = tile.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawParcelTile(ctx, this._parcelIndex, { x: coords.x, y: coords.y, z: coords.z, size: size.x });
+  },
+  /** Lots changed under `bbox` ([w,s,e,n]) — repaint the live tiles it touches, once per frame. */
+  markDirty(bbox) {
+    if (!bbox) return;
+    const d = this._dirty;
+    this._dirty = d ? [Math.min(d[0], bbox[0]), Math.min(d[1], bbox[1]), Math.max(d[2], bbox[2]), Math.max(d[3], bbox[3])] : bbox.slice();
+    if (this._flushTimer) return;
+    this._flushTimer = L.Util.requestAnimFrame(() => { this._flushTimer = null; this._flush(); });
+  },
+  _flush() {
+    const d = this._dirty; this._dirty = null;
+    if (!d || !this._map) return;
+    Object.keys(this._tiles).forEach((k) => {
+      const t = this._tiles[k];
+      if (!t || !t.el || !t.coords) return;
+      const b = tileLngLatBounds(t.coords.x, t.coords.y, t.coords.z, this.getTileSize().x);
+      if (b[0] <= d[2] && b[2] >= d[0] && b[1] <= d[3] && b[3] >= d[1]) this._paint(t.el, t.coords);
+    });
+  },
+});
+
 // `opts` overrides the defaults below (e.g. a tighter `minZoom` for the "close" regime of
 // `makeParcelAdaptiveLayer`); every existing single-argument caller is unaffected.
 export function makeParcelLayer(url, opts) {
-  /* B1976336 — TWO MEASURED COSTS, both found on Michael's Bartow view (17,282 <path> nodes held
-   * after ONE zoom step, only 27 distinct `d`, tab unresponsive for 30 s):
-   *  · a CANVAS renderer instead of one SVG <path> per lot: thousands of outlines become one bitmap
-   *    (no DOM node per parcel). `interactive:false` and the client-side hit test (`eachFeature` →
-   *    geometry) are untouched, so click-to-select is unchanged (B137). The renderer leaves the map
-   *    with the layer so no empty canvas is left behind.
-   *  · `pruneToLiveCells` — esri-leaflet 3.0.19 NEVER releases a feature once fetched: `cellLeave`
-   *    only removes when `!_activeCells[key]`, but `_removeCell` sets `_activeCells[key]` (for reuse)
-   *    just before calling it, so the test can never pass, and `cacheLayers:false` therefore changes
-   *    nothing (measured). A zoom-out/zoom-in cycle accumulated the union of every tile ever fetched.
-   *    After each move we drop every feature that belongs only to cells that are no longer current,
-   *    and forget those cells so they are re-requested if the view returns. Features held track the
-   *    view. */
-  const renderer = L.canvas({ padding: 0.3 });
+  /* B1976336 — esri-leaflet 3.0.19 NEVER releases a feature once fetched: `cellLeave` only removes when
+   * `!_activeCells[key]`, but `_removeCell` sets `_activeCells[key]` (for reuse) just before calling it, so
+   * the test can never pass, and `cacheLayers:false` therefore changes nothing (measured). A zoom-out/
+   * zoom-in cycle accumulated the union of every tile ever fetched (17,282 held after ONE zoom step on
+   * Michael's Bartow view). After each move `pruneToLiveCells` drops every feature that belongs only to
+   * cells that are no longer current, and forgets those cells so they are re-requested if the view
+   * returns. Features held track the view. `interactive:false` and the client-side hit test
+   * (`eachFeature` → geometry) are untouched, so click-to-select is unchanged (B137). */
+  const index = new ParcelIndex();
+  let tiles = null;
   const layer = EL.featureLayer({
     url,
     minZoom: Math.max(PARCEL_MINZOOM, displayMinZoomForUrl(url)), // NEW-2 — a source that cannot answer a dense cell inside its record cap declares a higher floor
@@ -59,20 +126,48 @@ export function makeParcelLayer(url, opts) {
     precision: 6,
     fields: ["OBJECTID"],
     interactive: false, // purely visual; clicks go to the map/canvas for add/remove
-    renderer,
-    style: () => ({ color: "#a21caf", weight: 1.3, opacity: 0.95, fillOpacity: 0 }),
+    style: () => PARCEL_OUTLINE_STYLE,
     ...opts,
   });
+  // NEW-1 — children are ghosts (no per-lot Path, no per-settle projection); see ParcelGhost above.
+  layer.createNewLayer = (geojson) => (geojson && geojson.geometry
+    ? new ParcelGhost(geojson, index, (bbox) => { if (tiles) tiles.markDirty(bbox); })
+    : null);
+  /* NEW-1 — esri-leaflet's `_addFeatures` dedupes each arriving id with `Array.indexOf` over EVERYTHING
+   * held (`_currentSnapshot`) and the cell's id list: O(held × arriving) — 225 ms across a handful of
+   * Bartow zooms. Same behaviour, one Set per call instead of a linear scan per id. */
+  const baseAddFeatures = layer._addFeatures;
+  if (typeof baseAddFeatures === "function") {
+    layer._addFeatures = function (features, coords) {
+      if (!Array.isArray(this._currentSnapshot) || !this._cache || this.options.timeField) return baseAddFeatures.call(this, features, coords);
+      let key;
+      if (coords) { key = this._cacheKey(coords); this._cache[key] = this._cache[key] || []; }
+      const snap = new Set(this._currentSnapshot);
+      const cell = key !== undefined ? new Set(this._cache[key]) : null;
+      for (let i = features.length - 1; i >= 0; i--) {
+        const id = features[i].id;
+        if (!snap.has(id)) { snap.add(id); this._currentSnapshot.push(id); }
+        if (cell && !cell.has(id)) { cell.add(id); this._cache[key].push(id); }
+      }
+      this.createLayers(features);
+    };
+  }
   let mapRef = null;
   let timer = null;
   const prune = () => { timer = null; if (layer._map) pruneToLiveCells(layer); };
   const onMoved = () => { if (timer) clearTimeout(timer); timer = setTimeout(prune, 0); };
-  layer.on("add", () => { mapRef = layer._map; if (mapRef) mapRef.on("moveend zoomend", onMoved); });
+  layer.on("add", () => {
+    mapRef = layer._map;
+    if (!mapRef) return;
+    mapRef.on("moveend zoomend", onMoved);
+    tiles = new ParcelTiles(index, { pane: "overlayPane", zIndex: 0, minZoom: layer.options.minZoom, maxZoom: 24, tileSize: 256, keepBuffer: 2 });
+    tiles.addTo(mapRef);
+  });
   layer.on("remove", () => {
     if (mapRef) mapRef.off("moveend zoomend", onMoved);
+    if (tiles) { try { tiles.remove(); } catch (_) {} tiles = null; }
     mapRef = null;
     if (timer) { clearTimeout(timer); timer = null; }
-    try { renderer.remove(); } catch (_) {}
   });
   return layer;
 }

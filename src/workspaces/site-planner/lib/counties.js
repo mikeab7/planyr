@@ -2815,8 +2815,16 @@ export function countyBboxIntersectsView(key, bounds) {
  * over-inclusive-but-bounded answer) so the first frame is never empty. A view over a state with no
  * source returns []. `bounds` is a plain `{south, west, north, east}`. Pure. Mirrors the click
  * path's narrowing, so what you SEE still equals what you can SELECT (B137). */
+/* NEW-1 (settle cost) — a settle asks this for the SAME view more than once (the source sync, then the
+ * outline-floor hint via `displayFloorForView`), and each ask is 81 county point-in-polygon resolves
+ * (~25 ms measured at a Bartow zoom). One remembered answer per exact view removes the repeats; it is only
+ * kept when the county geometry was resident (a `pending` answer is the transient bbox fallback and must be
+ * recomputed once the asset lands). */
+let _viewSourcesMemo = null;
 export function displaySourcesForView(bounds) {
   if (!bounds) return [];
+  const mk = `${bounds.south}|${bounds.west}|${bounds.north}|${bounds.east}`;
+  if (_viewSourcesMemo && _viewSourcesMemo.key === mk) return _viewSourcesMemo.out.slice();
   const out = new Set();
   const N = 8; // (N+1)² sample points
   let pending = false;
@@ -2837,7 +2845,9 @@ export function displaySourcesForView(bounds) {
       if (!c.statewide && c.bbox && countyBboxIntersectsView(k, bounds)) out.add(k);
     });
   }
-  return [...out];
+  const res = [...out];
+  _viewSourcesMemo = pending ? null : { key: mk, out: res };
+  return res.slice();
 }
 
 /* NEW-2 (California) — a source may declare a HIGHER outline floor than the generic PARCEL_MINZOOM when it cannot
