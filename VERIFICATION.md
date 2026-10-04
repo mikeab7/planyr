@@ -565,19 +565,17 @@ Sandbox-proven (logged out, unit): `test/prefsSingleSource.test.js` (12 tests, r
 5. Tab A: Site Planner floodplain rules, set Harris ratio 1.5. Tab B (opened earlier): tick "verified" on Fort Bend. **Expect:** Tab B shows Harris 1.5 without reload; after reload both edits persist.
 6. Library: pin folder F, rename F in its project, return to Library Home. **Expect:** the pinned card shows the new name; delete F and it falls back to the old name (not blank).
 - **Stopping rule:** closes on a dated pass of 1–6, or a failed step filed as a recurrence on B1953793.
-### V1398976 — B1962672–B1962677: the overlay Crop tool walked end to end on Michael's signed-in Chrome (Reset, pan/zoom, undo/redo, fill, reload) `Blocker: auth`
+### V1489552 — B2066224–B2066227: crop-tool leftovers walked on Michael's signed-in Chrome (Done keeps both shapes · Enter closes · Reset holds still · Crop… visible on a short window) `Blocker: auth`
 
-Sandbox-proven (logged out, throwaway seeded plan with a generated 3000×1800 sheet, real pointer + key events, foreground tab, known-good arm): `node ui-audit/verify-crop-tool-walkthrough.mjs` ALL PASS (58 checks), plus `verify-crop-polygon-editing.mjs` and `verify-site-tab-overlay-crop.mjs` still all-pass, `test/cropHistory.test.js`. Nothing touched a real plan or the locked Goose Creek master plan (`sms93j3sfc04`); the throwaway existed only in the sandbox browser's local storage and was discarded with it. **Still needs the signed-in pass** because the brief's walk (real upload, cloud-saved overlay, hard reload of a cloud plan) needs the account.
+Sandbox-proven (logged out, throwaway seeded plan, real pointer + key events, foreground tab, known-good arm per scenario): `node ui-audit/verify-crop-leftovers.mjs` ALL PASS; **7 checks go red on the pre-fix tool**, so it can fail. Not provable here: a signed-in plan's cloud round trip of the saved crop.
 **Steps, on a THROWAWAY duplicate plan with a throwaway upload (constraint 7):**
-1. Site tab → OVERLAYS → expand the row → Crop…. **Expect:** the sheet fills the window (full height, no wide dead bands beyond its own aspect), and the toolbar shows Undo, Redo, ✋ Pan, −, slider, +, Fit, 100%.
-2. Polygon: place 4 points, zoom in with + and the slider, pan with the arrow keys and again with the Pan tool, place 2 more, press Enter. **Expect:** 6 draggable points; no stray point appears where a Pan drag ends.
-3. Drag a point, then Undo button, Redo button, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y. **Expect:** each moves it back/forth; Delete on a selected point removes it and Undo restores it.
-4. Click **Reset to full page** in Polygon mode. **Expect:** Done stays enabled; Done saves an uncropped overlay. Clear polygon instead. **Expect:** Done is greyed with a sentence saying what it needs.
-5. Save a polygon, reopen, switch to Rectangle, Reset to full page, Done. **Expect:** the overlay is uncropped (polygon gone too).
-6. Trim a rectangle, Done, then hard-reload with `?cb=<anything>` on the URL. **Expect:** the crop is still applied and the OVERLAYS row is still expanded.
-7. Rectangle mode: **Expect:** all four side grips look the same weight as each other.
-8. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes when 1-7 confirm on a real signed-in account with the build hash, or a failing step is filed as a recurrence on the matching B# (STANDING RULE #2).
+1. Short window: Site → OVERLAYS, row NOT expanded. **Expect:** Crop… is on the row beside the eye/lock/× without scrolling; it opens the tool.
+2. Rectangle: trim it, Done. Reopen, Polygon, Clear polygon, trace a shape, close, Done. **Expect:** the footer said "Your rectangle is kept too"; reopen → Rectangle → the rectangle you trimmed is still there; Done → the polygon is still there when you switch back.
+3. Start a polygon, press + (or Fit), then Enter. **Expect:** the polygon closes; the zoom button does not fire again.
+4. Switch Rectangle ⇄ Polygon. **Expect:** "Reset to full page" stays put.
+5. Hard-reload with `?cb=<anything>`. **Expect:** the crop and both kept shapes persist.
+6. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–5 with the build hash, or a failed step is filed as a recurrence on the matching B# (STANDING RULE #2).
 
 ### V1396784 — B1960480: double-tap on blank paper raises the soft keyboard and the first text lands in the new box (real iPhone keyboard)
 

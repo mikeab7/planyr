@@ -104,6 +104,8 @@ const HANDLE_CURSOR = {
 
 const fullRect = (imgW, imgH) => ({ x: 0, y: 0, w: imgW, h: imgH });
 const clampToImage = (v, max) => Math.min(Math.max(0, v), max);
+const ptsEqual = (a, b) => !!a && !!b && a.length === b.length
+  && a.every((p, i) => Math.abs(p[0] - b[i][0]) < 0.01 && Math.abs(p[1] - b[i][1]) < 0.01);
 
 // Shared style for the footer's small underlined text actions (Clear polygon / Reset to full page).
 const linkButtonStyle = (disabled) => ({
@@ -164,6 +166,9 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
     return rectToPolyPoints(initialRectRef.current || fullRect(imgW, imgH)) || [];
   });
   const [polyClosed, setPolyClosed] = useState(hadAnySavedShape); // NEW-4: open/drawing when nothing was saved yet
+  // B2066224 — what the polygon looked like when it was only a seed (never hand-drawn): lets Done tell a
+  // shape the person drew from a stand-in the tool made, so a drawn one is never dropped (see `otherShapes`).
+  const polySeedRef = useRef(polyPts);
   const [selectedVertex, setSelectedVertex] = useState(null); // index, closed mode only
 
   const [dragType, setDragType] = useState(null); // rect handle key while a gesture is live, else null
@@ -335,22 +340,28 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
     setPolyPts((pts) => [...pts, [px, py]]);
   };
 
+  // B2066224 — Done saves the ACTIVE shape and keeps the OTHER one alongside it, never drops it. The
+  // other shape is kept when the person put it there: a rectangle that is not the full page, or a
+  // closed polygon that was saved before this tool opened or has been edited away from its stand-in
+  // seed. A "full page" stand-in (what Reset leaves behind) and an unedited seed are the absence of a
+  // shape, not a shape. Before this, a shape drawn EARLIER IN THE SAME SESSION in the other mode was
+  // discarded on Done unless the overlay had also been saved with it before opening.
+  const otherShapes = () => {
+    const rect = normalizeCrop(draft, imgW, imgH);
+    const polyAuthored = polyClosed && !isFullImagePoly(polyPts, imgW, imgH)
+      && (!!initialPtsRef.current || !ptsEqual(polyPts, polySeedRef.current));
+    return { rect, pts: polyAuthored ? normalizePolyCrop(polyPts, imgW, imgH) : null };
+  };
   const commit = () => {
-    // The shape that is NOT active is carried forward only if this overlay already had one when
-    // the tool opened (NEW-3) — and a "full page" stand-in for a shape (what Reset leaves behind)
-    // is never carried: it is the absence of a crop, not a crop.
+    const { rect: dormantRect, pts: dormantPts } = otherShapes();
     if (mode === "poly") {
       // NEW-4: a closed ring exactly covering the full image (Polygon's own "Reset to full page")
       // is "no crop", same as a full-page rect.
       const pts = isFullImagePoly(polyPts, imgW, imgH) ? null : normalizePolyCrop(polyPts, imgW, imgH);
-      const dormantRect = initialRectRef.current ? normalizeCrop(draft, imgW, imgH) : null;
       if (!pts) { onCommit(dormantRect ? { kind: "rect", ...dormantRect } : null); return; }
       onCommit({ kind: "poly", pts, ...(dormantRect || {}) });
     } else {
-      const rect = normalizeCrop(draft, imgW, imgH);
-      const dormantPts = initialPtsRef.current && !isFullImagePoly(polyPts, imgW, imgH)
-        ? normalizePolyCrop(polyPts, imgW, imgH) : null;
-      onCommit(rect ? { kind: "rect", ...rect, ...(dormantPts ? { pts: dormantPts } : {}) }
+      onCommit(dormantRect ? { kind: "rect", ...dormantRect, ...(dormantPts ? { pts: dormantPts } : {}) }
         : (dormantPts ? { kind: "poly", pts: dormantPts } : null));
     }
   };
@@ -395,7 +406,9 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
         if (k === "-" || k === "_") { e.preventDefault(); zoomBy(1 / ZOOM_STEP); return; }
       }
       // Enter on a focused toolbar button is that button's own click, never also "Done".
-      if (k === "Enter" && tag === "BUTTON") return;
+      // ...except while a polygon is drafting: Enter closes it wherever focus sits (B2066225), and the
+      // preventDefault below also stops it re-firing the focused button.
+      if (k === "Enter" && tag === "BUTTON" && !(mode === "poly" && !polyClosed)) return;
 
       if (mode !== "poly") {
         if (k === "Escape") { e.preventDefault(); onCancel(); }
@@ -708,20 +721,26 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8, gap: 12, flexWrap: "wrap" }}>
         <span style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          {/* B2066226 — Reset keeps the leftmost slot in both modes; Clear polygon joins it on the right. */}
+          <button onClick={resetAll} disabled={nothingToReset} style={linkButtonStyle(nothingToReset)} data-testid="crop-reset"
+            title="Removes the whole crop — rectangle and polygon — so the full page shows">
+            Reset to full page
+          </button>
           {mode === "poly" && (
             <button onClick={clearPoly} disabled={polyPts.length === 0} style={linkButtonStyle(polyPts.length === 0)} data-testid="crop-clear-polygon">
               Clear polygon
             </button>
           )}
-          <button onClick={resetAll} disabled={nothingToReset} style={linkButtonStyle(nothingToReset)} data-testid="crop-reset"
-            title="Removes the whole crop — rectangle and polygon — so the full page shows">
-            Reset to full page
-          </button>
           <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)" }}>
             Scroll to zoom · Pan tool, Space+drag or arrow keys to move · Ctrl+Z undo · Ctrl+Shift+Z redo
           </span>
         </span>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          {!doneWhy && (() => {
+            const o = otherShapes();
+            const kept = mode === "poly" ? (o.rect ? "rectangle" : null) : (o.pts ? "polygon" : null);
+            return kept ? <span data-testid="crop-keeps-other" style={{ fontSize: FONT_SIZE.label, color: "var(--text-primary)" }}>Your {kept} is kept too</span> : null;
+          })()}
           {doneWhy && <span data-testid="crop-done-why" style={{ fontSize: FONT_SIZE.label, color: "var(--text-primary)" }}>{doneWhy}</span>}
           <Button size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>
           <Button size="sm" onClick={commit} disabled={!canCommit} title={doneWhy || undefined} data-testid="crop-done">Done</Button>
