@@ -29,6 +29,7 @@
 import { useEffect, useRef, useState } from "react";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { rankSearchCandidates } from "../lib/searchQuality.js";
+import { mergeSearchRows, normalizeName } from "../lib/placeIdentity.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
 
 const DEBOUNCE_MS = 220;
@@ -43,10 +44,11 @@ function fieldStyle() {
   };
 }
 
-const nameMatches = (name, q) => (name || "").toLowerCase().includes(q);
+// Punctuation/case-blind: "daon" finds a manual pin saved as "DAO'N" or "DAO’N" (B2046224).
+const nameMatches = (name, q) => (name || "").toLowerCase().includes(q) || (normalizeName(q) !== "" && normalizeName(name).includes(normalizeName(q)));
 
 export default function SearchBox({
-  query, onQueryChange, view, manualPins, loggedIds, wishlistIds, bounds,
+  query, onQueryChange, view, manualPins, loggedIds, wishlistIds, existing, bounds, fill = false,
   searchSnapshot, onSelectPlace, onSelectManualPin, onFlyTo,
   onRequestLiveSearch, overpassPlaces, onStartDropPinFor,
 }) {
@@ -101,12 +103,16 @@ export default function SearchBox({
     ? (manualPins || []).filter((p) => nameMatches(p.name, q)).map((p) => ({ ...p, kind: "manual", mine: true }))
     : [];
   const snapshotRanked = snapshotResults.map((p) => ({ ...p, kind: "place", mine: loggedIds?.has(p.id), wishlisted: wishlistIds?.has(p.id) }));
-  const results = [
-    ...manualMatches,
-    ...snapshotRanked.filter((p) => p.mine),
-    ...snapshotRanked.filter((p) => !p.mine),
-    ...liveMatches.map((p) => ({ ...p, kind: "live" })),
-  ].slice(0, SHOWN_CAP);
+  // ONE row per restaurant (B2046224): a restaurant he already has (manual pin, or a place he's
+  // logged/flagged) and the snapshot's own record of the same spot are the same row — the surviving
+  // row is the one his visits hang off, so picking it opens the EXISTING restaurant. See
+  // lib/placeIdentity.js for the match rule (normalised name + proximity, never name alone).
+  const results = mergeSearchRows({
+    manualRows: manualMatches,
+    snapshotRows: [...snapshotRanked.filter((p) => p.mine), ...snapshotRanked.filter((p) => !p.mine)],
+    liveRows: liveMatches.map((p) => ({ ...p, kind: "live" })),
+    existing: existing || [],
+  }).slice(0, SHOWN_CAP);
 
   const settled = !loading && trimmed.length >= MIN_QUERY_LEN;
   const showLiveOffer = view === "map" && settled && liveState === "idle" && results.length < 3 && bounds;
@@ -129,14 +135,16 @@ export default function SearchBox({
   };
 
   return (
-    <div>
+    // `fill` (phone, B2046224): the field takes whatever width the Map/List + pin controls leave, so the
+    // whole toolbar fits one screen and the header row has nothing to scroll sideways when the field is focused.
+    <div style={fill ? { flex: "1 1 0", minWidth: 0 } : undefined}>
       <input
         ref={inputRef}
         type="search" value={query} data-testid="food-search-box"
         onChange={(e) => { onQueryChange(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
         placeholder={view === "map" ? "Search restaurants…" : "Filter your visits…"}
-        style={{ ...fieldStyle(), width: 220 }}
+        style={{ ...fieldStyle(), width: fill ? "100%" : 220 }}
         aria-label="Search restaurants"
       />
       <AnchoredMenu

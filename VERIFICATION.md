@@ -166,6 +166,18 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1471312 — B2046224: Food on a phone — one row per restaurant, a pick lands the map on it, the Map/List toggle stays on screen while typing `Blocker: auth`
+
+Sandbox-proven in WebKit-emulated iPhone 15 / SE against a MOCKED Supabase (`ui-audit/verify-food-phone.mjs`, 30/30; 16/33 on the unfixed build) plus `test/foodPlaceIdentity.test.js`. Not provable here: his real signed-in data, Mobile Safari's real keyboard and collapsing toolbar, and the literal "the map did not move" report (it did not reproduce — the pin was mis-centred / under the sheet). **Steps** (planyr.io/#/food on his iPhone, signed in; read the served chunk hash in the same observation; do NOT save anything to the real list — cancel out of the visit form, or use a throwaway restaurant he is happy to delete):
+1. Tap the search field and type `dao`. **Expect:** ONE DAO'N row (marked "Been here"), not two; the Map / List toggle, the Pin button and the search field are all visible together the whole time the keyboard is up.
+2. Tap that row. **Expect:** the map slides to DAO'N, its pin sits in the middle of the map area ABOVE the card (not at the left edge, not under the card) and is drawn in the larger "selected" style; the card shows its existing past visits.
+3. Clear the search, type a restaurant he has never saved (e.g. `fadi`) and tap it. **Expect:** same centring above the card; the card shows no past visits.
+4. Switch to List, tap any row, switch back to Map. **Expect:** the map is on that restaurant, centred above the card.
+5. Open a restaurant he has saved twice under slightly different spellings (apostrophe / capitalisation) if one exists. **Expect:** still one search row.
+6. Rotate to landscape and back with the field focused. **Expect:** the toggle and field stay on screen.
+7. Desktop browser at full width: toolbar looks as before; picking a result still centres the pin in the area LEFT of the right-hand panel.
+- **Stopping rule:** closes on a dated pass of 1–7, or a failed step filed as a recurrence on B2046224.
+
 ### V1468976 — B2043888: phone tab-strip chevrons page cleanly and clamp at both ends `Blocker: real-device (iOS elastic overscroll — not producible headless)`
 
 Sandbox-proven, both engines: `ui-audit/verify-nav-arrows.mjs` (and `ENGINE=webkit`), 31/31; `test/scrollStrip.test.js`. The original overshoot did NOT reproduce headless, so this is the live confirmation. **Steps** (planyr.io on the iPhone, Map with no project; read the served chunk hash in the same observation):
