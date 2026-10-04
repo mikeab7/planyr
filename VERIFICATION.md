@@ -166,16 +166,6 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
-### V1484657 — B2061329: on a real iPhone, tapping into a box keeps the keyboard up and puts the caret where tapped `Blocker: real-data` (signed-in real device)
-
-Sandbox-proven on WebKit (hasTouch + isMobile): `ui-audit/verify-notes-touch-box-tap.mjs`. A real soft keyboard cannot be driven headless.
-**Steps (real iPhone, a throwaway page):**
-1. Double-tap blank paper, type "hello world", then tap inside the word "world". **Expect:** the keyboard does not drop; the caret is where tapped; typing inserts there.
-2. Make a second box; tap from the first box into the second. **Expect:** keyboard stays up, caret in the second box, one tap.
-3. In a box, delete all its text with Backspace, press Backspace once more. **Expect:** the empty box disappears.
-4. Tap a picture box. **Expect:** it selects (handles), no keyboard.
-5. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2061329.
 ### V1471312 — B2046224: Food on a phone — one row per restaurant, a pick lands the map on it, the Map/List toggle stays on screen while typing `Blocker: auth`
 
 Sandbox-proven in WebKit-emulated iPhone 15 / SE against a MOCKED Supabase (`ui-audit/verify-food-phone.mjs`, 30/30; 16/33 on the unfixed build) plus `test/foodPlaceIdentity.test.js`. Not provable here: his real signed-in data, Mobile Safari's real keyboard and collapsing toolbar, and the literal "the map did not move" report (it did not reproduce — the pin was mis-centred / under the sheet). **Steps** (planyr.io/#/food on his iPhone, signed in; read the served chunk hash in the same observation; do NOT save anything to the real list — cancel out of the visit form, or use a throwaway restaurant he is happy to delete):
@@ -257,6 +247,16 @@ Sandbox-proven: `test/teamInviteEmail.test.js` (fake Supabase + fake Resend), `e
 4. Cancel invite. **Expect:** row gone, no row left behind. Existing pending invites (e.g. ryan.baumgartner@hillwood.com) received nothing.
 - **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2049312.
 
+### V1484657 — B2061329: on a real iPhone, tapping into a box keeps the keyboard up and puts the caret where tapped `Blocker: real-data` (signed-in real device)
+
+Sandbox-proven on WebKit (hasTouch + isMobile): `ui-audit/verify-notes-touch-box-tap.mjs`. A real soft keyboard cannot be driven headless.
+**Steps (real iPhone, a throwaway page):**
+1. Double-tap blank paper, type "hello world", then tap inside the word "world". **Expect:** the keyboard does not drop; the caret is where tapped; typing inserts there.
+2. Make a second box; tap from the first box into the second. **Expect:** keyboard stays up, caret in the second box, one tap.
+3. In a box, delete all its text with Backspace, press Backspace once more. **Expect:** the empty box disappears.
+4. Tap a picture box. **Expect:** it selects (handles), no keyboard.
+5. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2061329.
 ### V1468976 — B2043888: phone tab-strip chevrons page cleanly and clamp at both ends `Blocker: real-device (iOS elastic overscroll — not producible headless)`
 
 Sandbox-proven, both engines: `ui-audit/verify-nav-arrows.mjs` (and `ENGINE=webkit`), 31/31; `test/scrollStrip.test.js`. The original overshoot did NOT reproduce headless, so this is the live confirmation. **Steps** (planyr.io on the iPhone, Map with no project; read the served chunk hash in the same observation):
