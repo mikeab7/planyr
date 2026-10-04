@@ -166,16 +166,6 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
-### V1414592 — B1989504/B1989505: the "Start your site" card no longer covers the map `Blocker: live-GIS`
-
-Sandbox-proven: `e2e/start-hint-placement.spec.js` (red on main, green here; emulated phone, not a real iPhone). **Still needs the deployed build** (`live-GIS` here means the real planyr.io edge + real basemap tiles; no signed-in data needed).
-**Steps** (new Untitled site, Site tab; read `/version.json` with `cache:'no-store'` and the served chunk hash in the SAME observation):
-1. Phone width (390×844, Playwright device descriptor, WebKit if installable else Chromium — name the engine): open a new blank site. **Expect:** a compact "Start your site" strip at the top, between the Panels and Tools edge tabs; the middle of the map is clear.
-2. Tap the map centre / drag. **Expect:** the map pans, nothing intercepts.
-3. Tools → Parcel tools → Draw new parcel. **Expect:** the strip is gone and stays gone while drawing.
-4. New blank site again → ✕ → reload. **Expect:** strip stays dismissed.
-5. Desktop width: **Expect:** strip top-left, clear of the middle. Real iPhone Safari look (toolbar collapse, safe areas) remains owner-side and is NOT claimed.
-
 ### V1443696 — B2018608: vector roads + labels basemap (Food + Site Plan map) `Blocker: live-GIS`
 
 Sandbox-proven at dpr 2 against a SYNTHETIC OpenMapTiles fixture (`ui-audit/verify-vector-basemap.mjs`, 28/28); the sandbox cannot reach `tiles.openfreemap.org`, so the **real source, its CORS headers and the real map look are unverified**. **Steps** (planyr.io, read the served chunk hash in the same observation; `node ui-audit/verify-vector-basemap.mjs https://planyr.io --live` runs the mechanical half):
@@ -1959,6 +1949,16 @@ Sandbox-proven logged-out (both entry points, reload; red on main). **The signed
 3. Reload, then navigate to the Map. **Expect:** the project is still listed under the new name (it no longer vanishes).
 4. Delete the throwaway project. Read the served chunk hash in the same observation.
 - **Stopping rule:** closes on a dated pass of 1–3, or a failure is filed as a recurrence on B1991041.
+
+### V1414592 — B1989504/B1989505: the "Start your site" card no longer covers the map `Blocker: live-GIS`
+
+Sandbox-proven: `e2e/start-hint-placement.spec.js` (red on main, green here; emulated phone, not a real iPhone). **Still needs the deployed build** (`live-GIS` here means the real planyr.io edge + real basemap tiles; no signed-in data needed).
+**Steps** (new Untitled site, Site tab; read `/version.json` with `cache:'no-store'` and the served chunk hash in the SAME observation):
+1. Phone width (390×844, Playwright device descriptor, WebKit if installable else Chromium — name the engine): open a new blank site. **Expect:** a compact "Start your site" strip at the top, between the Panels and Tools edge tabs; the middle of the map is clear.
+2. Tap the map centre / drag. **Expect:** the map pans, nothing intercepts.
+3. Tools → Parcel tools → Draw new parcel. **Expect:** the strip is gone and stays gone while drawing.
+4. New blank site again → ✕ → reload. **Expect:** strip stays dismissed.
+5. Desktop width: **Expect:** strip top-left, clear of the middle. Real iPhone Safari look (toolbar collapse, safe areas) remains owner-side and is NOT claimed.
 
 ## THE CHECKLIST — run this on Michael's signed-in Chrome, on `planyr.io`
 
