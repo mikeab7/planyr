@@ -119,3 +119,15 @@ describe("doc_reviews — project label and auto-titles follow a rename; typed t
     expect(isAutoTitle({ title: "Pappadoupolos - Other", project: "Pappadoupolos", item: "Other" })).toBe(false);
   });
 });
+
+describe("review tabs — the persisted tab.project text is only a fallback", () => {
+  it("tabTitle resolves the project live by projectId and falls back to the stored text", async () => {
+    const { tabTitle } = await import("../src/workspaces/doc-review/lib/reviewTabs.js");
+    const nameOf = (id) => (id === "g1" ? "Papadopoulos" : null);
+    const tab = { id: "r1", name: "Grading set", projectId: "g1", project: "Pappadoupolos" };
+    expect(tabTitle(tab, nameOf)).toBe("Grading set — Papadopoulos");
+    expect(tabTitle({ ...tab, projectId: "gone" }, nameOf)).toBe("Grading set — Pappadoupolos");
+    expect(tabTitle({ ...tab, projectId: null, project: "" }, nameOf)).toBe("Grading set");
+    expect(tabTitle(tab)).toBe("Grading set — Pappadoupolos"); // no resolver → unchanged behaviour
+  });
+});

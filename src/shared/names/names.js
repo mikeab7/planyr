@@ -40,8 +40,11 @@ export function allProjectNames() {
       if (g && !idx[g] && (r.site || r.name)) idx[g] = r.site || r.name;
     }
   } catch (_) { /* an unreadable store answers "unknown", never a stale name */ }
-  nameIndex = idx; nameIndexAt = now;
-  return idx;
+  nameIndexAt = now;
+  // keep the SAME object while nothing changed, so a subscriber's snapshot is stable across a TTL refresh
+  const same = nameIndex && Object.keys(idx).length === Object.keys(nameIndex).length && Object.keys(idx).every((k) => nameIndex[k] === idx[k]);
+  if (!same) nameIndex = idx;
+  return nameIndex;
 }
 /** The stored project name for a group, or null when this device holds no record of it. */
 export function storedProjectName(groupId) {
@@ -66,6 +69,12 @@ const subscribeAll = (cb) => {
 
 export function useProjectName(groupId, fallback = "Untitled site") {
   return useSyncExternalStore(subscribeAll, () => projectNameOf(groupId, fallback), () => fallback);
+}
+/** Every project's live name as one id → name lookup; re-renders the caller when any name changes
+ *  (for a LIST of rows, where a hook per row is not possible). */
+export function useProjectNames() {
+  const idx = useSyncExternalStore(subscribeAll, () => allProjectNames(), () => ({}));
+  return (id) => (id && idx[id]) || null;
 }
 export function usePlanName(siteId, fallback = "Untitled plan") {
   return useSyncExternalStore(subscribeAll, () => planNameOf(siteId, fallback), () => fallback);
