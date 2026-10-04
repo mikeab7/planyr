@@ -203,7 +203,7 @@ export function applyRemote(local, remote, { isDirty = () => false, adoptActive 
     if (r.id === local.activeId) continue; // what is on screen keeps its own page/zoom
     if (r.state.page == null && r.state.scale == null) continue;
     const same = (r.state.page == null || r.state.page === have.page) && (r.state.scale == null || Math.abs(r.state.scale - (have.scale || (have.view && have.view.scale) || 0)) < 0.0015);
-    if (!same) { const { view, ...rest } = have; states[r.id] = { ...rest, ...(r.state.page ? { page: r.state.page } : {}), ...(r.state.scale ? { scale: r.state.scale } : {}) }; } // a remote view has no pan — drop the stale local one
+    if (!same) { const rest = { ...have }; delete rest.view; states[r.id] = { ...rest, ...(r.state.page ? { page: r.state.page } : {}), ...(r.state.scale ? { scale: r.state.scale } : {}) }; } // a remote view has no pan — drop the stale local one
   }
   for (const id of removed) delete states[id];
   let activeId = local.activeId;
