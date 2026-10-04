@@ -66,27 +66,26 @@ describe("small helpers", () => {
   });
 });
 
-describe("resendInvite", () => {
+describe("resendInvite (NEW-1: emails, never writes a row — full flow in teamInviteEmail.test.js)", () => {
   beforeEach(() => vi.resetModules());
-  async function load(upsertResult) {
-    const upsert = vi.fn().mockResolvedValue(upsertResult);
-    const from = vi.fn(() => ({ upsert }));
-    vi.doMock("../src/workspaces/site-planner/lib/supabase.js", () => ({ supabase: { from } }));
+  async function load(resp) {
+    const from = vi.fn();
+    vi.doMock("../src/workspaces/site-planner/lib/supabase.js", () => ({ supabase: { from, auth: { getSession: async () => ({ data: { session: { access_token: "t" } } }) } } }));
+    const fetchMock = vi.fn(async () => resp);
+    globalThis.fetch = fetchMock;
     const mod = await import("../src/workspaces/site-planner/lib/teams.js");
-    return { mod, upsert, from };
+    return { mod, from, fetchMock };
   }
-  it("calls the send path exactly once, ignoring duplicates so no second invite row is added", async () => {
-    const { mod, upsert, from } = await load({ error: null });
-    const r = await mod.resendInvite("t1", " Ryan@X.com ", "member");
+  it("sends exactly once and touches no table", async () => {
+    const { mod, from, fetchMock } = await load(new Response('{"ok":true}', { status: 200 }));
+    const r = await mod.resendInvite("t1", " Ryan@X.com ");
     expect(r.ok).toBe(true);
-    expect(from).toHaveBeenCalledTimes(1);
-    expect(from).toHaveBeenCalledWith("team_invites");
-    expect(upsert).toHaveBeenCalledTimes(1);
-    expect(upsert.mock.calls[0][0]).toEqual({ team_id: "t1", email: "ryan@x.com", role: "member" });
-    expect(upsert.mock.calls[0][1]).toMatchObject({ onConflict: "team_id,email", ignoreDuplicates: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ teamId: "t1", email: "ryan@x.com" });
+    expect(from).not.toHaveBeenCalled();
   });
-  it("surfaces a backend failure instead of reporting success (LOUD-FAILURE)", async () => {
-    const { mod } = await load({ error: { message: "boom" } });
+  it("surfaces a send failure instead of reporting success (LOUD-FAILURE)", async () => {
+    const { mod } = await load(new Response('{"ok":false,"error":"boom"}', { status: 502 }));
     expect(await mod.resendInvite("t1", "a@x.com")).toEqual({ ok: false, error: "boom" });
   });
 });
@@ -103,6 +102,6 @@ describe("TeamPanel source guards", () => {
     expect(body).not.toMatch(/\n\s{2}const [A-Z]\w* = \(\{/);
   });
   it("Resend goes through resendInvite, never a second invite-row insert", () => {
-    expect(src).toMatch(/resendInvite\(sel, iv\.email, iv\.role\)/);
+    expect(src).toMatch(/resendInvite\(sel, iv\.email\)/);
   });
 });
