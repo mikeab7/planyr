@@ -166,6 +166,17 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1504304 — B2086368: delete a file from the Library's Recent / Unfiled lists, restore it, delete it forever `Blocker: auth`
+
+Sandbox-proven: `ui-audit/verify-library-home-delete.mjs` (33 checks, real Chromium, signed-in against a stub database) and `test/libraryHomeDelete.test.js` (red on unmodified main). Not provable here: a real account and the real database.
+**Steps** (signed-in Chrome, planyr.io, **throwaway files only — never his real ones**; read the served chunk hash in the SAME observation as each PASS/FAIL):
+1. Review › Open… a throwaway **.docx** with no project, Save. Open the Library with no project selected. **Expect:** it is in Recent and in Unfiled, each with a ✕ whose hover text reads "Delete (moves to Recently deleted)".
+2. Click ✕ on the Unfiled row, then ✓. **Expect:** gone from Unfiled AND Recent; a "Moved … to Recently deleted · Undo" toast; a "↺ Recently deleted · 1" pill appears.
+3. Click Undo. **Expect:** back in Unfiled and Recent. Delete it again, open the pill, click Restore. **Expect:** back in Unfiled.
+4. Delete it once more, open the pill, Delete forever → ✓. **Expect:** it leaves the bin and does not come back after a reload.
+5. Tab to a ✕ with the keyboard and press Enter, Enter. **Expect:** same result as the mouse. On a phone, **Expect:** the ✕ is easy to hit.
+6. With a throwaway open as a Review tab, delete it from the Library. **Expect:** the Review tab stays open and unchanged (decided: tabs are never closed by a Library delete).
+7. Say exactly which throwaway files were touched.
 ### V1502928 — B2084992: headless sign-in as the test account via /api/auth/e2e-session, then open e2e-fixture-site `Blocker: real-data`
 
 Sandbox-proven: `test/e2eSessionRoute.test.js` (18, mutation-checked). Pending: the deployed route needs `E2E_LOGIN_KEY` (43 chars) in Cloudflare Pages production AND the session env. It ALSO needs `SUPABASE_SERVICE_ROLE_KEY` as a Secret in Cloudflare Pages production — measured absent 2026-10-04 (Cowork dashboard read); until Michael adds it the route answers 503 "not configured" after a correct key (on `OWNER-TODO.md`).

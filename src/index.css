@@ -1047,3 +1047,8 @@ html[data-notes-typing="1"] [data-testid="help-report-fab"] { display: none !imp
   [data-header-zone] button::after { content: ""; position: absolute; left: 0; right: 0; top: -6px; bottom: -6px; }
 }
 
+
+/* B2086368 — the Library's file-row delete ✕ (and its confirm buttons) is a full 44 px touch target on a coarse pointer. */
+@media (pointer: coarse) {
+  .trash-del { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+}
