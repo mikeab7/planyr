@@ -11592,6 +11592,16 @@ records its own live verify" mechanism) or a future sandbox with different egres
 
 *(minted **V1351376** alongside **B1895376**; `Cadence: once`)*
 
+### V1481216 — B2063056: a plan setting changed in one tab of the same browser appears in the other signed-in tab within seconds, without clobbering what that tab is editing `Blocker: auth`
+
+**Verified headless (logged out):** `e2e/cross-tab-live.spec.js` — rename, building, in-progress edit, header setting (red-proofed). **Pending:** the signed-in leg, where the element union is gated off and only the header path runs.
+**Use a throwaway DUPLICATE plan; read the served chunk hash in the same observation.**
+1. Signed in, open the same throwaway plan in two tabs of one browser; leave B in the background. **Expect:** same Settings in both.
+2. In A change the setback; switch to B without reloading. **Expect:** B shows the new setback and the notice "Updated from another session" within seconds.
+3. In B start typing a different setting (do not commit), change another setting in A. **Expect:** B's in-progress value is untouched.
+4. Reload both. **Expect:** both changes present.
+- **Stopping rule:** closes when steps 2–4 read as expected on `planyr.io`, or a residual is filed as a recurrence against B2063056.
+
 ### V1390100 — B1953797: two tabs/devices changing DIFFERENT plan settings keep BOTH; an idle open tab adopts the other's change; Model's Site.Acres / Plan.Building1.SF read the real plan on a device that never opened it `Blocker: auth`
 
 **Why this needs a real pass.** Concurrency / multi-writer is a mandatory LIVE-VERIFY class, and the sandbox's proxy CORS-blocks the Supabase sign-in handshake, so the real two-browser round trip (and the realtime channel on `site_elements`) cannot be driven here. **What sandbox verification DID prove, headless and red-first:** `test/headerTwoWriter.test.js` (two module instances of `cloudSync.js` = two tabs, one CAS-faithful in-memory `sites` table) reproduces the loss on untouched `origin/main` (`expected 'harris' to be 'waller'`) and passes after; `test/headerLocalMirror.test.js` proves the same loss/fix for two tabs sharing one local mirror; `test/modelPlanRows.test.js` proves Model reads rows (slim header + rows → 40 ac, not `#REF!`; loading / error → labelled `#N/A`, never zero). **NOT verified here:** the React adoption path (`applyAdoptedHeader`), the focus/visible/45 s refresh timers, the realtime channel, and the Model fetch against the real PostgREST + RLS.
