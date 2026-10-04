@@ -60,7 +60,7 @@ export async function fetchPlaceById(id) {
  *  alphabetical — passing the map's centre reorders those ties by real distance instead. Name
  *  relevance still comes first: a worse name match never outranks a better one just for being
  *  closer (see the RPC's `order by sim desc, distance_km asc` — distance is the TIEBREAK). */
-const SEARCH_RESULT_CAP = 15; // more than the ~10 shown, so client-side "his places first" reordering never runs dry
+const SEARCH_RESULT_CAP = 60; // a pool well past the ~10 shown: the client re-ranks it nearest-the-map-first (lib/searchProximity.js), so the nearby comparable matches must be IN it
 
 export async function searchPlacesByName(query, center) {
   if (!supabase || !query || !query.trim()) return { data: [], error: null };

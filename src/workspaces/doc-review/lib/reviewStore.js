@@ -43,21 +43,12 @@ export { DISCIPLINES } from "../../../shared/files/titleBlockParse.js";
 export { STATUSES, STATUS_META, statusOf };
 
 // "<Project> - <Item> - YYYY.MM.DD" — the default review/file name; each piece editable.
-const pad = (n) => String(n).padStart(2, "0");
-export function fmtDocDate(d) {
-  if (typeof d === "string" && /^\d{4}-\d{2}-\d{2}/.test(d)) { const [y, m, day] = d.slice(0, 10).split("-"); return `${y}.${m}.${day}`; }
-  const dt = d ? new Date(d) : new Date();
-  if (isNaN(dt)) return "";
-  return `${dt.getFullYear()}.${pad(dt.getMonth() + 1)}.${pad(dt.getDate())}`;
-}
-export function composeTitle({ project, item, docDate } = {}) {
-  // DATE-FIRST — the owner's own filing convention ("2026.06.23 GPL - Arch IFR"): every file he
-  // names starts with the document date, so auto-named files sort and read the same way his do
-  // (B659; was "<Project> - <Item> - date"). Keep server/filing/naming.js in lockstep.
-  const head = [project, item].map((s) => (s || "").trim()).filter(Boolean).join(" - ") || "Untitled";
-  const date = fmtDocDate(docDate);
-  return date ? `${date} ${head}` : head;
-}
+// The title composer + the live-name rule live in the pure module (NEW-1, B1991040); re-exported so
+// every existing import keeps working.
+import { fmtDocDate, composeTitle, withLiveReviewNames } from "./reviewNaming.js";
+import { storedProjectName } from "../../../shared/names/names.js";
+export { fmtDocDate, composeTitle };
+const liveRows = (rows) => (Array.isArray(rows) ? rows.map((r) => withLiveReviewNames(r, storedProjectName)) : rows);
 
 export const cloudConfigured = () => !!supabase;
 
@@ -364,7 +355,7 @@ export async function fetchReviews() {
   // ORG SCOPE (NEW-1) — `orgScope:data->orgScope` reads the flag straight out of the `data`
   // jsonb, the same trick `placed`/`sfile`/`folderId` already use, so no migration is needed:
   // `data` has carried the whole record since the very first `doc_reviews` migration.
-  const FULL = "id,title,kind,project,project_id,discipline,item,revision,doc_date,team_id,user_id,updated_at,placed:data->placed,sfile:data->>sourceFile,folderId:data->>folderId,orgScope:data->orgScope";
+  const FULL = "id,title,kind,project,project_id,discipline,item,revision,doc_date,team_id,user_id,updated_at,placed:data->placed,sfile:data->>sourceFile,folderId:data->>folderId,orgScope:data->orgScope,titleAuto:data->titleAuto";
   // Newest tier adds the NEW-F3 soft-delete filter: a review in Recently-deleted leaves every list.
   let res = await supabase.from("doc_reviews").select(FULL).is("deleted_at", null).order("updated_at", { ascending: false });
   if (res.error) {
@@ -384,7 +375,7 @@ export async function fetchReviews() {
     if (res.error) res = await supabase.from("doc_reviews").select("id,title,kind,project,discipline,updated_at").order("updated_at", { ascending: false });
   }
   if (res.error || !res.data) return { ok: false, rows: [], error: (res.error && res.error.message) || "Couldn't load your files." };
-  return { ok: true, rows: res.data };
+  return { ok: true, rows: liveRows(res.data) };
 }
 export async function listReviews() {
   const r = await fetchReviews();
@@ -398,11 +389,11 @@ export async function listReviews() {
 export async function listDeletedReviews() {
   if (!supabase || !(await currentUid())) return [];
   const { data, error } = await supabase.from("doc_reviews")
-    .select("id,title,kind,project,project_id,discipline,item,updated_at,deleted_at,sfile:data->>sourceFile,orgScope:data->orgScope")
+    .select("id,title,kind,project,project_id,discipline,item,doc_date,updated_at,deleted_at,sfile:data->>sourceFile,orgScope:data->orgScope,titleAuto:data->titleAuto")
     .not("deleted_at", "is", null)
     .order("deleted_at", { ascending: false });
   if (error) return isMissingColumn(error, "deleted_at") ? [] : null;
-  return data || [];
+  return liveRows(data || []);
 }
 
 // Mark a review as placed on the map at least once (NEW-3) — the write half of the
@@ -903,7 +894,7 @@ export async function fileNewReview({ projectId = null, project = "", discipline
   // the guard survives for the shape's sake — any not-ok store is a loud upload failure.
   const uploadFailed = !stored.ok && !stored.oversize;
   const record = {
-    id, kind: "single", title: composeTitle({ project: proj, item: itemLabel, docDate: filedDate }),
+    id, kind: "single", title: composeTitle({ project: proj, item: itemLabel, docDate: filedDate }), titleAuto: true,
     project: proj, projectId: pid, discipline, item: itemLabel, revision: "", docDate: filedDate,
     // ORG SCOPE (NEW-1) — rides inside the `data` jsonb via reviewRowFor's object spread, same
     // as every other record field; `fetchReviews` extracts it back out with `data->orgScope`

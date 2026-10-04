@@ -32,6 +32,8 @@ import { recordPinchGesture } from "../../shared/telemetry/gestureTelemetry.js";
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import CloudSyncBadge from "../../shared/ui/CloudSyncBadge.jsx";
 import { useReviewPersistence, docSaveState } from "./lib/usePersistence.js";
+import { isAutoTitle, liveReviewProject } from "./lib/reviewNaming.js";
+import { storedProjectName } from "../../shared/names/names.js";
 import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
 import { writeLastDoc, readLegacyPointers } from "./lib/lastDoc.js";
 import { RADIUS } from "../../shared/ui/radius.js";
@@ -707,7 +709,9 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
   const onMeta = (k, v) => setMeta((m) => ({ ...m, [k]: v }));
   const buildSnapshot = useCallback(() => ({
     id: reviewId, kind: "stitch", updatedAt: Date.now(), // stamp so the local mirror + cloud data carry a consistent updatedAt (reconcile)
+    // NEW-1 (B1991040): record WHICH kind the title is — composed (follows a project rename) or typed (never touched).
     title: (meta.title || "").trim() || composeTitle(meta),
+    titleAuto: !(meta.title || "").trim() || (meta.title || "").trim() === composeTitle(meta),
     project: meta.project, projectId: meta.projectId, orgScope: meta.orgScope === true, discipline: meta.discipline,
     item: meta.item, revision: meta.revision, docDate: meta.docDate,
     sources: pdfs.filter(isStoredSource).map((p) => ({ srcId: p.srcId, name: p.name, size: p.size || 0, storageKey: p.storageKey || null, driveKey: p.driveKey || null, oversize: !!p.oversize })),
@@ -807,7 +811,8 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
     const failed = []; // sources that wouldn't download / pages that wouldn't raster — reported, not swallowed
     try {
       setReviewId(rec.id);
-      setMeta({ title: rec.title || "", projectId: rec.projectId || null, project: rec.project || "", orgScope: rec.orgScope === true, discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "" });
+      const liveProj = liveReviewProject(rec, storedProjectName); // B1991040 — resolved by id, never the stored copy
+      setMeta({ title: isAutoTitle(rec) ? "" : (rec.title || ""), projectId: rec.projectId || null, project: liveProj, orgScope: rec.orgScope === true, discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "" });
       const st = rec.stitch || {};
       setMeasures(st.measures || []); setFtPerUnit(st.ftPerUnit || 0);
       if (st.view) setView(st.view);
