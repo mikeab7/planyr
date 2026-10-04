@@ -70,6 +70,7 @@ import {
   DELETED_RETENTION_DAYS, activeUid,
 } from "../projects/projects.js";
 import { validateName, announceNameNotice } from "../names/nameCore.js";
+import { liveSiteName } from "../schedule/scheduleOwnership.js";
 import { resolveCurrentName, withCurrentProject, unionProjectLists, resolveControlledId as resolveControlledIdPure, hasSavedProjectRecord, applyFrozenOrder } from "../projects/projectModel.js";
 import { readPinnedFromMirror, readOpenedMap, noteProjectOpened, lastOpenedAt, orderForSwitcher, relTimeShort, highlightParts } from "../projects/projectSwitcherModel.js";
 import { crumbNeedsCompact } from "./breadcrumbFit.js";
@@ -534,7 +535,7 @@ export default function ProjectBreadcrumb({
   // sets `linkedSiteId`, so this is a no-op for them.
   const refresh = () => {
     const cp = currentProjectRef.current;
-    const registryTarget = cp && cp.linkedSiteId != null ? { id: cp.linkedSiteId, name: cp.linkedSiteName || cp.name } : cp;
+    const registryTarget = cp && cp.linkedSiteId != null ? { id: cp.linkedSiteId, name: liveSiteName(cp.linkedSiteId, cp.linkedSiteName) || cp.name } : cp;
     setInternalProjects(withCurrentProject(listProjects(), registryTarget));
   };
   // B475 — warm the signed-in on-device project cache (empty on a cold tab that went straight to Markup,
