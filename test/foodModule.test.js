@@ -826,9 +826,12 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
 
   it("his own places (manual pins + logged snapshot places) stay in the one ranked list, marked, with a distance head start (B2051664 replaced the old absolute 'mine first' order)", () => {
     const box = src("components/SearchBox.jsx");
-    const order = box.slice(box.indexOf("const results = rankByProximity("), box.indexOf(".slice(0, SHOWN_CAP)"));
+    // (B2046224: the list is first folded through mergeSearchRows — one row per restaurant — and THEN ordered by
+    // rankByProximity; see test/foodPlaceIdentity.test.js.)
+    const order = box.slice(box.indexOf("const merged = mergeSearchRows({"), box.indexOf(".slice(0, SHOWN_CAP)"));
     expect(order).toContain("manualMatches");
     expect(order).toContain("snapshotRanked");
+    expect(order).toContain("rankByProximity(");
     expect(box).toMatch(/mine: loggedIds\?\.has\(p\.id\)/);
     expect(src("lib/searchProximity.js")).toMatch(/MINE_HEAD_START_KM/);
     // And a result carrying `mine` renders a visible "Been here" mark, not just a sort position.
@@ -1324,7 +1327,8 @@ describe("selected-place highlight — unmistakable pin, tied panel, centred pan
   it("the fly-to pan offsets the destination by half the panel's width — lands in the VISIBLE area, not the raw map centre", () => {
     const map = src("components/FoodMap.jsx");
     expect(map).toMatch(/const PANEL_WIDTH = 340;/); // matches VisitPanel's own literal width
-    expect(map).toMatch(/const panelOffsetPx = Math\.min\(PANEL_WIDTH, containerWidth \* 0\.8\) \/ 2;/);
+    // Desktop keeps the right-rail shift; on a phone the panel is a bottom sheet, so no horizontal shift (B2046224).
+    expect(map).toMatch(/const panelOffsetPx = narrowViewport \? 0 : Math\.min\(PANEL_WIDTH, containerWidth \* 0\.8\) \/ 2;/);
     expect(map).toMatch(/map\.project\(\[flyToTarget\.lat, flyToTarget\.lon\], targetZoom\)/);
     expect(map).toMatch(/targetPoint\.add\(\[panelOffsetPx, 0\]\)/);
     expect(map).toMatch(/map\.flyTo\(shiftedLatLng, targetZoom, \{ duration: FLY_DURATION_SEC \}\)/);
@@ -1633,7 +1637,8 @@ describe("B668195 — no emoji glyphs in the food map view controls (plain text 
   it("FoodApp.jsx: no emoji on the Drop a pin toolbar button", () => {
     const app = src("FoodApp.jsx");
     for (const glyph of TARGET_EMOJI) expect(app).not.toContain(glyph);
-    expect(app).toMatch(/\{pinMode \? "Click the map…" : "Drop a pin"\}/);
+    // Plain text labels only — a shorter pair on a phone so the toolbar fits one screen (B2046224).
+    expect(app).toMatch(/\{pinMode \? \(narrow \? "Tap map" : "Click the map…"\) : \(narrow \? "Pin" : "Drop a pin"\)\}/);
   });
 
   it("SearchBox.jsx: no emoji on the live-search or drop-a-pin fallback rows in the dropdown", () => {
@@ -1878,9 +1883,9 @@ describe("FoodApp — wishlist state, exclusion of already-visited, and auto-cle
 
   it("toggleWishlist is one click on, one click off — inserts when absent, removes when present, for a place, an existing manual pin, or a not-yet-saved new pin", () => {
     const toggle = app.slice(app.indexOf("const toggleWishlist = useCallback"), app.indexOf("const removeVisit = useCallback"));
-    expect(toggle).toMatch(/existing \? await removeWishlist\(existing\.id\) : await addWishlist\(/);
+    expect(toggle).toMatch(/flagged \? await removeWishlist\(flagged\.id\) : await addWishlist\(/);
     // Requires a name before flagging a brand-new dropped pin — same validation submitVisit uses.
-    expect(toggle).toMatch(/if \(!name \|\| !name\.trim\(\)\) \{ setError\("Give this place a name first\."\); return; \}/);
+    expect(toggle).toMatch(/\} else \{ setError\("Give this place a name first\."\); return; \}/);
   });
 
   it("wires the wishlist toggle and state into VisitPanel, wishlistIds into SearchBox, and both wishlist pin lists into FoodMap", () => {
