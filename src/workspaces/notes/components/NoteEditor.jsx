@@ -611,9 +611,17 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
    VISIBLE size is unchanged: each gets an invisible 44 px hit area centred on itself (a pseudo-element is
    part of its element for hit-testing). Mouse pointers never match this block. */
 @media (pointer: coarse) {
-  .planyr-note .ProseMirror .planyr-anchor-grip::after,
-  .planyr-note .ProseMirror .planyr-anchor-h::after,
-  .planyr-note .ProseMirror .planyr-anchor-connect::after {
+  /* Halos exist only on the SELECTED box, and they must never sit over the box's TEXT: a tap on the first
+     letters is a caret placement (NEW-3) and a tap on the grey is a pan (NEW-2). The grip's halo therefore
+     grows only up and to the LEFT of the grip (off the text, onto the paper edge); the resize / connect
+     halos are centred on their dots, so they are off while the box is being edited. Found on final main:
+     the original centred, always-on 44 px halo swallowed the taps verify-notes-touch-box-tap and
+     touch-pan measure. */
+  .planyr-note .ProseMirror .planyr-anchor[data-selected="1"] .planyr-anchor-grip::after {
+    content: ""; position: absolute; right: 0; bottom: 0; width: 44px; height: 44px;
+  }
+  .planyr-note .ProseMirror .planyr-anchor[data-selected="1"]:not([data-editing="1"]) .planyr-anchor-h::after,
+  .planyr-note .ProseMirror .planyr-anchor[data-selected="1"]:not([data-editing="1"]) .planyr-anchor-connect::after {
     content: ""; position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%);
   }
   /* The grip outranks the resize handles' halos: on a small box the west/north-west handles' 44 px
