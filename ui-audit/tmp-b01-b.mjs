@@ -1,0 +1,40 @@
+import { openSignedIn } from "./lib/signedInSession.mjs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
+const s = await openSignedIn({ base: "https://planyr.io" });
+const { page } = s;
+await assertMeasurable(page, "tmp-b01-b");
+console.log("build", JSON.stringify(s.build));
+const prefs = () => page.evaluate(async () => { const u=(await window.pfSupabase.auth.getUser()).data.user; const r=await window.pfSupabase.from("profiles").select("prefs").eq("id",u.id); return JSON.stringify((r.data&&r.data[0]&&r.data[0].prefs&&r.data[0].prefs.planStandards)||null); });
+const canvas = page.getByTestId("planner-canvas");
+await page.getByTestId("map-toolbar-draw").click();
+await canvas.waitFor();
+async function drawParcel(){
+  await page.locator('[data-rail-tab="parcel"]').click();
+  const add = page.getByTitle(/Add land to this plan/i); if (await add.count()) await add.click();
+  await page.getByRole("button", { name: /Draw a new boundary/i }).click();
+  const box = await canvas.boundingBox();
+  const ring = [[220,150],[480,150],[480,360],[220,360]].map(([x,y])=>[box.x+x,box.y+y]);
+  for (const [x,y] of ring){ await page.mouse.click(x,y); await page.waitForTimeout(60);}
+  await page.mouse.click(ring[0][0],ring[0][1]);
+  await page.waitForTimeout(500); await page.keyboard.press("Escape");
+}
+await drawParcel();
+await page.getByRole("button", { name: "Standards", exact: true }).click();
+await page.getByTestId("standards-bar").waitFor();
+const sec = page.getByRole("button", { name: /^Parcels/ });
+if ((await sec.getAttribute("aria-expanded")) === "false") await sec.click();
+console.log("footer buttons:", await page.getByTestId("standards-bar").innerText());
+console.log("save-all disabled?", await page.getByTestId("standards-save-all").isDisabled(), await page.getByTestId("standards-save-all").getAttribute("title"));
+await page.getByRole("button", { name: /^Outline color$/i }).click();
+const pal = page.getByRole("group", { name: "Palette colors" }).first();
+const sw = pal.getByRole("button").nth(4);
+const wanted = (await sw.getAttribute("title")); console.log("wanted", wanted);
+await sw.click();
+console.log("dirty", await page.getByTestId("standards-dirty").isVisible());
+await page.screenshot({path:"/tmp/b01-b1.png"});
+await page.getByTestId("standards-save-all").click();
+await page.waitForTimeout(3000);
+console.log("prefs after save-all", await prefs());
+console.log("toast/warn text:", await page.evaluate(()=>document.body.innerText.match(/saved on this computer only[^\n]*/i)?.[0]||"none"));
+await page.screenshot({path:"/tmp/b01-b2.png"});
+await s.close();

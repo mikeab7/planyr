@@ -13,6 +13,7 @@ via the Shell `onOpenReviewInDocReview` intent.
   swap-ready API) and the recents list (`/src/shared/recents/`); ☆ pin toggles live on
   FolderTree rows + file cards. Tree expansion persists per project via the shared persisted
   id-set helper in `/src/shared/ui/` (B665 — collapsed by default).
+- `components/ReviewTrash.jsx` (B2086368) — the ONE delete → Recently deleted → restore / delete-forever implementation (`useReviewTrash`, `DeleteButton`, `RecentlyDeletedList`, `TrashNotice`, `UndoToast`); FileBrowser AND LibraryHome (Recent + Unfiled rows, the no-project view) both consume it — never write a second copy.
 - `lib/fileIntoProject.js` — `fileReviewIntoProject`, the ONE "put this file into a project" step (re-point review → mirror file index → move the Drive copy); used by FileBrowser's Needs-filing row AND Home's **Unfiled** section (files saved from Review with no project; `UnfiledCard` = Open + Move to project…).
 - `lib/fileTypeTag.js` — DOC/DOCX/TXT/PDF tag on Home cards (B2084481). Home + FileBrowser re-read on the shared `libraryChanged` signal (B2084480).
 - `components/FileBrowser.jsx` — the filing machinery (search + sort toolbar, badged list,

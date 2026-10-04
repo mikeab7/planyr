@@ -12,6 +12,9 @@
  *   • UNFILED (NEW-2) — files saved from Review with no project selected. They belong to no project's view, so
  *     this is the one place they are listed: open one, or "Move to project…" to file it for real.
  *
+ *   • DELETE (B2086368) — Recent and Unfiled rows carry the same ✕ the project folder tree has, and a "Recently deleted"
+ *     bin (Restore / Delete forever) is reachable from here too. One shared implementation: ./ReviewTrash.jsx.
+ *
  * Adding files still happens inside a project (auto-filing never guesses a project), so the
  * import affordance here is a pointer, not a drop zone.
  */
@@ -19,7 +22,8 @@ import { useEffect, useState } from "react";
 import { listPins, removePin, subscribePins, pinnedFolderLabel } from "../../../shared/pins/pinStore.js";
 import { listFolders } from "../lib/folders.js";
 import { listRecents } from "../../../shared/recents/recentDocs.js";
-import { listReviews } from "../../doc-review/lib/reviewStore.js";
+import { listReviews, listDeletedReviews } from "../../doc-review/lib/reviewStore.js";
+import { useReviewTrash, TrashNotice, UndoToast, RecentlyDeletedList, DeleteButton } from "./ReviewTrash.jsx";
 import { listProjects as listLocalProjects } from "../../../shared/projects/projects.js";
 import { liveProjectIds } from "../../../shared/projects/docProjectLiveness.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
@@ -60,7 +64,7 @@ function TypeTag({ doc }) {
   );
 }
 
-function FileCard({ pin, doc, missing = !doc, projectName, when, onOpen, onUnpin }) {
+export function FileCard({ pin, doc, missing = !doc, projectName, when, onOpen, onUnpin, trash }) {
   const title = doc ? (doc.title || doc.item || "Untitled drawing") : (pin?.label || "Missing drawing");
   return (
     <div style={{ ...cardBase, cursor: "default" }}>
@@ -79,6 +83,7 @@ function FileCard({ pin, doc, missing = !doc, projectName, when, onOpen, onUnpin
         </span>
       </button>
       {onUnpin && <button onClick={onUnpin} title="Unpin" style={starBtn}>★</button>}
+      {trash && <DeleteButton id={doc.id} label={title} {...trash} />}
     </div>
   );
 }
@@ -102,7 +107,7 @@ function FolderCard({ pin, label, projectName, onOpen, onUnpin }) {
 }
 
 /* One Unfiled row: the file (opens in Review) + a "Move to project…" picker that files it for real. */
-export function UnfiledCard({ doc, projects = [], busy = false, onOpen, onMove }) {
+export function UnfiledCard({ doc, projects = [], busy = false, onOpen, onMove, trash }) {
   const title = doc.title || doc.sfile || doc.item || "Untitled file";
   return (
     <div data-testid="unfiled-row" data-review-id={doc.id} style={{ ...cardBase, cursor: "default", flexWrap: "wrap" }}>
@@ -120,6 +125,7 @@ export function UnfiledCard({ doc, projects = [], busy = false, onOpen, onMove }
         <option value="">{busy ? "Moving…" : projects.length ? "Move to project…" : "No projects yet"}</option>
         {projects.map((p) => <option key={p.id} value={p.id}>{p.name || "Untitled project"}</option>)}
       </select>
+      {trash && <DeleteButton id={doc.id} label={title} {...trash} />}
     </div>
   );
 }
@@ -130,6 +136,8 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
   const [reviews, setReviews] = useState([]);   // doc_reviews rows, for names/projects on cards
   const [loading, setLoading] = useState(true);
   const [moving, setMoving] = useState(null);   // review id mid-move
+  const [deletedRows, setDeletedRows] = useState([]); // soft-deleted reviews — the Recently deleted bin
+  const [showDeleted, setShowDeleted] = useState(false);
   const [moveNote, setMoveNote] = useState(null); // { ok, text } — said out loud either way, never silent
   // B1953793 — pinned folders show their LIVE name (a rename must not leave a stale pin-time
   // snapshot); `pin.label` is only the fallback when the folder can't be resolved.
@@ -165,6 +173,8 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
     const loadReviews = async () => {
       try { const rows = await listReviews(); if (live) setReviews(rows || []); }
       catch (_) { /* names degrade to pin labels; cards still render */ }
+      try { const dead = await listDeletedReviews(); if (live && dead !== null) setDeletedRows(dead); } // null = failed read → keep the last-known bin
+      catch (_) { /* the bin keeps its last-known contents */ }
       finally { if (live) setLoading(false); }
     };
     loadReviews();
@@ -174,6 +184,14 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
   }, [uid, active]);
 
   const byId = new Map(reviews.map((r) => [r.id, r]));
+  // Delete / undo / restore / delete-forever — the SAME code the project folder tree runs. Every one announces via
+  // libraryChanged (reviewStore), which re-reads this surface; the explicit refresh covers the bin read too.
+  const reloadAll = async () => {
+    try { const rows = await listReviews(); setReviews(rows || []); } catch (_) { /* keep last list */ }
+    try { const dead = await listDeletedReviews(); if (dead !== null) setDeletedRows(dead); } catch (_) { /* keep last bin */ }
+  };
+  const trash = useReviewTrash({ titleOf: (id) => { const d = byId.get(id); return d && (d.title || d.sfile || d.item); }, refresh: reloadAll });
+  const rowTrash = (id) => ({ armed: trash.pendingDel === id, onArm: trash.setPendingDel, onCancel: () => trash.setPendingDel(null), onConfirm: trash.del });
   const docProject = (doc, fallback) => (doc && (doc.project_id || doc.projectId)) || fallback || null;
   const openDoc = (id, fallbackProjectId) => {
     const doc = byId.get(id);
@@ -231,8 +249,26 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
   };
 
   return (
+    <div style={{ flex: 1, minHeight: 0, position: "relative", display: "flex", flexDirection: "column" }}>
     <div data-testid="library-home" style={{ flex: 1, minHeight: 0, overflowY: "auto", background: "var(--surface-page)", fontFamily: "system-ui, sans-serif" }}>
       <div style={{ maxWidth: 880, margin: "0 auto", padding: "10px 20px 28px" }}>
+
+        <TrashNotice notice={trash.delNotice} onDismiss={() => trash.setDelNotice(null)} style={{ margin: "8px 2px 0" }} />
+        {(deletedRows.length > 0 || showDeleted) && (
+          <div style={{ marginTop: 10 }}>
+            <button onClick={() => setShowDeleted((v) => !v)} data-testid="library-home-recently-deleted"
+              title="Deleted files wait here ~30 days — restore them or delete them forever"
+              style={{ fontSize: FONT_SIZE.control, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: RADIUS.pill, padding: "4px 12px", whiteSpace: "nowrap",
+                border: "1px solid var(--border-default)", background: showDeleted ? "var(--hover-menu)" : "var(--surface-raised)", color: "var(--text-secondary)" }}>
+              ↺ Recently deleted · {deletedRows.length}
+            </button>
+          </div>
+        )}
+        {showDeleted ? (
+          <div style={{ marginTop: 10 }}>
+            <RecentlyDeletedList rows={deletedRows} pendingPurge={trash.pendingPurge} setPendingPurge={trash.setPendingPurge} onRestore={trash.restoreRow} onPurge={trash.purgeRow} />
+          </div>
+        ) : (<>
 
         {nothingSaved && !loading && (
           <div style={{ margin: "26px 2px 4px", color: "var(--text-secondary)", fontSize: 13, lineHeight: 1.6 }}>
@@ -277,7 +313,7 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
             {recentCards.map((r) => (
               <div key={`recent:${r.id}`} style={{ marginBottom: 6 }}>
                 <FileCard doc={r.doc} projectName={projName(docProject(r.doc, r.projectId))}
-                  when={fmtWhen(r.openedAt)} onOpen={() => openDoc(r.id, r.projectId)} />
+                  when={fmtWhen(r.openedAt)} onOpen={() => openDoc(r.id, r.projectId)} trash={rowTrash(r.id)} />
               </div>
             ))}
           </>
@@ -295,7 +331,7 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
             {unfiled.map((d) => (
               <div key={`unfiled:${d.id}`} style={{ marginBottom: 6 }}>
                 <UnfiledCard doc={d} projects={projects} busy={moving === d.id}
-                  onOpen={() => openDoc(d.id, null)} onMove={(pid) => moveUnfiled(d, pid)} />
+                  onOpen={() => openDoc(d.id, null)} onMove={(pid) => moveUnfiled(d, pid)} trash={rowTrash(d.id)} />
               </div>
             ))}
           </>
@@ -325,7 +361,10 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
         <div style={{ marginTop: 22, padding: "9px 12px", borderRadius: 9, border: "1.5px dashed var(--border-default)", color: "var(--text-tertiary)", fontSize: 11.5, textAlign: "center" }}>
           To add drawings, open a project — files are dropped there so each one lands in the right place (nothing auto-guesses a project).
         </div>
+        </>)}
       </div>
+    </div>
+    <UndoToast undo={trash.undoDel} onUndo={trash.undoDelete} onDismiss={() => trash.setUndoDel(null)} />
     </div>
   );
 }

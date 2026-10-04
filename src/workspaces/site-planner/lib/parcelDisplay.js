@@ -37,6 +37,7 @@ import { STATEWIDE_PARCEL_LAYER, displayMinZoomForUrl, lotNumberFieldForUrl } fr
 import { attachLotNumbers } from "./parcelLotLabelLayer.js";
 import { getSnapshot, featuresForView, onSnapshotChange } from "./parcelSnapshot.js";
 import { pruneToLiveCells } from "./parcelPrune.js";
+import { IngestQueue, INGEST_BUDGET_MS, PAINT_BUDGET_MS } from "./parcelIngest.js";
 import { ParcelIndex, drawParcelTile, prepareParcel, tileLngLatBounds, PARCEL_OUTLINE_STYLE } from "./parcelTileLayer.js";
 import { guardRasterOpacity } from "./parcelOpacityGuard.js";
 import { PARCEL_MINZOOM, PARCEL_VECTOR_MINZOOM, parcelDisplayRegimeForZoom, parcelUrlSupportsImageExport, MAPSERVER_LAYER_RE, PARCEL_OUTLINE_COLOR, PARCEL_OUTLINE_WEIGHT, plainOutlineDynamicLayers } from "./parcelDisplayZoom.js";
@@ -103,24 +104,45 @@ const ParcelTiles = L.GridLayer.extend({
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawParcelTile(ctx, this._parcelIndex, { x: coords.x, y: coords.y, z: coords.z, size: size.x });
   },
-  /** Lots changed under `bbox` ([w,s,e,n]) — repaint the live tiles it touches, once per frame. */
+  /** Lots changed under `bbox` ([w,s,e,n]) — repaint the live tiles it touches, a few per frame. */
   markDirty(bbox) {
     if (!bbox) return;
     if (typeof window !== "undefined" && window.__PLANYR_E2E) window.__parcelTileStats = Object.assign(window.__parcelTileStats || { paints: 0, dirty: 0, flushes: 0 }, { dirty: ((window.__parcelTileStats || {}).dirty || 0) + 1 });
     const d = this._dirty;
     this._dirty = d ? [Math.min(d[0], bbox[0]), Math.min(d[1], bbox[1]), Math.max(d[2], bbox[2]), Math.max(d[3], bbox[3])] : bbox.slice();
-    if (this._flushTimer) return;
-    this._flushTimer = L.Util.requestAnimFrame(() => { this._flushTimer = null; this._flush(); });
+    this._schedule();
   },
+  _schedule() {
+    if (!this._flushTimer && this._map) this._flushTimer = L.Util.requestAnimFrame(() => { this._flushTimer = null; this._flush(); });
+  },
+  /* NEW-1 (arrival cost) — repainting is budgeted too. The dirty box is turned into a queue of tile keys once, and
+   * each frame repaints only as many as fit PAINT_BUDGET_MS (always at least one, so it always progresses). While lots
+   * are still being ingested the repaint is held back (up to ~100 ms) so a tile is painted once with the batch, not
+   * once per slice. A tile that left the map while queued is skipped. */
   _flush() {
+    if (!this._map) return;
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (this._busy && this._busy() && now - (this._lastFlush || 0) < 100) { this._schedule(); return; }
     const d = this._dirty; this._dirty = null;
-    if (!d || !this._map) return;
-    Object.keys(this._tiles).forEach((k) => {
+    const todo = this._todo || (this._todo = new Set());
+    if (d) {
+      const size = this.getTileSize().x;
+      Object.keys(this._tiles).forEach((k) => {
+        const t = this._tiles[k];
+        if (!t || !t.el || !t.coords) return;
+        const b = tileLngLatBounds(t.coords.x, t.coords.y, t.coords.z, size);
+        if (b[0] <= d[2] && b[2] >= d[0] && b[1] <= d[3] && b[3] >= d[1]) todo.add(k);
+      });
+    }
+    this._lastFlush = now;
+    const t0 = now;
+    for (const k of todo) {
+      todo.delete(k);
       const t = this._tiles[k];
-      if (!t || !t.el || !t.coords) return;
-      const b = tileLngLatBounds(t.coords.x, t.coords.y, t.coords.z, this.getTileSize().x);
-      if (b[0] <= d[2] && b[2] >= d[0] && b[1] <= d[3] && b[3] >= d[1]) this._paint(t.el, t.coords);
-    });
+      if (t && t.el && t.coords) this._paint(t.el, t.coords);
+      if (performance.now() - t0 >= PAINT_BUDGET_MS) break;
+    }
+    if (todo.size || this._dirty) this._schedule();
   },
 });
 
@@ -158,6 +180,38 @@ export function makeParcelLayer(url, opts) {
   layer.createNewLayer = (geojson) => (geojson && geojson.geometry
     ? new ParcelGhost(geojson, index, (bbox) => { if (tiles) tiles.markDirty(bbox); })
     : null);
+  /* NEW-1 (arrival cost) — a response is QUEUED and drained under a per-frame time budget (see parcelIngest.js),
+   * so landing 1,200 new lots × six queries never becomes one 100 ms task. `load` is held until the queue is empty,
+   * because MapFinder reads it as "the outlines for this view are drawn". */
+  const ingestOne = (gj) => {
+    let g = layer._layers[gj.id];
+    if (!g) {
+      g = layer.createNewLayer(gj);
+      if (!g) return;
+      g.feature = gj;
+      layer._layers[gj.id] = g;
+    }
+    if (layer._visibleZoom()) g.attach();
+  };
+  const queue = new IngestQueue({
+    process: ingestOne,
+    alive: (coords) => !coords || !layer._cache || layer._cache[layer._cacheKey(coords)] !== undefined, // prune deletes a left cell's cache entry
+  });
+  const heldLoads = [];
+  let basePostProcess = null;
+  const releaseLoads = () => { while (heldLoads.length && basePostProcess) basePostProcess.call(layer, heldLoads.shift()); };
+  let pumpRaf = null;
+  const pump = () => {
+    pumpRaf = null;
+    if (!layer._map) return;
+    queue.drain(INGEST_BUDGET_MS);
+    if (queue.pending) pumpRaf = L.Util.requestAnimFrame(pump); else releaseLoads();
+  };
+  const enqueue = (features, coords) => {
+    queue.push(features, coords);
+    if (typeof document !== "undefined" && document.hidden) { queue.drain(Infinity); releaseLoads(); return; } // nobody is watching a frame; rAF would not run either
+    if (pumpRaf == null) pumpRaf = L.Util.requestAnimFrame(pump);
+  };
   /* …and ghosts never go through `map.addLayer`/`map.removeLayer`: those fire layeradd/add/remove events and
    * walk Leaflet's registry per lot (a ~100 ms long task per zoom at 10k lots). These three replace esri's
    * bodies one-for-one for a layer whose children are inert; `_layers` stays the source of truth for
@@ -201,7 +255,14 @@ export function makeParcelLayer(url, opts) {
         if (!snap.has(id)) { snap.add(id); this._currentSnapshot.push(id); }
         if (cell && !cell.has(id)) { cell.add(id); this._cache[key].push(id); }
       }
-      this.createLayers(features);
+      enqueue(features, coords);
+    };
+  }
+  basePostProcess = layer._postProcessFeatures;
+  if (typeof basePostProcess === "function") {
+    layer._postProcessFeatures = function (bounds) {
+      if (queue.pending) { heldLoads.push(bounds); return undefined; }
+      return basePostProcess.call(this, bounds);
     };
   }
   let mapRef = null;
@@ -213,12 +274,16 @@ export function makeParcelLayer(url, opts) {
     if (!mapRef) return;
     mapRef.on("moveend zoomend", onMoved);
     tiles = new ParcelTiles(index, { pane: "overlayPane", zIndex: 0, minZoom: layer.options.minZoom, maxZoom: 24, tileSize: 512, keepBuffer: 1 });
+    tiles._busy = () => queue.pending > 0;
     tiles.addTo(mapRef);
   });
   layer.on("remove", () => {
     if (mapRef) mapRef.off("moveend zoomend", onMoved);
     Object.keys(layer._layers || {}).forEach((id) => { const g = layer._layers[id]; if (g && g.detach) g.detach(); });
     if (tiles) { try { tiles.remove(); } catch (_) {} tiles = null; }
+    queue.clear();
+    if (pumpRaf != null) { L.Util.cancelAnimFrame(pumpRaf); pumpRaf = null; }
+    releaseLoads(); // keeps esri-leaflet's request counter honest
     mapRef = null;
     if (timer) { clearTimeout(timer); timer = null; }
   });

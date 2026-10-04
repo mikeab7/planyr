@@ -1,0 +1,10 @@
+import { openSignedIn } from "./lib/signedInSession.mjs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
+const s = await openSignedIn({ base: "https://planyr.io", viewport:{width:1440,height:900} });
+const {page}=s; console.log("build",s.build,JSON.stringify(s.proof));
+await assertMeasurable(page,"tmp-b03-a");
+await page.waitForTimeout(3000);
+console.log(await page.evaluate(()=>[...document.querySelectorAll("header button, header [role=button]")].map(b=>(b.getAttribute("aria-label")||"")+"|"+(b.textContent||"").trim().slice(0,30)+"|"+(b.dataset.testid||"")).join("\n")));
+console.log("gear:",await page.locator('button[aria-label="Settings"]').count());
+await page.screenshot({path:"/tmp/claude-0/-home-user-planyr/db5c0953-cf9e-5605-a866-2b8c4145b56f/scratchpad/b03a.png"});
+await s.close();
