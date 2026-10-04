@@ -12,6 +12,12 @@
  * false` keeps outlines purely visual; clicks fall through to the map/canvas for
  * add/remove.
  *
+ * ⛔ AMENDED 2026-10-04 (NEW-1, owner decision): PLANYR OWNS THE OUTLINES AND THE LOT NUMBERS. The
+ * "wide" server-image regime described next is GONE for every queryable CAD — a county's own /export
+ * picture (its colours, its baked-in labels) is never mounted; only the statewide image-only source
+ * still draws a picture, and it is requested without labels in Planyr's colour. See
+ * `parcelDisplayZoom.js`'s amendment and `parcelLotNumbers.js` / `parcelLotLabelLayer.js`.
+ *
  * ⛔ NEW-1 (owner decision 2026-09-24) — a real CAD's OWN outline layer now draws in
  * THREE zoom-gated regimes, not one, and there is no more "capped this view at N lots"
  * banner. `parcelDisplayZoom.js` (a plain-Node-testable sibling — this file imports
@@ -27,12 +33,13 @@
  * that. */
 import * as EL from "esri-leaflet";
 import L from "leaflet";
-import { STATEWIDE_PARCEL_LAYER, displayMinZoomForUrl } from "./counties.js";
+import { STATEWIDE_PARCEL_LAYER, displayMinZoomForUrl, lotNumberFieldForUrl } from "./counties.js";
+import { attachLotNumbers } from "./parcelLotLabelLayer.js";
 import { getSnapshot, featuresForView, onSnapshotChange } from "./parcelSnapshot.js";
 import { pruneToLiveCells } from "./parcelPrune.js";
 import { ParcelIndex, drawParcelTile, prepareParcel, tileLngLatBounds, PARCEL_OUTLINE_STYLE } from "./parcelTileLayer.js";
 import { guardRasterOpacity } from "./parcelOpacityGuard.js";
-import { PARCEL_MINZOOM, PARCEL_VECTOR_MINZOOM, parcelDisplayRegimeForZoom, parcelUrlSupportsImageExport, MAPSERVER_LAYER_RE } from "./parcelDisplayZoom.js";
+import { PARCEL_MINZOOM, PARCEL_VECTOR_MINZOOM, parcelDisplayRegimeForZoom, parcelUrlSupportsImageExport, MAPSERVER_LAYER_RE, PARCEL_OUTLINE_COLOR, PARCEL_OUTLINE_WEIGHT, plainOutlineDynamicLayers } from "./parcelDisplayZoom.js";
 
 export { PARCEL_MINZOOM, PARCEL_VECTOR_MINZOOM, parcelDisplayRegimeForZoom, parcelUrlSupportsImageExport };
 
@@ -120,6 +127,12 @@ const ParcelTiles = L.GridLayer.extend({
 // `opts` overrides the defaults below (e.g. a tighter `minZoom` for the "close" regime of
 // `makeParcelAdaptiveLayer`); every existing single-argument caller is unaffected.
 export function makeParcelLayer(url, opts) {
+  /* NEW-1 (2026-10-04) — Planyr draws the lot NUMBERS too. `lotNumberHint` (default: the county's
+   * `lotNumberField`/`idField` for this URL) names the attribute; `labels:false` opts out;
+   * `getObstacles` hands the label engine the screen boxes a number must clear (the Site planner's
+   * parcel chips). None of these are esri-leaflet options, so they are split off before the spread. */
+  const { lotNumberHint, labels, getObstacles, getInset, ...layerOpts } = opts || {};
+  const lotHint = labels === false ? null : (lotNumberHint !== undefined ? lotNumberHint : lotNumberFieldForUrl(url));
   /* B1976336 — esri-leaflet 3.0.19 NEVER releases a feature once fetched: `cellLeave` only removes when
    * `!_activeCells[key]`, but `_removeCell` sets `_activeCells[key]` (for reuse) just before calling it, so
    * the test can never pass, and `cacheLayers:false` therefore changes nothing (measured). A zoom-out/
@@ -138,8 +151,9 @@ export function makeParcelLayer(url, opts) {
     fields: ["OBJECTID"],
     interactive: false, // purely visual; clicks go to the map/canvas for add/remove
     style: () => PARCEL_OUTLINE_STYLE,
-    ...opts,
+    ...layerOpts,
   });
+  if (lotHint) layer._lotNumbers = attachLotNumbers(layer, { hint: lotHint, getObstacles, getInset });
   // NEW-1 — children are ghosts (no per-lot Path, no per-settle projection); see ParcelGhost above.
   layer.createNewLayer = (geojson) => (geojson && geojson.geometry
     ? new ParcelGhost(geojson, index, (bbox) => { if (tiles) tiles.markDirty(bbox); })
@@ -227,14 +241,19 @@ export function parcelDisplayIsImageOnly(url) {
  * (esri dynamicMapLayer → /export) rather than a query-based vector featureLayer. Takes
  * the same /MapServer/<id> layer URL and targets that one sublayer; keeps the
  * PARCEL_MINZOOM gate so a statewide layer never paints at metro scale. Falls back to the
- * vector layer if the URL isn't a MapServer layer (a FeatureServer can't /export). */
+ * vector layer if the URL isn't a MapServer layer (a FeatureServer can't /export).
+ *
+ * NEW-1 (2026-10-04) — Planyr owns the look: the request goes out with `dynamicLayers` set to Planyr's
+ * outline colour and labels OFF, so the one remaining county-side picture carries neither the server's
+ * own colour nor any labels it would otherwise bake in. (`layers` is deliberately not sent as well —
+ * `dynamicLayers` is the whole layer definition for the request.) */
 export function makeParcelImageLayer(url, opts) {
   const m = MAPSERVER_LAYER_RE.exec(trimUrl(url));
   if (!m) return makeParcelLayer(url);
   const [, service, id] = m;
   return guardRasterOpacity(EL.dynamicMapLayer({
     url: service,
-    layers: [Number(id)],
+    dynamicLayers: plainOutlineDynamicLayers(id),
     minZoom: PARCEL_MINZOOM,
     opacity: 1,
     f: "image",
@@ -242,35 +261,16 @@ export function makeParcelImageLayer(url, opts) {
   }));
 }
 
-/* NEW-1 — a real, queryable CAD's outline display: the vector layer above from
- * PARCEL_VECTOR_MINZOOM up (close), the server-rendered image layer from PARCEL_MINZOOM up
- * to there (wide), nothing below PARCEL_MINZOOM (far). Both sublayers are mounted at once —
- * esri-leaflet's own FeatureManager/RasterLayer already re-check `options.minZoom`/`maxZoom`
- * against the live map zoom on every zoomend and add/clear themselves accordingly, so the
- * regime tracks the view with no listener or rebuild of ours. `eachFeature` — the one thing
- * `MapFinder.optimisticHitAt` needs off a parcel display, for the instant highlight-before-
- * the-authoritative-identify — delegates to the vector sublayer, which esri-leaflet already
- * empties out whenever it's outside its own zoom range, so an optimistic hit is naturally
- * only ever offered in the "close" regime; "wide" and "far" fall through to the ordinary
- * (still fully working) identify query, same as a statewide-image view always has.
- *
- * A source with no /export capability (a FeatureServer CAD, e.g. Fort Bend) has no image
- * regime to switch to, so it stays exactly what it was before this item: one vector layer,
- * gated at PARCEL_MINZOOM. */
-export function makeParcelAdaptiveLayer(url) {
-  if (!parcelUrlSupportsImageExport(url)) return makeParcelLayer(url);
-  // The two bands MEET (vector's floor equals the image's ceiling) rather than merely
-  // abut, so there is no zoom gap where neither draws — Leaflet zoom can be fractional
-  // mid-gesture (B1449 smooth zoom), and a strict `image <17, vector >=17` split would
-  // leave e.g. zoom 16.5 with nothing visible at all.
-  const vectorLayer = makeParcelLayer(url, { minZoom: PARCEL_VECTOR_MINZOOM });
-  const imageLayer = makeParcelImageLayer(url, { maxZoom: PARCEL_VECTOR_MINZOOM });
-  const group = L.layerGroup([vectorLayer, imageLayer]);
-  group._isAdaptive = true;
-  group._vectorLayer = vectorLayer;
-  group._imageLayer = imageLayer;
-  group.eachFeature = (fn, context) => vectorLayer.eachFeature(fn, context);
-  return group;
+/* A real, queryable CAD's outline display (NEW-1, 2026-10-04 — Planyr owns outlines AND lot numbers):
+ * ONE look in every county. Planyr's own vector outline (+ its own lot numbers) is the ONLY thing drawn;
+ * a county's server-rendered /export picture is never mounted for a queryable CAD. A MapServer CAD's
+ * vector floor is PARCEL_VECTOR_MINZOOM (`displayMinZoomForUrl` — the wide band draws nothing for it:
+ * no cheap way was found to draw vectors there without hitting `maxRecordCount`), a FeatureServer's is
+ * PARCEL_MINZOOM, exactly as before. `eachFeature` — the one thing `MapFinder.optimisticHitAt` needs off
+ * a parcel display for the instant highlight-before-the-authoritative-identify — is the vector layer's
+ * own. B137 holds: what is drawn is a subset of what a live point query can select. */
+export function makeParcelAdaptiveLayer(url, opts) {
+  return makeParcelLayer(url, opts);
 }
 
 /* The one entry point both parcel-display surfaces (the map's Select-parcels tool and
@@ -278,8 +278,8 @@ export function makeParcelAdaptiveLayer(url) {
  * statewide source renders as an image overlay (unchanged — its /query is disabled at
  * every zoom, not just a wide one), every queryable CAD as the three-regime adaptive
  * layer above (which also backs the instant client-side click highlight while close-in). */
-export function makeParcelDisplayLayer(url) {
-  return parcelDisplayIsImageOnly(url) ? makeParcelImageLayer(url) : makeParcelAdaptiveLayer(url);
+export function makeParcelDisplayLayer(url, opts) {
+  return parcelDisplayIsImageOnly(url) ? makeParcelImageLayer(url) : makeParcelAdaptiveLayer(url, opts);
 }
 
 /* Draw a county's outlines from its Drive PARCEL SNAPSHOT (B629) as a styleable vector layer —
@@ -291,7 +291,7 @@ export function makeParcelDisplayLayer(url) {
 export function makeSnapshotLayer(county) {
   const layer = L.geoJSON(null, {
     interactive: false, // purely visual; clicks fall through to the map/canvas (like makeParcelLayer)
-    style: () => ({ color: "#a21caf", weight: 1.3, opacity: 0.95, fillOpacity: 0 }),
+    style: () => ({ color: PARCEL_OUTLINE_COLOR, weight: PARCEL_OUTLINE_WEIGHT, opacity: 0.95, fillOpacity: 0 }),
   });
   layer._isSnapshot = true;
   layer._snapshotCounty = county;

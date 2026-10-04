@@ -43,6 +43,7 @@ import { byCountyKey, countyKeySet, normCountyKey } from "../../../shared/gis/co
  * config line: a county whose only real parcel source covers just one city inside it cannot be
  * expressed at county granularity without silently misrouting every OTHER place in that county. */
 import { cityScopeAnswer } from "./cityScopes.js";
+import { PARCEL_VECTOR_MINZOOM } from "./parcelDisplayZoom.js";
 
 export { loadCountyPolygons, countyPolygonsReady };
 
@@ -192,6 +193,11 @@ const COUNTIES_RAW = {
     layerUrl:
       "https://gisdata.pandai.com/pamaps02/rest/services/Chambers/ChambersCADPublic/MapServer/0",
     idField: "Parcel_Id",
+    // NEW-1 (2026-10-04) — the number Planyr DRAWS on a Chambers lot is the CAD account he would look up
+    // (`ChambersCADWeb.DBO.Accounts.Account`, e.g. 00321-02000-00100-100001), not `Parcel_Id`, which is
+    // an internal row id on this joined layer. The layer matches this bare name against its own
+    // table-prefixed field list (parcelLotNumbers.resolveLotNumberField), so no prefix is hard-coded.
+    lotNumberField: "Account",
     addrField: "Prop_Street",
     help: "Chambers CAD public parcels (CCAD's own live service). Search by parcel/account ID or a street name.",
   },
@@ -2850,15 +2856,46 @@ export function displaySourcesForView(bounds) {
   return res.slice();
 }
 
+/* NEW-1 (2026-10-04) — a queryable MapServer CAD no longer draws the county's own /export picture in the
+ * wide band (Planyr owns outlines and numbers), so its vector outline starts at PARCEL_VECTOR_MINZOOM and
+ * the wide band draws nothing for it. The image-only statewide source is the one exception: it draws its
+ * (label-free, Planyr-coloured) image from PARCEL_MINZOOM. 0 = no MapServer-specific floor. Pure. */
+function mapServerOutlineFloor(url) {
+  const u = trimLayerUrl(url);
+  if (!u || u === trimLayerUrl(STATEWIDE_PARCEL_LAYER)) return 0;
+  // A MapServer sublayer, or a bare MapServer root (the runtime resolves the sublayer later).
+  return /\/MapServer(\/\d+)?$/i.test(u) ? PARCEL_VECTOR_MINZOOM : 0;
+}
+
+/* NEW-1 (2026-10-04) — the attribute the lot NUMBER is drawn from, by service URL (the display layer only
+ * knows its URL). `lotNumberField` overrides `idField` where the search field is not the number a person
+ * would look up: Chambers' `idField` is `Parcel_Id` but the CAD account he searches by is `Accounts.Account`
+ * (a joined layer — the layer resolves the table-prefixed spelling from its own metadata). A statewide
+ * image-only source has no queryable attributes, so it has none. Null = no number to draw. Pure. */
+export function lotNumberFieldForUrl(url) {
+  const u = trimLayerUrl(url);
+  if (!u || u === trimLayerUrl(STATEWIDE_PARCEL_LAYER)) return null;
+  for (const key of Object.keys(COUNTIES_MAP)) {
+    const m = COUNTIES_MAP[key], c = COUNTIES[key] || {};
+    if (trimLayerUrl(c.layerUrl || (m && m.layerUrl)) !== u) continue;
+    const f = c.lotNumberField || c.idField || (m && (m.lotNumberField || m.idField));
+    if (f) return f;
+  }
+  return null;
+}
+
 /* NEW-2 (California) — a source may declare a HIGHER outline floor than the generic PARCEL_MINZOOM when it cannot
  * answer a dense cell inside its own record cap and has no server-rendered image regime to fall back on
  * (`displayMinZoom`; see `ca_statewide`). 0 = no source-specific floor. Pure. */
-export const displayMinZoomOf = (key) => Number(COUNTIES_MAP[key] && COUNTIES_MAP[key].displayMinZoom) || 0;
+export const displayMinZoomOf = (key) => {
+  const c = COUNTIES_MAP[key];
+  return Math.max(Number(c && c.displayMinZoom) || 0, mapServerOutlineFloor(c && (c.layerUrl || c.mapServer)));
+};
 /* The floor for a drawn layer, by its service URL (the display layer only knows its URL). */
 export function displayMinZoomForUrl(url) {
   const u = trimLayerUrl(url);
   if (!u) return 0;
-  let floor = 0;
+  let floor = mapServerOutlineFloor(u);
   for (const c of Object.values(COUNTIES_MAP)) {
     if (c && c.displayMinZoom && trimLayerUrl(c.layerUrl || c.mapServer) === u) floor = Math.max(floor, Number(c.displayMinZoom) || 0);
   }
