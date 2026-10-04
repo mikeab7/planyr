@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { zoomStackBottomPx, TOP_RIGHT_ROW_RESERVE_PX } from "../src/workspaces/site-planner/lib/mapChromeStack.js";
+import { zoomStackBottomPx, TOP_RIGHT_ROW_RESERVE_PX, sitesRailMaxHeight, SITES_RAIL_MIN_H_PX, ZOOM_CONTROL_CLEARANCE_PX } from "../src/workspaces/site-planner/lib/mapChromeStack.js";
 
 // B1338272 — the smallest current iPhone in landscape gives a 568×320 device a canvas about
 // 263px tall once the header/toolbar are subtracted (measured live against the owner's real
@@ -62,5 +62,12 @@ describe("zoomStackBottomPx (B1338272 — the zoom stack must never climb into t
       const floorBinds = got === FURNITURE_ROW_NARROW && paneH - FURNITURE_ROW_NARROW - STACK_H < TOP_RIGHT_ROW_RESERVE_PX;
       if (!floorBinds) expect(stackTop).toBeGreaterThanOrEqual(TOP_RIGHT_ROW_RESERVE_PX);
     }
+  });
+});
+
+describe("B2020064 — the Sites rail stops above the zoom stack", () => {
+  it("caps at map height minus the top offset minus the zoom clearance, floored", () => {
+    expect(sitesRailMaxHeight(10)).toBe(`max(${SITES_RAIL_MIN_H_PX}px, calc(100% - ${10 + ZOOM_CONTROL_CLEARANCE_PX}px))`);
+    expect(sitesRailMaxHeight(60)).toContain(`${60 + ZOOM_CONTROL_CLEARANCE_PX}px`);
   });
 });

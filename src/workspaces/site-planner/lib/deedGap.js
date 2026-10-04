@@ -77,3 +77,42 @@ export function deedGapText(trace) {
     precision: `Precision 1:${ratio.toLocaleString("en-US")}`,
   };
 }
+
+/* ── One rule for every user-facing "does this description close" ───────────────────────────────────
+ * The reader summary, the multi-file queue row, the plot toast and the Properties panel all answer from
+ * `deedTrace(...).gap` (above) — the same answer the canvas draws as the red dashed line. `pathCloses`
+ * (a 50 ft screening tolerance) is NOT used for wording: it once let "closes (misclosure 31.4′)" print
+ * for a tract that misses by 31 ft. */
+const fmtFt = (ft) => (ft >= 10 ? ft.toFixed(1) : ft.toFixed(2));
+
+/* Closure of a traverse `path` (as callsToPath returns it): { closes, gapFt, ratio }. */
+export function deedClosure(path) {
+  const t = deedTrace({ centerline: path, pts: path });
+  return t.gap ? { closes: false, gapFt: t.gap.ft, ratio: t.gap.ratio } : { closes: true, gapFt: 0, ratio: null };
+}
+
+/* "misses by 31.40 ft (1:1,450)" — the shared phrase. */
+export function deedMissPhrase(cl) {
+  return `misses by ${fmtFt(cl.gapFt)} ft${cl.ratio ? ` (1:${cl.ratio.toLocaleString("en-US")})` : ""}`;
+}
+
+/* Reader summary line + whether it should read in the danger colour. */
+export function deedReaderSummary(callCount, cl, exCount = 0) {
+  const head = `${callCount} call${callCount > 1 ? "s" : ""} parsed · `;
+  const tail = exCount ? ` · +${exCount} save-and-except` : "";
+  return { danger: !cl.closes, text: head + (cl.closes ? "closes" : `⚠ does NOT close — ${deedMissPhrase(cl)}`) + tail };
+}
+
+/* Queue-row suffix (after the call count). */
+export function deedQueueClosure(cl) {
+  return cl.closes ? "closes" : `⚠ does NOT close — ${deedMissPhrase(cl)}`;
+}
+
+/* Plot toast. `holes` = [{ name, gapFt }] for save-and-except tracts that miss above the floor.
+ * Returns "" when nothing misses (the caller then keeps the plain "Boundary placed." toast). */
+export function deedPlotWarning(cl, holes = []) {
+  const parts = [];
+  if (!cl.closes) parts.push(`⚠ This description does not close — it ${deedMissPhrase(cl)}. The red dashed line is the gap; check the calls before relying on this boundary.`);
+  for (const h of holes) parts.push(`⚠ ${h.name} (save-and-except) does not close — it misses by ${fmtFt(h.gapFt)} ft.`);
+  return parts.join(" ");
+}
