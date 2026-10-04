@@ -2378,6 +2378,17 @@ libs and point `SEQ_VENDOR` at them. Nothing pending.
 ## 📦 Archived from VERIFICATION.md — 2026-07-02
 
 ## ✅ Verified / ❌ Failed — history
+
+### V1440080 — B2014992: every pin on the Dashboard Locations map sits inside its own parcel (Katz in particular) `Blocker: auth` — ✅ PASSED 2026-10-03
+
+Sandbox-proven: `test/dashboardParcelAnchors.test.js` (5, red on pre-change source). Pending: the signed-in dashboard against real parcels. Read-only — change nothing.
+**Steps** (planyr.io, signed in; read the served chunk hash in the same observation):
+1. Open the Dashboard and zoom the Locations card in on Katz (Rankin Rd / I-45 N, Houston). **Expect:** its pin is on the large L-shaped parcel, not on the neighbouring lots.
+2. Compare with the Site tab map for the same site. **Expect:** the pin is at the same spot.
+3. Pan across the other pipeline pins. **Expect:** each sits inside its own outline; a site with no boundary still shows at its saved location.
+- **Stopping rule:** closes on a dated pass of 1-3, or a failed step filed as a recurrence on B2014992.
+- **RESULT — PASSED 2026-10-03, build 17f94b7, owner signed-in Chrome, read-only:** 25 of 25 `dash-map-marker` pins on the Dashboard Locations map sit at the same point as that site's marker on the Site tab map, which was already verified inside its parcel for all 41 sites. Steps 1-3 covered; nothing modified.
+
 _Move items here with the date and who/what checked them._
 
 ### V41 — Grab an unfilled markup shape by its INTERIOR, not just the border line (B155 increment 1) ✅
