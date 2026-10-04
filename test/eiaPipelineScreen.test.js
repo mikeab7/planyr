@@ -244,7 +244,13 @@ describe("siteState — Florida and Georgia are real outlines, and neighbours ar
     ["Jacksonville", 30.33, -81.66, "FL"], ["Tampa", 27.95, -82.46, "FL"], ["Miami", 25.76, -80.19, "FL"], ["Pensacola", 30.42, -87.22, "FL"],
     ["Key West", 24.56, -81.78, "FL"], ["Naples", 26.14, -81.79, "FL"], ["Tallahassee", 30.44, -84.28, "FL"],
     ["Birmingham AL", 33.52, -86.8, null], ["Montgomery AL", 32.37, -86.3, null], ["Gulf Shores AL", 30.25, -87.7, null],
-    ["Charleston SC", 32.78, -79.93, null], ["Aiken SC", 33.56, -81.72, null], ["Chattanooga TN", 35.05, -85.3, null],
+    ["Charleston SC", 32.78, -79.93, null],
+    // B1990960 (main): Georgia's ROUTING BOX is deliberately generous and answers "GA" for the SC / TN edges (fail-closed:
+    // a wrong "GA" only hides a Texas number). Which of those points is truly Georgia is decided by county polygons in
+    // jurisdiction.js. Pinned so a change to that decision is a visible one.
+    ["Aiken SC (inside the GA routing box)", 33.56, -81.72, "GA"], ["Chattanooga TN (inside the GA routing box)", 35.05, -85.3, "GA"],
+    // …but FLORIDA north of the box floor is Florida, not Georgia — the outlines are asked first.
+    ["Jacksonville FL (inside the GA routing box)", 30.33, -81.66, "FL"], ["Tallahassee FL (inside the GA routing box)", 30.44, -84.28, "FL"],
     ["Houston TX", 29.76, -95.37, "TX"], ["Denver CO", 39.7, -104.99, "CO"],
   ];
   for (const [n, lat, lng, want] of cases) it(`${n} → ${want}`, () => expect(siteState({ lat, lng })).toBe(want));
