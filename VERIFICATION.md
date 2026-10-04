@@ -1950,6 +1950,16 @@ Sandbox-proven logged-out (both entry points, reload; red on main). **The signed
 4. Delete the throwaway project. Read the served chunk hash in the same observation.
 - **Stopping rule:** closes on a dated pass of 1–3, or a failure is filed as a recurrence on B1991041.
 
+### V1414592 — B1989504/B1989505: the "Start your site" card no longer covers the map `Blocker: live-GIS`
+
+Sandbox-proven: `e2e/start-hint-placement.spec.js` (red on main, green here; emulated phone, not a real iPhone). **Still needs the deployed build** (`live-GIS` here means the real planyr.io edge + real basemap tiles; no signed-in data needed).
+**Steps** (new Untitled site, Site tab; read `/version.json` with `cache:'no-store'` and the served chunk hash in the SAME observation):
+1. Phone width (390×844, Playwright device descriptor, WebKit if installable else Chromium — name the engine): open a new blank site. **Expect:** a compact "Start your site" strip at the top, between the Panels and Tools edge tabs; the middle of the map is clear.
+2. Tap the map centre / drag. **Expect:** the map pans, nothing intercepts.
+3. Tools → Parcel tools → Draw new parcel. **Expect:** the strip is gone and stays gone while drawing.
+4. New blank site again → ✕ → reload. **Expect:** strip stays dismissed.
+5. Desktop width: **Expect:** strip top-left, clear of the middle. Real iPhone Safari look (toolbar collapse, safe areas) remains owner-side and is NOT claimed.
+
 ## THE CHECKLIST — run this on Michael's signed-in Chrome, on `planyr.io`
 
 **⛔ STEP 0, and it is not optional (owner correction, 2026-09-03, B1112449/B1112450).** A tab can silently keep serving a pre-deploy cached bundle, and a stale tab's own reload can reload the SAME stale chunks. So the chunk name is read **in the same `evaluate` as every result below** — never in a separate call, and never inherited from another tab that was "confirmed fresh" minutes earlier. **Open a brand-new tab**, go to a real project's Site view, let it settle, then run the single expression below.
