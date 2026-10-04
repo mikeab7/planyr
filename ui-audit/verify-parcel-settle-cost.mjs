@@ -126,7 +126,7 @@ for (const z of ZS) {
   await page.evaluate(([lat, lng, zz]) => { window.__mapFinderMap.setView([lat, lng], zz, { animate: false }); }, [BARTOW.lat, BARTOW.lng, z]);
   await settleLoaded();
   const zr = [], pr = [];
-  for (let i = 0; i < 5; i++) { zr.push(await settleMs("zoom", z === 16 ? 15 : z + 1)); await settleLoaded(); zr.push(await settleMs("zoom", z)); await settleLoaded(); pr.push(await settleMs("pan")); await page.waitForTimeout(400); }
+  for (let i = 0; i < 5; i++) { zr.push(await settleMs("zoom", z === 16 ? 15 : z + 1)); await settleLoaded(); zr.push(await settleMs("zoom", z)); await settleLoaded(); pr.push(await settleMs("pan")); await settleLoaded(); }
   floors[z] = { zoom: median(zr), pan: median(pr) };
   console.log(`  control z${z} (no parcel layer): zoom-settle median ${floors[z].zoom.toFixed(1)} ms · pan-settle median ${floors[z].pan.toFixed(1)} ms`);
 }
@@ -145,7 +145,7 @@ for (const z of ZS) {
   for (let i = 0; i < 5; i++) {
     zoomRuns.push(await settleMs("zoom", z === 16 ? 15 : z + 1)); await settleLoaded();
     zoomRuns.push(await settleMs("zoom", z)); await settleLoaded();
-    panRuns.push(await settleMs("pan")); await page.waitForTimeout(400);
+    panRuns.push(await settleMs("pan")); await settleLoaded();
   }
   results[z] = { longTasks: await page.evaluate(() => { const a = window.__lt.slice(); window.__lt.length = 0; return a; }), held: s && s.held, zoom: median(zoomRuns), pan: median(panRuns), zoomRuns, panRuns };
   console.log(`    long tasks (>=50 ms) during z${z} zooms/pans incl. data arrival: n=${results[z].longTasks.length}, max=${Math.max(0, ...results[z].longTasks).toFixed(0)} ms`);
