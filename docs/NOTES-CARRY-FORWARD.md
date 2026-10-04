@@ -1512,3 +1512,9 @@ consecutive runs of the SAME build, so diff identities, never counts. Carried by
 - **TRAP: a tap above the body grows `sheetGrowGap`, which moves the body and the box with it.** Folded into the view (touch + guard window only).
 - **Measure the glyph, not the box:** `ui-audit/verify-notes-touch-landing.mjs` reads a DOM Range over the first character against the tap. Reading the box's own rect would have passed the unfixed build. Seed a view through `planyr:notes:view:v1:local:<id>`; open page 2 through `planyr:notes:activePage:v1:local`.
 - Not provable headless: the keyboard-up `visualViewport` shift and a real fingertip → V1481472.
+
+### Opening framing (B2061331 / NEW-4, 2026-10-04)
+
+- **The first layout pass measures the sheet SHORT (213 px here) and the full height lands ~140 ms later.** Anything that centres the page vertically against the first measurement is a race. `frameView({align:"top"})` is height-independent — use it for opening/Ctrl+0; `fitView` keeps centring. Phones (canvas ≤ 640) open at fit width (`openingZoom`), saved per-page view still wins.
+- **TRAP: an unthrottled run can pass on unfixed code by luck of that race** — a framing harness needs a CPU-throttled arm AND settled-state thresholds (`verify-notes-open-framing.mjs`).
+- **Standing limit:** phone text is 11 px × the opening zoom (~1.0). Readability vs whole-page-width is an owner decision (OWNER-TODO), not a bug.

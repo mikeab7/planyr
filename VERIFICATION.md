@@ -266,6 +266,17 @@ Sandbox-proven (logged-out, seeded local site, real Chromium): `e2e/mapfinder-no
 - **2026-10-04 WebKit-emulated pass (B2050816, NOT on device, logged-out; chunk `index-BVErCNTL.js` read in the same run):** `node ui-audit/verify-phone-orientations.mjs` (`PLANYR_CASES=notice-leak`) — iPhone SE and iPhone 15, portrait + landscape × Dashboard/Schedule/Review/Library/Notes/Spreadsheet = **24/24 PASS** (hint visible after Select parcels, gone after the switch each time); the same case on the pre-fix build is 0/24 PASS. Steps 1-4 above on a real phone, signed in, remain pending (`Blocker: auth`).
 - **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B2041360.
 
+### V1484659 — B2061331: a note opens with its top near the top of the canvas, and on a phone both page edges are on screen `Blocker: real-data` (signed-in real device, real notes)
+
+Sandbox-proven: `ui-audit/verify-notes-open-framing.mjs` (WebKit + Chromium, five canvas sizes, three document shapes, CPU-throttled arm; red on untouched main). A real phone's first-paint timing is not producible headless.
+**Steps (real iPhone, signed in, a throwaway duplicate page — never a real plan):**
+1. Open a page you have never panned or zoomed. **Expect:** the sheet's top is right under the toolbar (a small margin), not halfway down; both left and right edges and corners are visible.
+2. Open a long page. **Expect:** same, starting at its top.
+3. Pinch/pan, leave, reopen. **Expect:** your view is restored exactly (not reset to the opening view).
+4. On desktop, open a short page. **Expect:** top near the top of the canvas, page centred sideways.
+5. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2061331.
+
 ### V1464320 — B2039232: an open file has a Close (×) back to the sheet index; unsaved Word/text edits ask first; reload after Close stays on the index `Blocker: auth`
 
 Sandbox-proven logged out against the built app: `ui-audit/verify-review-close-file.mjs` (25/25; red on `main`'s build) and `test/reviewCloseFile.test.js`. Pending: the real signed-in account on planyr.io, and a real phone.
