@@ -101,6 +101,7 @@ await page.waitForTimeout(1500);
 // CONTROL ARM (Select parcels still OFF): what a settle costs on this map with no parcel layer at all — the
 // base map's own tiles, basemap overlays, labels. The parcel layer's cost is everything above this floor,
 // so the budget is asked of the DIFFERENCE and a slow CI box cannot blame the parcel layer for the map.
+console.log("  served chunks:", (await page.evaluate(() => performance.getEntriesByType("resource").map((r) => r.name.split("/").pop()).filter((n) => /^(SitePlannerApp|map-vendor)-.*\.js$/.test(n)))).join(", ")); // build identity, read in the same run as the measurement
 const snap = async () => page.evaluate(() => (window.__mapParcelDisplay && window.__mapParcelDisplay()) || null);
 // In-page settle timer: runs `act()` (synchronous map call that ends in moveend/zoomend), then waits for the next
 // animation frame's callbacks, and returns the elapsed wall time. Paced with MessageChannel/rAF only (never a timer).
