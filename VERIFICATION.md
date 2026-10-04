@@ -556,6 +556,20 @@ Sandbox-proven on WebKit (touch emulation, `ui-audit/verify-notes-touch-place.mj
 6. Read the served chunk hash in the same observation as each result.
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1960480.
 
+### V1481472 — B1960480 (×2): on a real iPhone, a double-tap on blank paper puts the first letter exactly where the finger was `Blocker: real-data` (signed-in real device)
+
+Sandbox-proven on WebKit (hasTouch + isMobile, real touch tap pairs): `ui-audit/verify-notes-touch-landing.mjs` — first-glyph position vs tap, ±1 CSS px at 100% / 200% / 50%, left / middle / right, panned, panned+zoomed, not-the-first page; desktop path unchanged. NOT provable here: the iOS soft keyboard's visual-viewport shift, and a real fingertip on real glass.
+**Steps (real iPhone, signed in, a throwaway duplicate page — never a real plan):**
+1. Open the page at the normal zoom, double-tap blank paper near the middle, type "W". **Expect:** the W appears under where the finger landed (not lower/right of it).
+2. Repeat near the left edge and near the right edge of the sheet. **Expect:** same — no sideways drift.
+3. Pinch in (zoomed in) and repeat; pinch out and repeat. **Expect:** the letter still lands under the finger at both.
+4. Pan the page so a different part is on screen, repeat. **Expect:** same.
+5. With the keyboard already up (tap into an existing box first, leave it up), double-tap a blank spot, type. **Expect:** lands under the finger; the page does not jump.
+6. Open a page that is not the first one in the list and repeat step 1. **Expect:** same.
+7. Double-tap in the strip just under the page title. **Expect:** the box sits where tapped; the page does not slide.
+8. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–7, or a failed step filed as a recurrence on B1960480.
+
 
 ### V1394448 — B1958144: designed road sections (median, lane striping, ROW lines) show on the real Silvestri and Richfield plans `Blocker: real-data`
 
