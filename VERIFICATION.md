@@ -176,6 +176,15 @@ Sandbox-proven (Playwright WebKit, iPhone 15 descriptor, EMULATED, logged out, f
 5. Open an OLDER visit that was logged before this change and has "Had …" text. **Expect:** the text still shows on the card and, in the edit form, as "What I had (saved earlier)" (read-only); change the rating and save. **Expect:** the "Had …" text is unchanged afterward.
 6. Rotate to landscape with the keyboard up in the dish field. **Expect:** the field and Save are still visible; rotate back and dismiss the keyboard. **Expect:** the sheet returns to the bottom edge, nothing stuck high.
 - **Stopping rule:** closes on a dated pass of 1–6, or a failed step filed as a recurrence on B2057920 (name which of: keyboard / AutoFill / rating / first-visit).
+### V1493760 — B2070432: Food search shows his saved restaurant first, once, tagged `Blocker: auth`
+
+Sandbox-proven: `test/foodSavedSearchFirst.test.js` red on main, green here. **Steps** (planyr.io signed in, `#/food`, Map view; read the build from `/version.json` with cache:no-store in the SAME check):
+1. Houston-wide view, type "daon". **Expect:** DAO'N Korean Modern Restaurant is row 1 with BEEN HERE, exactly once; no second DAO'N row.
+2. Zoom into a spot far from it (e.g. Dallas) and type "daon" again. **Expect:** same — his DAO'N is still row 1, once.
+3. Repeat at both views for "Captain Tom", "Roadhouse", "El Tiempo". **Expect:** each saved place leads, tagged, once each (El Tiempo shows both his Cantina and Taqueria first).
+4. "soma", "tio trompo", "ikes". **Expect:** unchanged — saved first.
+5. Switch Map → List → Map a few times. **Expect:** no `_leaflet_pos` error in the console.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2070432.
 ### V1474512 — B2050928: Food map controls match — both segmented controls identical, info button md and unclipped, nothing in the toolbar clipped `Blocker: live-GIS (planyr.io is not reachable from the sandbox; no sign-in needed — browsing the map works logged out)`
 
 Sandbox-proven: `ui-audit/ui-inventory.mjs --budget-only` relational gate green on the four Food surfaces (RED on untouched main, named); `test/foodModule.test.js` 426/426. **Steps** (planyr.io at phone width, `#/food`, Map view; read the build from `/version.json` AND the served chunk hash in the same observation; fixtures only — never write to the real food list):

@@ -119,6 +119,8 @@ export function attachPlaceNames(map) {
   const draw = (ts) => {
     raf = 0;
     if (destroyed) return;
+    // The map was torn down under a queued frame (Food Map → List → Map): Leaflet has dropped its panes.
+    if (!map._mapPane) { controller.destroy(); return; }
     const now = typeof ts === "number" ? ts : performance.now();
     const dt = lastTs ? Math.min(100, now - lastTs) : 0;
     lastTs = now;

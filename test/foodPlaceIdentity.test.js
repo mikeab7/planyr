@@ -81,8 +81,8 @@ describe("mergeSearchRows — one row per restaurant", () => {
     expect(rows[1].kind).toBe("place");
   });
   it("a real chain keeps its genuinely different branches", () => {
-    const a = snap("Torchy's Tacos", { lat: 29.74, lon: -95.40 }, "a");
-    const b = snap("Torchy's Tacos", { lat: 29.77, lon: -95.43 }, "b");
+    const a = { ...snap("Torchy's Tacos", { lat: 29.74, lon: -95.40 }, "a"), address: "10 Alpha St, Houston" };
+    const b = { ...snap("Torchy's Tacos", { lat: 29.77, lon: -95.43 }, "b"), address: "20 Beta St, Houston" };
     expect(mergeSearchRows({ snapshotRows: [a, b], existing: [] })).toHaveLength(2);
   });
   it("a second snapshot id for a place he logged under another id collapses onto the logged one", () => {

@@ -110,7 +110,13 @@ export default function SearchBox({
   const manualMatches = view === "map" && trimmed.length >= MIN_QUERY_LEN
     ? (manualPins || []).filter((p) => nameMatches(p.name, q)).map((p) => ({ ...p, kind: "manual", mine: true }))
     : [];
-  const snapshotRanked = snapshotResults.map((p) => ({ ...p, kind: "place", mine: loggedIds?.has(p.id), wishlisted: wishlistIds?.has(p.id) }));
+  // His saved places that match by name are ALWAYS candidates, independent of the RPC: it returns a
+  // capped pool (95 "Roadhouse" rows in the snapshot, 60 fetched), so a saved one can simply be absent.
+  const savedPlaceRows = view === "map" && trimmed.length >= MIN_QUERY_LEN
+    ? (existing || []).filter((e) => e.kind === "place" && nameMatches(e.name, q))
+        .map((e) => ({ ...e.ref, kind: "place", mine: !!loggedIds?.has(e.ref.id), wishlisted: !!wishlistIds?.has(e.ref.id) }))
+    : [];
+  const snapshotRanked = [...savedPlaceRows, ...snapshotResults.map((p) => ({ ...p, kind: "place", mine: loggedIds?.has(p.id), wishlisted: wishlistIds?.has(p.id) }))];
   // ONE row per restaurant (B2046224): a restaurant he already has (manual pin, or a place he's
   // logged/flagged) and the snapshot's own record of the same spot are the same row — the surviving
   // row is the one his visits hang off, so picking it opens the EXISTING restaurant. See
