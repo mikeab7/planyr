@@ -56,6 +56,7 @@
  * pseudo-project (Pursuits / Operations, which no `sites` row describes) is bridge-only.
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { isCoarsePointer } from "./coarsePointer.js";
 import { RADIUS } from "./radius.js";
 import FloatingNotice from "./FloatingNotice.jsx";
 import AnchoredMenu from "./AnchoredMenu.jsx";
@@ -1227,7 +1228,7 @@ export default function ProjectBreadcrumb({
             <SearchIcon />
             <input
               {...NO_AUTOFILL}
-              autoFocus
+              autoFocus={!isCoarsePointer()}
               data-testid="project-search"
               aria-label="Search projects"
               value={q}

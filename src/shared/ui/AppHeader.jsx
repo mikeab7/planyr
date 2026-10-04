@@ -52,6 +52,7 @@
  * no allow="fullscreen", iOS Safari, which has no fullscreen for a non-video element) says so in
  * a short notice instead.
  */
+import { fullscreenApiAvailable, useFullscreenAvailable } from "./fullscreenSupport.js";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { RADIUS } from "./radius.js";
 import { Tab, IconButton } from "./controls.jsx";
@@ -69,6 +70,7 @@ import { useTheme } from "../theme/ThemeProvider.jsx";
 import InterfaceSettings from "./InterfaceSettings.jsx";
 import { centerSlotPlan, centerSlotMaxWidth, CENTER_SLOT_GAP } from "./headerCenterFit.js";
 import FloatingNotice from "./FloatingNotice.jsx";
+import { observeStripEdges, pageStrip } from "./scrollStrip.js";
 
 // Chrome colors are theme tokens (var(--chrome-*)) so the header themes WITH the app
 // (B318): light theme = light chrome, dark theme = dark chrome.
@@ -222,12 +224,9 @@ function ScrollChevron({ side, onClick }) {
     </IconButton>
   );
 }
-// A "page" is most of a screenful (0.72) rather than the whole row, so the trailing edge of what
-// was already visible stays on screen as a continuity anchor for the next page.
-function pageScrollRow(ref, dir) {
-  const el = ref.current;
-  if (el) el.scrollBy({ left: dir * el.clientWidth * 0.72, behavior: "smooth" });
-}
+// NAV-ARROWS — a "page" is an ABSOLUTE, clamped target (a screenful minus a tab), never a relative
+// nudge from wherever the strip is mid-animation; see `scrollStrip.js`.
+function pageScrollRow(ref, dir) { pageStrip(ref.current, dir); }
 
 function SettingsMenu() {
   const [open, setOpen] = useState(false);
@@ -369,19 +368,10 @@ function useScrollEdges(ref, active, watchRefs) {
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el || !active) { setEdges({ left: false, right: false }); return undefined; }
-    const update = () => {
-      const over = el.scrollWidth - el.clientWidth;
-      setEdges({ left: el.scrollLeft > 1, right: el.scrollLeft < over - 1 });
-    };
-    update();
-    el.addEventListener("scroll", update, { passive: true });
-    let ro;
-    if (typeof ResizeObserver === "function") {
-      ro = new ResizeObserver(update);
-      ro.observe(el);
-      (watchRefs || []).forEach((r) => { if (r && r.current) ro.observe(r.current); });
-    }
-    return () => { el.removeEventListener("scroll", update); ro?.disconnect(); };
+    // NAV-ARROWS — the model (edge tolerance, settle re-read, child-set watching) is the shared
+    // `scrollStrip` helper, so every chevron strip answers "is there more this way" identically.
+    return observeStripEdges(el, (next) => setEdges((prev) => (prev.left === next.left && prev.right === next.right ? prev : next)),
+      (watchRefs || []).map((r) => r && r.current));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ref, active, ...(watchRefs || [])]);
   return edges;
@@ -489,11 +479,7 @@ export function fsElement() {
   if (typeof document === "undefined") return null;
   return document.fullscreenElement || document.webkitFullscreenElement || null;
 }
-export function fsSupported() {
-  if (typeof document === "undefined") return false;
-  const el = document.documentElement;
-  return !!(el && (el.requestFullscreen || el.webkitRequestFullscreen));
-}
+export function fsSupported() { return fullscreenApiAvailable(); }
 /* Ask for fullscreen on the document ROOT. Resolves when the browser granted it; REJECTS when it
  * refused (no user activation, a permissions policy, an iframe without allow="fullscreen") or
  * when the API is absent — the caller falls back to hiding the header alone. */
@@ -916,6 +902,7 @@ export default function AppHeader({
     // owner for the state, so entering can't race the event that reports it.
   };
   const toggleRef = useRef(toggleFullscreen); toggleRef.current = toggleFullscreen;
+  const fsAvailable = useFullscreenAvailable();
 
   /* NEW-1 — the header follows the DOCUMENT, never a guess. Whatever ends fullscreen — Esc, the
      browser's own exit affordance, another script — arrives here, so the chrome comes back with
@@ -1248,7 +1235,10 @@ export default function AppHeader({
           {saveSlot}
           {/* NEW-3/B291538 — fullscreen's visible control. It has to exist here because the
               bare `f` shortcut now stands down wherever a writeable document is on screen. */}
-          <FullscreenButton active={fullscreen} onToggle={() => toggleRef.current()} />
+          {/* Only where full screen can actually happen (fullscreenSupport.js) — and always while
+              active, so the way OUT never disappears (Chromium reports display-mode: fullscreen
+              once inside). Nothing renders otherwise, so the row closes up with no gap. */}
+          {(fullscreen || fsAvailable) && <FullscreenButton active={fullscreen} onToggle={() => toggleRef.current()} />}
           {/* Theme gear — signed-out only; signed-in users switch theme in account → Settings (B389) */}
           {!accountActive && <SettingsMenu />}
           {/* ⛔ B972096 (NEW-1) — THE B950320 DIVIDER IS GONE, and its own reasoning is why. That

@@ -41,7 +41,7 @@ import CompEntryGrid, { draftFromParsedRow } from "./CompEntryGrid.jsx";
 import CompDraftsPanel from "./CompDraftsPanel.jsx";
 import { fetchMyDrafts, insertDrafts, promoteDraft, deleteDraft } from "../lib/compDraftsStore.js";
 import { kmlToDraftRows, kmzToKmlText } from "../lib/kmlImport.js";
-import { siteplanLocationText, pinFallbackText } from "../lib/compLocationText.js";
+import { compLocationFor } from "../lib/compLocationText.js";
 import { reverseGeocodeLatLon } from "../../../workspaces/site-planner/lib/geocode.js";
 import { COUNTIES } from "../../../workspaces/site-planner/lib/counties.js";
 import { DELETED_RETENTION_DAYS } from "../../../shared/projects/projectModel.js";
@@ -117,11 +117,9 @@ function useCompLocationText(anchor, overlaysById, enabled = true) {
     _pinAddrInflight.set(key, p);
   }, [anchor, enabled]);
   if (!anchor) return null;
-  if (anchor.kind === "site_plan") return siteplanLocationText(anchor, overlaysById) || pinFallbackText(anchor, countyEntry);
-  // "pin" and "parcel" both resolve to a real place the same way now.
+  // NEW-1 (B2010352) — the ONE resolver (`compLocationFor`), shared with the KMZ balloon.
   const key = pinCacheKey(anchor);
-  const resolved = key ? _pinAddrCache.get(key) : null;
-  return resolved || pinFallbackText(anchor, countyEntry);
+  return compLocationFor(anchor, { overlaysById, countyEntry, resolvedAddress: key ? _pinAddrCache.get(key) : null });
 }
 
 /* NEW-1 (adversarial review, 2026-09-05) — a comp's owning site can be BINNED (soft-deleted)

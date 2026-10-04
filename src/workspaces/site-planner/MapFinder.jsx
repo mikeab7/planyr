@@ -2,7 +2,7 @@ import { Fragment, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, 
 import { validateName, announceNameNotice } from "../../shared/names/nameCore.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState, displayFloorForView } from "./lib/counties.js";
 import { landingView, milesBetween, CLUSTER_RADIUS_MI, locatedPoints } from "./lib/landingView.js";
 import { decideTargetOf, orderVerbs, verbLabel } from "./lib/decideBar.js";
 import {
@@ -17,7 +17,7 @@ import { PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL } from "./lib/ma
 import { tileCacheLimit } from "./lib/tileBudget.js";
 import { boundTileCache, capTileCache, armBlankTileHeal } from "./lib/tileLifecycle.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
-import { BASEMAPS, FINDER_BASEMAP_CHOICES } from "./lib/basemaps.js";
+import { BASEMAPS, FINDER_BASEMAP_CHOICES, ROAD_NAMES_TILES, SITE_PLAN_BASEMAP } from "../../shared/basemaps/basemaps.js";
 // B427410 (×2) — the ONE gate for the "Road names" overlay below, shared with LayerPanel's
 // dormant note so the map's opacity switch and the panel's explanation can't disagree.
 import { PLACE_NAMES_MIN_ZOOM } from "./lib/layerZoomGate.js";
@@ -104,10 +104,12 @@ const ParcelInfoCard = lazy(() => import("./components/ParcelInfoCard.jsx"));
 import { PanelErrorBoundary } from "./components/LazyPanel.jsx";
 import { makeParcelDisplayLayer, makeSnapshotLayer, parcelDisplayIsImageOnly, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
 import { siteBoundaryInfo, siteDrawParcels } from "./lib/siteBoundary.js";
+import { siteAnchorLatLon } from "./lib/siteAnchor.js";
+import { pinClusterOffsets, pinOffsetsSig } from "./lib/pinCluster.js";
 // B1923744 — the pure zoom-gate/filter/reproject-outcome half of "draw the record's own active
 // parcel boundary alongside the pin at close zoom" (see the render site below for the Leaflet half).
 import { showActiveParcelAt, activeDrawParcels, reprojectParcelRing } from "./lib/activeParcelBoundary.js";
-import { geocodeAddress } from "./lib/geocode.js";
+import { geocodeAddress, reverseGeocodeLatLon } from "./lib/geocode.js";
 import { compAnchorFromSelection, parcelAnchorFromSelection } from "./lib/compParcelAnchor.js";
 import { statusToken } from "../../shared/ui/statusTokens.js";
 /* lib/sharing.js is loaded ON DEMAND, and the reason is a budget one. This module is the
@@ -127,10 +129,9 @@ import { lastEditedLabel } from "./lib/siteRecency.js";
 import { loadUserPrefs, updateUserPrefs, getPrefsSnapshot, subscribePrefs, setSitesPanelPref } from "./lib/userPrefs.js";
 import { adminBoundariesVisible, attachAdminBoundaries } from "./lib/adminBoundaryGate.js";
 import { placeNamesVisible, attachPlaceNames } from "./lib/placeNamesGate.js";
-import { compHeadline, compFieldRows, compDateLabel } from "../../shared/comps/lib/comps.js";
+import { compHeadline } from "../../shared/comps/lib/comps.js";
 import { loadCompsRatePeriod } from "../../shared/comps/lib/compsRatePeriodPrefs.js";
-import { compMarkerSvg, compMarkerSize, compMarkerColor } from "../../shared/comps/lib/compMarkerIcon.js";
-import { parcelLocationText, siteplanLocationText, pinFallbackText } from "../../shared/comps/lib/compLocationText.js";
+import { compMarkerSvg, compMarkerSize } from "../../shared/comps/lib/compMarkerIcon.js";
 // B1372144 (map notes) — a note is a comp's ANCHOR with a note's payload. It reuses this file's
 // existing ground-first plumbing wholesale (the dropped pin, the parcel selection, the decide bar)
 // and adds only its own marker, editor and layer. It is NOT the Notes WORKSPACE
@@ -145,6 +146,7 @@ import { fetchAllMapNotes, insertMapNote, updateMapNote, deleteMapNote } from ".
 // macrotask, see scheduleSaveSitesFrame below) is caller glue, same as terrainLayers.js's own.
 import { runBudgeted, PAINT_FRAME_BUDGET_MS } from "./lib/paintSchedule.js";
 import { parcelKey as parcelKeyOf } from "./lib/parcelIdentity.js";
+import { FREE_ZOOM_OPTIONS, attachFreeWheelZoom } from "../../shared/map/freePinchZoom.js";
 
 // Theme tokens (var(--…)) — MapFinder is DOM/inline-style only, so CSS vars resolve
 // and the panel themes live with no re-render. (B318)
@@ -199,7 +201,7 @@ const MAP_PIN_SHADOW = "0 1px 5px rgba(0,0,0,0.45)"; // design-exempt: no shadow
  * — do not relabel it back to anything implying place/city names without switching the source
  * too. City / town names are a SEPARATE row ("City names", NEW-2 2026-09-29), drawn by our own
  * canvas layer from our own dataset: lib/placeNamesLayer.js, gated by lib/placeNamesGate.js. */
-const LABELS_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}";
+const LABELS_TILES = ROAD_NAMES_TILES.url; // NEW-1 — defined once in shared/basemaps (Food reuses it)
 
 /* B427410 (×3) — THE DEFAULT OPACITY, MEASURED, NOT COPIED FROM THE TIER MODEL. The old fixed
  * 0.4 was never derived for this layer — it matches `layerWeight.js`'s "context" tier ceiling,
@@ -212,7 +214,7 @@ const LABELS_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/Refer
  * the tier ceiling below does not transfer to this layer. Session-only default; the user's own
  * slider (`opacityControl`, wired below) is the rest of the answer — "let me adjust the opacity"
  * was the owner's own fallback ask. */
-const PLACE_NAMES_DEFAULT_OPACITY = 0.85;
+const PLACE_NAMES_DEFAULT_OPACITY = ROAD_NAMES_TILES.defaultOpacity;
 
 /* NEW-MAPCTRL-3 — the narrow-mode full-width search bar's own footprint (`top:8, height:42`
  * where it's rendered below) plus an 8px gap. The bottom-left banner slot (error toast, share
@@ -690,7 +692,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     const c = at || (mapRef.current ? mapRef.current.getCenter() : null);
     setFallbackOffer(c ? { at: { lat: c.lat, lon: c.lon != null ? c.lon : c.lng } } : null);
   };
-  const [basemap, setBasemap] = useState("esri");
+  const [basemap, setBasemap] = useState(SITE_PLAN_BASEMAP.imageryKey);
   const [labels, setLabels] = useState(true);
   // NEW-2 (2026-09-29) — the "City names" row (own canvas layer, not a tile overlay). On by default.
   const [cityNames, setCityNames] = useState(true);
@@ -1467,38 +1469,27 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     return { name: rec.label ? rec.label.split(" ·")[0].trim() : null, state: rec.state || null };
   };
 
-  // Outer ring(s) of a comp's parcel-anchor GeoJSON (Polygon | MultiPolygon), already WGS84
-  // lon/lat — holes are dropped (a real property boundary carrying a donut hole is rare, and this
-  // export's own polygon+pin pairing only ever needs the outer shape). Never throws on a malformed
-  // shape — just contributes nothing, which degrades to the comp's plain pin.
-  const compParcelRings = (geom) => {
-    if (!geom) return [];
-    if (geom.type === "Polygon") return geom.coordinates?.[0] ? [geom.coordinates[0]] : [];
-    if (geom.type === "MultiPolygon") return (geom.coordinates || []).map((poly) => poly?.[0]).filter(Boolean);
-    return [];
-  };
-
-  // One comp -> its balloon (a card of every populated field, grouped exactly as `compFieldRows`
-  // already orders them for the panel/detail view — never a second, drifting field list) + its
-  // geometry input for `siteRecordFeatures`.
-  const compKmlBalloon = (c) => {
-    const loc = c.anchor?.kind === "parcel" ? parcelLocationText(c.anchor, countyDisplayName)
-      : c.anchor?.kind === "site_plan" ? siteplanLocationText(c.anchor, overlaysById)
-      : pinFallbackText(c.anchor, countyEntryFor);
-    const headRows = [];
-    if (loc) headRows.push({ label: "Location", value: loc });
-    headRows.push({ label: "Executed", value: compDateLabel(c.compDate) });
-    return [{ heading: c.title || compHeadline(c, compsRatePeriod), rows: headRows }, { rows: compFieldRows(c, compsRatePeriod) }];
-  };
-  const compToKmlFeatureInput = (c, balloonHtmlFn) => {
-    const name = c.title || compHeadline(c, compsRatePeriod);
-    const iconColor = compMarkerColor(c.compType);
-    const balloon = balloonHtmlFn(compKmlBalloon(c));
-    if (c.anchor?.kind === "parcel" && c.anchor.parcelGeom) {
-      const rings = compParcelRings(c.anchor.parcelGeom);
-      if (rings.length) return { name, polygonRings: rings, iconColor, lineColor: iconColor, balloon };
+  // B2010352 (NEW-1/2/3) — the balloon/feature assembly lives in the PURE shared/comps/lib/
+  // siteRecordKml.js now (it was closures here, unreachable by any test). This file only gathers
+  // inputs. `compLocationText` below is the panel's Location for a comp: the reverse-geocoded
+  // address from the same persisted cache the comp panel reads (fetched + persisted when absent),
+  // through the one resolver `compLocationFor` — never the APN.
+  const compLocationText = async (c) => {
+    const { compLocationFor } = await import("../../shared/comps/lib/compLocationText.js");
+    const { pinCacheKey, readPinAddrStorage, persistPinAddr } = await import("../../shared/comps/lib/pinAddrCache.js");
+    let resolvedAddress = null;
+    const key = c.anchor && c.anchor.kind !== "site_plan" ? pinCacheKey(c.anchor) : null;
+    if (key) {
+      resolvedAddress = readPinAddrStorage()[key] || null;
+      if (!resolvedAddress) {
+        try {
+          const ans = await reverseGeocodeLatLon(c.anchor.lat, c.anchor.lon);
+          resolvedAddress = ans?.label || null;
+          if (resolvedAddress) persistPinAddr(key, resolvedAddress);
+        } catch { resolvedAddress = null; } // falls back to county/coordinates, exactly as the panel does
+      }
     }
-    return { name, point: [c.anchor.lon, c.anchor.lat], iconColor, balloon };
+    return compLocationFor(c.anchor, { overlaysById, countyEntry: countyEntryFor, resolvedAddress });
   };
 
   // Right-click a comp marker (the green diamond, or any other comp type) -> export its OWNING
@@ -1509,7 +1500,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const exportCompSiteRecordKmz = async (comp) => {
     setCompMenu(null);
     try {
-      const { siteRecordFeatures, balloonHtml, buildKmz, kmzFilename, KMZ_MIME } = await import("../../shared/comps/lib/kmlExport.js");
+      const { buildKmz, kmzFilename, KMZ_MIME } = await import("../../shared/comps/lib/kmlExport.js");
+      const { siteRecordKmlFeatures } = await import("../../shared/comps/lib/siteRecordKml.js");
       const download = (bytes, filename) => {
         const blob = new Blob([bytes], { type: KMZ_MIME });
         const a = document.createElement("a");
@@ -1518,6 +1510,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         a.click();
         URL.revokeObjectURL(a.href);
       };
+
+      // The panel's Location text for each exported comp, resolved up front (see compLocationText).
+      const locations = new Map();
+      const loadLocations = (list) => Promise.all(list.map(async (c) => { locations.set(c.id, await compLocationText(c)); }));
 
       // `sites` (the `siteGroups` prop) is filtered to role === "pursuit" — most comps' owning
       // sites are "tracked" market-intel records that never appear there, so the lookup needs the
@@ -1534,7 +1530,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       // alone, and SAY so (never a silent narrower export).
       if (!site) {
         const name = comp.title || compHeadline(comp, compsRatePeriod);
-        const feats = siteRecordFeatures({ parcel: { rings: [] }, comps: [compToKmlFeatureInput(comp, balloonHtml)] });
+        await loadLocations([comp]);
+        const feats = siteRecordKmlFeatures({
+          siteName: name, site: null, boundary: { known: false, hasBoundary: false, acres: 0, rings: [] },
+          comps: [comp], locationFor: () => locations.get(comp.id), ratePeriod: compsRatePeriod,
+        });
         download(buildKmz(name, feats), kmzFilename(name));
         setErr(`This comp isn't linked to a site record yet — exported just "${name}" on its own.`);
         return;
@@ -1556,6 +1556,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       const parcelRings = projPt ? parcelRows.map((p, i) => ({
         ring: p.points.map(projPt),
         name: p.addr || (parcelRows.length > 1 ? `${siteName} (parcel ${i + 1})` : siteName),
+        acct: p.acct || null,
       })) : [];
 
       // Best-effort: the project's filed documents, listed by NAME only (never the file itself —
@@ -1570,36 +1571,23 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         documents = (rows || []).filter((r) => r.project_id === comp.projectId).map((r) => ({ name: r.sfile || r.title || "Untitled file" }));
       } catch { documents = null; }
 
-      const siteRows = [
-        { label: "Role", value: roleOf(site) === "tracked" ? "Tracked" : "Pursuit" },
-        { label: "Status", value: STATUS_META[statusOf(site)]?.label || statusOf(site) },
-      ];
-      if (site.county) siteRows.push({ label: "County", value: countyDisplayName(site.county) });
-      siteRows.push({ label: "Acreage", value: boundary.known ? (boundary.hasBoundary ? `${boundary.acres.toFixed(2)} AC` : "No boundary drawn yet") : "Unknown" });
-      if (site.origin) siteRows.push({ label: "Coordinates", value: `${site.origin.lat.toFixed(5)}, ${site.origin.lon.toFixed(5)}` });
-      const siteSections = [{ heading: siteName, rows: siteRows }];
-      const siteNotes = (mapNotes || []).filter((n) => n.projectId && n.projectId === comp.projectId);
-      if (siteNotes.length) {
-        siteSections.push({ heading: "Notes", lines: siteNotes.map((n) => `${n.title ? `${n.title} — ` : ""}${n.body || ""}`.trim()).filter(Boolean) });
-      }
-      if (documents) {
-        siteSections.push(documents.length
-          ? { heading: "Documents", links: documents.map((d) => ({ label: d.name, url: null })) }
-          : { heading: "Documents", lines: ["No documents on file."] });
-      }
-      siteSections.push({
-        heading: `Comps on this site record (${siblingComps.length})`,
-        lines: siblingComps.map((c) => `${c.title || compHeadline(c, compsRatePeriod)} — ${compDateLabel(c.compDate)}`),
-      });
+      await loadLocations(siblingComps);
 
-      const features = siteRecordFeatures({
-        parcel: {
-          rings: parcelRings,
-          fallbackPoint: !parcelRings.length && site.origin ? [site.origin.lon, site.origin.lat] : null,
-          name: siteName,
-          balloon: balloonHtml(siteSections),
+      const features = siteRecordKmlFeatures({
+        siteName,
+        site: {
+          role: roleOf(site) === "tracked" ? "Tracked" : "Pursuit",
+          status: STATUS_META[statusOf(site)]?.label || statusOf(site),
+          county: site.county ? countyDisplayName(site.county) : null,
+          origin: site.origin || null,
         },
-        comps: siblingComps.map((c) => compToKmlFeatureInput(c, balloonHtml)),
+        boundary: { known: boundary.known, hasBoundary: boundary.hasBoundary, acres: boundary.acres, rings: parcelRings },
+        comps: siblingComps,
+        locationFor: (c) => locations.get(c.id),
+        ratePeriod: compsRatePeriod,
+        notes: mapNotes || [],
+        projectId: comp.projectId,
+        documents,
       });
       if (!features.length) { setErr("Nothing to export yet — this site record has no boundary and no located comps."); return; }
       download(buildKmz(siteName, features), kmzFilename(siteName));
@@ -1681,6 +1669,28 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   // buckets here at all, so a null `status` on one can never be defaulted into "Pursuit."
   const pursuitSites = useMemo(() => sites.filter((s) => roleOf(s) === "pursuit"), [sites]);
 
+  // NEW-1 — pins that sit on the SAME ground (a parcel-anchored comp, a note on that parcel, the
+  // site's own pin: all resolve to the parcel centre) get nudged apart in SCREEN pixels so none hides
+  // another and each stays clickable at any zoom. Priority: site, then comps, then notes; the first
+  // keeps its true spot. Only what is actually painted counts (layer checkboxes + name filter).
+  // Held by signature so the three marker effects rebuild only when an offset really changes.
+  const pinOffsetsRef = useRef(new Map());
+  const pinOffsets = useMemo(() => {
+    const pts = [];
+    if (showSitesLayer) for (const s of pursuitSites.filter(passName)) {
+      if (!s.origin) continue;
+      const a = siteAnchorLatLon(s, siteDrawParcels(s, parcelSummary)) || s.origin;
+      pts.push({ id: `site:${s.id}`, lat: a.lat, lon: a.lon });
+    }
+    if (showCompsLayer) for (const c of comps) if (c?.anchor) pts.push({ id: `comp:${c.id}`, lat: c.anchor.lat, lon: c.anchor.lon });
+    if (showNotesLayer) for (const n of mapNotes) if (n?.anchor) pts.push({ id: `note:${n.id}`, lat: n.anchor.lat, lon: n.anchor.lon });
+    const next = pinClusterOffsets(pts);
+    return pinOffsetsSig(next) === pinOffsetsSig(pinOffsetsRef.current) ? pinOffsetsRef.current : next;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pursuitSites, parcelSummary, comps, mapNotes, showSitesLayer, showCompsLayer, showNotesLayer, nameFilter]);
+  pinOffsetsRef.current = pinOffsets;
+  const shiftAnchor = (anchor, id) => { const o = pinOffsets.get(id); return o ? [anchor[0] - o[0], anchor[1] - o[1]] : anchor; };
+
   const clearHilites = () => {
     const map = mapRef.current;
     Object.values(hilitesRef.current).forEach((p) => map && map.removeLayer(p));
@@ -1721,7 +1731,9 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // Mercator for the whole world). At z8 the view spans a few counties, so there was no way to
     // pull back and see another state at all — you could only jump by picking a site.
     // z3 puts the continent on screen, which is what a two-state product needs.
-    const map = L.map(elRef.current, { zoomControl: false, minZoom: 3, maxZoom: 21 }).setView(cfg.center, cfg.zoom);
+    const map = L.map(elRef.current, { zoomControl: false, minZoom: 3, maxZoom: 21, ...FREE_ZOOM_OPTIONS }).setView(cfg.center, cfg.zoom);
+    const detachFreeWheel = attachFreeWheelZoom(L, map); // NEW-1 — pinch lands where the fingers stop; a wheel notch stays one level
+    if (typeof window !== "undefined" && window.__PLANYR_E2E) window.__mapFinderMap = map;
     // "Locate me" (NEW — mobile pinch/locate/telemetry lap): a 3rd button stacked directly below
     // the zoom control (same `bottomleft` corner — every OTHER corner is already claimed, per
     // mapChromeStack.js's rule; a control belongs beside the map's other controls, not fighting a
@@ -2086,7 +2098,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       // vector boundary identify reads. Panning is gated inside attachRasterIdentify.
       identifyOk: () => !selectModeRef.current,
     });
-    return () => { cancelled = true; detachRasterIdentify(); detachPermWatch(); if (locateWatchdogRef.current) { clearTimeout(locateWatchdogRef.current); locateWatchdogRef.current = null; } map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("mousemove", onCoordMove); map.off("mouseout", onCoordOut); map.off("contextmenu", onMapCtx); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); map.off("dragstart", markUserMoved); map.off("locationfound"); map.off("locationerror"); containerEl.removeEventListener("pointerdown", onPress); containerEl.removeEventListener("pointerup", onRelease); containerEl.removeEventListener("pointercancel", onRelease); window.removeEventListener("pointerup", onRelease); window.removeEventListener("pointercancel", onRelease); containerEl.removeEventListener("wheel", markUserMoved); map.remove(); mapRef.current = null; };
+    return () => { cancelled = true; detachRasterIdentify(); detachPermWatch(); if (locateWatchdogRef.current) { clearTimeout(locateWatchdogRef.current); locateWatchdogRef.current = null; } map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("mousemove", onCoordMove); map.off("mouseout", onCoordOut); map.off("contextmenu", onMapCtx); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); map.off("dragstart", markUserMoved); map.off("locationfound"); map.off("locationerror"); containerEl.removeEventListener("pointerdown", onPress); containerEl.removeEventListener("pointerup", onRelease); containerEl.removeEventListener("pointercancel", onRelease); window.removeEventListener("pointerup", onRelease); window.removeEventListener("pointercancel", onRelease); containerEl.removeEventListener("wheel", markUserMoved); detachFreeWheel(); if (typeof window !== "undefined" && window.__mapFinderMap === map) window.__mapFinderMap = null; map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -2511,7 +2523,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       // hiding it outright was the B365 default and is exactly what made a site marked
       // dead read as "disappeared entirely." It still recedes via STATUS_TOKENS' size/
       // opacity/z-order, it just never vanishes.
-      const { lat, lon } = site.origin;
+      const { lat, lon } = site.origin; // the plan's feet-frame origin: polygons/elements below are projected about THIS
       const active = site.id === activeSiteId;
       const name = site.site || site.name || "Site";
       // B849344/NEW-1 — canonical boundary + acreage, never the dead `site.parcels` mirror; and
@@ -2530,6 +2542,9 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       // `site.parcels`: drawing the boundary from a different source than the number describes
       // it is exactly the "picture and number disagree" failure this fix exists to close.
       const drawParcels = siteDrawParcels(site, parcelSummary);
+      // NEW-1 — the marker/name tag sit at a point INSIDE the parcel (siteAnchor.js), not at the frame
+      // origin, which on a notched/L-shaped parcel can fall on the neighbour's land.
+      const anchor = siteAnchorLatLon(site, drawParcels) || { lat, lon };
       if (showPlans && drawParcels.length) {
         const t = statusToken(status);
         // Boundary ALWAYS carries the project status color; the open site is
@@ -2579,7 +2594,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         // matching an existing treatment rather than inventing a new one. Non-interactive (a name
         // tag, not a second click target — the same `interactive:false` pattern this file already
         // uses for the geolocate dot below) and HTML-escaped: a site name is user-entered text.
-        L.marker([lat, lon], {
+        L.marker([anchor.lat, anchor.lon], {
           icon: L.divIcon({ className: "", html: sitePlanLabelHtml(name), iconSize: [0, 0], iconAnchor: [0, 0] }),
           interactive: false, keyboard: false, zIndexOffset: active ? 1000 : 0,
         }).addTo(siteGroup);
@@ -2588,7 +2603,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         // (Pursuit on top → Complete at the bottom) so a settled pin never occludes a
         // pursuit where they overlap; the open site floats above its tier (B365).
         const zBase = (statusToken(status).z || 100) + (active ? 1000 : 0);
-        const marker = L.marker([lat, lon], { icon: sitePinIcon(status, active), interactive: !selectMode, keyboard: false, zIndexOffset: zBase, riseOnHover: true });
+        const marker = L.marker([anchor.lat, anchor.lon], { icon: sitePinIcon(status, active), interactive: !selectMode, keyboard: false, zIndexOffset: zBase, riseOnHover: true });
         if (!selectMode) marker.on("click", openSiteNow).on("contextmenu", onCtx).bindTooltip(tip, { direction: "top" });
         marker.addTo(group);
 
@@ -2661,7 +2676,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       (showCompsLayer ? comps : []).forEach((c) => {
         if (!c?.anchor || typeof c.anchor.lat !== "number" || typeof c.anchor.lon !== "number") return;
         const { size, anchor } = compMarkerSize(false);
-        const icon = L.divIcon({ className: "map-comp-feature", html: compMarkerSvg(c.compType), iconSize: size, iconAnchor: anchor });
+        const icon = L.divIcon({ className: "map-comp-feature", html: compMarkerSvg(c.compType), iconSize: size, iconAnchor: shiftAnchor(anchor, `comp:${c.id}`) });
         const marker = L.marker([c.anchor.lat, c.anchor.lon], { icon, interactive: !selectMode && !placingCompPin, keyboard: false, riseOnHover: true });
         const tip = `${c.title || compHeadline(c, compsRatePeriod)} · ${c.compDate || ""}`;
         if (!selectMode && !placingCompPin) {
@@ -2683,7 +2698,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     if (pressedRef.current) { pendingCompsRebuildRef.current = build; return; }
     build();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [comps, selectMode, placingCompPin, showCompsLayer, compsRatePeriod]);
+  }, [comps, selectMode, placingCompPin, showCompsLayer, compsRatePeriod, pinOffsets]);
 
   /* B1372144 — the MAP NOTES layer. Same construction as the comps layer above and gated the same
    * way: ONLY on its own "Notes" checkbox (B831778's rule — what is PAINTED is never a function of
@@ -2709,7 +2724,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         const icon = L.divIcon({
           className: "map-note-feature",
           html: `<span data-note-id="${String(n.id).replace(/"/g, "")}"${isOpen ? ' data-open="1"' : ""}>${pinHtml(mapNoteMarkerSvg({ selected: isOpen }), isOpen)}</span>`,
-          iconSize: size, iconAnchor,
+          iconSize: size, iconAnchor: shiftAnchor(iconAnchor, `note:${n.id}`),
         });
         const marker = L.marker([n.anchor.lat, n.anchor.lon], { icon, interactive: !selectMode && !placingCompPin, keyboard: false, riseOnHover: true });
         if (!selectMode && !placingCompPin) {
@@ -2723,10 +2738,12 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     if (pressedRef.current) { pendingNotesRebuildRef.current = build; return; }
     build();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapNotes, selectMode, placingCompPin, showNotesLayer, editingNote?.id]);
+  }, [mapNotes, selectMode, placingCompPin, showNotesLayer, editingNote?.id, pinOffsets]);
 
   const flyToSite = (site) => {
-    if (site.origin && mapRef.current) mapRef.current.flyTo([site.origin.lat, site.origin.lon], 17, { duration: 0.7 });
+    if (!site.origin || !mapRef.current) return;
+    const a = siteAnchorLatLon(site, siteDrawParcels(site, parcelSummary)) || site.origin; // NEW-1 — fly to the parcel's visual centre, same point as the pin
+    mapRef.current.flyTo([a.lat, a.lon], 17, { duration: 0.7 });
   };
 
   /* Resolve EVERY CAD county's parcel-layer URL once (no county pre-selection):
@@ -2771,6 +2788,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
    * own comment above) without flickering on every ordinary pan. */
   const SLOW_DISPLAY_NOTICE_MS = 2500;
   const [slowDisplayKeys, setSlowDisplayKeys] = useState(() => new Set());
+  const [outlineFloor, setOutlineFloor] = useState(PARCEL_MINZOOM); // NEW-2 — the zoom the outlines in THIS view start at (a dense statewide source declares a higher one)
   const markDisplaySlow = (key, slow) => {
     setSlowDisplayKeys((prev) => {
       if (prev.has(key) === slow) return prev; // no-op — never a fresh Set (and a render) for nothing
@@ -3000,6 +3018,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       if (want.has(k)) statewideKeysForState(COUNTIES_MAP[k] && COUNTIES_MAP[k].state).forEach((sk) => want.add(sk));
     });
     wantedDisplaysRef.current = want;
+    setOutlineFloor(Math.max(PARCEL_MINZOOM, displayFloorForView({ south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() })));
     Object.keys(displaysRef.current).forEach((k) => { if (!want.has(k)) removeDisplay(k); });
     want.forEach((k) => { if (layerUrlsRef.current[k]) addDisplay(k); });
   };
@@ -4085,7 +4104,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         onFocus={() => setHoverRow(s.id)}
         onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setHoverRow((r) => (r === s.id ? null : r)); }}
         onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); openSiteMenu(s, e.clientX, e.clientY); }}
-        style={{ display: "flex", alignItems: "center", gap: 8, height: rowH, padding: "0 12px", cursor: "pointer", position: "relative", borderLeft: `3px solid ${isActive ? PAL.accent : "transparent"}`, background: isActive ? "#fbf3ee" : "transparent" }}>
+        style={{ display: "flex", alignItems: "center", gap: 8, height: rowH, padding: "0 12px", cursor: "pointer", position: "relative", borderLeft: `3px solid ${isActive ? PAL.accent : "transparent"}`, background: isActive ? "var(--surface-selected)" : "transparent" }}>
         {showStatusDot && (
           <button title={`Status: ${STATUS_META[st]?.label || st} — click to change`} aria-label="Set status"
             onClick={(e) => { e.stopPropagation(); openSiteMenu(s, e.clientX, e.clientY); }}
@@ -5235,7 +5254,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             map keeps painting over the planner. See the map<->plan reset effect below, which is
             the other half of this fix (it now clears this state on the flip, in both directions,
             instead of relying on the gate alone). */}
-        {visible && backupNotice && !err && (
+        {visible && isActive && backupNotice && !err && (
           <FloatingNotice testId="parcel-backup-notice" maxWidth="min(420px, calc(100vw - 16px))">
             <div style={{ background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45, pointerEvents: "none" }}>
               <b>Statewide backup source.</b> {backupNotice.county} county’s own parcel server is unavailable, so this lot came from the all-Texas TxGIO layer — accurate for selection, but it may lag recent county updates.
@@ -5246,7 +5265,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             snapshot because the live county server was unreachable (B629). Same honesty as the
             statewide-backup notice: a possibly-staler local copy is never mistaken for a live record. */}
         {/* NEW-1 (B1462256) — gated on `visible` too, same reason as the backup notice above. */}
-        {visible && cachedNotice && !err && !backupNotice && (
+        {visible && isActive && cachedNotice && !err && !backupNotice && (
           <FloatingNotice testId="parcel-cached-notice" maxWidth="min(420px, calc(100vw - 16px))">
             <div style={{ background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45, pointerEvents: "none" }}>
               <b>Cached copy{fmtAsOf(cachedNotice.asOf)}.</b> {cachedNotice.county} county’s live parcel server is unavailable, so this lot came from Planyr’s saved snapshot — accurate for selection, but it may lag recent county updates.
@@ -5263,8 +5282,13 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         {/* NEW-1 (B1462256, owner screenshot) — gated on `visible` too: this is the ONE
             explanation anywhere in the app for how "+ Select parcels" works, and it kept
             rendering over a project's planner because `selectMode` was never reset on LEAVING
-            the map (only on returning to it) — see the reset effect below. */}
-        {visible && !err && selectMode && (
+            the map (only on returning to it) — see the reset effect below.
+            NEW-1 (B2041360, owner iPhone screenshot 2026-10-03) — and on `isActive` too: leaving
+            the Site WORKSPACE for the Dashboard (or any module) keeps this component mounted with
+            `visible` still true, and the portal paints over the other module. The reset effect is
+            deliberately NOT keyed on `isActive` (peeking at another tab must not wipe a parcel
+            selection), so the state survives and only the RENDER is gated. */}
+        {visible && isActive && !err && selectMode && (
           <FloatingNotice maxWidth="min(420px, calc(100vw - 16px))">
             <div data-testid="select-parcels-tip" style={{ background: "var(--surface-overlay)", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.lg, padding: "6px 11px", fontSize: FONT_SIZE.control, color: PAL.ink, lineHeight: 1.4, pointerEvents: "none" }}>
               {/* NEW-5 (B849588) — "Click a lot on the map" is the same phrase the Site Planner's
@@ -5275,7 +5299,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                   the statewide layer, which is never pulled on a hiccup and so never times out on
                   its own). Says so plainly instead of leaving a blank map that reads as "no data
                   here" while a click already works. */}
-              {zoom != null && zoom < PARCEL_MINZOOM
+              {zoom != null && zoom < outlineFloor
                 ? "Click any lot on the map to add it (＋) — it works even before the purple outlines appear. Zoom in a little to see the lines."
                 : slowDisplayKeys.size > 0
                 ? "Parcel outlines are still loading here — clicking a lot already adds it (＋). Hover an added lot and click to remove it (−)."
@@ -5315,7 +5339,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               return (
                 <button key={st} onClick={() => setStatus(statusMenu.site.id, st)}
                   style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
-                    background: cur ? "#fbf3ee" : "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: cur ? 700 : 500, textDecoration: t.struck ? "line-through" : "none" }}>
+                    background: cur ? "var(--surface-selected)" : "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: cur ? 700 : 500, textDecoration: t.struck ? "line-through" : "none" }}>
                   <span style={{ width: 15, height: 15, flex: "none", display: "grid", placeItems: "center", borderRadius: RADIUS.pill,
                     border: `1.5px solid ${t.color}`, background: t.hollow ? "var(--surface-raised)" : t.color, color: t.hollow ? t.color : "#fff", fontSize: 9, lineHeight: 1 }}>{t.glyph}</span>
                   <span style={{ flex: 1 }}>{STATUS_META[st]?.label || st}</span>
@@ -5384,7 +5408,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
                       <button key={tm.id} disabled={shareBusy} onClick={() => doShare(s, on ? null : tm.id)}
                         title={on ? `Stop sharing with ${tm.name}` : `Share this project with ${tm.name}`}
                         style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", textAlign: "left", padding: "7px 12px", border: "none",
-                          background: on ? "#fbf3ee" : "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: on ? 700 : 500 }}>
+                          background: on ? "var(--surface-selected)" : "transparent", color: PAL.ink, cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: on ? 700 : 500 }}>
                         <span style={{ width: 15, height: 15, flex: "none", display: "grid", placeItems: "center", color: PAL.accent, lineHeight: 0 }}>
                           <ShareGlyph />
                         </span>

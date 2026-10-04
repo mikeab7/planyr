@@ -40,6 +40,7 @@ import { DEFAULT_ROAD_CLASS, roadClassOf } from "./roadClasses.js";
 import { ensureZ, migrateBandForce } from "./zOrder.js";
 import { normCountyKey } from "../../../shared/gis/countyKeys.js";
 import { nameAuthority, renameStamp } from "./projectName.js";
+import { parcelFallbackName } from "./appraisal.js";
 import { headerSlice, mergeHeader, MERGEABLE_HEADER_KEYS } from "./headerMerge.js";
 // B927105 — the schema-version + status constants live in siteStatus.js (dependency-free) so a
 // caller that only needs a status label (doc-review/lib/reviewStore.js, siteListLight.js)
@@ -1558,7 +1559,7 @@ export function parcelDisplayInfo(parcels) {
      * The derivation below stays as the fallback for plans split before the stamp existed, whose
      * superseded parents are still on disk as `active:false` rows. */
     else if (p.splitName) res = { name: p.splitName, suffixed: true };   // depth comes from `splitDepth`
-    else if (isRoot(p)) res = { name: p.addr || `Parcel ${compute(p, new Set()).tag}`, suffixed: false };
+    else if (isRoot(p)) res = { name: p.addr || parcelFallbackName(p.attrs) || `Parcel ${compute(p, new Set()).tag}`, suffixed: false }; // B2024626 — situs, else owner/legal, before a bare number
     else {
       const base = nameOf(byId.get(p.parentId), seen);
       const depth = compute(p, new Set()).depth;

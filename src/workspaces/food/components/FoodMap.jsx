@@ -298,67 +298,28 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { colorForRating } from "../lib/ratingColor.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
+import { FREE_ZOOM_OPTIONS, attachFreeWheelZoom } from "../../../shared/map/freePinchZoom.js";
+import {
+  SITE_PLAN_BASEMAP, SITE_PLAN_BASEMAP_CHOICES, resolveBasemapChoice, basemapTileLayers, basemapAttribution,
+} from "../../../shared/basemaps/basemaps.js";
 
-// ⛔ B811520 — CARTO STARTED WATERMARKING KEYLESS VOYAGER TILES ("API KEY REQUIRED", stamped
-// diagonally across the map, owner screenshot 2026-08-27). The tiles still return HTTP 200 —
-// confirmed live, `image/png` — so this is CARTO changing its keyless-usage terms, not an outage
-// to wait out, and it will not clear on its own. The owner's constraint is unchanged and
-// non-negotiable: zero cost, no CARTO account of any kind, free tier included ("a free tier that
-// requires an account is a bill waiting to happen"). Fix: moved to Esri's `World_Topo_Map`, on
-// the SAME `server.arcgisonline.com` host `SATELLITE_TILES` below already uses — no new
-// dependency, no new attribution relationship, no new failure mode. Same axis-order trap as
-// satellite (`{z}/{y}/{x}`, y before x — opposite of Leaflet's own default, and exactly what
-// crashed the satellite toggle the first time it was built, see B634981 below) and the same
-// no-`subdomains`-key rule.
-// PICKED World_Topo_Map OVER World_Street_Map, checked against a real dense-Houston tile with
-// synthetic pins overlaid at every rating-ramp colour (not just eyeballing the bare basemap):
-// World_Street_Map's interstate shields and saturated orange/red arterial-road styling visually
-// competed with the SAME orange/red end of the pin colour ramp (`ratingColor.js`) and the manual-
-// pin orange (`COLORS.manual`) — a red pin and a red highway shield read as the same kind of mark
-// at a glance. World_Topo_Map keeps genuine colour (soft greens/tans, not the grey the owner
-// rejected in the B168/NEW-5 header note below) while roads render as plain, muted grey/white
-// lines with no shields — the SAME "quiet roads, real colour" balance Voyager was originally
-// chosen for. `maxZoom`/`maxNativeZoom` mirror `SATELLITE_TILES` below (confirmed live: Esri
-// serves genuine, non-extrapolated detail for Houston through z19). No `url1x` — Esri's tile URLs
-// have no `{r}` retina token to begin with, same as satellite already had no retina variant.
-const STREET_TILES = {
-  url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
-  maxZoom: 21, maxNativeZoom: 19,
-  // Esri's own published credit for World_Topo_Map (`?f=json`'s `copyrightText`) lists many
-  // upstream data sources, INCLUDING OpenStreetMap contributors as one of several inputs baked
-  // into Esri's own composite basemap — that is Esri's credit to make, not a standalone OSM
-  // relationship this app now has (it fetches no OSM tiles directly). Shortened to the same
-  // convention `SATELLITE_TILES.attribution` below already uses for Esri's own longer imagery
-  // credit list, not the full multi-line string.
-  attribution: "&copy; Esri, HERE, Garmin, and the GIS User Community",
-};
-// ⛔ FALLBACK, DOCUMENTED BUT NOT WIRED IN — if Esri ever does what CARTO just did (starts
-// watermarking or otherwise degrading keyless usage), the next keyless option is OpenStreetMap's
-// own standard tiles (`tile.openstreetmap.org`, confirmed live 2026-08-27: HTTP 200, ~38.9 KB/
-// tile at Houston, no key). Kept as a fallback, not a first choice, because OSM's own tile usage
-// policy (operations.osmfoundation.org/policies/tiles) discourages heavy automated/production use
-// of that specific server — it's a volunteer-funded service, not a CDN meant for this. Reach for
-// it only if BOTH CARTO and Esri stop working keyless:
-//   const OSM_FALLBACK_TILES = {
-//     url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", maxZoom: 19,
-//     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-//   };
-// Esri World Imagery — mirrors the Site Planner's own layer verbatim (MapFinder.jsx), including
-// maxZoom 21 with maxNativeZoom 19 (upscale past Esri's native ceiling rather than hard-refuse),
-// and NO `subdomains` key at all — see the B634981 header comment for why an explicit
-// `subdomains: undefined` (a single ArcGIS host has none) is what crashed this the first time.
-const SATELLITE_TILES = {
-  url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-  maxZoom: 21, maxNativeZoom: 19,
-  attribution: "Imagery &copy; Esri, Maxar",
-};
-// Faint road/place labels, overlaid ONLY in satellite mode (owner: "a satellite view with no
-// street labels is much harder to navigate") — same source + same opacity the planner already
-// uses for the identical reason.
-const LABELS_TILES = {
-  url: "https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}",
-  maxZoom: 21, maxNativeZoom: 19, opacity: 0.4,
-};
+// ⛔ NEW-1 (2026-10-03) — THE BASEMAP IS NO LONGER DEFINED HERE. Owner: "The map on the food module
+// is horrible, we should default to the site plan module map … and a good hybrid option as an
+// option." The tile sources, ceilings, opacities and credits for /food's two choices — "Site Plan"
+// (the default: the SAME aerial + road-names map the Site Plan module opens on) and "Hybrid"
+// (aerial + roads + place names, crisp) — live in `shared/basemaps/basemaps.js`, the one place the
+// Site Plan map is defined, so a change there reaches /food automatically. Do NOT paste a tile URL
+// back into this file (`test/basemapsShared.test.js` fails if you do). This module may import from
+// `shared/` freely; it still may import nothing from `workspaces/site-planner/` (BUNDLE ISOLATION).
+// History this replaces, kept short: CARTO street (watermarked, B811520) → Esri World_Topo_Map
+// street + a satellite toggle (B632177/B634981) → both retired by this item. The crash lessons
+// (B634981: never pass `subdomains: undefined`; axis order is {z}/{y}/{x}) are enforced inside the
+// shared `basemapTileLayers()` and its unit test.
+const BASEMAP_STORAGE_KEY = "planyr:food:basemap"; // per-user, per-device last choice (NEW-1)
+function readStoredBasemap() {
+  try { return resolveBasemapChoice(window.localStorage.getItem(BASEMAP_STORAGE_KEY)).key; }
+  catch (_) { return SITE_PLAN_BASEMAP.key; } // storage blocked → the default, never a crash
+}
 
 // Houston, so a first-ever visit opens somewhere useful rather than on the world map.
 const DEFAULT_CENTER = [29.76, -95.37];
@@ -526,7 +487,7 @@ export default function FoodMap({
   // click is read at event time, not something the resolver effect needs to re-subscribe over).
   const pinIndexRef = useRef([]);
   const [tooSmall, setTooSmall] = useState(false);
-  const [basemap, setBasemap] = useState("street"); // "street" | "satellite"
+  const [basemap, setBasemap] = useState(readStoredBasemap); // stale-ok: a per-device display preference nothing else writes or reads (NEW-1) — "siteplan" (default) | "hybrid"
   const [basemapError, setBasemapError] = useState(false);
   // B651872 (×4) — tied to the CURRENT tile layer's own 'loading'/'load' events (basemap effect
   // below); drives the "Loading imagery…" pill so a genuinely-in-progress screen never reads as
@@ -558,8 +519,10 @@ export default function FoodMap({
     // this always-top-anchored layout — see its comment for the full mechanism and measurement.
     const map = L.map(hostRef.current, {
       center: DEFAULT_CENTER, zoom: DEFAULT_ZOOM, zoomControl: true, fadeAnimation: false, attributionControl: false,
-      trackResize: false,
+      trackResize: false, ...FREE_ZOOM_OPTIONS,
     });
+    const detachFreeWheel = attachFreeWheelZoom(L, map); // NEW-1
+    if (typeof window !== "undefined" && window.__PLANYR_E2E) window.__foodMap = map;
     const canvasRenderer = L.canvas();
     layerRef.current = L.layerGroup([], { renderer: canvasRenderer }).addTo(map);
     mapRef.current = map;
@@ -598,7 +561,7 @@ export default function FoodMap({
       resizeObserver.observe(hostRef.current);
     }
 
-    return () => { resizeObserver?.disconnect(); map.remove(); mapRef.current = null; };
+    return () => { resizeObserver?.disconnect(); detachFreeWheel(); if (window.__foodMap === map) window.__foodMap = null; map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -613,43 +576,30 @@ export default function FoodMap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return undefined;
-    const source = basemap === "satellite" ? SATELLITE_TILES : STREET_TILES;
-    // B811520 — both sources are Esri now, and Esri's tile URLs carry no {r} retina token, so
-    // there is no narrow-viewport 1x/2x gate left to apply (the old CARTO street layer's own
-    // url1x is gone — see STREET_TILES's header comment).
-    const url = source.url;
+    const specs = basemapTileLayers(resolveBasemapChoice(basemap));
     const layers = [];
     let onLoading, onLoad, loadingLayer;
     try {
-      // `subdomains` is only added to the options object when the source actually declares one —
-      // never pass an explicit `subdomains: undefined`, which clobbers Leaflet's own internal
-      // default and is exactly what crashed this the first time (see the header comment).
-      const opts = { maxZoom: source.maxZoom, attribution: source.attribution };
-      if (source.subdomains) opts.subdomains = source.subdomains;
-      if (source.maxNativeZoom) opts.maxNativeZoom = source.maxNativeZoom;
-      const layer = L.tileLayer(url, opts).addTo(map);
-      layer.bringToBack(); // stays under the marker layer regardless of add order
-      tileLayerRef.current = layer;
-      layers.push(layer);
-
-      // B651872 (×4) — the loading-treatment pill (below in the render), tied to THIS layer's
-      // own lifecycle so it never reports stale state from a previous (torn-down) basemap.
-      loadingLayer = layer;
-      onLoading = () => setTilesLoading(true);
-      onLoad = () => setTilesLoading(false);
-      loadingLayer.on("loading", onLoading);
-      loadingLayer.on("load", onLoad);
-      setTilesLoading(loadingLayer.isLoading());
-
-      if (basemap === "satellite") {
-        const labelsLayer = L.tileLayer(LABELS_TILES.url, {
-          maxZoom: LABELS_TILES.maxZoom, maxNativeZoom: LABELS_TILES.maxNativeZoom, opacity: LABELS_TILES.opacity,
-        }).addTo(map);
-        labelsLayerRef.current = labelsLayer;
-        layers.push(labelsLayer);
-      } else {
-        labelsLayerRef.current = null;
-      }
+      // Every spec comes from the shared registry: no `subdomains` key (B634981), zIndex stacking
+      // imagery < road names < place names, all inside Leaflet's tile pane — under the markers.
+      specs.forEach((spec, i) => {
+        const layer = L.tileLayer(spec.url, spec.opts).addTo(map);
+        layers.push(layer);
+        if (i === 0) {
+          layer.bringToBack(); // stays under the marker layer regardless of add order
+          tileLayerRef.current = layer;
+          // B651872 (×4) — the loading pill tracks the imagery layer's own lifecycle, so it never
+          // reports stale state from a previous (torn-down) basemap.
+          loadingLayer = layer;
+          onLoading = () => setTilesLoading(true);
+          onLoad = () => setTilesLoading(false);
+          loadingLayer.on("loading", onLoading);
+          loadingLayer.on("load", onLoad);
+          setTilesLoading(loadingLayer.isLoading());
+        } else if (spec.id === "roads") {
+          labelsLayerRef.current = layer;
+        }
+      });
       setBasemapError(false);
     } catch (err) {
       console.error("FoodMap: basemap tile layer failed to mount", err);
@@ -660,9 +610,13 @@ export default function FoodMap({
       setTilesLoading(false);
       for (const layer of layers) { try { map.removeLayer(layer); } catch (_) { /* already gone */ } }
     };
-  // B811520 — narrowViewport dropped from the deps: it was only ever read for the now-gone
-  // url1x gate above. Keeping it here would re-tear-down and rebuild the tile layer on every
-  // viewport-width crossing for no reason (Esri's tile URL never varies by viewport width).
+  // narrowViewport is deliberately NOT a dep: rebuilding the tile layers on every viewport-width
+  // crossing would be churn for nothing (the tile URLs never vary by viewport width).
+  }, [basemap]);
+
+  // NEW-1 — remember the last choice (per device); a blocked/full store just means no memory.
+  useEffect(() => {
+    try { window.localStorage.setItem(BASEMAP_STORAGE_KEY, basemap); } catch (_) { /* no memory, no crash */ }
   }, [basemap]);
 
   // ⛔ B842528 (2026-08-28) — REVERTED: continuous marker scaling during a zoom animation
@@ -804,7 +758,7 @@ export default function FoodMap({
     layer.clearLayers();
 
     // Wider white keyline on satellite — see the header comment on PIN LEGIBILITY ON IMAGERY.
-    const strokeWeight = basemap === "satellite" ? 3 : 2;
+    const strokeWeight = 3; // every basemap is now imagery-based — NEW-1
     // B668193 — rebuilt every pass; the coarse-pointer click resolver (below) reads this by ref.
     pinIndexRef.current = [];
     // B651872 (×3) — set true the moment ANY loop below draws the selectedKey-matching pin, so
@@ -1044,19 +998,31 @@ export default function FoodMap({
           Imagery unavailable
         </div>
       )}
-      <button
-        type="button" onClick={() => setBasemap((b) => (b === "satellite" ? "street" : "satellite"))}
-        aria-pressed={basemap === "satellite"} data-testid="food-basemap-toggle"
-        title={basemap === "satellite" ? "Switch to street map" : "Switch to satellite view"}
+      <div
+        role="group" aria-label="Basemap" data-testid="food-basemap-toggle"
         style={{
-          position: "absolute", top: 12, right: 12, zIndex: 500,
+          position: "absolute", top: 12, right: 12, zIndex: 500, display: "flex", overflow: "hidden",
           border: "1px solid var(--border-default)", borderRadius: RADIUS.pill, background: "var(--surface-raised)",
-          color: "var(--text-primary)", font: "inherit", fontSize: 12.5, fontWeight: 700, padding: "7px 18px",
-          cursor: "pointer", boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
+          boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
         }}
       >
-        {basemap === "satellite" ? "Street" : "Satellite"}
-      </button>
+        {SITE_PLAN_BASEMAP_CHOICES.map((c) => {
+          const on = c.key === basemap;
+          return (
+            <button
+              key={c.key} type="button" onClick={() => setBasemap(c.key)}
+              aria-pressed={on} data-testid={`food-basemap-${c.key}`} title={c.title}
+              style={{
+                border: "none", font: "inherit", fontSize: 12.5, fontWeight: 700, padding: "7px 14px", cursor: "pointer",
+                background: on ? "var(--accent-food)" : "transparent",
+                color: on ? "var(--on-accent)" : "var(--text-primary)",
+              }}
+            >
+              {c.label}
+            </button>
+          );
+        })}
+      </div>
       {/* B681520 (×2) RECURRENCE — owner direction, verbatim: the collapse was never about
           desktop ("we can relocate it" was about the sheet, on mobile). "I'm fine with the full
           credit showing in the bottom-right on desktop... the busy-and-in-the-way complaint was
@@ -1075,7 +1041,7 @@ export default function FoodMap({
           }}
           // Same trusted, hardcoded HTML this file already passes to Leaflet's own `attribution`
           // option — never user input, safe to render as HTML.
-          dangerouslySetInnerHTML={{ __html: basemap === "satellite" ? SATELLITE_TILES.attribution : STREET_TILES.attribution }}
+          dangerouslySetInnerHTML={{ __html: basemapAttribution(resolveBasemapChoice(basemap)) }}
         />
       )}
       {narrowViewport && (
@@ -1114,7 +1080,7 @@ export default function FoodMap({
                 background: "var(--surface-raised)", color: "var(--text-secondary)", border: "1px solid var(--border-default)",
                 borderRadius: 8, padding: "8px 10px", fontSize: 11.5, lineHeight: 1.5, boxShadow: "0 4px 14px rgba(0,0,0,0.18)",
               }}
-              dangerouslySetInnerHTML={{ __html: basemap === "satellite" ? SATELLITE_TILES.attribution : STREET_TILES.attribution }}
+              dangerouslySetInnerHTML={{ __html: basemapAttribution(resolveBasemapChoice(basemap)) }}
             />
           )}
         </>

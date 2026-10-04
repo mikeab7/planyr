@@ -6,6 +6,9 @@ internals in `/docs/REFERENCE.md` (Document Review persistence section).
 
 **Entry points**
 - `DocReview.jsx` — workspace root (lazy chunk). `Stitcher.jsx` — multi-sheet stitch/align.
+- `docEditor/` — Word/text files open in an editable DOCUMENT editor instead of the canvas (NEW-1) — see its own `CLAUDE.md`.
+- `components/ReviewEmptyState.jsx` — nothing-open screen: pick a project → its current set (rows come from the shared sheet-index module under `src/shared/files/`).
+- `components/CloseFileDialog.jsx` + `DocReview.jsx` `requestClose`/`closeNow` — Close (×) on the open file's name (phone: its own "‹ Close" bar) → back to the index; unsaved Word/text edits ask Save / Discard / Cancel, and a project switch over a dirty file asks the same (Cancel navigates back). `lib/unfiled.js` — which rows are "Unfiled" (no project, no Organization) + the honest "where did it save" sentence.
 
 **Key `lib/`**
 - **⛔ `layerVisibilityReads.js` (B503184) — WHAT "HIDDEN" MEANS IN THIS WORKSPACE, and it is NOT the
@@ -35,6 +38,8 @@ internals in `/docs/REFERENCE.md` (Document Review persistence section).
   ⚠ Whether the owner's own drawings carry layers at all is **unknown from the sandbox** — his PDFs'
   bytes are not reachable there — which is why the fixture is a hand-built two-layer PDF and why
   **V287376's first step is "does the Layers button ever appear?"**.
+- `docVersions.js` + `components/VersionHistorySheet.jsx` (B2034128) — Version history for one file: pure list / `saveVersion` / `restoreVersion`
+  over the record's `sources[1..]` (each entry stamped `savedAt`/`savedBy`; append-only, no new table); the sheet only lists and asks.
 - `reviewStore.js` — all persistence I/O (Supabase `doc_reviews` + Drive-first file storage);
   `usePersistence.js` — the data-loss hook (first-edit save, honest badge, flush on unload).
 - `lastDoc.js` — per-PROJECT "last document reviewed" map + legacy-pointer fallback and the

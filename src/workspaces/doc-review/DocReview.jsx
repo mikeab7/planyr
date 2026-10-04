@@ -5,7 +5,7 @@
  * overlay (an editable layer over it) and are stored in PAGE UNITS so they survive
  * zoom. Lazy-loaded by the shell.
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { FONT_SIZE } from "../../shared/ui/designTokens.js";
 import { loadPdf, renderInto, extractPageItems } from "./lib/pdf.js";
 import { ocgLayerList, deriveLayerVisibility } from "./lib/ocg.js";
@@ -21,16 +21,27 @@ import Stitcher from "./Stitcher.jsx";
 import CompareView from "./CompareView.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import { useReviewPersistence, docSaveState } from "./lib/usePersistence.js";
-import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, driveStreamSource, MAX_BYTES, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
+import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, driveStreamSource, MAX_BYTES, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle, fileNewReview } from "./lib/reviewStore.js";
 import { writeLastDoc, readLastDoc, readLastDocMap, readLegacyPointers, resolveResume, resumeAllowedForRoute } from "./lib/lastDoc.js";
 import { recordOpen } from "../../shared/recents/recentDocs.js";
 import { liveProjectIds, openableProjectId } from "../../shared/projects/docProjectLiveness.js";
 import { classifySource, sourceUnavailableMessage } from "./lib/sourceState.js";
 import { cacheSourceBytes, getSourceBytes } from "./lib/sessionBytes.js";
 import { isPdfName } from "../../shared/files/uploadQueue.js";
+import { docKindOf } from "./docEditor/docKind.js";
+import { versionList, saveVersion, restoreVersion, packSource, copyFileName, earlierVersionLabel, versionDateLabel } from "./lib/docVersions.js";
+import VersionHistorySheet from "./components/VersionHistorySheet.jsx";
+import { getUser } from "../site-planner/lib/auth.js";
+import { displayNameFor } from "../../shared/profile/useProfile.js";
+// The document editor (Word / text files) is its own lazy chunk — drawing review never pays for it.
+const DocEditor = lazy(() => import("./docEditor/DocEditor.jsx"));
+import ReviewEmptyState from "./components/ReviewEmptyState.jsx";
+import CloseFileDialog from "./components/CloseFileDialog.jsx";
+import { savedPlace } from "./lib/unfiled.js";
+const REVIEW_ACCEPT = "application/pdf,.pdf,.docx,.doc,.txt,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,text/plain";
 import { onAuthChange } from "../site-planner/lib/auth.js";
 import { listProjects as listLocalProjects } from "../../shared/projects/projects.js";
-import AppHeader from "../../shared/ui/AppHeader.jsx";
+import AppHeader, { useNarrow } from "../../shared/ui/AppHeader.jsx";
 import ToolRail from "../../shared/ui/ToolRail.jsx";
 import MiddleTruncate from "../../shared/ui/MiddleTruncate.jsx";
 import { sheetOpenState, OPEN_CHIP_TIMEOUT_MS } from "./lib/sheetOpenState.js";
@@ -407,6 +418,20 @@ export default function DocReview({
   // fetchSourceBytes's non-PDF branch, and cleared everywhere else `redrop` is cleared to "" so a
   // stale offer can't survive onto an unrelated banner message or a freshly opened document.
   const [nonPdfOffer, setNonPdfOffer] = useState(null); // { name, blob } | null
+  // A Word/text file open in the DOCUMENT editor instead of the drawing canvas: { blob, name, kind, key } | null.
+  const [docFile, setDocFile] = useState(null);
+  // Close (NEW-1): the editor reports unsaved edits up; Close asks Save / Discard / Cancel when there are any.
+  const narrow = useNarrow(); // phone width: the toolbar strip scrolls sideways, so Close also gets its own always-visible bar
+  const [closePrompt, setClosePrompt] = useState(null); // null | "ask" | "saving"
+  const docSaveRef = useRef(null); // the editor's own Save, resolves true once the bytes reached the Library
+  const [docNotice, setDocNotice] = useState(""); // one-line outcome carried across the open that follows a "save as new"
+  const [docAuthor, setDocAuthor] = useState("Reviewer");
+  const [historyOpen, setHistoryOpen] = useState(false); // B2022929 — the "Version history" sheet
+  const [histBusy, setHistBusy] = useState(false);
+  const [histMsg, setHistMsg] = useState(""); const [histErr, setHistErr] = useState("");
+  const [docDirty, setDocDirty] = useState(false);
+  const [priorSources, setPriorSources] = useState([]); // earlier saved versions of this file — kept, never overwritten
+  useEffect(() => { let live = true; getUser().then((u) => { if (live && u) setDocAuthor(displayNameFor(null, u) || "Reviewer"); }).catch(() => {}); return () => { live = false; }; }, []);
   const [openErr, setOpenErr] = useState("");      // visible banner when an open no-ops / loadReview returns null (NEW-1) — so it can't fail silently
   const [signedIn, setSignedIn] = useState(false);
   // Takeoff is a TOOL-RAIL TOGGLE, hidden by default (owner, B664 — "why is takeoff a separate
@@ -684,6 +709,17 @@ export default function DocReview({
   const scanDone = useMemo(() => Object.keys(sheetMeta).length, [sheetMeta]);
   const scanComplete = numPages > 0 && scanDone >= numPages;
 
+  /* Where a file opened or saved from here is filed (NEW-2): the open review's own filing when it has one,
+   * else the ROUTE'S project (a blank Review standing in a project's "Current set" files into that project, not
+   * into nowhere), else Organization, else genuinely unfiled — which the Library lists under "Unfiled". */
+  const filingNow = () => {
+    if (meta.projectId || meta.orgScope === true) return { projectId: meta.orgScope === true ? null : meta.projectId, project: meta.project || "", orgScope: meta.orgScope === true };
+    if (org) return { projectId: null, project: "", orgScope: true };
+    if (projectId) return { projectId, project: (markupProject && markupProject.name) || "", orgScope: false };
+    return { projectId: null, project: "", orgScope: false };
+  };
+  const adoptFiling = (f) => setMeta((m) => (m.projectId || m.orgScope === true ? m : { ...m, projectId: f.projectId, project: f.project, orgScope: f.orgScope }));
+
   const openFile = async (file) => {
     // A null/no-op drop must not be silent (B446): name it on the always-visible banner so
     // "nothing happened" is never mistaken for a crash ("silence is a crash").
@@ -692,13 +728,15 @@ export default function DocReview({
     // file would otherwise be read via arrayBuffer() and only then fail). Surface the reject on
     // BOTH the inline empty-state hint (err) AND the top banner (openErr) so it shows whether or
     // not a document is already open (B446 — the drop-over-open path renders no empty state).
+    if (docKindOf(file.name)) { await openDocFile(file); return; }
     if (!file.size || !(/\.pdf$/i.test(file.name) || file.type === "application/pdf")) {
-      const msg = `“${file.name || "that file"}” isn’t a PDF we can open — drop a .pdf file.`;
+      const msg = `“${file.name || "that file"}” isn’t a PDF we can open — use a PDF, Word (.docx/.doc) or text (.txt) file.`;
       setErr(msg); setOpenErr(msg); return;
     }
     setBusy(true); setBusyLabel(file.name || "PDF"); setErr(""); setOpenErr(""); // opening a PDF → show the review canvas, with a clear "Opening…" overlay
     try {
       const pdf = await loadPdf(file);
+      setDocFile(null); setDocNotice(""); setPriorSources([]);
       setPdfDoc(pdf);
       readOcg(pdf); // B490: populate the Layers panel from the new doc's optional content
       setFileName(file.name || "document.pdf");
@@ -720,11 +758,12 @@ export default function DocReview({
       const base = { srcId, name: file.name || "document.pdf", size: file.size };
       sourceRef.current = base;
       cacheSourceBytes(srcId, file); // B448: keep the dropped bytes so a switch/reload mid-upload never loses the backdrop
-      setSource({ ...base, storageKey: null, driveKey: null, oversize: false });
+      setSource({ ...base, ...(keepId ? {} : { savedAt: Date.now(), savedBy: docAuthor }), storageKey: null, driveKey: null, oversize: false });
       // Store Drive-first, Supabase-fallback (B322). The source stays keyless in state until
       // this resolves, and buildSnapshot won't persist a keyless source, so a quick reload
       // mid-upload can't strand the backdrop with an unfetchable pointer (B323).
-      storeSource(srcId, file, { projectId: meta.projectId, discipline: meta.discipline, fileName: file.name }).then(async (r) => {
+      const filing = filingNow(); adoptFiling(filing);
+      storeSource(srcId, file, { projectId: filing.projectId, discipline: meta.discipline, fileName: file.name, orgScope: filing.orgScope }).then(async (r) => {
         setSource((s) => (s && s.srcId === srcId ? { ...s, storageKey: r.storageKey || null, driveKey: r.driveKey || null, oversize: !!r.oversize } : s));
         // B579: a GENUINE store failure (BOTH Drive and Supabase rejected it — not merely `oversize`, which
         // still saves the work layer and flags the file "re-drop on load") leaves the source permanently
@@ -746,6 +785,109 @@ export default function DocReview({
       setErr(msg); setOpenErr(msg);
     } finally { setBusy(false); setBusyLabel(""); }
   };
+
+  /* ---- Word / text files (NEW-1): open in the document editor, save back to the Library ---- */
+  const openDocFile = async (file) => {
+    const kind = docKindOf(file.name);
+    if (!file.size && kind !== "txt") { const m = `“${file.name}” is empty (0 bytes), so there is no Word document to open.`; setErr(m); setOpenErr(m); return; }
+    if (file.size > MAX_BYTES) { const m = `“${file.name}” is larger than the ${Math.round(MAX_BYTES / 1048576)} MB this editor can open.`; setErr(m); setOpenErr(m); return; }
+    setErr(""); setOpenErr(""); setRedrop(""); setNonPdfOffer(null);
+    const srcId = newSourceId();
+    const base = { srcId, name: file.name, size: file.size };
+    sourceRef.current = base;
+    cacheSourceBytes(srcId, file); // keep the dropped bytes so a switch/reload mid-upload never loses the file
+    setPdfDoc(null); setNumPages(0); setPage(1); setMarkups([]); setCalByPage({}); setCalInfo({}); setSheetMeta({}); setOpenGroups({}); setDraft(null); clearSelection(); clearHistory();
+    setPriorSources([]); setDocNotice("");
+    setFileName(file.name);
+    setSource({ ...base, savedAt: Date.now(), savedBy: docAuthor, storageKey: null, driveKey: null, oversize: false });
+    setDocFile({ blob: file, name: file.name, kind, key: srcId });
+    const filing = filingNow(); adoptFiling(filing);
+    storeSource(srcId, file, { projectId: filing.projectId, discipline: meta.discipline, fileName: file.name, folderId: meta.folderId || null, orgScope: filing.orgScope }).then(async (r) => {
+      setSource((s0) => (s0 && s0.srcId === srcId ? { ...s0, storageKey: r.storageKey || null, driveKey: r.driveKey || null, oversize: !!r.oversize } : s0));
+      if (!r.ok && !r.oversize && (await cloudReady())) { const m = `Couldn’t save this file to the cloud. ${r.driveError || "Check your connection and drop it again."}`; setErr(m); setOpenErr(m); }
+    }).catch(() => {});
+  };
+  const docScope = () => ({ projectId: meta.orgScope ? null : meta.projectId, discipline: meta.discipline || "Other", folderId: meta.folderId || null, orgScope: meta.orgScope === true });
+  // The one place a saved/restored version lands in state: it becomes `source`, the entry it replaced joins `priorSources`.
+  const commitVersion = (res) => {
+    setPriorSources(res.prior); setSource(res.source);
+    sourceRef.current = { srcId: res.source.srcId, name: res.source.name };
+    if (!res.local) setTimeout(() => { try { saveNow && saveNow(); } catch (_) {} }, 80);
+  };
+  // Called by the editor's Save. mode "replace": a NEW stored version of this file (the old bytes are kept
+  // in the record, never overwritten). mode "new": a separate Library file (.doc → .docx, .txt → Word copy).
+  const saveDocFile = async ({ blob, name, mode, restoredFrom = null }) => {
+    const ready = await cloudReady();
+    const scope = docScope();
+    // The banner names where the file is FILED (the open review's own meta), never where the URL points.
+    const filing = { projectId: scope.projectId || null, project: meta.project || "", orgScope: scope.orgScope === true };
+    const where = savedPlace(filing);
+    if (mode === "new") {
+      if (!ready) return { ok: false, error: "Sign in to save a new file to the Library." };
+      const res = await fileNewReview({ ...scope, project: filing.project, blob, fileName: name });
+      if (!res.ok || res.uploadFailed) return { ok: false, error: res.error || res.driveError || "Couldn’t save the new file to the Library." };
+      setDocNotice(`Saved as a new Word file, “${name}”. The original is kept in the Library. ${where}`);
+      await openReview({ id: res.id });
+      return { ok: true, message: `Saved as “${name}”. The original is kept. ${where}` };
+    }
+    const old = source;
+    if (!old) return { ok: false, error: "There is no file to save to." };
+    const io = { newId: newSourceId, cache: cacheSourceBytes, store: (id, b) => storeSource(id, b, { ...scope, fileName: old.name }) };
+    const res = await saveVersion({ source: old, prior: priorSources, blob, io, by: docAuthor, online: ready, restoredFrom });
+    if (!res.ok) return { ok: false, error: res.error };
+    commitVersion(res);
+    return res.local ? { ok: true, local: true } : { ok: true, where };
+  };
+
+  /* ---- Version history (B2022929): list / open read-only / restore / save a copy. Never deletes, never downloads. ---- */
+  const versions = useMemo(() => versionList(source, priorSources), [source, priorSources]);
+  const isDocFile = !!docFile;
+  const viewingSrcId = docFile && docFile.readOnly ? docFile.versionSrcId : null;
+  const readVersionBytes = async (v) => {
+    const cached = getSourceBytes(v.srcId);
+    if (cached) return cached instanceof Blob ? cached : new Blob([cached]);
+    const src = [source, ...priorSources].find((x) => x && x.srcId === v.srcId);
+    if (!src) return null;
+    let buf = src.driveKey ? await downloadFromDrive(src.driveKey) : null;
+    if (!buf && src.storageKey) buf = await downloadSource(src.storageKey);
+    return buf ? (buf instanceof Blob ? buf : new Blob([buf])) : null;
+  };
+  const histRun = async (fn) => {
+    setHistBusy(true); setHistMsg(""); setHistErr("");
+    try { await fn(); } catch (e) { setHistErr(`Something went wrong: ${e && e.message ? e.message : "unknown error"}. Nothing was changed.`); }
+    finally { setHistBusy(false); }
+  };
+  const openVersion = (v) => histRun(async () => {
+    const blob = await readVersionBytes(v);
+    if (!blob) { setHistErr("Couldn’t read that earlier version. Check your connection and try again."); return; }
+    const name = v.name || (source && source.name) || "document";
+    setDocFile({ blob, name, kind: docKindOf(name), key: `${v.srcId}:ro`, readOnly: true, versionSrcId: v.srcId, versionLabel: earlierVersionLabel(v.savedAt) });
+    setDocNotice(""); setDocDirty(false); setHistoryOpen(false);
+  });
+  const backToLatest = () => histRun(async () => { setDocFile(null); setDocDirty(false); await fetchSourceBytes(source, null); setHistoryOpen(false); });
+  const restoreFromHistory = (v) => histRun(async () => {
+    const ready = await cloudReady();
+    const scope = docScope();
+    const io = { newId: newSourceId, cache: cacheSourceBytes, store: (id, b) => storeSource(id, b, { ...scope, fileName: source.name }), read: readVersionBytes };
+    const res = await restoreVersion({ source, prior: priorSources, version: v, io, by: docAuthor, online: ready });
+    if (!res.ok) { setHistErr(res.error); return; }
+    commitVersion(res);
+    const name = res.source.name;
+    setDocNotice(`Restored the version from ${versionDateLabel(v.savedAt)} as a new latest version. Every earlier version is still in Version history.`);
+    setDocFile({ blob: res.blob, name, kind: docKindOf(name), key: res.source.srcId });
+    setDocDirty(false); setHistoryOpen(false);
+  });
+  const copyFromHistory = (v) => histRun(async () => {
+    if (!(await cloudReady())) { setHistErr("Sign in to save a copy to the Library."); return; }
+    const blob = await readVersionBytes(v);
+    if (!blob) { setHistErr("Couldn’t read that earlier version. Check your connection and try again."); return; }
+    const name = copyFileName(v.name || (source && source.name), v.savedAt);
+    const res = await fileNewReview({ ...docScope(), project: meta.project, blob, fileName: name });
+    if (!res.ok || res.uploadFailed) { setHistErr(res.error || res.driveError || "Couldn’t save the copy to the Library."); return; }
+    setDocNotice(`Saved a copy as “${name}”. The original and all its versions are kept.`);
+    setHistoryOpen(false);
+    await openReview({ id: res.id });
+  });
 
   /* ---- prepare page + fit (B329) ---- */
   const VIEW_MIN = 0.05, VIEW_MAX = 10; // px-per-page-unit clamp for the viewport (10 lets you read
@@ -954,15 +1096,15 @@ export default function DocReview({
     item: meta.item, revision: meta.revision, docDate: meta.docDate,
     // B1953796 - folderId / sourceFile are written by fileNewReview and must ride every autosave.
     ...(meta.folderId ? { folderId: meta.folderId } : {}), ...(meta.sourceFile ? { sourceFile: meta.sourceFile } : {}),
-    sources: isStoredSource(source) ? [{ srcId: source.srcId, name: source.name, size: source.size || 0, storageKey: source.storageKey || null, driveKey: source.driveKey || null, oversize: !!source.oversize }] : [],
+    sources: isStoredSource(source) ? [packSource(source), ...priorSources.filter(isStoredSource).map(packSource)] : [], // keeps savedAt/savedBy per version (B2022929)
     single: { srcId: source?.srcId || null, fileName, numPages, page, markups, calByPage, calInfo },
-  }), [reviewId, meta, source, fileName, numPages, page, markups, calByPage, calInfo]);
+  }), [reviewId, meta, source, priorSources, fileName, numPages, page, markups, calByPage, calInfo]);
   const isEmpty = useCallback(() => !source && markups.length === 0, [source, markups]);
   // `page`/`scale`/`numPages` ride along in the snapshot but aren't save triggers, so
   // flipping through sheets doesn't spam writes — the next real edit (or flush) saves them.
   const { status, suspendSave, saveNow } = useReviewPersistence({
     buildSnapshot, isEmpty, enabled: mode === "review",
-    deps: [reviewId, meta, source, markups, calByPage, calInfo],
+    deps: [reviewId, meta, source, priorSources, markups, calByPage, calInfo],
   });
 
   // Remember the active review so a refresh resumes it (cloud reconciled with the
@@ -972,11 +1114,12 @@ export default function DocReview({
   // resolved — writing on mount is what used to clobber the pointers before resume read them.
   useEffect(() => {
     if (!bootResolved) return;
-    // Never record a non-PDF as the resume/last-doc target (B686): the markup canvas can't render
+    // Never record a file Review can't show as the resume/last-doc target (B686) — Word/text now open in the
+    // document editor, so they ARE recorded (NEW-2). The markup canvas can't render
     // it, so resuming it would just re-trigger a download the user didn't ask for on load. Leaving
     // the previous PDF as last-doc is the right resume. (setReviewId + setSource are batched in
     // loadSingleReview, so this effect sees both together — no stale-source window.)
-    if (source && source.name && !isPdfName(source.name)) return;
+    if (source && source.name && !isPdfName(source.name) && !docKindOf(source.name)) return;
     // ORG SCOPE (NEW-1) — the org bucket is separate from every legacy global pointer (lastDoc.js's
     // own header): a doc opened while standing in Organization must never become the GLOBAL "last
     // single id"/"last mode", which the plain (non-org) resume path reads unconditionally — that
@@ -1034,6 +1177,13 @@ export default function DocReview({
     // the user's machine (B1456896: opening a document is navigation, not "save this to disk").
     // We already have the bytes, so just hold them — the banner's own Download button fires the
     // save only on that explicit click.
+    if (!pdf && src && src.name && docKindOf(src.name)) {
+      const b = blob instanceof Blob ? blob : new Blob([blob]);
+      if (b.size > MAX_BYTES) { setRedrop(`“${src.name}” is larger than the ${Math.round(MAX_BYTES / 1048576)} MB this editor can open. Find it in the Library.`); return; }
+      setDocFile({ blob: b, name: src.name, kind: docKindOf(src.name), key: src.srcId || src.name });
+      setRedrop("");
+      return;
+    }
     if (!pdf && src && src.name && !isPdfName(src.name)) {
       setNonPdfOffer({ name: src.name, blob: blob instanceof Blob ? blob : new Blob([blob]) });
       setRedrop(`“${src.name}” isn’t a PDF, so it can’t be shown on the markup canvas. Download it, or find it anytime in the Library.`);
@@ -1090,16 +1240,16 @@ export default function DocReview({
     // which can't be marked up and shouldn't clutter "Recent drawings" (opening it just downloads).
     // Uses the SAME re-checked id as the navigation below, so a dead project can't re-enter
     // Library Home's own offer-time check through this recorded pointer either.
-    if (!(src && src.name && !isPdfName(src.name))) {
+    if (!(src && src.name && !isPdfName(src.name) && !docKindOf(src.name))) {
       currentUid().then((uid) => recordOpen(uid, { id: rec.id, projectId: openProjectId })).catch(() => {});
     }
     setMeta({ title: rec.title || "", projectId: openProjectId, project: rec.project || "", orgScope: rec.orgScope === true, discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "", folderId: rec.folderId || null, sourceFile: rec.sourceFile || "" });
     if (openProjectId) onNavigate?.({ projectId: openProjectId }); // reflect the open file's project in the URL + breadcrumb (Work Item A)
-    setSource(src ? { srcId: src.srcId, name: src.name, size: src.size || 0, storageKey: src.storageKey || null, driveKey: src.driveKey || null, oversize: !!src.oversize } : null);
+    setSource(packSource(src));
     setMarkups(sanitizeMarkups(s.markups)); setCalByPage(s.calByPage || {}); setCalInfo(s.calInfo || {}); // sanitize: a corrupted/partial saved review can't crash the overlay
     setSheetMeta({}); setOpenGroups({}); // re-read on load (B266/B348); saved cals preserved
     setFileName(s.fileName || ""); setNumPages(s.numPages || 0); setPage(s.page || 1);
-    setDraft(null); clearSelection(); setTool("select"); setRedrop(""); setNonPdfOffer(null); setCalInput(null); clearHistory();
+    setDraft(null); clearSelection(); setTool("select"); setRedrop(""); setNonPdfOffer(null); setDocFile(null); setPriorSources((rec.sources || []).slice(1).filter(isStoredSource)); setCalInput(null); clearHistory();
     scanTok.current++; // a programmatic load supersedes any in-flight auto-scale scan (use the saved cals)
     try { await fetchSourceBytes(src, tok); }
     finally { if (tok === loadTok.current) { setBusy(false); setBusyLabel(""); } } // only the winning load clears the overlay (B447)
@@ -1112,12 +1262,49 @@ export default function DocReview({
     // under the project you're in (it does NOT drop you back to "Select a project").
     // Clear the empty-state hint too (B914): switching to a project's clean empty state must
     // not inherit a stale "Pick exactly two PDFs…" / bad-drop message from the last one.
-    setSource(null); setRedrop(""); setNonPdfOffer(null); setErr("");
+    setSource(null); setRedrop(""); setNonPdfOffer(null); setDocFile(null); setDocNotice(""); setPriorSources([]); setErr("");
     setFileName(""); setNumPages(0); setPage(1); setView(null); setPageBase(null); detailTileRef.current = null; setDetailTile(null); setLoadNonce((n) => n + 1);
     setMarkups([]); setCalByPage({}); setCalInfo({}); setSheetMeta({}); setOpenGroups({}); setDraft(null); clearSelection(); setTool("select"); setCalInput(null);
     clearHistory();
     scanTok.current++; // cancel any in-flight scan from a prior file
   };
+  /* Close the open file → back to the sheet index for the current project ("Pick a project" when none).
+   * The outgoing review is flushed first; resetSingle swaps in a fresh blank review id, which the last-doc
+   * pointer effect then records — so a reload after Close finds nothing to resume and stays on the index. */
+  const closeNow = async () => {
+    setClosePrompt(null);
+    loadTok.current++; // an open still in flight must not repaint over the index
+    try { await saveNow(); } catch (_) { /* the local mirror already ran; closing must not strand the user */ }
+    setDocDirty(false); setOpenErr("");
+    resetSingle();
+  };
+  const requestClose = () => { if (docFile && docDirty) setClosePrompt("ask"); else closeNow(); };
+  const closeSaveFirst = async () => {
+    setClosePrompt("saving");
+    let ok = false;
+    try { ok = !!(docSaveRef.current && await docSaveRef.current()); } catch (_) { ok = false; }
+    if (ok) await closeNow(); else setClosePrompt(null); // a failed save keeps the file open; the editor names why
+  };
+
+  /* B2039234 — a project switch that would replace a dirty Word/text file waits on the same prompt as Close.
+   * Cancel (or a failed Save) navigates back to where the user was, so the file and its edits stay put. */
+  const switchRef = useRef(null); // { run, back } while the switch prompt is up
+  const leaveDirtyDoc = (run, back) => {
+    if (docFile && docDirty) { switchRef.current = { run, back }; setClosePrompt("switch"); } else run();
+  };
+  const switchDecide = async (choice) => {
+    const sw = switchRef.current;
+    if (!sw) { setClosePrompt(null); return; }
+    if (choice === "save") {
+      setClosePrompt("switch-saving");
+      let ok = false;
+      try { ok = !!(docSaveRef.current && await docSaveRef.current()); } catch (_) { ok = false; }
+      if (!ok) choice = "cancel"; // a failed save never discards: stay with the file, where the editor names why
+    }
+    switchRef.current = null; setClosePrompt(null);
+    if (choice === "cancel") sw.back(); else sw.run();
+  };
+
   // Open a saved review from either toolbar OR the global Project Files panel; route single
   // vs. stitch by kind. Surfaces a visible error if the row can't be loaded so an open can
   // never fail silently again (NEW-1).
@@ -1168,6 +1355,7 @@ export default function DocReview({
   // when the project change came FROM opening a doc (meta already matches the new project).
   const booted = useRef(false);
   const prevProjectRef = useRef(projectId);
+  const prevOrgRef = useRef(org);
   // Live mirror of the route project (B914 round-2). The boot-resume effect below has `[]` deps,
   // so its closure captures whatever `projectId` was at MOUNT — which on a deep link is still null
   // for a beat before the route resolves. Reading this ref (updated every render) instead lets the
@@ -1180,9 +1368,14 @@ export default function DocReview({
   const routeOrgRef = useRef(org);
   routeOrgRef.current = org;
   useEffect(() => {
-    const prev = prevProjectRef.current;
-    prevProjectRef.current = projectId;
+    const prev = prevProjectRef.current, prevOrg = prevOrgRef.current;
+    prevProjectRef.current = projectId; prevOrgRef.current = org;
     if (!booted.current) return;
+    // B2039234 — every branch below that REPLACES the open file (open another project's last doc, or reset to the
+    // empty state) would silently drop a Word/text file's unsaved edits: the route has already changed by the time
+    // this runs. Route those through leaveDirtyDoc, which asks Save / Discard / Cancel first (Cancel navigates back).
+    const back = () => onNavigate?.({ projectId: prev || null, cross: false, org: !!prevOrg });
+    const leave = (run) => leaveDirtyDoc(run, back);
     if (docIntent && docIntent.token !== lastConsumedDocToken) return; // a specific open is incoming — it wins
     if (openInFlightRef.current) return; // an open is mid-flight — ITS navigate caused this change; it owns the outcome
     // ORG SCOPE (NEW-1) — Organization is a real destination, exactly like a project, checked
@@ -1197,9 +1390,9 @@ export default function DocReview({
       const entry = readLastDoc(null, true);
       const openId = mode === "stitch" ? ((pendingStitch && pendingStitch.id) || null) : reviewId;
       if (entry && entry.id === openId) return; // that doc is already on screen
-      if (entry) { openReview({ id: entry.id }); return; } // openReview flushes the outgoing doc first (B447)
+      if (entry) { leave(() => openReview({ id: entry.id })); return; } // openReview flushes the outgoing doc first (B447)
       if (mode !== "review" || source || markups.length > 0 || meta.projectId || meta.orgScope) {
-        (async () => { try { await saveNow(); } catch (_) {} setMode("review"); resetSingle(); })();
+        leave(() => { (async () => { try { await saveNow(); } catch (_) {} setMode("review"); resetSingle(); })(); });
       }
       return;
     }
@@ -1209,7 +1402,7 @@ export default function DocReview({
       // genuinely unfiled doc is left exactly as before (this branch used to be unreachable
       // with a real prior project on screen — there was no UI path INTO "no project" from one —
       // Organization is that new path).
-      if (meta.orgScope === true) { (async () => { try { await saveNow(); } catch (_) {} setMode("review"); resetSingle(); })(); }
+      if (meta.orgScope === true) leave(() => { (async () => { try { await saveNow(); } catch (_) {} setMode("review"); resetSingle(); })(); });
       return;
     }
     if (projectId === prev) return;
@@ -1217,12 +1410,12 @@ export default function DocReview({
     const entry = readLastDoc(projectId);
     const openId = mode === "stitch" ? ((pendingStitch && pendingStitch.id) || null) : reviewId;
     if (entry && entry.id === openId) return; // that doc is already on screen
-    if (entry) { openReview({ id: entry.id }); return; } // openReview flushes the outgoing doc first (B447)
+    if (entry) { leave(() => openReview({ id: entry.id })); return; } // openReview flushes the outgoing doc first (B447)
     // No remembered doc for this project: fall to the clean empty state — a drawing from
     // ANOTHER project staying open under the new breadcrumb reads as the wrong file. Flush
     // the outgoing review's pending edit before wiping the canvas state.
     if (mode !== "review" || source || markups.length > 0 || meta.projectId) {
-      (async () => { try { await saveNow(); } catch (_) {} setMode("review"); resetSingle(); })();
+      leave(() => { (async () => { try { await saveNow(); } catch (_) {} setMode("review"); resetSingle(); })(); });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, org]);
@@ -1238,6 +1431,7 @@ export default function DocReview({
       const targetPage = docIntent.openAtPage;
       const opened = openReview(docIntent.row);
       if (targetPage) opened.then(() => goToPage(targetPage));
+      if (docIntent.openHistory) opened.then(() => setHistoryOpen(true)); // Library row → "Version history"
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docIntent]);
@@ -2297,8 +2491,16 @@ export default function DocReview({
         accountActive={accountActive}
         toolbarContent={
           <>
-            <button style={chromeBtn()} title={fileName ? "Open another PDF" : "Open a PDF"} onClick={() => fileRef.current?.click()}>{fileName ? "Open…" : "Open PDF…"}</button>
-            <input ref={fileRef} type="file" accept="application/pdf,.pdf" style={{ display: "none" }} onChange={(e) => { openFile(e.target.files?.[0]); e.target.value = ""; }} />
+            {/* Close (NEW-1) leads the row: the phone toolbar is a sideways-scrolling strip, and a control at its far end is off screen. */}
+            {!narrow && fileName && (docFile || pdfRef.current) && (
+              <button type="button" data-testid="review-close-file" onClick={requestClose} aria-label={`Close ${fileName}`} title={`Close ${fileName} and go back to the sheet index`}
+                style={{ ...chromeBtn(), display: "inline-flex", alignItems: "center", gap: 6, maxWidth: 150, flex: "0 1 auto", minWidth: 0 }}>
+                <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fileName}</span>
+                <span aria-hidden="true" style={{ flex: "none", fontSize: 14, lineHeight: 1 }}>×</span>
+              </button>
+            )}
+            <button style={chromeBtn()} title="Open a PDF, Word or text file" onClick={() => fileRef.current?.click()}>Open…</button>
+            <input ref={fileRef} type="file" accept={REVIEW_ACCEPT} data-testid="review-file-input" style={{ display: "none" }} onChange={(e) => { openFile(e.target.files?.[0]); e.target.value = ""; }} />
             <button style={chromeBtn()} title="Compare two revisions of a drawing — see exactly what changed" onClick={() => compareInputRef.current?.click()}>⇄ Compare…</button>
             <button style={chromeBtn()} onClick={() => setMode("stitch")} title="Stitch multiple sheets into one continuous plan">Stitch ▸</button>
             {/* Reviews (file/save this review) lives in the Row-2 tools row (B360). Its own
@@ -2306,7 +2508,7 @@ export default function DocReview({
                 save indicator now, so there's no longer a second chip competing here. The old
                 📁 Library door is gone too — the 🗂 Files drawer browses by project + discipline. */}
             <ReviewsBar signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={openReview} onNew={resetSingle} />
-            {fileName && <span style={{ color: PAL.chromeMuted, fontSize: 11.5, maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fileName}</span>}
+            {(docFile || pdfRef.current) && source && <button style={iconBtn(false)} onClick={() => { setHistMsg(""); setHistErr(""); setHistoryOpen(true); }} title="Version history — see earlier saved versions" data-testid="version-history-open">Versions</button>}
             {/* Drawing/measure tools + zoom controls now live in the right-side tool rail (B330).
                 Undo/Redo stay here as document-history actions, beside the doc-level controls. */}
             {pdfRef.current && <>
@@ -2358,31 +2560,38 @@ export default function DocReview({
         </div>
       )}
 
-      {!pdfRef.current ? (
-        // Browsing moved to the Library workspace, so Review's landing is a clean empty state:
-        // browse the Library for a filed drawing, or drop/open an ad-hoc PDF to mark up here.
-        <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); openFile(e.dataTransfer.files?.[0]); }}
-          style={{ flex: 1, position: "relative", display: "grid", placeItems: "center", color: PAL.muted, fontFamily: "system-ui, sans-serif", textAlign: "center", padding: 24 }}>
-          <div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: PAL.ink, marginBottom: 8 }}>No drawing open</div>
-            <div style={{ fontSize: 13.5, marginBottom: 4 }}>{busy ? "Opening…" : "Open a filed drawing from the Library, or drop a construction PDF to review."}</div>
-            <div style={{ fontSize: 12, marginBottom: 14 }}>Calibrate to scale, measure distance/area/count, redline, and roll up a takeoff.</div>
-            <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
-              <button data-testid="empty-open-library" onClick={() => onShellSwitch?.("library")}
-                style={{ fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 700, cursor: "pointer", borderRadius: RADIUS.md, padding: "7px 14px", border: "1px solid var(--accent-library)", background: "var(--accent-library)", color: "var(--on-accent-library)" }}>
-                🗂 Browse the Library
-              </button>
-              <button onClick={() => fileRef.current?.click()}
-                style={{ fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, padding: "7px 14px", border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)" }}>
-                Open PDF…
-              </button>
-              <button data-testid="empty-compare" onClick={() => { setErr(""); compareInputRef.current?.click(); }}
-                style={{ fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, padding: "7px 14px", border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)" }}>
-                ⇄ Compare revisions…
-              </button>
-            </div>
-            {err && <div style={{ color: "var(--danger-text)", marginTop: 10, fontSize: FONT_SIZE.control }}>{err}</div>}
+      {narrow && fileName && (docFile || pdfRef.current) && mode === "review" && (
+        <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "0 8px", minHeight: 44, borderBottom: `1px solid ${PAL.line}`, background: "var(--surface-raised)" }}>
+          <button type="button" data-testid="review-close-file" onClick={requestClose} aria-label={`Close ${fileName}`}
+            style={{ flex: "none", minHeight: 44, minWidth: 44, padding: "0 10px", display: "inline-flex", alignItems: "center", gap: 6, background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.emphasis, fontWeight: 700, color: PAL.ink }}>
+            <span aria-hidden="true" style={{ fontSize: 18, lineHeight: 1 }}>‹</span>Close
+          </button>
+          <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: FONT_SIZE.control, color: PAL.muted }}>{fileName}</span>
+        </div>
+      )}
+
+      {closePrompt && (closePrompt === "switch" || closePrompt === "switch-saving"
+        ? <CloseFileDialog verb="switching project" name={fileName || (docFile && docFile.name) || "this file"} busy={closePrompt === "switch-saving"} onSave={() => switchDecide("save")} onDiscard={() => switchDecide("discard")} onCancel={() => switchDecide("cancel")} />
+        : <CloseFileDialog name={fileName || (docFile && docFile.name) || "this file"} busy={closePrompt === "saving"} onSave={closeSaveFirst} onDiscard={closeNow} onCancel={() => setClosePrompt(null)} />)}
+
+      {docFile ? (
+        <Suspense fallback={<div style={{ flex: 1, display: "grid", placeItems: "center", color: PAL.muted, fontFamily: "system-ui, sans-serif" }}>Opening “{docFile.name}”…</div>}>
+          <div data-testid="doc-editor-host" style={{ flex: 1, display: "flex", minHeight: 0, minWidth: 0, position: "relative" }}>
+            <DocEditor file={docFile} author={docAuthor} notice={docNotice} onSave={saveDocFile} onDirty={setDocDirty} saveRef={docSaveRef} onHistory={() => { setHistMsg(""); setHistErr(""); setHistoryOpen(true); }}
+              versionBar={docFile.readOnly ? { label: docFile.versionLabel, busy: histBusy, onRestore: () => restoreFromHistory(versions.find((v) => v.srcId === docFile.versionSrcId)), onCopy: () => copyFromHistory(versions.find((v) => v.srcId === docFile.versionSrcId)), onBack: backToLatest } : null} />
           </div>
+        </Suspense>
+      ) : !pdfRef.current ? (
+        // NEW-1 — project-aware sheet index (pick a project → its current set). Desktop drag-and-drop onto
+        // this area still opens a file, but no drop copy is shown.
+        <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); openFile(e.dataTransfer.files?.[0]); }}
+          style={{ flex: 1, position: "relative", minHeight: 0, overflowY: "auto", color: PAL.muted, fontFamily: "system-ui, sans-serif" }}>
+          <ReviewEmptyState
+            projectId={projectId} org={org} crossProject={crossProject}
+            busy={busy} err={err}
+            onSelectProject={(id) => onNavigate?.({ projectId: id, cross: false, org: false })}
+            onOpenRow={(row) => openReview(row)}
+            onUpload={() => fileRef.current?.click()} />
           {openingOverlay}
         </div>
       ) : (
@@ -2696,7 +2905,7 @@ export default function DocReview({
                 // behaviour — no preventDefault needed).
                 const isCallout = !!editing.calloutTip || (editing.id && markups.find((m) => m.id === editing.id)?.kind === "callout");
                 const color = editing.id ? (readProp(markups.find((m) => m.id === editing.id) || {}, "fontColor") || "#1a1a1a") : (propStyle.fontColor ?? columnMeta("fontColor")?.default ?? "#1a1a1a");
-                const commonStyle = { position: "absolute", left: editing.pt.x * view.scale, top: editing.pt.y * view.scale - 14, font: "600 12px ui-sans-serif, system-ui, sans-serif", padding: "1px 4px", border: `1px solid ${PAL.accent}`, borderRadius: 4, background: "#fff", color, zIndex: 5 };
+                const commonStyle = { position: "absolute", left: editing.pt.x * view.scale, top: editing.pt.y * view.scale - 14, font: "600 12px ui-sans-serif, system-ui, sans-serif", padding: "1px 4px", border: `1px solid ${PAL.accent}`, borderRadius: 4, background: "#fff", /* B1998016: intentional — sits on the drawing paper and takes the markup's own (dark) font colour */ color, zIndex: 5 };
                 const onKeyDown = (ev) => {
                   ev.stopPropagation();
                   if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); closeEditor(true); }
@@ -2724,7 +2933,7 @@ export default function DocReview({
               })()}
               {/* Inline Calibrate entry (B304) — replaces window.prompt; validates the typed length. */}
               {calInput && (
-                <div style={{ position: "absolute", left: calInput.x, top: calInput.y, transform: "translate(-50%, -135%)", zIndex: 6, width: 214, background: "#fff", border: `1px solid ${PAL.accent}`, borderRadius: 8, padding: "7px 9px", boxShadow: "0 6px 20px rgba(0,0,0,0.28)", fontFamily: "system-ui, sans-serif" }}>
+                <div style={{ position: "absolute", left: calInput.x, top: calInput.y, transform: "translate(-50%, -135%)", zIndex: 6, width: 214, background: "var(--surface-raised)", border: `1px solid ${PAL.accent}`, borderRadius: 8, padding: "7px 9px", boxShadow: "0 6px 20px rgba(0,0,0,0.28)", fontFamily: "system-ui, sans-serif" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <span style={{ fontSize: 11, color: PAL.muted, whiteSpace: "nowrap" }}>Real length</span>
                     <input autoFocus value={calInput.value}
@@ -2771,7 +2980,7 @@ export default function DocReview({
             {pageMarks.length === 0
               ? <div style={{ fontSize: 11.5, color: PAL.muted, marginBottom: 10 }}>Nothing on this sheet yet.</div>
               : <div style={{ marginBottom: 10 }}>{pageMarks.map((m) => (
-                  <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 2px 2px 6px", borderRadius: 6, background: m.id === sel ? "#fbf3ee" : "transparent" }}>
+                  <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 2px 2px 6px", borderRadius: 6, background: m.id === sel ? "var(--surface-selected)" : "transparent" }}>
                     <button onClick={() => { setTool("select"); selectOne(m.id); }} title="Select this markup on the sheet"
                       style={{ flex: 1, minWidth: 0, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0", border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, textAlign: "left", color: "inherit" }}>
                       <span style={{ color: PAL.muted, textTransform: "capitalize", flex: "none" }}>{m.kind}</span>
@@ -2806,11 +3015,11 @@ export default function DocReview({
       {/* tool hint */}
       {pdfRef.current && addLeaderFor ? (
         <div style={{ flex: "none", padding: "5px 12px", background: PAL.chrome, borderTop: `1px solid var(--chrome-divider)`, color: PAL.chromeMuted, fontSize: 11, fontFamily: "system-ui, sans-serif" }}>
-          <b style={{ color: PAL.ember }}>Add Leader:</b> click where the new leader should point — Esc to cancel.
+          <b style={{ color: "var(--accent-review-text)" }}>Add Leader:</b> click where the new leader should point — Esc to cancel.
         </div>
       ) : pdfRef.current && curTool && (
         <div style={{ flex: "none", padding: "5px 12px", background: PAL.chrome, borderTop: `1px solid var(--chrome-divider)`, color: PAL.chromeMuted, fontSize: 11, fontFamily: "system-ui, sans-serif" }}>
-          <b style={{ color: PAL.ember }}>{curTool.label}:</b> {curTool.hint}{err && <span style={{ color: "var(--warn-text)", marginLeft: 10 }}>{err}</span>}
+          <b style={{ color: "var(--accent-review-text)" }}>{curTool.label}:</b> {curTool.hint}{err && <span style={{ color: "var(--warn-text)", marginLeft: 10 }}>{err}</span>}
         </div>
       )}
 
@@ -2887,6 +3096,11 @@ export default function DocReview({
       {compareFiles ? (
         <CompareView a={compareFiles.a} b={compareFiles.b} onClose={() => setCompareFiles(null)} />
       ) : null}
+      {historyOpen && source && (
+        <VersionHistorySheet fileName={source.name} versions={versions} isDoc={isDocFile} viewingSrcId={viewingSrcId} busy={histBusy}
+          dirty={docDirty && !(docFile && docFile.readOnly)} signedIn={signedIn} message={histMsg} error={histErr}
+          onOpen={openVersion} onRestore={restoreFromHistory} onCopy={copyFromHistory} onBackToLatest={backToLatest} onClose={() => setHistoryOpen(false)} />
+      )}
     </div>
   );
 }

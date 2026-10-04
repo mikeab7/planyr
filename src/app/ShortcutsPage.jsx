@@ -17,6 +17,7 @@
  * scrolls correctly rather than assuming everything fits on screen at once.
  */
 import { useMemo, useRef, useState, useEffect } from "react";
+import { isCoarsePointer } from "../shared/ui/coarsePointer.js";
 import { SHORTCUT_SECTIONS } from "../shared/keyboard/shortcutsData.js";
 import { formatCombo, comboAriaLabel } from "../shared/keyboard/platform.js";
 import { RADIUS } from "../shared/ui/radius.js";
@@ -74,7 +75,7 @@ export default function ShortcutsPage({ onClose }) {
   const dialogRef = useRef(null);
   const bodyRef = useRef(null);
 
-  useEffect(() => { searchRef.current?.focus(); }, []);
+  useEffect(() => { if (!isCoarsePointer()) searchRef.current?.focus(); }, []);
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); onClose(); } };

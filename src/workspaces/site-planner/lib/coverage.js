@@ -45,7 +45,7 @@ export const LAYER_SCOPE = {
   txrrc_pipe: "statewide", txrrc_wells: "statewide",
   jur_county: "statewide", jur_city: "statewide", jur_mud: "statewide",
   // regional (bounded extent → can be "no data in this area")
-  jur_etj: "regional",          // H-GAC ETJ — 13-county Houston-Galveston region only
+  jur_etj: "regional",          // ETJ — Houston region + Dallas–Fort Worth (county/city publishers); no statewide layer
   coh_hydrants: "regional",     // City of Houston
   hcfcd_row: "regional",        // Harris County Flood Control District
   coh_ww: "regional", coh_storm: "regional", coh_water: "regional", // City of Houston utilities

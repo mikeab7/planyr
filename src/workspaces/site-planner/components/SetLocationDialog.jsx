@@ -19,6 +19,7 @@
  * Lazily loaded — it is a modal a session opens at most once, and it carries a Leaflet map.
  */
 import { useEffect, useRef, useState, useCallback } from "react";
+import { isCoarsePointer } from "../../../shared/ui/coarsePointer.js";
 import L from "leaflet";
 import { BASEMAPS } from "../lib/basemaps.js";
 import { parseLatLon, normalizeOrigin } from "../lib/sitePlacement.js";
@@ -112,7 +113,7 @@ export default function SetLocationDialog({ origin, PAL, onCancel, onConfirm }) 
 
         <div style={{ display: "flex", gap: 6, margin: "12px 0 8px" }}>
           <input
-            autoFocus value={q} onChange={(e) => setQ(e.target.value)}
+            autoFocus={!isCoarsePointer()} value={q} onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); find(); } }}
             placeholder="Address, or a latitude and longitude"
             aria-label="Address, or a latitude and longitude"

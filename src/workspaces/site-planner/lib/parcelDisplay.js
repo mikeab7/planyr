@@ -27,7 +27,7 @@
  * that. */
 import * as EL from "esri-leaflet";
 import L from "leaflet";
-import { STATEWIDE_PARCEL_LAYER } from "./counties.js";
+import { STATEWIDE_PARCEL_LAYER, displayMinZoomForUrl } from "./counties.js";
 import { getSnapshot, featuresForView, onSnapshotChange } from "./parcelSnapshot.js";
 import { pruneToLiveCells } from "./parcelPrune.js";
 import { guardRasterOpacity } from "./parcelOpacityGuard.js";
@@ -54,7 +54,7 @@ export function makeParcelLayer(url, opts) {
   const renderer = L.canvas({ padding: 0.3 });
   const layer = EL.featureLayer({
     url,
-    minZoom: PARCEL_MINZOOM,
+    minZoom: Math.max(PARCEL_MINZOOM, displayMinZoomForUrl(url)), // NEW-2 — a source that cannot answer a dense cell inside its record cap declares a higher floor
     simplifyFactor: 0.5,
     precision: 6,
     fields: ["OBJECTID"],
