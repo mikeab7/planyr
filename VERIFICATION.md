@@ -241,16 +241,6 @@ Built: saved places must pass the word-match rule; unit tests red→green. Pendi
 1. Type "dao" → expected: DAO'N Korean first, then real "Dao" names; no Dairy Queen.
 2. Type "dairy" and "da" → expected: the saved Dairy Queen appears, tagged.
 
-### V1493136 — B2069808: Food search answers faster — saved places show at once, results settle quicker, same matches in the same order `Blocker: auth`
-
-Sandbox-proven: server 220–259 ms → 13–90 ms with identical ordered results (in-database, 7 queries), `test/foodSearchSpeed.test.js` (red on main), mocked-backend browser timings (saved place 839 → 18 ms to first row). Not provable here: the real network + his real saved list + a real phone. **Steps** (signed in, planyr.io `#/food`, Map view, on the phone; read the build from `/version.json` in the SAME observation as the result):
-1. Type `dao` slowly, one letter at a time. **Expect:** his saved DAO'N row ("Been here") is on screen by the time the third letter is typed — it does not wait behind "Searching…"; the list never goes blank between letters.
-2. Type a place he has never saved (e.g. `fadi`). **Expect:** the row appears about a second or less after the last letter; "Searching…" sits BELOW any rows already shown, and arriving results do not jump the row he is looking at.
-3. Clear the box and type the same word again. **Expect:** results appear essentially at once (no second wait).
-4. Type `tacos`, then quickly keep typing `tacos a` (or erase two letters). **Expect:** the list always settles on the answer for what is in the box — never on an older word's rows.
-5. With the box showing a chain (`torchy`), pan the map to another part of town. **Expect:** the nearest branches to the new view lead, as before this change.
-- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2069808.
-
 ### V1476080 — B2057920: Food on a phone — first visit with dish ratings, tap ratings, keyboard, no contact-card AutoFill `Blocker: auth`
 
 Sandbox-proven (Playwright WebKit, iPhone 15 descriptor, EMULATED, logged out, fixture page): `ui-audit/verify-food-visit-phone.mjs` 25/25 (6/21 on the unfixed code) · `test/foodPhone.test.js`. Not reachable there: a signed-in save, the real iOS keyboard, Safari's AutoFill bar, a real finger scroll. **Steps** (iPhone Safari, signed in on planyr.io/#/food; read the served chunk hash — `document.querySelectorAll('script[src]')` or /version.json no-store — in the same observation; use a NEW pin or a throwaway place, never a place with real history):
@@ -301,16 +291,6 @@ Carried from V1484661 step 7, which Michael's 2026-10-04 on-device pass did not 
 2. **Expect:** no `page-containment-drift` row shaped "(0, ~250)"; any keyboard-driven ones are filed as `page-containment-keyboard-reveal`. Record the counts and the date range in the entry.
 - **Stopping rule:** closes on a dated query result inside the expectation, or a failed result filed as a recurrence on B2061333.
 
-### V1474512 — B2050928: Food map controls match — both segmented controls identical, info button md and unclipped, nothing in the toolbar clipped `Blocker: live-GIS (planyr.io is not reachable from the sandbox; no sign-in needed — browsing the map works logged out)`
-
-Sandbox-proven: `ui-audit/ui-inventory.mjs --budget-only` relational gate green on the four Food surfaces (RED on untouched main, named); `test/foodModule.test.js` 426/426. **Steps** (planyr.io at phone width, `#/food`, Map view; read the build from `/version.json` AND the served chunk hash in the same observation; fixtures only — never write to the real food list):
-1. Look at the toolbar row. **Expect:** Map | List, Drop a pin and the search field all fit on screen, nothing cut off or scrolling sideways; the search field fills the remaining width.
-2. Compare Map | List with Site Plan | Hybrid (top right of the map). **Expect:** identical shape and height; the selected segment is the same red fill with WHITE text in both (also in dark theme).
-3. Look at the "i" button beside the basemap toggle. **Expect:** a rounded square the same height as the toggle, level with its top edge, fully on screen, not a circle; tapping it opens the credit.
-4. Compare the top edges of the zoom +/− stack (left) and the toggle/"i" (right). **Expect:** same top edge and same distance from the screen sides.
-5. Zoom far out. **Expect:** the hint is a rounded rectangle like the other messages and does NOT overlap the "?" help button; on desktop width the credit line at the bottom-right sits left of the "?" button, not under it.
-6. Switch to List. **Expect:** Date / Rating / Ambiance / Cost / Want to try are matching pill chips; nothing clipped.
-- **Stopping rule:** closes on a dated pass of 1–6, or a failed step filed as a recurrence on B2050928.
 ### V1471312 — B2046224: Food on a phone — one row per restaurant, a pick lands the map on it, the Map/List toggle stays on screen while typing `Blocker: auth`
 
 Sandbox-proven in WebKit-emulated iPhone 15 / SE against a MOCKED Supabase (`ui-audit/verify-food-phone.mjs`, 30/30; 16/33 on the unfixed build) plus `test/foodPlaceIdentity.test.js`. Not provable here: his real signed-in data, Mobile Safari's real keyboard and collapsing toolbar, and the literal "the map did not move" report (it did not reproduce — the pin was mis-centred / under the sheet). **Steps** (planyr.io/#/food on his iPhone, signed in; read the served chunk hash in the same observation; do NOT save anything to the real list — cancel out of the visit form, or use a throwaway restaurant he is happy to delete):
@@ -377,15 +357,6 @@ Sandbox-proven at dpr 2 against a SYNTHETIC OpenMapTiles fixture (`ui-audit/veri
 7. Look along tile joins at fractional zoom on a 2x display. **Expect:** no light hairlines.
 8. Desktop: the credit reads "…OpenFreeMap © OpenMapTiles data © OpenStreetMap", fully visible beside (not under) the ? button; the "Loading imagery…" pill never overlaps the zoom control.
 - **Stopping rule:** closes on a dated pass of 1–8, or a failed step filed as a recurrence on B2018608.
-### V1469824 — B2051664: Food search lists the places nearest the visible map first (phone, signed in) `Blocker: auth`
-
-Sandbox-proven on fixture rows: `test/foodSearchProximity.test.js`, plus a real-Chromium run of the built app with the search RPC stubbed (Katy first at a Houston-area view; Dallas first after flying there). Pending: the owner's signed-in phone against his real snapshot (read-only — do not log or edit anything). **Steps** (read the served chunk hash in the same observation):
-1. Phone, Food map, zoomed on a neighbourhood. Search a chain name with branches in several cities (e.g. "Torchy's"). **Expect:** branches in the visible area first, nearest the map centre first, then farther ones.
-2. Pan to a different city, re-type the same query. **Expect:** the order re-anchors to the new view.
-3. Search a restaurant you have saved that is far off screen, by exact name. **Expect:** it is at or near the top and tapping it jumps the map there.
-4. Zoom out to the whole state and search. **Expect:** results still appear, ordered by distance from the centre.
-5. Search a name with no match nearby. **Expect:** far matches still listed — never an empty list because the match is off screen.
-- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2051664.
 ### V1476304 — B2058144: Review tabs open, switch, restore, and follow the signed-in account between desktop and phone `Blocker: auth`
 
 Sandbox-proven (real Chromium, built app): `ui-audit/verify-review-tabs.mjs` (logged out, 37/37), `ui-audit/verify-review-tabs-sync.mjs` (two contexts signed in as a made-up user against a hermetic fake account, 20/20), `test/reviewTabs.test.js`. Pending: the real account and real devices (the sandbox's fake account cannot show real Supabase row-level security, real timing, or a real phone). **Steps** (planyr.io, desktop + iPhone, signed in; read the served chunk hash in the same observation):
@@ -427,16 +398,7 @@ Sandbox-proven, both engines: `ui-audit/verify-nav-arrows.mjs` (and `ENGINE=webk
 4. Select a project (tab set changes) and repeat 1–2. **Expect:** same.
 5. Rotate to landscape and back. **Expect:** arrows update, no tab cut off.
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2043888.
-### V1466448 — B2041360: Site-map hint no longer follows you to the Dashboard (phone) `Blocker: auth`
-
-Sandbox-proven (logged-out, seeded local site, real Chromium): `e2e/mapfinder-notice-leak.spec.js` — 6 workspace destinations, red on the unfixed build, green on the fix. Pending: the owner's phone, signed in on planyr.io. **Steps** (read the served chunk hash, `document.querySelectorAll('script[src]')`, in the same observation):
-1. Phone: Site → the map view → tap **+ Select parcels**. **Expect:** the dark hint "Click any lot on the map to add it (＋)…" appears bottom-centre.
-2. Without turning Select parcels off, open the avatar/wordmark and go to the **Dashboard**. **Expect:** the hint is gone; nothing about the Site map appears over Jump back in / Pipeline / Comps.
-3. Repeat from the Dashboard to Schedule, Library, Notes, Spreadsheet. **Expect:** no Site-map hint on any of them.
-4. Return to Site → map. **Expect:** the hint is back only if Select parcels is still on (the mode is kept on purpose).
-- **2026-10-04 WebKit-emulated pass (B2050816, NOT on device, logged-out; chunk `index-BVErCNTL.js` read in the same run):** `node ui-audit/verify-phone-orientations.mjs` (`PLANYR_CASES=notice-leak`) — iPhone SE and iPhone 15, portrait + landscape × Dashboard/Schedule/Review/Library/Notes/Spreadsheet = **24/24 PASS** (hint visible after Select parcels, gone after the switch each time); the same case on the pre-fix build is 0/24 PASS. Steps 1-4 above on a real phone, signed in, remain pending (`Blocker: auth`).
-- **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B2041360.
-
+- **Cowork live check 2026-10-04 (PR #1929) reported PASSED on Michael's browser — recorded, but this item STAYS OPEN:** its blocker is a real iOS device (elastic overscroll), which a desktop-browser check does not exercise, and the report did not say that leg was run. Closes on a dated pass of that leg.
 ### V1464320 — B2039232: an open file has a Close (×) back to the sheet index; unsaved Word/text edits ask first; reload after Close stays on the index `Blocker: auth`
 
 Sandbox-proven logged out against the built app: `ui-audit/verify-review-close-file.mjs` (25/25; red on `main`'s build) and `test/reviewCloseFile.test.js`. Pending: the real signed-in account on planyr.io, and a real phone.
@@ -483,19 +445,6 @@ Sandbox-proven (seeded session + stateful mocked teams/members/invites): `e2e/te
 6. Desktop window: **Expect** the left nav kept, pane header with name + "N members · N shared projects", orange "+ Invite", team ⋯ (Rename/Delete work); ⋯ on a row opens a dropdown; invited rows show an inline "Resend invite" link.
 - **Stopping rule:** closes on a dated pass of 1-6, or a failed step filed as a recurrence on B2038784.
 
-### V1457120 — B2032032: phone Settings drills in (menu → section), Profile fields are labelled, Save is only active when something changed `Blocker: auth`
-
-Sandbox-proven (logged in via a seeded session + mocked profile row): `e2e/settings-drill-in.spec.js` (red on the pre-change source) and `test/settingsForm.test.js`. Pending: the real signed-in account on planyr.io, on a phone.
-**Steps** (planyr.io on a phone, signed in; read the served chunk hash in the same observation):
-1. Avatar menu → Settings. **Expect:** a menu page only — your name and email under a green initial, four rows with chevrons (Profile, Team, Account & security, Interface), and a separate red "Sign out" row; no form fields.
-2. Tap Profile. **Expect:** the menu is gone; "‹ Settings" at left, "Profile" centred; First name / Last name side by side and Organization below, each with a visible label above it; the button reads a greyed "Save" and cannot be tapped.
-3. Change Organization. **Expect:** the button turns orange and reads "Save changes". Change it back to what it was. **Expect:** greyed "Save" again.
-4. Change it, tap "‹ Settings". **Expect:** "Discard changes?" with Discard / Keep editing. Keep editing stays on the page with your edit. Back again → Discard returns to the menu; reopen Profile — the old value is back.
-5. Change it, tap Save changes, then reload and reopen Profile. **Expect:** the new value is there and the button is greyed "Save".
-6. Avatar menu → Profile (not Settings). **Expect:** lands directly on the Profile page.
-7. Widen to a desktop window. **Expect:** the section list sits beside the form (unchanged), labels and the greyed/orange Save apply, and Sign out is red text, not a filled button.
-- **Stopping rule:** closes on a dated pass of 1-7, or a failed step filed as a recurrence on B2032032.
-
 ### V1448016 — B2022928: a Word file opened in Review keeps tracked changes + comments through Save, in the Library and in Microsoft Word `Blocker: auth`
 
 Sandbox-proven: `test/docEditorDocx.test.js` (20) + `test/docEditorOpenSave.test.js` (12) + `ui-audit/verify-doc-editor.mjs` (29, real Chromium, logged out: open fixture, real typing, Track Changes, comment/reply/resolve, accept one change, find/replace, Save → the bytes handed to the Library path re-parsed and checked, .txt byte-exact, .doc → new .docx, 0 downloads, 390-wide no sideways scroll, PDF still on the canvas). Pending: everything that needs a signed-in account and the real Library, plus Microsoft Word itself (**not available in the sandbox**).
@@ -527,26 +476,6 @@ Sandbox-proven: `test/parcelOwnLook.test.js` (red on main for all three claims),
 7. Map view → Select parcels over Grand Port. **Expect:** the same outlines and numbers (no chips on the Map view).
 - **Stopping rule:** closes on a dated pass of 1–7, or a failed step filed as a recurrence on B2057040.
 
-### V1449712 — B2024624–B2024627: click-a-lot at Grand Port draws one outline source, no flash, no freeze, owner filled `Blocker: real-data`
-
-Sandbox-proven: `test/parcelOutlineSet.test.js`, `test/chambersLotRecord.test.js`, and `ui-audit/verify-click-a-lot-outlines.mjs` (seeded Chambers plan, hosts mocked; before/after numbers on B2024624–B2024626). **Not provable here:** the real Chambers imagery/tiles, the owner's larger plan, and the reported view jump. Run on the throwaway **"Concept A (copy)"** in the Grand Port group — **never Concept A** (CLAUDE.md owner constraint 7); first remove the two test lots (Parcel 18, Parcel 19) it already holds, and say exactly what was touched. Open the app with `?planyrDiag=1` and read the served chunk hash in the same observation.
-**Steps:**
-1. Parcel tools → Click a lot on the map; then `window.__plannerParcelOutlines()` in the console. **Expect:** `mounted` lists only Chambers (plus, only if Chambers is failing, the statewide composite); resource timing shows no requests to other counties' / states' parcel hosts.
-2. Watch the map while panning/zooming north of the strip lots toward I-10. **Expect:** no gold outlines flashing in, no doubled lines; blue Chambers lines stay until the new image replaces them.
-3. Before and after step 1, read `window.__plannerView()`/the view-change recorder. **Expect:** the view does not zoom out or re-centre when the mode opens (this is the unreproduced part of B2024624 — if it still jumps, record the recorder output on B2024624).
-4. Click two lots north of Grand Port (e.g. labelled 15835, 11232). **Expect:** "Added parcel", the owner shown (15835 → BARBERS HILL EDUCATION FOUNDATION), the plan name is the owner (not "Parcel N"), Account/ID is the CAD account (00321-02000-00100-100001), not 2933785. Use `PerformanceObserver('longtask')`: **Expect** no long task over 100 ms after the add.
-5. Look at the new chips against the lot numbers. **Expect (B2024627):** the chip is not sitting on the county's lot number — if it is, that item stays open.
-6. Re-click one added lot. **Expect:** only that lot is removed.
-- **Stopping rule:** closes on a dated pass of 1–6 (step 3/5 failures filed on B2024624/B2024627), or a failed step filed as a recurrence.
-### V1446336 — B2021248: opening Settings, and switching between its sections, never raises the phone keyboard `Blocker: auth`
-
-Sandbox-proven: `e2e/touch-no-autofocus-account.spec.js` (touch viewport, red on pre-change source) and `test/accountNoAutofocus.test.js`. Pending: the signed-in Settings sections (sign-in is CORS-blocked here).
-**Steps** (planyr.io on an iPhone, signed in; read the served chunk hash in the same observation):
-1. Avatar menu → Settings (since B2032032: the Settings menu page), then tap Profile. **Expect:** Profile shows, no field focused, no keyboard.
-2. Tap Team, Account & security, Interface in turn, then Profile again. **Expect:** no keyboard at any point.
-3. Tap the first-name field. **Expect:** the keyboard appears only now.
-4. Close, sign out, tap Sign in. **Expect:** no keyboard until a field is tapped.
-- **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B2021248.
 ### V1450368 — B2025280: /food opens on the Site Plan map, Hybrid is crisp, and pins stay legible on both `Blocker: auth`
 
 Sandbox-proven: `ui-audit/verify-food-satellite-toggle.mjs` (real Esri tiles, desktop + phone), `test/basemapsShared.test.js`, `test/foodModule.test.js`. **Not provable here:** pin legibility over the new imagery with the owner's real logged places (the sandbox cannot sign in, so no places draw).
@@ -602,38 +531,6 @@ Sandbox-proven: `test/deedGap.test.js` (real Tract 1 + hole calls), `ui-audit/ve
 4. File → export PDF. **Expect:** the red dashed gap line is on the sheet.
 - **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B2019264.
 
-### V1438832 — B2013744/B2013745: a note, a comp and the site on one parcel are each clickable on the map, and the exported KMZ has three distinct pins `Blocker: auth`
-
-Sandbox-proven: `ui-audit/verify-pin-overlap.mjs` (real Leaflet from the app's marker modules: red arm comp reachable 0/49, fixed arm 49/49 + note + site reachable), `test/pinCluster.test.js`, `test/compKmlExport.test.js` NEW-2 block (red-proved). **Not provable here:** the real signed-in map holding Michael's two throwaways. **Use ONLY the throwaways already on his account — comp "ZZ KML test - safe to delete" and map note "ZZ KML map note - safe to delete" (APN 0481850000004); DO NOT delete them — the Cowork chat does.** Read the served chunk hash in the same observation as each result.
-**Steps** (planyr.io, signed in as Michael, Map view, Comps and Notes layers both ON):
-1. Zoom to 17 centred on 29.62316598,-95.28208917. **Expect:** the comp marker and the note marker are drawn side by side (not stacked); `elementFromPoint` at each marker's centre returns that marker (`.map-comp-feature` / `.map-note-feature`).
-2. Right-click the comp marker. **Expect:** its menu opens (Export KMZ). Click the note marker. **Expect:** the note editor opens. Zoom out and in a few levels. **Expect:** the gap between them stays; both stay clickable.
-3. Right-click the comp -> Export KMZ, open doc.kml. **Expect:** the site pin, the comp pin and the note pin have three DISTINCT `<coordinates>` (within ~10 m of each other); the site pin is still the parcel centroid.
-- **Stopping rule:** closes on a dated pass of 1-3, or a failed step filed as a recurrence on B2013744 (1-2) / B2013745 (3).
-
-### V1435952 — B2010864: a California site draws county lines + city limits, names its governing body, says the county governs, and shows no Texas numbers `Blocker: live-GIS`
-
-Sandbox-proven: `test/californiaJurisdiction.test.js` (25, 26 of 46 California tests red on pre-change `src`), registry audit + fixtures, the CDT county/city layers queried live from the build sandbox 2026-10-02 (58 counties, 482 incorporated cities, the named points recorded on B2010864), the REAL jurisdiction code run against those live endpoints at nine named points, and `ui-audit/verify-california-lines.mjs` (built app in Chromium: both Layers rows present, no "no vector source registered" toast, the CDT service answers 200, geometry drawn, header badge `City of Ontario, CA · San Bernardino County`, with a known-good Texas arm). **Still needs the DEPLOYED planyr.io build in a signed-in browser** — merged is not live.
-**Steps** (planyr.io; read the served chunk hash in the same observation as each result):
-1. Open (or start) a site at an Ontario, CA industrial address. **Expect:** header badge `City of Ontario, CA · San Bernardino County`; the word ETJ appears nowhere in the badge or its hover.
-2. Layers panel → Jurisdictions on that site. **Expect:** `County boundaries (California)` and `City limits (California)` rows; turn each on — **county lines and city limits DRAW** (no "no vector source registered" toast — the Georgia failure); the Texas county/city/ETJ rows are folded under "not available in California"; the ETJ row's reason says California cities have no reach beyond their limits.
-3. Site in unincorporated Bloomington (San Bernardino County). **Expect:** `Unincorporated San Bernardino County, CA` — never "ETJ not mapped".
-4. A downtown San Francisco site. **Expect:** `City and County of San Francisco, CA (consolidated)`, never "city + unincorporated".
-5. Downtown Los Angeles, Stockton, Tracy. **Expect:** `City of Los Angeles, CA · Los Angeles County`, `City of Stockton, CA · San Joaquin County`, `City of Tracy, CA · San Joaquin County`.
-6. Yield/pond panel on a California site — including one in **Orange County, CA** or **Trinity County, CA**. **Expect:** detention reads `Detention criteria not yet available in California` (N/A in the verdict strip), no acre-feet number, no HCFCD/Harris channel wording.
-7. Attribution strip on the California view. **Expect:** California credits only; no Harris County / TxGIO.
-8. Sanity — a Las Vegas, NV site and a Reno, NV site. **Expect:** NO California badge and no "California" wording anywhere (the routing outline keeps Nevada out); a Katy (Texas), Denver (Colorado) and Atlanta (Georgia) site look exactly as before.
-- **Stopping rule:** closes on a dated pass of 1–8, or a failed step filed as a recurrence on B2010864.
-
-### V1435953 — B2010865: California parcels — click returns the APN, the outline draws only where a dense cell fits, and a California view queries only California `Blocker: live-GIS`
-
-Sandbox-proven: the live endpoint re-measured (13,138,000 parcels, edited 2026-05-28, `maxRecordCount` 2,000); the app's own point query at (-117.6030, 34.0260) → APN 011328215 / SAN BERNARDINO / 2525 E RIVERSIDE DR; `test/californiaParcels.test.js` (21); `ui-audit/verify-parcel-display-california.mjs` (built app, mocked service honouring the real 2,000 cap — red when the outline floor is removed). **Still needs the DEPLOYED build against the real service in a browser.**
-**Steps** (planyr.io, Map view → Select parcels):
-1. Fly to an Ontario, CA industrial address (e.g. 2525 E Riverside Dr). Zoom in until the purple outlines appear. **Expect:** outlines start at the close-in zoom (the tip says "Zoom in a little to see the lines" while out), and no Texas, Colorado or Georgia parcel service is asked for in the Network tab (only the `…svcs5.arcgis.com/…/CA_Statewide_Parcels_Public_view` host).
-2. Click a lot. **Expect:** Account / ID is the APN (e.g. `011328215`), NOT a short database number; the situs address `2525 E RIVERSIDE DR`; the County row `SAN BERNARDINO` under details; owner and appraised value ABSENT (never 0, never blank).
-3. Zoom out one level at a time in a dense city (San Francisco's Mission). **Expect:** outlines vanish below the close-in zoom rather than appearing as a random partial scatter; clicking a lot still works at EVERY zoom.
-4. Pan across the Nevada line at Lake Tahoe. **Expect:** California and Nevada outlines only — nothing else.
-- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2010865.
 ### V1435440 — B2010352–B2010355: the KMZ export of a parcel-anchored comp reads right, and a typed comp line saves with sensible Notes `Blocker: auth`
 
 Sandbox-proven: `test/compKmlExport.test.js` (doc.kml string for lease, land and building-sale fixtures × site-boundary-only / comp-parcel-only / both; map notes) + `test/compParse.test.js` (8 NEW-4 cases). **Not provable here:** the real signed-in export of Michael's throwaway comp (needs his account + the reverse-geocode cache). **Use ONLY the throwaway comp "ZZ KML test - safe to delete" (APN 0481850000004) already on Michael's account; DO NOT delete it — the Cowork chat does.** Read the served chunk hash in the same observation as each result.
@@ -759,17 +656,6 @@ Sandbox-proven: `ui-audit/verify-place-names.mjs` 31/31 and `ui-audit/verify-adm
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1978048 (step 5 is the one leg the sandbox cannot exercise at all).
 
 *(minted **V1408688** alongside **B1978048**; `Cadence: once`)*
-
-### V1340416 — B1875520: site + note pins are one-size symbol circles; the open one wears a ring `Blocker: auth`
-
-Sandbox-proven: `test/mapPinSymbol.test.js`, `test/mapNoteMarkerIcon.test.js`; headless local build showed 5 status pins at identical size with the warehouse/pause/check/x glyphs. **Still needs planyr.io, signed in, on the aerial** (imagery + saved notes are unreachable from the sandbox).
-**Steps** (note the served chunk hash in the same observation as each result):
-1. Open Site → map view, Sites + Notes layers on, zoomed out on the aerial. **Expect:** every site pin and every note pin is the same size circle with a white outline that reads on the imagery; Pursuit/Active show a small warehouse, notes show a page mark in magenta; Complete/Dead are faded.
-2. Zoom in and out. **Expect:** pins stay one size regardless of status.
-3. Open a site's plan, return to the map. **Expect:** that site's pin has a ring outside the circle, circle no bigger than its neighbours; it stays on top of nearby pins.
-4. Click a note pin. **Expect:** the editor opens and that note wears the ring; close it — the ring goes. Pin sits exactly on the note's spot (centre-anchored), not offset above it.
-5. Hover a site pin and a note pin. **Expect:** the tooltip appears above the circle, not on it.
-- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1875520.
 
 ### V1406976 — B1976336: Select-parcels outlines survive zoom in/out near Cartersville GA and only Georgia sources are queried `Blocker: live-GIS`
 
