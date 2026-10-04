@@ -230,7 +230,7 @@ export function panBy(view, { dx = 0, dy = 0 } = {}) {
  *  vertically: a document is read from the top, and centring a page taller than the viewport
  *  would open it showing the middle of it. Horizontally it is centred, which is where a page
  *  belongs on a wide screen. */
-export function frameView({ viewport, page, zoom = VIEW_ZOOM_DEFAULT }) {
+export function frameView({ viewport, page, zoom = VIEW_ZOOM_DEFAULT, align = "center" }) {
   const z = clampViewZoom(zoom);
   const vw = Math.max(1, num(viewport?.width));
   const vh = Math.max(1, num(viewport?.height));
@@ -252,7 +252,15 @@ export function frameView({ viewport, page, zoom = VIEW_ZOOM_DEFAULT }) {
   const x = px * z - (slackX >= 0 ? slackX / 2 : margin);
   /* Vertically a page taller than the viewport is anchored near its TOP rather than centred: a
    * document is read from the top, and centring a long page would open it showing its middle. */
-  const y = py * z - (slackY >= margin * 2 ? slackY / 2 : margin);
+  /* ⛔ `align: "top"` IS THE OPENING FRAMING (NEW-4, iPhone review 2026-09-29: pages opened with the
+   * sheet's top HALFWAY down the canvas — 253 px on a 1280x800 window, 330 px on a 390x664 phone). The
+   * first layout pass measures the sheet SHORT (213 px; the full-height pin lands ~140 ms later), and
+   * centring a short page vertically puts it mid-screen against a number that is about to change —
+   * and if two passes agree on the short height before the pin lands, the framing latches there for
+   * good. Anchoring the TOP near the top is independent of the page's eventual height: it can grow
+   * downward all it likes and the top edge is already where a document is read from. `"center"`
+   * stays the default because "Fit" genuinely wants the whole page centred. */
+  const y = align === "top" ? py * z - margin : py * z - (slackY >= margin * 2 ? slackY / 2 : margin);
   return { x, y, z };
 }
 
@@ -310,6 +318,7 @@ export function parseView(raw) {
   return normalizeView(obj);
 }
 
+<<<<<<< HEAD
 /* ---- KEEPING THE CARET ABOVE THE SOFT KEYBOARD (NEW-6a) -------------------------------------
  *
  * On iOS the keyboard shrinks only the VISUAL viewport — `window.innerHeight` and the mat's own
@@ -348,4 +357,23 @@ export function caretRevealDelta({ caret, band, pad = 48 }) {
   if (caret.left < band.left + px) dx = caret.left - (band.left + px);
   else if (caret.left > band.right - px) dx = caret.left - (band.right - px);
   return { dx, dy };
+=======
+/* ---- THE OPENING ZOOM (NEW-4) --------------------------------------------------------------
+ *
+ * Desktop opens at 100%. A PHONE opens at FIT WIDTH — the whole page width on screen, both edges
+ * (the old 100% framing counted the 8 px outside margin and the 8 px view offset on the LEFT only,
+ * so a page as wide as the screen had its right edge and rounded corner clipped). Fit width never
+ * magnifies past `PHONE_OPEN_ZOOM_MAX`: a page narrower than the screen (a pinned narrow page) is
+ * shown a little larger, which is what makes the 11 px body text readable without ever changing the
+ * stored font size; a page wider than the screen is shrunk until it fits. */
+export const PHONE_VIEWPORT_MAX = 640;
+export const PHONE_PAGE_GUTTER = 8;
+export const PHONE_OPEN_ZOOM_MAX = 1.25;
+
+export function openingZoom({ viewport, page } = {}) {
+  const vw = Math.max(1, num(viewport?.width));
+  if (vw > PHONE_VIEWPORT_MAX) return VIEW_ZOOM_DEFAULT;
+  const pw = Math.max(1, num(page?.width));
+  return clampViewZoom(Math.min((vw - PHONE_PAGE_GUTTER * 2) / pw, PHONE_OPEN_ZOOM_MAX));
+>>>>>>> origin/main
 }

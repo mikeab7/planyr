@@ -14,7 +14,7 @@
  */
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { Button, ToggleChip, IconButton, Field, Section, MenuItem, menuPanelStyle, CONTROL_RADIUS, PAD, FONT } from "../../shared/ui/controls.jsx";
+import { Button, ToggleChip, SegmentedControl, IconButton, Field, Section, MenuItem, menuPanelStyle, CONTROL_RADIUS, PAD, FONT } from "../../shared/ui/controls.jsx";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { MODULE_ACCENT } from "../../shared/ui/moduleAccent.js";
 
@@ -123,6 +123,14 @@ function GalleryBody() {
         <Specimen label="focus-visible (Tab to me)" tokens="the shared global focus ring"><Button>Tab here</Button></Specimen>
       </Row>
 
+      <Row title="SegmentedControl — pick one of N">
+        <Specimen label="two segments" tokens="CONTROL_RADIUS.control shell + nestedIn(md, 2) segments · SIZE.md height">
+          <SegmentedControl options={[{ key: "a", label: "Map" }, { key: "b", label: "List" }]} value="a" onChange={() => {}} />
+        </Specimen>
+        <Specimen label="module accent" tokens="accent / onAccent pair">
+          <SegmentedControl options={[{ key: "a", label: "Site Plan" }, { key: "b", label: "Hybrid" }]} value="b" onChange={() => {}} accent="var(--accent-food)" onAccent="var(--on-accent-food)" />
+        </Specimen>
+      </Row>
       <Row title="ToggleChip — active × rest">
         <Specimen label="rest" tokens="CONTROL_RADIUS.pill"><ToggleChip>Off</ToggleChip></Specimen>
         <Specimen label="active" tokens="accent fill"><ToggleChip active>On</ToggleChip></Specimen>

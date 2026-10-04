@@ -1462,11 +1462,16 @@ export default function AppHeader({
               against, anchor left instead so the controls read as this row's own content. */}
           <div
             style={{
-              flex: narrow ? "1 0 auto" : 1, display: "flex", alignItems: "center",
+              // NEW-1 (food controls) — a standalone route (no module tabs, today only /food) has a
+              // purpose-built toolbar that is designed to FIT the row, so on a phone the slot takes
+              // the row's width (`1 1 0`, min-width 0) rather than its content's natural width. The
+              // `1 0 auto` + scroll behaviour below stays for every route with tabs, whose toolbar
+              // (undo/redo/snap/File…) really is wider than a phone and is meant to be swiped.
+              flex: narrow && showModuleTabs ? "1 0 auto" : narrow ? "1 1 0" : 1, display: "flex", alignItems: "center",
               justifyContent: showModuleTabs ? "flex-end" : "flex-start",
               paddingLeft: showModuleTabs ? 0 : 6,
-              paddingRight: showModuleTabs ? 6 : 0,
-              minWidth: narrow ? "auto" : 0, gap: 4,
+              paddingRight: showModuleTabs || narrow ? 6 : 0,
+              minWidth: narrow && showModuleTabs ? "auto" : 0, gap: 4,
               overflow: narrow ? "visible" : "hidden",
             }}
           >
