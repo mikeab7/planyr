@@ -48,7 +48,8 @@ import {
   toggleSelection,
 } from "../lib/notesMarquee.js";
 import {
-  fitView, frameView, normalizeView, openingZoom, panBy, stepZoom, toWorkspace,
+  fitView, frameView, inertiaStep, normalizeView, openingZoom, panBy, panView, pinchView, releaseVelocity, stepZoom, toWorkspace,
+  touchTravelled,
   VIEW_ZOOM_DEFAULT, wheelIntent, wheelNativeAxis, zoomAbout, zoomForWheel, zoomKeyIntent, zoomLabel,
 } from "../lib/notesViewport.js";
 import { HIGHLIGHT_COLORS, SIZES, TEXT_COLORS } from "../lib/notesFormatPalette.js";
@@ -3672,43 +3673,159 @@ const NoteEditor = forwardRef(function NoteEditor({
     window.addEventListener("pointercancel", onUp);
   }, [setView]);
 
-  /* ⛔ PINCH. A trackpad pinch arrives as a Ctrl+wheel (handled above); a real touch pinch is two
-   * pointers, which nothing else here claims. Tracked on the viewport so it works over the page
-   * as well as over blank workspace. */
+  /* ⛔ TOUCH ON THE CANVAS: ONE FINGER PANS, TWO FINGERS PINCH AND FOLLOW (NEW-2, iPhone review
+   * 2026-09-29: *"one finger can't scroll or pan a note"*).
+   *
+   * The mat is `touch-action: none` + `overflow: hidden`, so a finger drag yields POINTER events and
+   * nothing else — in particular no compat mouse events, which is the only thing the blank-paper
+   * pan (`beginBlankGesture`, driven by window mousemove/mouseup) ever listened to. So on a phone
+   * the page simply did not move. This is the pointer-driven counterpart, for `pointerType ===
+   * "touch"` ONLY — the mouse path is untouched. Everything goes through `setView`, the one view
+   * ref (VIEW-INDEPENDENT-ONCE: no second pan mechanism, no per-frame state).
+   *
+   * WHAT A ONE-FINGER DRAG DOES, decided at the press by what is under the finger:
+   *   • on a box that is SELECTED, or the box being EDITED, or any grip/handle/field → NOT a pan.
+   *     A selected box keeps today's behaviour, and a drag in the box being edited selects text
+   *     (decided and stated: text selection wins inside the box you are typing in).
+   *   • anywhere else (paper, grey, text of an unselected box) → pan, once the finger has travelled
+   *     past TOUCH_PAN_SLOP. Below it, it is still a tap and the compat mouse events place/select
+   *     exactly as before.
+   * A pan that really moved swallows the compat mousedown/click a browser may still synthesise on
+   * lift, so lifting a finger after a pan never deselects or arms a placement.
+   *
+   * TWO FINGERS: zoom about the midpoint AND translate with it (`pinchView`). Lifting one finger
+   * hands the pan to the finger that is left, so there is no jump. A light inertia carries a flick
+   * (`releaseVelocity` / `inertiaStep`); any new touch or a view change from elsewhere stops it. */
+  const touchSwallowUntilRef = useRef(0);
   useEffect(() => {
     const sc = scrollerRef.current;
     if (!sc) return undefined;
     const live = new Map();
     let pinch = null;
+    let pan = null;                 // { id, from, startView, latched, samples }
+    let inertia = null;             // { raf, last }
+    const stopInertia = () => { if (inertia) { cancelAnimationFrame(inertia.raf); inertia = null; } };
+    const local = (pt) => { const r = viewportRect(); return r ? { x: pt.x - r.left, y: pt.y - r.top } : pt; };
     const spread = () => {
       const [a, b] = [...live.values()];
-      return { dist: Math.hypot(a.x - b.x, a.y - b.y), mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 } };
+      return { dist: Math.hypot(a.x - b.x, a.y - b.y), mid: local({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }) };
+    };
+    /* Pressing one of these is never a pan. A selected / edited box, a box grip or resize handle, a
+     * sheet edge grip, a form control, and the zoom pill all own their own touches. */
+    const ownsTheTouch = (el) => !(el instanceof Element) || !!el.closest(
+      'input, textarea, select, button, a, [data-handle], .planyr-anchor-grip, [class*="planyr-page-width-grip"], [class*="planyr-page-height-grip"], '
+      + '.planyr-anchor[data-selected="1"], .planyr-anchor[data-editing="1"], [data-testid="note-zoom-pill"]');
+    const beginPan = (id, at, latched) => {
+      pan = { id, from: at, startView: { ...viewRef.current }, latched, samples: [{ t: performance.now(), ...at }] };
     };
     const onDown = (e) => {
       if (e.pointerType !== "touch") return;
+      stopInertia();
       live.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (live.size === 2) pinch = { ...spread(), z: viewRef.current.z };
+      if (live.size === 2) {
+        pan = null;
+        pinch = { view: { ...viewRef.current }, ...spread() };
+        touchSwallowUntilRef.current = performance.now() + 500;
+      } else if (live.size === 1 && !ownsTheTouch(e.target)) {
+        beginPan(e.pointerId, { x: e.clientX, y: e.clientY }, false);
+      }
     };
     const onMove = (e) => {
       if (!live.has(e.pointerId)) return;
       live.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      if (live.size !== 2 || !pinch || !pinch.dist) return;
+      if (live.size === 2 && pinch && pinch.dist) {
+        e.preventDefault();
+        setView(pinchView(pinch, spread()));
+        return;
+      }
+      if (live.size !== 1 || !pan || pan.id !== e.pointerId) return;
+      const at = { x: e.clientX, y: e.clientY };
+      if (!pan.latched) {
+        if (!touchTravelled(pan.from, at)) return;
+        pan.latched = true;
+        sc.setAttribute("data-panning", "1");
+      }
       e.preventDefault();
-      const now = spread();
-      zoomTo(pinch.z * (now.dist / pinch.dist), now.mid);
+      pan.samples.push({ t: performance.now(), ...at });
+      if (pan.samples.length > 8) pan.samples.shift();
+      setView(panView(pan.startView, pan.from, at));
     };
-    const onUp = (e) => { live.delete(e.pointerId); if (live.size < 2) pinch = null; };
+    const onUp = (e) => {
+      if (!live.has(e.pointerId)) return;
+      live.delete(e.pointerId);
+      sc.removeAttribute("data-panning");
+      if (live.size < 2) pinch = null;
+      if (live.size === 1 && !pan) {
+        // One finger of a pinch lifted: the other carries on as a pan from where it is now, no jump.
+        const [[id, at]] = [...live.entries()];
+        beginPan(id, at, true);
+        sc.setAttribute("data-panning", "1");
+        return;
+      }
+      if (!pan || pan.id !== e.pointerId) return;
+      const was = pan;
+      pan = null;
+      if (!was.latched) return;                       // a tap: the compat mouse events own it
+      touchSwallowUntilRef.current = performance.now() + 500;
+      if (e.type === "pointercancel") return;
+      const vel = releaseVelocity(was.samples, performance.now());
+      if (!vel.x && !vel.y) return;
+      /* Inertia carries the CONTENT the way the finger was moving. It stands down the instant the
+       * view is changed by anything else (a new touch, the wheel, a zoom button). */
+      let v = vel;
+      inertia = { raf: 0, last: { ...viewRef.current } };
+      const tick = () => {
+        if (!inertia) return;
+        const cur = viewRef.current;
+        if (cur.x !== inertia.last.x || cur.y !== inertia.last.y || cur.z !== inertia.last.z) { inertia = null; return; }
+        const step = inertiaStep(v);
+        if (step.done) { inertia = null; return; }
+        v = step.vel;
+        setView({ x: cur.x - step.delta.x, y: cur.y - step.delta.y, z: cur.z });
+        inertia.last = { ...viewRef.current };
+        inertia.raf = requestAnimationFrame(tick);
+      };
+      inertia.raf = requestAnimationFrame(tick);
+    };
+    /* A press that follows a real pan/pinch within the swallow window is the browser's synthesised
+     * click for that lift, never the person's tap. Capture, so it never reaches `focusFromMat`. */
+    const swallow = (e) => {
+      if (performance.now() >= touchSwallowUntilRef.current) return;
+      if (!isTouchPointerType(lastPointerTypeRef.current)) return;
+      e.stopPropagation();
+    };
+    /* ⛔ A STRAY NATIVE SCROLL IS FOLDED INTO THE VIEW, THEN RESET. The mat is `overflow: hidden`
+     * but a browser still scrolls it to reveal a focused caret (measured: scrollLeft 33 after a tap
+     * into a box), and nothing ever put it back — the page stayed shifted sideways while the view
+     * model, which assumes 0, drew it somewhere else. Folding keeps exactly what the browser
+     * showed, so nothing visibly jumps, and the model is true again. */
+    const onScroll = () => {
+      const dx = sc.scrollLeft;
+      const dy = sc.scrollTop;
+      if (!dx && !dy) return;
+      sc.scrollLeft = 0;
+      sc.scrollTop = 0;
+      const cur = viewRef.current;
+      setView({ x: cur.x + dx, y: cur.y + dy, z: cur.z }, { byUser: false, persist: false });
+    };
     sc.addEventListener("pointerdown", onDown);
     sc.addEventListener("pointermove", onMove, { passive: false });
     sc.addEventListener("pointerup", onUp);
     sc.addEventListener("pointercancel", onUp);
+    sc.addEventListener("mousedown", swallow, true);
+    sc.addEventListener("click", swallow, true);
+    sc.addEventListener("scroll", onScroll);
     return () => {
+      stopInertia();
       sc.removeEventListener("pointerdown", onDown);
       sc.removeEventListener("pointermove", onMove);
       sc.removeEventListener("pointerup", onUp);
       sc.removeEventListener("pointercancel", onUp);
+      sc.removeEventListener("mousedown", swallow, true);
+      sc.removeEventListener("click", swallow, true);
+      sc.removeEventListener("scroll", onScroll);
     };
-  }, [zoomTo]);
+  }, [setView, viewportRect]);
 
   /* ⛔ THE PAGE GROWS TO HOLD THE BLOCKS — WHICH IS WHY THEY STOP MOVING (NEW-2, round 2).
    *
