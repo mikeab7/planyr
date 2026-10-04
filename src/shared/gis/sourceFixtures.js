@@ -190,6 +190,43 @@ export const SOURCE_FIXTURES = {
     { label: "Grand Junction (Mesa)", point: [-108.5506, 39.0639], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
   ],
   },
+  countyGa: {
+  fixtures: [
+    // NEW-1 (Georgia) · live 2026-09-30 from the build sandbox: 159 county polygons statewide (Georgia's full roster).
+    { label: "Downtown Atlanta (Fulton)", point: [-84.388, 33.749], expectMinCount: 1 }, // live: Fulton
+    { label: "Savannah (Chatham)", point: [-81.09, 32.08], expectMinCount: 1 }, // live: Chatham
+    { label: "Augusta (Richmond)", point: [-81.97, 33.47], expectMinCount: 1 }, // live: Richmond
+    { label: "Unincorporated Gwinnett", point: [-83.95, 34.02], expectMinCount: 1 }, // live: Gwinnett
+  ],
+  },
+  cityGa: {
+  fixtures: [
+    // NEW-1 (Georgia) · live 2026-09-30: 538 municipal polygons statewide.
+    { label: "City of Atlanta", point: [-84.388, 33.749], expectMinCount: 1 }, // live: Atlanta
+    { label: "Savannah", point: [-81.09, 32.08], expectMinCount: 1 }, // live: Savannah
+    { label: "Athens-Clarke County (consolidated)", point: [-83.3776, 33.9519], expectMinCount: 1 }, // live: Athens-Clarke County
+    { label: "Macon-Bibb County (consolidated)", point: [-83.63, 32.84], expectMinCount: 1 }, // live: Macon-Bibb County
+  ],
+  },
+  countyCa: {
+  fixtures: [
+    // NEW-1 (California) · live 2026-10-02 from the build sandbox: exactly 58 county polygons statewide.
+    { label: "Downtown Los Angeles (Los Angeles)", point: [-118.2437, 34.0522], expectMinCount: 1 }, // live: Los Angeles
+    { label: "Ontario (San Bernardino)", point: [-117.5931, 34.0633], expectMinCount: 1 }, // live: San Bernardino
+    { label: "Stockton (San Joaquin)", point: [-121.2908, 37.9577], expectMinCount: 1 }, // live: San Joaquin
+    { label: "San Francisco (consolidated)", point: [-122.4194, 37.7749], expectMinCount: 1 }, // live: San Francisco
+  ],
+  },
+  cityCa: {
+  fixtures: [
+    // NEW-1 (California) · live 2026-10-02: 482 incorporated-city polygons statewide (offshore water rows and the
+    // unincorporated community of Mountain House withheld by the row's `where`).
+    { label: "City of Los Angeles", point: [-118.2437, 34.0522], expectMinCount: 1 }, // live: Los Angeles
+    { label: "City of Ontario", point: [-117.5931, 34.0633], expectMinCount: 1 }, // live: Ontario
+    { label: "City of Tracy", point: [-121.426, 37.7397], expectMinCount: 1 }, // live: Tracy
+    { label: "City and County of San Francisco", point: [-122.4194, 37.7749], expectMinCount: 1 }, // live: San Francisco
+  ],
+  },
   city: {
   fixtures: [
     { label: "City of Houston", point: [-95.37, 29.76], expectMinCount: 1 },
@@ -256,8 +293,116 @@ export const SOURCE_FIXTURES = {
   },
   etj_fortworth: {
   fixtures: [
-    { label: "Fort Worth ETJ (south)", point: [-97.2384, 32.6382], expectMinCount: 1 },
-    { label: "Fort Worth ETJ (far south)", point: [-97.2384, 32.4832], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
+    // NEW-2 — re-measured against the 2025 city-staff copy (the 2018 points are not all inside it).
+    { label: "Fort Worth ETJ (south-west)", point: [-97.51286, 32.61144], expectMinCount: 1 },
+    { label: "Fort Worth ETJ (south-east)", point: [-97.21262, 32.55435], expectMinCount: 1 },
+  ],
+  },
+  /* NEW-1 (DFW, 2026-09-30) — every point below was queried live 2026-09-30 before it was written
+   * down. An ETJ is the ring OUTSIDE a city's limits, so each point is also asserted to be in NO
+   * city (`test/dfwEtjCoverage.test.js` / `ui-audit/audit-dfw-etj-coverage.mjs` carry that half). */
+  etj_collin: {
+  fixtures: [
+    { label: "Prosper ETJ (north of Frisco)", point: [-96.8961, 33.23255], expectMinCount: 1 },
+    { label: "Celina ETJ (north Collin)", point: [-96.72706, 33.32056], expectMinCount: 1 },
+  ],
+  },
+  etj_rockwall: {
+  fixtures: [
+    // Interior points of two of the six published polygons, each verified live 2026-09-30 to be in
+    // that polygon and in no TxGIO city.
+    { label: "Heath ETJ", point: [-96.4638, 32.815], expectMinCount: 1 },
+    { label: "Royse City ETJ", point: [-96.27454, 33.02009], expectMinCount: 1 },
+  ],
+  },
+  /* ⛔ NEW-2 — the two hosts below (Denton County, Fort Worth) are UNREACHABLE from the build sandbox (egress policy),
+   * so their fixtures were NOT measured here. Denton's points are the Little Elm and Sanger ETJs, which are stable
+   * across editions (both verified against the 2022 edition, 2026-09-30); Fort Worth's are the two points verified
+   * against the 2025 copy of the same layer. The owner's browser confirmed each service answers (2026-09-30);
+   * `ui-audit/verify-dfw-etj-browser-hosts.mjs` asserts these points from a browser, and the weekly verifier runs
+   * them from CI. A failure there means "re-measure", not "the fixture was right". */
+  etj_denton: {
+  fixtures: [
+    { label: "Little Elm ETJ", point: [-96.93688, 33.20664], expectMinCount: 1 },
+    { label: "Sanger ETJ", point: [-97.2088, 33.37143], expectMinCount: 1 },
+  ],
+  },
+  /* NEW-2 (DFW gaps, 2026-09-30) — every point is INSIDE the row's ETJ polygon(s) and in NO TxGIO city, verified live
+   * 2026-09-30 (interior points of polygon-minus-city-limits). `etj_fortworth`'s pair below replaces the 2018 layer's. */
+  /* NEW-2 — release areas' positions are unknown to this repo (attributes and extents unread), so the first
+   * fixture asks only that the layer answers over Fort Worth's ETJ extent; the second is a documented zero over
+   * the Houston coast, proving the layer is not a nationwide dump. Replace with real release-area points once
+   * the browser harness reports them. */
+  etj_release_fortworth: {
+  fixtures: [
+    { label: "Release areas exist somewhere in Fort Worth's ETJ extent", bbox: [-97.66, 32.45, -97.13, 33.10], expectMinCount: 1 },
+    { label: "None on the Houston coast (layer is Fort Worth-only)", bbox: [-95.5, 29.5, -95.2, 29.8], expectMinCount: 0 },
+  ],
+  },
+  etj_dallasco: {
+  fixtures: [
+    { label: "Seagoville ETJ (Dallas County)", point: [-96.60143, 32.62008], expectMinCount: 1 },
+    { label: "Wylie ETJ (Dallas County)", point: [-96.55583, 32.97697], expectMinCount: 1 },
+  ],
+  },
+  etj_ellis: {
+  fixtures: [
+    { label: "Maypearl ETJ (Ellis County)", point: [-96.99026, 32.29932], expectMinCount: 1 },
+    { label: "Ennis ETJ (Ellis County)", point: [-96.57542, 32.37378], expectMinCount: 1 },
+  ],
+  },
+  etj_johnson: {
+  fixtures: [
+    { label: "Burleson ETJ (Johnson SUD compile)", point: [-97.31302, 32.46665], expectMinCount: 1 },
+    { label: "Godley ETJ (Johnson SUD compile)", point: [-97.50916, 32.4537], expectMinCount: 1 },
+  ],
+  },
+  etj_grayson: {
+  fixtures: [
+    { label: "Gunter ETJ (Grayson County)", point: [-96.72999, 33.4627], expectMinCount: 1 },
+    { label: "Sherman ETJ (Grayson County)", point: [-96.62643, 33.69805], expectMinCount: 1 },
+  ],
+  },
+  etj_waxahachie: {
+  fixtures: [
+    { label: "Waxahachie ETJ — south-west", point: [-96.98737, 32.35429], expectMinCount: 1 },
+    { label: "Waxahachie ETJ — north-east", point: [-96.72033, 32.41549], expectMinCount: 1 },
+  ],
+  },
+  etj_corsicana: {
+  fixtures: [
+    { label: "Corsicana ETJ — west", point: [-96.54482, 32.04061], expectMinCount: 1 },
+    { label: "Corsicana ETJ — east", point: [-96.36837, 32.11064], expectMinCount: 1 },
+  ],
+  },
+  etj_bloominggrove: {
+  fixtures: [
+    { label: "Blooming Grove ETJ — west", point: [-96.73338, 32.09668], expectMinCount: 1 },
+    { label: "Blooming Grove ETJ — east", point: [-96.69834, 32.08031], expectMinCount: 1 },
+  ],
+  },
+  etj_forney: {
+  fixtures: [
+    { label: "Forney ETJ — west", point: [-96.49598, 32.72267], expectMinCount: 1 },
+    { label: "Forney ETJ — east", point: [-96.38527, 32.74305], expectMinCount: 1 },
+  ],
+  },
+  etj_talty: {
+  fixtures: [
+    { label: "Talty ETJ — north", point: [-96.43106, 32.69943], expectMinCount: 1 },
+    { label: "Talty ETJ — south-east", point: [-96.37236, 32.68517], expectMinCount: 1 },
+  ],
+  },
+  etj_mansfield: {
+  fixtures: [
+    { label: "Mansfield ETJ — north-west", point: [-97.20516, 32.58534], expectMinCount: 1 },
+    { label: "Mansfield ETJ — south-east", point: [-97.06927, 32.51246], expectMinCount: 1 },
+  ],
+  },
+  etj_sunnyvale: {
+  fixtures: [
+    { label: "Sunnyvale ETJ — north", point: [-96.56529, 32.83034], expectMinCount: 1 },
+    { label: "Sunnyvale ETJ — south", point: [-96.51406, 32.75078], expectMinCount: 1 },
   ],
   },
   mud: {
@@ -811,6 +956,29 @@ export const SOURCE_DOCS = {
     "The Colorado counterpart of the `city` row (TxGIO). Inside a polygon = inside a municipality; " +
     "outside = unincorporated county. A boundary means the municipality HAS JURISDICTION — never " +
     "proof it serves or will connect utilities.",
+  },
+  countyGa: {
+  notes:
+    "The Georgia counterpart of `county` / `countyCo`. DCA statewide counties (159, TIGER-derived). A point in NO polygon is " +
+    "not in Georgia (the routing envelope also holds SC/AL/FL/NC/TN ground) — point-in-polygon decides, never the envelope.",
+  },
+  cityGa: {
+  notes:
+    "The Georgia counterpart of `city`. DCA municipal limits (538). Georgia has NO ETJ: outside a city's limits the county " +
+    "governs. Consolidated governments publish under their consolidated names (Athens-Clarke County, Augusta-Richmond " +
+    "County, Macon-Bibb County; Columbus is plain 'Columbus'). A boundary means the city HAS JURISDICTION — never proof it serves utilities.",
+  },
+  countyCa: {
+  notes:
+    "The California counterpart of `county` / `countyCo` / `countyGa`. CDT State Geoportal counties (58, one row per county). A point in NO " +
+    "polygon is not in California (the routing envelope also holds NV/OR/AZ/Baja ground) — point-in-polygon decides, never the envelope.",
+  },
+  cityCa: {
+  notes:
+    "The California counterpart of `city`. CDT State Geoportal city boundaries (482 incorporated cities, land rows only). California cities " +
+    "have NO ETJ: outside a city's limits the county governs. San Francisco is the one consolidated city-county. Spheres of influence " +
+    "(LAFCO) are planning boundaries, not jurisdiction, and are deliberately not carried. A boundary means the city HAS JURISDICTION — " +
+    "never proof it serves or will connect utilities.",
   },
   isdCo: {
   notes:

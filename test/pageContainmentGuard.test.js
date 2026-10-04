@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { detectDrift, installPageContainmentGuard } from "../src/shared/ui/pageContainmentGuard.js";
+import { detectDrift, installPageContainmentGuard, keyboardUp } from "../src/shared/ui/pageContainmentGuard.js";
 
 describe("pageContainmentGuard — detectDrift (pure)", () => {
   it("reports no drift when the document is at rest and unzoomed", () => {
@@ -144,5 +144,51 @@ describe("pageContainmentGuard — installPageContainmentGuard (DOM-driven, inje
   it("returns a no-op installer for a window with no document", () => {
     expect(() => installPageContainmentGuard(undefined, vi.fn())()).not.toThrow();
     expect(() => installPageContainmentGuard({}, vi.fn())()).not.toThrow();
+  });
+});
+
+describe("NEW-6a — a scroll with the soft keyboard up is iOS revealing the field, and the guard cooperates", () => {
+  const withKeyboard = (up) => {
+    const { win, fire, fireVv } = makeFakeWindow();
+    win.innerHeight = 800;
+    win.visualViewport.height = up ? 456 : 800;
+    win.document.activeElement = { isContentEditable: true, tagName: "DIV" };
+    win.dispatchEvent = vi.fn();
+    return { win, fire, fireVv };
+  };
+  it("keyboardUp: needs an editable focused AND a markedly shorter visual viewport", () => {
+    expect(keyboardUp(withKeyboard(true).win)).toBe(true);
+    expect(keyboardUp(withKeyboard(false).win)).toBe(false);
+    const w = withKeyboard(true).win; w.document.activeElement = { isContentEditable: false, tagName: "BODY" };
+    expect(keyboardUp(w)).toBe(false);
+    expect(keyboardUp({})).toBe(false);
+  });
+  it("still pins the document back, but ANNOUNCES the heal so the canvas can reveal the caret", () => {
+    const { win, fire } = withKeyboard(true);
+    const reporter = vi.fn();
+    installPageContainmentGuard(win, reporter);
+    win.scrollY = 264;                       // the production figure: ~a keyboard's height
+    fire("scroll");
+    expect(win.scrollTo).toHaveBeenCalledWith(0, 0);
+    expect(win.dispatchEvent).toHaveBeenCalledTimes(1);
+    expect(win.dispatchEvent.mock.calls[0][0].type).toBe("planyr:viewport-healed");
+  });
+  it("…and reports it as its OWN kind, so a real stray drag is still distinguishable", () => {
+    const { win, fire } = withKeyboard(true);
+    const reporter = vi.fn();
+    installPageContainmentGuard(win, reporter);
+    win.scrollY = 264;
+    fire("scroll");
+    expect(reporter.mock.calls[0][0]).toBe("page-containment-keyboard-reveal");
+    expect(reporter.mock.calls[0][2].keyboardUp).toBe(true);
+  });
+  it("with NO keyboard a scroll is still the impossible drift, unchanged, and nothing is announced", () => {
+    const { win, fire } = withKeyboard(false);
+    const reporter = vi.fn();
+    installPageContainmentGuard(win, reporter);
+    win.scrollY = 264;
+    fire("scroll");
+    expect(reporter.mock.calls[0][0]).toBe("page-containment-drift");
+    expect(win.dispatchEvent).not.toHaveBeenCalled();
   });
 });

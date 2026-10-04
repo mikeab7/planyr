@@ -44,6 +44,14 @@
  * which already held one). Verified non-destructive: a scale-independent checksum over all 174
  * existing rows matched exactly before and after the ALTER.
  *
+ * ⛔ WHAT I HAD IS GONE; A NEW VISIT TAKES DISHES (B2057920, "Food on a phone", owner direction
+ * 2026-10-03: "adding a restaurant should take dish ratings as part of it, and should NOT ask 'what
+ * did you eat'"). `VisitForm` no longer has a "What I had" box: a fresh visit shows a Dishes block
+ * (name + tap rating per row) and hands `dishes` to FoodApp.submitVisit. Visits saved BEFORE this keep
+ * their `what_i_had` text — shown on the card ("Had …"), in the List's "Had" column, and read-only in
+ * the edit form; an edit never sends `what_i_had`, so it is never rewritten or nulled. It is NOT
+ * migrated into dishes: that would mean guessing dish boundaries and inventing scores.
+ *
  * ⛔ DATE FIELD (owner correction, 2026-08-18: never pre-filled with today, stays optional.
  *
  * ⛔ B668194 — CLEAR THE FORM ON A CONFIRMED SAVE, NEVER BEFORE. `onSubmit` (FoodApp's
@@ -105,6 +113,10 @@ import { formatVisitDate, formatRelativeDate, formatMonthYear } from "../lib/dat
 import { directionsUrl } from "../lib/directions.js";
 import { formatCategory, formatAddress, formatCityFromAddress } from "../lib/formatPlace.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
+import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
+import ScoreMeter, { ScoreTapGrid, nudgeScore, DISH_SCORE_STEP } from "./ScoreMeter.jsx";
+import { cleanDraftDishes, newDraftDish } from "../lib/draftDishes.js";
+import { noAutofill } from "../lib/noAutofill.js";
 
 // var(--accent-food) — a real DOM/CSS element (unlike FoodMap's canvas-drawn pin, which must use
 // the literal hex because a 2D canvas context has no cascade to resolve var() against), so this
@@ -133,12 +145,21 @@ function useIsMobile() {
   return mobile;
 }
 
+// iOS Safari zooms the whole page when a field under 16 px takes focus — on a phone that shoves the
+// sheet sideways and the form out of view. Fields in the visit form are therefore 16 px.
+const INPUT_FONT_PX = 16; // design-exempt: iOS Safari's focus-zoom threshold — below 16 px the page zooms on every field tap
+const NUDGE_STYLE = {
+  minWidth: 50, minHeight: 50, borderRadius: RADIUS.sm, border: "1px solid var(--border-default)", background: "var(--surface-page)",
+  color: "var(--text-primary)", cursor: "pointer", font: "inherit", fontWeight: 700, padding: 0,
+  fontSize: 20, // design-exempt: minus/plus glyph scaled to its own 50px phone button, same as ScoreMeter's phone nudge
+};
+
 const RATING_MAX = 10;
 const RATING_MIN = 1;
 const RATING_STEP = 0.25;
 const RATING_SLIDER_REST = 5.5; // purely the thumb's visual resting spot before any touch — never committed as a value
 
-function RatingSlider({ value, onChange, label }) {
+function RatingSlider({ value, onChange, label, isMobile = false }) {
   const active = value != null;
   const shown = active ? value : RATING_SLIDER_REST;
   const color = colorForRating(shown) || "var(--accent-food)";
@@ -165,12 +186,28 @@ function RatingSlider({ value, onChange, label }) {
           </button>
         )}
       </div>
+      {isMobile ? (
+        // NEW-1 (phone): tap, don't drag — see ScoreMeter.jsx's "PHONE: TAP, DON'T DRAG" note.
+        <>
+          <ScoreTapGrid value={value} onChange={onChange} label={label} />
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+            <button type="button" className="tap-target" onClick={() => onChange(nudgeScore(value, -DISH_SCORE_STEP))}
+              aria-label={`Decrease ${label} by a quarter point`}
+              style={NUDGE_STYLE}>−</button>
+            <span style={{ flex: 1, textAlign: "center", fontSize: FONT_SIZE.micro, color: "var(--text-tertiary)" }}>fine-tune by a quarter</span>
+            <button type="button" className="tap-target" onClick={() => onChange(nudgeScore(value, DISH_SCORE_STEP))}
+              aria-label={`Increase ${label} by a quarter point`}
+              style={NUDGE_STYLE}>+</button>
+          </div>
+        </>
+      ) : (
       <input
         type="range" min={RATING_MIN} max={RATING_MAX} step={RATING_STEP}
         value={shown} onChange={(e) => onChange(Number(e.target.value))}
         aria-label={label} aria-valuetext={active ? `${shown} out of ${RATING_MAX}` : "not rated"}
         style={{ width: "100%", accentColor: color, cursor: "pointer" }}
       />
+      )}
     </div>
   );
 }
@@ -183,33 +220,90 @@ function fieldStyle() {
   };
 }
 
+/* The dishes typed into a NEW visit — one row per dish: its name and a tap-to-set rating. Adding a
+ * restaurant takes dish ratings as part of the same flow (owner direction 2026-10-03: "adding a
+ * restaurant should take dish ratings as part of it, and should NOT ask 'what did you eat'"), so
+ * this block replaces the old free-text "What I had" box. Rows are drafts until Save; FoodApp's
+ * submitVisit writes the visit and then each dish (a dish needs its visit's id). Each row's rating
+ * is the same ScoreMeter the place-detail dish editor uses. */
+function DraftDishes({ rows, setRows, isMobile }) {
+  const update = (key, patch) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  return (
+    <div data-testid="visit-dishes" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-secondary)" }}>Dishes</div>
+      {rows.map((r, i) => (
+        <div key={r.key} data-testid="visit-dish-row" style={{
+          display: "flex", flexDirection: "column", gap: 8, padding: "10px 10px 12px", borderRadius: RADIUS.lg,
+          border: "1px solid var(--border-default)", background: "var(--surface-page)",
+        }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input
+              type="text" value={r.name} onChange={(e) => update(r.key, { name: e.target.value })}
+              placeholder="Dish" aria-label={`Dish ${i + 1}`} data-testid="visit-dish-name"
+              enterKeyHint="next" autoCapitalize="words"
+              {...noAutofill("dish-title")}
+              style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX, minHeight: 44 }}
+            />
+            {rows.length > 1 && (
+              <button type="button" onClick={() => setRows((rs) => rs.filter((x) => x.key !== r.key))}
+                aria-label={`Remove dish ${i + 1}`} data-testid="visit-dish-remove"
+                style={{ flex: "0 0 auto", minWidth: 44, minHeight: 44, border: "none", background: "none", color: "var(--text-tertiary)", cursor: "pointer", fontSize: INPUT_FONT_PX }}>
+                ✕
+              </button>
+            )}
+          </div>
+          <ScoreMeter value={r.score} onChange={(score) => update(r.key, { score })} label="Dish score" isMobile={isMobile} />
+        </div>
+      ))}
+      <button type="button" onClick={() => setRows((rs) => [...rs, newDraftDish()])} data-testid="visit-dish-add"
+        style={{
+          minHeight: 44, border: "1px dashed var(--border-default)", borderRadius: RADIUS.md, background: "transparent",
+          color: "var(--accent-food)", cursor: "pointer", font: "inherit", fontSize: 13, fontWeight: 700,
+        }}>
+        + Add another dish
+      </button>
+    </div>
+  );
+}
+
 function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, submitLabel = "Log this visit" }) {
   // `initial` (the visit being edited) is a lazy-initializer READ ONCE at mount — VisitCard
   // unmounts/remounts this form every time editing toggles off then on again, so re-opening edit
   // always starts from the CURRENT saved row, never a stale in-progress edit from before a Cancel.
   // rating/rating_ambiance are Postgres `numeric` -> PostgREST strings ("8.25"), same Number()
   // coercion every other read site in this module already applies.
+  const isMobile = useIsMobile();
   const [rating, setRating] = useState(() => (initial?.rating != null ? Number(initial.rating) : null));
   const [ratingAmbiance, setRatingAmbiance] = useState(() => (initial?.rating_ambiance != null ? Number(initial.rating_ambiance) : null));
   const [cost, setCost] = useState(() => (initial?.cost != null ? String(initial.cost) : ""));
   const [visitedOn, setVisitedOn] = useState(() => initial?.visited_on || ""); // never pre-filled on a FRESH log — see header comment
-  const [whatIHad, setWhatIHad] = useState(() => initial?.what_i_had || "");
+  // NEW-1 (Food on a phone): there is no "What I had" box any more. A NEW visit captures dishes
+  // (below); an EXISTING visit keeps whatever it already had in `what_i_had` — shown read-only in
+  // the edit form and never rewritten (see the header's "WHAT I HAD" note).
+  const [dishRows, setDishRows] = useState(() => (initial ? [] : [newDraftDish()]));
+  const [dishError, setDishError] = useState(null);
   const [whatWasGood, setWhatWasGood] = useState(() => initial?.what_was_good || "");
   const [notes, setNotes] = useState(() => initial?.notes || "");
   const [wouldReturn, setWouldReturn] = useState(() => initial?.would_return ?? null);
 
   const submit = async (e) => {
     e.preventDefault();
-    const saved = await onSubmit({
+    const fields = {
       rating,
       rating_ambiance: ratingAmbiance,
       cost: cost === "" ? null : Number(cost),
       visited_on: visitedOn || null,
-      what_i_had: whatIHad || null,
       what_was_good: whatWasGood || null,
       notes: notes || null,
       would_return: wouldReturn,
-    });
+    };
+    if (!initial) {
+      const { dishes, error } = cleanDraftDishes(dishRows);
+      if (error) { setDishError(error); return; }
+      setDishError(null);
+      fields.dishes = dishes;
+    }
+    const saved = await onSubmit(fields);
     // Only on a CONFIRMED save (B668194, see header comment) — a failed write leaves everything
     // typed so nothing is lost, and the panel's own error banner already says why.
     if (saved) {
@@ -217,7 +311,7 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, submitLabel 
       setRatingAmbiance(null);
       setCost("");
       setVisitedOn("");
-      setWhatIHad("");
+      setDishRows(initial ? [] : [newDraftDish()]);
       setWhatWasGood("");
       setNotes("");
       setWouldReturn(null);
@@ -228,17 +322,27 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, submitLabel 
     }
   };
 
+  const groupLabel = { display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-secondary)" };
   return (
-    <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 10, padding: "10px 16px 14px" }}>
-      <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-secondary)" }}>
+    <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 10, padding: "10px 16px 0" }}>
+      {!initial && <DraftDishes rows={dishRows} setRows={setDishRows} isMobile={isMobile} />}
+      {dishError && <div role="alert" data-testid="visit-dish-error" style={{ fontSize: 12, color: "var(--danger-text, var(--danger))" }}>{dishError}</div>}
+      {initial?.what_i_had && (
+        <div data-testid="visit-legacy-had" style={{ fontSize: FONT_SIZE.emphasis, color: "var(--text-secondary)" }}>
+          <span style={{ fontWeight: 700 }}>What I had (saved earlier):</span> {initial.what_i_had}
+        </div>
+      )}
+      {/* div, not label: a <label> around a button group forwards a tap on its text to the FIRST
+          button inside it, which would set the rating to 1 on a stray tap. */}
+      <div role="group" aria-label="Food" style={groupLabel}>
         Food
-        <RatingSlider value={rating} onChange={setRating} label="Food rating" />
-      </label>
-      <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-secondary)" }}>
+        <RatingSlider value={rating} onChange={setRating} label="Food rating" isMobile={isMobile} />
+      </div>
+      <div role="group" aria-label="Ambiance" style={groupLabel}>
         Ambiance
-        <RatingSlider value={ratingAmbiance} onChange={setRatingAmbiance} label="Ambiance rating" />
-      </label>
-      <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-secondary)" }}>
+        <RatingSlider value={ratingAmbiance} onChange={setRatingAmbiance} label="Ambiance rating" isMobile={isMobile} />
+      </div>
+      <label style={groupLabel}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
           <span>Date</span>
           {/* Explicit clear affordance, matching the rating slider's own "Clear" link — a native
@@ -253,40 +357,42 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, submitLabel 
             </button>
           )}
         </div>
-        <input type="date" value={visitedOn} onChange={(e) => setVisitedOn(e.target.value)} style={fieldStyle()} />
+        <input type="date" value={visitedOn} onChange={(e) => setVisitedOn(e.target.value)} {...noAutofill("visit-date")} style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX }} />
       </label>
-      <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-secondary)" }}>
-        What I had
-        <input type="text" value={whatIHad} onChange={(e) => setWhatIHad(e.target.value)} placeholder="Brisket plate, queso…" style={fieldStyle()} />
-      </label>
-      <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-secondary)" }}>
+      <label style={groupLabel}>
         What was good
-        <input type="text" value={whatWasGood} onChange={(e) => setWhatWasGood(e.target.value)} placeholder="The hamachi, the agedashi…" style={fieldStyle()} />
+        <input type="text" value={whatWasGood} onChange={(e) => setWhatWasGood(e.target.value)} placeholder="The hamachi, the agedashi…" {...noAutofill("visit-highlights")} style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX }} />
       </label>
-      <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-secondary)" }}>
+      <label style={groupLabel}>
         Cost
-        <input type="number" step="0.01" min="0" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="0.00" style={fieldStyle()} />
+        <input type="number" step="0.01" min="0" inputMode="decimal" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="0.00" {...noAutofill("visit-total")} style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX }} />
       </label>
-      <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-secondary)" }}>
+      <label style={groupLabel}>
         Notes
-        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} style={{ ...fieldStyle(), resize: "vertical" }} />
+        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} {...noAutofill("visit-notes")} style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX, resize: "vertical" }} />
       </label>
       <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12.5, color: "var(--text-secondary)" }}>
         Would return?
         <button type="button" onClick={() => setWouldReturn(wouldReturn === true ? null : true)}
-          style={{ border: "1px solid var(--border-default)", borderRadius: RADIUS.pill, padding: "6px 12px", minHeight: 32, cursor: "pointer",
+          style={{ border: "1px solid var(--border-default)", borderRadius: RADIUS.pill, padding: "6px 12px", minHeight: 44, cursor: "pointer",
             background: wouldReturn === true ? "var(--accent-food)" : "transparent",
             color: wouldReturn === true ? "var(--on-accent-food)" : "var(--text-primary)", font: "inherit", fontSize: 12, fontWeight: 700 }}>
           Yes
         </button>
         <button type="button" onClick={() => setWouldReturn(wouldReturn === false ? null : false)}
-          style={{ border: "1px solid var(--border-default)", borderRadius: RADIUS.pill, padding: "6px 12px", minHeight: 32, cursor: "pointer",
+          style={{ border: "1px solid var(--border-default)", borderRadius: RADIUS.pill, padding: "6px 12px", minHeight: 44, cursor: "pointer",
             background: wouldReturn === false ? "var(--chrome-muted)" : "transparent",
             color: "var(--text-primary)", font: "inherit", fontSize: 12, fontWeight: 700 }}>
           No
         </button>
       </div>
-      <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+      {/* Pinned to the bottom of whichever scroller holds the form (the sheet's content area on a
+          phone), so Save stays on screen while typing — with the keyboard up the sheet itself rides
+          above the keyboard (BottomSheet), and this keeps Save inside the visible part of it. */}
+      <div data-testid="visit-form-actions" style={{
+        position: "sticky", bottom: 0, zIndex: 1, display: "flex", gap: 8, padding: "10px 0 14px",
+        background: "var(--surface-raised)", borderTop: "1px solid var(--border-default)",
+      }}>
         <button type="submit" disabled={pending} style={{
           flex: 1, border: "none", borderRadius: RADIUS.md, padding: "10px 0", minHeight: 44, cursor: pending ? "default" : "pointer",
           background: "var(--accent-food)", color: "var(--on-accent-food)", font: "inherit", fontSize: 13.5, fontWeight: 700,
@@ -308,7 +414,7 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, submitLabel 
 function Chip({ label, value }) {
   return (
     <span style={{
-      display: "inline-block", borderRadius: 5, padding: "2px 7px", fontWeight: 700, fontSize: 11.5,
+      display: "inline-block", borderRadius: RADIUS.sm, padding: "2px 7px", fontWeight: 700, fontSize: 11.5,
       background: colorForRating(value), color: textColorForRating(value),
     }}>
       {label} {Number(value)}/{RATING_MAX}
@@ -319,7 +425,7 @@ function Chip({ label, value }) {
 function WouldReturnChip() {
   return (
     <span style={{
-      display: "inline-block", borderRadius: 5, padding: "2px 7px", fontWeight: 700, fontSize: 11.5,
+      display: "inline-block", borderRadius: RADIUS.sm, padding: "2px 7px", fontWeight: 700, fontSize: 11.5,
       background: "var(--surface-page)", border: "1px solid var(--border-default)", color: "var(--text-secondary)",
     }}>
       Would return
@@ -344,7 +450,8 @@ function PanelHeader({ manualNameEditable, manualName, onManualNameChange, name,
         {manualNameEditable ? (
           <input
             type="text" autoFocus value={manualName} onChange={(e) => onManualNameChange(e.target.value)}
-            placeholder="Name this place" style={{ ...fieldStyle(), fontSize: 17, fontWeight: 700 }}
+            placeholder="Name this place" {...noAutofill("pin-label")} enterKeyHint="done" autoCapitalize="words"
+            style={{ ...fieldStyle(), fontSize: 17, fontWeight: 700 }}
           />
         ) : (
           <div style={{ display: "flex", alignItems: "flex-start", gap: 8, minWidth: 0, flex: 1 }}>
@@ -404,7 +511,7 @@ function ScoreStrip({ aggregates, bestDish }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 7 }}>
         {tiles.map((t) => (
           <div key={t.key} style={{
-            borderRadius: 10, padding: "8px 4px", textAlign: "center", border: "1px solid var(--border-default)",
+            borderRadius: RADIUS.lg, padding: "8px 4px", textAlign: "center", border: "1px solid var(--border-default)",
             background: t.hero ? "color-mix(in srgb, var(--accent-food) 14%, var(--surface-page))" : "var(--surface-page)",
           }}>
             <div style={{
@@ -436,7 +543,7 @@ function OrderAgain({ entries }) {
   if (!entries.length) return null;
   return (
     <div data-testid="food-order-again" style={{
-      margin: "6px 16px 0", padding: "9px 11px", borderRadius: 10,
+      margin: "6px 16px 0", padding: "9px 11px", borderRadius: RADIUS.lg,
       background: "color-mix(in srgb, var(--accent-food) 10%, var(--surface-page))", border: "1px solid var(--border-default)",
     }}>
       <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--text-tertiary)" }}>
@@ -597,7 +704,7 @@ function VisitCard({ visit, onDelete, editing, onOpenEdit, onCloseEdit, onSubmit
         <AnchoredMenu
           open={menuOpen} onClose={closeMenu} anchorRef={menuBtnRef} placement="below-right" width={190} gap={4}
           panelStyle={{
-            background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: 10,
+            background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: RADIUS.lg,
             boxShadow: "0 10px 28px rgba(0,0,0,0.22)", padding: 6,
           }}
         >

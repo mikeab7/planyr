@@ -41,8 +41,16 @@
  * guards the snap-settle and ResizeObserver effects so neither of them races this sequence and
  * jumps straight to the target before the two-frame reveal gets to.
  */
+/* ⛔ KEYBOARD (NEW-1, "Food on a phone"): on iOS Safari the on-screen keyboard does NOT shrink the
+ * layout viewport — only `visualViewport` shrinks — so a `position: fixed; bottom: 0` sheet sat
+ * UNDER the keyboard and hid the field being typed into and the Save button. While the keyboard is
+ * up (`keyboardInset`, lib/keyboardInset.js) the sheet lifts by exactly the covered height, goes to
+ * its "full" snap (the most room above the keyboard) and the focused field is scrolled into view.
+ * Measured with a stubbed visualViewport in ui-audit/verify-food-visit-phone.mjs; the real keyboard is
+ * V1476080 (on device). */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { resolveSnap, heightForSnap } from "../lib/bottomSheetSnap.js";
+import { currentKeyboardInset } from "../lib/keyboardInset.js";
 import { publishBottomSheetHeight } from "../../../shared/ui/bottomSheetTracker.js";
 
 const TOP_INSET = 64; // px of the map always left visible above the sheet, even at "full"
@@ -56,12 +64,18 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
   const dragRef = useRef(null); // { startY, startHeight, pointerId } while an active drag is in progress
   const didMountRef = useRef(false);
 
+  const [kbInset, setKbInset] = useState(() => currentKeyboardInset());
+  const kbOpen = kbInset > 0;
   const viewportHeight = () => window.visualViewport?.height || window.innerHeight;
   const contentHeight = () => contentRef.current?.scrollHeight ?? 0;
 
-  const targetFor = useCallback((s) => heightForSnap(s, {
-    contentHeight: contentHeight(), peekHeight, viewportHeight: viewportHeight(), topInset: TOP_INSET,
-  }), [peekHeight]);
+  // Keyboard up -> always the "full" snap: the visible area is already short, so the content-
+  // driven half/peek heights would leave the form cramped above the keyboard.
+  const targetFor = useCallback((s) => heightForSnap(kbOpen ? "full" : s, {
+    contentHeight: contentHeight(), peekHeight, viewportHeight: viewportHeight(), topInset: kbOpen ? 8 : TOP_INSET,
+  // kbInset is read through viewportHeight(); re-derive when it changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [peekHeight, kbOpen, kbInset]);
 
   // The two-frame reveal (see header comment): frame 1 flips transitions on, frame 2 sets the
   // real content-driven target height so the browser has something to animate FROM.
@@ -84,6 +98,30 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
     if (!didMountRef.current || dragRef.current) return;
     setHeightPx(targetFor(snap));
   }, [snap, targetFor]);
+
+  // Track the visual viewport: it shrinks when the keyboard opens and grows back when it closes.
+  // On every change, keep the focused field inside the visible part of the scroller.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return undefined;
+    const onVv = () => {
+      setKbInset(currentKeyboardInset());
+      const el = document.activeElement;
+      if (el && contentRef.current?.contains(el) && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) {
+        requestAnimationFrame(() => el.scrollIntoView?.({ block: "center", behavior: "auto" }));
+      }
+    };
+    vv.addEventListener("resize", onVv);
+    vv.addEventListener("scroll", onVv);
+    return () => { vv.removeEventListener("resize", onVv); vv.removeEventListener("scroll", onVv); };
+  }, []);
+
+  // A field focused while the keyboard is already up (moving between fields) must also be revealed.
+  const onFocusIn = useCallback((e) => {
+    const el = e.target;
+    if (!currentKeyboardInset() || !/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+    requestAnimationFrame(() => el.scrollIntoView?.({ block: "center", behavior: "auto" }));
+  }, []);
 
   useEffect(() => {
     if (!contentRef.current || typeof ResizeObserver === "undefined") return undefined;
@@ -151,14 +189,17 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
       data-testid="food-bottom-sheet"
       data-sheet-snap={snap}
       style={{
-        position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 700,
-        height: heightPx, maxHeight: `calc(100vh - ${TOP_INSET}px)`,
+        position: "fixed", left: 0, right: 0, bottom: kbInset, zIndex: 700,
+        height: heightPx, maxHeight: kbOpen ? viewportHeight() - 8 : `calc(100vh - ${TOP_INSET}px)`,
         background: "var(--surface-raised)", borderTopLeftRadius: 16, borderTopRightRadius: 16,
         boxShadow: "0 -8px 24px rgba(0,0,0,0.22)", display: "flex", flexDirection: "column",
         overflow: "hidden", touchAction: "none",
         transition: animated ? `height ${TRANSITION_MS}ms cubic-bezier(0.2, 0.8, 0.2, 1)` : "none",
-        paddingBottom: "env(safe-area-inset-bottom)",
+        // The home-indicator inset only matters when the sheet touches the screen bottom; with the
+        // keyboard up the keyboard owns that edge.
+        paddingBottom: kbOpen ? 0 : "env(safe-area-inset-bottom)",
       }}
+      onFocus={onFocusIn}
     >
       <div
         data-testid="food-sheet-drag-handle"

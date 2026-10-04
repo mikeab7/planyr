@@ -581,35 +581,12 @@ describe("NEW-4 — food_places_in_bounds_sampled wiring", () => {
  *     snapshot is a lookup he reaches into once zoomed in, never metro-wide content.
  * ═══════════════════════════════════════════════════════════════════════════════════════ */
 describe("NEW-5 (revised) — colourful basemap, no clustering, his places always visible", () => {
-  it("B811520 — FoodMap uses Esri's free, key-less World_Topo_Map tiles — colourful, not the flat-grey Positron, and no CARTO anywhere (watermarked keyless usage, 2026-08-27)", () => {
+  it("NEW-1 — FoodMap carries NO tile URL of its own and no CARTO anywhere: the basemap comes from the shared registry (the Site Plan map), key-less Esri (B811520's watermark lesson stands)", () => {
     const map = src("components/FoodMap.jsx");
-    expect(map).toContain("server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}");
-    expect(map).not.toContain("basemaps.cartocdn.com/light_all");
-    expect(map).not.toMatch(/basemaps\.cartocdn\.com\/rastertiles\/voyager\/\{z\}\/\{x\}\/\{y\}/); // no LIVE cartocdn URL — history-only mentions in comments are fine
-    // Not World_Street_Map — checked live against dense Houston pins and picked against it (see
-    // the header comment); the constant's own url: line is what must not name it.
-    const streetUrlLine = map.slice(map.indexOf("const STREET_TILES = {"), map.indexOf("attribution:", map.indexOf("const STREET_TILES = {")));
-    expect(streetUrlLine).not.toContain("World_Street_Map");
-  });
-
-  it("B811520 — street tile axis order is {z}/{y}/{x}, same as satellite, never Leaflet's own default {z}/{x}/{y} (the exact mistake that crashed the satellite toggle the first time, B634981)", () => {
-    const map = src("components/FoodMap.jsx");
-    const streetBlock = map.slice(map.indexOf("const STREET_TILES = {"), map.indexOf("const STREET_TILES = {") + 400);
-    expect(streetBlock).toMatch(/tile\/\{z\}\/\{y\}\/\{x\}/);
-    expect(streetBlock).not.toMatch(/tile\/\{z\}\/\{x\}\/\{y\}/);
-    expect(streetBlock).not.toMatch(/subdomains/); // no subdomains key — a single ArcGIS host has none (B634981's own lesson)
-    expect(streetBlock).not.toMatch(/url1x/); // Esri tiles have no {r} retina token to strip
-  });
-
-  it("B811520 — the tile attribution credits Esri for BOTH layers, never a standalone OpenStreetMap/CARTO credit (nothing on the page fetches OSM or CARTO tiles any more)", () => {
-    const map = src("components/FoodMap.jsx");
-    const streetBlock = map.slice(map.indexOf("const STREET_TILES = {"), map.indexOf("const STREET_TILES = {") + 900);
-    expect(streetBlock).toMatch(/attribution: "&copy; Esri,/);
-    expect(streetBlock).not.toMatch(/openstreetmap\.org\/copyright/);
-    expect(streetBlock).not.toMatch(/carto\.com\/attributions/);
-    // The live OSM fallback documented for the future is commented-out code, not an active constant.
+    expect(map).not.toMatch(/https?:\/\/[^"'\s]*(arcgisonline|cartocdn|openstreetmap)[^"'\s]*\{z\}/); // no LIVE tile URL template here
+    expect(map).not.toMatch(/\bconst (STREET|SATELLITE|LABELS)_TILES\b/);
     expect(map).not.toMatch(/^const OSM_FALLBACK_TILES/m);
-    expect(map).toMatch(/\/\/\s*const OSM_FALLBACK_TILES = \{/); // present, but commented out
+    expect(map).toMatch(/from "\.\.\/\.\.\/\.\.\/shared\/basemaps\/basemaps\.js"/);
   });
 
   it("clustering is gone — no clusterer module, no import of one, no clustering package added", () => {
@@ -679,38 +656,32 @@ describe("NEW-5 (revised) — colourful basemap, no clustering, his places alway
   });
 });
 
-describe("satellite toggle — one control, two states, reused Esri source, legible pins on imagery", () => {
-  it("ONE toggle button, two states — never a basemap gallery, never a layers panel", () => {
+describe("NEW-1 basemap control — Satellite (default) + Hybrid, one shared source, remembered, legible pins", () => {
+  it("ONE control with exactly the registry's choices — never a gallery, never a layers panel", () => {
     const map = src("components/FoodMap.jsx");
     expect([...map.matchAll(/data-testid="food-basemap-toggle"/g)]).toHaveLength(1);
-    expect(map).toMatch(/setBasemap\(\(b\) => \(b === "satellite" \? "street" : "satellite"\)\)/);
-    expect(map).not.toMatch(/BASEMAP_CHOICES|basemapGallery|LayerPanel/);
+    expect(map).toMatch(/FOOD_BASEMAP_CHOICES\.map\(/);
+    expect(map).not.toMatch(/basemapGallery|LayerPanel/);
   });
 
-  it("the satellite source is duplicated from the Site Planner's Esri World Imagery, not imported — BUNDLE ISOLATION", () => {
+  it("the choice is remembered per device and the new-user default is Satellite", () => {
     const map = src("components/FoodMap.jsx");
-    expect(map).toContain("server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile");
-    expect(map).toMatch(/Imagery &copy; Esri, Maxar/);
-    // No API key, no account, no billing — a bare tile URL, same shape as the street source.
-    expect(map).not.toMatch(/apikey|api_key|access_token/i);
-    // BUNDLE ISOLATION — this file may still import nothing from site-planner, even though it
-    // reuses that module's SOURCE VALUES (copied as literals, not through an import edge).
-    expect(map).not.toMatch(/from\s+["'][^"']*site-planner[^"']*["']/);
+    expect(map).toMatch(/useState\(readStoredBasemap\)/);
+    expect(map).toMatch(/localStorage\.setItem\(BASEMAP_STORAGE_KEY, basemap\)/);
+    expect(map).toMatch(/catch \(_\) \{ return SATELLITE_BASEMAP\.key; \}/);
   });
 
-  it("the two tile sources are swapped WHOLE on toggle (fresh layer + removal), never `setUrl` on a shared layer", () => {
+  it("the tile layers are swapped WHOLE on change (fresh layers + removal), never `setUrl` on a shared layer", () => {
     const map = src("components/FoodMap.jsx");
     const tileEffect = map.slice(map.indexOf("Basemap tile layer"), map.indexOf("}, [basemap]);"));
-    expect(tileEffect).toMatch(/L\.tileLayer\(url,/);
-    expect(tileEffect).toMatch(/map\.removeLayer\(layer\)/); // the cleanup that removes the PREVIOUS layer
+    expect(tileEffect).toMatch(/L\.tileLayer\(spec\.url, spec\.opts\)/);
+    expect(tileEffect).toMatch(/map\.removeLayer\(layer\)/); // the cleanup that removes the PREVIOUS layers
     expect(map).not.toMatch(/\.setUrl\(/);
   });
 
-  it("satellite mode widens the pin's white keyline stroke so the rating ramp stays legible over photo imagery", () => {
+  it("every basemap is imagery, so the pin's wide white keyline always applies and no addPin hardcodes a thin one", () => {
     const map = src("components/FoodMap.jsx");
-    expect(map).toMatch(/const strokeWeight = basemap === "satellite" \? 3 : 2;/);
-    // Every addPin call must use the computed weight (directly, or via the isSelected ternary
-    // that still falls back to it) — never a value hardcoded back to a constant 2.
+    expect(map).toMatch(/const strokeWeight = 3;/);
     const drawEffect = map.slice(map.indexOf("Redraw markers"), map.indexOf("}, [places, loggedPlaces"));
     expect(drawEffect).toMatch(/weight:\s*(strokeWeight|isSelected \? 4 : strokeWeight)/);
     expect(drawEffect).not.toMatch(/weight:\s*2\b/);
@@ -728,52 +699,24 @@ describe("satellite toggle — one control, two states, reused Esri source, legi
  * defect classes — the harness above is the slower, real-browser proof; both exist because a
  * source scan alone would have missed this bug the first time (an `undefined`-valued object key
  * reads as "present" to any regex that only checks the key exists, not what it maps to). */
-describe("satellite crash fix — no explicit undefined subdomains, mirrors the planner's real config, degrades instead of crashing (B634981)", () => {
-  it("subdomains is only added to the tile-layer options when the source actually declares one — never an explicit `subdomains: undefined`", () => {
+describe("basemap crash fix — no explicit undefined subdomains, degrades instead of crashing (B634981, kept through NEW-1)", () => {
+  it("FoodMap hands Leaflet the shared specs' own options verbatim — it never builds a `subdomains` key itself", () => {
     const map = src("components/FoodMap.jsx");
-    expect(map).toMatch(/if \(source\.subdomains\) opts\.subdomains = source\.subdomains;/);
-    // The exact defect shape: an unconditional key in the options OBJECT LITERAL passed to
-    // L.tileLayer, which is `undefined` for a source with no subdomains and clobbers Leaflet's
-    // own internal default rather than leaving it alone.
-    expect(map).not.toMatch(/L\.tileLayer\([^)]*subdomains:\s*source\.subdomains[^)]*\)/s);
-  });
-
-  it("SATELLITE_TILES declares no subdomains key at all — a single ArcGIS host has none, matching the Site Planner's own layer", () => {
-    const map = src("components/FoodMap.jsx");
-    const satelliteBlock = map.slice(map.indexOf("const SATELLITE_TILES"), map.indexOf("const LABELS_TILES"));
-    expect(satelliteBlock).not.toMatch(/subdomains/);
-  });
-
-  it("mirrors the planner's real config: maxZoom 21 with maxNativeZoom 19 (upscale past Esri's native ceiling, never hard-refuse)", () => {
-    const map = src("components/FoodMap.jsx");
-    expect(map).toMatch(/const SATELLITE_TILES = \{[\s\S]{0,300}?maxZoom: 21, maxNativeZoom: 19,/);
-  });
-
-  it("axis order is {z}/{y}/{x} — Y before X, Esri's convention — for BOTH the imagery and the labels overlay", () => {
-    const map = src("components/FoodMap.jsx");
-    const arcgisUrls = [...map.matchAll(/server\.arcgisonline\.com\/ArcGIS\/rest\/services\/[^"]+"/g)].map((m) => m[0]);
-    expect(arcgisUrls.length).toBeGreaterThanOrEqual(2); // imagery + labels
-    for (const url of arcgisUrls) expect(url).toMatch(/\/tile\/\{z\}\/\{y\}\/\{x\}/);
-  });
-
-  it("a faint labels overlay (World_Transportation) is added ONLY in satellite mode, so street names stay readable over the imagery", () => {
-    const map = src("components/FoodMap.jsx");
-    expect(map).toMatch(/Reference\/World_Transportation\/MapServer\/tile/);
-    expect(map).toMatch(/if \(basemap === "satellite"\) \{/);
-    expect(map).toMatch(/L\.tileLayer\(LABELS_TILES\.url/);
+    const tileEffect = map.slice(map.indexOf("Basemap tile layer"), map.indexOf("}, [basemap]);"));
+    expect(tileEffect.replace(/\/\/.*$/gm, "")).not.toMatch(/subdomains/);
   });
 
   it("the tile-layer mount is wrapped in try/catch — a bad config degrades to an 'Imagery unavailable' state, never crashes the module", () => {
     const map = src("components/FoodMap.jsx");
     expect(map).toMatch(/const \[basemapError, setBasemapError\] = useState\(false\);/);
-    expect(map).toMatch(/try \{[\s\S]{0,300}?const opts = \{ maxZoom: source\.maxZoom, attribution: source\.attribution \};/);
+    expect(map).toMatch(/try \{[\s\S]{0,400}?specs\.forEach/);
     expect(map).toMatch(/\} catch \(err\) \{/);
     expect(map).toMatch(/setBasemapError\(true\)/);
     expect(map).toMatch(/data-testid="food-basemap-error"/);
     expect(map).toContain("Imagery unavailable");
   });
 
-  it("a real headless-browser guard exists for this defect class (ui-audit/verify-food-satellite-toggle.mjs) — proven RED on the pre-fix build and GREEN on the fix", () => {
+  it("a real headless-browser guard exists for this defect class (ui-audit/verify-food-satellite-toggle.mjs)", () => {
     expect(existsSync(join(REPO, "ui-audit", "verify-food-satellite-toggle.mjs"))).toBe(true);
   });
 });
@@ -881,16 +824,16 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     expect(box).toMatch(/if \(view !== "map"\) return undefined;/);
   });
 
-  it("his own places (manual pins + logged snapshot places) are ranked ahead of everywhere he hasn't been", () => {
+  it("his own places (manual pins + logged snapshot places) stay in the one ranked list, marked, with a distance head start (B2051664 replaced the old absolute 'mine first' order)", () => {
     const box = src("components/SearchBox.jsx");
-    // The merge order is the ranking: manual matches, then logged snapshot hits, then the rest.
-    const order = box.slice(box.indexOf("const results = ["), box.indexOf("];", box.indexOf("const results = [")));
-    const manualIdx = order.indexOf("manualMatches");
-    const mineIdx = order.indexOf("snapshotRanked.filter((p) => p.mine)");
-    const restIdx = order.indexOf("snapshotRanked.filter((p) => !p.mine)");
-    expect(manualIdx).toBeGreaterThanOrEqual(0);
-    expect(manualIdx).toBeLessThan(mineIdx);
-    expect(mineIdx).toBeLessThan(restIdx);
+    // (B2046224: the list is first folded through mergeSearchRows — one row per restaurant — and THEN ordered by
+    // rankByProximity; see test/foodPlaceIdentity.test.js.)
+    const order = box.slice(box.indexOf("const merged = mergeSearchRows({"), box.indexOf(".slice(0, SHOWN_CAP)"));
+    expect(order).toContain("manualMatches");
+    expect(order).toContain("snapshotRanked");
+    expect(order).toContain("rankByProximity(");
+    expect(box).toMatch(/mine: loggedIds\?\.has\(p\.id\)/);
+    expect(src("lib/searchProximity.js")).toMatch(/MINE_HEAD_START_KM/);
     // And a result carrying `mine` renders a visible "Been here" mark, not just a sort position.
     expect(box).toMatch(/Been here/);
   });
@@ -947,11 +890,16 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     const map = src("components/FoodMap.jsx");
     expect(map).toMatch(/const FLY_DURATION_SEC = 1\.5;/);
     expect(map).toMatch(/duration: FLY_DURATION_SEC/);
-    // Not a bounds-fit — zoomSnap/zoomDelta stay Leaflet's untouched defaults, and the target
-    // zoom passed to flyTo is always a literal integer (Math.max of two integers), never
+    // Not a bounds-fit — the target zoom passed to flyTo is Math.max(current, literal), never
     // computed from a fitBounds call anywhere in this file.
-    expect(map).not.toMatch(/zoomSnap:/);
-    expect(map).not.toMatch(/zoomDelta:/);
+    // NEW-1 (B2016112, owner-approved free pinch zoom): this block USED to assert there is no
+    // `zoomSnap:`/`zoomDelta:` here. That encoded only "the integer-zoom path wasn't the grey-tile
+    // cause" (B651872), never a requirement for integer zoom. The map now spreads
+    // FREE_ZOOM_OPTIONS (zoomSnap 0, zoomDelta 1) so a pinch lands where the fingers stop; the
+    // grey-tile fixes asserted below (fixed flyTo duration, long-jump setView) are independent
+    // of snap and are re-measured with fractional zoom in ui-audit/verify-free-pinch-zoom.mjs.
+    expect(map).toMatch(/\.\.\.FREE_ZOOM_OPTIONS/);
+    expect(map).not.toMatch(/zoomDelta:/); // the +/- step stays Leaflet's 1 via FREE_ZOOM_OPTIONS, never hand-set here
     expect(map).not.toMatch(/\.fitBounds\(/); // no fitBounds CALL anywhere — the word appears only in this item's own explanatory comment
     expect(map).toMatch(/const targetZoom = Math\.max\(map\.getZoom\(\), FLY_TO_ZOOM\);/);
   });
@@ -978,7 +926,7 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     expect(shortBranch).toMatch(/map\.flyTo\(shiftedLatLng, targetZoom, \{ duration: FLY_DURATION_SEC \}\)/);
   });
 
-  it("B811520 — the url1x/retina gate is GONE from the LIVE code, not just unused: Esri's tile URLs (street AND satellite) have no {r} token to strip, so there is nothing left to gate (history-only mentions in prose comments are fine)", () => {
+  it("B811520 — the url1x/retina gate is GONE from the LIVE code, not just unused: Esri's tile URLs have no {r} token to strip, so there is nothing left to gate (history-only mentions in prose comments are fine)", () => {
     const map = src("components/FoodMap.jsx");
     // Neither tile-source object declares a url1x field any more.
     expect(map).not.toMatch(/url1x:\s*"/);
@@ -988,7 +936,7 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     // The gate expression itself is gone from the tile-layer effect — never dead code left behind.
     expect(map).not.toMatch(/narrowViewport && source\.url1x/);
     const tileEffectSrc = map.slice(map.indexOf("Basemap tile layer"), map.indexOf("}, [basemap]);"));
-    expect(tileEffectSrc).toMatch(/const url = source\.url;/);
+    expect(tileEffectSrc).toMatch(/basemapTileLayers\(choice, \{ dpr: window\.devicePixelRatio \|\| 1 \}\)/);
   });
 
   it("B651872 (×4) — a real loading treatment tied to the current tile layer's own events, never silent grey", () => {
@@ -1052,7 +1000,7 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     expect(map).toMatch(/data-testid="food-attribution-text"/);
     const textBlock = map.slice(map.indexOf('data-testid="food-attribution-text"') - 100, map.indexOf('data-testid="food-attribution-text"') + 900);
     expect(textBlock).toMatch(/!narrowViewport/); // desktop only — never gated on anything else
-    expect(textBlock).toMatch(/bottom: 6, right: 10/);
+    expect(textBlock).toMatch(/bottom: 6, right: HELP_CLEARANCE/);
     expect(textBlock).not.toMatch(/onClick/); // not a button — always visible, nothing to expand
     expect(textBlock).toMatch(/dangerouslySetInnerHTML/); // same trusted attribution HTML, not a collapsed affordance
   });
@@ -1062,16 +1010,21 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     expect(map).toMatch(/data-testid="food-attribution-toggle"/);
     const attrBtn = map.slice(map.indexOf('data-testid="food-attribution-toggle"') - 1400, map.indexOf('data-testid="food-attribution-toggle"') + 900);
     expect(attrBtn).toMatch(/narrowViewport/); // gated to mobile, never rendered on desktop too
-    expect(attrBtn).toMatch(/top: ATTRIBUTION_TOGGLE_TOP, right: 12/); // directly under the basemap toggle — never the bottom
-    expect(attrBtn).toMatch(/width: ATTRIBUTION_TOGGLE_SIZE, height: ATTRIBUTION_TOGGLE_SIZE/);
-    expect(attrBtn).toMatch(/borderRadius: "50%"/); // circular, not a rectangular strip
+    // In the SAME flex row as the basemap toggle (one top edge by construction) — never the bottom.
+    expect(attrBtn).toMatch(/top: FLOAT_INSET, right: FLOAT_INSET/);
+    expect(map.indexOf('data-testid="food-attribution-toggle"')).toBeLessThan(map.indexOf('aria-label="Basemap"'));
+    // NEW-1 (food controls) — a standalone control is the shared IconButton (md, SIZE.md height), NOT
+    // a drawn circle; its 44x44 touch target is the primitive's own tap-target hit area.
+    expect(attrBtn).toMatch(/<IconButton/);
+    expect(attrBtn).toMatch(/size=\{ATTRIBUTION_TOGGLE_SIZE\}/);
+    expect(attrBtn).not.toMatch(/borderRadius: "50%"/); // never a circle
     expect(attrBtn).toMatch(/onClick=\{\(\) => setAttributionOpen\(\(o\) => !o\)\}/);
     expect(attrBtn).toMatch(/<InfoGlyph/); // a centred SVG glyph, never a text character
     expect(attrBtn).not.toMatch(/fontStyle:\s*"italic"/);
     expect(attrBtn).not.toMatch(/>\s*i\s*</); // the old literal text "i" glyph is gone
     // The size/position constants themselves: 44x44 (the module's own touch-target minimum,
     // TOUCH_MIN_TAP_RADIUS=22 diameter-equivalent), not the old sub-minimum 28.
-    expect(map).toMatch(/const ATTRIBUTION_TOGGLE_SIZE = 44;/);
+    expect(map).toMatch(/const ATTRIBUTION_TOGGLE_SIZE = SIZE\.md\.height;/);
   });
 
   it("B681520 (×2) — InfoGlyph is a plain SVG whose ink is centred in its own viewBox on both axes, not a font character", () => {
@@ -1093,10 +1046,9 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
   it("expanding the credit shows the CURRENT basemap's real text (never re-typed) — no 'Leaflet' prefix anywhere", () => {
     const map = src("components/FoodMap.jsx");
     expect(map).toMatch(/data-testid="food-attribution-panel"/);
-    expect(map).toMatch(/dangerouslySetInnerHTML=\{\{ __html: basemap === "satellite" \? SATELLITE_TILES\.attribution : STREET_TILES\.attribution \}\}/);
+    expect(map).toMatch(/dangerouslySetInnerHTML=\{\{ __html: basemapAttribution\(resolveBasemapChoice\(basemap\)\) \}\}/);
     // Sourced from the SAME constants already passed to Leaflet's own `attribution` option —
     // never a second, hand-typed copy that could drift.
-    expect(map).toMatch(/attribution: source\.attribution/); // still fed to the tileLayer options too (harmless, nothing reads it now)
     // Never Leaflet's own `L.control.attribution`/`prefix` mechanism — that's exactly what
     // rendered the unwanted "Leaflet |" text the owner screenshotted (quoted in the header
     // comment above, which is why this checks for the CALL, not the substring).
@@ -1120,9 +1072,13 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     // All three now live inside the SAME wrapper, between the map host and the loading pill —
     // no more top:12 notices or a narrowViewport-conditional top/bottom split for the button.
     const stackStart = map.indexOf("NEW-1 (2nd owner block, 2026-08-23) — the zoom-gate notice");
-    const stackEnd = map.indexOf("food-tiles-loading");
+    // NEW-1 (food controls): the loading + imagery-unavailable statuses JOINED this stack (they were
+    // lone top-corner chips), so the stack now ends at the basemap toggle that follows it.
+    const stackEnd = map.indexOf('aria-label="Basemap"');
     expect(stackStart).toBeGreaterThanOrEqual(0);
     const stack = map.slice(stackStart, stackEnd);
+    expect(stack).toMatch(/data-testid="food-tiles-loading"/);
+    expect(stack).toMatch(/data-testid="food-basemap-error"/);
     expect(stack).toMatch(/data-testid="food-zoomed-out-notice"/);
     expect(stack).toMatch(/data-testid="food-capped-notice"/);
     expect(stack).toMatch(/data-testid="food-search-here"/);
@@ -1380,7 +1336,8 @@ describe("selected-place highlight — unmistakable pin, tied panel, centred pan
   it("the fly-to pan offsets the destination by half the panel's width — lands in the VISIBLE area, not the raw map centre", () => {
     const map = src("components/FoodMap.jsx");
     expect(map).toMatch(/const PANEL_WIDTH = 340;/); // matches VisitPanel's own literal width
-    expect(map).toMatch(/const panelOffsetPx = Math\.min\(PANEL_WIDTH, containerWidth \* 0\.8\) \/ 2;/);
+    // Desktop keeps the right-rail shift; on a phone the panel is a bottom sheet, so no horizontal shift (B2046224).
+    expect(map).toMatch(/const panelOffsetPx = narrowViewport \? 0 : Math\.min\(PANEL_WIDTH, containerWidth \* 0\.8\) \/ 2;/);
     expect(map).toMatch(/map\.project\(\[flyToTarget\.lat, flyToTarget\.lon\], targetZoom\)/);
     expect(map).toMatch(/targetPoint\.add\(\[panelOffsetPx, 0\]\)/);
     expect(map).toMatch(/map\.flyTo\(shiftedLatLng, targetZoom, \{ duration: FLY_DURATION_SEC \}\)/);
@@ -1427,8 +1384,8 @@ describe("ambiance rating — a second, independent 1-10 rating; the map pin sta
     const panel = src("components/VisitPanel.jsx");
     const sliderUsages = [...panel.matchAll(/<RatingSlider /g)];
     expect(sliderUsages.length).toBe(2);
-    expect(panel).toMatch(/Food\s*<RatingSlider value=\{rating\} onChange=\{setRating\} label="Food rating" \/>/);
-    expect(panel).toMatch(/Ambiance\s*<RatingSlider value=\{ratingAmbiance\} onChange=\{setRatingAmbiance\} label="Ambiance rating" \/>/);
+    expect(panel).toMatch(/Food\s*<RatingSlider value=\{rating\} onChange=\{setRating\} label="Food rating" isMobile=\{isMobile\} \/>/);
+    expect(panel).toMatch(/Ambiance\s*<RatingSlider value=\{ratingAmbiance\} onChange=\{setRatingAmbiance\} label="Ambiance rating" isMobile=\{isMobile\} \/>/);
     expect(panel).not.toMatch(/>Rating</); // the old ambiguous bare label is gone
   });
 
@@ -1634,7 +1591,7 @@ describe("B668194 — a successful visit save clears the form; a failed one keep
     const submitVisitFn = app.slice(app.indexOf("const submitVisit = useCallback"), app.indexOf("const removeVisit = useCallback"));
     // The optimistic push happens BEFORE the await — i.e. before the network round-trip, not after.
     const optimisticIdx = submitVisitFn.indexOf("setVisits((v) => [optimisticVisit, ...v]);");
-    const awaitIdx = submitVisitFn.indexOf("const { error: err } = await insertVisit(payload);");
+    const awaitIdx = submitVisitFn.indexOf("const { data: savedVisit, error: err } = await insertVisit(payload);");
     expect(optimisticIdx).toBeGreaterThanOrEqual(0);
     expect(awaitIdx).toBeGreaterThan(optimisticIdx);
     // The optimistic id has a shape that can NEVER collide with a real row's uuid, so the
@@ -1649,14 +1606,14 @@ describe("B668194 — a successful visit save clears the form; a failed one keep
   it("VisitForm awaits the result and resets every field ONLY on success — a failed save leaves everything typed", () => {
     const panel = src("components/VisitPanel.jsx");
     expect(panel).toMatch(/const submit = async \(e\) => \{/);
-    expect(panel).toMatch(/const saved = await onSubmit\(\{/);
+    expect(panel).toMatch(/const saved = await onSubmit\(fields\);/);
     expect(panel).toMatch(/if \(saved\) \{/);
     const resetBlock = panel.slice(panel.indexOf("if (saved) {"), panel.indexOf("if (saved) {") + 400);
     expect(resetBlock).toMatch(/setRating\(null\);/);
     expect(resetBlock).toMatch(/setRatingAmbiance\(null\);/);
     expect(resetBlock).toMatch(/setCost\(""\);/);
     expect(resetBlock).toMatch(/setVisitedOn\(""\);/);
-    expect(resetBlock).toMatch(/setWhatIHad\(""\);/);
+    expect(resetBlock).toMatch(/setDishRows\(/); // NEW-1: the dish drafts reset too (the old "What I had" box is gone)
     expect(resetBlock).toMatch(/setWhatWasGood\(""\);/);
     expect(resetBlock).toMatch(/setNotes\(""\);/);
     expect(resetBlock).toMatch(/setWouldReturn\(null\);/);
@@ -1666,7 +1623,7 @@ describe("B668194 — a successful visit save clears the form; a failed one keep
     const panel = src("components/VisitPanel.jsx");
     // The reset calls appear exactly once each, all inside the `if (saved)` block (checked above)
     // — not duplicated at the top of submit() where they'd run before the save even resolves.
-    for (const setter of ["setRating(null)", "setCost(\"\")", "setWhatIHad(\"\")"]) {
+    for (const setter of ["setRating(null)", "setCost(\"\")", "setWhatWasGood(\"\")"]) {
       const count = panel.split(setter).length - 1;
       expect(count).toBe(1);
     }
@@ -1679,17 +1636,18 @@ describe("B668195 — no emoji glyphs in the food map view controls (plain text 
   // range a naive emoji regex would need to sweep) as a false positive.
   const TARGET_EMOJI = ["📍", "🔍", "🗺", "🛰"];
 
-  it("FoodMap.jsx: no emoji in the search-here button, or the street/satellite basemap toggle", () => {
+  it("FoodMap.jsx: no emoji in the search-here button, or the basemap control", () => {
     const map = src("components/FoodMap.jsx");
     for (const glyph of TARGET_EMOJI) expect(map).not.toContain(glyph);
     expect(map).toContain("Search live for more here");
-    expect(map).toMatch(/\{basemap === "satellite" \? "Street" : "Satellite"\}/);
+    expect(map).toMatch(/label: c\.label/); // the basemap SegmentedControl's options carry the plain text labels
   });
 
   it("FoodApp.jsx: no emoji on the Drop a pin toolbar button", () => {
     const app = src("FoodApp.jsx");
     for (const glyph of TARGET_EMOJI) expect(app).not.toContain(glyph);
-    expect(app).toMatch(/\{pinMode \? "Click the map…" : "Drop a pin"\}/);
+    // Plain text labels only — a shorter pair on a phone so the toolbar fits one screen (B2046224).
+    expect(app).toMatch(/\{pinMode \? \(narrow \? "Tap map" : "Click the map…"\) : \(narrow \? "Pin" : "Drop a pin"\)\}/);
   });
 
   it("SearchBox.jsx: no emoji on the live-search or drop-a-pin fallback rows in the dropdown", () => {
@@ -1713,10 +1671,13 @@ describe("B668195 — no emoji glyphs in the food map view controls (plain text 
 
   it("button padding was widened where an emoji was removed, so tap targets don't shrink", () => {
     const map = src("components/FoodMap.jsx");
-    expect(map).toMatch(/padding: "7px 20px"/); // search-here (was 7px 16px)
-    expect(map).toMatch(/padding: "7px 18px"/); // basemap toggle (was 7px 14px)
+    // NEW-1 (food controls): the three controls now take the app's ONE standalone-control size
+    // (SIZE.md: 30 high, 12px side padding) from the shared primitives instead of three private
+    // paddings — still a >=30px-tall target, and uniform instead of 7/20, 7/14 and 6/14.
+    expect(map).toMatch(/height: SIZE\.md\.height, padding: SIZE\.md\.padding/); // search-here
+    expect(map).toMatch(/<SegmentedControl/); // basemap control segments
     const app = src("FoodApp.jsx");
-    expect(app).toMatch(/padding: "6px 14px"/); // drop-a-pin toolbar button (was 6px 12px)
+    expect(app).toMatch(/padding: SIZE\.md\.padding/); // drop-a-pin toolbar button
   });
 });
 
@@ -1934,9 +1895,9 @@ describe("FoodApp — wishlist state, exclusion of already-visited, and auto-cle
 
   it("toggleWishlist is one click on, one click off — inserts when absent, removes when present, for a place, an existing manual pin, or a not-yet-saved new pin", () => {
     const toggle = app.slice(app.indexOf("const toggleWishlist = useCallback"), app.indexOf("const removeVisit = useCallback"));
-    expect(toggle).toMatch(/existing \? await removeWishlist\(existing\.id\) : await addWishlist\(/);
+    expect(toggle).toMatch(/flagged \? await removeWishlist\(flagged\.id\) : await addWishlist\(/);
     // Requires a name before flagging a brand-new dropped pin — same validation submitVisit uses.
-    expect(toggle).toMatch(/if \(!name \|\| !name\.trim\(\)\) \{ setError\("Give this place a name first\."\); return; \}/);
+    expect(toggle).toMatch(/\} else \{ setError\("Give this place a name first\."\); return; \}/);
   });
 
   it("wires the wishlist toggle and state into VisitPanel, wishlistIds into SearchBox, and both wishlist pin lists into FoodMap", () => {
@@ -1995,11 +1956,11 @@ describe("VisitPanel — the 'Want to try' toggle, reachable with zero visits", 
 describe("VisitList — 'Want to try' shortlist filter chip, same visual pattern as the sort row", () => {
   const list = src("components/VisitList.jsx");
 
-  it("is a FILTER toggle (local state, not a sort), reusing fieldStyle() — never a new control style", () => {
+  it("is a FILTER toggle (local state, not a sort), reusing the shared ToggleChip primitive — never a new control style", () => {
     expect(list).toMatch(/const \[shortlistOnly, setShortlistOnly\] = useState\(false\);/);
     expect(list).toMatch(/if \(shortlistOnly\) filtered = filtered\.filter\(\(v\) => v\.isWishlist\);/);
-    const button = list.slice(list.indexOf('data-testid="food-list-shortlist-filter"') - 200, list.indexOf('data-testid="food-list-shortlist-filter"') + 300);
-    expect(button).toMatch(/\.\.\.fieldStyle\(\),/);
+    const button = list.slice(list.indexOf('data-testid="food-list-shortlist-filter"') - 400, list.indexOf('data-testid="food-list-shortlist-filter"') + 300);
+    expect(button).toMatch(/<ToggleChip/);
   });
 
   it("shows a distinct empty-state message when the shortlist filter is on and empty", () => {
@@ -2245,7 +2206,7 @@ describe("BottomSheet.jsx — a generic drag-to-resize primitive, content-agnost
   });
 
   it("respects the iOS safe-area inset at the bottom", () => {
-    expect(sheet).toMatch(/paddingBottom:\s*"env\(safe-area-inset-bottom\)"/);
+    expect(sheet).toMatch(/paddingBottom:\s*kbOpen \? 0 : "env\(safe-area-inset-bottom\)"/); // NEW-1: the keyboard owns the bottom edge while it is up
   });
 
   it("the drag handle's own hit area is at least 44 CSS px tall", () => {
@@ -2262,7 +2223,7 @@ describe("BottomSheet.jsx — a generic drag-to-resize primitive, content-agnost
   });
 
   it("the sheet is positioned fixed to the viewport bottom, above the map's own z-index", () => {
-    expect(sheet).toMatch(/position:\s*"fixed",\s*left:\s*0,\s*right:\s*0,\s*bottom:\s*0,\s*zIndex:\s*700/);
+    expect(sheet).toMatch(/position:\s*"fixed",\s*left:\s*0,\s*right:\s*0,\s*bottom:\s*kbInset,\s*zIndex:\s*700/);
   });
 
   it("uses resolveSnap/heightForSnap from the pure lib file, not inline duplicate math", () => {
@@ -2511,7 +2472,7 @@ describe("VisitPanel — edit a past visit: reuses VisitForm, opens via card tap
     expect(formBody).toMatch(/useState\(\(\) => \(initial\?\.rating != null \? Number\(initial\.rating\) : null\)\)/);
     expect(formBody).toMatch(/useState\(\(\) => \(initial\?\.rating_ambiance != null \? Number\(initial\.rating_ambiance\) : null\)\)/);
     expect(formBody).toMatch(/useState\(\(\) => \(initial\?\.cost != null \? String\(initial\.cost\) : ""\)\)/);
-    expect(formBody).toMatch(/useState\(\(\) => initial\?\.what_i_had \|\| ""\)/);
+    expect(formBody).not.toMatch(/useState\(\(\) => initial\?\.what_i_had/); // NEW-1: no editable "What I had"; the saved text is shown read-only
     expect(formBody).toMatch(/useState\(\(\) => initial\?\.what_was_good \|\| ""\)/);
     expect(formBody).toMatch(/useState\(\(\) => initial\?\.notes \|\| ""\)/);
     expect(formBody).toMatch(/useState\(\(\) => initial\?\.would_return \?\? null\)/);
@@ -2882,8 +2843,8 @@ describe("searchQuality — rankSearchCandidates (the full pipeline, against rea
     expect(out[1].id).toBe(KATY_INC.id);
   });
 
-  it("a place he's already logged or flagged is exempt from the strong-match filter and is never dropped by dedupe", () => {
-    const weakButLogged = { id: "weak-logged", name: "Somewhere Odd", address: "", sim: 0.2, distance_km: 1,
+  it("a place he's already logged or flagged still has to match the query (NEW-2) but is never dropped by dedupe", () => {
+    const weakButLogged = { id: "weak-logged", name: "Fadis Odd Spot", address: "", sim: 0.2, distance_km: 1,
       confidence: 0.6, lat: BINZ_LLC.lat, lon: BINZ_LLC.lon }; // co-located with BINZ_LLC — would normally collapse away
     const out = rankSearchCandidates("fadis", [BINZ_LLC, weakButLogged], new Set(["weak-logged"]));
     expect(out.map((r) => r.id)).toContain("weak-logged");
@@ -3264,16 +3225,17 @@ describe("ScoreMeter — REDESIGN (NEW-1, 2026-09-28): QUARTER-point steps, minu
     expect(DISH_SCORE_TICKS).toEqual([1, 3, 5, 7, 9, 10]);
   });
 
-  it("⛔ STILL exactly ONE <input type=\"range\"> and no per-value <button> grid — the owner already rejected 'individual buttons for 20 options' for the visit rating (2026-08-18); the minus/plus NUDGE buttons step the existing slider, they are not that rejected shape", () => {
+  it("⛔ STILL exactly ONE <input type=\"range\"> (desktop) — the per-value button grid exists ONLY on a phone (NEW-1 'Food on a phone': the owner asked for one-tap rating on a thumb); desktop keeps the slider + 3 buttons", () => {
     const meter = src("components/ScoreMeter.jsx");
     const body = meter.slice(meter.indexOf("export default function ScoreMeter"));
-    const rangeInputs = body.match(/type="range"/g) || [];
-    expect(rangeInputs).toHaveLength(1);
+    expect(body.match(/type="range"/g) || []).toHaveLength(1);
     // The tick-label .map() renders plain <span> ticks, never a button grid.
     const ticksMapStart = body.indexOf("DISH_SCORE_TICKS.map");
     expect(body.slice(ticksMapStart, ticksMapStart + 300)).not.toMatch(/<button/);
-    // Exactly three real <button> elements total (minus, plus, Clear) — never one per score stop.
-    expect((body.match(/<button/g) || []).length).toBe(3);
+    // The whole-point grid is a separate component rendered only behind `isMobile`.
+    expect(body).toMatch(/\{isMobile \? \(\s*<>\s*<ScoreTapGrid/);
+    // Buttons: phone minus/plus + desktop minus/plus + Clear = 5 — never one per score stop here.
+    expect((body.match(/<button/g) || []).length).toBe(5);
     expect(meter).toMatch(/step=\{DISH_SCORE_STEP\}/);
   });
 

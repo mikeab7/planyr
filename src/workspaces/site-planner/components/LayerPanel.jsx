@@ -215,9 +215,12 @@ export default function LayerPanel({
   const slotOutOfState = (slot) => (slot.kind === "merge"
     ? slot.members.length > 0 && slot.members.every(([, cfg]) => outOfState(cfg))
     : outOfState(slot.entry[1]));
-  const STATE_NAME = { TX: "Texas", CO: "Colorado", FL: "Florida", GA: "Georgia" };
+  const STATE_NAME = { TX: "Texas", CO: "Colorado", FL: "Florida", GA: "Georgia", CA: "California" };
   const hereName = STATE_NAME[siteState] || "this state";
   const outOfStateReason = (cfg) => {
+    // NEW-1 (Georgia) — a layer can say the concept does not EXIST in this state (Georgia has no ETJ),
+    // which is a different fact from "no equivalent is wired yet".
+    if (cfg?.noEquivalentIn && cfg.noEquivalentIn[siteState]) return cfg.noEquivalentIn[siteState];
     const only = (cfg.states || []).map((c) => STATE_NAME[c] || c).join(" / ");
     return `${only}-only — no ${hereName} equivalent is wired yet. Not a finding: it is a gap in what Planyr carries here.`;
   };

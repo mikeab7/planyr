@@ -11,8 +11,10 @@
  * (lib/supabaseClient.js) instead of reusing site-planner's, so this route's bundle can never
  * grow because a planner file changed.
  */
+import { warmSearchPath } from "./lib/warmSearch.js";
+import { supabase, SUPABASE_ORIGIN } from "./lib/supabaseClient.js";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import AppHeader from "../../shared/ui/AppHeader.jsx";
+import AppHeader, { useNarrow } from "../../shared/ui/AppHeader.jsx";
 import FoodMap from "./components/FoodMap.jsx";
 import VisitPanel from "./components/VisitPanel.jsx";
 import VisitList from "./components/VisitList.jsx";
@@ -27,9 +29,12 @@ import {
 } from "./lib/foodStore.js";
 import { withVisitDate, matchingOpenDishWishlist } from "./lib/dishAggregates.js";
 import { searchOverpass } from "./lib/overpass.js";
+import { existingRestaurants, findExisting, canonicalIdentity } from "./lib/placeIdentity.js";
 import { RADIUS } from "../../shared/ui/radius.js";
+import { Button, SegmentedControl, SIZE } from "../../shared/ui/controls.jsx";
 
 export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, authControl, accountActive, userId }) {
+  const narrow = useNarrow(); // phone width — the toolbar must fit ONE screen (B2046224)
   const [view, setView] = useState("map"); // "map" | "list"
   const [bounds, setBounds] = useState(null);
   const [places, setPlaces] = useState([]);
@@ -59,6 +64,12 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   // flyNonceRef's own pattern. Never collides with a real row's uuid (a distinct "optimistic-N"
   // shape), so filtering it back out on rollback can never accidentally remove a real visit.
   const optimisticIdRef = useRef(0);
+
+  // B2021648 — once per page load, take the cold-start steps off the first search (lib/warmSearch.js).
+  useEffect(() => {
+    if (!supabaseConfigured()) return;
+    warmSearchPath({ supabase, search: searchPlacesByName, doc: document, origin: SUPABASE_ORIGIN });
+  }, []);
 
   // Places in the current map viewport — public read, works signed out too.
   useEffect(() => {
@@ -154,6 +165,13 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     [manualWishlistAll, manualPinKeys]
   );
 
+  // Everything he already HAS, flat — the one list search-merge, open-existing and the save guard all
+  // match against (B2046224; lib/placeIdentity.js).
+  const existing = useMemo(
+    () => existingRestaurants({ manualPins, wishlistManualPins, loggedPlaces, wishlistPlaces }),
+    [manualPins, wishlistManualPins, loggedPlaces, wishlistPlaces]
+  );
+
   const visitsForSelected = useMemo(() => {
     if (!selected) return [];
     if (selected.kind === "place") return visits.filter((v) => v.place_id === selected.place.id);
@@ -191,8 +209,16 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   // date all null, matching how the table already renders a visit that never set them) and
   // `isWishlist: true`, which VisitList's own shortlist filter chip reads.
   const listRows = useMemo(() => {
+    // NEW-1: the list's "Had" column shows the dishes rated at each visit; old visits that only
+    // have the saved free-text `what_i_had` fall back to it in VisitList (nothing is lost).
+    const dishNamesByVisit = new Map();
+    for (const d of dishes) {
+      if (!dishNamesByVisit.has(d.visit_id)) dishNamesByVisit.set(d.visit_id, []);
+      dishNamesByVisit.get(d.visit_id).push(d.name);
+    }
     const visitRows = visits.map((v) => ({
       ...v,
+      dishNames: (dishNamesByVisit.get(v.id) || []).join(", "),
       placeName: v.place_id ? (placeNames[v.place_id]?.name || "…") : v.custom_name,
       isWishlist: false,
     }));
@@ -206,10 +232,18 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
         isWishlist: true,
       }));
     return [...visitRows, ...wishlistOnlyRows];
-  }, [visits, wishlist, placeNames, loggedIds, manualPinKeys]);
+  }, [visits, dishes, wishlist, placeNames, loggedIds, manualPinKeys]);
 
-  const openPlace = useCallback((place) => { setSelected({ kind: "place", place }); setError(null); }, []);
   const openManualPin = useCallback((pin) => { setSelected({ kind: "manualPin", pin }); setError(null); }, []);
+  // B2046224 — opening a snapshot place that is really a restaurant he ALREADY has (a manual pin, or
+  // a place he's logged under another record) opens THAT one, so its past visits show and a save
+  // lands on the existing record instead of minting a second.
+  const openPlace = useCallback((place) => {
+    const hit = findExisting(place, existing);
+    if (hit?.kind === "manual") { setSelected({ kind: "manualPin", pin: hit.ref }); setError(null); return; }
+    if (hit?.kind === "place" && hit.ref.id !== place.id) { setSelected({ kind: "place", place: { ...place, ...hit.ref, address: place.address ?? hit.ref.address } }); setError(null); return; }
+    setSelected({ kind: "place", place }); setError(null);
+  }, [existing]);
   const dropPin = useCallback((lat, lon) => {
     setSelected({ kind: "newPin", lat, lon });
     // manualDraftName is NOT reset here — startDropPinFor (below) may have pre-seeded it from
@@ -247,19 +281,24 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   // B668194 — returns whether the save actually succeeded, so VisitForm can clear its own
   // fields ONLY on a confirmed write (see VisitPanel.jsx's header comment) rather than leaving
   // stale text sitting in the boxes, or clearing it before a failed save is even known about.
-  const submitVisit = useCallback(async (fields) => {
+  const submitVisit = useCallback(async (allFields) => {
     if (!selected) return false;
+    // NEW-1 (Food on a phone): a new visit now carries its DISHES. They are not columns of
+    // food_visits — peeled off here and written to food_dishes once the visit exists (a dish needs
+    // its visit's id). `fields` is exactly what the visit row stored before.
+    const { dishes: draftDishes = [], ...fields } = allFields;
     setPending(true); setError(null);
-    const payload = selected.kind === "place"
-      ? { place_id: selected.place.id, ...fields }
-      : selected.kind === "manualPin"
-        ? { place_id: null, custom_name: selected.pin.name, custom_lat: selected.pin.lat, custom_lon: selected.pin.lon, ...fields }
-        : { place_id: null, custom_name: manualDraftName || "Unnamed place", custom_lat: selected.lat, custom_lon: selected.lon, ...fields };
     if (selected.kind === "newPin" && !manualDraftName.trim()) {
       setPending(false);
       setError("Give this place a name first.");
       return false;
     }
+    // B2046224 — the SAVE-PATH GUARD: whatever the selection says, the write lands on the restaurant
+    // he already has when one matches (canonicalIdentity), so no route can mint a second record for
+    // the same place. A manual identity always carries place_id:null; a place identity carries no
+    // custom_* — exactly the two shapes the table already holds.
+    const ident = canonicalIdentity(selected, manualDraftName.trim() || "Unnamed place", existing);
+    const payload = { place_id: null, ...ident, ...fields };
     // NEW-1 (2026-08-27 owner block, verbatim: "when I click log this visit, it should not make
     // it seem like nothing happened") — OPTIMISTIC add, so the Past-visits list, the aggregates,
     // the panel's own visited/not-visited state, and the map pin (a hollow want-to-try pin
@@ -271,13 +310,47 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     const optimisticVisit = { ...payload, id: optimisticId, created_at: new Date().toISOString() };
     setVisits((v) => [optimisticVisit, ...v]);
 
-    const { error: err } = await insertVisit(payload);
-    setPending(false);
+    const { data: savedVisit, error: err } = await insertVisit(payload);
     if (err) {
+      setPending(false);
       setVisits((v) => v.filter((x) => x.id !== optimisticId)); // rollback — never a phantom visit
       setError(err.message || "Couldn't save that visit.");
       return false;
     }
+    // The dishes, all-or-nothing from the person's side (LOUD-FAILURE): if any dish fails to
+    // write, the just-created visit is removed again and the form stays open with everything
+    // still typed, so a retry can't leave a half-logged visit or a duplicate.
+    if (draftDishes.length) {
+      const written = [];
+      let dishErr = null;
+      for (const d of draftDishes) {
+        const { data: row, error: e } = await insertDish({ ...d, visit_id: savedVisit.id });
+        if (e) { dishErr = e; break; }
+        written.push(row);
+      }
+      if (dishErr) {
+        const { error: undoErr } = await deleteVisit(savedVisit.id);
+        setPending(false);
+        setVisits((v) => v.filter((x) => x.id !== optimisticId));
+        await reloadVisits(); await reloadDishes();
+        setError(undoErr
+          ? `A dish didn't save (${dishErr.message || "unknown error"}) and the visit couldn't be undone — check this place's visits before saving again.`
+          : `A dish didn't save (${dishErr.message || "unknown error"}), so nothing was logged. Your entries are still here — try Save again.`);
+        return false;
+      }
+      // A saved dish whose name matches an open "want to try" dish at this place strikes it done
+      // (same rule saveDish applies to a dish added from place detail).
+      const identity = payload.place_id
+        ? { placeId: payload.place_id }
+        : { customName: payload.custom_name, customLat: payload.custom_lat, customLon: payload.custom_lon };
+      for (const row of written) {
+        const match = matchingOpenDishWishlist(dishWishlist, identity, row?.name, manualGroupKey);
+        if (match) await markDishDone(match.id, true);
+      }
+      await reloadDishes();
+      await reloadDishWishlist();
+    }
+    setPending(false);
     // First visit at a flagged place clears the flag automatically (B669312, owner: "do not
     // prompt") — it's no longer a want-to-try once he's actually been. Matched by place_id, or
     // by the manual pin's own (name, lat, lon) key for a dropped/manual pin.
@@ -289,7 +362,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     await reloadWishlist();
     if (selected.kind === "newPin") setSelected(null); // the pin now exists as a manual pin; close and let it re-render from data
     return true;
-  }, [selected, manualDraftName, reloadVisits, reloadWishlist, wishlist]);
+  }, [selected, manualDraftName, reloadVisits, reloadWishlist, wishlist, existing, reloadDishes, reloadDishWishlist, dishWishlist]);
 
   // "Want to try" toggle (B669312) — one click on, one click off, working for a snapshot place,
   // an existing manual pin, or a brand-new dropped pin not yet saved anywhere (which needs a
@@ -297,22 +370,22 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   const toggleWishlist = useCallback(async () => {
     if (!selected || !accountActive) return;
     setError(null);
-    if (selected.kind === "place") {
-      const existing = wishlist.find((w) => w.place_id === selected.place.id);
-      const { error: err } = existing ? await removeWishlist(existing.id) : await addWishlist({ place_id: selected.place.id });
-      if (err) { setError(err.message || "Couldn't update that flag."); return; }
-    } else {
-      const name = selected.kind === "manualPin" ? selected.pin.name : manualDraftName;
-      const lat = selected.kind === "manualPin" ? selected.pin.lat : selected.lat;
-      const lon = selected.kind === "manualPin" ? selected.pin.lon : selected.lon;
-      if (!name || !name.trim()) { setError("Give this place a name first."); return; }
-      const key = manualGroupKey(name, lat, lon);
-      const existing = wishlist.find((w) => !w.place_id && manualGroupKey(w.custom_name, w.custom_lat, w.custom_lon) === key);
-      const { error: err } = existing ? await removeWishlist(existing.id) : await addWishlist({ custom_name: name, custom_lat: lat, custom_lon: lon });
-      if (err) { setError(err.message || "Couldn't update that flag."); return; }
-    }
+    if (selected.kind !== "newPin" || manualDraftName.trim()) {
+      // B2046224 — same guard as submitVisit: flag the restaurant he already has, never a twin.
+      const ident = canonicalIdentity(selected, manualDraftName.trim(), existing);
+      if (ident.place_id) {
+        const flagged = wishlist.find((w) => w.place_id === ident.place_id);
+        const { error: err } = flagged ? await removeWishlist(flagged.id) : await addWishlist({ place_id: ident.place_id });
+        if (err) { setError(err.message || "Couldn't update that flag."); return; }
+      } else {
+        const key = manualGroupKey(ident.custom_name, ident.custom_lat, ident.custom_lon);
+        const flagged = wishlist.find((w) => !w.place_id && manualGroupKey(w.custom_name, w.custom_lat, w.custom_lon) === key);
+        const { error: err } = flagged ? await removeWishlist(flagged.id) : await addWishlist({ custom_name: ident.custom_name, custom_lat: ident.custom_lat, custom_lon: ident.custom_lon });
+        if (err) { setError(err.message || "Couldn't update that flag."); return; }
+      }
+    } else { setError("Give this place a name first."); return; }
     await reloadWishlist();
-  }, [selected, accountActive, wishlist, manualDraftName, reloadWishlist]);
+  }, [selected, accountActive, wishlist, manualDraftName, reloadWishlist, existing]);
 
   const removeVisit = useCallback(async (id) => {
     const { error: err } = await deleteVisit(id);
@@ -450,38 +523,29 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
         showModuleTabs={false}
         multiEditOk
         toolbarContent={
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ display: "flex", border: "1px solid var(--border-default)", borderRadius: 8, overflow: "hidden" }}>
-              {["map", "list"].map((v) => (
-                <button
-                  key={v} type="button" onClick={() => setView(v)} aria-pressed={view === v}
-                  style={{
-                    border: "none", padding: "6px 14px", cursor: "pointer", font: "inherit", fontSize: 12.5, fontWeight: 700,
-                    background: view === v ? "var(--accent-food)" : "transparent",
-                    color: view === v ? "var(--on-accent-food)" : "var(--text-primary)",
-                  }}
-                >
-                  {v === "map" ? "Map" : "List"}
-                </button>
-              ))}
-            </div>
+          // NEW-1 (food controls) — ONE row that fits its slot (width 100%, min-width 0) so the search
+          // field takes whatever the Map/List switch and the pin button leave, instead of a fixed
+          // width that ran off a phone's right edge. The switch is the shared SegmentedControl (the same
+          // one the basemap toggle on the map uses) and the pin button is the shared Button — no
+          // hand-built control in this row.
+          <div style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", minWidth: 0 }}>
+            <SegmentedControl
+              aria-label="View" accent="var(--accent-food)" onAccent="var(--on-accent-food)"
+              options={[{ key: "map", label: "Map" }, { key: "list", label: "List" }]} value={view} onChange={setView}
+            />
             {view === "map" && (
-              <button
-                type="button" onClick={togglePinMode} aria-pressed={pinMode}
-                title="Drop a pin for a place not on the map"
-                style={{
-                  border: "1px solid var(--border-default)", borderRadius: RADIUS.md, padding: "6px 14px", cursor: "pointer",
-                  font: "inherit", fontSize: 12.5, fontWeight: 700,
-                  background: pinMode ? "var(--accent-food)" : "transparent",
-                  color: pinMode ? "var(--on-accent-food)" : "var(--text-primary)",
-                }}
+              <Button
+                variant="ghost" active={pinMode} onClick={togglePinMode} aria-pressed={pinMode}
+                accent="var(--accent-food)" onAccent="var(--on-accent-food)"
+                title="Drop a pin for a place not on the map" aria-label="Drop a pin for a place not on the map"
+                style={{ flex: "none", height: SIZE.md.height, padding: SIZE.md.padding, whiteSpace: "nowrap" }}
               >
-                {pinMode ? "Click the map…" : "Drop a pin"}
-              </button>
+                {pinMode ? (narrow ? "Tap map" : "Click the map…") : (narrow ? "Pin" : "Drop a pin")}
+              </Button>
             )}
             <SearchBox
               query={searchQuery} onQueryChange={setSearchQuery} view={view}
-              manualPins={manualPins} loggedIds={loggedIds} wishlistIds={wishlistIds} bounds={bounds}
+              manualPins={manualPins} loggedIds={loggedIds} wishlistIds={wishlistIds} existing={existing} bounds={bounds}
               searchSnapshot={searchPlacesByName} onSelectPlace={openPlace} onSelectManualPin={openManualPin}
               onFlyTo={flyTo} onRequestLiveSearch={searchHere} overpassPlaces={overpassPlaces}
               onStartDropPinFor={startDropPinFor}

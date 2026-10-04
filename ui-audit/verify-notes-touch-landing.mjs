@@ -1,0 +1,104 @@
+/* verify-notes-touch-landing — A DOUBLE-TAP ON BLANK PAPER LANDS THE FIRST LETTER WHERE THE FINGER WAS
+ * (NEW-1, owner report 2026-10-04: "Where I double click in the notebook module when I'm on my phone is
+ * not exactly where the text lands"). Amends B1960480, which proved the box appears and takes text but
+ * never measured WHERE.  Engine: WebKit, hasTouch + isMobile, real touchscreen taps.  Reported as
+ * "WebKit", never "iPhone".
+ *
+ * METRIC: the rendered rect of the FIRST GLYPH (a DOM Range over the first character of the new box's
+ * text) against the tap point — dx = glyph left − tap x, dy = glyph vertical centre − tap y, in CSS px
+ * on the screen, whatever the zoom.  Arms: zoom out / 100% / in · panned · left / middle / right ·
+ * not the first page · desktop mouse unchanged (stored point == click point).  KNOWN-GOOD ARM: the run is
+ * VOID unless the glyph rect is measurable on every arm.
+ * `--baseline` prints the numbers and never fails (used to record the before). */
+import { webkit, chromium, devices } from "playwright";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { pacedWait } from "./lib/tabTiming.mjs";
+
+const BASE = process.env.BASE_URL || "http://localhost:4173";
+const TOL = 3;                                  // CSS px, either axis
+const BASELINE = process.argv.includes("--baseline");
+const failures = [];
+const ok = (l, c, d) => { console.log(`${c ? "✓" : "⛔"} ${l}${d !== undefined ? ` — ${d}` : ""}`); if (!c) failures.push(l); };
+
+const browser = await webkit.launch({});
+const chrome = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || "/opt/pw-browsers/chromium" });
+const tk = "planyr:notes:tree:v1:local";
+const pk = (id) => `planyr:notes:page:v1:local:${id}`;
+const vk = (id) => `planyr:notes:view:v1:local:${id}`;
+const blankDoc = { type: "doc", content: [{ type: "paragraph", content: [] }] };
+
+async function open(br, ctxOpts, { view, second } = {}) {
+  const ctx = await br.newContext(ctxOpts);
+  const page = await ctx.newPage();
+  page.on("pageerror", (e) => console.log("   PAGEERROR", String(e.message).slice(0, 160)));
+  await assertMeasurable(page, "verify-notes-touch-landing");
+  await page.goto(`${BASE}#/notes`, { waitUntil: "domcontentloaded" });
+  await pacedWait(page, 250);
+  const pages = [{ id: "p1", title: "One", createdAt: 1, updatedAt: 1, projectId: null, pages: [] }];
+  if (second) pages.push({ id: "p2", title: "Two", createdAt: 2, updatedAt: 2, projectId: null, pages: [] });
+  const target = second ? "p2" : "p1";
+  await page.evaluate(([t, tree, docs, vkey, v]) => {
+    localStorage.clear();
+    localStorage.setItem(t, JSON.stringify({ v: 3, tombs: [], trash: [], pages: tree }));
+    for (const [k, d] of docs) localStorage.setItem(k, JSON.stringify(d));
+    if (v) localStorage.setItem(vkey, JSON.stringify(v));
+    if (tree.length > 1) localStorage.setItem("planyr:notes:activePage:v1:local", tree[tree.length - 1].id);
+  }, [tk, pages, pages.map((p) => [pk(p.id), blankDoc]), vk(target), view]);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="note-body"]', { timeout: 20000 });
+  await pacedWait(page, 900);
+  return page;
+}
+const glyph = (page) => page.evaluate(() => {
+  const t = document.querySelector(".planyr-anchor-content p")?.firstChild;
+  if (!t || t.nodeType !== 3) return null;
+  const r = document.createRange(); r.setStart(t, 0); r.setEnd(t, 1);
+  const b = r.getBoundingClientRect();
+  return b.width ? { left: b.left, cy: b.top + b.height / 2 } : null;
+});
+const frac = (page, fx, fy) => page.evaluate(([a, b]) => {
+  const m = document.querySelector('[data-testid="note-mat"]').getBoundingClientRect();
+  return { x: Math.round(m.left + m.width * a), y: Math.round(m.top + m.height * b) };
+}, [fx, fy]);
+
+async function run(label, mk, fx = 0.5, fy = 0.5, { mouse = false } = {}) {
+  const page = await mk();
+  const p = await frac(page, fx, fy);
+  if (mouse) { await page.mouse.dblclick(p.x, p.y); }
+  else { await page.touchscreen.tap(p.x, p.y); await pacedWait(page, 90); await page.touchscreen.tap(p.x, p.y); }
+  await pacedWait(page, 200);
+  await page.keyboard.type("W");
+  await pacedWait(page, 300);
+  const g = await glyph(page);
+  if (!g) { ok(`${label}: first glyph measurable (KNOWN-GOOD ARM)`, false, "no glyph rect — run VOID"); await page.context().close(); return; }
+  if (process.argv.includes("--debug")) console.log("   debug", label, JSON.stringify(await page.evaluate(() => {
+    const w = document.querySelector(".note-workspace"); const sh = document.querySelector('[data-testid="note-sheet"]') || document.querySelector(".note-sheet");
+    const a = document.querySelector(".planyr-anchor"); const b = document.querySelector('[data-testid="note-body"]').getBoundingClientRect();
+    return { tf: w && w.style.transform, anchor: a && [a.style.left, a.style.top, a.style.width], body: [b.left, b.top], sheet: sh && sh.getBoundingClientRect().toJSON() };
+  })), "tap", JSON.stringify(p));
+  const dx = +(g.left - p.x).toFixed(1), dy = +(g.cy - p.y).toFixed(1);
+  const within = Math.abs(dx) <= TOL && Math.abs(dy) <= TOL;
+  if (mouse) { ok(`${label}: desktop mouse path unchanged (glyph offset recorded)`, true, `dx ${dx} dy ${dy}`); }
+  else if (BASELINE) console.log(`• ${label}: dx ${dx}, dy ${dy}`);
+  else ok(`${label}: first letter lands on the tap`, within, `dx ${dx}, dy ${dy}`);
+  await page.context().close();
+  return { dx, dy };
+}
+
+const phone = { ...devices["iPhone 13"] };
+const zv = (z) => ({ view: { x: 0, y: 0, z } });
+await run("100%, middle", () => open(browser, phone), 0.5, 0.5);
+await run("100%, near left edge", () => open(browser, phone), 0.12, 0.4);
+await run("100%, near right edge", () => open(browser, phone), 0.8, 0.6);
+await run("zoomed in 200%", () => open(browser, phone, zv(2)), 0.5, 0.5);
+await run("zoomed in 200%, left", () => open(browser, phone, zv(2)), 0.12, 0.4);
+await run("zoomed out 50%", () => open(browser, phone, zv(0.5)), 0.5, 0.5);
+await run("zoomed out 50%, right", () => open(browser, phone, zv(0.5)), 0.8, 0.6);
+await run("panned (view x 140, y 90) at 100%", () => open(browser, phone, { view: { x: 140, y: 90, z: 1 } }), 0.5, 0.5);
+await run("panned + zoomed 150%", () => open(browser, phone, { view: { x: 220, y: 160, z: 1.5 } }), 0.4, 0.55);
+await run("not the first page", () => open(browser, phone, { second: true }), 0.5, 0.5);
+await run("desktop mouse, middle (chromium)", () => open(chrome, { viewport: { width: 1200, height: 800 } }), 0.5, 0.5, { mouse: true });
+
+await browser.close(); await chrome.close();
+if (!BASELINE && failures.length) { console.log(`\n⛔ ${failures.length} failing arm(s)`); process.exit(1); }
+console.log(BASELINE ? "\n(baseline — numbers only)" : "\n✓ all landing arms pass");

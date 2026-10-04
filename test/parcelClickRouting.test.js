@@ -25,11 +25,12 @@ const region = SP.slice(start, end);
 
 describe("NEW-1: in-planner parcel identify routes by the CLICKED POINT, never a frozen county", () => {
   it("candidateCountiesForPoint drives BOTH the outlines and the click query", () => {
-    // The outline effect resolves every configured county (Object.keys(COUNTIES_MAP)...), and the
-    // click path asks candidatesAtPoint — both funnel through candidateCountiesForPoint, so they
-    // can never again disagree about which counties are in play (the B137 contract).
+    // The outline effect draws displaySourcesForView (B2024624; it samples the view through
+    // candidateCountiesForPoint), and the click path asks candidatesAtPoint — both funnel through
+    // candidateCountiesForPoint, so they can never again disagree about which counties are in play
+    // (the B137 contract).
     expect(region.includes("candidateCountiesForPoint")).toBe(true);
-    expect(region.includes("Object.keys(COUNTIES_MAP).forEach")).toBe(true);
+    expect(region.includes("sourcesForView: displaySourcesForView")).toBe(true);
     expect(region.includes("candidatesAtPoint(lat, lng)")).toBe(true);
   });
 
