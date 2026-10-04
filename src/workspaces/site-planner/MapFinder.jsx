@@ -2975,15 +2975,13 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // Arm the hang-timer only once a request to the host is actually in flight, so we
     // never false-flag a county just because we're zoomed out below the outline zoom
     // (no request made). A live host fires 'load' well within the window.
-    // NEW-1 — `fl` is either the plain vector layer (a FeatureServer CAD with no /export,
-    // e.g. Fort Bend) or the adaptive composite (vector + image sublayers, `parcelDisplay.js`).
-    // Either sublayer's request can hang depending on the live zoom band, and esri-leaflet's
-    // vector FeatureLayer and image-mode RasterLayer use DIFFERENT event names for the same
-    // lifecycle (see the statewide branch above) — wire both vocabularies onto whichever
-    // sublayer(s) actually exist, sharing this ONE county's health state either way.
-    const wireDisplayHealth = (target, kind) => {
-      const startEvt = kind === "image" ? "loading" : "requeststart";
-      const errEvt = kind === "image" ? "error" : "requesterror";
+    // NEW-1 (2026-10-04) — a queryable CAD's display is ONE plain vector layer in every county
+    // (MapServer or FeatureServer): Planyr owns the outlines and the lot numbers, so there is no
+    // county /export image sublayer to wire any more (that image-mode vocabulary survives only in the
+    // statewide branch above).
+    const wireDisplayHealth = (target) => {
+      const startEvt = "requeststart";
+      const errEvt = "requesterror";
       target.on(startEvt, () => {
         if (!settled && !timer) timer = setTimeout(markDown, DISPLAY_LOAD_TIMEOUT_MS);
         // B1427664 — a much shorter "still loading" notice, well inside the 8s hang-guard: a real
@@ -2998,8 +2996,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       target.on("load", () => { if (!settled) { settled = true; stopTimer(); clearSlowTimer(); markDisplaySlow(key, false); } }); // drew fine — healthy
       target.on(errEvt, markDown);
     };
-    if (fl._isAdaptive) { wireDisplayHealth(fl._vectorLayer, "vector"); wireDisplayHealth(fl._imageLayer, "image"); }
-    else wireDisplayHealth(fl, "vector");
+    wireDisplayHealth(fl);
     fl.addTo(map); // NEW-3 — listeners are wired above; only now does the first request fire
   };
   /* B1976336 (NEW-1) — the display layer set follows the VIEW: only sources whose bbox (or, for a

@@ -266,6 +266,19 @@ Sandbox-proven: `test/docEditorDocx.test.js` (20) + `test/docEditorOpenSave.test
 7. On an iPhone-width window (or a phone), open the same `.docx`. **Expect:** the toolbar wraps, the Review pane sits under the page, and the page never scrolls sideways.
 - **Stopping rule:** closes on a dated pass of 1-7, or a failed step filed as a recurrence on B2022928.
 
+### V1475200 — B2057040: Planyr's own outlines and lot numbers at Grand Port, Harris and Fort Bend — one colour, one readable number per lot, no county picture `Blocker: real-data`
+
+Sandbox-proven: `test/parcelOwnLook.test.js` (red on main for all three claims), `ui-audit/verify-lot-numbers.mjs` (real app, **mocked** joined Chambers layer — 10/10, known-good arm), `ui-audit/verify-parcel-display-regimes.mjs` (Harris, mocked). **Not provable here:** the real Chambers / Harris / Fort Bend services and imagery (egress blocks them), so the real field spelling for the Chambers account, real lot density, and how the numbers read over real aerials in both basemaps. Run on the throwaway **"Concept A (copy)"** in the Grand Port group — **never Concept A** (CLAUDE.md owner constraint 7). Read the served chunk hash in the same observation as every PASS/FAIL.
+**Steps:**
+1. Open "Concept A (copy)" → Parcel tools → Click a lot on the map; frame the lots just north of the strip lots, zoomed in so whole lots are on screen. **Expect:** every lot shows ONE number (the CAD account, e.g. 00321-02000-00100-100001 — not `Parcel_Id`, not the county's own lot number), in the same purple as the outlines, none touching another number or the "Parcel N" chip; the outlines are all one colour (no blue county lines, no gold statewide lines).
+2. Open the Network tab, filter `pandai`. **Expect:** `…/MapServer/0/query` requests whose `outFields` are exactly `OBJECTID,ChambersCADWeb.DBO.Accounts.Account`; **no** `/export` requests to that host at any zoom.
+3. Zoom out ONE step (below the outline floor). **Expect:** no county picture at all — outlines and numbers both disappear together; the "zoom in a little to see the lines" hint appears; clicking a lot still adds it.
+4. Zoom into the densest subdivision you can find. **Expect:** numbers thin out (small lots show none) and never pile up; zooming in brings them back.
+5. Toggle the aerial / dark basemap if available. **Expect:** the numbers are legible over both (white halo).
+6. Repeat 1–3 on a Harris view (numbers = HCAD account) and a Fort Bend view (numbers = R-number). **Expect:** the same look; Harris shows nothing between the far floor and the vector floor (a deliberate trade).
+7. Map view → Select parcels over Grand Port. **Expect:** the same outlines and numbers (no chips on the Map view).
+- **Stopping rule:** closes on a dated pass of 1–7, or a failed step filed as a recurrence on B2057040.
+
 ### V1449712 — B2024624–B2024627: click-a-lot at Grand Port draws one outline source, no flash, no freeze, owner filled `Blocker: real-data`
 
 Sandbox-proven: `test/parcelOutlineSet.test.js`, `test/chambersLotRecord.test.js`, and `ui-audit/verify-click-a-lot-outlines.mjs` (seeded Chambers plan, hosts mocked; before/after numbers on B2024624–B2024626). **Not provable here:** the real Chambers imagery/tiles, the owner's larger plan, and the reported view jump. Run on the throwaway **"Concept A (copy)"** in the Grand Port group — **never Concept A** (CLAUDE.md owner constraint 7); first remove the two test lots (Parcel 18, Parcel 19) it already holds, and say exactly what was touched. Open the app with `?planyrDiag=1` and read the served chunk hash in the same observation.

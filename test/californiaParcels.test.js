@@ -11,7 +11,7 @@ import { COUNTIES_MAP, displaySourcesForView, displayMinZoomOf, displayMinZoomFo
 import { setCountyPolygons } from "../src/workspaces/site-planner/lib/countyPolygons.js";
 import { idAttrFor, resolveSearchField } from "../src/workspaces/site-planner/lib/parcelQuery.js";
 import { apprRows, parcelPanelRows, parcelCardRows, situsAddress } from "../src/workspaces/site-planner/lib/appraisal.js";
-import { PARCEL_MINZOOM, parcelDisplayRegimeForZoom } from "../src/workspaces/site-planner/lib/parcelDisplayZoom.js";
+import { PARCEL_MINZOOM, PARCEL_VECTOR_MINZOOM, parcelDisplayRegimeForZoom } from "../src/workspaces/site-planner/lib/parcelDisplayZoom.js";
 
 beforeAll(async () => {
   await setCountyPolygons(JSON.parse(readFileSync(new URL("../public/geo/county-polygons.json", import.meta.url), "utf8")));
@@ -66,21 +66,28 @@ describe("a California view queries ONLY the California source", () => {
 describe("the outline draw is bounded: the floor sits where a dense cell fits the service's record cap", () => {
   it("ca_statewide declares the higher floor; ordinary sources declare none", () => {
     expect(displayMinZoomOf("ca_statewide")).toBe(17);
-    expect(displayMinZoomOf("harris")).toBe(0);
-    expect(displayMinZoomOf("nv_statewide")).toBe(0);
+    // NEW-1 (2026-10-04): a queryable MapServer CAD (Harris) no longer draws the county /export picture in the
+    // wide band, so its vector outline starts at the vector floor; a FeatureServer (Fort Bend) declares none.
+    expect(displayMinZoomOf("harris")).toBe(PARCEL_VECTOR_MINZOOM);
+    expect(displayMinZoomOf("fortbend")).toBe(0);
+    expect(displayMinZoomOf("nv_statewide")).toBe(/\/MapServer\/\d+$/i.test(COUNTIES_MAP.nv_statewide.layerUrl) ? PARCEL_VECTOR_MINZOOM : 0); // NEW-1 (2026-10-04): a queryable MapServer starts at the vector floor
     expect(displayMinZoomOf("no_such_key")).toBe(0);
   });
   it("the floor is found by the display layer's own handle — the service URL", () => {
     expect(displayMinZoomForUrl(COUNTIES_MAP.ca_statewide.layerUrl)).toBe(17);
     expect(displayMinZoomForUrl(COUNTIES_MAP.ca_statewide.layerUrl + "/")).toBe(17);
-    expect(displayMinZoomForUrl(COUNTIES_MAP.harris.layerUrl || COUNTIES_MAP.harris.mapServer)).toBe(0);
+    expect(displayMinZoomForUrl(COUNTIES_MAP.harris.layerUrl || COUNTIES_MAP.harris.mapServer)).toBe(PARCEL_VECTOR_MINZOOM); // NEW-1 (2026-10-04)
+    expect(displayMinZoomForUrl(COUNTIES_MAP.fortbend.layerUrl)).toBe(0);
     expect(displayMinZoomForUrl(null)).toBe(0);
   });
   it("the 'zoom in to see the lines' hint follows the source: California views want 17, Texas views stay at the generic floor", () => {
     expect(Math.max(PARCEL_MINZOOM, displayFloorForView(view(34.04, -117.62, 34.08, -117.56)))).toBe(17);
     expect(Math.max(PARCEL_MINZOOM, displayFloorForPoint(34.0260, -117.6030))).toBe(17);
-    expect(Math.max(PARCEL_MINZOOM, displayFloorForView(view(29.72, -95.42, 29.78, -95.34)))).toBe(PARCEL_MINZOOM);
-    expect(Math.max(PARCEL_MINZOOM, displayFloorForPoint(29.75, -95.37))).toBe(PARCEL_MINZOOM);
+    // Fort Bend (a FeatureServer) keeps the generic floor; Harris (a MapServer) draws vectors only from the vector floor (NEW-1, 2026-10-04).
+    expect(Math.max(PARCEL_MINZOOM, displayFloorForView(view(29.52, -95.80, 29.58, -95.72)))).toBe(PARCEL_MINZOOM);
+    expect(Math.max(PARCEL_MINZOOM, displayFloorForPoint(29.55, -95.76))).toBe(PARCEL_MINZOOM);
+    expect(Math.max(PARCEL_MINZOOM, displayFloorForView(view(29.72, -95.42, 29.78, -95.34)))).toBe(PARCEL_VECTOR_MINZOOM);
+    expect(Math.max(PARCEL_MINZOOM, displayFloorForPoint(29.75, -95.37))).toBe(PARCEL_VECTOR_MINZOOM);
   });
   /* Measured live 2026-10-02 (returnCountOnly, 512-px cells — esri-leaflet's default cell size — over the densest
    * blocks sampled). The cap is the service's maxRecordCount (2,000, from layer metadata). Zoom 16 still overflows

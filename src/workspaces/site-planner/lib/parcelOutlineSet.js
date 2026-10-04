@@ -85,8 +85,7 @@ export function createOutlineSet({
       target.on("load", ok);
       target.on(kind === "image" ? "error" : "requesterror", () => markDown(url));
     };
-    if (layer._isAdaptive) { hook(layer._vectorLayer, "vector"); hook(layer._imageLayer, "image"); }
-    else hook(layer, "vector");
+    hook(layer, "vector"); // NEW-1 (2026-10-04): a queryable CAD is one plain vector layer; the image-only source never reaches wire()
   };
 
   const mount = (key, url) => {
@@ -123,6 +122,9 @@ export function createOutlineSet({
     sync,
     markDown: (key) => { const u = keyUrl[key]; if (u != null) markDown(u); },
     mounted: () => Object.keys(keyUrl),
+    /* NEW-1 (2026-10-04) — ask every mounted layer to re-lay out its lot numbers. The Site planner calls
+     * this when something a number must clear (its own parcel chips) has moved without the map moving. */
+    relayoutLabels: () => { byUrl.forEach((e) => { const ln = e.layer && e.layer._lotNumbers; if (ln && typeof ln.relayout === "function") ln.relayout(); }); },
     dispose() {
       disposed = true;
       [...byUrl.keys()].forEach(unmountUrl);
