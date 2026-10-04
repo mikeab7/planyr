@@ -2873,8 +2873,15 @@ export const displayFloorForPoint = (lat, lng) => Math.max(0, ...candidateCounti
 export const statewideKeysForState = (state) =>
   Object.entries(COUNTIES_MAP).filter(([, c]) => c.statewide && (!c.state || c.state === state)).map(([k]) => k);
 
+/* NEW-1 (settle cost) — `COUNTIES_MAP` is a key-normalising Proxy over ~175 sources, and `Object.entries` on it
+ * costs ~0.23 ms a call; `displaySourcesForView` resolves 81 sample points per settle, so that one line was
+ * ~19 of the ~24 ms. The map is assigned once at load and never mutated (no write to it exists anywhere in
+ * the tree), so the entry list is read once. */
+let _countyEntriesMemo = null;
+const countyEntries = () => _countyEntriesMemo || (_countyEntriesMemo = Object.entries(COUNTIES_MAP));
+
 export function candidateCountiesForPoint(lat, lng) {
-  const entries = Object.entries(COUNTIES_MAP);
+  const entries = countyEntries();
   const within = entries
     .filter(([, c]) => { const b = c.bbox; return b && lat >= b[0] && lat <= b[2] && lng >= b[1] && lng <= b[3]; })
     .map(([k]) => k);
