@@ -619,6 +619,11 @@ sat BESIDE the pressed line, not under it. Live copy: `ui-audit/diagnose-notes-o
 
 ---
 
+### Open page vs sync (B2061328 / NEW-7, 2026-10-04)
+
+- **An un-flushed keystroke is invisible to the store's `dirty` flag** (the editor holds it 600 ms in `pendingRef`). `registerOpenNoteDoc` now also carries `hasPending` + `flush`: `seed` flushes the open page BEFORE `planPageSeed`, the adopt loop re-checks pending synchronously with the write, `resolveDivergence` re-merges after its snapshot await, and `emitPagesChanged` treats pending as dirty. An adopted/merged body reaches the OPEN editor through its `applyDocument` transaction (`{external:true}`: no remount, no queued save, caret clamped); the workspace remount is only for a page nobody has open. The lost-update shape this closes: adopt stamps a CLEAN server rev, then the editor's stale document commits cleanly past it.
+- **Test shape:** `test/notesOpenPageSync.test.js` drives the real store with a fake open editor + a "workspace" listener that flushes on remount (real timers, §1 entry 45). `ui-audit/verify-notes-open-page-adopt.mjs` proves the real editor's half (same ProseMirror node, caret, no save queued) with a known-good arm (a page switch DOES replace the node — the route-change arm cannot, Notes stays mounted).
+
 ## 3 · Data facts
 
 **Font and size, as stored (2026-09-08).** A `textStyle` mark's `fontFamily` holds the source's

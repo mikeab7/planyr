@@ -34,6 +34,7 @@
  */
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
+import { TextSelection } from "@tiptap/pm/state";
 import { noteExtensions, EMPTY_DOC } from "../lib/notesExtensions.js";
 import { ANCHOR_MIN_HEIGHT, anchorExtent, anchorExtentLeft, anchorExtentTop, anchorExtentX, anchorPosAtSelection, fitAnchorBox, placeAnchor } from "../lib/notesAnchorNode.js";
 import { edgePoint as arrowEdgePoint } from "../lib/notesArrows.js";
@@ -65,7 +66,7 @@ import { indentCssRules, listMarkerCssRules } from "../lib/notesIndentLevel.js";
 import {
   readNoteFiles, readNoteImages, readPage, readPageVersions, registerOpenNoteDoc,
   restorePageVersion, snapshotPage, writePage,
-  readNoteView, writeNoteView,
+  readNoteView, writeNoteView, applyExternalToOpenNote,
 } from "../lib/notesStore.js";
 import {
   attachmentIdsInDoc, docToMarkdown, imageIdsInDoc, safeFileName, MD_INLINE_ATTACHMENT_MAX,
@@ -1476,6 +1477,7 @@ const NoteEditor = forwardRef(function NoteEditor({
   /* The pending snapshot is PLAIN JSON captured at edit time, so the flush never has to
    * ask a possibly-destroyed editor for anything — see fix (1) in the header. */
   const pendingRef = useRef(null);
+  const externalApplyRef = useRef(false);   // NEW-7: set only while a synced body is applied in place
   /* The version snapshot's own copy of the document. Declared beside `pendingRef` because
    * they are written together and read apart — see the unmount effect further down for the
    * hook-cleanup-order bug that is the whole reason there are two of them. */
@@ -1676,6 +1678,7 @@ const NoteEditor = forwardRef(function NoteEditor({
       // flush; `lastDocRef` is the version snapshot's and is never emptied. See the unmount
       // effect below for the cleanup-order bug that separating them fixes.
       lastDocRef.current = { id: pageId, doc };
+      if (externalApplyRef.current) return;   // NEW-7: a body the sync already stored is not an edit
       // ⛔ B1662464 — see `hasUserInputRef`'s own note above. A transaction nobody's keyboard
       // or pointer caused (the mount-time schema settle) updates `lastDocRef` so a REAL edit
       // right after it is never missing context, but it queues nothing: no dirty status, no
@@ -1730,6 +1733,9 @@ const NoteEditor = forwardRef(function NoteEditor({
         const next = state.schema.nodeFromJSON(json);
         view.dispatch(state.tr.replaceWith(0, state.doc.content.size, next.content));
       },
+      /** NEW-7: hand the open editor a body "the sync wrote to storage" — the exact path an adopted
+       *  server copy takes. Returns whether the editor took it in place. */
+      applyExternal: (json) => applyExternalToOpenNote(pageId, json),
       /** Put the caret at an absolute document position — the only way to state "the very
        *  start of THAT block" without depending on where a click happens to land. */
       caretAt: (pos) => { if (!editor.isDestroyed) editor.chain().focus().setTextSelection(pos).run(); },
@@ -1959,18 +1965,33 @@ const NoteEditor = forwardRef(function NoteEditor({
      * the live note. */
     if (readOnly) return undefined;
     return registerOpenNoteDoc(pageId, {
-      applyDocument: (doc) => {
+      /* NEW-7: the same door also takes a body the SYNC wrote to storage behind this editor
+       * (`opts.external`). It is a transaction, so the instance, its keyboard, its undo history and
+       * (clamped) its caret all survive — the old route remounted. External means the text is
+       * ALREADY in storage, so it queues no save and stays out of undo. */
+      applyDocument: (doc, opts) => {
         if (editor.isDestroyed) return { ok: false, error: "the editor closed before the version could be applied" };
+        const external = !!opts?.external;
         try {
           const node = editor.schema.nodeFromJSON(doc);
-          editor.view.dispatch(editor.state.tr.replaceWith(0, editor.state.doc.content.size, node.content));
+          const { from, to } = editor.state.selection;
+          externalApplyRef.current = external;
+          let tr = editor.state.tr.replaceWith(0, editor.state.doc.content.size, node.content);
+          if (external) {
+            const size = tr.doc.content.size;
+            const at = (n) => TextSelection.near(tr.doc.resolve(Math.max(0, Math.min(n, size))));
+            tr = tr.setSelection(TextSelection.between(at(from).$from, at(to).$to)).setMeta("addToHistory", false);
+          }
+          editor.view.dispatch(tr);
           return { ok: true };
         } catch (e) {
           return { ok: false, error: `that version could not be read back (${e?.message || e})` };
-        }
+        } finally { externalApplyRef.current = false; }
       },
+      hasPending: () => !!pendingRef.current,
+      flush,
     });
-  }, [editor, pageId, readOnly]);
+  }, [editor, pageId, readOnly, flush]);
 
   /* ═══ A PRESS ARMS A CARET; THE FIRST KEYSTROKE MAKES THE NOTE (NEW-8) ═══════════════════
    *
