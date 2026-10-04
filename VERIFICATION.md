@@ -176,6 +176,14 @@ Sandbox-proven (Playwright WebKit, iPhone 15 descriptor, EMULATED, logged out, f
 5. Open an OLDER visit that was logged before this change and has "Had …" text. **Expect:** the text still shows on the card and, in the edit form, as "What I had (saved earlier)" (read-only); change the rating and save. **Expect:** the "Had …" text is unchanged afterward.
 6. Rotate to landscape with the keyboard up in the dish field. **Expect:** the field and Save are still visible; rotate back and dismiss the keyboard. **Expect:** the sheet returns to the bottom edge, nothing stuck high.
 - **Stopping rule:** closes on a dated pass of 1–6, or a failed step filed as a recurrence on B2057920 (name which of: keyboard / AutoFill / rating / first-visit).
+### V1474400 — B2049312: team invite + Resend emails arrive in the inbox `Blocker: real-data (needs RESEND_API_KEY in Cloudflare + team_invite_email.sql run — both Michael's)`
+
+Sandbox-proven: `test/teamInviteEmail.test.js` (fake Supabase + fake Resend), `e2e/team-settings-layout.spec.js` (mocked send incl. throttle). Pending: a real send. **Steps** (planyr.io, signed in as a team admin; check the served chunk hash in the same observation). Use only the throwaway `mikeabmab+planyrtest@live.com`:
+1. Settings › Team › + Invite → that address, Member → Send invite. **Expect:** toast "Invite sent to mikeabmab+planyrtest@live.com"; the email lands in his live.com inbox from a planyr.io address, subject "<name> invited you to <team> on Planyr", button opens sign-in with the address prefilled.
+2. On that invite choose Resend invite. **Expect:** toast "Invite email sent again"; a second email arrives; still ONE row in Invited; Resend is disabled for about a minute.
+3. Try Resend again inside the minute via the ⋯ menu. **Expect:** disabled; (server also refuses — a direct POST inside the window returns 429).
+4. Cancel invite. **Expect:** row gone, no row left behind. Existing pending invites (e.g. ryan.baumgartner@hillwood.com) received nothing.
+- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2049312.
 
 ### V1468976 — B2043888: phone tab-strip chevrons page cleanly and clamp at both ends `Blocker: real-device (iOS elastic overscroll — not producible headless)`
 
@@ -193,6 +201,7 @@ Sandbox-proven (logged-out, seeded local site, real Chromium): `e2e/mapfinder-no
 2. Without turning Select parcels off, open the avatar/wordmark and go to the **Dashboard**. **Expect:** the hint is gone; nothing about the Site map appears over Jump back in / Pipeline / Comps.
 3. Repeat from the Dashboard to Schedule, Library, Notes, Spreadsheet. **Expect:** no Site-map hint on any of them.
 4. Return to Site → map. **Expect:** the hint is back only if Select parcels is still on (the mode is kept on purpose).
+- **2026-10-04 WebKit-emulated pass (B2050816, NOT on device, logged-out; chunk `index-BVErCNTL.js` read in the same run):** `node ui-audit/verify-phone-orientations.mjs` (`PLANYR_CASES=notice-leak`) — iPhone SE and iPhone 15, portrait + landscape × Dashboard/Schedule/Review/Library/Notes/Spreadsheet = **24/24 PASS** (hint visible after Select parcels, gone after the switch each time); the same case on the pre-fix build is 0/24 PASS. Steps 1-4 above on a real phone, signed in, remain pending (`Blocker: auth`).
 - **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B2041360.
 
 ### V1464320 — B2039232: an open file has a Close (×) back to the sheet index; unsaved Word/text edits ask first; reload after Close stays on the index `Blocker: auth`

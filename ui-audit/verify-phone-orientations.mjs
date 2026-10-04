@@ -284,7 +284,97 @@ async function driveOpenPropertiesSheet(page, issues) {
   return { opened: true, mode, sheetRect, targetId: target.id };
 }
 
+/* B2041360 / NEW-1 (2026-10-04) — PERMANENT CASE: the Site map's "Click any lot on the map…" hint
+ * must not follow you off Site. Owner's original report was iPhone Safari (the hint floated over
+ * the Dashboard); the desktop e2e (e2e/mapfinder-notice-leak.spec.js) and a desktop-Chromium live
+ * check cover the logic, this covers the phone shape in WebKit. Every result is labelled
+ * "WebKit-emulated" — never "on device" (see docs/PHONE-TESTING.md).
+ *
+ * LEG = fresh context + fresh load of #/site (the hint shows ONCE per page visit, so reusing a page
+ * reads as a false pass) → Select parcels → assert the hint is visible → switch through the phone
+ * header (wordmark for Dashboard, module-tab-* for the rest) → assert the hint is gone.
+ *
+ * THREE INSTRUMENT TRAPS, each guarded rather than remembered:
+ *  1. KNOWN-GOOD ARM — the hint must be VISIBLE immediately before the switch, else the leg is VOID
+ *     (a "gone" reading from a page that never showed it is vacuous, not a pass).
+ *  2. THE HINT SHARES ITS RENDER SLOT WITH THE MAP'S ERROR NOTICE (`!err && selectMode`), and the
+ *     sandbox's egress-blocked GIS hosts trip that error at once — the hint never even appears. So
+ *     every non-planyr.io request is answered locally (transparent tile / empty feature list): the
+ *     map behaves as on a healthy network and the hint is observable. The target origin (BASE) is NOT
+ *     stubbed, so the bundle under test is the real deployed one.
+ *  3. THE HINT ALSO EXPIRES ON ITS OWN ~5-6s after arming (the same unrelated timeout, measured on
+ *     the pre-fix build in e2e/mapfinder-notice-leak.spec.js). A "gone" read taken after that proves
+ *     nothing, so the leg is VOID unless the switch + read land inside HINT_WINDOW_MS of arming. */
+const LEAK_DEVICES = ["iPhone SE", "iPhone SE landscape", "iPhone 15", "iPhone 15 landscape"];
+const LEAK_DESTINATIONS = [
+  { id: "dashboard", label: "Dashboard (wordmark)", go: (page) => page.getByRole("button", { name: "Planyr", exact: true }).first().click({ timeout: 5000 }), landed: (h) => /^#?\/?$/.test(h) || /^#\/(dashboard|home)/.test(h) },
+  { id: "schedule", label: "Schedule", go: (page) => page.getByTestId("module-tab-scheduler").click({ timeout: 5000 }), landed: (h) => /schedule/.test(h) },
+  { id: "review", label: "Review", go: (page) => page.getByTestId("module-tab-doc-review").click({ timeout: 5000 }), landed: (h) => /markup|review/.test(h) },
+  { id: "library", label: "Library", go: (page) => page.getByTestId("module-tab-library").click({ timeout: 5000 }), landed: (h) => /library/.test(h) },
+  { id: "notes", label: "Notes", go: (page) => page.getByTestId("module-tab-notes").click({ timeout: 5000 }), landed: (h) => /notes/.test(h) },
+  { id: "spreadsheet", label: "Spreadsheet", go: (page) => page.getByTestId("module-tab-model").click({ timeout: 5000 }), landed: (h) => /spreadsheet|model/.test(h) },
+];
+const HINT_WINDOW_MS = 4000;
+const TRANSPARENT_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+const HINT_SEL = '[data-floating-notice="1"]';
+const hintCount = (page) => page.locator(HINT_SEL).filter({ hasText: /Click (any|a) lot on the map/ }).count();
+
+async function runNoticeLeak(engine, browser) {
+  console.log(`\n=== B2041360 — Site-map hint must not follow you off Site (${engine.engineName === "webkit" ? "WebKit-emulated" : "Chromium-emulated FALLBACK"}) ===`);
+  const legs = [];
+  for (const devName of LEAK_DEVICES) {
+    const device = devices[devName];
+    if (!device) { console.log(`⛔ unknown device descriptor "${devName}" — skipped`); continue; }
+    for (const dest of LEAK_DESTINATIONS) {
+      const label = `${devName} · Site → ${dest.label}`;
+      let ctx;
+      try {
+        ctx = await browser.newContext({ ...device, ignoreHTTPSErrors: true });
+        await ctx.route((u) => /^https?:/.test(u.href) && u.host !== new URL(BASE).host, (route) => {
+          const rt = route.request().resourceType();
+          if (rt === "image") return route.fulfill({ status: 200, contentType: "image/png", body: TRANSPARENT_PNG });
+          return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ type: "FeatureCollection", features: [], objectIds: [] }) });
+        });
+        const page = await ctx.newPage();
+        page.on("pageerror", () => {});
+        await page.goto(BASE + "#/site", { waitUntil: "domcontentloaded", timeout: 30000 });
+        await assertMeasurable(page, "verify-phone-orientations");
+        const select = page.getByTestId("map-toolbar-select-parcels");
+        await select.waitFor({ state: "visible", timeout: 30000 });
+        await page.waitForTimeout(1500);
+        await select.click({ timeout: 5000 });
+        const armedAt = Date.now();
+        let shown = false;
+        for (let i = 0; i < 20 && !shown; i++) { shown = (await hintCount(page)) > 0; if (!shown) await page.waitForTimeout(100); }
+        const chunk = (await fetchChunkInfo(page)).mainChunk;
+        if (!shown) { legs.push({ device: devName, dest: dest.id, verdict: "VOID", why: "hint never appeared after Select parcels (known-good arm failed)", chunk }); console.log(`VOID  ${label} — hint never appeared (known-good arm) — chunk ${chunk}`); continue; }
+        await dest.go(page);
+        await page.waitForFunction(() => document.visibilityState === "visible");
+        await page.getByTestId("map-toolbar-draw").waitFor({ state: "hidden", timeout: 8000 }).catch(() => {});
+        const hash = await page.evaluate(() => window.location.hash);
+        const left = await page.getByTestId("map-toolbar-draw").isVisible().then((v) => !v).catch(() => true);
+        const remaining = await hintCount(page);
+        const elapsed = Date.now() - armedAt;
+        let verdict, why = "";
+        if (!dest.landed(hash) || !left) { verdict = "VOID"; why = `did not actually leave Site (hash ${hash}, map toolbar ${left ? "gone" : "still visible"})`; }
+        else if (elapsed > HINT_WINDOW_MS) { verdict = "VOID"; why = `read landed ${elapsed}ms after arming — past the hint's own expiry window, a "gone" reading proves nothing`; }
+        else if (remaining > 0) { verdict = "FAIL"; why = `hint still painted over ${dest.label} (${remaining} node(s))`; }
+        else verdict = "PASS";
+        legs.push({ device: devName, dest: dest.id, verdict, why, hash, elapsedMs: elapsed, viewport: page.viewportSize(), chunk });
+        console.log(`${verdict.padEnd(5)} ${label} — hint visible before, ${remaining} after, ${elapsed}ms, ${hash} — chunk ${chunk}${why ? " — " + why : ""}`);
+      } catch (e) {
+        legs.push({ device: devName, dest: dest.id, verdict: "ERROR", why: String(e && e.message || e).slice(0, 300) });
+        console.log(`ERROR ${label} — ${String(e && e.message || e).slice(0, 200)}`);
+      } finally { if (ctx) await ctx.close().catch(() => {}); }
+    }
+  }
+  const count = (v) => legs.filter((l) => l.verdict === v).length;
+  console.log(`  ${legs.length} legs (WebKit-emulated, logged-out, GIS stubbed locally): ${count("PASS")} PASS · ${count("FAIL")} FAIL · ${count("VOID")} VOID · ${count("ERROR")} ERROR`);
+  return legs;
+}
+
 async function run() {
+  const CASES = (process.env.PLANYR_CASES || "matrix,notice-leak").split(",").map((s) => s.trim());
   const engine = await resolveEngine();
   console.log(`\n=== STEP 1 — engine ===`);
   console.log(`  requested: WebKit`);
@@ -292,9 +382,11 @@ async function run() {
   if (engine.fallback) console.log(`  WebKit failure (verbatim, truncated): ${engine.error}`);
   console.log(`  base URL:  ${BASE}`);
 
+  const runMatrix = CASES.includes("matrix");
   const seedBrowser = await engine.launch({});
   let fixtureState = null, fixtureFacts = null;
   try {
+    if (!runMatrix) throw new Error("matrix not requested (PLANYR_CASES) — fixture seeding skipped");
     const fixture = readFixture("bain");
     const built = await buildFixtureState(seedBrowser, { base: BASE, fixture, siteId: SITE_ID, cacheDir: CACHE_DIR, viewport: { width: 1600, height: 900 } });
     fixtureState = built.state;
@@ -309,9 +401,10 @@ async function run() {
   await seedBrowser.close();
 
   const results = [];
+  let noticeLeak = null;
   const browser = await engine.launch({});
   try {
-    for (const spec of DEVICE_SPECS) {
+    for (const spec of (runMatrix ? DEVICE_SPECS : [])) {
       const device = devices[spec.name];
       if (!device) { console.log(`⛔ unknown device descriptor "${spec.name}" — skipped`); continue; }
       for (const surface of SURFACES) {
@@ -380,11 +473,12 @@ async function run() {
         }
       }
     }
+    if (CASES.includes("notice-leak")) noticeLeak = await runNoticeLeak(engine, browser);
   } finally {
     await browser.close();
   }
 
-  writeFileSync(`${OUT_DIR}/results.json`, JSON.stringify({ engine: engine.label, base: BASE, generatedAt: new Date().toISOString(), fixtureFacts, results }, null, 2));
+  writeFileSync(`${OUT_DIR}/results.json`, JSON.stringify({ engine: engine.label, base: BASE, generatedAt: new Date().toISOString(), fixtureFacts, results, noticeLeak }, null, 2));
 
   console.log(`\n=== SUMMARY ===`);
   const worst = results.filter((r) => (r.breakingCount > 0) || r.error).length;
@@ -392,6 +486,11 @@ async function run() {
   const skipped = results.filter((r) => r.skipped).length;
   console.log(`  ${results.length} runs: ${clean} clean, ${worst} with findings, ${skipped} skipped`);
   console.log(`  results + screenshots: ${OUT_DIR}`);
+  if (noticeLeak) {
+    const bad = noticeLeak.filter((l) => l.verdict !== "PASS");
+    const vacuous = noticeLeak.length === 0 || noticeLeak.every((l) => l.verdict === "VOID");
+    if (bad.length || vacuous) { console.log(`  ⛔ notice-leak case: ${vacuous ? "VACUOUS" : bad.length + " non-PASS leg(s)"} — exit 1`); process.exit(1); }
+  }
   process.exit(0);
 }
 

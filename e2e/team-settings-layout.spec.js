@@ -29,7 +29,7 @@ const freshState = () => ({
     { user_id: "u-3", role: "member", first_name: "Ana", last_name: "Ruiz", email: "ana@planyr.test" },
   ],
   invites: [{ id: "inv-1", email: "throwaway@planyr.test", role: "member", created_at: "2026-10-01T00:00:00Z", claimed_at: null }],
-  inviteWrites: 0, inviteDeletes: 0,
+  inviteWrites: 0, inviteDeletes: 0, sends: 0, lastSend: {},
 });
 
 async function mock(page, st) {
@@ -39,7 +39,17 @@ async function mock(page, st) {
   await page.route("**/*", async (route) => {
     const req = route.request();
     let u; try { u = new URL(req.url()); } catch (_) { return route.continue(); }
-    if (u.hostname === "localhost" || u.hostname === "127.0.0.1") return route.continue();
+    if (u.hostname === "localhost" || u.hostname === "127.0.0.1") {
+      // NEW-1: the invite-email Pages Function. Mirrors its contract incl. the 60 s server throttle.
+      if (u.pathname === "/api/team/invite-email") {
+        let b = {}; try { b = JSON.parse(req.postData() || "{}"); } catch (_) {}
+        const last = st.lastSend[b.email] || 0;
+        if (Date.now() - last < 60_000) return route.fulfill({ status: 429, contentType: "application/json", body: JSON.stringify({ ok: false, reason: "throttled", retryAfterSeconds: 30 }) });
+        st.lastSend[b.email] = Date.now(); st.sends++;
+        return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) });
+      }
+      return route.continue();
+    }
     if (u.hostname !== HOST) return route.abort();
     const json = (b, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(b) });
     const p = u.pathname, m = req.method();
@@ -212,8 +222,9 @@ test.describe("phone", () => {
     const before = st.inviteWrites;
     await inv.locator("[data-team-more]").click();
     await page.locator('[data-team-sheet] [data-team-menu-item="Resend invite"]').click();
-    await expect(dlg.getByText("Invite resent")).toBeVisible();
-    expect(st.inviteWrites - before).toBe(1);
+    await expect(dlg.getByText("Invite email sent again")).toBeVisible();
+    expect(st.sends).toBe(1);               // one send…
+    expect(st.inviteWrites - before).toBe(0); // …and no row written
     expect(st.invites).toHaveLength(1);
     await expect(dlg.locator('[data-team-row="invite"]')).toHaveCount(1);
 
@@ -257,8 +268,10 @@ test.describe("desktop", () => {
     await page.keyboard.press("Escape");
     // Inline Resend: one send, no new row.
     await inv.locator("[data-team-resend]").click();
-    await expect(dlg.getByText("Invite resent")).toBeVisible();
-    expect(st.inviteWrites).toBe(1);
+    await expect(dlg.getByText("Invite email sent again")).toBeVisible();
+    expect(st.sends).toBe(1);
+    expect(st.inviteWrites).toBe(0);
+    await expect(inv.locator("[data-team-resend]")).toBeDisabled(); // cooldown after a send
     expect(st.invites).toHaveLength(1);
     // Switch toggles.
     const sw = dlg.locator("[data-team-autoshare]");
