@@ -1976,6 +1976,13 @@ Sandbox-proven: `e2e/start-hint-placement.spec.js` (red on main, green here; emu
 4. New blank site again → ✕ → reload. **Expect:** strip stays dismissed.
 5. Desktop width: **Expect:** strip top-left, clear of the middle. Real iPhone Safari look (toolbar collapse, safe areas) remains owner-side and is NOT claimed.
 
+### V1445152 — B2020064: Map view zoom +/−/locate buttons clickable with a long Sites list `Blocker: real-data (signed-in account with his long site list on planyr.io)`
+
+Sandbox-proven: `ui-audit/verify-map-zoom-reachable.mjs` (hit test; red pre-fix, green after) and `test/mapChromeStack.test.js`.
+1. On planyr.io, Map view, ~1600-wide window, Sites rail open; read `/version.json` in the same check. **Expect:** the + and − buttons are visible below the rail and clicking them zooms the map (no project opens).
+2. Collapse the rail. **Expect:** same buttons still clickable. Reopen it. **Expect:** the list scrolls inside the rail, which ends above the buttons.
+3. Repeat on a phone-width window with the rail open. **Expect:** buttons clear of the rail and clickable.
+
 ## THE CHECKLIST — run this on Michael's signed-in Chrome, on `planyr.io`
 
 **⛔ STEP 0, and it is not optional (owner correction, 2026-09-03, B1112449/B1112450).** A tab can silently keep serving a pre-deploy cached bundle, and a stale tab's own reload can reload the SAME stale chunks. So the chunk name is read **in the same `evaluate` as every result below** — never in a separate call, and never inherited from another tab that was "confirmed fresh" minutes earlier. **Open a brand-new tab**, go to a real project's Site view, let it settle, then run the single expression below.

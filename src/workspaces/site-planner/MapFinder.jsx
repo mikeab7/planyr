@@ -50,7 +50,7 @@ import { siteState } from "./lib/siteRegion.js";
 // NEW-3 — the ONE map-overlay stacking model. Leaflet fixes its own control containers at
 // z-index 1000; these panels sat at 1000 too, so whether the zoom buttons and the scale bar
 // covered them came down to document order. An open panel now outranks map chrome outright.
-import { MAP_CHROME_Z, panelMaxHeight, ZOOM_CONTROL_CLEARANCE_PX, MAP_OVERLAY_TOP_PX, MAP_OVERLAY_CHIP_H_PX, MAP_OVERLAY_BAR_H_PX } from "./lib/mapChromeStack.js";
+import { MAP_CHROME_Z, panelMaxHeight, sitesRailMaxHeight, ZOOM_CONTROL_CLEARANCE_PX, MAP_OVERLAY_TOP_PX, MAP_OVERLAY_CHIP_H_PX, MAP_OVERLAY_BAR_H_PX } from "./lib/mapChromeStack.js";
 import { registerChromeDock } from "../../shared/ui/chromeDock.js";
 import { cornerClearanceFromBottom } from "../../shared/ui/cornerClearance.js";
 // B848496 — site-plan overlays (upload a site plan, place it on the map, pin comps to it).
@@ -4572,7 +4572,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             // Phone: drop below the full-width search bar; a slim tap when closed, a wider
             // overlay (above the layers panel) when the user opens it.
             ...(narrow
-              ? { top: 60, left: 8, zIndex: MAP_CHROME_Z.panel, width: sitesPanelOpen ? "min(320px, calc(100vw - 16px))" : 188, maxHeight: "calc(100% - 68px)" }
+              ? { top: 60, left: 8, zIndex: MAP_CHROME_Z.panel, width: sitesPanelOpen ? "min(320px, calc(100vw - 16px))" : 188, maxHeight: sitesRailMaxHeight(60) }
               // NEW-2 (B950321) — MAP_OVERLAY_TOP_PX, the one top edge every desktop overlay
               // shares (was a bare `10` that happened to agree with the Layers panel's own bare
               // `10` — nothing enforced that once). Collapsed, this panel now also pins to the
@@ -4596,7 +4596,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               // toggle changed `mode` without touching `panelTab`, so the panel silently grew even
               // though the rail tab it's showing never moved. Width now follows `panelTab` (what
               // the rail is actually browsing) like every other read of this panel already does.
-              : { top: MAP_OVERLAY_TOP_PX, left: 10, zIndex: MAP_CHROME_Z.panel, width: panelTab === "comp" ? "clamp(232px, 23vw, 440px)" : 232, maxHeight: "calc(100% - 24px)", ...(sitesPanelOpen ? null : { height: MAP_OVERLAY_CHIP_H_PX }) }) }}>
+              : { top: MAP_OVERLAY_TOP_PX, left: 10, zIndex: MAP_CHROME_Z.panel, width: panelTab === "comp" ? "clamp(232px, 23vw, 440px)" : 232, maxHeight: sitesRailMaxHeight(MAP_OVERLAY_TOP_PX), ...(sitesPanelOpen ? null : { height: MAP_OVERLAY_CHIP_H_PX }) }) }}>
             {/* collapsible header (B106) + the two tabs — one row, always visible (never buried
                 behind the collapse, and now PINNED — flex:"none" against the scrollable body
                 below — so both counts stay readable, and reachable, no matter how long either
