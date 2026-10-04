@@ -17,10 +17,10 @@ import { PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL } from "./lib/ma
 import { tileCacheLimit } from "./lib/tileBudget.js";
 import { boundTileCache, capTileCache, armBlankTileHeal } from "./lib/tileLifecycle.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
-import { BASEMAPS, FINDER_BASEMAP_CHOICES, ROAD_NAMES_TILES, SITE_PLAN_BASEMAP } from "../../shared/basemaps/basemaps.js";
+import { BASEMAPS, FINDER_BASEMAP_CHOICES, ROAD_NAMES_TILES, SITE_PLAN_BASEMAP, IMAGERY_GRADE, densityTileOptions } from "../../shared/basemaps/basemaps.js";
+import { addVectorLabels } from "../../shared/basemaps/vectorLabelLayer.js";
 // B427410 (×2) — the ONE gate for the "Road names" overlay below, shared with LayerPanel's
 // dormant note so the map's opacity switch and the panel's explanation can't disagree.
-import { PLACE_NAMES_MIN_ZOOM } from "./lib/layerZoomGate.js";
 // B427411 — the ONE corner-radius scale. Never a bare number at a call site: eight of them
 // disagreed visibly in this file alone before it existed.
 import { RADIUS, nestedIn } from "../../shared/ui/radius.js";
@@ -201,7 +201,8 @@ const MAP_PIN_SHADOW = "0 1px 5px rgba(0,0,0,0.45)"; // design-exempt: no shadow
  * — do not relabel it back to anything implying place/city names without switching the source
  * too. City / town names are a SEPARATE row ("City names", NEW-2 2026-09-29), drawn by our own
  * canvas layer from our own dataset: lib/placeNamesLayer.js, gated by lib/placeNamesGate.js. */
-const LABELS_TILES = ROAD_NAMES_TILES.url; // NEW-1 — defined once in shared/basemaps (Food reuses it)
+// NEW-1 (B2018608) — road + place names are now VECTOR (shared/basemaps/vectorLabelLayer.js, the same
+// layer /food uses); the Esri raster road-names URL above survives only as that layer's own fallback.
 
 /* B427410 (×3) — THE DEFAULT OPACITY, MEASURED, NOT COPIED FROM THE TIER MODEL. The old fixed
  * 0.4 was never derived for this layer — it matches `layerWeight.js`'s "context" tier ceiling,
@@ -534,9 +535,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const mapRef = useRef(null);
   const addrTokRef = useRef(0); // B545: address-search generation — a newer search invalidates an older in-flight one
   const imageryCapRef = useRef(null); // NEW-6 — detach fn for the imagery layer's tile-cache cap
-  const labelsCapRef = useRef(null);  // NEW-6 — ditto for the labels overlay
   const imageryHealRef = useRef(null); // B844704 — detach fn for the imagery layer's blank-tile self-heal
-  const labelsHealRef = useRef(null);  // B844704 — ditto for the labels overlay
   const displaysRef = useRef({});    // county -> visible parcel-line layer (all CAD counties)
   /* NEW-2 — county -> { url, owner }: the RESOLVED endpoint behind that county's on-map layer, and
      which county key actually CREATED it. Two keys that resolve to the same endpoint (a county
@@ -2163,10 +2162,15 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // shipped for the planner-canvas backdrop (SitePlanner.jsx GEO_BASEMAP's
     // detailMaxNative); B220 brings it to the map-finder layer B182 missed. Do NOT drop
     // this in a refactor — the placeholder regresses SILENTLY (tiles return 200). (B220)
-    const srcMaxNative = L.Browser.retina ? bm.maxNative - 1 : bm.maxNative;
-    const layer = withTileRetry(L.tileLayer(bm.tiles, { maxZoom: 21, maxNativeZoom: srcMaxNative, detectRetina: true, attribution: bm.attr }));
+    // NEW-1 (B2018608): the density rule (detectRetina + ceiling-1) is ONE shared function now, and the
+    // on-screen aerial carries the tone grade class (exports stitch their own canvas — never graded).
+    const layer = withTileRetry(L.tileLayer(bm.tiles, {
+      maxZoom: 21, attribution: bm.attr, className: IMAGERY_GRADE.className,
+      ...densityTileOptions(bm.maxNative, window.devicePixelRatio || 1),
+    }));
     layer.setZIndex(1);
     layer.addTo(map);
+    map.getContainer().classList.add(IMAGERY_GRADE.containerClass); // seam fix: gap colour behind the aerial (NEW-1)
     imageryRef.current = layer;
     /* NEW-6 — the SAME explicit ceiling the planner's two layers got in B1121. The Map view has
        its own Leaflet map and was left out of that work, and it is never unmounted (SitePlannerApp
@@ -2210,46 +2214,26 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
    * ceiling from the ACTIVE basemap the same way the imagery effect does, rather than a bare `19`
    * that was only ever correct for the default Esri source) removes the structural gap entirely —
    * both layers now request the same native zoom at every step of a zoom gesture, verified by
-   * driving the real layer live (`ui-audit/verify-map-finder-labels-zoom.mjs`).
+   * driving the real layer live (retired with the raster labels, NEW-1/B2018608).
    */
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !labels) return;
-    const initOpacity = (map.getZoom() >= PLACE_NAMES_MIN_ZOOM) ? labelsOpacity : 0;
-    const bm = BASEMAPS[basemap] || BASEMAPS.esri;
-    const labelsMaxNative = L.Browser.retina ? bm.maxNative - 1 : bm.maxNative;
-    const layer = withTileRetry(L.tileLayer(LABELS_TILES, {
-      maxZoom: 21, maxNativeZoom: labelsMaxNative, detectRetina: true, opacity: initOpacity,
-    }));
-    layer.setZIndex(2);
-    layer.addTo(map);
-    labelsRef.current = layer;
-    const detachCap = boundTileCache(layer, () => tileCacheLimit({   // NEW-6 — second uncapped layer
-      containerW: (elRef.current && elRef.current.clientWidth) || 1024,
-      containerH: (elRef.current && elRef.current.clientHeight) || 768,
-      tileSizePx: (layer.getTileSize && layer.getTileSize().x) || 256,
-      keepBuffer: MAP_KEEP_BUFFER,
-    }));
-    labelsCapRef.current = detachCap;
-    // B844704 — same self-heal as the imagery layer above; this layer errors independently.
-    const detachHeal = armBlankTileHeal(layer, { onHeal: reportBlankTileHealed(map, "map-finder-labels") });
-    labelsHealRef.current = detachHeal;
-    return () => {
-      detachCap(); labelsCapRef.current = null;
-      detachHeal(); labelsHealRef.current = null;
-      try { map.removeLayer(layer); } catch (_) {} labelsRef.current = null;
-    };
+    if (!map || !labels) return undefined;
+    const handle = addVectorLabels(L, map, { includePois: true });
+    labelsRef.current = handle;
+    return () => { handle.remove(); labelsRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [labels, basemap]);
 
-  /* zoom-driven label opacity (B162): hide road names below PLACE_NAMES_MIN_ZOOM, otherwise use
-   * the owner's own opacity (B427410 ×3) — one effect, so the zoom gate and the slider can never
-   * fight over which one last wrote `setOpacity`. */
+  /* Label strength (B427410 ×3: the owner's own slider). The vector layer lives in its own pane, so the
+   * slider is that pane's opacity — one knob, no per-layer fan-out. Zoom gating (road names from
+   * neighbourhood-ish zoom, city names wide) is done by the vector STYLE's own minzoom per layer, so the
+   * old "hide everything below PLACE_NAMES_MIN_ZOOM" raster gate is gone with the raster. */
   useEffect(() => {
-    const layer = labelsRef.current;
-    if (!layer) return;
-    layer.setOpacity(zoom != null && zoom >= PLACE_NAMES_MIN_ZOOM ? labelsOpacity : 0);
-  }, [zoom, labelsOpacity]);
+    const map = mapRef.current;
+    const pane = map && map.getPane && map.getPane("planyrVectorLabels");
+    if (pane) pane.style.opacity = String(labelsOpacity);
+  }, [labelsOpacity, labels, basemap]);
 
   /* State + country outlines at wide zoom (NEW-1) — the same shape as the label-opacity
      gate above and the `showPlans` switch below: one boolean derived from the live zoom,
@@ -2339,7 +2323,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     if (visible) return;
     const map = mapRef.current;
     if (!map) return;
-    for (const layer of [imageryRef.current, labelsRef.current]) {
+    for (const layer of [imageryRef.current]) {
       if (layer) { try { capTileCache(layer, HIDDEN_TILE_CAP); } catch (_) {} }
     }
     for (const key of Object.keys(overlayRefs.current)) {

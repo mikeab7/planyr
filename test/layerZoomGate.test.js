@@ -112,17 +112,15 @@ describe("the declared gates and the runtime constants may never drift", () => {
  * and the wording says what is really drawn. Both assertions fail on the pre-fix source: it had
  * no `PLACE_NAMES_MIN_ZOOM` import and its wording claimed "City, road and landmark names". */
 describe("PLACE_NAMES_MIN_ZOOM — the map-finder road-names overlay's own gate", () => {
-  it("is declared once, at the value the map has always actually used", () => {
-    expect(PLACE_NAMES_MIN_ZOOM).toBe(14);
+  it("is declared once, and IS the vector style's own road-name zoom (NEW-1/B2018608 — was 14 for the raster overlay)", () => {
+    expect(PLACE_NAMES_MIN_ZOOM).toBe(11);
+    expect(src("lib/layerZoomGate.js")).toMatch(/PLACE_NAMES_MIN_ZOOM = ROAD_NAMES_FROM/);
   });
 
-  it("MapFinder reads the shared constant rather than a private literal '14'", () => {
+  it("MapFinder no longer gates labels itself: the vector style owns the zoom gate (no private literal)", () => {
     const m = readFileSync(join(HERE, "..", "src", "workspaces", "site-planner", "MapFinder.jsx"), "utf8");
-    expect(m).toMatch(/from\s+"\.\/lib\/layerZoomGate\.js"/);
-    expect(m).toMatch(/PLACE_NAMES_MIN_ZOOM/);
-    // The two places that used to hardcode the zoom threshold must both read the constant now.
-    expect(m).toMatch(/getZoom\(\)\s*>=\s*PLACE_NAMES_MIN_ZOOM/);
-    expect(m).toMatch(/zoom\s*>=\s*PLACE_NAMES_MIN_ZOOM/);
+    expect(m).toMatch(/addVectorLabels\(/);
+    expect(m).not.toMatch(/getZoom\(\)\s*>=\s*\d+/);
   });
 
   it("LayerPanel's dormant note is keyed off the same constant, not a re-guessed number", () => {
@@ -161,8 +159,7 @@ describe("PLACE_NAMES_DEFAULT_OPACITY — the owner's crispness fix + his own op
     const shared = readFileSync(join(HERE, "..", "src", "shared", "basemaps", "basemaps.js"), "utf8");
     expect(shared).toMatch(/defaultOpacity:\s*0\.85/);
     // Both places that used to read the literal `0.4` for this layer now read the shared default.
-    expect(m).toMatch(/PLACE_NAMES_MIN_ZOOM\s*\)\s*\?\s*labelsOpacity\s*:\s*0/);
-    expect(m).toMatch(/PLACE_NAMES_MIN_ZOOM\s*\?\s*labelsOpacity\s*:\s*0/);
+    expect(m).toMatch(/pane\.style\.opacity = String\(labelsOpacity\)/); // NEW-1: the slider is the vector pane's opacity
   });
 
   it("the state feeding the map layer starts at the measured default, not a re-guessed number", () => {

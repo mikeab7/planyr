@@ -94,65 +94,113 @@ export const PLACE_NAMES_TILES = {
   maxNative: 19,
 };
 
-const LABELS_ATTR = "Labels &copy; Esri";
-
-/* The Site Plan module's own map: Esri World Imagery aerial + the road-names overlay at the
- * finder's default opacity. `imageryKey` names the BASEMAPS entry both Site Plan surfaces default to. */
-export const SITE_PLAN_BASEMAP = {
-  key: "siteplan",
-  label: "Site Plan",
-  title: "The same map the Site Plan module opens on — aerial imagery with road names",
-  imageryKey: "esri",
-  imagery: BASEMAPS.esri,
-  roadNames: { ...ROAD_NAMES_TILES, opacity: ROAD_NAMES_TILES.defaultOpacity },
-  placeNames: null,
+/* ───────────────────────── NEW-1 (B2018608) — VECTOR roads + labels ─────────────────────────
+ *
+ * Owner: the raster Esri reference overlay "looks kind of lame, like just the way all the streets
+ * pop up. It doesn't look as clean as Apple Maps." Roads and labels are now drawn client-side from
+ * VECTOR tiles (MapLibre GL inside the existing Leaflet maps) over the raster imagery. This block
+ * is the ONE config entry for that source — swapping providers (MapTiler, Protomaps, a self-hosted
+ * PMTiles file) means editing this object and nothing else; the style in `vectorStyle.js` only
+ * assumes the OpenMapTiles schema, and no map code names a host.
+ *
+ * ⛔ No API key lives here or anywhere in the repo. OpenFreeMap needs none; if a swap ever does, it
+ * goes in the Cloudflare dashboard env vars (never wrangler.toml, never a `VITE_` var in chat). */
+export const VECTOR_SOURCE = {
+  id: "openfreemap",
+  schema: "openmaptiles",
+  /* TileJSON — MapLibre resolves tile URLs, zoom range and bounds from it. */
+  tilejson: "https://tiles.openfreemap.org/planet",
+  /* Self-hosted (public/map-assets/fonts, Noto Sans — SIL OFL): glyph lookups never leave the
+   * origin, so label text does not depend on a third-party font host. Root-relative; resolved to
+   * an absolute URL at runtime because the MapLibre worker cannot resolve a relative one. */
+  glyphs: "/map-assets/fonts/{fontstack}/{range}.pbf",
+  /* OpenFreeMap's terms ask for exactly this credit line (OpenFreeMap + OpenMapTiles + OSM). */
+  attribution:
+    '<a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> ' +
+    '&copy; <a href="https://www.openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a> ' +
+    'data &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
 };
 
-/* HYBRID: the same imagery with road names AND place/street names drawn on top at full strength,
- * so it stays readable at neighbourhood zoom (restaurant-finding zoom). Plain "satellite" was
- * folded into this and the default — it added nothing over either. */
+/* The map's own zoom is Leaflet's (256-px tile) numbering; MapLibre counts 512-px tiles, so its zoom
+ * is one LOWER at the same view. The style is written in LEAFLET zoom (what an owner sees) and
+ * `vectorStyle.js` subtracts this. */
+export const VECTOR_ZOOM_OFFSET = 1;
+
+/* The pre-vector raster reference overlays survive ONLY as the fallback when the vector source
+ * cannot be reached (LOUD-FAILURE: the map must not silently lose its road names). */
+const LABELS_ATTR = "Labels &copy; Esri";
+
+/* Tone grade for raw aerial — a little darker and a little less saturated, so roads, labels and pins
+ * read on top (Apple does the same). Applied as a CSS filter on the on-screen imagery layer ONLY;
+ * the Site Plan PDF/image export stitches its own canvas from the source tiles and is never graded
+ * (a graded aerial in an exhibit would misrepresent the site — B550512 path left untouched). */
+export const IMAGERY_GRADE = { className: "planyr-imagery-graded", containerClass: "planyr-aerial-bg", brightness: 0.9, saturate: 0.8 };
+
+/* HIGH-DENSITY TILES. A 256-px tile drawn at 256 CSS px is upscaled 2x on a dpr-2 screen (the soft
+ * look). Leaflet's `detectRetina` requests one zoom DEEPER and draws at half size — and the
+ * provider's native ceiling must drop by one with it, or the deepest request lands on the grey
+ * "Map data not yet available" placeholder served as HTTP 200 (B182/B220). Pure, so it is
+ * unit-tested at dpr 1/2/3 without a browser. */
+export function densityTileOptions(maxNative, dpr) {
+  const hi = Number(dpr) > 1;
+  return { detectRetina: hi, maxNativeZoom: hi ? Math.max(1, maxNative - 1) : maxNative };
+}
+
+/* HYBRID — the default everywhere, and THE Site Plan map: aerial imagery + vector roads and place
+ * labels. `imageryKey` names the BASEMAPS entry both Site Plan surfaces default to. */
 export const HYBRID_BASEMAP = {
   key: "hybrid",
   label: "Hybrid",
-  title: "Aerial imagery with roads and place names drawn crisp on top",
+  title: "Aerial imagery with crisp roads and place names",
   imageryKey: "esri",
   imagery: BASEMAPS.esri,
-  roadNames: { ...ROAD_NAMES_TILES, opacity: 1 },
-  placeNames: { ...PLACE_NAMES_TILES, opacity: 1 },
+  vector: VECTOR_SOURCE,
+  graded: true,
 };
 
-/* The choices /food offers, in display order. The FIRST is the default. */
-export const SITE_PLAN_BASEMAP_CHOICES = [SITE_PLAN_BASEMAP, HYBRID_BASEMAP];
+/* SATELLITE — the same imagery, toned, with nothing drawn on top. */
+export const SATELLITE_BASEMAP = {
+  key: "satellite",
+  label: "Satellite",
+  title: "Aerial imagery only",
+  imageryKey: "esri",
+  imagery: BASEMAPS.esri,
+  vector: null,
+  graded: true,
+};
 
-/* Resolve a stored/unknown key to a choice — anything unrecognised falls back to the default. */
+/* "The Site Plan map" IS Hybrid — same object, not a copy, so the two can never drift. */
+export const SITE_PLAN_BASEMAP = HYBRID_BASEMAP;
+
+/* The choices /food offers, in display order. The FIRST is the default. */
+export const SITE_PLAN_BASEMAP_CHOICES = [HYBRID_BASEMAP, SATELLITE_BASEMAP];
+
+/* Resolve a stored/unknown key to a choice — anything unrecognised falls back to the default.
+ * Pre-NEW-1 stored values ("siteplan") resolve to Hybrid by the same fallback. */
 export function resolveBasemapChoice(key) {
   return SITE_PLAN_BASEMAP_CHOICES.find((c) => c.key === key) || SITE_PLAN_BASEMAP;
 }
 
-/* The ordered tile layers a choice is made of (bottom → top), each ready to hand to Leaflet:
- * `{ id, url, opts }`. Pure, so it is unit-tested without a browser. The B220 rule holds for the
- * imagery (`maxNativeZoom` = the source's own ceiling — past it Esri answers HTTP 200 with a grey
- * placeholder), and no entry ever carries a `subdomains` key (a single ArcGIS host has none; an
- * explicit `subdomains: undefined` crashed /food once — B634981). */
-export function basemapTileLayers(choice) {
+/* The raster tile layers a choice is made of — the IMAGERY only now (roads and labels are vector;
+ * see `vectorLabelLayer.js`). `{ id, url, opts }`, ready for Leaflet. Pure. The B220 rule holds
+ * (`maxNativeZoom` = the source's ceiling, minus one at high density) and no entry ever carries a
+ * `subdomains` key (B634981). `dpr` defaults to 1 so a caller that does not know it gets the
+ * conservative, never-placeholder behaviour. */
+export function basemapTileLayers(choice, { dpr = 1 } = {}) {
   const c = choice || SITE_PLAN_BASEMAP;
-  const out = [{
-    id: "imagery", url: c.imagery.tiles,
-    opts: { maxZoom: 21, maxNativeZoom: c.imagery.maxNative, attribution: c.imagery.attr, zIndex: 1 },
-  }];
-  if (c.roadNames) {
-    out.push({ id: "roads", url: c.roadNames.url,
-      opts: { maxZoom: 21, maxNativeZoom: c.roadNames.maxNative, opacity: c.roadNames.opacity, zIndex: 2 } });
-  }
-  if (c.placeNames) {
-    out.push({ id: "places", url: c.placeNames.url,
-      opts: { maxZoom: 21, maxNativeZoom: c.placeNames.maxNative, opacity: c.placeNames.opacity, zIndex: 3 } });
-  }
-  return out;
+  const opts = {
+    maxZoom: 21, attribution: c.imagery.attr, zIndex: 1,
+    ...densityTileOptions(c.imagery.maxNative, dpr),
+  };
+  if (c.graded) opts.className = IMAGERY_GRADE.className;
+  return [{ id: "imagery", url: c.imagery.tiles, opts }];
 }
 
-/* The credit line for a choice, composed from the same registry entries (never re-typed). */
+/* The credit line for a choice — imagery credit, plus the vector source's when labels are drawn. */
 export function basemapAttribution(choice) {
   const c = choice || SITE_PLAN_BASEMAP;
-  return c.roadNames || c.placeNames ? `${c.imagery.attr} · ${LABELS_ATTR}` : c.imagery.attr;
+  return c.vector ? `${c.imagery.attr} · ${c.vector.attribution}` : c.imagery.attr;
 }
+
+/* Fallback credit when the raster reference overlay is swapped in. */
+export const FALLBACK_LABELS_ATTR = LABELS_ATTR;

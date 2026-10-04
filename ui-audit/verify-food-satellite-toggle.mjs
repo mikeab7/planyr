@@ -25,13 +25,6 @@ if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 const failures = [];
 const check = (label, ok, extra = "") => { console.log(`${ok ? "PASS" : "FAIL"} — ${label}${extra ? ` (${extra})` : ""}`); if (!ok) failures.push(label); };
 
-async function layerUrls(page) {
-  return page.evaluate(() => [...document.querySelectorAll('[data-testid="food-map"] .leaflet-tile-pane .leaflet-layer')].map((l) => {
-    const img = l.querySelector("img.leaflet-tile");
-    return { src: img ? img.src : null, opacity: Number(getComputedStyle(l).opacity) };
-  }));
-}
-
 // Known-good arm (DRIVER-SCROLL §6): the control's two buttons must exist; otherwise the run is void.
 async function open(browser, viewport, label, seed) {
   const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport });
@@ -43,7 +36,7 @@ async function open(browser, viewport, label, seed) {
   await page.goto(`${BASE_URL}/#/food`, { waitUntil: "domcontentloaded", timeout: 30000 });
   await page.waitForSelector('[data-testid="food-map"]', { timeout: 15000 });
   await assertMeasurable(page, "verify-food-satellite-toggle");
-  const have = await page.locator('[data-testid="food-basemap-siteplan"], [data-testid="food-basemap-hybrid"]').count();
+  const have = await page.locator('[data-testid="food-basemap-satellite"], [data-testid="food-basemap-hybrid"]').count();
   if (have !== 2) throw new Error(`VOID RUN (${label}): expected the two basemap buttons, found ${have}`);
   return { context, page, pageErrors };
 }
@@ -60,41 +53,32 @@ async function main() {
     const { context, page, pageErrors } = await open(browser, viewport, label);
     const pressed = async (k) => (await page.getAttribute(`[data-testid="food-basemap-${k}"]`, "aria-pressed")) === "true";
 
-    check(`${label}: a NEW user opens on the Site Plan map`, await pressed("siteplan") && !(await pressed("hybrid")));
+    check(`${label}: a NEW user opens on Hybrid`, await pressed("hybrid") && !(await pressed("satellite")));
     await zoomToNeighbourhood(page);
-    let layers = await layerUrls(page);
-    check(`${label}: Site Plan = imagery + road names (2 tile layers)`, layers.length === 2 && /World_Imagery/.test(layers[0].src || "") && /World_Transportation/.test(layers[1].src || ""), JSON.stringify(layers.map((l) => l.opacity)));
-    check(`${label}: imagery tiles really painted and opaque (no blank map)`, layers[0].opacity === 1 && layers[0].src && await page.evaluate(() => [...document.querySelectorAll('[data-testid="food-map"] .leaflet-tile-pane img.leaflet-tile')].some((i) => i.naturalWidth > 0)));
-    if (SHOTS) await page.screenshot({ path: `${SHOTS}/food-siteplan-${label}.png` });
-
-    await page.click('[data-testid="food-basemap-hybrid"]', { force: true });
-    await page.waitForTimeout(3500);
-    layers = await layerUrls(page);
-    check(`${label}: Hybrid = imagery + road names + place names (3 layers, labels full strength)`, layers.length === 3 && /World_Boundaries_and_Places/.test(layers[2].src || "") && layers[1].opacity === 1 && layers[2].opacity === 1);
+    check(`${label}: imagery tiles really painted and opaque (no blank map)`, await page.evaluate(() => [...document.querySelectorAll('[data-testid="food-map"] .leaflet-tile-pane img.leaflet-tile')].some((i) => i.naturalWidth > 0)));
+    await page.click('[data-testid="food-basemap-satellite"]', { force: true });
+    await page.waitForTimeout(2500);
     check(`${label}: no crash on switch`, (await page.locator("text=/hit an error and couldn.?t load/i").count()) === 0 && (await page.locator('[data-testid="food-basemap-error"]').count()) === 0 && pageErrors.length === 0, pageErrors.join("|"));
-    if (SHOTS) await page.screenshot({ path: `${SHOTS}/food-hybrid-${label}.png` });
-
-    // Pan + zoom on Hybrid: tiles must stay painted (B651872 symptom), nothing throws.
     await page.mouse.move(viewport.width / 2, viewport.height / 2);
     await page.mouse.down(); await page.mouse.move(viewport.width / 2 + 160, viewport.height / 2 + 90, { steps: 8 }); await page.mouse.up();
     await page.click(".leaflet-control-zoom-out", { force: true });
     await page.waitForTimeout(2500);
-    check(`${label}: Hybrid still painted after pan + zoom`, await page.evaluate(() => [...document.querySelectorAll('[data-testid="food-map"] .leaflet-tile-pane img.leaflet-tile')].filter((i) => i.naturalWidth > 0).length > 3));
+    check(`${label}: Satellite still painted after pan + zoom (B651872)`, await page.evaluate(() => [...document.querySelectorAll('[data-testid="food-map"] .leaflet-tile-pane img.leaflet-tile')].filter((i) => i.naturalWidth > 0).length > 3));
 
-    // Persistence: reload → Hybrid remembered.
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.waitForSelector('[data-testid="food-basemap-hybrid"]', { timeout: 15000 });
-    check(`${label}: the choice persists across a reload`, await pressed("hybrid"));
-    // Toggle back and forth (B634981's crash path).
-    for (const k of ["siteplan", "hybrid", "siteplan"]) { await page.click(`[data-testid="food-basemap-${k}"]`, { force: true }); await page.waitForTimeout(400); }
+    check(`${label}: the choice persists across a reload`, await pressed("satellite"));
+    for (const k of ["hybrid", "satellite", "hybrid"]) { await page.click(`[data-testid="food-basemap-${k}"]`, { force: true }); await page.waitForTimeout(400); }
     check(`${label}: repeated switching never crashes`, (await page.locator('[data-testid="food-map"]').count()) === 1 && pageErrors.length === 0);
     await context.close();
   }
 
-  // Corrupt / hostile stored value falls back to the default instead of crashing.
-  const bad = await open(browser, { width: 1280, height: 800 }, "bad-storage", () => { try { localStorage.setItem("planyr:food:basemap", "street-from-the-old-build"); } catch (_) {} });
-  check("an unrecognised stored choice falls back to the Site Plan map", (await bad.page.getAttribute('[data-testid="food-basemap-siteplan"]', "aria-pressed")) === "true");
-  await bad.context.close();
+  // Corrupt / hostile / pre-NEW-1 stored value falls back to the default (Hybrid) instead of crashing.
+  for (const stored of ["street-from-the-old-build", "siteplan"]) {
+    const bad = await open(browser, { width: 1280, height: 800 }, "bad-storage", `try { localStorage.setItem("planyr:food:basemap", ${JSON.stringify(stored)}); } catch (_) {}`);
+    check(`stored "${stored}" falls back to Hybrid`, (await bad.page.getAttribute('[data-testid="food-basemap-hybrid"]', "aria-pressed")) === "true");
+    await bad.context.close();
+  }
 
   await browser.close();
   if (failures.length) { console.error(`\nFAIL — ${failures.length} check(s): ${failures.join("; ")}`); process.exit(1); }

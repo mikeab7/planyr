@@ -166,6 +166,18 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1443696 — B2018608: vector roads + labels basemap (Food + Site Plan map) `Blocker: live-GIS`
+
+Sandbox-proven at dpr 2 against a SYNTHETIC OpenMapTiles fixture (`ui-audit/verify-vector-basemap.mjs`, 28/28); the sandbox cannot reach `tiles.openfreemap.org`, so the **real source, its CORS headers and the real map look are unverified**. **Steps** (planyr.io, read the served chunk hash in the same observation; `node ui-audit/verify-vector-basemap.mjs https://planyr.io --live` runs the mechanical half):
+1. Open `/food` fresh (clear `planyr:food:basemap`). **Expect:** Hybrid is selected; roads/labels render crisp over the aerial within a few seconds; no "Crisp road labels unavailable" notice (if it shows, OpenFreeMap was blocked/CORS-refused — file that on B2018608).
+2. Houston at metro zoom, then neighbourhood zoom. **Expect:** freeways/major roads only at metro; local streets appear at neighbourhood zoom; road names follow the road line; no two labels overlap; no heavy black outlines.
+3. Pan and zoom (wheel + buttons). **Expect:** labels stay glued to the aerial through the animation; Food pins sit above labels; no blank map after a search jump.
+4. Click Satellite. **Expect:** toned aerial only, no labels; reload keeps Satellite.
+5. Site Plan → Map view, Layers → Road names slider. **Expect:** same Hybrid look; the slider fades the labels; parcels / FEMA / draw tools still paint above.
+6. Open a plan, File → Download PDF. **Expect:** the aerial in the PDF is NOT darkened or desaturated.
+7. Look along tile joins at fractional zoom on a 2x display. **Expect:** no light hairlines.
+8. Desktop: the credit reads "…OpenFreeMap © OpenMapTiles data © OpenStreetMap", fully visible beside (not under) the ? button; the "Loading imagery…" pill never overlaps the zoom control.
+- **Stopping rule:** closes on a dated pass of 1–8, or a failed step filed as a recurrence on B2018608.
 ### V1468976 — B2043888: phone tab-strip chevrons page cleanly and clamp at both ends `Blocker: real-device (iOS elastic overscroll — not producible headless)`
 
 Sandbox-proven, both engines: `ui-audit/verify-nav-arrows.mjs` (and `ENGINE=webkit`), 31/31; `test/scrollStrip.test.js`. The original overshoot did NOT reproduce headless, so this is the live confirmation. **Steps** (planyr.io on the iPhone, Map with no project; read the served chunk hash in the same observation):
