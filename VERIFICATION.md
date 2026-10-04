@@ -359,6 +359,16 @@ Sandbox-proven: `test/deedGap.test.js` (real Tract 1 + hole calls), `ui-audit/ve
 3. Align to county parcel (or Rotate), then undo. **Expect:** the gap line moves with the deed and keeps its length.
 4. File → export PDF. **Expect:** the red dashed gap line is on the sheet.
 - **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B2019264.
+### V1487744 — B2064416–B2064418: Food on a phone — search lists his restaurant once, picking it shows its pin above the sheet, and the Map / List toggle stays put while typing `Blocker: auth`
+
+Sandbox-proven (Chromium + the iPhone-15 descriptor, NOT WebKit — it could not be installed here; mocked backend, no real data): `ui-audit/verify-food-phone-search.mjs` — 30 checks, 9 red on main / 30 green with the fix, with a known-good arm — and `test/foodPlaceIdentity.test.js`. **Not provable here:** his real signed-in visit list, the real bottom-sheet heights, and a real on-screen keyboard. **Use a restaurant already on his list and DO NOT save a visit — cancel the form (or use a throwaway duplicate of a real place and say exactly what was touched).**
+**Steps** (planyr.io/#/food, signed in as Michael, a real phone, Map view):
+1. Type the name of a restaurant he has already visited (e.g. DAO'N). **Expect:** exactly ONE row for it, marked "Been here".
+2. Tap that row. **Expect:** the panel shows his existing visits (not a blank "log a visit" restaurant).
+3. Tap "Log a visit" and cancel without saving. **Expect:** nothing new appears in List view. (If saved on a throwaway: it joins the existing restaurant's visit count, never a second row.)
+4. Search a restaurant far from the current view and pick it; then clear search, switch to List, tap a restaurant, switch back to Map. **Expect:** each time the map has moved and the restaurant's pin is visible in the strip of map above the sheet, not under it.
+5. Tap the search field and type with the keyboard up. **Expect:** Map and List stay visible and tappable beside the search field the whole time; the results list fits above the keyboard and scrolls inside itself.
+- **Stopping rule:** closes on a dated pass of 1-5 on a real phone, or a failed step filed as a recurrence on B2064416 (1-3) / B2064417 (4) / B2064418 (5).
 
 ### V1438832 — B2013744/B2013745: a note, a comp and the site on one parcel are each clickable on the map, and the exported KMZ has three distinct pins `Blocker: auth`
 

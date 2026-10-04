@@ -29,6 +29,7 @@
 import { useEffect, useRef, useState } from "react";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { rankSearchCandidates } from "../lib/searchQuality.js";
+import { mergeSearchResults } from "../lib/searchMerge.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
 
 const DEBOUNCE_MS = 220;
@@ -46,9 +47,10 @@ function fieldStyle() {
 const nameMatches = (name, q) => (name || "").toLowerCase().includes(q);
 
 export default function SearchBox({
-  query, onQueryChange, view, manualPins, loggedIds, wishlistIds, bounds,
+  query, onQueryChange, view, manualPins, ownPlaces, loggedIds, wishlistIds, bounds,
   searchSnapshot, onSelectPlace, onSelectManualPin, onFlyTo,
   onRequestLiveSearch, overpassPlaces, onStartDropPinFor,
+  fill = false, // phone: take the width the toolbar has left instead of a fixed 220 (see FoodApp)
 }) {
   const [snapshotResults, setSnapshotResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -57,6 +59,18 @@ export default function SearchBox({
   const debounceRef = useRef(null);
   const requestRef = useRef(0);
   const inputRef = useRef(null); // AnchoredMenu's anchor — the portal positions off this
+  // Phone, keyboard up: the dropdown must fit what is still VISIBLE. `window.innerHeight` does not
+  // shrink for an on-screen keyboard on iOS, the visual viewport does — track that, so a long result
+  // list scrolls inside itself instead of running off behind the keyboard.
+  const [viewportH, setViewportH] = useState(() => (typeof window !== "undefined" ? (window.visualViewport?.height || window.innerHeight) : 800));
+  const [viewportW, setViewportW] = useState(() => (typeof window !== "undefined" ? (window.visualViewport?.width || window.innerWidth) : 1200));
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const on = () => { setViewportH(vv?.height || window.innerHeight); setViewportW(vv?.width || window.innerWidth); };
+    on();
+    (vv || window).addEventListener("resize", on);
+    return () => (vv || window).removeEventListener("resize", on);
+  }, []);
 
   const trimmed = query.trim();
   const q = trimmed.toLowerCase();
@@ -94,19 +108,15 @@ export default function SearchBox({
   // once its results land, filter them by the CURRENT query and fold matches in.
   const liveMatches = liveState === "done" ? (overpassPlaces || []).filter((p) => nameMatches(p.name, q)) : [];
 
-  // "His own places rank first" — manual pins (never in the snapshot) matched client-side,
-  // plus every snapshot hit he's already logged, ahead of everywhere he hasn't been. Each
-  // bucket keeps the relevance order it already arrived in.
-  const manualMatches = view === "map" && trimmed.length >= MIN_QUERY_LEN
-    ? (manualPins || []).filter((p) => nameMatches(p.name, q)).map((p) => ({ ...p, kind: "manual", mine: true }))
-    : [];
+  // "His own places rank first" — and ONE row per real-world restaurant (owner report, 2026-10-04,
+  // "DAO'N" listed twice): a snapshot/live hit that is a copy of a place he already has is replaced by
+  // his own record, so picking it opens the existing restaurant. See lib/searchMerge.js.
   const snapshotRanked = snapshotResults.map((p) => ({ ...p, kind: "place", mine: loggedIds?.has(p.id), wishlisted: wishlistIds?.has(p.id) }));
-  const results = [
-    ...manualMatches,
-    ...snapshotRanked.filter((p) => p.mine),
-    ...snapshotRanked.filter((p) => !p.mine),
-    ...liveMatches.map((p) => ({ ...p, kind: "live" })),
-  ].slice(0, SHOWN_CAP);
+  const results = view === "map" && trimmed.length >= MIN_QUERY_LEN
+    ? mergeSearchResults({
+      query: trimmed, manualPins, ownPlaces, loggedIds, wishlistIds, snapshotRanked, liveMatches, cap: SHOWN_CAP,
+    })
+    : [];
 
   const settled = !loading && trimmed.length >= MIN_QUERY_LEN;
   const showLiveOffer = view === "map" && settled && liveState === "idle" && results.length < 3 && bounds;
@@ -128,20 +138,29 @@ export default function SearchBox({
     onRequestLiveSearch().finally(() => setLiveState("done"));
   };
 
+  const anchorBottom = inputRef.current?.getBoundingClientRect().bottom ?? 80;
+  const menuWidth = fill ? Math.min(280, viewportW - 16) : 280;
+  const menuMaxH = Math.max(120, viewportH - anchorBottom - 16);
+
   return (
-    <div>
+    <div style={fill ? { flex: "1 1 0", minWidth: 0 } : undefined}>
       <input
         ref={inputRef}
         type="search" value={query} data-testid="food-search-box"
         onChange={(e) => { onQueryChange(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
+        onFocus={() => {
+          setOpen(true);
+          // iOS may scroll the page to bring a focused field into view; the search + Map/List strip
+          // lives at the top and must stay there.
+          if (fill) requestAnimationFrame(() => { if (window.scrollY) window.scrollTo(0, 0); });
+        }}
         placeholder={view === "map" ? "Search restaurants…" : "Filter your visits…"}
-        style={{ ...fieldStyle(), width: 220 }}
+        style={{ ...fieldStyle(), width: fill ? "100%" : 220 }}
         aria-label="Search restaurants"
       />
       <AnchoredMenu
         open={showDropdown} onClose={() => setOpen(false)} anchorRef={inputRef}
-        placement="below-left" width={280} gap={4}
+        placement="below-left" width={menuWidth} gap={4}
         // hoverSafe: not a hover trigger, but its click-away semantics are exactly what a text
         // input needs — no full-viewport interactive backdrop covering the input itself, so
         // clicking back into the box to keep typing/reposition the cursor works normally
@@ -150,6 +169,7 @@ export default function SearchBox({
         panelStyle={{
           background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: 10,
           boxShadow: "0 10px 28px rgba(0,0,0,0.22)", padding: 6,
+          maxHeight: menuMaxH, overflowY: "auto",
         }}
       >
         <div data-testid="food-search-results">

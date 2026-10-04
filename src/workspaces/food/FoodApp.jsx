@@ -27,10 +27,28 @@ import {
 } from "./lib/foodStore.js";
 import { withVisitDate, matchingOpenDishWishlist } from "./lib/dishAggregates.js";
 import { searchOverpass } from "./lib/overpass.js";
+import { resolveSaveTarget } from "./lib/placeIdentity.js";
 import { RADIUS } from "../../shared/ui/radius.js";
+
+// Phone width — the SAME 760 breakpoint AppHeader's own `useNarrow`, VisitPanel's bottom-sheet switch
+// and FoodMap use, read locally because AppHeader does not export its hook and this module may not
+// grow an import edge for one boolean.
+const PHONE_QUERY = "(max-width: 760px)";
+function usePhoneWidth() {
+  const [phone, setPhone] = useState(() => { try { return window.matchMedia(PHONE_QUERY).matches; } catch (_) { return false; } });
+  useEffect(() => {
+    let mq; try { mq = window.matchMedia(PHONE_QUERY); } catch (_) { return undefined; }
+    const on = () => setPhone(mq.matches);
+    on();
+    mq.addEventListener ? mq.addEventListener("change", on) : mq.addListener(on);
+    return () => { mq.removeEventListener ? mq.removeEventListener("change", on) : mq.removeListener(on); };
+  }, []);
+  return phone;
+}
 
 export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, authControl, accountActive, userId }) {
   const [view, setView] = useState("map"); // "map" | "list"
+  const phone = usePhoneWidth();
   const [bounds, setBounds] = useState(null);
   const [places, setPlaces] = useState([]);
   const [placesCap, setPlacesCap] = useState({ capped: false, totalMatched: 0 });
@@ -250,16 +268,22 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   const submitVisit = useCallback(async (fields) => {
     if (!selected) return false;
     setPending(true); setError(null);
-    const payload = selected.kind === "place"
-      ? { place_id: selected.place.id, ...fields }
-      : selected.kind === "manualPin"
-        ? { place_id: null, custom_name: selected.pin.name, custom_lat: selected.pin.lat, custom_lon: selected.pin.lon, ...fields }
-        : { place_id: null, custom_name: manualDraftName || "Unnamed place", custom_lat: selected.lat, custom_lon: selected.lon, ...fields };
     if (selected.kind === "newPin" && !manualDraftName.trim()) {
       setPending(false);
       setError("Give this place a name first.");
       return false;
     }
+    // Owner report 2026-10-04 ("DAO'N" listed twice; picking the second copy saved a brand-new
+    // restaurant): a visit may only ever attach to the restaurant he ALREADY has for this spot. If the
+    // selection is a copy of one (same place id, or same normalised name within a storefront's reach —
+    // lib/placeIdentity.js), the write is redirected to his existing record and the panel re-points
+    // at it, so a second record for the same place cannot be created from here.
+    const { target, redirected } = resolveSaveTarget(selected, manualDraftName, { manualPins, ownPlaces: loggedPlaces });
+    const payload = target.kind === "place"
+      ? { place_id: target.place.id, ...fields }
+      : target.kind === "manualPin"
+        ? { place_id: null, custom_name: target.pin.name, custom_lat: target.pin.lat, custom_lon: target.pin.lon, ...fields }
+        : { place_id: null, custom_name: manualDraftName || "Unnamed place", custom_lat: target.lat, custom_lon: target.lon, ...fields };
     // NEW-1 (2026-08-27 owner block, verbatim: "when I click log this visit, it should not make
     // it seem like nothing happened") — OPTIMISTIC add, so the Past-visits list, the aggregates,
     // the panel's own visited/not-visited state, and the map pin (a hollow want-to-try pin
@@ -287,9 +311,10 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     if (clearedWish) await removeWishlist(clearedWish.id);
     await reloadVisits(); // replaces the optimistic row with the real, server-confirmed one — never a duplicate
     await reloadWishlist();
-    if (selected.kind === "newPin") setSelected(null); // the pin now exists as a manual pin; close and let it re-render from data
+    if (redirected) setSelected(target); // panel re-points at the restaurant the visit joined
+    else if (selected.kind === "newPin") setSelected(null); // now a manual pin; re-renders from data
     return true;
-  }, [selected, manualDraftName, reloadVisits, reloadWishlist, wishlist]);
+  }, [selected, manualDraftName, reloadVisits, reloadWishlist, wishlist, manualPins, loggedPlaces]);
 
   // "Want to try" toggle (B669312) — one click on, one click off, working for a snapshot place,
   // an existing manual pin, or a brand-new dropped pin not yet saved anywhere (which needs a
@@ -297,14 +322,16 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   const toggleWishlist = useCallback(async () => {
     if (!selected || !accountActive) return;
     setError(null);
-    if (selected.kind === "place") {
-      const existing = wishlist.find((w) => w.place_id === selected.place.id);
-      const { error: err } = existing ? await removeWishlist(existing.id) : await addWishlist({ place_id: selected.place.id });
+    // Same duplicate guard as submitVisit: flag the restaurant he already has, never a second copy.
+    const { target: sel } = resolveSaveTarget(selected, manualDraftName, { manualPins, ownPlaces: loggedPlaces });
+    if (sel.kind === "place") {
+      const existing = wishlist.find((w) => w.place_id === sel.place.id);
+      const { error: err } = existing ? await removeWishlist(existing.id) : await addWishlist({ place_id: sel.place.id });
       if (err) { setError(err.message || "Couldn't update that flag."); return; }
     } else {
-      const name = selected.kind === "manualPin" ? selected.pin.name : manualDraftName;
-      const lat = selected.kind === "manualPin" ? selected.pin.lat : selected.lat;
-      const lon = selected.kind === "manualPin" ? selected.pin.lon : selected.lon;
+      const name = sel.kind === "manualPin" ? sel.pin.name : manualDraftName;
+      const lat = sel.kind === "manualPin" ? sel.pin.lat : sel.lat;
+      const lon = sel.kind === "manualPin" ? sel.pin.lon : sel.lon;
       if (!name || !name.trim()) { setError("Give this place a name first."); return; }
       const key = manualGroupKey(name, lat, lon);
       const existing = wishlist.find((w) => !w.place_id && manualGroupKey(w.custom_name, w.custom_lat, w.custom_lon) === key);
@@ -312,7 +339,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
       if (err) { setError(err.message || "Couldn't update that flag."); return; }
     }
     await reloadWishlist();
-  }, [selected, accountActive, wishlist, manualDraftName, reloadWishlist]);
+  }, [selected, accountActive, wishlist, manualDraftName, reloadWishlist, manualPins, loggedPlaces]);
 
   const removeVisit = useCallback(async (id) => {
     const { error: err } = await deleteVisit(id);
@@ -450,8 +477,14 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
         showModuleTabs={false}
         multiEditOk
         toolbarContent={
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ display: "flex", border: "1px solid var(--border-default)", borderRadius: 8, overflow: "hidden" }}>
+          // Owner report 2026-10-04 (phone): typing in search pushed the Map / List toggle off screen.
+          // The header's second row scrolls sideways on a phone and this strip was wider than the
+          // screen (toggle + "Drop a pin" + a fixed-width search), so focusing the search field
+          // scrolled the row to reveal it — right past the toggle. On a phone the strip is now exactly
+          // one screen wide, the toggle and pin button keep their natural size, and the search field
+          // takes whatever is left (min-width 0), so nothing ever needs to scroll.
+          <div data-testid="food-toolbar" style={{ display: "flex", alignItems: "center", gap: 8, ...(phone ? { width: "calc(100vw - 12px)", minWidth: 0 } : null) }}>
+            <div style={{ display: "flex", flex: "0 0 auto", border: "1px solid var(--border-default)", borderRadius: 8, overflow: "hidden" }}>
               {["map", "list"].map((v) => (
                 <button
                   key={v} type="button" onClick={() => setView(v)} aria-pressed={view === v}
@@ -469,22 +502,24 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
               <button
                 type="button" onClick={togglePinMode} aria-pressed={pinMode}
                 title="Drop a pin for a place not on the map"
+                aria-label="Drop a pin for a place not on the map"
                 style={{
-                  border: "1px solid var(--border-default)", borderRadius: RADIUS.md, padding: "6px 14px", cursor: "pointer",
+                  flex: "0 0 auto", whiteSpace: "nowrap",
+                  border: "1px solid var(--border-default)", borderRadius: RADIUS.md, padding: phone ? "6px 10px" : "6px 14px", cursor: "pointer",
                   font: "inherit", fontSize: 12.5, fontWeight: 700,
                   background: pinMode ? "var(--accent-food)" : "transparent",
                   color: pinMode ? "var(--on-accent-food)" : "var(--text-primary)",
                 }}
               >
-                {pinMode ? "Click the map…" : "Drop a pin"}
+                {pinMode ? (phone ? "Tap the map" : "Click the map…") : (phone ? "+ Pin" : "Drop a pin")}
               </button>
             )}
             <SearchBox
               query={searchQuery} onQueryChange={setSearchQuery} view={view}
-              manualPins={manualPins} loggedIds={loggedIds} wishlistIds={wishlistIds} bounds={bounds}
+              manualPins={manualPins} ownPlaces={loggedPlaces} loggedIds={loggedIds} wishlistIds={wishlistIds} bounds={bounds}
               searchSnapshot={searchPlacesByName} onSelectPlace={openPlace} onSelectManualPin={openManualPin}
               onFlyTo={flyTo} onRequestLiveSearch={searchHere} overpassPlaces={overpassPlaces}
-              onStartDropPinFor={startDropPinFor}
+              onStartDropPinFor={startDropPinFor} fill={phone}
             />
           </div>
         }

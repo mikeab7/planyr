@@ -9,6 +9,7 @@
  * row in food_places — that table is service-role-write-only by design.
  */
 import { supabase, supabaseConfigured } from "./supabaseClient.js";
+import { normalizeName } from "./placeIdentity.js";
 
 export { supabaseConfigured };
 
@@ -121,7 +122,9 @@ export async function deleteVisit(id) {
  *  manual pin resolves to the SAME key regardless of which table it came from — that's what lets
  *  FoodApp tell a flagged-but-unvisited manual pin apart from an already-visited one. */
 export function manualGroupKey(name, lat, lon) {
-  return `${name}|${Number(lat).toFixed(4)}|${Number(lon).toFixed(4)}`;
+  // The NAME part is normalised (case, whitespace, straight/curly apostrophes — lib/placeIdentity.js),
+  // so "DAO'N" and "Dao’N " logged at the same spot are ONE pin, not two (owner report 2026-10-04).
+  return `${normalizeName(name)}|${Number(lat).toFixed(4)}|${Number(lon).toFixed(4)}`;
 }
 
 /** B1953796 (R5) — the ONE selection/row key for a manual pin (name + rounded lat/lon), used by the

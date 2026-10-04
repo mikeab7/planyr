@@ -94,6 +94,15 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
   registry-name and confidence de-ranking, corrupted-concatenated-address exclusion, and
   near-duplicate (same real-world spot, multiple sources) collapse. Pure JS, no Supabase import —
   see its own header for the production-measured reasoning behind every threshold.
+- `lib/placeIdentity.js` (B2064416) — the ONE answer to "is this the same restaurant he already has?"
+  (same place id, or same normalised name — apostrophes/case/spaces folded — within a storefront's
+  reach). `lib/searchMerge.js` uses it to show ONE search row per restaurant (his own record wins);
+  `FoodApp`'s `submitVisit`/`toggleWishlist` use `resolveSaveTarget` so a save can never create a
+  second record for a place he has. Never add a second "same place" test elsewhere.
+- `lib/mapCamera.js` (B2064417) — pure fly-to offset: desktop shifts for the right-hand panel, a
+  phone shifts for the bottom sheet. `FoodMap` also publishes read-only `data-map-lat/lon/zoom`
+  for the repo-root phone harness `verify-food-phone-search` under ui-audit (the phone harness: Chromium iPhone emulation, mocked
+  backend; covers duplicate search, map-follow, and the Map/List toggle staying on screen).
 - `lib/supabaseClient.js` — this module's own client. See BUNDLE ISOLATION above for why it
   isn't the site-planner's.
 - `db/food.sql` — the applied migration (production, `lyeqzkuiwngunutlkkmi`). `db/test/food_rls.test.sql` — the RLS proof.

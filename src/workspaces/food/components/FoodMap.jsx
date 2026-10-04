@@ -294,6 +294,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { manualPinKey } from "../lib/foodStore.js";
+import { cameraOffsetPx } from "../lib/mapCamera.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { colorForRating } from "../lib/ratingColor.js";
@@ -382,6 +383,25 @@ const SELECTED_ACCENT = "#BE3B22";
 function boundsOf(map) {
   const b = map.getBounds();
   return { south: b.getSouth(), north: b.getNorth(), west: b.getWest(), east: b.getEast() };
+}
+
+// NEW-1 (food phone pass, 2026-10-04, owner: "picking a restaurant does not move the map to it") —
+// ON A PHONE the detail panel is a BOTTOM SHEET covering the lower part of the map, not the right-
+// hand rail the offset below was written for (the old code shifted the camera SIDEWAYS by half a
+// rail's width, parking the pin against the left edge and leaving it under the sheet — reproduced:
+// pin at y=370 with the sheet's top edge at y=264). The camera is shifted DOWN by half the sheet's
+// height instead, so the pin lands in the middle of the strip of map that is still visible.
+// `PREDICTED_SHEET_FRACTION` is only the first guess for the instant the sheet opens (it reports its
+// real height two frames later; `recentreForSheet` then corrects it).
+const PREDICTED_SHEET_FRACTION = 0.4;
+const SHEET_RECENTRE_WINDOW_MS = 2500;
+
+/** The map centre that puts (lat, lon) in the middle of the UNOBSTRUCTED part of the map
+ *  (the offset rule is the pure, unit-tested lib/mapCamera.js). */
+function cameraFor(map, lat, lon, zoom, sheetPx, phone) {
+  const size = map.getSize();
+  const off = cameraOffsetPx({ width: size.x, height: size.y, panelWidth: PANEL_WIDTH, sheetPx, phone });
+  return map.unproject(map.project([lat, lon], zoom).add(off), zoom);
 }
 
 // Above MIN_PIN_ZOOM so a search result reliably lands somewhere the reference snapshot
@@ -499,6 +519,15 @@ export default function FoodMap({
   const [attributionOpen, setAttributionOpen] = useState(false);
   const coarsePointer = useCoarsePointer();
   const narrowViewport = useNarrowViewport();
+  // NEW-1 (food phone pass, 2026-10-04) — the fly-to effect below is keyed on the target's nonce
+  // only (see its comment), so it reads the CURRENT sheet height / layout through refs, and
+  // `flyInfoRef` remembers the last fly so the camera can be re-centred once the bottom sheet has
+  // finished measuring itself (it only reports its real height two animation frames after it opens).
+  const sheetHeightRef = useRef(sheetHeightPx);
+  sheetHeightRef.current = sheetHeightPx;
+  const narrowRef = useRef(narrowViewport);
+  narrowRef.current = narrowViewport;
+  const flyInfoRef = useRef(null); // {lat, lon, zoom, at, usedSheet, flying}
 
   // Mount once. The tile layer itself is NOT created here — see the basemap effect below —
   // so toggling satellite never tears down/recreates the map, the marker layer or its handlers.
@@ -533,6 +562,17 @@ export default function FoodMap({
     };
     map.on("moveend", report);
     report();
+    // Read-only view probe for the phone harness (ui-audit/verify-food-phone-search.mjs): the
+    // Leaflet instance is not reachable from the DOM, and "did the map follow the selection" is
+    // a question about where the camera ended up. Writes nothing, changes no behaviour.
+    const hostEl = hostRef.current;
+    const publishView = () => {
+      const c = map.getCenter();
+      hostEl.dataset.mapLat = String(c.lat); hostEl.dataset.mapLon = String(c.lng);
+      hostEl.dataset.mapZoom = String(map.getZoom());
+    };
+    map.on("moveend zoomend", publishView);
+    publishView();
 
     // B651872 (×5) — nothing else in this file ever tells Leaflet the CONTAINER's own size
     // changed outside of the flyTo/setView effect below (a search-select). A device rotation or
@@ -708,10 +748,10 @@ export default function FoodMap({
     // the visible (unobstructed) region. Clamped to 40% of the map's own width so a narrow/phone
     // viewport (where the panel can approach the map's full width) never shifts the target off
     // the visible area entirely in the other direction.
-    const containerWidth = map.getSize().x;
-    const panelOffsetPx = Math.min(PANEL_WIDTH, containerWidth * 0.8) / 2;
-    const targetPoint = map.project([flyToTarget.lat, flyToTarget.lon], targetZoom);
-    const shiftedLatLng = map.unproject(targetPoint.add([panelOffsetPx, 0]), targetZoom);
+    const sheetPx = narrowRef.current ? (sheetHeightRef.current || PREDICTED_SHEET_FRACTION * map.getSize().y) : 0;
+    const shiftedLatLng = cameraFor(map, flyToTarget.lat, flyToTarget.lon, targetZoom, sheetPx, narrowRef.current);
+    flyInfoRef.current = { lat: flyToTarget.lat, lon: flyToTarget.lon, zoom: targetZoom, at: Date.now(), usedSheet: sheetPx, flying: true };
+    map.once("moveend", () => { if (flyInfoRef.current) flyInfoRef.current.flying = false; });
 
     // B651872 (×4) — beyond LONG_JUMP_METERS, skip the animation entirely: setView with
     // animate:false goes straight through Leaflet's own hard-reset path (_resetView, the SAME
@@ -737,6 +777,27 @@ export default function FoodMap({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flyToTarget?.nonce]);
+
+  // NEW-1 (food phone pass) — the bottom sheet reports its REAL height a couple of frames after it
+  // opens (and again if its content resizes), so re-centre ONCE it has: inside a short window after a
+  // fly-to only, never on a later drag of the sheet (that would yank the map out from under the user),
+  // and never mid-flight (wait for the flight's own moveend so the animation isn't cut short).
+  useEffect(() => {
+    const map = mapRef.current;
+    const f = flyInfoRef.current;
+    if (!map || !f || !narrowRef.current || !sheetHeightPx) return undefined;
+    if (Date.now() - f.at > SHEET_RECENTRE_WINDOW_MS) return undefined;
+    if (Math.abs(sheetHeightPx - f.usedSheet) < 4) return undefined;
+    const apply = () => {
+      const cur = flyInfoRef.current;
+      if (!cur || cur !== f) return; // a newer selection owns the camera now
+      f.usedSheet = sheetHeightRef.current;
+      map.setView(cameraFor(map, f.lat, f.lon, f.zoom, sheetHeightRef.current, true), f.zoom, { animate: false });
+    };
+    if (f.flying) { map.once("moveend", apply); return () => map.off("moveend", apply); }
+    apply();
+    return undefined;
+  }, [sheetHeightPx]);
 
   // Drop-a-pin mode: next map click reports its lat/lon.
   useEffect(() => {

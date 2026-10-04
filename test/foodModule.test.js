@@ -826,11 +826,14 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
 
   it("his own places (manual pins + logged snapshot places) are ranked ahead of everywhere he hasn't been", () => {
     const box = src("components/SearchBox.jsx");
-    // The merge order is the ranking: manual matches, then logged snapshot hits, then the rest.
-    const order = box.slice(box.indexOf("const results = ["), box.indexOf("];", box.indexOf("const results = [")));
-    const manualIdx = order.indexOf("manualMatches");
-    const mineIdx = order.indexOf("snapshotRanked.filter((p) => p.mine)");
-    const restIdx = order.indexOf("snapshotRanked.filter((p) => !p.mine)");
+    // The merge order is the ranking (lib/searchMerge.js since 2026-10-04): manual pins, then his
+    // logged snapshot places, then the rest — and SearchBox must build its rows through it.
+    expect(box).toMatch(/mergeSearchResults\(/);
+    const merge = src("lib/searchMerge.js");
+    const order = merge.slice(merge.indexOf("return [...out.filter"));
+    const manualIdx = order.indexOf('r.kind === "manual"');
+    const mineIdx = order.indexOf('r.kind !== "manual" && isMine(r)');
+    const restIdx = order.indexOf("!isMine(r)");
     expect(manualIdx).toBeGreaterThanOrEqual(0);
     expect(manualIdx).toBeLessThan(mineIdx);
     expect(mineIdx).toBeLessThan(restIdx);
@@ -876,7 +879,8 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     // Flies to a PANEL-OFFSET point derived from the target (see the panel-aware-centring
     // describe block below), not the raw [lat, lon] directly — map.project/unproject shift it.
     expect(map).toMatch(/map\.flyTo\(shiftedLatLng, targetZoom, \{ duration: FLY_DURATION_SEC \}\)/);
-    expect(map).toMatch(/map\.project\(\[flyToTarget\.lat, flyToTarget\.lon\], targetZoom\)/);
+    expect(map).toMatch(/cameraFor\(map, flyToTarget\.lat, flyToTarget\.lon, targetZoom,/);
+    expect(map).toMatch(/map\.project\(\[lat, lon\], zoom\)\.add\(off\)/);
     expect(map).toMatch(/\[flyToTarget\?\.nonce\]/);
   });
 
@@ -1327,9 +1331,12 @@ describe("selected-place highlight — unmistakable pin, tied panel, centred pan
   it("the fly-to pan offsets the destination by half the panel's width — lands in the VISIBLE area, not the raw map centre", () => {
     const map = src("components/FoodMap.jsx");
     expect(map).toMatch(/const PANEL_WIDTH = 340;/); // matches VisitPanel's own literal width
-    expect(map).toMatch(/const panelOffsetPx = Math\.min\(PANEL_WIDTH, containerWidth \* 0\.8\) \/ 2;/);
-    expect(map).toMatch(/map\.project\(\[flyToTarget\.lat, flyToTarget\.lon\], targetZoom\)/);
-    expect(map).toMatch(/targetPoint\.add\(\[panelOffsetPx, 0\]\)/);
+    // The offset rule moved to the pure, unit-tested lib/mapCamera.js (2026-10-04 phone pass): desktop
+    // keeps half-the-panel sideways; a phone shifts DOWN by half the bottom sheet instead.
+    const cam = src("lib/mapCamera.js");
+    expect(cam).toMatch(/Math\.min\(panelWidth, width \* 0\.8\) \/ 2, 0\]/);
+    expect(map).toMatch(/cameraOffsetPx\(\{ width: size\.x, height: size\.y, panelWidth: PANEL_WIDTH, sheetPx, phone \}\)/);
+    expect(map).toMatch(/map\.project\(\[lat, lon\], zoom\)\.add\(off\)/);
     expect(map).toMatch(/map\.flyTo\(shiftedLatLng, targetZoom, \{ duration: FLY_DURATION_SEC \}\)/);
   });
 
@@ -1636,7 +1643,7 @@ describe("B668195 — no emoji glyphs in the food map view controls (plain text 
   it("FoodApp.jsx: no emoji on the Drop a pin toolbar button", () => {
     const app = src("FoodApp.jsx");
     for (const glyph of TARGET_EMOJI) expect(app).not.toContain(glyph);
-    expect(app).toMatch(/\{pinMode \? "Click the map…" : "Drop a pin"\}/);
+    expect(app).toMatch(/\{pinMode \? \(phone \? "Tap the map" : "Click the map…"\) : \(phone \? "\+ Pin" : "Drop a pin"\)\}/);
   });
 
   it("SearchBox.jsx: no emoji on the live-search or drop-a-pin fallback rows in the dropdown", () => {
