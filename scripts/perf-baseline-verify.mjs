@@ -112,7 +112,7 @@ for (const [commit, group] of byCommit) {
       why = `commit ${short} is not in this clone (${e.message.split("\n")[0].slice(0, 120)}) — a shallow clone cannot verify a baseline`;
     }
     if (!why) {
-      try { symlinkSync(join(ROOT, "node_modules"), join(tree, "node_modules"), "dir"); }
+      try { rmSync(join(tree, "node_modules"), { recursive: true, force: true }); symlinkSync(join(ROOT, "node_modules"), join(tree, "node_modules"), "dir"); }
       catch (e) { why = `could not share node_modules with the ${short} worktree (${e.message.slice(0, 120)})`; }
     }
     if (!why) {
