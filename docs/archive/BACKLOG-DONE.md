@@ -17524,3 +17524,10 @@ Constraint check: nothing contradicts `## Owner product constraints`.
 `[x]` **Rules rewritten (owner decision 2026-10-04):** CLAUDE.md + VERIFICATION.md — `Blocker: auth` no longer parks a check; a session's own signed-in check on the test account counts; only `real-data` / `live-GIS` park; ship-then-verify-signed-in on planyr.io (match `/version.json`); a session never ends its turn merged-but-unverified; the shared helper `ui-audit/lib/signedInSession.mjs` named; the setup-script CA import noted (never ignore-cert flags); the "sandbox blocks sign-in" / "Cowork is the only actor" wording removed.
 `[x]` **14 Cowork-verified PRs (#1939 #1966 #1944 #1888 #1936 #1922 #1918 #1883 #1915 #1914 #1932 #1929 #1925 #1923):** already recorded by #1984 (11 V# archived, 3 already closed; V1468976 for #1929 stays open for its real-iOS leg). Nothing further needed.
 - Verify: sandbox + live (the sign-in itself) — done 2026-10-04.
+
+### B2095120 — Site Planner hard-crashed on open for a plan holding an element type not in the type table `[site-planner]` (bug) #site-planner #robustness  *(Found by the VERIFY-SELF v3 auth sweep 2026-10-04 on `e2e-fixture-testfit`. DEDUPE-FIRST: no prior item. Constraint check: nothing contradicts `## Owner product constraints`.)*
+
+`[x]` **Symptom:** opening `#/project/e2e-fixture-testfit/site` signed in showed "Site Planyr hit an error and couldn't load: Cannot read properties of undefined (reading 'label')".
+`[x]` **Cause (AUDIT-FIRST, reproduced live on build 2f45a3d):** the fixture holds six legacy `type: "line"` setback elements; `SitePlanner.jsx` read `TYPE[el.type].label` unguarded in the element render pass (and 6 selection-panel sites), so any saved element whose type is not in `planStyle.TYPE` took the whole planner down.
+`[x]` **Fix:** all seven reads now `(TYPE[…type]?.label || "Element")`. Guard: `test/unknownElementType.test.js` (fails on any unguarded read).
+- Verify: live — see the V entry result in the PR (signed-in open of the fixture after deploy).
