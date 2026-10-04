@@ -71,6 +71,7 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
 - `components/FoodMap.jsx` — Leaflet map, canvas-rendered pins; basemap = Satellite (photo only, default) or Hybrid, defined in the shared basemaps registry under src/shared/ (NEW-1/B2025280 — never inline a tile URL here)
   (not SVG — the snapshot query can return up to ~2,000 points). Logged vs not-yet-logged vs
   manual pins are three distinct colors, per the brief.
+- `db/food_browse_qualify_gis_operator.sql` + `db/test/food_browse_rpc.test.sql` (B2079808) — the browse RPC's PostGIS operator must stay `OPERATOR(extensions.&&)` under its pinned search_path (a bare `&&` broke every browse call); a failed browse shows "Couldn't load restaurants here — Retry" and logs to `client_errors` via `foodStore.reportBrowseError` (food's own client, never shared telemetry).
 - `components/VisitPanel.jsx` — click a pin, see past visits, log another. A right-side panel,
   never a dialog box (`window.prompt`/`confirm` are banned app-wide).
 - `components/VisitList.jsx` — every visit, searchable by name, sortable by date/rating/cost.

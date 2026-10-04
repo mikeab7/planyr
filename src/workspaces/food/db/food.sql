@@ -217,13 +217,15 @@ returns table (
   category text, cuisine text, address text, brand text,
   source text, source_licence text, total_matched bigint
 )
-language sql stable as $$
+language sql stable
+set search_path = public, pg_temp
+as $$
   with matched as (
     select id, name, lat, lon, category, cuisine, address, brand, source, source_licence,
       width_bucket(lat, p_south, p_north, greatest(p_grid, 1)) as gy,
       width_bucket(lon, p_west, p_east, greatest(p_grid, 1)) as gx
     from public.food_places
-    where geom && extensions.st_makeenvelope(p_west, p_south, p_east, p_north, 4326)::extensions.geography
+    where geom OPERATOR(extensions.&&) extensions.st_makeenvelope(p_west, p_south, p_east, p_north, 4326)::extensions.geography
   ),
   counted as (
     select *,
@@ -743,6 +745,14 @@ alter function public.food_dishes_before_write() set search_path = public, pg_te
 -- migration tool and a direct SQL session — a plain ALTER FUNCTION SET search_path never touches
 -- that clause at all, so it adds a second, independent proconfig entry rather than replacing it).
 alter function public.food_places_in_bounds_sampled(double precision, double precision, double precision, double precision, integer, integer) set search_path = public, pg_temp;
+-- ⛔ B<PENDING> (2026-10-04, food browse pins): the pin above is what BROKE the map's browse call —
+-- with `extensions` off the path, the bare `&&` operator in food_places_in_bounds_sampled could not
+-- be resolved (42883 "operator does not exist: extensions.geography && extensions.geography"), so
+-- every viewport query errored and no unsaved restaurant pins ever drew. A function-call form like
+-- `extensions.st_distance(...)` is schema-qualified and survives a pinned path; an OPERATOR is not,
+-- so it must be written OPERATOR(extensions.&&). The function body above carries that fix and the
+-- live definition (migration food_places_in_bounds_sampled_qualify_gis_operator, applied 2026-10-04)
+-- matches it exactly. Guard: db/test/food_browse_rpc.test.sql.
 alter function public.food_places_search_by_name_raw(text, integer, double precision, double precision) set search_path = public, pg_temp;
 alter function public.food_places_search_by_name(text, integer, double precision, double precision) set search_path = public, pg_temp;
 
