@@ -316,7 +316,7 @@ export function makeParcelImageLayer(url, opts) {
   const m = MAPSERVER_LAYER_RE.exec(trimUrl(url));
   if (!m) return makeParcelLayer(url);
   const [, service, id] = m;
-  return guardRasterOpacity(EL.dynamicMapLayer({
+  const layer = guardRasterOpacity(EL.dynamicMapLayer({
     url: service,
     dynamicLayers: plainOutlineDynamicLayers(id),
     minZoom: PARCEL_MINZOOM,
@@ -324,6 +324,19 @@ export function makeParcelImageLayer(url, opts) {
     f: "image",
     ...opts,
   }));
+  /* A statewide BACKUP covers only the counties whose own server failed (`names`), not the whole view; null
+   * = the whole state (a county with no CAD of its own). A no-op when unchanged, and safe before the layer is
+   * on a map (esri's `_update` returns with no map), so the first request already carries the scope. */
+  let scopeKey = "";
+  layer.setCountyScope = (names) => {
+    const list = Array.isArray(names) && names.length ? [...names].sort() : [];
+    const key = list.join("|");
+    if (key === scopeKey) return layer;
+    scopeKey = key;
+    if (typeof layer.setDynamicLayers === "function") layer.setDynamicLayers(plainOutlineDynamicLayers(id, { countyNames: list }));
+    return layer;
+  };
+  return layer;
 }
 
 /* A real, queryable CAD's outline display (NEW-1, 2026-10-04 — Planyr owns outlines AND lot numbers):

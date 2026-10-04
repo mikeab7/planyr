@@ -63,9 +63,16 @@ const seen = { exports: [], outFields: [], queries: 0, statewide: [] };
 await ctx.route(/./, async (route) => {
   const u = new URL(route.request().url());
   if (u.hostname === "localhost" || u.hostname === "127.0.0.1") return route.continue();
-  if (/geographic\.texas\.gov/.test(u.href)) seen.statewide.push(u.href);
+  if (/geographic\.texas\.gov/.test(u.href)) {
+    seen.statewide.push(u.href);
+    if (/\/export/.test(u.pathname)) return route.fulfill({ status: 200, headers: cors, contentType: "image/png", body: PNG });
+  }
   if (/gisdata\.pandai\.com/.test(u.href)) {
     if (/\/export/.test(u.pathname)) { seen.exports.push(u.href); return route.fulfill({ status: 200, headers: cors, contentType: "image/png", body: PNG }); }
+    if (/\/query/.test(u.pathname) && process.env.CHAMBERS_DOWN) { // the live outage: HTTP 200 with an error body, as measured 2026-10-04
+      seen.queries++;
+      return route.fulfill({ status: 200, headers: cors, contentType: "application/json", body: JSON.stringify({ error: { code: 400, message: "Failed to execute query." } }) });
+    }
     if (/\/query/.test(u.pathname)) {
       seen.queries++;
       const sp = u.searchParams;
@@ -130,6 +137,20 @@ for (let i = 0; i < 40 && z < 17.4; i++) { await wheel(-240, 1); z = await zoomN
 for (let i = 0; i < 24 && z != null && z > 17.8; i++) { await wheel(240, 1); z = await zoomNow(); }
 console.log("close-band zoom", z);
 await page.screenshot({ path: "/tmp/lotnos-close.png" });
+if (process.env.CHAMBERS_DOWN) {
+  /* OWNER QUESTION (V1475200 follow-up): when Chambers' own server fails, does the statewide backup cover the WHOLE
+   * view or only Chambers? Every statewide export must carry a definitionExpression naming CHAMBERS. */
+  await page.waitForTimeout(6000);
+  const sw = seen.statewide.filter((h) => /\/export/.test(h));
+  console.log(`CHAMBERS DOWN: ${seen.queries} county queries answered with an error, ${sw.length} statewide export requests`);
+  if (!sw.length) { console.log("VOID — the statewide backup was never requested, so scoping cannot be judged"); await browser.close(); process.exit(2); }
+  const scoped = sw.filter((h) => /definitionExpression/.test(decodeURIComponent(h)) && /CHAMBERS/.test(decodeURIComponent(h)));
+  ok(scoped.length === sw.length, `every statewide backup request is scoped to CHAMBERS (${scoped.length} of ${sw.length})`);
+  await page.screenshot({ path: "/tmp/lotnos-chambers-down.png" });
+  console.log(`\n${pass} passed, ${fail} failed`);
+  await browser.close();
+  process.exit(fail ? 1 : 0);
+}
 const close = await readLabels();
 console.log(`CLOSE (z ${z && z.toFixed(2)}): ${close.nodes.length} numbers, ${seen.queries} outline queries, chip ${close.chip ? "present" : "absent"}`);
 if (!close.nodes.length) { console.log("VOID — no lot number drawn in the close band, so the run cannot vouch for anything (known-good arm failed)"); await browser.close(); process.exit(2); }

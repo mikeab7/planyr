@@ -3111,6 +3111,40 @@ export function lotNumberFieldForUrl(url) {
   return null;
 }
 
+/* A county key's name as the TxGIO statewide layer spells it in its `county` column (upper-case: 'CHAMBERS',
+ * 'FORT BEND', 'AUSTIN'), read off the county's registry label ("Chambers County · CCAD", "Fort Bend · FBCAD").
+ * null when it cannot be told — callers then fall back to drawing the whole state. Pure. */
+export function statewideCountyName(key) {
+  const label = COUNTIES[key] && COUNTIES[key].label;
+  if (!label) return null;
+  const n = String(label).split("·")[0].replace(/\s+County\s*$/i, "").trim().toUpperCase();
+  return n || null;
+}
+
+/* Which counties a statewide image BACKUP should draw (V1475200 follow-up, 2026-10-04: "should a failed Chambers
+ * source push the WHOLE view to statewide, or only the Chambers part?" — only the Chambers part).
+ *   statewideKey  the statewide composite being drawn
+ *   baseSources   `displaySourcesForView(bounds)` — the sources the view needs with NOTHING failed
+ *   downKeys      the county keys whose own layer failed
+ * Returns an array of county names, or null = draw the whole state. null when the statewide source is itself
+ * the primary for some of the view (a county with no CAD of its own must still be drawn), when nothing is down,
+ * or when a failed county's name cannot be told. Pure. */
+export function statewideBackupScope(statewideKey, baseSources, downKeys) {
+  // Primary for part of the view: the composite itself, OR a county parked on it (Waller's own source IS the statewide URL).
+  const swUrl = trimLayerUrl(COUNTIES_MAP[statewideKey] && COUNTIES_MAP[statewideKey].layerUrl);
+  const urlOf = (k) => trimLayerUrl((COUNTIES_MAP[k] && COUNTIES_MAP[k].layerUrl) || "");
+  if ((baseSources || []).some((k) => k === statewideKey || (swUrl && urlOf(k) === swUrl))) return null;
+  const st = COUNTIES_MAP[statewideKey] && COUNTIES_MAP[statewideKey].state;
+  const names = [];
+  for (const k of downKeys || []) {
+    if (!COUNTIES_MAP[k] || COUNTIES_MAP[k].statewide || COUNTIES_MAP[k].state !== st) continue;
+    const n = statewideCountyName(k);
+    if (!n) return null;
+    names.push(n);
+  }
+  return names.length ? [...new Set(names)].sort() : null;
+}
+
 /* NEW-2 (California) — a source may declare a HIGHER outline floor than the generic PARCEL_MINZOOM when it cannot
  * answer a dense cell inside its own record cap and has no server-rendered image regime to fall back on
  * (`displayMinZoom`; see `ca_statewide`). 0 = no source-specific floor. Pure. */
