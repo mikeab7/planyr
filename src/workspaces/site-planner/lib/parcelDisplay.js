@@ -40,8 +40,10 @@ export { PARCEL_MINZOOM, PARCEL_VECTOR_MINZOOM, parcelDisplayRegimeForZoom, parc
  * `moveend: _update` on the map, so every held lot was re-projected, re-clipped and re-simplified on every
  * settle — 75–94 ms at z14 on Michael's Bartow view (16,702 held). A ghost keeps the two things every
  * consumer reads off a display layer's children (`.feature` for the hit-test / hover / export, and
- * `getBounds()`), registers no map events, and joins/leaves the tile index exactly when esri-leaflet adds
- * it to / removes it from the map. The picture comes from `ParcelTiles` below. See parcelTileLayer.js. */
+ * `getBounds()`), registers no map events, and is never put on the Leaflet map at all (see the
+ * createLayers/addLayers/removeLayers overrides in makeParcelLayer): it joins/leaves the tile index when
+ * esri-leaflet would have added/removed it, so a zoom that drops 10k lots is 10k Set deletes, not 10k
+ * `map.removeLayer` calls (each firing events). The picture comes from `ParcelTiles` below. See parcelTileLayer.js. */
 const ParcelGhost = L.Layer.extend({
   initialize(geojson, index, onChange) {
     this.feature = geojson;
@@ -58,8 +60,9 @@ const ParcelGhost = L.Layer.extend({
   },
   addEventParent() { return this; }, // nothing listens to a lot's own events (interactive:false); skips a per-lot parent link
   setStyle() { return this; }, // style is one constant for the whole layer, drawn per tile
-  onAdd() { this._index.add(this); this._onChange(this.bbox); },
-  onRemove() { this._index.delete(this); this._onChange(this.bbox); },
+  attach() { if (this._drawn) return; this._drawn = true; this._index.add(this); this._onChange(this.bbox); },
+  detach() { if (!this._drawn) return; this._drawn = false; this._index.delete(this); this._onChange(this.bbox); },
+  isDrawn() { return !!this._drawn; },
 });
 
 /* One cached canvas per map tile, drawn from the index (a bbox reject, then only that tile's lots are
@@ -133,6 +136,33 @@ export function makeParcelLayer(url, opts) {
   layer.createNewLayer = (geojson) => (geojson && geojson.geometry
     ? new ParcelGhost(geojson, index, (bbox) => { if (tiles) tiles.markDirty(bbox); })
     : null);
+  /* …and ghosts never go through `map.addLayer`/`map.removeLayer`: those fire layeradd/add/remove events and
+   * walk Leaflet's registry per lot (a ~100 ms long task per zoom at 10k lots). These three replace esri's
+   * bodies one-for-one for a layer whose children are inert; `_layers` stays the source of truth for
+   * `eachFeature`, so the hit-test, hover and export reads are unchanged. */
+  layer.createLayers = function (features) {
+    const visible = this._visibleZoom();
+    for (let i = features.length - 1; i >= 0; i--) {
+      const gj = features[i];
+      let g = this._layers[gj.id];
+      if (!g) {
+        g = this.createNewLayer(gj);
+        if (!g) continue;
+        g.feature = gj;
+        this._layers[gj.id] = g;
+      }
+      if (visible) g.attach();
+    }
+  };
+  layer.addLayers = function (ids) { for (let i = ids.length - 1; i >= 0; i--) { const g = this._layers[ids[i]]; if (g) g.attach(); } };
+  layer.removeLayers = function (ids, permanent) {
+    for (let i = ids.length - 1; i >= 0; i--) {
+      const g = this._layers[ids[i]];
+      if (!g) continue;
+      g.detach();
+      if (permanent) delete this._layers[ids[i]];
+    }
+  };
   /* NEW-1 — esri-leaflet's `_addFeatures` dedupes each arriving id with `Array.indexOf` over EVERYTHING
    * held (`_currentSnapshot`) and the cell's id list: O(held × arriving) — 225 ms across a handful of
    * Bartow zooms. Same behaviour, one Set per call instead of a linear scan per id. */
@@ -165,6 +195,7 @@ export function makeParcelLayer(url, opts) {
   });
   layer.on("remove", () => {
     if (mapRef) mapRef.off("moveend zoomend", onMoved);
+    Object.keys(layer._layers || {}).forEach((id) => { const g = layer._layers[id]; if (g && g.detach) g.detach(); });
     if (tiles) { try { tiles.remove(); } catch (_) {} tiles = null; }
     mapRef = null;
     if (timer) { clearTimeout(timer); timer = null; }
