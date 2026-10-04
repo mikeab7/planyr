@@ -49,7 +49,7 @@ import { RADIUS } from "../../shared/ui/radius.js";
 // downstream propagation entirely — the same principle NEW-2(a) already applied to `currentSite`.
 import { writeLastRoute } from "../../app/lastRoute.js";
 import { DEFAULT_MODULE } from "../../app/route.js";
-import { markProjectFreshlyMinted, findProjectAtOrigin } from "../../shared/projects/projectModel.js";
+import { markProjectFreshlyMinted, findProjectAtOrigin, groupStatusOf } from "../../shared/projects/projectModel.js";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
 migrateSiteGroups();  // give every legacy record a site (location) group
@@ -1134,9 +1134,11 @@ export default function App({
     sites.forEach((s) => { if (roleOf(s) !== "pursuit") return; const g = groupOf(s); if (!plansByGroup.has(g)) plansByGroup.set(g, []); plansByGroup.get(g).push(s); });
     // A-B1953794 — the same representative chooser the Dashboard uses (siteRecency.js).
     const byGroup = new Map();
-    for (const [g, plans] of plansByGroup) byGroup.set(g, pickRepresentativePlan(plans, elementRecency));
+    // B2064897 — the project's status is ONE answer (groupStatusOf), not the representative plan's own.
+    const withStatus = (plan, plans) => { const st = groupStatusOf(plans); return st && st !== plan.status ? { ...plan, status: st } : plan; };
+    for (const [g, plans] of plansByGroup) byGroup.set(g, withStatus(pickRepresentativePlan(plans, elementRecency), plans));
     const act = activeSiteId && sites.find((s) => s.id === activeSiteId);
-    if (act) byGroup.set(groupOf(act), act);
+    if (act) byGroup.set(groupOf(act), withStatus(act, plansByGroup.get(groupOf(act)) || [act]));
     return [...byGroup.values()];
   }, [sites, activeSiteId, elementRecency]); // stable identity → doesn't force MapFinder to re-render every parent render
 
