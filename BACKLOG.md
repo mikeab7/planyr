@@ -54,6 +54,11 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 ---
 
 ## 🔲 Open
+### B2063057 — Cross-device instant sync of the plan header via Supabase Realtime on `sites` (needs an owner go-ahead for a production DB change) `[architecture / sync]` (feature) #site-planner #persistence  *(split from B2063056 — the cross-device option the decision note recommends evaluating, NOT built: `public.sites` is not in the `supabase_realtime` publication (production checked read-only: only `planar_suggestions`, `site_elements`).)*
+
+`[ ]` **Blocker (loud):** needs `alter publication supabase_realtime add table public.sites` on production (outward-facing, not applied without Michael's go-ahead) and a signed-in two-device check the sandbox cannot run. Design is in docs/decisions/instant-cross-tab-sync.md (Option B): a table filter on the EXISTING per-plan channel (0 new connections), one message per header write per other open tab, whole-row payload (size to be measured signed-in), refetch on every re-join, feed into the existing `refreshPlanHeaderFromCloud` → `applyAdoptedHeader`, keep the 45 s tick as fallback.
+- **Stopping rule:** closes when either (a) Michael approves the migration and a signed-in two-device pass shows a header setting arriving within seconds with the measured message size/count recorded, or (b) Michael says focus-refresh is enough, in which case it is closed with his answer.
+- Verify: live — `Blocker: auth`.
 ### B2022929 — Document editor: Word fidelity gaps and no way to browse earlier saved versions `[doc-review]` (task) #doc-review #files  *(FOUND while shipping B2022928 — known, deliberate limits of the first version, filed so they are owned.)*
 
 `[ ]` Things the editor does NOT do yet (each is either kept verbatim, flagged on open, or reduced — none is silently destroyed except where marked):
@@ -5278,6 +5283,15 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 ---
 
 ## ⏳ Verify — awaiting live confirmation
+
+### B2063056 — A change in one tab shows up in the others right away, only where it is cheap: an open plan now adopts another tab's header settings live `[architecture / sync]` (feature) #site-planner #persistence  *(Owner chat block NEW-1 2026-10-04, "Changes show up instantly in other open tabs, but only if it's cheap". Minted **B2063056 / V1481216** from this branch's reserved block. DEDUPE-FIRST — searched Open/⏳ Verify/Done for `storage` listeners, `postgres_changes`, `BroadcastChannel`, `applyAdoptedHeader`: extends **B1953797** (leaf 3 "inbound is polling, not realtime") and **B672** (element realtime); no open item covers it. Net-new.)*
+
+`[x]` **Decision (docs/decisions/instant-cross-tab-sync.md): no new transport; keep focus/45 s refresh as the fallback.** MEASURED FIRST on untouched main: a two-page, one-context Playwright test for a rename + a drawn building passed with NO change — same-browser tabs were already instant (native `storage` events; element rows via the `site_elements` realtime channel when signed in). BroadcastChannel would duplicate that signal, so it was rejected.
+`[x]` **The one cheap gap closed.** An open plan did not adopt another tab's header settings/origin/layer overrides until its own next save. `SitePlanner.jsx`'s same-browser `storage` handler now runs the existing per-leaf `mergeHeader` (base = `storage.headerBaseOf`, advanced via `advanceHeaderBase`) and applies only the adopted leaves through the existing `applyAdoptedHeader`. A leaf this tab is editing is kept (never overwritten); gestures defer it; device-local `snap` excluded; runs for signed-in tabs too (header only — the element union stays gated off when cloud-active). Cost: **0 new connections, 0 messages, no quota use** (local events only).
+`[x]` **Guard:** `e2e/cross-tab-live.spec.js` — two pages, one context, B in the background: rename, building drawn, B's half-typed plan name survives A's rename (with a known-good control arm: B shows the ORIGINAL state first), and a header setting written by A is adopted by B and not reverted by B's next save. **Red-proof:** with the source change reverted the setting test fails, rename/building pass (they were already live).
+- **LEFT, stated loudly:** header keys outside settings/origin/layers (status, dates, county, overlay placement) stay whole-header last-write-wins on a save — per-key merge would fight `nameAuthority`; documented, not attempted. Cross-DEVICE instant sync is **B2063057**.
+- Owner product constraints check: nothing built here contradicts a listed constraint.
+- Verify: live — **V1481216**. `Blocker: auth` for the signed-in leg only.
 
 ### B2051664 — Food map search: results ordered nearest the visible map first (a bias, never a filter) `[Food]` (feature) #ui  *(Owner chat block NEW-1, 2026-10-04)*
 
