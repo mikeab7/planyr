@@ -73,7 +73,7 @@ import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, a
 // NEW-1 — the per-site "Show above plan" twin of the four above: which GIS layers this site had
 // lifted over the site elements. Its own sparse map, so nothing about layerOverrides changes.
 import { sanitizeLayerAbove, aboveFromOverlays, applyAboveOverrides, aboveSig } from "./lib/layerPrefs.js";
-import { BASEMAPS, SITE_PLAN_BASEMAP } from "../../shared/basemaps/basemaps.js";
+import { BASEMAPS, SITE_PLAN_BASEMAP, IMAGERY_GRADE } from "../../shared/basemaps/basemaps.js";
 import {
   ppfToZoom, zoomToPpf, exactContainerPoint,
   basemapWrapPoint, registrationShift, sanitizeShift, tileNwFeet, registrationLayoutMayHaveChanged,
@@ -3011,6 +3011,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       geoBaseRef.current = null; geoBackfillRef.current = null;
     }
     geoSrcRef.current = want;
+    // NEW-1 seam fix: gap colour behind the aerial tiles — NOT a tone grade (the planner canvas stays ungraded so it matches the export).
+    try { map.getContainer().classList.toggle(IMAGERY_GRADE.containerClass, !!want); } catch (_) { /* container gone */ }
     if (!want) { setBasemapStatus(null); return; }
     if (geoBaseRef.current || geoBackfillRef.current) return; // already built for this source
     const bm = BASEMAPS[want] || BASEMAPS.esri;
