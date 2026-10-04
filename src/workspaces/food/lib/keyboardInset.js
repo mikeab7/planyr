@@ -15,7 +15,7 @@ export function keyboardInset({ innerHeight, vvHeight, vvOffsetTop = 0 }) {
 }
 
 /** Read the live numbers off `window.visualViewport` (absent -> 0, i.e. no keyboard handling). */
-export function readKeyboardInset(win = typeof window !== "undefined" ? window : null) {
+export function currentKeyboardInset(win = typeof window !== "undefined" ? window : null) {
   const vv = win?.visualViewport;
   if (!vv) return 0;
   return keyboardInset({ innerHeight: win.innerHeight, vvHeight: vv.height, vvOffsetTop: vv.offsetTop });

@@ -8,7 +8,7 @@ import { dirname, join, resolve } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { keyboardInset, readKeyboardInset, MIN_KEYBOARD_PX } from "../src/workspaces/food/lib/keyboardInset.js";
+import { keyboardInset, currentKeyboardInset, MIN_KEYBOARD_PX } from "../src/workspaces/food/lib/keyboardInset.js";
 import { cleanDraftDishes, newDraftDish } from "../src/workspaces/food/lib/draftDishes.js";
 import { noAutofill } from "../src/workspaces/food/lib/noAutofill.js";
 import ScoreMeter, { ScoreTapGrid } from "../src/workspaces/food/components/ScoreMeter.jsx";
@@ -29,8 +29,8 @@ describe("keyboardInset", () => {
   });
   it("is 0 for anything unreadable, and when there is no visualViewport", () => {
     expect(keyboardInset({ innerHeight: NaN, vvHeight: 100 })).toBe(0);
-    expect(readKeyboardInset({ innerHeight: 600 })).toBe(0);
-    expect(readKeyboardInset({ innerHeight: 600, visualViewport: { height: 280, offsetTop: 0 } })).toBe(320);
+    expect(currentKeyboardInset({ innerHeight: 600 })).toBe(0);
+    expect(currentKeyboardInset({ innerHeight: 600, visualViewport: { height: 280, offsetTop: 0 } })).toBe(320);
   });
 });
 
@@ -107,7 +107,7 @@ describe("phone rating control", () => {
 describe("keyboard-aware sheet", () => {
   it("BottomSheet lifts by the keyboard inset from visualViewport", () => {
     const sheet = read("components/BottomSheet.jsx");
-    expect(sheet).toMatch(/readKeyboardInset/);
+    expect(sheet).toMatch(/currentKeyboardInset/);
     expect(sheet).toMatch(/visualViewport/);
     expect(sheet).toMatch(/bottom:\s*kbInset/);
   });

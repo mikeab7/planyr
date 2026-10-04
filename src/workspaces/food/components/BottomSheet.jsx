@@ -50,7 +50,7 @@
  * V1476080 (on device). */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { resolveSnap, heightForSnap } from "../lib/bottomSheetSnap.js";
-import { readKeyboardInset } from "../lib/keyboardInset.js";
+import { currentKeyboardInset } from "../lib/keyboardInset.js";
 import { publishBottomSheetHeight } from "../../../shared/ui/bottomSheetTracker.js";
 
 const TOP_INSET = 64; // px of the map always left visible above the sheet, even at "full"
@@ -64,7 +64,7 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
   const dragRef = useRef(null); // { startY, startHeight, pointerId } while an active drag is in progress
   const didMountRef = useRef(false);
 
-  const [kbInset, setKbInset] = useState(() => readKeyboardInset());
+  const [kbInset, setKbInset] = useState(() => currentKeyboardInset());
   const kbOpen = kbInset > 0;
   const viewportHeight = () => window.visualViewport?.height || window.innerHeight;
   const contentHeight = () => contentRef.current?.scrollHeight ?? 0;
@@ -105,7 +105,7 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
     const vv = window.visualViewport;
     if (!vv) return undefined;
     const onVv = () => {
-      setKbInset(readKeyboardInset());
+      setKbInset(currentKeyboardInset());
       const el = document.activeElement;
       if (el && contentRef.current?.contains(el) && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) {
         requestAnimationFrame(() => el.scrollIntoView?.({ block: "center", behavior: "auto" }));
@@ -119,7 +119,7 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
   // A field focused while the keyboard is already up (moving between fields) must also be revealed.
   const onFocusIn = useCallback((e) => {
     const el = e.target;
-    if (!readKeyboardInset() || !/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+    if (!currentKeyboardInset() || !/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
     requestAnimationFrame(() => el.scrollIntoView?.({ block: "center", behavior: "auto" }));
   }, []);
 
