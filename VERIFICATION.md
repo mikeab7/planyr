@@ -176,6 +176,16 @@ Sandbox-proven: server 220–259 ms → 13–90 ms with identical ordered result
 5. With the box showing a chain (`torchy`), pan the map to another part of town. **Expect:** the nearest branches to the new view lead, as before this change.
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2069808.
 
+### V1476080 — B2057920: Food on a phone — first visit with dish ratings, tap ratings, keyboard, no contact-card AutoFill `Blocker: auth`
+
+Sandbox-proven (Playwright WebKit, iPhone 15 descriptor, EMULATED, logged out, fixture page): `ui-audit/verify-food-visit-phone.mjs` 25/25 (6/21 on the unfixed code) · `test/foodPhone.test.js`. Not reachable there: a signed-in save, the real iOS keyboard, Safari's AutoFill bar, a real finger scroll. **Steps** (iPhone Safari, signed in on planyr.io/#/food; read the served chunk hash — `document.querySelectorAll('script[src]')` or /version.json no-store — in the same observation; use a NEW pin or a throwaway place, never a place with real history):
+1. Tap a place that has never been visited → **Log a visit**. **Expect:** the form opens on a **Dishes** block (a dish field + a 1–10 rating); there is NO "What I had" field anywhere.
+2. Tap the dish field. **Expect:** the keyboard opens and the dish field stays visible above it, and **Log this visit** stays visible above the keyboard without scrolling the page; type a name. **Expect:** no "Autofill Contact" / contact-card suggestion bar appears above the keyboard on this field, the Cost field, the Notes field, or a dropped-pin "Name this place" field.
+3. Dismiss the keyboard, then tap **8** in the dish rating with your thumb. **Expect:** it reads 8 / 10 on the first tap. Put a finger on the rating buttons and scroll the sheet up and down. **Expect:** the rating does not change from scrolling. Tap **+ Add another dish**, name it, tap **6**. **Expect:** a second dish row, rated 6.
+4. Tap **Log this visit**. **Expect:** "✓ Visit saved"; the place now shows both dishes under Dishes with 8 and 6; reload — both are still there.
+5. Open an OLDER visit that was logged before this change and has "Had …" text. **Expect:** the text still shows on the card and, in the edit form, as "What I had (saved earlier)" (read-only); change the rating and save. **Expect:** the "Had …" text is unchanged afterward.
+6. Rotate to landscape with the keyboard up in the dish field. **Expect:** the field and Save are still visible; rotate back and dismiss the keyboard. **Expect:** the sheet returns to the bottom edge, nothing stuck high.
+- **Stopping rule:** closes on a dated pass of 1–6, or a failed step filed as a recurrence on B2057920 (name which of: keyboard / AutoFill / rating / first-visit).
 ### V1493760 — B2070432: Food search shows his saved restaurant first, once, tagged `Blocker: auth`
 
 Sandbox-proven: `test/foodSavedSearchFirst.test.js` red on main, green here. **Steps** (planyr.io signed in, `#/food`, Map view; read the build from `/version.json` with cache:no-store in the SAME check):
