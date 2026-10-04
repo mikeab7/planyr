@@ -166,6 +166,16 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1493136 — B2069808: Food search answers faster — saved places show at once, results settle quicker, same matches in the same order `Blocker: auth`
+
+Sandbox-proven: server 220–259 ms → 13–90 ms with identical ordered results (in-database, 7 queries), `test/foodSearchSpeed.test.js` (red on main), mocked-backend browser timings (saved place 839 → 18 ms to first row). Not provable here: the real network + his real saved list + a real phone. **Steps** (signed in, planyr.io `#/food`, Map view, on the phone; read the build from `/version.json` in the SAME observation as the result):
+1. Type `dao` slowly, one letter at a time. **Expect:** his saved DAO'N row ("Been here") is on screen by the time the third letter is typed — it does not wait behind "Searching…"; the list never goes blank between letters.
+2. Type a place he has never saved (e.g. `fadi`). **Expect:** the row appears about a second or less after the last letter; "Searching…" sits BELOW any rows already shown, and arriving results do not jump the row he is looking at.
+3. Clear the box and type the same word again. **Expect:** results appear essentially at once (no second wait).
+4. Type `tacos`, then quickly keep typing `tacos a` (or erase two letters). **Expect:** the list always settles on the answer for what is in the box — never on an older word's rows.
+5. With the box showing a chain (`torchy`), pan the map to another part of town. **Expect:** the nearest branches to the new view lead, as before this change.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2069808.
+
 ### V1476080 — B2057920: Food on a phone — first visit with dish ratings, tap ratings, keyboard, no contact-card AutoFill `Blocker: auth`
 
 Sandbox-proven (Playwright WebKit, iPhone 15 descriptor, EMULATED, logged out, fixture page): `ui-audit/verify-food-visit-phone.mjs` 25/25 (6/21 on the unfixed code) · `test/foodPhone.test.js`. Not reachable there: a signed-in save, the real iOS keyboard, Safari's AutoFill bar, a real finger scroll. **Steps** (iPhone Safari, signed in on planyr.io/#/food; read the served chunk hash — `document.querySelectorAll('script[src]')` or /version.json no-store — in the same observation; use a NEW pin or a throwaway place, never a place with real history):
