@@ -859,6 +859,207 @@ const COUNTIES_RAW = {
     idField: "PARCELID", addrField: "SITEADDRESS",
     help: "Orleans Parish (New Orleans) parcels (parish GIS). Search by parcel ID or a site address.",
   },
+  /* ═══ NEW-1 (Louisiana parishes, 2026-09-30) — every parish whose parcel roll is reachable on
+   * ArcGIS Online from this sandbox. 24 parishes; the other 38 (incl. Calcasieu and Jefferson, whose
+   * only sources sit on hosts this sandbox's egress blocks) are recorded by ROUTE in
+   * docs/STATEWIDE-PARCELS.md "Louisiana parishes" — never as "no source". Keys drop "Parish"
+   * (`la_calcasieu`, never `la_calcasieuparish`), labels keep it ("… Parish, LA"). MOST of these are
+   * NOT the parish's own server: each row's countiesProvenance.js note says exactly whose copy it is.
+   * idField/addrField are PINNED wherever detectField would have chosen a wrong column (a parish FIPS
+   * code, a sequential row id, a house-number-only address). ═══ */
+  la_ascension: {
+    // NEW-1 (Louisiana parishes, 2026-09-30) — measured LIVE from this sandbox 2026-09-30: 48,115 parcel polygons, extent -91.11..-90.63 / 30.06..30.35.
+    // Provenance + every caveat: countiesProvenance.js and docs/STATEWIDE-PARCELS.md "Louisiana parishes".
+    state: "LA", label: "Ascension Parish, LA",
+    layerUrl: "https://services.arcgis.com/FqQ2BQIKVGpUWqAa/arcgis/rest/services/Ascension_Parish_Tax_Parcels/FeatureServer/0",
+    idField: "PARCEL_NO", addrField: "LOCATION_1", pinAddrField: true,
+    help: "Ascension Parish parcels (parish assessor roll). Search by parcel ID or a site address.",
+  },
+  la_assumption: {
+    // NEW-1 (Louisiana parishes, 2026-09-30) — measured LIVE from this sandbox 2026-09-30: 14,275 parcel polygons, extent -91.26..-90.89 / 29.63..30.08.
+    // Provenance + every caveat: countiesProvenance.js and docs/STATEWIDE-PARCELS.md "Louisiana parishes".
+    state: "LA", label: "Assumption Parish, LA",
+    layerUrl: "https://services.arcgis.com/FqQ2BQIKVGpUWqAa/arcgis/rest/services/Assumption_Parish_Parcels_2019/FeatureServer/0",
+    idField: "PIN",
+    help: "Assumption Parish parcels (parish assessor roll). Search by parcel ID.",
+  },
+  la_iberville: {
+    // NEW-1 (Louisiana parishes, 2026-09-30) — measured LIVE from this sandbox 2026-09-30: 17,471 parcel polygons, extent -91.7..-91.02 / 30.02..30.5.
+    // Provenance + every caveat: countiesProvenance.js and docs/STATEWIDE-PARCELS.md "Louisiana parishes".
+    state: "LA", label: "Iberville Parish, LA",
+    layerUrl: "https://services.arcgis.com/FqQ2BQIKVGpUWqAa/arcgis/rest/services/Iberville_Parish_Tax_Parcels/FeatureServer/0",
+    idField: "ParcelNumb", addrField: "Street_Nam", pinAddrField: true,
+    help: "Iberville Parish parcels (parish assessor roll). Search by parcel ID or a site address.",
+  },
+  la_stcharles: {
+    // NEW-1 (Louisiana parishes, 2026-09-30) — measured LIVE from this sandbox 2026-09-30: 34,253 parcel polygons, extent -90.55..-90.17 / 29.69..30.08.
+    // Provenance + every caveat: countiesProvenance.js and docs/STATEWIDE-PARCELS.md "Louisiana parishes".
+    state: "LA", label: "St. Charles Parish, LA",
+    layerUrl: "https://services.arcgis.com/FqQ2BQIKVGpUWqAa/arcgis/rest/services/Saint_Charles_Parish_Tax_Parcels/FeatureServer/0",
+    idField: "PI_CODE", pinIdField: true, addrField: "Address",
+    help: "St. Charles Parish parcels (parish assessor roll). Search by parcel ID or a site address.",
+  },
+  la_stjames: {
+    // NEW-1 (Louisiana parishes, 2026-09-30) — measured LIVE from this sandbox 2026-09-30: 10,301 parcel polygons, extent -90.96..-90.64 / 29.89..30.17.
+    // Provenance + every caveat: countiesProvenance.js and docs/STATEWIDE-PARCELS.md "Louisiana parishes".
+    state: "LA", label: "St. James Parish, LA",
+    layerUrl: "https://services.arcgis.com/FqQ2BQIKVGpUWqAa/arcgis/rest/services/Saint_James_Parish_Tax_Parcels/FeatureServer/0",
+    idField: "PIN", addrField: "Physical_A", pinAddrField: true,
+    help: "St. James Parish parcels (parish assessor roll). Search by parcel ID or a site address.",
+  },
+  la_stjohnthebaptist: {
+    // NEW-1 (Louisiana parishes, 2026-09-30) — measured LIVE from this sandbox 2026-09-30: 26,805 parcel polygons, extent -90.69..-90.3 / 29.9..30.3.
+    // Provenance + every caveat: countiesProvenance.js and docs/STATEWIDE-PARCELS.md "Louisiana parishes".
+    state: "LA", label: "St. John the Baptist Parish, LA",
+    layerUrl: "https://services.arcgis.com/FqQ2BQIKVGpUWqAa/arcgis/rest/services/Saint_John_the_Baptist_Tax_Parcels/FeatureServer/0",
+    idField: "PARCEL_ID", addrField: "PAR_ADDR", pinAddrField: true,
+    help: "St. John the Baptist Parish parcels (parish assessor roll). Search by parcel ID or a site address.",
+  },
+  la_stbernard: {
+    // NEW-1 (Louisiana parishes, 2026-09-30) — measured LIVE from this sandbox 2026-09-30: 22,764 parcel polygons, extent -90.01..-89.17 / 29.63..30.16.
+    // Provenance + every caveat: countiesProvenance.js and docs/STATEWIDE-PARCELS.md "Louisiana parishes".
+    state: "LA", label: "St. Bernard Parish, LA",
+    layerUrl: "https://services.arcgis.com/FqQ2BQIKVGpUWqAa/arcgis/rest/services/Saint_Bernard_Parish_Tax_Parcels/FeatureServer/0",
+    idField: "ParcelNumb", addrField: "Street_Nam", pinAddrField: true,
+    help: "St. Bernard Parish parcels (parish assessor roll). Search by parcel ID or a site address.",
+  },
+  la_stmartin: {
+    // NEW-1 (Louisiana parishes, 2026-09-30) — measured LIVE from this sandbox 2026-09-30: 44,228 parcel polygons, extent -91.99..-91.09 / 29.73..30.5.
+    // Provenance + every caveat: countiesProvenance.js and docs/STATEWIDE-PARCELS.md "Louisiana parishes".
+    state: "LA", label: "St. Martin Parish, LA",
+    layerUrl: "https://services.arcgis.com/FqQ2BQIKVGpUWqAa/arcgis/rest/services/StMartin_Parcels_9399b/FeatureServer/0",
+    idField: "PARCEL_NO", addrField: "STREET_NAM", pinAddrField: true,
+    help: "St. Martin Parish parcels (parish assessor roll). Search by parcel ID or a site address.",
+  },
+  la_plaquemines: {
+    // NEW-1 (Louisiana parishes, 2026-09-30) — measured LIVE from this sandbox 2026-09-30: 18,008 parcel polygons, extent -90.08..-89.02 / 28.91..29.9.
+    // Provenance + every caveat: countiesProvenance.js and docs/STATEWIDE-PARCELS.md "Louisiana parishes".
+    state: "LA", label: "Plaquemines Parish, LA",
+    layerUrl: "https://services.arcgis.com/FqQ2BQIKVGpUWqAa/arcgis/rest/services/Plaquemines_Parish_Tax_Parcels/FeatureServer/0",
+    idField: "ASSESSID", pinIdField: true,
+    help: "Plaquemines Parish parcels (parish assessor roll). Search by parcel ID.",
+  },
+  la_sttammany: {
+    // NEW-1 (Louisiana parishes, 2026-09-30) — measured LIVE from this sandbox 2026-09-30: 135,083 parcel polygons, extent -90.26..-89.52 / 30.15..30.71.
+    // Provenance + every caveat: countiesProvenance.js and docs/STATEWIDE-PARCELS.md "Louisiana parishes".
+    state: "LA", label: "St. Tammany Parish, LA",
+    layerUrl: "https://services6.arcgis.com/qTudxJc3aZ26vKe6/arcgis/rest/services/STP_Parcels_2025/FeatureServer/0",
+    idField: "REID", pinIdField: true, addrField: "Physical_A", pinAddrField: true,
+    help: "St. Tammany Parish parcels (parish assessor roll). Search by parcel ID or a site address.",
+  },
+  la_lafayette: {
+    // NEW-1 (Louisiana parishes, 2026-09-30) — measured LIVE from this sandbox 2026-09-30: 116,693 parcel polygons, extent -92.29..-91.91 / 30.04..30.38.
+    // Provenance + every caveat: countiesProvenance.js and docs/STATEWIDE-PARCELS.md "Louisiana parishes".
+    state: "LA", label: "Lafayette Parish, LA",
+    layerUrl: "https://services1.arcgis.com/Brg1qbmzmFn7JtpX/arcgis/rest/services/Parish_Parcels__All_/FeatureServer/0",
+    idField: "parcelnumb", pinIdField: true, addrField: "address",
+    scopeWhere: "geoid='22055'",
+    help: "Lafayette Parish parcels (parish assessor roll). Search by parcel ID or a site address.",
+  },
+  la_acadia: {
+    // NEW-1 (Louisiana parishes, 2026-09-30) — measured LIVE from this sandbox 2026-09-30: 46,577 parcel polygons, extent -92.63..-92.14 / 30.05..30.48.
+    // Provenance + every caveat: countiesProvenance.js and docs/STATEWIDE-PARCELS.md "Louisiana parishes".
+    state: "LA", label: "Acadia Parish, LA",
+    layerUrl: "https://services3.arcgis.com/cWVjJ3EL88oVeYPk/arcgis/rest/services/Tax_Parcel_View/FeatureServer/0",
+    idField: "PARCEL_NO",
+    help: "Acadia Parish parcels (parish assessor roll). Search by parcel ID.",
+  },
+  la_eastfeliciana: {
+    // NEW-1 (Louisiana parishes, 2026-09-30) — measured LIVE from this sandbox 2026-09-30: 16,762 parcel polygons, extent -91.32..-90.83 / 30.65..31.
+    // Provenance + every caveat: countiesProvenance.js and docs/STATEWIDE-PARCELS.md "Louisiana parishes".
+    state: "LA", label: "East Feliciana Parish, LA",
+    layerUrl: "https://services6.arcgis.com/KLV8PjHx4dhS4u83/arcgis/rest/services/EFAOParcelsPV/FeatureServer/0",
+    idField: "PIN_Number", pinIdField: true,
+    help: "East Feliciana Parish parcels (parish assessor roll). Search by parcel ID.",
+  },
+  la_caddo: {
+    // NEW-1 (Louisiana parishes, 2026-09-30) — measured LIVE from this sandbox 2026-09-30: 140,086 parcel polygons, extent -94.06..-93.46 / 32.19..33.02.
+    // Provenance + every caveat: countiesProvenance.js and docs/STATEWIDE-PARCELS.md "Louisiana parishes".
+    state: "LA", label: "Caddo Parish, LA",
+    layerUrl: "https://utility.arcgis.com/usrsvcs/servers/de60c109dfc14c488283d6c2b779dc96/rest/services/Assessor_Data/Caddo_Parish_Parcels/MapServer/0",
+    idField: "PARCELID", pinIdField: true,
+    help: "Caddo Parish parcels (parish assessor roll). Search by parcel ID.",
+  },
+  la_bossier: {
+    // NEW-1 (Louisiana parishes, 2026-09-30) — measured LIVE from this sandbox 2026-09-30: 75,290 parcel polygons, extent -93.84..-93.38 / 32.23..33.02.
+    // Provenance + every caveat: countiesProvenance.js and docs/STATEWIDE-PARCELS.md "Louisiana parishes".
+    state: "LA", label: "Bossier Parish, LA",
+    layerUrl: "https://utility.arcgis.com/usrsvcs/servers/328d1d13289442af913ff8cbe3e292af/rest/services/Assessor_Data/Bossier_Parish_Parcels/MapServer/0",
+    idField: "Assessment", pinIdField: true,
+    help: "Bossier Parish parcels (parish assessor roll). Search by parcel ID.",
+  },
+  la_webster: {
+    // NEW-1 (Louisiana parishes, 2026-09-30) — measured LIVE from this sandbox 2026-09-30: 55,625 parcel polygons, extent -93.53..-93.15 / 32.41..33.02.
+    // Provenance + every caveat: countiesProvenance.js and docs/STATEWIDE-PARCELS.md "Louisiana parishes".
+    state: "LA", label: "Webster Parish, LA",
+    layerUrl: "https://utility.arcgis.com/usrsvcs/servers/d0a1725c02ca4da38112599e882a16d9/rest/services/Assessor_Data/Webster_Parish_Parcels/MapServer/0",
+    idField: "ParcelNumb", pinIdField: true, addrField: "Street_Nam", pinAddrField: true,
+    help: "Webster Parish parcels (parish assessor roll). Search by parcel ID or a site address.",
+  },
+  la_stmary: {
+    // NEW-1 (Louisiana parishes, 2026-09-30) — measured LIVE from this sandbox 2026-09-30: 43,610 parcel polygons, extent -91.88..-91.08 / 29.48..29.96.
+    // Provenance + every caveat: countiesProvenance.js and docs/STATEWIDE-PARCELS.md "Louisiana parishes".
+    state: "LA", label: "St. Mary Parish, LA",
+    layerUrl: "https://utility.arcgis.com/usrsvcs/servers/d102b2698c964dab8bc101c12931acfe/rest/services/st_mary_levee/st_mary2/MapServer/4",
+    idField: "PIN", pinIdField: true, addrField: "STREET_NAM", pinAddrField: true,
+    help: "St. Mary Parish parcels (parish assessor roll). Search by parcel ID or a site address.",
+  },
+  la_terrebonne: {
+    // NEW-1 (Louisiana parishes, 2026-09-30) — measured LIVE from this sandbox 2026-09-30: 55,364 parcel polygons, extent -91.35..-90.37 / 28.99..29.78.
+    // Provenance + every caveat: countiesProvenance.js and docs/STATEWIDE-PARCELS.md "Louisiana parishes".
+    state: "LA", label: "Terrebonne Parish, LA",
+    layerUrl: "https://services2.arcgis.com/LJwIycC0yIuqCBxq/arcgis/rest/services/Terrebonne_Parcels/FeatureServer/0",
+    idField: "ACCT_NUM",
+    help: "Terrebonne Parish parcels (parish assessor roll). Search by parcel ID.",
+  },
+  la_lafourche: {
+    // NEW-1 (Louisiana parishes, 2026-09-30) — measured LIVE from this sandbox 2026-09-30: 56,246 parcel polygons, extent -91.01..-90.07 / 29.08..29.92.
+    // Provenance + every caveat: countiesProvenance.js and docs/STATEWIDE-PARCELS.md "Louisiana parishes".
+    state: "LA", label: "Lafourche Parish, LA",
+    layerUrl: "https://services7.arcgis.com/4SUeHSEFUQHen9tg/arcgis/rest/services/LafourcheParishParcels2020/FeatureServer/0",
+    idField: "parcelnumb", addrField: "street_nam", pinAddrField: true,
+    help: "Lafourche Parish parcels (parish assessor roll). Search by parcel ID or a site address.",
+  },
+  la_allen: {
+    // NEW-1 (Louisiana parishes, 2026-09-30) — measured LIVE from this sandbox 2026-09-30: 17,706 parcel polygons, extent -93.13..-92.58 / 30.42..30.9.
+    // Provenance + every caveat: countiesProvenance.js and docs/STATEWIDE-PARCELS.md "Louisiana parishes".
+    state: "LA", label: "Allen Parish, LA",
+    layerUrl: "https://services2.arcgis.com/LJwIycC0yIuqCBxq/arcgis/rest/services/Allen_Parish_Parcels/FeatureServer/0",
+    idField: "ParcelID", addrField: "par_addres", pinAddrField: true,
+    help: "Allen Parish parcels (parish assessor roll). Search by parcel ID or a site address.",
+  },
+  la_cameron: {
+    // NEW-1 (Louisiana parishes, 2026-09-30) — measured LIVE from this sandbox 2026-09-30: 11,918 parcel polygons, extent -93.9..-92.61 / 29.58..30.05.
+    // Provenance + every caveat: countiesProvenance.js and docs/STATEWIDE-PARCELS.md "Louisiana parishes".
+    state: "LA", label: "Cameron Parish, LA",
+    layerUrl: "https://services1.arcgis.com/mI6oAOl02j67RDtJ/arcgis/rest/services/Parcels_Cameron_Parish/FeatureServer/0",
+    idField: "PARCELNUMB", pinIdField: true, addrField: "ADDRESS",
+    help: "Cameron Parish parcels (parish assessor roll). Search by parcel ID or a site address.",
+  },
+  la_natchitoches: {
+    // NEW-1 (Louisiana parishes, 2026-09-30) — measured LIVE from this sandbox 2026-09-30: 29,443 parcel polygons, extent -93.44..-92.71 / 31.35..32.15.
+    // Provenance + every caveat: countiesProvenance.js and docs/STATEWIDE-PARCELS.md "Louisiana parishes".
+    state: "LA", label: "Natchitoches Parish, LA",
+    layerUrl: "https://services7.arcgis.com/eR5n9maFLflJFdXU/arcgis/rest/services/LA_Natchitoches_Parish_22069_a0198910/FeatureServer/0",
+    idField: "PARCEL_ID", addrField: "SITUS",
+    help: "Natchitoches Parish parcels (parish assessor roll). Search by parcel ID or a site address.",
+  },
+  la_tangipahoa: {
+    // NEW-1 (Louisiana parishes, 2026-09-30) — measured LIVE from this sandbox 2026-09-30: 75,019 parcel polygons, extent -90.57..-90.24 / 30.28..31.
+    // Provenance + every caveat: countiesProvenance.js and docs/STATEWIDE-PARCELS.md "Louisiana parishes".
+    state: "LA", label: "Tangipahoa Parish, LA",
+    layerUrl: "https://services2.arcgis.com/LJwIycC0yIuqCBxq/arcgis/rest/services/TangiParcelsNew/FeatureServer/1",
+    idField: "Assessment", pinIdField: true, addrField: "Address",
+    help: "Tangipahoa Parish parcels (parish assessor roll). Search by parcel ID or a site address.",
+  },
+  la_livingston: {
+    // NEW-1 (Louisiana parishes, 2026-09-30) — measured LIVE from this sandbox 2026-09-30: 79,656 parcel polygons, extent -90.99..-90.47 / 30.18..30.65.
+    // Provenance + every caveat: countiesProvenance.js and docs/STATEWIDE-PARCELS.md "Louisiana parishes".
+    state: "LA", label: "Livingston Parish, LA",
+    layerUrl: "https://utility.arcgis.com/usrsvcs/servers/c24a97ebd70d4581acf3134ba7eea341/rest/services/Assessor/Livingston_Parish/MapServer/21",
+    idField: "ParcelNumber", addrField: "Par_Address", pinAddrField: true,
+    help: "Livingston Parish parcels (parish assessor roll). Search by parcel ID or a site address.",
+  },
   al_jefferson: {
     state: "AL", label: "Jefferson County, AL",
     layerUrl: "https://jccgis.jccal.org/server/rest/services/Basemap/Parcels/MapServer/0",
@@ -2538,6 +2739,32 @@ const COUNTIES_MAP_RAW = {
   // asset resolveCounty uses, same convention as the B1551617/B1339920 rows below), never
   // hand-typed: raw extent [-180269,59766,-179299,60327] at scale 2000, rounded to 2 dp.
   la_orleans: { state: "LA", center: [30.0233, -89.8920], zoom: 11, bbox: [29.88, -90.13, 30.16, -89.65], mapServer: null, layerUrl: COUNTIES.la_orleans.layerUrl },
+  // NEW-1 (Louisiana parishes) — center/bbox computed from public/geo/county-polygons.json (the same nationwide
+  // asset resolveCounty uses): raw extent / scale 2000, floored/ceiled to 2 dp; never hand-typed.
+  la_ascension: { state: "LA", center: [30.2140, -90.8690], zoom: 10, bbox: [30.07, -91.11, 30.36, -90.63], mapServer: null, layerUrl: COUNTIES.la_ascension.layerUrl },
+  la_assumption: { state: "LA", center: [29.8637, -91.0690], zoom: 10, bbox: [29.64, -91.26, 30.09, -90.87], mapServer: null, layerUrl: COUNTIES.la_assumption.layerUrl },
+  la_iberville: { state: "LA", center: [30.2665, -91.3535], zoom: 10, bbox: [30.03, -91.70, 30.51, -91.01], mapServer: null, layerUrl: COUNTIES.la_iberville.layerUrl },
+  la_stcharles: { state: "LA", center: [29.8985, -90.3452], zoom: 10, bbox: [29.70, -90.55, 30.10, -90.14], mapServer: null, layerUrl: COUNTIES.la_stcharles.layerUrl },
+  la_stjames: { state: "LA", center: [30.0310, -90.7997], zoom: 10, bbox: [29.89, -90.96, 30.17, -90.63], mapServer: null, layerUrl: COUNTIES.la_stjames.layerUrl },
+  la_stjohnthebaptist: { state: "LA", center: [30.1015, -90.4992], zoom: 10, bbox: [29.89, -90.69, 30.31, -90.30], mapServer: null, layerUrl: COUNTIES.la_stjohnthebaptist.layerUrl },
+  la_stbernard: { state: "LA", center: [29.8402, -89.6883], zoom: 10, bbox: [29.63, -90.02, 30.05, -89.36], mapServer: null, layerUrl: COUNTIES.la_stbernard.layerUrl },
+  la_stmartin: { state: "LA", center: [30.1118, -91.5350], zoom: 10, bbox: [29.72, -91.99, 30.51, -91.08], mapServer: null, layerUrl: COUNTIES.la_stmartin.layerUrl },
+  la_plaquemines: { state: "LA", center: [29.4260, -89.5443], zoom: 10, bbox: [28.93, -90.07, 29.92, -89.02], mapServer: null, layerUrl: COUNTIES.la_plaquemines.layerUrl },
+  la_sttammany: { state: "LA", center: [30.4465, -89.9142], zoom: 10, bbox: [30.18, -90.26, 30.72, -89.57], mapServer: null, layerUrl: COUNTIES.la_sttammany.layerUrl },
+  la_lafayette: { state: "LA", center: [30.2157, -92.0905], zoom: 10, bbox: [30.04, -92.28, 30.39, -91.90], mapServer: null, layerUrl: COUNTIES.la_lafayette.layerUrl },
+  la_acadia: { state: "LA", center: [30.2752, -92.3785], zoom: 10, bbox: [30.06, -92.63, 30.49, -92.13], mapServer: null, layerUrl: COUNTIES.la_acadia.layerUrl },
+  la_eastfeliciana: { state: "LA", center: [30.8275, -91.0700], zoom: 10, bbox: [30.65, -91.32, 31.01, -90.82], mapServer: null, layerUrl: COUNTIES.la_eastfeliciana.layerUrl },
+  la_caddo: { state: "LA", center: [32.6115, -93.7645], zoom: 10, bbox: [32.19, -94.05, 33.03, -93.48], mapServer: null, layerUrl: COUNTIES.la_caddo.layerUrl },
+  la_bossier: { state: "LA", center: [32.6310, -93.6123], zoom: 10, bbox: [32.23, -93.83, 33.03, -93.39], mapServer: null, layerUrl: COUNTIES.la_bossier.layerUrl },
+  la_webster: { state: "LA", center: [32.7163, -93.3330], zoom: 10, bbox: [32.41, -93.53, 33.03, -93.14], mapServer: null, layerUrl: COUNTIES.la_webster.layerUrl },
+  la_stmary: { state: "LA", center: [29.7245, -91.4690], zoom: 10, bbox: [29.48, -91.87, 29.96, -91.07], mapServer: null, layerUrl: COUNTIES.la_stmary.layerUrl },
+  la_terrebonne: { state: "LA", center: [29.4555, -90.8572], zoom: 10, bbox: [29.12, -91.35, 29.79, -90.37], mapServer: null, layerUrl: COUNTIES.la_terrebonne.layerUrl },
+  la_lafourche: { state: "LA", center: [29.5140, -90.5128], zoom: 10, bbox: [29.09, -91.00, 29.93, -90.03], mapServer: null, layerUrl: COUNTIES.la_lafourche.layerUrl },
+  la_allen: { state: "LA", center: [30.6650, -92.8528], zoom: 10, bbox: [30.43, -93.13, 30.90, -92.57], mapServer: null, layerUrl: COUNTIES.la_allen.layerUrl },
+  la_cameron: { state: "LA", center: [29.8245, -93.2537], zoom: 10, bbox: [29.58, -93.90, 30.07, -92.60], mapServer: null, layerUrl: COUNTIES.la_cameron.layerUrl },
+  la_natchitoches: { state: "LA", center: [31.7510, -93.0763], zoom: 10, bbox: [31.34, -93.44, 32.16, -92.71], mapServer: null, layerUrl: COUNTIES.la_natchitoches.layerUrl },
+  la_tangipahoa: { state: "LA", center: [30.6418, -90.4017], zoom: 10, bbox: [30.27, -90.57, 31.01, -90.24], mapServer: null, layerUrl: COUNTIES.la_tangipahoa.layerUrl },
+  la_livingston: { state: "LA", center: [30.4233, -90.7145], zoom: 10, bbox: [30.19, -90.99, 30.66, -90.44], mapServer: null, layerUrl: COUNTIES.la_livingston.layerUrl },
   al_jefferson: { state: "AL", center: [33.5207, -86.8025], zoom: 10, bbox: [33.25, -87.15, 33.80, -86.45], mapServer: null, layerUrl: COUNTIES.al_jefferson.layerUrl },
   // B1551617 — Tier 1 counties (see the matching COUNTIES block above); bbox/center read directly
   // from public/geo/county-polygons.json (the same nationwide asset resolveCounty uses), never

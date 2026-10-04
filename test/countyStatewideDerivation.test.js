@@ -170,7 +170,9 @@ describe("the derivation changes nothing about enumeration or the statewide pseu
     // against (a blind nationwide expansion — see B1457152's own history two describe blocks below).
     // Raise again the same way if a future county-wiring session needs the room; the number is a
     // generous ceiling, not a target.
-    expect(keys.length).toBeLessThan(180);
+    // ⛔ Bumped 180 → 240 (2026-09-30, NEW-1): 24 Louisiana parishes wired in one pass took it from 175
+    // to 199 — again purely real counties being wired one at a time, not a blind expansion.
+    expect(keys.length).toBeLessThan(240);
   });
 
   it("candidateCountiesForPoint still answers via the existing txgio_statewide fallback for a derived county — unchanged, not doubled", () => {
@@ -512,12 +514,13 @@ describe("B1574256/B1574257 — Louisiana parishes route by geometry, not just b
   });
 
   it("an UNWIRED Louisiana parish still reports its own real name with the right designation", () => {
-    // Lafayette Parish has no source wired. The honest answer names it correctly and does NOT
-    // fall back to Orleans or East Baton Rouge — and never reads "Lafayette Parish County".
-    const id = countyIdentity(30.2241, -92.0198);
+    // Pointe Coupee Parish (New Roads) has no source wired — it is on the 2026-09-30 NOT-FOUND list
+    // (Lafayette, this test's example until then, was wired that day). The honest answer names it
+    // correctly and does NOT fall back to any wired parish — and never reads "Pointe Coupee Parish County".
+    const id = countyIdentity(30.6996, -91.4368);
     expect(id.status).toBe("no-source");
-    expect(id.name).toBe("Lafayette Parish");
-    expect(noParcelSourceNote(id)).toBe("Lafayette Parish — no parcel data wired here yet.");
+    expect(id.name).toBe("Pointe Coupee Parish");
+    expect(noParcelSourceNote(id)).toBe("Pointe Coupee Parish — no parcel data wired here yet.");
   });
 
   it("Orleans and East Baton Rouge never query each other — the parishes are ~80 miles apart", () => {
@@ -559,10 +562,11 @@ describe("B1597232 — an unsourced county is an ANSWER (no candidates), not a l
   });
 
   it("the same rule, a different state: an unwired Louisiana parish never reaches the two wired ones", () => {
-    // Lafayette Parish, whose honest `no-source` identity this file already asserts above. Before
-    // this fix it was handed BOTH la_orleans and la_eastbatonrouge — services ~80 and ~40 miles
-    // away that cannot hold a Lafayette lot. Louisiana has no statewide composite, so: nothing.
-    expect(candidateCountiesForPoint(30.2241, -92.0198)).toEqual([]);
+    // Pointe Coupee Parish (New Roads), whose honest `no-source` identity this file already asserts
+    // above. Before this fix an unwired parish was handed EVERY wired one (then la_orleans and
+    // la_eastbatonrouge) — services tens of miles away that cannot hold a lot there. Louisiana has no
+    // statewide composite, so: nothing. (Was Lafayette until it was wired 2026-09-30.)
+    expect(candidateCountiesForPoint(30.6996, -91.4368)).toEqual([]);
   });
 
   it("⛔ A STATEWIDE COMPOSITE IS COVERAGE AND IS NEVER NARROWED AWAY — the states that would break", () => {
