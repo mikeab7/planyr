@@ -242,7 +242,7 @@ import { loadDeed, deedNow } from "./lib/deedLazy.js";
  * once someone drops a deed or survey file, so it has no business on the boot path; the same
  * treatment B1123 gave the title reader and B1042 gave the export path. */
 import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip, easementStyle, easementPatternId, encumbranceStyle, encumbrancePatternId, DEFAULT_EASE_FILL_OPACITY, DEFAULT_EASE_HATCH, ENCUMBRANCE_DEFAULT } from "./lib/easements.js";
-import { deedTrace, deedGapText } from "./lib/deedGap.js";
+import { deedTrace, deedGapText, deedClosure, deedReaderSummary, deedQueueClosure, deedPlotWarning } from "./lib/deedGap.js";
 import { HATCH_OPTIONS, hatchSpec } from "../../shared/style/hatchPatterns.js";
 // NEW-EASE-STYLE — the ONE renderer that turns a hatch catalog spec (shared/style/hatchPatterns.js)
 // into an SVG <pattern>. MODULE-SCOPE (never defined inside SitePlanner's render body — a component
@@ -19186,8 +19186,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           row.exCount = Math.max(0, tracts.length - 1);
           if (row.boundaryCalls) {
             const p = callsToPath(b.calls, { x: 0, y: 0 });
-            row.closes = pathCloses(p);
+            row.closes = pathCloses(p); // screening tolerance — promotability only, never wording
             row.gap = misclosure(p);
+            row.closure = deedClosure(p); // the as-drawn answer every "closes" label reads
           } else {
             row.error = "No bearing/distance calls found — a survey drawing rather than a written description?";
           }
@@ -19226,7 +19227,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setPobMode(null);
       if (pm && pm.queueTotal) {
         const bad = notes.filter((n) => n && n.bad).map((n) => n.name);
-        flashWarn(`All ${pm.queueTotal} deed${pm.queueTotal > 1 ? "s" : ""} placed.${bad.length ? ` ⚠ Verify: ${bad.join(", ")}.` : ""}`, 9000);
+        const open = notes.filter((n) => n && n.noClose).map((n) => `${n.name}${n.noClose.ft ? ` (misses by ${n.noClose.ft >= 10 ? n.noClose.ft.toFixed(1) : n.noClose.ft.toFixed(2)} ft)` : ""}`);
+        flashWarn(`All ${pm.queueTotal} deed${pm.queueTotal > 1 ? "s" : ""} placed.${open.length ? ` ⚠ Does not close: ${open.join(", ")}.` : ""}${bad.length ? ` ⚠ Verify: ${bad.join(", ")}.` : ""}`, open.length ? 16000 : 9000);
       }
     }
   };
@@ -19302,7 +19304,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         stroke: except ? "#b91c1c" : "#7c3aed", fill: except ? "#b91c1c" : "#7c3aed",
         fillOpacity: except ? 0.1 : 0.14, weight: 2, dash: except ? "6 4" : "solid",
       },
-      ring, closed, gap: misclosure(path),
+      ring, closed, gap: misclosure(path), closure: deedClosure(path),
     };
   };
 
@@ -19332,7 +19334,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const built = buildEncumbranceMarkup(main.calls, pob, { label: (main.label && main.label !== "Boundary") ? main.label : "Tract boundary", group: groupId });
     if (!built) { if (pobMode && pobMode.queueTotal) { advanceDeed({ name: pobMode.name || "deed", bad: true }); return; } flashWarn("Couldn't form a shape from those calls — check the description.", 6000); setPobMode(null); return; }
     // SAVE-AND-EXCEPT holes: position each from its commencing tie off the same POB.
-    const exMarks = [];
+    const exMarks = [], exMisses = [];
     for (const t of tracts.slice(1)) {
       if (!t.calls.length) continue;
       // the tie's END point locates the exception POB — take the LAST path point
@@ -19340,17 +19342,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const tiePath = t.tie && t.tie.length ? callsToPath(t.tie, pob) : null;
       const exPob = tiePath ? tiePath[tiePath.length - 1] : pob;
       const eb = buildEncumbranceMarkup(t.calls, exPob, { label: t.label || "Save & except", except: true, group: groupId });
-      if (eb) exMarks.push(eb.mk);
+      if (eb) { exMarks.push(eb.mk); if (!eb.closure.closes) exMisses.push({ name: t.label || `Exception ${exMarks.length}`, gapFt: eb.closure.gapFt }); }
     }
     pushHistory();
     setMarkups((a) => [...a, ...withStackZ(a, [built.mk, ...exMarks])]);
     setSel({ kind: "markup", id: built.mk.id });
     // overlap check against buildings + paving (main ring only)
     const hits = els.filter((e) => (e.type === "building" || e.type === "paving") && ringsOverlap(built.ring, elRingOf(e)));
-    const gap = built.gap;
-    const closeNote = !built.closed
-      ? ` ⚠ Traverse does NOT close (gap ≈ ${gap.toFixed(1)}′) — plotted as drawn; verify the calls.`
-      : (gap > 1 ? ` Traverse misclosure ≈ ${gap.toFixed(1)}′ — the red dashed line is the gap.` : "");
+    // ONE rule (deedGap.js): any miss above the noise floor warns — no screening tolerance, no 1 ft cutoff.
+    const warnText = deedPlotWarning(built.closure, exMisses);
+    const closeNote = warnText ? ` ${warnText}` : "";
     const exNote = exMarks.length ? ` +${exMarks.length} save-and-except hole${exMarks.length > 1 ? "s" : ""}.` : "";
     let overlapNote = "";
     if (hits.length) {
@@ -19362,7 +19363,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // banner across many deeds and re-run an O(parcels) solve each time) — accumulate a note and
     // advance to the next deed's POB. The user aligns each afterward via the right-click menu.
     if (pobMode && pobMode.queueTotal) {
-      advanceDeed({ name: pobMode.name || built.mk.label, bad: !built.closed || hits.length > 0 });
+      advanceDeed({ name: pobMode.name || built.mk.label, bad: !built.closure.closes || exMisses.length > 0 || hits.length > 0, noClose: !built.closure.closes || exMisses.length > 0 ? { ft: built.closure.gapFt, holes: exMisses.length } : null });
       return;
     }
     setPobMode(null);
@@ -19379,7 +19380,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         msg: `This deed sits about ${foldedRot.toFixed(2)}° off the county parcel${best.fit.confident ? "" : " (loose match)"} — its bearings are likely on State Plane grid north, not true north.${closeNote}${exNote}${overlapNote}`,
       });
     } else {
-      flashWarn(`Boundary placed${exMarks.length ? " with its exception(s)" : ""}.${closeNote}${exNote}${overlapNote}`, 9000);
+      flashWarn(`${warnText ? "" : "Boundary placed"}${warnText ? "" : exMarks.length ? " with its exception(s)" : ""}${warnText ? "" : "."}${closeNote}${exNote}${overlapNote}`.trim(), warnText ? 14000 : 9000);
     }
   };
 
@@ -23395,7 +23396,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <polygon data-testid={m.except ? "deed-except" : "deed-boundary"} points={ring} fill={`url(#${encumbrancePatternId(m)})`} stroke={gapSeg ? "none" : stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} pointerEvents="all" />
                       {/* The courses as written, then the misclosure as its OWN line (not part of the boundary stroke). */}
                       {gapSeg && <polyline data-testid="deed-courses" points={trace.path.map(f2p).map((q) => `${q.x},${q.y}`).join(" ")} fill="none" stroke={stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} strokeLinejoin="round" pointerEvents="none" />}
-                      {gapSeg && <line data-testid="deed-gap" x1={gapSeg.a.x} y1={gapSeg.a.y} x2={gapSeg.b.x} y2={gapSeg.b.y} stroke={PAL.dangerText} strokeWidth={strokeZoom(Math.max(sw, 2.2), zk)} strokeDasharray={dashZoom("6 4", zk)} strokeLinecap="butt" pointerEvents="none"><title>{`${deedGapText(trace).text} ${deedGapText(trace).precision}`}</title></line>}
+                      {gapSeg && <line data-testid="deed-gap" x1={gapSeg.a.x} y1={gapSeg.a.y} x2={gapSeg.b.x} y2={gapSeg.b.y} stroke={PAL.danger} strokeWidth={strokeZoom(Math.max(sw, 2.2), zk)} strokeDasharray={dashZoom("6 4", zk)} strokeLinecap="butt" pointerEvents="none"><title>{`${deedGapText(trace).text} ${deedGapText(trace).precision}`}</title></line>}
                       {/* centerline + per-call bearing/distance labels */}
                       {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={stroke} strokeWidth={strokeZoom(0.8, zk)} strokeDasharray={dashZoom("4 3", zk)} opacity={0.7} pointerEvents="none" />}
                       {labelPpf > 0.12 && (m.calls || []).map((c, i) => {
@@ -26582,7 +26583,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   return (
                     <div style={{ marginTop: 6, paddingTop: 8, borderTop: BORDER_1 }}>
                       {/* The misclosure in plain words, with the precision ratio; the canvas draws it as a red dashed line. */}
-                      <div data-testid="deed-closure" style={{ fontSize: 11.5, lineHeight: 1.5, marginBottom: 8, fontWeight: 700, color: gapInfo.closes ? PAL.text : PAL.dangerText }}>
+                      <div data-testid="deed-closure" style={{ fontSize: 11.5, lineHeight: 1.5, marginBottom: 8, fontWeight: 700, color: gapInfo.closes ? PAL.text : PAL.danger }}>
                         {gapInfo.closes ? "" : "⚠ "}{gapInfo.text}{gapInfo.precision ? ` ${gapInfo.precision}.` : ""}
                       </div>
                       <button style={{ ...chip, width: "100%", fontWeight: 700 }} disabled={!!selMarkup.locked}
@@ -29473,7 +29474,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const calls = tracts[0] ? tracts[0].calls : [];
         const path = dp && calls.length ? dp.callsToPath(calls, { x: 0, y: 0 }) : [];
         const closes = dp ? dp.pathCloses(path) : false;
-        const gap = dp ? dp.misclosure(path) : 0;
+        const closure = path.length ? deedClosure(path) : { closes: true, gapFt: 0, ratio: null }; // as drawn (deedGap.js), not the 50 ft screen
         const exCount = Math.max(0, tracts.length - 1);
         // B768160 — OCR review data for whichever text is currently loaded: low-confidence word spans
         // (highlighted in the box) and suspect (likely-lost-decimal-point) distances feed the closure
@@ -29483,7 +29484,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const ocrHelpers = ocrRun ? ocrHelpersRef.current : null; // populated by the same call that set ocrRun
         const ocrLcSpans = ocrHelpers ? ocrHelpers.lowConfidenceSpans(ocrSpansForBox) : [];
         const ocrSuspects = ocrHelpers && mbText ? ocrHelpers.flagSuspectDistances(mbText) : [];
-        const ocrCulprits = (ocrHelpers && calls.length && !closes) ? ocrHelpers.culpritCalls(mbText, calls, ocrLcSpans, ocrSuspects) : [];
+        const ocrCulprits = (ocrHelpers && calls.length && !closure.closes) ? ocrHelpers.culpritCalls(mbText, calls, ocrLcSpans, ocrSuspects) : [];
         return (
         <div onClick={() => setTitleOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: SURF_RAISED, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 720, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
@@ -29619,7 +29620,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <div key={r.id} data-testid="deed-queue-row" onClick={() => { if (r.error) return; setDeedActiveId(r.id); setDeedName(r.name); setOcrRun(r.ocr || null); if (r.text) setMbText(r.text); setDeedErr(""); }}
                         style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "7px 10px", cursor: r.error ? "default" : "pointer", borderTop: i ? `1px solid ${PAL.panelLine}` : "none", background: active ? "rgba(124,58,237,0.08)" : "transparent" }}>
                         <span style={{ fontSize: 11.5, fontWeight: 600, color: r.error ? PAL.danger : PAL.ink, fontFamily: MONO_FONT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "50%" }}>📄 {r.name}</span>
-                        <span style={{ fontSize: 11, color: r.error ? PAL.danger : PAL.muted, flex: 1, lineHeight: 1.4 }}>{r.error ? r.error : `${r.boundaryCalls} call${r.boundaryCalls > 1 ? "s" : ""}${r.exCount ? ` · +${r.exCount} save-and-except` : ""} · ${r.closes ? "closes" : `gap ${r.gap.toFixed(1)}′`}`}</span>
+                        <span data-testid="deed-queue-closure" style={{ fontSize: 11, color: r.error || (r.closure && !r.closure.closes) ? PAL.danger : PAL.muted, flex: 1, lineHeight: 1.4 }}>{r.error ? r.error : `${r.boundaryCalls} call${r.boundaryCalls > 1 ? "s" : ""}${r.exCount ? ` · +${r.exCount} save-and-except` : ""} · ${r.closure ? deedQueueClosure(r.closure) : (r.closes ? "closes" : `gap ${r.gap.toFixed(1)}′`)}`}</span>
                         {active && ok && <span style={{ fontSize: 10.5, color: PAL.accent, fontWeight: 700, whiteSpace: "nowrap" }}>LOADED</span>}
                       </div>
                     );
@@ -29635,12 +29636,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 placeholder={'Paste a legal description, e.g.\nBEGINNING at a point… THENCE N 45°30′00″ E, 150.00 feet;\nTHENCE S 44°30′00″ E, 300.00 feet; …'}
                 style={{ width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 12, fontFamily: MONO_FONT, border: BORDER_1, borderRadius: 8, color: PAL.ink, resize: "vertical", lineHeight: 1.5 }} />
               <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
-                <div style={{ fontSize: 12, color: calls.length ? PAL.ink : PAL.muted, fontWeight: 600 }}>
-                  {calls.length
-                    ? `${calls.length} call${calls.length > 1 ? "s" : ""} parsed · ${closes ? `closes${gap > 1 ? ` (misclosure ${gap.toFixed(1)}′)` : ""}` : `does NOT close — gap ${gap.toFixed(1)}′`}${exCount ? ` · +${exCount} save-and-except` : ""}`
-                    : "No calls parsed yet"}
+                <div data-testid="deed-reader-summary" style={{ fontSize: 12, color: !calls.length ? PAL.muted : closure.closes ? PAL.ink : PAL.danger, fontWeight: 600 }}>
+                  {calls.length ? deedReaderSummary(calls.length, closure, exCount).text : "No calls parsed yet"}
                 </div>
-                {calls.length > 0 && !closes && (
+                {calls.length > 0 && !closure.closes && (
                   <div style={{ flexBasis: "100%", fontSize: 11, color: PAL.warn, lineHeight: 1.45 }}>
                     ⚠ These calls don't close back to the start — the boundary is plotted exactly as written, with the gap on the last edge. Check the description against the survey.
                     {/* B768160 — CLAUDE.md item (f): use closure as the OCR safety net. When the OCR'd
@@ -29754,7 +29753,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             /* NEW-4/B872 — was `.startsWith("⚠")`: a message that EMBEDS a warning mid-string (e.g. "All
                3 deeds placed. ⚠ Verify: …") never starts with it, so it rendered in the default
                success-green with its own warning invisible to the color. `.includes` catches both. */
-            <div style={{ ...toastPill, background: (deedAlignHint && !pobMode) ? PAL.accent : overlapWarn.includes("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d") }}>
+            <div style={{ ...toastPill, background: (deedAlignHint && !pobMode) ? (deedAlignHint.msg.includes("⚠") ? "#7f1d1d" : PAL.accent) : overlapWarn.includes("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d") }}>
               <span>{pobMode ? (pobMode.queueTotal ? `Deed ${(pobMode.placed || 0) + 1} of ${pobMode.queueTotal}${pobMode.name ? ` — ${pobMode.name}` : ""}: click its point of beginning (Esc cancels all).` : "Click the point of beginning on the plan to anchor the description (Esc to cancel).") : (deedAlignHint ? deedAlignHint.msg : overlapWarn)}</span>
               {(pobMode || routeMode) && <button onClick={() => { setPobMode(null); setRouteMode(null); setOverlapWarn(""); }} style={toastGhostBtn}>Cancel</button>}
               {deedAlignHint && !pobMode && !routeMode && <>
