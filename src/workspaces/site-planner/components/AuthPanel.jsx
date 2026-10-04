@@ -403,13 +403,13 @@ function AccountView({ user, profileApi, initialTab, onClose }) {
   );
 }
 
-export default function AuthPanel({ user, recovery, profileApi, initialTab, initialMode, onClose }) {
+export default function AuthPanel({ user, recovery, profileApi, initialTab, initialMode, initialEmail, onClose }) {
   // initialMode (B1315632 — landing page deep link): "signup" lands the signed-out
   // visitor straight on the create-account tab instead of the sign-in default, so the
   // landing page's "Create an account" button actually means something distinct from
   // "Open Planyr". Anything else (including undefined) keeps the historical default.
   const [mode, setMode] = useState(recovery ? "recovery" : (initialMode === "signup" ? "signup" : "signin")); // signin | signup | reset | recovery
-  const [email, setEmail] = useState((user && user.email) || "");
+  const [email, setEmail] = useState((user && user.email) || initialEmail || "");
   const [pw, setPw] = useState("");
   const [first, setFirst] = useState("");
   const [last, setLast] = useState("");

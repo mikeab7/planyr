@@ -24,7 +24,7 @@ import { loadUserPrefs, saveUserPrefs } from "../lib/userPrefs.js";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
-import { groupRoster, canManage, initialsOf, countsLine } from "../lib/teamRoster.js";
+import { groupRoster, canManage, initialsOf, countsLine, resendCooldownMs } from "../lib/teamRoster.js";
 
 const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", paper: "var(--surface-raised)", danger: "var(--danger)" };
 const field = { width: "100%", boxSizing: "border-box", padding: "8px 10px", fontSize: 13, border: `1px solid ${PAL.line}`, borderRadius: 8, color: PAL.ink, fontFamily: "inherit", background: "var(--surface-default)" };
@@ -179,7 +179,10 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
     const r = await inviteByEmail(sel, email, role);
     setBusy(false);
     if (!r.ok) { say("err", r.error || "Couldn't send the invite."); return; }
-    setEmail(""); setShowInvite(false); say("ok", "Invite sent — it activates when they sign in with that email.");
+    const sentTo = email.trim().toLowerCase();
+    setEmail(""); setShowInvite(false);
+    if (r.emailed) { markSent(sentTo); say("ok", `Invite sent to ${sentTo}`); }
+    else say("err", "Invite saved, but the email didn't send. Try Resend.");
     loadRoster(sel);
   };
 
@@ -197,7 +200,24 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
     setBusy(true); const r = await renameTeam(sel, v); setBusy(false);
     if (r.ok) { say("ok", "Team renamed."); await loadTeams(sel); } else say("err", r.error || "Couldn't rename the team.");
   };
-  const doResend = async (iv) => { setBusy(true); const r = await resendInvite(sel, iv.email, iv.role); setBusy(false); if (!r.ok) say("err", r.error || "Couldn't resend the invite."); else say("ok", "Invite resent"); };
+  // Resend throttle (NEW-1): disabled for ~a minute after any send; the server enforces the same window.
+  const [sentAt, setSentAt] = useState({});   // lower-cased email -> ms of the last send from this tab
+  const [clock, setClock] = useState(() => Date.now());
+  const markSent = (em) => { const t = Date.now(); setSentAt((m) => ({ ...m, [em]: t })); setClock(t); };
+  const cooldown = (iv) => resendCooldownMs(Math.max(sentAt[String(iv.email).toLowerCase()] || 0, Date.parse(iv.lastSentAt || "") || 0), clock);
+  useEffect(() => {
+    const left = Object.values(sentAt).concat(invites.map((i) => Date.parse(i.lastSentAt || "") || 0)).map((t) => resendCooldownMs(t, clock)).filter((x) => x > 0);
+    if (!left.length) return undefined;
+    const id = setTimeout(() => setClock(Date.now()), Math.min(...left) + 50);
+    return () => clearTimeout(id);
+  }, [sentAt, invites, clock]);
+  const doResend = async (iv) => {
+    if (cooldown(iv) > 0) return;
+    setBusy(true); const r = await resendInvite(sel, iv.email); setBusy(false);
+    if (r.ok) { markSent(String(iv.email).toLowerCase()); say("ok", "Invite email sent again"); return; }
+    if (r.throttled) { setSentAt((m) => ({ ...m, [String(iv.email).toLowerCase()]: Date.now() })); setClock(Date.now()); say("err", r.error); return; }
+    say("err", "Invite saved, but the email didn't send. Try Resend.");
+  };
 
   // Escape closes the open ⋯ menu / info popover first, not the whole Settings dialog behind it
   // (the dialog's own Escape handler is a document-level capture; window capture runs before it).
@@ -238,11 +258,11 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
 
   const menuRows = (row) => {
     const item = (label, onClick, opts = {}) => (
-      <button key={label} role="menuitem" data-team-menu-item={label} style={{ ...menuItem(!!opts.danger), minHeight: narrow ? 48 : undefined, display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "none" }} disabled={busy} onClick={() => { closeMenu(); onClick(); }}>
+      <button key={label} role="menuitem" data-team-menu-item={label} style={{ ...menuItem(!!opts.danger), minHeight: narrow ? 48 : undefined, display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "none" }} disabled={busy || !!opts.disabled} onClick={() => { closeMenu(); onClick(); }}>
         <span>{label}</span>{opts.check && <span aria-hidden="true" style={{ color: PAL.accent, fontWeight: 700 }}>✓</span>}
       </button>
     );
-    if (row.kind === "invite") return [item("Resend invite", () => doResend(row)), item("Cancel invite", () => doCancel(row.id), { danger: true })];
+    if (row.kind === "invite") return [item("Resend invite", () => doResend(row), { disabled: cooldown(row) > 0 }), item("Cancel invite", () => doCancel(row.id), { danger: true })];
     return [
       item("Admin", () => row.role !== "admin" && doSetRole(row.id, "admin"), { check: row.role === "admin" }),
       item("Member", () => row.role !== "member" && doSetRole(row.id, "member"), { check: row.role === "member" }),
@@ -273,7 +293,7 @@ export default function TeamPanel({ user, setMsg, onTitle }) {
               {canManage(r, isAdmin) && !narrow && (
                 <>
                   <span aria-hidden="true">·</span>
-                  <button data-team-resend style={linkBtnStyle} disabled={busy} onClick={() => doResend(r)}>Resend invite</button>
+                  <button data-team-resend style={linkBtnStyle} disabled={busy || cooldown(r) > 0} onClick={() => doResend(r)}>Resend invite</button>
                 </>
               )}
             </div>
