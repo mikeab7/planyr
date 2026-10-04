@@ -178,6 +178,18 @@ Sandbox-proven at dpr 2 against a SYNTHETIC OpenMapTiles fixture (`ui-audit/veri
 7. Look along tile joins at fractional zoom on a 2x display. **Expect:** no light hairlines.
 8. Desktop: the credit reads "…OpenFreeMap © OpenMapTiles data © OpenStreetMap", fully visible beside (not under) the ? button; the "Loading imagery…" pill never overlaps the zoom control.
 - **Stopping rule:** closes on a dated pass of 1–8, or a failed step filed as a recurrence on B2018608.
+### V1476304 — B2058144: Review tabs open, switch, restore, and follow the signed-in account between desktop and phone `Blocker: auth`
+
+Sandbox-proven (real Chromium, built app): `ui-audit/verify-review-tabs.mjs` (logged out, 37/37), `ui-audit/verify-review-tabs-sync.mjs` (two contexts signed in as a made-up user against a hermetic fake account, 20/20), `test/reviewTabs.test.js`. Pending: the real account and real devices (the sandbox's fake account cannot show real Supabase row-level security, real timing, or a real phone). **Steps** (planyr.io, desktop + iPhone, signed in; read the served chunk hash in the same observation):
+1. Desktop: Review → Open… three files (two PDFs, one .docx). **Expect:** three tabs in order, last active; no sheet index anywhere.
+2. Desktop: on the first PDF go to page 3 and zoom in. **Expect:** the tab remembers it when you switch away and back.
+3. Reload the desktop. **Expect:** the same three tabs, same active tab, each at its last page and zoom.
+4. iPhone: open Review. **Expect:** the same three tabs, the same active tab at the same page and zoom; the strip scrolls sideways, × only on the active tab.
+5. Desktop: type in the .docx (do not save), then on the phone close the .docx tab. Back on the desktop, focus the window. **Expect:** the .docx tab is STILL there with the text.
+6. Phone: close the second PDF. Desktop: click away and back. **Expect:** the tab is gone on the desktop.
+7. Phone in airplane mode: change a page, then reconnect. **Expect:** the desktop picks up the new page at its next focus.
+8. Close every tab on the desktop, reload. **Expect:** blank Review (no tabs, no index).
+- **Stopping rule:** closes on a dated pass of 1–8, or a failed step filed as a recurrence on B2058144.
 ### V1474944 — B2056784: no full-screen button on iPhone Safari; still present and working on desktop Chrome `Blocker: real-device (iPhone Safari has no Fullscreen API for page elements — cannot be produced headless)`
 
 Sandbox-proven: `test/fullscreenSupport.test.js`, `e2e/fullscreen-gate.spec.js` (API stubbed off at iPhone width; iPad width, standalone and desktop arms). The real-device confirmation is what is left.
@@ -329,14 +341,6 @@ Sandbox-proven (dev server, visible tab, real CDP two-finger touch events, all t
 - **Stopping rule:** closes on a dated pass of 1-5, or a failed step filed as a recurrence on B2016112.
 
 
-### V1440080 — B2014992: every pin on the Dashboard Locations map sits inside its own parcel (Katz in particular) `Blocker: auth`
-
-Sandbox-proven: `test/dashboardParcelAnchors.test.js` (5, red on pre-change source). Pending: the signed-in dashboard against real parcels. Read-only — change nothing.
-**Steps** (planyr.io, signed in; read the served chunk hash in the same observation):
-1. Open the Dashboard and zoom the Locations card in on Katz (Rankin Rd / I-45 N, Houston). **Expect:** its pin is on the large L-shaped parcel, not on the neighbouring lots.
-2. Compare with the Site tab map for the same site. **Expect:** the pin is at the same spot.
-3. Pan across the other pipeline pins. **Expect:** each sits inside its own outline; a site with no boundary still shows at its saved location.
-- **Stopping rule:** closes on a dated pass of 1-3, or a failed step filed as a recurrence on B2014992.
 ### V1440896 — B2015808: each schedule group's Focus holds across leaving the module, switching schedules, and a hard reload `Blocker: auth`
 
 Sandbox-proven: `test/schedulerViewState.test.js` (7 new, red on pre-change source) and the real `/sequence/` page in headless Chromium (focus → reload → still focused → off → reload → still off; store `planar:taskFocus:v1` written/cleared). Pending: the signed-in cloud path (a real merge/refresh from the cloud).
@@ -584,6 +588,20 @@ Sandbox-proven on WebKit (touch emulation, `ui-audit/verify-notes-touch-place.mj
 5. Empty page. **Expect:** the prompt reads "Double-tap anywhere to start a note."
 6. Read the served chunk hash in the same observation as each result.
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1960480.
+
+### V1481472 — B1960480 (×2): on a real iPhone, a double-tap on blank paper puts the first letter exactly where the finger was `Blocker: real-data` (signed-in real device)
+
+Sandbox-proven on WebKit (hasTouch + isMobile, real touch tap pairs): `ui-audit/verify-notes-touch-landing.mjs` — first-glyph position vs tap, ±1 CSS px at 100% / 200% / 50%, left / middle / right, panned, panned+zoomed, not-the-first page; desktop path unchanged. NOT provable here: the iOS soft keyboard's visual-viewport shift, and a real fingertip on real glass.
+**Steps (real iPhone, signed in, a throwaway duplicate page — never a real plan):**
+1. Open the page at the normal zoom, double-tap blank paper near the middle, type "W". **Expect:** the W appears under where the finger landed (not lower/right of it).
+2. Repeat near the left edge and near the right edge of the sheet. **Expect:** same — no sideways drift.
+3. Pinch in (zoomed in) and repeat; pinch out and repeat. **Expect:** the letter still lands under the finger at both.
+4. Pan the page so a different part is on screen, repeat. **Expect:** same.
+5. With the keyboard already up (tap into an existing box first, leave it up), double-tap a blank spot, type. **Expect:** lands under the finger; the page does not jump.
+6. Open a page that is not the first one in the list and repeat step 1. **Expect:** same.
+7. Double-tap in the strip just under the page title. **Expect:** the box sits where tapped; the page does not slide.
+8. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–7, or a failed step filed as a recurrence on B1960480.
 
 
 ### V1394448 — B1958144: designed road sections (median, lane striping, ROW lines) show on the real Silvestri and Richfield plans `Blocker: real-data`
