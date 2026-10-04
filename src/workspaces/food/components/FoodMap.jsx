@@ -302,10 +302,9 @@ import { Button, IconButton, SegmentedControl, SIZE } from "../../../shared/ui/c
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import { FREE_ZOOM_OPTIONS, attachFreeWheelZoom } from "../../../shared/map/freePinchZoom.js";
 import {
-  SITE_PLAN_BASEMAP, SITE_PLAN_BASEMAP_CHOICES, resolveBasemapChoice, basemapTileLayers, basemapAttribution, IMAGERY_GRADE,
+  SATELLITE_BASEMAP, FOOD_BASEMAP_CHOICES, resolveBasemapChoice, basemapTileLayers, basemapAttribution, IMAGERY_GRADE,
 } from "../../../shared/basemaps/basemaps.js";
 import { addVectorLabels } from "../../../shared/basemaps/vectorLabelLayer.js";
-import { attachSiteLabelStack } from "../../../shared/basemaps/siteLabelStack.js";
 
 // ⛔ NEW-1 (2026-10-03) — THE BASEMAP IS NO LONGER DEFINED HERE. Owner: "The map on the food module
 // is horrible, we should default to the site plan module map … and a good hybrid option as an
@@ -322,7 +321,7 @@ import { attachSiteLabelStack } from "../../../shared/basemaps/siteLabelStack.js
 const BASEMAP_STORAGE_KEY = "planyr:food:basemap"; // per-user, per-device last choice (NEW-1)
 function readStoredBasemap() {
   try { return resolveBasemapChoice(window.localStorage.getItem(BASEMAP_STORAGE_KEY)).key; }
-  catch (_) { return SITE_PLAN_BASEMAP.key; } // storage blocked → the default, never a crash
+  catch (_) { return SATELLITE_BASEMAP.key; } // storage blocked → the default, never a crash
 }
 
 // Houston, so a first-ever visit opens somewhere useful rather than on the world map.
@@ -642,14 +641,10 @@ export default function FoodMap({
           setTilesLoading(loadingLayer.isLoading());
         }
       });
-      // Site Plan (the default) attaches the SAME label stack the Site tab's map shows — Planyr's city
-      // names at wide zoom, the clean vector roads from close zoom — through the one shared `siteStack`.
+      // Satellite (the default) carries NO road/label layer at all (`choice.vector` null) — the photo only.
       // Hybrid is the full vector map. /food draws no basemap POI labels either way: the restaurant pins
       // ARE the points of interest, and a basemap label under a pin is the collision the owner called out.
-      if (choice.vectorMode === "site") {
-        vectorHandle = attachSiteLabelStack(L, map, { source: choice.vector, onStatus: setLabelsStatus });
-        labelsLayerRef.current = vectorHandle;
-      } else if (choice.vector) {
+      if (choice.vector) {
         vectorHandle = addVectorLabels(L, map, { source: choice.vector, mode: "hybrid", includePois: false, onStatus: setLabelsStatus });
         labelsLayerRef.current = vectorHandle;
       } else {
@@ -1103,7 +1098,7 @@ export default function FoodMap({
         <SegmentedControl
           aria-label="Basemap" data-testid="food-basemap-toggle"
           accent="var(--accent-food)" onAccent="var(--on-accent-food)"
-          options={SITE_PLAN_BASEMAP_CHOICES.map((c) => ({ key: c.key, label: c.label, title: c.title, testid: `food-basemap-${c.key}` }))}
+          options={FOOD_BASEMAP_CHOICES.map((c) => ({ key: c.key, label: c.label, title: c.title, testid: `food-basemap-${c.key}` }))}
           value={basemap} onChange={setBasemap}
         />
       </div>

@@ -201,13 +201,28 @@ export const HYBRID_BASEMAP = {
   graded: true,
 };
 
+/* SATELLITE — /food's default (B2070433): the aerial photo and NOTHING else, at every zoom. No vector
+ * roads, no road names, no city names, no label overlay of any kind (`vector: null`, `vectorMode: null`).
+ * Same imagery definition as the Site Plan map (`SITE_PLAN_BASEMAP.imagery`, so the same high-density
+ * tiles and the same untoned look) — one source for the imagery itself; only the label stack differs. */
+export const SATELLITE_BASEMAP = {
+  key: "satellite",
+  label: "Satellite",
+  title: "Aerial photo only — no roads or labels",
+  imageryKey: SITE_PLAN_BASEMAP.imageryKey,
+  imagery: SITE_PLAN_BASEMAP.imagery,
+  vector: null,
+  vectorMode: null,
+  graded: SITE_PLAN_BASEMAP.graded,
+};
+
 /* The choices /food offers, in display order. The FIRST is the default. */
-export const SITE_PLAN_BASEMAP_CHOICES = [SITE_PLAN_BASEMAP, HYBRID_BASEMAP];
+export const FOOD_BASEMAP_CHOICES = [SATELLITE_BASEMAP, HYBRID_BASEMAP];
 
 /* Resolve a stored/unknown key to a choice — anything unrecognised falls back to the default.
- * Stored values from the interim Hybrid/Satellite build ("satellite") fall back to Site Plan. */
+ * A stored "siteplan" (the interim Site Plan | Hybrid build, B2025280) migrates to Satellite. */
 export function resolveBasemapChoice(key) {
-  return SITE_PLAN_BASEMAP_CHOICES.find((c) => c.key === key) || SITE_PLAN_BASEMAP;
+  return FOOD_BASEMAP_CHOICES.find((c) => c.key === key) || SATELLITE_BASEMAP;
 }
 
 /* The raster tile layers a choice is made of — the IMAGERY only now (roads and labels are vector;
@@ -216,7 +231,7 @@ export function resolveBasemapChoice(key) {
  * `subdomains` key (B634981). `dpr` defaults to 1 so a caller that does not know it gets the
  * conservative, never-placeholder behaviour. */
 export function basemapTileLayers(choice, { dpr = 1 } = {}) {
-  const c = choice || SITE_PLAN_BASEMAP;
+  const c = choice || SATELLITE_BASEMAP;
   const opts = {
     maxZoom: 21, attribution: c.imagery.attr, zIndex: 1,
     ...densityTileOptions(c.imagery.maxNative, dpr),
@@ -227,7 +242,7 @@ export function basemapTileLayers(choice, { dpr = 1 } = {}) {
 
 /* The credit line for a choice — imagery credit, plus the vector source's when labels are drawn. */
 export function basemapAttribution(choice) {
-  const c = choice || SITE_PLAN_BASEMAP;
+  const c = choice || SATELLITE_BASEMAP;
   return c.vector ? `${c.imagery.attr} · ${c.vector.attribution}` : c.imagery.attr;
 }
 
