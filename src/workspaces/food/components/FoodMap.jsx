@@ -377,6 +377,8 @@ const COLORS = {
 // canvas/no-cascade reason as COLORS above, and because sharing it would mean importing across
 // two components for one number — not worth a new shared-constants module for this module's size.
 const PANEL_WIDTH = 340;
+// B2046224 — how long after a phone selection lands the map keeps re-centring as the bottom sheet reports its height.
+const SHEET_SETTLE_MS = 1200;
 // --accent-food, literal for the same canvas reason as COLORS — ties the selected pin's ring
 // and halo to the panel's own accent dot (VisitPanel.jsx), "the eye connects them."
 const SELECTED_ACCENT = "#BE3B22";
@@ -504,6 +506,17 @@ export default function FoodMap({
   const [attributionOpen, setAttributionOpen] = useState(false);
   const coarsePointer = useCoarsePointer();
   const narrowViewport = useNarrowViewport();
+  // B2046224 — phone centring. On a narrow viewport the detail panel is a BOTTOM SHEET, not the
+  // desktop right rail, so a selection must land centred in the area ABOVE the sheet (horizontally
+  // centred, vertically centred in what the sheet leaves visible) — the old right-rail shift pushed a
+  // phone's pin to the left edge. The sheet's height is only known a beat after the selection (it
+  // measures itself), and a flight is still running by then, so the vertical correction is applied
+  // once the flight settles / the height arrives: `followRef` holds {applied: the sheet height already
+  // compensated} and is disarmed by the first real touch on the map, so it can never fight a pan.
+  const sheetHeightRef = useRef(0);
+  sheetHeightRef.current = narrowViewport ? sheetHeightPx : 0;
+  const followRef = useRef(null); // { applied:number } while a phone selection's centring is live
+  const flyingRef = useRef(false);
 
   // Mount once. The tile layer itself is NOT created here — see the basemap effect below —
   // so toggling satellite never tears down/recreates the map, the marker layer or its handlers.
@@ -692,6 +705,34 @@ export default function FoodMap({
   // every case, which could not be fully verified in the time available; the risk of a new, subtler
   // position bug outweighed the polish this session, so the plain revert is what shipped.
 
+  // B2046224 — shift the camera DOWN by half of whatever sheet height is not yet compensated, so the
+  // selected pin sits at the vertical centre of the visible area above the bottom sheet. Incremental
+  // (`applied`) so it is safe to call from several places; a no-op off-phone, mid-flight, or once the
+  // user has touched the map (followRef disarmed).
+  const applySheetCentring = () => {
+    const map = mapRef.current; const f = followRef.current;
+    if (!map || !f || flyingRef.current) return;
+    // The settle window opens when the flight lands: late sheet-height reports (content measuring
+    // itself) inside it still centre; a user dragging the sheet handle later does not drag the map.
+    if (f.until == null) f.until = performance.now() + SHEET_SETTLE_MS;
+    else if (performance.now() > f.until) { followRef.current = null; return; }
+    const h = sheetHeightRef.current;
+    if (!(h > 0) || h === f.applied) return;
+    const delta = (h - f.applied) / 2;
+    f.applied = h;
+    map.panBy([0, delta], { animate: false });
+  };
+  useEffect(() => { applySheetCentring(); }, [sheetHeightPx, narrowViewport]);
+  // The first real touch/click on the map hands control back to the user for good (until the next selection).
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return undefined;
+    const disarm = () => { followRef.current = null; };
+    host.addEventListener("pointerdown", disarm, true);
+    host.addEventListener("wheel", disarm, true);
+    return () => { host.removeEventListener("pointerdown", disarm, true); host.removeEventListener("wheel", disarm, true); };
+  }, []);
+
   // Search or list result selected — fly to it, offset so it lands centred in the area the user
   // can actually SEE (see header comment: the detail panel covers roughly the right third).
   // Keyed on flyToTarget.nonce (not just lat/lon) so re-selecting the SAME result twice in a row
@@ -732,9 +773,13 @@ export default function FoodMap({
     // viewport (where the panel can approach the map's full width) never shifts the target off
     // the visible area entirely in the other direction.
     const containerWidth = map.getSize().x;
-    const panelOffsetPx = Math.min(PANEL_WIDTH, containerWidth * 0.8) / 2;
+    // Desktop: the right-rail panel covers the right side → shift the target left of centre. Phone:
+    // the panel is a bottom sheet → NO horizontal shift (it would hug the left edge); the vertical
+    // correction for the sheet is applied by `applySheetCentring` below once the sheet's height is known.
+    const panelOffsetPx = narrowViewport ? 0 : Math.min(PANEL_WIDTH, containerWidth * 0.8) / 2;
     const targetPoint = map.project([flyToTarget.lat, flyToTarget.lon], targetZoom);
     const shiftedLatLng = map.unproject(targetPoint.add([panelOffsetPx, 0]), targetZoom);
+    followRef.current = narrowViewport ? { applied: 0 } : null;
 
     // B651872 (×4) — beyond LONG_JUMP_METERS, skip the animation entirely: setView with
     // animate:false goes straight through Leaflet's own hard-reset path (_resetView, the SAME
@@ -749,10 +794,14 @@ export default function FoodMap({
       // never the right model here, even when the following setView immediately supersedes it.
       map.invalidateSize({ animate: false, pan: false });
       map.setView(shiftedLatLng, targetZoom, { animate: false });
+      applySheetCentring();
     } else {
+      flyingRef.current = true;
       map.once("moveend", () => {
+        flyingRef.current = false;
         map.invalidateSize({ animate: false, pan: false });
         map.setView(map.getCenter(), map.getZoom(), { reset: true, animate: false });
+        applySheetCentring();
       });
       // B651872 (×3) — fixed duration, not Leaflet's own distance-proportional default; see
       // FLY_DURATION_SEC and the header comment.
@@ -908,7 +957,12 @@ export default function FoodMap({
         () => onSelectPlace?.({ id: selectedKey.slice("place:".length), lat: selectedPlaceInfo.lat, lon: selectedPlaceInfo.lon, name: selectedPlaceInfo.name }),
         { ...REFERENCE_PIN, key: selectedKey }
       );
+      selectedDrawn = true;
     }
+    // B2046224 — read-only probe: the key of the pin currently drawn in the SELECTED style ("" = none
+    // drawn selected). Lets a harness assert "picking it marks it as the selected one" without reading
+    // canvas pixels; nothing in the app reads it.
+    if (hostRef.current) hostRef.current.dataset.selectedPin = selectedKey && selectedDrawn ? selectedKey : "";
   }, [places, loggedPlaces, loggedIds, manualPins, wishlistPlaces, wishlistManualPins, overpassPlaces, tooSmall, basemap, selectedKey, selectedPlaceInfo, onSelectPlace, onSelectManualPin, coarsePointer]);
 
   // B668193 — the coarse-pointer nearest-centre tap resolver. Only ever registered on a coarse

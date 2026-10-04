@@ -166,6 +166,27 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1471312 — B2046224: Food on a phone — one row per restaurant, a pick lands the map on it, the Map/List toggle stays on screen while typing `Blocker: auth`
+
+Sandbox-proven in WebKit-emulated iPhone 15 / SE against a MOCKED Supabase (`ui-audit/verify-food-phone.mjs`, 30/30; 16/33 on the unfixed build) plus `test/foodPlaceIdentity.test.js`. Not provable here: his real signed-in data, Mobile Safari's real keyboard and collapsing toolbar, and the literal "the map did not move" report (it did not reproduce — the pin was mis-centred / under the sheet). **Steps** (planyr.io/#/food on his iPhone, signed in; read the served chunk hash in the same observation; do NOT save anything to the real list — cancel out of the visit form, or use a throwaway restaurant he is happy to delete):
+1. Tap the search field and type `dao`. **Expect:** ONE DAO'N row (marked "Been here"), not two; the Map / List toggle, the Pin button and the search field are all visible together the whole time the keyboard is up.
+2. Tap that row. **Expect:** the map slides to DAO'N, its pin sits in the middle of the map area ABOVE the card (not at the left edge, not under the card) and is drawn in the larger "selected" style; the card shows its existing past visits.
+3. Clear the search, type a restaurant he has never saved (e.g. `fadi`) and tap it. **Expect:** same centring above the card; the card shows no past visits.
+4. Switch to List, tap any row, switch back to Map. **Expect:** the map is on that restaurant, centred above the card.
+5. Open a restaurant he has saved twice under slightly different spellings (apostrophe / capitalisation) if one exists. **Expect:** still one search row.
+6. Rotate to landscape and back with the field focused. **Expect:** the toggle and field stay on screen.
+7. Desktop browser at full width: toolbar looks as before; picking a result still centres the pin in the area LEFT of the right-hand panel.
+- **Stopping rule:** closes on a dated pass of 1–7, or a failed step filed as a recurrence on B2046224.
+### V1486288 — B2061600: Select-parcels outlines do not catch when a zoom or pan settles at zoom 14–16 in Bartow County GA `Blocker: real-data`
+
+Sandbox-proven: `ui-audit/verify-parcel-settle-cost.mjs` (z14 moveend settle 103.7 → 0.8 ms, mock at Bartow density), `test/parcelTileLayer.test.js`, and the existing parcel display harnesses. **Not provable here:** Michael's real 63,688-lot Bartow service, his GPU-accelerated Chrome, and how it *feels*. Read the served chunk hash in the SAME observation as the result (CLAUDE.md live-measurement rule).
+**Steps:**
+1. Map (#/site), centre 34.20 / -84.83 (his site A010-0202-001), turn Select parcels on. **Expect:** lot outlines draw as before (same colour/weight), only the lots in view.
+2. Zoom between levels 14, 15 and 16 and let each settle; then pan a short distance and let it settle. **Expect:** no visible catch when the map stops moving at any of the three levels (the reported "catch at 15, a clear one at 14" is gone). A brief hold right after zooming OUT while new lots stream in is the separate data-arrival cost (see B2061600) — record it if you see it, do not call it a pass or a fail of this check.
+3. At 14 and again at 16, click one lot. **Expect:** the lot that was under the cursor is selected and highlighted (B137: what you see is what you can select); hover/selected styling unchanged.
+4. Zoom out to 13. **Expect:** outlines hidden with the "zoom in a little to see the lines" hint, unchanged.
+5. Dense Texas check: Katy (29.786 / -95.825, Harris) then a Fort Bend view, Select parcels on, zoom 14–16. **Expect:** outlines draw, no catch, a lot click selects the right lot.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2061600.
 ### V1445360 — B2020272/B2020273: blue my-location marker, heading cone and arrow button on a real iPhone `Blocker: real-device (iOS compass permission prompt and the heading cone need a real phone; the sandbox has no sensors or map tiles)`
 
 Sandbox-proven: `ui-audit/verify-locate-marker.mjs` (colors, ring, pane order, metre-accurate circle at two zooms, cone present/absent, button states) and `test/locateHeading.test.js`. Left for the phone:
@@ -1988,16 +2009,13 @@ Sandbox-proven logged-out (both entry points, reload; red on main). **The signed
 4. Delete the throwaway project. Read the served chunk hash in the same observation.
 - **Stopping rule:** closes on a dated pass of 1–3, or a failure is filed as a recurrence on B1991041.
 
-### V1414592 — B1989504/B1989505: the "Start your site" card no longer covers the map `Blocker: live-GIS`
+### V1489328 — B2064640: a street click in San Francisco and in Las Vegas shows no "not wired" sentence `Blocker: live-GIS (needs the live CAL FIRE / Nevada statewide parcel services, which the sandbox egress blocks)`
 
-Sandbox-proven: `e2e/start-hint-placement.spec.js` (red on main, green here; emulated phone, not a real iPhone). **Still needs the deployed build** (`live-GIS` here means the real planyr.io edge + real basemap tiles; no signed-in data needed).
-**Steps** (new Untitled site, Site tab; read `/version.json` with `cache:'no-store'` and the served chunk hash in the SAME observation):
-1. Phone width (390×844, Playwright device descriptor, WebKit if installable else Chromium — name the engine): open a new blank site. **Expect:** a compact "Start your site" strip at the top, between the Panels and Tools edge tabs; the middle of the map is clear.
-2. Tap the map centre / drag. **Expect:** the map pans, nothing intercepts.
-3. Tools → Parcel tools → Draw new parcel. **Expect:** the strip is gone and stays gone while drawing.
-4. New blank site again → ✕ → reload. **Expect:** strip stays dismissed.
-5. Desktop width: **Expect:** strip top-left, clear of the middle. Real iPhone Safari look (toolbar collapse, safe areas) remains owner-side and is NOT claimed.
-
+Sandbox-proven: `test/statewideCoverageNote.test.js` (identity + sentence against the real committed county polygons). What is left is the real click on the deployed build.
+1. On planyr.io Map view, turn on Select parcels, go to San Francisco (Mission), and read `/version.json` in the same check. Click the street point 37.750733, -122.400883. **Expect:** the tag says "No lot here" and the error line reads "No parcel right there — zoom in and click directly on a lot." — no "no parcel data wired here yet" anywhere.
+2. Repeat in Las Vegas on a street. **Expect:** same wording, no "not wired" sentence.
+3. Click a real lot a few blocks away in each. **Expect:** it selects as before.
+4. Control: click inside an unwired county (e.g. Taylor, MI). **Expect:** "Wayne County — no parcel data wired here yet." still appears.
 ### V1445152 — B2020064: Map view zoom +/−/locate buttons clickable with a long Sites list `Blocker: real-data (signed-in account with his long site list on planyr.io)`
 
 Sandbox-proven: `ui-audit/verify-map-zoom-reachable.mjs` (hit test; red pre-fix, green after) and `test/mapChromeStack.test.js`.
