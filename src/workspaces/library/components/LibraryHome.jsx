@@ -26,6 +26,8 @@ import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { unfiledRows } from "../../doc-review/lib/unfiled.js";
 import { fileReviewIntoProject } from "../lib/fileIntoProject.js";
+import { subscribeLibraryChanged } from "../../../shared/library/libraryChanged.js";
+import { fileTypeTag } from "../lib/fileTypeTag.js";
 
 const SectionHead = ({ children }) => (
   <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: "0.07em", textTransform: "uppercase", color: "var(--text-tertiary)", margin: "18px 2px 8px" }}>{children}</div>
@@ -49,6 +51,15 @@ const fmtWhen = (ms) => { try { return ms ? new Date(ms).toLocaleDateString(unde
  * `missing` defaults to `!doc` but the caller may pass an explicit override — a pin whose doc
  * resolves fine but is filed under a DEAD project (B1340368) is just as unopenable and gets
  * the identical "missing" treatment, not a silent difference the caller would have to repeat. */
+/* B2084481 - the file's type (DOC / DOCX / TXT / PDF…), so a .doc and the .docx saved from it never read alike. */
+function TypeTag({ doc }) {
+  const tag = fileTypeTag(doc);
+  return (
+    <span data-testid="file-type-tag" title="File type"
+      style={{ marginLeft: 7, padding: "1px 6px", borderRadius: RADIUS.sm, border: "1px solid var(--border-default)", background: "var(--hover-ghost)", color: "var(--text-secondary)", fontSize: FONT_SIZE.label, fontWeight: 700, letterSpacing: "0.03em", verticalAlign: "1px" }}>{tag}</span>
+  );
+}
+
 function FileCard({ pin, doc, missing = !doc, projectName, when, onOpen, onUnpin }) {
   const title = doc ? (doc.title || doc.item || "Untitled drawing") : (pin?.label || "Missing drawing");
   return (
@@ -58,7 +69,7 @@ function FileCard({ pin, doc, missing = !doc, projectName, when, onOpen, onUnpin
         <span aria-hidden style={{ flex: "none", color: "var(--accent-library-text)" }}>📄</span>
         <span style={{ minWidth: 0 }}>
           <span style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: missing ? "var(--text-secondary)" : "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {title}
+            {title}{doc && <TypeTag doc={doc} />}
           </span>
           <span style={{ display: "block", fontSize: 10.5, color: missing ? "var(--danger-text)" : "var(--text-tertiary)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {missing
@@ -99,7 +110,7 @@ export function UnfiledCard({ doc, projects = [], busy = false, onOpen, onMove }
         style={{ flex: "1 1 160px", minWidth: 0, display: "flex", alignItems: "center", gap: 9, textAlign: "left", border: "none", background: "transparent", padding: 0, fontFamily: "inherit", cursor: "pointer", color: "inherit" }}>
         <span aria-hidden style={{ flex: "none", color: "var(--accent-library-text)" }}>📄</span>
         <span style={{ minWidth: 0 }}>
-          <span style={{ display: "block", fontSize: FONT_SIZE.emphasis, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
+          <span style={{ display: "block", fontSize: FONT_SIZE.emphasis, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}<TypeTag doc={doc} /></span>
           <span style={{ display: "block", fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", marginTop: 2 }}>{[doc.discipline, fmtWhen(Date.parse(doc.updated_at || "") || 0)].filter(Boolean).join(" · ")}</span>
         </span>
       </button>
@@ -151,12 +162,15 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
     };
     load();
     const off = subscribePins(load);
-    (async () => {
+    const loadReviews = async () => {
       try { const rows = await listReviews(); if (live) setReviews(rows || []); }
       catch (_) { /* names degrade to pin labels; cards still render */ }
       finally { if (live) setLoading(false); }
-    })();
-    return () => { live = false; off(); };
+    };
+    loadReviews();
+    // B2084480 - a save/refile/delete made in Review (this tab or another) re-reads the shelf without a reload.
+    const offLib = subscribeLibraryChanged(() => { load(); loadReviews(); });
+    return () => { live = false; off(); offLib(); };
   }, [uid, active]);
 
   const byId = new Map(reviews.map((r) => [r.id, r]));
