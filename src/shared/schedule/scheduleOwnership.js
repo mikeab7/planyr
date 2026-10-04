@@ -77,10 +77,26 @@ const ORG_OWNER_LABEL = "Organization";
 //   4. Anything else — the organization. Invariant 4: an `ownerKind:"site"` whose site id went
 //      missing lands HERE rather than in a fourth "unowned" state, because that state is exactly
 //      what this model removes.
+//
+// ⛔ NEW-1 (B1991040) — THE LINKED PROJECT'S NAME IS A READ-TIME LOOKUP BY ID, NEVER THE STORED COPY.
+// `linkedSiteName` is a snapshot written when the link was made; renaming the project never touched
+// it, so the Dashboard's Schedule health card printed "Pappadoupolos / Master Schedule" beside a
+// Jump Back In row reading "Papadopoulos" (measured live 2026-09-29, `schedules` id 6). A host
+// registers ONE resolver (id → the project's live name, `shared/names`) and every display below
+// asks it first; the stored copy is now ONLY the fallback for a link whose project this device
+// cannot resolve (not pulled yet, or deleted) — it is never preferred over a live answer.
+let siteNameResolver = null;
+function setSiteNameResolver(fn) { siteNameResolver = typeof fn === "function" ? fn : null; }
+function liveSiteName(siteId, stored) {
+  let live = null;
+  if (siteNameResolver && siteId != null) { try { live = siteNameResolver(siteId); } catch (_) { live = null; } }
+  if (live) return live;
+  return stored != null && stored !== "" ? stored : null;
+}
 function ownerOf(schedule) {
   const s = schedule && typeof schedule === "object" ? schedule : {};
   const siteId = s.linkedSiteId != null && s.linkedSiteId !== "" ? s.linkedSiteId : null;
-  const siteName = s.linkedSiteName != null && s.linkedSiteName !== "" ? s.linkedSiteName : null;
+  const siteName = liveSiteName(siteId, s.linkedSiteName);
   if (s.ownerKind === OWNER_KIND_ORG) return { kind: OWNER_KIND_ORG, siteId: null, siteName: null, key: ORG_OWNER_KEY };
   if (s.ownerKind === OWNER_KIND_SITE && siteId != null) return { kind: OWNER_KIND_SITE, siteId, siteName, key: siteId };
   if (s.ownerKind == null && siteId != null) return { kind: OWNER_KIND_SITE, siteId, siteName, key: siteId };
@@ -329,6 +345,7 @@ function describeScheduleDelete(name, taskCount) {
 
 export {
   ORG_OWNER_KEY, ORG_OWNER_LABEL, OWNER_KIND_SITE, OWNER_KIND_ORG,
+  setSiteNameResolver, liveSiteName,
   ownerOf, ownerKeyOf, isOrgOwned, isSiteOwned,
   scheduleList, schedulesForOwner, partitionSchedules,
   scheduleLabelParts, crossScheduleLabel,
