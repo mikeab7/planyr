@@ -22,11 +22,11 @@ import { docKindOf } from "../../doc-review/docEditor/docKind.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchProjects, fetchReviews, fetchFileFacts, fileNewReview,
-  upsertFileFacts, deleteReview, restoreReview, purgeReview, listDeletedReviews,
+  upsertFileFacts, deleteReview, listDeletedReviews,
   purgeExpiredDeleted, loadReview, getShareLink, DISCIPLINES,
   downloadFromDrive, downloadSource,
 } from "../../doc-review/lib/reviewStore.js";
-import { friendlySaveError } from "../../../shared/sitePlans/lib/overlayErrors.js";
+import { useReviewTrash, TrashNotice, UndoToast, RecentlyDeletedList, DeleteButton, FileTypeIcon } from "./ReviewTrash.jsx";
 import { toFactsRow, mergeFactsIntoReviews, findDuplicateReview, isRapidRepeatUpload } from "../../doc-review/lib/fileIndex.js";
 import { fileWarn } from "../../doc-review/lib/sourceState.js";
 import { fileReviewIntoProject } from "../lib/fileIntoProject.js";
@@ -75,15 +75,6 @@ const Badge = ({ children, tone = "neutral", title }) => {
   );
 };
 
-const FileTypeIcon = ({ kind }) => (
-  <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"
-    strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flex: "none", color: "var(--text-tertiary)" }}>
-    {kind === "stitch"
-      ? <><rect x="2" y="3" width="5.5" height="10" rx="1" /><rect x="8.5" y="3" width="5.5" height="10" rx="1" /></>
-      : <><path d="M4 1.7h5l3 3v9.6H4z" /><path d="M9 1.7v3h3" /></>}
-  </svg>
-);
-
 export default function FileBrowser({
   projectId = null, projectName = "", signedIn = false, cross = false, isActive = true,
   // ORG SCOPE (NEW-1) — a real, distinct browse scope alongside a project and cross-project:
@@ -120,15 +111,10 @@ export default function FileBrowser({
   const [dropOver, setDropOver] = useState(false);
   const [queue, setQueue] = useState([]);
   const [refileSel, setRefileSel] = useState({});          // fileId -> { category, discipline }
-  const [pendingDel, setPendingDel] = useState(null);
   const [share, setShare] = useState({});                  // fileId -> { status, url, error }
-  const [delNotice, setDelNotice] = useState(null);        // { orphaned } after a delete left bytes behind
   const [loadNotice, setLoadNotice] = useState(null);      // a refresh FAILED — keeping the last loaded list (NEW-F5)
   const [deletedRows, setDeletedRows] = useState([]);      // soft-deleted reviews (NEW-F3 Recently deleted)
   const [showDeleted, setShowDeleted] = useState(false);   // "Recently deleted" view active
-  const [pendingPurge, setPendingPurge] = useState(null);  // two-click arm for "Delete forever"
-  const [undoDel, setUndoDel] = useState(null);            // { id, title } — ~10s undo toast after a delete
-  const undoTimer = useRef(null);
   const [moveNotice, setMoveNotice] = useState(null);      // refile moved metadata but not the Drive copy (B662 #3)
   const [folderNote, setFolderNote] = useState(null);      // { filed, skipped } after a FOLDER drop/pick (B664)
   const [dlNotice, setDlNotice] = useState(null);          // { name, busy?, error? } for a non-PDF download (B685)
@@ -604,49 +590,9 @@ export default function FileBrowser({
       setDlNotice(null);
     } catch (e) { setDlNotice({ name: label, error: (e && e.message) || "Couldn’t download this file." }); }
   };
-  // Delete = move to Recently deleted (NEW-F3, soft) — restorable for ~30 days. The pre-migration
-  // degrade path can still hard-delete (r.soft absent); its cleanup failures stay loud (NEW-4).
-  const del = async (id) => {
-    setPendingDel(null);
-    const title = (reviews.find((x) => x.id === id) || {}).title || "file";
-    const r = await deleteReview(id);
-    if (r && (r.orphaned || r.cleanupFailed)) setDelNotice({ orphaned: r.orphaned || 0, sharedKept: r.sharedKept || 0 });
-    if (r && r.ok && r.soft && r.removed > 0) { // ~10s undo toast — ONLY for a delete that really landed (B757 removed-count honesty)
-      if (undoTimer.current) clearTimeout(undoTimer.current);
-      setUndoDel({ id, title });
-      undoTimer.current = setTimeout(() => setUndoDel(null), 10000);
-    } else if (!r || !r.ok || (r.soft && r.removed === 0)) {
-      setDelNotice({ deleteFailed: true }); // a failed/0-row delete is never a silent dead click (NEW-4)
-    }
-    refresh();
-  };
-  const undoDelete = async () => {
-    const u = undoDel;
-    setUndoDel(null);
-    if (undoTimer.current) clearTimeout(undoTimer.current);
-    if (!u) return;
-    const r = await restoreReview(u.id);
-    if (!r.ok) setDelNotice({ restoreFailed: true }); // never silent (NEW-4)
-    refresh();
-  };
-  const restoreRow = async (id) => {
-    const r = await restoreReview(id);
-    if (!r.ok) setDelNotice({ restoreFailed: true });
-    refresh();
-  };
-  // "Delete forever" out of Recently deleted — the only user-facing hard delete (NEW-F3).
-  // B972512-HARDENING new finding 2 — a document with a site-plan overlay still built from it
-  // now REFUSES this delete outright (site_plan_overlays_review_id_fkey, CASCADE -> RESTRICT) —
-  // that's a real failure, not a cleanup side-effect, and it was silently dropped here before
-  // (neither `r.ok` nor `r.error` was ever checked, so the row just sat in Recently-deleted with
-  // no explanation). Checked first, before the orphaned/cleanupFailed side-effect notice.
-  const purgeRow = async (id) => {
-    setPendingPurge(null);
-    const r = await purgeReview(id);
-    if (!r || !r.ok) setDelNotice({ purgeBlocked: friendlySaveError(r && r.error) });
-    else if (r.orphaned || r.cleanupFailed) setDelNotice({ orphaned: r.orphaned || 0, sharedKept: r.sharedKept || 0 });
-    refresh();
-  };
+  // Delete / undo / restore / delete-forever: ONE implementation, shared with the no-project Home (ReviewTrash.jsx, B2086368).
+  const { pendingDel, setPendingDel, pendingPurge, setPendingPurge, delNotice, setDelNotice, undoDel, setUndoDel, del, undoDelete, restoreRow, purgeRow } =
+    useReviewTrash({ titleOf: (id) => (reviews.find((x) => x.id === id) || {}).title, refresh: () => refresh() });
   // Share-by-link: outward-facing, so confirm first, then mint a link. driveKey lives on the
   // review's sources (not the file-fact row), so load the record on demand.
   const startShare = (id) => setShare((s) => ({ ...s, [id]: { status: "confirm" } }));
@@ -875,58 +821,12 @@ export default function FileBrowser({
         )}
 
         {/* delete/restore/purge hiccups — surface them (never a silent cleanup failure, NEW-4) */}
-        {delNotice && (
-          <div style={{ flex: "none", margin: "8px 12px 0", padding: "7px 10px", borderRadius: 7, display: "flex", alignItems: "center", gap: 8,
-            border: "1px solid var(--warn-border)", background: "var(--warn-bg)", color: "var(--warn-text)", fontSize: 11.5, lineHeight: 1.45 }}>
-            <span style={{ flex: 1 }}>
-              {delNotice.restoreFailed ? "Couldn’t restore that file — check your connection and try again from Recently deleted."
-                : delNotice.deleteFailed ? "Couldn’t delete that file — it may already be deleted, or the cloud is unreachable. Refresh and try again."
-                : delNotice.purgeBlocked ? delNotice.purgeBlocked
-                : delNotice.purgeFailed ? "Couldn’t fully clear expired items from Recently deleted — anything left will be retried next time this list loads."
-                : <>Deleted — but {delNotice.orphaned ? `${delNotice.orphaned} ` : ""}file{delNotice.orphaned === 1 ? "" : "s"} couldn’t be removed from storage, so a copy may linger. You can remove it directly in Google Drive.{delNotice.sharedKept ? ` ${delNotice.sharedKept} stored file${delNotice.sharedKept === 1 ? " was" : "s were"} kept because another drawing still uses ${delNotice.sharedKept === 1 ? "it" : "them"}.` : ""}</>}
-            </span>
-            <button onClick={() => setDelNotice(null)} title="Dismiss" style={{ flex: "none", border: "none", background: "transparent", color: "var(--warn-text)", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 2 }}>✕</button>
-          </div>
-        )}
+        <TrashNotice notice={delNotice} onDismiss={() => setDelNotice(null)} />
 
         {/* file list */}
         <div style={{ flex: 1, overflowY: "auto", padding: "8px 12px 4px" }}>
           {showDeleted ? (
-            /* Recently deleted (NEW-F3): restore or permanently delete. Rows here are soft-
-               deleted doc_reviews — everything (markups, bytes, index) is still intact. */
-            <>
-              <div style={{ fontSize: 11.5, color: "var(--text-secondary)", padding: "4px 4px 10px", lineHeight: 1.5 }}>
-                Deleted files wait here about 30 days, then clear out on their own. Restore brings
-                everything back — the drawing and your markups.
-              </div>
-              {deadShown.length === 0 && <div style={{ fontSize: 12.5, color: "var(--text-secondary)", padding: 12 }}>Nothing in Recently deleted.</div>}
-              {deadShown.map((d) => (
-                <div key={d.id} style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", marginBottom: 6, background: "var(--surface-raised)", display: "flex", alignItems: "center", gap: 9 }}>
-                  <FileTypeIcon kind={d.kind} />
-                  <span style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ display: "block", fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {d.title || d.item || d.sfile || "Untitled"}
-                    </span>
-                    <span style={{ display: "block", fontSize: 10.5, color: "var(--text-tertiary)", marginTop: 2 }}>
-                      Deleted {(() => { try { return new Date(d.deleted_at).toLocaleDateString(undefined, { month: "short", day: "numeric" }); } catch (_) { return ""; } })()}
-                      {d.project ? ` · ${d.project}` : ""}
-                    </span>
-                  </span>
-                  <button onClick={() => restoreRow(d.id)} title="Put this file back in the Library"
-                    style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-primary)", padding: "3px 10px" }}>Restore</button>
-                  {pendingPurge === d.id ? (
-                    <span style={{ flex: "none", display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, color: "var(--danger-text)", fontWeight: 700 }}>
-                      Delete forever — markups too?
-                      <button onClick={() => purgeRow(d.id)} title="Permanently delete this file and its markups" style={{ border: "none", background: "transparent", color: "var(--danger-text)", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 2 }}>✓</button>
-                      <button onClick={() => setPendingPurge(null)} title="Cancel" style={{ border: "none", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13, padding: 2 }}>✕</button>
-                    </span>
-                  ) : (
-                    <button onClick={() => setPendingPurge(d.id)} title="Permanently delete (cannot be undone)"
-                      style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--border-default)", background: "transparent", color: "var(--danger-text)", padding: "3px 8px" }}>Delete forever</button>
-                  )}
-                </div>
-              ))}
-            </>
+            <RecentlyDeletedList rows={deadShown} pendingPurge={pendingPurge} setPendingPurge={setPendingPurge} onRestore={restoreRow} onPurge={purgeRow} />
           ) : (
           <>
           {busy && shown.length === 0 && <div style={{ fontSize: 12, color: "var(--text-secondary)", padding: 12 }}>Loading…</div>}
@@ -1004,18 +904,7 @@ export default function FileBrowser({
                     style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Versions</button>}
                   <button onClick={() => (share[f.id] ? closeShare(f.id) : startShare(f.id))} title="Get a shareable link"
                     style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--border-default)", background: share[f.id] ? "var(--hover-menu)" : "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Share</button>
-                  {pendingDel === f.id ? (
-                    /* Wording, not a bare glyph pair (NEW-F3): say where the file goes. The
-                       delete is soft (Recently deleted, ~30-day restore), so the stakes match
-                       the light inline affordance. */
-                    <span style={{ flex: "none", display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 700, whiteSpace: "nowrap" }}>
-                      Move to Recently deleted?
-                      <button onClick={() => del(f.id)} title="Yes — move it (restorable ~30 days)" style={{ border: "none", background: "transparent", color: "var(--danger-text)", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 2 }}>✓</button>
-                      <button onClick={() => setPendingDel(null)} title="Cancel" style={{ border: "none", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13, padding: 2 }}>✕</button>
-                    </span>
-                  ) : (
-                    <button onClick={() => setPendingDel(f.id)} title="Delete (moves to Recently deleted)" style={{ flex: "none", border: "none", background: "transparent", color: "var(--danger-text)", cursor: "pointer", fontSize: 14, padding: 3 }}>×</button>
-                  )}
+                  <DeleteButton id={f.id} armed={pendingDel === f.id} label={f.title || f.item || f.sfile || "file"} onArm={setPendingDel} onCancel={() => setPendingDel(null)} onConfirm={del} />
                 </div>
                 {/* re-file (re-assign category/subcategory) — inline, never auto-guesses */}
                 {(needs || refileSel[f.id]) && (
@@ -1046,19 +935,7 @@ export default function FileBrowser({
           type="file" multiple style={{ display: "none" }} onChange={onPickFolder} />
       </div>
 
-      {/* undo toast (NEW-F3): ~10s window to un-delete without hunting for Recently deleted */}
-      {undoDel && (
-        <div style={{ position: "absolute", bottom: 14, right: 14, zIndex: 6, display: "flex", alignItems: "center", gap: 10,
-          padding: "9px 14px", borderRadius: 9, background: "var(--surface-raised)", border: "1px solid var(--border-default)",
-          boxShadow: "0 4px 16px rgba(0,0,0,0.18)", fontSize: 12, color: "var(--text-primary)" }}>
-          <span style={{ maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            Moved “{undoDel.title}” to Recently deleted.
-          </span>
-          <button onClick={undoDelete} title="Put it right back"
-            style={{ flex: "none", fontSize: 11.5, fontFamily: "inherit", fontWeight: 800, cursor: "pointer", borderRadius: 7, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-primary)", padding: "3px 12px" }}>Undo</button>
-          <button onClick={() => setUndoDel(null)} title="Dismiss" style={{ flex: "none", border: "none", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 2 }}>✕</button>
-        </div>
-      )}
+      <UndoToast undo={undoDel} onUndo={undoDelete} onDismiss={() => setUndoDel(null)} />
 
       {/* drop-anywhere overlay hint — the pill names the REAL target: the hovered folder row
           (rail drop), else the selected folder, else the auto-file path. */}
