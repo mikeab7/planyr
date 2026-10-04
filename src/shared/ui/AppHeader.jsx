@@ -52,6 +52,7 @@
  * no allow="fullscreen", iOS Safari, which has no fullscreen for a non-video element) says so in
  * a short notice instead.
  */
+import { fullscreenApiAvailable, useFullscreenAvailable } from "./fullscreenSupport.js";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { RADIUS } from "./radius.js";
 import { Tab, IconButton } from "./controls.jsx";
@@ -478,11 +479,7 @@ export function fsElement() {
   if (typeof document === "undefined") return null;
   return document.fullscreenElement || document.webkitFullscreenElement || null;
 }
-export function fsSupported() {
-  if (typeof document === "undefined") return false;
-  const el = document.documentElement;
-  return !!(el && (el.requestFullscreen || el.webkitRequestFullscreen));
-}
+export function fsSupported() { return fullscreenApiAvailable(); }
 /* Ask for fullscreen on the document ROOT. Resolves when the browser granted it; REJECTS when it
  * refused (no user activation, a permissions policy, an iframe without allow="fullscreen") or
  * when the API is absent — the caller falls back to hiding the header alone. */
@@ -907,6 +904,7 @@ export default function AppHeader({
     // owner for the state, so entering can't race the event that reports it.
   };
   const toggleRef = useRef(toggleFullscreen); toggleRef.current = toggleFullscreen;
+  const fsAvailable = useFullscreenAvailable();
 
   /* NEW-1 — the header follows the DOCUMENT, never a guess. Whatever ends fullscreen — Esc, the
      browser's own exit affordance, another script — arrives here, so the chrome comes back with
@@ -1239,7 +1237,10 @@ export default function AppHeader({
           {saveSlot}
           {/* NEW-3/B291538 — fullscreen's visible control. It has to exist here because the
               bare `f` shortcut now stands down wherever a writeable document is on screen. */}
-          <FullscreenButton active={fullscreen} onToggle={() => toggleRef.current()} />
+          {/* Only where full screen can actually happen (fullscreenSupport.js) — and always while
+              active, so the way OUT never disappears (Chromium reports display-mode: fullscreen
+              once inside). Nothing renders otherwise, so the row closes up with no gap. */}
+          {(fullscreen || fsAvailable) && <FullscreenButton active={fullscreen} onToggle={() => toggleRef.current()} />}
           {/* Theme gear — signed-out only; signed-in users switch theme in account → Settings (B389) */}
           {!accountActive && <SettingsMenu />}
           {/* ⛔ B972096 (NEW-1) — THE B950320 DIVIDER IS GONE, and its own reasoning is why. That
