@@ -294,7 +294,7 @@ export const NoteAnchor = Node.create({
        *  ⛔ THE CARET ONLY FOLLOWS INTO A BOX SOMEBODY IS GOING TO TYPE IN. Dropping a picture is
        *  not the start of a sentence, and an atom has no text position to land in anyway — asking
        *  for one puts the selection somewhere arbitrary. */
-      addNoteAnchorAt: ({ x, y, w = ANCHOR_WIDTH, h = null, content = null }) => ({ chain, state }) => {
+      addNoteAnchorAt: ({ x, y, w = ANCHOR_WIDTH, h = null, content = null, aid = null }) => ({ chain, state }) => {
         const { doc } = state;
         const tail = doc.lastChild;
         const at = tail && tail.isTextblock ? doc.content.size - tail.nodeSize : doc.content.size;
@@ -307,6 +307,10 @@ export const NoteAnchor = Node.create({
             y: Math.round(num(y)),
             w: Math.round(num(w, ANCHOR_WIDTH)),
             h: Number.isFinite(num(h, NaN)) ? Math.round(num(h)) : null,
+            /* NEW-3: a caller that has to NAME the new box in the same tick (the placement commit
+             * marks it selected + editing so the first tap back into it is not a stage-1 tap) passes
+             * its identity in; everyone else still gets one from `ensureNoteAnchorIds`. */
+            ...(aid ? { aid: String(aid) } : {}),
           },
           content: body,
         });

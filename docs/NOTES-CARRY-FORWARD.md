@@ -1504,6 +1504,13 @@ INTO IT"*, is separately **flaky on base and head alike** (the harness's own typ
 characters — `FIRSTSECOND` came back as `FRSTSECOND`/`FSTSECOND`); it appears and disappears across
 consecutive runs of the SAME build, so diff identities, never counts. Carried by **B1597762**.
 
+### Touch on a box (B2061329 / NEW-3, 2026-10-04)
+
+- **On touch there is NO stage 1.** `focusFromMat` leaves the press to the browser (caret lands at the tap, inside the box) and marks the box selected + editing; `commitPendingPlace` marks a freshly placed box the same way (`addNoteAnchorAt({aid})` names it in the same tick). Desktop keeps stage 1 + blur (B1555152). Backspace on an EMPTY box removes it on touch only (`selectionKeyDown`).
+- **TRAP: WebKit's native touch caret lands ~2 characters right of the finger** (measured with and without the change). Assert "moved to the tap" (a few characters' tolerance, far from the end), never a glyph-exact position.
+- **TRAP: an empty box cannot be seeded** — the provisional-block prune removes it on load; make one by double-tapping, typing a letter and Backspacing it.
+- `ui-audit/verify-notes-touch-box-tap.mjs` is the harness. On untouched main, `verify-notes-box-selection` (81/131), `-pan`, `-context-menu` (23/27), `-menu-layout` (32/36), `-doubleclick` (12/13) and `-box-drag` already fail — diff failure IDENTITIES against a `git worktree` build of `origin/main`, never "stay green". Harnesses that launch default Chromium need `PW_CHROME=/opt/pw-browsers/chromium-1194/chrome-linux/chrome`.
+
 ## Touch placement on WebKit (B1960480, 2026-09-29)
 
 - On a touch press the blank-paper handlers run on the COMPAT mouse events, which no longer say who made them — `lastPointerTypeRef` (window `pointerdown` capture) carries the pointer type. Touch arms focus the editor synchronously (iOS raises the keyboard only for a focus inside the tap).
