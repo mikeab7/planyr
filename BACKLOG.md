@@ -5695,39 +5695,30 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 `[x]` Guard: `test/prefsSingleSource.test.js` (12 tests; **all 12 red on origin/main**, green after: stale whole-bag save reverts a key while `updatePrefs` does not; fresh cloud read; two mounted readers see a writer's change and after reload; storage-event delivery; loud failure; Harris-ratio vs Fort-Bend-verified two-tab scenario; easement label kept; live folder label; source guard that no view keeps its own prefs copy).
 - Owner product constraints check: nothing built here contradicts a listed constraint.
 - Verify: live — **V1390096** (two real tabs + signed-in account row; `Blocker: auth` for the cloud leg only).
-### B1962672 — Crop dialog: "Reset to full page" in Polygon mode left a dead Done button `[Site Planner / overlays]` (bug) #site-planner #ui  *(Owner walk of the crop tool on planyr.io, 2026-09-29, NEW-1. Minted from reserved block B1962672–B1962687 / V1398976. DEDUPE-FIRST: no prior item covers it; B1838704/B1783328 are the tool itself, untouched.)*
+### B2066224 — Crop: Done in one mode could silently drop the shape you drew in the other `[Site Planner / overlays]` (bug) #site-planner #ui #persistence  *(Owner walk leftover NEW-1, 2026-10-04. Minted from reserved block B2066224–B2066239 / V1489552. DEDUPE-FIRST: B1783328/B1838704 are the tool, B1962672–77 the first walk; none covers Done's carry rule.)*
 
-`[x]` **Fixed, with the choice stated.** Polygon-mode Reset used to EMPTY the trace, and Done is (correctly) disabled with no polygon, silently. Now Reset never empties anything: it puts the overlay back to the whole page (both shapes; Polygon shows the closed full-page quad), so **Done stays live and saves "no crop"**. Chosen over "leave Done disabled and explain" because Reset means "show me the whole sheet" and the only sensible commit of that is exactly what Done then does; the deliberate start-over action is the separate **Clear polygon**, and *that* state now says in plain words why Done is off ("Place at least 3 points, then close the polygon to save" / "Close the polygon (click the first point or press Enter) to save") next to the button and as its tooltip. `ImageCropTool.jsx` `resetAll` / `clearPoly` / `doneWhy`.
-- Verify: live — **V1398976** (sandbox walk PASSED; signed-in Chrome pass pending).
-- Files: `src/shared/sitePlans/components/ImageCropTool.jsx`, `ui-audit/verify-crop-tool-walkthrough.mjs`.
+`[x]` **AUDIT-FIRST, the settled repro.** Reading `commit()`: the other shape was carried only if the overlay had ALSO been saved with it before the tool opened (`initialRectRef`/`initialPtsRef`). So a saved rectangle survived a polygon Done, and a saved polygon survived a rectangle Done — but a shape drawn EARLIER IN THE SAME SESSION was silently discarded (trim a rectangle on an unsaved overlay, switch to Polygon, trace, Done → rectangle gone; and the mirror). An open half-traced polygon was also carried as if finished. **Chosen: keep both, save the active one as the active shape** (the other rides beside it exactly as the saved case always did), via one `otherShapes()`: a rectangle that is not the full page, or a CLOSED polygon that was saved before opening or has been edited away from its stand-in seed. Reset's full-page stand-in and an untouched seed are never carried (Reset still clears both). Done says so in one line when it applies ("Your rectangle is kept too"). Considered and not chosen: warning before replacing — nothing is replaced, so there is nothing to warn about.
+- Verify: live — **V1489552** (sandbox walk PASSED: `ui-audit/verify-crop-leftovers.mjs`, red on the old tool, green on the new).
+- Files: `src/shared/sitePlans/components/ImageCropTool.jsx`, `ui-audit/verify-crop-leftovers.mjs`, `test/cropLeftovers.test.js`.
 
-### B1962673 — "Reset to full page" only reset the shape you were standing on `[Site Planner / overlays]` (bug) #site-planner #ui  *(NEW-2 of the same walk.)*
+### B2066225 — Crop: Enter did not close the polygon unless focus was on the canvas `[Site Planner / overlays]` (bug) #site-planner #ui  *(Owner walk leftover NEW-2, 2026-10-04.)*
 
-`[x]` **Chose "reset the overlay", per the owner's mental model.** One Reset, always shown, enabled whenever ANY crop (rectangle or polygon) is saved or drawn; from either mode it sets both shapes to the full page, so Rectangle → Reset → Done saves `crop: null` and switching back to Polygon shows the full-page quad, not the old polygon. `commit` also never carries a "full page" stand-in as a dormant shape. The tooltip says "Removes the whole crop — rectangle and polygon". The two harnesses that had encoded the old behaviour (`verify-site-tab-overlay-crop.mjs` step 8, which expected Rectangle+Done to clear a polygon and so had been silently red) were corrected to the new contract.
-- Verify: live — **V1398976**.
+`[x]` The key handler returned early for any focused BUTTON (so Enter belongs to that button). While a polygon is drafting that exception is lifted: Enter closes it and the preventDefault stops the focused button re-firing. Walk: place 3 points, press + (focus now on the button), Enter → closed, zoom unchanged. Red on the old tool.
+- Verify: live — **V1489552**.
+- Files: `ImageCropTool.jsx`.
 
-### B1962674 — Crop dialog had no discoverable way to pan or zoom in between `[Site Planner / overlays]` (bug) #site-planner #ui  *(NEW-3.)*
+### B2066226 — Crop: "Reset to full page" slid sideways when switching modes `[Site Planner / overlays]` (bug) #site-planner #ui  *(Owner walk leftover NEW-3, 2026-10-04.)*
 
-`[x]` Added, all on screen: a **✋ Pan tool** toggle (left-drag moves the picture; a pan no longer drops a polygon point where the mouse comes up — a click-after-drag bug found by the walk, fixed with a guard that also covers Space+drag), **arrow keys** (Shift = ×4) to pan, **− / slider / +** zoom (log slider, about the middle of the view; `+`/`-` keys too) between Fit and 100%. Scroll-wheel zoom, Space+drag and middle-drag unchanged. Footer hint rewritten (replaces the old one-line hint; no net growth). Keyboard focus is now kept inside the tool when a button disables itself (Undo/Redo at the end of history dropped focus to `<body>` and killed Ctrl+Z / arrows). Scrollbars deliberately NOT built (the brief allowed "or").
-- Verify: live — **V1398976**.
-- Files: `ImageCropTool.jsx`, `src/workspaces/site-planner/lib/cropHistory.js` (pure slider mapping), `test/cropHistory.test.js`.
+`[x]` Reset now keeps the leftmost footer slot in both modes; Clear polygon (Polygon only) joins on its right. Measured the same x in both modes (was 44 vs 125). Red on the old tool.
+- Verify: live — **V1489552**.
+- Files: `ImageCropTool.jsx`.
 
-### B1962675 — Crop dialog undo had no redo and no button `[Site Planner / overlays]` (bug) #site-planner #ui  *(NEW-4.)*
+### B2066227 — Crop: Edit crop sat below the fold on a short window `[Site Planner / overlays]` (bug) #site-planner #ui  *(Owner walk leftover NEW-4, 2026-10-04.)*
 
-`[x]` One undo/redo history for BOTH shapes (`lib/cropHistory.js`, pure, unit-tested): **↶ Undo / ↷ Redo buttons** in the toolbar (disabled when empty), **Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y** (Cmd on a Mac), working in Rectangle mode too (it was Polygon-only). A snapshot is tagged with its mode so undo also returns you to the mode the change was made in. A rectangle drag / vertex drag pushes its undo frame on first real movement, not on the press, so a plain click leaves no do-nothing step now that Undo is a visible button.
-- Verify: live — **V1398976**.
-
-### B1962676 — Crop dialog fit a landscape sheet into a short band with dead space `[Site Planner / overlays]` (bug) #site-planner #ui  *(NEW-5.)*
-
-`[x]` The dialog is now 96% × 94% of the window and `ImageCropTool` gained a **`fill`** mode: the viewport takes whatever is left under the title (measured with a ResizeObserver, no more `innerHeight - 220` guess) and Fit re-runs on resize until the user zooms/pans by hand. Fit also no longer caps at native size (a small image is enlarged to the room available; `FIT_MAX` 8). Measured on a 3000×1800 sheet at a 1440×900 window: the sheet fills the full window height and ~89% of its width (the rest is the sheet's own aspect ratio), dialog 96%×94%.
-- Verify: live — **V1398976**.
-- Files: `src/workspaces/site-planner/components/OverlayCropDialog.jsx` (still lazy), `ImageCropTool.jsx`.
-
-### B1962677 — Crop: thin left/right rectangle grips, and the expanded OVERLAYS row collapsed on reload `[Site Planner / overlays]` (bug) #site-planner #ui  *(NEW-6, two small ones.)*
-
-`[x]` **(a)** The four mid-edge grips now share ONE footprint (long side × the corner grips' own thickness, visible like the corners); test asserts left/right are the top/bottom grips turned 90° and none is thinner than a corner. **(b)** The expanded overlay row is remembered per plan in `sessionStorage` (`planyr:selOverlay:<siteId>`, wrapped in try/catch — a per-viewer convenience only), so a reload leaves Crop… one click away. An unknown/stale id simply opens nothing.
-- Verify: live — **V1398976**.
-- Files: `ImageCropTool.jsx`, `src/workspaces/site-planner/SitePlanner.jsx`.
+`[x]` The collapsed overlay row now carries its own Crop… / Edit crop… button on the always-visible hide/lock/remove row (same handler as the expanded body, which keeps Reset crop and the trim fields). Measured at 1600×465: fully inside the window with the row collapsed, and it opens the tool.
+- Verify: live — **V1489552**.
+- Files: `src/workspaces/site-planner/SitePlanner.jsx`.
+- Owner product constraints check: nothing here contradicts `## Owner product constraints` (entries 11/12 untouched: no storage change, keep-inside only). PANEL-BREVITY n/a (not yield/pond copy). Pre-existing, not from this change: `perf-bundle-audit` totals read over ceiling on a clean tree locally too (+0.8 KB total / +0.3 KB largest from this change); `test/docText.test.js` fails on a clean tree.
 
 ### B1960480 — iPhone: double-tap on blank paper never raised the keyboard; first text landed in the wrong place (×2: still not exactly where tapped) `[Notes]` (bug) #notes #mobile  *(Claude Code dispatch block "NEW-1," 2026-09-29, adversarial iPhone review)*
 

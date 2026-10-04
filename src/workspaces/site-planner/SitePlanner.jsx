@@ -21131,6 +21131,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <button style={{ ...iconBtn, color: hideOn ? PAL.ink : PAL.muted }} title={hideOn ? "Hide" : "Show"} onClick={toggleHide}>{hideOn ? <EyeIcon /> : <EyeOffIcon />}</button>
                         <button style={iconBtn} title={o.locked ? "Unlock" : "Lock"} onClick={() => patchOverlay(o.id, { locked: !o.locked })}>{o.locked ? <LockIcon /> : <UnlockIcon />}</button>
                         <button style={{ ...iconBtn, color: PAL.accent }} title="Remove" onClick={removeRow}><XIcon /></button>
+                        {/* B2066227 — the crop entry point rides the always-visible row. On a short window the
+                            expanded body's own Crop… sat below the fold of the scrolling panel. Same handler. */}
+                        {!isAerialRow && (() => {
+                          const why = cropEditBlock(o);
+                          return (
+                            <button style={{ ...chip, marginLeft: "auto", opacity: why ? 0.55 : 1 }} data-testid={`overlay-crop-open-row-${o.id}`} disabled={!!why}
+                              title={why || "Trim the logo band, title block and margins with a rectangle or a polygon — reversible, the full sheet is kept"}
+                              onClick={() => { setSelOverlay(o.id); setOvCropId(o.id); }}>{hasCrop(o) ? "Edit crop…" : "Crop…"}</button>
+                          );
+                        })()}
                       </div>
                       {on && (
                         <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>
