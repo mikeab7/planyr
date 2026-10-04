@@ -32,6 +32,14 @@
  * NULL — the caller falls back to what the user searched, never to the owner's address.
  */
 
+/* B2024626 — A JOINED CAD LAYER PUBLISHES TABLE-PREFIXED FIELD NAMES (Chambers:
+ * `ChambersCADWeb.DBO.Accounts.Owner_Name`). Every resolver below matches an anchored, bare column
+ * name, so a prefixed key never matched: Owner, name and legal came back blank for every Chambers lot
+ * without a situs, and the "Account / ID" row matched the prefix word `Accounts` in
+ * `…Accounts.OBJECTID` and showed the row id. Resolvers therefore match the LEAF — the text after the
+ * last "." — while still reading the value off the full key. An un-prefixed key is its own leaf. */
+export const leafKey = (key) => String(key).replace(/^.*\./, "");
+
 /** Keys that are an OWNER / BILLING address by name. Excluded at every rung of the ladder. */
 export const MAILING_KEY_RE =
   /(mail|owner_?addr|own_?addr|care_?of|^c_?o$|^c_?o_|billing|bill_?to|remit|correspond|agent_?addr|tax_?addr|^m_(addr|street|city|zip|state))/i;
@@ -117,11 +125,12 @@ export function situsKey(attrs, { skip = null } = {}) {
     for (const wantComposed of passes) {
       for (const key of keys) {
         if (skip && skip.has(key)) continue;
-        if (isMailingKey(key, rung)) continue;
-        if (NON_SITUS_KEY_RE.test(key)) continue;
-        if (!re.test(key)) continue;
-        if (wantComposed === true && !COMPOSED_ADDR_RE.test(key)) continue;
-        if (wantComposed === false && COMPOSED_ADDR_RE.test(key)) continue; // already tried above
+        const lk = leafKey(key);
+        if (isMailingKey(lk, rung)) continue;
+        if (NON_SITUS_KEY_RE.test(lk)) continue;
+        if (!re.test(lk)) continue;
+        if (wantComposed === true && !COMPOSED_ADDR_RE.test(lk)) continue;
+        if (wantComposed === false && COMPOSED_ADDR_RE.test(lk)) continue; // already tried above
         const v = attrs[key];
         if (isPlaceholderValue(v) || looksLikeJsonBlob(v)) continue;
         // NEW-1 (Louisiana) — on the generic catch-all rung ONLY, a value that is a bare house NUMBER
@@ -257,9 +266,14 @@ export function ownerKey(attrs, { skip = null } = {}) {
   let best = null, bestSeq = Infinity;
   for (const key of Object.keys(attrs)) {
     if (skip && skip.has(key)) continue;
-    if (!OWNER_KEY_RE.test(key)) continue;
+    const lk = leafKey(key);
+    if (!OWNER_KEY_RE.test(lk)) continue;
     if (isPlaceholderValue(attrs[key])) continue;
-    const seq = ownerSeq(key);
+    // A TABLE-PREFIXED `name` is a joined layer's own label (TaxParcels.Name = the lot number), never an owner.
+    if (lk !== key && /^name$/i.test(lk)) continue;
+    // A bare `name` column is the weakest owner signal (a joined layer's TaxParcels.Name is the LOT
+    // NUMBER), so any real owner column outranks it whatever order the service lists them in.
+    const seq = ownerSeq(lk) + (/^name$/i.test(lk) ? 1000 : 0);
     if (seq < bestSeq) { best = key; bestSeq = seq; }
   }
   if (best) return best;
@@ -269,7 +283,7 @@ export function ownerKey(attrs, { skip = null } = {}) {
   // column resolves exactly as before, so no existing source can change its answer.
   for (const key of Object.keys(attrs)) {
     if (skip && skip.has(key)) continue;
-    if (!OWNER_FALLBACK_RE.test(key)) continue;
+    if (!OWNER_FALLBACK_RE.test(leafKey(key))) continue;
     if (isPlaceholderValue(attrs[key])) continue;
     return key;
   }
@@ -314,8 +328,9 @@ export function acreageKey(attrs, { skip = null } = {}) {
   for (const key of Object.keys(attrs)) {
     if (skip && skip.has(key)) continue;
     if (isPlaceholderValue(attrs[key])) continue;
-    if (GIS_ACRE_RE.test(key) && looksLikeAcreageNumber(attrs[key])) return key;
-    if (legal == null && LEGAL_ACRE_RE.test(key)) legal = key;
+    const lk = leafKey(key);
+    if (GIS_ACRE_RE.test(lk) && looksLikeAcreageNumber(attrs[key])) return key;
+    if (legal == null && LEGAL_ACRE_RE.test(lk)) legal = key;
   }
   return legal;
 }
@@ -337,7 +352,11 @@ export const APPR_FIELDS = [
   // key in `apprRows`' used-key bookkeeping; the VALUE always comes from `situsAddress`.
   [SITUS_FIELD, "Situs address"],
   // ...|parcel_?id matches CCAD's Parcel_Id; |account matches CCAD's Account.
-  [/(hcad_?num|^acct|account|parcel_?id|prop_?id|geo_?id|quick_?ref|^pid)/i, "Account / ID"],
+  // ...|parcel_?apn matches California's statewide PARCEL_APN (the assessor parcel number IS the account id there).
+  [/(hcad_?num|^acct|account|parcel_?id|parcel_?apn|prop_?id|geo_?id|quick_?ref|^pid)/i, "Account / ID"],
+  // Statewide layers such as California's name the county in a column (COUNTYNAME); shown in the panel's
+  // collapsed tail. Exact-name match so no other source's county CODE column is swept in.
+  [/^county_?name$/i, "County"],
   // ...|land_?size_?ac matches FBCAD's LANDSIZEAC (acres) — NOT LANDSIZEFT (square feet);
   // ^acre matches CCAD's Acres.
   [/(gis_?acre|calc_?acre|legal_?acre|^acre|acreage|deed_?acre|legal_?area|gis_?area|land_?size_?ac)/i, "Acreage"],
@@ -382,7 +401,7 @@ export const apprRows = (attrs) => {
         // (see `acreageKey`'s own header), regardless of the service's key order.
         : label === "Acreage"
           ? acreageKey(attrs, { skip: used })
-          : Object.keys(attrs).find((key) => !used.has(key) && re.test(key) && !isPlaceholderValue(attrs[key]));
+          : Object.keys(attrs).find((key) => !used.has(key) && re.test(leafKey(key)) && !isPlaceholderValue(attrs[key]));
     if (k) { used.add(k); rows.push({ label, value: label === "Situs address" ? String(attrs[k]).replace(/\s+/g, " ").trim() : attrs[k] }); }
   }
   return rows;
@@ -485,4 +504,15 @@ export const apprAll = (attrs) => Object.entries(attrs || {})
 export const apprVal = (label, v) => (/value/i.test(label) && v !== "" && !isNaN(+v)) ? `$${(+v).toLocaleString()}` : String(v);
 
 // First attribute whose key matches `re` and has a non-empty, non-placeholder value, as a string.
-export const findAttr = (attrs, re) => { const k = Object.keys(attrs || {}).find((key) => re.test(key) && !isPlaceholderValue(attrs[key])); return k ? String(attrs[k]) : null; };
+export const findAttr = (attrs, re) => { const k = Object.keys(attrs || {}).find((key) => re.test(leafKey(key)) && !isPlaceholderValue(attrs[key])); return k ? String(attrs[k]) : null; };
+
+/* B2024626 — what a lot is CALLED when the record carries no situs: the owner, else the first
+ * line of the legal description, else null (the caller then numbers it "Parcel N"). Capped so a
+ * metes-and-bounds blob can never become a label. Pure. */
+export function parcelFallbackName(attrs) {
+  const owner = ownerName(attrs);
+  if (owner) return owner;
+  const legal = apprRows(attrs).find((r) => r.label === "Legal");
+  const v = legal ? String(legal.value).replace(/\s+/g, " ").trim() : "";
+  return v ? (v.length > 40 ? `${v.slice(0, 39).trimEnd()}…` : v) : null;
+}

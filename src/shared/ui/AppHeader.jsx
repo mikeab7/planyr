@@ -52,6 +52,7 @@
  * no allow="fullscreen", iOS Safari, which has no fullscreen for a non-video element) says so in
  * a short notice instead.
  */
+import { fullscreenApiAvailable, useFullscreenAvailable } from "./fullscreenSupport.js";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { RADIUS } from "./radius.js";
 import { Tab, IconButton } from "./controls.jsx";
@@ -69,6 +70,7 @@ import { useTheme } from "../theme/ThemeProvider.jsx";
 import InterfaceSettings from "./InterfaceSettings.jsx";
 import { centerSlotPlan, centerSlotMaxWidth, CENTER_SLOT_GAP } from "./headerCenterFit.js";
 import FloatingNotice from "./FloatingNotice.jsx";
+import { observeStripEdges, pageStrip } from "./scrollStrip.js";
 
 // Chrome colors are theme tokens (var(--chrome-*)) so the header themes WITH the app
 // (B318): light theme = light chrome, dark theme = dark chrome.
@@ -222,12 +224,9 @@ function ScrollChevron({ side, onClick }) {
     </IconButton>
   );
 }
-// A "page" is most of a screenful (0.72) rather than the whole row, so the trailing edge of what
-// was already visible stays on screen as a continuity anchor for the next page.
-function pageScrollRow(ref, dir) {
-  const el = ref.current;
-  if (el) el.scrollBy({ left: dir * el.clientWidth * 0.72, behavior: "smooth" });
-}
+// NAV-ARROWS — a "page" is an ABSOLUTE, clamped target (a screenful minus a tab), never a relative
+// nudge from wherever the strip is mid-animation; see `scrollStrip.js`.
+function pageScrollRow(ref, dir) { pageStrip(ref.current, dir); }
 
 function SettingsMenu() {
   const [open, setOpen] = useState(false);
@@ -369,19 +368,10 @@ function useScrollEdges(ref, active, watchRefs) {
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el || !active) { setEdges({ left: false, right: false }); return undefined; }
-    const update = () => {
-      const over = el.scrollWidth - el.clientWidth;
-      setEdges({ left: el.scrollLeft > 1, right: el.scrollLeft < over - 1 });
-    };
-    update();
-    el.addEventListener("scroll", update, { passive: true });
-    let ro;
-    if (typeof ResizeObserver === "function") {
-      ro = new ResizeObserver(update);
-      ro.observe(el);
-      (watchRefs || []).forEach((r) => { if (r && r.current) ro.observe(r.current); });
-    }
-    return () => { el.removeEventListener("scroll", update); ro?.disconnect(); };
+    // NAV-ARROWS — the model (edge tolerance, settle re-read, child-set watching) is the shared
+    // `scrollStrip` helper, so every chevron strip answers "is there more this way" identically.
+    return observeStripEdges(el, (next) => setEdges((prev) => (prev.left === next.left && prev.right === next.right ? prev : next)),
+      (watchRefs || []).map((r) => r && r.current));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ref, active, ...(watchRefs || [])]);
   return edges;
@@ -489,11 +479,7 @@ export function fsElement() {
   if (typeof document === "undefined") return null;
   return document.fullscreenElement || document.webkitFullscreenElement || null;
 }
-export function fsSupported() {
-  if (typeof document === "undefined") return false;
-  const el = document.documentElement;
-  return !!(el && (el.requestFullscreen || el.webkitRequestFullscreen));
-}
+export function fsSupported() { return fullscreenApiAvailable(); }
 /* Ask for fullscreen on the document ROOT. Resolves when the browser granted it; REJECTS when it
  * refused (no user activation, a permissions policy, an iframe without allow="fullscreen") or
  * when the API is absent — the caller falls back to hiding the header alone. */
@@ -537,6 +523,8 @@ export default function AppHeader({
   multiEditOk = false,
   authControl,
   toolbarContent,
+  // Optional strip rendered directly ABOVE Row 2 (the toolbar row), inside the header — Review's file tabs (NEW-1).
+  aboveToolbar,
   // Optional Row-2 center group (B387). When provided, Row 2 renders a 3-zone layout
   // (tabs | center | toolbar) with the center group optically centered like Row 1.
   // Generic + additive: callers that omit it (Site, Review) keep the 2-zone layout
@@ -916,6 +904,7 @@ export default function AppHeader({
     // owner for the state, so entering can't race the event that reports it.
   };
   const toggleRef = useRef(toggleFullscreen); toggleRef.current = toggleFullscreen;
+  const fsAvailable = useFullscreenAvailable();
 
   /* NEW-1 — the header follows the DOCUMENT, never a guess. Whatever ends fullscreen — Esc, the
      browser's own exit affordance, another script — arrives here, so the chrome comes back with
@@ -1248,7 +1237,10 @@ export default function AppHeader({
           {saveSlot}
           {/* NEW-3/B291538 — fullscreen's visible control. It has to exist here because the
               bare `f` shortcut now stands down wherever a writeable document is on screen. */}
-          <FullscreenButton active={fullscreen} onToggle={() => toggleRef.current()} />
+          {/* Only where full screen can actually happen (fullscreenSupport.js) — and always while
+              active, so the way OUT never disappears (Chromium reports display-mode: fullscreen
+              once inside). Nothing renders otherwise, so the row closes up with no gap. */}
+          {(fullscreen || fsAvailable) && <FullscreenButton active={fullscreen} onToggle={() => toggleRef.current()} />}
           {/* Theme gear — signed-out only; signed-in users switch theme in account → Settings (B389) */}
           {!accountActive && <SettingsMenu />}
           {/* ⛔ B972096 (NEW-1) — THE B950320 DIVIDER IS GONE, and its own reasoning is why. That
@@ -1273,6 +1265,7 @@ export default function AppHeader({
         {narrow && row1Edges.right && <ScrollChevron side="right" onClick={() => pageScrollRow(rowRef, 1)} />}
       </div>
 
+      {aboveToolbar}
       {/* ── Row 2 — 44px (taller than Row 1: the tools row earns the weight, B357) ──
            With a center slot (B387) Row 2 is a 3-zone layout: tabs | center group | toolbar.
            The row may wrap on a too-narrow viewport (the center/toolbar flow to a second
@@ -1357,7 +1350,7 @@ export default function AppHeader({
         // B1610640 — see Row 1's identical wrapper comment above: the chevrons move to a
         // non-scrolling `position:relative` wrapper around `row2Ref` so they stop scrolling with
         // the row's own content.
-        <div style={{ position: "relative" }}>
+        <div data-header-row2="1" style={{ position: "relative" }}>
         <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ minHeight: HEADER_ROW_H, display: "flex", alignItems: "center", position: "relative", flexWrap: narrow ? "nowrap" : "wrap", justifyContent: "flex-end", rowGap: 2, borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
           {/* Left zone — module tabs. B1012560: content-sized (`"none"` = `0 0 auto`) and
               never shrinks, same as the 2-zone layout's tabs zone below — primary navigation
@@ -1440,7 +1433,7 @@ export default function AppHeader({
         // The module tab strip stretches the same additional 10px — the same disclosed trade-off
         // the 26→30 move already made, just one more step of it.
         // B1610640 — same non-scrolling wrapper as the branch above; see its comment.
-        <div style={{ position: "relative" }}>
+        <div data-header-row2="1" style={{ position: "relative" }}>
         <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ height: HEADER_ROW_H, display: "flex", alignItems: "center", position: "relative", borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
 
           {/* Module tabs — the planner's own workspace navigation. Omitted entirely on a
@@ -1469,11 +1462,16 @@ export default function AppHeader({
               against, anchor left instead so the controls read as this row's own content. */}
           <div
             style={{
-              flex: narrow ? "1 0 auto" : 1, display: "flex", alignItems: "center",
+              // NEW-1 (food controls) — a standalone route (no module tabs, today only /food) has a
+              // purpose-built toolbar that is designed to FIT the row, so on a phone the slot takes
+              // the row's width (`1 1 0`, min-width 0) rather than its content's natural width. The
+              // `1 0 auto` + scroll behaviour below stays for every route with tabs, whose toolbar
+              // (undo/redo/snap/File…) really is wider than a phone and is meant to be swiped.
+              flex: narrow && showModuleTabs ? "1 0 auto" : narrow ? "1 1 0" : 1, display: "flex", alignItems: "center",
               justifyContent: showModuleTabs ? "flex-end" : "flex-start",
               paddingLeft: showModuleTabs ? 0 : 6,
-              paddingRight: showModuleTabs ? 6 : 0,
-              minWidth: narrow ? "auto" : 0, gap: 4,
+              paddingRight: showModuleTabs || narrow ? 6 : 0,
+              minWidth: narrow && showModuleTabs ? "auto" : 0, gap: 4,
               overflow: narrow ? "visible" : "hidden",
             }}
           >

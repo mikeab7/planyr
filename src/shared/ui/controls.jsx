@@ -138,6 +138,47 @@ export function ToggleChip({ active = false, accent = "var(--accent)", onAccent 
   );
 }
 
+/* SegmentedControl — ONE shape for "pick one of N" (NEW-1, food controls, 2026-10-04). Before this
+ * there was no shared primitive: /food built two by hand (Map | List with a square-cornered shell and
+ * a filled-to-the-edge segment; Site Plan | Hybrid with a pill shell, dark-on-orange text) and they
+ * disagreed on shape AND on the active text colour, on the same screen. The shell is `md` — the
+ * family of every Button / field it sits beside (docs/DESIGN.md's sibling clause: converge onto the
+ * neighbours' family rather than put a pill flush against `md` controls) — and each segment is
+ * NESTED in it, concentric by `nestedIn(md, gap)` = `sm`, so a gap of 2 (1px border + 1px padding)
+ * keeps the filled segment visibly inside the shell instead of flush against it. This is also the
+ * shape the Site Plan's own aerial-source segmented control (LayerPanel's `Off | Aerial | USGS`) already
+ * uses — a rounded-rectangle shell, never a capsule.
+ * Height is SIZE.md (30, CONTROL_H.lg) — the app's standalone-control height — so a segmented control
+ * sits level with a Button beside it. `accent`/`onAccent` follow the module like every other
+ * primitive here (/food passes its own pair; the text on a solid module fill is always that module's
+ * `--on-accent-*`, never a bare colour). Options: { key, label, title?, testid? }. */
+// nestedIn(8, 2) — the concentric inner radius for a segment inside the md shell (= RADIUS.sm, 6).
+const SEGMENT_RADIUS = 6;
+export function SegmentedControl({ options, value, onChange, accent = "var(--accent)", onAccent = "var(--on-accent)", style, ...rest }) {
+  return (
+    <div role="group" style={{
+      display: "inline-flex", flex: "none", boxSizing: "border-box", height: SIZE.md.height, padding: 1,
+      border: "1px solid var(--border-default)", borderRadius: CONTROL_RADIUS.control, background: "var(--surface-raised)", boxShadow: REST_SHADOW, ...style,
+    }} {...rest}>
+      {options.map((o) => {
+        const on = o.key === value;
+        return (
+          <button
+            key={o.key} type="button" onClick={() => onChange(o.key)} aria-pressed={on} title={o.title} data-testid={o.testid}
+            style={{
+              border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: FONT.md, fontWeight: on ? 700 : 600,
+              height: "100%", padding: "0 12px", borderRadius: SEGMENT_RADIUS,
+              background: on ? accent : "transparent", color: on ? onAccent : "var(--text-primary)",
+            }}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /* IconButton — the square icon slot (the Site Planner iconBtn, token-only). Ref-forwarding so
  * it can anchor an AnchoredMenu directly, like any other trigger element. */
 export const IconButton = forwardRef(function IconButton({ size = 30, active = false, accent = "var(--accent)", onAccent = "var(--on-accent)", style, className, children, ...rest }, ref) {

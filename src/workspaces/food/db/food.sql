@@ -387,6 +387,82 @@ $$;
 grant execute on function public.food_places_search_by_name(text, integer, double precision, double precision) to anon, authenticated;
 grant execute on function public.food_places_search_by_name_raw(text, integer, double precision, double precision) to anon, authenticated;
 
+-- ⛔ NEW-1 (food search perf, 2026-10-04): distance is computed ONLY for the rows that can make the cut.
+-- The loose 0.3 word-similarity threshold lets thousands of rows through ("tacos": ~6,900 of 82k), and
+-- the old `_raw` body ran an st_distance on every one before `order by sim desc, distance_km` + `limit`.
+-- Same answer, less work: (1) score every candidate by similarity alone, (2) find the similarity of the
+-- p_cap-th best, (3) only rows at-or-above that similarity can appear in the top p_cap, so compute
+-- distance for just those (a chain's identical-name ties are the only big group) and apply the very same
+-- `order by sim desc, distance_km asc nulls last, name asc limit`. Verified row-for-row identical (ordered id
+-- list md5) to `_raw` for tacos/pizza/pho/dao/bbq/sushi/burger; ~230-260 ms -> ~15-90 ms in-database.
+-- `_raw` is deliberately LEFT IN PLACE as the reference implementation (and its SET clause cannot be
+-- re-issued: 42501 for every role here). This one is plpgsql so it can set the 0.3 threshold itself with
+-- set_config(..., is_local => true) -- pg_trgm's threshold is user-settable at runtime, only the
+-- function-level SET clause is privileged -- scoped to the calling transaction (one RPC = one transaction).
+create or replace function public.food_places_search_by_name_fast(
+  p_query text, p_cap integer default 15,
+  p_center_lat double precision default null, p_center_lon double precision default null
+)
+returns table (
+  id text, name text, lat double precision, lon double precision,
+  category text, cuisine text, address text, brand text,
+  source text, source_licence text, metro text, sim real, distance_km double precision
+)
+language plpgsql stable
+set search_path = public, pg_temp
+as $$
+#variable_conflict use_column
+declare
+  v_q text := lower(p_query);
+  v_cap integer := greatest(1, p_cap);
+begin
+  perform set_config('pg_trgm.word_similarity_threshold', '0.3', true);
+  return query
+  with cand as materialized (
+    select f.id, word_similarity(v_q, lower(f.name)) as sim
+    from public.food_places f
+    where v_q <% lower(f.name)
+  ),
+  cut as (select min(t.sim) as s from (select c0.sim from cand c0 order by c0.sim desc limit v_cap) t)
+  select f.id, f.name, f.lat, f.lon, f.category, f.cuisine, f.address, f.brand, f.source, f.source_licence, f.metro,
+    c.sim,
+    case when p_center_lat is null or p_center_lon is null then null
+      else extensions.st_distance(
+        f.geom,
+        extensions.st_setsrid(extensions.st_makepoint(p_center_lon, p_center_lat), 4326)::extensions.geography
+      ) / 1000.0
+    end as distance_km
+  from cand c
+  join public.food_places f on f.id = c.id
+  cross join cut
+  where c.sim >= cut.s
+  order by c.sim desc, distance_km asc nulls last, f.name asc
+  limit v_cap;
+end;
+$$;
+
+-- The public wrapper now reads the fast body (same columns, same address exclusion, same grants).
+create or replace function public.food_places_search_by_name(
+  p_query text, p_cap integer default 15,
+  p_center_lat double precision default null, p_center_lon double precision default null
+)
+returns table (
+  id text, name text, lat double precision, lon double precision,
+  category text, cuisine text, address text, brand text,
+  source text, source_licence text, metro text, confidence double precision,
+  sim real, distance_km double precision
+)
+language sql stable
+as $$
+  select s.id, s.name, s.lat, s.lon, s.category, s.cuisine, s.address, s.brand,
+    s.source, s.source_licence, s.metro, fp.confidence, s.sim, s.distance_km
+  from public.food_places_search_by_name_fast(p_query, p_cap, p_center_lat, p_center_lon) s
+  join public.food_places fp on fp.id = s.id
+  where fp.address !~ '\d{5}(-\d{4})?\s+and\s+\d+\s+\S';
+$$;
+
+grant execute on function public.food_places_search_by_name_fast(text, integer, double precision, double precision) to anon, authenticated;
+
 -- ── food_wishlist: "want to try" flags (B669312, owner chat block 2026-08-22: "flag places he
 -- has not been to yet, so the map doubles as a shortlist and not just a log"). A THIRD table,
 -- deliberately -- not a food_places column (that table has no user_id and is service-role-write-

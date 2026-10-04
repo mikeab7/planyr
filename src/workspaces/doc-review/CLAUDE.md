@@ -1,11 +1,13 @@
 # Document Review workspace — folder pointer
 
 User-facing name **"Review"** (internal id stays `doc-review`, route `/markup`, data field
-`markups`). Open one drawing + mark it up. Root rules in `/CLAUDE.md`; persistence + filing
+`markups`). Open files in tabs + mark them up. Root rules in `/CLAUDE.md`; persistence + filing
 internals in `/docs/REFERENCE.md` (Document Review persistence section).
 
 **Entry points**
 - `DocReview.jsx` — workspace root (lazy chunk). `Stitcher.jsx` — multi-sheet stitch/align.
+- `docEditor/` — Word/text files open in an editable DOCUMENT editor instead of the canvas (NEW-1) — see its own `CLAUDE.md`.
+- **Tabs (NEW-1, B2058144)** — `components/ReviewTabStrip.jsx` (strip above the toolbar) + `lib/reviewTabs.js` (pure model: open / close-neighbour / reorder / per-device cache / account-copy merge) + `lib/tabSync.js` (tabs follow the ACCOUNT via `profiles.prefs.reviewTabs`, last change wins). `DocReview.jsx` holds ONE review at a time (the active tab) and swaps via `openReview`; Word/txt editors stay mounted-hidden in `docPool` (cursor + undo survive). Review is BLANK with no tab open — no landing screen (owner constraint 13). Close = the tab's ×; `components/CloseFileDialog.jsx` asks Save / Discard / Cancel for an unsaved Word/text tab. `lib/unfiled.js` — which rows are "Unfiled" + the "where did it save" sentence.
 
 **Key `lib/`**
 - **⛔ `layerVisibilityReads.js` (B503184) — WHAT "HIDDEN" MEANS IN THIS WORKSPACE, and it is NOT the
@@ -35,6 +37,8 @@ internals in `/docs/REFERENCE.md` (Document Review persistence section).
   ⚠ Whether the owner's own drawings carry layers at all is **unknown from the sandbox** — his PDFs'
   bytes are not reachable there — which is why the fixture is a hand-built two-layer PDF and why
   **V287376's first step is "does the Layers button ever appear?"**.
+- `docVersions.js` + `components/VersionHistorySheet.jsx` (B2034128) — Version history for one file: pure list / `saveVersion` / `restoreVersion`
+  over the record's `sources[1..]` (each entry stamped `savedAt`/`savedBy`; append-only, no new table); the sheet only lists and asks.
 - `reviewStore.js` — all persistence I/O (Supabase `doc_reviews` + Drive-first file storage);
   `usePersistence.js` — the data-loss hook (first-edit save, honest badge, flush on unload).
 - `lastDoc.js` — per-PROJECT "last document reviewed" map + legacy-pointer fallback and the

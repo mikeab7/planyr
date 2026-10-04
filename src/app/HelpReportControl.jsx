@@ -145,6 +145,7 @@
  * undocked from one) re-sizes live, no reload, via the same matchMedia change listener.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { isCoarsePointer } from "../shared/ui/coarsePointer.js";
 import { createPortal } from "react-dom";
 import AnchoredMenu from "../shared/ui/AnchoredMenu.jsx";
 import { MenuItem } from "../shared/ui/controls.jsx";
@@ -456,7 +457,7 @@ export default function HelpReportControl({ user }) {
           <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 8, width: 264 }}>
             <div style={{ fontSize: FONT_SIZE.control, fontWeight: 700, color: "var(--text-primary)" }}>Report a problem</div>
             <textarea
-              autoFocus
+              autoFocus={!isCoarsePointer()}
               value={desc}
               onChange={(e) => setDesc(e.target.value.slice(0, DESC_MAX))}
               placeholder="What happened? What did you expect instead?"

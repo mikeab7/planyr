@@ -2401,11 +2401,29 @@ const COUNTIES_MAP_RAW = {
     // ⛔ SIZE: at 13.1M parcels this is the largest source in the file (~21% above Florida's
     // 10.8M, already wired). That is safe because NOTHING here ever fetches a layer whole — the
     // display layer is an esri-leaflet featureLayer gated at PARCEL_MINZOOM and queried per map
-    // viewport (parcelDisplay.js), and a truncated draw is reported LOUDLY via
-    // `responseWasTruncated` rather than silently drawn short. Feature count scales the SERVER's
-    // index, not the client's payload.
+    // viewport (parcelDisplay.js). ⛔ CORRECTED 2026-10-02 (NEW-2): this comment used to add "and a truncated draw is
+    // reported LOUDLY via `responseWasTruncated`" — no such notice exists in the code, so a dense cell was silently
+    // drawn short; the `displayMinZoom` below is the real bound. Feature count scales the SERVER's index, not
+    // the client's payload.
     state: "CA", center: [37.2, -119.5], zoom: 6, mapServer: null, statewide: true,
     layerUrl: "https://bz1uwWPKUInZBK94.svcs5.arcgis.com/bz1uwWPKUInZBK94/arcgis/rest/services/CA_Statewide_Parcels_Public_view/FeatureServer/0",
+    /* NEW-2 (2026-10-02) — TWO MEASURED CORRECTIONS to the comment above, found by driving the real click path:
+     *  · ID/ADDRESS FIELDS ARE PINNED. Unpinned, `idAttrFor` fell to the generic id-detector and returned the
+     *    layer's OBJECTID (a database row number) as the parcel's "Account / ID" — the Ontario parcel read "1",
+     *    not APN 011328215 (the B1875248 defect, here with a different column). `PARCEL_APN` is the APN. The
+     *    situs line needs no pin: the planner panel's situs ladder already resolves `SITE_ADDR` correctly.
+     *  · THE OUTLINE FLOOR IS HIGHER THAN THE GENERIC ONE, and the "truncated draw is reported loudly" claim
+     *    above is NOT TRUE of this code (there is no truncation notice; the owner retired the "capped this view"
+     *    banner 2026-09-24 in favour of the image regime, and this FeatureServer has no /export, so it never gets
+     *    that regime). The service answers at most 2,000 features per query (maxRecordCount, measured), the
+     *    outline layer asks per 512-px cell, and dense California blocks hold far more: the busiest 512-px cell
+     *    measured live 2026-10-02 was 18,043 parcels at zoom 15 (SF Mission), 3,410 at zoom 16, and 1,124 at
+     *    zoom 17 (Oakland 2,271 at 16; Los Angeles 1,757 at 16) — so zoom 16 still drew an arbitrary 2,000 of 3,410
+     *    with nothing saying so. Zoom 17 is the first level where every sampled cell fits, and it is the app's own
+     *    site-focus zoom. Below it nothing draws and the existing "zoom in to see the lines" hint says so
+     *    (`displayFloorForView`); a click is UNAFFECTED at every zoom (B137 — drawn is a subset of selectable). */
+    idField: "PARCEL_APN", pinIdField: true, // read by `idAttrFor` (parcelQuery.js) off this MAP entry — statewide keys have no COUNTIES config row
+    displayMinZoom: 17,
   },
   ct_statewide: {
     state: "CT", center: [41.6, -72.7], zoom: 9, mapServer: null, statewide: true,
@@ -3024,8 +3042,16 @@ export function countyBboxIntersectsView(key, bounds) {
  * over-inclusive-but-bounded answer) so the first frame is never empty. A view over a state with no
  * source returns []. `bounds` is a plain `{south, west, north, east}`. Pure. Mirrors the click
  * path's narrowing, so what you SEE still equals what you can SELECT (B137). */
+/* NEW-1 (settle cost) — a settle asks this for the SAME view more than once (the source sync, then the
+ * outline-floor hint via `displayFloorForView`), and each ask is 81 county point-in-polygon resolves
+ * (~25 ms measured at a Bartow zoom). One remembered answer per exact view removes the repeats; it is only
+ * kept when the county geometry was resident (a `pending` answer is the transient bbox fallback and must be
+ * recomputed once the asset lands). */
+let _viewSourcesMemo = null;
 export function displaySourcesForView(bounds) {
   if (!bounds) return [];
+  const mk = `${bounds.south}|${bounds.west}|${bounds.north}|${bounds.east}`;
+  if (_viewSourcesMemo && _viewSourcesMemo.key === mk) return _viewSourcesMemo.out.slice();
   const out = new Set();
   const N = 8; // (N+1)² sample points
   let pending = false;
@@ -3046,15 +3072,43 @@ export function displaySourcesForView(bounds) {
       if (!c.statewide && c.bbox && countyBboxIntersectsView(k, bounds)) out.add(k);
     });
   }
-  return [...out];
+  const res = [...out];
+  _viewSourcesMemo = pending ? null : { key: mk, out: res };
+  return res.slice();
 }
+
+/* NEW-2 (California) — a source may declare a HIGHER outline floor than the generic PARCEL_MINZOOM when it cannot
+ * answer a dense cell inside its own record cap and has no server-rendered image regime to fall back on
+ * (`displayMinZoom`; see `ca_statewide`). 0 = no source-specific floor. Pure. */
+export const displayMinZoomOf = (key) => Number(COUNTIES_MAP[key] && COUNTIES_MAP[key].displayMinZoom) || 0;
+/* The floor for a drawn layer, by its service URL (the display layer only knows its URL). */
+export function displayMinZoomForUrl(url) {
+  const u = trimLayerUrl(url);
+  if (!u) return 0;
+  let floor = 0;
+  for (const c of Object.values(COUNTIES_MAP)) {
+    if (c && c.displayMinZoom && trimLayerUrl(c.layerUrl || c.mapServer) === u) floor = Math.max(floor, Number(c.displayMinZoom) || 0);
+  }
+  return floor;
+}
+/* The floor the hint text should use for a view / a point: the highest source floor among the sources that
+ * would draw there. Callers take Math.max(PARCEL_MINZOOM, …). */
+export const displayFloorForView = (bounds) => Math.max(0, ...displaySourcesForView(bounds).map(displayMinZoomOf));
+export const displayFloorForPoint = (lat, lng) => Math.max(0, ...candidateCountiesForPoint(lat, lng).map(displayMinZoomOf));
 
 /* B1976336 — the statewide composite(s) that back a county whose own layer failed. */
 export const statewideKeysForState = (state) =>
   Object.entries(COUNTIES_MAP).filter(([, c]) => c.statewide && (!c.state || c.state === state)).map(([k]) => k);
 
+/* NEW-1 (settle cost) — `COUNTIES_MAP` is a key-normalising Proxy over ~175 sources, and `Object.entries` on it
+ * costs ~0.23 ms a call; `displaySourcesForView` resolves 81 sample points per settle, so that one line was
+ * ~19 of the ~24 ms. The map is assigned once at load and never mutated (no write to it exists anywhere in
+ * the tree), so the entry list is read once. */
+let _countyEntriesMemo = null;
+const countyEntries = () => _countyEntriesMemo || (_countyEntriesMemo = Object.entries(COUNTIES_MAP));
+
 export function candidateCountiesForPoint(lat, lng) {
-  const entries = Object.entries(COUNTIES_MAP);
+  const entries = countyEntries();
   const within = entries
     .filter(([, c]) => { const b = c.bbox; return b && lat >= b[0] && lat <= b[2] && lng >= b[1] && lng <= b[3]; })
     .map(([k]) => k);
@@ -3325,7 +3379,18 @@ export function countyIdentity(lat, lng) {
   if (key && COUNTIES_MAP[key] && !COUNTIES_MAP[key].statewide) {
     return { status: "ok", key, name: ans.name, state: ans.state, nearEdge: !!ans.nearEdge };
   }
-  return { status: "no-source", key: null, name: ans.name, state: ans.state, nearEdge: !!ans.nearEdge };
+  /* NEW-1 — "no per-county source" is not "no source". A state whose only parcel source is a
+   * statewide layer (CA, NV, RI, ME, DC, …) has no per-county entry by design, so every one of its
+   * counties lands here; the statewide layer covers them. STATUS stays `no-source` (candidate routing
+   * and `countyForView` read it, and `key` stays null — a composite is coverage, not a jurisdiction
+   * claim) but the identity now names the covering layer so `noParcelSourceNote` stays silent.
+   * Texas is excluded on purpose: its statewide layer is the derived fallback behind every TX county
+   * row, and a TX county that still reaches here keeps its gap sentence. */
+  const sw = ans.state === "TX" ? [] : statewideKeysForState(ans.state);
+  return {
+    status: "no-source", key: null, name: ans.name, state: ans.state, nearEdge: !!ans.nearEdge,
+    ...(sw.length ? { statewideKey: sw[0] } : {}),
+  };
 }
 
 /* The owner-facing sentence for a resolved county with no parcel source, or null when there is
@@ -3342,6 +3407,7 @@ export function countyIdentity(lat, lng) {
  * read "Orleans Parish County". Never assume "County" is the universal case; ask the source. */
 export function noParcelSourceNote(identity) {
   if (!identity || identity.status !== "no-source") return null;
+  if (identity.statewideKey) return null; // NEW-1 — a statewide layer covers this county
   const suffix = identity.state === "TX" ? " County" : "";
   return `${identity.name}${suffix} — no parcel data wired here yet.`;
 }

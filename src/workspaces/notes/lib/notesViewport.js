@@ -230,7 +230,7 @@ export function panBy(view, { dx = 0, dy = 0 } = {}) {
  *  vertically: a document is read from the top, and centring a page taller than the viewport
  *  would open it showing the middle of it. Horizontally it is centred, which is where a page
  *  belongs on a wide screen. */
-export function frameView({ viewport, page, zoom = VIEW_ZOOM_DEFAULT }) {
+export function frameView({ viewport, page, zoom = VIEW_ZOOM_DEFAULT, align = "center" }) {
   const z = clampViewZoom(zoom);
   const vw = Math.max(1, num(viewport?.width));
   const vh = Math.max(1, num(viewport?.height));
@@ -252,7 +252,15 @@ export function frameView({ viewport, page, zoom = VIEW_ZOOM_DEFAULT }) {
   const x = px * z - (slackX >= 0 ? slackX / 2 : margin);
   /* Vertically a page taller than the viewport is anchored near its TOP rather than centred: a
    * document is read from the top, and centring a long page would open it showing its middle. */
-  const y = py * z - (slackY >= margin * 2 ? slackY / 2 : margin);
+  /* ⛔ `align: "top"` IS THE OPENING FRAMING (NEW-4, iPhone review 2026-09-29: pages opened with the
+   * sheet's top HALFWAY down the canvas — 253 px on a 1280x800 window, 330 px on a 390x664 phone). The
+   * first layout pass measures the sheet SHORT (213 px; the full-height pin lands ~140 ms later), and
+   * centring a short page vertically puts it mid-screen against a number that is about to change —
+   * and if two passes agree on the short height before the pin lands, the framing latches there for
+   * good. Anchoring the TOP near the top is independent of the page's eventual height: it can grow
+   * downward all it likes and the top edge is already where a document is read from. `"center"`
+   * stays the default because "Fit" genuinely wants the whole page centred. */
+  const y = align === "top" ? py * z - margin : py * z - (slackY >= margin * 2 ? slackY / 2 : margin);
   return { x, y, z };
 }
 
@@ -308,4 +316,117 @@ export function parseView(raw) {
   if (!obj || typeof obj !== "object") return null;
   if (!Number.isFinite(num(obj.x, NaN)) || !Number.isFinite(num(obj.y, NaN))) return null;
   return normalizeView(obj);
+}
+
+/* ---- KEEPING THE CARET ABOVE THE SOFT KEYBOARD (NEW-6a) -------------------------------------
+ *
+ * On iOS the keyboard shrinks only the VISUAL viewport — `window.innerHeight` and the mat's own
+ * `getBoundingClientRect()` still describe the full layout viewport — so a caret hidden behind the
+ * keyboard counted as visible and typing carried on blind. The band a caret must sit inside is the
+ * mat's box INTERSECTED with the visual viewport. Pure, so it can be tested without a keyboard. */
+
+/** The rectangle (viewport client coordinates) the caret has to stay inside. `vv` is a
+ *  `VisualViewport`-shaped `{ offsetLeft, offsetTop, width, height }`, or null where there is none. */
+export function visibleBand(mat, vv) {
+  const band = { left: num(mat?.left), top: num(mat?.top), right: num(mat?.right), bottom: num(mat?.bottom) };
+  if (!vv) return band;
+  const vl = num(vv.offsetLeft);
+  const vt = num(vv.offsetTop);
+  return {
+    left: Math.max(band.left, vl),
+    top: Math.max(band.top, vt),
+    right: Math.min(band.right, vl + num(vv.width, Infinity)),
+    bottom: Math.min(band.bottom, vt + num(vv.height, Infinity)),
+  };
+}
+
+/** How far the view must move so `caret` sits inside `band` with `pad` to spare. Moves the
+ *  MINIMUM and never zooms; a band too small to hold the padding twice is judged against its own
+ *  middle so a keyboard-up proxy (a few hundred px) cannot make it oscillate. */
+export function caretRevealDelta({ caret, band, pad = 48 }) {
+  if (!caret || !band) return { dx: 0, dy: 0 };
+  const h = band.bottom - band.top;
+  const w = band.right - band.left;
+  const py = Math.min(pad, Math.max(0, h / 4));
+  const px = Math.min(pad, Math.max(0, w / 4));
+  let dx = 0;
+  let dy = 0;
+  if (caret.top < band.top + py) dy = caret.top - (band.top + py);
+  else if (caret.bottom > band.bottom - py) dy = caret.bottom - (band.bottom - py);
+  if (caret.left < band.left + px) dx = caret.left - (band.left + px);
+  else if (caret.left > band.right - px) dx = caret.left - (band.right - px);
+  return { dx, dy };
+}
+
+/* ---- touch: one-finger pan, pinch-with-midpoint, light inertia (NEW-2) ---------------------
+ *
+ * The mat is `touch-action: none`, so a finger drag produces pointer events and NOTHING ELSE: no
+ * native scroll and — the part that made the page feel dead — no compat mouse events either, which
+ * is the only path the blank-paper pan (`beginBlankGesture`) ever listened on. These are the pure
+ * decisions behind the pointer-driven replacement; the wiring is `NoteEditor.jsx`'s touch effect.
+ * Everything here is in VIEWPORT-relative pixels and goes through the one view ref. */
+
+/** A fingertip is not a mouse pointer: a tap wobbles by several pixels, so the distance before a
+ *  touch becomes a pan is ~2.5x the mouse's 4. Below it the gesture is still a tap. */
+export const TOUCH_PAN_SLOP = 10;
+
+/** Has a touch travelled far enough to stop being a tap? */
+export function touchTravelled(from, at, slop = TOUCH_PAN_SLOP) {
+  return Math.hypot(num(at?.x) - num(from?.x), num(at?.y) - num(from?.y)) > slop;
+}
+
+/** The view a one-finger drag asks for: the content follows the finger one-to-one. */
+export function panView(startView, from, at) {
+  const v = normalizeView(startView);
+  return { x: v.x - (num(at?.x) - num(from?.x)), y: v.y - (num(at?.y) - num(from?.y)), z: v.z };
+}
+
+/** Pinch that ZOOMS and PANS: the workspace point that was under the fingers' starting midpoint
+ *  stays under their CURRENT midpoint, at the zoom the spread asks for. (The old handler zoomed
+ *  about the current midpoint only, so the page never followed a two-finger drag.) */
+export function pinchView(start, now) {
+  const v = normalizeView(start?.view);
+  const ratio = num(start?.dist) > 0 ? num(now?.dist) / num(start.dist) : 1;
+  const z = clampViewZoom(v.z * (Number.isFinite(ratio) && ratio > 0 ? ratio : 1));
+  const w = toWorkspace(v, start?.mid || { x: 0, y: 0 });
+  return { x: w.x * z - num(now?.mid?.x), y: w.y * z - num(now?.mid?.y), z };
+}
+
+/** Release velocity in px per 16 ms frame, from the last ~100 ms of `{ t, x, y }` samples.
+ *  Zero when the finger stopped before lifting — a held finger must not fling. */
+export function releaseVelocity(samples, now, windowMs = 100) {
+  const recent = (samples || []).filter((s) => now - s.t <= windowMs);
+  if (recent.length < 2) return { x: 0, y: 0 };
+  const a = recent[0];
+  const b = recent[recent.length - 1];
+  const dt = b.t - a.t;
+  if (dt <= 0 || now - b.t > 50) return { x: 0, y: 0 };
+  return { x: ((b.x - a.x) / dt) * 16, y: ((b.y - a.y) / dt) * 16 };
+}
+
+/** One frame of inertia: the content keeps going in the direction the finger was moving. `delta`
+ *  is how far the CONTENT moves this frame; `done` when it has slowed to nothing. */
+export function inertiaStep(vel, { friction = 0.92, floor = 0.4 } = {}) {
+  const speed = Math.hypot(num(vel?.x), num(vel?.y));
+  if (speed < floor) return { delta: { x: 0, y: 0 }, vel: { x: 0, y: 0 }, done: true };
+  return { delta: { x: vel.x, y: vel.y }, vel: { x: vel.x * friction, y: vel.y * friction }, done: false };
+}
+
+/* ---- THE OPENING ZOOM (NEW-4) --------------------------------------------------------------
+ *
+ * Desktop opens at 100%. A PHONE opens at FIT WIDTH — the whole page width on screen, both edges
+ * (the old 100% framing counted the 8 px outside margin and the 8 px view offset on the LEFT only,
+ * so a page as wide as the screen had its right edge and rounded corner clipped). Fit width never
+ * magnifies past `PHONE_OPEN_ZOOM_MAX`: a page narrower than the screen (a pinned narrow page) is
+ * shown a little larger, which is what makes the 11 px body text readable without ever changing the
+ * stored font size; a page wider than the screen is shrunk until it fits. */
+export const PHONE_VIEWPORT_MAX = 640;
+export const PHONE_PAGE_GUTTER = 8;
+export const PHONE_OPEN_ZOOM_MAX = 1.25;
+
+export function openingZoom({ viewport, page } = {}) {
+  const vw = Math.max(1, num(viewport?.width));
+  if (vw > PHONE_VIEWPORT_MAX) return VIEW_ZOOM_DEFAULT;
+  const pw = Math.max(1, num(page?.width));
+  return clampViewZoom(Math.min((vw - PHONE_PAGE_GUTTER * 2) / pw, PHONE_OPEN_ZOOM_MAX));
 }

@@ -61,6 +61,9 @@ try {
   // Share the installed dependencies rather than re-installing them. Vite resolves plugins
   // from the build cwd, and a symlinked node_modules is resolvable exactly like a real one.
   try {
+    // A worktree of a commit that TRACKS a node_modules entry (it happened once: a stray symlink merged to main)
+    // already holds one — clear it first or the symlink below fails EEXIST and the whole comparison is lost.
+    rmSync(join(tree, "node_modules"), { recursive: true, force: true });
     symlinkSync(join(ROOT, "node_modules"), join(tree, "node_modules"), "dir");
   } catch (e) {
     bail(`could not share node_modules with the base worktree (${e.message})`);

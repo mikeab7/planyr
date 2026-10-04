@@ -5,8 +5,8 @@
  * overlay (an editable layer over it) and are stored in PAGE UNITS so they survive
  * zoom. Lazy-loaded by the shell.
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { FONT_SIZE } from "../../shared/ui/designTokens.js";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { FONT_SIZE, SPACE } from "../../shared/ui/designTokens.js";
 import { loadPdf, renderInto, extractPageItems } from "./lib/pdf.js";
 import { ocgLayerList, deriveLayerVisibility } from "./lib/ocg.js";
 import { reorderWithinPage, arrangeFlags } from "./lib/arrange.js";
@@ -21,16 +21,31 @@ import Stitcher from "./Stitcher.jsx";
 import CompareView from "./CompareView.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import { useReviewPersistence, docSaveState } from "./lib/usePersistence.js";
-import { newReviewId, newSourceId, storeSource, isStoredSource, downloadSource, downloadFromDrive, driveStreamSource, MAX_BYTES, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle } from "./lib/reviewStore.js";
-import { writeLastDoc, readLastDoc, readLastDocMap, readLegacyPointers, resolveResume, resumeAllowedForRoute } from "./lib/lastDoc.js";
+import { isAutoTitle, liveReviewProject } from "./lib/reviewNaming.js";
+import { storedProjectName } from "../../shared/names/names.js";
+import { newReviewId, newSourceId, upsertReview, storeSource, isStoredSource, downloadSource, downloadFromDrive, driveStreamSource, MAX_BYTES, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle, fileNewReview } from "./lib/reviewStore.js";
+import { writeLastDoc } from "./lib/lastDoc.js";
+import { TABS_STORE_KEY, upsertTab, findOpenTab, closeTab, moveTab, tabKindOf, srcKeyOf, serializeTabs, parseTabs, mergeRestored, droppedNotice, mergeLiveRecord, withKnownKeys, syncSig } from "./lib/reviewTabs.js";
+import { createTabSync, prefsBackend } from "./lib/tabSync.js";
+import ReviewTabStrip from "./components/ReviewTabStrip.jsx";
 import { recordOpen } from "../../shared/recents/recentDocs.js";
 import { liveProjectIds, openableProjectId } from "../../shared/projects/docProjectLiveness.js";
 import { classifySource, sourceUnavailableMessage } from "./lib/sourceState.js";
 import { cacheSourceBytes, getSourceBytes } from "./lib/sessionBytes.js";
 import { isPdfName } from "../../shared/files/uploadQueue.js";
+import { docKindOf } from "./docEditor/docKind.js";
+import { versionList, saveVersion, restoreVersion, packSource, copyFileName, earlierVersionLabel, versionDateLabel } from "./lib/docVersions.js";
+import VersionHistorySheet from "./components/VersionHistorySheet.jsx";
+import { getUser } from "../site-planner/lib/auth.js";
+import { displayNameFor } from "../../shared/profile/useProfile.js";
+// The document editor (Word / text files) is its own lazy chunk — drawing review never pays for it.
+const DocEditor = lazy(() => import("./docEditor/DocEditor.jsx"));
+import CloseFileDialog from "./components/CloseFileDialog.jsx";
+import { savedPlace } from "./lib/unfiled.js";
+const REVIEW_ACCEPT = "application/pdf,.pdf,.docx,.doc,.txt,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,text/plain";
 import { onAuthChange } from "../site-planner/lib/auth.js";
 import { listProjects as listLocalProjects } from "../../shared/projects/projects.js";
-import AppHeader from "../../shared/ui/AppHeader.jsx";
+import AppHeader, { useNarrow } from "../../shared/ui/AppHeader.jsx";
 import ToolRail from "../../shared/ui/ToolRail.jsx";
 import MiddleTruncate from "../../shared/ui/MiddleTruncate.jsx";
 import { sheetOpenState, OPEN_CHIP_TIMEOUT_MS } from "./lib/sheetOpenState.js";
@@ -397,8 +412,8 @@ export default function DocReview({
   // this session's fresh blank id/mode BEFORE the resume effect read them back — so resume
   // loaded a review that was never saved and fell to the empty state ("starts from nothing"
   // on every reload). Resume now reads this capture; writes stay silent until boot resolves.
-  const bootPointers = useRef(null);
-  if (bootPointers.current === null) bootPointers.current = { legacy: readLegacyPointers(), map: readLastDocMap() };
+  const curIdRef = useRef(null); // the id of the review the root is showing / loading RIGHT NOW (set synchronously, unlike state)
+  if (curIdRef.current === null) curIdRef.current = reviewId;
   const [bootResolved, setBootResolved] = useState(false); // pointer writes arm only after the boot resume settled
   const [source, setSource] = useState(null);     // { srcId, name, size, storageKey, oversize }
   const [redrop, setRedrop] = useState("");        // "re-drop on load" banner when bytes aren't available
@@ -407,6 +422,49 @@ export default function DocReview({
   // fetchSourceBytes's non-PDF branch, and cleared everywhere else `redrop` is cleared to "" so a
   // stale offer can't survive onto an unrelated banner message or a freshly opened document.
   const [nonPdfOffer, setNonPdfOffer] = useState(null); // { name, blob } | null
+  // A Word/text file open in the DOCUMENT editor instead of the drawing canvas: { blob, name, kind, key } | null.
+  const [docFile, setDocFile] = useState(null);
+  // Close (NEW-1): the editor reports unsaved edits up; Close asks Save / Discard / Cancel when there are any.
+  const narrow = useNarrow(); // phone width: the toolbar strip scrolls sideways, so Close also gets its own always-visible bar
+  const [closePrompt, setClosePrompt] = useState(null); // null | "ask" | "saving"
+  const [docNotice, setDocNotice] = useState(""); // one-line outcome carried across the open that follows a "save as new"
+  const [docAuthor, setDocAuthor] = useState("Reviewer");
+  const [historyOpen, setHistoryOpen] = useState(false); // B2022929 — the "Version history" sheet
+  const [histBusy, setHistBusy] = useState(false);
+  const [histMsg, setHistMsg] = useState(""); const [histErr, setHistErr] = useState("");
+  /* TABS (NEW-1, 2026-10-04) — one tab per open review record, keyed by its review id. The root still HOLDS one
+   * review at a time (the active tab); a switch flushes it and loads the other (openReview), restoring that tab's
+   * page / zoom / tool / selection from `tabStatesRef`. Word/text tabs are different: their editor instance stays
+   * MOUNTED (hidden) in `docPool`, which is what keeps each one's cursor and undo history across a switch. */
+  const [tabs, setTabs] = useState([]);              // [{ id, name, projectId, project, kind, srcKey }]
+  const [tabNotice, setTabNotice] = useState("");     // one line — a restored tab whose file is gone is named here, never an error screen
+  const [dirtyMap, setDirtyMap] = useState({});       // tab id → unsaved Word/text edits (the dot, and Save / Discard / Cancel on close)
+  const [docPool, setDocPool] = useState({});         // tab id → the docFile its (mounted) editor was opened with
+  const tabStatesRef = useRef({});                    // tab id → { page, view, tool, sel } — what a switch back restores
+  const restoreRef = useRef(null);                    // { id, view } consumed by the fit effect of the NEXT load of that review
+  const tabLiveRef = useRef({});                      // tab id → the full record as last seen in THIS session (keyless sources included)
+  const srcKeysRef = useRef({});                      // srcId → where its bytes ended up, learned even when the tab was in the background
+  const docSaveRefs = useRef({});                     // tab id → that editor's own Save ref
+  const uidRef = useRef(null);
+  const syncRef = useRef(null);       // the account-sync controller (null signed out) — tabs follow the account, see lib/tabSync.js
+  const localAtRef = useRef(0);       // when THIS device last changed the tab set (last change wins)
+  const lastSigRef = useRef(null);
+  const [fileDrag, setFileDrag] = useState(false); // a file is being dragged over Review (desktop) — the drop outline shows only then
+  const dragDepth = useRef(0);
+  const setDirtyFor = useCallback((id, d) => setDirtyMap((m) => (!!m[id] === !!d ? m : { ...m, [id]: !!d })), []);
+  const docDirty = !!dirtyMap[reviewId];
+  const setDocDirty = (d) => setDirtyFor(curIdRef.current, d);
+  const saveRefFor = (id) => (docSaveRefs.current[id] || (docSaveRefs.current[id] = { current: null }));
+  // `docSaveRef.current` always means THE ACTIVE tab's editor Save (read at call time).
+  const docSaveRef = { get current() { return (docSaveRefs.current[curIdRef.current] || {}).current || null; } };
+  const putDocFile = (f) => { // the ONE place a document file is handed to an editor: stamp its tab, pool it
+    if (!f) { setDocFile(null); return; }
+    const o = { ...f, tabId: curIdRef.current };
+    setDocFile(o);
+    setDocPool((p) => { const cur = p[o.tabId]; return cur && cur.key === o.key && !!cur.readOnly === !!o.readOnly ? p : { ...p, [o.tabId]: o }; });
+  };
+  const [priorSources, setPriorSources] = useState([]); // earlier saved versions of this file — kept, never overwritten
+  useEffect(() => { let live = true; getUser().then((u) => { if (live && u) setDocAuthor(displayNameFor(null, u) || "Reviewer"); }).catch(() => {}); return () => { live = false; }; }, []);
   const [openErr, setOpenErr] = useState("");      // visible banner when an open no-ops / loadReview returns null (NEW-1) — so it can't fail silently
   const [signedIn, setSignedIn] = useState(false);
   // Takeoff is a TOOL-RAIL TOGGLE, hidden by default (owner, B664 — "why is takeoff a separate
@@ -684,6 +742,42 @@ export default function DocReview({
   const scanDone = useMemo(() => Object.keys(sheetMeta).length, [sheetMeta]);
   const scanComplete = numPages > 0 && scanDone >= numPages;
 
+  /* Where a file opened or saved from here is filed (NEW-2): the open review's own filing when it has one,
+   * else the ROUTE'S project (a blank Review standing in a project's "Current set" files into that project, not
+   * into nowhere), else Organization, else genuinely unfiled — which the Library lists under "Unfiled". */
+  const filingNow = (m = meta) => {
+    if (m.projectId || m.orgScope === true) return { projectId: m.orgScope === true ? null : m.projectId, project: m.project || "", orgScope: m.orgScope === true };
+    if (org) return { projectId: null, project: "", orgScope: true };
+    if (projectId) return { projectId, project: (markupProject && markupProject.name) || "", orgScope: false };
+    return { projectId: null, project: "", orgScope: false };
+  };
+  const adoptFiling = (f) => setMeta((m) => (m.projectId || m.orgScope === true ? m : { ...m, projectId: f.projectId, project: f.project, orgScope: f.orgScope }));
+
+  /* A file picked/dropped from disk becomes a TAB (NEW-1). Three cases:
+   *  · the SAME file (same name + size, same project) is already open → switch to its tab, add nothing;
+   *  · the open review is waiting for THIS file's bytes ("re-drop on load" banner) → fill that tab in place;
+   *  · otherwise, if a file is already open, flush it and start a NEW review record, so the new file gets its own
+   *    tab instead of overwriting the active one's record. A blank Review just uses its blank record. */
+  const beginFileOpen = async (file) => {
+    const L = liveRef.current;
+    const hasFile = !!(L.source || L.hasPdf || L.docFile);
+    const reattach = hasFile && L.redrop && sourceRef.current && sameName(sourceRef.current.name, file.name);
+    const guess = filingNow(hasFile ? newMeta() : L.meta);
+    const hit = findOpenTab(L.tabs, { name: file.name, size: file.size, projectId: guess.projectId });
+    if (hit && !reattach) {
+      if (hit.id === L.reviewId && L.mode === "review") return { switched: true };
+      await activateTab(hit.id);
+      return { switched: true };
+    }
+    if (hasFile && !reattach) {
+      loadTok.current++;
+      try { await saveNow(); } catch (_) { /* the local mirror already ran */ }
+      stashActive();
+      resetSingle();
+      return { switched: false, meta: newMeta() };
+    }
+    return { switched: false, meta: L.meta };
+  };
   const openFile = async (file) => {
     // A null/no-op drop must not be silent (B446): name it on the always-visible banner so
     // "nothing happened" is never mistaken for a crash ("silence is a crash").
@@ -692,13 +786,18 @@ export default function DocReview({
     // file would otherwise be read via arrayBuffer() and only then fail). Surface the reject on
     // BOTH the inline empty-state hint (err) AND the top banner (openErr) so it shows whether or
     // not a document is already open (B446 — the drop-over-open path renders no empty state).
+    if (docKindOf(file.name)) { await openDocFile(file); return; }
     if (!file.size || !(/\.pdf$/i.test(file.name) || file.type === "application/pdf")) {
-      const msg = `“${file.name || "that file"}” isn’t a PDF we can open — drop a .pdf file.`;
+      const msg = `“${file.name || "that file"}” isn’t a PDF we can open — use a PDF, Word (.docx/.doc) or text (.txt) file.`;
       setErr(msg); setOpenErr(msg); return;
     }
+    const lead = await beginFileOpen(file); // already open → just switch to its tab; otherwise a NEW tab (its own review record)
+    if (lead.switched) return;
+    const meta = lead.meta; // shadows the previous file's filing: a fresh tab files by the route's project, not the old tab's
     setBusy(true); setBusyLabel(file.name || "PDF"); setErr(""); setOpenErr(""); // opening a PDF → show the review canvas, with a clear "Opening…" overlay
     try {
       const pdf = await loadPdf(file);
+      setDocFile(null); setDocNotice(""); setPriorSources([]);
       setPdfDoc(pdf);
       readOcg(pdf); // B490: populate the Layers panel from the new doc's optional content
       setFileName(file.name || "document.pdf");
@@ -720,12 +819,14 @@ export default function DocReview({
       const base = { srcId, name: file.name || "document.pdf", size: file.size };
       sourceRef.current = base;
       cacheSourceBytes(srcId, file); // B448: keep the dropped bytes so a switch/reload mid-upload never loses the backdrop
-      setSource({ ...base, storageKey: null, driveKey: null, oversize: false });
+      setSource({ ...base, ...(keepId ? {} : { savedAt: Date.now(), savedBy: docAuthor }), storageKey: null, driveKey: null, oversize: false });
       // Store Drive-first, Supabase-fallback (B322). The source stays keyless in state until
       // this resolves, and buildSnapshot won't persist a keyless source, so a quick reload
       // mid-upload can't strand the backdrop with an unfetchable pointer (B323).
-      storeSource(srcId, file, { projectId: meta.projectId, discipline: meta.discipline, fileName: file.name }).then(async (r) => {
+      const filing = filingNow(meta); adoptFiling(filing);
+      storeSource(srcId, file, { projectId: filing.projectId, discipline: meta.discipline, fileName: file.name, orgScope: filing.orgScope }).then(async (r) => {
         setSource((s) => (s && s.srcId === srcId ? { ...s, storageKey: r.storageKey || null, driveKey: r.driveKey || null, oversize: !!r.oversize } : s));
+        noteSourceKeys(srcId, r);
         // B579: a GENUINE store failure (BOTH Drive and Supabase rejected it — not merely `oversize`, which
         // still saves the work layer and flags the file "re-drop on load") leaves the source permanently
         // keyless, so buildSnapshot persists sources:[] and the markups reload with NO backdrop. That used
@@ -747,6 +848,113 @@ export default function DocReview({
     } finally { setBusy(false); setBusyLabel(""); }
   };
 
+  /* ---- Word / text files (NEW-1): open in the document editor, save back to the Library ---- */
+  const openDocFile = async (file) => {
+    const kind = docKindOf(file.name);
+    if (!file.size && kind !== "txt") { const m = `“${file.name}” is empty (0 bytes), so there is no Word document to open.`; setErr(m); setOpenErr(m); return; }
+    if (file.size > MAX_BYTES) { const m = `“${file.name}” is larger than the ${Math.round(MAX_BYTES / 1048576)} MB this editor can open.`; setErr(m); setOpenErr(m); return; }
+    const lead = await beginFileOpen(file);
+    if (lead.switched) return;
+    const meta = lead.meta; // see openFile
+    setErr(""); setOpenErr(""); setRedrop(""); setNonPdfOffer(null);
+    const srcId = newSourceId();
+    const base = { srcId, name: file.name, size: file.size };
+    sourceRef.current = base;
+    cacheSourceBytes(srcId, file); // keep the dropped bytes so a switch/reload mid-upload never loses the file
+    setPdfDoc(null); setNumPages(0); setPage(1); setMarkups([]); setCalByPage({}); setCalInfo({}); setSheetMeta({}); setOpenGroups({}); setDraft(null); clearSelection(); clearHistory();
+    setPriorSources([]); setDocNotice("");
+    setFileName(file.name);
+    setSource({ ...base, savedAt: Date.now(), savedBy: docAuthor, storageKey: null, driveKey: null, oversize: false });
+    putDocFile({ blob: file, name: file.name, kind, key: srcId });
+    const filing = filingNow(meta); adoptFiling(filing);
+    storeSource(srcId, file, { projectId: filing.projectId, discipline: meta.discipline, fileName: file.name, folderId: meta.folderId || null, orgScope: filing.orgScope }).then(async (r) => {
+      setSource((s0) => (s0 && s0.srcId === srcId ? { ...s0, storageKey: r.storageKey || null, driveKey: r.driveKey || null, oversize: !!r.oversize } : s0));
+      noteSourceKeys(srcId, r);
+      if (!r.ok && !r.oversize && (await cloudReady())) { const m = `Couldn’t save this file to the cloud. ${r.driveError || "Check your connection and drop it again."}`; setErr(m); setOpenErr(m); }
+    }).catch(() => {});
+  };
+  const docScope = () => ({ projectId: meta.orgScope ? null : meta.projectId, discipline: meta.discipline || "Other", folderId: meta.folderId || null, orgScope: meta.orgScope === true });
+  // The one place a saved/restored version lands in state: it becomes `source`, the entry it replaced joins `priorSources`.
+  const commitVersion = (res) => {
+    setPriorSources(res.prior); setSource(res.source);
+    sourceRef.current = { srcId: res.source.srcId, name: res.source.name };
+    if (!res.local) setTimeout(() => { try { saveNow && saveNow(); } catch (_) {} }, 80);
+  };
+  // Called by the editor's Save. mode "replace": a NEW stored version of this file (the old bytes are kept
+  // in the record, never overwritten). mode "new": a separate Library file (.doc → .docx, .txt → Word copy).
+  const saveDocFile = async ({ blob, name, mode, restoredFrom = null }) => {
+    const ready = await cloudReady();
+    const scope = docScope();
+    // The banner names where the file is FILED (the open review's own meta), never where the URL points.
+    const filing = { projectId: scope.projectId || null, project: meta.project || "", orgScope: scope.orgScope === true };
+    const where = savedPlace(filing);
+    if (mode === "new") {
+      if (!ready) return { ok: false, error: "Sign in to save a new file to the Library." };
+      const res = await fileNewReview({ ...scope, project: filing.project, blob, fileName: name });
+      if (!res.ok || res.uploadFailed) return { ok: false, error: res.error || res.driveError || "Couldn’t save the new file to the Library." };
+      setDocNotice(`Saved as a new Word file, “${name}”. The original is kept in the Library. ${where}`);
+      await openReview({ id: res.id });
+      return { ok: true, message: `Saved as “${name}”. The original is kept. ${where}` };
+    }
+    const old = source;
+    if (!old) return { ok: false, error: "There is no file to save to." };
+    const io = { newId: newSourceId, cache: cacheSourceBytes, store: (id, b) => storeSource(id, b, { ...scope, fileName: old.name }) };
+    const res = await saveVersion({ source: old, prior: priorSources, blob, io, by: docAuthor, online: ready, restoredFrom });
+    if (!res.ok) return { ok: false, error: res.error };
+    commitVersion(res);
+    return res.local ? { ok: true, local: true } : { ok: true, where };
+  };
+
+  /* ---- Version history (B2022929): list / open read-only / restore / save a copy. Never deletes, never downloads. ---- */
+  const versions = useMemo(() => versionList(source, priorSources), [source, priorSources]);
+  const isDocFile = !!docFile;
+  const viewingSrcId = docFile && docFile.readOnly ? docFile.versionSrcId : null;
+  const readVersionBytes = async (v) => {
+    const cached = getSourceBytes(v.srcId);
+    if (cached) return cached instanceof Blob ? cached : new Blob([cached]);
+    const src = [source, ...priorSources].find((x) => x && x.srcId === v.srcId);
+    if (!src) return null;
+    let buf = src.driveKey ? await downloadFromDrive(src.driveKey) : null;
+    if (!buf && src.storageKey) buf = await downloadSource(src.storageKey);
+    return buf ? (buf instanceof Blob ? buf : new Blob([buf])) : null;
+  };
+  const histRun = async (fn) => {
+    setHistBusy(true); setHistMsg(""); setHistErr("");
+    try { await fn(); } catch (e) { setHistErr(`Something went wrong: ${e && e.message ? e.message : "unknown error"}. Nothing was changed.`); }
+    finally { setHistBusy(false); }
+  };
+  const openVersion = (v) => histRun(async () => {
+    const blob = await readVersionBytes(v);
+    if (!blob) { setHistErr("Couldn’t read that earlier version. Check your connection and try again."); return; }
+    const name = v.name || (source && source.name) || "document";
+    putDocFile({ blob, name, kind: docKindOf(name), key: `${v.srcId}:ro`, readOnly: true, versionSrcId: v.srcId, versionLabel: earlierVersionLabel(v.savedAt) });
+    setDocNotice(""); setDocDirty(false); setHistoryOpen(false);
+  });
+  const backToLatest = () => histRun(async () => { setDocFile(null); setDocDirty(false); await fetchSourceBytes(source, null); setHistoryOpen(false); });
+  const restoreFromHistory = (v) => histRun(async () => {
+    const ready = await cloudReady();
+    const scope = docScope();
+    const io = { newId: newSourceId, cache: cacheSourceBytes, store: (id, b) => storeSource(id, b, { ...scope, fileName: source.name }), read: readVersionBytes };
+    const res = await restoreVersion({ source, prior: priorSources, version: v, io, by: docAuthor, online: ready });
+    if (!res.ok) { setHistErr(res.error); return; }
+    commitVersion(res);
+    const name = res.source.name;
+    setDocNotice(`Restored the version from ${versionDateLabel(v.savedAt)} as a new latest version. Every earlier version is still in Version history.`);
+    putDocFile({ blob: res.blob, name, kind: docKindOf(name), key: res.source.srcId });
+    setDocDirty(false); setHistoryOpen(false);
+  });
+  const copyFromHistory = (v) => histRun(async () => {
+    if (!(await cloudReady())) { setHistErr("Sign in to save a copy to the Library."); return; }
+    const blob = await readVersionBytes(v);
+    if (!blob) { setHistErr("Couldn’t read that earlier version. Check your connection and try again."); return; }
+    const name = copyFileName(v.name || (source && source.name), v.savedAt);
+    const res = await fileNewReview({ ...docScope(), project: meta.project, blob, fileName: name });
+    if (!res.ok || res.uploadFailed) { setHistErr(res.error || res.driveError || "Couldn’t save the copy to the Library."); return; }
+    setDocNotice(`Saved a copy as “${name}”. The original and all its versions are kept.`);
+    setHistoryOpen(false);
+    await openReview({ id: res.id });
+  });
+
   /* ---- prepare page + fit (B329) ---- */
   const VIEW_MIN = 0.05, VIEW_MAX = 10; // px-per-page-unit clamp for the viewport (10 lets you read
   // the finest survey bearing/distance call-outs & tiny dimension text; the detail layer still
@@ -765,7 +973,16 @@ export default function DocReview({
       setPageBase({ w: base.width, h: base.height });
       pageBaseRef.current = { w: base.width, h: base.height }; // sync now so the req effects below read the new size
       detailTileRef.current = null; setDetailTile(null);       // a new page/size invalidates the old detail tile
-      if (!viewRef.current) {
+      if (!viewRef.current && restoreRef.current && restoreRef.current.id === curIdRef.current) {
+        // A tab coming back: its saved zoom/pan replaces the fit (the page itself was restored by the load).
+        const rs = restoreRef.current; restoreRef.current = null;
+        if (rs.view) setView(rs.view);
+        else { // zoom only (it came from another device, which has no pan to give): that zoom, centred, top of the sheet
+          const wrap = wrapRef.current, vw = wrap?.clientWidth || 900;
+          const sc = Math.min(VIEW_MAX, Math.max(VIEW_MIN, rs.scale));
+          setView({ scale: sc, tx: Math.round((vw - base.width * sc) / 2), ty: 12 });
+        }
+      } else if (!viewRef.current) {
         const wrap = wrapRef.current;
         const vw = wrap?.clientWidth || 900, vh = wrap?.clientHeight || 600;
         // Keep-alive: while hidden (display:none), clientWidth reads 0 and the fit lands on
@@ -945,7 +1162,9 @@ export default function DocReview({
 
   const buildSnapshot = useCallback(() => ({
     id: reviewId, kind: "single", updatedAt: Date.now(), // stamp so the local mirror + cloud data carry a consistent updatedAt (reconcile)
+    // NEW-1 (B1991040): record WHICH kind the title is — composed (follows a project rename) or typed (never touched).
     title: (meta.title || "").trim() || composeTitle(meta),
+    titleAuto: !(meta.title || "").trim() || (meta.title || "").trim() === composeTitle(meta),
     // ORG SCOPE (NEW-1) — `orgScope` must ride this snapshot exactly like every other meta
     // field: `data` becomes `{ ...record, schemaVersion }` in reviewStore.js's `reviewRowFor`,
     // so a field missing from THIS object is a field the next autosave silently drops from the
@@ -954,15 +1173,15 @@ export default function DocReview({
     item: meta.item, revision: meta.revision, docDate: meta.docDate,
     // B1953796 - folderId / sourceFile are written by fileNewReview and must ride every autosave.
     ...(meta.folderId ? { folderId: meta.folderId } : {}), ...(meta.sourceFile ? { sourceFile: meta.sourceFile } : {}),
-    sources: isStoredSource(source) ? [{ srcId: source.srcId, name: source.name, size: source.size || 0, storageKey: source.storageKey || null, driveKey: source.driveKey || null, oversize: !!source.oversize }] : [],
+    sources: isStoredSource(source) ? [packSource(source), ...priorSources.filter(isStoredSource).map(packSource)] : [], // keeps savedAt/savedBy per version (B2022929)
     single: { srcId: source?.srcId || null, fileName, numPages, page, markups, calByPage, calInfo },
-  }), [reviewId, meta, source, fileName, numPages, page, markups, calByPage, calInfo]);
+  }), [reviewId, meta, source, priorSources, fileName, numPages, page, markups, calByPage, calInfo]);
   const isEmpty = useCallback(() => !source && markups.length === 0, [source, markups]);
   // `page`/`scale`/`numPages` ride along in the snapshot but aren't save triggers, so
   // flipping through sheets doesn't spam writes — the next real edit (or flush) saves them.
   const { status, suspendSave, saveNow } = useReviewPersistence({
     buildSnapshot, isEmpty, enabled: mode === "review",
-    deps: [reviewId, meta, source, markups, calByPage, calInfo],
+    deps: [reviewId, meta, source, priorSources, markups, calByPage, calInfo],
   });
 
   // Remember the active review so a refresh resumes it (cloud reconciled with the
@@ -972,11 +1191,12 @@ export default function DocReview({
   // resolved — writing on mount is what used to clobber the pointers before resume read them.
   useEffect(() => {
     if (!bootResolved) return;
-    // Never record a non-PDF as the resume/last-doc target (B686): the markup canvas can't render
+    // Never record a file Review can't show as the resume/last-doc target (B686) — Word/text now open in the
+    // document editor, so they ARE recorded (NEW-2). The markup canvas can't render
     // it, so resuming it would just re-trigger a download the user didn't ask for on load. Leaving
     // the previous PDF as last-doc is the right resume. (setReviewId + setSource are batched in
     // loadSingleReview, so this effect sees both together — no stale-source window.)
-    if (source && source.name && !isPdfName(source.name)) return;
+    if (source && source.name && !isPdfName(source.name) && !docKindOf(source.name)) return;
     // ORG SCOPE (NEW-1) — the org bucket is separate from every legacy global pointer (lastDoc.js's
     // own header): a doc opened while standing in Organization must never become the GLOBAL "last
     // single id"/"last mode", which the plain (non-org) resume path reads unconditionally — that
@@ -1034,6 +1254,13 @@ export default function DocReview({
     // the user's machine (B1456896: opening a document is navigation, not "save this to disk").
     // We already have the bytes, so just hold them — the banner's own Download button fires the
     // save only on that explicit click.
+    if (!pdf && src && src.name && docKindOf(src.name)) {
+      const b = blob instanceof Blob ? blob : new Blob([blob]);
+      if (b.size > MAX_BYTES) { setRedrop(`“${src.name}” is larger than the ${Math.round(MAX_BYTES / 1048576)} MB this editor can open. Find it in the Library.`); return; }
+      putDocFile({ blob: b, name: src.name, kind: docKindOf(src.name), key: src.srcId || src.name });
+      setRedrop("");
+      return;
+    }
     if (!pdf && src && src.name && !isPdfName(src.name)) {
       setNonPdfOffer({ name: src.name, blob: blob instanceof Blob ? blob : new Blob([blob]) });
       setRedrop(`“${src.name}” isn’t a PDF, so it can’t be shown on the markup canvas. Download it, or find it anytime in the Library.`);
@@ -1047,7 +1274,7 @@ export default function DocReview({
     setPdfDoc(pdf);
     readOcg(pdf); // B490: populate the Layers panel from the new doc's optional content
     setRedrop(""); // bytes came back (from cache or cloud) — clear any stale "re-drop" banner (B448)
-    setNumPages(pdf.numPages); setView(null); setPageBase(null); detailTileRef.current = null; setDetailTile(null); setLoadNonce((n) => n + 1); // refit on load (B329)
+    setNumPages(pdf.numPages); setPage((p) => Math.max(1, Math.min(p, pdf.numPages))); setView(null); setPageBase(null); detailTileRef.current = null; setDetailTile(null); setLoadNonce((n) => n + 1); // refit on load (B329)
     scanSheets(pdf, pdf.numPages); // re-read sheets for the labeled/grouped sidebar (B266/B348); won't override saved cals
   };
   // B1456896 — the ONE deliberate action that writes a non-PDF to the user's machine. Fired only
@@ -1062,7 +1289,7 @@ export default function DocReview({
       setOpenErr(`Couldn’t download “${nonPdfOffer.name}”. Open it from the Library and try again.`);
     }
   };
-  const loadSingleReview = async (rec) => {
+  const loadSingleReview = async (rec, opts = {}) => {
     const tok = ++loadTok.current; // supersede any in-flight load so its late PDF can't land on this review (B52)
     suspendSave(); // don't let this programmatic load re-save itself with a fresh updatedAt (B19)
     const s = rec.single || {};
@@ -1074,7 +1301,11 @@ export default function DocReview({
     setBusy(true); setBusyLabel(src?.name || rec.title || rec.item || "file");
     setPdfDoc(null);
     sourceRef.current = src ? { srcId: src.srcId, name: src.name } : null;
+    curIdRef.current = rec.id;
     setReviewId(rec.id);
+    // A tab being switched back to (or restored after a reload) returns to its own page / zoom / tool / selection.
+    const rs = opts.restore && opts.restore.id === rec.id ? opts.restore : null;
+    restoreRef.current = rs && (rs.view || rs.scale) ? rs : null;
     // B1340368 (×2) — `rec.projectId` is the record's OWN copy of "which project is this
     // filed under" (reviewStore.loadReview reads the `data` jsonb), which a project purge can
     // leave stale even after the offer-time check (docProjectLiveness, reading the separate flat
@@ -1090,41 +1321,127 @@ export default function DocReview({
     // which can't be marked up and shouldn't clutter "Recent drawings" (opening it just downloads).
     // Uses the SAME re-checked id as the navigation below, so a dead project can't re-enter
     // Library Home's own offer-time check through this recorded pointer either.
-    if (!(src && src.name && !isPdfName(src.name))) {
+    if (!(src && src.name && !isPdfName(src.name) && !docKindOf(src.name))) {
       currentUid().then((uid) => recordOpen(uid, { id: rec.id, projectId: openProjectId })).catch(() => {});
     }
-    setMeta({ title: rec.title || "", projectId: openProjectId, project: rec.project || "", orgScope: rec.orgScope === true, discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "", folderId: rec.folderId || null, sourceFile: rec.sourceFile || "" });
-    if (openProjectId) onNavigate?.({ projectId: openProjectId }); // reflect the open file's project in the URL + breadcrumb (Work Item A)
-    setSource(src ? { srcId: src.srcId, name: src.name, size: src.size || 0, storageKey: src.storageKey || null, driveKey: src.driveKey || null, oversize: !!src.oversize } : null);
+    const liveProj = liveReviewProject({ ...rec, projectId: openProjectId }, storedProjectName); // B1991040 — the project label is resolved by id, never the stored copy
+    setMeta({ title: isAutoTitle(rec) ? "" : (rec.title || ""), projectId: openProjectId, project: liveProj, orgScope: rec.orgScope === true, discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "", folderId: rec.folderId || null, sourceFile: rec.sourceFile || "" });
+    if (openProjectId && !opts.noNavigate) onNavigate?.({ projectId: openProjectId }); // reflect the open file's project in the URL + breadcrumb (Work Item A)
+    setSource(withKnownKeys(packSource(src), srcKeysRef.current));
     setMarkups(sanitizeMarkups(s.markups)); setCalByPage(s.calByPage || {}); setCalInfo(s.calInfo || {}); // sanitize: a corrupted/partial saved review can't crash the overlay
     setSheetMeta({}); setOpenGroups({}); // re-read on load (B266/B348); saved cals preserved
-    setFileName(s.fileName || ""); setNumPages(s.numPages || 0); setPage(s.page || 1);
-    setDraft(null); clearSelection(); setTool("select"); setRedrop(""); setNonPdfOffer(null); setCalInput(null); clearHistory();
+    setFileName(s.fileName || ""); setNumPages(s.numPages || 0); setPage((rs && rs.page) || s.page || 1);
+    setDraft(null); clearSelection(); setTool((rs && rs.tool) || "select");
+    if (rs && rs.sel && sanitizeMarkups(s.markups).some((m) => m.id === rs.sel)) selectOne(rs.sel);
+    setRedrop(""); setNonPdfOffer(null); setDocFile(null); setPriorSources((rec.sources || []).slice(1).filter(isStoredSource)); setCalInput(null); clearHistory();
     scanTok.current++; // a programmatic load supersedes any in-flight auto-scale scan (use the saved cals)
     try { await fetchSourceBytes(src, tok); }
     finally { if (tok === loadTok.current) { setBusy(false); setBusyLabel(""); } } // only the winning load clears the overlay (B447)
   };
   const resetSingle = () => {
     setPdfDoc(null); sourceRef.current = null;
-    setReviewId(newReviewId());
+    const freshId = newReviewId(); curIdRef.current = freshId;
+    setReviewId(freshId);
     setMeta(newMeta());
     // Keep the current project context: "New" starts a fresh blank review still filed
     // under the project you're in (it does NOT drop you back to "Select a project").
     // Clear the empty-state hint too (B914): switching to a project's clean empty state must
     // not inherit a stale "Pick exactly two PDFs…" / bad-drop message from the last one.
-    setSource(null); setRedrop(""); setNonPdfOffer(null); setErr("");
+    setSource(null); setRedrop(""); setNonPdfOffer(null); setDocFile(null); setDocNotice(""); setPriorSources([]); setErr("");
     setFileName(""); setNumPages(0); setPage(1); setView(null); setPageBase(null); detailTileRef.current = null; setDetailTile(null); setLoadNonce((n) => n + 1);
     setMarkups([]); setCalByPage({}); setCalInfo({}); setSheetMeta({}); setOpenGroups({}); setDraft(null); clearSelection(); setTool("select"); setCalInput(null);
     clearHistory();
     scanTok.current++; // cancel any in-flight scan from a prior file
   };
+  /* ---- TABS: stash · activate · close (NEW-1, 2026-10-04) ---- */
+  // What the next render will see, readable from async code and from effects that were bound a render ago.
+  const liveRef = useRef({});
+  liveRef.current = { reviewId, mode, tabs, redrop, source, meta, docFile, hasPdf: !!pdfRef.current, page, view, tool, sel, busy,
+    dirty: dirtyMap,
+    snap: () => ({ ...buildSnapshot(), sources: source ? [packSource(source), ...priorSources.map(packSource)] : [] }) };
+  // Remember where the ACTIVE tab is (page · zoom/pan · tool · selection) so coming back to it restores exactly that.
+  const stashActive = () => {
+    const L = liveRef.current;
+    if (L.mode !== "review" || L.busy || !L.tabs.some((t) => t.id === L.reviewId)) return;
+    const prev = tabStatesRef.current[L.reviewId] || {};
+    tabStatesRef.current[L.reviewId] = { ...prev, page: L.page, tool: L.tool, sel: L.sel || null, ...(L.view ? { view: { scale: L.view.scale, tx: L.view.tx, ty: L.view.ty } } : {}) };
+    if (L.source) tabLiveRef.current[L.reviewId] = L.snap(); // the in-memory truth of this tab, for when its stored copy cannot reopen it alone
+  };
+  // An upload finished. Remember where the bytes went even if its tab is in the background by now (the root's `source`
+  // belongs to whichever tab is showing), and — signed in — write that into the background tab's record so it is not lost.
+  const noteSourceKeys = (srcId, r) => {
+    if (!r || !(r.storageKey || r.driveKey || r.oversize)) return;
+    const keys = { storageKey: r.storageKey || null, driveKey: r.driveKey || null, oversize: !!r.oversize };
+    srcKeysRef.current[srcId] = keys;
+    for (const [id, rec] of Object.entries(tabLiveRef.current)) {
+      if (!rec || !(rec.sources || []).some((x) => x && x.srcId === srcId)) continue;
+      const next = { ...rec, sources: rec.sources.map((x) => (x && x.srcId === srcId ? { ...x, ...keys } : x)) };
+      tabLiveRef.current[id] = next;
+      if (id !== liveRef.current.reviewId) {
+        cloudReady().then((ready) => { if (ready) upsertReview({ ...next, updatedAt: Date.now(), sources: next.sources.filter(isStoredSource) }).catch(() => {}); }).catch(() => {});
+      }
+    }
+  };
+  const stateFor = (id) => (tabStatesRef.current[id] ? { id, ...tabStatesRef.current[id] } : null);
+  const activateTab = async (id) => {
+    const L = liveRef.current;
+    if (id === L.reviewId && L.mode === "review" && !L.redrop) return;
+    await openReview({ id });
+  };
+  // Drop a tab and everything held for it. Returns the tab to show next when the dropped one was the active one.
+  const dropTab = (id) => {
+    const L = liveRef.current;
+    const res = closeTab(L.tabs, id, L.mode === "review" ? L.reviewId : null);
+    setTabs(res.tabs);
+    forgetTab(id);
+    return res.next;
+  };
+  const forgetTab = (id) => {
+    setDocPool((p) => { if (!p[id]) return p; const { [id]: _gone, ...rest } = p; return rest; });
+    setDirtyMap((m) => { if (!(id in m)) return m; const { [id]: _gone, ...rest } = m; return rest; });
+    delete tabStatesRef.current[id]; delete docSaveRefs.current[id]; delete tabLiveRef.current[id];
+  };
+  /* Close the ACTIVE tab: flush it, drop it, then show its neighbour on the right (left if it was last), or leave
+   * Review blank when it was the last. resetSingle keeps the route's project context but leaves no file open. */
+  const closeNow = async () => {
+    setClosePrompt(null);
+    loadTok.current++; // an open still in flight must not repaint over what comes next
+    const id = liveRef.current.reviewId;
+    try { await saveNow(); } catch (_) { /* the local mirror already ran; closing must not strand the user */ }
+    setOpenErr("");
+    const next = dropTab(id);
+    if (next) await openReview({ id: next }); else resetSingle();
+  };
+  // × on any tab. A Word/text tab with unsaved edits asks first (Save / Discard / Cancel) — for a background tab it is
+  // brought forward first, because Save needs that tab's own record and editor on screen.
+  const closeTabById = async (id) => {
+    const t = liveRef.current.tabs.find((x) => x.id === id);
+    if (!t) return;
+    if (t.kind === "doc" && dirtyMap[id]) {
+      if (id !== liveRef.current.reviewId) await activateTab(id);
+      setClosePrompt("ask");
+      return;
+    }
+    if (id === liveRef.current.reviewId && liveRef.current.mode === "review") await closeNow();
+    else dropTab(id);
+  };
+  const closeSaveFirst = async () => {
+    setClosePrompt("saving");
+    let ok = false;
+    try { ok = !!(docSaveRef.current && await docSaveRef.current()); } catch (_) { ok = false; }
+    if (ok) await closeNow(); else setClosePrompt(null); // a failed save keeps the file open; the editor names why
+  };
+
   // Open a saved review from either toolbar OR the global Project Files panel; route single
   // vs. stitch by kind. Surfaces a visible error if the row can't be loaded so an open can
   // never fail silently again (NEW-1).
-  const openReview = async (row) => {
+  const openReview = async (row, opts = {}) => {
     // Even a malformed open request is named, never silent (B446).
     if (!row || !row.id) { setOpenErr("That file can't be opened (its reference is missing). Browse the Files list and try again."); return; }
     setOpenErr("");
+    // Already the file on screen → nothing to switch (a "re-drop" banner is the exception: opening it again retries).
+    { const L = liveRef.current; if (row.id === L.reviewId && L.mode === "review" && (L.hasPdf || L.docFile) && !L.redrop) return; }
+    stashActive(); // leaving a tab: remember its page / zoom / tool / selection first
     // While THIS open runs, the project-switch resume effect must stand down: a cross-
     // workspace open navigates the route a commit AFTER its intent is consumed, and without
     // this flag that route change would kick off the target project's LAST doc in parallel,
@@ -1144,6 +1461,7 @@ export default function DocReview({
       const uid = await currentUid();
       rec = reconcile(await loadReview(row.id), readDraft(uid, row.id));
     } catch (_) { rec = null; }
+    rec = mergeLiveRecord(rec, tabLiveRef.current[row.id], srcKeysRef.current); // a tab still only in memory reopens from memory
     if (!rec) {
       setBusy(false); setBusyLabel("");
       setOpenErr(`Couldn't open “${row.title || row.item || "that file"}”. It may have been removed, or the cloud is unreachable — try again.`);
@@ -1157,75 +1475,14 @@ export default function DocReview({
     if (rec.kind === "stitch") {
       currentUid().then((uid) => recordOpen(uid, { id: rec.id, projectId: rec.projectId || null })).catch(() => {}); // Library-Home "Recent"
       setPendingStitch(rec); setMode("stitch"); setBusy(false); setBusyLabel("");
-    } else { setMode("review"); await loadSingleReview(rec); }
+    } else { setMode("review"); await loadSingleReview(rec, { restore: opts.restore || stateFor(row.id), noNavigate: opts.noNavigate }); }
     } finally { openInFlightRef.current = false; }
   };
 
-  // Breadcrumb project switch → land on THAT project's last-open document (owner request,
-  // 2026-07-05: "whatever I last reviewed in that project should stay open too"). Declared
-  // BEFORE the docIntent consumer so a same-commit cross-workspace open still reads as
-  // pending here and wins. Skips during boot (the resume effect owns the first resolve) and
-  // when the project change came FROM opening a doc (meta already matches the new project).
+  /* NEW-1 (2026-10-04) — switching project from the breadcrumb no longer swaps or closes the open file: tabs are not
+   * tied to the selected project. (The old "land on that project's last document" effect and its Save/Discard/Cancel
+   * "switching project" prompt were retired with it.) */
   const booted = useRef(false);
-  const prevProjectRef = useRef(projectId);
-  // Live mirror of the route project (B914 round-2). The boot-resume effect below has `[]` deps,
-  // so its closure captures whatever `projectId` was at MOUNT — which on a deep link is still null
-  // for a beat before the route resolves. Reading this ref (updated every render) instead lets the
-  // resume guard see the CURRENT route when a slow candidate's loadReview() finally settles.
-  const routeIdRef = useRef(projectId);
-  routeIdRef.current = projectId;
-  // ORG SCOPE (NEW-1) — mirrors routeIdRef exactly, for the same reason (the boot-resume
-  // effect's resumeAllowedForRoute check below needs the LIVE route, not its own mount-time
-  // closure).
-  const routeOrgRef = useRef(org);
-  routeOrgRef.current = org;
-  useEffect(() => {
-    const prev = prevProjectRef.current;
-    prevProjectRef.current = projectId;
-    if (!booted.current) return;
-    if (docIntent && docIntent.token !== lastConsumedDocToken) return; // a specific open is incoming — it wins
-    if (openInFlightRef.current) return; // an open is mid-flight — ITS navigate caused this change; it owns the outcome
-    // ORG SCOPE (NEW-1) — Organization is a real destination, exactly like a project, checked
-    // FIRST: falling through to the plain `projectId` comparison below would read Organization
-    // as indistinguishable from "no project chosen" (docs/DATA.md invariant §14 — never let a
-    // `projectId` fallback stand in for it). Reachable in one click from ANY project's Review
-    // (the breadcrumb's "🏢 Organization" row) followed by switching back to the Review tab —
-    // Review stays mounted the whole time (keep-alive), so without this branch the canvas would
-    // keep showing the prior project's drawing under an "Organization" breadcrumb.
-    if (org) {
-      if (meta.orgScope === true) return; // the open doc already belongs to Organization
-      const entry = readLastDoc(null, true);
-      const openId = mode === "stitch" ? ((pendingStitch && pendingStitch.id) || null) : reviewId;
-      if (entry && entry.id === openId) return; // that doc is already on screen
-      if (entry) { openReview({ id: entry.id }); return; } // openReview flushes the outgoing doc first (B447)
-      if (mode !== "review" || source || markups.length > 0 || meta.projectId || meta.orgScope) {
-        (async () => { try { await saveNow(); } catch (_) {} setMode("review"); resetSingle(); })();
-      }
-      return;
-    }
-    if (!projectId) {
-      // "No project chosen" — the one other case that reads as `projectId === null`. An
-      // org-scoped doc must not linger once the breadcrumb no longer names Organization; a
-      // genuinely unfiled doc is left exactly as before (this branch used to be unreachable
-      // with a real prior project on screen — there was no UI path INTO "no project" from one —
-      // Organization is that new path).
-      if (meta.orgScope === true) { (async () => { try { await saveNow(); } catch (_) {} setMode("review"); resetSingle(); })(); }
-      return;
-    }
-    if (projectId === prev) return;
-    if (meta.projectId === projectId) return; // the open doc already belongs here (its own open navigated us)
-    const entry = readLastDoc(projectId);
-    const openId = mode === "stitch" ? ((pendingStitch && pendingStitch.id) || null) : reviewId;
-    if (entry && entry.id === openId) return; // that doc is already on screen
-    if (entry) { openReview({ id: entry.id }); return; } // openReview flushes the outgoing doc first (B447)
-    // No remembered doc for this project: fall to the clean empty state — a drawing from
-    // ANOTHER project staying open under the new breadcrumb reads as the wrong file. Flush
-    // the outgoing review's pending edit before wiping the canvas state.
-    if (mode !== "review" || source || markups.length > 0 || meta.projectId) {
-      (async () => { try { await saveNow(); } catch (_) {} setMode("review"); resetSingle(); })();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, org]);
 
   // Consume the Shell's cross-workspace "open this review" intent (NEW-1). A file clicked in
   // the GLOBAL Project Files panel switches here AND hands us the review; because this
@@ -1238,59 +1495,127 @@ export default function DocReview({
       const targetPage = docIntent.openAtPage;
       const opened = openReview(docIntent.row);
       if (targetPage) opened.then(() => goToPage(targetPage));
+      if (docIntent.openHistory) opened.then(() => setHistoryOpen(true)); // Library row → "Version history"
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docIntent]);
-  // Resume the last review (and its mode) on mount, once — per-project first. Stitch
-  // reviews are handed to <Stitcher> via pendingStitch; single reviews load here.
+  /* Reopen the tabs left open on this device (NEW-1, 2026-10-04): same order, same active tab, each at its last page and
+   * zoom. Per-device on purpose (a phone does not inherit a desktop's tabs). Every stored tab is checked first; one whose
+   * file no longer exists (or cannot be read, after one retry) is dropped with a one-line notice — never an error screen.
+   * With nothing stored Review stays BLANK: there is no "last document" resume any more. */
   useEffect(() => {
     if (booted.current) return; booted.current = true;
-    // A cross-workspace open is incoming — let the docIntent effect load THAT review rather
-    // than also resuming the last one (the two are async and would race; resume could win
-    // and silently replace the file the user just clicked). (NEW-1)
-    if (bootDocIntentRef.current) { setBootResolved(true); return; }
-    // Browsing lives in the Library workspace, so Review resumes the last open drawing on
-    // mount. Candidates come from the FIRST-RENDER pointer capture (the live keys may already
-    // be touched by this session): the URL's project → that project's own last doc first,
-    // then the legacy global pointers; no URL project → the legacy globals, then unfiled.
     (async () => {
-      const candidates = resolveResume({
-        routeProjectId: projectId,
-        map: bootPointers.current.map,
-        legacy: bootPointers.current.legacy,
-        org,
-      });
-      if (!candidates.length) return;
       const uid = await currentUid();
-      // Respect an explicit deep link (Work Item A): if the URL named a project, only
-      // auto-resume a review that belongs to THAT project — try the next candidate, else the
-      // empty state. B914: the match must be EXACT (see resumeAllowedForRoute) — the old
-      // `rec.projectId && …` guard let an UNFILED legacy-global orphan through, leaking one
-      // project's last loose PDF (and its stuck upload banner) onto every other project's
-      // Review tab. No URL project → resume freely (it reflects into the URL).
-      for (const c of candidates) {
-        // B914 round-2 — a route-driven open (the project-switch effect above, once the URL's
-        // project resolves) is AUTHORITATIVE. If one is in flight, stand down: otherwise a slow
-        // legacy-global candidate could finish LAST and supersede the correct per-project doc it
-        // already opened, re-leaking the very "Goose Creek…" banner B914 killed.
-        if (openInFlightRef.current) return;
-        const rec = reconcile(await loadReview(c.id), readDraft(uid, c.id));
-        if (openInFlightRef.current) return; // re-check: the open may have started during the await
-        // Guard on the LIVE route (routeIdRef), never this effect's mount-time `projectId` closure.
-        // On a deep link the projectId prop lands a beat after mount, so the closed-over value can
-        // still be null while loadReview() is in flight — guarding on that stale null waved a
-        // projectId-less orphan through resumeAllowedForRoute() and let it clobber the right doc.
-        if (!rec || !resumeAllowedForRoute(routeIdRef.current, rec.projectId || null, routeOrgRef.current, rec.orgScope === true)) continue;
-        // Route by the RECORD's kind (an entry's stored mode could be stale if re-filed).
-        if (rec.kind === "stitch") { setPendingStitch(rec); setMode("stitch"); return; }
-        if (rec.kind === "single") { await loadSingleReview(rec); return; }
+      uidRef.current = uid;
+      let raw = null; try { raw = localStorage.getItem(TABS_STORE_KEY); } catch (_) { /* private mode */ }
+      const local = parseTabs(raw, uid); // the on-device copy: instant, and the only one when signed out / offline
+      let start = local ? { tabs: local.tabs.map(({ state, ...t }) => t), active: local.active, states: Object.fromEntries(local.tabs.filter((t) => t.state && Object.keys(t.state).length).map((t) => [t.id, t.state])), at: local.at } : { tabs: [], active: null, states: {}, at: 0 };
+      if (uid) { // tabs follow the account: take the newest copy (a newer local one — offline edits — wins and is pushed instead)
+        syncRef.current = createTabSync({ backend: prefsBackend, uid });
+        const res = await syncRef.current.pull({ tabs: start.tabs, activeId: start.active, states: start.states, at: start.at }, { adoptActive: true });
+        if (res.changed) start = { tabs: res.tabs, active: res.activeId, states: res.states, at: res.at };
       }
-    })().catch(() => {}) // B535: a resume failure (currentUid/loadReview/reconcile throwing) must
-      // not be an unhandled rejection — loadSingleReview owns its own "Opening…" overlay via
-      // finally, so swallowing here just falls to the empty state.
-      .finally(() => setBootResolved(true)); // arm the pointer writes only now — never before resume read them
+      localAtRef.current = start.at;
+      if (!start.tabs.length) return;
+      Object.assign(tabStatesRef.current, start.states);
+      lastSigRef.current = syncSig({ tabs: start.tabs, activeId: start.active, states: start.states });
+      setTabs((cur) => mergeRestored(start.tabs, cur)); // visible at once; anything that turns out to be gone is removed below
+      const readable = async (id) => {
+        for (let i = 0; i < 2; i++) {
+          let rec = null;
+          try { rec = reconcile(await loadReview(id), readDraft(uid, id)); } catch (_) { rec = null; }
+          if (rec) return rec.kind === "stitch" ? null : rec;
+          if (i === 0) await new Promise((r) => setTimeout(r, 600)); // a flaky read must not cost the owner a tab
+        }
+        return null;
+      };
+      const checked = await Promise.all(start.tabs.map(async (t) => ({ t, rec: await readable(t.id) })));
+      const gone = checked.filter((c) => !c.rec).map((c) => c.t);
+      if (gone.length) {
+        const ids = new Set(gone.map((t) => t.id));
+        setTabs((cur) => cur.filter((t) => !ids.has(t.id)));
+        for (const id of ids) delete tabStatesRef.current[id];
+        setTabNotice(droppedNotice(gone.map((t) => t.name)));
+      }
+      const alive = checked.filter((c) => c.rec).map((c) => c.t);
+      if (!alive.length || bootDocIntentRef.current || openInFlightRef.current) return; // a specific open is incoming — it wins
+      const first = alive.find((t) => t.id === start.active) || alive[0];
+      const st = start.states[first.id];
+      await openReview({ id: first.id }, { restore: st && Object.keys(st).length ? { id: first.id, ...st } : null, noNavigate: true });
+    })().catch(() => {}) // B535: a restore failure must not be an unhandled rejection — Review simply stays blank
+      .finally(() => setBootResolved(true)); // arm the tab-store writes only now — never before the restore read them
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /* Pull the account's tab set again whenever the window regains focus, the tab becomes visible, or the network returns
+   * (LAST CHANGE WINS). The tab being looked at is never swapped out from under the user, and a Word/text tab with unsaved
+   * edits on THIS device stays open even if another device closed it. */
+  useEffect(() => {
+    if (!bootResolved) return undefined;
+    let running = false;
+    const pull = async () => {
+      const sync = syncRef.current;
+      if (!sync || running || (typeof document !== "undefined" && document.visibilityState === "hidden")) return;
+      running = true;
+      try {
+        const L = liveRef.current;
+        stashActive();
+        const hasActive = L.mode === "review" && L.tabs.some((t) => t.id === L.reviewId);
+        const r = await sync.pull({ tabs: L.tabs, activeId: hasActive ? L.reviewId : null, states: tabStatesRef.current, at: localAtRef.current }, { adoptActive: !hasActive, isDirty: (id) => !!liveRef.current.dirty[id] });
+        if (!r.ok || !r.changed) return;
+        localAtRef.current = r.at; lastSigRef.current = syncSig(r);
+        Object.keys(tabStatesRef.current).forEach((k) => { delete tabStatesRef.current[k]; });
+        Object.assign(tabStatesRef.current, r.states);
+        setTabs(r.tabs);
+        r.removed.forEach(forgetTab);
+        const cur = liveRef.current;
+        if (cur.mode === "review" && cur.tabs.some((t) => t.id === cur.reviewId) && !r.tabs.some((t) => t.id === cur.reviewId)) {
+          // the file on screen was closed on the other device (and has no unsaved edits here): move to the tab chosen, or go blank
+          if (r.activeId) await openReview({ id: r.activeId }); else resetSingle();
+        } else if (!hasActive && r.activeId) await openReview({ id: r.activeId }, { noNavigate: true });
+      } catch (_) { /* a failed pull leaves the local set exactly as it was */ } finally { running = false; }
+    };
+    window.addEventListener("focus", pull); window.addEventListener("online", pull); document.addEventListener("visibilitychange", pull);
+    return () => { window.removeEventListener("focus", pull); window.removeEventListener("online", pull); document.removeEventListener("visibilitychange", pull); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bootResolved]);
+
+  // Persist the open tabs: on this device at once, and to the account shortly after. Armed only after the restore above.
+  useEffect(() => {
+    if (!bootResolved) return undefined;
+    const L = liveRef.current;
+    if (L.mode === "review" && !L.busy && tabs.some((t) => t.id === reviewId) && (docFile || numPages > 0)) {
+      const prev = tabStatesRef.current[reviewId] || {};
+      tabStatesRef.current[reviewId] = { ...prev, page, tool, sel: sel || null, ...(view ? { view: { scale: view.scale, tx: view.tx, ty: view.ty } } : {}) };
+    }
+    const activeNow = L.mode === "review" && tabs.some((t) => t.id === reviewId) ? reviewId : null;
+    const snapNow = { tabs, activeId: activeNow, states: tabStatesRef.current };
+    const sig = syncSig(snapNow);
+    if (sig !== lastSigRef.current) { lastSigRef.current = sig; localAtRef.current = Date.now(); } // a real local change: it is now the newest
+    const write = () => {
+      try {
+        if (!snapNow.tabs.length) { localStorage.removeItem(TABS_STORE_KEY); return; }
+        localStorage.setItem(TABS_STORE_KEY, serializeTabs({ uid: uidRef.current, tabs: snapNow.tabs, activeId: activeNow, states: snapNow.states, at: localAtRef.current }));
+      } catch (_) { /* private mode / full — the tabs just won't survive a reload */ }
+    };
+    const id = setTimeout(write, 350);
+    // …and to the account (debounced harder: a pan/zoom burst is one write). A failure leaves the local copy as the source
+    // and is retried by the next focus / online pull, which pushes a newer local copy instead of overwriting it.
+    const cloud = setTimeout(() => { const sync = syncRef.current; if (sync) sync.push({ ...snapNow, at: localAtRef.current }).catch(() => {}); }, 1500);
+    const flush = () => { clearTimeout(id); write(); };
+    window.addEventListener("pagehide", flush);
+    return () => { clearTimeout(id); clearTimeout(cloud); window.removeEventListener("pagehide", flush); };
+  }, [bootResolved, tabs, reviewId, mode, page, view, tool, sel, busy, docFile, numPages]);
+  useEffect(() => { // signing in mid-session starts syncing the open tabs to the account (the next change pushes them)
+    currentUid().then((u) => { uidRef.current = u; if (u && !syncRef.current) syncRef.current = createTabSync({ backend: prefsBackend, uid: u }); }).catch(() => {});
+  }, [signedIn]);
+
+  // Every file that becomes the open review gets a tab (or refreshes its own): Open…, Library, dashboard, Unfiled, a link.
+  useEffect(() => {
+    if (mode !== "review" || !fileName || !(docFile || source)) return;
+    setTabs((cur) => upsertTab(cur, { id: reviewId, name: fileName, projectId: meta.projectId || null, project: meta.project || "", kind: tabKindOf(fileName, docKindOf), srcKey: srcKeyOf((source && source.name) || fileName, source && source.size) }));
+  }, [mode, reviewId, fileName, docFile, source, meta.projectId, meta.project]);
 
   /* ---- pointer → page units (via the shared transform; relative to the viewport so it
    * works at any pan/zoom — the sheet lives inside the viewport, offset by view.tx/ty) ---- */
@@ -2261,7 +2586,12 @@ export default function DocReview({
   ) : null;
 
   return (
-    <div data-testid="doc-review-root" style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}>
+    <div data-testid="doc-review-root" style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}
+      onDragEnter={(e) => { if (!narrow && e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files")) { dragDepth.current += 1; setFileDrag(true); } }}
+      onDragLeave={() => { if (dragDepth.current > 0 && --dragDepth.current === 0) setFileDrag(false); }}
+      onDrop={() => { dragDepth.current = 0; setFileDrag(false); }}
+      onDragEnd={() => { dragDepth.current = 0; setFileDrag(false); }}>
+      {fileDrag && <div data-testid="review-drop-outline" aria-hidden="true" style={{ position: "absolute", inset: SPACE.sm, zIndex: 35, pointerEvents: "none", border: "2px dashed var(--accent-review, var(--accent))", borderRadius: RADIUS.md }} />}
       <AppHeader
         module={shellModule || "doc-review"}
         onSwitch={onShellSwitch}
@@ -2295,10 +2625,14 @@ export default function DocReview({
         }
         authControl={authControl}
         accountActive={accountActive}
+        aboveToolbar={mode === "review" ? (
+          <ReviewTabStrip tabs={tabs} activeId={tabs.some((t) => t.id === reviewId) ? reviewId : null} dirty={dirtyMap} narrow={narrow} notice={tabNotice} onNotice={setTabNotice}
+            onSelect={activateTab} onClose={closeTabById} onMove={(id, before) => setTabs((cur) => moveTab(cur, id, before))} />
+        ) : null}
         toolbarContent={
           <>
-            <button style={chromeBtn()} title={fileName ? "Open another PDF" : "Open a PDF"} onClick={() => fileRef.current?.click()}>{fileName ? "Open…" : "Open PDF…"}</button>
-            <input ref={fileRef} type="file" accept="application/pdf,.pdf" style={{ display: "none" }} onChange={(e) => { openFile(e.target.files?.[0]); e.target.value = ""; }} />
+            <button style={chromeBtn()} title="Open a PDF, Word or text file" onClick={() => fileRef.current?.click()}>Open…</button>
+            <input ref={fileRef} type="file" accept={REVIEW_ACCEPT} data-testid="review-file-input" style={{ display: "none" }} onChange={(e) => { openFile(e.target.files?.[0]); e.target.value = ""; }} />
             <button style={chromeBtn()} title="Compare two revisions of a drawing — see exactly what changed" onClick={() => compareInputRef.current?.click()}>⇄ Compare…</button>
             <button style={chromeBtn()} onClick={() => setMode("stitch")} title="Stitch multiple sheets into one continuous plan">Stitch ▸</button>
             {/* Reviews (file/save this review) lives in the Row-2 tools row (B360). Its own
@@ -2306,7 +2640,7 @@ export default function DocReview({
                 save indicator now, so there's no longer a second chip competing here. The old
                 📁 Library door is gone too — the 🗂 Files drawer browses by project + discipline. */}
             <ReviewsBar signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={openReview} onNew={resetSingle} />
-            {fileName && <span style={{ color: PAL.chromeMuted, fontSize: 11.5, maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fileName}</span>}
+            {(docFile || pdfRef.current) && source && <button style={iconBtn(false)} onClick={() => { setHistMsg(""); setHistErr(""); setHistoryOpen(true); }} title="Version history — see earlier saved versions" data-testid="version-history-open">Versions</button>}
             {/* Drawing/measure tools + zoom controls now live in the right-side tool rail (B330).
                 Undo/Redo stay here as document-history actions, beside the doc-level controls. */}
             {pdfRef.current && <>
@@ -2358,31 +2692,26 @@ export default function DocReview({
         </div>
       )}
 
-      {!pdfRef.current ? (
-        // Browsing moved to the Library workspace, so Review's landing is a clean empty state:
-        // browse the Library for a filed drawing, or drop/open an ad-hoc PDF to mark up here.
-        <div onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); openFile(e.dataTransfer.files?.[0]); }}
-          style={{ flex: 1, position: "relative", display: "grid", placeItems: "center", color: PAL.muted, fontFamily: "system-ui, sans-serif", textAlign: "center", padding: 24 }}>
-          <div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: PAL.ink, marginBottom: 8 }}>No drawing open</div>
-            <div style={{ fontSize: 13.5, marginBottom: 4 }}>{busy ? "Opening…" : "Open a filed drawing from the Library, or drop a construction PDF to review."}</div>
-            <div style={{ fontSize: 12, marginBottom: 14 }}>Calibrate to scale, measure distance/area/count, redline, and roll up a takeoff.</div>
-            <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
-              <button data-testid="empty-open-library" onClick={() => onShellSwitch?.("library")}
-                style={{ fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 700, cursor: "pointer", borderRadius: RADIUS.md, padding: "7px 14px", border: "1px solid var(--accent-library)", background: "var(--accent-library)", color: "var(--on-accent-library)" }}>
-                🗂 Browse the Library
-              </button>
-              <button onClick={() => fileRef.current?.click()}
-                style={{ fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, padding: "7px 14px", border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)" }}>
-                Open PDF…
-              </button>
-              <button data-testid="empty-compare" onClick={() => { setErr(""); compareInputRef.current?.click(); }}
-                style={{ fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, padding: "7px 14px", border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)" }}>
-                ⇄ Compare revisions…
-              </button>
+      {closePrompt && <CloseFileDialog name={fileName || (docFile && docFile.name) || "this file"} busy={closePrompt === "saving"} onSave={closeSaveFirst} onDiscard={closeNow} onCancel={() => setClosePrompt(null)} />}
+
+      {/* Word / text files: every open tab's editor stays MOUNTED (hidden when not the active tab) so its cursor and undo
+          history survive a tab switch. Closing the tab unmounts it. */}
+      {Object.values(docPool).filter((f) => tabs.some((t) => t.id === f.tabId)).map((f) => {
+        const here = !!docFile && docFile.tabId === f.tabId && f.tabId === reviewId && mode === "review";
+        return (
+          <Suspense key={f.tabId} fallback={here ? <div style={{ flex: 1, display: "grid", placeItems: "center", color: PAL.muted, fontFamily: "system-ui, sans-serif" }}>Opening “{f.name}”…</div> : null}>
+            <div data-testid="doc-editor-host" data-tab-id={f.tabId} style={{ flex: here ? 1 : "none", display: here ? "flex" : "none", minHeight: 0, minWidth: 0, position: "relative" }}>
+              <DocEditor file={f} author={docAuthor} notice={here ? docNotice : ""} onSave={saveDocFile} onDirty={(d) => setDirtyFor(f.tabId, d)} saveRef={saveRefFor(f.tabId)} onHistory={() => { setHistMsg(""); setHistErr(""); setHistoryOpen(true); }}
+                versionBar={f.readOnly ? { label: f.versionLabel, busy: histBusy, onRestore: () => restoreFromHistory(versions.find((v) => v.srcId === f.versionSrcId)), onCopy: () => copyFromHistory(versions.find((v) => v.srcId === f.versionSrcId)), onBack: backToLatest } : null} />
             </div>
-            {err && <div style={{ color: "var(--danger-text)", marginTop: 10, fontSize: FONT_SIZE.control }}>{err}</div>}
-          </div>
+          </Suspense>
+        );
+      })}
+      {docFile ? null : !pdfRef.current ? (
+        // NEW-1 (2026-10-04) — with no tab open Review is BLANK: no heading, no buttons, no sheet index. Open… in the
+        // toolbar is the way in. Desktop drag-and-drop still opens a file; its outline shows only while a file is dragged over.
+        <div data-testid="review-blank" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); setFileDrag(false); openFile(e.dataTransfer.files?.[0]); }}
+          style={{ flex: 1, position: "relative", minHeight: 0 }}>
           {openingOverlay}
         </div>
       ) : (
@@ -2696,7 +3025,7 @@ export default function DocReview({
                 // behaviour — no preventDefault needed).
                 const isCallout = !!editing.calloutTip || (editing.id && markups.find((m) => m.id === editing.id)?.kind === "callout");
                 const color = editing.id ? (readProp(markups.find((m) => m.id === editing.id) || {}, "fontColor") || "#1a1a1a") : (propStyle.fontColor ?? columnMeta("fontColor")?.default ?? "#1a1a1a");
-                const commonStyle = { position: "absolute", left: editing.pt.x * view.scale, top: editing.pt.y * view.scale - 14, font: "600 12px ui-sans-serif, system-ui, sans-serif", padding: "1px 4px", border: `1px solid ${PAL.accent}`, borderRadius: 4, background: "#fff", color, zIndex: 5 };
+                const commonStyle = { position: "absolute", left: editing.pt.x * view.scale, top: editing.pt.y * view.scale - 14, font: "600 12px ui-sans-serif, system-ui, sans-serif", padding: "1px 4px", border: `1px solid ${PAL.accent}`, borderRadius: 4, background: "#fff", /* B1998016: intentional — sits on the drawing paper and takes the markup's own (dark) font colour */ color, zIndex: 5 };
                 const onKeyDown = (ev) => {
                   ev.stopPropagation();
                   if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); closeEditor(true); }
@@ -2724,7 +3053,7 @@ export default function DocReview({
               })()}
               {/* Inline Calibrate entry (B304) — replaces window.prompt; validates the typed length. */}
               {calInput && (
-                <div style={{ position: "absolute", left: calInput.x, top: calInput.y, transform: "translate(-50%, -135%)", zIndex: 6, width: 214, background: "#fff", border: `1px solid ${PAL.accent}`, borderRadius: 8, padding: "7px 9px", boxShadow: "0 6px 20px rgba(0,0,0,0.28)", fontFamily: "system-ui, sans-serif" }}>
+                <div style={{ position: "absolute", left: calInput.x, top: calInput.y, transform: "translate(-50%, -135%)", zIndex: 6, width: 214, background: "var(--surface-raised)", border: `1px solid ${PAL.accent}`, borderRadius: 8, padding: "7px 9px", boxShadow: "0 6px 20px rgba(0,0,0,0.28)", fontFamily: "system-ui, sans-serif" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <span style={{ fontSize: 11, color: PAL.muted, whiteSpace: "nowrap" }}>Real length</span>
                     <input autoFocus value={calInput.value}
@@ -2771,7 +3100,7 @@ export default function DocReview({
             {pageMarks.length === 0
               ? <div style={{ fontSize: 11.5, color: PAL.muted, marginBottom: 10 }}>Nothing on this sheet yet.</div>
               : <div style={{ marginBottom: 10 }}>{pageMarks.map((m) => (
-                  <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 2px 2px 6px", borderRadius: 6, background: m.id === sel ? "#fbf3ee" : "transparent" }}>
+                  <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 2px 2px 6px", borderRadius: 6, background: m.id === sel ? "var(--surface-selected)" : "transparent" }}>
                     <button onClick={() => { setTool("select"); selectOne(m.id); }} title="Select this markup on the sheet"
                       style={{ flex: 1, minWidth: 0, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "2px 0", border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, textAlign: "left", color: "inherit" }}>
                       <span style={{ color: PAL.muted, textTransform: "capitalize", flex: "none" }}>{m.kind}</span>
@@ -2806,11 +3135,11 @@ export default function DocReview({
       {/* tool hint */}
       {pdfRef.current && addLeaderFor ? (
         <div style={{ flex: "none", padding: "5px 12px", background: PAL.chrome, borderTop: `1px solid var(--chrome-divider)`, color: PAL.chromeMuted, fontSize: 11, fontFamily: "system-ui, sans-serif" }}>
-          <b style={{ color: PAL.ember }}>Add Leader:</b> click where the new leader should point — Esc to cancel.
+          <b style={{ color: "var(--accent-review-text)" }}>Add Leader:</b> click where the new leader should point — Esc to cancel.
         </div>
       ) : pdfRef.current && curTool && (
         <div style={{ flex: "none", padding: "5px 12px", background: PAL.chrome, borderTop: `1px solid var(--chrome-divider)`, color: PAL.chromeMuted, fontSize: 11, fontFamily: "system-ui, sans-serif" }}>
-          <b style={{ color: PAL.ember }}>{curTool.label}:</b> {curTool.hint}{err && <span style={{ color: "var(--warn-text)", marginLeft: 10 }}>{err}</span>}
+          <b style={{ color: "var(--accent-review-text)" }}>{curTool.label}:</b> {curTool.hint}{err && <span style={{ color: "var(--warn-text)", marginLeft: 10 }}>{err}</span>}
         </div>
       )}
 
@@ -2887,6 +3216,11 @@ export default function DocReview({
       {compareFiles ? (
         <CompareView a={compareFiles.a} b={compareFiles.b} onClose={() => setCompareFiles(null)} />
       ) : null}
+      {historyOpen && source && (
+        <VersionHistorySheet fileName={source.name} versions={versions} isDoc={isDocFile} viewingSrcId={viewingSrcId} busy={histBusy}
+          dirty={docDirty && !(docFile && docFile.readOnly)} signedIn={signedIn} message={histMsg} error={histErr}
+          onOpen={openVersion} onRestore={restoreFromHistory} onCopy={copyFromHistory} onBackToLatest={backToLatest} onClose={() => setHistoryOpen(false)} />
+      )}
     </div>
   );
 }

@@ -739,6 +739,14 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   silently discard every unsaved row with no prompt at all — now routes through `requestClose`,
   arming an inline (never `window.confirm`) "Discard N unsaved comps?" / Keep-editing prompt
   whenever the sheet holds rows, staying instant/silent when it's empty.
+  **B2010352–B2010355 (KMZ export + paste notes):** `lib/siteRecordKml.js` is the PURE assembler behind
+  the right-click "Export KMZ" (MapFinder only gathers inputs): the balloon is `compFieldRows` verbatim with
+  Location first — adds no row of its own — and a comp is always one pin; its parcel outline rides with the comp (named
+  "… — comp parcel") unless the site's own boundary is the same parcel (then drawn once, the site's);
+  the record's map notes are a Notes folder of pins. `compLocationFor` (`compLocationText.js`) is the ONE
+  Location resolver (panel + export; the APN is never a Location). `compParse.js` reads the unclaimed leftover
+  per comma-segment: consumed type/connector words ("lease", "at", "executed") never reach Notes, a leading
+  name becomes the Title.
   KML import (B849233) is a SEPARATE staging table, `db/comp_import_drafts.sql`
   (`public.comp_import_drafts`, owner-only RLS — no team visibility at all, unlike `comps` itself,
   until promoted) — `lib/kmlImport.js` is the pure, hand-rolled Placemark parser (a Point is a
@@ -784,6 +792,7 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   `auth.users` capping signups per hour/day (config-toggleable with one UPDATE statement,
   fails OPEN on any error so a bug here can never brick account creation); `db/test/` holds its
   self-rolling-back proof, including a mutation check (raising the cap lifts the block).
+- `basemaps/` (B2018608) — the ONE basemap definition Food + the Site Plan map share: `basemaps.js` (registry, `SITE_PLAN_BASEMAP` (= the Site tab map) + `SATELLITE_BASEMAP` (Food default: photo only, no roads/labels) + `HYBRID_BASEMAP`, `siteStack(zoom)` (the one layer-stack + gate both read), `VECTOR_SOURCE` = the single swappable vector config, `densityTileOptions`, `IMAGERY_GRADE`), `vectorStyle.js` (pure Apple-like MapLibre style, written in Leaflet zoom), `vectorLabelLayer.js` (lazy MapLibre-in-Leaflet helper with raster fallback), and the city-name layer (`placeNames*.js`, `zoomTracker.js` — moved here, site-planner/lib keeps re-exports). Never fork a Food-only copy; the PDF export is never graded. Glyphs: `public/map-assets/fonts`.
 - `projects/`, `profile/`, `cloud/`, `presence/`, `gis/`, `geometry/`, `placement/`.
 
 **Convention:** shared logic is pure and unit-tested; per-host state/wiring stays in the workspace.

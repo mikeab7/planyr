@@ -1,0 +1,27 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>pin overlap fixture</title>
+<style>html,body,#map{margin:0;height:100%}</style></head>
+<body><div id="map"></div>
+<script type="module">
+/* Fixture for ui-audit/verify-pin-overlap.mjs — a real Leaflet map carrying a site pin, a comp marker
+ * and a map-note marker on ONE parcel centre, built from the app's own marker modules and the same
+ * cluster helper MapFinder.jsx uses. `?cluster=0` skips the offsets: that is the red arm (the pre-fix
+ * layout), which the harness requires to FAIL so a green run means something. */
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+import { compMarkerSvg, compMarkerSize } from "/src/shared/comps/lib/compMarkerIcon.js";
+import { mapNoteMarkerSvg, mapNoteMarkerSize } from "/src/shared/mapNotes/lib/mapNoteMarkerIcon.js";
+import { sitePinSvg, pinHitBox, pinHtml } from "/src/shared/mapNotes/lib/mapPinSymbol.js";
+import { pinClusterOffsets } from "/src/workspaces/site-planner/lib/pinCluster.js";
+const P = { lat: 29.62316598, lon: -95.28208917 };
+const cluster = new URLSearchParams(location.search).get("cluster") !== "0";
+const offs = cluster ? pinClusterOffsets([{ id: "site:s", ...P }, { id: "comp:c", ...P }, { id: "note:n", ...P }]) : new Map();
+const shift = (a, id) => { const o = offs.get(id); return o ? [a[0] - o[0], a[1] - o[1]] : a; };
+const map = L.map("map", { zoomControl: false }).setView([P.lat, P.lon], 17);
+const mk = (cls, html, size, anchor, z) => L.marker([P.lat, P.lon], { icon: L.divIcon({ className: cls, html, iconSize: size, iconAnchor: anchor }), zIndexOffset: z }).addTo(map);
+const hb = pinHitBox();
+mk("map-site-feature", pinHtml(sitePinSvg("pursuit", false), false), hb.size, shift(hb.anchor, "site:s"), 100);
+{ const { size, anchor } = compMarkerSize(false); mk("map-comp-feature", compMarkerSvg("lease"), size, shift(anchor, "comp:c"), 0); }
+{ const { size, anchor } = mapNoteMarkerSize(false); mk("map-note-feature", `<span data-note-id="n">${pinHtml(mapNoteMarkerSvg({ selected: false }), false)}</span>`, size, shift(anchor, "note:n"), 0); }
+window.__ready = true;
+</script></body></html>

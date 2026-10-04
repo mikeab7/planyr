@@ -594,10 +594,15 @@ export const JURISDICTIONS = {
     kind: "vector", label: "City ETJ (Houston & Dallas–Fort Worth)",
     url: HGAC_ETJ.url, minZoom: 9, color: "#1d4ed8", dash: true, weight: 1.6, opacity: 0.4, // B761: same hue as city, dashed
     noLiveFallback: true, // NEW-1 (DFW): several services drawn as one — see vectorLayers.js jur_etj
-    note: "City ETJ — Houston region (H-GAC + Baytown), Dallas–Fort Worth (Collin, Rockwall and Denton counties, Fort Worth) and Austin. Blank elsewhere: there is no statewide ETJ layer, and NCTCOG publishes none. A blank inside those areas is NOT proof of no ETJ. ETJ = a city's reach OUTSIDE its limits; not annexation and not utility service.",
+    note: "City ETJ — Houston region (H-GAC + Baytown), Dallas–Fort Worth (Collin, Rockwall, Denton, Dallas, Ellis, Johnson, Grayson and Kaufman-side publishers, Fort Worth, Mansfield, Corsicana) and Austin. Blank elsewhere: there is no statewide ETJ layer, and NCTCOG publishes none. A blank inside those areas — most of Tarrant, Parker, Wise, Hill, Henderson, Van Zandt — is NOT proof of no ETJ. ETJ = a city's reach OUTSIDE its limits; not annexation and not utility service.",
     // NEW-1 stacking role (lib/mapStack.js): Boundary outlines (dashed).
     role: "line",
     states: ["TX"],
+    // NEW-1 (Georgia) — the panel's out-of-state reason for a state that has no such thing at all.
+    noEquivalentIn: {
+      GA: "Georgia cities have no reach beyond their limits — the county governs outside them. Not a gap in Planyr.",
+      CA: "California cities have no reach beyond their limits — the county governs outside them. Not a gap in Planyr.", // NEW-1 (California)
+    },
     group: "jurisdiction", order: 2,
   },
   jur_isd: {
@@ -868,6 +873,44 @@ export const AHJ_LAYERS = {
   // completely different fact from "nothing here". LayerPanel does the scoping; nothing here
   // filters by location itself.
   // =========================================================================
+  /* NEW-1 (Georgia) — county lines and city limits for Georgia sites. Each is its OWN row reading its
+   * own registry row (`countyGa` / `cityGa`, both DCA, live-probed 2026-09-30), `states: ["GA"]` so the
+   * Texas rows demote on a Georgia view and these demote on a Texas one — and the attribution each layer
+   * contributes is Georgia's alone. Georgia has NO ETJ, so there is deliberately no Georgia ETJ row. */
+  ga_county: {
+    kind: "vector", label: "County boundaries (Georgia)", source: "Georgia DCA",
+    url: GIS_SOURCES.countyGa.serviceUrl, states: ["GA"],
+    minZoom: 6, color: "#374151", weight: 1.6, opacity: 0.4,
+    note: "Georgia county lines (DCA, all 159 counties). Outside city limits the county is the zoning and permitting authority. A has-jurisdiction boundary, not a service area.",
+    role: "line", group: "jurisdiction", order: 1,
+  },
+  ga_city: {
+    kind: "vector", label: "City limits (Georgia)", source: "Georgia DCA",
+    url: GIS_SOURCES.cityGa.serviceUrl, states: ["GA"],
+    minZoom: 9, color: "#1d4ed8", weight: 1.6, opacity: 0.4,
+    note: "Georgia municipal boundaries (DCA). Inside = in the city; outside = unincorporated county. NOT proof of utility service.",
+    infoCaveat: "A boundary means the city HAS JURISDICTION here — not that it serves or will connect utilities to a parcel.",
+    role: "line", group: "jurisdiction", order: 2,
+  },
+  /* NEW-1 (California) — county lines and city limits for California sites. Each is its OWN row reading its own
+   * registry row (`countyCa` / `cityCa`, both CDT State Geoportal, live-probed 2026-10-02), `states: ["CA"]` so
+   * the Texas rows demote on a California view and these demote on a Texas one — and the attribution each layer
+   * contributes is California's alone. California has NO ETJ, so there is deliberately no California ETJ row. */
+  ca_county: {
+    kind: "vector", label: "County boundaries (California)", source: "California CDT State Geoportal",
+    url: GIS_SOURCES.countyCa.serviceUrl, states: ["CA"],
+    minZoom: 6, color: "#374151", weight: 1.6, opacity: 0.4,
+    note: "California county lines (CDT State Geoportal, all 58 counties). Outside city limits the county is the zoning and permitting authority. A has-jurisdiction boundary, not a service area.",
+    role: "line", group: "jurisdiction", order: 1,
+  },
+  ca_city: {
+    kind: "vector", label: "City limits (California)", source: "California CDT State Geoportal",
+    url: GIS_SOURCES.cityCa.serviceUrl, states: ["CA"],
+    minZoom: 9, color: "#1d4ed8", weight: 1.6, opacity: 0.4,
+    note: "California incorporated-city limits (CDT State Geoportal, 482 cities). Inside = in the city; outside = unincorporated county. Spheres of influence are planning lines, not jurisdiction, and are not shown. NOT proof of utility service.",
+    infoCaveat: "A boundary means the city HAS JURISDICTION here — not that it serves or will connect utilities to a parcel.",
+    role: "line", group: "jurisdiction", order: 2,
+  },
   co_city: {
     kind: "vector", label: "City limits (Colorado)", source: "Colorado DOLA (via State of Colorado OIT GIS)",
     url: GIS_SOURCES.cityCo.serviceUrl, states: ["CO"],
@@ -1545,7 +1588,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
           },
         });
         if (lyr) { lyr.addTo(map); refs[k] = lyr; }
-        else fail(k, cfg, `${cfg.label}: no vector source registered`, "unregistered"); // registry drift — loud, never a silent no-op
+        else fail(k, cfg, `${cfg.label}: no vector source registered`, "unregistered"); // registry drift — loud, never a silent no-op (B685200: an owner-set contract — do not reroute)
       } else if (cfg.kind === "vectorLine") {
         // Cached pipeline vector layer (B751): crisp commodity-colored polylines when zoomed in,
         // the agency /export raster (imageFallback) when zoomed far out — switch re-evaluated per

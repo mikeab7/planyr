@@ -27,6 +27,7 @@ import {
   dishRowsForTable, theOrderEntries, theOrderTotalCents, theOrderAsText, formatCents,
   formatScore, dishScoreTier,
 } from "../lib/dishAggregates.js";
+import { noAutofill } from "../lib/noAutofill.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
@@ -218,7 +219,7 @@ function DishEditRow({ initial, existingNames, openWishlistNames, onSave, onCanc
       <input
         type="text" autoFocus value={name} onChange={(e) => setName(e.target.value)}
         placeholder="Dish name" list={listId}
-        data-testid="dish-name-input"
+        data-testid="dish-name-input" {...noAutofill("dish-title")} enterKeyHint="next" autoCapitalize="words"
         style={{
           width: "100%", boxSizing: "border-box", background: "transparent", border: "none",
           borderBottom: "2px solid var(--accent-food)", padding: "4px 2px",
@@ -240,7 +241,7 @@ function DishEditRow({ initial, existingNames, openWishlistNames, onSave, onCanc
           <span style={FIELD_LABEL_STYLE}>Price</span>
           <input
             type="number" step="0.01" min="0" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)}
-            placeholder="$" style={FILLED_FIELD_STYLE} data-testid="dish-price-input"
+            placeholder="$" style={FILLED_FIELD_STYLE} data-testid="dish-price-input" {...noAutofill("dish-price")}
           />
         </div>
       </div>
@@ -251,7 +252,7 @@ function DishEditRow({ initial, existingNames, openWishlistNames, onSave, onCanc
 
       <div>
         <span style={FIELD_LABEL_STYLE}>Note</span>
-        <input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" style={FILLED_FIELD_STYLE} data-testid="dish-note-input" />
+        <input type="text" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" style={FILLED_FIELD_STYLE} data-testid="dish-note-input" {...noAutofill("dish-remarks")} enterKeyHint="done" />
       </div>
 
       {isMobile ? (

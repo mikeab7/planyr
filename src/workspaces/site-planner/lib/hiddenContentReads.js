@@ -77,8 +77,6 @@ export const DECLARATIONS = Object.freeze([
   { name: "fmtScaleNum", verdict: U,
     why: "A number FORMATTER. Its body is swept only because the sweep reads a whole top-level span; it produces no picture." },
   { name: "probeRef", verdict: U, why: "The E2E read-only probe store. It reports what the app holds, so it must report ALL of it." },
-  { name: "frameToActiveParcels", verdict: U,
-    why: "Frames the ACTIVE parcels on an explicit user action (the parcel panel's own control). Its subject is the parcel set the user just named, not what the View menu is showing." },
   { name: "onBgDown", verdict: U,
     why: "A press handler. Its element reads resolve what was pressed, and a hidden element cannot be pressed (it is not rendered) — proven by the HIT arm of verify-hidden-content-behaviour." },
   { name: "onUp", verdict: U, why: "Release handler; the marquee pick it hosts is already visibility-filtered (B442688)." },

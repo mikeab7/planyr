@@ -410,7 +410,9 @@ describe("compParse: B1063904 — MERGE SAFETY, DATA CORRUPTION on paste (5 AC s
     // The land row keeps its real unit — 5 ACRES, never reinterpreted as 5 SF.
     expect(land.draft.landSizeValue).toBe("5");
     expect(land.draft.landSizeUnit).toBe("ac");
-    expect(land.draft.notes).toMatch(/land sale/);
+    // NEW-4 (2026-10-01): "land sale" was CONSUMED by the type detector, so it no longer rides
+    // into Notes (it used to; that assertion pinned the leak, not the safety property above).
+    expect(land.draft.notes).not.toMatch(/land sale/);
 
     // The lease row keeps its own facts, untouched by line 1.
     expect(lease.draft.leaseRate).toBe("0.56");
@@ -1198,5 +1200,72 @@ describe("compParse: B1149584/B1149585 — Michael's Tesla repro, one comp not f
     const { draft } = parseProseLine("800,405 SF");
     expect(draft.compType).toBe("");
     expect(draft.notes).toMatch(/800,405 SF/);
+  });
+});
+
+/* B2010352 NEW-4 (owner report 2026-10-01) — typing `ZZ KML test - safe to delete, lease 50,000 SF
+ * at $0.65/SF/mo NNN, executed 9/15/2026` parsed every field correctly and then saved Notes =
+ * "ZZ KML test - safe to delete lease at executed": the words that INTRODUCE a claimed value rode
+ * into Notes with the deal name. Keywords the parser consumed never land in Notes; a leading
+ * free-text name goes to Title (when empty), not Notes. */
+describe("compParse NEW-4 — consumed keywords never leak into Notes; a leading name is the Title", () => {
+  const draftOf = (text) => {
+    const r = parsePaste(text);
+    expect(r.rows).toHaveLength(1);
+    return r.rows[0].draft;
+  };
+
+  it("the exact owner line: every field parses, Notes is empty, the deal name is the Title", () => {
+    const d = draftOf("ZZ KML test - safe to delete, lease 50,000 SF at $0.65/SF/mo NNN, executed 9/15/2026");
+    expect(d.compType).toBe("lease");
+    expect(d.leaseSizeSf).toBe("50000");
+    expect(d.leaseRate).toBe("0.65");
+    expect(d.leaseRatePeriod).toBe("monthly");
+    expect(d.leaseRateExpense).toBe("nnn");
+    expect(d.compDate).toBe("2026-09-15");
+    expect(d.title).toBe("ZZ KML test - safe to delete");
+    expect(d.notes).toBe("");
+    expect(d.notes).not.toMatch(/\b(lease|at|executed)\b/i);
+  });
+
+  it.each([
+    ["Airtex Building A - leased 25,000 SF at $0.72/SF/mo NNN, signed 3/1/2026", "Airtex Building A"],
+    ["Acme Logistics signed a lease for 120,000 SF at $0.58/SF/mo NNN on 8/12/2026", "Acme Logistics"],
+    ["Katy Commerce Park, leased 40,000 SF at $0.66/SF/mo NNN, dated 2/3/2026", "Katy Commerce Park"],
+  ])("broker-email shape: %s", (line, title) => {
+    const d = draftOf(line);
+    expect(d.compType).toBe("lease");
+    expect(d.title).toBe(title);
+    expect(d.notes).toBe("");
+  });
+
+  it("introducing words are stripped from a lead fragment too (\"Lease at 123 Main St\")", () => {
+    const d = draftOf("Lease at 123 Main St Houston TX, 30,000 SF, $0.70/SF/mo NNN, executed 1/5/2026");
+    expect(d.title).toBe("123 Main St Houston TX");
+    expect(d.notes).toBe("");
+  });
+
+  it("real trailing free text is KEPT in Notes verbatim — only the glue goes", () => {
+    const d = draftOf("Lease at 123 Main St Houston TX, 30,000 SF, $0.70/SF/mo NNN, executed 1/5/2026, tenant improvements negotiable");
+    expect(d.notes).toBe("tenant improvements negotiable");
+  });
+
+  it("a sale line: consumed type/verb words do not leak either", () => {
+    const d = draftOf("Katy Commerce Park, sold 80,000 SF building for $9,200,000 on 5/2/2026");
+    expect(d.compType).toBe("building_sale");
+    expect(d.title).toBe("Katy Commerce Park");
+    expect(d.notes).not.toMatch(/\b(sold|for|on)\b/i);
+  });
+
+  it("a free fragment AFTER a claimed one is context, never the title", () => {
+    const d = draftOf("$0.65/SF NNN, mumbojumbo xyz123");
+    expect(d.title).toBe("");
+    expect(d.notes).toMatch(/mumbojumbo xyz123/);
+  });
+
+  it("a multi-line record's free lines stay in Notes (the title is only taken from a one-line record)", () => {
+    const d = draftOf("Lease 50,000 SF\n$0.65/SF/mo NNN\nGreat dock-high building");
+    expect(d.title).toBe("");
+    expect(d.notes).toMatch(/Great dock-high building/);
   });
 });

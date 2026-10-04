@@ -1,3 +1,13 @@
+### V1474944 — B2056784: no full-screen button on iPhone Safari; still present and working on desktop Chrome `Blocker: real-device` ✅ **PASSED 2026-10-04 — live-verified by Michael on his own devices** (build `0460de1` on desktop)
+
+Sandbox-proven: `test/fullscreenSupport.test.js`, `e2e/fullscreen-gate.spec.js` (API stubbed off at iPhone width; iPad width, standalone and desktop arms). The real-device confirmation is what is left.
+1. On the iPhone, open `planyr.io`; read `/version.json` in the same check. **Expect:** the header's right side shows the sync badge and account chip with NO four-corner button and no gap between them.
+2. Visit the map, Notes, Schedule and Review. **Expect:** no full-screen button anywhere.
+3. On desktop Chrome, same build. **Expect:** the button is present; clicking it enters full screen and the button remains to leave it.
+4. (If an iPad is to hand) **Expect:** the button is present.
+
+**Result (recorded 2026-10-04):** step 1–2 (iPhone Safari): full-screen button gone. Step 3 (desktop Chrome, build `0460de1`): header Full screen button present, `document.fullscreenEnabled` true. Step 4 (iPad) not reported — not claimed. Not separately reported: clicking the desktop button into/out of full screen, and the map/Notes/Schedule/Review modules on the phone; both covered by `e2e/fullscreen-gate.spec.js` and the shared header, not by this pass.
+
 ### V1369888 — B1933584: turning FEMA off truly stops it painting on the Map view — no further paint, no further network request, after a project visit and a return ✅ **PASSED 2026-09-29 — live-verified by Cowork on Michael's signed-in Chrome against real production `planyr.io`, build `42c38c6` (contains merge commit `d3bc142`); `Blocker: live-GIS` closed by this pass**
 
 **Why this needs a real pass even though the mechanism is proven sandbox-side.** The whole defect is that a role-split GIS layer's two real Leaflet sub-layers survive MapFinder's own teardown when the Map view is hidden, and repaint on the next zoom/pan — a **GIS endpoint behavior** + **zoom-/data-density-dependent rendering** defect, both mandatory `LIVE-VERIFY` classes per `CLAUDE.md`, regardless of how solid the sandbox proof is. `hazards.fema.gov` is unreachable from this sandbox (confirmed repo-wide, e.g. `ui-audit/verify-flood-tiles.mjs`'s own header), so the live network half — does the REAL FEMA export endpoint actually get a further, unsolicited request after toggle-off — can only be proven on `planyr.io`.
@@ -2378,6 +2388,17 @@ libs and point `SEQ_VENDOR` at them. Nothing pending.
 ## 📦 Archived from VERIFICATION.md — 2026-07-02
 
 ## ✅ Verified / ❌ Failed — history
+
+### V1440080 — B2014992: every pin on the Dashboard Locations map sits inside its own parcel (Katz in particular) `Blocker: auth` — ✅ PASSED 2026-10-03
+
+Sandbox-proven: `test/dashboardParcelAnchors.test.js` (5, red on pre-change source). Pending: the signed-in dashboard against real parcels. Read-only — change nothing.
+**Steps** (planyr.io, signed in; read the served chunk hash in the same observation):
+1. Open the Dashboard and zoom the Locations card in on Katz (Rankin Rd / I-45 N, Houston). **Expect:** its pin is on the large L-shaped parcel, not on the neighbouring lots.
+2. Compare with the Site tab map for the same site. **Expect:** the pin is at the same spot.
+3. Pan across the other pipeline pins. **Expect:** each sits inside its own outline; a site with no boundary still shows at its saved location.
+- **Stopping rule:** closes on a dated pass of 1-3, or a failed step filed as a recurrence on B2014992.
+- **RESULT — PASSED 2026-10-03, build 17f94b7, owner signed-in Chrome, read-only:** 25 of 25 `dash-map-marker` pins on the Dashboard Locations map sit at the same point as that site's marker on the Site tab map, which was already verified inside its parcel for all 41 sites. Steps 1-3 covered; nothing modified.
+
 _Move items here with the date and who/what checked them._
 
 ### V41 — Grab an unfilled markup shape by its INTERIOR, not just the border line (B155 increment 1) ✅
@@ -3484,15 +3505,54 @@ Sandbox-proven: `test/parcelIdentity.test.js` (9; the pre-fix rule collides on t
 
 **Result:** ✅ PASSED, recorded from the owner's report. Throwaway plan "Concept B" (`smunisjn4ny7`) in the Grand Port group, since binned to Recently deleted; Concept A and Concept A (copy) untouched. Identify mode, real clicks: (1) 20887 in plan → "already in plan", selected 20887 (acct 13376). (2) 15328 in plan → selected 15328 (acct 10096). (3) both deleted, then 15328 → added (`oid:3642195`), 20887 → added (`oid:3642194`), re-click 15328 → removed ONLY 15328, 20887 stayed (confirmed in `site_elements`). (4) the two 2.35 AC strips: 25153 → selected 25153 (acct 14964), 6496 → selected 6496 (acct 4358). (5) re-click 20887 → removed only it. Also: strip lots re-added on Concept A ~4:20 PM with distinct `oid:` keys and no duplicates. The served chunk hash was not stated in this report. `Cadence: once` — closed.
 
-### V1411120 — B1986032: "Activate layer" never zooms out and never moves a view that already shows the site ✅ **PASSED 2026-09-30 for the stay-put case (steps 1–3) — live-verified by Cowork on real production `planyr.io`, build `5263066` (the merge commit itself); off-screen pan and zoom-in-to-gate (steps 4–5) NOT exercised live**
 
-Sandbox-proven: `test/activateFraming.test.js` (pure view rule incl. red-proof against the old margin fit), full unit suite, build. **Still needs** the owner's real Georgia plan (signed in).
-**Steps** (read the served chunk hash in the same observation as each result; use a throwaway duplicate of the plan):
-1. Open the Georgia plan, zoom to a close working view of the parcel, open Analysis. **Expect:** parcel visible, panel shows findings.
-2. Click **◍ Activate layer** on each resolved finding in turn. **Expect:** the view does not move at all (same zoom, same position) and the layer paints (or shows its own "zoom in" note).
-3. Click **◉ Deactivate layer** on one. **Expect:** view still does not move.
-4. Pan so the site is fully off-screen, click Activate. **Expect:** the site comes back centred at the same or a closer scale, never wider.
-5. Zoom far out (below FEMA's draw level), click Activate on the flood finding. **Expect:** it zooms IN just enough for the layer to draw, never out.
-- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1986032.
-- **Live result (Cowork, recorded 2026-09-30):** Georgia plan, Concept A. Zoomed to a close working view of the parcel, opened Analysis, clicked Activate layer on Floodplain then Wetlands. The parcel outline stayed in exactly the same screen position and the scale bar did not change after either click; both layers switched to Deactivate and their overlay images were in the page. Both layers turned back off afterwards, view still unchanged.
-- **Accepted / not accepted:** steps 1–3 accepted as PASS. Steps 4 (site off-screen → pan, never wider) and 5 (far-out zoom → zoom in only) were not run live and are covered by `test/activateFraming.test.js` only. Closed on the owner's instruction to record the stay-put pass; the residual is a unit-test-only claim, not a live one, and is stated as such. `Cadence: once`.
+### V1411120 — B1986032: Activate / Deactivate layer NEVER moves the view — close view, off-screen view, very wide view ✅ **PASSED 2026-09-30 — live-verified by Cowork on real production `planyr.io`, build `f9b5f79` (the #1906 merge); `Blocker: real-data` closed by this pass** (Floodplain in steps 1–3; see accepted / not-accepted below)
+
+Sandbox-proven: `test/activateNeverMoves.test.js` (the real handler body, three views × Activate and Deactivate, red-proofed against the first cut), full unit suite, build. **Earlier pass, superseded:** on 2026-09-30 Cowork passed a first gate on build `5263066` (close view, Floodplain then Wetlands, view unchanged) — that measured the first rule (which still panned/zoomed in two cases); it is kept as history and does NOT close this gate. **Still needs** the owner's real Georgia plan (signed in).
+**Steps** (read the served chunk hash in the same observation as each result; throwaway duplicate of the plan; record the parcel outline's screen position and the scale bar before AND after every click):
+1. **Close view.** Zoom to a close working view of the parcel, open Analysis. Click **◍ Activate layer** on each resolved finding in turn. **Expect:** the parcel outline and scale bar do not move at all after any click; each layer's overlay paints (or the card shows "Not showing at this zoom — zoom in N levels").
+2. **Off-screen view.** Pan until the parcel is entirely off-screen. Click Activate on each resolved finding again. **Expect:** the view does not move — no pan back to the site, no zoom; the site stays off-screen.
+3. **Very wide view.** Zoom far out (below where flood / wetlands draw). Click Activate on Floodplain and Wetlands. **Expect:** the view does not zoom in or out; those cards show the read-only "Not showing at this zoom — zoom in N levels" line, visible without opening the card.
+4. **Deactivate.** Click ◉ Deactivate layer on each layer turned on above. **Expect:** the view still does not move and the note disappears.
+- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B1986032.
+- **Live result (Cowork, recorded 2026-09-30):** Georgia plan, Concept A. Floodplain Activate layer clicked in all three views — close, very wide, and with the site fully off-screen. In each case the parcel outline kept exactly the same screen position, the scale bar did not change, and the button switched to Deactivate. Layer turned back off afterwards.
+- **Accepted:** steps 1–3 for the Floodplain finding (the layer whose gate differs most from a close view) — view never moved in any of the three views. Closed on the owner's instruction.
+- **Not separately reported live, stated rather than assumed:** Wetlands and the other resolved findings (steps 1–3 named "each resolved finding"; only Floodplain was reported), the view being unchanged specifically on the Deactivate click (step 4 — the report says only that the layer was turned back off), and the visibility of the card's "Not showing at this zoom" line in the very-wide view. Those rest on `test/activateNeverMoves.test.js` (real handler, all three views, Activate and Deactivate — the handler is layer-independent). `Cadence: once`.
+
+### V1413904 — B1988816: every site's map pin sits inside its own parcel (Katz, Rankin Rd) `Blocker: real-data`
+
+Sandbox-proven: `test/siteAnchor.test.js` (L-shaped fixture, centroid outside -> anchor inside with clearance; holes; multi-parcel; sliver). **Still needs Michael's real signed-in Katz site.**
+**Steps** (read-only — no edits to any plan; read the served chunk hash in the same observation):
+1. Site tab -> Map view, no project selected. Zoom to the Katz site near Rankin Rd / I-45 N. **Expect:** the orange marker sits inside the outlined parcel, in the wide part, not in the lower-left notch.
+2. Zoom in past the point where the parcel outline appears, then further to the full plan. **Expect:** the marker (then the name tag) stays inside the outline the whole way, at one consistent spot.
+3. Click the Show-on-map arrow for Katz in the Sites list. **Expect:** the map centres on that same inside point.
+4. Spot-check two ordinary rectangular sites. **Expect:** their pins have not visibly moved from where they were.
+- **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B1988816.
+**Observed result: PASSED 2026-10-02, build `4d472ef`, Michael's signed-in Chrome (Site tab overview map).** The Katz circle sits inside the northern block of the parcel, well clear of the edges — checked visually and by point-in-polygon against the drawn outline. Reported as steps 1 and the pin placement; steps 2 (zoom into the plan), 3 (Sites-list fly-to) and 4 (ordinary rectangular sites unmoved) were not separately reported live — they rest on `test/siteAnchor.test.js` (rectangle stays at its centroid; fly-to shares the pin's helper). Moved to Done. See `docs/archive/BACKLOG-DONE.md` **B1988816**.
+
+### V1398976 — B1962672–B1962677: the overlay Crop tool walked end to end on Michael's signed-in Chrome (Reset, pan/zoom, undo/redo, fill, reload) `Blocker: auth`
+
+Sandbox-proven (logged out, throwaway seeded plan with a generated 3000×1800 sheet, real pointer + key events, foreground tab, known-good arm): `node ui-audit/verify-crop-tool-walkthrough.mjs` ALL PASS (58 checks), plus `verify-crop-polygon-editing.mjs` and `verify-site-tab-overlay-crop.mjs` still all-pass, `test/cropHistory.test.js`. Nothing touched a real plan or the locked Goose Creek master plan (`sms93j3sfc04`); the throwaway existed only in the sandbox browser's local storage and was discarded with it. **Still needs the signed-in pass** because the brief's walk (real upload, cloud-saved overlay, hard reload of a cloud plan) needs the account.
+**Steps, on a THROWAWAY duplicate plan with a throwaway upload (constraint 7):**
+1. Site tab → OVERLAYS → expand the row → Crop…. **Expect:** the sheet fills the window (full height, no wide dead bands beyond its own aspect), and the toolbar shows Undo, Redo, ✋ Pan, −, slider, +, Fit, 100%.
+2. Polygon: place 4 points, zoom in with + and the slider, pan with the arrow keys and again with the Pan tool, place 2 more, press Enter. **Expect:** 6 draggable points; no stray point appears where a Pan drag ends.
+3. Drag a point, then Undo button, Redo button, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y. **Expect:** each moves it back/forth; Delete on a selected point removes it and Undo restores it.
+4. Click **Reset to full page** in Polygon mode. **Expect:** Done stays enabled; Done saves an uncropped overlay. Clear polygon instead. **Expect:** Done is greyed with a sentence saying what it needs.
+5. Save a polygon, reopen, switch to Rectangle, Reset to full page, Done. **Expect:** the overlay is uncropped (polygon gone too).
+6. Trim a rectangle, Done, then hard-reload with `?cb=<anything>` on the URL. **Expect:** the crop is still applied and the OVERLAYS row is still expanded.
+7. Rectangle mode: **Expect:** all four side grips look the same weight as each other.
+8. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes when 1-7 confirm on a real signed-in account with the build hash, or a failing step is filed as a recurrence on the matching B# (STANDING RULE #2).
+- **PASSED 2026-10-04** on Michael's signed-in account, builds 17f94b7 and 028d64d: all six items (steps 1–7) confirmed, including crop + expanded OVERLAYS row surviving a hard reload both directions. Recorded from the owner's report in the dispatch brief.
+
+### V1414592 — B1989504/B1989505: the "Start your site" card no longer covers the map `Blocker: live-GIS`
+
+Sandbox-proven: `e2e/start-hint-placement.spec.js` (red on main, green here; emulated phone, not a real iPhone). **Still needs the deployed build** (`live-GIS` here means the real planyr.io edge + real basemap tiles; no signed-in data needed).
+**Steps** (new Untitled site, Site tab; read `/version.json` with `cache:'no-store'` and the served chunk hash in the SAME observation):
+1. Phone width (390×844, Playwright device descriptor, WebKit if installable else Chromium — name the engine): open a new blank site. **Expect:** a compact "Start your site" strip at the top, between the Panels and Tools edge tabs; the middle of the map is clear.
+2. Tap the map centre / drag. **Expect:** the map pans, nothing intercepts.
+3. Tools → Parcel tools → Draw new parcel. **Expect:** the strip is gone and stays gone while drawing.
+4. New blank site again → ✕ → reload. **Expect:** strip stays dismissed.
+5. Desktop width: **Expect:** strip top-left, clear of the middle. Real iPhone Safari look (toolbar collapse, safe areas) remains owner-side and is NOT claimed.
+- **PASSED 2026-10-04** on the deployed planyr.io, build `a0dda27` (read from `/version.json`, no-store, in the same run; the served SitePlannerApp chunk was read in the same observation — it changed between two runs, `kkiQbThE` → `BYQ9GlIP`, i.e. the deploy was still rolling, and a first-run screenshot caught the app's own "couldn't finish loading part of the app — likely mid-deploy" banner, which was absent on the second run). **Engine: Chromium (Playwright, headless, visible, rAF-live), Pixel-style emulation with touch — NOT WebKit and NOT a real iPhone.** Phone 390×844 and desktop 1440×900, a new blank site, Site tab: (1) compact "Start your site" strip docked at the top between the Panels/Tools tabs — clear of the middle half of the map, canvas centre answers to the canvas; (2) the card's own "Trace your boundary" starts Draw and the strip is gone; (3) ✕ dismisses with one tap and it stays gone after a reload; (5) desktop: strip top-left, clear of the middle. Steps 2/3 of the original list (pan through the map; rail-menu Draw) are covered by `e2e/start-hint-placement.spec.js` (green in CI and locally), not re-driven live. **NOT claimed:** real iPhone Safari (collapsing toolbar, safe-area insets, real finger).
+

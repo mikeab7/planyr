@@ -49,7 +49,7 @@ import { enforceMeasureValueOnSheet, droppedMeasureWarning } from "./measureShee
 import { jpegToPdf } from "./imagePdf.js";
 import { buildOverlayVectorFragment, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./overlayVectorSvg.js";
 import { labelAnchors, placeLabels } from "./boundaryLabels.js";
-import { VECTOR_SOURCES, styleFor } from "./vectorLayers.js";
+import { VECTOR_SOURCES, styleFor, isCountyLinesId } from "./vectorLayers.js";
 import { gisCache } from "./gisCache.js";
 import { gridRequest } from "./demGrid.js";
 
@@ -876,7 +876,7 @@ export function createExportSheet(ctx) {
         const anchors = labelAnchors(fc, { labelField: src.labelField, titleCase: !!src.titleCaseLabel });
         const placed = placeLabels(anchors, { project: (lng, lat) => projLLtoPx([lng, lat]), viewW: size.w, viewH: size.h });
         const tmpl = src.nameTemplate || "{name}";
-        labels = placed.map((p) => ({ x: p.box.x, y: p.box.y, text: tmpl.replace("{name}", p.name), uppercase: id === "jur_county" }));
+        labels = placed.map((p) => ({ x: p.box.x, y: p.box.y, text: tmpl.replace("{name}", p.name), uppercase: isCountyLinesId(id) }));
       }
       return { features, labels };
     }

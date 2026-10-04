@@ -142,6 +142,8 @@ export default function JurisdictionBadge({ badge }) {
     badge.touchesCities?.length ? `"Containment unchecked": ${badge.touchesCities.map((c) => `City of ${c}`).join(", ")} borders the site, but the containment check did not complete — we cannot yet say whether the site is inside it.` : "",
     badge.failureNote || "",
     badge.etjNote || "",
+    // NEW-1 (Georgia) — the county governs outside city limits; the consolidated city-county note rides with it.
+    badge.gaNote || "",
     /* ⛔ B689904 — two ETJs named together are an APPORTIONMENT, never a place both fully govern.
      * Local Gov't Code ch. 42 apportions an ETJ overlap between the two cities along a line; a point
      * on this tract is in at most one of them. Said once, here, rather than left to the "crosses"

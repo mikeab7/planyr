@@ -14,7 +14,7 @@
  *
  * MODULE-SCOPE-COMPONENTS: every component here is defined at module scope.
  */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "../../ui/controls.jsx";
 import { RADIUS } from "../../ui/radius.js";
 import { FONT_SIZE } from "../../ui/designTokens.js";
@@ -114,24 +114,42 @@ const inputStyle = {
 
 /** One editable text/number/date field row: static value at rest, an `<input>` while editing.
  * `col.kind === "date"` for `compDate` additionally carries the "Today" quick-set chip — the
- * owner's own answer to date friction: the user asserts today, the app never assumes it. */
+ * owner's own answer to date friction: the user asserts today, the app never assumes it.
+ *
+ * NEW-1 (2026-10-01, iPhone Safari): the WHOLE ROW is the tap target, not just the value text.
+ * Only the right-aligned value was a button, so an empty field ("—", a few px wide) and any tap
+ * on the label or the blank middle of the row did nothing — measured: every text/number/date row
+ * was dead to a touch tap at the row centre, filled or empty. The row now opens its editor from a
+ * tap anywhere on it (min height = ROW_MIN_H, above the 44px touch minimum). */
 function EditableRow({ col, draft, onCommit, onToday }) {
   const st = cellState(col, draft);
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(st.raw ?? "");
   const inputRef = useRef(null);
   useEffect(() => { if (!editing) setVal(st.raw ?? ""); }, [st.raw, editing]);
-  useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
+  // Layout effect (not passive): focus must happen inside the tap's own task for iOS Safari to
+  // raise the keyboard.
+  useLayoutEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
   const commit = () => { onCommit(col, val); setEditing(false); };
   const cancel = () => { setVal(st.raw ?? ""); setEditing(false); };
   const isToday = col.key === "compDate";
+  const numeric = col.kind === "number";
+  const open = () => { if (!editing) setEditing(true); };
   return (
-    <div style={rowShellStyle}>
+    <div
+      data-field-key={col.key}
+      data-field-editor="text"
+      role={editing ? undefined : "button"}
+      tabIndex={editing ? undefined : 0}
+      aria-label={editing ? undefined : `Edit ${mobileLabel(col)}`}
+      onClick={open}
+      onKeyDown={(e) => { if (!editing && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); open(); } }}
+      style={{ ...rowShellStyle, cursor: editing ? "default" : "pointer" }}>
       <span style={labelStyle}>{mobileLabel(col)}</span>
       <span style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0, justifyContent: "flex-end" }}>
         {isToday && (
           <button
-            onClick={() => onToday()}
+            onClick={(e) => { e.stopPropagation(); onToday(); }}
             style={{
               flex: "none", border: "none", borderRadius: RADIUS.sm, padding: "3px 8px",
               background: "var(--focus-ring-soft)", color: "var(--accent)", fontSize: FONT_SIZE.control, fontWeight: 600,
@@ -150,14 +168,14 @@ function EditableRow({ col, draft, onCommit, onToday }) {
               if (e.key === "Enter") { e.preventDefault(); commit(); }
               else if (e.key === "Escape") { e.preventDefault(); cancel(); }
             }}
-            inputMode={col.kind === "number" ? "decimal" : "text"}
+            inputMode={numeric ? "decimal" : "text"}
+            enterKeyHint="done"
+            aria-label={mobileLabel(col)}
             placeholder={col.editHint || undefined}
             style={inputStyle}
           />
         ) : (
-          <button onClick={() => setEditing(true)} style={{ border: "none", background: "none", padding: 0, cursor: "pointer", minWidth: 0 }}>
-            <ValueText text={st.text} empty={!st.text} />
-          </button>
+          <ValueText text={st.text} empty={!st.text} />
         )}
       </span>
     </div>
@@ -171,7 +189,7 @@ function EditableRow({ col, draft, onCommit, onToday }) {
 function ChoiceRow({ col, draft, onCommit }) {
   const st = cellState(col, draft);
   return (
-    <label style={{ ...rowShellStyle, cursor: "pointer" }}>
+    <label data-field-key={col.key} data-field-editor="select" style={{ ...rowShellStyle, cursor: "pointer" }}>
       <span style={labelStyle}>{mobileLabel(col)}</span>
       <span style={{ position: "relative", display: "flex", alignItems: "center", gap: 4, flex: 1, minWidth: 0, justifyContent: "flex-end" }}>
         <ValueText text={st.text} empty={!st.text} />
@@ -195,7 +213,7 @@ function ChoiceRow({ col, draft, onCommit }) {
 function ReadOnlyRow({ col, draft }) {
   const st = cellState(col, draft);
   return (
-    <div style={rowShellStyle}>
+    <div data-field-key={col.key} data-field-editor="readonly" style={rowShellStyle}>
       <span style={labelStyle}>{mobileLabel(col)}</span>
       <ValueText text={st.text} empty={!st.text} muted />
     </div>
@@ -207,7 +225,7 @@ function ReadOnlyRow({ col, draft }) {
  * cell (`CompEntryGrid.jsx`'s `triggerAction`). */
 function LocationRow({ col, draft, locationText, onTap }) {
   return (
-    <button onClick={onTap} style={rowShellStyle}>
+    <button data-field-key={col.key} data-field-editor="action" onClick={onTap} style={rowShellStyle}>
       <span style={labelStyle}>{mobileLabel(col)}</span>
       <ValueText text={locationText || "Set"} empty={!locationText} />
     </button>

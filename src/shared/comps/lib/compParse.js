@@ -802,7 +802,7 @@ function flagUnreadableNumber(generic, flags, fieldKey, hit, label) {
  * term, size) already owns. Whatever real content is left over at the end is preserved verbatim
  * via `addNote` rather than silently dropped (DEFECT A) — never dumped wholesale the way a
  * fully-unmatched LINE used to be; here it's whatever fragment nothing could place. */
-function extractUnlabeledLine(generic, flags, rawLine, recordContext) {
+function extractUnlabeledLine(generic, flags, rawLine, recordContext, opts = {}) {
   const line = String(rawLine || "");
   // The sale/lease context a unit price needs to disambiguate itself often lives on a DIFFERENT
   // line of the same record ("Building sold" / "$92.40 psf") — recordContext is the whole
@@ -1025,11 +1025,79 @@ function extractUnlabeledLine(generic, flags, rawLine, recordContext) {
   }
   // Partial claim: whatever's left in `working` after every detector had its turn is real
   // unrecognized content (not just the punctuation/glue the claims left behind) — keep it too.
-  // B986096 (owner report, 2026-09-02) — stripping "," left the space that FOLLOWED it behind
-  // ("Houston, TX 77073" -> "Houston  TX 77073", a double space) — collapse any run of whitespace
-  // the comma-strip produces down to one, same as every other leftover-text normalization here.
-  const leftover = working.replace(/[,;|]+/g, " ").replace(/\s+/g, " ").trim();
-  if (leftover) addNote(generic, leftover);
+  // ⛔ NEW-4 (owner report, 2026-10-01, `ZZ KML test - safe to delete, lease 50,000 SF at
+  // $0.65/SF/mo NNN, executed 9/15/2026` saved Notes = "ZZ KML test - safe to delete lease at
+  // executed"): the leftover used to be ONE blob of everything no detector blanked, so the words
+  // that INTRODUCE a claimed value ("lease", "at", "executed") rode into Notes beside the deal
+  // name. The leftover is now read per SEGMENT of the original line (comma / semicolon / bar,
+  // never the comma inside a number): a segment a detector touched keeps only its non-glue
+  // remainder (a segment that is nothing but glue vanishes); a segment nothing touched is free
+  // text — the lead one becomes the TITLE when the caller says this line is its own record and
+  // Title is still empty, everything else goes to Notes verbatim.
+  const segs = leftoverSegments(line, working);
+  const noteParts = [];
+  const cleanGlue = (t) => String(t || "").replace(GLUE_WORD_RE, " ").replace(ARTICLE_RE, " ").replace(/\s+/g, " ").trim().replace(EDGE_PUNCT_RE, "");
+  segs.forEach((seg, i) => {
+    const wantsTitle = opts.leadTitle && i === 0 && !generic.title;
+    if (!seg.touched) {
+      let text = seg.orig.replace(/\s+/g, " ").trim().replace(EDGE_PUNCT_RE, "");
+      if (!text) return;
+      // Only the segment that LEADS the line may be a title ("Deal name, lease 50,000 SF …") — a
+      // free fragment AFTER a claimed one ("… NNN, Houston, TX") is context, not a name. A lead
+      // fragment still carries its own introducing words ("Lease at 123 Main St"), which go.
+      if (wantsTitle) {
+        const name = text.replace(LEAD_GLUE_RE, "").replace(EDGE_PUNCT_RE, "");
+        if (name && name.length <= LEAD_TITLE_MAX) { generic.title = name; return; }
+      }
+      noteParts.push(text);
+      return;
+    }
+    // A lead segment a detector TOUCHED can still open with the deal name ("Airtex Building A -
+    // leased 25,000 SF …"): the words before the first claimed character are the title; the rest
+    // of the segment is judged as glue-vs-content like any other touched segment.
+    let work = seg.work;
+    if (wantsTitle) {
+      let k = 0;
+      while (k < seg.orig.length && seg.orig[k] === seg.work[k]) k++;
+      const name = cleanGlue(seg.orig.slice(0, k));
+      if (/[A-Za-z0-9]/.test(name) && name.length <= LEAD_TITLE_MAX) {
+        generic.title = name;
+        work = " ".repeat(k) + seg.work.slice(k);
+      }
+    }
+    // B986096 (owner report, 2026-09-02) — stripping "," left the space that FOLLOWED it behind
+    // ("Houston, TX 77073" -> "Houston  TX 77073", a double space) — collapse whitespace.
+    const rest = cleanGlue(work);
+    if (/[A-Za-z0-9]/.test(rest)) noteParts.push(rest);
+  });
+  // One blob, joined by a space — the shape this leftover always had ("Houston TX 77073").
+  if (noteParts.length) addNote(generic, noteParts.join(" "));
+}
+
+// ⛔ NEW-4 — the words that merely INTRODUCE a value another detector already claimed. They are
+// dropped from a segment a detector touched, never from one nothing touched (a free-text sentence
+// like "Tenant to sign at renewal" keeps every word).
+const GLUE_WORD_RE = /\b(?:(?:ground|land)\s+leases?|leases?|leased|leasing|(?:(?:land|building|bldg)\s+)?(?:sale|sold|purchased?)|executed|signed|dated|effective|commenc(?:ed|ing|es|ement)|closed|at|on|for|of|per|as of)\b|@/gi;
+// Articles only ever as lowercase words — a capital "A" is a name ("Airtex Building A").
+const ARTICLE_RE = /\b(?:a|an|the)\b/g;
+const LEAD_TITLE_MAX = 80;
+const EDGE_PUNCT_RE = /^[\s\-–—:/@$.]+|[\s\-–—:/@$.]+$/g;
+const LEAD_GLUE_RE = /^(?:(?:leases?|leased|leasing|sold|sale|executed|signed|dated|at|on|for|of)\s+)+/i;
+
+/** Split a line into segments on `,` `;` `|` (not the comma inside a number like 50,000) and mark
+ * each one `touched` when a detector blanked any of it out of `working` (same length as `line`). */
+function leftoverSegments(line, working) {
+  const out = [];
+  const re = /[;|]|,(?!\d)|(?<!\d),/g;
+  let start = 0, m;
+  const push = (s, e) => {
+    const orig = line.slice(s, e);
+    const work = working.slice(s, e);
+    out.push({ orig, work, touched: orig !== work });
+  };
+  while ((m = re.exec(line))) { push(start, m.index); start = m.index + 1; }
+  push(start, line.length);
+  return out;
 }
 
 function remapFlagKey(key, compType) {
@@ -1197,7 +1265,7 @@ function buildLineGeneric(line, { respectLabels } = {}) {
   if (labelMatch) {
     applyLabeledLine(generic, flags, sawLeaseLabel, labelMatch[1], line.slice(labelMatch[0].length));
   } else {
-    extractUnlabeledLine(generic, flags, line);
+    extractUnlabeledLine(generic, flags, line, undefined, { leadTitle: true });
   }
 
   if (!generic.compType) {
@@ -1365,7 +1433,7 @@ export function parseSingleRecord(text) {
     if (m) {
       applyLabeledLine(generic, flags, sawLeaseLabel, m[1], line.slice(m[0].length));
     } else {
-      extractUnlabeledLine(generic, flags, line, recordContext);
+      extractUnlabeledLine(generic, flags, line, recordContext, { leadTitle: lines.length === 1 });
     }
   }
 
