@@ -17,6 +17,8 @@ import { pacedWait } from "./lib/tabTiming.mjs";
 const BASE = process.env.BASE_URL || "http://localhost:4173";
 const TOL = 3;                                  // CSS px, either axis
 const BASELINE = process.argv.includes("--baseline");
+// --webkit-only skips the Chromium desktop-mouse control arm (used for a run against live planyr.io from a sandbox, where only the WebKit touch arms are the point).
+const WEBKIT_ONLY = process.argv.includes("--webkit-only");
 const failures = [];
 const ok = (l, c, d) => { console.log(`${c ? "✓" : "⛔"} ${l}${d !== undefined ? ` — ${d}` : ""}`); if (!c) failures.push(l); };
 
@@ -56,14 +58,27 @@ const glyph = (page) => page.evaluate(() => {
   const b = r.getBoundingClientRect();
   return b.width ? { left: b.left, cy: b.top + b.height / 2 } : null;
 });
+/* The tap target is a fraction of the part of the PAPER (note-body — NOT note-sheet, which includes the title band;
+ * NOTES-CARRY-FORWARD trap 41) that is actually ON SCREEN, so a short landscape viewport or a small phone cannot aim
+ * the tap at the title input, the toolbar or past the glass (traps 18 / 40). Returns null when the paper has no visible
+ * area or the point is not answered by the paper itself — the arm is then reported NOT EXERCISED, never scored. */
 const frac = (page, fx, fy) => page.evaluate(([a, b]) => {
-  const m = document.querySelector('[data-testid="note-mat"]').getBoundingClientRect();
-  return { x: Math.round(m.left + m.width * a), y: Math.round(m.top + m.height * b) };
+  const body = document.querySelector('[data-testid="note-body"]');
+  const r = body.getBoundingClientRect();
+  const M = 12;
+  const L = Math.max(r.left, M), R = Math.min(r.right, innerWidth - M), T = Math.max(r.top, M), B = Math.min(r.bottom, innerHeight - M);
+  if (R - L < 40 || B - T < 40) return null;
+  const x = Math.round(L + (R - L) * a), y = Math.round(T + (B - T) * b);
+  const hit = document.elementFromPoint(x, y);
+  if (!hit || !hit.closest('[data-testid="note-body"]') || hit.closest("input, textarea, button")) return null;
+  return { x, y };
 }, [fx, fy]);
+const notExercised = [];
 
 async function run(label, mk, fx = 0.5, fy = 0.5, { mouse = false } = {}) {
   const page = await mk();
   const p = await frac(page, fx, fy);
+  if (!p) { notExercised.push(label); console.log(`• ${label}: NOT EXERCISED — no visible blank paper at that fraction on this screen`); await page.context().close(); return; }
   if (mouse) { await page.mouse.dblclick(p.x, p.y); }
   else { await page.touchscreen.tap(p.x, p.y); await pacedWait(page, 90); await page.touchscreen.tap(p.x, p.y); }
   await pacedWait(page, 200);
@@ -85,7 +100,7 @@ async function run(label, mk, fx = 0.5, fy = 0.5, { mouse = false } = {}) {
   return { dx, dy };
 }
 
-const phone = { ...devices["iPhone 13"] };
+const phone = { ...devices[process.env.PHONE || "iPhone 13"] }; // PHONE="iPhone SE landscape" etc.
 const zv = (z) => ({ view: { x: 0, y: 0, z } });
 await run("100%, middle", () => open(browser, phone), 0.5, 0.5);
 await run("100%, near left edge", () => open(browser, phone), 0.12, 0.4);
@@ -97,8 +112,10 @@ await run("zoomed out 50%, right", () => open(browser, phone, zv(0.5)), 0.8, 0.6
 await run("panned (view x 140, y 90) at 100%", () => open(browser, phone, { view: { x: 140, y: 90, z: 1 } }), 0.5, 0.5);
 await run("panned + zoomed 150%", () => open(browser, phone, { view: { x: 220, y: 160, z: 1.5 } }), 0.4, 0.55);
 await run("not the first page", () => open(browser, phone, { second: true }), 0.5, 0.5);
-await run("desktop mouse, middle (chromium)", () => open(chrome, { viewport: { width: 1200, height: 800 } }), 0.5, 0.5, { mouse: true });
+if (!WEBKIT_ONLY) await run("desktop mouse, middle (chromium)", () => open(chrome, { viewport: { width: 1200, height: 800 } }), 0.5, 0.5, { mouse: true });
 
 await browser.close(); await chrome.close();
 if (!BASELINE && failures.length) { console.log(`\n⛔ ${failures.length} failing arm(s)`); process.exit(1); }
-console.log(BASELINE ? "\n(baseline — numbers only)" : "\n✓ all landing arms pass");
+if (notExercised.length) console.log(`\nNOT EXERCISED on this screen (${notExercised.length}): ${notExercised.join(" · ")}`);
+if (notExercised.length >= 9) { console.log("⛔ run VOID — no arm could be exercised"); process.exit(1); }
+console.log(BASELINE ? "\n(baseline — numbers only)" : "\n✓ all landing arms that could be exercised pass");
