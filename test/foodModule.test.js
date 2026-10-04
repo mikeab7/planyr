@@ -824,16 +824,13 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     expect(box).toMatch(/if \(view !== "map"\) return undefined;/);
   });
 
-  it("his own places (manual pins + logged snapshot places) are ranked ahead of everywhere he hasn't been", () => {
+  it("his own places (manual pins + logged snapshot places) stay in the one ranked list, marked, with a distance head start (B2051664 replaced the old absolute 'mine first' order)", () => {
     const box = src("components/SearchBox.jsx");
-    // The merge order is the ranking: manual matches, then logged snapshot hits, then the rest.
-    const order = box.slice(box.indexOf("const results = ["), box.indexOf("];", box.indexOf("const results = [")));
-    const manualIdx = order.indexOf("manualMatches");
-    const mineIdx = order.indexOf("snapshotRanked.filter((p) => p.mine)");
-    const restIdx = order.indexOf("snapshotRanked.filter((p) => !p.mine)");
-    expect(manualIdx).toBeGreaterThanOrEqual(0);
-    expect(manualIdx).toBeLessThan(mineIdx);
-    expect(mineIdx).toBeLessThan(restIdx);
+    const order = box.slice(box.indexOf("const results = rankByProximity("), box.indexOf(".slice(0, SHOWN_CAP)"));
+    expect(order).toContain("manualMatches");
+    expect(order).toContain("snapshotRanked");
+    expect(box).toMatch(/mine: loggedIds\?\.has\(p\.id\)/);
+    expect(src("lib/searchProximity.js")).toMatch(/MINE_HEAD_START_KM/);
     // And a result carrying `mine` renders a visible "Been here" mark, not just a sort position.
     expect(box).toMatch(/Been here/);
   });
@@ -936,7 +933,7 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     // The gate expression itself is gone from the tile-layer effect — never dead code left behind.
     expect(map).not.toMatch(/narrowViewport && source\.url1x/);
     const tileEffectSrc = map.slice(map.indexOf("Basemap tile layer"), map.indexOf("}, [basemap]);"));
-    expect(tileEffectSrc).toMatch(/basemapTileLayers\(resolveBasemapChoice\(basemap\)\)/);
+    expect(tileEffectSrc).toMatch(/basemapTileLayers\(choice, \{ dpr: window\.devicePixelRatio \|\| 1 \}\)/);
   });
 
   it("B651872 (×4) — a real loading treatment tied to the current tile layer's own events, never silent grey", () => {
@@ -1000,7 +997,7 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     expect(map).toMatch(/data-testid="food-attribution-text"/);
     const textBlock = map.slice(map.indexOf('data-testid="food-attribution-text"') - 100, map.indexOf('data-testid="food-attribution-text"') + 900);
     expect(textBlock).toMatch(/!narrowViewport/); // desktop only — never gated on anything else
-    expect(textBlock).toMatch(/bottom: 6, right: 10/);
+    expect(textBlock).toMatch(/bottom: 6, right: ATTRIBUTION_CLEAR_HELP_RIGHT/);
     expect(textBlock).not.toMatch(/onClick/); // not a button — always visible, nothing to expand
     expect(textBlock).toMatch(/dangerouslySetInnerHTML/); // same trusted attribution HTML, not a collapsed affordance
   });

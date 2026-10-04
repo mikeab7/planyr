@@ -1,3 +1,15 @@
+### B2056784 — Full-screen button hid wherever the browser cannot go full screen (iPhone Safari showed a dead button) `[shared/ui]` (bug) #mobile #ui  *(Owner NEW-1, 2026-10-04, iPhone Safari.)*
+
+`[x]` **Report:** the header's four-corner full-screen button shows on iPhone, where it cannot work.
+`[x]` **Fix:** ONE helper, `src/shared/ui/fullscreenSupport.js` — feature detection only (`document.fullscreenEnabled` / `webkitFullscreenEnabled` AND the root element having `requestFullscreen` / `webkitRequestFullscreen`), plus hidden when already chromeless (`display-mode: standalone|fullscreen`, `navigator.standalone`). `useFullscreenAvailable` re-reads on display-mode change. `AppHeader` renders the button only when available OR currently in full screen (Chromium reports `display-mode: fullscreen` once inside, and the way out must never vanish); unrendered, the right zone just closes up (flex row, no placeholder). `fsSupported()` now delegates to the helper.
+`[x]` **Controls found (the list asked for):** exactly ONE full-screen control exists — `FullscreenButton` in `AppHeader.jsx`, which every workspace (map, Notes, Schedule, Review, Library) inherits. The `F` / Ctrl+Shift+F shortcuts route through the same toggle. No other `requestFullscreen` call site in `src/`.
+`[x]` **Runtime refusal:** unchanged and already loud — `requestFs()` rejection sets the "Your browser wouldn't allow full screen here." notice (B1173).
+`[x]` **Tests:** `test/fullscreenSupport.test.js` (10: iPhone no-flags, flag-without-method, method-without-flag, standard, webkit-prefixed, standalone, display-mode fullscreen, `navigator.standalone`; red on main — the helper did not exist) · `e2e/fullscreen-gate.spec.js` (iPhone viewport + API stubbed off → no button; iPad viewport API on → stays; standalone → gone; desktop → present, toggles in and out, exit control stays). Ran on Chromium; WebKit not run (desktop WebKit reports full screen supported, so the stub is the proof).
+`[x]` **Constraint check (Definition of Done #4):** nothing here touches an `## Owner product constraints` entry.
+- Verify: live — **V1474944** ✅ PASSED 2026-10-04 (archived).
+- Stopping rule: closes on a dated pass of V1474944, or Michael saying it no longer shows on his iPhone; a recurrence re-opens THIS item.
+- **Live PASS 2026-10-04:** Michael checked planyr.io in iPhone Safari — the full-screen button is gone. Desktop Chrome (build `0460de1`): header Full screen button still present, `document.fullscreenEnabled` true. Stopping rule met. Disposition: ✅ confirmed by the owner's own check (STANDING RULE #2 — verdict taken from him, not a null).
+
 ### B1983600 — Plain mouse wheel zooms the notes canvas at the cursor, like the site plan `[Notes]` (feature) #notes #ui #view  *(Owner chat block "NEW-1," 2026-09-29, verbatim: "mouse scroll up or down should correspond to zoom like it does on the site plan view but for the notebook module." Minted **B1983600** from this branch's reserved block B1983600–B1983615 against freshly-fetched `origin/main` 2aaa1c4. DEDUPE-FIRST: the closest prior is **B1815024** (the Bluebeam-style canvas), whose rule "a plain wheel PANS, Ctrl+wheel zooms" this deliberately AMENDS — an owner-requested reversal, not a recurrence; that item is archive, not edited.)*
 
 `[x]` **AUDIT-FIRST — the brief's premise was partly stale, and the code reality is recorded here.** `lib/notesZoom.js` (named in the brief) was already DELETED by B1815024; the canvas is a transform viewport (`lib/notesViewport.js`: `zoomAbout`, `zoomForWheel`, `stepZoom`, per-page persistence), not a scroller, so "scrollTop arithmetic" does not exist — the pointer anchor is `zoomAbout` (both axes, the viewport is unbounded). Ctrl+wheel/pinch, Ctrl+=/−/0/9 and the pill were already there and are unchanged.
@@ -5887,6 +5899,17 @@ Why it survived: the "Recently deleted" LIST was never affected — `listDeleted
     harness-side handles. Clearing one candidate is not clearing the instrument.
 
 ## ✅ Done
+
+### B2014992 — Dashboard Locations map pins use the saved origin, so they can sit off irregular parcels (Katz) `[Dashboard / map]` (bug) #dashboard #site-planner #parcel  *(Owner chat block 2026-10-03 (NEW-1); amends B1988816, which fixed the Site tab map and left this path.)*
+
+`[x]` **Cause (AUDIT-FIRST):** dashboard project rows (`fetchSiteSummaries`) carry only `data->origin`; `mapMarkers` plotted that. On a notched/L-shaped parcel the origin can be outside it.
+`[x]` **Fix:** `dashboard/lib/dashboardParcelFetch.js` reads `site_elements` kind=parcel for just the plotted projects' representative plans (read-only, paged, once per set of plotted plans); `dashboardParcelAnchors.displayPointsByGroup` runs the ONE shared helper `siteAnchorLatLon` (no second placement routine); `mapMarkers(projects, comps, displayPoints)` uses that point, else the saved origin (no-boundary sites, failed fetch, not-yet-loaded). No stored data rewritten; no recompute per render/zoom (derived once per fetch; helper also memoises per ring). Fit-on-load still frames from origins (parcel-scale difference only).
+- **Other origin-positioned paths audited:** Site tab pins + fly-to (already via helper, B1988816); `MapFinder` frame-origin projections (a coordinate frame, not a pin — correct); `landingView` market clustering and `compSiteMatch`/`overlaySiteMatch` proximity matching (miles-scale, not placement — left); `siteRecordKml` coordinates row (a labelled "Coordinates" figure, left); `SiteReviewModal` lat/lon text (display of the saved origin, left). No mini-map or card thumbnail positions a site from origin.
+- Guard: `test/dashboardParcelAnchors.test.js` (5; notched site's pin == helper point and inside the ring while the origin is outside; no-boundary falls back to origin; red on pre-change `dashboardMapMarkers.js`).
+- Not done: an in-browser screenshot of the dashboard card with a test parcel — the card needs a signed-in Supabase read, which the sandbox cannot do.
+- Verify: live — **V1440080 PASSED 2026-10-03** (build 17f94b7, owner signed-in Chrome, read-only): 25 of 25 Dashboard Locations pins sit at the same point as that site's Site-tab marker (already verified inside its parcel for all 41 sites). ✅ Done; archived.
+- Owner product constraints check: nothing here contradicts a listed constraint.
+
 
 ### B1675105 — Nested list levels all render the same "1." marker; step through the outline convention `[Notes]` (bug) #notes #ui  *(owner report, from a screenshot of his own note: a first-level "1. Utility Facilities" with a second-level item that also renders "1.", indentation the only distinguishing signal. Minted **B1675105** from this branch's reserved block B1675104–B1675119 against freshly-fetched `origin/main` ad18dab. DEDUPE-FIRST — searched Open/⏳Verify/Done/Done-archive for "list marker", "lower-alpha", "list-style-type": B1656400–B1656403 (PR #1725) fixed Tab's vertical drop and Enter/Backspace on a flat-indented item — none of the three touched marker GLYPH selection, which is the actual gap here — net-new.)*
 
@@ -17091,3 +17114,48 @@ Each shrink case also carries a **vacuity guard** that fails rather than scoring
 - Guard: `test/siteAnchor.test.js` (8): Katz-like L polygon whose centroid is verified OUTSIDE (the bug's premise; helper did not exist on main) -> anchor inside with clearance; rectangle stays at its centroid; multi-parcel -> largest; inactive/deleted ignored; hole never entered; sliver inside; memoised; lat/lon round-trip inside. Real Katz geometry is not reachable from the sandbox (signed-in data) — live check below.
 - Verify: live — **V1413904** ✅ PASSED 2026-10-02 (owner signed-in Chrome, build `4d472ef`): Katz marker inside the northern block of the parcel, clear of the edges (visual + point-in-polygon against the drawn outline). Disposition (STANDING RULE #2): reproduce-and-fix, confirmed on the reporter's own site. Not separately reported live: zoom-through, list fly-to, ordinary-site spot-check (covered by `test/siteAnchor.test.js`).
 - Owner product constraints check: nothing here contradicts a listed constraint (no measurements quoted in product copy).
+
+### B2050816 — Phone-size (WebKit-emulated) check of B2041360: the Site-map hint must not follow you off Site, as a permanent harness case `[ui-audit]` (task) #mobile #ui  *(Owner block NEW-1, 2026-10-04; amends B2041360 / PR #1932. Minted from this branch's block B2050816–B2050831 · V1475904–V1475919 against fresh `origin/main` bdace9f; DEDUPE-FIRST — closest is B2041360 itself, which this verifies rather than re-opens.)*
+
+- **Built:** `ui-audit/verify-phone-orientations.mjs` gained the permanent `notice-leak` case (`PLANYR_CASES=notice-leak`; default run does it after the matrix). 4 device descriptors (iPhone SE, iPhone 15 × portrait, landscape) × 6 destinations (Dashboard via the wordmark; Schedule, Review, Library, Notes, Spreadsheet via the phone module-tab strip) = 24 legs; each leg is a fresh context + fresh load of `#/site` → Select parcels → hint asserted visible → switch → hint asserted gone. Exits 1 on any non-PASS leg, or if every leg is VOID.
+- **Instrument traps guarded, not remembered:** (1) known-good arm — the hint must be visible immediately before the switch, else the leg is VOID, never a pass; (2) the hint shares its render slot with the map's error notice and this sandbox's egress-blocked GIS hosts trip that at once (measured: hint never appears) — so every non-target-origin request is answered locally (transparent tile / empty feature list), the target bundle itself is untouched; (3) the hint expires by itself a few seconds after arming — a "gone" read taken late is VOID, so the switch+read must land inside 4 s (measured 138–470 ms).
+- **Result, WebKit-emulated (not on device), production build chunk `index-BVErCNTL.js`, logged-out:** **24/24 PASS** — hint visible before, gone after, on every leg, both orientations, both devices. **Red-proof:** the same case against a local build of the parent of the fix commit (`454ef55^`, chunk `index-BK7flEze.js`): **0 PASS / 24 FAIL** ("hint still painted over …") — so it can see the defect. No leg failed on production, so no product fix was needed.
+- **Not covered (stated):** signed-in session and a real phone (collapsing Safari toolbar, real glass) — those stay on V1466448.
+- **Owner product constraints check:** nothing here touches a listed constraint.
+- Verify: sandbox ✅ (above); the on-device pass stays on **V1466448**.
+
+### B1962672 — Crop dialog: "Reset to full page" in Polygon mode left a dead Done button `[Site Planner / overlays]` (bug) #site-planner #ui  *(Owner walk of the crop tool on planyr.io, 2026-09-29, NEW-1. Minted from reserved block B1962672–B1962687 / V1398976. DEDUPE-FIRST: no prior item covers it; B1838704/B1783328 are the tool itself, untouched.)*
+
+`[x]` **Fixed, with the choice stated.** Polygon-mode Reset used to EMPTY the trace, and Done is (correctly) disabled with no polygon, silently. Now Reset never empties anything: it puts the overlay back to the whole page (both shapes; Polygon shows the closed full-page quad), so **Done stays live and saves "no crop"**. Chosen over "leave Done disabled and explain" because Reset means "show me the whole sheet" and the only sensible commit of that is exactly what Done then does; the deliberate start-over action is the separate **Clear polygon**, and *that* state now says in plain words why Done is off ("Place at least 3 points, then close the polygon to save" / "Close the polygon (click the first point or press Enter) to save") next to the button and as its tooltip. `ImageCropTool.jsx` `resetAll` / `clearPoly` / `doneWhy`.
+- Verify: live — **V1398976** (sandbox walk PASSED; signed-in Chrome pass pending).
+- Files: `src/shared/sitePlans/components/ImageCropTool.jsx`, `ui-audit/verify-crop-tool-walkthrough.mjs`.
+
+### B1962673 — "Reset to full page" only reset the shape you were standing on `[Site Planner / overlays]` (bug) #site-planner #ui  *(NEW-2 of the same walk.)*
+
+`[x]` **Chose "reset the overlay", per the owner's mental model.** One Reset, always shown, enabled whenever ANY crop (rectangle or polygon) is saved or drawn; from either mode it sets both shapes to the full page, so Rectangle → Reset → Done saves `crop: null` and switching back to Polygon shows the full-page quad, not the old polygon. `commit` also never carries a "full page" stand-in as a dormant shape. The tooltip says "Removes the whole crop — rectangle and polygon". The two harnesses that had encoded the old behaviour (`verify-site-tab-overlay-crop.mjs` step 8, which expected Rectangle+Done to clear a polygon and so had been silently red) were corrected to the new contract.
+- Verify: live — **V1398976**.
+
+### B1962674 — Crop dialog had no discoverable way to pan or zoom in between `[Site Planner / overlays]` (bug) #site-planner #ui  *(NEW-3.)*
+
+`[x]` Added, all on screen: a **✋ Pan tool** toggle (left-drag moves the picture; a pan no longer drops a polygon point where the mouse comes up — a click-after-drag bug found by the walk, fixed with a guard that also covers Space+drag), **arrow keys** (Shift = ×4) to pan, **− / slider / +** zoom (log slider, about the middle of the view; `+`/`-` keys too) between Fit and 100%. Scroll-wheel zoom, Space+drag and middle-drag unchanged. Footer hint rewritten (replaces the old one-line hint; no net growth). Keyboard focus is now kept inside the tool when a button disables itself (Undo/Redo at the end of history dropped focus to `<body>` and killed Ctrl+Z / arrows). Scrollbars deliberately NOT built (the brief allowed "or").
+- Verify: live — **V1398976**.
+- Files: `ImageCropTool.jsx`, `src/workspaces/site-planner/lib/cropHistory.js` (pure slider mapping), `test/cropHistory.test.js`.
+
+### B1962675 — Crop dialog undo had no redo and no button `[Site Planner / overlays]` (bug) #site-planner #ui  *(NEW-4.)*
+
+`[x]` One undo/redo history for BOTH shapes (`lib/cropHistory.js`, pure, unit-tested): **↶ Undo / ↷ Redo buttons** in the toolbar (disabled when empty), **Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y** (Cmd on a Mac), working in Rectangle mode too (it was Polygon-only). A snapshot is tagged with its mode so undo also returns you to the mode the change was made in. A rectangle drag / vertex drag pushes its undo frame on first real movement, not on the press, so a plain click leaves no do-nothing step now that Undo is a visible button.
+- Verify: live — **V1398976**.
+
+### B1962676 — Crop dialog fit a landscape sheet into a short band with dead space `[Site Planner / overlays]` (bug) #site-planner #ui  *(NEW-5.)*
+
+`[x]` The dialog is now 96% × 94% of the window and `ImageCropTool` gained a **`fill`** mode: the viewport takes whatever is left under the title (measured with a ResizeObserver, no more `innerHeight - 220` guess) and Fit re-runs on resize until the user zooms/pans by hand. Fit also no longer caps at native size (a small image is enlarged to the room available; `FIT_MAX` 8). Measured on a 3000×1800 sheet at a 1440×900 window: the sheet fills the full window height and ~89% of its width (the rest is the sheet's own aspect ratio), dialog 96%×94%.
+- Verify: live — **V1398976**.
+- Files: `src/workspaces/site-planner/components/OverlayCropDialog.jsx` (still lazy), `ImageCropTool.jsx`.
+
+### B1962677 — Crop: thin left/right rectangle grips, and the expanded OVERLAYS row collapsed on reload `[Site Planner / overlays]` (bug) #site-planner #ui  *(NEW-6, two small ones.)*
+
+`[x]` **(a)** The four mid-edge grips now share ONE footprint (long side × the corner grips' own thickness, visible like the corners); test asserts left/right are the top/bottom grips turned 90° and none is thinner than a corner. **(b)** The expanded overlay row is remembered per plan in `sessionStorage` (`planyr:selOverlay:<siteId>`, wrapped in try/catch — a per-viewer convenience only), so a reload leaves Crop… one click away. An unknown/stale id simply opens nothing.
+- Verify: live — **V1398976**.
+- Files: `ImageCropTool.jsx`, `src/workspaces/site-planner/SitePlanner.jsx`.
+- **Closed 2026-10-04:** all six walked live on Michael's signed-in account on builds 17f94b7 and 028d64d — ALL PASS (V1398976). Leftovers filed and shipped as B2066224–B2066227.
+

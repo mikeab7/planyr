@@ -124,20 +124,42 @@ export async function listMembers(teamId) {
   });
 }
 
-// Pending (unclaimed) invites for a team — admins only (RLS). Returns [{ id, email, role, createdAt }].
+// Pending (unclaimed) invites for a team — admins only (RLS). Returns
+// [{ id, email, role, createdAt, lastSentAt }]. lastSentAt (db/team_invite_email.sql) is null when
+// never emailed — or when that migration hasn't been run yet, in which case the column is simply
+// not asked for, so the roster still loads.
 export async function listInvites(teamId) {
   if (!supabase || !teamId) return [];
-  const { data, error } = await supabase
-    .from("team_invites")
-    .select("id, email, role, created_at, claimed_at")
-    .eq("team_id", teamId)
-    .is("claimed_at", null)
-    .order("created_at", { ascending: false });
+  const q = (cols) => supabase.from("team_invites").select(cols)
+    .eq("team_id", teamId).is("claimed_at", null).order("created_at", { ascending: false });
+  let { data, error } = await q("id, email, role, created_at, claimed_at, last_sent_at");
+  if (error) ({ data, error } = await q("id, email, role, created_at, claimed_at"));
   if (error) return [];
-  return (data || []).map((r) => ({ id: r.id, email: r.email, role: r.role, createdAt: r.created_at }));
+  return (data || []).map((r) => ({ id: r.id, email: r.email, role: r.role, createdAt: r.created_at, lastSentAt: r.last_sent_at || null }));
 }
 
-// Invite a person by email (admin action). The email is lower-cased; one open invite per
+// Ask the server to email this pending invite (NEW-1). The server throttles (one send per invite
+// per minute) and holds the provider key; the browser only sends the bearer token.
+// Returns { ok, throttled?, retryAfterSeconds?, error? } — never throws.
+export async function sendInviteEmail(teamId, email) {
+  if (!supabase || !teamId) return { ok: false, error: "Cloud not configured." };
+  try {
+    const { data } = await supabase.auth.getSession();
+    const token = data && data.session && data.session.access_token;
+    if (!token) return { ok: false, error: "Not signed in." };
+    const resp = await fetch("/api/team/invite-email", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ teamId, email: lower(email) }),
+    });
+    let jr = {}; try { jr = await resp.json(); } catch (_) { /* keep */ }
+    if (resp.ok && jr.ok) return { ok: true };
+    if (resp.status === 429) return { ok: false, throttled: true, retryAfterSeconds: jr.retryAfterSeconds || 60, error: "Just sent — try again in a minute." };
+    return { ok: false, error: jr.error || `HTTP ${resp.status}` };
+  } catch (e) { return { ok: false, error: (e && e.message) || "Network error." }; }
+}
+
+// Invite a person by email (admin action) and email them. The email is lower-cased; one open invite per
 // team+email (unique constraint). If they already have an account they'll join on next sign-in;
 // if not, the signup trigger adds them when they register. Returns { ok, error }.
 export async function inviteByEmail(teamId, email, role = "member") {
@@ -148,24 +170,18 @@ export async function inviteByEmail(teamId, email, role = "member") {
   const { error } = await supabase.from("team_invites").upsert(
     { team_id: teamId, email: e, role: r }, { onConflict: "team_id,email" });
   if (error) return { ok: false, error: error.message };
-  return { ok: true };
+  // NEW-1: the row is saved either way; the email is a separate step whose failure is reported
+  // (emailed:false) without undoing the invite.
+  const sent = await sendInviteEmail(teamId, e);
+  return { ok: true, emailed: sent.ok, emailError: sent.ok ? null : sent.error };
 }
 
-// Resend a PENDING invite (admin action, NEW-1 Team redesign). Goes through the same validated
-// send path as inviteByEmail but with ignoreDuplicates: ON CONFLICT DO NOTHING, so it never adds
-// a second row (one open invite per team+email) and needs no UPDATE policy — team_invites has none
-// (measured on planyr_production 2026-10-03: policies are insert/delete/select only, no triggers).
-// NOTE: the app sends no email today — an invite is a standing row that activates when that email
-// signs in — so this re-asserts the row; it cannot deliver mail. Returns { ok, error }.
-export async function resendInvite(teamId, email, role = "member") {
-  if (!supabase || !teamId) return { ok: false, error: "Cloud not configured." };
-  const e = lower(email);
-  if (!isEmail(e)) return { ok: false, error: "Enter a valid email address." };
-  const r = role === "admin" ? "admin" : "member";
-  const { error } = await supabase.from("team_invites").upsert(
-    { team_id: teamId, email: e, role: r }, { onConflict: "team_id,email", ignoreDuplicates: true });
-  if (error) return { ok: false, error: error.message };
-  return { ok: true };
+// Resend a PENDING invite's email (admin action). Creates NO row — the invite already exists; this
+// only asks the server to send the email again (server-throttled, see sendInviteEmail).
+// Returns { ok, throttled?, error? }.
+export async function resendInvite(teamId, email) {
+  if (!isEmail(email)) return { ok: false, error: "Enter a valid email address." };
+  return sendInviteEmail(teamId, email);
 }
 
 // Activate any invites waiting on the signed-in user's email (existing account invited later).

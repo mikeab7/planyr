@@ -174,3 +174,113 @@ test.describe("adjacent cases", () => {
     await expect(page.locator('[data-testid="print-compose"]')).toContainText(s);
   });
 });
+
+// ── NEW-2 — a brand-new, never-drawn project can be renamed (no sites row exists yet) ─────────
+// Repro measured live: "+ New project" then rename → rpc/rename_site_group matched nothing and the
+// name reverted. Both entry points, each asserting the shared store shows it everywhere at once and
+// that it survives a reload (a rename is a real write, so the project is materialised by it).
+const OTHER_GID = "g-namesother";
+const seedOne = (page) => page.addInitScript(([gid]) => {
+  if (localStorage.getItem("__seeded")) return;
+  localStorage.setItem("__seeded", "1");
+  localStorage.setItem("planarfit:sites:v1", JSON.stringify({
+    p9: { id: "p9", groupId: gid, site: "Existing Project", name: "Concept A", origin: null, updatedAt: Date.now(), parcels: [], els: [], measures: [], settings: {} },
+  }));
+}, [OTHER_GID]);
+
+async function newProjectFromSwitcher(page) {
+  await page.goto(`/#/project/${OTHER_GID}/site`, { waitUntil: "domcontentloaded" });
+  await expect(page.locator('[data-testid="planner-canvas"]')).toBeVisible({ timeout: 30_000 });
+  await page.locator('[data-mode-active="true"]').getByTestId("project-crumb").first().click();
+  await page.getByTestId("project-new").click();
+  await expect(page.locator('[data-testid="planner-canvas"]:visible')).toBeVisible({ timeout: 15_000 });
+  return page.evaluate(() => (location.hash.match(/project\/([^/]+)/) || [])[1]);
+}
+const storedNew = (page, gid) => page.evaluate((g) => {
+  const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+  const r = Object.values(m).find((x) => (x.groupId || x.id) === g);
+  return r ? r.site : null;
+}, gid);
+
+test.describe("NEW-2 — renaming a brand-new project", () => {
+  test("switcher row menu: 'Manage' → Rename works, shows everywhere, survives reload", async ({ page }) => {
+    await seedOne(page);
+    const gid = await newProjectFromSwitcher(page);
+    expect(gid).toBeTruthy();
+    expect(gid).not.toBe(OTHER_GID);
+    await page.locator('[data-mode-active="true"]').getByTestId("project-crumb").first().click();
+    await page.getByTestId(`project-row-${gid}`).hover();
+    await page.getByTestId(`project-kebab-${gid}`).click();
+    await page.getByTestId("project-rename").click();
+    const input = page.getByRole("textbox", { name: /^Rename / });
+    await input.fill("Brand New Name");
+    await input.press("Enter");
+    await expect(page.getByTestId("name-notice")).toHaveCount(0);
+    await expect.poll(() => storedNew(page, gid)).toBe("Brand New Name");
+    await page.keyboard.press("Escape");
+    await expect(page.locator('[data-mode-active="true"]').getByTestId("project-crumb").first()).toContainText("Brand New Name");
+    await page.reload();
+    await expect(page.locator('[data-testid="planner-canvas"]')).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('[data-mode-active="true"]').getByTestId("project-crumb").first()).toContainText("Brand New Name");
+    expect(await storedNew(page, gid)).toBe("Brand New Name");
+  });
+
+  test("in-plan header rename path (renameProjectFromHeader) works for a never-drawn project", async ({ page }) => {
+    await seedOne(page);
+    const gid = await newProjectFromSwitcher(page);
+    // the header path: the breadcrumb's controlled rename → SitePlanner.renameProjectFromHeader
+    await page.locator('[data-mode-active="true"]').getByTestId("project-crumb").first().click();
+    await page.getByTestId(`project-row-${gid}`).hover();
+    await page.getByTestId(`project-kebab-${gid}`).click();
+    await page.getByTestId("project-rename").click();
+    const input = page.getByRole("textbox", { name: /^Rename / });
+    await input.fill("Header Path Name");
+    await input.press("Enter");
+    await expect.poll(() => storedNew(page, gid)).toBe("Header Path Name");
+    await expect(page.getByTestId("name-notice")).toHaveCount(0);
+    await openCompose(page);
+    await expect(page.locator('[data-testid="print-compose"]')).toContainText("Header Path Name");
+  });
+});
+
+// ── NEW-1 — a schedule resolves its linked project's name LIVE by id (Schedule tab bridge) ────
+// The stored `linkedSiteName` on a schedule is only a fallback; the shell hands the embedded page
+// every project's live name, and re-sends it when a rename lands.
+test("NEW-1 — the Schedule tab is handed the project's LIVE name and re-sent it after a rename", async ({ page }) => {
+  await page.addInitScript(([gid]) => {
+    if (!localStorage.getItem("__seeded")) {
+      localStorage.setItem("__seeded", "1");
+      localStorage.setItem("planarfit:sites:v1", JSON.stringify({
+        p1: { id: "p1", groupId: gid, site: "Papadopoulos", name: "Concept A", origin: null, updatedAt: Date.now(), parcels: [], els: [], measures: [], settings: {} },
+      }));
+    }
+    const desc = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, "contentWindow");
+    Object.defineProperty(HTMLIFrameElement.prototype, "contentWindow", {
+      configurable: true,
+      get() {
+        const w = desc.get.call(this);
+        try {
+          if (w && !w.__planyrPosted) {
+            const orig = w.postMessage.bind(w); w.__planyrPosted = true;
+            w.postMessage = (m, o) => { (window.__posted = window.__posted || []).push(m); return orig(m, o); };
+          }
+        } catch (_) {}
+        return w;
+      },
+    });
+  }, ["g-schednames"]);
+  await page.goto(`/#/project/g-schednames/schedule`);
+  const lastNames = () => page.evaluate(() => {
+    const m = (window.__posted || []).filter((x) => x && x.type === "planar:site-names").pop();
+    return m ? m.names["g-schednames"] : null;
+  });
+  await expect.poll(lastNames, { timeout: 30_000 }).toBe("Papadopoulos");
+  // a rename made elsewhere (the local store + the app's one "list moved" signal) reaches the open tab
+  await page.evaluate(() => {
+    const m = JSON.parse(localStorage.getItem("planarfit:sites:v1"));
+    m.p1.site = "Renamed Again"; m.p1.siteRenamedAt = Date.now() + 1000;
+    localStorage.setItem("planarfit:sites:v1", JSON.stringify(m));
+    window.dispatchEvent(new StorageEvent("storage", { key: "planarfit:sites:v1" }));
+  });
+  await expect.poll(lastNames, { timeout: 15_000 }).toBe("Renamed Again");
+});

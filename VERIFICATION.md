@@ -176,6 +176,56 @@ Sandbox-proven: `ui-audit/verify-parcel-settle-cost.mjs` (z14 moveend settle 103
 4. Zoom out to 13. **Expect:** outlines hidden with the "zoom in a little to see the lines" hint, unchanged.
 5. Dense Texas check: Katy (29.786 / -95.825, Harris) then a Fort Bend view, Select parcels on, zoom 14–16. **Expect:** outlines draw, no catch, a lot click selects the right lot.
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2061600.
+### V1479952 — B2061792: a non-closing deed warns on the reader, the plot toast and the panel `Blocker: real-data (the Grand Port group's saved plans)`
+
+Sandbox-proven: `test/deedGap.test.js`, `ui-audit/verify-deed-closure-warning.mjs` (real Tract 1 calls, logged-out). Pending: the same on a real signed-in plan. **Steps** (planyr.io; read the served chunk hash in the same observation; use the throwaway **"Concept A (copy)"** plan in the Grand Port group — NEVER Concept A):
+1. Parcel tools → Deed / Title, paste the Tract 1 description. **Expect:** the summary line reads in red "⚠ does NOT close — misses by 31.4 ft (1:312)" and never says "closes".
+2. Plot on canvas, click a point of beginning. **Expect:** a red ⚠ toast "This description does not close — it misses by 31.4 ft…", with the red dashed gap line on the canvas.
+3. Select the deed, open Properties. **Expect:** the closure line is red and agrees with step 1.
+4. Paste an exactly-closing description. **Expect:** reader says "closes", plot toast is the plain "Boundary placed.".
+- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2061792.
+
+### V1443696 — B2018608: vector roads + labels basemap (Food + Site Plan map) `Blocker: live-GIS`
+
+Sandbox-proven at dpr 2 against a SYNTHETIC OpenMapTiles fixture (`ui-audit/verify-vector-basemap.mjs`, 28/28); the sandbox cannot reach `tiles.openfreemap.org`, so the **real source, its CORS headers and the real map look are unverified**. **Steps** (planyr.io, read the served chunk hash in the same observation; `node ui-audit/verify-vector-basemap.mjs https://planyr.io --live` runs the mechanical half):
+1. Open `/food` fresh (clear `planyr:food:basemap`) at Houston metro zoom, and the Site tab's Map at the same zoom. **Expect:** /food opens on **Site Plan** and looks IDENTICAL to the Site map — satellite + Planyr's clean white city names, NO road lines. Zoom in past parcel zoom on both: clean thin roads + names appear on both at the same zoom; no "Crisp road labels unavailable" notice (if it shows, OpenFreeMap was blocked/CORS-refused — file that on B2018608).
+2. Tap **Hybrid** on /food at metro zoom, then neighbourhood zoom. **Expect:** freeways/major roads and place names at metro, no edge-to-edge bands; local streets only at neighbourhood zoom; road names follow the road line; no two labels overlap; no heavy black outlines; the aerial is slightly toned.
+3. Pan and zoom (wheel + buttons). **Expect:** labels stay glued to the aerial through the animation; Food pins sit above labels; no blank map after a search jump.
+4. Switch between Site Plan and Hybrid and reload. **Expect:** the choice persists; switching never blanks the map.
+5. Site tab → Map view, Layers → Road names slider (close zoom). **Expect:** the slider fades the roads; parcels / FEMA / draw tools still paint above; at metro zoom still no road lines.
+6. Open a plan, File → Download PDF. **Expect:** the aerial in the PDF is NOT darkened or desaturated.
+7. Look along tile joins at fractional zoom on a 2x display. **Expect:** no light hairlines.
+8. Desktop: the credit reads "…OpenFreeMap © OpenMapTiles data © OpenStreetMap", fully visible beside (not under) the ? button; the "Loading imagery…" pill never overlaps the zoom control.
+- **Stopping rule:** closes on a dated pass of 1–8, or a failed step filed as a recurrence on B2018608.
+### V1469824 — B2051664: Food search lists the places nearest the visible map first (phone, signed in) `Blocker: auth`
+
+Sandbox-proven on fixture rows: `test/foodSearchProximity.test.js`, plus a real-Chromium run of the built app with the search RPC stubbed (Katy first at a Houston-area view; Dallas first after flying there). Pending: the owner's signed-in phone against his real snapshot (read-only — do not log or edit anything). **Steps** (read the served chunk hash in the same observation):
+1. Phone, Food map, zoomed on a neighbourhood. Search a chain name with branches in several cities (e.g. "Torchy's"). **Expect:** branches in the visible area first, nearest the map centre first, then farther ones.
+2. Pan to a different city, re-type the same query. **Expect:** the order re-anchors to the new view.
+3. Search a restaurant you have saved that is far off screen, by exact name. **Expect:** it is at or near the top and tapping it jumps the map there.
+4. Zoom out to the whole state and search. **Expect:** results still appear, ordered by distance from the centre.
+5. Search a name with no match nearby. **Expect:** far matches still listed — never an empty list because the match is off screen.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2051664.
+### V1476304 — B2058144: Review tabs open, switch, restore, and follow the signed-in account between desktop and phone `Blocker: auth`
+
+Sandbox-proven (real Chromium, built app): `ui-audit/verify-review-tabs.mjs` (logged out, 37/37), `ui-audit/verify-review-tabs-sync.mjs` (two contexts signed in as a made-up user against a hermetic fake account, 20/20), `test/reviewTabs.test.js`. Pending: the real account and real devices (the sandbox's fake account cannot show real Supabase row-level security, real timing, or a real phone). **Steps** (planyr.io, desktop + iPhone, signed in; read the served chunk hash in the same observation):
+1. Desktop: Review → Open… three files (two PDFs, one .docx). **Expect:** three tabs in order, last active; no sheet index anywhere.
+2. Desktop: on the first PDF go to page 3 and zoom in. **Expect:** the tab remembers it when you switch away and back.
+3. Reload the desktop. **Expect:** the same three tabs, same active tab, each at its last page and zoom.
+4. iPhone: open Review. **Expect:** the same three tabs, the same active tab at the same page and zoom; the strip scrolls sideways, × only on the active tab.
+5. Desktop: type in the .docx (do not save), then on the phone close the .docx tab. Back on the desktop, focus the window. **Expect:** the .docx tab is STILL there with the text.
+6. Phone: close the second PDF. Desktop: click away and back. **Expect:** the tab is gone on the desktop.
+7. Phone in airplane mode: change a page, then reconnect. **Expect:** the desktop picks up the new page at its next focus.
+8. Close every tab on the desktop, reload. **Expect:** blank Review (no tabs, no index).
+- **Stopping rule:** closes on a dated pass of 1–8, or a failed step filed as a recurrence on B2058144.
+### V1474400 — B2049312: team invite + Resend emails arrive in the inbox `Blocker: real-data (needs RESEND_API_KEY in Cloudflare + team_invite_email.sql run — both Michael's)`
+
+Sandbox-proven: `test/teamInviteEmail.test.js` (fake Supabase + fake Resend), `e2e/team-settings-layout.spec.js` (mocked send incl. throttle). Pending: a real send. **Steps** (planyr.io, signed in as a team admin; check the served chunk hash in the same observation). Use only the throwaway `mikeabmab+planyrtest@live.com`:
+1. Settings › Team › + Invite → that address, Member → Send invite. **Expect:** toast "Invite sent to mikeabmab+planyrtest@live.com"; the email lands in his live.com inbox from a planyr.io address, subject "<name> invited you to <team> on Planyr", button opens sign-in with the address prefilled.
+2. On that invite choose Resend invite. **Expect:** toast "Invite email sent again"; a second email arrives; still ONE row in Invited; Resend is disabled for about a minute.
+3. Try Resend again inside the minute via the ⋯ menu. **Expect:** disabled; (server also refuses — a direct POST inside the window returns 429).
+4. Cancel invite. **Expect:** row gone, no row left behind. Existing pending invites (e.g. ryan.baumgartner@hillwood.com) received nothing.
+- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2049312.
 
 ### V1468976 — B2043888: phone tab-strip chevrons page cleanly and clamp at both ends `Blocker: real-device (iOS elastic overscroll — not producible headless)`
 
@@ -193,6 +243,7 @@ Sandbox-proven (logged-out, seeded local site, real Chromium): `e2e/mapfinder-no
 2. Without turning Select parcels off, open the avatar/wordmark and go to the **Dashboard**. **Expect:** the hint is gone; nothing about the Site map appears over Jump back in / Pipeline / Comps.
 3. Repeat from the Dashboard to Schedule, Library, Notes, Spreadsheet. **Expect:** no Site-map hint on any of them.
 4. Return to Site → map. **Expect:** the hint is back only if Select parcels is still on (the mode is kept on purpose).
+- **2026-10-04 WebKit-emulated pass (B2050816, NOT on device, logged-out; chunk `index-BVErCNTL.js` read in the same run):** `node ui-audit/verify-phone-orientations.mjs` (`PLANYR_CASES=notice-leak`) — iPhone SE and iPhone 15, portrait + landscape × Dashboard/Schedule/Review/Library/Notes/Spreadsheet = **24/24 PASS** (hint visible after Select parcels, gone after the switch each time); the same case on the pre-fix build is 0/24 PASS. Steps 1-4 above on a real phone, signed in, remain pending (`Blocker: auth`).
 - **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B2041360.
 
 ### V1464320 — B2039232: an open file has a Close (×) back to the sheet index; unsaved Word/text edits ask first; reload after Close stays on the index `Blocker: auth`
@@ -311,14 +362,6 @@ Sandbox-proven (dev server, visible tab, real CDP two-finger touch events, all t
 - **Stopping rule:** closes on a dated pass of 1-5, or a failed step filed as a recurrence on B2016112.
 
 
-### V1440080 — B2014992: every pin on the Dashboard Locations map sits inside its own parcel (Katz in particular) `Blocker: auth`
-
-Sandbox-proven: `test/dashboardParcelAnchors.test.js` (5, red on pre-change source). Pending: the signed-in dashboard against real parcels. Read-only — change nothing.
-**Steps** (planyr.io, signed in; read the served chunk hash in the same observation):
-1. Open the Dashboard and zoom the Locations card in on Katz (Rankin Rd / I-45 N, Houston). **Expect:** its pin is on the large L-shaped parcel, not on the neighbouring lots.
-2. Compare with the Site tab map for the same site. **Expect:** the pin is at the same spot.
-3. Pan across the other pipeline pins. **Expect:** each sits inside its own outline; a site with no boundary still shows at its saved location.
-- **Stopping rule:** closes on a dated pass of 1-3, or a failed step filed as a recurrence on B2014992.
 ### V1440896 — B2015808: each schedule group's Focus holds across leaving the module, switching schedules, and a hard reload `Blocker: auth`
 
 Sandbox-proven: `test/schedulerViewState.test.js` (7 new, red on pre-change source) and the real `/sequence/` page in headless Chromium (focus → reload → still focused → off → reload → still off; store `planar:taskFocus:v1` written/cleared). Pending: the signed-in cloud path (a real merge/refresh from the cloud).
@@ -541,19 +584,17 @@ Sandbox-proven (logged out, unit): `test/prefsSingleSource.test.js` (12 tests, r
 5. Tab A: Site Planner floodplain rules, set Harris ratio 1.5. Tab B (opened earlier): tick "verified" on Fort Bend. **Expect:** Tab B shows Harris 1.5 without reload; after reload both edits persist.
 6. Library: pin folder F, rename F in its project, return to Library Home. **Expect:** the pinned card shows the new name; delete F and it falls back to the old name (not blank).
 - **Stopping rule:** closes on a dated pass of 1–6, or a failed step filed as a recurrence on B1953793.
-### V1398976 — B1962672–B1962677: the overlay Crop tool walked end to end on Michael's signed-in Chrome (Reset, pan/zoom, undo/redo, fill, reload) `Blocker: auth`
+### V1489552 — B2066224–B2066227: crop-tool leftovers walked on Michael's signed-in Chrome (Done keeps both shapes · Enter closes · Reset holds still · Crop… visible on a short window) `Blocker: auth`
 
-Sandbox-proven (logged out, throwaway seeded plan with a generated 3000×1800 sheet, real pointer + key events, foreground tab, known-good arm): `node ui-audit/verify-crop-tool-walkthrough.mjs` ALL PASS (58 checks), plus `verify-crop-polygon-editing.mjs` and `verify-site-tab-overlay-crop.mjs` still all-pass, `test/cropHistory.test.js`. Nothing touched a real plan or the locked Goose Creek master plan (`sms93j3sfc04`); the throwaway existed only in the sandbox browser's local storage and was discarded with it. **Still needs the signed-in pass** because the brief's walk (real upload, cloud-saved overlay, hard reload of a cloud plan) needs the account.
+Sandbox-proven (logged out, throwaway seeded plan, real pointer + key events, foreground tab, known-good arm per scenario): `node ui-audit/verify-crop-leftovers.mjs` ALL PASS; **7 checks go red on the pre-fix tool**, so it can fail. Not provable here: a signed-in plan's cloud round trip of the saved crop.
 **Steps, on a THROWAWAY duplicate plan with a throwaway upload (constraint 7):**
-1. Site tab → OVERLAYS → expand the row → Crop…. **Expect:** the sheet fills the window (full height, no wide dead bands beyond its own aspect), and the toolbar shows Undo, Redo, ✋ Pan, −, slider, +, Fit, 100%.
-2. Polygon: place 4 points, zoom in with + and the slider, pan with the arrow keys and again with the Pan tool, place 2 more, press Enter. **Expect:** 6 draggable points; no stray point appears where a Pan drag ends.
-3. Drag a point, then Undo button, Redo button, Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y. **Expect:** each moves it back/forth; Delete on a selected point removes it and Undo restores it.
-4. Click **Reset to full page** in Polygon mode. **Expect:** Done stays enabled; Done saves an uncropped overlay. Clear polygon instead. **Expect:** Done is greyed with a sentence saying what it needs.
-5. Save a polygon, reopen, switch to Rectangle, Reset to full page, Done. **Expect:** the overlay is uncropped (polygon gone too).
-6. Trim a rectangle, Done, then hard-reload with `?cb=<anything>` on the URL. **Expect:** the crop is still applied and the OVERLAYS row is still expanded.
-7. Rectangle mode: **Expect:** all four side grips look the same weight as each other.
-8. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes when 1-7 confirm on a real signed-in account with the build hash, or a failing step is filed as a recurrence on the matching B# (STANDING RULE #2).
+1. Short window: Site → OVERLAYS, row NOT expanded. **Expect:** Crop… is on the row beside the eye/lock/× without scrolling; it opens the tool.
+2. Rectangle: trim it, Done. Reopen, Polygon, Clear polygon, trace a shape, close, Done. **Expect:** the footer said "Your rectangle is kept too"; reopen → Rectangle → the rectangle you trimmed is still there; Done → the polygon is still there when you switch back.
+3. Start a polygon, press + (or Fit), then Enter. **Expect:** the polygon closes; the zoom button does not fire again.
+4. Switch Rectangle ⇄ Polygon. **Expect:** "Reset to full page" stays put.
+5. Hard-reload with `?cb=<anything>`. **Expect:** the crop and both kept shapes persist.
+6. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–5 with the build hash, or a failed step is filed as a recurrence on the matching B# (STANDING RULE #2).
 
 ### V1396784 — B1960480: double-tap on blank paper raises the soft keyboard and the first text lands in the new box (real iPhone keyboard)
 
@@ -566,6 +607,20 @@ Sandbox-proven on WebKit (touch emulation, `ui-audit/verify-notes-touch-place.mj
 5. Empty page. **Expect:** the prompt reads "Double-tap anywhere to start a note."
 6. Read the served chunk hash in the same observation as each result.
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1960480.
+
+### V1481472 — B1960480 (×2): on a real iPhone, a double-tap on blank paper puts the first letter exactly where the finger was `Blocker: real-data` (signed-in real device)
+
+Sandbox-proven on WebKit (hasTouch + isMobile, real touch tap pairs): `ui-audit/verify-notes-touch-landing.mjs` — first-glyph position vs tap, ±1 CSS px at 100% / 200% / 50%, left / middle / right, panned, panned+zoomed, not-the-first page; desktop path unchanged. NOT provable here: the iOS soft keyboard's visual-viewport shift, and a real fingertip on real glass.
+**Steps (real iPhone, signed in, a throwaway duplicate page — never a real plan):**
+1. Open the page at the normal zoom, double-tap blank paper near the middle, type "W". **Expect:** the W appears under where the finger landed (not lower/right of it).
+2. Repeat near the left edge and near the right edge of the sheet. **Expect:** same — no sideways drift.
+3. Pinch in (zoomed in) and repeat; pinch out and repeat. **Expect:** the letter still lands under the finger at both.
+4. Pan the page so a different part is on screen, repeat. **Expect:** same.
+5. With the keyboard already up (tap into an existing box first, leave it up), double-tap a blank spot, type. **Expect:** lands under the finger; the page does not jump.
+6. Open a page that is not the first one in the list and repeat step 1. **Expect:** same.
+7. Double-tap in the strip just under the page title. **Expect:** the box sits where tapped; the page does not slide.
+8. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–7, or a failed step filed as a recurrence on B1960480.
 
 
 ### V1394448 — B1958144: designed road sections (median, lane striping, ROW lines) show on the real Silvestri and Richfield plans `Blocker: real-data`
@@ -1890,6 +1945,37 @@ Sandbox done: unit test proves token in both themes (15.20:1 / 10.57:1), no lite
 1. Dark theme: open a project row's menu → checked status row shows visible label on a tinted band. Expected: readable.
 2. Same menu, shared team row → readable tinted band.
 3. Light theme: both look as before (cream band).
+
+### V1416128 — B1991040: a project rename reaches schedule + review labels (Dashboard, Reports, Review lists) `Blocker: auth`
+
+Sandbox-proven: `test/nameCopiesGuard.test.js` (live-name rule, the production row verbatim in both title shapes, typed-title-untouched, column guard) and `e2e/names-matrix.spec.js` (the Schedule tab receives the LIVE name and again after a rename). **Needs a signed-in pass on real data** (the Dashboard reads the account's schedules/reviews from the cloud).
+**Steps:**
+1. Run the two SQL files (`schedules_linked_site_name_backfill_20260930.sql`, then `doc_reviews_project_name_backfill_20260930.sql`) — **step 1 (preview) of each first**; expect schedule id 6 and review rvmqzs201bfcc2d listed, the review's title kind "auto (name-first)", any hand-typed title "typed — left alone". Then run step 2.
+2. On planyr.io open the Dashboard. **Expect:** Schedule Health shows "Papadopoulos / Master Schedule", matching Jump Back In; "Last document" shows the new name.
+3. Rename that project again to a throwaway name from the Map row menu, return to the Dashboard **without** running SQL. **Expect:** both cards show the throwaway name (read-time resolution), then rename it back.
+4. Open Review → Saved reviews. **Expect:** that review's row reads "… Papadopoulos …"; a review with a typed title keeps it.
+5. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 2–4, or a failed step is filed as a recurrence on B1991040.
+
+### V1416129 — B1991041: renaming a brand-new project works signed in `Blocker: auth`
+
+Sandbox-proven logged-out (both entry points, reload; red on main). **The signed-in leg** exercises `ensureProjectRow` → push → `rename_site_group`.
+**Steps:**
+1. Signed in on planyr.io: Map → project switcher → "+ New project" (don't draw). **Expect:** opens as "Untitled site".
+2. Switcher → row menu → Rename → a throwaway name → Enter. **Expect:** no red "didn't match any project" toast; the name shows in the breadcrumb, the plan header and the Compose exhibit.
+3. Reload, then navigate to the Map. **Expect:** the project is still listed under the new name (it no longer vanishes).
+4. Delete the throwaway project. Read the served chunk hash in the same observation.
+- **Stopping rule:** closes on a dated pass of 1–3, or a failure is filed as a recurrence on B1991041.
+
+### V1414592 — B1989504/B1989505: the "Start your site" card no longer covers the map `Blocker: live-GIS`
+
+Sandbox-proven: `e2e/start-hint-placement.spec.js` (red on main, green here; emulated phone, not a real iPhone). **Still needs the deployed build** (`live-GIS` here means the real planyr.io edge + real basemap tiles; no signed-in data needed).
+**Steps** (new Untitled site, Site tab; read `/version.json` with `cache:'no-store'` and the served chunk hash in the SAME observation):
+1. Phone width (390×844, Playwright device descriptor, WebKit if installable else Chromium — name the engine): open a new blank site. **Expect:** a compact "Start your site" strip at the top, between the Panels and Tools edge tabs; the middle of the map is clear.
+2. Tap the map centre / drag. **Expect:** the map pans, nothing intercepts.
+3. Tools → Parcel tools → Draw new parcel. **Expect:** the strip is gone and stays gone while drawing.
+4. New blank site again → ✕ → reload. **Expect:** strip stays dismissed.
+5. Desktop width: **Expect:** strip top-left, clear of the middle. Real iPhone Safari look (toolbar collapse, safe areas) remains owner-side and is NOT claimed.
 
 ## THE CHECKLIST — run this on Michael's signed-in Chrome, on `planyr.io`
 
@@ -11567,6 +11653,16 @@ records its own live verify" mechanism) or a future sandbox with different egres
 - **Stopping rule:** closes when steps 2–3 both read as expected on `planyr.io` over a real parcel selection, or a specific residual is filed as a recurrence against B1895376, per STANDING RULE #2.
 
 *(minted **V1351376** alongside **B1895376**; `Cadence: once`)*
+
+### V1481216 — B2063056: a plan setting changed in one tab of the same browser appears in the other signed-in tab within seconds, without clobbering what that tab is editing `Blocker: auth`
+
+**Verified headless (logged out):** `e2e/cross-tab-live.spec.js` — rename, building, in-progress edit, header setting (red-proofed). **Pending:** the signed-in leg, where the element union is gated off and only the header path runs.
+**Use a throwaway DUPLICATE plan; read the served chunk hash in the same observation.**
+1. Signed in, open the same throwaway plan in two tabs of one browser; leave B in the background. **Expect:** same Settings in both.
+2. In A change the setback; switch to B without reloading. **Expect:** B shows the new setback and the notice "Updated from another session" within seconds.
+3. In B start typing a different setting (do not commit), change another setting in A. **Expect:** B's in-progress value is untouched.
+4. Reload both. **Expect:** both changes present.
+- **Stopping rule:** closes when steps 2–4 read as expected on `planyr.io`, or a residual is filed as a recurrence against B2063056.
 
 ### V1390100 — B1953797: two tabs/devices changing DIFFERENT plan settings keep BOTH; an idle open tab adopts the other's change; Model's Site.Acres / Plan.Building1.SF read the real plan on a device that never opened it `Blocker: auth`
 
