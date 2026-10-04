@@ -57,6 +57,8 @@ export const VERDICT_REGISTRY = {
   "commit_elements_group_cas.test.sql": allPassLiteralOrCountedFail,
   "deleted_plan_naming.test.sql": passedCommaFailed,
   "overlay_object_release_guard.test.sql": passedCommaFailed,
+  "food_browse_rpc.test.sql": passedCommaFailed,
+  "food_rls.test.sql": passedCommaFailed,
   "parcel_active_deleted_invariant.test.sql": allPassedOrCountedFail,
   "profiles_email_sync.test.sql": allPassedOrCountedFail,
   "reconcile_site_group_name.test.sql": proofPassedOrFailed,

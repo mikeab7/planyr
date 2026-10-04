@@ -498,7 +498,7 @@ function InfoGlyph({ size = 18 }) {
 }
 
 export default function FoodMap({
-  places, placesCapped, placesTotalMatched, loggedPlaces, loggedIds, manualPins,
+  places, placesCapped, placesTotalMatched, placesError, onRetryPlaces, loggedPlaces, loggedIds, manualPins,
   wishlistPlaces, wishlistManualPins, overpassPlaces,
   onSelectPlace, onSelectManualPin, pinMode, onDropPin, onViewChanged, onRequestSearchHere,
   flyToTarget, selectedKey, selectedPlaceInfo, sheetHeightPx = 0,
@@ -1063,6 +1063,15 @@ export default function FoodMap({
             {hasOwnPlaces
               ? "Showing places you've been or want to try — zoom in to browse everywhere else"
               : "Zoom in to browse restaurants near you"}
+          </div>
+        )}
+        {!tooSmall && placesError && (
+          <div data-testid="food-browse-error" role="alert" style={{ pointerEvents: "auto", display: "flex", alignItems: "center", gap: 8, ...FLOAT_NOTICE_STYLE }}>
+            <span>{placesError} — </span>
+            {onRetryPlaces && (
+              <Button variant="ghost" onClick={onRetryPlaces} data-testid="food-browse-retry"
+                style={{ height: SIZE.md.height, padding: SIZE.md.padding }}>Retry</Button>
+            )}
           </div>
         )}
         {showCappedNotice && (
