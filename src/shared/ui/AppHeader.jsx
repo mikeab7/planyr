@@ -526,6 +526,8 @@ export default function AppHeader({
   multiEditOk = false,
   authControl,
   toolbarContent,
+  // Optional strip rendered directly ABOVE Row 2 (the toolbar row), inside the header — Review's file tabs (NEW-1).
+  aboveToolbar,
   // Optional Row-2 center group (B387). When provided, Row 2 renders a 3-zone layout
   // (tabs | center | toolbar) with the center group optically centered like Row 1.
   // Generic + additive: callers that omit it (Site, Review) keep the 2-zone layout
@@ -1262,6 +1264,7 @@ export default function AppHeader({
         {narrow && row1Edges.right && <ScrollChevron side="right" onClick={() => pageScrollRow(rowRef, 1)} />}
       </div>
 
+      {aboveToolbar}
       {/* ── Row 2 — 44px (taller than Row 1: the tools row earns the weight, B357) ──
            With a center slot (B387) Row 2 is a 3-zone layout: tabs | center group | toolbar.
            The row may wrap on a too-narrow viewport (the center/toolbar flow to a second
