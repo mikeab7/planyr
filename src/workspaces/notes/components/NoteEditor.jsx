@@ -602,7 +602,7 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
 .planyr-note [data-testid="note-mat"][data-panning="1"] * { cursor: grabbing; }
 
 /* ⛔ NEW-6d — FINGER-SIZED TARGETS. On a coarse pointer the box grip (12 px), the eight resize handles
-   (10 px), the connect dot (11 px) and the sheet edge grips (14 px) were far below a fingertip. The
+   (10 px), the connect dot (11 px) and the sheet edge grips (left alone, see the note). The
    VISIBLE size is unchanged: each gets an invisible 44 px hit area centred on itself (a pseudo-element is
    part of its element for hit-testing). Mouse pointers never match this block. */
 @media (pointer: coarse) {
@@ -616,17 +616,9 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
      reach (it is how a box moves). Cost, stated: a corner handle's halo is partly shadowed by the
      grip's on a very small box — its own visible square still hits. */
   .planyr-note .ProseMirror .planyr-anchor-grip { z-index: 2; }
-  /* The sheet's edge grips grow OUTWARD only: still 7 px of reach onto the paper (a tap on the page near its
-     edge must keep placing a box — verify-notes-touch-landing caught a symmetric 44 px grip stealing it),
-     29 px of reach onto the grey, where a finger has nothing else to do. */
-  .planyr-note .planyr-page-width-grip { width: 36px; }
-  .planyr-note .planyr-page-width-grip-left { left: -29px; }
-  .planyr-note .planyr-page-width-grip-left::after { left: 28px; }
-  .planyr-note .planyr-page-width-grip-right { right: -29px; }
-  .planyr-note .planyr-page-height-grip { height: 36px; }
-  .planyr-note .planyr-page-height-grip-top { top: -29px; }
-  .planyr-note .planyr-page-height-grip-top::after { top: 28px; }
-  .planyr-note .planyr-page-height-grip-bottom { bottom: -29px; }
+  /* The sheet's EDGE grips are deliberately NOT enlarged: they sit where a page-edge tap places a box, and
+     every enlargement tried (44 px symmetric, then 36 px outward-only) moved a first letter off the finger
+     by 5 px at 200% zoom in verify-notes-touch-landing. Resizing a page is a deliberate desktop-style act. */
 }
 `;
 

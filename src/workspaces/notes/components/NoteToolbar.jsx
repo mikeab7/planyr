@@ -1628,7 +1628,7 @@ export default function NoteToolbar({
     return (
       <div
         ref={rootRef}
-        style={{ ...barStyle, overflowX: "hidden", gap: 0, padding: "2px 4px" }}
+        style={{ ...barStyle, overflowX: "hidden", gap: 0 }}
         data-testid="note-toolbar"
         data-narrow="1"
         data-compact={compact ? "1" : "0"}
