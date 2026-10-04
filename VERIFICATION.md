@@ -218,6 +218,19 @@ Sandbox-proven in WebKit-emulated iPhone 15 / SE against a MOCKED Supabase (`ui-
 8. **(amendment — typing, every text field)** With the keyboard up on the iPhone, type a long entry (e.g. `Mizuki Nigiri omakase with extra wasabi…`) in EACH of: the Map-view search box · List-view filter · drop-a-pin name · visit form (date, first dish name, what was good, cost, notes) · edit an old visit · add-a-dish (name, price, note). **Expect, per field:** the text and caret stay on screen and follow what you type (nothing under the keyboard, behind the card or past the screen edge); no field extends past the edge; **no "AutoFill Contact" bar** above the keyboard; the action key reads Search / Next / Done sensibly. Name any field that still fails. (Overlaps V1476080 for the visit form — one pass can close both.)
 9. Desktop browser, full width: every one of those fields looks and types as before.
 - **Stopping rule:** closes on a dated pass of 1–7, or a failed step filed as a recurrence on B2046224.
+### V1497664 — B2046224 (×2): on a real iPhone, the field you type in stays above the keyboard and no "AutoFill Contact" bar appears `Blocker: real-device (no session can raise a real iPhone keyboard or Safari's AutoFill bar)`
+
+Sandbox-proven: `ui-audit/verify-food-ios-keyboard.mjs` models real iOS (layout viewport unchanged, `innerHeight` shrinks with the visual viewport, optional pan) — **RED on the old code for the exact reported field (38/72), 99/99 on the fix**; `verify-food-phone.mjs` 159/159, `verify-food-visit-phone.mjs` 25/25, `test/foodPhone.test.js`. Not provable here: the real keyboard, the real AutoFill bar. **Steps** (iPhone, Safari, planyr.io → Food → Map; read `/version.json` and the served chunk hash in the same check):
+1. Search `Buffalo Grill`, open **The Buffalo Grill** (1301 S Voss Rd). **Expect:** the card opens about half way up, with "Dishes · Sort" visible under the score tiles.
+2. Tap **+ Add a dish**. **Expect:** the keyboard opens, the card slides up to sit on top of the keyboard and fills the screen above it, and the "Dish" field (red underline) is visible above the keyboard with the cursor in it. **No "AutoFill Contact" bar / no own-name suggestion.**
+3. Type a long dish, e.g. `Chicken fried steak with cream gravy and jalapeño mash`. **Expect:** every letter visible as you type.
+4. Tap Price, then Note, typing in each. **Expect:** each one stays visible above the keyboard, and the Done / Save & add another buttons are not on top of it. No AutoFill Contact bar.
+5. Tap Done, close the keyboard. **Expect:** the card drops back to the bottom of the screen.
+6. Tap **Log a visit**; tap Dish, What was good, Cost, Notes in turn (type a few lines in Notes). **Expect:** each field visible above the keyboard while typing; no AutoFill Contact bar on any.
+7. Tap an existing visit card to edit it; tap What was good and Notes. **Expect:** same.
+8. Tap Pin, drop a pin. **Expect:** the place-name field is visible with the keyboard up; no AutoFill Contact bar.
+9. Desktop browser, full width: open the same restaurant. **Expect:** right-hand panel as before, nothing moved.
+- **Stopping rule:** closes on a dated pass of 1–9 from Michael's iPhone; any failed step re-opens B2046224 (×3) with that step number.
 ### V1486288 — B2061600: Select-parcels outlines do not catch when a zoom or pan settles at zoom 14–16 in Bartow County GA `Blocker: real-data`
 
 Sandbox-proven: `ui-audit/verify-parcel-settle-cost.mjs` (z14 moveend settle 103.7 → 0.8 ms, mock at Bartow density), `test/parcelTileLayer.test.js`, and the existing parcel display harnesses. **Not provable here:** Michael's real 63,688-lot Bartow service, his GPU-accelerated Chrome, and how it *feels*. Read the served chunk hash in the SAME observation as the result (CLAUDE.md live-measurement rule).

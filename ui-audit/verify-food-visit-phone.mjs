@@ -128,11 +128,11 @@ try {
     const { ctx, page } = await open(browser, `${FIX}?newpin=1`);
     await tap(page, '[data-testid="food-log-visit-btn"]');
     await page.waitForTimeout(400);
-    const fields = await page.locator("form input:not([type=range]):not([type=date]):not([type=number]), form textarea, input[placeholder='Name this place'], form input[type=number]").evaluateAll((els) =>
+    const fields = await page.locator("form input:not([type=range]):not([type=date]):not([type=number]), form textarea, [data-testid='pin-label-input'], form input[type=number]").evaluateAll((els) =>
       els.map((e) => ({ ph: e.placeholder, ac: e.getAttribute("autocomplete"), nm: e.getAttribute("name"), id: e.id })));
     const contact = /(^|[^a-z])(name|first|last|full|email|phone|tel|address|street|city|zip|postal|org|company)([^a-z]|$)/i;
-    const bad = fields.filter((f) => f.ac !== "off" || contact.test(f.nm || "") || contact.test(f.id || ""));
-    check("4a every text field opts out of AutoFill (autocomplete=off) with a non-contact name", fields.length >= 3 && bad.length === 0, bad.length ? JSON.stringify(bad) : `${fields.length} fields clean`);
+    const bad = fields.filter((f) => !/^x-food-/.test(f.ac || "") || contact.test(f.nm || "") || contact.test(f.id || ""));
+    check("4a every text field opts out of AutoFill (non-standard x-food-* token — iOS overrides off) with a non-contact name", fields.length >= 3 && bad.length === 0, bad.length ? JSON.stringify(bad) : `${fields.length} fields clean`);
     await ctx.close();
   });
 
