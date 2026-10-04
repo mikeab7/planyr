@@ -36,6 +36,7 @@
  * B1095 discipline: reading a gate must never drag a pipeline onto the boot bundle.
  */
 
+import { SITE_ROADS_FROM } from "../../../shared/basemaps/basemaps.js";
 import { TERRAIN_MIN_ZOOM } from "./terrainGate.js";
 
 /* The evidence-layer gates. They lived as module-private constants inside
@@ -49,7 +50,7 @@ export const MAPILLARY_MIN_ZOOM = 16;  // Mapillary bbox must be < 0.01° — hi
  * here rather than as a MapFinder-local literal so the row's dormant note and the map's own
  * opacity switch read the SAME number — the B220/OSM_MIN_ZOOM discipline applied to a
  * control that isn't in the `ALL_LAYERS` registry. */
-export const PLACE_NAMES_MIN_ZOOM = 14;
+export const PLACE_NAMES_MIN_ZOOM = SITE_ROADS_FROM; // 14 — defined once in shared/basemaps; /food's default reads it too (NEW-1)
 
 /* `featureLayerOptions`'s own default. An `esriFeature` row with no declared `minZoom`
  * is STILL gated — at 10 — because that is the value handed to Leaflet. Naming it here is
