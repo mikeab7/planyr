@@ -42,7 +42,18 @@ export const leafKey = (key) => String(key).replace(/^.*\./, "");
 
 /** Keys that are an OWNER / BILLING address by name. Excluded at every rung of the ladder. */
 export const MAILING_KEY_RE =
-  /(mail|owner_?addr|own_?addr|care_?of|^c_?o$|^c_?o_|billing|bill_?to|remit|correspond|agent_?addr|tax_?addr)/i;
+  /(mail|owner_?addr|own_?addr|care_?of|^c_?o$|^c_?o_|billing|bill_?to|remit|correspond|agent_?addr|tax_?addr|^m_(addr|street|city|zip|state))/i;
+
+/* NEW-1 (Louisiana parishes) — keys that CONTAIN the word "address" but hold something that is not
+ * one, measured on real Regrid-schema parish layers: Cameron's `ADDRESS_SO` reads the literal
+ * "county" (the source-of-address flag) and beat its own `ADDRESS` column because it is listed
+ * first; `ll_address_count` reads "1". A situs ladder that matched them would title a parcel card
+ * "county". Excluded at every rung, exactly like a mailing key. */
+const NON_SITUS_KEY_RE = /(address_?so(urce)?$|addr(ess)?_?count$)/i;
+
+/* A value that is a serialised JSON object (Regrid's `original_address` = {"scity":"Parish"}) is
+ * never a street address, however its key is spelled. */
+const looksLikeJsonBlob = (v) => { const s = String(v ?? "").trim(); return s.startsWith("{") && s.endsWith("}"); };
 
 /* Keys that are a NUMBERED address LINE (ADDRESS1 / ADDRESS2 / ADDR_LINE_2 / ADDR2). A line
  * number is the hallmark of a mailing block — a situs column is a single field, never "line 2" —
@@ -56,7 +67,7 @@ export const SITUS_LADDER = [
   /situs/i,
   // 2 — the land's own address under another name. `prop_?street(?!_)` matches CCAD's Prop_Street
   //     (the situs street NAME) but not its Prop_Street_Number/Dir/Suffix sub-columns.
-  /(site_?addr|prop(erty)?_?addr|prop_?street(?!_)|phys(ical)?_?addr|loc(ation)?_?addr|street_?addr|^location$)/i,
+  /(site_?addr|prop(erty)?_?addr|prop_?street(?!_)|phys(ical)?_?addr|loc(ation)?_?addr|street_?addr|^location$|^phys(ical)?_?a$|^par(cel)?_?addr(es{1,2})?$)/i,
   // 3 — the generic catch-all, LAST. Plenty of CADs do name their situs column plainly
   //     ("ADDRESS", "FULL_ADDR"), so dropping this rung would regress them; it is simply no longer
   //     allowed to outrank rungs 1–2, and never sees a mailing key or a numbered line.
@@ -79,7 +90,7 @@ const isMailingKey = (key, rung) => MAILING_KEY_RE.test(key) || (rung === 2 && A
  * stringified on the way in. Every curated-field resolver must treat this exactly like a missing
  * value — never display it as if it were data (LOUD-FAILURE's quieter cousin: an absent fact
  * reads as absent, not as a four-letter word that looks like one). */
-const PLACEHOLDER_TEXT_RE = /^(null|none|n\/a|na|unk(nown)?|undefined|-{1,2})$/i;
+const PLACEHOLDER_TEXT_RE = /^(null|none|n\/a|na|unk(nown)?|undefined|-{1,2}|~|\?{3}|(0 )?no address|(none|not) available)$/i;
 
 /** Is this value a real-looking placeholder rather than actual data? Pure. */
 export function isPlaceholderValue(v) {
@@ -116,11 +127,17 @@ export function situsKey(attrs, { skip = null } = {}) {
         if (skip && skip.has(key)) continue;
         const lk = leafKey(key);
         if (isMailingKey(lk, rung)) continue;
+        if (NON_SITUS_KEY_RE.test(lk)) continue;
         if (!re.test(lk)) continue;
         if (wantComposed === true && !COMPOSED_ADDR_RE.test(lk)) continue;
         if (wantComposed === false && COMPOSED_ADDR_RE.test(lk)) continue; // already tried above
         const v = attrs[key];
-        if (isPlaceholderValue(v)) continue;
+        if (isPlaceholderValue(v) || looksLikeJsonBlob(v)) continue;
+        // NEW-1 (Louisiana) — on the generic catch-all rung ONLY, a value that is a bare house NUMBER
+        // ("1653", "240") is one half of a split address (Address_Nu + Street_Nam on Lafourche, St. Mary,
+        // St. John, St. Bernard, Iberville, Webster), never a situs: as a card title it names nothing.
+        // Rungs 0-1 still return a number-only value (`SITUS_NUM` behaviour is unchanged).
+        if (rung === 2 && /^\s*\d+[A-Za-z]?\s*$/.test(String(v))) continue;
         if (String(v).replace(/\s+/g, " ").trim()) return key;
       }
     }
@@ -234,6 +251,8 @@ export function siteNameFromParcel(attrs, { addr = null, searched = null, acct =
  * the service happened to list first. So the owner row resolves through `ownerKey`, which prefers
  * the UN-numbered column, then the lowest-numbered one — the same discipline as `situsKey`. */
 export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?nme\d*|name|owner\d)$/i;
+/** Fallback owner spellings — consulted only when nothing in OWNER_KEY_RE resolves. */
+export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_)$/i;
 
 /** The trailing sequence number on an owner column (OWNERNME2 → 2), or 0 when it has none. */
 const ownerSeq = (key) => { const m = /(\d+)$/.exec(key); return m ? Number(m[1]) : 0; };
@@ -257,7 +276,18 @@ export function ownerKey(attrs, { skip = null } = {}) {
     const seq = ownerSeq(lk) + (/^name$/i.test(lk) ? 1000 : 0);
     if (seq < bestSeq) { best = key; bestSeq = seq; }
   }
-  return best;
+  if (best) return best;
+  // Second pass — the spellings only Louisiana's parish rolls use (NEW-1): Assumption/St. James
+  // publish the owner as `Taxpayer`, Ascension as `OWNERNAME_` (a shapefile-truncated trailing
+  // underscore), Acadia as `OWNERS`. Strictly a FALLBACK: a layer that already has an `Owner`
+  // column resolves exactly as before, so no existing source can change its answer.
+  for (const key of Object.keys(attrs)) {
+    if (skip && skip.has(key)) continue;
+    if (!OWNER_FALLBACK_RE.test(leafKey(key))) continue;
+    if (isPlaceholderValue(attrs[key])) continue;
+    return key;
+  }
+  return null;
 }
 
 /* NEW-1 (2026-09-12) — a source can publish BOTH a GIS-measured area column and a "legal" one

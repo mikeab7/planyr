@@ -5,7 +5,7 @@
  * What this CAN prove, hermetically (no real network to any GIS host): that the Leaflet/
  * esri-leaflet WIRING actually behaves the way `parcelDisplay.js`'s header claims — vector
  * outlines close-in, a server-rendered image wide, nothing far out — against Harris County
- * (a real MapServer CAD, so it gets the full adaptive composite), driven by REAL wheel-zoom
+ * (a real MapServer CAD — since NEW-1 (2026-10-04) vector-only, never a county picture), driven by REAL wheel-zoom
  * gestures rather than assumed from reading esri-leaflet's source alone.
  *
  * FOREGROUND-OR-VOID: this harness zooms a real map and reads real DOM geometry/counts
@@ -131,45 +131,41 @@ await clearSelectionIfAny(); // the highlight itself is a separate, always-drawn
 // zoom-gated by design (a selected parcel stays marked at any zoom) — and would otherwise
 // contaminate every `vectorPaths` reading below with a leftover count of 1.
 
-// Zoom out with real wheel gestures (Leaflet's default scrollWheelZoom) until either the "wide"
-// image layer appears or the far-zoom hint text does — polling rather than assuming a fixed
-// wheel-notch-to-zoom-level mapping, because smooth zoom (B1449) means one notch's settled zoom
-// delta is not guaranteed to be exactly 1.
+// Zoom out with real wheel gestures until the "zoom in a little" hint appears — polling rather than assuming a
+// fixed wheel-notch-to-zoom-level mapping, because smooth zoom (B1449) means one notch's settled zoom delta
+// is not guaranteed to be exactly 1.
+//
+// ⛔ AMENDED 2026-10-04 (NEW-1, owner decision — Planyr owns outlines and lot numbers): Harris is a queryable
+// MapServer, and a county's own /export PICTURE is NEVER mounted any more. The old "WIDE" band for a MapServer
+// CAD (a server image every lot in view) is gone — there is no cheap way to draw Planyr vectors there without
+// hitting maxRecordCount, so the band draws NOTHING. What this now proves, driven by real wheel gestures:
+//   · at no zoom on the way out does a county image appear;
+//   · the vectors stop at the vector floor, where the hint takes over;
+//   · clicking a lot still adds a parcel when nothing is drawn (B137: what is drawn is a subset of what is selectable).
 await page.mouse.move(640, 430);
-let sawWide = false, sawFar = false;
+let everImg = false, sawFar = false, vectorsStoppedAt = null;
 for (let i = 0; i < 30 && !sawFar; i++) {
   await page.mouse.wheel(0, 300); // positive deltaY = zoom OUT
   await page.waitForTimeout(450); // let the smooth-zoom gesture + any query settle
   s = await domState(page);
-  if (!sawWide && s.parcelImg > 0) {
-    sawWide = true;
-    console.log(`--- WIDE reached after ${i + 1} wheel notches ---`);
-    console.log(`  state: ${JSON.stringify(s)}`);
-    expect("vector outlines stop drawing once the image layer takes over", s.vectorPaths === 0, `${s.vectorPaths} path nodes`);
-    expect("the server-image overlay is present", s.parcelImg > 0);
-    expect("clicking still adds a parcel while wide (no outline drawn at the click point)", await clickAddsParcel("wide"));
-    await clearSelectionIfAny(); // see the identical note after the "close" check above
-    // `clickAddsParcel`/`clearSelectionIfAny` moved the cursor onto the click point and then the
-    // "Clear selection" button — put it back over the map or every wheel event below lands on
-    // whatever UI it's now hovering instead of zooming (this is exactly what stalled the loop
-    // the first time this harness ran: 29 more notches, zero zoom change).
-    await page.mouse.move(640, 430);
-    s = await domState(page); // the highlight's own `<path>` just cleared — re-read before continuing
-  }
+  if (s.parcelImg > 0) everImg = true;
+  if (vectorsStoppedAt == null && s.vectorPaths === 0 && i > 0) vectorsStoppedAt = i + 1;
   if (/zoom in a little/i.test(s.zoomTip)) sawFar = true;
 }
-expect("the WIDE (image) regime was reached by zooming out", sawWide);
-expect("the FAR (draw-nothing) floor was reached by continuing to zoom out", sawFar);
+expect("the FAR (draw-nothing) floor was reached by zooming out", sawFar);
+expect("no county /export picture appeared at ANY zoom on the way out", !everImg);
 if (sawFar) {
-  console.log("--- FAR reached (the pre-existing PARCEL_MINZOOM floor, unchanged by this item) ---");
-  console.log(`  state: ${JSON.stringify(s)}`);
+  console.log("--- FAR reached (below the vector floor — nothing drawn for a MapServer CAD) ---");
+  console.log(`  state: ${JSON.stringify(s)} (vectors stopped after ${vectorsStoppedAt} wheel notches)`);
   expect("no vector outlines far out", s.vectorPaths === 0);
-  expect("no server-image overlay far out either — neither sublayer draws below PARCEL_MINZOOM", s.parcelImg === 0);
-  expect("the far-zoom hint is the pre-existing one, unchanged", /zoom in a little to see the lines/i.test(s.zoomTip));
+  expect("no server-image overlay far out either", s.parcelImg === 0);
+  expect("the far-zoom hint is shown", /zoom in a little to see the lines/i.test(s.zoomTip));
+  expect("clicking still adds a parcel while nothing is drawn (B137)", await clickAddsParcel("far"));
+  await clearSelectionIfAny();
 }
 
 expect("no uncaught page errors", pageErrors.length === 0, `${pageErrors.length} errors`);
 await page.close();
 await browser.close();
-console.log(`\n${failures ? `❌ ${failures} FAILED` : "✅ PASS"} — parcel display regimes (NEW-1, zoom-based cap-banner replacement)`);
+console.log(`\n${failures ? `❌ ${failures} FAILED` : "✅ PASS"} — parcel display (NEW-1 regimes, amended 2026-10-04: Planyr owns outlines)`);
 process.exit(failures ? 1 : 0);

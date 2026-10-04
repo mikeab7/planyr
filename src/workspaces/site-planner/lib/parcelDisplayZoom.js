@@ -1,5 +1,18 @@
 /* lib/parcelDisplayZoom.js — NEW-1.
  *
+ * ⛔ AMENDED 2026-10-04 (NEW-1, owner decision after the Grand Port follow-up) — PLANYR OWNS THE
+ * OUTLINES. The "wide" regime below used to draw a county's own server /export PICTURE for every
+ * MapServer county, which carried the county's colours and its own baked-in lot numbers (Chambers'
+ * '1532567588' west of the pond, under Planyr's "Parcel 19" chip). It no longer does:
+ *   - a QUERYABLE CAD (MapServer or FeatureServer) draws ONLY Planyr's vector outline, in Planyr's
+ *     one colour; a MapServer CAD's vector floor is PARCEL_VECTOR_MINZOOM (it has no cheap way to
+ *     draw vectors further out without hitting its record cap — B1976336 / `maxRecordCount`), so
+ *     the wide band draws NOTHING for it; a FeatureServer keeps its PARCEL_MINZOOM floor;
+ *   - the ONE remaining picture is the statewide image-only source (TxGIO — /query disabled
+ *     upstream), the one area with no queryable source. It is requested WITHOUT labels and in
+ *     Planyr's outline colour via `dynamicLayers` (`plainOutlineDynamicLayers`).
+ * Read "wide" below as: the band in which ONLY that statewide image can draw.
+ *
  * Split out of `parcelDisplay.js` for the same reason `parcelOpacityGuard.js` is: that module
  * imports Leaflet + esri-leaflet, so nothing in it can run outside a browser. This is the whole
  * DECISION behind the three-regime parcel display — which zoom band draws what — so it belongs
@@ -61,4 +74,41 @@ export function parcelDisplayRegimeForZoom(zoom) {
 export const MAPSERVER_LAYER_RE = /^(.*\/MapServer)\/(\d+)\/?$/i;
 export function parcelUrlSupportsImageExport(url) {
   return MAPSERVER_LAYER_RE.test(String(url || "").replace(/\/+$/, ""));
+}
+
+/* ONE outline colour for every Planyr-drawn parcel line, the statewide image's server-side
+ * recolour, and the lot numbers — so a county never shows a look of its own. */
+export const PARCEL_OUTLINE_COLOR = "#a21caf"; // design-exempt: the one parcel-outline colour — canvas strokes, a server-image request and DOM label ink cannot use var(); same value as parcelTileLayer.PARCEL_OUTLINE_STYLE
+export const PARCEL_OUTLINE_RGB = [162, 28, 175];
+export const PARCEL_OUTLINE_WEIGHT = 1.3;
+
+/* The one floor a queryable MapServer CAD may draw vectors from (see the amendment above).
+ * A FeatureServer (or any non-MapServer URL) has no image regime to hand over to, so it stays at
+ * PARCEL_MINZOOM; the image-only statewide source is exempt — it draws its image from there. */
+export const parcelVectorFloorFor = (url) =>
+  (parcelUrlSupportsImageExport(url) ? PARCEL_VECTOR_MINZOOM : PARCEL_MINZOOM);
+
+/* `dynamicLayers` for an /export of ONE sublayer: Planyr's outline colour, no fill, and labels
+ * OFF. A county server's /export otherwise paints with its own drawingInfo — its own colour and,
+ * where it publishes labelingInfo, its own lot numbers. Verified live 2026-10-04 on the TxGIO
+ * StratMap MapServer (supportsDynamicLayers: true): the same view re-rendered magenta. Returns
+ * the JSON string esri-leaflet passes through as the `dynamicLayers` export parameter. */
+export function plainOutlineDynamicLayers(layerId) {
+  const id = Number(layerId);
+  return JSON.stringify([{
+    id,
+    source: { type: "mapLayer", mapLayerId: id },
+    drawingInfo: {
+      showLabels: false,
+      renderer: {
+        type: "simple",
+        symbol: {
+          type: "esriSFS",
+          style: "esriSFSNull",
+          color: [0, 0, 0, 0],
+          outline: { type: "esriSLS", style: "esriSLSSolid", color: [...PARCEL_OUTLINE_RGB, 242], width: PARCEL_OUTLINE_WEIGHT },
+        },
+      },
+    },
+  }]);
 }

@@ -2516,6 +2516,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      The chip is a HIT TARGET only while it is hovered — see the render site for why that gate and
      not the old selected-lot one (which could only be opened from behind itself). */
   const parcelChipsRef = useRef([]);
+  const lotNoInsetRef = useRef(0);               // the basemap's over-scan, so a lot number is placed in the VISIBLE canvas
+  const lotNoObstaclesRef = useRef(() => []); // NEW-1 (2026-10-04): this frame's parcel-chip boxes, in the basemap's container pixels, for the county lot-number layer
   const [hoverChipId, setHoverChipId] = useState(null);
   const [mapMenu, setMapMenu] = useState(null);   // {x,y,kind:'markup'|'empty',id?} — dedicated canvas right-click menu (never the browser's)
   // B230 — Bluebeam-style vertex editing (shared across every editable path: parcel, polygon
@@ -16278,7 +16280,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       getMap: () => geoMapRef.current,
       boundsOf: (m) => { const b = m.getBounds(); return { south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() }; },
       resolveUrl: (key) => resolveOneCountyLayer(key),
-      makeLayer: makeParcelDisplayLayer,
+      // NEW-1 (2026-10-04) — Planyr draws the county lot numbers; they must clear this plan's own parcel chips.
+      makeLayer: (url) => makeParcelDisplayLayer(url, { getObstacles: () => lotNoObstaclesRef.current(), getInset: () => lotNoInsetRef.current }),
       sourcesForView: displaySourcesForView,
       statewideKeysForState,
       stateOf: (k) => COUNTIES_MAP[k] && COUNTIES_MAP[k].state,
@@ -17407,6 +17410,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      Assigning during render is safe here because it is a pure mirror of what this frame draws — the
      handler that reads it can only run after the frame is committed. */
   parcelChipsRef.current = parcelChips.map((p) => ({ id: p.pc.id, box: p.box }));
+  // The map container is the canvas plus `geoOverscan` on every side, so a canvas-space box moves by that much.
+  lotNoInsetRef.current = geoOverscan;
+  lotNoObstaclesRef.current = () => parcelChipsRef.current.map(({ box }) => ({ x: box.x + geoOverscan, y: box.y + geoOverscan, w: box.w, h: box.h }));
+  /* NEW-1 (2026-10-04) — the county lot numbers must keep clear of this plan's own parcel chips, which move when
+   * the view settles or a parcel is added / moved / hidden WITHOUT the map firing a move. A signature of the
+   * chips' boxes (not the raw `parcels` list) is the trigger, so it changes exactly when a chip does. */
+  const lotNoChipSig = parcelChips.map((p) => `${p.pc.id}:${Math.round(p.box.x)},${Math.round(p.box.y)},${Math.round(p.box.w)}`).join("|");
+  useEffect(() => {
+    if (!identifyMode) return undefined;
+    const t = setTimeout(() => { const set = outlineLayersRef.current; if (set && set.relayoutLabels) set.relayoutLabels(); }, 200);
+    return () => clearTimeout(t);
+  }, [identifyMode, lotNoChipSig, geoOverscan]);
 
   /* NEW-3 — the MEASUREMENT summary chip.
    *
