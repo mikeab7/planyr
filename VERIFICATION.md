@@ -166,6 +166,17 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1484657 — B2061329: on a real iPhone, tapping into a box keeps the keyboard up and puts the caret where tapped `Blocker: real-data` (signed-in real device)
+
+Sandbox-proven on WebKit (hasTouch + isMobile): `ui-audit/verify-notes-touch-box-tap.mjs`. A real soft keyboard cannot be driven headless.
+**Steps (real iPhone, a throwaway page):**
+1. Double-tap blank paper, type "hello world", then tap inside the word "world". **Expect:** the keyboard does not drop; the caret is where tapped; typing inserts there.
+2. Make a second box; tap from the first box into the second. **Expect:** keyboard stays up, caret in the second box, one tap.
+3. In a box, delete all its text with Backspace, press Backspace once more. **Expect:** the empty box disappears.
+4. Tap a picture box. **Expect:** it selects (handles), no keyboard.
+5. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2061329.
+
 ### V1443696 — B2018608: vector roads + labels basemap (Food + Site Plan map) `Blocker: live-GIS`
 
 Sandbox-proven at dpr 2 against a SYNTHETIC OpenMapTiles fixture (`ui-audit/verify-vector-basemap.mjs`, 28/28); the sandbox cannot reach `tiles.openfreemap.org`, so the **real source, its CORS headers and the real map look are unverified**. **Steps** (planyr.io, read the served chunk hash in the same observation; `node ui-audit/verify-vector-basemap.mjs https://planyr.io --live` runs the mechanical half):

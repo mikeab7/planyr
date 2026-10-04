@@ -2017,7 +2017,16 @@ const NoteEditor = forwardRef(function NoteEditor({
      * typing into must hold the caret — otherwise the second character goes somewhere else. The
      * pair is dispatched synchronously, so ProseMirror's history groups them into ONE undo step;
      * that is asserted rather than assumed in `verify-notes-pending-caret`. */
-    editor.commands.addNoteAnchorAt({ x: at.x, y: at.y, w: at.w });
+    /* ⛔ NEW-3 — THE NEW BOX IS BORN SELECTED AND BEING EDITED. The press that makes it is
+     * stage 2 of the two-stage model by definition (the caret is already inside), so the next press
+     * into it must not read as a stage-1 "select the box" tap — on a phone that blur dropped the
+     * keyboard on the very first tap back into the box you had just typed in. Named in the same
+     * tick (`aid` is passed in, not minted later by `ensureNoteAnchorIds`) so the state can be set
+     * before any further press exists. */
+    const aid = `a${Date.now().toString(36)}c${Math.floor(Math.random() * 1e6).toString(36)}`;
+    editor.commands.addNoteAnchorAt({ x: at.x, y: at.y, w: at.w, aid });
+    setSelection(new Set([aid]));
+    setEditingId(aid);
     /* ⛔ REAL DOM FOCUS HAS TO LAND IN THIS SAME TICK, NOT WHENEVER THE BROWSER GETS TO IT
      * (B1928816, owner report 2026-09-27: a brand-new page's first box kept only the FIRST
      * character typed). `addNoteAnchorAt`'s own `.focus(at + 2, …)` already ran above and moved
@@ -2789,6 +2798,20 @@ const NoteEditor = forwardRef(function NoteEditor({
      * — it is the way back OUT to the box — and getting this wrong would mean Delete eating a
      * whole box while somebody was editing a word in it. */
     if (editingRef.current) {
+      /* ⛔ NEW-3 — BACKSPACE ON AN EMPTY BOX REMOVES IT, ON TOUCH ONLY. With the box-select stage
+       * skipped on a phone there is otherwise no way to delete a box from the keyboard. Desktop is
+       * unchanged (Escape, then Delete, as before). Undoable like any removal. */
+      if (e.key === "Backspace" && isTouchPointerType(lastPointerTypeRef.current)) {
+        const id = String(editingRef.current);
+        const box = [...editor.view.dom.querySelectorAll(".planyr-anchor")].find((n) => n.getAttribute("data-anchor-id") === id);
+        if (box && box.getAttribute("data-empty") === "1") {
+          e.preventDefault();
+          editor.commands.removeNoteAnchors([id]);
+          clearSelection();
+          editor.commands.focus(null, { scrollIntoView: false });
+          return true;
+        }
+      }
       if (e.key !== "Escape") return false;
       e.preventDefault();
       setEditingId(null);
@@ -3031,7 +3054,19 @@ const NoteEditor = forwardRef(function NoteEditor({
       }
       if (id) {
         const alreadySelected = selRef.current.has(String(id)) && selRef.current.size === 1;
-        if (!alreadySelected) {
+        /* ⛔ NEW-3 — ON TOUCH THERE IS NO STAGE 1. A finger tap on a box's text is "put the caret
+         * there and keep the keyboard up"; the select-then-enter pair cost a keyboard dismiss and a
+         * second tap on every box switch, INCLUDING the box you were typing in. Stage 1's blur
+         * exists for one desktop hazard (a stale caret left in flow text swallowing a Backspace that
+         * was meant to delete the SELECTED box — B1555152 / B434416). That hazard cannot arise here:
+         * we do NOT preventDefault, so the browser moves the caret to the tap point INSIDE this box
+         * and this box is marked selected+editing, which routes Backspace to its text. Deleting a box
+         * on touch is Backspace-on-an-empty-box (`selectionKeyDown`) or the NEW-5 menu. A picture
+         * box has no words to enter, so it keeps stage 1 on every device. */
+        const touchEnter = !alreadySelected && isTouchPointerType(lastPointerTypeRef.current)
+          && inBlock.getAttribute("data-anchor-kind") !== "image";
+        if (touchEnter) setSelection(new Set([String(id)]));
+        if (!alreadySelected && !touchEnter) {
           /* Stage 1. Nothing is typed and no caret moves — this press is about the BOX.
            *
            * ⛔ AND THE EDITOR MUST BE BLURRED HERE, NOT LEFT AS IT WAS (B1555152, owner report
