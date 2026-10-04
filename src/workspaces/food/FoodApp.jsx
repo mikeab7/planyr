@@ -18,7 +18,7 @@ import VisitPanel from "./components/VisitPanel.jsx";
 import VisitList from "./components/VisitList.jsx";
 import SearchBox from "./components/SearchBox.jsx";
 import {
-  supabaseConfigured, fetchPlacesInBounds, fetchAllVisits, fetchPlacesByIds,
+  supabaseConfigured, fetchPlacesInBounds, reportBrowseError, BROWSE_ERROR_MESSAGE, fetchAllVisits, fetchPlacesByIds,
   insertVisit, updateVisit, deleteVisit, manualPinsFromVisits, loggedPlaceIds, avgRatingByPlaceId,
   searchPlacesByName, fetchAllWishlist, addWishlist, removeWishlist, wishlistedPlaceIds,
   manualWishlistFromRows, manualGroupKey, manualPinKey,
@@ -37,6 +37,8 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   const [bounds, setBounds] = useState(null);
   const [places, setPlaces] = useState([]);
   const [placesCap, setPlacesCap] = useState({ capped: false, totalMatched: 0 });
+  const [placesError, setPlacesError] = useState(null); // browse RPC failure — shown on the map, never silent
+  const [placesRetry, setPlacesRetry] = useState(0);
   const [overpassPlaces, setOverpassPlaces] = useState([]);
   const [visits, setVisits] = useState([]);
   const [wishlist, setWishlist] = useState([]); // "want to try" flags (B669312) — food_wishlist rows
@@ -67,13 +69,19 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   useEffect(() => {
     if (!bounds) return;
     let cancelled = false;
-    fetchPlacesInBounds(bounds).then(({ data, capped, totalMatched }) => {
+    fetchPlacesInBounds(bounds).then(({ data, capped, totalMatched, error }) => {
       if (cancelled) return;
+      if (error) {
+        reportBrowseError(error);
+        setPlacesError(BROWSE_ERROR_MESSAGE);
+        return; // keep the pins already drawn; the notice says the new view didn't load
+      }
+      setPlacesError(null);
       setPlaces(data);
       setPlacesCap({ capped, totalMatched });
     });
     return () => { cancelled = true; };
-  }, [bounds]);
+  }, [bounds, placesRetry]);
 
   // The signed-in user's own visit log.
   const reloadVisits = useCallback(async () => {
@@ -563,6 +571,8 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
             places={places}
             placesCapped={placesCap.capped}
             placesTotalMatched={placesCap.totalMatched}
+            placesError={placesError}
+            onRetryPlaces={() => setPlacesRetry((n) => n + 1)}
             loggedPlaces={loggedPlaces}
             loggedIds={loggedIds}
             manualPins={manualPins}

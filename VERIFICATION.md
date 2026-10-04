@@ -166,6 +166,15 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1495440 — B2079808: Food map browse pins are back, and a failed browse says so
+
+Sandbox-proven: the browse RPC returns rows (1,040 downtown / 424 Heights; also as `anon`) after the live fix; `food_browse_rpc.test.sql` 3 passed; `test/foodBrowseError.test.js` 7 passed. Not provable here: the deployed build and the real map.
+1. On planyr.io (signed in or out) read the build from `/version.json` and the served `FoodApp-*.js` hash in the same check. Open `#/food`, zoom to street level over downtown Houston. **Expect:** unsaved restaurant pins appear without pressing anything; the Network call `rpc/food_places_in_bounds_sampled` returns 200.
+2. Pan to the Heights / Washington Ave and zoom in. **Expect:** pins appear there too; saved pins still show in their own colour.
+3. Zoomed out past the browse threshold. **Expect:** the "zoom in" notice, no error notice.
+4. (Error path, optional) in DevTools block the `food_places_in_bounds_sampled` request and pan. **Expect:** "Couldn't load restaurants here — Retry" at the bottom of the map; unblock and press Retry: the pins load and the notice goes.
+- **Stopping rule:** closes on a dated pass of 1–3 with the build hash recorded, or a failed step filed as a recurrence on B2079808.
+
 ### V1493136 — B2069808: Food search answers faster — saved places show at once, results settle quicker, same matches in the same order `Blocker: auth`
 
 Sandbox-proven: server 220–259 ms → 13–90 ms with identical ordered results (in-database, 7 queries), `test/foodSearchSpeed.test.js` (red on main), mocked-backend browser timings (saved place 839 → 18 ms to first row). Not provable here: the real network + his real saved list + a real phone. **Steps** (signed in, planyr.io `#/food`, Map view, on the phone; read the build from `/version.json` in the SAME observation as the result):

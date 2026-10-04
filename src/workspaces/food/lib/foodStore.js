@@ -1,3 +1,4 @@
+/* global __BUILD_ID__ */
 /* foodStore — the ONE seam between the /food UI and Supabase. Two tables, two shapes:
  *   food_places — public reference data (Overture Maps snapshot, loaded once by
  *                 scripts/load-food-places.py). Read-only from the browser.
@@ -37,6 +38,32 @@ export async function fetchPlacesInBounds(bounds) {
   const rows = data || [];
   const totalMatched = rows.length ? Number(rows[0].total_matched) : 0;
   return { data: rows, totalMatched, capped: totalMatched > rows.length, error };
+}
+
+/** The browse call failing used to be INVISIBLE — the map just drew no pins and the banner kept
+ *  saying "Search live for more here" (B<PENDING>, 2026-10-04: a search_path pin broke the RPC for
+ *  every viewport and nobody could tell). LOUD-FAILURE: FoodApp shows BROWSE_ERROR_MESSAGE with a
+ *  Retry, and this records the failure to public.client_errors (INSERT-only anon RLS) through
+ *  food's OWN client — never shared/telemetry/clientErrors.js, which imports site-planner's
+ *  Supabase client and would break this module's BUNDLE ISOLATION. Fire-and-forget, never throws,
+ *  and the same message is sent at most once a minute so a retry loop can't flood the table. */
+export const BROWSE_ERROR_MESSAGE = "Couldn't load restaurants here";
+let _lastBrowseReport = { msg: "", at: 0 };
+export function reportBrowseError(error, now = Date.now()) {
+  try {
+    const message = `food_places_in_bounds_sampled: ${(error && (error.message || error.code)) || "unknown error"}` +
+      (error && error.code ? ` (${error.code})` : "");
+    if (message === _lastBrowseReport.msg && now - _lastBrowseReport.at < 60000) return Promise.resolve(false);
+    _lastBrowseReport = { msg: message, at: now };
+    if (!supabase) return Promise.resolve(false);
+    const row = {
+      build: typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "dev",
+      module: "food", source: "food:browse-rpc", message: message.slice(0, 500),
+      url: typeof location !== "undefined" ? location.href : null,
+      user_agent: typeof navigator !== "undefined" ? navigator.userAgent : null,
+    };
+    return Promise.resolve(supabase.from("client_errors").insert(row)).then((r) => !(r && r.error), () => false);
+  } catch (_) { return Promise.resolve(false); }
 }
 
 export async function fetchPlaceById(id) {
