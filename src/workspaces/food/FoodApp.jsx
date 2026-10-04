@@ -28,6 +28,7 @@ import {
 import { withVisitDate, matchingOpenDishWishlist } from "./lib/dishAggregates.js";
 import { searchOverpass } from "./lib/overpass.js";
 import { RADIUS } from "../../shared/ui/radius.js";
+import { Button, SegmentedControl, SIZE } from "../../shared/ui/controls.jsx";
 
 export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, authControl, accountActive, userId }) {
   const [view, setView] = useState("map"); // "map" | "list"
@@ -450,34 +451,25 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
         showModuleTabs={false}
         multiEditOk
         toolbarContent={
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ display: "flex", border: "1px solid var(--border-default)", borderRadius: 8, overflow: "hidden" }}>
-              {["map", "list"].map((v) => (
-                <button
-                  key={v} type="button" onClick={() => setView(v)} aria-pressed={view === v}
-                  style={{
-                    border: "none", padding: "6px 14px", cursor: "pointer", font: "inherit", fontSize: 12.5, fontWeight: 700,
-                    background: view === v ? "var(--accent-food)" : "transparent",
-                    color: view === v ? "var(--on-accent-food)" : "var(--text-primary)",
-                  }}
-                >
-                  {v === "map" ? "Map" : "List"}
-                </button>
-              ))}
-            </div>
+          // NEW-1 (food controls) — ONE row that fits its slot (width 100%, min-width 0) so the search
+          // field takes whatever the Map/List switch and the pin button leave, instead of a fixed
+          // width that ran off a phone's right edge. The switch is the shared SegmentedControl (the same
+          // one the basemap toggle on the map uses) and the pin button is the shared Button — no
+          // hand-built control in this row.
+          <div style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", minWidth: 0 }}>
+            <SegmentedControl
+              aria-label="View" accent="var(--accent-food)" onAccent="var(--on-accent-food)"
+              options={[{ key: "map", label: "Map" }, { key: "list", label: "List" }]} value={view} onChange={setView}
+            />
             {view === "map" && (
-              <button
-                type="button" onClick={togglePinMode} aria-pressed={pinMode}
+              <Button
+                variant="ghost" active={pinMode} onClick={togglePinMode} aria-pressed={pinMode}
+                accent="var(--accent-food)" onAccent="var(--on-accent-food)"
                 title="Drop a pin for a place not on the map"
-                style={{
-                  border: "1px solid var(--border-default)", borderRadius: RADIUS.md, padding: "6px 14px", cursor: "pointer",
-                  font: "inherit", fontSize: 12.5, fontWeight: 700,
-                  background: pinMode ? "var(--accent-food)" : "transparent",
-                  color: pinMode ? "var(--on-accent-food)" : "var(--text-primary)",
-                }}
+                style={{ flex: "none", height: SIZE.md.height, padding: SIZE.md.padding, whiteSpace: "nowrap" }}
               >
                 {pinMode ? "Click the map…" : "Drop a pin"}
-              </button>
+              </Button>
             )}
             <SearchBox
               query={searchQuery} onQueryChange={setSearchQuery} view={view}
