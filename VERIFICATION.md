@@ -257,6 +257,19 @@ Sandbox-proven: `test/teamInviteEmail.test.js` (fake Supabase + fake Resend), `e
 4. Cancel invite. **Expect:** row gone, no row left behind. Existing pending invites (e.g. ryan.baumgartner@hillwood.com) received nothing.
 - **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2049312.
 
+### V1484661 — B2061333: on a real iPhone the caret stays above the keyboard, the essentials are reachable without swiping, and the chrome gets out of the way `Blocker: real-data` (signed-in real device)
+
+Sandbox-proven: `ui-audit/verify-notes-phone-layout.mjs` (WebKit 390x844 with a fake visualViewport for the keyboard; red on untouched main). A real keyboard and a real fingertip are not producible headless.
+**Steps (real iPhone, a throwaway duplicate page):**
+1. Open a long page, tap near the bottom so the keyboard rises, type 10 lines. **Expect:** the line you are typing is always visible above the keyboard.
+2. Look at the toolbar. **Expect:** undo, redo, B, I, U, bullet, numbered, text colour and ⋯ all visible without swiping.
+3. Tap ⋯. **Expect:** a panel with the font, size, alignment, insert menu and the page actions (Find and replace, Page setup, Version history, Export); Find and replace opens the find bar.
+4. With the keyboard up. **Expect:** the row of module tabs is gone, the page did not jump when it went, the help button and zoom control are out of the writing area; dismiss the keyboard and they return.
+5. Select a box and try its grip and a resize handle with a finger. **Expect:** easy to hit without zooming.
+6. Tap toolbar buttons several times. **Expect:** no tooltip stays on screen.
+7. After a week on this build, check `client_errors` for `page-containment-drift` rows from iPhones. **Expect:** none shaped "(0, ~250)"; any keyboard ones now arrive as `page-containment-keyboard-reveal`.
+8. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–7, or a failed step filed as a recurrence on B2061333.
 ### V1484660 — B2061332: on a real iPhone, the page menu and the box menu are reachable (⋯, long-press, Delete box) `Blocker: real-data` (signed-in real device)
 
 Sandbox-proven: `ui-audit/verify-notes-touch-menus.mjs` (Chromium real touch pipeline + WebKit; red on untouched main). A real held fingertip and iOS's own selection loupe are not producible headless.

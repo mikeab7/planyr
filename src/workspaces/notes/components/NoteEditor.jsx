@@ -48,9 +48,9 @@ import {
   toggleSelection,
 } from "../lib/notesMarquee.js";
 import {
-  fitView, frameView, inertiaStep, normalizeView, openingZoom, panBy, panView, pinchView, releaseVelocity, stepZoom, toWorkspace,
+  caretRevealDelta, fitView, frameView, inertiaStep, normalizeView, openingZoom, panBy, panView, pinchView, releaseVelocity, stepZoom, toWorkspace,
   touchTravelled,
-  VIEW_ZOOM_DEFAULT, wheelIntent, wheelNativeAxis, zoomAbout, zoomForWheel, zoomKeyIntent, zoomLabel,
+  VIEW_ZOOM_DEFAULT, visibleBand, wheelIntent, wheelNativeAxis, zoomAbout, zoomForWheel, zoomKeyIntent, zoomLabel,
 } from "../lib/notesViewport.js";
 import { HIGHLIGHT_COLORS, SIZES, TEXT_COLORS } from "../lib/notesFormatPalette.js";
 import { PASTE_MODES } from "../lib/notesPastePlain.js";
@@ -605,6 +605,26 @@ ${listMarkerCssRules(".planyr-note .ProseMirror")}
 .planyr-note [data-testid="note-sheet"] { cursor: auto; }
 .planyr-note [data-testid="note-mat"][data-panning="1"],
 .planyr-note [data-testid="note-mat"][data-panning="1"] * { cursor: grabbing; }
+
+/* ⛔ NEW-6d — FINGER-SIZED TARGETS. On a coarse pointer the box grip (12 px), the eight resize handles
+   (10 px), the connect dot (11 px) and the sheet edge grips (left alone, see the note). The
+   VISIBLE size is unchanged: each gets an invisible 44 px hit area centred on itself (a pseudo-element is
+   part of its element for hit-testing). Mouse pointers never match this block. */
+@media (pointer: coarse) {
+  .planyr-note .ProseMirror .planyr-anchor-grip::after,
+  .planyr-note .ProseMirror .planyr-anchor-h::after,
+  .planyr-note .ProseMirror .planyr-anchor-connect::after {
+    content: ""; position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%);
+  }
+  /* The grip outranks the resize handles' halos: on a small box the west/north-west handles' 44 px
+     halos land on top of the grip, and the grip is the one control a finger must always be able to
+     reach (it is how a box moves). Cost, stated: a corner handle's halo is partly shadowed by the
+     grip's on a very small box — its own visible square still hits. */
+  .planyr-note .ProseMirror .planyr-anchor-grip { z-index: 2; }
+  /* The sheet's EDGE grips are deliberately NOT enlarged: they sit where a page-edge tap places a box, and
+     every enlargement tried (44 px symmetric, then 36 px outward-only) moved a first letter off the finger
+     by 5 px at 200% zoom in verify-notes-touch-landing. Resizing a page is a deliberate desktop-style act. */
+}
 `;
 
 function EditorStyles() {
@@ -664,8 +684,9 @@ function ZoomPill({ pct, onZoomOut, onZoomIn, onPick, onReset, onFitWidth }) {
     document.addEventListener("keydown", onKey);
     return () => { document.removeEventListener("pointerdown", onDown, true); document.removeEventListener("keydown", onKey); };
   }, [open]);
+  const big = isCoarsePointerDevice();            // NEW-6d — a finger-sized target on a phone/tablet
   const btnStyle = {
-    width: 26, height: 26, display: "inline-flex", alignItems: "center", justifyContent: "center",
+    width: big ? 44 : 26, height: big ? 44 : 26, display: "inline-flex", alignItems: "center", justifyContent: "center",
     border: "none", background: "transparent", color: "var(--text-secondary)", cursor: "pointer",
     font: "inherit", fontSize: 14, fontWeight: 700, borderRadius: RADIUS.control,
   };
@@ -704,7 +725,7 @@ function ZoomPill({ pct, onZoomOut, onZoomIn, onPick, onReset, onFitWidth }) {
           role="menu"
           data-testid="note-zoom-menu"
           style={{
-            position: "absolute", right: 0, bottom: 34, zIndex: 31, padding: 4, minWidth: 120,
+            position: "absolute", right: 0, bottom: big ? 52 : 34, zIndex: 31, padding: 4, minWidth: 120,
             display: "flex", flexDirection: "column", gap: 1,
             background: "var(--surface-raised)", border: "1px solid var(--border-default)",
             borderRadius: RADIUS.control, boxShadow: FLOAT_SHADOW,
@@ -1458,6 +1479,7 @@ const NoteEditor = forwardRef(function NoteEditor({
   historyOpen = false, onCloseHistory,
   pageSetupOpen = false, onClosePageSetup,
   findReplaceOpen = false, onCloseFindReplace,
+  onToggleFind, onTogglePageSetup, onToggleHistory,
 }, ref) {
   /* Initial content read ONCE, here. Not in an effect — see fix (2) in the header.
    *
@@ -1597,6 +1619,28 @@ const NoteEditor = forwardRef(function NoteEditor({
    * down; set synchronously by the touch arm / commit, never by anything else. Declared before
    * `useEditor` because `editorProps` closes over it. */
   const touchPlaceGuardRef = useRef(0);
+  /* ⛔ THE CARET STAYS ABOVE THE KEYBOARD (NEW-6a). The old measurement compared the caret with the
+   * mat's own rect, which on iOS keeps describing the FULL screen while the keyboard covers its
+   * lower part — so a caret behind the keyboard read as visible. The band is now the mat ∩ the
+   * VISUAL viewport (`visibleBand`). It pans, never zooms, and moves only the minimum; it runs on a
+   * keystroke (ProseMirror's own scroll hook) AND on a keyboard open/close or a guard heal — see the
+   * effect below — so it does not wait for the next letter. Held in a ref so the editor config and
+   * that effect share ONE implementation. */
+  const revealCaretRef = useRef(null);
+  revealCaretRef.current = (view, { verticalOnly = false } = {}) => {
+    const sc = scrollerRef.current;
+    if (!sc || !view || view.isDestroyed) return;
+    let caret;
+    try { caret = view.coordsAtPos(view.state.selection.head); } catch { return; }
+    if (!caret) return;
+    const vv = typeof window !== "undefined" ? window.visualViewport : null;
+    const band = visibleBand(sc.getBoundingClientRect(), vv);
+    const delta = caretRevealDelta({ caret, band });
+    const dx = verticalOnly ? 0 : delta.dx;
+    const dy = delta.dy;
+    if (dx || dy) setView({ x: viewRef.current.x + dx, y: viewRef.current.y + dy, z: viewRef.current.z });
+  };
+
   const editor = useEditor({
     extensions,
     content: initialDoc,
@@ -1625,20 +1669,9 @@ const NoteEditor = forwardRef(function NoteEditor({
        * choice and nothing typed may change it. Returning `true` tells ProseMirror this was
        * handled so it does not also try. */
       handleScrollToSelection: (view) => {
-        const sc = scrollerRef.current;
-        if (!sc) return true;
+        if (!scrollerRef.current) return true;
         if (performance.now() < touchPlaceGuardRef.current) return true;   // see `touchPlaceGuardRef`
-        let caret;
-        try { caret = view.coordsAtPos(view.state.selection.head); } catch { return true; }
-        if (!caret) return true;
-        const box = sc.getBoundingClientRect();
-        const pad = 48;                                  // a comfortable band, not the bare edge
-        let dx = 0; let dy = 0;
-        if (caret.top < box.top + pad) dy = caret.top - (box.top + pad);
-        else if (caret.bottom > box.bottom - pad) dy = caret.bottom - (box.bottom - pad);
-        if (caret.left < box.left + pad) dx = caret.left - (box.left + pad);
-        else if (caret.left > box.right - pad) dx = caret.left - (box.right - pad);
-        if (dx || dy) setView({ x: viewRef.current.x + dx, y: viewRef.current.y + dy, z: viewRef.current.z });
+        revealCaretRef.current?.(view);
         return true;
       },
       attributes: {
@@ -2447,6 +2480,44 @@ const NoteEditor = forwardRef(function NoteEditor({
     if (v.z !== was.z) setZoomPct(v.z);
     if (persist) persistView();
   }, [applyView, persistView]);
+
+  /* ⛔ A KEYBOARD OPENING OR CLOSING IS A REASON TO RE-CHECK THE CARET (NEW-6a). The keyboard
+   * shrinks the visual viewport after the tap that raised it, with no keystroke to trigger
+   * ProseMirror's own scroll hook. The page-containment guard also announces
+   * `planyr:viewport-healed` when it pins a window scroll iOS made to reveal the field — so the
+   * canvas, not the window, does the revealing and the two stop fighting. Never while a placement
+   * is armed (the caret is then the EMPTY page's top-left one; chasing it is the B1960480 trap). */
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return undefined;
+    let raf = 0;
+    let timer = 0;
+    const run = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        if (editor.isDestroyed || !editor.view.hasFocus() || pendingRef2.current) return;
+        /* A touch placement is still settling (`touchPlaceGuardRef`): panning now would slide the box
+         * out from under the finger that just put it there (`verify-notes-touch-landing` measures it).
+         * Look again once the guard has expired. */
+        const wait = touchPlaceGuardRef.current - performance.now();
+        if (wait > 0) { timer = setTimeout(run, wait + 30); return; }
+        /* VERTICAL ONLY: the keyboard covers the bottom, never the sides. The horizontal comfort band is
+         * ProseMirror's own keystroke hook's business. */
+        revealCaretRef.current?.(editor.view, { verticalOnly: true });
+      });
+    };
+    const vv = typeof window !== "undefined" ? window.visualViewport : null;
+    vv?.addEventListener("resize", run);
+    vv?.addEventListener("scroll", run);
+    window.addEventListener("planyr:viewport-healed", run);
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      if (timer) clearTimeout(timer);
+      vv?.removeEventListener("resize", run);
+      vv?.removeEventListener("scroll", run);
+      window.removeEventListener("planyr:viewport-healed", run);
+    };
+  }, [editor]);
 
   /** The viewport's own box — the element the view is expressed relative to. */
   const viewportRect = useCallback(() => scrollerRef.current?.getBoundingClientRect() || null, []);
@@ -4747,6 +4818,49 @@ const NoteEditor = forwardRef(function NoteEditor({
    * other memoised value handed across a boundary. */
   useImperativeHandle(ref, () => ({ exportPage, printPage }), [exportPage, printPage]);
 
+  /* NEW-6b/c — the module-tab row's page actions, as the phone "More" panel's page-action buttons. */
+  const pageActions = useMemo(() => (narrow && !readOnly && onToggleFind ? [
+    { id: "find", label: "Find and replace", run: onToggleFind, active: findReplaceOpen },
+    { id: "setup", label: "Page setup", run: onTogglePageSetup, active: pageSetupOpen },
+    { id: "history", label: "Version history", run: onToggleHistory, active: historyOpen },
+    { id: "export", label: "Export (Markdown)", run: () => exportPage() },
+    { id: "print", label: "Print / save as PDF", run: () => printPage() },
+  ] : undefined), [narrow, readOnly, onToggleFind, onTogglePageSetup, onToggleHistory, findReplaceOpen, pageSetupOpen, historyOpen, exportPage, printPage]);
+
+  /* ⛔ NEW-6c — WHILE THE EDITOR HAS FOCUS ON A PHONE, THE MODULE-TAB ROW STEPS ASIDE. Header + toolbar
+   * took 136 px of every screen and ~194 px was left to write in with the keyboard up. `data-notes-typing`
+   * on <html> is what `index.css` hides row 2 (and the floating help button + zoom pill) on; it is set on
+   * editor focus and cleared on blur/unmount, phone width only. The page actions that live in that row are
+   * in the toolbar's "More" panel meanwhile. VIEWPORT-STABLE: the mat's top edge moves when the row
+   * collapses, so the move is MEASURED around the toggle (before the attribute, then in a layout effect)
+   * and folded into the view — the page does not jump under the finger. */
+  const matTopBeforeRef = useRef(null);
+  const [phoneTyping, setPhoneTyping] = useState(false);
+  useEffect(() => {
+    if (!editor || editor.isDestroyed || !narrow || readOnly) return undefined;
+    const root = document.documentElement;
+    const toggle = (on) => {
+      if (on === (root.dataset.notesTyping === "1")) return;
+      matTopBeforeRef.current = scrollerRef.current ? scrollerRef.current.getBoundingClientRect().top : null;
+      if (on) root.dataset.notesTyping = "1"; else delete root.dataset.notesTyping;
+      setPhoneTyping(on);
+    };
+    const onFocus = () => toggle(true);
+    const onBlur = () => toggle(false);
+    editor.on("focus", onFocus);
+    editor.on("blur", onBlur);
+    if (editor.view.hasFocus()) toggle(true);
+    return () => { editor.off("focus", onFocus); editor.off("blur", onBlur); toggle(false); };
+  }, [editor, narrow, readOnly]);
+  useLayoutEffect(() => {
+    const before = matTopBeforeRef.current;
+    matTopBeforeRef.current = null;
+    const sc = scrollerRef.current;
+    if (before == null || !sc) return;
+    const delta = sc.getBoundingClientRect().top - before;
+    if (delta) setView({ x: viewRef.current.x, y: viewRef.current.y + delta, z: viewRef.current.z }, { persist: false, byUser: false });
+  }, [phoneTyping, setView]);
+
   /* ⛔ NEW-5 — read fresh every render (`shouldRerenderOnTransaction` already re-renders this
    * component on every editor transaction, `setNoteTitleStyle` included), never mirrored into
    * React state — the same "the editor is the one source of truth" rule the toolbar's own
@@ -4821,6 +4935,7 @@ const NoteEditor = forwardRef(function NoteEditor({
         titleDefaultSize={noteTitleFontPx(narrow)}
         arrowMode={!!arrowConnect}
         onToggleArrow={toggleArrowMode}
+        pageActions={pageActions}
       />
       {findReplaceOpen ? (
         <FindReplaceBar

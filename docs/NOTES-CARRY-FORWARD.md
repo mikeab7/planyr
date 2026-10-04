@@ -683,6 +683,13 @@ position**.
 
 ---
 
+### Phone layout (B2061333 / NEW-6, 2026-10-04)
+
+- **A phone is `narrow`: the toolbar is ONE non-scrolling row of nine essentials + a "More" panel that drops DOWN** (the keyboard covers the bottom). The desktop row is composed from the same named pieces and is byte-identical to before — the harness compares its DOM to a main build. NEW-9 had removed the phone layout (B849633's row), which is why Bold sat at x=449.
+- **The caret band is the mat ∩ `window.visualViewport`**, never the mat alone (iOS shrinks only the visual viewport). WebKit headless has NO keyboard: the harness installs a FAKE `visualViewport` via `addInitScript` and shrinks it — that proves the arithmetic and wiring, not iOS. The containment guard announces `planyr:viewport-healed` when it pins a keyboard-reveal scroll; the editor listens.
+- **`<html data-notes-typing>` (set on editor focus, phone only) hides `[data-header-row2]`, the help fab and the zoom pill** (rules in `src/index.css`); the mat-top move is measured and folded into the view. Anything that moves the mat's top edge needs the same compensation (VIEWPORT-STABLE).
+- **TRAP: coarse-pointer halos fight each other on small boxes** — a 44 px halo per grip/handle overlaps neighbours; the grip is z-index 2 so it always wins. Probe with `elementFromPoint(...).closest(...)`, not a className test (a child can answer).
+
 ## 5 · The recurring bug families — suspect these first
 
 -1. **⛔ A FIX THAT MOVES A DEFECT RATHER THAN REMOVING IT — AND THE TELL IS THAT THE SAME LINE HAS

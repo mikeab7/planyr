@@ -318,6 +318,46 @@ export function parseView(raw) {
   return normalizeView(obj);
 }
 
+/* ---- KEEPING THE CARET ABOVE THE SOFT KEYBOARD (NEW-6a) -------------------------------------
+ *
+ * On iOS the keyboard shrinks only the VISUAL viewport — `window.innerHeight` and the mat's own
+ * `getBoundingClientRect()` still describe the full layout viewport — so a caret hidden behind the
+ * keyboard counted as visible and typing carried on blind. The band a caret must sit inside is the
+ * mat's box INTERSECTED with the visual viewport. Pure, so it can be tested without a keyboard. */
+
+/** The rectangle (viewport client coordinates) the caret has to stay inside. `vv` is a
+ *  `VisualViewport`-shaped `{ offsetLeft, offsetTop, width, height }`, or null where there is none. */
+export function visibleBand(mat, vv) {
+  const band = { left: num(mat?.left), top: num(mat?.top), right: num(mat?.right), bottom: num(mat?.bottom) };
+  if (!vv) return band;
+  const vl = num(vv.offsetLeft);
+  const vt = num(vv.offsetTop);
+  return {
+    left: Math.max(band.left, vl),
+    top: Math.max(band.top, vt),
+    right: Math.min(band.right, vl + num(vv.width, Infinity)),
+    bottom: Math.min(band.bottom, vt + num(vv.height, Infinity)),
+  };
+}
+
+/** How far the view must move so `caret` sits inside `band` with `pad` to spare. Moves the
+ *  MINIMUM and never zooms; a band too small to hold the padding twice is judged against its own
+ *  middle so a keyboard-up proxy (a few hundred px) cannot make it oscillate. */
+export function caretRevealDelta({ caret, band, pad = 48 }) {
+  if (!caret || !band) return { dx: 0, dy: 0 };
+  const h = band.bottom - band.top;
+  const w = band.right - band.left;
+  const py = Math.min(pad, Math.max(0, h / 4));
+  const px = Math.min(pad, Math.max(0, w / 4));
+  let dx = 0;
+  let dy = 0;
+  if (caret.top < band.top + py) dy = caret.top - (band.top + py);
+  else if (caret.bottom > band.bottom - py) dy = caret.bottom - (band.bottom - py);
+  if (caret.left < band.left + px) dx = caret.left - (band.left + px);
+  else if (caret.left > band.right - px) dx = caret.left - (band.right - px);
+  return { dx, dy };
+}
+
 /* ---- touch: one-finger pan, pinch-with-midpoint, light inertia (NEW-2) ---------------------
  *
  * The mat is `touch-action: none`, so a finger drag produces pointer events and NOTHING ELSE: no

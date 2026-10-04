@@ -1863,6 +1863,11 @@ export default function Notes({
                 onClosePageSetup={() => setPageSetupOpen(false)}
                 findReplaceOpen={findReplaceOpen}
                 onCloseFindReplace={() => setFindReplaceOpen(false)}
+                /* NEW-6c — the header page actions, handed down so a phone's "More" panel can offer
+                   them while the module-tab row (where they live) steps aside during typing. */
+                onToggleFind={() => setFindReplaceOpen((v) => !v)}
+                onTogglePageSetup={() => setPageSetupOpen((v) => !v)}
+                onToggleHistory={() => setHistoryOpen((v) => !v)}
               />
             </Suspense>
           ) : (
