@@ -19,6 +19,7 @@ was never clicked" quietly ships broken.
 > than file the click-through for someone else. The working rhythm:
 > - After a change is **CI-green + build-green**, **run the headless-browser check yourself**, then
 >   record the outcome here (✅/❌ + date). Don't punt it.
+> - **⛔ A session does not end its turn while its own change is merged-but-unverified** (merge → deploy serves your build → signed-in check → record).
 > - **Only if no browser is reachable** (rare), log the item below and move on — never block on Michael.
 > - **Do NOT surface "these N are unverified" to Michael as a to-do for him.**
 > - **Only interrupt Michael for a genuinely CRITICAL problem** — the app won't build, won't render
@@ -29,11 +30,14 @@ was never clicked" quietly ships broken.
 > Write a short Playwright script and run it with Node:
 > - Browsers live at `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`; the module is the global
 >   `/opt/node22/lib/node_modules/playwright` (require it by absolute path).
-> - The sandbox egress proxy intercepts TLS, so launch with `args:['--ignore-certificate-errors']`
->   **and** `newContext({ ignoreHTTPSErrors: true })`, or `page.goto` throws `ERR_CERT_AUTHORITY_INVALID`.
-> - **Logged-out only:** that proxy also CORS-blocks the Supabase auth handshake, so self-tests run in
->   **this-device (logged-out) mode** — full coverage for the planner/drawing tools, but anything that
->   *requires* sign-in (cloud save/sync) still needs a signed-in check elsewhere.
+> - **TLS is already trusted** — the environment setup script imports the sandbox proxy's CA into Chromium's
+>   NSS store. **NEVER pass `--ignore-certificate-errors` / `ignoreHTTPSErrors`** (owner-ruled-out).
+> - **SIGNED IN is available (2026-10-04):** `import { openSignedIn } from "./ui-audit/lib/signedInSession.mjs"`
+>   (`openSignedIn({ base: "https://planyr.io" })` or a PR preview URL) signs in as the throwaway test account
+>   `e2e@planyr.test` via `/api/auth/e2e-session` using `E2E_LOGIN_KEY` (never print it), and returns the page +
+>   the served `/version.json` build + a proof object (account email + `e2e-fixture-site`). Smoke:
+>   `node ui-audit/verify-signed-in-session.mjs https://planyr.io`. Password sign-in is captcha-refused by design.
+>   **A session's own signed-in check on the test account COUNTS as verified.**
 > - Enter the planner via the map toolbar's **"Draw"** button — `getByTestId("map-toolbar-draw")`,
 >   ONE click (⚠ CORRECTED 2026-09-08, B1368144: this used to be a two-step
 >   `map-start-blank-menu-btn` → `map-start-blank-menu-item` caret click, and "Start blank" is now
@@ -132,13 +136,14 @@ was never clicked" quietly ships broken.
    Before you file OR leave a `V###` as pending, you must FIRST drive the headless self-verify. You may
    only defer an item if it hits one of exactly THREE hard walls — and it must NAME which, in a
    `Blocker:` field on the entry:
-   - **`Blocker: auth`** — needs sign-in. The egress proxy CORS-blocks the Supabase auth handshake, so
-     the sandbox genuinely cannot log in (a network-policy wall, not a missing password — a test login
-     alone does not unlock it without a matching network-policy change).
+   - ~~**`Blocker: auth`**~~ **RETIRED 2026-10-04 (owner decision, Michael).** Sessions sign in as the test
+     account (`ui-audit/lib/signedInSession.mjs`) and verify signed-in checks themselves; `auth` no longer
+     parks a check. A `V###` still carrying it is a mis-classification: drive it signed in and record ✅/❌.
+     Park ONLY if the check needs Michael's own data (`real-data`) — and first try a fixture on the test account.
    - **`Blocker: live-GIS`** — needs a live external map/GIS host the sandbox egress blocks (county
      flood / parcel / TxGIO services, etc.).
    - **`Blocker: real-data`** — needs a specific SIGNED-IN saved project (Tsakiris / Bain) that only
-     exists in a real account.
+     exists in Michael's real account (try a fixture on the test account first).
    - **`Blocker: print-engine`** *(added 2026-07-31 with **V631**, and flagged rather than smuggled in:
      this is a FOURTH wall, and the rule above says three.)* — needs the browser's real PRINT pipeline.
      Headless Chromium's `window.print()` is a **no-op**: it produces no paginated output at all, so
@@ -177,14 +182,6 @@ Sandbox-proven: `ui-audit/verify-library-home-delete.mjs` (33 checks, real Chrom
 5. Tab to a ✕ with the keyboard and press Enter, Enter. **Expect:** same result as the mouse. On a phone, **Expect:** the ✕ is easy to hit.
 6. With a throwaway open as a Review tab, delete it from the Library. **Expect:** the Review tab stays open and unchanged (decided: tabs are never closed by a Library delete).
 7. Say exactly which throwaway files were touched.
-### V1502928 — B2084992: headless sign-in as the test account via /api/auth/e2e-session, then open e2e-fixture-site `Blocker: real-data`
-
-Sandbox-proven: `test/e2eSessionRoute.test.js` (18, mutation-checked). Pending: the deployed route needs `E2E_LOGIN_KEY` (43 chars) in Cloudflare Pages production AND the session env. It ALSO needs `SUPABASE_SERVICE_ROLE_KEY` as a Secret in Cloudflare Pages production — measured absent 2026-10-04 (Cowork dashboard read); until Michael adds it the route answers 503 "not configured" after a correct key (on `OWNER-TODO.md`).
-**Steps** (any session with E2E_LOGIN_KEY; read `/version.json` in the SAME call and match it to the merge commit):
-1. `E2E_LOGIN_KEY=… node ui-audit/verify-signed-in-session.mjs https://planyr.io`. **Expect:** `PASS signed in as e2e@planyr.test | fixture e2e-fixture-site visible: true`, and a build matching the merge commit.
-2. `curl -X POST https://planyr.io/api/auth/e2e-session` (no key) and with a wrong key. **Expect:** 404 both; `curl -X GET` → 405; no `access-control-*` header on any.
-3. Password sign-in still needs a captcha for real users. **Expect:** unchanged `captcha_failed`.
-
 ### V1500112 — B2084480: a file saved in Review appears in the Library without a reload, in this tab and in other open tabs `Blocker: auth`
 
 Sandbox-proven: `test/libraryFreshAndTypeTag.test.js` (every write path announces; both Library surfaces subscribe; red with the wiring reverted). Not provable here: the signed-in round-trip and a second real browser tab.
@@ -507,6 +504,8 @@ Sandbox-proven: `test/parcelOwnLook.test.js` (red on main for all three claims),
 **❌ FAILED 2026-10-04, build c8fc0d0 (Michael's Chrome, 4:05 PM Central, "Concept A (copy)"):** wide band good (one colour, no county labels); at lot level north of I-10 NO numbers and the ONLY parcel layer was the statewide StratMap `/export`, zero `/query`. Root cause + fix recorded on B2057040 (Recurrence ×2): a county layer sitting BELOW its vector floor for >8 s was declared down by the hang-guard and replaced by the statewide picture, permanently. Fix is merged-pending in the follow-up PR; **re-run this check on the build that carries it** (read the served chunk hash in the same observation).
 **CORRECTION (owner, 4:40 PM Central the same day):** the Chambers CAD server was DOWN during that failed run (every `/query` → HTTP 200 + `{"error":{"code":400,…}}`; the Map finder showed its saved-copy banner), so the statewide picture over Chambers was the designed fallback; "the close-band layer never mounts" is retracted as a general claim. The below-the-floor false positive (step 0) was ALSO real and is fixed; and a failed county's statewide backup now covers ONLY that county (`county IN (…)`), so Harris keeps its own vector layer beside a failed Chambers. **Fort Bend in the Map finder PASSED live** (Rosenberg, close zoom: Planyr outlines with `QUICKREFID` R-numbers, readable, no pile-ups). Re-run the Grand Port steps once Chambers' server answers again; while it is down, expect: Harris lots with Planyr outlines + HCAD numbers, Chambers lots drawn by the statewide picture ONLY (no whole-view statewide over Harris), numbers absent on the Chambers part.
 **Steps:**
+**RETRACTION (owner, 6:30 PM Central):** the "Harris lots north of I-10 lost their outlines" premise was inference and is wrong — HCAD returns 0 features in that area (point query at the Liberty Dr lot, -94.8816, 29.8206); those lots are in Chambers, so statewide there is the correct fallback while Chambers is down. The Chambers-only scoping (#1987) is a design choice, not a reproduced Grand Port defect; do not expect Harris lots in that frame.
+
 0. **Start zoomed OUT** (below the lot-level zoom — the wide band), enter Click a lot on the map, and WAIT ~10 seconds before touching the map. **Expect:** nothing drawn (blank map is correct here) and no statewide picture appears either. Then zoom in to lot level. **Expect:** the Chambers (and Harris) outlines AND numbers appear — the 10-second wait must not have permanently swapped them for the statewide picture (this is the step that failed).
 1. Open "Concept A (copy)" → Parcel tools → Click a lot on the map; frame the lots just north of the strip lots, zoomed in so whole lots are on screen. **Expect:** every lot shows ONE number (the CAD account, e.g. 00321-02000-00100-100001 — not `Parcel_Id`, not the county's own lot number), in the same purple as the outlines, none touching another number or the "Parcel N" chip; the outlines are all one colour (no blue county lines, no gold statewide lines).
 2. Open the Network tab, filter `pandai`. **Expect:** `…/MapServer/0/query` requests whose `outFields` are exactly `OBJECTID,ChambersCADWeb.DBO.Accounts.Account`; **no** `/export` requests to that host at any zoom.

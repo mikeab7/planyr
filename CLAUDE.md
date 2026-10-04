@@ -360,43 +360,33 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > **verify any ⏳/due items yourself in a headless browser** (Chromium/Playwright is in the environment — see
 > "🤖 Self-verification" there), then record the result. **The moment an item fully passes with nothing
 > pending, MOVE it to `docs/archive/VERIFICATION-DONE.md`** (same archiving discipline as the backlog). The session that
-> ships a UI change drives the live app itself rather than defer it. **⛔ ATTEMPT-BEFORE-YOU-PARK (owner rule,
-> 2026-07-18): a logged-out, no-external-GIS UI check — draw / reshape / select / toggle / keyboard / export a
-> blank site, the landing page, a dropped LOCAL file, a boot-recovery flow — is Claude-doable HERE and must
-> NEVER be filed as "needs a live pass." Drive it headless and record ✅/❌ THIS session. You may only defer an
-> item that hits a named `Blocker:` — `auth` (proxy CORS-blocks Supabase sign-in), `live-GIS` (external map host
-> the egress blocks), or `real-data` (a signed-in saved project like Tsakiris/Bain); a `V###` with no `Blocker:`
-> wall is a mis-classification, not a to-do (`VERIFICATION.md` rule 4).** **Michael does NOT self-test — never wait
-> on him or hand him a test to-do**; if no browser is reachable, log the item and move on (after CI-green +
-> build-green). Self-tests run **logged-out** (the sandbox blocks sign-in), so auth-only features (cloud sync)
-> still need a signed-in check. **⛔ STANDING RULE — when you ship a UI change with any path you CANNOT verify
-> here (auth-only / cloud / signed-in-only / needs the live edge), you MUST add a numbered `V###` entry to
-> `VERIFICATION.md` for that check, every time, unprompted.** A `⏳` note buried in the BACKLOG item is NOT a
-> substitute: `VERIFICATION.md` is the single canonical list of "builds green but never clicked," and it's the
-> only place a browser-equipped teammate looks for the click-through. The entry records what you DID verify
-> (lint/test/build/headless) **and** the precise signed-in steps still pending — so the gap is visible, not lost.
-> (Owner rule, 2026-06-26, after a session captured an auth-only check only in the backlog and nearly skipped
-> the verification log.) **Interrupt Michael only for a CRITICAL failure** — won't build, won't render,
-> or a shipped feature visibly crashing. (Recurring 🌐 endpoint-liveness checks still run from any session.)
+> ships a UI change drives the live app itself rather than defer it. **Michael does NOT self-test — never wait
+> on him or hand him a test to-do.**
 >
-> **📥 `verification-inbox/` is the write path FROM the Cowork thread INTO `VERIFICATION.md` (B825232,
-> 2026-08-28) — it names an actor split the rules above never named.** A Claude Code session can push to
-> this repo but cannot sign in (the sandbox proxy CORS-blocks the Supabase auth handshake, the same wall
-> behind every `Blocker: auth` item above). The **Cowork thread** can drive Michael's real signed-in
-> browser but cannot push here (its git proxy refuses to inject a credential for `mikeab7/planyr`). So:
-> **the Cowork thread is the only actor that can close a `Blocker: auth` / `real-data` / `live-GIS` item,
-> and a check it closes is not closed until it lands in `VERIFICATION.md` via this inbox.** Before this,
-> that split had no exit — it's the reason 79 `Blocker:`-walled items had piled up unclosable as of
-> 2026-08-28. Mechanically: the Cowork thread appends a dated `verification-inbox/<date>-<label>.md` file
-> recording each live pass/fail it ran on Michael's browser (**append-only — nothing is ever deleted from
-> an inbox file**, only added); a session then drains it into `VERIFICATION.md` (⏳ → passed or ❌, per
-> what was actually found), moves any now-fully-passed item on to `docs/archive/VERIFICATION-DONE.md`, and marks the
-> drained inbox entry with the PR number that did the draining, so the same entry is never drained twice.
-> An item the inbox itself records as **NOT** closed (a stated residual, a leg not separately performed)
-> stays exactly as open in `VERIFICATION.md` as it was before — draining is a transcription, never a
-> rubber stamp, and a session that drains a partial pass says explicitly which parts it is accepting and
-> why (STANDING RULE #2 — no closing an owner-reported symptom on a null still applies here).
+> **⛔ SESSIONS SIGN IN AND VERIFY THEIR OWN WORK — `Blocker: auth` NO LONGER PARKS A CHECK (owner decision,
+> 2026-10-04, Michael: a session's own live signed-in check on the test account COUNTS as verified; the Cowork
+> chat must not be the only verifier).** Proven the same day: `node ui-audit/verify-signed-in-session.mjs
+> https://planyr.io` signs in headlessly as `e2e@planyr.test` and proves it with something only a signed-in
+> user sees (the account email + its `e2e-fixture-site` row). **THE ONE SHARED HELPER is
+> `ui-audit/lib/signedInSession.mjs` (`openSignedIn({ base })`) — never write a second sign-in.** It uses the
+> `E2E_LOGIN_KEY` env var (set in this environment; never print it) against `POST /api/auth/e2e-session`, a
+> route that can only ever mint a session for the test account. Password sign-in is refused by Supabase's
+> Turnstile captcha on purpose and **turning captcha off is ruled out**. **Trust:** the environment setup
+> script imports the sandbox proxy's CA into Chromium's NSS store, so HTTPS just works — **NEVER reach for
+> `--ignore-certificate-errors` / `ignoreHTTPSErrors`** (owner-ruled-out). The test account is `authenticated`
+> only: no admin row, no team memberships, owns two fixture sites.
+> **THE RULE:** a session that ships a UI change verifies it **signed in as the test account on planyr.io after
+> the deploy** (read `/version.json` and match it to your merge commit IN THE SAME CALL as the assertion), and
+> on the PR preview first where that works. **Only `real-data` (Michael's own saved projects — and first try a
+> fixture on the test account) and genuinely external-GIS (`live-GIS`) checks may park.** A `V###` carrying
+> `Blocker: auth` is a mis-classification now: drive it and record ✅/❌ this session.
+> **⛔ A SESSION DOES NOT END ITS TURN WHILE ITS OWN CHANGE IS MERGED-BUT-UNVERIFIED.** Merge → wait for the
+> deploy to serve your build → run the signed-in check → record the result. If the route answers 503/404
+> (`not configured`), say so in one line as a needs-Michael item (Retry deployment in Cloudflare Pages).
+> (Everything about `verification-inbox/` and Cowork below is HISTORY for the checks already queued; the
+> Cowork chat may still verify, it is no longer the only actor that can.)
 >
+
 > **⛔ STANDING RULE — A COWORK SESSION RECORDS ITS OWN LIVE VERIFY, DIRECTLY (owner decision, 2026-09-01:
 > "I'm okay with the chat writing to the repo … implement the new rule so you can write that yourself").**
 > When a Cowork session verifies something live — on Michael's own browser, against production — it
