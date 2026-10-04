@@ -88,6 +88,7 @@ const ParcelTiles = L.GridLayer.extend({
     if (t && t.el && this._pool.length < 64) this._pool.push(t.el);
   },
   _paint(tile, coords) {
+    if (typeof window !== "undefined" && window.__PLANYR_E2E) window.__parcelTileStats = Object.assign(window.__parcelTileStats || { paints: 0, dirty: 0, flushes: 0 }, { paints: ((window.__parcelTileStats || {}).paints || 0) + 1 }); // E2E-only counter: the settle harness asserts a no-op moveend repaints nothing
     const size = this.getTileSize();
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     if (tile.width !== size.x * dpr) { tile.width = size.x * dpr; tile.height = size.y * dpr; }
@@ -98,6 +99,7 @@ const ParcelTiles = L.GridLayer.extend({
   /** Lots changed under `bbox` ([w,s,e,n]) — repaint the live tiles it touches, once per frame. */
   markDirty(bbox) {
     if (!bbox) return;
+    if (typeof window !== "undefined" && window.__PLANYR_E2E) window.__parcelTileStats = Object.assign(window.__parcelTileStats || { paints: 0, dirty: 0, flushes: 0 }, { dirty: ((window.__parcelTileStats || {}).dirty || 0) + 1 });
     const d = this._dirty;
     this._dirty = d ? [Math.min(d[0], bbox[0]), Math.min(d[1], bbox[1]), Math.max(d[2], bbox[2]), Math.max(d[3], bbox[3])] : bbox.slice();
     if (this._flushTimer) return;

@@ -153,7 +153,10 @@ for (const z of ZS) {
   // on every settle (old: every held lot re-projected + the canvas redrawn; new: the tile layer asks for no new tiles).
   // No network, no tile churn, so no data-arrival noise. This is the arm the budget is asked of.
   const meRuns = [];
+  const st0 = await page.evaluate(() => ({ ...(window.__parcelTileStats || { paints: 0, dirty: 0 }) }));
   for (let i = 0; i < 7; i++) { meRuns.push(await settleMs("moveend")); await page.waitForTimeout(150); }
+  const st1 = await page.evaluate(() => ({ ...(window.__parcelTileStats || { paints: 0, dirty: 0 }) }));
+  console.log(`  z${z} tile repaints during 7 no-op moveends: paints=${st1.paints - st0.paints} dirty-marks=${st1.dirty - st0.dirty} (new build only; old build has no tile layer)`);
   const meFloor = floors[z].moveend;
   results[z] = { moveend: median(meRuns), moveendCost: median(meRuns) - meFloor, longTasks: await page.evaluate(() => { const a = window.__lt.slice(); window.__lt.length = 0; return a; }), held: s && s.held, zoom: median(zoomRuns), pan: median(panRuns), zoomRuns, panRuns };
   console.log(`  z${z} MOVEEND settle (data held, nothing moving): ${results[z].moveend.toFixed(1)} ms (parcel cost ${results[z].moveendCost.toFixed(1)}, floor ${floors[z].moveend.toFixed(1)})`);
