@@ -177,6 +177,13 @@ Sandbox-proven: `ui-audit/verify-library-home-delete.mjs` (33 checks, real Chrom
 5. Tab to a ✕ with the keyboard and press Enter, Enter. **Expect:** same result as the mouse. On a phone, **Expect:** the ✕ is easy to hit.
 6. With a throwaway open as a Review tab, delete it from the Library. **Expect:** the Review tab stays open and unchanged (decided: tabs are never closed by a Library delete).
 7. Say exactly which throwaway files were touched.
+### V1502928 — B2084992: headless sign-in as the test account via /api/auth/e2e-session, then open e2e-fixture-site `Blocker: real-data`
+
+Sandbox-proven: `test/e2eSessionRoute.test.js` (18, mutation-checked). Pending: the deployed route needs `E2E_LOGIN_KEY` (43 chars) in Cloudflare Pages production AND the session env. It ALSO needs `SUPABASE_SERVICE_ROLE_KEY` as a Secret in Cloudflare Pages production — measured absent 2026-10-04 (Cowork dashboard read); until Michael adds it the route answers 503 "not configured" after a correct key (on `OWNER-TODO.md`).
+**Steps** (any session with E2E_LOGIN_KEY; read `/version.json` in the SAME call and match it to the merge commit):
+1. `E2E_LOGIN_KEY=… node ui-audit/verify-signed-in-session.mjs https://planyr.io`. **Expect:** `PASS signed in as e2e@planyr.test | fixture e2e-fixture-site visible: true`, and a build matching the merge commit.
+2. `curl -X POST https://planyr.io/api/auth/e2e-session` (no key) and with a wrong key. **Expect:** 404 both; `curl -X GET` → 405; no `access-control-*` header on any.
+3. Password sign-in still needs a captcha for real users. **Expect:** unchanged `captcha_failed`.
 
 ### V1500112 — B2084480: a file saved in Review appears in the Library without a reload, in this tab and in other open tabs `Blocker: auth`
 
@@ -226,6 +233,16 @@ Sandbox-proven: `test/authPanelSignup.test.js` (15), `e2e/signup-success.spec.js
 3. Reopen Sign up and click into Password. **Expect:** "Min 6 characters" appears directly under the field (not at the panel bottom); on Sign in it never appears; "Forgot password?" is on Sign in only.
 4. When Supabase "Confirm email" is later switched OFF: repeat step 1. **Expect:** the panel closes and you are signed in — no check-your-email screen, no redeploy needed.
 - **Stopping rule:** closes on a dated pass of 1–3 (4 when the setting flips), or a failed step filed as a recurrence on B2014096.
+
+### V1509936 — B2078593 (×2): on a real iPhone "Hard Cost Pricing" shows its content at the same share of the page as on desktop, and the table is fully visible `Blocker: real-data` (signed-in real device, real Organization page)
+
+Not the first time anyone has seen it: `ui-audit/verify-notes-box-width-parity.mjs` (his exact document rebuilt as a fixture, five contexts, 86 checks green; 23 red on untouched main with his own numbers) and the phone / desktop screenshots in `docs/evidence/B2078593-box-width/` were compared by eye before this was written. A real phone's own copy of the page is the only thing left.
+**Steps (real iPhone, then desktop; open the Organization page "Hard Cost Pricing" — do not edit it):**
+1. Fully close and reopen planyr.io on the phone, open the page. **Expect:** the whole page width is on screen and the list and table fill most of it (the table about as wide as on desktop relative to the page); the table's right column reads in full — "…permit fee → $500/year total at the 10M gallon mark" and "…the remaining 20% billed at $26/million gallons" — with nothing cut off and blank paper only to the right of the table.
+2. Zoom in on the table with two fingers. **Expect:** the same words and line breaks as on desktop, just bigger.
+3. Open the same page on desktop. **Expect:** the same arrangement — same line breaks, same table.
+4. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–3, or a failed step filed as a recurrence on B2078593.
 
 ### V1496384 — B2080752: a Word/txt/PDF opened from disk and saved is filed under its OWN name `Blocker: auth`
 
@@ -477,6 +494,7 @@ Sandbox-proven: `test/docEditorDocx.test.js` (20) + `test/docEditorOpenSave.test
 
 Sandbox-proven: `test/parcelOwnLook.test.js` (red on main for all three claims), `ui-audit/verify-lot-numbers.mjs` (real app, **mocked** joined Chambers layer — 10/10, known-good arm), `ui-audit/verify-parcel-display-regimes.mjs` (Harris, mocked). **Not provable here:** the real Chambers / Harris / Fort Bend services and imagery (egress blocks them), so the real field spelling for the Chambers account, real lot density, and how the numbers read over real aerials in both basemaps. Run on the throwaway **"Concept A (copy)"** in the Grand Port group — **never Concept A** (CLAUDE.md owner constraint 7). Read the served chunk hash in the same observation as every PASS/FAIL.
 **❌ FAILED 2026-10-04, build c8fc0d0 (Michael's Chrome, 4:05 PM Central, "Concept A (copy)"):** wide band good (one colour, no county labels); at lot level north of I-10 NO numbers and the ONLY parcel layer was the statewide StratMap `/export`, zero `/query`. Root cause + fix recorded on B2057040 (Recurrence ×2): a county layer sitting BELOW its vector floor for >8 s was declared down by the hang-guard and replaced by the statewide picture, permanently. Fix is merged-pending in the follow-up PR; **re-run this check on the build that carries it** (read the served chunk hash in the same observation).
+**CORRECTION (owner, 4:40 PM Central the same day):** the Chambers CAD server was DOWN during that failed run (every `/query` → HTTP 200 + `{"error":{"code":400,…}}`; the Map finder showed its saved-copy banner), so the statewide picture over Chambers was the designed fallback; "the close-band layer never mounts" is retracted as a general claim. The below-the-floor false positive (step 0) was ALSO real and is fixed; and a failed county's statewide backup now covers ONLY that county (`county IN (…)`), so Harris keeps its own vector layer beside a failed Chambers. **Fort Bend in the Map finder PASSED live** (Rosenberg, close zoom: Planyr outlines with `QUICKREFID` R-numbers, readable, no pile-ups). Re-run the Grand Port steps once Chambers' server answers again; while it is down, expect: Harris lots with Planyr outlines + HCAD numbers, Chambers lots drawn by the statewide picture ONLY (no whole-view statewide over Harris), numbers absent on the Chambers part.
 **Steps:**
 0. **Start zoomed OUT** (below the lot-level zoom — the wide band), enter Click a lot on the map, and WAIT ~10 seconds before touching the map. **Expect:** nothing drawn (blank map is correct here) and no statewide picture appears either. Then zoom in to lot level. **Expect:** the Chambers (and Harris) outlines AND numbers appear — the 10-second wait must not have permanently swapped them for the statewide picture (this is the step that failed).
 1. Open "Concept A (copy)" → Parcel tools → Click a lot on the map; frame the lots just north of the strip lots, zoomed in so whole lots are on screen. **Expect:** every lot shows ONE number (the CAD account, e.g. 00321-02000-00100-100001 — not `Parcel_Id`, not the county's own lot number), in the same purple as the outlines, none touching another number or the "Parcel N" chip; the outlines are all one colour (no blue county lines, no gold statewide lines).

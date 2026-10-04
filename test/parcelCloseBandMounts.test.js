@@ -19,7 +19,7 @@ import { readFileSync } from "node:fs";
 
 vi.mock("esri-leaflet", () => ({
   featureLayer: (opts) => { const l = { options: { ...opts }, _requestFeatures() {}, metadata() {}, on() { return l; }, off() { return l; }, eachFeature() {} }; return l; },
-  dynamicMapLayer: (opts) => { const l = { options: { ...opts }, on() { return l; }, off() { return l; }, onRemove() {}, _renderImage() {}, getPane() {} }; return l; },
+  dynamicMapLayer: (opts) => { const l = { options: { ...opts }, on() { return l; }, off() { return l; }, onRemove() {}, _renderImage() {}, getPane() {}, setDynamicLayers(v) { l.options.dynamicLayers = v; l.sets = (l.sets || 0) + 1; return l; } }; return l; },
 }));
 vi.mock("leaflet", () => {
   const C = (proto) => { const F = function () {}; Object.assign(F.prototype, proto); return F; };
@@ -32,9 +32,9 @@ vi.mock("leaflet", () => {
 
 import { createOutlineSet } from "../src/workspaces/site-planner/lib/parcelOutlineSet.js";
 import { makeParcelDisplayLayer } from "../src/workspaces/site-planner/lib/parcelDisplay.js";
-import { displaySourcesForView, statewideKeysForState, COUNTIES, COUNTIES_MAP, isStatewideLayerUrl, displayMinZoomForUrl, lotNumberFieldForUrl } from "../src/workspaces/site-planner/lib/counties.js";
+import { displaySourcesForView, statewideKeysForState, statewideBackupScope, COUNTIES, COUNTIES_MAP, isStatewideLayerUrl, displayMinZoomForUrl, lotNumberFieldForUrl } from "../src/workspaces/site-planner/lib/counties.js";
 import { setCountyPolygons } from "../src/workspaces/site-planner/lib/countyPolygons.js";
-import { PARCEL_VECTOR_MINZOOM } from "../src/workspaces/site-planner/lib/parcelDisplayZoom.js";
+import { PARCEL_VECTOR_MINZOOM, plainOutlineDynamicLayers, parcelUrlSupportsImageExport } from "../src/workspaces/site-planner/lib/parcelDisplayZoom.js";
 
 beforeAll(async () => {
   await setCountyPolygons(JSON.parse(readFileSync(new URL("../public/geo/county-polygons.json", import.meta.url), "utf8")));
@@ -65,6 +65,7 @@ function harness(zoom0) {
         // esri-leaflet reads the layer's field list the moment the layer is added, at any zoom → requeststart.
         addTo: (m) => { l.mounted = true; l._map = m; l.emit("requeststart"); return l; },
       };
+      if (isStatewideLayerUrl(url)) { l.scopes = []; l.setCountyScope = (n) => { l.scopes.push(n); return l; }; }
       layers.push(l);
       return l;
     },
@@ -72,6 +73,7 @@ function harness(zoom0) {
     statewideKeysForState,
     stateOf: (k) => COUNTIES_MAP[k] && COUNTIES_MAP[k].state,
     isStatewideUrl: isStatewideLayerUrl,
+    scopeFor: statewideBackupScope,
     setTimer: (f, ms) => { const t = { f, ms, dead: false }; timers.push(t); return t; },
     clearTimer: (t) => { t.dead = true; },
   });
@@ -143,5 +145,45 @@ describe("each Grand Port county layer carries the number's field request (label
       expect(layer._lotNumbers, key).toBeTruthy();
       expect(layer.options.minZoom, key).toBeGreaterThanOrEqual(PARCEL_VECTOR_MINZOOM);
     }
+  });
+});
+
+describe("a failed county's statewide backup covers ONLY that county (owner question, V1475200 follow-up)", () => {
+  const GP_BASE = ["harris", "chambers", "liberty"];
+  it("pure: Chambers down → only CHAMBERS; two down → both; nothing down → whole state", () => {
+    expect(statewideBackupScope("txgio_statewide", GP_BASE, ["chambers"])).toEqual(["CHAMBERS"]);
+    expect(statewideBackupScope("txgio_statewide", GP_BASE, ["chambers", "harris"])).toEqual(["CHAMBERS", "HARRIS"]);
+    expect(statewideBackupScope("txgio_statewide", ["fortbend"], ["fortbend"])).toEqual(["FORT BEND"]);   // the spelling the layer's `county` column uses
+    expect(statewideBackupScope("txgio_statewide", GP_BASE, [])).toBeNull();
+  });
+  it("pure: where the statewide source is itself PRIMARY (a county with no CAD of its own, Waller parked on it) it is drawn whole", () => {
+    expect(statewideBackupScope("txgio_statewide", ["waller", "chambers"], ["chambers"])).toBeNull();
+    expect(statewideBackupScope("txgio_statewide", ["txgio_statewide"], ["chambers"])).toBeNull();
+  });
+  it("the export request carries a definitionExpression naming the failed counties (quotes escaped), and none when unscoped", () => {
+    expect(JSON.parse(plainOutlineDynamicLayers(0, { countyNames: ["CHAMBERS", "FORT BEND"] }))[0].definitionExpression).toBe("county IN ('CHAMBERS','FORT BEND')");
+    expect(JSON.parse(plainOutlineDynamicLayers(0))[0].definitionExpression).toBeUndefined();
+    expect(JSON.parse(plainOutlineDynamicLayers(0, { countyNames: ["O'BRIEN"] }))[0].definitionExpression).toBe("county IN ('O''BRIEN')");
+  });
+  it("the real statewide image layer re-requests only when the scope actually changes", () => {
+    const layer = makeParcelDisplayLayer(COUNTIES.waller.layerUrl);
+    layer.setCountyScope(["CHAMBERS"]); layer.setCountyScope(["CHAMBERS"]);
+    expect(layer.sets).toBe(1);
+    expect(JSON.parse(layer.options.dynamicLayers)[0].definitionExpression).toBe("county IN ('CHAMBERS')");
+    layer.setCountyScope(null);
+    expect(JSON.parse(layer.options.dynamicLayers)[0].definitionExpression).toBeUndefined();
+  });
+  it("Grand Port, Chambers' own server failing: the statewide layer mounts SCOPED to Chambers, and Harris keeps its own vector layer", async () => {
+    const h = harness(17.2);
+    h.set.sync(); await h.flush(); await h.flush();
+    const chambers = h.layers.find((l) => l.url === COUNTIES.chambers.layerUrl);
+    chambers.emit("requesterror");               // the live service answers every query with an error
+    await h.flush(); await h.flush(); await h.flush();
+    h.layers.filter((l) => !isStatewideLayerUrl(l.url)).forEach((l) => l.emit("load"));
+    expect(mountedKeys(h)).toEqual(expect.arrayContaining(["harris", "txgio_statewide"]));
+    expect(mountedKeys(h)).not.toContain("chambers");
+    const sw = h.layers.find((l) => isStatewideLayerUrl(l.url));
+    expect(sw.scopes[sw.scopes.length - 1]).toEqual(["CHAMBERS"]);   // fails before this change: the whole view, Harris included
+    expect(sw.scopes[0]).toEqual(["CHAMBERS"]);                      // already scoped BEFORE its first request
   });
 });

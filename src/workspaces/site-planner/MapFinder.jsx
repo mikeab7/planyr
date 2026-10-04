@@ -2,7 +2,7 @@ import { Fragment, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, 
 import { validateName, announceNameNotice } from "../../shared/names/nameCore.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState, displayFloorForView } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState, statewideBackupScope, displayFloorForView } from "./lib/counties.js";
 import { landingView, milesBetween, CLUSTER_RADIUS_MI, locatedPoints } from "./lib/landingView.js";
 import { decideTargetOf, orderVerbs, verbLabel } from "./lib/decideBar.js";
 import { addLocateControl } from "../../shared/map/locateControl.js";
@@ -2839,7 +2839,15 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     wantedDisplaysRef.current = want;
     setOutlineFloor(Math.max(PARCEL_MINZOOM, displayFloorForView({ south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() })));
     Object.keys(displaysRef.current).forEach((k) => { if (!want.has(k)) removeDisplay(k); });
+    // A statewide BACKUP draws only the counties whose own live source failed, never the whole view (V1475200 follow-up).
+    const base = displaySourcesForView({ south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() });
+    const scopeBackups = () => Object.entries(displaysRef.current).forEach(([k, l]) => {
+      // keyed by the composite's own key — an alias (a county parked on the same URL) would answer "primary" for the same layer
+      if (COUNTIES_MAP[k] && COUNTIES_MAP[k].statewide && l && typeof l.setCountyScope === "function") l.setCountyScope(statewideBackupScope(k, base, [...downDisplaysRef.current]));
+    });
+    scopeBackups(); // layers already on the map
     want.forEach((k) => { if (layerUrlsRef.current[k]) addDisplay(k); });
+    scopeBackups(); // …and any added just now (a no-op for the ones already scoped)
   };
   /* B1976336 — read-only diagnostic: which parcel sources are drawing and how many outline features
    * each holds right now. Gated at CALL time by `isDiagArmed` (see diagArm.js), writes nothing. The
