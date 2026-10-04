@@ -2,7 +2,7 @@ import { Fragment, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, 
 import { validateName, announceNameNotice } from "../../shared/names/nameCore.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState, displayFloorForView } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState, statewideBackupScope, displayFloorForView } from "./lib/counties.js";
 import { landingView, milesBetween, CLUSTER_RADIUS_MI, locatedPoints } from "./lib/landingView.js";
 import { decideTargetOf, orderVerbs, verbLabel } from "./lib/decideBar.js";
 import { addLocateControl } from "../../shared/map/locateControl.js";
@@ -99,6 +99,7 @@ import { idAttrFor } from "./lib/parcelQuery.js";
 const ParcelInfoCard = lazy(() => import("./components/ParcelInfoCard.jsx"));
 import { PanelErrorBoundary } from "./components/LazyPanel.jsx";
 import { makeParcelDisplayLayer, makeSnapshotLayer, parcelDisplayIsImageOnly, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
+import { layerInDrawRange } from "./lib/parcelDisplayZoom.js"; // V1475200 — the hang-guard may only arm while a layer is inside the zoom range it can draw in
 import { siteBoundaryInfo, siteDrawParcels } from "./lib/siteBoundary.js";
 import { siteAnchorLatLon } from "./lib/siteAnchor.js";
 import { pinClusterOffsets, pinOffsetsSig } from "./lib/pinCluster.js";
@@ -2801,7 +2802,10 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       const startEvt = "requeststart";
       const errEvt = "requesterror";
       target.on(startEvt, () => {
-        if (!settled && !timer) timer = setTimeout(markDown, DISPLAY_LOAD_TIMEOUT_MS);
+        // V1475200 — below its zoom floor a healthy layer reads its metadata, asks for no cells and never
+        // "loads"; arming the hang-guard then pulled a working county for the statewide picture. See layerInDrawRange.
+        if (!layerInDrawRange(fl)) return;
+        if (!settled && !timer) timer = setTimeout(() => { timer = null; if (layerInDrawRange(fl)) markDown(); }, DISPLAY_LOAD_TIMEOUT_MS);
         // B1427664 — a much shorter "still loading" notice, well inside the 8s hang-guard: a real
         // CAD host that's merely slow (not yet hung) drew nothing and said nothing for up to 8s.
         if (!settled && !slowTimer) {
@@ -2835,7 +2839,15 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     wantedDisplaysRef.current = want;
     setOutlineFloor(Math.max(PARCEL_MINZOOM, displayFloorForView({ south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() })));
     Object.keys(displaysRef.current).forEach((k) => { if (!want.has(k)) removeDisplay(k); });
+    // A statewide BACKUP draws only the counties whose own live source failed, never the whole view (V1475200 follow-up).
+    const base = displaySourcesForView({ south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() });
+    const scopeBackups = () => Object.entries(displaysRef.current).forEach(([k, l]) => {
+      // keyed by the composite's own key — an alias (a county parked on the same URL) would answer "primary" for the same layer
+      if (COUNTIES_MAP[k] && COUNTIES_MAP[k].statewide && l && typeof l.setCountyScope === "function") l.setCountyScope(statewideBackupScope(k, base, [...downDisplaysRef.current]));
+    });
+    scopeBackups(); // layers already on the map
     want.forEach((k) => { if (layerUrlsRef.current[k]) addDisplay(k); });
+    scopeBackups(); // …and any added just now (a no-op for the ones already scoped)
   };
   /* B1976336 — read-only diagnostic: which parcel sources are drawing and how many outline features
    * each holds right now. Gated at CALL time by `isDiagArmed` (see diagArm.js), writes nothing. The

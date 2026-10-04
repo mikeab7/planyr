@@ -93,11 +93,18 @@ export const parcelVectorFloorFor = (url) =>
  * where it publishes labelingInfo, its own lot numbers. Verified live 2026-10-04 on the TxGIO
  * StratMap MapServer (supportsDynamicLayers: true): the same view re-rendered magenta. Returns
  * the JSON string esri-leaflet passes through as the `dynamicLayers` export parameter. */
-export function plainOutlineDynamicLayers(layerId) {
+export function plainOutlineDynamicLayers(layerId, { countyNames } = {}) {
   const id = Number(layerId);
+  /* `countyNames` scopes the picture to those counties (TxGIO's `county` column, upper-case: 'CHAMBERS',
+   * 'FORT BEND') via the layer's `definitionExpression` — verified live 2026-10-04 on the StratMap MapServer
+   * (the export drew Chambers' lots only; `county='FORTBEND'` drew nothing, `'FORT BEND'` drew them). It is how
+   * a statewide BACKUP covers only the county whose own server failed, instead of the whole view. */
+  const names = Array.isArray(countyNames) ? countyNames.filter(Boolean) : [];
+  const q = (n) => `'${String(n).replace(/'/g, "''")}'`;
   return JSON.stringify([{
     id,
     source: { type: "mapLayer", mapLayerId: id },
+    ...(names.length ? { definitionExpression: `county IN (${names.map(q).join(",")})` } : {}),
     drawingInfo: {
       showLabels: false,
       renderer: {
@@ -111,4 +118,23 @@ export function plainOutlineDynamicLayers(layerId) {
       },
     },
   }]);
+}
+
+/* Is this display layer INSIDE the zoom range it can draw in right now? Duck-typed (a Leaflet layer's `_map`
+ * and `options.minZoom`) so the health guards that need it stay Leaflet-free and Node-testable.
+ *
+ * ⛔ WHY THIS EXISTS (V1475200 live FAIL, 2026-10-04). esri-leaflet fires `requeststart` for a layer's own
+ * metadata read the moment it is ADDED, at any zoom — but a layer below its `minZoom` then requests no cells
+ * and so never fires `load`. A hang-guard that armed on that first `requeststart` therefore declared a
+ * perfectly healthy county DOWN eight seconds after it was mounted below its floor, replaced it with the
+ * statewide picture, and — `down` being sticky — never mounted it again after the view zoomed in. A guard
+ * for "a request is outstanding and not answering" may only arm when the layer could actually be asked
+ * for data. Unknown zoom or floor reads as IN range, so a layer this cannot judge keeps the old behaviour. */
+export function layerInDrawRange(layer) {
+  const m = layer && layer._map;
+  if (!m || typeof m.getZoom !== "function") return true;
+  const z = m.getZoom();
+  const floor = Number(layer.options && layer.options.minZoom);
+  if (!Number.isFinite(z) || !Number.isFinite(floor)) return true;
+  return z >= floor;
 }

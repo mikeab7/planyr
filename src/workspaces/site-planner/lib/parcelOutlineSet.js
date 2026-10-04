@@ -16,6 +16,8 @@
  * Dependency-injected (no Leaflet, no React) so the policy is unit-testable. Pure of side effects
  * beyond the callbacks it is handed. */
 
+import { layerInDrawRange } from "./parcelDisplayZoom.js";
+
 export const OUTLINE_LOAD_TIMEOUT_MS = 8000;
 
 /** The sources to draw for a view: the view's own sources, plus the statewide composite(s) backing
@@ -41,6 +43,7 @@ export function createOutlineSet({
   setTimer = setTimeout,
   clearTimer = clearTimeout,
   onDown = () => {},
+  scopeFor = null,   // (statewideKey, baseSources, downKeys) => county names | null — what a statewide BACKUP draws
 }) {
   const urls = {};            // key -> resolved url (null = none)
   const asking = new Set();   // keys whose url resolve is in flight
@@ -77,7 +80,14 @@ export function createOutlineSet({
   };
 
   const wire = (url, layer, e) => {
-    const arm = () => { if (!e.timer) e.timer = setTimer(() => { e.timer = null; markDown(url); }, timeoutMs); };
+    /* The guard only means anything while the layer is in the zoom range it can draw in — see
+     * `layerInDrawRange` (V1475200). Below the floor a healthy layer reads its metadata, asks for no cells
+     * and never "loads"; arming then pulled a working county and mounted the statewide picture instead.
+     * Re-checked when the timer fires too: the view may have left the range while it was running. */
+    const arm = () => {
+      if (e.timer || !layerInDrawRange(layer)) return;
+      e.timer = setTimer(() => { e.timer = null; if (layerInDrawRange(layer)) markDown(url); }, timeoutMs);
+    };
     const ok = () => { if (e.timer) { clearTimer(e.timer); e.timer = null; } };
     const hook = (target, kind) => {
       if (!target || typeof target.on !== "function") return;
@@ -98,7 +108,23 @@ export function createOutlineSet({
     byUrl.set(url, e);
     keyUrl[key] = url;
     if (!isStatewideUrl(url)) wire(url, layer, e); // listeners BEFORE addTo — onAdd fires the first request
+    applyScope(map); // …and the scope too, so the very first request is already scoped
     layer.addTo(map);
+  };
+
+  /* A statewide backup draws only the counties whose own source failed, never the whole view — so a healthy
+   * neighbour (Harris beside a failed Chambers) is not painted twice. A layer without `setCountyScope` (a
+   * queryable statewide vector composite) is left alone. */
+  const applyScope = (map) => {
+    if (typeof scopeFor !== "function") return;
+    const base = sourcesForView(boundsOf(map));
+    byUrl.forEach((e) => {
+      const l = e.layer;
+      if (!l || typeof l.setCountyScope !== "function") return;
+      const key = [...e.keys].find((k) => !isStatewideUrl || isStatewideUrl(urls[k])) ?? [...e.keys][0];
+      if (key == null) return;
+      l.setCountyScope(scopeFor(key, base, [...down]));
+    });
   };
 
   function sync() {
@@ -115,6 +141,7 @@ export function createOutlineSet({
       Promise.resolve().then(() => resolveUrl(k)).then((u) => { asking.delete(k); urls[k] = u || null; sync(); })
         .catch(() => { asking.delete(k); urls[k] = null; if (!disposed) { down.add(k); onDown(k); sync(); } });
     });
+    applyScope(map);
     return true;
   }
 

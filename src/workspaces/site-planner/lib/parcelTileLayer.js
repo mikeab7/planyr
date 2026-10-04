@@ -66,11 +66,20 @@ const unitY = (lat) => 0.5 - Math.log(Math.tan(Math.PI / 4 + lat * RAD)) / (2 * 
  *  rings as flat Float64Arrays of unit-square x,y pairs. Pure. */
 export function prepareParcel(geometry) {
   const bbox = geometryBBox(geometry);
-  const rings = geometryLines(geometry).filter((pts) => pts.length >= 2).map((pts) => {
-    const a = new Float64Array(pts.length * 2);
-    for (let i = 0; i < pts.length; i++) { a[2 * i] = unitX(pts[i][0]); a[2 * i + 1] = unitY(pts[i][1]); }
-    return a;
-  });
+  const lines = geometryLines(geometry).filter((pts) => pts.length >= 2);
+  /* ONE backing buffer per lot, rings as views into it: a lot used to allocate one Float64Array (a backing store +
+   * a header) per ring, and ten thousand lots landing at once made that the biggest source of GC in the arrival
+   * window (59 ms of a 6-response zoom, profiled). */
+  let total = 0;
+  for (let l = 0; l < lines.length; l++) total += lines[l].length;
+  const slab = new Float64Array(total * 2);
+  const rings = new Array(lines.length);
+  let at = 0;
+  for (let l = 0; l < lines.length; l++) {
+    const pts = lines[l], start = at;
+    for (let i = 0; i < pts.length; i++) { slab[at++] = unitX(pts[i][0]); slab[at++] = unitY(pts[i][1]); }
+    rings[l] = slab.subarray(start, at);
+  }
   return { bbox, rings };
 }
 
