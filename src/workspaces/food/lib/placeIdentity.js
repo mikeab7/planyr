@@ -33,6 +33,25 @@ export function normalizeName(name) {
     .replace(/[^a-z0-9]+/g, "");
 }
 
+const STREET_WORDS = {
+  northwest: "nw", northeast: "ne", southwest: "sw", southeast: "se", north: "n", south: "s", east: "e", west: "w",
+  freeway: "fwy", highway: "hwy", road: "rd", street: "st", avenue: "ave", boulevard: "blvd", drive: "dr",
+  lane: "ln", parkway: "pkwy", court: "ct", circle: "cir", place: "pl", expressway: "expy", suite: "ste",
+};
+
+/** The STREET part of an address as a comparable key — "9861 Long Point Rd, Houston, TX, 77055-4107" and
+ *  "9861 Long Point Road, Houston, TX 77055" both read "9861 long point rd"; "12950 NW Fwy" and
+ *  "12950 Northwest Freeway Ste 100" both read "12950 nw fwy". Zip (5 or +4), city, state and unit are
+ *  dropped. null when there is no house-numbered street (so two bare place names never "match"). */
+export function addressKey(address) {
+  const street = String(address || "").split(",")[0].toLowerCase().replace(/[.#]/g, " ");
+  let words = street.split(/[^a-z0-9]+/).filter(Boolean).map((w) => STREET_WORDS[w] || w);
+  const unit = words.findIndex((w, i) => i > 1 && (w === "ste" || w === "unit" || w === "apt" || w === "bldg"));
+  if (unit > 0) words = words.slice(0, unit);
+  if (words.length < 2 || !/^\d+$/.test(words[0])) return null;
+  return words.join(" ");
+}
+
 export function haversineMeters(a, b) {
   const R = 6371000;
   const toRad = (d) => (d * Math.PI) / 180;
@@ -48,9 +67,14 @@ const pt = (p) => ({ lat: Number(p.lat), lon: Number(p.lon) });
 
 /** Are these two records one real-world restaurant? Records need only {name, lat, lon}. */
 export function samePlace(a, b) {
-  if (!a || !b || !hasPoint(a) || !hasPoint(b)) return false;
+  if (!a || !b) return false;
   const na = normalizeName(a.name);
   if (!na || na !== normalizeName(b.name)) return false;
+  // Same name + same street address is one restaurant even when the sources geocoded it kilometres apart
+  // (production: DAO'N at 9861 Long Point Rd is in the snapshot twice, one copy ~20 km off).
+  const ka = addressKey(a.address);
+  if (ka && ka === addressKey(b.address)) return true;
+  if (!hasPoint(a) || !hasPoint(b)) return false;
   return haversineMeters(pt(a), pt(b)) <= MERGE_RADIUS_METERS;
 }
 
@@ -62,7 +86,7 @@ export function samePlace(a, b) {
 export function existingRestaurants({ manualPins = [], wishlistManualPins = [], loggedPlaces = [], wishlistPlaces = [] } = {}) {
   const out = [];
   for (const p of [...manualPins, ...wishlistManualPins]) out.push({ kind: "manual", name: p.name, lat: p.lat, lon: p.lon, ref: p });
-  for (const p of [...loggedPlaces, ...wishlistPlaces]) out.push({ kind: "place", name: p.name, lat: p.lat, lon: p.lon, ref: p });
+  for (const p of [...loggedPlaces, ...wishlistPlaces]) out.push({ kind: "place", name: p.name, lat: p.lat, lon: p.lon, address: p.address, ref: p });
   return out;
 }
 
