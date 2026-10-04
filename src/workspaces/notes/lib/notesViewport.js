@@ -412,21 +412,24 @@ export function inertiaStep(vel, { friction = 0.92, floor = 0.4 } = {}) {
   return { delta: { x: vel.x, y: vel.y }, vel: { x: vel.x * friction, y: vel.y * friction }, done: false };
 }
 
-/* ---- THE OPENING ZOOM (NEW-4) --------------------------------------------------------------
+/* ---- THE OPENING ZOOM (NEW-4, widened by B2078593) -------------------------------------------
  *
- * Desktop opens at 100%. A PHONE opens at FIT WIDTH — the whole page width on screen, both edges
- * (the old 100% framing counted the 8 px outside margin and the 8 px view offset on the LEFT only,
- * so a page as wide as the screen had its right edge and rounded corner clipped). Fit width never
- * magnifies past `PHONE_OPEN_ZOOM_MAX`: a page narrower than the screen (a pinned narrow page) is
- * shown a little larger, which is what makes the 11 px body text readable without ever changing the
- * stored font size; a page wider than the screen is shrunk until it fits. */
+ * ⛔ A NOTE OPENS AT FULL PAGE WIDTH, ON EVERY DEVICE, EVERY TIME (owner, 2026-10-04): both page
+ * edges on screen, whatever device or earlier session left on the page. The zoom is therefore a
+ * pure function of the viewport and the page — never of a remembered view. Desktop caps at 100%
+ * (a narrow page is not blown up on a big monitor) and shrinks a page wider than the window until
+ * it fits; a PHONE may magnify a page narrower than the screen up to `PHONE_OPEN_ZOOM_MAX` (that is
+ * what makes the 11 px body text readable without changing the stored font size) and shrinks a
+ * wider one the same way. The old 100% framing counted the 8 px outside margin and the 8 px view
+ * offset on the LEFT only, so a page as wide as the screen had its right edge and rounded corner
+ * clipped. */
 export const PHONE_VIEWPORT_MAX = 640;
 export const PHONE_PAGE_GUTTER = 8;
 export const PHONE_OPEN_ZOOM_MAX = 1.25;
 
 export function openingZoom({ viewport, page } = {}) {
   const vw = Math.max(1, num(viewport?.width));
-  if (vw > PHONE_VIEWPORT_MAX) return VIEW_ZOOM_DEFAULT;
   const pw = Math.max(1, num(page?.width));
-  return clampViewZoom(Math.min((vw - PHONE_PAGE_GUTTER * 2) / pw, PHONE_OPEN_ZOOM_MAX));
+  const cap = vw > PHONE_VIEWPORT_MAX ? VIEW_ZOOM_DEFAULT : PHONE_OPEN_ZOOM_MAX;
+  return clampViewZoom(Math.min((vw - PHONE_PAGE_GUTTER * 2) / pw, cap));
 }
