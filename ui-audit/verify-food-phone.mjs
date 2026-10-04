@@ -324,11 +324,23 @@ async function armFields(browser) {
         const loc = page.locator(sel).first();
         if (!(await loc.count())) { row(tag, false, `field not reachable by selector ${sel} — probe could not open it (instrument, not a pass)`); await ctx.close(); continue; }
         // bring it into reach like a finger would (in-page scroll of the sheet), NOT the driver's actionability scroll
-        await page.evaluate((s) => { const e = document.querySelector(s); if (e) e.scrollIntoView({ block: "nearest", inline: "nearest" }); }, sel);
+        // bring it into reach the way the app itself does for a focused field: centred in its scroller (in-page scroll, NOT the driver's)
+        await page.evaluate((s) => { const e = document.querySelector(s); if (e) e.scrollIntoView({ block: "center", inline: "nearest" }); }, sel);
         await page.evaluate((s) => { document.querySelectorAll('[data-probe]').forEach((x) => x.removeAttribute("data-probe")); document.querySelector(s).setAttribute("data-probe", "1"); }, sel);
-        // finger tap at its centre (keyboard still DOWN) → focus; then the keyboard "rises" (viewport shrinks)
-        const bb = await loc.boundingBox();
-        await page.touchscreen.tap(bb.x + Math.min(bb.width / 2, 60), bb.y + bb.height / 2);
+        await page.waitForTimeout(500); // let the sheet's own scroll / layout settle, THEN read where the field is (a stale position taps the wrong thing)
+        // a finger needs a point that IS the field: scan a few points; if none answers to the field it is covered at keyboard-down
+        const pt = await page.evaluate(() => {
+          const el = document.querySelector('[data-probe="1"]'); const r = el.getBoundingClientRect();
+          for (const fy of [0.5, 0.3, 0.7, 0.15, 0.85]) {
+            const x = r.left + Math.min(r.width / 2, 60), y = r.top + r.height * fy;
+            if (x < 0 || y < 0 || x > innerWidth || y > innerHeight) continue;
+            const t = document.elementFromPoint(x, y);
+            if (t === el || el.contains(t)) return { x, y };
+          }
+          return null;
+        });
+        if (!pt) { row(`${tag}: reachable by a finger at keyboard-down (some point on the field answers to the field)`, false, `no tappable point — the field is covered (e.g. by the sticky action bar) even after the sheet centres it`); await ctx.close(); continue; }
+        await page.touchscreen.tap(pt.x, pt.y);
         await page.waitForTimeout(250);
         const vp = page.viewportSize();
         await page.evaluate((h) => window.__setKeyboard(h), Math.round(vp.height * 0.45)); // keyboard-up (EMULATED, visual viewport only)
