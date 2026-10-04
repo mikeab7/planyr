@@ -63,8 +63,13 @@ await page.addInitScript(`(() => { try {
   }))});
   localStorage.removeItem("planarfit:currentSite:v1");
 } catch (e) {} })();`);
-await page.route("**/*", (route) => {
+// Real county servers answer after the settle, in their own tasks — so the mock answers after a delay too.
+// An instant answer would land INSIDE the timing window and charge feature ingestion (async, chunked per
+// response in real use) to the settle. Ingestion is reported separately below as the longest task.
+const RESPONSE_DELAY_MS = 350;
+await page.route("**/*", async (route) => {
   const u = route.request().url();
+  if (u.includes("bartowgis.org") && /\/query(\?|$)/i.test(u)) await new Promise((r) => setTimeout(r, RESPONSE_DELAY_MS));
   if (!/\/(MapServer|FeatureServer)\//i.test(u)) return route.continue();
   if (u.includes("bartowgis.org")) {
     if (/\/query(\?|$)/i.test(u)) {
@@ -116,6 +121,7 @@ for (const z of [16, 15, 14]) {
 await page.locator('[data-testid="map-toolbar-select-parcels"]').first().click();
 await page.waitForTimeout(2500);
 
+await page.evaluate(() => { window.__lt = []; try { new PerformanceObserver((l) => l.getEntries().forEach((e) => window.__lt.push(e.duration))).observe({ entryTypes: ["longtask"] }); } catch (_) {} });
 const results = {};
 for (const z of [16, 15, 14]) {
   // Land at z (data fetched + held), then measure re-settles with the data already held — what Michael sees on
@@ -129,7 +135,8 @@ for (const z of [16, 15, 14]) {
     zoomRuns.push(await settleMs("zoom", z)); await settleLoaded();
     panRuns.push(await settleMs("pan")); await page.waitForTimeout(400);
   }
-  results[z] = { held: s && s.held, zoom: median(zoomRuns), pan: median(panRuns), zoomRuns, panRuns };
+  results[z] = { longTasks: await page.evaluate(() => { const a = window.__lt.slice(); window.__lt.length = 0; return a; }), held: s && s.held, zoom: median(zoomRuns), pan: median(panRuns), zoomRuns, panRuns };
+  console.log(`    long tasks (>=50 ms) during z${z} zooms/pans incl. data arrival: n=${results[z].longTasks.length}, max=${Math.max(0, ...results[z].longTasks).toFixed(0)} ms`);
   results[z].zoomCost = results[z].zoom - floors[z].zoom; results[z].panCost = results[z].pan - floors[z].pan;
   console.log(`  z${z}: held=${s && s.held} sources=${s && s.sources.join(",")}  zoom-settle median ${results[z].zoom.toFixed(1)} ms (parcel cost ${results[z].zoomCost.toFixed(1)}) · pan-settle median ${results[z].pan.toFixed(1)} ms (parcel cost ${results[z].panCost.toFixed(1)})`);
 }
