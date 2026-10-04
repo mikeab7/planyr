@@ -166,6 +166,17 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1484656 — B2061328: typing in an open note while the app returns to the foreground / another window pushes never loses either side's text, and the editor stays put `Blocker: auth` (two signed-in windows)
+
+Sandbox-proven: `test/notesOpenPageSync.test.js` (gated fake network, red on main) + `ui-audit/verify-notes-open-page-adopt.mjs` (real editor takes the adopted body in place). The real two-window cloud round-trip needs a signed-in account.
+**Steps (signed in, a throwaway duplicate page — never a real plan):**
+1. Open the same throwaway page in window A and window B. In B, change the FIRST paragraph and wait for "Saved".
+2. In A (not touched since), type a few words in the LAST paragraph and, within a second, switch to another tab/app and back (or click away and back) so the app syncs. **Expect:** the keyboard/caret in A are not dropped; A shows B's first-paragraph change AND its own words.
+3. Wait ~10 s, reload A. **Expect:** both edits present; no "also changed in another window" banner.
+4. Repeat with both windows editing the SAME paragraph. **Expect:** the existing conflict banner (nothing silently lost).
+5. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 2–4, or a failed step filed as a recurrence on B2061328.
+
 ### V1469824 — B2051664: Food search lists the places nearest the visible map first (phone, signed in) `Blocker: auth`
 
 Sandbox-proven on fixture rows: `test/foodSearchProximity.test.js`, plus a real-Chromium run of the built app with the search RPC stubbed (Katy first at a Houston-area view; Dallas first after flying there). Pending: the owner's signed-in phone against his real snapshot (read-only — do not log or edit anything). **Steps** (read the served chunk hash in the same observation):
