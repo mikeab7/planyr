@@ -166,6 +166,16 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1486288 — B2061600: Select-parcels outlines do not catch when a zoom or pan settles at zoom 14–16 in Bartow County GA `Blocker: real-data`
+
+Sandbox-proven: `ui-audit/verify-parcel-settle-cost.mjs` (z14 moveend settle 103.7 → 0.8 ms, mock at Bartow density), `test/parcelTileLayer.test.js`, and the existing parcel display harnesses. **Not provable here:** Michael's real 63,688-lot Bartow service, his GPU-accelerated Chrome, and how it *feels*. Read the served chunk hash in the SAME observation as the result (CLAUDE.md live-measurement rule).
+**Steps:**
+1. Map (#/site), centre 34.20 / -84.83 (his site A010-0202-001), turn Select parcels on. **Expect:** lot outlines draw as before (same colour/weight), only the lots in view.
+2. Zoom between levels 14, 15 and 16 and let each settle; then pan a short distance and let it settle. **Expect:** no visible catch when the map stops moving at any of the three levels (the reported "catch at 15, a clear one at 14" is gone). A brief hold right after zooming OUT while new lots stream in is the separate data-arrival cost (see B2061600) — record it if you see it, do not call it a pass or a fail of this check.
+3. At 14 and again at 16, click one lot. **Expect:** the lot that was under the cursor is selected and highlighted (B137: what you see is what you can select); hover/selected styling unchanged.
+4. Zoom out to 13. **Expect:** outlines hidden with the "zoom in a little to see the lines" hint, unchanged.
+5. Dense Texas check: Katy (29.786 / -95.825, Harris) then a Fort Bend view, Select parcels on, zoom 14–16. **Expect:** outlines draw, no catch, a lot click selects the right lot.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2061600.
 ### V1445360 — B2020272/B2020273: blue my-location marker, heading cone and arrow button on a real iPhone `Blocker: real-device (iOS compass permission prompt and the heading cone need a real phone; the sandbox has no sensors or map tiles)`
 
 Sandbox-proven: `ui-audit/verify-locate-marker.mjs` (colors, ring, pane order, metre-accurate circle at two zooms, cone present/absent, button states) and `test/locateHeading.test.js`. Left for the phone:
