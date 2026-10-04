@@ -81,8 +81,10 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
 - `lib/keyboardInset.js`, `lib/draftDishes.js`, `lib/noAutofill.js` (B2057920, "Food on a phone") — the
   covered-by-keyboard height from `visualViewport` (BottomSheet lifts by it), the dishes typed into a
   NEW visit before it exists (`FoodApp.submitVisit` writes the visit then each dish, all-or-nothing),
-  and the `autocomplete=off` + non-contact `name` props every free-text field spreads (a source sweep in
-  foodPhone.test fails a field that doesn't). There is NO "What I had" input any more; old
+  and the non-standard `x-food-*` autocomplete token + non-contact `name` props every free-text field spreads (a source sweep in
+  foodPhone.test fails a field that doesn't, or whose name/placeholder/aria-label reads as a contact field). ⛔ B2046224 ×2:
+  the layout height comes from a fixed-position probe, NEVER `innerHeight` (on iOS it shrinks with the keyboard); the
+  iOS-faithful harness is verify-food-ios-keyboard (ui-audit). There is NO "What I had" input any more; old
   visits' saved `what_i_had` text stays readable and is never rewritten. At phone width ratings are a
   1-10 tap grid (`ScoreTapGrid` in ScoreMeter), desktop keeps the slider. Phone harness:
   verify-food-visit-phone (ui-audit) + its food-panel fixture page.

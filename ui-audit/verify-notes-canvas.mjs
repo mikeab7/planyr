@@ -258,7 +258,7 @@ await section("2 · a plain wheel zooms at the cursor (like the site plan); Shif
   ok("a plain wheel-DOWN zooms OUT", zDown < zUp - 0.05, `${zUp.toFixed(3)} → ${zDown.toFixed(3)}`);
   await pacedWait(page, 700);          // past the persist debounce
   const stored = await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("planyr:notes:view:")));
-  ok("the wheel-reached level is persisted like any other", stored.length === 1, stored.join(", ") || "nothing stored");
+  ok("the wheel-reached level is NOT written to storage (B2078593: a note re-opens at full width, never at a remembered view)", stored.length === 0, stored.join(", ") || "nothing stored");
 
   /* The pill reads the level the wheel reached. */
   const pill = await page.evaluate(() => document.querySelector('[data-testid="note-zoom-level"]')?.textContent?.trim());
@@ -402,28 +402,25 @@ await section("5 · Ctrl+= · Ctrl+− · Ctrl+0 · Ctrl+9", async (page) => {
 });
 
 /* ── 6 · THE VIEW PERSISTS ──────────────────────────────────────────────────────────────────── */
-await section("6 · the view is remembered per page and survives a reload", async (page) => {
+await section("6 · the view is session memory only: a reload RE-FRAMES to full width and nothing is stored (B2078593)", async (page) => {
   const m = await matRect(page);
   await page.mouse.move(m.left + m.width / 2, m.top + m.height / 2);
   await page.keyboard.down("Control");
   await page.mouse.wheel(0, -300);
   await page.keyboard.up("Control");
   for (let i = 0; i < 4; i += 1) await panWheel(page, 0, 90);
-  await pacedWait(page, 700);            // past the persist debounce
+  await pacedWait(page, 700);            // past the old persist debounce
   const before = await view(page);
+  ok("KNOWN-GOOD: the view really moved away from the opening framing before the reload", before.z > 1.2, `${(before.z * 100).toFixed(0)}%`);
 
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForSelector('[data-testid="note-body"]', { timeout: 20000 });
   await pacedWait(page, 1200);
   const after = await view(page);
-  ok("the zoom level comes back", Math.abs(after.z - before.z) < 0.01,
+  ok("a reload opens at full page width again — not at the zoom left behind", Math.abs(after.z - before.z) > 0.2 && after.z <= 1.001,
     `${(before.z * 100).toFixed(0)}% → ${(after.z * 100).toFixed(0)}%`);
-  ok("and so does where the page was left", Math.abs(after.x - before.x) <= 2 && Math.abs(after.y - before.y) <= 2,
-    `view ${before.x.toFixed(0)},${before.y.toFixed(0)} → ${after.x.toFixed(0)},${after.y.toFixed(0)}`);
-
   const stored = await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("planyr:notes:view:")));
-  ok("⛔ IT IS KEYED PER PAGE, not one level for the whole workspace",
-    stored.length === 1 && stored[0].endsWith(":p1"), stored.join(", ") || "nothing stored");
+  ok("⛔ NOTHING is stored for the view — it cannot carry a stale framing to the next open", stored.length === 0, stored.join(", ") || "nothing stored");
 });
 
 /* ── 7 · THE WORKSPACE IS UNBOUNDED ─────────────────────────────────────────────────────────── */

@@ -47,7 +47,22 @@
  * up (`keyboardInset`, lib/keyboardInset.js) the sheet lifts by exactly the covered height, goes to
  * its "full" snap (the most room above the keyboard) and the focused field is scrolled into view.
  * Measured with a stubbed visualViewport in ui-audit/verify-food-visit-phone.mjs; the real keyboard is
- * V1476080 (on device). */
+ * V1476080 (on device).
+ *
+ * ⛔ RECURRENCE (B2046224 ×2, 2026-10-04 — owner, real iPhone, The Buffalo Grill → "+ Add a dish": the
+ * dish-name field sat behind the keyboard and the sheet never lifted, after the fix above had passed
+ * 136/136 emulated rows). Two causes, both fixed here and in lib/keyboardInset.js:
+ *  1. The inset read `window.innerHeight` as the layout height. On iOS WebKit innerHeight is the
+ *     VISIBLE height and shrinks with the keyboard, so the inset was ≈ 0 → no lift, no "full" snap.
+ *     It now measures the fixed-position containing block itself (keyboardInset.js header).
+ *  2. Revealing the focused field used `el.scrollIntoView`, which scrolls EVERY scrollable ancestor —
+ *     on iOS that includes the page/visual viewport, which then fights the sheet's own lift — and it
+ *     only ran when the inset was already non-zero at focus time (never true for an autoFocus field:
+ *     focus comes first, the keyboard after). `revealField` scrolls only this sheet's content box,
+ *     keeps clear of the sticky header / sticky Save bars (`data-sheet-sticky`), and is re-run on
+ *     focus, on every visualViewport change, and after the height transition settles.
+ * The harness that reproduces the real-phone failure (and was red on the old code) is
+ * ui-audit/verify-food-ios-keyboard.mjs; on-device confirmation is the V# in VERIFICATION.md. */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { resolveSnap, heightForSnap } from "../lib/bottomSheetSnap.js";
 import { currentKeyboardInset } from "../lib/keyboardInset.js";
@@ -55,6 +70,9 @@ import { publishBottomSheetHeight } from "../../../shared/ui/bottomSheetTracker.
 
 const TOP_INSET = 64; // px of the map always left visible above the sheet, even at "full"
 const TRANSITION_MS = 220;
+const TEXT_ENTRY = /^(INPUT|TEXTAREA|SELECT)$/;
+const REVEAL_MARGIN = 12; // breathing room between a revealed field and the sheet's visible edge
+const FOCUS_RECHECK_MS = [0, 120, 350, 700];
 
 export default function BottomSheet({ open, onDismiss, initialSnap = "half", peekHeight, onHeightChange, children }) {
   const contentRef = useRef(null);
@@ -63,6 +81,12 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
   const [animated, setAnimated] = useState(false);
   const dragRef = useRef(null); // { startY, startHeight, pointerId } while an active drag is in progress
   const didMountRef = useRef(false);
+  const selfScrollRef = useRef(false); // true between a reveal's own scrollTop write and the scroll event it fires
+  const foreignScrollAtRef = useRef(0); // when something other than a reveal last scrolled the content
+  const onContentScroll = useCallback(() => {
+    if (selfScrollRef.current) { selfScrollRef.current = false; return; }
+    foreignScrollAtRef.current = performance.now();
+  }, []);
 
   const [kbInset, setKbInset] = useState(() => currentKeyboardInset());
   const kbOpen = kbInset > 0;
@@ -99,29 +123,63 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
     setHeightPx(targetFor(snap));
   }, [snap, targetFor]);
 
-  // Track the visual viewport: it shrinks when the keyboard opens and grows back when it closes.
-  // On every change, keep the focused field inside the visible part of the scroller.
+  // Keep the focused field inside the visible part of THIS sheet's scroller — never the page's.
+  const revealField = useCallback((el) => {
+    const box = contentRef.current;
+    if (!box || !el || !box.contains(el) || !TEXT_ENTRY.test(el.tagName)) return;
+    const b = box.getBoundingClientRect();
+    const vv = window.visualViewport;
+    const visTop = Math.max(b.top, vv ? vv.offsetTop : b.top);
+    const visBottom = Math.min(b.bottom, vv ? vv.offsetTop + vv.height : b.bottom);
+    let topReserve = 0, bottomReserve = 0;
+    box.querySelectorAll("[data-sheet-sticky]").forEach((s) => {
+      if (s.contains(el)) return;
+      const sr = s.getBoundingClientRect();
+      if (!sr.height) return;
+      if (s.dataset.sheetSticky === "top" && sr.top <= b.top + 2) topReserve = Math.max(topReserve, sr.bottom - b.top);
+      if (s.dataset.sheetSticky === "bottom" && Math.abs(sr.bottom - b.bottom) <= 2) bottomReserve = Math.max(bottomReserve, b.bottom - sr.top);
+    });
+    const lo = visTop + topReserve + REVEAL_MARGIN;
+    const hi = visBottom - bottomReserve - REVEAL_MARGIN;
+    const r = el.getBoundingClientRect();
+    const before = box.scrollTop;
+    if (r.top < lo) box.scrollTop -= lo - r.top;
+    else if (r.bottom > hi) box.scrollTop += Math.min(r.bottom - hi, r.top - lo);
+    if (box.scrollTop !== before) selfScrollRef.current = true; // the scroll event this causes is ours, not a finger's
+  }, []);
+  const revealActive = useCallback(() => revealField(document.activeElement), [revealField]);
+
+  // Track the visual viewport: it shrinks when the keyboard opens and grows back when it closes
+  // (and on iOS it may pan, `offsetTop`). On every change, re-measure and re-reveal.
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return undefined;
     const onVv = () => {
       setKbInset(currentKeyboardInset());
-      const el = document.activeElement;
-      if (el && contentRef.current?.contains(el) && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) {
-        requestAnimationFrame(() => el.scrollIntoView?.({ block: "center", behavior: "auto" }));
-      }
+      requestAnimationFrame(revealActive);
+      setTimeout(revealActive, TRANSITION_MS + 40); // again once the lift / full-snap has animated
     };
     vv.addEventListener("resize", onVv);
     vv.addEventListener("scroll", onVv);
     return () => { vv.removeEventListener("resize", onVv); vv.removeEventListener("scroll", onVv); };
-  }, []);
+  }, [revealActive]);
 
-  // A field focused while the keyboard is already up (moving between fields) must also be revealed.
+  // A focused field must be revealed whether or not the keyboard is up yet — an autoFocus field
+  // (the dish editor's name) is focused BEFORE the keyboard opens, and some iOS versions deliver the
+  // visualViewport change late, so re-check the inset and re-reveal a few times as it settles.
+  // The re-checks stand down the moment anything else scrolls the sheet (a finger moving on to the
+  // next field) — they exist to catch a late keyboard, never to drag the list back to the field.
   const onFocusIn = useCallback((e) => {
-    const el = e.target;
-    if (!currentKeyboardInset() || !/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
-    requestAnimationFrame(() => el.scrollIntoView?.({ block: "center", behavior: "auto" }));
-  }, []);
+    if (!TEXT_ENTRY.test(e.target.tagName)) return;
+    const focusedAt = performance.now();
+    for (const ms of FOCUS_RECHECK_MS) {
+      setTimeout(() => {
+        if (document.activeElement !== e.target || foreignScrollAtRef.current > focusedAt) return;
+        setKbInset(currentKeyboardInset());
+        revealField(e.target);
+      }, ms);
+    }
+  }, [revealField]);
 
   useEffect(() => {
     if (!contentRef.current || typeof ResizeObserver === "undefined") return undefined;
@@ -214,7 +272,7 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
       >
         <span aria-hidden="true" style={{ width: 36, height: 4, borderRadius: 999, background: "var(--border-strong, var(--border-default))" }} />
       </div>
-      <div ref={contentRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain" }}>
+      <div ref={contentRef} onScroll={onContentScroll} style={{ flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain" }}>
         {children}
       </div>
     </div>

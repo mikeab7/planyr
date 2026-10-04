@@ -25,7 +25,7 @@
 
 import { gisCache as defaultCache } from "./gisCache.js";
 import { identifyJurisdiction, identifyRoadAuthority } from "./jurisdiction.js";
-import { GIS_SOURCES } from "../../../shared/gis/sources.js";
+import { GIS_SOURCES, sourceCoversState } from "../../../shared/gis/sources.js";
 import { fetchArcgisJson, gisErrorMessage, pLimit, GIS_MAX_GET_URL } from "./gisFetch.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { classifyCcn } from "./ccnClassify.js";
@@ -35,6 +35,10 @@ import { summarizeWells } from "./wellStatus.js";
 // NEW-1 — which STATE the site is in, geometrically and without a network call, so the zoning
 // answer holds when every GIS endpoint is down (siteRegion.js is pure geometry, no prose).
 import { siteState } from "./siteRegion.js";
+// NEW-1 (FL/GA pipelines) — the pure half of the "never clear outside Texas" rule (see that module).
+import { EIA_COMMODITIES, EIA_BUFFER_MI, isEiaScreenState } from "./eiaPipelineScreen.js";
+// The wording + combiner are loaded ON DEMAND (only a non-Texas site reads them): `eiaPipelineScreenCopy.js`.
+const loadEiaCopy = () => import("./eiaPipelineScreenCopy.js");
 import { summarizeTransmission, summarizeSubstations } from "./powerScreen.js";
 import { summarizeAadt, summarizeRail, summarizeAirports } from "./accessScreen.js";
 
@@ -437,6 +441,37 @@ export function pipelineSummary(rows, total) {
   const n = total != null ? total : rows.length;
   const head = `${n} pipeline segment${n === 1 ? "" : "s"}`;
   return ops.length ? `${head} — ${ops.slice(0, 3).join(", ")}${ops.length > 3 ? "…" : ""}` : head;
+}
+
+/* NEW-1 (FL/GA pipelines) — the four EIA commodity layers, as proximity sources. They are NOT in
+ * ANALYSIS_SOURCES: the panel shows ONE pipelines finding, and `runEiaPipelines` folds these four into
+ * it (`combineEiaFindings`). `verified: false` is deliberate and load-bearing — it makes it impossible
+ * for `analyzeProximitySource` to ever return "absent" for these rows; an empty answer stays "unknown"
+ * and the combiner turns it into "not confirmed". Endpoints come from the registry rows only. */
+export const EIA_PIPELINE_SOURCES = EIA_COMMODITIES.map((c) => ({
+  id: c.key, category: "Pipelines", label: `${c.name} pipelines (EIA, approximate)`, kind: "line",
+  mapLayer: c.mapLayer,
+  ...reg(c.key),
+  screenMode: "proximity", bufferMi: EIA_BUFFER_MI, ttl: 30 * DAY, verified: false,
+  plural: `${c.noun}(s)`, onSiteLabel: "crosses the site",
+  caveat: "Approximate — EIA major transmission lines only.",
+}));
+
+/* Screen a FL/GA site's rings against the four EIA layers and fold them into the one pipelines
+ * finding. A failure of one layer can never turn the others' silence into "clear": an error with no
+ * hit is `unavailable`, no hit with no error is `unconfirmed`, and there is no `absent` branch. */
+export async function runEiaPipelines(rings, opts = {}, state = null) {
+  const parts = await Promise.all(EIA_PIPELINE_SOURCES.map(async (src, i) => {
+    let finding;
+    try {
+      finding = await analyzeProximitySource(src, rings, opts);
+    } catch (e) {
+      finding = { id: src.id, status: "unavailable", summary: null, detail: [], error: gisErrorMessage(e) };
+    }
+    return { commodity: EIA_COMMODITIES[i], finding };
+  }));
+  const { combineEiaFindings } = await loadEiaCopy();
+  return combineEiaFindings(parts, { state });
 }
 
 // Classify a fetched result into a finding status (pure). `attrs` is the feature
@@ -942,7 +977,17 @@ export async function runSiteAnalysis(rings, opts = {}) {
   const arcOpts = { ...opts, fetchJson: pooledFetch };
   const jurFetch = opts.jurFetchJson || pooledFetch;
 
-  const arcPromises = ANALYSIS_SOURCES.map((s) => analyzeSource(s, rings, arcOpts));
+  // NEW-1 (FL/GA pipelines) — the state comes FIRST, and geometry decides it (no network). A source
+  // whose registry row is scoped to other states is NEVER queried for a site positively in another
+  // one: a Texas service asked about a Florida coordinate answers "nothing", and that used to render
+  // as "No mapped RRC pipelines crossing the site" — a false clean. Unknown state (null) and Texas are
+  // untouched. Pipelines in FL/GA are the one place an approximate substitute exists (EIA).
+  const state = siteState({ lat: c.lat, lng: c.lng });
+  const arcPromises = ANALYSIS_SOURCES.map((s) => {
+    if (s.id === "pipelines" && isEiaScreenState(state)) return runEiaPipelines(rings, arcOpts, state);
+    if (!sourceCoversState(GIS_SOURCES[s.id], state)) return loadEiaCopy().then((m) => m.outOfStateFinding(s, state));
+    return analyzeSource(s, rings, arcOpts);
+  });
   // NEW-5 (2026-09-05, owner-reported) — thread EVERY active parcel's ring, not just the
   // representative (largest) one: a multi-parcel assemblage's city/ETJ containment is a coin
   // flip weighted by lot size when only one parcel is tested (jurisdiction.js's own
@@ -968,5 +1013,5 @@ export async function runSiteAnalysis(rings, opts = {}) {
   byId.set("road", road && !road.__error ? buildRoadFinding(road) : unknownInfo("road", "Road authority", "Who maintains the fronting road(s)"));
 
   const findings = CATEGORY_ORDER.map((id) => byId.get(id)).filter(Boolean);
-  return { findings, generatedAt: Date.now(), site: { centroid: c } };
+  return { findings, generatedAt: Date.now(), site: { centroid: c, state } };
 }

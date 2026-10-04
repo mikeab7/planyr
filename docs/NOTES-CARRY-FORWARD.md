@@ -665,7 +665,7 @@ position**.
 
 ### Touch routes into the menus (B2061332 / NEW-5, 2026-10-04)
 
-- **iOS Safari fires NO `contextmenu` on a long-press, and a `draggable` row turns a long-press into a drag.** Touch has two routes into the SAME menus: a "⋯" button on each tree row (coarse pointers only) and a 500 ms long-press (travel >10 px cancels — same slop as NEW-2's pan). Rows are not `draggable` on a coarse pointer; `openDocMenuAt` is the right-click handler's body, shared. A selected box gets a top-of-canvas "Delete box" pill on touch (`note-touch-box-bar`).
+- **iOS Safari fires NO `contextmenu` on a long-press, and a `draggable` row turns a long-press into a drag.** Touch has two routes into the SAME menus: a "⋯" button on each tree row (coarse pointers only) and a 500 ms long-press (travel >10 px cancels — same slop as NEW-2's pan). Rows are not `draggable` on a coarse pointer; `openDocMenuAt` is the right-click handler's body, shared. **There is NO floating "Delete box" (owner, 2026-10-04, B2078592):** a box is deleted from the press-and-hold menu ("Delete this box"); a touch-opened menu leaves focus in the editor (keyboard kept) and swallows the lift's synthesised mousedown/click for ~250 ms after the lift (it opens under the finger). A harness that checks for it must look by visible TEXT as well as test id.
 - **TRAP: a held touch's lift synthesises a mousedown/click** — the press that opened a menu swallows its own (`longPressSwallowRef` / the row's `swallowUntil`), or releasing the finger selects the row / deselects the box.
 - **Which engine proves what:** Chromium + CDP `Input.dispatchTouchEvent` is a real held touch; WebKit gets dispatched PointerEvents for the hold only. `ui-audit/verify-notes-touch-menus.mjs`.
 
@@ -1491,6 +1491,11 @@ position**.
 - `CLAUDE.md` → **Engineering rules** — the named rules invoked by name in briefs.
 - `ui-audit/` — the harnesses. The systematic one is `sweep-notes.mjs`; **a sweep that reports
   nothing is a failed sweep** and says so in its own output.
+
+## B2078593 — a note always OPENS at full page width; the view is session memory, not a stored preference (2026-10-04)
+- **The owner's phone opened a page at 55% with its right side off screen while his desktop framed it differently:** each device obeyed a view left in its OWN localStorage (`planyr:notes:view:v1:<scope>:<pageId>`, never synced) by an earlier pinch/pan. His rule: full page width on every device, every time — so a stored view may not win on open. The view now lives in an in-memory map per page (`notesStore.js`), nothing is written, and any legacy key is purged on first look.
+- **A harness can no longer seed a panned/zoomed start through storage.** Use `window.__noteEditor.setView({x,y,z})` (E2E-gated, `byUser` so the opening re-framing latches off). `verify-notes-touch-landing` was moved to it. Seeding the OLD key is still the right way to test that a stale one is IGNORED and deleted (`verify-notes-open-framing`).
+- **`openingZoom` is no longer phone-only:** a page wider than a desktop window shrinks to fit (1700-wide on 1280 → ~59%); desktop caps at 100%.
 
 ## 7 · The mat's gesture model, in one table (NEW-1/NEW-2, 2026-09-12)
 

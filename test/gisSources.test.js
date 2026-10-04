@@ -43,11 +43,13 @@ describe("registry tier integrity", () => {
     }
   });
 
-  it("the only acknowledged exceptions are wetlands + growthFaults (no live authoritative endpoint)", () => {
+  it("the only acknowledged exceptions are wetlands, growthFaults and the four EIA republications (no live authoritative endpoint reachable)", () => {
     const exceptions = Object.values(GIS_SOURCES).filter((s) => s.tier !== "production").map((s) => s.key);
     // wetlands: USFWS publishes polygon-query only on its Test folder. growthFaults: USGS SIM 2874
     // is download-only, so we depend on the UH GIS republication until we self-host the shapefile.
-    expect(exceptions).toEqual(["wetlands", "growthFaults"]);
+    // NEW-1 (FL/GA pipelines): the four EIA rows are Esri's unmodified republication because EIA's
+    // own host is egress-blocked from the build sandbox — acknowledged, with a tierReason each.
+    expect(exceptions).toEqual(["wetlands", "eiaGas", "eiaPetroleum", "eiaCrude", "eiaHgl", "growthFaults"]);
     for (const key of exceptions) expect(docsFor(key).tierReason, key).toBeTruthy();
   });
 
