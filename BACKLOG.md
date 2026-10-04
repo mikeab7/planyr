@@ -5294,6 +5294,22 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
+### B2080752 — A Word/txt file saved from Review gets another file's name (or "Untitled") in the Library `[library / doc-review]` (bug) #doc-review #files  *(Owner measured live 2026-10-04, build d93047b, NEW-1.)*
+
+`[x]` **Cause (read from code):** `beginFileOpen` gave the root a fresh `meta` only when a file was already open, and only to a LOCAL variable; with a blank Review it returned the root's stale `meta`. The saved title is `meta.title || composeTitle(meta)` and a file opened from disk never set `meta.item` — so the row read "Untitled" (empty item) or carried whatever the root last held (a previously open drawing's item/title).
+- **Fix:** `lib/openedFileMeta.js` `metaForOpenedFile(name, filing, date)` — item = the file's own name without extension (same rule `fileNewReview` uses), discipline "Other", auto-composed date-first title; only the FILING (project/org) carries over. `beginFileOpen` applies it with `setMeta` for every new file; a re-attach keeps the review's own meta. PDFs, .docx, .doc, .txt alike.
+- **Adjacent cases (`test/reviewOpenedFileNaming.test.js`; each = own file name + category "Other", never "Untitled"):** Word no project ✔ · Word in a project ✔ · Organization scope ✔ · .txt ✔ · Save-as-Word from a .txt (copy named from its own file by `fileNewReview`) ✔ · .doc → .docx ✔ · PDF ✔ · PDF then Word (helper takes no prior meta) ✔ · Restore from version history (no meta change; same record) ✔.
+- **Red-proof:** 4 source-guard tests fail on unmodified `DocReview.jsx`, pass with the fix. `docEditorOpenSave`, `reviewTabs`, `docPointers` green; `ui-audit/verify-review-tabs.mjs` 37/37 on the built app.
+- **Existing rows NOT mass-renamed:** the two owner test rows keep their stored titles (the fix does not re-derive them); only new saves are corrected.
+- **Pending (⏳):** signed-in check — **V1496384**. **Stopping rule:** closes on a dated PASS of V1496384; a failed step re-opens this item.
+- Verify: live — `Blocker: auth`.
+
+### B2080753 — A status banner from one Review tab stays on screen after switching tabs `[doc-review]` (bug) #doc-review #ui  *(Owner measured live 2026-10-04, NEW-2.)*
+
+`[x]` **Cause:** `docNotice` was ONE root-level string handed to whichever editor was active, and an editor seeds its status line from it on mount — so another tab's editor adopted tab A's "Restored the version…" line. **Fix:** stored as `{tab, msg}`; each editor gets `noticeForTab(rec, f.tabId)` (its own tab's message or nothing); "save as new"/"save a copy" tag the message with the NEW review's tab. Red-proof: 2 source guards fail on old code. No panel copy added.
+- **Pending (⏳):** signed-in check (Restore needs cloud version history) — **V1496385**. **Stopping rule:** closes on a dated PASS of V1496385.
+- Verify: live — `Blocker: auth`.
+
 ### B2069808 — Food search: results appear faster after typing `[Food]` (task, perf) #food #perf  *(Owner request 2026-10-04 (NEW-1): "did nearest-first slow search, and can it be faster?" Answer measured: no, it did not; yes, it can.)*
 
 `[x]` **Measured, same 7 queries (tacos pizza pho dao bbq sushi burger), production `food_places_search_by_name`, in-database, map centre Houston, cap 60:** before 220–259 ms each (cap 15 the same — #1939's 15→60 pool change is NOT the cause); after **13–90 ms** (bbq 23 · burger 40 · dao 35 · pho 14 · pizza 90 · sushi 48 · tacos 83). Cause: the loose similarity threshold lets thousands of rows through ("tacos" ~6,900) and the old body ran `st_distance` on every one before the top-N cut.
