@@ -81,8 +81,8 @@ describe("NEW-2 — every toggleable GIS layer exposes opacity", () => {
     expect((evidence.match(/group\.setOpacity = /g) || []).length).toBe(2);
     const terrain = read("lib/terrainLayers.js"); // contours + flowdir share one factory
     expect(terrain).toMatch(/group\.setOpacity = /);
-    const vec = read("lib/vectorOverlay.js"); // vector + vectorLine + pipelineCorridor
-    expect((vec.match(/group\.setOpacity = /g) || []).length).toBe(3);
+    const vec = read("lib/vectorOverlay.js"); // vector + vectorLine + pipelineCorridor + the Georgia stream-buffer corridor
+    expect((vec.match(/group\.setOpacity = /g) || []).length).toBe(4);
     const layers = read("lib/layers.js"); // esriFeature has no native one — layers.js shims it
     expect(layers).toMatch(/lyr\.setOpacity = typeof cfg\.styleFn === "function"/);
     // …and the update pass pushes the slider's value at whatever the ref turned out to be,

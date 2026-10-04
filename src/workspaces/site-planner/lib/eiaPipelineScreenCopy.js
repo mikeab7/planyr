@@ -119,7 +119,8 @@ export function outOfStateFinding(source, state) {
   return {
     id: source.id, category: source.category, label: source.label,
     status: "unconfirmed",
-    summary: `Not available in ${stName} yet — Planyr has no “${source.category || source.label || "source"}” source here. A gap in what Planyr carries, not a finding.`,
+    // Owner wording (2026-10-04): "Not screened in <state>" — a gap in what Planyr carries, never a finding.
+    summary: `Not screened in ${stName} — Planyr has no “${source.category || source.label || "source"}” source here yet. A gap in what Planyr carries, not a finding about the site.`,
     detail: [], rows: null,
     sourceName: null, ageMs: null, ts: null, error: null,
     caveat: null, verified: false, mapLayer: null, outOfState: true,

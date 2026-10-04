@@ -41,6 +41,7 @@ import { EIA_COMMODITIES, EIA_BUFFER_MI, isEiaScreenState } from "./eiaPipelineS
 const loadEiaCopy = () => import("./eiaPipelineScreenCopy.js");
 import { summarizeTransmission, summarizeSubstations } from "./powerScreen.js";
 import { summarizeAadt, summarizeRail, summarizeAirports } from "./accessScreen.js";
+import { summarizeGaStreams, gopherSummary, critHabitatSummary, critHabitatDetail, hsiTag } from "./georgiaScreens.js";
 
 const DAY = 24 * 3600 * 1000;
 
@@ -233,6 +234,64 @@ export const ANALYSIS_SOURCES = [
     classifyProx: (scr, ctx) => summarizeAirports(scr, ctx),
     caveat: "FAA airports. Distance to the nearest is a PROXY for FAA Part 77 height-restriction surfaces near a public-use airport — NOT the computed Part 77 surfaces. A tall structure near an airport may require an FAA Form 7460 determination. Screening only.",
   },
+  /* GEORGIA-ONLY CARDS (Georgia screening, Part B). `extraFor` is the OTHER half of the state rule from `states`:
+   * `states` = "this standing check has no data outside these states" (so elsewhere it reads NOT SCREENED);
+   * `extraFor` = "this card exists only for these states" (so elsewhere it is simply absent — a Houston plan gains no
+   * Georgia rows). Every endpoint is a registry row, live-verified 2026-10-04. */
+  {
+    id: "streamsGa", category: "Streams & buffers", label: "USGS streams (Georgia buffers)", kind: "line", extraFor: ["GA"],
+    mapLayer: "ga_stream_buffers",
+    ...reg("nhdHydro"),
+    screenMode: "proximity", bufferMi: 0.1, ttl: 30 * DAY, verified: true, proxCap: 300,
+    plural: "stream segment(s)", onSiteLabel: "crosses the site",
+    classifyProx: (scr, ctx) => summarizeGaStreams(scr, ctx),
+    caveat: "USGS NHD centrelines. Georgia measures its buffers from the top of the bank, not the centreline, and the local ordinance (not the model) governs — a survey and the county decide the real setback. Ephemeral channels, ditches and canals are not counted. Screening only.",
+  },
+  {
+    id: "hsiGa", category: "Hazardous sites (Georgia EPD)", label: "Georgia EPD Hazardous Site Inventory", kind: "point", extraFor: ["GA"],
+    mapLayer: "ga_hsi",
+    ...reg("hsiGa"),
+    screenMode: "proximity", bufferMi: 1, ttl: 30 * DAY, verified: true,
+    plural: "HSI site(s)", proxTag: hsiTag,
+    absentLabel: "No Georgia EPD Hazardous Site Inventory site within 1 mi",
+    caveat: "Phase I ESA PRE-SCREEN only — NOT a substitute for a Phase I ESA. The HSI lists sites with a reportable release at EPD's own coordinates; the Class is EPD's. A records review is the authoritative check.",
+  },
+  {
+    id: "critHabitatGa", category: "Critical habitat (USFWS)", label: "USFWS critical habitat", kind: "polygon", extraFor: ["GA"],
+    mapLayer: "ga_crit_habitat",
+    ...reg("critHabitat"),
+    ttl: 30 * DAY, verified: true,
+    absentLabel: "No USFWS critical habitat on the site (screening only — IPaC is the authoritative species list)",
+    summarize: (rows) => critHabitatSummary(rows), detail: (rows) => critHabitatDetail(rows),
+    caveat: "Critical habitat binds FEDERAL actions, not private land directly — but a Corps wetlands permit is a federal action. Screening only; confirm species and consultation needs through USFWS IPaC.",
+  },
+  {
+    id: "gopherGa", category: "Gopher tortoise soils (DNR)", label: "Georgia DNR gopher tortoise suitable soils", kind: "polygon", extraFor: ["GA"],
+    mapLayer: "ga_gopher_tortoise",
+    ...reg("gopherTortoiseGa"),
+    ttl: 30 * DAY, verified: true,
+    absentLabel: "No DNR gopher-tortoise suitable soils on the site (a modeled screen, not a survey)",
+    summarize: (rows) => gopherSummary(rows),
+    caveat: "A modeled soils screen from Georgia DNR — NOT a survey or a sighting. The gopher tortoise is state-protected in Georgia; if this flags, a tortoise survey is the only real check.",
+  },
+  {
+    id: "nrhpGa", category: "Historic places (National Register)", label: "National Register of Historic Places", kind: "point", extraFor: ["GA"],
+    mapLayer: "ga_nrhp",
+    ...reg("nrhp"),
+    screenMode: "proximity", bufferMi: 0.25, ttl: 30 * DAY, verified: true,
+    plural: "National Register listing(s)",
+    absentLabel: "No National Register listing within a quarter-mile (unlisted historic sites are not covered)",
+    caveat: "National Register listings only, as points. Georgia's SHPO database (GNAHRGIS) is login-only and is NOT used, so recorded-but-unlisted sites are missing. Confirm with the Georgia Historic Preservation Division.",
+  },
+  {
+    id: "cemeteriesGa", category: "Cemeteries (recorded)", label: "USGS / GNIS cemeteries", kind: "point", extraFor: ["GA"],
+    mapLayer: "ga_cemeteries",
+    ...reg("cemeteries"),
+    screenMode: "proximity", bufferMi: 0.25, ttl: 30 * DAY, verified: true,
+    plural: "recorded cemetery(ies)",
+    absentLabel: "No RECORDED cemetery within a quarter-mile — unrecorded family burial grounds are not on this layer",
+    caveat: "INCOMPLETE by nature: recorded cemeteries only. Old Georgia farmland often holds unrecorded family burial grounds, so a clear result is not proof of none — ask the county and have the site surveyed.",
+  },
   {
     // Zoning / entitlement — derived from the jurisdiction result rather than a single
     // statewide layer (zoning is per-city, and City of Houston has NONE). Filled in by
@@ -266,6 +325,27 @@ export const ANALYSIS_SOURCES = [
     caveat: "PUC sewer CCN, Houston-region coverage (no statewide sewer-CCN service exists yet). A site with no sewer CCN likely needs septic / on-site treatment or a new CCN. Screening only — confirm with the utility and the PUC.",
   },
 ];
+
+
+// ---------------------------------------------------------------------------
+// State gate — ONE rule, two halves (Part A, Georgia screening).
+//
+// (1) A standing check whose data exists only in some states (the RRC, TCEQ, TxDOT and the PUC are Texas
+//     institutions) declares that ONCE, in the GIS registry (`SOURCE_STATE_SCOPE` / the row's own `states`),
+//     and `runSiteAnalysis` asks `sourceCoversState` before it queries — PR 1902's gate, the same one the
+//     Layers panel's `outOfState` reads. Outside its states it reads "Not screened in <state>", never "none
+//     found" (`eiaPipelineScreenCopy.outOfStateFinding`).
+// (2) A card that exists only for some states (`extraFor` — the Georgia cards) is simply ABSENT elsewhere, so a
+//     Houston plan gains no Georgia rows and nothing there reads as "not screened" about a check it never had.
+// ---------------------------------------------------------------------------
+const STATE_NAMES = { TX: "Texas", CO: "Colorado", GA: "Georgia", CA: "California", FL: "Florida" };
+export const stateName = (st) => STATE_NAMES[st] || "this state";
+
+export const cardExistsIn = (source, state) => !Array.isArray(source.extraFor) || (!!state && source.extraFor.includes(state));
+
+// The road-authority card is built outside ANALYSIS_SOURCES (jurisdiction.js engine); this is its gate record.
+// Its registry row (`road`) is Texas-only (TxDOT Roadway Inventory), so it takes the same gate.
+const ROAD_SCREEN = { id: "road", category: "Road authority", label: "Who maintains the fronting road(s)" };
 
 // ---------------------------------------------------------------------------
 // Pure geometry helpers
@@ -813,7 +893,9 @@ export function analyzeSource(source, rings, opts = {}) {
 // ---------------------------------------------------------------------------
 // Jurisdiction / road / zoning findings (reuse the verified jurisdiction.js engine)
 // ---------------------------------------------------------------------------
-export function buildJurisdictionFinding(j) {
+// Whose boundary services the jurisdiction card actually read — by state (the Texas string was shown on every site).
+const JURISDICTION_SOURCE_NAME = { TX: "TxDOT / TxGIO / H-GAC", GA: "Georgia DCA (county + municipal boundaries)", CO: "Colorado county + municipal boundary services", CA: "California CDT State Geoportal (county + city boundaries)" };
+export function buildJurisdictionFinding(j, state = null) {
   const rows = [];
   rows.push(["County", j.county.length ? j.county.join(" + ") : "—", j.ages.county]);
   // NEW-1 (DFW ETJ) — "Unincorporated" and "not in a city ETJ" are POSITIVE findings; where the ETJ
@@ -824,15 +906,18 @@ export function buildJurisdictionFinding(j) {
   const undet = (j.etjUndetermined || []).length
     ? `ETJ undetermined (disputed)${(j.etjUndetermined || []).flatMap((u) => u.claimants || []).length ? " — claimed by " + [...new Set((j.etjUndetermined || []).flatMap((u) => u.claimants || []))].join(" and ") : ""}` : null;
   const rel = (j.etjReleased || []).length ? (j.etjReleased || []).map((n) => `${n} ETJ release area (SB 2038)`).join(" + ") : null;
-  rows.push(["ETJ", [j.etj.length ? j.etj.map((n) => `${n} ETJ`).join(" + ") : null, undet, rel].filter(Boolean).join(" · ") || (j.etjUnavailable ? "ETJ data unavailable here" : etjState === "unavailable" ? "no ETJ layer for this area" : "not in a city ETJ"), j.ages.etj]);
+  const noEtjStates = state === "GA" || state === "CA"; // these states give a city no reach beyond its limits
+  rows.push(["ETJ", noEtjStates ? `None in ${stateName(state)} — a city has no reach beyond its limits` : [j.etj.length ? j.etj.map((n) => `${n} ETJ`).join(" + ") : null, undet, rel].filter(Boolean).join(" · ") || (j.etjUnavailable ? "ETJ data unavailable here" : etjState === "unavailable" ? "no ETJ layer for this area" : "not in a city ETJ"), j.ages.etj]);
   // B764: the school district (ISD) — the biggest single line on most Texas tax bills. Only
   // rows out when the identify actually ran ISD (j.isd present), so older callers are unchanged.
-  if (Array.isArray(j.isd)) rows.push(["School district", j.isd.length ? j.isd.join(" + ") : "—", j.ages.isd]);
+  // The ISD source is Texas's TEA. Off Texas ground a bare "—" would read as "no school district" — it is a screen
+  // Planyr does not run there, so it says so (Part A, never silent-clean).
+  if (Array.isArray(j.isd)) rows.push(["School district", state && state !== "TX" ? `Not screened in ${stateName(state)}` : j.isd.length ? j.isd.join(" + ") : "—", j.ages.isd]);
   return {
     id: "jurisdiction", category: "Jurisdiction", label: "City / ETJ / county",
     status: "info", summary: null, detail: [], rows,
     straddle: j.straddle,
-    sourceName: "TxDOT / TxGIO / H-GAC", ageMs: j.ages.county ?? j.ages.city ?? null, ts: null,
+    sourceName: JURISDICTION_SOURCE_NAME[state] || JURISDICTION_SOURCE_NAME.TX, ageMs: j.ages.county ?? j.ages.city ?? null, ts: null,
     error: null, caveat: "Screening only — boundaries (especially ETJ) change. Verify with the jurisdiction.", verified: true,
   };
 }
@@ -956,7 +1041,7 @@ const CO_ZONING_CAVEAT =
 // Display order for the assembled findings.
 // NEW-2 (2026-09-23, owner request) — Jurisdiction and Road authority lead the panel;
 // everything else keeps its prior relative order below them.
-const CATEGORY_ORDER = ["jurisdiction", "road", "flood", "wetlands", "pipelines", "oilgas", "lpst", "epaCleanups", "growthFaults", "transmission", "substations", "aadt", "rail", "airports", "zoning", "ccnWater", "ccnSewer"];
+const CATEGORY_ORDER = ["jurisdiction", "road", "flood", "wetlands", "streamsGa", "pipelines", "oilgas", "lpst", "epaCleanups", "hsiGa", "critHabitatGa", "gopherGa", "nrhpGa", "cemeteriesGa", "growthFaults", "transmission", "substations", "aadt", "rail", "airports", "zoning", "ccnWater", "ccnSewer"];
 
 /* Run the full screen against the active-parcel rings ([[ [lng,lat], ... ], ...]).
  * Returns { findings, generatedAt }. Findings are presence-first and each carries its
@@ -965,6 +1050,7 @@ export async function runSiteAnalysis(rings, opts = {}) {
   if (!rings || !rings.length) return { findings: [], generatedAt: Date.now(), empty: true };
   const rep = representativeRing(rings);
   const c = ringCentroid(rep);
+  const state = siteState({ lat: c.lat, lng: c.lng });
   const idJur = opts.identifyJurisdiction || identifyJurisdiction;
   const idRoad = opts.identifyRoadAuthority || identifyRoadAuthority;
 
@@ -977,13 +1063,15 @@ export async function runSiteAnalysis(rings, opts = {}) {
   const arcOpts = { ...opts, fetchJson: pooledFetch };
   const jurFetch = opts.jurFetchJson || pooledFetch;
 
-  // NEW-1 (FL/GA pipelines) — the state comes FIRST, and geometry decides it (no network). A source
+  // NEW-1 (FL/GA pipelines, PR 1902) — the state comes FIRST, and geometry decides it (no network). A source
   // whose registry row is scoped to other states is NEVER queried for a site positively in another
-  // one: a Texas service asked about a Florida coordinate answers "nothing", and that used to render
+  // one: a Texas service asked about a Florida/Georgia coordinate answers "nothing", and that used to render
   // as "No mapped RRC pipelines crossing the site" — a false clean. Unknown state (null) and Texas are
   // untouched. Pipelines in FL/GA are the one place an approximate substitute exists (EIA).
-  const state = siteState({ lat: c.lat, lng: c.lng });
-  const arcPromises = ANALYSIS_SOURCES.map((s) => {
+  // Georgia screening (Part A) extends that SAME gate rather than adding a second one: the registry's `states`
+  // (SOURCE_STATE_SCOPE / the row's own) is the one place a source declares where it can answer, and a
+  // Georgia-only `extraFor` card simply does not exist outside Georgia.
+  const arcPromises = ANALYSIS_SOURCES.filter((s) => cardExistsIn(s, state)).map((s) => {
     if (s.id === "pipelines" && isEiaScreenState(state)) return runEiaPipelines(rings, arcOpts, state);
     if (!sourceCoversState(GIS_SOURCES[s.id], state)) return loadEiaCopy().then((m) => m.outOfStateFinding(s, state));
     return analyzeSource(s, rings, arcOpts);
@@ -996,7 +1084,10 @@ export async function runSiteAnalysis(rings, opts = {}) {
   // "Unincorporated" off the one parcel that happened to be largest while the header, testing
   // every parcel, correctly found the site partly inside a city's ETJ.
   const jurP = Promise.resolve().then(() => idJur(c.lng, c.lat, { ring: rep, ...(rings.length > 1 ? { rings } : {}), cache: opts.cache, fetchJson: jurFetch })).catch((e) => ({ __error: e }));
-  const roadP = Promise.resolve().then(() => idRoad(c.lng, c.lat, { ring: rep, cache: opts.cache, fetchJson: jurFetch })).catch((e) => ({ __error: e }));
+  // Road authority reads TxDOT's Roadway Inventory — a Texas-only source. Off Texas ground it is not asked at all.
+  const roadP = !sourceCoversState(GIS_SOURCES.road, state)
+    ? Promise.resolve({ __notScreened: true })
+    : Promise.resolve().then(() => idRoad(c.lng, c.lat, { ring: rep, cache: opts.cache, fetchJson: jurFetch })).catch((e) => ({ __error: e }));
 
   const [arc, j, road] = await Promise.all([Promise.all(arcPromises), jurP, roadP]);
 
@@ -1008,9 +1099,9 @@ export async function runSiteAnalysis(rings, opts = {}) {
     id, category, label, status: "unavailable", summary: null, detail: [], rows: null,
     sourceName: null, ageMs: null, ts: null, error: "Couldn't reach the GIS source — temporarily unavailable.", caveat: null, verified: false,
   });
-  byId.set("jurisdiction", j && !j.__error ? buildJurisdictionFinding(j) : unknownInfo("jurisdiction", "Jurisdiction", "City / ETJ / county"));
-  byId.set("zoning", j && !j.__error ? deriveZoning(j, siteState({ lat: c.lat, lng: c.lng })) : byId.get("zoning") || unknownInfo("zoning", "Zoning / entitlement", "Zoning & entitlement context"));
-  byId.set("road", road && !road.__error ? buildRoadFinding(road) : unknownInfo("road", "Road authority", "Who maintains the fronting road(s)"));
+  byId.set("jurisdiction", j && !j.__error ? buildJurisdictionFinding(j, state) : unknownInfo("jurisdiction", "Jurisdiction", "City / ETJ / county"));
+  byId.set("zoning", j && !j.__error ? deriveZoning(j, state) : byId.get("zoning") || unknownInfo("zoning", "Zoning / entitlement", "Zoning & entitlement context"));
+  byId.set("road", road && road.__notScreened ? (await loadEiaCopy()).outOfStateFinding(ROAD_SCREEN, state) : road && !road.__error ? buildRoadFinding(road) : unknownInfo("road", "Road authority", "Who maintains the fronting road(s)"));
 
   const findings = CATEGORY_ORDER.map((id) => byId.get(id)).filter(Boolean);
   return { findings, generatedAt: Date.now(), site: { centroid: c, state } };

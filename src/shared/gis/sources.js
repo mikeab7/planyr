@@ -562,6 +562,127 @@ export const GIS_SOURCES = {
     fullPurposeOnly: true,
     lastVerified: "2026-09-30",
   },
+
+  /* NEW-1 (Georgia screening, 2026-10-04) — THE GEORGIA SCREENING ROWS. Every endpoint below was read and
+   * queried live on 2026-10-04 from the build sandbox (reachable, answers `f=json`, `access-control-allow-origin: *`
+   * so planyr.io can call it from the browser) and sits on a production host — no `/Test/` or staging path.
+   * Each row's fixtures sit on real features (counts in the fixtures file). Georgia DOT's own GIS host, Georgia
+   * DNR's coastal-resources host, USDA's Soil Data Access and NPS's own map server were NOT reachable from the
+   * sandbox (egress 403), so those layers are deliberately NOT wired — see BACKLOG (an unconfirmed URL is exactly
+   * how a row ships dead). */
+  /* Georgia EPD Hazardous Site Inventory — the state's list of sites with a release above a reportable
+   * quantity (HSI, Georgia HSRA). EPD publishes it as POINTS with the site's own latitude/longitude, so the
+   * layer is exact, not a geocode of an address list. Hosted by EPD's own ArcGIS Online org (owner
+   * `Bo.Noakes_GAEPD3`), the July 2025 edition (edited 2025-08-04); 453 sites inside the Georgia envelope. */
+  hsiGa: {
+    key: "hsiGa",
+    label: "Hazardous Site Inventory (Georgia EPD)",
+    provider: "Georgia Environmental Protection Division (EPD) — Hazardous Site Inventory",
+    serviceUrl: "https://services1.arcgis.com/p0dLjwtOaJHU8zq2/arcgis/rest/services/2025_HSI/FeatureServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "Site_Name", city: "City", county: "County", cls: "Class", listed: "List_Date" },
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-10-04",
+  },
+  /* Georgia DNR Wildlife Resources Division — trout streams (layer 1 `Trout_Stream`). The designated-trout-water
+   * lines the 50-ft stream buffer keys off. Georgia DNR's own ArcGIS Online org (owner `courtney.balling_dnr`),
+   * edited 2024-12-30; 2,479 line features in the Georgia envelope, all in the north Georgia mountains. */
+  troutGa: {
+    key: "troutGa",
+    label: "Trout streams (Georgia DNR)",
+    provider: "Georgia Department of Natural Resources — Wildlife Resources Division",
+    serviceUrl: "https://services6.arcgis.com/9QlSLDqa0P1cHLhu/arcgis/rest/services/Georgia_Trout_Streams_Public_Download_All_Layers/FeatureServer/1",
+    layerId: null,
+    geometryType: "line",
+    fields: { name: "Name", basin: "Basin" },
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-10-04",
+  },
+  /* Metropolitan North Georgia Water Planning District — the district boundary (the 15 counties whose model
+   * stream-buffer ordinance is the "typical local requirement" for the metro). The Atlanta Regional Commission,
+   * which staffs the District, publishes it (`MNGWPD_Boundary`, layer 1 `MNGWPD Outline`). Point-in-polygon decides
+   * "inside the district" — never a hard-coded county list. */
+  mngwpd: {
+    key: "mngwpd",
+    label: "Metropolitan North Georgia Water Planning District boundary",
+    provider: "Atlanta Regional Commission — Metropolitan North Georgia Water Planning District",
+    serviceUrl: "https://services1.arcgis.com/Ug5xGQbHsD8zuZzM/arcgis/rest/services/MNGWPD_Boundary/FeatureServer/1",
+    layerId: null,
+    geometryType: "polygon",
+    fields: {},
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-10-04",
+  },
+  /* USFWS critical habitat — the Service's own ArcGIS Online org (`QVENGdaPbd4LUkLV`), "Final Critical Habitat
+   * Features" (edited 2026-08-31). Federal critical habitat is a designation under ESA §7: it constrains federal
+   * actions, NOT private development directly — but a federal nexus (a Corps §404 permit) puts it in play. */
+  critHabitat: {
+    key: "critHabitat",
+    label: "USFWS critical habitat",
+    provider: "U.S. Fish & Wildlife Service — Final Critical Habitat",
+    serviceUrl: "https://services.arcgis.com/QVENGdaPbd4LUkLV/ArcGIS/rest/services/USFWS_Critical_Habitat/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { name: "comname", sci: "sciname", status: "listing_status", unit: "unitname" },
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-10-04",
+  },
+  /* Georgia DNR gopher-tortoise suitable soils, by tier — SSURGO soils scored for burrowing suitability, from
+   * DNR's own org (edited 2026-09-11). A MODELED habitat screen, not a tortoise survey or an occurrence record. */
+  gopherTortoiseGa: {
+    key: "gopherTortoiseGa",
+    label: "Gopher tortoise suitable soils (Georgia DNR)",
+    provider: "Georgia Department of Natural Resources — Wildlife Resources Division",
+    serviceUrl: "https://services6.arcgis.com/9QlSLDqa0P1cHLhu/arcgis/rest/services/GopherTortoiseSoils/FeatureServer/0",
+    layerId: null,
+    geometryType: "polygon",
+    fields: { tier: "Tier", acres: "Acres", musym: "MUSYM" },
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-10-04",
+  },
+  /* National Register of Historic Places — NPS's register (NRIS) as Esri's federal-data republication, edited
+   * 2026-10-02 (the NPS server itself is not reachable from the build sandbox, so this is the copy that could
+   * be verified). Points only; a district is one point, not its boundary. */
+  nrhp: {
+    key: "nrhp",
+    label: "National Register of Historic Places",
+    provider: "National Park Service — National Register of Historic Places (via Esri Federal Data)",
+    serviceUrl: "https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/nrhp_points_v1/FeatureServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "RESNAME", type: "ResType", city: "City", county: "County", listed: "CertDate" },
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-10-04",
+  },
+  /* USGS National Map "Structures" — Cemeteries (GNIS-derived points). Federal, production host. INCOMPLETE by
+   * construction: a recorded cemetery is on this layer, an unrecorded family burial ground is not — which is
+   * why the layer is labelled incomplete everywhere it is shown. */
+  cemeteries: {
+    key: "cemeteries",
+    label: "Cemeteries (USGS / GNIS)",
+    provider: "U.S. Geological Survey — National Map Structures (GNIS cemeteries)",
+    serviceUrl: "https://carto.nationalmap.gov/arcgis/rest/services/structures/MapServer/37",
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "NAME", city: "CITY", state: "STATE" },
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-10-04",
+  },
   /* NEW-1 (California) — the California counterpart of `county` / `countyCo` / `countyGa`. Its OWN row with
    * `states: ["CA"]`; the Texas, Colorado and Georgia rows are untouched. VERIFIED LIVE 2026-10-02 from the
    * build sandbox: exactly 58 county polygons (California's full roster), one per county, ArcGIS-Online hosted
@@ -2162,6 +2283,10 @@ export const SOURCE_FIXTURE_REACH = {
   // Houston-region drainage/utility districts — a county or a metro, not a state.
   ccnSewer: ["regional", "Harris County GIS re-serve of the PUCT CCN; its coverage is the Houston metro region, not the state (no statewide sewer-CCN REST endpoint exists)."],
   growthFaults: ["regional", "The USGS SIM 2874 study extent IS the Houston metropolitan area — there are no growth-fault traces to probe outside it."],
+  // NEW-1 (Georgia screening) — two Georgia rows whose real extent is a region, not the state.
+  troutGa: ["regional", "Designated trout waters exist only in the north Georgia mountains — probing a trout stream in Savannah would assert a guaranteed zero."],
+  mngwpd: ["regional", "The Metropolitan North Georgia Water Planning District is 15 metro-Atlanta counties — one polygon about 100 km across."],
+  gopherTortoiseGa: ["regional", "The gopher tortoise's range is the Georgia coastal plain and sandhills — there is no tortoise soil model in the mountains to probe."],
   hcfcdChannels: ["regional", "Harris County Flood Control District — one county by definition."],
   hcfcdWatersheds: ["regional", "Harris County Flood Control District — one county by definition."],
   hcfcdMaapnext: ["regional", "HCFCD MAAPnext model results cover Harris County only."],

@@ -208,6 +208,59 @@ export const SOURCE_FIXTURES = {
     { label: "Macon-Bibb County (consolidated)", point: [-83.63, 32.84], expectMinCount: 1 }, // live: Macon-Bibb County
   ],
   },
+  /* NEW-1 (Georgia screening) · every point below sits ON a real feature, found by asking each live service for its
+   * features inside the Georgia envelope and taking the one nearest an anchor city; each count is the number of
+   * features inside the ±0.01° box the verifier queries (live 2026-10-04). A fixture that only proves "the service
+   * answers somewhere" would pass a clipped copy — these are spread Atlanta ↔ Savannah ↔ west Georgia on purpose. */
+  hsiGa: {
+  fixtures: [
+    { label: "Atlanta (Fulton) HSI site", point: [-84.4011, 33.7453], expectMinCount: 1 }, // live: 1
+    { label: "Savannah (Chatham) HSI site", point: [-81.1, 32.0758], expectMinCount: 1 }, // live: 1
+    { label: "Columbus area HSI site", point: [-84.93, 32.4628], expectMinCount: 1 }, // live: 1
+  ],
+  },
+  troutGa: {
+  fixtures: [
+    { label: "Chattahoochee headwaters (White Co.)", point: [-83.8921, 34.6906], expectMinCount: 1 }, // live: 4
+    { label: "Blue Ridge / Toccoa basin", point: [-84.1931, 34.7907], expectMinCount: 1 }, // live: 4
+    { label: "Rabun / Tallulah basin", point: [-83.4978, 34.9015], expectMinCount: 1 }, // live: 2
+  ],
+  },
+  mngwpd: {
+  fixtures: [
+    { label: "Downtown Atlanta (Fulton)", point: [-84.388, 33.749], expectMinCount: 1 },
+    { label: "Lawrenceville (Gwinnett)", point: [-83.95, 34.02], expectMinCount: 1 },
+    { label: "Canton (Cherokee)", point: [-84.48, 34.25], expectMinCount: 1 },
+  ],
+  },
+  critHabitat: {
+  fixtures: [
+    { label: "Flint River basin (Upson/Meriwether area)", point: [-84.4966, 33.4124], expectMinCount: 1 }, // live: 4
+    { label: "Ogeechee/Altamaha basin (south-east Georgia)", point: [-82.4755, 31.9712], expectMinCount: 1 }, // live: 1
+    { label: "Chattahoochee corridor (Stewart/Quitman area)", point: [-85.654, 31.9696], expectMinCount: 1 }, // live: 5
+  ],
+  },
+  gopherTortoiseGa: {
+  fixtures: [
+    { label: "Fort Benning / Chattahoochee sandhills", point: [-84.9, 32.3], expectMinCount: 1 }, // live: 6
+    { label: "Albany (Dougherty) coastal plain", point: [-84.15, 31.55], expectMinCount: 1 }, // live: 25
+    { label: "Savannah-Ogeechee coastal plain", point: [-81.7, 31.9], expectMinCount: 1 }, // live: 2
+  ],
+  },
+  nrhp: {
+  fixtures: [
+    { label: "Downtown Atlanta", point: [-84.3894, 33.7503], expectMinCount: 1 }, // live: 30
+    { label: "Savannah Historic District", point: [-81.099, 32.0805], expectMinCount: 1 }, // live: 18
+    { label: "Columbus area", point: [-84.9539, 32.4735], expectMinCount: 1 }, // live: 3
+  ],
+  },
+  cemeteries: {
+  fixtures: [
+    { label: "Atlanta (Oakland / Grant Park area)", point: [-84.3734, 33.755], expectMinCount: 1 }, // live: 2
+    { label: "Savannah", point: [-81.103, 32.073], expectMinCount: 1 }, // live: 3
+    { label: "Columbus area", point: [-84.9111, 32.4651], expectMinCount: 1 }, // live: 1
+  ],
+  },
   countyCa: {
   fixtures: [
     // NEW-1 (California) · live 2026-10-02 from the build sandbox: exactly 58 county polygons statewide.
@@ -968,6 +1021,47 @@ export const SOURCE_DOCS = {
     "governs. Consolidated governments publish under their consolidated names (Athens-Clarke County, Augusta-Richmond " +
     "County, Macon-Bibb County; Columbus is plain 'Columbus'). A boundary means the city HAS JURISDICTION — never proof it serves utilities.",
   },
+  hsiGa: {
+  notes:
+    "Georgia EPD Hazardous Site Inventory (HSI) — sites with a release of a regulated substance above the reportable " +
+    "quantity, Class and listing date per site. EPD publishes each site's own lat/long, so these are points, not a " +
+    "geocode. A Phase I ESA PRE-SCREEN: a site on the list is a flag to pull the file, never a verdict on a neighbour.",
+  },
+  troutGa: {
+  notes:
+    "Georgia DNR trout streams (layer 1 `Trout_Stream`). The designated-trout-water lines the 50-ft buffer keys off; " +
+    "EPD's rule on designated trout waters is the legal authority — DNR's mapping is the screening copy of it.",
+  },
+  mngwpd: {
+  notes:
+    "ARC's Metropolitan North Georgia Water Planning District outline. Inside it the District's model stream-buffer " +
+    "ordinance (50 ft undisturbed + 25 ft impervious setback) is the typical local requirement — the county's own " +
+    "adopted ordinance governs; confirm with the county. Point-in-polygon decides membership, never a county list.",
+  },
+  critHabitat: {
+  notes:
+    "USFWS final critical habitat polygons (ESA §7). Critical habitat binds FEDERAL actions, not private land directly — " +
+    "but a Corps §404 permit is a federal action. Screening only; USFWS IPaC is the authoritative species list.",
+  },
+  gopherTortoiseGa: {
+  notes:
+    "Georgia DNR suitable-soils model for gopher tortoise (SSURGO map units scored into Tiers 1–3). A MODELED habitat " +
+    "screen — not a survey and not an occurrence record. The gopher tortoise is a state-protected species in Georgia, " +
+    "so a tortoise survey is the only real check.",
+  },
+  nrhp: {
+  notes:
+    "National Park Service National Register of Historic Places points (Esri Federal Data republication; the NPS server " +
+    "itself was not reachable from the build sandbox). One point per listing, a district is not drawn as a boundary. " +
+    "Georgia's own GNAHRGIS (SHPO) is login-only and is NOT used.",
+  },
+  cemeteries:
+    {
+    notes:
+      "USGS GNIS cemeteries. INCOMPLETE: recorded cemeteries only — unrecorded family burial grounds are not on this " +
+      "layer, so an empty result is never proof of none. A burial ground on the site is a hard constraint under Georgia " +
+      "law, so the county and a survey are the real check.",
+    },
   countyCa: {
   notes:
     "The California counterpart of `county` / `countyCo` / `countyGa`. CDT State Geoportal counties (58, one row per county). A point in NO " +

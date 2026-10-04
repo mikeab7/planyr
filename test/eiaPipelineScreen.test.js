@@ -103,7 +103,7 @@ describe("outOfStateFinding — a Texas-only source on a non-Texas site is never
   it("is `unconfirmed`, names the state and says it is a gap in what Planyr carries", () => {
     const f = outOfStateFinding({ id: "oilgas", category: "Oil & gas wells", label: "Oil & gas well surface locations" }, "FL");
     expect(f.status).toBe("unconfirmed");
-    expect(f.summary).toMatch(/Not available in Florida/);
+    expect(f.summary).toMatch(/Not screened in Florida/);
     expect(f.summary).toMatch(/not a finding/);
     expect(f.outOfState).toBe(true);
   });
@@ -176,7 +176,7 @@ describe("runSiteAnalysis — FL/GA pipelines route to EIA and are never clear",
       const { opts } = harness();
       const w = oilgas(await runSiteAnalysis(rings, opts));
       expect(w.status).toBe("unconfirmed");
-      expect(w.summary).toMatch(new RegExp(`Not available in ${name}`));
+      expect(w.summary).toMatch(new RegExp(`Not screened in ${name}`));
       expect(w.summary).not.toMatch(/No mapped oil/);
     });
 
@@ -184,7 +184,7 @@ describe("runSiteAnalysis — FL/GA pipelines route to EIA and are never clear",
       const { opts } = harness();
       const r = await runSiteAnalysis(rings, opts);
       for (const s of ANALYSIS_SOURCES) {
-        if (!statesFor(GIS_SOURCES[s.id])) continue; // national rows may legitimately be absent
+        if (s.extraFor || !statesFor(GIS_SOURCES[s.id])) continue; // national rows may legitimately be absent; `extraFor` cards (Georgia's own sources) are not Texas-only standing checks
         expect(r.findings.find((f) => f.id === s.id).status, s.id).not.toBe("absent");
       }
     });

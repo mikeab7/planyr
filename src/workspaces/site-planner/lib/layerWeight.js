@@ -99,6 +99,14 @@ export const LAYER_TIER = {
   // publishes GIS — B1078). Neither is orientation furniture.
   jur_road_authority: "reference",
   nhd_flowlines: "reference",
+  // Georgia screening (NEW-1)
+  ga_hsi: "reference",             // a listed release site — a pull-the-file flag
+  ga_nrhp: "reference",
+  ga_cemeteries: "reference",
+  ga_crit_habitat: "reference",    // binds federal actions, not the parcel directly
+  ga_gopher_tortoise: "reference", // a modeled habitat screen
+  ga_trout: "reference",           // the designation; the BUFFER it triggers is the constraint below
+  ga_stream_buffers: "constraint", // 25/50/75 ft of land taken off each side of a stream
 
   // ---- CONTEXT: orientation furniture ----
   jur_county: "context",
@@ -128,7 +136,7 @@ export const LAYER_TIER = {
  * plan and the basemap", and contours are neither. They are an overlay he turned on and may want
  * off in the same click as everything else. The basemap needs no exemption at all — it is a
  * separate segmented control, not a member of the overlay registry. */
-export const EXEMPT_IDS = new Set(["elevation", "contours", "flowdir", "aerial", "basemap"]);
+export const EXEMPT_IDS = new Set(["elevation", "contours", "flowdir", "ga_slope", "aerial", "basemap"]); // ga_slope: a terrain wash, same family as the elevation shading
 
 export const tierOf = (id) => LAYER_TIER[id] || null;
 export const isExempt = (id) => EXEMPT_IDS.has(id);

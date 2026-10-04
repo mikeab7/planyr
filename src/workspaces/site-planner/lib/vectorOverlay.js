@@ -30,6 +30,7 @@ import { labelAnchors, placeLabels, labelsVisible, titleCaseName } from "./bound
 import { placeNamesShown, placeNameKey } from "./placeNamesGate.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { corridorRingLngLat, DEFAULT_CORRIDOR_WIDTH_FT } from "./pipelineCorridor.js";
+import { streamBufferBands, bufferLegend } from "./georgiaStreamBuffers.js";
 import { ftypeLabel } from "./nhdFlowline.js";
 import { pointSymbolOptions } from "./layerRequest.js";
 import { installDefaultMarkerIcon, pointToLayerFor } from "./mapSymbols.js";
@@ -641,6 +642,9 @@ export function cachedPipelineLayer(k, cfg, initialOpacity, pane, onStatus, opts
  *
  * Options: cache (injected SWR cache), widthFt (total corridor width, feet). */
 export function cachedCorridorLayer(k, cfg, initialOpacity, pane, onStatus, opts = {}) {
+  // Georgia stream buffers are a corridor of a different kind: per-feature widths from three sources, not one
+  // assumed width off one source — a sibling builder, same pane / status / export contract.
+  if (cfg.bufferRule === "ga_streams") return cachedStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, opts);
   const source = VECTOR_SOURCES[cfg.pipelineSource || "txrrc_pipe"];
   if (!source) return null;
   const { cache = gisCache } = opts;
@@ -732,6 +736,106 @@ export function cachedCorridorLayer(k, cfg, initialOpacity, pane, onStatus, opts
   group.setOpacity = (o) => { opacity = o; if (lastData) paint(lastData); };
   // Inline width control (B752): re-buffer the SAME cached geometry at the new width (no re-fetch).
   group.setWidth = (ft) => { const n = Number(ft); if (Number.isFinite(n) && n > 0 && n !== widthFt) { widthFt = n; if (lastData) paint(lastData); } };
+  group.getExportMode = () => "vector";
+  return group;
+}
+
+/* Georgia STREAM BUFFER bands (Georgia screening, Part B1) — the Leaflet half; every rule (which streams, how
+ * wide, where the Metro North Georgia District applies) is `georgiaStreamBuffers.streamBufferBands`, pure and
+ * unit-tested. NHD flowlines + DNR trout lines + the District outline all come through `fetchCached` — the same
+ * SWR cache entries the drawn "Streams" / "Trout streams" layers use, so enabling the buffer next to them costs
+ * no second pull. Bands paint in the corridor pane (just under the GIS overlay pane) in each tier's colour, and
+ * the export gatherer reads them exactly as it reads a pipeline corridor (PDF-PARITY: same polygons, same fill).
+ *
+ * LOUD, never partial-and-silent: a supporting source that fails is NAMED on the row (a missing District outline
+ * would otherwise draw 25 ft where the rule is 75), and a truncated NHD pull says it is partial.
+ *
+ * Vector-only: below the NHD source's vector gate there are no centrelines to buffer, so it reports "zoom in". */
+export function cachedStreamBufferLayer(k, cfg, initialOpacity, pane, onStatus, opts = {}) {
+  const nhd = VECTOR_SOURCES.nhd_flowlines, trout = VECTOR_SOURCES.ga_trout, district = VECTOR_SOURCES.ga_mngwpd;
+  if (!nhd || !trout || !district) return null;
+  const { cache = gisCache } = opts;
+
+  let map = null, opacity = initialOpacity, seq = 0;
+  const data = { nhd: null, trout: null, district: null };
+  const failed = { nhd: false, trout: false, district: false };
+  const report = (state, msg, extra) => onStatus && onStatus(k, state, msg, extra);
+  const group = L.layerGroup([], { pane });
+  const bands = L.layerGroup([]);
+  group.addLayer(bands);
+
+  const paint = () => {
+    bands.clearLayers();
+    if (!data.nhd) return;
+    const list = streamBufferBands({ nhd: data.nhd, trout: failed.trout ? null : data.trout, district: failed.district ? null : data.district });
+    // Widest first, so a narrower tier laid over a wider one stays legible instead of being buried by it.
+    list.sort((a, b) => b.tier.eachSideFt - a.tier.eachSideFt);
+    for (const { ring, tier } of list) {
+      bands.addLayer(L.polygon(ring.map(([lng, lat]) => [lat, lng]), {
+        pane: CORRIDOR_PANE,
+        stroke: true, color: tier.color, weight: 0.5, opacity: Math.min(1, opacity + 0.15),
+        fill: true, fillColor: tier.color, fillOpacity: 0.18 * opacity,
+        interactive: false,
+      }));
+    }
+    const lost = [failed.trout && "trout streams", failed.district && "the Metro North Georgia District outline"].filter(Boolean);
+    if (lost.length) {
+      report("failed", `${cfg.label}: couldn't load ${lost.join(" and ")} — the bands shown are the 25 ft state minimum only, NOT the full rule (screening only).`);
+    } else if (!list.length) {
+      report("empty", "No state-waters streams in this view.");
+    } else if (data.nhd.truncated) {
+      report("loaded", `Partial — too many streams in this view to buffer them all; zoom in. Showing: ${bufferLegend(list).join(" · ")}.`);
+    } else {
+      report("loaded", bufferLegend(list).join(" · "));
+    }
+  };
+
+  const refresh = async () => {
+    if (!map) return;
+    const zoom = map.getZoom();
+    const b = map.getBounds();
+    const bbox = { w: b.getWest(), s: b.getSouth(), e: b.getEast(), n: b.getNorth() };
+    const areaDeg = Math.abs((bbox.e - bbox.w) * (bbox.n - bbox.s));
+    if (decideVectorOrImage(nhd, { zoom, bboxAreaDeg: areaDeg }) === "image") {
+      seq++; bands.clearLayers(); data.nhd = null;
+      report("empty", "Zoom in to about street level to see the stream buffers.");
+      return;
+    }
+    const mySeq = ++seq;
+    const pull = (name, source) => fetchCached(source, bbox, {
+      cache, zoom,
+      onFresh: (fr) => { if (mySeq === seq && map && fr && fr.updated) { data[name] = fr.data; failed[name] = false; paint(); } },
+    }).then((r) => { if (mySeq === seq) { data[name] = r.data; failed[name] = false; } })
+      .catch((e) => { if (mySeq === seq) { failed[name] = true; reportClientEvent("ga-stream-buffer-source-failed", String((e && e.message) || e), { source: name }); } });
+    await Promise.all([pull("nhd", nhd), pull("trout", trout), pull("district", district)]);
+    if (mySeq !== seq || !map) return;
+    if (failed.nhd) {
+      bands.clearLayers();
+      report("failed", `${cfg.label}: couldn't load the USGS stream lines here — no buffers are shown (screening only).`);
+      return;
+    }
+    paint();
+  };
+
+  group.onAdd = function (m) {
+    map = m;
+    if (!m.getPane(CORRIDOR_PANE)) {
+      const p = m.createPane(CORRIDOR_PANE);
+      p.style.zIndex = 349; // just below the GIS overlay pane (350) → bands sit under the stream lines
+    }
+    L.LayerGroup.prototype.onAdd.call(this, m);
+    m.on("moveend", refresh);
+    report("loading");
+    refresh();
+    return this;
+  };
+  group.onRemove = function (m) {
+    seq++;
+    m.off("moveend", refresh);
+    L.LayerGroup.prototype.onRemove.call(this, m);
+    map = null; data.nhd = data.trout = data.district = null;
+  };
+  group.setOpacity = (o) => { opacity = o; paint(); };
   group.getExportMode = () => "vector";
   return group;
 }
