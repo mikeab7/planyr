@@ -1,3 +1,13 @@
+### V1474944 — B2056784: no full-screen button on iPhone Safari; still present and working on desktop Chrome `Blocker: real-device` ✅ **PASSED 2026-10-04 — live-verified by Michael on his own devices** (build `0460de1` on desktop)
+
+Sandbox-proven: `test/fullscreenSupport.test.js`, `e2e/fullscreen-gate.spec.js` (API stubbed off at iPhone width; iPad width, standalone and desktop arms). The real-device confirmation is what is left.
+1. On the iPhone, open `planyr.io`; read `/version.json` in the same check. **Expect:** the header's right side shows the sync badge and account chip with NO four-corner button and no gap between them.
+2. Visit the map, Notes, Schedule and Review. **Expect:** no full-screen button anywhere.
+3. On desktop Chrome, same build. **Expect:** the button is present; clicking it enters full screen and the button remains to leave it.
+4. (If an iPad is to hand) **Expect:** the button is present.
+
+**Result (recorded 2026-10-04):** step 1–2 (iPhone Safari): full-screen button gone. Step 3 (desktop Chrome, build `0460de1`): header Full screen button present, `document.fullscreenEnabled` true. Step 4 (iPad) not reported — not claimed. Not separately reported: clicking the desktop button into/out of full screen, and the map/Notes/Schedule/Review modules on the phone; both covered by `e2e/fullscreen-gate.spec.js` and the shared header, not by this pass.
+
 ### V1369888 — B1933584: turning FEMA off truly stops it painting on the Map view — no further paint, no further network request, after a project visit and a return ✅ **PASSED 2026-09-29 — live-verified by Cowork on Michael's signed-in Chrome against real production `planyr.io`, build `42c38c6` (contains merge commit `d3bc142`); `Blocker: live-GIS` closed by this pass**
 
 **Why this needs a real pass even though the mechanism is proven sandbox-side.** The whole defect is that a role-split GIS layer's two real Leaflet sub-layers survive MapFinder's own teardown when the Map view is hidden, and repaint on the next zoom/pan — a **GIS endpoint behavior** + **zoom-/data-density-dependent rendering** defect, both mandatory `LIVE-VERIFY` classes per `CLAUDE.md`, regardless of how solid the sandbox proof is. `hazards.fema.gov` is unreachable from this sandbox (confirmed repo-wide, e.g. `ui-audit/verify-flood-tiles.mjs`'s own header), so the live network half — does the REAL FEMA export endpoint actually get a further, unsolicited request after toggle-off — can only be proven on `planyr.io`.

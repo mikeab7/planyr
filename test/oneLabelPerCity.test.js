@@ -29,7 +29,7 @@ describe("the shown-names registry (placeNamesGate leaf)", () => {
 
 describe("the seam is wired at both ends (source guards)", () => {
   it("the canvas layer PUBLISHES what it draws, and hands its names back when destroyed", () => {
-    const s = src("placeNamesLayer.js");
+    const s = fs.readFileSync(new URL("../src/shared/basemaps/placeNamesLayer.js", import.meta.url), "utf8");
     expect(s).toMatch(/setPlaceNamesShown\(map, shownNow\.filter/);
     expect(s).toMatch(/setPlaceNamesShown\(map, \[\]\)/);
   });

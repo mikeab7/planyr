@@ -166,6 +166,27 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1443696 — B2018608: vector roads + labels basemap (Food + Site Plan map) `Blocker: live-GIS`
+
+Sandbox-proven at dpr 2 against a SYNTHETIC OpenMapTiles fixture (`ui-audit/verify-vector-basemap.mjs`, 28/28); the sandbox cannot reach `tiles.openfreemap.org`, so the **real source, its CORS headers and the real map look are unverified**. **Steps** (planyr.io, read the served chunk hash in the same observation; `node ui-audit/verify-vector-basemap.mjs https://planyr.io --live` runs the mechanical half):
+1. Open `/food` fresh (clear `planyr:food:basemap`) at Houston metro zoom, and the Site tab's Map at the same zoom. **Expect:** /food opens on **Site Plan** and looks IDENTICAL to the Site map — satellite + Planyr's clean white city names, NO road lines. Zoom in past parcel zoom on both: clean thin roads + names appear on both at the same zoom; no "Crisp road labels unavailable" notice (if it shows, OpenFreeMap was blocked/CORS-refused — file that on B2018608).
+2. Tap **Hybrid** on /food at metro zoom, then neighbourhood zoom. **Expect:** freeways/major roads and place names at metro, no edge-to-edge bands; local streets only at neighbourhood zoom; road names follow the road line; no two labels overlap; no heavy black outlines; the aerial is slightly toned.
+3. Pan and zoom (wheel + buttons). **Expect:** labels stay glued to the aerial through the animation; Food pins sit above labels; no blank map after a search jump.
+4. Switch between Site Plan and Hybrid and reload. **Expect:** the choice persists; switching never blanks the map.
+5. Site tab → Map view, Layers → Road names slider (close zoom). **Expect:** the slider fades the roads; parcels / FEMA / draw tools still paint above; at metro zoom still no road lines.
+6. Open a plan, File → Download PDF. **Expect:** the aerial in the PDF is NOT darkened or desaturated.
+7. Look along tile joins at fractional zoom on a 2x display. **Expect:** no light hairlines.
+8. Desktop: the credit reads "…OpenFreeMap © OpenMapTiles data © OpenStreetMap", fully visible beside (not under) the ? button; the "Loading imagery…" pill never overlaps the zoom control.
+- **Stopping rule:** closes on a dated pass of 1–8, or a failed step filed as a recurrence on B2018608.
+### V1469824 — B2051664: Food search lists the places nearest the visible map first (phone, signed in) `Blocker: auth`
+
+Sandbox-proven on fixture rows: `test/foodSearchProximity.test.js`, plus a real-Chromium run of the built app with the search RPC stubbed (Katy first at a Houston-area view; Dallas first after flying there). Pending: the owner's signed-in phone against his real snapshot (read-only — do not log or edit anything). **Steps** (read the served chunk hash in the same observation):
+1. Phone, Food map, zoomed on a neighbourhood. Search a chain name with branches in several cities (e.g. "Torchy's"). **Expect:** branches in the visible area first, nearest the map centre first, then farther ones.
+2. Pan to a different city, re-type the same query. **Expect:** the order re-anchors to the new view.
+3. Search a restaurant you have saved that is far off screen, by exact name. **Expect:** it is at or near the top and tapping it jumps the map there.
+4. Zoom out to the whole state and search. **Expect:** results still appear, ordered by distance from the centre.
+5. Search a name with no match nearby. **Expect:** far matches still listed — never an empty list because the match is off screen.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2051664.
 ### V1476304 — B2058144: Review tabs open, switch, restore, and follow the signed-in account between desktop and phone `Blocker: auth`
 
 Sandbox-proven (real Chromium, built app): `ui-audit/verify-review-tabs.mjs` (logged out, 37/37), `ui-audit/verify-review-tabs-sync.mjs` (two contexts signed in as a made-up user against a hermetic fake account, 20/20), `test/reviewTabs.test.js`. Pending: the real account and real devices (the sandbox's fake account cannot show real Supabase row-level security, real timing, or a real phone). **Steps** (planyr.io, desktop + iPhone, signed in; read the served chunk hash in the same observation):
@@ -178,13 +199,6 @@ Sandbox-proven (real Chromium, built app): `ui-audit/verify-review-tabs.mjs` (lo
 7. Phone in airplane mode: change a page, then reconnect. **Expect:** the desktop picks up the new page at its next focus.
 8. Close every tab on the desktop, reload. **Expect:** blank Review (no tabs, no index).
 - **Stopping rule:** closes on a dated pass of 1–8, or a failed step filed as a recurrence on B2058144.
-### V1474944 — B2056784: no full-screen button on iPhone Safari; still present and working on desktop Chrome `Blocker: real-device (iPhone Safari has no Fullscreen API for page elements — cannot be produced headless)`
-
-Sandbox-proven: `test/fullscreenSupport.test.js`, `e2e/fullscreen-gate.spec.js` (API stubbed off at iPhone width; iPad width, standalone and desktop arms). The real-device confirmation is what is left.
-1. On the iPhone, open `planyr.io`; read `/version.json` in the same check. **Expect:** the header's right side shows the sync badge and account chip with NO four-corner button and no gap between them.
-2. Visit the map, Notes, Schedule and Review. **Expect:** no full-screen button anywhere.
-3. On desktop Chrome, same build. **Expect:** the button is present; clicking it enters full screen and the button remains to leave it.
-4. (If an iPad is to hand) **Expect:** the button is present.
 ### V1474400 — B2049312: team invite + Resend emails arrive in the inbox `Blocker: real-data (needs RESEND_API_KEY in Cloudflare + team_invite_email.sql run — both Michael's)`
 
 Sandbox-proven: `test/teamInviteEmail.test.js` (fake Supabase + fake Resend), `e2e/team-settings-layout.spec.js` (mocked send incl. throttle). Pending: a real send. **Steps** (planyr.io, signed in as a team admin; check the served chunk hash in the same observation). Use only the throwaway `mikeabmab+planyrtest@live.com`:
@@ -1912,6 +1926,27 @@ Sandbox done: unit test proves token in both themes (15.20:1 / 10.57:1), no lite
 1. Dark theme: open a project row's menu → checked status row shows visible label on a tinted band. Expected: readable.
 2. Same menu, shared team row → readable tinted band.
 3. Light theme: both look as before (cream band).
+
+### V1416128 — B1991040: a project rename reaches schedule + review labels (Dashboard, Reports, Review lists) `Blocker: auth`
+
+Sandbox-proven: `test/nameCopiesGuard.test.js` (live-name rule, the production row verbatim in both title shapes, typed-title-untouched, column guard) and `e2e/names-matrix.spec.js` (the Schedule tab receives the LIVE name and again after a rename). **Needs a signed-in pass on real data** (the Dashboard reads the account's schedules/reviews from the cloud).
+**Steps:**
+1. Run the two SQL files (`schedules_linked_site_name_backfill_20260930.sql`, then `doc_reviews_project_name_backfill_20260930.sql`) — **step 1 (preview) of each first**; expect schedule id 6 and review rvmqzs201bfcc2d listed, the review's title kind "auto (name-first)", any hand-typed title "typed — left alone". Then run step 2.
+2. On planyr.io open the Dashboard. **Expect:** Schedule Health shows "Papadopoulos / Master Schedule", matching Jump Back In; "Last document" shows the new name.
+3. Rename that project again to a throwaway name from the Map row menu, return to the Dashboard **without** running SQL. **Expect:** both cards show the throwaway name (read-time resolution), then rename it back.
+4. Open Review → Saved reviews. **Expect:** that review's row reads "… Papadopoulos …"; a review with a typed title keeps it.
+5. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 2–4, or a failed step is filed as a recurrence on B1991040.
+
+### V1416129 — B1991041: renaming a brand-new project works signed in `Blocker: auth`
+
+Sandbox-proven logged-out (both entry points, reload; red on main). **The signed-in leg** exercises `ensureProjectRow` → push → `rename_site_group`.
+**Steps:**
+1. Signed in on planyr.io: Map → project switcher → "+ New project" (don't draw). **Expect:** opens as "Untitled site".
+2. Switcher → row menu → Rename → a throwaway name → Enter. **Expect:** no red "didn't match any project" toast; the name shows in the breadcrumb, the plan header and the Compose exhibit.
+3. Reload, then navigate to the Map. **Expect:** the project is still listed under the new name (it no longer vanishes).
+4. Delete the throwaway project. Read the served chunk hash in the same observation.
+- **Stopping rule:** closes on a dated pass of 1–3, or a failure is filed as a recurrence on B1991041.
 
 ## THE CHECKLIST — run this on Michael's signed-in Chrome, on `planyr.io`
 

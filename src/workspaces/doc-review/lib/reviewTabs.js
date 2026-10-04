@@ -63,8 +63,14 @@ export function moveTab(tabs, id, beforeId) {
   return out.every((t, i) => t === tabs[i]) ? tabs : out;
 }
 
-/** The hover title: the full name plus the project it is filed under. */
-export const tabTitle = (t) => (t.project ? `${t.name} — ${t.project}` : t.name);
+/** The hover title: the full name plus the project it is filed under. B1991040 — the project half is
+ *  resolved LIVE by `projectId` (`nameOf`, the shared names store); the `project` text a tab persists is
+ *  only the fallback for a tab with no resolvable id, so a rename shows on an already-open tab. */
+export const tabTitle = (t, nameOf) => {
+  const live = t.projectId && typeof nameOf === "function" ? nameOf(t.projectId) : null;
+  const project = live || t.project;
+  return project ? `${t.name} — ${project}` : t.name;
+};
 
 /* ---------- the per-device store ---------- */
 
