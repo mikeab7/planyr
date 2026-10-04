@@ -5210,6 +5210,16 @@ Both are walled-off compute (Cloud Run); keys server-side only. Until deployed, 
 
 ---
 
+### B2020064 — Map view: the + / − zoom buttons sat under the Sites panel; a press there opened a site `[site-planner / map-finder]` (bug) #ui #site-planner  *(Owner NEW-1 2026-10-04, planyr.io build 17f94b7, desktop ~1600 wide.)*
+
+`[x]` **Report:** the Leaflet zoom control (bottom-left) was inside the footprint of the left Sites rail, so it could not be clicked and a "zoom out" press opened the Silvestri project.
+`[x]` **Cause:** the rail (z-index above Leaflet's control tier) was capped at "map height − 24" with no knowledge of the zoom stack, so a long site list grew down over it. B427408 moved the control into the bottom-left corner on the assumption the rail only lives at the top.
+`[x]` **Fix:** the rail's height cap now stops above the zoom + locate stack — `sitesRailMaxHeight(topPx)` in `lib/mapChromeStack.js` (map height − its top offset − the existing `ZOOM_CONTROL_CLEARANCE_PX`, floored so the header + a few rows always remain; the list scrolls inside). Same placement system as the rest of the map chrome — no new corner, no z-index raise (the file's own rule). Same cap on phone (open rail) and desktop; collapsed rail never reaches the corner.
+`[x]` **Sandbox proof:** `ui-audit/verify-map-zoom-reachable.mjs` — real `elementFromPoint` hit test at the centre of +, −, and locate, 40 seeded sites, desktop / short desktop / phone × rail open / collapsed; known-good arm requires the open rail to reach its cap or the run is VOID. RED on pre-fix code (short desktop: "+" covered by the rail; rail bottom 502 vs zoom top 484), ALL PASS after. `test/mapChromeStack.test.js` pins the cap arithmetic.
+`[x]` **Constraint check (DoD #4):** no `## Owner product constraints` entry touched.
+- Verify: live — **V1445152** (real signed-in account with his long site list).
+- Stopping rule: closes on a dated pass of V1445152, or Michael saying the buttons now click on his window; a recurrence re-opens THIS item.
+
 ## 🎨 UI audit pass — 2026-06-16
 
 Full UI workstream from `UI_AUDIT.md` (re-authored this session: the predecessor 58-item
@@ -5296,6 +5306,23 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 `[x]` **Constraint check (Definition of Done #4):** nothing here touches an `## Owner product constraints` entry (no task-owner prompt, no Texas fallback, project creation untouched, the cloud-write banner untouched).
 - Verify: live — **V1471312** (signed-in, real iPhone, real data: the literal "map doesn't move" report did not reproduce headless, and Mobile Safari's keyboard/toolbar cannot be emulated).
 - Stopping rule: closes on a dated PASS of V1471312, or Michael saying all three are gone on his phone; a recurrence re-opens THIS item with the device and the exact restaurant noted.
+### B2020272 — My-location marker is now an Apple-style blue dot with accuracy circle and heading cone (was an orange site-pin lookalike) `[map/shared]` (feature) #site-planner #mobile #ui  *(Owner chat block NEW-1, 2026-10-04, iPhone Safari; design approved from four mockups — Apple style.)*
+
+`[x]` **Report:** the locate button dropped an ORANGE dot (Planyr's action color) that read like a site pin, not "you are here".
+`[x]` **Built:** `src/shared/map/locateControl.js` — one `addLocateControl(L, map, hooks)` used by every Leaflet map with a locate control. Blue core (`--locate-blue`, #1A73E8, same in both themes — it sits on imagery, not chrome) + white ring; accuracy circle is an `L.circle` (real ground metres, scales with zoom) hidden when it would hug the dot (`locateGeometry.js`) and still hidden above the existing 500 m honesty gate; a soft heading cone ONLY when a real heading exists (`locateHeading.js`: iOS `webkitCompassHeading`, `deviceorientationabsolute`/absolute alpha → 360−alpha, `coords.heading` only while moving; a relative alpha is ignored; none → no cone). iOS `DeviceOrientationEvent.requestPermission()` is requested from the locate tap; denied → silently no cone. Tracking via `watchPosition`; the marker is moved with `setLatLng` (never re-created) with a short glide. Own pane (z 645, `pointer-events:none`) so it sits above parcel outlines and site pins and never steals a tap.
+`[x]` **Maps found:** a repo-wide search for `geolocation`/`watchPosition`/`getCurrentPosition` finds exactly ONE locate control — MapFinder (the Site tab's browse map, which also carries the dashboard/comps browse views). No food map or other locate control exists in this app; a future map gets the identical control by calling the shared function. `locateMe.js` moved to `src/shared/map/` (old path re-exports).
+`[x]` **Tests:** `test/locateHeading.test.js` (heading: iOS vs alpha vs none vs coords-while-moving, north-crossing smoothing, accuracy geometry) · `ui-audit/verify-locate-marker.mjs` (mocked geolocation: blue/white-ring computed style, pane above overlays + click-through, circle radius matches 60 m in pixels at zoom 16 and 18 against an independently computed Web-Mercator expectation (4× across two zoom levels), hidden far out, no cone without heading, cone rotated by a stubbed absolute event (alpha 90 → 270) and by an iOS compass event, marker element survives a live position update) · `ui-audit/verify-locate-me.mjs` mocks extended to the watch call (29/30 → its stale-resolution arm now expects a settled FOLLOWING state with exactly one marker).
+`[x]` **Constraint check (DoD #4):** nothing here touches an `## Owner product constraints` entry.
+- Not verified here: tiles are unreachable in this sandbox so PR screenshots use a synthetic satellite-like and light backdrop behind the real marker; real tiles, the iOS compass prompt and the cone on a real phone are **V1445360**. Screen-rotation correction of the cone is not applied (portrait-first).
+- Verify: live — **V1445360** (real iPhone Safari).
+- Stopping rule: closes on a dated pass of V1445360, or Michael confirming the blue dot and cone on his iPhone; a recurrence re-opens THIS item.
+### B2020273 — Locate button: navigation-arrow icon with idle / following / panned-away states `[map/shared]` (feature) #site-planner #mobile #ui  *(Owner chat block NEW-2, 2026-10-04.)*
+
+`[x]` **Built (same shared control as B2020272):** the crosshair is replaced by the Tabler `navigation` arrow. States from a pure machine (`locateButtonState.js`): idle = outline arrow in normal chrome color · locating = pulsing (old spin was meaningless on an arrow) · following = solid blue arrow · located (user dragged the map away) = outline blue arrow, tap re-centres · tap while following = tracking off, marker removed. Denied / unavailable / error → back to idle (or the dimmed blocked look) with the existing anchored notice; the first-fix 10 s timeout and 12 s watchdog are kept, a 2nd tap while finding still cancels. While tracking, a transient position-unavailable or timeout (a tunnel, a still phone) does NOT end the watch; only revoked permission does.
+`[x]` **Tests:** state machine in `test/locateHeading.test.js`; button-state flow (idle → following → panned → re-centre → stop, denied → no stuck spinner) in `ui-audit/verify-locate-marker.mjs`.
+`[x]` **Pre-existing, not touched:** `ui-audit/verify-locate-notice-anchor.mjs` fails 2 checks (notice 7 px right of the button) identically on unmodified main.
+- Verify: live — **V1445360** (shared with B2020272).
+- Stopping rule: as B2020272.
 ### B2061792 — A deed that doesn't close now WARNS on every surface by ONE rule (reader, queue row, plot toast, holes, Plot-all summary) — Tract 1 no longer reads "closes (misclosure 31.4′)" `[site-planner / deed]` (bug) #site-planner  *(Owner NEW-1, 2026-10-04. Amends B2019264 — recurrence-style follow-on: that item drew the gap; this one makes the words agree with the drawing.)*
 
 `[x]` **Report:** only the Properties panel said a deed misses; the reader summary said "closes (misclosure 31.4′)" for Grand Port Tract 1 (the 50 ft `pathCloses` screen), the queue row said "closes", and the plot toast stayed neutral unless the miss exceeded 1 ft.

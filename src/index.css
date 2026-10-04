@@ -794,6 +794,7 @@ input[type="range"] { height: 18px; }
 
 /* spinner — e.g. the "Preparing PDF…" indicator */
 @keyframes spin { to { transform: rotate(360deg); } }
+@keyframes locate-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
 /* B860 (chat NEW-1) — verdict-changed flash on the Yield → Stormwater readout: a soft
    accent highlight that fades out, so a number that recomputed live (detention, mitigation,
@@ -989,6 +990,31 @@ html.click-ack-busy, html.click-ack-busy * { cursor: progress !important; }
 @media (prefers-reduced-motion: reduce) {
   .click-ack__ring { animation: none; }
 }
+
+/* NEW-1/NEW-2 — shared "my location" control (src/shared/map/locateControl.js). The blue is the
+ * same in both themes on purpose: the dot sits on imagery, not on chrome, and must read as "you
+ * are here" (Apple/Google blue), never as Planyr's orange action color. */
+:root { --locate-blue: #1A73E8; }
+.locate-marker { background: none; border: 0; pointer-events: none; }
+.locate-marker .locate-dot {
+  position: absolute; left: 50%; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px;
+  border-radius: 50%; background: var(--locate-blue); border: 3px solid #fff; box-sizing: border-box;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.18), 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+.locate-marker .locate-cone {
+  position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+  background: conic-gradient(from -30deg at 50% 50%, var(--locate-blue) 0deg, var(--locate-blue) 60deg, transparent 60deg);
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, transparent 9px, #000 12px, transparent 32px);
+  mask-image: radial-gradient(circle at 50% 50%, transparent 9px, #000 12px, transparent 32px);
+  opacity: 0.75;
+}
+.locate-marker.locate-glide { transition: transform 0.5s linear; }
+path.locate-accuracy { stroke: var(--locate-blue); stroke-opacity: 0.55; fill: var(--locate-blue); fill-opacity: 0.14; pointer-events: none; }
+.leaflet-control-locate.leaflet-bar a { display: flex; align-items: center; justify-content: center; color: var(--chrome-text); }
+.leaflet-control-locate.leaflet-bar a svg { fill: none; }
+.leaflet-control-locate.leaflet-bar a[data-locate-state="following"] { color: var(--locate-blue); }
+.leaflet-control-locate.leaflet-bar a[data-locate-state="following"] svg { fill: currentColor; }
+.leaflet-control-locate.leaflet-bar a[data-locate-state="located"] { color: var(--locate-blue); }
 
 
 /* ───────── NEW-1 (B2018608) — shared aerial basemap treatment ─────────

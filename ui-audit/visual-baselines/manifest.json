@@ -6,24 +6,24 @@
   "surfaces": {
     "map-landing": {
       "light": {
-        "approvedAt": "2026-09-30",
-        "approvedCommit": "66abc024",
-        "note": "Scale bar label no longer ghosted: vendor text-shadow cleared (B1875168)"
+        "approvedAt": "2026-10-04",
+        "approvedCommit": "c83f7718",
+        "note": "locate button: crosshair replaced by navigation arrow (B2020273)"
       },
       "dark": {
-        "approvedAt": "2026-09-30",
-        "approvedCommit": "66abc024",
-        "note": "Scale bar label no longer ghosted: vendor text-shadow cleared (B1875168)"
+        "approvedAt": "2026-10-04",
+        "approvedCommit": "c83f7718",
+        "note": "locate button: crosshair replaced by navigation arrow (B2020273)"
       },
       "light--phone": {
-        "approvedAt": "2026-09-30",
-        "approvedCommit": "66abc024",
-        "note": "Scale bar label no longer ghosted: vendor text-shadow cleared (B1875168)"
+        "approvedAt": "2026-10-04",
+        "approvedCommit": "c83f7718",
+        "note": "locate button: crosshair replaced by navigation arrow (B2020273)"
       },
       "dark--phone": {
-        "approvedAt": "2026-09-30",
-        "approvedCommit": "66abc024",
-        "note": "Scale bar label no longer ghosted: vendor text-shadow cleared (B1875168)"
+        "approvedAt": "2026-10-04",
+        "approvedCommit": "c83f7718",
+        "note": "locate button: crosshair replaced by navigation arrow (B2020273)"
       }
     },
     "site-planner-header": {
