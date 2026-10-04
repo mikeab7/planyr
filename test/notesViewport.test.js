@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   VIEW_ZOOM_DEFAULT, VIEW_ZOOM_MAX, VIEW_ZOOM_MIN, VIEW_ZOOM_STEPS,
-  clampViewZoom, fitView, frameView, normalizeView, panBy, parseView, serializeView,
+  caretRevealDelta, clampViewZoom, fitView, frameView, visibleBand, normalizeView, panBy, parseView, serializeView,
   stepZoom, toViewport, toWorkspace, viewKey, wheelIntent, wheelNativeAxis, zoomAbout, zoomForWheel, zoomKeyIntent, zoomLabel,
 } from "../src/workspaces/notes/lib/notesViewport.js";
 
@@ -336,5 +336,35 @@ describe("wheelIntent — what a wheel event means over the canvas", () => {
   it("wheel zoom is smooth within the clamp and lands on it at both ends, like Ctrl+wheel", () => {
     expect(zoomForWheel(VIEW_ZOOM_MAX, wheelIntent({ deltaY: -100 }).deltaY)).toBe(VIEW_ZOOM_MAX);
     expect(zoomForWheel(VIEW_ZOOM_MIN, wheelIntent({ deltaY: 100 }).deltaY)).toBe(VIEW_ZOOM_MIN);
+  });
+});
+
+describe("NEW-6a — the caret band is the mat INTERSECTED with the visual viewport", () => {
+  const mat = { left: 0, top: 146, right: 390, bottom: 844 };
+  it("without a visual viewport the band is the mat; with the keyboard up it ends where the keyboard starts", () => {
+    expect(visibleBand(mat, null)).toEqual(mat);
+    const vv = { offsetLeft: 0, offsetTop: 0, width: 390, height: 500 };      // keyboard covers 500…844
+    expect(visibleBand(mat, vv)).toEqual({ left: 0, top: 146, right: 390, bottom: 500 });
+  });
+  it("a caret behind the keyboard — which the OLD mat-only test called visible — now needs a pan", () => {
+    const caret = { top: 700, bottom: 716, left: 100 };
+    expect(caretRevealDelta({ caret, band: visibleBand(mat, null) }).dy).toBe(0);                 // old answer: fine
+    const dy = caretRevealDelta({ caret, band: visibleBand(mat, { offsetLeft: 0, offsetTop: 0, width: 390, height: 500 }) }).dy;
+    expect(dy).toBeGreaterThan(200);                                                               // new answer: pan up
+    // …and after that pan the caret sits above the keyboard with padding to spare
+    expect(716 - dy).toBeLessThanOrEqual(500 - 48 + 0.001);
+  });
+  it("moves the minimum, only when needed, and never when the caret is comfortably inside", () => {
+    const band = { left: 0, top: 100, right: 390, bottom: 500 };
+    expect(caretRevealDelta({ caret: { top: 300, bottom: 316, left: 100 }, band })).toEqual({ dx: 0, dy: 0 });
+    expect(caretRevealDelta({ caret: { top: 90, bottom: 106, left: 100 }, band }).dy).toBeLessThan(0);
+  });
+  it("a keyboard-up proxy (a few hundred px) cannot make it oscillate: padding shrinks with the band", () => {
+    const band = { left: 0, top: 146, right: 390, bottom: 330 };            // 184 tall
+    const caret = { top: 200, bottom: 216, left: 100 };
+    const { dy } = caretRevealDelta({ caret, band });
+    const after = { top: caret.top - dy, bottom: caret.bottom - dy };
+    expect(caretRevealDelta({ caret: { ...caret, ...after }, band })).toEqual({ dx: 0, dy: 0 });
+    expect(caretRevealDelta({ caret: null, band })).toEqual({ dx: 0, dy: 0 });
   });
 });

@@ -137,12 +137,20 @@ function Icon({ children, size = 15 }) {
 const TIP_GAP = 8;
 const TIP_HEIGHT_GUESS = 40;
 
+function canHover() {
+  try { return !(typeof window !== "undefined" && window.matchMedia?.("(hover: none)").matches); } catch { return true; }
+}
+
 function useHoverTooltip() {
   const ref = useRef(null);
   const [tip, setTip] = useState(null);
   const show = () => {
     const el = ref.current;
     if (!el) return;
+    /* ⛔ NEW-6e — A TOUCH SCREEN HAS NO HOVER. iOS fires a compat `mouseenter` on a tap and nothing
+     * ever fires `mouseleave`, so the tooltip stuck on screen after every tap. `(hover: none)` is the
+     * browser's own statement that there is no hovering pointer; a laptop with a mouse is untouched. */
+    if (!canHover()) return;
     const r = el.getBoundingClientRect();
     const above = r.bottom + TIP_GAP + TIP_HEIGHT_GUESS > window.innerHeight;
     setTip({
@@ -1119,6 +1127,10 @@ export default function NoteToolbar({
      just the one boolean it needs) and the title's own default size when nothing is set yet. */
   titleActive = false, titleDefaultSize = null,
   arrowMode = false, onToggleArrow,
+  /* ⛔ NEW-6b/c — the page actions (Find and replace, Page setup, Version history, Export, Print) that
+     live in the module-tab row on desktop. On a phone that row steps aside while typing, so the same
+     actions are offered in the "More" panel. `[{ id, label, run, active }]`; `undefined` elsewhere. */
+  pageActions,
 }) {
   const fileRef = useRef(null);
   const rootRef = useRef(null);
@@ -1144,6 +1156,40 @@ export default function NoteToolbar({
     ro.observe(el);
     return () => ro.disconnect();
   }, [editor]);
+
+  /* NEW-6b — the phone "More" panel: open/closed, and where it hangs (just under the bar, never taller
+   * than the VISIBLE viewport — the keyboard covers the layout viewport's lower part on iOS). */
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [moreBox, setMoreBox] = useState({ top: 0, max: 360 });
+  useLayoutEffect(() => {
+    if (!moreOpen) return undefined;
+    const measure = () => {
+      const el = rootRef.current;
+      if (!el) return;
+      const top = el.getBoundingClientRect().bottom;
+      const vv = window.visualViewport;
+      const bottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
+      setMoreBox({ top, max: Math.max(160, bottom - top - 8) });
+    };
+    measure();
+    const vv = window.visualViewport;
+    window.addEventListener("resize", measure);
+    vv?.addEventListener("resize", measure);
+    vv?.addEventListener("scroll", measure);
+    const onDown = (e) => { if (rootRef.current && !rootRef.current.contains(e.target)) setMoreOpen(false); };
+    const onKey = (e) => { if (e.key === "Escape") setMoreOpen(false); };
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("resize", measure);
+      vv?.removeEventListener("resize", measure);
+      vv?.removeEventListener("scroll", measure);
+      document.removeEventListener("pointerdown", onDown, true);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [moreOpen]);
+  const moreTop = moreBox.top;
+  const moreMaxPx = moreBox.max;
 
   /* ⛔ WHAT AN UNSTYLED RUN IS ACTUALLY RENDERED IN. "Default" is not a font, and a run with no
    * font mark is drawn in the note's own typeface, which only the BROWSER knows — read off the
@@ -1381,11 +1427,11 @@ export default function NoteToolbar({
         onClick={onBack}
         aria-label="Back to the notes list"
         style={{
-          flex: "0 0 auto", minWidth: 44, minHeight: 44, display: "inline-flex", alignItems: "center", gap: 4,
+          flex: "0 0 auto", minWidth: 32, minHeight: 44, display: "inline-flex", alignItems: "center", gap: 4,
           border: "none", background: "transparent", color: "var(--accent-notes-text)",
-          font: "inherit", fontSize: 14, fontWeight: 650, cursor: "pointer", padding: "0 10px 0 4px",
+          font: "inherit", fontSize: 22, fontWeight: 650, cursor: "pointer", padding: "0 6px 0 2px", lineHeight: 1,
         }}
-      >‹ Notes</button>
+      >‹<span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>Notes</span></button>
       <Sep />
     </span>
   ) : null;
@@ -1404,30 +1450,21 @@ export default function NoteToolbar({
     </>
   ) : null;
 
-  return (
-    <div
-      ref={rootRef}
-      style={barStyle}
-      data-testid="note-toolbar"
-      data-narrow={narrow ? "1" : "0"}
-      data-compact={compact ? "1" : "0"}
-      role="toolbar"
-      aria-label="Formatting"
-      /* ⛔ NEW-6 — see this file's own top-of-file note. Capture, so it runs before any
-         individual button's own `stop` (mousedown preventDefault). */
-      onMouseDownCapture={() => onBeforeAction?.()}
-    >
-      {backControl}
-
+  /* ⛔ NEW-6b — THE BAR'S CONTROLS ARE NAMED PIECES, composed two ways: the unchanged DESKTOP row (all of
+   * them, in the original order) and the PHONE row (the essentials) with everything else in the "More"
+   * sheet. One implementation of every control — never a second copy for the phone. */
+  const undoRedo = (
+    <>
       <TBButton title="Undo" testid="nt-undo" big={narrow} disabled={!editor.can().undo()} onClick={() => chain().undo().run()}>
         <Icon><path d="M3 7h6.5a3 3 0 0 1 0 6H6" /><path d="M5.5 4.5L3 7l2.5 2.5" /></Icon>
       </TBButton>
       <TBButton title="Redo" testid="nt-redo" big={narrow} disabled={!editor.can().redo()} onClick={() => chain().redo().run()}>
         <Icon><path d="M13 7H6.5a3 3 0 0 0 0 6H10" /><path d="M10.5 4.5L13 7l-2.5 2.5" /></Icon>
       </TBButton>
-
-      <Sep />
-
+    </>
+  );
+  const styleGroup = (
+    <>
       <FormatMenu title="Paragraph style" testid="nt-block" big={narrow}
         value={blockDisplay} mixed={blockMixed}
         iconTrigger={<PilcrowIcon />}
@@ -1443,9 +1480,10 @@ export default function NoteToolbar({
       <SizeMenu testid="nt-size" big={narrow}
         value={currentSizeNum} mixed={sizeMixed} displayLabel={sizeLabel}
         onPick={pickSize} />
-
-      <Sep />
-
+    </>
+  );
+  const bIU = (
+    <>
       <TBButton title="Bold" testid="nt-bold" big={narrow} disabled={titleActive} pressed={boldPressed} onClick={() => chain().toggleBold().run()}>
         <span style={{ fontWeight: 800, fontSize: 13 }}>B</span>
       </TBButton>
@@ -1455,6 +1493,10 @@ export default function NoteToolbar({
       <TBButton title="Underline" testid="nt-underline" big={narrow} disabled={titleActive} pressed={underlinePressed} onClick={() => chain().toggleUnderline().run()}>
         <span style={{ textDecoration: "underline", fontSize: 13 }}>U</span>
       </TBButton>
+    </>
+  );
+  const strikeSupSub = (
+    <>
       <TBButton title="Strikethrough" testid="nt-strike" big={narrow} disabled={titleActive} pressed={strikePressed} onClick={() => chain().toggleStrike().run()}>
         <span style={{ textDecoration: "line-through", fontSize: 13 }}>S</span>
       </TBButton>
@@ -1466,16 +1508,24 @@ export default function NoteToolbar({
         onClick={() => (titleActive ? setTitleStyle({ sub: !titleStyle.sub, sup: false }) : chain().toggleSubscript().run())}>
         <SubIcon />
       </TBButton>
-
+    </>
+  );
+  const textColor = (
+    <>
       <ColorPopover title="Text colour" testid="nt-color" glyph="ink" big={narrow} mixed={colorMixed}
         swatch={currentColor || DEFAULT_TEXT_SWATCH} colors={TEXT_COLORS}
         onPick={(c) => (titleActive ? setTitleStyle({ color: c }) : (c ? chain().setColor(c).run() : chain().unsetColor().run()))} />
+    </>
+  );
+  const highlight = (
+    <>
       <ColorPopover title="Highlight colour" testid="nt-highlight" glyph="marker" big={narrow} mixed={hlMixed}
         swatch={currentHl || DEFAULT_HIGHLIGHT_SWATCH} colors={HIGHLIGHT_COLORS}
         onPick={(c) => (titleActive ? setTitleStyle({ highlight: c }) : (c ? chain().setHighlight({ color: c }).run() : chain().unsetHighlight().run()))} />
-
-      <Sep />
-
+    </>
+  );
+  const align = (
+    <>
       {compact ? (
         disabledWrap(<AlignMenu value={alignDisplay ?? "left"} mixed={alignMixed} big={narrow}
           onPick={(id) => chain().setTextAlign(id).run()} />)
@@ -1490,23 +1540,25 @@ export default function NoteToolbar({
           ))}
         </>,
       )}
-
-      <Sep />
-
-      {disabledWrap(
-        <>
+    </>
+  );
+  const bulletOrdered = (
+    <>
           <TBButton title="Bulleted list" testid="nt-bullet" big={narrow} pressed={listPressed("bulletList")} onClick={() => chain().toggleBulletList().run()}><BulletIcon /></TBButton>
           <TBButton title="Numbered list" testid="nt-ordered" big={narrow} pressed={listPressed("orderedList")} onClick={() => chain().toggleOrderedList().run()}><OrderedIcon /></TBButton>
+    </>
+  );
+  const listExtras = (
+    <>
           <TBButton title="Checklist" testid="nt-task" big={narrow} pressed={listPressed("taskList")} onClick={() => chain().toggleTaskList().run()}><TaskIcon /></TBButton>
           <TBButton title="Decrease indent" testid="nt-outdent" big={narrow} onClick={outdent}><IndentIcon out /></TBButton>
           <TBButton title="Increase indent" testid="nt-indent" big={narrow} onClick={indent}><IndentIcon /></TBButton>
           <SpacingPopover big={narrow} lineHeight={spacingResolved} spaceBefore={spaceBeforeCaret} spaceAfter={spaceAfterCaret}
             onPick={pickSpacing} onApplyWholePage={applySpacingWholePage} onReset={resetSpacing} />
-        </>,
-      )}
-
-      <Sep />
-
+    </>
+  );
+  const insertInline = (
+    <>
       {!compact && !titleActive && (
         <>
           <LinkControl editor={editor} big={narrow} />
@@ -1517,15 +1569,26 @@ export default function NoteToolbar({
           </TBButton>
         </>
       )}
+    </>
+  );
+  const insertMenu = (
+    <>
       {!titleActive && (
         <InsertMenu editor={editor} big={narrow} compact={compact} fileRef={fileRef} onAttach={onAttach}
           onInsertTable={insertTableSmart} />
       )}
+    </>
+  );
+  const arrow = (
+    <>
       {disabledWrap(
         <TBButton title="Connect two boxes with an arrow — click this, then click the box it starts from, then the box it points to"
           testid="nt-arrow" active={arrowMode} big={narrow} onClick={onToggleArrow}><ArrowConnectIcon /></TBButton>,
       )}
-
+    </>
+  );
+  const fileInput = (
+    <>
       {/* The picker is the deliberate alternative to paste/drop, not a replacement — it is how
           a picture gets in on a device where dragging a file is awkward. */}
       <input
@@ -1537,7 +1600,10 @@ export default function NoteToolbar({
         onChange={pickImages}
         style={{ display: "none" }}
       />
-
+    </>
+  );
+  const tableGroup = (
+    <>
       {tableGroupControls && (
         <>
           <Sep />
@@ -1547,6 +1613,137 @@ export default function NoteToolbar({
           </span>
         </>
       )}
+    </>
+  );
+
+  /* ⛔ NEW-6b — PHONE: THE ESSENTIALS ON ONE NON-SCROLLING ROW, THE REST IN "MORE". Measured before:
+   * one 1290 px sideways-scrolling row, so at 390 px only ‹ Notes, undo, redo, the style/font chips and
+   * half the size box showed — Bold started at x=449 and the lists at x=944, with no scroll cue (iOS
+   * hides the scrollbar). CLAUDE.md's B849633 claimed a phone row of "Undo/Redo/Bold/Italic/Bullet/
+   * Numbered/Link"; NEW-9 (the compact fold) removed the phone-specific layout without replacing it,
+   * which is the regression. Essentials: undo · redo · B · I · U · bullet · numbered · text colour ·
+   * More. The "More" panel drops DOWN from the bar (never up from the bottom: the soft keyboard
+   * covers the bottom) and also carries the page actions that used to hide in the module-tab row. */
+  if (narrow) {
+    return (
+      <div
+        ref={rootRef}
+        style={{ ...barStyle, overflowX: "hidden", gap: 0, padding: "2px 4px" }}
+        data-testid="note-toolbar"
+        data-narrow="1"
+        data-compact={compact ? "1" : "0"}
+        role="toolbar"
+        aria-label="Formatting"
+        onMouseDownCapture={() => onBeforeAction?.()}
+      >
+        {backControl}
+        <style>{`
+          [data-testid="note-toolbar-essentials"] > span { flex: 1 1 0 !important; min-width: 0 !important; display: flex !important; }
+          [data-testid="note-toolbar-essentials"] > span[data-grow="2"] { flex-grow: 2 !important; }
+          [data-testid="note-toolbar-essentials"] button { flex: 1 1 0 !important; min-width: 0 !important; padding: 0 !important; }
+        `}</style>
+        <span data-testid="note-toolbar-essentials" style={{ display: "flex", alignItems: "center", flex: "1 1 0", minWidth: 0 }}>
+          {undoRedo}
+          {bIU}
+          <span data-grow="2" style={{ display: "inline-flex", alignItems: "center", gap: 2, opacity: titleActive ? 0.35 : 1, pointerEvents: titleActive ? "none" : "auto" }}>{bulletOrdered}</span>
+          {textColor}
+          <TBButton title="More formatting" testid="nt-more" big={narrow} active={moreOpen} onClick={() => setMoreOpen((o) => !o)}>
+            <Icon><circle cx="3.5" cy="8" r="1.1" fill="currentColor" /><circle cx="8" cy="8" r="1.1" fill="currentColor" /><circle cx="12.5" cy="8" r="1.1" fill="currentColor" /></Icon>
+          </TBButton>
+        </span>
+        {fileInput}
+        {moreOpen ? (
+          <div
+            data-testid="note-toolbar-more"
+            onMouseDown={stop}
+            style={{
+              position: "fixed", left: 0, right: 0, top: moreTop, zIndex: 60,
+              maxHeight: `calc(${moreMaxPx}px)`, overflowY: "auto",
+              background: "var(--surface-raised)", borderBottom: "1px solid var(--border-default)",
+              boxShadow: POPOVER_SHADOW, padding: "6px 8px 10px",
+              display: "flex", flexDirection: "column", gap: 6,
+            }}
+          >
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 2 }}>
+              {styleGroup}
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 2 }}>
+              {strikeSupSub}
+              {highlight}
+              {align}
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 2 }}>
+              {disabledWrap(listExtras)}
+              {insertMenu}
+              {arrow}
+            </div>
+            {inTable ? <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 2 }}>{tableGroup}</div> : null}
+            {pageActions && pageActions.length ? (
+              <div data-testid="note-toolbar-page-actions" style={{ display: "flex", flexWrap: "wrap", gap: 6, paddingTop: 6, borderTop: "1px solid var(--border-default)" }}>
+                {pageActions.map((a) => (
+                  <button key={a.id} type="button" data-testid={`nt-page-${a.id}`} onMouseDown={stop}
+                    onClick={() => { setMoreOpen(false); a.run(); }}
+                    style={{
+                      minHeight: 44, padding: "0 14px", borderRadius: RADIUS.control, cursor: "pointer", font: "inherit", fontSize: 13.5, fontWeight: 600,
+                      border: "1px solid var(--border-default)",
+                      background: a.active ? "var(--accent-notes)" : "transparent",
+                      color: a.active ? "var(--on-accent-notes)" : "var(--text-primary)",
+                    }}
+                  >{a.label}</button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+
+  return (
+    <div
+      ref={rootRef}
+      style={barStyle}
+      data-testid="note-toolbar"
+      data-narrow={narrow ? "1" : "0"}
+      data-compact={compact ? "1" : "0"}
+      role="toolbar"
+      aria-label="Formatting"
+      onMouseDownCapture={() => onBeforeAction?.()}
+    >
+      {backControl}
+
+      {undoRedo}
+
+      <Sep />
+
+      {styleGroup}
+
+      <Sep />
+
+      {bIU}
+      {strikeSupSub}
+
+      {textColor}
+      {highlight}
+
+      <Sep />
+
+      {align}
+
+      <Sep />
+
+      {disabledWrap(<>{bulletOrdered}{listExtras}</>)}
+
+      <Sep />
+
+      {insertInline}
+      {insertMenu}
+      {arrow}
+
+      {fileInput}
+
+      {tableGroup}
     </div>
   );
 }

@@ -1027,3 +1027,23 @@ path.locate-accuracy { stroke: var(--locate-blue); stroke-opacity: 0.55; fill: v
 .planyr-imagery-graded { filter: brightness(0.9) saturate(0.8); }
 /* Seam fix: the container colour behind aerial tiles (see --aerial-gap-bg). */
 .leaflet-container.planyr-aerial-bg { background: var(--aerial-gap-bg); }
+
+/* NEW-6c — while the Notes editor has focus on a PHONE, the module-tab row (row 2) steps aside so a
+ * screen with the soft keyboard up has room to write. `NoteEditor.jsx` sets/clears
+ * `data-notes-typing` on <html> (phone width only, on editor focus/blur/unmount); the page actions that
+ * live in that row (Find, Page setup, History, Export) are in the toolbar's "More" sheet meanwhile.
+ * The editor folds the mat's resulting top-edge move into its view so the page does not jump
+ * (VIEWPORT-STABLE). Row 1 — settings, account, sync — stays. */
+html[data-notes-typing="1"] [data-header-row2] { display: none !important; }
+/* …and the floating help button and the zoom pill leave the writing area while typing (NEW-6d). */
+html[data-notes-typing="1"] [data-testid="note-zoom-pill"],
+html[data-notes-typing="1"] [data-testid="help-report-fab"] { display: none !important; }
+
+/* NEW-6d — the header's controls are 28–30 px tall inside 40 px rows. On a coarse pointer each button
+ * gets an invisible hit area the full height of its row (never wider: neighbours are 4 px apart, so a
+ * wider halo would steal their edges). Visible size unchanged. */
+@media (pointer: coarse) {
+  [data-header-zone] button { position: relative; }
+  [data-header-zone] button::after { content: ""; position: absolute; left: 0; right: 0; top: -6px; bottom: -6px; }
+}
+
