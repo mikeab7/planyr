@@ -247,6 +247,7 @@ export default function Shell() {
   const [authOpen,  setAuthOpen]  = useState(false);
   const [recovery,  setRecovery]  = useState(false);
   const [authTab,   setAuthTab]   = useState("profile"); // which tab the account modal opens on
+  const [authEmail, setAuthEmail]  = useState("");        // invite-email deep link: ?auth=…&email=… prefills the form
   const [authMode,  setAuthMode]  = useState("signin");  // which AuthPanel tab (signin|signup) it opens on
   // The account pill/dropdown + "Cloud off" popover now live in AccountControl, which owns its
   // own anchor ref + open state per mounted header instance (B734) — Shell only drives the modal.
@@ -460,9 +461,10 @@ export default function Shell() {
   // param is stripped via replaceState so a reload doesn't reopen the panel forever.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    let want;
-    try { want = new URLSearchParams(window.location.search).get("auth"); } catch (_) { return; }
+    let want, wantEmail = "";
+    try { const q = new URLSearchParams(window.location.search); want = q.get("auth"); wantEmail = q.get("email") || ""; } catch (_) { return; }
     if (want !== "signin" && want !== "signup") return;
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(wantEmail)) setAuthEmail(wantEmail);
     setRecovery(false);
     setAuthMode(want);
     setAuthOpen(true);
@@ -473,6 +475,8 @@ export default function Shell() {
       // ugly in the address bar. This keeps "?app" exactly as the "Open Planyr"/"Sign in" links
       // wrote it.
       const search = window.location.search
+        .replace(/([?&])email=[^&]*/, (_, sep) => (sep === "?" ? "?" : ""))
+        .replace(/^\?&/, "?")
         .replace(/([?&])auth=[^&]*/, (_, sep) => (sep === "?" ? "?" : ""))
         .replace(/^\?&/, "?")
         .replace(/^[?&]$/, "")
@@ -911,6 +915,7 @@ export default function Shell() {
           profileApi={profileApi}
           initialTab={authTab}
           initialMode={authMode}
+          initialEmail={authEmail}
           onClose={() => { setAuthOpen(false); setRecovery(false); }}
         />
       )}

@@ -29,7 +29,7 @@ const freshState = () => ({
     { user_id: "u-3", role: "member", first_name: "Ana", last_name: "Ruiz", email: "ana@planyr.test" },
   ],
   invites: [{ id: "inv-1", email: "throwaway@planyr.test", role: "member", created_at: "2026-10-01T00:00:00Z", claimed_at: null }],
-  inviteWrites: 0, inviteDeletes: 0,
+  inviteWrites: 0, inviteDeletes: 0, sends: 0, lastSend: {},
 });
 
 async function mock(page, st) {
@@ -39,7 +39,17 @@ async function mock(page, st) {
   await page.route("**/*", async (route) => {
     const req = route.request();
     let u; try { u = new URL(req.url()); } catch (_) { return route.continue(); }
-    if (u.hostname === "localhost" || u.hostname === "127.0.0.1") return route.continue();
+    if (u.hostname === "localhost" || u.hostname === "127.0.0.1") {
+      // NEW-1: the invite-email Pages Function. Mirrors its contract incl. the 60 s server throttle.
+      if (u.pathname === "/api/team/invite-email") {
+        let b = {}; try { b = JSON.parse(req.postData() || "{}"); } catch (_) {}
+        const last = st.lastSend[b.email] || 0;
+        if (Date.now() - last < 60_000) return route.fulfill({ status: 429, contentType: "application/json", body: JSON.stringify({ ok: false, reason: "throttled", retryAfterSeconds: 30 }) });
+        st.lastSend[b.email] = Date.now(); st.sends++;
+        return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) });
+      }
+      return route.continue();
+    }
     if (u.hostname !== HOST) return route.abort();
     const json = (b, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(b) });
     const p = u.pathname, m = req.method();
@@ -212,8 +222,9 @@ test.describe("phone", () => {
     const before = st.inviteWrites;
     await inv.locator("[data-team-more]").click();
     await page.locator('[data-team-sheet] [data-team-menu-item="Resend invite"]').click();
-    await expect(dlg.getByText("Invite resent")).toBeVisible();
-    expect(st.inviteWrites - before).toBe(1);
+    await expect(dlg.getByText("Invite email sent again")).toBeVisible();
+    expect(st.sends).toBe(1);               // one send…
+    expect(st.inviteWrites - before).toBe(0); // …and no row written
     expect(st.invites).toHaveLength(1);
     await expect(dlg.locator('[data-team-row="invite"]')).toHaveCount(1);
 
@@ -257,8 +268,10 @@ test.describe("desktop", () => {
     await page.keyboard.press("Escape");
     // Inline Resend: one send, no new row.
     await inv.locator("[data-team-resend]").click();
-    await expect(dlg.getByText("Invite resent")).toBeVisible();
-    expect(st.inviteWrites).toBe(1);
+    await expect(dlg.getByText("Invite email sent again")).toBeVisible();
+    expect(st.sends).toBe(1);
+    expect(st.inviteWrites).toBe(0);
+    await expect(inv.locator("[data-team-resend]")).toBeDisabled(); // cooldown after a send
     expect(st.invites).toHaveLength(1);
     // Switch toggles.
     const sw = dlg.locator("[data-team-autoshare]");
@@ -274,25 +287,28 @@ test.describe("desktop, short window (520 tall)", () => {
   test("row menus are really open, header ⋯ inside the pane, invite email not cut", async ({ page }) => {
     test.setTimeout(90_000);
     const st = freshState();
-    st.invites = [{ id: "inv-1", email: "ryan.baumgartner@hillwood.com", role: "member", created_at: "2026-10-01T00:00:00Z", claimed_at: null }];
+    st.invites = [{ id: "inv-1", email: "ryan.baumgartner.throwaway@hillwood.com", role: "member", created_at: "2026-10-01T00:00:00Z", claimed_at: null }];
     await mock(page, st);
     const dlg = await openTeam(page, false);
-    // Header ⋯ sits fully inside the pane: its right edge is within the cards' right edge.
-    const cardR = (await box(dlg.locator('[data-team-section="admins"] > div').nth(1))).x + (await box(dlg.locator('[data-team-section="admins"] > div').nth(1))).width;
+    // Header ⋯ lines up with the row ⋯ buttons below it, and sits fully inside the pane.
     const hb = await box(dlg.locator("[data-team-menu]"));
-    expect(hb.x + hb.width).toBeLessThanOrEqual(cardR + 0.5);
-    expect(Math.abs((hb.x + hb.width) - cardR)).toBeLessThan(2);
+    const rb0 = await box(dlg.locator('[data-team-row="member"] [data-team-more]').first());
+    expect(Math.abs((hb.x + hb.width) - (rb0.x + rb0.width))).toBeLessThan(1.5);
+    const cardBox = await box(dlg.locator('[data-team-section="admins"] > div').nth(1));
+    expect(hb.x + hb.width).toBeLessThanOrEqual(cardBox.x + cardBox.width);
     // Invite row: the whole email shows, and Resend sits on the second line after the status.
     const inv = dlg.locator('[data-team-row="invite"]');
-    const nameEl = inv.locator("div > div").first();
-    const cut = await nameEl.evaluate((e) => e.scrollWidth > e.clientWidth);
-    expect(cut).toBe(false);
-    await expect(inv).toContainText("ryan.baumgartner@hillwood.com");
+    const nameEl = inv.locator("[data-team-invite-email]");
+    await expect(nameEl).toHaveText("ryan.baumgartner.throwaway@hillwood.com"); // whole address in the DOM, nothing elided
+    expect(await nameEl.evaluate((e) => e.scrollWidth > e.clientWidth)).toBe(false); // no horizontal clipping
+    expect(await nameEl.evaluate((e) => getComputedStyle(e).textOverflow)).not.toBe("ellipsis");
     const second = inv.locator("[data-team-resend]");
     await expect(second).toHaveText("Resend invite");
     const nb = await box(nameEl), rb = await box(second);
-    expect(rb.y).toBeGreaterThan(nb.y + nb.height - 2); // below the email line
-    expect(await second.evaluate((e) => getComputedStyle(e).color)).toBe(await dlg.locator("[data-team-invite]").evaluate((e) => getComputedStyle(e).backgroundColor));
+    expect(rb.y).toBeGreaterThan(nb.y + nb.height - 2); // Resend below the email
+    // the status text is complete too (not cut)
+    const status = inv.getByText("Member · not joined yet");
+    expect(await status.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
     if (SHOTS) await page.screenshot({ path: "ui-audit/screens/team-settings-fix-desktop-short.png" });
     // Every row ⋯ — member, admin, invite — opens a REAL, reachable menu.
     for (const row of [dlg.locator('[data-team-row="member"]').filter({ hasText: "Ana Ruiz" }), dlg.locator('[data-team-row="member"]').filter({ hasText: "mb.one@planyr.test" }), inv]) {
@@ -305,5 +321,24 @@ test.describe("desktop, short window (520 tall)", () => {
     await dlg.locator('[data-team-row="member"]').filter({ hasText: "Ana Ruiz" }).locator("[data-team-more]").click();
     await page.locator('[data-team-dropdown] [data-team-menu-item="Admin"]').click();
     await expect(dlg.locator('[data-team-section="members"]')).toHaveCount(0);
+  });
+});
+
+test.describe("phone, long invite email", () => {
+  test.use({ viewport: { width: 360, height: 740 } });
+  test("the invite email wraps instead of truncating", async ({ page }) => {
+    test.setTimeout(90_000);
+    const st = freshState();
+    st.invites = [{ id: "inv-1", email: "ryan.baumgartner.throwaway@hillwood.com", role: "member", created_at: "2026-10-01T00:00:00Z", claimed_at: null }];
+    await mock(page, st);
+    const dlg = await openTeam(page, true);
+    const nameEl = dlg.locator("[data-team-invite-email]");
+    await expect(nameEl).toHaveText("ryan.baumgartner.throwaway@hillwood.com");
+    expect(await nameEl.evaluate((e) => e.scrollWidth > e.clientWidth)).toBe(false);
+    const row = await box(dlg.locator('[data-team-row="invite"]'));
+    const eb = await box(nameEl);
+    expect(eb.x + eb.width).toBeLessThanOrEqual(row.x + row.width);
+    await nameEl.scrollIntoViewIfNeeded();
+    if (SHOTS) await page.screenshot({ path: "ui-audit/screens/team-settings-fix2-phone-invite.png" });
   });
 });
