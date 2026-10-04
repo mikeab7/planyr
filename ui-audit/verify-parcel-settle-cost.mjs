@@ -20,6 +20,7 @@ const BASE = process.env.BASE_URL || "http://localhost:4188/";
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const BUDGET_MS = Number(process.env.SETTLE_BUDGET_MS || 16);
 const BARTOW = { lat: 34.20, lng: -84.83 };
+const ZS = (process.env.ZS || "16,15,14").split(",").map(Number); // zooms to measure
 const STEP = 0.001; // ~110 m pitch → ~7k lots across a 1280×860 view at z14 (Michael's measured 7,124)
 let failures = 0;
 const expect = (label, cond, extra = "") => { if (!cond) failures++; console.log(`  [${cond ? "PASS" : "FAIL"}] ${label}${extra ? ` — ${extra}` : ""}`); };
@@ -121,7 +122,7 @@ const settleLoaded = async () => { await page.waitForTimeout(2500); };
 const median = (a) => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
 
 const floors = {};
-for (const z of [16, 15, 14]) {
+for (const z of ZS) {
   await page.evaluate(([lat, lng, zz]) => { window.__mapFinderMap.setView([lat, lng], zz, { animate: false }); }, [BARTOW.lat, BARTOW.lng, z]);
   await settleLoaded();
   const zr = [], pr = [];
@@ -134,7 +135,7 @@ await page.waitForTimeout(2500);
 
 await page.evaluate(() => { window.__lt = []; try { new PerformanceObserver((l) => l.getEntries().forEach((e) => window.__lt.push(e.duration))).observe({ entryTypes: ["longtask"] }); } catch (_) {} });
 const results = {};
-for (const z of [16, 15, 14]) {
+for (const z of ZS) {
   // Land at z (data fetched + held), then measure re-settles with the data already held — what Michael sees on
   // every pan/zoom settle. Alternate z±1 so every zoom measurement crosses a real tile-zoom change.
   await page.evaluate(([lat, lng, zz]) => { window.__mapFinderMap.setView([lat, lng], zz, { animate: false }); }, [BARTOW.lat, BARTOW.lng, z]);
@@ -152,7 +153,7 @@ for (const z of [16, 15, 14]) {
   console.log(`  z${z}: held=${s && s.held} sources=${s && s.sources.join(",")}  zoom-settle median ${results[z].zoom.toFixed(1)} ms (parcel cost ${results[z].zoomCost.toFixed(1)}) · pan-settle median ${results[z].pan.toFixed(1)} ms (parcel cost ${results[z].panCost.toFixed(1)})`);
 }
 expect("KNOWN-GOOD ARM: the mocked Bartow service was queried and a z14-scale number of lots is held (else the run is void)", counts.bartowQuery > 0 && (results[14].held || 0) >= 5000, `queries=${counts.bartowQuery}, held@z14=${results[14].held}`);
-for (const z of [16, 15, 14]) {
+for (const z of ZS) {
   expect(`z${z} zoom settle: parcel layer's cost under ${BUDGET_MS} ms (median, over the no-parcel floor)`, results[z].zoomCost < BUDGET_MS, `${results[z].zoomCost.toFixed(1)} ms`);
   expect(`z${z} pan settle: parcel layer's cost under ${BUDGET_MS} ms (median, over the no-parcel floor)`, results[z].panCost < BUDGET_MS, `${results[z].panCost.toFixed(1)} ms`);
 }
