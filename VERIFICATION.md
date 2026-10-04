@@ -166,6 +166,15 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1500112 — B2084480: a file saved in Review appears in the Library without a reload, in this tab and in other open tabs `Blocker: auth`
+
+Sandbox-proven: `test/libraryFreshAndTypeTag.test.js` (every write path announces; both Library surfaces subscribe; red with the wiring reverted). Not provable here: the signed-in round-trip and a second real browser tab.
+**Steps** (signed-in Chrome, planyr.io, test account; read the served chunk hash in the SAME observation as each PASS/FAIL):
+1. Open the Library tab, then a second tab on planyr.io showing the Library. **Expect:** both list the current files.
+2. In tab 1, Review › Open… a throwaway **.docx** with no project, edit, Save ("Saved to the Library under Unfiled"). Click the Library tab (same tab, no reload). **Expect:** the file is in Recent and Unfiled; tab 2's Library shows it too without a reload. Each row shows a **DOCX** tag.
+3. Repeat with a **.txt**, a **PDF**, and a **.doc** → "Save as .docx". **Expect:** each appears without a reload; the .doc row reads **DOC** and the .docx row **DOCX**, so the two are distinguishable.
+4. Bin the throwaway files afterwards. Say exactly what was touched.
+
 ### V1502416 — B2081248: Georgia site screening — Georgia layers draw on planyr.io, Texas layers stay off, Analysis never reads "none found" off a Texas source `Blocker: auth`
 
 Sandbox-proven (logged-out, local plans, real built app, real services): `ui-audit/verify-georgia-layers.mjs` — **PASS**: a Braselton/I-85 Piedmont site and a Rincon/Effingham coastal site list all eight Georgia rows and no Texas row; each Georgia layer over a site placed on its own known feature requests its host, gets 200, raises no failure toast and draws; **turning every Georgia layer on and off left the map's zoom and offset identical**; a Katy site still lists the Texas rows, no Georgia row, and a Texas layer still draws. Unit guards: `georgiaStreamBuffers`, `georgiaScreens`, `siteAnalysisStateGate`, `layerStateCoverage`, `georgiaStreamBufferWiring`. **Still needs the owner's SIGNED-IN test account on the real origin** (the sandbox cannot sign in, and its Chromium cannot reach every GIS host directly): real CORS from `planyr.io`, and the saved-plan round trip.

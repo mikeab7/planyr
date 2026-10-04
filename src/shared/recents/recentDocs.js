@@ -9,6 +9,8 @@
  * capped so the list stays a quick-access shelf, not a history log.
  */
 
+import { notifyLibraryChanged } from "../library/libraryChanged.js";
+
 const keyFor = (uid) => `planyr:recentDocs:v1:${uid || "local"}`;
 export const RECENTS_CAP = 15;
 
@@ -30,6 +32,7 @@ export function recordOpen(uid, { id, projectId }, now = Date.now()) {
   if (typeof id !== "string" || !id) return listRecents(uid);
   const list = [{ id, projectId: projectId || null, openedAt: now }, ...listRecents(uid).filter((r) => r.id !== id)].slice(0, RECENTS_CAP);
   try { localStorage.setItem(keyFor(uid), JSON.stringify(list)); } catch (_) { /* quota — recents are a convenience */ }
+  notifyLibraryChanged(); // B2084480 - a mounted Library Home re-reads its Recent shelf
   return list;
 }
 
