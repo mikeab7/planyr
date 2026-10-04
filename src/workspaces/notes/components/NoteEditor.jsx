@@ -84,6 +84,9 @@ import NoteOutline from "./NoteOutline.jsx";
 import NoteHistory from "./NoteHistory.jsx";
 
 const SAVE_DEBOUNCE_MS = 600;
+/* NEW-5 — a held touch opens the document menu; this is how long, and how far a finger may wobble. */
+const LONG_PRESS_MS = 500;
+const LONG_PRESS_SLOP = 10;
 const RADIUS = { control: 8, pill: 999 }; // mirrored from shared/ui/controls.jsx — see NoteToolbar
 const SHEET_RADIUS = 12; // RADIUS.lg (shared/ui/radius.js) — a surface that CONTAINS other things (DESIGN.md's shape rule); not folded into the local RADIUS const above because test/notesModule.test.js regex-pins that object's exact two-key shape against controls.jsx's own scale.
 
@@ -4603,6 +4606,94 @@ const NoteEditor = forwardRef(function NoteEditor({
   const [docMenu, setDocMenu] = useState(null);
   const [pasteAt, setPasteAt] = useState(null);
 
+  /* ⛔ ONE ROUTE TO THE DOCUMENT MENU, TWO WAYS IN (NEW-5). The right-click handler and the touch
+   * long-press (below) both call this, so there is exactly ONE menu — never a second copy for a
+   * phone. Its body is the right-click's, moved verbatim. */
+  const openDocMenuAt = useCallback((target, x, y) => {
+    if (!(target instanceof Element)) return;
+    /* ⛔ RIGHT-CLICKING A BOX IS STILL RIGHT-CLICKING INSIDE TEXT (B539651), so the box menu
+       is the document's plus the box's own action rather than a different menu. The id is
+       what tells them apart, and it comes from the DOM the press actually landed on. */
+    const box = target.closest(".planyr-anchor");
+    /* ⛔ A RIGHT-CLICK MUST RESOLVE ITS OWN TARGET (found chasing NEW-2, B649377).
+       ProseMirror only learns where the browser's native right-click actually put the
+       caret through an async `selectionchange` event — measured arriving ~20ms AFTER
+       `contextmenu` has already fired and this handler has already run — so reading
+       `editor.state.selection` here, synchronously, sees wherever the caret was doing
+       BEFORE this click, not where the user just clicked. Confirmed on a plain paragraph
+       with no table involved at all: right-clicking the third line left PM's selection
+       sitting at the document's very first position while the native DOM selection had
+       already moved correctly. Left-click is unaffected (`focusFromMat` places it
+       directly), which is why this went unnoticed until a command — "is the caret inside
+       a table" — actually needed the answer to be right. Resolved and applied by hand
+       here, the way a real editor does; a right-click INSIDE the current selection (e.g.
+       Cut/Copy on a phrase you already selected) is left alone, matching every editor's
+       convention, and a box is untouched (its own selection is separate React state, not
+       PM's, so it was never exposed to this). */
+    if (!box && editor && !editor.isDestroyed) {
+      const hit = editor.view.posAtCoords({ left: x, top: y });
+      if (hit && Number.isFinite(hit.pos)) {
+        const { from, to } = editor.state.selection;
+        if (hit.pos < from || hit.pos > to) editor.commands.setTextSelection(hit.pos);
+      }
+    }
+    /* NEW-2 — "Convert table to text" only makes sense when the right-click actually
+       landed inside a table; reading it off the DOM the press hit (rather than off
+       `editor.isActive("table")`) keeps it consistent with how the box id above is read. */
+    const inTable = !!target.closest("table");
+    setDocMenu({ x, y, boxId: box?.getAttribute("data-anchor-id") || null, inTable });
+  }, [editor]);
+
+  /* ⛔ TOUCH ROUTE TO THE DOCUMENT MENU: LONG-PRESS (NEW-5, iPhone review 2026-09-29). iOS Safari
+   * never fires `contextmenu` on a long-press, so the box menu (Delete this box, Paste as plain
+   * text, Convert table to text, …) had no way in on a phone. A touch held ~500 ms on the page
+   * opens THE SAME menu through `openDocMenuAt`; it is cancelled by more than 10 px of travel (that
+   * is a pan — NEW-2's slop, so the two never both claim a press), a second finger, or lifting
+   * early. The press that opened it swallows its own synthesised mousedown/click so releasing the
+   * finger cannot also deselect or place a box. Touch only: a mouse keeps its right-click. */
+  const longPressSwallowRef = useRef(0);
+  useEffect(() => {
+    const sc = scrollerRef.current;
+    if (!sc || readOnly) return undefined;
+    let timer = 0;
+    let start = null;
+    const cancel = () => { if (timer) { clearTimeout(timer); timer = 0; } start = null; };
+    const onDown = (e) => {
+      if (e.pointerType !== "touch" || !e.isPrimary) { cancel(); return; }
+      if (!(e.target instanceof Element) || !e.target.closest(".ProseMirror")) return;
+      if (e.target.closest("input, textarea, select, button, a, [data-handle], .planyr-anchor-grip")) return;
+      start = { x: e.clientX, y: e.clientY, target: e.target };
+      timer = setTimeout(() => {
+        timer = 0;
+        const at = start;
+        start = null;
+        if (!at || !editor || editor.isDestroyed) return;
+        longPressSwallowRef.current = performance.now() + 700;
+        openDocMenuAt(at.target, at.x, at.y);
+      }, LONG_PRESS_MS);
+    };
+    const onMove = (e) => {
+      if (!start) return;
+      if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > LONG_PRESS_SLOP) cancel();
+    };
+    const swallow = (e) => { if (performance.now() < longPressSwallowRef.current) { e.stopPropagation(); e.preventDefault(); } };
+    sc.addEventListener("pointerdown", onDown);
+    sc.addEventListener("pointermove", onMove);
+    sc.addEventListener("pointerup", cancel);
+    sc.addEventListener("pointercancel", cancel);
+    sc.addEventListener("mousedown", swallow, true);
+    sc.addEventListener("click", swallow, true);
+    return () => {
+      cancel();
+      sc.removeEventListener("pointerdown", onDown);
+      sc.removeEventListener("pointermove", onMove);
+      sc.removeEventListener("pointerup", cancel);
+      sc.removeEventListener("pointercancel", cancel);
+      sc.removeEventListener("mousedown", swallow, true);
+      sc.removeEventListener("click", swallow, true);
+    };
+  }, [editor, readOnly, openDocMenuAt]);
+
   useEffect(() => {
     if (!pasteOffer || !editor || editor.isDestroyed) { setPasteAt(null); return undefined; }
     let live = true;
@@ -4928,37 +5019,7 @@ const NoteEditor = forwardRef(function NoteEditor({
         onContextMenu={(e) => {
           if (!(e.target instanceof Element) || !e.target.closest(".ProseMirror")) return;
           e.preventDefault();
-          /* ⛔ RIGHT-CLICKING A BOX IS STILL RIGHT-CLICKING INSIDE TEXT (B539651), so the box menu
-             is the document's plus the box's own action rather than a different menu. The id is
-             what tells them apart, and it comes from the DOM the press actually landed on. */
-          const box = e.target.closest(".planyr-anchor");
-          /* ⛔ A RIGHT-CLICK MUST RESOLVE ITS OWN TARGET (found chasing NEW-2, B649377).
-             ProseMirror only learns where the browser's native right-click actually put the
-             caret through an async `selectionchange` event — measured arriving ~20ms AFTER
-             `contextmenu` has already fired and this handler has already run — so reading
-             `editor.state.selection` here, synchronously, sees wherever the caret was doing
-             BEFORE this click, not where the user just clicked. Confirmed on a plain paragraph
-             with no table involved at all: right-clicking the third line left PM's selection
-             sitting at the document's very first position while the native DOM selection had
-             already moved correctly. Left-click is unaffected (`focusFromMat` places it
-             directly), which is why this went unnoticed until a command — "is the caret inside
-             a table" — actually needed the answer to be right. Resolved and applied by hand
-             here, the way a real editor does; a right-click INSIDE the current selection (e.g.
-             Cut/Copy on a phrase you already selected) is left alone, matching every editor's
-             convention, and a box is untouched (its own selection is separate React state, not
-             PM's, so it was never exposed to this). */
-          if (!box && editor && !editor.isDestroyed) {
-            const hit = editor.view.posAtCoords({ left: e.clientX, top: e.clientY });
-            if (hit && Number.isFinite(hit.pos)) {
-              const { from, to } = editor.state.selection;
-              if (hit.pos < from || hit.pos > to) editor.commands.setTextSelection(hit.pos);
-            }
-          }
-          /* NEW-2 — "Convert table to text" only makes sense when the right-click actually
-             landed inside a table; reading it off the DOM the press hit (rather than off
-             `editor.isActive("table")`) keeps it consistent with how the box id above is read. */
-          const inTable = !!e.target.closest("table");
-          setDocMenu({ x: e.clientX, y: e.clientY, boxId: box?.getAttribute("data-anchor-id") || null, inTable });
+          openDocMenuAt(e.target, e.clientX, e.clientY);
         }}
         data-arrow-mode={arrowConnect ? "1" : undefined}
         ref={scrollerRef}
@@ -5446,6 +5507,38 @@ const NoteEditor = forwardRef(function NoteEditor({
             and clicking away. That box is one you made and then emptied yourself, it is visibly
             outlined the whole time, and the prune at the storage seam still takes it, silently, as
             it did before B1370546 existed. No toast covers that case any more. */}
+        {/* ⛔ A SELECTED BOX CAN BE DELETED ON A PHONE (NEW-5). With no right-click and no Delete key
+            on a phone, a box that is selected needs its own way out: a small pill pinned to the TOP
+            of the canvas (never the bottom — the soft keyboard covers that) with one 44 px action.
+            Coarse pointers only; the desktop selection model, keys and menu are untouched. It
+            deletes through the same command and the same undo step as the menu's row. */}
+        {selection.size > 0 && !readOnly && isCoarsePointerDevice() ? (
+          <div
+            data-testid="note-touch-box-bar"
+            onMouseDown={(e) => e.preventDefault()}
+            style={{
+              position: "absolute", top: 8, left: "50%", transform: "translateX(-50%)", zIndex: 6,
+              display: "flex", alignItems: "center", gap: 4, padding: 3,
+              background: "var(--surface-raised)", border: "1px solid var(--border-default)",
+              borderRadius: RADIUS.pill, boxShadow: "0 6px 18px rgba(0,0,0,0.18)", // design-exempt: floating-chip shadow, same value as the other canvas overlays
+            }}
+          >
+            <button
+              type="button"
+              data-testid="note-touch-box-delete"
+              onClick={() => {
+                if (!editor || editor.isDestroyed) return;
+                editor.commands.removeNoteAnchors([...selRef.current]);
+                clearSelection();
+                editor.commands.focus(null, { scrollIntoView: false });   // …so undo can reach it (B421489)
+              }}
+              style={{
+                minHeight: 44, minWidth: 44, padding: "0 16px", border: "none", borderRadius: RADIUS.pill,
+                background: "transparent", color: "var(--danger-text)", font: "inherit", fontSize: 14, fontWeight: 700, cursor: "pointer",
+              }}
+            >{selection.size > 1 ? `Delete ${selection.size} boxes` : "Delete box"}</button>
+          </div>
+        ) : null}
         {pendingPlace ? (
           <div
             data-testid="note-pending-caret"

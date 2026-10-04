@@ -270,6 +270,17 @@ Sandbox-proven: `ui-audit/verify-notes-phone-layout.mjs` (WebKit 390x844 with a 
 7. After a week on this build, check `client_errors` for `page-containment-drift` rows from iPhones. **Expect:** none shaped "(0, ~250)"; any keyboard ones now arrive as `page-containment-keyboard-reveal`.
 8. Read the served chunk hash in the same observation as each result.
 - **Stopping rule:** closes on a dated pass of 1–7, or a failed step filed as a recurrence on B2061333.
+### V1484660 — B2061332: on a real iPhone, the page menu and the box menu are reachable (⋯, long-press, Delete box) `Blocker: real-data` (signed-in real device)
+
+Sandbox-proven: `ui-audit/verify-notes-touch-menus.mjs` (Chromium real touch pipeline + WebKit; red on untouched main). A real held fingertip and iOS's own selection loupe are not producible headless.
+**Steps (real iPhone, a throwaway page):**
+1. In the notes list, tap "⋯" on a page. **Expect:** the same menu a right-click gives on desktop; Rename and Delete work.
+2. Press and hold a page row for about half a second. **Expect:** the menu opens; the page does not open and nothing starts dragging.
+3. Press and hold a box in a note. **Expect:** the document menu opens with "Delete this box"; choosing it removes the box (Undo brings it back).
+4. Tap a box so it is selected. **Expect:** a "Delete box" pill at the top of the canvas; pressing it removes the box.
+5. Press and hold inside a box's text. **Expect:** note whether iOS's own text-selection magnifier ALSO appears over the menu (if so, file it as a recurrence here).
+6. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–4 (5 recorded), or a failed step filed as a recurrence on B2061332.
 ### V1484658 — B2061330: on a real iPhone, one finger pans a note, two fingers pinch and follow, the page never stays shifted sideways `Blocker: real-data` (signed-in real device)
 
 Sandbox-proven: `ui-audit/verify-notes-touch-pan.mjs` (Chromium real touch pipeline via CDP + WebKit PointerEvents; red on untouched main). A real finger / iOS rubber-band / system gestures are not producible headless.
