@@ -48,6 +48,10 @@ vi.mock("leaflet", () => {
     },
     marker: (ll, o) => { const m = { ll, o, addTo(g) { g.addLayer(m); return m; } }; return m; },
     geoJSON: () => ({ on() {}, off() {}, addData() {}, clearLayers() {} }),
+    latLngBounds: () => ({}),
+    // main's per-tile ghost layer subclasses these at module scope; a stub class is enough — the code under test is what gets mounted.
+    Layer: { extend: (proto) => { const C = function () {}; Object.assign(C.prototype, proto); return C; } },
+    GridLayer: { extend: (proto) => { const C = function () {}; Object.assign(C.prototype, proto); return C; } },
   };
   return { default: L };
 });
