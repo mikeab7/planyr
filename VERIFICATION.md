@@ -215,6 +215,16 @@ Sandbox-proven: `test/authPanelSignup.test.js` (15), `e2e/signup-success.spec.js
 4. When Supabase "Confirm email" is later switched OFF: repeat step 1. **Expect:** the panel closes and you are signed in — no check-your-email screen, no redeploy needed.
 - **Stopping rule:** closes on a dated pass of 1–3 (4 when the setting flips), or a failed step filed as a recurrence on B2014096.
 
+### V1509936 — B2078593 (×2): on a real iPhone "Hard Cost Pricing" shows its content at the same share of the page as on desktop, and the table is fully visible `Blocker: real-data` (signed-in real device, real Organization page)
+
+Not the first time anyone has seen it: `ui-audit/verify-notes-box-width-parity.mjs` (his exact document rebuilt as a fixture, five contexts, 86 checks green; 23 red on untouched main with his own numbers) and the phone / desktop screenshots in `docs/evidence/B2078593-box-width/` were compared by eye before this was written. A real phone's own copy of the page is the only thing left.
+**Steps (real iPhone, then desktop; open the Organization page "Hard Cost Pricing" — do not edit it):**
+1. Fully close and reopen planyr.io on the phone, open the page. **Expect:** the whole page width is on screen and the list and table fill most of it (the table about as wide as on desktop relative to the page); the table's right column reads in full — "…permit fee → $500/year total at the 10M gallon mark" and "…the remaining 20% billed at $26/million gallons" — with nothing cut off and blank paper only to the right of the table.
+2. Zoom in on the table with two fingers. **Expect:** the same words and line breaks as on desktop, just bigger.
+3. Open the same page on desktop. **Expect:** the same arrangement — same line breaks, same table.
+4. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–3, or a failed step filed as a recurrence on B2078593.
+
 ### V1496384 — B2080752: a Word/txt/PDF opened from disk and saved is filed under its OWN name `Blocker: auth`
 
 Sandbox-proven: pure naming table + red-proof source guards (`test/reviewOpenedFileNaming.test.js`), tabs harness 37/37. Not provable here: the real signed-in save into the Library. **Steps** (signed in, planyr.io `#/markup`, no project selected; read the build from `/version.json` in the same observation; use a throwaway `.docx`):

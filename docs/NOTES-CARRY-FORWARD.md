@@ -1497,6 +1497,11 @@ position**.
 - **A harness can no longer seed a panned/zoomed start through storage.** Use `window.__noteEditor.setView({x,y,z})` (E2E-gated, `byUser` so the opening re-framing latches off). `verify-notes-touch-landing` was moved to it. Seeding the OLD key is still the right way to test that a stale one is IGNORED and deleted (`verify-notes-open-framing`).
 - **`openingZoom` is no longer phone-only:** a page wider than a desktop window shrinks to fit (1700-wide on 1280 → ~59%); desktop caps at 100%.
 
+## B2078593 ×2 — a verified-in-emulation layout is not a verified layout; measure what is INSIDE the page (2026-10-04)
+- **The first "full width" harness measured the page's edges and top, never its CONTENT, and passed while the owner's phone rendered his box at 41% of the page with the table cut off.** The cause was `fitAnchorBox({hostWidth: paneWidth})` clamping the rendered box to the SCREEN pane's unscaled width (a phone's 390) — wrong on any pane narrower than a box, phone OR narrow desktop. A layout harness for "identical on every device" must compare rendered box ÷ zoom against the STORED width, the box's share of the page, table containment and per-paragraph line counts, in more than one engine and more than one viewport (`ui-audit/verify-notes-box-width-parity.mjs`; his document is the fixture). A fixture built from the reporter's real document (read-only from his storage key) found it in the first run; a hand-made one would not have been wide enough.
+- **A pane's on-screen width is never a layout input for content that a view transform scales.** Anything measured on `note-mat` (`offsetWidth`) is screen-space; the page and its boxes are workspace-space.
+- **Known and not unified:** the sheet's paper margin (16 vs 40 a side) is a deliberate phone setting; it shifts the paper edge ~48 workspace-units on pages that grow/are pinned below the floor, never box widths, tables or line breaks.
+
 ## 7 · The mat's gesture model, in one table (NEW-1/NEW-2, 2026-09-12)
 
 Four meanings now compete for one press on the note canvas. The rule reads in this order, and the
