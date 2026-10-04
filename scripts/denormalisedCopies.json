@@ -1,0 +1,571 @@
+{
+  "_comment": "Denormalised-copy manifest (B2064896). `copies` = every stored copy of a fact that lives elsewhere, with its verdict and how it stays right; `ownedColumns` = vocabulary-matching columns that ARE the source of truth (not copies). test/denormalisedCopies.test.js fails on a vocabulary-matching DDL column that is in neither, on a dead entry, and on a drift-report check with no declared copy. Verdicts: A fixed (readers resolve from the source) · B intentional snapshot/override · C cache with a cited invalidation.",
+  "copies": [
+    {
+      "id": "C01",
+      "columns": [
+        "schedules.linked_site_name"
+      ],
+      "source": "sites.site of the linked project (by schedules.linked_site_id)",
+      "verdict": "A",
+      "driftCheck": "D01",
+      "resolve": "display resolves live by linked_site_id (scheduleOwnership.liveSiteName, registered resolver); the stored text is only the fallback for an unresolvable link. Backfill: B1991040's file (PR #1892).",
+      "evidence": {
+        "file": "src/shared/schedule/scheduleOwnership.js",
+        "contains": "liveSiteName"
+      },
+      "pendingOn": "PR #1892 (B1991040) — evidence lands with it"
+    },
+    {
+      "id": "C02",
+      "columns": [
+        "schedules.name",
+        "schedules.linked_site_id"
+      ],
+      "source": "schedules.data (source of truth for content)",
+      "verdict": "C",
+      "driftCheck": "D02",
+      "resolve": "promoted columns for indexing, written in the same upsert as data (one writer).",
+      "evidence": {
+        "file": "src/workspaces/scheduler/db/schedules_normalization.sql",
+        "contains": "denormalized"
+      },
+      "noDdl": true
+    },
+    {
+      "id": "C03",
+      "blob": "sites.data.scheduleProjectId",
+      "source": "schedules.linked_site_id (schedule says which project)",
+      "verdict": "A",
+      "driftCheck": "D04",
+      "resolve": "hint mirrored on plans for the breadcrumb 'has a schedule' icon. Heals from the schedule ROWS on every Dashboard load (planHintHealFromRows) as well as on Schedule nav-state; never clears on an unknown list.",
+      "evidence": {
+        "file": "src/shared/schedule/scheduleLinkHints.js",
+        "contains": "planHintHealFromRows"
+      }
+    },
+    {
+      "id": "C04",
+      "blob": "sites.data.scheduleProjectName",
+      "source": "sites.site (live project name)",
+      "verdict": "B",
+      "driftCheck": "D05",
+      "resolve": "write-once hint; never displayed (scheduleLinkOf returns the group's own current name). Documented in siteModel.js.",
+      "evidence": {
+        "file": "src/workspaces/site-planner/lib/storage.js",
+        "contains": "scheduleLinkOf"
+      }
+    },
+    {
+      "id": "C05",
+      "blob": "sites.data.status",
+      "source": "the project's other plans (status is project-level)",
+      "verdict": "A",
+      "driftCheck": "D15",
+      "resolve": "every reader answers through groupStatusOf (newest plan header wins) — Map, Dashboard, breadcrumb.",
+      "evidence": {
+        "file": "src/shared/projects/projectModel.js",
+        "contains": "export function groupStatusOf"
+      }
+    },
+    {
+      "id": "C06",
+      "blob": "sites.data.role / closingDate / loiDate / feasibilityExpiry",
+      "source": "the project's other plans",
+      "verdict": "C",
+      "driftCheck": "D16",
+      "resolve": "role is written by the atomic set_site_group_role RPC; the dates are per-plan header facts written through one saveSite path (no cross-plan fan-out exists).",
+      "evidence": {
+        "file": "src/workspaces/site-planner/db/set_site_group_role.sql",
+        "contains": "set_site_group_role"
+      }
+    },
+    {
+      "id": "C07",
+      "columns": [
+        "doc_reviews.project"
+      ],
+      "source": "sites.site of the project (by project_id)",
+      "verdict": "A",
+      "driftCheck": "D06",
+      "resolve": "display resolves live by project_id (reviewNaming.liveReviewProject); stored text is only the fallback. Backfill: B1991040's file (PR #1892).",
+      "evidence": {
+        "file": "src/workspaces/doc-review/lib/reviewNaming.js",
+        "contains": "liveReviewProject"
+      },
+      "noDdl": true,
+      "pendingOn": "PR #1892 (B1991040) — evidence lands with it"
+    },
+    {
+      "id": "C08",
+      "columns": [
+        "doc_reviews.title",
+        "doc_reviews.kind",
+        "doc_reviews.discipline",
+        "doc_reviews.project_id",
+        "doc_reviews.item",
+        "doc_reviews.revision",
+        "doc_reviews.doc_date"
+      ],
+      "source": "doc_reviews.data (blob copy of the same fields)",
+      "verdict": "C",
+      "driftCheck": "D07",
+      "resolve": "one upsert (reviewRowFor + mergeOntoStored) writes column and blob from the same record.",
+      "evidence": {
+        "file": "src/workspaces/doc-review/lib/reviewStore.js",
+        "contains": "reviewRowFor"
+      },
+      "noDdl": true
+    },
+    {
+      "id": "C09",
+      "columns": [
+        "doc_reviews.team_id",
+        "site_plan_overlays.team_id",
+        "comps.team_id",
+        "map_notes.team_id"
+      ],
+      "source": "sites.team_id of the project",
+      "verdict": "B",
+      "driftCheck": "D12",
+      "resolve": "sharing is deliberately per-object (owner decision 2026-08-09 'SITE PLANS ONLY'; guard_team_rehome). NOT auto-synced. Differences are reported on OWNER-TODO.md for a decision, never auto-changed (private by default).",
+      "evidence": {
+        "file": "src/workspaces/site-planner/db/team_rehome_guard.sql",
+        "contains": "guard_team_rehome"
+      }
+    },
+    {
+      "id": "C10",
+      "columns": [
+        "file_facts.project_id",
+        "file_facts.discipline",
+        "file_facts.item",
+        "file_facts.revision",
+        "file_facts.doc_date",
+        "file_facts.category",
+        "file_facts.team_id"
+      ],
+      "source": "doc_reviews columns (by review_id)",
+      "verdict": "A",
+      "driftCheck": "D08",
+      "resolve": "upsertReview → syncFileFactsForReview mirrors on every review save; MCP/Library read the review's value first (applyReviewTruth); backfill fills blanks only.",
+      "evidence": {
+        "file": "functions/api/mcp/_tools.js",
+        "contains": "B2064899"
+      }
+    },
+    {
+      "id": "C11",
+      "columns": [
+        "file_facts.source_file"
+      ],
+      "source": "doc_reviews.data.sourceFile",
+      "verdict": "C",
+      "driftCheck": "D09",
+      "resolve": "file_facts holds the uploaded name; loadReview fills an empty review sourceFile from it (B1953796 R1). Only a blank review side differs.",
+      "evidence": {
+        "file": "src/workspaces/doc-review/lib/reviewStore.js",
+        "contains": "source_file"
+      },
+      "noDdl": true
+    },
+    {
+      "id": "C12",
+      "columns": [
+        "site_plan_overlays.doc_title",
+        "site_plan_overlays.doc_date"
+      ],
+      "source": "doc_reviews.title / doc_date (by review_id)",
+      "verdict": "B",
+      "driftCheck": "D10",
+      "resolve": "doc_title is the overlay's own EDITABLE name, seeded once from the file title (a rename stays an override); doc_date is a seeded display cache. Stores stay separate (owner constraint 11).",
+      "evidence": {
+        "file": "src/shared/sitePlans/components/SitePlansSection.jsx",
+        "contains": "docTitle"
+      }
+    },
+    {
+      "id": "C13",
+      "columns": [
+        "site_plan_overlays.project_id"
+      ],
+      "source": "doc_reviews.project_id",
+      "verdict": "B",
+      "driftCheck": "D11",
+      "resolve": "the overlay's 'Site' control is a different fact from the Library filing; never synced by design.",
+      "evidence": {
+        "file": "src/shared/sitePlans/components/SitePlansSection.jsx",
+        "contains": "setOverlaySite"
+      }
+    },
+    {
+      "id": "C14",
+      "columns": [
+        "site_plan_overlays.locked"
+      ],
+      "source": "site model sheetOverlays[].locked",
+      "verdict": "B",
+      "driftCheck": null,
+      "resolve": "separate stores by owner decision (constraint 11); each surface owns its own flag.",
+      "evidence": {
+        "file": "src/shared/sitePlans/db/site_plan_overlays.sql",
+        "contains": "mirrors the Site Planner reference-image"
+      }
+    },
+    {
+      "id": "C15",
+      "columns": [
+        "sites.site",
+        "sites.name",
+        "sites.county",
+        "sites.group_id",
+        "sites.team_id"
+      ],
+      "source": "sites.data blob (name/site/county/groupId/teamId)",
+      "verdict": "C",
+      "driftCheck": "D13",
+      "resolve": "trigger sites_mirror_site_column + normalise-county trigger + cloudSync.siteRowFor write column and blob together.",
+      "evidence": {
+        "file": "src/workspaces/site-planner/db/sites_county_normalize.sql",
+        "contains": "county"
+      },
+      "noDdl": true
+    },
+    {
+      "id": "C16",
+      "columns": [
+        "sites.thumbnail_svg",
+        "sites.thumbnail_updated_at"
+      ],
+      "source": "the plan's drawn contents",
+      "verdict": "C",
+      "driftCheck": "D17",
+      "resolve": "refreshed after every successful push (siteThumbnail.js, no-op if identical) with a lazy Dashboard fallback for nulls; a failed write is telemetered and retried.",
+      "evidence": {
+        "file": "src/workspaces/site-planner/lib/siteThumbnail.js",
+        "contains": "thumbnail-refresh-failed"
+      }
+    },
+    {
+      "id": "C17",
+      "blob": "sites.updated_at (column) vs sites.data.updatedAt",
+      "source": "each other",
+      "verdict": "C",
+      "driftCheck": "D18",
+      "resolve": "they measure different things: the column is the server's last header write (ordering on Dashboard/MCP), the blob is the client edit stamp that decides merges. Not a copy of one fact.",
+      "evidence": {
+        "file": "src/workspaces/site-planner/lib/cloudSync.js",
+        "contains": "updated_at"
+      }
+    },
+    {
+      "id": "C18",
+      "blob": "sites.data.els",
+      "source": "site_elements rows",
+      "verdict": "C",
+      "driftCheck": "D19",
+      "resolve": "ROWS-CANONICAL-ON-SEED: once elementsInRows the blob list is empty and rows are the only copy.",
+      "evidence": {
+        "file": "src/workspaces/site-planner/lib/elementSync.js",
+        "contains": "afterSeed"
+      }
+    },
+    {
+      "id": "C19",
+      "columns": [
+        "project_folders.drive_name",
+        "project_folders.drive_folder_id",
+        "project_folders.drive_parent_id",
+        "project_folders.trashed"
+      ],
+      "source": "project_folders.name / trashed (the user's structure)",
+      "verdict": "C",
+      "driftCheck": "D20",
+      "resolve": "drive_* is server-only mirror bookkeeping (guard trigger blocks client writes); readers show name/trashed; the mirror reconciler converges drive_*.",
+      "evidence": {
+        "file": "server/storage/folderReconcile.js",
+        "contains": "driveFolderId"
+      },
+      "noDdl": true
+    },
+    {
+      "id": "C20",
+      "columns": [
+        "food_dishes.place_id"
+      ],
+      "source": "food_visits.place_id",
+      "verdict": "C",
+      "driftCheck": "D22",
+      "resolve": "DB trigger food_dishes_before_write forces it from the visit; client value is never trusted.",
+      "evidence": {
+        "file": "src/workspaces/food/db/food.sql",
+        "contains": "food_dishes_before_write"
+      }
+    },
+    {
+      "id": "C21",
+      "columns": [
+        "profiles.email"
+      ],
+      "source": "auth.users.email",
+      "verdict": "A",
+      "driftCheck": "D23",
+      "resolve": "insert trigger handle_new_user PLUS update trigger sync_profile_email (B2064900, profiles_email_sync.sql).",
+      "evidence": {
+        "file": "src/workspaces/site-planner/db/profiles_email_sync.sql",
+        "contains": "sync_profile_email"
+      }
+    },
+    {
+      "id": "C22",
+      "columns": [
+        "pins.label"
+      ],
+      "source": "the pinned folder's / project's current name",
+      "verdict": "C",
+      "driftCheck": null,
+      "resolve": "label is a fallback; Library Home resolves the live folder name (B1953793). pins is empty in production.",
+      "evidence": {
+        "file": "src/shared/pins/db/pins.sql",
+        "contains": "label"
+      },
+      "noDdl": true
+    },
+    {
+      "id": "C23",
+      "columns": [
+        "problem_reports.user_email",
+        "problem_reports.build",
+        "problem_reports.route"
+      ],
+      "source": "the submitting session at submit time",
+      "verdict": "B",
+      "driftCheck": null,
+      "resolve": "intentional point-in-time snapshot of a report (what the user ran when they filed it).",
+      "evidence": {
+        "file": "src/shared/reports/problem_reports.sql",
+        "contains": "denormalised at submit time"
+      }
+    },
+    {
+      "id": "C24",
+      "blob": "planar_data hs-v1 value.projects",
+      "source": "schedules.data (rows authoritative)",
+      "verdict": "B",
+      "driftCheck": "D24",
+      "resolve": "frozen legacy snapshot after the authority flip: planar_data_refuse_post_flip_write refuses content writes; readers resolve schedule rows.",
+      "evidence": {
+        "file": "src/workspaces/scheduler/db/schedules_authority_flip.sql",
+        "contains": "planar_data_refuse_post_flip_write"
+      }
+    },
+    {
+      "id": "C25",
+      "blob": "recovery_* snapshot tables",
+      "source": "n/a — intentional backups",
+      "verdict": "B",
+      "driftCheck": "D25",
+      "resolve": "point-in-time recovery copies taken before a migration; never read by the app, never edited.",
+      "evidence": {
+        "file": "docs/audit-single-source-of-truth.md",
+        "contains": "recovery_"
+      }
+    },
+    {
+      "id": "C26",
+      "blob": "schedules.linked_site_id → a deleted project",
+      "source": "sites (project still exists)",
+      "verdict": "B",
+      "driftCheck": "D03",
+      "resolve": "a link to a soft-deleted project is KEPT so a restore re-attaches it; the label falls back to the stored name (documented fallback, scheduleOwnership.liveSiteName). Reported, never auto-cleared.",
+      "evidence": {
+        "file": "src/shared/schedule/scheduleOwnership.js",
+        "contains": "liveSiteName"
+      },
+      "pendingOn": "PR #1892 (B1991040) — evidence lands with it"
+    },
+    {
+      "id": "C27",
+      "blob": "sites.site per plan (one copy on each plan of a project)",
+      "source": "the project name authority (siteRenamedAt stamp)",
+      "verdict": "C",
+      "driftCheck": "D14",
+      "resolve": "one authoritative value per group via nameAuthority + the atomic rename_site_group RPC; reconcileGroupNames converges stragglers.",
+      "evidence": {
+        "file": "src/workspaces/site-planner/lib/projectName.js",
+        "contains": "nameAuthority"
+      }
+    },
+    {
+      "id": "C28",
+      "columns": [
+        "project_folders.project_id"
+      ],
+      "source": "sites (project still exists)",
+      "verdict": "B",
+      "driftCheck": "D21",
+      "resolve": "folder rows of a soft-deleted project are kept until the project is purged (30-day retention → purgeProjectFoldersFor); hidden from every reader meanwhile (fetchProjects filters deleted_at).",
+      "evidence": {
+        "file": "src/workspaces/site-planner/lib/storage.js",
+        "contains": "purgeProjectFoldersFor"
+      },
+      "noDdl": true
+    }
+  ],
+  "ownedColumns": {
+    "signup_attempts_log": [
+      "email_domain"
+    ],
+    "comp_import_drafts": [
+      "raw_name",
+      "status"
+    ],
+    "comps": [
+      "anchor_kind",
+      "bldg_size_sf",
+      "comp_date",
+      "county",
+      "lease_commencement_date",
+      "lease_size_sf",
+      "project_id",
+      "site_plan_overlay_id",
+      "site_plan_point",
+      "title"
+    ],
+    "map_notes": [
+      "anchor_kind",
+      "county",
+      "project_id",
+      "title"
+    ],
+    "pins": [
+      "project_id"
+    ],
+    "problem_reports": [
+      "category"
+    ],
+    "site_plan_overlays": [
+      "site_link_declined",
+      "source_file_name",
+      "thumb_data_url"
+    ],
+    "client_errors": [
+      "kind"
+    ],
+    "file_facts": [
+      "sheet_title"
+    ],
+    "project_folders": [
+      "name",
+      "parent_id",
+      "project_id"
+    ],
+    "food_places": [
+      "category",
+      "name"
+    ],
+    "food_visits": [
+      "custom_name",
+      "place_id",
+      "visited_on"
+    ],
+    "food_wishlist": [
+      "custom_name",
+      "place_id"
+    ],
+    "food_dish_wishlist": [
+      "custom_name",
+      "dish_name",
+      "place_id"
+    ],
+    "food_dishes": [
+      "name"
+    ],
+    "org_model_sheets": [
+      "name"
+    ],
+    "notes_images": [
+      "kind",
+      "name",
+      "path",
+      "updated_by"
+    ],
+    "notes_trees": [
+      "updated_by"
+    ],
+    "notes_pages": [
+      "updated_by"
+    ],
+    "planar_data": [
+      "team_id"
+    ],
+    "planar_history": [
+      "team_id"
+    ],
+    "planar_suggestions": [
+      "team_id"
+    ],
+    "schedule_account_index": [
+      "last_active_by_site",
+      "team_id"
+    ],
+    "schedules": [
+      "team_id"
+    ],
+    "site_elements": [
+      "kind",
+      "op_kind",
+      "site_id",
+      "updated_by"
+    ],
+    "criteria_requests": [
+      "county_key",
+      "county_label",
+      "site_id"
+    ],
+    "profiles": [
+      "first_name",
+      "last_name"
+    ],
+    "project_shares": [
+      "project_id",
+      "role"
+    ],
+    "share_events": [
+      "project_id"
+    ],
+    "teams": [
+      "name"
+    ],
+    "team_members": [
+      "role",
+      "team_id"
+    ],
+    "team_invites": [
+      "email",
+      "role",
+      "team_id"
+    ],
+    "jurisdictions": [
+      "name"
+    ],
+    "jurisdiction_row_standards": [
+      "jurisdiction"
+    ],
+    "thoroughfare_segments": [
+      "jurisdiction",
+      "plan_adopted_date",
+      "plan_name",
+      "status",
+      "street_name"
+    ],
+    "drive_files": [
+      "name"
+    ],
+    "upload_sessions": [
+      "file_name",
+      "status",
+      "total_bytes"
+    ]
+  }
+}

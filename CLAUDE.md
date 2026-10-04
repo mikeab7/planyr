@@ -316,6 +316,11 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > intentional (issued revision, history, export) is labelled as such in code. Inventory + verdicts:
 > `docs/audit-single-source-of-truth.md`. Guard: `test/entityStateCopy.test.js` (fails on a new seeded
 > copy; escape is an inline `// stale-ok: <reason>`).
+> **Copies in OTHER TABLES / jsonb blobs (B2064896, 2026-10-04):** every migration column that could hold a copy
+> must be declared in `scripts/denormalisedCopies.json` (COPY with verdict + how it stays right + cited code, or
+> OWNED) or `test/denormalisedCopies.test.js` fails; `npm run drift-report` (`scripts/drift-report.sql`, read-only)
+> lists rows where a stored copy disagrees with its source in production — run it after any change that adds or
+> moves a copy. A project's STATUS is read only through `projectModel.groupStatusOf`.
 >
 > **📋 `BACKLOG.md` = the single source of truth for open bugs & feature requests — KEEP IT LEAN.** Every run,
 > work the **🔲 Open** items. **The moment an item ships, MOVE its whole block to `docs/archive/BACKLOG-DONE.md` that same

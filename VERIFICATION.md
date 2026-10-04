@@ -166,6 +166,17 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+
+### V1489584 — B2064896: one status per project, the schedule icon follows the schedule rows, filing facts resolve to the review, profile email follows the account `Blocker: auth (signed-in plans) + real-data (apply two SQL files, re-run drift-report)`
+
+Sandbox-proven as pure logic (`test/singleSourceCopies.test.js`, red on main) and the backfill logic was run on temp-table COPIES of production (D08 3→0, D15 1→0, real tables untouched). Everything below needs a signed-in pass **on a THROWAWAY project** (never a real plan).
+**Steps:**
+1. Throwaway project with two plans. In the plan menu set status to Active on plan A. Then, in Supabase SQL editor on the throwaway rows only, set plan B's `data.status` to `pursuit` (simulating a half-finished write). Open the Dashboard, the Map's Sites list and the project switcher. **Expect:** all three show the SAME status for the project (the one on the newer plan header), never two.
+2. Link a schedule to the throwaway project, then unlink it while the Schedule tab is CLOSED (delete the link in the schedule rows). Open the Dashboard, then the project switcher. **Expect:** the calendar "has a schedule" icon is gone after one Dashboard visit — no Schedule tab visit needed.
+3. After the owner applies `single_source_backfill_20261004.sql` and `profiles_email_sync.sql` through the normal deploy path: run `npm run drift-report` (or paste `scripts/drift-report.sql`). **Expect:** D08, D15 read 0 drifted; D04 reads 0; D23 reads 0. D01/D06 read 0 only after PR #1892's own backfill.
+4. Change the email on a throwaway auth user. **Expect:** `profiles.email` follows within the same statement.
+5. Read the served chunk hash in the same observation as each result.
+
 ### V1474400 — B2049312: team invite + Resend emails arrive in the inbox `Blocker: real-data (needs RESEND_API_KEY in Cloudflare + team_invite_email.sql run — both Michael's)`
 
 Sandbox-proven: `test/teamInviteEmail.test.js` (fake Supabase + fake Resend), `e2e/team-settings-layout.spec.js` (mocked send incl. throttle). Pending: a real send. **Steps** (planyr.io, signed in as a team admin; check the served chunk hash in the same observation). Use only the throwaway `mikeabmab+planyrtest@live.com`:

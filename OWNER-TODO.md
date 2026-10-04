@@ -7,6 +7,14 @@
 
 _Last updated: 2026-10-04._
 
+
+## 🧾 A decision on shared child items, plus two database scripts to apply (B2064896)
+
+> **What I found:** I compared every stored copy of a fact in your database with where that fact really lives (read-only). Almost everything agrees. Six items (a review, an overlay, comps) are marked with a different team than the project they belong to. By your 2026-08-09 decision, sharing is decided per item (site plans only), so I did **not** change them.
+>
+> - [ ] **Decide:** should a project's reviews / overlays / comps follow the project's team, or stay private until shared on their own? (Today: they stay private. Five of the six are reviews of shared projects — Papadopoulos, 8 South ×2, Mason & Clay, Grand Port — that your teammates cannot see.)
+> - [ ] **Apply two SQL files** (I'll hand them to you in order): `single_source_backfill_20261004.sql` (fills blank filing fields and aligns one project's status; takes a safety copy first) and `profiles_email_sync.sql` (keeps the team roster email right). Both are safe to run twice.
+
 ## ✉️ Two steps to make team invites actually send email (B2049312)
 
 > **What changed:** Invite and Resend invite now email the person (subject "<you> invited you to <team> on Planyr").
