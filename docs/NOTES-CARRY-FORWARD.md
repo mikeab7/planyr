@@ -1470,6 +1470,14 @@ position**.
 
 ---
 
+### Touch pan / pinch (B2061330 / NEW-2, 2026-10-04)
+
+- **A finger drag on the mat produces POINTER events only** (`touch-action: none`) — never the compat mouse events `beginBlankGesture` listens on. Touch has its own pointer-driven pan in the mat's touch effect (slop 10, `lib/notesViewport.js` helpers); the mouse path is untouched. A press on a selected/edited box, a grip/handle, a field or the zoom pill is not a pan.
+- **Which engine proves what:** Chromium + CDP `Input.dispatchTouchEvent` is the real touch pipeline; WebKit only gets dispatched PointerEvents (no real touch-drag primitive). Say so in any report. `ui-audit/verify-notes-touch-pan.mjs`.
+- **TRAP: a finger that lifts while still moving flings** (inertia) — hold the finger still before `touchEnd` when measuring travel, or the number includes the coast.
+- **TRAP: the mat can only be scrolled programmatically if its content overflows** — zoom in first (Ctrl+= ×6) before testing the stray-scroll fold. Chromium refused it here; WebKit exercised it.
+- A stray native scroll (browser revealing a caret) is folded into the view and reset to 0; nothing else in the editor depends on the mat's own scroll.
+
 ## 6 · Where the rest lives
 
 - `src/workspaces/notes/CLAUDE.md` — the module pointer: every file, and the decision behind it.
