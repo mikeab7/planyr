@@ -5284,15 +5284,6 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
-### B2064640 — Empty-spot click in a statewide-parcel state said "no parcel data wired here yet" for a covered county `[site-planner / map-finder]` (bug) #gis #parcel #site-planner  *(Owner NEW-1, 2026-10-04; found during the live check of V1435953 step 3, San Francisco Mission, build 17f94b7.)*
-
-`[x]` **Report:** a click on a street (37.750733, -122.400883) in San Francisco tagged "No lot here" (right) but the error line read "San Francisco County — no parcel data wired here yet." (wrong — California's statewide layer covers it).
-`[x]` **Cause (confirmed in source):** `countyIdentity` returns `no-source` whenever the county key is missing or is a statewide pseudo-county, which is every county of a state whose only parcel source is a statewide layer (CA, NV, RI, ME, DC, …); `noParcelSourceNote` then printed the gap sentence.
-`[x]` **Fix (`counties.js`):** the `no-source` identity now carries `statewideKey` when a statewide source covers its state (via the existing `statewideKeysForState`), and `noParcelSourceNote` returns null for it, so all five callers (MapFinder ×3, SitePlanner ×2) fall to the existing covered-county wording "No parcel right there — zoom in and click directly on a lot." STATUS and `key` are deliberately unchanged — candidate routing, `countyForView` and B1597232's empty-candidates branch read them, and the existing pins (Las Vegas / Columbus `no-source`) still hold. Texas is excluded (its statewide layer is the derived fallback behind every TX row; a TX county reaching `no-source` keeps its sentence). Wording change: none beyond silencing the gap sentence.
-`[x]` **Tests:** `test/statewideCoverageNote.test.js` — San Francisco, Ontario CA, Las Vegas and Reno NV, Providence RI, Portland ME, Washington DC → no gap note (7 red on untouched main, green after); Wayne County MI and Lafayette Parish LA keep their sentence; TX and CO hand identities keep theirs; a wired Harris point untouched. Adjacent suites counties / countyStatewideDerivation / cityScopes / bugHuntGuards / parcelClickRouting green.
-`[x]` **Constraint check (Definition of Done #4):** nothing here touches an `## Owner product constraints` entry.
-- Verify: live — **V1489328** (`Blocker: live-GIS`).
-- Stopping rule: closes on a dated pass of V1489328; a recurrence re-opens THIS item.
 ### B2061792 — A deed that doesn't close now WARNS on every surface by ONE rule (reader, queue row, plot toast, holes, Plot-all summary) — Tract 1 no longer reads "closes (misclosure 31.4′)" `[site-planner / deed]` (bug) #site-planner  *(Owner NEW-1, 2026-10-04. Amends B2019264 — recurrence-style follow-on: that item drew the gap; this one makes the words agree with the drawing.)*
 
 `[x]` **Report:** only the Properties panel said a deed misses; the reader summary said "closes (misclosure 31.4′)" for Grand Port Tract 1 (the 50 ft `pathCloses` screen), the queue row said "closes", and the plot toast stayed neutral unless the miss exceeded 1 ft.
@@ -20271,6 +20262,16 @@ Stopping rule: closes when V1414592 passes on the deployed build, or the owner c
 `[x]` Steps 1 and 3 read as the same thing (both routed through "Parcel tools ▾"; step 1 also bundled address search; "right rail" is a collapsed "Tools" tab on phone). Replaced the three sentences with four short, distinct, TAPPABLE options (each starts its action): **Click a lot on the map** (county record; same vocabulary as the Parcel tools menu) · **Search an address** · **Trace your boundary** · **Use a screenshot** (opens the file picker; place & calibrate follows). No menu paths, no "right rail". Sentence removed (PANEL-BREVITY spirit): the old three-line numbered paragraph. Covered by the same spec as B1989504 (`start-hint-draw` starts Draw; asserted on both viewports).
 Verify: live — see V1414592.
 Stopping rule: as B1989504.
+
+### B2064640 — Empty-spot click in a statewide-parcel state said "no parcel data wired here yet" for a covered county `[site-planner / map-finder]` (bug) #gis #parcel #site-planner  *(Owner NEW-1, 2026-10-04; found during the live check of V1435953 step 3, San Francisco Mission, build 17f94b7.)*
+
+`[x]` **Report:** a click on a street (37.750733, -122.400883) in San Francisco tagged "No lot here" (right) but the error line read "San Francisco County — no parcel data wired here yet." (wrong — California's statewide layer covers it).
+`[x]` **Cause (confirmed in source):** `countyIdentity` returns `no-source` whenever the county key is missing or is a statewide pseudo-county, which is every county of a state whose only parcel source is a statewide layer (CA, NV, RI, ME, DC, …); `noParcelSourceNote` then printed the gap sentence.
+`[x]` **Fix (`counties.js`):** the `no-source` identity now carries `statewideKey` when a statewide source covers its state (via the existing `statewideKeysForState`), and `noParcelSourceNote` returns null for it, so all five callers (MapFinder ×3, SitePlanner ×2) fall to the existing covered-county wording "No parcel right there — zoom in and click directly on a lot." STATUS and `key` are deliberately unchanged — candidate routing, `countyForView` and B1597232's empty-candidates branch read them, and the existing pins (Las Vegas / Columbus `no-source`) still hold. Texas is excluded (its statewide layer is the derived fallback behind every TX row; a TX county reaching `no-source` keeps its sentence). Wording change: none beyond silencing the gap sentence.
+`[x]` **Tests:** `test/statewideCoverageNote.test.js` — San Francisco, Ontario CA, Las Vegas and Reno NV, Providence RI, Portland ME, Washington DC → no gap note (7 red on untouched main, green after); Wayne County MI and Lafayette Parish LA keep their sentence; TX and CO hand identities keep theirs; a wired Harris point untouched. Adjacent suites counties / countyStatewideDerivation / cityScopes / bugHuntGuards / parcelClickRouting green.
+`[x]` **Constraint check (Definition of Done #4):** nothing here touches an `## Owner product constraints` entry.
+- Verify: live — **V1489328** (`Blocker: live-GIS`).
+- Stopping rule: closes on a dated pass of V1489328; a recurrence re-opens THIS item.
 
 ## 🕓 Later / Roadmap
 

@@ -166,13 +166,6 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
-### V1489328 — B2064640: a street click in San Francisco and in Las Vegas shows no "not wired" sentence `Blocker: live-GIS (needs the live CAL FIRE / Nevada statewide parcel services, which the sandbox egress blocks)`
-
-Sandbox-proven: `test/statewideCoverageNote.test.js` (identity + sentence against the real committed county polygons). What is left is the real click on the deployed build.
-1. On planyr.io Map view, turn on Select parcels, go to San Francisco (Mission), and read `/version.json` in the same check. Click the street point 37.750733, -122.400883. **Expect:** the tag says "No lot here" and the error line reads "No parcel right there — zoom in and click directly on a lot." — no "no parcel data wired here yet" anywhere.
-2. Repeat in Las Vegas on a street. **Expect:** same wording, no "not wired" sentence.
-3. Click a real lot a few blocks away in each. **Expect:** it selects as before.
-4. Control: click inside an unwired county (e.g. Taylor, MI). **Expect:** "Wayne County — no parcel data wired here yet." still appears.
 ### V1479952 — B2061792: a non-closing deed warns on the reader, the plot toast and the panel `Blocker: real-data (the Grand Port group's saved plans)`
 
 Sandbox-proven: `test/deedGap.test.js`, `ui-audit/verify-deed-closure-warning.mjs` (real Tract 1 calls, logged-out). Pending: the same on a real signed-in plan. **Steps** (planyr.io; read the served chunk hash in the same observation; use the throwaway **"Concept A (copy)"** plan in the Grand Port group — NEVER Concept A):
@@ -1973,6 +1966,14 @@ Sandbox-proven: `e2e/start-hint-placement.spec.js` (red on main, green here; emu
 3. Tools → Parcel tools → Draw new parcel. **Expect:** the strip is gone and stays gone while drawing.
 4. New blank site again → ✕ → reload. **Expect:** strip stays dismissed.
 5. Desktop width: **Expect:** strip top-left, clear of the middle. Real iPhone Safari look (toolbar collapse, safe areas) remains owner-side and is NOT claimed.
+
+### V1489328 — B2064640: a street click in San Francisco and in Las Vegas shows no "not wired" sentence `Blocker: live-GIS (needs the live CAL FIRE / Nevada statewide parcel services, which the sandbox egress blocks)`
+
+Sandbox-proven: `test/statewideCoverageNote.test.js` (identity + sentence against the real committed county polygons). What is left is the real click on the deployed build.
+1. On planyr.io Map view, turn on Select parcels, go to San Francisco (Mission), and read `/version.json` in the same check. Click the street point 37.750733, -122.400883. **Expect:** the tag says "No lot here" and the error line reads "No parcel right there — zoom in and click directly on a lot." — no "no parcel data wired here yet" anywhere.
+2. Repeat in Las Vegas on a street. **Expect:** same wording, no "not wired" sentence.
+3. Click a real lot a few blocks away in each. **Expect:** it selects as before.
+4. Control: click inside an unwired county (e.g. Taylor, MI). **Expect:** "Wayne County — no parcel data wired here yet." still appears.
 
 ## THE CHECKLIST — run this on Michael's signed-in Chrome, on `planyr.io`
 
