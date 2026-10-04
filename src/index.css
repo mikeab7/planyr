@@ -707,6 +707,9 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
 
 /* card section headers */
 .sec-head:hover .sec-title { color: var(--text-primary); }
+/* Flat panels (owner NEW-1): a titled Section is a divider-separated group, not a card, so the
+   first one in a panel needs no rule above it (the panel header already draws one). */
+.flat-section:first-child { border-top: none !important; }
 
 /* color swatch inputs — clean rounded chip, no UA chrome */
 input[type="color"] {

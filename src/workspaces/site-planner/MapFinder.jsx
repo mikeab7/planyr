@@ -2852,7 +2852,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         if (!fl || seen.has(fl)) return;
         seen.add(fl);
         let held = 0, drawn = 0;
-        try { if (typeof fl.eachFeature === "function") fl.eachFeature((l) => { held++; if (mapRef.current && mapRef.current.hasLayer(l)) drawn++; }); } catch (_) {}
+        try { if (typeof fl.eachFeature === "function") fl.eachFeature((l) => { held++; if (typeof l.isDrawn === "function" ? l.isDrawn() : (mapRef.current && mapRef.current.hasLayer(l))) drawn++; }); } catch (_) {}
         layers.push({ key, url: displaySrcRef.current[key] && displaySrcRef.current[key].url, held, drawn });
       });
       return { sources: layers.map((l) => l.key), layers, held: layers.reduce((n, l) => n + l.held, 0), drawn: layers.reduce((n, l) => n + l.drawn, 0) };
