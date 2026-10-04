@@ -49,7 +49,8 @@ import { RADIUS } from "../../shared/ui/radius.js";
 // downstream propagation entirely — the same principle NEW-2(a) already applied to `currentSite`.
 import { writeLastRoute } from "../../app/lastRoute.js";
 import { DEFAULT_MODULE } from "../../app/route.js";
-import { markProjectFreshlyMinted, findProjectAtOrigin, groupStatusOf } from "../../shared/projects/projectModel.js";
+import { markProjectFreshlyMinted, findProjectAtOrigin } from "../../shared/projects/projectModel.js";
+import { groupStatusOf } from "../../shared/projects/projectModel.js";
 
 migrateOldAutosave(); // bring any legacy single-slot autosave into the site store
 migrateSiteGroups();  // give every legacy record a site (location) group
