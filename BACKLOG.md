@@ -5279,6 +5279,17 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
+### B2056784 — Full-screen button hid wherever the browser cannot go full screen (iPhone Safari showed a dead button) `[shared/ui]` (bug) #mobile #ui  *(Owner NEW-1, 2026-10-04, iPhone Safari.)*
+
+`[x]` **Report:** the header's four-corner full-screen button shows on iPhone, where it cannot work.
+`[x]` **Fix:** ONE helper, `src/shared/ui/fullscreenSupport.js` — feature detection only (`document.fullscreenEnabled` / `webkitFullscreenEnabled` AND the root element having `requestFullscreen` / `webkitRequestFullscreen`), plus hidden when already chromeless (`display-mode: standalone|fullscreen`, `navigator.standalone`). `useFullscreenAvailable` re-reads on display-mode change. `AppHeader` renders the button only when available OR currently in full screen (Chromium reports `display-mode: fullscreen` once inside, and the way out must never vanish); unrendered, the right zone just closes up (flex row, no placeholder). `fsSupported()` now delegates to the helper.
+`[x]` **Controls found (the list asked for):** exactly ONE full-screen control exists — `FullscreenButton` in `AppHeader.jsx`, which every workspace (map, Notes, Schedule, Review, Library) inherits. The `F` / Ctrl+Shift+F shortcuts route through the same toggle. No other `requestFullscreen` call site in `src/`.
+`[x]` **Runtime refusal:** unchanged and already loud — `requestFs()` rejection sets the "Your browser wouldn't allow full screen here." notice (B1173).
+`[x]` **Tests:** `test/fullscreenSupport.test.js` (10: iPhone no-flags, flag-without-method, method-without-flag, standard, webkit-prefixed, standalone, display-mode fullscreen, `navigator.standalone`; red on main — the helper did not exist) · `e2e/fullscreen-gate.spec.js` (iPhone viewport + API stubbed off → no button; iPad viewport API on → stays; standalone → gone; desktop → present, toggles in and out, exit control stays). Ran on Chromium; WebKit not run (desktop WebKit reports full screen supported, so the stub is the proof).
+`[x]` **Constraint check (Definition of Done #4):** nothing here touches an `## Owner product constraints` entry.
+- Verify: live — **V1474944** (real iPhone Safari).
+- Stopping rule: closes on a dated pass of V1474944, or Michael saying it no longer shows on his iPhone; a recurrence re-opens THIS item.
+
 ### B2043888 — Module tab-strip chevrons: page by an absolute clamped target, snap flush to each end, stay truthful after smooth scroll / rubber-band `[nav / app shell]` (bug) #mobile #ui  *(Owner chat block NAV-ARROWS 2026-10-03, iPhone Safari, planyr.io Map with no project)*
 
 `[x]` **Report:** the phone's module tab strip (Site, Schedule, …) has a ">" chevron; after scrolling, tapping the LEFT arrow "took him too far over" — Site sitting in from the left with empty space beside it and the left arrow gone.

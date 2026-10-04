@@ -166,6 +166,14 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1474944 — B2056784: no full-screen button on iPhone Safari; still present and working on desktop Chrome `Blocker: real-device (iPhone Safari has no Fullscreen API for page elements — cannot be produced headless)`
+
+Sandbox-proven: `test/fullscreenSupport.test.js`, `e2e/fullscreen-gate.spec.js` (API stubbed off at iPhone width; iPad width, standalone and desktop arms). The real-device confirmation is what is left.
+1. On the iPhone, open `planyr.io`; read `/version.json` in the same check. **Expect:** the header's right side shows the sync badge and account chip with NO four-corner button and no gap between them.
+2. Visit the map, Notes, Schedule and Review. **Expect:** no full-screen button anywhere.
+3. On desktop Chrome, same build. **Expect:** the button is present; clicking it enters full screen and the button remains to leave it.
+4. (If an iPad is to hand) **Expect:** the button is present.
+
 ### V1468976 — B2043888: phone tab-strip chevrons page cleanly and clamp at both ends `Blocker: real-device (iOS elastic overscroll — not producible headless)`
 
 Sandbox-proven, both engines: `ui-audit/verify-nav-arrows.mjs` (and `ENGINE=webkit`), 31/31; `test/scrollStrip.test.js`. The original overshoot did NOT reproduce headless, so this is the live confirmation. **Steps** (planyr.io on the iPhone, Map with no project; read the served chunk hash in the same observation):
