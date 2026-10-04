@@ -656,19 +656,19 @@ describe("NEW-5 (revised) — colourful basemap, no clustering, his places alway
   });
 });
 
-describe("NEW-1 basemap control — Site Plan (default) + Hybrid, one shared source, remembered, legible pins", () => {
+describe("NEW-1 basemap control — Satellite (default) + Hybrid, one shared source, remembered, legible pins", () => {
   it("ONE control with exactly the registry's choices — never a gallery, never a layers panel", () => {
     const map = src("components/FoodMap.jsx");
     expect([...map.matchAll(/data-testid="food-basemap-toggle"/g)]).toHaveLength(1);
-    expect(map).toMatch(/SITE_PLAN_BASEMAP_CHOICES\.map\(/);
+    expect(map).toMatch(/FOOD_BASEMAP_CHOICES\.map\(/);
     expect(map).not.toMatch(/basemapGallery|LayerPanel/);
   });
 
-  it("the choice is remembered per device and the new-user default is the Site Plan map", () => {
+  it("the choice is remembered per device and the new-user default is Satellite", () => {
     const map = src("components/FoodMap.jsx");
     expect(map).toMatch(/useState\(readStoredBasemap\)/);
     expect(map).toMatch(/localStorage\.setItem\(BASEMAP_STORAGE_KEY, basemap\)/);
-    expect(map).toMatch(/catch \(_\) \{ return SITE_PLAN_BASEMAP\.key; \}/);
+    expect(map).toMatch(/catch \(_\) \{ return SATELLITE_BASEMAP\.key; \}/);
   });
 
   it("the tile layers are swapped WHOLE on change (fresh layers + removal), never `setUrl` on a shared layer", () => {

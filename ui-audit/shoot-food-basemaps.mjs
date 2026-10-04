@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* shoot-food-basemaps — NEW-1 (B2018608). Before/after Houston screenshots of /food at devicePixelRatio 2,
  * metro (zoom 11) and neighbourhood (zoom 16), per basemap. The same script runs against the old build
- * (`--before`, whose buttons are "Site Plan"/"Hybrid") and the new one (Hybrid/Satellite).
+ * (`--before`, whose buttons are "Site Plan"/"Hybrid") and the new one (Satellite/Hybrid, B2070433).
  *   node ui-audit/shoot-food-basemaps.mjs http://localhost:4174 --shots dir --tag before --before
  *   node ui-audit/shoot-food-basemaps.mjs http://localhost:4173 --shots dir --tag after
  * Vector tiles: synthetic source unless `--live` (see lib/fakeVectorTiles.mjs). Imagery is real Esri. */
