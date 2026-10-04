@@ -21079,12 +21079,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // the name shows exactly once.
   const panelTitle = {
     yield: "Yield",
+    drainage: "Drainage", // the rail tab had no entry, so its header strip rendered EMPTY (× alone)
     parcel: `Parcels · ${parcels.length - supersededParcelIds.size}`,
     analysis: "Site Analysis",
     properties: "Properties", // B733 (dock-only; the companion supplies its body)
     references: "Overlays",
     standards: "Standards",
   };
+  // Flat-panel header (owner NEW-1, "Option A"): every rail panel's ONE header row carries the
+  // section icon, the title, the site · plan name as a one-line subtitle, and the ×. A section-level
+  // action (Drainage's flood-data ↻) portals into the header's action slot — one slot per host
+  // (docked column / floating card), read through state so the portal mounts once the slot exists.
+  const [dockActionsEl, setDockActionsEl] = useState(null);
+  const [floatActionsEl, setFloatActionsEl] = useState(null);
+  const panelHeaderSubtitle = [siteLabel, planLabel].filter(Boolean).join(" · ");
   // Render one left-rail panel's body for a given id, hosted in EITHER the docked column or a
   // floating card. A called render FUNCTION (never a mounted <Component/>) so the same JSX inlines
   // into either host with no remount on drag (MODULE-SCOPE-COMPONENTS).
@@ -21147,7 +21155,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const toggleHide = isAerialRow ? () => setShowAerial((v) => !v) : () => patchOverlay(o.id, { visible: o.visible === false });
                   const removeRow = () => { removeOverlay(o.id); if (isAerialRow) setShowAerial(true); };
                   return (
-                    <div key={o.id} data-testid={`reference-row-${o.id}`} data-reference-band={overlayBand(o)} data-reference-frommap={isAerialRow ? "1" : undefined} style={{ border: `1px solid ${on ? PAL.accent : "var(--border-default)"}`, borderRadius: 9, padding: 9, background: SURF_RAISED }}>
+                    <div key={o.id} data-testid={`reference-row-${o.id}`} data-reference-band={overlayBand(o)} data-reference-frommap={isAerialRow ? "1" : undefined} style={{ borderBottom: "1px solid var(--planner-border)", borderLeft: `2px solid ${on ? PAL.accent : "transparent"}`, padding: "9px 0 9px 8px" }}>
+                      {/* Flat panel (owner NEW-1): a list row divided by a rule — no card. The selected row keeps its accent as a left rule. */}
                       {/* Filename gets its own full-width row (B578) and WRAPS instead of truncating, so a long
                           sheet name is fully readable; the hide / lock / remove controls drop to their own row. */}
                       <button style={{ ...chip, width: "100%", textAlign: "left", whiteSpace: "normal", overflowWrap: "anywhere", lineHeight: 1.35, borderColor: on ? PAL.accent : "var(--border-default)", color: on ? PAL.accent : PAL.ink }} title={isAerialRow ? `${o.name} — the map capture; always beneath everything else` : `${o.name} — right-click for Copy, Duplicate, z-order, Lock, Align to base`} onClick={() => setSelOverlay(on ? null : o.id)} onContextMenu={(e) => onOverlayContext(e, o.id)}>{o.name}</button>
@@ -21436,7 +21445,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         this link routes to the Drainage module that owns the actual detention/
                         mitigation working surface (moved out of Yield's old "Stormwater" section). */}
                     <button type="button" onClick={() => setLeftPanel("drainage")}
-                      style={{ marginTop: 8, width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "7px 10px", border: `1px solid ${PAL.panelLine}`, borderRadius: RADIUS.md, background: "transparent", color: PAL.ink, fontWeight: 700, fontSize: 11.5, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                      style={{ marginTop: 8, width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "9px 0", border: "none", borderTop: `1px solid ${PAL.panelLine}`, borderRadius: 0, background: "transparent", color: PAL.ink, fontWeight: 700, fontSize: 11.5, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
                       <span>Floodplain drainage &amp; mitigation</span>
                       <span style={{ color: PAL.muted, fontWeight: 600, fontSize: 10.5, whiteSpace: "nowrap" }}>in Drainage →</span>
                     </button>
@@ -22014,7 +22023,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               worth being able to select. */}
           {_pid === "yield" && (<div data-testid="yield-metrics" style={{ display: "contents" }}>
           <YieldPanel
-            projectName={siteLabel} conceptName={planLabel}
             buildingCount={els.filter((e) => e.type === "building" && !e.dogEar).length}
             siteSqft={siteSqft} bldg={bldg} cov={cov} stalls={stalls} ratio={ratio}
             providedDetCf={providedDetCf} pondCount={pondCount}
@@ -22273,7 +22281,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               timestamp) Yield used to. */}
           {_pid === "drainage" && (<div data-testid="drainage-metrics" style={{ display: "contents" }}>
           <DrainagePanel
-            projectName={siteLabel} conceptName={planLabel}
+            headerSlot={dockActionsEl || floatActionsEl}
             drainage={drainFacts()}
             heat={{ available: !!fmHeat, on: fmHeatOn, user: fmHeatUser, onToggle: setFmHeatUser, totals: fmHeatTotals, ledgerAcFt: fmResultView?.volumeAcFt ?? null }}
             floodExposure={floodExposure} // NEW-3 — per-building floodplain exposure, its own Collapse here
@@ -26203,7 +26211,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               boxShadow: "0 -10px 28px rgba(0,0,0,0.32)",
               transition: sheetAnimated ? "height 220ms cubic-bezier(0.2,0.8,0.2,1), bottom 160ms ease-out" : "none",
             } : {
-              width: narrow ? "min(320px, calc(100vw - 74px))" : leftWidth, flex: "none", background: "var(--planner-panel)", display: "flex", flexDirection: "column", minHeight: 0,
+              width: narrow ? `min(320px, calc(100vw - ${54 + TOOLS_TAB_WIDTH_PX}px))` : leftWidth, // narrow: stop at the Tools edge tab so it never paints over the header ×/↻ (it did, at 20px of overlap)
+              flex: "none", background: "var(--planner-panel)", display: "flex", flexDirection: "column", minHeight: 0,
               ...(narrow ? { position: "absolute", left: 54, top: 0, bottom: 0, zIndex: 1100, boxShadow: "10px 0 28px rgba(0,0,0,0.35)" } : null),
             }}>
           {phoneSheetSolo && (<>
@@ -29316,7 +29325,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               there, and Properties is intentionally dock-only / non-floating). */}
           {leftPanel && !propsTab && (<>
           <PanelChrome
-            title={panelTitle[leftPanel]} floating={false} canFloat={!narrow}
+            title={panelTitle[leftPanel]} icon={<RailIcon id={leftPanel} size={18} />} subtitle={panelHeaderSubtitle}
+            actionsRef={leftPanel === "drainage" ? setDockActionsEl : undefined}
+            floating={false} canFloat={!narrow}
             onDetach={() => detachPanel(leftPanel)}
             onClose={() => setLeftPanel(null)}
             onToggle={() => { if (!narrow) detachPanel(leftPanel); }}
@@ -29338,7 +29349,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           each renders the SAME body as its docked form via renderPanelBody, so there's no
           duplicated JSX. Gated to !narrow — below the breakpoint the app is docked-only. */}
       {!narrow && Object.keys(floating).map((id) => (
-        <FloatingPanel key={id} title={panelTitle[id]} pos={floating[id]}
+        <FloatingPanel key={id} title={panelTitle[id]} icon={<RailIcon id={id} size={18} />} subtitle={panelHeaderSubtitle}
+          actionsRef={id === "drainage" ? setFloatActionsEl : undefined} pos={floating[id]}
           onMove={(p) => moveFloating(id, p)} onDock={() => dockPanel(id)} onClose={() => closeFloating(id)}
           boundsRef={wrapRef} width={leftWidth} data-testid={`floating-panel-${id}`}
           footer={id === "standards" ? standardsFooter : null}>
@@ -31294,22 +31306,22 @@ function Section({ title, children, collapsed, accent }) {
   // render a bare, always-open card.
   if (title == null || title === false) {
     return (
-      <div style={{ marginBottom: 9, background: SURF_RAISED, border: "1px solid var(--planner-border)", borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
-        <div style={{ padding: 12 }}>{children}</div>
-      </div>
+      // Flat panel (owner NEW-1, Option A): the panel IS the section — no second border, radius,
+      // background or inset. The scroll container's ordinary padding is the only inset.
+      <div data-flat-section="1" style={{ marginBottom: 9 }}>{children}</div>
     );
   }
   return (
-    <div style={{ marginBottom: 9, background: SURF_RAISED, border: "1px solid var(--planner-border)", borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
+    <div className="flat-section" data-flat-section="1" style={{ borderTop: "1px solid var(--planner-border)" }}>
       <div className="sec-head" onClick={() => setOpen((o) => !o)}
         role="button" tabIndex={0} aria-expanded={open} aria-label={title}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((o) => !o); } }} /* B531: keyboard-toggle the section */
-        style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "10px 12px", userSelect: "none" }}>
+        style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "10px 2px", userSelect: "none" }}>
         {accent && <span style={{ width: 6, height: 6, borderRadius: 99, background: accent, flex: "none" }} />}
         <span className="sec-title" style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: "var(--text-secondary)", flex: 1, transition: "color .12s" }}>{title}</span>
         <span style={{ fontSize: 10.5, color: "var(--text-secondary)", transform: open ? "rotate(90deg)" : "none", transition: "transform .18s ease", width: 9 }}>▶</span>
       </div>
-      {open && <div style={{ padding: "0 12px 12px" }}>{children}</div>}
+      {open && <div style={{ padding: "0 2px 12px" }}>{children}</div>}
     </div>
   );
 }
@@ -32053,16 +32065,14 @@ const row = (label, value, sub, muted, tag) => (
 const note = (text) => <div style={{ fontSize: 10.5, color: YIELD_PAL.muted, lineHeight: 1.4, margin: "3px 0 0" }}>{text}</div>;
 
 function YieldPanel({
-  projectName, conceptName, // v3 A1 — the header subtitle "{project} · {concept}"
   buildingCount, // v3 A6 — the BUILDINGS closed summary "{n} · {sf} SF"
   siteSqft, bldg, cov, stalls, ratio, trailers, impPct, pondArea, detPct, open,
   pondBermRingSf, // v3 C4 — site-wide berm-ring land area (ac source), for the LAND USE Pond legend title
   providedDetCf, pondCount, // B719: site-wide provided detention VOLUME (cf) + pond count — the same accumulator the drainage screen uses
-  bumpCount, bumpArea, bumpsUniform, inactiveCount, easeAll, easeArea, easeBldgArea, easePaveArea, collapsed,
+  bumpCount, bumpArea, bumpsUniform, inactiveCount, easeAll, easeArea, easeBldgArea, easePaveArea,
   parcelOverlaps, // B652: {count,names,overlapAcres} when active parcels overlap, else null
   onOpenDrainage, // NEW-1 (2026-09-05) — jumps the left rail to the new Drainage panel
 }) {
-  const [openPanel, setOpenPanel] = useState(!collapsed);
   const Y = YIELD_PAL;
   const acres = siteSqft / SQFT_PER_ACRE;
   const hasSite = siteSqft > 0;
@@ -32075,34 +32085,12 @@ function YieldPanel({
   const openPct = hasSite ? Math.max(0, 100 - buildingPct - pavingPct - detentionPct) : 0;
 
   return (
-    <div data-testid="yield-panel" style={{ marginBottom: 9, background: Y.panelBg, border: `1px solid ${Y.border}`, borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
-      {/* v3 A1 — header: SITE YIELD + "{project} · {concept}" subtitle. NEW-1 (2026-09-05) —
-          the flood-freshness element moved to the new Drainage panel; Yield now reports only
-          land use, coverage and costs (the pond rides the Land Use bar below, linked to Drainage). */}
-      <div onClick={() => setOpenPanel((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: "9px 11px", userSelect: "none" }}>
-        <span style={{ width: 32, height: 32, borderRadius: 9, background: Y.iconTile, display: "grid", placeItems: "center", flex: "none" }}>
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-            <rect x="2.2" y="2.2" width="13.6" height="13.6" rx="2.6" stroke={Y.buildingAccent} strokeWidth="1.4" />
-            <rect x="4.6" y="8" width="5.6" height="5.4" rx="0.7" fill={Y.buildingAccent} />
-            <rect x="10.6" y="4.4" width="3.2" height="3.2" rx="0.6" fill={Y.buildingAccent} opacity="0.5" />
-          </svg>
-        </span>
-        <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 1 }}>
-          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: Y.text }}>Site Yield</span>
-          {(projectName || conceptName) && (
-            <span style={{ fontSize: 10.5, color: Y.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{[projectName, conceptName].filter(Boolean).join(" · ")}</span>
-          )}
-        </span>
-        <span style={{ fontSize: 10.5, color: Y.faint, transform: openPanel ? "rotate(90deg)" : "none", transition: "transform .18s ease", width: 10, flex: "none" }}>▶</span>
-      </div>
-
-      {openPanel && (
-        <div style={{ padding: "0 12px 13px" }}>
+    <div data-testid="yield-panel" data-flat-panel="1">
           {/* B652 warning + B715 fix: two or more ACTIVE parcels cover the same ground. Site area now
               DISSOLVES the overlap (counts it once), so the acreage is correct — but an overlap usually
               means a duplicate/stray outline worth reviewing. Non-blocking; names the offending parcels. */}
           {parcelOverlaps && (
-            <div role="alert" style={{ margin: "10px 0 2px", padding: "8px 10px", borderRadius: 9, background: "rgba(234,179,8,0.13)", border: `1px solid ${Y.warnText}`, color: Y.warnText, fontSize: 11, lineHeight: 1.45 }}>
+            <div role="alert" style={{ margin: "10px 0 2px", padding: "2px 0 2px 9px", borderLeft: `3px solid ${Y.warnText}`, color: Y.warnText, fontSize: 11, lineHeight: 1.45 }}>
               <div style={{ fontWeight: 700 }}>⚠ Active parcels overlap</div>
               <div style={{ marginTop: 2 }}>{parcelOverlaps.names.join(", ")} cover the same ground (~{f2(parcelOverlaps.overlapAcres)} AC of overlap). Site area counts the shared ground once — but if one is a duplicate or stray outline, make it inactive in the Parcel panel.</div>
             </div>
@@ -32183,8 +32171,6 @@ function YieldPanel({
             {easePaveArea > 0 && row("· Restrict paving", `${f0(easePaveArea)} SF`, "", true)}
             {note("Gross of overlaps; subtracted from buildable area by the future yield engine.")}
           </>)}
-        </div>
-      )}
     </div>
   );
 }
@@ -32202,15 +32188,13 @@ function YieldPanel({
 // its one-line flood row). MODULE-SCOPE-COMPONENTS: its own top-level component, sharing only
 // the module-scope `groupHead`/`row`/`note` helpers with YieldPanel (see their definitions above).
 function DrainagePanel({
-  projectName, conceptName, // the header subtitle "{project} · {concept}"
   drainage, // B630–B632: required-vs-provided detention + tier + regime (null until a site exists)
   heat, // B809: { available, on, user, onToggle, totals, ledgerAcFt } — the fill-depth heat map
   onMitOpenChange, // B809: mirrors the mit group's expansion up (heat map defaults ON while open)
   floodExposure, // NEW-3: buildingFloodExposure() result — per-building footprint ∩ flood zone
   siteId, siteState, // B877440/B877441 — for the "Request criteria" action's filed row
-  collapsed,
+  headerSlot, // flat-panel layout: PanelChrome's action slot, where the flood-data freshness + ↻ portals in
 }) {
-  const [openPanel, setOpenPanel] = useState(!collapsed);
   // ⛔ B877440/B877441 — YieldPanel is its own top-level component (MODULE-SCOPE-COMPONENTS), so
   // it cannot close over SitePlanner's `critReqStatus`/`onRequestCriteria` (a real eslint no-undef
   // caught exactly this) — this is its own, independent copy of the same small UI-status pattern
@@ -34020,75 +34004,53 @@ function DrainagePanel({
   const floodAgeMs = drainage ? drainage.floodAgeMs : null;
 
   return (
-    <div data-testid="drainage-panel" style={{ marginBottom: 9, background: Y.panelBg, border: `1px solid ${Y.border}`, borderRadius: 12, boxShadow: "0 1px 2px rgba(28,25,20,0.04)", overflow: "hidden" }}>
-      {/* v3 A1 — header: DRAINAGE + "{project} · {concept}" subtitle (left); the ONE freshness
-          element "Flood data {age} ago · ↻" (right, neutral gray, amber while a verdict is blocked
-          loading — state D). This is the SAME freshness element the Yield panel used to show —
-          moved here wholesale, unchanged, per NEW-1's "one timestamp, owned by Drainage" rule. */}
-      <div onClick={() => setOpenPanel((o) => !o)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", padding: "9px 11px", userSelect: "none" }}>
-        <span style={{ width: 32, height: 32, borderRadius: 9, background: Y.iconTile, display: "grid", placeItems: "center", flex: "none" }}>
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
-            <path d="M9 2.5C9 2.5 3.8 8.6 3.8 12.2a5.2 5.2 0 0 0 10.4 0C14.2 8.6 9 2.5 9 2.5Z" stroke={Y.buildingAccent} strokeWidth="1.4" fill="none" />
-            <path d="M6.6 11.4c0 1.4 1.1 2.5 2.4 2.5" stroke={Y.buildingAccent} strokeWidth="1.2" fill="none" opacity="0.6" />
-          </svg>
-        </span>
-        <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 1 }}>
-          <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: Y.text }}>Drainage</span>
-          {(projectName || conceptName) && (
-            <span style={{ fontSize: 10.5, color: Y.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{[projectName, conceptName].filter(Boolean).join(" · ")}</span>
+    <div data-testid="drainage-panel" data-flat-panel="1">
+      {/* v3 A1 — the ONE freshness element "Flood data {age} ago · ↻". Flat-panel layout (owner
+          NEW-1): it is the section-level refresh action of the panel's ONE header row, so it
+          portals into PanelChrome's action slot instead of drawing a header of its own. */}
+      {headerSlot && drainage && drainage.onCheck && createPortal(
+        <span onClick={(e) => e.stopPropagation()} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, color: verdictLoading ? Y.warnText : Y.muted, whiteSpace: "nowrap", flex: "none" }}>
+          {/* NEW-4 — THE LIGHT (owner: "leave it green while elements are in the same spot, once
+              they're moved turn it red so we know to recheck"). One dot, no new line: green while
+              the parcels / fill / ponds the last check was computed against are where they were,
+              red once one of them moves, and nothing at all before a first check — a dot over a
+              plan that was never checked would read as a verdict. The reason rides the hover
+              (PANEL-BREVITY: a title is not visible copy), and `data-drain-freshness` lets a
+              headless check assert the state without reading colours. */}
+          {drainage.freshness && (drainage.freshness.state === "fresh" || drainage.freshness.state === "stale") && (
+            // NEW-4 (B849713) — a stale check is a WARNING (something moved since he last ran it),
+            // never an ERROR, so the dot is amber, not red — owner: "a yellow stale indicator when
+            // he has run the check and has since changed elements on the plan."
+            <span data-drain-freshness={drainage.freshness.state} aria-label={drainage.freshness.state === "stale" ? "Flood check is out of date" : "Flood check is up to date"}
+              title={[drainage.freshness.note || "The flood check still matches what's drawn.", drainage.groundElevNote].filter(Boolean).join("\n")}
+              data-ground-elev={drainage.groundElev?.status || undefined}
+              data-ground-cached={drainage.groundElev?.fromCache ? "1" : undefined}
+              style={{ color: floodDotColorToken(drainage.freshness.state) === "warn" ? Y.warnText : "var(--success-text)", fontSize: 9, lineHeight: 1, flex: "none" }}>●</span>
           )}
-        </span>
-        {openPanel && drainage && drainage.onCheck && (
-          // v3 A1 — the ONE freshness element. The ↻ (re-check) is ALWAYS reachable when there's a
-          // drainage context; the age shows when known ("Flood data 16h ago"), and the line goes
-          // amber while a verdict is blocked loading (state D). v3 B3 — an unknown age reads
-          // "Flood data: not checked" (never a bare "Flood data"); a "·" separates the ↻.
-          <span onClick={(e) => e.stopPropagation()} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, color: verdictLoading ? Y.warnText : Y.muted, whiteSpace: "nowrap", flex: "none" }}>
-            {/* NEW-4 — THE LIGHT (owner: "leave it green while elements are in the same spot, once
-                they're moved turn it red so we know to recheck"). One dot, no new line: green while
-                the parcels / fill / ponds the last check was computed against are where they were,
-                red once one of them moves, and nothing at all before a first check — a dot over a
-                plan that was never checked would read as a verdict. The reason rides the hover
-                (PANEL-BREVITY: a title is not visible copy), and `data-drain-freshness` lets a
-                headless check assert the state without reading colours. */}
-            {drainage.freshness && (drainage.freshness.state === "fresh" || drainage.freshness.state === "stale") && (
-              // NEW-4 (B849713) — a stale check is a WARNING (something moved since he last ran it),
-              // never an ERROR, so the dot is amber, not red — owner: "a yellow stale indicator when
-              // he has run the check and has since changed elements on the plan."
-              <span data-drain-freshness={drainage.freshness.state} aria-label={drainage.freshness.state === "stale" ? "Flood check is out of date" : "Flood check is up to date"}
-                title={[drainage.freshness.note || "The flood check still matches what's drawn.", drainage.groundElevNote].filter(Boolean).join("\n")}
-                data-ground-elev={drainage.groundElev?.status || undefined}
-                data-ground-cached={drainage.groundElev?.fromCache ? "1" : undefined}
-                style={{ color: floodDotColorToken(drainage.freshness.state) === "warn" ? Y.warnText : "var(--success-text)", fontSize: 9, lineHeight: 1, flex: "none" }}>●</span>
-            )}
-            {/* NEW-2(b) / NEW-3 — the elevation leg is the ONLY part of the check that can still be
-                outstanding once the panel has published, and a failed one must never be silent. One
-                muted glyph, no new line: "…" while it is still loading, "!" when the service failed
-                or timed out (named in the hover). Nothing at all in the ordinary case, which is now
-                the common case because the value is cached. */}
-            {drainage.groundElev && (drainage.groundElev.status === "pending" || drainage.groundElev.status === "unavailable") && (
-              <span data-ground-elev={drainage.groundElev.status} title={drainage.groundElevNote || undefined}
-                aria-label={drainage.groundElev.status === "pending" ? "Ground elevation still loading" : "Ground elevation unavailable"}
-                style={{ color: drainage.groundElev.status === "unavailable" ? Y.warnText : Y.faint, fontSize: 10, lineHeight: 1, flex: "none", cursor: "help" }}>
-                {drainage.groundElev.status === "unavailable" ? "!" : "…"}
-              </span>
-            )}
-            {/* NEW-20(a) — while a fetch is in flight the line says so ("checking…") instead of an
-                unchanging "not checked", and the ↻ spins + disables so the click is never silent.
-                NEW-4 (B849713, owner amendment) — a STALE check now KEEPS the last-run date instead
-                of replacing it: "re-check" alone didn't say when it last ran, and he wants that date
-                visible (the amber dot above already carries the "something moved" alarm, so the text
-                doesn't have to). */}
-            <span>{floodStatusLine({ refreshing: drainRefreshing, floodChecked: drainage.floodChecked, freshnessState: drainage.freshness?.state, floodAgeMs })}</span>
-            <span aria-hidden="true" style={{ color: Y.faint }}>·</span>
-            <button type="button" onClick={drainRefreshing ? undefined : drainage.onCheck} disabled={drainRefreshing} aria-busy={drainRefreshing} title={drainRefreshing ? "Re-checking the flood data…" : "Re-pull the GIS flood data for the drawn area."} style={{ border: "none", background: "none", color: verdictLoading ? Y.warnText : "var(--accent)", cursor: drainRefreshing ? "default" : "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit", padding: 0, lineHeight: 1, display: "inline-block", animation: drainRefreshing ? "spin 0.9s linear infinite" : undefined }} aria-label="Re-check flood data">↻</button>
-          </span>
-        )}
-        <span style={{ fontSize: 10.5, color: Y.faint, transform: openPanel ? "rotate(90deg)" : "none", transition: "transform .18s ease", width: 10, flex: "none" }}>▶</span>
-      </div>
-
-      {openPanel && (
-        <div style={{ padding: "0 12px 13px" }}>
+          {/* NEW-2(b) / NEW-3 — the elevation leg is the ONLY part of the check that can still be
+              outstanding once the panel has published, and a failed one must never be silent. One
+              muted glyph, no new line: "…" while it is still loading, "!" when the service failed
+              or timed out (named in the hover). Nothing at all in the ordinary case, which is now
+              the common case because the value is cached. */}
+          {drainage.groundElev && (drainage.groundElev.status === "pending" || drainage.groundElev.status === "unavailable") && (
+            <span data-ground-elev={drainage.groundElev.status} title={drainage.groundElevNote || undefined}
+              aria-label={drainage.groundElev.status === "pending" ? "Ground elevation still loading" : "Ground elevation unavailable"}
+              style={{ color: drainage.groundElev.status === "unavailable" ? Y.warnText : Y.faint, fontSize: 10, lineHeight: 1, flex: "none", cursor: "help" }}>
+              {drainage.groundElev.status === "unavailable" ? "!" : "…"}
+            </span>
+          )}
+          {/* NEW-20(a) — while a fetch is in flight the line says so ("checking…") instead of an
+              unchanging "not checked", and the ↻ spins + disables so the click is never silent.
+              NEW-4 (B849713, owner amendment) — a STALE check now KEEPS the last-run date instead
+              of replacing it: "re-check" alone didn't say when it last ran, and he wants that date
+              visible (the amber dot above already carries the "something moved" alarm, so the text
+              doesn't have to). */}
+          <span>{floodStatusLine({ refreshing: drainRefreshing, floodChecked: drainage.floodChecked, freshnessState: drainage.freshness?.state, floodAgeMs })}</span>
+          <span aria-hidden="true" style={{ color: Y.faint }}>·</span>
+          <button type="button" onClick={drainRefreshing ? undefined : drainage.onCheck} disabled={drainRefreshing} aria-busy={drainRefreshing} title={drainRefreshing ? "Re-checking the flood data…" : "Re-pull the GIS flood data for the drawn area."} style={{ border: "none", background: "none", color: verdictLoading ? Y.warnText : "var(--accent)", cursor: drainRefreshing ? "default" : "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit", padding: 0, lineHeight: 1, display: "inline-block", animation: drainRefreshing ? "spin 0.9s linear infinite" : undefined }} aria-label="Re-check flood data">↻</button>
+        </span>,
+        headerSlot,
+      )}
           {/* v3 A2 — the VERDICT STRIP: one row per verdict, grid [40px pill | 1fr sentence |
               auto]. Word-only equal-width SHORT/OK/… pills (G5); the provided/required pair is
               bold+nowrap and renders ONCE per panel here (G1). The sentence NEVER ellipsizes — it
@@ -34100,15 +34062,10 @@ function DrainagePanel({
             // NEW-7 — the banded chip needs a THIRD tone: "warn" (amber) for a surplus too thin to
             // rely on. Green now means real headroom, not merely "not short".
             const pillCol = { danger: ["var(--danger-bg)", "var(--danger-text)"], good: ["var(--success-bg)", "var(--success-text)"], warn: ["rgba(234,179,8,0.16)", "var(--warn-text)"], neutral: ["var(--planner-panel)", Y.muted] };
-            const pillStyle = (tone) => {
-              const [bg, fg] = pillCol[tone] || pillCol.neutral;
-              return { width: 40, boxSizing: "border-box", flex: "none", textAlign: "center", fontSize: 9, fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase", color: fg, background: bg, borderRadius: 5, padding: "3px 0", whiteSpace: "nowrap" };
-            };
             return (
               <div style={{ margin: "10px 0 6px" }} data-testid="yield-verdict-strip">
                 {verdictStrip.map((v) => (
-                  <div key={v.key} style={{ display: "grid", gridTemplateColumns: "40px 1fr", alignItems: "center", gap: 8, minHeight: 26 }}>
-                    <span style={pillStyle(v.tone)}>{v.pill}</span>
+                  <div key={v.key} data-verdict-row={v.key} style={{ padding: "4px 0", minHeight: 26 }}>
                     {/* The sentence takes the full remaining width and NEVER ellipsizes (item 2).
                         The "…" pill + "checking flood data" already convey a loading row, so no
                         competing "↻ retrying" element squeezes the sentence into an overflow. */}
@@ -34119,12 +34076,18 @@ function DrainagePanel({
                         wrappable span, and the whole line carries the full text in a title. A single
                         nowrap headline was clipped mid-word at the panel edge — cutting off the one
                         word that carried the meaning ("…counted twi"). */}
-                    <span data-testid={`yield-verdict-sentence-${v.key}`} title={v.text} style={{ display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap", fontSize: 12.5, color: Y.text, lineHeight: 1.35, whiteSpace: "normal", overflowWrap: "anywhere", minWidth: 0 }}>
-                      <span style={{ minWidth: 0 }}>{v.label}: {v.pair
-                        ? <><b style={{ whiteSpace: "nowrap", fontWeight: 750 }}>{v.pairText || v.sentence}</b>{v.suffix ? <span style={{ whiteSpace: "normal", overflowWrap: "anywhere" }}> — {v.suffix}</span> : null}</>
+                    <span data-testid={`yield-verdict-sentence-${v.key}`} title={v.text} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 12.5, color: Y.text, lineHeight: 1.35, whiteSpace: "normal", overflowWrap: "anywhere", minWidth: 0 }}>
+                      {/* Flat rows (owner NEW-1): LABEL left, VALUE right. What the old left-gutter pill
+                          said now rides the right end of the value — a tone-coloured status word (SHORT /
+                          THIN / OK / N/A / FAIL), or, for a loading / pending row, the sentence itself
+                          ("checking flood data", "not checked yet"), so no state is dropped. */}
+                      <span data-verdict-label="1" style={{ flex: "none", color: Y.rowLabel }}>{v.label}</span>
+                      <span data-verdict-value="1" style={{ flex: 1, minWidth: 0, textAlign: "right" }}>{v.pair
+                        ? <b style={{ whiteSpace: "nowrap", fontWeight: 750 }}>{v.pairText || v.sentence}</b>
                         // NEW-20(a) — a recheck row reads "checking…" while its fetch is in flight,
                         // never a frozen "not checked yet" that looks like the click did nothing.
-                        : <span style={{ color: v.loading || (v.recheck && drainRefreshing) ? Y.muted : Y.text }}>{v.recheck && drainRefreshing ? "checking…" : v.sentence}</span>}</span>
+                        : <span style={{ color: v.loading || (v.recheck && drainRefreshing) ? Y.muted : Y.text }}>{v.recheck && drainRefreshing ? "checking…" : v.sentence}</span>}
+                        {v.pill && v.pill !== "…" ? <span data-verdict-status={v.pill} style={{ marginLeft: 8, fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", textTransform: "uppercase", whiteSpace: "nowrap", color: (pillCol[v.tone] || pillCol.neutral)[1] }}>{v.pill}</span> : null}</span>
                       {/* v3 B2 — an unassessed Buildability row (and the "set BFE" state) hangs a ↻
                           that re-pulls the flood data, since its own group was deleted. NEW-20(a): the
                           ↻ spins + disables while a fetch is in flight so the click is never silent. */}
@@ -34154,6 +34117,7 @@ function DrainagePanel({
                         <RowInfo label="Trace mitigation requirement" sections={[{ text: `The mapped floodplain clips this site by only about ${v.traceAcFt.toFixed(3)} AC-FT of storage — grid-cell crumbs where the zone edge grazes the boundary, below the ${TRACE_ACFT.toFixed(2)}-ac-ft materiality floor. Treated as not required; if the flood boundary runs close to your work area, confirm with your engineer.` }]} />
                       )}
                     </span>
+                    {v.pair && v.suffix ? <div data-testid={`yield-verdict-suffix-${v.key}`} style={{ fontSize: 11, color: Y.text, lineHeight: 1.4, marginTop: 2, whiteSpace: "normal", overflowWrap: "anywhere" }}>{v.suffix}</div> : null}
                     {/* R1 — the ASSUMED coincident-storm policy stated on the verdict line whenever it
                         materially drives the usable number (never silently). Amber = ASSUMED. Hover shows
                         the citation target (BKDD Rules 22-01 + Waller Appendix E Sec 5) until it verifies. */}
@@ -34352,8 +34316,6 @@ function DrainagePanel({
               );
             })()}
           </Collapse>
-        </div>
-      )}
     </div>
   );
 }

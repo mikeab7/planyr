@@ -936,6 +936,17 @@ Stopping rule: this passes and moves to `docs/archive/VERIFICATION-DONE.md` once
 3. (Optional sanity check — confirms nothing else moved.) Re-run `db/test/sites_cas_ownership_independent.test.sql`. **Expect:** unaffected, still all PASS.
 - **Stopping rule:** closes when step 2 confirms Case 13 flips to PASS against the real deployed function — or it fails and is filed as a recurrence against B1853664, per STANDING RULE #2 (a null result is a FINDING, never a silent close).
 
+### V1421552 — B1996464: flat rail panels show real data correctly (populated Drainage rows, Analysis findings, Overlays with live layers) `Blocker: live-GIS`
+
+Sandbox-proven (`ui-audit/verify-flat-rail-panels.mjs` 0 failing across 14 panel renders; the pre-change build fails it 26 ways; `test/flatRailPanels.test.js`). **Still needs planyr.io where the flood/GIS services answer** — offline the Drainage rows only ever read "not checked yet" and Analysis never loads findings, so the populated states were not seen.
+**Steps** (note the served chunk hash in the same observation as each result):
+1. Site → a georeferenced plan (Silvestri / Concept D) → Drainage on a phone width. **Expect:** one header row (icon, DRAINAGE, site · plan, "Flood data … ↻", ×), no empty strip above it, no inner card; press ↻ and the header line reads "checking…" then an age.
+2. After the check completes: **Expect:** Detention / Mitigation / Buildability are label-left, value-right lines; a short row shows its SHORT/THIN/OK word in tone colour at the right end; the "Rule applied…" amber note and any reconciliation clause run full width under their row; "Buildings in the floodplain" is a divider-separated fold.
+3. Analysis tab after its screen loads. **Expect:** each finding is a divider row (glyph, name, status) — no tinted card — and expanding one indents its detail under the name.
+4. Overlays with a dropped PDF selected. **Expect:** the selected row shows an accent rule on its left edge, others none; controls on the row all work.
+5. Repeat 1 at desktop width. **Expect:** same, plus the detach icon still pops the panel to a floating card whose header carries the same icon/title/subtitle/↻.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1996464.
+
 ### V1308368 — B1838704: a polygon crop made from the Site tab OVERLAYS panel survives a signed-in cloud save, a reload on a second device, and prints clipped `Blocker: auth`
 
 **What was verified here (sandbox, logged out).** `node ui-audit/verify-site-tab-overlay-crop.mjs` — 39/39 on the built app: poly + rect crop via the panel, pixels in/out, undo/redo, Rotate, Opacity, Bring in front of the plan, lock refusal, export-sheet raster parity, reload (on-device storage), DXF and PDF (+ Knock out white paper). Unit suites green; lint 0 errors; build green; `OverlayCropDialog` is its own lazy chunk.
