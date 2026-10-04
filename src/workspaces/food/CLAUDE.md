@@ -77,6 +77,14 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
 - `components/DishesSection.jsx` (B1873008) — the place-detail Dishes table, its inline add/edit
   row, "The order," and the per-dish history view. Also mounts inside an editing `VisitCard` for
   the "add dishes under this visit" flow.
+- `lib/keyboardInset.js`, `lib/draftDishes.js`, `lib/noAutofill.js` (B2057920, "Food on a phone") — the
+  covered-by-keyboard height from `visualViewport` (BottomSheet lifts by it), the dishes typed into a
+  NEW visit before it exists (`FoodApp.submitVisit` writes the visit then each dish, all-or-nothing),
+  and the `autocomplete=off` + non-contact `name` props every free-text field spreads (a source sweep in
+  foodPhone.test fails a field that doesn't). There is NO "What I had" input any more; old
+  visits' saved `what_i_had` text stays readable and is never rewritten. At phone width ratings are a
+  1-10 tap grid (`ScoreTapGrid` in ScoreMeter), desktop keeps the slider. Phone harness:
+  verify-food-phone (ui-audit) + its food-panel fixture page.
 - `components/ScoreMeter.jsx` (B1873008) — the per-dish score control (half-point, 1.0–10.0). A
   deliberate sibling of `VisitPanel.jsx`'s own `RatingSlider`, not a replacement — see its own
   header for why the two stayed separate.

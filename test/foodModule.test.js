@@ -1374,8 +1374,8 @@ describe("ambiance rating — a second, independent 1-10 rating; the map pin sta
     const panel = src("components/VisitPanel.jsx");
     const sliderUsages = [...panel.matchAll(/<RatingSlider /g)];
     expect(sliderUsages.length).toBe(2);
-    expect(panel).toMatch(/Food\s*<RatingSlider value=\{rating\} onChange=\{setRating\} label="Food rating" \/>/);
-    expect(panel).toMatch(/Ambiance\s*<RatingSlider value=\{ratingAmbiance\} onChange=\{setRatingAmbiance\} label="Ambiance rating" \/>/);
+    expect(panel).toMatch(/Food\s*<RatingSlider value=\{rating\} onChange=\{setRating\} label="Food rating" isMobile=\{isMobile\} \/>/);
+    expect(panel).toMatch(/Ambiance\s*<RatingSlider value=\{ratingAmbiance\} onChange=\{setRatingAmbiance\} label="Ambiance rating" isMobile=\{isMobile\} \/>/);
     expect(panel).not.toMatch(/>Rating</); // the old ambiguous bare label is gone
   });
 
@@ -1581,7 +1581,7 @@ describe("B668194 — a successful visit save clears the form; a failed one keep
     const submitVisitFn = app.slice(app.indexOf("const submitVisit = useCallback"), app.indexOf("const removeVisit = useCallback"));
     // The optimistic push happens BEFORE the await — i.e. before the network round-trip, not after.
     const optimisticIdx = submitVisitFn.indexOf("setVisits((v) => [optimisticVisit, ...v]);");
-    const awaitIdx = submitVisitFn.indexOf("const { error: err } = await insertVisit(payload);");
+    const awaitIdx = submitVisitFn.indexOf("const { data: savedVisit, error: err } = await insertVisit(payload);");
     expect(optimisticIdx).toBeGreaterThanOrEqual(0);
     expect(awaitIdx).toBeGreaterThan(optimisticIdx);
     // The optimistic id has a shape that can NEVER collide with a real row's uuid, so the
@@ -1596,14 +1596,14 @@ describe("B668194 — a successful visit save clears the form; a failed one keep
   it("VisitForm awaits the result and resets every field ONLY on success — a failed save leaves everything typed", () => {
     const panel = src("components/VisitPanel.jsx");
     expect(panel).toMatch(/const submit = async \(e\) => \{/);
-    expect(panel).toMatch(/const saved = await onSubmit\(\{/);
+    expect(panel).toMatch(/const saved = await onSubmit\(fields\);/);
     expect(panel).toMatch(/if \(saved\) \{/);
     const resetBlock = panel.slice(panel.indexOf("if (saved) {"), panel.indexOf("if (saved) {") + 400);
     expect(resetBlock).toMatch(/setRating\(null\);/);
     expect(resetBlock).toMatch(/setRatingAmbiance\(null\);/);
     expect(resetBlock).toMatch(/setCost\(""\);/);
     expect(resetBlock).toMatch(/setVisitedOn\(""\);/);
-    expect(resetBlock).toMatch(/setWhatIHad\(""\);/);
+    expect(resetBlock).toMatch(/setDishRows\(/); // NEW-1: the dish drafts reset too (the old "What I had" box is gone)
     expect(resetBlock).toMatch(/setWhatWasGood\(""\);/);
     expect(resetBlock).toMatch(/setNotes\(""\);/);
     expect(resetBlock).toMatch(/setWouldReturn\(null\);/);
@@ -1613,7 +1613,7 @@ describe("B668194 — a successful visit save clears the form; a failed one keep
     const panel = src("components/VisitPanel.jsx");
     // The reset calls appear exactly once each, all inside the `if (saved)` block (checked above)
     // — not duplicated at the top of submit() where they'd run before the save even resolves.
-    for (const setter of ["setRating(null)", "setCost(\"\")", "setWhatIHad(\"\")"]) {
+    for (const setter of ["setRating(null)", "setCost(\"\")", "setWhatWasGood(\"\")"]) {
       const count = panel.split(setter).length - 1;
       expect(count).toBe(1);
     }
@@ -2192,7 +2192,7 @@ describe("BottomSheet.jsx — a generic drag-to-resize primitive, content-agnost
   });
 
   it("respects the iOS safe-area inset at the bottom", () => {
-    expect(sheet).toMatch(/paddingBottom:\s*"env\(safe-area-inset-bottom\)"/);
+    expect(sheet).toMatch(/paddingBottom:\s*kbOpen \? 0 : "env\(safe-area-inset-bottom\)"/); // NEW-1: the keyboard owns the bottom edge while it is up
   });
 
   it("the drag handle's own hit area is at least 44 CSS px tall", () => {
@@ -2209,7 +2209,7 @@ describe("BottomSheet.jsx — a generic drag-to-resize primitive, content-agnost
   });
 
   it("the sheet is positioned fixed to the viewport bottom, above the map's own z-index", () => {
-    expect(sheet).toMatch(/position:\s*"fixed",\s*left:\s*0,\s*right:\s*0,\s*bottom:\s*0,\s*zIndex:\s*700/);
+    expect(sheet).toMatch(/position:\s*"fixed",\s*left:\s*0,\s*right:\s*0,\s*bottom:\s*kbInset,\s*zIndex:\s*700/);
   });
 
   it("uses resolveSnap/heightForSnap from the pure lib file, not inline duplicate math", () => {
@@ -2458,7 +2458,7 @@ describe("VisitPanel — edit a past visit: reuses VisitForm, opens via card tap
     expect(formBody).toMatch(/useState\(\(\) => \(initial\?\.rating != null \? Number\(initial\.rating\) : null\)\)/);
     expect(formBody).toMatch(/useState\(\(\) => \(initial\?\.rating_ambiance != null \? Number\(initial\.rating_ambiance\) : null\)\)/);
     expect(formBody).toMatch(/useState\(\(\) => \(initial\?\.cost != null \? String\(initial\.cost\) : ""\)\)/);
-    expect(formBody).toMatch(/useState\(\(\) => initial\?\.what_i_had \|\| ""\)/);
+    expect(formBody).not.toMatch(/useState\(\(\) => initial\?\.what_i_had/); // NEW-1: no editable "What I had"; the saved text is shown read-only
     expect(formBody).toMatch(/useState\(\(\) => initial\?\.what_was_good \|\| ""\)/);
     expect(formBody).toMatch(/useState\(\(\) => initial\?\.notes \|\| ""\)/);
     expect(formBody).toMatch(/useState\(\(\) => initial\?\.would_return \?\? null\)/);
@@ -3211,16 +3211,17 @@ describe("ScoreMeter — REDESIGN (NEW-1, 2026-09-28): QUARTER-point steps, minu
     expect(DISH_SCORE_TICKS).toEqual([1, 3, 5, 7, 9, 10]);
   });
 
-  it("⛔ STILL exactly ONE <input type=\"range\"> and no per-value <button> grid — the owner already rejected 'individual buttons for 20 options' for the visit rating (2026-08-18); the minus/plus NUDGE buttons step the existing slider, they are not that rejected shape", () => {
+  it("⛔ STILL exactly ONE <input type=\"range\"> (desktop) — the per-value button grid exists ONLY on a phone (NEW-1 'Food on a phone': the owner asked for one-tap rating on a thumb); desktop keeps the slider + 3 buttons", () => {
     const meter = src("components/ScoreMeter.jsx");
     const body = meter.slice(meter.indexOf("export default function ScoreMeter"));
-    const rangeInputs = body.match(/type="range"/g) || [];
-    expect(rangeInputs).toHaveLength(1);
+    expect(body.match(/type="range"/g) || []).toHaveLength(1);
     // The tick-label .map() renders plain <span> ticks, never a button grid.
     const ticksMapStart = body.indexOf("DISH_SCORE_TICKS.map");
     expect(body.slice(ticksMapStart, ticksMapStart + 300)).not.toMatch(/<button/);
-    // Exactly three real <button> elements total (minus, plus, Clear) — never one per score stop.
-    expect((body.match(/<button/g) || []).length).toBe(3);
+    // The whole-point grid is a separate component rendered only behind `isMobile`.
+    expect(body).toMatch(/\{isMobile \? \(\s*<>\s*<ScoreTapGrid/);
+    // Buttons: phone minus/plus + desktop minus/plus + Clear = 5 — never one per score stop here.
+    expect((body.match(/<button/g) || []).length).toBe(5);
     expect(meter).toMatch(/step=\{DISH_SCORE_STEP\}/);
   });
 

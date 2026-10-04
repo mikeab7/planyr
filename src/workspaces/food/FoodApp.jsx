@@ -191,8 +191,16 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   // date all null, matching how the table already renders a visit that never set them) and
   // `isWishlist: true`, which VisitList's own shortlist filter chip reads.
   const listRows = useMemo(() => {
+    // NEW-1: the list's "Had" column shows the dishes rated at each visit; old visits that only
+    // have the saved free-text `what_i_had` fall back to it in VisitList (nothing is lost).
+    const dishNamesByVisit = new Map();
+    for (const d of dishes) {
+      if (!dishNamesByVisit.has(d.visit_id)) dishNamesByVisit.set(d.visit_id, []);
+      dishNamesByVisit.get(d.visit_id).push(d.name);
+    }
     const visitRows = visits.map((v) => ({
       ...v,
+      dishNames: (dishNamesByVisit.get(v.id) || []).join(", "),
       placeName: v.place_id ? (placeNames[v.place_id]?.name || "…") : v.custom_name,
       isWishlist: false,
     }));
@@ -206,7 +214,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
         isWishlist: true,
       }));
     return [...visitRows, ...wishlistOnlyRows];
-  }, [visits, wishlist, placeNames, loggedIds, manualPinKeys]);
+  }, [visits, dishes, wishlist, placeNames, loggedIds, manualPinKeys]);
 
   const openPlace = useCallback((place) => { setSelected({ kind: "place", place }); setError(null); }, []);
   const openManualPin = useCallback((pin) => { setSelected({ kind: "manualPin", pin }); setError(null); }, []);
@@ -247,8 +255,12 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   // B668194 — returns whether the save actually succeeded, so VisitForm can clear its own
   // fields ONLY on a confirmed write (see VisitPanel.jsx's header comment) rather than leaving
   // stale text sitting in the boxes, or clearing it before a failed save is even known about.
-  const submitVisit = useCallback(async (fields) => {
+  const submitVisit = useCallback(async (allFields) => {
     if (!selected) return false;
+    // NEW-1 (Food on a phone): a new visit now carries its DISHES. They are not columns of
+    // food_visits — peeled off here and written to food_dishes once the visit exists (a dish needs
+    // its visit's id). `fields` is exactly what the visit row stored before.
+    const { dishes: draftDishes = [], ...fields } = allFields;
     setPending(true); setError(null);
     const payload = selected.kind === "place"
       ? { place_id: selected.place.id, ...fields }
@@ -271,13 +283,47 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     const optimisticVisit = { ...payload, id: optimisticId, created_at: new Date().toISOString() };
     setVisits((v) => [optimisticVisit, ...v]);
 
-    const { error: err } = await insertVisit(payload);
-    setPending(false);
+    const { data: savedVisit, error: err } = await insertVisit(payload);
     if (err) {
+      setPending(false);
       setVisits((v) => v.filter((x) => x.id !== optimisticId)); // rollback — never a phantom visit
       setError(err.message || "Couldn't save that visit.");
       return false;
     }
+    // The dishes, all-or-nothing from the person's side (LOUD-FAILURE): if any dish fails to
+    // write, the just-created visit is removed again and the form stays open with everything
+    // still typed, so a retry can't leave a half-logged visit or a duplicate.
+    if (draftDishes.length) {
+      const written = [];
+      let dishErr = null;
+      for (const d of draftDishes) {
+        const { data: row, error: e } = await insertDish({ ...d, visit_id: savedVisit.id });
+        if (e) { dishErr = e; break; }
+        written.push(row);
+      }
+      if (dishErr) {
+        const { error: undoErr } = await deleteVisit(savedVisit.id);
+        setPending(false);
+        setVisits((v) => v.filter((x) => x.id !== optimisticId));
+        await reloadVisits(); await reloadDishes();
+        setError(undoErr
+          ? `A dish didn't save (${dishErr.message || "unknown error"}) and the visit couldn't be undone — check this place's visits before saving again.`
+          : `A dish didn't save (${dishErr.message || "unknown error"}), so nothing was logged. Your entries are still here — try Save again.`);
+        return false;
+      }
+      // A saved dish whose name matches an open "want to try" dish at this place strikes it done
+      // (same rule saveDish applies to a dish added from place detail).
+      const identity = payload.place_id
+        ? { placeId: payload.place_id }
+        : { customName: payload.custom_name, customLat: payload.custom_lat, customLon: payload.custom_lon };
+      for (const row of written) {
+        const match = matchingOpenDishWishlist(dishWishlist, identity, row?.name, manualGroupKey);
+        if (match) await markDishDone(match.id, true);
+      }
+      await reloadDishes();
+      await reloadDishWishlist();
+    }
+    setPending(false);
     // First visit at a flagged place clears the flag automatically (B669312, owner: "do not
     // prompt") — it's no longer a want-to-try once he's actually been. Matched by place_id, or
     // by the manual pin's own (name, lat, lon) key for a dropped/manual pin.
@@ -289,7 +335,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     await reloadWishlist();
     if (selected.kind === "newPin") setSelected(null); // the pin now exists as a manual pin; close and let it re-render from data
     return true;
-  }, [selected, manualDraftName, reloadVisits, reloadWishlist, wishlist]);
+  }, [selected, manualDraftName, reloadVisits, reloadWishlist, wishlist, reloadDishes, reloadDishWishlist, dishWishlist]);
 
   // "Want to try" toggle (B669312) — one click on, one click off, working for a snapshot place,
   // an existing manual pin, or a brand-new dropped pin not yet saved anywhere (which needs a

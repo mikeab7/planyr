@@ -18,7 +18,8 @@
  *
  * "What was good" (B634979) gets its own column here too — each row shows THAT visit's own
  * value (never an aggregate; the panel's own accumulated summary is a separate concern, see
- * VisitPanel.jsx's LikedDishes) — same shape as the existing "What I had" column beside it.
+ * VisitPanel.jsx's LikedDishes) — same shape as the "Had" column beside it (NEW-1: that column used to be "What I had"; it now lists the dishes
+ * rated at the visit and falls back to the old saved free text for visits logged before dishes were captured).
  *
  * ⛔ "WANT TO TRY" SHORTLIST (B669312, owner chat block, 2026-08-22). Flagged-but-unvisited places
  * appear as rows here too (FoodApp's `listRows` folds them in, `isWishlist: true`, every visit
@@ -124,7 +125,7 @@ export default function VisitList({ visits, query, onSelect, selectedKey }) {
                 <th style={{ padding: "4px 8px", fontWeight: 700 }}>Ambiance</th>
                 <th style={{ padding: "4px 8px", fontWeight: 700 }}>Cost</th>
                 <th style={{ padding: "4px 8px", fontWeight: 700 }}>Date</th>
-                <th style={{ padding: "4px 8px", fontWeight: 700 }}>What I had</th>
+                <th style={{ padding: "4px 8px", fontWeight: 700 }}>Had</th>
                 <th style={{ padding: "4px 8px", fontWeight: 700 }}>What was good</th>
               </tr>
             </thead>
@@ -186,7 +187,7 @@ export default function VisitList({ visits, query, onSelect, selectedKey }) {
                     </td>
                     <td style={{ padding: "7px 8px", color: "var(--text-primary)" }}>{v.cost != null ? `$${Number(v.cost).toFixed(2)}` : "—"}</td>
                     <td style={{ padding: "7px 8px", color: "var(--text-secondary)" }}>{v.visited_on || "—"}</td>
-                    <td style={{ padding: "7px 8px", color: "var(--text-secondary)" }}>{v.what_i_had || "—"}</td>
+                    <td style={{ padding: "7px 8px", color: "var(--text-secondary)" }}>{v.dishNames || v.what_i_had || "—"}</td>
                     <td style={{ padding: "7px 8px", color: "var(--text-secondary)" }}>{v.what_was_good || "—"}</td>
                   </tr>
                 );
