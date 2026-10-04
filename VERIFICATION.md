@@ -19,6 +19,7 @@ was never clicked" quietly ships broken.
 > than file the click-through for someone else. The working rhythm:
 > - After a change is **CI-green + build-green**, **run the headless-browser check yourself**, then
 >   record the outcome here (✅/❌ + date). Don't punt it.
+> - **⛔ A session does not end its turn while its own change is merged-but-unverified** (merge → deploy serves your build → signed-in check → record).
 > - **Only if no browser is reachable** (rare), log the item below and move on — never block on Michael.
 > - **Do NOT surface "these N are unverified" to Michael as a to-do for him.**
 > - **Only interrupt Michael for a genuinely CRITICAL problem** — the app won't build, won't render
@@ -29,11 +30,14 @@ was never clicked" quietly ships broken.
 > Write a short Playwright script and run it with Node:
 > - Browsers live at `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`; the module is the global
 >   `/opt/node22/lib/node_modules/playwright` (require it by absolute path).
-> - The sandbox egress proxy intercepts TLS, so launch with `args:['--ignore-certificate-errors']`
->   **and** `newContext({ ignoreHTTPSErrors: true })`, or `page.goto` throws `ERR_CERT_AUTHORITY_INVALID`.
-> - **Logged-out only:** that proxy also CORS-blocks the Supabase auth handshake, so self-tests run in
->   **this-device (logged-out) mode** — full coverage for the planner/drawing tools, but anything that
->   *requires* sign-in (cloud save/sync) still needs a signed-in check elsewhere.
+> - **TLS is already trusted** — the environment setup script imports the sandbox proxy's CA into Chromium's
+>   NSS store. **NEVER pass `--ignore-certificate-errors` / `ignoreHTTPSErrors`** (owner-ruled-out).
+> - **SIGNED IN is available (2026-10-04):** `import { openSignedIn } from "./ui-audit/lib/signedInSession.mjs"`
+>   (`openSignedIn({ base: "https://planyr.io" })` or a PR preview URL) signs in as the throwaway test account
+>   `e2e@planyr.test` via `/api/auth/e2e-session` using `E2E_LOGIN_KEY` (never print it), and returns the page +
+>   the served `/version.json` build + a proof object (account email + `e2e-fixture-site`). Smoke:
+>   `node ui-audit/verify-signed-in-session.mjs https://planyr.io`. Password sign-in is captcha-refused by design.
+>   **A session's own signed-in check on the test account COUNTS as verified.**
 > - Enter the planner via the map toolbar's **"Draw"** button — `getByTestId("map-toolbar-draw")`,
 >   ONE click (⚠ CORRECTED 2026-09-08, B1368144: this used to be a two-step
 >   `map-start-blank-menu-btn` → `map-start-blank-menu-item` caret click, and "Start blank" is now
@@ -132,13 +136,14 @@ was never clicked" quietly ships broken.
    Before you file OR leave a `V###` as pending, you must FIRST drive the headless self-verify. You may
    only defer an item if it hits one of exactly THREE hard walls — and it must NAME which, in a
    `Blocker:` field on the entry:
-   - **`Blocker: auth`** — needs sign-in. The egress proxy CORS-blocks the Supabase auth handshake, so
-     the sandbox genuinely cannot log in (a network-policy wall, not a missing password — a test login
-     alone does not unlock it without a matching network-policy change).
+   - ~~**`Blocker: auth`**~~ **RETIRED 2026-10-04 (owner decision, Michael).** Sessions sign in as the test
+     account (`ui-audit/lib/signedInSession.mjs`) and verify signed-in checks themselves; `auth` no longer
+     parks a check. A `V###` still carrying it is a mis-classification: drive it signed in and record ✅/❌.
+     Park ONLY if the check needs Michael's own data (`real-data`) — and first try a fixture on the test account.
    - **`Blocker: live-GIS`** — needs a live external map/GIS host the sandbox egress blocks (county
      flood / parcel / TxGIO services, etc.).
    - **`Blocker: real-data`** — needs a specific SIGNED-IN saved project (Tsakiris / Bain) that only
-     exists in a real account.
+     exists in Michael's real account (try a fixture on the test account first).
    - **`Blocker: print-engine`** *(added 2026-07-31 with **V631**, and flagged rather than smuggled in:
      this is a FOURTH wall, and the rule above says three.)* — needs the browser's real PRINT pipeline.
      Headless Chromium's `window.print()` is a **no-op**: it produces no paginated output at all, so
@@ -165,14 +170,6 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
-
-### V1502928 — B2084992: headless sign-in as the test account via /api/auth/e2e-session, then open e2e-fixture-site `Blocker: real-data`
-
-Sandbox-proven: `test/e2eSessionRoute.test.js` (18, mutation-checked). Pending: the deployed route needs `E2E_LOGIN_KEY` (43 chars) in Cloudflare Pages production AND the session env. It ALSO needs `SUPABASE_SERVICE_ROLE_KEY` as a Secret in Cloudflare Pages production — measured absent 2026-10-04 (Cowork dashboard read); until Michael adds it the route answers 503 "not configured" after a correct key (on `OWNER-TODO.md`).
-**Steps** (any session with E2E_LOGIN_KEY; read `/version.json` in the SAME call and match it to the merge commit):
-1. `E2E_LOGIN_KEY=… node ui-audit/verify-signed-in-session.mjs https://planyr.io`. **Expect:** `PASS signed in as e2e@planyr.test | fixture e2e-fixture-site visible: true`, and a build matching the merge commit.
-2. `curl -X POST https://planyr.io/api/auth/e2e-session` (no key) and with a wrong key. **Expect:** 404 both; `curl -X GET` → 405; no `access-control-*` header on any.
-3. Password sign-in still needs a captcha for real users. **Expect:** unchanged `captcha_failed`.
 
 ### V1500112 — B2084480: a file saved in Review appears in the Library without a reload, in this tab and in other open tabs `Blocker: auth`
 

@@ -3787,3 +3787,13 @@ Sandbox-proven: `test/mapPinSymbol.test.js`, `test/mapNoteMarkerIcon.test.js`; h
 5. Hover a site pin and a note pin. **Expect:** the tooltip appears above the circle, not on it.
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1875520.
 - **✅ PASSED 2026-10-04 — Cowork live check** (Michael's signed-in browser, planyr.io). Recorded from the Cowork chat's report that PR #1883 passed live verification; per-step detail was not supplied to the recording session, so the steps above are accepted as a whole on that report.
+
+### V1502928 — B2084992: headless sign-in as the test account via /api/auth/e2e-session, then open e2e-fixture-site `Blocker: real-data`
+
+Sandbox-proven: `test/e2eSessionRoute.test.js` (18, mutation-checked). Pending: the deployed route needs `E2E_LOGIN_KEY` (43 chars) in Cloudflare Pages production AND the session env. It ALSO needs `SUPABASE_SERVICE_ROLE_KEY` as a Secret in Cloudflare Pages production — measured absent 2026-10-04 (Cowork dashboard read); until Michael adds it the route answers 503 "not configured" after a correct key (on `OWNER-TODO.md`).
+**Steps** (any session with E2E_LOGIN_KEY; read `/version.json` in the SAME call and match it to the merge commit):
+1. `E2E_LOGIN_KEY=… node ui-audit/verify-signed-in-session.mjs https://planyr.io`. **Expect:** `PASS signed in as e2e@planyr.test | fixture e2e-fixture-site visible: true`, and a build matching the merge commit.
+2. `curl -X POST https://planyr.io/api/auth/e2e-session` (no key) and with a wrong key. **Expect:** 404 both; `curl -X GET` → 405; no `access-control-*` header on any.
+3. Password sign-in still needs a captcha for real users. **Expect:** unchanged `captcha_failed`.
+
+**✅ PASSED 2026-10-04 (Claude Code session, signed in headlessly on planyr.io, build `21216dd` read in the same call via `/version.json`):** `node ui-audit/verify-signed-in-session.mjs https://planyr.io` → `PASS signed in as e2e@planyr.test | fixture e2e-fixture-site visible: true`. First attempt on build `2375282` answered 503 not-configured (deploy predated `SUPABASE_SERVICE_ROLE_KEY`); after Michael's republish the route works.
