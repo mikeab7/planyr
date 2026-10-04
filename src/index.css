@@ -52,6 +52,9 @@
 * { box-sizing: border-box; }
 
 :root {
+  /* NEW-1 (B2018608): colour the map shows through the hairline gaps between aerial tiles — a dark
+     green-grey instead of Leaflet's default light grey, so a seam reads as a faint dark line, not a white one. */
+  --aerial-gap-bg: #2a3324;
   --font: "Inter", system-ui, sans-serif;  /* the one UI face — swap here only */
   /* B1998016 — tell the browser which palette the NATIVE controls (field fill, select popup, scrollbars,
      iOS Safari's form widgets) should use; without it a dark theme still gets light-scheme controls. */
@@ -1012,3 +1015,12 @@ path.locate-accuracy { stroke: var(--locate-blue); stroke-opacity: 0.55; fill: v
 .leaflet-control-locate.leaflet-bar a[data-locate-state="following"] { color: var(--locate-blue); }
 .leaflet-control-locate.leaflet-bar a[data-locate-state="following"] svg { fill: currentColor; }
 .leaflet-control-locate.leaflet-bar a[data-locate-state="located"] { color: var(--locate-blue); }
+
+
+/* ───────── NEW-1 (B2018608) — shared aerial basemap treatment ─────────
+ * Tone grade: slightly darker, slightly desaturated aerial so roads, labels and pins read on top
+ * (the values mirror IMAGERY_GRADE in shared/basemaps/basemaps.js). On-screen layer only — the
+ * Site Plan PDF/image export stitches its own canvas and is never graded. */
+.planyr-imagery-graded { filter: brightness(0.9) saturate(0.8); }
+/* Seam fix: the container colour behind aerial tiles (see --aerial-gap-bg). */
+.leaflet-container.planyr-aerial-bg { background: var(--aerial-gap-bg); }
