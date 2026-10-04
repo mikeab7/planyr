@@ -318,6 +318,60 @@ export function parseView(raw) {
   return normalizeView(obj);
 }
 
+/* ---- touch: one-finger pan, pinch-with-midpoint, light inertia (NEW-2) ---------------------
+ *
+ * The mat is `touch-action: none`, so a finger drag produces pointer events and NOTHING ELSE: no
+ * native scroll and — the part that made the page feel dead — no compat mouse events either, which
+ * is the only path the blank-paper pan (`beginBlankGesture`) ever listened on. These are the pure
+ * decisions behind the pointer-driven replacement; the wiring is `NoteEditor.jsx`'s touch effect.
+ * Everything here is in VIEWPORT-relative pixels and goes through the one view ref. */
+
+/** A fingertip is not a mouse pointer: a tap wobbles by several pixels, so the distance before a
+ *  touch becomes a pan is ~2.5x the mouse's 4. Below it the gesture is still a tap. */
+export const TOUCH_PAN_SLOP = 10;
+
+/** Has a touch travelled far enough to stop being a tap? */
+export function touchTravelled(from, at, slop = TOUCH_PAN_SLOP) {
+  return Math.hypot(num(at?.x) - num(from?.x), num(at?.y) - num(from?.y)) > slop;
+}
+
+/** The view a one-finger drag asks for: the content follows the finger one-to-one. */
+export function panView(startView, from, at) {
+  const v = normalizeView(startView);
+  return { x: v.x - (num(at?.x) - num(from?.x)), y: v.y - (num(at?.y) - num(from?.y)), z: v.z };
+}
+
+/** Pinch that ZOOMS and PANS: the workspace point that was under the fingers' starting midpoint
+ *  stays under their CURRENT midpoint, at the zoom the spread asks for. (The old handler zoomed
+ *  about the current midpoint only, so the page never followed a two-finger drag.) */
+export function pinchView(start, now) {
+  const v = normalizeView(start?.view);
+  const ratio = num(start?.dist) > 0 ? num(now?.dist) / num(start.dist) : 1;
+  const z = clampViewZoom(v.z * (Number.isFinite(ratio) && ratio > 0 ? ratio : 1));
+  const w = toWorkspace(v, start?.mid || { x: 0, y: 0 });
+  return { x: w.x * z - num(now?.mid?.x), y: w.y * z - num(now?.mid?.y), z };
+}
+
+/** Release velocity in px per 16 ms frame, from the last ~100 ms of `{ t, x, y }` samples.
+ *  Zero when the finger stopped before lifting — a held finger must not fling. */
+export function releaseVelocity(samples, now, windowMs = 100) {
+  const recent = (samples || []).filter((s) => now - s.t <= windowMs);
+  if (recent.length < 2) return { x: 0, y: 0 };
+  const a = recent[0];
+  const b = recent[recent.length - 1];
+  const dt = b.t - a.t;
+  if (dt <= 0 || now - b.t > 50) return { x: 0, y: 0 };
+  return { x: ((b.x - a.x) / dt) * 16, y: ((b.y - a.y) / dt) * 16 };
+}
+
+/** One frame of inertia: the content keeps going in the direction the finger was moving. `delta`
+ *  is how far the CONTENT moves this frame; `done` when it has slowed to nothing. */
+export function inertiaStep(vel, { friction = 0.92, floor = 0.4 } = {}) {
+  const speed = Math.hypot(num(vel?.x), num(vel?.y));
+  if (speed < floor) return { delta: { x: 0, y: 0 }, vel: { x: 0, y: 0 }, done: true };
+  return { delta: { x: vel.x, y: vel.y }, vel: { x: vel.x * friction, y: vel.y * friction }, done: false };
+}
+
 /* ---- THE OPENING ZOOM (NEW-4) --------------------------------------------------------------
  *
  * Desktop opens at 100%. A PHONE opens at FIT WIDTH — the whole page width on screen, both edges
