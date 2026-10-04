@@ -2843,8 +2843,8 @@ describe("searchQuality — rankSearchCandidates (the full pipeline, against rea
     expect(out[1].id).toBe(KATY_INC.id);
   });
 
-  it("a place he's already logged or flagged is exempt from the strong-match filter and is never dropped by dedupe", () => {
-    const weakButLogged = { id: "weak-logged", name: "Somewhere Odd", address: "", sim: 0.2, distance_km: 1,
+  it("a place he's already logged or flagged still has to match the query (NEW-2) but is never dropped by dedupe", () => {
+    const weakButLogged = { id: "weak-logged", name: "Fadis Odd Spot", address: "", sim: 0.2, distance_km: 1,
       confidence: 0.6, lat: BINZ_LLC.lat, lon: BINZ_LLC.lon }; // co-located with BINZ_LLC — would normally collapse away
     const out = rankSearchCandidates("fadis", [BINZ_LLC, weakButLogged], new Set(["weak-logged"]));
     expect(out.map((r) => r.id)).toContain("weak-logged");

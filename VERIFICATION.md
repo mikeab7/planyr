@@ -182,6 +182,15 @@ Sandbox-proven: `noticeForTab` unit + source guards. Needs cloud version history
 2. Click tab B. **Expect:** B shows no restore banner. Click back to A. **Expect:** the banner is only ever on A, never on B.
 3. In B, Save. **Expect:** only B shows its own "Saved…" line; A unchanged.
 - **Stopping rule:** closes on a dated pass of 1–3, or a failed step filed as a recurrence on B2080753.
+### V1446736 — B2021648: the first Food search after opening the page is about as fast as later ones `Blocker: auth`
+Built: warm-up on Food mount (preconnect, session, one throwaway search); unit tests green. Pending, signed in on the phone and desktop, on a fresh page load with the served chunk hash read in the same observation:
+1. Open `#/food`, wait a few seconds, type a query → expected: first results in roughly the time of a later search (~0.25 s), not 1.5–2 s.
+2. Repeat on two more fresh loads; record first vs second `food_places_search_by_name` time (Network: DNS, connect, TLS, wait). Expected: first within ~2× the second.
+
+### V1446737 — B2021649: "dao" no longer lists a saved Dairy Queen `Blocker: auth`
+Built: saved places must pass the word-match rule; unit tests red→green. Pending, signed in with Dairy Queen saved:
+1. Type "dao" → expected: DAO'N Korean first, then real "Dao" names; no Dairy Queen.
+2. Type "dairy" and "da" → expected: the saved Dairy Queen appears, tagged.
 
 ### V1493136 — B2069808: Food search answers faster — saved places show at once, results settle quicker, same matches in the same order `Blocker: auth`
 

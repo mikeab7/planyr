@@ -5308,6 +5308,21 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 `[x]` **Cause:** `docNotice` was ONE root-level string handed to whichever editor was active, and an editor seeds its status line from it on mount — so another tab's editor adopted tab A's "Restored the version…" line. **Fix:** stored as `{tab, msg}`; each editor gets `noticeForTab(rec, f.tabId)` (its own tab's message or nothing); "save as new"/"save a copy" tag the message with the NEW review's tab. Red-proof: 2 source guards fail on old code. No panel copy added.
 - **Pending (⏳):** signed-in check (Restore needs cloud version history) — **V1496385**. **Stopping rule:** closes on a dated PASS of V1496385.
+### B2021648 — Food: the first search after opening the page still paused (1.6–2.2 s vs ~0.25 s after) `[Food]` (bug, perf) #food #perf  *(Owner chat block 2026-10-04, NEW-1, measured live on d93047b: two page loads, first RPC 2.2 s and 1.6 s, four later ones ~0.25 s. Follows B2069808. Minted from this branch's block B2021648–B2021663.)*
+
+`[x]` **AUDIT-FIRST:** the in-database time is tens of ms (B2069808), so the wait is everything around the query: new connection to Supabase, the auth session being resolved before the request can carry a token, and the server's first call of the function. The sandbox cannot reproduce the signed-in network path, so the first-vs-second Network breakdown is the pending live step, not a guess presented as a measurement.
+- **Fix:** `lib/warmSearch.js` — on Food mount, once: `<link rel=preconnect>` to the Supabase origin, `auth.getSession()` resolved up front, then one throwaway search to warm the function. Fire-and-forget, never throws, stays inside the Food bundle (own client).
+- **Tests:** `test/foodWarmSearch.test.js` — order (preconnect → session → search), never throws, FoodApp wires it (red on main: no warm-up existed).
+- **Pending (⏳):** first vs second search time on the signed-in phone — **V1446736**. If the first search is still slow, read DNS/connect/TLS/wait for call 1 vs 2 and file the recurrence here (do not close on this null).
+- **Stopping rule:** closes on a dated PASS of V1446736.
+- Verify: live — `Blocker: auth`.
+
+### B2021649 — Food search: typing "dao" listed his saved Dairy Queen second `[Food]` (bug) #food #testing  *(Owner chat block 2026-10-04, NEW-2. Minted from the same block. DEDUPE-FIRST: builds on B2070432 / B709697; does not change nearest-first ranking.)*
+
+`[x]` **Root cause (not the saved-name matcher — that one is correct):** the server's loose pool returned Dairy Queen for "dao", and `rankSearchCandidates` exempted every logged/flagged id from the strong-match word rule, so it survived. **Fix:** a saved place must pass `isStrongMatch` like any row (still never dropped by dedupe, still sorts first); saved places that genuinely match are added by SearchBox itself, so none is lost.
+- **Tests:** `test/foodSavedSearchFirst.test.js` NEW-2 block (red on main — Dairy Queen listed; green: not listed; DAO'N, "dao'n korean", 2–3 letter, case, multi-word, starts-with all still found; duplicates not collapsed). `foodModule.test.js`'s old "exempt from strong-match" case was rewritten to the new rule.
+- **Pending (⏳):** signed-in check of "dao" — **V1446737**.
+- **Stopping rule:** closes on a dated PASS of V1446737.
 - Verify: live — `Blocker: auth`.
 
 ### B2069808 — Food search: results appear faster after typing `[Food]` (task, perf) #food #perf  *(Owner request 2026-10-04 (NEW-1): "did nearest-first slow search, and can it be faster?" Answer measured: no, it did not; yes, it can.)*
