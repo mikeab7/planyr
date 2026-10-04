@@ -20309,6 +20309,16 @@ _(new `Verify: live` items land here after implementation.)_
 - Owner product constraints check: **constraint 5 (lazy project creation) is preserved** — nothing is created by "New project" itself; only a rename (a real write) materialises the row.
 - Verify: live — **V1416129** (`Blocker: auth`: the signed-in cloud path, `ensureProjectRow` → push → RPC).
 
+### B2064640 — Empty-spot click in a statewide-parcel state said "no parcel data wired here yet" for a covered county `[site-planner / map-finder]` (bug) #gis #parcel #site-planner  *(Owner NEW-1, 2026-10-04; found during the live check of V1435953 step 3, San Francisco Mission, build 17f94b7.)*
+
+`[x]` **Report:** a click on a street (37.750733, -122.400883) in San Francisco tagged "No lot here" (right) but the error line read "San Francisco County — no parcel data wired here yet." (wrong — California's statewide layer covers it).
+`[x]` **Cause (confirmed in source):** `countyIdentity` returns `no-source` whenever the county key is missing or is a statewide pseudo-county, which is every county of a state whose only parcel source is a statewide layer (CA, NV, RI, ME, DC, …); `noParcelSourceNote` then printed the gap sentence.
+`[x]` **Fix (`counties.js`):** the `no-source` identity now carries `statewideKey` when a statewide source covers its state (via the existing `statewideKeysForState`), and `noParcelSourceNote` returns null for it, so all five callers (MapFinder ×3, SitePlanner ×2) fall to the existing covered-county wording "No parcel right there — zoom in and click directly on a lot." STATUS and `key` are deliberately unchanged — candidate routing, `countyForView` and B1597232's empty-candidates branch read them, and the existing pins (Las Vegas / Columbus `no-source`) still hold. Texas is excluded (its statewide layer is the derived fallback behind every TX row; a TX county reaching `no-source` keeps its sentence). Wording change: none beyond silencing the gap sentence.
+`[x]` **Tests:** `test/statewideCoverageNote.test.js` — San Francisco, Ontario CA, Las Vegas and Reno NV, Providence RI, Portland ME, Washington DC → no gap note (7 red on untouched main, green after); Wayne County MI and Lafayette Parish LA keep their sentence; TX and CO hand identities keep theirs; a wired Harris point untouched. Adjacent suites counties / countyStatewideDerivation / cityScopes / bugHuntGuards / parcelClickRouting green.
+`[x]` **Constraint check (Definition of Done #4):** nothing here touches an `## Owner product constraints` entry.
+- Verify: live — **V1489328** (`Blocker: live-GIS`).
+- Stopping rule: closes on a dated pass of V1489328; a recurrence re-opens THIS item.
+
 ## 🕓 Later / Roadmap
 
 *Deliberately deferred. Do **not** action these unless moved up to 🔲 Open.*

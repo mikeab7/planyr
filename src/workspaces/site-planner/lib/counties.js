@@ -3152,7 +3152,18 @@ export function countyIdentity(lat, lng) {
   if (key && COUNTIES_MAP[key] && !COUNTIES_MAP[key].statewide) {
     return { status: "ok", key, name: ans.name, state: ans.state, nearEdge: !!ans.nearEdge };
   }
-  return { status: "no-source", key: null, name: ans.name, state: ans.state, nearEdge: !!ans.nearEdge };
+  /* NEW-1 — "no per-county source" is not "no source". A state whose only parcel source is a
+   * statewide layer (CA, NV, RI, ME, DC, …) has no per-county entry by design, so every one of its
+   * counties lands here; the statewide layer covers them. STATUS stays `no-source` (candidate routing
+   * and `countyForView` read it, and `key` stays null — a composite is coverage, not a jurisdiction
+   * claim) but the identity now names the covering layer so `noParcelSourceNote` stays silent.
+   * Texas is excluded on purpose: its statewide layer is the derived fallback behind every TX county
+   * row, and a TX county that still reaches here keeps its gap sentence. */
+  const sw = ans.state === "TX" ? [] : statewideKeysForState(ans.state);
+  return {
+    status: "no-source", key: null, name: ans.name, state: ans.state, nearEdge: !!ans.nearEdge,
+    ...(sw.length ? { statewideKey: sw[0] } : {}),
+  };
 }
 
 /* The owner-facing sentence for a resolved county with no parcel source, or null when there is
@@ -3169,6 +3180,7 @@ export function countyIdentity(lat, lng) {
  * read "Orleans Parish County". Never assume "County" is the universal case; ask the source. */
 export function noParcelSourceNote(identity) {
   if (!identity || identity.status !== "no-source") return null;
+  if (identity.statewideKey) return null; // NEW-1 — a statewide layer covers this county
   const suffix = identity.state === "TX" ? " County" : "";
   return `${identity.name}${suffix} — no parcel data wired here yet.`;
 }

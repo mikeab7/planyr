@@ -1998,6 +1998,13 @@ Sandbox-proven logged-out (both entry points, reload; red on main). **The signed
 4. Delete the throwaway project. Read the served chunk hash in the same observation.
 - **Stopping rule:** closes on a dated pass of 1–3, or a failure is filed as a recurrence on B1991041.
 
+### V1489328 — B2064640: a street click in San Francisco and in Las Vegas shows no "not wired" sentence `Blocker: live-GIS (needs the live CAL FIRE / Nevada statewide parcel services, which the sandbox egress blocks)`
+
+Sandbox-proven: `test/statewideCoverageNote.test.js` (identity + sentence against the real committed county polygons). What is left is the real click on the deployed build.
+1. On planyr.io Map view, turn on Select parcels, go to San Francisco (Mission), and read `/version.json` in the same check. Click the street point 37.750733, -122.400883. **Expect:** the tag says "No lot here" and the error line reads "No parcel right there — zoom in and click directly on a lot." — no "no parcel data wired here yet" anywhere.
+2. Repeat in Las Vegas on a street. **Expect:** same wording, no "not wired" sentence.
+3. Click a real lot a few blocks away in each. **Expect:** it selects as before.
+4. Control: click inside an unwired county (e.g. Taylor, MI). **Expect:** "Wayne County — no parcel data wired here yet." still appears.
 ### V1445152 — B2020064: Map view zoom +/−/locate buttons clickable with a long Sites list `Blocker: real-data (signed-in account with his long site list on planyr.io)`
 
 Sandbox-proven: `ui-audit/verify-map-zoom-reachable.mjs` (hit test; red pre-fix, green after) and `test/mapChromeStack.test.js`.
