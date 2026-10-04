@@ -94,6 +94,16 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
   registry-name and confidence de-ranking, corrupted-concatenated-address exclusion, and
   near-duplicate (same real-world spot, multiple sources) collapse. Pure JS, no Supabase import —
   see its own header for the production-measured reasoning behind every threshold.
+- `lib/placeIdentity.js` (B2046224) — pure "is this a restaurant he ALREADY has?": normalised-name
+  (case/apostrophes/punctuation/diacritics-blind) AND within 300 m — never name alone (chains) or distance
+  alone. `mergeSearchRows` gives the search dropdown ONE row per restaurant (a snapshot hit that is really
+  his manual pin shows as the pin), `findExisting` backs `FoodApp.openPlace`, and `canonicalIdentity` is the
+  SAVE-PATH GUARD every visit save and want-to-try flag resolves through, so no route mints a second record.
+- Phone behaviour (B2046224): the toolbar is exactly one screen wide on a narrow viewport (search field flexes,
+  pin button reads "Pin") so focusing it can't scroll the header row; `FoodMap`'s flyTo has NO horizontal shift on a
+  phone (the panel is a bottom sheet) and re-centres above the sheet once it reports its height. Real-browser proof:
+  the verify-food-phone harness in the repo-root ui-audit folder (WebKit iPhone descriptors + its foodFixture helper, a fully mocked signed-in
+  Supabase — build with `VITE_SUPABASE_URL=https://plnrtestfood123456.supabase.co VITE_SUPABASE_ANON_KEY=fixture-anon`).
 - `lib/supabaseClient.js` — this module's own client. See BUNDLE ISOLATION above for why it
   isn't the site-planner's.
 - `db/food.sql` — the applied migration (production, `lyeqzkuiwngunutlkkmi`). `db/test/food_rls.test.sql` — the RLS proof.
