@@ -19,9 +19,10 @@
  *      by a weak nearby fuzzy one. Remaining scores are grouped into bands (a band ends when the
  *      score falls `BAND_WIDTH` below the band's best) — "comparable matches".
  *   2. IN VIEW first, then 3. distance from the map centre, outward. Inside a band only.
- *   4. His own places (saved/logged) get a `MINE_HEAD_START_KM` head start on distance, so at a
- *      similar distance his own place leads (the earlier "his places first" rule, demoted from an
- *      absolute to a tiebreak, which the owner's "nearest first" ask requires).
+ *   0. (Above all of the above.) His SAVED places that genuinely match the text lead, wherever the
+ *      map is looking — logged first, then want-to-try. The 2026-10 report ("you can't search for
+ *      restaurants I've saved") reversed the earlier demotion of this rule to a distance head start.
+ *   4. `MINE_HEAD_START_KM` stays as a tiebreak for his places that do not clear the lead bar.
  *
  * Pure — no Supabase, no React. */
 
@@ -29,6 +30,7 @@ export const BAND_WIDTH = 0.15; // two scores this close are "comparable matches
 export const EXACT_SCORE = 1.5; // above any non-exact score (max 1.0)
 export const REGISTRY_PENALTY = 0.2; // LLC/Inc-style registry names sit a band below clean names
 export const MINE_HEAD_START_KM = 0.2;
+export const SAVED_LEAD_MIN_SCORE = 0.5; // a saved place must really match to jump the queue
 export const MIN_ADDRESS_QUERY_LEN = 8; // "a full street address" — short fragments never count as exact
 
 const norm = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -61,9 +63,12 @@ export function textScore(query, item) {
   const name = norm(item.name);
   if (name === q) return EXACT_SCORE;
   if (q.length >= MIN_ADDRESS_QUERY_LEN && /\d/.test(q) && norm(item.address).includes(q)) return EXACT_SCORE;
+  // Punctuation-blind: "daon" is in "DAO'N Korean…" (norm() splits it into "dao n" and misses).
+  const cq = q.replace(/ /g, ""), cn = name.replace(/ /g, "");
+  if (cq.length >= 2 && cn === cq) return EXACT_SCORE;
   let s;
   if (typeof item.sim === "number") s = item.sim;
-  else if (name.includes(q)) s = 1;
+  else if (name.includes(q) || (cq.length >= 2 && cn.includes(cq))) s = 1;
   else {
     const hay = `${name} ${norm(item.address)}`;
     const words = q.split(" ").filter((w) => w.length >= 2);
@@ -93,8 +98,12 @@ export function rankByProximity(query, items, bounds) {
     if (band < 1 || r.score < bandStart - BAND_WIDTH) { band = Math.max(1, band + 1); bandStart = r.score; }
     r.band = band;
   }
+  // His saved places (logged first, then want-to-try) lead whenever they genuinely match the text —
+  // wherever the map is looking (owner 2026-10-04). Everything else keeps the nearest-first order.
+  const lead = (r) => (r.score < SAVED_LEAD_MIN_SCORE ? 2 : r.item.mine ? 0 : r.item.wishlisted ? 1 : 2);
   const eff = (r) => r.km - (r.item.mine ? MINE_HEAD_START_KM : 0);
   rows.sort((a, b) =>
+    (lead(a) - lead(b)) ||
     (a.band - b.band) ||
     (Number(b.inView) - Number(a.inView)) ||
     (eff(a) - eff(b) || 0) ||

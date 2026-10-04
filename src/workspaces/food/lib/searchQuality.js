@@ -39,6 +39,8 @@
  * Foursquare one (0.77) — so it's used here purely as a sort tiebreaker, never a filter.
  */
 
+import { samePlace } from "./placeIdentity.js";
+
 // ── "strong match": word coverage ─────────────────────────────────────────────────────────────
 export const SIGNIFICANT_WORD_MIN_LEN = 3; // drop "a", "of" — too short to carry any meaning
 
@@ -197,7 +199,7 @@ export function rankSearchCandidates(query, rawResults, protectedIds = new Set()
 
   const kept = [];
   for (const r of ranked) {
-    if (!isProtected(r) && kept.some((k) => haversineMeters(k, r) < DEDUPE_RADIUS_METERS)) continue;
+    if (!isProtected(r) && kept.some((k) => haversineMeters(k, r) < DEDUPE_RADIUS_METERS || samePlace(k, r))) continue;
     kept.push(r);
   }
   return kept;
