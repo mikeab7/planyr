@@ -824,18 +824,16 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     expect(box).toMatch(/if \(view !== "map"\) return undefined;/);
   });
 
-  it("his own places (manual pins + logged snapshot places) are ranked ahead of everywhere he hasn't been", () => {
+  it("his own places (manual pins + logged snapshot places) stay in the one ranked list, marked, with a distance head start (B2051664 replaced the old absolute 'mine first' order)", () => {
     const box = src("components/SearchBox.jsx");
-    // The merge order is the ranking: manual matches, then logged snapshot hits, then the rest.
-    // (B2046224: the merge now runs through mergeSearchRows, which keeps that same input order and only
-    // DROPS a snapshot row that duplicates one of his own — see test/foodPlaceIdentity.test.js.)
-    const order = box.slice(box.indexOf("const results = mergeSearchRows({"), box.indexOf("}).slice(", box.indexOf("const results = mergeSearchRows({")));
-    const manualIdx = order.indexOf("manualMatches");
-    const mineIdx = order.indexOf("snapshotRanked.filter((p) => p.mine)");
-    const restIdx = order.indexOf("snapshotRanked.filter((p) => !p.mine)");
-    expect(manualIdx).toBeGreaterThanOrEqual(0);
-    expect(manualIdx).toBeLessThan(mineIdx);
-    expect(mineIdx).toBeLessThan(restIdx);
+    // (B2046224: the list is first folded through mergeSearchRows — one row per restaurant — and THEN ordered by
+    // rankByProximity; see test/foodPlaceIdentity.test.js.)
+    const order = box.slice(box.indexOf("const merged = mergeSearchRows({"), box.indexOf(".slice(0, SHOWN_CAP)"));
+    expect(order).toContain("manualMatches");
+    expect(order).toContain("snapshotRanked");
+    expect(order).toContain("rankByProximity(");
+    expect(box).toMatch(/mine: loggedIds\?\.has\(p\.id\)/);
+    expect(src("lib/searchProximity.js")).toMatch(/MINE_HEAD_START_KM/);
     // And a result carrying `mine` renders a visible "Been here" mark, not just a sort position.
     expect(box).toMatch(/Been here/);
   });
