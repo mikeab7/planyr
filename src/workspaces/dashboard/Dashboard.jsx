@@ -63,6 +63,8 @@ import { buildCompsCardData } from "./lib/compsCardModel.js";
 import { fetchRecentComps } from "./lib/dashboardCompsRecentFetch.js";
 import { fetchRecentNotePages } from "./lib/dashboardNotesRecentFetch.js";
 import { fetchLastTouchedDoc } from "./lib/dashboardDocFetch.js";
+import { planHintHealFromRows } from "../../shared/schedule/scheduleLinkHints.js";
+import { listProjects } from "../../shared/projects/projects.js";
 import { fetchScheduleProjects, fetchScheduleSettings, fetchScheduleLastWriteAt } from "./lib/dashboardScheduleFetch.js";
 import { fetchAllElementRecency } from "./lib/dashboardElementRecencyFetch.js";
 import { fetchElementsForSites } from "./lib/dashboardYieldFetch.js";
@@ -122,6 +124,19 @@ function useMeasuredWidth() {
     return () => ro.disconnect();
   }, []);
   return [ref, width];
+}
+
+/* B2064898 — the Dashboard already holds the schedule ROWS (the source), so it heals the "has a
+ * schedule" hint mirrored on the plans from them: a hint left stale by an unlink/delete done while
+ * the Schedule tab was closed no longer waits for that tab. Lazy import — storage.js is heavy. */
+function healScheduleHints(rowsMap) {
+  try {
+    const ops = planHintHealFromRows(rowsMap, listProjects());
+    if (!ops.length) return;
+    import("../site-planner/lib/storage.js")
+      .then(({ setScheduleLink }) => { for (const op of ops) { try { setScheduleLink(op.groupId, { scheduleProjectId: op.scheduleProjectId, name: op.name }); } catch (_) {} } })
+      .catch(() => {});
+  } catch (_) {}
 }
 
 export default function Dashboard({ onShellSwitch, authControl, accountActive, userId, onNewProject, onNavigate, onOpenReviewInDocReview, onOpenTaskInScheduler, onOpenCompInSitePlanner, onOpenMissingLocationsInSitePlanner, onOpenNoteInNotes }) {
@@ -251,7 +266,7 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
         fetchAllCompsForCard().then((v) => { if (live) setComps(v); }),
         fetchCompsForMap().then((v) => { if (live) setCompsForMap(v); }),
         fetchLastTouchedDoc().then((v) => { if (live) setDoc(v); }),
-        fetchScheduleProjects().then((v) => { if (live) setScheduleProjects(v); return v; }),
+        fetchScheduleProjects().then((v) => { if (live) { setScheduleProjects(v); healScheduleHints(v); } return v; }),
         fetchAllElementRecency().then((v) => v),
         fetchRecentComps(sinceIso),
         fetchRecentNotePages(userId, windowStartMs),

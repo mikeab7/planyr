@@ -50,3 +50,21 @@ export function planScheduleHintSync(navProjects, groups) {
   }
   return ops;
 }
+
+/* B2064898 — the schedule ROWS as a nav list. The Schedule iframe's nav-state is not the only
+ * place that knows what the schedules link to: signed-in, `public.schedules` is authoritative and
+ * the Dashboard already reads it on every visit. Turning that `{ id → project }` map into the same
+ * list shape `planScheduleHintSync` takes lets the Dashboard heal the "has a schedule" hint too, so
+ * a hint left stale by an unlink/delete done while the Schedule was NOT open no longer waits for
+ * someone to open the Schedule tab (measured in production 2026-10-04: two plans carried a hint to
+ * no live schedule, and two live schedules had no plan carrying one). A null/empty map yields []
+ * (never clears on "nothing known yet" — same contract as planScheduleHintSync). */
+export function navListFromScheduleRows(projectsMap) {
+  if (!projectsMap || typeof projectsMap !== "object") return [];
+  return Object.entries(projectsMap)
+    .filter(([, p]) => p && typeof p === "object")
+    .map(([id, p]) => ({ ...p, id: p.id != null ? p.id : (Number.isFinite(Number(id)) ? Number(id) : id) }));
+}
+export function planHintHealFromRows(projectsMap, groups) {
+  return planScheduleHintSync(navListFromScheduleRows(projectsMap), groups);
+}
