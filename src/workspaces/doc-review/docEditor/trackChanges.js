@@ -11,6 +11,7 @@
 import { ReplaceStep } from "@tiptap/pm/transform";
 import { Fragment, Slice } from "@tiptap/pm/model";
 import { TextSelection } from "@tiptap/pm/state";
+import { FORMAT_MARKS, oldRunMarks, runLabel, paraLabel, restorePprx, ATTR_SCOPES, attrChangeInfo, resolveAttrChange, gridChangeInfo, oldGridCols } from "../../../shared/files/docx/fmtChange.js";
 
 export const BYPASS = "trackBypass";
 const isoNow = () => new Date().toISOString().replace(/\.\d+Z$/, "Z");
@@ -133,9 +134,16 @@ export function fixupTracked(tr, state, { author = "Reviewer" } = {}) {
 }
 
 /* ---------- reading + resolving changes ---------- */
+const inListAt = (doc, pos) => { const $p = doc.resolve(pos); for (let d = $p.depth; d > 0; d--) if ($p.node(d).type.name === "listItem") return true; return false; };
+const snippet = (n) => String(n.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60);
+
+/** Every change in the document, in reading order. `kind` is "ins" | "del" | "fmt". A "fmt" change carries `ids`
+ * (the Word change ids it covers, scope-prefixed) so it can be found again after earlier edits move positions. */
 export function listChanges(doc) {
   const map = new Map();
   const order = [];
+  let run = null; // the contiguous run-formatting group being built
+  const push = (c) => { order.push(c); return c; };
   doc.descendants((n, pos) => {
     if (n.isInline) {
       for (const [kind, type] of [["ins", "trackIns"], ["del", "trackDel"]]) {
@@ -148,12 +156,37 @@ export function listChanges(doc) {
         const last = c.ranges[c.ranges.length - 1];
         if (last && last.to === pos) last.to = pos + n.nodeSize; else c.ranges.push({ from: pos, to: pos + n.nodeSize });
       }
-    } else if (n.isTextblock && n.attrs.pMark && n.attrs.pMark.type) {
-      const pm = n.attrs.pMark;
-      const key = `${pm.type}:${pm.id}:p${pos}`;
-      const c = { key, kind: pm.type, id: pm.id, author: pm.author, date: pm.date, text: "¶", ranges: [], para: true, pos };
-      map.set(key, c); order.push(c);
-    }
+      const fm = n.marks.find((x) => x.type.name === "trackFmt");
+      if (fm) {
+        const a = fm.attrs;
+        if (run && run.to === pos && run.author === a.author && run.date === a.date && run.old === a.old) {
+          run.to = pos + n.nodeSize; run.text += n.isText ? n.text : "￼";
+          if (!run.ids.includes(`run:${a.id}`)) run.ids.push(`run:${a.id}`);
+        } else run = push({ key: `fmt:run:${a.id}`, kind: "fmt", scope: "run", id: a.id, ids: [`run:${a.id}`], author: a.author, date: a.date, old: a.old, text: n.isText ? n.text : "￼", from: pos, to: pos + n.nodeSize, label: runLabel(a.old, n.marks), para: false });
+      } else run = null;
+    } else if (n.isTextblock || n.type.name === "table" || n.type.name === "tableRow" || n.type.name === "tableCell" || n.type.name === "tableHeader") {
+      run = null;
+      if (n.isTextblock && n.attrs.pMark && n.attrs.pMark.type) {
+        const pm = n.attrs.pMark;
+        const key = `${pm.type}:${pm.id}:p${pos}`;
+        const c = { key, kind: pm.type, id: pm.id, author: pm.author, date: pm.date, text: "¶", ranges: [], para: true, pos };
+        map.set(key, c); order.push(c);
+      }
+      if (n.isTextblock && n.attrs.pFmt && n.attrs.pFmt.old) {
+        const f = n.attrs.pFmt;
+        const inList = inListAt(doc, pos);
+        push({ key: `fmt:para:${f.id}`, kind: "fmt", scope: "para", id: f.id, ids: [`para:${f.id}`], author: f.author, date: f.date, text: snippet(n), pos, label: paraLabel(f.old, { level: n.type.name === "heading" ? n.attrs.level : null, pStyle: n.attrs.pStyle, textAlign: n.attrs.textAlign, pprx: n.attrs.pprx }, inList), para: false });
+      }
+      for (const [scope, def] of Object.entries(ATTR_SCOPES)) {
+        if (!def.nodes.includes(n.type.name)) continue;
+        const info = attrChangeInfo(scope, n.attrs[def.attr]);
+        if (info) push({ key: `fmt:${scope}:${info.id}`, kind: "fmt", scope, ...info, ids: [`${scope}:${info.id}`], text: snippet(n), pos, label: def.label, para: false });
+      }
+      if (n.type.name === "table") {
+        const info = gridChangeInfo(n.attrs.gridChange);
+        if (info) push({ key: `fmt:grid:${info.id}`, kind: "fmt", scope: "grid", ...info, ids: [`grid:${info.id}`], text: snippet(n), pos, label: "Formatted: Table column widths", para: false });
+      }
+    } else run = null;
     return true;
   });
   return order;
@@ -196,14 +229,48 @@ export function rejectChange(state, key) { return resolve(state, (c) => c.key ==
 export const acceptAll = (state) => resolve(state, () => true, true);
 export const rejectAll = (state) => resolve(state, () => true, false);
 
+/* Formatting changes. ACCEPT drops the record and keeps the current look. REJECT puts the OLD properties back. */
+function resolveRunFmt(tr, c, accept) {
+  const schema = tr.doc.type.schema;
+  tr.removeMark(c.from, c.to, schema.marks.trackFmt);
+  if (accept) return;
+  for (const t of FORMAT_MARKS) if (schema.marks[t]) tr.removeMark(c.from, c.to, schema.marks[t]);
+  for (const m of oldRunMarks(c.old)) if (schema.marks[m.type]) tr.addMark(c.from, c.to, schema.marks[m.type].create(m.attrs));
+}
+function resolveNodeFmt(tr, c, accept) {
+  const n = tr.doc.nodeAt(c.pos);
+  if (!n) return;
+  const schema = tr.doc.type.schema;
+  if (c.scope === "para") {
+    if (accept) { tr.setNodeMarkup(c.pos, undefined, { ...n.attrs, pFmt: null }); return; }
+    const old = n.attrs.pFmt.old;
+    const type = old.level ? schema.nodes.heading : schema.nodes.paragraph;
+    tr.setNodeMarkup(c.pos, type, { ...n.attrs, pStyle: old.pStyle || null, textAlign: old.textAlign || "left", pprx: restorePprx(old.pprx, n.attrs.pprx), pFmt: null, ...(old.level ? { level: old.level } : {}) });
+    if (!!old.num !== inListAt(tr.doc, c.pos)) tr.setMeta("fmtPartial", "bullets / numbering"); // list structure is left as it is
+    return;
+  }
+  if (c.scope === "grid") {
+    const cols = accept ? null : oldGridCols(n.attrs.gridChange);
+    tr.setNodeMarkup(c.pos, undefined, { ...n.attrs, gridChange: "", ...(cols && cols.length === (n.attrs.gridCols || []).length ? { gridCols: cols } : {}) });
+    return;
+  }
+  const def = ATTR_SCOPES[c.scope];
+  tr.setNodeMarkup(c.pos, undefined, { ...n.attrs, [def.attr]: resolveAttrChange(c.scope, n.attrs[def.attr], accept) });
+}
+
 function resolve(state, pick, accept) {
   const tr = keep(state.tr);
   const changes = listChanges(state.doc).filter(pick);
-  // text first (right-to-left by doc position), paragraph marks after, so positions stay valid
-  const text = changes.filter((c) => !c.para), paras = changes.filter((c) => c.para);
+  // text first (right-to-left by doc position), then formatting, paragraph marks, and node-attribute formatting, re-listing
+  // against the live document each time so positions stay valid
+  const text = changes.filter((c) => !c.para && c.kind !== "fmt"), paras = changes.filter((c) => c.para), fmts = changes.filter((c) => c.kind === "fmt");
   for (const c of text) resolveOne(tr, c, accept);
+  const fmtIds = new Set(fmts.flatMap((c) => c.ids));
+  const liveFmt = () => listChanges(tr.doc).filter((c) => c.kind === "fmt" && c.ids.some((i) => fmtIds.has(i)));
+  for (const c of liveFmt().filter((x) => x.scope === "run").sort((a, b) => b.from - a.from)) resolveRunFmt(tr, c, accept);
   const live = listChanges(tr.doc).filter((c) => c.para && paras.some((p) => p.id === c.id && p.kind === c.kind));
   for (const c of live.sort((a, b) => b.pos - a.pos)) resolveOne(tr, c, accept);
+  for (const c of liveFmt().filter((x) => x.scope !== "run").sort((a, b) => b.pos - a.pos)) resolveNodeFmt(tr, c, accept);
   if (accept) sweepEmptyDeletedParas(tr);
   return tr;
 }

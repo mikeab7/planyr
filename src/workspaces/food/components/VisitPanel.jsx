@@ -241,7 +241,7 @@ function DraftDishes({ rows, setRows, isMobile }) {
               type="text" value={r.name} onChange={(e) => update(r.key, { name: e.target.value })}
               placeholder="Dish" aria-label={`Dish ${i + 1}`} data-testid="visit-dish-name"
               enterKeyHint="next" autoCapitalize="words"
-              {...noAutofill("dish-title")}
+              {...noAutofill("dish-pick")}
               style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX, minHeight: 44 }}
             />
             {rows.length > 1 && (
@@ -357,19 +357,19 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, submitLabel 
             </button>
           )}
         </div>
-        <input type="date" value={visitedOn} onChange={(e) => setVisitedOn(e.target.value)} {...noAutofill("visit-date")} style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX }} />
+        <input type="date" value={visitedOn} onChange={(e) => setVisitedOn(e.target.value)} {...noAutofill("visit-day")} data-testid="visit-date-input" style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX }} />
       </label>
       <label style={groupLabel}>
         What was good
-        <input type="text" value={whatWasGood} onChange={(e) => setWhatWasGood(e.target.value)} placeholder="The hamachi, the agedashi…" {...noAutofill("visit-highlights")} style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX }} />
+        <input type="text" value={whatWasGood} onChange={(e) => setWhatWasGood(e.target.value)} placeholder="The hamachi, the agedashi…" {...noAutofill("visit-highlights")} data-testid="visit-highlights-input" style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX }} />
       </label>
       <label style={groupLabel}>
         Cost
-        <input type="number" step="0.01" min="0" inputMode="decimal" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="0.00" {...noAutofill("visit-total")} style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX }} />
+        <input type="number" step="0.01" min="0" inputMode="decimal" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="0.00" {...noAutofill("visit-total")} data-testid="visit-cost-input" style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX }} />
       </label>
       <label style={groupLabel}>
         Notes
-        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} {...noAutofill("visit-notes")} style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX, resize: "vertical" }} />
+        <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} {...noAutofill("visit-notes")} data-testid="visit-notes-input" style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX, resize: "vertical" }} />
       </label>
       <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12.5, color: "var(--text-secondary)" }}>
         Would return?
@@ -389,7 +389,7 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, submitLabel 
       {/* Pinned to the bottom of whichever scroller holds the form (the sheet's content area on a
           phone), so Save stays on screen while typing — with the keyboard up the sheet itself rides
           above the keyboard (BottomSheet), and this keeps Save inside the visible part of it. */}
-      <div data-testid="visit-form-actions" style={{
+      <div data-testid="visit-form-actions" data-sheet-sticky="bottom" style={{
         position: "sticky", bottom: 0, zIndex: 1, display: "flex", gap: 8, padding: "10px 0 14px",
         background: "var(--surface-raised)", borderTop: "1px solid var(--border-default)",
       }}>
@@ -450,7 +450,7 @@ function PanelHeader({ manualNameEditable, manualName, onManualNameChange, name,
         {manualNameEditable ? (
           <input
             type="text" autoFocus value={manualName} onChange={(e) => onManualNameChange(e.target.value)}
-            placeholder="Name this place" {...noAutofill("pin-label")} enterKeyHint="done" autoCapitalize="words"
+            placeholder="What's this place called?" aria-label="Place" data-testid="pin-label-input" {...noAutofill("pin-label")} enterKeyHint="done" autoCapitalize="words"
             style={{ ...fieldStyle(), fontSize: 17, fontWeight: 700 }}
           />
         ) : (
@@ -615,7 +615,7 @@ function ActionsRow({ everVisited, onOpenForm, wishlisted, onToggleWishlist, wis
   );
 
   return (
-    <div data-testid="food-actions-row" style={{
+    <div data-testid="food-actions-row" data-sheet-sticky="bottom" style={{
       position: "sticky", bottom: 0, display: "flex", gap: 8, padding: "10px 16px",
       background: "var(--surface-raised)", borderTop: "1px solid var(--border-default)",
     }}>
@@ -871,7 +871,7 @@ export default function VisitPanel({
          * for why this was a genuine gap, not a deliberate choice). Wrapped here, INSIDE peekRef,
          * so the sheet's peek-height measurement (unchanged, above) still sees this block's real
          * height — position:sticky doesn't remove an element from normal flow. */}
-        <div style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--surface-raised)" }}>
+        <div data-sheet-sticky="top" style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--surface-raised)" }}>
           <PanelHeader
             manualNameEditable={manualNameEditable} manualName={manualName} onManualNameChange={onManualNameChange}
             name={place?.name} category={place?.category} address={place?.address} lat={place?.lat} lon={place?.lon}
