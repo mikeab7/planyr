@@ -650,6 +650,11 @@ export async function binOrphanedTrackedSite(id) {
   return cloudDelete(activeUid(), id);
 }
 
+// NEW-1 (instant cross-tab sync) — the per-TAB header merge base, readable/advanceable by the open
+// planner's same-browser fold (SitePlanner.jsx) so it can merge ANOTHER tab's header per leaf with the
+// SAME mergeHeader the cloud refresh uses. `advanceHeaderBase` is the "I have now seen this header" step.
+export function headerBaseOf(id) { return lastSeenHeader[id] || null; }
+export function advanceHeaderBase(id, slice) { if (id && slice) lastSeenHeader[id] = slice; }
 // B1953797 (H1) — write an adopted (merged) header slice into the local mirror. Only the governed
 // header keys are touched; everything else in the stored record is left exactly as it is.
 function adoptHeaderIntoMirror(id, slice) {
