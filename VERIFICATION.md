@@ -177,6 +177,18 @@ Sandbox-proven in WebKit-emulated iPhone 15 / SE against a MOCKED Supabase (`ui-
 6. Rotate to landscape and back with the field focused. **Expect:** the toggle and field stay on screen.
 7. Desktop browser at full width: toolbar looks as before; picking a result still centres the pin in the area LEFT of the right-hand panel.
 - **Stopping rule:** closes on a dated pass of 1–7, or a failed step filed as a recurrence on B2046224.
+### V1443696 — B2018608: vector roads + labels basemap (Food + Site Plan map) `Blocker: live-GIS`
+
+Sandbox-proven at dpr 2 against a SYNTHETIC OpenMapTiles fixture (`ui-audit/verify-vector-basemap.mjs`, 28/28); the sandbox cannot reach `tiles.openfreemap.org`, so the **real source, its CORS headers and the real map look are unverified**. **Steps** (planyr.io, read the served chunk hash in the same observation; `node ui-audit/verify-vector-basemap.mjs https://planyr.io --live` runs the mechanical half):
+1. Open `/food` fresh (clear `planyr:food:basemap`) at Houston metro zoom, and the Site tab's Map at the same zoom. **Expect:** /food opens on **Site Plan** and looks IDENTICAL to the Site map — satellite + Planyr's clean white city names, NO road lines. Zoom in past parcel zoom on both: clean thin roads + names appear on both at the same zoom; no "Crisp road labels unavailable" notice (if it shows, OpenFreeMap was blocked/CORS-refused — file that on B2018608).
+2. Tap **Hybrid** on /food at metro zoom, then neighbourhood zoom. **Expect:** freeways/major roads and place names at metro, no edge-to-edge bands; local streets only at neighbourhood zoom; road names follow the road line; no two labels overlap; no heavy black outlines; the aerial is slightly toned.
+3. Pan and zoom (wheel + buttons). **Expect:** labels stay glued to the aerial through the animation; Food pins sit above labels; no blank map after a search jump.
+4. Switch between Site Plan and Hybrid and reload. **Expect:** the choice persists; switching never blanks the map.
+5. Site tab → Map view, Layers → Road names slider (close zoom). **Expect:** the slider fades the roads; parcels / FEMA / draw tools still paint above; at metro zoom still no road lines.
+6. Open a plan, File → Download PDF. **Expect:** the aerial in the PDF is NOT darkened or desaturated.
+7. Look along tile joins at fractional zoom on a 2x display. **Expect:** no light hairlines.
+8. Desktop: the credit reads "…OpenFreeMap © OpenMapTiles data © OpenStreetMap", fully visible beside (not under) the ? button; the "Loading imagery…" pill never overlaps the zoom control.
+- **Stopping rule:** closes on a dated pass of 1–8, or a failed step filed as a recurrence on B2018608.
 ### V1469824 — B2051664: Food search lists the places nearest the visible map first (phone, signed in) `Blocker: auth`
 
 Sandbox-proven on fixture rows: `test/foodSearchProximity.test.js`, plus a real-Chromium run of the built app with the search RPC stubbed (Katy first at a Houston-area view; Dallas first after flying there). Pending: the owner's signed-in phone against his real snapshot (read-only — do not log or edit anything). **Steps** (read the served chunk hash in the same observation):
@@ -11625,6 +11637,16 @@ records its own live verify" mechanism) or a future sandbox with different egres
 - **Stopping rule:** closes when steps 2–3 both read as expected on `planyr.io` over a real parcel selection, or a specific residual is filed as a recurrence against B1895376, per STANDING RULE #2.
 
 *(minted **V1351376** alongside **B1895376**; `Cadence: once`)*
+
+### V1481216 — B2063056: a plan setting changed in one tab of the same browser appears in the other signed-in tab within seconds, without clobbering what that tab is editing `Blocker: auth`
+
+**Verified headless (logged out):** `e2e/cross-tab-live.spec.js` — rename, building, in-progress edit, header setting (red-proofed). **Pending:** the signed-in leg, where the element union is gated off and only the header path runs.
+**Use a throwaway DUPLICATE plan; read the served chunk hash in the same observation.**
+1. Signed in, open the same throwaway plan in two tabs of one browser; leave B in the background. **Expect:** same Settings in both.
+2. In A change the setback; switch to B without reloading. **Expect:** B shows the new setback and the notice "Updated from another session" within seconds.
+3. In B start typing a different setting (do not commit), change another setting in A. **Expect:** B's in-progress value is untouched.
+4. Reload both. **Expect:** both changes present.
+- **Stopping rule:** closes when steps 2–4 read as expected on `planyr.io`, or a residual is filed as a recurrence against B2063056.
 
 ### V1390100 — B1953797: two tabs/devices changing DIFFERENT plan settings keep BOTH; an idle open tab adopts the other's change; Model's Site.Acres / Plan.Building1.SF read the real plan on a device that never opened it `Blocker: auth`
 

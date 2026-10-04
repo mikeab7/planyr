@@ -265,10 +265,10 @@ describe("NEW-5 — releasing a canvas backing store", () => {
 describe("NEW-6 — the Map view's Leaflet map is capped like the planner's", () => {
   const finder = srcOf("../src/workspaces/site-planner/MapFinder.jsx");
 
-  it("both tile layers get an explicit ceiling", () => {
-    expect(finder.match(/boundTileCache\(layer, \(\) => tileCacheLimit\(\{/g).length).toBe(2);
+  it("the raster imagery layer gets an explicit ceiling (the labels are vector now — NEW-1/B2018608 — and hold no tile cache)", () => {
+    expect(finder.match(/boundTileCache\(layer, \(\) => tileCacheLimit\(\{/g).length).toBe(1);
     expect(finder).toContain("imageryCapRef.current = detachCap;");
-    expect(finder).toContain("labelsCapRef.current = detachCap;");
+    expect(finder).not.toContain("labelsCapRef.current = detachCap;");
   });
 
   it("hiding the map sheds tiles and releases the duplicate raster overlays", () => {
@@ -290,7 +290,7 @@ describe("NEW-6 — the Map view's Leaflet map is capped like the planner's", ()
   });
 
   it("nothing here downgrades what is DRAWN — retina is untouched", () => {
-    expect(finder).toContain("detectRetina: true"); // the owner has ruled out any retina downgrade
+    expect(finder).toContain("densityTileOptions(bm.maxNative"); // detectRetina via the one shared density rule (NEW-1) // the owner has ruled out any retina downgrade
     expect(finder.includes("detectRetina: false")).toBe(false);
   });
 });
