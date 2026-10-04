@@ -115,6 +115,7 @@ import { classifyIsolatedControl, ROW_ALIGN_TOLERANCE_PX, SURFACE_HEIGHT_THRESHO
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..");
 const OUT_MD = join(REPO, "docs", "UI-INVENTORY.md");
+import { fakeTilePng } from "./lib/fakeTile.mjs";
 const SIGNATURE_BUDGET_PATH = join(HERE, "signature-budget.json");
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
 
@@ -176,9 +177,16 @@ const escAll = async (p) => { await p.keyboard.press("Escape").catch(() => {}); 
 // (buttons rendered, tooltip rendered, no error) in every environment, deterministically, forever.
 // Verified empirically (ui-audit/tmp-diag-*.mjs, since deleted) to reproduce CI's exact rendered
 // text byte-for-byte on both surfaces before this was wired in here.
-const mockExternalNetwork = async (ctx) => {
+const mockExternalNetwork = async (ctx, { tiles = false } = {}) => {
   await ctx.route((url) => !url.toString().startsWith(BASE), async (route) => {
     const url = route.request().url();
+    // NEW-1 (food controls) — a basemap tile must answer with a real image, or Leaflet's tileerror
+    // raises the Food map's "Imagery unavailable" chip: a control that appears or not depending on
+    // the crawl's network, which is exactly the flakiness this mock exists to remove.
+    if (tiles && route.request().resourceType() === "image") {
+      await route.fulfill({ status: 200, contentType: "image/png", body: fakeTilePng(0, 0, 0) });
+      return;
+    }
     if (url.includes("rest/v1/")) {
       // Supabase PostgREST — an empty, successful result set (matches `fetchAllComps`'s
       // `{ data: [], error: null }` un-configured-client fallback, which is the shape every
@@ -223,6 +231,36 @@ const INTERACTIVE_SEL = 'button, [role="button"], [role="menuitem"], input, sele
 // (a plain `<div>`, matched by neither clause) and make the zoom-stack/locate-button `<a>` tags
 // explicit rather than relying on their incidental `role="button"`.
 const LANDING_SEL = `${INTERACTIVE_SEL}, [style*="border-radius"], .leaflet-control-scale-line, .leaflet-bar a`;
+
+// NEW-1 (food controls, 2026-10-04) — THE FOOD MAP WAS NEVER CRAWLED. `#/food` is the hidden
+// Easter-egg route (not a module tab, so no surface here ever navigated to it), which is why a
+// segmented control with a different shape and active colour from its neighbour, a circle where
+// every other floating control is `md`, and a toolbar row running off a phone's right edge all
+// sat in the product with every relational check reporting a clean "none found". Phone width is
+// the owner's own screen (an iPhone, ~390 wide) and the one the reported defects live at, so it is
+// the primary entry; desktop and the Hybrid basemap state are crawled beside it because each is a
+// different set of controls on screen. `relationalGate` makes the relational checks FATAL on these
+// surfaces (every other surface only reports them in docs/UI-INVENTORY.md) — see
+// relationalProblems() below.
+// Findings the relational gate deliberately does NOT fail on, each named with why. The row-1 header
+// is shared app chrome rendered identically on every module (this pair — the icon-only Settings
+// gear beside the labelled account chip — differs on the Map landing page and the Site Planner too),
+// so it is the "App header" surface's business, not something a Food change can or should converge.
+const RELATIONAL_IGNORE = [
+  { kind: "SIBLING-SIZE", a: "Settings", b: "Sign in", reason: "shared row-1 header chrome, identical on every module — owned by the App header surface" },
+];
+const FOOD_PHONE = { width: 390, height: 844 };
+const foodSurface = (name, viewport, prep) => ({
+  name, hash: "#/food", viewport, touch: viewport.width < 500, mockNetwork: true, fakeTiles: true, relationalGate: true,
+  prep, scope: "body", exclude: "[data-menu-owner]", directSelector: LANDING_SEL,
+});
+const hybrid = async (p) => { await clickIf(p, '[data-testid="food-basemap-hybrid"]'); await p.waitForTimeout(300); };
+const FOOD_SURFACES = [
+  foodSurface("Food map (phone)", FOOD_PHONE, async (p) => { await p.waitForTimeout(500); }),
+  foodSurface("Food map — Hybrid (phone)", FOOD_PHONE, hybrid),
+  foodSurface("Food map (desktop)", { width: 1440, height: 900 }, async (p) => { await p.waitForTimeout(500); }),
+  foodSurface("Food list (phone)", FOOD_PHONE, async (p) => { await clickIf(p, 'button[aria-pressed]:has-text("List")'); await p.waitForTimeout(400); }),
+];
 
 const SURFACES = [
   {
@@ -355,6 +393,7 @@ const SURFACES = [
   },
   { name: "Library", hash: "#/library", prep: async () => {}, scope: "body", exclude: "header, [data-menu-owner]" },
   { name: "Doc Review (empty state)", hash: "#/markup", prep: async () => {}, scope: "body", exclude: "header, [data-menu-owner]" },
+  ...FOOD_SURFACES,
 ];
 
 async function readSurface(page, surface) {
@@ -894,6 +933,54 @@ async function alignmentMismatches(page, surface) {
   }, { menuOnly: !!surface.menuOnly, scope: surface.scope, exclude: surface.exclude, topTolPx: ALIGN_TOP_TOL_PX, heightTolPx: ALIGN_HEIGHT_TOL_PX, bandPx: ALIGN_BAND_PX, radiusOk: [...RADIUS_OK] });
 }
 
+// NEW-1 (food controls) — TWO shapes the relational checks above are blind to BY CONSTRUCTION,
+// both measured on the Food map before this existed:
+//  · a CIRCLE. Every other check builds its candidate pool from controls whose computed radius is
+//    a single on-scale pixel value, and a `border-radius: 50%` button computes to the string
+//    "50%" — which is not a pixel value, so the Food map's info button was never a candidate for
+//    nesting, sibling, alignment or kind. A circular, actionable control is the exact case the
+//    shape rule forbids (a standalone control is `md`, whatever its aspect ratio), so it is its own
+//    finding: square-ish (within 2px), at least 24px across, radius at or past half its side.
+//  · a control CLIPPED at the screen's side. A control whose box extends past the viewport edge, or
+//    past an ancestor that clips horizontally (overflow hidden/auto/scroll), is partly invisible —
+//    the Food toolbar's search field ran off a phone's right edge and was cut by the header's own
+//    scroll strip. Horizontal only: a list row scrolled out of a vertical scroller is normal, a
+//    control cut off sideways never is.
+async function circleAndClipFindings(page, surface) {
+  return page.evaluate(({ interactiveSel, scope, exclude }) => {
+    const root = [...document.querySelectorAll(scope)].find((el) => el.getBoundingClientRect().width > 0) || document.body;
+    const vw = document.documentElement.clientWidth;
+    const circles = [], clipped = [];
+    for (const el of root.querySelectorAll(interactiveSel)) {
+      if (exclude && el.closest(exclude) && el.closest(exclude) !== root) continue;
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) continue;
+      const cs = getComputedStyle(el);
+      if (cs.visibility === "hidden" || cs.display === "none") continue;
+      const label = String(el.getAttribute("aria-label") || el.getAttribute("title") || (el.textContent || "").trim().slice(0, 30) || el.tagName).replace(/\s+/g, " ").trim();
+      // Circle: first corner value, % or px, against the box.
+      const first = String(cs.borderTopLeftRadius).split(/\s+/)[0];
+      const rpx = first.endsWith("%") ? (parseFloat(first) / 100) * Math.min(rect.width, rect.height) : parseFloat(first);
+      if (Math.abs(rect.width - rect.height) <= 2 && rect.width >= 24 && rpx >= Math.min(rect.width, rect.height) / 2 - 0.5) {
+        circles.push({ label, w: Math.round(rect.width), h: Math.round(rect.height) });
+      }
+      // Horizontal clip: viewport edge, then every clipping ancestor.
+      let left = 0, right = vw, by = "the screen edge";
+      for (let a = el.parentElement; a && a !== document.documentElement; a = a.parentElement) {
+        const acs = getComputedStyle(a);
+        if (acs.overflowX === "visible") continue;
+        const ar = a.getBoundingClientRect();
+        if (ar.left > left) { left = ar.left; by = "an overflow-clipping ancestor"; }
+        if (ar.right < right) { right = ar.right; by = "an overflow-clipping ancestor"; }
+      }
+      if (rect.right > right + 1 || rect.left < left - 1) {
+        clipped.push({ label, by, over: Math.round(Math.max(rect.right - right, left - rect.left)) });
+      }
+    }
+    return { circles, clipped };
+  }, { interactiveSel: INTERACTIVE_SEL, scope: surface.scope, exclude: surface.exclude });
+}
+
 // B1176976 (NEW-2) — isolatedKindMismatches(): the gap nestingMismatches()/siblingMismatches()
 // cannot close BY CONSTRUCTION, because both are relative checks (a control vs. its CONTAINER, a
 // control vs. a rounded ROW PEER) — a control with neither never reaches either one's compliance
@@ -1356,15 +1443,22 @@ async function run() {
   const sibling = {}; // surface name -> { light: [...], dark: [...] } of sibling-radius-family findings (B950320)
   const sizeSibling = {}; // surface name -> { light: [...], dark: [...] } of sibling height/padding findings (B982402)
   const alignment = {}; // surface name -> { light: [...], dark: [...] } of top/height alignment findings (B950322)
+  const shapeFindings = {}; // surface name -> { light, dark } of circle + horizontal-clip findings (NEW-1, food controls)
   const isolatedKind = {}; // surface name -> { light: [...], dark: [...] } of isolated-control-kind candidates (B1176976)
   try {
     // NEW-15 / B846608 — fail loudly, before spending ~90s crawling every surface, if this
     // build isn't in CI's canonical auth state. See the gate's own header comment above.
     await assertCanonicalAuthState(browser);
     for (const theme of ["light", "dark"]) {
-      for (const surface of SURFACES) {
-        const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
-        if (surface.mockNetwork) await mockExternalNetwork(ctx);
+      // INV_ONLY=<substring> — dev loop only (crawl just the matching surfaces); never set in CI.
+      for (const surface of SURFACES.filter((x) => !process.env.INV_ONLY || x.name.includes(process.env.INV_ONLY))) {
+        const ctx = await browser.newContext({
+          viewport: surface.viewport || { width: 1440, height: 900 }, deviceScaleFactor: 1,
+          // A touch surface is a REAL coarse pointer (the help control, tap radii and the narrow
+          // layout all key off it) — not just a small window.
+          ...(surface.touch ? { hasTouch: true, isMobile: true } : {}),
+        });
+        if (surface.mockNetwork) await mockExternalNetwork(ctx, { tiles: !!surface.fakeTiles });
         await ctx.addInitScript(seed(theme));
         const page = await ctx.newPage();
         await assertMeasurable(page, "ui-inventory");
@@ -1379,6 +1473,7 @@ async function run() {
         (sizeSibling[surface.name] ||= {})[theme] = await siblingSizeMismatches(page, surface);
         (alignment[surface.name] ||= {})[theme] = await alignmentMismatches(page, surface);
         (isolatedKind[surface.name] ||= {})[theme] = await isolatedKindMismatches(page, surface);
+        (shapeFindings[surface.name] ||= {})[theme] = await circleAndClipFindings(page, surface);
         await ctx.close();
       }
     }
@@ -1554,6 +1649,27 @@ async function run() {
     }
   }
   if (!totalIsolatedKindMismatches) isolatedKindLines.push("_None found on this run._", "");
+
+
+  // NEW-1 (food controls) — the relational checks above only ever REPORTED into docs/UI-INVENTORY.md,
+  // so a surface could carry any number of them and stay green. On a surface flagged
+  // `relationalGate` every finding of every relational kind is a BUILD FAILURE, named by element.
+  const relationalProblems = [];
+  for (const s of SURFACES.filter((x) => x.relationalGate)) {
+    for (const theme of ["light", "dark"]) {
+      for (const f of (nesting[s.name] || {})[theme] || []) relationalProblems.push(`${s.name} (${theme}) NESTING: "${f.childLabel}" is ${f.childRadius}px inside "${f.ancestorLabel}" (${f.ancestorRadius}px) — expected ${f.expected}px.`);
+      for (const f of (sibling[s.name] || {})[theme] || []) relationalProblems.push(`${s.name} (${theme}) SIBLING-RADIUS: ${JSON.stringify(f)}`);
+      for (const f of ((sizeSibling[s.name] || {})[theme] || []).filter((x) => !RELATIONAL_IGNORE.some((i) => i.kind === "SIBLING-SIZE" && i.a === x.aLabel && x.bLabel.startsWith(i.b)))) relationalProblems.push(`${s.name} (${theme}) SIBLING-SIZE: ${JSON.stringify(f)}`);
+      for (const f of (alignment[s.name] || {})[theme] || []) relationalProblems.push(`${s.name} (${theme}) ALIGNMENT: ${f.members.join(" · ")} (top spread ${f.topSpread}px, height spread ${f.heightSpread}px)`);
+      const shape = (shapeFindings[s.name] || {})[theme] || { circles: [], clipped: [] };
+      for (const c of shape.circles) relationalProblems.push(`${s.name} (${theme}) CIRCLE: "${c.label}" is a ${c.w}×${c.h} circle — a standalone control is md (docs/DESIGN.md shape rule).`);
+      for (const c of shape.clipped) relationalProblems.push(`${s.name} (${theme}) CLIPPED: "${c.label}" runs ${c.over}px past ${c.by}.`);
+      for (const c of (isolatedKind[s.name] || {})[theme] || []) {
+        const v = classifyIsolatedControl(c);
+        if (!v.compliant) relationalProblems.push(`${s.name} (${theme}) CONTROL-KIND: "${c.label}" is ${c.radius}px, a ${v.kind} — expected ${v.expectedRadius}px.`);
+      }
+    }
+  }
 
   // NEW-1/NEW-2 (B1038016) — THE headline metric, now BOUND rather than merely reported. Not "how
   // many values deviate from a list" (a value can be individually on-scale and still be the wrong
@@ -1749,7 +1865,8 @@ async function run() {
       return false;
     })();
     if (!signatureCheck.ok) console.error("Signature BUDGET check FAILED (NEW-1, B1038016):\n" + signatureCheck.problems.map((p) => "  • " + p).join("\n"));
-    if (docStale || !signatureCheck.ok) process.exit(1);
+    if (relationalProblems.length) console.error("Relational design check FAILED on a gated surface (NEW-1, food controls):\n" + relationalProblems.map((p) => "  • " + p).join("\n"));
+    if (docStale || !signatureCheck.ok || relationalProblems.length) process.exit(1);
     console.log(budgetOnly
       ? "Every crawled surface is within its signature budget (docs/UI-INVENTORY.md content not checked — see --budget-only)."
       : "docs/UI-INVENTORY.md is up to date and every surface is within its signature budget.");
@@ -1758,6 +1875,7 @@ async function run() {
 
   writeFileSync(OUT_MD, md);
   console.log(`docs/UI-INVENTORY.md written — ${totalDeviations} distinct deviating style signature(s), ${totalNestingMismatches} nesting mismatch(es), ${totalSiblingMismatches} sibling radius mismatch(es), ${totalSizeSiblingMismatches} sibling height/padding mismatch(es), ${totalAlignmentMismatches} alignment mismatch(es), ${totalIsolatedKindMismatches} isolated control kind mismatch(es) found.`);
+  if (relationalProblems.length) console.warn("⚠ Relational design check FAILED on a gated surface:\n" + relationalProblems.map((p) => "  • " + p).join("\n"));
   if (!signatureCheck.ok) {
     console.warn("⚠ Signature BUDGET check FAILED (see docs/UI-INVENTORY.md's own section):\n" + signatureCheck.problems.map((p) => "  • " + p).join("\n"));
   } else {
