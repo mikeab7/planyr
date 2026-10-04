@@ -581,9 +581,9 @@ function TreeRow({
                 flex: "0 0 auto", width: 44, height: 44, margin: "-6px -4px -6px 0", padding: 0,
                 display: "inline-flex", alignItems: "center", justifyContent: "center",
                 border: "none", borderRadius: RADIUS.control, background: "transparent",
-                color: "inherit", font: "inherit", fontSize: 20, lineHeight: 1, fontWeight: 700, cursor: "pointer",
+                color: "inherit", font: "inherit", cursor: "pointer",
               }}
-            >⋯</button>
+            ><svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><circle cx="4" cy="10" r="1.7" /><circle cx="10" cy="10" r="1.7" /><circle cx="16" cy="10" r="1.7" /></svg></button>
           ) : null}
         </>
       )}
