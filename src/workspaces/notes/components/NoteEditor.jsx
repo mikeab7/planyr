@@ -47,13 +47,8 @@ import {
   toggleSelection,
 } from "../lib/notesMarquee.js";
 import {
-<<<<<<< HEAD
-  caretRevealDelta, fitView, frameView, normalizeView, panBy, stepZoom, toWorkspace,
+  caretRevealDelta, fitView, frameView, normalizeView, openingZoom, panBy, stepZoom, toWorkspace,
   VIEW_ZOOM_DEFAULT, visibleBand, wheelIntent, wheelNativeAxis, zoomAbout, zoomForWheel, zoomKeyIntent, zoomLabel,
-=======
-  fitView, frameView, normalizeView, openingZoom, panBy, stepZoom, toWorkspace,
-  VIEW_ZOOM_DEFAULT, wheelIntent, wheelNativeAxis, zoomAbout, zoomForWheel, zoomKeyIntent, zoomLabel,
->>>>>>> origin/main
 } from "../lib/notesViewport.js";
 import { HIGHLIGHT_COLORS, SIZES, TEXT_COLORS } from "../lib/notesFormatPalette.js";
 import { PASTE_MODES } from "../lib/notesPastePlain.js";
@@ -1634,7 +1629,7 @@ const NoteEditor = forwardRef(function NoteEditor({
    * effect below — so it does not wait for the next letter. Held in a ref so the editor config and
    * that effect share ONE implementation. */
   const revealCaretRef = useRef(null);
-  revealCaretRef.current = (view) => {
+  revealCaretRef.current = (view, { verticalOnly = false } = {}) => {
     const sc = scrollerRef.current;
     if (!sc || !view || view.isDestroyed) return;
     let caret;
@@ -1642,7 +1637,9 @@ const NoteEditor = forwardRef(function NoteEditor({
     if (!caret) return;
     const vv = typeof window !== "undefined" ? window.visualViewport : null;
     const band = visibleBand(sc.getBoundingClientRect(), vv);
-    const { dx, dy } = caretRevealDelta({ caret, band });
+    const delta = caretRevealDelta({ caret, band });
+    const dx = verticalOnly ? 0 : delta.dx;
+    const dy = delta.dy;
     if (dx || dy) setView({ x: viewRef.current.x + dx, y: viewRef.current.y + dy, z: viewRef.current.z });
   };
 
@@ -2467,25 +2464,32 @@ const NoteEditor = forwardRef(function NoteEditor({
   useEffect(() => {
     if (!editor || editor.isDestroyed) return undefined;
     let raf = 0;
+    let timer = 0;
     const run = () => {
       if (raf) return;
       raf = requestAnimationFrame(() => {
         raf = 0;
         if (editor.isDestroyed || !editor.view.hasFocus() || pendingRef2.current) return;
-        revealCaretRef.current?.(editor.view);
+        /* A touch placement is still settling (`touchPlaceGuardRef`): panning now would slide the box
+         * out from under the finger that just put it there (`verify-notes-touch-landing` measures it).
+         * Look again once the guard has expired. */
+        const wait = touchPlaceGuardRef.current - performance.now();
+        if (wait > 0) { timer = setTimeout(run, wait + 30); return; }
+        /* VERTICAL ONLY: the keyboard covers the bottom, never the sides. The horizontal comfort band is
+         * ProseMirror's own keystroke hook's business. */
+        revealCaretRef.current?.(editor.view, { verticalOnly: true });
       });
     };
     const vv = typeof window !== "undefined" ? window.visualViewport : null;
     vv?.addEventListener("resize", run);
     vv?.addEventListener("scroll", run);
     window.addEventListener("planyr:viewport-healed", run);
-    editor.on("focus", run);
     return () => {
       if (raf) cancelAnimationFrame(raf);
+      if (timer) clearTimeout(timer);
       vv?.removeEventListener("resize", run);
       vv?.removeEventListener("scroll", run);
       window.removeEventListener("planyr:viewport-healed", run);
-      editor.off("focus", run);
     };
   }, [editor]);
 

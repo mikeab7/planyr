@@ -318,7 +318,6 @@ export function parseView(raw) {
   return normalizeView(obj);
 }
 
-<<<<<<< HEAD
 /* ---- KEEPING THE CARET ABOVE THE SOFT KEYBOARD (NEW-6a) -------------------------------------
  *
  * On iOS the keyboard shrinks only the VISUAL viewport — `window.innerHeight` and the mat's own
@@ -357,7 +356,8 @@ export function caretRevealDelta({ caret, band, pad = 48 }) {
   if (caret.left < band.left + px) dx = caret.left - (band.left + px);
   else if (caret.left > band.right - px) dx = caret.left - (band.right - px);
   return { dx, dy };
-=======
+}
+
 /* ---- THE OPENING ZOOM (NEW-4) --------------------------------------------------------------
  *
  * Desktop opens at 100%. A PHONE opens at FIT WIDTH — the whole page width on screen, both edges
@@ -375,5 +375,4 @@ export function openingZoom({ viewport, page } = {}) {
   if (vw > PHONE_VIEWPORT_MAX) return VIEW_ZOOM_DEFAULT;
   const pw = Math.max(1, num(page?.width));
   return clampViewZoom(Math.min((vw - PHONE_PAGE_GUTTER * 2) / pw, PHONE_OPEN_ZOOM_MAX));
->>>>>>> origin/main
 }

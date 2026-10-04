@@ -14,11 +14,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   VIEW_ZOOM_DEFAULT, VIEW_ZOOM_MAX, VIEW_ZOOM_MIN, VIEW_ZOOM_STEPS,
-<<<<<<< HEAD
-  caretRevealDelta, clampViewZoom, fitView, frameView, visibleBand, normalizeView, panBy, parseView, serializeView,
-=======
-  clampViewZoom, fitView, frameView, openingZoom, PHONE_OPEN_ZOOM_MAX, PHONE_VIEWPORT_MAX, normalizeView, panBy, parseView, serializeView,
->>>>>>> origin/main
+  caretRevealDelta, clampViewZoom, fitView, frameView, openingZoom, PHONE_OPEN_ZOOM_MAX, PHONE_VIEWPORT_MAX, visibleBand, normalizeView, panBy, parseView, serializeView,
   stepZoom, toViewport, toWorkspace, viewKey, wheelIntent, wheelNativeAxis, zoomAbout, zoomForWheel, zoomKeyIntent, zoomLabel,
 } from "../src/workspaces/notes/lib/notesViewport.js";
 
@@ -343,7 +339,6 @@ describe("wheelIntent — what a wheel event means over the canvas", () => {
   });
 });
 
-<<<<<<< HEAD
 describe("NEW-6a — the caret band is the mat INTERSECTED with the visual viewport", () => {
   const mat = { left: 0, top: 146, right: 390, bottom: 844 };
   it("without a visual viewport the band is the mat; with the keyboard up it ends where the keyboard starts", () => {
@@ -371,7 +366,9 @@ describe("NEW-6a — the caret band is the mat INTERSECTED with the visual viewp
     const after = { top: caret.top - dy, bottom: caret.bottom - dy };
     expect(caretRevealDelta({ caret: { ...caret, ...after }, band })).toEqual({ dx: 0, dy: 0 });
     expect(caretRevealDelta({ caret: null, band })).toEqual({ dx: 0, dy: 0 });
-=======
+  });
+});
+
 describe('NEW-4 — the opening framing: top-anchored, and fit-width on a phone', () => {
   const viewport = { width: 1232, height: 824 };
   it('align: "top" puts a SHORT page\'s top edge a small margin below the top, whatever its height', () => {
@@ -406,6 +403,5 @@ describe('NEW-4 — the opening framing: top-anchored, and fit-width on a phone'
     expect(openingZoom({ viewport: { width: 390 }, page: { width: 200 } })).toBe(PHONE_OPEN_ZOOM_MAX);
     expect(PHONE_VIEWPORT_MAX).toBeGreaterThan(430);
     expect(Number.isFinite(openingZoom({}))).toBe(true);
->>>>>>> origin/main
   });
 });
