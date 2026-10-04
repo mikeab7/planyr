@@ -5294,6 +5294,15 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
+### B2061792 — A deed that doesn't close now WARNS on every surface by ONE rule (reader, queue row, plot toast, holes, Plot-all summary) — Tract 1 no longer reads "closes (misclosure 31.4′)" `[site-planner / deed]` (bug) #site-planner  *(Owner NEW-1, 2026-10-04. Amends B2019264 — recurrence-style follow-on: that item drew the gap; this one makes the words agree with the drawing.)*
+
+`[x]` **Report:** only the Properties panel said a deed misses; the reader summary said "closes (misclosure 31.4′)" for Grand Port Tract 1 (the 50 ft `pathCloses` screen), the queue row said "closes", and the plot toast stayed neutral unless the miss exceeded 1 ft.
+`[x]` **Fix — one rule:** `deedTrace(...).gap` (`lib/deedGap.js`, noise floor `DEED_GAP_NOISE_FT`) is the only source of user-facing closure. New pure helpers there (`deedClosure`, `deedMissPhrase`, `deedReaderSummary`, `deedQueueClosure`, `deedPlotWarning`) feed: reader summary (danger colour, "⚠ does NOT close — misses by X ft (1:N)"), queue row, plot toast (⚠ danger-styled, no `gap > 1` cutoff; the align-hint banner also goes danger-red when it carries the ⚠), save-and-except holes (warn + name the tract; a ~0.01 ft hole is silent), Plot-all final summary (names every deed that doesn't close, with its miss), and the OCR culprit hints (now gated on the as-drawn gap, so they fire for a sub-50 ft miss). `pathCloses` is left for promotability / easement-vs-boundary / the corridor-width control only.
+`[x]` **Found on the way:** the panel's closure line and the canvas gap line used `PAL.dangerText`, which does not exist on `PAL` (the field is `PAL.danger`), so both silently rendered in inherited ink, not red. Fixed all three.
+`[x]` **Adjacent cases (unit-tested in `test/deedGap.test.js`):** exact-closing deed → silent · Tract 1 (31.4 ft) → warns on all surfaces · 0.5 ft miss → warns · ~0.01 ft hole → silent · real hole miss → names its tract · open traverse beyond 50 ft → same wording ("misses by 80.0 ft"), refusal/easement behaviour unchanged · easement path untouched.
+`[x]` **Red proof:** the new `deedGap.test.js` block asserts `pathCloses(Tract 1) === true` yet the reader/queue/toast text contains no "closes" and does contain "⚠ does NOT close" (the helpers do not exist on main, so it fails there). Headless `ui-audit/verify-deed-closure-warning.mjs` (known-good square arm reads "closes"; Tract 1 reads red ⚠, plot raises the ⚠ toast) ALL PASS; `verify-deed-gap.mjs` still ALL PASS.
+- Verify: live (V1479952 — signed-in Grand Port throwaway plan).
+- Stopping rule: closes on a dated pass of V1479952, or a failed step filed as a recurrence here.
 ### B2063056 — A change in one tab shows up in the others right away, only where it is cheap: an open plan now adopts another tab's header settings live `[architecture / sync]` (feature) #site-planner #persistence  *(Owner chat block NEW-1 2026-10-04, "Changes show up instantly in other open tabs, but only if it's cheap". Minted **B2063056 / V1481216** from this branch's reserved block. DEDUPE-FIRST — searched Open/⏳ Verify/Done for `storage` listeners, `postgres_changes`, `BroadcastChannel`, `applyAdoptedHeader`: extends **B1953797** (leaf 3 "inbound is polling, not realtime") and **B672** (element realtime); no open item covers it. Net-new.)*
 
 `[x]` **Decision (docs/decisions/instant-cross-tab-sync.md): no new transport; keep focus/45 s refresh as the fallback.** MEASURED FIRST on untouched main: a two-page, one-context Playwright test for a rename + a drawn building passed with NO change — same-browser tabs were already instant (native `storage` events; element rows via the `site_elements` realtime channel when signed in). BroadcastChannel would duplicate that signal, so it was rejected.
@@ -5742,39 +5751,30 @@ Owner's NEW-1 expected a far city / full street address to "surface and jump". `
 `[x]` Guard: `test/prefsSingleSource.test.js` (12 tests; **all 12 red on origin/main**, green after: stale whole-bag save reverts a key while `updatePrefs` does not; fresh cloud read; two mounted readers see a writer's change and after reload; storage-event delivery; loud failure; Harris-ratio vs Fort-Bend-verified two-tab scenario; easement label kept; live folder label; source guard that no view keeps its own prefs copy).
 - Owner product constraints check: nothing built here contradicts a listed constraint.
 - Verify: live — **V1390096** (two real tabs + signed-in account row; `Blocker: auth` for the cloud leg only).
-### B1962672 — Crop dialog: "Reset to full page" in Polygon mode left a dead Done button `[Site Planner / overlays]` (bug) #site-planner #ui  *(Owner walk of the crop tool on planyr.io, 2026-09-29, NEW-1. Minted from reserved block B1962672–B1962687 / V1398976. DEDUPE-FIRST: no prior item covers it; B1838704/B1783328 are the tool itself, untouched.)*
+### B2066224 — Crop: Done in one mode could silently drop the shape you drew in the other `[Site Planner / overlays]` (bug) #site-planner #ui #persistence  *(Owner walk leftover NEW-1, 2026-10-04. Minted from reserved block B2066224–B2066239 / V1489552. DEDUPE-FIRST: B1783328/B1838704 are the tool, B1962672–77 the first walk; none covers Done's carry rule.)*
 
-`[x]` **Fixed, with the choice stated.** Polygon-mode Reset used to EMPTY the trace, and Done is (correctly) disabled with no polygon, silently. Now Reset never empties anything: it puts the overlay back to the whole page (both shapes; Polygon shows the closed full-page quad), so **Done stays live and saves "no crop"**. Chosen over "leave Done disabled and explain" because Reset means "show me the whole sheet" and the only sensible commit of that is exactly what Done then does; the deliberate start-over action is the separate **Clear polygon**, and *that* state now says in plain words why Done is off ("Place at least 3 points, then close the polygon to save" / "Close the polygon (click the first point or press Enter) to save") next to the button and as its tooltip. `ImageCropTool.jsx` `resetAll` / `clearPoly` / `doneWhy`.
-- Verify: live — **V1398976** (sandbox walk PASSED; signed-in Chrome pass pending).
-- Files: `src/shared/sitePlans/components/ImageCropTool.jsx`, `ui-audit/verify-crop-tool-walkthrough.mjs`.
+`[x]` **AUDIT-FIRST, the settled repro.** Reading `commit()`: the other shape was carried only if the overlay had ALSO been saved with it before the tool opened (`initialRectRef`/`initialPtsRef`). So a saved rectangle survived a polygon Done, and a saved polygon survived a rectangle Done — but a shape drawn EARLIER IN THE SAME SESSION was silently discarded (trim a rectangle on an unsaved overlay, switch to Polygon, trace, Done → rectangle gone; and the mirror). An open half-traced polygon was also carried as if finished. **Chosen: keep both, save the active one as the active shape** (the other rides beside it exactly as the saved case always did), via one `otherShapes()`: a rectangle that is not the full page, or a CLOSED polygon that was saved before opening or has been edited away from its stand-in seed. Reset's full-page stand-in and an untouched seed are never carried (Reset still clears both). Done says so in one line when it applies ("Your rectangle is kept too"). Considered and not chosen: warning before replacing — nothing is replaced, so there is nothing to warn about.
+- Verify: live — **V1489552** (sandbox walk PASSED: `ui-audit/verify-crop-leftovers.mjs`, red on the old tool, green on the new).
+- Files: `src/shared/sitePlans/components/ImageCropTool.jsx`, `ui-audit/verify-crop-leftovers.mjs`, `test/cropLeftovers.test.js`.
 
-### B1962673 — "Reset to full page" only reset the shape you were standing on `[Site Planner / overlays]` (bug) #site-planner #ui  *(NEW-2 of the same walk.)*
+### B2066225 — Crop: Enter did not close the polygon unless focus was on the canvas `[Site Planner / overlays]` (bug) #site-planner #ui  *(Owner walk leftover NEW-2, 2026-10-04.)*
 
-`[x]` **Chose "reset the overlay", per the owner's mental model.** One Reset, always shown, enabled whenever ANY crop (rectangle or polygon) is saved or drawn; from either mode it sets both shapes to the full page, so Rectangle → Reset → Done saves `crop: null` and switching back to Polygon shows the full-page quad, not the old polygon. `commit` also never carries a "full page" stand-in as a dormant shape. The tooltip says "Removes the whole crop — rectangle and polygon". The two harnesses that had encoded the old behaviour (`verify-site-tab-overlay-crop.mjs` step 8, which expected Rectangle+Done to clear a polygon and so had been silently red) were corrected to the new contract.
-- Verify: live — **V1398976**.
+`[x]` The key handler returned early for any focused BUTTON (so Enter belongs to that button). While a polygon is drafting that exception is lifted: Enter closes it and the preventDefault stops the focused button re-firing. Walk: place 3 points, press + (focus now on the button), Enter → closed, zoom unchanged. Red on the old tool.
+- Verify: live — **V1489552**.
+- Files: `ImageCropTool.jsx`.
 
-### B1962674 — Crop dialog had no discoverable way to pan or zoom in between `[Site Planner / overlays]` (bug) #site-planner #ui  *(NEW-3.)*
+### B2066226 — Crop: "Reset to full page" slid sideways when switching modes `[Site Planner / overlays]` (bug) #site-planner #ui  *(Owner walk leftover NEW-3, 2026-10-04.)*
 
-`[x]` Added, all on screen: a **✋ Pan tool** toggle (left-drag moves the picture; a pan no longer drops a polygon point where the mouse comes up — a click-after-drag bug found by the walk, fixed with a guard that also covers Space+drag), **arrow keys** (Shift = ×4) to pan, **− / slider / +** zoom (log slider, about the middle of the view; `+`/`-` keys too) between Fit and 100%. Scroll-wheel zoom, Space+drag and middle-drag unchanged. Footer hint rewritten (replaces the old one-line hint; no net growth). Keyboard focus is now kept inside the tool when a button disables itself (Undo/Redo at the end of history dropped focus to `<body>` and killed Ctrl+Z / arrows). Scrollbars deliberately NOT built (the brief allowed "or").
-- Verify: live — **V1398976**.
-- Files: `ImageCropTool.jsx`, `src/workspaces/site-planner/lib/cropHistory.js` (pure slider mapping), `test/cropHistory.test.js`.
+`[x]` Reset now keeps the leftmost footer slot in both modes; Clear polygon (Polygon only) joins on its right. Measured the same x in both modes (was 44 vs 125). Red on the old tool.
+- Verify: live — **V1489552**.
+- Files: `ImageCropTool.jsx`.
 
-### B1962675 — Crop dialog undo had no redo and no button `[Site Planner / overlays]` (bug) #site-planner #ui  *(NEW-4.)*
+### B2066227 — Crop: Edit crop sat below the fold on a short window `[Site Planner / overlays]` (bug) #site-planner #ui  *(Owner walk leftover NEW-4, 2026-10-04.)*
 
-`[x]` One undo/redo history for BOTH shapes (`lib/cropHistory.js`, pure, unit-tested): **↶ Undo / ↷ Redo buttons** in the toolbar (disabled when empty), **Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y** (Cmd on a Mac), working in Rectangle mode too (it was Polygon-only). A snapshot is tagged with its mode so undo also returns you to the mode the change was made in. A rectangle drag / vertex drag pushes its undo frame on first real movement, not on the press, so a plain click leaves no do-nothing step now that Undo is a visible button.
-- Verify: live — **V1398976**.
-
-### B1962676 — Crop dialog fit a landscape sheet into a short band with dead space `[Site Planner / overlays]` (bug) #site-planner #ui  *(NEW-5.)*
-
-`[x]` The dialog is now 96% × 94% of the window and `ImageCropTool` gained a **`fill`** mode: the viewport takes whatever is left under the title (measured with a ResizeObserver, no more `innerHeight - 220` guess) and Fit re-runs on resize until the user zooms/pans by hand. Fit also no longer caps at native size (a small image is enlarged to the room available; `FIT_MAX` 8). Measured on a 3000×1800 sheet at a 1440×900 window: the sheet fills the full window height and ~89% of its width (the rest is the sheet's own aspect ratio), dialog 96%×94%.
-- Verify: live — **V1398976**.
-- Files: `src/workspaces/site-planner/components/OverlayCropDialog.jsx` (still lazy), `ImageCropTool.jsx`.
-
-### B1962677 — Crop: thin left/right rectangle grips, and the expanded OVERLAYS row collapsed on reload `[Site Planner / overlays]` (bug) #site-planner #ui  *(NEW-6, two small ones.)*
-
-`[x]` **(a)** The four mid-edge grips now share ONE footprint (long side × the corner grips' own thickness, visible like the corners); test asserts left/right are the top/bottom grips turned 90° and none is thinner than a corner. **(b)** The expanded overlay row is remembered per plan in `sessionStorage` (`planyr:selOverlay:<siteId>`, wrapped in try/catch — a per-viewer convenience only), so a reload leaves Crop… one click away. An unknown/stale id simply opens nothing.
-- Verify: live — **V1398976**.
-- Files: `ImageCropTool.jsx`, `src/workspaces/site-planner/SitePlanner.jsx`.
+`[x]` The collapsed overlay row now carries its own Crop… / Edit crop… button on the always-visible hide/lock/remove row (same handler as the expanded body, which keeps Reset crop and the trim fields). Measured at 1600×465: fully inside the window with the row collapsed, and it opens the tool.
+- Verify: live — **V1489552**.
+- Files: `src/workspaces/site-planner/SitePlanner.jsx`.
+- Owner product constraints check: nothing here contradicts `## Owner product constraints` (entries 11/12 untouched: no storage change, keep-inside only). PANEL-BREVITY n/a (not yield/pond copy). Pre-existing, not from this change: `perf-bundle-audit` totals read over ceiling on a clean tree locally too (+0.8 KB total / +0.3 KB largest from this change); `test/docText.test.js` fails on a clean tree.
 
 ### B1960480 — iPhone: double-tap on blank paper never raised the keyboard; first text landed in the wrong place (×2: still not exactly where tapped) `[Notes]` (bug) #notes #mobile  *(Claude Code dispatch block "NEW-1," 2026-09-29, adversarial iPhone review)*
 
@@ -20258,6 +20258,20 @@ _(new `Verify: live` items land here after implementation.)_
 `[x]` **Red-proof + acceptance.** Two new cases in `e2e/names-matrix.spec.js` ("NEW-2 — renaming a brand-new project"): switcher row menu, and the in-plan header path, each on a never-drawn project created through "+ New project" — both FAIL on current main (name stays unstored, `null`) and PASS with the fix; the row-menu case also reloads.
 - Owner product constraints check: **constraint 5 (lazy project creation) is preserved** — nothing is created by "New project" itself; only a rename (a real write) materialises the row.
 - Verify: live — **V1416129** (`Blocker: auth`: the signed-in cloud path, `ensureProjectRow` → push → RPC).
+
+### B1989504 — "Start your site" card covers the middle of the map on phone and stays up while drawing `[site-planner]` (bug) #site-planner #mobile *(Owner report 2026-09-30, iPhone Safari: "Obv not how it should work.")*
+
+`[x]` **Reproduced on main first** (`e2e/start-hint-placement.spec.js`, run against the pre-change build): on a phone-width new site the card was a full-width box across the middle of the map (overlap assertion red), and it STAYED UP after Draw new parcel was armed from the rail menu (the owner's second case — the hint used to be gated only on "nothing drawn yet", never on the active tool). Desktop: same centred box, same red.
+`[x]` **Fix.** The card is now a compact strip docked to the top edge (phone: between the Panels/Tools edge tabs, under the View/Layers row; desktop: top-left of the canvas), with no full-size wrapper — nothing invisible left over the canvas. It shows only while nothing has started a site: any parcel/element/reference, an armed tool (Draw new parcel included), an identify pass, an open Add menu or an open calibration removes it. One tap on ✕ dismisses it and it stays dismissed on this device (`planarfit:startHintDismissed`, try/catch). No contradiction with `## Owner product constraints`.
+`[x]` **Sandbox proof:** `e2e/start-hint-placement.spec.js` — 4 cases × phone (390×844, emulated touch Chromium, NOT a real iPhone) and desktop (1440×900): box outside the middle half of the canvas, canvas centre answers to the canvas, Draw new parcel (rail menu AND the card's own option) removes it, dismiss persists across reload. Red on main, 8/8 green here; full vitest green.
+Verify: live — see V1414592 (real planyr.io at phone width; real-iPhone look).
+Stopping rule: closes when V1414592 passes on the deployed build, or the owner confirms on his phone.
+
+### B1989505 — Rewrite "Start your site" so the three ways to start read as different things `[site-planner]` (task) #site-planner #mobile *(Owner request 2026-09-30, NEW-2)*
+
+`[x]` Steps 1 and 3 read as the same thing (both routed through "Parcel tools ▾"; step 1 also bundled address search; "right rail" is a collapsed "Tools" tab on phone). Replaced the three sentences with four short, distinct, TAPPABLE options (each starts its action): **Click a lot on the map** (county record; same vocabulary as the Parcel tools menu) · **Search an address** · **Trace your boundary** · **Use a screenshot** (opens the file picker; place & calibrate follows). No menu paths, no "right rail". Sentence removed (PANEL-BREVITY spirit): the old three-line numbered paragraph. Covered by the same spec as B1989504 (`start-hint-draw` starts Draw; asserted on both viewports).
+Verify: live — see V1414592.
+Stopping rule: as B1989504.
 
 ## 🕓 Later / Roadmap
 
