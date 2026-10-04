@@ -346,6 +346,16 @@ Sandbox-proven: `ui-audit/verify-food-ios-keyboard.mjs` models real iOS (layout 
 8. Tap Pin, drop a pin. **Expect:** the place-name field is visible with the keyboard up; no AutoFill Contact bar.
 9. Desktop browser, full width: open the same restaurant. **Expect:** right-hand panel as before, nothing moved.
 - **Stopping rule:** closes on a dated pass of 1–9 from Michael's iPhone; any failed step re-opens B2046224 (×3) with that step number.
+### V1516224 — B2092656: no catch when NEW parcel outlines arrive (pan onto new ground / zoom to a new level) in Bartow County GA, and Katy/Fort Bend unchanged `Blocker: real-data`
+- **Done in the sandbox:** unit (12) + synthetic-Bartow arrival harness (`ui-audit/verify-parcel-arrival-cost.mjs`: zoom-arm longest task 71–86 → 16–25 ms) + five adjacent parcel harnesses green. **Why still live:** the sandbox has no GPU and no recorded Bartow response.
+- **Steps (Michael's Chrome, planyr.io, Map, Select parcels ON; read the served chunk hash in the same observation):**
+  1. Bartow GA (34.20 / -84.83), zoom 15, then zoom OUT to 14 onto ground not yet loaded. **Expect:** outlines fill in over a few frames with no visible catch (previously two long frames).
+  2. Pan ~500 px onto new ground at 14. **Expect:** no catch; outlines appear progressively.
+  3. Zoom 14→15 for the first time. **Expect:** no catch.
+  4. Pan back over loaded ground. **Expect:** instant, as before.
+  5. Katy (29.786 / -95.825) and a Fort Bend view: outlines appear, no new delay or missing lots.
+  6. Click a lot at z14 and at z16 in Georgia (also click one the instant it is still filling in). **Expect:** it selects the lot under the cursor; a click before outlines appear still adds the lot.
+- **Stopping rule:** closes on a dated pass of 1–6, or a failed step filed as a recurrence on B2092656.
 ### V1486288 — B2061600: Select-parcels outlines do not catch when a zoom or pan settles at zoom 14–16 in Bartow County GA `Blocker: real-data`
 
 Sandbox-proven: `ui-audit/verify-parcel-settle-cost.mjs` (z14 moveend settle 103.7 → 0.8 ms, mock at Bartow density), `test/parcelTileLayer.test.js`, and the existing parcel display harnesses. **Not provable here:** Michael's real 63,688-lot Bartow service, his GPU-accelerated Chrome, and how it *feels*. Read the served chunk hash in the SAME observation as the result (CLAUDE.md live-measurement rule).
