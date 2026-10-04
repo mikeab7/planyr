@@ -165,7 +165,31 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V1439184 — B2014096/B2014097/B2014098: sign-up panel — success state, hint placement, Forgot password scoping `Blocker: auth`
 
+Sandbox-proven: `test/authPanelSignup.test.js` (15), `e2e/signup-success.spec.js` (4, real built app with Supabase's signup endpoint MOCKED, both session branches, double-submit, placement measured). Not provable here: the real Supabase round trip with Cloudflare Turnstile and a real inbox (the sandbox cannot sign up for real). **Steps** (logged-out window, planyr.io, throwaway address; read the served chunk hash in the SAME observation):
+1. Open Sign up, fill it, pass the Turnstile check, press Create account. **Expect:** the button turns to "Creating account…" and ignores a second press; then the form is REPLACED by "Check your email" naming the address you typed and the sender (Supabase Auth). No password field remains.
+2. Open the email. **Expect:** it is from the sender named on screen; the link confirms the account.
+3. Reopen Sign up and click into Password. **Expect:** "Min 6 characters" appears directly under the field (not at the panel bottom); on Sign in it never appears; "Forgot password?" is on Sign in only.
+4. When Supabase "Confirm email" is later switched OFF: repeat step 1. **Expect:** the panel closes and you are signed in — no check-your-email screen, no redeploy needed.
+- **Stopping rule:** closes on a dated pass of 1–3 (4 when the setting flips), or a failed step filed as a recurrence on B2014096.
+
+### V1496384 — B2080752: a Word/txt/PDF opened from disk and saved is filed under its OWN name `Blocker: auth`
+
+Sandbox-proven: pure naming table + red-proof source guards (`test/reviewOpenedFileNaming.test.js`), tabs harness 37/37. Not provable here: the real signed-in save into the Library. **Steps** (signed in, planyr.io `#/markup`, no project selected; read the build from `/version.json` in the same observation; use a throwaway `.docx`):
+1. Open a PDF in Review, close its tab, then Open… a `.docx` named `zz-naming-test.docx`, type a word, Save. **Expect:** banner "Saved to the Library under Unfiled…"; Library › Unfiled lists `<today> zz-naming-test` with a category — not "Untitled", not the PDF's name; clicking it opens the Word file.
+2. Without closing anything, open a PDF, then Open… a `.txt`, Save. **Expect:** the row is `<today> <txt name>`, never the PDF's name.
+3. Open the same `.txt`, "Save as Word document". **Expect:** a second row named after the new `.docx`; the `.txt` row unchanged.
+4. Repeat step 1 inside a project. **Expect:** `<today> <Project> - zz-naming-test`.
+- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2080752.
+
+### V1496385 — B2080753: a Review status banner stays on the tab that produced it `Blocker: auth`
+
+Sandbox-proven: `noticeForTab` unit + source guards. Needs cloud version history. **Steps** (signed in, two saved `.docx` tabs A and B, each with ≥2 versions; throwaway files):
+1. In A open Version history, open an earlier version, Restore. **Expect:** A shows "Restored the version from …".
+2. Click tab B. **Expect:** B shows no restore banner. Click back to A. **Expect:** the banner is only ever on A, never on B.
+3. In B, Save. **Expect:** only B shows its own "Saved…" line; A unchanged.
+- **Stopping rule:** closes on a dated pass of 1–3, or a failed step filed as a recurrence on B2080753.
 ### V1446736 — B2021648: the first Food search after opening the page is about as fast as later ones `Blocker: auth`
 Built: warm-up on Food mount (preconnect, session, one throwaway search); unit tests green. Pending, signed in on the phone and desktop, on a fresh page load with the served chunk hash read in the same observation:
 1. Open `#/food`, wait a few seconds, type a query → expected: first results in roughly the time of a later search (~0.25 s), not 1.5–2 s.
@@ -631,7 +655,7 @@ Sandbox-proven (live services, real overlay engine in Chromium, 2026-09-30): `ui
 Sandbox-proven: `test/georgiaJurisdiction.test.js` (16, red on pre-change main), registry audit + fixtures, and the DCA county/city layers queried live from the build sandbox 2026-09-30 (159 counties, 538 municipalities, the fixture points recorded on B1990960). **Still needs planyr.io in a real browser** (the map tile/GIS hosts are egress-blocked here, so the drawn lines and the in-app badge were not seen).
 **Steps** (signed-in Chrome, planyr.io; read the served chunk hash in the same observation as each result):
 1. Open a Georgia site in a wired county — e.g. Gwinnett or Fulton. **Expect:** the header badge names the governing body ("City of X, GA · … County" or "Unincorporated … County, GA"); the word ETJ appears nowhere in the badge or its hover.
-2. ❌ **FAILED 2026-09-30 (live, signed-in, build f9b5f79, real Adairsville / Bartow project — recorded by the Cowork thread):** turning either Georgia row on drew nothing and toasted "… layer failed: no vector source registered". Root cause and fix on B1990960 (×2): the two rows had no `VECTOR_SOURCES` entry. **Re-run this step on a build that contains the fix, on the same project.** Layers panel → jurisdiction group. **Expect:** "County boundaries (Georgia)" and "City limits (Georgia)" rows are live; toggle each. County lines draw at region zoom, city limits at city zoom, following the real boundaries; the Texas county/city/ETJ rows are shown as not applicable here.
+2. ✅ **PASSED 2026-10-04 (live, signed-in, builds bf1e485 then 4e7352f — both contain #1909 — real Adairsville / Bartow project; recorded by the Cowork thread).** Turning on "County boundaries (Georgia)" and "City limits (Georgia)" queried the DCA `Counties_2018` and `Municipal_Boundaries` services and drew them: 4 county outlines (Floyd, Gordon, Bartow, Chattooga) and 6 city outlines (Adairsville, Calhoun, Cartersville, Plainville, Rome, White), the Adairsville limit visibly drawn around the site; no error toast, no "Not showing here" note; the Texas rows folded under "not available in Georgia". *History: ❌ FAILED 2026-09-30 on build f9b5f79 — both rows drew nothing and toasted "no vector source registered"; root cause and fix on B1990960 (×2).* Original expectation: Layers panel → jurisdiction group. **Expect:** "County boundaries (Georgia)" and "City limits (Georgia)" rows are live; toggle each. County lines draw at region zoom, city limits at city zoom, following the real boundaries; the Texas county/city/ETJ rows are shown as not applicable here.
 3. Hover the ETJ row's not-applicable reason. **Expect:** it says Georgia cities have no reach beyond their limits (not "no equivalent wired yet").
 4. Pan so a site sits inside a city that spans two counties (Atlanta: Fulton/DeKalb) or a site straddles a county line. **Expect:** both counties are named, joined as peers.
 5. Open a site in Athens (Clarke), Augusta (Richmond), Columbus (Muscogee) or Macon (Bibb). **Expect:** one consolidated government ("Athens-Clarke County, GA (consolidated)"), never "city + unincorporated".
@@ -639,6 +663,7 @@ Sandbox-proven: `test/georgiaJurisdiction.test.js` (16, red on pre-change main),
 7. Attribution strip on the Georgia view. **Expect:** Georgia credits only; no Harris County / TxGIO.
 8. Sanity: open a Katy (Texas) site and a Denver (Colorado) site. **Expect:** badge and layers exactly as before.
 - **Already PASSED live 2026-09-30 (build f9b5f79, Adairsville — recorded by the Cowork thread; do not re-run):** step 1 (badge "City of Adairsville, GA · Bartow County", no ETJ anywhere); the Layers panel shows both Georgia rows with the 8 Texas rows folded under "not available in Georgia"; no Harris/TxGIO credits; the Yield panel shows no Texas detention number (step 6's Adairsville arm — its Harris-County-GA and Montgomery-County-GA arms are still open). Steps 3, 4, 5, 7 (attribution on a drawn layer) and 8 are still open.
+- **Also PASSED live 2026-10-04 (builds bf1e485 and 4e7352f, Adairsville — recorded by the Cowork thread; do not re-run):** step 1 again (badge "City of Adairsville, GA · Bartow County"; the word ETJ appears nowhere on the page); step 7 **partially** (no Harris/TxGIO credits on the Georgia view — the attribution of the now-drawn Georgia layers specifically was not itemised); step 6's Adairsville arm again (Yield panel shows no Texas detention number). **Not exercised this pass: steps 3, 4, 5, 8** — and still open from step 6, the Harris-County-Georgia and Montgomery-County-Georgia arms. The gate stays open for those.
 - **Colorado — NOT fixed by this item, noted so it is not lost:** seven Colorado layer rows (`co_city`, `co_isd`, `co_road`, `co_metro_districts`, `co_water_districts`, `mhfd_drainage`, `mhfd_easements`) have the same missing vector source and draw nothing on a Colorado site (see B1990960 ×2). Registering them needs the real Colorado hosts (`Blocker: live-GIS`).
 - **Stopping rule:** closes on a dated pass of 1–8 (step 2 re-run first), or a failed step filed as a recurrence on B1990960.
 

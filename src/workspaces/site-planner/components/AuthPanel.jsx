@@ -6,11 +6,13 @@
  * this calls the auth wrappers and the profile hook's save/reload passed in via `profileApi`. */
 import { lazy, useCallback, useEffect, useId, useRef, useState } from "react";
 import { RADIUS } from "../../../shared/ui/radius.js";
+import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import { signIn, signUp, signOut, signOutEverywhere, resetPassword, updatePassword } from "../lib/auth.js";
 // The confirmation / reset copy NAMES the address the email arrives from (NEW-2) — a user
 // watching for "planyr.io" never finds it otherwise and assumes the signup failed. Both
 // messages are generated from the one sender constant in lib/authMail.js.
-import { SIGNUP_CONFIRM_MSG, PASSWORD_RESET_MSG } from "../lib/authMail.js";
+import { PASSWORD_RESET_MSG } from "../lib/authMail.js";
+import { MIN_PASSWORD_LENGTH, PASSWORD_MIN_HINT, signupOutcome, passwordHintVisible, checkEmailCopy } from "../lib/signupOutcome.js";
 // Cloudflare Turnstile (B1160720, NEW-1) — config-gated bot check on sign-up only. Not lazy:
 // this component and its config are both dependency-free (no external script loads until
 // mode === "signup" actually mounts the widget), so there's no bundle cost to keep it a
@@ -416,6 +418,12 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
   const [org, setOrg] = useState("");
   const [msg, setMsg] = useState(null); // { type: 'err'|'ok', text }
   const [busy, setBusy] = useState(false);
+  // Synchronous double-submit guard (NEW-1): `busy` only lands on the next render, and the
+  // password field's Enter key bypasses the button's disabled state entirely.
+  const submitting = useRef(false);
+  const [pwFocus, setPwFocus] = useState(false);
+  // Set once a sign-up with confirmation ON succeeds: { email } replaces the whole form.
+  const [done, setDone] = useState(null);
   // Turnstile (B1160720): "loading" until the widget paints, "ready" once it can be solved,
   // "error" if the script or Cloudflare itself failed — Submit stays disabled through both
   // "loading" and "error" so a slow/unreachable Cloudflare degrades to "can't submit yet"
@@ -433,6 +441,8 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
   useEffect(() => { if (mode !== "signup") setCaptchaToken(""); }, [mode]);
 
   const submit = async () => {
+    if (submitting.current) return;
+    submitting.current = true;
     setBusy(true); setMsg(null);
     try {
       if (mode === "signin") {
@@ -442,15 +452,19 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
         if (!first.trim() || !last.trim()) { setMsg({ type: "err", text: "First and last name are required." }); return; }
         const needsCaptcha = turnstileEnabled();
         if (needsCaptcha && !captchaToken) { setMsg({ type: "err", text: "Please complete the verification check." }); return; }
-        const { error, needsConfirm } = await signUp(email.trim(), pw, { firstName: first.trim(), lastName: last.trim(), org: org.trim() }, captchaToken || undefined);
+        const res = await signUp(email.trim(), pw, { firstName: first.trim(), lastName: last.trim(), org: org.trim() }, captchaToken || undefined);
         // A Turnstile token is single-use — whether the signup succeeded or the server
         // rejected it (a stale/expired token reads as a captcha failure server-side too),
         // the widget must reset so the NEXT attempt (retry, or the panel reopening) never
         // resubmits a dead token and gets stuck failing silently.
         if (needsCaptcha) { turnstileRef.current?.reset(); setCaptchaToken(""); }
-        if (error) setMsg({ type: "err", text: error });
-        else if (needsConfirm) setMsg({ type: "ok", text: SIGNUP_CONFIRM_MSG });
-        else onClose();
+        const outcome = signupOutcome(res);
+        if (outcome === "error") setMsg({ type: "err", text: res.error });
+        else {
+          setPw(""); // never leave the typed password sitting in a live field behind the result
+          if (outcome === "signed-in") onClose();
+          else setDone({ email: email.trim() });
+        }
       } else if (mode === "reset") {
         const { error } = await resetPassword(email.trim());
         setMsg(error ? { type: "err", text: error } : { type: "ok", text: PASSWORD_RESET_MSG });
@@ -459,7 +473,7 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
         if (error) setMsg({ type: "err", text: error });
         else { setMsg({ type: "ok", text: "Password updated." }); setTimeout(onClose, 900); }
       }
-    } finally { setBusy(false); }
+    } finally { submitting.current = false; setBusy(false); }
   };
 
   // Signed-in account view (Profile + Settings) — not while completing a recovery.
@@ -474,6 +488,21 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
         <div style={{ fontSize: 13, color: PAL.ink, marginBottom: 2 }}>Set a new password</div>
         <input aria-label="New password" type="password" autoComplete="new-password" placeholder="New password" value={pw} onChange={(e) => setPw(e.target.value)} style={field} onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
         <button style={{ ...btn(true), width: "100%", marginTop: 12 }} disabled={busy || pw.length < 6} onClick={submit}>{busy ? "…" : "Update password"}</button>
+      </Wrap>
+    );
+  }
+
+  // Sign-up succeeded with email confirmation ON: the form is gone, not just annotated.
+  if (done) {
+    const c = checkEmailCopy(done.email);
+    return (
+      <Wrap onClose={onClose} msg={null} title={c.heading}>
+        <div data-testid="signup-success">
+          <div style={{ fontSize: 13, color: PAL.ink, lineHeight: 1.5, wordBreak: "break-word" }}>{c.sent}</div>
+          <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>{c.sender}</div>
+          <div style={{ fontSize: 12, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>{c.next}</div>
+          <button data-testid="signup-success-signin" style={{ ...btn(true), width: "100%", marginTop: 14 }} onClick={() => { setDone(null); setMode("signin"); setMsg(null); }}>Back to sign in</button>
+        </div>
       </Wrap>
     );
   }
@@ -496,7 +525,11 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
       )}
       <input aria-label="Email" type="email" autoComplete="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} style={field} />
       {mode !== "reset" && (
-        <input aria-label="Password" type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="Password" value={pw} onChange={(e) => setPw(e.target.value)} style={field} onKeyDown={(e) => { if (e.key === "Enter") submit(); }} />
+        <input aria-label="Password" type="password" autoComplete={mode === "signup" ? "new-password" : "current-password"} placeholder="Password" value={pw} onChange={(e) => setPw(e.target.value)} style={field} onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+          aria-describedby={mode === "signup" ? "auth-pw-hint" : undefined} onFocus={() => setPwFocus(true)} onBlur={() => setPwFocus(false)} />
+      )}
+      {mode === "signup" && passwordHintVisible(pwFocus, pw) && (
+        <div id="auth-pw-hint" data-testid="password-hint" style={{ fontSize: FONT_SIZE.label, color: PAL.muted, marginTop: 4 }}>{PASSWORD_MIN_HINT}</div>
       )}
       {mode === "signup" && turnstileEnabled() && (
         <div style={{ marginTop: 10 }}>
@@ -506,14 +539,15 @@ export default function AuthPanel({ user, recovery, profileApi, initialTab, init
         </div>
       )}
       <button data-testid="auth-submit" style={{ ...btn(true), width: "100%", marginTop: 12 }}
-        disabled={busy || !email || (mode !== "reset" && pw.length < 6) || (mode === "signup" && turnstileEnabled() && (captchaState !== "ready" || !captchaToken))}
-        onClick={submit}>{busy ? "…" : mode === "signin" ? "Sign in" : mode === "signup" ? "Create account" : "Send reset email"}</button>
-      <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-        {mode === "reset"
-          ? <button style={linkBtn} onClick={() => { setMode("signin"); setMsg(null); }}>← Back to sign in</button>
-          : <button style={linkBtn} onClick={() => { setMode("reset"); setMsg(null); }}>Forgot password?</button>}
-        {mode === "signup" && <span style={{ color: PAL.muted }}>Min 6 characters</span>}
-      </div>
+        disabled={busy || !email || (mode !== "reset" && pw.length < MIN_PASSWORD_LENGTH) || (mode === "signup" && turnstileEnabled() && (captchaState !== "ready" || !captchaToken))}
+        onClick={submit}>{busy ? (mode === "signup" ? "Creating account…" : "…") : mode === "signin" ? "Sign in" : mode === "signup" ? "Create account" : "Send reset email"}</button>
+      {mode !== "signup" && (
+        <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+          {mode === "reset"
+            ? <button style={linkBtn} onClick={() => { setMode("signin"); setMsg(null); }}>← Back to sign in</button>
+            : <button style={linkBtn} onClick={() => { setMode("reset"); setMsg(null); }}>Forgot password?</button>}
+        </div>
+      )}
     </Wrap>
   );
 }
