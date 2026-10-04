@@ -97,6 +97,26 @@
 - **Not provable here:** keyboard-up `visualViewport` offset (WebKit headless has no soft keyboard) and a real fingertip → **V1481472**. Stopping rule: closes on a dated pass of V1481472 (and V1396784), or Michael saying it lands right now.
 - Constraint check (Definition of Done #4): nothing here contradicts `## Owner product constraints` (no measurements quoted to him in chat; desktop behaviour unchanged as instructed).
 - **Owner on-device pass 2026-10-04:** Michael tested double-tap-on-blank-paper (#1880) on his real iPhone and passed it — the keyboard rises and the first text lands in the new box where tapped. Chunk hash not captured in his report; accepted as his own pass.
+### B2014096 — Sign-up succeeds but the form never says so: no success state, double-submit possible `[auth panel]` (bug) #auth #ui  *(Owner NEW-1, 2026-10-04, found in one live production sign-up: auth.users row created, confirmation_sent_at set, form unchanged.)*
+
+`[x]` **Report:** after Create account the account exists and the email is sent, but the panel stays as it was; the natural response is to press the button again.
+`[x]` **AUDIT-FIRST discrepancy:** the old code DID call `setMsg(ok, SIGNUP_CONFIRM_MSG)`, but rendered it as a one-line note at the very bottom of a scrolling panel, below the filled form (which stayed), so it read as nothing. The signUp call itself was fine (Turnstile + token path untouched, verified live by the owner).
+`[x]` **Fix:** `lib/signupOutcome.js` (`signupOutcome`) decides from the RESPONSE: session present → signed in, panel closes into the app; session absent → the form is REPLACED by a "Check your email" state naming the address and the real sender (built from `AUTH_SENDER_LABEL`, so it can't drift from `authMail.js`) with a Back to sign in button; error → stays on the form. `auth.js` signUp now also returns `signedIn` (= session present). No build-time flag, so the Supabase "Confirm email" setting flips behaviour with no redeploy; a response with neither error nor session is never read as signed in. The typed password is cleared and the success view renders no inputs. Double-submit: a synchronous `submitting` ref (the password field's Enter key bypassed the button's disabled state) plus a pending "Creating account…" button.
+`[x]` **Tests:** `test/authPanelSignup.test.js` (15; both branches, copy, wiring) and `e2e/signup-success.spec.js` (real built app, Supabase signup mocked: confirmation ON → form gone + address + sender + no password in the DOM; confirmation OFF → panel closes, no check-email screen; button pending and click+Enter+Enter sends ONE request). Mutation check: restoring the original AuthPanel/auth.js turns 6 unit tests and 3 of the 4 browser tests red (the session-present test passes on both — that path already closed the panel). `test/authMailCopy.test.js` updated: the sign-up message is now `checkEmailCopy`, still built from the one sender constant.
+`[x]` Constraint check: nothing contradicts `## Owner product constraints`. Turnstile integration not touched.
+- Verify: sandbox (green build + unit + mocked-backend browser run); the real Supabase/Turnstile round trip is logged as V1439184 (`Blocker: auth`).
+
+### B2014097 — The "Min 6 characters" hint sat bottom-right of the sign-up panel, far from the password field `[auth panel]` (bug) #auth #ui  *(Owner NEW-2, 2026-10-04.)*
+
+`[x]` **Fix:** the hint now renders directly UNDER the password input, Sign up tab only, and only when useful — while the field has focus, or when something shorter than the minimum has been typed (`passwordHintVisible`); the input carries `aria-describedby`. Chosen over removal because the disabled Create account button otherwise gives no reason; kept as non-permanent chrome. Replaced (not added to): the old `<span>Min 6 characters</span>` in the Forgot-password row, deleted. The 6 is one constant (`MIN_PASSWORD_LENGTH`) shared with the button's disabled check.
+`[x]` **Tests:** placement asserted in `test/authPanelSignup.test.js` (hint after the input, before submit, nothing between) and measured in the browser in `e2e/signup-success.spec.js` (box directly beneath the input, left-aligned, above the button); absent on Sign in. Red on the original.
+- Verify: sandbox
+
+### B2014098 — "Forgot password?" showed on the Sign up tab `[auth panel]` (bug) #auth #ui  *(Owner NEW-3, 2026-10-04.)*
+
+`[x]` **Fix:** the link row renders on Sign in only (reset mode keeps its own "← Back to sign in"). **Whole-panel audit, as asked:** controls checked per tab — name/organization fields and the Turnstile widget were already Sign-up-only; the password field is correctly absent in reset; the only wrong-tab controls were Forgot password and the Min-6 hint (both fixed above). Noted, not changed: the typed password carries across the Sign in / Sign up tab switch (harmless, and intentional-looking).
+`[x]` **Tests:** tab-scoping asserted on real AuthPanel markup per tab in `test/authPanelSignup.test.js` and in the browser spec. Red on the original.
+- Verify: sandbox
 
 ### B2056784 — Full-screen button hid wherever the browser cannot go full screen (iPhone Safari showed a dead button) `[shared/ui]` (bug) #mobile #ui  *(Owner NEW-1, 2026-10-04, iPhone Safari.)*
 

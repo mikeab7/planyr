@@ -165,7 +165,31 @@ was never clicked" quietly ships broken.
 ---
 
 ## 🔲 Needs verification
+### V1439184 — B2014096/B2014097/B2014098: sign-up panel — success state, hint placement, Forgot password scoping `Blocker: auth`
 
+Sandbox-proven: `test/authPanelSignup.test.js` (15), `e2e/signup-success.spec.js` (4, real built app with Supabase's signup endpoint MOCKED, both session branches, double-submit, placement measured). Not provable here: the real Supabase round trip with Cloudflare Turnstile and a real inbox (the sandbox cannot sign up for real). **Steps** (logged-out window, planyr.io, throwaway address; read the served chunk hash in the SAME observation):
+1. Open Sign up, fill it, pass the Turnstile check, press Create account. **Expect:** the button turns to "Creating account…" and ignores a second press; then the form is REPLACED by "Check your email" naming the address you typed and the sender (Supabase Auth). No password field remains.
+2. Open the email. **Expect:** it is from the sender named on screen; the link confirms the account.
+3. Reopen Sign up and click into Password. **Expect:** "Min 6 characters" appears directly under the field (not at the panel bottom); on Sign in it never appears; "Forgot password?" is on Sign in only.
+4. When Supabase "Confirm email" is later switched OFF: repeat step 1. **Expect:** the panel closes and you are signed in — no check-your-email screen, no redeploy needed.
+- **Stopping rule:** closes on a dated pass of 1–3 (4 when the setting flips), or a failed step filed as a recurrence on B2014096.
+
+### V1496384 — B2080752: a Word/txt/PDF opened from disk and saved is filed under its OWN name `Blocker: auth`
+
+Sandbox-proven: pure naming table + red-proof source guards (`test/reviewOpenedFileNaming.test.js`), tabs harness 37/37. Not provable here: the real signed-in save into the Library. **Steps** (signed in, planyr.io `#/markup`, no project selected; read the build from `/version.json` in the same observation; use a throwaway `.docx`):
+1. Open a PDF in Review, close its tab, then Open… a `.docx` named `zz-naming-test.docx`, type a word, Save. **Expect:** banner "Saved to the Library under Unfiled…"; Library › Unfiled lists `<today> zz-naming-test` with a category — not "Untitled", not the PDF's name; clicking it opens the Word file.
+2. Without closing anything, open a PDF, then Open… a `.txt`, Save. **Expect:** the row is `<today> <txt name>`, never the PDF's name.
+3. Open the same `.txt`, "Save as Word document". **Expect:** a second row named after the new `.docx`; the `.txt` row unchanged.
+4. Repeat step 1 inside a project. **Expect:** `<today> <Project> - zz-naming-test`.
+- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2080752.
+
+### V1496385 — B2080753: a Review status banner stays on the tab that produced it `Blocker: auth`
+
+Sandbox-proven: `noticeForTab` unit + source guards. Needs cloud version history. **Steps** (signed in, two saved `.docx` tabs A and B, each with ≥2 versions; throwaway files):
+1. In A open Version history, open an earlier version, Restore. **Expect:** A shows "Restored the version from …".
+2. Click tab B. **Expect:** B shows no restore banner. Click back to A. **Expect:** the banner is only ever on A, never on B.
+3. In B, Save. **Expect:** only B shows its own "Saved…" line; A unchanged.
+- **Stopping rule:** closes on a dated pass of 1–3, or a failed step filed as a recurrence on B2080753.
 ### V1446736 — B2021648: the first Food search after opening the page is about as fast as later ones `Blocker: auth`
 Built: warm-up on Food mount (preconnect, session, one throwaway search); unit tests green. Pending, signed in on the phone and desktop, on a fresh page load with the served chunk hash read in the same observation:
 1. Open `#/food`, wait a few seconds, type a query → expected: first results in roughly the time of a later search (~0.25 s), not 1.5–2 s.
@@ -320,6 +344,17 @@ Sandbox-proven (real Chromium, built app): `ui-audit/verify-review-tabs.mjs` (lo
 7. Phone in airplane mode: change a page, then reconnect. **Expect:** the desktop picks up the new page at its next focus.
 8. Close every tab on the desktop, reload. **Expect:** blank Review (no tabs, no index).
 - **Stopping rule:** closes on a dated pass of 1–8, or a failed step filed as a recurrence on B2058144.
+
+### V1489584 — B2064896: one status per project, the schedule icon follows the schedule rows, filing facts resolve to the review, profile email follows the account `Blocker: auth (signed-in plans) + real-data (apply two SQL files, re-run drift-report)`
+
+Sandbox-proven as pure logic (`test/singleSourceCopies.test.js`, red on main) and the backfill logic was run on temp-table COPIES of production (D08 3→0, D15 1→0, real tables untouched). Everything below needs a signed-in pass **on a THROWAWAY project** (never a real plan).
+**Steps:**
+1. Throwaway project with two plans. In the plan menu set status to Active on plan A. Then, in Supabase SQL editor on the throwaway rows only, set plan B's `data.status` to `pursuit` (simulating a half-finished write). Open the Dashboard, the Map's Sites list and the project switcher. **Expect:** all three show the SAME status for the project (the one on the newer plan header), never two.
+2. Link a schedule to the throwaway project, then unlink it while the Schedule tab is CLOSED (delete the link in the schedule rows). Open the Dashboard, then the project switcher. **Expect:** the calendar "has a schedule" icon is gone after one Dashboard visit — no Schedule tab visit needed.
+3. After the owner applies `single_source_backfill_20261004.sql` and `profiles_email_sync.sql` through the normal deploy path: run `npm run drift-report` (or paste `scripts/drift-report.sql`). **Expect:** D08, D15 read 0 drifted; D04 reads 0; D23 reads 0. D01/D06 read 0 only after PR #1892's own backfill.
+4. Change the email on a throwaway auth user. **Expect:** `profiles.email` follows within the same statement.
+5. Read the served chunk hash in the same observation as each result.
+
 ### V1474400 — B2049312: team invite + Resend emails arrive in the inbox `Blocker: real-data (needs RESEND_API_KEY in Cloudflare + team_invite_email.sql run — both Michael's)`
 
 Sandbox-proven: `test/teamInviteEmail.test.js` (fake Supabase + fake Resend), `e2e/team-settings-layout.spec.js` (mocked send incl. throttle). Pending: a real send. **Steps** (planyr.io, signed in as a team admin; check the served chunk hash in the same observation). Use only the throwaway `mikeabmab+planyrtest@live.com`:
