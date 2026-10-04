@@ -176,6 +176,15 @@ Sandbox-proven: `ui-audit/ui-inventory.mjs --budget-only` relational gate green 
 5. Zoom far out. **Expect:** the hint is a rounded rectangle like the other messages and does NOT overlap the "?" help button; on desktop width the credit line at the bottom-right sits left of the "?" button, not under it.
 6. Switch to List. **Expect:** Date / Rating / Ambiance / Cost / Want to try are matching pill chips; nothing clipped.
 - **Stopping rule:** closes on a dated pass of 1–6, or a failed step filed as a recurrence on B2050928.
+### V1445360 — B2020272/B2020273: blue my-location marker, heading cone and arrow button on a real iPhone `Blocker: real-device (iOS compass permission prompt and the heading cone need a real phone; the sandbox has no sensors or map tiles)`
+
+Sandbox-proven: `ui-audit/verify-locate-marker.mjs` (colors, ring, pane order, metre-accurate circle at two zooms, cone present/absent, button states) and `test/locateHeading.test.js`. Left for the phone:
+1. On the iPhone in Safari, open `planyr.io` → Site tab; read `/version.json` in the same check. Tap the locate button (arrow icon, bottom-left under +/−). **Expect:** Safari asks for location, then for Motion & Orientation access; the arrow turns solid blue; a blue dot with a white ring appears at your position (NOT orange), with a soft blue circle around it.
+2. Slowly turn your body. **Expect:** a soft blue wedge from the dot points the way the phone faces and swings with you.
+3. Pinch in and out. **Expect:** the soft circle grows and shrinks with the map (real ground size), and fades away when zoomed far out.
+4. Drag the map away. **Expect:** the arrow turns outline-blue; tap it and the map re-centres (solid again). Tap once more. **Expect:** tracking off, dot gone, arrow gray outline.
+5. Tap a parcel under where the dot sits. **Expect:** the parcel still selects (the dot never blocks the tap).
+6. Repeat step 1 but answer **Don't Allow** to the Motion prompt. **Expect:** dot and circle still show, no wedge, no error.
 ### V1479952 — B2061792: a non-closing deed warns on the reader, the plot toast and the panel `Blocker: real-data (the Grand Port group's saved plans)`
 
 Sandbox-proven: `test/deedGap.test.js`, `ui-audit/verify-deed-closure-warning.mjs` (real Tract 1 calls, logged-out). Pending: the same on a real signed-in plan. **Steps** (planyr.io; read the served chunk hash in the same observation; use the throwaway **"Concept A (copy)"** plan in the Grand Port group — NEVER Concept A):
@@ -1976,6 +1985,13 @@ Sandbox-proven: `e2e/start-hint-placement.spec.js` (red on main, green here; emu
 3. Tools → Parcel tools → Draw new parcel. **Expect:** the strip is gone and stays gone while drawing.
 4. New blank site again → ✕ → reload. **Expect:** strip stays dismissed.
 5. Desktop width: **Expect:** strip top-left, clear of the middle. Real iPhone Safari look (toolbar collapse, safe areas) remains owner-side and is NOT claimed.
+
+### V1445152 — B2020064: Map view zoom +/−/locate buttons clickable with a long Sites list `Blocker: real-data (signed-in account with his long site list on planyr.io)`
+
+Sandbox-proven: `ui-audit/verify-map-zoom-reachable.mjs` (hit test; red pre-fix, green after) and `test/mapChromeStack.test.js`.
+1. On planyr.io, Map view, ~1600-wide window, Sites rail open; read `/version.json` in the same check. **Expect:** the + and − buttons are visible below the rail and clicking them zooms the map (no project opens).
+2. Collapse the rail. **Expect:** same buttons still clickable. Reopen it. **Expect:** the list scrolls inside the rail, which ends above the buttons.
+3. Repeat on a phone-width window with the rail open. **Expect:** buttons clear of the rail and clickable.
 
 ## THE CHECKLIST — run this on Michael's signed-in Chrome, on `planyr.io`
 
