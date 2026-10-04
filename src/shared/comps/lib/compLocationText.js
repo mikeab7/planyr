@@ -50,3 +50,17 @@ export function pinFallbackText(anchor, countyEntry) {
   }
   return `${anchor.lat.toFixed(4)}, ${anchor.lon.toFixed(4)}`;
 }
+
+/** ⛔ NEW-1 (B2010352, 2026-10-01) — THE ONE ANSWER to "what Location text does this comp show?",
+ * for every surface: the comp detail panel, the list rows, and the KMZ balloon. The KMZ export used
+ * to derive its own (`parcelLocationText` for a parcel anchor, i.e. the raw APN) while the panel
+ * showed the resolved place — two derivations, two answers, the APN reading as an address. A pin
+ * AND a parcel resolve identically: the reverse-geocoded street address when one is known
+ * (`resolvedAddress`, from the shared pin-address cache), else the synchronous county/coordinate
+ * fallback; a site plan reads as its own title. The APN is never a Location — it has its own row
+ * (`comps.js`'s `compFieldRows`, "Parcel ID (APN)"). Pure; the caller supplies what it has. */
+export function compLocationFor(anchor, { overlaysById = null, countyEntry = null, resolvedAddress = null } = {}) {
+  if (!anchor) return null;
+  if (anchor.kind === "site_plan") return siteplanLocationText(anchor, overlaysById) || pinFallbackText(anchor, countyEntry);
+  return resolvedAddress || pinFallbackText(anchor, countyEntry);
+}

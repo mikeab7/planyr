@@ -19,6 +19,7 @@ import { RADIUS } from "../../../shared/ui/radius.js";
  *   chip         — the shared chip button style
  *   isLayerOn    — (layerId) => bool: is the shared GIS overlay currently shown? (B190)
  *   onToggleLayer— (layerId, wantOn) => void: toggle that overlay on the planner map (B190)
+ *   layerZoomNote — (layerId) → a read-only "not showing at this zoom" line or null. Text only: Activate never moves the map (owner 2026-09-30).
  *   layerStatus  — shared per-overlay sync status map (id → {state}); for an honest
  *                  "service not responding" hint when a just-enabled layer fails (B190)
  *   runAnalysis  — injectable for tests (defaults to the real runSiteAnalysis)
@@ -37,7 +38,7 @@ const STATUS = {
   pending: { dot: "#4B5263", bg: "#F3F5F8", border: "#E1E5EB", label: "Not connected", glyph: "○" },
 };
 
-export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isLayerOn, onToggleLayer, layerStatus = {}, runAnalysis = runSiteAnalysis, onFindings = null }) {
+export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isLayerOn, onToggleLayer, layerStatus = {}, layerZoomNote = null, runAnalysis = runSiteAnalysis, onFindings = null }) {
   const [state, setState] = useState({ loading: false, findings: null, error: null, empty: !rings || !rings.length, at: null });
   const [open, setOpen] = useState({});
   const reqRef = useRef(0);
@@ -151,7 +152,7 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isL
                         <button
                           type="button"
                           onClick={(e) => { e.stopPropagation(); onToggleLayer(f.mapLayer, !layerOn); }}
-                          title={layerOn ? "Deactivate this layer on the map" : "Activate this layer on the map (frames to the site)"}
+                          title={layerOn ? "Deactivate this layer on the map" : "Activate this layer on the map"}
                           aria-pressed={layerOn}
                           style={{ cursor: "pointer", fontFamily: "inherit", fontSize: 10, fontWeight: 700, letterSpacing: "0.02em", padding: "2px 7px", borderRadius: RADIUS.pill, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 3, border: `1px solid ${layerOn ? "#1d4ed8" : line}`, background: layerOn ? "#1d4ed8" : "transparent", color: layerOn ? "#fff" : muted }}>
                           {layerOn ? "◉ Deactivate layer" : "◍ Activate layer"}
@@ -188,6 +189,7 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isL
                     </span>
                   )}
                   {f.straddle && <span style={{ display: "block", marginTop: 2, color: "var(--warn-text)", fontWeight: 600 }}>⚑ Straddles a boundary — touches multiple jurisdictions.</span>}
+                  {layerOn && layerZoomNote && layerZoomNote(f.mapLayer) && <span data-analysis-zoom-note={f.mapLayer} style={{ display: "block", marginTop: 3, color: "var(--warn-text)", fontSize: 10.5, lineHeight: 1.4 }}>{layerZoomNote(f.mapLayer)}</span>}
                   {mapFailed && <span style={{ display: "block", marginTop: 3, color: "var(--warn-text)", fontSize: 10.5, lineHeight: 1.4 }}>⚠ This layer's map service isn't responding right now — the screen result above still stands; try the map again shortly.</span>}
                 </span>
                 {hasDetail && <span style={{ color: muted, flex: "none", fontSize: 10 }}>{isOpen ? "▾" : "▸"}</span>}
@@ -210,7 +212,7 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isL
       </div>
 
       <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${line}`, fontSize: 10.5, color: muted, lineHeight: 1.5 }}>
-        Screening only — desktop GIS sources, not a survey or a legal determination. Each finding carries its own source, age, and caveat (tap to expand). Tap <b style={{ color: "var(--info-text)" }}>◍ Activate layer</b> on a finding to show that layer on the map, framed to the site. An <b>unknown</b> is never an all-clear.
+        Screening only — desktop GIS sources, not a survey or a legal determination. Each finding carries its own source, age, and caveat (tap to expand). Tap <b style={{ color: "var(--info-text)" }}>◍ Activate layer</b> on a finding to show that layer on the map. An <b>unknown</b> is never an all-clear.
       </div>
     </div>
   );

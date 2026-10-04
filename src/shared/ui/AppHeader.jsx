@@ -69,6 +69,7 @@ import { useTheme } from "../theme/ThemeProvider.jsx";
 import InterfaceSettings from "./InterfaceSettings.jsx";
 import { centerSlotPlan, centerSlotMaxWidth, CENTER_SLOT_GAP } from "./headerCenterFit.js";
 import FloatingNotice from "./FloatingNotice.jsx";
+import { observeStripEdges, pageStrip } from "./scrollStrip.js";
 
 // Chrome colors are theme tokens (var(--chrome-*)) so the header themes WITH the app
 // (B318): light theme = light chrome, dark theme = dark chrome.
@@ -222,12 +223,9 @@ function ScrollChevron({ side, onClick }) {
     </IconButton>
   );
 }
-// A "page" is most of a screenful (0.72) rather than the whole row, so the trailing edge of what
-// was already visible stays on screen as a continuity anchor for the next page.
-function pageScrollRow(ref, dir) {
-  const el = ref.current;
-  if (el) el.scrollBy({ left: dir * el.clientWidth * 0.72, behavior: "smooth" });
-}
+// NAV-ARROWS — a "page" is an ABSOLUTE, clamped target (a screenful minus a tab), never a relative
+// nudge from wherever the strip is mid-animation; see `scrollStrip.js`.
+function pageScrollRow(ref, dir) { pageStrip(ref.current, dir); }
 
 function SettingsMenu() {
   const [open, setOpen] = useState(false);
@@ -369,19 +367,10 @@ function useScrollEdges(ref, active, watchRefs) {
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el || !active) { setEdges({ left: false, right: false }); return undefined; }
-    const update = () => {
-      const over = el.scrollWidth - el.clientWidth;
-      setEdges({ left: el.scrollLeft > 1, right: el.scrollLeft < over - 1 });
-    };
-    update();
-    el.addEventListener("scroll", update, { passive: true });
-    let ro;
-    if (typeof ResizeObserver === "function") {
-      ro = new ResizeObserver(update);
-      ro.observe(el);
-      (watchRefs || []).forEach((r) => { if (r && r.current) ro.observe(r.current); });
-    }
-    return () => { el.removeEventListener("scroll", update); ro?.disconnect(); };
+    // NAV-ARROWS — the model (edge tolerance, settle re-read, child-set watching) is the shared
+    // `scrollStrip` helper, so every chevron strip answers "is there more this way" identically.
+    return observeStripEdges(el, (next) => setEdges((prev) => (prev.left === next.left && prev.right === next.right ? prev : next)),
+      (watchRefs || []).map((r) => r && r.current));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ref, active, ...(watchRefs || [])]);
   return edges;

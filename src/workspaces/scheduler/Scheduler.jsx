@@ -757,7 +757,7 @@ export default function Scheduler({
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#f6f8fa" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "var(--surface-page)" }}>
       <AppHeader
         module={shellModule || "scheduler"}
         onSwitch={onShellSwitch}

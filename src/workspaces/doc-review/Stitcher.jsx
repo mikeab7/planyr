@@ -1081,7 +1081,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
 
       <div style={{ flex: 1, display: "flex", minHeight: 0 }}>
         {/* tray */}
-        <div style={{ flex: "none", width: 168, background: "#fff", borderRight: `1px solid ${PAL.line}`, overflowY: "auto", padding: 8 }}>
+        <div style={{ flex: "none", width: 168, background: "var(--surface-raised)", borderRight: `1px solid ${PAL.line}`, overflowY: "auto", padding: 8 }}>
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 6 }}>
             <div style={{ fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>{showAllPages || !anyGroups ? "Sheets" : "Logical sheets"}</div>
             {anyGroups && <button onClick={() => setShowAllPages((v) => !v)} style={{ fontSize: 10, color: PAL.accent, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", padding: 0 }}>{showAllPages ? "grouped" : "all pages"}</button>}
@@ -1094,12 +1094,12 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
               name is on the hover tooltip. */}
           {trayItems.map((t) => t.group ? (
             <button key={t.key} data-testid="stitch-tray-row" onClick={() => addGroup(t.pdf, t.group, t.groupIndex)} title={`${t.group.label} — ${t.pdf.name}`}
-              style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: RADIUS.sm, cursor: "pointer", fontFamily: "inherit", fontSize: 11, border: `1px solid ${t.group.kind === "group" ? "#c7b88f" : PAL.line}`, background: t.group.kind === "group" ? "#fbf7ec" : "#fff", color: PAL.ink }}>
+              style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 4, borderRadius: RADIUS.sm, cursor: "pointer", fontFamily: "inherit", fontSize: 11, border: `1px solid ${t.group.kind === "group" ? "var(--warn-border)" : PAL.line}`, background: t.group.kind === "group" ? "var(--warn-bg)" : "var(--surface-raised)", color: t.group.kind === "group" ? "var(--warn-text)" : PAL.ink }}>
               {/* The sheet CODE is pinned and never truncated — on a real set the titles repeat
                   ("OVERALL ROOF PLAN" on four disciplines) and the code is the only thing that
                   tells two rows apart. Title middle-truncates beside it. */}
               <div style={{ display: "flex", alignItems: "baseline", gap: 4, overflow: "hidden" }}>
-                <span style={{ flex: "none", fontWeight: 700, color: t.group.kind === "group" ? "#8a6d1f" : PAL.muted }}>{t.group.kind === "group" ? "▣" : "+"}</span>
+                <span style={{ flex: "none", fontWeight: 700, color: t.group.kind === "group" ? "var(--warn-text)" : PAL.muted }}>{t.group.kind === "group" ? "▣" : "+"}</span>
                 {t.group.sheetRange ? <span style={{ flex: "none", fontWeight: 700 }}>{t.group.sheetRange}</span> : null}
                 <MiddleTruncate text={t.group.title} title={`${t.group.label} — ${t.pdf.name}`} style={{ fontWeight: t.group.kind === "group" ? 650 : 400 }} />
               </div>
@@ -1107,7 +1107,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
             </button>
           ) : (
             <button key={t.key} data-testid="stitch-tray-row" onClick={() => addSheet(t.pdf, t.page)} title={`${t.pdf.name} · page ${t.page}`}
-              style={{ display: "flex", alignItems: "baseline", gap: 3, width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 3, borderRadius: RADIUS.sm, cursor: "pointer", fontFamily: "inherit", fontSize: 11, border: `1px solid ${PAL.line}`, background: "#fff", color: PAL.ink, overflow: "hidden" }}>
+              style={{ display: "flex", alignItems: "baseline", gap: 3, width: "100%", textAlign: "left", padding: "6px 8px", marginBottom: 3, borderRadius: RADIUS.sm, cursor: "pointer", fontFamily: "inherit", fontSize: 11, border: `1px solid ${PAL.line}`, background: "var(--surface-raised)", color: PAL.ink, overflow: "hidden" }}>
               <span style={{ flex: "none", fontWeight: 700, color: PAL.muted }}>+</span>
               <MiddleTruncate text={`${t.pdf.name.replace(/\.pdf$/i, "")} · p${t.page}`} title={`${t.pdf.name} · page ${t.page}`} />
             </button>
@@ -1208,17 +1208,17 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
           </svg>
           {/* Inline Calibrate entry (B304) — replaces window.prompt; validates the typed length. */}
           {calInput && (
-            <div style={{ position: "absolute", left: calPos.x, top: calPos.y, transform: "translate(-50%, -135%)", zIndex: 5, width: 214, background: "#fff", border: `1px solid ${PAL.accent}`, borderRadius: 8, padding: "7px 9px", boxShadow: "0 6px 20px rgba(0,0,0,0.28)", fontFamily: "system-ui, sans-serif" }}>
+            <div style={{ position: "absolute", left: calPos.x, top: calPos.y, transform: "translate(-50%, -135%)", zIndex: 5, width: 214, background: "var(--surface-raised)", border: `1px solid ${PAL.accent}`, borderRadius: 8, padding: "7px 9px", boxShadow: "0 6px 20px rgba(0,0,0,0.28)", fontFamily: "system-ui, sans-serif" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={{ fontSize: 11, color: PAL.muted, whiteSpace: "nowrap" }}>Real length</span>
                 <input autoFocus value={calInput.value}
                   onChange={(e) => { const v = e.target.value; setCalInput((c) => (c ? { ...c, value: v } : c)); if (err) setErr(""); }}
                   onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitCalibrate(); } else if (e.key === "Escape") { e.preventDefault(); setCalInput(null); setErr(""); } }}
                   placeholder={`120  or  38'-7"`}
-                  style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontFamily: "inherit", padding: "3px 6px", border: `1px solid ${err ? "#dc2626" : PAL.line}`, borderRadius: 5, outline: "none" }} />
+                  style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontFamily: "inherit", padding: "3px 6px", border: `1px solid ${err ? "var(--danger-text)" : PAL.line}`, borderRadius: 5, outline: "none" }} />
                 <button onMouseDown={(e) => e.preventDefault()} onClick={commitCalibrate} style={{ ...btn(true), padding: "3px 9px", fontSize: 11.5 }}>Set</button>
               </div>
-              <div style={{ fontSize: 10.5, marginTop: 4, color: err ? "#dc2626" : PAL.muted, lineHeight: 1.35 }}>
+              <div style={{ fontSize: 10.5, marginTop: 4, color: err ? "var(--danger-text)" : PAL.muted, lineHeight: 1.35 }}>
                 {err || "Feet, or feet-inches. Enter to set · Esc to cancel."}
               </div>
             </div>
@@ -1234,7 +1234,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
               B350 — also carries every sheet's NOTES/LEGEND, aggregated + deduped, so a note that
               changes page to page is still shown (cropping the title block can't lose it). */}
           {hasKey && legendOpen && (
-            <div style={{ position: "absolute", top: 10, left: 10, zIndex: 4, width: 230, maxHeight: "calc(100% - 20px)", overflowY: "auto", background: "rgba(255,255,255,0.97)", border: `1px solid ${PAL.line}`, borderRadius: 8, padding: "8px 10px", boxShadow: "0 4px 14px rgba(0,0,0,0.16)", fontFamily: "system-ui, sans-serif" }}>
+            <div style={{ position: "absolute", top: 10, left: 10, zIndex: 4, width: 230, maxHeight: "calc(100% - 20px)", overflowY: "auto", background: "var(--surface-raised)", border: `1px solid ${PAL.line}`, borderRadius: 8, padding: "8px 10px", boxShadow: "0 4px 14px rgba(0,0,0,0.16)", fontFamily: "system-ui, sans-serif" }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
                 <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: PAL.muted }}>Composite key</span>
                 <button onClick={() => setLegendOpen(false)} title="Hide" style={{ border: "none", background: "none", cursor: "pointer", color: PAL.muted, fontSize: 13, lineHeight: 1, padding: 0 }}>×</button>
@@ -1242,7 +1242,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
               {composite.map((s) => (
                 <div key={s.groupLabel} style={{ fontSize: 11.5, color: PAL.ink, padding: "2px 0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.groupLabel}>{s.groupLabel}</div>
               ))}
-              <div style={{ fontSize: 10.5, color: (Number.isFinite(ftPerUnit) && ftPerUnit) ? "#15803d" : "#b45309", marginTop: 5, borderTop: `1px solid ${PAL.line}`, paddingTop: 4 }}>
+              <div style={{ fontSize: 10.5, color: (Number.isFinite(ftPerUnit) && ftPerUnit) ? "var(--success-text)" : "var(--warn-text)", marginTop: 5, borderTop: `1px solid ${PAL.line}`, paddingTop: 4 }}>
                 {/* B546: Number.isFinite guard — a non-finite ftPerUnit (e.g. a corrupt loaded review) is truthy and would render "1\" ≈ ∞'". */}
                 {(Number.isFinite(ftPerUnit) && ftPerUnit) ? `Scale set · 1" ≈ ${f0(ftPerUnit * 72)}'` : "Scale not set — use Calibrate once"}
               </div>
@@ -1262,7 +1262,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
                         return (
                           <div key={li} style={{ fontSize: 10.5, color: PAL.ink, lineHeight: 1.4, padding: "1px 0 1px 6px" }}>
                             {ln.text}
-                            {varies && <span style={{ color: "#b45309", fontWeight: 700 }}> · {ln.sheets.join(", ")}</span>}
+                            {varies && <span style={{ color: "var(--warn-text)", fontWeight: 700 }}> · {ln.sheets.join(", ")}</span>}
                           </div>
                         );
                       })}
@@ -1306,7 +1306,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
               <button onClick={() => setSteerDismissed(true)} title="Dismiss" style={{ flex: "none", border: "none", background: "none", color: "#fff", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: 0 }}>×</button>
             </div>
           )}
-          {!placed.length && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none", color: "#5a554a", fontFamily: "system-ui, sans-serif", textAlign: "center" }}><div><div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>Drop a whole set — it stitches itself</div><div style={{ fontSize: 12.5 }}>Drop a multi-page PDF → it groups the pages into logical sheets → click a grouped plan to add it auto-stitched, cropped, and scaled. Manual add &amp; Align stay as the safety net.</div></div></div>}
+          {!placed.length && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none", color: PAL.muted, fontFamily: "system-ui, sans-serif", textAlign: "center" }}><div><div style={{ fontWeight: 700, fontSize: 15, marginBottom: 6 }}>Drop a whole set — it stitches itself</div><div style={{ fontSize: 12.5 }}>Drop a multi-page PDF → it groups the pages into logical sheets → click a grouped plan to add it auto-stitched, cropped, and scaled. Manual add &amp; Align stay as the safety net.</div></div></div>}
         </div>
         {/* B350 — the detail "cloud": click a detail callout → that detail pops up here without
             leaving the current drawing. Pulls the referenced sheet, centers on the named detail if
@@ -1316,7 +1316,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
           const left = Math.max(8, Math.min((detail.screen?.x || 200) - PW / 2, (typeof window !== "undefined" ? window.innerWidth : 1200) - PW - 8));
           const top = Math.max(8, Math.min((detail.screen?.y || 200) + 18, (typeof window !== "undefined" ? window.innerHeight : 800) - DBOX.h - 96));
           return (
-            <div style={{ position: "fixed", left, top, zIndex: 30, width: PW, background: "#fff", border: `1px solid ${PAL.accent}`, borderRadius: 10, boxShadow: "0 12px 34px rgba(0,0,0,0.34)", fontFamily: "system-ui, sans-serif", overflow: "hidden" }}>
+            <div style={{ position: "fixed", left, top, zIndex: 30, width: PW, background: "var(--surface-raised)", border: `1px solid ${PAL.accent}`, borderRadius: 10, boxShadow: "0 12px 34px rgba(0,0,0,0.34)", fontFamily: "system-ui, sans-serif", overflow: "hidden" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", background: "var(--chrome-bg)", borderBottom: "1px solid var(--chrome-divider)" }}>
                 <span style={{ fontSize: 12.5, fontWeight: 700, color: "var(--chrome-text)" }}>☁ {detail.title}</span>
                 <div style={{ flex: 1 }} />
@@ -1350,7 +1350,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
         })()}
 
         {/* right panel: placed sheets + takeoff */}
-        <div style={{ flex: "none", width: 220, background: "#fff", borderLeft: `1px solid ${PAL.line}`, overflowY: "auto", padding: 12, fontFamily: "system-ui, sans-serif" }}>
+        <div style={{ flex: "none", width: 220, background: "var(--surface-raised)", borderLeft: `1px solid ${PAL.line}`, overflowY: "auto", padding: 12, fontFamily: "system-ui, sans-serif" }}>
           <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, marginBottom: 6 }}>Placed sheets · {placed.length}</div>
           {placed.map((s, i) => {
             const isAligning = align && align.sheetId === s.id;
@@ -1358,16 +1358,16 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
             // + while a post-load not-to-scale re-scan is still in flight (B631).
             const needsAlign = i > 0 && s.aligned === false && !referenceSet && !s.notToScale && !metaScanning;
             return (
-            <div key={s.id} style={{ border: `1px solid ${isAligning ? PAL.accent : needsAlign ? "#d6a64a" : PAL.line}`, borderRadius: 7, padding: "6px 8px", marginBottom: 6, background: needsAlign ? "#fffbeb" : "#fff" }}>
+            <div key={s.id} style={{ border: `1px solid ${isAligning ? PAL.accent : needsAlign ? "var(--warn-border)" : PAL.line}`, borderRadius: 7, padding: "6px 8px", marginBottom: 6, background: needsAlign ? "var(--warn-bg)" : "var(--surface-raised)" }}>
               {/* NEW-4 — the placed list identifies sheets by the same tail the tray does. */}
               <div style={{ display: "flex", alignItems: "baseline", gap: 3, fontSize: 11, color: PAL.ink, overflow: "hidden", marginBottom: 4 }}>
                 <span style={{ flex: "none" }}>{i + 1}.</span>
                 <MiddleTruncate text={s.name} data-testid="stitch-placed-name" />
               </div>
-              {needsAlign && <div style={{ fontSize: 10, color: "#b45309", fontWeight: 700, marginBottom: 4 }}>⚠ Not aligned — Align before measuring</div>}
+              {needsAlign && <div style={{ fontSize: 10, color: "var(--warn-text)", fontWeight: 700, marginBottom: 4 }}>⚠ Not aligned — Align before measuring</div>}
               <div style={{ display: "flex", gap: 6 }}>
-                {i > 0 && <button style={{ ...btn(isAligning), padding: "3px 8px", fontSize: 11, ...(needsAlign && !isAligning ? { border: "1px solid #d6a64a", color: "#b45309", fontWeight: 700 } : {}) }} onClick={() => startAlign(s.id)}>Align</button>}
-                <button style={{ ...btn(false), padding: "3px 8px", fontSize: 11, color: "#b3361b" }} onClick={() => removeSheet(s.id)}>Remove</button>
+                {i > 0 && <button style={{ ...btn(isAligning), padding: "3px 8px", fontSize: 11, ...(needsAlign && !isAligning ? { border: "1px solid var(--warn-border)", color: "var(--warn-text)", fontWeight: 700 } : {}) }} onClick={() => startAlign(s.id)}>Align</button>}
+                <button style={{ ...btn(false), padding: "3px 8px", fontSize: 11, color: "var(--danger-text)" }} onClick={() => removeSheet(s.id)}>Remove</button>
               </div>
             </div>
             );
@@ -1375,7 +1375,7 @@ export default function Stitcher({ onReview, loadReq = null, onConsumeLoad, onOp
           {placed.length > 0 && (
             <div style={{ borderTop: `1px solid ${PAL.line}`, marginTop: 6, paddingTop: 8 }}>
               <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 700, marginBottom: 4 }}>Takeoff (stitched)</div>
-              <div style={{ fontSize: 11, color: ftPerUnit ? "#15803d" : "#b45309", marginBottom: 6 }}>{ftPerUnit ? "Calibrated" : "Not calibrated — use Calibrate once"}</div>
+              <div style={{ fontSize: 11, color: ftPerUnit ? "var(--success-text)" : "var(--warn-text)", marginBottom: 6 }}>{ftPerUnit ? "Calibrated" : "Not calibrated — use Calibrate once"}</div>
               {/* B547: Number.isFinite guard — one degenerate/NaN measure must not propagate "NaN ac · NaN sf · NaN ft" into the rollup. */}
               {[["Area", Number.isFinite(totals.areaSf) ? `${f2(ftToAcres(totals.areaSf))} AC` : "—"], ["", Number.isFinite(totals.areaSf) ? `${f0(totals.areaSf)} SF` : "—"], ["Distance", Number.isFinite(totals.distFt) ? `${f1(totals.distFt)} ft` : "—"], ["Measures", `${measures.length}`]].map(([k, v], i) => (
                 <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 12 }}><span style={{ color: PAL.muted }}>{k}</span><span style={{ color: PAL.ink, fontWeight: 650, fontFamily: "ui-monospace, monospace" }}>{v}</span></div>

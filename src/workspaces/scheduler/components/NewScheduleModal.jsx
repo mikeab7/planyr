@@ -28,6 +28,7 @@
  * the one primary action.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { isCoarsePointer } from "../../../shared/ui/coarsePointer.js";
 import { Button, Field } from "../../../shared/ui/controls.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE, SPACE } from "../../../shared/ui/designTokens.js";
@@ -112,7 +113,7 @@ export default function NewScheduleModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ownerKey]);
 
-  useEffect(() => { nameRef.current?.focus(); nameRef.current?.select(); }, []);
+  useEffect(() => { if (isCoarsePointer()) return; nameRef.current?.focus(); nameRef.current?.select(); }, []);
 
   const result = validateNewSchedule({ name, ownerKind, siteId, siteName, projects: schedules });
   // The error is the reason Create is disabled — shown only once he has engaged with the field, so

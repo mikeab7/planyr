@@ -4,9 +4,8 @@
  * Logged-out checks (sign-in is blocked in the sandbox):
  *   1. The Library tab renders in the header and switching to it mounts the Library
  *      workspace at hash #/library.
- *   2. Review, opened with nothing loaded, shows the new empty state ("No drawing open"
- *      + a "Browse the Library" button) — NOT a file list.
- *   3. The empty-state "Browse the Library" button switches to the Library tab.
+ *   2. Review, opened with nothing loaded, shows the project-aware empty state ("Pick a project" /
+ *      "Current set") — NOT a file list, and no Browse-the-Library button.
  *
  * Run: node ui-audit/verify-library-tab.mjs   (preview server must be running on :4173)
  */
@@ -51,17 +50,11 @@ async function run() {
   await page.locator('[data-testid="module-tab-doc-review"]').click();
   await page.waitForTimeout(1200);
   check(await page.locator('[data-testid="doc-review-root"]').count() === 1, "Review workspace mounts");
-  const emptyBtn = page.locator('[data-testid="empty-open-library"]');
-  check(await emptyBtn.count() === 1, 'Review shows the empty-state "Browse the Library" button');
+  // NEW-1: the empty state is now a project-aware sheet index — no "Browse the Library" button here.
+  check(await page.locator('[data-testid="empty-open-library"]').count() === 0, "Review empty state no longer carries a Browse-the-Library button");
   const bodyText = await page.locator('[data-testid="doc-review-root"]').innerText();
-  check(/No drawing open/i.test(bodyText), 'Review empty state reads "No drawing open"');
+  check(/Pick a project|Current set/i.test(bodyText), 'Review empty state reads "Pick a project" / "Current set"');
   await page.screenshot({ path: OUT + "review-empty.png" });
-
-  // 3. The empty-state button switches to the Library tab
-  await emptyBtn.click();
-  await page.waitForTimeout(900);
-  check(await page.locator('[data-testid="library-root"]').count() === 1, '"Browse the Library" button switches to the Library workspace');
-  check(/#\/library$/.test(await page.evaluate(() => location.hash)), "hash is #/library after the empty-state jump");
 
   await browser.close();
   console.log(failures === 0 ? "\n✓ All Library-tab checks passed." : `\n✗ ${failures} check(s) failed.`);

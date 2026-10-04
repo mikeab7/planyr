@@ -61,6 +61,7 @@ import { storedProjectName } from "../../../shared/names/names.js";
 import { supabase } from "../../site-planner/lib/supabase.js";
 import { liveProjectIds, docProjectIsDead } from "../../../shared/projects/docProjectLiveness.js";
 import { isPdfName } from "../../../shared/files/uploadQueue.js";
+import { docKindOf } from "../../doc-review/docEditor/docKind.js";
 
 // A project-less candidate's own recorded source name is the one thing that decides whether the
 // Review canvas can show it at all. An unrecognized/absent name reads as "assume PDF" — the same
@@ -68,7 +69,8 @@ import { isPdfName } from "../../../shared/files/uploadQueue.js";
 // the fallback batch on a name we can actually read as non-PDF, never on a maybe.
 function candidateIsPdf(sources) {
   const name = Array.isArray(sources) && sources[0] && sources[0].name;
-  return !name || isPdfName(name);
+  // NEW-1: Word/text files now open in Review's document editor, so they are no longer a dead end.
+  return !name || isPdfName(name) || !!docKindOf(name);
 }
 
 // Bounded fallback depth — a card is not the place for an unbounded account-wide scan; an

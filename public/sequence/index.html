@@ -8089,6 +8089,61 @@ function saveTabView(obj)   { try { sessionStorage.setItem(VIEW_TAB_STORAGE_KEY,
 function loadViewPrefs()    { try { return JSON.parse(localStorage.getItem(VIEW_PREFS_STORAGE_KEY) || "{}") || {}; } catch { return {}; } }
 function saveViewPrefs(obj) { try { localStorage.setItem(VIEW_PREFS_STORAGE_KEY, JSON.stringify(obj)); } catch (_) {} }
 
+// NEW-1 (2026-10-02, owner report: "the focus button on the schedule module doesn't hold ... It should
+// just hold whatever the last status was") — the OTHER half of the 2026-09-17 strip below. `focused`
+// stays OUT of the versioned document (TASK_VIEW_FIELDS), but the strip alone made it live only in
+// memory, so every remount/reload came back fully expanded. It now lives per BROWSER in localStorage:
+// { [scheduleId]: [focusedTaskId, ...] }. Written by persistViewState (every `focused` change, from the
+// pill OR any flow that clears it — re-parent, indent, paste, open-row jump), re-applied by
+// applyTaskFocus on every doc that enters memory (load / import / restore / sibling-tab merge).
+// `focused` undefined = "not known" (a doc that came off the cloud); an explicit true/false is a
+// decision and always wins over what is stored, so a remote doc can never wipe local focus.
+const TASK_FOCUS_STORAGE_KEY = "planar:taskFocus:v1";
+function loadTaskFocus()    { try { const v = JSON.parse(localStorage.getItem(TASK_FOCUS_STORAGE_KEY) || "{}"); return (v && typeof v === "object" && !Array.isArray(v)) ? v : {}; } catch { return {}; } }
+function saveTaskFocus(obj) { try { localStorage.setItem(TASK_FOCUS_STORAGE_KEY, JSON.stringify(obj)); } catch (_) {} }
+function applyTaskFocus(d) {
+  if (!d || typeof d !== "object" || !d.projects || typeof d.projects !== "object") return d;
+  const store = loadTaskFocus();
+  let projects = null;
+  Object.keys(store).forEach(pid => {
+    const proj = d.projects[pid], ids = store[pid];
+    if (!proj || !Array.isArray(proj.tasks) || !Array.isArray(ids) || !ids.length) return;
+    const want = new Set(ids);
+    let changed = false;
+    const tasks = proj.tasks.map(t => {
+      if (t && want.has(t.id) && t.focused === undefined) { changed = true; return { ...t, focused: true }; }
+      return t;
+    });
+    if (!changed) return;
+    if (!projects) projects = { ...d.projects };
+    projects[pid] = { ...proj, tasks };
+  });
+  return projects ? { ...d, projects } : d;
+}
+// Fold every explicit `focused` true/false in `next` into the stored map; prune ids that no longer
+// exist in a project that is present. A no-op unless the projects tree actually changed.
+function persistTaskFocus(prev, next) {
+  if (!next || !next.projects || (prev && prev.projects === next.projects)) return;
+  const store = loadTaskFocus();
+  let dirty = false;
+  Object.entries(next.projects).forEach(([pid, proj]) => {
+    if (!proj || !Array.isArray(proj.tasks) || !proj.tasks.length) return;
+    const before = Array.isArray(store[pid]) ? store[pid] : [];
+    const live = new Set(proj.tasks.map(t => t && t.id));
+    const set = new Set(before.filter(id => live.has(id)));
+    proj.tasks.forEach(t => {
+      if (!t) return;
+      if (t.focused === true) set.add(t.id);
+      else if (t.focused === false) set.delete(t.id);
+    });
+    const after = [...set];
+    if (after.length === before.length && after.every((id, i) => id === before[i])) return;
+    dirty = true;
+    if (after.length) store[pid] = after; else delete store[pid];
+  });
+  if (dirty) saveTaskFocus(store);
+}
+
 // True when any key OUTSIDE the 13 view-state keys differs between `prev` and `next` — a shallow,
 // reference-equality check per top-level key. Safe because every setData updater in this file
 // builds its result via immutable spreads, so a changed sub-tree always gets a new object identity.
@@ -8113,7 +8168,7 @@ function coreChanged(prev, next) {
 // — yet it lives inside the `task` object, which IS core data, so toggling it on an idle tab kept
 // bumping __rev and reading as a genuine edit to every other open tab (measured: an idle tab's
 // ENTIRE autosave diff, repeatedly, was one task's `focused: true → false`). Stripped here exactly
-// like the 13 top-level keys — never restored on load, so it just resets per session like those.
+// like the 13 top-level keys — and restored per browser from localStorage (taskFocus, above), never from the doc.
 const TASK_VIEW_FIELDS = ["focused"];
 function stripTaskViewFields(tasks) {
   if (!Array.isArray(tasks)) return tasks;
@@ -8173,6 +8228,7 @@ function persistViewState(prev, next) {
     VIEW_PREF_KEYS.forEach(k => { cur[k] = next[k]; });
     saveViewPrefs(cur);
   }
+  persistTaskFocus(prev, next);   // NEW-1 (2026-10-02) — per-task Focus, local-only
 }
 
 // Resolve the 13 view-state keys for a just-loaded/imported/restored document `d`: prefer whatever
@@ -8200,7 +8256,7 @@ function resolveViewState(d) {
   const prefsPatch = {}; VIEW_PREF_KEYS.forEach(k => { prefsPatch[k] = patch[k]; });
   saveTabView({...tab, ...tabPatch});
   saveViewPrefs({...prefs, ...prefsPatch});
-  return {...d, ...patch};
+  return applyTaskFocus({...d, ...patch});   // NEW-1 (2026-10-02) — re-apply per-task Focus before first render
 }
 
 // ── App ───────────────────────────────────────────────────
@@ -8945,8 +9001,8 @@ function App() {
       // the ancestor's, so a real non-task change (a schedule's name/linkedSiteId) still toasts.
       const trulyEmpty = changedRows === 0 && _mEq(merged.projects, anc && anc.projects);
       setData(cur => {
-        if (!cur) return merged;
-        try { return mergeCloudDoc(anc, cur, merged); } catch { return merged; }
+        if (!cur) return applyTaskFocus(merged);
+        try { return applyTaskFocus(mergeCloudDoc(anc, cur, merged)); } catch { return applyTaskFocus(merged); }   // NEW-1 (2026-10-02) — a merged-in remote doc carries no `focused`
       });
       // NEW-1 — a successful merge means this tab is caught up (its own save just became the new
       // top cloud version), so any "reload for the latest" banner is now stale advice — clear it

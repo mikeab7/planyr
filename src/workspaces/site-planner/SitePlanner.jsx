@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, useId, memo, Fragment, lazy, Suspense, useSyncExternalStore } from "react";
 import { flushSync, createPortal } from "react-dom";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
+import { startClickAck } from "../../shared/ui/clickAck.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useProjectName, usePlanName, renameProjectChecked, renamePlanChecked } from "../../shared/names/names.js";
@@ -72,7 +73,7 @@ import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, a
 // NEW-1 — the per-site "Show above plan" twin of the four above: which GIS layers this site had
 // lifted over the site elements. Its own sparse map, so nothing about layerOverrides changes.
 import { sanitizeLayerAbove, aboveFromOverlays, applyAboveOverrides, aboveSig } from "./lib/layerPrefs.js";
-import { BASEMAPS } from "./lib/basemaps.js";
+import { BASEMAPS, SITE_PLAN_BASEMAP } from "../../shared/basemaps/basemaps.js";
 import {
   ppfToZoom, zoomToPpf, exactContainerPoint,
   basemapWrapPoint, registrationShift, sanitizeShift, tileNwFeet, registrationLayoutMayHaveChanged,
@@ -166,6 +167,7 @@ import AppHeader from "../../shared/ui/AppHeader.jsx";
    above already imports this file. */
 import { CRUMB_MIN_W } from "../../shared/ui/ProjectBreadcrumb.jsx";
 import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.jsx";
+import { layerVisibility, dormantZoomLine } from "./lib/layerZoomGate.js";
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 /* B1449 — the anchored render (the zoom half of B1440's increment) + the proportional wheel factor.
    `viewAnchor.js` holds the proof that an anchored frame lands exactly where a direct one would. */
@@ -211,7 +213,7 @@ import { bestMeasurer } from "../../shared/markup/textWrap.js"; // B548818 — m
 import { CROSS_BAND_BEHIND, CROSS_BAND_FRONT } from "./lib/paintOrder.js"; // B548819 — ONE name for the cross-band command
 import { nearestRectPerimeterPoint, calloutCornerRadius } from "../../shared/markup/geometry.js";
 import { calloutDblZone } from "../../shared/markup/hitTest.js";
-import { COUNTIES, COUNTIES_MAP, countyKeyForName, resolveTaxRates, candidateCountiesForPoint, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, countyKeyForName, resolveTaxRates, candidateCountiesForPoint, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote, displayFloorForPoint, displaySourcesForView, statewideKeysForState, isStatewideLayerUrl, loadCountyPolygons } from "./lib/counties.js";
 import { lookupParcels } from "./lib/parcelQuery.js";
 import {
   resolveLayerUrl,
@@ -225,6 +227,7 @@ import {
 import { filterHealthyCandidates, recordSourceResult, suppressRedundantStatewide } from "./lib/sourceHealth.js";
 import { apprRows, apprAll, apprVal, findAttr, situsAddress, ownerName, parcelPanelRows } from "./lib/appraisal.js";
 import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
+import { createOutlineSet } from "./lib/parcelOutlineSet.js";
 import { geocodeAddress } from "./lib/geocode.js";
 import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackLineStyle, setbackChipStyle, SETBACK_LINE } from "./lib/planStyle.js";
 import { byZAsc, nextZ, sortByZ, Z_GAP, withMissingZ } from "./lib/zOrder.js";
@@ -239,6 +242,7 @@ import { loadDeed, deedNow } from "./lib/deedLazy.js";
  * once someone drops a deed or survey file, so it has no business on the boot path; the same
  * treatment B1123 gave the title reader and B1042 gave the export path. */
 import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip, easementStyle, easementPatternId, encumbranceStyle, encumbrancePatternId, DEFAULT_EASE_FILL_OPACITY, DEFAULT_EASE_HATCH, ENCUMBRANCE_DEFAULT } from "./lib/easements.js";
+import { deedTrace, deedGapText } from "./lib/deedGap.js";
 import { HATCH_OPTIONS, hatchSpec } from "../../shared/style/hatchPatterns.js";
 // NEW-EASE-STYLE — the ONE renderer that turns a hatch catalog spec (shared/style/hatchPatterns.js)
 // into an SVG <pattern>. MODULE-SCOPE (never defined inside SitePlanner's render body — a component
@@ -2729,7 +2733,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Aerial basemap SOURCE (B693): "off" | "esri" | "usgs" — a three-way control in the
   // Layers panel's Basemap group (was a bare on/off checkbox). Located sites default to
   // the Esri aerial, exactly like the old boolean defaulted on.
-  const [basemapSrc, setBasemapSrc] = useState(origin ? "esri" : "off");
+  const [basemapSrc, setBasemapSrc] = useState(origin ? SITE_PLAN_BASEMAP.imageryKey : "off");
   const basemapOn = basemapSrc !== "off" && !!origin;
   const [basemapStatus, setBasemapStatus] = useState(null); // "loading" | "loaded" | "failed" | null — the Basemap row's status dot
   /* NEW-1 / NEW-2 — THE ZOOM THE BACKDROP MAP HAS ACTUALLY COMMITTED TO, which is the zoom every
@@ -4967,8 +4971,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const liveIds = idsOf(liveModel), mergedIds = idsOf(merged), tomb = new Set(merged.deletedIds || []);
       const droppedLive = [...liveIds].filter((id) => !mergedIds.has(id) && !tomb.has(id));
       if (droppedLive.length) reportClientEvent("merge-dropped-live", "cross-tab merge dropped a live item with no tombstone", { id: siteId, dropped: droppedLive.slice(0, 5) });
-      setParcels(merged.parcels); setEls(merged.els); setMeasures(merged.measures);
-      setCallouts(merged.callouts); setMarkups(merged.markups); setSheetOverlays(merged.sheetOverlays); setDeletedIds(merged.deletedIds);
+      /* B2024625 — adopt only the collections that ACTUALLY differ. This fold also hears the app's own
+       * synthetic same-tab `storage` event (notifyProjectsChanged, fired after a save), and it used to hand EVERY
+       * collection a fresh array each time — a new `els` identity with identical contents re-ran the whole
+       * dissolved road network (~300 ms on a 58-element plan, ~1.5 s at 4× CPU) right after the first lot was
+       * added. A real cross-tab difference is still adopted, per collection, exactly as before. */
+      const adopt = (key, set) => { if (JSON.stringify(merged[key]) !== JSON.stringify(liveModel[key])) set(merged[key]); };
+      adopt("parcels", setParcels); adopt("els", setEls); adopt("measures", setMeasures);
+      adopt("callouts", setCallouts); adopt("markups", setMarkups); adopt("sheetOverlays", setSheetOverlays); adopt("deletedIds", setDeletedIds);
     };
     window.addEventListener("storage", onStore);
     return () => window.removeEventListener("storage", onStore);
@@ -6344,32 +6354,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return () => { stop(); };
   }, [fitReq]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* Frame the planner view to the ACTIVE parcels (+ margin) so a just-enabled
-     constraint overlay is on-screen — FEMA/NWI are scale-gated and only draw zoomed
-     in. The margin keeps nearby constraints (a pipeline just off the parcel) visible.
-     Used by the Site Analysis "show on map" toggle (B190). */
-  const frameToActiveParcels = useCallback((marginFrac = 0.6) => {
-    const pts = [];
-    parcels.forEach((pc) => { if (pc.active !== false && (pc.points?.length || 0) >= 3) pts.push(...pc.points); });
-    if (pts.length === 0) return;
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    pts.forEach((p) => { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); });
-    const bw = Math.max(maxX - minX, 10), bh = Math.max(maxY - minY, 10);
-    minX -= bw * marginFrac; maxX += bw * marginFrac; minY -= bh * marginFrac; maxY += bh * marginFrac;
-    const ebw = maxX - minX, ebh = maxY - minY, pad = 40;
-    const ppf = Math.max(0.02, Math.min(8, Math.min((size.w - pad * 2) / ebw, (size.h - pad * 2) / ebh)));
-    setView({ ppf, offX: pad - minX * ppf + (size.w - pad * 2 - ebw * ppf) / 2, offY: pad - minY * ppf + (size.h - pad * 2 - ebh * ppf) / 2 });
-  }, [parcels, size, setView]);
-
   /* Toggle a shared GIS overlay from a Site Analysis constraint card (B190). Writes
      the same app-shared `overlays` state the Layers panel uses (one source of truth) —
-     so syncOverlayLayers paints it on the map. On enable: ensure the basemap is on for
-     geographic context, then frame to the active parcels so it isn't offscreen. */
+     so syncOverlayLayers paints it on the map. On enable it makes sure the basemap is on for
+     geographic context and NOTHING ELSE: activating or deactivating a layer NEVER moves the
+     view — no pan, no zoom in, no zoom out (owner, 2026-09-30: "The activate layer button
+     shouldn't move the screen anywhere."; supersedes the B190 frame-to-site rule and B1986032's
+     first cut). A scale-gated layer that cannot draw at the current zoom says so on its card
+     (`analysisLayerZoomNote`) instead of the map moving. Do NOT add a setView / requestFit here. */
   const toggleAnalysisLayer = useCallback((layerId, wantOn) => {
     if (!layerId) return;
     setOverlays && setOverlays((o) => ({ ...o, [layerId]: { ...(o[layerId] || { opacity: ALL_LAYERS[layerId]?.opacity ?? 0.7 }), on: wantOn } }));
-    if (wantOn) { ensureBasemapOn(); frameToActiveParcels(); }
-  }, [setOverlays, frameToActiveParcels, ensureBasemapOn]);
+    if (wantOn) ensureBasemapOn();
+  }, [setOverlays, ensureBasemapOn]);
+
+  /* The card's read-only note for an ON layer the current zoom suppresses — the same
+     `layerVisibility` answer the Layers panel row shows, reported here so the owner is told why
+     nothing painted rather than the map jumping. Text only: no click, no zoom. */
+  const analysisLayerZoomNote = useCallback((layerId) => {
+    if (!origin || !layerId || !overlays?.[layerId]?.on) return null;
+    const v = layerVisibility({ cfg: ALL_LAYERS[layerId], on: true, zoom: ppfToZoom(view.ppf, origin.lat), status: layerStatus?.[layerId] });
+    return v.state === "dormant-zoom" ? dormantZoomLine(v.levels) : null;
+  }, [origin, overlays, view.ppf, layerStatus]);
 
   /* ⛔ REMOVED (B-VTX-SEL) — this used to auto-select "the single restored parcel so its handles
    * are ready to use". It ran on every MOUNT, not just the moment a parcel was first drawn, so
@@ -7397,8 +7403,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // AND the on-parcel press, so clicking an already-added lot can toggle it back off
   // (the parcel polygon's own handler stops propagation, so it must call this directly).
   const beginIdentifyPress = (e) => {
+    // NEW-1 — acknowledge the press AT THE CURSOR before anything else runs (plain DOM, so it paints
+    // on the next frame instead of waiting on this component's render). Cleared by onUp: a drag
+    // becomes a pan (cancel), a click hands it to quickAddAt, which holds it until the lot lands.
+    const ack = startClickAck(e.clientX, e.clientY);
     setPanning(true);
-    drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY, tapIdentify: p2f(e.clientX, e.clientY), downX: e.clientX, downY: e.clientY };
+    drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY, tapIdentify: p2f(e.clientX, e.clientY), downX: e.clientX, downY: e.clientY, ack };
     capturePidRef.current = e.pointerId;
     try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
   };
@@ -9466,7 +9476,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   // B673 — zoom the canvas to a set of elements (the conflict toast's "Show" action) and select
   // them all, so the highlight makes "which elements are they talking about" unmistakable for a
-  // coalesced notice as much as a single one. Same framing math as frameToActiveParcels, over the
+  // coalesced notice as much as a single one. Same framing math as `fit`, over the
   // UNION bbox with generous margin for context. `members` is a list of { kind, id }.
   const zoomToElements = (members) => {
     const list = Array.isArray(members) ? members : [];
@@ -9785,8 +9795,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // click → add (or toggle) the lot under it; any real drag just panned to find more.
     if (d && d.mode === "pan" && d.tapIdentify
         && Math.hypot(e.clientX - d.downX, e.clientY - d.downY) <= PARCEL_CLICK_SLOP_PX) {
-      quickAddAt(d.tapIdentify);
-    }
+      quickAddAt(d.tapIdentify, d.ack);
+    } else if (d && d.ack) d.ack.cancel(); // NEW-1 — a real drag (a pan) is not a click: drop the ring
     // B416: committing a building reshape that flipped its long-side axis can leave a
     // dock-zone stack (court → trailer → buffer) stranded on a side that is no longer a
     // dock side. Prune it on release (not during the live drag, so a drag past-square-and-
@@ -12997,7 +13007,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        * marks each rejection handled, because a `tok` supersede can return before the await and an
        * un-awaited rejection would otherwise surface as an unhandled one. */
       const zoneAUnstudied = (floodGeo.zones || []).some((z) => z.unstudiedA && z.zone === "A");
-      const inHarris = (ctx?.authority?.jurisdiction?.county || []).some((c) => /harris/i.test(String(c)));
+      const inHarris = ctx?.authority?.jurisdiction?.state !== "GA" && ctx?.authority?.jurisdiction?.state !== "CA" // NEW-1 — Harris County, GEORGIA is not Texas's Harris (and no California county is either)
+        && (ctx?.authority?.jurisdiction?.county || []).some((c) => /harris/i.test(String(c)));
       const [ptLat, ptLng] = feetToLatLng(bfePt, origin.lat, origin.lon);
       const ebfeP = zoneAUnstudied ? leg("ebfe", sampleEbfePoint(ptLat, ptLng)) : null;
       const maapP = zoneAUnstudied && inHarris ? leg("maapnext", sampleMaapnextWse(ptLat, ptLng)) : null;
@@ -13226,7 +13237,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // to "hcfcd" ONLY for Harris, so it's sufficient evidence on its own). An effective coh/hcfcd
   // authority outside Harris — e.g. a user override on a Fort Bend site — must NOT surface the
   // control, and a STORED channel answer is ignored (not cleared) there, with a visible note.
-  const drainCountyHarris = (drainCtxData?.authority?.jurisdiction?.county || []).some((c) => /harris/i.test(String(c)));
+  const drainCountyHarris = drainCtxData?.authority?.jurisdiction?.state !== "GA" && drainCtxData?.authority?.jurisdiction?.state !== "CA" // NEW-1 — Harris County, GEORGIA is not HCFCD's Harris (nor is any California county)
+    && (drainCtxData?.authority?.jurisdiction?.county || []).some((c) => /harris/i.test(String(c)));
   const drainChannelRelevant = drainCtxData?.authority?.channelAuthority === "hcfcd"
     || (drainCountyHarris && (drainAuthorityId === "coh" || drainAuthorityId === "hcfcd"));
   const chanOverride = drainChannelRelevant ? chanOverrideStored : undefined;
@@ -13314,13 +13326,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     : null;
   const detReq = siteStateId === "CO"
     ? computeRequiredDetention({ ...detReqInputsCo, authorityId: null })
+    // NEW-1 (Georgia) — no modeled Georgia criteria: the guard's named "not available in Georgia yet"
+    // carrier, regardless of whatever the (Texas-shaped) drainage context resolved.
+    : siteStateId === "GA" || siteStateId === "CA" // NEW-1 (California) — same carrier, "not available in California yet"
+    ? computeRequiredDetention({ ...detReqInputs, authorityId: null })
     : drainCtxData && siteSqft > 0 && drainAuthorityId
       ? computeRequiredDetention({ ...detReqInputs, authorityId: drainAuthorityId })
       : drainCtxData && siteSqft > 0 && drainCountyUnmodeled
         ? { ...computeRequiredDetention({ ...detReqInputs, authorityId: null }), governingCounty: drainCountyUnmodeled }
         : null;
   // A boundary straddle leaves primary null — compute EVERY candidate, labeled (never default).
-  const detReqCandidates = siteStateId !== "CO" && drainCtxData && siteSqft > 0 && !drainAuthorityId && drainCtxData.authority?.ambiguous?.length
+  const detReqCandidates = siteStateId !== "CO" && siteStateId !== "GA" && siteStateId !== "CA" && drainCtxData && siteSqft > 0 && !drainAuthorityId && drainCtxData.authority?.ambiguous?.length
     ? drainCtxData.authority.ambiguous[0].candidates.filter(Boolean).map((aid) => ({ aid, r: computeRequiredDetention({ ...detReqInputs, authorityId: aid }) }))
     : null;
   // Tier + regime need flood facts — a FAILED flood query is an unknown, never "clean".
@@ -15937,7 +15953,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [addrQuery, setAddrQuery] = useState(""); // B384: the "Add by address" text field in the ＋ Add parcel menu
   const [addrBusy, setAddrBusy] = useState(false); // geocode in flight
   const identifyTok = useRef(0);
-  const outlineLayersRef = useRef({});          // county key -> the lit outline layer for that county, while identify mode is on
+  const ackRef = useRef(null); // NEW-1 — the click acknowledgement (ring at the cursor) of the identify in flight
+  const outlineLayersRef = useRef(null);        // the outline set (lib/parcelOutlineSet.js) while identify mode is on — also read by the E2E hook below
   const identifyAddedRef = useRef(new Map());   // gisKey -> [parcel ids] added THIS session, so a re-click toggles it off
   // NEW-1 (parcel routing, owner report 2026-08-22 — Jordan/Colorado) — `resolveCountyLayer` used to
   // resolve ONCE against `siteCounty`, the county recorded when the site was CREATED, and cache that
@@ -16080,7 +16097,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           ? `ETJ boundaries: ${layerVintage("jur_etj") || "vintage unknown"}. ETJs shrink as landowners opt out (SB 2038) — screening only, verify before relying on an ETJ answer.`
           : null;
         // B689905 — carried through so the tooltip never claims a parcel that isn't there.
-        const badge = { ...b, ageMs: j.ages?.county ?? j.ages?.city ?? j.ages?.etj ?? null, sourceName: "TxDOT / TxGIO / H-GAC", etjNote, parcelBased: hasParcel };
+        const badge = { ...b, ageMs: j.ages?.county ?? j.ages?.city ?? j.ages?.etj ?? null, sourceName: "TxDOT / TxGIO / county & city ETJ publishers", etjNote, parcelBased: hasParcel };
         /* NEW-2 — CACHE ONLY A RESOLVED ANSWER. This cache is keyed on parcel geometry and lives for
          * the session, so caching a badge whose ETJ lookup failed pinned that site to "couldn't
          * check" until a reload, on a source measured flaky at exactly this. An unresolved badge is
@@ -16120,10 +16137,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // preview-then-confirm) — click more lots to add more; re-click a lot you just added
   // to toggle it off. The info card then shows that lot's appraisal + the jurisdiction
   // lookup. The SINGLE add path (shared `parcelsFromRings`) every parcel-add reuses.
-  const quickAddAt = async (fp) => {
-    if (!origin) { setIdentifyRes({ error: "This plan isn't georeferenced — bring the parcel in from the map." }); return; }
+  const quickAddAt = async (fp, ack = null) => {
+    if (!origin) { ack?.cancel(); setIdentifyRes({ error: "This plan isn't georeferenced — bring the parcel in from the map." }); return; }
     const tok = ++identifyTok.current; // a later click supersedes this one (B53)
-    setJurInfo(null); setIdentifyRes({ busy: true });
+    /* NEW-1 — the ring belongs to THIS click: a newer click (or Add-by-address) supersedes it, and
+     * every way out below settles it, so it can never outlive its answer. `setRes` is the one exit. */
+    ackRef.current?.cancel(); ackRef.current = ack;
+    let settled = false;
+    const setRes = (r) => {
+      settled = true;
+      if (tok === identifyTok.current) {
+        if (r && r.error) ack?.empty(r.noLot ? "No lot here" : "Couldn't get that lot"); else ack?.done();
+      }
+      setIdentifyRes(r);
+    };
+    /* NEW-1 — the county request goes out BEFORE the busy-state render. Setting state first made React
+     * render this whole component (a ~150 ms long task on a real plan) ahead of the fetch, so the query
+     * started ~190 ms late. The busy text now paints in a following task — and only if no answer beat it. */
+    setTimeout(() => { if (!settled && tok === identifyTok.current) { setJurInfo(null); setIdentifyRes({ busy: true }); } }, 0);
     try {
       const [lat, lng] = feetToLatLng(fp, origin.lat, origin.lon);
       // NEW-1 (parcel routing) — candidates for THIS point, not the site's frozen county.
@@ -16131,7 +16162,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (tok !== identifyTok.current) return;
       if (!candidates.length) {
         const gap = noParcelSourceNote(countyIdentity(lat, lng));
-        setIdentifyRes({ error: gap ? `${gap} You can still trace the lot from the aerial.` : "Parcel services are still loading — give it a second and click again." });
+        setRes({ error: gap ? `${gap} You can still trace the lot from the aerial.` : "Parcel services are still loading — give it a second and click again." });
         return;
       }
       const res = await identifyParcelEager(candidates, lng, lat, {
@@ -16142,15 +16173,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // NEW-2 — say the TRUE reason instead of blaming the user's aim: a healthy source
         // genuinely found no lot here, this county has no parcel source wired at all, or every
         // source that could have answered this point was unreachable this click.
-        if (res.responded === 0) { setIdentifyRes({ error: "The parcel server for this area isn't responding right now — try again in a moment." }); return; }
+        if (res.responded === 0) { setRes({ error: "The parcel server for this area isn't responding right now — try again in a moment." }); return; }
         const gap = noParcelSourceNote(countyIdentity(lat, lng));
-        setIdentifyRes({ error: gap ? `${gap} You can still trace the lot from the aerial.` : "No parcel right there — click directly on a lot (zoom in if the outlines aren't showing)." });
+        setRes({ error: gap ? `${gap} You can still trace the lot from the aerial.` : "No parcel right there — click directly on a lot (zoom in if the outlines aren't showing).", noLot: true });
         return;
       }
       const hit = res.hits[0]; // first county whose service answered owns the lot
       const feat = hit.feature;
       const rings = outerRingsLngLat(feat); // every part of a multipart parcel
-      if (!rings.length) { setIdentifyRes({ error: "That record has no polygon shape — try an adjacent lot." }); return; }
+      if (!rings.length) { setRes({ error: "That record has no polygon shape — try an adjacent lot." }); return; }
       const attrs = feat.attributes || {};
       const addr = situsAddress(attrs); // NEW-2 — the SITUS, never the owner's mailing address (shared ladder)
       const key = parcelGisKey(attrs, rings);
@@ -16162,26 +16193,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         setParcels((a) => a.filter((p) => !ids.includes(p.id)));
         tombstone(ids); // NEW-1 — the toggled-off identify lot(s) stay gone across a merge + a multipart lot's ≥2 drop doesn't trip the thin-clobber guard
         setSel(null); setIdentAdded(identifyAddedRef.current.size);
-        setIdentifyRes({ removed: true, addr });
+        setRes({ removed: true, addr });
         return;
       }
       // Already in the plan from before → select + inform, never add a duplicate.
       const dupe = (stateRef.current.parcels || []).filter((p) => storedParcelKey(p) === key); // recomputed from attrs — legacy geo: gisKeys still match
       if (dupe.length) {
         setSel({ kind: "parcel", id: dupe[dupe.length - 1].id });
-        setIdentifyRes({ already: true, addr });
+        setRes({ already: true, addr });
         return;
       }
       const pcs = parcelsFromRings(rings, addr, attrs);
-      if (!pcs.length) { setIdentifyRes({ error: "That record has no usable polygon — try an adjacent lot." }); return; }
+      if (!pcs.length) { setRes({ error: "That record has no usable polygon — try an adjacent lot." }); return; }
       pushHistory();
       setParcels((a) => [...a, ...pcs]);
       identifyAddedRef.current.set(key, pcs.map((p) => p.id));
       setIdentAdded(identifyAddedRef.current.size);
       setSel({ kind: "parcel", id: pcs[pcs.length - 1].id });
       // `ring` (largest part) drives the jurisdiction/road tests; keep attrs for the card.
-      setIdentifyRes({ added: true, attrs, rings, ring: largestRingLngLat(feat), lng, lat, addr });
-    } catch (e) { if (tok === identifyTok.current) setIdentifyRes({ error: humanizeError(e) }); }
+      setRes({ added: true, attrs, rings, ring: largestRingLngLat(feat), lng, lat, addr });
+    } catch (e) { if (tok === identifyTok.current) setRes({ error: humanizeError(e) }); }
   };
   // B384 — "Add by address": geocode a typed address (biased to the plan's origin), project the
   // hit into the site's feet frame, and run the SAME identify-and-add path (quickAddAt) the click
@@ -16214,25 +16245,49 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // selects them) instead of going dark, exactly like the Map view already does.
   useEffect(() => {
     if (!origin) return;
-    const dropOutlines = () => {
-      const map = geoMapRef.current;
-      Object.keys(outlineLayersRef.current).forEach((k) => { try { map?.removeLayer(outlineLayersRef.current[k]); } catch (_) {} });
-      outlineLayersRef.current = {};
-    };
-    if (!identifyMode) { identifyAddedRef.current = new Map(); setIdentAdded(0); dropOutlines(); return; }
+    if (!identifyMode) { identifyAddedRef.current = new Map(); setIdentAdded(0); return; }
     ensureBasemapOn(); // make sure the aerial is on so the lit outlines have context
-    let cancelled = false;
-    const addOutline = (key, url) => {
-      const map = geoMapRef.current;
-      if (cancelled || !url || !map || outlineLayersRef.current[key]) return;
-      try { const fl = makeParcelDisplayLayer(url); fl.addTo(map); outlineLayersRef.current[key] = fl; } catch (_) {}
-    };
-    Object.keys(COUNTIES_MAP).forEach((key) => {
-      resolveOneCountyLayer(key).then((url) => addOutline(key, url)).catch(() => {});
+    /* B2024624 — ONE source per AREA, following the VIEW (lib/parcelOutlineSet.js). This used
+     * to mount every county source in the country (36+ full-viewport images) and the statewide
+     * composite sat under the county's own layer, flashing gold whenever the county image reloaded. */
+    const set = createOutlineSet({
+      getMap: () => geoMapRef.current,
+      boundsOf: (m) => { const b = m.getBounds(); return { south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() }; },
+      resolveUrl: (key) => resolveOneCountyLayer(key),
+      makeLayer: makeParcelDisplayLayer,
+      sourcesForView: displaySourcesForView,
+      statewideKeysForState,
+      stateOf: (k) => COUNTIES_MAP[k] && COUNTIES_MAP[k].state,
+      isStatewideUrl: isStatewideLayerUrl,
     });
-    return () => { cancelled = true; dropOutlines(); };
+    outlineLayersRef.current = set;
+    let map = null, poll = null, tries = 0;
+    const onMoved = () => set.sync();
+    // The aerial may only be mounting now (basemap was off) — wait for the map, then follow its view.
+    const attach = () => {
+      poll = null;
+      const m = geoMapRef.current;
+      if (!m) { if (++tries < 40) poll = setTimeout(attach, 250); return; }
+      map = m; m.on("moveend", onMoved); set.sync();
+    };
+    attach();
+    // Until the county geometry is resident the view answer is bbox-overlap (over-inclusive); re-ask once it lands so a neighbour's layer is released.
+    Promise.resolve(loadCountyPolygons()).then(() => set.sync(), () => {});
+    return () => {
+      if (poll) clearTimeout(poll);
+      if (map) map.off("moveend", onMoved);
+      set.dispose();
+      outlineLayersRef.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [identifyMode, origin]);
+  /* B2024624 — read-only diagnostic: which outline sources the click-a-lot mode has mounted. Gated at CALL
+   * time (diagArm.js), writes nothing; the acceptance for "no nationwide fan-out" reads this. */
+  useEffect(() => {
+    const hook = () => (isDiagArmed(window) && outlineLayersRef.current ? { mounted: outlineLayersRef.current.mounted() } : null);
+    window.__plannerParcelOutlines = hook;
+    return () => { if (window.__plannerParcelOutlines === hook) window.__plannerParcelOutlines = null; };
+  }, []);
   // ⛔ NAMES HAVE ONE SOURCE OF TRUTH (shared/names/names.js) — `siteLabel`/`planLabel` are READ
   // from it on every render, never seeded into state (that was B1934528: a copy taken at mount that
   // every other rename door missed, patched once with a storage-event listener and now gone).
@@ -19223,13 +19278,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
 
   // Build a polygon encumbrance markup from a traverse anchored at `pob`. A tract
-  // boundary is ALWAYS a polygon — if the calls don't close, the last→first edge
-  // carries the gap (shown honestly) rather than being redrawn as a corridor.
+  // boundary is ALWAYS a polygon, drawn EXACTLY as written (deedGap.js): the last course ends where its
+  // bearing and distance put it, and any misclosure above rounding noise is its own gap segment — never
+  // absorbed into the closing edge. `closed` is still the screening tolerance (promotability / OCR), it
+  // just no longer decides what is drawn.
   const buildEncumbranceMarkup = (calls, pob, { label, except, group }) => {
     const { callsToPath, pathCloses, misclosure } = deedLib();
     const path = callsToPath(calls, pob);
     const closed = pathCloses(path);
-    const ring = closed ? path.slice(0, -1) : path;
+    const ring = deedTrace({ centerline: path, pts: path }).ring;
     if (ring.length < 3) return null;
     return {
       mk: {
@@ -19259,11 +19316,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (asEasement) {
       const path = callsToPath(main.calls, pob);
       const closed = pathCloses(path);
+      // As written (deedGap.js): the last course's endpoint is kept, so a misclosing description's gap is the
+      // polygon's closing edge rather than being absorbed into it.
+      const eTrace = deedTrace({ centerline: path, pts: path });
       const mk = closed
-        ? makeEasement({ mode: "boundary", pts: path.slice(0, -1) })
+        ? makeEasement({ mode: "boundary", pts: eTrace.ring })
         : makeEasement({ mode: "centerline", centerline: path, width: mbWidth });
       setPobMode(null);
       commitEasement(mk);
+      if (closed && eTrace.gap) flashWarn(`⚠ This easement description does not close — it misses by ${eTrace.gap.ft.toFixed(eTrace.gap.ft >= 10 ? 1 : 2)}′. The last edge of the shape carries that gap; verify the calls.`, 9000);
       if (tracts.length > 1) flashWarn(`Plotted the main tract as an easement — its ${tracts.length - 1} save-and-except exception(s) were not carved. Use “Plot on canvas” to include the holes.`, 8000);
       return;
     }
@@ -19289,7 +19350,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const gap = built.gap;
     const closeNote = !built.closed
       ? ` ⚠ Traverse does NOT close (gap ≈ ${gap.toFixed(1)}′) — plotted as drawn; verify the calls.`
-      : (gap > 1 ? ` Traverse misclosure ≈ ${gap.toFixed(1)}′.` : "");
+      : (gap > 1 ? ` Traverse misclosure ≈ ${gap.toFixed(1)}′ — the red dashed line is the gap.` : "");
     const exNote = exMarks.length ? ` +${exMarks.length} save-and-except hole${exMarks.length > 1 ? "s" : ""}.` : "";
     let overlapNote = "";
     if (hits.length) {
@@ -21331,7 +21392,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <>
                     <LazyPanel name="Site Analysis" minHeight={220} label="Loading site analysis…">
                       <SiteAnalysis rings={rings} acres={acres} parcelCount={act.length} PAL={PAL} chip={chip}
-                        isLayerOn={(id) => !!overlays?.[id]?.on} onToggleLayer={toggleAnalysisLayer} layerStatus={layerStatus}
+                        isLayerOn={(id) => !!overlays?.[id]?.on} onToggleLayer={toggleAnalysisLayer} layerStatus={layerStatus} layerZoomNote={analysisLayerZoomNote}
                         onFindings={(fs) => { const w = fs && fs.find((f) => f.id === "wetlands"); setAnalysisWetlands(w ? w.status : null); }} />
                     </LazyPanel>
                     {/* NEW-1 (2026-09-05, owner directive) — Analysis screens, Drainage decides:
@@ -21580,7 +21641,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       onClick={() => { setIdentifyMode(false); setIdentifyRes(null); setJurInfo(null); }} title="Stop adding parcels">
                       {identAdded > 0 ? `Adding lots — ${identAdded} added · Done` : "Click lit-up lots to add · Done"}
                     </button>
-                    {origin && ppfToZoom(view.ppf, origin.lat) < PARCEL_MINZOOM && (
+                    {origin && ppfToZoom(view.ppf, origin.lat) < Math.max(PARCEL_MINZOOM, displayFloorForPoint(origin.lat, origin.lon)) && ( // NEW-2 — a dense statewide source (California) declares a higher floor
                       <div style={{ fontSize: 10.5, color: "var(--warn-text)", lineHeight: 1.4, marginTop: 5 }}>Zoom in to see the county parcel lines light up (a click still adds the lot).</div>
                     )}
                   </>
@@ -21608,8 +21669,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             <div style={{ marginTop: 7, borderTop: "1px dashed var(--planner-border)", paddingTop: 6 }}>
                               {jurInfo.error ? <span style={{ color: PAL.warn }}>{jurInfo.error}</span> : <>
                                 {jurRow("County", jurInfo.j.county.length ? jurInfo.j.county.join(" + ") : "—", jurInfo.j.ages.county)}
-                                {jurRow("City", jurInfo.j.unincorporated ? "Unincorporated" : jurInfo.j.city.join(" + "), jurInfo.j.ages.city)}
-                                {jurRow("ETJ", jurInfo.j.etj.length ? jurInfo.j.etj.map((n) => `${n} ETJ`).join(" + ") : ((jurInfo.j.sources.find((s) => s.id === "etj") || {}).state === "unavailable" ? "no ETJ layer here (Houston/Austin/DFW covered)" : "not in a city ETJ"), jurInfo.j.ages.etj)}
+                                {jurRow("City", jurInfo.j.unincorporated ? (jurInfo.j.etjUnavailable ? "Outside city limits" : "Unincorporated") : jurInfo.j.city.join(" + "), jurInfo.j.ages.city)}
+                                {jurRow("ETJ", jurInfo.j.etj.length ? jurInfo.j.etj.map((n) => `${n} ETJ`).join(" + ") : ((jurInfo.j.etjUndetermined || []).length ? "ETJ undetermined (disputed)" : (jurInfo.j.etjReleased || []).length ? `${jurInfo.j.etjReleased.join(" + ")} ETJ release area (SB 2038)` : jurInfo.j.etjUnavailable ? "ETJ data unavailable here" : (jurInfo.j.sources.find((s) => s.id === "etj") || {}).state === "unavailable" ? "no ETJ layer here (Houston/Austin/DFW covered)" : "not in a city ETJ"), jurInfo.j.ages.etj)}
                                 {Array.isArray(jurInfo.j.isd) && jurRow("School dist.", jurInfo.j.isd.length ? jurInfo.j.isd.join(" + ") : "—", jurInfo.j.ages.isd)}
                                 {jurRow("Road maint.", jurInfo.road.authorities.length ? jurInfo.road.authorities.join(" · ") + (jurInfo.road.nearest?.route ? ` (${jurInfo.road.nearest.route})` : "") : "unknown", jurInfo.road.ageMs)}
                                 {jurInfo.j.straddle && <div style={{ color: PAL.warn, marginTop: 3 }}>⚑ Straddles a boundary — touches multiple jurisdictions.</div>}
@@ -23318,16 +23379,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   );
                 }
                 if (m.kind === "encumbrance") {
-                  const ring = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
+                  // As written (deedGap.js): the ring keeps the last course's true endpoint and any misclosure
+                  // draws as its own red dashed segment instead of being absorbed into the closing edge.
+                  const trace = deedTrace(m);
+                  const ring = trace.ring.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
                   const cen = (m.centerline || []).map(f2p);
-                  const ctr = centroid(m.pts), cp = f2p(ctr);
+                  const ctr = centroid(trace.ring), cp = f2p(ctr);
+                  const gapSeg = trace.gap ? { a: f2p(trace.gap.from), b: f2p(trace.gap.to) } : null;
                   return (
                     <g key={m.id} data-markup={m.id} style={mkCursor} onPointerDown={(e) => startMoveMarkup(e, m.id)} onContextMenu={(e) => onMarkupContext(e, m.id)}>
                       {isSel && <polygon points={ring} fill="none" stroke={SEL_BLUE} strokeWidth={2} data-export="skip" pointerEvents="none" />}
                       {/* NEW-EASE-STYLE — encumbrance shares the easement appearance model
                           (fill/stroke/fillOpacity/hatch, editable in Properties); see
                           easements.js's encumbranceStyle/ENCUMBRANCE_DEFAULT header. */}
-                      <polygon data-testid={m.except ? "deed-except" : "deed-boundary"} points={ring} fill={`url(#${encumbrancePatternId(m)})`} stroke={stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} pointerEvents="all" />
+                      <polygon data-testid={m.except ? "deed-except" : "deed-boundary"} points={ring} fill={`url(#${encumbrancePatternId(m)})`} stroke={gapSeg ? "none" : stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} pointerEvents="all" />
+                      {/* The courses as written, then the misclosure as its OWN line (not part of the boundary stroke). */}
+                      {gapSeg && <polyline data-testid="deed-courses" points={trace.path.map(f2p).map((q) => `${q.x},${q.y}`).join(" ")} fill="none" stroke={stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} strokeLinejoin="round" pointerEvents="none" />}
+                      {gapSeg && <line data-testid="deed-gap" x1={gapSeg.a.x} y1={gapSeg.a.y} x2={gapSeg.b.x} y2={gapSeg.b.y} stroke={PAL.dangerText} strokeWidth={strokeZoom(Math.max(sw, 2.2), zk)} strokeDasharray={dashZoom("6 4", zk)} strokeLinecap="butt" pointerEvents="none"><title>{`${deedGapText(trace).text} ${deedGapText(trace).precision}`}</title></line>}
                       {/* centerline + per-call bearing/distance labels */}
                       {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={stroke} strokeWidth={strokeZoom(0.8, zk)} strokeDasharray={dashZoom("4 3", zk)} opacity={0.7} pointerEvents="none" />}
                       {labelPpf > 0.12 && (m.calls || []).map((c, i) => {
@@ -23555,7 +23623,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           sync — elements are per-row rev-guarded, the header self-heals a stale CAS (cloudUpsert). */}
       {/* B673 — its successor: the loud-but-NON-BLOCKING per-element conflict toasts (both sides of
           a collision get told, with Show / Restore actions; nothing is ever silently overwritten). */}
-      <ToastHost toasts={toasts} onDismiss={dismissToast} />
+      {active && <ToastHost toasts={toasts} onDismiss={dismissToast} />}
       {/* B455/NEW-7 + B464/B466 (NEW-1/NEW-3) — single-active-editor read-only banner, now LOUD and
           ACTIONABLE. Another tab of this browser is the active editor, so this tab is read-only and
           its edits are NOT syncing to the cloud (they ARE kept on this device — B458). Reloading does
@@ -26510,8 +26578,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {selMarkup.kind === "encumbrance" && (() => {
                   const hasParcel = parcels.some((p) => p.active !== false && (p.points?.length || 0) >= 3);
                   const dm = deedMainOf(deedGroupMembers(selMarkup), selMarkup);
+                  const gapInfo = deedGapText(deedTrace(selMarkup));
                   return (
                     <div style={{ marginTop: 6, paddingTop: 8, borderTop: BORDER_1 }}>
+                      {/* The misclosure in plain words, with the precision ratio; the canvas draws it as a red dashed line. */}
+                      <div data-testid="deed-closure" style={{ fontSize: 11.5, lineHeight: 1.5, marginBottom: 8, fontWeight: 700, color: gapInfo.closes ? PAL.text : PAL.dangerText }}>
+                        {gapInfo.closes ? "" : "⚠ "}{gapInfo.text}{gapInfo.precision ? ` ${gapInfo.precision}.` : ""}
+                      </div>
                       <button style={{ ...chip, width: "100%", fontWeight: 700 }} disabled={!!selMarkup.locked}
                         onClick={() => alignDeedToParcel(dm.id)}>
                         📐 {hasParcel ? "Align to county parcel" : "Rotate to grid north"}
@@ -32461,12 +32534,17 @@ function DrainagePanel({
                 // also the only moment this branch can be reached, so there is no first-paint gap.
                 coMhfd && req.panelLine
                   ? req.panelLine
-                  : `${coSubject} — confirm the criteria your town has adopted.`,
+                  // NEW-1 (Georgia) — the named "not available in Georgia yet" state; one line, the why rides the ⓘ.
+                  : (req.flags || []).some((f) => f === "georgia-not-wired" || f === "california-not-wired")
+                    ? req.headline // PANEL-BREVITY: the carrier's own headline, so no new literal is added here
+                    : `${coSubject} — confirm the criteria your town has adopted.`,
                 "co-detention",
                 // The explanation rides the lazily-loaded Colorado tier (with the rest of the
                 // Colorado prose). Until it lands, the visible line and its verdict are already
                 // correct — only the ⓘ fills in a moment later.
-                d.coDetail
+                (req.flags || []).some((f) => f === "georgia-not-wired" || f === "california-not-wired")
+                  ? req.detail
+                  : d.coDetail
                   ? `${d.coDetail}${d.coRegime ? ` Reviewing regime: ${d.coRegime.label} (${d.coRegime.criteria}). ${d.coRegime.note}` : ""}`
                   : null,
               ));

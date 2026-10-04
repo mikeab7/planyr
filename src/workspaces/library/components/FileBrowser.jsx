@@ -17,9 +17,10 @@
  * Counts + the tree are metadata-only queries (listReviews + listFileFacts); file bytes
  * load only when a file is opened. Reuses the existing reviewStore / uploadQueue plumbing.
  */
+import { docKindOf } from "../../doc-review/docEditor/docKind.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  fetchProjects, fetchReviews, fetchFileFacts, fileNewReview, refileReview,
+  fetchProjects, fetchReviews, fetchFileFacts, fileNewReview,
   upsertFileFacts, deleteReview, restoreReview, purgeReview, listDeletedReviews,
   purgeExpiredDeleted, loadReview, getShareLink, DISCIPLINES,
   downloadFromDrive, downloadSource,
@@ -27,6 +28,7 @@ import {
 import { friendlySaveError } from "../../../shared/sitePlans/lib/overlayErrors.js";
 import { toFactsRow, mergeFactsIntoReviews, findDuplicateReview, isRapidRepeatUpload } from "../../doc-review/lib/fileIndex.js";
 import { fileWarn } from "../../doc-review/lib/sourceState.js";
+import { fileReviewIntoProject } from "../lib/fileIntoProject.js";
 import { buildFilingPlan } from "../../../shared/files/disciplineSplit.js";
 import { splitPdfByPlan } from "../../doc-review/lib/pdfSplit.js";
 import {
@@ -37,7 +39,6 @@ import {
 import {
   resolveDrawingTarget, subtreeIds, displayLabel, matchDropPathToFolder,
 } from "../../../shared/folders/folderTree.js";
-import { moveDriveFileToFolder } from "../lib/folders.js";
 import {
   QUEUE_STATUS, makeQueueItems, splitQueue, runPool,
   dropItemsToEntries, flattenEntries, partitionAccepted, isPdfName, fileRelDirs,
@@ -87,7 +88,7 @@ export default function FileBrowser({
   // ORG SCOPE (NEW-1) — a real, distinct browse scope alongside a project and cross-project:
   // files filed to the Organization, never mixed with "unfiled" project files.
   orgScope = false,
-  onOpenReview, onNavigate, indexProvider = null,
+  onOpenReview, onOpenHistory, onNavigate, indexProvider = null,
   /* Unified Library (B650 follow-on) — "folder mode": the left column shows the project's REAL
    * folder tree (the `folderRail` node, a FolderTree) instead of the derived category tree, and
    * the file list filters to the selected folder's subtree. Files place by the SAME resolver the
@@ -568,10 +569,14 @@ export default function FileBrowser({
   // Legacy files carry no sourceFile — they were always PDFs, so an empty sourceFile reads as
   // "PDF" (opens in Review, as before).
   const isPdfFile = (f) => !f.sourceFile || isPdfName(f.sourceFile);
+  // NEW-1: Word and text files open in Review's document editor, so they are no longer a download-only dead end.
+  const isDocFile = (f) => !!f.sourceFile && !!docKindOf(f.sourceFile);
   const open = (f) => {
-    if (!isPdfFile(f)) { setPendingDl(f); return; }
+    if (!isPdfFile(f) && !isDocFile(f)) { setPendingDl(f); return; }
     const r = reviews.find((x) => x.id === f.id); onOpenReview?.(r || f);
   };
+  // B2022929 — "Version history": opens the file in Review with the history sheet already showing.
+  const openHistory = (f) => { const r = reviews.find((x) => x.id === f.id); onOpenHistory?.(r || f); };
   // Fetch a stored file's bytes (Drive-first, Supabase-fallback — the same read-back order the
   // Review canvas uses) and save it to disk. Failure is loud (a banner), never a dead click.
   // Only ever called from the pendingDl confirmation's own Download button (B1456896) — never
@@ -659,35 +664,14 @@ export default function FileBrowser({
     const typed = (sel.discipline || f.discipline || "Civil").trim();
     const discipline = DISCIPLINES.find((d) => d.toLowerCase() === typed.toLowerCase()) || typed;
     const pid = f.projectId || projectId;
-    const res = await refileReview(f.id, { projectId: pid, project: projName(pid), discipline });
-    if (!res || !res.ok) { // R2 - a failed refile writes NOTHING to the index, and says so
-      setMoveNotice(`Couldn't file "${f.title || "this file"}" — ${(res && res.error) || "the save failed"}. Nothing was changed.`);
+    const res = await fileReviewIntoProject({ f, projectId: pid, projectName: projName(pid), discipline, category: sel.category });
+    if (!res.ok) { // R2 - a failed refile writes NOTHING to the index, and says so
+      setMoveNotice(`Couldn't file "${f.title || "this file"}" — ${res.error}. Nothing was changed.`);
       return;
     }
-    // Update the index row's category/state too so the tree moves it immediately. Preserve the
-    // REAL upload filename (B685) — never the extension-less title: source_file is what isPdfFile
-    // reads to decide open-in-Review vs. download, so writing f.title here would make a re-filed
-    // PDF look like a non-PDF (empty stays empty → legacy PDFs still read as PDF).
-    const ff = await upsertFileFacts(toFactsRow({ projectId: pid, discipline, item: f.item, category: sel.category || undefined, needsFiling: false }, { id: f.id, reviewId: f.id, sourceFile: f.sourceFile || "" })).catch((e) => ({ ok: false, error: e && e.message }));
-    if (ff && ff.ok === false) setMoveNotice(`Filed, but the Library index wasn't updated (${ff.error || "write failed"}) — refresh and try again if the file looks misplaced.`);
-    {
-      // Move the Drive BYTES to match the confirmed discipline (B662 review #3): the upload
-      // landed where the ORIGINAL read pointed (often the Drawings fallback for "Other");
-      // filing is only done when the physical copy follows the decision. Failure is loud —
-      // the metadata is filed either way, so the notice says exactly what's still pending.
-      try {
-        const rec = await loadReview(f.id);
-        const keys = ((rec && rec.sources) || []).map((s) => s && s.driveKey).filter(Boolean);
-        for (const k of keys) {
-          const mv = await moveDriveFileToFolder(pid, k, discipline);
-          if (mv && mv.ok === false) { setMoveNotice(`Filed as ${discipline}, but the Google Drive copy couldn't be moved (${mv.error || "move failed"}) — it stays in its old folder.`); break; }
-        }
-      } catch (_) {
-        setMoveNotice(`Filed as ${discipline}, but the Google Drive copy couldn't be moved — it stays in its old folder.`);
-      }
-      setRefileSel((s) => { const n = { ...s }; delete n[f.id]; return n; });
-      refresh();
-    }
+    if (res.notice) setMoveNotice(res.notice);
+    setRefileSel((s) => { const n = { ...s }; delete n[f.id]; return n; });
+    refresh();
   };
 
   // ---- empty / no-project states ------------------------------------------
@@ -976,11 +960,12 @@ export default function FileBrowser({
             // download (B1456896 — never fires the download itself), and a small type chip (its
             // extension) makes clear it's not a drawing you mark up.
             const pdfRow = isPdfFile(f);
+            const docRow = isDocFile(f);
             const ext = (String(f.sourceFile || "").match(/\.([a-z0-9]+)$/i) || [])[1];
             return (
               <div key={f.id} style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", marginBottom: 6, background: "var(--surface-raised)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
-                  <button onClick={() => open(f)} title={pdfRow ? "Open to review / mark up" : "Not a PDF — click for a Download option"}
+                  <button onClick={() => open(f)} title={pdfRow ? "Open to review / mark up" : docRow ? "Open in the document editor" : "Not a PDF — click for a Download option"}
                     style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 9, textAlign: "left", border: "none", background: "transparent", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
                     <FileTypeIcon kind={f.kind} />
                     <span style={{ minWidth: 0 }}>
@@ -989,7 +974,7 @@ export default function FileBrowser({
                       </span>
                       <span style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
                         <Badge title="Subcategory (discipline)">{subcategoryOf(f)}</Badge>
-                        {!pdfRow && ext && <Badge tone="old" title="File type — click the row for a Download option">{ext.toUpperCase()}</Badge>}
+                        {!pdfRow && ext && <Badge tone="old" title={docRow ? "File type — opens in the document editor" : "File type — click the row for a Download option"}>{ext.toUpperCase()}</Badge>}
                         {f.sheetNumber && <Badge title="Sheet number / range read off the title block">{f.sheetNumber}</Badge>}
                         {st === FILE_STATES.SUPERSEDED && <Badge tone="old" title="Replaced by a newer revision">superseded</Badge>}
                         {needs && <Badge title="Couldn’t classify confidently">needs filing</Badge>}
@@ -1009,6 +994,8 @@ export default function FileBrowser({
                   )}
                   {pdfRow && spatial && !mapped && <button onClick={() => onOpenReview && open(f)} title="Open to place this drawing on the map"
                     style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Place</button>}
+                  {onOpenHistory && (pdfRow || docRow) && <button onClick={() => openHistory(f)} title="Version history — see earlier saved versions" data-testid="library-version-history"
+                    style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Versions</button>}
                   <button onClick={() => (share[f.id] ? closeShare(f.id) : startShare(f.id))} title="Get a shareable link"
                     style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--border-default)", background: share[f.id] ? "var(--hover-menu)" : "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Share</button>
                   {pendingDel === f.id ? (

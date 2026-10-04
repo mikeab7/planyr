@@ -156,7 +156,10 @@ describe("PLACE_NAMES_MIN_ZOOM — the map-finder road-names overlay's own gate"
 describe("PLACE_NAMES_DEFAULT_OPACITY — the owner's crispness fix + his own opacity control", () => {
   it("MapFinder no longer hardcodes the old muddy 0.4 for this layer", () => {
     const m = readFileSync(join(HERE, "..", "src", "workspaces", "site-planner", "MapFinder.jsx"), "utf8");
-    expect(m).toMatch(/PLACE_NAMES_DEFAULT_OPACITY\s*=\s*0\.85/);
+    // NEW-1 — the measured 0.85 now lives in the shared basemap registry (Food reuses it).
+    expect(m).toMatch(/PLACE_NAMES_DEFAULT_OPACITY\s*=\s*ROAD_NAMES_TILES\.defaultOpacity/);
+    const shared = readFileSync(join(HERE, "..", "src", "shared", "basemaps", "basemaps.js"), "utf8");
+    expect(shared).toMatch(/defaultOpacity:\s*0\.85/);
     // Both places that used to read the literal `0.4` for this layer now read the shared default.
     expect(m).toMatch(/PLACE_NAMES_MIN_ZOOM\s*\)\s*\?\s*labelsOpacity\s*:\s*0/);
     expect(m).toMatch(/PLACE_NAMES_MIN_ZOOM\s*\?\s*labelsOpacity\s*:\s*0/);

@@ -248,6 +248,7 @@ export default function Shell() {
   const [authOpen,  setAuthOpen]  = useState(false);
   const [recovery,  setRecovery]  = useState(false);
   const [authTab,   setAuthTab]   = useState("profile"); // which tab the account modal opens on
+  const [authEmail, setAuthEmail]  = useState("");        // invite-email deep link: ?auth=…&email=… prefills the form
   const [authMode,  setAuthMode]  = useState("signin");  // which AuthPanel tab (signin|signup) it opens on
   // The account pill/dropdown + "Cloud off" popover now live in AccountControl, which owns its
   // own anchor ref + open state per mounted header instance (B734) — Shell only drives the modal.
@@ -304,13 +305,13 @@ export default function Shell() {
   const [docIntent, setDocIntent] = useState(null);
   // `openAtPage` (B848848 — the comps "open source brochure" link) jumps to a specific page
   // once the review has loaded, instead of resuming wherever it was last left open.
-  const openReviewInDocReview = (row, { page } = {}) => {
+  const openReviewInDocReview = (row, { page, history } = {}) => {
     // ORG SCOPE (NEW-1) — `reviewOpenTarget` (route.js) reads the row's `orgScope` flag FIRST,
     // never falling back to a project id for an org-filed file (project_id is null for both an
     // org-filed and a genuinely unfiled row, and those are different destinations —
     // docs/DATA.md invariant §14).
     const { projectId: pid, org: orgScoped } = reviewOpenTarget(row);
-    setDocIntent({ kind: "open-review", row, openAtPage: page || null, token: Date.now() });
+    setDocIntent({ kind: "open-review", row, openAtPage: page || null, openHistory: !!history, token: Date.now() });
     navigate({ module: "doc-review", projectId: pid || null, cross: false, org: orgScoped });
   };
   // B1161792 (NEW-1) — the Dashboard's "Needs attention" card rows click through to the exact
@@ -461,9 +462,10 @@ export default function Shell() {
   // param is stripped via replaceState so a reload doesn't reopen the panel forever.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    let want;
-    try { want = new URLSearchParams(window.location.search).get("auth"); } catch (_) { return; }
+    let want, wantEmail = "";
+    try { const q = new URLSearchParams(window.location.search); want = q.get("auth"); wantEmail = q.get("email") || ""; } catch (_) { return; }
     if (want !== "signin" && want !== "signup") return;
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(wantEmail)) setAuthEmail(wantEmail);
     setRecovery(false);
     setAuthMode(want);
     setAuthOpen(true);
@@ -474,6 +476,8 @@ export default function Shell() {
       // ugly in the address bar. This keeps "?app" exactly as the "Open Planyr"/"Sign in" links
       // wrote it.
       const search = window.location.search
+        .replace(/([?&])email=[^&]*/, (_, sep) => (sep === "?" ? "?" : ""))
+        .replace(/^\?&/, "?")
         .replace(/([?&])auth=[^&]*/, (_, sep) => (sep === "?" ? "?" : ""))
         .replace(/^\?&/, "?")
         .replace(/^[?&]$/, "")
@@ -912,6 +916,7 @@ export default function Shell() {
           profileApi={profileApi}
           initialTab={authTab}
           initialMode={authMode}
+          initialEmail={authEmail}
           onClose={() => { setAuthOpen(false); setRecovery(false); }}
         />
       )}

@@ -15,23 +15,43 @@
  * Pure. Node-testable.
  */
 
+import { inCaliforniaEnvelope } from "./californiaJurisdiction.js";
+
 /* Coarse state envelopes. Generous on purpose — this decides which RULES may apply, so a false
  * "unknown" (pre-Colorado behaviour, safe) is far better than a false confident answer. */
 export const STATE_ENVELOPES = {
   TX: [25.5, -107.0, 36.8, -93.3],
   CO: [36.9, -109.2, 41.1, -101.9],
+  /* NEW-1 (Georgia). Generous like the others, so it also holds edges of SC / AL / FL / NC / TN — which
+   * is fine HERE: this answers "which state's RULES may apply", and a wrong "GA" only ever HIDES a Texas
+   * number (fail-closed). Which counties/cities a point is IN is decided by point-in-polygon in
+   * `jurisdiction.js`, never by this box. It overlaps neither TX nor CO. Keep in sync with
+   * `georgiaJurisdiction.GA_ENVELOPE_BOX` (test/georgiaJurisdiction.test.js asserts it). */
+  GA: [30.3, -85.7, 35.1, -80.7],
+  /* NEW-1 (California). Generous like the others, so it also holds edges of NV / OR / AZ / Baja California —
+   * fine HERE for the same fail-closed reason as Georgia's (a wrong "CA" only ever HIDES a Texas number).
+   * Which counties/cities a point is IN is decided by point-in-polygon in `jurisdiction.js`, never by this
+   * box. It overlaps none of TX / CO / GA. Keep in sync with `californiaJurisdiction.CA_ENVELOPE_BOX`
+   * (test/californiaJurisdiction.test.js asserts it). */
+  CA: [32.5, -124.5, 42.0, -114.1],
 };
 
-/* "TX" | "CO" | null. Null for a site with no coordinates (every legacy saved plan) and for one
+/* "TX" | "CO" | "GA" | "CA" | null. Null for a site with no coordinates (every legacy saved plan) and for one
  * outside both envelopes — and null behaves exactly as the app did before Colorado existed. The
  * guard fires on a POSITIVE Colorado answer, never on the absence of one. */
 export function siteState({ lat = null, lng = null, lon = null } = {}) {
   const la = Number(lat), lo = Number(lng != null ? lng : lon);
   if (!Number.isFinite(la) || !Number.isFinite(lo)) return null;
   for (const [st, b] of Object.entries(STATE_ENVELOPES)) {
-    if (la >= b[0] && la <= b[2] && lo >= b[1] && lo <= b[3]) return st;
+    if (la >= b[0] && la <= b[2] && lo >= b[1] && lo <= b[3]) {
+      // NEW-1 — California's box is only the pre-filter; its diagonal east edge is refined by an outline (see californiaJurisdiction.js)
+      if (st === "CA" && !inCaliforniaEnvelope(la, lo)) continue;
+      return st;
+    }
   }
   return null;
 }
 
 export const isColorado = (pt) => siteState(pt) === "CO";
+export const isGeorgia = (pt) => siteState(pt) === "GA";
+export const isCalifornia = (pt) => siteState(pt) === "CA";
