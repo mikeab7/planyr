@@ -94,6 +94,7 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
   registry-name and confidence de-ranking, corrupted-concatenated-address exclusion, and
   near-duplicate (same real-world spot, multiple sources) collapse. Pure JS, no Supabase import —
   see its own header for the production-measured reasoning behind every threshold.
+- `lib/searchProximity.js` (B2051664) — orders the merged search list (saved + snapshot + live) nearest the visible map first: text band (exact name/address on top) → in-view → distance from centre, with a small head start for his own places. A bias, never a filter; client-side because the RPC has no viewport parameter. Pure JS.
 - `lib/supabaseClient.js` — this module's own client. See BUNDLE ISOLATION above for why it
   isn't the site-planner's.
 - `db/food.sql` — the applied migration (production, `lyeqzkuiwngunutlkkmi`). `db/test/food_rls.test.sql` — the RLS proof.
