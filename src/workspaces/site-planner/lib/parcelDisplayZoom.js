@@ -93,11 +93,18 @@ export const parcelVectorFloorFor = (url) =>
  * where it publishes labelingInfo, its own lot numbers. Verified live 2026-10-04 on the TxGIO
  * StratMap MapServer (supportsDynamicLayers: true): the same view re-rendered magenta. Returns
  * the JSON string esri-leaflet passes through as the `dynamicLayers` export parameter. */
-export function plainOutlineDynamicLayers(layerId) {
+export function plainOutlineDynamicLayers(layerId, { countyNames } = {}) {
   const id = Number(layerId);
+  /* `countyNames` scopes the picture to those counties (TxGIO's `county` column, upper-case: 'CHAMBERS',
+   * 'FORT BEND') via the layer's `definitionExpression` — verified live 2026-10-04 on the StratMap MapServer
+   * (the export drew Chambers' lots only; `county='FORTBEND'` drew nothing, `'FORT BEND'` drew them). It is how
+   * a statewide BACKUP covers only the county whose own server failed, instead of the whole view. */
+  const names = Array.isArray(countyNames) ? countyNames.filter(Boolean) : [];
+  const q = (n) => `'${String(n).replace(/'/g, "''")}'`;
   return JSON.stringify([{
     id,
     source: { type: "mapLayer", mapLayerId: id },
+    ...(names.length ? { definitionExpression: `county IN (${names.map(q).join(",")})` } : {}),
     drawingInfo: {
       showLabels: false,
       renderer: {
