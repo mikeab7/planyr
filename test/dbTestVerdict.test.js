@@ -181,7 +181,9 @@ describe("db-test-verdict — the CI parser for self-rolling-back SQL tests", ()
   // already uses elsewhere).
 
   it("has exactly one registry entry per db/test/*.sql file that actually exists on disk, in both directions", () => {
-    const onDisk = readdirSync(DB_TEST_DIR)
+    // site-planner's suite plus the food workspace's (B2079808 — run-db-tests --dir food/db/test)
+    const FOOD_DB_TEST_DIR = path.join(DB_TEST_DIR, "..", "..", "..", "food", "db", "test");
+    const onDisk = [...readdirSync(DB_TEST_DIR), ...readdirSync(FOOD_DB_TEST_DIR)]
       .filter((f) => f.endsWith(".test.sql"))
       .sort();
     const registered = Object.keys(VERDICT_REGISTRY).sort();
