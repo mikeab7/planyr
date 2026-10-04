@@ -166,6 +166,13 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1445152 — B2020064: Map view zoom +/−/locate buttons clickable with a long Sites list `Blocker: real-data (signed-in account with his long site list on planyr.io)`
+
+Sandbox-proven: `ui-audit/verify-map-zoom-reachable.mjs` (hit test; red pre-fix, green after) and `test/mapChromeStack.test.js`.
+1. On planyr.io, Map view, ~1600-wide window, Sites rail open; read `/version.json` in the same check. **Expect:** the + and − buttons are visible below the rail and clicking them zooms the map (no project opens).
+2. Collapse the rail. **Expect:** same buttons still clickable. Reopen it. **Expect:** the list scrolls inside the rail, which ends above the buttons.
+3. Repeat on a phone-width window with the rail open. **Expect:** buttons clear of the rail and clickable.
+
 ### V1474944 — B2056784: no full-screen button on iPhone Safari; still present and working on desktop Chrome `Blocker: real-device (iPhone Safari has no Fullscreen API for page elements — cannot be produced headless)`
 
 Sandbox-proven: `test/fullscreenSupport.test.js`, `e2e/fullscreen-gate.spec.js` (API stubbed off at iPhone width; iPad width, standalone and desktop arms). The real-device confirmation is what is left.

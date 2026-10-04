@@ -268,3 +268,16 @@ export function zoomStackBottomPx({ desired, paneH, stackH, floor, topReserve = 
  * panel or reworking either of these two — a NEW panel that can grow tall in a claimed corner
  * needs the SAME yield relationship with whatever else can be tall in that corner, not a new
  * clearance constant assumed to be enough. */
+
+/* ⛔ B2020064 — THE LEFT RAIL STOPS ABOVE THE ZOOM STACK; IT NEVER REACHES THE BOTTOM EDGE.
+ *
+ * The zoom + locate controls live at `bottomleft` (B427408), and the Sites/Comps rail sits at the
+ * top of that same left edge at a higher z-index. The rail's height cap was "the whole map minus
+ * a margin", so a long site list grew down over the buttons: they were un-clickable and a press
+ * landed on a site row instead (owner, live: a "zoom out" click opened a project). The cap is now
+ * the map's height minus the rail's own top offset minus ZOOM_CONTROL_CLEARANCE_PX, floored so the
+ * header + a few rows always remain on a very short window (the rail scrolls internally). */
+export const SITES_RAIL_MIN_H_PX = 120;
+export function sitesRailMaxHeight(topPx) {
+  return `max(${SITES_RAIL_MIN_H_PX}px, calc(100% - ${topPx + ZOOM_CONTROL_CLEARANCE_PX}px))`;
+}
