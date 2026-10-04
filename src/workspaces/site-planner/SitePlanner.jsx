@@ -213,7 +213,7 @@ import { bestMeasurer } from "../../shared/markup/textWrap.js"; // B548818 — m
 import { CROSS_BAND_BEHIND, CROSS_BAND_FRONT } from "./lib/paintOrder.js"; // B548819 — ONE name for the cross-band command
 import { nearestRectPerimeterPoint, calloutCornerRadius } from "../../shared/markup/geometry.js";
 import { calloutDblZone } from "../../shared/markup/hitTest.js";
-import { COUNTIES, COUNTIES_MAP, countyKeyForName, resolveTaxRates, candidateCountiesForPoint, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote, displayFloorForPoint, displaySourcesForView, statewideKeysForState, isStatewideLayerUrl, loadCountyPolygons } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, countyKeyForName, resolveTaxRates, candidateCountiesForPoint, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote, displayFloorForPoint, displaySourcesForView, statewideKeysForState, statewideBackupScope, isStatewideLayerUrl, loadCountyPolygons } from "./lib/counties.js";
 import { lookupParcels } from "./lib/parcelQuery.js";
 import {
   resolveLayerUrl,
@@ -16286,6 +16286,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       statewideKeysForState,
       stateOf: (k) => COUNTIES_MAP[k] && COUNTIES_MAP[k].state,
       isStatewideUrl: isStatewideLayerUrl,
+      scopeFor: statewideBackupScope, // a failed county's statewide backup draws only that county, not the whole view
     });
     outlineLayersRef.current = set;
     let map = null, poll = null, tries = 0;
