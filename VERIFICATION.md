@@ -174,6 +174,22 @@ Sandbox-proven: `test/authPanelSignup.test.js` (15), `e2e/signup-success.spec.js
 4. When Supabase "Confirm email" is later switched OFF: repeat step 1. **Expect:** the panel closes and you are signed in — no check-your-email screen, no redeploy needed.
 - **Stopping rule:** closes on a dated pass of 1–3 (4 when the setting flips), or a failed step filed as a recurrence on B2014096.
 
+### V1496384 — B2080752: a Word/txt/PDF opened from disk and saved is filed under its OWN name `Blocker: auth`
+
+Sandbox-proven: pure naming table + red-proof source guards (`test/reviewOpenedFileNaming.test.js`), tabs harness 37/37. Not provable here: the real signed-in save into the Library. **Steps** (signed in, planyr.io `#/markup`, no project selected; read the build from `/version.json` in the same observation; use a throwaway `.docx`):
+1. Open a PDF in Review, close its tab, then Open… a `.docx` named `zz-naming-test.docx`, type a word, Save. **Expect:** banner "Saved to the Library under Unfiled…"; Library › Unfiled lists `<today> zz-naming-test` with a category — not "Untitled", not the PDF's name; clicking it opens the Word file.
+2. Without closing anything, open a PDF, then Open… a `.txt`, Save. **Expect:** the row is `<today> <txt name>`, never the PDF's name.
+3. Open the same `.txt`, "Save as Word document". **Expect:** a second row named after the new `.docx`; the `.txt` row unchanged.
+4. Repeat step 1 inside a project. **Expect:** `<today> <Project> - zz-naming-test`.
+- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2080752.
+
+### V1496385 — B2080753: a Review status banner stays on the tab that produced it `Blocker: auth`
+
+Sandbox-proven: `noticeForTab` unit + source guards. Needs cloud version history. **Steps** (signed in, two saved `.docx` tabs A and B, each with ≥2 versions; throwaway files):
+1. In A open Version history, open an earlier version, Restore. **Expect:** A shows "Restored the version from …".
+2. Click tab B. **Expect:** B shows no restore banner. Click back to A. **Expect:** the banner is only ever on A, never on B.
+3. In B, Save. **Expect:** only B shows its own "Saved…" line; A unchanged.
+- **Stopping rule:** closes on a dated pass of 1–3, or a failed step filed as a recurrence on B2080753.
 ### V1446736 — B2021648: the first Food search after opening the page is about as fast as later ones `Blocker: auth`
 Built: warm-up on Food mount (preconnect, session, one throwaway search); unit tests green. Pending, signed in on the phone and desktop, on a fresh page load with the served chunk hash read in the same observation:
 1. Open `#/food`, wait a few seconds, type a query → expected: first results in roughly the time of a later search (~0.25 s), not 1.5–2 s.

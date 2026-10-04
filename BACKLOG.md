@@ -5294,6 +5294,20 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
+### B2080752 — A Word/txt file saved from Review gets another file's name (or "Untitled") in the Library `[library / doc-review]` (bug) #doc-review #files  *(Owner measured live 2026-10-04, build d93047b, NEW-1.)*
+
+`[x]` **Cause (read from code):** `beginFileOpen` gave the root a fresh `meta` only when a file was already open, and only to a LOCAL variable; with a blank Review it returned the root's stale `meta`. The saved title is `meta.title || composeTitle(meta)` and a file opened from disk never set `meta.item` — so the row read "Untitled" (empty item) or carried whatever the root last held (a previously open drawing's item/title).
+- **Fix:** `lib/openedFileMeta.js` `metaForOpenedFile(name, filing, date)` — item = the file's own name without extension (same rule `fileNewReview` uses), discipline "Other", auto-composed date-first title; only the FILING (project/org) carries over. `beginFileOpen` applies it with `setMeta` for every new file; a re-attach keeps the review's own meta. PDFs, .docx, .doc, .txt alike.
+- **Adjacent cases (`test/reviewOpenedFileNaming.test.js`; each = own file name + category "Other", never "Untitled"):** Word no project ✔ · Word in a project ✔ · Organization scope ✔ · .txt ✔ · Save-as-Word from a .txt (copy named from its own file by `fileNewReview`) ✔ · .doc → .docx ✔ · PDF ✔ · PDF then Word (helper takes no prior meta) ✔ · Restore from version history (no meta change; same record) ✔.
+- **Red-proof:** 4 source-guard tests fail on unmodified `DocReview.jsx`, pass with the fix. `docEditorOpenSave`, `reviewTabs`, `docPointers` green; `ui-audit/verify-review-tabs.mjs` 37/37 on the built app.
+- **Existing rows NOT mass-renamed:** the two owner test rows keep their stored titles (the fix does not re-derive them); only new saves are corrected.
+- **Pending (⏳):** signed-in check — **V1496384**. **Stopping rule:** closes on a dated PASS of V1496384; a failed step re-opens this item.
+- Verify: live — `Blocker: auth`.
+
+### B2080753 — A status banner from one Review tab stays on screen after switching tabs `[doc-review]` (bug) #doc-review #ui  *(Owner measured live 2026-10-04, NEW-2.)*
+
+`[x]` **Cause:** `docNotice` was ONE root-level string handed to whichever editor was active, and an editor seeds its status line from it on mount — so another tab's editor adopted tab A's "Restored the version…" line. **Fix:** stored as `{tab, msg}`; each editor gets `noticeForTab(rec, f.tabId)` (its own tab's message or nothing); "save as new"/"save a copy" tag the message with the NEW review's tab. Red-proof: 2 source guards fail on old code. No panel copy added.
+- **Pending (⏳):** signed-in check (Restore needs cloud version history) — **V1496385**. **Stopping rule:** closes on a dated PASS of V1496385.
 ### B2021648 — Food: the first search after opening the page still paused (1.6–2.2 s vs ~0.25 s after) `[Food]` (bug, perf) #food #perf  *(Owner chat block 2026-10-04, NEW-1, measured live on d93047b: two page loads, first RPC 2.2 s and 1.6 s, four later ones ~0.25 s. Follows B2069808. Minted from this branch's block B2021648–B2021663.)*
 
 `[x]` **AUDIT-FIRST:** the in-database time is tens of ms (B2069808), so the wait is everything around the query: new connection to Supabase, the auth session being resolved before the request can carry a token, and the server's first call of the function. The sandbox cannot reproduce the signed-in network path, so the first-vs-second Network breakdown is the pending live step, not a guess presented as a measurement.
