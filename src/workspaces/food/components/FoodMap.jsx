@@ -302,8 +302,10 @@ import { Button, IconButton, SegmentedControl, SIZE } from "../../../shared/ui/c
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import { FREE_ZOOM_OPTIONS, attachFreeWheelZoom } from "../../../shared/map/freePinchZoom.js";
 import {
-  SITE_PLAN_BASEMAP, SITE_PLAN_BASEMAP_CHOICES, resolveBasemapChoice, basemapTileLayers, basemapAttribution,
+  SITE_PLAN_BASEMAP, SITE_PLAN_BASEMAP_CHOICES, resolveBasemapChoice, basemapTileLayers, basemapAttribution, IMAGERY_GRADE,
 } from "../../../shared/basemaps/basemaps.js";
+import { addVectorLabels } from "../../../shared/basemaps/vectorLabelLayer.js";
+import { attachSiteLabelStack } from "../../../shared/basemaps/siteLabelStack.js";
 
 // ⛔ NEW-1 (2026-10-03) — THE BASEMAP IS NO LONGER DEFINED HERE. Owner: "The map on the food module
 // is horrible, we should default to the site plan module map … and a good hybrid option as an
@@ -510,12 +512,13 @@ export default function FoodMap({
   // click is read at event time, not something the resolver effect needs to re-subscribe over).
   const pinIndexRef = useRef([]);
   const [tooSmall, setTooSmall] = useState(false);
-  const [basemap, setBasemap] = useState(readStoredBasemap); // stale-ok: a per-device display preference nothing else writes or reads (NEW-1) — "siteplan" (default) | "hybrid"
+  const [basemap, setBasemap] = useState(readStoredBasemap); // stale-ok: a per-device display preference nothing else writes or reads (NEW-1) — "hybrid" (default) | "satellite"
   const [basemapError, setBasemapError] = useState(false);
   // B651872 (×4) — tied to the CURRENT tile layer's own 'loading'/'load' events (basemap effect
   // below); drives the "Loading imagery…" pill so a genuinely-in-progress screen never reads as
   // simply broken.
   const [tilesLoading, setTilesLoading] = useState(false);
+  const [labelsStatus, setLabelsStatus] = useState("none"); // "none" | "loading" | "ready" | "failed" — the vector roads/labels layer (B2018608)
   // B681520 — the attribution credit panel's open/closed state; the CONTENT it shows is computed
   // fresh from `basemap` on every render, so leaving it open across a basemap toggle just shows
   // the newly-current credit, never a stale one.
@@ -599,17 +602,22 @@ export default function FoodMap({
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return undefined;
-    const specs = basemapTileLayers(resolveBasemapChoice(basemap));
+    const choice = resolveBasemapChoice(basemap);
+    const specs = basemapTileLayers(choice, { dpr: window.devicePixelRatio || 1 });
     const layers = [];
-    let onLoading, onLoad, loadingLayer;
+    let onLoading, onLoad, loadingLayer, vectorHandle = null;
+    const markGap = () => map.getContainer().classList.add(IMAGERY_GRADE.containerClass);
     try {
-      // Every spec comes from the shared registry: no `subdomains` key (B634981), zIndex stacking
-      // imagery < road names < place names, all inside Leaflet's tile pane — under the markers.
+      // The raster side is the IMAGERY only (NEW-1/B2018608): no `subdomains` key (B634981), high
+      // density on a dpr>1 screen, tone-graded via the layer's className. Roads and labels are the
+      // shared VECTOR layer below — its own pane sits above the tile pane and under the pins.
       specs.forEach((spec, i) => {
         const layer = L.tileLayer(spec.url, spec.opts).addTo(map);
         layers.push(layer);
         if (i === 0) {
           layer.bringToBack(); // stays under the marker layer regardless of add order
+          // Seam fix (NEW-1): dark gap colour behind the aerial, added once a real tile has painted.
+          layer.once("tileload", markGap);
           tileLayerRef.current = layer;
           // B651872 (×4) — the loading pill tracks the imagery layer's own lifecycle, so it never
           // reports stale state from a previous (torn-down) basemap.
@@ -619,10 +627,21 @@ export default function FoodMap({
           loadingLayer.on("loading", onLoading);
           loadingLayer.on("load", onLoad);
           setTilesLoading(loadingLayer.isLoading());
-        } else if (spec.id === "roads") {
-          labelsLayerRef.current = layer;
         }
       });
+      // Site Plan (the default) attaches the SAME label stack the Site tab's map shows — Planyr's city
+      // names at wide zoom, the clean vector roads from close zoom — through the one shared `siteStack`.
+      // Hybrid is the full vector map. /food draws no basemap POI labels either way: the restaurant pins
+      // ARE the points of interest, and a basemap label under a pin is the collision the owner called out.
+      if (choice.vectorMode === "site") {
+        vectorHandle = attachSiteLabelStack(L, map, { source: choice.vector, onStatus: setLabelsStatus });
+        labelsLayerRef.current = vectorHandle;
+      } else if (choice.vector) {
+        vectorHandle = addVectorLabels(L, map, { source: choice.vector, mode: "hybrid", includePois: false, onStatus: setLabelsStatus });
+        labelsLayerRef.current = vectorHandle;
+      } else {
+        setLabelsStatus("none");
+      }
       setBasemapError(false);
     } catch (err) {
       console.error("FoodMap: basemap tile layer failed to mount", err);
@@ -631,6 +650,8 @@ export default function FoodMap({
     return () => {
       if (loadingLayer) { loadingLayer.off("loading", onLoading); loadingLayer.off("load", onLoad); }
       setTilesLoading(false);
+      if (vectorHandle) { vectorHandle.remove(); labelsLayerRef.current = null; }
+      try { map.getContainer().classList.remove(IMAGERY_GRADE.containerClass); } catch (_) { /* container gone */ }
       for (const layer of layers) { try { map.removeLayer(layer); } catch (_) { /* already gone */ } }
     };
   // narrowViewport is deliberately NOT a dep: rebuilding the tile layers on every viewport-width
@@ -981,6 +1002,11 @@ export default function FoodMap({
         {basemapError && (
           <div data-testid="food-basemap-error" role="status" style={{ pointerEvents: "auto", ...FLOAT_NOTICE_STYLE }}>
             Imagery unavailable
+          </div>
+        )}
+        {labelsStatus === "failed" && (
+          <div data-testid="food-labels-fallback" role="status" style={{ pointerEvents: "auto", ...FLOAT_NOTICE_STYLE }}>
+            Crisp road labels unavailable — showing basic labels
           </div>
         )}
         {tooSmall && (

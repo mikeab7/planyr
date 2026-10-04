@@ -5,7 +5,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  BASEMAPS, ROAD_NAMES_TILES, PLACE_NAMES_TILES, SITE_PLAN_BASEMAP, HYBRID_BASEMAP,
+  BASEMAPS, SITE_PLAN_BASEMAP, HYBRID_BASEMAP, VECTOR_SOURCE, IMAGERY_GRADE, densityTileOptions,
   SITE_PLAN_BASEMAP_CHOICES, resolveBasemapChoice, basemapTileLayers, basemapAttribution,
 } from "../src/shared/basemaps/basemaps.js";
 import * as plannerReexport from "../src/workspaces/site-planner/lib/basemaps.js";
@@ -33,47 +33,69 @@ describe("one definition of the Site Plan map", () => {
     expect(code).not.toMatch(/arcgisonline|nationalmap\.gov|cartocdn|openstreetmap/);
   });
 
-  it("the map finder and planner take their defaults from the shared object, with no re-inlined road-names URL", () => {
+  it("the map finder and planner take their defaults from the shared object, with no re-inlined tile URL", () => {
     const finder = stripComments(read("src/workspaces/site-planner/MapFinder.jsx"));
-    expect(finder).not.toMatch(/arcgisonline/);
-    expect(finder).toMatch(/ROAD_NAMES_TILES\.url/);
+    expect(finder).not.toMatch(/arcgisonline|openfreemap/);
+    expect(finder).toMatch(/addVectorLabels\(/);
     expect(finder).toMatch(/useState\(SITE_PLAN_BASEMAP\.imageryKey\)/);
     expect(stripComments(read("src/workspaces/site-planner/SitePlanner.jsx"))).toMatch(/SITE_PLAN_BASEMAP\.imageryKey/);
+  });
+
+  it("Food and the map finder use the SAME vector-label helper (never a Food-only copy)", () => {
+    const food = stripComments(read("src/workspaces/food/components/FoodMap.jsx"));
+    const finder = stripComments(read("src/workspaces/site-planner/MapFinder.jsx"));
+    for (const code of [food, finder]) expect(code).toMatch(/(from |import\()"(\.\.\/)+shared\/basemaps\/vectorLabelLayer\.js"/);
+    expect(food).not.toMatch(/maplibre|buildVectorStyle/);
+  });
+
+  it("Food's DEFAULT is the Site Plan map (same object the Site tab reads); Hybrid is the second option; a stale stored key falls back to the default", () => {
+    expect(SITE_PLAN_BASEMAP_CHOICES[0]).toBe(SITE_PLAN_BASEMAP);
+    expect(SITE_PLAN_BASEMAP_CHOICES[1]).toBe(HYBRID_BASEMAP);
+    expect(resolveBasemapChoice("satellite")).toBe(SITE_PLAN_BASEMAP);
+    expect(resolveBasemapChoice("siteplan")).toBe(SITE_PLAN_BASEMAP);
+    expect(resolveBasemapChoice("hybrid")).toBe(HYBRID_BASEMAP);
   });
 });
 
 describe("layer stacks", () => {
-  it("Site Plan = imagery + road names (the planner's default opacity), nothing more", () => {
-    const l = basemapTileLayers(SITE_PLAN_BASEMAP);
-    expect(l.map((x) => x.id)).toEqual(["imagery", "roads"]);
-    expect(l[0].url).toBe(BASEMAPS.esri.tiles);
-    expect(l[1].url).toBe(ROAD_NAMES_TILES.url);
-    expect(l[1].opts.opacity).toBe(ROAD_NAMES_TILES.defaultOpacity);
+  it("Site Plan = UNGRADED imagery (the look the owner likes); Hybrid = graded imagery; both on the one vector source", () => {
+    const sp = basemapTileLayers(SITE_PLAN_BASEMAP), hy = basemapTileLayers(HYBRID_BASEMAP);
+    for (const l of [sp, hy]) { expect(l.map((x) => x.id)).toEqual(["imagery"]); expect(l[0].url).toBe(BASEMAPS.esri.tiles); }
+    expect("className" in sp[0].opts).toBe(false);
+    expect(hy[0].opts.className).toBe(IMAGERY_GRADE.className);
+    expect(SITE_PLAN_BASEMAP.vector).toBe(VECTOR_SOURCE);
+    expect(HYBRID_BASEMAP.vector).toBe(VECTOR_SOURCE);
+    expect(SITE_PLAN_BASEMAP.vectorMode).toBe("site");
+    expect(HYBRID_BASEMAP.vectorMode).toBe("hybrid");
   });
 
-  it("Hybrid = imagery + road names + place names, labels at full strength, stacked in that order", () => {
-    const l = basemapTileLayers(HYBRID_BASEMAP);
-    expect(l.map((x) => x.id)).toEqual(["imagery", "roads", "places"]);
-    expect(l[2].url).toBe(PLACE_NAMES_TILES.url);
-    expect(l[1].opts.opacity).toBe(1);
-    expect(l[2].opts.opacity).toBe(1);
-    expect(l.map((x) => x.opts.zIndex)).toEqual([1, 2, 3]);
+  it("imagery is HIGH DENSITY at dpr 2 (one zoom deeper, ceiling-1) and plain at dpr 1", () => {
+    expect(densityTileOptions(19, 2)).toEqual({ detectRetina: true, maxNativeZoom: 18 });
+    expect(densityTileOptions(19, 3)).toEqual({ detectRetina: true, maxNativeZoom: 18 });
+    expect(densityTileOptions(19, 1)).toEqual({ detectRetina: false, maxNativeZoom: 19 });
+    const hi = basemapTileLayers(SITE_PLAN_BASEMAP, { dpr: 2 })[0].opts;
+    expect(hi.detectRetina).toBe(true);
+    expect(hi.maxNativeZoom).toBe(BASEMAPS.esri.maxNative - 1);
+    expect(basemapTileLayers(HYBRID_BASEMAP)[0].opts.detectRetina).toBe(false);
   });
 
-  it("every layer: Esri {z}/{y}/{x} axis order, no `subdomains` key, imagery clamped to its native ceiling (B634981 / B220)", () => {
+  it("every layer: Esri {z}/{y}/{x} axis order, no `subdomains` key (B634981 / B220)", () => {
     for (const c of SITE_PLAN_BASEMAP_CHOICES) {
       for (const layer of basemapTileLayers(c)) {
         expect(layer.url).toMatch(/\/tile\/\{z\}\/\{y\}\/\{x\}$/);
         expect("subdomains" in layer.opts).toBe(false);
-        expect(layer.opts.maxNativeZoom).toBeGreaterThan(0);
       }
-      expect(basemapTileLayers(c)[0].opts.maxNativeZoom).toBe(BASEMAPS.esri.maxNative);
     }
   });
 
-  it("the offered choices are exactly Site Plan and Hybrid, and each has a correct Esri credit", () => {
+  it("the offered choices are exactly Site Plan (default) then Hybrid, with credits", () => {
     expect(SITE_PLAN_BASEMAP_CHOICES.map((c) => c.key)).toEqual(["siteplan", "hybrid"]);
-    for (const c of SITE_PLAN_BASEMAP_CHOICES) expect(basemapAttribution(c)).toContain("Esri");
-    expect(basemapAttribution(HYBRID_BASEMAP)).toContain("Labels");
+    expect(SITE_PLAN_BASEMAP_CHOICES.map((c) => c.label)).toEqual(["Site Plan", "Hybrid"]);
+    for (const c of SITE_PLAN_BASEMAP_CHOICES) expect(basemapAttribution(c)).toContain("OpenFreeMap");
+  });
+
+  it("the export path never sees the grade: exportSheet imports no grade/vector module", () => {
+    const code = stripComments(read("src/workspaces/site-planner/lib/exportSheet.js"));
+    expect(code).not.toMatch(/IMAGERY_GRADE|planyr-imagery-graded|vectorLabelLayer/);
   });
 });

@@ -933,7 +933,7 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
     // The gate expression itself is gone from the tile-layer effect — never dead code left behind.
     expect(map).not.toMatch(/narrowViewport && source\.url1x/);
     const tileEffectSrc = map.slice(map.indexOf("Basemap tile layer"), map.indexOf("}, [basemap]);"));
-    expect(tileEffectSrc).toMatch(/basemapTileLayers\(resolveBasemapChoice\(basemap\)\)/);
+    expect(tileEffectSrc).toMatch(/basemapTileLayers\(choice, \{ dpr: window\.devicePixelRatio \|\| 1 \}\)/);
   });
 
   it("B651872 (×4) — a real loading treatment tied to the current tile layer's own events, never silent grey", () => {
