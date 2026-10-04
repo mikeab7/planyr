@@ -166,18 +166,6 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
-### V1484658 — B2061330: on a real iPhone, one finger pans a note, two fingers pinch and follow, the page never stays shifted sideways `Blocker: real-data` (signed-in real device)
-
-Sandbox-proven: `ui-audit/verify-notes-touch-pan.mjs` (Chromium real touch pipeline via CDP + WebKit PointerEvents; red on untouched main). A real finger / iOS rubber-band / system gestures are not producible headless.
-**Steps (real iPhone, a throwaway page):**
-1. Drag one finger on blank paper, on the grey beside the page, and starting on an unselected box's text. **Expect:** the page follows the finger each time; a flick coasts a little and stops.
-2. Tap (no drag) blank paper, then double-tap. **Expect:** same as before — a single tap does not move the page; double-tap places a box.
-3. Select a box (tap it, then use its grip) and drag. **Expect:** the box moves; the page does not pan.
-4. Pinch with two fingers while also moving both. **Expect:** zoom follows the spread and the page travels with your fingers.
-5. Tap into a box near the right edge so the keyboard rises. **Expect:** the page is not left shifted sideways afterwards.
-6. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2061330.
-
 ### V1471312 — B2046224: Food on a phone — one row per restaurant, a pick lands the map on it, the Map/List toggle stays on screen while typing `Blocker: auth`
 
 Sandbox-proven in WebKit-emulated iPhone 15 / SE against a MOCKED Supabase (`ui-audit/verify-food-phone.mjs`, 30/30; 16/33 on the unfixed build) plus `test/foodPlaceIdentity.test.js`. Not provable here: his real signed-in data, Mobile Safari's real keyboard and collapsing toolbar, and the literal "the map did not move" report (it did not reproduce — the pin was mis-centred / under the sheet). **Steps** (planyr.io/#/food on his iPhone, signed in; read the served chunk hash in the same observation; do NOT save anything to the real list — cancel out of the visit form, or use a throwaway restaurant he is happy to delete):
@@ -258,6 +246,18 @@ Sandbox-proven: `test/teamInviteEmail.test.js` (fake Supabase + fake Resend), `e
 3. Try Resend again inside the minute via the ⋯ menu. **Expect:** disabled; (server also refuses — a direct POST inside the window returns 429).
 4. Cancel invite. **Expect:** row gone, no row left behind. Existing pending invites (e.g. ryan.baumgartner@hillwood.com) received nothing.
 - **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2049312.
+
+### V1484658 — B2061330: on a real iPhone, one finger pans a note, two fingers pinch and follow, the page never stays shifted sideways `Blocker: real-data` (signed-in real device)
+
+Sandbox-proven: `ui-audit/verify-notes-touch-pan.mjs` (Chromium real touch pipeline via CDP + WebKit PointerEvents; red on untouched main). A real finger / iOS rubber-band / system gestures are not producible headless.
+**Steps (real iPhone, a throwaway page):**
+1. Drag one finger on blank paper, on the grey beside the page, and starting on an unselected box's text. **Expect:** the page follows the finger each time; a flick coasts a little and stops.
+2. Tap (no drag) blank paper, then double-tap. **Expect:** same as before — a single tap does not move the page; double-tap places a box.
+3. Select a box (tap it, then use its grip) and drag. **Expect:** the box moves; the page does not pan.
+4. Pinch with two fingers while also moving both. **Expect:** zoom follows the spread and the page travels with your fingers.
+5. Tap into a box near the right edge so the keyboard rises. **Expect:** the page is not left shifted sideways afterwards.
+6. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2061330.
 
 ### V1468976 — B2043888: phone tab-strip chevrons page cleanly and clamp at both ends `Blocker: real-device (iOS elastic overscroll — not producible headless)`
 
