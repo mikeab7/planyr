@@ -1518,3 +1518,9 @@ consecutive runs of the SAME build, so diff identities, never counts. Carried by
 - **iOS Safari fires NO `contextmenu` on a long-press, and a `draggable` row turns a long-press into a drag.** Touch has two routes into the SAME menus: a "⋯" button on each tree row (coarse pointers only) and a 500 ms long-press (travel >10 px cancels — same slop as NEW-2's pan). Rows are not `draggable` on a coarse pointer; `openDocMenuAt` is the right-click handler's body, shared. A selected box gets a top-of-canvas "Delete box" pill on touch (`note-touch-box-bar`).
 - **TRAP: a held touch's lift synthesises a mousedown/click** — the press that opened a menu swallows its own (`longPressSwallowRef` / the row's `swallowUntil`), or releasing the finger selects the row / deselects the box.
 - **Which engine proves what:** Chromium + CDP `Input.dispatchTouchEvent` is a real held touch; WebKit gets dispatched PointerEvents for the hold only. `ui-audit/verify-notes-touch-menus.mjs`.
+
+### Opening framing (B2061331 / NEW-4, 2026-10-04)
+
+- **The first layout pass measures the sheet SHORT (213 px here) and the full height lands ~140 ms later.** Anything that centres the page vertically against the first measurement is a race. `frameView({align:"top"})` is height-independent — use it for opening/Ctrl+0; `fitView` keeps centring. Phones (canvas ≤ 640) open at fit width (`openingZoom`), saved per-page view still wins.
+- **TRAP: an unthrottled run can pass on unfixed code by luck of that race** — a framing harness needs a CPU-throttled arm AND settled-state thresholds (`verify-notes-open-framing.mjs`).
+- **Standing limit:** phone text is 11 px × the opening zoom (~1.0). Readability vs whole-page-width is an owner decision (OWNER-TODO), not a bug.
