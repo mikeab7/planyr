@@ -3,9 +3,8 @@
  * canvas renderer's update+redraw: z16 6–8 ms (767 in view) · z15 37–51 ms (8,230 held) · z14 75–94 ms
  * (16,702 held). The cost scaled with what was HELD, not what was seen.
  *
- * THE MEASUREMENT: the synchronous `map.fire("moveend")`/`zoomend` work PLUS the next animation frame's
- * callbacks (Leaflet batches the canvas redraw and the tile paint into rAF) — i.e. everything the main thread
- * does between "the map stopped moving" and "the frame that shows the result is ready to be produced".
+ * THE MEASUREMENT: CPU time of the synchronous `setView`/`panBy` (moveend/zoomend handlers) PLUS the animation-frame
+ * callbacks it queued (Leaflet batches the canvas redraw and the tile paint there) — never the vsync wait between.
  * Hermetic (every GIS host mocked; the /query mock serves a Bartow-density parcel grid, ~0.001° pitch, so
  * ~7k lots are in view at z14). Known-good arm: the run is VOID unless the layer actually held a z14-scale
  * number of lots (a run over an empty layer measures nothing and must not pass). Run:
@@ -56,6 +55,13 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
 const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
 await assertMeasurable(page, "verify-parcel-settle-cost");
 const errs = []; page.on("pageerror", (e) => errs.push(String(e)));
+// Count CPU time inside animation-frame callbacks (Leaflet batches the redraw / tile paint there). Waiting for the
+// NEXT frame is a vsync wait — 0-16 ms of nothing that a timer would read as work — so the settle is measured as
+// the synchronous call plus the callbacks that ran, never the wall time up to the frame.
+await page.addInitScript(`(() => { try {
+  window.__rafMs = 0; const raf = window.requestAnimationFrame.bind(window);
+  window.requestAnimationFrame = (cb) => raf((t) => { const s = performance.now(); try { cb(t); } finally { window.__rafMs += performance.now() - s; } });
+} catch (e) {} })();`);
 await page.addInitScript(`(() => { try {
   window.__PLANYR_E2E = true;
   localStorage.setItem("planarfit:sites:v1", ${JSON.stringify(JSON.stringify({
@@ -100,11 +106,14 @@ const snap = async () => page.evaluate(() => (window.__mapParcelDisplay && windo
 // animation frame's callbacks, and returns the elapsed wall time. Paced with MessageChannel/rAF only (never a timer).
 const settleMs = (kind, z) => page.evaluate(async ({ kind, z }) => {
   const map = window.__mapFinderMap;
+  const r0 = window.__rafMs;
   const t0 = performance.now();
   if (kind === "zoom") map.setView(map.getCenter(), z, { animate: false });
   else map.panBy([260, 0], { animate: false });
-  await new Promise((r) => requestAnimationFrame(() => r()));
-  return performance.now() - t0;
+  const sync = performance.now() - t0;
+  await new Promise((r) => requestAnimationFrame(() => r())); // flush: the batched redraw callbacks queued above run first
+  await new Promise((r) => setTimeout(r, 0));
+  return sync + (window.__rafMs - r0);
 }, { kind, z });
 const settleLoaded = async () => { await page.waitForTimeout(2500); };
 const median = (a) => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
