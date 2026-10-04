@@ -166,6 +166,15 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1479952 — B2061792: a non-closing deed warns on the reader, the plot toast and the panel `Blocker: real-data (the Grand Port group's saved plans)`
+
+Sandbox-proven: `test/deedGap.test.js`, `ui-audit/verify-deed-closure-warning.mjs` (real Tract 1 calls, logged-out). Pending: the same on a real signed-in plan. **Steps** (planyr.io; read the served chunk hash in the same observation; use the throwaway **"Concept A (copy)"** plan in the Grand Port group — NEVER Concept A):
+1. Parcel tools → Deed / Title, paste the Tract 1 description. **Expect:** the summary line reads in red "⚠ does NOT close — misses by 31.4 ft (1:312)" and never says "closes".
+2. Plot on canvas, click a point of beginning. **Expect:** a red ⚠ toast "This description does not close — it misses by 31.4 ft…", with the red dashed gap line on the canvas.
+3. Select the deed, open Properties. **Expect:** the closure line is red and agrees with step 1.
+4. Paste an exactly-closing description. **Expect:** reader says "closes", plot toast is the plain "Boundary placed.".
+- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2061792.
+
 ### V1443696 — B2018608: vector roads + labels basemap (Food + Site Plan map) `Blocker: live-GIS`
 
 Sandbox-proven at dpr 2 against a SYNTHETIC OpenMapTiles fixture (`ui-audit/verify-vector-basemap.mjs`, 28/28); the sandbox cannot reach `tiles.openfreemap.org`, so the **real source, its CORS headers and the real map look are unverified**. **Steps** (planyr.io, read the served chunk hash in the same observation; `node ui-audit/verify-vector-basemap.mjs https://planyr.io --live` runs the mechanical half):
