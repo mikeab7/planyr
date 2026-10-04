@@ -7,6 +7,9 @@
 
 _Last updated: 2026-10-04._
 
+## 🔑 Add one more Cloudflare secret so the test-account sign-in route works (B2084992)
+- [ ] **In Cloudflare Pages → Production → Variables and Secrets, add `SUPABASE_SERVICE_ROLE_KEY` as a Secret** (Supabase → Project Settings → API → the `service_role` key). The new test-account sign-in route needs it to mint a session for the e2e account; without it the route answers "not configured" (503) even with the right login key. It is never printed, never sent to the browser, and the route can only ever use it for that one test account. Then redeploy (a merge or "Retry deployment") so it takes effect.
+
 ## 📱 Phone: readable text, or the whole page width on screen? (B2061331)
 - [x] ~~**Pick one for how a note opens on your phone.**~~ **Decided 2026-10-04: a note opens showing the whole page width, accepting the smaller text.** That is what it already does (both page edges on screen; a page you have saved a view for still opens exactly as you left it), so nothing changed in the app. Recorded on B2061331. (If the small text ever bothers you, pinch to zoom in — it stays put for that page.)
 

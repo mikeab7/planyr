@@ -166,6 +166,14 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1502928 — B2084992: headless sign-in as the test account via /api/auth/e2e-session, then open e2e-fixture-site `Blocker: real-data`
+
+Sandbox-proven: `test/e2eSessionRoute.test.js` (18, mutation-checked). Pending: the deployed route needs `E2E_LOGIN_KEY` (43 chars) in Cloudflare Pages production AND the session env. It ALSO needs `SUPABASE_SERVICE_ROLE_KEY` as a Secret in Cloudflare Pages production — measured absent 2026-10-04 (Cowork dashboard read); until Michael adds it the route answers 503 "not configured" after a correct key (on `OWNER-TODO.md`).
+**Steps** (any session with E2E_LOGIN_KEY; read `/version.json` in the SAME call and match it to the merge commit):
+1. `E2E_LOGIN_KEY=… node ui-audit/verify-signed-in-session.mjs https://planyr.io`. **Expect:** `PASS signed in as e2e@planyr.test | fixture e2e-fixture-site visible: true`, and a build matching the merge commit.
+2. `curl -X POST https://planyr.io/api/auth/e2e-session` (no key) and with a wrong key. **Expect:** 404 both; `curl -X GET` → 405; no `access-control-*` header on any.
+3. Password sign-in still needs a captcha for real users. **Expect:** unchanged `captcha_failed`.
+
 ### V1500112 — B2084480: a file saved in Review appears in the Library without a reload, in this tab and in other open tabs `Blocker: auth`
 
 Sandbox-proven: `test/libraryFreshAndTypeTag.test.js` (every write path announces; both Library surfaces subscribe; red with the wiring reverted). Not provable here: the signed-in round-trip and a second real browser tab.
