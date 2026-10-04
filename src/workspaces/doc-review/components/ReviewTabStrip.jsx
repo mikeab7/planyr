@@ -7,6 +7,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { tabTitle } from "../lib/reviewTabs.js";
+import { useProjectNames } from "../../../shared/names/names.js";
 import { FONT_SIZE, CONTROL_H, SPACE } from "../../../shared/ui/designTokens.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
 
@@ -16,6 +17,7 @@ export default function ReviewTabStrip({ tabs, activeId, dirty = {}, narrow = fa
   const [overId, setOverId] = useState(null);
 
   // Keep the active tab on screen (a phone strip scrolls sideways; ten tabs overflow a desktop strip too).
+  const names = useProjectNames(); // B1991040 — a tab's project label is resolved live by id, never the persisted text
   useEffect(() => {
     const el = stripRef.current && stripRef.current.querySelector('[aria-selected="true"]');
     if (el && el.scrollIntoView) { try { el.scrollIntoView({ block: "nearest", inline: "nearest" }); } catch (_) { /* older engines */ } }
@@ -33,7 +35,7 @@ export default function ReviewTabStrip({ tabs, activeId, dirty = {}, narrow = fa
             const showX = !narrow || active;
             return (
               <div key={t.id} role="tab" aria-selected={active} data-testid="review-tab" data-tab-id={t.id} data-active={active ? "1" : "0"}
-                tabIndex={active ? 0 : -1} title={tabTitle(t)}
+                tabIndex={active ? 0 : -1} title={tabTitle(t, names)}
                 draggable={!narrow}
                 onDragStart={(e) => { setDragId(t.id); try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", t.id); } catch (_) { /* some engines */ } }}
                 onDragOver={(e) => { if (dragId) { e.preventDefault(); if (overId !== t.id) setOverId(t.id); } }}

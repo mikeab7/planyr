@@ -25,6 +25,7 @@ import { reloadFresh, isChunkRecoveryStuck, subscribeChunkRecoveryStuck } from "
 import { RADIUS } from "../shared/ui/radius.js";
 import FloatingNotice from "../shared/ui/FloatingNotice.jsx";
 import NameNoticeHost from "../shared/names/NameNoticeHost.jsx";
+import "../shared/schedule/scheduleSiteNames.js"; // registers the live project-name resolver for schedule labels
 import { mayResumeLastSite } from "../workspaces/site-planner/lib/bootResume.js";
 import HelpReportControl from "./HelpReportControl.jsx";
 import { retryQueuedReports } from "../shared/reports/reportsStore.js";
