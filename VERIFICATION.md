@@ -175,6 +175,15 @@ Sandbox-proven on fixture rows: `test/foodSearchProximity.test.js`, plus a real-
 4. Zoom out to the whole state and search. **Expect:** results still appear, ordered by distance from the centre.
 5. Search a name with no match nearby. **Expect:** far matches still listed — never an empty list because the match is off screen.
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2051664.
+### V1474400 — B2049312: team invite + Resend emails arrive in the inbox `Blocker: real-data (needs RESEND_API_KEY in Cloudflare + team_invite_email.sql run — both Michael's)`
+
+Sandbox-proven: `test/teamInviteEmail.test.js` (fake Supabase + fake Resend), `e2e/team-settings-layout.spec.js` (mocked send incl. throttle). Pending: a real send. **Steps** (planyr.io, signed in as a team admin; check the served chunk hash in the same observation). Use only the throwaway `mikeabmab+planyrtest@live.com`:
+1. Settings › Team › + Invite → that address, Member → Send invite. **Expect:** toast "Invite sent to mikeabmab+planyrtest@live.com"; the email lands in his live.com inbox from a planyr.io address, subject "<name> invited you to <team> on Planyr", button opens sign-in with the address prefilled.
+2. On that invite choose Resend invite. **Expect:** toast "Invite email sent again"; a second email arrives; still ONE row in Invited; Resend is disabled for about a minute.
+3. Try Resend again inside the minute via the ⋯ menu. **Expect:** disabled; (server also refuses — a direct POST inside the window returns 429).
+4. Cancel invite. **Expect:** row gone, no row left behind. Existing pending invites (e.g. ryan.baumgartner@hillwood.com) received nothing.
+- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2049312.
+
 ### V1468976 — B2043888: phone tab-strip chevrons page cleanly and clamp at both ends `Blocker: real-device (iOS elastic overscroll — not producible headless)`
 
 Sandbox-proven, both engines: `ui-audit/verify-nav-arrows.mjs` (and `ENGINE=webkit`), 31/31; `test/scrollStrip.test.js`. The original overshoot did NOT reproduce headless, so this is the live confirmation. **Steps** (planyr.io on the iPhone, Map with no project; read the served chunk hash in the same observation):
