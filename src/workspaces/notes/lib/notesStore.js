@@ -1253,9 +1253,27 @@ export function notesConflictKeptLine() {
 const pageListeners = new Set();
 export function onNotesPagesChanged(fn) { pageListeners.add(fn); return () => pageListeners.delete(fn); }
 function emitPagesChanged(pageIds) {
-  const ids = (pageIds || []).filter((id) => id && !sync.pages[id]?.dirty);
-  if (!ids.length) return;
-  for (const fn of pageListeners) { try { fn(ids); } catch (_) { /* a bad listener must not mute the rest */ } }
+  // NEW-7: an UN-FLUSHED keystroke is a pending edit too — the page is not `dirty` until the
+  // editor's debounce writes it, but a remount here would still throw it away.
+  const ids = (pageIds || []).filter((id) => id && !sync.pages[id]?.dirty && !openNoteHasPending(id));
+  deliverPages(ids);
+}
+
+/* ⛔ NEW-7 — THE OPEN EDITOR TAKES AN ANNOUNCED BODY IN PLACE; ONLY A PAGE NOBODY HAS OPEN IS
+ * ANNOUNCED TO THE WORKSPACE (which remounts). A remount closes the phone keyboard, drops the
+ * caret and, worse, runs the old instance's unmount flush over whatever was just adopted. The
+ * editor replaces its document through a transaction instead (`registerOpenNoteDoc`'s
+ * `applyDocument`, flagged external so it queues no save of its own). This is synchronous on
+ * purpose: callers write the body and call this in the same tick, so no keystroke can land
+ * between the write and the apply. */
+function deliverPages(ids) {
+  const remount = (ids || []).filter((id) => {
+    if (!openDoc || openDoc.pageId !== id) return true;
+    const live = readPage(id);
+    return !(live && applyExternalToOpenNote(id, live));
+  });
+  if (!remount.length) return;
+  for (const fn of pageListeners) { try { fn(remount); } catch (_) { /* a bad listener must not mute the rest */ } }
 }
 
 /** ⛔ THE SAME ANNOUNCEMENT WITHOUT THE DIRTY GUARD. `emitPagesChanged` skips a page this
@@ -1276,7 +1294,7 @@ function emitPagesChanged(pageIds) {
 function announcePages(pageIds) {
   const ids = (pageIds || []).filter(Boolean);
   if (!ids.length) return;
-  for (const fn of pageListeners) { try { fn(ids); } catch (_) { /* a bad listener must not mute the rest */ } }
+  deliverPages(ids);
 }
 
 const conflictListeners = new Set();
@@ -1410,11 +1428,21 @@ async function resolveDivergence(pageId, row) {
   if (!row) return false;
   const base = await mergeBaseFor(pageId);
   if (base == null) return false;
-  const localDoc = readPage(pageId);
-  const result = mergeNoteDocs({ baseDoc: base, localDoc, serverDoc: row.doc });
+  flushOpenNote(pageId);                       // NEW-7: merge from what the editor holds, not what it last saved
+  let localDoc = readPage(pageId);
+  let result = mergeNoteDocs({ baseDoc: base, localDoc, serverDoc: row.doc });
   if (!result) return false;
 
   await snapshotPage(pageId, localDoc, { reason: "before-merge", pinned: true, force: true });
+
+  // ⛔ NEW-7 — the snapshot above is an await, and typing continued through it. Re-merge from the
+  // fresh local copy (synchronously with the write below) so those keystrokes are inside it.
+  if (openNoteHasPending(pageId)) {
+    flushOpenNote(pageId);
+    localDoc = readPage(pageId);
+    result = mergeNoteDocs({ baseDoc: base, localDoc, serverDoc: row.doc });
+    if (!result) return false;
+  }
 
   if (result.clean) {
     if (!writePageLocal(pageId, result.mergedDoc)) return false;   // LOUD-FAILURE
@@ -1682,6 +1710,9 @@ async function seed({ full }) {
     for (const row of idx.index) {
       if (row.binned && !row.purged && Number.isFinite(row.deletedAt)) knownBinnedDeletedAt.set(row.id, row.deletedAt);
     }
+    // NEW-7: an open page's un-flushed keystrokes are written first, so the plan sees them as the
+    // pending edit they are (a conflict → per-paragraph merge) instead of "clean → adopt".
+    for (const row of idx.index) flushOpenNote(row.id);
     const plan = c.planPageSeed({ index: idx.index, state: sync, localIds: listStoredPageIds() });
 
     // Purged elsewhere: clear the bytes here (body AND pictures) and remember the tombstone,
@@ -1736,9 +1767,16 @@ async function seed({ full }) {
       for (const id of plan.adopt) {
         const row = got.pages[id];
         if (!row || row.purged) continue;
+        // ⛔ NEW-7 — CHECKED HERE, SYNCHRONOUSLY WITH THE WRITE (the fetch above is an await the
+        // person kept typing through). Adopting now would stamp a clean server revision over a
+        // document this editor is about to write back, committing it past a rev it legitimately
+        // holds. Flush it instead: the page goes dirty against its OLD rev, and the next pass
+        // sees a real divergence and merges per paragraph.
+        if (openNoteHasPending(id)) { flushOpenNote(id); continue; }
         if (writePageLocal(id, row.doc)) {
           sync.pages[id] = { rev: row.rev, dirty: false, purged: false, auto: false };
-          adopted.push(id);
+          // Same tick as the write: the open editor takes it in place before anything can type.
+          if (!applyExternalToOpenNote(id, row.doc)) adopted.push(id);
           // ⛔ NEW-1 — this device and the server are PROVEN identical right here (we just
           // wrote the server's own row), which is exactly the fact the per-paragraph merge
           // needs a base to be. Best-effort: a failed write here costs nothing but a future
@@ -2114,9 +2152,26 @@ let openDoc = null;
  *  it rather than round the back of it: replacing the whole document on a version restore
  *  (NEW-3). Returns the un-register, so a page switch cannot leave a dead claim behind
  *  (which would send an edit into a torn-down editor). */
-export function registerOpenNoteDoc(pageId, { applyDocument } = {}) {
-  openDoc = { pageId, applyDocument };
+export function registerOpenNoteDoc(pageId, { applyDocument, hasPending, flush } = {}) {
+  openDoc = { pageId, applyDocument, hasPending, flush };
   return () => { if (openDoc && openDoc.pageId === pageId) openDoc = null; };
+}
+
+/* NEW-7 — what the sync needs to know about the open editor. `hasPending`: it holds a keystroke
+ * the debounce has not written yet. `flush`: write it NOW (the page then becomes `dirty`, so the
+ * ordinary conflict / per-paragraph-merge path owns it). `applyExternal`: show a body that was
+ * written to storage behind it, in place. All three are no-ops for any other page. */
+function openNoteHasPending(pageId) {
+  try { return !!(openDoc && openDoc.pageId === pageId && openDoc.hasPending?.()); } catch (_) { return false; }
+}
+function flushOpenNote(pageId) {
+  try { if (openDoc && openDoc.pageId === pageId) openDoc.flush?.(); } catch (e) { fail("write", pageId, e); }
+}
+export function applyExternalToOpenNote(pageId, doc) {
+  try {
+    if (!openDoc || openDoc.pageId !== pageId || typeof openDoc.applyDocument !== "function") return false;
+    return openDoc.applyDocument(doc, { external: true })?.ok === true;
+  } catch (_) { return false; }
 }
 
 /* ---- what is actually IN the bin (NEW-3) ------------------------------------------------
