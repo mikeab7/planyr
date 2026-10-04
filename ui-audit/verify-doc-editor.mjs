@@ -41,6 +41,10 @@ await ctx.addInitScript(() => { // record every Blob the app builds for saving (
   window.Blob = class extends B { constructor(p, o) { super(p, o); if (o && /wordprocessingml|text\/plain/.test(o.type || "")) window.__saved.push(this); } };
 });
 const page = await ctx.newPage();
+// Review keeps every open tab's editor MOUNTED and hides the inactive ones (display:none), so a page-wide testid matches
+// earlier documents too. A user only ever sees the active tab; scope every editor selector to what is visible.
+{ const loc = page.locator.bind(page); page.locator = (sel, o) => loc(typeof sel === "string" && /^\[data-testid="(doc-|change-|accept-|reject-|track-|toggle-pane|comment-|reply-|resolve-|add-comment|find-|replace-|save-as-)|^\[data-testid="doc-editor-page"\]/.test(sel) ? `${sel}:visible` : sel, o);
+  const wfs = page.waitForSelector.bind(page); page.waitForSelector = (sel, o) => wfs(typeof sel === "string" && /^\[data-testid="(doc-save-status|doc-editor|doc-converted-note|change-card)"\]$/.test(sel) ? `${sel}:visible` : sel, o); }
 await assertMeasurable(page, "verify-doc-editor");
 const downloads = []; page.on("download", (d) => downloads.push(d.suggestedFilename()));
 const errors = []; page.on("pageerror", (e) => errors.push(String(e)));
@@ -93,7 +97,7 @@ try {
   await page.locator('[data-testid="change-card"][data-kind="ins"]').first().locator('[data-testid="accept-change"]').click();
   ok("accepting one change removes only that change", (await pageEl.locator("ins.dre-ins", { hasText: "approximately" }).count()) === 0 && (await pageEl.locator("del.dre-del", { hasText: "roughly" }).count()) === 1);
   // find + replace
-  await page.getByTitle("Find and replace").click();
+  await page.locator('[title="Find and replace"]:visible').click();
   await page.locator('[data-testid="find-input"]').fill("Trailer");
   await page.locator('[data-testid="replace-input"]').fill("Truck");
   await page.locator('[data-testid="replace-all"]').click();
@@ -139,11 +143,11 @@ try {
 
   /* ---- .txt ---- */
   await open(TXT);
-  await page.waitForFunction(() => document.querySelector('[data-testid="doc-editor"]')?.getAttribute("data-kind") === "txt", { timeout: 15000 });
-  ok(".txt: formatting controls are hidden, 'Save as Word document' is offered", (await page.locator('select[aria-label="Font"]').count()) === 0 && (await page.locator('[data-testid="save-as-word"]').count()) === 1);
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="doc-editor"]')].some((e) => e.offsetParent && e.getAttribute("data-kind") === "txt"), { timeout: 15000 });
+  ok(".txt: formatting controls are hidden, 'Save as Word document' is offered", (await page.locator('select[aria-label="Font"]:visible').count()) === 0 && (await page.locator('[data-testid="save-as-word"]').count()) === 1);
   await page.locator('[data-testid="doc-editor-page"] p', { hasText: "beta two" }).click();
   await page.keyboard.press("End"); await page.keyboard.type("!");
-  await page.getByTitle("Find and replace").click();
+  await page.locator('[title="Find and replace"]:visible').click();
   await page.locator('[data-testid="find-input"]').fill("gamma"); await page.locator('[data-testid="replace-input"]').fill("delta"); await page.locator('[data-testid="replace-all"]').click();
   await page.keyboard.press("Control+z");
   await page.locator('[data-testid="doc-editor-page"]').click(); await page.keyboard.press("Control+z");
@@ -169,7 +173,7 @@ try {
   ok(".doc: Save builds a valid .docx (new file), nothing downloaded", d.type.includes("wordprocessingml") && !!unzipSync(asBuf(d))["word/document.xml"] && downloads.length === 0);
 
   await open(FORMATTED_DOC);
-  await page.waitForFunction(() => document.querySelector('[data-testid="doc-editor-page"] h1')?.innerText === "Project Scope", { timeout: 15000 });
+  await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="doc-editor-page"] h1')].some((h) => h.offsetParent && h.innerText === "Project Scope"), { timeout: 15000 });
   const dp = page.locator('[data-testid="doc-editor-page"]');
   ok(".doc with formatting: heading, bold run, bulleted list and table all come across", (await dp.locator("strong", { hasText: "building" }).count()) === 1 && (await dp.locator("ul li").count()) === 2 && (await dp.locator("table td").count()) === 4, "");
   ok(".doc with formatting: the note says what came across", /headings, bold \/ italic \/ underline, lists, tables and JPEG \/ PNG pictures come across/.test(await page.locator('[data-testid="doc-converted-note"]').innerText()));
