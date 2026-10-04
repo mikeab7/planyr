@@ -332,7 +332,7 @@ export const ANALYSIS_SOURCES = [
 //
 // (1) A standing check whose data exists only in some states (the RRC, TCEQ, TxDOT and the PUC are Texas
 //     institutions) declares that ONCE, in the GIS registry (`SOURCE_STATE_SCOPE` / the row's own `states`),
-//     and `runSiteAnalysis` asks `sourceCoversState` before it queries — PR #1902's gate, the same one the
+//     and `runSiteAnalysis` asks `sourceCoversState` before it queries — PR 1902's gate, the same one the
 //     Layers panel's `outOfState` reads. Outside its states it reads "Not screened in <state>", never "none
 //     found" (`eiaPipelineScreenCopy.outOfStateFinding`).
 // (2) A card that exists only for some states (`extraFor` — the Georgia cards) is simply ABSENT elsewhere, so a
@@ -1063,7 +1063,7 @@ export async function runSiteAnalysis(rings, opts = {}) {
   const arcOpts = { ...opts, fetchJson: pooledFetch };
   const jurFetch = opts.jurFetchJson || pooledFetch;
 
-  // NEW-1 (FL/GA pipelines, PR #1902) — the state comes FIRST, and geometry decides it (no network). A source
+  // NEW-1 (FL/GA pipelines, PR 1902) — the state comes FIRST, and geometry decides it (no network). A source
   // whose registry row is scoped to other states is NEVER queried for a site positively in another
   // one: a Texas service asked about a Florida/Georgia coordinate answers "nothing", and that used to render
   // as "No mapped RRC pipelines crossing the site" — a false clean. Unknown state (null) and Texas are
