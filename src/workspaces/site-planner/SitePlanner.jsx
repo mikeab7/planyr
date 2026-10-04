@@ -5,7 +5,7 @@ import { startClickAck } from "../../shared/ui/clickAck.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useProjectName, usePlanName, renameProjectChecked, renamePlanChecked } from "../../shared/names/names.js";
-import { loadSite, saveSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
+import { loadSite, saveSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
 import { relTime } from "../../shared/projects/projectModel.js";
 import { collectAssetRefs, releasePlanForOverlay } from "./lib/sharedAssetRefs.js";
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
@@ -27,7 +27,7 @@ import { createNameResolver, describeElement, SELF_ACTOR } from "./lib/editorNam
 import { toastForSyncEvent, describeCoalescedLabel } from "./lib/conflictToasts.js";
 import { listMembers, currentIdentity } from "./lib/teams.js";
 import { multiwriterEnabled } from "./lib/multiwriter.js";
-import { applyLeafPatches } from "./lib/headerMerge.js";
+import { applyLeafPatches, headerSlice, mergeHeader, sameHeader } from "./lib/headerMerge.js";
 import { presenceParties, presenceDisplayName, relativeAgo } from "./lib/presencePill.js";
 import { loadProfile } from "./lib/profile.js";
 import { commitElements, fetchElements, keepaliveCommit } from "./lib/elementApi.js";
@@ -242,7 +242,7 @@ import { loadDeed, deedNow } from "./lib/deedLazy.js";
  * once someone drops a deed or survey file, so it has no business on the boot path; the same
  * treatment B1123 gave the title reader and B1042 gave the export path. */
 import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip, easementStyle, easementPatternId, encumbranceStyle, encumbrancePatternId, DEFAULT_EASE_FILL_OPACITY, DEFAULT_EASE_HATCH, ENCUMBRANCE_DEFAULT } from "./lib/easements.js";
-import { deedTrace, deedGapText } from "./lib/deedGap.js";
+import { deedTrace, deedGapText, deedClosure, deedReaderSummary, deedQueueClosure, deedPlotWarning } from "./lib/deedGap.js";
 import { HATCH_OPTIONS, hatchSpec } from "../../shared/style/hatchPatterns.js";
 // NEW-EASE-STYLE — the ONE renderer that turns a hatch catalog spec (shared/style/hatchPatterns.js)
 // into an SVG <pattern>. MODULE-SCOPE (never defined inside SitePlanner's render body — a component
@@ -1823,6 +1823,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const pondRevealTargetRef = useRef(null); // null = the card root; "assistant" / "purpose" for a sub-card
   // B875 — a one-time hint the first time a pond auto-classifies as Hybrid (its cut serves both
   // detention above the flood WSE and mitigation below it). Dismiss persists so it never nags.
+  // NEW-1 (2026-09-30) — the empty-site "Start your site" hint is dismissible once and stays
+  // dismissed on this device (a per-viewer convenience, so localStorage — read/write in try/catch).
+  const [startHintDismissed, setStartHintDismissed] = useState(() => { try { return !!localStorage.getItem("planarfit:startHintDismissed"); } catch (_) { return false; } });
+  const dismissStartHint = () => { setStartHintDismissed(true); try { localStorage.setItem("planarfit:startHintDismissed", "1"); } catch (_) { /* dismissal just won't persist */ } };
+  const startHintFileRef = useRef(null);
   const [hybridHintSeen, setHybridHintSeen] = useState(() => { try { return !!localStorage.getItem("planarfit:pondHybridHintSeen"); } catch (_) { return true; } });
   const dismissHybridHint = () => { try { localStorage.setItem("planarfit:pondHybridHintSeen", "1"); } catch (_) {} setHybridHintSeen(true); };
   useEffect(() => {
@@ -4950,11 +4955,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // B672 — signed-in tabs converge through the site_elements realtime channel + refetch-replace
       // (rows are canonical); the localStorage union fold below would fight that (it can resurrect
       // an element a row-tombstone just removed). It remains the signed-OUT cross-tab convergence.
-      if (isCloudActive()) return;
       if (busyRef.current) return;
       const stored = loadSite(siteId);
       if (!stored) return;
       const live = liveRef.current || {};
+      /* NEW-1 — the plan HEADER (settings / origin / layer overrides) from another tab of this browser,
+       * merged per leaf against the base this tab last synced (the same mergeHeader the cloud refresh
+       * uses): a leaf this tab has not touched is adopted, one it is editing is kept — never overwritten.
+       * Header only (no element rows), so it is safe for a signed-in tab too, unlike the content union below.
+       * Device-local `snap` is excluded on both sides. */
+      try {
+        const noSnap = (h) => (h && h.settings && "snap" in h.settings ? { ...h, settings: (({ snap, ...r }) => r)(h.settings) } : h);
+        const base = headerBaseOf(siteId);
+        const theirs = noSnap(headerSlice(stored));
+        const mine = noSnap(headerSlice({ settings: live.settings, origin: metaRef.current.origin, layerOverrides: live.layerOverrides, layerAbove: live.layerAbove }));
+        if (sameHeader(theirs, mine)) advanceHeaderBase(siteId, headerSlice(stored)); // in sync → that IS this tab's new base
+        else if (base) {
+          const res = mergeHeader(noSnap(base), mine, theirs);
+          advanceHeaderBase(siteId, headerSlice(stored));
+          if (res.changedFromMine) applyAdoptedHeader(res.adopted);
+        }
+      } catch (_) { /* a header adoption failure must never break the content fold below */ }
+      if (isCloudActive()) return;
       const liveModel = createSiteModel({ id: siteId, ...metaRef.current, ...live, updatedAt: Date.now() });
       const merged = mergeSiteContent(liveModel, stored); // our (newest) scalars + union of content
       // B591 — an id-MEMBERSHIP signature (not just counts): a same-count swap (the other tab
@@ -19188,8 +19210,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           row.exCount = Math.max(0, tracts.length - 1);
           if (row.boundaryCalls) {
             const p = callsToPath(b.calls, { x: 0, y: 0 });
-            row.closes = pathCloses(p);
+            row.closes = pathCloses(p); // screening tolerance — promotability only, never wording
             row.gap = misclosure(p);
+            row.closure = deedClosure(p); // the as-drawn answer every "closes" label reads
           } else {
             row.error = "No bearing/distance calls found — a survey drawing rather than a written description?";
           }
@@ -19228,7 +19251,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setPobMode(null);
       if (pm && pm.queueTotal) {
         const bad = notes.filter((n) => n && n.bad).map((n) => n.name);
-        flashWarn(`All ${pm.queueTotal} deed${pm.queueTotal > 1 ? "s" : ""} placed.${bad.length ? ` ⚠ Verify: ${bad.join(", ")}.` : ""}`, 9000);
+        const open = notes.filter((n) => n && n.noClose).map((n) => `${n.name}${n.noClose.ft ? ` (misses by ${n.noClose.ft >= 10 ? n.noClose.ft.toFixed(1) : n.noClose.ft.toFixed(2)} ft)` : ""}`);
+        flashWarn(`All ${pm.queueTotal} deed${pm.queueTotal > 1 ? "s" : ""} placed.${open.length ? ` ⚠ Does not close: ${open.join(", ")}.` : ""}${bad.length ? ` ⚠ Verify: ${bad.join(", ")}.` : ""}`, open.length ? 16000 : 9000);
       }
     }
   };
@@ -19304,7 +19328,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         stroke: except ? "#b91c1c" : "#7c3aed", fill: except ? "#b91c1c" : "#7c3aed",
         fillOpacity: except ? 0.1 : 0.14, weight: 2, dash: except ? "6 4" : "solid",
       },
-      ring, closed, gap: misclosure(path),
+      ring, closed, gap: misclosure(path), closure: deedClosure(path),
     };
   };
 
@@ -19334,7 +19358,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const built = buildEncumbranceMarkup(main.calls, pob, { label: (main.label && main.label !== "Boundary") ? main.label : "Tract boundary", group: groupId });
     if (!built) { if (pobMode && pobMode.queueTotal) { advanceDeed({ name: pobMode.name || "deed", bad: true }); return; } flashWarn("Couldn't form a shape from those calls — check the description.", 6000); setPobMode(null); return; }
     // SAVE-AND-EXCEPT holes: position each from its commencing tie off the same POB.
-    const exMarks = [];
+    const exMarks = [], exMisses = [];
     for (const t of tracts.slice(1)) {
       if (!t.calls.length) continue;
       // the tie's END point locates the exception POB — take the LAST path point
@@ -19342,17 +19366,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const tiePath = t.tie && t.tie.length ? callsToPath(t.tie, pob) : null;
       const exPob = tiePath ? tiePath[tiePath.length - 1] : pob;
       const eb = buildEncumbranceMarkup(t.calls, exPob, { label: t.label || "Save & except", except: true, group: groupId });
-      if (eb) exMarks.push(eb.mk);
+      if (eb) { exMarks.push(eb.mk); if (!eb.closure.closes) exMisses.push({ name: t.label || `Exception ${exMarks.length}`, gapFt: eb.closure.gapFt }); }
     }
     pushHistory();
     setMarkups((a) => [...a, ...withStackZ(a, [built.mk, ...exMarks])]);
     setSel({ kind: "markup", id: built.mk.id });
     // overlap check against buildings + paving (main ring only)
     const hits = els.filter((e) => (e.type === "building" || e.type === "paving") && ringsOverlap(built.ring, elRingOf(e)));
-    const gap = built.gap;
-    const closeNote = !built.closed
-      ? ` ⚠ Traverse does NOT close (gap ≈ ${gap.toFixed(1)}′) — plotted as drawn; verify the calls.`
-      : (gap > 1 ? ` Traverse misclosure ≈ ${gap.toFixed(1)}′ — the red dashed line is the gap.` : "");
+    // ONE rule (deedGap.js): any miss above the noise floor warns — no screening tolerance, no 1 ft cutoff.
+    const warnText = deedPlotWarning(built.closure, exMisses);
+    const closeNote = warnText ? ` ${warnText}` : "";
     const exNote = exMarks.length ? ` +${exMarks.length} save-and-except hole${exMarks.length > 1 ? "s" : ""}.` : "";
     let overlapNote = "";
     if (hits.length) {
@@ -19364,7 +19387,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // banner across many deeds and re-run an O(parcels) solve each time) — accumulate a note and
     // advance to the next deed's POB. The user aligns each afterward via the right-click menu.
     if (pobMode && pobMode.queueTotal) {
-      advanceDeed({ name: pobMode.name || built.mk.label, bad: !built.closed || hits.length > 0 });
+      advanceDeed({ name: pobMode.name || built.mk.label, bad: !built.closure.closes || exMisses.length > 0 || hits.length > 0, noClose: !built.closure.closes || exMisses.length > 0 ? { ft: built.closure.gapFt, holes: exMisses.length } : null });
       return;
     }
     setPobMode(null);
@@ -19381,7 +19404,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         msg: `This deed sits about ${foldedRot.toFixed(2)}° off the county parcel${best.fit.confident ? "" : " (loose match)"} — its bearings are likely on State Plane grid north, not true north.${closeNote}${exNote}${overlapNote}`,
       });
     } else {
-      flashWarn(`Boundary placed${exMarks.length ? " with its exception(s)" : ""}.${closeNote}${exNote}${overlapNote}`, 9000);
+      flashWarn(`${warnText ? "" : "Boundary placed"}${warnText ? "" : exMarks.length ? " with its exception(s)" : ""}${warnText ? "" : "."}${closeNote}${exNote}${overlapNote}`.trim(), warnText ? 14000 : 9000);
     }
   };
 
@@ -21133,6 +21156,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <button style={{ ...iconBtn, color: hideOn ? PAL.ink : PAL.muted }} title={hideOn ? "Hide" : "Show"} onClick={toggleHide}>{hideOn ? <EyeIcon /> : <EyeOffIcon />}</button>
                         <button style={iconBtn} title={o.locked ? "Unlock" : "Lock"} onClick={() => patchOverlay(o.id, { locked: !o.locked })}>{o.locked ? <LockIcon /> : <UnlockIcon />}</button>
                         <button style={{ ...iconBtn, color: PAL.accent }} title="Remove" onClick={removeRow}><XIcon /></button>
+                        {/* B2066227 — the crop entry point rides the always-visible row. On a short window the
+                            expanded body's own Crop… sat below the fold of the scrolling panel. Same handler. */}
+                        {!isAerialRow && (() => {
+                          const why = cropEditBlock(o);
+                          return (
+                            <button style={{ ...chip, marginLeft: "auto", opacity: why ? 0.55 : 1 }} data-testid={`overlay-crop-open-row-${o.id}`} disabled={!!why}
+                              title={why || "Trim the logo band, title block and margins with a rectangle or a polygon — reversible, the full sheet is kept"}
+                              onClick={() => { setSelOverlay(o.id); setOvCropId(o.id); }}>{hasCrop(o) ? "Edit crop…" : "Crop…"}</button>
+                          );
+                        })()}
                       </div>
                       {on && (
                         <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>
@@ -23397,7 +23430,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <polygon data-testid={m.except ? "deed-except" : "deed-boundary"} points={ring} fill={`url(#${encumbrancePatternId(m)})`} stroke={gapSeg ? "none" : stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} pointerEvents="all" />
                       {/* The courses as written, then the misclosure as its OWN line (not part of the boundary stroke). */}
                       {gapSeg && <polyline data-testid="deed-courses" points={trace.path.map(f2p).map((q) => `${q.x},${q.y}`).join(" ")} fill="none" stroke={stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} strokeLinejoin="round" pointerEvents="none" />}
-                      {gapSeg && <line data-testid="deed-gap" x1={gapSeg.a.x} y1={gapSeg.a.y} x2={gapSeg.b.x} y2={gapSeg.b.y} stroke={PAL.dangerText} strokeWidth={strokeZoom(Math.max(sw, 2.2), zk)} strokeDasharray={dashZoom("6 4", zk)} strokeLinecap="butt" pointerEvents="none"><title>{`${deedGapText(trace).text} ${deedGapText(trace).precision}`}</title></line>}
+                      {gapSeg && <line data-testid="deed-gap" x1={gapSeg.a.x} y1={gapSeg.a.y} x2={gapSeg.b.x} y2={gapSeg.b.y} stroke={PAL.danger} strokeWidth={strokeZoom(Math.max(sw, 2.2), zk)} strokeDasharray={dashZoom("6 4", zk)} strokeLinecap="butt" pointerEvents="none"><title>{`${deedGapText(trace).text} ${deedGapText(trace).precision}`}</title></line>}
                       {/* centerline + per-call bearing/distance labels */}
                       {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={stroke} strokeWidth={strokeZoom(0.8, zk)} strokeDasharray={dashZoom("4 3", zk)} opacity={0.7} pointerEvents="none" />}
                       {labelPpf > 0.12 && (m.calls || []).map((c, i) => {
@@ -25327,29 +25360,32 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </div>
           </div>
 
-          {/* empty state */}
-          {parcels.length === 0 && els.length === 0 && !sheetOverlays.length && (
-            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
-              <div style={{ textAlign: "left", color: PAL.muted, background: "var(--surface-overlay)", padding: "20px 24px", borderRadius: 14, border: `1px solid ${PAL.panelLine}`, boxShadow: "0 8px 32px rgba(28,25,20,0.08)", maxWidth: 380 }}>
-                <div style={{ fontSize: 14.5, fontWeight: 700, color: PAL.ink, marginBottom: 10 }}>Start your site</div>
-                {/* NEW-5 (B849588) — one vocabulary for "get a parcel from county records" across
-                    this card, the Parcel tools ▾ menu (`lib/parcelActions.js`'s `identify`/`address`
-                    rows) and the Map finder's own parcel-pick hint, so the same job isn't named three
-                    different ways in three places. This also points at the control that actually does
-                    the job: the old copy sent a new user back to the "Map" button (top-left), which
-                    leaves this plan for the site picker — the in-place identify lives one click away,
-                    in Parcel tools ▾, right here. */}
+          {/* empty state — NEW-1/NEW-2 (2026-09-30, owner iPhone report): a compact card DOCKED to the top
+              edge, never over the middle of the map (it used to be a centred box across the exact
+              area he was about to draw on, and it stayed up after Draw new parcel was armed). It
+              exists only while nothing has started a site: any lot, reference, armed tool, identify
+              pass or open Add menu removes it, and one tap on ✕ dismisses it for good. Each option
+              is itself the action. The container is the card only (no full-size wrapper), so nothing
+              invisible can sit over the canvas. Same vocabulary as the Parcel tools ▾ menu
+              (`lib/parcelActions.js`): "Click a lot on the map" = a county-recorded lot. */}
+          {parcels.length === 0 && els.length === 0 && !sheetOverlays.length && !startHintDismissed
+            && tool === "select" && !identifyMode && !addParcelMenu && !draftPoly && !ovCalib && (
+            <div data-testid="start-hint" style={{ position: "absolute", top: narrow ? 66 : 12, left: narrow ? TOOLS_TAB_WIDTH_PX + 8 : 12, right: narrow ? TOOLS_TAB_WIDTH_PX + 8 : "auto", maxWidth: narrow ? undefined : 420, zIndex: 5, boxSizing: "border-box", background: "var(--surface-overlay)", padding: narrow ? "6px 38px 8px 10px" : "9px 40px 10px 12px", borderRadius: RADIUS.md, border: `1px solid ${PAL.panelLine}`, boxShadow: "0 4px 16px rgba(28,25,20,0.10)" }}>
+              <div style={{ fontSize: FONT_SIZE.display, fontWeight: 700, color: PAL.ink, marginBottom: narrow ? 4 : 7 }}>Start your site</div>
+              <button data-testid="start-hint-dismiss" onClick={dismissStartHint} aria-label="Dismiss" title="Dismiss"
+                style={{ position: "absolute", top: 0, right: 0, width: 36, height: 36, border: "none", background: "transparent", color: PAL.muted, fontSize: FONT_SIZE.emphasis, cursor: "pointer", fontFamily: "inherit" }}>✕</button>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
                 {[
-                  ["1", <><b>Click a lot on the map</b> — county records (Parcel tools ▾, right rail) — or add one by address,</>],
-                  ["2", <>or drop a <b>screenshot reference</b> and calibrate it,</>],
-                  ["3", <>or draw one yourself (Parcel tools ▾ → Draw new parcel).</>],
-                ].map(([n, body]) => (
-                  <div key={n} style={{ display: "flex", gap: 10, alignItems: "baseline", fontSize: 12.5, lineHeight: 1.55, marginBottom: 5 }}>
-                    <span style={{ width: 17, height: 17, borderRadius: 99, background: "var(--planner-raised)", color: "var(--text-secondary)", fontSize: 10.5, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center", flex: "none", transform: "translateY(2px)" }}>{n}</span>
-                    <span>{body}</span>
-                  </div>
+                  ["start-hint-lot", "Click a lot on the map", () => { setIdentifyMode(true); ensureBasemapOn(); setIdentifyRes(null); setJurInfo(null); }],
+                  ["start-hint-address", "Search an address", () => openLandPanel({ select: false, addMenu: true })],
+                  ["start-hint-draw", "Trace your boundary", () => selectTool("parcel")],
+                  ["start-hint-screenshot", "Use a screenshot", () => startHintFileRef.current?.click()],
+                ].map(([tid, label, act]) => (
+                  <button key={tid} data-testid={tid} onClick={act}
+                    style={{ minHeight: narrow ? 34 : 36, padding: "4px 7px", borderRadius: RADIUS.sm, border: `1px solid ${PAL.panelLine}`, background: "var(--planner-raised)", color: PAL.ink, fontSize: FONT_SIZE.control, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", textAlign: "left", lineHeight: 1.25 }}>{label}</button>
                 ))}
               </div>
+              <input ref={startHintFileRef} type="file" accept="application/pdf,image/*,.dxf,.dwg" style={{ display: "none" }} onChange={(e) => { addOverlayFile(e.target.files?.[0]); e.target.value = ""; }} />
             </div>
           )}
 
@@ -26584,7 +26620,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   return (
                     <div style={{ marginTop: 6, paddingTop: 8, borderTop: BORDER_1 }}>
                       {/* The misclosure in plain words, with the precision ratio; the canvas draws it as a red dashed line. */}
-                      <div data-testid="deed-closure" style={{ fontSize: 11.5, lineHeight: 1.5, marginBottom: 8, fontWeight: 700, color: gapInfo.closes ? PAL.text : PAL.dangerText }}>
+                      <div data-testid="deed-closure" style={{ fontSize: 11.5, lineHeight: 1.5, marginBottom: 8, fontWeight: 700, color: gapInfo.closes ? PAL.text : PAL.danger }}>
                         {gapInfo.closes ? "" : "⚠ "}{gapInfo.text}{gapInfo.precision ? ` ${gapInfo.precision}.` : ""}
                       </div>
                       <button style={{ ...chip, width: "100%", fontWeight: 700 }} disabled={!!selMarkup.locked}
@@ -29475,7 +29511,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const calls = tracts[0] ? tracts[0].calls : [];
         const path = dp && calls.length ? dp.callsToPath(calls, { x: 0, y: 0 }) : [];
         const closes = dp ? dp.pathCloses(path) : false;
-        const gap = dp ? dp.misclosure(path) : 0;
+        const closure = path.length ? deedClosure(path) : { closes: true, gapFt: 0, ratio: null }; // as drawn (deedGap.js), not the 50 ft screen
         const exCount = Math.max(0, tracts.length - 1);
         // B768160 — OCR review data for whichever text is currently loaded: low-confidence word spans
         // (highlighted in the box) and suspect (likely-lost-decimal-point) distances feed the closure
@@ -29485,7 +29521,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const ocrHelpers = ocrRun ? ocrHelpersRef.current : null; // populated by the same call that set ocrRun
         const ocrLcSpans = ocrHelpers ? ocrHelpers.lowConfidenceSpans(ocrSpansForBox) : [];
         const ocrSuspects = ocrHelpers && mbText ? ocrHelpers.flagSuspectDistances(mbText) : [];
-        const ocrCulprits = (ocrHelpers && calls.length && !closes) ? ocrHelpers.culpritCalls(mbText, calls, ocrLcSpans, ocrSuspects) : [];
+        const ocrCulprits = (ocrHelpers && calls.length && !closure.closes) ? ocrHelpers.culpritCalls(mbText, calls, ocrLcSpans, ocrSuspects) : [];
         return (
         <div onClick={() => setTitleOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(20,18,15,0.55)", display: "grid", placeItems: "center" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: SURF_RAISED, borderRadius: 14, boxShadow: "0 20px 60px rgba(0,0,0,0.35)", padding: 22, width: 720, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
@@ -29621,7 +29657,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <div key={r.id} data-testid="deed-queue-row" onClick={() => { if (r.error) return; setDeedActiveId(r.id); setDeedName(r.name); setOcrRun(r.ocr || null); if (r.text) setMbText(r.text); setDeedErr(""); }}
                         style={{ display: "flex", alignItems: "baseline", gap: 8, padding: "7px 10px", cursor: r.error ? "default" : "pointer", borderTop: i ? `1px solid ${PAL.panelLine}` : "none", background: active ? "rgba(124,58,237,0.08)" : "transparent" }}>
                         <span style={{ fontSize: 11.5, fontWeight: 600, color: r.error ? PAL.danger : PAL.ink, fontFamily: MONO_FONT, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "50%" }}>📄 {r.name}</span>
-                        <span style={{ fontSize: 11, color: r.error ? PAL.danger : PAL.muted, flex: 1, lineHeight: 1.4 }}>{r.error ? r.error : `${r.boundaryCalls} call${r.boundaryCalls > 1 ? "s" : ""}${r.exCount ? ` · +${r.exCount} save-and-except` : ""} · ${r.closes ? "closes" : `gap ${r.gap.toFixed(1)}′`}`}</span>
+                        <span data-testid="deed-queue-closure" style={{ fontSize: 11, color: r.error || (r.closure && !r.closure.closes) ? PAL.danger : PAL.muted, flex: 1, lineHeight: 1.4 }}>{r.error ? r.error : `${r.boundaryCalls} call${r.boundaryCalls > 1 ? "s" : ""}${r.exCount ? ` · +${r.exCount} save-and-except` : ""} · ${r.closure ? deedQueueClosure(r.closure) : (r.closes ? "closes" : `gap ${r.gap.toFixed(1)}′`)}`}</span>
                         {active && ok && <span style={{ fontSize: 10.5, color: PAL.accent, fontWeight: 700, whiteSpace: "nowrap" }}>LOADED</span>}
                       </div>
                     );
@@ -29637,12 +29673,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 placeholder={'Paste a legal description, e.g.\nBEGINNING at a point… THENCE N 45°30′00″ E, 150.00 feet;\nTHENCE S 44°30′00″ E, 300.00 feet; …'}
                 style={{ width: "100%", boxSizing: "border-box", padding: "9px 11px", fontSize: 12, fontFamily: MONO_FONT, border: BORDER_1, borderRadius: 8, color: PAL.ink, resize: "vertical", lineHeight: 1.5 }} />
               <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 10, flexWrap: "wrap" }}>
-                <div style={{ fontSize: 12, color: calls.length ? PAL.ink : PAL.muted, fontWeight: 600 }}>
-                  {calls.length
-                    ? `${calls.length} call${calls.length > 1 ? "s" : ""} parsed · ${closes ? `closes${gap > 1 ? ` (misclosure ${gap.toFixed(1)}′)` : ""}` : `does NOT close — gap ${gap.toFixed(1)}′`}${exCount ? ` · +${exCount} save-and-except` : ""}`
-                    : "No calls parsed yet"}
+                <div data-testid="deed-reader-summary" style={{ fontSize: 12, color: !calls.length ? PAL.muted : closure.closes ? PAL.ink : PAL.danger, fontWeight: 600 }}>
+                  {calls.length ? deedReaderSummary(calls.length, closure, exCount).text : "No calls parsed yet"}
                 </div>
-                {calls.length > 0 && !closes && (
+                {calls.length > 0 && !closure.closes && (
                   <div style={{ flexBasis: "100%", fontSize: 11, color: PAL.warn, lineHeight: 1.45 }}>
                     ⚠ These calls don't close back to the start — the boundary is plotted exactly as written, with the gap on the last edge. Check the description against the survey.
                     {/* B768160 — CLAUDE.md item (f): use closure as the OCR safety net. When the OCR'd
@@ -29756,7 +29790,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             /* NEW-4/B872 — was `.startsWith("⚠")`: a message that EMBEDS a warning mid-string (e.g. "All
                3 deeds placed. ⚠ Verify: …") never starts with it, so it rendered in the default
                success-green with its own warning invisible to the color. `.includes` catches both. */
-            <div style={{ ...toastPill, background: (deedAlignHint && !pobMode) ? PAL.accent : overlapWarn.includes("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d") }}>
+            <div style={{ ...toastPill, background: (deedAlignHint && !pobMode) ? (deedAlignHint.msg.includes("⚠") ? "#7f1d1d" : PAL.accent) : overlapWarn.includes("⚠") ? "#7f1d1d" : (pobMode || routeMode ? PAL.accent : "#15803d") }}>
               <span>{pobMode ? (pobMode.queueTotal ? `Deed ${(pobMode.placed || 0) + 1} of ${pobMode.queueTotal}${pobMode.name ? ` — ${pobMode.name}` : ""}: click its point of beginning (Esc cancels all).` : "Click the point of beginning on the plan to anchor the description (Esc to cancel).") : (deedAlignHint ? deedAlignHint.msg : overlapWarn)}</span>
               {(pobMode || routeMode) && <button onClick={() => { setPobMode(null); setRouteMode(null); setOverlapWarn(""); }} style={toastGhostBtn}>Cancel</button>}
               {deedAlignHint && !pobMode && !routeMode && <>
