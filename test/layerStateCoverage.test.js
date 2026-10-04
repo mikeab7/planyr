@@ -19,7 +19,7 @@ vi.mock("../src/workspaces/site-planner/lib/mapSymbols.js", () => ({ installDefa
 
 import { ALL_LAYERS, JLAYERS } from "../src/workspaces/site-planner/lib/layers.js";
 import { GIS_SOURCES } from "../src/shared/gis/sources.js";
-import { STATE_ENVELOPES } from "../src/workspaces/site-planner/lib/siteRegion.js";
+import { STATE_ENVELOPES, STATE_POLYGONS } from "../src/workspaces/site-planner/lib/siteRegion.js";
 
 /* National sources — shown on every site. FEMA, NWI, EPA, rail/airports, OSM, HIFLD, Mapillary, USGS NHD and 3DEP. */
 const NATIONAL = [
@@ -34,6 +34,8 @@ const TEXAS_ONLY = [
   "coh_ww", "coh_storm", "coh_water", "bkdd_drainage", "bkdd_easements", "bkdd_dmp", "fb_contours",
 ];
 
+/* Shared by Florida AND Georgia (PR #1902): the EIA approximate pipeline layers. */
+const SHARED_FL_GA = ["eia_gas", "eia_petroleum", "eia_crude", "eia_hgl"];
 const GEORGIA = ["ga_county", "ga_city", "ga_hsi", "ga_nrhp", "ga_cemeteries", "ga_crit_habitat", "ga_gopher_tortoise", "ga_trout", "ga_stream_buffers", "ga_slope"];
 const idsWhere = (pred) => Object.entries(ALL_LAYERS).filter(([, c]) => pred(c)).map(([k]) => k);
 
@@ -49,12 +51,13 @@ describe("the layer registry's state coverage", () => {
     for (const [id, cfg] of Object.entries(JLAYERS)) expect(cfg.states, id).toEqual(["TX"]);
   });
   it("every state code used is one siteState() can actually return", () => {
-    const known = new Set(Object.keys(STATE_ENVELOPES));
+    const known = new Set([...Object.keys(STATE_ENVELOPES), ...Object.keys(STATE_POLYGONS)]);
     for (const [id, c] of Object.entries(ALL_LAYERS)) for (const st of c.states || []) expect(known.has(st), `${id}: ${st}`).toBe(true);
   });
   it("every Georgia layer is Georgia-only, and each is in the declared Georgia set", () => {
     for (const id of GEORGIA) expect(ALL_LAYERS[id].states, id).toEqual(["GA"]);
-    expect(idsWhere((c) => (c.states || []).includes("GA")).sort()).toEqual([...GEORGIA].sort());
+    for (const id of SHARED_FL_GA) expect(ALL_LAYERS[id].states, id).toEqual(["FL", "GA"]);
+    expect(idsWhere((c) => (c.states || []).includes("GA")).sort()).toEqual([...GEORGIA, ...SHARED_FL_GA].sort());
   });
   it("no layer is both national and scoped, and no row lists an empty scope (an empty list would hide it everywhere)", () => {
     for (const [id, c] of Object.entries(ALL_LAYERS)) if (c.states) expect(c.states.length, id).toBeGreaterThan(0);
@@ -63,7 +66,7 @@ describe("the layer registry's state coverage", () => {
     const shownIn = (st) => Object.entries(ALL_LAYERS).filter(([, c]) => !c.states || c.states.includes(st)).map(([k]) => k);
     const ga = shownIn("GA"), tx = shownIn("TX");
     for (const id of TEXAS_ONLY) expect(ga, id).not.toContain(id);
-    for (const id of GEORGIA) expect(tx, id).not.toContain(id);
+    for (const id of [...GEORGIA, ...SHARED_FL_GA]) expect(tx, id).not.toContain(id);
     for (const id of NATIONAL) { expect(ga, id).toContain(id); expect(tx, id).toContain(id); }
   });
 });

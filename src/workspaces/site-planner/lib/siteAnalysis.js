@@ -25,7 +25,7 @@
 
 import { gisCache as defaultCache } from "./gisCache.js";
 import { identifyJurisdiction, identifyRoadAuthority } from "./jurisdiction.js";
-import { GIS_SOURCES } from "../../../shared/gis/sources.js";
+import { GIS_SOURCES, sourceCoversState } from "../../../shared/gis/sources.js";
 import { fetchArcgisJson, gisErrorMessage, pLimit, GIS_MAX_GET_URL } from "./gisFetch.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { classifyCcn } from "./ccnClassify.js";
@@ -35,6 +35,10 @@ import { summarizeWells } from "./wellStatus.js";
 // NEW-1 — which STATE the site is in, geometrically and without a network call, so the zoning
 // answer holds when every GIS endpoint is down (siteRegion.js is pure geometry, no prose).
 import { siteState } from "./siteRegion.js";
+// NEW-1 (FL/GA pipelines) — the pure half of the "never clear outside Texas" rule (see that module).
+import { EIA_COMMODITIES, EIA_BUFFER_MI, isEiaScreenState } from "./eiaPipelineScreen.js";
+// The wording + combiner are loaded ON DEMAND (only a non-Texas site reads them): `eiaPipelineScreenCopy.js`.
+const loadEiaCopy = () => import("./eiaPipelineScreenCopy.js");
 import { summarizeTransmission, summarizeSubstations } from "./powerScreen.js";
 import { summarizeAadt, summarizeRail, summarizeAirports } from "./accessScreen.js";
 import { summarizeGaStreams, gopherSummary, critHabitatSummary, critHabitatDetail, hsiTag } from "./georgiaScreens.js";
@@ -106,7 +110,6 @@ export const ANALYSIS_SOURCES = [
   },
   {
     id: "oilgas", category: "Oil & gas wells", label: "Oil & gas well surface locations", kind: "polygon",
-    states: ["TX"],
     mapLayer: "txrrc_wells",
     // AUTHORITATIVE statewide Railroad Commission service (registry key "oilgas"). Replaces
     // the Harris-County GIS republication that was ~99.8% incomplete outside Harris — a
@@ -125,7 +128,6 @@ export const ANALYSIS_SOURCES = [
   },
   {
     id: "pipelines", category: "Pipelines", label: "Pipelines (RRC T-4)", kind: "polygon",
-    states: ["TX"],
     mapLayer: "txrrc_pipe",
     // AUTHORITATIVE statewide RRC pipelines (registry key "pipelines", layer 13). Replaces
     // the Harris-clipped republication (B368). Fields: OPERATOR / COMMODITY_DESCRIPTION /
@@ -142,7 +144,6 @@ export const ANALYSIS_SOURCES = [
     // parcel, by PROXIMITY (count + nearest distance + names within a 1-mi buffer). Registry
     // `lpst`. Labeled a Phase I ESA PRE-SCREEN, never a substitute.
     id: "lpst", category: "Leaking petroleum tanks (TCEQ LPST)", label: "TCEQ LPST sites", kind: "point",
-    states: ["TX"],
     mapLayer: "env_lpst",
     ...reg("lpst"),
     screenMode: "proximity", bufferMi: 1, ttl: 30 * DAY, verified: true,
@@ -167,7 +168,6 @@ export const ANALYSIS_SOURCES = [
     // by PROXIMITY to the fault LINES (the proximity engine handles line geometry). onSiteLabel
     // makes a 0-ft nearest read "crosses the site" (a fault through the footprint is a real flag).
     id: "growthFaults", category: "Active surface faults", label: "Houston-area growth faults", kind: "line",
-    states: ["TX"],
     mapLayer: "faults",
     ...reg("growthFaults"),
     screenMode: "proximity", bufferMi: 0.25, ttl: 30 * DAY, verified: true,
@@ -205,7 +205,6 @@ export const ANALYSIS_SOURCES = [
     // Traffic / AADT (public-data screening PHASE 6, access tier) — the average daily traffic
     // on the nearest TxDOT-counted road, an access / visibility proxy. Point proximity, info fact.
     id: "aadt", category: "Traffic (AADT)", label: "TxDOT traffic counts", kind: "point",
-    states: ["TX"],
     mapLayer: "txdot_aadt",
     ...reg("aadt"),
     screenMode: "proximity", bufferMi: 0.5, ttl: 30 * DAY, verified: true,
@@ -308,7 +307,6 @@ export const ANALYSIS_SOURCES = [
     // Statewide authoritative source (TWDB-hosted PUCT CCN) via the registry. CCN is a
     // FACT not a good/bad constraint, so classifyCcn returns `info` for both outcomes.
     id: "ccnWater", category: "Water service (CCN)", label: "Water CCN service area", kind: "polygon",
-    states: ["TX"],
     mapLayer: "ccn_service", // both CCN cards drive the one Water/sewer CCN overlay (B190 "◍ Activate layer")
     ...reg("ccnWater"),
     ttl: 30 * DAY, verified: true,
@@ -320,7 +318,6 @@ export const ANALYSIS_SOURCES = [
     // Harris County GIS re-serve (registry `ccnSewer`, EPSG:2278) — REGIONAL (Houston MSA)
     // coverage, so the empty message is hedged (regional:true), never a green all-clear.
     id: "ccnSewer", category: "Sewer service (CCN)", label: "Sewer CCN service area", kind: "polygon",
-    states: ["TX"],
     mapLayer: "ccn_service",
     ...reg("ccnSewer"),
     ttl: 30 * DAY, verified: true,
@@ -331,44 +328,24 @@ export const ANALYSIS_SOURCES = [
 
 
 // ---------------------------------------------------------------------------
-// State gate (Part A, Georgia screening) — one answer to "does this screen mean anything HERE?"
+// State gate — ONE rule, two halves (Part A, Georgia screening).
 //
-// A source row declares `states: [...]` when its data only exists in some states (the RRC, TCEQ, TxDOT
-// and the PUC are Texas institutions). Run against a Georgia site the Texas endpoint answers an honest
-// ZERO, and a `verified` source reads that zero as "none found" — a fabricated all-clear on a live
-// deal. So an out-of-state source never runs: it reports NOT SCREENED, a gap in what Planyr carries
-// (never a finding about the ground). No `states` = national, always runs. A site whose state cannot
-// be named (outside every envelope) is NOT in a listed state, so a state-scoped screen is not run for it.
-// Same semantics as LayerPanel's `outOfState`; this is the Site Analysis half of that one rule.
+// (1) A standing check whose data exists only in some states (the RRC, TCEQ, TxDOT and the PUC are Texas
+//     institutions) declares that ONCE, in the GIS registry (`SOURCE_STATE_SCOPE` / the row's own `states`),
+//     and `runSiteAnalysis` asks `sourceCoversState` before it queries — PR #1902's gate, the same one the
+//     Layers panel's `outOfState` reads. Outside its states it reads "Not screened in <state>", never "none
+//     found" (`eiaPipelineScreenCopy.outOfStateFinding`).
+// (2) A card that exists only for some states (`extraFor` — the Georgia cards) is simply ABSENT elsewhere, so a
+//     Houston plan gains no Georgia rows and nothing there reads as "not screened" about a check it never had.
 // ---------------------------------------------------------------------------
-const STATE_NAMES = { TX: "Texas", CO: "Colorado", GA: "Georgia", CA: "California" };
+const STATE_NAMES = { TX: "Texas", CO: "Colorado", GA: "Georgia", CA: "California", FL: "Florida" };
 export const stateName = (st) => STATE_NAMES[st] || "this state";
 
-export function screenAppliesIn(source, state) {
-  const only = source && source.states;
-  if (!Array.isArray(only) || only.length === 0) return true;
-  return !!state && only.includes(state);
-}
-
-// The road-authority card is built outside ANALYSIS_SOURCES (jurisdiction.js engine); this is its gate record.
-const ROAD_SCREEN = { id: "road", category: "Road authority", label: "Who maintains the fronting road(s)", states: ["TX"], sourceName: "TxDOT Roadway Inventory" };
-
-/* A card that exists only for some states (`extraFor`) is simply absent elsewhere — a Houston plan gains no Georgia rows. */
 export const cardExistsIn = (source, state) => !Array.isArray(source.extraFor) || (!!state && source.extraFor.includes(state));
 
-export function notScreenedFinding(source, state) {
-  const here = stateName(state);
-  const only = (source.states || []).map(stateName).join(" / ");
-  return {
-    id: source.id, category: source.category, label: source.label,
-    status: "notscreened",
-    summary: `Not screened in ${here} — Planyr has no ${here} source for this check yet (${only}-only data).`,
-    detail: [], rows: null,
-    sourceName: source.sourceName || null, ageMs: null, ts: null, error: null,
-    caveat: `A gap in what Planyr carries, not a finding about the site. Do not read it as clear — confirm with the ${here} authority.`,
-    verified: false, mapLayer: null, notScreenedIn: state || null,
-  };
-}
+// The road-authority card is built outside ANALYSIS_SOURCES (jurisdiction.js engine); this is its gate record.
+// Its registry row (`road`) is Texas-only (TxDOT Roadway Inventory), so it takes the same gate.
+const ROAD_SCREEN = { id: "road", category: "Road authority", label: "Who maintains the fronting road(s)" };
 
 // ---------------------------------------------------------------------------
 // Pure geometry helpers
@@ -544,6 +521,37 @@ export function pipelineSummary(rows, total) {
   const n = total != null ? total : rows.length;
   const head = `${n} pipeline segment${n === 1 ? "" : "s"}`;
   return ops.length ? `${head} — ${ops.slice(0, 3).join(", ")}${ops.length > 3 ? "…" : ""}` : head;
+}
+
+/* NEW-1 (FL/GA pipelines) — the four EIA commodity layers, as proximity sources. They are NOT in
+ * ANALYSIS_SOURCES: the panel shows ONE pipelines finding, and `runEiaPipelines` folds these four into
+ * it (`combineEiaFindings`). `verified: false` is deliberate and load-bearing — it makes it impossible
+ * for `analyzeProximitySource` to ever return "absent" for these rows; an empty answer stays "unknown"
+ * and the combiner turns it into "not confirmed". Endpoints come from the registry rows only. */
+export const EIA_PIPELINE_SOURCES = EIA_COMMODITIES.map((c) => ({
+  id: c.key, category: "Pipelines", label: `${c.name} pipelines (EIA, approximate)`, kind: "line",
+  mapLayer: c.mapLayer,
+  ...reg(c.key),
+  screenMode: "proximity", bufferMi: EIA_BUFFER_MI, ttl: 30 * DAY, verified: false,
+  plural: `${c.noun}(s)`, onSiteLabel: "crosses the site",
+  caveat: "Approximate — EIA major transmission lines only.",
+}));
+
+/* Screen a FL/GA site's rings against the four EIA layers and fold them into the one pipelines
+ * finding. A failure of one layer can never turn the others' silence into "clear": an error with no
+ * hit is `unavailable`, no hit with no error is `unconfirmed`, and there is no `absent` branch. */
+export async function runEiaPipelines(rings, opts = {}, state = null) {
+  const parts = await Promise.all(EIA_PIPELINE_SOURCES.map(async (src, i) => {
+    let finding;
+    try {
+      finding = await analyzeProximitySource(src, rings, opts);
+    } catch (e) {
+      finding = { id: src.id, status: "unavailable", summary: null, detail: [], error: gisErrorMessage(e) };
+    }
+    return { commodity: EIA_COMMODITIES[i], finding };
+  }));
+  const { combineEiaFindings } = await loadEiaCopy();
+  return combineEiaFindings(parts, { state });
 }
 
 // Classify a fetched result into a finding status (pure). `attrs` is the feature
@@ -1055,7 +1063,19 @@ export async function runSiteAnalysis(rings, opts = {}) {
   const arcOpts = { ...opts, fetchJson: pooledFetch };
   const jurFetch = opts.jurFetchJson || pooledFetch;
 
-  const arcPromises = ANALYSIS_SOURCES.filter((s) => cardExistsIn(s, state)).map((s) => (screenAppliesIn(s, state) ? analyzeSource(s, rings, arcOpts) : Promise.resolve(notScreenedFinding(s, state))));
+  // NEW-1 (FL/GA pipelines, PR #1902) — the state comes FIRST, and geometry decides it (no network). A source
+  // whose registry row is scoped to other states is NEVER queried for a site positively in another
+  // one: a Texas service asked about a Florida/Georgia coordinate answers "nothing", and that used to render
+  // as "No mapped RRC pipelines crossing the site" — a false clean. Unknown state (null) and Texas are
+  // untouched. Pipelines in FL/GA are the one place an approximate substitute exists (EIA).
+  // Georgia screening (Part A) extends that SAME gate rather than adding a second one: the registry's `states`
+  // (SOURCE_STATE_SCOPE / the row's own) is the one place a source declares where it can answer, and a
+  // Georgia-only `extraFor` card simply does not exist outside Georgia.
+  const arcPromises = ANALYSIS_SOURCES.filter((s) => cardExistsIn(s, state)).map((s) => {
+    if (s.id === "pipelines" && isEiaScreenState(state)) return runEiaPipelines(rings, arcOpts, state);
+    if (!sourceCoversState(GIS_SOURCES[s.id], state)) return loadEiaCopy().then((m) => m.outOfStateFinding(s, state));
+    return analyzeSource(s, rings, arcOpts);
+  });
   // NEW-5 (2026-09-05, owner-reported) — thread EVERY active parcel's ring, not just the
   // representative (largest) one: a multi-parcel assemblage's city/ETJ containment is a coin
   // flip weighted by lot size when only one parcel is tested (jurisdiction.js's own
@@ -1065,7 +1085,7 @@ export async function runSiteAnalysis(rings, opts = {}) {
   // every parcel, correctly found the site partly inside a city's ETJ.
   const jurP = Promise.resolve().then(() => idJur(c.lng, c.lat, { ring: rep, ...(rings.length > 1 ? { rings } : {}), cache: opts.cache, fetchJson: jurFetch })).catch((e) => ({ __error: e }));
   // Road authority reads TxDOT's Roadway Inventory — a Texas-only source. Off Texas ground it is not asked at all.
-  const roadP = !screenAppliesIn(ROAD_SCREEN, state)
+  const roadP = !sourceCoversState(GIS_SOURCES.road, state)
     ? Promise.resolve({ __notScreened: true })
     : Promise.resolve().then(() => idRoad(c.lng, c.lat, { ring: rep, cache: opts.cache, fetchJson: jurFetch })).catch((e) => ({ __error: e }));
 
@@ -1081,8 +1101,8 @@ export async function runSiteAnalysis(rings, opts = {}) {
   });
   byId.set("jurisdiction", j && !j.__error ? buildJurisdictionFinding(j, state) : unknownInfo("jurisdiction", "Jurisdiction", "City / ETJ / county"));
   byId.set("zoning", j && !j.__error ? deriveZoning(j, state) : byId.get("zoning") || unknownInfo("zoning", "Zoning / entitlement", "Zoning & entitlement context"));
-  byId.set("road", road && road.__notScreened ? notScreenedFinding(ROAD_SCREEN, state) : road && !road.__error ? buildRoadFinding(road) : unknownInfo("road", "Road authority", "Who maintains the fronting road(s)"));
+  byId.set("road", road && road.__notScreened ? (await loadEiaCopy()).outOfStateFinding(ROAD_SCREEN, state) : road && !road.__error ? buildRoadFinding(road) : unknownInfo("road", "Road authority", "Who maintains the fronting road(s)"));
 
   const findings = CATEGORY_ORDER.map((id) => byId.get(id)).filter(Boolean);
-  return { findings, generatedAt: Date.now(), site: { centroid: c } };
+  return { findings, generatedAt: Date.now(), site: { centroid: c, state } };
 }

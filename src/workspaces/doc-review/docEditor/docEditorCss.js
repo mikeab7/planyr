@@ -28,6 +28,7 @@ export const DOC_EDITOR_CSS = `
 .dre-page .selectedCell:after{content:"";position:absolute;inset:0;background:var(--hover-ghost);pointer-events:none}
 .dre-ins{color:var(--success-text);text-decoration:underline;text-decoration-style:solid}
 .dre-del{color:var(--danger-text);text-decoration:line-through}
+.dre-fmt{border-bottom:2px dotted var(--accent-review)}
 .dre-comment{background:var(--warn-bg);border-bottom:2px solid var(--warn-border)}
 .dre-comment.active{background:var(--warn-border)}
 .dre-raw{display:inline-block;font-size:${FS.raw};color:var(--text-secondary)}

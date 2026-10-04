@@ -177,6 +177,88 @@ export const GIS_SOURCES = {
     lastVerified: "2026-06-21",
   },
 
+  // ===========================================================================
+  // NEW-1 (FL/GA pipelines) — EIA US ENERGY ATLAS TRANSMISSION PIPELINES, APPROXIMATE.
+  //
+  // Florida and Georgia publish NO statewide pipeline GIS (FDEP's oil & gas map is wells only;
+  // Georgia PSC publishes none). PHMSA NPMS is the complete source and is restricted to
+  // government officials and operators, so Planyr cannot consume it. The only public statewide
+  // option is the US Energy Information Administration's Energy Atlas: national, major
+  // TRANSMISSION lines only — it EXCLUDES local gas distribution mains and (mostly) gathering
+  // lines. Owner-approved with an explicit "approximate" treatment. ⛔ THEREFORE THESE ROWS CAN
+  // NEVER PRODUCE A "CLEAR": the screen (`lib/eiaPipelineScreen.js`) maps an empty answer to
+  // "not confirmed" + the title/survey/811 pointers, never to "no pipelines".
+  //
+  // ⚠ WHICH ENDPOINT, AND WHY — read before "fixing" the host. EIA's own ArcGIS host
+  // (atlas.eia.gov), www.eia.gov and geo.dot.gov are ALL denied by this build sandbox's egress
+  // policy (2026-09-30: every CONNECT returns 403), so EIA's own service could not be verified
+  // live from here. The reachable, CORS-clean (`access-control-allow-origin: *`), /query-capable
+  // copies are Esri's "U.S. Federal Datasets" org (orgId FiaPA4ga0iQKduv3, the same org that
+  // already hosts the `transmission` row), item-owned by Federal_User_Community, credited to
+  // "Energy Information Administration (EIA)", "Data modification: None", "periodically
+  // reviewed against its federal source". That is a REPUBLICATION, so each row is a
+  // `monitored-exception` (tierReason in sourceFixtures.js) — NOT HIFLD Open, NOT the Data
+  // Rescue archive, NOT a personal/third-party copy. Swap `serviceUrl` for EIA's own service
+  // once it can be verified from a networked machine (V-item on the backlog block).
+  // Provenance per row (item · layer · publisher · last data edit reported by the service):
+  //   gas        9833ca6c8103490b8ad145a30f0522ee · FeatureServer/0 · dataLastEditDate 2025-07-01
+  //   petroleum  c745d9f4b81e42f3a54aee7aaa396975 · FeatureServer/0 · dataLastEditDate 2025-07-01
+  //   crude      bb2aee97117d403ea63bcfe6be4a12c8 · FeatureServer/0 · dataLastEditDate 2025-06-13
+  //   hgl        25e6c30180974dada0dca74ba33fd558 · FeatureServer/0 · dataLastEditDate 2025-06-13
+  // ===========================================================================
+  eiaGas: {
+    key: "eiaGas",
+    label: "Natural gas transmission pipelines (EIA, approximate)",
+    provider: "US Energy Information Administration (EIA) — via Esri U.S. Federal Datasets",
+    serviceUrl: "https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/Natural_Gas_Interstate_and_Intrastate_Pipelines_1/FeatureServer/0",
+    layerId: null, // url already includes the layer index (FeatureServer/0)
+    geometryType: "line",
+    fields: { type: "TYPEPIPE", name: "Operator", status: "Status" },
+    coverage: "national",
+    states: ["FL", "GA"],
+    tier: "monitored-exception",
+    lastVerified: "2026-09-30",
+  },
+  eiaPetroleum: {
+    key: "eiaPetroleum",
+    label: "Petroleum product pipelines (EIA, approximate)",
+    provider: "US Energy Information Administration (EIA) — via Esri U.S. Federal Datasets",
+    serviceUrl: "https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/Petroleum_Products_Pipelines_1/FeatureServer/0",
+    layerId: null,
+    geometryType: "line",
+    fields: { name: "Pipename", operator: "Opername" },
+    coverage: "national",
+    states: ["FL", "GA"],
+    tier: "monitored-exception",
+    lastVerified: "2026-09-30",
+  },
+  eiaCrude: {
+    key: "eiaCrude",
+    label: "Crude oil pipelines (EIA, approximate)",
+    provider: "US Energy Information Administration (EIA) — via Esri U.S. Federal Datasets",
+    serviceUrl: "https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/Crude_Oil_Trunk_Pipelines_1/FeatureServer/0",
+    layerId: null,
+    geometryType: "line",
+    fields: { name: "Pipename", operator: "Opername" },
+    coverage: "national",
+    states: ["FL", "GA"],
+    tier: "monitored-exception",
+    lastVerified: "2026-09-30",
+  },
+  eiaHgl: {
+    key: "eiaHgl",
+    label: "Hydrocarbon gas liquids pipelines (EIA, approximate)",
+    provider: "US Energy Information Administration (EIA) — via Esri U.S. Federal Datasets",
+    serviceUrl: "https://services2.arcgis.com/FiaPA4ga0iQKduv3/arcgis/rest/services/Hydrocarbon_Gas_Liquids_Pipelines_1/FeatureServer/0",
+    layerId: null,
+    geometryType: "line",
+    fields: { name: "Pipename", operator: "Opername" },
+    coverage: "national",
+    states: ["FL", "GA"],
+    tier: "monitored-exception",
+    lastVerified: "2026-09-30",
+  },
+
   // ---- Utility-service CCN screening sources (public-data screening PHASE 1) ----
   // "Who holds the certificate to serve this site." A CCN (Certificate of Convenience &
   // Necessity) is the PUC of Texas retail monopoly to provide water / sewer in a bounded
@@ -2090,6 +2172,8 @@ export function sourceCoversState(entry, state) {
 
 // Keys grouped by the surface that consumes them (handy for the audit + tests).
 export const ANALYSIS_KEYS = ["flood", "wetlands", "oilgas", "pipelines"];
+// NEW-1 (FL/GA pipelines) — the four EIA rows the Florida/Georgia pipeline screen reads (one finding).
+export const EIA_PIPELINE_KEYS = ["eiaGas", "eiaPetroleum", "eiaCrude", "eiaHgl"];
 export const JURISDICTION_KEYS = ["county", "city", "road", "isd", "etj_hgac", "etj_austin", "etj_fortworth", "etj_collin", "etj_rockwall", "etj_denton", "etj_release_fortworth", "etj_dallasco", "etj_ellis", "etj_waxahachie", "etj_johnson", "etj_grayson", "etj_corsicana", "etj_bloominggrove", "etj_forney", "etj_talty", "etj_mansfield", "etj_sunnyvale"];
 export const DETENTION_KEYS = ["mud", "hcfcdChannels", "hcfcdWatersheds"]; // B629 drainage resolver
 
@@ -2190,6 +2274,12 @@ export const FIXTURE_REACH_CLASSES = {
  * state scope implies, and the value is `[class, reason]` so the audit can require the reason.
  * A row absent from this table takes the class its state scope derives. */
 export const SOURCE_FIXTURE_REACH = {
+  // NEW-1 (FL/GA pipelines) — no crude trunk line crosses Florida or Georgia and only one HGL line
+  // (Dixie) crosses Georgia, so a "state" fixture set would have to assert a guaranteed zero. The
+  // fixtures instead prove the SERVICE answers on the Gulf Coast lines it does carry; the FL/GA
+  // empty answer is legitimate and is rendered as "not confirmed", never clear.
+  eiaCrude: ["regional", "EIA crude trunk lines: none in FL/GA (measured 2026-09-30); fixtures probe the Gulf/Midcontinent lines the layer carries to prove the service answers."],
+  eiaHgl: ["regional", "EIA HGL lines: only Dixie crosses GA and none reach FL (measured 2026-09-30); fixtures probe Dixie in GA plus the Mont Belvieu hub to prove the service answers."],
   // Houston-region drainage/utility districts — a county or a metro, not a state.
   ccnSewer: ["regional", "Harris County GIS re-serve of the PUCT CCN; its coverage is the Houston metro region, not the state (no statewide sewer-CCN REST endpoint exists)."],
   growthFaults: ["regional", "The USGS SIM 2874 study extent IS the Houston metropolitan area — there are no growth-fault traces to probe outside it."],

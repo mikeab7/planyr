@@ -13,6 +13,7 @@ import { DOC_EDITOR_CSS } from "./docEditorCss.js";
 import { BYPASS, fixupTracked, listChanges, acceptChange, rejectChange, acceptAll, rejectAll, commentRanges, removeCommentMarks } from "./trackChanges.js";
 import { HIGHLIGHT } from "../../../shared/files/docx/ooxml.js";
 import { loadModel, buildSave } from "./docModel.js";
+import { sectChanges, resolveSect } from "../../../shared/files/docx/fmtChange.js";
 
 const FONTS = ["Calibri", "Arial", "Times New Roman", "Cambria", "Georgia", "Verdana", "Courier New"];
 const SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36];
@@ -49,6 +50,7 @@ function Surface({ file, model, author, notice, onSave, onDirty, onHistory, vers
   const trackRef = useRef(false); trackRef.current = trackOn;
   const authorRef = useRef(author); authorRef.current = author;
   const filesRef = useRef(model.files);
+  const [sectPr, setSectPr] = useState(model.meta && model.meta.sectPr); // the final section's properties — it lives outside the page content, so its tracked formatting change is resolved here
 
   const extensions = useMemo(() => docExtensions({ plain }), [plain]);
   const editor = useEditor({
@@ -98,7 +100,7 @@ function Surface({ file, model, author, notice, onSave, onDirty, onHistory, vers
     if (!editor || !onSave) return false;
     setStatus({ kind: "saving", msg: "Saving to the Library…" });
     try {
-      const built = buildSave({ model, file, json: editor.getJSON(), comments, author, asNew, files: filesRef.current });
+      const built = buildSave({ model: sectPr === (model.meta && model.meta.sectPr) ? model : { ...model, meta: { ...model.meta, sectPr } }, file, json: editor.getJSON(), comments, author, asNew, files: filesRef.current });
       const { name, mode, note } = built;
       const blob = new Blob([built.bytes], { type: built.mime });
       const res = await onSave({ blob, name, mode });
@@ -110,7 +112,7 @@ function Surface({ file, model, author, notice, onSave, onDirty, onHistory, vers
       setStatus({ kind: "error", msg: `Couldn’t save: ${e && e.message ? e.message : "unknown error"}. Your edits are still here.` });
       return false;
     }
-  }, [editor, onSave, file, model, comments, author]);
+  }, [editor, onSave, file, model, comments, author, sectPr]);
   useEffect(() => {
     if (!saveRef) return undefined;
     saveRef.current = () => doSave(false);
@@ -118,7 +120,7 @@ function Surface({ file, model, author, notice, onSave, onDirty, onHistory, vers
   }, [saveRef, doSave]);
 
   if (!editor) return <div className="dre-root"><style>{DOC_EDITOR_CSS}</style></div>;
-  const changes = plain ? [] : listChanges(editor.state.doc);
+  const changes = plain ? [] : [...listChanges(editor.state.doc), ...sectChanges(sectPr)];
   const saveLabel = model.converted ? "Save as .docx" : "Save";
 
   return (
@@ -143,7 +145,7 @@ function Surface({ file, model, author, notice, onSave, onDirty, onHistory, vers
           if (empty) { setStatus({ kind: "error", msg: "Select some text first, then add the comment." }); return; }
           setPending({ from, to, quote: editor.state.doc.textBetween(from, to, " ").slice(0, 120) }); setPaneOpen(true);
         }} />
-      {model.converted && <div className="dre-note" data-testid="doc-converted-note">Word 97–2003 file — its text opens here (old-format formatting and tables aren’t carried over). Saving creates a new .docx next to it; the original .doc is kept.</div>}
+      {model.converted && <div className="dre-note" data-testid="doc-converted-note">{model.docNote}</div>}
       {(model.meta && model.meta.warnings || []).map((w, i) => <div key={i} className="dre-note warn" data-testid="doc-import-warning">⚠ {w}</div>)}
       {plain && model.txt.encoding === "windows-1252" && <div className="dre-note">This text file uses an older Windows encoding; it will be saved as UTF-8.</div>}
       {status.kind !== "idle" && <div className={`dre-note${status.kind === "error" ? " err" : ""}`} role={status.kind === "error" ? "alert" : "status"} data-testid="doc-save-status">{status.msg}</div>}
@@ -151,7 +153,7 @@ function Surface({ file, model, author, notice, onSave, onDirty, onHistory, vers
       <div className="dre-body">
         <div className="dre-scroll"><EditorContent editor={editor} /></div>
         {!plain && paneOpen && (
-          <ReviewPane ro={ro} editor={editor} changes={changes} comments={comments} setComments={setComments} author={author}
+          <ReviewPane ro={ro} editor={editor} changes={changes} sectPr={sectPr} setSectPr={setSectPr} onNote={(msg) => setStatus({ kind: "saved", msg })} comments={comments} setComments={setComments} author={author}
             pending={pending} setPending={setPending} onTouch={() => setDirty(true)} />
         )}
       </div>
@@ -295,10 +297,14 @@ function FindBar({ editor, onClose }) {
 }
 
 /* ---------- review pane: changes + comments ---------- */
-function ReviewPane({ ro, editor, changes, comments, setComments, author, pending, setPending, onTouch }) {
+function ReviewPane({ ro, editor, changes, sectPr, setSectPr, onNote, comments, setComments, author, pending, setPending, onTouch }) {
   const [draft, setDraft] = useState("");
   const [replyFor, setReplyFor] = useState(null); const [replyText, setReplyText] = useState("");
-  const apply = (tr) => { editor.view.dispatch(tr); onTouch(); };
+  const apply = (tr) => { editor.view.dispatch(tr); onTouch(); const part = tr.getMeta("fmtPartial"); if (part) onNote(`Restored the earlier formatting. The ${part} change was left as it is — undo it by hand if needed.`); };
+  // The document's final section lives outside the page content, so its formatting change is resolved on the saved properties.
+  const resolveMeta = (accept, key) => { if (sectChanges(sectPr).some((c) => key == null || c.key === key)) { setSectPr(resolveSect(sectPr, accept)); onTouch(); } };
+  const act = (c, accept) => { if (c.meta) resolveMeta(accept, c.key); else apply((accept ? acceptChange : rejectChange)(editor.state, c.key)); };
+  const actAll = (accept) => { resolveMeta(accept, null); apply((accept ? acceptAll : rejectAll)(editor.state)); };
   const roots = comments.filter((c) => !c.parentId);
   const quoteOf = (id) => { const r = commentRanges(editor.state.doc, id)[0]; return r ? editor.state.doc.textBetween(r.from, r.to, " ").slice(0, 100) : ""; };
   const focusComment = (id) => { const r = commentRanges(editor.state.doc, id)[0]; if (r) editor.chain().focus().setTextSelection({ from: r.from, to: r.to }).scrollIntoView().run(); };
@@ -327,18 +333,18 @@ function ReviewPane({ ro, editor, changes, comments, setComments, author, pendin
         {!changes.length && <div className="dre-meta">No tracked changes. Turn on “Track changes” to record your edits.</div>}
         {changes.map((c) => (
           <div key={c.key} className="dre-card" data-testid="change-card" data-kind={c.kind} style={{ marginTop: 6 }}>
-            <div><b className={c.kind === "ins" ? "dre-ins" : "dre-del"}>{c.kind === "ins" ? "Inserted" : "Deleted"}</b> “{c.text.slice(0, 80)}”</div>
+            <div><b className={c.kind === "ins" ? "dre-ins" : c.kind === "fmt" ? "dre-fmt" : "dre-del"} data-testid="change-label">{c.kind === "ins" ? "Inserted" : c.kind === "fmt" ? c.label : "Deleted"}</b>{c.text ? <> “{c.text.slice(0, 80)}”</> : null}</div>
             <div className="dre-meta">{c.author || "Unknown"}{c.date ? ` · ${when(c.date)}` : ""}</div>
             {!ro && <div className="dre-row">
-              <Button size="sm" variant="ghost" onClick={() => apply(acceptChange(editor.state, c.key))} data-testid="accept-change">Accept</Button>
-              <Button size="sm" variant="ghost" onClick={() => apply(rejectChange(editor.state, c.key))} data-testid="reject-change">Reject</Button>
+              <Button size="sm" variant="ghost" onClick={() => act(c, true)} data-testid="accept-change">Accept</Button>
+              <Button size="sm" variant="ghost" onClick={() => act(c, false)} data-testid="reject-change">Reject</Button>
             </div>}
           </div>
         ))}
         {changes.length > 1 && !ro && (
           <div className="dre-row">
-            <Button size="sm" variant="ghost" onClick={() => apply(acceptAll(editor.state))} data-testid="accept-all">Accept all</Button>
-            <Button size="sm" variant="ghost" onClick={() => apply(rejectAll(editor.state))} data-testid="reject-all">Reject all</Button>
+            <Button size="sm" variant="ghost" onClick={() => actAll(true)} data-testid="accept-all">Accept all</Button>
+            <Button size="sm" variant="ghost" onClick={() => actAll(false)} data-testid="reject-all">Reject all</Button>
           </div>
         )}
       </div>

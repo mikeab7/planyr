@@ -67,7 +67,7 @@ function numberingHelper(files) {
 }
 
 /* ---------- run properties ---------- */
-function marksToRPr(marks) {
+function marksToRPr(marks, newChange) {
   const kidsOut = [];
   for (const m of marks || []) {
     const a = m.attrs || {};
@@ -85,6 +85,7 @@ function marksToRPr(marks) {
         if (a.fontFamily) { const f = String(a.fontFamily).split(",")[0].replace(/["']/g, "").trim(); if (f) kidsOut.push(el("w:rFonts", { "w:ascii": f, "w:hAnsi": f, "w:cs": f })); }
         break;
       }
+      case "trackFmt": kidsOut.push(el("w:rPrChange", newChange(a), [el("w:rPr", {}, frag(a.old))])); break; // Word's own record; the OLD properties verbatim
       default: break;
     }
   }
@@ -135,7 +136,7 @@ export function writeDocx({ doc, comments = [], meta = {}, files }) {
     const marks = n.marks || [];
     const it = { xml: [], ins: marks.find((m) => m.type === "trackIns") || null, del: marks.find((m) => m.type === "trackDel") || null, link: marks.find((m) => m.type === "link") || null };
     if (n.type === "text") {
-      const rpr = marksToRPr(marks);
+      const rpr = marksToRPr(marks, (a) => trackAttrsOf({ attrs: a }));
       const parts = cleanText(n.text).split("\t");
       const tn = it.del ? "w:delText" : "w:t";
       const rc = [];
@@ -177,6 +178,7 @@ export function writeDocx({ doc, comments = [], meta = {}, files }) {
     for (const x of frag(a.pprx)) { if (x.name === "w:rPr") rPr = el("w:rPr", {}, [...kids(x)]); else pc.push(x); }
     if (a.pMark && a.pMark.type) { rPr = rPr || el("w:rPr", {}, []); rPr.children.push(el(a.pMark.type === "ins" ? "w:ins" : "w:del", trackAttrsOf({ attrs: a.pMark }))); }
     if (rPr) { rPr.children = orderBy(kids(rPr), RPR_ORDER); pc.push(rPr); }
+    if (a.pFmt && a.pFmt.xml != null) pc.push(el("w:pPrChange", trackAttrsOf({ attrs: a.pFmt }), [el("w:pPr", {}, frag(a.pFmt.xml))])); // a tracked paragraph-formatting change, written back as read
     const items = [];
     if (unanchoredPending) { unanchoredPending = false; for (const c of unanchored) { items.push(...commentStart([c]), ...commentEnd([c])); } }
     for (const n of node.content || []) {
@@ -214,7 +216,9 @@ export function writeDocx({ doc, comments = [], meta = {}, files }) {
     let ncols = 0; const carry = [];
     for (const r of rows) { const cells = r.content || []; let k = 0; let col = 0; while (k < cells.length || (carry[col] > 0)) { if (carry[col] > 0) { carry[col]--; col++; continue; } const cell = cells[k++]; const sp = (cell.attrs && cell.attrs.colspan) || 1; const rs = (cell.attrs && cell.attrs.rowspan) || 1; for (let q = 0; q < sp; q++) carry[col + q] = rs - 1; col += sp; } ncols = Math.max(ncols, col, colsOfRow(r)); }
     let grid = (t.attrs && t.attrs.gridCols) || [];
-    if (grid.length !== ncols) { // columns were added/removed: rebuild from the cell widths, else split a page evenly
+    let gridChange = frag(t.attrs && t.attrs.gridChange);
+    if (grid.length !== ncols) {
+      gridChange = []; // the column count was edited here, so the recorded old grid no longer describes this table // columns were added/removed: rebuild from the cell widths, else split a page evenly
       grid = Array.from({ length: ncols }, () => Math.round(9360 / Math.max(1, ncols)));
       const r0 = rows[0] && rows[0].content || []; let col = 0;
       for (const cell of r0) { const cw = cell.attrs && cell.attrs.colwidth; const sp = (cell.attrs && cell.attrs.colspan) || 1; if (cw && cw.length === sp && cw.every((w) => w > 0)) for (let q = 0; q < sp; q++) grid[col + q] = Math.round(cw[q] * TWIP_PER_PX); col += sp; }
@@ -244,7 +248,7 @@ export function writeDocx({ doc, comments = [], meta = {}, files }) {
       const trKids = frag(r.attrs && r.attrs.trpr);
       tr.push(el("w:tr", {}, [...(trKids.length ? [el("w:trPr", {}, trKids)] : []), ...rc]));
     }
-    return el("w:tbl", {}, [el("w:tblPr", {}, tblPrKids.length ? tblPrKids : defaultPr), el("w:tblGrid", {}, grid.map((w) => el("w:gridCol", { "w:w": String(w) }))), ...tr]);
+    return el("w:tbl", {}, [el("w:tblPr", {}, tblPrKids.length ? tblPrKids : defaultPr), el("w:tblGrid", {}, [...grid.map((w) => el("w:gridCol", { "w:w": String(w) })), ...gridChange]), ...tr]);
   }
 
   function blockXml(n) {
@@ -284,19 +288,23 @@ export function writeDocx({ doc, comments = [], meta = {}, files }) {
 }
 
 /* A minimal valid package (used for "Save as Word document" from a .txt). */
-export function blankPackage() {
+export function blankPackage({ font, halfPts, media = [] } = {}) { // font / halfPts: the source document's own default (a converted .doc), else Calibri 11
   const hdr = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
   const sty = (id, name, extra = "", based = "Normal") => `<w:style w:type="paragraph" w:styleId="${id}"><w:name w:val="${name}"/>${id === "Normal" ? "" : `<w:basedOn w:val="${based}"/><w:next w:val="Normal"/>`}<w:qFormat/>${extra}</w:style>`;
-  const styles = hdr + `<w:styles xmlns:w="${NS_W}"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="160" w:line="259" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>`
+  const styles = hdr + `<w:styles xmlns:w="${NS_W}"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="${font || "Calibri"}" w:hAnsi="${font || "Calibri"}" w:cs="${font || "Calibri"}"/><w:sz w:val="${halfPts || 22}"/><w:szCs w:val="${halfPts || 22}"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="160" w:line="259" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>`
     + `<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>`
     + sty("Title", "Title", '<w:pPr><w:spacing w:after="80"/></w:pPr><w:rPr><w:sz w:val="56"/></w:rPr>')
     + [1, 2, 3].map((n) => sty(`Heading${n}`, `heading ${n}`, `<w:pPr><w:keepNext/><w:spacing w:before="240" w:after="80"/><w:outlineLvl w:val="${n - 1}"/></w:pPr><w:rPr><w:b/><w:sz w:val="${[32, 28, 24][n - 1]}"/></w:rPr>`)).join("")
     + "</w:styles>";
+  const MEDIA_CT = { png: "image/png", jpg: "image/jpeg" };
+  const exts = [...new Set(media.map((m) => m.ext))];
+  const mediaRels = media.map((m) => `<Relationship Id="${m.rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${m.name}"/>`).join("");
   return {
-    "[Content_Types].xml": bytes(hdr + `<Types xmlns="${CT_NS}"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>`),
+    ...Object.fromEntries(media.map((m) => [`word/media/${m.name}`, m.bytes])),
+    "[Content_Types].xml": bytes(hdr + `<Types xmlns="${CT_NS}"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${exts.map((e) => `<Default Extension="${e}" ContentType="${MEDIA_CT[e]}"/>`).join("")}<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>`),
     "_rels/.rels": bytes(hdr + `<Relationships xmlns="${REL_NS}"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`),
     "word/document.xml": bytes(hdr + `<w:document ${Object.entries(DOC_ROOT_ATTRS).map(([k, v]) => `${k}="${v}"`).join(" ")}><w:body><w:p/></w:body></w:document>`),
-    "word/_rels/document.xml.rels": bytes(hdr + `<Relationships xmlns="${REL_NS}"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`),
+    "word/_rels/document.xml.rels": bytes(hdr + `<Relationships xmlns="${REL_NS}"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>${mediaRels}</Relationships>`),
     "word/styles.xml": bytes(styles),
   };
 }

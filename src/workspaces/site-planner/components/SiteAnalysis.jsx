@@ -36,10 +36,11 @@ const STATUS = {
   // "Not connected" is an inert/off state → a QUIET cool neutral (not a warm cream, and never
   // a semantic hue). The five entries above stay their intentional semantic colours (B689).
   pending: { dot: "#4B5263", bg: "#F3F5F8", border: "#E1E5EB", label: "Not connected", glyph: "○" },
-  // NOT SCREENED (Part A, Georgia) — this check has no source for the site's state. Same quiet neutral as
-  // "Not connected" and for the same reason: it is a gap in what Planyr carries, never a finding.
 };
-STATUS.notscreened = { ...STATUS.pending, label: "Not screened", glyph: "◌" }; // same neutral as "Not connected", no new hex
+// UNCONFIRMED (NEW-1, FL/GA pipelines) — nothing found in data that CANNOT prove absence (an approximate,
+// transmission-only map; or a Texas-only source on a non-Texas site). Amber like unknown/unavailable and NEVER
+// the green "None found": it must not be readable as an all-clear.
+STATUS.unconfirmed = { ...STATUS.unknown, label: "Not confirmed" }; // same amber as unknown — deliberately not a new colour
 
 export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isLayerOn, onToggleLayer, layerStatus = {}, layerZoomNote = null, runAnalysis = runSiteAnalysis, onFindings = null }) {
   const [state, setState] = useState({ loading: false, findings: null, error: null, empty: !rings || !rings.length, at: null });
@@ -215,7 +216,7 @@ export default function SiteAnalysis({ rings, acres, parcelCount, PAL, chip, isL
       </div>
 
       <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${line}`, fontSize: 10.5, color: muted, lineHeight: 1.5 }}>
-        Screening only — desktop GIS sources, not a survey or a legal determination. Each finding carries its own source, age, and caveat (tap to expand). Tap <b style={{ color: "var(--info-text)" }}>◍ Activate layer</b> on a finding to show that layer on the map. An <b>unknown</b> is never an all-clear.
+        Screening only — desktop GIS sources, not a survey or a legal determination. Each finding carries its own source, age, and caveat (tap to expand). Tap <b style={{ color: "var(--info-text)" }}>◍ Activate layer</b> on a finding to show that layer on the map. An <b>unknown</b> or <b>not confirmed</b> result is never an all-clear.
       </div>
     </div>
   );

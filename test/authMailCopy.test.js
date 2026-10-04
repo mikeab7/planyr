@@ -45,10 +45,13 @@ describe("auth mail copy — the sender is named, and it is the configured one (
 });
 
 describe("auth mail copy — AuthPanel renders the generated copy, not its own (NEW-2)", () => {
-  it("uses the two constants and hardcodes neither message", () => {
-    expect(panelSrc).toContain("SIGNUP_CONFIRM_MSG");
+  it("uses the generated copy and hardcodes neither message", () => {
+    // The sign-up message became a full success state (NEW-1): its copy is built from the SAME
+    // sender constant by lib/signupOutcome.js's checkEmailCopy, never typed into the panel.
+    expect(panelSrc).toContain("checkEmailCopy");
     expect(panelSrc).toContain("PASSWORD_RESET_MSG");
     expect(panelSrc).toContain('from "../lib/authMail.js"');
+    expect(readFileSync(new URL("../src/workspaces/site-planner/lib/signupOutcome.js", import.meta.url), "utf8")).toContain("AUTH_SENDER_LABEL");
   });
 
   it("has no surviving copy of the old sender-less wording", () => {
