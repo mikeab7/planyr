@@ -21,6 +21,8 @@ import Stitcher from "./Stitcher.jsx";
 import CompareView from "./CompareView.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import { useReviewPersistence, docSaveState } from "./lib/usePersistence.js";
+import { isAutoTitle, liveReviewProject } from "./lib/reviewNaming.js";
+import { storedProjectName } from "../../shared/names/names.js";
 import { newReviewId, newSourceId, upsertReview, storeSource, isStoredSource, downloadSource, downloadFromDrive, driveStreamSource, MAX_BYTES, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle, fileNewReview } from "./lib/reviewStore.js";
 import { writeLastDoc } from "./lib/lastDoc.js";
 import { TABS_STORE_KEY, upsertTab, findOpenTab, closeTab, moveTab, tabKindOf, srcKeyOf, serializeTabs, parseTabs, mergeRestored, droppedNotice, mergeLiveRecord, withKnownKeys, syncSig } from "./lib/reviewTabs.js";
@@ -1160,7 +1162,9 @@ export default function DocReview({
 
   const buildSnapshot = useCallback(() => ({
     id: reviewId, kind: "single", updatedAt: Date.now(), // stamp so the local mirror + cloud data carry a consistent updatedAt (reconcile)
+    // NEW-1 (B1991040): record WHICH kind the title is — composed (follows a project rename) or typed (never touched).
     title: (meta.title || "").trim() || composeTitle(meta),
+    titleAuto: !(meta.title || "").trim() || (meta.title || "").trim() === composeTitle(meta),
     // ORG SCOPE (NEW-1) — `orgScope` must ride this snapshot exactly like every other meta
     // field: `data` becomes `{ ...record, schemaVersion }` in reviewStore.js's `reviewRowFor`,
     // so a field missing from THIS object is a field the next autosave silently drops from the
@@ -1320,7 +1324,8 @@ export default function DocReview({
     if (!(src && src.name && !isPdfName(src.name) && !docKindOf(src.name))) {
       currentUid().then((uid) => recordOpen(uid, { id: rec.id, projectId: openProjectId })).catch(() => {});
     }
-    setMeta({ title: rec.title || "", projectId: openProjectId, project: rec.project || "", orgScope: rec.orgScope === true, discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "", folderId: rec.folderId || null, sourceFile: rec.sourceFile || "" });
+    const liveProj = liveReviewProject({ ...rec, projectId: openProjectId }, storedProjectName); // B1991040 — the project label is resolved by id, never the stored copy
+    setMeta({ title: isAutoTitle(rec) ? "" : (rec.title || ""), projectId: openProjectId, project: liveProj, orgScope: rec.orgScope === true, discipline: rec.discipline || "", item: rec.item || "", revision: rec.revision || "", docDate: rec.docDate || "", folderId: rec.folderId || null, sourceFile: rec.sourceFile || "" });
     if (openProjectId && !opts.noNavigate) onNavigate?.({ projectId: openProjectId }); // reflect the open file's project in the URL + breadcrumb (Work Item A)
     setSource(withKnownKeys(packSource(src), srcKeysRef.current));
     setMarkups(sanitizeMarkups(s.markups)); setCalByPage(s.calByPage || {}); setCalInfo(s.calInfo || {}); // sanitize: a corrupted/partial saved review can't crash the overlay
