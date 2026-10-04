@@ -38,7 +38,7 @@ export function addLocateControl(L, map, hooks = {}) {
   let latest = null;            // { latlng, accuracy, coords }
   let orientHeading = null;     // compass heading (smoothed)
   let lastHeadingAt = 0;
-  let marker = null, circle = null, pane = null, glideTimer = null, watchdog = null,
+  let marker = null, circle = null, pane = null, glideTimer = null, watchdog = null;
   let listening = false;
 
   const container = L.DomUtil.create("div", "leaflet-bar leaflet-control leaflet-control-locate");
