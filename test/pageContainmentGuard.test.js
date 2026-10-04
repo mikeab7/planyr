@@ -163,6 +163,14 @@ describe("NEW-6a — a scroll with the soft keyboard up is iOS revealing the fie
     expect(keyboardUp(w)).toBe(false);
     expect(keyboardUp({})).toBe(false);
   });
+  it("keyboardUp: still sees the keyboard when iOS shrinks innerHeight WITH it (B2046224 ×3 — the owner's 21:10 UTC Food row was misfiled as a stray drag)", () => {
+    const { win } = withKeyboard(true);
+    win.innerHeight = 456; // iOS: innerHeight is the unobscured rect
+    const probeEl = { style: {}, dataset: {}, setAttribute() {}, isConnected: true, offsetHeight: 800 };
+    win.document.body = { appendChild() {} };
+    win.document.createElement = () => { probeEl.ownerDocument = win.document; return probeEl; };
+    expect(keyboardUp(win)).toBe(true);
+  });
   it("still pins the document back, but ANNOUNCES the heal so the canvas can reveal the caret", () => {
     const { win, fire } = withKeyboard(true);
     const reporter = vi.fn();
