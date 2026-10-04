@@ -68,7 +68,7 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
 - `FoodApp.jsx` — workspace root (lazy chunk). Owns view state (map/list), the visit CRUD
   flow, and the manual-pin drop flow. No projects, no cross-workspace navigation — this module
   is deliberately outside the Site Planner's project model.
-- `components/FoodMap.jsx` — Leaflet map, canvas-rendered pins; basemap = the shared Site Plan map or Hybrid, defined in the shared basemaps registry under src/shared/ (NEW-1/B2025280 — never inline a tile URL here)
+- `components/FoodMap.jsx` — Leaflet map, canvas-rendered pins; basemap = Satellite (photo only, default) or Hybrid, defined in the shared basemaps registry under src/shared/ (NEW-1/B2025280 — never inline a tile URL here)
   (not SVG — the snapshot query can return up to ~2,000 points). Logged vs not-yet-logged vs
   manual pins are three distinct colors, per the brief.
 - `db/food_browse_qualify_gis_operator.sql` + `db/test/food_browse_rpc.test.sql` (B2079808) — the browse RPC's PostGIS operator must stay `OPERATOR(extensions.&&)` under its pinned search_path (a bare `&&` broke every browse call); a failed browse shows "Couldn't load restaurants here — Retry" and logs to `client_errors` via `foodStore.reportBrowseError` (food's own client, never shared telemetry).
@@ -115,6 +115,7 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
   Supabase — build with `VITE_SUPABASE_URL=https://plnrtestfood123456.supabase.co VITE_SUPABASE_ANON_KEY=fixture-anon`).
 - `lib/searchSession.js` (B2069808) — the search box's request side: cancels the in-flight RPC on a newer query (AbortController), drops out-of-order answers, caches per query + map centre; `carryOverRows` keeps already-loaded rows on screen while the next answer is pending. Pure JS. The RPC body is `food_places_search_by_name_fast` (distance only on rows that can make the cut — see db/food.sql).
 - `lib/searchProximity.js` (B2051664) — orders the merged search list (saved + snapshot + live) nearest the visible map first (B2070432: his saved places that really match LEAD, wherever the map looks): text band (exact name/address on top) → in-view → distance from centre, with a small head start for his own places. A bias, never a filter; client-side because the RPC has no viewport parameter. Pure JS.
+- `lib/warmSearch.js` (B2021648) — once per page load: preconnect to Supabase, resolve the auth session, one throwaway search, so the FIRST real search isn't the slow one. Fire-and-forget.
 - `lib/supabaseClient.js` — this module's own client. See BUNDLE ISOLATION above for why it
   isn't the site-planner's.
 - `db/food.sql` — the applied migration (production, `lyeqzkuiwngunutlkkmi`). `db/test/food_rls.test.sql` — the RLS proof.

@@ -656,19 +656,19 @@ describe("NEW-5 (revised) — colourful basemap, no clustering, his places alway
   });
 });
 
-describe("NEW-1 basemap control — Site Plan (default) + Hybrid, one shared source, remembered, legible pins", () => {
+describe("NEW-1 basemap control — Satellite (default) + Hybrid, one shared source, remembered, legible pins", () => {
   it("ONE control with exactly the registry's choices — never a gallery, never a layers panel", () => {
     const map = src("components/FoodMap.jsx");
     expect([...map.matchAll(/data-testid="food-basemap-toggle"/g)]).toHaveLength(1);
-    expect(map).toMatch(/SITE_PLAN_BASEMAP_CHOICES\.map\(/);
+    expect(map).toMatch(/FOOD_BASEMAP_CHOICES\.map\(/);
     expect(map).not.toMatch(/basemapGallery|LayerPanel/);
   });
 
-  it("the choice is remembered per device and the new-user default is the Site Plan map", () => {
+  it("the choice is remembered per device and the new-user default is Satellite", () => {
     const map = src("components/FoodMap.jsx");
     expect(map).toMatch(/useState\(readStoredBasemap\)/);
     expect(map).toMatch(/localStorage\.setItem\(BASEMAP_STORAGE_KEY, basemap\)/);
-    expect(map).toMatch(/catch \(_\) \{ return SITE_PLAN_BASEMAP\.key; \}/);
+    expect(map).toMatch(/catch \(_\) \{ return SATELLITE_BASEMAP\.key; \}/);
   });
 
   it("the tile layers are swapped WHOLE on change (fresh layers + removal), never `setUrl` on a shared layer", () => {
@@ -2843,8 +2843,8 @@ describe("searchQuality — rankSearchCandidates (the full pipeline, against rea
     expect(out[1].id).toBe(KATY_INC.id);
   });
 
-  it("a place he's already logged or flagged is exempt from the strong-match filter and is never dropped by dedupe", () => {
-    const weakButLogged = { id: "weak-logged", name: "Somewhere Odd", address: "", sim: 0.2, distance_km: 1,
+  it("a place he's already logged or flagged still has to match the query (NEW-2) but is never dropped by dedupe", () => {
+    const weakButLogged = { id: "weak-logged", name: "Fadis Odd Spot", address: "", sim: 0.2, distance_km: 1,
       confidence: 0.6, lat: BINZ_LLC.lat, lon: BINZ_LLC.lon }; // co-located with BINZ_LLC — would normally collapse away
     const out = rankSearchCandidates("fadis", [BINZ_LLC, weakButLogged], new Set(["weak-logged"]));
     expect(out.map((r) => r.id)).toContain("weak-logged");

@@ -22,6 +22,7 @@ import CompareView from "./CompareView.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
 import { useReviewPersistence, docSaveState } from "./lib/usePersistence.js";
 import { isAutoTitle, liveReviewProject } from "./lib/reviewNaming.js";
+import { metaForOpenedFile, noticeForTab } from "./lib/openedFileMeta.js";
 import { storedProjectName } from "../../shared/names/names.js";
 import { newReviewId, newSourceId, upsertReview, storeSource, isStoredSource, downloadSource, downloadFromDrive, driveStreamSource, MAX_BYTES, loadReview, currentUid, readDraft, reconcile, cloudReady, composeTitle, fileNewReview } from "./lib/reviewStore.js";
 import { writeLastDoc } from "./lib/lastDoc.js";
@@ -427,7 +428,8 @@ export default function DocReview({
   // Close (NEW-1): the editor reports unsaved edits up; Close asks Save / Discard / Cancel when there are any.
   const narrow = useNarrow(); // phone width: the toolbar strip scrolls sideways, so Close also gets its own always-visible bar
   const [closePrompt, setClosePrompt] = useState(null); // null | "ask" | "saving"
-  const [docNotice, setDocNotice] = useState(""); // one-line outcome carried across the open that follows a "save as new"
+  const [docNoticeRec, setDocNoticeRec] = useState({ tab: null, msg: "" }); // NEW-2: a status line belongs to the TAB that produced it
+  const setDocNotice = (msg, tab = curIdRef.current) => setDocNoticeRec({ tab, msg }); // one-line outcome carried across the open that follows a "save as new"
   const [docAuthor, setDocAuthor] = useState("Reviewer");
   const [historyOpen, setHistoryOpen] = useState(false); // B2022929 — the "Version history" sheet
   const [histBusy, setHistBusy] = useState(false);
@@ -769,14 +771,18 @@ export default function DocReview({
       await activateTab(hit.id);
       return { switched: true };
     }
-    if (hasFile && !reattach) {
+    if (reattach) return { switched: false, meta: L.meta };
+    // A NEW file is its own review: named after ITSELF, filed by the route/org/project context — never by whatever
+    // the root last held (a prior drawing's item/title, or the empty "Untitled" fallback). NEW-1 (2026-10-04).
+    const fresh = metaForOpenedFile(file.name, guess, today());
+    if (hasFile) {
       loadTok.current++;
       try { await saveNow(); } catch (_) { /* the local mirror already ran */ }
       stashActive();
       resetSingle();
-      return { switched: false, meta: newMeta() };
     }
-    return { switched: false, meta: L.meta };
+    setMeta(fresh);
+    return { switched: false, meta: fresh };
   };
   const openFile = async (file) => {
     // A null/no-op drop must not be silent (B446): name it on the always-visible banner so
@@ -892,7 +898,7 @@ export default function DocReview({
       if (!ready) return { ok: false, error: "Sign in to save a new file to the Library." };
       const res = await fileNewReview({ ...scope, project: filing.project, blob, fileName: name });
       if (!res.ok || res.uploadFailed) return { ok: false, error: res.error || res.driveError || "Couldn’t save the new file to the Library." };
-      setDocNotice(`Saved as a new Word file, “${name}”. The original is kept in the Library. ${where}`);
+      setDocNotice(`Saved as a new Word file, “${name}”. The original is kept in the Library. ${where}`, res.id);
       await openReview({ id: res.id });
       return { ok: true, message: `Saved as “${name}”. The original is kept. ${where}` };
     }
@@ -950,7 +956,7 @@ export default function DocReview({
     const name = copyFileName(v.name || (source && source.name), v.savedAt);
     const res = await fileNewReview({ ...docScope(), project: meta.project, blob, fileName: name });
     if (!res.ok || res.uploadFailed) { setHistErr(res.error || res.driveError || "Couldn’t save the copy to the Library."); return; }
-    setDocNotice(`Saved a copy as “${name}”. The original and all its versions are kept.`);
+    setDocNotice(`Saved a copy as “${name}”. The original and all its versions are kept.`, res.id);
     setHistoryOpen(false);
     await openReview({ id: res.id });
   });
@@ -2701,7 +2707,7 @@ export default function DocReview({
         return (
           <Suspense key={f.tabId} fallback={here ? <div style={{ flex: 1, display: "grid", placeItems: "center", color: PAL.muted, fontFamily: "system-ui, sans-serif" }}>Opening “{f.name}”…</div> : null}>
             <div data-testid="doc-editor-host" data-tab-id={f.tabId} style={{ flex: here ? 1 : "none", display: here ? "flex" : "none", minHeight: 0, minWidth: 0, position: "relative" }}>
-              <DocEditor file={f} author={docAuthor} notice={here ? docNotice : ""} onSave={saveDocFile} onDirty={(d) => setDirtyFor(f.tabId, d)} saveRef={saveRefFor(f.tabId)} onHistory={() => { setHistMsg(""); setHistErr(""); setHistoryOpen(true); }}
+              <DocEditor file={f} author={docAuthor} notice={noticeForTab(docNoticeRec, f.tabId)} onSave={saveDocFile} onDirty={(d) => setDirtyFor(f.tabId, d)} saveRef={saveRefFor(f.tabId)} onHistory={() => { setHistMsg(""); setHistErr(""); setHistoryOpen(true); }}
                 versionBar={f.readOnly ? { label: f.versionLabel, busy: histBusy, onRestore: () => restoreFromHistory(versions.find((v) => v.srcId === f.versionSrcId)), onCopy: () => copyFromHistory(versions.find((v) => v.srcId === f.versionSrcId)), onBack: backToLatest } : null} />
             </div>
           </Suspense>

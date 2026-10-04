@@ -37,20 +37,16 @@ describe("the visible layer set, by zoom", () => {
 });
 
 describe("both surfaces read the one stack", () => {
-  it("/food's default option IS the Site Plan basemap object, and a stale key resolves to it", () => {
-    expect(resolveBasemapChoice(undefined)).toBe(SITE_PLAN_BASEMAP);
-    expect(resolveBasemapChoice("satellite")).toBe(SITE_PLAN_BASEMAP);
+  it("/food no longer mirrors the Site stack (B2070433): its default is Satellite, photo only; the Site Plan definition itself is unchanged", () => {
+    expect(resolveBasemapChoice(undefined).key).toBe("satellite");
+    expect(resolveBasemapChoice("siteplan").key).toBe("satellite");
     expect(SITE_PLAN_BASEMAP.vectorMode).toBe("site");
+    expect(strip(read("src/workspaces/food/components/FoodMap.jsx"))).not.toMatch(/attachSiteLabelStack|siteStack/);
   });
-  it("Food attaches the shared stack for the default; the map finder reads siteStack — neither keeps a private zoom literal", () => {
-    const food = strip(read("src/workspaces/food/components/FoodMap.jsx"));
-    const helper = strip(read("src/shared/basemaps/siteLabelStack.js"));
+  it("the map finder reads siteStack — it keeps no private zoom literal", () => {
     const finder = strip(read("src/workspaces/site-planner/MapFinder.jsx"));
-    expect(food).toMatch(/attachSiteLabelStack\(/);
-    expect(helper).toMatch(/siteStack\(map\.getZoom\(\)\)/);
     expect(finder).toMatch(/siteStack\(zoom, \{ roads: labels, cityNames \}\)/);
     expect(finder).toMatch(/siteStack\(zoom\)\.includes\("cityNames"\)/);
-    for (const code of [food, helper]) expect(code).not.toMatch(/getZoom\(\)\s*[<>]=?\s*\d+/);
     expect(finder).not.toMatch(/getZoom\(\)\s*>=\s*\d+/);
   });
   it("the city-name layer is shared code (food may not import site-planner) and the old path is a pure re-export", () => {
