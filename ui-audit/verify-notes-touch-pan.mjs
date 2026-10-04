@@ -128,10 +128,14 @@ for (const engine of ["chromium", "webkit"]) {
     ok(`${tag} a drag starting on an unselected box's text pans`, !bx.sel && near(v5.x - v4.x, 30, 3) && near(v5.y - v4.y, -50, 3), `Δ ${(v5.x - v4.x).toFixed(1)},${(v5.y - v4.y).toFixed(1)}`);
     // 4. a wobble inside the slop is a tap, not a pan
     const q = { x: r.l + r.w * 0.5, y: r.t + r.h * 0.7 };
-    const v6 = await readView(env.page);
+    // The paper's ON-SCREEN origin (mat edge − view offset), not the raw view: on a phone a tap that enters a box
+    // collapses the module-tab row (NEW-6c) and the view absorbs that move so the page stays put — the view
+    // number changes, the paper must not.
+    const origin = async () => { const [v, m] = [await readView(env.page), await matRect(env.page)]; return { x: m.l - v.x, y: m.t - v.y }; };
+    const v6 = await origin();
     await touchDrive(env, [q], [{ x: q.x + 4, y: q.y + 3 }], { steps: 2, holdMs: 40 });
-    const v7 = await readView(env.page);
-    ok(`${tag} a wobble inside the slop does not pan`, v6.x === v7.x && v6.y === v7.y);
+    const v7 = await origin();
+    ok(`${tag} a wobble inside the slop does not pan`, near(v6.x, v7.x, 0.5) && near(v6.y, v7.y, 0.5), JSON.stringify([v6, v7]));
     await env.ctx.close();
   }
 
