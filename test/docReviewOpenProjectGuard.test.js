@@ -29,7 +29,7 @@ describe("DocReview.jsx loadSingleReview — re-checks project liveness before n
   });
 
   it("loadSingleReview computes openProjectId via openableProjectId, strictly before its own onNavigate call", () => {
-    const start = SRC.indexOf("const loadSingleReview = async (rec) => {");
+    const start = SRC.indexOf("const loadSingleReview = async (rec, opts = {}) => {");
     expect(start).toBeGreaterThan(-1);
     const end = SRC.indexOf("\n  const resetSingle = ", start);
     expect(end).toBeGreaterThan(start);
