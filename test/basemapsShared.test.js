@@ -44,7 +44,7 @@ describe("one definition of the Site Plan map", () => {
   it("Food and the map finder use the SAME vector-label helper (never a Food-only copy)", () => {
     const food = stripComments(read("src/workspaces/food/components/FoodMap.jsx"));
     const finder = stripComments(read("src/workspaces/site-planner/MapFinder.jsx"));
-    for (const code of [food, finder]) expect(code).toMatch(/from "(\.\.\/)+shared\/basemaps\/vectorLabelLayer\.js"/);
+    for (const code of [food, finder]) expect(code).toMatch(/(from |import\()"(\.\.\/)+shared\/basemaps\/vectorLabelLayer\.js"/);
     expect(food).not.toMatch(/maplibre|buildVectorStyle/);
   });
 

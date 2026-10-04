@@ -36,7 +36,7 @@
  * B1095 discipline: reading a gate must never drag a pipeline onto the boot bundle.
  */
 
-import { ROAD_NAMES_FROM } from "../../../shared/basemaps/vectorStyle.js";
+import { ROAD_NAMES_FROM } from "../../../shared/basemaps/basemaps.js";
 import { TERRAIN_MIN_ZOOM } from "./terrainGate.js";
 
 /* The evidence-layer gates. They lived as module-private constants inside

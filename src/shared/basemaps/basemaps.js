@@ -126,6 +126,10 @@ export const VECTOR_SOURCE = {
  * `vectorStyle.js` subtracts this. */
 export const VECTOR_ZOOM_OFFSET = 1;
 
+/* Leaflet zoom from which road NAMES draw. Lives here (not in vectorStyle.js) so the Layers panel's
+ * "not showing at this zoom" note can read it without pulling the style module onto the Site route. */
+export const ROAD_NAMES_FROM = 11;
+
 /* The pre-vector raster reference overlays survive ONLY as the fallback when the vector source
  * cannot be reached (LOUD-FAILURE: the map must not silently lose its road names). */
 const LABELS_ATTR = "Labels &copy; Esri";

@@ -15,14 +15,14 @@
  *   · Labels — modern sans (Noto Sans), soft halo instead of a heavy black outline, road names that
  *     follow the line, collision ON (never `text-allow-overlap`), ranked so the important name wins.
  *   · Nothing here is interactive; pins/drawing stay in Leaflet above this layer. */
-import { VECTOR_ZOOM_OFFSET } from "./basemaps.js";
+import { VECTOR_ZOOM_OFFSET, ROAD_NAMES_FROM } from "./basemaps.js";
+export { ROAD_NAMES_FROM };
 
 /* Leaflet zoom at which local streets first appear (neighbourhood zoom). Below it they are hidden. */
 export const LOCAL_STREETS_FROM = 15;
 /* Leaflet zoom from which sparse points of interest appear (Site Plan only — see `includePois`). */
 export const POI_FROM = 15;
 /* Leaflet zoom from which road NAMES draw (the Layers panel's "not showing at this zoom" note reads this). */
-export const ROAD_NAMES_FROM = 11;
 
 const FONT_REGULAR = ["Noto Sans Regular"];
 const FONT_MEDIUM = ["Noto Sans Medium"];

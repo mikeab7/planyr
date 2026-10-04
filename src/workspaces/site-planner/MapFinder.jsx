@@ -18,7 +18,6 @@ import { tileCacheLimit } from "./lib/tileBudget.js";
 import { boundTileCache, capTileCache, armBlankTileHeal } from "./lib/tileLifecycle.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { BASEMAPS, FINDER_BASEMAP_CHOICES, ROAD_NAMES_TILES, SITE_PLAN_BASEMAP, IMAGERY_GRADE, densityTileOptions } from "../../shared/basemaps/basemaps.js";
-import { addVectorLabels } from "../../shared/basemaps/vectorLabelLayer.js";
 // B427410 (×2) — the ONE gate for the "Road names" overlay below, shared with LayerPanel's
 // dormant note so the map's opacity switch and the panel's explanation can't disagree.
 // B427411 — the ONE corner-radius scale. Never a bare number at a call site: eight of them
@@ -2219,9 +2218,14 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !labels) return undefined;
-    const handle = addVectorLabels(L, map, { includePois: true });
-    labelsRef.current = handle;
-    return () => { handle.remove(); labelsRef.current = null; };
+    // Lazy: the helper (and MapLibre behind it) never rides the Site route's boot chunks.
+    let cancelled = false, handle = null;
+    import("../../shared/basemaps/vectorLabelLayer.js").then(({ addVectorLabels }) => {
+      if (cancelled) return;
+      handle = addVectorLabels(L, map, { includePois: true });
+      labelsRef.current = handle;
+    }).catch((e) => console.error("MapFinder: vector labels failed to load", e));
+    return () => { cancelled = true; if (handle) handle.remove(); labelsRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [labels, basemap]);
 
