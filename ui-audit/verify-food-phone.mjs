@@ -5,7 +5,7 @@
  * a build pointed at a MOCKED Supabase origin (ui-audit/lib/foodFixture.mjs). Nothing here touches the
  * owner's data: every request is answered from the in-memory fixture and every write is recorded, not sent.
  * Labels: this is WebKit-emulated-iPhone, NOT Mobile Safari. The on-screen keyboard cannot be raised in
- * headless WebKit — "keyboard up" is EMULATED by shrinking the visual viewport height (setViewportSize).
+ * headless WebKit — "keyboard up" is EMULATED by shrinking window.visualViewport only (a stub — see KEYBOARD_STUB).
  *
  * Arms (each prints a row; exit 1 on any FAIL):
  *   1 DUPLICATE  — search "dao": exactly ONE row for the pair; picking it opens the EXISTING pin
@@ -33,7 +33,7 @@ const row = (arm, ok, detail, pending = null) => {
   console.log(`${status}  ${arm} — ${detail}`);
 };
 
-async function open(browser, { variant = "plain", device = "iPhone 15", viewport } = {}) {
+async function open(browser, { variant = "plain", device = "iPhone 15", viewport, kbStub = false } = {}) {
   const ctx = await browser.newContext({ ...(device ? devices[device] : {}), ...(viewport ? { viewport } : {}), ignoreHTTPSErrors: true });
   const page = await ctx.newPage();
   page.__touch = !!device;
@@ -41,6 +41,7 @@ async function open(browser, { variant = "plain", device = "iPhone 15", viewport
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await installFixture(page, state);
+  if (kbStub) await page.addInitScript(KEYBOARD_STUB);
   await page.goto(`${BASE}/#/food`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector('[data-testid="food-map"]', { timeout: 20000 });
   await assertMeasurable(page, "verify-food-phone");
@@ -48,6 +49,24 @@ async function open(browser, { variant = "plain", device = "iPhone 15", viewport
   await page.waitForTimeout(600); // initial bounds fetch + visits load
   return { ctx, page, state, errors };
 }
+
+
+/* iOS Safari does NOT resize the layout viewport when the keyboard opens: window.innerHeight stays put and only
+ * window.visualViewport shrinks. Shrinking the whole window (setViewportSize) is therefore the WRONG emulation for any
+ * code that reads visualViewport (the Food bottom sheet does) — it never sees a keyboard. This stub keeps the layout
+ * viewport at full height and makes visualViewport.height shrink by the keyboard's height, firing its 'resize'
+ * event, exactly as WebKit on a phone does. Call window.__setKeyboard(px) to raise it, 0 to drop it. (Still an
+ * EMULATION: the real keyboard, its predictive bar and iOS's native scroll-to-focus are not reproduced.) */
+const KEYBOARD_STUB = `(() => {
+  const ls = { resize: new Set(), scroll: new Set() }; let kb = 0;
+  const stub = {
+    get width() { return innerWidth; }, get height() { return innerHeight - kb; },
+    offsetLeft: 0, offsetTop: 0, pageLeft: 0, pageTop: 0, scale: 1,
+    addEventListener(t, f) { if (ls[t]) ls[t].add(f); }, removeEventListener(t, f) { if (ls[t]) ls[t].delete(f); },
+  };
+  Object.defineProperty(window, "visualViewport", { get: () => stub, configurable: true });
+  window.__setKeyboard = (h) => { kb = h; ls.resize.forEach((f) => f(new Event("resize"))); };
+})();`;
 
 const searchBox = (page) => page.locator('[data-testid="food-search-box"]');
 async function typeInSearch(page, text) {
@@ -154,7 +173,7 @@ async function armMapFollowFromList(browser) {
 }
 
 async function armLayout(browser, { label, viewport, device }) {
-  const { ctx, page } = await open(browser, { viewport, device });
+  const { ctx, page } = await open(browser, { viewport, device, kbStub: !!device });
   const measure = async () => page.evaluate(() => {
     const vv = window.visualViewport; const W = vv ? vv.width : innerWidth; const H = vv ? vv.height : innerHeight;
     const btn = (t) => [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === t);
@@ -175,7 +194,7 @@ async function armLayout(browser, { label, viewport, device }) {
   row(`3 LAYOUT (${label}): no sideways page scroll`, !scrollX, `scrollWidth>innerWidth=${scrollX}`);
   if (device) {
     const vp = page.viewportSize();
-    await page.setViewportSize({ width: vp.width, height: Math.round(vp.height * 0.55) }); // EMULATED keyboard-up
+    await page.evaluate((h) => window.__setKeyboard(h), Math.round(vp.height * 0.45)); // EMULATED keyboard-up (visual viewport only)
     await page.waitForTimeout(500);
     const kb = await measure();
     row(`3 LAYOUT (${label}): keyboard-up (emulated), toggle + field still on screen & hittable`, allOk(kb), JSON.stringify(kb));
@@ -197,7 +216,7 @@ async function armChain(browser) {
  * showed the START of the text while the keyboard's predictive bar showed the next word — the field ran off the
  * right edge, so new characters landed out of sight; iOS also offered an "AutoFill Contact" bar.)
  *
- * For EVERY text field in the module, on a phone, with the keyboard-up viewport EMULATED (setViewportSize shrunk —
+ * For EVERY text field in the module, on a phone, with the keyboard-up EMULATED (visual viewport shrunk, layout viewport kept —
  * headless WebKit cannot raise the real keyboard; labelled, not "iOS"): type a long entry and assert
  *   (a) the field sits inside the visible viewport AND inside every scrolling ancestor's visible box (a field under
  *       the sheet's own clip, or under the "keyboard", is not on screen),
@@ -279,7 +298,7 @@ async function armFields(browser) {
       } },
     ...[
       ["visit form — date", 'input[type="date"]', false, "visit"],
-      ["visit form — what I had", 'input[placeholder="Brisket plate, queso…"]', true, "visit"],
+      ["visit form — first dish name", '[data-testid="visit-dish-name"]', true, "visit"],
       ["visit form — what was good", 'input[placeholder="The hamachi, the agedashi…"]', true, "visit"],
       ["visit form — cost", 'input[placeholder="0.00"]', "num", "visit"],
       ["visit form — notes", "textarea", true, "visit"],
@@ -298,7 +317,7 @@ async function armFields(browser) {
   const only = (process.argv.find((x) => x.startsWith("--field=")) || "").slice(8);
   for (const phone of ["iPhone 15", "iPhone SE"]) {
     for (const f of FIELDS.filter((x) => !only || new RegExp(only, "i").test(x.id))) {
-      const { ctx, page } = await open(browser, { device: phone });
+      const { ctx, page } = await open(browser, { device: phone, kbStub: true });
       let tag = `4 FIELD (${phone}) ${f.id}`;
       try {
         const { sel, scrollSheet } = await f.open(page);
@@ -312,8 +331,8 @@ async function armFields(browser) {
         await page.touchscreen.tap(bb.x + Math.min(bb.width / 2, 60), bb.y + bb.height / 2);
         await page.waitForTimeout(250);
         const vp = page.viewportSize();
-        await page.setViewportSize({ width: vp.width, height: Math.round(vp.height * 0.55) }); // keyboard-up (EMULATED)
-        await page.waitForTimeout(700);
+        await page.evaluate((h) => window.__setKeyboard(h), Math.round(vp.height * 0.45)); // keyboard-up (EMULATED, visual viewport only)
+        await page.waitForTimeout(900);
         const focused = await page.evaluate(() => document.activeElement?.getAttribute("data-probe") === "1");
         if (!focused) await page.evaluate(() => document.querySelector('[data-probe="1"]').focus({ preventScroll: true }));
         if (f.typed === "num") await page.keyboard.type("123456.78", { delay: 15 });
@@ -339,9 +358,9 @@ async function armFields(browser) {
 
 /* known-good arm for ARM 4: a non-text control placed through the same visibility rule must read in-view. */
 async function armFieldsKnownGood(browser) {
-  const { ctx, page } = await open(browser, { device: "iPhone 15" });
+  const { ctx, page } = await open(browser, { device: "iPhone 15", kbStub: true });
   const vp = page.viewportSize();
-  await page.setViewportSize({ width: vp.width, height: Math.round(vp.height * 0.55) });
+  await page.evaluate((h) => window.__setKeyboard(h), Math.round(vp.height * 0.45));
   await page.waitForTimeout(500);
   await page.evaluate(() => { const b = [...document.querySelectorAll("button")].find((x) => x.textContent.trim() === "Map"); b.setAttribute("data-probe", "1"); });
   const m = await measureField(page);
