@@ -60,11 +60,6 @@ describe("Library Home Unfiled section (NEW-2)", () => {
     expect(src).toContain("fileReviewIntoProject");
     expect(src).not.toMatch(/await refileReview\(/);
   });
-  it("Review's 'Upload a file without a project' says where it will land", async () => {
-    const { ReviewEmptyStateView } = await import("../src/workspaces/doc-review/components/ReviewEmptyState.jsx");
-    const h = renderToStaticMarkup(createElement(ReviewEmptyStateView, { projects: [{ id: "p1", name: "A" }], reviews: [] }));
-    expect(h).toMatch(/Unfiled in the Library/);
-  });
 });
 
 describe("fileReviewIntoProject — the shared filing step", () => {
@@ -100,26 +95,28 @@ describe("fileReviewIntoProject — the shared filing step", () => {
   });
 });
 
-describe("Close (NEW-1) — wiring", () => {
+describe("Close (NEW-1, tabs 2026-10-04) — wiring", () => {
   const src = read("src/workspaces/doc-review/DocReview.jsx");
-  it("a Close control exists for an open file, on the toolbar and (phone) its own bar", () => {
-    expect((src.match(/data-testid="review-close-file"/g) || []).length).toBe(2);
-    expect(src).toMatch(/const requestClose = /);
+  it("the #1926 Close control and the #1920 empty-state screen are gone; closing is the tab's ×", () => {
+    expect(src).not.toContain('data-testid="review-close-file"');
+    expect(src).not.toContain("ReviewEmptyState");
+    expect(src).not.toContain("requestClose");
   });
-  it("unsaved Word/text edits prompt; a clean file closes straight away", () => {
-    expect(src).toMatch(/if \(docFile && docDirty\) setClosePrompt\("ask"\); else closeNow\(\)/);
-    expect(src).toContain("onDirty={setDocDirty}");
-    expect(src).toContain("saveRef={docSaveRef}");
+  it("unsaved Word/text edits prompt; a clean tab closes straight away", () => {
+    expect(src).toMatch(/if \(t\.kind === "doc" && dirtyMap\[id\]\)/);
+    expect(src).toContain("onDirty={(d) => setDirtyFor(f.tabId, d)}");
+    expect(src).toContain("saveRef={saveRefFor(f.tabId)}");
   });
-  it("Close flushes the review, then swaps in a blank one so the last-doc pointer stops pointing at the closed file", () => {
-    const body = src.slice(src.indexOf("const closeNow = async"), src.indexOf("const requestClose"));
+  it("closing the active tab flushes it, drops it, then shows the neighbour — or leaves Review blank", () => {
+    const body = src.slice(src.indexOf("const closeNow = async"), src.indexOf("// × on any tab."));
     expect(body.indexOf("saveNow()")).toBeGreaterThan(-1);
-    expect(body.indexOf("saveNow()")).toBeLessThan(body.indexOf("resetSingle()"));
+    expect(body.indexOf("saveNow()")).toBeLessThan(body.indexOf("dropTab(id)"));
+    expect(body).toMatch(/if \(next\) await openReview\(\{ id: next \}\); else resetSingle\(\);/);
   });
   it("a Save that fails keeps the file open", () => {
     expect(src).toMatch(/if \(ok\) await closeNow\(\); else setClosePrompt\(null\)/);
   });
-  it("Word/text files are recorded as recents and as the resume target (they open in the editor now)", () => {
+  it("Word/text files are recorded as recents (they open in the editor now)", () => {
     expect(src).toContain("!isPdfName(source.name) && !docKindOf(source.name)");
     expect(src).toContain("!isPdfName(src.name) && !docKindOf(src.name)");
   });
@@ -136,11 +133,9 @@ describe("Close (NEW-1) — wiring", () => {
     expect(e).toContain("saveRef.current = () => doSave(false)");
     expect(e).toMatch(/return true;\s*\} catch/);
   });
-  it("B2039234 — every project-switch branch that would replace the file goes through the dirty-file prompt, and Cancel goes back", () => {
-    const eff = src.slice(src.indexOf("const back = () => onNavigate"), src.indexOf("// Consume the Shell's cross-workspace"));
-    expect((eff.match(/leave\(\(\) =>/g) || []).length).toBe(5);
-    expect(eff).not.toMatch(/[^(]\(async \(\) => \{ try \{ await saveNow\(\); \} catch \(_\) \{\} setMode\("review"\); resetSingle\(\); \}\)\(\);\s*\n\s*\}\s*\n\s*\/\/ eslint/);
-    expect(src).toContain("if (!ok) choice = \"cancel\"");
-    expect(src).toContain("if (choice === \"cancel\") sw.back(); else sw.run();");
+  it("switching project no longer replaces or closes the open file (B2039234's prompt retired with the swap)", () => {
+    expect(src).not.toContain("leaveDirtyDoc");
+    expect(src).not.toContain("switchDecide");
+    expect(src).not.toContain("readLastDoc(projectId)");
   });
 });

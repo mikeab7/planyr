@@ -74,3 +74,33 @@ export function isBlankDoublePress(prev, next, { ms = BLANK_DBLTAP_MS, px = BLAN
   if (!(dt >= 0) || !(dt < ms)) return false;
   return Math.abs(next.x - prev.x) <= px && Math.abs(next.y - prev.y) <= px;
 }
+
+/* ⛔ WHERE THE FIRST LETTER SITS INSIDE A FRESHLY PLACED BOX (NEW-1, 2026-10-04, owner report:
+ * "Where I double click in the notebook module when I'm on my phone is not exactly where the text
+ * lands"). A box's stored `x`/`y` is its TOP-LEFT CORNER, but a finger means "start writing HERE" —
+ * the first glyph. Between the two sit the box's own insets, all in the box's own (document-space)
+ * units, so they scale with the canvas zoom and cannot be fixed with a screen constant:
+ *   x : 1px border + 16px left padding                         (`.planyr-anchor` in `NoteEditor.jsx`)
+ *   y : 1px border + 3px top padding + the first paragraph's `margin: 1em 0 0 0` + half a line
+ * Measured in WebKit (hasTouch/isMobile) before the fix: the glyph landed 17px right and 23.8px below
+ * the tap at 100%, and 35 / 48.6 at 200% — i.e. the offset grew with zoom, which is the signature of
+ * a document-space inset rather than a coordinate-mixing bug. `test/notesTouchLanding.test.js` pins
+ * these three numbers against the stylesheet text so a padding change cannot silently re-open this.
+ *
+ * ⛔ TOUCH ONLY, deliberately: the owner asked that desktop double-click behaviour not change, and
+ * `verify-notes-anchor-zoom`'s acceptance test pins desktop's stored point to the click point. */
+export const BOX_INSET_X = 17;
+export const BOX_INSET_TOP = 4;
+export const BOX_FIRST_LINE_MARGIN_EM = 1;
+
+/** The box-origin (top-left) to store so that the first glyph's left edge and vertical centre sit on
+ *  the tap. `x`,`y` are the tap in DOCUMENT space; `lineH` and `fontPx` are the editor's unscaled
+ *  computed line height and font size (document-space units, whatever the canvas zoom). */
+export function touchBoxOrigin({ x, y, lineH, fontPx }) {
+  const line = Number.isFinite(lineH) && lineH > 0 ? lineH : 0;
+  const em = Number.isFinite(fontPx) && fontPx > 0 ? fontPx : 0;
+  return {
+    x: x - BOX_INSET_X,
+    y: y - (BOX_INSET_TOP + BOX_FIRST_LINE_MARGIN_EM * em + line / 2),
+  };
+}
