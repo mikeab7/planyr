@@ -5,7 +5,15 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-09-30._
+_Last updated: 2026-10-04._
+
+## ✉️ Two steps to make team invites actually send email (B2049312)
+
+> **What changed:** Invite and Resend invite now email the person (subject "<you> invited you to <team> on Planyr").
+> Until these two steps are done, Invite still saves the invite and tells you "saved, but the email didn't send".
+>
+> - [ ] **Run one SQL script in Supabase** (I'll hand you `team_invite_email.sql`): SQL Editor → paste → Run. Adds a "last emailed" stamp so Resend can't be spammed. Touches no existing invite; safe to re-run.
+> - [ ] **Create a Resend account (resend.com), verify planyr.io there, and add the key to Cloudflare** — Pages → planyr → Settings → Variables and Secrets → Production → add secret **`RESEND_API_KEY`**. Resend will give you a few DNS records to add for planyr.io. Never paste the key in chat or the repo. Optional: `INVITE_FROM` (default `Planyr <no-reply@planyr.io>`).
 
 ## 🗺 One database script so comps follow their county when you move a site plan (B1953796)
 
