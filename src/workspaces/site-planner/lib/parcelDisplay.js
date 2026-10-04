@@ -75,11 +75,17 @@ const ParcelTiles = L.GridLayer.extend({
     this._parcelIndex = index;
     this._dirty = null;
     this._flushTimer = null;
+    this._pool = []; // canvases from tiles Leaflet dropped — a zoom settle reuses them instead of allocating ~dozens
   },
   createTile(coords) {
-    const tile = L.DomUtil.create("canvas", "leaflet-tile");
+    const tile = this._pool.pop() || L.DomUtil.create("canvas", "leaflet-tile");
     this._paint(tile, coords);
     return tile;
+  },
+  _removeTile(key) {
+    const t = this._tiles[key];
+    L.GridLayer.prototype._removeTile.call(this, key);
+    if (t && t.el && this._pool.length < 64) this._pool.push(t.el);
   },
   _paint(tile, coords) {
     const size = this.getTileSize();
