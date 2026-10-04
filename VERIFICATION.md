@@ -166,6 +166,16 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1414592 — B1989504/B1989505: the "Start your site" card no longer covers the map `Blocker: live-GIS`
+
+Sandbox-proven: `e2e/start-hint-placement.spec.js` (red on main, green here; emulated phone, not a real iPhone). **Still needs the deployed build** (`live-GIS` here means the real planyr.io edge + real basemap tiles; no signed-in data needed).
+**Steps** (new Untitled site, Site tab; read `/version.json` with `cache:'no-store'` and the served chunk hash in the SAME observation):
+1. Phone width (390×844, Playwright device descriptor, WebKit if installable else Chromium — name the engine): open a new blank site. **Expect:** a compact "Start your site" strip at the top, between the Panels and Tools edge tabs; the middle of the map is clear.
+2. Tap the map centre / drag. **Expect:** the map pans, nothing intercepts.
+3. Tools → Parcel tools → Draw new parcel. **Expect:** the strip is gone and stays gone while drawing.
+4. New blank site again → ✕ → reload. **Expect:** strip stays dismissed.
+5. Desktop width: **Expect:** strip top-left, clear of the middle. Real iPhone Safari look (toolbar collapse, safe areas) remains owner-side and is NOT claimed.
+
 ### V1474944 — B2056784: no full-screen button on iPhone Safari; still present and working on desktop Chrome `Blocker: real-device (iPhone Safari has no Fullscreen API for page elements — cannot be produced headless)`
 
 Sandbox-proven: `test/fullscreenSupport.test.js`, `e2e/fullscreen-gate.spec.js` (API stubbed off at iPhone width; iPad width, standalone and desktop arms). The real-device confirmation is what is left.

@@ -1823,6 +1823,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const pondRevealTargetRef = useRef(null); // null = the card root; "assistant" / "purpose" for a sub-card
   // B875 — a one-time hint the first time a pond auto-classifies as Hybrid (its cut serves both
   // detention above the flood WSE and mitigation below it). Dismiss persists so it never nags.
+  // NEW-1 (2026-09-30) — the empty-site "Start your site" hint is dismissible once and stays
+  // dismissed on this device (a per-viewer convenience, so localStorage — read/write in try/catch).
+  const [startHintDismissed, setStartHintDismissed] = useState(() => { try { return !!localStorage.getItem("planarfit:startHintDismissed"); } catch (_) { return false; } });
+  const dismissStartHint = () => { setStartHintDismissed(true); try { localStorage.setItem("planarfit:startHintDismissed", "1"); } catch (_) { /* dismissal just won't persist */ } };
+  const startHintFileRef = useRef(null);
   const [hybridHintSeen, setHybridHintSeen] = useState(() => { try { return !!localStorage.getItem("planarfit:pondHybridHintSeen"); } catch (_) { return true; } });
   const dismissHybridHint = () => { try { localStorage.setItem("planarfit:pondHybridHintSeen", "1"); } catch (_) {} setHybridHintSeen(true); };
   useEffect(() => {
@@ -25325,29 +25330,32 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </div>
           </div>
 
-          {/* empty state */}
-          {parcels.length === 0 && els.length === 0 && !sheetOverlays.length && (
-            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
-              <div style={{ textAlign: "left", color: PAL.muted, background: "var(--surface-overlay)", padding: "20px 24px", borderRadius: 14, border: `1px solid ${PAL.panelLine}`, boxShadow: "0 8px 32px rgba(28,25,20,0.08)", maxWidth: 380 }}>
-                <div style={{ fontSize: 14.5, fontWeight: 700, color: PAL.ink, marginBottom: 10 }}>Start your site</div>
-                {/* NEW-5 (B849588) — one vocabulary for "get a parcel from county records" across
-                    this card, the Parcel tools ▾ menu (`lib/parcelActions.js`'s `identify`/`address`
-                    rows) and the Map finder's own parcel-pick hint, so the same job isn't named three
-                    different ways in three places. This also points at the control that actually does
-                    the job: the old copy sent a new user back to the "Map" button (top-left), which
-                    leaves this plan for the site picker — the in-place identify lives one click away,
-                    in Parcel tools ▾, right here. */}
+          {/* empty state — NEW-1/NEW-2 (2026-09-30, owner iPhone report): a compact card DOCKED to the top
+              edge, never over the middle of the map (it used to be a centred box across the exact
+              area he was about to draw on, and it stayed up after Draw new parcel was armed). It
+              exists only while nothing has started a site: any lot, reference, armed tool, identify
+              pass or open Add menu removes it, and one tap on ✕ dismisses it for good. Each option
+              is itself the action. The container is the card only (no full-size wrapper), so nothing
+              invisible can sit over the canvas. Same vocabulary as the Parcel tools ▾ menu
+              (`lib/parcelActions.js`): "Click a lot on the map" = a county-recorded lot. */}
+          {parcels.length === 0 && els.length === 0 && !sheetOverlays.length && !startHintDismissed
+            && tool === "select" && !identifyMode && !addParcelMenu && !draftPoly && !ovCalib && (
+            <div data-testid="start-hint" style={{ position: "absolute", top: narrow ? 66 : 12, left: narrow ? TOOLS_TAB_WIDTH_PX + 8 : 12, right: narrow ? TOOLS_TAB_WIDTH_PX + 8 : "auto", maxWidth: narrow ? undefined : 420, zIndex: 5, boxSizing: "border-box", background: "var(--surface-overlay)", padding: narrow ? "6px 38px 8px 10px" : "9px 40px 10px 12px", borderRadius: RADIUS.md, border: `1px solid ${PAL.panelLine}`, boxShadow: "0 4px 16px rgba(28,25,20,0.10)" }}>
+              <div style={{ fontSize: FONT_SIZE.display, fontWeight: 700, color: PAL.ink, marginBottom: narrow ? 4 : 7 }}>Start your site</div>
+              <button data-testid="start-hint-dismiss" onClick={dismissStartHint} aria-label="Dismiss" title="Dismiss"
+                style={{ position: "absolute", top: 0, right: 0, width: 36, height: 36, border: "none", background: "transparent", color: PAL.muted, fontSize: FONT_SIZE.emphasis, cursor: "pointer", fontFamily: "inherit" }}>✕</button>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
                 {[
-                  ["1", <><b>Click a lot on the map</b> — county records (Parcel tools ▾, right rail) — or add one by address,</>],
-                  ["2", <>or drop a <b>screenshot reference</b> and calibrate it,</>],
-                  ["3", <>or draw one yourself (Parcel tools ▾ → Draw new parcel).</>],
-                ].map(([n, body]) => (
-                  <div key={n} style={{ display: "flex", gap: 10, alignItems: "baseline", fontSize: 12.5, lineHeight: 1.55, marginBottom: 5 }}>
-                    <span style={{ width: 17, height: 17, borderRadius: 99, background: "var(--planner-raised)", color: "var(--text-secondary)", fontSize: 10.5, fontWeight: 700, display: "inline-flex", alignItems: "center", justifyContent: "center", flex: "none", transform: "translateY(2px)" }}>{n}</span>
-                    <span>{body}</span>
-                  </div>
+                  ["start-hint-lot", "Click a lot on the map", () => { setIdentifyMode(true); ensureBasemapOn(); setIdentifyRes(null); setJurInfo(null); }],
+                  ["start-hint-address", "Search an address", () => openLandPanel({ select: false, addMenu: true })],
+                  ["start-hint-draw", "Trace your boundary", () => selectTool("parcel")],
+                  ["start-hint-screenshot", "Use a screenshot", () => startHintFileRef.current?.click()],
+                ].map(([tid, label, act]) => (
+                  <button key={tid} data-testid={tid} onClick={act}
+                    style={{ minHeight: narrow ? 34 : 36, padding: "4px 7px", borderRadius: RADIUS.sm, border: `1px solid ${PAL.panelLine}`, background: "var(--planner-raised)", color: PAL.ink, fontSize: FONT_SIZE.control, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", textAlign: "left", lineHeight: 1.25 }}>{label}</button>
                 ))}
               </div>
+              <input ref={startHintFileRef} type="file" accept="application/pdf,image/*,.dxf,.dwg" style={{ display: "none" }} onChange={(e) => { addOverlayFile(e.target.files?.[0]); e.target.value = ""; }} />
             </div>
           )}
 
