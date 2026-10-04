@@ -167,8 +167,8 @@ function haversineMeters(a, b) {
 /** The full pipeline: exclude known-corrupted rows, exclude weak matches (see isStrongMatch),
  *  rank clean/high-confidence/non-registry records first, then collapse near-duplicate records
  *  of the same real-world spot down to one. `protectedIds` (his own logged visits + "want to
- *  try" flags) is exempted from the strong-match filter — a place he's already vetted stays
- *  findable even if its name fuzzy-matches the query oddly — and is NEVER dropped by dedup, so a
+ *  try" flags) is exempted from the corrupted-address filter and sorts first, but must still pass
+ *  the strong-match word rule (NEW-2: "dao" must not list a saved Dairy Queen) — and is NEVER dropped by dedup, so a
  *  search can never stop resolving to the specific place-id an existing visit or flag points at.
  *  Chain locations that are genuinely far apart (km-scale, not the ~30m of a real duplicate) are
  *  untouched — each stays independently selectable. */
@@ -176,7 +176,10 @@ export function rankSearchCandidates(query, rawResults, protectedIds = new Set()
   const isProtected = (r) => protectedIds.has(r.id);
 
   const survivors = (rawResults || []).filter((r) => {
-    if (isProtected(r)) return true;
+    // NEW-2 (B2021649): a saved place is NOT exempt from the word-match rule — the RPC's loose
+    // trigram pool returned his saved Dairy Queen for "dao" and the old exemption kept it. A saved
+    // place that genuinely matches still passes (and SearchBox adds those itself, so none is lost).
+    if (isProtected(r)) return isStrongMatch(query, r.name, r.address);
     if (hasConcatenatedAddress(r.address)) return false;
     return isStrongMatch(query, r.name, r.address);
   });

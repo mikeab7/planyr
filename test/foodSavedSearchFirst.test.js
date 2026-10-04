@@ -64,3 +64,29 @@ describe("saved place first, once", () => {
     expect(new Set(out.map((x) => x.id)).size).toBe(out.length);
   });
 });
+
+// NEW-2 (B2021649): "dao" listed his saved Dairy Queen — the RPC's loose trigram pool returned it and
+// the saved-place exemption skipped the word-match rule. Fixtures only.
+describe("saved places must genuinely match the query (NEW-2)", () => {
+  const DQ = r("dq", "Dairy Queen", 29.7, -95.4, "1 Main St, Houston, TX", { sim: 0.4 });
+  const REAL = [
+    r("deDao", "De Dao", 29.7, -95.4, "2 A St, Houston"), r("phoCaDao", "Pho Ca Dao", 29.7, -95.41, "3 B St, Houston"),
+    r("daoLao", "Dao Lao Thai", 29.7, -95.42, "4 C St, Houston"),
+  ];
+  const names = (q, raw, logged) => rankSearchCandidates(q, raw, new Set(logged)).map((x) => x.name);
+
+  it("'dao' does not list a saved Dairy Queen, but still lists saved places that really match", () => {
+    expect(names("dao", [SAVED_DAON, DQ, ...REAL], ["dq", "daon-a", "deDao"])).not.toContain("Dairy Queen");
+    expect(names("dao", [SAVED_DAON, DQ, ...REAL], ["dq", "daon-a", "deDao"])).toEqual(expect.arrayContaining(["De Dao"]));
+  });
+  it("short queries, apostrophes, case, multi-word and starts-with all still find the saved place", () => {
+    expect(names("DAO", [SAVED_DAON], ["daon-a"])).toEqual([SAVED_DAON.name]);
+    expect(names("daon", [SAVED_DAON], ["daon-a"])).toEqual([SAVED_DAON.name]);
+    expect(names("dao'n korean", [SAVED_DAON], ["daon-a"])).toEqual([SAVED_DAON.name]);
+    expect(names("dairy queen", [DQ], ["dq"])).toEqual(["Dairy Queen"]);
+    expect(names("da", [DQ], ["dq"])).toEqual(["Dairy Queen"]);
+  });
+  it("a saved duplicate is still never collapsed away", () => {
+    expect(names("daon", [SAVED_DAON, DUP_DAON], ["daon-a", "daon-b"]).length).toBe(2);
+  });
+});
