@@ -12,6 +12,10 @@
  * Props:
  *  - title       : string / node — the single panel-level title (the inner Section titles that
  *                  duplicated it are dropped so the title shows exactly once).
+ *  - icon        : node — the section glyph, leading the ONE header row (flat-panel layout).
+ *  - subtitle    : string — one-line site/plan name under the title (truncates, never wraps).
+ *  - actionsRef  : callback ref for a slot between the title and the detach/× controls, where a
+ *                  section-level action (e.g. Drainage's flood-data ↻) portals itself in.
  *  - floating    : boolean — true in the floating card, false in the docked column.
  *  - canFloat    : boolean — false below the docked-only breakpoint; hides the detach icon.
  *  - onDetach    : () => void — dock → float (shown docked when canFloat).
@@ -57,7 +61,7 @@ function IconBtn({ title, onClick, children, "data-testid": testId, "aria-label"
   );
 }
 
-export default function PanelChrome({ title, floating, canFloat, onDetach, onDock, onClose, onToggle, onDragStart, "data-testid": testId }) {
+export default function PanelChrome({ title, icon, subtitle, actionsRef, floating, canFloat, onDetach, onDock, onClose, onToggle, onDragStart, "data-testid": testId }) {
   return (
     <div
       data-testid={testId}
@@ -65,12 +69,21 @@ export default function PanelChrome({ title, floating, canFloat, onDetach, onDoc
       onDoubleClick={onToggle}
       style={{
         flex: "none", display: "flex", alignItems: "center", gap: 4,
-        padding: "8px 8px 8px 12px", borderBottom: "1px solid var(--planner-border)",
+        padding: "8px 8px 8px 13px", borderBottom: "1px solid var(--planner-border)",
         userSelect: "none", cursor: onDragStart ? "grab" : "default",
       }}>
-      <span style={{ flex: 1, minWidth: 0, fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-        {title}
+      {icon ? <span data-panel-icon="1" style={{ flex: "none", display: "grid", placeItems: "center", width: 28, height: 28, color: "var(--text-secondary)" }}>{icon}</span> : null}
+      <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 1 }}>
+        <span data-panel-title="1" style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: "var(--text-primary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {title}
+        </span>
+        {subtitle ? (
+          <span data-panel-subtitle="1" title={subtitle} style={{ fontSize: 10.5, color: "var(--text-secondary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{subtitle}</span>
+        ) : null}
       </span>
+      {/* Section-level action slot (Drainage's flood-data ↻ portals in here). Empty for every
+          other panel; `display: contents` when empty so it costs no width. */}
+      <span ref={actionsRef} data-panel-actions="1" onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()} style={{ flex: "none", display: "inline-flex", alignItems: "center", minWidth: 0 }} />
       {floating ? (
         <IconBtn title="Dock to the left rail" aria-label="Dock panel" onClick={onDock} data-testid={testId ? `${testId}-dock` : undefined}>
           <DockIcon />

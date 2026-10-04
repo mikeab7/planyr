@@ -176,6 +176,16 @@ Sandbox-proven: `ui-audit/ui-inventory.mjs --budget-only` relational gate green 
 5. Zoom far out. **Expect:** the hint is a rounded rectangle like the other messages and does NOT overlap the "?" help button; on desktop width the credit line at the bottom-right sits left of the "?" button, not under it.
 6. Switch to List. **Expect:** Date / Rating / Ambiance / Cost / Want to try are matching pill chips; nothing clipped.
 - **Stopping rule:** closes on a dated pass of 1–6, or a failed step filed as a recurrence on B2050928.
+### V1486288 — B2061600: Select-parcels outlines do not catch when a zoom or pan settles at zoom 14–16 in Bartow County GA `Blocker: real-data`
+
+Sandbox-proven: `ui-audit/verify-parcel-settle-cost.mjs` (z14 moveend settle 103.7 → 0.8 ms, mock at Bartow density), `test/parcelTileLayer.test.js`, and the existing parcel display harnesses. **Not provable here:** Michael's real 63,688-lot Bartow service, his GPU-accelerated Chrome, and how it *feels*. Read the served chunk hash in the SAME observation as the result (CLAUDE.md live-measurement rule).
+**Steps:**
+1. Map (#/site), centre 34.20 / -84.83 (his site A010-0202-001), turn Select parcels on. **Expect:** lot outlines draw as before (same colour/weight), only the lots in view.
+2. Zoom between levels 14, 15 and 16 and let each settle; then pan a short distance and let it settle. **Expect:** no visible catch when the map stops moving at any of the three levels (the reported "catch at 15, a clear one at 14" is gone). A brief hold right after zooming OUT while new lots stream in is the separate data-arrival cost (see B2061600) — record it if you see it, do not call it a pass or a fail of this check.
+3. At 14 and again at 16, click one lot. **Expect:** the lot that was under the cursor is selected and highlighted (B137: what you see is what you can select); hover/selected styling unchanged.
+4. Zoom out to 13. **Expect:** outlines hidden with the "zoom in a little to see the lines" hint, unchanged.
+5. Dense Texas check: Katy (29.786 / -95.825, Harris) then a Fort Bend view, Select parcels on, zoom 14–16. **Expect:** outlines draw, no catch, a lot click selects the right lot.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2061600.
 ### V1445360 — B2020272/B2020273: blue my-location marker, heading cone and arrow button on a real iPhone `Blocker: real-device (iOS compass permission prompt and the heading cone need a real phone; the sandbox has no sensors or map tiles)`
 
 Sandbox-proven: `ui-audit/verify-locate-marker.mjs` (colors, ring, pane order, metre-accurate circle at two zooms, cone present/absent, button states) and `test/locateHeading.test.js`. Left for the phone:
@@ -945,6 +955,17 @@ Stopping rule: this passes and moves to `docs/archive/VERIFICATION-DONE.md` once
 2. Re-run `src/workspaces/site-planner/db/test/security_definer_ownership_audit.test.sql` (paste into the SQL editor, or `execute_sql`) against the same project. **Expect:** all 14 cases PASS — specifically Case 13 now reports `plans=0 foreign=0` for a total stranger to the group, instead of the real counts.
 3. (Optional sanity check — confirms nothing else moved.) Re-run `db/test/sites_cas_ownership_independent.test.sql`. **Expect:** unaffected, still all PASS.
 - **Stopping rule:** closes when step 2 confirms Case 13 flips to PASS against the real deployed function — or it fails and is filed as a recurrence against B1853664, per STANDING RULE #2 (a null result is a FINDING, never a silent close).
+
+### V1421552 — B1996464: flat rail panels show real data correctly (populated Drainage rows, Analysis findings, Overlays with live layers) `Blocker: live-GIS`
+
+Sandbox-proven (`ui-audit/verify-flat-rail-panels.mjs` 0 failing across 14 panel renders; the pre-change build fails it 26 ways; `test/flatRailPanels.test.js`). **Still needs planyr.io where the flood/GIS services answer** — offline the Drainage rows only ever read "not checked yet" and Analysis never loads findings, so the populated states were not seen.
+**Steps** (note the served chunk hash in the same observation as each result):
+1. Site → a georeferenced plan (Silvestri / Concept D) → Drainage on a phone width. **Expect:** one header row (icon, DRAINAGE, site · plan, "Flood data … ↻", ×), no empty strip above it, no inner card; press ↻ and the header line reads "checking…" then an age.
+2. After the check completes: **Expect:** Detention / Mitigation / Buildability are label-left, value-right lines; a short row shows its SHORT/THIN/OK word in tone colour at the right end; the "Rule applied…" amber note and any reconciliation clause run full width under their row; "Buildings in the floodplain" is a divider-separated fold.
+3. Analysis tab after its screen loads. **Expect:** each finding is a divider row (glyph, name, status) — no tinted card — and expanding one indents its detail under the name.
+4. Overlays with a dropped PDF selected. **Expect:** the selected row shows an accent rule on its left edge, others none; controls on the row all work.
+5. Repeat 1 at desktop width. **Expect:** same, plus the detach icon still pops the panel to a floating card whose header carries the same icon/title/subtitle/↻.
+- **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1996464.
 
 ### V1308368 — B1838704: a polygon crop made from the Site tab OVERLAYS panel survives a signed-in cloud save, a reload on a second device, and prints clipped `Blocker: auth`
 
@@ -1975,16 +1996,6 @@ Sandbox-proven logged-out (both entry points, reload; red on main). **The signed
 3. Reload, then navigate to the Map. **Expect:** the project is still listed under the new name (it no longer vanishes).
 4. Delete the throwaway project. Read the served chunk hash in the same observation.
 - **Stopping rule:** closes on a dated pass of 1–3, or a failure is filed as a recurrence on B1991041.
-
-### V1414592 — B1989504/B1989505: the "Start your site" card no longer covers the map `Blocker: live-GIS`
-
-Sandbox-proven: `e2e/start-hint-placement.spec.js` (red on main, green here; emulated phone, not a real iPhone). **Still needs the deployed build** (`live-GIS` here means the real planyr.io edge + real basemap tiles; no signed-in data needed).
-**Steps** (new Untitled site, Site tab; read `/version.json` with `cache:'no-store'` and the served chunk hash in the SAME observation):
-1. Phone width (390×844, Playwright device descriptor, WebKit if installable else Chromium — name the engine): open a new blank site. **Expect:** a compact "Start your site" strip at the top, between the Panels and Tools edge tabs; the middle of the map is clear.
-2. Tap the map centre / drag. **Expect:** the map pans, nothing intercepts.
-3. Tools → Parcel tools → Draw new parcel. **Expect:** the strip is gone and stays gone while drawing.
-4. New blank site again → ✕ → reload. **Expect:** strip stays dismissed.
-5. Desktop width: **Expect:** strip top-left, clear of the middle. Real iPhone Safari look (toolbar collapse, safe areas) remains owner-side and is NOT claimed.
 
 ### V1445152 — B2020064: Map view zoom +/−/locate buttons clickable with a long Sites list `Blocker: real-data (signed-in account with his long site list on planyr.io)`
 
