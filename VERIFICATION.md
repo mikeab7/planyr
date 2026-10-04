@@ -215,6 +215,8 @@ Sandbox-proven in WebKit-emulated iPhone 15 / SE against a MOCKED Supabase (`ui-
 5. Open a restaurant he has saved twice under slightly different spellings (apostrophe / capitalisation) if one exists. **Expect:** still one search row.
 6. Rotate to landscape and back with the field focused. **Expect:** the toggle and field stay on screen.
 7. Desktop browser at full width: toolbar looks as before; picking a result still centres the pin in the area LEFT of the right-hand panel.
+8. **(amendment — typing, every text field)** With the keyboard up on the iPhone, type a long entry (e.g. `Mizuki Nigiri omakase with extra wasabi…`) in EACH of: the Map-view search box · List-view filter · drop-a-pin name · visit form (date, first dish name, what was good, cost, notes) · edit an old visit · add-a-dish (name, price, note). **Expect, per field:** the text and caret stay on screen and follow what you type (nothing under the keyboard, behind the card or past the screen edge); no field extends past the edge; **no "AutoFill Contact" bar** above the keyboard; the action key reads Search / Next / Done sensibly. Name any field that still fails. (Overlaps V1476080 for the visit form — one pass can close both.)
+9. Desktop browser, full width: every one of those fields looks and types as before.
 - **Stopping rule:** closes on a dated pass of 1–7, or a failed step filed as a recurrence on B2046224.
 ### V1486288 — B2061600: Select-parcels outlines do not catch when a zoom or pan settles at zoom 14–16 in Bartow County GA `Blocker: real-data`
 

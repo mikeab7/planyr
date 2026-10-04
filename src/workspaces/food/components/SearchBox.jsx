@@ -176,7 +176,7 @@ export default function SearchBox({
         onFocus={() => setOpen(true)}
         placeholder={view === "map" ? "Search restaurants…" : "Filter your visits…"}
         style={{ ...fieldStyle(), width: "100%" }}
-        aria-label="Search restaurants" {...noAutofill("place-search")}
+        aria-label="Search restaurants" {...noAutofill("place-search")} enterKeyHint="search"
       />
       <AnchoredMenu
         open={showDropdown} onClose={() => setOpen(false)} anchorRef={inputRef}
