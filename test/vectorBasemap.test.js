@@ -1,7 +1,7 @@
 /* vectorBasemap — NEW-1 (B2018608). The vector roads/labels style + source contract, pure (no browser;
  * the live render is ui-audit/verify-vector-basemap.mjs). */
 import { describe, it, expect } from "vitest";
-import { VECTOR_SOURCE, VECTOR_ZOOM_OFFSET } from "../src/shared/basemaps/basemaps.js";
+import { VECTOR_SOURCE, VECTOR_ZOOM_OFFSET, SITE_ROADS_FROM } from "../src/shared/basemaps/basemaps.js";
 import { buildVectorStyle, visibleRoadClassesAt, LOCAL_STREETS_FROM } from "../src/shared/basemaps/vectorStyle.js";
 import { vectorLayerOptions, VECTOR_PANE } from "../src/shared/basemaps/vectorLabelLayer.js";
 
@@ -65,6 +65,24 @@ describe("style: Apple-like hierarchy and collision", () => {
   });
   it("transparent over the aerial: no background/fill layer", () => {
     expect(style.layers.some((l) => l.type === "background" || l.type === "fill")).toBe(false);
+  });
+});
+
+describe("site mode — the Site Plan map's close-zoom roads", () => {
+  const site = buildVectorStyle(VECTOR_SOURCE, "g", { mode: "site" });
+  it("draws roads + road names ONLY: no vector places, no POIs (city names are Planyr's own layer there)", () => {
+    expect(site.layers.some((l) => /^place-|^poi-/.test(l.id))).toBe(false);
+    expect(site.layers.length).toBeGreaterThan(8);
+  });
+  it("NOTHING draws below the Site map's road gate: every layer's minzoom >= SITE_ROADS_FROM (no road lines at metro zoom)", () => {
+    for (const l of site.layers) expect(l.minzoom).toBeGreaterThanOrEqual(SITE_ROADS_FROM - VECTOR_ZOOM_OFFSET);
+    for (const z of [3, 8, 10, 11, 12, 13]) expect(visibleRoadClassesAt(z, "site").size).toBe(0);
+    expect(visibleRoadClassesAt(14, "site").has("motorway")).toBe(true);
+    expect(visibleRoadClassesAt(16, "site").has("minor")).toBe(true);
+  });
+  it("hybrid is the opposite: freeways already draw at metro zoom", () => {
+    expect(visibleRoadClassesAt(11, "hybrid").has("motorway")).toBe(true);
+    expect(visibleRoadClassesAt(11, "hybrid").has("minor")).toBe(false);
   });
 });
 

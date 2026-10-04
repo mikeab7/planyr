@@ -24,10 +24,10 @@ const LOAD_DEADLINE_MS = 12000;
 
 /* Pure: the MapLibre constructor options the plugin is handed. Exported so the test can assert the
  * label-collision / non-interactive contract without a browser. */
-export function vectorLayerOptions(source = VECTOR_SOURCE, { includePois = true, origin } = {}) {
+export function vectorLayerOptions(source = VECTOR_SOURCE, { includePois = true, mode = "hybrid", origin } = {}) {
   const o = origin || (typeof location !== "undefined" ? location.origin : "");
   return {
-    style: buildVectorStyle(source, absoluteGlyphsUrl(source, o), { includePois }),
+    style: buildVectorStyle(source, absoluteGlyphsUrl(source, o), { includePois, mode }),
     pane: VECTOR_PANE,
     interactive: false,
     attributionControl: false,
@@ -49,7 +49,7 @@ function ensurePane(map) {
 
 /* `L` is the app's Leaflet; `onStatus("loading" | "ready" | "failed")`. Returns `{ remove, status }`.
  * Safe to call remove() at any moment, including before the lazy chunk has arrived. */
-export function addVectorLabels(L, map, { source = VECTOR_SOURCE, includePois = true, onStatus } = {}) {
+export function addVectorLabels(L, map, { source = VECTOR_SOURCE, includePois = true, mode = "hybrid", onStatus } = {}) {
   let removed = false;
   let status = "loading";
   let glLayer = null;
@@ -84,7 +84,7 @@ export function addVectorLabels(L, map, { source = VECTOR_SOURCE, includePois = 
         import("maplibre-gl/dist/maplibre-gl.css"),
       ]);
       if (removed) return;
-      glLayer = maplibreGL(vectorLayerOptions(source, { includePois })).addTo(map);
+      glLayer = maplibreGL(vectorLayerOptions(source, { includePois, mode })).addTo(map);
       const gl = glLayer.getMaplibreMap();
       let settled = false;
       const ok = () => { if (settled || removed) return; settled = true; clearTimeout(deadline); say("ready"); };

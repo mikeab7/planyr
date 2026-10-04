@@ -15,6 +15,8 @@
  * the retina offset) and let maxZoom upscale the deepest real tile beyond it. Any new
  * source MUST carry its own `maxNative`. (B220 — recurrence of B182)
  */
+import { placeNamesVisible } from "./placeNamesGate.js";
+
 export const BASEMAPS = {
   esri: {
     label: "Esri",
@@ -150,37 +152,60 @@ export function densityTileOptions(maxNative, dpr) {
   return { detectRetina: hi, maxNativeZoom: hi ? Math.max(1, maxNative - 1) : maxNative };
 }
 
-/* HYBRID — the default everywhere, and THE Site Plan map: aerial imagery + vector roads and place
- * labels. `imageryKey` names the BASEMAPS entry both Site Plan surfaces default to. */
-export const HYBRID_BASEMAP = {
-  key: "hybrid",
-  label: "Hybrid",
-  title: "Aerial imagery with crisp roads and place names",
+/* Leaflet zoom from which the SITE PLAN map draws road lines + names. This is the gate the Site tab's
+ * browse map has always used (= PARCEL_MINZOOM: the first zoom at which a parcel draws), so below it the
+ * Site map is satellite + city names only — no road lines. Defined once; `layerZoomGate`'s
+ * PLACE_NAMES_MIN_ZOOM IS this value. */
+export const SITE_ROADS_FROM = 14;
+
+/* ───────── THE SITE PLAN LAYER STACK, defined once ─────────
+ * Which layers the Site Plan map shows at a zoom — read by the Site tab's browse map AND /food's default
+ * option, so they cannot disagree (test/siteStackParity.test.js). Pure.
+ *   · imagery   — always
+ *   · cityNames — Planyr's own city/town name layer, zooms 3..13 (`placeNamesVisible`, the Site map's gate)
+ *   · roadNames — the road lines + names, from SITE_ROADS_FROM up (never at metro zoom)
+ * `toggles` are the Site Layers panel's two rows ("Road names", "City names"); both default ON. */
+export function siteStack(zoom, toggles = {}) {
+  const z = typeof zoom === "number" ? zoom : null;
+  const out = ["imagery"];
+  if (toggles.cityNames !== false && placeNamesVisible(z)) out.push("cityNames");
+  if (toggles.roads !== false && z != null && z >= SITE_ROADS_FROM) out.push("roadNames");
+  return out;
+}
+
+/* SITE PLAN — the default everywhere, and THE Site tab's browse map: untoned aerial + the Site stack
+ * above. Roads are the new clean vector style (`vectorMode: "site"` — roads + road names only, gated to
+ * SITE_ROADS_FROM; no vector places, because the city names are Planyr's own layer). `imageryKey` names
+ * the BASEMAPS entry both Site Plan surfaces default to. Not graded: the owner likes this look as is. */
+export const SITE_PLAN_BASEMAP = {
+  key: "siteplan",
+  label: "Site Plan",
+  title: "The same map the Site tab opens on — aerial with city names, road names up close",
   imageryKey: "esri",
   imagery: BASEMAPS.esri,
   vector: VECTOR_SOURCE,
-  graded: true,
+  vectorMode: "site",
+  graded: false,
 };
 
-/* SATELLITE — the same imagery, toned, with nothing drawn on top. */
-export const SATELLITE_BASEMAP = {
-  key: "satellite",
-  label: "Satellite",
-  title: "Aerial imagery only",
+/* HYBRID — the Apple/Google-like map: toned aerial with clean vector roads and labels phasing in by
+ * importance (freeways first, locals only up close), sparse, never edge-to-edge bands. */
+export const HYBRID_BASEMAP = {
+  key: "hybrid",
+  label: "Hybrid",
+  title: "Aerial imagery with clean roads and place names that appear by importance",
   imageryKey: "esri",
   imagery: BASEMAPS.esri,
-  vector: null,
+  vector: VECTOR_SOURCE,
+  vectorMode: "hybrid",
   graded: true,
 };
 
-/* "The Site Plan map" IS Hybrid — same object, not a copy, so the two can never drift. */
-export const SITE_PLAN_BASEMAP = HYBRID_BASEMAP;
-
 /* The choices /food offers, in display order. The FIRST is the default. */
-export const SITE_PLAN_BASEMAP_CHOICES = [HYBRID_BASEMAP, SATELLITE_BASEMAP];
+export const SITE_PLAN_BASEMAP_CHOICES = [SITE_PLAN_BASEMAP, HYBRID_BASEMAP];
 
 /* Resolve a stored/unknown key to a choice — anything unrecognised falls back to the default.
- * Pre-NEW-1 stored values ("siteplan") resolve to Hybrid by the same fallback. */
+ * Stored values from the interim Hybrid/Satellite build ("satellite") fall back to Site Plan. */
 export function resolveBasemapChoice(key) {
   return SITE_PLAN_BASEMAP_CHOICES.find((c) => c.key === key) || SITE_PLAN_BASEMAP;
 }

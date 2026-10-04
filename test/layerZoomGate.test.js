@@ -112,9 +112,9 @@ describe("the declared gates and the runtime constants may never drift", () => {
  * and the wording says what is really drawn. Both assertions fail on the pre-fix source: it had
  * no `PLACE_NAMES_MIN_ZOOM` import and its wording claimed "City, road and landmark names". */
 describe("PLACE_NAMES_MIN_ZOOM — the map-finder road-names overlay's own gate", () => {
-  it("is declared once, and IS the vector style's own road-name zoom (NEW-1/B2018608 — was 14 for the raster overlay)", () => {
-    expect(PLACE_NAMES_MIN_ZOOM).toBe(11);
-    expect(src("lib/layerZoomGate.js")).toMatch(/PLACE_NAMES_MIN_ZOOM = ROAD_NAMES_FROM/);
+  it("is declared once, at the value the map has always used, and IS the shared Site Plan road gate (NEW-1/B2018608)", () => {
+    expect(PLACE_NAMES_MIN_ZOOM).toBe(14);
+    expect(src("lib/layerZoomGate.js")).toMatch(/PLACE_NAMES_MIN_ZOOM = SITE_ROADS_FROM/);
   });
 
   it("MapFinder no longer gates labels itself: the vector style owns the zoom gate (no private literal)", () => {

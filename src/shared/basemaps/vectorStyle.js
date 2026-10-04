@@ -15,7 +15,7 @@
  *   · Labels — modern sans (Noto Sans), soft halo instead of a heavy black outline, road names that
  *     follow the line, collision ON (never `text-allow-overlap`), ranked so the important name wins.
  *   · Nothing here is interactive; pins/drawing stay in Leaflet above this layer. */
-import { VECTOR_ZOOM_OFFSET, ROAD_NAMES_FROM } from "./basemaps.js";
+import { VECTOR_ZOOM_OFFSET, ROAD_NAMES_FROM, SITE_ROADS_FROM } from "./basemaps.js";
 export { ROAD_NAMES_FROM };
 
 /* Leaflet zoom at which local streets first appear (neighbourhood zoom). Below it they are hidden. */
@@ -58,20 +58,20 @@ const ROAD_CLASSES = {
 const roadFilter = (classes) => ["all", ["in", ["get", "class"], ["literal", classes]],
   ["!=", ["get", "brunnel"], "tunnel"]];
 
-function roadLayers() {
+function roadLayers(floor) {
   const layers = [];
   for (const [id, r] of Object.entries(ROAD_CLASSES)) {
     /* Hairline casing first (below the stroke): keeps a pale road legible on bright roofs/pavement. */
     layers.push({
       id: `road-${id}-casing`, type: "line", source: "vec", "source-layer": "transportation",
-      minzoom: gl(r.minzoom), filter: roadFilter(r.classes),
+      minzoom: gl(Math.max(r.minzoom, floor)), filter: roadFilter(r.classes),
       layout: { "line-cap": "round", "line-join": "round" },
       paint: { "line-color": "rgba(10, 16, 24, 0.55)", "line-opacity": r.opacity * 0.55,
         "line-width": widthByZoom(r.widths.map(([z, w]) => [z, w + 0.9])) },
     });
     layers.push({
       id: `road-${id}`, type: "line", source: "vec", "source-layer": "transportation",
-      minzoom: gl(r.minzoom), filter: roadFilter(r.classes),
+      minzoom: gl(Math.max(r.minzoom, floor)), filter: roadFilter(r.classes),
       layout: { "line-cap": "round", "line-join": "round" },
       paint: { "line-color": r.color, "line-opacity": r.opacity, "line-width": widthByZoom(r.widths) },
     });
@@ -80,7 +80,7 @@ function roadLayers() {
 }
 
 /* Road names follow the road line. Ranked by class so freeways win a contested spot. */
-function roadNameLayers() {
+function roadNameLayers(floor) {
   const rank = ["match", ["get", "class"], "motorway", 0, "trunk", 1, "primary", 2, "secondary", 3,
     "tertiary", 4, 5];
   const labelFilter = (classes) => ["in", ["get", "class"], ["literal", classes]];
@@ -103,9 +103,9 @@ function roadNameLayers() {
       "text-halo-width": TEXT.haloWidth, "text-halo-blur": TEXT.haloBlur },
   };
   return [
-    { ...base, id: "roadname-major", minzoom: gl(ROAD_NAMES_FROM), filter: labelFilter(["motorway", "trunk", "primary", "secondary"]) },
-    { ...base, id: "roadname-collector", minzoom: gl(14), filter: labelFilter(["tertiary"]) },
-    { ...base, id: "roadname-local", minzoom: gl(LOCAL_STREETS_FROM + 1), filter: labelFilter(["minor", "service"]),
+    { ...base, id: "roadname-major", minzoom: gl(Math.max(ROAD_NAMES_FROM, floor)), filter: labelFilter(["motorway", "trunk", "primary", "secondary"]) },
+    { ...base, id: "roadname-collector", minzoom: gl(Math.max(14, floor)), filter: labelFilter(["tertiary"]) },
+    { ...base, id: "roadname-local", minzoom: gl(Math.max(LOCAL_STREETS_FROM + 1, floor)), filter: labelFilter(["minor", "service"]),
       layout: { ...base.layout, "text-size": ["interpolate", ["linear"], ["zoom"], gl(16), 10, gl(19), 12.5] } },
   ];
 }
@@ -161,12 +161,18 @@ function poiLayer() {
 
 /* The style. `glyphsUrl` must be ABSOLUTE (the MapLibre worker cannot resolve a relative URL);
  * `source` is the `VECTOR_SOURCE` config entry. */
-export function buildVectorStyle(source, glyphsUrl, { includePois = true } = {}) {
-  const layers = [...roadLayers(), ...roadNameLayers(), ...placeLayers()];
-  if (includePois) layers.push(poiLayer());
+export function buildVectorStyle(source, glyphsUrl, { includePois = true, mode = "hybrid" } = {}) {
+  /* "site" = the Site Plan map's close-zoom roads: road lines + road names ONLY, nothing before
+   * SITE_ROADS_FROM, no vector places (the city names are Planyr's own layer there) and no POIs.
+   * "hybrid" = the full Apple/Google-like style with everything phasing in by importance. */
+  const site = mode === "site";
+  const floor = site ? SITE_ROADS_FROM : 0;
+  const layers = [...roadLayers(floor), ...roadNameLayers(floor)];
+  if (!site) layers.push(...placeLayers());
+  if (!site && includePois) layers.push(poiLayer());
   return {
     version: 8,
-    name: "planyr-hybrid-labels",
+    name: site ? "planyr-site-plan-roads" : "planyr-hybrid-labels",
     glyphs: glyphsUrl,
     sources: { vec: { type: "vector", url: source.tilejson } },
     /* Transparent background: this style paints ONLY on top of the aerial. */
@@ -182,9 +188,10 @@ export function absoluteGlyphsUrl(source, origin) {
 /* Which road layers a given Leaflet zoom actually draws — the pure answer the tests assert
  * ("local streets hidden at metro zoom, shown at neighbourhood zoom"), computed from the SAME
  * minzoom the style carries, so it cannot disagree with it. */
-export function visibleRoadClassesAt(leafletZoom) {
+export function visibleRoadClassesAt(leafletZoom, mode = "hybrid") {
+  const floor = mode === "site" ? SITE_ROADS_FROM : 0;
   const z = gl(leafletZoom);
   const out = new Set();
-  for (const r of Object.values(ROAD_CLASSES)) if (z >= gl(r.minzoom)) r.classes.forEach((c) => out.add(c));
+  for (const r of Object.values(ROAD_CLASSES)) if (z >= gl(Math.max(r.minzoom, floor))) r.classes.forEach((c) => out.add(c));
   return out;
 }

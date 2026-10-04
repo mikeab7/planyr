@@ -169,11 +169,11 @@ was never clicked" quietly ships broken.
 ### V1443696 — B2018608: vector roads + labels basemap (Food + Site Plan map) `Blocker: live-GIS`
 
 Sandbox-proven at dpr 2 against a SYNTHETIC OpenMapTiles fixture (`ui-audit/verify-vector-basemap.mjs`, 28/28); the sandbox cannot reach `tiles.openfreemap.org`, so the **real source, its CORS headers and the real map look are unverified**. **Steps** (planyr.io, read the served chunk hash in the same observation; `node ui-audit/verify-vector-basemap.mjs https://planyr.io --live` runs the mechanical half):
-1. Open `/food` fresh (clear `planyr:food:basemap`). **Expect:** Hybrid is selected; roads/labels render crisp over the aerial within a few seconds; no "Crisp road labels unavailable" notice (if it shows, OpenFreeMap was blocked/CORS-refused — file that on B2018608).
-2. Houston at metro zoom, then neighbourhood zoom. **Expect:** freeways/major roads only at metro; local streets appear at neighbourhood zoom; road names follow the road line; no two labels overlap; no heavy black outlines.
+1. Open `/food` fresh (clear `planyr:food:basemap`) at Houston metro zoom, and the Site tab's Map at the same zoom. **Expect:** /food opens on **Site Plan** and looks IDENTICAL to the Site map — satellite + Planyr's clean white city names, NO road lines. Zoom in past parcel zoom on both: clean thin roads + names appear on both at the same zoom; no "Crisp road labels unavailable" notice (if it shows, OpenFreeMap was blocked/CORS-refused — file that on B2018608).
+2. Tap **Hybrid** on /food at metro zoom, then neighbourhood zoom. **Expect:** freeways/major roads and place names at metro, no edge-to-edge bands; local streets only at neighbourhood zoom; road names follow the road line; no two labels overlap; no heavy black outlines; the aerial is slightly toned.
 3. Pan and zoom (wheel + buttons). **Expect:** labels stay glued to the aerial through the animation; Food pins sit above labels; no blank map after a search jump.
-4. Click Satellite. **Expect:** toned aerial only, no labels; reload keeps Satellite.
-5. Site Plan → Map view, Layers → Road names slider. **Expect:** same Hybrid look; the slider fades the labels; parcels / FEMA / draw tools still paint above.
+4. Switch between Site Plan and Hybrid and reload. **Expect:** the choice persists; switching never blanks the map.
+5. Site tab → Map view, Layers → Road names slider (close zoom). **Expect:** the slider fades the roads; parcels / FEMA / draw tools still paint above; at metro zoom still no road lines.
 6. Open a plan, File → Download PDF. **Expect:** the aerial in the PDF is NOT darkened or desaturated.
 7. Look along tile joins at fractional zoom on a 2x display. **Expect:** no light hairlines.
 8. Desktop: the credit reads "…OpenFreeMap © OpenMapTiles data © OpenStreetMap", fully visible beside (not under) the ? button; the "Loading imagery…" pill never overlaps the zoom control.

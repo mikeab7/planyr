@@ -5,7 +5,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  BASEMAPS, SITE_PLAN_BASEMAP, HYBRID_BASEMAP, SATELLITE_BASEMAP, VECTOR_SOURCE, IMAGERY_GRADE, densityTileOptions,
+  BASEMAPS, SITE_PLAN_BASEMAP, HYBRID_BASEMAP, VECTOR_SOURCE, IMAGERY_GRADE, densityTileOptions,
   SITE_PLAN_BASEMAP_CHOICES, resolveBasemapChoice, basemapTileLayers, basemapAttribution,
 } from "../src/shared/basemaps/basemaps.js";
 import * as plannerReexport from "../src/workspaces/site-planner/lib/basemaps.js";
@@ -48,30 +48,32 @@ describe("one definition of the Site Plan map", () => {
     expect(food).not.toMatch(/maplibre|buildVectorStyle/);
   });
 
-  it("Site Plan's map IS Hybrid (same object), and a legacy stored 'siteplan' resolves to it", () => {
-    expect(SITE_PLAN_BASEMAP).toBe(HYBRID_BASEMAP);
-    expect(resolveBasemapChoice("siteplan")).toBe(HYBRID_BASEMAP);
-    expect(resolveBasemapChoice("satellite")).toBe(SATELLITE_BASEMAP);
+  it("Food's DEFAULT is the Site Plan map (same object the Site tab reads); Hybrid is the second option; a stale stored key falls back to the default", () => {
+    expect(SITE_PLAN_BASEMAP_CHOICES[0]).toBe(SITE_PLAN_BASEMAP);
+    expect(SITE_PLAN_BASEMAP_CHOICES[1]).toBe(HYBRID_BASEMAP);
+    expect(resolveBasemapChoice("satellite")).toBe(SITE_PLAN_BASEMAP);
+    expect(resolveBasemapChoice("siteplan")).toBe(SITE_PLAN_BASEMAP);
+    expect(resolveBasemapChoice("hybrid")).toBe(HYBRID_BASEMAP);
   });
 });
 
 describe("layer stacks", () => {
-  it("Hybrid = graded imagery + the vector source; Satellite = graded imagery only", () => {
+  it("Site Plan = UNGRADED imagery (the look the owner likes); Hybrid = graded imagery; both on the one vector source", () => {
+    const sp = basemapTileLayers(SITE_PLAN_BASEMAP), hy = basemapTileLayers(HYBRID_BASEMAP);
+    for (const l of [sp, hy]) { expect(l.map((x) => x.id)).toEqual(["imagery"]); expect(l[0].url).toBe(BASEMAPS.esri.tiles); }
+    expect("className" in sp[0].opts).toBe(false);
+    expect(hy[0].opts.className).toBe(IMAGERY_GRADE.className);
+    expect(SITE_PLAN_BASEMAP.vector).toBe(VECTOR_SOURCE);
     expect(HYBRID_BASEMAP.vector).toBe(VECTOR_SOURCE);
-    expect(SATELLITE_BASEMAP.vector).toBe(null);
-    for (const c of [HYBRID_BASEMAP, SATELLITE_BASEMAP]) {
-      const l = basemapTileLayers(c);
-      expect(l.map((x) => x.id)).toEqual(["imagery"]);
-      expect(l[0].url).toBe(BASEMAPS.esri.tiles);
-      expect(l[0].opts.className).toBe(IMAGERY_GRADE.className);
-    }
+    expect(SITE_PLAN_BASEMAP.vectorMode).toBe("site");
+    expect(HYBRID_BASEMAP.vectorMode).toBe("hybrid");
   });
 
   it("imagery is HIGH DENSITY at dpr 2 (one zoom deeper, ceiling-1) and plain at dpr 1", () => {
     expect(densityTileOptions(19, 2)).toEqual({ detectRetina: true, maxNativeZoom: 18 });
     expect(densityTileOptions(19, 3)).toEqual({ detectRetina: true, maxNativeZoom: 18 });
     expect(densityTileOptions(19, 1)).toEqual({ detectRetina: false, maxNativeZoom: 19 });
-    const hi = basemapTileLayers(HYBRID_BASEMAP, { dpr: 2 })[0].opts;
+    const hi = basemapTileLayers(SITE_PLAN_BASEMAP, { dpr: 2 })[0].opts;
     expect(hi.detectRetina).toBe(true);
     expect(hi.maxNativeZoom).toBe(BASEMAPS.esri.maxNative - 1);
     expect(basemapTileLayers(HYBRID_BASEMAP)[0].opts.detectRetina).toBe(false);
@@ -86,11 +88,10 @@ describe("layer stacks", () => {
     }
   });
 
-  it("the offered choices are exactly Hybrid (default) then Satellite, with credits", () => {
-    expect(SITE_PLAN_BASEMAP_CHOICES.map((c) => c.key)).toEqual(["hybrid", "satellite"]);
-    expect(basemapAttribution(HYBRID_BASEMAP)).toContain("OpenFreeMap");
-    expect(basemapAttribution(HYBRID_BASEMAP)).toContain("OpenStreetMap");
-    expect(basemapAttribution(SATELLITE_BASEMAP)).not.toContain("OpenFreeMap");
+  it("the offered choices are exactly Site Plan (default) then Hybrid, with credits", () => {
+    expect(SITE_PLAN_BASEMAP_CHOICES.map((c) => c.key)).toEqual(["siteplan", "hybrid"]);
+    expect(SITE_PLAN_BASEMAP_CHOICES.map((c) => c.label)).toEqual(["Site Plan", "Hybrid"]);
+    for (const c of SITE_PLAN_BASEMAP_CHOICES) expect(basemapAttribution(c)).toContain("OpenFreeMap");
   });
 
   it("the export path never sees the grade: exportSheet imports no grade/vector module", () => {

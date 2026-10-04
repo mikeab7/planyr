@@ -303,6 +303,7 @@ import {
   SITE_PLAN_BASEMAP, SITE_PLAN_BASEMAP_CHOICES, resolveBasemapChoice, basemapTileLayers, basemapAttribution, IMAGERY_GRADE,
 } from "../../../shared/basemaps/basemaps.js";
 import { addVectorLabels } from "../../../shared/basemaps/vectorLabelLayer.js";
+import { attachSiteLabelStack } from "../../../shared/basemaps/siteLabelStack.js";
 
 // ⛔ NEW-1 (2026-10-03) — THE BASEMAP IS NO LONGER DEFINED HERE. Owner: "The map on the food module
 // is horrible, we should default to the site plan module map … and a good hybrid option as an
@@ -605,10 +606,15 @@ export default function FoodMap({
           setTilesLoading(loadingLayer.isLoading());
         }
       });
-      // /food draws no basemap POI labels: the restaurant pins ARE the points of interest, and a
-      // basemap label under a pin is the collision the owner called out.
-      if (choice.vector) {
-        vectorHandle = addVectorLabels(L, map, { source: choice.vector, includePois: false, onStatus: setLabelsStatus });
+      // Site Plan (the default) attaches the SAME label stack the Site tab's map shows — Planyr's city
+      // names at wide zoom, the clean vector roads from close zoom — through the one shared `siteStack`.
+      // Hybrid is the full vector map. /food draws no basemap POI labels either way: the restaurant pins
+      // ARE the points of interest, and a basemap label under a pin is the collision the owner called out.
+      if (choice.vectorMode === "site") {
+        vectorHandle = attachSiteLabelStack(L, map, { source: choice.vector, onStatus: setLabelsStatus });
+        labelsLayerRef.current = vectorHandle;
+      } else if (choice.vector) {
+        vectorHandle = addVectorLabels(L, map, { source: choice.vector, mode: "hybrid", includePois: false, onStatus: setLabelsStatus });
         labelsLayerRef.current = vectorHandle;
       } else {
         setLabelsStatus("none");

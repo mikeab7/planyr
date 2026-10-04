@@ -17,7 +17,7 @@ import { PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL } from "./lib/ma
 import { tileCacheLimit } from "./lib/tileBudget.js";
 import { boundTileCache, capTileCache, armBlankTileHeal } from "./lib/tileLifecycle.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
-import { BASEMAPS, FINDER_BASEMAP_CHOICES, ROAD_NAMES_TILES, SITE_PLAN_BASEMAP, IMAGERY_GRADE, densityTileOptions } from "../../shared/basemaps/basemaps.js";
+import { BASEMAPS, FINDER_BASEMAP_CHOICES, ROAD_NAMES_TILES, SITE_PLAN_BASEMAP, IMAGERY_GRADE, densityTileOptions, siteStack } from "../../shared/basemaps/basemaps.js";
 // B427410 (×2) — the ONE gate for the "Road names" overlay below, shared with LayerPanel's
 // dormant note so the map's opacity switch and the panel's explanation can't disagree.
 // B427411 — the ONE corner-radius scale. Never a bare number at a call site: eight of them
@@ -127,7 +127,7 @@ import { lastEditedLabel } from "./lib/siteRecency.js";
 // "Save for all projects" uses (see lib/userPrefs.js's `sitesPanel` header) — never a new mechanism.
 import { loadUserPrefs, updateUserPrefs, getPrefsSnapshot, subscribePrefs, setSitesPanelPref } from "./lib/userPrefs.js";
 import { adminBoundariesVisible, attachAdminBoundaries } from "./lib/adminBoundaryGate.js";
-import { placeNamesVisible, attachPlaceNames } from "./lib/placeNamesGate.js";
+import { attachPlaceNames } from "./lib/placeNamesGate.js";
 import { compHeadline } from "../../shared/comps/lib/comps.js";
 import { loadCompsRatePeriod } from "../../shared/comps/lib/compsRatePeriodPrefs.js";
 import { compMarkerSvg, compMarkerSize } from "../../shared/comps/lib/compMarkerIcon.js";
@@ -2164,7 +2164,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // NEW-1 (B2018608): the density rule (detectRetina + ceiling-1) is ONE shared function now, and the
     // on-screen aerial carries the tone grade class (exports stitch their own canvas — never graded).
     const layer = withTileRetry(L.tileLayer(bm.tiles, {
-      maxZoom: 21, attribution: bm.attr, className: IMAGERY_GRADE.className,
+      maxZoom: 21, attribution: bm.attr, // NOT graded: the Site map keeps its own look (the grade is Hybrid-only)
+     
       ...densityTileOptions(bm.maxNative, window.devicePixelRatio || 1),
     }));
     layer.setZIndex(1);
@@ -2215,19 +2216,22 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
    * both layers now request the same native zoom at every step of a zoom gesture, verified by
    * driving the real layer live (retired with the raster labels, NEW-1/B2018608).
    */
+  // Which labels the Site Plan stack shows at this zoom — the ONE pure answer /food's default reads too
+  // (shared/basemaps `siteStack`). Road lines + names are close-zoom only; never at metro zoom.
+  const roadsOn = siteStack(zoom, { roads: labels, cityNames }).includes("roadNames");
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !labels) return undefined;
+    if (!map || !roadsOn) return undefined;
     // Lazy: the helper (and MapLibre behind it) never rides the Site route's boot chunks.
     let cancelled = false, handle = null;
     import("../../shared/basemaps/vectorLabelLayer.js").then(({ addVectorLabels }) => {
       if (cancelled) return;
-      handle = addVectorLabels(L, map, { includePois: true });
+      handle = addVectorLabels(L, map, { mode: "site", includePois: false });
       labelsRef.current = handle;
     }).catch((e) => console.error("MapFinder: vector labels failed to load", e));
     return () => { cancelled = true; if (handle) handle.remove(); labelsRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [labels, basemap]);
+  }, [roadsOn, basemap]);
 
   /* Label strength (B427410 ×3: the owner's own slider). The vector layer lives in its own pane, so the
    * slider is that pane's opacity — one knob, no per-layer fan-out. Zoom gating (road names from
@@ -2237,7 +2241,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     const map = mapRef.current;
     const pane = map && map.getPane && map.getPane("planyrVectorLabels");
     if (pane) pane.style.opacity = String(labelsOpacity);
-  }, [labelsOpacity, labels, basemap]);
+  }, [labelsOpacity, labels, basemap, roadsOn]);
 
   /* State + country outlines at wide zoom (NEW-1) — the same shape as the label-opacity
      gate above and the `showPlans` switch below: one boolean derived from the live zoom,
@@ -2255,7 +2259,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
      lib/placeNamesGate.js), the layer + datasets behind a dynamic import so nothing rides the
      boot bundle and nothing is fetched at site working zoom. `cityWantRef` closes the race where
      the row is switched off while the chunk is still loading. */
-  const cityVisible = placeNamesVisible(zoom);
+  const cityVisible = siteStack(zoom).includes("cityNames"); // the same gate /food reads (placeNamesVisible inside siteStack)
   const cityRef = useRef(null);
   const cityWantRef = useRef(false);
   useEffect(() => {
