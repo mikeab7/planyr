@@ -733,11 +733,11 @@ describe("VisitPanel — rating slider (not a button row) and a date field that 
     expect(panel).not.toMatch(/new Date\(\)\.toISOString\(\)\.slice\(0,\s*10\)/);
   });
 
-  it("rating is a range-slider control, step 0.25 across 1-10 — never a row of per-value buttons", () => {
+  it("rating is a range-slider control, step 0.5 across 1-10 (lib/ratingScale.js) — never a row of per-value buttons", () => {
     const panel = src("components/VisitPanel.jsx");
     expect(panel).toMatch(/type="range"/);
     expect(panel).toMatch(/min=\{RATING_MIN\}\s*max=\{RATING_MAX\}\s*step=\{RATING_STEP\}/);
-    expect(panel).toMatch(/const RATING_STEP = 0\.25;/);
+    expect(src("lib/ratingScale.js")).toMatch(/export const RATING_STEP = 0\.5;/);
     // The old design this replaces: ten separate <button> elements, one per whole number.
     expect(panel).not.toMatch(/role="radiogroup"/);
     expect(panel).not.toContain("RatingPicker");
@@ -1456,9 +1456,8 @@ describe("quarter-point ratings — schema widened to numeric(4,2), CHECK loosen
     expect(sql).toMatch(/rating\s+numeric\(3,1\)\s+check/); // the original inline create, left alone
   });
 
-  it("VisitPanel's RATING_STEP is 0.25 (37 stops across 1-10), still ONE native range-slider control", () => {
-    const panel = src("components/VisitPanel.jsx");
-    expect(panel).toMatch(/const RATING_STEP = 0\.25;/);
+  it("entry is HALF-point steps again (2026-10-05 owner decision #15; the column still accepts the quarters saved in this period)", () => {
+    expect(src("lib/ratingScale.js")).toMatch(/export const RATING_STEP = 0\.5;/);
   });
 
   it("⛔ VisitList shows ratings at natural precision too — Number(v.rating)/Number(v.rating_ambiance), never the raw numeric(4,2) string (which would otherwise read '9.00' post-widen)", () => {
@@ -2234,7 +2233,7 @@ describe("BottomSheet.jsx — a generic drag-to-resize primitive, content-agnost
   });
 
   it("uses resolveSnap/heightForSnap from the pure lib file, not inline duplicate math", () => {
-    expect(sheet).toMatch(/import \{ resolveSnap, heightForSnap \} from "\.\.\/lib\/bottomSheetSnap\.js";/);
+    expect(sheet).toMatch(/import \{[^}]*heightForSnap[^}]*resolveRelease[^}]*\} from "\.\.\/lib\/bottomSheetSnap\.js";/);
   });
 
   it("returns null (unmounted) when not open — no stray fixed-position element left in the DOM behind a closed sheet", () => {
@@ -3232,17 +3231,16 @@ describe("ScoreMeter — REDESIGN (NEW-1, 2026-09-28): QUARTER-point steps, minu
     expect(DISH_SCORE_TICKS).toEqual([1, 3, 5, 7, 9, 10]);
   });
 
-  it("⛔ STILL exactly ONE <input type=\"range\"> (desktop) — the per-value button grid exists ONLY on a phone (NEW-1 'Food on a phone': the owner asked for one-tap rating on a thumb); desktop keeps the slider + 3 buttons", () => {
+  it("⛔ exactly ONE <input type=\"range\"> on EVERY device — no per-value tap grid anywhere (2026-10-05: ratings are sliders, never tap buttons)", () => {
     const meter = src("components/ScoreMeter.jsx");
     const body = meter.slice(meter.indexOf("export default function ScoreMeter"));
     expect(body.match(/type="range"/g) || []).toHaveLength(1);
     // The tick-label .map() renders plain <span> ticks, never a button grid.
     const ticksMapStart = body.indexOf("DISH_SCORE_TICKS.map");
     expect(body.slice(ticksMapStart, ticksMapStart + 300)).not.toMatch(/<button/);
-    // The whole-point grid is a separate component rendered only behind `isMobile`.
-    expect(body).toMatch(/\{isMobile \? \(\s*<>\s*<ScoreTapGrid/);
-    // Buttons: phone minus/plus + desktop minus/plus + Clear = 5 — never one per score stop here.
-    expect((body.match(/<button/g) || []).length).toBe(5);
+    expect(meter).not.toMatch(/ScoreTapGrid|score-tap/);
+    // Buttons: minus + plus + Clear = 3 — never one per score stop here.
+    expect((body.match(/<button/g) || []).length).toBe(3);
     expect(meter).toMatch(/step=\{DISH_SCORE_STEP\}/);
   });
 

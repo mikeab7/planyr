@@ -11,7 +11,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { keyboardInset, currentKeyboardInset, layoutViewportHeight, visualViewportBox, MIN_KEYBOARD_PX } from "../src/workspaces/food/lib/keyboardInset.js";
 import { cleanDraftDishes, newDraftDish } from "../src/workspaces/food/lib/draftDishes.js";
 import { noAutofill, CONTACT_WORDS } from "../src/workspaces/food/lib/noAutofill.js";
-import ScoreMeter, { ScoreTapGrid } from "../src/workspaces/food/components/ScoreMeter.jsx";
+import ScoreMeter from "../src/workspaces/food/components/ScoreMeter.jsx";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const FOOD = join(REPO, "src", "workspaces", "food");
@@ -111,21 +111,12 @@ describe("a new visit takes dishes, not 'What I had'", () => {
 });
 
 describe("phone rating control", () => {
-  it("ScoreTapGrid renders ten whole-point buttons 1-10, each at least 44 x 44", () => {
-    const html = renderToStaticMarkup(createElement(ScoreTapGrid, { value: 8, onChange() {}, label: "Dish score" }));
-    expect((html.match(/<button/g) || []).length).toBe(10);
-    for (let n = 1; n <= 10; n++) expect(html).toContain(`data-testid="score-tap-${n}"`);
-    expect(html).toContain("min-height:48px");
-    expect(html).toContain("min-width:44px");
-    expect(html).toMatch(/data-testid="score-tap-8"[^>]*|aria-pressed="true"[^>]*score-tap-8/);
-  });
-  it("on a phone the dish ScoreMeter has the tap grid and no drag slider; on desktop the reverse", () => {
-    const phone = renderToStaticMarkup(createElement(ScoreMeter, { value: null, onChange() {}, isMobile: true }));
-    expect(phone).toContain("score-tap-grid");
-    expect(phone).not.toContain('type="range"');
-    const desk = renderToStaticMarkup(createElement(ScoreMeter, { value: null, onChange() {}, isMobile: false }));
-    expect(desk).toContain('type="range"');
-    expect(desk).not.toContain("score-tap-grid");
+  it("on a phone the dish ScoreMeter is the same single slider as desktop — no tap grid (2026-10-05)", () => {
+    for (const isMobile of [true, false]) {
+      const html = renderToStaticMarkup(createElement(ScoreMeter, { value: null, onChange() {}, isMobile }));
+      expect(html).toContain('type="range"');
+      expect(html).not.toContain("score-tap");
+    }
   });
 });
 
