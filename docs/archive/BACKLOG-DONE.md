@@ -17770,3 +17770,15 @@ Constraint check: nothing contradicts `## Owner product constraints`.
 `[x]` Owner constraint 15 added to CLAUDE.md "Owner product constraints"; entry 7 amended to cross-reference it. Grepped CLAUDE.md, docs/AGENT-RULES.md, VERIFICATION.md header and docs/PHONE-TESTING.md — no wording tells a session to ask or leave test artifacts for Michael, so nothing else needed aligning.
 - Verify: sandbox (doc-only) — passed: entry present, cross-references in place.
 - Origin: filed 2026-10-05 from chat. Michael verbatim: "stop asking to clear test files, always clr."
+
+### B2086784 — Dashboard topo: owner-tuned drift speed and cursor lag `[dashboard]` (task) #dashboard #ui  *(TOPO-TUNE-2026-10-05 NEW-1)*
+`[x]` `topoMotion.js`: DEPTH_RATE 0.0000031 · SETTLE_POS 0.0019 · SETTLE_STRENGTH 0.0013 — exactly as the owner tuned (extreme on purpose; FOLLOW_* untouched). Doc comments rewritten to the new values + "owner-tuned". The `S > 0.004` / `ptr.s > 0.01` / entry-snap (`ts === 0 && s < 0.02`) gates were checked at the slow rate: highlight turns on within ~8 frames of entry, fades below the draw gate and stays off (no stuck state); re-entering within ~50 s glides from the old position, which is the intended lag. Guards: `test/topoMotion.test.js` (pins constants, ~20 s to 90 %, gates on/off); `ui-audit/verify-dashboard-topo-settle.mjs` retimed for the slow lag (passes).
+- Verify: sandbox — passed (unit + harness). Stopping rule: n/a (not an owner-reported symptom).
+
+### B2086785 — Dashboard topo: refined line colors, light and night `[dashboard]` (task) #dashboard #ui  *(TOPO-TUNE-2026-10-05 NEW-2)*
+`[x]` Line ink now `TOPO_INK` (named constants in `lib/topoMotion.js` — palette.js is a CSS-token mirror and these are owner-tuned canvas-only values): day #8394AA / #3B4B63, alpha 0.50; night #5F6E86 / #B7C4DA, alpha 0.55; widths 0.9 / 1.5; switched by `resolved` theme. DIM_ALPHA and the palette.borderStrong/textTertiary reads removed (the effect now depends on `resolved` only). Coral highlight and page background untouched. Before/after screenshots day + night captured.
+- Verify: sandbox — passed (screenshots, unit pin of TOPO_INK, design-drift check green).
+
+### B2086786 — Dashboard topo: cursor highlight repaints only the box around the cursor `[dashboard]` (task) #dashboard #perf  *(TOPO-TUNE-2026-10-05 NEW-3)*
+`[x]` Highlight pass fills only the clamped box [x−340, y−340, 680, 680] instead of the whole canvas; the gradient is fully transparent past radius 340 so the picture is identical (source-atop with no ink drawn leaves pixels unchanged). devicePixelRatio handling untouched.
+- Verify: sandbox — passed (harness frame-timing under the budget, highlight tint reads unchanged); signed-in planyr.io check after deploy is recorded on the PR.
