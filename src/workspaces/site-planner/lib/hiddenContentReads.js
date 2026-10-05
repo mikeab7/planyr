@@ -114,6 +114,8 @@ export const DECLARATIONS = Object.freeze([
     why: "A MODEL-BUILT export: it decides its own contents and never inherits a canvas display toggle (kmzExport.js's own rule, guarded by test/kmzExport.test.js)." },
   { name: "exportFeetExtent", verdict: F,
     why: "B494050 — the sheet's CROP. Its primary branch reads the visibility-aware `devExtent`; its fallback branch (a plan with no development yet) reads the collections directly and asks the predicate for itself." },
+  { name: "buildComposedSheet", verdict: U,
+    why: "NEW-1 (B2127664) — the editable-markups PDF reads `markups`/`callouts`/`measures` ONLY to look up metadata (subject, author, dates) for nodes that already exist in the cloned `<svg>`; a hidden group has no node, so it can never become an annotation." },
   { name: "buildExportSvgRaw", verdict: U,
     why: "Clones the live `<svg>`. Hidden content is not in the DOM, so it cannot reach the sheet — parity by construction, asserted on the real artefact by verify-content-visibility." },
 ]);
