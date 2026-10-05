@@ -54,7 +54,7 @@ export const CHECK_THRESHOLDS = Object.freeze({
 /* `regions: "all"` = trusted wherever the site is; an array = trusted ONLY where every part of the site
  * resolves into one of those states. `source` is the key in shared/gis/sources.js; test/siteChecks.test.js
  * asserts each row's regions agree with that registry's own `SOURCE_STATE_SCOPE`, so the two cannot drift.
- * `layer` is the Layers-panel key the row highlights on hover. */
+ * `layer` is the Layers-panel key a click on the row turns on (click-to-show; no hover). */
 export const TRUSTED_CHECKS = Object.freeze([
   { id: "flood100", label: "100-year floodplain", group: "flood", source: "flood", regions: "all", layer: "fema" },
   { id: "flood500", label: "500-year floodplain", group: "flood", source: "flood", regions: "all", layer: "fema" },
