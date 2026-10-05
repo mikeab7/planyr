@@ -1072,3 +1072,5 @@ a look-ahead at what that study will produce, clearly labelled as screening and 
 - B483 — a 100%-full browser store can sign him out (self-heals; very unlikely now that big images moved to the
       large drawer).
 - B484 — the PDF/map stutter above (needs the heavy PDF to profile).
+
+- **Decision (B2099043):** should a loose Notes page (not bound to any project) show inside a project's Notes list, or only under "Not in a project" / "See all your notes"? Today it does not show inside a project.
