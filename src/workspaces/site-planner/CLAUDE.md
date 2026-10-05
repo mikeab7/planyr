@@ -1853,6 +1853,15 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   hoisted whole into their common ancestor — tree-shaking drops unused exports, never
   exports used by a sibling chunk — so a mixed-tier module silently charges the Site route
   for export-only code. Split by tier, don't hope for shaking.
+  **NEW-1 (B2127664) — EDITABLE MARKUPS IN THE PDF.** The compose screen's "Flatten markups" toggle (OFF by default,
+  per-USER in `profiles.prefs.exportPrefs`, never per plan) makes `exportPDF` lift every annotation-class node
+  (neutral markups · callouts/text boxes · measurements — NOT easements/encumbrances/utility routes, which are site data)
+  out of the cloned SVG AFTER `restyleExportClone` (`annotationExtract.js`) and write it as a native PDF annotation with an
+  explicit appearance stream (`pdfAnnotations.js` pure core → `imagePdf.jpegToPdf({annotations})`). The geometry is the
+  clone's own primitives, never re-derived from the model, so the picture and the annotations cannot drift. Base-14
+  Helvetica (not embedded), `Tz`-squeezed to the browser's measured widths — read the B2127664 deviations list before
+  promising more. Guards: repo-root `test/` suite **pdfAnnotations** (incl. a second-library round-trip) + ui-audit
+  **verify-pdf-markup-annotations** (real compose flow, poppler render parity, known-good arm).
   **B765985 — the compose screen.** Picking a print frame no longer downloads straight off the
   canvas: `components/PrintCompose.jsx` (also lazy, its own chunk, warmed alongside the export
   chunk) is a dedicated full-screen surface for paper size (incl. ARCH C/D, ANSI C/D),

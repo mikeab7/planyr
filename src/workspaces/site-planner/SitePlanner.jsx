@@ -180,7 +180,7 @@ import ColorField from "../../shared/ui/ColorField.jsx";
 /* LAZY (B1064 tranche a). The Standards footer renders only while the Standards panel is the
  * open one, docked or floating — never at first paint. */
 const StandardsBar = lazy(() => import("./components/StandardsBar.jsx"));
-import { loadUserPrefs, updateUserPrefs, applyPrefs, getPrefsSnapshot, subscribePrefs, setStandardPref, getStandardPref } from "./lib/userPrefs.js";
+import { loadUserPrefs, updateUserPrefs, applyPrefs, getPrefsSnapshot, subscribePrefs, setStandardPref, getStandardPref, setExportPref } from "./lib/userPrefs.js";
 import {
   PARCEL_STD_KEYS, TYPE_STD_KEYS, MEASURE_STD_KEYS, applyAllStandards, allStandardsImpact, appliedObjectsLabel,
   EMPTY_STD_DRAFT, draftParcelValue, draftTypeValue, draftMeasureValue, withParcelDraft, withTypeDraft, withMeasureDraft,
@@ -16732,8 +16732,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // `doPrint`'s 7th argument (the "Stats band" toggle) never reached the actual PDF even though
   // the live compose PREVIEW (a separate, direct `buildComposedSheet` call) honored it — a real
   // pre-existing bug, found and fixed incidentally while adding the 8th (Fit-to-frame page).
-  const exportPDF = (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true) =>
-    withExportSheet((x) => x.exportPDF(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride, includeBuildingsTable));
+  const exportPDF = (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true, flattenMarkups = true) =>
+    withExportSheet((x) => x.exportPDF(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride, includeBuildingsTable, flattenMarkups));
 
   /* ------------ export frame geometry (stays here — the print-frame drag reads it) ----
      devExtent also seeds the initial print crop, so it can't live in the lazy chunk. */
@@ -17045,12 +17045,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       preCanvasDisplayRef.current = null;
     }
   };
+  // Read at CALL time off the one shared prefs snapshot (never a mount-time copy of it).
+  const flattenMarkupsPref = () => getPrefsSnapshot().exportPrefs?.flattenMarkups === true;
   const doPrint = async () => {
     setComposeDownloading(true);
     try {
       const scaleText = printScale ? scaleLabel(printScale) : "";
       const preparedBy = (settings.printPreparedBy || "").trim();
-      await exportPDF(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false, composePageOverride, settings.printBuildingsTable !== false);
+      // NEW-1 — "Flatten markups" is a per-USER choice (account prefs), default OFF = editable annotations.
+      await exportPDF(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false, composePageOverride, settings.printBuildingsTable !== false, flattenMarkupsPref());
       cancelPrint();
     } finally { setComposeDownloading(false); }
   };
@@ -25699,6 +25702,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 mapLayersPrintable={mapLayersPrintable} printMapLayers={printMapLayers} onToggleMapLayers={setPrintMapLayers}
                 showMetricsBand={settings.printMetricsBand !== false} onToggleMetricsBand={(v) => setSettings((s) => ({ ...s, printMetricsBand: v }))}
                 buildingsTablePrintable={buildingsTablePrintable} showBuildingsTable={settings.printBuildingsTable !== false} onToggleBuildingsTable={(v) => setSettings((s) => ({ ...s, printBuildingsTable: v }))}
+                flattenMarkups={prefsSnap.exportPrefs?.flattenMarkups === true} onToggleFlattenMarkups={(v) => commitUserPrefs((p) => setExportPref(p, { flattenMarkups: v }))}
                 onReposition={exitToReposition} onCancel={cancelPrint} onDownload={doPrint}
                 downloading={composeDownloading}
               />
