@@ -214,7 +214,8 @@ try {
   await openAnalysis(bad.page);
   const brows = await rowsOf(bad.page);
   check("pipelines + wells read 'Couldn't check' (failed), not green, not None", ["pipelines", "wells"].every((k) => brows[k]?.sev === "failed" && /Couldn't check/.test(brows[k].figure) && !/None/.test(brows[k].text)), JSON.stringify([brows.pipelines?.sev, brows.wells?.sev]));
-  check("…while FEMA + NWI still answer (one source's outage doesn't take the rest down)", brows.flood100?.sev === "red" && brows.wetlands?.sev === "red");
+  check("a failed row says it in plain words — no HTTP/code/server text in the visible line", ["pipelines", "wells"].every((k) => !/HTTP|code|\\d{3}|ArcGIS|parameter/i.test((brows[k]?.text || "").replace(/Oil & gas wells|Pipelines/, ""))) && /map is temporarily unavailable/.test(brows.pipelines?.text || ""), brows.pipelines?.text);
+    check("…while FEMA + NWI still answer (one source's outage doesn't take the rest down)", brows.flood100?.sev === "red" && brows.wetlands?.sev === "red");
   check("each failed row offers Retry", (await bad.page.locator("[data-check-retry]").count()) === 2);
   if (SHOTS) await bad.page.screenshot({ path: `${SHOTS}/after-failure.png` });
   bad.state.rrc = "ok";

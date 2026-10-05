@@ -12,7 +12,7 @@
  */
 
 import { gisCache as defaultCache } from "./gisCache.js";
-import { fetchArcgisJson, gisErrorMessage, classifyGisError, pLimit, GIS_MAX_GET_URL, clearCoalesced } from "./gisFetch.js";
+import { fetchArcgisJson, classifyGisError, pLimit, GIS_MAX_GET_URL, clearCoalesced } from "./gisFetch.js";
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { normalizeAttrs, buildQueryUrl } from "./siteAnalysis.js";
@@ -69,24 +69,31 @@ async function fetchPolygons(key, rings, fetchJson, { pageSize = 1000, maxPages 
   const outFields = (src.outFields && src.outFields.join(",")) || Object.values(src.fields).filter(Boolean).join(",") || "*";
   const out = [];
   for (const layer of src.layers) {
-    let offset = 0, done = false;
-    for (let page = 0; page < maxPages && !done; page++) {
-      const params = {
-        f: "json", where: "1=1", geometry: polyJson(rings), geometryType: "esriGeometryPolygon", spatialRel: "esriSpatialRelIntersects",
-        inSR: 4326, outSR: 4326, outFields, returnGeometry: "true", geometryPrecision: 6, resultRecordCount: pageSize,
-        orderByFields: "OBJECTID", // EVERY page, or page 0 and page 1 can overlap and skip features
-        ...(page > 0 ? { resultOffset: offset } : {}),
-      };
-      const j = featuresOf(await queryJson(src, layer, params, fetchJson), `${key} layer ${layer}`);
+    /* Unordered first: ArcGIS joined layers (NWI) answer HTTP 400 to `orderByFields=OBJECTID` (the field is
+     * table-qualified there) — found live. Only a TRUNCATED answer needs a stable order to page, so the layer is
+     * then re-read from the top, every page ordered by the layer's own reported id field. */
+    const base = { f: "json", where: "1=1", geometry: polyJson(rings), geometryType: "esriGeometryPolygon", spatialRel: "esriSpatialRelIntersects",
+      inSR: 4326, outSR: 4326, outFields, returnGeometry: "true", geometryPrecision: 6, resultRecordCount: pageSize };
+    const take = (j, acc) => {
       for (const f of j.features) {
         const g = f && f.geometry;
         if (!g || !Array.isArray(g.rings) || !g.rings.length) throw new Error(`${key}: a returned polygon carried no geometry, so its area can't be measured.`);
-        out.push({ attrs: normalizeAttrs(f.attributes), rings: g.rings });
+        acc.push({ attrs: normalizeAttrs(f.attributes), rings: g.rings });
       }
+    };
+    const first = featuresOf(await queryJson(src, layer, base, fetchJson), `${key} layer ${layer}`);
+    if (!first.exceededTransferLimit) { take(first, out); continue; }
+    const orderBy = first.objectIdFieldName || "OBJECTID";
+    const acc = [];
+    let offset = 0, done = false;
+    for (let page = 0; page < maxPages && !done; page++) {
+      const j = featuresOf(await queryJson(src, layer, { ...base, orderByFields: orderBy, resultOffset: offset }, fetchJson), `${key} layer ${layer}`);
+      take(j, acc);
       offset += j.features.length;
       done = !j.exceededTransferLimit;
-      if (!done && page === maxPages - 1) throw new Error(`${key}: too many polygons on this site to measure honestly.`);
     }
+    if (!done) throw new Error(`${key}: too many polygons on this site to measure honestly.`);
+    out.push(...acc);
   }
   return out;
 }
@@ -156,6 +163,17 @@ export function assertMeasurement(group, m) {
   if (!ok) throw new Error(`${group}: the stored answer was incomplete.`);
 }
 
+/* A failed row speaks in plain words and NEVER shows a server string, code or status ("Invalid or missing input
+ * parameters. (code 400)", "HTTP 503"). The detail goes to telemetry (`logFailure`), not to the reader. */
+const SOURCE_NOUN = { flood100: "FEMA flood map", flood500: "FEMA flood map", wetlands: "wetlands map", pipelines: "pipeline map", wells: "oil and gas well map" };
+export function plainFailure(check, err) {
+  const noun = SOURCE_NOUN[check.id] || "map";
+  const kind = classifyGisError(err).kind;
+  if (kind === "timeout") return `The ${noun} was too slow to answer.`;
+  if (kind === "offline") return "You appear to be offline.";
+  if (kind === "http-5xx" || kind === "network") return `The ${noun} is temporarily unavailable.`;
+  return `The ${noun} didn't answer.`;
+}
 function failedRow(check, message) {
   return {
     id: check.id, label: check.label, layer: check.layer, severity: "failed", figure: "Couldn't check",
@@ -215,10 +233,7 @@ export async function runTrustedChecks(rings, opts = {}) {
       });
     } catch (e) {
       logFailure(group, e);
-      // A transport failure keeps its plain wording ("didn't respond in time…"); an internal complaint about the
-      // answer's shape is not for the reader — the telemetry row above has the detail.
-      const plain = classifyGisError(e).kind === "error" ? "The map source gave an answer Planyr couldn't use." : gisErrorMessage(e);
-      return checks.map((c) => failedRow(c, plain));
+      return checks.map((c) => failedRow(c, plainFailure(c, e)));
     }
   }));
   const rowsById = new Map(results.flat().map((r) => [r.id, r]));

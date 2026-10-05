@@ -17,12 +17,17 @@ import { pLimit } from "./gisFetch.js";
 import { fetchArcgisJson } from "./gisFetch.js";
 import { ANALYSIS_SOURCES, analyzeSource, representativeRing, ringCentroid, stateName } from "./siteAnalysis.js";
 import { runTrustedChecks } from "./siteChecksRun.js";
-import { buildGovernsModel, buildCalls } from "./siteGoverns.js";
+import { buildGovernsModel, buildCalls, mergeRoadAnswers } from "./siteGoverns.js";
 import { TRUSTED_CHECKS } from "./siteChecks.js";
 
 /* The city-limits layer keys per state — the Layers panel's own "City limits & ETJ" pair in Texas (one merged
  * row), the state's city layer elsewhere. Anything unknown gets no "Show lines" link rather than a dead one. */
 const LINE_LAYERS = { TX: ["jur_city", "jur_etj"], GA: ["ga_city"], CA: ["ca_city"], CO: ["co_city"] };
+
+/* Road frontage is asked of EVERY active parcel (largest first, capped) — see mergeRoadAnswers. */
+const MAX_ROAD_RINGS = 12;
+const ringArea = (r) => { let a = 0; for (let i = 0; i < r.length; i++) { const [x1, y1] = r[i], [x2, y2] = r[(i + 1) % r.length]; a += x1 * y2 - x2 * y1; } return Math.abs(a) / 2; };
+export const roadRings = (rings) => (rings || []).filter((r) => r && r.length >= 3).sort((a, b) => ringArea(b) - ringArea(a)).slice(0, MAX_ROAD_RINGS);
 
 const ccnSource = (id) => ANALYSIS_SOURCES.find((s) => s.id === id);
 
@@ -58,7 +63,7 @@ export async function runSiteScreen(rings, opts = {}) {
   const jurP = Promise.resolve().then(() => idJur(c.lng, c.lat, { ring: rep, ...(rings.length > 1 ? { rings } : {}), cache: opts.cache, fetchJson: jurFetch })).catch((e) => ({ __error: e }));
   const roadP = !sourceCoversState(GIS_SOURCES.road, state)
     ? Promise.resolve({ __notScreened: true })
-    : Promise.resolve().then(() => idRoad(c.lng, c.lat, { ring: rep, cache: opts.cache, fetchJson: jurFetch })).catch((e) => ({ __error: e }));
+    : Promise.all(roadRings(rings).map((ring) => Promise.resolve().then(() => idRoad(c.lng, c.lat, { ring, cache: opts.cache, fetchJson: jurFetch })).catch((e) => ({ __error: e })))).then(mergeRoadAnswers);
   // CCN: Texas institutions (PUC). Off Texas ground they are never asked — the call simply applies.
   const ccnP = (id) => (!sourceCoversState(GIS_SOURCES[id], state) ? Promise.resolve(null)
     : analyzeSource(ccnSource(id), rings, { ...opts, fetchJson: pooledFetch }).catch(() => null));
