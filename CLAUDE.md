@@ -20,6 +20,39 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 >   wrong number written into the backlog, a gate quietly weakened to go green). **Must be read
 >   before judging whether any change works.**
 >
+> **🧾 LEDGER — ONE FILE PER ENTRY (NEW-1, B2109728, owner-approved 2026-10-05). `BACKLOG.md` AND `VERIFICATION.md`
+> ARE NO LONGER HAND-EDITED, AND THE TWO `docs/archive/*-DONE.md` FILES NO LONGER EXIST. This section overrides every
+> older sentence in this file (and in the docs) that says to append to, move a block within, or archive from them.**
+> **WHY:** every session appended to the same spot of those two files, so on a busy day every PR invalidated every other
+> one — and GitHub's SERVER-side mergeability ignores `merge=union` (measured 2026-10-05, PRs #2022/#2023: two PRs
+> prepending a line to a `merge=union` file both read `mergeable_state: dirty`; two PRs adding different *files* read
+> clean, #2024). PR #1900 sat dirty five days over code that never clashed. Only a layout in which two entries never
+> share a file removes the conflict by construction.
+> - **Where entries live:** `ledger/backlog/<open|bug-audit|verify|later|done>/B<id>.md` and
+>   `ledger/verification/<pending|checklist|done>/V<id>.md` — each file is exactly the old block (`### B<id> — title` …).
+>   A duplicate legacy id inside one folder is `B<id>.2.md`. The prose around the entries (rules, tag legend, section
+>   headings, the checklist preamble) is `ledger/<kind>/_frame.md` — hand-edited, rarely.
+> - **File an entry:** write the new file under `…/open/` (backlog) or `…/pending/` (verification). **Edit one:** edit its
+>   file. **Lifecycle move** (Open → Verify → Done, a recurrence back to Open, a V# archived when passed):
+>   `npm run ledger -- move B<id> <state>` (a rename — edit the text in the same commit). **Never delete an entry.**
+> - **Orient cheaply:** `npm run ledger -- list open` (one heading per entry), Grep `^### B` in `ledger/backlog/open` /
+>   `…/verify`, or read `BACKLOG_OPEN.md`. The *-done folders are write-only — look up ONE id (`ledger/backlog/done/B###.md`),
+>   never read a folder wholesale. `npm run next-id` still mints (it reads the ledger; `check-mint`, the id-uniqueness tests
+>   and every other consumer go through `scripts/lib/ledger.mjs`, which also serves the old file paths as VIRTUAL text).
+> - **`BACKLOG.md` / `VERIFICATION.md` at the repo root are GENERATED VIEWS** (frame + live entries), refreshed nightly by
+>   `.github/workflows/regen-derived-docs.yml` and never edited by a branch — `scripts/generated-doc-touch-guard.mjs`
+>   FAILS THE BUILD on a PR that touches them, `docs/archive/BACKLOG-DONE.md` or `…/VERIFICATION-DONE.md` (enforced once
+>   `ledger/` is on main). They can lag the real ledger by up to a day: the entry folders are the truth.
+> - **`npm run ledger -- check`** (a CI gate) validates layout: right folder, right filename, heading id = filename id, a frame
+>   marker for every live state. `ledger render` regenerates the two views locally (never commit them).
+> - **A branch that edited the OLD files** (opened before this landed): merge `origin/main`, take main's version of the old
+>   files, then `node scripts/ledger.mjs import-legacy <merge-base> <your-branch-tip-before-the-merge>` replays your entry
+>   additions/edits/moves onto `ledger/`. (`resolve-ledgers.mjs` / `npm run safe-merge` are no longer needed for these files;
+>   they remain for `MAP.md` / `BACKLOG_OPEN.md`.)
+> - **Acceptance test:** `test/ledgerConcurrentPRs.test.js` — two concurrent PRs each add a backlog + a verification entry
+>   and merge cleanly in both orders under a GitHub-equivalent `git merge-tree`; the same two PRs against the old
+>   one-big-file layout conflict (red-proof). Never reintroduce a shared append point.
+>
 > **⛔ TOUCHING PERSISTENCE, SYNC, UNDO, OR DELETE? READ `docs/DATA.md` FIRST.** It is the single
 > place that answers who owns a fact and how it may change — the entity table, the numbered
 > invariants (each with the test that proves it), the short list of "one-answer" functions
@@ -488,7 +521,8 @@ were split out of this file.
    forgets the durable log; Retry does not.** Keep those two actions distinct — never collapse
    them into one dismissal. (See B1037952, B1048400.)
 7. **(2026-08-22) A live check runs on a throwaway duplicate of a real plan, never on one of
-   Michael's real plans** — and the session says exactly what was touched.
+   Michael's real plans** — and the session says exactly what was touched. The duplicate is
+   deleted when the check finishes, without asking (entry 15).
 8. **(2026-09-11 · SUSPENDED 2026-09-12 · RE-LANDED 2026-09-15, live-verify still PENDING) The
    canvas commits ONE framing per load.** The GOAL was never in doubt; what has changed twice is
    whether a mechanism enforces it.
@@ -568,6 +602,32 @@ were split out of this file.
     phones as you have it. No change needed there." Box widths, tables and line breaks must still be identical on
     every device (asserted by `ui-audit/verify-notes-box-width-parity.mjs`); only this margin may differ. (See
     B2078593.)
+
+15. **(2026-10-05) Test artifacts are ALWAYS cleared, never asked about.** Michael, verbatim: "stop
+    asking to clear test files, always clr." Anything a session (or the Cowork chat) created for a test
+    or live check — throwaway duplicate plans, projects, schedules or reviews, test rows, uploaded test
+    files in Library/Drive, scratch files, temporary fixtures — is deleted as soon as the check is
+    done, WITHOUT asking and with no "needs you" line or report about it. Delete-must-verify still
+    applies (confirm the item is actually gone). Boundaries: never touches Michael's real projects or
+    anything he made himself; the standing `e2e@planyr.test` fixtures the signed-in helper depends on
+    (`e2e-fixture-site` and its sibling fixture) are NOT throwaway and stay. (See B2103600.)
+
+16. **(2026-10-05) Food ratings are one slider each, 1 to 10 in half steps, and must not be replaced
+    with tap buttons, steppers or whole numbers without Michael's say-so.** A visit's Food rating and
+    its Ambiance rating are each a single slider (min 1, max 10, step 0.5), "Not rated" until touched,
+    on first visit, log-another-visit and edit-an-old-visit, phone and desktop (B626576 shipped it;
+    #1941 swapped it for a 1-10 tap grid on phones and he got whole numbers back). The scale lives in
+    `src/workspaces/food/lib/ratingScale.js`; `test/foodRatingSlider.test.js` fails if the range or step
+    changes or a tap grid/stepper returns. Ratings saved in quarter points (8.75) still display as saved.
+    (See the NEW-1 item on BACKLOG.md.)
+17. **(2026-10-05) In Food, on a phone held SIDEWAYS, the place card docks to the RIGHT as a side panel
+    (like desktop) — never the bottom sheet — and the map keeps the pin in view.** Michael, approved fix
+    ("dock the card to the side, and improve on it"): the header collapses to one row, a pick centres its
+    pin in the map to the LEFT of the card, the "Search live for more here" chip is centred in that visible
+    part, "Log a visit" stays at the card's bottom, and the notch/home-bar safe areas are respected.
+    Upright phones keep the bottom sheet; desktop keeps the rail. "Landscape phone" is one query
+    (`LANDSCAPE_PHONE_QUERY`, `src/workspaces/food/lib/phoneLayout.js`: landscape + short + touch);
+    `ui-audit/verify-food-landscape.mjs` fails if the pin is hidden or the sheet comes back. (B2046224 ×4.)
 
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by
@@ -1497,7 +1557,7 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
    built in this item contradicts a listed constraint, and say so in the session reply. If a
    contradiction was caught, **CONSTRAINT-CAPTURE** governs — the offending part is not built, and
    the reply names the constraint it collided with.
-5. `BACKLOG.md` updated. **Do NOT regenerate or commit `BACKLOG_OPEN.md` yourself** — the Generated-
+5. The backlog entry filed/moved under `ledger/backlog/` (see the LEDGER section — never edit `BACKLOG.md`). **Do NOT regenerate or commit `BACKLOG_OPEN.md` yourself** — the Generated-
    index touch guard rejects a PR that touches it (NEW-1, B<PENDING>, 2026-09-08); it's refreshed by
    `.github/workflows/regen-derived-docs.yml` instead. Touched yield / pond panel copy?
    **PANEL-BREVITY** applies: run `node ui-audit/panel-copy-budget.mjs` before and after, and put

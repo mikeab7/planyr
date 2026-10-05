@@ -41,6 +41,7 @@ import { EIA_COMMODITIES, EIA_BUFFER_MI, isEiaScreenState } from "./eiaPipelineS
 const loadEiaCopy = () => import("./eiaPipelineScreenCopy.js");
 import { summarizeTransmission, summarizeSubstations } from "./powerScreen.js";
 import { summarizeAadt, summarizeRail, summarizeAirports } from "./accessScreen.js";
+import { NEAR_RADIUS_MI } from "./siteCheckRadius.js";
 import { summarizeGaStreams, gopherSummary, critHabitatSummary, critHabitatDetail, hsiTag, ustTag } from "./georgiaScreens.js";
 
 const DAY = 24 * 3600 * 1000;
@@ -120,7 +121,7 @@ export const ANALYSIS_SOURCES = [
     // reads SYMNUM / GIS_SYMBOL_DESCRIPTION → producing / plugged / dry / injection, and flags
     // on-site wells. Replaces the old count-only "N wells on/adjacent" summary.
     ...reg("oilgas"),
-    screenMode: "proximity", bufferMi: 0.25, ttl: 30 * DAY, verified: true,
+    screenMode: "proximity", bufferMi: NEAR_RADIUS_MI, ttl: 30 * DAY, verified: true,
     plural: "well(s)",
     absentLabel: "No mapped oil & gas wells within a quarter-mile",
     classifyProx: (scr, ctx) => summarizeWells(scr, ctx),
@@ -869,11 +870,12 @@ export function analyzeSource(source, rings, opts = {}) {
     // A source MAY supply its own classifier for when "a feature intersects" is not the
     // same as "a constraint" (flood: the NFHL returns the all-clear Zone X as polygons too).
     // Otherwise fall back to the generic presence/verified classifier (the silent-error guard).
-    let status, summary, detail;
+    let status, summary, detail, covered;
     if (hardError) {
       status = "unavailable"; summary = null; detail = [];
     } else if (typeof source.classify === "function") {
       const c = source.classify(attrs, source) || {};
+      covered = c.covered; // NEW-1 — whether a certificate / polygon covers the site, for the calls-to-make prompts
       status = c.status || "unknown";
       summary = c.summary != null ? c.summary : null;
       detail = c.detail || [];
@@ -895,6 +897,7 @@ export function analyzeSource(source, rings, opts = {}) {
       error: hardError,
       stale: haveStale, refreshError: haveStale ? gisErrorMessage(r.error) : null,
       caveat: source.caveat, verified: !!source.verified, mapLayer: source.mapLayer || null,
+      ...(covered !== undefined ? { covered } : {}),
     };
   });
 }

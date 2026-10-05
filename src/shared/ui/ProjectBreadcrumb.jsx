@@ -56,6 +56,7 @@
  * pseudo-project (Pursuits / Operations, which no `sites` row describes) is bridge-only.
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { isCoarsePointer } from "./coarsePointer.js";
 import { RADIUS } from "./radius.js";
 import FloatingNotice from "./FloatingNotice.jsx";
@@ -72,7 +73,8 @@ import {
 import { validateName, announceNameNotice } from "../names/nameCore.js";
 import { liveSiteName } from "../schedule/scheduleOwnership.js";
 import { resolveCurrentName, withCurrentProject, unionProjectLists, resolveControlledId as resolveControlledIdPure, hasSavedProjectRecord, applyFrozenOrder } from "../projects/projectModel.js";
-import { readPinnedFromMirror, readOpenedMap, noteProjectOpened, lastOpenedAt, orderForSwitcher, relTimeShort, highlightParts } from "../projects/projectSwitcherModel.js";
+import { readPinnedFromMirror, readOpenedMap, noteProjectOpened, lastOpenedAt, orderForSwitcher, relTimeShort, highlightParts, companyCardsFor } from "../projects/projectSwitcherModel.js";
+import { useOrgName } from "../profile/orgNameStore.js";
 import { crumbNeedsCompact } from "./breadcrumbFit.js";
 import { noteEffectRun } from "../../app/renderLoopProbe.js";
 
@@ -288,18 +290,26 @@ const panel = {
  * cluster is these four slots in this order (pin · calendar · time · menu); a slot is always
  * reserved, empty or not, which is what makes the columns line up on every row. */
 const switcherPanel = {
-  padding: 0, borderRadius: RADIUS.sm, background: "var(--surface-raised)", color: "var(--text-primary)",
-  border: "1px solid var(--border-default)", boxShadow: "0 8px 24px rgba(0,0,0,0.14), 0 1px 3px rgba(0,0,0,0.08)", // design-exempt: no shadow-color token exists repo-wide yet — the soft drop shadow the spec asks for
+  // NEW-1 (grouped cards) — the panel sits clearly ABOVE the page: its own surface (the page-level
+  // gray — darker than the header in dark mode, light gray in light mode), a visible border, a strong
+  // drop shadow. Content sits on raised cards (`CARD`) inside it, iPhone-Settings style.
+  padding: 0, borderRadius: RADIUS.md, background: "var(--surface-page)", color: "var(--text-primary)",
+  border: "1px solid var(--border-strong)", boxShadow: "0 18px 48px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.30)", // design-exempt: no shadow-color token exists repo-wide — the strong drop shadow the spec asks for
   fontFamily: "system-ui, sans-serif", display: "flex", flexDirection: "column", overflow: "hidden",
 };
+// The dim behind an open dropdown. A fixed black wash reads the same over any map imagery or theme.
+const SCRIM_STYLE = { position: "fixed", inset: 0, zIndex: 4000, background: "rgba(0,0,0,0.5)" }; // design-exempt: fixed scrim over any imagery/theme
+// A raised rounded card inside the panel; rows inside it are separated by hairlines.
+// flexShrink 0: an overflow:hidden flex child has min-height 0 and would otherwise be squeezed to the
+// scroll box and clip its own rows instead of letting the list scroll.
+const CARD = { background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: RADIUS.md, overflow: "hidden", flexShrink: 0 };
 const SLOT = { flex: "none", display: "flex", alignItems: "center", boxSizing: "border-box" };
 const SLOT_PIN = { ...SLOT, width: 24, justifyContent: "center" };
 const SLOT_CAL = { ...SLOT, width: 20, justifyContent: "center" };
-const SLOT_TIME = { ...SLOT, width: 50, justifyContent: "flex-end", fontSize: 11, color: "var(--text-tertiary)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
+const SLOT_TIME = { ...SLOT, width: 50, justifyContent: "flex-end", fontSize: 11, color: "var(--text-secondary)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
 const SLOT_MENU = { ...SLOT, width: 26, justifyContent: "flex-end" };
 const PIN_BTN = { flex: "none", width: 22, height: 22, display: "grid", placeItems: "center", padding: 0, border: "none", background: "transparent", cursor: "pointer", borderRadius: RADIUS.sm, color: "var(--text-secondary)", fontFamily: "inherit" };
-const KEBAB_BTN = { flex: "none", cursor: "pointer", border: "none", background: "transparent", color: "var(--text-tertiary)", borderRadius: RADIUS.sm, padding: "2px 3px", lineHeight: 0, fontFamily: "inherit", display: "grid", placeItems: "center" };
-const SECTION_LABEL = { padding: "9px 12px 3px", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)" };
+const KEBAB_BTN = { flex: "none", cursor: "pointer", border: "none", background: "transparent", color: "var(--text-secondary)", borderRadius: RADIUS.sm, padding: "2px 3px", lineHeight: 0, fontFamily: "inherit", display: "grid", placeItems: "center" };
 
 const row = (extra) => ({
   display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
@@ -901,7 +911,8 @@ export default function ProjectBreadcrumb({
   const doPurge = (p) => {
     setBinBusy(p.id); setPurgeFor(null);
     Promise.resolve(purgeDeletedProject(p.ids, p.id)).then((res) => {
-      if (!res || res.ok === false) flashToast((res && res.error) || `“${p.name}” couldn't be permanently deleted — check your connection and try again.`);
+      // NEW-1 — a failure names the project and the reason (the storage layer words it); the row stays listed.
+      if (!res || res.ok === false) flashToast(`“${p.name}” couldn't be permanently deleted. ${(res && res.error) || "Check your connection and try again."}`, 12000);
       refreshBin();
     }).catch(() => flashToast(`“${p.name}” couldn't be permanently deleted — check your connection and try again.`))
       .finally(() => setBinBusy(null));
@@ -935,7 +946,7 @@ export default function ProjectBreadcrumb({
         data-menu-open={menuFor?.id === p.id ? "1" : undefined}
         onClick={editing ? undefined : () => pickProject(p.id, p.name)}
         onContextMenu={canManage ? (e) => openManageMenu(e, p) : undefined}
-        style={{ display: "flex", alignItems: "center", height: 32, padding: "0 6px 0 12px", cursor: editing ? "default" : "pointer", fontSize: CHROME_FONT_CONTROL, color: "var(--text-primary)" }}
+        style={{ display: "flex", alignItems: "center", height: 38, padding: "0 6px 0 12px", cursor: editing ? "default" : "pointer", fontSize: CHROME_FONT_CONTROL, color: "var(--text-primary)" }}
       >
         {editing ? (
           <RenameInput
@@ -968,17 +979,18 @@ export default function ProjectBreadcrumb({
               <span data-testid={`project-slot-pin-${p.id}`} style={SLOT_PIN}>
                 <button
                   className="psw-pin"
+                  data-pinned={isPinned ? "1" : "0"}
                   data-testid={`project-pin-${p.id}`}
                   aria-label={isPinned ? `Unpin ${p.name}` : `Pin ${p.name}`}
                   aria-pressed={isPinned}
                   title={isPinned ? "Unpin" : "Pin"}
                   onClick={(e) => { e.stopPropagation(); togglePinned(p.id); }}
-                  style={PIN_BTN}
-                ><PinIcon size={12} filled={isPinned} /></button>
+                  style={isPinned ? { ...PIN_BTN, color: "var(--accent-site)" } : PIN_BTN}
+                ><PinIcon size={13} filled={isPinned} /></button>
               </span>
               <span data-testid={`project-slot-cal-${p.id}`} style={SLOT_CAL}>
                 {p.scheduleProjectId != null && (
-                  <span data-testid={`project-cal-${p.id}`} title="Has a schedule" aria-label="Has a schedule" style={{ display: "grid", placeItems: "center", color: "var(--text-tertiary)" }}><CalendarIcon /></span>
+                  <span data-testid={`project-cal-${p.id}`} title="Has a schedule" aria-label="Has a schedule" style={{ display: "grid", placeItems: "center", color: "var(--text-secondary)" }}><CalendarIcon /></span>
                 )}
               </span>
               <span data-testid={`project-time-${p.id}`} style={{ ...SLOT_TIME, ...(cur ? { color: accent, fontWeight: 600 } : null) }}>
@@ -1009,7 +1021,11 @@ export default function ProjectBreadcrumb({
   // NEW-4 (B1343203) — the SAME name the visible span below computes inline (kept literal there
   // for an existing source-guard test's sake — see that span's own comment), hoisted here once so
   // the compact-mode aria-label and the hidden measurement twin can't drift from it independently.
-  const projectLabel = cross ? "All projects" : org ? "Organization" : (currentName || "Select a project");
+  // NEW-2 — at company scope the crumb reads the organization's own name from Settings (one source:
+  // orgNameStore), so the trail is Map / <Company name>; "Organization" only when no name is saved.
+  const orgName = useOrgName();
+  const orgLabel = orgName || "Organization";
+  const projectLabel = cross ? "All projects" : org ? orgLabel : (currentName || "Select a project");
 
   /* NEW-4 (B1343203) — measured (not assumed) compaction of the MIDDLE crumb, per this file's own
    * VIEWPORT-STABLE-style rule: guess wrong either way and you either compact a trail that
@@ -1182,7 +1198,7 @@ export default function ProjectBreadcrumb({
             {/* NEW-2 — the same fix, on the crumb's own visible text: it used to fall straight
                 to "Select a project" whenever nothing was picked, which is wrong the moment the
                 same menu also offers the Organization. */}
-            {cross ? "All projects" : org ? "Organization" : (currentName || "Select a project")}
+            {cross ? "All projects" : org ? orgLabel : (currentName || "Select a project")}
           </span>
         )}
         {/* ⛔ NEW-5 (owner report 2026-09-25) — the crumb's own at-risk triangle is REMOVED. It
@@ -1220,32 +1236,44 @@ export default function ProjectBreadcrumb({
         </>
       )}
 
+      {/* NEW-1 (grouped cards) — the page behind the dropdown dims while it is open; a tap on the
+          dim closes it. It is its own portal layer stacked just ABOVE the menu's dismiss layer
+          (`data-menu-layer` 4000.5 > the menu's 4000) so AnchoredMenu's document mousedown
+          listener stands down for it — otherwise the listener would unmount the scrim between
+          mousedown and click and the tap would land on whatever was underneath (a map pin). Its
+          paint order stays below the panel (zIndex 4000 < 4001). */}
+      {open && createPortal(
+        <div data-testid="project-scrim" data-menu-layer="4000.5" aria-hidden="true" onClick={() => setOpen(false)} style={SCRIM_STYLE} />,
+        document.body,
+      )}
       <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchorRef}
         placement="below-left" width={340} gap={8} panelStyle={switcherPanel} className="psw-panel">
-        {/* NEW-1 (switcher restyle) — a white crisp panel: search across the top, ONE scrolling list
-            (the panel itself never scrolls), a footer that is always in view. */}
+        {/* A filled, rounded search field across the top; then ONE scrolling list of raised cards
+            (the panel itself never scrolls); then a footer that is always in view. */}
         {!binOpen && (
-          <div style={{ flex: "none", display: "flex", alignItems: "center", gap: 8, padding: "0 12px", height: 38, borderBottom: "1px solid var(--border-default)", color: "var(--text-tertiary)" }}>
-            <SearchIcon />
-            <input
-              {...NO_AUTOFILL}
-              autoFocus={!isCoarsePointer()}
-              data-testid="project-search"
-              aria-label="Search projects"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search projects"
-              style={{
-                flex: 1, minWidth: 0, boxSizing: "border-box", padding: 0, border: "none", outline: "none", boxShadow: "none",
-                fontFamily: "inherit", fontSize: CHROME_FONT_CONTROL, color: "var(--text-primary)", background: "transparent",
-              }}
-            />
+          <div style={{ flex: "none", padding: "10px 10px 6px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 12px", height: 38, boxSizing: "border-box", background: "var(--surface-field)", border: "1px solid var(--border-default)", borderRadius: RADIUS.md, color: "var(--text-secondary)" }}>
+              <SearchIcon />
+              <input
+                {...NO_AUTOFILL}
+                autoFocus={!isCoarsePointer()}
+                data-testid="project-search"
+                aria-label="Search projects"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search projects"
+                style={{
+                  flex: 1, minWidth: 0, boxSizing: "border-box", padding: 0, border: "none", outline: "none", boxShadow: "none",
+                  fontFamily: "inherit", fontSize: CHROME_FONT_CONTROL, color: "var(--text-primary)", background: "transparent",
+                }}
+              />
+            </div>
           </div>
         )}
 
         {atRisk(saveState) && (
           <div style={{ flex: "none", display: "flex", gap: 7, alignItems: "flex-start", padding: "7px 12px",
-            background: "var(--surface-page)", borderBottom: "1px solid var(--warn-text)", color: "var(--warn-text)", fontSize: CHROME_FONT_CONTROL, lineHeight: 1.4 }}>
+            background: "var(--surface-raised)", borderBottom: "1px solid var(--warn-text)", color: "var(--warn-text)", fontSize: CHROME_FONT_CONTROL, lineHeight: 1.4 }}>
             <WarnIcon />
             <span>This project's latest changes are saved on this device — the cloud is unreachable. Switching is safe; they'll sync next time you edit or close this tab.</span>
           </div>
@@ -1256,9 +1284,9 @@ export default function ProjectBreadcrumb({
 
         {/* THE ONE SCROLLING ELEMENT. `minHeight: 0` lets it shrink inside the flex column so the
             footer below can never be pushed out of the panel. */}
-        <div data-testid="project-list-scroll" style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
+        <div data-testid="project-list-scroll" style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "4px 10px 10px", display: "flex", flexDirection: "column", gap: 10 }}>
           {binOpen ? (
-            <div data-testid="project-bin">
+            <div data-testid="project-bin" style={CARD}>
               <button
                 data-testid="project-bin-back"
                 onClick={() => { setBinOpen(false); setPurgeFor(null); }}
@@ -1310,58 +1338,51 @@ export default function ProjectBreadcrumb({
             </div>
           ) : (
             <>
-              {/* ORG SCOPE (NEW-1) — a real, distinct destination, NOT a project row: it never appears
-                  in `projects`/`filtered`, and always routes through `onSelectOrg`. Omitted entirely
-                  when the caller hasn't wired it (Scheduler's bridged switcher). */}
-              {onSelectOrg && (
-                <button
-                  data-testid="project-org"
-                  onClick={pickOrg}
-                  className="psw-row"
-                  data-current={org ? "1" : undefined}
-                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", height: 32, padding: "0 12px", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: CHROME_FONT_CONTROL, fontWeight: 700, color: "var(--text-primary)", textAlign: "left" }}
-                >
-                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}><OrgIcon />Organization</span>
-                  {org && <span style={{ color: accent, fontSize: 11, fontWeight: 600 }}>Current</span>}
-                </button>
-              )}
-              {filtered.length === 0 ? (
-                <div style={{ padding: "12px", fontSize: 12, color: "var(--text-tertiary)" }}>
-                  {q ? "No matching projects." : (warming ? "Loading projects…" : "No projects yet — start one below.")}
+              {/* NEW-2 — the company workspace card: its own card above the projects card. Not a
+                  project row (never in `projects`/`filtered`); always routes through `onSelectOrg`.
+                  Omitted when the caller hasn't wired it (Scheduler's bridged switcher), and hidden
+                  while a search has text unless the name matches. No chevron, no destination text. */}
+              {onSelectOrg && companyCardsFor(orgName, q).map((c, i) => (
+                <div key={c.id} style={CARD}>
+                  <button
+                    data-testid="project-org"
+                    onClick={pickOrg}
+                    className="psw-row"
+                    data-current={org && i === 0 ? "1" : undefined}
+                    style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", minHeight: 52, padding: "8px 12px", border: "none", cursor: "pointer", fontFamily: "inherit", color: "var(--text-primary)", textAlign: "left" }}
+                  >
+                    <span aria-hidden="true" style={{ flex: "none", width: 32, height: 32, display: "grid", placeItems: "center", borderRadius: RADIUS.sm, background: "var(--accent-site)", color: "var(--on-accent-site)" }}><OrgIcon size={17} /></span>
+                    <span style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 1 }}>
+                      <span data-testid="project-org-name" title={c.name} style={{ fontSize: 13, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
+                      <span data-testid="project-org-subtitle" style={{ fontSize: CHROME_FONT_CONTROL, color: "var(--text-secondary)" }}>{c.subtitle}</span>
+                    </span>
+                    {org && i === 0 && <span style={{ flex: "none", color: accent, fontSize: 11, fontWeight: 600 }}>Current</span>}
+                  </button>
                 </div>
-              ) : (
-                <>
-                  {currentRow && (
-                    <>
-                      {renderProjectRow(currentRow)}
-                      {(pinnedRows.length > 0 || restRows.length > 0) && <div style={{ height: 1, background: "var(--border-default)" }} />}
-                    </>
-                  )}
-                  {pinnedRows.length > 0 && (
-                    <div data-testid="project-group-pinned">
-                      <div style={SECTION_LABEL}>Pinned</div>
-                      {pinnedRows.map((p) => renderProjectRow(p))}
-                    </div>
-                  )}
-                  {restRows.length > 0 && (
-                    <div data-testid="project-group-recent">
-                      <div style={SECTION_LABEL}>Recent</div>
-                      {restRows.map((p) => renderProjectRow(p))}
-                    </div>
-                  )}
-                </>
-              )}
+              ))}
+              {/* ONE card holds every project: current first, then pinned, then everything else (each
+                  newest-opened first, off `lastOpenedAt`). No section labels — a pinned row says so
+                  with its own green pin. Hairlines between rows. */}
+              <div data-testid="project-card" className="psw-card" style={CARD}>
+                {filtered.length === 0 ? (
+                  <div style={{ padding: "12px", fontSize: 12, color: "var(--text-secondary)" }}>
+                    {q ? "No matching projects." : (warming ? "Loading projects…" : "No projects yet — start one below.")}
+                  </div>
+                ) : (
+                  [...(currentRow ? [currentRow] : []), ...pinnedRows, ...restRows].map(renderProjectRow)
+                )}
+              </div>
             </>
           )}
         </div>
 
         {/* FOOTER — always visible, whatever the list length. */}
-        <div data-testid="project-footer" style={{ flex: "none", borderTop: "1px solid var(--border-default)", padding: "4px 0 6px" }}>
+        <div data-testid="project-footer" style={{ flex: "none", padding: "6px 10px 10px", display: "flex", flexDirection: "column", gap: 4 }}>
           <button
             data-testid="project-new"
             onClick={newProject}
             className="psw-row"
-            style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", height: 32, padding: "0 12px", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: CHROME_FONT_CONTROL, fontWeight: 600, color: accent, textAlign: "left" }}
+            style={{ ...CARD, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, width: "100%", height: 40, padding: "0 12px", cursor: "pointer", fontFamily: "inherit", fontSize: 13, fontWeight: 600, color: accent }}
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true" style={{ flex: "none", display: "block" }}><path d="M12 5v14M5 12h14" /></svg>
             New project
@@ -1373,7 +1394,7 @@ export default function ProjectBreadcrumb({
               data-testid="project-bin-toggle"
               onClick={() => { setBinOpen((v) => !v); setPurgeFor(null); }}
               aria-expanded={binOpen}
-              style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", height: 24, padding: "0 12px", border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 11, color: "var(--text-tertiary)", textAlign: "left" }}
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6, width: "100%", height: 26, padding: "0 12px", border: "none", background: "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: 11, color: "var(--text-secondary)" }}
             >
               <RestoreIcon />
               Recently deleted ({deleted.length})

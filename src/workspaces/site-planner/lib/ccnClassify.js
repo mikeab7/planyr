@@ -80,7 +80,7 @@ export function classifyCcn(rows, { service = "water", regional = false } = {}) 
     const summary = regional
       ? base + " (Sewer CCN coverage is the Houston region — a site outside it reads as none; confirm.)"
       : base + " Confirm with the utility and the PUC.";
-    return { status: "info", summary, detail: [] };
+    return { status: "info", summary, detail: [], covered: false };
   }
 
   const pending = list.filter(isPending).length > 0;
@@ -99,5 +99,5 @@ export function classifyCcn(rows, { service = "water", regional = false } = {}) 
     const no = row.CCN_NO ? ` · CCN ${String(row.CCN_NO).trim()}` : "";
     return `${describeHolder(h)}${st}${no}`;
   });
-  return { status: "info", summary, detail };
+  return { status: "info", summary, detail, covered: true };
 }

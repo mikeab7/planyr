@@ -17,6 +17,9 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 const h = vi.hoisted(() => ({
   cloudDeletedRowsResult: { ok: true, supported: true, rows: [] },
   hardDeleteResults: {},
+  // NEW-1 — ids the table still holds after a delete (the fresh read), and whether that read works.
+  stillPresent: [],
+  presentReadOk: true,
   purgeProjectFoldersResult: { ok: true, rowsDeleted: true, driveTrashed: true },
   // B1164193 — defaults to "the group is genuinely gone" (no live plans left), which is what
   // every PRE-EXISTING test below assumes; the new live-siblings tests override it per case.
@@ -32,6 +35,9 @@ vi.mock("../src/workspaces/site-planner/lib/cloudSync.js", () => ({
   cloudUpsert: vi.fn(async () => ({ ok: true })),
   cloudDelete: vi.fn(async () => ({ ok: true, removed: 1 })),
   cloudHardDelete: vi.fn(async (uid, id) => h.hardDeleteResults[id] || { ok: true, removed: 1 }),
+  cloudRowsPresent: vi.fn(async (uid, ids) => h.presentReadOk
+    ? { ok: true, present: ids.filter((id) => h.stillPresent.includes(id)) }
+    : { ok: false, present: [], error: "offline" }),
   cloudRestore: vi.fn(async () => ({ ok: true, restored: 1 })),
   cloudCheckDeleted: vi.fn(async () => h.cloudCheckDeletedResult),
   clearSiteVersions: vi.fn(),
@@ -63,6 +69,8 @@ beforeEach(() => {
   };
   h.cloudDeletedRowsResult = { ok: true, supported: true, rows: [] };
   h.hardDeleteResults = {};
+  h.stillPresent = [];
+  h.presentReadOk = true;
   h.purgeProjectFoldersResult = { ok: true, rowsDeleted: true, driveTrashed: true };
   h.cloudCheckDeletedResult = { ok: true, exists: false, deleted: false };
   h.unfileResult = { ok: true, unfiled: 0 };
@@ -253,5 +261,73 @@ describe("purgeExpiredDeletedProjects — one folder purge per GROUP, not per pl
     };
     await purgeExpiredDeletedProjects();
     expect(purgeProjectFolders).toHaveBeenCalledWith("plan-solo");
+  });
+});
+
+/* NEW-1 — "Delete forever" on a whole project looked like it worked and did nothing. RED on the
+ * code before this fix: a DELETE that matched ZERO rows came back `{ ok: true, removed: 0 }`,
+ * `purgeDeletedProject` read only `ok`, so it reported success AND ran the folder/Drive teardown
+ * against a project whose `sites` row was still in the database. The property: a purge is only
+ * reported — and the cascade only runs — once a FRESH READ can no longer find the rows. */
+describe("purgeDeletedProject — a purge counts only once a fresh read proves the rows are gone (NEW-1)", () => {
+  it("a zero-row DELETE whose row is still there is a LOUD failure, and tears down nothing", async () => {
+    h.hardDeleteResults["proj-a"] = { ok: true, removed: 0 }; // matched nothing
+    h.stillPresent = ["proj-a"];                              // ...and the row is still in the table
+    const r = await purgeDeletedProject(["proj-a"], "proj-a");
+    expect(r.ok).toBe(false);
+    expect(r.purged).toBe(0);
+    expect(r.error).toMatch(/still in your account/i);
+    expect(purgeProjectFolders).not.toHaveBeenCalled();
+    expect(unfileReviewsForDeletedProject).not.toHaveBeenCalled();
+    expect(reportClientEvent).toHaveBeenCalledWith("purge-not-effective", expect.any(String), expect.objectContaining({ ids: ["proj-a"] }));
+  });
+
+  it("a partly-effective purge says so, counts only what is really gone, and runs no cascade", async () => {
+    h.stillPresent = ["plan-b"];
+    const r = await purgeDeletedProject(["plan-a", "plan-b"], "grp");
+    expect(r.ok).toBe(false);
+    expect(r.purged).toBe(1);
+    expect(r.error).toMatch(/1 of its 2 plans/);
+    expect(purgeProjectFolders).not.toHaveBeenCalled();
+  });
+
+  it("KNOWN-GOOD ARM: a delete the read confirms still succeeds and still cascades once", async () => {
+    const r = await purgeDeletedProject(["proj-a"], "proj-a");
+    expect(r).toEqual({ ok: true, purged: 1, error: null });
+    expect(purgeProjectFolders).toHaveBeenCalledTimes(1);
+  });
+
+  it("a row that was already gone (zero rows, read finds nothing) is success, not a false alarm", async () => {
+    h.hardDeleteResults["proj-a"] = { ok: true, removed: 0 };
+    const r = await purgeDeletedProject(["proj-a"], "proj-a");
+    expect(r.ok).toBe(true);
+    expect(purgeProjectFolders).toHaveBeenCalledTimes(1);
+  });
+
+  it("an unreadable verification is never read as 'gone' off a zero-row answer", async () => {
+    h.presentReadOk = false;
+    h.hardDeleteResults["proj-a"] = { ok: true, removed: 0 };
+    const r = await purgeDeletedProject(["proj-a"], "proj-a");
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/couldn't confirm/i);
+    expect(purgeProjectFolders).not.toHaveBeenCalled();
+  });
+
+  it("an unreadable verification after a DELETE that positively removed the row still cleans up", async () => {
+    h.presentReadOk = false;
+    const r = await purgeDeletedProject(["proj-a"], "proj-a");
+    expect(r.ok).toBe(false); // can't be confirmed, so it is said — but the teardown is not orphaned
+    expect(r.purged).toBe(1);
+    expect(purgeProjectFolders).toHaveBeenCalledTimes(1);
+  });
+
+  it("the 30-day sweep gets the same proof: a still-present row is a failure, not a purge", async () => {
+    h.cloudDeletedRowsResult = { ok: true, supported: true, rows: [{ id: "old-a", group_id: "old-a", deleted_at: new Date(Date.now() - 40 * 86400000).toISOString() }] };
+    h.hardDeleteResults["old-a"] = { ok: true, removed: 0 };
+    h.stillPresent = ["old-a"];
+    const r = await purgeExpiredDeletedProjects();
+    expect(r.purged).toBe(0);
+    expect(r.failed).toBe(1);
+    expect(purgeProjectFolders).not.toHaveBeenCalled();
   });
 });

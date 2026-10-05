@@ -97,27 +97,31 @@ export function lotBoxCanHost(pxW, pxH, fontPx = LOT_NO_FONT_PX) {
   return pxH >= Math.ceil(fontPx * 1.25) && pxW > LOT_NO_PAD_X;
 }
 
-export function layoutLotNumbers({ lots, origin, measure, fontPx = LOT_NO_FONT_PX, obstacles = [], maxLabels = LOT_NO_MAX_LABELS }) {
+/** One lot → its layout item, or null when the lot cannot hold its number (the same rejects, in the same order, the
+ *  layout always made). Per-lot and independent of every other lot, so a caller can prepare lots a few at a time
+ *  across frames (B2092656 ×3) and hand the items to `solveLotNumberItems`. Pure. */
+export function lotNumberItem(lot, { origin, measure, fontPx = LOT_NO_FONT_PX }) {
+  if (!lot || !lot.text || !Array.isArray(lot.ring) || lot.ring.length < 3) return null;
   const lh = Math.ceil(fontPx * 1.25);
-  const items = [];
-  const byId = new Map();
-  for (const lot of lots || []) {
-    if (!lot || !lot.text || !Array.isArray(lot.ring) || lot.ring.length < 3) continue;
-    const b = ringBox(lot.ring);
-    if (!(b.h >= lh)) continue;                           // cheap reject BEFORE measuring text (measureText was 20 ms of one relayout)
-    const w = Math.ceil(measure(lot.text, fontPx)) + LOT_NO_PAD_X;
-    if (!(b.w >= w)) continue;                            // cheap reject: the lot's bbox cannot hold it
-    const fitter = interiorFitter(lot.ring);
-    if (!fitter || !fitter.place(w, lh)) continue;        // the real interior cannot hold it either
-    byId.set(lot.id, { text: lot.text, w, h: lh });
-    items.push({
-      id: lot.id, cx: 0, cy: 0, lines: [lot.text], lh, charW: fontPx * 0.68, textW: { [lot.text]: w },
-      halfW: b.w / 2, halfH: b.h / 2, importance: b.w * b.h,   // the bigger lot keeps its number when two compete
-      ring: lot.ring, ringOrigin: origin, ringPpf: 1,
-    });
-  }
-  items.sort((p, q) => (q.importance - p.importance) || (String(p.id) < String(q.id) ? -1 : 1));
-  const solved = layoutLabelsSolve(items.slice(0, maxLabels), { pad: LOT_NO_GAP_PX, obstacles });
+  const b = ringBox(lot.ring);
+  if (!(b.h >= lh)) return null;                           // cheap reject BEFORE measuring text (measureText was 20 ms of one relayout)
+  const w = Math.ceil(measure(lot.text, fontPx)) + LOT_NO_PAD_X;
+  if (!(b.w >= w)) return null;                            // cheap reject: the lot's bbox cannot hold it
+  const fitter = interiorFitter(lot.ring);
+  if (!fitter || !fitter.place(w, lh)) return null;        // the real interior cannot hold it either
+  return {
+    id: lot.id, cx: 0, cy: 0, lines: [lot.text], lh, charW: fontPx * 0.68, textW: { [lot.text]: w },
+    halfW: b.w / 2, halfH: b.h / 2, importance: b.w * b.h,   // the bigger lot keeps its number when two compete
+    ring: lot.ring, ringOrigin: origin, ringPpf: 1,
+    _lot: { text: lot.text, w, h: lh },
+  };
+}
+
+/** The collision pass over prepared items → placed numbers [{id,text,x,y,w,h}]. Pure. */
+export function solveLotNumberItems(items, { obstacles = [], maxLabels = LOT_NO_MAX_LABELS } = {}) {
+  const list = items.slice().sort((p, q) => (q.importance - p.importance) || (String(p.id) < String(q.id) ? -1 : 1));
+  const byId = new Map(list.map((it) => [it.id, it._lot]));
+  const solved = layoutLabelsSolve(list.slice(0, maxLabels), { pad: LOT_NO_GAP_PX, obstacles });
   const out = [];
   solved.forEach((pl, id) => {
     if (pl.leader || pl.rung === "outside") return; // never a connector: a number lives inside its lot or not at all
@@ -125,4 +129,10 @@ export function layoutLotNumbers({ lots, origin, measure, fontPx = LOT_NO_FONT_P
     if (m) out.push({ id, text: m.text, x: pl.x, y: pl.y, w: m.w, h: m.h });
   });
   return out;
+}
+
+export function layoutLotNumbers({ lots, origin, measure, fontPx = LOT_NO_FONT_PX, obstacles = [], maxLabels = LOT_NO_MAX_LABELS }) {
+  const items = [];
+  for (const lot of lots || []) { const it = lotNumberItem(lot, { origin, measure, fontPx }); if (it) items.push(it); }
+  return solveLotNumberItems(items, { obstacles, maxLabels });
 }

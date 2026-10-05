@@ -41,3 +41,24 @@ export function useBottomSheetHeight() {
   }, []);
   return h;
 }
+
+// ── The side-docked place card (Food, phone held sideways — B2046224 ×4) ───────────────────────
+// Same idea as the sheet height above, on the other axis: how wide the card down the RIGHT edge is,
+// so the global help button (fixed bottom-right, mounted in the Shell with no path into Food) can
+// step to the card's left edge instead of sitting on its "Log a visit" bar. 0 when no card is docked.
+let sideWidth = 0;
+const sideSubs = new Set();
+export function publishSideDockWidth(px) {
+  sideWidth = px > 0 ? px : 0;
+  sideSubs.forEach((fn) => fn(sideWidth));
+}
+export function currentSideDockWidth() { return sideWidth; }
+export function useSideDockWidth() {
+  const [w, setW] = useState(sideWidth);
+  useEffect(() => {
+    sideSubs.add(setW);
+    setW(sideWidth);
+    return () => sideSubs.delete(setW);
+  }, []);
+  return w;
+}

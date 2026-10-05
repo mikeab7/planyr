@@ -1502,6 +1502,10 @@ position**.
 - **A pane's on-screen width is never a layout input for content that a view transform scales.** Anything measured on `note-mat` (`offsetWidth`) is screen-space; the page and its boxes are workspace-space.
 - **Known and not unified:** the sheet's paper margin (16 vs 40 a side) is a deliberate phone setting; it shifts the paper edge ~48 workspace-units on pages that grow/are pinned below the floor, never box widths, tables or line breaks. **Owner decision 2026-10-04: keep it thinner on phones — do not unify (CLAUDE.md constraint #14).**
 
+## When a symptom survives three narrow fixes, ask whether the mechanism should exist at all (B1815025, 2026-10-05)
+
+The Notes width-drag took FOUR rounds. B1740688 (PR #1758: content shifted instead of the boundary), B1775312 (PR #1778: gross judder from a double scroll compensation) and B1801040 (PR #1792: left-grip creep from a scroll clamped at zero on narrow pages) each fixed the symptom named and left the next one. The fourth round (PR #1805) **deleted the compensation mechanism entirely** instead of testing it harder, and the owner's own hand-drag then found nothing moving. **Lesson: when a symptom survives three narrow fixes, stop patching and ask whether the mechanism should exist at all.**
+
 ## 7 · The mat's gesture model, in one table (NEW-1/NEW-2, 2026-09-12)
 
 Four meanings now compete for one press on the note canvas. The rule reads in this order, and the

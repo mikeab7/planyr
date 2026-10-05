@@ -3,6 +3,7 @@
  * (a) count the two authoritative id forms — `### B123` headings and `**B123**` bold mints, incl.
  * ranges — and (b) be IMMUNE to a stray inline prose mention inflating the max (the one dangerous
  * error is UNDER-counting, i.e. reusing a live number; over-counting from a typo is what we prevent). */
+import { readText } from "../scripts/lib/ledger.mjs";
 import { describe, it, expect } from "vitest";
 import { maxId, computeNextIds, findDuplicateIdsIn, maxAgainstMain, readRefFile, GIT_MAX_BUFFER, B_FILES, V_FILES } from "../scripts/next-id.mjs";
 import { fileURLToPath } from "node:url";
@@ -133,7 +134,7 @@ describe("the git reader — must not silently degrade on a large archive (B896 
   });
 
   it("passes an explicit maxBuffer comfortably above docs/archive/BACKLOG-DONE.md's on-disk size", () => {
-    const onDiskBytes = readFileSync(resolve(REPO, "docs/archive/BACKLOG-DONE.md")).length;
+    const onDiskBytes = Buffer.byteLength(readText(REPO, "docs/archive/BACKLOG-DONE.md"));
     expect(GIT_MAX_BUFFER, "every git read must use an explicit maxBuffer above the archive size").toBeGreaterThan(onDiskBytes);
   });
 
