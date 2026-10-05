@@ -405,3 +405,56 @@ describe("the gate leaves the clone exactly as it found it", () => {
     expect(git(repo, "merge-base", "refs/remotes/origin/main", "HEAD").trim()).toBe(before.base);
   });
 });
+
+/* ------------------------------------------------------------------------------------------ *
+ * MINT-CHECK-ENCODING (NEW-1, 2026-10-05). `readLedgerAtRef` once passed `encoding: "buffer"` to
+ * `execFileSync` (not a valid Node encoding), which died with "Unknown encoding: buffer" the moment
+ * the gate had to read the ledger at origin/main — so every push adding an id was blocked by its own
+ * safety check. #2028 fixed the call; nothing pinned it with a LARGE blob, which is the real-world
+ * shape (the generated BACKLOG view is ~7 MB; the ref reader streams every entry through ONE
+ * `git cat-file --batch`, far past Node's default 1 MB maxBuffer). This drives the real gate and CLI
+ * against a ledger/ tree on origin whose combined blobs exceed 1 MB, with one single blob > 1 MB.
+ * ------------------------------------------------------------------------------------------ */
+describe("MINT-CHECK-ENCODING — the gate reads a multi-megabyte ledger at origin/main", () => {
+  let R, O, work;
+  beforeAll(async () => {
+    const { writeEntry } = await import("../scripts/lib/ledger.mjs");
+    R = mkdtempSync(join(tmpdir(), "mint-gate-big-"));
+    O = join(R, "origin.git");
+    mkdirSync(O);
+    git(O, "init", "--bare", "-q", "-b", "main");
+    const seed = clone(O, join(R, "seed"));
+    for (const kind of ["backlog", "verification"]) {
+      mkdirSync(join(seed, "ledger", kind), { recursive: true });
+      writeFileSync(join(seed, "ledger", kind, "_frame.md"), readFileSync(join(REPO, "ledger", kind, "_frame.md")));
+    }
+    const pad = "x".repeat(1100 * 1024); // one blob alone is past the 1 MB default buffer
+    writeEntry(seed, "backlog", "open", "B100", `### B100 — huge open item \`[x]\` (task) #infra\n${pad}\n- Verify: sandbox`);
+    for (let i = 0; i < 4; i++) writeEntry(seed, "backlog", "done", `B${10 + i}`, `### B${10 + i} — big done item\n${pad}`);
+    writeEntry(seed, "verification", "pending", "V50", "### V50 — existing check\n1. step. **Expect:** x");
+    commitAll(seed, "base with a >5 MB ledger");
+    git(seed, "push", "-q", "origin", "main");
+    work = clone(O, join(R, "work"));
+    git(work, "checkout", "-q", "-b", "adds-an-id", "origin/main");
+    writeEntry(work, "backlog", "open", "B2000", "### B2000 — this branch's new item `[x]` (task) #infra\nbody\n- Verify: sandbox");
+    commitAll(work, "mint B2000");
+  }, 120000);
+  afterAll(() => { if (R) rmSync(R, { recursive: true, force: true }); });
+
+  it("the ref reader returns every entry from a >1 MB blob set (no 'Unknown encoding: buffer')", async () => {
+    const { readLedgerAtRef } = await import("../scripts/lib/ledger.mjs");
+    const l = readLedgerAtRef(work, "origin/main", "backlog");
+    expect(l.entries.map((e) => e.id).sort()).toEqual(["B10", "B100", "B11", "B12", "B13"]);
+    expect(l.entries.every((e) => e.text.length > 1024 * 1024)).toBe(true);
+  }, 60000);
+
+  it("the real gate + CLI verify a new id against it and ALLOW the push (exit 0, check actually ran)", () => {
+    const res = runGate(work);
+    expect(res.unverifiable, res.reason).toBeFalsy();
+    expect(res.ok).toBe(true);
+    const { code, out, err } = cli(work);
+    expect(err).not.toMatch(/Unknown encoding/);
+    expect(code).toBe(0);
+    expect(out).toMatch(/B2000/);
+  }, 120000);
+});
