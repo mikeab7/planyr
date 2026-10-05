@@ -365,6 +365,7 @@ Sandbox-proven: `node ui-audit/verify-food-landscape.mjs <baseUrl>` — main 147
 5. Sideways with a card open, tap a field in the card (Log a visit → a text field), then the search box. **Expect:** the field being typed in is fully visible above the keyboard each time.
 6. (real phone only) Both sideways turns on an iPhone with a notch. **Expect:** no button under the notch or the home bar, in the header, on the map, or in the card.
 7. Upright phone and desktop. **Expect:** bottom sheet and right rail exactly as before.
+- **2026-10-05 — branch-preview pass (NOT the planyr.io deploy; does not close this item):** `verify-food-landscape --live=https://claude-relaxed-fermi-ii4q7t.planyr.pages.dev`, logged out, real data, build `3516e90` read from `/version.json` in the same run: 52/52 (iPhone 15 + SE, sideways and upright). The same script on production (`8f45b2c`) showed the sheet over a two-row header. Still owed: the planyr.io run after merge, signed in as the test account, and step 6 on a real phone.
 - **Stopping rule:** closes on a dated pass of 1–7 (1–5 and 7 by the session, 6 on a real phone); any failed step re-opens B2046224 (×5) with that step number.
 ### V1522064 — B2088384: everywhere you type in Planyr on a real iPhone — the field stays above the keyboard, no page or map shows through, nothing covers it, no "AutoFill Contact" bar on non-contact fields `Blocker: real-device (no session can raise a real iPhone keyboard or Safari's AutoFill bar)`
 
