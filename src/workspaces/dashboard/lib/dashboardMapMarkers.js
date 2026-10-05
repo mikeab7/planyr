@@ -34,14 +34,21 @@ export function openPipelineProjects(projects) {
   return (projects || []).filter((p) => p.role !== "tracked" && OPEN_STATUSES.has(p.status));
 }
 
+/** NEW-2 (company-scope Site tab) — EVERY project the account has, any status (complete and dead
+ * included), still excluding role:"tracked" market records, which are not projects. */
+export function allSiteProjects(projects) {
+  return (projects || []).filter((p) => p.role !== "tracked");
+}
+const plottedProjects = (projects, scope) => (scope === "all" ? allSiteProjects(projects) : openPipelineProjects(projects));
+
 /** The map's marker list: one entry per LOCATED open project/pursuit, plus one per located comp.
  * `kind` is "active" | "pursuit" | "comp" — the three weights. Anything without a usable lat/lon
  * is left out here (never silently counted as drawn) — see missingLocationCount for its own,
  * explicit accounting. `displayPoints` — optional { [groupId]: {lat, lon} } from
  * dashboardParcelAnchors.displayPointsByGroup. */
-export function mapMarkers(projects, comps, displayPoints) {
+export function mapMarkers(projects, comps, displayPoints, scope) {
   const out = [];
-  for (const p of openPipelineProjects(projects)) {
+  for (const p of plottedProjects(projects, scope)) {
     if (!hasOrigin(p.origin)) continue;
     // B-NEW-1 — the pin sits at the parcel's inside point (dashboardParcelAnchors.js, the Site tab
     // map's helper) when one has been derived; a site with no boundary keeps its saved origin.
@@ -61,6 +68,6 @@ export function mapMarkers(projects, comps, displayPoints) {
 
 /** How many open projects/pursuits have no usable location — the quiet accounting line, never
  * silently dropped. */
-export function missingLocationCount(projects) {
-  return openPipelineProjects(projects).filter((p) => !hasOrigin(p.origin)).length;
+export function missingLocationCount(projects, scope) {
+  return plottedProjects(projects, scope).filter((p) => !hasOrigin(p.origin)).length;
 }

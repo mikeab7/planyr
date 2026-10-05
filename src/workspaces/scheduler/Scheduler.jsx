@@ -805,6 +805,9 @@ export default function Scheduler({
         // schedule and silently left the project itself untouched).
         currentProject={currentProject}
         onSelectProject={(id) => onProjectChange?.(id)}
+        // NEW-2 — the company workspace card is offered from a project's Schedule too (it was only
+        // wired at org scope, so from a project there was no way to the company's agenda from here).
+        onSelectOrg={onSelectOrg}
         onDashboard={goDashboard}
         // B1128272 — the wordmark stays the way OUT of Schedule (onGoDashboard, same as
         // every other module); the crumb above it stays IN Schedule (goDashboard, its

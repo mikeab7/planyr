@@ -1612,7 +1612,7 @@ const hexA = (hex, a) => {
 const trimNum = (n) => String(Math.round(n * 1000) / 1000);
 const fmtScaleNum = (n) => { const r = Math.round(n * 10) / 10; return Number.isInteger(r) ? String(r) : r.toFixed(1); };
 
-export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, cloud = null, layerStatus = {}, setLayerStatus, onBackToMap, onGoDashboard, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onDeletePlan, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved, shellModule, onShellSwitch, onOpenReviewInDocReview, authControl, accountActive = false,
+export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, cloud = null, layerStatus = {}, setLayerStatus, onBackToMap, onGoDashboard, onSelectOrg, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onDeletePlan, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved, shellModule, onShellSwitch, onOpenReviewInDocReview, authControl, accountActive = false,
   backgroundPushFailed = false, backgroundPushDetail, onRetryBackgroundPush } = {}) {
   // Theme palette as real hexes (canvas = SVG + PNG/PDF export, where var() can't be
   // used). Maps the active theme's tokens onto this file's existing PAL keys, so the
@@ -23693,6 +23693,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         homeLabel="Map"
         onDashboard={onBackToMap}
         onLogoDashboard={onGoDashboard}
+        // NEW-2 — the company workspace card is reachable from inside a plan too, not only the map.
+        onSelectOrg={onSelectOrg}
         currentProject={{ id: groupId, name: siteLabel }}
         onSelectProject={openProjectGroupLocal}
         onNewProject={handleNewSite}

@@ -159,9 +159,20 @@ export function buildHash({ module = DEFAULT_MODULE, projectId = null, cross = f
 // whether a tab switch keeps org scope; AppHeader.jsx's own `orgVisibleTabs` decides which
 // tabs even render at org scope and is kept in step with this set by hand (a different file,
 // a different concern — one decides ROUTING, the other decides the TAB STRIP — see that file's
-// own comment). Site Planner is the one module never offered a way in: there is no parcel to
-// draw without a project.
-export const ORG_CAPABLE_MODULES = new Set(["notes", "library", "scheduler", "model", "doc-review"]);
+// own comment). Site Planner joined it with NEW-2 (company workspace card): at org scope its
+// tab renders the all-sites map (Shell's OrgSitesView) instead of a plan.
+export const ORG_CAPABLE_MODULES = new Set(["site-planner", "notes", "library", "scheduler", "model", "doc-review"]);
+
+// NEW-2 (company workspace card) — which tab the switcher's company entry lands on. The rule is
+// "keep the tab you are on": every org-capable module has a company version (Site = the all-sites
+// map, the rest their own org surface), so the company entry resolves to the CURRENT module. It
+// only falls back to Notes when no org-capable tab is current (the Dashboard has none, a module
+// like Food has no company version). Never resolves or injects a project id. Before this, the
+// switcher's entry was hardcoded to Notes from every tab.
+export function orgScopeTarget(activeModule) {
+  const module = ORG_CAPABLE_MODULES.has(activeModule) ? activeModule : "notes";
+  return { module, projectId: null, cross: false, org: true };
+}
 
 // ORG SCOPE (NEW-1) — pure resolution of "where should opening this Library/Dashboard row
 // navigate", used by Shell.jsx's `openReviewInDocReview`. A row's `orgScope` flag (already

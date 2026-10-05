@@ -1278,6 +1278,7 @@ export default function App({
             sites={sites}
             onBackToMap={goMap}
             onGoDashboard={onGoDashboard}
+            onSelectOrg={onSelectOrg}
             onOpenSite={openSite}
             onNewSite={newBlankSite}
             onNewPlanSameParcel={newPlanSameParcel}
