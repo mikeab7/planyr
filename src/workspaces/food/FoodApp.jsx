@@ -31,10 +31,12 @@ import { withVisitDate, matchingOpenDishWishlist } from "./lib/dishAggregates.js
 import { searchOverpass } from "./lib/overpass.js";
 import { existingRestaurants, findExisting, canonicalIdentity } from "./lib/placeIdentity.js";
 import { RADIUS } from "../../shared/ui/radius.js";
+import { useLandscapePhone } from "./lib/phoneLayout.js";
 import { Button, SegmentedControl, SIZE } from "../../shared/ui/controls.jsx";
 
 export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, authControl, accountActive, userId }) {
   const narrow = useNarrow(); // phone width — the toolbar must fit ONE screen (B2046224)
+  const landscape = useLandscapePhone(); // phone held sideways: one-row header, place card docks to the right (B2046224 ×4)
   const [view, setView] = useState("map"); // "map" | "list"
   const [bounds, setBounds] = useState(null);
   const [places, setPlaces] = useState([]);
@@ -62,6 +64,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   // full, mid-drag); VisitPanel forwards it up via onSheetHeightChange. 0 whenever no panel is
   // open (desktop never opens a sheet at all — VisitPanel's right-rail branch never calls this).
   const [sheetHeightPx, setSheetHeightPx] = useState(0);
+  const [sidePanelPx, setSidePanelPx] = useState(0); // width of the side-docked card (landscape phone), 0 when none
   // NEW-1 (2026-08-27 owner block) — a monotonic id for optimistic visit rows, mirroring
   // flyNonceRef's own pattern. Never collides with a real row's uuid (a distinct "optimistic-N"
   // shape), so filtering it back out on rollback can never accidentally remove a real visit.
@@ -535,6 +538,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
         // rejected. Row 1 (wordmark + account controls) is untouched — that's the minimal header
         // this route is supposed to keep.
         showModuleTabs={false}
+        singleRow={landscape}
         multiEditOk
         toolbarContent={
           // NEW-1 (food controls) — ONE row that fits its slot (width 100%, min-width 0) so the search
@@ -573,7 +577,8 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
           Not connected to the cloud in this build — places will show, but visits can't be saved.
         </div>
       )}
-      {supabaseConfigured() && !accountActive && (
+      {/* Sideways the card itself already says "Sign in to log a visit here", and a phone has ~300 px of height: no banner row. */}
+      {supabaseConfigured() && !accountActive && !landscape && (
         <div role="status" style={{ padding: "6px 16px", fontSize: 12.5, color: "var(--text-secondary)", background: "var(--surface-raised)", borderBottom: "1px solid var(--border-default)" }}>
           Sign in to log visits — browsing the map works either way.
         </div>
@@ -603,6 +608,8 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
             selectedKey={selectedKey}
             selectedPlaceInfo={selectedPlaceInfo}
             sheetHeightPx={sheetHeightPx}
+            landscape={landscape}
+            sidePanelPx={sidePanelPx}
           />
         ) : (
           <VisitList
@@ -643,6 +650,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
             wishlisted={wishlistedForSelected}
             onToggleWishlist={accountActive ? toggleWishlist : undefined}
             onSheetHeightChange={setSheetHeightPx}
+            onSideWidthChange={setSidePanelPx}
             dishesWithDate={dishesForSelected}
             onSaveDish={accountActive ? saveDish : undefined}
             onDeleteDish={removeDish}

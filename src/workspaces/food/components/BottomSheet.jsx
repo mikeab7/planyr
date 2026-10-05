@@ -81,7 +81,7 @@ const textEntryFocused = () => TEXT_ENTRY.test(document.activeElement?.tagName |
 // Tried and measured first: keeping the form's own Save pinned (B2057920's choice) — it then covers
 // the lower part of any card taller than the space above the keyboard (a dish row's score buttons).
 // Save tucks while typing and is back the moment the keyboard closes.
-const TYPING_CSS = `[data-food-sheet][data-typing] [data-hide-while-typing]{display:none !important}`
+export const TYPING_CSS = `[data-food-sheet][data-typing] [data-hide-while-typing]{display:none !important}`
   + `[data-food-sheet][data-typing] [data-sheet-sticky]{position:static !important}`;
 // While a form (a dish, a new visit, an edited visit) is open in the sheet, ONLY that form's own
 // actions are on screen — the "Log a visit" bar steps out for as long as the form exists, at every

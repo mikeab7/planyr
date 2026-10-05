@@ -587,6 +587,14 @@ were split out of this file.
     `src/workspaces/food/lib/ratingScale.js`; `test/foodRatingSlider.test.js` fails if the range or step
     changes or a tap grid/stepper returns. Ratings saved in quarter points (8.75) still display as saved.
     (See the NEW-1 item on BACKLOG.md.)
+17. **(2026-10-05) In Food, on a phone held SIDEWAYS, the place card docks to the RIGHT as a side panel
+    (like desktop) — never the bottom sheet — and the map keeps the pin in view.** Michael, approved fix
+    ("dock the card to the side, and improve on it"): the header collapses to one row, a pick centres its
+    pin in the map to the LEFT of the card, the "Search live for more here" chip is centred in that visible
+    part, "Log a visit" stays at the card's bottom, and the notch/home-bar safe areas are respected.
+    Upright phones keep the bottom sheet; desktop keeps the rail. "Landscape phone" is one query
+    (`LANDSCAPE_PHONE_QUERY`, `src/workspaces/food/lib/phoneLayout.js`: landscape + short + touch);
+    `ui-audit/verify-food-landscape.mjs` fails if the pin is hidden or the sheet comes back. (B2046224 ×4.)
 
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by
