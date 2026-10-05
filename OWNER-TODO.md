@@ -7,6 +7,9 @@
 
 _Last updated: 2026-10-05._
 
+## 🗄 A decision: schedule edits don't save for any account except yours (B2095121)
+- [ ] **Decide how to fix it.** I found that any account other than yours that edits a schedule gets a silent "refused" from the database — the edit shows on screen and is gone on reload (your account is fine because it already uses the newer per-schedule storage). Today it now shows a red "did NOT save" message instead of failing silently. **Option A (my recommendation):** new accounts start on the newer per-schedule storage — no database change, I build it. **Option B:** change the old table's key so each account gets its own row — small, but it alters the production database, so I won't do it without your yes.
+
 ## 🔑 Test-account sign-in route (B2084992) — ✅ owner action DONE 2026-10-05, nothing for you here
 - [x] ~~Add `SUPABASE_SERVICE_ROLE_KEY` (and `E2E_LOGIN_KEY`) to Cloudflare Pages → Production.~~ **DONE (read from the live Cloudflare variable list 2026-10-05: both names present).** This closes the owner action only; whether the deployed values work was tested separately by B2095824 on 2026-10-05, which signed in as `e2e@planyr.test` against production (see `VERIFICATION-DONE.md` V1518160). Nothing for you to do.
 
