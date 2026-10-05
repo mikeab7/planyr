@@ -22691,7 +22691,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      un-migrated set keeps a stable order rather than shuffling on load. */
   const calloutBands = useMemo(() => {
     if (isHidden(hiddenGroups, "callouts")) return { below: [], above: [], forced: [] };   // NEW-1
-    const sorted = [...callouts].sort(byZAsc);
+    // B2095120: a callout with no placeable `box` (legacy {x,y} shape — e2e-fixture-testfit's) is skipped, not
+    // drawn: f2p(undefined) → worldToScreen(view, undefined) took the whole planner down on open.
+    const sorted = callouts.filter((c) => c && c.box && Number.isFinite(c.box.x) && Number.isFinite(c.box.y)).sort(byZAsc);
     // B806080 round 2 — a THIRD tier, `forced`: a callout the user explicitly brought to the
     // absolute front (`frontForce: true`) renders from its own pass, ABOVE `above` — see
     // PAINT_LADDER rung 11 (lib/paintOrder.js) and the render call site for why `behindEls` alone

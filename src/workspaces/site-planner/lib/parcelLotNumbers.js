@@ -88,6 +88,15 @@ export function clipRingToRect(ring, rect) {
  *  Returns [{ id, text, x, y, w, h }] — CENTRE x/y in container pixels. A number that cannot be
  *  placed INSIDE its own lot without touching another number or an obstacle is OMITTED, never
  *  leadered out and never overprinted: hiding is the contract. */
+/** B2092656 — the cheapest possible "can this lot's bounding box host a number at all?", asked from the
+ *  lot's PIXEL box BEFORE its rings are projected, clipped, measured or fitted. It is exactly the reject
+ *  `layoutLotNumbers` makes first (box height < one text line, or box narrower than the padding alone),
+ *  so it can only skip lots the layout would have thrown away anyway — it removes the per-lot projection
+ *  and text measurement that made the debounced relayout a ~300 ms task at z14 on a dense county. Pure. */
+export function lotBoxCanHost(pxW, pxH, fontPx = LOT_NO_FONT_PX) {
+  return pxH >= Math.ceil(fontPx * 1.25) && pxW > LOT_NO_PAD_X;
+}
+
 export function layoutLotNumbers({ lots, origin, measure, fontPx = LOT_NO_FONT_PX, obstacles = [], maxLabels = LOT_NO_MAX_LABELS }) {
   const lh = Math.ceil(fontPx * 1.25);
   const items = [];
@@ -95,8 +104,9 @@ export function layoutLotNumbers({ lots, origin, measure, fontPx = LOT_NO_FONT_P
   for (const lot of lots || []) {
     if (!lot || !lot.text || !Array.isArray(lot.ring) || lot.ring.length < 3) continue;
     const b = ringBox(lot.ring);
+    if (!(b.h >= lh)) continue;                           // cheap reject BEFORE measuring text (measureText was 20 ms of one relayout)
     const w = Math.ceil(measure(lot.text, fontPx)) + LOT_NO_PAD_X;
-    if (!(b.w >= w) || !(b.h >= lh)) continue;            // cheap reject: the lot's bbox cannot hold it
+    if (!(b.w >= w)) continue;                            // cheap reject: the lot's bbox cannot hold it
     const fitter = interiorFitter(lot.ring);
     if (!fitter || !fitter.place(w, lh)) continue;        // the real interior cannot hold it either
     byId.set(lot.id, { text: lot.text, w, h: lh });
