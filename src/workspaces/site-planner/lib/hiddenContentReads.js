@@ -51,6 +51,8 @@ export const DECLARATIONS = Object.freeze([
     why: "B494048 — Zoom to fit. An extent built from the whole model frames the view around content that is not on screen, so the drawing you CAN see is pushed into a corner of it." },
   { name: "connectableRoads", verdict: F,
     why: "B494049 — the road-connect magnet. A hidden road must not weld or snap the endpoint of one you are drawing." },
+  { name: "calloutBands", verdict: F,
+    why: "The callout/text-box draw set. It asks the visibility predicate (isHidden(hiddenGroups, \"callouts\")) before reading the model, and drops a callout with no placeable box (B2095120)." },
   { name: "devExtent", verdict: F,
     why: "B494050 — the EXPORT crop, and the print-frame seed. The sheet is framed to the development's extent; built from the whole model it prints blank paper around content the drawing is not showing. PDF-PARITY. (The ambient flush-snap's neighbour set lives inside `onMove`, declared below.)" },
 
