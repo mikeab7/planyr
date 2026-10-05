@@ -17076,12 +17076,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   }, [hiddenGroups]);
 
   const drawEls = useMemo(() => {
-    const vis0 = hiddenGroups ? els.filter((el) => !elHidden(hiddenGroups, el)) : els;
-    // B2095120: an element whose `type` is not in the TYPE table (legacy "line" setback markers) has no
-    // style/geometry this renderer knows — skip drawing it rather than letting one such element take
-    // the whole planner down (worldToScreen(view, undefined) → "reading 'x'" once the label read was safe).
-    const vis = vis0.every((el) => TYPE[el.type]) ? vis0 : vis0.filter((el) => TYPE[el.type]);
-    return cullToView(vis, cullRect, { enabled: !!cullRect, keep: cullKeep });
+    const vis = hiddenGroups ? els.filter((el) => !elHidden(hiddenGroups, el)) : els;
+    const culled = cullToView(vis, cullRect, { enabled: !!cullRect, keep: cullKeep });
+    // B2095120: skip an element whose `type` is not in TYPE (legacy "line" setback markers) rather than let it
+    // take the whole planner down — worldToScreen(view, undefined) → "reading 'x'".
+    return culled.every((el) => TYPE[el.type]) ? culled : culled.filter((el) => TYPE[el.type]);
   }, [els, cullRect, cullKeep, hiddenGroups]);
 
   /* ------------ grid lines ------------ */

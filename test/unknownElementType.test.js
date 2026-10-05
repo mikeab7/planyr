@@ -17,5 +17,6 @@ describe("the draw list skips elements of an unknown type", () => {
   it("drawEls filters on TYPE[el.type]", () => {
     const block = src.slice(src.indexOf("const drawEls = useMemo"), src.indexOf("/* ------------ grid lines"));
     expect(block).toMatch(/TYPE\[el\.type\]/);
+    expect(block).toMatch(/cullToView\(vis,/);
   });
 });
