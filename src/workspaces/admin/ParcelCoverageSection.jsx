@@ -9,11 +9,6 @@
  * that join to no outline are listed under the map, never dropped.
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  COUNTIES, COUNTIES_MAP, countyKeyForName, statewideKeysForState, isStatewideLayerUrl,
-} from "../site-planner/lib/counties.js";
-import { setCountyPolygons } from "../site-planner/lib/countyPolygons.js";
-import { COUNTY_VERIFICATION } from "../site-planner/lib/countiesProvenance.js";
 import { buildCoverage, totalLine, SOURCE_KINDS, SOURCE_KIND_LABEL } from "./lib/parcelCoverage.js";
 import { buildCountyPaths } from "./lib/countyMapGeometry.js";
 import { PARCEL_COVERAGE_SECTION } from "./lib/adminSections.js";
@@ -29,10 +24,25 @@ const KIND_FILL = {
 };
 const MIN_ZOOM = 1, MAX_ZOOM = 40;
 
-const REGISTRY = {
-  countiesMap: COUNTIES_MAP, counties: COUNTIES, keyForName: countyKeyForName,
-  statewideKeysForState, isStatewideUrl: isStatewideLayerUrl, verification: COUNTY_VERIFICATION,
-};
+/* The registry is imported DYNAMICALLY, on purpose: a static import from this lazy chunk makes the
+ * bundler hoist counties.js (and the jurisdiction/appraisal/localDb modules it drags) into their own
+ * shared chunks, which then load on a plain Site route and breach the Site-route allowlist. A dynamic
+ * import leaves the registry in the chunk the planner already ships it in. */
+async function loadRegistry() {
+  const [c, poly, prov] = await Promise.all([
+    import("../site-planner/lib/counties.js"),
+    import("../site-planner/lib/countyPolygons.js"),
+    import("../site-planner/lib/countiesProvenance.js"),
+  ]);
+  return {
+    setCountyPolygons: poly.setCountyPolygons,
+    registry: {
+      countiesMap: c.COUNTIES_MAP, counties: c.COUNTIES, keyForName: c.countyKeyForName,
+      statewideKeysForState: c.statewideKeysForState, isStatewideUrl: c.isStatewideLayerUrl,
+      verification: prov.COUNTY_VERIFICATION,
+    },
+  };
+}
 
 async function fetchPayload() {
   const base = (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.BASE_URL) || "/";
@@ -88,10 +98,10 @@ export default function ParcelCoverageSection({ loadPayload = fetchPayload }) {
     let live = true;
     (async () => {
       try {
-        const payload = await loadPayload();
+        const [payload, { setCountyPolygons, registry }] = await Promise.all([loadPayload(), loadRegistry()]);
         // The registry's Texas tier is derived from this same roster, so it must be resident first.
         await setCountyPolygons(payload);
-        const coverage = buildCoverage(payload.counties, REGISTRY);
+        const coverage = buildCoverage(payload.counties, registry);
         const geo = buildCountyPaths(payload);
         if (live) setState({ loading: false, error: null, data: { coverage, geo } });
       } catch (err) {
