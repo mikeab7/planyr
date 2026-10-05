@@ -3,7 +3,8 @@
  * no project chip; title box hugs its text and the band beside it is page (double-click places a note);
  * a selected title clears on a double-click / click elsewhere. Real mouse, local fixture. */
 import { chromium } from "playwright";
-import { assertMeasurable, pacedWait } from "./lib/tabTiming.mjs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { pacedWait } from "./lib/tabTiming.mjs";
 const BASE = process.env.BASE_URL || "http://localhost:4173";
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const TREE_KEY = "planyr:notes:tree:v1:local", PAGE_KEY = "planyr:notes:page:v1:local:p1";
