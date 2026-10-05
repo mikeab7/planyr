@@ -67,7 +67,8 @@ export { reflowLines };
 /* Read a PDF (File / Blob / ArrayBuffer) into deed text. Throws a friendly error for a scanned
  * (no-text-layer) PDF. Async; used by readDeedFile via a lazy import. */
 export async function pdfToDeedText(fileOrBuffer) {
-  const data = fileOrBuffer instanceof ArrayBuffer ? fileOrBuffer : await fileOrBuffer.arrayBuffer();
+  // pdf.js transfers (detaches) the buffer it is given — pass a private copy so the caller can reuse theirs.
+  const data = fileOrBuffer instanceof ArrayBuffer ? fileOrBuffer.slice(0) : await fileOrBuffer.arrayBuffer();
   let pdf;
   try {
     // useSystemFonts:false keeps extraction deterministic; no render assets are needed for text.

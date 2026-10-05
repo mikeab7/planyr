@@ -10,6 +10,9 @@ _Last updated: 2026-10-04._
 ## 🗄 A decision: schedule edits don't save for any account except yours (B2095121)
 - [ ] **Decide how to fix it.** I found that any account other than yours that edits a schedule gets a silent "refused" from the database — the edit shows on screen and is gone on reload (your account is fine because it already uses the newer per-schedule storage). Today it now shows a red "did NOT save" message instead of failing silently. **Option A (my recommendation):** new accounts start on the newer per-schedule storage — no database change, I build it. **Option B:** change the old table's key so each account gets its own row — small, but it alters the production database, so I won't do it without your yes.
 
+## 🗂 A decision: should a "New project" (blank) inherit your team? (B2096358)
+- [ ] **Decide.** On an account with one team and auto-share on, a brand-new blank project stays private (only a project created from a located site gets the team). That fits "private by default" and your lazy-creation rule, so I left it. Say if blank projects should share with the team too.
+
 ## 🔑 Add one more Cloudflare secret so the test-account sign-in route works (B2084992)
 - [ ] **In Cloudflare Pages → Production → Variables and Secrets, add `SUPABASE_SERVICE_ROLE_KEY` as a Secret** (Supabase → Project Settings → API → the `service_role` key). The new test-account sign-in route needs it to mint a session for the e2e account; without it the route answers "not configured" (503) even with the right login key. It is never printed, never sent to the browser, and the route can only ever use it for that one test account. Then redeploy (a merge or "Retry deployment") so it takes effect.
 
