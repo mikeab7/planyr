@@ -142,7 +142,7 @@ export default function SiteAnalysis({
 
       {state.error && (
         <div style={{ padding: "2px 0 2px 9px", borderLeft: "3px solid var(--warn-text)", color: "var(--warn-text)" }}>
-          Couldn't run the screen: {state.error}
+          Couldn't run the screen. Try Refresh in a moment.
         </div>
       )}
 

@@ -243,7 +243,7 @@ import { loadDeed, deedNow } from "./lib/deedLazy.js";
  * call site in the deed-drop handler). It is a self-contained .docx/ZIP reader that only runs
  * once someone drops a deed or survey file, so it has no business on the boot path; the same
  * treatment B1123 gave the title reader and B1042 gave the export path. */
-import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip, easementStyle, easementPatternId, encumbranceStyle, encumbrancePatternId, DEFAULT_EASE_FILL_OPACITY, DEFAULT_EASE_HATCH, ENCUMBRANCE_DEFAULT } from "./lib/easements.js";
+import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip, easementStyle, easementPatternId, encumbranceStyle, encumbrancePatternId, deedCallsShown, DEFAULT_EASE_FILL_OPACITY, DEFAULT_EASE_HATCH, ENCUMBRANCE_DEFAULT } from "./lib/easements.js";
 import { deedTrace, deedGapText, deedClosure, deedReaderSummary, deedQueueClosure, deedPlotWarning } from "./lib/deedGap.js";
 import { HATCH_OPTIONS, hatchSpec } from "../../shared/style/hatchPatterns.js";
 // NEW-EASE-STYLE — the ONE renderer that turns a hatch catalog spec (shared/style/hatchPatterns.js)
@@ -23494,9 +23494,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {/* The courses as written, then the misclosure as its OWN line (not part of the boundary stroke). */}
                       {gapSeg && <polyline data-testid="deed-courses" points={trace.path.map(f2p).map((q) => `${q.x},${q.y}`).join(" ")} fill="none" stroke={stroke} strokeWidth={strokeZoom(sw, zk)} strokeDasharray={da} strokeLinejoin="round" pointerEvents="none" />}
                       {gapSeg && <line data-testid="deed-gap" x1={gapSeg.a.x} y1={gapSeg.a.y} x2={gapSeg.b.x} y2={gapSeg.b.y} stroke={PAL.danger} strokeWidth={strokeZoom(Math.max(sw, 2.2), zk)} strokeDasharray={dashZoom("6 4", zk)} strokeLinecap="butt" pointerEvents="none"><title>{`${deedGapText(trace).text} ${deedGapText(trace).precision}`}</title></line>}
-                      {/* centerline + per-call bearing/distance labels */}
+                      {/* centerline + per-call bearing/distance labels. NEW-1: the per-course labels are OFF
+                          unless this shape's `showCalls` is on (deedCallsShown — the one gate; the export
+                          clones this node so the sheet follows it). The calls stay on `m.calls` and in
+                          Properties → Courses. */}
                       {cen.length > 1 && <polyline points={cen.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={stroke} strokeWidth={strokeZoom(0.8, zk)} strokeDasharray={dashZoom("4 3", zk)} opacity={0.7} pointerEvents="none" />}
-                      {labelPpf > 0.12 && (m.calls || []).map((c, i) => {
+                      {deedCallsShown(m) && labelPpf > 0.12 && (m.calls || []).map((c, i) => {
                         const a = cen[i], b = cen[i + 1]; if (!a || !b) return null;
                         const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
                         return <text key={i} x={mx} y={my - 3 * labelK} textAnchor="middle" fontSize={9 * labelK} fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={stroke} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{c.label}</text>;
@@ -26688,6 +26691,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <div data-testid="deed-closure" style={{ fontSize: 11.5, lineHeight: 1.5, marginBottom: 8, fontWeight: 700, color: gapInfo.closes ? PAL.text : PAL.danger }}>
                         {gapInfo.closes ? "" : "⚠ "}{gapInfo.text}{gapInfo.precision ? ` ${gapInfo.precision}.` : ""}
                       </div>
+                      {/* NEW-1 — per-shape "Show calls" (default OFF, saved on the shape, one undo frame). Uses
+                          setSelMarkupGeom, NOT setSelMarkup: that one also writes the shared mkStyle, which new
+                          markups inherit. Not-closing warning above stays here regardless of the toggle. */}
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: PAL.ink, cursor: "pointer", marginBottom: 6 }}>
+                        <input type="checkbox" data-testid="deed-show-calls" checked={deedCallsShown(selMarkup)} onChange={(e) => setSelMarkupGeom({ showCalls: e.target.checked })} style={{ accentColor: PAL.accent, width: 14, height: 14 }} />
+                        <span>Show calls</span>
+                      </label>
+                      {(selMarkup.calls || []).length > 0 && (
+                        <details data-testid="deed-courses-list" style={{ fontSize: 11, color: PAL.ink, marginBottom: 8 }}>
+                          <summary style={{ cursor: "pointer", fontWeight: 600 }}>Courses ({selMarkup.calls.length})</summary>
+                          <ol style={{ margin: "4px 0 0", paddingLeft: 18, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>
+                            {selMarkup.calls.map((c, i) => <li key={i}>{c.label}</li>)}
+                          </ol>
+                        </details>
+                      )}
                       <button style={{ ...chip, width: "100%", fontWeight: 700 }} disabled={!!selMarkup.locked}
                         onClick={() => alignDeedToParcel(dm.id)}>
                         📐 {hasParcel ? "Align to county parcel" : "Rotate to grid north"}
