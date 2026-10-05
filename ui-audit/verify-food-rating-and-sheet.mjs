@@ -21,7 +21,11 @@
  */
 import { webkit, chromium } from "playwright";
 import { mkdirSync } from "node:fs";
-import { open, openPlace, touchSession } from "./lib/foodIosPage.mjs";
+import { open as openRaw, openPlace, touchSession } from "./lib/foodIosPage.mjs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
+
+// FOREGROUND-OR-VOID: every page this harness measures is proven foreground + painting first.
+const open = async (...a) => { const r = await openRaw(...a); await assertMeasurable(r.page, "verify-food-rating-and-sheet"); return r; };
 
 const SHOTS = (process.argv.find((a) => a.startsWith("--shots=")) || "").slice(8);
 const ONLY = (process.argv.find((a) => a.startsWith("--only=")) || "").slice(7);
