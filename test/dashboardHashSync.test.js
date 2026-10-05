@@ -53,6 +53,6 @@ describe("Shell.jsx — isAdminHash/isDesignHash/isDashboardHash are synchronous
 
   it("active is derived from isDashboardHash, so the two can never be one render apart", () => {
     // NEW-2 (admin build-out): the admin page, once actually shown, also leaves no workspace active.
-    expect(shellSrc).toMatch(/const active = isDashboardHash \|\| \(isAdminHash && adminShown\) \? null : routedModule;/);
+    expect(shellSrc).toMatch(/const active = isDashboardHash \|\| \(isAdminHash && \(adminShown \|\| adminKnown\)\) \? null : routedModule;/);
   });
 });

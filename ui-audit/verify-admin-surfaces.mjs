@@ -131,6 +131,31 @@ try {
     check("Back to Planyr leaves the admin page", (await page.locator('[data-testid="admin-app"]').count()) === 0);
     await ctx.close(); }
 
+  // 3b — REGRESSION (B2122576 reopened): reaching #/admin IN-APP from a route other than Site used to
+  // bounce to #/site ~100 ms later (measured live on the owner's account, build 00ac52e). Navigate from
+  // the dashboard via the real menu click, and from non-Site modules by hash, then wait 2 s.
+  { const { ctx, page } = await newPage({ width: 1440, height: 900 }, tokens, "#/dashboard");
+    const trail = []; await page.exposeFunction("__hc", (v) => trail.push(v));
+    await page.evaluate(() => window.addEventListener("hashchange", (e) => window.__hc(new URL(e.newURL).hash)));
+    const settled = async (label) => {
+      await page.waitForTimeout(2000);
+      const hash = await page.evaluate(() => location.hash);
+      const mounted = await page.locator('[data-testid="admin-app"]').count();
+      check(`${label}: stays on #/admin with the admin root mounted 2 s later`, hash === "#/admin" && mounted === 1, `hash=${hash} mounted=${mounted} trail=${trail.join(" ")}`);
+    };
+    // the account menu has answered is_admin by now (cached) — exactly the owner's situation
+    await page.locator('button[aria-label^="Account:"]:visible').first().click(); await page.waitForTimeout(600);
+    trail.length = 0;
+    await page.locator('[data-testid="account-admin-row"]').click();
+    await settled("dashboard → Admin row (real click)");
+    for (const from of ["#/dashboard", "#/schedule", "#/library", "#/notes", "#/markup", "#/food"]) {
+      await page.evaluate((h) => { location.hash = h; }, from); await page.waitForTimeout(2500);
+      trail.length = 0;
+      await page.evaluate(() => { location.hash = "#/admin"; });
+      await settled(`${from} → #/admin (hash)`);
+    }
+    await ctx.close(); }
+
   // 4 — empty + visible error states.
   mock.empty = true;
   { const { ctx, page } = await newPage({ width: 1440, height: 900 }, tokens, "#/admin");
