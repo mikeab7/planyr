@@ -488,7 +488,8 @@ were split out of this file.
    forgets the durable log; Retry does not.** Keep those two actions distinct — never collapse
    them into one dismissal. (See B1037952, B1048400.)
 7. **(2026-08-22) A live check runs on a throwaway duplicate of a real plan, never on one of
-   Michael's real plans** — and the session says exactly what was touched.
+   Michael's real plans** — and the session says exactly what was touched. The duplicate is
+   deleted when the check finishes, without asking (entry 15).
 8. **(2026-09-11 · SUSPENDED 2026-09-12 · RE-LANDED 2026-09-15, live-verify still PENDING) The
    canvas commits ONE framing per load.** The GOAL was never in doubt; what has changed twice is
    whether a mechanism enforces it.
@@ -569,7 +570,16 @@ were split out of this file.
     every device (asserted by `ui-audit/verify-notes-box-width-parity.mjs`); only this margin may differ. (See
     B2078593.)
 
-15. **(2026-10-05) Food ratings are one slider each, 1 to 10 in half steps, and must not be replaced
+15. **(2026-10-05) Test artifacts are ALWAYS cleared, never asked about.** Michael, verbatim: "stop
+    asking to clear test files, always clr." Anything a session (or the Cowork chat) created for a test
+    or live check — throwaway duplicate plans, projects, schedules or reviews, test rows, uploaded test
+    files in Library/Drive, scratch files, temporary fixtures — is deleted as soon as the check is
+    done, WITHOUT asking and with no "needs you" line or report about it. Delete-must-verify still
+    applies (confirm the item is actually gone). Boundaries: never touches Michael's real projects or
+    anything he made himself; the standing `e2e@planyr.test` fixtures the signed-in helper depends on
+    (`e2e-fixture-site` and its sibling fixture) are NOT throwaway and stay. (See B2103600.)
+
+16. **(2026-10-05) Food ratings are one slider each, 1 to 10 in half steps, and must not be replaced
     with tap buttons, steppers or whole numbers without Michael's say-so.** A visit's Food rating and
     its Ambiance rating are each a single slider (min 1, max 10, step 0.5), "Not rated" until touched,
     on first visit, log-another-visit and edit-an-old-visit, phone and desktop (B626576 shipped it;

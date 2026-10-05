@@ -154,7 +154,7 @@ const RATING_TICKS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
 /* THE RATING CONTROL (Food and Ambiance, every entry point, phone and desktop): ONE native range
  * slider, 1 to 10 in HALF-POINT steps, "Not rated" until touched. ⛔ PRODUCT DECISION (owner,
- * 2026-10-05, CLAUDE.md "Owner product constraints" #15): never replaced with tap buttons, a
+ * 2026-10-05, CLAUDE.md "Owner product constraints" #16): never replaced with tap buttons, a
  * stepper or whole numbers. History: B626576 shipped it; B2057920 (PR 1941) swapped it for a 1-10 tap
  * grid + quarter nudges on phones ("ratings are hard to set with a thumb") and he got whole numbers
  * back — he wants the slider. A saved quarter-point rating (8.75, from the quarter-step period)

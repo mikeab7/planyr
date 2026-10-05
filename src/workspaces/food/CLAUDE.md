@@ -90,7 +90,7 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
   full app, iOS keyboard + accessory bar drawn, GAP/CARD/CONTROLS/OVERLAY asserted, screenshots — is
   verify-food-ios-screens (ui-audit); verify-food-ios-keyboard is the fixture-page check. There is NO "What I had" input any more; old
   visits' saved `what_i_had` text stays readable and is never rewritten. Visit Food/Ambiance ratings are ONE half-step
-  slider (1-10) on every device — `lib/ratingScale.js`, `## Owner product constraints` #15 (never tap buttons); the dish score is
+  slider (1-10) on every device — `lib/ratingScale.js`, `## Owner product constraints` #16 (never tap buttons); the dish score is
   also one slider on a phone. Open forms (`data-sheet-form`) hide the "Log a visit" bar; the sheet's drag engine + release rule are
   `BottomSheet.jsx` + `lib/bottomSheetSnap.js`; harness: verify-food-rating-and-sheet (ui-audit). Phone harness:
   verify-food-visit-phone (ui-audit) + its food-panel fixture page.
