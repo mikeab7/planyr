@@ -2660,7 +2660,7 @@ export default function DocReview({
                 <button style={iconBtn(false)} onClick={() => { setHistMsg(""); setHistErr(""); setHistoryOpen(true); }} title="Version history — see earlier saved versions" data-testid="version-history-open">Versions</button>
               ) }] : []),
               ...(pdfRef.current ? [
-                { id: "undo", label: "Undo", priority: 70, disabled: !canUndo, onSelect: undo, render: () => (<><span style={tbDiv} /><button style={iconBtn(!canUndo)} disabled={!canUndo} onClick={undo} title="Undo (⌘/Ctrl-Z)">↶</button></>) },
+                { id: "undo", label: "Undo", priority: 70, disabled: !canUndo, onSelect: undo, render: () => (<span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><span style={tbDiv} /><button style={iconBtn(!canUndo)} disabled={!canUndo} onClick={undo} title="Undo (⌘/Ctrl-Z)">↶</button></span>) },
                 { id: "redo", label: "Redo", priority: 70, disabled: !canRedo, onSelect: redo, render: () => (<button style={iconBtn(!canRedo)} disabled={!canRedo} onClick={redo} title="Redo (⌘/Ctrl-Shift-Z)">↷</button>) },
               ] : []),
               // B490 — Layers: show/hide the PDF's optional-content groups. A view filter only; the popover is portaled (AnchoredMenu).

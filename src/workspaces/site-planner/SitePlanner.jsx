@@ -21031,7 +21031,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           { id: "export-pdf", label: "File · Download PDF / pick frame…", onSelect: enterPrintMode },
         ],
         render: ({ measuring }) => (
-          <>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
             {vSep}
             {/* File group — after Undo/Redo (NEW-1, B1900672, 2026-09-24: moved right of Undo/Redo, see
                 the History group comment above for the full reorder).
@@ -21087,7 +21087,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 lives in the Parcels panel (the site-setup context where choosing ground actually
                 happens; see `_pid === "parcel"` below), with a route back from the canvas via
                 right-click on any parcel (`onParcelContext` → the parcelMenu). */}
-          </>
+          </span>
         ),
       },
       ...((() => {
@@ -21102,13 +21102,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           ],
           render: () => (
             <>
-                <>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                   {vSep}
                   <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
                     {canG && <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={groupSel} title="Group the selected items so they move, copy & select as one unit — you can still double-click a member to edit it in place (Ctrl+G)">⊞ Group</button>}
                     {canU && <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={ungroupSel} title="Ungroup — split this group back into individual items (Ctrl+Shift+G)">⊟ Ungroup</button>}
                   </div>
-                </>
+                </span>
             </>
           ),
         }];
