@@ -46,16 +46,19 @@ try {
   console.log("signed in as", s.proof.email, "| served build", JSON.stringify(s.build));
   if (expectSha) check("the deploy is serving the merge commit", String(s.build?.build || "").startsWith(expectSha.slice(0, 7)), `served ${s.build?.build}, expected ${expectSha.slice(0, 7)}`);
 
-  // seed the throwaway plan locally and open it (the signed-in app loads local records beside the cloud list)
-  await page.evaluate((site) => {
-    const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
-    all[site.id] = site;
-    localStorage.setItem("planarfit:sites:v1", JSON.stringify(all));
-    localStorage.setItem("planarfit:currentSite:v1", site.id);
+  // The signed-in app lists the ACCOUNT's plans, so the throwaway plan is written to the test account's own cloud
+  // (RLS: its own row) — and deleted again in the `finally` below, verified.
+  const ins = await page.evaluate(async (site) => {
+    const { data: u } = await window.pfSupabase.auth.getUser();
+    const row = { id: site.id, group_id: site.groupId, site: site.site, name: site.name, county: site.county, updated_at: new Date().toISOString(), data: site, user_id: u.user.id };
+    let r = await window.pfSupabase.from("sites").insert(row);
+    if (r.error && /user_id/.test(String(r.error.message))) { delete row.user_id; r = await window.pfSupabase.from("sites").insert(row); }
+    return r.error ? String(r.error.message) : null;
   }, SITE);
+  check("throwaway plan written to the test account", !ins, ins || "");
   await page.goto(`${base}/#/project/${ID}/site`, { waitUntil: "load" });
   await page.reload({ waitUntil: "load" });
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(5000);
 
   const open = async () => {
     if (!(await page.locator('[data-site-analysis="1"]').count())) await page.locator('button[title="Analysis"]').click();
@@ -123,7 +126,7 @@ try {
   const gone = await page.evaluate(async (id) => {
     try {
       const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); delete all[id]; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all));
-      if (window.pfSupabase) await window.pfSupabase.from("sites").delete().eq("id", id);
+      if (window.pfSupabase) { await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id); await window.pfSupabase.from("sites").delete().eq("id", id); } // the table refuses a hard delete until the row is in the trash
       const q = window.pfSupabase ? await window.pfSupabase.from("sites").select("id").eq("id", id) : { data: [] };
       return { local: !JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}")[id], cloud: !(q.data && q.data.length) };
     } catch (e) { return { error: String(e) }; }

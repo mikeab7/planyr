@@ -6,10 +6,10 @@ vi.mock("../src/workspaces/site-planner/lib/terrainLayers.js", () => ({ contourL
 vi.mock("../src/workspaces/site-planner/lib/vectorOverlay.js", () => ({ cachedVectorLayer: vi.fn(), cachedPipelineLayer: vi.fn(), cachedCorridorLayer: vi.fn(), isPointFeature: vi.fn() }));
 vi.mock("../src/workspaces/site-planner/lib/mapSymbols.js", () => ({ installDefaultMarkerIcon: vi.fn(), pointToLayerFor: vi.fn() }));
 
-import { cityLineOf, roadsLineOf, buildGovernsModel, buildCalls, CALLS } from "../src/workspaces/site-planner/lib/siteGoverns.js";
+import { cityLineOf, roadsLineOf, buildGovernsModel, buildCalls, CALLS, mergeRoadAnswers } from "../src/workspaces/site-planner/lib/siteGoverns.js";
 import { pillsFor, pillOn, togglePill, PILLS_NOTE, PILL_DEFS } from "../src/workspaces/site-planner/lib/siteLayerPills.js";
 import { focusOverlays, FOCUS_DIM } from "../src/workspaces/site-planner/lib/layerFocus.js";
-import { runSiteScreen, legacyFindings } from "../src/workspaces/site-planner/lib/siteScreen.js";
+import { runSiteScreen, legacyFindings, roadRings } from "../src/workspaces/site-planner/lib/siteScreen.js";
 import { formatJurisdictionBadge } from "../src/workspaces/site-planner/lib/jurisdiction.js";
 import { ALL_LAYERS } from "../src/workspaces/site-planner/lib/layers.js";
 import { createGisCache } from "../src/workspaces/site-planner/lib/gisCache.js";
@@ -172,5 +172,45 @@ describe("runSiteScreen — the whole pipeline with injected services", () => {
     const r = await runSiteScreen(TX, { fetchJson, identifyJurisdiction: idJ, identifyRoadAuthority: idRoad, cache: mk(), only: ["wells"], force: true });
     expect(r.rows.map((x) => x.id)).toEqual(["wells"]);
     expect(idJ).not.toHaveBeenCalled();
+  });
+});
+
+describe("roads — the mixed-ownership path (Goose Creek: IH 10 + county roads)", () => {
+  const rd = (name, label, lengthM = 100) => ({ name, authority: { label }, lengthM });
+  it("one parcel fronting BOTH a state and a county road reads Mixed with the per-road list", () => {
+    const line = roadsLineOf({ roads: [rd("IH 10", "State (TxDOT)"), rd("John Martin Rd", "County"), rd("N Battle Bell Rd", "County")] });
+    expect(line.kind).toBe("mixed");
+    expect(line.items.map((i) => `${i.name} — ${i.authority}`)).toEqual(["IH 10 — State (TxDOT)", "John Martin Rd — County", "N Battle Bell Rd — County"]);
+  });
+  it("roads fronted by DIFFERENT parcels merge: parcel A fronts only IH 10, parcel B only county roads → Mixed, not 'State maintains IH 10'", () => {
+    const merged = mergeRoadAnswers([{ roads: [rd("IH 10", "State (TxDOT)", 900)] }, { roads: [rd("John Martin Rd", "County", 400), rd("Pocahontas Dr", "County", 200)] }]);
+    expect(merged.roads).toHaveLength(3);
+    expect(roadsLineOf(merged).kind).toBe("mixed");
+  });
+  it("the same road across parcels is one row; lengths add and the longest piece names the authority", () => {
+    const merged = mergeRoadAnswers([{ roads: [rd("John Martin Rd", "County", 300)] }, { roads: [rd("John Martin Rd", "County", 500)] }]);
+    expect(merged.roads).toHaveLength(1);
+    expect(merged.roads[0].lengthM).toBe(800);
+  });
+  it("a parcel whose lookup failed is REPORTED, never silently dropped; all failed → the failure", () => {
+    const m = mergeRoadAnswers([{ roads: [rd("IH 10", "State (TxDOT)")] }, { __error: new Error("x") }]);
+    expect(m.partialError).toBe(true);
+    expect(roadsLineOf(m).text).toContain("some parcels couldn't be checked");
+    expect(roadsLineOf(mergeRoadAnswers([{ __error: new Error("x") }, { __error: new Error("y") }])).kind).toBe("failed");
+  });
+  it("runSiteScreen asks the road engine for EVERY parcel's frontage (largest first), not just the largest", async () => {
+    const big = [[-95.0, 29.8], [-94.99, 29.8], [-94.99, 29.81], [-95.0, 29.81]];
+    const small = [[-94.98, 29.8], [-94.979, 29.8], [-94.979, 29.801], [-94.98, 29.801]];
+    const seen = [];
+    const idRoad = async (lng, lat, o) => { seen.push(o.ring); return o.ring === big ? { roads: [rd("IH 10", "State (TxDOT)")] } : { roads: [rd("John Martin Rd", "County")] }; };
+    const r = await runSiteScreen([small, big], { fetchJson: async () => ({ features: [] }), identifyJurisdiction: async () => ({ county: ["Harris"], city: [], etj: [], isd: [], unincorporated: true, straddle: false, ages: {}, sources: [] }), identifyRoadAuthority: idRoad, cache: createGisCache({ store: { getItem: () => null, setItem() {}, removeItem() {}, length: 0, key: () => null }, now: () => 1 }) });
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toBe(big);
+    expect(r.governs.roads.kind).toBe("mixed");
+  });
+  it("roadRings orders largest-first and caps", () => {
+    const many = Array.from({ length: 20 }, (_, i) => [[0, 0], [i + 1, 0], [i + 1, 1]]);
+    expect(roadRings(many)).toHaveLength(12);
+    expect(roadRings(many)[0]).toBe(many[19]);
   });
 });
