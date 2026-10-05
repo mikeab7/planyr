@@ -19,7 +19,7 @@ import { mapillaryRequestUrl, pickDetections } from "./mapillaryClient.js";
  * nothing outside this file could see them. They now live in the leaf `layerZoomGate.js`
  * alongside every other gate in the app, so the panel's live "not showing at this zoom" state
  * and the runtime that actually suppresses the fetch read ONE number, never two. */
-import { OSM_MIN_ZOOM, MAPILLARY_MIN_ZOOM } from "./layerZoomGate.js";
+import { OSM_MIN_ZOOM, MAPILLARY_MIN_ZOOM, SOIL_BEDROCK_MIN_ZOOM } from "./layerZoomGate.js";
 
 const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 const MIN_ZOOM = OSM_MIN_ZOOM;       // OSM power/hydrant data is dense — don't fetch zoomed out
@@ -211,6 +211,66 @@ export function mapillaryLayer(onStatus) {
       L.circleMarker([lat, lon], { radius: 4, color: COL.mly, weight: 1.4, opacity, fillColor: isHyd ? COL.hydrant : COL.mly, fillOpacity: opacity })
         .bindTooltip(`${isHyd ? "Hydrant" : "Pole"} · crowdsourced detection (Mapillary)`).addTo(group);
     });
+  };
+  group.abortPending = () => { if (ctrl) { try { ctrl.abort(); } catch (_) {} } };
+  group.onAdd = function (m) { L.LayerGroup.prototype.onAdd.call(this, m); map = m; m.on("moveend", refresh); refresh(); return this; };
+  group.onRemove = function (m) { group.abortPending(); m.off("moveend", refresh); map = null; lastKey = null; L.LayerGroup.prototype.onRemove.call(this, m); };
+  return group;
+}
+
+// ---- SSURGO depth to bedrock (B2081251) ----
+// Soil is effectively static, so a copy is "fresh" for a day; the pure fetch/join lives in ssurgoBedrock.js and is
+// loaded on first use so it never rides the boot bundle.
+const BEDROCK_TTL = 24 * 60 * 60 * 1000;
+
+function renderBedrock(polys, group, opacity) {
+  const op = opacity ?? 0.55;
+  for (const p of polys) {
+    const inches = Math.round(p.depthCm / 2.54);
+    const tip = `${p.muname || "Soil map unit"} · bedrock as shallow as ${inches} in (${(inches / 12).toFixed(1)} ft) in the shallowest soil of this unit (USDA SSURGO)`;
+    for (const rings of p.polygons) {
+      L.polygon(rings.map((r) => r.map(([lng, lat]) => [lat, lng])), {
+        color: p.cls.color, weight: 0.8, opacity: Math.min(1, op + 0.2), fillColor: p.cls.color, fillOpacity: op * 0.7,
+      }).bindTooltip(tip, { sticky: true }).addTo(group);
+    }
+  }
+}
+
+/* A view-driven shallow-rock overlay. `onStatus(state, msg, extra)` as for overpassLayer. A fetch that fails
+ * reports "failed" — it never paints an empty (reads-as-clear) map. */
+export function bedrockLayer(onStatus) {
+  const group = L.layerGroup();
+  let map = null, lastKey = null, opacity = 0.55, lastPolys = [], ctrl = null;
+  group.setOpacity = (o) => { opacity = o; group.clearLayers(); renderBedrock(lastPolys, group, opacity); };
+  const paint = (res, ts, opts = {}) => {
+    group.clearLayers(); renderBedrock(res.polys, group, opacity); lastPolys = res.polys;
+    const msg = opts.note
+      || (res.capped ? "Showing the first 1,500 soil map units in view — zoom in for the rest"
+        : res.polys.length ? null : "No soil in view with bedrock recorded within 5 ft — not proof there is none");
+    onStatus && onStatus(res.polys.length ? "loaded" : "empty", msg, { ts, stale: !!opts.stale });
+  };
+  const refresh = async () => {
+    if (!map) return;
+    if (map.getZoom() < SOIL_BEDROCK_MIN_ZOOM) { group.clearLayers(); lastPolys = []; lastKey = "zoomed-out"; onStatus && onStatus("empty", `Zoom in to ≥ ${SOIL_BEDROCK_MIN_ZOOM} to load`); return; }
+    const b = map.getBounds();
+    const bb = { s: b.getSouth(), w: b.getWest(), n: b.getNorth(), e: b.getEast() };
+    const key = "ssurgo-bedrock:" + bboxKey(bb);
+    if (key === lastKey) return;
+    lastKey = key;
+    if (ctrl) ctrl.abort();
+    ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const sig = ctrl && ctrl.signal;
+    let fetchBedrockView;
+    try { ({ fetchBedrockView } = await import("./ssurgoBedrock.js")); }
+    catch (e) { lastKey = null; onStatus && onStatus("failed", `Soil bedrock: ${(e && e.message) || "module failed to load"}`); return; }
+    const { cached, stale, fresh } = gisCache.swr(key, () => fetchBedrockView(bb, { signal: sig }), { ttl: BEDROCK_TTL });
+    if (cached) paint(cached.data, cached.ts, { stale });
+    else onStatus && onStatus("loading");
+    const r = await fresh;
+    if (!map || (sig && sig.aborted)) return;
+    if (r.updated) paint(r.data, r.ts);
+    else if (r.error && !cached) { lastKey = null; onStatus && onStatus("failed", `USDA soils: ${(r.error && r.error.message) || "request failed"}`); }
+    else if (r.error && cached) paint(cached.data, cached.ts, { stale: true, note: "Showing last-good — refresh failed" });
   };
   group.abortPending = () => { if (ctrl) { try { ctrl.abort(); } catch (_) {} } };
   group.onAdd = function (m) { L.LayerGroup.prototype.onAdd.call(this, m); map = m; m.on("moveend", refresh); refresh(); return this; };
