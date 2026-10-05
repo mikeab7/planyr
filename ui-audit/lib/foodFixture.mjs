@@ -31,7 +31,11 @@ function authSession() {
 }
 
 /** variant: "plain" (DAO'N / DAO'N) · "case" (manual "dao'n" vs snapshot "DAO'N") · "curly" (manual "DAO’N"). */
-export function makeFixture({ variant = "plain" } = {}) {
+/** `aburi: true` adds Aburi Sushi (2800 Southwest Fwy) with one past visit — the place the owner's
+ *  real-iPhone screenshot was taken on (B2046224 ×3) — for verify-food-ios-screens. Off by default
+ *  so every other harness's counts are unchanged. */
+export const ABURI_ID = "fx-aburi";
+export function makeFixture({ variant = "plain", aburi = false } = {}) {
   const manualName = variant === "case" ? "dao'n" : variant === "curly" ? "DAO’N" : "DAO'N";
   const places = [
     { id: "fx-daon", name: "DAO'N", lat: DAON_AT.lat + 0.00035, lon: DAON_AT.lon, category: "restaurant", cuisine: "asian", address: "1 Fixture Way, Houston, TX 77077", brand: null, source: "fixture", source_licence: "x", metro: "houston", confidence: 0.95 },
@@ -45,6 +49,15 @@ export function makeFixture({ variant = "plain" } = {}) {
     visited_on: "2026-09-01", rating: "8.5", rating_ambiance: null, cost: null, what_i_had: "noodles", what_was_good: null, notes: null,
     created_at: "2026-09-01T12:00:00Z", updated_at: "2026-09-01T12:00:00Z",
   }];
+  if (aburi) {
+    places.push({ id: ABURI_ID, name: "Aburi Sushi", lat: 29.7392, lon: -95.4151, category: "sushi_restaurant", cuisine: "sushi", address: "2800 Southwest Fwy, Houston, TX 77098", brand: null, source: "fixture", source_licence: "x", metro: "houston", confidence: 0.97 });
+    visits.push({
+      id: "00000000-0000-4000-8000-0000000000b1", user_id: FIXTURE_UID, place_id: ABURI_ID,
+      custom_name: null, custom_lat: null, custom_lon: null,
+      visited_on: "2026-09-20", rating: "8.75", rating_ambiance: "8", cost: "64.20", what_i_had: null, what_was_good: "the aburi salmon", notes: null,
+      created_at: "2026-09-20T12:00:00Z", updated_at: "2026-09-20T12:00:00Z",
+    });
+  }
   return { places, visits, writes: [], manualName };
 }
 

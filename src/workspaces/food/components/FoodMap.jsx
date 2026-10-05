@@ -306,6 +306,8 @@ import {
 } from "../../../shared/basemaps/basemaps.js";
 import { addVectorLabels } from "../../../shared/basemaps/vectorLabelLayer.js";
 
+const MIN_STACK_ROOM_PX = 140; // map height above the sheet below which the bottom message stack hides
+
 // ⛔ NEW-1 (2026-10-03) — THE BASEMAP IS NO LONGER DEFINED HERE. Owner: "The map on the food module
 // is horrible, we should default to the site plan module map … and a good hybrid option as an
 // option." The tile sources, ceilings, opacities and credits for /food's two choices — "Site Plan"
@@ -526,6 +528,19 @@ export default function FoodMap({
   const [attributionOpen, setAttributionOpen] = useState(false);
   const coarsePointer = useCoarsePointer();
   const narrowViewport = useNarrowViewport();
+  // The map area's own height — so the bottom message stack can step aside when the place sheet
+  // leaves too little map above it to hold a message without colliding with the top controls.
+  const wrapRef = useRef(null);
+  const [wrapH, setWrapH] = useState(0);
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(() => setWrapH(el.clientHeight));
+    ro.observe(el);
+    setWrapH(el.clientHeight);
+    return () => ro.disconnect();
+  }, []);
+  const stackRoomPx = wrapH - (narrowViewport ? sheetHeightPx : 0);
   // B2046224 — phone centring. On a narrow viewport the detail panel is a BOTTOM SHEET, not the
   // desktop right rail, so a selection must land centred in the area ABOVE the sheet (horizontally
   // centred, vertically centred in what the sheet leaves visible) — the old right-rail shift pushed a
@@ -1009,8 +1024,14 @@ export default function FoodMap({
   const hasOwnPlaces = (loggedPlaces?.length || 0) + (manualPins?.length || 0) + (wishlistPlaces?.length || 0) + (wishlistManualPins?.length || 0) > 0;
 
   return (
-    <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
-      <div ref={hostRef} data-testid="food-map" style={{ position: "absolute", inset: 0 }} />
+    // overflow:hidden — the bottom message stack rides `sheetHeightPx` above the map's bottom; with the
+    // sheet dragged taller than the map it used to climb out over the app's toolbar (seen in the
+    // B2046224 ×3 iPhone screenshots). Clipped to the map, it simply goes out of view instead.
+    <div ref={wrapRef} style={{ position: "relative", flex: 1, minHeight: 0, overflow: "hidden" }}>
+      {/* isolation: Leaflet's own controls (the + / − zoom stack is z-index 1000) are confined to this
+          box's stacking context, so they can never draw over the place sheet (B2046224 ×3, owner
+          screenshot: the zoom control sat on top of the sheet's category line). */}
+      <div ref={hostRef} data-testid="food-map" style={{ position: "absolute", inset: 0, isolation: "isolate", zIndex: 0 }} />
       {/* NEW-1 (2nd owner block, 2026-08-23) — the zoom-gate notice, the capped notice, and
           "Search live for more here" used to be split between the TOP centre (the two notices)
           and a viewport-dependent position (the button — bottom on desktop, top on mobile since
@@ -1036,6 +1057,9 @@ export default function FoodMap({
           // plus its inset and a gap each side, kept symmetric so the stack stays centred) — the long
           // zoom hint used to run underneath it.
           maxWidth: narrowViewport ? "calc(100% - 136px)" : "calc(100% - 24px)", pointerEvents: "none",
+          // B2046224 ×3 screenshots: with the sheet dragged near the top, the stack landed on the
+          // basemap toggle / "i" button. Below this much map it steps aside until the sheet comes down.
+          visibility: wrapH && stackRoomPx < MIN_STACK_ROOM_PX ? "hidden" : undefined,
         }}
       >
         {/* B651872 (×4) — a real loading treatment instead of leaving grey unexplained; tied to the

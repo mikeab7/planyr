@@ -65,7 +65,7 @@
  * ui-audit/verify-food-ios-keyboard.mjs; on-device confirmation is the V# in VERIFICATION.md. */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { resolveSnap, heightForSnap } from "../lib/bottomSheetSnap.js";
-import { currentKeyboardInset } from "../lib/keyboardInset.js";
+import { currentKeyboardInset, visualViewportBox } from "../lib/keyboardInset.js";
 import { publishBottomSheetHeight } from "../../../shared/ui/bottomSheetTracker.js";
 
 const TOP_INSET = 64; // px of the map always left visible above the sheet, even at "full"
@@ -73,6 +73,16 @@ const TRANSITION_MS = 220;
 const TEXT_ENTRY = /^(INPUT|TEXTAREA|SELECT)$/;
 const REVEAL_MARGIN = 12; // breathing room between a revealed field and the sheet's visible edge
 const FOCUS_RECHECK_MS = [0, 120, 350, 700];
+const VIEWPORT_WATCH_MS = 120; // while typing, re-read the visual viewport this often (iOS can move it without an event)
+const textEntryFocused = () => TEXT_ENTRY.test(document.activeElement?.tagName || "");
+// While a field in the sheet has focus (`data-typing`): the "Log a visit" bar steps out of the way and
+// every sticky bar (header, the form's Save/Done) flows with its content instead of floating over the
+// card being edited (B2046224 ×3, owner: "while typing, the card being edited is fully visible").
+// Tried and measured first: keeping the form's own Save pinned (B2057920's choice) — it then covers
+// the lower part of any card taller than the space above the keyboard (a dish row's score buttons).
+// Save tucks while typing and is back the moment the keyboard closes.
+const TYPING_CSS = `[data-food-sheet][data-typing] [data-hide-while-typing]{display:none !important}`
+  + `[data-food-sheet][data-typing] [data-sheet-sticky]{position:static !important}`;
 
 export default function BottomSheet({ open, onDismiss, initialSnap = "half", peekHeight, onHeightChange, children }) {
   const contentRef = useRef(null);
@@ -88,18 +98,42 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
     foreignScrollAtRef.current = performance.now();
   }, []);
 
-  const [kbInset, setKbInset] = useState(() => currentKeyboardInset());
+  // kbInset DETECTS the keyboard (and only while a field has focus); vvBox is where the sheet pins
+  // itself while it is up — the visual viewport's own box, so no layout-height estimate can open a
+  // gap between the sheet and the keyboard (see the header's ×3 note).
+  const [kbInset, setKbInset] = useState(0);
+  const [vvBox, setVvBox] = useState(null);
+  const vvBoxRef = useRef(null);
+  const [typing, setTyping] = useState(false);
+  const rootRef = useRef(null);
   const kbOpen = kbInset > 0;
+  const revealSoonRef = useRef(() => {});
+  const measureViewport = useCallback(() => {
+    const kb = textEntryFocused() ? currentKeyboardInset() : 0;
+    setKbInset(kb);
+    const box = kb ? visualViewportBox() : null;
+    const prev = vvBoxRef.current;
+    const same = box && prev ? box.top === prev.top && box.height === prev.height : box === prev;
+    if (same) return;
+    vvBoxRef.current = box;
+    setVvBox(box);
+    revealSoonRef.current();
+  }, []);
   const viewportHeight = () => window.visualViewport?.height || window.innerHeight;
-  const contentHeight = () => contentRef.current?.scrollHeight ?? 0;
+  // The sheet holds the drag handle AND the content; sizing it to the content alone left it one
+  // handle short, so the last strip of content always had to scroll (B2046224 ×3: a dropped pin's
+  // name field got a scroll area barely taller than itself).
+  const handleRef = useRef(null);
+  const handleHeight = () => handleRef.current?.offsetHeight ?? 0;
+  const contentHeight = () => (contentRef.current?.scrollHeight ?? 0) + handleHeight();
 
   // Keyboard up -> always the "full" snap: the visible area is already short, so the content-
   // driven half/peek heights would leave the form cramped above the keyboard.
   const targetFor = useCallback((s) => heightForSnap(kbOpen ? "full" : s, {
-    contentHeight: contentHeight(), peekHeight, viewportHeight: viewportHeight(), topInset: kbOpen ? 8 : TOP_INSET,
+    contentHeight: contentHeight(), peekHeight: peekHeight + handleHeight(), viewportHeight: viewportHeight(), topInset: kbOpen ? 8 : TOP_INSET,
   // kbInset is read through viewportHeight(); re-derive when it changes
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [peekHeight, kbOpen, kbInset]);
+  }), [peekHeight, kbOpen, kbInset, vvBox?.height]);
 
   // The two-frame reveal (see header comment): frame 1 flips transitions on, frame 2 sets the
   // real content-driven target height so the browser has something to animate FROM.
@@ -133,7 +167,7 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
     const visBottom = Math.min(b.bottom, vv ? vv.offsetTop + vv.height : b.bottom);
     let topReserve = 0, bottomReserve = 0;
     box.querySelectorAll("[data-sheet-sticky]").forEach((s) => {
-      if (s.contains(el)) return;
+      if (s.contains(el) || getComputedStyle(s).position !== "sticky") return; // un-stuck while typing → plain content
       const sr = s.getBoundingClientRect();
       if (!sr.height) return;
       if (s.dataset.sheetSticky === "top" && sr.top <= b.top + 2) topReserve = Math.max(topReserve, sr.bottom - b.top);
@@ -141,13 +175,23 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
     });
     const lo = visTop + topReserve + REVEAL_MARGIN;
     const hi = visBottom - bottomReserve - REVEAL_MARGIN;
-    const r = el.getBoundingClientRect();
+    // Reveal the field's whole CARD (`data-edit-card`: the dish editor, a visit-form row) when it
+    // fits; when it does not, keep the field visible with as much of the card above it as fits.
+    const f = el.getBoundingClientRect();
+    const cardEl = el.closest("[data-edit-card]");
+    let r = f;
+    if (cardEl && box.contains(cardEl)) {
+      const c = cardEl.getBoundingClientRect();
+      r = c.height <= hi - lo ? c : { top: Math.max(c.top, f.bottom - (hi - lo)), bottom: f.bottom };
+    }
+    if (f.height > hi - lo) r = { top: f.top, bottom: f.top }; // smaller than the field: show its top
     const before = box.scrollTop;
     if (r.top < lo) box.scrollTop -= lo - r.top;
     else if (r.bottom > hi) box.scrollTop += Math.min(r.bottom - hi, r.top - lo);
     if (box.scrollTop !== before) selfScrollRef.current = true; // the scroll event this causes is ours, not a finger's
   }, []);
   const revealActive = useCallback(() => revealField(document.activeElement), [revealField]);
+  revealSoonRef.current = () => { requestAnimationFrame(revealActive); setTimeout(revealActive, TRANSITION_MS + 40); };
 
   // Track the visual viewport: it shrinks when the keyboard opens and grows back when it closes
   // (and on iOS it may pan, `offsetTop`). On every change, re-measure and re-reveal.
@@ -155,14 +199,24 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
     const vv = window.visualViewport;
     if (!vv) return undefined;
     const onVv = () => {
-      setKbInset(currentKeyboardInset());
+      measureViewport();
       requestAnimationFrame(revealActive);
       setTimeout(revealActive, TRANSITION_MS + 40); // again once the lift / full-snap has animated
     };
     vv.addEventListener("resize", onVv);
     vv.addEventListener("scroll", onVv);
-    return () => { vv.removeEventListener("resize", onVv); vv.removeEventListener("scroll", onVv); };
-  }, [revealActive]);
+    // iOS also SCROLLS THE PAGE to reveal a field and the page-containment guard pins it back
+    // (production telemetry, the owner's own test) — the visual viewport moves with no vv event.
+    window.addEventListener("scroll", onVv, { passive: true });
+    return () => { vv.removeEventListener("resize", onVv); vv.removeEventListener("scroll", onVv); window.removeEventListener("scroll", onVv); };
+  }, [revealActive, measureViewport]);
+
+  // …and because none of those events is guaranteed, re-read it on a short timer while typing.
+  useEffect(() => {
+    if (!typing) return undefined;
+    const id = setInterval(measureViewport, VIEWPORT_WATCH_MS);
+    return () => clearInterval(id);
+  }, [typing, measureViewport]);
 
   // A focused field must be revealed whether or not the keyboard is up yet — an autoFocus field
   // (the dish editor's name) is focused BEFORE the keyboard opens, and some iOS versions deliver the
@@ -171,15 +225,23 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
   // next field) — they exist to catch a late keyboard, never to drag the list back to the field.
   const onFocusIn = useCallback((e) => {
     if (!TEXT_ENTRY.test(e.target.tagName)) return;
+    setTyping(true);
     const focusedAt = performance.now();
     for (const ms of FOCUS_RECHECK_MS) {
       setTimeout(() => {
         if (document.activeElement !== e.target || foreignScrollAtRef.current > focusedAt) return;
-        setKbInset(currentKeyboardInset());
+        measureViewport();
         revealField(e.target);
       }, ms);
     }
-  }, [revealField]);
+  }, [revealField, measureViewport]);
+  const onFocusOut = useCallback(() => {
+    setTimeout(() => {
+      const a = document.activeElement;
+      setTyping(!!(a && TEXT_ENTRY.test(a.tagName) && rootRef.current?.contains(a)));
+      measureViewport();
+    }, 0);
+  }, [measureViewport]);
 
   useEffect(() => {
     if (!contentRef.current || typeof ResizeObserver === "undefined") return undefined;
@@ -211,6 +273,10 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
 
   const onHandlePointerDown = useCallback((e) => {
     if (e.button != null && e.button !== 0) return;
+    // A MOUSE drag of the handle must not start a text selection: WebKit extends it across the
+    // page and hands focus to whatever input the pointer crosses (measured: the search box, whose
+    // results list then opened over the sheet). Touch never selects here; mouse-only so a tap stays a tap.
+    if (e.pointerType === "mouse") e.preventDefault();
     e.currentTarget.setPointerCapture?.(e.pointerId);
     dragRef.current = { startY: e.clientY, startHeight: heightPx, pointerId: e.pointerId };
   }, [heightPx]);
@@ -242,13 +308,29 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
 
   if (!open) return null;
 
+  // ROOT = the box the sheet is anchored to: the layout viewport normally, the VISUAL viewport's own
+  // box while the keyboard is up (so the sheet's bottom edge IS the keyboard's top edge). The skirt
+  // below the sheet is sheet-coloured and lives under the keyboard: if any reading is ever off and
+  // the sheet sits a little high, what shows between it and the keyboard is still the sheet — never
+  // the map (B2046224 ×3, owner: "a band of the satellite map shows through").
   return (
     <div
+      ref={rootRef}
+      data-food-sheet-root=""
+      style={{
+        position: "fixed", left: 0, right: 0, zIndex: 700, pointerEvents: "none",
+        ...(vvBox ? { top: vvBox.top, height: vvBox.height } : { top: 0, bottom: 0 }),
+      }}
+    >
+    <style>{TYPING_CSS}</style>
+    <div
       data-testid="food-bottom-sheet"
+      data-food-sheet=""
+      data-typing={typing ? "" : undefined}
       data-sheet-snap={snap}
       style={{
-        position: "fixed", left: 0, right: 0, bottom: kbInset, zIndex: 700,
-        height: heightPx, maxHeight: kbOpen ? viewportHeight() - 8 : `calc(100vh - ${TOP_INSET}px)`,
+        position: "absolute", left: 0, right: 0, bottom: 0, pointerEvents: "auto",
+        height: heightPx, maxHeight: vvBox ? vvBox.height - 8 : `calc(100% - ${TOP_INSET}px)`,
         background: "var(--surface-raised)", borderTopLeftRadius: 16, borderTopRightRadius: 16,
         boxShadow: "0 -8px 24px rgba(0,0,0,0.22)", display: "flex", flexDirection: "column",
         overflow: "hidden", touchAction: "none",
@@ -258,8 +340,10 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
         paddingBottom: kbOpen ? 0 : "env(safe-area-inset-bottom)",
       }}
       onFocus={onFocusIn}
+      onBlur={onFocusOut}
     >
       <div
+        ref={handleRef}
         data-testid="food-sheet-drag-handle"
         onPointerDown={onHandlePointerDown}
         onPointerMove={onHandlePointerMove}
@@ -275,6 +359,13 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
       <div ref={contentRef} onScroll={onContentScroll} style={{ flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain" }}>
         {children}
       </div>
+    </div>
+    {vvBox && (
+      <div data-testid="food-sheet-skirt" aria-hidden="true" style={{
+        position: "absolute", left: 0, right: 0, top: "100%", height: "100vh", pointerEvents: "auto",
+        background: "var(--surface-raised)",
+      }} />
+    )}
     </div>
   );
 }

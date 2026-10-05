@@ -83,8 +83,12 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
   NEW visit before it exists (`FoodApp.submitVisit` writes the visit then each dish, all-or-nothing),
   and the non-standard `x-food-*` autocomplete token + non-contact `name` props every free-text field spreads (a source sweep in
   foodPhone.test fails a field that doesn't, or whose name/placeholder/aria-label reads as a contact field). ⛔ B2046224 ×2:
-  the layout height comes from a fixed-position probe, NEVER `innerHeight` (on iOS it shrinks with the keyboard); the
-  iOS-faithful harness is verify-food-ios-keyboard (ui-audit). There is NO "What I had" input any more; old
+  the layout height comes from a fixed-position probe, NEVER `innerHeight` (on iOS it moves both ways). ⛔ ×3: while a
+  field has focus the sheet pins to the VISUAL viewport's own box (no layout-height math can open a map gap), hangs a
+  sheet-coloured skirt under itself, tucks "Log a visit" and every sticky bar (`data-typing`), reveals the field's whole
+  `data-edit-card`; the Leaflet host is `isolation: isolate` so map controls never draw over it. The PICTURE harness —
+  full app, iOS keyboard + accessory bar drawn, GAP/CARD/CONTROLS/OVERLAY asserted, screenshots — is
+  verify-food-ios-screens (ui-audit); verify-food-ios-keyboard is the fixture-page check. There is NO "What I had" input any more; old
   visits' saved `what_i_had` text stays readable and is never rewritten. At phone width ratings are a
   1-10 tap grid (`ScoreTapGrid` in ScoreMeter), desktop keeps the slider. Phone harness:
   verify-food-visit-phone (ui-audit) + its food-panel fixture page.

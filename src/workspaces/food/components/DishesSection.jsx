@@ -194,7 +194,7 @@ function DishEditRow({ initial, existingNames, openWishlistNames, onSave, onCanc
 
   return (
     <div
-      data-testid="dish-edit-row"
+      data-testid="dish-edit-row" data-edit-card=""
       onKeyDown={(e) => {
         if (e.key === "Escape") { e.preventDefault(); onCancel(); }
         if (e.key === "Enter" && e.target.tagName !== "TEXTAREA") { e.preventDefault(); commit(!initial); }
