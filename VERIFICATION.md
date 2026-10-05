@@ -514,6 +514,7 @@ Sandbox-proven: `test/parcelOwnLook.test.js` (red on main for all three claims),
 5. Toggle the aerial / dark basemap if available. **Expect:** the numbers are legible over both (white halo).
 6. Repeat 1–3 on a Harris view (numbers = HCAD account) and a Fort Bend view (numbers = R-number). **Expect:** the same look; Harris shows nothing between the far floor and the vector floor (a deliberate trade).
 7. Map view → Select parcels over Grand Port. **Expect:** the same outlines and numbers (no chips on the Map view).
+8. (2026-10-05) Saved copy, while Chambers' spatial queries still fail — Map view at Mont Belvieu with the "saved copy" banner showing. **Expect:** Planyr outlines WITH numbers; lot 15835 (-94.8695, 29.8222) reads 00321-02000-00100-100001 — the same number it shows when the live server answers; clicking it shows the saved-copy notice saying owner names and values may lag (the state copy names BALLIS JOHN there, live CAD BARBERS HILL EDUCATION FOUNDATION). Waller (saved copy is its display) shows Property-ID numbers — confirm that is the one you look Waller up by.
 - **Stopping rule:** closes on a dated pass of 1–7, or a failed step filed as a recurrence on B2057040.
 
 ### V1450368 — B2025280: /food opens on the Site Plan map, Hybrid is crisp, and pins stay legible on both `Blocker: auth`

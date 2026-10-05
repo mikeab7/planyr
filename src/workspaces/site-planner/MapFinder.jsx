@@ -5095,7 +5095,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
         {visible && isActive && cachedNotice && !err && !backupNotice && (
           <FloatingNotice testId="parcel-cached-notice" maxWidth="min(420px, calc(100vw - 16px))">
             <div style={{ background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45, pointerEvents: "none" }}>
-              <b>Cached copy{fmtAsOf(cachedNotice.asOf)}.</b> {cachedNotice.county} county’s live parcel server is unavailable, so this lot came from Planyr’s saved snapshot — accurate for selection, but it may lag recent county updates.
+              <b>Cached copy{fmtAsOf(cachedNotice.asOf)}.</b> {cachedNotice.county} county’s live parcel server is unavailable, so this lot is Planyr’s saved copy — lot lines are accurate, but owner names and values may lag the county’s current records.
             </div>
           </FloatingNotice>
         )}
