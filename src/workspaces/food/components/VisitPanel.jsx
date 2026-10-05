@@ -105,6 +105,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import BottomSheet, { FORM_OPEN_CSS } from "./BottomSheet.jsx";
+import SideDock from "./SideDock.jsx";
+import { useLandscapePhone } from "../lib/phoneLayout.js";
 import DishesSection from "./DishesSection.jsx";
 import { colorForRating, textColorForRating } from "../lib/ratingColor.js";
 import { computeVisitAggregates, orderAgainEntries } from "../lib/visitAggregates.js";
@@ -267,7 +269,9 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, submitLabel 
   // always starts from the CURRENT saved row, never a stale in-progress edit from before a Cancel.
   // rating/rating_ambiance are Postgres `numeric` -> PostgREST strings ("8.25"), same Number()
   // coercion every other read site in this module already applies.
-  const isMobile = useIsMobile();
+  const narrowForm = useIsMobile();
+  const landscapeForm = useLandscapePhone();
+  const isMobile = narrowForm || landscapeForm; // a phone held sideways is a touch screen too
   const [rating, setRating] = useState(() => (initial?.rating != null ? Number(initial.rating) : null));
   const [ratingAmbiance, setRatingAmbiance] = useState(() => (initial?.rating_ambiance != null ? Number(initial.rating_ambiance) : null));
   const [cost, setCost] = useState(() => (initial?.cost != null ? String(initial.cost) : ""));
@@ -503,7 +507,7 @@ function ScoreStrip({ aggregates, bestDish }) {
   const bestDishLine = bestDish ? `Best dish: ${bestDish.name} (${Number(bestDish.latestScore)})` : null;
   return (
     <div data-testid="food-score-strip" style={{ padding: "6px 16px 4px" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 7 }}>
+      <div data-score-grid="" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 7 }}>
         {tiles.map((t) => (
           <div key={t.key} style={{
             borderRadius: RADIUS.lg, padding: "8px 4px", textAlign: "center", border: "1px solid var(--border-default)",
@@ -611,7 +615,7 @@ function ActionsRow({ everVisited, onOpenForm, wishlisted, onToggleWishlist, wis
 
   return (
     <div data-testid="food-actions-row" data-sheet-sticky="bottom" data-hide-while-typing="" data-hide-while-form="" style={{
-      position: "sticky", bottom: 0, display: "flex", gap: 8, padding: "10px 16px",
+      position: "sticky", bottom: 0, marginTop: "auto", display: "flex", gap: 8, padding: "10px 16px",
       background: "var(--surface-raised)", borderTop: "1px solid var(--border-default)",
     }}>
       {[logBtn, wishBtn].filter(Boolean)}
@@ -795,10 +799,13 @@ function EmptyStateNote() {
 export default function VisitPanel({
   place, pastVisits, onClose, onSubmitVisit, onDeleteVisit, onEditVisit, pending, error,
   manualNameEditable, manualName, onManualNameChange,
-  wishlisted, onToggleWishlist, onSheetHeightChange,
+  wishlisted, onToggleWishlist, onSheetHeightChange, onSideWidthChange,
   dishesWithDate, onSaveDish, onDeleteDish, dishPending, openDishWishlistNames,
 }) {
-  const isMobile = useIsMobile();
+  const narrowPhone = useIsMobile();
+  // B2046224 ×4 — a phone held sideways docks the card to the right edge instead of a bottom sheet.
+  const landscape = useLandscapePhone();
+  const isMobile = narrowPhone && !landscape;
   const [adding, setAdding] = useState(false); // NEW-2: never auto-opens, even on a never-visited place
   // Edit-a-visit (owner block, 2026-08-28) — which existing visit's card (if any) is showing its
   // edit form inline, in place of the card. Lifted here rather than local to VisitCard so this
@@ -859,6 +866,13 @@ export default function VisitPanel({
   // above on why only one form is ever open at once.
   const handleOpenForm = () => { setEditingVisitId(null); setAdding(true); };
 
+  const actionsRow = onSubmitVisit && !adding ? (
+    <ActionsRow
+      everVisited={everVisited} onOpenForm={handleOpenForm}
+      wishlisted={wishlisted} onToggleWishlist={onToggleWishlist} wishlistDisabled={wishlistDisabled}
+    />
+  ) : null;
+
   const body = (
     <>
       <div ref={peekRef}>
@@ -907,22 +921,25 @@ export default function VisitPanel({
         </div>
       )}
 
-      {onSubmitVisit && (adding ? (
+      {onSubmitVisit && adding && (
         <VisitForm pending={pending} onCancel={() => setAdding(false)} onSubmit={onSubmitVisit} onSaved={handleSaved} />
-      ) : (
-        <ActionsRow
-          everVisited={everVisited} onOpenForm={handleOpenForm}
-          wishlisted={wishlisted} onToggleWishlist={onToggleWishlist} wishlistDisabled={wishlistDisabled}
-        />
-      ))}
+      )}
+      {!landscape && actionsRow}
 
       <PastVisitsSection
         pastVisits={visits} onDelete={onDeleteVisit} onEditVisit={onEditVisit} pending={pending}
         editingVisitId={editingVisitId} onOpenEdit={handleOpenEdit} onCloseEdit={handleCloseEdit}
         dishesWithDate={dishesWithDate} onSaveDish={onSaveDish} onDeleteDish={onDeleteDish} dishPending={dishPending}
       />
+      {/* B2046224 ×4 — side card: the bar is the LAST thing in the card and the content fills it, so "Log a visit" is
+          always on the card's bottom edge (sticky alone only holds it until its own place in the list scrolls past). */}
+      {landscape && actionsRow}
     </>
   );
+
+  if (landscape) {
+    return <SideDock onWidthChange={onSideWidthChange}>{body}</SideDock>;
+  }
 
   if (isMobile) {
     return (

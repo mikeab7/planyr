@@ -583,6 +583,10 @@ export default function AppHeader({
   // via tabs. Every other caller omits this and is unaffected (defaults true, byte-identical
   // layout — the toolbar zone was already flex:1 and simply reclaims the tabs' width when absent).
   showModuleTabs = true,
+  /* B2046224 ×4 (Food, phone held SIDEWAYS) — ONE row: the toolbar sits inside row 1 between the brand
+     and the account controls, and row 2 is not rendered. A landscape phone has ~300 px of height; two
+     40 px rows were a quarter of it. Opt-in; every other caller omits it and renders byte-identically. */
+  singleRow = false,
 }) {
   /* B1173(×2) — `fullscreen` now means exactly one thing: THE BROWSER IS IN FULLSCREEN AND THIS
      HEADER IS THE ONE ON SCREEN. It no longer means "the chrome is collapsed", because the chrome
@@ -1091,7 +1095,7 @@ export default function AppHeader({
           this is a pure position fix — the row's own content, mask and measurement refs are
           untouched. */}
       <div style={{ position: "relative" }}>
-      <div ref={rowRef} className={narrow ? "no-hscrollbar" : undefined} style={{ height: HEADER_ROW_H, display: "flex", alignItems: "center", position: "relative", ...rowScroll, WebkitMaskImage: row1Mask, maskImage: row1Mask }}>
+      <div ref={rowRef} className={narrow ? "no-hscrollbar" : undefined} style={{ height: HEADER_ROW_H, display: "flex", alignItems: "center", position: "relative", ...rowScroll, ...(singleRow ? { paddingLeft: "env(safe-area-inset-left, 0px)", paddingRight: "env(safe-area-inset-right, 0px)" } : null), WebkitMaskImage: row1Mask, maskImage: row1Mask }}>
 
         {/* ⛔ NEW-2 — NAVIGATION WINS. Read this before changing any of the three zone flexes.
             The owner could not open the plan switcher on a laptop: "the unincorporated / city of
@@ -1120,7 +1124,7 @@ export default function AppHeader({
             window. That is what "navigation wins" buys. Narrow (phone) is untouched — the row
             scrolls sideways there and the zoneFixed no-shrink still applies. (Dropdowns portal to
             <body>, so overflow:hidden here never clips a menu.) */}
-        <div ref={leftZoneRef} data-header-zone="left" style={{ display: "flex", alignItems: "center", gap: 4, paddingLeft: 9, minWidth: 0, ...(narrow ? { flex: 1, ...zoneFixed } : { flex: "0 1 auto", maxWidth: "60%", overflow: "hidden" }) }}>
+        <div ref={leftZoneRef} data-header-zone="left" style={{ display: "flex", alignItems: "center", gap: 4, paddingLeft: 9, minWidth: 0, ...(singleRow ? { flex: "0 0 auto" } : narrow ? { flex: 1, ...zoneFixed } : { flex: "0 1 auto", maxWidth: "60%", overflow: "hidden" }) }}>
           {/* Logo — the Planyr brand mark + wordmark (BrandMark, theme-aware).
               Also a secondary route to the Dashboard (the labeled crumb is primary, B192).
               B1128272 — `onLogoDashboard`/`logoDashboardTitle` let a caller (Schedule) give
@@ -1187,6 +1191,11 @@ export default function AppHeader({
             the two cases a true centre cannot serve, because a visible off-centre chip beats a sliver
             and beats a silently collapsed one.
             On a phone (`narrow`) the row scrolls sideways, so the badge keeps its natural width. */}
+        {singleRow && (
+          <div data-header-toolbar-inline="1" style={{ flex: "1 1 0%", minWidth: 0, display: "flex", alignItems: "center", padding: "0 6px" }}>{toolbarContent}</div>
+        )}
+        {!singleRow && (
+        <>
         <div
           ref={centerZoneRef}
           data-header-center="1"
@@ -1215,6 +1224,8 @@ export default function AppHeader({
             inert spacer keeps that measurement honest. (In `tight` / `unmeasured` / `narrow` mode the
             centre is back in flow and absorbs the slack itself, so the spacer stands down.) */}
         {centered && <div aria-hidden="true" style={{ flex: "1 1 0%", minWidth: CENTER_SLOT_GAP }} />}
+        </>
+        )}
 
         {/* Right zone — cloud-sync badge · settings · auth. On narrow use `1 0 auto`: still
             GROWS to pin the auth pill rightward when the row has slack, but never SHRINKS its
@@ -1226,7 +1237,7 @@ export default function AppHeader({
           ref={rightZoneRef}
           data-header-zone="right"
           style={{
-            flex: narrow ? "1 0 auto" : "0 0 auto", display: "flex", alignItems: "center",
+            flex: narrow && !singleRow ? "1 0 auto" : "0 0 auto", display: "flex", alignItems: "center",
             justifyContent: "flex-end", gap: 6, paddingRight: 9,
           }}
         >
@@ -1333,7 +1344,7 @@ export default function AppHeader({
            rectangle-intersection check (not a 1D gap) for the corrected, mutation-proven version
            of this measurement — its mutation test forces `flexWrap:"nowrap"` at runtime to
            confirm the check WOULD catch a genuine overlap if the wrap fallback above ever broke. */}
-      {toolbarCenter ? (
+      {singleRow ? null : toolbarCenter ? (
         // On narrow, scroll sideways (nowrap) instead of wrapping to a 2nd line — the owner's
         // explicit ask. Above the breakpoint the original wrap layout is untouched.
         // NEW-1 (B1218496) — `minHeight` raised 26 → 30. The icon-button cluster (toolbarContent)
