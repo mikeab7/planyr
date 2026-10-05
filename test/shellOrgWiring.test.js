@@ -34,3 +34,23 @@ describe("Shell.jsx — org-capable modules come from route.js, never a re-imple
     expect(body).not.toMatch(/org:\s*false/);
   });
 });
+
+// NEW-2 (company workspace card) — the switcher's company entry keeps the tab you are on, and the Site
+// tab at company scope is the all-sites map. On main goOrg was `navigate({ module: "notes", … })` from
+// every tab, so the first assertion below is RED there.
+describe("Shell.jsx — company scope keeps the current tab (NEW-2)", () => {
+  it("goOrg resolves its target through orgScopeTarget(active), never a hardcoded Notes", () => {
+    expect(SRC).toMatch(/import\s*\{[^}]*orgScopeTarget[^}]*\}\s*from\s*["']\.\/route\.js["']/);
+    expect(SRC).toMatch(/const goOrg = \(\) => navigate\(orgScopeTarget\(active\)\)/);
+    expect(SRC).not.toMatch(/const goOrg = \(\) => navigate\(\{ module: "notes"/);
+  });
+  it("mounts OrgSitesView (not the Site Planner) at #/org/site, and holds an already-open planner inactive", () => {
+    expect(SRC).toMatch(/const orgSite = !!org && active === "site-planner"/);
+    expect(SRC).toMatch(/\{orgSite && \(/);
+    expect(SRC).toMatch(/<OrgSitesView/);
+    expect(SRC).toMatch(/const isActive = w\.id === active && !\(orgSite && w\.id === "site-planner"\)/);
+  });
+  it("mirrors the profile's organization into the one name store", () => {
+    expect(SRC).toMatch(/setOrgName\(profileApi\.org\)/);
+  });
+});

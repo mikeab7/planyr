@@ -360,3 +360,62 @@ describe("PDF-PARITY generalizes to a free-aspect frame (confirmatory: sheetFitS
     }
   });
 });
+
+// ── NEW-1 (B2118784) — the on-map BUILDINGS legend: two aligned columns, no dash ──
+import { furnitureLayout, buildSheetFurnitureSvg } from "../src/workspaces/site-planner/lib/sheetFurnitureLayout.js";
+
+describe("B2118784 — BUILDINGS legend layout", () => {
+  const frame = { x: 0, y: 0, w: 1000, h: 700, ftPerUnit: 1, fmtFeet: (n) => String(Math.round(n)) };
+  const mk = (n) => Array.from({ length: n }, (_, i) => ({ name: `Building ${i + 1}`, sf: 370000 + i * 12345 }));
+  const legend = (n) => {
+    const rows = mk(n);
+    const total = rows.reduce((a, r) => a + r.sf, 0);
+    return furnitureLayout({ ...frame, buildingRows: rows, buildingTotal: total, fmtSf: (v) => Math.round(v).toLocaleString() }).buildings;
+  };
+  const texts = (markup) => [...markup.matchAll(/<text ([^>]*)>([^<]*)<\/text>/g)].map((m) => ({
+    x: Number((m[1].match(/ x="([\d.-]+)"/) || [])[1]), y: Number((m[1].match(/ y="([\d.-]+)"/) || [])[1]),
+    anchor: (m[1].match(/text-anchor="(\w+)"/) || [])[1], bold: /font-weight="700"/.test(m[1]), text: m[2],
+  }));
+
+  it("contains no em dash, en dash or separator hyphen", () => {
+    const { markup } = legend(3);
+    expect(markup).not.toMatch(/[—–]/);
+    expect(texts(markup).some((t) => /\s-\s/.test(t.text))).toBe(false);
+  });
+  it("header carries BUILDINGS (left) and SF (right); no row text contains SF", () => {
+    const t = texts(legend(3).markup);
+    expect(t.find((x) => x.text === "BUILDINGS").anchor).toBeUndefined();
+    expect(t.find((x) => x.text === "SF").anchor).toBe("end");
+    expect(t.filter((x) => x.text !== "SF" && x.text !== "BUILDINGS").some((x) => /SF/.test(x.text))).toBe(false);
+  });
+  it("every number is right-aligned at one shared x, shared with the SF header", () => {
+    const t = texts(legend(4).markup);
+    const edge = t.find((x) => x.text === "SF").x;
+    const nums = t.filter((x) => /^[\d,]+$/.test(x.text));
+    expect(nums).toHaveLength(5); // 4 rows + total
+    for (const n of nums) { expect(n.anchor).toBe("end"); expect(n.x).toBe(edge); expect(n.bold).toBe(true); }
+  });
+  it("Total is bold with a rule above it; ordinary names are regular weight", () => {
+    const L = legend(3);
+    const t = texts(L.markup);
+    const total = t.find((x) => x.text === "Total");
+    expect(total.bold).toBe(true);
+    expect(t.find((x) => x.text === "Building 1").bold).toBe(false);
+    const ruleY = Number(L.markup.match(/<line [^>]*y1="([\d.-]+)"/)[1]);
+    expect(ruleY).toBeLessThan(total.y);
+    expect(ruleY).toBeGreaterThan(Math.max(...t.filter((x) => /^Building/.test(x.text)).map((x) => x.y)));
+  });
+  it("no buildings draws no legend", () => {
+    expect(furnitureLayout({ ...frame, buildingRows: [] }).buildings).toBeUndefined();
+    expect(buildSheetFurnitureSvg({ ...frame, buildingRows: [] })).not.toContain("BUILDINGS");
+  });
+  it("one building and six+ buildings both fit inside the frame", () => {
+    for (const n of [1, 6, 9]) {
+      const b = legend(n);
+      expect(b.tx).toBeGreaterThanOrEqual(frame.x);
+      expect(b.ty).toBeGreaterThanOrEqual(frame.y);
+      expect(b.tx + b.plateW).toBeLessThanOrEqual(frame.x + frame.w);
+      expect(b.ty + b.plateH).toBeLessThanOrEqual(frame.y + frame.h);
+    }
+  });
+});

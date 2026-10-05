@@ -22,7 +22,7 @@ import { RADIUS } from "../shared/ui/radius.js";
 import { MenuTrigger } from "../shared/ui/controls.jsx";
 import { supabase, supabaseConfigured } from "../workspaces/site-planner/lib/supabase.js";
 import { signOut } from "../workspaces/site-planner/lib/auth.js";
-import { checkIsAdmin } from "../workspaces/admin/lib/adminAccess.js";
+import { useIsAdmin } from "../workspaces/admin/lib/useIsAdmin.js";
 import AnchoredMenu from "../shared/ui/AnchoredMenu.jsx";
 
 // Chrome tokens (theme-aware — the account surface themes WITH the app, B318/B341).
@@ -94,21 +94,15 @@ export default function AccountControl({ user, authKnown = true, profileApi, onO
   const acctAnchor = useRef(null);
   const who = profileApi?.displayName;
 
-  // NEW-1 (B711904 follow-up) — reuses the EXISTING admin gate (checkIsAdmin / is_admin()),
-  // never a second access mechanism. Fails closed and starts false, so there is nothing to
-  // flash: the Admin row below only ever APPEARS once a confirmed `true` comes back, it is
-  // never rendered greyed/disabled/pending. This is a CONVENIENCE link, not a security
-  // boundary — the route and every RPC behind it stay server-gated (admin_users keeps its
-  // zero-policy RLS; is_admin() is the only door), so a non-admin who types #/admin still
-  // gets the ordinary app exactly as before this link existed.
-  const [isAdmin, setIsAdmin] = useState(false);
-  const userId = user?.id || null;
-  useEffect(() => {
-    let live = true;
-    if (!userId) { setIsAdmin(false); return; }
-    checkIsAdmin(supabase).then((ok) => { if (live) setIsAdmin(ok); });
-    return () => { live = false; };
-  }, [userId]);
+  // NEW-1/NEW-2 (B711904 follow-up) — the admin answer comes from the ONE shared store
+  // (admin/lib/adminStatus.js via useIsAdmin): fetched once per signed-in user, keyed by user id so an
+  // account switch / sign-out can never leave the previous account's answer behind, and an ERRORED
+  // call is retried each time this menu opens (below). Starts false, fails closed, so nothing flashes:
+  // the Admin row only ever APPEARS once a confirmed `true` comes back, never greyed/pending. This is a
+  // CONVENIENCE link, not a security boundary — the route and every RPC behind it stay server-gated
+  // (admin_users keeps its zero-policy RLS; is_admin() is the only door).
+  const { isAdmin, recheck: recheckAdmin } = useIsAdmin(user);
+  useEffect(() => { if (acctOpen) recheckAdmin(); }, [acctOpen, recheckAdmin]);
 
   // Close the dropdown on ANY workspace navigation. Every module switch — a tab click, a
   // programmatic navigate, AND browser Back/Forward — goes through window.location.hash and

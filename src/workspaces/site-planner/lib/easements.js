@@ -155,6 +155,16 @@ export function encumbranceStyle(e) {
   return { fill, stroke, fillOpacity, hatch, hasOverride };
 }
 
+/* NEW-1 (metes-and-bounds call labels) — THE one answer to "does this tract draw its
+ * per-course bearing/distance labels on the map?". OFF unless the shape explicitly says
+ * `showCalls: true`, so a missing field (every plan saved before this) reads as hidden with no
+ * migration. The canvas and the PDF/PNG export read the SAME markup node (exportSheet clones the
+ * live <svg>), so this is the only gate — never add a second one at a render site. The calls
+ * themselves stay on `m.calls` and in the Properties course list. */
+export function deedCallsShown(m) {
+  return !!(m && m.showCalls === true);
+}
+
 export function encumbrancePatternId(e) {
   return encumbranceStyle(e).hasOverride ? `pat-encumber-el-${e.id}` : "pat-encumber";
 }

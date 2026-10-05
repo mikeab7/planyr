@@ -40,18 +40,17 @@ describe("AccountControl — admin row is absent before anything resolves", () =
 describe("AccountControl — admin row source shape", () => {
   const src = readFileSync(new URL("../src/app/AccountControl.jsx", import.meta.url), "utf8");
 
-  it("reuses the EXISTING admin gate — never a second access mechanism", () => {
-    expect(src).toMatch(/import \{ checkIsAdmin \} from "\.\.\/workspaces\/admin\/lib\/adminAccess\.js";/);
-    expect(src).toMatch(/checkIsAdmin\(supabase\)/);
-    // No direct RPC call and no second checker invented in this file.
+  it("reads the ONE shared admin store via useIsAdmin — never a second access mechanism", () => {
+    expect(src).toMatch(/import \{ useIsAdmin \} from "\.\.\/workspaces\/admin\/lib\/useIsAdmin\.js";/);
+    expect(src).toMatch(/useIsAdmin\(user\)/);
     expect(src).not.toMatch(/\.rpc\(\s*["']is_admin["']/);
   });
 
-  it("starts closed (false) and only flips on a resolved answer — never renders pending/greyed", () => {
-    expect(src).toMatch(/const \[isAdmin, setIsAdmin\] = useState\(false\);/);
-    expect(src).toMatch(/if \(!userId\) \{ setIsAdmin\(false\); return; \}/);
-    expect(src).toMatch(/checkIsAdmin\(supabase\)\.then\(\(ok\) => \{ if \(live\) setIsAdmin\(ok\); \}\);/);
-    // The row is gated on the plain boolean and nothing else — no `? ... : <grey row>` branch.
+  it("retries an errored check each time the menu opens", () => {
+    expect(src).toMatch(/if \(acctOpen\) recheckAdmin\(\);/);
+  });
+
+  it("the row is gated on the plain boolean and nothing else — never a pending/greyed branch", () => {
     expect(src).toMatch(/\{isAdmin && \(/);
   });
 

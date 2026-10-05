@@ -42,7 +42,7 @@ export const leafKey = (key) => String(key).replace(/^.*\./, "");
 
 /** Keys that are an OWNER / BILLING address by name. Excluded at every rung of the ladder. */
 export const MAILING_KEY_RE =
-  /(mail|owner_?addr|own_?addr|care_?of|^c_?o$|^c_?o_|billing|bill_?to|remit|correspond|agent_?addr|tax_?addr|^m_(addr|street|city|zip|state))/i;
+  /(mail|owner_?ad(dr)?|own_?addr|full_?owner_?a|care_?of|^c_?o$|^c_?o_|billing|bill_?to|remit|correspond|agent_?addr|tax_?addr|^m_(addr|street|city|zip|state))/i;
 
 /* NEW-1 (Louisiana parishes) — keys that CONTAIN the word "address" but hold something that is not
  * one, measured on real Regrid-schema parish layers: Cameron's `ADDRESS_SO` reads the literal
@@ -67,7 +67,7 @@ export const SITUS_LADDER = [
   /situs/i,
   // 2 — the land's own address under another name. `prop_?street(?!_)` matches CCAD's Prop_Street
   //     (the situs street NAME) but not its Prop_Street_Number/Dir/Suffix sub-columns.
-  /(site_?addr|prop(erty)?_?addr|prop_?street(?!_)|phys(ical)?_?addr|loc(ation)?_?addr|street_?addr|^location$|^phys(ical)?_?a$|^par(cel)?_?addr(es{1,2})?$)/i,
+  /(site_?addr|prop(erty)?_?addr|prop_?street(?!_)|phys(ical)?_?addr|loc(ation)?_?addr|street_?addr|^location$|^phys(ical)?_?a$|^phys(ical)?_?ad$|^par(cel)?_?addr(es{1,2})?$)/i,
   // 3 — the generic catch-all, LAST. Plenty of CADs do name their situs column plainly
   //     ("ADDRESS", "FULL_ADDR"), so dropping this rung would regress them; it is simply no longer
   //     allowed to outrank rungs 1–2, and never sees a mailing key or a numbered line.
@@ -121,7 +121,7 @@ export function situsKey(attrs, { skip = null } = {}) {
     // NEW-2 — within rung 0 only, a key that ALSO names itself a composed "addr" field is tried
     // before any of the rung's decomposed sub-fields, so SITUS_ADDR beats SITUS_NUM regardless of
     // which one the service happened to list first. Every other rung is a single pass, unchanged.
-    const passes = rung === 0 ? [true, false] : [null];
+    const passes = rung === 0 ? ["bare", true, false] : [null];
     for (const wantComposed of passes) {
       for (const key of keys) {
         if (skip && skip.has(key)) continue;
@@ -129,6 +129,10 @@ export function situsKey(attrs, { skip = null } = {}) {
         if (isMailingKey(lk, rung)) continue;
         if (NON_SITUS_KEY_RE.test(lk)) continue;
         if (!re.test(lk)) continue;
+        // NEW-1 (Louisiana) — a column that is literally `SITUS` is the whole line, and wins over its own
+        // `SITUS_CITY` / `SITUS_ZIP` siblings whatever order the service lists them (St. Landry's schema).
+        if (wantComposed === "bare" && !/^situs$/i.test(lk)) continue;
+        if (wantComposed !== "bare" && rung === 0 && /^situs$/i.test(lk)) continue; // already tried above
         if (wantComposed === true && !COMPOSED_ADDR_RE.test(lk)) continue;
         if (wantComposed === false && COMPOSED_ADDR_RE.test(lk)) continue; // already tried above
         const v = attrs[key];
@@ -252,7 +256,7 @@ export function siteNameFromParcel(attrs, { addr = null, searched = null, acct =
  * the UN-numbered column, then the lowest-numbered one — the same discipline as `situsKey`. */
 export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?nme\d*|name|owner\d)$/i;
 /** Fallback owner spellings — consulted only when nothing in OWNER_KEY_RE resolves. */
-export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_)$/i;
+export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_|ais_?name)$/i;
 
 /** The trailing sequence number on an owner column (OWNERNME2 → 2), or 0 when it has none. */
 const ownerSeq = (key) => { const m = /(\d+)$/.exec(key); return m ? Number(m[1]) : 0; };
