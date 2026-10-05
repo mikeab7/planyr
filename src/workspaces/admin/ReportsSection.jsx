@@ -43,6 +43,7 @@ export default function ReportsSection() {
 
   return (
     <section
+      data-testid="admin-section-reports"
       style={{
         background: "var(--surface-raised)", border: "1px solid var(--border-default)",
         borderRadius: RADIUS.lg, padding: 18, display: "flex", flexDirection: "column", gap: 8,

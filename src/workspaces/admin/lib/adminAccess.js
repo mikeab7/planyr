@@ -16,17 +16,24 @@
  */
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 
-export async function checkIsAdmin(client) {
-  if (!client) return false;
+/* Three-way answer: "admin" | "not-admin" | "error". An error is NOT a "no" — callers that cache
+ * (adminStatus.js) must retry an error and may remember a "not-admin". Still fails closed: only a
+ * literal `true` from the RPC is "admin". */
+export async function checkAdminStatus(client) {
+  if (!client) return "not-admin";
   try {
     const { data, error } = await client.rpc("is_admin");
     if (error) {
       reportClientEvent("admin-check-error", error.message || "is_admin rpc error");
-      return false;
+      return "error";
     }
-    return data === true;
+    return data === true ? "admin" : "not-admin";
   } catch (err) {
     reportClientEvent("admin-check-error", (err && err.message) || "is_admin threw");
-    return false;
+    return "error";
   }
+}
+
+export async function checkIsAdmin(client) {
+  return (await checkAdminStatus(client)) === "admin";
 }

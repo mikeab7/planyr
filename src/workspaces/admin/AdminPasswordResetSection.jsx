@@ -61,6 +61,7 @@ export default function AdminPasswordResetSection() {
 
   return (
     <section
+      data-testid="admin-section-password-reset"
       style={{
         background: "var(--surface-raised)", border: "1px solid var(--border-default)",
         borderRadius: RADIUS.lg, padding: 18, display: "flex", flexDirection: "column", gap: 8,
