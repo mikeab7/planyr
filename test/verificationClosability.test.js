@@ -14,10 +14,13 @@
  * The sweep is proven on the real sentence rather than on a synthetic one — a guard nobody has seen
  * fire is a guard that rots green.
  */
+import { readText } from "../scripts/lib/ledger.mjs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 
-const VERIFICATION = readFileSync(new URL("../VERIFICATION.md", import.meta.url), "utf8");
+const VERIFICATION = readText(resolve(fileURLToPath(new URL("..", import.meta.url))), "VERIFICATION.md");
 
 /* Phrasings that hand a check's closure to the owner's memory. Deliberately narrow: this is about
  * "we cannot know what he meant", never about the ordinary "he should look at it on his machine",
@@ -81,7 +84,7 @@ describe("VERIFICATION.md — every live check is closeable by someone other tha
   it("the two items this rule was written alongside state a named expected result per step", () => {
     for (const id of ["V302432", "V302433"]) {
       // V302432 passed live 2026-10-05 and moved to the archive — its text (the per-step "Expected:") is what this pins.
-      const arch = readFileSync(new URL("../docs/archive/VERIFICATION-DONE.md", import.meta.url), "utf8");
+      const arch = readText(resolve(fileURLToPath(new URL("..", import.meta.url))), "docs/archive/VERIFICATION-DONE.md");
       const am = arch.split(/^(?=### V\d+)/m).find((x) => x.startsWith(`### ${id} `));
       const b = blocks.find((x) => x.id === id) || (am ? { id, text: am } : null);
       expect(b, `${id} should exist (active or archived)`).toBeTruthy();

@@ -90,6 +90,7 @@ export function isUnsupportedExpression(value) {
  * no source file, and they are the entire cost this fast path exists to avoid paying twice.
  */
 export const DOCS_ONLY_GATE_NAMES = [
+  "Ledger layout guard (one file per entry — NEW-1)",
   "Generated-index touch guard (branches must never touch MAP.md / BACKLOG_OPEN.md / docs/UI-INVENTORY.md — NEW-1)",
   "Required-check contract guard (a required check must always be able to report — NEW-2)",
   "BACKLOG.md tag-legend guard (every #tag must be in the legend — B638; narrowed by NEW-1)",

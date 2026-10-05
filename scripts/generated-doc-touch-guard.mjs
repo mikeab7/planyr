@@ -56,6 +56,14 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..");
 
 export const GENERATED_DOCS = ["MAP.md", "BACKLOG_OPEN.md", "docs/UI-INVENTORY.md"];
+/* NEW-1 (ledger, 2026-10-05): these four are the OLD hand-edited ledger files. Once `ledger/` is on
+ * origin/main the two live ones are GENERATED VIEWS and the two archives no longer exist, so editing
+ * (or re-creating) any of them is the old way of filing an entry — it conflicts with every other PR
+ * that does, and GitHub's server-side merge ignores `merge=union`. File entries under ledger/ instead
+ * (CLAUDE.md "LEDGER"; `node scripts/ledger.mjs --help`). Only enforced while the ledger is in force,
+ * so the PR that introduces the ledger is not blocked by its own rule. */
+export const RETIRED_LEDGER_FILES = ["BACKLOG.md", "VERIFICATION.md", "docs/archive/BACKLOG-DONE.md", "docs/archive/VERIFICATION-DONE.md"];
+const REFRESHABLE_BY_REGEN = (f) => GENERATED_DOCS.includes(f) || RETIRED_LEDGER_FILES.slice(0, 2).includes(f);
 export const REGEN_BRANCH_PREFIX = "chore/regen-derived-docs";
 const MAIN_BRANCH_NAMES = new Set(["main", "refs/heads/main"]);
 
@@ -69,14 +77,15 @@ export function isRegenBranch(name) {
  * `selfBranchNames`); `changedFiles` — the full set of repo-relative paths this branch's diff
  * touches, relative to its merge base with main.
  */
-export function verdict({ branchNames = [], changedFiles = [] }) {
+export function verdict({ branchNames = [], changedFiles = [], ledgerInForce = false }) {
   if (branchNames.some((n) => MAIN_BRANCH_NAMES.has(n))) {
     return { ok: true, reason: "push to main — the intended lifecycle point for these files to change." };
   }
-  const touched = changedFiles.filter((f) => GENERATED_DOCS.includes(f));
+  const guarded = (f) => GENERATED_DOCS.includes(f) || (ledgerInForce && RETIRED_LEDGER_FILES.includes(f));
+  const touched = changedFiles.filter(guarded);
   if (!touched.length) return { ok: true, touched: [] };
 
-  const onlyGenerated = changedFiles.every((f) => GENERATED_DOCS.includes(f));
+  const onlyGenerated = changedFiles.every(REFRESHABLE_BY_REGEN);
   if (branchNames.some(isRegenBranch) && onlyGenerated) {
     return { ok: true, touched, reason: `exempt: ${REGEN_BRANCH_PREFIX}* branch, diff touches only generated docs` };
   }
@@ -93,7 +102,8 @@ export function runGate(repo = REPO) {
   if (!diff.ok) return { unverifiable: true, reason: `could not diff against origin/main — ${diff.reason}` };
   const changedFiles = diff.out.split("\n").map((l) => l.trim()).filter(Boolean);
 
-  const v = verdict({ branchNames, changedFiles });
+  const ledgerInForce = tryGit(repo, "git cat-file -e origin/main:ledger/backlog/_frame.md").ok;
+  const v = verdict({ branchNames, changedFiles, ledgerInForce });
   return { ...v, branch: branchNames[0] || "(detached)" };
 }
 
@@ -119,7 +129,7 @@ function main(argv) {
       process.stdout.write(
         res.touched?.length
           ? `✅ Generated-index touch guard: ${res.branch} touches ${res.touched.join(", ")} — exempt (${res.reason}).\n`
-          : `✅ Generated-index touch guard: ${res.branch} does not touch ${GENERATED_DOCS.join(", ")}.\n`,
+          : `✅ Generated-index touch guard: ${res.branch} does not touch ${GENERATED_DOCS.join(", ")} (nor, once ledger/ is in force, the old ledger files).\n`,
       );
     }
     return 0;
@@ -133,6 +143,9 @@ function main(argv) {
         `   scripts/build-backlog-index.mjs, ui-audit/ui-inventory.mjs), so any two PRs open at once\n` +
         `   that both touch one conflict on it by construction — and GitHub can't even compute a\n` +
         `   test-merge for a conflicted PR, so the required "build" check never runs at all.\n\n` +
+        `   (BACKLOG.md / VERIFICATION.md / docs/archive/*-DONE.md: the ledger is now ONE FILE PER ENTRY under\n` +
+        `   ledger/ — file, edit and move entries there; \`node scripts/ledger.mjs --help\`. A branch that\n` +
+        `   edited the old files: \`node scripts/ledger.mjs import-legacy <base> <tip>\`.)\n\n` +
         `   → Revert your changes to these files (\`git checkout origin/main -- <file>\`). They are\n` +
         `     refreshed automatically by .github/workflows/regen-derived-docs.yml after your PR merges —\n` +
         `     you never need to touch them yourself.\n\n`,
