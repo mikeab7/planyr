@@ -172,9 +172,10 @@ describe("runSiteAnalysis — FL/GA pipelines route to EIA and are never clear",
       for (const k of EIA_PIPELINE_KEYS) expect(calls.some((u) => u.startsWith(GIS_SOURCES[k].serviceUrl)), k).toBe(true);
     });
 
-    it(`${name}: the Texas-only wells source is 'not available', never "No mapped oil & gas wells"`, async () => {
+    it(`${name}: the Texas-only wells source is 'not available' (or, in Georgia, not rendered at all — B2095744), never "No mapped oil & gas wells"`, async () => {
       const { opts } = harness();
       const w = oilgas(await runSiteAnalysis(rings, opts));
+      if (name === "Georgia") { expect(w).toBeUndefined(); return; } // owner 2026-10-05: oil & gas wells dropped for Georgia
       expect(w.status).toBe("unconfirmed");
       expect(w.summary).toMatch(new RegExp(`Not screened in ${name}`));
       expect(w.summary).not.toMatch(/No mapped oil/);
@@ -185,7 +186,9 @@ describe("runSiteAnalysis — FL/GA pipelines route to EIA and are never clear",
       const r = await runSiteAnalysis(rings, opts);
       for (const s of ANALYSIS_SOURCES) {
         if (s.extraFor || !statesFor(GIS_SOURCES[s.id])) continue; // national rows may legitimately be absent; `extraFor` cards (Georgia's own sources) are not Texas-only standing checks
-        expect(r.findings.find((f) => f.id === s.id).status, s.id).not.toBe("absent");
+        const f = r.findings.find((x) => x.id === s.id);
+        if (!f) continue; // B2095744 — a Texas-institution card is HIDDEN off-Texas (the registry's out-of-state policy), which is the strongest "never green"
+        expect(f.status, s.id).not.toBe("absent");
       }
     });
   }

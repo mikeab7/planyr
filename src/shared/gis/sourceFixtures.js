@@ -219,6 +219,13 @@ export const SOURCE_FIXTURES = {
     { label: "Columbus area HSI site", point: [-84.93, 32.4628], expectMinCount: 1 }, // live: 1
   ],
   },
+  ustGa: {
+  fixtures: [
+    { label: "Adairsville (Bartow Co.)", bbox: [-84.95, 34.3, -84.85, 34.4], expectMinCount: 1 }, // live 2026-10-05: 14
+    { label: "Atlanta (Fulton Co.)", bbox: [-84.45, 33.7, -84.35, 33.8], expectMinCount: 1 }, // live: 150
+    { label: "Savannah (Chatham Co.)", bbox: [-81.15, 32.0, -81.05, 32.1], expectMinCount: 1 }, // live: 55
+  ],
+  },
   troutGa: {
   fixtures: [
     { label: "Chattahoochee headwaters (White Co.)", point: [-83.8921, 34.6906], expectMinCount: 1 }, // live: 4
@@ -653,6 +660,25 @@ export const SOURCE_FIXTURES = {
     { label: "Grand Junction (Mesa)", point: [-108.5506, 39.0639], expectMinCount: 1 }, // B209505 · live 2026-08-06: 2
   ],
   },
+  /* B2081249 — national rows, so spread over three well-separated metros (Atlanta/Gwinnett — the owner's own probe box —
+   * Phoenix, Seattle). Live 2026-10-05, NN=1 filter applied for the National Network row: Gwinnett 16, Phoenix 30,
+   * Seattle 41; HPMS: 27 / 117 / 229. Texas (Katy) 22 / 12 as a control that the national rows still answer there. */
+  ntaNationalNetwork: {
+  fixtures: [
+    { label: "Gwinnett Co. GA (I-85 / SR-316)", bbox: [-84.05, 33.9, -83.95, 34.0], expectMinCount: 1 }, // live: 16 with NN=1
+    { label: "Phoenix, AZ", bbox: [-112.1, 33.4, -112.0, 33.5], expectMinCount: 1 }, // live: 30
+    { label: "Seattle, WA", bbox: [-122.35, 47.55, -122.25, 47.65], expectMinCount: 1 }, // live: 41
+    { label: "Katy, TX (control)", bbox: [-95.9, 29.7, -95.8, 29.8], expectMinCount: 1 }, // live: 22
+  ],
+  },
+  hpmsAadt: {
+  fixtures: [
+    { label: "Gwinnett Co. GA (the owner's probe box)", bbox: [-84.05, 33.9, -83.95, 34.0], expectMinCount: 1 }, // live: 27, sample AADT 31300
+    { label: "Phoenix, AZ", bbox: [-112.1, 33.4, -112.0, 33.5], expectMinCount: 1 }, // live: 117
+    { label: "Seattle, WA", bbox: [-122.35, 47.55, -122.25, 47.65], expectMinCount: 1 }, // live: 229
+    { label: "Katy, TX (control)", bbox: [-95.9, 29.7, -95.8, 29.8], expectMinCount: 1 }, // live: 12
+  ],
+  },
   aadtCo: {
   fixtures: [
     { label: "Denver AADT stations", point: [-104.9903, 39.7392], expectMinCount: 1 },
@@ -1027,6 +1053,12 @@ export const SOURCE_DOCS = {
     "quantity, Class and listing date per site. EPD publishes each site's own lat/long, so these are points, not a " +
     "geocode. A Phase I ESA PRE-SCREEN: a site on the list is a flag to pull the file, never a verdict on a neighbour.",
   },
+  ustGa: {
+  notes:
+    "Georgia EPD's REGISTER of underground storage tank facilities (name, address, facility type, status). It is not a " +
+    "release list: leak, corrective-action and closure status are not in the layer (edited 2022-10-17), so a facility on it " +
+    "is a flag to pull EPD's UST Management Program file, never a finding of contamination.",
+  },
   troutGa: {
   notes:
     "Georgia DNR trout streams (layer 1 `Trout_Stream`). The designated-trout-water lines the 50-ft buffer keys off; " +
@@ -1097,6 +1129,17 @@ export const SOURCE_DOCS = {
     "CDOT on-system state highway routes. A hit means CDOT is the access-permitting authority; " +
     "NO hit means the frontage is a city or county road, NOT that there is no road. Never read " +
     "an empty answer as 'unmaintained'.",
+  },
+  ntaNationalNetwork: {
+  notes:
+    "FHWA's STAA National Network from the USDOT BTS National Transportation Atlas: the routes a 53-ft trailer may use. " +
+    "The layer also holds NN = 0 segments (listed, but not on the network), so every read filters NN = 1. Data year " +
+    "2018 (layer edited 2023-04-03). A federal reference, not a state permit status. AADT_COM / AADT_SINGL are truck counts.",
+  },
+  hpmsAadt: {
+  notes:
+    "FHWA HPMS 2022 traffic (AADT) and functional class on the National Highway System only (the service is a view " +
+    "with NHS > 0). A road off the NHS has no line — a coverage gap, not low traffic. Some NHS segments carry no AADT.",
   },
   aadtCo: {
   notes:
