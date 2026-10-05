@@ -171,6 +171,13 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1525216 — B2106752: Hybrid map has no yellow/cream road `Blocker: live-GIS`
+
+Unit-proven (`test/vectorBasemap.test.js` "no tinted roads"); the vector tiles come from an external host the sandbox cannot reach, so the picture itself is checked live.
+**Steps** (planyr.io `#/food`, Hybrid on, Houston at metro zoom; read the served chunk hash in the SAME observation and match it to the merge commit):
+1. Look at I-45 North Freeway, Gulf Freeway, South Loop West and Southwest Fwy plus interchanges. **Expect:** white like every other road, no cream/yellow band; freeways still visibly the widest.
+2. Zoom in to ramps. **Expect:** ramps white, dark hairline casing, no yellow.
+3. Zoom to where road names show. **Expect:** names white with dark halo, none yellow.
 ### V1519600 — B626576 (×2) / B2097264 / B2097265: Food on his iPhone — half-step rating slider, one set of actions on an open form, sheet drags `Blocker: real-data`
 
 Sandbox-proven (WebKit taps + Chromium CDP touch on the iPhone 15 / SE descriptors, iOS keyboard MODEL, mocked Supabase): `ui-audit/verify-food-rating-and-sheet.mjs` 159/159 on the fix (115 rows, 50 red, on main) · keyboard picture harness verify-food-ios-screens 538/538 on both main and the fix · `test/foodRatingSlider.test.js` · `test/foodBottomSheetGesture.test.js`. Not reachable there: a real finger on real Safari, the real keyboard, his real saved ratings. Read `/version.json` and match it to the merge commit in the same observation.

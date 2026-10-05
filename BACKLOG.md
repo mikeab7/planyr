@@ -5374,6 +5374,12 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
+### B2106752 — Hybrid map: freeways and highways are yellow `[shared basemap / Food]` (bug) #ui #food
+
+`[x]` **Fixed:** `vectorStyle.js` freeway tier was `#fff3c4` (cream), every other tier `#ffffff`; now white — freeways still outrank streets by width and opacity, never hue. Casing (dark neutral), ramp/link classes (same `motorway`/`trunk` tier) and road-name labels (white, dark halo) audited: no yellow survives. Header comment updated. Guard: `test/vectorBasemap.test.js` "no tinted roads" asserts every line/text/halo colour in the style is neutral.
+- **Stopping rule:** closes on a dated pass of V1525216.
+- Verify: live (hybrid render at Houston zoom) — **V1525216**.
+
 ### B2097264 — Food: "Save and add another" stacked over "Log a visit", and "Log a visit" came and went with the sheet height `[Food]` (bug) #food #ui #mobile #testing  *(Owner block 2026-10-05 NEW-2, iPhone. Deduped: B2046224 ×3 hid "Log a visit" only WHILE A FIELD HAD FOCUS; nothing covered a form that is open with the keyboard down.)*
 
 `[x]` **Reproduced on main (ui-audit/verify-food-rating-and-sheet.mjs section 2, WebKit iPhone 15 + SE, peek/half/full):** with the dish form open the sticky "Log a visit" bar was on screen at all 3 heights (and under the edit-visit form too). The same pictures showed the dish form's own Save bar was NOT pinned at the bottom at peek/half — it scrolled away with the form, because the dish list box was `overflow:hidden`, which made it the scroll container the sticky bar stuck to (so "Log a visit" was the only bar left in view, covering Save).
