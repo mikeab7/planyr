@@ -26,7 +26,7 @@ describe("B1807200 amendment — header row clearance", () => {
   });
 
   it("Row 1's row div uses HEADER_ROW_H, not a hardcoded 30", () => {
-    const idx = SRC.indexOf('ref={rowRef} className={narrow ? "no-hscrollbar" : undefined} style={{ height:');
+    const idx = SRC.indexOf('ref={rowRef} data-header-row="1" className={narrow ? "no-hscrollbar" : undefined} style={{ height:');
     expect(idx).toBeGreaterThan(-1);
     const line = SRC.slice(idx, SRC.indexOf("\n", idx));
     expect(line).toMatch(/height:\s*HEADER_ROW_H/);

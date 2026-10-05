@@ -53,13 +53,15 @@
  * a short notice instead.
  */
 import { fullscreenApiAvailable, useFullscreenAvailable } from "./fullscreenSupport.js";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { RADIUS } from "./radius.js";
 import { Tab, IconButton } from "./controls.jsx";
 import ProjectBreadcrumb from "./ProjectBreadcrumb.jsx";
 import { logoDashboardAction } from "./dashboardNav.js";
 import CloudSyncBadge from "./CloudSyncBadge.jsx";
 import AnchoredMenu from "./AnchoredMenu.jsx";
+import PriorityToolbar, { ToolbarBudgetContext } from "./PriorityToolbar.jsx";
+import { MORE_WIDTH } from "./toolbarPlan.js";
 import { createMultiTabPresence } from "../presence/multiTab.js";
 import BrandMark from "../brand/BrandMark.jsx";
 import { prefetchModule } from "../../app/modulePrefetch.js";
@@ -391,7 +393,7 @@ function edgeFadeMask({ left, right }) {
 // `Tab` primitive (controls.jsx); this component keeps only the business logic a shared
 // primitive shouldn't own (hover-to-prefetch, aria-current, the icon). Byte-for-byte identical
 // render: `Tab`'s own geometry is a direct transcription of what this function used to inline.
-function ModuleTab({ m, isActive, onClick }) {
+function ModuleTab({ m, isActive, onClick, iconOnly = false }) {
   const [hover, setHover] = useState(false);
   const fill = ACCENT_FILL[m.id] || "var(--accent)";
   const textCol = ACCENT_TEXT[m.id] || "var(--accent)";
@@ -404,6 +406,9 @@ function ModuleTab({ m, isActive, onClick }) {
       idleColor={TAB_IDLE}
       onClick={onClick}
       data-testid={`module-tab-${m.id}`}
+      // NEW-2 (2026-10-05) — icon-only is the first step a crowded tab strip takes (PriorityToolbar):
+      // the name survives as the tooltip and the accessible name, so nothing is lost but the text.
+      {...(iconOnly ? { title: m.label, "aria-label": m.label } : null)}
       // Hover = nav intent: warm the target workspace's chunk (and Schedule's
       // iframe doc) so the click loads from cache. Idempotent + best-effort. (B223)
       // Since NEW-9 removed the boot-time idle warm, these gestures are the ONLY
@@ -425,9 +430,23 @@ function ModuleTab({ m, isActive, onClick }) {
         </svg>
       }
     >
-      {m.label}
+      {iconOnly ? null : m.label}
     </Tab>
   );
+}
+
+/* NEW-2 (2026-10-05) — the module tab strip as a PriorityToolbar: tabs drop to icon-only from the right,
+ * then into a "More" menu, and the ACTIVE tab is never collapsible (you must always see where you are).
+ * Module scope (MODULE-SCOPE-COMPONENTS). Phones never reach this — the `narrow` strip scrolls sideways. */
+function ModuleTabStrip({ modules, activeId, onSwitch, budget }) {
+  const items = modules.map((m, i) => ({
+    id: m.id, label: m.label,
+    priority: m.id === activeId ? 1000 : 100 - i,
+    collapsible: m.id !== activeId,
+    render: ({ iconOnly }) => <ModuleTab m={m} isActive={m.id === activeId} iconOnly={iconOnly} onClick={() => onSwitch && onSwitch(m.id)} />,
+    onSelect: () => onSwitch && onSwitch(m.id),
+  }));
+  return <PriorityToolbar name="module-tabs" items={items} budget={budget} gap={0} align="stretch" moreLabel="More modules" style={{ alignSelf: "stretch", height: "100%" }} />;
 }
 
 // B313 — track whether the same project is open in another same-browser tab (BroadcastChannel),
@@ -820,6 +839,43 @@ export default function AppHeader({
     return () => { ro.disconnect(); mo?.disconnect(); };
   }, [narrow]);
   const row2Centered = !narrow && row2Center.mode === "centered";
+  /* ── NEW-1/NEW-2 (2026-10-05) — ROW 2 NEVER WRAPS: EVERY ZONE IS GIVEN A BUDGET ───────────────────────
+     The owner's Schedule header wrapped its action buttons onto a second line at a laptop window
+     (the row used `flex-wrap: wrap`, so a shortfall pushed the toolbar down). The row is now nowrap, and
+     the room is shared out in a fixed priority: the view switch / centre chip (never shrinks) · the module
+     TABS (collapse to icons, then a More menu, never the active one) · the TOOLBAR (collapses to icons, then
+     its own More menu). `tabs` is what the tab strip may use once the toolbar has been left its floor (a
+     More button, or — for a workspace toolbar not yet on PriorityToolbar — its natural width); `tools` is
+     what the toolbar may use once the tabs have taken their ACTUAL width. One-way: tools depends on tabs'
+     result, tabs never on tools', so the two cannot chase each other. Measured on the row's own box with a
+     ResizeObserver, never window width, so a Split view or a docked panel is handled the same way. */
+  const [rowBudget, setRowBudget] = useState({ tabs: null, tools: null });
+  useLayoutEffect(() => {
+    if (narrow) { setRowBudget((p) => (p.tabs == null && p.tools == null ? p : { tabs: null, tools: null })); return undefined; }
+    const row = row2Ref.current;
+    if (!row) return undefined;
+    const calc = () => {
+      const left = row2LeftZoneRef.current, right = row2RightZoneRef.current, content = row2CenterContentRef.current;
+      const rowW = row.clientWidth;
+      const centerW = content ? Math.ceil(content.getBoundingClientRect().width) + 16 : 0; // + the centre zone's own 8px side padding
+      const kids = right ? [...right.children] : [];
+      const managed = kids.some((k) => k.hasAttribute("data-priority-toolbar")) && kids.every((k) => k.hasAttribute("data-priority-toolbar") || k.getBoundingClientRect().width === 0);
+      const natural = kids.reduce((n, k) => n + k.getBoundingClientRect().width, 0) + Math.max(0, kids.length - 1) * 4;
+      const toolsFloor = !kids.length ? 0 : managed ? MORE_WIDTH + 4 : Math.ceil(natural);
+      const tabsW = left ? Math.ceil(left.getBoundingClientRect().width) : 0;
+      const RIGHT_PAD = 6, LEFT_PAD = 4, SLACK = 2;
+      const tabs = Math.max(0, Math.floor(rowW - LEFT_PAD - centerW - toolsFloor - RIGHT_PAD - SLACK));
+      const tools = Math.max(0, Math.floor(rowW - tabsW - centerW - RIGHT_PAD - SLACK));
+      setRowBudget((p) => (p.tabs === tabs && p.tools === tools ? p : { tabs, tools }));
+    };
+    calc();
+    if (typeof ResizeObserver !== "function") { window.addEventListener("resize", calc); return () => window.removeEventListener("resize", calc); }
+    const ro = new ResizeObserver(calc);
+    ro.observe(row);
+    for (const el of [row2LeftZoneRef.current, row2CenterContentRef.current]) if (el) ro.observe(el);
+    return () => ro.disconnect();
+  }, [narrow, toolbarCenter, showModuleTabs]);
+  const toolbarBudgetCtx = useMemo(() => ({ width: rowBudget.tools, narrow }), [rowBudget.tools, narrow]);
   // NEW-2 (B917073) — one edge-fade reading per scrolling row; see `useScrollEdges` above.
   const row1Edges = useScrollEdges(rowRef, narrow, [leftZoneRef]);
   const row2Edges = useScrollEdges(row2Ref, narrow);
@@ -1045,6 +1101,11 @@ export default function AppHeader({
   const moduleTabButtons = visibleModules.map((m) => (
     <ModuleTab key={m.id} m={m} isActive={m.id === module} onClick={() => onSwitch && onSwitch(m.id)} />
   ));
+  // NEW-2 (2026-10-05) — desktop: the PriorityToolbar strip (icons → More, active tab pinned). Phone: the
+  // original sideways-scrolling buttons, untouched.
+  const tabStrip = narrow
+    ? moduleTabButtons
+    : <ModuleTabStrip modules={visibleModules} activeId={module} onSwitch={onSwitch} budget={rowBudget.tabs ?? Infinity} />;
   // NEW-2 (B1343201) — shared by both Row-2 layout branches below (only one renders at a time).
   const row2Chevrons = (
     <>
@@ -1096,7 +1157,7 @@ export default function AppHeader({
           this is a pure position fix — the row's own content, mask and measurement refs are
           untouched. */}
       <div style={{ position: "relative" }}>
-      <div ref={rowRef} className={narrow ? "no-hscrollbar" : undefined} style={{ height: HEADER_ROW_H, display: "flex", alignItems: "center", position: "relative", ...rowScroll, ...(singleRow ? { paddingLeft: "env(safe-area-inset-left, 0px)", paddingRight: "env(safe-area-inset-right, 0px)" } : null), WebkitMaskImage: row1Mask, maskImage: row1Mask }}>
+      <div ref={rowRef} data-header-row="1" className={narrow ? "no-hscrollbar" : undefined} style={{ height: HEADER_ROW_H, display: "flex", alignItems: "center", position: "relative", ...rowScroll, ...(singleRow ? { paddingLeft: "env(safe-area-inset-left, 0px)", paddingRight: "env(safe-area-inset-right, 0px)" } : null), WebkitMaskImage: row1Mask, maskImage: row1Mask }}>
 
         {/* ⛔ NEW-2 — NAVIGATION WINS. Read this before changing any of the three zone flexes.
             The owner could not open the plan switcher on a laptop: "the unincorporated / city of
@@ -1363,7 +1424,7 @@ export default function AppHeader({
         // non-scrolling `position:relative` wrapper around `row2Ref` so they stop scrolling with
         // the row's own content.
         <div data-header-row2="1" style={{ position: "relative", ...(singleRow ? { display: "none" } : null) }}>
-        <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ minHeight: HEADER_ROW_H, display: "flex", alignItems: "center", position: "relative", flexWrap: narrow ? "nowrap" : "wrap", justifyContent: "flex-end", rowGap: 2, borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
+        <div ref={row2Ref} data-header-row="2" className={narrow ? "no-hscrollbar" : undefined} style={{ minHeight: HEADER_ROW_H, display: "flex", alignItems: "center", position: "relative", flexWrap: "nowrap", justifyContent: "flex-end", minWidth: 0, borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
           {/* Left zone — module tabs. B1012560: content-sized (`"none"` = `0 0 auto`) and
               never shrinks, same as the 2-zone layout's tabs zone below — primary navigation
               is the last thing to lose space. Omitted entirely when showModuleTabs is false
@@ -1371,7 +1432,7 @@ export default function AppHeader({
               with a hidden-tabs caller. */}
           {showModuleTabs && (
             <div ref={row2LeftZoneRef} style={{ display: "flex", alignItems: "stretch", alignSelf: "stretch", paddingLeft: 4, flex: "none" }}>
-              {moduleTabButtons}
+              {tabStrip}
             </div>
           )}
           {/* Center zone — workspace-supplied center group. NEW-2 (2026-09-10) — CENTRED on the
@@ -1415,7 +1476,7 @@ export default function AppHeader({
               already consumes the row's entire slack and the toolbar is the last item. Narrow
               (phone) is untouched — `1 0 auto`, exactly as before. */}
           <div ref={row2RightZoneRef} style={{ flex: narrow ? "1 0 auto" : "none", display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 6, minWidth: narrow ? "auto" : 0, gap: 4, overflow: narrow ? "visible" : "hidden" }}>
-            {singleRow ? null : toolbarContent}
+            <ToolbarBudgetContext.Provider value={toolbarBudgetCtx}>{singleRow ? null : toolbarContent}</ToolbarBudgetContext.Provider>
           </div>
         </div>
         {row2Chevrons}
@@ -1446,15 +1507,15 @@ export default function AppHeader({
         // the 26→30 move already made, just one more step of it.
         // B1610640 — same non-scrolling wrapper as the branch above; see its comment.
         <div data-header-row2="1" style={{ position: "relative", ...(singleRow ? { display: "none" } : null) }}>
-        <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ height: HEADER_ROW_H, display: "flex", alignItems: "center", position: "relative", borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
+        <div ref={row2Ref} data-header-row="2" className={narrow ? "no-hscrollbar" : undefined} style={{ height: HEADER_ROW_H, display: "flex", alignItems: "center", position: "relative", borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
 
           {/* Module tabs — the planner's own workspace navigation. Omitted entirely on a
               standalone route (B651873, e.g. /food): the toolbar zone below is already
               flex:1/flex:"1 0 auto" and simply reclaims the width, so the layout is
               byte-identical for every existing caller (all of which leave this true). */}
           {showModuleTabs && (
-            <div style={{ display: "flex", alignItems: "stretch", height: "100%", paddingLeft: 4, flex: "none" }}>
-              {moduleTabButtons}
+            <div ref={row2LeftZoneRef} style={{ display: "flex", alignItems: "stretch", height: "100%", paddingLeft: 4, flex: "none" }}>
+              {tabStrip}
             </div>
           )}
 
@@ -1473,6 +1534,7 @@ export default function AppHeader({
               strip stranded in a corner with nothing to its left. With no tabs to be flush
               against, anchor left instead so the controls read as this row's own content. */}
           <div
+            ref={row2RightZoneRef}
             style={{
               // NEW-1 (food controls) — a standalone route (no module tabs, today only /food) has a
               // purpose-built toolbar that is designed to FIT the row, so on a phone the slot takes
@@ -1487,7 +1549,7 @@ export default function AppHeader({
               overflow: narrow ? "visible" : "hidden",
             }}
           >
-            {singleRow ? null : toolbarContent}
+            <ToolbarBudgetContext.Provider value={toolbarBudgetCtx}>{singleRow ? null : toolbarContent}</ToolbarBudgetContext.Provider>
           </div>
         </div>
         {row2Chevrons}
