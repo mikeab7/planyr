@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { runTrustedChecks, assertMeasurement, ringsHash, VERDICT_CACHE_VERSION } from "../src/workspaces/site-planner/lib/siteChecksRun.js";
+import { runTrustedChecks, plainFailure, assertMeasurement, ringsHash, VERDICT_CACHE_VERSION } from "../src/workspaces/site-planner/lib/siteChecksRun.js";
 import { createGisCache } from "../src/workspaces/site-planner/lib/gisCache.js";
 import { GisFetchError } from "../src/workspaces/site-planner/lib/gisFetch.js";
 
@@ -216,9 +216,45 @@ describe("review findings — runner", () => {
   it("an incomplete stored measurement throws, never falls through to green", () => {
     for (const g of ["flood", "wetlands", "pipelines", "wells"]) expect(() => assertMeasurement(g, {})).toThrow();
   });
-  it("every page asks for a stable order", async () => {
-    const t = transport(happy());
-    await runTrustedChecks(SITE, { cache: freshCache(), fetchJson: t });
-    expect(t.mock.calls.filter(([u]) => u.includes(HOSTS.flood)).every(([u]) => u.includes("orderByFields=OBJECTID"))).toBe(true);
+  it("a joined layer that rejects orderByFields (live NWI: HTTP 400) still answers — the first read is unordered", async () => {
+    const t = transport({ ...happy(), [HOSTS.wetlands]: (u) => (u.includes("orderByFields") ? new GisFetchError("arcgis", "Invalid or missing input parameters.", { arcgisCode: 400 }) : { features: [] }) });
+    const res = await runTrustedChecks(SITE, { cache: freshCache(), fetchJson: t });
+    expect(byId(res).wetlands.severity).toBe("green");
+  });
+  it("only a TRUNCATED answer pages, from the top, every page ordered by the layer's own id field", async () => {
+    let n = 0;
+    const t = transport({ ...happy(), [HOSTS.flood]: (u) => (++n === 1 ? { features: FLOOD_OK, exceededTransferLimit: true, objectIdFieldName: "OBJECTID" } : { features: FLOOD_OK }) });
+    const res = await runTrustedChecks(SITE, { cache: freshCache(), fetchJson: t });
+    const floodCalls = t.mock.calls.filter(([u]) => u.includes(HOSTS.flood)).map(([u]) => u);
+    expect(floodCalls[0]).not.toContain("orderByFields");
+    expect(floodCalls.slice(1).every((u) => u.includes("orderByFields=OBJECTID"))).toBe(true);
+    expect(byId(res).flood100.severity).not.toBe("failed");
+  });
+});
+
+describe("failed rows speak plain words — no server strings, codes or status numbers anywhere visible", () => {
+  const RAW = [
+    new GisFetchError("arcgis", "Invalid or missing input parameters. (code 400)", { arcgisCode: 400 }),
+    new GisFetchError("http-5xx", "The GIS source returned HTTP 503 — temporarily unavailable.", { status: 503 }),
+    new GisFetchError("http-4xx", "The GIS source returned HTTP 404.", { status: 404 }),
+    new GisFetchError("timeout", "The GIS source didn't respond in time", {}),
+    new TypeError("Failed to fetch"),
+    new Error("wetlands layer 1: the source answered without a feature list."),
+  ];
+  it("every check × every failure kind: the row line has no code, no HTTP, no 'ArcGIS', no 'parameters', no digits", async () => {
+    for (const e of RAW) {
+      const res = await runTrustedChecks(SITE, { cache: freshCache(), fetchJson: transport({ [HOSTS.flood]: () => e, [HOSTS.wetlands]: () => e, [HOSTS.rrc]: () => e }) });
+      for (const r of res.rows) {
+        expect(r.severity).toBe("failed");
+        const visible = `${r.figure} ${r.line}`;
+        expect(visible, `${r.id} / ${e.message}`).not.toMatch(/\d|code|HTTP|ArcGIS|parameter|layer|feature list|GIS source|undefined|\[object/i);
+        expect(r.line.length).toBeGreaterThan(10);
+      }
+    }
+  });
+  it("wetlands says it in the owner's plain words", () => {
+    expect(plainFailure({ id: "wetlands" }, RAW[0])).toBe("The wetlands map didn't answer.");
+    expect(plainFailure({ id: "pipelines" }, RAW[3])).toBe("The pipeline map was too slow to answer.");
+    expect(plainFailure({ id: "wells" }, RAW[1])).toBe("The oil and gas well map is temporarily unavailable.");
   });
 });
