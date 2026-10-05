@@ -58,7 +58,7 @@ import "leaflet/dist/leaflet.css";
 import { usePalette } from "../../../shared/theme/ThemeProvider.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { ToggleChip } from "../../../shared/ui/controls.jsx";
-import { openPipelineProjects, mapMarkers, missingLocationCount } from "../lib/dashboardMapMarkers.js";
+import { openPipelineProjects, allSiteProjects, mapMarkers, missingLocationCount } from "../lib/dashboardMapMarkers.js";
 import { displayPointsByGroup } from "../lib/dashboardParcelAnchors.js";
 import { fetchParcelsForSites } from "../lib/dashboardParcelFetch.js";
 import { resolveLabelVisibility } from "../lib/labelCollide.js";
@@ -203,7 +203,9 @@ function CompDot() {
 
 const EMPTY = { fontSize: 12, color: "var(--text-secondary)", fontStyle: "italic" };
 
-export default function LocationsMapCard({ projects, comps, onOpenProject, onFixLocations }) {
+// `scope` (NEW-2): "pipeline" (default — the Dashboard card: open projects + comps) or "all" (the
+// company-scope Site tab: every project, any status, no comps). Same map, pins and parcel anchors.
+export default function LocationsMapCard({ projects, comps, onOpenProject, onFixLocations, scope = "pipeline" }) {
   const palette = usePalette();
   const hostRef = useRef(null);
   const mapRef = useRef(null);
@@ -215,14 +217,14 @@ export default function LocationsMapCard({ projects, comps, onOpenProject, onFix
   // zoomend/moveend handlers registered once in the map-creation effect below.
   const labelMarkersRef = useRef([]);
 
-  const openProjects = useMemo(() => openPipelineProjects(projects), [projects]);
+  const openProjects = useMemo(() => (scope === "all" ? allSiteProjects(projects) : openPipelineProjects(projects)), [projects, scope]);
   // B-NEW-1 — pins sit inside their parcel, same point as the Site tab map. Parcel shapes are read
   // once per set of plotted plans (never per render/zoom); until they arrive, or for a site with no
   // boundary, a pin stays at its saved origin.
   const [displayPoints, setDisplayPoints] = useState(null);
   const plottedSiteKey = useMemo(
-    () => mapMarkers(projects, null).map((m) => m.project.siteId).filter(Boolean).sort().join(","),
-    [projects],
+    () => mapMarkers(projects, null, null, scope).map((m) => m.project.siteId).filter(Boolean).sort().join(","),
+    [projects, scope],
   );
   useEffect(() => {
     if (!plottedSiteKey) return undefined;
@@ -233,8 +235,8 @@ export default function LocationsMapCard({ projects, comps, onOpenProject, onFix
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plottedSiteKey]);
-  const allMarkers = useMemo(() => mapMarkers(projects, comps, displayPoints), [projects, comps, displayPoints]);
-  const missingCount = useMemo(() => missingLocationCount(projects), [projects]);
+  const allMarkers = useMemo(() => mapMarkers(projects, comps, displayPoints, scope), [projects, comps, displayPoints, scope]);
+  const missingCount = useMemo(() => missingLocationCount(projects, scope), [projects, scope]);
   const compsTotal = comps ? comps.length : 0;
   const compsPlotted = useMemo(() => allMarkers.filter((m) => m.kind === "comp").length, [allMarkers]);
   const visibleMarkers = useMemo(
@@ -345,6 +347,7 @@ export default function LocationsMapCard({ projects, comps, onOpenProject, onFix
   }, [visibleMarkers, palette, onOpenProject]);
 
   if (nothingPlaced) {
+    if (scope === "all") return <div style={EMPTY} data-testid="locations-map-empty">No projects yet — start one from the project menu.</div>;
     return <div style={EMPTY} data-testid="locations-map-empty">Nothing placed yet — add a project or a comp to see it on the map.</div>;
   }
 
@@ -376,7 +379,7 @@ export default function LocationsMapCard({ projects, comps, onOpenProject, onFix
         data-testid="locations-map-host"
         style={{ flex: 1, minHeight: 120, borderRadius: RADIUS.md, overflow: "hidden", border: "1px solid var(--border-default)" }}
       />
-      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", flex: "none" }}>
+      {scope !== "all" && <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", flex: "none" }}>
         <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, color: "var(--text-secondary)" }}>
           <LegendDot /> Active
         </span>
@@ -388,7 +391,7 @@ export default function LocationsMapCard({ projects, comps, onOpenProject, onFix
             <CompDot /> Comps{compsPlotted ? ` · ${compsPlotted}` : ""}
           </span>
         </ToggleChip>
-      </div>
+      </div>}
       {missingLine}
     </div>
   );
