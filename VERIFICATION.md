@@ -171,6 +171,11 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1517457 — B2095122: a pasted Land (and Building sale) comp saves and survives a reload
+
+Sandbox-proven: `test/compToRowEnumBlank.test.js`. **Steps** (signed in as `e2e@planyr.test` on planyr.io after the deploy; read `/version.json` in the same call and match it to the merge commit): 1. Comps → add a comp by pasting land text (any 1–2 line land listing). **Expect:** it saves with no error. 2. Reload. **Expect:** the comp is still there. 3. Repeat with a pasted building sale. **Expect:** same. Delete the throwaway comps afterwards.
+
+
 ### V1517456 — B2095121: a refused Schedule cloud save shows a red "did NOT save to the cloud" toast (test account reproduces the 403 on demand)
 
 Sandbox-proven: `test/scheduleSaveFailLoud.test.js`. **Steps** (signed in as `e2e@planyr.test` on planyr.io after the deploy; read `/version.json` in the same call and match it to the merge commit): 1. Open Schedule, edit any task's Owner cell. **Expect:** within a few seconds a red toast "Your change did NOT save to the cloud (42501)…" appears (before this fix: nothing). 2. Reload. **Expect:** the edit is gone (the root defect, B2095121, is still open — that is the expected result of this check).

@@ -5345,6 +5345,13 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
+### B2095122 — A Land comp made by pasting text could not be saved (CHECK constraint refused the blank basis) `[comps]` (bug) #comps #persistence  *(Found by the VERIFY-SELF v3 auth sweep 2026-10-04 (V461202, batch b10), live on build 1aef6cc. DEDUPE-FIRST: no prior item. Constraint check: nothing contradicts `## Owner product constraints`.)*
+
+`[x]` **Symptom:** paste land text → Save → `new row for relation "comps" violates check constraint "comps_lease_rate_expense_check"`; the comp is not saved. Saves only if the row starts as Lease and is switched to Land.
+`[x]` **Cause (AUDIT-FIRST):** the paste parser's blank draft carries `leaseRateExpense: ""` (compParse.js:1183); `compToRow` used `?? null`, which lets `""` through, and the table CHECKs only allow `nnn`/`gross`. Same shape for `land_size_unit` and `lease_rate_period`.
+`[x]` **Fix:** `compToRow` sends NULL for blank values of all three CHECK-constrained enums (`||`). Guard: `test/compToRowEnumBlank.test.js` (red on the old code, measured).
+- Verify: live — **V1517457** (paste a Land comp as the test account after deploy; save; reload). Not yet checked for a pasted Building sale — included in the V.
+
 ### B2086368 — No way to delete a file from the Library's Recent or Unfiled lists `[library]` (bug) #library #persistence  *(Owner report 2026-10-04 build f853752, dispatch block NEW-1. DEDUPE-FIRST: searched Open/Verify/Done for Library delete / Unfiled / Recently deleted — B2084480 (Unfiled refresh) and NEW-F3 (the folder-tree soft delete) are the neighbours; neither covers Home. Not a recurrence.)*
 
 `[x]` **Cause (AUDIT-FIRST, matches his measurement):** the soft-delete path (`deleteReview` → Recently deleted → `restoreReview` / `purgeReview`) was written INLINE in `FileBrowser.jsx` (the per-project list). `LibraryHome.jsx` (no project selected: Recent + Unfiled) never had any of it — each row was Open (+ Move to project…) and nothing else — so a file saved from Review with no project could never be removed.
