@@ -14,12 +14,18 @@
  */
 export const COUNTY_VERIFICATION = {
   harris: {
+    publisher: "own",
+    publisherName: "Harris County (HCAD parcels, gis.hctx.net)",
     verifiedOn: "2026-07-29",
   },
   fortbend: {
+    publisher: "unverified",
+    publisherName: "AGOL account shaunencarnacion (\"FBCAD Public Data\") — affiliation not established",
     verifiedOn: "2026-07-29",
   },
   chambers: {
+    publisher: "own",
+    publisherName: "Chambers County Appraisal District (Pandai-hosted)",
     verifiedOn: null,
     verifiedNote: "Live-verified at the B787 CCAD repoint, and it is the same service the CCAD website's own map " + "draws. It could NOT be re-probed on 2026-07-29 because gisdata.pandai.com is blocked by this " + "build environment's egress policy — a sandbox limitation, not a sign the endpoint moved. Kept " + "as the primary: demoting a working Texas source to the statewide composite would be a " + "behaviour change, which the Colorado work is not permitted to make.",
   },
@@ -30,44 +36,66 @@ export const COUNTY_VERIFICATION = {
    * count-query time, point-identify time, and the actual parcel returned — is recorded in the
    * matching `counties.js` comment, the way the Weld and Broomfield entries do it. */
   montgomery: {
+    publisher: "own",
+    publisherName: "Montgomery County, TX IT-GIS Group",
     verifiedOn: "2026-08-06",
     verifiedNote: "Montgomery County's OWN GIS org (AGOL owner GIS.Data_MOCO), not a republication: 336,769 parcel polygons, count query 1,212 ms, point identify 172–596 ms, real lots returned at Conroe, downtown Conroe and The Woodlands. → V17704.",
   },
   brazoria: {
+    publisher: "own",
+    publisherName: "Brazoria CAD (hosted by BIS Consulting, its appraisal-software vendor)",
     verifiedOn: "2026-08-06",
     verifiedNote: "280,226 parcel polygons, count query 156 ms, point identify 224 ms. Returned the real lot at the Pearland test point (prop_id 517005, CITY OF PEARLAND, 0.43 ac) — the site whose wrong-county answer produced B209502. → V17704.",
   },
   galveston: {
+    publisher: "own",
+    publisherName: "Galveston Central Appraisal District (AGOL account COG_GIS_Admin)",
     verifiedOn: "2026-08-06",
     verifiedNote: "188,679 parcel polygons, count query 128 ms, point identify 594 ms, real lot returned at Texas City. A SECOND AGOL layer (services7.arcgis.com/2iAOv9D7729Bn31m, GCAD_Parcels_MGO_view) also answers at Texas City but holds only 26,094 features — a partial republication, rejected: it is the B369 clip trap, a source that passes your test point while being silently incomplete elsewhere. → V17704.",
   },
   liberty: {
+    publisher: "own",
+    publisherName: "Liberty CAD (hosted by BIS Consulting, its appraisal-software vendor)",
     verifiedOn: "2026-08-06",
     verifiedNote: "155,826 parcel polygons, count query 133 ms, point identify 144 ms, real lot returned at Dayton (prop_id 73270). → V17704.",
   },
   austintx: {
+    publisher: "own",
+    publisherName: "Austin County CAD (hosted by BIS Consulting, its appraisal-software vendor)",
     verifiedOn: "2026-08-06",
     verifiedNote: "22,630 parcel polygons, count query 221 ms, point identify 137–233 ms, real lots returned at both Sealy and Bellville. Small count is CORRECT for a rural county of ~30k people — checked against the whole-county extent, not assumed. → V17704.",
   },
 
   co_adams: {
+    publisher: "own",
+    publisherName: "Adams County, CO GIS",
     verifiedOn: "2026-07-29",
   },
   co_denver: {
+    publisher: "own",
+    publisherName: "City and County of Denver",
     verifiedOn: "2026-07-29",
   },
   co_weld: {
+    publisher: "own",
+    publisherName: "Weld County, CO",
     verifiedOn: "2026-07-29",
   },
   co_broomfield: {
+    publisher: "own",
+    publisherName: "City and County of Broomfield",
     verifiedOn: "2026-07-29",
   },
   co_arapahoe: {
+    publisher: "statewide",
+    publisherName: "State of Colorado (gis.colorado.gov statewide parcels)",
     candidateUrl: "https://gis.arapahoegov.com/arcgis/rest/services/OpenDataService/FeatureServer/0",
     candidateProvenance: "ArcGIS Online item 'Parcels - Arapahoe County' (owner gis@mhfd); host gis.arapahoegov.com still blocked by build-environment egress policy — RE-PROBED 2026-08-03 (NEW-1) and still pending. The only reachable alternative is an AGOL copy (services1.arcgis.com/Ezk9fcjSUkeadg6u, 214,375 features, 250 ms) owned by `jklier_uagis`, a 2017 personal/coursework account; a nine-year-old third-party copy is worse than the state composite, so it is recorded and not shipped.",
     verifiedOn: null,
   },
   co_larimer: {
+    publisher: "own",
+    publisherName: "Larimer County, CO",
     // PROMOTED 2026-08-03 (NEW-1). The parked candidate is now the primary: probed LIVE from the
     // owner's own browser over the site in the report — 181,035 tax parcels, capabilities
     // Map,Query,Data, count query 108 ms, point identify 87 ms, maxRecordCount 1000, and the same
@@ -78,6 +106,8 @@ export const COUNTY_VERIFICATION = {
     verifiedNote: "Live-probed from the owner's browser, not from this build environment — maps1.larimer.org is still blocked by the sandbox egress policy (a sandbox limitation, not a sign the endpoint moved), the same standing as the Chambers row. The browser is where the app actually runs, so a browser probe is the load-bearing one; the AGOL item record was matched here to confirm the URL is the county's own published service. → V682.",
   },
   co_jefferson: {
+    publisher: "statewide",
+    publisherName: "State of Colorado (gis.colorado.gov statewide parcels)",
     // ⚠ CORRECTS the B1111 record. Jefferson was filed as "no county parcel endpoint could be
     // FOUND at all". The 2026-08-03 re-probe (NEW-1) found it registered: ArcGIS Online item
     // "Parcel", owner `Jeffco` (the county's own org).
@@ -86,11 +116,15 @@ export const COUNTY_VERIFICATION = {
     verifiedOn: null,
   },
   co_elpaso: {
+    publisher: "statewide",
+    publisherName: "State of Colorado (gis.colorado.gov statewide parcels)",
     candidateUrl: "https://gisservices.elpasoco.com/arcgis2/rest/services/HubPublic/Parcels/MapServer",
     candidateProvenance: "ArcGIS Online item 'Parcels' (owner BaileyG, El Paso County); host gisservices.elpasoco.com still blocked by build-environment egress policy — RE-PROBED 2026-08-03 (NEW-1) and still pending. A regional alternative was verified live 2026-07-29 and RE-verified 2026-08-03 — PPACG Parcels (2025), https://services1.arcgis.com/0plDVQODvYjBRQXP/arcgis/rest/services/PPACG_Parcels/FeatureServer/0, 268,356 features, 326 ms, native SR EPSG:2232, last edited 2026-07-25 — but it is the MPO's TAZ-joined planning derivative (LandUse/PlaceType/NumHU columns), it drops right-of-way parcels and it spans Teller County, so it is still not shipped as a parcel source. The re-probe confirms the 2026-07-29 reasoning rather than overturning it.",
     verifiedOn: null,
   },
   co_boulder: {
+    publisher: "statewide",
+    publisherName: "State of Colorado (gis.colorado.gov statewide parcels)",
     candidateUrl: "https://maps.bouldercounty.org/arcgis/rest/services/PARCELS/PARCELS_OWNER/FeatureServer/0",
     candidateProvenance: "ArcGIS Online item 'Parcels - Boulder County' (owner gis@mhfd); host maps.bouldercounty.org still blocked by build-environment egress policy — RE-PROBED 2026-08-03 (NEW-1) and still pending. Boulder County's OWN reachable AGOL copy ('Boulder County Parcel / Address Look Up', services3.arcgis.com/0jWpHMuhmHsukKE3, native SR EPSG:2876, 259 ms) carries only 30,803 features and its own Updated column reads 2/14/2020 — a partial six-year-old extract would show a lot as MISSING rather than as slow, so it is recorded and not shipped.",
     verifiedOn: null,
@@ -103,19 +137,71 @@ export const COUNTY_VERIFICATION = {
    * `extentCoverageCheck` confirmed the layer is NOT statewide (lat 66% / lon 104% of Idaho's
    * bbox) — consistent with only 13 of 44 counties participating. A Boise envelope query answered
    * in 1,682ms, inside the app's 8s budget. → V1055873. */
-  id_ada: { verifiedOn: "2026-09-10" },
-  id_bearlake: { verifiedOn: "2026-09-10" },
-  id_boise: { verifiedOn: "2026-09-10" },
-  id_camas: { verifiedOn: "2026-09-10" },
-  id_gooding: { verifiedOn: "2026-09-10" },
-  id_jerome: { verifiedOn: "2026-09-10" },
-  id_lincoln: { verifiedOn: "2026-09-10" },
-  id_minidoka: { verifiedOn: "2026-09-10" },
-  id_nezperce: { verifiedOn: "2026-09-10" },
-  id_oneida: { verifiedOn: "2026-09-10" },
-  id_teton: { verifiedOn: "2026-09-10" },
-  id_valley: { verifiedOn: "2026-09-10" },
-  id_washington: { verifiedOn: "2026-09-10" },
+  id_ada: {
+    publisher: "statewide",
+    publisherName: "State of Idaho (Public Idaho Parcels)",
+    verifiedOn: "2026-09-10",
+  },
+  id_bearlake: {
+    publisher: "statewide",
+    publisherName: "State of Idaho (Public Idaho Parcels)",
+    verifiedOn: "2026-09-10",
+  },
+  id_boise: {
+    publisher: "statewide",
+    publisherName: "State of Idaho (Public Idaho Parcels)",
+    verifiedOn: "2026-09-10",
+  },
+  id_camas: {
+    publisher: "statewide",
+    publisherName: "State of Idaho (Public Idaho Parcels)",
+    verifiedOn: "2026-09-10",
+  },
+  id_gooding: {
+    publisher: "statewide",
+    publisherName: "State of Idaho (Public Idaho Parcels)",
+    verifiedOn: "2026-09-10",
+  },
+  id_jerome: {
+    publisher: "statewide",
+    publisherName: "State of Idaho (Public Idaho Parcels)",
+    verifiedOn: "2026-09-10",
+  },
+  id_lincoln: {
+    publisher: "statewide",
+    publisherName: "State of Idaho (Public Idaho Parcels)",
+    verifiedOn: "2026-09-10",
+  },
+  id_minidoka: {
+    publisher: "statewide",
+    publisherName: "State of Idaho (Public Idaho Parcels)",
+    verifiedOn: "2026-09-10",
+  },
+  id_nezperce: {
+    publisher: "statewide",
+    publisherName: "State of Idaho (Public Idaho Parcels)",
+    verifiedOn: "2026-09-10",
+  },
+  id_oneida: {
+    publisher: "statewide",
+    publisherName: "State of Idaho (Public Idaho Parcels)",
+    verifiedOn: "2026-09-10",
+  },
+  id_teton: {
+    publisher: "statewide",
+    publisherName: "State of Idaho (Public Idaho Parcels)",
+    verifiedOn: "2026-09-10",
+  },
+  id_valley: {
+    publisher: "statewide",
+    publisherName: "State of Idaho (Public Idaho Parcels)",
+    verifiedOn: "2026-09-10",
+  },
+  id_washington: {
+    publisher: "statewide",
+    publisherName: "State of Idaho (Public Idaho Parcels)",
+    verifiedOn: "2026-09-10",
+  },
 
   /* ═══ B1455634 — 21-item dispatch batch (19 distinct county rows; Hinds MS is documented, not
    * wired — see counties.js). Ten sit on `*.arcgis.com` and were re-verified live from THIS
@@ -125,26 +211,40 @@ export const COUNTY_VERIFICATION = {
    * the correct layer via the allowlisted arcgis.com search API even though the origin host
    * itself could not be re-probed). → V1055874. */
   il_cook: {
+    publisher: "own",
+    publisherName: "Cook County, IL",
     verifiedNote: "gis.cookcountyil.gov is blocked by this build environment's egress policy. Endpoint, feature count (95ms/23 populated fields) and county provenance are from the dispatch's own live-browser measurement, 2026-09-10 — not independently re-probed here.",
   },
   il_dupage: {
+    publisher: "own",
+    publisherName: "DuPage County, IL",
     verifiedNote: "gis.dupageco.org is blocked by this build environment's egress policy. Endpoint, feature count (275ms/66 populated fields) and county provenance are from the dispatch's own live-browser measurement, 2026-09-10 — not independently re-probed here.",
   },
   il_will: {
+    publisher: "own",
+    publisherName: "Will County, IL",
     verifiedNote: "gis.willcountyillinois.com is blocked by this build environment's egress policy. Endpoint, feature count (329ms/18 populated fields) and county provenance are from the dispatch's own live-browser measurement, 2026-09-10 — not independently re-probed here.",
   },
   pa_allegheny: {
+    publisher: "own",
+    publisherName: "Allegheny County",
     verifiedNote: "gisdata.alleghenycounty.us is blocked by this build environment's egress policy. Endpoint, feature count (469ms/8 populated fields) and county provenance are from the dispatch's own live-browser measurement, 2026-09-10 — not independently re-probed here.",
   },
   pa_northampton: {
+    publisher: "own",
+    publisherName: "Northampton County GIS Division",
     verifiedOn: "2026-09-10",
     verifiedNote: "VERIFIED LIVE from this sandbox (services2.arcgis.com is reachable): 122,379 parcel polygons, count query 275ms, 57 populated fields, esriGeometryPolygon.",
   },
   pa_cumberland: {
+    publisher: "own",
+    publisherName: "Cumberland County, PA",
     verifiedOn: "2026-09-10",
     verifiedNote: "VERIFIED LIVE from this sandbox: 104,637 parcel polygons, count query 496ms, 41 populated fields, esriGeometryPolygon.",
   },
   ga_gwinnett: {
+    publisher: "own",
+    publisherName: "Gwinnett County, GA GIS",
     verifiedOn: "2026-09-10",
     verifiedNote: "VERIFIED LIVE from this sandbox: 309,658 parcel polygons, count query 304ms, 16 populated fields, esriGeometryPolygon. Also independently surfaced in this repo's own statewide-parcel probe (docs/STATEWIDE-PARCELS.md, 'unlinked hits' table) as a real county publisher, corroborating the county provenance.",
   },
@@ -155,50 +255,74 @@ export const COUNTY_VERIFICATION = {
    * (Walton = Florida, the dispatch's Paulding hint = Ohio), is in
    * docs/STATEWIDE-PARCELS.md's dated 2026-09-23 section. ═══ */
   ga_dekalb: {
+    publisher: "own",
+    publisherName: "DeKalb County, GA GIS",
     verifiedOn: "2026-09-23",
     verifiedNote: "VERIFIED LIVE from this sandbox: 245,688 parcel polygons, esriGeometryPolygon, extent -84.35..-84.02 / 33.62..33.97 (matches DeKalb County around Decatur). Published by the county's own GIS org (AGOL owner DeKalbGISAdmin).",
   },
   ga_clarke: {
+    publisher: "own",
+    publisherName: "Athens-Clarke County Unified Government",
     verifiedOn: "2026-09-23",
     verifiedNote: "VERIFIED LIVE from this sandbox: 41,989 parcel polygons, esriGeometryPolygon, extent -83.54..-83.24 / 33.85..34.04 (matches Athens). Published by the Athens-Clarke unified government's own GIS staff account (accgov.com).",
   },
   ga_columbia: {
+    publisher: "own",
+    publisherName: "Columbia County, GA",
     verifiedOn: "2026-09-23",
     verifiedNote: "VERIFIED LIVE from this sandbox: 66,097 parcel polygons, esriGeometryPolygon, extent -82.44..-82.03 / 33.35..33.70 (matches Evans/Martinez, near Augusta). Published by the county's own GIS org (AGOL owner ColumbiaCountyGA_publisher) — a materially better source than the dispatch's own self-hosted URL (mapsonline.columbiacountyga.gov, blocked by this build environment's egress policy).",
   },
   ga_lowndes: {
+    publisher: "own",
+    publisherName: "Southern Georgia Regional Commission (county CAMA vendor Valor)",
     verifiedOn: "2026-09-23",
     verifiedNote: "VERIFIED LIVE from this sandbox: 52,558 parcel polygons, esriGeometryPolygon, extent -83.49..-83.02 / 30.62..31.03 (matches Valdosta). Published under a Southwest Georgia Regional Commission GIS account whose owner name references the county's own CAMA vendor (valorgis.com, the host the dispatch itself named as blocked).",
   },
   ga_jackson: {
+    publisher: "own",
+    publisherName: "Jackson County, GA GIS",
     verifiedOn: "2026-09-23",
     verifiedNote: "VERIFIED LIVE from this sandbox: 45,046 parcel polygons, esriGeometryPolygon, extent -83.82..-83.35 / 33.97..34.30 (matches Jefferson, GA — Jackson County's own seat). Resolved via the ArcGIS Online item the dispatch's own Hub item id (cb6bbe781e324c3abf6e135ed1bc0a32) pointed at; the real polygon layer is id 9 on that service, not 0. ⛔ SECOND PASS (2026-09-23, Michael's own browser): this layer's first ID-shaped column is PIN, a short partial (\"006A\") that matches several lots — an ID search through detectField's plain auto-detection returned 8 lots instead of one. Fixed by pinning PARCEL_NO (pinIdField: true, parcelQuery.js's resolveSearchField), which degrades back to detection if this layer ever drops PARCEL_NO.",
   },
   ga_bibb: {
+    publisher: "own",
+    publisherName: "Macon-Bibb County Government (IT GIS / Tax Assessor)",
     verifiedOn: "2026-09-23",
     verifiedNote: "VERIFIED LIVE from this sandbox: 68,899 parcel polygons, esriGeometryPolygon, extent -83.89..-83.49 / 32.66..32.95 (matches Macon-Bibb). Resolved via the dispatch's own Hub item id (23ef5481f8f24e6aa6e22e7367a4cf32). ⛔ SECOND PASS (2026-09-23, Michael's own browser): detectField was picking LOWPARCELID ahead of PARCELID on this layer, misrouting id searches. Fixed by pinning PARCELID (pinIdField: true, same mechanism as ga_jackson).",
   },
   ga_dougherty: {
+    publisher: "unverified",
+    publisherName: "AGOL individual account jkendall8 — affiliation not established",
     verifiedOn: "2026-09-23",
     verifiedNote: "VERIFIED LIVE from this sandbox: 38,007 parcel polygons, esriGeometryPolygon, extent -84.46..-83.98 / 31.44..31.65 (matches Albany). Resolved via the dispatch's own Hub item id (9729f520dfab47fab85484908994ef1f).",
   },
   ga_rockdale: {
+    publisher: "own",
+    publisherName: "Rockdale County, GA Technology Services (GIS analyst account)",
     verifiedOn: "2026-09-23",
     verifiedNote: "VERIFIED LIVE from this sandbox: 36,856 parcel polygons, esriGeometryPolygon, extent -84.18..-83.91 / 33.53..33.79 (matches Conyers). ⛔ Two near-identical Rockdale services exist on the same AGOL org — a commercial real-estate broker's personal mirror (rbell@nationalland.com_CCIM) and this one, the county's own GIS staff account (gary.morris_RockdaleGA); wired to the county's own copy, not the broker's. ⛔ SECOND PASS (2026-09-23, Michael's own browser): the wired Address column holds ONLY the house number (\"1620\") — a street-name search on it found 0 lots, a bare house number found 32. The same layer's BOA_Addres column holds the whole situs line (\"1620 WALNUT ST SE\") — a street-name search on it found 55 lots, a full address exactly 1. Rewired addrField to BOA_Addres with pinAddrField: true so it wins over whatever detectField would otherwise pick.",
   },
   ga_paulding: {
+    publisher: "third-party",
+    publisherName: "University of Maryland researcher account (mhackman_UofMD; Regrid-schema copy)",
     verifiedOn: "2026-09-23",
     verifiedNote: "⛔ CORRECTS the dispatch's own discovery hint — the Hub host it named (paulding-county-geospatial-hub-pcaud.hub.arcgis.com) is Paulding County, OHIO (native SR NAD83/Ohio South (ftUS); a sampled feature reads owner 'WEST OHIO GAS COMPANY'), confirmed live from this sandbox. VERIFIED LIVE instead: 68,018 parcel polygons, esriGeometryPolygon, extent -85.05..-84.72 / 33.77..34.08 (matches Dallas, GA); sampled features read county='paulding', state2='ga'. This is a third-party nationwide-parcel-schema republication (AGOL owner mhackman_UofMD, a University of Maryland researcher account — field prefixes match the Regrid/Loveland national parcel schema), not the county's own GIS; recorded honestly rather than presented as an official source. Vintage 2022 (editingInfo), within this repo's 5-year staleness bar.",
   },
   ga_bulloch: {
+    publisher: "unverified",
+    publisherName: "AGOL account cbrown72 — affiliation not established",
     verifiedOn: "2026-09-23",
     verifiedNote: "VERIFIED LIVE from this sandbox: 34,014 parcel polygons, esriGeometryPolygon, extent -82.03..-81.43 / 32.15..32.65 (matches Statesboro). ⛔ REJECTED CANDIDATE on the same AGOL org (xxKKavhytNgFUeV5): a layer named 'Bulloch_County_GA_Atlas_WFL1' / 'Bulloch County Parcels' holds only 136 features — the B1551616 'title is never the measurement' trap, a stale/partial extract rather than the county's fabric.",
   },
   ga_camden: {
+    publisher: "unverified",
+    publisherName: "AGOL account CGRUSER_USG — affiliation not established",
     verifiedOn: "2026-09-23",
     verifiedNote: "VERIFIED LIVE from this sandbox: 31,649 parcel polygons, esriGeometryPolygon, extent -81.94..-81.40 / 30.71..31.17 (matches Kingsland/St. Marys). ⛔ CORRECTS the dispatch's own URL: that MapServer path advertises capabilities:\"Map\" only (no Query — /query 400s 'Invalid URL'); the identical dataset is also published as a FeatureServer at the same path with Query enabled, wired here instead.",
   },
   ga_tift: {
+    publisher: "own",
+    publisherName: "Southern Georgia Regional Commission (sgrcmaps.com)",
     verifiedOn: "2026-09-24",
     verifiedNote: "VERIFIED LIVE twice: first from Michael's own browser (planyr.io origin) — the SGRC layer (www.sgrcmaps.com/alma/rest/services/Tift/Tift_Parcels/MapServer/0) holds 19,194 parcel polygons and opens fine fetched directly, but the identical fetch FROM planyr.io fails with no Access-Control-Allow-Origin header on the response at all, which is why this county routes through the same-origin /gis-proxy/ pass-through (functions/gis-proxy/[[path]].js) instead of a direct URL. SECOND, independently, from THIS sandbox against the DEPLOYED proxy on this PR's Cloudflare preview build (sgrcmaps.com itself is still blocked by this sandbox's own egress policy, but the proxy's upstream fetch runs server-side in Cloudflare, which the block never reaches): /MapServer/0?f=json returned real layer metadata (fields OBJECTID/ParcelNum/OwnerName/Situs/QPLINK, esriGeometryPolygon); /query?returnCountOnly=true returned exactly 19,194, matching Michael's own count; a point query at Tifton (31.4504, -83.5085) returned a real parcel — OBJECTID 18560, ParcelNum \"T044  082\", OwnerName \"TIFTON DREAM VISION PROPERTIES, LLC\", Situs \"212 E 5TH ST\". idField (ParcelNum) / addrField (Situs) are this measurement, not a guess.",
   },
@@ -210,46 +334,68 @@ export const COUNTY_VERIFICATION = {
    * request shapes: queryAtPoint at a real parcel centroid, then an id search and an address
    * search through the Map Finder search box. ═══ */
   ga_forsyth: {
+    publisher: "own",
+    publisherName: "Forsyth County, GA",
     verifiedOn: "2026-09-23",
     verifiedNote: "MEASURED live on Michael's own Chrome, planyr.io origin: 105,480 parcel polygons. queryAtPoint at a real parcel centroid near Cumming, plus an id search and a street-address search through the Map Finder search box, all returned real lots.",
   },
   ga_henry: {
+    publisher: "own",
+    publisherName: "Henry County, GA",
     verifiedOn: "2026-09-23",
     verifiedNote: "MEASURED live on Michael's own Chrome, planyr.io origin: 103,537 parcel polygons. The slowest of the eleven to click-identify (about 1.5s), comfortably inside the 8s fetch timeout. queryAtPoint + both search modes confirmed near McDonough.",
   },
   ga_clayton: {
+    publisher: "own",
+    publisherName: "Clayton County, GA",
     verifiedOn: "2026-09-23",
     verifiedNote: "MEASURED live on Michael's own Chrome, planyr.io origin: 92,100 parcel polygons. Host is weba.co.clayton.ga.us on a non-standard port (5443) — blocked by this build environment's egress policy, answers cleanly from a real browser (queryAtPoint + both search modes confirmed near Jonesboro).",
   },
   ga_cherokee: {
+    publisher: "own",
+    publisherName: "Cherokee County, GA",
     verifiedOn: "2026-09-23",
     verifiedNote: "MEASURED live on Michael's own Chrome, planyr.io origin: 116,022 parcel polygons. queryAtPoint + both search modes confirmed near Canton; the Woodstock overlap point against ga_cobb resolved to this county, not the neighbour.",
   },
   ga_coweta: {
+    publisher: "own",
+    publisherName: "Coweta County, GA",
     verifiedOn: "2026-09-23",
     verifiedNote: "MEASURED live on Michael's own Chrome, planyr.io origin: 64,060 parcel polygons. Host is the county's own cccjcgiswa GIS server — blocked by this build environment's egress policy, answers cleanly from a real browser (queryAtPoint + both search modes confirmed near Newnan).",
   },
   ga_glynn: {
+    publisher: "own",
+    publisherName: "Glynn County, GA",
     verifiedOn: "2026-09-23",
     verifiedNote: "MEASURED live on Michael's own Chrome, planyr.io origin: 46,503 parcel polygons. Host is a webadaptor path on the county's own GIS server — blocked by this build environment's egress policy, answers cleanly from a real browser. No address column on this layer at all — id search only, addrField deliberately left unset.",
   },
   ga_screven: {
+    publisher: "own",
+    publisherName: "Coastal Regional Commission shared GIS host (maps.crc.ga.gov)",
     verifiedOn: "2026-09-23",
     verifiedNote: "MEASURED live on Michael's own Chrome, planyr.io origin: 10,979 parcel polygons — smallest of the eleven. Published on the Coastal Regional Commission's shared GIS host (maps.crc.ga.gov), same publisher convention as ga_liberty below. No address column — id search only.",
   },
   ga_bryan: {
+    publisher: "own",
+    publisherName: "Bryan County, GA",
     verifiedOn: "2026-09-23",
     verifiedNote: "MEASURED live on Michael's own Chrome, planyr.io origin: 23,200 parcel polygons. ⛔ This server answers HTTP 200 with {error:{code:400,message:\"Pagination is not supported.\"}} to ANY query carrying resultRecordCount — every ordinary search — so the search box could not have worked here without arcgis.js's queryFeatures pagination fallback (isPaginationUnsupportedError → ids-only, then by objectIds); both fallback calls were measured working on this server. The click path (queryAtPoint, no pagination params) always worked. Layer is PropertyDetails/0 — the dispatch's own Parcels/MapServer path does not exist on this host. Situs is decomposed (no combined column) — addrField is the street-name column.",
   },
   ga_liberty: {
+    publisher: "own",
+    publisherName: "Coastal Regional Commission shared GIS host (maps.crc.ga.gov)",
     verifiedOn: "2026-09-23",
     verifiedNote: "MEASURED live on Michael's own Chrome, planyr.io origin: 28,170 parcel polygons. Published on the same Coastal Regional Commission shared GIS host as ga_screven — the dispatch's own gis.libertycountyga.com host did not connect at all from that Chrome; this is a genuinely different, working source.",
   },
   ga_bartow: {
+    publisher: "own",
+    publisherName: "Bartow County, GA",
     verifiedOn: "2026-09-23",
     verifiedNote: "MEASURED live on Michael's own Chrome, planyr.io origin: 63,688 parcel polygons. Situs is decomposed (no combined column), same shape as ga_bryan — addrField is the street-name column.",
   },
   ga_cobb: {
+    publisher: "own",
+    publisherName: "Cobb County, GA",
     verifiedOn: "2026-09-23",
     verifiedNote: "MEASURED live on Michael's own Chrome, planyr.io origin: 279,635 parcel polygons — largest of the eleven. queryAtPoint + both search modes confirmed near Marietta; the north-Marietta overlap point against ga_cherokee resolved to this county, not the neighbour.",
   },
@@ -262,303 +408,453 @@ export const COUNTY_VERIFICATION = {
    * Full session record, including the six counties with no usable public parcel source found,
    * is in docs/STATEWIDE-PARCELS.md's dated 2026-09-24 section. ═══ */
   ga_richmond: {
+    publisher: "own",
+    publisherName: "Augusta-Richmond County consolidated government",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 84,925 parcel polygons, last edited live county server. Augusta-Richmond consolidated government's own GIS host (gismap.augustaga.gov).",
   },
   ga_whitfield: {
+    publisher: "own",
+    publisherName: "Whitfield County, GA",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 46,673 parcel polygons, last edited live county server. The county's own GIS host (gis.whitfieldcountyga.com). ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCEL_FUL' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_hall: {
+    publisher: "own",
+    publisherName: "Hall County, GA",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 91,921 parcel polygons, last edited live county server. The county's own GIS host (hallgis.hallcounty.org), layer 1 \"Parcel Boundary\". ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PIN' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_effingham: {
+    publisher: "unverified",
+    publisherName: "AGOL account dave.tenney_evsketchinspect (appraisal-software vendor?) — not established",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 32,941 parcel polygons, last edited 2024-10. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCEL_NO' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_fayette: {
+    publisher: "own",
+    publisherName: "Fayette County, GA Tax Assessor",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 49,104 parcel polygons, last edited daily. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCEL_NO' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_spalding: {
+    publisher: "own",
+    publisherName: "Spalding County, GA (AGOL account creagan_spalding)",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 33,700 parcel polygons, last edited daily. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCEL_ID' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_newton: {
+    publisher: "third-party",
+    publisherName: "University of Maryland researcher account (mhackman_UofMD)",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 45,755 parcel polygons, last edited 2022-02. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCEL_NO' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_barrow: {
+    publisher: "own",
+    publisherName: "Regional commission shared GIS account SGRC_GIS (Greater Athens service)",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 35,234 parcel polygons, last edited 2022-03. Layer 30 of the Greater Athens regional commission's shared FeatureServer (org Ug5xGQbHsD8zuZzM); ga_oconee shares the same service at layer 32 — same host, different layer id, not a URL conflict. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'Parcel_no' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_oconee: {
+    publisher: "own",
+    publisherName: "Regional commission shared GIS account SGRC_GIS (Greater Athens service)",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 19,068 parcel polygons, last edited 2022-03. Layer 32 of the same Greater Athens regional-commission service ga_barrow rides at layer 30. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCELID' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_butts: {
+    publisher: "unverified",
+    publisherName: "AGOL account VerticalAccuracy (GIS firm?) — not established",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 13,065 parcel polygons, last edited 2024-09. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'GSI_PIN' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_monroe: {
+    publisher: "own",
+    publisherName: "Middle Georgia Regional Commission",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 16,707 parcel polygons, last edited 2025-08. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCELID' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_troup: {
+    publisher: "unverified",
+    publisherName: "AGOL account sagesgovdev (GIS contractor?) — not established",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 35,511 parcel polygons, last edited 2026-02. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'parcelnumb' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_peach: {
+    publisher: "own",
+    publisherName: "Middle Georgia Regional Commission",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 14,431 parcel polygons, last edited 2026-09. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCELS' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_muscogee: {
+    publisher: "unverified",
+    publisherName: "AGOL account DBCooper — affiliation not established",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 70,625 parcel polygons, last edited 2019-01. 2019 vintage — the oldest of this batch, still inside this repo's 5-year staleness bar; the help text says so. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'TaxPIN' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_morgan: {
+    publisher: "own",
+    publisherName: "Morgan County, GA GIS",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 12,190 parcel polygons, last edited 2018-11. 2018 vintage — the oldest county source in the whole registry, still inside this repo's 5-year staleness bar; the help text says so. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'Parcel_No' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_baldwin: {
+    publisher: "own",
+    publisherName: "Baldwin County, GA Board of Commissioners",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 21,411 parcel polygons, last edited 2021-03.",
   },
   ga_brantley: {
+    publisher: "own",
+    publisherName: "Brantley County, GA GIS",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 13,301 parcel polygons, last edited 2025-10. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'Parcel_No' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_charlton: {
+    publisher: "own",
+    publisherName: "Southern Georgia Regional Commission (county CAMA vendor Valor)",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 7,357 parcel polygons, last edited 2023-07. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCEL_NO' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_clay: {
+    publisher: "own",
+    publisherName: "River Valley Regional Commission",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 3,063 parcel polygons, last edited 2024-05. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'Parcel_No' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_cook: {
+    publisher: "third-party",
+    publisherName: "Miami University researcher account (keverett_miamioh; Adel overview)",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 5,103 parcel polygons, last edited 2023-11. ⚠ measured extent is narrower than the whole county (about -83.49..-83.37) — possibly city-of-Adel-only coverage. Wired anyway per this item's own instruction; the live-verify pass must click a lot outside Adel to confirm county-wide coverage. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'Parcel_No' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_crawford: {
+    publisher: "own",
+    publisherName: "Middle Georgia Regional Commission",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 8,186 parcel polygons, last edited 2026-09. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCELNO' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_crisp: {
+    publisher: "own",
+    publisherName: "Southern Georgia Regional Commission",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 12,351 parcel polygons, last edited 2022-03. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'Parcel_No' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_dade: {
+    publisher: "third-party",
+    publisherName: "University research lab account (bgn313_igtlab; LLLT clip)",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 7,811 parcel polygons, last edited 2026-07. ⛔ Do not confuse with `Walker_Parcels_2026LLLT/4` on a different AGOL org — identical 7,811-feature count and Dade's own extent under a Walker-County-sounding name; that layer is Dade's data mislabeled, not a real Walker County source, and stays unwired. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCEL_NO' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_dooly: {
+    publisher: "own",
+    publisherName: "Southern Georgia Regional Commission",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 7,277 parcel polygons, last edited 2022-03. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'Parcel_No' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_echols: {
+    publisher: "own",
+    publisherName: "Southern Georgia Regional Commission",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 2,206 parcel polygons, last edited 2026-06. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCEL_NO' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_emanuel: {
+    publisher: "unverified",
+    publisherName: "AGOL individual account TimberHarvest — affiliation not established",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 15,107 parcel polygons, last edited 2026-08. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'Parcel_No' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_evans: {
+    publisher: "own",
+    publisherName: "Evans County, GA",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 6,672 parcel polygons, last edited 2023-01. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCEL_NO' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_greene: {
+    publisher: "own",
+    publisherName: "Greene County, GA Board of Commissioners",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 17,735 parcel polygons, last edited 2025-09. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'Parcel_No' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_lanier: {
+    publisher: "own",
+    publisherName: "Southern Georgia Regional Commission",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 5,968 parcel polygons, last edited 2025-12. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCEL_NO' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_meriwether: {
+    publisher: "own",
+    publisherName: "Meriwether County, GA",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 16,511 parcel polygons, last edited 2023-06. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'Parcel_No' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_sumter: {
+    publisher: "own",
+    publisherName: "River Valley Regional Commission",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 16,415 parcel polygons, last edited 2026-07. Layer 9 of a regional-commission service named for trails, not parcels — same B1551616 \"title is never the measurement\" trap other GA rows in this file have already hit; the layer itself is the county's real parcel fabric. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCELID' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_turner: {
+    publisher: "own",
+    publisherName: "Southern Georgia Regional Commission",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 5,714 parcel polygons, last edited 2026-01. Service name really is \"TunerParcels\" (sic). ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'Parcel_No' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_twiggs: {
+    publisher: "own",
+    publisherName: "Middle Georgia Regional Commission",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 6,832 parcel polygons, last edited 2026-01. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCELID' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   ga_ware: {
+    publisher: "own",
+    publisherName: "Ware County, GA GIS",
     verifiedOn: null,
     verifiedNote: "MEASURED from Michael's own signed-in Chrome (this build environment's egress policy blocks this host): 23,119 parcel polygons, last edited 2026-09-22. ⛔ THIRD-PASS ID PIN 2026-09-24: pinned idField 'PARCEL_NO' (pinIdField: true) — this layer also publishes a FID/OBJECTID row-number column that plain detection would otherwise have picked, showing the layer's own row number instead of the real parcel number on the card (B1875248).",
   },
   mi_oakland: {
+    publisher: "own",
+    publisherName: "Oakland County, MI GIS",
     verifiedOn: "2026-09-10",
     verifiedNote: "The dispatch's own URL was truncated ('gisservices.oakgov.com... my capture truncated it'). Re-RESOLVED via the allowlisted arcgis.com search API (which reaches ArcGIS Online item metadata even for a host whose ORIGIN is blocked): item 'OC Tax Parcels (Public)', owner OCAGOAdmin (Oakland County's own GIS org) — layer 1 of EnterpriseOpenParcelDataMapService, distinct from layer 0 (Site Address), layer 2 (Right of Way) and layer 3 (Parcel History) on the same service; that resolution IS a live confirmation of the correct endpoint, even though gisservices.oakgov.com's own /query cannot be independently re-probed from this sandbox (blocked by egress policy). PIN/SITESTREETADDRESS come from the dispatch's own live-browser measurement (540ms/12 populated fields).",
   },
   ks_wyandotte: {
+    publisher: "own",
+    publisherName: "Wyandotte County / Unified Government, KS",
     verifiedOn: "2026-09-10",
     verifiedNote: "VERIFIED LIVE from this sandbox: 68,993 parcel polygons, count query 289ms, esriGeometryPolygon. Attribute-light by design (id + acreage only, no owner/situs/value on this layer).",
   },
   mo_platte: {
+    publisher: "third-party",
+    publisherName: "City of Parkville (republishes Platte County tax parcels)",
     verifiedOn: "2026-09-10",
     verifiedNote: "VERIFIED LIVE from this sandbox: 45,149 parcel polygons, count query 744ms, esriGeometryPolygon. Attribute-light by design (id/legal/acreage/zoning only).",
   },
   or_multnomah: {
+    publisher: "own",
+    publisherName: "Multnomah County, OR (Assessment, Recording & Taxation)",
     verifiedOn: "2026-09-10",
     verifiedNote: "VERIFIED LIVE from this sandbox: 284,349 parcel polygons, count query 585ms, 49 populated fields, esriGeometryPolygon. A 3-point spread (Portland/Gresham/Troutdale) all answered with real parcels.",
   },
   or_clackamas: {
+    publisher: "own",
+    publisherName: "Clackamas County, OR GIS",
     verifiedOn: "2026-09-10",
     verifiedNote: "⛔ CORRECTS the dispatch's URL. The originally-measured endpoint (services2.arcgis.com/…/Taxlot_additional_records_public/FeatureServer/2, 'Taxlot Additional Records Public', OregonMetro.RLIS org) is a supplementary POINT table — esriGeometryPoint, only 3,470 features — not the county's parcel fabric; confirmed live from this sandbox. RESOLVED to Clackamas County's OWN GIS org account (CCGISWebService, not the regional OregonMetro.RLIS account): 'Taxlots', 163,927 parcel polygons, esriGeometryPolygon, VERIFIED LIVE from this sandbox, count query returned real data at all 3 of a spread across the county (Oregon City 3,775ms/2000 feat., Milwaukie 2,581ms/2000 feat., Molalla 973ms/707 feat.).",
   },
   ky_jefferson: {
+    publisher: "own",
+    publisherName: "LOJIC (Louisville/Jefferson County Information Consortium)",
     verifiedNote: "gis.lojic.org is blocked by this build environment's egress policy. Endpoint, feature count (272ms/7 populated fields) and county provenance (LOJIC — the Louisville/Jefferson County Information Consortium's own open-data service) are from the dispatch's own live-browser measurement, 2026-09-10 — not independently re-probed here.",
   },
   ms_desoto: {
+    publisher: "third-party",
+    publisherName: "ETR Business Development / Tristate Consulting (DeSoto County assessor data)",
     verifiedOn: "2026-09-10",
     verifiedNote: "VERIFIED LIVE from this sandbox: 80,950 parcel polygons, count query 830ms, 55 populated fields, esriGeometryPolygon. A 3-point spread (Southaven/Hernando/Horn Lake) all answered with real parcels.",
   },
   ok_oklahoma: {
+    publisher: "unverified",
+    publisherName: "AGOL account artimcon (\"Tax Parcels Public\") — affiliation not established",
     verifiedOn: "2026-09-10",
     verifiedNote: "VERIFIED LIVE from this sandbox: 337,029 parcel polygons, count query 149ms, 45 populated fields, esriGeometryPolygon. A 3-point spread (OKC/Edmond/Midwest City) all answered with real parcels.",
   },
   ok_tulsa: {
+    publisher: "own",
+    publisherName: "Tulsa County Assessor",
     verifiedOn: "2026-09-10",
     verifiedNote: "The dispatch's own URL was truncated ('Tulsa County parcels on services3.arcgis.com... my capture truncated it'). No services3.arcgis.com item matching '122 populated fields, densest in the set' was found under the Tulsa County Assessor's own AGOL account (tca_cperkins) — that account's services3.arcgis.com items are ancillary tables (Building Permit, Historical Parcels, Records), not the main parcel layer. RESOLVED to the assessor's own primary service instead: asps0305.tulsacounty.org, owner tca_cperkins (Tulsa County Assessor's own org, confirmed via that account's public AGOL item listing, including a 'Tulsa County Assessor' Hub site under the same account) — that resolution IS a live confirmation of the correct endpoint, even though the host itself is blocked by this build environment's egress policy and its field list could not be independently re-read here.",
   },
   la_eastbatonrouge: {
+    publisher: "own",
+    publisherName: "City of Baton Rouge / Parish of East Baton Rouge (EBRGIS)",
     verifiedOn: "2026-09-10",
     verifiedNote: "VERIFIED LIVE from this sandbox: 205,820 parcel polygons, count query 563ms, 13 populated fields, esriGeometryPolygon. A 3-point spread (Baton Rouge/Zachary/Baker) all answered with real parcels.",
   },
   la_orleans: {
+    publisher: "own",
+    publisherName: "City of New Orleans (gis.nola.gov)",
     verifiedNote: "gis.nola.gov is blocked by this build environment's egress policy (re-confirmed live while wiring this row, B1574256 — CONNECT tunnel rejected, HTTP 403 — the same standing as az_maricopa and al_jefferson). Endpoint, layer choice and the 3-point spread are from the dispatch's own live-browser measurement, 2026-09-11 evening Central — not independently re-probed here. Layer 0 'parcels' is the ONLY layer on the ParcelSearch service, capabilities Map/Query/Data; the spread was New Orleans CBD (114ms, 357 features, PARCELID 41036654, SITEADDRESS '826 UNION ST, LA', OWNERNME1 'CONDO MASTER'), Algiers across the Mississippi (94ms, 246 features, PARCELID 41001272, '1306 PACIFIC AVE, LA, 70114') and Lakeview (65ms, 224 features, PARCELID 41011510, '6198 MILNE BLVD, LA, 70124') — three real, distinct parcels at the far corners of the parish, not just its downtown. Found by route 3 (the jurisdiction's OWN GIS hostname, gis.nola.gov/arcgis/rest/services) after routes 1 and 2 both came up empty — the third consecutive time route 3 has succeeded where 1 and 2 failed (Maricopa, Allegheny, Orleans). → V1127504.",
   },
   /* ═══ NEW-1 (Louisiana parishes, 2026-09-30) — all measured LIVE from this sandbox (ArcGIS Online is reachable;
    * parish-owned hosts are not). See docs/STATEWIDE-PARCELS.md "Louisiana parishes" for the routes tried on every
    * parish, the not-found and blocked-candidate tables, and the rejected candidates. ═══ */
   la_ascension: {
+    publisher: "third-party",
+    publisherName: "Westwood (CSRS) AGOL copy of the Ascension Parish assessor roll",
     verifiedOn: "2026-09-30",
     verifiedNote: "VERIFIED LIVE from this sandbox 2026-09-30: 48,115 parcel polygons, esriGeometryPolygon, layer \"Ascension_Parish_Tax_Parcels\", extent -91.11..-90.63 / 30.06..30.35 (matches Ascension Parish), 29/30 in-parish probe points answered (misses are marsh/water/road, and a 1 km box around each parish seat held real parcels — no city-hole). Three widely spread hits: 30.094,-91.071 → id 252000, owner \"EVAN BELLE CORPORATION\"; 30.203,-90.667 → id 8725100, owner \"THE LOUISIANA WILDLIFE AND F\"; 30.334,-90.961 → id 5670001, owner \"LEMOINE, KENNETH G\". SOURCE: Westwood/CSRS engineering-firm ArcGIS Online org `FqQ2BQIKVGpUWqAa` (item owner CFOrdoyne_westwood; a same-schema copy sits on the sibling CSRS-GIS org `1fGAZVgZnPx4zcNH`) — a THIRD-PARTY REPUBLICATION of the parish assessor's tax roll, not the parish's own server. Parish's own host geo.apgov.us (Ascension Parish Government) lists `AscensionGeneralDetails/MapServer/5` — blocked here, see the Louisiana candidates table. Situs is split (LOCATION_S house number + LOCATION_1 street + LOCATION_C city); no single whole-address column exists, so the address search runs on the street-name column LOCATION_1 and the card title falls back to the searched address. → V1413376.",
   },
   la_assumption: {
+    publisher: "third-party",
+    publisherName: "Westwood (CSRS) AGOL copy of the Assumption Parish assessor roll",
     verifiedOn: "2026-09-30",
     verifiedNote: "VERIFIED LIVE from this sandbox 2026-09-30: 14,275 parcel polygons, esriGeometryPolygon, layer \"Assumption_Parish_Parcels_2019\", extent -91.26..-90.89 / 29.63..30.08 (matches Assumption Parish), 24/30 in-parish probe points answered (misses are marsh/water/road, and a 1 km box around each parish seat held real parcels — no city-hole). Three widely spread hits: 29.983,-91.025 → id 600016200A, owner \"CAMPO, PHILIP NOLAN &\"; 29.744,-91.084 → id 300079600, owner \"NORMAN, P. R. ET AL\"; 29.949,-91.229 → id 900017500, owner \"BROWNELL-KIDD CO.\". SOURCE: Westwood/CSRS engineering-firm ArcGIS Online org `FqQ2BQIKVGpUWqAa` (item owner CFOrdoyne_westwood; a same-schema copy sits on the sibling CSRS-GIS org `1fGAZVgZnPx4zcNH`) — a THIRD-PARTY REPUBLICATION of the parish assessor's tax roll, not the parish's own server. Attribute-light by design (PIN, Taxpayer, MapAcres — no situs, no assessed value); the card shows owner (Taxpayer), parcel # and acreage; address search is unavailable and says so. Layer title carries 2019 but the roll was re-published 2026-05-29. → V1413376.",
   },
   la_iberville: {
+    publisher: "third-party",
+    publisherName: "Westwood (CSRS) AGOL copy of the Iberville Parish assessor roll",
     verifiedOn: "2026-09-30",
     verifiedNote: "VERIFIED LIVE from this sandbox 2026-09-30: 17,471 parcel polygons, esriGeometryPolygon, layer \"Iberville_Parish_Tax_Parcels\", extent -91.7..-91.02 / 30.02..30.5 (matches Iberville Parish), 26/27 in-parish probe points answered (misses are marsh/water/road, and a 1 km box around each parish seat held real parcels — no city-hole). Three widely spread hits: 30.32,-91.169 → id 0600717700, owner \"AUSTRALIA PLTG CO LTD.\"; 30.465,-91.643 → id 8901382548, owner \"UNITED STATES OF AMERICA\"; 30.177,-91.432 → id 0801010000A, owner \"FRANK BAIST COMPANY LLC & OT\". SOURCE: Westwood/CSRS engineering-firm ArcGIS Online org `FqQ2BQIKVGpUWqAa` (item owner CFOrdoyne_westwood; a same-schema copy sits on the sibling CSRS-GIS org `1fGAZVgZnPx4zcNH`) — a THIRD-PARTY REPUBLICATION of the parish assessor's tax roll, not the parish's own server; a duplicate `Iberville_Parish_Parcels_1dd47` sits beside it with identical 17,471 features. Parish roll also served by the assessor-consortium host gissrv1.romlc.net (LA_Assessors/MapServer/1, shared with West Baton Rouge) — blocked here. Situs is split (Address_Nu + Street_Nam; Physical_A is the whole line where populated), so search runs on Street_Nam. → V1413376.",
   },
   la_stcharles: {
+    publisher: "third-party",
+    publisherName: "Westwood (CSRS) AGOL copy of the St. Charles Parish assessor roll",
     verifiedOn: "2026-09-30",
     verifiedNote: "VERIFIED LIVE from this sandbox 2026-09-30: 34,253 parcel polygons, esriGeometryPolygon, layer \"Saint_Charles_Parish_Tax_Parcels\", extent -90.55..-90.17 / 29.69..30.08 (matches St. Charles Parish), 25/31 in-parish probe points answered (misses are marsh/water/road, and a 1 km box around each parish seat held real parcels — no city-hole). Three widely spread hits: 30.003,-90.484 → id 000000000012, situs \"194 POST ST\"; 29.765,-90.268 → id 710600100001, owner \"LA. WILDLIFE & FISHERIES COM\"; 30.032,-90.299 → id 000000000056. SOURCE: Westwood/CSRS engineering-firm ArcGIS Online org `FqQ2BQIKVGpUWqAa` (item owner CFOrdoyne_westwood; a same-schema copy sits on the sibling CSRS-GIS org `1fGAZVgZnPx4zcNH`) — a THIRD-PARTY REPUBLICATION of the parish assessor's tax roll, not the parish's own server. `Address` is the whole situs line (populated on ~1 in 4 sampled rows — most St. Charles land is rural/marsh). detectField would have picked FID for the ID; PI_CODE (the 12-character assessor parcel code) is PINNED. → V1413376.",
   },
   la_stjames: {
+    publisher: "third-party",
+    publisherName: "Westwood (CSRS) AGOL copy of the St. James Parish assessor roll",
     verifiedOn: "2026-09-30",
     verifiedNote: "VERIFIED LIVE from this sandbox 2026-09-30: 10,301 parcel polygons, esriGeometryPolygon, layer \"Saint_James_Parish_Tax_Parcels\", extent -90.96..-90.64 / 29.89..30.17 (matches St. James Parish), 27/30 in-parish probe points answered (misses are marsh/water/road, and a 1 km box around each parish seat held real parcels — no city-hole). Three widely spread hits: 30.02,-90.763 → id 0400095490, owner \"ROUSSEL, THE SHELDON & LOIS\"; 30.084,-90.935 → id 0500034700, owner \"MOSAIC FERTILIZER LLC - FAUS\", situs \"Not Available\"; 30.126,-90.664 → id 7200003668, owner \"THE LA. DEPT. OF WILDLIFE & \". SOURCE: Westwood/CSRS engineering-firm ArcGIS Online org `FqQ2BQIKVGpUWqAa` (item owner CFOrdoyne_westwood; a same-schema copy sits on the sibling CSRS-GIS org `1fGAZVgZnPx4zcNH`) — a THIRD-PARTY REPUBLICATION of the parish assessor's tax roll, not the parish's own server. Parish's own viewer gisviewer.stjamesla.com (TaxViewer/MapServer/4) — blocked here, see the Louisiana candidates table. Owner is published as `TAXPAYER` and the situs as the shapefile-truncated `Physical_A`; both needed a small addition to the shared owner/situs resolvers (appraisal.js) to reach the card. → V1413376.",
   },
   la_stjohnthebaptist: {
+    publisher: "third-party",
+    publisherName: "Westwood (CSRS) AGOL copy of the St. John the Baptist Parish assessor roll",
     verifiedOn: "2026-09-30",
     verifiedNote: "VERIFIED LIVE from this sandbox 2026-09-30: 26,805 parcel polygons, esriGeometryPolygon, layer \"Saint_John_the_Baptist_Tax_Parcels\", extent -90.69..-90.3 / 29.9..30.3 (matches St. John the Baptist Parish), 15/26 in-parish probe points answered (misses are marsh/water/road, and a 1 km box around each parish seat held real parcels — no city-hole). Three widely spread hits: 30.053,-90.543 → id 0500281300, owner \"VICKNAIR, HENRY D\"; 30.246,-90.368 → id 0400101720, owner \"LOUISIANA DEPARTMENT OF WILD\"; 30.214,-90.602 → id 0600013300, owner \"THE CONSERVATION FUND\". SOURCE: Westwood/CSRS engineering-firm ArcGIS Online org `FqQ2BQIKVGpUWqAa` (item owner CFOrdoyne_westwood; a same-schema copy sits on the sibling CSRS-GIS org `1fGAZVgZnPx4zcNH`) — a THIRD-PARTY REPUBLICATION of the parish assessor's tax roll, not the parish's own server. PAR_ADDR holds the HOUSE NUMBER only (PAR_STNM the street, rarely populated) — the same shape as Rockdale GA; pinned so a house-number search finds lots. → V1413376.",
   },
   la_stbernard: {
+    publisher: "third-party",
+    publisherName: "Westwood (CSRS) AGOL copy of the St. Bernard Parish assessor roll",
     verifiedOn: "2026-09-30",
     verifiedNote: "VERIFIED LIVE from this sandbox 2026-09-30: 22,764 parcel polygons, esriGeometryPolygon, layer \"Saint_Bernard_Parish_Tax_Parcels\", extent -90.01..-89.17 / 29.63..30.16 (matches St. Bernard Parish), 19/31 in-parish probe points answered (misses are marsh/water/road, and a 1 km box around each parish seat held real parcels — no city-hole). Three widely spread hits: 29.982,-89.514 → id 739900011020, owner \"BILOXI MARSH LANDS CORP\"; 29.95,-89.963 → id 3544160A0002, owner \"PARK PLAZA SHOPPING CENTER N\", situs \"3200\"; 29.73,-89.663 → id 739900011020, owner \"BILOXI MARSH LANDS CORP\". SOURCE: Westwood/CSRS engineering-firm ArcGIS Online org `FqQ2BQIKVGpUWqAa` (item owner CFOrdoyne_westwood; a same-schema copy sits on the sibling CSRS-GIS org `1fGAZVgZnPx4zcNH`) — a THIRD-PARTY REPUBLICATION of the parish assessor's tax roll, not the parish's own server. Parish's own host lucity.sbpg.net (`ComDev/Parcels3/MapServer/0`) — blocked here, see the Louisiana candidates table. Situs is split (Address_Nu + Street_Nam); Owner_Addr is the owner's MAILING block (excluded from the situs ladder). → V1413376.",
   },
   la_stmartin: {
+    publisher: "third-party",
+    publisherName: "Westwood (CSRS) AGOL copy of the St. Martin Parish assessor roll",
     verifiedOn: "2026-09-30",
     verifiedNote: "VERIFIED LIVE from this sandbox 2026-09-30: 44,228 parcel polygons, esriGeometryPolygon, layer \"StMartin_Parcels\", extent -91.99..-91.09 / 29.73..30.5 (matches St. Martin Parish), 23/25 in-parish probe points answered (misses are marsh/water/road, and a 1 km box around each parish seat held real parcels — no city-hole). Three widely spread hits: 30.142,-91.638 → id 1630004041, owner \"CUMMINGS, GLORIA\"; 29.783,-91.156 → id 2890004616, owner \"WILLIAMS, INC.\"; 30.321,-91.914 → id 05002A2231, owner \"ATCHAFALAYA CRAWFISH PROCESS\". SOURCE: Westwood/CSRS engineering-firm ArcGIS Online org `FqQ2BQIKVGpUWqAa` (item owner CFOrdoyne_westwood; a same-schema copy sits on the sibling CSRS-GIS org `1fGAZVgZnPx4zcNH`) — a THIRD-PARTY REPUBLICATION of the parish assessor's tax roll, not the parish's own server. Situs is split (HOUSE_NO + STREET_NAM); OWN_ADDRES/ADDRESS1 are mailing blocks (excluded). → V1413376.",
   },
   la_plaquemines: {
+    publisher: "third-party",
+    publisherName: "Westwood (CSRS) AGOL copy of the Plaquemines Parish assessor roll",
     verifiedOn: "2026-09-30",
     verifiedNote: "VERIFIED LIVE from this sandbox 2026-09-30: 18,008 parcel polygons, esriGeometryPolygon, layer \"Plaquemines_Parish_Tax_Parcels\", extent -90.08..-89.02 / 28.91..29.9 (matches Plaquemines Parish), 18/41 in-parish probe points answered (misses are marsh/water/road, and a 1 km box around each parish seat held real parcels — no city-hole). Three widely spread hits: 29.538,-89.745 → id 1257250; 29.314,-89.343 → id 0000000; 29.838,-89.906 → id 1370950. SOURCE: Westwood/CSRS engineering-firm ArcGIS Online org `FqQ2BQIKVGpUWqAa` (item owner CFOrdoyne_westwood; a same-schema copy sits on the sibling CSRS-GIS org `1fGAZVgZnPx4zcNH`) — a THIRD-PARTY REPUBLICATION of the parish assessor's tax roll, not the parish's own server. A second, near-identical copy `PlaqueminesParcelLayer` (18,265 features, 2025-03-18) sits on another org (fe3XWHMASK948q2c) — not chosen: older and editable (Create/Delete/Update enabled). ATTRIBUTE-LIGHT — measured honestly: the geometry tiles the parish but only ~2/3 of sampled parcels carry ASSESSID and ~1/4 PARCELID; the `Owner` column exists and was empty on every sampled row. Wired on the Virginia/Hawaii attribute-light precedent (boundary + id), NOT as an owner source. → V1413376.",
   },
   la_sttammany: {
+    publisher: "own",
+    publisherName: "St. Tammany Parish Assessor's Office",
     verifiedOn: "2026-09-30",
     verifiedNote: "VERIFIED LIVE from this sandbox 2026-09-30: 135,083 parcel polygons, esriGeometryPolygon, layer \"STP_Parcels_2025\", extent -90.26..-89.52 / 30.15..30.71 (matches St. Tammany Parish), 29/31 in-parish probe points answered (misses are marsh/water/road, and a 1 km box around each parish seat held real parcels — no city-hole). Three widely spread hits: 30.385,-90.045 → id 44323, situs \"1859 VIOLA ST\"; 30.222,-89.626 → id 95941, situs \"0 NO ADDRESS\"; 30.671,-90.15 → id 15906, situs \"0 NO ADDRESS\". SOURCE: AGOL item owner ROkwemba (an individual account) — the item's own copyright line reads \"©2025 St. Tammany Parish Assessor's Office\" and its snippet \"St. Tammany Parish Assessor Office 2025 Parcels with Tax Roll\"; a second copy `stpao_parcel_data` (owner mikus31, 134,747 features, 2025-08-14) has no situs column. Parish's own host gisportal.stpgov.org (`CarlData/MapServer/1`) — blocked here, see the Louisiana candidates table. ATTRIBUTE-LIGHT — schema is REID/Assessment/Physical_A/LegacyID/PARCEL_ID only (no owner). REID (the assessor account, equal to Assessment) is PINNED over the synthetic `PARCEL_ID` (\"PARCEL_\"+REID). Situs is Physical_A (\"0 NO ADDRESS\" where none). → V1413376.",
   },
   la_lafayette: {
+    publisher: "third-party",
+    publisherName: "ES2 assessor-software vendor AGOL copy (Regrid-schema, Lafayette + Vermilion)",
     verifiedOn: "2026-09-30",
     verifiedNote: "VERIFIED LIVE from this sandbox 2026-09-30: 116,693 parcel polygons in scope, esriGeometryPolygon, layer \"Parcels\", extent -92.29..-91.91 / 30.04..30.38 (matches Lafayette Parish), 29/29 in-parish probe points answered (misses are marsh/water/road, and a 1 km box around each parish seat held real parcels — no city-hole). Three widely spread hits: 30.177,-92.047 → id 6105835, owner \"HARRINGTON DONALD R / HARRIN\", situs \"200 RAVENSWOOD LN\"; 30.151,-92.249 → id 6158073, owner \"THIBODEAUX STEVEN M / THIBOD\", situs \"500 BLK CHAMBERLAIN\"; 30.359,-91.961 → id 6021439, owner \"STUART BILLY MAC CORD / STUA\", situs \"2300 BLK LA\". SOURCE: ES2 (assessor-software vendor) AGOL item `Parish_Parcels__All_` (owner es2.amelia.adams; snippet \"Tax parcels for Lafayette and Vermilion parishes\"), Regrid/Loveland national-parcel schema (geoid, parcelnumb, owner, address, gisacre) — a vendor republication, not the assessor's own Sidwell server. Shared with Vermilion: this row is scoped `geoid='22055'`. `taxyear` reads 2022 on sampled rows; layer edited 2025-12-10. Assessor's own host webgis.lafayetteassessor.com (`Sidwell/TaxParcelPublic/MapServer/0`) — blocked here, see the Louisiana candidates table. idField PINNED to `parcelnumb` — detectField picks `geoid`, the parish FIPS code, identical on every row. Situs is `address` (block-level on some rows, e.g. \"500 BLK CHAMBERLAIN\"). ⛔ REJECTED CANDIDATE: LED's `2023_Parcels_Lafayette_Parish` (115,107 features, 2025 edit) has only Name/Ownership/SUB_ID — its `Name` column is the PARCEL NUMBER, which the shared owner resolver would have shown as the OWNER. → V1413376.",
   },
   la_acadia: {
+    publisher: "own",
+    publisherName: "Acadia Parish Assessor (ES2-hosted)",
     verifiedOn: "2026-09-30",
     verifiedNote: "VERIFIED LIVE from this sandbox 2026-09-30: 46,577 parcel polygons, esriGeometryPolygon, layer \"Parcels\", extent -92.63..-92.14 / 30.05..30.48 (matches Acadia Parish), 21/25 in-parish probe points answered (misses are marsh/water/road, and a 1 km box around each parish seat held real parcels — no city-hole). Three widely spread hits: 30.16,-92.321 → id 0600052355, owner \"SONNIER, VICTORIA LEGER\"; 30.457,-92.55 → id 0700155250, owner \"YOUNG, BRENTLY J\"; 30.127,-92.588 → id 0500066800A, owner \"MELANIE E LEGROS FAMILY TRUS\". SOURCE: Acadia Parish Assessor's own ArcGIS Online org (`cWVjJ3EL88oVeYPk`; the same org's `MobileMXD` item is the assessor's \"Mobile Parish Parcel Viewer\", authored by an account named 'Acadia Parish Assessor'; this view is published by ES2 support staff), edited 2026-09-22. Owner is published as `OWNERS` (added to the shared owner resolver's fallback). MAILING_ADDRESS is the only address column — there is NO situs column, so address search is unavailable and the card title falls back to the searched address. → V1413376.",
   },
   la_eastfeliciana: {
+    publisher: "own",
+    publisherName: "East Feliciana Parish Assessor's Office",
     verifiedOn: "2026-09-30",
     verifiedNote: "VERIFIED LIVE from this sandbox 2026-09-30: 16,762 parcel polygons, esriGeometryPolygon, layer \"EFAOParcels\", extent -91.32..-90.83 / 30.65..31 (matches East Feliciana Parish), 26/26 in-parish probe points answered (misses are marsh/water/road, and a 1 km box around each parish seat held real parcels — no city-hole). Three widely spread hits: 30.787,-91.237 → id 1200086000; 30.948,-90.867 → id 8200070700; 30.734,-90.941 → id 6200067303. SOURCE: East Feliciana Parish Assessor's OWN account (item owner csnyder@efassessor.com; title \"EFAO Parcels for Software and Services Public View\"), edited 2026-09-25. ⛔ REJECTED CANDIDATE on another org: `EastFelParcels` (owner daviddcbudtest, 560,226 features, 2020) — a stale test-account explosion of the roll. ATTRIBUTE-LIGHT public view — ID / PIN_Number / Lot_Number only. detectField would have picked OBJECTID for the id; PIN_Number is PINNED. → V1413376.",
   },
   la_caddo: {
+    publisher: "third-party",
+    publisherName: "Northwest Louisiana Council of Governments (republishes the Caddo assessor roll)",
     verifiedOn: "2026-09-30",
     verifiedNote: "VERIFIED LIVE from this sandbox 2026-09-30: 140,086 parcel polygons, esriGeometryPolygon, layer \"Caddo Parish Parcels\", extent -94.06..-93.46 / 32.19..33.02 (matches Caddo Parish), 27/27 in-parish probe points answered (misses are marsh/water/road, and a 1 km box around each parish seat held real parcels — no city-hole). Three widely spread hits: 32.96,-93.829 → id 231429000001100; 32.2,-93.999 → id 141615000000500; 32.263,-93.53 → id 151130000002700. SOURCE: Northwest Louisiana Council of Governments (item owner kevinreeves_NLCOG, folder `Assessor_Data`), served through ArcGIS Online's federated-server proxy (utility.arcgis.com) — a regional republication of the Caddo Assessor's roll, not the assessor's own server; no editing date is exposed. Assessor consortium host gissrv1.romlc.net (`LA_Assessors/MapServer/3`) — blocked here. ATTRIBUTE-LIGHT — LOWPARCELID/PARCELID only. A sibling `Caddo_Parish_Parcel_Boundaries` (682,101 polygons, id-only, hit only 2 of 16 spread points) was measured and not chosen. → V1413376.",
   },
   la_bossier: {
+    publisher: "third-party",
+    publisherName: "Northwest Louisiana Council of Governments (republishes the Bossier assessor roll)",
     verifiedOn: "2026-09-30",
     verifiedNote: "VERIFIED LIVE from this sandbox 2026-09-30: 75,290 parcel polygons, esriGeometryPolygon, layer \"Bossier Parish Parcels\", extent -93.84..-93.38 / 32.23..33.02 (matches Bossier Parish), 22/25 in-parish probe points answered (misses are marsh/water/road, and a 1 km box around each parish seat held real parcels — no city-hole). Three widely spread hits: 32.42,-93.661 → id 113200; 32.962,-93.53 → id 148152; 32.782,-93.76 → id 108073. SOURCE: Northwest Louisiana Council of Governments (item owner kevinreeves_NLCOG, folder `Assessor_Data`) via the utility.arcgis.com federated proxy — a regional republication of the Bossier Assessor's roll; no editing date is exposed. Assessor consortium host gissrv1.romlc.net (`LA_Assessors/MapServer/7`) — blocked here. Owner name is in `Assessme_1` (and Address1), which no shared resolver claims, so the card shows parcel # and acreage but NOT the owner — a known gap, not fixed here. `StreetName` mixes situs and mailing lines (\"P O BOX 56\") so no address search is pinned; detectField picks OBJECTID_1 for the ID, so `Assessment` (the assessor account) is PINNED. → V1413376.",
   },
   la_webster: {
+    publisher: "third-party",
+    publisherName: "Northwest Louisiana Council of Governments (republishes the Webster assessor roll)",
     verifiedOn: "2026-09-30",
     verifiedNote: "VERIFIED LIVE from this sandbox 2026-09-30: 55,625 parcel polygons, esriGeometryPolygon, layer \"Webster Parish Parcels\", extent -93.53..-93.15 / 32.41..33.02 (matches Webster Parish), 25/25 in-parish probe points answered (misses are marsh/water/road, and a 1 km box around each parish seat held real parcels — no city-hole). Three widely spread hits: 32.975,-93.496 → id 118280A, owner \"DORCHEAT LAND & TIMBER, LLC\"; 32.505,-93.2 → id 101024, owner \"RISER, GLORIA JAN BUTLER\"; 32.787,-93.259 → id 120862, owner \"ZACHRY, WILLIAM COLE TRUST\". SOURCE: Northwest Louisiana Council of Governments (item owner kevinreeves_NLCOG, folder `Assessor_Data`) via the utility.arcgis.com federated proxy — a regional republication of the Webster Assessor's roll; no editing date is exposed. Situs is split (Address_Nu + Street_Nam), so search runs on Street_Nam; `PIN` is a map-derived key, so ParcelNumb (equal to ASSESSNUM) is PINNED as the ID. → V1413376.",
   },
   la_stmary: {
+    publisher: "third-party",
+    publisherName: "St. Mary Parish levee district (copy of the parish assessor roll)",
     verifiedOn: "2026-09-30",
     verifiedNote: "VERIFIED LIVE from this sandbox 2026-09-30: 43,610 parcel polygons, esriGeometryPolygon, layer \"Parcels\", extent -91.88..-91.08 / 29.48..29.96 (matches St. Mary Parish), 34/36 in-parish probe points answered (misses are marsh/water/road, and a 1 km box around each parish seat held real parcels — no city-hole). Three widely spread hits: 29.851,-91.681 → id 1634924015.00, owner \"KILGORE CORPORATION\", situs \"240\"; 29.634,-91.135 → id 3314124008.00, owner \"AVOCA INC\", situs \"999\"; 29.562,-91.439 → id 2473804003.00, owner \"SM ENERGY CO\", situs \"999\". SOURCE: St. Mary Parish levee district's federated ArcGIS Server service (`st_mary_levee/st_mary2`, layer 4 \"Parcels\") reached through the utility.arcgis.com proxy — the district's copy of the parish assessor's roll; no editing date is exposed. ADDRESS_NU carries the placeholder \"999\" on many rows and STREET_NAM \"N/A\"; search runs on STREET_NAM. PARCEL_ID is a sequential row number, so PIN is PINNED as the ID. → V1413376.",
   },
   la_terrebonne: {
+    publisher: "third-party",
+    publisherName: "DesireLine LLC (consulting firm) AGOL copy",
     verifiedOn: "2026-09-30",
     verifiedNote: "VERIFIED LIVE from this sandbox 2026-09-30: 55,364 parcel polygons, esriGeometryPolygon, layer \"TerrebonneParcels\", extent -91.35..-90.37 / 28.99..29.78 (matches Terrebonne Parish), 25/28 in-parish probe points answered (misses are marsh/water/road, and a 1 km box around each parish seat held real parcels — no city-hole). Three widely spread hits: 29.481,-91.192 → id R09-38085; 29.38,-90.448 → id R06-31916; 29.683,-90.82 → id R02-43192. SOURCE: Consulting firm's AGOL org (item owner DesireLineLLC), edited 2026-03-05 — a third-party republication; a sibling `Terrebonne_Property_Owners_2021` also exists on the org. Parish's own host gis.tpcg.org (`SAS/webmap_public/MapServer/0`, TPCG = Terrebonne Parish Consolidated Government) — blocked here, see the Louisiana candidates table. ATTRIBUTE-LIGHT — ACCT_NUM (assessor account) and ACSDNO only; boundary + id, no owner or situs. → V1413376.",
   },
   la_lafourche: {
+    publisher: "third-party",
+    publisherName: "North Lafourche Conservation, Levee & Drainage District (copy of the parish roll)",
     verifiedOn: "2026-09-30",
     verifiedNote: "VERIFIED LIVE from this sandbox 2026-09-30: 56,246 parcel polygons, esriGeometryPolygon, layer \"LafourcheParishParcels2020\", extent -91.01..-90.07 / 29.08..29.92 (matches Lafourche Parish), 26/31 in-parish probe points answered (misses are marsh/water/road, and a 1 km box around each parish seat held real parcels — no city-hole). Three widely spread hits: 29.802,-90.847 → id 0010062300, owner \"ROUSE LAND COMPANY\", situs \"1653\"; 29.29,-90.104 → id 0102313000, owner \"LOUISIANA LAND & EXPLORATION\"; 29.738,-90.401 → id 0083156100, owner \"CENAC, ARLEN B., JR.\", situs \"2490\". SOURCE: North Lafourche Conservation, Levee & Drainage District's AGOL org (item owner NLCLDD; title `LafourcheParishParcels2020`, edited 2024-01-15) — a public agency's copy of the parish roll, 2020 vintage refreshed 2024. Situs is split (address_nu + street_nam); search runs on street_nam. Vintage is the oldest of this batch — still inside the repo's 5-year bar by its 2024 edit date. → V1413376.",
   },
   la_allen: {
+    publisher: "third-party",
+    publisherName: "DesireLine LLC (consulting firm) AGOL copy of the TotaLand viewer layer",
     verifiedOn: "2026-09-30",
     verifiedNote: "VERIFIED LIVE from this sandbox 2026-09-30: 17,706 parcel polygons, esriGeometryPolygon, layer \"Allen_Parish_Parcels\", extent -93.13..-92.58 / 30.42..30.9 (matches Allen Parish), 24/24 in-parish probe points answered (misses are marsh/water/road, and a 1 km box around each parish seat held real parcels — no city-hole). Three widely spread hits: 30.503,-93.084 → id 0300042600I, owner \"ALLIED DEVELOPMENT, INC.\"; 30.719,-92.622 → id 0500111550, owner \"VBT. LLC\"; 30.791,-92.958 → id 0400049499, owner \"M & G FARMS, INC.\". SOURCE: Consulting firm's AGOL org (item owner DesireLineLLC; item text \"Parcel layer for Allen Parish from https://allen.totaland.com/\" — the assessor's vendor viewer), edited 2023-01-26. Assessor's vendor host gis3.totaland.com (`Allen/AllenReference2/MapServer/14`) — blocked here, see the Louisiana candidates table. Owner, acreage and assessed-tax fields are rich; situs is `par_addres` (street only, ~1 in 10 rows) — pinned for search. Vintage 2023 (tax_year 2021 on sampled rows). → V1413376.",
   },
   la_cameron: {
+    publisher: "third-party",
+    publisherName: "AGOL individual account ldl14 (Regrid-schema copy)",
     verifiedOn: "2026-09-30",
     verifiedNote: "VERIFIED LIVE from this sandbox 2026-09-30: 11,918 parcel polygons, esriGeometryPolygon, layer \"Parcels_Cameron_Parish\", extent -93.9..-92.61 / 29.58..30.05 (matches Cameron Parish), 21/25 in-parish probe points answered (misses are marsh/water/road, and a 1 km box around each parish seat held real parcels — no city-hole). Three widely spread hits: 29.734,-93.801 → id 0501071300, owner \"HENDERSON HELEN LEE\"; 29.988,-92.707 → id 0101018900, owner \"DIXIE RICE AGRICULTURAL LLC\", situs \"415 VETERANS MEMORIAL DR\"; 29.915,-93.204 → id 0301056100, owner \"MIAMI ALTERNATIVES, LLC\". SOURCE: AGOL item owner ldl14 (an individual account with no organisation name), Regrid/Loveland national-parcel schema (GEOID, PARCELNUMB, OWNER, GISACRE) — a third-party republication, edited 2023-03-13. ⛔ `ADDRESS_SO` reads the literal \"county\" (the source-of-address flag) and is listed BEFORE the real `ADDRESS` column, so the shared situs ladder would have titled parcels \"county\" — fixed in appraisal.js (address-source/count keys never claim the situs row). idField PINNED to PARCELNUMB (detectField picks GEOID, the parish FIPS). → V1413376.",
   },
   la_natchitoches: {
+    publisher: "third-party",
+    publisherName: "AGOL individual account Michaeljuser58 (Regrid-style copy)",
     verifiedOn: "2026-09-30",
     verifiedNote: "VERIFIED LIVE from this sandbox 2026-09-30: 29,443 parcel polygons, esriGeometryPolygon, layer \"LA_Natchitoches_Parish_22069_a0198910\", extent -93.44..-92.71 / 31.35..32.15 (matches Natchitoches Parish), 30/30 in-parish probe points answered (misses are marsh/water/road, and a 1 km box around each parish seat held real parcels — no city-hole). Three widely spread hits: 31.596,-93.328 → id 0070005400, owner \"WOODSIDE ACQUISITIONS LLC\"; 31.535,-92.768 → id 0100008550, owner \"BROSSETTE ALVIN D. REVOCABLE\", situs \"3401 MARCO RD.\"; 31.967,-92.992 → id 0020118900, owner \"MARTIN TIMBER CO. L.L.C.\". SOURCE: AGOL item owner Michaeljuser58 (individual account), Regrid/Loveland-style schema, edited 2023-07-19 — a third-party republication. Assessor consortium host gissrv1.romlc.net (`LA_Assessors/MapServer/5`) — blocked here. ⛔ situs is SITUS (populated on ~3% of rows); the near-universal `M_ADDRESSN`/`M_STREETNM` columns are the owner's MAILING address — the shared ladder used to title the card with M_ADDRESSN (a mailing house number). Fixed in appraisal.js (an `m_`-prefixed key is a mailing key). → V1413376.",
   },
   la_tangipahoa: {
+    publisher: "third-party",
+    publisherName: "DesireLine LLC (consulting firm) AGOL copy",
     verifiedOn: "2026-09-30",
     verifiedNote: "VERIFIED LIVE from this sandbox 2026-09-30: 75,019 parcel polygons, esriGeometryPolygon, layer \"ParcelsNew\", extent -90.57..-90.24 / 30.28..31 (matches Tangipahoa Parish), 26/26 in-parish probe points answered (misses are marsh/water/road, and a 1 km box around each parish seat held real parcels — no city-hole). Three widely spread hits: 30.726,-90.539 → id 6037992, owner \"WALKER SANDRA F\", situs \"11102 HIGHWAY 16\"; 30.334,-90.34 → id 2152401, owner \"LOUISIANA WILDLIFE & FISHERI\", situs \"NONE AVAILABLE\"; 30.614,-90.265 → id 6037593, owner \"DUFRECHOU PAUL J\", situs \"27433 HILLTOP COURT\". SOURCE: Consulting firm's AGOL org (item owner DesireLineLLC), `TangiParcelsNew` layer 1, edited 2026-09-03 (a 2022-11-18 sibling `Parcels` layer has 73,475 features and was not chosen). Parish's own host tangis.tangipahoa.org (`Cadastral/TaxParcel_A/MapServer/0`) — blocked here, see the Louisiana candidates table. Owner + whole-line situs + Assessment all populated. detectField would pick OBJECTID for the id, so `Assessment` is PINNED. → V1413376.",
   },
   la_livingston: {
+    publisher: "own",
+    publisherName: "Livingston Parish Government (AGOL account LivParishGov)",
     verifiedOn: "2026-09-30",
     verifiedNote: "VERIFIED LIVE from this sandbox 2026-09-30: 79,656 parcel polygons, esriGeometryPolygon, layer \"Parcels (non-GCT)\", extent -90.99..-90.47 / 30.18..30.65 (matches Livingston Parish), 24/27 in-parish probe points answered (misses are marsh/water/road, and a 1 km box around each parish seat held real parcels — no city-hole). Three widely spread hits: 30.548,-90.94 → id 0011338, owner \"LYNCH, AIMEE HOPE\", situs \"8427\"; 30.263,-90.612 → id ???, situs \"~\"; 30.584,-90.571 → id 0124750, owner \"ST CYR, GLENN R & BETTY K\", situs \"~\". SOURCE: Livingston Parish GOVERNMENT's own ArcGIS Online (item owner LivParishGov, service `Assessor/Livingston_Parish`, layer 21 \"Parcels (non-GCT)\") reached through the utility.arcgis.com federated proxy; no editing date is exposed. ⛔ REJECTED on the same parish: `Livingston_Parish_Assessor_Parcels` (owner ds.admin) holds 5,541 features dated 2/21/2018 covering only the Denham Springs corner, and sibling layer 20 \"Lots\" hit 0 of 16 spread points. `Par_Address` is the whole situs line and is preferred over the house-number-only Address_Number; the source publishes \"~\" for unset values (now treated as a placeholder by the shared resolvers). → V1413376.",
   },
   la_calcasieu: {
+    publisher: "own",
+    publisherName: "Calcasieu Parish Police Jury",
     verifiedOn: "2026-10-04",
     verifiedNote: "MEASURED measured live from Michael's browser at the planyr.io origin, 2026-10-04 (CORS-confirmed from the production origin, so no gis-proxy); this sandbox's egress blocks the host (CONNECT 403), so it was NOT independently re-probed here — wired from those measurements, live re-check → V1538480. 167,981 parcel polygons (esriGeometryPolygon), extent -93.77,30.04 to -92.89,30.49 (the whole parish). Point 30.2266,-93.2174 (Lake Charles) → PIN \"061008-1397-13 -000G\", NAME \"SUGAR BOWL 2004 LLC\", PHYSICALAD present. SOURCE: Calcasieu Parish Police Jury's own server (FIRST-PARTY; AGOL item owner giscppj) — supersedes the partial Westwood `Calcasieu_Tax_Parcels` (26,401, Lake Charles half) and the unattributable `CalcParcels` copy. Also present, not used as primary: gis2.totaland.com .../CPPJ/CPPJ_Group2/MapServer/21 (same roll, no situs). ⛔ ADDRESS1/ADDRESS2 are the owner's MAILING block and must never reach the card's address line (numbered lines are excluded from the generic situs rung); the situs is PHYSICALAD, which the shared ladder now claims (appraisal.js). Owner is NAME; ASSESSMENT and WARD also published. idField PINNED to PIN.",
   },
   la_jefferson: {
+    publisher: "own",
+    publisherName: "Jefferson Parish GIS (jpgis.jeffparish.net)",
     verifiedOn: "2026-10-04",
     verifiedNote: "MEASURED measured live from Michael's browser at the planyr.io origin, 2026-10-04 (CORS-confirmed from the production origin, so no gis-proxy); this sandbox's egress blocks the host (CONNECT 403), so it was NOT independently re-probed here — wired from those measurements, live re-check → V1538480. Layer 72 \"Parcel Ownership\" of PAO_MAP_2025 (a FeatureServer twin exists): 192,313 polygons (180,965 with OWNERNAME populated), extent -90.28,29.65 to -90.01,30.05 (east + west bank), maxRecordCount 2000. Spread hits via small envelope: Elmwood → TAXROLLPAR 0700000440 \"EMMERSON ASSET MANAGEMENT\"; Harahan → 3933287515 \"S S SIGNS AND GRAPHICS\"; Metairie → 9700005539 \"MAGNOLIA SCHOOL\"; Westwego-area -90.05,29.90 → 0100000361; Lafitte-area -90.10,29.70 → 0600001469. SOURCE: Jefferson Parish GIS with the assessor roll joined (FIRST-PARTY, parish server). ⛔ GOTCHA, measured: a BARE point query (geometry=x,y with inSR=4326) returned 0 features at three in-parish points that DO have parcels, while a small ENVELOPE around the same points returned real parcels every time. The CAUSE WAS NOT DETERMINED (no access to the host from here) — so the row declares `pointViaEnvelope`, and `queryAtPoint` asks this layer the envelope shape that was measured working (pinned in test/louisianaParishes.test.js). The app's own click path sends a JSON point WITH a spatialReference, a different shape from the bare one that failed and not itself measured on this layer — V1538480 step 6 measures it. ⛔ MAILING columns OWNER_ADDR / OWNER_AD_1 / OWNER_AD_2 / CITYSTATE / ZIP / FULLOWNERA must never reach the card's address line (the mailing-key pattern now claims OWNER_AD_*/FULLOWNERA); the situs is PARCELADDR (+ ADDRESSNUM/ADDRESSSTR). Layer 18 \"Parcels\" (155,139, zoning/lot, NO owner) on the same service is what the Westwood copy mirrors — not used. idField PINNED to TAXROLLPAR (PARCELNUMB also published).",
   },
   la_jeffersondavis: {
+    publisher: "own",
+    publisherName: "TotaLand-hosted for the Jefferson Davis Parish Economic Development organization",
     verifiedOn: "2026-10-04",
     verifiedNote: "MEASURED measured live from Michael's browser at the planyr.io origin, 2026-10-04 (CORS-confirmed from the production origin, so no gis-proxy); this sandbox's egress blocks the host (CONNECT 403), so it was NOT independently re-probed here — wired from those measurements, live re-check → V1538480. 26,157 polygons, extent -93.13,30.04 to -92.58,30.49. Point 30.2241,-92.6571 (Jennings) → ParcelID 221556545, \"PARKER, RICHARD K. CAROLYN L\", 414 BROADWAY ST N, 0.25 ac. Fields ParcelID, OwnerName, OwnerName2, LegalDescription, Acreage, par_address (situs), Zone_. SOURCE: TotaLand-hosted (gis2.totaland.com, folder AEDC) for the parish's ECONOMIC-DEVELOPMENT organisation — NOT the assessor's own server; previously recorded NOT FOUND, which was only a sandbox-reachability finding.",
   },
   la_stlandry: {
+    publisher: "own",
+    publisherName: "TotaLand-hosted St. Landry Parish service",
     verifiedOn: "2026-10-04",
     verifiedNote: "MEASURED measured live from Michael's browser at the planyr.io origin, 2026-10-04 (CORS-confirmed from the production origin, so no gis-proxy); this sandbox's egress blocks the host (CONNECT 403), so it was NOT independently re-probed here — wired from those measurements, live re-check → V1538480. 58,772 polygons. Point 30.5335,-92.0815 (Opelousas) → PARCEL_ID 0101120288, OWNER \"BATISTE SENIC M\", SITUS \"117 MAIN ST S\", OPELOUSAS. Fields PARCEL_ID, SITUS, SITUS_CITY, SITUS_ZIP, OWNER plus a NATIONAL-PARCEL-SCHEMA field set (CTY_ROW_ID, COUNTY_FIP …) — recorded honestly: this is a vendor-schema service, not the assessor's native layout. SOURCE: TotaLand-hosted parish service (gis2.totaland.com, folder StLandryParish). A different, complete source from the REJECTED `StLandryParcels` test-account copy (PARCEL/BLOCK/acreage only). The bare `SITUS` column now outranks its SITUS_CITY / SITUS_ZIP siblings in the shared ladder whatever order the service lists them.",
   },
   la_westbatonrouge: {
+    publisher: "own",
+    publisherName: "West Baton Rouge Parish Tax Assessor (TotaLand-hosted)",
     verifiedOn: "2026-10-04",
     verifiedNote: "MEASURED measured live from Michael's browser at the planyr.io origin, 2026-10-04 (CORS-confirmed from the production origin, so no gis-proxy); this sandbox's egress blocks the host (CONNECT 403), so it was NOT independently re-probed here — wired from those measurements, live re-check → V1538480. 13,178 polygons, extent -91.49,30.32 to -91.15,30.65. Fields ASSESSORID, PARCEL, ParcelNumb, AISName (owner), AISAddress / AISStreetN / AISPhysCit (situs), AISOwnerAd / AISOwnerCi (MAILING). The single Port Allen point tried (30.4515,-91.2101) MISSED — in-parish points and the seat-not-a-hole check are V1538480 step 5. SOURCE: West Baton Rouge Parish TAX ASSESSOR (FIRST-PARTY, TotaLand-hosted, folder WestBatonRougeTaxAssessor) — supersedes the stale 2018 `WBRParcels` copy. `AISName` is claimed as an owner fallback and `AISOwnerAd` is a mailing key (appraisal.js). idField PINNED to ParcelNumb (ASSESSORID / PARCEL also published — which the assessor treats as the account number is unconfirmed); addrField AISAddress is taken as the whole situs line — if it proves to be only a house number, the card falls back to the searched address and V1538480 step 5 says so.",
   },
   al_jefferson: {
+    publisher: "own",
+    publisherName: "Jefferson County Commission, AL",
     verifiedNote: "jccgis.jccal.org is blocked by this build environment's egress policy. Endpoint, feature count (652ms/68 populated fields) and county provenance are from the dispatch's own live-browser measurement, 2026-09-10 — not independently re-probed here.",
   },
   /* ═══ B1551617 — Tier 1 counties, all discovered + verified LIVE from this sandbox 2026-09-11 by
@@ -566,47 +862,69 @@ export const COUNTY_VERIFICATION = {
    * reachable here). Every one passed 3 geometry-verified spread points across the WHOLE county
    * (never just the seat), not merely a metadata check. ═══ */
   ga_fulton: {
+    publisher: "own",
+    publisherName: "Fulton County GIS (Board of Assessors data)",
     verifiedOn: "2026-09-11",
     verifiedNote: "VERIFIED LIVE from this sandbox: 373,296 parcel polygons, count query 616ms, 28 fields, esriGeometryPolygon. Replaces the previously-declined `Tax_Parcels2018` (2018 vintage, stale — docs/STATEWIDE-PARCELS.md). Discovered via the ArcGIS Hub dataset API route.",
   },
   ga_chatham: {
+    publisher: "own",
+    publisherName: "SAGIS (Savannah Area GIS) / Chatham County Board of Assessors",
     verifiedOn: "2026-09-11",
     verifiedNote: "VERIFIED LIVE from this sandbox: 126,490 parcel polygons, count query 708ms, 47 fields, esriGeometryPolygon. Previously recorded as 'not found by routes 1-2' (docs/STATEWIDE-PARCELS.md, 2026-09-10); found this session via the ArcGIS Online item search route.",
   },
   az_pinal: {
+    publisher: "third-party",
+    publisherName: "City of Maricopa GIS (republishes Pinal County Assessor parcels)",
     verifiedOn: "2026-09-11",
     verifiedNote: "VERIFIED LIVE from this sandbox: 286,959 parcel polygons, count query 523ms, 74 fields, esriGeometryPolygon. Published by the City of Maricopa's own GIS account (owner CityOfMaricopa, not the neighboring Maricopa COUNTY) — a 3-point spread 50-80 miles apart (Casa Grande / Apache Junction area / San Tan Valley area) all answered with real, distinct parcels, confirming this covers the whole county rather than just the city.",
   },
   az_maricopa: {
+    publisher: "own",
+    publisherName: "Maricopa County",
     verifiedNote: "gis.maricopa.gov is blocked by this build environment's egress policy (confirmed live, B1339920 — CONNECT tunnel rejected by organization policy). Endpoint, feature count (1,760,396 polygons, capabilities Map/Query/Data) and the 4-point spread (Phoenix/Mesa/Surprise/Buckeye, each with a real APN and sub-250ms response) are from the dispatch's own live-browser measurement, 2026-09-11 evening Central — not independently re-probed here. Layer 1 ('Parcel') was explicitly distinguished from layer 0 ('Subdivision') in that measurement; layer 0 is NOT wired.",
   },
   mo_clay: {
+    publisher: "own",
+    publisherName: "Clay County, MO GIS",
     verifiedOn: "2026-09-11",
     verifiedNote: "VERIFIED LIVE from this sandbox: 98,112 parcel polygons, count query 570ms, 40 fields, esriGeometryPolygon.",
   },
   sc_greenville: {
+    publisher: "third-party",
+    publisherName: "AGOL individual account FungiFaery (Koordinates-derived shapefile copy)",
     verifiedOn: "2026-09-11",
     verifiedNote: "VERIFIED LIVE from this sandbox: 215,484 parcel polygons, count query 387ms, 55 fields, esriGeometryPolygon. Replaces the previously-declined `Parcel_Sizes_2018_WFL1` (2018 vintage AND a derived-acreage layer, not the parcel layer itself — docs/STATEWIDE-PARCELS.md).",
   },
   ia_polk: {
+    publisher: "own",
+    publisherName: "Des Moines Area Regional GIS Partnership (Polk County is a member)",
     verifiedOn: "2026-09-11",
     verifiedNote: "VERIFIED LIVE from this sandbox: 219,672 parcel polygons, count query 291ms, 49 fields, esriGeometryPolygon. Previously recorded as 'not found by routes 1-2' (docs/STATEWIDE-PARCELS.md, 2026-09-10); found this session via the ArcGIS Hub dataset API route.",
   },
   pa_lehigh: {
+    publisher: "third-party",
+    publisherName: "AGOL account SWT_zlawlor (monthly copy pulled from Lehigh County)",
     verifiedOn: "2026-09-11",
     verifiedNote: "VERIFIED LIVE from this sandbox: 127,043 parcel polygons, count query 451ms, 21 fields, esriGeometryPolygon. Replaces the previously-declined `ATestParcel` — this is the SAME underlying ArcGIS service container (a publisher naming quirk, not the same data): fetched the service's own layer list directly and confirmed layer 0 is an unrelated 'Owner' POINT layer while layer 1 (wired here) is a real, current, 127,043-feature POLYGON parcel layer whose own AGOL item is titled 'Parcels - PA - Lehigh County'.",
   },
   nm_bernalillo: {
+    publisher: "third-party",
+    publisherName: "City of Albuquerque AGIS (republishes Bernalillo County parcels)",
     verifiedOn: "2026-09-11",
     verifiedNote: "VERIFIED LIVE from this sandbox: 257,283 parcel polygons, count query 304ms, 16 fields, esriGeometryPolygon. Published by the City of Albuquerque's GIS (owner agis_CABQ). Previously recorded as 'not found by routes 1-2' (docs/STATEWIDE-PARCELS.md, 2026-09-10).",
   },
   il_kane: {
+    publisher: "own",
+    publisherName: "Kane County, IL GIS-Technologies Department",
     verifiedOn: "2026-09-11",
     verifiedNote: "VERIFIED LIVE from this sandbox: 187,336 parcel polygons, count query 336ms, 48 fields, esriGeometryPolygon.",
   },
 
   /* B1583296 — City of Detroit, wired CITY-scoped (see cityScopes.js), not as Wayne County. */
   mi_detroit: {
+    publisher: "third-party",
+    publisherName: "SmithGroup (consulting firm) — Detroit Master Plan parcel layer",
     verifiedOn: "2026-09-12",
     verifiedNote: "Layer metadata (field list: parcel_id, address, tax_status, tax_status_description, 51 fields total) confirmed LIVE from this sandbox — services2.arcgis.com is reachable here. The dispatch's own live-browser measurement (2026-09-11 evening Central) queried a real point at downtown Detroit (42.3314, -83.0458) and returned a parcel with 46 populated fields. Detroit_MP_Parcel_Authoritative was PREVIOUSLY declined as a Wayne County candidate (B1455635/B1551617) for exactly the reason it is now wired only as a CITY scope: it is Detroit's own authoritative parcel layer and would silently return nothing across the rest of Wayne County. The boundary geometry cityScopes.js uses to decide whether a point is inside Detroit at all — 'City of Detroit Boundary', City of Detroit's own ArcGIS Online org (OpenDataAdmin_detroitmi, item 86b221bb68ca4364afe81d156e54f95c, public_authoritative) — was independently queried and verified live from this sandbox the same session; see that module's own header for the full provenance and the three control points (downtown Detroit hits; Livonia and Taylor, both real Wayne County cities, do not).",
   },
@@ -617,29 +935,45 @@ export const COUNTY_VERIFICATION = {
    * Independence) were additionally confirmed reachable, with matching field lists, directly from
    * this sandbox the same day. ═══ */
   sd_pennington: {
+    publisher: "own",
+    publisherName: "Pennington County Director of Equalization (AGOL account jdcarson_CSMGIS)",
     verifiedOn: "2026-09-15",
     verifiedNote: "VERIFIED LIVE from Michael's own browser and independently re-confirmed from this sandbox (services1.arcgis.com is reachable here): 52,547 parcel polygons, extent matching Pennington County (Rapid City), fields include PIN/TaxID/Acres/LotStreetN/LegalDescr/Subdivisio.",
   },
   sd_minnehaha: {
+    publisher: "own",
+    publisherName: "Minnehaha County, SD",
     verifiedNote: "gis.minnehahacounty.gov is blocked by this build environment's egress policy. VERIFIED LIVE from Michael's own browser 2026-09-15: 23,044 parcel polygons across the whole-county extent — but this layer has a HOLE exactly where Sioux Falls sits (a point query at downtown Sioux Falls, -96.7311/43.5460, returns ZERO; a rural point 15 miles away, -96.95/43.75, returns a real parcel). See sd_siouxfalls below for the city's own layer, which fills the hole, and cityScopes.js for the resolution mechanism. This is the worked example behind the parcel-source vetting 'city-hole' trap (ui-audit/discover-county-parcels.mjs).",
   },
   sd_siouxfalls: {
+    publisher: "own",
+    publisherName: "City of Sioux Falls, SD",
     verifiedNote: "gis.siouxfalls.gov is blocked by this build environment's egress policy. VERIFIED LIVE from Michael's own browser 2026-09-15: 67,022 parcel polygons, extent covering the city (not the county); ACREAGE is a real double, unlike Lackawanna's StatedArea below. City-scoped (cityScopes.js) — the boundary ring itself comes from Esri's own Living Atlas 'USA Census Populated Place Areas' (services.arcgis.com/P3ePLMYs2RVChkJx/…), queried live from this sandbox 2026-09-15 (the city's own AGOL account publishes no reachable mirror of its 'City Limits' layer — see cityScopes.js's own header for the full provenance).",
   },
   pa_luzerne: {
+    publisher: "own",
+    publisherName: "Luzerne County",
     verifiedNote: "gis.luzernecounty.org is blocked by this build environment's egress policy. VERIFIED LIVE from Michael's own browser 2026-09-15: 176,385 parcel polygons, extent matching Luzerne County. Layer 1 ('PublicMap/MapServer/1') is the parcel (tax parcels) layer; layer 6 on the same service is IMPROVEMENTS, a different table, and is not wired.",
   },
   pa_lackawanna: {
+    publisher: "own",
+    publisherName: "Lackawanna County",
     verifiedNote: "gis.lackawannacounty.org is blocked by this build environment's egress policy. VERIFIED LIVE from Michael's own browser 2026-09-15: 103,145 parcel polygons, extent matching Lackawanna County, Esri parcel-fabric schema (Name = the 13-digit parcel PIN, confirmed by sampled attributes). Do not wire the sibling GISViewer/ParcelsPINs service — identical count and schema, no added value.",
   },
   mi_macomb: {
+    publisher: "unverified",
+    publisherName: "AGOL personal account jschro — affiliation not established",
     verifiedOn: "2026-09-15",
     verifiedNote: "VERIFIED LIVE from Michael's own browser and independently re-confirmed from this sandbox (services6.arcgis.com is reachable here, field list matches exactly: TAX_ID/ADDRESS/TAX_TYPE/CVT_NAME/…): 332,971 parcel polygons, extent matching Macomb County. Layer ID is 10, NOT 0 (layer 0 does not exist on this service — 'Invalid URL'). ⛔ Published under a PERSONAL ArcGIS Online account, not a county-org account — the same provenance risk as the Texas statewide source whose owner deleted it (docs/STATEWIDE-PARCELS.md); flagged here so a future staleness check looks at this row first.",
   },
   mo_kansascity: {
+    publisher: "own",
+    publisherName: "City of Kansas City, MO",
     verifiedNote: "mapd.kcmo.org is blocked by this build environment's egress policy. VERIFIED LIVE from Michael's own browser 2026-09-15: 203,425 parcel polygons; a 3-point spread across the whole city (Crown Center/Jackson Co., Northland/Clay Co., the airport/Platte Co.) all answered with real, distinct parcels through this ONE layer. City-scoped (cityScopes.js) and spans Jackson, Clay, Platte and Cass counties — the ring test is county-agnostic, so no per-county branching is needed. The boundary ring comes from Esri's own Living Atlas 'USA Census Populated Place Areas' (services.arcgis.com/P3ePLMYs2RVChkJx/…), queried live from this sandbox 2026-09-15, after the city's own AGOL-hosted 'CityLimit' layer (services.arcgis.com/4o5uMWTHuOhUVJPd/…) was found to answer `returnCountOnly` with 0 features despite advertising a real extent — an empty hosted layer, confirmed live, not a reachability block. See cityScopes.js's own header for the full provenance.",
   },
   mo_independence: {
+    publisher: "own",
+    publisherName: "City of Independence, MO",
     verifiedOn: "2026-09-15",
     verifiedNote: "VERIFIED LIVE from Michael's own browser and independently re-confirmed from this sandbox (services.arcgis.com/sbDzK061dd6DNPHv is reachable here): 73,154 parcel polygons, extent covering the city (not Jackson County). `Name` is confirmed as the idField — its live field-list alias reads 'Parcel APN'. City-scoped (cityScopes.js), wholly within Jackson County, which publishes no open countywide parcel service of its own (docs/STATEWIDE-PARCELS.md) — Independence and Kansas City together are what Jackson County gets; the rest of the county has no source wired, an honest gap rather than a defect.",
   },
@@ -654,70 +988,104 @@ export const COUNTY_VERIFICATION = {
    * run from this sandbox 2026-09-24, never by a whole-layer count/extent probe. All 17 CO_NO values
    * were independently confirmed this way (not merely copied from the dispatch's own table). */
   fl_duval: {
+    publisher: "statewide",
+    publisherName: "Florida Geographic Information Office (Florida Statewide Parcels)",
     verifiedOn: "2026-09-24",
     verifiedNote: "Live point query from this sandbox at downtown Jacksonville (-81.6579, 30.3255): CO_NO 26, PARCEL_ID \"0744550000R\", PHY_ADDR1 \"3 E INDEPENDENT DR\", OWN_NAME \"JACKSONVILLE AREA CHAMBER OF C\" — the real lot at the measured address, on the shared FL_STATEWIDE_LAYER.",
   },
   fl_nassau: {
+    publisher: "statewide",
+    publisherName: "Florida Geographic Information Office (Florida Statewide Parcels)",
     verifiedOn: "2026-09-24",
     verifiedNote: "Live point query from this sandbox at Fernandina Beach (-81.4626, 30.6697): CO_NO 55, PARCEL_ID \"000031180000120290\", PHY_ADDR1 \"312 ASH ST\", OWN_NAME \"CLARK BRADFORD R\". ⛔ RECURRENCE FIX (2026-09-24, B1885600 ×2): the offline nationwide county-polygon asset's own Nassau ring used to be built from the GENERALIZED USA_Counties_Generalized_Boundaries source and did not reach the true tip of Amelia Island — this exact point resolved 'outside' against it, so the click router never fired a parcel request at all for this town, on the deployed build. Fixed by giving Florida its own dedicated FDEP shoreline source in build-county-polygons.mjs (the TX/CO treatment), rather than routing test coverage around the gap — this point now resolves 'ok'/Nassau against the rebuilt asset too. See docs/STATEWIDE-PARCELS.md's Florida section.",
   },
   fl_clay: {
+    publisher: "statewide",
+    publisherName: "Florida Geographic Information Office (Florida Statewide Parcels)",
     verifiedOn: "2026-09-24",
     verifiedNote: "Live point query from this sandbox near Green Cove Springs (-81.6777, 29.9911 — nudged ~0.001° from the exact seat point, which landed on Bay St with no parcel underneath): CO_NO 20, PARCEL_ID \"38-06-26-017310-000-00\", PHY_ADDR1 \"BAY St\", OWN_NAME \"Knight Brian\".",
   },
   fl_stjohns: {
+    publisher: "statewide",
+    publisherName: "Florida Geographic Information Office (Florida Statewide Parcels)",
     verifiedOn: "2026-09-24",
     verifiedNote: "Live point query from this sandbox at St. Augustine (-81.3145, 29.8947): CO_NO 65, PARCEL_ID \"1980800000\", PHY_ADDR1 \"70 HYPOLITA ST\", OWN_NAME \"66 AND 70 HYPOLITA LLC\".",
   },
   fl_baker: {
+    publisher: "statewide",
+    publisherName: "Florida Geographic Information Office (Florida Statewide Parcels)",
     verifiedOn: "2026-09-24",
     verifiedNote: "Live point query from this sandbox at Macclenny (-82.1265, 30.2827): CO_NO 12, PARCEL_ID \"322S22004900250010\", PHY_ADDR1 \"57 SHUEY AVE\", OWN_NAME \"CITY OF MACCLENNY\".",
   },
   fl_polk: {
+    publisher: "statewide",
+    publisherName: "Florida Geographic Information Office (Florida Statewide Parcels)",
     verifiedOn: "2026-09-24",
     verifiedNote: "Live point query from this sandbox at Lakeland (-81.9498, 28.0395): CO_NO 63, PARCEL_ID \"242819000000031050\", PHY_ADDR1 \"72 LAKE MORTON DR\", OWN_NAME \"FIRST UNITED METHODIST CHURCH\". Polk County's seat is Bartow, FL — a city, not Bartow County, GA (already wired as ga_bartow).",
   },
   fl_hillsborough: {
+    publisher: "statewide",
+    publisherName: "Florida Geographic Information Office (Florida Statewide Parcels)",
     verifiedOn: "2026-09-24",
     verifiedNote: "Live point query from this sandbox near Tampa (-82.4572, 27.9516 — nudged ~0.001° from the exact seat point, which landed on E Polk St with no parcel underneath): CO_NO 39, PARCEL_ID \"1829244ZI000029000010A\", PHY_ADDR1 \"E POLK ST\", OWN_NAME \"U S A FEDERAL BUILDING\".",
   },
   fl_pasco: {
+    publisher: "statewide",
+    publisherName: "Florida Geographic Information Office (Florida Statewide Parcels)",
     verifiedOn: "2026-09-24",
     verifiedNote: "Live point query from this sandbox at Dade City (-82.1968, 28.3625): CO_NO 61, PARCEL_ID \"27-24-21-0000-09100-0000\", PHY_ADDR1 \"14031 14TH\", OWN_NAME \"DISTRICT SCHOOL BOARD OF\".",
   },
   fl_hernando: {
+    publisher: "statewide",
+    publisherName: "Florida Geographic Information Office (Florida Statewide Parcels)",
     verifiedOn: "2026-09-24",
     verifiedNote: "Live point query from this sandbox near Brooksville (-82.3819, 28.5553 — nudged ~0.006° from the exact seat point, which timed out/landed off-parcel): CO_NO 37, PARCEL_ID \"R23 122 19 1200 0060 0020\", PHY_ADDR1 \"504 E JEFFERSON ST\", OWN_NAME \"HARVEST TIME HERNANDO CHURCH I\".",
   },
   fl_sumter: {
+    publisher: "statewide",
+    publisherName: "Florida Geographic Information Office (Florida Statewide Parcels)",
     verifiedOn: "2026-09-24",
     verifiedNote: "Live point query from this sandbox at Bushnell (-82.1101, 28.6650): CO_NO 70, PARCEL_ID \"N16A205\", PHY_ADDR1 \"305 N FLORIDA ST\", OWN_NAME \"BARNES A DALE & KELLI L\".",
   },
   fl_lake: {
+    publisher: "statewide",
+    publisherName: "Florida Geographic Information Office (Florida Statewide Parcels)",
     verifiedOn: "2026-09-24",
     verifiedNote: "Live point query from this sandbox near Tavares (-81.7238, 28.8039 — nudged ~0.001° from the exact seat point, which landed with no parcel underneath): CO_NO 45, PARCEL_ID \"28-19-26-1800-026-00200\", PHY_ADDR1 \"418 E ALFRED ST\", OWN_NAME \"BUDD-MC GOWN CASSANDRA L\".",
   },
   fl_orange: {
+    publisher: "statewide",
+    publisherName: "Florida Geographic Information Office (Florida Statewide Parcels)",
     verifiedOn: "2026-09-24",
     verifiedNote: "Live point query from this sandbox near Orlando (-81.3792, 28.5393 — nudged ~0.001° from the exact seat point): CO_NO 58, PARCEL_ID \"262229002700050\", PHY_ADDR1 \"200 S ORANGE AVE\", OWN_NAME \"PIEDMONT 200 AND 250 SOUTH ORA\".",
   },
   fl_osceola: {
+    publisher: "statewide",
+    publisherName: "Florida Geographic Information Office (Florida Statewide Parcels)",
     verifiedOn: "2026-09-24",
     verifiedNote: "Live point query from this sandbox near Kissimmee (-81.4066, 28.2920 — nudged ~0.001° from the exact seat point, which timed out/landed off-parcel): CO_NO 59, PARCEL_ID \"2225292257000100C0\", PHY_ADDR1 \"PLEASANT ST\", OWN_NAME \"CITY OF KISSIMMEE\".",
   },
   fl_highlands: {
+    publisher: "statewide",
+    publisherName: "Florida Geographic Information Office (Florida Statewide Parcels)",
     verifiedOn: "2026-09-24",
     verifiedNote: "Live point query from this sandbox near Sebring (-81.4399, 27.4956 — nudged ~0.001° from the exact seat point, which landed with no parcel underneath): CO_NO 38, PARCEL_ID \"S29342907005800180\", PHY_ADDR1 \"127 E CENTER AVE BEAUTY SHOP\", OWN_NAME \"MEDINA DIANA\".",
   },
   fl_hardee: {
+    publisher: "statewide",
+    publisherName: "Florida Geographic Information Office (Florida Statewide Parcels)",
     verifiedOn: "2026-09-24",
     verifiedNote: "Live point query from this sandbox near Wauchula (-81.8085, 27.5372 — nudged ~0.001° from the exact seat point, which landed with no parcel underneath): CO_NO 35, PARCEL_ID \"1034250000008000000\", PHY_ADDR1 \"905 S  6TH AVE\", OWN_NAME \"DISCOUNT AUTO PARTS LLC\".",
   },
   fl_manatee: {
+    publisher: "statewide",
+    publisherName: "Florida Geographic Information Office (Florida Statewide Parcels)",
     verifiedOn: "2026-09-24",
     verifiedNote: "Live point query from this sandbox at Bradenton (-82.5748, 27.4989): CO_NO 51, PARCEL_ID \"3329300059\", PHY_ADDR1 \"1301 1ST AVE W\", OWN_NAME \"MANATEE COUNTY\". ⛔ The offline nationwide county-polygon asset's own Manatee ring has a small gap near downtown Bradenton's riverfront (likely the Manatee River channel) — this exact point resolves cleanly against the LIVE layer above but 'outside' against that offline asset; the COUNTIES_MAP bbox/routing test therefore uses a point just north of downtown (still within city limits) rather than this exact address.",
   },
   fl_desoto: {
+    publisher: "statewide",
+    publisherName: "Florida Geographic Information Office (Florida Statewide Parcels)",
     verifiedOn: "2026-09-24",
     verifiedNote: "Live point query from this sandbox at Arcadia (-81.8592, 27.2153): CO_NO 24, PARCEL_ID \"253724001200100045\", PHY_ADDR1 \"1 N  BREVARD AVE\", OWN_NAME \"VIRGINIA H LISKEY PROPS LLC\".",
   },

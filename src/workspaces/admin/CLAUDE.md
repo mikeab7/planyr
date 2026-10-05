@@ -87,8 +87,9 @@ A US map of every county / parish / borough Planyr can answer a parcel click for
 (own server / statewide layer / third-party copy / unclassified). Nothing is a list: `parcelCoverage.buildCoverage`
 joins the county-polygons asset onto the live site-planner county registry (`COUNTIES_MAP`, `countyKeyForName`,
 `statewideKeysForState`), so a newly wired county shows up with no other edit; registry keys that join no
-outline are listed under the map. Source kind is inferred from structure + the provenance prose
-(the site-planner provenance module) and falls to "unclassified" rather than guess. Headless check: the
+outline are listed under the map. Source kind is DATA: each provenance record
+(the site-planner provenance module) carries `publisher` + `publisherName`; no prose inference, and a wiring
+session that omits it fails the parcel-coverage unit test. Headless check: the
 parcel-coverage verify script under the repo's ui-audit folder.
 
 <!-- Keep this pointer current: if you rename/move/delete a key file in this folder, update the

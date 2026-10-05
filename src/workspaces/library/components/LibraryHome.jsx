@@ -251,7 +251,7 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
   return (
     <div style={{ flex: 1, minHeight: 0, position: "relative", display: "flex", flexDirection: "column" }}>
     <div data-testid="library-home" style={{ flex: 1, minHeight: 0, overflowY: "auto", background: "var(--surface-page)", fontFamily: "system-ui, sans-serif" }}>
-      <div style={{ maxWidth: 880, margin: "0 auto", padding: "10px 20px 28px" }}>
+      <div style={{ maxWidth: 880, margin: "0 auto", padding: "10px 20px 56px" }}>{/* NEW-3 — bottom room: last card scrolls clear of the Help "?" */}
 
         <TrashNotice notice={trash.delNotice} onDismiss={() => trash.setDelNotice(null)} style={{ margin: "8px 2px 0" }} />
         {(deletedRows.length > 0 || showDeleted) && (

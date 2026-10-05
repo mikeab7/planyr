@@ -187,6 +187,18 @@ jobs:
         env:
           BASE_URL: "http://localhost:4173/"
         run: node ui-audit/verify-notes-table-click.mjs
+      # App-shell WIDTH SWEEP (NEW-3, 2026-10-05). Owner: "I want the frame to always work regardless of the
+      # size of computer or screen." His Schedule header wrapped onto a second row, clipped at the window
+      # edge and showed a page scrollbar because CI only ever looked at one width. For every module route at
+      # widths 800-2560, heights 450/900 (+ a deviceScaleFactor 2 pass) this asserts from DOM GEOMETRY: no
+      # page-level scroll, every chrome control inside the viewport and unclipped, no two controls
+      # intersecting, each header row/toolbar exactly one row tall, and every More menu lists what the bar
+      # dropped. Reuses the preview server and Chromium the gates above paid for; signed out (hermetic).
+      # Verdict logic is unit-tested (test/widthSweep.test.js); red-proofed against pre-fix main in the PR.
+      - name: App-shell width sweep (no wrap / clip / overlap / page scroll at any width — NEW-3)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/verify-width-sweep.mjs
       # Critical interaction lane (B1857904/B1857905, reliability programme R2). A SMALL,
       # deterministic subset of e2e/ — reused, not duplicated — wired into the required build so a
       # real interaction regression can no longer merge silently, closing the gap the reliability

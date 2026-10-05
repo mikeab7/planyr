@@ -2,14 +2,14 @@
  * No Cloudflare imports, network is injected, so test/teamInviteEmail.test.js drives the whole
  * claim → send → release flow with fakes. The Pages Function file is a thin wrapper.
  *
- * Provider: Resend (https://resend.com) — one HTTPS call with a bearer key, plain JSON, and a
- * domain-verification step that fits planyr.io's existing DNS. Env (Cloudflare Pages secrets,
- * never the repo): RESEND_API_KEY (required) · INVITE_FROM (optional, default below) ·
- * PUBLIC_APP_URL (optional, default https://planyr.io).
+ * Provider: the Gmail API as a planyr.io Google Workspace user via a service account with
+ * domain-wide delegation (lib/gmailSend.js) — no third-party email service. Env (Cloudflare Pages,
+ * never the repo): GMAIL_SERVICE_ACCOUNT_JSON (secret, required) · INVITE_SENDER (planyr.io mailbox
+ * to send as, required) · PUBLIC_APP_URL (optional, default https://planyr.io).
  */
 import { verifySupabaseUser } from "../../../server/auth/supabaseAuth.js";
+import { sendViaGmail } from "./gmailSend.js";
 
-export const DEFAULT_FROM = "Planyr <no-reply@planyr.io>";
 export const DEFAULT_APP_URL = "https://planyr.io";
 
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -54,7 +54,7 @@ async function rpc(env, token, name, args, fetchImpl) {
 /* POST { teamId, email } with the caller's Supabase bearer token.
  * 200 { ok:true } sent · 429 { reason:"throttled", retryAfterSeconds } · 403/404 not allowed / no
  * such pending invite · 502 { reason:"send_failed" } provider failed (slot released, row kept) ·
- * 503 { reason:"not_configured" } no RESEND_API_KEY yet (slot released). */
+ * 503 { reason:"not_configured" } no Gmail credentials yet (slot released). */
 export async function handleInviteEmail({ env, request, fetchImpl = fetch }) {
   const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
   const v = await verifySupabaseUser({ token, supabaseUrl: env.SUPABASE_URL, anonKey: env.SUPABASE_ANON_KEY, fetchImpl });
@@ -79,27 +79,16 @@ export async function handleInviteEmail({ env, request, fetchImpl = fetch }) {
 
   const release = () => rpc(env, token, "release_invite_send", { p_invite: c.invite_id, p_prev: c.prev_sent_at }, fetchImpl).catch(() => null);
 
-  if (!env.RESEND_API_KEY) {
+  if (!env.GMAIL_SERVICE_ACCOUNT_JSON || !env.INVITE_SENDER) {
     await release();
     return json({ ok: false, reason: "not_configured", error: "Email sending isn't configured yet." }, 503);
   }
 
   const mail = buildInviteEmail({ inviterName: c.inviter_name, teamName: c.team_name, role: c.role, email: c.email, appUrl: env.PUBLIC_APP_URL });
-  let res;
-  try {
-    res = await fetchImpl("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { authorization: `Bearer ${env.RESEND_API_KEY}`, "content-type": "application/json" },
-      body: JSON.stringify({ from: env.INVITE_FROM || DEFAULT_FROM, to: [c.email], subject: mail.subject, html: mail.html, text: mail.text }),
-    });
-  } catch (e) {
+  const sent = await sendViaGmail({ serviceAccountJson: env.GMAIL_SERVICE_ACCOUNT_JSON, sender: env.INVITE_SENDER, to: c.email, subject: mail.subject, html: mail.html, text: mail.text, fetchImpl });
+  if (!sent.ok) {
     await release();
-    return json({ ok: false, reason: "send_failed", error: `Provider unreachable: ${e && e.message ? e.message : e}` }, 502);
-  }
-  if (!res.ok) {
-    await release();
-    let detail = ""; try { detail = (await res.text()).slice(0, 200); } catch (_) { /* ignore */ }
-    return json({ ok: false, reason: "send_failed", error: `Provider refused the send (${res.status}). ${detail}`.trim() }, 502);
+    return json({ ok: false, reason: "send_failed", error: sent.error }, 502);
   }
   return json({ ok: true });
 }

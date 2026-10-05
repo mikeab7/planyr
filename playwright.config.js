@@ -60,7 +60,7 @@ export default defineConfig({
       },
       // setup runs first (one sign-in). A skipped setup (no seeded account) doesn't block this.
       dependencies: ["setup"],
-      testIgnore: /food-first-visit-phone\.spec\.js/, // runs only in the webkit-phone project below
+      testIgnore: /food-(first-visit|rating-slider)-phone\.spec\.js/, // runs only in the webkit-phone project below
     },
     // Opt-in (PW_WEBKIT_PHONE=1) so the default `npm run e2e` / drift-gate lanes, which install only
     // Chromium, never try to launch WebKit.
@@ -69,7 +69,7 @@ export default defineConfig({
       // set per-describe in the spec). Not part of the default `npm run e2e` set: it needs WebKit
       // installed (`npx playwright install --with-deps webkit`) — run with PW_WEBKIT_PHONE=1 --project=webkit-phone.
       name: "webkit-phone",
-      testMatch: /food-first-visit-phone\.spec\.js/,
+      testMatch: /food-(first-visit|rating-slider)-phone\.spec\.js/,
       use: { ...devices["iPhone 15"] },
       dependencies: ["setup"],
     }] : []),
