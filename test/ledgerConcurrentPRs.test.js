@@ -69,7 +69,7 @@ function newPr(d, branch, b, v, { moveB101 = false } = {}) {
   git(d, "checkout", "-q", "-b", branch, "main");
   writeEntry(d, "backlog", "open", b, `### ${b} — new item from ${branch} \`[x]\` (task) #infra\n\`[ ]\` body\n- Verify: sandbox`);
   writeEntry(d, "verification", "pending", v, `### ${v} — check from ${branch}\n1. step. **Expect:** y`);
-  if (moveB101) git(d, "mv", "ledger/backlog/open/B101.md", "ledger/backlog/verify/B101.md");
+  if (moveB101) { mkdirSync(join(d, "ledger/backlog/verify"), { recursive: true }); git(d, "mv", "ledger/backlog/open/B101.md", "ledger/backlog/verify/B101.md"); }
   commit(d, branch);
   git(d, "checkout", "-q", "main");
 }
