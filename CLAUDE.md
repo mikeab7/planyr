@@ -629,6 +629,15 @@ were split out of this file.
     (`LANDSCAPE_PHONE_QUERY`, `src/workspaces/food/lib/phoneLayout.js`: landscape + short + touch);
     `ui-audit/verify-food-landscape.mjs` fails if the pin is hidden or the sheet comes back. (B2046224 ×4.)
 
+18. **(2026-10-05) Combine and Split on parcels NEVER ask for a name, and the map toolbar and the Parcels panel are ONE
+    action.** Michael, verbatim: "Owner is on the fly; never block on a name" — a combine auto-names the tract
+    ("Tract A", "Tract B", …) and a split names its pieces "<name> · A", "· B"; renaming is an optional pencil afterwards,
+    never a prompt. Both operations show an Undo toast, keep the originals reachable (Restore) and never alter county data.
+    And: "if I do the split without ever coming into the left-hand menu, just from the right-hand menu, it'll still work,
+    same thing with merge" — the map's Split tool / Merge banner and the panel call the same single functions
+    (`site-planner/lib/parcelOps.js`; `test/parcelOpsParity.test.js` fails if a second implementation grows back). In the
+    Parcels table the checkbox only SELECTS rows; the eye includes/excludes a parcel from the site total. (B2134368–B2134370.)
+
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by
 Michael (industrial developer, Dallas/Houston). It is becoming a multi-workspace
