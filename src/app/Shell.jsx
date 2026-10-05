@@ -14,6 +14,7 @@ import AuthPanel from "../workspaces/site-planner/components/AuthPanel.jsx";
 import ErrorBoundary from "./ErrorBoundary.jsx";
 import ModuleLoader from "../shared/ui/ModuleLoader.jsx";
 import AccountControl from "./AccountControl.jsx";
+import { adminStatusStore } from "../workspaces/admin/lib/adminStatus.js";
 import { useProfile } from "../shared/profile/useProfile.js";
 import { setOrgName } from "../shared/profile/orgNameStore.js";
 import { setTelemetryModule } from "../shared/telemetry/clientErrors.js";
@@ -245,9 +246,16 @@ export default function Shell() {
   // resolved (measured: ~2.5 s after a cold load), dropping the owner off the page. So no workspace is
   // active while it shows — the Dashboard's shape. Deliberately keyed on "shown", NOT on the hash: a
   // non-admin typing #/admin must keep the ordinary active workspace (the 404-equivalent).
-  const [adminShown, setAdminShown] = useState(false);
-  const active = isDashboardHash || (isAdminHash && adminShown) ? null : routedModule;
   const [user,      setUser]      = useState(null);
+  const [adminShown, setAdminShown] = useState(false);
+  // …and the SAME decision read synchronously from the cached answer (admin/lib/adminStatus.js): the
+  // `adminShown` state above only flips one render AFTER the route lands, and in that render every
+  // route but Site resolves #/admin to the default module — the Site Planner activated for a frame and
+  // its URL writer rewrote #/admin to #/site (~100 ms; the owner's "Admin row only works from Site",
+  // build 00ac52e). The account menu has already asked, so for an allowlisted account the answer is
+  // known BEFORE the click. Still keyed on a confirmed "admin" for THIS user — never on the hash alone.
+  const adminKnown = isAdminHash && user?.id != null && adminStatusStore.peek(user.id) === "admin";
+  const active = isDashboardHash || (isAdminHash && (adminShown || adminKnown)) ? null : routedModule;
   // NEW-1 — `user` starts null on every load and only resolves once Supabase's auth listener
   // reports back, so a signed-in visitor briefly sees the SIGNED-OUT "Sign in" pill before the
   // real, usually wider, named account pill replaces it. AccountControl's rendered width is part

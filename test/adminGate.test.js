@@ -47,7 +47,9 @@ describe("AdminGate — source shape", () => {
     expect(src).toMatch(/onShownChange\(isAdmin\)/);
     expect(src).toMatch(/return \(\) => onShownChange\(false\)/);
     const shell = readFileSync(new URL("../src/app/Shell.jsx", import.meta.url), "utf8");
-    expect(shell).toMatch(/isDashboardHash \|\| \(isAdminHash && adminShown\) \? null : routedModule/);
+    expect(shell).toMatch(/isDashboardHash \|\| \(isAdminHash && \(adminShown \|\| adminKnown\)\) \? null : routedModule/);
+    // the cached answer is read synchronously (not via state that lags a render) and only for a confirmed admin of THIS user
+    expect(shell).toMatch(/adminStatusStore\.peek\(user\.id\) === "admin"/);
     // keyed on "shown", never on the hash alone — a non-admin typing #/admin keeps the ordinary workspace
     expect(shell).not.toMatch(/isDashboardHash \|\| isAdminHash \? null/);
   });
