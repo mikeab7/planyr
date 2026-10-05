@@ -69,6 +69,7 @@ import {
   PANE_AREA_FRONT, PANE_AREA_FRONT_LABEL, FRONT_BAND_ATTR,
 } from "./lib/mapStack.js";
 import { loadRasterIdentify, makeHoverIdentify, rasterIdentifyNow } from "./lib/rasterIdentifyLazy.js";
+import { focusOverlays } from "./lib/layerFocus.js";
 import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, applyOnOverrides, overridesSig } from "./lib/layerPrefs.js";
 // NEW-1 — the per-site "Show above plan" twin of the four above: which GIS layers this site had
 // lifted over the site elements. Its own sparse map, so nothing about layerOverrides changes.
@@ -2878,6 +2879,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Wetlands presence lifted from the Site Analysis screen's own finding (B710's
   // Section-404 cross-flag consumes it — no new fetch).
   const [analysisWetlands, setAnalysisWetlands] = useState(null);
+  // NEW-1 — the Site Analysis panel's hover/open highlight: a layer id the DRAWN overlays are focused on. Transient by
+  // construction — it only ever feeds `syncOverlays` (below), never `overlays`, so it is neither persisted nor undoable.
+  const [analysisFocus, setAnalysisFocus] = useState(null);
+  const syncOverlays = useMemo(() => focusOverlays(overlays, analysisFocus, ALL_LAYERS), [overlays, analysisFocus]);
   // ⛔ B877440 — no `|| "harris"` fallback. A plan with no saved county is genuinely
   // unresolved, so `jurKey` starts null (easementRules.defaultJurForCounty now returns null
   // for a county with no easement record, rather than silently routing to City of Houston's
@@ -3629,7 +3634,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // point.
     let staged = overlayStagedRef.current ? Infinity : 0;
     let idleId = null, idleTimer = null;
-    const order = orderLayersByPriority(overlays, ALL_LAYERS);
+    const order = orderLayersByPriority(syncOverlays, ALL_LAYERS);
     /* ⛔ NEW-2 — THE ZOOM GATE RESOLVES BEFORE FIRST PAINT, and this is where that is enforced.
      *
      * The owner's report: opening the site, contour lines rendered IMMEDIATELY and then vanished
@@ -3652,7 +3657,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      * It gates ADDS ONLY. A removal, an opacity change and a lift are untouched, exactly as with
      * the staging gate it composes with. */
     const gateResolved = layerGateReady;
-    const sync = () => syncOverlayLayers(geoMapRef.current, overlays, overlayRefs.current, {
+    const sync = () => syncOverlayLayers(geoMapRef.current, syncOverlays, overlayRefs.current, {
       // NEW-1 — the two stacking bands (lib/mapStack.js). Each layer lands in the one its
       // declared ROLE names: fills under the plan, strokes and points over it.
       panes: {
@@ -3687,7 +3692,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (idleId != null && typeof cancelIdleCallback === "function") { try { cancelIdleCallback(idleId); } catch (_) {} }
       if (idleTimer) clearTimeout(idleTimer);
     };
-  }, [overlays, origin, basemapOn, layerGateReady]); // eslint-disable-line
+  }, [syncOverlays, origin, basemapOn, layerGateReady]); // eslint-disable-line
 
   /* NEW-2 — the latch itself. It flips exactly once, when the framed view has been COMMITTED to
    * the backdrop map, and does nothing thereafter — so a zoom gesture (which moves `view.ppf`
@@ -6405,6 +6410,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setOverlays && setOverlays((o) => ({ ...o, [layerId]: { ...(o[layerId] || { opacity: ALL_LAYERS[layerId]?.opacity ?? 0.7 }), on: wantOn } }));
     if (wantOn) ensureBasemapOn();
   }, [setOverlays, ensureBasemapOn]);
+
+  /* NEW-1 — the Site Analysis panel's row highlight. Setting a layer focuses it immediately; clearing waits a beat so
+     moving the pointer from one row to the next never flashes the whole map through "unfocused". */
+  const focusClearRef = useRef(null);
+  const focusAnalysisLayer = useCallback((id) => {
+    clearTimeout(focusClearRef.current);
+    if (id) { setAnalysisFocus(id); return; }
+    focusClearRef.current = setTimeout(() => setAnalysisFocus(null), 140);
+  }, []);
+  useEffect(() => () => clearTimeout(focusClearRef.current), []);
+  /* NEW-1 — a "Calls to make" tick, persisted PER SITE in the plan's own settings (sparse: only ticked ids exist). */
+  const toggleAnalysisCall = useCallback((id, on) => {
+    setSettings((s) => {
+      const cur = { ...(s.analysisCalls || {}) };
+      if (on) cur[id] = true; else delete cur[id];
+      return { ...s, analysisCalls: cur };
+    });
+  }, []);
 
   /* The card's read-only note for an ON layer the current zoom suppresses — the same
      `layerVisibility` answer the Layers panel row shows, reported here so the owner is told why
@@ -21463,23 +21486,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const act = parcels.filter((p) => p.active !== false && (p.points?.length || 0) >= 3);
                 const rings = act.map((p) => p.points.map((pt) => { const [lat, lng] = feetToLatLng(pt, origin.lat, origin.lon); return [lng, lat]; }));
                 const acres = dissolvedParcelSqft(act) / SQFT_PER_ACRE; // B715: dissolve overlaps (count shared ground once)
+                // NEW-1 — save-and-except carve-outs ride along as HOLES, so every area fraction the panel states is of the
+                // land that is actually the property (parcelArea.js: the same deduction every acreage number takes).
+                const holeRings = act.flatMap((p) => (Array.isArray(p.exceptions) ? p.exceptions : [])
+                  .map((h) => (h && Array.isArray(h.pts) ? h.pts : Array.isArray(h) ? h : null))
+                  .filter((pts) => pts && pts.length >= 3)
+                  .map((pts) => pts.map((pt) => { const [lat, lng] = feetToLatLng(pt, origin.lat, origin.lon); return [lng, lat]; })));
                 return (
                   <>
                     <LazyPanel name="Site Analysis" minHeight={220} label="Loading site analysis…">
-                      <SiteAnalysis rings={rings} acres={acres} parcelCount={act.length} PAL={PAL} chip={chip}
+                      <SiteAnalysis rings={rings} holes={holeRings} acres={acres} parcelCount={act.length}
                         isLayerOn={(id) => !!overlays?.[id]?.on} onToggleLayer={toggleAnalysisLayer} layerStatus={layerStatus} layerZoomNote={analysisLayerZoomNote}
+                        onFocusLayer={focusAnalysisLayer}
+                        callsChecked={settings.analysisCalls || null} onToggleCall={toggleAnalysisCall}
+                        onOpenDrainage={() => setLeftPanel("drainage")}
                         onFindings={(fs) => { const w = fs && fs.find((f) => f.id === "wetlands"); setAnalysisWetlands(w ? w.status : null); }} />
                     </LazyPanel>
-                    {/* NEW-1 (2026-09-05, owner directive) — Analysis screens, Drainage decides:
-                        the flood finding above is a single present/absent screening row (its own
-                        freshness stamp lives on Drainage, never here — see SiteAnalysis.jsx), and
-                        this link routes to the Drainage module that owns the actual detention/
-                        mitigation working surface (moved out of Yield's old "Stormwater" section). */}
-                    <button type="button" onClick={() => setLeftPanel("drainage")}
-                      style={{ marginTop: 8, width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "9px 0", border: "none", borderTop: `1px solid ${PAL.panelLine}`, borderRadius: 0, background: "transparent", color: PAL.ink, fontWeight: 700, fontSize: 11.5, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
-                      <span>Floodplain drainage &amp; mitigation</span>
-                      <span style={{ color: PAL.muted, fontWeight: 600, fontSize: 10.5, whiteSpace: "nowrap" }}>in Drainage →</span>
-                    </button>
                   </>
                 );
               })()}
