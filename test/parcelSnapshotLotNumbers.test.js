@@ -8,7 +8,7 @@
  * RED on main: the saved copy drew outlines only (no numbers), and `snapshotLotNumberField` did not exist. */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const rec = vi.hoisted(() => ({ markers: [], groups: [] }));
+const rec = vi.hoisted(() => ({ markers: [], groups: [], frames: [] }));
 
 vi.mock("esri-leaflet", () => ({
   featureLayer: () => ({ options: {}, on() {}, off() {} }),
@@ -38,8 +38,18 @@ vi.mock("leaflet", () => {
       return lyr;
     },
     latLngBounds: () => ({}),
-    Layer: { extend: (proto) => { const C = function () {}; Object.assign(C.prototype, proto); return C; } },
-    GridLayer: { extend: (proto) => { const C = function () {}; Object.assign(C.prototype, proto); return C; } },
+    // B2092656 ×3 — the saved copy is now a plain Layer drawn by per-tile canvases (as the live outlines are), not an L.geoJSON.
+    Layer: { extend: (proto) => {
+      const C = function (...args) { this._h = {}; if (this.initialize) this.initialize(...args); };
+      Object.assign(C.prototype, {
+        on(ev, fn) { (this._h[ev] = this._h[ev] || []).push(fn); return this; },
+        off() { return this; },
+        fire(ev) { (this._h[ev] || []).slice().forEach((f) => f()); return this; },
+      }, proto);
+      return C;
+    } },
+    GridLayer: { extend: (proto) => { const C = function () {}; Object.assign(C.prototype, { addTo() { return this; }, remove() {}, getTileSize: () => ({ x: 512, y: 512 }) }, proto); return C; } },
+    Util: { requestAnimFrame: (fn) => { rec.frames.push(fn); return rec.frames.length; }, cancelAnimFrame() {} },
   };
   return { default: L };
 });
@@ -66,6 +76,7 @@ function fakeMap(zoom = 17) {
     getPixelBounds: () => ({ min }),
     getSize: () => ({ x: 800, y: 600 }),
     project: (ll) => px(ll.lng, ll.lat),
+    unproject: (pt) => ({ lng: pt.x / SCALE - 180, lat: 90 - pt.y / SCALE }),
     containerPointToLatLng: (pt) => ({ lng: (pt.x + min.x) / SCALE - 180, lat: 90 - (pt.y + min.y) / SCALE }),
     handlers: {},
     on(ev, fn) { map.handlers[ev] = fn; }, off() {},
@@ -83,8 +94,27 @@ async function loadSnapshot(features) {
   await ensureSnapshot("chambers", { fetchImpl });
 }
 
-const mount = (map) => { const layer = makeSnapshotLayer("chambers"); layer._map = map; layer.fire("add"); return layer; };
-beforeEach(() => { rec.markers.length = 0; rec.groups.length = 0; });
+// Leaflet's own order: onAdd, then the "add" event, then animation frames (the budgeted ingest drains in them).
+const mounted = [];
+const mount = async (map) => {
+  const layer = makeSnapshotLayer("chambers");
+  mounted.push([layer, map]);
+  layer._map = map;
+  layer.onAdd(map);
+  layer.fire("add");
+  // B2092656 ×3: the view's lots arrive asynchronously (the copy lives in a worker in the browser), ingest drains in
+  // animation frames, and the lot-number layout is a sliced job — let all three finish.
+  for (let k = 0; k < 10; k++) {
+    await new Promise((r) => setTimeout(r, 2));
+    for (let i = 0; i < 100 && rec.frames.length; i++) rec.frames.shift()();
+  }
+  return layer;
+};
+beforeEach(() => {
+  // a layer left on its map keeps listening for snapshot changes — take the previous test's off first
+  mounted.splice(0).forEach(([l, m]) => { l.onRemove(m); l.fire("remove"); });
+  rec.markers.length = 0; rec.groups.length = 0; rec.frames.length = 0;
+});
 
 describe("which attribute the saved copy labels a lot with", () => {
   it("Chambers → GEO_ID (the CCAD account), Fort Bend → QUICKREFID, Waller → PROP_ID; every snapshot county has one", () => {
@@ -104,9 +134,9 @@ describe("which attribute the saved copy labels a lot with", () => {
 describe("the saved-copy layer draws the number", () => {
   it("a snapshot feature for lot 15835 labels as 00321-02000-00100-100001 (exactly once, inside its lot)", async () => {
     await loadSnapshot([feature(LOT_15835)]);
-    const layer = mount(fakeMap());
+    const layer = await mount(fakeMap());
     // the layer refreshes on its first add; the numbers ride the same refresh
-    expect(layer.data).toHaveLength(1);
+    expect(layer.getLayers()).toHaveLength(1);
     const texts = rec.markers.map((m) => /data-lot-no="([^"]+)"/.exec(m.o.icon.html)[1]);
     expect(texts).toEqual(["00321-02000-00100-100001"]);      // RED on main: no markers at all
     const { lat, lng } = rec.markers[0].ll;
@@ -116,18 +146,18 @@ describe("the saved-copy layer draws the number", () => {
   it("a lot whose record has no GEO_ID draws no number (never falls back to a different number)", async () => {
     const { GEO_ID, ...noAcct } = LOT_15835;
     await loadSnapshot([feature(noAcct)]);
-    mount(fakeMap());
+    await mount(fakeMap());
     expect(rec.markers).toHaveLength(0);
   });
   it("two neighbouring lots → two numbers, no overlapping boxes", async () => {
     await loadSnapshot([feature(LOT_15835), feature({ ...LOT_15835, PROP_ID: "15836", GEO_ID: "00321-02000-00100-100002" }, D * 1.1)]);
-    mount(fakeMap());
+    await mount(fakeMap());
     const texts = rec.markers.map((m) => /data-lot-no="([^"]+)"/.exec(m.o.icon.html)[1]).sort();
     expect(texts).toEqual(["00321-02000-00100-100001", "00321-02000-00100-100002"]);
   });
   it("below the far floor nothing is drawn (same floor as the outlines)", async () => {
     await loadSnapshot([feature(LOT_15835)]);
-    mount(fakeMap(10));
+    await mount(fakeMap(10));
     expect(rec.markers).toHaveLength(0);
   });
 });
