@@ -216,9 +216,18 @@ describe("review findings — runner", () => {
   it("an incomplete stored measurement throws, never falls through to green", () => {
     for (const g of ["flood", "wetlands", "pipelines", "wells"]) expect(() => assertMeasurement(g, {})).toThrow();
   });
-  it("every page asks for a stable order", async () => {
-    const t = transport(happy());
-    await runTrustedChecks(SITE, { cache: freshCache(), fetchJson: t });
-    expect(t.mock.calls.filter(([u]) => u.includes(HOSTS.flood)).every(([u]) => u.includes("orderByFields=OBJECTID"))).toBe(true);
+  it("a joined layer that rejects orderByFields (live NWI: HTTP 400) still answers — the first read is unordered", async () => {
+    const t = transport({ ...happy(), [HOSTS.wetlands]: (u) => (u.includes("orderByFields") ? new GisFetchError("arcgis", "Invalid or missing input parameters.", { arcgisCode: 400 }) : { features: [] }) });
+    const res = await runTrustedChecks(SITE, { cache: freshCache(), fetchJson: t });
+    expect(byId(res).wetlands.severity).toBe("green");
+  });
+  it("only a TRUNCATED answer pages, from the top, every page ordered by the layer's own id field", async () => {
+    let n = 0;
+    const t = transport({ ...happy(), [HOSTS.flood]: (u) => (++n === 1 ? { features: FLOOD_OK, exceededTransferLimit: true, objectIdFieldName: "OBJECTID" } : { features: FLOOD_OK }) });
+    const res = await runTrustedChecks(SITE, { cache: freshCache(), fetchJson: t });
+    const floodCalls = t.mock.calls.filter(([u]) => u.includes(HOSTS.flood)).map(([u]) => u);
+    expect(floodCalls[0]).not.toContain("orderByFields");
+    expect(floodCalls.slice(1).every((u) => u.includes("orderByFields=OBJECTID"))).toBe(true);
+    expect(byId(res).flood100.severity).not.toBe("failed");
   });
 });

@@ -69,24 +69,31 @@ async function fetchPolygons(key, rings, fetchJson, { pageSize = 1000, maxPages 
   const outFields = (src.outFields && src.outFields.join(",")) || Object.values(src.fields).filter(Boolean).join(",") || "*";
   const out = [];
   for (const layer of src.layers) {
-    let offset = 0, done = false;
-    for (let page = 0; page < maxPages && !done; page++) {
-      const params = {
-        f: "json", where: "1=1", geometry: polyJson(rings), geometryType: "esriGeometryPolygon", spatialRel: "esriSpatialRelIntersects",
-        inSR: 4326, outSR: 4326, outFields, returnGeometry: "true", geometryPrecision: 6, resultRecordCount: pageSize,
-        orderByFields: "OBJECTID", // EVERY page, or page 0 and page 1 can overlap and skip features
-        ...(page > 0 ? { resultOffset: offset } : {}),
-      };
-      const j = featuresOf(await queryJson(src, layer, params, fetchJson), `${key} layer ${layer}`);
+    /* Unordered first: ArcGIS joined layers (NWI) answer HTTP 400 to `orderByFields=OBJECTID` (the field is
+     * table-qualified there) — found live. Only a TRUNCATED answer needs a stable order to page, so the layer is
+     * then re-read from the top, every page ordered by the layer's own reported id field. */
+    const base = { f: "json", where: "1=1", geometry: polyJson(rings), geometryType: "esriGeometryPolygon", spatialRel: "esriSpatialRelIntersects",
+      inSR: 4326, outSR: 4326, outFields, returnGeometry: "true", geometryPrecision: 6, resultRecordCount: pageSize };
+    const take = (j, acc) => {
       for (const f of j.features) {
         const g = f && f.geometry;
         if (!g || !Array.isArray(g.rings) || !g.rings.length) throw new Error(`${key}: a returned polygon carried no geometry, so its area can't be measured.`);
-        out.push({ attrs: normalizeAttrs(f.attributes), rings: g.rings });
+        acc.push({ attrs: normalizeAttrs(f.attributes), rings: g.rings });
       }
+    };
+    const first = featuresOf(await queryJson(src, layer, base, fetchJson), `${key} layer ${layer}`);
+    if (!first.exceededTransferLimit) { take(first, out); continue; }
+    const orderBy = first.objectIdFieldName || "OBJECTID";
+    const acc = [];
+    let offset = 0, done = false;
+    for (let page = 0; page < maxPages && !done; page++) {
+      const j = featuresOf(await queryJson(src, layer, { ...base, orderByFields: orderBy, resultOffset: offset }, fetchJson), `${key} layer ${layer}`);
+      take(j, acc);
       offset += j.features.length;
       done = !j.exceededTransferLimit;
-      if (!done && page === maxPages - 1) throw new Error(`${key}: too many polygons on this site to measure honestly.`);
     }
+    if (!done) throw new Error(`${key}: too many polygons on this site to measure honestly.`);
+    out.push(...acc);
   }
   return out;
 }
