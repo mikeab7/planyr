@@ -171,6 +171,15 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1512960 — B2088016: first click on "Select parcels" after a fresh load of the Map engages the mode `Blocker: real-data`
+
+Sandbox-proven only in part: the lost-press recovery (`e2e/select-parcels-first-click.spec.js`, red on unmodified main) and the signed-in test-account probe (`ui-audit/diagnose-select-parcels-first-click.mjs`, 10/10 engaged — the original symptom did NOT reproduce here). Not provable here: his account's data volume and his Chrome.
+**Steps** (Michael's signed-in Chrome, planyr.io; read the served chunk hash in the SAME observation as each PASS/FAIL and match it to the merge commit):
+1. Fresh load of `planyr.io/#/site`, wait 5–8 s, click **Select parcels** once. **Expect:** the bar switches to "Selecting… / Drop a pin / Cancel" on that first click.
+2. Repeat on three more fresh loads (one right after a map re-centre). **Expect:** the first click engages every time.
+3. Open the page once as `…/#/site?planyrDiag=1`, repeat step 1, then in the console run `window.__selectParcelsTrace()`. **Expect:** a `press-down` / `press-up` / `click` / `mode-on` sequence; a `press-lost-recovered` entry means a press was caught and recovered (note its time).
+4. Query `client_errors` for `event:select-parcels-click-lost` and `event:select-parcels-mode-reset` since the deploy. **Expect:** none — any row names the mechanism (lost press vs engage-then-reset) and re-opens B2088016 with that row as the evidence.
+5. Say exactly what was touched (nothing is written by this check).
 ### V1517459 — B2095120: the e2e-fixture-testfit plan (legacy `line` elements) opens and draws
 
 Sandbox-proven: `test/unknownElementType.test.js`. **Steps** (signed in as `e2e@planyr.test` on planyr.io after the deploy; `/version.json` in the same call): open `#/project/e2e-fixture-testfit/site`. **Expect:** `planner-canvas` appears and no "Site Planyr hit an error" card. (Before: build 2f45a3d threw "reading 'label'"; build eafc260 threw "reading 'x'".)
