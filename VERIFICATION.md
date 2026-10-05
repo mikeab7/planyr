@@ -171,6 +171,11 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1517456 — B2095121: a refused Schedule cloud save shows a red "did NOT save to the cloud" toast (test account reproduces the 403 on demand)
+
+Sandbox-proven: `test/scheduleSaveFailLoud.test.js`. **Steps** (signed in as `e2e@planyr.test` on planyr.io after the deploy; read `/version.json` in the same call and match it to the merge commit): 1. Open Schedule, edit any task's Owner cell. **Expect:** within a few seconds a red toast "Your change did NOT save to the cloud (42501)…" appears (before this fix: nothing). 2. Reload. **Expect:** the edit is gone (the root defect, B2095121, is still open — that is the expected result of this check).
+
+
 ### V1504304 — B2086368: delete a file from the Library's Recent / Unfiled lists, restore it, delete it forever `Blocker: auth`
 
 Sandbox-proven: `ui-audit/verify-library-home-delete.mjs` (33 checks, real Chromium, signed-in against a stub database) and `test/libraryHomeDelete.test.js` (red on unmodified main). Not provable here: a real account and the real database.
