@@ -20,3 +20,11 @@ describe("the draw list skips elements of an unknown type", () => {
     expect(block).toMatch(/cullToView\(vis,/);
   });
 });
+
+describe("the callout pass skips a callout that has no placeable box", () => {
+  const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+  it("calloutBands filters on a finite c.box before sorting", () => {
+    const block = src.slice(src.indexOf("const calloutBands = useMemo"), src.indexOf("one callout/text-box node, lifted out"));
+    expect(block).toMatch(/c\.box && Number\.isFinite\(c\.box\.x\)/);
+  });
+});
