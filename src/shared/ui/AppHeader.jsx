@@ -1124,7 +1124,7 @@ export default function AppHeader({
             window. That is what "navigation wins" buys. Narrow (phone) is untouched — the row
             scrolls sideways there and the zoneFixed no-shrink still applies. (Dropdowns portal to
             <body>, so overflow:hidden here never clips a menu.) */}
-        <div ref={leftZoneRef} data-header-zone="left" style={{ display: "flex", alignItems: "center", gap: 4, paddingLeft: 9, minWidth: 0, ...(singleRow ? { flex: "0 0 auto" } : narrow ? { flex: 1, ...zoneFixed } : { flex: "0 1 auto", maxWidth: "60%", overflow: "hidden" }) }}>
+        <div ref={leftZoneRef} data-header-zone="left" style={{ display: "flex", alignItems: "center", gap: 4, paddingLeft: 9, minWidth: 0, ...(narrow ? { flex: 1, ...zoneFixed } : { flex: "0 1 auto", maxWidth: "60%", overflow: "hidden" }), ...(singleRow ? { flex: "0 0 auto" } : null) }}>
           {/* Logo — the Planyr brand mark + wordmark (BrandMark, theme-aware).
               Also a secondary route to the Dashboard (the labeled crumb is primary, B192).
               B1128272 — `onLogoDashboard`/`logoDashboardTitle` let a caller (Schedule) give
@@ -1237,8 +1237,8 @@ export default function AppHeader({
           ref={rightZoneRef}
           data-header-zone="right"
           style={{
-            flex: narrow && !singleRow ? "1 0 auto" : "0 0 auto", display: "flex", alignItems: "center",
-            justifyContent: "flex-end", gap: 6, paddingRight: 9,
+            flex: narrow ? "1 0 auto" : "0 0 auto", display: "flex", alignItems: "center",
+            justifyContent: "flex-end", gap: 6, paddingRight: 9, ...(singleRow ? { flex: "0 0 auto" } : null),
           }}
         >
           {/* The compact, app-wide save indicator (NEW-1): one shared component, driven by
@@ -1344,7 +1344,7 @@ export default function AppHeader({
            rectangle-intersection check (not a 1D gap) for the corrected, mutation-proven version
            of this measurement — its mutation test forces `flexWrap:"nowrap"` at runtime to
            confirm the check WOULD catch a genuine overlap if the wrap fallback above ever broke. */}
-      {singleRow ? null : toolbarCenter ? (
+      {toolbarCenter ? (
         // On narrow, scroll sideways (nowrap) instead of wrapping to a 2nd line — the owner's
         // explicit ask. Above the breakpoint the original wrap layout is untouched.
         // NEW-1 (B1218496) — `minHeight` raised 26 → 30. The icon-button cluster (toolbarContent)
@@ -1361,7 +1361,7 @@ export default function AppHeader({
         // B1610640 — see Row 1's identical wrapper comment above: the chevrons move to a
         // non-scrolling `position:relative` wrapper around `row2Ref` so they stop scrolling with
         // the row's own content.
-        <div data-header-row2="1" style={{ position: "relative" }}>
+        <div data-header-row2="1" style={{ position: "relative", ...(singleRow ? { display: "none" } : null) }}>
         <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ minHeight: HEADER_ROW_H, display: "flex", alignItems: "center", position: "relative", flexWrap: narrow ? "nowrap" : "wrap", justifyContent: "flex-end", rowGap: 2, borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
           {/* Left zone — module tabs. B1012560: content-sized (`"none"` = `0 0 auto`) and
               never shrinks, same as the 2-zone layout's tabs zone below — primary navigation
@@ -1414,7 +1414,7 @@ export default function AppHeader({
               already consumes the row's entire slack and the toolbar is the last item. Narrow
               (phone) is untouched — `1 0 auto`, exactly as before. */}
           <div ref={row2RightZoneRef} style={{ flex: narrow ? "1 0 auto" : "none", display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 6, minWidth: narrow ? "auto" : 0, gap: 4, overflow: narrow ? "visible" : "hidden" }}>
-            {toolbarContent}
+            {singleRow ? null : toolbarContent}
           </div>
         </div>
         {row2Chevrons}
@@ -1444,7 +1444,7 @@ export default function AppHeader({
         // The module tab strip stretches the same additional 10px — the same disclosed trade-off
         // the 26→30 move already made, just one more step of it.
         // B1610640 — same non-scrolling wrapper as the branch above; see its comment.
-        <div data-header-row2="1" style={{ position: "relative" }}>
+        <div data-header-row2="1" style={{ position: "relative", ...(singleRow ? { display: "none" } : null) }}>
         <div ref={row2Ref} className={narrow ? "no-hscrollbar" : undefined} style={{ height: HEADER_ROW_H, display: "flex", alignItems: "center", position: "relative", borderTop: `1px solid ${LINE}`, WebkitMaskImage: row2Mask, maskImage: row2Mask, ...rowScroll }}>
 
           {/* Module tabs — the planner's own workspace navigation. Omitted entirely on a
@@ -1486,7 +1486,7 @@ export default function AppHeader({
               overflow: narrow ? "visible" : "hidden",
             }}
           >
-            {toolbarContent}
+            {singleRow ? null : toolbarContent}
           </div>
         </div>
         {row2Chevrons}

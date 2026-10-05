@@ -760,6 +760,7 @@ export default function FoodMap({
   // (`applied`) so it is safe to call from several places; a no-op off-phone, mid-flight, or once the
   // user has touched the map (followRef disarmed).
   const applySheetCentring = () => {
+    applySideCentring(); // landscape: the side card's exact centring rides the same landing / late-report calls
     const map = mapRef.current; const f = followRef.current;
     if (!map || !f || flyingRef.current) return;
     // The settle window opens when the flight lands: late sheet-height reports (content measuring
@@ -873,10 +874,10 @@ export default function FoodMap({
     // Landscape phone: the card is the side card — shift by half its (measured, else estimated) width less
     // half the notch inset, then `applySideCentring` makes it exact once the card has reported itself.
     const cardNow = sidePanelRef.current > 0 ? sidePanelRef.current : cardEstimateRef.current;
-    const panelOffsetPx = landscape
-      ? Math.max(0, cardNow - safeAreaInsets().left) / 2
-      : sheetMode ? 0 : Math.min(PANEL_WIDTH, containerWidth * 0.8) / 2;
-    const targetPoint = map.project([flyToTarget.lat, flyToTarget.lon], targetZoom);
+    const landscapeOffsetPx = Math.max(0, cardNow - safeAreaInsets().left) / 2;
+    const panelOffsetPx = narrowViewport ? 0 : Math.min(PANEL_WIDTH, containerWidth * 0.8) / 2;
+    // (landscape: swap the desktop rail's shift for the side card's — the total shift is `landscapeOffsetPx`)
+    const targetPoint = map.project([flyToTarget.lat, flyToTarget.lon], targetZoom).add([landscape ? landscapeOffsetPx - panelOffsetPx : 0, 0]);
     const shiftedLatLng = map.unproject(targetPoint.add([panelOffsetPx, 0]), targetZoom);
     followRef.current = sheetMode ? { applied: 0 } : null;
     sideFollowRef.current = landscape ? { until: null } : null;
@@ -895,14 +896,14 @@ export default function FoodMap({
       // never the right model here, even when the following setView immediately supersedes it.
       map.invalidateSize({ animate: false, pan: false });
       map.setView(shiftedLatLng, targetZoom, { animate: false });
-      applySheetCentring(); applySideCentring();
+      applySheetCentring();
     } else {
       flyingRef.current = true;
       map.once("moveend", () => {
         flyingRef.current = false;
         map.invalidateSize({ animate: false, pan: false });
         map.setView(map.getCenter(), map.getZoom(), { reset: true, animate: false });
-        applySheetCentring(); applySideCentring();
+        applySheetCentring();
       });
       // B651872 (×3) — fixed duration, not Leaflet's own distance-proportional default; see
       // FLY_DURATION_SEC and the header comment.
@@ -942,7 +943,8 @@ export default function FoodMap({
     selectedPosRef.current = null;
     const addPin = (lat, lon, color, title, onClick, opts = {}) => {
       const isSelected = opts.key != null && opts.key === selectedKey;
-      if (isSelected) { selectedDrawn = true; selectedPosRef.current = [lat, lon]; }
+      if (isSelected) selectedDrawn = true;
+      if (isSelected) selectedPosRef.current = [lat, lon];
       const baseRadius = opts.radius ?? 7;
       // Selected: noticeably larger, an accent-coloured ring (never the plain white every other
       // state uses), PLUS a soft halo behind it — unmistakable at a glance, distinct from both
@@ -980,7 +982,8 @@ export default function FoodMap({
     // principle as the selected-state halo above.
     const addHollowPin = (lat, lon, title, onClick, opts = {}) => {
       const isSelected = opts.key != null && opts.key === selectedKey;
-      if (isSelected) { selectedDrawn = true; selectedPosRef.current = [lat, lon]; }
+      if (isSelected) selectedDrawn = true;
+      if (isSelected) selectedPosRef.current = [lat, lon];
       const baseRadius = opts.radius ?? 7;
       if (isSelected) {
         L.circleMarker([lat, lon], {
@@ -1124,20 +1127,23 @@ export default function FoodMap({
           even if a stale value briefly lingers across a breakpoint flip. */}
       <div
         style={{
-          position: "absolute", transform: "translateX(-50%)", zIndex: 500,
-          // Landscape phone: centred in the part of the map BESIDE the card (and clear of the notch), not the whole width.
-          left: landscape ? `calc((env(safe-area-inset-left, 0px) + 100% - max(${dockPx}px, env(safe-area-inset-right, 0px))) / 2)` : "50%",
-          bottom: landscape ? `calc(${BOTTOM_STACK_GAP}px + env(safe-area-inset-bottom, 0px))` : (sheetMode ? sheetHeightPx : 0) + BOTTOM_STACK_GAP,
+          position: "absolute", left: "50%", transform: "translateX(-50%)", zIndex: 500,
+          bottom: (narrowViewport ? sheetHeightPx : 0) + BOTTOM_STACK_GAP,
           display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
           // A phone keeps clear of the global help button in the bottom-right corner (a touch-size FAB
           // plus its inset and a gap each side, kept symmetric so the stack stays centred) — the long
           // zoom hint used to run underneath it.
-          maxWidth: landscape
-            ? `calc(100% - max(${dockPx}px, env(safe-area-inset-right, 0px)) - env(safe-area-inset-left, 0px) - 136px)`
-            : narrowViewport ? "calc(100% - 136px)" : "calc(100% - 24px)", pointerEvents: "none",
+          maxWidth: narrowViewport ? "calc(100% - 136px)" : "calc(100% - 24px)", pointerEvents: "none",
           // B2046224 ×3 screenshots: with the sheet dragged near the top, the stack landed on the
           // basemap toggle / "i" button. Below this much map it steps aside until the sheet comes down.
           visibility: wrapH && stackRoomPx < MIN_STACK_ROOM_PX ? "hidden" : undefined,
+          // B2046224 ×4 — landscape phone: centred in the part of the map BESIDE the card (clear of the notch and the card),
+          // on the bottom edge (there is no sheet to ride above), never wider than that part less the help button's room.
+          ...(landscape ? {
+            left: `calc((env(safe-area-inset-left, 0px) + 100% - max(${dockPx}px, env(safe-area-inset-right, 0px))) / 2)`,
+            bottom: `calc(${BOTTOM_STACK_GAP}px + env(safe-area-inset-bottom, 0px))`,
+            maxWidth: `calc(100% - max(${dockPx}px, env(safe-area-inset-right, 0px)) - env(safe-area-inset-left, 0px) - 136px)`,
+          } : null),
         }}
       >
         {/* B651872 (×4) — a real loading treatment instead of leaving grey unexplained; tied to the
@@ -1195,7 +1201,7 @@ export default function FoodMap({
           top edge as Leaflet's zoom stack on the opposite corner. On a phone the credit button sits
           BESIDE it in one flex row (same height, same top by construction) rather than stacked under
           it — a stack puts two floating controls on different top edges. */}
-      <div style={{ position: "absolute", top: FLOAT_INSET, right: landscape && !dockPx ? `calc(${FLOAT_INSET}px + env(safe-area-inset-right, 0px))` : FLOAT_INSET + dockPx, zIndex: 500, display: "flex", alignItems: "flex-start", gap: FLOAT_GAP }}>
+      <div style={{ position: "absolute", top: FLOAT_INSET, right: FLOAT_INSET, zIndex: 500, display: "flex", alignItems: "flex-start", gap: FLOAT_GAP, ...(landscape ? { right: dockPx ? FLOAT_INSET + dockPx : `calc(${FLOAT_INSET}px + env(safe-area-inset-right, 0px))` } : null) }}>
         {narrowViewport && (
           <IconButton
             size={ATTRIBUTION_TOGGLE_SIZE} onClick={() => setAttributionOpen((o) => !o)}
