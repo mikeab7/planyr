@@ -82,7 +82,7 @@ const CountyShapes = memo(function CountyShapes({ rows, paths }) {
 function readoutOf(r) {
   if (!r) return "Hover or tap a county.";
   if (!r.wired) return `${r.displayName} — not wired for parcels.`;
-  return `${r.displayName} — ${SOURCE_KIND_LABEL[r.kind]}${r.host ? ` · reads from ${r.host}` : ""}`;
+  return `${r.displayName} — ${SOURCE_KIND_LABEL[r.kind]}${r.publisherName ? ` · ${r.publisherName}` : ""}${r.host ? ` · reads from ${r.host}` : ""}`;
 }
 
 export default function ParcelCoverageSection({ loadPayload = fetchPayload }) {
