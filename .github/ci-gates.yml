@@ -37,6 +37,11 @@ jobs:
       # before "Install dependencies" (needs no node_modules) so it fails fast either way.
       - name: Generated-index touch guard (branches must never touch MAP.md / BACKLOG_OPEN.md / docs/UI-INVENTORY.md — NEW-1)
         run: node scripts/generated-doc-touch-guard.mjs
+      # Ledger layout guard (NEW-1, 2026-10-05): ledger/ holds ONE FILE PER backlog/verification entry
+      # so two PRs that each file an entry can never conflict. Fails on a misplaced/misnamed entry file,
+      # a heading that disagrees with its filename, or a frame missing a state marker. No node_modules needed.
+      - name: Ledger layout guard (one file per entry — NEW-1)
+        run: node scripts/ledger.mjs check
       - name: Install dependencies
         run: npm ci
       - name: Lint (fails the build on a dangling/undefined identifier)
