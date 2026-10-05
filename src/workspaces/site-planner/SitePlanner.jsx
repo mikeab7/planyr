@@ -76,7 +76,7 @@ import { sanitizeLayerAbove, aboveFromOverlays, applyAboveOverrides, aboveSig } 
 import { BASEMAPS, SITE_PLAN_BASEMAP, IMAGERY_GRADE } from "../../shared/basemaps/basemaps.js";
 import {
   ppfToZoom, zoomToPpf, exactContainerPoint,
-  basemapWrapPoint, registrationShift, sanitizeShift, tileNwFeet, registrationLayoutMayHaveChanged,
+  basemapWrapPoint, registrationShift, sanitizeShift, tileNwFeet, registrationLayoutMayHaveChanged, resolvedLayoutInputs,
   hasRegisterableContainer, viewValuesEqual,
 } from "./lib/mapLock.js";
 import { overscanPx, keepBufferFor, retinaForZoom, tileWeight, tileCacheLimit } from "./lib/tileBudget.js";
@@ -3518,6 +3518,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // permanently — 86 px of misregistration at rest, with nothing left to compare against.
       setWrapTransform("");
       try { map.invalidateSize({ animate: false, pan: false }); } catch (_) {}
+      /* ⛔ NEW-1 (B2096832) — THE RE-SYNC ANSWERS THE QUESTION, SO THE CACHED ANSWER MUST BE RETIRED. B846384
+       * cached `cachedStale` in `geoLayoutInputsRef` and reuses it while `size`/`geoOverscan` are unchanged.
+       * Taken true ONCE (the first commit — the container settled to its overscan after the map was
+       * built), it was never cleared, so EVERY later view commit re-entered this branch: clear the gesture
+       * transform, force `invalidateSize` (a synchronous layout of the whole dirtied tree) and `setView`
+       * — the heavy path, once per wheel event, instead of the cheap CSS-transform tracking below.
+       * Measured on the owner's Silvestri plan: 96 `invalidateSize` + 96 `setView` for 96 wheel events,
+       * 1.9 s of `getSize` (~45% of all scheduler time), the ~300 ms `U` frames in his perf capture.
+       * `invalidateSize` has now synced Leaflet's cached size to the container, so the staleness is
+       * resolved until a layout input changes and the read is retaken. */
+      geoLayoutInputsRef.current = resolvedLayoutInputs(geoLayoutInputsRef.current);
       commit(center, z, false);
       return;
     }
