@@ -161,10 +161,10 @@ describe("splitSteps / classifyInfra — gates vs CI-only plumbing", () => {
     ]);
   });
 
-  it("ci-gates.yml's real steps split into 24 gates + 0 infra", () => {
+  it("ci-gates.yml's real steps split into 25 gates + 0 infra", () => {
     const { steps } = jobSteps(readGates(), "build");
     const { gates, infra } = splitSteps(steps);
-    expect(gates.length).toBe(24);
+    expect(gates.length).toBe(25);
     expect(infra.length).toBe(0);
   });
 
