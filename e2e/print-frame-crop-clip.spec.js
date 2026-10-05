@@ -122,7 +122,7 @@ test.describe("NEW-1 (B1804992) — the export sheet clips every layer to the dr
       const PLAN_X = 150, PLAN_Y = 120, PLAN_W = 900, PLAN_H = 660; // page margin surrounds this box
       const nested = markup.replace(
         /width="[\d.]+" height="[\d.]+"(?=[^>]*>)/,
-        `x="${PLAN_X}" y="${PLAN_Y}" width="${PLAN_W}" height="${PLAN_H}" preserveAspectRatio="xMidYMid meet"`,
+        `x="${PLAN_X}" y="${PLAN_Y}" width="${PLAN_W}" height="${PLAN_H}"${/^<svg[^>]*preserveAspectRatio=/.test(markup) ? "" : ' preserveAspectRatio="xMidYMid meet"'}`, // the export root already carries its own — a duplicate attribute is invalid XML
       );
       const sheet = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PAGE_W} ${PAGE_H}" width="${PAGE_W}" height="${PAGE_H}">`
         + `<rect x="0" y="0" width="${PAGE_W}" height="${PAGE_H}" fill="#ffffff"/>`

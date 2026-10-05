@@ -37,7 +37,7 @@ async function open(browser, url, { desktop = false } = {}) {
   page.setDefaultTimeout(3000);
   const errs = []; page.on("pageerror", (e) => errs.push(e.message));
   await page.goto(url, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector('[data-testid="food-actions-row"], [data-testid="food-visit-card"]', { timeout: 15000 });
+  await page.waitForSelector('[data-testid="food-actions-row"], [data-testid="food-visit-card"], [data-testid="food-bottom-sheet"]', { timeout: 15000 });
   await assertMeasurable(page, "verify-food-visit-phone");
   await page.waitForTimeout(600);
   return { ctx, page, errs };
@@ -57,18 +57,18 @@ try {
     check("1a no 'What I had' field on a new visit", !labels.some((t) => /what i had/i.test(t)), JSON.stringify(labels.map((t) => t.split("\n")[0])));
     check("1b new visit has a Dishes block with a name field", (await page.locator('[data-testid="visit-dishes"] [data-testid="visit-dish-name"]').count()) >= 1);
     await page.locator('[data-testid="visit-dish-name"]').first().fill("Brisket plate");
-    // one tap on "8" sets 8
+    // the dish rating is the slider (2026-10-05: never tap buttons) — set it to 8
     const row = page.locator('[data-testid="visit-dish-row"]').first();
-    await row.locator('[data-testid="score-tap-8"]').tap().catch(() => {});
+    await row.locator('[data-testid="dish-score-slider"]').fill("8");
     const numeral = await row.locator('[data-testid="dish-score-numeral"]').innerText().catch(() => "");
-    check("1c one tap on 8 sets the dish rating to 8", /^8\b/.test(numeral.trim()), JSON.stringify(numeral));
+    check("1c the dish slider set to 8 shows a dish rating of 8", /^8\b/.test(numeral.trim()), JSON.stringify(numeral));
     // second dish
     await tap(page, '[data-testid="visit-dish-add"]').catch(() => {});
     const rows2 = await page.locator('[data-testid="visit-dish-row"]').count();
     check("1d 'add another dish' gives a second dish row", rows2 === 2, `rows=${rows2}`);
     if (rows2 === 2) {
       await page.locator('[data-testid="visit-dish-name"]').nth(1).fill("Queso");
-      await page.locator('[data-testid="visit-dish-row"]').nth(1).locator('[data-testid="score-tap-6"]').tap();
+      await page.locator('[data-testid="visit-dish-row"]').nth(1).locator('[data-testid="dish-score-slider"]').fill("6");
     }
     await page.locator('form button[type="submit"]').tap();
     await page.waitForTimeout(500);
@@ -85,16 +85,12 @@ try {
     const { ctx, page } = await open(browser, FIX);
     await tap(page, '[data-testid="food-log-visit-btn"]');
     await page.waitForTimeout(400);
-    const btns = page.locator('[data-testid="visit-dish-row"] [data-testid^="score-tap-"]:not([data-testid="score-tap-grid"])');
-    const n = await btns.count();
-    check("2a rating offers ten tap targets (1–10)", n === 10, `n=${n}`);
-    let minW = 1e9, minH = 1e9;
-    for (let i = 0; i < n; i++) { const r = await btns.nth(i).evaluate((e) => { const b = e.getBoundingClientRect(); return [b.width, b.height]; }); minW = Math.min(minW, r[0]); minH = Math.min(minH, r[1]); }
-    check("2b every rating target is at least 44 x 44", n > 0 && minW >= 44 && minH >= 44, `min ${minW.toFixed(1)}x${minH.toFixed(1)}`);
-    const sliders = await page.locator('[data-testid="visit-dish-row"] input[type="range"]').count();
-    check("2c no drag-slider inside the scrolling phone form's dish rows (a scroll can't mis-set it)", n > 0 && sliders === 0, `sliders=${sliders}`);
-    const foodSliders = await page.locator('form input[type="range"]').count();
-    check("2d visit-level Food/Ambiance ratings are tap targets too on a phone", foodSliders === 0, `range inputs=${foodSliders}`);
+    const tapButtons = await page.locator('[data-testid^="score-tap"]').count();
+    check("2a no tap-button rating grid anywhere in the form", tapButtons === 0, `tap buttons=${tapButtons}`);
+    const dishSliders = await page.locator('[data-testid="visit-dish-row"] input[type="range"]').count();
+    check("2b each dish row's rating is one slider", dishSliders === 1, `sliders=${dishSliders}`);
+    const rs = await page.locator('form input[type="range"][data-testid="rating-slider"]').evaluateAll((els) => els.map((e) => [e.min, e.max, e.step].join("/")));
+    check("2c visit-level Food and Ambiance ratings are two half-step sliders", rs.length === 2 && rs.every((r) => r === "1/10/0.5"), JSON.stringify(rs));
     await ctx.close();
   });
 
@@ -113,10 +109,16 @@ try {
     const sr = await save.evaluate((el) => el.getBoundingClientRect().bottom);
     const sheet = await rect(page, '[data-testid="food-bottom-sheet"]');
     check("3a focused field is above the keyboard", nr <= vvH, `field bottom ${nr.toFixed(0)} vs visible ${vvH.toFixed(0)}`);
-    check("3b Save is above the keyboard", sr <= vvH, `save bottom ${sr.toFixed(0)} vs visible ${vvH.toFixed(0)}`);
+    // B2046224 ×3 (owner: "while typing, the card being edited is fully visible"): Save TUCKS while a
+    // field has focus — it flows at the end of the form instead of floating over the card — and is back
+    // on screen the moment the keyboard closes (3e below).
+    const savePos = await save.evaluate((el) => getComputedStyle(el.parentElement).position);
+    check("3b while typing, the Save bar does not float over the form", savePos === "static", `Save bar position: ${savePos} (bottom ${sr.toFixed(0)} vs visible ${vvH.toFixed(0)})`);
     check("3c the sheet itself rides above the keyboard", sheet.bottom <= vvH + 1, `sheet bottom ${sheet.bottom.toFixed(0)} vs visible ${vvH.toFixed(0)}`);
-    await page.evaluate(() => window.__setKeyboard(0));
+    await page.evaluate(() => { document.activeElement?.blur?.(); window.__setKeyboard(0); }); // the keyboard's ✓
     await page.waitForTimeout(500);
+    const saveBack = await save.evaluate((el) => { const r = el.getBoundingClientRect(); const t = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return { pos: getComputedStyle(el.parentElement).position, onScreen: r.bottom <= innerHeight && r.top >= 0, hit: t === el || el.contains(t) }; });
+    check("3e keyboard closed → Save is pinned and on screen again", saveBack.pos === "sticky" && saveBack.onScreen && saveBack.hit, JSON.stringify(saveBack));
     const sheet2 = await rect(page, '[data-testid="food-bottom-sheet"]');
     const ih = await page.evaluate(() => innerHeight);
     check("3d keyboard dismissed -> sheet returns to the screen bottom", Math.abs(sheet2.bottom - ih) <= 1, `sheet bottom ${sheet2.bottom.toFixed(0)} vs ${ih}`);
@@ -126,13 +128,15 @@ try {
   // ── 4. AUTOFILL: nothing here may look like a contact field ───────────────────────────────────
   await section(async () => {
     const { ctx, page } = await open(browser, `${FIX}?newpin=1`);
+    // the pin name opens focused; "Log a visit" is tucked while typing (B2046224 ×3) — close the keyboard first
+    await page.evaluate(() => document.activeElement?.blur?.()); await page.waitForTimeout(300);
     await tap(page, '[data-testid="food-log-visit-btn"]');
     await page.waitForTimeout(400);
-    const fields = await page.locator("form input:not([type=range]):not([type=date]):not([type=number]), form textarea, input[placeholder='Name this place'], form input[type=number]").evaluateAll((els) =>
+    const fields = await page.locator("form input:not([type=range]):not([type=date]):not([type=number]), form textarea, [data-testid='pin-label-input'], form input[type=number]").evaluateAll((els) =>
       els.map((e) => ({ ph: e.placeholder, ac: e.getAttribute("autocomplete"), nm: e.getAttribute("name"), id: e.id })));
     const contact = /(^|[^a-z])(name|first|last|full|email|phone|tel|address|street|city|zip|postal|org|company)([^a-z]|$)/i;
-    const bad = fields.filter((f) => f.ac !== "off" || contact.test(f.nm || "") || contact.test(f.id || ""));
-    check("4a every text field opts out of AutoFill (autocomplete=off) with a non-contact name", fields.length >= 3 && bad.length === 0, bad.length ? JSON.stringify(bad) : `${fields.length} fields clean`);
+    const bad = fields.filter((f) => !/^x-food-/.test(f.ac || "") || contact.test(f.nm || "") || contact.test(f.id || ""));
+    check("4a every text field opts out of AutoFill (non-standard x-food-* token — iOS overrides off) with a non-contact name", fields.length >= 3 && bad.length === 0, bad.length ? JSON.stringify(bad) : `${fields.length} fields clean`);
     await ctx.close();
   });
 

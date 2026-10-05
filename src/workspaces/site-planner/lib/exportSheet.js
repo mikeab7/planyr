@@ -47,7 +47,7 @@ import { printStrokeWidth, sheetFitScale } from "./exportStyle.js";
 import { sheetLabelPpf } from "./exportLabelScale.js";
 import { enforceMeasureValueOnSheet, droppedMeasureWarning } from "./measureSheet.js";
 import { jpegToPdf } from "./imagePdf.js";
-import { buildOverlayVectorFragment, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./overlayVectorSvg.js";
+import { buildOverlayVectorFragment, esriPrintFeatures, esriLineFeatures, esriPolygonFeatures, contourFeatures, arrowGlyphFeatures, swapLatLng } from "./overlayVectorSvg.js";
 import { labelAnchors, placeLabels } from "./boundaryLabels.js";
 import { VECTOR_SOURCES, styleFor, isCountyLinesId } from "./vectorLayers.js";
 import { gisCache } from "./gisCache.js";
@@ -819,14 +819,14 @@ export function createExportSheet(ctx) {
   // weights, dashes, radii and the terrain palette come verbatim from the live layer / registry.
   const normalizeVectorLayer = (id, cfg, ref) => {
     const kind = cfg.kind;
-    if (kind === "esriFeature") { // transmission (hifld_tx), road-authority: line features
+    if (kind === "esriFeature") { // every esriFeature row: lines + points + polygons (B2081252)
       if (typeof ref.eachFeature !== "function") return { features: [] };
       const features = [];
       ref.eachFeature((l) => {
         const gj = l && l.feature;
         if (!gj || !gj.geometry) return;
-        const style = leafStyle(cfg.styleFn ? cfg.styleFn(gj.properties, 1) : { color: cfg.color, weight: cfg.weight, opacity: 1 });
-        features.push(...esriLineFeatures(gj.geometry, style));
+        // B2081252 — lines, POINTS and POLYGONS, same symbology as the screen (the pure rule lives in overlayVectorSvg).
+        features.push(...esriPrintFeatures(gj, cfg, leafStyle));
       });
       return { features };
     }
@@ -894,6 +894,18 @@ export function createExportSheet(ctx) {
           const c = l.getLatLng();
           features.push({ kind: "point", coords: [c.lng, c.lat], style: { stroke: o.color, strokeWidth: o.weight, strokeOpacity: 1, fill: o.fillColor || o.color, fillOpacity: (o.fillOpacity ?? 1) / base, radius: o.radius } });
         }
+      });
+      return { features };
+    }
+    if (kind === "sdaBedrock") { // B2081251 SSURGO shallow rock: class-coloured polygons (holes kept). Design fill 0.7 — the emitter applies the slider once, as on screen (op × 0.7).
+      const features = [];
+      ref.eachLayer((l) => {
+        if (typeof l.getLatLngs !== "function") return;
+        const raw = l.getLatLngs();
+        const rings = (Array.isArray(raw[0]) && raw[0].length && !Array.isArray(raw[0][0]) ? [raw] : raw).map((r) => r.map((p) => [p.lng, p.lat])).filter((r) => r.length >= 3);
+        if (!rings.length) return;
+        const o = l.options || {};
+        features.push({ kind: "polygon", coords: rings, style: { stroke: o.color, strokeWidth: o.weight, strokeOpacity: 1, fill: o.fillColor || o.color, fillOpacity: 0.7 } });
       });
       return { features };
     }

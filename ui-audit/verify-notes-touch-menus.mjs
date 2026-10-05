@@ -1,7 +1,8 @@
 /* verify-notes-touch-menus — NEW-5 (iPhone review 2026-09-29): the page menu and the box menu are
  * reachable on TOUCH. iOS Safari never fires `contextmenu` on a long-press, and tree rows are draggable
  * (a long-press started a drag), so rename / subpage / move / copy / delete a page and delete a box had
- * no touch route at all.
+ * no touch route at all. B2078592: a box is deleted from the press-and-hold menu ("Delete this box"),
+ * never from a floating button — none may render.
  *
  * WHICH ENGINE PROVES WHAT (PHONE-TESTING.md — WebKit has no real touch-hold primitive in Playwright):
  *   • CHROMIUM touch emulation + CDP `Input.dispatchTouchEvent` = a REAL held touch (touchStart, 650 ms,
@@ -147,18 +148,73 @@ for (const engine of ["webkit", "chromium"]) {
     await env.ctx.close();
   }
 
-  // ── the selected-box pill: tap a box (selected) → "Delete box" → gone
+  // ── NO FLOATING "DELETE BOX" (owner 2026-10-04, B2078592): nothing destructive sits on screen. Checked
+  //    selected, editing, and with text typed — and by TEXT as well as by the old test ids, so a renamed
+  //    reincarnation cannot slip past.
   {
     const env = await open(browser, engine, true);
     await env.page.waitForSelector(".planyr-anchor", { timeout: 15000 });
     const c = await center(env.page, ".planyr-anchor");
+    const gone = async (when) => {
+      const n = await env.page.evaluate(() => ({
+        ids: document.querySelectorAll('[data-testid="note-touch-box-bar"], [data-testid="note-touch-box-delete"]').length,
+        text: [...document.querySelectorAll("button, [role=button], [role=menuitem]")].filter((e) => /^\s*delete\s+(box|\d+\s+boxes)\s*$/i.test(e.textContent || "")).length,
+      }));
+      ok(`[${tag}] no floating "Delete box" ${when}`, n.ids === 0 && n.text === 0, JSON.stringify(n));
+    };
+    await gone("before anything is touched");
     await env.page.touchscreen.tap(c.x, c.y); await pacedWait(env.page, 400);
-    const btn = env.page.locator('[data-testid="note-touch-box-delete"]');
-    const bb = await btn.boundingBox({ timeout: 3000 }).catch(() => null);
-    ok(`[${tag}] a selected box shows a 44 px "Delete box" action on touch`, !!bb && bb.height >= 44, JSON.stringify(bb && { w: bb.width, h: bb.height }));
-    if (bb) { await env.page.touchscreen.tap(bb.x + bb.width / 2, bb.y + bb.height / 2); await pacedWait(env.page, 1500); }
+    const sel = await env.page.evaluate(() => ({ selected: !!document.querySelector('.planyr-anchor[data-selected="1"]'), editing: !!document.querySelector('.planyr-anchor[data-editing="1"]') }));
+    ok(`[${tag}] KNOWN-GOOD: the tap really selected/entered the box (so the absence below means something)`, sel.selected, JSON.stringify(sel));
+    await gone("with the box selected");
+    await env.page.keyboard.type("hi"); await pacedWait(env.page, 300);
+    await gone("while typing in the box");
+    await env.ctx.close();
+  }
+
+  // ── press-and-hold INSIDE the box you are typing in: the same document menu, no drag, keyboard kept
+  {
+    const env = await open(browser, engine, true);
+    await env.page.waitForSelector(".planyr-anchor", { timeout: 15000 });
+    await env.page.evaluate(() => { window.__drag = 0; document.addEventListener("dragstart", () => { window.__drag += 1; }, true); });
+    const c = await center(env.page, ".planyr-anchor");
+    await env.page.touchscreen.tap(c.x, c.y); await pacedWait(env.page, 400);
+    await env.page.keyboard.type("Z"); await pacedWait(env.page, 400);
+    const read = () => env.page.evaluate(() => {
+      const a = document.querySelector(".planyr-anchor");
+      const d = JSON.parse(localStorage.getItem("planyr:notes:page:v1:local:p1") || "null");
+      const n = d?.content?.find((x) => x.type === "noteAnchor");
+      return { focusInEditor: !!document.activeElement?.closest?.(".ProseMirror"), editing: a?.getAttribute("data-editing") === "1", sel: a?.getAttribute("data-selected") === "1", x: n?.attrs?.x, y: n?.attrs?.y, drag: window.__drag };
+    });
+    const before = await read();
+    ok(`[${tag}] KNOWN-GOOD: typing in the box put focus in the editor`, before.focusInEditor && before.editing, JSON.stringify(before));
+    const c2 = await center(env.page, ".planyr-anchor .planyr-anchor-content");
+    await hold(env, c2.x, c2.y);
+    ok(`[${tag}] press-and-hold inside the box you are typing in opens the document menu`, await env.page.locator('[data-testid="note-doc-menu"]').count() === 1);
+    const del = env.page.locator('[data-testid="note-menu-delete-box"]');
+    ok(`[${tag}] …and it carries "Delete this box" (the existing row — no second menu)`, await del.count() === 1);
+    const mid = await read();
+    ok(`[${tag}] …no drag started and the box did not move`, mid.drag === 0 && mid.x === before.x && mid.y === before.y, JSON.stringify({ before, mid }));
+    ok(`[${tag}] …the keyboard state is KEPT (focus stays in the editor, box still being edited)`, mid.focusInEditor && mid.editing, JSON.stringify(mid));
+    await del.tap({ timeout: 3000 }).catch(() => {}); await pacedWait(env.page, 1500);
     const n = await env.page.evaluate(() => JSON.parse(localStorage.getItem("planyr:notes:page:v1:local:p1") || "null"));
-    ok(`[${tag}] …and pressing it removes the box (stored document)`, !JSON.stringify(n).includes("noteAnchor"), JSON.stringify(n).slice(0, 100));
+    ok(`[${tag}] choosing Delete this box removes it (stored document)`, !JSON.stringify(n).includes("noteAnchor"), JSON.stringify(n).slice(0, 100));
+    await env.ctx.close();
+  }
+
+  // ── a LONG hold (finger down well past the menu opening): the lift's synthesised mousedown/click land ON the
+  //    menu and must neither run the row under the finger nor drop the keyboard
+  {
+    const env = await open(browser, engine, true);
+    await env.page.waitForSelector(".planyr-anchor", { timeout: 15000 });
+    const c = await center(env.page, ".planyr-anchor .planyr-anchor-content");
+    await env.page.touchscreen.tap(c.x, c.y); await pacedWait(env.page, 400);
+    await env.page.keyboard.type("Q"); await pacedWait(env.page, 300);
+    const docBefore = await env.page.evaluate(() => localStorage.getItem("planyr:notes:page:v1:local:p1"));
+    await hold(env, c.x, c.y, 1400);
+    const st = await env.page.evaluate(() => ({ menu: !!document.querySelector('[data-testid="note-doc-menu"]'), focusInEditor: !!document.activeElement?.closest?.(".ProseMirror"), doc: localStorage.getItem("planyr:notes:page:v1:local:p1") }));
+    ok(`[${tag}] a 1.4 s hold: the menu is open after the lift (no row was triggered by the lift)`, st.menu);
+    ok(`[${tag}] …the box is intact and the keyboard state is kept`, st.focusInEditor && /noteAnchor/.test(st.doc || ""), JSON.stringify({ focusInEditor: st.focusInEditor, hadAnchor: /noteAnchor/.test(st.doc || "") }));
     await env.ctx.close();
   }
 
@@ -174,7 +230,7 @@ for (const engine of ["webkit", "chromium"]) {
     const c = await center(env.page, ".planyr-anchor");
     await env.page.mouse.click(c.x, c.y, { button: "right" }); await pacedWait(env.page, 300);
     ok(`KNOWN-GOOD: desktop right-click on a box still opens the document menu`, await env.page.locator('[data-testid="note-doc-menu"]').count() === 1);
-    ok(`KNOWN-GOOD: desktop shows no touch "Delete box" pill`, await env.page.locator('[data-testid="note-touch-box-bar"]').count() === 0);
+    ok(`KNOWN-GOOD: desktop shows no floating "Delete box" either`, await env.page.locator('[data-testid="note-touch-box-bar"]').count() === 0);
     await env.ctx.close();
   }
   await browser.close();

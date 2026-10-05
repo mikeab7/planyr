@@ -557,6 +557,25 @@ export async function cloudHardDelete(uid, id) {
   }
 }
 
+/* NEW-1 (project "Delete forever" looked like it worked and did nothing) — the FRESH READ that makes a
+ * hard delete a fact. `cloudHardDelete` answers `{ ok: true, removed: 0 }` for a DELETE that matched
+ * nothing (a policy refusal reads exactly like that), and `interpretDelete` has always called that
+ * ok — so a caller that only reads `ok` reports a purge that never happened. This asks the database
+ * which of these ids it STILL holds, so "gone" is proven by a read, never inferred from a write's
+ * return value. Returns { ok, present: [ids still in the table], error }. ok:false means the read
+ * itself failed — the caller must NOT treat that as "gone". */
+export async function cloudRowsPresent(uid, ids) {
+  const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
+  if (!supabase || !uid || !list.length) return { ok: true, present: [] };
+  try {
+    const { data, error } = await supabase.from("sites").select("id").in("id", list);
+    if (error) return { ok: false, present: [], error: error.message || "read failed" };
+    return { ok: true, present: (data || []).map((r) => r.id) };
+  } catch (e) {
+    return { ok: false, present: [], error: (e && e.message) || "read threw" };
+  }
+}
+
 // PostgREST reports an unknown RPC as PGRST202 ("Could not find the function … in the schema
 // cache") — mirrors cloudRename.js's own isMissingFunction, kept local rather than shared because
 // each caller's degrade path differs.

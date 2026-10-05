@@ -5,10 +5,27 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-10-04._
+_Last updated: 2026-10-05._
+
+## 🗄 A decision: schedule edits don't save for any account except yours (B2095121)
+- [ ] **Decide how to fix it.** I found that any account other than yours that edits a schedule gets a silent "refused" from the database — the edit shows on screen and is gone on reload (your account is fine because it already uses the newer per-schedule storage). Today it now shows a red "did NOT save" message instead of failing silently. **Option A (my recommendation):** new accounts start on the newer per-schedule storage — no database change, I build it. **Option B:** change the old table's key so each account gets its own row — small, but it alters the production database, so I won't do it without your yes.
+
+## 🗂 A decision: should a "New project" (blank) inherit your team? (B2096358)
+- [ ] **Decide.** On an account with one team and auto-share on, a brand-new blank project stays private (only a project created from a located site gets the team). That fits "private by default" and your lazy-creation rule, so I left it. Say if blank projects should share with the team too.
+
+## 🔑 Test-account sign-in route (B2084992) — ✅ owner action DONE 2026-10-05, nothing for you here
+- [x] ~~Add `SUPABASE_SERVICE_ROLE_KEY` (and `E2E_LOGIN_KEY`) to Cloudflare Pages → Production.~~ **DONE (read from the live Cloudflare variable list 2026-10-05: both names present).** This closes the owner action only; whether the deployed values work was tested separately by B2095824 on 2026-10-05, which signed in as `e2e@planyr.test` against production (see `VERIFICATION-DONE.md` V1518160). Nothing for you to do.
 
 ## 📱 Phone: readable text, or the whole page width on screen? (B2061331)
 - [x] ~~**Pick one for how a note opens on your phone.**~~ **Decided 2026-10-04: a note opens showing the whole page width, accepting the smaller text.** That is what it already does (both page edges on screen; a page you have saved a view for still opens exactly as you left it), so nothing changed in the app. Recorded on B2061331. (If the small text ever bothers you, pinch to zoom in — it stays put for that page.)
+
+
+## 🧾 A decision on shared child items, plus two database scripts to apply (B2064896)
+
+> **What I found:** I compared every stored copy of a fact in your database with where that fact really lives (read-only). Almost everything agrees. Six items (a review, an overlay, comps) are marked with a different team than the project they belong to. By your 2026-08-09 decision, sharing is decided per item (site plans only), so I did **not** change them.
+>
+> - [ ] **Decide:** should a project's reviews / overlays / comps follow the project's team, or stay private until shared on their own? (Today: they stay private. Five of the six are reviews of shared projects — Papadopoulos, 8 South ×2, Mason & Clay, Grand Port — that your teammates cannot see.)
+> - [ ] **Apply two SQL files** (I'll hand them to you in order): `single_source_backfill_20261004.sql` (fills blank filing fields and aligns one project's status; takes a safety copy first) and `profiles_email_sync.sql` (keeps the team roster email right). Both are safe to run twice.
 
 ## ✉️ Two steps to make team invites actually send email (B2049312)
 
@@ -190,7 +207,10 @@ _Last updated: 2026-10-04._
 >       and the keyboard doesn't bury it. Nothing else on this is waiting on you; this is purely
 >       "does it feel right in your hand."
 
-## 🤖 Signup now has a bot check built in — two things needed from you to turn it on (B1160720/B1160723)
+## ✅ DONE 2026-10-04 — Signup bot check turned on, nothing for you here (B1160720/B1160723)
+
+> **✅ DONE 2026-10-04 — both steps below were completed by you:** Cloudflare Turnstile widget created, `VITE_TURNSTILE_SITE_KEY` set in Cloudflare Pages Production, the Turnstile secret pasted into Supabase (Attack Protection, provider Turnstile by Cloudflare) and captcha protection switched ON. Verified live: a real production signup created the `auth.users` row for mik@live.com at 2026-10-04 16:15:35 UTC, which can only exist if Supabase accepted the Turnstile token. "Confirm email" was then switched OFF in Supabase (Sign In / Providers); PR #1971 shipped the sign-up success state. The original text is kept below as history.
+
 
 > **Short version: I built the "prove you're not a robot" check (a small Cloudflare Turnstile widget) into the
 > sign-up form, and a hard cap on how many accounts can be created per hour/day so a script can't flood
@@ -200,14 +220,14 @@ _Last updated: 2026-10-04._
 > **1. Create the Cloudflare Turnstile widget and get two keys.** Go to
 > [dash.cloudflare.com](https://dash.cloudflare.com/login) → Turnstile → create a widget for planyr.io. It gives
 > you two keys: a **Site key** (safe to be public) and a **Secret key** (keep it private).
-> - [ ] **Paste the Site key into Cloudflare Pages** — your `planyr` project → Settings → Environment variables
+> - [x] **Paste the Site key into Cloudflare Pages** — your `planyr` project → Settings → Environment variables
 >       (Production) → add `VITE_TURNSTILE_SITE_KEY` → paste the Site key → redeploy. This is what turns the
 >       widget ON in the sign-up form; nothing shows up until this is set.
-> - [ ] **Paste the Secret key into Supabase** — project `lyeqzkuiwngunutlkkmi` → Project Settings →
+> - [x] **Paste the Secret key into Supabase** — project `lyeqzkuiwngunutlkkmi` → Project Settings →
 >       Authentication → **Bot and Abuse Protection** → **Enable CAPTCHA protection** → choose **Turnstile** from
 >       the dropdown → paste the Secret key → Save. This is what makes Supabase actually CHECK the widget's
 >       answer — without it, the widget shows but nothing enforces it.
-> - [ ] **Tell a Claude session once both are done** so it can confirm a real sign-up from a real browser both
+> - [x] **Tell a Claude session once both are done** so it can confirm a real sign-up from a real browser both
 >       shows the widget and gets rejected if the widget is skipped — that's the live check nothing here can run
 >       without those two keys.
 >
@@ -215,7 +235,7 @@ _Last updated: 2026-10-04._
 > check doing the job email confirmation used to do, new users can land in the app immediately instead of
 > waiting on an email. **Don't flip this before the bot check above is confirmed live** — doing it out of order
 > would leave sign-up with no gate at all for a while.
-> - [ ] **Supabase → project `lyeqzkuiwngunutlkkmi` → Authentication → Sign In / Providers → Email → turn OFF
+> - [x] **Supabase → project `lyeqzkuiwngunutlkkmi` → Authentication → Sign In / Providers → Email → turn OFF
 >       "Confirm email."** That's the whole step; say the word once it's flipped and I'll clean up the "check
 >       your email" wording that would otherwise sit there unused.
 
@@ -1052,3 +1072,5 @@ a look-ahead at what that study will produce, clearly labelled as screening and 
 - B483 — a 100%-full browser store can sign him out (self-heals; very unlikely now that big images moved to the
       large drawer).
 - B484 — the PDF/map stutter above (needs the heavy PDF to profile).
+
+- **Decision (B2099043):** should a loose Notes page (not bound to any project) show inside a project's Notes list, or only under "Not in a project" / "See all your notes"? Today it does not show inside a project.

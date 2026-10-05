@@ -8,8 +8,12 @@ import { useState } from "react";
 import "../../src/index.css";
 import VisitPanel from "../../src/workspaces/food/components/VisitPanel.jsx";
 
-const seeded = new URLSearchParams(location.search).get("visits") === "1";
+const seeded = ["visits", "buffalo"].some((k) => new URLSearchParams(location.search).get(k) === "1");
 const newPin = new URLSearchParams(location.search).get("newpin") === "1";
+// `?buffalo=1` — the owner's own repro place (B2046224 recurrence, 2026-10-04): The Buffalo Grill,
+// category line "Bar and Grill Restaurant", 1301 S Voss Rd — a place he has visited, so the sheet
+// shows the Dishes · Sort row with "+ Add a dish" right under it. Fixture data only, no real rows.
+const buffalo = new URLSearchParams(location.search).get("buffalo") === "1";
 window.__calls = { visits: [], edits: [], dishes: [] };
 
 function App() {
@@ -21,7 +25,9 @@ function App() {
   const [dishes, setDishes] = useState(seeded ? [{ id: "d1", visit_id: "v1", name: "Brisket", score: "8", course: null, order_again: null, price_cents: null, note: null, visited_on: "2026-09-01" }] : []);
   return (
     <VisitPanel
-      place={{ name: "Fixture Smokehouse", category: "bbq_restaurant", address: null, lat: 29.76, lon: -95.37 }}
+      place={buffalo
+        ? { name: "The Buffalo Grill", category: "bar_and_grill_restaurant", address: "1301 S Voss Rd, Houston, TX 77057", lat: 29.7499, lon: -95.4955 }
+        : { name: "Fixture Smokehouse", category: "bbq_restaurant", address: null, lat: 29.76, lon: -95.37 }}
       pastVisits={visits}
       onClose={() => {}}
       manualNameEditable={newPin} manualName={pinName} onManualNameChange={setPinName}

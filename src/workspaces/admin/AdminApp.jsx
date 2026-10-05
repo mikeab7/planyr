@@ -2,32 +2,22 @@
  *
  * NOT a workspace: it carries no header tab, isn't in the module switcher, and mounts only
  * when Shell.jsx has already confirmed (via AdminGate) that the signed-in user is on the
- * admin allowlist. Four empty sections today — Usage / Issues / Support / Ops — each a
- * placeholder for NEW-2..NEW-5, which render their real content inside these same section
- * shells and read through this same gated access path. See CLAUDE.md's "No admin /
+ * admin allowlist. Sections (lib/adminSections.js order): Issues, Problem reports, Support,
+ * Usage, Signup activity, County criteria requests, Password reset, Ops — each reads through its own
+ * is_admin()-gated RPC. See CLAUDE.md's "No admin /
  * cross-user data access" decision: this is Michael's own view of the product he runs,
  * gated to his own account, never a support-agent view over customer data.
  */
-import { SECTIONS } from "./lib/adminSections.js";
 import { RADIUS } from "../../shared/ui/radius.js";
+import IssuesSection from "./IssuesSection.jsx";
+import SupportSection from "./SupportSection.jsx";
+import UsageSection from "./UsageSection.jsx";
+import OpsSection from "./OpsSection.jsx";
 import CriteriaRequestsSection from "./CriteriaRequestsSection.jsx";
 import ReportsSection from "./ReportsSection.jsx";
 import SignupActivitySection from "./SignupActivitySection.jsx";
 import AdminPasswordResetSection from "./AdminPasswordResetSection.jsx";
-
-function Section({ title, blurb }) {
-  return (
-    <section
-      style={{
-        background: "var(--surface-raised)", border: "1px solid var(--border-default)",
-        borderRadius: 10, padding: 18, display: "flex", flexDirection: "column", gap: 6,
-      }}
-    >
-      <h2 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: "var(--text-primary)" }}>{title}</h2>
-      <p style={{ margin: 0, fontSize: 12.5, color: "var(--text-tertiary)" }}>{blurb}</p>
-    </section>
-  );
-}
+import ParcelCoverageSection from "./ParcelCoverageSection.jsx";
 
 export default function AdminApp({ onExit }) {
   return (
@@ -58,20 +48,18 @@ export default function AdminApp({ onExit }) {
           Back to Planyr
         </button>
       </header>
-      <div style={{ flex: 1, minHeight: 0, padding: 18, display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
-        {SECTIONS.map((s) => (
-          <Section key={s.id} title={s.title} blurb={s.blurb} />
-        ))}
-        {/* B877442 — a fifth, real (non-placeholder) section, added the same way NEW-2..NEW-5 are
-            meant to be: without touching this grid's layout. It carries a table, so it gets its
-            own component rather than being squeezed into the shared blurb-only Section shape. */}
-        <CriteriaRequestsSection />
-        {/* B842866 — the "help / report a problem" control's owner-only read side. */}
+      <div style={{ flex: 1, minHeight: 0, padding: 18, display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", minWidth: 0 }}>
+        {/* Order = lib/adminSections.js: the sections he acts on first. */}
+        <IssuesSection />
         <ReportsSection />
-        {/* B1160721, NEW-2 — signup volume visibility (the server-side rate limit's read side). */}
+        <SupportSection />
+        <UsageSection />
         <SignupActivitySection />
-        {/* B1160722, NEW-3 — reset a teammate's password with no email involved. */}
+        <CriteriaRequestsSection />
         <AdminPasswordResetSection />
+        {/* NEW-1 — US map of every county wired to a parcel source (read from the live registry). */}
+        <ParcelCoverageSection />
+        <OpsSection />
       </div>
     </div>
   );

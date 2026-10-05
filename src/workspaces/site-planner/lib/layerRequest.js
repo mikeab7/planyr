@@ -111,6 +111,8 @@ export function pointSymbolOptions(cfg = {}, opacity = 1) {
 export function featureLayerOptions(cfg, opacity, pane, opts = {}) {
   const o = { url: cfg.url, pane, minZoom: cfg.minZoom ?? 10, interactive: !!opts.interactive };
   if (cfg.fields) o.fields = cfg.fields;
+  // B2081249 — a row may narrow its service with a SQL `where` (the National Network layer must draw only NN = 1).
+  if (cfg.where) o.where = cfg.where;
   if (typeof opts.pointToLayer === "function") o.pointToLayer = opts.pointToLayer;
   o.style = typeof cfg.styleFn === "function"
     ? (feature) => cfg.styleFn(feature && feature.properties, opacity)
@@ -133,7 +135,7 @@ export function featureLayerOptions(cfg, opacity, pane, opts = {}) {
  *     feature, and elevation under the cursor already has its own honest readout;
  *   • a registry row that opts out (`identify: false`). */
 const VECTOR_KINDS = new Set(["esriFeature", "vector", "vectorLine", "pipelineCorridor",
-  "overpass", "mapillary", "contours", "flowdir"]);
+  "overpass", "mapillary", "contours", "flowdir", "sdaBedrock"]);
 
 export function identifyCapable(cfg) {
   if (!cfg || !cfg.url) return false;

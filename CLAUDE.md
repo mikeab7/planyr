@@ -20,6 +20,39 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 >   wrong number written into the backlog, a gate quietly weakened to go green). **Must be read
 >   before judging whether any change works.**
 >
+> **🧾 LEDGER — ONE FILE PER ENTRY (NEW-1, B2109728, owner-approved 2026-10-05). `BACKLOG.md` AND `VERIFICATION.md`
+> ARE NO LONGER HAND-EDITED, AND THE TWO `docs/archive/*-DONE.md` FILES NO LONGER EXIST. This section overrides every
+> older sentence in this file (and in the docs) that says to append to, move a block within, or archive from them.**
+> **WHY:** every session appended to the same spot of those two files, so on a busy day every PR invalidated every other
+> one — and GitHub's SERVER-side mergeability ignores `merge=union` (measured 2026-10-05, PRs #2022/#2023: two PRs
+> prepending a line to a `merge=union` file both read `mergeable_state: dirty`; two PRs adding different *files* read
+> clean, #2024). PR #1900 sat dirty five days over code that never clashed. Only a layout in which two entries never
+> share a file removes the conflict by construction.
+> - **Where entries live:** `ledger/backlog/<open|bug-audit|verify|later|done>/B<id>.md` and
+>   `ledger/verification/<pending|checklist|done>/V<id>.md` — each file is exactly the old block (`### B<id> — title` …).
+>   A duplicate legacy id inside one folder is `B<id>.2.md`. The prose around the entries (rules, tag legend, section
+>   headings, the checklist preamble) is `ledger/<kind>/_frame.md` — hand-edited, rarely.
+> - **File an entry:** write the new file under `…/open/` (backlog) or `…/pending/` (verification). **Edit one:** edit its
+>   file. **Lifecycle move** (Open → Verify → Done, a recurrence back to Open, a V# archived when passed):
+>   `npm run ledger -- move B<id> <state>` (a rename — edit the text in the same commit). **Never delete an entry.**
+> - **Orient cheaply:** `npm run ledger -- list open` (one heading per entry), Grep `^### B` in `ledger/backlog/open` /
+>   `…/verify`, or read `BACKLOG_OPEN.md`. The *-done folders are write-only — look up ONE id (`ledger/backlog/done/B###.md`),
+>   never read a folder wholesale. `npm run next-id` still mints (it reads the ledger; `check-mint`, the id-uniqueness tests
+>   and every other consumer go through `scripts/lib/ledger.mjs`, which also serves the old file paths as VIRTUAL text).
+> - **`BACKLOG.md` / `VERIFICATION.md` at the repo root are GENERATED VIEWS** (frame + live entries), refreshed nightly by
+>   `.github/workflows/regen-derived-docs.yml` and never edited by a branch — `scripts/generated-doc-touch-guard.mjs`
+>   FAILS THE BUILD on a PR that touches them, `docs/archive/BACKLOG-DONE.md` or `…/VERIFICATION-DONE.md` (enforced once
+>   `ledger/` is on main). They can lag the real ledger by up to a day: the entry folders are the truth.
+> - **`npm run ledger -- check`** (a CI gate) validates layout: right folder, right filename, heading id = filename id, a frame
+>   marker for every live state. `ledger render` regenerates the two views locally (never commit them).
+> - **A branch that edited the OLD files** (opened before this landed): merge `origin/main`, take main's version of the old
+>   files, then `node scripts/ledger.mjs import-legacy <merge-base> <your-branch-tip-before-the-merge>` replays your entry
+>   additions/edits/moves onto `ledger/`. (`resolve-ledgers.mjs` / `npm run safe-merge` are no longer needed for these files;
+>   they remain for `MAP.md` / `BACKLOG_OPEN.md`.)
+> - **Acceptance test:** `test/ledgerConcurrentPRs.test.js` — two concurrent PRs each add a backlog + a verification entry
+>   and merge cleanly in both orders under a GitHub-equivalent `git merge-tree`; the same two PRs against the old
+>   one-big-file layout conflict (red-proof). Never reintroduce a shared append point.
+>
 > **⛔ TOUCHING PERSISTENCE, SYNC, UNDO, OR DELETE? READ `docs/DATA.md` FIRST.** It is the single
 > place that answers who owns a fact and how it may change — the entity table, the numbered
 > invariants (each with the test that proves it), the short list of "one-answer" functions
@@ -322,6 +355,11 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > intentional (issued revision, history, export) is labelled as such in code. Inventory + verdicts:
 > `docs/audit-single-source-of-truth.md`. Guard: `test/entityStateCopy.test.js` (fails on a new seeded
 > copy; escape is an inline `// stale-ok: <reason>`).
+> **Copies in OTHER TABLES / jsonb blobs (B2064896, 2026-10-04):** every migration column that could hold a copy
+> must be declared in `scripts/denormalisedCopies.json` (COPY with verdict + how it stays right + cited code, or
+> OWNED) or `test/denormalisedCopies.test.js` fails; `npm run drift-report` (`scripts/drift-report.sql`, read-only)
+> lists rows where a stored copy disagrees with its source in production — run it after any change that adds or
+> moves a copy. A project's STATUS is read only through `projectModel.groupStatusOf`.
 >
 > **📋 `BACKLOG.md` = the single source of truth for open bugs & feature requests — KEEP IT LEAN.** Every run,
 > work the **🔲 Open** items. **The moment an item ships, MOVE its whole block to `docs/archive/BACKLOG-DONE.md` that same
@@ -355,43 +393,33 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 > **verify any ⏳/due items yourself in a headless browser** (Chromium/Playwright is in the environment — see
 > "🤖 Self-verification" there), then record the result. **The moment an item fully passes with nothing
 > pending, MOVE it to `docs/archive/VERIFICATION-DONE.md`** (same archiving discipline as the backlog). The session that
-> ships a UI change drives the live app itself rather than defer it. **⛔ ATTEMPT-BEFORE-YOU-PARK (owner rule,
-> 2026-07-18): a logged-out, no-external-GIS UI check — draw / reshape / select / toggle / keyboard / export a
-> blank site, the landing page, a dropped LOCAL file, a boot-recovery flow — is Claude-doable HERE and must
-> NEVER be filed as "needs a live pass." Drive it headless and record ✅/❌ THIS session. You may only defer an
-> item that hits a named `Blocker:` — `auth` (proxy CORS-blocks Supabase sign-in), `live-GIS` (external map host
-> the egress blocks), or `real-data` (a signed-in saved project like Tsakiris/Bain); a `V###` with no `Blocker:`
-> wall is a mis-classification, not a to-do (`VERIFICATION.md` rule 4).** **Michael does NOT self-test — never wait
-> on him or hand him a test to-do**; if no browser is reachable, log the item and move on (after CI-green +
-> build-green). Self-tests run **logged-out** (the sandbox blocks sign-in), so auth-only features (cloud sync)
-> still need a signed-in check. **⛔ STANDING RULE — when you ship a UI change with any path you CANNOT verify
-> here (auth-only / cloud / signed-in-only / needs the live edge), you MUST add a numbered `V###` entry to
-> `VERIFICATION.md` for that check, every time, unprompted.** A `⏳` note buried in the BACKLOG item is NOT a
-> substitute: `VERIFICATION.md` is the single canonical list of "builds green but never clicked," and it's the
-> only place a browser-equipped teammate looks for the click-through. The entry records what you DID verify
-> (lint/test/build/headless) **and** the precise signed-in steps still pending — so the gap is visible, not lost.
-> (Owner rule, 2026-06-26, after a session captured an auth-only check only in the backlog and nearly skipped
-> the verification log.) **Interrupt Michael only for a CRITICAL failure** — won't build, won't render,
-> or a shipped feature visibly crashing. (Recurring 🌐 endpoint-liveness checks still run from any session.)
+> ships a UI change drives the live app itself rather than defer it. **Michael does NOT self-test — never wait
+> on him or hand him a test to-do.**
 >
-> **📥 `verification-inbox/` is the write path FROM the Cowork thread INTO `VERIFICATION.md` (B825232,
-> 2026-08-28) — it names an actor split the rules above never named.** A Claude Code session can push to
-> this repo but cannot sign in (the sandbox proxy CORS-blocks the Supabase auth handshake, the same wall
-> behind every `Blocker: auth` item above). The **Cowork thread** can drive Michael's real signed-in
-> browser but cannot push here (its git proxy refuses to inject a credential for `mikeab7/planyr`). So:
-> **the Cowork thread is the only actor that can close a `Blocker: auth` / `real-data` / `live-GIS` item,
-> and a check it closes is not closed until it lands in `VERIFICATION.md` via this inbox.** Before this,
-> that split had no exit — it's the reason 79 `Blocker:`-walled items had piled up unclosable as of
-> 2026-08-28. Mechanically: the Cowork thread appends a dated `verification-inbox/<date>-<label>.md` file
-> recording each live pass/fail it ran on Michael's browser (**append-only — nothing is ever deleted from
-> an inbox file**, only added); a session then drains it into `VERIFICATION.md` (⏳ → passed or ❌, per
-> what was actually found), moves any now-fully-passed item on to `docs/archive/VERIFICATION-DONE.md`, and marks the
-> drained inbox entry with the PR number that did the draining, so the same entry is never drained twice.
-> An item the inbox itself records as **NOT** closed (a stated residual, a leg not separately performed)
-> stays exactly as open in `VERIFICATION.md` as it was before — draining is a transcription, never a
-> rubber stamp, and a session that drains a partial pass says explicitly which parts it is accepting and
-> why (STANDING RULE #2 — no closing an owner-reported symptom on a null still applies here).
+> **⛔ SESSIONS SIGN IN AND VERIFY THEIR OWN WORK — `Blocker: auth` NO LONGER PARKS A CHECK (owner decision,
+> 2026-10-04, Michael: a session's own live signed-in check on the test account COUNTS as verified; the Cowork
+> chat must not be the only verifier).** Proven the same day: `node ui-audit/verify-signed-in-session.mjs
+> https://planyr.io` signs in headlessly as `e2e@planyr.test` and proves it with something only a signed-in
+> user sees (the account email + its `e2e-fixture-site` row). **THE ONE SHARED HELPER is
+> `ui-audit/lib/signedInSession.mjs` (`openSignedIn({ base })`) — never write a second sign-in.** It uses the
+> `E2E_LOGIN_KEY` env var (set in this environment; never print it) against `POST /api/auth/e2e-session`, a
+> route that can only ever mint a session for the test account. Password sign-in is refused by Supabase's
+> Turnstile captcha on purpose and **turning captcha off is ruled out**. **Trust:** the environment setup
+> script imports the sandbox proxy's CA into Chromium's NSS store, so HTTPS just works — **NEVER reach for
+> `--ignore-certificate-errors` / `ignoreHTTPSErrors`** (owner-ruled-out). The test account is `authenticated`
+> only: no admin row, no team memberships, owns two fixture sites.
+> **THE RULE:** a session that ships a UI change verifies it **signed in as the test account on planyr.io after
+> the deploy** (read `/version.json` and match it to your merge commit IN THE SAME CALL as the assertion), and
+> on the PR preview first where that works. **Only `real-data` (Michael's own saved projects — and first try a
+> fixture on the test account) and genuinely external-GIS (`live-GIS`) checks may park.** A `V###` carrying
+> `Blocker: auth` is a mis-classification now: drive it and record ✅/❌ this session.
+> **⛔ A SESSION DOES NOT END ITS TURN WHILE ITS OWN CHANGE IS MERGED-BUT-UNVERIFIED.** Merge → wait for the
+> deploy to serve your build → run the signed-in check → record the result. If the route answers 503/404
+> (`not configured`), say so in one line as a needs-Michael item (Retry deployment in Cloudflare Pages).
+> (Everything about `verification-inbox/` and Cowork below is HISTORY for the checks already queued; the
+> Cowork chat may still verify, it is no longer the only actor that can.)
 >
+
 > **⛔ STANDING RULE — A COWORK SESSION RECORDS ITS OWN LIVE VERIFY, DIRECTLY (owner decision, 2026-09-01:
 > "I'm okay with the chat writing to the repo … implement the new rule so you can write that yourself").**
 > When a Cowork session verifies something live — on Michael's own browser, against production — it
@@ -493,7 +521,8 @@ were split out of this file.
    forgets the durable log; Retry does not.** Keep those two actions distinct — never collapse
    them into one dismissal. (See B1037952, B1048400.)
 7. **(2026-08-22) A live check runs on a throwaway duplicate of a real plan, never on one of
-   Michael's real plans** — and the session says exactly what was touched.
+   Michael's real plans** — and the session says exactly what was touched. The duplicate is
+   deleted when the check finishes, without asking (entry 15).
 8. **(2026-09-11 · SUSPENDED 2026-09-12 · RE-LANDED 2026-09-15, live-verify still PENDING) The
    canvas commits ONE framing per load.** The GOAL was never in doubt; what has changed twice is
    whether a mechanism enforces it.
@@ -566,6 +595,39 @@ were split out of this file.
     the desktop left open. Last change wins; a Word/txt tab with unsaved edits on a device is never removed by another
     device; signed out/offline falls back to the local copy. Stored in the existing `profiles.prefs` (`reviewTabs`) — never a
     new table. Do not reintroduce a landing screen or per-device-only tabs. (See B2058144.)
+
+14. **(2026-10-04) On a phone, the page keeps its THINNER grey margin around the sheet — do not widen it to match
+    desktop, do not re-ask.** Michael, in answer to whether the phone's paper margin (16 vs 40 per side) should be
+    made identical to desktop's after the B2078593 full-width work: "keep the thinner grey margin around the page on
+    phones as you have it. No change needed there." Box widths, tables and line breaks must still be identical on
+    every device (asserted by `ui-audit/verify-notes-box-width-parity.mjs`); only this margin may differ. (See
+    B2078593.)
+
+15. **(2026-10-05) Test artifacts are ALWAYS cleared, never asked about.** Michael, verbatim: "stop
+    asking to clear test files, always clr." Anything a session (or the Cowork chat) created for a test
+    or live check — throwaway duplicate plans, projects, schedules or reviews, test rows, uploaded test
+    files in Library/Drive, scratch files, temporary fixtures — is deleted as soon as the check is
+    done, WITHOUT asking and with no "needs you" line or report about it. Delete-must-verify still
+    applies (confirm the item is actually gone). Boundaries: never touches Michael's real projects or
+    anything he made himself; the standing `e2e@planyr.test` fixtures the signed-in helper depends on
+    (`e2e-fixture-site` and its sibling fixture) are NOT throwaway and stay. (See B2103600.)
+
+16. **(2026-10-05) Food ratings are one slider each, 1 to 10 in half steps, and must not be replaced
+    with tap buttons, steppers or whole numbers without Michael's say-so.** A visit's Food rating and
+    its Ambiance rating are each a single slider (min 1, max 10, step 0.5), "Not rated" until touched,
+    on first visit, log-another-visit and edit-an-old-visit, phone and desktop (B626576 shipped it;
+    #1941 swapped it for a 1-10 tap grid on phones and he got whole numbers back). The scale lives in
+    `src/workspaces/food/lib/ratingScale.js`; `test/foodRatingSlider.test.js` fails if the range or step
+    changes or a tap grid/stepper returns. Ratings saved in quarter points (8.75) still display as saved.
+    (See the NEW-1 item on BACKLOG.md.)
+17. **(2026-10-05) In Food, on a phone held SIDEWAYS, the place card docks to the RIGHT as a side panel
+    (like desktop) — never the bottom sheet — and the map keeps the pin in view.** Michael, approved fix
+    ("dock the card to the side, and improve on it"): the header collapses to one row, a pick centres its
+    pin in the map to the LEFT of the card, the "Search live for more here" chip is centred in that visible
+    part, "Log a visit" stays at the card's bottom, and the notch/home-bar safe areas are respected.
+    Upright phones keep the bottom sheet; desktop keeps the rail. "Landscape phone" is one query
+    (`LANDSCAPE_PHONE_QUERY`, `src/workspaces/food/lib/phoneLayout.js`: landscape + short + touch);
+    `ui-audit/verify-food-landscape.mjs` fails if the pin is hidden or the sheet comes back. (B2046224 ×4.)
 
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by
@@ -1495,7 +1557,7 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
    built in this item contradicts a listed constraint, and say so in the session reply. If a
    contradiction was caught, **CONSTRAINT-CAPTURE** governs — the offending part is not built, and
    the reply names the constraint it collided with.
-5. `BACKLOG.md` updated. **Do NOT regenerate or commit `BACKLOG_OPEN.md` yourself** — the Generated-
+5. The backlog entry filed/moved under `ledger/backlog/` (see the LEDGER section — never edit `BACKLOG.md`). **Do NOT regenerate or commit `BACKLOG_OPEN.md` yourself** — the Generated-
    index touch guard rejects a PR that touches it (NEW-1, B<PENDING>, 2026-09-08); it's refreshed by
    `.github/workflows/regen-derived-docs.yml` instead. Touched yield / pond panel copy?
    **PANEL-BREVITY** applies: run `node ui-audit/panel-copy-budget.mjs` before and after, and put

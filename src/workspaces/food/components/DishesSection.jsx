@@ -194,7 +194,7 @@ function DishEditRow({ initial, existingNames, openWishlistNames, onSave, onCanc
 
   return (
     <div
-      data-testid="dish-edit-row"
+      data-testid="dish-edit-row" data-edit-card="" data-sheet-form=""
       onKeyDown={(e) => {
         if (e.key === "Escape") { e.preventDefault(); onCancel(); }
         if (e.key === "Enter" && e.target.tagName !== "TEXTAREA") { e.preventDefault(); commit(!initial); }
@@ -218,8 +218,8 @@ function DishEditRow({ initial, existingNames, openWishlistNames, onSave, onCanc
           exactly as important as the least. */}
       <input
         type="text" autoFocus value={name} onChange={(e) => setName(e.target.value)}
-        placeholder="Dish name" list={listId}
-        data-testid="dish-name-input" {...noAutofill("dish-title")} enterKeyHint="next" autoCapitalize="words"
+        placeholder="Dish" aria-label="Dish" list={listId}
+        data-testid="dish-name-input" {...noAutofill("dish-pick")} enterKeyHint="next" autoCapitalize="words"
         style={{
           width: "100%", boxSizing: "border-box", background: "transparent", border: "none",
           borderBottom: "2px solid var(--accent-food)", padding: "4px 2px",
@@ -258,7 +258,7 @@ function DishEditRow({ initial, existingNames, openWishlistNames, onSave, onCanc
       {isMobile ? (
         // Phone: pinned to the bottom of the editor, a narrow secondary action on the left and
         // the primary solid action wide on the right — no hint line, no room for it.
-        <div data-testid="dish-edit-buttons" style={{ position: "sticky", bottom: 0, background: "var(--surface-raised)", paddingTop: 4, display: "flex", gap: 8 }}>
+        <div data-testid="dish-edit-buttons" data-sheet-sticky="bottom" style={{ position: "sticky", bottom: 0, background: "var(--surface-raised)", paddingTop: 4, display: "flex", gap: 8 }}>
           <button type="button" onClick={initial ? onCancel : () => commit(false)} data-testid={initial ? "dish-cancel-btn" : "dish-save-close-btn"} style={{
             flex: "0 0 auto", border: "1px solid var(--border-default)", borderRadius: RADIUS.md, padding: "0 16px", minHeight: 44,
             background: "transparent", color: "var(--text-secondary)", cursor: "pointer", font: "inherit", fontSize: 13, fontWeight: 600,
@@ -524,7 +524,10 @@ export default function DishesSection({ dishesWithDate, visits, onSaveDish, onDe
         </select>
       </div>
 
-      <div style={{ border: "1px solid var(--border-default)", borderRadius: RADIUS.lg, overflow: "hidden" }}>
+      <div style={{ border: "1px solid var(--border-default)", borderRadius: RADIUS.lg,
+        // clip, not hidden: `hidden` makes this box a scroll container, so the open form's sticky Save bar
+        // pinned to THIS box (it scrolled away with the form) instead of the bottom of the sheet (NEW-2).
+        overflow: "clip" }}>
         {sorted.map((row) =>
           editingKey === row.key ? (
             <div key={row.key}>

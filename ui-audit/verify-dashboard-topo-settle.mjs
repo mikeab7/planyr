@@ -60,18 +60,19 @@ await page.goto(`${BASE}#/`, { waitUntil: "load" });
 await page.waitForSelector('[data-testid="dashboard-topo-background"]', { timeout: 20_000 });
 
 const A = { x: 500, y: 400 };
-const B = { x: 1100, y: 800 }; // far enough from A that the radial highlight (radius 340) doesn't overlap both
+const B = { x: 850, y: 600 }; // far enough from A that the radial highlight (radius 340) doesn't overlap both
 
 // ── 1. Settle fully at A first (a real ramp-up, not an instant snap on entry).
 await page.mouse.move(A.x, A.y);
-await pacedWait(page, 1600);
+await pacedWait(page, 12000); // 20s-class lag: let the highlight ramp in
+await page.screenshot({ path: process.env.SHOT_LIGHT || "/tmp/topo-light.png" });
 const baselineA = await coralIntensity(page, A.x, A.y);
 const baselineB = await coralIntensity(page, B.x, B.y);
 ok(baselineA !== null, "the topo canvas is readable via getImageData");
 // Ambient (no-cursor) contour ink reads slightly negative on this proxy (this app's line tokens
 // lean cooler than warm), so "a real coral tint" is judged against baselineB (the untouched,
 // no-highlight point) rather than an absolute magic number.
-ok(baselineA > baselineB + 3, `settled at A shows a real coral tint above the untouched-point baseline (A=${baselineA}, untouched B=${baselineB})`);
+ok(baselineA > baselineB + 2, `settled at A shows a real coral tint above the untouched-point baseline (A=${baselineA}, untouched B=${baselineB})`);
 
 // ── 2. Sudden jump A → B. Sample IMMEDIATELY (one input event, no settle time) and confirm the
 //    highlight has NOT snapped — most of the tint is still at A, not yet at B.
@@ -84,7 +85,7 @@ ok(rightAfterJumpB < baselineA * 0.3, `B has NOT snapped to full tint immediatel
 // ── 3. Gradual, monotonic migration — sample a few times through the settle window and confirm
 //    B climbs while A falls, with no oscillation (a lerp cannot overshoot).
 const samples = [];
-for (const waitMs of [150, 350, 700, 1600]) {
+for (const waitMs of [2000, 5000, 8000, 10000]) {
   await pacedWait(page, waitMs);
   samples.push({ t: waitMs, a: await coralIntensity(page, A.x, A.y), b: await coralIntensity(page, B.x, B.y) });
 }
@@ -101,8 +102,10 @@ ok(monotonicA, "A's tint falls monotonically (no oscillation) as the highlight l
 ok(monotonicB, "B's tint rises monotonically (no oscillation) as the highlight arrives");
 
 const final = samples[samples.length - 1];
-ok(final.b > baselineA * 0.6, `B reaches a strong tint once fully settled (got r-b=${final.b}, baseline was ${baselineA})`);
-ok(final.a < baselineA * 0.3, `A fades back down once the highlight has moved on (got r-b=${final.a})`);
+// OWNER-TUNED lag (TOPO-TUNE-2026-10-05): ~20s to close 90% of the gap, so ~10s after the jump
+// the highlight is only partway — B has begun to gain, A has begun to lose, neither is done.
+ok(final.b > rightAfterJumpB + 1, `B has started gaining tint ~10s after the jump (got r-b=${final.b} vs ${rightAfterJumpB} at the jump)`);
+ok(final.a < rightAfterJumpA - 1, `A has started losing tint (got r-b=${final.a} vs ${rightAfterJumpA})`);
 
 // ── 4. prefers-reduced-motion still renders exactly one static frame — untouched by this item
 //    (the SETTLE easing lives entirely inside the rAF loop, which reduced-motion never starts),
@@ -125,9 +128,11 @@ await darkPage.route(/supabase\.co/, (r) => r.abort());
 await darkPage.goto(`${BASE}#/`, { waitUntil: "load" });
 await darkPage.waitForSelector('[data-testid="dashboard-topo-background"]', { timeout: 20_000 });
 await darkPage.mouse.move(500, 400);
-await pacedWait(darkPage, 1000);
+await pacedWait(darkPage, 12000);
 const darkTint = await coralIntensity(darkPage, 500, 400);
-ok(darkTint !== null && darkTint > 0, `dark theme still renders a live, cursor-following canvas (got r-b=${darkTint})`);
+const darkFar = await coralIntensity(darkPage, 1250, 900);
+ok(darkTint !== null && darkTint > darkFar + 3, `dark theme still renders a live, cursor-following canvas (cursor r-b=${darkTint} vs far=${darkFar})`);
+await darkPage.screenshot({ path: process.env.SHOT_DARK || "/tmp/topo-dark.png" });
 await darkCtx.close();
 
 // ── 6. Perf — this item only renames existing inline numbers and swaps three duplicated inline

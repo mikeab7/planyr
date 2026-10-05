@@ -92,3 +92,23 @@ describe("missingLocationCount", () => {
     expect(missingLocationCount(null)).toBe(0);
   });
 });
+
+// NEW-2 — company-scope Site tab: scope "all" plots EVERY project (any status), one pin each.
+import { mapMarkers as mapMarkersAll, missingLocationCount as missingAll, allSiteProjects } from "../src/workspaces/dashboard/lib/dashboardMapMarkers.js";
+describe("scope: all (company-scope Site tab)", () => {
+  const P = (id, status, origin, role = "pursuit") => ({ groupId: id, name: id, status, role, origin });
+  const projects = [
+    P("a", "active", { lat: 1, lon: 1 }), P("b", "pursuit", { lat: 2, lon: 2 }), P("c", "complete", { lat: 3, lon: 3 }),
+    P("d", "dead", { lat: 4, lon: 4 }), P("e", "active", null), P("t", "pursuit", { lat: 5, lon: 5 }, "tracked"),
+  ];
+  it("default (pipeline) scope still plots only open projects", () => {
+    expect(mapMarkersAll(projects, null).map((m) => m.id).sort()).toEqual(["a", "b"]);
+  });
+  it("all scope plots every located non-tracked project, complete and dead included", () => {
+    expect(mapMarkersAll(projects, null, null, "all").map((m) => m.id).sort()).toEqual(["a", "b", "c", "d"]);
+    expect(allSiteProjects(projects)).toHaveLength(5);
+  });
+  it("counts the unlocated ones instead of dropping them silently", () => {
+    expect(missingAll(projects, "all")).toBe(1);
+  });
+});

@@ -305,6 +305,10 @@ import {
   SATELLITE_BASEMAP, FOOD_BASEMAP_CHOICES, resolveBasemapChoice, basemapTileLayers, basemapAttribution, IMAGERY_GRADE,
 } from "../../../shared/basemaps/basemaps.js";
 import { addVectorLabels } from "../../../shared/basemaps/vectorLabelLayer.js";
+import { safeAreaInsets } from "../../../shared/ui/safeAreaInsets.js";
+import { SIDE_CARD_MAX, SIDE_CARD_VW_SHARE, visibleMapBox, centringPan } from "../lib/phoneLayout.js";
+
+const MIN_STACK_ROOM_PX = 140; // map height above the sheet below which the bottom message stack hides
 
 // ⛔ NEW-1 (2026-10-03) — THE BASEMAP IS NO LONGER DEFINED HERE. Owner: "The map on the food module
 // is horrible, we should default to the site plan module map … and a good hybrid option as an
@@ -498,10 +502,13 @@ function InfoGlyph({ size = 18 }) {
 }
 
 export default function FoodMap({
-  places, placesCapped, placesTotalMatched, loggedPlaces, loggedIds, manualPins,
+  places, placesCapped, placesTotalMatched, placesError, onRetryPlaces, loggedPlaces, loggedIds, manualPins,
   wishlistPlaces, wishlistManualPins, overpassPlaces,
   onSelectPlace, onSelectManualPin, pinMode, onDropPin, onViewChanged, onRequestSearchHere,
   flyToTarget, selectedKey, selectedPlaceInfo, sheetHeightPx = 0,
+  // B2046224 ×4 — phone held sideways: the place card is docked down the RIGHT edge (`sidePanelPx` wide, measured
+  // by the card itself), there is no bottom sheet, and every selection frames the pin in what is left beside it.
+  landscape = false, sidePanelPx = 0,
 }) {
   const hostRef = useRef(null);
   const mapRef = useRef(null);
@@ -526,6 +533,33 @@ export default function FoodMap({
   const [attributionOpen, setAttributionOpen] = useState(false);
   const coarsePointer = useCoarsePointer();
   const narrowViewport = useNarrowViewport();
+  // The map area's own height — so the bottom message stack can step aside when the place sheet
+  // leaves too little map above it to hold a message without colliding with the top controls.
+  const wrapRef = useRef(null);
+  const [wrapH, setWrapH] = useState(0);
+  const [wrapW, setWrapW] = useState(0);
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(() => { setWrapH(el.clientHeight); setWrapW(el.clientWidth); });
+    ro.observe(el);
+    setWrapH(el.clientHeight); setWrapW(el.clientWidth);
+    return () => ro.disconnect();
+  }, []);
+  // The bottom sheet exists only on an UPRIGHT phone; sideways it is the side card (B2046224 ×4).
+  const sheetMode = narrowViewport && !landscape;
+  const stackRoomPx = wrapH - (sheetMode ? sheetHeightPx : 0);
+  // How much of the right edge the docked card takes (0 when none / not landscape). Before the card has
+  // measured itself, its width is what its CSS will make it.
+  const cardEstimate = Math.round(Math.min(SIDE_CARD_MAX, (wrapW || 0) * SIDE_CARD_VW_SHARE));
+  const dockPx = landscape ? (sidePanelPx > 0 ? sidePanelPx : 0) : 0;
+  const sidePanelRef = useRef(0);
+  sidePanelRef.current = landscape ? sidePanelPx : 0;
+  const cardEstimateRef = useRef(0);
+  cardEstimateRef.current = cardEstimate;
+  const selectedPosRef = useRef(null); // [lat, lon] of the pin drawn in the selected style (set by the marker pass)
+  const sideFollowRef = useRef(null); // { until } while a landscape selection's exact centring is live
+  const rotatedRef = useRef(false); // an orientation change happened since the last selection / touch
   // B2046224 — phone centring. On a narrow viewport the detail panel is a BOTTOM SHEET, not the
   // desktop right rail, so a selection must land centred in the area ABOVE the sheet (horizontally
   // centred, vertically centred in what the sheet leaves visible) — the old right-rail shift pushed a
@@ -534,7 +568,7 @@ export default function FoodMap({
   // once the flight settles / the height arrives: `followRef` holds {applied: the sheet height already
   // compensated} and is disarmed by the first real touch on the map, so it can never fight a pan.
   const sheetHeightRef = useRef(0);
-  sheetHeightRef.current = narrowViewport ? sheetHeightPx : 0;
+  sheetHeightRef.current = sheetMode ? sheetHeightPx : 0;
   const followRef = useRef(null); // { applied:number } while a phone selection's centring is live
   const flyingRef = useRef(false);
 
@@ -726,6 +760,7 @@ export default function FoodMap({
   // (`applied`) so it is safe to call from several places; a no-op off-phone, mid-flight, or once the
   // user has touched the map (followRef disarmed).
   const applySheetCentring = () => {
+    applySideCentring(); // landscape: the side card's exact centring rides the same landing / late-report calls
     const map = mapRef.current; const f = followRef.current;
     if (!map || !f || flyingRef.current) return;
     // The settle window opens when the flight lands: late sheet-height reports (content measuring
@@ -738,12 +773,56 @@ export default function FoodMap({
     f.applied = h;
     map.panBy([0, delta], { animate: false });
   };
-  useEffect(() => { applySheetCentring(); }, [sheetHeightPx, narrowViewport]);
+  useEffect(() => { applySheetCentring(); }, [sheetHeightPx, sheetMode]);
+
+  // ── Landscape framing (B2046224 ×4) ───────────────────────────────────────────────────────────
+  // The VISIBLE map is the container minus the side card (right) and the notch (left). `frameSelected`
+  // moves the map so the selected pin sits at the centre of exactly that box: `exact` always (a fresh
+  // selection — "centre it"), otherwise only when the pin is hidden or hugging an edge (a rotation, a
+  // pin tapped on the map that the card then covered), so a pan the user made on purpose is never undone.
+  const visibleBox = (map, cardPx, sheetPx) => {
+    const size = map.getSize();
+    return visibleMapBox({ width: size.x, height: size.y, cardPx, sheetPx, insetLeft: safeAreaInsets().left });
+  };
+  const frameSelected = (exact) => {
+    const map = mapRef.current;
+    const pos = selectedPosRef.current;
+    if (!map || !pos || flyingRef.current) return false;
+    const cardPx = sidePanelRef.current;
+    const sheetPx = sheetHeightRef.current;
+    if (landscape ? !(cardPx > 0) : !(sheetPx > 0)) return false; // nothing covers the map yet — nothing to frame against
+    const point = map.latLngToContainerPoint(pos);
+    const pan = centringPan({ point, box: visibleBox(map, landscape ? cardPx : 0, landscape ? 0 : sheetPx), margin: exact ? Infinity : undefined });
+    if (!pan || (Math.abs(pan.dx) < 1 && Math.abs(pan.dy) < 1)) return true;
+    map.panBy([pan.dx, pan.dy], { animate: false });
+    return true;
+  };
+  const applySideCentring = () => {
+    const f = sideFollowRef.current;
+    if (!f || flyingRef.current) return;
+    if (f.until == null) f.until = performance.now() + SHEET_SETTLE_MS;
+    else if (performance.now() > f.until) { sideFollowRef.current = null; return; }
+    frameSelected(true);
+  };
+  // An orientation change is remembered so an upright sheet also gets the pin back into view (see below).
+  useEffect(() => { rotatedRef.current = true; }, [landscape]);
+  useEffect(() => {
+    if (!selectedKey) { rotatedRef.current = false; return; }
+    // Card width (landscape) or sheet height (upright, only right after a rotation) arrived / changed, or the
+    // map was resized by the rotation: keep the pin in the visible part. Never fights a live flight or a touch.
+    // A frame later, so the marker pass (which records where the selected pin is) has run for this selection.
+    const id = requestAnimationFrame(() => {
+      if (landscape) { if (sideFollowRef.current) applySideCentring(); else frameSelected(false); }
+      else if (rotatedRef.current && sheetHeightPx > 0) frameSelected(false);
+    });
+    return () => cancelAnimationFrame(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedKey, landscape, sidePanelPx, sheetHeightPx, wrapW, wrapH]);
   // The first real touch/click on the map hands control back to the user for good (until the next selection).
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return undefined;
-    const disarm = () => { followRef.current = null; };
+    const disarm = () => { followRef.current = null; sideFollowRef.current = null; rotatedRef.current = false; };
     host.addEventListener("pointerdown", disarm, true);
     host.addEventListener("wheel", disarm, true);
     return () => { host.removeEventListener("pointerdown", disarm, true); host.removeEventListener("wheel", disarm, true); };
@@ -792,10 +871,17 @@ export default function FoodMap({
     // Desktop: the right-rail panel covers the right side → shift the target left of centre. Phone:
     // the panel is a bottom sheet → NO horizontal shift (it would hug the left edge); the vertical
     // correction for the sheet is applied by `applySheetCentring` below once the sheet's height is known.
+    // Landscape phone: the card is the side card — shift by half its (measured, else estimated) width less
+    // half the notch inset, then `applySideCentring` makes it exact once the card has reported itself.
+    const cardNow = sidePanelRef.current > 0 ? sidePanelRef.current : cardEstimateRef.current;
+    const landscapeOffsetPx = Math.max(0, cardNow - safeAreaInsets().left) / 2;
     const panelOffsetPx = narrowViewport ? 0 : Math.min(PANEL_WIDTH, containerWidth * 0.8) / 2;
-    const targetPoint = map.project([flyToTarget.lat, flyToTarget.lon], targetZoom);
+    // (landscape: swap the desktop rail's shift for the side card's — the total shift is `landscapeOffsetPx`)
+    const targetPoint = map.project([flyToTarget.lat, flyToTarget.lon], targetZoom).add([landscape ? landscapeOffsetPx - panelOffsetPx : 0, 0]);
     const shiftedLatLng = map.unproject(targetPoint.add([panelOffsetPx, 0]), targetZoom);
-    followRef.current = narrowViewport ? { applied: 0 } : null;
+    followRef.current = sheetMode ? { applied: 0 } : null;
+    sideFollowRef.current = landscape ? { until: null } : null;
+    rotatedRef.current = false;
 
     // B651872 (×4) — beyond LONG_JUMP_METERS, skip the animation entirely: setView with
     // animate:false goes straight through Leaflet's own hard-reset path (_resetView, the SAME
@@ -854,9 +940,11 @@ export default function FoodMap({
     // comment: a place selected via search but not yet in the bounds-scoped snapshot would
     // otherwise have no pin at all until that snapshot refetches.
     let selectedDrawn = false;
+    selectedPosRef.current = null;
     const addPin = (lat, lon, color, title, onClick, opts = {}) => {
       const isSelected = opts.key != null && opts.key === selectedKey;
       if (isSelected) selectedDrawn = true;
+      if (isSelected) selectedPosRef.current = [lat, lon];
       const baseRadius = opts.radius ?? 7;
       // Selected: noticeably larger, an accent-coloured ring (never the plain white every other
       // state uses), PLUS a soft halo behind it — unmistakable at a glance, distinct from both
@@ -895,6 +983,7 @@ export default function FoodMap({
     const addHollowPin = (lat, lon, title, onClick, opts = {}) => {
       const isSelected = opts.key != null && opts.key === selectedKey;
       if (isSelected) selectedDrawn = true;
+      if (isSelected) selectedPosRef.current = [lat, lon];
       const baseRadius = opts.radius ?? 7;
       if (isSelected) {
         L.circleMarker([lat, lon], {
@@ -979,6 +1068,8 @@ export default function FoodMap({
     // drawn selected). Lets a harness assert "picking it marks it as the selected one" without reading
     // canvas pixels; nothing in the app reads it.
     if (hostRef.current) hostRef.current.dataset.selectedPin = selectedKey && selectedDrawn ? selectedKey : "";
+    // B2046224 ×4 — read-only: where the selected pin is, so a harness can find it on a live (non-fixture) place.
+    if (hostRef.current) { hostRef.current.dataset.selectedLat = selectedPosRef.current ? String(selectedPosRef.current[0]) : ""; hostRef.current.dataset.selectedLon = selectedPosRef.current ? String(selectedPosRef.current[1]) : ""; }
   }, [places, loggedPlaces, loggedIds, manualPins, wishlistPlaces, wishlistManualPins, overpassPlaces, tooSmall, basemap, selectedKey, selectedPlaceInfo, onSelectPlace, onSelectManualPin, coarsePointer]);
 
   // B668193 — the coarse-pointer nearest-centre tap resolver. Only ever registered on a coarse
@@ -1009,8 +1100,15 @@ export default function FoodMap({
   const hasOwnPlaces = (loggedPlaces?.length || 0) + (manualPins?.length || 0) + (wishlistPlaces?.length || 0) + (wishlistManualPins?.length || 0) > 0;
 
   return (
-    <div style={{ position: "relative", flex: 1, minHeight: 0 }}>
-      <div ref={hostRef} data-testid="food-map" style={{ position: "absolute", inset: 0 }} />
+    // overflow:hidden — the bottom message stack rides `sheetHeightPx` above the map's bottom; with the
+    // sheet dragged taller than the map it used to climb out over the app's toolbar (seen in the
+    // B2046224 ×3 iPhone screenshots). Clipped to the map, it simply goes out of view instead.
+    <div ref={wrapRef} style={{ position: "relative", flex: 1, minHeight: 0, overflow: "hidden" }}>
+      {/* isolation: Leaflet's own controls (the + / − zoom stack is z-index 1000) are confined to this
+          box's stacking context, so they can never draw over the place sheet (B2046224 ×3, owner
+          screenshot: the zoom control sat on top of the sheet's category line). */}
+      {landscape && <style>{`.leaflet-left .leaflet-control{margin-left:calc(10px + env(safe-area-inset-left, 0px)) !important}`}</style>}
+      <div ref={hostRef} data-testid="food-map" style={{ position: "absolute", inset: 0, isolation: "isolate", zIndex: 0 }} />
       {/* NEW-1 (2nd owner block, 2026-08-23) — the zoom-gate notice, the capped notice, and
           "Search live for more here" used to be split between the TOP centre (the two notices)
           and a viewport-dependent position (the button — bottom on desktop, top on mobile since
@@ -1036,6 +1134,16 @@ export default function FoodMap({
           // plus its inset and a gap each side, kept symmetric so the stack stays centred) — the long
           // zoom hint used to run underneath it.
           maxWidth: narrowViewport ? "calc(100% - 136px)" : "calc(100% - 24px)", pointerEvents: "none",
+          // B2046224 ×3 screenshots: with the sheet dragged near the top, the stack landed on the
+          // basemap toggle / "i" button. Below this much map it steps aside until the sheet comes down.
+          visibility: wrapH && stackRoomPx < MIN_STACK_ROOM_PX ? "hidden" : undefined,
+          // B2046224 ×4 — landscape phone: centred in the part of the map BESIDE the card (clear of the notch and the card),
+          // on the bottom edge (there is no sheet to ride above), never wider than that part less the help button's room.
+          ...(landscape ? {
+            left: `calc((env(safe-area-inset-left, 0px) + 100% - max(${dockPx}px, env(safe-area-inset-right, 0px))) / 2)`,
+            bottom: `calc(${BOTTOM_STACK_GAP}px + env(safe-area-inset-bottom, 0px))`,
+            maxWidth: `calc(100% - max(${dockPx}px, env(safe-area-inset-right, 0px)) - env(safe-area-inset-left, 0px) - 136px)`,
+          } : null),
         }}
       >
         {/* B651872 (×4) — a real loading treatment instead of leaving grey unexplained; tied to the
@@ -1065,6 +1173,15 @@ export default function FoodMap({
               : "Zoom in to browse restaurants near you"}
           </div>
         )}
+        {!tooSmall && placesError && (
+          <div data-testid="food-browse-error" role="alert" style={{ pointerEvents: "auto", display: "flex", alignItems: "center", gap: 8, ...FLOAT_NOTICE_STYLE }}>
+            <span>{placesError} — </span>
+            {onRetryPlaces && (
+              <Button variant="ghost" onClick={onRetryPlaces} data-testid="food-browse-retry"
+                style={{ height: SIZE.md.height, padding: SIZE.md.padding }}>Retry</Button>
+            )}
+          </div>
+        )}
         {showCappedNotice && (
           <div data-testid="food-capped-notice" style={{ pointerEvents: "auto", ...FLOAT_NOTICE_STYLE }}>
             Showing {places.length.toLocaleString()} of {placesTotalMatched.toLocaleString()} here — zoom in for more
@@ -1084,7 +1201,7 @@ export default function FoodMap({
           top edge as Leaflet's zoom stack on the opposite corner. On a phone the credit button sits
           BESIDE it in one flex row (same height, same top by construction) rather than stacked under
           it — a stack puts two floating controls on different top edges. */}
-      <div style={{ position: "absolute", top: FLOAT_INSET, right: FLOAT_INSET, zIndex: 500, display: "flex", alignItems: "flex-start", gap: FLOAT_GAP }}>
+      <div style={{ position: "absolute", top: FLOAT_INSET, right: FLOAT_INSET, zIndex: 500, display: "flex", alignItems: "flex-start", gap: FLOAT_GAP, ...(landscape ? { right: dockPx ? FLOAT_INSET + dockPx : `calc(${FLOAT_INSET}px + env(safe-area-inset-right, 0px))` } : null) }}>
         {narrowViewport && (
           <IconButton
             size={ATTRIBUTION_TOGGLE_SIZE} onClick={() => setAttributionOpen((o) => !o)}
@@ -1115,7 +1232,7 @@ export default function FoodMap({
           style={{
             // Clears the global help button (a 30px control on a desktop pointer, 14px from the corner) that
             // used to sit on top of the credit line.
-            position: "absolute", bottom: 6, right: HELP_CLEARANCE, zIndex: 500, maxWidth: `calc(100% - ${HELP_CLEARANCE + FLOAT_INSET}px)`,
+            position: "absolute", bottom: 6, right: HELP_CLEARANCE + dockPx, zIndex: 500, maxWidth: `calc(100% - ${HELP_CLEARANCE + FLOAT_INSET + dockPx}px)`,
             color: "var(--text-secondary)", fontSize: FONT_SIZE.label, lineHeight: 1.4,
             background: "var(--surface-raised)", border: "1px solid var(--border-default)",
             borderRadius: RADIUS.sm, padding: "1px 7px",
@@ -1143,8 +1260,8 @@ export default function FoodMap({
               data-testid="food-attribution-panel" role="note"
               style={{
                 ...FLOAT_NOTICE_STYLE,
-                position: "absolute", top: ATTRIBUTION_TOGGLE_TOP + ATTRIBUTION_TOGGLE_SIZE + FLOAT_GAP, right: FLOAT_INSET, zIndex: 500,
-                maxWidth: `calc(100% - ${2 * FLOAT_INSET}px)`, fontWeight: 500, lineHeight: 1.5, textAlign: "left",
+                position: "absolute", top: ATTRIBUTION_TOGGLE_TOP + ATTRIBUTION_TOGGLE_SIZE + FLOAT_GAP, right: FLOAT_INSET + dockPx, zIndex: 500,
+                maxWidth: `calc(100% - ${2 * FLOAT_INSET + dockPx}px)`, fontWeight: 500, lineHeight: 1.5, textAlign: "left",
               }}
               dangerouslySetInnerHTML={{ __html: basemapAttribution(resolveBasemapChoice(basemap)) }}
             />

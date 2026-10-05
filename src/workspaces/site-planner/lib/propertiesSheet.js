@@ -10,6 +10,7 @@
  * the owner brief's "ONE SURFACE, do not generalise" instruction. If this pattern is repeated for
  * another surface later, that is a new, deliberate item, not an extension of this file.
  */
+import { layoutViewportHeight } from "../../../shared/ui/layoutViewport.js";
 
 // Bottom-sheet mode needs BOTH a narrow width (the existing 760px phone/tablet breakpoint) AND a
 // coarse (touch) pointer — width alone is not enough. An iPad in landscape is as wide as a laptop
@@ -44,10 +45,14 @@ export function resolveDragSnap({ heightPx, halfPx, tallPx, dismissBelowPx }) {
 // sheet anchored to `window.innerHeight` alone would sit UNDER the keyboard — the "keyboard buries
 // the field" failure the brief names as the second thing that kills this pattern. `win` is
 // injected (not read from a module-scope `window`) so this stays unit-testable with no DOM.
+// ⛔ B2088384 — the layout height is MEASURED (shared/ui/layoutViewport.js), never innerHeight: on iOS
+// innerHeight moves with the keyboard (both ways — see that file's header), which read here as "no
+// keyboard" (the sheet stayed under it) or "a bigger keyboard" (a gap of map above it). Same defect,
+// same fix as the Food sheet (B2046224 ×2/×3).
 export function keyboardInsetPx(win) {
   const vv = win && win.visualViewport;
   if (!vv) return 0;
-  const innerH = (win && win.innerHeight) || 0;
+  const innerH = layoutViewportHeight(win) || 0;
   const inset = innerH - (vv.height + vv.offsetTop);
   return inset > 1 ? Math.round(inset) : 0;
 }

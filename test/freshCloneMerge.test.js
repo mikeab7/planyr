@@ -33,7 +33,7 @@ const softGit = (cwd, ...args) => { try { return git(cwd, ...args); } catch { re
 const porcelain = (dir) => spawnSync("git", ["status", "--porcelain"], { cwd: dir, encoding: "utf8" }).stdout;
 
 /* Real, dependency-free generator scripts, copied byte-for-byte — no fixture reimplementation. */
-const SCRIPT_FILES = ["build-map.mjs", "build-backlog-index.mjs"];
+const SCRIPT_FILES = ["lib/ledger.mjs", "build-map.mjs", "build-backlog-index.mjs"];
 
 /** A bare fresh clone: `git init`, the REAL committed `.gitattributes`, and the real generator
  *  scripts. Deliberately NOTHING else — no `.githooks`, no `installHooks`/`installMergeDriver`/
@@ -46,7 +46,7 @@ function freshClone(dir) {
   git(dir, "config", "user.name", "Fresh Clone (no npm install)");
   writeFileSync(join(dir, ".gitattributes"), REAL_GITATTRIBUTES);
   mkdirSync(join(dir, "scripts"), { recursive: true });
-  for (const f of SCRIPT_FILES) copyFileSync(join(REPO, "scripts", f), join(dir, "scripts", f));
+  for (const f of SCRIPT_FILES) mkdirSync(dirname(join(dir, "scripts", f)), { recursive: true }), copyFileSync(join(REPO, "scripts", f), join(dir, "scripts", f));
   mkdirSync(join(dir, "docs", "archive"), { recursive: true });
   return dir;
 }

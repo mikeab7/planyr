@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseRoute, buildHash, sameRoute, unknownModuleSlug, isAdminRoute, isDashboardRoute, DEFAULT_MODULE, ORG_CAPABLE_MODULES, reviewOpenTarget } from "../src/app/route.js";
+import { parseRoute, buildHash, sameRoute, unknownModuleSlug, isAdminRoute, isDashboardRoute, DEFAULT_MODULE, ORG_CAPABLE_MODULES, reviewOpenTarget, orgScopeTarget } from "../src/app/route.js";
 
 describe("parseRoute", () => {
   it("empty / root hash falls back to the default module, no project (isDashboardRoute is the real Dashboard signal)", () => {
@@ -176,11 +176,26 @@ describe("sameRoute", () => {
 // org-capable module gets added (or a regression silently drops one) without rendering either
 // component.
 describe("ORG_CAPABLE_MODULES", () => {
-  it("names exactly the five modules that can show org-scoped content today", () => {
-    expect(ORG_CAPABLE_MODULES).toEqual(new Set(["notes", "library", "scheduler", "model", "doc-review"]));
+  it("names exactly the six modules that can show org-scoped content today", () => {
+    expect(ORG_CAPABLE_MODULES).toEqual(new Set(["site-planner", "notes", "library", "scheduler", "model", "doc-review"]));
   });
-  it("Site Planner is never org-capable — there is no parcel to draw without a project", () => {
-    expect(ORG_CAPABLE_MODULES.has("site-planner")).toBe(false);
+  it("Site Planner is org-capable — at company scope it renders the all-sites map (NEW-2)", () => {
+    expect(ORG_CAPABLE_MODULES.has("site-planner")).toBe(true);
+  });
+});
+
+// NEW-2 — the switcher's company entry keeps the tab you are on. On main it was hardcoded to Notes
+// from EVERY tab (Shell's goOrg), so each assertion below except Notes' own fails there.
+describe("orgScopeTarget — company entry keeps the current tab", () => {
+  for (const m of ["site-planner", "notes", "library", "scheduler", "model", "doc-review"]) {
+    it(`from ${m}: stays on ${m}, org scope, never carries a project id`, () => {
+      expect(orgScopeTarget(m)).toEqual({ module: m, projectId: null, cross: false, org: true });
+      expect(buildHash(orgScopeTarget(m))).toMatch(/^#\/org\//);
+    });
+  }
+  it("falls back to Notes only when no org-capable tab is current (Dashboard, Food)", () => {
+    expect(orgScopeTarget(null).module).toBe("notes");
+    expect(orgScopeTarget("food").module).toBe("notes");
   });
 });
 

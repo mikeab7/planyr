@@ -15,7 +15,7 @@
  *      16-bit UTF-16LE, so we decode with the matching native TextDecoder and concatenate the
  *      body text (clamped to ccpText so footnote/header text doesn't bleed in).
  *
- * Why the native decoders matter: surveyors' minute/second marks are often the windows-1252
+ * Why the right decoder matters (utf-16 native; windows-1252 via decodeCp1252 below): surveyors' minute/second marks are often the windows-1252
  * smart quotes 0x92/0x94 (→ U+2019/U+201D) in the 0x80–0x9F band where cp1252 ≠ Latin-1 — a
  * naive `String.fromCharCode` yields control chars the metes-and-bounds bearing parser won't
  * match, silently dropping the minutes/seconds. `TextDecoder("windows-1252")` maps them right.
@@ -31,14 +31,14 @@ const OLE_MAGIC = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
 const ENDOFCHAIN = 0xfffffffe;
 const FREESECT = 0xffffffff;
 
-const SAVE_AS = "Save it as .docx (File ▸ Save As ▸ Word Document) or paste the description.";
+export const SAVE_AS = "Save it as .docx (File ▸ Save As ▸ Word Document) or paste the description.";
 
 function fail(msg) {
   throw new Error(msg);
 }
 
 /* Parse the OLE Compound File Binary container into a { entries, readStream } accessor. */
-function parseCfb(arrayBuffer) {
+export function parseCfb(arrayBuffer) {
   const bytes = new Uint8Array(arrayBuffer);
   const dv = new DataView(arrayBuffer);
   if (bytes.length < 512) fail("Not a Word .doc file.");
@@ -203,8 +203,11 @@ function tidy(s) {
     .trim();
 }
 
-/* Read the WordDocument FIB + piece table, decode the body text. */
-function extractWordText(cfb) {
+/* Read the WordDocument FIB + the piece table. Shared by the text-only reader below and by the structure reader
+ * (docStructure.js), so there is ONE implementation of "where does the body text live". `fib(i)` answers the
+ * (fc, lcb) pair at index i of the FibRgFcLcb97 table; `pieces` are the CLX pieces with their character range
+ * (cp), the byte offset of their first char in the WordDocument stream (fc) and whether they are 8-bit. */
+export function readWordFile(cfb) {
   const wd = cfb.readStream(cfb.entries.WordDocument);
   if (!wd || wd.length < 0x300) fail("Not a Word .doc file.");
   const wdv = new DataView(wd.buffer, wd.byteOffset, wd.byteLength);
@@ -219,8 +222,8 @@ function extractWordText(cfb) {
   // fcClx / lcbClx live in the FibRgFcLcb97 blob; compute its start defensively from the header
   // vector counts (equals the canonical 0x9A for standard Word docs), then pair index 33.
   const blobStart = 0x22 + u16(wdv, 0x20) * 2 + 2 + u16(wdv, 0x3e) * 4 + 2;
-  const fcClx = u32(wdv, blobStart + 33 * 8);
-  const lcbClx = u32(wdv, blobStart + 33 * 8 + 4);
+  const fib = (i) => ({ fc: u32(wdv, blobStart + i * 8), lcb: u32(wdv, blobStart + i * 8 + 4) });
+  const { fc: fcClx, lcb: lcbClx } = fib(33);
   if (!lcbClx) fail(`Couldn't read the text from that .doc. ${SAVE_AS}`);
 
   const tbl = cfb.readStream(cfb.entries[whichTable] || cfb.entries["1Table"] || cfb.entries["0Table"]);
@@ -249,9 +252,7 @@ function extractWordText(cfb) {
   const pcdBase = pcdtPos + (n + 1) * 4;
   if (n <= 0 || pcdBase + n * 8 > clxEnd) fail(`Couldn't read the text from that .doc. ${SAVE_AS}`);
 
-  const dec1252 = new TextDecoder("windows-1252");
-  const decU16 = new TextDecoder("utf-16le");
-  let raw = "";
+  const pieces = [];
   let cpSoFar = 0;
   for (let i = 0; i < n && cpSoFar < ccpText; i++) {
     const cpStart = u32(tdv, cpBase + i * 4);
@@ -262,18 +263,46 @@ function extractWordText(cfb) {
     const fcRaw = u32(tdv, pcdBase + i * 8 + 2);
     const compressed = (fcRaw & 0x40000000) !== 0;
     const fcVal = fcRaw & 0x3fffffff;
-    if (compressed) {
-      const off = fcVal >>> 1; // 8-bit windows-1252, one byte per char
-      const avail = Math.max(0, Math.min(chars, wd.length - off));
-      raw += dec1252.decode(wd.subarray(off, off + avail));
-    } else {
-      const off = fcVal; // 16-bit UTF-16LE, two bytes per char
-      const avail = Math.max(0, Math.min(chars, Math.floor((wd.length - off) / 2)));
-      raw += decU16.decode(wd.subarray(off, off + avail * 2));
-    }
+    pieces.push({ cp: cpSoFar, chars, compressed, fc: compressed ? fcVal >>> 1 : fcVal }); // cp = position in the body text
     cpSoFar += chars;
   }
+  return { wd, wdv, tbl, tdv, fib, pieces, ccpText, nFib: u16(wdv, 0x02) };
+}
+
+/* windows-1252 → string. Written out rather than `new TextDecoder("windows-1252")`: some Node 22 builds take a Latin-1
+ * fast path for that label, so 0x92 comes back as U+0092 instead of U+2019 (a deed's smart-quote minute mark) — measured
+ * here, and the failure is silent. The 0x80–0x9F band is the only place cp1252 differs from Latin-1. */
+const CP1252_HI = "€\u0081‚ƒ„…†‡ˆ‰Š‹Œ\u008dŽ\u008f\u0090‘’“”•–—˜™š›œ\u009džŸ";
+export function decodeCp1252(bytes) {
+  let out = "";
+  const CH = 0x4000;
+  for (let i = 0; i < bytes.length; i += CH) {
+    let chunk = "";
+    for (let j = i, e = Math.min(bytes.length, i + CH); j < e; j++) { const b = bytes[j]; chunk += b >= 0x80 && b <= 0x9f ? CP1252_HI[b - 0x80] : String.fromCharCode(b); }
+    out += chunk;
+  }
+  return out;
+}
+
+/* Decode the body text of a piece list into one string (cp-indexed). */
+export function decodePieces(wd, pieces) {
+  const decU16 = new TextDecoder("utf-16le");
+  let raw = "";
+  for (const pc of pieces) {
+    if (pc.compressed) {
+      const avail = Math.max(0, Math.min(pc.chars, wd.length - pc.fc)); // 8-bit windows-1252, one byte per char
+      raw += decodeCp1252(wd.subarray(pc.fc, pc.fc + avail));
+    } else {
+      const avail = Math.max(0, Math.min(pc.chars, Math.floor((wd.length - pc.fc) / 2))); // 16-bit UTF-16LE
+      raw += decU16.decode(wd.subarray(pc.fc, pc.fc + avail * 2));
+    }
+  }
   return raw;
+}
+
+function extractWordText(cfb) {
+  const f = readWordFile(cfb);
+  return decodePieces(f.wd, f.pieces);
 }
 
 /* Read a legacy .doc (as an ArrayBuffer) into plain text. Async to match readDeedFile's docx path. */

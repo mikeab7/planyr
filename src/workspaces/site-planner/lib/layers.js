@@ -16,12 +16,12 @@ import * as EL from "esri-leaflet";
 import { JURISDICTION_LAYERS } from "./counties.js";
 import { JURISDICTION_SOURCES, ETJ_SOURCES, roadAuthorityStyle, ROAD_AUTHORITY_LEGEND } from "./jurisdiction.js";
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
-import { overpassLayer, mapillaryLayer } from "./evidenceLayers.js";
+import { overpassLayer, mapillaryLayer, bedrockLayer } from "./evidenceLayers.js";
 import { TERRAIN_MIN_ZOOM } from "./terrainGate.js";
 /* NEW-1 — every zoom gate in the app, declared in ONE leaf so the registry rows below can
  * state theirs and the Layers panel can report it as live state. `PIPELINE_VECTOR_MIN_ZOOM`
  * mirrors VECTOR_SOURCES.txrrc_pipe.query.minVectorZoom (pinned by test/layerZoomGate). */
-import { OSM_MIN_ZOOM, MAPILLARY_MIN_ZOOM } from "./layerZoomGate.js";
+import { OSM_MIN_ZOOM, MAPILLARY_MIN_ZOOM, SOIL_BEDROCK_MIN_ZOOM } from "./layerZoomGate.js";
 const PIPELINE_VECTOR_MIN_ZOOM = 13;
 import { loadTerrain } from "./terrainLazy.js";
 import {
@@ -129,6 +129,31 @@ function reportCacheAge(lyr, k, onStatus) {
       .catch(() => {});
   } catch (_) { /* age is optional */ }
 }
+
+/* NEW-1 (FL/GA pipelines) — the four EIA transmission-pipeline rows share one shape, built here so
+ * the "approximate" wording, the state scope and the 811 pointer cannot drift apart across them.
+ * ⛔ `states: ["FL","GA"]` is load-bearing: a Texas site must never be offered the approximate EIA
+ * layer as a stand-in for the authoritative TxRRC one (the panel demotes it as "not available in
+ * Texas", exactly like every other out-of-state row). The URL comes from the registry — never inline. */
+const EIA_APPROX_INFO = "Approximate — major transmission lines only. No local gas mains or gathering lines, and geometry can be miles off.";
+const EIA_APPROX_CAVEAT = "Not a survey and not complete. Confirm with the title commitment (easements), an ALTA survey and an 811 locate — Sunshine 811 in Florida, Georgia 811 in Georgia.";
+const eiaPipelineRow = (regKey, { label, color, order, title }) => ({
+  kind: "esriFeature", label,
+  source: "US EIA (via Esri U.S. Federal Datasets)",
+  url: GIS_SOURCES[regKey].serviceUrl, minZoom: 9, color, weight: 2.2, opacity: 0.8,
+  hoverIdentify: true, canvasIdentify: true, hoverTitle: title + " (approximate)", hoverSource: "US EIA",
+  hoverFields: [{ names: ["Pipename", "PIPENAME"] }, { names: ["Operator", "Opername", "OPERATOR"] }],
+  sublabel: EIA_APPROX_INFO,
+  // NEW-1 — an empty view on an APPROXIMATE, transmission-only map is not evidence of absence, so this row never says "No features".
+  emptyMsg: "None mapped in this view — not proof there are none.",
+  note: "US Energy Information Administration Energy Atlas — national, transmission-only. Loads zoomed in.",
+  infoCaveat: EIA_APPROX_CAVEAT,
+  // NEW-1 stacking role (lib/mapStack.js): pipeline centrelines.
+  role: "line",
+  states: ["FL", "GA"],
+  group: "environmental", order,
+});
+
 
 export const STATEWIDE = {
   fema: {
@@ -260,6 +285,10 @@ export const STATEWIDE = {
     states: ["TX"],
     group: "environmental", order: 4,
   },
+  eia_gas: eiaPipelineRow("eiaGas", { label: "Gas pipelines (approx.)", title: "Natural gas pipeline", color: "#c2410c", order: 8 }),
+  eia_petroleum: eiaPipelineRow("eiaPetroleum", { label: "Petroleum product pipelines (approx.)", title: "Petroleum product pipeline", color: "#a16207", order: 9 }),
+  eia_crude: eiaPipelineRow("eiaCrude", { label: "Crude oil pipelines (approx.)", title: "Crude oil pipeline", color: "#7c2d12", order: 10 }),
+  eia_hgl: eiaPipelineRow("eiaHgl", { label: "Gas liquids pipelines (approx.)", title: "Hydrocarbon gas liquids pipeline", color: "#be185d", order: 11 }),
   ccn_service: {
     // Public-data screening PHASE 1 — water & sewer CCN service areas ("who holds the
     // certificate to serve this site"). The Site Analysis Water/Sewer CCN cards drive this
@@ -339,6 +368,41 @@ export const STATEWIDE = {
     role: "line",
     states: ["TX"],
     group: "access", order: 1,
+  },
+  bts_truck_network: {
+    // B2081249 — NATIONAL. FHWA's STAA National Network (USDOT BTS National Transportation Atlas). The service ALSO holds
+    // segments listed WITHOUT national-network status (NN = 0), so the row carries its source's `where` — never draw it
+    // unfiltered. Georgia DOT publishes no truck-route service of its own; this is the federal answer for every state.
+    kind: "esriFeature", label: "Truck routes (STAA National Network)", source: "USDOT BTS — FHWA National Network",
+    url: GIS_SOURCES.ntaNationalNetwork.serviceUrl, where: GIS_SOURCES.ntaNationalNetwork.where,
+    minZoom: 11, color: "#7c2d12", weight: 2, opacity: 0.55,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "National Network route", hoverSource: "USDOT BTS",
+    hoverFields: [{ names: ["SIGN1", "ROUTEID"], label: "route" }, { names: ["AADT"], label: "AADT" }, { names: ["AADT_COM"], label: "combination trucks/day" }, { names: ["AADT_SINGL"], label: "single-unit trucks/day" }],
+    note: "The federal STAA National Network — the routes a 53-ft trailer / 80,000-lb truck may use (Interstates and the connecting highways). Data year 2018; a federal reference list, NOT a state permit or current restriction. A road missing here is not proven closed to trucks: it may be a state-designated route this file never listed. Confirm access and any turning-radius limits with the state DOT.",
+    infoCaveat: "Federal reference, data year 2018 (layer last edited April 2023). Truck counts are AADT of combination and single-unit trucks where the file carries them.",
+    role: "line", group: "access", order: 2,
+  },
+  hpms_aadt: {
+    // B2081249 — NATIONAL. FHWA HPMS 2022 traffic on the National Highway System (the data each state DOT reports to FHWA).
+    // Coexists with the Texas/Colorado state count layers: it is the FEDERAL copy on the NHS only, different vintage and
+    // method, off by default — both are offered and both say what they are.
+    kind: "esriFeature", label: "Traffic volumes (HPMS 2022, highways)", source: "USDOT BTS — FHWA HPMS",
+    url: GIS_SOURCES.hpmsAadt.serviceUrl,
+    minZoom: 11, color: "#2563eb", weight: 2, opacity: 0.55,
+    // AADT bands: grey = reported without a count · blue < 10k · indigo 10–30k · violet 30–60k · magenta 60k+
+    styleFn: (props, opacity) => {
+      const a = props && props.AADT != null ? Number(props.AADT) : NaN;
+      if (!Number.isFinite(a) || a <= 0) return { color: "#64748b", weight: 1.2, opacity: opacity * 0.8 };
+      if (a < 10000) return { color: "#0ea5e9", weight: 1.5, opacity };
+      if (a < 30000) return { color: "#2563eb", weight: 2, opacity };
+      if (a < 60000) return { color: "#7c3aed", weight: 2, opacity };
+      return { color: "#be185d", weight: 2.5, opacity };
+    },
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Traffic volume (HPMS 2022)", hoverSource: "USDOT BTS / FHWA HPMS",
+    hoverFields: [{ names: ["AADT"], label: "AADT" }, { names: ["F_SYSTEM"], label: "HPMS functional class" }],
+    note: "FHWA HPMS 2022 average daily traffic on the NATIONAL HIGHWAY SYSTEM only — Interstates, freeways, principal arterials and the connectors. Colour = AADT: blue under 10,000 · indigo 10–30,000 · violet 30,000–60,000 · magenta over 60,000 · grey = on the system but no count reported. A road off the system has NO line here: that is a coverage gap, never low traffic. In Texas and Colorado the state's own count layer is the closer read; this is the federal copy.",
+    infoCaveat: "HPMS 2022 as published by USDOT BTS (layer edited February 2025). An access / visibility proxy, not a traffic study.",
+    role: "line", group: "access", order: 3,
   },
   bts_rail: {
     // Public-data screening PHASE 6 (access tier) — BTS/FRA rail-network lines. The Site Analysis
@@ -544,6 +608,43 @@ export const TERRAIN = {
     // NEW-1 stacking role (lib/mapStack.js): Flow arrows — strokes, and useless buried under a pad.
     role: "line",
     group: "base", order: 3,
+  },
+  ga_slope: {
+    // Georgia screening — slope classes rendered by the 3DEP ImageServer itself (the same service as the
+    // elevation shading), as a custom raster-function chain: Slope (percent rise) → Remap into five classes →
+    // Colormap. ZFactor 1.2 corrects the Web-Mercator export's horizontal stretch at Georgia latitudes
+    // (1/cos 33° ≈ 1.19), so a 10% slope reads as 10% rather than 8%.
+    kind: "esriImage", label: "Slope classes",
+    url: "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer",
+    states: ["GA"],
+    rendering: {
+      rasterFunction: "Colormap",
+      rasterFunctionArguments: {
+        // class 1 (<2%) is fully transparent: flat ground is the answer, not something to paint
+        Colormap: [[1, 0, 0, 0, 0], [2, 253, 224, 71, 255], [3, 249, 115, 22, 255], [4, 220, 38, 38, 255], [5, 127, 29, 29, 255]],
+        Raster: {
+          rasterFunction: "Remap",
+          rasterFunctionArguments: {
+            InputRanges: [0, 2, 2, 5, 5, 10, 10, 15, 15, 10000], OutputValues: [1, 2, 3, 4, 5], AllowUnmatched: false,
+            Raster: { rasterFunction: "Slope", rasterFunctionArguments: { SlopeType: 2, ZFactor: 1.2 } },
+          },
+          outputPixelType: "U8",
+        },
+      },
+    },
+    opacity: 0.55, source: "USGS 3DEP",
+    note: "Slope of the ground, from LiDAR: clear under 2%, yellow 2–5%, orange 5–10%, red 10–15%, dark red over 15%. Computed at the screen's current resolution, so zoomed far out the ground reads flatter than it is — use it at site zoom. Screening only; a survey topo governs grading cost.",
+    role: "area", group: "base", order: 4,
+  },
+  soil_bedrock: {
+    // B2081251 — SHALLOW ROCK, national (USDA NRCS SSURGO via the SDM WFS + Soil Data Access). Not an ArcGIS source,
+    // so it lives here and in ssurgoBedrock.js rather than GIS_SOURCES (whose verifier is /query-shaped); the live
+    // check is ui-audit/verify-ssurgo-bedrock.mjs. Drawn client-side, view-driven, like the OSM layers.
+    kind: "sdaBedrock", label: "Shallow rock (depth to bedrock)", source: "USDA NRCS — SSURGO soils",
+    minZoom: SOIL_BEDROCK_MIN_ZOOM, opacity: 0.55,
+    note: "Soil map units where bedrock is recorded within 5 ft: dark red under 20 in, orange 20–40 in, yellow 40–60 in. Depth is the SHALLOWEST soil in each map unit, so rock can be that shallow somewhere in the unit, not everywhere. A unit left unpainted has no rock recorded in the soil profile (described to about 6 ft) — that is not proof there is none. A desktop soils read, never a boring: it prices rock excavation and utility trenching only as a flag to investigate.",
+    infoCaveat: "Screening only — SSURGO map units are generalised polygons; a geotechnical boring governs.",
+    role: "area", group: "base", order: 5,
   },
 };
 
@@ -911,6 +1012,96 @@ export const AHJ_LAYERS = {
     infoCaveat: "A boundary means the city HAS JURISDICTION here — not that it serves or will connect utilities to a parcel.",
     role: "line", group: "jurisdiction", order: 2,
   },
+  /* NEW-1 (Georgia screening, 2026-10-04) — THE GEORGIA SCREENING LAYERS. Each reads its own `GIS_SOURCES` row
+   * (live-verified, CORS-open, production host — see sources.js), declares `states: ["GA"]` so a Texas view lists
+   * none of them and a Georgia view lists them, and carries the honest limits of its data in `note`. Georgia DOT
+   * traffic/truck routes, the coastal-marsh jurisdiction line and SSURGO depth-to-bedrock are NOT here: their hosts
+   * could not be reached from the build sandbox (see BACKLOG) and an unconfirmed URL is how a row ships dead. */
+  ga_hsi: {
+    kind: "esriFeature", label: "Hazardous sites (Georgia EPD)", source: "Georgia EPD — Hazardous Site Inventory",
+    url: GIS_SOURCES.hsiGa.serviceUrl, states: ["GA"],
+    minZoom: 9, color: "#9a3412", weight: 2, opacity: 0.55, pointRadius: 5,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Hazardous site", hoverSource: "Georgia EPD",
+    hoverFields: [{ names: ["Site_Name"] }, { names: ["Class"], label: "class" }, { names: ["City"] }],
+    note: "Georgia EPD's Hazardous Site Inventory — sites with a reportable release, at EPD's own surveyed coordinates (the July 2025 list). A Phase I ESA PRE-SCREEN, not a substitute; the Class number is EPD's.",
+    role: "point", group: "environmental", order: 12,
+  },
+  ga_ust: {
+    // NEW-1 (B2095744) — Georgia EPD's REGISTER of underground storage tank facilities (not a leak list; see GIS_SOURCES.ustGa).
+    kind: "esriFeature", label: "Underground storage tanks (Georgia EPD)", source: "Georgia EPD — UST Management Program",
+    url: GIS_SOURCES.ustGa.serviceUrl, states: ["GA"],
+    minZoom: 12, color: "#854d0e", weight: 2, opacity: 0.55, pointRadius: 3.5,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "UST facility", hoverSource: "Georgia EPD",
+    hoverFields: [{ names: ["LOCATION_NAME"] }, { names: ["LOCATION_TYPE"], label: "type" }, { names: ["FACILITY_STATUS"], label: "status" }, { names: ["CITY"] }],
+    note: "Georgia EPD's register of facilities with underground storage tanks (gas stations, distributors, farms, industrial…), the October 2022 edition. A REGISTER, not a leak list: release, corrective-action and closure status are not in it. A facility beside the site is a Phase I ESA pre-screen flag — pull EPD's UST Management Program file.",
+    role: "point", group: "environmental", order: 11,
+  },
+  ga_nrhp: {
+    kind: "esriFeature", label: "Historic places (National Register)", source: "National Park Service — National Register of Historic Places",
+    url: GIS_SOURCES.nrhp.serviceUrl, states: ["GA"],
+    minZoom: 11, color: "#6d28d9", weight: 2, opacity: 0.55, pointRadius: 4,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Historic place", hoverSource: "NPS National Register",
+    hoverFields: [{ names: ["RESNAME"] }, { names: ["ResType"], label: "type" }, { names: ["City"] }],
+    note: "National Register listings — one point per listing (a district is one point, not its boundary). Georgia's own SHPO database (GNAHRGIS) is login-only, so recorded-but-unlisted sites are NOT here. A flag to check with the Georgia Historic Preservation Division, not a clearance.",
+    role: "point", group: "environmental", order: 13,
+  },
+  ga_cemeteries: {
+    kind: "esriFeature", label: "Cemeteries (incomplete)", source: "USGS — GNIS cemeteries",
+    url: GIS_SOURCES.cemeteries.serviceUrl, states: ["GA"],
+    minZoom: 12, color: "#475569", weight: 2, opacity: 0.55, pointRadius: 3.5,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Cemetery", hoverSource: "USGS GNIS",
+    hoverFields: [{ names: ["NAME"] }, { names: ["CITY"] }],
+    note: "INCOMPLETE: recorded cemeteries only. Unrecorded family burial grounds — common on old Georgia farmland — are NOT on this layer, so an empty map is never proof of none. A burial ground on the site is a hard constraint; ask the county and have it surveyed.",
+    role: "point", group: "environmental", order: 14,
+  },
+  ga_crit_habitat: {
+    kind: "esriFeature", label: "Critical habitat (USFWS)", source: "U.S. Fish & Wildlife Service",
+    url: GIS_SOURCES.critHabitat.serviceUrl, states: ["GA"],
+    minZoom: 8, color: "#15803d", weight: 1.5, opacity: 0.45,
+    // A designated area, drawn as a light fill + outline (a bare outline vanishes over aerial imagery).
+    styleFn: (props, opacity) => ({ color: "#15803d", weight: 1.5, opacity, fillColor: "#15803d", fillOpacity: opacity * 0.5 }), // fill is PROPORTIONAL to the slider — the print path multiplies the same base (PDF-PARITY)
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Critical habitat", hoverSource: "USFWS",
+    hoverFields: [{ names: ["comname"] }, { names: ["sciname"] }, { names: ["listing_status"], label: "status" }],
+    note: "USFWS final critical habitat. It binds FEDERAL actions, not private land directly — but a Corps wetlands permit is a federal action, so it matters wherever there is a stream or wetland. A screen; USFWS IPaC is the authoritative species list.",
+    role: "area", group: "environmental", order: 15,
+  },
+  ga_gopher_tortoise: {
+    kind: "esriFeature", label: "Gopher tortoise soils (DNR)", source: "Georgia DNR — Wildlife Resources Division",
+    url: GIS_SOURCES.gopherTortoiseGa.serviceUrl, states: ["GA"],
+    minZoom: 12, color: "#a16207", weight: 1, opacity: 0.45,
+    styleFn: (props, opacity) => {
+      const c = { 1: "#7c2d12", 2: "#c2410c", 3: "#f59e0b" }[props && props.Tier] || "#a16207";
+      return { color: c, weight: 0.8, opacity, fillColor: c, fillOpacity: opacity * 0.6 };
+    },
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Tortoise soil", hoverSource: "Georgia DNR",
+    hoverFields: [{ names: ["Tier"], label: "tier" }, { names: ["MUSYM"], label: "soil unit" }],
+    note: "Soils suitable for gopher tortoise burrows, by DNR tier (the tier numbers are DNR's). A MODELED habitat screen, not a survey or a sighting. The gopher tortoise is state-protected in Georgia — if this lights up, a tortoise survey is the only real check. Coastal plain and sandhills only.",
+    role: "area", group: "environmental", order: 16,
+  },
+  ga_trout: {
+    kind: "esriFeature", label: "Trout streams (Georgia DNR)", source: "Georgia DNR — Wildlife Resources Division",
+    url: GIS_SOURCES.troutGa.serviceUrl, states: ["GA"],
+    minZoom: 9, color: "#0f766e", weight: 2, opacity: 0.55,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Trout stream", hoverSource: "Georgia DNR",
+    hoverFields: [{ names: ["Name"] }, { names: ["Basin"], label: "basin" }],
+    note: "Georgia DNR-mapped trout streams (north Georgia). A designated trout stream carries a 50 ft buffer instead of the 25 ft state minimum — turn on \"Stream buffers\" to see it drawn.",
+    role: "line", group: "flood", order: 2,
+    floodTier: "hydrography", agency: "Georgia DNR",
+  },
+  ga_stream_buffers: {
+    // Georgia screening — computed buffer bands off the cached NHD + DNR trout + District-outline geometry (see
+    // vectorOverlay.cachedStreamBufferLayer and lib/georgiaStreamBuffers.js, which holds every rule).
+    kind: "pipelineCorridor", label: "Stream buffers (Georgia)", bufferRule: "ga_streams",
+    source: "USGS NHD + Georgia DNR trout streams + Atlanta Regional Commission (computed)",
+    states: ["GA"],
+    // Vector-only: the bands exist only where the NHD centrelines came back as VECTORS, so the gate is the NHD
+    // source's own `query.minVectorZoom` (test/layerZoomGate pins the two together).
+    minZoom: 12,
+    opacity: 0.55,
+    note: "Assumed buffer bands off the USGS stream centreline: 25 ft each side on every state-waters stream (Georgia Erosion & Sedimentation Act), 50 ft on a DNR trout stream, and 75 ft (50 undisturbed + 25 impervious) inside the Metropolitan North Georgia Water Planning District — the District's MODEL ordinance, the typical local requirement; each county adopts its own, so confirm with the county. Measured from the CENTRELINE, not the bank, so a wide stream's true buffer starts further out. Ephemeral channels, ditches and canals are not buffered. Screening only — a surveyed top-of-bank governs.",
+    role: "area", group: "flood", order: 3,
+    floodTier: "hydrography", agency: "USGS / Georgia DNR",
+  },
   co_city: {
     kind: "vector", label: "City limits (Colorado)", source: "Colorado DOLA (via State of Colorado OIT GIS)",
     url: GIS_SOURCES.cityCo.serviceUrl, states: ["CO"],
@@ -1002,7 +1193,10 @@ export const AHJ_LAYERS = {
 // LISTS the ones for the current jurisdiction.
 export const JLAYERS = {};
 Object.entries(JURISDICTION_LAYERS).forEach(([cty, j]) =>
-  Object.entries(j.layers || {}).forEach(([id, cfg]) => { JLAYERS[id] = { ...cfg, county: cty }; }));
+  // Part A (Georgia screening): every per-county group in counties.js is a Texas county (Harris / Fort Bend / Chambers /
+  // Waller), so each row inherits `states: ["TX"]` unless it names its own — one rule, so a county group can never
+  // list itself on a Georgia view just because nobody tagged it.
+  Object.entries(j.layers || {}).forEach(([id, cfg]) => { JLAYERS[id] = { ...cfg, county: cty, states: cfg.states || ["TX"] }; }));
 
 export const ALL_LAYERS = { ...STATEWIDE, ...TERRAIN, ...JURISDICTIONS, ...EVIDENCE, ...AHJ_LAYERS, ...JLAYERS };
 
@@ -1033,6 +1227,10 @@ export const LAYER_VINTAGE = {
   txrrc_pipe: "RRC permit data — continuously updated",
   txrrc_pipe_easement: "Assumed buffer off RRC T-4 routes — not a recorded width",
   txrrc_wells: "RRC permit data — continuously updated",
+  eia_gas: "EIA Energy Atlas — data edited mid-2025, periodically refreshed",
+  eia_petroleum: "EIA Energy Atlas — data edited mid-2025, periodically refreshed",
+  eia_crude: "EIA Energy Atlas — data edited mid-2025, periodically refreshed",
+  eia_hgl: "EIA Energy Atlas — data edited mid-2025, periodically refreshed",
   ccn_service: "PUC CCN (via Harris County GIS) — Dec 2023 edition",
   env_lpst: "TCEQ LPST — continuously updated",
   env_cleanups: "EPA Cleanups in My Community (FRS) — periodically updated",
@@ -1066,6 +1264,19 @@ export const LAYER_VINTAGE = {
   bkdd_easements: "BKDD recorded easements (Quiddity) — current edition",
   bkdd_dmp: "BKDD Drainage Master Plan — study results (advisory)",
   nhd_flowlines: "USGS NHD — collection date varies by area",
+  // Georgia screening (NEW-1) — each stamped with the edition the provider's own layer reported on 2026-10-04.
+  ga_hsi: "Georgia EPD Hazardous Site Inventory — July 2025 list (layer edited 2025-08-04)",
+  ga_ust: "Georgia EPD UST facility register — layer edited 2022-10-17",
+  ga_nrhp: "NPS National Register — Esri Federal Data copy, edited 2026-10-02",
+  ga_cemeteries: "USGS GNIS cemeteries — recorded sites only; no single edition date",
+  ga_crit_habitat: "USFWS final critical habitat — layer edited 2026-08-31",
+  ga_gopher_tortoise: "Georgia DNR suitable-soils model — layer edited 2026-09-11",
+  ga_trout: "Georgia DNR trout streams — layer edited 2024-12-30",
+  ga_stream_buffers: "Computed from USGS NHD + DNR trout streams + the District outline — not a surveyed buffer",
+  ga_slope: "USGS 3DEP LiDAR — collection date varies by area",
+  bts_truck_network: "FHWA National Network — data year 2018 (layer edited 2023-04-03)",
+  hpms_aadt: "FHWA HPMS — data year 2022 (layer edited 2025-02-12)",
+  soil_bedrock: "USDA SSURGO — survey vintage varies by county",
   coh_ww: "City of Houston GIS (test host) — current edition",
   coh_storm: "City of Houston GIS (test host) — current edition",
   coh_water: "City of Houston GIS (test host) — current edition",
@@ -1245,7 +1456,7 @@ export function attachFeatureRetry(lyr, k, cfg, onStatus, max = 3) {
   lyr.on("load", () => {
     tries = 0;
     const n = featureLayerCount(lyr);
-    onStatus && onStatus(k, n === 0 ? "empty" : "loaded", n === 0 ? "No features in this view." : null);
+    onStatus && onStatus(k, n === 0 ? "empty" : "loaded", n === 0 ? ((cfg && cfg.emptyMsg) || "No features in this view.") : null);
   });
   lyr.on("requesterror", (e) => {
     const code = e && e.error && (e.error.code ?? e.error.httpStatus);
@@ -1509,6 +1720,9 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
       const report = (s, msg, extra) => onStatus && onStatus(k, s, msg, extra); // extra carries data-age {ts,stale} for B75
       if (cfg.kind === "overpass") {
         const lyr = overpassLayer(cfg.query, report);
+        lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;
+      } else if (cfg.kind === "sdaBedrock") {
+        const lyr = bedrockLayer(report);
         lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;
       } else if (cfg.kind === "mapillary") {
         // B308: served via the same-origin /api/mapillary proxy (token held server-side),

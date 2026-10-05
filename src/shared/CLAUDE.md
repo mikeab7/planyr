@@ -48,7 +48,9 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   (vector match-line edge fit), `legendUnion.js` (union sheet legends into the composite key).
   The **deed-import readers** that feed the Site Planner metes-and-bounds plotter: `docxText.js`
   (.docx + the `readDeedFile` dispatcher), `docText.js` (legacy binary .doc, OLE/CFB), and
-  `pdfText.js` (PDF embedded text layer, lazily loaded). `deedTextReflow.js` is the shared
+  `pdfText.js` (PDF embedded text layer, lazily loaded). `docStructure.js` reads the SAME legacy .doc WITH its formatting
+  (headings, bold/italic/underline, lists, tables) for the Review editor, on top of `docText.js`'s container + piece-table
+  reader (`readWordFile`/`decodePieces`). `deedTextReflow.js` is the shared
   wrapped-line-rejoin pdfText.js and `deedOcr.js` both use.
   **⛔ B768160 — a SCANNED deed PDF (no text layer) is now handled too, via OCR, not just refused.**
   `pdfText.js`'s "looks scanned" error carries a `.scanned` marker; the Site Planner workspace's

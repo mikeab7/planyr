@@ -30,20 +30,26 @@
 export const FOLLOW_RADIUS2 = 9;
 export const FOLLOW_STRENGTH = 1.6;
 
-// DEPTH — unchanged value, now named. Purely time-driven; never reset or nudged by input.
-export const DEPTH_RATE = 0.0000625;
+// DEPTH — OWNER-TUNED (NEW-1 of the TOPO-TUNE-2026-10-05 block; was 0.0000625, ~0.05x of the old
+// speed, so the contours drift very slowly). Purely time-driven; never reset or nudged by input.
+export const DEPTH_RATE = 0.0000031;
 
-// SETTLE — NEW. Lower = more visible trailing lag. Chosen empirically against the OLD inline
-// values this replaces (0.11 for position, 0.065 for intensity): at 60fps, easeToward's implicit
-// time constant is roughly -16.7ms / ln(1-rate), so the old position rate reached ~90% of a
-// sudden jump in about 20 frames (~330ms) — closer to "tracks the cursor" than "trails behind
-// it." These values roughly double that (~45-50 frames, ~750-800ms to 90%), which reads as a
-// deliberate beat of lag on a real gesture without the overshoot-free lerp ever looking "seasick"
-// (a lerp can't oscillate — it only ever approaches its target monotonically, so slowing it
-// further only ever looks laggier, never unstable). Confirmed by canvas sampling in
-// ui-audit/verify-dashboard-topo-settle.mjs, not guessed.
-export const SETTLE_POS = 0.045;
-export const SETTLE_STRENGTH = 0.03;
+// SETTLE — OWNER-TUNED, deliberately extreme (NEW-1, 2026-10-05; were 0.045 / 0.03). Chosen by the
+// owner on a standalone tuner that is a verbatim port of this component: do not clamp or round.
+// easeToward is a per-frame lerp, so at 60fps the cursor highlight takes about 20 seconds to close
+// 90% of the gap to the real cursor (was ~0.8s), and the highlight intensity fades in and out
+// just as slowly. SETTLE_STRENGTH keeps the 2:3 ratio to SETTLE_POS. A lerp can't oscillate, so
+// slowing it only ever reads laggier, never unstable.
+export const SETTLE_POS = 0.0019;
+export const SETTLE_STRENGTH = 0.0013;
+
+// LINE INK — OWNER-TUNED (NEW-2, 2026-10-05). Canvas strokes need concrete hex at render time
+// (palette.js: var() can't be used on a canvas), so the day/night sets live here as named
+// constants, switched by the app's resolved theme in DashboardTopoBackground.jsx.
+export const TOPO_INK = {
+  light: { minor: "#8394AA", index: "#3B4B63", alpha: 0.50, minorWidth: 0.9, indexWidth: 1.5 }, // design-exempt: owner-tuned canvas line ink
+  dark: { minor: "#5F6E86", index: "#B7C4DA", alpha: 0.55, minorWidth: 0.9, indexWidth: 1.5 }, // design-exempt: owner-tuned canvas line ink
+};
 
 /** Ease `current` toward `target` by `rate` (0,1]. `rate` at 1 is an instant snap (no lag at
  * all) — the pre-existing entry-snap case in DashboardTopoBackground.jsx still assigns directly

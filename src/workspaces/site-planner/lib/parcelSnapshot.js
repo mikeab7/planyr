@@ -23,12 +23,24 @@
  * "a fix" — the bug was the server declaring an encoding it didn't reliably apply, not a missing
  * client capability.
  */
-import { geoJsonToEsriFeature, outerRingsLngLat } from "./arcgis.js";
 import { SNAPSHOT_COUNTIES, STATEWIDE_PARCEL_LAYER } from "./counties.js";
-import { idbGet, idbPut } from "./localDb.js";
+import { idbDelete } from "./localDb.js";
+import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
+import { readStoredSnapshot, writeStoredSnapshot, legacySnapshotKey } from "./parcelSnapshotStore.js";
+import { featureBbox, featuresForView, featureAtPoint } from "./parcelSnapshotGeom.js";
 
-const IDB_PREFIX = "parcel-snapshot:v1:";
-const idbKey = (county) => `${IDB_PREFIX}${county}:full`;
+export { featureBbox, featuresForView, featureAtPoint };
+
+/* ⛔ B2092656 ×3 — IN THE BROWSER A SAVED COPY LIVES IN A WORKER, NEVER ON THE MAIN THREAD. Turning Select parcels on
+ * (even in Georgia) warmed both Texas copies, and each was one IndexedDB value (a 227–254 ms structured-clone
+ * deserialise per county on a returning visit) or one `r.json()` (276–392 ms on a new-vintage day) — the pair of long
+ * frames Michael measured (161 / 308 ms, build 947c0ff). Holding 46k lots on the main thread also left ~50 ms major-GC
+ * pauses behind even once the work was sliced. So now: the worker (parcelSnapshotWorker.js) reads the CHUNKED
+ * IndexedDB copy (parcelSnapshotStore.js), checks Drive, downloads, parses and stores — and keeps the features. The main
+ * thread holds only the copy's vintage (`getSnapshot` → { generatedAt, count, bbox, inWorker: true }) and asks the
+ * worker for the lots in a view (`snapshotFeaturesInView`) or under a click (`snapshotHitAt`). The CALLER warms only the
+ * counties in view (MapFinder.syncDisplaysToView). Node / an injected fetch keeps the old in-memory path (the unit
+ * tests). Gate: ui-audit/verify-select-parcels-on-cost.mjs (recorded real copies). */
 
 // Default ON; disabled only by an explicit VITE_PARCEL_SNAPSHOT=0/false/off (mirrors VITE_GIS_PROXY).
 export function snapshotEnabled() {
@@ -56,87 +68,15 @@ export function preferSnapshotForDisplay({ hasSnapshot, liveUrl } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Pure geometry (no DOM / IO) — the core the map's render + click paths call.
-// ---------------------------------------------------------------------------
-
-/* [minLng, minLat, maxLng, maxLat] over a GeoJSON Polygon/MultiPolygon feature's coords, or null.
- * Pure. Memoised on the feature via a non-enumerable field so a viewport filter over ~30k parcels
- * doesn't recompute every pan. */
-export function featureBbox(feature) {
-  if (!feature || !feature.geometry) return null;
-  if (feature.__bbox) return feature.__bbox;
-  const g = feature.geometry;
-  const rings = g.type === "Polygon" ? g.coordinates : g.type === "MultiPolygon" ? g.coordinates.flat() : null;
-  if (!rings || !rings.length) return null;
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const ring of rings) for (const p of ring) {
-    const x = p[0], y = p[1];
-    if (x < minX) minX = x; if (x > maxX) maxX = x;
-    if (y < minY) minY = y; if (y > maxY) maxY = y;
-  }
-  if (!isFinite(minX)) return null;
-  const b = [minX, minY, maxX, maxY];
-  try { Object.defineProperty(feature, "__bbox", { value: b, enumerable: false, configurable: true }); } catch (_) {}
-  return b;
-}
-
-// Absolute shoelace area (deg²) of an [[lng,lat]…] ring list — only for the smallest-lot tiebreak
-// (mirrors optimisticHitAt preferring the tighter parcel when several overlap). Pure.
-function ringsAreaAbs(parts) {
-  let a = 0;
-  for (const r of parts) { let s = 0; for (let i = 0; i < r.length; i++) { const j = (i + 1) % r.length; s += r[i][0] * r[j][1] - r[j][0] * r[i][1]; } a += Math.abs(s / 2); }
-  return a;
-}
-
-// Even-odd point-in-ring on [[lng,lat]…]. Same test as MapFinder.optimisticHitAt. Pure.
-function pointInRing(lng, lat, ring) {
-  let inside = false;
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
-    if ((yi > lat) !== (yj > lat) && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside;
-  }
-  return inside;
-}
-
-/* The features whose bbox intersects the view (lng/lat `{ w, s, e, n }`). Cheap bbox reject so only
- * a few hundred parcels are ever drawn/hit-tested at site zoom. Pure. */
-export function featuresForView(features, bounds) {
-  if (!bounds) return features || [];
-  const { w, s, e, n } = bounds;
-  return (features || []).filter((f) => {
-    const b = featureBbox(f);
-    return b && !(b[2] < w || b[0] > e || b[3] < s || b[1] > n);
-  });
-}
-
-/* The parcel under a clicked point, as the SAME esri feature shape the identify pipeline returns
- * (`{ geometry: { rings }, attributes }`, lng/lat), so it feeds `addParcelHit` with no new logic.
- * Prefers the tightest containing lot (parity with optimisticHitAt). Returns null if none. Pure. */
-export function featureAtPoint(features, lng, lat) {
-  let best = null, bestArea = Infinity;
-  for (const f of features || []) {
-    const b = featureBbox(f);
-    if (!b || lng < b[0] || lng > b[2] || lat < b[1] || lat > b[3]) continue;
-    const esri = geoJsonToEsriFeature(f);
-    if (!esri) continue;
-    const parts = outerRingsLngLat(esri);
-    if (!parts.length || !parts.some((r) => pointInRing(lng, lat, r))) continue;
-    const area = ringsAreaAbs(parts);
-    if (area < bestArea) { best = esri; bestArea = area; }
-  }
-  return best;
-}
-
-// ---------------------------------------------------------------------------
 // IO — download once, hold in IndexedDB, SWR-refresh when the Drive copy is newer.
 // ---------------------------------------------------------------------------
 
-const loaded = new Map();       // county -> { generatedAt, count, features, bbox }
+const loaded = new Map();       // county -> { generatedAt, count, bbox, features } (in memory) | { …, inWorker: true }
 const inflight = new Map();     // county -> Promise (dedupe concurrent ensureSnapshot)
 const listeners = new Set();    // repaint hooks
 
-/* The in-memory snapshot for a county (null until loaded). Synchronous — the render/click paths
- * read this after `ensureSnapshot` has warmed it. */
+/* The snapshot for a county (null until loaded). Synchronous. In the browser it carries the vintage only
+ * (`inWorker: true`) — ask `snapshotFeaturesInView` / `snapshotHitAt` for lots; never read `.features`. */
 export function getSnapshot(county) { return loaded.get(county) || null; }
 export function snapshotVintage(county) { const s = loaded.get(county); return s ? { asOf: s.generatedAt || null, count: s.count ?? (s.features ? s.features.length : 0) } : null; }
 
@@ -144,31 +84,65 @@ export function snapshotVintage(county) { const s = loaded.get(county); return s
 export function onSnapshotChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 function emitChange(county) { for (const fn of listeners) { try { fn(county); } catch (_) {} } }
 
-/* Warm the snapshot for a county: (1) load the IndexedDB copy into memory instantly if present,
- * then (2) background-check the Drive vintage and re-download only when it's newer (SWR). Safe to
- * call repeatedly / on every county-open. Resolves the current in-memory snapshot (possibly null).
- * `fetchImpl` is injectable for tests. */
+/* Stable per-vintage key on every feature (its index in the county's list), so a layer can tell "already held" from
+ * "new" across separate view queries — the worker's answers are fresh objects each time. */
+function stampKeys(features) { for (let i = 0; i < features.length; i++) features[i].__k = i; return features; }
+
+/* Warm the snapshot for a county: (1) load the IndexedDB copy if present, then (2) background-check the Drive
+ * vintage and re-download only when it's newer (SWR). Safe to call repeatedly. Resolves the current snapshot
+ * (possibly null). `fetchImpl` is injectable for tests and selects the in-memory path. */
 export async function ensureSnapshot(county, { fetchImpl, base = "/api/parcel-cache" } = {}) {
   if (!snapshotEnabled() || !SNAPSHOT_COUNTIES.has(county)) return null;
-  const doFetch = fetchImpl || (typeof fetch !== "undefined" ? fetch.bind(globalThis) : null);
   if (inflight.has(county)) return inflight.get(county);
-
-  const run = (async () => {
-    // 1. Instant: hydrate memory from IndexedDB.
-    if (!loaded.has(county)) {
-      const stored = await idbGet(idbKey(county)).catch(() => null);
-      if (stored && Array.isArray(stored.features)) { loaded.set(county, stored); emitChange(county); }
-    }
-    // 2. Background: is Drive's copy newer (or do we have nothing)?
-    if (doFetch) await refreshFromDrive(county, doFetch, base).catch(() => {});
-    return loaded.get(county) || null;
-  })();
-
+  const run = (!fetchImpl && workerAvailable()
+    ? ensureInWorker(county, base).catch((err) => {
+      // LOUD: the fallback works, but it is the main-thread path this item removed — say so, never silently.
+      reportClientEvent("parcel-snapshot-worker-failed", `${county}: ${(err && err.message) || err} — loading the saved copy on the main thread`, { county });
+      return ensureInMemory(county, fetch.bind(globalThis), base);
+    })
+    : ensureInMemory(county, fetchImpl || (typeof fetch !== "undefined" ? fetch.bind(globalThis) : null), base));
   inflight.set(county, run);
   try { return await run; } finally { inflight.delete(county); }
 }
 
-async function refreshFromDrive(county, doFetch, base) {
+/* The lots of `county` whose bbox meets `bounds` ({ w, s, e, n }). Each carries `__k`. Resolves [] when not loaded. */
+export function snapshotFeaturesInView(county, bounds) {
+  const s = loaded.get(county);
+  if (!s) return Promise.resolve([]);
+  if (s.features) return Promise.resolve(featuresForView(s.features, bounds));
+  const parts = [];
+  return ask({ op: "view", county, bounds }, (d) => { if (d.type === "viewPart") parts.push(d.features); }).then(() => parts.flat());
+}
+
+/* The lot under (lng, lat) in any loaded saved copy, shaped like an identify hit ({ county, feature(esri) }), or
+ * null — the last-resort answer when every live source is unreachable (B629 / B1164656). */
+export async function snapshotHitAt(lng, lat, counties = SNAPSHOT_COUNTIES) {
+  const remote = [];
+  for (const c of counties) {
+    const s = loaded.get(c);
+    if (!s) continue;
+    if (s.features) { const feature = featureAtPoint(s.features, lng, lat); if (feature) return { county: c, feature }; }
+    else remote.push(c);
+  }
+  if (!remote.length) return null;
+  const d = await ask({ op: "point", counties: remote, lng, lat }).catch(() => null);
+  return d && d.hit ? d.hit : null;
+}
+
+// ── the in-memory path (Node, tests, or a browser with no Worker) ──
+async function ensureInMemory(county, doFetch, base) {
+  // 1. Hydrate memory from IndexedDB, one chunk (one task) at a time.
+  if (!loaded.has(county)) {
+    const stored = await readStoredSnapshot(county, { onChunk: warmBboxes }).catch(() => null);
+    if (stored && Array.isArray(stored.features)) { stampKeys(stored.features); loaded.set(county, stored); emitChange(county); }
+    else idbDelete(legacySnapshotKey(county)).catch(() => {}); // a pre-B2092656 ×3 single-value copy: dropped, never read (reading it IS the long task)
+  }
+  // 2. Background: is Drive's copy newer (or do we have nothing)?
+  if (doFetch) await refreshInMemory(county, doFetch, base).catch(() => {});
+  return loaded.get(county) || null;
+}
+
+async function refreshInMemory(county, doFetch, base) {
   const cur = loaded.get(county);
   let meta = null;
   try { const r = await doFetch(`${base}/svc/${county}?meta=1`); meta = r && r.ok ? await r.json() : null; } catch (_) { return; }
@@ -183,12 +157,61 @@ async function refreshFromDrive(county, doFetch, base) {
   const snap = {
     generatedAt: meta.generatedAt || null,
     count: meta.count ?? fc.features.length,
-    features: fc.features,
+    features: stampKeys(fc.features),
     bbox: meta.bbox || null,
   };
   loaded.set(county, snap);
-  idbPut(idbKey(county), snap).catch(() => {});
+  writeStoredSnapshot(county, snap).catch(() => {}); // chunked: each put serialises one chunk
   emitChange(county);
+}
+
+/* Memoise every feature's bbox as its chunk lands, so the first `featuresForView` over the whole county is not one
+ * long task. */
+function warmBboxes(features) { for (let i = 0; i < features.length; i++) featureBbox(features[i]); }
+
+// ── the worker path (the browser) ──
+let worker = null, seq = 0;
+const pending = new Map(); // id -> { resolve, reject, onPart }
+const workerAvailable = () => typeof Worker !== "undefined" && typeof location !== "undefined";
+function getWorker() {
+  if (worker) return worker;
+  worker = new Worker(new URL("./parcelSnapshotWorker.js", import.meta.url), { type: "module" });
+  worker.onmessage = (e) => {
+    const d = e.data || {};
+    if (d.type === "loaded") { // a county's copy is now held in the worker (from IndexedDB, or a fresher download)
+      loaded.set(d.county, { generatedAt: d.meta.generatedAt || null, count: d.meta.count ?? null, bbox: d.meta.bbox || null, inWorker: true });
+      emitChange(d.county);
+      return;
+    }
+    const p = pending.get(d.id);
+    if (!p) return;
+    if (d.type === "viewPart") { if (p.onPart) p.onPart(d); return; } // a batch of a reply still coming
+    pending.delete(d.id);
+    if (d.type === "error") p.reject(new Error(d.message || "saved-copy worker error"));
+    else p.resolve(d);
+  };
+  worker.onerror = (e) => {
+    const err = new Error(`saved-copy worker crashed${e && e.message ? `: ${e.message}` : ""}`);
+    for (const p of pending.values()) p.reject(err);
+    pending.clear();
+    for (const [c, s] of loaded) if (s && s.inWorker) loaded.delete(c); // its copies died with it; the next ensure reloads
+    try { worker.terminate(); } catch (_) { /* already gone */ }
+    worker = null;
+  };
+  return worker;
+}
+function ask(msg, onPart) {
+  return new Promise((resolve, reject) => {
+    let w;
+    try { w = getWorker(); } catch (err) { reject(err); return; }
+    const id = ++seq;
+    pending.set(id, { resolve, reject, onPart });
+    w.postMessage({ ...msg, id });
+  });
+}
+async function ensureInWorker(county, base) {
+  await ask({ op: "ensure", county, base: new URL(base, location.href).href });
+  return loaded.get(county) || null;
 }
 
 /* ── NEW-7 — INSTRUMENTATION, deliberately not a cap ────────────────────────────────────────
@@ -203,16 +226,16 @@ async function refreshFromDrive(county, doFetch, base) {
  * retained object graph's scale, though the live JS objects cost more than their JSON text.
  * It is computed ON DEMAND (serializing a county is not free) and never on a render path.
  *
- * If the number turns out to justify a cap, the durable copy is already in IndexedDB (`idbPut`
- * above / `idbGet` in ensureSnapshot), so an evicted county rehydrates instantly and locally —
+ * If the number turns out to justify a cap, the durable copy is already in IndexedDB (`writeStoredSnapshot`
+ * above / `readStoredSnapshot` in ensureSnapshot), so an evicted county rehydrates instantly and locally —
  * the eviction would cost nothing but a disk read. That work is deliberately NOT done here. */
 export function snapshotFootprint() {
   const counties = [];
   let totalBytes = 0, totalFeatures = 0;
   for (const [county, snap] of loaded) {
-    const features = snap && Array.isArray(snap.features) ? snap.features.length : 0;
-    let approxBytes = null;
-    try { approxBytes = JSON.stringify(snap && snap.features ? snap.features : []).length; } catch (_) { approxBytes = null; }
+    const features = snap && Array.isArray(snap.features) ? snap.features.length : (snap && snap.count) || 0;
+    let approxBytes = null; // a copy held in the worker is not on this heap at all (B2092656 ×3) — reported as null, never 0
+    if (snap && snap.features) { try { approxBytes = JSON.stringify(snap.features).length; } catch (_) { approxBytes = null; } }
     counties.push({ county, features, approxBytes, generatedAt: (snap && snap.generatedAt) || null });
     totalFeatures += features;
     if (approxBytes != null) totalBytes += approxBytes;

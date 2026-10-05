@@ -26,11 +26,11 @@ const browser = await webkit.launch({});
 const chrome = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || "/opt/pw-browsers/chromium" });
 const tk = "planyr:notes:tree:v1:local";
 const pk = (id) => `planyr:notes:page:v1:local:${id}`;
-const vk = (id) => `planyr:notes:view:v1:local:${id}`;
 const blankDoc = { type: "doc", content: [{ type: "paragraph", content: [] }] };
 
 async function open(br, ctxOpts, { view, second } = {}) {
   const ctx = await br.newContext(ctxOpts);
+  await ctx.addInitScript(() => { window.__PLANYR_E2E = true; });   // B2078593: the view is set through the E2E hook now
   const page = await ctx.newPage();
   page.on("pageerror", (e) => console.log("   PAGEERROR", String(e.message).slice(0, 160)));
   await assertMeasurable(page, "verify-notes-touch-landing");
@@ -38,17 +38,18 @@ async function open(br, ctxOpts, { view, second } = {}) {
   await pacedWait(page, 250);
   const pages = [{ id: "p1", title: "One", createdAt: 1, updatedAt: 1, projectId: null, pages: [] }];
   if (second) pages.push({ id: "p2", title: "Two", createdAt: 2, updatedAt: 2, projectId: null, pages: [] });
-  const target = second ? "p2" : "p1";
-  await page.evaluate(([t, tree, docs, vkey, v]) => {
+  await page.evaluate(([t, tree, docs]) => {
     localStorage.clear();
     localStorage.setItem(t, JSON.stringify({ v: 3, tombs: [], trash: [], pages: tree }));
     for (const [k, d] of docs) localStorage.setItem(k, JSON.stringify(d));
-    if (v) localStorage.setItem(vkey, JSON.stringify(v));
     if (tree.length > 1) localStorage.setItem("planyr:notes:activePage:v1:local", tree[tree.length - 1].id);
-  }, [tk, pages, pages.map((p) => [pk(p.id), blankDoc]), vk(target), view]);
+  }, [tk, pages, pages.map((p) => [pk(p.id), blankDoc])]);
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForSelector('[data-testid="note-body"]', { timeout: 20000 });
   await pacedWait(page, 900);
+  // B2078593 — a note always OPENS at full width (a stored view no longer wins), so a panned / zoomed
+  // starting state is applied the way a pan or pinch would: through the E2E view hook.
+  if (view) { await page.evaluate((v) => window.__noteEditor?.setView(v), view); await pacedWait(page, 400); }
   return page;
 }
 const glyph = (page) => page.evaluate(() => {

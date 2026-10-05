@@ -7,6 +7,7 @@
  * refreshed by a scheduled job instead, so these tests exercise the GENERATOR against fresh
  * input rather than asserting the currently-committed file is up to date. `--check`/`auditIndex()`
  * still exist for that job and for local use. Mirrors the ui-audit/*-audit.mjs guard pattern. */
+import { readText } from "../scripts/lib/ledger.mjs";
 import { describe, it, expect } from "vitest";
 import { auditTagLegend, parseBacklog, parseLegend, renderIndex } from "../scripts/build-backlog-index.mjs";
 import { readFileSync } from "node:fs";
@@ -31,7 +32,7 @@ describe("BACKLOG.md tags stay within the legend", () => {
    * items that matter most. Rendered fresh here (never read from the possibly-stale committed
    * BACKLOG_OPEN.md) so this stays a test of the GENERATOR, not of today's regen state. */
   it("indexes recurrence-marked items, and carries the count into the row", () => {
-    const text = readFileSync(join(REPO, "BACKLOG.md"), "utf8");
+    const text = readText(REPO, "BACKLOG.md");
     const items = parseBacklog(text);
     const headings = [...text.matchAll(/^###\s+(B\d+)\s*\(×(\d+)\)\s*[—-]/gm)].map((m) => m[1]);
     expect(headings.length, "no recurrence-marked heading in BACKLOG.md to test against").toBeGreaterThan(0);
@@ -48,7 +49,7 @@ describe("BACKLOG.md tags stay within the legend", () => {
   });
 
   it("an item with no recurrence marker carries no count, and its row is the bare id", () => {
-    const items = parseBacklog(readFileSync(join(REPO, "BACKLOG.md"), "utf8"));
+    const items = parseBacklog(readText(REPO, "BACKLOG.md"));
     const plain = items.find((i) => !i.recurrences);
     expect(plain, "no plain item found").toBeTruthy();
     expect(plain.recurrences).toBeNull();
@@ -56,7 +57,7 @@ describe("BACKLOG.md tags stay within the legend", () => {
   });
 
   it("the legend is non-empty and every tagged item uses only legal tags", () => {
-    const text = readFileSync(join(REPO, "BACKLOG.md"), "utf8");
+    const text = readText(REPO, "BACKLOG.md");
     const legend = parseLegend(text);
     expect(legend.size).toBeGreaterThan(0);
     const items = parseBacklog(text);

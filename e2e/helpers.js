@@ -3,7 +3,9 @@ import { expect } from "@playwright/test";
 
 export const E2E_EMAIL = process.env.E2E_EMAIL || "";
 export const E2E_PASSWORD = process.env.E2E_PASSWORD || "";
-export const hasAccount = !!(E2E_EMAIL && E2E_PASSWORD);
+/* NEW-1: when set, sign-in goes through /api/auth/e2e-session (captcha blocks password sign-in). */
+export const E2E_LOGIN_KEY = process.env.E2E_LOGIN_KEY || "";
+export const hasAccount = !!(E2E_LOGIN_KEY || (E2E_EMAIL && E2E_PASSWORD));
 
 /* Where auth.setup.js saves the signed-in session for the auth-gated specs to reuse. */
 export const STORAGE_STATE = "e2e/.auth/user.json";
@@ -13,6 +15,21 @@ export const STORAGE_STATE = "e2e/.auth/user.json";
  * for the signed-in chrome. Call `test.skip(!hasAccount, …)` BEFORE this in any spec that
  * needs auth so a contributor without the secrets gets a clean skip, not a failure. */
 export async function signIn(page) {
+  if (E2E_LOGIN_KEY) {
+    // Key route: the server mints a session for the test account ONLY; hand it to the page's client.
+    // Same-origin fetch inside the page (uses the browser's trust store; no CORS needed).
+    const r = await page.evaluate(async (k) => {
+      const res = await fetch("/api/auth/e2e-session", { method: "POST", headers: { "x-e2e-login-key": k } });
+      return { status: res.status, body: await res.json().catch(() => null) };
+    }, E2E_LOGIN_KEY);
+    if (r.status !== 200 || !r.body?.access_token) throw new Error(`e2e-session route answered ${r.status} (404 = E2E_LOGIN_KEY not set/wrong on that deploy)`);
+    await page.waitForFunction(() => !!window.pfSupabase, null, { timeout: 20_000 });
+    await page.evaluate(({ access_token, refresh_token }) => window.pfSupabase.auth.setSession({ access_token, refresh_token }), r.body);
+    // Proven by something only the signed-in owner sees — not by tabs, which also render signed out.
+    await expect.poll(() => page.evaluate(async () => (await window.pfSupabase.auth.getUser()).data?.user?.email), { timeout: 15_000 }).toBe("e2e@planyr.test");
+    await expect(page.getByTestId("account-signed-out")).toHaveCount(0, { timeout: 15_000 });
+    return;
+  }
   // Open the auth panel from the header. The signed-out header shows a "Sign in" affordance;
   // clicking any control that reveals the email field is enough — we find it by role/text.
   const emailField = page.locator('input[type="email"]');
