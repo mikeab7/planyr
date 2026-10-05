@@ -387,17 +387,22 @@ Sandbox-proven: `ui-audit/verify-phone-typing.mjs` (WebKit at iPhone 15 and iPho
 7. Review › Reviews menu search, Library search, the project search at the top. **Expect:** field visible, menu fits the screen width, nothing drawn over the field.
 8. Desktop browser, full width: open the same Site panel, Properties, and a Schedule cell. **Expect:** exactly as before.
 - **Stopping rule:** closes on a dated pass of 1–8 from Michael's iPhone; any failed step re-opens B2088384 (×2) with that step number.
-### V1516224 — B2092656: no catch when NEW parcel outlines arrive (pan onto new ground / zoom to a new level) in Bartow County GA, and Katy/Fort Bend unchanged `Blocker: real-data`
+### V1516224 — B2092656 (×3): no catch turning Select parcels on, or when NEW parcel outlines arrive (pan onto new ground / zoom to a new level), in Bartow County GA; Katy/Fort Bend unchanged `Blocker: real-data`
 - **2026-10-04 ~7:50 PM CDT — Michael's Chrome, build ccaca0c: ❌ FAIL.** Select-on 283/211 ms frames; pan onto new ground 192 ms (137 blocking) and a 331 ms frame in a `setTimeout` callback with no network (the lot-number relayout — see B2092656 ×2). Fixed in the follow-up PR; re-run all steps on the new build.
+- **2026-10-04 ~9:45 PM CDT — Michael's Chrome, build 947c0ff: ❌ FAIL (filed as B2092656 ×3).** Select-on 161 ms (108 blocking) then 308 ms (256 blocking); pan 500 px east no blocking (×2 held); pan 350 px south 105 ms (53 blocking); zoom 15→14 89 ms (39 blocking). Cause found and reproduced: Select-on loaded the two TEXAS saved copies (Chambers + Waller, 25 + 30 MB) on the main thread even in Georgia. Fixed in the ×3 PR; re-run all steps on the new build.
+- **AMENDED for ×3 — added step 0 and step 7 below.** Read the served chunk hash (`SitePlannerApp-*.js` in the Network tab or `performance.getEntriesByType("resource")`) in the same observation as each timing; ignore ~1000 ms frames with single-digit blocking (a hidden-tab artefact), and the first injected click after a load if the extension driver drops it.
 - **Done in the sandbox:** unit (16) + synthetic-Bartow arrival harness (`ui-audit/verify-parcel-arrival-cost.mjs`: zoom-arm longest task 71–86 → 16–25 ms) + five adjacent parcel harnesses green. **Why still live:** the sandbox has no GPU and no recorded Bartow response.
+- **Done in the sandbox for ×3:** `ui-audit/verify-select-parcels-on-cost.mjs` on the RECORDED REAL Chambers + Waller saved copies, 3 fresh profiles, median longest task: Georgia Select-on 337 → 15 ms, Texas Select-on 406/614 → 27/28 ms, Georgia zoom/pans 17–20 ms (gate 33); `verify-georgia-lot-click` (z16/z14/before-arrival) and ten adjacent parcel harnesses green on the final build. Bartow responses still synthetic (egress-blocked).
 - **Steps (Michael's Chrome, planyr.io, Map, Select parcels ON; read the served chunk hash in the same observation):**
+  0. **(×3) Bartow GA (34.20 / -84.83) at zoom 15 with lot numbers, road names, city names and contours as you normally have them: turn Select parcels ON. Expect:** no visible catch — no Long Animation Frame with blockingDuration above ~0 (was 108 + 256 ms). This is the case that was failing.
   1. Bartow GA (34.20 / -84.83), zoom 15, then zoom OUT to 14 onto ground not yet loaded. **Expect:** outlines fill in over a few frames with no visible catch (previously two long frames).
   2. Pan ~500 px onto new ground at 14. **Expect:** no catch; outlines appear progressively.
   3. Zoom 14→15 for the first time. **Expect:** no catch.
   4. Pan back over loaded ground. **Expect:** instant, as before.
   5. Katy (29.786 / -95.825) and a Fort Bend view: outlines appear, no new delay or missing lots.
   6. Click a lot at z14 and at z16 in Georgia (also click one the instant it is still filling in). **Expect:** it selects the lot under the cursor; a click before outlines appear still adds the lot.
-- **Stopping rule:** closes on a dated pass of 1–6, or a failed step filed as a recurrence on B2092656.
+  7. **(×3) Katy (29.786 / -95.825 — Waller's outlines there come from Planyr's saved copy): turn Select parcels ON, then reload and turn it on again. Expect:** Waller's lots draw (with their numbers) and no visible catch either time; clicking a Waller lot selects it.
+- **Stopping rule:** closes on a dated pass of 0–7, or a failed step filed as a recurrence on B2092656.
 ### V1486288 — B2061600: Select-parcels outlines do not catch when a zoom or pan settles at zoom 14–16 in Bartow County GA `Blocker: real-data`
 
 Sandbox-proven: `ui-audit/verify-parcel-settle-cost.mjs` (z14 moveend settle 103.7 → 0.8 ms, mock at Bartow density), `test/parcelTileLayer.test.js`, and the existing parcel display harnesses. **Not provable here:** Michael's real 63,688-lot Bartow service, his GPU-accelerated Chrome, and how it *feels*. Read the served chunk hash in the SAME observation as the result (CLAUDE.md live-measurement rule).
