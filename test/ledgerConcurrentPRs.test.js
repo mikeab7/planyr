@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync, execFileSync } from "node:child_process";
-import { writeEntry, readLedgerDir, renderView, validateLedger, marker } from "../scripts/lib/ledger.mjs";
+import { writeEntry, readLedgerDir, readLedgerAtRef, virtualText, renderView, validateLedger, marker } from "../scripts/lib/ledger.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dirs = [];
@@ -113,6 +113,14 @@ describe("NEW-1 — two concurrent PRs that each file a backlog + verification e
     for (const id of ["B100", "B101", "B201", "B202"]) expect(view).toContain(`### ${id} —`);
     const v = readLedgerDir(d, "verification");
     expect(v.entries.map((e) => e.id).sort()).toEqual(["V201", "V202", "V50"]);
+  });
+
+  it("a git ref carrying ledger/ reads back the same entries (regression: ref reader crashed on main, B2109728)", () => {
+    const d = newLayout();
+    const l = readLedgerAtRef(d, "main", "backlog");
+    expect(l.entries.map((e) => e.id).sort()).toEqual(["B100", "B101"]);
+    expect(virtualText(d, "BACKLOG.md", { ref: "main" })).toContain("### B100 —");
+    expect(virtualText(d, "docs/archive/BACKLOG-DONE.md", { ref: "main" })).toBe("\n");
   });
 
   it("the real frames carry a marker for every live state (a view can place every entry)", () => {
