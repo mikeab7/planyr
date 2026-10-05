@@ -5374,7 +5374,7 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
-### B2106752 — Hybrid map: freeways and highways are yellow `[shared basemap / Food]` (bug) #map #ui
+### B2106752 — Hybrid map: freeways and highways are yellow `[shared basemap / Food]` (bug) #ui #food
 
 `[x]` **Fixed:** `vectorStyle.js` freeway tier was `#fff3c4` (cream), every other tier `#ffffff`; now white — freeways still outrank streets by width and opacity, never hue. Casing (dark neutral), ramp/link classes (same `motorway`/`trunk` tier) and road-name labels (white, dark halo) audited: no yellow survives. Header comment updated. Guard: `test/vectorBasemap.test.js` "no tinted roads" asserts every line/text/halo colour in the style is neutral.
 - **Stopping rule:** closes on a dated pass of V1525216.
