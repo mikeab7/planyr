@@ -54,6 +54,16 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 ---
 
 ## 🔲 Open
+### B2095121 — Schedule edits silently fail to save for any account not on the per-schedule `schedules` path (403 RLS on `planar_data`) `[scheduler / cloud]` (bug) #scheduler #persistence #sync  *(Found by the VERIFY-SELF v3 auth sweep 2026-10-04 (V238480, batch b06), diagnosed same day. DEDUPE-FIRST: no prior item. Constraint check: nothing contradicts `## Owner product constraints`.)*
+
+⚠ **LOUD — HALF SHIPPED, ROOT FIX NEEDS MICHAEL'S DECISION (production schema change).**
+`[x]` **Reproduced live on build 2f45a3d** as `e2e@planyr.test`: edit a task's Owner in Schedule → `POST /rest/v1/planar_data?on_conflict=key` → **403 `42501` "new row violates row-level security policy (USING expression)"**; the grid showed the edit, a reload lost it, nothing told the user (console only).
+`[x]` **Cause:** `planar_data` has `PRIMARY KEY (key)` on `key` ALONE and the legacy save (`public/sequence/index.html` `attemptWrite`, `upsert({key:"hs-v1", value}, {onConflict:"key"})`) uses the one constant key, so the first account to save owns `hs-v1` for the whole database (Michael's row). Every other un-flipped account's upsert conflicts with his row and the UPDATE policy (`user_id = auth.uid()`) rejects it. The read side hides it (RLS → 0 rows → "first load", seed in memory). Michael is unaffected only because his account is flipped (`schedule_account_index.rows_authoritative`), so his saves go through `schedules`.
+`[x]` **Shipped now (LOUD-FAILURE):** all three legacy write-error branches call `reportCloudSaveFailed` → a red toast "Your change did NOT save to the cloud (<code>)…" + a `planar:cloud-save-failed` event. Guard: `test/scheduleSaveFailLoud.test.js`.
+`[ ]` **Root fix — choose one (owner decision; DDL on production):** **A)** new accounts start on the `schedules` / `schedule_account_index` rows path (no legacy blob write) — matches the repo's direction, client-only; **B)** migrate `planar_data` to `UNIQUE (user_id, key)` + client `onConflict:"user_id,key"` — small, but a production DDL change and the two triggers (`planar_data_enforce_version_monotonic`, `planar_data_refuse_post_flip_write`) must be re-checked. Recommendation: A. On `OWNER-TODO.md`.
+`[ ]` Side observation (unverified): on a brand-new account the Schedule full-screen "Assembling schedule…" overlay did not dismiss in ~20 s and intercepted pointer events.
+- **Stopping rule:** closes when a brand-new signed-in account can edit a schedule, reload, and see the edit survive (re-run V238480's typing leg), or Michael says only Michael's account matters.
+- Verify: live — **V1517456** (toast leg, test account reproduces the 403 on demand).
 ### B2088384 — Every place you type in Planyr, on a phone: field and caret visible above the keyboard, no page/map showing through, nothing drawn over the edited area, no contact AutoFill on non-contact fields `[All modules]` (task) #ui #mobile #testing  *(Owner chat block 2026-10-04, NEW-2 — the app-wide follow-on to B2046224 ×3. Minted **B2088384** from this branch's reserved block B2088384–B2088399 · V1506320–V1506335 against freshly-fetched `origin/main` 88d0302. DEDUPE-FIRST — searched Open/⏳Verify/Done for keyboard / AutoFill / typing / visualViewport: B1176481 is safe-area insets (not the keyboard), B1199216 is two Site Planner off-device questions (home indicator, toolbar jump), B2057920/B2046224 are Food-only. Nothing sweeps every text field app-wide with the keyboard up. Net-new.)*
 
 `[ ]` **Plan (ships as its OWN PR after B2046224 ×3 merges — the owner's sequencing):** generalise `verify-food-ios-screens`'s iOS keyboard model + pictures + assertions into an app-wide crawler; run it across sign-in / sign-up, Settings, Team invites, Schedule (task names, notes, contacts), Notes, Review, Site Planner panels and dialogs, Dashboard, and every other `input`/`textarea` found; fix every failure; list every field and its result in the PR body with screenshots of anything changed; desktop unchanged.
@@ -5334,6 +5344,19 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 ---
 
 ## ⏳ Verify — awaiting live confirmation
+
+### B2095123 — Food: a visit logged on an open manual pin did not show in Past visits until the pin was reselected `[food]` (bug) #food #ui  *(Found by the VERIFY-SELF v3 auth sweep 2026-10-04 (V306784 step 6 / V341842, batch b08). DEDUPE-FIRST: no prior item. Constraint check: nothing contradicts `## Owner product constraints`.)*
+
+`[x]` **Cause (AUDIT-FIRST):** `FoodApp.visitsForSelected` filtered a selected manual pin's visits by `selected.pin.visitIds` — a snapshot taken when the pin was selected — so the optimistic/real visit added afterwards was never in it.
+`[x]` **Fix:** match by the pin's own `manualGroupKey(name, lat, lon)` against the live `visits`. Guard: `test/foodPastVisitsLive.test.js`.
+- Verify: live — **V1517458**.
+
+### B2095122 — A Land comp made by pasting text could not be saved (CHECK constraint refused the blank basis) `[comps]` (bug) #comps #persistence  *(Found by the VERIFY-SELF v3 auth sweep 2026-10-04 (V461202, batch b10), live on build 1aef6cc. DEDUPE-FIRST: no prior item. Constraint check: nothing contradicts `## Owner product constraints`.)*
+
+`[x]` **Symptom:** paste land text → Save → `new row for relation "comps" violates check constraint "comps_lease_rate_expense_check"`; the comp is not saved. Saves only if the row starts as Lease and is switched to Land.
+`[x]` **Cause (AUDIT-FIRST):** the paste parser's blank draft carries `leaseRateExpense: ""` (compParse.js:1183); `compToRow` used `?? null`, which lets `""` through, and the table CHECKs only allow `nnn`/`gross`. Same shape for `land_size_unit` and `lease_rate_period`.
+`[x]` **Fix:** `compToRow` sends NULL for blank values of all three CHECK-constrained enums (`||`). Guard: `test/compToRowEnumBlank.test.js` (red on the old code, measured).
+- Verify: live — **V1517457** (paste a Land comp as the test account after deploy; save; reload). Not yet checked for a pasted Building sale — included in the V.
 
 ### B2086368 — No way to delete a file from the Library's Recent or Unfiled lists `[library]` (bug) #library #persistence  *(Owner report 2026-10-04 build f853752, dispatch block NEW-1. DEDUPE-FIRST: searched Open/Verify/Done for Library delete / Unfiled / Recently deleted — B2084480 (Unfiled refresh) and NEW-F3 (the folder-tree soft delete) are the neighbours; neither covers Home. Not a recurrence.)*
 
