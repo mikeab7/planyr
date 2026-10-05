@@ -511,6 +511,53 @@ export const GIS_SOURCES = {
     tier: "production",
     lastVerified: "2026-07-29",
   },
+  /* B2081249 — NATIONAL road-access rows from the USDOT Bureau of Transportation Statistics' National Transportation
+   * Atlas (ArcGIS Online org xOi1kZaI0eWDREZv), CORS-open from planyr.io and reachable from the build sandbox. These
+   * are the federal answer for states whose DOT publishes no public AADT / truck-route service — Georgia DOT's own host
+   * (rnhp.dot.ga.gov) carries only live inclement-weather counters, and the one AADT copy in GDOT's ArcGIS Online org is
+   * a 2017 republication (rejected: not GDOT's own, nine years stale). They cover Texas too and do NOT displace the
+   * TxDOT row there (`aadt`, a state count-station layer with its own vintage).
+   *
+   * `ntaNationalNetwork` — FHWA's STAA National Network (the routes a 53-ft trailer / 80,000-lb truck may use).
+   * ⛔ THE LAYER IS NOT ONLY THE NETWORK: it also carries segments with NN = 0 (probed live 2026-10-05 — 16 of the 32
+   * segments in a Gwinnett box), roads the federal file lists WITHOUT national-network status. Drawing it unfiltered
+   * would print a truck-route claim on roads that are not truck routes, so the row carries `where: "NN = 1"` and
+   * every consumer (layer, verifier, fixtures) applies it. Data YEAR 2018 on every row; the layer was last edited
+   * 2023-04-03 — a federal reference, not a current permit status. AADT_COM / AADT_SINGL are combination and
+   * single-unit TRUCK counts. */
+  ntaNationalNetwork: {
+    key: "ntaNationalNetwork",
+    label: "STAA National Network — truck routes (USDOT BTS)",
+    provider: "USDOT Bureau of Transportation Statistics — National Transportation Atlas (FHWA National Network)",
+    serviceUrl: "https://services.arcgis.com/xOi1kZaI0eWDREZv/arcgis/rest/services/National_Network/FeatureServer/0",
+    layerId: null,
+    geometryType: "line",
+    where: "NN = 1",
+    fields: { route: "ROUTEID", sign: "SIGN1", nn: "NN", aadt: "AADT", trucksCombo: "AADT_COM", trucksSingle: "AADT_SINGL", year: "YEAR" },
+    coverage: "national (federal STAA National Network)",
+    states: null,
+    tier: "production",
+    lastVerified: "2026-10-05",
+  },
+  /* `hpmsAadt` — FHWA's Highway Performance Monitoring System, 2022, the traffic data each state DOT (GDOT included)
+   * reports to FHWA, as lines with AADT and the HPMS functional system (F_SYSTEM 1 interstate · 2 freeway/expressway ·
+   * 3 principal arterial · 4 minor arterial · 5 major collector · 6 minor collector). ⛔ THE SERVICE IS A VIEW WITH
+   * `NHS > 0`: it is the NATIONAL HIGHWAY SYSTEM ONLY (probed 2026-10-05 — its name says "FULL", its definition does
+   * not), so a road off the NHS has no line here and that is a coverage gap, never a low-traffic finding. Some NHS
+   * segments carry no AADT (the interstate stretches around Savannah returned null) and say so. Layer edited 2025-02-12. */
+  hpmsAadt: {
+    key: "hpmsAadt",
+    label: "HPMS traffic counts, 2022 (USDOT BTS, National Highway System)",
+    provider: "USDOT Bureau of Transportation Statistics — National Transportation Atlas (FHWA HPMS 2022)",
+    serviceUrl: "https://services.arcgis.com/xOi1kZaI0eWDREZv/arcgis/rest/services/HPMS_FULL_US_2022_Sysnomulti_view/FeatureServer/0",
+    layerId: null,
+    geometryType: "line",
+    fields: { aadt: "AADT", fsystem: "F_SYSTEM", nhs: "NHS", nn: "NN" },
+    coverage: "national (National Highway System roads only)",
+    states: null,
+    tier: "production",
+    lastVerified: "2026-10-05",
+  },
   /* NEW-1 (Georgia) — the Georgia counterpart of `county` / `countyCo`. Its OWN row with
    * `states: ["GA"]`; the Texas and Colorado rows are untouched. VERIFIED LIVE 2026-09-30 from the
    * build sandbox: 159 county polygons (Georgia's full roster), ArcGIS-Online hosted with

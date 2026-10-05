@@ -369,6 +369,41 @@ export const STATEWIDE = {
     states: ["TX"],
     group: "access", order: 1,
   },
+  bts_truck_network: {
+    // B2081249 — NATIONAL. FHWA's STAA National Network (USDOT BTS National Transportation Atlas). The service ALSO holds
+    // segments listed WITHOUT national-network status (NN = 0), so the row carries its source's `where` — never draw it
+    // unfiltered. Georgia DOT publishes no truck-route service of its own; this is the federal answer for every state.
+    kind: "esriFeature", label: "Truck routes (STAA National Network)", source: "USDOT BTS — FHWA National Network",
+    url: GIS_SOURCES.ntaNationalNetwork.serviceUrl, where: GIS_SOURCES.ntaNationalNetwork.where,
+    minZoom: 11, color: "#7c2d12", weight: 2, opacity: 0.55,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "National Network route", hoverSource: "USDOT BTS",
+    hoverFields: [{ names: ["SIGN1", "ROUTEID"], label: "route" }, { names: ["AADT"], label: "AADT" }, { names: ["AADT_COM"], label: "combination trucks/day" }, { names: ["AADT_SINGL"], label: "single-unit trucks/day" }],
+    note: "The federal STAA National Network — the routes a 53-ft trailer / 80,000-lb truck may use (Interstates and the connecting highways). Data year 2018; a federal reference list, NOT a state permit or current restriction. A road missing here is not proven closed to trucks: it may be a state-designated route this file never listed. Confirm access and any turning-radius limits with the state DOT.",
+    infoCaveat: "Federal reference, data year 2018 (layer last edited April 2023). Truck counts are AADT of combination and single-unit trucks where the file carries them.",
+    role: "line", group: "access", order: 2,
+  },
+  hpms_aadt: {
+    // B2081249 — NATIONAL. FHWA HPMS 2022 traffic on the National Highway System (the data each state DOT reports to FHWA).
+    // Coexists with the Texas/Colorado state count layers: it is the FEDERAL copy on the NHS only, different vintage and
+    // method, off by default — both are offered and both say what they are.
+    kind: "esriFeature", label: "Traffic volumes (HPMS 2022, highways)", source: "USDOT BTS — FHWA HPMS",
+    url: GIS_SOURCES.hpmsAadt.serviceUrl,
+    minZoom: 11, color: "#2563eb", weight: 2, opacity: 0.55,
+    // AADT bands: grey = reported without a count · blue < 10k · indigo 10–30k · violet 30–60k · magenta 60k+
+    styleFn: (props, opacity) => {
+      const a = props && props.AADT != null ? Number(props.AADT) : NaN;
+      if (!Number.isFinite(a) || a <= 0) return { color: "#64748b", weight: 1.2, opacity: opacity * 0.8 };
+      if (a < 10000) return { color: "#0ea5e9", weight: 1.5, opacity };
+      if (a < 30000) return { color: "#2563eb", weight: 2, opacity };
+      if (a < 60000) return { color: "#7c3aed", weight: 2, opacity };
+      return { color: "#be185d", weight: 2.5, opacity };
+    },
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Traffic volume (HPMS 2022)", hoverSource: "USDOT BTS / FHWA HPMS",
+    hoverFields: [{ names: ["AADT"], label: "AADT" }, { names: ["F_SYSTEM"], label: "HPMS functional class" }],
+    note: "FHWA HPMS 2022 average daily traffic on the NATIONAL HIGHWAY SYSTEM only — Interstates, freeways, principal arterials and the connectors. Colour = AADT: blue under 10,000 · indigo 10–30,000 · violet 30,000–60,000 · magenta over 60,000 · grey = on the system but no count reported. A road off the system has NO line here: that is a coverage gap, never low traffic. In Texas and Colorado the state's own count layer is the closer read; this is the federal copy.",
+    infoCaveat: "HPMS 2022 as published by USDOT BTS (layer edited February 2025). An access / visibility proxy, not a traffic study.",
+    role: "line", group: "access", order: 3,
+  },
   bts_rail: {
     // Public-data screening PHASE 6 (access tier) — BTS/FRA rail-network lines. The Site Analysis
     // "Rail access" card drives this overlay (mapLayer: "bts_rail"). FeatureServer line layer →
@@ -1228,6 +1263,8 @@ export const LAYER_VINTAGE = {
   ga_trout: "Georgia DNR trout streams — layer edited 2024-12-30",
   ga_stream_buffers: "Computed from USGS NHD + DNR trout streams + the District outline — not a surveyed buffer",
   ga_slope: "USGS 3DEP LiDAR — collection date varies by area",
+  bts_truck_network: "FHWA National Network — data year 2018 (layer edited 2023-04-03)",
+  hpms_aadt: "FHWA HPMS — data year 2022 (layer edited 2025-02-12)",
   soil_bedrock: "USDA SSURGO — survey vintage varies by county",
   coh_ww: "City of Houston GIS (test host) — current edition",
   coh_storm: "City of Houston GIS (test host) — current edition",

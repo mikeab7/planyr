@@ -171,6 +171,11 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1518082 — B2081249: the two national road layers draw on planyr.io and print `Blocker: none`
+
+**Steps** (signed-in test account, throwaway plan at **33.964 / -84.021**, read the served chunk hash in the same observation): Layers → Access → switch on **Truck routes (STAA National Network)** and **Traffic volumes (HPMS 2022, highways)**. **Expect:** brown truck-route lines along SR-316 and violet/blue/magenta AADT-coloured highway lines, status dots blue, ⓘ shows the data year (2018 / 2022) and the NHS-only / NN-only caveats, hover names the route and AADT, **the map does not move**. File → Export PDF. **Expect:** both print. Repeat on a Houston plan: both rows listed beside "Traffic counts (AADT)".
+- **Stopping rule:** closes on a dated pass.
+
 ### V1517459 — B2095120: the e2e-fixture-testfit plan (legacy `line` elements) opens and draws
 
 Sandbox-proven: `test/unknownElementType.test.js`. **Steps** (signed in as `e2e@planyr.test` on planyr.io after the deploy; `/version.json` in the same call): open `#/project/e2e-fixture-testfit/site`. **Expect:** `planner-canvas` appears and no "Site Planyr hit an error" card. (Before: build 2f45a3d threw "reading 'label'"; build eafc260 threw "reading 'x'".)

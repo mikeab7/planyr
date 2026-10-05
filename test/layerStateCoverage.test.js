@@ -24,7 +24,7 @@ import { STATE_ENVELOPES, STATE_POLYGONS } from "../src/workspaces/site-planner/
 /* National sources — shown on every site. FEMA, NWI, EPA, rail/airports, OSM, HIFLD, Mapillary, USGS NHD and 3DEP. */
 const NATIONAL = [
   "fema", "wetlands", "env_cleanups", "bts_rail", "faa_airports", "elevation", "contours", "flowdir",
-  "osm_power", "hifld_tx", "hifld_substations", "osm_hydrants", "mapillary", "nhd_flowlines", "soil_bedrock",
+  "osm_power", "hifld_tx", "hifld_substations", "osm_hydrants", "mapillary", "nhd_flowlines", "soil_bedrock", "bts_truck_network", "hpms_aadt",
 ].sort();
 
 /* Texas-only — HCFCD, TxRRC, TxDOT, BKDD, the Texas county groups, ETJ/MUD, CCN, TCEQ, the growth faults. */
