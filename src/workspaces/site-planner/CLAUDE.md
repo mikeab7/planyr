@@ -57,8 +57,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   at read time from `CHECK_THRESHOLDS` (the one home for every radius/tolerance; `siteCheckRadius.js` is its boot-safe leaf).
   **(4)** flood/wetland numbers are AREA fractions through clipper on the real rings (save-and-except holes subtracted; 0.2% netted
   against the 100-yr first), never vertex sampling; FEMA publishes the all-clear as polygons, so uncovered ground is "Not fully
-  mapped", never "None". **(5)** hovering/opening a row highlights its layer through `layerFocus.js` — a DERIVED copy fed only to
-  the overlay-sync effect (`syncOverlays` in `SitePlanner.jsx`), so a hover can never be persisted, undone or left on. Orchestrator:
+  mapped", never "None". **(5)** a "Checked for you" row is CLICK-TO-SHOW, never hover (B2117136 follow-up, owner: "you should click on it to show it permanently instead of a hover"): clicking a row turns its layer on through the SAME overlay key the Layers panel uses (persisted, in sync both ways) and opens its detail; clicking again turns it off. A "None" or "Couldn't check" row has nothing to draw, so it opens a plain note and touches no layer. There is no hover highlight and no dimming of other overlays — the old layer-focus module is deleted, do not bring a focus/dim copy of the overlay state back. The 100-/500-year rows share the `fema` layer and go on and off together. **(6)** the "Who governs" values are SHORT (`siteGoverns.js`: a city value like "Baytown, part ETJ"; the class split rides a second muted line) and a road's count is the length of the very array it lists, with names cleaned by `normalizeRoadName`. Orchestrator:
   `siteScreen.js` (`runSiteScreen`; `runSiteAnalysis` is untouched). Guards: repo-root `test/` suites **siteChecks**,
   **siteChecksRun** (every failure path forced), **siteScreenModels**, and ui-audit **verify-site-analysis-trust** (real panel,
   mocked sources with known ground truth; TX + CO arms).
@@ -1854,6 +1853,15 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   hoisted whole into their common ancestor — tree-shaking drops unused exports, never
   exports used by a sibling chunk — so a mixed-tier module silently charges the Site route
   for export-only code. Split by tier, don't hope for shaking.
+  **NEW-1 (B2127664) — EDITABLE MARKUPS IN THE PDF.** The compose screen's "Flatten markups" toggle (OFF by default,
+  per-USER in `profiles.prefs.exportPrefs`, never per plan) makes `exportPDF` lift every annotation-class node
+  (neutral markups · callouts/text boxes · measurements — NOT easements/encumbrances/utility routes, which are site data)
+  out of the cloned SVG AFTER `restyleExportClone` (`annotationExtract.js`) and write it as a native PDF annotation with an
+  explicit appearance stream (`pdfAnnotations.js` pure core → `imagePdf.jpegToPdf({annotations})`). The geometry is the
+  clone's own primitives, never re-derived from the model, so the picture and the annotations cannot drift. Base-14
+  Helvetica (not embedded), `Tz`-squeezed to the browser's measured widths — read the B2127664 deviations list before
+  promising more. Guards: repo-root `test/` suite **pdfAnnotations** (incl. a second-library round-trip) + ui-audit
+  **verify-pdf-markup-annotations** (real compose flow, poppler render parity, known-good arm).
   **B765985 — the compose screen.** Picking a print frame no longer downloads straight off the
   canvas: `components/PrintCompose.jsx` (also lazy, its own chunk, warmed alongside the export
   chunk) is a dedicated full-screen surface for paper size (incl. ARCH C/D, ANSI C/D),

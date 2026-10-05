@@ -69,7 +69,6 @@ import {
   PANE_AREA_FRONT, PANE_AREA_FRONT_LABEL, FRONT_BAND_ATTR,
 } from "./lib/mapStack.js";
 import { loadRasterIdentify, makeHoverIdentify, rasterIdentifyNow } from "./lib/rasterIdentifyLazy.js";
-import { focusOverlays } from "./lib/layerFocus.js";
 import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, applyOnOverrides, overridesSig } from "./lib/layerPrefs.js";
 // NEW-1 — the per-site "Show above plan" twin of the four above: which GIS layers this site had
 // lifted over the site elements. Its own sparse map, so nothing about layerOverrides changes.
@@ -182,7 +181,7 @@ import ColorField from "../../shared/ui/ColorField.jsx";
 /* LAZY (B1064 tranche a). The Standards footer renders only while the Standards panel is the
  * open one, docked or floating — never at first paint. */
 const StandardsBar = lazy(() => import("./components/StandardsBar.jsx"));
-import { loadUserPrefs, updateUserPrefs, applyPrefs, getPrefsSnapshot, subscribePrefs, setStandardPref, getStandardPref } from "./lib/userPrefs.js";
+import { loadUserPrefs, updateUserPrefs, applyPrefs, getPrefsSnapshot, subscribePrefs, setStandardPref, getStandardPref, setExportPref } from "./lib/userPrefs.js";
 import {
   PARCEL_STD_KEYS, TYPE_STD_KEYS, MEASURE_STD_KEYS, applyAllStandards, allStandardsImpact, appliedObjectsLabel,
   EMPTY_STD_DRAFT, draftParcelValue, draftTypeValue, draftMeasureValue, withParcelDraft, withTypeDraft, withMeasureDraft,
@@ -2881,10 +2880,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Wetlands presence lifted from the Site Analysis screen's own finding (B710's
   // Section-404 cross-flag consumes it — no new fetch).
   const [analysisWetlands, setAnalysisWetlands] = useState(null);
-  // NEW-1 — the Site Analysis panel's hover/open highlight: a layer id the DRAWN overlays are focused on. Transient by
-  // construction — it only ever feeds `syncOverlays` (below), never `overlays`, so it is neither persisted nor undoable.
-  const [analysisFocus, setAnalysisFocus] = useState(null);
-  const syncOverlays = useMemo(() => focusOverlays(overlays, analysisFocus, ALL_LAYERS), [overlays, analysisFocus]);
   // ⛔ B877440 — no `|| "harris"` fallback. A plan with no saved county is genuinely
   // unresolved, so `jurKey` starts null (easementRules.defaultJurForCounty now returns null
   // for a county with no easement record, rather than silently routing to City of Houston's
@@ -3636,7 +3631,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // point.
     let staged = overlayStagedRef.current ? Infinity : 0;
     let idleId = null, idleTimer = null;
-    const order = orderLayersByPriority(syncOverlays, ALL_LAYERS);
+    const order = orderLayersByPriority(overlays, ALL_LAYERS);
     /* ⛔ NEW-2 — THE ZOOM GATE RESOLVES BEFORE FIRST PAINT, and this is where that is enforced.
      *
      * The owner's report: opening the site, contour lines rendered IMMEDIATELY and then vanished
@@ -3659,7 +3654,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      * It gates ADDS ONLY. A removal, an opacity change and a lift are untouched, exactly as with
      * the staging gate it composes with. */
     const gateResolved = layerGateReady;
-    const sync = () => syncOverlayLayers(geoMapRef.current, syncOverlays, overlayRefs.current, {
+    const sync = () => syncOverlayLayers(geoMapRef.current, overlays, overlayRefs.current, {
       // NEW-1 — the two stacking bands (lib/mapStack.js). Each layer lands in the one its
       // declared ROLE names: fills under the plan, strokes and points over it.
       panes: {
@@ -3694,7 +3689,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (idleId != null && typeof cancelIdleCallback === "function") { try { cancelIdleCallback(idleId); } catch (_) {} }
       if (idleTimer) clearTimeout(idleTimer);
     };
-  }, [syncOverlays, origin, basemapOn, layerGateReady]); // eslint-disable-line
+  }, [overlays, origin, basemapOn, layerGateReady]); // eslint-disable-line
 
   /* NEW-2 — the latch itself. It flips exactly once, when the framed view has been COMMITTED to
    * the backdrop map, and does nothing thereafter — so a zoom gesture (which moves `view.ppf`
@@ -6413,15 +6408,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (wantOn) ensureBasemapOn();
   }, [setOverlays, ensureBasemapOn]);
 
-  /* NEW-1 — the Site Analysis panel's row highlight. Setting a layer focuses it immediately; clearing waits a beat so
-     moving the pointer from one row to the next never flashes the whole map through "unfocused". */
-  const focusClearRef = useRef(null);
-  const focusAnalysisLayer = useCallback((id) => {
-    clearTimeout(focusClearRef.current);
-    if (id) { setAnalysisFocus(id); return; }
-    focusClearRef.current = setTimeout(() => setAnalysisFocus(null), 140);
-  }, []);
-  useEffect(() => () => clearTimeout(focusClearRef.current), []);
   /* NEW-1 — a "Calls to make" tick, persisted PER SITE in the plan's own settings (sparse: only ticked ids exist). */
   const toggleAnalysisCall = useCallback((id, on) => {
     setSettings((s) => {
@@ -16779,8 +16765,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // `doPrint`'s 7th argument (the "Stats band" toggle) never reached the actual PDF even though
   // the live compose PREVIEW (a separate, direct `buildComposedSheet` call) honored it — a real
   // pre-existing bug, found and fixed incidentally while adding the 8th (Fit-to-frame page).
-  const exportPDF = (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true) =>
-    withExportSheet((x) => x.exportPDF(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride, includeBuildingsTable));
+  const exportPDF = (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true, flattenMarkups = true) =>
+    withExportSheet((x) => x.exportPDF(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride, includeBuildingsTable, flattenMarkups));
 
   /* ------------ export frame geometry (stays here — the print-frame drag reads it) ----
      devExtent also seeds the initial print crop, so it can't live in the lazy chunk. */
@@ -17092,12 +17078,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       preCanvasDisplayRef.current = null;
     }
   };
+  // Read at CALL time off the one shared prefs snapshot (never a mount-time copy of it).
+  const flattenMarkupsPref = () => getPrefsSnapshot().exportPrefs?.flattenMarkups === true;
   const doPrint = async () => {
     setComposeDownloading(true);
     try {
       const scaleText = printScale ? scaleLabel(printScale) : "";
       const preparedBy = (settings.printPreparedBy || "").trim();
-      await exportPDF(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false, composePageOverride, settings.printBuildingsTable !== false);
+      // NEW-1 — "Flatten markups" is a per-USER choice (account prefs), default OFF = editable annotations.
+      await exportPDF(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false, composePageOverride, settings.printBuildingsTable !== false, flattenMarkupsPref());
       cancelPrint();
     } finally { setComposeDownloading(false); }
   };
@@ -21579,7 +21568,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <LazyPanel name="Site Analysis" minHeight={220} label="Loading site analysis…">
                       <SiteAnalysis rings={rings} holes={holeRings} acres={acres} parcelCount={act.length}
                         isLayerOn={(id) => !!overlays?.[id]?.on} onToggleLayer={toggleAnalysisLayer} layerStatus={layerStatus} layerZoomNote={analysisLayerZoomNote}
-                        onFocusLayer={focusAnalysisLayer}
                         callsChecked={settings.analysisCalls || null} onToggleCall={toggleAnalysisCall}
                         onOpenDrainage={() => setLeftPanel("drainage")}
                         onFindings={(fs) => { const w = fs && fs.find((f) => f.id === "wetlands"); setAnalysisWetlands(w ? w.status : null); }} />
@@ -25781,6 +25769,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 mapLayersPrintable={mapLayersPrintable} printMapLayers={printMapLayers} onToggleMapLayers={setPrintMapLayers}
                 showMetricsBand={settings.printMetricsBand !== false} onToggleMetricsBand={(v) => setSettings((s) => ({ ...s, printMetricsBand: v }))}
                 buildingsTablePrintable={buildingsTablePrintable} showBuildingsTable={settings.printBuildingsTable !== false} onToggleBuildingsTable={(v) => setSettings((s) => ({ ...s, printBuildingsTable: v }))}
+                flattenMarkups={prefsSnap.exportPrefs?.flattenMarkups === true} onToggleFlattenMarkups={(v) => commitUserPrefs((p) => setExportPref(p, { flattenMarkups: v }))}
                 onReposition={exitToReposition} onCancel={cancelPrint} onDownload={doPrint}
                 downloading={composeDownloading}
               />
@@ -29490,7 +29479,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             onClose={() => setLeftPanel(null)}
             onToggle={() => { if (!narrow) detachPanel(leftPanel); }}
             data-testid={`panel-chrome-${leftPanel}`} />
-          <div data-wheelscroll="1" style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "13px 13px 24px" }}>
+          <div data-wheelscroll="1" data-panel-body={leftPanel} style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "13px 13px 24px",
+            // Site Analysis reads on the same white surface the Layers / Properties panels use — its verdict rows are not
+            // filled cards, so on the gray column ground the whole panel read as one flat gray wall.
+            ...(leftPanel === "analysis" ? { background: "var(--surface-overlay)" } : null) }}>
           {renderPanelBody(leftPanel)}
           </div>
           {leftPanel === "standards" && standardsFooter}

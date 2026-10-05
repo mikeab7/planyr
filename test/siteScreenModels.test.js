@@ -6,9 +6,8 @@ vi.mock("../src/workspaces/site-planner/lib/terrainLayers.js", () => ({ contourL
 vi.mock("../src/workspaces/site-planner/lib/vectorOverlay.js", () => ({ cachedVectorLayer: vi.fn(), cachedPipelineLayer: vi.fn(), cachedCorridorLayer: vi.fn(), isPointFeature: vi.fn() }));
 vi.mock("../src/workspaces/site-planner/lib/mapSymbols.js", () => ({ installDefaultMarkerIcon: vi.fn(), pointToLayerFor: vi.fn() }));
 
-import { cityLineOf, roadsLineOf, buildGovernsModel, buildCalls, CALLS, mergeRoadAnswers } from "../src/workspaces/site-planner/lib/siteGoverns.js";
+import { cityLineOf, cityClassDetail, roadsLineOf, normalizeRoadName, ROADS_LIST_MAX, buildGovernsModel, buildCalls, CALLS, mergeRoadAnswers } from "../src/workspaces/site-planner/lib/siteGoverns.js";
 import { pillsFor, pillOn, togglePill, PILLS_NOTE, PILL_DEFS } from "../src/workspaces/site-planner/lib/siteLayerPills.js";
-import { focusOverlays, FOCUS_DIM } from "../src/workspaces/site-planner/lib/layerFocus.js";
 import { runSiteScreen, legacyFindings, roadRings } from "../src/workspaces/site-planner/lib/siteScreen.js";
 import { formatJurisdictionBadge } from "../src/workspaces/site-planner/lib/jurisdiction.js";
 import { ALL_LAYERS } from "../src/workspaces/site-planner/lib/layers.js";
@@ -25,9 +24,28 @@ describe("who governs — the structured badge, compact only when compact is com
     expect(c.text).toBe("Baytown, part ETJ");
     expect(buildGovernsModel(b, null).city.straddles).toBe(true);
   });
-  it("a limited-purpose annexation is NEVER collapsed into 'Baytown': the full badge text (with its class) is shown", () => {
-    const b = { shape: "in-city", governingCities: ["Baytown"], partialCities: [], etjLabels: [], cityLimitedAreas: [{ name: "Baytown", class: "limited" }], jur: "City of Baytown limited-purpose annexation", tail: null, straddle: false };
-    expect(cityLineOf(b).text).toBe("City of Baytown limited-purpose annexation");
+  it("Grand Port (full purpose 4% + limited purpose 67%, rest ETJ): a SHORT value + the straddles chip; the classes ride a second line", () => {
+    const j = jur({ city: ["Baytown"], etj: ["Baytown"], unincorporated: false, county: ["Chambers"], isd: ["Barbers Hill ISD"],
+      cityCentroid: ["Baytown"], cityAll: [], citySome: ["Baytown"], cityContainment: "partial",
+      cityAreas: { rows: [{ name: "Baytown", class: "full", share: 0.04 }] },
+      cityLimitedAreas: [{ name: "Baytown", class: "limited", share: 0.67 }],
+      sources: [{ id: "city", state: "ok" }, { id: "etj", state: "ok" }, { id: "county", state: "ok" }] });
+    const b = formatJurisdictionBadge(j);
+    const c = cityLineOf(b);
+    expect(c.text).toBe("Baytown, part ETJ");
+    expect(c.text.length).toBeLessThan(30);                       // a value, never the paragraph
+    expect(c.note).toBe("Full purpose 4% · limited purpose 67% · rest ETJ");
+    expect(c.note.length).toBeLessThan(80);                       // two muted lines at most
+    expect(buildGovernsModel(b, null).city.straddles).toBe(true);
+    // the classes are KEPT (honest), just not the headline
+    expect(`${c.text} ${c.note}`).toMatch(/limited purpose/);
+  });
+  it("a limited-purpose-only site is never collapsed into plain 'Baytown'", () => {
+    const b = { shape: "etj", governingCities: [], partialCities: [], etjLabels: ["Baytown"], cityLimitedAreas: [{ name: "Baytown", class: "limited", share: 0.9 }], jur: "x", tail: null, straddle: false };
+    const c = cityLineOf(b);
+    expect(c.text).toBe("Baytown, limited purpose");
+    expect(c.note).toBe("Limited purpose 90% · rest ETJ");
+    expect(cityClassDetail({ cityLimitedAreas: [], shape: "in-city" })).toBeNull();
   });
   it("a failed city lookup says so; an unincorporated site says Unincorporated; a disputed ETJ keeps its words", () => {
     expect(cityLineOf(null).failed).toBe(true);
@@ -50,6 +68,59 @@ describe("who governs — the structured badge, compact only when compact is com
   it("school district off Texas ground is 'Not screened', never a dash that reads as 'none'", () => {
     const g = buildGovernsModel({ shape: "unincorporated", county: "Weld County", isd: null, governingCities: [], partialCities: [], etjLabels: [], jur: "Unincorporated" }, null, { state: "CO", stateLabel: "Colorado" });
     expect(g.school).toBe("Not screened in Colorado");
+  });
+});
+
+describe("roads — count equals rows, no doubled street type, one separator", () => {
+  const rd = (name, label) => ({ name, authority: { label } });
+  const grandPort = () => [
+    rd("IH 10", "State (TxDOT)"), rd("Gordon Speer - Chambers Parkway Pkwy", "County"), rd("Lake Groove Lane Ln", "County"),
+    rd("John Martin Rd", "County"), rd("Lee Rd", "County"), rd("Ward Rd", "County"),
+  ];
+  it("six roads in → the headline says 6, the list has 6 rows, and the split is 1 state, 5 county (no em dash)", () => {
+    const r = roadsLineOf({ roads: grandPort() });
+    expect(r.kind).toBe("mixed");
+    expect(r.text).toBe("Mixed · 6 roads · 1 state, 5 county");
+    expect(r.items).toHaveLength(6);
+    expect(r.listed).toHaveLength(6);
+    expect(r.text).not.toMatch(/—/);
+  });
+  it("the headline count is ALWAYS the number of rows, however many roads (cap is explicit, never silent)", () => {
+    for (const n of [2, 3, 6, 9, 14]) {
+      const roads = Array.from({ length: n }, (_, i) => rd(`Road ${i} Rd`, i === 0 ? "State (TxDOT)" : "County"));
+      const r = roadsLineOf({ roads });
+      expect(r.text).toContain(`${n} roads`);
+      expect(r.items).toHaveLength(n);
+      expect(r.listed.length + r.more).toBe(n);
+      expect(r.listed.length).toBeLessThanOrEqual(ROADS_LIST_MAX);
+    }
+  });
+  it("a street type is never doubled and a bare hyphen between two names is written ' / '", () => {
+    expect(normalizeRoadName("Gordon Speer - Chambers Parkway Pkwy")).toBe("Gordon Speer / Chambers Parkway");
+    expect(normalizeRoadName("Lake Groove Lane Ln")).toBe("Lake Groove Lane");
+    expect(normalizeRoadName("Greens Rd")).toBe("Greens Rd");               // a single, correct type is untouched
+    expect(normalizeRoadName("Oak Lane  Ln.")).toBe("Oak Lane");
+    expect(normalizeRoadName("Main St Street")).toBe("Main Street");        // either order of the pair
+    expect(normalizeRoadName("Lane Ln")).toBe("Lane Ln");                   // a name that IS the type word has nothing before it to keep
+    expect(normalizeRoadName("FM 565")).toBe("FM 565");
+    expect(normalizeRoadName("  ")).toBe("");
+    const names = roadsLineOf({ roads: grandPort() }).items.map((i) => i.name);
+    expect(names.some((n) => /Pkwy|Ln\b/.test(n) && /Parkway Pkwy|Lane Ln/.test(n))).toBe(false);
+    expect(names.every((n) => !/ [-–—] /.test(n))).toBe(true);
+  });
+  it("a road the source names two ways is ONE row, so the count cannot overstate", () => {
+    const r = roadsLineOf({ roads: [rd("Lake Groove Lane Ln", "County"), rd("Lake Groove Lane", "County"), rd("IH 10", "State (TxDOT)")] });
+    expect(r.items).toHaveLength(2);
+    expect(r.text).toContain("2 roads");
+  });
+  it("merging parcel answers keys on the CLEAN name, so one road fronted by two parcels is one road", () => {
+    const merged = mergeRoadAnswers([{ roads: [{ name: "Lake Groove Lane Ln", lengthM: 10, authority: { label: "County" } }] }, { roads: [{ name: "Lake Groove Lane", lengthM: 20, authority: { label: "County" } }] }]);
+    expect(merged.roads).toHaveLength(1);
+  });
+  it("headline for one maintainer keeps its form, with clean names", () => {
+    const r = roadsLineOf({ roads: [rd("Lake Groove Lane Ln", "County"), rd("Lee Rd", "County")] });
+    expect(r.kind).toBe("all");
+    expect(r.text).toBe("County maintains all 2 · Lake Groove Lane, Lee Rd");
   });
 });
 
@@ -111,24 +182,6 @@ describe("show-on-the-map pills — handles on the SAME layer keys the Layers pa
     state.env_lpst = false;
     expect(pillOn(pill, is)).toBe(false);       // both off → off
     expect(PILL_DEFS.length).toBe(5);
-  });
-});
-
-describe("row highlight — focus is derived, never written", () => {
-  const reg = { fema: { opacity: 0.6 }, wetlands: { opacity: 0.7 }, hifld_tx: { opacity: 0.8 } };
-  it("identity when nothing is focused (the overlay-sync effect must not re-run for nothing)", () => {
-    const o = { fema: { on: false } };
-    expect(focusOverlays(o, null, reg)).toBe(o);
-    expect(focusOverlays(o, "nope", reg)).toBe(o);
-  });
-  it("shows the focused layer at full strength even if it was off, dims every other layer that is on, leaves off layers off", () => {
-    const o = { fema: { on: false, opacity: 0.6 }, wetlands: { on: true, opacity: 0.8 }, hifld_tx: { on: false } };
-    const f = focusOverlays(o, "fema", reg);
-    expect(f.fema).toEqual(expect.objectContaining({ on: true, opacity: 1 }));
-    expect(f.wetlands.opacity).toBeCloseTo(0.8 * FOCUS_DIM);
-    expect(f.hifld_tx.on).toBe(false);
-    expect(o.fema.on).toBe(false);              // the REAL state is untouched — nothing persisted, nothing undoable
-    expect(o.wetlands.opacity).toBe(0.8);
   });
 });
 
