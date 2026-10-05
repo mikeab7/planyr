@@ -352,7 +352,8 @@ Sandbox-proven: `ui-audit/verify-food-ios-screens.mjs` (full app, iOS keyboard +
 9. Desktop browser, full width: open the same restaurant. **Expect:** right-hand panel exactly as before.
 - **Stopping rule:** closes on a dated pass of 1–9 from Michael's iPhone; any failed step re-opens B2046224 (×4) with that step number.
 ### V1516224 — B2092656: no catch when NEW parcel outlines arrive (pan onto new ground / zoom to a new level) in Bartow County GA, and Katy/Fort Bend unchanged `Blocker: real-data`
-- **Done in the sandbox:** unit (12) + synthetic-Bartow arrival harness (`ui-audit/verify-parcel-arrival-cost.mjs`: zoom-arm longest task 71–86 → 16–25 ms) + five adjacent parcel harnesses green. **Why still live:** the sandbox has no GPU and no recorded Bartow response.
+- **2026-10-04 ~7:50 PM CDT — Michael's Chrome, build ccaca0c: ❌ FAIL.** Select-on 283/211 ms frames; pan onto new ground 192 ms (137 blocking) and a 331 ms frame in a `setTimeout` callback with no network (the lot-number relayout — see B2092656 ×2). Fixed in the follow-up PR; re-run all steps on the new build.
+- **Done in the sandbox:** unit (16) + synthetic-Bartow arrival harness (`ui-audit/verify-parcel-arrival-cost.mjs`: zoom-arm longest task 71–86 → 16–25 ms) + five adjacent parcel harnesses green. **Why still live:** the sandbox has no GPU and no recorded Bartow response.
 - **Steps (Michael's Chrome, planyr.io, Map, Select parcels ON; read the served chunk hash in the same observation):**
   1. Bartow GA (34.20 / -84.83), zoom 15, then zoom OUT to 14 onto ground not yet loaded. **Expect:** outlines fill in over a few frames with no visible catch (previously two long frames).
   2. Pan ~500 px onto new ground at 14. **Expect:** no catch; outlines appear progressively.

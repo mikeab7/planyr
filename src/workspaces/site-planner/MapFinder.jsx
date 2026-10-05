@@ -2826,7 +2826,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
    * (which also drops their in-flight tile work and their attribution). Runs on entering select
    * mode, after each moveend, and as each source's URL resolves. */
   const wantedDisplaysRef = useRef(null);
-  const syncDisplaysToView = () => {
+  const syncDisplaysToView = (stagger = false) => {
     const map = mapRef.current;
     if (!map || !selectModeRef.current) return;
     const b = map.getBounds();
@@ -2846,6 +2846,15 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       if (COUNTIES_MAP[k] && COUNTIES_MAP[k].statewide && l && typeof l.setCountyScope === "function") l.setCountyScope(statewideBackupScope(k, base, [...downDisplaysRef.current]));
     });
     scopeBackups(); // layers already on the map
+    if (stagger === true) {
+      /* B2092656 ×2 — entering select mode builds every wanted county's layer (an esri featureLayer, its tile layer, its
+       * lot-number layer: ~15–25 ms each). One task per layer, so the toggle never holds the thread for the sum. */
+      want.forEach((k) => {
+        if (!layerUrlsRef.current[k]) return;
+        setTimeout(() => { if (selectModeRef.current) { addDisplay(k); scopeBackups(); } }, 0);
+      });
+      return;
+    }
     want.forEach((k) => { if (layerUrlsRef.current[k]) addDisplay(k); });
     scopeBackups(); // …and any added just now (a no-op for the ones already scoped)
   };
@@ -2961,9 +2970,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       // Warm the cached parcel snapshots (instant from IndexedDB, SWR-refresh from Drive) so a
       // county whose live server is down still draws + clicks from the local copy (B629).
       CLIENT_SNAPSHOT_COUNTIES.forEach((c) => { ensureSnapshot(c).catch(() => {}); });
-      syncDisplaysToView();
+      /* B2092656 — turning Select parcels on ran React's commit AND the whole display sync (two county-polygon
+       * sweeps, layer construction) in ONE task: 43–85 ms measured, 283 ms on Michael's Chrome. The sync is
+       * its own task now (next tick) so the toggle's commit paints first; nothing reads the displays between. */
+      let t = setTimeout(() => syncDisplaysToView(true), 0);
       map.getContainer().style.cursor = ADD_CURSOR;
-      let t = null;
       const onViewMoved = () => { clearTimeout(t); t = setTimeout(syncDisplaysToView, 200); };
       map.on("moveend", onViewMoved);
       return () => { clearTimeout(t); map.off("moveend", onViewMoved); };
