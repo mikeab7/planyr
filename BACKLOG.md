@@ -5345,6 +5345,12 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
+### B2095123 — Food: a visit logged on an open manual pin did not show in Past visits until the pin was reselected `[food]` (bug) #food #ui  *(Found by the VERIFY-SELF v3 auth sweep 2026-10-04 (V306784 step 6 / V341842, batch b08). DEDUPE-FIRST: no prior item. Constraint check: nothing contradicts `## Owner product constraints`.)*
+
+`[x]` **Cause (AUDIT-FIRST):** `FoodApp.visitsForSelected` filtered a selected manual pin's visits by `selected.pin.visitIds` — a snapshot taken when the pin was selected — so the optimistic/real visit added afterwards was never in it.
+`[x]` **Fix:** match by the pin's own `manualGroupKey(name, lat, lon)` against the live `visits`. Guard: `test/foodPastVisitsLive.test.js`.
+- Verify: live — **V1517458**.
+
 ### B2095122 — A Land comp made by pasting text could not be saved (CHECK constraint refused the blank basis) `[comps]` (bug) #comps #persistence  *(Found by the VERIFY-SELF v3 auth sweep 2026-10-04 (V461202, batch b10), live on build 1aef6cc. DEDUPE-FIRST: no prior item. Constraint check: nothing contradicts `## Owner product constraints`.)*
 
 `[x]` **Symptom:** paste land text → Save → `new row for relation "comps" violates check constraint "comps_lease_rate_expense_check"`; the comp is not saved. Saves only if the row starts as Lease and is switched to Land.

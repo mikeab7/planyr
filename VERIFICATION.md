@@ -171,6 +171,11 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1517458 — B2095123: logging a visit on an open manual pin shows it in Past visits immediately
+
+Sandbox-proven: `test/foodPastVisitsLive.test.js`. **Steps** (signed in as `e2e@planyr.test` on planyr.io after the deploy; `/version.json` read in the same call): 1. Food → drop a manual pin, name it `zz-verify`, log a visit. **Expect:** the pin closes into a manual pin. 2. Reselect it, log a second visit without closing the panel. **Expect:** "Past visits · 2" appears at once. Delete the throwaway visits.
+
+
 ### V1517457 — B2095122: a pasted Land (and Building sale) comp saves and survives a reload
 
 Sandbox-proven: `test/compToRowEnumBlank.test.js`. **Steps** (signed in as `e2e@planyr.test` on planyr.io after the deploy; read `/version.json` in the same call and match it to the merge commit): 1. Comps → add a comp by pasting land text (any 1–2 line land listing). **Expect:** it saves with no error. 2. Reload. **Expect:** the comp is still there. 3. Repeat with a pasted building sale. **Expect:** same. Delete the throwaway comps afterwards.
