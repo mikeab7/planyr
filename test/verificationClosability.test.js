@@ -80,8 +80,11 @@ describe("VERIFICATION.md — every live check is closeable by someone other tha
 
   it("the two items this rule was written alongside state a named expected result per step", () => {
     for (const id of ["V302432", "V302433"]) {
-      const b = blocks.find((x) => x.id === id);
-      expect(b, `${id} should be an active verification item`).toBeTruthy();
+      // V302432 passed live 2026-10-05 and moved to the archive — its text (the per-step "Expected:") is what this pins.
+      const arch = readFileSync(new URL("../docs/archive/VERIFICATION-DONE.md", import.meta.url), "utf8");
+      const am = arch.split(/^(?=### V\d+)/m).find((x) => x.startsWith(`### ${id} `));
+      const b = blocks.find((x) => x.id === id) || (am ? { id, text: am } : null);
+      expect(b, `${id} should exist (active or archived)`).toBeTruthy();
       expect(b.text).toMatch(/Expected:/);
       expect((b.text.match(/Expected:/g) || []).length).toBeGreaterThanOrEqual(4);
     }

@@ -194,7 +194,7 @@ describe("NEW-2(b) — identifyCapable declines what it cannot honestly answer",
   });
 
   it("declines every VECTOR kind — those answer through the tooltip path, not the network", () => {
-    for (const kind of ["esriFeature", "vector", "vectorLine", "pipelineCorridor", "overpass", "mapillary", "contours", "flowdir"])
+    for (const kind of ["esriFeature", "vector", "vectorLine", "pipelineCorridor", "overpass", "mapillary", "contours", "flowdir", "sdaBedrock"])
       expect(identifyCapable({ kind, url: MS })).toBe(false);
   });
 

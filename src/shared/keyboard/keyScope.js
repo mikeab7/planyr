@@ -145,7 +145,14 @@ export function focusScope({ tag, type, isContentEditable, insideCanvas, lastTou
   if (T === "INPUT" && isTextInputType(type)) return SCOPE.FIELD;
   /* A focused node inside the drawing IS the drawing — this is what keeps a future focusable
    * canvas (or a focusable handle inside it) from reading as chrome. */
-  if (insideCanvas) return SCOPE.CANVAS;
+  /* B2095124 — EXCEPT A BUTTON. The canvas wrapper holds real buttons (Zoom to fit, Zoom in/out). A
+   * stepper ▲ in the inspector never takes focus on click, so focus stays parked on whichever of those
+   * was last used; reading "inside the canvas" as authoritative here ignored the latch that the ▲'s own
+   * press had just set to FIELD, and Backspace deleted the selected building (measured live, build
+   * ccaca0c: Properties open, focus on Zoom-to-fit, click Depth ▲, Backspace → 1→0). A focused button
+   * is a CONTROL, not the drawing — it answers to the latch like any other. The press on that very
+   * button already latches CANVAS (it sits inside the wrapper), so Delete after Zoom-in still works. */
+  if (insideCanvas && T !== "BUTTON") return SCOPE.CANVAS;
   /* ⛔ EVERYTHING ELSE IS THE LATCH'S QUESTION, INCLUDING A FOCUSED `<button>`, AND THIS IS THE
    * CORRECTION THAT MATTERS. The first cut of this rule answered CHROME for any focused non-text
    * element outright — reasoning that two of the seven measured leaks had focus on a stepper

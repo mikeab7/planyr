@@ -73,14 +73,13 @@ describe("slope", () => {
 });
 
 describe("PDF-PARITY — every Georgia point / polygon row prints", () => {
-  it("each opts in with printGeometry, and the export branch honours exactly that opt-in", () => {
+  it("each is an esriFeature row and the export branch prints through the shared esriPrintFeatures rule (B2081252)", () => {
     for (const id of ["ga_hsi", "ga_nrhp", "ga_cemeteries", "ga_crit_habitat", "ga_gopher_tortoise"]) {
       expect(ALL_LAYERS[id].kind, id).toBe("esriFeature");
-      expect(ALL_LAYERS[id].printGeometry, id).toBe(true);
+      expect(ALL_LAYERS[id].printGeometry, id).not.toBe(false); // printing is the default now; only `false` opts OUT
     }
     const src = readFileSync(new URL("../src/workspaces/site-planner/lib/exportSheet.js", import.meta.url), "utf8");
-    expect(src).toMatch(/if \(cfg\.printGeometry\) \{/);
-    expect(src).toMatch(/pointSymbolOptions\(cfg, 1\)/); // the SAME symbology as the screen
+    expect(src).toMatch(/esriPrintFeatures\(gj, cfg, leafStyle\)/);
   });
   it("polygon fills are proportional to the slider (no cap), so print = screen at any opacity", () => {
     for (const id of ["ga_crit_habitat", "ga_gopher_tortoise"]) {

@@ -16,12 +16,12 @@ import * as EL from "esri-leaflet";
 import { JURISDICTION_LAYERS } from "./counties.js";
 import { JURISDICTION_SOURCES, ETJ_SOURCES, roadAuthorityStyle, ROAD_AUTHORITY_LEGEND } from "./jurisdiction.js";
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
-import { overpassLayer, mapillaryLayer } from "./evidenceLayers.js";
+import { overpassLayer, mapillaryLayer, bedrockLayer } from "./evidenceLayers.js";
 import { TERRAIN_MIN_ZOOM } from "./terrainGate.js";
 /* NEW-1 — every zoom gate in the app, declared in ONE leaf so the registry rows below can
  * state theirs and the Layers panel can report it as live state. `PIPELINE_VECTOR_MIN_ZOOM`
  * mirrors VECTOR_SOURCES.txrrc_pipe.query.minVectorZoom (pinned by test/layerZoomGate). */
-import { OSM_MIN_ZOOM, MAPILLARY_MIN_ZOOM } from "./layerZoomGate.js";
+import { OSM_MIN_ZOOM, MAPILLARY_MIN_ZOOM, SOIL_BEDROCK_MIN_ZOOM } from "./layerZoomGate.js";
 const PIPELINE_VECTOR_MIN_ZOOM = 13;
 import { loadTerrain } from "./terrainLazy.js";
 import {
@@ -601,6 +601,16 @@ export const TERRAIN = {
     note: "Slope of the ground, from LiDAR: clear under 2%, yellow 2–5%, orange 5–10%, red 10–15%, dark red over 15%. Computed at the screen's current resolution, so zoomed far out the ground reads flatter than it is — use it at site zoom. Screening only; a survey topo governs grading cost.",
     role: "area", group: "base", order: 4,
   },
+  soil_bedrock: {
+    // B2081251 — SHALLOW ROCK, national (USDA NRCS SSURGO via the SDM WFS + Soil Data Access). Not an ArcGIS source,
+    // so it lives here and in ssurgoBedrock.js rather than GIS_SOURCES (whose verifier is /query-shaped); the live
+    // check is ui-audit/verify-ssurgo-bedrock.mjs. Drawn client-side, view-driven, like the OSM layers.
+    kind: "sdaBedrock", label: "Shallow rock (depth to bedrock)", source: "USDA NRCS — SSURGO soils",
+    minZoom: SOIL_BEDROCK_MIN_ZOOM, opacity: 0.55,
+    note: "Soil map units where bedrock is recorded within 5 ft: dark red under 20 in, orange 20–40 in, yellow 40–60 in. Depth is the SHALLOWEST soil in each map unit, so rock can be that shallow somewhere in the unit, not everywhere. A unit left unpainted has no rock recorded in the soil profile (described to about 6 ft) — that is not proof there is none. A desktop soils read, never a boring: it prices rock excavation and utility trenching only as a flag to investigate.",
+    infoCaveat: "Screening only — SSURGO map units are generalised polygons; a geotechnical boring governs.",
+    role: "area", group: "base", order: 5,
+  },
 };
 
 /* Jurisdiction BOUNDARY overlays (B176) — toggleable district lines for screening:
@@ -973,8 +983,6 @@ export const AHJ_LAYERS = {
    * traffic/truck routes, the coastal-marsh jurisdiction line and SSURGO depth-to-bedrock are NOT here: their hosts
    * could not be reached from the build sandbox (see BACKLOG) and an unconfirmed URL is how a row ships dead. */
   ga_hsi: {
-    // PDF-PARITY: points / polygons print too (the esriFeature export branch only prints LINES unless a row opts in)
-    printGeometry: true,
     kind: "esriFeature", label: "Hazardous sites (Georgia EPD)", source: "Georgia EPD — Hazardous Site Inventory",
     url: GIS_SOURCES.hsiGa.serviceUrl, states: ["GA"],
     minZoom: 9, color: "#9a3412", weight: 2, opacity: 0.55, pointRadius: 5,
@@ -984,8 +992,6 @@ export const AHJ_LAYERS = {
     role: "point", group: "environmental", order: 12,
   },
   ga_nrhp: {
-    // PDF-PARITY: points / polygons print too (the esriFeature export branch only prints LINES unless a row opts in)
-    printGeometry: true,
     kind: "esriFeature", label: "Historic places (National Register)", source: "National Park Service — National Register of Historic Places",
     url: GIS_SOURCES.nrhp.serviceUrl, states: ["GA"],
     minZoom: 11, color: "#6d28d9", weight: 2, opacity: 0.55, pointRadius: 4,
@@ -995,8 +1001,6 @@ export const AHJ_LAYERS = {
     role: "point", group: "environmental", order: 13,
   },
   ga_cemeteries: {
-    // PDF-PARITY: points / polygons print too (the esriFeature export branch only prints LINES unless a row opts in)
-    printGeometry: true,
     kind: "esriFeature", label: "Cemeteries (incomplete)", source: "USGS — GNIS cemeteries",
     url: GIS_SOURCES.cemeteries.serviceUrl, states: ["GA"],
     minZoom: 12, color: "#475569", weight: 2, opacity: 0.55, pointRadius: 3.5,
@@ -1006,8 +1010,6 @@ export const AHJ_LAYERS = {
     role: "point", group: "environmental", order: 14,
   },
   ga_crit_habitat: {
-    // PDF-PARITY: points / polygons print too (the esriFeature export branch only prints LINES unless a row opts in)
-    printGeometry: true,
     kind: "esriFeature", label: "Critical habitat (USFWS)", source: "U.S. Fish & Wildlife Service",
     url: GIS_SOURCES.critHabitat.serviceUrl, states: ["GA"],
     minZoom: 8, color: "#15803d", weight: 1.5, opacity: 0.45,
@@ -1019,8 +1021,6 @@ export const AHJ_LAYERS = {
     role: "area", group: "environmental", order: 15,
   },
   ga_gopher_tortoise: {
-    // PDF-PARITY: points / polygons print too (the esriFeature export branch only prints LINES unless a row opts in)
-    printGeometry: true,
     kind: "esriFeature", label: "Gopher tortoise soils (DNR)", source: "Georgia DNR — Wildlife Resources Division",
     url: GIS_SOURCES.gopherTortoiseGa.serviceUrl, states: ["GA"],
     minZoom: 12, color: "#a16207", weight: 1, opacity: 0.45,
@@ -1228,6 +1228,7 @@ export const LAYER_VINTAGE = {
   ga_trout: "Georgia DNR trout streams — layer edited 2024-12-30",
   ga_stream_buffers: "Computed from USGS NHD + DNR trout streams + the District outline — not a surveyed buffer",
   ga_slope: "USGS 3DEP LiDAR — collection date varies by area",
+  soil_bedrock: "USDA SSURGO — survey vintage varies by county",
   coh_ww: "City of Houston GIS (test host) — current edition",
   coh_storm: "City of Houston GIS (test host) — current edition",
   coh_water: "City of Houston GIS (test host) — current edition",
@@ -1671,6 +1672,9 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
       const report = (s, msg, extra) => onStatus && onStatus(k, s, msg, extra); // extra carries data-age {ts,stale} for B75
       if (cfg.kind === "overpass") {
         const lyr = overpassLayer(cfg.query, report);
+        lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;
+      } else if (cfg.kind === "sdaBedrock") {
+        const lyr = bedrockLayer(report);
         lyr.setOpacity(st.opacity); lyr.addTo(map); refs[k] = lyr;
       } else if (cfg.kind === "mapillary") {
         // B308: served via the same-origin /api/mapillary proxy (token held server-side),
