@@ -171,6 +171,14 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1526800 — B2108336: "Delete forever" on a whole project in the account bin removes it, or says why `Blocker: real-data`
+
+Sandbox-proven: stub-database harness `ui-audit/verify-project-purge.mjs` (known-good arm: row leaves, DB empty, folders torn down; zero-row arm: row stays, toast names the reason, NO folder teardown) and the red-proofed `test/purgeProjectFolders.test.js` NEW-1 block. Signed-in throwaway on planyr.io (test account) removed the row on the pre-fix build; re-run after the deploy in the steps below.
+**Steps** (read the served chunk hash / `/version.json` in the SAME observation as each PASS/FAIL and match it to the merge commit):
+1. Test account (`ui-audit/lib/signedInSession.mjs`): seed a throwaway binned project, project switcher → Recently deleted → × → Delete forever. **Expect:** row leaves the list, database no longer holds it, no toast. Clean up the throwaway.
+2. Michael's signed-in Chrome, planyr.io: project switcher → Recently deleted → × on **Untitled site** (`smutb6e87v2n`, a Claude test project he asked gone) → Delete forever. **Expect either:** the row leaves, and after a hard reload it is still gone, `select id from sites where id='smutb6e87v2n'` returns nothing; **or** a toast reading “Untitled site” couldn't be permanently deleted + a reason (anything but silence), the row staying listed.
+3. If it fails: read the toast and `client_errors` for `event:purge-not-effective` / `event:purge-blocked-live-group` / `event:cloud-write-failed` naming `smutb6e87v2n`, and re-open B2108336 with that row.
+4. Say exactly what was touched: the throwaway(s) and `smutb6e87v2n` only.
 ### V1525216 — B2106752: Hybrid map has no yellow/cream road `Blocker: live-GIS`
 
 Unit-proven (`test/vectorBasemap.test.js` "no tinted roads"); the vector tiles come from an external host the sandbox cannot reach, so the picture itself is checked live.
