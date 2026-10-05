@@ -1,3 +1,39 @@
+### V1501920 — B2078592: on a real iPhone there is no floating "Delete box"; press-and-hold inside a box opens the menu with the keyboard kept, and "Delete this box" removes it `Blocker: real-data` (signed-in real device) ✅ **PASSED 2026-10-04 — owner on-device pass (Michael, his iPhone)**
+
+Sandbox-proven: `ui-audit/verify-notes-touch-menus.mjs` (WebKit hasTouch+isMobile + Chromium real touch pipeline; red on untouched main). A real held fingertip, iOS's own selection loupe and the real soft keyboard are not producible headless.
+**Steps (real iPhone, a throwaway page):**
+1. Tap into a box and type a few letters. **Expect:** no "Delete box" button or banner anywhere on screen — not while the box is selected, not while typing.
+2. With the keyboard up, press and hold inside the same box for about half a second. **Expect:** the same menu a right-click gives on desktop, including "Delete this box"; the keyboard stays up; the box does not move or start dragging; lifting your finger does not run any menu row.
+3. Choose "Delete this box". **Expect:** the box is gone; Undo brings it back.
+4. In a box, empty its text and press Backspace once more. **Expect:** the empty box disappears (unchanged).
+5. Note whether iOS's own text-selection magnifier ALSO appears over the menu in step 2 (carried from V1484660 step 5; if it does, file it as a recurrence on B2078592).
+6. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–4 (5 recorded), or a failed step filed as a recurrence on B2078592.
+- **2026-10-04 (evening) — owner on-device pass: Michael on his iPhone, build after #1973: press-and-hold inside a box opens the menu with the Delete option, and there is no floating Delete button. Recorded from his report; it did not itemise the keyboard-stays-up, nothing-triggered-on-lift, Undo or Backspace-on-empty-box steps, nor the iOS text-selection-magnifier note (step 5) — accepted as his own pass at his instruction. Chunk hash not captured in his report.**
+
+### V1501921 — B2078593: on a real iPhone and on desktop, "Hard Cost Pricing" opens at full page width, top near the top of the screen, every time `Blocker: real-data` (signed-in real device, real Organization page) ✅ **PASSED 2026-10-04 — owner on-device pass (Michael, his iPhone)**
+
+Sandbox-proven: `ui-audit/verify-notes-open-framing.mjs` (WebKit + Chromium, 390×844 and 1280×800 among the sizes; a view stored by an older build on either kind of device no longer decides the opening; red on untouched main) and `test/notesViewNotPersisted.test.js`. The real page and the real device's leftover storage are not reachable headless.
+**Steps (real iPhone, then desktop; the Organization page "Hard Cost Pricing" — open it only, do not edit it):**
+1. On the iPhone, fully close the tab/app and reopen planyr.io, then open Hard Cost Pricing. **Expect:** the whole page width is on screen — left and right edges and the table's edge — with the page top near the top of the screen; not at 55%, not a third of the way down. (Any view left on that phone by an older build is deleted unread on this open.)
+2. Reload the page on the phone. **Expect:** the same full-width opening again.
+3. Pinch/pan on the phone, open another page, come back to Hard Cost Pricing without reloading. **Expect:** it returns to where you left it (kept for the session only); reload → full width again.
+4. On desktop, open the same page. **Expect:** the same framing — full page width, top near the top; no difference from the phone beyond screen size. If the page is wider than the window it opens shrunk until both edges are visible.
+5. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2078593.
+- **2026-10-04 (evening) — owner on-device pass: Michael on his iPhone, build after #1985: Hard Cost Pricing shows the whole table and matches desktop. Recorded from his report; the in-session return-to-where-you-were and reload-reopens-full-width steps (2–3) were not itemised — accepted as his own pass at his instruction. Chunk hash not captured in his report.**
+
+### V1509936 — B2078593 (×2): on a real iPhone "Hard Cost Pricing" shows its content at the same share of the page as on desktop, and the table is fully visible `Blocker: real-data` (signed-in real device, real Organization page) ✅ **PASSED 2026-10-04 — owner on-device pass (Michael, his iPhone)**
+
+Not the first time anyone has seen it: `ui-audit/verify-notes-box-width-parity.mjs` (his exact document rebuilt as a fixture, five contexts, 86 checks green; 23 red on untouched main with his own numbers) and the phone / desktop screenshots in `docs/evidence/B2078593-box-width/` were compared by eye before this was written. A real phone's own copy of the page is the only thing left.
+**Steps (real iPhone, then desktop; open the Organization page "Hard Cost Pricing" — do not edit it):**
+1. Fully close and reopen planyr.io on the phone, open the page. **Expect:** the whole page width is on screen and the list and table fill most of it (the table about as wide as on desktop relative to the page); the table's right column reads in full — "…permit fee → $500/year total at the 10M gallon mark" and "…the remaining 20% billed at $26/million gallons" — with nothing cut off and blank paper only to the right of the table.
+2. Zoom in on the table with two fingers. **Expect:** the same words and line breaks as on desktop, just bigger.
+3. Open the same page on desktop. **Expect:** the same arrangement — same line breaks, same table.
+4. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–3, or a failed step filed as a recurrence on B2078593.
+- **2026-10-04 (evening) — owner on-device pass: Michael on his iPhone, build after #1985: Hard Cost Pricing shows the whole table and matches desktop (same pass as V1501921, same observation). Chunk hash not captured in his report; accepted as his own pass.**
+
 ### V1484656 — B2061328: typing in an open note while the app returns to the foreground / another window pushes never loses either side's text, and the editor stays put `Blocker: auth` (two signed-in windows) ✅ **PASSED 2026-10-04 — owner on-device pass (Michael, his iPhone)**
 
 Sandbox-proven: `test/notesOpenPageSync.test.js` (gated fake network, red on main) + `ui-audit/verify-notes-open-page-adopt.mjs` (real editor takes the adopted body in place). The real two-window cloud round-trip needs a signed-in account.
@@ -3787,3 +3823,13 @@ Sandbox-proven: `test/mapPinSymbol.test.js`, `test/mapNoteMarkerIcon.test.js`; h
 5. Hover a site pin and a note pin. **Expect:** the tooltip appears above the circle, not on it.
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1875520.
 - **✅ PASSED 2026-10-04 — Cowork live check** (Michael's signed-in browser, planyr.io). Recorded from the Cowork chat's report that PR #1883 passed live verification; per-step detail was not supplied to the recording session, so the steps above are accepted as a whole on that report.
+
+### V1502928 — B2084992: headless sign-in as the test account via /api/auth/e2e-session, then open e2e-fixture-site `Blocker: real-data`
+
+Sandbox-proven: `test/e2eSessionRoute.test.js` (18, mutation-checked). Pending: the deployed route needs `E2E_LOGIN_KEY` (43 chars) in Cloudflare Pages production AND the session env. It ALSO needs `SUPABASE_SERVICE_ROLE_KEY` as a Secret in Cloudflare Pages production — measured absent 2026-10-04 (Cowork dashboard read); until Michael adds it the route answers 503 "not configured" after a correct key (on `OWNER-TODO.md`).
+**Steps** (any session with E2E_LOGIN_KEY; read `/version.json` in the SAME call and match it to the merge commit):
+1. `E2E_LOGIN_KEY=… node ui-audit/verify-signed-in-session.mjs https://planyr.io`. **Expect:** `PASS signed in as e2e@planyr.test | fixture e2e-fixture-site visible: true`, and a build matching the merge commit.
+2. `curl -X POST https://planyr.io/api/auth/e2e-session` (no key) and with a wrong key. **Expect:** 404 both; `curl -X GET` → 405; no `access-control-*` header on any.
+3. Password sign-in still needs a captcha for real users. **Expect:** unchanged `captcha_failed`.
+
+**✅ PASSED 2026-10-04 (Claude Code session, signed in headlessly on planyr.io, build `21216dd` read in the same call via `/version.json`):** `node ui-audit/verify-signed-in-session.mjs https://planyr.io` → `PASS signed in as e2e@planyr.test | fixture e2e-fixture-site visible: true`. First attempt on build `2375282` answered 503 not-configured (deploy predated `SUPABASE_SERVICE_ROLE_KEY`); after Michael's republish the route works.

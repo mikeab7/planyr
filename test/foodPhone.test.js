@@ -8,7 +8,7 @@ import { dirname, join, resolve } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { keyboardInset, currentKeyboardInset, layoutViewportHeight, MIN_KEYBOARD_PX } from "../src/workspaces/food/lib/keyboardInset.js";
+import { keyboardInset, currentKeyboardInset, layoutViewportHeight, visualViewportBox, MIN_KEYBOARD_PX } from "../src/workspaces/food/lib/keyboardInset.js";
 import { cleanDraftDishes, newDraftDish } from "../src/workspaces/food/lib/draftDishes.js";
 import { noAutofill, CONTACT_WORDS } from "../src/workspaces/food/lib/noAutofill.js";
 import ScoreMeter, { ScoreTapGrid } from "../src/workspaces/food/components/ScoreMeter.jsx";
@@ -45,7 +45,8 @@ describe("keyboardInset", () => {
   });
   it("keyboardInset.js never derives the layout height from innerHeight alone", () => {
     const src = read("lib/keyboardInset.js");
-    expect(src).toMatch(/position:fixed;top:0;bottom:0/);
+    expect(src).toMatch(/import \{ layoutViewportHeight \} from "\.\.\/\.\.\/\.\.\/shared\/ui\/layoutViewport\.js"/);
+    expect(readFileSync(join(REPO, "src/shared/ui/layoutViewport.js"), "utf8")).toMatch(/position:fixed;top:0;bottom:0/);
     expect(src).not.toMatch(/layoutHeight:\s*win\.innerHeight/);
   });
 });
@@ -129,11 +130,38 @@ describe("phone rating control", () => {
 });
 
 describe("keyboard-aware sheet", () => {
-  it("BottomSheet lifts by the keyboard inset from visualViewport", () => {
+  it("BottomSheet pins itself to the VISUAL viewport's own box while typing — never to a layout-height estimate (B2046224 ×3: the gap)", () => {
     const sheet = read("components/BottomSheet.jsx");
     expect(sheet).toMatch(/currentKeyboardInset/);
-    expect(sheet).toMatch(/visualViewport/);
-    expect(sheet).toMatch(/bottom:\s*kbInset/);
+    expect(sheet).toMatch(/visualViewportBox/);
+    expect(sheet).toMatch(/top:\s*vvBox\.top,\s*height:\s*vvBox\.height/);
+    expect(sheet).not.toMatch(/bottom:\s*kbInset/);
+  });
+  it("a sheet-coloured skirt sits under the sheet while the keyboard is up, so a mis-read can never show the map", () => {
+    expect(read("components/BottomSheet.jsx")).toMatch(/food-sheet-skirt[\s\S]{0,200}top:\s*"100%"[\s\S]{0,120}var\(--surface-raised\)/);
+  });
+  it("the sheet re-reads the visual viewport on window scroll and on a timer while typing (iOS can move it with no vv event)", () => {
+    const sheet = read("components/BottomSheet.jsx");
+    expect(sheet).toMatch(/window\.addEventListener\("scroll", onVv/);
+    expect(sheet).toMatch(/setInterval\(measureViewport/);
+  });
+  it("while typing, 'Log a visit' steps aside and sticky bars stop floating over the card (B2046224 ×3: the cut-off card)", () => {
+    const sheet = read("components/BottomSheet.jsx");
+    expect(sheet).toMatch(/\[data-typing\] \[data-hide-while-typing\]\{display:none !important\}/);
+    expect(sheet).toMatch(/\[data-typing\] \[data-sheet-sticky\]\{position:static !important\}/);
+    expect(read("components/VisitPanel.jsx")).toMatch(/food-actions-row" data-sheet-sticky="bottom" data-hide-while-typing/);
+  });
+  it("every editable card is marked so the reveal shows the whole card, not just the field", () => {
+    expect(read("components/DishesSection.jsx")).toMatch(/dish-edit-row" data-edit-card/);
+    expect(read("components/VisitPanel.jsx").match(/data-edit-card/g)?.length).toBeGreaterThanOrEqual(6);
+    expect(read("components/BottomSheet.jsx")).toMatch(/closest\("\[data-edit-card\]"\)/);
+  });
+  it("the map's own controls are confined below the sheet (B2046224 ×3: the zoom control over the sheet)", () => {
+    expect(read("components/FoodMap.jsx")).toMatch(/data-testid="food-map" style=\{\{ position: "absolute", inset: 0, isolation: "isolate", zIndex: 0 \}\}/);
+  });
+  it("visualViewportBox reads the visual viewport's own box", () => {
+    expect(visualViewportBox({ visualViewport: { offsetTop: 56.4, height: 279.2 } })).toEqual({ top: 56, height: 279 });
+    expect(visualViewportBox({})).toBe(null);
   });
   it("reveals the focused field by scrolling the sheet's own box — never scrollIntoView (it scrolls the iOS page too)", () => {
     const sheet = read("components/BottomSheet.jsx");

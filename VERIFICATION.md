@@ -19,6 +19,7 @@ was never clicked" quietly ships broken.
 > than file the click-through for someone else. The working rhythm:
 > - After a change is **CI-green + build-green**, **run the headless-browser check yourself**, then
 >   record the outcome here (✅/❌ + date). Don't punt it.
+> - **⛔ A session does not end its turn while its own change is merged-but-unverified** (merge → deploy serves your build → signed-in check → record).
 > - **Only if no browser is reachable** (rare), log the item below and move on — never block on Michael.
 > - **Do NOT surface "these N are unverified" to Michael as a to-do for him.**
 > - **Only interrupt Michael for a genuinely CRITICAL problem** — the app won't build, won't render
@@ -29,11 +30,14 @@ was never clicked" quietly ships broken.
 > Write a short Playwright script and run it with Node:
 > - Browsers live at `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`; the module is the global
 >   `/opt/node22/lib/node_modules/playwright` (require it by absolute path).
-> - The sandbox egress proxy intercepts TLS, so launch with `args:['--ignore-certificate-errors']`
->   **and** `newContext({ ignoreHTTPSErrors: true })`, or `page.goto` throws `ERR_CERT_AUTHORITY_INVALID`.
-> - **Logged-out only:** that proxy also CORS-blocks the Supabase auth handshake, so self-tests run in
->   **this-device (logged-out) mode** — full coverage for the planner/drawing tools, but anything that
->   *requires* sign-in (cloud save/sync) still needs a signed-in check elsewhere.
+> - **TLS is already trusted** — the environment setup script imports the sandbox proxy's CA into Chromium's
+>   NSS store. **NEVER pass `--ignore-certificate-errors` / `ignoreHTTPSErrors`** (owner-ruled-out).
+> - **SIGNED IN is available (2026-10-04):** `import { openSignedIn } from "./ui-audit/lib/signedInSession.mjs"`
+>   (`openSignedIn({ base: "https://planyr.io" })` or a PR preview URL) signs in as the throwaway test account
+>   `e2e@planyr.test` via `/api/auth/e2e-session` using `E2E_LOGIN_KEY` (never print it), and returns the page +
+>   the served `/version.json` build + a proof object (account email + `e2e-fixture-site`). Smoke:
+>   `node ui-audit/verify-signed-in-session.mjs https://planyr.io`. Password sign-in is captcha-refused by design.
+>   **A session's own signed-in check on the test account COUNTS as verified.**
 > - Enter the planner via the map toolbar's **"Draw"** button — `getByTestId("map-toolbar-draw")`,
 >   ONE click (⚠ CORRECTED 2026-09-08, B1368144: this used to be a two-step
 >   `map-start-blank-menu-btn` → `map-start-blank-menu-item` caret click, and "Start blank" is now
@@ -132,13 +136,14 @@ was never clicked" quietly ships broken.
    Before you file OR leave a `V###` as pending, you must FIRST drive the headless self-verify. You may
    only defer an item if it hits one of exactly THREE hard walls — and it must NAME which, in a
    `Blocker:` field on the entry:
-   - **`Blocker: auth`** — needs sign-in. The egress proxy CORS-blocks the Supabase auth handshake, so
-     the sandbox genuinely cannot log in (a network-policy wall, not a missing password — a test login
-     alone does not unlock it without a matching network-policy change).
+   - ~~**`Blocker: auth`**~~ **RETIRED 2026-10-04 (owner decision, Michael).** Sessions sign in as the test
+     account (`ui-audit/lib/signedInSession.mjs`) and verify signed-in checks themselves; `auth` no longer
+     parks a check. A `V###` still carrying it is a mis-classification: drive it signed in and record ✅/❌.
+     Park ONLY if the check needs Michael's own data (`real-data`) — and first try a fixture on the test account.
    - **`Blocker: live-GIS`** — needs a live external map/GIS host the sandbox egress blocks (county
      flood / parcel / TxGIO services, etc.).
    - **`Blocker: real-data`** — needs a specific SIGNED-IN saved project (Tsakiris / Bain) that only
-     exists in a real account.
+     exists in Michael's real account (try a fixture on the test account first).
    - **`Blocker: print-engine`** *(added 2026-07-31 with **V631**, and flagged rather than smuggled in:
      this is a FOURTH wall, and the rule above says three.)* — needs the browser's real PRINT pipeline.
      Headless Chromium's `window.print()` is a **no-op**: it produces no paginated output at all, so
@@ -177,14 +182,6 @@ Sandbox-proven: `ui-audit/verify-library-home-delete.mjs` (33 checks, real Chrom
 5. Tab to a ✕ with the keyboard and press Enter, Enter. **Expect:** same result as the mouse. On a phone, **Expect:** the ✕ is easy to hit.
 6. With a throwaway open as a Review tab, delete it from the Library. **Expect:** the Review tab stays open and unchanged (decided: tabs are never closed by a Library delete).
 7. Say exactly which throwaway files were touched.
-### V1502928 — B2084992: headless sign-in as the test account via /api/auth/e2e-session, then open e2e-fixture-site `Blocker: real-data`
-
-Sandbox-proven: `test/e2eSessionRoute.test.js` (18, mutation-checked). Pending: the deployed route needs `E2E_LOGIN_KEY` (43 chars) in Cloudflare Pages production AND the session env. It ALSO needs `SUPABASE_SERVICE_ROLE_KEY` as a Secret in Cloudflare Pages production — measured absent 2026-10-04 (Cowork dashboard read); until Michael adds it the route answers 503 "not configured" after a correct key (on `OWNER-TODO.md`).
-**Steps** (any session with E2E_LOGIN_KEY; read `/version.json` in the SAME call and match it to the merge commit):
-1. `E2E_LOGIN_KEY=… node ui-audit/verify-signed-in-session.mjs https://planyr.io`. **Expect:** `PASS signed in as e2e@planyr.test | fixture e2e-fixture-site visible: true`, and a build matching the merge commit.
-2. `curl -X POST https://planyr.io/api/auth/e2e-session` (no key) and with a wrong key. **Expect:** 404 both; `curl -X GET` → 405; no `access-control-*` header on any.
-3. Password sign-in still needs a captcha for real users. **Expect:** unchanged `captcha_failed`.
-
 ### V1500112 — B2084480: a file saved in Review appears in the Library without a reload, in this tab and in other open tabs `Blocker: auth`
 
 Sandbox-proven: `test/libraryFreshAndTypeTag.test.js` (every write path announces; both Library surfaces subscribe; red with the wiring reverted). Not provable here: the signed-in round-trip and a second real browser tab.
@@ -234,16 +231,6 @@ Sandbox-proven: `test/authPanelSignup.test.js` (15), `e2e/signup-success.spec.js
 4. When Supabase "Confirm email" is later switched OFF: repeat step 1. **Expect:** the panel closes and you are signed in — no check-your-email screen, no redeploy needed.
 - **Stopping rule:** closes on a dated pass of 1–3 (4 when the setting flips), or a failed step filed as a recurrence on B2014096.
 
-### V1509936 — B2078593 (×2): on a real iPhone "Hard Cost Pricing" shows its content at the same share of the page as on desktop, and the table is fully visible `Blocker: real-data` (signed-in real device, real Organization page)
-
-Not the first time anyone has seen it: `ui-audit/verify-notes-box-width-parity.mjs` (his exact document rebuilt as a fixture, five contexts, 86 checks green; 23 red on untouched main with his own numbers) and the phone / desktop screenshots in `docs/evidence/B2078593-box-width/` were compared by eye before this was written. A real phone's own copy of the page is the only thing left.
-**Steps (real iPhone, then desktop; open the Organization page "Hard Cost Pricing" — do not edit it):**
-1. Fully close and reopen planyr.io on the phone, open the page. **Expect:** the whole page width is on screen and the list and table fill most of it (the table about as wide as on desktop relative to the page); the table's right column reads in full — "…permit fee → $500/year total at the 10M gallon mark" and "…the remaining 20% billed at $26/million gallons" — with nothing cut off and blank paper only to the right of the table.
-2. Zoom in on the table with two fingers. **Expect:** the same words and line breaks as on desktop, just bigger.
-3. Open the same page on desktop. **Expect:** the same arrangement — same line breaks, same table.
-4. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes on a dated pass of 1–3, or a failed step filed as a recurrence on B2078593.
-
 ### V1496384 — B2080752: a Word/txt/PDF opened from disk and saved is filed under its OWN name `Blocker: auth`
 
 Sandbox-proven: pure naming table + red-proof source guards (`test/reviewOpenedFileNaming.test.js`), tabs harness 37/37. Not provable here: the real signed-in save into the Library. **Steps** (signed in, planyr.io `#/markup`, no project selected; read the build from `/version.json` in the same observation; use a throwaway `.docx`):
@@ -289,29 +276,6 @@ Sandbox-proven: `test/foodSavedSearchFirst.test.js` red on main, green here. **S
 4. "soma", "tio trompo", "ikes". **Expect:** unchanged — saved first.
 5. Switch Map → List → Map a few times. **Expect:** no `_leaflet_pos` error in the console.
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2070432.
-### V1501920 — B2078592: on a real iPhone there is no floating "Delete box"; press-and-hold inside a box opens the menu with the keyboard kept, and "Delete this box" removes it `Blocker: real-data` (signed-in real device)
-
-Sandbox-proven: `ui-audit/verify-notes-touch-menus.mjs` (WebKit hasTouch+isMobile + Chromium real touch pipeline; red on untouched main). A real held fingertip, iOS's own selection loupe and the real soft keyboard are not producible headless.
-**Steps (real iPhone, a throwaway page):**
-1. Tap into a box and type a few letters. **Expect:** no "Delete box" button or banner anywhere on screen — not while the box is selected, not while typing.
-2. With the keyboard up, press and hold inside the same box for about half a second. **Expect:** the same menu a right-click gives on desktop, including "Delete this box"; the keyboard stays up; the box does not move or start dragging; lifting your finger does not run any menu row.
-3. Choose "Delete this box". **Expect:** the box is gone; Undo brings it back.
-4. In a box, empty its text and press Backspace once more. **Expect:** the empty box disappears (unchanged).
-5. Note whether iOS's own text-selection magnifier ALSO appears over the menu in step 2 (carried from V1484660 step 5; if it does, file it as a recurrence on B2078592).
-6. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes on a dated pass of 1–4 (5 recorded), or a failed step filed as a recurrence on B2078592.
-
-### V1501921 — B2078593: on a real iPhone and on desktop, "Hard Cost Pricing" opens at full page width, top near the top of the screen, every time `Blocker: real-data` (signed-in real device, real Organization page)
-
-Sandbox-proven: `ui-audit/verify-notes-open-framing.mjs` (WebKit + Chromium, 390×844 and 1280×800 among the sizes; a view stored by an older build on either kind of device no longer decides the opening; red on untouched main) and `test/notesViewNotPersisted.test.js`. The real page and the real device's leftover storage are not reachable headless.
-**Steps (real iPhone, then desktop; the Organization page "Hard Cost Pricing" — open it only, do not edit it):**
-1. On the iPhone, fully close the tab/app and reopen planyr.io, then open Hard Cost Pricing. **Expect:** the whole page width is on screen — left and right edges and the table's edge — with the page top near the top of the screen; not at 55%, not a third of the way down. (Any view left on that phone by an older build is deleted unread on this open.)
-2. Reload the page on the phone. **Expect:** the same full-width opening again.
-3. Pinch/pan on the phone, open another page, come back to Hard Cost Pricing without reloading. **Expect:** it returns to where you left it (kept for the session only); reload → full width again.
-4. On desktop, open the same page. **Expect:** the same framing — full page width, top near the top; no difference from the phone beyond screen size. If the page is wider than the window it opens shrunk until both edges are visible.
-5. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2078593.
-
 ### V1501922 — B2061333: no `page-containment-drift` rows shaped "(0, ~250)" from iPhones after a week on the phone-layout build; keyboard ones arrive as `page-containment-keyboard-reveal` `Blocker: real-data` (needs a week of real iPhone traffic; run on or after 2026-10-11)
 
 Carried from V1484661 step 7, which Michael's 2026-10-04 on-device pass did not cover. A query, not a click-through: Claude-doable once the week has elapsed.
@@ -333,19 +297,20 @@ Sandbox-proven in WebKit-emulated iPhone 15 / SE against a MOCKED Supabase (`ui-
 8. **(amendment — typing, every text field)** With the keyboard up on the iPhone, type a long entry (e.g. `Mizuki Nigiri omakase with extra wasabi…`) in EACH of: the Map-view search box · List-view filter · drop-a-pin name · visit form (date, first dish name, what was good, cost, notes) · edit an old visit · add-a-dish (name, price, note). **Expect, per field:** the text and caret stay on screen and follow what you type (nothing under the keyboard, behind the card or past the screen edge); no field extends past the edge; **no "AutoFill Contact" bar** above the keyboard; the action key reads Search / Next / Done sensibly. Name any field that still fails. (Overlaps V1476080 for the visit form — one pass can close both.)
 9. Desktop browser, full width: every one of those fields looks and types as before.
 - **Stopping rule:** closes on a dated pass of 1–7, or a failed step filed as a recurrence on B2046224.
-### V1497664 — B2046224 (×2): on a real iPhone, the field you type in stays above the keyboard and no "AutoFill Contact" bar appears `Blocker: real-device (no session can raise a real iPhone keyboard or Safari's AutoFill bar)`
+### V1497664 — B2046224 (×3): on a real iPhone, the sheet sits flush on the keyboard, the card being edited is fully visible, nothing is drawn over the sheet, and no "AutoFill Contact" bar appears `Blocker: real-device (no session can raise a real iPhone keyboard or Safari's AutoFill bar)`
 
-Sandbox-proven: `ui-audit/verify-food-ios-keyboard.mjs` models real iOS (layout viewport unchanged, `innerHeight` shrinks with the visual viewport, optional pan) — **RED on the old code for the exact reported field (38/72), 99/99 on the fix**; `verify-food-phone.mjs` 159/159, `verify-food-visit-phone.mjs` 25/25, `test/foodPhone.test.js`. Not provable here: the real keyboard, the real AutoFill bar. **Steps** (iPhone, Safari, planyr.io → Food → Map; read `/version.json` and the served chunk hash in the same check):
-1. Search `Buffalo Grill`, open **The Buffalo Grill** (1301 S Voss Rd). **Expect:** the card opens about half way up, with "Dishes · Sort" visible under the score tiles.
-2. Tap **+ Add a dish**. **Expect:** the keyboard opens, the card slides up to sit on top of the keyboard and fills the screen above it, and the "Dish" field (red underline) is visible above the keyboard with the cursor in it. **No "AutoFill Contact" bar / no own-name suggestion.**
-3. Type a long dish, e.g. `Chicken fried steak with cream gravy and jalapeño mash`. **Expect:** every letter visible as you type.
-4. Tap Price, then Note, typing in each. **Expect:** each one stays visible above the keyboard, and the Done / Save & add another buttons are not on top of it. No AutoFill Contact bar.
-5. Tap Done, close the keyboard. **Expect:** the card drops back to the bottom of the screen.
-6. Tap **Log a visit**; tap Dish, What was good, Cost, Notes in turn (type a few lines in Notes). **Expect:** each field visible above the keyboard while typing; no AutoFill Contact bar on any.
-7. Tap an existing visit card to edit it; tap What was good and Notes. **Expect:** same.
-8. Tap Pin, drop a pin. **Expect:** the place-name field is visible with the keyboard up; no AutoFill Contact bar.
-9. Desktop browser, full width: open the same restaurant. **Expect:** right-hand panel as before, nothing moved.
-- **Stopping rule:** closes on a dated pass of 1–9 from Michael's iPhone; any failed step re-opens B2046224 (×3) with that step number.
+**2026-10-04 4:10 PM CDT — owner, iPhone (iOS 18.7), build after #1976, Aburi Sushi → + Add a dish: PARTIAL.** ✅ sheet lifts · ✅ Dish field visible with the caret · ✅ no AutoFill Contact. ❌ map visible between the sheet and the keyboard's accessory bar · ❌ "Log a visit" covers the New Dish card (Course/Price half hidden) · ❌ + / − zoom control drawn over the sheet. Fixed in the ×3 PR; re-check below.
+Sandbox-proven: `ui-audit/verify-food-ios-screens.mjs` (full app, iOS keyboard + accessory bar drawn, screenshots of every typing state; RED on the old code reproducing his screenshot) and `verify-food-ios-keyboard.mjs`. Not provable here: the real keyboard and Safari's AutoFill bar. **Steps** (iPhone, Safari, planyr.io → Food → Map; reload first; read `/version.json` and the served chunk hash in the same check):
+1. Open **Aburi Sushi** (2800 Southwest Fwy). **Expect:** card about half way up; the map's + / − buttons are NOT on top of the card.
+2. Tap **+ Add a dish**. **Expect:** the card rides up and sits right on top of the keyboard — **no strip of map between the card and the ^ v ✓ bar**; the "Log a visit" button is gone while you type; the New Dish box is visible from its top (NEW DISH heading) down, with nothing covering it. No AutoFill Contact bar.
+3. Tap Course, then Price, then Note. **Expect:** each time the card stays flush on the keyboard (or picker) with no map showing through, and the field you tapped is fully visible, not under any bar.
+4. Tap ✓ to close the keyboard. **Expect:** the card drops back down and "Log a visit" comes back.
+5. Tap **Log a visit**; tap Dish, What was good, Cost, Notes (a few lines). **Expect:** same — flush on the keyboard, field and its box fully visible, no AutoFill bar.
+6. Edit an existing visit (tap it); tap What was good and Notes. **Expect:** same.
+7. Drop a pin and type its name. **Expect:** same.
+8. Drag the card all the way up, then tap + Add a dish. **Expect:** same; the zoom buttons never show on top of the card.
+9. Desktop browser, full width: open the same restaurant. **Expect:** right-hand panel exactly as before.
+- **Stopping rule:** closes on a dated pass of 1–9 from Michael's iPhone; any failed step re-opens B2046224 (×4) with that step number.
 ### V1516224 — B2092656: no catch when NEW parcel outlines arrive (pan onto new ground / zoom to a new level) in Bartow County GA, and Katy/Fort Bend unchanged `Blocker: real-data`
 - **Done in the sandbox:** unit (12) + synthetic-Bartow arrival harness (`ui-audit/verify-parcel-arrival-cost.mjs`: zoom-arm longest task 71–86 → 16–25 ms) + five adjacent parcel harnesses green. **Why still live:** the sandbox has no GPU and no recorded Bartow response.
 - **Steps (Michael's Chrome, planyr.io, Map, Select parcels ON; read the served chunk hash in the same observation):**
@@ -506,6 +471,8 @@ Sandbox-proven: `test/parcelOwnLook.test.js` (red on main for all three claims),
 **❌ FAILED 2026-10-04, build c8fc0d0 (Michael's Chrome, 4:05 PM Central, "Concept A (copy)"):** wide band good (one colour, no county labels); at lot level north of I-10 NO numbers and the ONLY parcel layer was the statewide StratMap `/export`, zero `/query`. Root cause + fix recorded on B2057040 (Recurrence ×2): a county layer sitting BELOW its vector floor for >8 s was declared down by the hang-guard and replaced by the statewide picture, permanently. Fix is merged-pending in the follow-up PR; **re-run this check on the build that carries it** (read the served chunk hash in the same observation).
 **CORRECTION (owner, 4:40 PM Central the same day):** the Chambers CAD server was DOWN during that failed run (every `/query` → HTTP 200 + `{"error":{"code":400,…}}`; the Map finder showed its saved-copy banner), so the statewide picture over Chambers was the designed fallback; "the close-band layer never mounts" is retracted as a general claim. The below-the-floor false positive (step 0) was ALSO real and is fixed; and a failed county's statewide backup now covers ONLY that county (`county IN (…)`), so Harris keeps its own vector layer beside a failed Chambers. **Fort Bend in the Map finder PASSED live** (Rosenberg, close zoom: Planyr outlines with `QUICKREFID` R-numbers, readable, no pile-ups). Re-run the Grand Port steps once Chambers' server answers again; while it is down, expect: Harris lots with Planyr outlines + HCAD numbers, Chambers lots drawn by the statewide picture ONLY (no whole-view statewide over Harris), numbers absent on the Chambers part.
 **Steps:**
+**RETRACTION (owner, 6:30 PM Central):** the "Harris lots north of I-10 lost their outlines" premise was inference and is wrong — HCAD returns 0 features in that area (point query at the Liberty Dr lot, -94.8816, 29.8206); those lots are in Chambers, so statewide there is the correct fallback while Chambers is down. The Chambers-only scoping (#1987) is a design choice, not a reproduced Grand Port defect; do not expect Harris lots in that frame.
+
 0. **Start zoomed OUT** (below the lot-level zoom — the wide band), enter Click a lot on the map, and WAIT ~10 seconds before touching the map. **Expect:** nothing drawn (blank map is correct here) and no statewide picture appears either. Then zoom in to lot level. **Expect:** the Chambers (and Harris) outlines AND numbers appear — the 10-second wait must not have permanently swapped them for the statewide picture (this is the step that failed).
 1. Open "Concept A (copy)" → Parcel tools → Click a lot on the map; frame the lots just north of the strip lots, zoomed in so whole lots are on screen. **Expect:** every lot shows ONE number (the CAD account, e.g. 00321-02000-00100-100001 — not `Parcel_Id`, not the county's own lot number), in the same purple as the outlines, none touching another number or the "Parcel N" chip; the outlines are all one colour (no blue county lines, no gold statewide lines).
 2. Open the Network tab, filter `pandai`. **Expect:** `…/MapServer/0/query` requests whose `outFields` are exactly `OBJECTID,ChambersCADWeb.DBO.Accounts.Account`; **no** `/export` requests to that host at any zoom.
@@ -514,6 +481,7 @@ Sandbox-proven: `test/parcelOwnLook.test.js` (red on main for all three claims),
 5. Toggle the aerial / dark basemap if available. **Expect:** the numbers are legible over both (white halo).
 6. Repeat 1–3 on a Harris view (numbers = HCAD account) and a Fort Bend view (numbers = R-number). **Expect:** the same look; Harris shows nothing between the far floor and the vector floor (a deliberate trade).
 7. Map view → Select parcels over Grand Port. **Expect:** the same outlines and numbers (no chips on the Map view).
+8. (2026-10-05) Saved copy, while Chambers' spatial queries still fail — Map view at Mont Belvieu with the "saved copy" banner showing. **Expect:** Planyr outlines WITH numbers; lot 15835 (-94.8695, 29.8222) reads 00321-02000-00100-100001 — the same number it shows when the live server answers; clicking it shows the saved-copy notice saying owner names and values may lag (the state copy names BALLIS JOHN there, live CAD BARBERS HILL EDUCATION FOUNDATION). Waller (saved copy is its display) shows Property-ID numbers — confirm that is the one you look Waller up by.
 - **Stopping rule:** closes on a dated pass of 1–7, or a failed step filed as a recurrence on B2057040.
 
 ### V1450368 — B2025280: /food opens on the Site Plan map, Hybrid is crisp, and pins stay legible on both `Blocker: auth`

@@ -33,8 +33,8 @@
  * that. */
 import * as EL from "esri-leaflet";
 import L from "leaflet";
-import { STATEWIDE_PARCEL_LAYER, displayMinZoomForUrl, lotNumberFieldForUrl } from "./counties.js";
-import { attachLotNumbers } from "./parcelLotLabelLayer.js";
+import { STATEWIDE_PARCEL_LAYER, displayMinZoomForUrl, lotNumberFieldForUrl, snapshotLotNumberField } from "./counties.js";
+import { attachLotNumbers, attachSnapshotLotNumbers } from "./parcelLotLabelLayer.js";
 import { getSnapshot, featuresForView, onSnapshotChange } from "./parcelSnapshot.js";
 import { pruneToLiveCells } from "./parcelPrune.js";
 import { IngestQueue, INGEST_BUDGET_MS, PAINT_BUDGET_MS } from "./parcelIngest.js";
@@ -373,16 +373,22 @@ export function makeSnapshotLayer(county) {
   });
   layer._isSnapshot = true;
   layer._snapshotCounty = county;
+  // The saved copy numbers its lots too (owner decision 2026-10-05): the SAME account the live CAD shows,
+  // read off the snapshot's own attributes, so a lot reads one number whether the county server is up or down.
+  let inView = [];
+  const numbers = attachSnapshotLotNumbers(layer, { field: snapshotLotNumberField(county), getFeatures: () => inView });
   let mapRef = null, unsub = null;
   const refresh = () => {
     if (!mapRef) return;
     layer.clearLayers();
+    numbers.clear();
+    inView = [];
     if (mapRef.getZoom() < PARCEL_MINZOOM) return; // too many to draw across a whole county at once
     const snap = getSnapshot(county);
     if (!snap || !snap.features) return;
     const b = mapRef.getBounds();
     const feats = featuresForView(snap.features, { w: b.getWest(), s: b.getSouth(), e: b.getEast(), n: b.getNorth() });
-    if (feats.length) layer.addData({ type: "FeatureCollection", features: feats });
+    if (feats.length) { layer.addData({ type: "FeatureCollection", features: feats }); inView = feats; numbers.relayout(); }
   };
   layer.on("add", () => {
     mapRef = layer._map;
