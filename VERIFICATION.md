@@ -171,6 +171,19 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1518080 — B2081251: the Shallow rock (depth to bedrock) layer paints real SSURGO data on planyr.io `Blocker: live-GIS`
+
+**Steps** (Chrome on planyr.io, or `node ui-audit/verify-ssurgo-bedrock.mjs https://planyr.io`; read the served chunk hash in the same observation):
+1. Run the harness. **Expect:** the Piedmont (Gwinnett) KNOWN-GOOD arm paints ≥ 1 shallow-rock unit (a run where it paints none is VOID); Cherokee/Savannah/Katy answer without error (Savannah/Katy may legitimately paint few or none).
+2. Throwaway plan at **33.95 / -84.00**, Layers → Base & terrain → **Shallow rock (depth to bedrock)** on. **Expect:** dark-red / orange / yellow map-unit polygons, status dot blue, hover names the unit and "bedrock as shallow as N in", the row's ⓘ states depth is the shallowest soil in the unit and that unpainted ≠ no rock; **the map does not move**.
+3. Same on a Houston plan. **Expect:** the row is listed; few or no polygons (deep Gulf Coast soils) and no error.
+4. File → Export PDF with it on (Piedmont plan). **Expect:** the polygons print in the same colours.
+- **Stopping rule:** closes on a dated pass, or a failed step filed as a recurrence on B2081251 (a WFS/SDA format difference is the likely failure: paste the response into the item).
+
+### V1518081 — B2081252: point and polygon layers appear in the PDF/PNG export `Blocker: none`
+
+**Steps** (throwaway plan only): Houston-area plan, turn on **EPA Superfund / RCRA cleanups** and **Airports** at a zoom where dots show, File → Export PDF. **Expect:** the dots appear on the sheet in the screen's colours. Repeat on a Georgia plan with **Hazardous sites** and **Critical habitat**. **Expect:** points and the filled habitat polygon print.
+- **Stopping rule:** closes on a dated pass.
 ### V1517458 — B2095123: logging a visit on an open manual pin shows it in Past visits immediately
 
 Sandbox-proven: `test/foodPastVisitsLive.test.js`. **Steps** (signed in as `e2e@planyr.test` on planyr.io after the deploy; `/version.json` read in the same call): 1. Food → drop a manual pin, name it `zz-verify`, log a visit. **Expect:** the pin closes into a manual pin. 2. Reselect it, log a second visit without closing the panel. **Expect:** "Past visits · 2" appears at once. Delete the throwaway visits.
