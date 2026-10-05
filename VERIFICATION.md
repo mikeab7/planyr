@@ -184,6 +184,20 @@ was never clicked" quietly ships broken.
 
 **Steps** (throwaway plan only): Houston-area plan, turn on **EPA Superfund / RCRA cleanups** and **Airports** at a zoom where dots show, File → Export PDF. **Expect:** the dots appear on the sheet in the screen's colours. Repeat on a Georgia plan with **Hazardous sites** and **Critical habitat**. **Expect:** points and the filled habitat polygon print.
 - **Stopping rule:** closes on a dated pass.
+### V1517458 — B2095123: logging a visit on an open manual pin shows it in Past visits immediately
+
+Sandbox-proven: `test/foodPastVisitsLive.test.js`. **Steps** (signed in as `e2e@planyr.test` on planyr.io after the deploy; `/version.json` read in the same call): 1. Food → drop a manual pin, name it `zz-verify`, log a visit. **Expect:** the pin closes into a manual pin. 2. Reselect it, log a second visit without closing the panel. **Expect:** "Past visits · 2" appears at once. Delete the throwaway visits.
+
+
+### V1517457 — B2095122: a pasted Land (and Building sale) comp saves and survives a reload
+
+Sandbox-proven: `test/compToRowEnumBlank.test.js`. **Steps** (signed in as `e2e@planyr.test` on planyr.io after the deploy; read `/version.json` in the same call and match it to the merge commit): 1. Comps → add a comp by pasting land text (any 1–2 line land listing). **Expect:** it saves with no error. 2. Reload. **Expect:** the comp is still there. 3. Repeat with a pasted building sale. **Expect:** same. Delete the throwaway comps afterwards.
+
+
+### V1517456 — B2095121: a refused Schedule cloud save shows a red "did NOT save to the cloud" toast (test account reproduces the 403 on demand)
+
+Sandbox-proven: `test/scheduleSaveFailLoud.test.js`. **Steps** (signed in as `e2e@planyr.test` on planyr.io after the deploy; read `/version.json` in the same call and match it to the merge commit): 1. Open Schedule, edit any task's Owner cell. **Expect:** within a few seconds a red toast "Your change did NOT save to the cloud (42501)…" appears (before this fix: nothing). 2. Reload. **Expect:** the edit is gone (the root defect, B2095121, is still open — that is the expected result of this check).
+
 
 ### V1504304 — B2086368: delete a file from the Library's Recent / Unfiled lists, restore it, delete it forever `Blocker: auth`
 
@@ -245,16 +259,6 @@ Sandbox-proven: `test/authPanelSignup.test.js` (15), `e2e/signup-success.spec.js
 4. When Supabase "Confirm email" is later switched OFF: repeat step 1. **Expect:** the panel closes and you are signed in — no check-your-email screen, no redeploy needed.
 - **Stopping rule:** closes on a dated pass of 1–3 (4 when the setting flips), or a failed step filed as a recurrence on B2014096.
 
-### V1509936 — B2078593 (×2): on a real iPhone "Hard Cost Pricing" shows its content at the same share of the page as on desktop, and the table is fully visible `Blocker: real-data` (signed-in real device, real Organization page)
-
-Not the first time anyone has seen it: `ui-audit/verify-notes-box-width-parity.mjs` (his exact document rebuilt as a fixture, five contexts, 86 checks green; 23 red on untouched main with his own numbers) and the phone / desktop screenshots in `docs/evidence/B2078593-box-width/` were compared by eye before this was written. A real phone's own copy of the page is the only thing left.
-**Steps (real iPhone, then desktop; open the Organization page "Hard Cost Pricing" — do not edit it):**
-1. Fully close and reopen planyr.io on the phone, open the page. **Expect:** the whole page width is on screen and the list and table fill most of it (the table about as wide as on desktop relative to the page); the table's right column reads in full — "…permit fee → $500/year total at the 10M gallon mark" and "…the remaining 20% billed at $26/million gallons" — with nothing cut off and blank paper only to the right of the table.
-2. Zoom in on the table with two fingers. **Expect:** the same words and line breaks as on desktop, just bigger.
-3. Open the same page on desktop. **Expect:** the same arrangement — same line breaks, same table.
-4. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes on a dated pass of 1–3, or a failed step filed as a recurrence on B2078593.
-
 ### V1496384 — B2080752: a Word/txt/PDF opened from disk and saved is filed under its OWN name `Blocker: auth`
 
 Sandbox-proven: pure naming table + red-proof source guards (`test/reviewOpenedFileNaming.test.js`), tabs harness 37/37. Not provable here: the real signed-in save into the Library. **Steps** (signed in, planyr.io `#/markup`, no project selected; read the build from `/version.json` in the same observation; use a throwaway `.docx`):
@@ -300,29 +304,6 @@ Sandbox-proven: `test/foodSavedSearchFirst.test.js` red on main, green here. **S
 4. "soma", "tio trompo", "ikes". **Expect:** unchanged — saved first.
 5. Switch Map → List → Map a few times. **Expect:** no `_leaflet_pos` error in the console.
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B2070432.
-### V1501920 — B2078592: on a real iPhone there is no floating "Delete box"; press-and-hold inside a box opens the menu with the keyboard kept, and "Delete this box" removes it `Blocker: real-data` (signed-in real device)
-
-Sandbox-proven: `ui-audit/verify-notes-touch-menus.mjs` (WebKit hasTouch+isMobile + Chromium real touch pipeline; red on untouched main). A real held fingertip, iOS's own selection loupe and the real soft keyboard are not producible headless.
-**Steps (real iPhone, a throwaway page):**
-1. Tap into a box and type a few letters. **Expect:** no "Delete box" button or banner anywhere on screen — not while the box is selected, not while typing.
-2. With the keyboard up, press and hold inside the same box for about half a second. **Expect:** the same menu a right-click gives on desktop, including "Delete this box"; the keyboard stays up; the box does not move or start dragging; lifting your finger does not run any menu row.
-3. Choose "Delete this box". **Expect:** the box is gone; Undo brings it back.
-4. In a box, empty its text and press Backspace once more. **Expect:** the empty box disappears (unchanged).
-5. Note whether iOS's own text-selection magnifier ALSO appears over the menu in step 2 (carried from V1484660 step 5; if it does, file it as a recurrence on B2078592).
-6. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes on a dated pass of 1–4 (5 recorded), or a failed step filed as a recurrence on B2078592.
-
-### V1501921 — B2078593: on a real iPhone and on desktop, "Hard Cost Pricing" opens at full page width, top near the top of the screen, every time `Blocker: real-data` (signed-in real device, real Organization page)
-
-Sandbox-proven: `ui-audit/verify-notes-open-framing.mjs` (WebKit + Chromium, 390×844 and 1280×800 among the sizes; a view stored by an older build on either kind of device no longer decides the opening; red on untouched main) and `test/notesViewNotPersisted.test.js`. The real page and the real device's leftover storage are not reachable headless.
-**Steps (real iPhone, then desktop; the Organization page "Hard Cost Pricing" — open it only, do not edit it):**
-1. On the iPhone, fully close the tab/app and reopen planyr.io, then open Hard Cost Pricing. **Expect:** the whole page width is on screen — left and right edges and the table's edge — with the page top near the top of the screen; not at 55%, not a third of the way down. (Any view left on that phone by an older build is deleted unread on this open.)
-2. Reload the page on the phone. **Expect:** the same full-width opening again.
-3. Pinch/pan on the phone, open another page, come back to Hard Cost Pricing without reloading. **Expect:** it returns to where you left it (kept for the session only); reload → full width again.
-4. On desktop, open the same page. **Expect:** the same framing — full page width, top near the top; no difference from the phone beyond screen size. If the page is wider than the window it opens shrunk until both edges are visible.
-5. Read the served chunk hash in the same observation as each result.
-- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2078593.
-
 ### V1501922 — B2061333: no `page-containment-drift` rows shaped "(0, ~250)" from iPhones after a week on the phone-layout build; keyboard ones arrive as `page-containment-keyboard-reveal` `Blocker: real-data` (needs a week of real iPhone traffic; run on or after 2026-10-11)
 
 Carried from V1484661 step 7, which Michael's 2026-10-04 on-device pass did not cover. A query, not a click-through: Claude-doable once the week has elapsed.
@@ -528,6 +509,7 @@ Sandbox-proven: `test/parcelOwnLook.test.js` (red on main for all three claims),
 5. Toggle the aerial / dark basemap if available. **Expect:** the numbers are legible over both (white halo).
 6. Repeat 1–3 on a Harris view (numbers = HCAD account) and a Fort Bend view (numbers = R-number). **Expect:** the same look; Harris shows nothing between the far floor and the vector floor (a deliberate trade).
 7. Map view → Select parcels over Grand Port. **Expect:** the same outlines and numbers (no chips on the Map view).
+8. (2026-10-05) Saved copy, while Chambers' spatial queries still fail — Map view at Mont Belvieu with the "saved copy" banner showing. **Expect:** Planyr outlines WITH numbers; lot 15835 (-94.8695, 29.8222) reads 00321-02000-00100-100001 — the same number it shows when the live server answers; clicking it shows the saved-copy notice saying owner names and values may lag (the state copy names BALLIS JOHN there, live CAD BARBERS HILL EDUCATION FOUNDATION). Waller (saved copy is its display) shows Property-ID numbers — confirm that is the one you look Waller up by.
 - **Stopping rule:** closes on a dated pass of 1–7, or a failed step filed as a recurrence on B2057040.
 
 ### V1450368 — B2025280: /food opens on the Site Plan map, Hybrid is crisp, and pins stay legible on both `Blocker: auth`

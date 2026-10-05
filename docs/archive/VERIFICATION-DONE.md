@@ -1,3 +1,39 @@
+### V1501920 — B2078592: on a real iPhone there is no floating "Delete box"; press-and-hold inside a box opens the menu with the keyboard kept, and "Delete this box" removes it `Blocker: real-data` (signed-in real device) ✅ **PASSED 2026-10-04 — owner on-device pass (Michael, his iPhone)**
+
+Sandbox-proven: `ui-audit/verify-notes-touch-menus.mjs` (WebKit hasTouch+isMobile + Chromium real touch pipeline; red on untouched main). A real held fingertip, iOS's own selection loupe and the real soft keyboard are not producible headless.
+**Steps (real iPhone, a throwaway page):**
+1. Tap into a box and type a few letters. **Expect:** no "Delete box" button or banner anywhere on screen — not while the box is selected, not while typing.
+2. With the keyboard up, press and hold inside the same box for about half a second. **Expect:** the same menu a right-click gives on desktop, including "Delete this box"; the keyboard stays up; the box does not move or start dragging; lifting your finger does not run any menu row.
+3. Choose "Delete this box". **Expect:** the box is gone; Undo brings it back.
+4. In a box, empty its text and press Backspace once more. **Expect:** the empty box disappears (unchanged).
+5. Note whether iOS's own text-selection magnifier ALSO appears over the menu in step 2 (carried from V1484660 step 5; if it does, file it as a recurrence on B2078592).
+6. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–4 (5 recorded), or a failed step filed as a recurrence on B2078592.
+- **2026-10-04 (evening) — owner on-device pass: Michael on his iPhone, build after #1973: press-and-hold inside a box opens the menu with the Delete option, and there is no floating Delete button. Recorded from his report; it did not itemise the keyboard-stays-up, nothing-triggered-on-lift, Undo or Backspace-on-empty-box steps, nor the iOS text-selection-magnifier note (step 5) — accepted as his own pass at his instruction. Chunk hash not captured in his report.**
+
+### V1501921 — B2078593: on a real iPhone and on desktop, "Hard Cost Pricing" opens at full page width, top near the top of the screen, every time `Blocker: real-data` (signed-in real device, real Organization page) ✅ **PASSED 2026-10-04 — owner on-device pass (Michael, his iPhone)**
+
+Sandbox-proven: `ui-audit/verify-notes-open-framing.mjs` (WebKit + Chromium, 390×844 and 1280×800 among the sizes; a view stored by an older build on either kind of device no longer decides the opening; red on untouched main) and `test/notesViewNotPersisted.test.js`. The real page and the real device's leftover storage are not reachable headless.
+**Steps (real iPhone, then desktop; the Organization page "Hard Cost Pricing" — open it only, do not edit it):**
+1. On the iPhone, fully close the tab/app and reopen planyr.io, then open Hard Cost Pricing. **Expect:** the whole page width is on screen — left and right edges and the table's edge — with the page top near the top of the screen; not at 55%, not a third of the way down. (Any view left on that phone by an older build is deleted unread on this open.)
+2. Reload the page on the phone. **Expect:** the same full-width opening again.
+3. Pinch/pan on the phone, open another page, come back to Hard Cost Pricing without reloading. **Expect:** it returns to where you left it (kept for the session only); reload → full width again.
+4. On desktop, open the same page. **Expect:** the same framing — full page width, top near the top; no difference from the phone beyond screen size. If the page is wider than the window it opens shrunk until both edges are visible.
+5. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–4, or a failed step filed as a recurrence on B2078593.
+- **2026-10-04 (evening) — owner on-device pass: Michael on his iPhone, build after #1985: Hard Cost Pricing shows the whole table and matches desktop. Recorded from his report; the in-session return-to-where-you-were and reload-reopens-full-width steps (2–3) were not itemised — accepted as his own pass at his instruction. Chunk hash not captured in his report.**
+
+### V1509936 — B2078593 (×2): on a real iPhone "Hard Cost Pricing" shows its content at the same share of the page as on desktop, and the table is fully visible `Blocker: real-data` (signed-in real device, real Organization page) ✅ **PASSED 2026-10-04 — owner on-device pass (Michael, his iPhone)**
+
+Not the first time anyone has seen it: `ui-audit/verify-notes-box-width-parity.mjs` (his exact document rebuilt as a fixture, five contexts, 86 checks green; 23 red on untouched main with his own numbers) and the phone / desktop screenshots in `docs/evidence/B2078593-box-width/` were compared by eye before this was written. A real phone's own copy of the page is the only thing left.
+**Steps (real iPhone, then desktop; open the Organization page "Hard Cost Pricing" — do not edit it):**
+1. Fully close and reopen planyr.io on the phone, open the page. **Expect:** the whole page width is on screen and the list and table fill most of it (the table about as wide as on desktop relative to the page); the table's right column reads in full — "…permit fee → $500/year total at the 10M gallon mark" and "…the remaining 20% billed at $26/million gallons" — with nothing cut off and blank paper only to the right of the table.
+2. Zoom in on the table with two fingers. **Expect:** the same words and line breaks as on desktop, just bigger.
+3. Open the same page on desktop. **Expect:** the same arrangement — same line breaks, same table.
+4. Read the served chunk hash in the same observation as each result.
+- **Stopping rule:** closes on a dated pass of 1–3, or a failed step filed as a recurrence on B2078593.
+- **2026-10-04 (evening) — owner on-device pass: Michael on his iPhone, build after #1985: Hard Cost Pricing shows the whole table and matches desktop (same pass as V1501921, same observation). Chunk hash not captured in his report; accepted as his own pass.**
+
 ### V1484656 — B2061328: typing in an open note while the app returns to the foreground / another window pushes never loses either side's text, and the editor stays put `Blocker: auth` (two signed-in windows) ✅ **PASSED 2026-10-04 — owner on-device pass (Michael, his iPhone)**
 
 Sandbox-proven: `test/notesOpenPageSync.test.js` (gated fake network, red on main) + `ui-audit/verify-notes-open-page-adopt.mjs` (real editor takes the adopted body in place). The real two-window cloud round-trip needs a signed-in account.
@@ -88,7 +124,7 @@ Sandbox-proven on WebKit (touch emulation, `ui-audit/verify-notes-touch-place.mj
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1960480.
 - **2026-10-04 — owner on-device pass: Michael verified B1960480 (#1880) on his iPhone — double-tap raises the keyboard and the first text lands in the new box. Chunk hash not captured; accepted as his own pass.**
 
-### V1474944 — B2056784: no full-screen button on iPhone Safari; still present and working on desktop Chrome `Blocker: real-device` ✅ **PASSED 2026-10-04 — live-verified by Michael on his own devices** (build `0460de1` on desktop)
+### V1474944 — B2056784 (PR #1936): no full-screen button on iPhone Safari; still present and working on desktop Chrome `Blocker: real-device` ✅ **PASSED 2026-10-04 — live-verified by Michael on his own devices** (build `0460de1` on desktop)
 
 Sandbox-proven: `test/fullscreenSupport.test.js`, `e2e/fullscreen-gate.spec.js` (API stubbed off at iPhone width; iPad width, standalone and desktop arms). The real-device confirmation is what is left.
 1. On the iPhone, open `planyr.io`; read `/version.json` in the same check. **Expect:** the header's right side shows the sync badge and account chip with NO four-corner button and no gap between them.
@@ -2479,7 +2515,7 @@ libs and point `SEQ_VENDOR` at them. Nothing pending.
 
 ## ✅ Verified / ❌ Failed — history
 
-### V1440080 — B2014992: every pin on the Dashboard Locations map sits inside its own parcel (Katz in particular) `Blocker: auth` — ✅ PASSED 2026-10-03
+### V1440080 — B2014992 (PR #1918): every pin on the Dashboard Locations map sits inside its own parcel (Katz in particular) `Blocker: auth` — ✅ PASSED 2026-10-03
 
 Sandbox-proven: `test/dashboardParcelAnchors.test.js` (5, red on pre-change source). Pending: the signed-in dashboard against real parcels. Read-only — change nothing.
 **Steps** (planyr.io, signed in; read the served chunk hash in the same observation):
