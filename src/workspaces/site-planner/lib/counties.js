@@ -1060,6 +1060,49 @@ const COUNTIES_RAW = {
     idField: "ParcelNumber", addrField: "Par_Address", pinAddrField: true,
     help: "Livingston Parish parcels (parish assessor roll). Search by parcel ID or a site address.",
   },
+  /* NEW-1 (Louisiana, 2026-10-04) — five more parishes wired from sources MEASURED LIVE from Michael's
+   * own Chrome on a planyr.io tab (CORS-confirmed from the production origin, so no gis-proxy), after
+   * the first pass could not reach them from a code sandbox. Provenance + every caveat:
+   * countiesProvenance.js and docs/STATEWIDE-PARCELS.md "Louisiana parishes — route 3 run 2026-10-04". */
+  la_calcasieu: {
+    // Calcasieu Parish Police Jury, first-party. 167,981 polygons, whole parish. ADDRESS1/ADDRESS2 are the
+    // owner's MAILING block (never the situs); PHYSICALAD is the situs.
+    state: "LA", label: "Calcasieu Parish, LA",
+    layerUrl: "https://lak-dc-arcgis2.cppj.net/arcgis/rest/services/HubLayers/Parcels/FeatureServer/0",
+    idField: "PIN", pinIdField: true, addrField: "PHYSICALAD", pinAddrField: true,
+    help: "Calcasieu Parish parcels (Police Jury GIS). Search by PIN or a site address.",
+  },
+  la_jefferson: {
+    // Jefferson Parish GIS with the assessor roll joined (PAO_MAP_2025 layer 72 "Parcel Ownership").
+    // ⛔ pointViaEnvelope: a bare point query returned 0 features at three in-parish points that DO hold
+    // parcels while a small envelope returned real parcels every time — see queryAtPoint.
+    state: "LA", label: "Jefferson Parish, LA",
+    layerUrl: "https://jpgis.jeffparish.net/server/rest/services/PAO_MAP_2025/MapServer/72",
+    idField: "TAXROLLPAR", pinIdField: true, addrField: "PARCELADDR", pinAddrField: true,
+    pointViaEnvelope: true,
+    help: "Jefferson Parish parcels (parish GIS, assessor roll joined). Search by tax-roll parcel number or a site address.",
+  },
+  la_jeffersondavis: {
+    // TotaLand-hosted for the parish economic-development body (AEDC) — NOT the assessor's own server.
+    state: "LA", label: "Jefferson Davis Parish, LA",
+    layerUrl: "https://gis2.totaland.com/ArcGIS/rest/services/AEDC/JDPE_Parcels/MapServer/0",
+    idField: "ParcelID", addrField: "par_address", pinAddrField: true,
+    help: "Jefferson Davis Parish parcels (TotaLand-hosted for the parish economic-development office). Search by parcel ID or a site address.",
+  },
+  la_stlandry: {
+    // TotaLand-hosted parish service, national-parcel-schema field set (CTY_ROW_ID, COUNTY_FIP …).
+    state: "LA", label: "St. Landry Parish, LA",
+    layerUrl: "https://gis2.totaland.com/ArcGIS/rest/services/StLandryParish/Parcels/MapServer/0",
+    idField: "PARCEL_ID", pinIdField: true, addrField: "SITUS", pinAddrField: true,
+    help: "St. Landry Parish parcels (TotaLand-hosted parish service). Search by parcel ID or a site address.",
+  },
+  la_westbatonrouge: {
+    // West Baton Rouge Parish Tax Assessor, first-party (TotaLand-hosted). AISOwnerAd/AISOwnerCi are MAILING.
+    state: "LA", label: "West Baton Rouge Parish, LA",
+    layerUrl: "https://gis2.totaland.com/ArcGIS/rest/services/WestBatonRougeTaxAssessor/WestBatonRouge/MapServer/1",
+    idField: "ParcelNumb", pinIdField: true, addrField: "AISAddress", pinAddrField: true,
+    help: "West Baton Rouge Parish parcels (parish tax assessor). Search by parcel number or a site address.",
+  },
   al_jefferson: {
     state: "AL", label: "Jefferson County, AL",
     layerUrl: "https://jccgis.jccal.org/server/rest/services/Basemap/Parcels/MapServer/0",
@@ -2765,6 +2808,12 @@ const COUNTIES_MAP_RAW = {
   la_natchitoches: { state: "LA", center: [31.7510, -93.0763], zoom: 10, bbox: [31.34, -93.44, 32.16, -92.71], mapServer: null, layerUrl: COUNTIES.la_natchitoches.layerUrl },
   la_tangipahoa: { state: "LA", center: [30.6418, -90.4017], zoom: 10, bbox: [30.27, -90.57, 31.01, -90.24], mapServer: null, layerUrl: COUNTIES.la_tangipahoa.layerUrl },
   la_livingston: { state: "LA", center: [30.4233, -90.7145], zoom: 10, bbox: [30.19, -90.99, 30.66, -90.44], mapServer: null, layerUrl: COUNTIES.la_livingston.layerUrl },
+  // NEW-1 (Louisiana, 2026-10-04) — center/bbox read from public/geo/county-polygons.json, never hand-typed.
+  la_calcasieu: { state: "LA", center: [30.2710, -93.3180], zoom: 10, bbox: [30.05, -93.76, 30.50, -92.88], mapServer: null, layerUrl: COUNTIES.la_calcasieu.layerUrl },
+  la_jefferson: { state: "LA", center: [29.6193, -90.1238], zoom: 10, bbox: [29.18, -90.28, 30.06, -89.97], mapServer: null, layerUrl: COUNTIES.la_jefferson.layerUrl, pointViaEnvelope: true },
+  la_jeffersondavis: { state: "LA", center: [30.2695, -92.8540], zoom: 10, bbox: [30.04, -93.13, 30.50, -92.58], mapServer: null, layerUrl: COUNTIES.la_jeffersondavis.layerUrl },
+  la_stlandry: { state: "LA", center: [30.5795, -92.0825], zoom: 10, bbox: [30.31, -92.49, 30.85, -91.67], mapServer: null, layerUrl: COUNTIES.la_stlandry.layerUrl },
+  la_westbatonrouge: { state: "LA", center: [30.4947, -91.3120], zoom: 10, bbox: [30.33, -91.48, 30.66, -91.15], mapServer: null, layerUrl: COUNTIES.la_westbatonrouge.layerUrl },
   al_jefferson: { state: "AL", center: [33.5207, -86.8025], zoom: 10, bbox: [33.25, -87.15, 33.80, -86.45], mapServer: null, layerUrl: COUNTIES.al_jefferson.layerUrl },
   // B1551617 — Tier 1 counties (see the matching COUNTIES block above); bbox/center read directly
   // from public/geo/county-polygons.json (the same nationwide asset resolveCounty uses), never
@@ -3547,6 +3596,16 @@ export const IDENTIFY_ONLY_LAYER_URLS = Object.freeze(
   Object.values(COUNTIES_MAP).filter((c) => c.identifyOnly).map((c) => trimLayerUrl(c.layerUrl)),
 );
 export const isIdentifyOnlyLayerUrl = (url) => IDENTIFY_ONLY_LAYER_URLS.includes(trimLayerUrl(url));
+
+/* NEW-1 (Louisiana, 2026-10-04) — a layer whose bare POINT query returns nothing where a small ENVELOPE
+ * around the same point returns the parcel (Jefferson Parish's PAO_MAP_2025/72, measured from Michael's
+ * browser: 0 features at Elmwood/Harahan/Metairie by point, a real parcel at each by envelope). Declared
+ * once on the config entry and keyed by URL exactly like identifyOnly above, so `queryAtPoint` (which is
+ * handed a URL, not a county key) can ask it. */
+export const POINT_VIA_ENVELOPE_LAYER_URLS = Object.freeze(
+  Object.values(COUNTIES_MAP).filter((c) => c.pointViaEnvelope).map((c) => trimLayerUrl(c.layerUrl)),
+);
+export const isPointViaEnvelopeLayerUrl = (url) => POINT_VIA_ENVELOPE_LAYER_URLS.includes(trimLayerUrl(url));
 
 /* NEW-2 — the dev-time assertion that stops the next county parked on a composite from
  * reintroducing the double-add. Two config entries may share a layer URL ONLY when that URL is a
