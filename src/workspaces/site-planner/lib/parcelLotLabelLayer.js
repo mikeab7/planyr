@@ -13,7 +13,7 @@
  * here can reintroduce B1976336's tens-of-thousands-of-nodes class. */
 import L from "leaflet";
 import { bestMeasurer } from "../../../shared/markup/textWrap.js";
-import { layoutLotNumbers, clipRingToRect, lotNumberText, resolveLotNumberField, LOT_NO_FONT_PX } from "./parcelLotNumbers.js";
+import { layoutLotNumbers, clipRingToRect, lotNumberText, resolveLotNumberField, lotBoxCanHost, LOT_NO_FONT_PX } from "./parcelLotNumbers.js";
 import { PARCEL_OUTLINE_COLOR } from "./parcelDisplayZoom.js";
 
 const RELAYOUT_DEBOUNCE_MS = 90;
@@ -60,8 +60,13 @@ function paintLotNumbers({ map, group, field, floor, measure, getObstacles, getI
   try { inset += Math.max(0, Number(getInset && getInset()) || 0); } catch (_) { /* default inset */ }
   const view = { x0: min.x + inset, y0: min.y + inset, x1: min.x + size.x - inset, y1: min.y + size.y - inset };
   const lots = [];
-  forEachFeature((f) => {
+  forEachFeature((f, bbox) => {
     if (!f) return;
+    if (bbox) { // B2092656: reject on the lot's pixel box (two projections) before anything per-vertex
+      const a = map.project(L.latLng(bbox[3], bbox[0]), z), b = map.project(L.latLng(bbox[1], bbox[2]), z);
+      if (b.x < view.x0 || b.y < view.y0 || a.x > view.x1 || a.y > view.y1) return; // off-screen
+      if (!lotBoxCanHost(b.x - a.x, b.y - a.y)) return; // too small to hold a number at this zoom
+    }
     const text = lotNumberText(f.properties, field);
     if (!text) return;
     const ring = worldRing(map, f, z);
@@ -165,7 +170,7 @@ export function attachLotNumbers(layer, { hint, getObstacles, getInset } = {}) {
     const floor = Number(layer.options && layer.options.minZoom) || 0;
     paintLotNumbers({
       map, group, field, floor, measure, getObstacles, getInset,
-      forEachFeature: (cb) => layer.eachFeature((lyr) => cb(lyr.feature)),
+      forEachFeature: (cb) => layer.eachFeature((lyr) => cb(lyr.feature, lyr.bbox)),
     });
   };
   const sched = () => { if (timer) clearTimeout(timer); timer = setTimeout(relayout, RELAYOUT_DEBOUNCE_MS); };
