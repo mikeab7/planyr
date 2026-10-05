@@ -319,6 +319,14 @@ no swallowed `catch` that reads as success. Concretely, in the sync engine:
 
 ---
 
+**A project and its schedule live and die together (B2087648/B2087649, 2026-10-05).** `schedules.linked_site_id` is the
+source; `sites.data.scheduleProjectId` is a mirror of it. Both directions are enforced at the DATABASE by
+`site-planner/db/project_schedule_cascade.sql`, not by a client remembering: soft-deleting a project's LAST live plan
+soft-deletes its schedules with the same `deleted_at` (tag `schedules.deleted_with_project`), restoring the project restores
+exactly the tagged ones, and a schedule leaving (soft or hard delete) clears the plan hints naming it (with a `version`
+bump). Readers still verify: `scheduleLiveness.dropSchedulesOfDeletedProjects` (Dashboard) and
+`scheduleLinkHints.resolveScheduleHint` (switcher icon). Proof: `db/test/project_schedule_cascade.test.sql`.
+
 ## 7. This session's findings, stated plainly (so a ninth round is never scheduled on stale evidence)
 
 **NEW-2 (isOwnWrite consolidation)** — already shipped. `git log` / the archived backlog show
