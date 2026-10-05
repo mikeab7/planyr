@@ -104,6 +104,7 @@ export const LAYER_TIER = {
   ga_nrhp: "reference",
   ga_cemeteries: "reference",
   ga_crit_habitat: "reference",    // binds federal actions, not the parcel directly
+  ga_ust: "reference",             // NEW-1 (B2095744) — a facility register; a Phase I flag, not a stop
   ga_gopher_tortoise: "reference", // a modeled habitat screen
   ga_trout: "reference",           // the designation; the BUFFER it triggers is the constraint below
   soil_bedrock: "reference",

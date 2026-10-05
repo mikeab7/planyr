@@ -1026,6 +1026,16 @@ export const AHJ_LAYERS = {
     note: "Georgia EPD's Hazardous Site Inventory — sites with a reportable release, at EPD's own surveyed coordinates (the July 2025 list). A Phase I ESA PRE-SCREEN, not a substitute; the Class number is EPD's.",
     role: "point", group: "environmental", order: 12,
   },
+  ga_ust: {
+    // NEW-1 (B2095744) — Georgia EPD's REGISTER of underground storage tank facilities (not a leak list; see GIS_SOURCES.ustGa).
+    kind: "esriFeature", label: "Underground storage tanks (Georgia EPD)", source: "Georgia EPD — UST Management Program",
+    url: GIS_SOURCES.ustGa.serviceUrl, states: ["GA"],
+    minZoom: 12, color: "#854d0e", weight: 2, opacity: 0.55, pointRadius: 3.5,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "UST facility", hoverSource: "Georgia EPD",
+    hoverFields: [{ names: ["LOCATION_NAME"] }, { names: ["LOCATION_TYPE"], label: "type" }, { names: ["FACILITY_STATUS"], label: "status" }, { names: ["CITY"] }],
+    note: "Georgia EPD's register of facilities with underground storage tanks (gas stations, distributors, farms, industrial…), the October 2022 edition. A REGISTER, not a leak list: release, corrective-action and closure status are not in it. A facility beside the site is a Phase I ESA pre-screen flag — pull EPD's UST Management Program file.",
+    role: "point", group: "environmental", order: 11,
+  },
   ga_nrhp: {
     kind: "esriFeature", label: "Historic places (National Register)", source: "National Park Service — National Register of Historic Places",
     url: GIS_SOURCES.nrhp.serviceUrl, states: ["GA"],
@@ -1256,6 +1266,7 @@ export const LAYER_VINTAGE = {
   nhd_flowlines: "USGS NHD — collection date varies by area",
   // Georgia screening (NEW-1) — each stamped with the edition the provider's own layer reported on 2026-10-04.
   ga_hsi: "Georgia EPD Hazardous Site Inventory — July 2025 list (layer edited 2025-08-04)",
+  ga_ust: "Georgia EPD UST facility register — layer edited 2022-10-17",
   ga_nrhp: "NPS National Register — Esri Federal Data copy, edited 2026-10-02",
   ga_cemeteries: "USGS GNIS cemeteries — recorded sites only; no single edition date",
   ga_crit_habitat: "USFWS final critical habitat — layer edited 2026-08-31",

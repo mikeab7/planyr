@@ -634,6 +634,24 @@ export const GIS_SOURCES = {
     tier: "production",
     lastVerified: "2026-10-04",
   },
+  /* Georgia EPD — REGISTERED UNDERGROUND STORAGE TANK FACILITIES (the org's `UST_coordinates`, 8,400 locations statewide,
+   * the layer last edited 2022-10-17). ⛔ What it is NOT: a list of leaks. The attributes are the facility register (name,
+   * address, type — gas station, distributor, farm, … — status, financial-responsibility mechanism); release and closure
+   * status are not in it. It is the closest public Georgia counterpart to Texas's LPST layer, and is worded as a REGISTER
+   * of tanks, never as "leaking tanks". Probed live 2026-10-05; Adairsville box 14, Atlanta 150, Savannah 55. */
+  ustGa: {
+    key: "ustGa",
+    label: "Underground storage tank facilities (Georgia EPD)",
+    provider: "Georgia Environmental Protection Division (EPD) — Underground Storage Tank Management Program",
+    serviceUrl: "https://services1.arcgis.com/p0dLjwtOaJHU8zq2/arcgis/rest/services/UST_coordinates/FeatureServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "LOCATION_NAME", city: "CITY", county: "COUNTY", type: "LOCATION_TYPE", status: "FACILITY_STATUS" },
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-10-05",
+  },
   /* Georgia DNR Wildlife Resources Division — trout streams (layer 1 `Trout_Stream`). The designated-trout-water
    * lines the 50-ft stream buffer keys off. Georgia DNR's own ArcGIS Online org (owner `courtney.balling_dnr`),
    * edited 2024-12-30; 2,479 line features in the Georgia envelope, all in the north Georgia mountains. */
@@ -2197,6 +2215,36 @@ export const SOURCE_STATE_SCOPE = {
   // Commerce City, real values in Waller County.
   femaEbfe: ["TX", "LA", "AR", "OK"],
 };
+
+/* NEW-1 (B2095744) — WHAT A STANDING CHECK DOES ON GROUND ITS SOURCE DOES NOT COVER. The second half of the state rule
+ * (`SOURCE_STATE_SCOPE` says where a row can answer; this says what the Analysis panel shows where it cannot). Declared HERE,
+ * in the one registry, so no card carries a per-card special case.
+ *   notScreened — a GENERIC check a developer expects everywhere (tanks, traffic, pipelines, road authority). It renders an
+ *                 honest "Not screened in <state>" card under the NEUTRAL `name`: a Texas agency's name (TCEQ, TxDOT, RRC)
+ *                 never reaches a report for another state.
+ *   hide        — the concept IS a Texas institution (CCN service areas, the Houston-area growth faults) and means nothing
+ *                 elsewhere; the card does not render at all.
+ * `hideIn` hides a notScreened check in specific states where it would only be noise (Georgia has no oil & gas program
+ * a screen would stand for; its UST card replaces the Texas tank card). A row with no entry defaults to notScreened under
+ * its own name. Pure. */
+export const SOURCE_OUT_OF_STATE = {
+  oilgas: { mode: "notScreened", name: "Oil & gas wells", hideIn: ["GA"] },
+  growthFaults: { mode: "hide" },
+  ccnWater: { mode: "hide" },
+  ccnSewer: { mode: "hide" },
+  lpst: { mode: "notScreened", name: "Leaking petroleum tanks", hideIn: ["GA"] }, // GA: the Georgia EPD UST card (`ustGa`) carries the concept
+  aadt: { mode: "notScreened", name: "Traffic counts" },
+  pipelines: { mode: "notScreened", name: "Pipelines" },
+  road: { mode: "notScreened", name: "Road authority" },
+};
+
+/* For a source that does NOT cover `state`: { hide: true } or { hide: false, name } (the neutral card name). Pure. */
+export function outOfStateDisposition(key, state) {
+  const p = SOURCE_OUT_OF_STATE[key] || { mode: "notScreened" };
+  const st = String(state || "").toUpperCase();
+  if (p.mode === "hide" || (Array.isArray(p.hideIn) && p.hideIn.includes(st))) return { hide: true };
+  return { hide: false, name: p.name || null };
+}
 
 /* The states a row can answer in: its own `states` wins, else the table, else undefined (which
  * `auditRegistry` rejects). `null` = national. Pure. */

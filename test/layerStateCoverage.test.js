@@ -36,7 +36,7 @@ const TEXAS_ONLY = [
 
 /* Shared by Florida AND Georgia (PR #1902): the EIA approximate pipeline layers. */
 const SHARED_FL_GA = ["eia_gas", "eia_petroleum", "eia_crude", "eia_hgl"];
-const GEORGIA = ["ga_county", "ga_city", "ga_hsi", "ga_nrhp", "ga_cemeteries", "ga_crit_habitat", "ga_gopher_tortoise", "ga_trout", "ga_stream_buffers", "ga_slope"];
+const GEORGIA = ["ga_county", "ga_city", "ga_hsi", "ga_ust", "ga_nrhp", "ga_cemeteries", "ga_crit_habitat", "ga_gopher_tortoise", "ga_trout", "ga_stream_buffers", "ga_slope"];
 const idsWhere = (pred) => Object.entries(ALL_LAYERS).filter(([, c]) => pred(c)).map(([k]) => k);
 
 describe("the layer registry's state coverage", () => {
@@ -90,7 +90,7 @@ describe("every Georgia layer row is complete (a row an inline comment swallowed
 });
 
 describe("the Georgia GIS registry rows", () => {
-  const KEYS = ["countyGa", "cityGa", "hsiGa", "troutGa", "mngwpd", "critHabitat", "gopherTortoiseGa", "nrhp", "cemeteries"];
+  const KEYS = ["countyGa", "cityGa", "hsiGa", "ustGa", "troutGa", "mngwpd", "critHabitat", "gopherTortoiseGa", "nrhp", "cemeteries"];
   it("each is Georgia-scoped, production-tier, and not on a test/staging path", () => {
     for (const k of KEYS) {
       const s = GIS_SOURCES[k];

@@ -25,7 +25,7 @@
 
 import { gisCache as defaultCache } from "./gisCache.js";
 import { identifyJurisdiction, identifyRoadAuthority } from "./jurisdiction.js";
-import { GIS_SOURCES, sourceCoversState } from "../../../shared/gis/sources.js";
+import { GIS_SOURCES, sourceCoversState, outOfStateDisposition } from "../../../shared/gis/sources.js";
 import { fetchArcgisJson, gisErrorMessage, pLimit, GIS_MAX_GET_URL } from "./gisFetch.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { classifyCcn } from "./ccnClassify.js";
@@ -41,7 +41,7 @@ import { EIA_COMMODITIES, EIA_BUFFER_MI, isEiaScreenState } from "./eiaPipelineS
 const loadEiaCopy = () => import("./eiaPipelineScreenCopy.js");
 import { summarizeTransmission, summarizeSubstations } from "./powerScreen.js";
 import { summarizeAadt, summarizeRail, summarizeAirports } from "./accessScreen.js";
-import { summarizeGaStreams, gopherSummary, critHabitatSummary, critHabitatDetail, hsiTag } from "./georgiaScreens.js";
+import { summarizeGaStreams, gopherSummary, critHabitatSummary, critHabitatDetail, hsiTag, ustTag } from "./georgiaScreens.js";
 
 const DAY = 24 * 3600 * 1000;
 
@@ -255,6 +255,15 @@ export const ANALYSIS_SOURCES = [
     plural: "HSI site(s)", proxTag: hsiTag,
     absentLabel: "No Georgia EPD Hazardous Site Inventory site within 1 mi",
     caveat: "Phase I ESA PRE-SCREEN only — NOT a substitute for a Phase I ESA. The HSI lists sites with a reportable release at EPD's own coordinates; the Class is EPD's. A records review is the authoritative check.",
+  },
+  {
+    id: "ustGa", category: "Underground storage tanks (Georgia EPD)", label: "Georgia EPD registered UST facilities", kind: "point", extraFor: ["GA"],
+    mapLayer: "ga_ust",
+    ...reg("ustGa"),
+    screenMode: "proximity", bufferMi: 0.25, ttl: 30 * DAY, verified: true,
+    plural: "registered UST facility(ies)", proxTag: ustTag,
+    absentLabel: "No Georgia EPD-registered UST facility within a quarter-mile",
+    caveat: "A REGISTER of tank facilities (EPD's list, edited October 2022) — NOT a list of leaks: release, corrective-action and closure status are not in it. A facility within a quarter-mile is a flag to pull EPD's UST Management Program file, and a Phase I ESA pre-screen item, never a finding of contamination.",
   },
   {
     id: "critHabitatGa", category: "Critical habitat (USFWS)", label: "USFWS critical habitat", kind: "polygon", extraFor: ["GA"],
@@ -1041,7 +1050,7 @@ const CO_ZONING_CAVEAT =
 // Display order for the assembled findings.
 // NEW-2 (2026-09-23, owner request) — Jurisdiction and Road authority lead the panel;
 // everything else keeps its prior relative order below them.
-const CATEGORY_ORDER = ["jurisdiction", "road", "flood", "wetlands", "streamsGa", "pipelines", "oilgas", "lpst", "epaCleanups", "hsiGa", "critHabitatGa", "gopherGa", "nrhpGa", "cemeteriesGa", "growthFaults", "transmission", "substations", "aadt", "rail", "airports", "zoning", "ccnWater", "ccnSewer"];
+const CATEGORY_ORDER = ["jurisdiction", "road", "flood", "wetlands", "streamsGa", "pipelines", "oilgas", "lpst", "epaCleanups", "hsiGa", "ustGa", "critHabitatGa", "gopherGa", "nrhpGa", "cemeteriesGa", "growthFaults", "transmission", "substations", "aadt", "rail", "airports", "zoning", "ccnWater", "ccnSewer"];
 
 /* Run the full screen against the active-parcel rings ([[ [lng,lat], ... ], ...]).
  * Returns { findings, generatedAt }. Findings are presence-first and each carries its
@@ -1071,11 +1080,21 @@ export async function runSiteAnalysis(rings, opts = {}) {
   // Georgia screening (Part A) extends that SAME gate rather than adding a second one: the registry's `states`
   // (SOURCE_STATE_SCOPE / the row's own) is the one place a source declares where it can answer, and a
   // Georgia-only `extraFor` card simply does not exist outside Georgia.
-  const arcPromises = ANALYSIS_SOURCES.filter((s) => cardExistsIn(s, state)).map((s) => {
-    if (s.id === "pipelines" && isEiaScreenState(state)) return runEiaPipelines(rings, arcOpts, state);
-    if (!sourceCoversState(GIS_SOURCES[s.id], state)) return loadEiaCopy().then((m) => m.outOfStateFinding(s, state));
-    return analyzeSource(s, rings, arcOpts);
-  });
+  // NEW-1 (B2095744) — what an UNCOVERED check does is ALSO the registry's call (`outOfStateDisposition`): a Texas-institution
+  // card (CCN, growth faults, and the oil & gas / tank cards on a Georgia site) is HIDDEN, and a generic check a developer
+  // expects renders "Not screened in <state>" under its NEUTRAL name — a Texas agency's name never reaches another state.
+  const uncovered = (s) => !!state && !(s.id === "pipelines" && isEiaScreenState(state)) && !sourceCoversState(GIS_SOURCES[s.id], state);
+  const arcPromises = ANALYSIS_SOURCES
+    .filter((s) => cardExistsIn(s, state))
+    .filter((s) => !(uncovered(s) && outOfStateDisposition(s.id, state).hide))
+    .map((s) => {
+      if (s.id === "pipelines" && isEiaScreenState(state)) return runEiaPipelines(rings, arcOpts, state);
+      if (uncovered(s)) {
+        const { name } = outOfStateDisposition(s.id, state);
+        return loadEiaCopy().then((m) => m.outOfStateFinding(name ? { ...s, category: name, label: name } : s, state));
+      }
+      return analyzeSource(s, rings, arcOpts);
+    });
   // NEW-5 (2026-09-05, owner-reported) — thread EVERY active parcel's ring, not just the
   // representative (largest) one: a multi-parcel assemblage's city/ETJ containment is a coin
   // flip weighted by lot size when only one parcel is tested (jurisdiction.js's own

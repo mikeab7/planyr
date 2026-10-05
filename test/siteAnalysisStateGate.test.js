@@ -6,7 +6,7 @@
  * `states`), `runSiteAnalysis` asks `sourceCoversState` before it queries, and `outOfStateFinding` words the gap. This
  * file adds only what Georgia needed on top: the `extraFor` cards, the road-authority + school-district seams. */
 import { describe, it, expect } from "vitest";
-import { GIS_SOURCES, sourceCoversState } from "../src/shared/gis/sources.js";
+import { GIS_SOURCES, sourceCoversState, SOURCE_OUT_OF_STATE, outOfStateDisposition, statesFor } from "../src/shared/gis/sources.js";
 import {
   ANALYSIS_SOURCES, cardExistsIn, runSiteAnalysis, buildJurisdictionFinding, stateName,
 } from "../src/workspaces/site-planner/lib/siteAnalysis.js";
@@ -14,7 +14,10 @@ import { outOfStateFinding } from "../src/workspaces/site-planner/lib/eiaPipelin
 
 // pipelines is Texas-only too, but on a Georgia site it runs the EIA approximate screen instead (PR #1902)
 const TEXAS_ONLY = ["oilgas", "lpst", "growthFaults", "aadt", "ccnWater", "ccnSewer"];
-const GA_CARDS = ["streamsGa", "hsiGa", "critHabitatGa", "gopherGa", "nrhpGa", "cemeteriesGa"];
+const GA_CARDS = ["streamsGa", "hsiGa", "ustGa", "critHabitatGa", "gopherGa", "nrhpGa", "cemeteriesGa"];
+// NEW-1 (B2095744): on a Georgia site a Texas-institution card does not render AT ALL; a generic check reads "Not screened" under a neutral name.
+const GA_HIDDEN = ["oilgas", "lpst", "growthFaults", "ccnWater", "ccnSewer"];
+const TEXAS_AGENCY = /\b(TCEQ|TxDOT|RRC|Railroad Commission|CCN|LPST|TWDB|PUC|Houston-area|HCFCD|BKDD)\b/i;
 const ring = (lng, lat, d = 0.0012) => [[lng - d, lat - d], [lng + d, lat - d], [lng + d, lat + d], [lng - d, lat + d], [lng - d, lat - d]];
 const GWINNETT = ring(-83.95, 34.02);
 const KATY = ring(-95.795, 29.785);
@@ -65,23 +68,28 @@ describe("the registry: every Georgia card is Georgia-only", () => {
 });
 
 describe("runSiteAnalysis on real-shaped rings", () => {
-  it("⛔ GEORGIA: no Texas service is ever asked, and every Texas-only screen reads NOT SCREENED — never 'none found'", async () => {
+  it("⛔ GEORGIA: no Texas service is asked, Texas-institution cards do NOT render, a generic check reads NOT SCREENED under a neutral name", async () => {
     const fetchJson = spyFetch();
     const { findings } = await runSiteAnalysis([GWINNETT], { cache: emptyCache, fetchJson, identifyJurisdiction: jur, identifyRoadAuthority: road });
     const byId = Object.fromEntries(findings.map((f) => [f.id, f]));
-    for (const id of TEXAS_ONLY) {
-      expect(byId[id].status, id).toBe("unconfirmed");
-      expect(byId[id].outOfState, id).toBe(true);
-      expect(byId[id].summary, id).toMatch(/Not screened in Georgia/);
-    }
-    expect(byId.road.status).toBe("unconfirmed"); // TxDOT Roadway Inventory
+    for (const id of GA_HIDDEN) expect(byId[id], `${id} must not render on a Georgia site`).toBeUndefined();
+    expect(byId.aadt.status).toBe("unconfirmed");
+    expect(byId.aadt.outOfState).toBe(true);
+    expect(byId.aadt.category).toBe("Traffic counts"); // neutral — not "Traffic (AADT)" / "TxDOT traffic counts"
+    expect(byId.aadt.summary).toMatch(/Not screened in Georgia/);
+    expect(byId.road.status).toBe("unconfirmed");
     expect(byId.road.outOfState).toBe(true);
     expect(byId.pipelines.approximate).toBe(true); // PR #1902: the EIA approximate screen, never "none found"
     expect(byId.pipelines.status).not.toBe("absent");
     expect(fetchJson.urls.some((u) => /gis\.rrc\.texas\.gov|tceq|txdot|twdb|Fault_Houston/i.test(u))).toBe(false);
+    // no Texas agency / concept name anywhere in a Georgia report
+    for (const f of findings) {
+      expect(`${f.category} | ${f.label} | ${f.summary || ""} | ${f.sourceName || ""}`, f.id).not.toMatch(TEXAS_AGENCY);
+    }
     // …and the Georgia cards are there, ran, and carry real answers
     for (const id of GA_CARDS) expect(byId[id], id).toBeTruthy();
     expect(byId.hsiGa.status).toBe("absent");
+    expect(byId.ustGa.status).toBe("absent");
     // the national screens still ran
     expect(byId.flood.outOfState).toBeUndefined();
     expect(byId.wetlands.outOfState).toBeUndefined();
@@ -111,5 +119,35 @@ describe("the jurisdiction card on Georgia ground", () => {
     expect(f.rows.find((r) => r[0] === "School district")[1]).toBe("Katy ISD");
     expect(f.sourceName).toBe("TxDOT / TxGIO / H-GAC");
     expect(buildJurisdictionFinding(j).sourceName).toBe("TxDOT / TxGIO / H-GAC"); // legacy caller, no state
+  });
+});
+
+describe("the out-of-state policy lives in the registry (NEW-1, B2095744)", () => {
+  it("every policy key is a real, state-scoped registry row", () => {
+    for (const k of Object.keys(SOURCE_OUT_OF_STATE)) {
+      expect(GIS_SOURCES[k], k).toBeTruthy();
+      expect(Array.isArray(statesFor(GIS_SOURCES[k])), `${k} must be state-scoped for a policy to mean anything`).toBe(true);
+    }
+  });
+  it("a Texas-institution concept is hidden everywhere it is uncovered; a generic check is never hidden except where a state replaces it", () => {
+    for (const k of ["growthFaults", "ccnWater", "ccnSewer"]) for (const st of ["GA", "CO", "FL"]) expect(outOfStateDisposition(k, st).hide, `${k}/${st}`).toBe(true);
+    expect(outOfStateDisposition("oilgas", "GA").hide).toBe(true);
+    expect(outOfStateDisposition("oilgas", "CO")).toEqual({ hide: false, name: "Oil & gas wells" }); // a Colorado developer does expect the check
+    expect(outOfStateDisposition("lpst", "GA").hide).toBe(true);   // the Georgia EPD UST card replaces it
+    expect(outOfStateDisposition("lpst", "CO")).toEqual({ hide: false, name: "Leaking petroleum tanks" });
+    expect(outOfStateDisposition("aadt", "GA")).toEqual({ hide: false, name: "Traffic counts" });
+    expect(outOfStateDisposition("road", "GA")).toEqual({ hide: false, name: "Road authority" });
+  });
+  it("every neutral name is free of Texas agency names", () => {
+    for (const [k, p] of Object.entries(SOURCE_OUT_OF_STATE)) if (p.name) expect(p.name, k).not.toMatch(TEXAS_AGENCY);
+  });
+  it("a Colorado site keeps its honest 'Not screened in Colorado' cards under neutral names and loses the Texas-only ones", async () => {
+    const DEN = ring(-104.99, 39.74);
+    const { findings } = await runSiteAnalysis([DEN], { cache: emptyCache, fetchJson: spyFetch(), identifyJurisdiction: jur, identifyRoadAuthority: road });
+    const byId = Object.fromEntries(findings.map((f) => [f.id, f]));
+    for (const id of ["growthFaults", "ccnWater", "ccnSewer"]) expect(byId[id], id).toBeUndefined();
+    expect(byId.oilgas.summary).toMatch(/Not screened in Colorado/);
+    expect(byId.lpst.category).toBe("Leaking petroleum tanks");
+    for (const f of findings) expect(`${f.category} | ${f.summary || ""}`, f.id).not.toMatch(TEXAS_AGENCY);
   });
 });

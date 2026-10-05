@@ -171,6 +171,11 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1518083 — B2095744: a Georgia site's Analysis panel shows no Texas-only card and names no Texas agency; the Georgia UST card answers `Blocker: real-data` (Michael's Adairsville plan, read-only; first try a throwaway at 34.37 / -84.93 on the test account)
+
+**Steps** (signed-in, planyr.io; read the served chunk hash in the same observation; read-only on his real plan — never edit it): open the Georgia plan → Analysis. **Expect:** NO card titled Leaking petroleum tanks (TCEQ LPST) · Water service (CCN) · Sewer service (CCN) · Active surface faults · Oil & gas wells, and no "TCEQ", "TxDOT", "RRC", "CCN" or "LPST" text anywhere in the panel; **Road authority** and **Traffic counts** read "Not screened in Georgia" (amber, never green); the new **Underground storage tanks (Georgia EPD)** card answers (a count within a quarter-mile or the explicit "none within a quarter-mile", and its caveat says register, not leaks). Then open a Houston plan. **Expect:** unchanged — every Texas card present by its Texas name.
+- **Stopping rule:** closes on a dated pass.
+
 ### V1518082 — B2081249: the two national road layers draw on planyr.io and print `Blocker: none`
 
 **Steps** (signed-in test account, throwaway plan at **33.964 / -84.021**, read the served chunk hash in the same observation): Layers → Access → switch on **Truck routes (STAA National Network)** and **Traffic volumes (HPMS 2022, highways)**. **Expect:** brown truck-route lines along SR-316 and violet/blue/magenta AADT-coloured highway lines, status dots blue, ⓘ shows the data year (2018 / 2022) and the NHS-only / NN-only caveats, hover names the route and AADT, **the map does not move**. File → Export PDF. **Expect:** both print. Repeat on a Houston plan: both rows listed beside "Traffic counts (AADT)".

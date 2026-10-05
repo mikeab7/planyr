@@ -219,6 +219,13 @@ export const SOURCE_FIXTURES = {
     { label: "Columbus area HSI site", point: [-84.93, 32.4628], expectMinCount: 1 }, // live: 1
   ],
   },
+  ustGa: {
+  fixtures: [
+    { label: "Adairsville (Bartow Co.)", bbox: [-84.95, 34.3, -84.85, 34.4], expectMinCount: 1 }, // live 2026-10-05: 14
+    { label: "Atlanta (Fulton Co.)", bbox: [-84.45, 33.7, -84.35, 33.8], expectMinCount: 1 }, // live: 150
+    { label: "Savannah (Chatham Co.)", bbox: [-81.15, 32.0, -81.05, 32.1], expectMinCount: 1 }, // live: 55
+  ],
+  },
   troutGa: {
   fixtures: [
     { label: "Chattahoochee headwaters (White Co.)", point: [-83.8921, 34.6906], expectMinCount: 1 }, // live: 4
@@ -1045,6 +1052,12 @@ export const SOURCE_DOCS = {
     "Georgia EPD Hazardous Site Inventory (HSI) — sites with a release of a regulated substance above the reportable " +
     "quantity, Class and listing date per site. EPD publishes each site's own lat/long, so these are points, not a " +
     "geocode. A Phase I ESA PRE-SCREEN: a site on the list is a flag to pull the file, never a verdict on a neighbour.",
+  },
+  ustGa: {
+  notes:
+    "Georgia EPD's REGISTER of underground storage tank facilities (name, address, facility type, status). It is not a " +
+    "release list: leak, corrective-action and closure status are not in the layer (edited 2022-10-17), so a facility on it " +
+    "is a flag to pull EPD's UST Management Program file, never a finding of contamination.",
   },
   troutGa: {
   notes:
