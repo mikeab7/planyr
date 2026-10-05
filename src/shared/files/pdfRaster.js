@@ -38,7 +38,8 @@ const PDF_BASE_DPI = 72; // pdf.js viewport scale of 1.0 == 72 dpi, by PDF spec
 /** Open a PDF (File/Blob/ArrayBuffer) and return its page count, without rendering anything — used
  *  to build the OCR page picker before committing to a (possibly slow) full recognition pass. */
 export async function pdfPageCount(fileOrBuffer) {
-  const data = fileOrBuffer instanceof ArrayBuffer ? fileOrBuffer : await fileOrBuffer.arrayBuffer();
+  // pdf.js transfers (detaches) the buffer it is given — pass a private copy so the caller can reuse theirs.
+  const data = fileOrBuffer instanceof ArrayBuffer ? fileOrBuffer.slice(0) : await fileOrBuffer.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data }).promise;
   try { return pdf.numPages || 1; } finally { try { pdf.destroy(); } catch (_) { /* best-effort */ } }
 }
@@ -57,7 +58,8 @@ export async function pdfPageCount(fileOrBuffer) {
  *  must not import anything outside `shared/files/` (see its own OCR-only header). */
 export async function renderPdfPageToImageData(fileOrBuffer, pageNum, opts = {}) {
   const targetDpi = opts.targetDpi ?? 300;
-  const data = fileOrBuffer instanceof ArrayBuffer ? fileOrBuffer : await fileOrBuffer.arrayBuffer();
+  // pdf.js transfers (detaches) the buffer it is given — pass a private copy so the caller can reuse theirs.
+  const data = fileOrBuffer instanceof ArrayBuffer ? fileOrBuffer.slice(0) : await fileOrBuffer.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data }).promise;
   try {
     const page = await pdf.getPage(pageNum);
