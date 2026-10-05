@@ -36,6 +36,7 @@
  * what no reference resolves to; it only makes the ambiguity visible at the destination.
  * The last describe block proves that property mechanically rather than asserting it.
  */
+import { readText } from "../scripts/lib/ledger.mjs";
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -170,7 +171,7 @@ describe("MUTATION — the guard goes RED on a duplicate, and stays quiet on wha
     // The rot case: if the file list ever resolves to nothing, the checks above would report a
     // clean [] forever. Assert the real files were actually read.
     for (const [letter, files] of FAMILIES) {
-      const texts = files.map((f) => readFileSync(join(REPO, f), "utf8"));
+      const texts = files.map((f) => readText(REPO, f));
       expect(texts.every((t) => new RegExp(`^###\\s+${letter}\\d+`, "m").test(t)),
         `${files.join(" / ")}: no ${letter}# heading found at all — the guard would be reading nothing`).toBe(true);
     }
@@ -190,7 +191,7 @@ describe("MUTATION — the guard goes RED on a duplicate, and stays quiet on wha
  * survey of reference sites could make, because it does not depend on having found them all.
  * ========================================================================================== */
 describe("the 31 shared ids are marked in place, and no reference resolution moved", () => {
-  const READ = (f) => readFileSync(join(REPO, f), "utf8");
+  const READ = (f) => readText(REPO, f);
   const FILES = [["B", "docs/archive/BACKLOG-DONE.md"], ["V", "docs/archive/VERIFICATION-DONE.md"]];
 
   it("every colliding heading carries a SHARED ID marker naming its twin", () => {

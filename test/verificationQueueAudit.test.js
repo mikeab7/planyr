@@ -4,6 +4,7 @@
  * passes its own recorded ceiling. Regenerate the ceiling with
  * `node scripts/verification-queue-audit.mjs --write-ceiling` after a session genuinely improves the
  * queue — a failure here means the queue got WORSE, not that this test is stale. */
+import { readText } from "../scripts/lib/ledger.mjs";
 import { describe, it, expect } from "vitest";
 import { auditQueue, parseQueue, checkCeiling, STALE_THRESHOLD_DAYS } from "../scripts/verification-queue-audit.mjs";
 import { readFileSync } from "node:fs";
@@ -108,7 +109,7 @@ describe("verification-queue-audit — ceiling gate", () => {
 
 describe("verification-queue-audit — the real repo file, right now", () => {
   it("VERIFICATION.md currently passes its own recorded ceiling", () => {
-    const text = readFileSync(join(REPO, "VERIFICATION.md"), "utf8");
+    const text = readText(REPO, "VERIFICATION.md");
     const ceiling = JSON.parse(readFileSync(join(REPO, "scripts", "verification-queue-ceiling.json"), "utf8"));
     const report = auditQueue(text, { staleThresholdDays: ceiling.staleThresholdDays });
     const { ok, problems } = checkCeiling(report, ceiling);

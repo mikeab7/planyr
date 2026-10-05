@@ -34,7 +34,14 @@
 MAP.md merge=union
 BACKLOG_OPEN.md merge=union
 
-# docs/archive/BACKLOG-DONE.md is hand-authored, APPEND-ONLY history (never derived from anything,
+# NEW-1 (2026-10-05): docs/archive/BACKLOG-DONE.md NO LONGER EXISTS — the ledger is now one file per
+# entry under ledger/ (scripts/lib/ledger.mjs), which needs no merge driver at all: two PRs that each
+# add an entry touch different files. Measured the same day: GitHub's SERVER-side merge ignores
+# `merge=union` (two PRs prepending a line to a union-ruled file both read `mergeable_state: dirty`),
+# so union could only ever have helped local merges. The rule below is kept only so the scratch-repo
+# tests of the old behaviour stay meaningful; it is inert on the real tree.
+#
+# (history) docs/archive/BACKLOG-DONE.md was hand-authored, APPEND-ONLY history (never derived from anything,
 # unlike the pair above), so it gets git's zero-config `union` driver directly — no local-override
 # upgrade exists or is planned for it. Two branches each ARCHIVING a different newly-shipped item
 # (the overwhelming majority of its conflicts, and the only kind git ever showed a raw conflict for
