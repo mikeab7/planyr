@@ -31,6 +31,31 @@ export function cityLineOf(b) {
   return { text: b.jur || "Couldn't check", failed: false, note: b.tail || null };
 }
 
+/* Road authority answers for SEVERAL rings (one per active parcel) → ONE answer. The engine reads the frontage of
+ * the ring it is handed, so asking only the largest parcel hid every road the other parcels front (Goose Creek's
+ * 6-parcel plan read "State maintains IH 10" while the same ground as 4 parcels read the county roads). Roads are
+ * merged by name (route when unnamed): lengths add, the authority follows the longest piece. A parcel whose lookup
+ * failed is REPORTED (`partialError`), never silently dropped; if every lookup failed the answer is the failure. */
+export function mergeRoadAnswers(answers) {
+  const list = (answers || []).filter(Boolean);
+  if (!list.length) return { __error: new Error("no road answer") };
+  if (list.every((a) => a.__notScreened)) return { __notScreened: true };
+  const usable = list.filter((a) => !a.__error && !a.__notScreened);
+  const failed = list.filter((a) => a.__error || (a.error && !(a.roads || []).length));
+  if (!usable.length) return list.find((a) => a.__error) || { roads: [], error: (failed[0] && failed[0].error) || "Couldn't check" };
+  const by = new Map();
+  for (const a of usable) for (const r of a.roads || []) {
+    const key = (r.name && String(r.name).toLowerCase()) || (r.route != null ? "route:" + r.route : null) || "u:" + by.size;
+    const cur = by.get(key);
+    if (!cur) { by.set(key, { ...r, _max: r.lengthM || 0 }); continue; }
+    cur.lengthM = (cur.lengthM || 0) + (r.lengthM || 0);
+    if ((r.lengthM || 0) > cur._max) { cur._max = r.lengthM || 0; cur.authority = r.authority; }
+    if (r.funcClass != null && (cur.funcClass == null || Number(r.funcClass) < Number(cur.funcClass))) cur.funcClass = r.funcClass;
+  }
+  const roads = [...by.values()].map(({ _max, ...x }) => x).sort((a, b) => (b.lengthM || 0) - (a.lengthM || 0));
+  return { roads, error: null, partialError: failed.length > 0 && failed.length < list.length };
+}
+
 /* The roads line from identifyRoadAuthority's `{ roads: [{ name, route, authority:{label} }], error }`.
  * kind: "all" (one maintainer for every road) · "mixed" (a per-road list) · "none" · "failed" · "not-screened". */
 export function roadsLineOf(road, { notScreenedIn = null } = {}) {
@@ -41,16 +66,17 @@ export function roadsLineOf(road, { notScreenedIn = null } = {}) {
   const nameOf = (r) => r.name || (r.route ? `Route ${r.route}` : "Unnamed road");
   const authOf = (r) => (r.authority && r.authority.label) || "Unknown";
   const auths = [...new Set(roads.map(authOf))];
+  const partial = road.partialError ? " (some parcels couldn't be checked)" : "";
   const names = roads.map(nameOf);
   if (auths.length === 1) {
     const a = auths[0];
     const head = a === "Unknown" ? (roads.length === 1 ? "Maintainer unknown" : `Maintainer unknown for all ${roads.length}`)
       : roads.length === 1 ? `${a} maintains` : `${a} maintains all ${roads.length}`;
     const shown = names.slice(0, 3).join(", ") + (names.length > 3 ? ", …" : "");
-    return { kind: "all", text: roads.length === 1 ? `${head} ${shown}` : `${head} · ${shown}`, items: roads.map((r) => ({ name: nameOf(r), authority: authOf(r) })) };
+    return { kind: "all", text: (roads.length === 1 ? `${head} ${shown}` : `${head} · ${shown}`) + partial, items: roads.map((r) => ({ name: nameOf(r), authority: authOf(r) })) };
   }
   const items = roads.map((r) => ({ name: nameOf(r), authority: authOf(r) }));
-  return { kind: "mixed", text: `Mixed — ${roads.length} roads`, items };
+  return { kind: "mixed", text: `Mixed — ${roads.length} roads${partial}`, items };
 }
 
 /* The whole "Who governs this site" model. */

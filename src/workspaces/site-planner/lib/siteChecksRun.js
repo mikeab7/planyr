@@ -12,7 +12,7 @@
  */
 
 import { gisCache as defaultCache } from "./gisCache.js";
-import { fetchArcgisJson, gisErrorMessage, classifyGisError, pLimit, GIS_MAX_GET_URL, clearCoalesced } from "./gisFetch.js";
+import { fetchArcgisJson, classifyGisError, pLimit, GIS_MAX_GET_URL, clearCoalesced } from "./gisFetch.js";
 import { GIS_SOURCES } from "../../../shared/gis/sources.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { normalizeAttrs, buildQueryUrl } from "./siteAnalysis.js";
@@ -163,6 +163,17 @@ export function assertMeasurement(group, m) {
   if (!ok) throw new Error(`${group}: the stored answer was incomplete.`);
 }
 
+/* A failed row speaks in plain words and NEVER shows a server string, code or status ("Invalid or missing input
+ * parameters. (code 400)", "HTTP 503"). The detail goes to telemetry (`logFailure`), not to the reader. */
+const SOURCE_NOUN = { flood100: "FEMA flood map", flood500: "FEMA flood map", wetlands: "wetlands map", pipelines: "pipeline map", wells: "oil and gas well map" };
+export function plainFailure(check, err) {
+  const noun = SOURCE_NOUN[check.id] || "map";
+  const kind = classifyGisError(err).kind;
+  if (kind === "timeout") return `The ${noun} was too slow to answer.`;
+  if (kind === "offline") return "You appear to be offline.";
+  if (kind === "http-5xx" || kind === "network") return `The ${noun} is temporarily unavailable.`;
+  return `The ${noun} didn't answer.`;
+}
 function failedRow(check, message) {
   return {
     id: check.id, label: check.label, layer: check.layer, severity: "failed", figure: "Couldn't check",
@@ -222,10 +233,7 @@ export async function runTrustedChecks(rings, opts = {}) {
       });
     } catch (e) {
       logFailure(group, e);
-      // A transport failure keeps its plain wording ("didn't respond in time…"); an internal complaint about the
-      // answer's shape is not for the reader — the telemetry row above has the detail.
-      const plain = classifyGisError(e).kind === "error" ? "The map source gave an answer Planyr couldn't use." : gisErrorMessage(e);
-      return checks.map((c) => failedRow(c, plain));
+      return checks.map((c) => failedRow(c, plainFailure(c, e)));
     }
   }));
   const rowsById = new Map(results.flat().map((r) => [r.id, r]));
