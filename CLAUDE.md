@@ -569,6 +569,15 @@ were split out of this file.
     every device (asserted by `ui-audit/verify-notes-box-width-parity.mjs`); only this margin may differ. (See
     B2078593.)
 
+15. **(2026-10-05) Food ratings are one slider each, 1 to 10 in half steps, and must not be replaced
+    with tap buttons, steppers or whole numbers without Michael's say-so.** A visit's Food rating and
+    its Ambiance rating are each a single slider (min 1, max 10, step 0.5), "Not rated" until touched,
+    on first visit, log-another-visit and edit-an-old-visit, phone and desktop (B626576 shipped it;
+    #1941 swapped it for a 1-10 tap grid on phones and he got whole numbers back). The scale lives in
+    `src/workspaces/food/lib/ratingScale.js`; `test/foodRatingSlider.test.js` fails if the range or step
+    changes or a tap grid/stepper returns. Ratings saved in quarter points (8.75) still display as saved.
+    (See the NEW-1 item on BACKLOG.md.)
+
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by
 Michael (industrial developer, Dallas/Houston). It is becoming a multi-workspace

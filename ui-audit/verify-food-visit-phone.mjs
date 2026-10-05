@@ -57,18 +57,18 @@ try {
     check("1a no 'What I had' field on a new visit", !labels.some((t) => /what i had/i.test(t)), JSON.stringify(labels.map((t) => t.split("\n")[0])));
     check("1b new visit has a Dishes block with a name field", (await page.locator('[data-testid="visit-dishes"] [data-testid="visit-dish-name"]').count()) >= 1);
     await page.locator('[data-testid="visit-dish-name"]').first().fill("Brisket plate");
-    // one tap on "8" sets 8
+    // the dish rating is the slider (2026-10-05: never tap buttons) — set it to 8
     const row = page.locator('[data-testid="visit-dish-row"]').first();
-    await row.locator('[data-testid="score-tap-8"]').tap().catch(() => {});
+    await row.locator('[data-testid="dish-score-slider"]').fill("8");
     const numeral = await row.locator('[data-testid="dish-score-numeral"]').innerText().catch(() => "");
-    check("1c one tap on 8 sets the dish rating to 8", /^8\b/.test(numeral.trim()), JSON.stringify(numeral));
+    check("1c the dish slider set to 8 shows a dish rating of 8", /^8\b/.test(numeral.trim()), JSON.stringify(numeral));
     // second dish
     await tap(page, '[data-testid="visit-dish-add"]').catch(() => {});
     const rows2 = await page.locator('[data-testid="visit-dish-row"]').count();
     check("1d 'add another dish' gives a second dish row", rows2 === 2, `rows=${rows2}`);
     if (rows2 === 2) {
       await page.locator('[data-testid="visit-dish-name"]').nth(1).fill("Queso");
-      await page.locator('[data-testid="visit-dish-row"]').nth(1).locator('[data-testid="score-tap-6"]').tap();
+      await page.locator('[data-testid="visit-dish-row"]').nth(1).locator('[data-testid="dish-score-slider"]').fill("6");
     }
     await page.locator('form button[type="submit"]').tap();
     await page.waitForTimeout(500);
@@ -85,16 +85,12 @@ try {
     const { ctx, page } = await open(browser, FIX);
     await tap(page, '[data-testid="food-log-visit-btn"]');
     await page.waitForTimeout(400);
-    const btns = page.locator('[data-testid="visit-dish-row"] [data-testid^="score-tap-"]:not([data-testid="score-tap-grid"])');
-    const n = await btns.count();
-    check("2a rating offers ten tap targets (1–10)", n === 10, `n=${n}`);
-    let minW = 1e9, minH = 1e9;
-    for (let i = 0; i < n; i++) { const r = await btns.nth(i).evaluate((e) => { const b = e.getBoundingClientRect(); return [b.width, b.height]; }); minW = Math.min(minW, r[0]); minH = Math.min(minH, r[1]); }
-    check("2b every rating target is at least 44 x 44", n > 0 && minW >= 44 && minH >= 44, `min ${minW.toFixed(1)}x${minH.toFixed(1)}`);
-    const sliders = await page.locator('[data-testid="visit-dish-row"] input[type="range"]').count();
-    check("2c no drag-slider inside the scrolling phone form's dish rows (a scroll can't mis-set it)", n > 0 && sliders === 0, `sliders=${sliders}`);
-    const foodSliders = await page.locator('form input[type="range"]').count();
-    check("2d visit-level Food/Ambiance ratings are tap targets too on a phone", foodSliders === 0, `range inputs=${foodSliders}`);
+    const tapButtons = await page.locator('[data-testid^="score-tap"]').count();
+    check("2a no tap-button rating grid anywhere in the form", tapButtons === 0, `tap buttons=${tapButtons}`);
+    const dishSliders = await page.locator('[data-testid="visit-dish-row"] input[type="range"]').count();
+    check("2b each dish row's rating is one slider", dishSliders === 1, `sliders=${dishSliders}`);
+    const rs = await page.locator('form input[type="range"][data-testid="rating-slider"]').evaluateAll((els) => els.map((e) => [e.min, e.max, e.step].join("/")));
+    check("2c visit-level Food and Ambiance ratings are two half-step sliders", rs.length === 2 && rs.every((r) => r === "1/10/0.5"), JSON.stringify(rs));
     await ctx.close();
   });
 

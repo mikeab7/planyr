@@ -15,15 +15,11 @@
  * plus NUDGE buttons are not that rejected shape — they step the existing slider by one quarter
  * point each, they don't offer 37 individual stops to pick from.
  *
- * ⛔ PHONE: TAP, DON'T DRAG (NEW-1, "Food on a phone", owner direction 2026-10-03 — "ratings are hard
- * to set with a thumb"). A native range slider inside a scrolling bottom sheet is the worst shape
- * for a thumb: the same finger that scrolls the sheet lands on the track and moves the value, and
- * the 37 stops are far narrower than a fingertip. At phone width (`isMobile`) the slider is
- * replaced by `ScoreTapGrid`: ten big whole-point buttons (1-10) in two rows — ONE tap sets the
- * rating, and a tap is only delivered if the finger did NOT scroll, so a scroll can never set one —
- * with the existing minus/plus quarter-point nudges kept for the fine part. This is NOT the
- * rejected "individual buttons for 20 options" shape (that was 37 quarter-point stops; this is
- * ten whole points plus the nudges). Desktop keeps the slider, unchanged.
+ * ⛔ PHONE: THE SAME SLIDER (2026-10-05, owner: ratings are one slider each, never tap buttons). #1941
+ * (B2057920) had replaced the slider with a 1-10 whole-point tap grid on phones; the owner got whole
+ * numbers back and wants the slider, so the phone renders the SAME range slider as desktop (taller
+ * track, finger-sized nudges). Dragging it never moves the sheet or scrolls the list
+ * (BottomSheet ignores a touch that starts on a range input).
  *
  * STEP CHANGED 0.5 -> 0.25 (NEW-1) — the scale is still 1.0-10.0; only the resolution moved,
  * matching db/food.sql's food_dishes_score_check widen to numeric(4,2)/quarter-point.
@@ -83,36 +79,6 @@ const NUDGE_BTN_STYLE = {
 // than a new mechanism.
 const NUDGE_BTN_STYLE_PHONE = { ...NUDGE_BTN_STYLE, width: 50, height: 50, minWidth: 50, minHeight: 50, fontSize: 20 }; // design-exempt: same glyph-scaled-to-button reasoning, scaled again for the 50px phone target
 
-const TAP_POINTS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-
-/** Ten whole-point tap targets, 5 across x 2 down, each at least 48 CSS px tall and 44 wide. The
- *  selected point is the one the value equals when it is a whole number; a quarter-point value
- *  (set with the nudges) highlights nothing and the numeral above shows the exact value. */
-export function ScoreTapGrid({ value, onChange, label = "Score" }) {
-  return (
-    <div role="group" aria-label={label} data-testid="score-tap-grid" style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6 }}>
-      {TAP_POINTS.map((n) => {
-        const on = value != null && Number(value) === n;
-        return (
-          <button
-            key={n} type="button" aria-pressed={on} aria-label={`${label} ${n}`} data-testid={`score-tap-${n}`}
-            onClick={() => onChange(n)}
-            style={{
-              minHeight: 48, minWidth: 44, padding: 0, borderRadius: RADIUS.md, cursor: "pointer", font: "inherit",
-              fontSize: 17, fontWeight: 700, touchAction: "manipulation", // design-exempt: the tap digit — a score numeral on a thumb-sized button, above FONT_SIZE's ceiling by design
-              border: on ? "1px solid var(--accent-food)" : "1px solid var(--border-default)",
-              background: on ? "var(--accent-food)" : "var(--surface-raised)",
-              color: on ? "var(--on-accent-food)" : "var(--text-primary)",
-            }}
-          >
-            {n}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 export default function ScoreMeter({ value, onChange, label = "Score", isMobile = false }) {
   const active = value != null;
   const shown = active ? value : DISH_SCORE_MIN;
@@ -146,26 +112,6 @@ export default function ScoreMeter({ value, onChange, label = "Score", isMobile 
           {active && <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)" }}>/ {DISH_SCORE_MAX}</span>}
         </span>
       </div>
-      {isMobile ? (
-        <>
-          <ScoreTapGrid value={value} onChange={onChange} label={label} />
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
-            <button
-              type="button" className="tap-target" onClick={() => onChange(nudgeScore(value, -DISH_SCORE_STEP))}
-              aria-label="Decrease score by a quarter point" data-testid="dish-score-minus" style={nudgeStyle}
-            >
-              −
-            </button>
-            <span style={{ flex: 1, textAlign: "center", fontSize: FONT_SIZE.micro, color: "var(--text-tertiary)" }}>fine-tune by a quarter</span>
-            <button
-              type="button" className="tap-target" onClick={() => onChange(nudgeScore(value, DISH_SCORE_STEP))}
-              aria-label="Increase score by a quarter point" data-testid="dish-score-plus" style={nudgeStyle}
-            >
-              +
-            </button>
-          </div>
-        </>
-      ) : (
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <button
           type="button" className="tap-target" onClick={() => onChange(nudgeScore(value, -DISH_SCORE_STEP))}
@@ -205,7 +151,6 @@ export default function ScoreMeter({ value, onChange, label = "Score", isMobile 
           +
         </button>
       </div>
-      )}
       {active && (
         <button type="button" onClick={() => onChange(null)} data-testid="dish-score-clear" style={{
           border: "none", background: "none", color: "var(--text-tertiary)", cursor: "pointer",

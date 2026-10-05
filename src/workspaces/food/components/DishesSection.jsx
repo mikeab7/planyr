@@ -194,7 +194,7 @@ function DishEditRow({ initial, existingNames, openWishlistNames, onSave, onCanc
 
   return (
     <div
-      data-testid="dish-edit-row" data-edit-card=""
+      data-testid="dish-edit-row" data-edit-card="" data-sheet-form=""
       onKeyDown={(e) => {
         if (e.key === "Escape") { e.preventDefault(); onCancel(); }
         if (e.key === "Enter" && e.target.tagName !== "TEXTAREA") { e.preventDefault(); commit(!initial); }
@@ -524,7 +524,10 @@ export default function DishesSection({ dishesWithDate, visits, onSaveDish, onDe
         </select>
       </div>
 
-      <div style={{ border: "1px solid var(--border-default)", borderRadius: RADIUS.lg, overflow: "hidden" }}>
+      <div style={{ border: "1px solid var(--border-default)", borderRadius: RADIUS.lg,
+        // clip, not hidden: `hidden` makes this box a scroll container, so the open form's sticky Save bar
+        // pinned to THIS box (it scrolled away with the form) instead of the bottom of the sheet (NEW-2).
+        overflow: "clip" }}>
         {sorted.map((row) =>
           editingKey === row.key ? (
             <div key={row.key}>
