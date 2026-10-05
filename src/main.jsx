@@ -7,6 +7,7 @@ import { installClientErrorTelemetry, TAB_ID } from "./shared/telemetry/clientEr
 import { isEnrolled } from "./shared/telemetry/perfSampling.js";
 import { perfRecorderEnabled } from "./shared/telemetry/perfRecorderHandle.js";
 import { retireGisSw } from "./workspaces/site-planner/lib/registerGisSw.js";
+import { installPhoneTyping } from "./shared/ui/phoneTyping.js";
 import "./index.css";
 
 // Self-report runtime errors (B279): global error / unhandledrejection / preloadError
@@ -86,6 +87,12 @@ const armPageContainmentGuard = () => import("./shared/ui/pageContainmentGuard.j
   .then((m) => m.installPageContainmentGuard(window)).catch(() => {});
 if (typeof requestIdleCallback === "function") requestIdleCallback(armPageContainmentGuard, { timeout: 9000 });
 else setTimeout(armPageContainmentGuard, 4500);
+
+// B2088384 — typing on a phone, app-wide: no contact AutoFill on non-contact fields, and the field
+// being typed in stays above the keyboard. Installed SYNCHRONOUSLY (not on idle like the watchers
+// above) because it has to be listening before the first tap on a field. Tiny, no dependencies
+// beyond the layout probe. See the module's header.
+installPhoneTyping(window);
 
 // Recover from "stale chunk after deploy" failures (B221): when a new build ships
 // while this tab is open, switching to a not-yet-loaded workspace would otherwise

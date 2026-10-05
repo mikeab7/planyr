@@ -24,7 +24,7 @@ const auth = readFileSync(AUTH, "utf8");
 describe("NO_AUTOFILL shared attribute bag", () => {
   it("carries exactly the four extension opt-outs + autocomplete off", () => {
     expect(NO_AUTOFILL).toEqual({
-      autoComplete: "off",
+      autoComplete: "x-planyr", // B2088384: iOS ignores "off" for contact AutoFill
       "data-1p-ignore": true,
       "data-lpignore": "true",
       "data-bwignore": true,
@@ -46,7 +46,7 @@ describe("Sequence iframe inline copy (drift guard)", () => {
     const body = m[1];
     // Every module key/value must appear verbatim in the iframe object literal.
     const expectedLines = {
-      autoComplete: 'autoComplete: "off"',
+      autoComplete: 'autoComplete: "x-planyr"',
       "data-1p-ignore": '"data-1p-ignore": true',
       "data-lpignore": '"data-lpignore": "true"',
       "data-bwignore": '"data-bwignore": true',
