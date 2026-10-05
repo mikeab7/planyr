@@ -5,13 +5,13 @@
 > step; tick/remove it once he's done it. This is the **owner's** plate only. Browser click-throughs and
 > signed-in spot-checks are the Claude cohort's job (`VERIFICATION.md`), **never** Michael's — do NOT list those here.
 
-_Last updated: 2026-10-04._
+_Last updated: 2026-10-05._
 
 ## 🗄 A decision: schedule edits don't save for any account except yours (B2095121)
 - [ ] **Decide how to fix it.** I found that any account other than yours that edits a schedule gets a silent "refused" from the database — the edit shows on screen and is gone on reload (your account is fine because it already uses the newer per-schedule storage). Today it now shows a red "did NOT save" message instead of failing silently. **Option A (my recommendation):** new accounts start on the newer per-schedule storage — no database change, I build it. **Option B:** change the old table's key so each account gets its own row — small, but it alters the production database, so I won't do it without your yes.
 
-## 🔑 Add one more Cloudflare secret so the test-account sign-in route works (B2084992)
-- [ ] **In Cloudflare Pages → Production → Variables and Secrets, add `SUPABASE_SERVICE_ROLE_KEY` as a Secret** (Supabase → Project Settings → API → the `service_role` key). The new test-account sign-in route needs it to mint a session for the e2e account; without it the route answers "not configured" (503) even with the right login key. It is never printed, never sent to the browser, and the route can only ever use it for that one test account. Then redeploy (a merge or "Retry deployment") so it takes effect.
+## 🔑 Test-account sign-in route (B2084992) — ✅ owner action DONE 2026-10-05, nothing for you here
+- [x] ~~Add `SUPABASE_SERVICE_ROLE_KEY` (and `E2E_LOGIN_KEY`) to Cloudflare Pages → Production.~~ **DONE (read from the live Cloudflare variable list 2026-10-05: both names present).** This closes the owner action only; whether the deployed values work was tested separately by B2095824 on 2026-10-05, which signed in as `e2e@planyr.test` against production (see `VERIFICATION-DONE.md` V1518160). Nothing for you to do.
 
 ## 📱 Phone: readable text, or the whole page width on screen? (B2061331)
 - [x] ~~**Pick one for how a note opens on your phone.**~~ **Decided 2026-10-04: a note opens showing the whole page width, accepting the smaller text.** That is what it already does (both page edges on screen; a page you have saved a view for still opens exactly as you left it), so nothing changed in the app. Recorded on B2061331. (If the small text ever bothers you, pinch to zoom in — it stays put for that page.)
@@ -204,7 +204,10 @@ _Last updated: 2026-10-04._
 >       and the keyboard doesn't bury it. Nothing else on this is waiting on you; this is purely
 >       "does it feel right in your hand."
 
-## 🤖 Signup now has a bot check built in — two things needed from you to turn it on (B1160720/B1160723)
+## ✅ DONE 2026-10-04 — Signup bot check turned on, nothing for you here (B1160720/B1160723)
+
+> **✅ DONE 2026-10-04 — both steps below were completed by you:** Cloudflare Turnstile widget created, `VITE_TURNSTILE_SITE_KEY` set in Cloudflare Pages Production, the Turnstile secret pasted into Supabase (Attack Protection, provider Turnstile by Cloudflare) and captcha protection switched ON. Verified live: a real production signup created the `auth.users` row for mik@live.com at 2026-10-04 16:15:35 UTC, which can only exist if Supabase accepted the Turnstile token. "Confirm email" was then switched OFF in Supabase (Sign In / Providers); PR #1971 shipped the sign-up success state. The original text is kept below as history.
+
 
 > **Short version: I built the "prove you're not a robot" check (a small Cloudflare Turnstile widget) into the
 > sign-up form, and a hard cap on how many accounts can be created per hour/day so a script can't flood
@@ -214,14 +217,14 @@ _Last updated: 2026-10-04._
 > **1. Create the Cloudflare Turnstile widget and get two keys.** Go to
 > [dash.cloudflare.com](https://dash.cloudflare.com/login) → Turnstile → create a widget for planyr.io. It gives
 > you two keys: a **Site key** (safe to be public) and a **Secret key** (keep it private).
-> - [ ] **Paste the Site key into Cloudflare Pages** — your `planyr` project → Settings → Environment variables
+> - [x] **Paste the Site key into Cloudflare Pages** — your `planyr` project → Settings → Environment variables
 >       (Production) → add `VITE_TURNSTILE_SITE_KEY` → paste the Site key → redeploy. This is what turns the
 >       widget ON in the sign-up form; nothing shows up until this is set.
-> - [ ] **Paste the Secret key into Supabase** — project `lyeqzkuiwngunutlkkmi` → Project Settings →
+> - [x] **Paste the Secret key into Supabase** — project `lyeqzkuiwngunutlkkmi` → Project Settings →
 >       Authentication → **Bot and Abuse Protection** → **Enable CAPTCHA protection** → choose **Turnstile** from
 >       the dropdown → paste the Secret key → Save. This is what makes Supabase actually CHECK the widget's
 >       answer — without it, the widget shows but nothing enforces it.
-> - [ ] **Tell a Claude session once both are done** so it can confirm a real sign-up from a real browser both
+> - [x] **Tell a Claude session once both are done** so it can confirm a real sign-up from a real browser both
 >       shows the widget and gets rejected if the widget is skipped — that's the live check nothing here can run
 >       without those two keys.
 >
@@ -229,7 +232,7 @@ _Last updated: 2026-10-04._
 > check doing the job email confirmation used to do, new users can land in the app immediately instead of
 > waiting on an email. **Don't flip this before the bot check above is confirmed live** — doing it out of order
 > would leave sign-up with no gate at all for a while.
-> - [ ] **Supabase → project `lyeqzkuiwngunutlkkmi` → Authentication → Sign In / Providers → Email → turn OFF
+> - [x] **Supabase → project `lyeqzkuiwngunutlkkmi` → Authentication → Sign In / Providers → Email → turn OFF
 >       "Confirm email."** That's the whole step; say the word once it's flipped and I'll clean up the "check
 >       your email" wording that would otherwise sit there unused.
 
