@@ -27,6 +27,8 @@
  * the app. The only DOM writes it makes are the two self-heals described below.
  */
 
+import { layoutViewportHeight } from "./layoutViewport.js";
+
 const SCROLL_EPS = 0; // html/body are pinned — ANY nonzero scroll offset is already the defect
 const SCALE_EPS = 0.01; // visualViewport.scale drift tolerance (float rounding only)
 
@@ -54,7 +56,9 @@ export function keyboardUp(win) {
     const vv = win.visualViewport;
     const a = win.document && win.document.activeElement;
     const editable = !!(a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)));
-    return !!vv && editable && (win.innerHeight - vv.height) > 120;
+    // B2046224 ×3: measured layout height, not innerHeight — on iOS innerHeight can shrink with the
+    // keyboard, which made this read "no keyboard" during the owner's own Food test (21:10 UTC row).
+    return !!vv && editable && (layoutViewportHeight(win) - vv.height - (vv.offsetTop || 0)) > 120;
   } catch (_) { return false; }
 }
 

@@ -1103,7 +1103,10 @@ describe("SearchBox — whole-snapshot name search, his places first, one contro
 
     const sheet = src("components/BottomSheet.jsx");
     expect(sheet).toMatch(/onHeightChange\?\.\(heightPx\)/); // fires on every real height change, not a poll
-    expect(sheet).not.toMatch(/setInterval\(/);
+    // B2046224 ×3: the sheet now keeps ONE interval — re-reading the visual viewport while a field has
+    // focus (iOS can move it with no event). The height REPORT is still never a poll.
+    expect(sheet.match(/setInterval\(/g) || []).toHaveLength(1);
+    expect(sheet).toMatch(/setInterval\(measureViewport, VIEWPORT_WATCH_MS\)/);
   });
 
   it("B651872 — a search-select flyTo forces a hard view reset once it settles, so the tile grid can never stay stale", () => {
@@ -2223,7 +2226,11 @@ describe("BottomSheet.jsx — a generic drag-to-resize primitive, content-agnost
   });
 
   it("the sheet is positioned fixed to the viewport bottom, above the map's own z-index", () => {
-    expect(sheet).toMatch(/position:\s*"fixed",\s*left:\s*0,\s*right:\s*0,\s*bottom:\s*kbInset,\s*zIndex:\s*700/);
+    // B2046224 ×3: the fixed ROOT is the layout viewport at rest and the visual viewport's own box
+    // while typing; the sheet sits at the root's bottom.
+    expect(sheet).toMatch(/position:\s*"fixed",\s*left:\s*0,\s*right:\s*0,\s*zIndex:\s*700/);
+    expect(sheet).toMatch(/vvBox \? \{ top: vvBox\.top, height: vvBox\.height \} : \{ top: 0, bottom: 0 \}/);
+    expect(sheet).toMatch(/position:\s*"absolute",\s*left:\s*0,\s*right:\s*0,\s*bottom:\s*0/);
   });
 
   it("uses resolveSnap/heightForSnap from the pure lib file, not inline duplicate math", () => {
