@@ -104,7 +104,7 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
-import BottomSheet from "./BottomSheet.jsx";
+import BottomSheet, { FORM_OPEN_CSS } from "./BottomSheet.jsx";
 import DishesSection from "./DishesSection.jsx";
 import { colorForRating, textColorForRating } from "../lib/ratingColor.js";
 import { computeVisitAggregates, orderAgainEntries } from "../lib/visitAggregates.js";
@@ -114,7 +114,8 @@ import { directionsUrl } from "../lib/directions.js";
 import { formatCategory, formatAddress, formatCityFromAddress } from "../lib/formatPlace.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
-import ScoreMeter, { ScoreTapGrid, nudgeScore, DISH_SCORE_STEP } from "./ScoreMeter.jsx";
+import ScoreMeter from "./ScoreMeter.jsx";
+import { RATING_MIN, RATING_MAX, RATING_STEP, RATING_SLIDER_REST } from "../lib/ratingScale.js";
 import { cleanDraftDishes, newDraftDish } from "../lib/draftDishes.js";
 import { noAutofill } from "../lib/noAutofill.js";
 
@@ -148,18 +149,17 @@ function useIsMobile() {
 // iOS Safari zooms the whole page when a field under 16 px takes focus — on a phone that shoves the
 // sheet sideways and the form out of view. Fields in the visit form are therefore 16 px.
 const INPUT_FONT_PX = 16; // design-exempt: iOS Safari's focus-zoom threshold — below 16 px the page zooms on every field tap
-const NUDGE_STYLE = {
-  minWidth: 50, minHeight: 50, borderRadius: RADIUS.sm, border: "1px solid var(--border-default)", background: "var(--surface-page)",
-  color: "var(--text-primary)", cursor: "pointer", font: "inherit", fontWeight: 700, padding: 0,
-  fontSize: 20, // design-exempt: minus/plus glyph scaled to its own 50px phone button, same as ScoreMeter's phone nudge
-};
+// The scale lives in lib/ratingScale.js (one place; test/foodRatingSlider.test.js pins it).
+const RATING_TICKS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
-const RATING_MAX = 10;
-const RATING_MIN = 1;
-const RATING_STEP = 0.25;
-const RATING_SLIDER_REST = 5.5; // purely the thumb's visual resting spot before any touch — never committed as a value
-
-function RatingSlider({ value, onChange, label, isMobile = false }) {
+/* THE RATING CONTROL (Food and Ambiance, every entry point, phone and desktop): ONE native range
+ * slider, 1 to 10 in HALF-POINT steps, "Not rated" until touched. ⛔ PRODUCT DECISION (owner,
+ * 2026-10-05, CLAUDE.md "Owner product constraints" #15): never replaced with tap buttons, a
+ * stepper or whole numbers. History: B626576 shipped it; B2057920 (PR 1941) swapped it for a 1-10 tap
+ * grid + quarter nudges on phones ("ratings are hard to set with a thumb") and he got whole numbers
+ * back — he wants the slider. A saved quarter-point rating (8.75, from the quarter-step period)
+ * still displays as saved: the label reads the stored value, only the thumb sits on the nearest half. */
+export function RatingSlider({ value, onChange, label, isMobile = false }) {
   const active = value != null;
   const shown = active ? value : RATING_SLIDER_REST;
   const color = colorForRating(shown) || "var(--accent-food)";
@@ -186,28 +186,23 @@ function RatingSlider({ value, onChange, label, isMobile = false }) {
           </button>
         )}
       </div>
-      {isMobile ? (
-        // NEW-1 (phone): tap, don't drag — see ScoreMeter.jsx's "PHONE: TAP, DON'T DRAG" note.
-        <>
-          <ScoreTapGrid value={value} onChange={onChange} label={label} />
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
-            <button type="button" className="tap-target" onClick={() => onChange(nudgeScore(value, -DISH_SCORE_STEP))}
-              aria-label={`Decrease ${label} by a quarter point`}
-              style={NUDGE_STYLE}>−</button>
-            <span style={{ flex: 1, textAlign: "center", fontSize: FONT_SIZE.micro, color: "var(--text-tertiary)" }}>fine-tune by a quarter</span>
-            <button type="button" className="tap-target" onClick={() => onChange(nudgeScore(value, DISH_SCORE_STEP))}
-              aria-label={`Increase ${label} by a quarter point`}
-              style={NUDGE_STYLE}>+</button>
-          </div>
-        </>
-      ) : (
       <input
         type="range" min={RATING_MIN} max={RATING_MAX} step={RATING_STEP}
         value={shown} onChange={(e) => onChange(Number(e.target.value))}
         aria-label={label} aria-valuetext={active ? `${shown} out of ${RATING_MAX}` : "not rated"}
-        style={{ width: "100%", accentColor: color, cursor: "pointer" }}
+        data-testid="rating-slider"
+        style={{ width: "100%", accentColor: color, cursor: "pointer", height: isMobile ? 40 : undefined, margin: 0 }}
       />
-      )}
+      <div aria-hidden="true" style={{ position: "relative", height: 12, marginTop: 1 }}>
+        {RATING_TICKS.map((t) => (
+          <span key={t} style={{
+            position: "absolute", left: `${((t - RATING_MIN) / (RATING_MAX - RATING_MIN)) * 100}%`,
+            transform: "translateX(-50%)", fontSize: FONT_SIZE.micro, color: "var(--text-tertiary)",
+          }}>
+            {t}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
@@ -324,7 +319,7 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, submitLabel 
 
   const groupLabel = { display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-secondary)" };
   return (
-    <form onSubmit={submit} style={{ display: "flex", flexDirection: "column", gap: 10, padding: "10px 16px 0" }}>
+    <form onSubmit={submit} data-sheet-form="" style={{ display: "flex", flexDirection: "column", gap: 10, padding: "10px 16px 0" }}>
       {!initial && <DraftDishes rows={dishRows} setRows={setDishRows} isMobile={isMobile} />}
       {dishError && <div role="alert" data-testid="visit-dish-error" style={{ fontSize: 12, color: "var(--danger-text, var(--danger))" }}>{dishError}</div>}
       {initial?.what_i_had && (
@@ -615,7 +610,7 @@ function ActionsRow({ everVisited, onOpenForm, wishlisted, onToggleWishlist, wis
   );
 
   return (
-    <div data-testid="food-actions-row" data-sheet-sticky="bottom" data-hide-while-typing="" style={{
+    <div data-testid="food-actions-row" data-sheet-sticky="bottom" data-hide-while-typing="" data-hide-while-form="" style={{
       position: "sticky", bottom: 0, display: "flex", gap: 8, padding: "10px 16px",
       background: "var(--surface-raised)", borderTop: "1px solid var(--border-default)",
     }}>
@@ -656,7 +651,7 @@ function VisitCard({ visit, onDelete, editing, onOpenEdit, onCloseEdit, onSubmit
 
   if (editing) {
     return (
-      <div data-testid="food-visit-card-editing" style={{ borderBottom: "1px solid var(--border-default)" }}>
+      <div data-testid="food-visit-card-editing" data-sheet-form="" style={{ borderBottom: "1px solid var(--border-default)" }}>
         <VisitForm
           initial={visit} submitLabel="Save changes" pending={pending}
           onCancel={onCloseEdit} onSubmit={onSubmitEdit} onSaved={onCloseEdit}
@@ -938,12 +933,13 @@ export default function VisitPanel({
   }
 
   return (
-    <div data-testid="food-visit-panel" style={{
+    <div data-testid="food-visit-panel" data-food-panel="" style={{
       position: "absolute", top: 0, right: 0, bottom: 0, width: 340, maxWidth: "90vw", // matches FoodMap.jsx's own PANEL_WIDTH (its fly-to pan-offset assumes this)
       background: "var(--surface-raised)", borderLeft: "1px solid var(--border-default)",
       boxShadow: "-8px 0 24px rgba(0,0,0,0.18)", zIndex: 600, display: "flex", flexDirection: "column",
       overflowY: "auto",
     }}>
+      <style>{FORM_OPEN_CSS}</style>
       {body}
     </div>
   );

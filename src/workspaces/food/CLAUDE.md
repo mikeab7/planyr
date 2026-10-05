@@ -89,10 +89,12 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
   `data-edit-card`; the Leaflet host is `isolation: isolate` so map controls never draw over it. The PICTURE harness —
   full app, iOS keyboard + accessory bar drawn, GAP/CARD/CONTROLS/OVERLAY asserted, screenshots — is
   verify-food-ios-screens (ui-audit); verify-food-ios-keyboard is the fixture-page check. There is NO "What I had" input any more; old
-  visits' saved `what_i_had` text stays readable and is never rewritten. At phone width ratings are a
-  1-10 tap grid (`ScoreTapGrid` in ScoreMeter), desktop keeps the slider. Phone harness:
+  visits' saved `what_i_had` text stays readable and is never rewritten. Visit Food/Ambiance ratings are ONE half-step
+  slider (1-10) on every device — `lib/ratingScale.js`, `## Owner product constraints` #15 (never tap buttons); the dish score is
+  also one slider on a phone. Open forms (`data-sheet-form`) hide the "Log a visit" bar; the sheet's drag engine + release rule are
+  `BottomSheet.jsx` + `lib/bottomSheetSnap.js`; harness: verify-food-rating-and-sheet (ui-audit). Phone harness:
   verify-food-visit-phone (ui-audit) + its food-panel fixture page.
-- `components/ScoreMeter.jsx` (B1873008) — the per-dish score control (half-point, 1.0–10.0). A
+- `components/ScoreMeter.jsx` (B1873008) — the per-dish score control (quarter-step slider, 1.0–10.0; no tap grid). A
   deliberate sibling of `VisitPanel.jsx`'s own `RatingSlider`, not a replacement — see its own
   header for why the two stayed separate.
 - `lib/foodStore.js` — the one seam to Supabase: place/visit queries, visit CRUD, the manual-
