@@ -3111,6 +3111,18 @@ export function lotNumberFieldForUrl(url) {
   return null;
 }
 
+/* The attribute the SAVED COPY (Drive snapshot) labels each lot with — the same account the live CAD shows,
+ * so a lot reads one number whether the county server is up or down (owner decision 2026-10-05).
+ * Chambers: `geo_id` — the state record's GEO_ID IS the CCAD account (lot 15835 → 00321-02000-00100-100001,
+ * identical to the live `Accounts.Account`; `prop_id` is the county parcel number, not the account).
+ * Fort Bend: `quickrefid` (the R-number FBCAD shows, same as live). Waller: `prop_id` — Waller's live source is the
+ * image-only statewide layer, so there is no live number to match; prop_id is the property id Planyr's record
+ * panel already calls the account (GEO_ID is Waller's separate geographic id). null = no number. Pure. */
+export const SNAPSHOT_LOT_NUMBER_FIELD = { chambers: "geo_id", waller: "prop_id", fortbend: "quickrefid" };
+export function snapshotLotNumberField(county) {
+  return SNAPSHOT_LOT_NUMBER_FIELD[String(county || "").toLowerCase().replace(/\s+/g, "")] || null;
+}
+
 /* A county key's name as the TxGIO statewide layer spells it in its `county` column (upper-case: 'CHAMBERS',
  * 'FORT BEND', 'AUSTIN'), read off the county's registry label ("Chambers County · CCAD", "Fort Bend · FBCAD").
  * null when it cannot be told — callers then fall back to drawing the whole state. Pure. */

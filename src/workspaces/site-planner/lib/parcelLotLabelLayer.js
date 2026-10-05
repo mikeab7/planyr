@@ -22,10 +22,11 @@ const VIEW_INSET = 6; // keep a number off the very edge of the map
 
 /* A feature's OUTER ring as [{x,y}] in WORLD PIXELS at zoom `z` (pan-independent, so the interior
  * fit that `interiorFitter` caches by ring identity survives a pan). Cached on the feature per zoom. */
-function worldRing(map, lyr, z) {
-  const c = lyr.__lotRing;
+const ringCache = new WeakMap(); // feature -> { z, ring }
+function worldRing(map, feature, z) {
+  const c = ringCache.get(feature);
   if (c && c.z === z) return c.ring;
-  const g = lyr.feature && lyr.feature.geometry;
+  const g = feature && feature.geometry;
   if (!g) return null;
   let rings = null;
   if (g.type === "Polygon") rings = [g.coordinates[0]];
@@ -41,8 +42,76 @@ function worldRing(map, lyr, z) {
     a = Math.abs(a / 2);
     if (a > bestArea) { bestArea = a; best = pts; }
   }
-  lyr.__lotRing = { z, ring: best };
+  ringCache.set(feature, { z, ring: best });
   return best;
+}
+
+/* The shared layout + draw core: `forEachFeature(cb)` hands it every GeoJSON feature that may be in view
+ * (the live outline layer's own, or the saved copy's); it keeps the ones with a number, lays them out with
+ * the collision engine and draws one marker per placed number into `group`. */
+function paintLotNumbers({ map, group, field, floor, measure, getObstacles, getInset, forEachFeature }) {
+  const z = map.getZoom();
+  if (!field || !(z >= floor)) return;
+  const min = map.getPixelBounds().min;
+  const size = map.getSize();
+  // `getInset`: a host whose map container is larger than what the person can see (the Site planner
+  // over-scans its basemap so a pan never shows blank tile) says how much, so numbers sit in the VISIBLE part.
+  let inset = VIEW_INSET;
+  try { inset += Math.max(0, Number(getInset && getInset()) || 0); } catch (_) { /* default inset */ }
+  const view = { x0: min.x + inset, y0: min.y + inset, x1: min.x + size.x - inset, y1: min.y + size.y - inset };
+  const lots = [];
+  forEachFeature((f) => {
+    if (!f) return;
+    const text = lotNumberText(f.properties, field);
+    if (!text) return;
+    const ring = worldRing(map, f, z);
+    if (!ring) return;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of ring) { if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x; if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y; }
+    if (x1 < view.x0 || y1 < view.y0 || x0 > view.x1 || y0 > view.y1) return; // off-screen
+    // A lot larger than the screen is numbered where you can SEE it: lay out against the visible part.
+    const seen = (x0 < view.x0 || y0 < view.y0 || x1 > view.x1 || y1 > view.y1) ? clipRingToRect(ring, view) : ring;
+    if (!seen) return;
+    lots.push({ id: String(f.id != null ? f.id : lots.length), text, ring: seen });
+  });
+  if (!lots.length) return;
+  let obstacles = [];
+  try { obstacles = (getObstacles && getObstacles()) || []; } catch (_) { obstacles = []; }
+  const placed = layoutLotNumbers({ lots, origin: { x: min.x, y: min.y }, measure, fontPx: LOT_NO_FONT_PX, obstacles });
+  const esc = (t) => String(t).replace(/[&<>"']/g, "");
+  for (const p of placed) {
+    const ll = map.containerPointToLatLng(L.point(p.x, p.y));
+    const el = L.divIcon({
+      className: "planyr-lot-no",
+      iconSize: [p.w, p.h],
+      iconAnchor: [p.w / 2, p.h / 2],
+      html: `<span data-lot-no="${esc(p.text)}" style="display:block;width:${p.w}px;text-align:center;white-space:nowrap;pointer-events:none;`
+        + `font:600 ${LOT_NO_FONT_PX}px/${p.h}px 'Inter',system-ui,sans-serif;color:${PARCEL_OUTLINE_COLOR};`
+        + `text-shadow:0 0 2px ${LABEL_HALO},0 0 2px ${LABEL_HALO},0 0 3px ${LABEL_HALO},0 0 3px ${LABEL_HALO}">${esc(p.text)}</span>`,
+    });
+    L.marker(ll, { icon: el, interactive: false, keyboard: false, zIndexOffset: -500 }).addTo(group);
+  }
+}
+
+/* The SAVED COPY's numbers (owner decision 2026-10-05): the county's Drive snapshot draws its own lot
+ * numbers from `field` — the same account the live CAD would show — so a lot reads the SAME number whether
+ * the county server is up or down. `getFeatures()` is the snapshot's in-view features. Attached to the
+ * snapshot's GeoJSON layer; returns { relayout }. */
+export function attachSnapshotLotNumbers(layer, { field, getFeatures } = {}) {
+  if (!layer || !field || typeof getFeatures !== "function") return { relayout() {}, clear() {} };
+  const measure = bestMeasurer({ weight: 600 });
+  let map = null, group = null;
+  const relayout = () => {
+    if (!map || !group) return;
+    group.clearLayers();
+    paintLotNumbers({ map, group, field, floor: 0, measure, forEachFeature: (cb) => getFeatures().forEach(cb) });
+  };
+  layer.on("add", () => { map = layer._map; if (map) group = L.layerGroup().addTo(map); });
+  layer.on("remove", () => {
+    if (group && map) { try { map.removeLayer(group); } catch (_) { /* detached */ } }
+    group = null; map = null;
+  });
+  return { relayout, clear: () => { if (group) group.clearLayers(); } };
 }
 
 export function attachLotNumbers(layer, { hint, getObstacles, getInset } = {}) {
@@ -93,49 +162,11 @@ export function attachLotNumbers(layer, { hint, getObstacles, getInset } = {}) {
     timer = null;
     if (!map || !group) return;
     clear();
-    const z = map.getZoom();
     const floor = Number(layer.options && layer.options.minZoom) || 0;
-    if (!field || !(z >= floor)) return;
-    const min = map.getPixelBounds().min;
-    const size = map.getSize();
-    // `getInset`: a host whose map container is larger than what the person can see (the Site planner
-    // over-scans its basemap so a pan never shows blank tile) says how much, so numbers sit in the VISIBLE part.
-    let inset = VIEW_INSET;
-    try { inset += Math.max(0, Number(getInset && getInset()) || 0); } catch (_) { /* default inset */ }
-    const view = { x0: min.x + inset, y0: min.y + inset, x1: min.x + size.x - inset, y1: min.y + size.y - inset };
-    const lots = [];
-    layer.eachFeature((lyr) => {
-      const f = lyr.feature;
-      if (!f) return;
-      const text = lotNumberText(f.properties, field);
-      if (!text) return;
-      const ring = worldRing(map, lyr, z);
-      if (!ring) return;
-      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-      for (const p of ring) { if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x; if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y; }
-      if (x1 < view.x0 || y1 < view.y0 || x0 > view.x1 || y0 > view.y1) return; // off-screen
-      // A lot larger than the screen is numbered where you can SEE it: lay out against the visible part.
-      const seen = (x0 < view.x0 || y0 < view.y0 || x1 > view.x1 || y1 > view.y1) ? clipRingToRect(ring, view) : ring;
-      if (!seen) return;
-      lots.push({ id: String(f.id != null ? f.id : lots.length), text, ring: seen });
+    paintLotNumbers({
+      map, group, field, floor, measure, getObstacles, getInset,
+      forEachFeature: (cb) => layer.eachFeature((lyr) => cb(lyr.feature)),
     });
-    if (!lots.length) return;
-    let obstacles = [];
-    try { obstacles = (getObstacles && getObstacles()) || []; } catch (_) { obstacles = []; }
-    const placed = layoutLotNumbers({ lots, origin: { x: min.x, y: min.y }, measure, fontPx: LOT_NO_FONT_PX, obstacles });
-    const esc = (t) => String(t).replace(/[&<>"']/g, "");
-    for (const p of placed) {
-      const ll = map.containerPointToLatLng(L.point(p.x, p.y));
-      const el = L.divIcon({
-        className: "planyr-lot-no",
-        iconSize: [p.w, p.h],
-        iconAnchor: [p.w / 2, p.h / 2],
-        html: `<span data-lot-no="${esc(p.text)}" style="display:block;width:${p.w}px;text-align:center;white-space:nowrap;pointer-events:none;`
-          + `font:600 ${LOT_NO_FONT_PX}px/${p.h}px 'Inter',system-ui,sans-serif;color:${PARCEL_OUTLINE_COLOR};`
-          + `text-shadow:0 0 2px ${LABEL_HALO},0 0 2px ${LABEL_HALO},0 0 3px ${LABEL_HALO},0 0 3px ${LABEL_HALO}">${esc(p.text)}</span>`,
-      });
-      L.marker(ll, { icon: el, interactive: false, keyboard: false, zIndexOffset: -500 }).addTo(group);
-    }
   };
   const sched = () => { if (timer) clearTimeout(timer); timer = setTimeout(relayout, RELAYOUT_DEBOUNCE_MS); };
 
