@@ -74,11 +74,11 @@ describe("NEW-2 — every toggleable GIS layer exposes opacity", () => {
   it("every layer KIND actually implements setOpacity — a slider that moves nothing is worse than none", () => {
     const kinds = new Set(Object.values(ALL_LAYERS).map((c) => c.kind || "dynamic"));
     expect([...kinds].sort()).toEqual(
-      ["contours", "dynamic", "esriFeature", "esriImage", "flowdir", "mapillary", "overpass", "pipelineCorridor", "vector", "vectorLine"],
+      ["contours", "dynamic", "esriFeature", "esriImage", "flowdir", "mapillary", "overpass", "pipelineCorridor", "sdaBedrock", "vector", "vectorLine"],
     );
     // dynamic / esriImage come from esri-leaflet with a native setOpacity; the rest are ours.
     const evidence = read("lib/evidenceLayers.js"); // overpass + mapillary
-    expect((evidence.match(/group\.setOpacity = /g) || []).length).toBe(2);
+    expect((evidence.match(/group\.setOpacity = /g) || []).length).toBe(3);
     const terrain = read("lib/terrainLayers.js"); // contours + flowdir share one factory
     expect(terrain).toMatch(/group\.setOpacity = /);
     const vec = read("lib/vectorOverlay.js"); // vector + vectorLine + pipelineCorridor + the Georgia stream-buffer corridor

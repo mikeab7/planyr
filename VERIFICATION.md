@@ -180,6 +180,33 @@ Sandbox-proven only in part: the lost-press recovery (`e2e/select-parcels-first-
 3. Open the page once as `…/#/site?planyrDiag=1`, repeat step 1, then in the console run `window.__selectParcelsTrace()`. **Expect:** a `press-down` / `press-up` / `click` / `mode-on` sequence; a `press-lost-recovered` entry means a press was caught and recovered (note its time).
 4. Query `client_errors` for `event:select-parcels-click-lost` and `event:select-parcels-mode-reset` since the deploy. **Expect:** none — any row names the mechanism (lost press vs engage-then-reset) and re-opens B2088016 with that row as the evidence.
 5. Say exactly what was touched (nothing is written by this check).
+### V1518080 — B2081251: the Shallow rock (depth to bedrock) layer paints real SSURGO data on planyr.io `Blocker: live-GIS`
+
+**Steps** (Chrome on planyr.io, or `node ui-audit/verify-ssurgo-bedrock.mjs https://planyr.io`; read the served chunk hash in the same observation):
+1. Run the harness. **Expect:** the Piedmont (Gwinnett) KNOWN-GOOD arm paints ≥ 1 shallow-rock unit (a run where it paints none is VOID); Cherokee/Savannah/Katy answer without error (Savannah/Katy may legitimately paint few or none).
+2. Throwaway plan at **33.95 / -84.00**, Layers → Base & terrain → **Shallow rock (depth to bedrock)** on. **Expect:** dark-red / orange / yellow map-unit polygons, status dot blue, hover names the unit and "bedrock as shallow as N in", the row's ⓘ states depth is the shallowest soil in the unit and that unpainted ≠ no rock; **the map does not move**.
+3. Same on a Houston plan. **Expect:** the row is listed; few or no polygons (deep Gulf Coast soils) and no error.
+4. File → Export PDF with it on (Piedmont plan). **Expect:** the polygons print in the same colours.
+- **Stopping rule:** closes on a dated pass, or a failed step filed as a recurrence on B2081251 (a WFS/SDA format difference is the likely failure: paste the response into the item).
+
+### V1518081 — B2081252: point and polygon layers appear in the PDF/PNG export `Blocker: none`
+
+**Steps** (throwaway plan only): Houston-area plan, turn on **EPA Superfund / RCRA cleanups** and **Airports** at a zoom where dots show, File → Export PDF. **Expect:** the dots appear on the sheet in the screen's colours. Repeat on a Georgia plan with **Hazardous sites** and **Critical habitat**. **Expect:** points and the filled habitat polygon print.
+- **Stopping rule:** closes on a dated pass.
+### V1517458 — B2095123: logging a visit on an open manual pin shows it in Past visits immediately
+
+Sandbox-proven: `test/foodPastVisitsLive.test.js`. **Steps** (signed in as `e2e@planyr.test` on planyr.io after the deploy; `/version.json` read in the same call): 1. Food → drop a manual pin, name it `zz-verify`, log a visit. **Expect:** the pin closes into a manual pin. 2. Reselect it, log a second visit without closing the panel. **Expect:** "Past visits · 2" appears at once. Delete the throwaway visits.
+
+
+### V1517457 — B2095122: a pasted Land (and Building sale) comp saves and survives a reload
+
+Sandbox-proven: `test/compToRowEnumBlank.test.js`. **Steps** (signed in as `e2e@planyr.test` on planyr.io after the deploy; read `/version.json` in the same call and match it to the merge commit): 1. Comps → add a comp by pasting land text (any 1–2 line land listing). **Expect:** it saves with no error. 2. Reload. **Expect:** the comp is still there. 3. Repeat with a pasted building sale. **Expect:** same. Delete the throwaway comps afterwards.
+
+
+### V1517456 — B2095121: a refused Schedule cloud save shows a red "did NOT save to the cloud" toast (test account reproduces the 403 on demand)
+
+Sandbox-proven: `test/scheduleSaveFailLoud.test.js`. **Steps** (signed in as `e2e@planyr.test` on planyr.io after the deploy; read `/version.json` in the same call and match it to the merge commit): 1. Open Schedule, edit any task's Owner cell. **Expect:** within a few seconds a red toast "Your change did NOT save to the cloud (42501)…" appears (before this fix: nothing). 2. Reload. **Expect:** the edit is gone (the root defect, B2095121, is still open — that is the expected result of this check).
+
 
 ### V1504304 — B2086368: delete a file from the Library's Recent / Unfiled lists, restore it, delete it forever `Blocker: auth`
 

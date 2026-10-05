@@ -124,7 +124,7 @@ Sandbox-proven on WebKit (touch emulation, `ui-audit/verify-notes-touch-place.mj
 - **Stopping rule:** closes on a dated pass of 1–5, or a failed step filed as a recurrence on B1960480.
 - **2026-10-04 — owner on-device pass: Michael verified B1960480 (#1880) on his iPhone — double-tap raises the keyboard and the first text lands in the new box. Chunk hash not captured; accepted as his own pass.**
 
-### V1474944 — B2056784: no full-screen button on iPhone Safari; still present and working on desktop Chrome `Blocker: real-device` ✅ **PASSED 2026-10-04 — live-verified by Michael on his own devices** (build `0460de1` on desktop)
+### V1474944 — B2056784 (PR #1936): no full-screen button on iPhone Safari; still present and working on desktop Chrome `Blocker: real-device` ✅ **PASSED 2026-10-04 — live-verified by Michael on his own devices** (build `0460de1` on desktop)
 
 Sandbox-proven: `test/fullscreenSupport.test.js`, `e2e/fullscreen-gate.spec.js` (API stubbed off at iPhone width; iPad width, standalone and desktop arms). The real-device confirmation is what is left.
 1. On the iPhone, open `planyr.io`; read `/version.json` in the same check. **Expect:** the header's right side shows the sync badge and account chip with NO four-corner button and no gap between them.
@@ -2515,7 +2515,7 @@ libs and point `SEQ_VENDOR` at them. Nothing pending.
 
 ## ✅ Verified / ❌ Failed — history
 
-### V1440080 — B2014992: every pin on the Dashboard Locations map sits inside its own parcel (Katz in particular) `Blocker: auth` — ✅ PASSED 2026-10-03
+### V1440080 — B2014992 (PR #1918): every pin on the Dashboard Locations map sits inside its own parcel (Katz in particular) `Blocker: auth` — ✅ PASSED 2026-10-03
 
 Sandbox-proven: `test/dashboardParcelAnchors.test.js` (5, red on pre-change source). Pending: the signed-in dashboard against real parcels. Read-only — change nothing.
 **Steps** (planyr.io, signed in; read the served chunk hash in the same observation):
@@ -3833,3 +3833,7 @@ Sandbox-proven: `test/e2eSessionRoute.test.js` (18, mutation-checked). Pending: 
 3. Password sign-in still needs a captcha for real users. **Expect:** unchanged `captcha_failed`.
 
 **✅ PASSED 2026-10-04 (Claude Code session, signed in headlessly on planyr.io, build `21216dd` read in the same call via `/version.json`):** `node ui-audit/verify-signed-in-session.mjs https://planyr.io` → `PASS signed in as e2e@planyr.test | fixture e2e-fixture-site visible: true`. First attempt on build `2375282` answered 503 not-configured (deploy predated `SUPABASE_SERVICE_ROLE_KEY`); after Michael's republish the route works.
+
+### V1518160 — B2095824: the e2e sign-in route authenticates against production (re-proof) ✅ PASSED 2026-10-05
+**Steps → named expected result:** (1) `curl` `/version.json` no-store → build id; (2) `node ui-audit/verify-signed-in-session.mjs https://planyr.io` → route answers 200 with tokens (a 404 would mean disabled-or-wrong-key and fails the helper), then the page proves the Supabase user is `e2e@planyr.test` and RLS returns `e2e-fixture-site`.
+**Result:** PASS — `signed in as e2e@planyr.test | fixture e2e-fixture-site visible: true`; build `ccaca0c` read in the same run (= `origin/main` tip). Key value never printed; key-format mismatch refuted (admin calls succeeded).

@@ -183,7 +183,13 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   const visitsForSelected = useMemo(() => {
     if (!selected) return [];
     if (selected.kind === "place") return visits.filter((v) => v.place_id === selected.place.id);
-    if (selected.kind === "manualPin") return visits.filter((v) => selected.pin.visitIds.includes(v.id));
+    // B2095123: match by the pin's own (name, lat, lon) key against the LIVE visits, never by the
+    // `visitIds` snapshot taken when the pin was selected — a visit logged while the panel is open
+    // (optimistic or reloaded) is not in that snapshot and so never appeared until a reselect.
+    if (selected.kind === "manualPin") {
+      const key = manualGroupKey(selected.pin.name, selected.pin.lat, selected.pin.lon);
+      return visits.filter((v) => !v.place_id && manualGroupKey(v.custom_name, v.custom_lat, v.custom_lon) === key);
+    }
     return [];
   }, [selected, visits]);
 
