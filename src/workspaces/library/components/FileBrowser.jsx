@@ -824,7 +824,8 @@ export default function FileBrowser({
         <TrashNotice notice={delNotice} onDismiss={() => setDelNotice(null)} />
 
         {/* file list */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "8px 12px 4px" }}>
+        {/* NEW-3 — bottom room so the last file can scroll clear of the shell's floating Help "?" */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "8px 12px 56px" }}>
           {showDeleted ? (
             <RecentlyDeletedList rows={deadShown} pendingPurge={pendingPurge} setPendingPurge={setPendingPurge} onRestore={restoreRow} onPurge={purgeRow} />
           ) : (
