@@ -15,8 +15,9 @@ import ErrorBoundary from "./ErrorBoundary.jsx";
 import ModuleLoader from "../shared/ui/ModuleLoader.jsx";
 import AccountControl from "./AccountControl.jsx";
 import { useProfile } from "../shared/profile/useProfile.js";
+import { setOrgName } from "../shared/profile/orgNameStore.js";
 import { setTelemetryModule } from "../shared/telemetry/clientErrors.js";
-import { useHashRoute, unknownModuleSlug, isAdminRoute, isDesignRoute, isDashboardRoute, readRoute, buildHash, INITIAL_HASH_EMPTY, ORG_CAPABLE_MODULES, reviewOpenTarget } from "./route.js";
+import { useHashRoute, unknownModuleSlug, isAdminRoute, isDesignRoute, isDashboardRoute, readRoute, buildHash, INITIAL_HASH_EMPTY, ORG_CAPABLE_MODULES, reviewOpenTarget, orgScopeTarget } from "./route.js";
 import { pageTitle } from "./pageTitle.js";
 import { writeLastRoute, seedBootRoute } from "./lastRoute.js";
 import { isFreshRoutelessBoot, firstLandingRedirect, resolveHasAnyProjects } from "./firstLanding.js";
@@ -46,6 +47,10 @@ const DesignGallery = lazy(() => import("../workspaces/design-gallery/DesignGall
 // one of them, so it's deliberately not a WORKSPACES entry either — same lazy/not-a-workspace
 // shape as AdminGate/DesignGallery above (isDashboardHash below, no header tab of its own).
 const Dashboard = lazy(() => import("../workspaces/dashboard/Dashboard.jsx"));
+// NEW-2 (company workspace card) — the Site tab at COMPANY scope: a map of every project, one pin
+// each. Lazy and not a WORKSPACES entry: it is the Site tab's org-scope face, mounted only while
+// the route is #/org/site (the Site Planner is not mounted for it).
+const OrgSitesView = lazy(() => import("../workspaces/site-planner/components/OrgSitesView.jsx"));
 // NEW-1 (keyboard shortcuts page, 2026-09-12) — same lazy/not-a-workspace shape as the three
 // above: reachable from every route via the global "?" listener below and the Help menu's
 // "Keyboard shortcuts" row (HelpReportControl.jsx), never a header tab of its own.
@@ -234,7 +239,14 @@ export default function Shell() {
   // active" true for free (AppHeader's tabs highlight on `m.id === module`, and `active` here
   // never equals a real workspace id while it's null) and keeps a fresh dashboard boot from
   // mounting the Site Planner's chunk just to hide it underneath.
-  const active = isDashboardHash ? null : routedModule;
+  // NEW-2 (admin build-out) — the admin page, once it is ACTUALLY showing (a confirmed allowlisted
+  // account — AdminGate reports it), is a layer over a workspace that must not keep acting like the
+  // visible module: an "active" Site Planner rewrote `#/admin` to `#/site` the moment its boot
+  // resolved (measured: ~2.5 s after a cold load), dropping the owner off the page. So no workspace is
+  // active while it shows — the Dashboard's shape. Deliberately keyed on "shown", NOT on the hash: a
+  // non-admin typing #/admin must keep the ordinary active workspace (the 404-equivalent).
+  const [adminShown, setAdminShown] = useState(false);
+  const active = isDashboardHash || (isAdminHash && adminShown) ? null : routedModule;
   const [user,      setUser]      = useState(null);
   // NEW-1 — `user` starts null on every load and only resolves once Supabase's auth listener
   // reports back, so a signed-in visitor briefly sees the SIGNED-OUT "Sign in" pill before the
@@ -295,7 +307,8 @@ export default function Shell() {
   // ORG SCOPE (NEW-1) — the switcher's "Organization" entry, reachable from every workspace
   // the same way "New project" is: it always lands in Notes (the first org-capable module),
   // regardless of where it was picked from.
-  const goOrg = () => navigate({ module: "notes", projectId: null, cross: false, org: true });
+  // NEW-2 — now keeps the tab you are on (orgScopeTarget, route.js) instead of always landing in Notes.
+  const goOrg = () => navigate(orgScopeTarget(active));
   // Cross-workspace "open this file" intent (NEW-1). The global Project Files panel is
   // reachable from every workspace, but Document Review is lazy-mounted — so a file clicked
   // from the Site side can't be handed to a component that doesn't exist yet. We route to
@@ -555,8 +568,11 @@ export default function Shell() {
   // file list, and the booted Schedule iframe all survive. Hidden workspaces still follow
   // the route's project (their route→state effects stay live); writing to the URL and global
   // keyboard handling are gated on the `isActive` prop each workspace now receives.
-  const [visited, setVisited] = useState(() => new Set([active]));
-  useEffect(() => { setVisited((v) => (v.has(active) ? v : new Set(v).add(active))); }, [active]);
+  // NEW-2 — at company scope the Site tab is the all-sites map (OrgSitesView), not the Site Planner:
+  // the planner is not mounted for it (and, when already open, is held inactive below).
+  const orgSite = !!org && active === "site-planner";
+  const [visited, setVisited] = useState(() => new Set(orgSite ? [] : [active]));
+  useEffect(() => { if (orgSite) return; setVisited((v) => (v.has(active) ? v : new Set(v).add(active))); }, [active, orgSite]);
 
   /* NEW-2 (B848833) — A SOFT-DELETED PROJECT MUST NOT SILENTLY STAY OPEN AND WRITABLE.
    *
@@ -715,6 +731,9 @@ export default function Shell() {
   // Profile (name/org) for the signed-in user — sourced from the profiles table via
   // the useProfile hook, with a never-blank display name (B297/B298).
   const profileApi = useProfile(user);
+  // NEW-2 — the organization's name has ONE home (orgNameStore): mirrored here from the profile in a
+  // single effect, read by the switcher's company card and the "Map / <Company>" crumb.
+  useEffect(() => { setOrgName(profileApi.org); }, [profileApi.org]);
 
   const openAuth    = () => { setRecovery(false); setAuthOpen(true); };
   const openAccount = (tab) => { setRecovery(false); setAuthTab(tab); setAuthOpen(true); };
@@ -756,8 +775,8 @@ export default function Shell() {
             boundary (stable key — a crash in one is contained and shows only when that tab
             is active; "Try again" resets in place) and its own Suspense (the per-module
             loader shows only on the first visit, while the lazy chunk loads). */}
-        {WORKSPACES.filter((w) => visited.has(w.id) || w.id === active).map((w) => {
-          const isActive = w.id === active;
+        {WORKSPACES.filter((w) => visited.has(w.id) || (w.id === active && !(orgSite && w.id === "site-planner"))).map((w) => {
+          const isActive = w.id === active && !(orgSite && w.id === "site-planner");
           const Comp = w.Comp;
           // NEW-2 (B848833) — a workspace never mounts (or stays mounted) for a project the gate
           // has confirmed is soft-deleted / nonexistent. This is what makes the block real rather
@@ -830,6 +849,24 @@ export default function Shell() {
             </div>
           );
         })}
+        {orgSite && (
+          <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column" }}>
+            <ErrorBoundary label="Company sites" moduleId="site-planner">
+              <Suspense fallback={null}>
+                <OrgSitesView
+                  onShellSwitch={switchModule}
+                  authControl={authControl}
+                  accountActive={!!user}
+                  onGoDashboard={goDashboard}
+                  onNavigate={navigate}
+                  onNewProject={newProject}
+                  onSelectOrg={goOrg}
+                  onFixLocations={openMissingLocationsInSitePlanner}
+                />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
+        )}
         {/* B711904 (NEW-1), pointer-events fixed B1154240 — the admin page. Only mounted (lazy
             chunk + the allowlist RPC call) while the hash actually reads #/admin, so a normal
             session never pays for either. AdminGate itself renders null for anyone not on the
@@ -845,7 +882,7 @@ export default function Shell() {
         {isAdminHash && (
           <div style={{ position: "absolute", inset: 0, zIndex: 1, pointerEvents: "none" }}>
             <Suspense fallback={null}>
-              <AdminGate user={user} onExit={goDashboard} />
+              <AdminGate user={user} onExit={goDashboard} onShownChange={setAdminShown} />
             </Suspense>
           </div>
         )}

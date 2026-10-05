@@ -198,12 +198,10 @@ const TOP_EDGE_REACH_GAP = 10;
  * retune the title. A title that wants the smaller, size-tracks-body look is free to say so
  * explicitly via its own size control (NEW-5, `titleStyle.fontSize`), which this redesign adds. */
 const NOTE_BODY_FONT_PX = 11;
-const TITLE_SCALE = { narrow: 1.75, wide: 2.05 };
-const TITLE_TUNED_BODY_PX = 15;
-const TITLE_DEFAULT_PX = {
-  narrow: Math.round(TITLE_TUNED_BODY_PX * TITLE_SCALE.narrow),
-  wide: Math.round(TITLE_TUNED_BODY_PX * TITLE_SCALE.wide),
-};
+/* ⛔ THE TITLE DEFAULTS TO 16 ON EVERY DEVICE (NEW-1, owner 2026-10-05: "I like that" about 16). The old
+ * ratio-to-body scale (42px desktop / 34px phone, B1203504) read as far too big; weight (700), not size,
+ * now carries the heading hierarchy. A size picked in the toolbar (`titleStyle.fontSize`) still wins. */
+const TITLE_DEFAULT_PX = { narrow: 16, wide: 16 };
 export const noteTitleFontPx = (narrow) => (narrow ? TITLE_DEFAULT_PX.narrow : TITLE_DEFAULT_PX.wide);
 
 /* Editor surface styling. It lives here (rather than in src/index.css) so it rides the lazy
@@ -3087,6 +3085,14 @@ const NoteEditor = forwardRef(function NoteEditor({
      * is side-effect-free beyond clearing that one piece of state, so calling it unconditionally
      * changes nothing about how the input itself handles the press. */
     cancelPendingPlace();
+    /* ⛔ A PRESS ELSEWHERE LEAVES THE TITLE (NEW-5). Every press below that claims the canvas calls
+     * preventDefault, which also stops the browser moving focus off the title <input> — so its text stayed
+     * highlighted after a click or double-click on the page. Blur it and collapse its selection first. */
+    const ae = document.activeElement;
+    if (ae instanceof HTMLInputElement && ae.getAttribute("data-testid") === "note-title" && ae !== el) {
+      try { ae.setSelectionRange(0, 0); } catch { /* not selectable */ }
+      ae.blur();
+    }
     if (el.closest("input, textarea, select, button, a")) return;
 
     /* ⛔ A PRESS INSIDE AN ANCHORED BLOCK IS A PRESS ON CONTENT. This was the owner's ORIGINAL
@@ -4913,6 +4919,12 @@ const NoteEditor = forwardRef(function NoteEditor({
    * React state — the same "the editor is the one source of truth" rule the toolbar's own
    * active-state reads follow. */
   const titleStyleNow = (!editor || editor.isDestroyed) ? {} : (editor.state.doc.attrs?.titleStyle || {});
+  /* One size answer shared by the title input and its width ghost (NEW-4). */
+  const titleFontStyle = {
+    fontSize: (titleStyleNow.sup || titleStyleNow.sub)
+      ? Math.round((titleStyleNow.fontSize || noteTitleFontPx(narrow)) * 0.7)
+      : (titleStyleNow.fontSize || noteTitleFontPx(narrow)),
+  };
 
   const edited = editedLabel(updatedAt);
 
@@ -5354,8 +5366,21 @@ const NoteEditor = forwardRef(function NoteEditor({
               so this is the same fixed `TITLE_BAND_GAP` it always was until something above the
               body's origin needs more room than that. */}
           <div style={{ marginBottom: TITLE_BAND_GAP + sheetGrowGap }}>
+            {/* ⛔ THE TITLE HUGS ITS TEXT (NEW-4). A ghost span holding the same text sizes an inline grid;
+                the input fills that one cell, so the box is as wide as the words (min = the placeholder),
+                wraps at the page edge, and the rest of the band is ordinary page for a double-click. */}
+            <div data-testid="note-title-wrap" style={{ display: "inline-grid", maxWidth: "100%", verticalAlign: "top" }}>
+            <span
+              aria-hidden="true"
+              style={{
+                gridArea: "1 / 1", visibility: "hidden", whiteSpace: "pre", overflow: "hidden",
+                fontWeight: titleStyleNow.bold ? 800 : 700, letterSpacing: "-0.01em", padding: "2px 2px 2px 0",
+                ...titleFontStyle,
+              }}
+            >{(title || "Untitled page") + " "}</span>
             <input
               data-testid="note-title"
+              size={1}
               value={title}
               placeholder="Untitled page"
               aria-label="Page title"
@@ -5374,7 +5399,7 @@ const NoteEditor = forwardRef(function NoteEditor({
                 editor.commands.focus("start");
               }}
               style={{
-                display: "block", width: "100%", border: "none", borderBottom: "1px solid transparent",
+                gridArea: "1 / 1", display: "block", width: "100%", minWidth: 0, border: "none", borderBottom: "1px solid transparent",
                 background: "transparent",
                 /* ⛔ NEW-5 — the title's OWN formatting, read off the document attribute the
                    toolbar writes (`titleStyle`). A field left unset here keeps the module's
@@ -5398,9 +5423,7 @@ const NoteEditor = forwardRef(function NoteEditor({
                    real name more room to actually show on a 390px-class phone before the
                    input's own internal scroll takes over. */
                 font: "inherit",
-                fontSize: (titleStyleNow.sup || titleStyleNow.sub)
-                  ? Math.round((titleStyleNow.fontSize || noteTitleFontPx(narrow)) * 0.7)
-                  : (titleStyleNow.fontSize || noteTitleFontPx(narrow)),
+                ...titleFontStyle,
                 letterSpacing: "-0.01em",
                 padding: "2px 0", outline: "none",
               }}
@@ -5410,8 +5433,9 @@ const NoteEditor = forwardRef(function NoteEditor({
                  made the field impossible to clear, because the write came straight back into a
                  controlled input. Folded into the existing blur rather than added beside it —
                  two onBlur props on one element and the second silently wins. */
-              onBlur={(e) => { e.target.style.borderBottomColor = "transparent"; setTitleActive(false); onTitleCommit?.(); }}
+              onBlur={(e) => { e.target.style.borderBottomColor = "transparent"; try { e.target.setSelectionRange(0, 0); } catch { /* not selectable */ } setTitleActive(false); onTitleCommit?.(); }}
             />
+            </div>
             {/* ⛔ THE ZOOM LEVEL IS NOT SHOWN HERE ANY MORE (NEW-2, owner report 2026-09-06:
                 "the zoom shouldn't be shown on the page"). It rendered as a real `<button>` inside
                 `note-sheet` — the document itself, not chrome around it — which is a control
@@ -5422,38 +5446,10 @@ const NoteEditor = forwardRef(function NoteEditor({
                 to 100%); only where its indicator sits moved. Same `data-testid="note-zoom-level"`
                 on the relocated control, so nothing that already asks "is a level shown, and does
                 it say what it is" had to change — only where it's rooted did. */}
-            {(projectLabel || edited) ? (
+            {edited ? (
               <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
-                {/* ⛔ WHICH PROJECT THIS NOTE BELONGS TO, WHILE YOU ARE READING IT (NEW-2).
-                    The owner could not see a note's filing anywhere near the note itself: the
-                    rail drops the per-row badge inside a project (everything there belongs where
-                    you are standing) and the Dashboard's grouping is a level up from the page. So
-                    a note copied into an unrelated pursuit looked exactly like a note in the
-                    right place. This is the one surface that is always on screen with the note.
-                    It is a LABEL, never a control — re-filing stays on the row's menu, one place,
-                    so there is no second way to change the fact. An id that no longer resolves
-                    wears the warning colour rather than being captioned as "no project": a failed
-                    lookup and a page that genuinely belongs nowhere are different states. */}
-                {projectLabel ? (
-                  <span
-                    data-testid="note-project-badge"
-                    data-project-id={projectLabel.projectId ?? ""}
-                    data-resolved={projectLabel.resolved ? "1" : "0"}
-                    // ⛔ THE NO-PROJECT CASE GETS ITS OWN SENTENCE (NEW-1, the banner-wording
-                    // fix's audit of every project-name interpolation in this module) —
-                    // projectLabel.name is "Not in a project" there, and "filed in Not in a
-                    // project" is a phrase inside a phrase. Org scope is unaffected: its label
-                    // ("Organization") reads fine in the same slot.
-                    title={projectLabel.projectId == null && !projectLabel.org ? "This note has no project" : `This note is filed in ${projectLabel.name}`}
-                    style={{
-                      flex: "0 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis",
-                      whiteSpace: "nowrap", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.04em",
-                      color: projectLabel.resolved ? "var(--text-secondary)" : "var(--warn-text)",
-                      border: `1px solid ${projectLabel.resolved ? "var(--border-default)" : "var(--warn-text)"}`,
-                      borderRadius: RADIUS.pill, padding: "3px 9px",
-                    }}
-                  >{projectLabel.name}</span>
-                ) : null}
+                {/* ⛔ NO PROJECT / ORGANIZATION CHIP HERE (NEW-3, owner 2026-10-05). The filing is unchanged and
+                    still shown by the rail and the Dashboard grouping; only this header label is gone. */}
                 {edited ? (
                   <span
                     data-testid="note-edited"

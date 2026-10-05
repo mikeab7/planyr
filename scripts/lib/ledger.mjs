@@ -202,7 +202,7 @@ export function readLedgerDir(repo, kind) {
 
 /** Build the same shape from `git` at a ref (one ls-tree + one cat-file --batch; null if the ref has no ledger). */
 export function readLedgerAtRef(repo, ref, kind) {
-  const git = (args, input) => execFileSync("git", args, { cwd: repo, encoding: "buffer", maxBuffer: 1 << 29, input });
+  const git = (args, input) => execFileSync("git", args, { cwd: repo, maxBuffer: 1 << 29, input });
   let ls;
   try { ls = git(["ls-tree", "-r", ref, "--", `${LEDGER_DIR}/${kind}`]).toString("utf8"); } catch { return null; }
   const rows = ls.split("\n").filter(Boolean).map((l) => {

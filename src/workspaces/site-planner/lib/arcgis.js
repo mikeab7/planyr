@@ -2,7 +2,7 @@
  * its geometry into a polygon in local feet. All requests run in the browser,
  * so they depend on the target server allowing CORS (Esri's do, by default).
  */
-import { FEET_WKID, isIdentifyOnlyLayerUrl } from "./counties.js";
+import { FEET_WKID, isIdentifyOnlyLayerUrl, isPointViaEnvelopeLayerUrl } from "./counties.js";
 import { FT_PER_DEG, ftPerDeg, mercDeg, lngLatToFeet, feetToLatLngPair } from "./mapLock.js";
 // B2092656 ×3 — the ring helpers live in a dependency-free leaf so the parcel saved-copy WORKER can use the exact same
 // geometry without pulling in counties.js; imported (not bare re-exported) because functions below use them in scope.
@@ -256,6 +256,10 @@ export async function identifyAtPoint(layerUrl, lng, lat) {
   return feats.find((f) => featureContainsLngLat(f, lng, lat)) || feats[0];
 }
 
+// Half-width (degrees, ~5 m) of the envelope a `pointViaEnvelope` layer is asked about. The exact size the
+// measurement used was "a small envelope"; this one is small enough to name one lot, large enough to catch it.
+const POINT_ENVELOPE_HALF = 0.00005;
+
 // Find the parcel polygon under a clicked map point. Returns the ArcGIS feature
 // with geometry in lon/lat (EPSG:4326), which every service supports, or null.
 export async function queryAtPoint(layerUrl, lng, lat) {
@@ -264,6 +268,26 @@ export async function queryAtPoint(layerUrl, lng, lat) {
   // directly, instead of paying a wasted round trip on every click just to rediscover the same
   // capability error the isQueryCapabilityError catch below already knows about.
   if (isIdentifyOnlyLayerUrl(layerUrl)) return identifyAtPoint(layerUrl, lng, lat);
+  // NEW-1 (Louisiana) — Jefferson Parish's layer answers a point with nothing where a small envelope
+  // around it answers with the parcel; a layer that declares `pointViaEnvelope` is asked the shape that
+  // was measured working, then the parcel that actually CONTAINS the point is chosen (else the first).
+  if (isPointViaEnvelopeLayerUrl(layerUrl)) {
+    const j = await fetchJson(trim(layerUrl) + "/query", {
+      geometry: JSON.stringify({
+        xmin: lng - POINT_ENVELOPE_HALF, ymin: lat - POINT_ENVELOPE_HALF,
+        xmax: lng + POINT_ENVELOPE_HALF, ymax: lat + POINT_ENVELOPE_HALF,
+        spatialReference: { wkid: 4326 },
+      }),
+      geometryType: "esriGeometryEnvelope",
+      inSR: 4326,
+      spatialRel: "esriSpatialRelIntersects",
+      outFields: "*",
+      returnGeometry: "true",
+      outSR: 4326,
+    });
+    const feats = j.features || [];
+    return feats.find((f) => featureContainsLngLat(f, lng, lat)) || feats[0] || null;
+  }
   const geometry = JSON.stringify({ x: lng, y: lat, spatialReference: { wkid: 4326 } });
   try {
     const j = await fetchJson(trim(layerUrl) + "/query", {

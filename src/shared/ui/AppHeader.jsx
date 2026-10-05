@@ -1031,9 +1031,10 @@ export default function AppHeader({
 
   // Module tabs — shared by both Row-2 layouts (with and without the B387 center slot)
   // so the per-tab wiring is defined once.
-  // ORG SCOPE (NEW-1, extended B1020930, B1912209) — Site Planner is not OFFERED at org scope:
-  // there is no parcel to draw without a project, so its tab simply doesn't appear while `org`
-  // is true. Notes/Library/Schedule/Spreadsheet/Review all stay visible — Schedule renders
+  // ORG SCOPE (NEW-1, extended B1020930, B1912209, NEW-2) — at org scope the Site tab stays visible
+  // and renders the all-sites map (OrgSitesView) rather than a plan: there is no parcel to draw
+  // without a project, so company scope is the zoomed-out view. Notes/Library/Schedule/Spreadsheet/
+  // Review all stay visible — Schedule renders
   // AgendaView (a lightweight local surface) instead of the embedded Gantt, Spreadsheet renders
   // a workbook picker instead of a project's one workbook, and Review opens an org-filed
   // drawing exactly like a project-filed one — none of them route into a walled/embedded

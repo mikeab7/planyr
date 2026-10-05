@@ -45,3 +45,6 @@ export const critHabitatDetail = (rows) => uniq((rows || []).map((r) => [r.comna
 
 /* HSI proxTag: EPD's own Class number, shown as EPD gives it (never reinterpreted). */
 export const hsiTag = (attrs) => (attrs && attrs.Class != null && String(attrs.Class).trim() !== "" ? `Class ${String(attrs.Class).trim()}` : "");
+
+/* UST facility proxTag: EPD's own facility type (Gas Station, Farm, Industrial…), as EPD gives it — a register entry, never a leak. */
+export const ustTag = (attrs) => (attrs && attrs.LOCATION_TYPE != null && String(attrs.LOCATION_TYPE).trim() !== "" && !/^not marked$/i.test(String(attrs.LOCATION_TYPE).trim()) ? String(attrs.LOCATION_TYPE).trim() : "");

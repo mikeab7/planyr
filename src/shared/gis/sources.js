@@ -511,6 +511,53 @@ export const GIS_SOURCES = {
     tier: "production",
     lastVerified: "2026-07-29",
   },
+  /* B2081249 — NATIONAL road-access rows from the USDOT Bureau of Transportation Statistics' National Transportation
+   * Atlas (ArcGIS Online org xOi1kZaI0eWDREZv), CORS-open from planyr.io and reachable from the build sandbox. These
+   * are the federal answer for states whose DOT publishes no public AADT / truck-route service — Georgia DOT's own host
+   * (rnhp.dot.ga.gov) carries only live inclement-weather counters, and the one AADT copy in GDOT's ArcGIS Online org is
+   * a 2017 republication (rejected: not GDOT's own, nine years stale). They cover Texas too and do NOT displace the
+   * TxDOT row there (`aadt`, a state count-station layer with its own vintage).
+   *
+   * `ntaNationalNetwork` — FHWA's STAA National Network (the routes a 53-ft trailer / 80,000-lb truck may use).
+   * ⛔ THE LAYER IS NOT ONLY THE NETWORK: it also carries segments with NN = 0 (probed live 2026-10-05 — 16 of the 32
+   * segments in a Gwinnett box), roads the federal file lists WITHOUT national-network status. Drawing it unfiltered
+   * would print a truck-route claim on roads that are not truck routes, so the row carries `where: "NN = 1"` and
+   * every consumer (layer, verifier, fixtures) applies it. Data YEAR 2018 on every row; the layer was last edited
+   * 2023-04-03 — a federal reference, not a current permit status. AADT_COM / AADT_SINGL are combination and
+   * single-unit TRUCK counts. */
+  ntaNationalNetwork: {
+    key: "ntaNationalNetwork",
+    label: "STAA National Network — truck routes (USDOT BTS)",
+    provider: "USDOT Bureau of Transportation Statistics — National Transportation Atlas (FHWA National Network)",
+    serviceUrl: "https://services.arcgis.com/xOi1kZaI0eWDREZv/arcgis/rest/services/National_Network/FeatureServer/0",
+    layerId: null,
+    geometryType: "line",
+    where: "NN = 1",
+    fields: { route: "ROUTEID", sign: "SIGN1", nn: "NN", aadt: "AADT", trucksCombo: "AADT_COM", trucksSingle: "AADT_SINGL", year: "YEAR" },
+    coverage: "national (federal STAA National Network)",
+    states: null,
+    tier: "production",
+    lastVerified: "2026-10-05",
+  },
+  /* `hpmsAadt` — FHWA's Highway Performance Monitoring System, 2022, the traffic data each state DOT (GDOT included)
+   * reports to FHWA, as lines with AADT and the HPMS functional system (F_SYSTEM 1 interstate · 2 freeway/expressway ·
+   * 3 principal arterial · 4 minor arterial · 5 major collector · 6 minor collector). ⛔ THE SERVICE IS A VIEW WITH
+   * `NHS > 0`: it is the NATIONAL HIGHWAY SYSTEM ONLY (probed 2026-10-05 — its name says "FULL", its definition does
+   * not), so a road off the NHS has no line here and that is a coverage gap, never a low-traffic finding. Some NHS
+   * segments carry no AADT (the interstate stretches around Savannah returned null) and say so. Layer edited 2025-02-12. */
+  hpmsAadt: {
+    key: "hpmsAadt",
+    label: "HPMS traffic counts, 2022 (USDOT BTS, National Highway System)",
+    provider: "USDOT Bureau of Transportation Statistics — National Transportation Atlas (FHWA HPMS 2022)",
+    serviceUrl: "https://services.arcgis.com/xOi1kZaI0eWDREZv/arcgis/rest/services/HPMS_FULL_US_2022_Sysnomulti_view/FeatureServer/0",
+    layerId: null,
+    geometryType: "line",
+    fields: { aadt: "AADT", fsystem: "F_SYSTEM", nhs: "NHS", nn: "NN" },
+    coverage: "national (National Highway System roads only)",
+    states: null,
+    tier: "production",
+    lastVerified: "2026-10-05",
+  },
   /* NEW-1 (Georgia) — the Georgia counterpart of `county` / `countyCo`. Its OWN row with
    * `states: ["GA"]`; the Texas and Colorado rows are untouched. VERIFIED LIVE 2026-09-30 from the
    * build sandbox: 159 county polygons (Georgia's full roster), ArcGIS-Online hosted with
@@ -586,6 +633,24 @@ export const GIS_SOURCES = {
     states: ["GA"],
     tier: "production",
     lastVerified: "2026-10-04",
+  },
+  /* Georgia EPD — REGISTERED UNDERGROUND STORAGE TANK FACILITIES (the org's `UST_coordinates`, 8,400 locations statewide,
+   * the layer last edited 2022-10-17). ⛔ What it is NOT: a list of leaks. The attributes are the facility register (name,
+   * address, type — gas station, distributor, farm, … — status, financial-responsibility mechanism); release and closure
+   * status are not in it. It is the closest public Georgia counterpart to Texas's LPST layer, and is worded as a REGISTER
+   * of tanks, never as "leaking tanks". Probed live 2026-10-05; Adairsville box 14, Atlanta 150, Savannah 55. */
+  ustGa: {
+    key: "ustGa",
+    label: "Underground storage tank facilities (Georgia EPD)",
+    provider: "Georgia Environmental Protection Division (EPD) — Underground Storage Tank Management Program",
+    serviceUrl: "https://services1.arcgis.com/p0dLjwtOaJHU8zq2/arcgis/rest/services/UST_coordinates/FeatureServer/0",
+    layerId: null,
+    geometryType: "point",
+    fields: { name: "LOCATION_NAME", city: "CITY", county: "COUNTY", type: "LOCATION_TYPE", status: "FACILITY_STATUS" },
+    coverage: "georgia",
+    states: ["GA"],
+    tier: "production",
+    lastVerified: "2026-10-05",
   },
   /* Georgia DNR Wildlife Resources Division — trout streams (layer 1 `Trout_Stream`). The designated-trout-water
    * lines the 50-ft stream buffer keys off. Georgia DNR's own ArcGIS Online org (owner `courtney.balling_dnr`),
@@ -2150,6 +2215,36 @@ export const SOURCE_STATE_SCOPE = {
   // Commerce City, real values in Waller County.
   femaEbfe: ["TX", "LA", "AR", "OK"],
 };
+
+/* NEW-1 (B2095744) — WHAT A STANDING CHECK DOES ON GROUND ITS SOURCE DOES NOT COVER. The second half of the state rule
+ * (`SOURCE_STATE_SCOPE` says where a row can answer; this says what the Analysis panel shows where it cannot). Declared HERE,
+ * in the one registry, so no card carries a per-card special case.
+ *   notScreened — a GENERIC check a developer expects everywhere (tanks, traffic, pipelines, road authority). It renders an
+ *                 honest "Not screened in <state>" card under the NEUTRAL `name`: a Texas agency's name (TCEQ, TxDOT, RRC)
+ *                 never reaches a report for another state.
+ *   hide        — the concept IS a Texas institution (CCN service areas, the Houston-area growth faults) and means nothing
+ *                 elsewhere; the card does not render at all.
+ * `hideIn` hides a notScreened check in specific states where it would only be noise (Georgia has no oil & gas program
+ * a screen would stand for; its UST card replaces the Texas tank card). A row with no entry defaults to notScreened under
+ * its own name. Pure. */
+export const SOURCE_OUT_OF_STATE = {
+  oilgas: { mode: "notScreened", name: "Oil & gas wells", hideIn: ["GA"] },
+  growthFaults: { mode: "hide" },
+  ccnWater: { mode: "hide" },
+  ccnSewer: { mode: "hide" },
+  lpst: { mode: "notScreened", name: "Leaking petroleum tanks", hideIn: ["GA"] }, // GA: the Georgia EPD UST card (`ustGa`) carries the concept
+  aadt: { mode: "notScreened", name: "Traffic counts" },
+  pipelines: { mode: "notScreened", name: "Pipelines" },
+  road: { mode: "notScreened", name: "Road authority" },
+};
+
+/* For a source that does NOT cover `state`: { hide: true } or { hide: false, name } (the neutral card name). Pure. */
+export function outOfStateDisposition(key, state) {
+  const p = SOURCE_OUT_OF_STATE[key] || { mode: "notScreened" };
+  const st = String(state || "").toUpperCase();
+  if (p.mode === "hide" || (Array.isArray(p.hideIn) && p.hideIn.includes(st))) return { hide: true };
+  return { hide: false, name: p.name || null };
+}
 
 /* The states a row can answer in: its own `states` wins, else the table, else undefined (which
  * `auditRegistry` rejects). `null` = national. Pure. */

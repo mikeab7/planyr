@@ -111,6 +111,8 @@ export function pointSymbolOptions(cfg = {}, opacity = 1) {
 export function featureLayerOptions(cfg, opacity, pane, opts = {}) {
   const o = { url: cfg.url, pane, minZoom: cfg.minZoom ?? 10, interactive: !!opts.interactive };
   if (cfg.fields) o.fields = cfg.fields;
+  // B2081249 — a row may narrow its service with a SQL `where` (the National Network layer must draw only NN = 1).
+  if (cfg.where) o.where = cfg.where;
   if (typeof opts.pointToLayer === "function") o.pointToLayer = opts.pointToLayer;
   o.style = typeof cfg.styleFn === "function"
     ? (feature) => cfg.styleFn(feature && feature.properties, opacity)

@@ -141,3 +141,25 @@ describe("highlightParts", () => {
     expect(highlightParts("Alpha", "zzz")).toEqual([{ text: "Alpha", hit: false }]);
   });
 });
+
+// NEW-2 (company workspace card) — pure rules for the card above the projects card.
+import { companyCards, companyCardsFor, COMPANY_SUBTITLE } from "../src/shared/projects/projectSwitcherModel.js";
+describe("company cards", () => {
+  it("one card: the organization's own name on line one, 'Company workspace' on line two", () => {
+    expect(companyCards("Acme Industrial")).toEqual([{ id: "org:Acme Industrial", name: "Acme Industrial", subtitle: "Company workspace" }]);
+    expect(COMPANY_SUBTITLE).toBe("Company workspace");
+  });
+  it("one card per organization when the account has several", () => {
+    expect(companyCards(["Acme", "Beta LLC"]).map((c) => c.name)).toEqual(["Acme", "Beta LLC"]);
+  });
+  it("an unset name falls back to the word Organization, never a stale or invented name", () => {
+    expect(companyCards("")[0].name).toBe("Organization");
+    expect(companyCards(null)[0].name).toBe("Organization");
+    expect(companyCards("  ")[0].name).toBe("Organization");
+  });
+  it("hidden while the search has text unless the name matches", () => {
+    expect(companyCardsFor("Acme Industrial", "")).toHaveLength(1);
+    expect(companyCardsFor("Acme Industrial", "acme")).toHaveLength(1);
+    expect(companyCardsFor("Acme Industrial", "goose creek")).toHaveLength(0);
+  });
+});

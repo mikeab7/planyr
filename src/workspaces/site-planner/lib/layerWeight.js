@@ -104,9 +104,12 @@ export const LAYER_TIER = {
   ga_nrhp: "reference",
   ga_cemeteries: "reference",
   ga_crit_habitat: "reference",    // binds federal actions, not the parcel directly
+  ga_ust: "reference",             // NEW-1 (B2095744) — a facility register; a Phase I flag, not a stop
   ga_gopher_tortoise: "reference", // a modeled habitat screen
   ga_trout: "reference",           // the designation; the BUFFER it triggers is the constraint below
-  soil_bedrock: "reference",       // B2081251 — shallow rock is a cost flag (excavation, trenching), not a stop
+  soil_bedrock: "reference",
+  bts_truck_network: "reference",  // B2081249 — federal truck-route reference
+  hpms_aadt: "reference",          // B2081249 — federal traffic volumes       // B2081251 — shallow rock is a cost flag (excavation, trenching), not a stop
   ga_stream_buffers: "constraint", // 25/50/75 ft of land taken off each side of a stream
 
   // ---- CONTEXT: orientation furniture ----
