@@ -171,6 +171,15 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1526800 — B2108336: "Delete forever" on a whole project in the account bin removes it, or says why `Blocker: real-data`
+
+Sandbox-proven: stub-database harness `ui-audit/verify-project-purge.mjs` (known-good arm: row leaves, DB empty, folders torn down; zero-row arm: row stays, toast names the reason, NO folder teardown) and the red-proofed `test/purgeProjectFolders.test.js` NEW-1 block. Signed-in throwaway on planyr.io (test account) removed the row on the pre-fix build; re-run after the deploy in the steps below.
+**Steps** (read the served chunk hash / `/version.json` in the SAME observation as each PASS/FAIL and match it to the merge commit):
+1. Test account (`ui-audit/lib/signedInSession.mjs`): seed a throwaway binned project, project switcher → Recently deleted → × → Delete forever. **Expect:** row leaves the list, database no longer holds it, no toast. Clean up the throwaway.
+2. Michael's signed-in Chrome, planyr.io: project switcher → Recently deleted → × on **Untitled site** (`smutb6e87v2n`, a Claude test project he asked gone) → Delete forever. **Expect either:** the row leaves, and after a hard reload it is still gone, `select id from sites where id='smutb6e87v2n'` returns nothing; **or** a toast reading “Untitled site” couldn't be permanently deleted + a reason (anything but silence), the row staying listed.
+3. If it fails: read the toast and `client_errors` for `event:purge-not-effective` / `event:purge-blocked-live-group` / `event:cloud-write-failed` naming `smutb6e87v2n`, and re-open B2108336 with that row.
+4. Say exactly what was touched: the throwaway(s) and `smutb6e87v2n` only.
+
 ### V1512960 — B2088016: first click on "Select parcels" after a fresh load of the Map engages the mode `Blocker: real-data`
 
 Sandbox-proven only in part: the lost-press recovery (`e2e/select-parcels-first-click.spec.js`, red on unmodified main) and the signed-in test-account probe (`ui-audit/diagnose-select-parcels-first-click.mjs`, 10/10 engaged — the original symptom did NOT reproduce here). Not provable here: his account's data volume and his Chrome.
