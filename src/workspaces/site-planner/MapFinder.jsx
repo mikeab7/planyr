@@ -10,7 +10,6 @@ import { ensureSnapshot, getSnapshot, snapshotVintage, onSnapshotChange, feature
 import { recordSourceResult, filterHealthyCandidates, isSourceOpen, isStatewideBackup, suppressRedundantStatewide } from "./lib/sourceHealth.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, releaseOverlayRef } from "./lib/layers.js";
 import { isDiagArmed } from "./lib/diagArm.js";
-import { createPressWatch, createModeTrace, pointInRect } from "./lib/pressWatch.js";
 import { PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL } from "./lib/mapStack.js";
 import { tileCacheLimit } from "./lib/tileBudget.js";
 import { boundTileCache, capTileCache, armBlankTileHeal } from "./lib/tileLifecycle.js";
@@ -596,22 +595,6 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const imageryRef = useRef(null);
   const labelsRef = useRef(null);
   const selectModeRef = useRef(false); // read by the once-bound map handlers
-  // NEW-1 — "first click on Select parcels does nothing". Instrument + lost-press recovery; see
-  // lib/pressWatch.js for why this is an instrument and not a one-line fix.
-  const modeTraceRef = useRef(null);
-  if (!modeTraceRef.current) modeTraceRef.current = createModeTrace();
-  const selectPressRef = useRef(null);
-  if (!selectPressRef.current) {
-    selectPressRef.current = createPressWatch({
-      // A completed press over the button with no click: the node was replaced mid-press. Do what the
-      // press asked for (idempotent), and say so — a recovered press is still a defect to chase.
-      onLost: (info) => {
-        modeTraceRef.current.note("press-lost-recovered", info);
-        reportClientEvent("select-parcels-click-lost", "press on Select parcels completed with no click — recovered", { ...info, trace: modeTraceRef.current.snapshot().slice(-8) });
-        setSelectMode(true);
-      },
-    });
-  }
   const placingCompPinRef = useRef(false); // NEW-COMPS: armed by "+ Comp", read by the once-bound click handler
   const activeOverlayIdRef = useRef(null); // NEW-2 (B848496): read by the once-bound click handler, to deselect on a background click
   const selectedRef = useRef([]);
@@ -2291,7 +2274,6 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
      itself (`selected`/hilites/`parcelInfo`/`placingCompPin`) stays return-only, matching the
      existing "clears a committed selection on return" contract above. */
   useEffect(() => {
-    modeTraceRef.current.willExit("visible-flip");
     setSelectMode(false); setBackupNotice(null); setCachedNotice(null);
     if (visible) { clearHilites(); setSelected([]); setParcelInfo(null); setPlacingCompPin(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2974,21 +2956,6 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* NEW-1 — record every committed select-mode value; an EARLY exit nobody asked for (the "it engaged
-     and something reset it" half of the first-click report) is reported once with its reason. */
-  useEffect(() => {
-    const reset = modeTraceRef.current.transition(selectMode);
-    if (reset) {
-      reportClientEvent("select-parcels-mode-reset", `select mode dropped ${reset.heldMs}ms after engaging (${reset.reason})`, { ...reset, trace: modeTraceRef.current.snapshot().slice(-8) });
-    }
-  }, [selectMode]);
-  useEffect(() => {
-    // Read-only, armed at CALL time (diagArm.js) — never gates behaviour.
-    const hook = () => (isDiagArmed(window) ? modeTraceRef.current.snapshot() : null);
-    window.__selectParcelsTrace = hook;
-    return () => { if (window.__selectParcelsTrace === hook) window.__selectParcelsTrace = null; };
-  }, []);
-
   /* enter/leave select mode: show all counties' outlines, set the +/− cursor,
      enable click-to-identify. */
   useEffect(() => {
@@ -3434,7 +3401,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
    * selection bar" defect). Deliberately NOT folded into `clearSel()` itself: the decide bar's own
    * ✕ "Clear selection" button calls `clearSel()` to let the user pick different parcels WITHOUT
    * leaving select mode, and that stays correct. */
-  const finishGroundAction = () => { modeTraceRef.current.willExit("verb"); clearSel(); setSelectMode(false); };
+  const finishGroundAction = () => { clearSel(); setSelectMode(false); };
 
   /* NEW-1 (2026-09-08) — GROUND FIRST. A raw point the user pointed at, with the question of what
    * it IS deliberately not yet asked; the decide bar asks it. Clears any parcel selection, so the
@@ -3443,7 +3410,6 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   const markDecidePin = (latlng) => {
     setPlacingCompPin(false);
     setPinDecideArmed(false);
-    modeTraceRef.current.willExit("verb");
     setSelectMode(false);
     clearSel();
     setDroppedPin({ lat: latlng.lat, lon: latlng.lon != null ? latlng.lon : latlng.lng });
@@ -4331,15 +4297,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             <>
               <Button
                 variant="primary"
+                onClick={() => setSelectMode(true)}
                 data-testid="map-toolbar-select-parcels"
-                onClick={() => { selectPressRef.current && selectPressRef.current.click(); modeTraceRef.current.note("click"); setSelectMode(true); }}
-                onPointerDown={(e) => { selectPressRef.current && selectPressRef.current.down(e.pointerId); modeTraceRef.current.note("press-down"); }}
-                onPointerUp={(e) => {
-                  const inside = pointInRect(e.clientX, e.clientY, e.currentTarget.getBoundingClientRect());
-                  modeTraceRef.current.note("press-up", { inside });
-                  selectPressRef.current && selectPressRef.current.up(e.pointerId, inside);
-                }}
-                onPointerCancel={() => { selectPressRef.current && selectPressRef.current.cancel(); }}
                 title="Click parcels on the map to select them, then say what they are"
                 style={{ ...NESTED_ACTION_SIZE, fontWeight: 700, flex: "0 1 auto", minWidth: 44, overflow: "hidden", boxShadow: "none" }}
               >
@@ -4427,7 +4386,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               {(
                 <Button
                   variant="ghost"
-                  onClick={() => { modeTraceRef.current.willExit("user"); setSelectMode(false); setPinDecideArmed(true); setPlacingCompPin(true); }}
+                  onClick={() => { setSelectMode(false); setPinDecideArmed(true); setPlacingCompPin(true); }}
                   title="Drop a pin instead of anchoring to a parcel"
                   style={{ ...NESTED_ACTION_SIZE, flex: "0 1 auto", minWidth: 40, overflow: "hidden", color: PAL.chromeInk, background: "var(--chrome-bg-elev)", border: "1px solid var(--chrome-divider)", boxShadow: "none" }}
                 >
@@ -4436,7 +4395,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
               )}
               <Button
                 variant="ghost"
-                onClick={() => { modeTraceRef.current.willExit("user"); setSelectMode(false); }}
+                onClick={() => setSelectMode(false)}
                 style={{ ...NESTED_ACTION_SIZE, flex: "none", color: PAL.chromeInk, background: "var(--chrome-bg-elev)", border: "1px solid var(--chrome-divider)", boxShadow: "none" }}
               >
                 Cancel
