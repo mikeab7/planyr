@@ -1,6 +1,6 @@
 /* ratingScale — the Food / Ambiance rating scale, in ONE place.
  *
- * ⛔ PRODUCT DECISION (owner, 2026-10-05; CLAUDE.md "Owner product constraints" #15): a visit's food
+ * ⛔ PRODUCT DECISION (owner, 2026-10-05; CLAUDE.md "Owner product constraints" #16): a visit's food
  * rating and ambiance rating are each ONE slider, 1 to 10 in HALF-point steps, "Not rated" until
  * touched. Do not replace it with tap buttons, a stepper or whole numbers without his say-so.
  * test/foodRatingSlider.test.js fails if any of the three numbers below change.
