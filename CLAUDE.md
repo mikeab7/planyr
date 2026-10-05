@@ -20,6 +20,39 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 >   wrong number written into the backlog, a gate quietly weakened to go green). **Must be read
 >   before judging whether any change works.**
 >
+> **🧾 LEDGER — ONE FILE PER ENTRY (NEW-1, B2109728, owner-approved 2026-10-05). `BACKLOG.md` AND `VERIFICATION.md`
+> ARE NO LONGER HAND-EDITED, AND THE TWO `docs/archive/*-DONE.md` FILES NO LONGER EXIST. This section overrides every
+> older sentence in this file (and in the docs) that says to append to, move a block within, or archive from them.**
+> **WHY:** every session appended to the same spot of those two files, so on a busy day every PR invalidated every other
+> one — and GitHub's SERVER-side mergeability ignores `merge=union` (measured 2026-10-05, PRs #2022/#2023: two PRs
+> prepending a line to a `merge=union` file both read `mergeable_state: dirty`; two PRs adding different *files* read
+> clean, #2024). PR #1900 sat dirty five days over code that never clashed. Only a layout in which two entries never
+> share a file removes the conflict by construction.
+> - **Where entries live:** `ledger/backlog/<open|bug-audit|verify|later|done>/B<id>.md` and
+>   `ledger/verification/<pending|checklist|done>/V<id>.md` — each file is exactly the old block (`### B<id> — title` …).
+>   A duplicate legacy id inside one folder is `B<id>.2.md`. The prose around the entries (rules, tag legend, section
+>   headings, the checklist preamble) is `ledger/<kind>/_frame.md` — hand-edited, rarely.
+> - **File an entry:** write the new file under `…/open/` (backlog) or `…/pending/` (verification). **Edit one:** edit its
+>   file. **Lifecycle move** (Open → Verify → Done, a recurrence back to Open, a V# archived when passed):
+>   `npm run ledger -- move B<id> <state>` (a rename — edit the text in the same commit). **Never delete an entry.**
+> - **Orient cheaply:** `npm run ledger -- list open` (one heading per entry), Grep `^### B` in `ledger/backlog/open` /
+>   `…/verify`, or read `BACKLOG_OPEN.md`. The *-done folders are write-only — look up ONE id (`ledger/backlog/done/B###.md`),
+>   never read a folder wholesale. `npm run next-id` still mints (it reads the ledger; `check-mint`, the id-uniqueness tests
+>   and every other consumer go through `scripts/lib/ledger.mjs`, which also serves the old file paths as VIRTUAL text).
+> - **`BACKLOG.md` / `VERIFICATION.md` at the repo root are GENERATED VIEWS** (frame + live entries), refreshed nightly by
+>   `.github/workflows/regen-derived-docs.yml` and never edited by a branch — `scripts/generated-doc-touch-guard.mjs`
+>   FAILS THE BUILD on a PR that touches them, `docs/archive/BACKLOG-DONE.md` or `…/VERIFICATION-DONE.md` (enforced once
+>   `ledger/` is on main). They can lag the real ledger by up to a day: the entry folders are the truth.
+> - **`npm run ledger -- check`** (a CI gate) validates layout: right folder, right filename, heading id = filename id, a frame
+>   marker for every live state. `ledger render` regenerates the two views locally (never commit them).
+> - **A branch that edited the OLD files** (opened before this landed): merge `origin/main`, take main's version of the old
+>   files, then `node scripts/ledger.mjs import-legacy <merge-base> <your-branch-tip-before-the-merge>` replays your entry
+>   additions/edits/moves onto `ledger/`. (`resolve-ledgers.mjs` / `npm run safe-merge` are no longer needed for these files;
+>   they remain for `MAP.md` / `BACKLOG_OPEN.md`.)
+> - **Acceptance test:** `test/ledgerConcurrentPRs.test.js` — two concurrent PRs each add a backlog + a verification entry
+>   and merge cleanly in both orders under a GitHub-equivalent `git merge-tree`; the same two PRs against the old
+>   one-big-file layout conflict (red-proof). Never reintroduce a shared append point.
+>
 > **⛔ TOUCHING PERSISTENCE, SYNC, UNDO, OR DELETE? READ `docs/DATA.md` FIRST.** It is the single
 > place that answers who owns a fact and how it may change — the entity table, the numbered
 > invariants (each with the test that proves it), the short list of "one-answer" functions
@@ -1524,7 +1557,7 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
    built in this item contradicts a listed constraint, and say so in the session reply. If a
    contradiction was caught, **CONSTRAINT-CAPTURE** governs — the offending part is not built, and
    the reply names the constraint it collided with.
-5. `BACKLOG.md` updated. **Do NOT regenerate or commit `BACKLOG_OPEN.md` yourself** — the Generated-
+5. The backlog entry filed/moved under `ledger/backlog/` (see the LEDGER section — never edit `BACKLOG.md`). **Do NOT regenerate or commit `BACKLOG_OPEN.md` yourself** — the Generated-
    index touch guard rejects a PR that touches it (NEW-1, B<PENDING>, 2026-09-08); it's refreshed by
    `.github/workflows/regen-derived-docs.yml` instead. Touched yield / pond panel copy?
    **PANEL-BREVITY** applies: run `node ui-audit/panel-copy-budget.mjs` before and after, and put
