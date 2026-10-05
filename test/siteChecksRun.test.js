@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { runTrustedChecks, ringsHash, VERDICT_CACHE_VERSION } from "../src/workspaces/site-planner/lib/siteChecksRun.js";
+import { runTrustedChecks, assertMeasurement, ringsHash, VERDICT_CACHE_VERSION } from "../src/workspaces/site-planner/lib/siteChecksRun.js";
 import { createGisCache } from "../src/workspaces/site-planner/lib/gisCache.js";
 import { GisFetchError } from "../src/workspaces/site-planner/lib/gisFetch.js";
 
@@ -111,6 +111,13 @@ describe("FAILURE — a source that fails is 'Couldn't check', never None, never
     expect(byId(res).flood100.severity).toBe("amber");
     expect(byId(res).flood100.figure).toBe("Not fully mapped");
   });
+  it("Retry on the 100-year row also refreshes its 500-year twin (they share one FEMA answer)", async () => {
+    const cache = freshCache();
+    await runTrustedChecks(SITE, { cache, fetchJson: transport({ ...happy(), [HOSTS.flood]: () => new Error("down") }) });
+    const res = await runTrustedChecks(SITE, { cache, fetchJson: transport(happy()), only: ["flood100"], force: true });
+    expect(res.rows.map((r) => r.id)).toEqual(["flood100", "flood500"]);
+    for (const r of res.rows) expect(r.severity).not.toBe("failed");
+  });
   it("Retry re-asks ONLY the named check and bypasses its stored answer", async () => {
     const cache = freshCache();
     const first = transport({ ...happy(), [HOSTS.rrc]: () => new Error("down") });
@@ -193,5 +200,25 @@ describe("STALE PERSISTED VERDICTS — the cache holds measurements under a vers
     const a = [[[0, 0], [10, 0], [10, 10], [0, 10]]], b = [[[0, 0], [10, 0], [10, 10], [5, 3], [0, 10]]];
     expect(ringsHash(a)).not.toBe(ringsHash(b));
     expect(ringsHash(a, [])).not.toBe(ringsHash(a, [[[1, 1], [2, 1], [2, 2]]]));
+  });
+});
+
+describe("review findings — runner", () => {
+  it("polygons with no flood-zone attribute fail (they would all read 'mapped, not floodplain')", async () => {
+    const res = await runTrustedChecks(SITE, { cache: freshCache(), fetchJson: transport({ ...happy(), [HOSTS.flood]: () => ({ features: [{ attributes: {}, geometry: esri(rect(-50, -50, 1050, 1050)) }] }) }) });
+    expect(byId(res).flood100.severity).toBe("failed");
+  });
+  it("empty paths / empty rings are unusable geometry → failed, never a zero-count green", async () => {
+    const res = await runTrustedChecks(SITE, { cache: freshCache(), fetchJson: transport({ ...happy(), [HOSTS.rrc]: () => ({ features: [{ attributes: {}, geometry: { paths: [] } }] }) }) });
+    expect(byId(res).pipelines.severity).toBe("failed");
+    expect(byId(res).wells.severity).toBe("failed");
+  });
+  it("an incomplete stored measurement throws, never falls through to green", () => {
+    for (const g of ["flood", "wetlands", "pipelines", "wells"]) expect(() => assertMeasurement(g, {})).toThrow();
+  });
+  it("every page asks for a stable order", async () => {
+    const t = transport(happy());
+    await runTrustedChecks(SITE, { cache: freshCache(), fetchJson: t });
+    expect(t.mock.calls.filter(([u]) => u.includes(HOSTS.flood)).every(([u]) => u.includes("orderByFields=OBJECTID"))).toBe(true);
   });
 });

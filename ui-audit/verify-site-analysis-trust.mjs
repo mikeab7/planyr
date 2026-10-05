@@ -56,7 +56,7 @@ function mockFor(lat, lon) {
 }
 
 async function openApp(browser, site, mocks, { rrc = "ok" } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, ignoreHTTPSErrors: true });
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 });
   await ctx.addInitScript(`(() => { try {
     window.__PLANYR_E2E = true;
     if (!localStorage.getItem('planarfit:sites:v1')) {
@@ -102,7 +102,7 @@ const rowsOf = (page) => page.evaluate(() => Object.fromEntries([...document.que
 const panelText = (page) => page.evaluate(() => document.querySelector('[data-site-analysis="1"]')?.innerText || "");
 const layersOn = (page) => page.evaluate(() => (window.__plannerLayers ? window.__plannerLayers().on : null));
 
-const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
+const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
 try {
   /* ═════════════ Texas site ═════════════ */
   const mocks = mockFor(TX.lat, TX.lon);
@@ -188,6 +188,13 @@ try {
   const on2 = (await layersOn(page)) || [];
   check("the contamination pill drives BOTH its layers (env_lpst + env_cleanups)", on2.includes("env_lpst") && on2.includes("env_cleanups"), JSON.stringify(on2));
   await page.locator('[data-layer-pill="contamination"]').click(); await page.waitForTimeout(300);
+
+  console.log("\n— Who governs: Show lines toggles the city limits & ETJ layers —");
+  await page.locator('[data-governs-lines]').click(); await page.waitForTimeout(600);
+  const lines = (await layersOn(page)) || [];
+  check("'Show lines' turns on BOTH city-limits layers (jur_city + jur_etj)", lines.includes("jur_city") && lines.includes("jur_etj"), JSON.stringify(lines));
+  check("…and the link now reads 'Hide lines'", /Hide lines/.test(await page.locator('[data-governs-lines]').innerText()));
+  await page.locator('[data-governs-lines]').click(); await page.waitForTimeout(400);
 
   console.log("\n— Calls to make: ticks persist per site —");
   const callIds = await page.evaluate(() => [...document.querySelectorAll("[data-call]")].map((e) => e.dataset.call));

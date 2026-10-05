@@ -76,11 +76,11 @@ export const TEXAS_OUTLINE = Object.freeze([
   [-94.07, 33.54], [-94.07, 31.99], [-93.90, 31.80], [-93.76, 31.45], [-93.62, 31.10], [-93.70, 30.75],
   [-93.70, 30.30], [-93.72, 30.05], [-93.82, 29.70], [-93.80, 29.55], [-94.45, 29.35], [-94.95, 29.15],
   [-95.35, 28.80], [-96.00, 28.45], [-96.55, 28.20], [-97.05, 27.80], [-97.30, 27.20], [-97.25, 26.60],
-  [-97.10, 25.92], [-97.50, 25.95], [-98.20, 26.06], [-98.60, 26.27], [-99.10, 26.47], [-99.35, 26.92],
-  [-99.48, 27.50], [-99.75, 27.78], [-100.30, 28.20], [-100.55, 28.75], [-100.95, 29.38], [-101.50, 29.80],
-  [-102.30, 29.90], [-102.72, 29.72], [-102.98, 29.05], [-103.60, 29.20], [-104.30, 29.62], [-104.55, 29.78],
-  [-104.95, 30.45], [-105.55, 31.05], [-106.20, 31.50], [-106.50, 31.78], [-106.58, 31.93], [-106.58, 32.00],
-  [-103.07, 32.00],
+  [-97.15, 25.96], [-97.50, 25.87], [-97.65, 25.93], [-98.00, 26.05], [-98.26, 26.08], [-98.82, 26.36], [-99.02, 26.40],
+  [-99.27, 26.88], [-99.53, 27.50], [-99.95, 27.90], [-100.30, 28.45], [-100.50, 28.71], [-100.90, 29.36], [-101.40, 29.75],
+  [-101.55, 29.80], [-102.30, 29.88], [-102.70, 29.70], [-102.95, 29.15], [-103.15, 28.98], [-103.60, 29.17], [-103.78, 29.26],
+  [-104.37, 29.56], [-104.70, 30.15], [-105.00, 30.65], [-105.85, 31.30], [-106.53, 31.77], [-106.62, 31.80], [-106.62, 32.00],
+  [-103.05, 32.00],
 ]);
 
 function inPolygon(lng, lat, poly) {
@@ -95,9 +95,16 @@ export const inTexas = (lat, lng) => inPolygon(lng, lat, TEXAS_OUTLINE);
 
 /* The region ("TX" | "CO" | "GA" | "CA" | "FL" | null) a single point belongs to FOR TRUST PURPOSES: "TX"
  * only when the box AND the outline agree. */
+/* The Texas claim also covers a quarter-mile buffer (a check says "None within a quarter mile"), and the RRC has
+ * nothing across the line, so "Texas" requires the point AND a ~0.4 mi ring around it (four offsets) inside the
+ * outline: a site closer than that to a border loses its verdict rather than gaining a false one. */
+const TX_MARGIN_DEG = 0.007;
 export function trustRegionOf(lat, lng) {
   const st = siteState({ lat, lng });
-  if (st === "TX") return inTexas(lat, lng) ? "TX" : null;
+  if (st === "TX") {
+    const d = TX_MARGIN_DEG;
+    return inTexas(lat, lng) && inTexas(lat + d, lng) && inTexas(lat - d, lng) && inTexas(lat, lng + d) && inTexas(lat, lng - d) ? "TX" : null;
+  }
   return st;
 }
 
@@ -227,10 +234,11 @@ export function measureFlood(rings, holes, features, thresholds = CHECK_THRESHOL
   const frame = makeFrame(ringsFt);
   const solid = siteSolid(rings, holes, frame);
   const siteSqft = pathsArea(solid);
+  if (!(siteSqft > 0)) throw new Error("The site has no measurable area.");
   const feats = features || [];
   const sfha = feats.filter((f) => isSfhaZone(f.zone));
   const shaded = feats.filter((f) => !isSfhaZone(f.zone) && String(f.zone || "").trim().toUpperCase() === "X" && isShadedXSubtype(f.subtype));
-  const undetermined = feats.filter((f) => String(f.zone || "").trim().toUpperCase() === "D");
+  const undetermined = feats.filter((f) => /^D$|NOT INCLUDED/i.test(String(f.zone || "").trim()));
   const sfhaU = unionOfFeatures(sfha, frame);
   const shadedU = unionOfFeatures(shaded, frame);
   const shadedOnly = shadedU.length && sfhaU.length ? exec(ClipperLib.ClipType.ctDifference, shadedU, sfhaU) : shadedU;
@@ -261,6 +269,7 @@ export function measureWetlands(rings, holes, features, thresholds = CHECK_THRES
   const frame = makeFrame(ringsFt);
   const solid = siteSolid(rings, holes, frame);
   const siteSqft = pathsArea(solid);
+  if (!(siteSqft > 0)) throw new Error("The site has no measurable area.");
   let count = 0;
   const types = new Set();
   const kept = [];
@@ -306,7 +315,7 @@ export function measureProximity(rings, features, { keep = 60 } = {}) {
     return best ? compassFrom((best.x - cx) / spanX, (best.y - cy) / spanY, false) : null;
   };
   const ranked = scr.ranked.slice(0, keep).map((f) => ({ attrs: f.attrs || {}, distFt: f.distFt }));
-  return { ranked, count: scr.count, nearestFt: scr.nearestFt, nearestDir: scr.nearest ? dirOf(scr.nearest) : null };
+  return { ranked, distances: scr.ranked.map((f) => f.distFt), count: scr.count, nearestFt: scr.nearestFt, nearestDir: scr.nearest ? dirOf(scr.nearest) : null };
 }
 
 /* ── severity (pure) ─────────────────────────────────────────────────────────────────────────── */
@@ -319,7 +328,8 @@ export function severityFlood100(m, t = CHECK_THRESHOLDS) {
 }
 export function severityFlood500(m, t = CHECK_THRESHOLDS) {
   if (m.shadedSqft >= t.overlapDustSqft) return SEVERITY.amber;
-  if (m.sfhaSqft < t.overlapDustSqft && (m.undeterminedSqft > 0 || m.mappedFrac < t.floodMappedMin)) return SEVERITY.amber;
+  if (m.undeterminedSqft > 0 || m.mappedFrac < t.floodMappedMin) return SEVERITY.amber;
+  if (m.sfhaFrac >= 0.98) return SEVERITY.amber; // the 0.2% area contains the 1% area — "None" would be false reassurance
   return SEVERITY.green;
 }
 export const severityWetlands = (m, t = CHECK_THRESHOLDS) => (m.sqft >= t.overlapDustSqft ? SEVERITY.red : SEVERITY.green);
@@ -385,6 +395,10 @@ export function buildFlood500Row(m, t = CHECK_THRESHOLDS) {
     return { ...base, figure: pct(m.shadedFrac), line: `Shaded Zone X (0.2%)${m.shadedSide ? `, ${m.shadedSide}` : ""}`,
       sentences: [`About ${pct(m.shadedFrac)} of the site (outside the 100-year area) is in the 0.2%-annual-chance floodplain. Harris County counts it for 1:1 fill mitigation; other jurisdictions vary.`] };
   }
+  if (sev === SEVERITY.amber && m.sfhaFrac >= 0.98) {
+    return { ...base, figure: "In 100-yr area", line: "Inside the 100-year floodplain",
+      sentences: ["The whole site is already inside the 100-year floodplain, which the 500-year area contains."] };
+  }
   if (sev === SEVERITY.amber) {
     return { ...base, figure: "Not fully mapped", line: "FEMA's map doesn't cover all of this site",
       sentences: ["Part of the site has no FEMA flood zone, so \"none\" would be a guess."] };
@@ -413,7 +427,7 @@ function operatorSummary(ranked, attrKey = "OPERATOR") {
 }
 export function buildPipelinesRow(m, t = CHECK_THRESHOLDS) {
   const sev = severityPipelines(m, t);
-  const base = { id: "pipelines", severity: sev, source: "Railroad Commission of Texas (T-4 permit routes)", caveat: "Routes are approximate. Confirm with 811 and the operator." };
+  const base = { id: "pipelines", severity: sev, source: "Railroad Commission of Texas (permit routes)", caveat: "Routes are approximate. Confirm with 811 and the operator." };
   const radiusFt = t.nearRadiusMi * FT_PER_MI;
   const within = m.ranked.filter((f) => f.distFt <= radiusFt + EDGE);
   const ops = operatorSummary(sev === SEVERITY.red ? m.ranked.filter((f) => f.distFt <= t.onSiteFt) : within);
@@ -427,11 +441,11 @@ export function buildPipelinesRow(m, t = CHECK_THRESHOLDS) {
     return { ...base, figure: fmtApproxFt(m.nearestFt), line: `${opLine}, outside the site${dir ? ` to the ${dir}` : ""}`,
       sentences: [`The nearest mapped pipeline is ${fmtApproxFt(m.nearestFt)} from the site line. Because the routes are schematic, it could be closer or on the site.`] };
   }
-  return { ...base, figure: "None", line: NONE_NEAR, sentences: ["No mapped RRC pipeline crosses the site or sits within a quarter mile of it."] };
+  return { ...base, figure: "None", line: NONE_NEAR, sentences: ["No mapped Railroad Commission pipeline crosses the site or sits within a quarter mile of it."] };
 }
 export function buildWellsRow(m, t = CHECK_THRESHOLDS) {
   const sev = severityWells(m, t);
-  const base = { id: "wells", severity: sev, source: "Railroad Commission of Texas (well surface locations)", caveat: "Well points are schematic and old wells can be mis-located or unmapped. An RRC records search is the real check." };
+  const base = { id: "wells", severity: sev, source: "Railroad Commission of Texas (well surface locations)", caveat: "Well points are schematic and old wells can be mis-located or unmapped. A Railroad Commission records search is the real check." };
   if (sev === SEVERITY.green) return { ...base, figure: "None", line: NONE_NEAR, sentences: ["No mapped well sits on the site or within a quarter mile of it."] };
   const cats = {};
   for (const f of m.inRadius) { const c = classifyWell(f.attrs); cats[c] = (cats[c] || 0) + 1; }
@@ -455,9 +469,10 @@ export const ROW_BUILDERS = Object.freeze({
 export function measureWells(rings, features, { capped = false, thresholds = CHECK_THRESHOLDS } = {}) {
   const base = measureProximity(rings, features);
   const radiusFt = thresholds.nearRadiusMi * FT_PER_MI;
-  const inRadius = base.ranked.filter((f) => f.distFt <= radiusFt + EDGE);
-  const onSite = inRadius.filter((f) => f.distFt <= thresholds.onSiteFt).length;
-  return { ...base, inRadius, onSite, near: inRadius.length, nearLabel: `${inRadius.length}${capped ? "+" : ""}`, capped };
+  const inRadius = base.ranked.filter((f) => f.distFt <= radiusFt + EDGE); // the trimmed sample (copy: status mix)
+  const near = base.distances.filter((d) => d <= radiusFt + EDGE).length;  // the FULL count, never the trimmed sample's
+  const onSite = base.distances.filter((d) => d <= thresholds.onSiteFt).length;
+  return { ...base, inRadius, onSite, near, nearLabel: `${near}${capped ? "+" : ""}`, capped };
 }
 export function measurePipelines(rings, features) {
   return measureProximity(rings, features);

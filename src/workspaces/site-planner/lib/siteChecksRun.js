@@ -74,12 +74,13 @@ async function fetchPolygons(key, rings, fetchJson, { pageSize = 1000, maxPages 
       const params = {
         f: "json", where: "1=1", geometry: polyJson(rings), geometryType: "esriGeometryPolygon", spatialRel: "esriSpatialRelIntersects",
         inSR: 4326, outSR: 4326, outFields, returnGeometry: "true", geometryPrecision: 6, resultRecordCount: pageSize,
-        ...(page > 0 ? { resultOffset: offset, orderByFields: "OBJECTID" } : {}),
+        orderByFields: "OBJECTID", // EVERY page, or page 0 and page 1 can overlap and skip features
+        ...(page > 0 ? { resultOffset: offset } : {}),
       };
       const j = featuresOf(await queryJson(src, layer, params, fetchJson), `${key} layer ${layer}`);
       for (const f of j.features) {
         const g = f && f.geometry;
-        if (!g || !Array.isArray(g.rings)) throw new Error(`${key}: a returned polygon carried no geometry, so its area can't be measured.`);
+        if (!g || !Array.isArray(g.rings) || !g.rings.length) throw new Error(`${key}: a returned polygon carried no geometry, so its area can't be measured.`);
         out.push({ attrs: normalizeAttrs(f.attributes), rings: g.rings });
       }
       offset += j.features.length;
@@ -104,7 +105,7 @@ async function fetchNear(key, rings, radiusMi, fetchJson, cap = CHECK_THRESHOLDS
   const toRecs = (j) => j.features.map((f) => {
     const g = f.geometry || {};
     const rec = { attrs: normalizeAttrs(f.attributes) };
-    if (Array.isArray(g.paths)) rec.paths = g.paths;
+    if (Array.isArray(g.paths) && g.paths.length) rec.paths = g.paths;
     else if (Number.isFinite(g.x) && Number.isFinite(g.y)) rec.lngLat = [g.x, g.y];
     else throw new Error(`${key}: a returned feature carried no usable geometry.`);
     return rec;
@@ -124,6 +125,8 @@ async function fetchNear(key, rings, radiusMi, fetchJson, cap = CHECK_THRESHOLDS
 const GROUPS = {
   flood: async (rings, holes, o) => {
     const feats = await fetchPolygons("flood", rings, o.fetchJson);
+    // Features with no zone attribute (schema drift / an alias) would all read as "mapped, not floodplain" — a false None.
+    if (feats.length && !feats.every((f) => typeof f.attrs.FLD_ZONE === "string")) throw new Error("flood: the answer carried no flood-zone field.");
     return measureFlood(rings, holes, feats.map((f) => ({ rings: f.rings, zone: f.attrs.FLD_ZONE, subtype: f.attrs.ZONE_SUBTY })), o.thresholds);
   },
   wetlands: async (rings, holes, o) => {
@@ -139,6 +142,19 @@ const GROUPS = {
     return measureWells(rings, recs, { capped, thresholds: o.thresholds });
   },
 };
+
+/* A stored or fresh measurement must carry every field its row logic reads: a missing one would fall through every
+ * comparison (undefined >= n is false) to GREEN. Throw instead — the row then reads "Couldn't check". */
+const num = (v) => typeof v === "number" && Number.isFinite(v);
+export function assertMeasurement(group, m) {
+  const ok = m && typeof m === "object" && (
+    group === "flood" ? [m.siteSqft, m.sfhaSqft, m.sfhaFrac, m.shadedSqft, m.shadedFrac, m.undeterminedSqft, m.mappedFrac].every(num) && Array.isArray(m.sfhaZones)
+    : group === "wetlands" ? [m.siteSqft, m.sqft, m.acres, m.count].every(num) && Array.isArray(m.types)
+    : group === "pipelines" ? Array.isArray(m.ranked) && num(m.count) && (m.nearestFt === null || num(m.nearestFt))
+    : group === "wells" ? Array.isArray(m.ranked) && Array.isArray(m.inRadius) && Array.isArray(m.distances) && [m.onSite, m.near, m.count].every(num) && (m.nearestFt === null || num(m.nearestFt))
+    : false);
+  if (!ok) throw new Error(`${group}: the stored answer was incomplete.`);
+}
 
 function failedRow(check, message) {
   return {
@@ -173,7 +189,10 @@ export async function runTrustedChecks(rings, opts = {}) {
 
   const trusted = TRUSTED_CHECKS.filter((c) => isTrustedFor(c, reg.regions));
   const untrusted = TRUSTED_CHECKS.filter((c) => !isTrustedFor(c, reg.regions)).map((c) => c.id);
-  const wanted = trusted.filter((c) => !only || only.has(c.id));
+  // A Retry names ONE row, but the 100-year and 500-year rows share a single FEMA answer — retrying either re-asks
+  // the group and refreshes both, or one would recover while its twin stayed on "Couldn't check".
+  const groupsWanted = only ? new Set(trusted.filter((c) => only.has(c.id)).map((c) => c.group)) : null;
+  const wanted = trusted.filter((c) => !groupsWanted || groupsWanted.has(c.group));
   if (opts.force) clearCoalesced();
 
   const hash = ringsHash(rings, holes);
@@ -188,7 +207,7 @@ export async function runTrustedChecks(rings, opts = {}) {
       const r = await fresh;
       // STRICT: any error — even with an older stored copy behind it — is a failure, never a stale verdict.
       if (r.error) throw r.error;
-      if (r.data == null || typeof r.data !== "object") throw new Error(`${group}: the stored answer was unreadable.`);
+      assertMeasurement(group, r.data);
       return checks.map((c) => {
         const row = rowFromMeasurement(c.id, r.data, thresholds);
         if (!row) return failedRow(c, "No result.");

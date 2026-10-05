@@ -51,17 +51,21 @@ describe("region gate — trust by LOCATION, strictest reading on a straddle", (
     }
   });
   it("the Texas BOX is not trusted for the RRC: Shreveport, Roswell and Lawton fall inside the box but outside Texas", () => {
-    for (const [lng, lat] of [[-93.75, 32.5], [-104.5, 33.4], [-98.4, 34.62], [-103.1, 32.7]]) {
+    for (const [lng, lat] of [[-93.75, 32.5], [-104.5, 33.4], [-98.4, 34.62], [-103.1, 32.7], [-93.22, 30.23], [-96.4, 33.99], [-103.3, 36.7]]) {
       expect(inTexas(lat, lng), `${lng},${lat}`).toBe(false);
       expect(trustRegionOf(lat, lng), `${lng},${lat}`).toBeNull();
       const reg = siteRegions([rect(0, 0, 500, 500, lng, lat)]).regions;
       expect(isTrustedFor(rrc[0], reg)).toBe(false);
     }
   });
-  it("real Texas ground reads Texas: Houston, Dallas, Austin, San Antonio, Lubbock, Corpus Christi, Orange, Galveston", () => {
-    for (const [lng, lat] of [[-95.37, 29.76], [-96.8, 32.78], [-97.74, 30.27], [-98.49, 29.42], [-101.85, 33.58], [-97.4, 27.8], [-93.7366, 30.0927], [-94.8, 29.3]]) {
+  it("real Texas ground reads Texas: Houston, Dallas, Austin, San Antonio, Lubbock, Corpus Christi, Orange, Galveston, Laredo, El Paso, Eagle Pass, Del Rio, McAllen, Brownsville, Beaumont, Port Arthur, Marshall", () => {
+    for (const [lng, lat] of [[-95.37, 29.76], [-96.8, 32.78], [-97.74, 30.27], [-98.49, 29.42], [-101.85, 33.58], [-97.4, 27.8], [-93.7366, 30.0927], [-94.8, 29.3], [-99.507, 27.506], [-106.485, 31.76], [-100.40, 28.65], [-100.85, 29.38], [-98.23, 26.2], [-97.497, 25.90], [-94.10, 30.08], [-93.93, 29.9], [-94.37, 32.54]]) {
       expect(inTexas(lat, lng), `${lng},${lat}`).toBe(true);
     }
+  });
+  it("a Texas-side site within the quarter-mile buffer of the New Mexico line gets no RRC verdict (the claim covers the buffer)", () => {
+    expect(trustRegionOf(32.449, -103.065)).toBeNull();
+    expect(trustRegionOf(32.449, -102.5)).toBe("TX");
   });
   it("a site that STRADDLES Texas and Colorado gets no RRC verdict (strictest reading)", () => {
     const straddle = [rect(0, 0, 500, 500), rect(0, 0, 500, 500, -104.99, 39.74)];
@@ -301,5 +305,24 @@ describe("copy helpers", () => {
     const meas = { ranked: [{ attrs: { OPERATOR: "X" }, distFt: 800 }], count: 1, nearestFt: 800, nearestDir: "east" };
     expect(rowFromMeasurement("pipelines", meas).severity).toBe("amber");
     expect(rowFromMeasurement("pipelines", meas, { ...CHECK_THRESHOLDS, nearRadiusMi: 0.1 }).severity).toBe("green");
+  });
+});
+
+describe("review findings — no green from a missing, empty or truncated measurement", () => {
+  it("the 500-year row is not 'None' when the whole site is already in the 100-year area", () => {
+    const m = measureFlood(SITE, [], [flood(rect(-10, -10, 1010, 1010), "AE")]);
+    expect(severityFlood500(m)).toBe("amber");
+    expect(buildFlood500Row(m).figure).toBe("In 100-yr area");
+  });
+  it("'AREA NOT INCLUDED' is unmapped, not mapped", () => {
+    const m = measureFlood(SITE, [], [flood(rect(-10, -10, 1010, 1010), "AREA NOT INCLUDED")]);
+    expect(severityFlood100(m)).toBe("amber");
+  });
+  it("a degenerate site (no area) throws instead of reading None", () => {
+    expect(() => measureWetlands([[[LNG0, LAT0], [LNG0 + 0.001, LAT0], [LNG0 + 0.002, LAT0]]], [], [])).toThrow();
+  });
+  it("100 wells inside the radius count as 100, not the trimmed sample of 60", () => {
+    const wells = Array.from({ length: 100 }, (_, i) => ({ attrs: {}, lngLat: [LNG0 + (1100 + i) / FT_LNG, LAT0 + 500 / FT_LAT] }));
+    expect(measureWells(SITE, wells).near).toBe(100);
   });
 });

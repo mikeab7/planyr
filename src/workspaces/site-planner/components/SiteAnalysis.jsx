@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { runSiteScreen } from "../lib/siteScreen.js";
 import { freshnessOf } from "../lib/siteChecks.js";
+import { ringsHash } from "../lib/siteChecksRun.js";
 import { pillsFor, pillOn, togglePill, PILLS_NOTE } from "../lib/siteLayerPills.js";
 import { ALL_LAYERS } from "../lib/layers.js";
 import { ToggleChip } from "../../../shared/ui/controls.jsx";
@@ -62,16 +63,15 @@ export default function SiteAnalysis({
   const openRef = useRef(null);
   openRef.current = openId;
 
-  const sig = rings ? rings.length + ":" + rings.reduce((n, r) => n + r.length, 0) + ":" + JSON.stringify(rings[0]?.[0] || null) + "|" + (holes || []).length : "";
-
-  const lift = (r) => { if (onFindings) { try { onFindings(r.findings || []); } catch (_) { /* a listener error must not break the panel */ } } };
+  // Every coordinate of every ring and hole — a moved vertex must re-screen (the stored answers are keyed the same way).
+  const sig = rings && rings.length ? ringsHash(rings, holes) : "";
 
   const run = (force = false) => {
-    if (!rings || !rings.length) { setState({ loading: false, result: null, error: null, empty: true }); return; }
+    if (!rings || !rings.length) { ++reqRef.current; setState({ loading: false, result: null, error: null, empty: true }); return; }
     const tok = ++reqRef.current;
     setState((s) => ({ ...s, loading: true, error: null, empty: false }));
     Promise.resolve(runAnalysis(rings, { holes, force }))
-      .then((r) => { if (tok !== reqRef.current) return; setState({ loading: false, result: r, error: null, empty: !!r.empty }); lift(r); })
+      .then((r) => { if (tok !== reqRef.current) return; setState({ loading: false, result: r, error: null, empty: !!r.empty }); })
       .catch((e) => { if (tok === reqRef.current) setState({ loading: false, result: null, error: String(e?.message || e), empty: false }); });
   };
 
@@ -86,9 +86,7 @@ export default function SiteAnalysis({
           if (!s.result) return s;
           const byId = new Map((r.rows || []).map((x) => [x.id, x]));
           const rows = s.result.rows.map((x) => byId.get(x.id) || x);
-          const next = { ...s.result, rows, findings: r.findings && r.findings.length ? r.findings : s.result.findings };
-          lift(next);
-          return { ...s, result: next };
+          return { ...s, result: { ...s.result, rows, findings: r.findings && r.findings.length ? r.findings : s.result.findings } };
         });
       })
       .catch(() => { /* the row keeps its "Couldn't check" state — a failed retry is the same honest answer */ })
@@ -102,6 +100,9 @@ export default function SiteAnalysis({
   useEffect(() => () => { if (onFocusLayer) onFocusLayer(null); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const result = state.result;
+  // The legacy wetlands status is lifted from an EFFECT, never from inside a state updater (a side effect there can
+  // run twice or during render).
+  useEffect(() => { if (result && onFindings) { try { onFindings(result.findings || []); } catch (_) { /* a listener error must not break the panel */ } } }, [result]); // eslint-disable-line react-hooks/exhaustive-deps
   const rows = useMemo(() => result?.rows || [], [result]);
   const fresh = useMemo(() => freshnessOf(rows), [rows]);
   const pills = useMemo(() => (result && !result.partial ? pillsFor({ regions: result.regions || [], untrusted: result.untrusted || [], layers }) : []), [result, layers]);
@@ -131,7 +132,7 @@ export default function SiteAnalysis({
         <div style={{ lineHeight: 1.4 }}>
           <b>{parcelCount}</b> parcel{parcelCount === 1 ? "" : "s"}{acres != null && <> · <b>{acres.toFixed(2)} AC</b></>}
           <div data-analysis-freshness="1" style={{ color: "var(--text-secondary)", fontSize: FONT_SIZE.label }}>
-            {state.loading ? "Checking the maps…" : fresh.line || (result ? "Checked just now" : "")}
+            {state.loading ? "Checking the maps…" : fresh.line || (rows.length && rows.every((r) => r.severity === "failed") ? "Couldn't check the maps" : result ? "Checked just now" : "")}
           </div>
         </div>
         <button type="button" style={linkBtn} onClick={() => run(true)} disabled={state.loading} title="Re-check from the map sources">
@@ -173,7 +174,7 @@ export default function SiteAnalysis({
       )}
 
       {/* ── Checked for you ───────────────────────────────────────────────────────────────── */}
-      <div data-section="checked">
+      <div data-section="checked" style={{ opacity: state.loading && rows.length ? 0.5 : 1 }}>
         <div style={{ ...sectionLabel, marginBottom: 4 }}>Checked for you</div>
         {state.loading && !rows.length && <div style={{ color: "var(--text-secondary)", padding: "6px 0" }}>Checking the maps…</div>}
         <div style={{ display: "flex", flexDirection: "column" }}>
@@ -185,7 +186,7 @@ export default function SiteAnalysis({
               <div key={r.id} data-check-row={r.id} data-severity={r.severity}
                 onMouseEnter={() => focus(r.layer)} onMouseLeave={() => focus(openRef.current ? (rows.find((x) => x.id === openRef.current) || {}).layer : null)}
                 style={{ borderLeft: `3px solid ${sev.bar}`, padding: "7px 0 7px 10px", marginBottom: 6 }}>
-                <div role="button" tabIndex={0} aria-expanded={open}
+                <div role="button" tabIndex={0} aria-expanded={r.severity === "failed" ? undefined : open}
                   onClick={toggle} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } }}
                   style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, cursor: "pointer" }}>
                   <span style={{ minWidth: 0 }}>

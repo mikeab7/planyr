@@ -35,7 +35,7 @@ export function cityLineOf(b) {
  * kind: "all" (one maintainer for every road) · "mixed" (a per-road list) · "none" · "failed" · "not-screened". */
 export function roadsLineOf(road, { notScreenedIn = null } = {}) {
   if (road && road.__notScreened) return { kind: "not-screened", text: `Not screened in ${notScreenedIn || "this state"}`, items: [] };
-  if (!road || road.__error) return { kind: "failed", text: "Couldn't check", items: [] };
+  if (!road || road.__error || (road.error && !(Array.isArray(road.roads) && road.roads.length))) return { kind: "failed", text: "Couldn't check", items: [] };
   const roads = Array.isArray(road.roads) ? road.roads : [];
   if (!roads.length) return { kind: "none", text: "No fronting road found", items: [] };
   const nameOf = (r) => r.name || (r.route ? `Route ${r.route}` : "Unnamed road");
@@ -56,9 +56,9 @@ export function roadsLineOf(road, { notScreenedIn = null } = {}) {
 /* The whole "Who governs this site" model. */
 export function buildGovernsModel(badge, road, { state = null, stateLabel = null, layerKeys = ["jur_city", "jur_etj"] } = {}) {
   const city = cityLineOf(badge);
-  const isdText = !badge ? null : badge.isd || null;
+  const isdText = !badge ? "Couldn't check" : badge.isd || null;
   return {
-    county: badge ? (badge.county || null) : null,
+    county: badge ? (badge.county || null) : "Couldn't check",
     city: { ...city, straddles: !!(badge && badge.straddle) },
     // School district: a Texas (TEA) source. Off Texas ground a bare dash would read "no school district".
     school: state && state !== "TX" ? `Not screened in ${stateLabel || "this state"}` : isdText,

@@ -44,6 +44,7 @@ describe("who governs — the structured badge, compact only when compact is com
     expect(mixed.kind).toBe("mixed"); expect(mixed.items).toHaveLength(2);
     expect(roadsLineOf({ roads: [] }).kind).toBe("none");
     expect(roadsLineOf({ __error: new Error("x") }).kind).toBe("failed");
+    expect(roadsLineOf({ roads: [], error: "The GIS source returned HTTP 503" }).kind).toBe("failed"); // the engine RETURNS its failure
     expect(roadsLineOf({ __notScreened: true }, { notScreenedIn: "Colorado" }).text).toBe("Not screened in Colorado");
   });
   it("school district off Texas ground is 'Not screened', never a dash that reads as 'none'", () => {
