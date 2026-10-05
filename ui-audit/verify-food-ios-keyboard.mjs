@@ -11,6 +11,11 @@
  * footer hides under the iOS keyboard"). The shipped `keyboardInset = innerHeight − vv.height −
  * vv.offsetTop` therefore read ≈ 0 on a real iPhone, and the sheet never lifted — while every stub
  * that kept innerHeight at full height saw a perfect lift. Those harnesses tested their own model.
+ * ⚠ CORRECTED (B2046224 ×3): "innerHeight shrinks WITH the visual viewport" is not always true either —
+ * production telemetry from the owner's iPhone (iOS 18.7, 21:12 UTC) shows innerHeight standing >120
+ * above visualViewport.height with the keyboard up. innerHeight moves BOTH ways; the sheet no longer
+ * reads it at all (it pins to the visual viewport's own box). The full-app, picture-taking harness
+ * that models both readings is verify-food-ios-screens.mjs; this one stays as the fixture-page check.
  *
  * THE MODEL HERE (stated, because a harness that cannot say what it models cannot be trusted):
  *  · the LAYOUT viewport (the fixed-position containing block) is the Playwright viewport and never
@@ -125,7 +130,13 @@ try {
     await page.locator('[data-testid="food-add-dish-btn"]').tap();
     await page.waitForTimeout(300);
     // Freeze the sheet against the screen bottom (what a sheet that ignores the keyboard does), open it.
-    await sheet.evaluate((el) => { el.style.setProperty("bottom", "0px", "important"); el.style.setProperty("height", "45vh", "important"); el.style.setProperty("transition", "none", "important"); });
+    // (B2046224 ×3: the sheet now sits inside a fixed ROOT that follows the visual viewport — freeze
+    // the root to the layout viewport too, or the planted defect is silently corrected.)
+    await sheet.evaluate((el) => {
+      const root = el.closest("[data-food-sheet-root]");
+      if (root) { root.style.setProperty("top", "0px", "important"); root.style.setProperty("height", "auto", "important"); root.style.setProperty("bottom", "0px", "important"); }
+      el.style.setProperty("bottom", "0px", "important"); el.style.setProperty("height", "45vh", "important"); el.style.setProperty("transition", "none", "important");
+    });
     await page.evaluate(() => window.__kb.set(380));
     await page.waitForTimeout(200);
     const field = page.locator('[data-testid="dish-name-input"]');

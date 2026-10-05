@@ -232,7 +232,7 @@ function DraftDishes({ rows, setRows, isMobile }) {
     <div data-testid="visit-dishes" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-secondary)" }}>Dishes</div>
       {rows.map((r, i) => (
-        <div key={r.key} data-testid="visit-dish-row" style={{
+        <div key={r.key} data-testid="visit-dish-row" data-edit-card="" style={{
           display: "flex", flexDirection: "column", gap: 8, padding: "10px 10px 12px", borderRadius: RADIUS.lg,
           border: "1px solid var(--border-default)", background: "var(--surface-page)",
         }}>
@@ -342,7 +342,7 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, submitLabel 
         Ambiance
         <RatingSlider value={ratingAmbiance} onChange={setRatingAmbiance} label="Ambiance rating" isMobile={isMobile} />
       </div>
-      <label style={groupLabel}>
+      <label data-edit-card="" style={groupLabel}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
           <span>Date</span>
           {/* Explicit clear affordance, matching the rating slider's own "Clear" link — a native
@@ -359,15 +359,15 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, submitLabel 
         </div>
         <input type="date" value={visitedOn} onChange={(e) => setVisitedOn(e.target.value)} {...noAutofill("visit-day")} data-testid="visit-date-input" style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX }} />
       </label>
-      <label style={groupLabel}>
+      <label data-edit-card="" style={groupLabel}>
         What was good
         <input type="text" value={whatWasGood} onChange={(e) => setWhatWasGood(e.target.value)} placeholder="The hamachi, the agedashi…" {...noAutofill("visit-highlights")} data-testid="visit-highlights-input" style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX }} />
       </label>
-      <label style={groupLabel}>
+      <label data-edit-card="" style={groupLabel}>
         Cost
         <input type="number" step="0.01" min="0" inputMode="decimal" value={cost} onChange={(e) => setCost(e.target.value)} placeholder="0.00" {...noAutofill("visit-total")} data-testid="visit-cost-input" style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX }} />
       </label>
-      <label style={groupLabel}>
+      <label data-edit-card="" style={groupLabel}>
         Notes
         <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} {...noAutofill("visit-notes")} data-testid="visit-notes-input" style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX, resize: "vertical" }} />
       </label>
@@ -445,7 +445,7 @@ function PanelHeader({ manualNameEditable, manualName, onManualNameChange, name,
   const formattedAddress = formatAddress(address);
   const mapsUrl = directionsUrl(lat, lon);
   return (
-    <div style={{ padding: "14px 16px 8px" }}>
+    <div data-edit-card={manualNameEditable ? "" : undefined} style={{ padding: "14px 16px 8px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
         {manualNameEditable ? (
           <input
@@ -615,7 +615,7 @@ function ActionsRow({ everVisited, onOpenForm, wishlisted, onToggleWishlist, wis
   );
 
   return (
-    <div data-testid="food-actions-row" data-sheet-sticky="bottom" style={{
+    <div data-testid="food-actions-row" data-sheet-sticky="bottom" data-hide-while-typing="" style={{
       position: "sticky", bottom: 0, display: "flex", gap: 8, padding: "10px 16px",
       background: "var(--surface-raised)", borderTop: "1px solid var(--border-default)",
     }}>
