@@ -46,6 +46,22 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   EVERY role so a second deal on an already-tracked property attaches to it instead of minting a
   duplicate, then an exact normalized-title fallback) and mints a new "tracked" site only when
   nothing plausible matches. The owner must never have to create a site before recording a deal.
+- **⛔ Site Analysis = TRUSTED VERDICTS ONLY (B2117136, owner-approved 2026-10-05) — read before adding a check or a card.**
+  A verdict (colour, amount, "None") is issued only by `siteChecks.js`'s declared `TRUSTED_CHECKS` registry, and only where the
+  site's region is in that check's `regions` (FEMA + NWI: all; RRC wells + pipelines: TX). Everything else is a map-layer PILL
+  (`siteLayerPills.js`) with no claim at all. Rules to keep: **(1)** the region gate is the strictest reading over sampled points of
+  EVERY ring, and "Texas" means the box AND `TEXAS_OUTLINE` (the box holds Shreveport/Roswell/Lawton — the RRC knows nothing of
+  them, so a green "None" there would be a false clean). **(2)** a failed/timed-out/malformed/truncated source is a `failed` row
+  ("Couldn't check" + Retry) — never "None", never green, even with an older stored copy behind it. **(3)** the cache
+  (`siteChecksRun.js`) stores MEASUREMENTS under a versioned key (`VERDICT_CACHE_VERSION`), never verdicts — severity is recomputed
+  at read time from `CHECK_THRESHOLDS` (the one home for every radius/tolerance; `siteCheckRadius.js` is its boot-safe leaf).
+  **(4)** flood/wetland numbers are AREA fractions through clipper on the real rings (save-and-except holes subtracted; 0.2% netted
+  against the 100-yr first), never vertex sampling; FEMA publishes the all-clear as polygons, so uncovered ground is "Not fully
+  mapped", never "None". **(5)** hovering/opening a row highlights its layer through `layerFocus.js` — a DERIVED copy fed only to
+  the overlay-sync effect (`syncOverlays` in `SitePlanner.jsx`), so a hover can never be persisted, undone or left on. Orchestrator:
+  `siteScreen.js` (`runSiteScreen`; `runSiteAnalysis` is untouched). Guards: repo-root `test/` suites **siteChecks**,
+  **siteChecksRun** (every failure path forced), **siteScreenModels**, and ui-audit **verify-site-analysis-trust** (real panel,
+  mocked sources with known ground truth; TX + CO arms).
 - **`splitIntegrity.js` (B540768, B966624/B966629) — parcel split-lineage invariants, pure and
   Node-testable.** `isLiveActive`/`liveActive` (a parcel counts only when active AND not soft-deleted —
   read either half alone and a sum silently vanishes or doubles) · `lineageAudit` (account-wide: any

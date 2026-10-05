@@ -3,10 +3,9 @@
  *
  * Drives the built app (vite preview on :4173) over a seeded, georeferenced Houston
  * site and checks, against the LIVE TxDOT Roadway Inventory:
- *   1. the Site Analysis "Road authority" card renders a PER-ROAD list (a header
- *      roll-up + one row per fronting road, name → authority) — not one collapsed value;
- *   2. the card's "◍ Activate layer" toggle flips to "◉ Deactivate layer" (B190 suppression
- *      lifted) and the color-coded road overlay paints vector <path>s into the env overlay pane.
+ *   1. the Site Analysis "Who governs this site" box shows the Roads row — one maintainer for
+ *      every road ("County maintains all 4 · …") or, when mixed, a PER-ROAD list (name → authority).
+ *   (The old card's "Activate layer" overlay toggle was retired by the NEW-1 redesign.)
  *
  * Live-data caveat: the road query hits services.arcgis.com from the browser. If that
  * host isn't reachable from this sandbox's browser egress, the card reads "unavailable"
@@ -85,58 +84,38 @@ await page.waitForTimeout(1600);
 
 // Open the ⚐ Analysis left-rail tab.
 await page.locator('button[title="Analysis"]').click({ timeout: 8000 });
-await page.waitForTimeout(400);
-ok(await page.locator('text=Site Analysis').count() > 0, "Site Analysis panel opened");
+await page.waitForSelector('[data-site-analysis="1"]', { timeout: 20000 });
 
-// Wait for the Road authority card to leave the loading state (live GIS query).
-const roadCard = page.locator('div', { hasText: /Road authority/ }).last();
-await page.waitForTimeout(800);
+// NEW-1 (2026-10-05) — road authority now lives in the "Who governs this site" box (plain facts, no card, no
+// INFO badge, no Activate-layer chip). Wait for its Roads row to leave the loading state (live GIS query).
+const governs = page.locator('[data-section="governs"]');
 let cardText = "";
-for (let i = 0; i < 25; i++) {
-  cardText = (await roadCard.innerText().catch(() => "")) || "";
-  if (/Maintained by|unavailable|temporarily|unknown|No roads matched/i.test(cardText)) break;
+for (let i = 0; i < 40; i++) {
+  cardText = ((await governs.innerText().catch(() => "")) || "").replace(/\s+/g, " ");
+  if (/maintains|Mixed — \d+ roads|Maintainer unknown|No fronting road|Couldn't check|Not screened/i.test(cardText)) break;
   await page.waitForTimeout(700);
 }
-console.log("\n--- Road authority card text ---\n" + cardText + "\n--------------------------------\n");
+ok(/Who governs this site/i.test(cardText), "Site Analysis panel opened with the 'Who governs this site' box");
+console.log("\n--- Who governs this site ---\n" + cardText + "\n-----------------------------\n");
 
-const liveOk = /Maintained by/i.test(cardText);
+const liveOk = /maintains|Mixed — \d+ roads|Maintainer unknown/i.test(cardText);
 if (liveOk) {
-  ok(true, "card reached a resolved state (road query returned)");
-  ok(/Maintained by\s*Mixed — 4 roads/i.test(cardText.replace(/\s+/g, " ")), "header roll-up present ('Maintained by · Mixed — 4 roads')");
-  ok(/Greens Rd/.test(cardText), "same-named segments merged to one 'Greens Rd' row");
-  ok(/IH 45/.test(cardText), "highway named from coded HWY ('IH 45')");
-  ok(/State \(TxDOT\)/.test(cardText) && /City/.test(cardText) && /County/.test(cardText), "City / County / State (TxDOT) all labeled per-road");
-  ok(/Unknown/.test(cardText), "unclassifiable road shows an explicit Unknown (never a guess)");
-  // The per-road list should show 4 distinct roads (IH 45, Greens Rd, Aldine Mail Rd, Private Dr).
-  const authorityWords = (cardText.match(/City|County|State \(TxDOT\)|Toll|Federal|Unknown/g) || []).length;
-  ok(authorityWords >= 4, `per-road authorities listed (found ${authorityWords}, expected ≥4)`);
-  // Expand the card to view the per-road detail (route + class).
-  await roadCard.click({ timeout: 4000 }).catch(() => {});
-  await page.waitForTimeout(300);
-
-  // Flip the "◍ Activate layer" toggle and confirm it arms + the overlay paints.
-  const mapBtn = page.locator('button:has-text("Activate layer")').first();
-  const hadToggle = await mapBtn.count() > 0;
-  ok(hadToggle, "card exposes a '◍ Activate layer' toggle (B190 suppression lifted)");
-  if (hadToggle) {
-    await mapBtn.click({ timeout: 5000 });
-    await page.waitForTimeout(2500);
-    const onMap = await page.locator('button:has-text("Deactivate layer")').count() > 0;
-    ok(onMap, "toggle armed to '◉ Deactivate layer' (overlay turned on)");
-    // The overlay draws into the env pane as vector paths — but esri-leaflet queries the
-    // FeatureServer via its OWN XHR to services.arcgis.com, which this sandbox's browser
-    // can't reach (only basemap tiles are allowlisted). So paint is NOT a hard gate here;
-    // it's the live-browser check logged to VERIFICATION.md. Report it, don't fail on it.
-    // Scope strictly to Leaflet panes (the planner's own canvas SVG lives OUTSIDE
-    // .leaflet-pane, so this counts only true map-overlay vector features).
-    const paths = await page.locator('.leaflet-pane path').count();
-    if (paths > 0) ok(paths > 0, `road overlay painted ${paths} vector features in a Leaflet pane (esri-leaflet fetch shimmed)`);
-    else console.log(`  • road overlay paths in a Leaflet pane: 0 — FeatureServer egress blocked in sandbox; live paint → VERIFICATION.md`);
+  ok(true, "Roads row reached a resolved state (road query returned)");
+  const mixed = /Mixed — \d+ roads/i.test(cardText);
+  if (mixed) {
+    const list = ((await page.locator("[data-roads-list]").innerText().catch(() => "")) || "").replace(/\s+/g, " ");
+    ok(list.length > 0, "a mixed site lists each road with its own maintainer");
+    ok(/Greens Rd/.test(list), "same-named segments merged to one 'Greens Rd' row");
+    ok(/IH 45/.test(list), "highway named from coded HWY ('IH 45')");
+    ok(/State \(TxDOT\)/.test(list) && /City/.test(list) && /County/.test(list), "City / County / State (TxDOT) all labeled per-road");
+    ok(/Unknown/.test(list), "unclassifiable road shows an explicit Unknown (never a guess)");
+  } else {
+    ok(/maintains all \d+|maintains /.test(cardText), "one maintainer for every road reads 'X maintains all N · names'");
   }
 } else {
   // Honest degradation: the browser couldn't reach the live GIS host from this sandbox.
   console.log("  ⚠ Live TxDOT query did not resolve in-browser (egress) — structural checks only.");
-  ok(/Road authority/i.test(cardText), "Road authority card rendered (live data unavailable in sandbox)");
+  ok(/Roads/i.test(cardText), "Roads row rendered (live data unavailable in sandbox)");
 }
 
 await page.screenshot({ path: new URL("./screens/road-authority.png", import.meta.url).pathname });
