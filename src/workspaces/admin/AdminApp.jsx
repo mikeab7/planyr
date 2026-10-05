@@ -14,6 +14,7 @@ import CriteriaRequestsSection from "./CriteriaRequestsSection.jsx";
 import ReportsSection from "./ReportsSection.jsx";
 import SignupActivitySection from "./SignupActivitySection.jsx";
 import AdminPasswordResetSection from "./AdminPasswordResetSection.jsx";
+import ParcelCoverageSection from "./ParcelCoverageSection.jsx";
 
 function Section({ title, blurb }) {
   return (
@@ -72,6 +73,8 @@ export default function AdminApp({ onExit }) {
         <SignupActivitySection />
         {/* B1160722, NEW-3 — reset a teammate's password with no email involved. */}
         <AdminPasswordResetSection />
+        {/* NEW-1 — US map of every county wired to a parcel source (read from the live registry). */}
+        <ParcelCoverageSection />
       </div>
     </div>
   );
