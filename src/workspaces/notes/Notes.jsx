@@ -24,6 +24,7 @@
  */
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AppHeader, { useNarrow } from "../../shared/ui/AppHeader.jsx";
+import PriorityToolbar from "../../shared/ui/PriorityToolbar.jsx";
 import { notesSaveState } from "./lib/notesSaveState.js";
 import NotesTree from "./components/NotesTree.jsx";
 import {
@@ -121,10 +122,10 @@ const headerIconBtnStyle = (active) => ({
   font: "inherit", fontSize: 12, fontWeight: 650,
 });
 
-function NotesHeaderTools({
-  onToggleFind, findActive, onTogglePageSetup, pageSetupActive, onToggleHistory, historyActive,
-  onExportMarkdown, onPrint,
-}) {
+/* ⛔ NEW-2 (2026-10-05) — the export control is its own module-scope component (MODULE-SCOPE-COMPONENTS) so
+ * the `PriorityToolbar` can draw it more than once (the bar copy + its hidden measuring copies) and so it
+ * can drop its "Export" word to an icon when the row narrows. Same menu, same test ids as before. */
+function ExportControl({ iconOnly, onExportMarkdown, onPrint }) {
   const [exportOpen, setExportOpen] = useState(false);
   const wrapRef = useRef(null);
   useEffect(() => {
@@ -172,53 +173,85 @@ function NotesHeaderTools({
   const rowStyle = { ...soonRowStyle, color: "var(--text-primary)", opacity: 1, cursor: "pointer", textAlign: "left" };
 
   return (
-    <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-      <button type="button" data-testid="notes-header-find" title="Find and replace (Ctrl+H)" aria-label="Find and replace"
-        aria-pressed={findActive} onClick={onToggleFind} style={headerIconBtnStyle(findActive)}>
-        <HeaderIcon><circle cx="7" cy="7" r="4.5" /><line x1="10.3" y1="10.3" x2="14" y2="14" /></HeaderIcon>
+    <span ref={wrapRef} style={{ position: "relative", display: "inline-flex" }}>
+      <button type="button" data-testid="notes-header-export" title="Export this page" aria-label={iconOnly ? "Export this page" : undefined} aria-haspopup="menu" aria-expanded={exportOpen}
+        onClick={() => setExportOpen((o) => !o)} style={{ ...headerIconBtnStyle(exportOpen), padding: "0 9px" }}>
+        <HeaderIcon><path d="M8 2.5v8" /><path d="M5 7.5L8 10.5l3-3" /><path d="M2.5 12.5h11" /></HeaderIcon>
+        {iconOnly ? null : "Export"}<span aria-hidden="true" style={{ fontSize: 9 }}>▾</span>
       </button>
-      <button type="button" data-testid="notes-header-page-setup" title="Page setup" aria-label="Page setup"
-        aria-pressed={pageSetupActive} onClick={onTogglePageSetup} style={headerIconBtnStyle(pageSetupActive)}>
-        <HeaderIcon><rect x="3" y="2" width="10" height="12" rx="1.2" /><line x1="5.5" y1="5.5" x2="10.5" y2="5.5" /><line x1="5.5" y1="8" x2="10.5" y2="8" /></HeaderIcon>
-      </button>
-      <button type="button" data-testid="notes-header-history" title="Earlier versions of this page" aria-label="Version history"
-        aria-pressed={historyActive} onClick={onToggleHistory} style={headerIconBtnStyle(historyActive)}>
-        <HeaderIcon><path d="M8 4.5V8l2.5 1.5" /><circle cx="8" cy="8" r="5.5" /></HeaderIcon>
-      </button>
-      <span ref={wrapRef} style={{ position: "relative", display: "inline-flex" }}>
-        <button type="button" data-testid="notes-header-export" title="Export this page" aria-haspopup="menu" aria-expanded={exportOpen}
-          onClick={() => setExportOpen((o) => !o)} style={{ ...headerIconBtnStyle(exportOpen), padding: "0 9px" }}>
-          <HeaderIcon><path d="M8 2.5v8" /><path d="M5 7.5L8 10.5l3-3" /><path d="M2.5 12.5h11" /></HeaderIcon>
-          Export<span aria-hidden="true" style={{ fontSize: 9 }}>▾</span>
-        </button>
-        {exportOpen && (
-          <div
-            data-testid="notes-header-export-menu"
-            role="menu"
-            style={{
-              padding: 4, width: 176,
-              display: "flex", flexDirection: "column", gap: 1,
-              background: "var(--surface-raised)", border: "1px solid var(--border-default)",
-              borderRadius: RADIUS.control, boxShadow: "0 12px 32px rgba(0,0,0,0.20)",
-              ...menuStyle,
-            }}
-          >
-            <span style={soonRowStyle}>PDF<span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase" }}>Soon</span></span>
-            <span style={soonRowStyle}>Word (.docx)<span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase" }}>Soon</span></span>
-            <button type="button" data-testid="notes-header-export-markdown" style={rowStyle}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => { setExportOpen(false); onExportMarkdown(); }}
-            >Markdown</button>
-            <div style={{ height: 1, margin: "3px 4px", background: "var(--border-default)" }} />
-            <button type="button" data-testid="notes-header-export-print" style={rowStyle}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => { setExportOpen(false); onPrint(); }}
-            >Print…</button>
-          </div>
-        )}
-      </span>
+      {exportOpen && (
+        <div
+          data-testid="notes-header-export-menu"
+          role="menu"
+          style={{
+            padding: 4, width: 176,
+            display: "flex", flexDirection: "column", gap: 1,
+            background: "var(--surface-raised)", border: "1px solid var(--border-default)",
+            borderRadius: RADIUS.control, boxShadow: "0 12px 32px rgba(0,0,0,0.20)",
+            ...menuStyle,
+          }}
+        >
+          <span style={soonRowStyle}>PDF<span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase" }}>Soon</span></span>
+          <span style={soonRowStyle}>Word (.docx)<span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase" }}>Soon</span></span>
+          <button type="button" data-testid="notes-header-export-markdown" style={rowStyle}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => { setExportOpen(false); onExportMarkdown(); }}
+          >Markdown</button>
+          <div style={{ height: 1, margin: "3px 4px", background: "var(--border-default)" }} />
+          <button type="button" data-testid="notes-header-export-print" style={rowStyle}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => { setExportOpen(false); onPrint(); }}
+          >Print…</button>
+        </div>
+      )}
     </span>
   );
+}
+
+/* Priority (higher = kept longest — reorder here): Export 80 · Version history 70 · Page setup 50 · Find 40.
+ * The row never wraps: Export drops its word first, then Find / Page setup / History move into "More". */
+function NotesHeaderTools({
+  onToggleFind, findActive, onTogglePageSetup, pageSetupActive, onToggleHistory, historyActive,
+  onExportMarkdown, onPrint,
+}) {
+  const items = [
+    {
+      id: "find", label: "Find and replace", priority: 40, active: findActive, onSelect: onToggleFind,
+      render: () => (
+        <button type="button" data-testid="notes-header-find" title="Find and replace (Ctrl+H)" aria-label="Find and replace"
+          aria-pressed={findActive} onClick={onToggleFind} style={headerIconBtnStyle(findActive)}>
+          <HeaderIcon><circle cx="7" cy="7" r="4.5" /><line x1="10.3" y1="10.3" x2="14" y2="14" /></HeaderIcon>
+        </button>
+      ),
+    },
+    {
+      id: "page-setup", label: "Page setup", priority: 50, active: pageSetupActive, onSelect: onTogglePageSetup,
+      render: () => (
+        <button type="button" data-testid="notes-header-page-setup" title="Page setup" aria-label="Page setup"
+          aria-pressed={pageSetupActive} onClick={onTogglePageSetup} style={headerIconBtnStyle(pageSetupActive)}>
+          <HeaderIcon><rect x="3" y="2" width="10" height="12" rx="1.2" /><line x1="5.5" y1="5.5" x2="10.5" y2="5.5" /><line x1="5.5" y1="8" x2="10.5" y2="8" /></HeaderIcon>
+        </button>
+      ),
+    },
+    {
+      id: "history", label: "Version history", priority: 70, active: historyActive, onSelect: onToggleHistory,
+      render: () => (
+        <button type="button" data-testid="notes-header-history" title="Earlier versions of this page" aria-label="Version history"
+          aria-pressed={historyActive} onClick={onToggleHistory} style={headerIconBtnStyle(historyActive)}>
+          <HeaderIcon><path d="M8 4.5V8l2.5 1.5" /><circle cx="8" cy="8" r="5.5" /></HeaderIcon>
+        </button>
+      ),
+    },
+    {
+      id: "export", label: "Export", priority: 80,
+      menuRows: [
+        { id: "export-markdown", label: "Export · Markdown", onSelect: onExportMarkdown },
+        { id: "export-print", label: "Export · Print…", onSelect: onPrint },
+      ],
+      render: ({ iconOnly }) => <ExportControl iconOnly={iconOnly} onExportMarkdown={onExportMarkdown} onPrint={onPrint} />,
+    },
+  ];
+  return <PriorityToolbar name="notes-actions" items={items} moreLabel="More page actions" />;
 }
 
 /** LOUD-FAILURE: a storage failure is a NAMED banner, never a quiet no-op. A full or
