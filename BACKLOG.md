@@ -5345,6 +5345,13 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
+### B2096352 — Backspace after clicking the inspector's Depth ▲ deleted the selected building when focus was parked on a canvas button `[site-planner]` (bug) #site-planner #keyboard #persistence  *(Found by the VERIFY-SELF v3 auth sweep 2026-10-04 (V258992 stepper arm, batch b07), reproduced with a known-good control on build ccaca0c. DEDUPE-FIRST: this is a RECURRENCE of the keyScope family (NEW-1 / B464048, "Backspace deleted my building") — same owner-reported data loss, a different focus state; filed under its own number because the original item is archived. Constraint check: nothing contradicts `## Owner product constraints`.)*
+
+`[x]` **Repro (live, real keys, fresh plan per arm):** Properties already open, focus parked on **Zoom to fit** / **Zoom in** (canvas wrapper), select the building, click Depth ▲, press Backspace → building **1→0, no toast.** Controls: focus on a rail button → survives with the key-scope toast; known-good arm (click the building after the ▲, Backspace) deletes, so the instrument is valid.
+`[x]` **Cause:** `focusScope` returned CANVAS for ANY focused node inside the canvas wrapper before consulting the latch; the ▲ never takes focus on click, so the latch the ▲'s own press set to FIELD was never read, and `keyScopeVerdict` allows everything under CANVAS.
+`[x]` **Fix:** a focused BUTTON inside the canvas wrapper answers to the latch (a canvas-button press itself latches CANVAS, so Delete after Zoom-in still works). `test/keyContract.test.js` updated (+1 arm).
+- Verify: live — **V1518688** (re-run the A1 arm after deploy).
+
 ### B2095120 — Site Planner hard-crashed on open for a plan holding an element type not in the type table `[site-planner]` (bug) #site-planner #persistence  *(Found by the VERIFY-SELF v3 auth sweep 2026-10-04 on `e2e-fixture-testfit`. DEDUPE-FIRST: no prior item. Constraint check: nothing contradicts `## Owner product constraints`.)*
 
 `[x]` **Symptom:** opening `#/project/e2e-fixture-testfit/site` signed in showed "Site Planyr hit an error and couldn't load: Cannot read properties of undefined (reading 'label')".

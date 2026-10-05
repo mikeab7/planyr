@@ -171,6 +171,11 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1518688 — B2096352: Backspace after the Depth ▲ never deletes the building (focus parked on Zoom-to-fit)
+
+Sandbox-proven: `test/keyContract.test.js`. **Steps** (signed in as `e2e@planyr.test` on planyr.io after the deploy; `/version.json` in the same call; own throwaway plan, one building drawn): 1. Open Properties, press **Zoom to fit** (focus stays on it), select the building. 2. Click the Depth ▲ (stepper). 3. Press Backspace (real key). **Expect:** the building survives (element count 1→1) and the key-scope toast shows. 4. Control: click the building, Backspace. **Expect:** it deletes (1→0). Delete the throwaway plan afterwards.
+
+
 ### V1517459 — B2095120: the e2e-fixture-testfit plan (legacy `line` elements) opens and draws
 
 Sandbox-proven: `test/unknownElementType.test.js`. **Steps** (signed in as `e2e@planyr.test` on planyr.io after the deploy; `/version.json` in the same call): open `#/project/e2e-fixture-testfit/site`. **Expect:** `planner-canvas` appears and no "Site Planyr hit an error" card. (Before: build 2f45a3d threw "reading 'label'"; build eafc260 threw "reading 'x'".)

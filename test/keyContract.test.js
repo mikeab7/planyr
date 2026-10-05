@@ -59,8 +59,16 @@ describe("focusScope — who owns the keyboard", () => {
     expect(focusScope({ tag: "BODY", lastTouchedCanvas: false })).toBe(SCOPE.CHROME);
   });
 
-  it("a focused node INSIDE the drawing is the drawing, whatever its tag", () => {
-    expect(focusScope({ tag: "BUTTON", insideCanvas: true, lastTouchedCanvas: false })).toBe(SCOPE.CANVAS);
+  it("a focused non-button node INSIDE the drawing is the drawing", () => {
+    expect(focusScope({ tag: "DIV", insideCanvas: true, lastTouchedCanvas: false })).toBe(SCOPE.CANVAS);
+    expect(focusScope({ tag: "SVG", insideCanvas: true, lastTouchedCanvas: false })).toBe(SCOPE.CANVAS);
+  });
+
+  // B2095124 — a BUTTON inside the canvas wrapper (Zoom to fit / Zoom in) is a control, so the latch decides:
+  // after a press on the inspector's Depth ▲ (latch not-canvas) Backspace must NOT reach the plan.
+  it("a focused BUTTON inside the canvas wrapper answers to the latch (stepper-then-Backspace leak)", () => {
+    expect(focusScope({ tag: "BUTTON", insideCanvas: true, lastTouchedCanvas: false })).toBe(SCOPE.CHROME);
+    expect(focusScope({ tag: "BUTTON", insideCanvas: true, lastTouchedCanvas: true })).toBe(SCOPE.CANVAS);
   });
 
   /* ⛔ THE REGRESSION THE FIRST CUT OF THIS RULE SHIPPED, and the reason it is pinned here. Answering
