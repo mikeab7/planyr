@@ -64,14 +64,14 @@ export async function proveSignedIn(page) {
   }, FIXTURE_SITE_ID);
 }
 
-export async function openSignedIn({ base = "https://planyr.io", viewport = { width: 1440, height: 900 } } = {}) {
+export async function openSignedIn({ base = "https://planyr.io", viewport = { width: 1440, height: 900 }, contextOptions = {} } = {}) {
   const key = process.env.E2E_LOGIN_KEY, email = process.env.E2E_EMAIL, pw = process.env.E2E_PASSWORD;
   if (!key && !(email && pw)) throw new Error("signedInSession: set E2E_LOGIN_KEY (preferred) or E2E_EMAIL / E2E_PASSWORD");
   // Pinned-revision mismatch in this sandbox: fall back to the pre-installed Chromium (never download).
   const exe = existsSync(chromium.executablePath()) ? undefined : "/opt/pw-browsers/chromium";
   const browser = await chromium.launch({ executablePath: exe, args: ["--no-sandbox"] }); // no ignore-cert flags, ever
   try {
-    const context = await browser.newContext({ viewport });
+    const context = await browser.newContext({ viewport, ...contextOptions }); // contextOptions: e.g. a Playwright device descriptor (isMobile/hasTouch) for a phone check
     const page = await context.newPage();
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));

@@ -315,6 +315,48 @@ async function signedOutFlow({ browser, phoneName }) {
 }
 
 // ── LIVE (planyr.io, logged out): the real deployed bundle, real data, no fixture ─────────────────────
+async function liveBody(page, tag, orient, url, slug) {
+  await page.goto(`${url}/?cb=${Date.now()}#/food`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="food-map"]', { timeout: 30000 });
+  await assertMeasurable(page, "verify-food-landscape"); // live — FOREGROUND-OR-VOID: visible tab + live rAF before anything is scored
+  await page.waitForTimeout(2500);
+  const build = await page.evaluate(() => fetch("/version.json", { cache: "no-store" }).then((r) => r.json()).then((j) => j.build).catch(() => "?"));
+  console.log(`${tag} build ${build}`);
+  await searchBox(page).tap(); await page.keyboard.type("taco", { delay: 20 }); await page.waitForTimeout(2500);
+  await page.locator('[data-testid="food-search-results"] button').first().tap();
+  await page.evaluate(() => document.activeElement?.blur?.());
+  await page.waitForSelector('[data-testid="food-bottom-sheet"], [data-testid="food-visit-panel"]');
+  await page.waitForTimeout(3500);
+  const p = await probe(page, null);
+  await shot(page, slug);
+  check(`${tag} — a real restaurant is selected and its pin located`, !!p.pin && !!p.selectedPin, String(p.selectedPin));
+  if (p.pin) scorePicked(tag, p, { key: p.selectedPin }, { landscape: orient === "landscape" });
+  if (orient === "landscape") { scoreHeader(tag, p); check(`${tag} — card docks to the RIGHT`, p.kind === "side", String(p.kind)); }
+  else check(`${tag} — upright: bottom sheet as before`, p.kind === "sheet", String(p.kind));
+  if (orient !== "landscape" || !p.pin) return;
+  // V1527936 steps 2–4 on the REAL deploy: card scroll (only scored if it really overflows), close, rotate and back.
+  if (p.side && p.side.scrollHeight > p.side.clientHeight + 4) {
+    await page.evaluate(() => { document.querySelector('[data-testid="food-side-scroll"]').scrollTop = 400; }); await page.waitForTimeout(400);
+    const q = await probe(page, null);
+    check(`${tag} — the card scrolls on its own; page and map stay put`, q.side.scrollTop > 0 && q.pageScroll === 0 && Math.hypot(q.pin.x - p.pin.x, q.pin.y - p.pin.y) < 1, `scrollTop ${q.side.scrollTop}, page ${q.pageScroll}`);
+    if (q.actions) check(`${tag} — 'Log a visit' still on the card's bottom edge while scrolled`, Math.abs(q.actions.bottom - q.side.scroll.bottom) <= 3, `bar ${Math.round(q.actions.bottom)} vs ${Math.round(q.side.scroll.bottom)}`);
+    await page.evaluate(() => { document.querySelector('[data-testid="food-side-scroll"]').scrollTop = 0; });
+  } else console.log(`${tag} — card does not overflow for this restaurant: scroll rows not scored (covered on the fixture)`);
+  const title = p.title, vp = page.viewportSize();
+  await page.setViewportSize({ width: vp.height, height: vp.width }); await page.waitForTimeout(2500);
+  let r = await probe(page, null);
+  await shot(page, slug + "-rotated-upright");
+  check(`${tag} — rotating upright keeps the same restaurant open, sheet again, pin in view above it`, r.title === title && r.kind === "sheet" && r.pin && r.pin.y < r.panel.top - 8 && r.covered.length === 0, `"${r.title}" vs "${title}", ${r.kind}, covered ${r.covered.slice(0, 2).join(" ")}`);
+  await page.setViewportSize(vp); await page.waitForTimeout(2500);
+  r = await probe(page, null);
+  check(`${tag} — rotating back sideways keeps it open, side card, pin uncovered inside the visible map`, r.title === title && r.kind === "side" && r.pin && r.covered.length === 0 && r.pin.x > r.box.left && r.pin.x < r.box.right && r.pin.y > r.box.top && r.pin.y < r.box.bottom, `"${r.title}", ${r.kind}, covered ${r.covered.slice(0, 2).join(" ")}`);
+  const before = r.pin;
+  // the selected-pin readout clears with the selection, so keep the pin's own coordinates to find it after closing
+  const at = await page.evaluate(() => { const h = document.querySelector('[data-testid="food-map"]').dataset; return { lat: +h.selectedLat, lon: +h.selectedLon }; });
+  await page.locator('[data-testid="food-panel-close"]').tap(); await page.waitForTimeout(900);
+  const c = await probe(page, at);
+  check(`${tag} — closing gives the map the full width and the pin stays put`, c.kind === null && c.host.width >= c.vw - 1 && Math.hypot((c.pin?.x ?? 1e9) - before.x, (c.pin?.y ?? 1e9) - before.y) <= 2, `panel ${c.kind}, map ${Math.round(c.host.width)} of ${c.vw}, pin moved ${c.pin ? Math.round(Math.hypot(c.pin.x - before.x, c.pin.y - before.y)) : "?"}`);
+}
 async function liveFlow({ browser, phoneName, orient, url }) {
   const ph = PHONES[phoneName];
   const tag = `[LIVE webkit · ${phoneName} ${orient}]`;
@@ -322,26 +364,20 @@ async function liveFlow({ browser, phoneName, orient, url }) {
   const page = await ctx.newPage();
   page.setDefaultTimeout(8000);
   await page.addInitScript(() => { window.__PLANYR_E2E = true; }); // read-only camera handle (window.__foodMap), as the fixture runs do
+  try { await liveBody(page, tag, orient, url, `LIVE-${phoneName.replace(/\s+/g, "")}-${orient}-picked`); } finally { await ctx.close(); }
+}
+// SIGNED IN as the test account on the real deploy (Chromium — the shared helper's engine; emulated phone, labelled so).
+async function signedInFlow({ phoneName, orient, url }) {
+  const { openSignedIn } = await import("./lib/signedInSession.mjs");
+  const ph = PHONES[phoneName];
+  const tag = `[LIVE SIGNED-IN chromium-emulated · ${phoneName} ${orient}]`;
+  const s = await openSignedIn({ base: url, viewport: devices[ph[orient]].viewport, contextOptions: { ...devices[ph[orient]] } });
   try {
-    await page.goto(`${url}/?cb=${Date.now()}#/food`, { waitUntil: "domcontentloaded" });
-    await page.waitForSelector('[data-testid="food-map"]', { timeout: 30000 });
-    await assertMeasurable(page, "verify-food-landscape"); // live — FOREGROUND-OR-VOID: visible tab + live rAF before anything is scored
-    await page.waitForTimeout(2500);
-    const build = await page.evaluate(() => fetch("/version.json", { cache: "no-store" }).then((r) => r.json()).then((j) => j.build).catch(() => "?"));
-    console.log(`${tag} build ${build}`);
-    await searchBox(page).tap(); await page.keyboard.type("taco", { delay: 20 }); await page.waitForTimeout(2500);
-    const first = page.locator('[data-testid="food-search-results"] button').first();
-    await first.tap();
-    await page.evaluate(() => document.activeElement?.blur?.());
-    await page.waitForSelector('[data-testid="food-bottom-sheet"], [data-testid="food-visit-panel"]');
-    await page.waitForTimeout(3500);
-    const p = await probe(page, null);
-    await shot(page, `LIVE-${phoneName.replace(/\s+/g, "")}-${orient}-picked`);
-    check(`${tag} — a real restaurant is selected and its pin located`, !!p.pin && !!p.selectedPin, String(p.selectedPin));
-    if (p.pin) scorePicked(tag, p, { key: p.selectedPin }, { landscape: orient === "landscape" });
-    if (orient === "landscape") { scoreHeader(tag, p); check(`${tag} — card docks to the RIGHT`, p.kind === "side", String(p.kind)); }
-    else check(`${tag} — upright: bottom sheet as before`, p.kind === "sheet", String(p.kind));
-  } finally { await ctx.close(); }
+    check(`${tag} — PRECONDITION: signed in as the test account (account email + fixture site, RLS-only)`, s.proof.email === "e2e@planyr.test" && s.proof.fixtureVisible, JSON.stringify(s.proof));
+    s.page.setDefaultTimeout(8000);
+    await s.page.addInitScript(() => { window.__PLANYR_E2E = true; });
+    await liveBody(s.page, tag, orient, url, `LIVE-SIGNEDIN-${phoneName.replace(/\s+/g, "")}-${orient}-picked`);
+  } finally { await s.close(); }
 }
 
 // ── KNOWN-ANSWER ARM: the covered-pin detector must see a pin we cover ───────────────────────────────
@@ -371,6 +407,13 @@ async function launchChromium() {
   }
 }
 const LIVE = (process.argv.find((a) => a.startsWith("--live=")) || "").slice(7);
+const SIGNED_IN = (process.argv.find((a) => a.startsWith("--signed-in=")) || "").slice(12);
+if (SIGNED_IN) {
+  for (const phoneName of Object.keys(PHONES)) for (const orient of ["landscape", "portrait"]) await signedInFlow({ phoneName, orient, url: SIGNED_IN.replace(/\/$/, "") }).catch((e) => check(`[LIVE SIGNED-IN ${phoneName} ${orient}] aborted`, false, e.message.split("\n")[0]));
+  const failed = results.filter((r) => !r.ok);
+  console.log(`\n${results.length - failed.length}/${results.length} passed (LIVE, signed in as the test account)`);
+  process.exit(failed.length ? 1 : 0);
+}
 const wk = await webkit.launch();
 let cr = null;
 if (LIVE) {
