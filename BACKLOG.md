@@ -5382,6 +5382,11 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 `[ ]` **NOT reproduced: the owner's own row.** Against production, as the row's owner (rolled-back transaction, deferred constraints forced), the DELETE removes `smutb6e87v2n`; and the same click on throwaway projects (plain, and with his row's real `data` shape incl. an overlay) on the signed-in test account removed the row from the database on build 947c0ff. So the server side is not what stopped his purge, and what did is unknown. **Disposition, by name (STANDING RULE #2): INSTRUMENT IT + ASK HIM** — the silent path is closed, so the same click now either removes the row or says why on screen; his row is deliberately LEFT in the bin (not purged by SQL) so his next click on it is the real-data check.
 - **Stopping rule:** closes on a dated pass of V1526800; if his click on `smutb6e87v2n` still does not remove it, the toast text (or a `purge-not-effective` row in `client_errors`) names the cause and this item re-opens (×2) with that as the evidence.
 - Verify: live — **V1526800** (real-data: his row).
+### B2106752 — Hybrid map: freeways and highways are yellow `[shared basemap / Food]` (bug) #ui #food
+
+`[x]` **Fixed:** `vectorStyle.js` freeway tier was `#fff3c4` (cream), every other tier `#ffffff`; now white — freeways still outrank streets by width and opacity, never hue. Casing (dark neutral), ramp/link classes (same `motorway`/`trunk` tier) and road-name labels (white, dark halo) audited: no yellow survives. Header comment updated. Guard: `test/vectorBasemap.test.js` "no tinted roads" asserts every line/text/halo colour in the style is neutral.
+- **Stopping rule:** closes on a dated pass of V1525216.
+- Verify: live (hybrid render at Houston zoom) — **V1525216**.
 
 ### B2097264 — Food: "Save and add another" stacked over "Log a visit", and "Log a visit" came and went with the sheet height `[Food]` (bug) #food #ui #mobile #testing  *(Owner block 2026-10-05 NEW-2, iPhone. Deduped: B2046224 ×3 hid "Log a visit" only WHILE A FIELD HAD FOCUS; nothing covered a form that is open with the keyboard down.)*
 
