@@ -17077,7 +17077,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   const drawEls = useMemo(() => {
     const vis = hiddenGroups ? els.filter((el) => !elHidden(hiddenGroups, el)) : els;
-    return cullToView(vis, cullRect, { enabled: !!cullRect, keep: cullKeep });
+    const culled = cullToView(vis, cullRect, { enabled: !!cullRect, keep: cullKeep });
+    // B2095120: skip an element whose `type` is not in TYPE (legacy "line" setback markers) rather than let it
+    // take the whole planner down — worldToScreen(view, undefined) → "reading 'x'".
+    return culled.every((el) => TYPE[el.type]) ? culled : culled.filter((el) => TYPE[el.type]);
   }, [els, cullRect, cullKeep, hiddenGroups]);
 
   /* ------------ grid lines ------------ */

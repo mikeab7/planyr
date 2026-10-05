@@ -57,7 +57,7 @@ export async function loadPdf(source) {
   // progressively through the /api/files streaming proxy (B409 rework). Anything else is
   // the classic in-memory path: an ArrayBuffer, or a File/Blob via .arrayBuffer().
   const isUrlSource = source && typeof source === "object" && typeof source.url === "string";
-  const data = isUrlSource ? undefined : (source instanceof ArrayBuffer ? source : await source.arrayBuffer());
+  const data = isUrlSource ? undefined : (source instanceof ArrayBuffer ? source.slice(0) : await source.arrayBuffer());
   // useSystemFonts:false — render non-embedded fonts from the shipped standardFontDataUrl substitutes
   // instead of the viewer's local system fonts, so a construction sheet renders identically on every
   // machine (B489c). Harmless to the text-extraction callers below (they never rasterize).
