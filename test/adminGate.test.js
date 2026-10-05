@@ -28,12 +28,27 @@ describe("AdminGate — safe by default before the access check resolves", () =>
 describe("AdminGate — source shape", () => {
   const src = readFileSync(new URL("../src/workspaces/admin/AdminGate.jsx", import.meta.url), "utf8");
 
-  it("skips the RPC entirely when there is no signed-in user", () => {
-    expect(src).toMatch(/if \(!userId\) \{ setAllowed\(false\); return; \}/);
+  it("asks through the shared per-user store (useIsAdmin) — no RPC of its own", () => {
+    expect(src).toMatch(/useIsAdmin\(user\)/);
+    expect(src).not.toMatch(/\.rpc\(/);
   });
 
-  it("only ever renders AdminApp behind the allowed flag", () => {
-    expect(src).toMatch(/if \(!allowed\) return null;/);
+  it("only ever renders AdminApp behind a confirmed isAdmin", () => {
+    expect(src).toMatch(/if \(!isAdmin\) return null;/);
     expect(src).toMatch(/<AdminApp/);
+  });
+
+  it("retries an ERRORED check a bounded number of times, never a definite 'not-admin'", () => {
+    expect(src).toMatch(/status !== "error"/);
+    expect(src).toMatch(/RETRY_DELAYS_MS/);
+  });
+
+  it("reports whether the page is really shown, and always resets on unmount (Shell keeps no workspace 'active' only while it shows)", () => {
+    expect(src).toMatch(/onShownChange\(isAdmin\)/);
+    expect(src).toMatch(/return \(\) => onShownChange\(false\)/);
+    const shell = readFileSync(new URL("../src/app/Shell.jsx", import.meta.url), "utf8");
+    expect(shell).toMatch(/isDashboardHash \|\| \(isAdminHash && adminShown\) \? null : routedModule/);
+    // keyed on "shown", never on the hash alone — a non-admin typing #/admin keeps the ordinary workspace
+    expect(shell).not.toMatch(/isDashboardHash \|\| isAdminHash \? null/);
   });
 });
