@@ -577,7 +577,8 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
           Not connected to the cloud in this build — places will show, but visits can't be saved.
         </div>
       )}
-      {supabaseConfigured() && !accountActive && (
+      {/* Sideways the card itself already says "Sign in to log a visit here", and a phone has ~300 px of height: no banner row. */}
+      {supabaseConfigured() && !accountActive && !landscape && (
         <div role="status" style={{ padding: "6px 16px", fontSize: 12.5, color: "var(--text-secondary)", background: "var(--surface-raised)", borderBottom: "1px solid var(--border-default)" }}>
           Sign in to log visits — browsing the map works either way.
         </div>

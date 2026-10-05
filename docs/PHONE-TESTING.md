@@ -188,3 +188,13 @@ GIS hosts put the map in its error state, which occupies the hint's render slot,
 non-target-origin requests locally; and the hint expires on its own a few seconds after arming, so a
 "gone" reading taken late is VOID (the case enforces a 4 s window). Results are WebKit-emulated, never
 "on device". Last run: 24/24 PASS on production; 0/24 on the pre-fix build (red-proof).
+
+## Permanent case: Food sideways — the card docks right and the pin stays in view (B2046224 ×4)
+
+`node ui-audit/verify-food-landscape.mjs <baseUrl>` (build with the Food fixture env, see `ui-audit/lib/foodFixture.mjs`): WebKit
+iPhone 15 / iPhone SE descriptors in landscape and portrait, a rotate-with-the-card-open flow, and Chromium with an INJECTED
+safe-area inset for both notch rotations (WebKit's `env(safe-area-inset-*)` is always 0 — gap #2 above — so the notch is
+emulated on Chromium and labelled so). Two things a future session would otherwise rediscover: mobile WebKit has no mouse wheel
+(`page.mouse.wheel` throws), so the card's scroller is driven directly there and by a real wheel on Chromium; and the iPhone SE has
+no notch, so its Chromium runs use a small stress inset, not 59. Last run: red on main (the bottom sheet over a two-row header,
+pin hidden after a rotation, zoom control cut off), green on the fix.

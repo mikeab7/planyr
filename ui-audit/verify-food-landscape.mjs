@@ -24,6 +24,7 @@
  */
 import { webkit, chromium, devices } from "playwright";
 import { mkdirSync } from "node:fs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { openFood, readSafeAreas } from "./lib/foodPhoneKit.mjs";
 
 const BASE = process.argv.find((a, i) => i > 1 && a.startsWith("http")) || "http://localhost:4181";
@@ -46,7 +47,8 @@ const ROTATIONS = { "notch-left": { top: 0, left: 59, bottom: 21, right: 0 }, "n
 const rotationsFor = (phoneName) => (phoneName === "iPhone SE" ? { "notch-left": { top: 0, left: 20, bottom: 0, right: 0 }, "notch-right": { top: 0, left: 0, bottom: 0, right: 20 } } : ROTATIONS);
 
 // ── the one probe: everything a person could see, in viewport coordinates ───────────────────────────────
-const probe = (page, sel) => page.evaluate(({ sel }) => {
+const probe = (page, sel) => page.evaluate(({ sel: sel0 }) => {
+  let sel = sel0;
   const R = (el) => { if (!el) return null; const r = el.getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height }; };
   const vw = innerWidth, vh = document.documentElement.clientHeight;
   const hostEl = document.querySelector('[data-testid="food-map"]');
@@ -58,6 +60,8 @@ const probe = (page, sel) => page.evaluate(({ sel }) => {
   const panel = R(panelEl);
   const kind = side ? (side.dataset.layout === "side" ? "side" : "rail") : sheet ? "sheet" : null;
   let pin = null;
+  const live = hostEl?.dataset.selectedLat ? { lat: +hostEl.dataset.selectedLat, lon: +hostEl.dataset.selectedLon } : null;
+  if (!sel && live) sel = live; // a live (non-fixture) place: the app reports where its selected pin is
   if (map && host && sel) { const p = map.latLngToContainerPoint([sel.lat, sel.lon]); pin = { x: host.left + p.x, y: host.top + p.y }; }
   const ins = (() => { const d = document.createElement("div"); d.style.cssText = "position:fixed;visibility:hidden;padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)"; document.body.appendChild(d); const c = getComputedStyle(d); const o = { top: parseFloat(c.paddingTop), right: parseFloat(c.paddingRight), bottom: parseFloat(c.paddingBottom), left: parseFloat(c.paddingLeft) }; d.remove(); return o; })();
   // what the panel leaves visible of the map: left of a side card, above a sheet; minus the notch
@@ -125,7 +129,13 @@ async function pick(page, q, re) {
   await page.waitForSelector('[data-testid="food-bottom-sheet"], [data-testid="food-visit-panel"]');
   await page.waitForTimeout(2200); // flight + settle window
 }
-const shot = async (page, name) => { if (SHOTS) await page.screenshot({ path: `${SHOTS}/${name}.png` }); };
+const shot = async (page, name) => {
+  if (!SHOTS) return;
+  // draw the keyboard where the model puts it, so a picture of a typing state shows what the phone would
+  await page.evaluate(() => { const px = window.__kb?.px || 0; let k = document.getElementById("__kbdraw"); if (!k) { k = document.createElement("div"); k.id = "__kbdraw"; document.documentElement.appendChild(k); } k.style.cssText = `position:fixed;left:0;right:0;bottom:0;height:${px}px;z-index:2147483647;pointer-events:none;background:#d0d3d9;display:${px ? "block" : "none"}`; });
+  await page.screenshot({ path: `${SHOTS}/${name}.png` });
+  await page.evaluate(() => { const k = document.getElementById("__kbdraw"); if (k) k.style.display = "none"; });
+};
 
 // ── assertions on one probe ───────────────────────────────────────────────────────────────────────────
 function scorePicked(tag, p, sel, { landscape }) {
@@ -164,6 +174,7 @@ async function landscapeFlow({ engine, browser, phoneName, label, insets }) {
   const tag = `[${engine} · ${phoneName} landscape${label ? " · " + label : ""}]`;
   const slug = `${engine}-${phoneName.replace(/\s+/g, "")}-landscape${label ? "-" + label : ""}`;
   const { ctx, page, errs } = await openFood(browser, devices[ph.landscape], { base: BASE, harness: `verify-food-landscape:${tag}`, kbPortrait: ph.kbPortrait, kbLandscape: ph.kbLandscape, insets });
+  await assertMeasurable(page, "verify-food-landscape"); // landscape-flow — FOREGROUND-OR-VOID: visible tab + live rAF before anything is scored
   try {
     if (insets) { const r = await readSafeAreas(page); check(`${tag} — KNOWN ANSWER: injected safe-area insets read back`, r.left === insets.left && r.right === insets.right && r.bottom === insets.bottom, JSON.stringify(r)); }
     // 1. pick
@@ -232,6 +243,7 @@ async function rotationFlow({ browser, phoneName }) {
   const tag = `[webkit · ${phoneName} rotate]`;
   const slug = `webkit-${phoneName.replace(/\s+/g, "")}-rotate`;
   const { ctx, page } = await openFood(browser, devices[ph.portrait], { base: BASE, harness: `verify-food-landscape:${tag}`, kbPortrait: ph.kbPortrait, kbLandscape: ph.kbLandscape });
+  await assertMeasurable(page, "verify-food-landscape"); // rotation-flow — FOREGROUND-OR-VOID: visible tab + live rAF before anything is scored
   try {
     await pick(page, "aburi", /aburi/i);
     let p = await probe(page, ABURI);
@@ -257,6 +269,7 @@ async function portraitFlow({ browser, phoneName }) {
   const ph = PHONES[phoneName];
   const tag = `[webkit · ${phoneName} portrait]`;
   const { ctx, page } = await openFood(browser, devices[ph.portrait], { base: BASE, harness: `verify-food-landscape:${tag}`, kbPortrait: ph.kbPortrait, kbLandscape: ph.kbLandscape });
+  await assertMeasurable(page, "verify-food-landscape"); // portrait-flow — FOREGROUND-OR-VOID: visible tab + live rAF before anything is scored
   try {
     await pick(page, "aburi", /aburi/i);
     const p = await probe(page, ABURI);
@@ -269,6 +282,7 @@ async function portraitFlow({ browser, phoneName }) {
 async function desktopFlow({ browser }) {
   const tag = "[chromium · desktop 1280×800]";
   const { ctx, page } = await openFood(browser, { viewport: { width: 1280, height: 800 } }, { base: BASE, harness: `verify-food-landscape:${tag}` });
+  await assertMeasurable(page, "verify-food-landscape"); // desktop-flow — FOREGROUND-OR-VOID: visible tab + live rAF before anything is scored
   try {
     await searchBox(page).click(); await page.keyboard.type("aburi", { delay: 15 }); await page.waitForTimeout(800);
     await page.locator('[data-testid="food-search-results"] button').filter({ hasText: /aburi/i }).first().click(); await page.waitForTimeout(2200);
@@ -278,10 +292,63 @@ async function desktopFlow({ browser }) {
   } finally { await ctx.close(); }
 }
 
+// ── SIGNED OUT, sideways: the logged-out banner row must not cost the map its room ────────────────────
+async function signedOutFlow({ browser, phoneName }) {
+  const ph = PHONES[phoneName];
+  const tag = `[webkit · ${phoneName} landscape · signed out]`;
+  const { ctx, page } = await openFood(browser, devices[ph.landscape], { base: BASE, harness: `verify-food-landscape:${tag}`, kbLandscape: ph.kbLandscape, signedOut: true });
+  await assertMeasurable(page, "verify-food-landscape"); // signed-out-flow — FOREGROUND-OR-VOID: visible tab + live rAF before anything is scored
+  try {
+    // PRECONDITION with a known answer: the account control must read "Sign in" (the fixture's signed-in one reads the account's initial).
+    const accountLabel = await page.evaluate(() => (document.querySelector("header")?.innerText || "").replace(/\s+/g, " ").trim());
+    check(`${tag} — PRECONDITION: this really is the signed-out app (account control says "Sign in")`, /sign in/i.test(accountLabel), `header text: "${accountLabel.slice(0, 60)}"`);
+    const signedOutBanner = await page.evaluate(() => /Sign in to log visits/.test(document.body.innerText));
+    await pick(page, "aburi", /aburi/i);
+    const p = await probe(page, ABURI);
+    await shot(page, `webkit-${phoneName.replace(/\s+/g, "")}-landscape-signedout-picked`);
+    const cardSaysSignIn = await page.evaluate(() => /Sign in to log a visit here/.test(document.querySelector('[data-testid="food-visit-panel"], [data-testid="food-bottom-sheet"]')?.innerText || ""));
+    check(`${tag} — signed out: the card itself says "Sign in to log a visit here"`, cardSaysSignIn, "");
+    check(`${tag} — signed out: no extra banner row above the map`, !signedOutBanner, `banner present: ${signedOutBanner}`);
+    scorePicked(tag, p, ABURI, { landscape: true });
+    scoreHeader(tag, p);
+  } finally { await ctx.close(); }
+}
+
+// ── LIVE (planyr.io, logged out): the real deployed bundle, real data, no fixture ─────────────────────
+async function liveFlow({ browser, phoneName, orient, url }) {
+  const ph = PHONES[phoneName];
+  const tag = `[LIVE webkit · ${phoneName} ${orient}]`;
+  const ctx = await browser.newContext({ ...devices[ph[orient]], ignoreHTTPSErrors: false });
+  const page = await ctx.newPage();
+  page.setDefaultTimeout(8000);
+  await page.addInitScript(() => { window.__PLANYR_E2E = true; }); // read-only camera handle (window.__foodMap), as the fixture runs do
+  try {
+    await page.goto(`${url}/?cb=${Date.now()}#/food`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector('[data-testid="food-map"]', { timeout: 30000 });
+    await assertMeasurable(page, "verify-food-landscape"); // live — FOREGROUND-OR-VOID: visible tab + live rAF before anything is scored
+    await page.waitForTimeout(2500);
+    const build = await page.evaluate(() => fetch("/version.json", { cache: "no-store" }).then((r) => r.json()).then((j) => j.build).catch(() => "?"));
+    console.log(`${tag} build ${build}`);
+    await searchBox(page).tap(); await page.keyboard.type("taco", { delay: 20 }); await page.waitForTimeout(2500);
+    const first = page.locator('[data-testid="food-search-results"] button').first();
+    await first.tap();
+    await page.evaluate(() => document.activeElement?.blur?.());
+    await page.waitForSelector('[data-testid="food-bottom-sheet"], [data-testid="food-visit-panel"]');
+    await page.waitForTimeout(3500);
+    const p = await probe(page, null);
+    await shot(page, `LIVE-${phoneName.replace(/\s+/g, "")}-${orient}-picked`);
+    check(`${tag} — a real restaurant is selected and its pin located`, !!p.pin && !!p.selectedPin, String(p.selectedPin));
+    if (p.pin) scorePicked(tag, p, { key: p.selectedPin }, { landscape: orient === "landscape" });
+    if (orient === "landscape") { scoreHeader(tag, p); check(`${tag} — card docks to the RIGHT`, p.kind === "side", String(p.kind)); }
+    else check(`${tag} — upright: bottom sheet as before`, p.kind === "sheet", String(p.kind));
+  } finally { await ctx.close(); }
+}
+
 // ── KNOWN-ANSWER ARM: the covered-pin detector must see a pin we cover ───────────────────────────────
 async function knownAnswer({ browser }) {
   const ph = PHONES["iPhone 15"];
   const { ctx, page } = await openFood(browser, devices[ph.landscape], { base: BASE, harness: "verify-food-landscape:known-answer", kbLandscape: ph.kbLandscape });
+  await assertMeasurable(page, "verify-food-landscape"); // known-answer — FOREGROUND-OR-VOID: visible tab + live rAF before anything is scored
   try {
     await pick(page, "aburi", /aburi/i);
     const before = await probe(page, ABURI);
@@ -292,17 +359,38 @@ async function knownAnswer({ browser }) {
   } finally { await ctx.close(); }
 }
 
+async function launchChromium() {
+  if (process.env.PW_CHROMIUM) return chromium.launch({ executablePath: process.env.PW_CHROMIUM });
+  try { return await chromium.launch(); } catch (_) {
+    // Playwright pins one Chromium revision; this container ships another. Use the newest installed one (never `playwright install`).
+    const { readdirSync, existsSync } = await import("node:fs");
+    const root = process.env.PLAYWRIGHT_BROWSERS_PATH || "/opt/pw-browsers";
+    const dirs = readdirSync(root).filter((d) => /^chromium-\d+$/.test(d)).sort((a, b) => +b.split("-")[1] - +a.split("-")[1]);
+    for (const d of dirs) for (const sub of ["chrome-linux64/chrome", "chrome-linux/chrome"]) if (existsSync(`${root}/${d}/${sub}`)) return chromium.launch({ executablePath: `${root}/${d}/${sub}` });
+    throw new Error("no Chromium found under " + root);
+  }
+}
+const LIVE = (process.argv.find((a) => a.startsWith("--live=")) || "").slice(7);
 const wk = await webkit.launch();
 let cr = null;
+if (LIVE) {
+  try {
+    for (const phoneName of Object.keys(PHONES)) for (const orient of ["landscape", "portrait"]) await liveFlow({ browser: wk, phoneName, orient, url: LIVE.replace(/\/$/, "") }).catch((e) => check(`[LIVE ${phoneName} ${orient}] aborted`, false, e.message.split("\n")[0]));
+  } finally { await wk.close(); }
+  const failed = results.filter((r) => !r.ok);
+  console.log(`\n${results.length - failed.length}/${results.length} passed (LIVE, logged out)`);
+  process.exit(failed.length ? 1 : 0);
+}
 try {
   if (wants("known")) await knownAnswer({ browser: wk }).catch((e) => check("0: known-answer arm aborted", false, e.message.split("\n")[0]));
   for (const phoneName of Object.keys(PHONES)) {
     if (wants(`webkit.*${phoneName}.*landscape`)) await landscapeFlow({ engine: "webkit", browser: wk, phoneName }).catch((e) => check(`[webkit · ${phoneName} landscape] aborted`, false, e.message.split("\n")[0]));
+    if (wants(`signedout.*${phoneName}|signed out.*${phoneName}`)) await signedOutFlow({ browser: wk, phoneName }).catch((e) => check(`[webkit · ${phoneName} signed out] aborted`, false, e.message.split("\n")[0]));
     if (wants(`rotate.*${phoneName}`)) await rotationFlow({ browser: wk, phoneName }).catch((e) => check(`[webkit · ${phoneName} rotate] aborted`, false, e.message.split("\n")[0]));
     if (wants(`portrait.*${phoneName}`)) await portraitFlow({ browser: wk, phoneName }).catch((e) => check(`[webkit · ${phoneName} portrait] aborted`, false, e.message.split("\n")[0]));
   }
   // This container's Chromium is a different revision than Playwright pins (docs say: use executablePath, never `playwright install`).
-  cr = await chromium.launch(process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {});
+  cr = await launchChromium();
   for (const phoneName of Object.keys(PHONES)) {
     for (const [label, insets] of Object.entries(rotationsFor(phoneName))) {
       if (!wants(`chromium.*${phoneName}.*${label}`)) continue;

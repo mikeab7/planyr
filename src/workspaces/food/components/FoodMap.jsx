@@ -1065,6 +1065,8 @@ export default function FoodMap({
     // drawn selected). Lets a harness assert "picking it marks it as the selected one" without reading
     // canvas pixels; nothing in the app reads it.
     if (hostRef.current) hostRef.current.dataset.selectedPin = selectedKey && selectedDrawn ? selectedKey : "";
+    // B2046224 ×4 — read-only: where the selected pin is, so a harness can find it on a live (non-fixture) place.
+    if (hostRef.current) { hostRef.current.dataset.selectedLat = selectedPosRef.current ? String(selectedPosRef.current[0]) : ""; hostRef.current.dataset.selectedLon = selectedPosRef.current ? String(selectedPosRef.current[1]) : ""; }
   }, [places, loggedPlaces, loggedIds, manualPins, wishlistPlaces, wishlistManualPins, overpassPlaces, tooSmall, basemap, selectedKey, selectedPlaceInfo, onSelectPlace, onSelectManualPin, coarsePointer]);
 
   // B668193 — the coarse-pointer nearest-centre tap resolver. Only ever registered on a coarse

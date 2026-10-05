@@ -4,7 +4,7 @@
  * that model), safe-area injection for Chromium, and `openFood`. First used by verify-food-landscape (B2046224 ×4). */
 import { deflateSync } from "node:zlib";
 import { assertMeasurable } from "./tabTiming.mjs";
-import { makeFixture, installFixture } from "./foodFixture.mjs";
+import { makeFixture, installFixture, STORAGE_KEY } from "./foodFixture.mjs";
 
 function crc32(buf) { let c, crc = 0xffffffff; for (const b of buf) { c = (crc ^ b) & 0xff; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; crc = (crc >>> 8) ^ c; } return (crc ^ 0xffffffff) >>> 0; }
 function chunk(type, data) { const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const td = Buffer.concat([Buffer.from(type), data]); const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(td)); return Buffer.concat([len, td, crc]); }
@@ -59,7 +59,7 @@ export const readSafeAreas = (page) => page.evaluate(() => {
   return r;
 });
 
-export async function openFood(browser, contextOptions, { base, harness, kbPortrait = 380, kbLandscape = 240, insets = null, fixture = { aburi: true } }) {
+export async function openFood(browser, contextOptions, { base, harness, kbPortrait = 380, kbLandscape = 240, insets = null, fixture = { aburi: true }, signedOut = false }) {
   const ctx = await browser.newContext({ ...contextOptions, ignoreHTTPSErrors: true });
   const page = await ctx.newPage();
   page.setDefaultTimeout(6000);
@@ -71,6 +71,7 @@ export async function openFood(browser, contextOptions, { base, harness, kbPortr
     if (req.resourceType() === "image" && !/localhost|127\.0\.0\.1|supabase/.test(u.hostname)) return route.fulfill({ status: 200, contentType: "image/png", body: TILE, headers: { "access-control-allow-origin": "*" } });
     return route.fallback();
   });
+  if (signedOut) await page.addInitScript((k) => { try { window.localStorage.removeItem(k); } catch (_) {} }, STORAGE_KEY); // after installFixture's own seeding
   await page.addInitScript(IOS_MODEL, { kbPortrait, kbLandscape });
   const errs = []; page.on("pageerror", (e) => errs.push(e.message));
   if (insets) await setSafeAreas(ctx, page, insets);

@@ -58,9 +58,27 @@ describe("centringPan", () => {
 });
 
 describe("wiring", () => {
-  it("VisitPanel, FoodMap and FoodApp all read the one landscape query", () => {
-    for (const f of ["components/VisitPanel.jsx", "components/FoodMap.jsx", "FoodApp.jsx"]) {
-      expect(readFileSync(new URL(`../src/workspaces/food/${f}`, import.meta.url), "utf8")).toMatch(/useLandscapePhone/);
-    }
+  const src = (f) => readFileSync(new URL(`../src/workspaces/food/${f}`, import.meta.url), "utf8");
+  it("FoodApp and VisitPanel read the one landscape query; FoodMap is told through a prop", () => {
+    expect(src("FoodApp.jsx")).toMatch(/useLandscapePhone\(\)/);
+    expect(src("components/VisitPanel.jsx")).toMatch(/useLandscapePhone\(\)/);
+    expect(src("FoodApp.jsx")).toMatch(/landscape=\{landscape\}/);
+    expect(src("components/FoodMap.jsx")).toMatch(/landscape = false, sidePanelPx = 0/);
+  });
+  it("a landscape phone gets the side card, an upright one the bottom sheet, desktop the rail", () => {
+    const v = src("components/VisitPanel.jsx");
+    expect(v).toMatch(/if \(landscape\) \{\s*return <SideDock/);
+    expect(v).toMatch(/const isMobile = narrowPhone && !landscape/);
+  });
+  it("the one-row header is opt-in and only Food turns it on", () => {
+    expect(src("FoodApp.jsx")).toMatch(/singleRow=\{landscape\}/);
+    expect(readFileSync(new URL("../src/shared/ui/AppHeader.jsx", import.meta.url), "utf8")).toMatch(/singleRow = false/);
+  });
+  it("the global help button steps left of a docked card (it must never sit on 'Log a visit')", () => {
+    expect(readFileSync(new URL("../src/app/HelpReportControl.jsx", import.meta.url), "utf8")).toMatch(/sideDockW > 0 \? FAB_RIGHT \+ sideDockW/);
+  });
+  it("the harness exists and scores a covered pin red (known-answer arm)", () => {
+    const h = readFileSync(new URL("../ui-audit/verify-food-landscape.mjs", import.meta.url), "utf8");
+    expect(h).toMatch(/KNOWN ANSWER: a pin with something painted over it reads as COVERED/);
   });
 });

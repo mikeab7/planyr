@@ -122,7 +122,8 @@ export default function SideDock({ children, onWidthChange }) {
         paddingRight: "env(safe-area-inset-right, 0px)",
         paddingBottom: box ? 0 : "env(safe-area-inset-bottom, 0px)",
         background: "var(--surface-raised)", borderLeft: "1px solid var(--border-default)",
-        boxShadow: "-8px 0 24px rgba(0,0,0,0.18)", display: "flex", flexDirection: "column",
+        boxShadow: "-8px 0 24px rgba(0,0,0,0.18)", // design-exempt: the same panel-edge shadow as VisitPanel's desktop rail and BottomSheet (no shadow token exists); one look for every place card
+        display: "flex", flexDirection: "column",
       }}
     >
       <style>{TYPING_CSS + FORM_OPEN_CSS + NARROW_CARD_CSS}</style>
