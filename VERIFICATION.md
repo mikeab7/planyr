@@ -171,6 +171,22 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1526800 — B2108336: "Delete forever" on a whole project in the account bin removes it, or says why `Blocker: real-data`
+
+Sandbox-proven: stub-database harness `ui-audit/verify-project-purge.mjs` (known-good arm: row leaves, DB empty, folders torn down; zero-row arm: row stays, toast names the reason, NO folder teardown) and the red-proofed `test/purgeProjectFolders.test.js` NEW-1 block. Signed-in throwaway on planyr.io (test account) removed the row on the pre-fix build; re-run after the deploy in the steps below.
+**Steps** (read the served chunk hash / `/version.json` in the SAME observation as each PASS/FAIL and match it to the merge commit):
+1. Test account (`ui-audit/lib/signedInSession.mjs`): seed a throwaway binned project, project switcher → Recently deleted → × → Delete forever. **Expect:** row leaves the list, database no longer holds it, no toast. Clean up the throwaway.
+   - ✅ **Step 1 PASSED 2026-10-05, build `5db0354` (read from `/version.json` in the same run as the assertion; merge commit of #2016):** signed in as the test account on planyr.io, throwaway binned project → × → Delete forever → row left the bin (26 → 25), `DELETE sites` returned the row, `DELETE project_folders` ran, no toast, a fresh read found nothing; throwaway verified gone. Step 2 (Michael's own `smutb6e87v2n`) is still pending — he has not clicked it yet.
+2. Michael's signed-in Chrome, planyr.io: project switcher → Recently deleted → × on **Untitled site** (`smutb6e87v2n`, a Claude test project he asked gone) → Delete forever. **Expect either:** the row leaves, and after a hard reload it is still gone, `select id from sites where id='smutb6e87v2n'` returns nothing; **or** a toast reading “Untitled site” couldn't be permanently deleted + a reason (anything but silence), the row staying listed.
+3. If it fails: read the toast and `client_errors` for `event:purge-not-effective` / `event:purge-blocked-live-group` / `event:cloud-write-failed` naming `smutb6e87v2n`, and re-open B2108336 with that row.
+4. Say exactly what was touched: the throwaway(s) and `smutb6e87v2n` only.
+### V1525216 — B2106752: Hybrid map has no yellow/cream road `Blocker: live-GIS`
+
+Unit-proven (`test/vectorBasemap.test.js` "no tinted roads"); the vector tiles come from an external host the sandbox cannot reach, so the picture itself is checked live.
+**Steps** (planyr.io `#/food`, Hybrid on, Houston at metro zoom; read the served chunk hash in the SAME observation and match it to the merge commit):
+1. Look at I-45 North Freeway, Gulf Freeway, South Loop West and Southwest Fwy plus interchanges. **Expect:** white like every other road, no cream/yellow band; freeways still visibly the widest.
+2. Zoom in to ramps. **Expect:** ramps white, dark hairline casing, no yellow.
+3. Zoom to where road names show. **Expect:** names white with dark halo, none yellow.
 ### V1519600 — B626576 (×2) / B2097264 / B2097265: Food on his iPhone — half-step rating slider, one set of actions on an open form, sheet drags `Blocker: real-data`
 
 Sandbox-proven (WebKit taps + Chromium CDP touch on the iPhone 15 / SE descriptors, iOS keyboard MODEL, mocked Supabase): `ui-audit/verify-food-rating-and-sheet.mjs` 159/159 on the fix (115 rows, 50 red, on main) · keyboard picture harness verify-food-ios-screens 538/538 on both main and the fix · `test/foodRatingSlider.test.js` · `test/foodBottomSheetGesture.test.js`. Not reachable there: a real finger on real Safari, the real keyboard, his real saved ratings. Read `/version.json` and match it to the merge commit in the same observation.
@@ -383,17 +399,23 @@ Sandbox-proven: `ui-audit/verify-phone-typing.mjs` (WebKit at iPhone 15 and iPho
 7. Review › Reviews menu search, Library search, the project search at the top. **Expect:** field visible, menu fits the screen width, nothing drawn over the field.
 8. Desktop browser, full width: open the same Site panel, Properties, and a Schedule cell. **Expect:** exactly as before.
 - **Stopping rule:** closes on a dated pass of 1–8 from Michael's iPhone; any failed step re-opens B2088384 (×2) with that step number.
-### V1516224 — B2092656: no catch when NEW parcel outlines arrive (pan onto new ground / zoom to a new level) in Bartow County GA, and Katy/Fort Bend unchanged `Blocker: real-data`
+### V1516224 — B2092656 (×3): no catch turning Select parcels on, or when NEW parcel outlines arrive (pan onto new ground / zoom to a new level), in Bartow County GA; Katy/Fort Bend unchanged `Blocker: real-data`
 - **2026-10-04 ~7:50 PM CDT — Michael's Chrome, build ccaca0c: ❌ FAIL.** Select-on 283/211 ms frames; pan onto new ground 192 ms (137 blocking) and a 331 ms frame in a `setTimeout` callback with no network (the lot-number relayout — see B2092656 ×2). Fixed in the follow-up PR; re-run all steps on the new build.
+- **2026-10-04 ~9:45 PM CDT — Michael's Chrome, build 947c0ff: ❌ FAIL (filed as B2092656 ×3).** Select-on 161 ms (108 blocking) then 308 ms (256 blocking); pan 500 px east no blocking (×2 held); pan 350 px south 105 ms (53 blocking); zoom 15→14 89 ms (39 blocking). Cause found and reproduced: Select-on loaded the two TEXAS saved copies (Chambers + Waller, 25 + 30 MB) on the main thread even in Georgia. Fixed in the ×3 PR; re-run all steps on the new build.
+- **2026-10-05 ~05:05 UTC — sandbox headless Chromium against production planyr.io, build 294434a read from `/version.json` in the same run (signed out, no GPU): step 7 PARTIAL ✅.** Katy (29.786/-95.825) z16, Select parcels ON: both workers start (`parcelSnapshotWorker`, `parcelQueryWorker`); Waller's saved copy is held IN THE WORKER (46,231 lots, vintage 2026-10-04T13:47:55Z, nothing on the main heap) and 420 of its lots + 51 lot numbers draw; no page errors. NOT covered: timing on Michael's GPU, real Bartow responses (egress-blocked here), steps 0–6 — those stay his.
+- **AMENDED for ×3 — added step 0 and step 7 below.** Read the served chunk hash (`SitePlannerApp-*.js` in the Network tab or `performance.getEntriesByType("resource")`) in the same observation as each timing; ignore ~1000 ms frames with single-digit blocking (a hidden-tab artefact), and the first injected click after a load if the extension driver drops it.
 - **Done in the sandbox:** unit (16) + synthetic-Bartow arrival harness (`ui-audit/verify-parcel-arrival-cost.mjs`: zoom-arm longest task 71–86 → 16–25 ms) + five adjacent parcel harnesses green. **Why still live:** the sandbox has no GPU and no recorded Bartow response.
+- **Done in the sandbox for ×3:** `ui-audit/verify-select-parcels-on-cost.mjs` on the RECORDED REAL Chambers + Waller saved copies, 3 fresh profiles, median longest task: Georgia Select-on 337 → 15 ms, Texas Select-on 406/614 → 27/28 ms, Georgia zoom/pans 17–20 ms (gate 33); `verify-georgia-lot-click` (z16/z14/before-arrival) and ten adjacent parcel harnesses green on the final build. Bartow responses still synthetic (egress-blocked).
 - **Steps (Michael's Chrome, planyr.io, Map, Select parcels ON; read the served chunk hash in the same observation):**
+  0. **(×3) Bartow GA (34.20 / -84.83) at zoom 15 with lot numbers, road names, city names and contours as you normally have them: turn Select parcels ON. Expect:** no visible catch — no Long Animation Frame with blockingDuration above ~0 (was 108 + 256 ms). This is the case that was failing.
   1. Bartow GA (34.20 / -84.83), zoom 15, then zoom OUT to 14 onto ground not yet loaded. **Expect:** outlines fill in over a few frames with no visible catch (previously two long frames).
   2. Pan ~500 px onto new ground at 14. **Expect:** no catch; outlines appear progressively.
   3. Zoom 14→15 for the first time. **Expect:** no catch.
   4. Pan back over loaded ground. **Expect:** instant, as before.
   5. Katy (29.786 / -95.825) and a Fort Bend view: outlines appear, no new delay or missing lots.
   6. Click a lot at z14 and at z16 in Georgia (also click one the instant it is still filling in). **Expect:** it selects the lot under the cursor; a click before outlines appear still adds the lot.
-- **Stopping rule:** closes on a dated pass of 1–6, or a failed step filed as a recurrence on B2092656.
+  7. **(×3) Katy (29.786 / -95.825 — Waller's outlines there come from Planyr's saved copy): turn Select parcels ON, then reload and turn it on again. Expect:** Waller's lots draw (with their numbers) and no visible catch either time; clicking a Waller lot selects it.
+- **Stopping rule:** closes on a dated pass of 0–7, or a failed step filed as a recurrence on B2092656.
 ### V1486288 — B2061600: Select-parcels outlines do not catch when a zoom or pan settles at zoom 14–16 in Bartow County GA `Blocker: real-data`
 
 Sandbox-proven: `ui-audit/verify-parcel-settle-cost.mjs` (z14 moveend settle 103.7 → 0.8 ms, mock at Bartow density), `test/parcelTileLayer.test.js`, and the existing parcel display harnesses. **Not provable here:** Michael's real 63,688-lot Bartow service, his GPU-accelerated Chrome, and how it *feels*. Read the served chunk hash in the SAME observation as the result (CLAUDE.md live-measurement rule).

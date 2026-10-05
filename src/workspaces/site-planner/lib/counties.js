@@ -3060,13 +3060,15 @@ export function displaySourcesForView(bounds) {
   if (_viewSourcesMemo && _viewSourcesMemo.key === mk) return _viewSourcesMemo.out.slice();
   const out = new Set();
   const N = 8; // (N+1)² sample points
-  let pending = false;
+  /* B2092656 ×3 — "pending" is a property of the geometry asset, not of a point (`resolveCounty` answers pending iff
+   * the polygons are not resident), so it is asked ONCE. It used to be a full point-in-polygon + distance-to-edge
+   * resolve per sample point, on top of the one `candidateCountiesForPoint` already makes — half of this sweep's
+   * cost (~35 ms of one task at Katy's three-county corner on the first Select-on). */
+  const pending = !countyPolygonsReady();
   for (let i = 0; i <= N; i++) {
     for (let j = 0; j <= N; j++) {
       const lat = bounds.south + ((bounds.north - bounds.south) * i) / N;
       const lng = bounds.west + ((bounds.east - bounds.west) * j) / N;
-      const a = resolveCounty(lat, lng);
-      if (a && a.status === "pending") pending = true;
       const cands = candidateCountiesForPoint(lat, lng).filter((k) => COUNTIES_MAP[k]);
       const county = cands.filter((k) => !COUNTIES_MAP[k].statewide);
       if (county.length) county.forEach((k) => out.add(k));

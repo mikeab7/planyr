@@ -13,8 +13,9 @@
  * here can reintroduce B1976336's tens-of-thousands-of-nodes class. */
 import L from "leaflet";
 import { bestMeasurer } from "../../../shared/markup/textWrap.js";
-import { layoutLotNumbers, clipRingToRect, lotNumberText, resolveLotNumberField, lotBoxCanHost, LOT_NO_FONT_PX } from "./parcelLotNumbers.js";
+import { lotNumberItem, solveLotNumberItems, clipRingToRect, lotNumberText, resolveLotNumberField, lotBoxCanHost, LOT_NO_FONT_PX } from "./parcelLotNumbers.js";
 import { PARCEL_OUTLINE_COLOR } from "./parcelDisplayZoom.js";
+import { featureBbox } from "./parcelSnapshot.js";
 
 const RELAYOUT_DEBOUNCE_MS = 90;
 const LABEL_HALO = "#fff"; // design-exempt: a number's halo must be white over ANY basemap and theme — no token models "readable over a photo"
@@ -46,12 +47,32 @@ function worldRing(map, feature, z) {
   return best;
 }
 
+/* Yield to the event loop between slices with a MessageChannel macrotask (the terrainLayers.js idiom): unlike rAF it
+ * is not folded into the frame it was asked from, so the browser paints between slices. */
+const yieldTask = (() => {
+  if (typeof MessageChannel === "undefined") return (fn) => setTimeout(fn, 0);
+  const ch = new MessageChannel();
+  const q = [];
+  ch.port1.onmessage = () => { const fn = q.shift(); if (fn) fn(); };
+  return (fn) => { q.push(fn); ch.port2.postMessage(0); };
+})();
+/** Per-slice budget (ms) for preparing lots — B2092656 ×3. */
+export const LOT_NO_SLICE_MS = 6;
+const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+
 /* The shared layout + draw core: `forEachFeature(cb)` hands it every GeoJSON feature that may be in view
  * (the live outline layer's own, or the saved copy's); it keeps the ones with a number, lays them out with
- * the collision engine and draws one marker per placed number into `group`. */
+ * the collision engine and draws one marker per placed number into `group`.
+ *
+ * ⛔ B2092656 ×3 — IT RUNS AS A SLICED JOB, NOT ONE TASK. On real parcel geometry (Waller's recorded saved copy at Katy,
+ * z15 — rural lots big enough to hold a number) preparing every lot (ring projection, clip, text measure, the interior
+ * fit) was ~100 ms of one task. Lots are now prepared a few at a time under LOT_NO_SLICE_MS, yielding between slices;
+ * the collision pass and the draw run once all are prepared. The previous numbers stay up until the new ones are
+ * drawn (no flash), and a newer relayout cancels an older job. Positions are converted with the zoom and pixel origin
+ * the job STARTED with (`map.unproject`), so a pan while it runs cannot shift them. Returns { cancel }. */
 function paintLotNumbers({ map, group, field, floor, measure, getObstacles, getInset, forEachFeature }) {
   const z = map.getZoom();
-  if (!field || !(z >= floor)) return;
+  if (!field || !(z >= floor)) { group.clearLayers(); return { cancel() {} }; }
   const min = map.getPixelBounds().min;
   const size = map.getSize();
   // `getInset`: a host whose map container is larger than what the person can see (the Site planner
@@ -59,9 +80,12 @@ function paintLotNumbers({ map, group, field, floor, measure, getObstacles, getI
   let inset = VIEW_INSET;
   try { inset += Math.max(0, Number(getInset && getInset()) || 0); } catch (_) { /* default inset */ }
   const view = { x0: min.x + inset, y0: min.y + inset, x1: min.x + size.x - inset, y1: min.y + size.y - inset };
-  const lots = [];
-  forEachFeature((f, bbox) => {
-    if (!f) return;
+  const origin = { x: min.x, y: min.y };
+  const cands = [];
+  forEachFeature((f, bbox) => { if (f) cands.push(f, bbox); });
+  const items = [];
+  let i = 0, n = 0, cancelled = false;
+  const prepOne = (f, bbox) => {
     if (bbox) { // B2092656: reject on the lot's pixel box (two projections) before anything per-vertex
       const a = map.project(L.latLng(bbox[3], bbox[0]), z), b = map.project(L.latLng(bbox[1], bbox[2]), z);
       if (b.x < view.x0 || b.y < view.y0 || a.x > view.x1 || a.y > view.y1) return; // off-screen
@@ -77,25 +101,42 @@ function paintLotNumbers({ map, group, field, floor, measure, getObstacles, getI
     // A lot larger than the screen is numbered where you can SEE it: lay out against the visible part.
     const seen = (x0 < view.x0 || y0 < view.y0 || x1 > view.x1 || y1 > view.y1) ? clipRingToRect(ring, view) : ring;
     if (!seen) return;
-    lots.push({ id: String(f.id != null ? f.id : lots.length), text, ring: seen });
-  });
-  if (!lots.length) return;
-  let obstacles = [];
-  try { obstacles = (getObstacles && getObstacles()) || []; } catch (_) { obstacles = []; }
-  const placed = layoutLotNumbers({ lots, origin: { x: min.x, y: min.y }, measure, fontPx: LOT_NO_FONT_PX, obstacles });
-  const esc = (t) => String(t).replace(/[&<>"']/g, "");
-  for (const p of placed) {
-    const ll = map.containerPointToLatLng(L.point(p.x, p.y));
-    const el = L.divIcon({
-      className: "planyr-lot-no",
-      iconSize: [p.w, p.h],
-      iconAnchor: [p.w / 2, p.h / 2],
-      html: `<span data-lot-no="${esc(p.text)}" style="display:block;width:${p.w}px;text-align:center;white-space:nowrap;pointer-events:none;`
-        + `font:600 ${LOT_NO_FONT_PX}px/${p.h}px 'Inter',system-ui,sans-serif;color:${PARCEL_OUTLINE_COLOR};`
-        + `text-shadow:0 0 2px ${LABEL_HALO},0 0 2px ${LABEL_HALO},0 0 3px ${LABEL_HALO},0 0 3px ${LABEL_HALO}">${esc(p.text)}</span>`,
-    });
-    L.marker(ll, { icon: el, interactive: false, keyboard: false, zIndexOffset: -500 }).addTo(group);
-  }
+    const it = lotNumberItem({ id: String(f.id != null ? f.id : n++), text, ring: seen }, { origin, measure, fontPx: LOT_NO_FONT_PX });
+    if (it) items.push(it);
+  };
+  const draw = () => {
+    group.clearLayers();
+    if (!items.length) return;
+    let obstacles = [];
+    try { obstacles = (getObstacles && getObstacles()) || []; } catch (_) { obstacles = []; }
+    const placed = solveLotNumberItems(items, { obstacles });
+    const esc = (t) => String(t).replace(/[&<>"']/g, "");
+    for (const p of placed) {
+      const ll = map.unproject(L.point(p.x + origin.x, p.y + origin.y), z);
+      const el = L.divIcon({
+        className: "planyr-lot-no",
+        iconSize: [p.w, p.h],
+        iconAnchor: [p.w / 2, p.h / 2],
+        html: `<span data-lot-no="${esc(p.text)}" style="display:block;width:${p.w}px;text-align:center;white-space:nowrap;pointer-events:none;`
+          + `font:600 ${LOT_NO_FONT_PX}px/${p.h}px 'Inter',system-ui,sans-serif;color:${PARCEL_OUTLINE_COLOR};`
+          + `text-shadow:0 0 2px ${LABEL_HALO},0 0 2px ${LABEL_HALO},0 0 3px ${LABEL_HALO},0 0 3px ${LABEL_HALO}">${esc(p.text)}</span>`,
+      });
+      L.marker(ll, { icon: el, interactive: false, keyboard: false, zIndexOffset: -500 }).addTo(group);
+    }
+  };
+  const step = () => {
+    if (cancelled) return;
+    if (map.getZoom() !== z) return; // the view changed scale under the job; the zoomend relayout replaces it
+    const t0 = now();
+    while (i < cands.length) {
+      prepOne(cands[i], cands[i + 1]);
+      i += 2;
+      if (now() - t0 >= LOT_NO_SLICE_MS) { yieldTask(step); return; } // the clock after EVERY lot: one big real lot's interior fit can take several ms on its own
+    }
+    draw();
+  };
+  step();
+  return { cancel() { cancelled = true; } };
 }
 
 /* The SAVED COPY's numbers (owner decision 2026-10-05): the county's Drive snapshot draws its own lot
@@ -105,18 +146,19 @@ function paintLotNumbers({ map, group, field, floor, measure, getObstacles, getI
 export function attachSnapshotLotNumbers(layer, { field, getFeatures } = {}) {
   if (!layer || !field || typeof getFeatures !== "function") return { relayout() {}, clear() {} };
   const measure = bestMeasurer({ weight: 600 });
-  let map = null, group = null;
+  let map = null, group = null, job = null;
   const relayout = () => {
+    if (job) job.cancel();
+    job = null;
     if (!map || !group) return;
-    group.clearLayers();
-    paintLotNumbers({ map, group, field, floor: 0, measure, forEachFeature: (cb) => getFeatures().forEach((f) => cb(f)) }); // NOT forEach(cb): its 2nd argument is the INDEX, which the live path uses as a bbox (B2092656 ×2)
+    job = paintLotNumbers({ map, group, field, floor: 0, measure, forEachFeature: (cb) => getFeatures().forEach((f) => cb(f, featureBbox(f))) }); // NOT forEach(cb): its 2nd argument is the INDEX, which the live path uses as a bbox (B2092656 ×2). The bbox (memoised on the feature) lets the pixel-box reject skip a too-small lot before any per-vertex work (B2092656 ×3)
   };
   layer.on("add", () => { map = layer._map; if (map) group = L.layerGroup().addTo(map); });
   layer.on("remove", () => {
     if (group && map) { try { map.removeLayer(group); } catch (_) { /* detached */ } }
     group = null; map = null;
   });
-  return { relayout, clear: () => { if (group) group.clearLayers(); } };
+  return { relayout, clear: () => { if (job) job.cancel(); job = null; if (group) group.clearLayers(); } };
 }
 
 export function attachLotNumbers(layer, { hint, getObstacles, getInset } = {}) {
@@ -162,13 +204,14 @@ export function attachLotNumbers(layer, { hint, getObstacles, getInset } = {}) {
   }
 
   /* ── 2. lay the numbers out ───────────────────────────────────────────────────────────────────── */
-  const clear = () => { if (group) group.clearLayers(); };
+  let job = null;
   const relayout = () => {
     timer = null;
+    if (job) job.cancel(); // the old numbers stay up until the new job draws (no flash between)
+    job = null;
     if (!map || !group) return;
-    clear();
     const floor = Number(layer.options && layer.options.minZoom) || 0;
-    paintLotNumbers({
+    job = paintLotNumbers({
       map, group, field, floor, measure, getObstacles, getInset,
       forEachFeature: (cb) => layer.eachFeature((lyr) => cb(lyr.feature, lyr.bbox)),
     });
@@ -187,6 +230,7 @@ export function attachLotNumbers(layer, { hint, getObstacles, getInset } = {}) {
     if (map) map.off("moveend zoomend", sched);
     layer.off("load", sched);
     if (timer) { clearTimeout(timer); timer = null; }
+    if (job) { job.cancel(); job = null; }
     if (group && map) { try { map.removeLayer(group); } catch (_) { /* detached */ } }
     group = null; map = null;
   });

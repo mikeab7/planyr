@@ -901,7 +901,8 @@ export default function ProjectBreadcrumb({
   const doPurge = (p) => {
     setBinBusy(p.id); setPurgeFor(null);
     Promise.resolve(purgeDeletedProject(p.ids, p.id)).then((res) => {
-      if (!res || res.ok === false) flashToast((res && res.error) || `“${p.name}” couldn't be permanently deleted — check your connection and try again.`);
+      // NEW-1 — a failure names the project and the reason (the storage layer words it); the row stays listed.
+      if (!res || res.ok === false) flashToast(`“${p.name}” couldn't be permanently deleted. ${(res && res.error) || "Check your connection and try again."}`, 12000);
       refreshBin();
     }).catch(() => flashToast(`“${p.name}” couldn't be permanently deleted — check your connection and try again.`))
       .finally(() => setBinBusy(null));

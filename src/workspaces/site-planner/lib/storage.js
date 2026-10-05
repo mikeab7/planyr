@@ -10,7 +10,7 @@
  */
 import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding, toMs, countJunkEntries,
   shareMirrorOf, withShareMirror, normRole } from "./siteModel.js";
-import { cloudUpsert, cloudDelete, cloudDeleteGroup, cloudHardDelete, cloudPurgeOnePlan, cloudRestore, cloudDeletedRows, cloudCheckDeleted, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile, refreshHeaderFromCloud } from "./cloudSync.js";
+import { cloudUpsert, cloudDelete, cloudDeleteGroup, cloudHardDelete, cloudRowsPresent, cloudPurgeOnePlan, cloudRestore, cloudDeletedRows, cloudCheckDeleted, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile, refreshHeaderFromCloud } from "./cloudSync.js";
 import { headerSlice } from "./headerMerge.js";
 import { reconcileGroupNames, resolveNameFor, groupKeyOf, maxStampOf, nameAuthority, renameStamp } from "./projectName.js";
 import { idbGet, idbPut, idbAvailable, idbDelete, idbDeleteByPrefix } from "./localDb.js";
@@ -1629,11 +1629,41 @@ async function purgeProjectFoldersFor(groupId) {
 export async function purgeDeletedProject(ids, groupId) {
   const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
   if (!activeUid() || !list.length) return { ok: false, purged: 0, error: "not signed in" };
-  const results = await Promise.all(list.map((id) => cloudHardDelete(activeUid(), id).catch((e) => ({ ok: false, error: (e && e.message) || "purge threw" }))));
+  const v = await hardDeleteVerified(list);
+  if (v.confirmedGone) await purgeProjectFoldersFor(groupId || list[0]);
+  return { ok: v.ok, purged: v.gone.length, error: v.error };
+}
+
+// NEW-1 — a hard delete is only a fact once a FRESH READ can no longer find the rows. This used to
+// read only `ok` off each DELETE, and `cloudHardDelete` answers `{ ok: true, removed: 0 }` for a
+// DELETE that matched nothing — so a purge the database never performed reported success: the row
+// vanished from the list with no message, came back on reload, and the folder/Drive teardown below
+// it had already run against a project that still existed. Now: every DELETE's own error is kept,
+// then ONE read asks the table which of these ids it still holds. Any that remain is a LOUD
+// failure that says so; the folder cascade runs only when every row is proven gone (or — read
+// itself failing — every DELETE positively reported a removed row, never on a zero-row answer).
+async function hardDeleteVerified(list) {
+  const uid = activeUid();
+  const results = await Promise.all(list.map((id) => cloudHardDelete(uid, id).catch((e) => ({ ok: false, error: (e && e.message) || "purge threw" }))));
   const failed = results.find((r) => r && r.ok === false);
-  const purged = results.filter((r) => r && r.ok !== false).length;
-  if (purged > 0) await purgeProjectFoldersFor(groupId || list[0]);
-  return { ok: !failed, purged, error: failed ? failed.error : null };
+  const reportedRemoved = results.every((r) => r && r.ok !== false && r.removed > 0);
+  const chk = await cloudRowsPresent(uid, list).catch((e) => ({ ok: false, present: [], error: (e && e.message) || "read threw" }));
+  const readable = !!(chk && chk.ok !== false);
+  const present = readable ? (chk.present || []) : [];
+  const gone = list.filter((id, i) => results[i] && results[i].ok !== false && (readable ? !present.includes(id) : results[i].removed > 0));
+  let error = failed ? failed.error : null;
+  if (!error && present.length) {
+    error = list.length === 1 || present.length === list.length
+      ? "It is still in your account — the permanent delete didn't take effect, so nothing was removed."
+      : `${present.length} of its ${list.length} plans are still in your account — the permanent delete only partly took effect.`;
+    reportClientEvent("purge-not-effective", "a hard delete reported no error but the rows are still in the database", { ids: present });
+  }
+  if (!error && !readable) {
+    error = "Couldn't confirm the permanent delete went through — reopen Recently deleted to check.";
+    reportClientEvent("purge-unverified", "hard delete could not be verified by a fresh read", { ids: list, error: (chk && chk.error) || "" });
+  }
+  const confirmedGone = !failed && (readable ? !present.length : reportedRemoved);
+  return { ok: !error, gone, error, confirmedGone };
 }
 
 // B1767168 (NEW-1) — permanently purge exactly ONE dead plan out of an otherwise-LIVE project: the
@@ -1696,7 +1726,7 @@ export async function purgeExpiredDeletedProjects({ days = DELETED_RETENTION_DAY
       reportClientEvent("plan-purge-skipped-live-group", "a soft-deleted plan's project still has live plans in its group — it was left in place instead of being auto-purged, since it was never offered back through the account-wide bin", { id: row.id, groupId: gid });
       continue;
     }
-    const out = await cloudHardDelete(activeUid(), row.id).catch(() => ({ ok: false }));
+    const out = await hardDeleteVerified([row.id]).catch(() => ({ ok: false }));
     if (out && out.ok) {
       purged += 1;
       if (!purgedGroups.has(gid)) { purgedGroups.add(gid); await purgeProjectFoldersFor(gid); }

@@ -7,7 +7,7 @@
  * is a config edit.
  *
  * What it draws, and why it reads "clean" over aerial:
- *   · Hierarchy — freeways/trunks widest and warm white, primaries narrower, secondaries/tertiaries
+ *   · Hierarchy — freeways/trunks widest (rank by WIDTH + opacity, never hue — no road is tinted), primaries narrower, secondaries/tertiaries
  *     thinner still, and LOCAL streets only from neighbourhood zoom (`LOCAL_STREETS_FROM`). The old
  *     overlay drew every road as one thick opaque band; here width AND opacity both step down.
  *   · Thin, slightly translucent strokes with a hairline dark casing so a pale road holds its edge
@@ -41,7 +41,7 @@ const TEXT = { color: "#ffffff", halo: "rgba(18, 26, 38, 0.62)", haloWidth: 1.1,
 
 const ROAD_CLASSES = {
   /* [class list, leaflet minzoom, stroke color, opacity, width stops (leaflet zoom → px)] */
-  freeway: { classes: ["motorway", "trunk"], minzoom: 6, color: "#fff3c4", opacity: 0.95,
+  freeway: { classes: ["motorway", "trunk"], minzoom: 6, color: "#ffffff", opacity: 0.95,
     widths: [[6, 0.7], [10, 1.8], [14, 4.6], [18, 13]] },
   major: { classes: ["primary"], minzoom: 8, color: "#ffffff", opacity: 0.9,
     widths: [[8, 0.5], [11, 1.3], [14, 3.4], [18, 10]] },

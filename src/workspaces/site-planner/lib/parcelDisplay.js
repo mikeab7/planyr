@@ -35,12 +35,13 @@ import * as EL from "esri-leaflet";
 import L from "leaflet";
 import { STATEWIDE_PARCEL_LAYER, displayMinZoomForUrl, lotNumberFieldForUrl, snapshotLotNumberField } from "./counties.js";
 import { attachLotNumbers, attachSnapshotLotNumbers } from "./parcelLotLabelLayer.js";
-import { getSnapshot, featuresForView, onSnapshotChange } from "./parcelSnapshot.js";
+import { getSnapshot, snapshotFeaturesInView, onSnapshotChange } from "./parcelSnapshot.js";
 import { pruneToLiveCells } from "./parcelPrune.js";
 import { IngestQueue, INGEST_BUDGET_MS, PAINT_BUDGET_MS } from "./parcelIngest.js";
+import { routeQueryThroughWorker } from "./parcelQueryTransport.js";
 import { ParcelIndex, drawParcelTile, prepareParcel, tileLngLatBounds, PARCEL_OUTLINE_STYLE } from "./parcelTileLayer.js";
 import { guardRasterOpacity } from "./parcelOpacityGuard.js";
-import { PARCEL_MINZOOM, PARCEL_VECTOR_MINZOOM, parcelDisplayRegimeForZoom, parcelUrlSupportsImageExport, MAPSERVER_LAYER_RE, PARCEL_OUTLINE_COLOR, PARCEL_OUTLINE_WEIGHT, plainOutlineDynamicLayers } from "./parcelDisplayZoom.js";
+import { PARCEL_MINZOOM, PARCEL_VECTOR_MINZOOM, parcelDisplayRegimeForZoom, parcelUrlSupportsImageExport, MAPSERVER_LAYER_RE, plainOutlineDynamicLayers } from "./parcelDisplayZoom.js";
 
 export { PARCEL_MINZOOM, PARCEL_VECTOR_MINZOOM, parcelDisplayRegimeForZoom, parcelUrlSupportsImageExport };
 
@@ -258,6 +259,12 @@ export function makeParcelLayer(url, opts) {
       enqueue(features, coords);
     };
   }
+  /* B2092656 ×3 — the /query round trip, its JSON parse and the ArcGIS→GeoJSON conversion run in a worker
+   * (parcelQueryTransport.js): one ~1,200-lot answer was a 15–35 ms main-thread task inside esri-leaflet's XHR
+   * callback. The query itself is still built by esri-leaflet (`_buildQuery`), and the service still fires every
+   * request event the hang-guards listen for. */
+  const baseBuildQuery = layer._buildQuery;
+  if (typeof baseBuildQuery === "function") layer._buildQuery = function (bounds, offset) { return routeQueryThroughWorker(baseBuildQuery.call(this, bounds, offset)); };
   basePostProcess = layer._postProcessFeatures;
   if (typeof basePostProcess === "function") {
     layer._postProcessFeatures = function (bounds) {
@@ -360,47 +367,108 @@ export function makeParcelDisplayLayer(url, opts) {
   return parcelDisplayIsImageOnly(url) ? makeParcelImageLayer(url) : makeParcelAdaptiveLayer(url, opts);
 }
 
-/* Draw a county's outlines from its Drive PARCEL SNAPSHOT (B629) as a styleable vector layer —
- * the same magenta `L.geoJSON` shape as `makeParcelLayer`, so the existing `optimisticHitAt`
- * hit-test (which iterates `eachFeature`) selects a lot from it with NO new click logic, and it
- * renders + clicks even when the live county server is fully down. Only the viewport's parcels are
- * drawn (bbox-filtered) so a whole county never paints at once, and it re-fills on pan/zoom and
- * when a fresher snapshot loads. Empty until `ensureSnapshot(county)` has warmed the data. */
+/* Draw a county's outlines from its Drive PARCEL SNAPSHOT (B629). `optimisticHitAt` (which iterates `eachFeature`)
+ * selects a lot from it with NO new click logic, and it renders + clicks even when the live county server is fully
+ * down. Only the viewport's parcels are held (bbox-filtered), re-filled on pan/zoom and when a fresher snapshot loads.
+ * Empty until `ensureSnapshot(county)` has warmed the data.
+ *
+ * ⛔ B2092656 ×3 — THE SAME MACHINERY AS THE LIVE OUTLINES, NOT AN `L.geoJSON`. It used to be an `L.geoJSON` that rebuilt
+ * one Leaflet Path per in-view lot (projected, clipped, an SVG node each) plus every lot number, all in ONE task —
+ * 263–282 ms on Waller's recorded real copy at Katy, z15 (ui-audit/verify-select-parcels-on-cost.mjs), the moment the
+ * copy finished loading. Now: in-view lots are inert `ParcelGhost`s fed through the budgeted `IngestQueue`, drawn by
+ * the per-tile cached canvases (`ParcelTiles`), and the lot numbers are laid out once ingestion drains. B137 holds the
+ * same way it does for the live layer: a lot is in `_layers` (what `eachFeature` walks) exactly when it is in the
+ * tile index. */
 export function makeSnapshotLayer(county) {
-  const layer = L.geoJSON(null, {
-    interactive: false, // purely visual; clicks fall through to the map/canvas (like makeParcelLayer)
-    style: () => ({ color: PARCEL_OUTLINE_COLOR, weight: PARCEL_OUTLINE_WEIGHT, opacity: 0.95, fillOpacity: 0 }),
-  });
+  const index = new ParcelIndex();
+  let tiles = null;
+  const held = new Map(); // lot key (`__k`, stable per vintage) -> { f, g } — g is its ghost once ingested, null while queued (a ghost's ring prep is per-lot work, so it happens in the budgeted drain)
+  const layer = new (L.Layer.extend({}))();
   layer._isSnapshot = true;
   layer._snapshotCounty = county;
+  layer._layers = {};
+  let nextId = 0;
+  layer.eachFeature = function (fn, ctx) { Object.keys(this._layers).forEach((k) => fn.call(ctx, this._layers[k])); return this; };
+  layer.eachLayer = layer.eachFeature;
+  layer.getLayers = function () { return Object.keys(this._layers).map((k) => this._layers[k]); };
   // The saved copy numbers its lots too (owner decision 2026-10-05): the SAME account the live CAD shows,
   // read off the snapshot's own attributes, so a lot reads one number whether the county server is up or down.
-  let inView = [];
-  const numbers = attachSnapshotLotNumbers(layer, { field: snapshotLotNumberField(county), getFeatures: () => inView });
-  let mapRef = null, unsub = null;
+  const numbers = attachSnapshotLotNumbers(layer, { field: snapshotLotNumberField(county), getFeatures: () => layer.getLayers().map((g) => g.feature) });
+  let mapRef = null, unsub = null, pumpRaf = null;
+  const queue = new IngestQueue({
+    process: (k) => {
+      const h = held.get(k);
+      if (!h || h.g) return; // left the view while queued, or already in
+      const g = new ParcelGhost(h.f, index, (bbox) => { if (tiles) tiles.markDirty(bbox); });
+      h.g = g;
+      g._live = true;
+      g._sid = String(++nextId);
+      layer._layers[g._sid] = g;
+      g.attach();
+    },
+  });
+  const pump = () => {
+    pumpRaf = null;
+    if (!mapRef) return;
+    queue.drain(INGEST_BUDGET_MS);
+    if (queue.pending) pumpRaf = L.Util.requestAnimFrame(pump);
+    else numbers.relayout();
+  };
+  const drop = (k, h) => {
+    held.delete(k);
+    const g = h && h.g;
+    if (g && g._live) { g._live = false; delete layer._layers[g._sid]; g.detach(); }
+  };
+  const dropAll = () => { held.forEach((h, k) => drop(k, h)); queue.clear(); };
+  let ask = 0;
+  const apply = (feats) => {
+    const want = new Set();
+    const fresh = [];
+    for (let i = 0; i < feats.length; i++) {
+      const f = feats[i];
+      const k = f.__k != null ? f.__k : f; // the worker's answers are fresh objects; `__k` is the lot's stable key
+      want.add(k);
+      if (held.has(k)) continue;
+      held.set(k, { f, g: null });
+      fresh.push(k);
+    }
+    held.forEach((h, k) => { if (!want.has(k)) drop(k, h); });
+    if (fresh.length) {
+      queue.push(fresh, null);
+      if (typeof document !== "undefined" && document.hidden) { queue.drain(Infinity); numbers.relayout(); return; }
+      if (pumpRaf == null) pumpRaf = L.Util.requestAnimFrame(pump);
+    } else if (!queue.pending) numbers.relayout();
+  };
   const refresh = () => {
     if (!mapRef) return;
-    layer.clearLayers();
-    numbers.clear();
-    inView = [];
-    if (mapRef.getZoom() < PARCEL_MINZOOM) return; // too many to draw across a whole county at once
-    const snap = getSnapshot(county);
-    if (!snap || !snap.features) return;
+    const mine = ++ask;
+    if (mapRef.getZoom() < PARCEL_MINZOOM || !getSnapshot(county)) { dropAll(); numbers.clear(); return; } // too many to draw across a whole county at once
     const b = mapRef.getBounds();
-    const feats = featuresForView(snap.features, { w: b.getWest(), s: b.getSouth(), e: b.getEast(), n: b.getNorth() });
-    if (feats.length) { layer.addData({ type: "FeatureCollection", features: feats }); inView = feats; numbers.relayout(); }
+    snapshotFeaturesInView(county, { w: b.getWest(), s: b.getSouth(), e: b.getEast(), n: b.getNorth() })
+      .then((feats) => { if (mine === ask && mapRef) apply(feats || []); }) // a later view's answer supersedes this one
+      .catch(() => {});
   };
-  layer.on("add", () => {
-    mapRef = layer._map;
-    if (mapRef) mapRef.on("moveend zoomend", refresh);
-    unsub = onSnapshotChange((c) => { if (c === county) refresh(); });
+  layer.onAdd = function (map) {
+    mapRef = map;
+    tiles = new ParcelTiles(index, { pane: "overlayPane", zIndex: 0, minZoom: PARCEL_MINZOOM, maxZoom: 24, tileSize: 512, keepBuffer: 1 });
+    tiles._busy = () => queue.pending > 0;
+    tiles.addTo(map);
+    map.on("moveend zoomend", refresh);
+    unsub = onSnapshotChange((c) => { if (c === county) { dropAll(); refresh(); } }); // a fresher copy: new lots, new keys
     refresh();
-  });
-  layer.on("remove", () => {
-    if (mapRef) mapRef.off("moveend zoomend", refresh);
+    return this;
+  };
+  layer.onRemove = function (map) {
+    map.off("moveend zoomend", refresh);
     if (unsub) unsub();
+    if (pumpRaf != null) { L.Util.cancelAnimFrame(pumpRaf); pumpRaf = null; }
+    ask++;
+    dropAll();
+    numbers.clear();
+    if (tiles) { try { tiles.remove(); } catch (_) {} tiles = null; }
     mapRef = null; unsub = null;
-  });
+    return this;
+  };
   return layer;
 }
 
