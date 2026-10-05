@@ -143,7 +143,7 @@ describe("the layout rule, read off the real source", () => {
     expect(threeZone).toContain('flex: "none"'); // tabs zone
     expect(threeZone).toContain('flex: narrow ? "1 0 auto" : "none"'); // toolbar zone
     expect(threeZone).toContain('justifyContent: "flex-end"');
-    expect(header).toContain('flexWrap: narrow ? "nowrap" : "wrap"');
+    expect(header).toContain('flexWrap: "nowrap"'); // NEW-1 (2026-10-05): a shortfall collapses (PriorityToolbar), it no longer wraps
   });
 
   it("the phone layout is untouched — narrow always falls back to flow, never attempts to center", () => {
