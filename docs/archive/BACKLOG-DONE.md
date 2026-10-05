@@ -17713,3 +17713,8 @@ Constraint check: nothing contradicts `## Owner product constraints`.
 - **Stopping rule:** closes on a signed-in pass of V1518692, or on an evidenced finding that it was the instrument (state which of the three admissible dispositions was taken).
 - Verify: live — **V1518692**.
 - **✅ Verified 2026-10-05 — signed in as the test account on planyr.io (see its V entry in docs/archive/VERIFICATION-DONE.md).**
+
+### B2103600 — Test artifacts are always cleared, never asked about `[repo / process]` (task) #process  *(owner decision 2026-10-05)*
+`[x]` Owner constraint 15 added to CLAUDE.md "Owner product constraints"; entry 7 amended to cross-reference it. Grepped CLAUDE.md, docs/AGENT-RULES.md, VERIFICATION.md header and docs/PHONE-TESTING.md — no wording tells a session to ask or leave test artifacts for Michael, so nothing else needed aligning.
+- Verify: sandbox (doc-only) — passed: entry present, cross-references in place.
+- Origin: filed 2026-10-05 from chat. Michael verbatim: "stop asking to clear test files, always clr."
