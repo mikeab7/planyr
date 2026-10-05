@@ -129,7 +129,7 @@ const SURFACES = [
   })),
   { id: "site — Properties of a selected building", route: `#/project/${PROJ}/site`, signedIn: false, max: 16, noType: true,
     open: async (p) => {
-      const pt = await p.evaluate(() => { const e = [...document.querySelectorAll("[data-el-id]")].find((n) => { const r = n.getBoundingClientRect(); return r.width > 20 && r.height > 20 && r.top > 150; }); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+      const pt = await p.evaluate(() => { const e = document.querySelector('[data-el-id="b1"]'); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
       if (pt) { await p.touchscreen.tap(pt.x, pt.y); await p.waitForTimeout(700); }
       await p.locator('[data-testid="mobile-panels-tab"]').locator("visible=true").first().click({ timeout: 2500 }).catch(() => {});
       await p.getByRole("button", { name: /^Properties$/ }).first().click({ timeout: 2500 }).catch(() => {});
