@@ -1,24 +1,57 @@
-/* Usage (B711905) — "is anyone using this, and how often", from data the database already holds
- * (accounts, last sign-in, row counts, created/updated dates). COUNTS AND DATES ONLY — never plan,
- * project or file content (CLAUDE.md KEY DECISION: not a cross-customer content view). Read through
- * admin_usage_overview() (SECURITY DEFINER, is_admin()-gated). No new tracking. */
+/* Usage (B711905) — totals and the 12-week trend. COUNTS AND DATES ONLY — never plan, project or file
+ * content (CLAUDE.md KEY DECISION). Read through admin_usage_overview() (SECURITY DEFINER, is_admin()-gated).
+ * The per-account table moved to Users; the trend is a real line chart with labelled axes. */
 import { supabase } from "../site-planner/lib/supabase.js";
 import { FONT_SIZE } from "../../shared/ui/designTokens.js";
+import { Button } from "../../shared/ui/controls.jsx";
 import { RADIUS } from "../../shared/ui/radius.js";
-import AdminPanel, { PanelState, useAdminLoad, th, td } from "./AdminPanel.jsx";
-import { fetchUsage, shapeUsage, USAGE_CANNOT_ANSWER, ago } from "./lib/adminPanels.js";
+import AdminPanel, { Card, PanelState, useAdminLoad } from "./AdminPanel.jsx";
+import { fetchUsage, shapeUsage, USAGE_CANNOT_ANSWER } from "./lib/adminPanels.js";
+import { niceTicks, shortDay } from "./lib/adminFormat.js";
 
 function Stat({ label, value }) {
   return (
-    <div style={{ background: "var(--surface-page)", border: "1px solid var(--border-default)", borderRadius: RADIUS.md, padding: "8px 12px", minWidth: 96 }}>
-      <div style={{ fontSize: 20, fontWeight: 700, color: "var(--text-primary)" }}>{value}</div>
+    <div style={{ background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: RADIUS.lg, padding: "10px 14px", minWidth: 0 }}>
+      <div style={{ fontSize: 22, /* design-exempt: stat numeral */ fontWeight: 700, color: "var(--text-primary)", fontVariantNumeric: "tabular-nums" }}>{value}</div>
       <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase" }}>{label}</div>
     </div>
   );
 }
 
-function Bar({ value, peak, color }) {
-  return <span style={{ display: "inline-block", height: 8, width: `${Math.round((value / peak) * 100)}%`, minWidth: value ? 2 : 0, background: color, borderRadius: 2 }} />;
+const SERIES = [
+  { key: "plansEdited", label: "Plans edited", color: "var(--accent)" },
+  { key: "plansCreated", label: "Plans created", color: "var(--accent-site)" },
+  { key: "signups", label: "Sign-ups", color: "var(--accent-schedule)" },
+];
+
+/** Line chart with labelled axes: y = count per week, x = week-of date. Solid strokes, direct legend. */
+export function TrendChart({ weekly }) {
+  const W = 720, H = 240, L = 40, R = 12, T = 12, B = 30;
+  const peak = Math.max(1, ...weekly.flatMap((w) => SERIES.map((s) => w[s.key])));
+  const { top, ticks } = niceTicks(peak);
+  const x = (i) => L + (weekly.length < 2 ? 0 : (i * (W - L - R)) / (weekly.length - 1));
+  const y = (v) => T + (H - T - B) * (1 - v / top);
+  const every = Math.ceil(weekly.length / 6);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Weekly sign-ups, plans created and plans edited, last 12 weeks" style={{ width: "100%", height: "auto", display: "block" }}>
+      {ticks.map((v) => (
+        <g key={v}>
+          <line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke="var(--border-default)" strokeWidth="1" />
+          <text x={L - 6} y={y(v) + 3} textAnchor="end" fontSize={FONT_SIZE.label} fill="var(--text-secondary)">{v}</text>
+        </g>
+      ))}
+      {weekly.map((w, i) => (i % every === 0 || i === weekly.length - 1) && (
+        <text key={w.week} x={x(i)} y={H - 10} textAnchor="middle" fontSize={FONT_SIZE.label} fill="var(--text-secondary)">{shortDay(w.week)}</text>
+      ))}
+      <text x={4} y={T + 4} fontSize={FONT_SIZE.label} fill="var(--text-secondary)" transform={`rotate(-90 4 ${T + 4})`} textAnchor="end">per week</text>
+      {SERIES.map((s) => (
+        <g key={s.key}>
+          <polyline fill="none" stroke={s.color} strokeWidth="2.5" strokeLinejoin="round" points={weekly.map((w, i) => `${x(i)},${y(w[s.key])}`).join(" ")} />
+          {weekly.map((w, i) => <circle key={w.week} cx={x(i)} cy={y(w[s.key])} r="3" fill={s.color}><title>{`${s.label}, week of ${shortDay(w.week)}: ${w[s.key]}`}</title></circle>)}
+        </g>
+      ))}
+    </svg>
+  );
 }
 
 export default function UsageSection() {
@@ -26,11 +59,15 @@ export default function UsageSection() {
   const u = shapeUsage(data);
   const t = u && u.totals;
   return (
-    <AdminPanel id="usage" title="Usage" blurb="Accounts, sign-ins and how much has been created — counts and dates only.">
+    <AdminPanel
+      id="usage" title="Usage"
+      blurb={u && u.generatedAt ? `Totals across all accounts, as of ${new Date(u.generatedAt).toLocaleString()}. Counts and dates only.` : "Totals and the 12-week trend — counts and dates only."}
+      actions={<Button variant="ghost" size="sm" onClick={reload}>Refresh</Button>}
+    >
       <PanelState loading={loading} error={error} empty={!u} emptyText="No usage data." onRetry={reload} />
       {u && (
         <>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))" }}>
             <Stat label="Accounts" value={t.accounts} />
             <Stat label="Signed in, 7 days" value={t.active7} />
             <Stat label="Signed in, 30 days" value={t.active30} />
@@ -43,41 +80,15 @@ export default function UsageSection() {
             <Stat label="Team members" value={t.members} />
             <Stat label="Pending invites" value={t.pendingInvites} />
           </div>
-          <h3 style={{ margin: "6px 0 0", fontSize: FONT_SIZE.emphasis }}>Last 12 weeks</h3>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: FONT_SIZE.control }}>
-              <thead><tr><th style={th}>Week of</th><th style={th}>Sign-ups</th><th style={th}>Plans created</th><th style={th}>Plans edited</th><th style={{ ...th, width: "40%" }} /></tr></thead>
-              <tbody>
-                {u.weekly.map((w) => (
-                  <tr key={w.week} style={{ borderTop: "1px solid var(--border-default)" }}>
-                    <td style={td}>{w.week}</td><td style={td}>{w.signups}</td><td style={td}>{w.plansCreated}</td><td style={td}>{w.plansEdited}</td>
-                    <td style={td}>
-                      <div><Bar value={w.plansEdited} peak={u.peak} color="var(--accent)" /></div>
-                      <div><Bar value={w.signups} peak={u.peak} color="var(--text-secondary)" /></div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <h3 style={{ margin: "6px 0 0", fontSize: FONT_SIZE.emphasis }}>Accounts</h3>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: FONT_SIZE.control }}>
-              <thead><tr><th style={th}>Account</th><th style={th}>Joined</th><th style={th}>Last sign-in</th><th style={th}>Last plan edit</th><th style={th}>Projects</th><th style={th}>Plans</th><th style={th}>Files</th></tr></thead>
-              <tbody>
-                {u.accounts.map((a) => (
-                  <tr key={a.id} style={{ borderTop: "1px solid var(--border-default)" }}>
-                    <td style={{ ...td, wordBreak: "break-all" }}>{a.email}</td>
-                    <td style={td}>{a.createdAt ? a.createdAt.slice(0, 10) : "—"}</td>
-                    <td style={td} title={a.lastSignIn || ""}>{ago(a.lastSignIn)}</td>
-                    <td style={td} title={a.lastPlanEdit || ""}>{a.lastPlanEdit ? ago(a.lastPlanEdit) : "—"}</td>
-                    <td style={td}>{a.projects}</td><td style={td}>{a.plans}</td><td style={td}>{a.files}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p style={{ margin: 0, fontSize: FONT_SIZE.control, color: "var(--text-tertiary)" }}>{USAGE_CANNOT_ANSWER}</p>
+          <Card title="Last 12 weeks" aside={(
+            <span style={{ display: "inline-flex", gap: 12, fontSize: FONT_SIZE.control }}>
+              {SERIES.map((s) => <span key={s.key} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><span aria-hidden style={{ width: 12, height: 3, background: s.color, display: "inline-block" }} />{s.label}</span>)}
+            </span>
+          )}>
+            <TrendChart weekly={u.weekly} />
+            <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: 4 }}>Count per week; the x-axis is the Monday each week starts. Per-account detail is in Users.</div>
+          </Card>
+          <p style={{ margin: 0, fontSize: FONT_SIZE.control, color: "var(--text-secondary)" }}>{USAGE_CANNOT_ANSWER}</p>
         </>
       )}
     </AdminPanel>

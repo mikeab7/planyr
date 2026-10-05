@@ -43,5 +43,5 @@ export default function AdminGate({ user, onExit, onShownChange }) {
   }, [isAdmin, onShownChange]);
 
   if (!isAdmin) return null;
-  return <AdminApp onExit={onExit} />;
+  return <AdminApp onExit={onExit} user={user} />;
 }
