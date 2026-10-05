@@ -160,6 +160,7 @@ import { safeAreaInsets } from "../../shared/ui/safeAreaInsets.js";
 import { registerChromeDock } from "../../shared/ui/chromeDock.js";
 import { publishBottomSheetHeight } from "../../shared/ui/bottomSheetTracker.js";
 import { isPhoneSheetMode, heightForSnap, resolveDragSnap, keyboardInsetPx, clampSheetHeightForKeyboard, selectionCoverDeltaPx } from "./lib/propertiesSheet.js";
+import { layoutViewportHeight } from "../../shared/ui/layoutViewport.js";
 import { isPhoneShape } from "./lib/deviceShape.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 /* NEW-2 — the ONE floor a header crumb may be squeezed to, shared with the project crumb so the
@@ -18814,7 +18815,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // keyboard is only safe once the sheet is also allowed to shrink to make room for it.
   let sheetRenderH = 0, sheetRenderBottom = 0;
   if (phoneSheetSolo) {
-    let vh = 0; try { vh = window.innerHeight; } catch (_) {}
+    let vh = 0; try { vh = layoutViewportHeight(window); } catch (_) {} // B2088384: measured, never innerHeight (iOS moves it with the keyboard)
     sheetRenderBottom = sheetKbInset > 0 ? sheetKbInset : sheetBottomSafe;
     sheetRenderH = clampSheetHeightForKeyboard(sheetHeightPx, vh, sheetKbInset);
   }
@@ -26206,6 +26207,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {(leftPanel || companionOpen) && (<>
           <div data-testid="left-menu-panel" ref={sheetRef}
             data-bottom-sheet={phoneSheetSolo ? "properties" : undefined}
+            data-keyboard-managed={phoneSheetSolo ? "position" : undefined}
             data-sheet-snap={phoneSheetSolo ? sheetSnap : undefined}
             onFocusCapture={phoneSheetSolo ? (e) => {
               // B1215682/NEW-1 — the brief's other named failure mode: the iOS keyboard covers the

@@ -416,6 +416,7 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
     <div
       ref={rootRef}
       data-food-sheet-root=""
+      data-keyboard-managed=""
       style={{
         position: "fixed", left: 0, right: 0, zIndex: 700, pointerEvents: "none",
         ...(vvBox ? { top: vvBox.top, height: vvBox.height } : { top: 0, bottom: 0 }),

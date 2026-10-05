@@ -4378,3 +4378,39 @@ Sandbox-proven: `test/e2eSessionRoute.test.js` (18, mutation-checked). Pending: 
 
 - **✅ PASS — 2026-10-05. Signed-in sweep (NEW-1 [VERIFY-SELF], test account e2e@planyr.test, planyr.io, fixtures only). Build `d49320f / b8658dc`.** (a) dragged acreage chip -> `labelOffset` in the cloud row, second signed-in window showed it at the same screen spot; (b) Hide wrote `chipHidden:true`, 0 chips in the second window after reload; (c) yield 74.38 AC shown and hidden; (d) Show restored it; (e) hide + one Ctrl+Z restored it; (f) real PDFs: hidden has no chip, shown has it at the moved spot.
 - **PASSED 2026-10-05** — nothing pending; archived. (`Cadence: once`)
+
+### V1517459 — B2095120: the e2e-fixture-testfit plan (legacy `line` elements) opens and draws
+
+Sandbox-proven: `test/unknownElementType.test.js`. **Steps** (signed in as `e2e@planyr.test` on planyr.io after the deploy; `/version.json` in the same call): open `#/project/e2e-fixture-testfit/site`. **Expect:** `planner-canvas` appears and no "Site Planyr hit an error" card. (Before: build 2f45a3d threw "reading 'label'"; build eafc260 threw "reading 'x'".)
+
+**✅ PASSED 2026-10-05 — session live check, signed in as the test account on planyr.io, build `52f291c` (read from /version.json in the same run):** Opened `#/project/e2e-fixture-testfit/site` signed in: `planner-canvas` present, no error card, no pageerror (earlier builds failed in two layers — label read, then render list, then callout box).
+
+### V1518688 — B2096352: Backspace after the Depth ▲ never deletes the building (focus parked on Zoom-to-fit)
+
+Sandbox-proven: `test/keyContract.test.js`. **Steps** (signed in as `e2e@planyr.test` on planyr.io after the deploy; `/version.json` in the same call; own throwaway plan, one building drawn): 1. Open Properties, press **Zoom to fit** (focus stays on it), select the building. 2. Click the Depth ▲ (stepper). 3. Press Backspace (real key). **Expect:** the building survives (element count 1→1) and the key-scope toast shows. 4. Control: click the building, Backspace. **Expect:** it deletes (1→0). Delete the throwaway plan afterwards.
+
+**✅ PASSED 2026-10-05 — session live check, signed in as the test account on planyr.io, build `a6b7d5d` (read from /version.json in the same run):** Depth ▲ moved 229→230 with focus parked on "Zoom to fit"; real Backspace left the building (1→1) and showed the key-scope toast; control (click building, Backspace) deleted it 1→0. Caveat: the control blurred focus first, so it did not repeat the exact parked-focus state.
+
+### V1518689 — B2096353: retrying a failed overlay upload via "Change page…" rasterises the PDF page
+
+**Steps** (signed in as `e2e@planyr.test`, after the fix deploys; `/version.json` in the same call): on a throwaway plan, add a PDF overlay, force a failed first upload (offline once), then use the row's "Change page…". **Expect:** the page renders, no "detached ArrayBuffer" error. Delete the throwaway plan.
+
+**✅ PASSED 2026-10-05 — session live check, signed in as the test account on planyr.io, build `a6b7d5d` (read from /version.json in the same run):** "Change page…" on a 3-page PDF overlay (Map-level ＋ Site plan list) opened the picker with a rendered preview, no detached-ArrayBuffer error; Next showed page 2 with a different preview and "Use this page" saved page 2. Positive render is the evidence (the old-build failure is not re-proven here).
+
+### V1518690 — B2096354: a diverged Model local copy is never auto-pushed; the Sync problem warning persists
+
+**Steps** (signed in as the test account, after deploy; `/version.json` in the same call; throwaway project): 1. Open Model, type `A` in A1, wait for green Synced; note `model_sheets.version`. 2. Make the local copy diverge (edit the `planyr:model:sheet:v1:<uid>:<projectId>` localStorage JSON so A1 is `LOCAL-B`). 3. Reload and touch nothing for 5 s. **Expect:** red 'Sync problem' badge stays, `data-testid="model-diverged-bar"` visible, NO `model_sheets` write, cloud version/data unchanged. 4. Edit a cell. **Expect:** still no cloud write. 5. Click "Use the cloud copy". **Expect:** grid shows the cloud content, bar gone, one write (+1), green; Ctrl+Z restores local. 6. Repeat 2–3, click "Keep this device's copy". **Expect:** one write replaces the cloud content, green. 7. Control: matching copies reload → no bar. Delete the throwaway model.
+
+**✅ PASSED 2026-10-05 — session live check, signed in as the test account on planyr.io, build `a6b7d5d` (read from /version.json in the same run):** Diverged local copy (A1 = LOCAL-B vs cloud A, version 2): after reload and 6 s untouched the red Sync problem badge and model-diverged-bar stayed, cloud stayed version 2 / "A", 0 non-GET requests to model_sheets; "Use the cloud copy" removed the bar and showed "A" (cloud → version 3, same data). Control: matching copies → no bar, Synced.
+
+### V1518691 — B2096355: opening a comp's detail writes nothing and shows no "Couldn't save" banner
+
+**Steps** (signed in, after deploy): open a comp's detail on an account that has an orphaned overlay row. **Expect:** no PATCH to `site_plan_overlays`, no banner.
+
+**✅ PASSED 2026-10-05 — session live check, signed in as the test account on planyr.io, build `a6b7d5d` (read from /version.json in the same run):** A pasted comp saved with a location and opening its detail showed no "Couldn't save" banner and no HTTP ≥400; throwaway comps deleted. Note: the same banner DID appear in a separate stale-row case on b8658dc — see B2096359.
+
+### V1518692 — B2096356: three attachments dropped in a row leave three chips
+
+**Steps** (signed in, after deploy): in a throwaway note drop a PDF, an XLSX and a DWG. **Expect:** three chips, each with its own type badge and size. Delete the note.
+
+**✅ PASSED 2026-10-05 — session live check, signed in as the test account on planyr.io, build `a6b7d5d` (read from /version.json in the same run):** Toolbar Attach took a PDF, an XLSX and a DWG in order → three chips with PDF/XLSX/DWG badges, still three after reload; with the first chip selected, a second DWG landed after it (pdf, dwg, xlsx, dwg) and nothing was lost.

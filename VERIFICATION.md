@@ -189,33 +189,6 @@ Sandbox-proven only in part: the lost-press recovery (`e2e/select-parcels-first-
 3. In the console run `sessionStorage.setItem("planyr:diag","1")`, reload `planyr.io/#/site`, repeat step 1, then run `window.__selectParcelsTrace()` (the `#/site?planyrDiag=1` form does NOT survive the app's hash rewrite — only the storage key is proven; b09b4d8 PASS 2026-10-05, test account: first click engaged, trace press-down/press-up/click/mode-on). **Expect:** a `press-down` / `press-up` / `click` / `mode-on` sequence; a `press-lost-recovered` entry means a press was caught and recovered (note its time).
 4. Query `client_errors` for `event:select-parcels-click-lost` and `event:select-parcels-mode-reset` since the deploy. **Expect:** none — any row names the mechanism (lost press vs engage-then-reset) and re-opens B2088016 with that row as the evidence.
 5. Say exactly what was touched (nothing is written by this check).
-### V1517459 — B2095120: the e2e-fixture-testfit plan (legacy `line` elements) opens and draws
-
-Sandbox-proven: `test/unknownElementType.test.js`. **Steps** (signed in as `e2e@planyr.test` on planyr.io after the deploy; `/version.json` in the same call): open `#/project/e2e-fixture-testfit/site`. **Expect:** `planner-canvas` appears and no "Site Planyr hit an error" card. (Before: build 2f45a3d threw "reading 'label'"; build eafc260 threw "reading 'x'".)
-
-
-### V1518688 — B2096352: Backspace after the Depth ▲ never deletes the building (focus parked on Zoom-to-fit)
-
-Sandbox-proven: `test/keyContract.test.js`. **Steps** (signed in as `e2e@planyr.test` on planyr.io after the deploy; `/version.json` in the same call; own throwaway plan, one building drawn): 1. Open Properties, press **Zoom to fit** (focus stays on it), select the building. 2. Click the Depth ▲ (stepper). 3. Press Backspace (real key). **Expect:** the building survives (element count 1→1) and the key-scope toast shows. 4. Control: click the building, Backspace. **Expect:** it deletes (1→0). Delete the throwaway plan afterwards.
-
-
-### V1518692 — B2096356: three attachments dropped in a row leave three chips
-
-**Steps** (signed in, after deploy): in a throwaway note drop a PDF, an XLSX and a DWG. **Expect:** three chips, each with its own type badge and size. Delete the note.
-
-
-### V1518691 — B2096355: opening a comp's detail writes nothing and shows no "Couldn't save" banner
-
-**Steps** (signed in, after deploy): open a comp's detail on an account that has an orphaned overlay row. **Expect:** no PATCH to `site_plan_overlays`, no banner.
-
-### V1518690 — B2096354: a diverged Model local copy is never auto-pushed; the Sync problem warning persists
-
-**Steps** (signed in as the test account, after deploy; `/version.json` in the same call; throwaway project): 1. Open Model, type `A` in A1, wait for green Synced; note `model_sheets.version`. 2. Make the local copy diverge (edit the `planyr:model:sheet:v1:<uid>:<projectId>` localStorage JSON so A1 is `LOCAL-B`). 3. Reload and touch nothing for 5 s. **Expect:** red 'Sync problem' badge stays, `data-testid="model-diverged-bar"` visible, NO `model_sheets` write, cloud version/data unchanged. 4. Edit a cell. **Expect:** still no cloud write. 5. Click "Use the cloud copy". **Expect:** grid shows the cloud content, bar gone, one write (+1), green; Ctrl+Z restores local. 6. Repeat 2–3, click "Keep this device's copy". **Expect:** one write replaces the cloud content, green. 7. Control: matching copies reload → no bar. Delete the throwaway model.
-
-### V1518689 — B2096353: retrying a failed overlay upload via "Change page…" rasterises the PDF page
-
-**Steps** (signed in as `e2e@planyr.test`, after the fix deploys; `/version.json` in the same call): on a throwaway plan, add a PDF overlay, force a failed first upload (offline once), then use the row's "Change page…". **Expect:** the page renders, no "detached ArrayBuffer" error. Delete the throwaway plan.
-
 ### V1518080 — B2081251: the Shallow rock (depth to bedrock) layer paints real SSURGO data on planyr.io `Blocker: live-GIS`
 
 **Steps** (Chrome on planyr.io, or `node ui-audit/verify-ssurgo-bedrock.mjs https://planyr.io`; read the served chunk hash in the same observation):
@@ -369,6 +342,20 @@ Sandbox-proven: `ui-audit/verify-food-ios-screens.mjs` (full app, iOS keyboard +
 8. Drag the card all the way up, then tap + Add a dish. **Expect:** same; the zoom buttons never show on top of the card.
 9. Desktop browser, full width: open the same restaurant. **Expect:** right-hand panel exactly as before.
 - **Stopping rule:** closes on a dated pass of 1–9 from Michael's iPhone; any failed step re-opens B2046224 (×4) with that step number.
+### V1522064 — B2088384: everywhere you type in Planyr on a real iPhone — the field stays above the keyboard, no page or map shows through, nothing covers it, no "AutoFill Contact" bar on non-contact fields `Blocker: real-device (no session can raise a real iPhone keyboard or Safari's AutoFill bar)`
+
+**Signed-in leg owed by the NEXT session that has `E2E_LOGIN_KEY` (not a park):** the Schedule GRID cells only assemble signed in. The shipping session tried `ui-audit/verify-signed-in-session.mjs https://planyr.io` on 2026-10-05 and could not sign in — its container predates the key and the proxy-CA import (`ERR_CERT_AUTHORITY_INVALID`; bypassing it is owner-ruled-out). Run: `openSignedIn({ base: "https://planyr.io" })` → the test account's fixture schedule → Grid → focus a Task name, a Notes and an Owner cell under the iOS model (`IOS_MODEL` from `ui-audit/lib/iosKeyboard.mjs`, `probeFocused`) at iPhone 15 and SE size. **Expect:** FIELD visible above the keyboard and below the sticky header, OVER empty, autocomplete not a contact token.
+
+Sandbox-proven: `ui-audit/verify-phone-typing.mjs` (WebKit at iPhone 15 and iPhone SE size, the iOS keyboard + accessory bar drawn into every screenshot, iOS's own page scroll AND the app's pin-back both modelled, a known-answer arm that must read HIDDEN) over every reachable text field — sign in/up, Settings profile/team, Help, shortcuts search, project search, map search, plan name, every Site Planner side panel, building Properties, Set location, Notes, Spreadsheet, Schedule agenda/new schedule, Library, Review — plus `test/phoneTyping.test.js`. **Not provable here:** the real keyboard's own height and animation, Safari's AutoFill bar itself (scored on the attributes it keys off), the Schedule grid's cells (the grid only assembles signed-in), and a real finger. **Steps** (iPhone, Safari, planyr.io, signed in; reload first; read `/version.json` and the served chunk hash in the same check; use a throwaway duplicate plan/schedule, never a real one):
+1. Signed out, tap Email then Password on the sign-in screen. **Expect:** each field sits above the keyboard; AutoFill offers your saved login (that one is wanted).
+2. Settings (gear) › Profile: tap each name field. **Expect:** field above the keyboard, nothing covering it; no "AutoFill Contact" bar except on the real name/email fields.
+3. Site › a throwaway plan › open the left panel (Land, Yield, Drainage…) and tap a number field near the BOTTOM of the panel. **Expect:** the panel scrolls so the field sits just above the keyboard; no map visible between panel and keyboard.
+4. Tap a building › Properties sheet › tap Name, then a lower field. **Expect:** the sheet sits on the keyboard, the field visible, no gap of map.
+5. Notes: tap into a note and type several lines past the bottom. **Expect:** the line you're typing stays above the keyboard.
+6. Schedule › a throwaway schedule › Grid: double-tap a task name, then a Notes cell, then an Owner cell and type. **Expect:** the cell you edit is above the keyboard and not hidden under the header; no AutoFill Contact bar on Task name / Notes.
+7. Review › Reviews menu search, Library search, the project search at the top. **Expect:** field visible, menu fits the screen width, nothing drawn over the field.
+8. Desktop browser, full width: open the same Site panel, Properties, and a Schedule cell. **Expect:** exactly as before.
+- **Stopping rule:** closes on a dated pass of 1–8 from Michael's iPhone; any failed step re-opens B2088384 (×2) with that step number.
 ### V1516224 — B2092656: no catch when NEW parcel outlines arrive (pan onto new ground / zoom to a new level) in Bartow County GA, and Katy/Fort Bend unchanged `Blocker: real-data`
 - **2026-10-04 ~7:50 PM CDT — Michael's Chrome, build ccaca0c: ❌ FAIL.** Select-on 283/211 ms frames; pan onto new ground 192 ms (137 blocking) and a 331 ms frame in a `setTimeout` callback with no network (the lot-number relayout — see B2092656 ×2). Fixed in the follow-up PR; re-run all steps on the new build.
 - **Done in the sandbox:** unit (16) + synthetic-Bartow arrival harness (`ui-audit/verify-parcel-arrival-cost.mjs`: zoom-arm longest task 71–86 → 16–25 ms) + five adjacent parcel harnesses green. **Why still live:** the sandbox has no GPU and no recorded Bartow response.
