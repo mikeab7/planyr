@@ -169,6 +169,7 @@ import AppHeader from "../../shared/ui/AppHeader.jsx";
 import { CRUMB_MIN_W } from "../../shared/ui/ProjectBreadcrumb.jsx";
 import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.jsx";
 import { layerVisibility, dormantZoomLine } from "./lib/layerZoomGate.js";
+import { nextHiddenToast } from "./lib/layerHiddenToast.js";
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 /* B1449 — the anchored render (the zoom half of B1440's increment) + the proportional wheel factor.
    `viewAnchor.js` holds the proof that an anchored frame lands exactly where a direct one would. */
@@ -6414,6 +6415,51 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const v = layerVisibility({ cfg: ALL_LAYERS[layerId], on: true, zoom: ppfToZoom(view.ppf, origin.lat), status: layerStatus?.[layerId] });
     return v.state === "dormant-zoom" ? dormantZoomLine(v.levels) : null;
   }, [origin, overlays, view.ppf, layerStatus]);
+
+  /* NEW-1 — "layer hidden at this zoom" toast. One combined toast per CROSSING into a layer's
+     no-draw range (turn-on, load, or in→out), re-armed when it draws again or is switched off;
+     the decision is the pure `nextHiddenToast` (lib/layerHiddenToast.js). Evaluated on a short
+     SETTLE debounce so a zoom gesture hovering at a gate cannot flicker toasts, and only after
+     `layerGateReady` so the opening default view (never the zoom the plan lands on) is not judged.
+     The action animates the zoom about the canvas centre (the ＋/－ anchor) to the nearest zoom
+     where the layers draw. */
+  const hiddenToastAnnouncedRef = useRef(null);
+  const zoomAnimRef = useRef(0);
+  const animateZoomTo = useCallback((z) => {
+    if (!origin) return;
+    const want = zoomToPpf(z, origin.lat);
+    const id = ++zoomAnimRef.current;
+    const t0 = performance.now(), DUR = 260;
+    let start = null;
+    const step = (now) => {
+      if (zoomAnimRef.current !== id) return;
+      const k = Math.min(1, (now - t0) / DUR), e = 1 - Math.pow(1 - k, 3);
+      setView((v) => {
+        if (!start) start = v;
+        const f = Math.exp(Math.log(want / start.ppf) * e);
+        const nv = zoomAround({ scale: start.ppf, tx: start.offX, ty: start.offY }, f, size.w / 2, size.h / 2, 0.02, 8);
+        return { ppf: nv.scale, offX: nv.tx, offY: nv.ty };
+      });
+      if (k < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }, [origin, size.w, size.h]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!active || !origin || !layerGateReady) return undefined;
+    const zoom = ppfToZoom(view.ppf, origin.lat);
+    const t = setTimeout(() => {
+      const layers = Object.keys(overlays || {}).map((id) => ({ id, cfg: ALL_LAYERS[id], on: !!overlays[id]?.on }));
+      const r = nextHiddenToast(hiddenToastAnnouncedRef.current, layers, zoom);
+      hiddenToastAnnouncedRef.current = r.announced;
+      if (!r.toast) return;
+      const { action } = r.toast;
+      pushToast({
+        text: r.toast.text, dedupeKey: "layer-hidden-at-zoom",
+        action: action ? { label: action.label, onClick: () => animateZoomTo(action.target) } : null,
+      });
+    }, 250);
+    return () => clearTimeout(t);
+  }, [active, origin, layerGateReady, overlays, view.ppf]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ⛔ REMOVED (B-VTX-SEL) — this used to auto-select "the single restored parcel so its handles
    * are ready to use". It ran on every MOUNT, not just the moment a parcel was first drawn, so

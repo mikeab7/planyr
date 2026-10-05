@@ -171,6 +171,12 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1532176 — B2112576: a layer that is ON but zoom-gated toasts once per crossing, and Zoom in fixes it
+Sandbox-proven (unit + e2e on a local build). Live steps, signed in as the test account on planyr.io (`ui-audit/lib/signedInSession.mjs`; read `/version.json` in the SAME observation as each PASS/FAIL and match it to the merge commit):
+1. Open a located plan zoomed out past the 1-ft terrain gate, Layers → turn Contour lines on. **Expect:** one toast "… is hidden at this zoom" with a Zoom in button, bottom-centre.
+2. Click Zoom in. **Expect:** the map animates in, contours draw, toast gone.
+3. Zoom back out past the gate and stay there, panning/zooming a bit. **Expect:** the toast returns exactly once, not on every tick.
+4. Reload with contours still on and zoomed out. **Expect:** the toast shows on load. On a phone width, **Expect:** it does not cover the map controls.
 ### V1526800 — B2108336: "Delete forever" on a whole project in the account bin removes it, or says why `Blocker: real-data`
 
 Sandbox-proven: stub-database harness `ui-audit/verify-project-purge.mjs` (known-good arm: row leaves, DB empty, folders torn down; zero-row arm: row stays, toast names the reason, NO folder teardown) and the red-proofed `test/purgeProjectFolders.test.js` NEW-1 block. Signed-in throwaway on planyr.io (test account) removed the row on the pre-fix build; re-run after the deploy in the steps below.
