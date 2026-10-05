@@ -399,6 +399,17 @@ describe('NEW-4 — the opening framing: top-anchored, and fit-width on a phone'
       expect(right).toBeLessThanOrEqual(vw);
     }
   });
+  it('desktop too: a page WIDER than the window shrinks until both edges are on screen (B2078593)', () => {
+    for (const [vw, pw] of [[1280, 1700], [1024, 1100], [1920, 2400], [700, 900]]) {
+      const z = openingZoom({ viewport: { width: vw }, page: { width: pw } });
+      expect(z).toBeLessThan(1);
+      const v = frameView({ viewport: { width: vw, height: 800 }, page: { x: 0, y: 0, width: pw, height: 500 }, zoom: z, align: 'top' });
+      expect(toViewport(v, { x: 0, y: 0 }).x).toBeGreaterThanOrEqual(0);
+      expect(toViewport(v, { x: pw, y: 0 }).x).toBeLessThanOrEqual(vw);
+    }
+    // …and a narrow page on a big monitor is NOT blown up
+    expect(openingZoom({ viewport: { width: 1920 }, page: { width: 300 } })).toBe(1);
+  });
   it('a page narrower than the screen is shown a little larger, never past the cap; junk is safe', () => {
     expect(openingZoom({ viewport: { width: 390 }, page: { width: 200 } })).toBe(PHONE_OPEN_ZOOM_MAX);
     expect(PHONE_VIEWPORT_MAX).toBeGreaterThan(430);

@@ -198,12 +198,10 @@ const TOP_EDGE_REACH_GAP = 10;
  * retune the title. A title that wants the smaller, size-tracks-body look is free to say so
  * explicitly via its own size control (NEW-5, `titleStyle.fontSize`), which this redesign adds. */
 const NOTE_BODY_FONT_PX = 11;
-const TITLE_SCALE = { narrow: 1.75, wide: 2.05 };
-const TITLE_TUNED_BODY_PX = 15;
-const TITLE_DEFAULT_PX = {
-  narrow: Math.round(TITLE_TUNED_BODY_PX * TITLE_SCALE.narrow),
-  wide: Math.round(TITLE_TUNED_BODY_PX * TITLE_SCALE.wide),
-};
+/* ⛔ THE TITLE DEFAULTS TO 16 ON EVERY DEVICE (NEW-1, owner 2026-10-05: "I like that" about 16). The old
+ * ratio-to-body scale (42px desktop / 34px phone, B1203504) read as far too big; weight (700), not size,
+ * now carries the heading hierarchy. A size picked in the toolbar (`titleStyle.fontSize`) still wins. */
+const TITLE_DEFAULT_PX = { narrow: 16, wide: 16 };
 export const noteTitleFontPx = (narrow) => (narrow ? TITLE_DEFAULT_PX.narrow : TITLE_DEFAULT_PX.wide);
 
 /* Editor surface styling. It lives here (rather than in src/index.css) so it rides the lazy
@@ -1340,7 +1338,7 @@ export function placeMenu({ x, y, w, h, viewW, viewH, margin = MENU_MARGIN }) {
   return { left: Math.round(left), top: Math.round(top), flipped: !fitsBelow && fitsAbove };
 }
 
-function DocMenu({ at, editor, onPlainPaste, onClose, onDeleteBox, onClipboardNote, onConvertTable }) {
+function DocMenu({ at, editor, onPlainPaste, onClose, onDeleteBox, onClipboardNote, onConvertTable, pressGuardRef }) {
   const ref = useRef(null);
   const [box, setBox] = useState(null);
   /* ⛔ GATED ON `at`. Registered unconditionally, this effect put a CAPTURE-phase Escape
@@ -1372,7 +1370,13 @@ function DocMenu({ at, editor, onPlainPaste, onClose, onDeleteBox, onClipboardNo
     }));
   }, [at]);
 
-  useEffect(() => { if (box) ref.current?.querySelector("button")?.focus(); }, [box]);
+  /* ⛔ A TOUCH-OPENED MENU LEAVES FOCUS WHERE IT WAS (B2078592). Moving focus to the first row is keyboard
+   * navigation's courtesy on desktop; on a phone it blurs the editor, which DROPS THE SOFT KEYBOARD the
+   * moment you press-and-hold inside the box you are typing in. A finger needs no focus ring on a row
+   * (rows already swallow mousedown so the selection survives), so a menu a finger opened keeps the
+   * editor focused — keyboard up if it was up, down if it was down. Desktop right-click is unchanged. */
+  const touchMenu = !!at?.touch;
+  useEffect(() => { if (box && !touchMenu) ref.current?.querySelector("button")?.focus(); }, [box, touchMenu]);
 
   if (!at || !editor || editor.isDestroyed) return null;
 
@@ -1421,6 +1425,17 @@ function DocMenu({ at, editor, onPlainPaste, onClose, onDeleteBox, onClipboardNo
       data-testid="note-doc-menu"
       data-menu-kind={onDeleteBox ? "box" : "document"}
       data-menu-flipped={box?.flipped ? "1" : undefined}
+      /* ⛔ THE LONG-PRESS THAT OPENED A TOUCH MENU IS STILL ON THE GLASS (B2078592). Lifting the finger
+       * synthesises a mousedown + click at the press point — which is now ON the menu. Unguarded, the
+       * mousedown on the menu's own (non-button) area moved focus off the editor and DROPPED THE KEYBOARD
+       * (measured on a real held touch in Chromium), and the click could land on whichever row sits
+       * under the finger. For a short window after the press the menu swallows both. Touch menus only. */
+      onMouseDownCapture={(e) => {
+        if (!at?.touch) return;
+        if (pressGuardRef && performance.now() < pressGuardRef.current) { e.stopPropagation(); e.preventDefault(); return; }
+        if (!(e.target instanceof Element) || !e.target.closest("button")) e.preventDefault();   // padding/separator: never steal focus
+      }}
+      onClickCapture={(e) => { if (at?.touch && pressGuardRef && performance.now() < pressGuardRef.current) { e.stopPropagation(); e.preventDefault(); } }}
       style={{
         position: "fixed",
         left: box ? box.left : at.x,
@@ -1635,6 +1650,7 @@ const NoteEditor = forwardRef(function NoteEditor({
    * effect below — so it does not wait for the next letter. Held in a ref so the editor config and
    * that effect share ONE implementation. */
   const revealCaretRef = useRef(null);
+  const setViewForE2ERef = useRef(null);   // B2078593 — assigned where `setView` is defined, read only by the __PLANYR_E2E hook
   revealCaretRef.current = (view, { verticalOnly = false } = {}) => {
     const sc = scrollerRef.current;
     if (!sc || !view || view.isDestroyed) return;
@@ -1781,6 +1797,10 @@ const NoteEditor = forwardRef(function NoteEditor({
       /** NEW-7: hand the open editor a body "the sync wrote to storage" — the exact path an adopted
        *  server copy takes. Returns whether the editor took it in place. */
       applyExternal: (json) => applyExternalToOpenNote(pageId, json),
+      /** B2078593 — put the canvas at an exact view ({x, y, z}), as a pan/pinch would. A saved view no
+       *  longer exists to seed through storage (the opening is always full width), so a harness that
+       *  needs "zoomed in 200%" or "panned" states it here. Read-only to shipped sessions: E2E-gated. */
+      setView: (v) => setViewForE2ERef.current?.(v, { persist: false, byUser: true }),
       /** Put the caret at an absolute document position — the only way to state "the very
        *  start of THAT block" without depending on where a click happens to land. */
       caretAt: (pos) => { if (!editor.isDestroyed) editor.chain().focus().setTextSelection(pos).run(); },
@@ -2488,6 +2508,7 @@ const NoteEditor = forwardRef(function NoteEditor({
     if (v.z !== was.z) setZoomPct(v.z);
     if (persist) persistView();
   }, [applyView, persistView]);
+  setViewForE2ERef.current = setView;
 
   /* ⛔ A KEYBOARD OPENING OR CLOSING IS A REASON TO RE-CHECK THE CARET (NEW-6a). The keyboard
    * shrinks the visual viewport after the tap that raised it, with no keystroke to trigger
@@ -3064,6 +3085,14 @@ const NoteEditor = forwardRef(function NoteEditor({
      * is side-effect-free beyond clearing that one piece of state, so calling it unconditionally
      * changes nothing about how the input itself handles the press. */
     cancelPendingPlace();
+    /* ⛔ A PRESS ELSEWHERE LEAVES THE TITLE (NEW-5). Every press below that claims the canvas calls
+     * preventDefault, which also stops the browser moving focus off the title <input> — so its text stayed
+     * highlighted after a click or double-click on the page. Blur it and collapse its selection first. */
+    const ae = document.activeElement;
+    if (ae instanceof HTMLInputElement && ae.getAttribute("data-testid") === "note-title" && ae !== el) {
+      try { ae.setSelectionRange(0, 0); } catch { /* not selectable */ }
+      ae.blur();
+    }
     if (el.closest("input, textarea, select, button, a")) return;
 
     /* ⛔ A PRESS INSIDE AN ANCHORED BLOCK IS A PRESS ON CONTENT. This was the owner's ORIGINAL
@@ -3999,7 +4028,17 @@ const NoteEditor = forwardRef(function NoteEditor({
       const blocks = nodes.map((el) => {
         const x = parseFloat(el.getAttribute("data-anchor-x")) || parseFloat(el.style.left) || 0;
         const w = parseFloat(el.getAttribute("data-anchor-w")) || parseFloat(el.style.width);
-        const fit = fitAnchorBox({ x, w, hostWidth: paneWidth });
+        /* ⛔ A BOX RENDERS AT ITS STORED WIDTH, ON EVERY DEVICE (B2078593 ×2, owner iPhone 2026-10-04).
+         * `hostWidth: paneWidth` clamped the rendered width to the SCREEN pane (`note-mat`'s on-screen
+         * width, an UNSCALED number) — but the box lives in workspace coordinates the view transform
+         * then scales. On a phone the pane is ~390 while the page is 1012 wide at 37%, so a stored
+         * 873-wide box was squeezed to 386 (41% of the page instead of 86%) and its table cut off; the
+         * same note on a desktop pane that happened to be wider than the box rendered correctly — so
+         * "the same note lays out differently on my phone". The clamp answered B421490 (a box hanging
+         * off the end of the sheet landing under the Outline panel) from the scroller-era, when the pane
+         * WAS the page; the canvas is unbounded and pannable now, and the STORED width is the person's
+         * intent (this function's own header says so). No `hostWidth` = "unmeasured — never guess". */
+        const fit = fitAnchorBox({ x, w });
         if (Math.round(parseFloat(el.style.width)) !== fit.w) el.style.width = `${fit.w}px`;
         if (Math.round(parseFloat(el.style.left)) !== fit.x) el.style.left = `${fit.x}px`;
         return { x: fit.x, w: fit.w, y: parseFloat(el.style.top) || 0, height: el.offsetHeight };
@@ -4617,7 +4656,7 @@ const NoteEditor = forwardRef(function NoteEditor({
   /* ⛔ ONE ROUTE TO THE DOCUMENT MENU, TWO WAYS IN (NEW-5). The right-click handler and the touch
    * long-press (below) both call this, so there is exactly ONE menu — never a second copy for a
    * phone. Its body is the right-click's, moved verbatim. */
-  const openDocMenuAt = useCallback((target, x, y) => {
+  const openDocMenuAt = useCallback((target, x, y, { touch = false } = {}) => {
     if (!(target instanceof Element)) return;
     /* ⛔ RIGHT-CLICKING A BOX IS STILL RIGHT-CLICKING INSIDE TEXT (B539651), so the box menu
        is the document's plus the box's own action rather than a different menu. The id is
@@ -4649,7 +4688,7 @@ const NoteEditor = forwardRef(function NoteEditor({
        landed inside a table; reading it off the DOM the press hit (rather than off
        `editor.isActive("table")`) keeps it consistent with how the box id above is read. */
     const inTable = !!target.closest("table");
-    setDocMenu({ x, y, boxId: box?.getAttribute("data-anchor-id") || null, inTable });
+    setDocMenu({ x, y, boxId: box?.getAttribute("data-anchor-id") || null, inTable, touch, hadFocus: !!editor && !editor.isDestroyed && editor.view.hasFocus() });
   }, [editor]);
 
   /* ⛔ TOUCH ROUTE TO THE DOCUMENT MENU: LONG-PRESS (NEW-5, iPhone review 2026-09-29). iOS Safari
@@ -4665,6 +4704,7 @@ const NoteEditor = forwardRef(function NoteEditor({
     if (!sc || readOnly) return undefined;
     let timer = 0;
     let start = null;
+    let opened = false;     // this press opened a menu, so its lift owns the compat-event guard
     const cancel = () => { if (timer) { clearTimeout(timer); timer = 0; } start = null; };
     const onDown = (e) => {
       if (e.pointerType !== "touch" || !e.isPrimary) { cancel(); return; }
@@ -4677,7 +4717,8 @@ const NoteEditor = forwardRef(function NoteEditor({
         start = null;
         if (!at || !editor || editor.isDestroyed) return;
         longPressSwallowRef.current = performance.now() + 700;
-        openDocMenuAt(at.target, at.x, at.y);
+        opened = true;
+        openDocMenuAt(at.target, at.x, at.y, { touch: true });
       }, LONG_PRESS_MS);
     };
     const onMove = (e) => {
@@ -4687,7 +4728,11 @@ const NoteEditor = forwardRef(function NoteEditor({
     const swallow = (e) => { if (performance.now() < longPressSwallowRef.current) { e.stopPropagation(); e.preventDefault(); } };
     sc.addEventListener("pointerdown", onDown);
     sc.addEventListener("pointermove", onMove);
-    sc.addEventListener("pointerup", cancel);
+    /* The guard is anchored to the LIFT, not to the moment the menu opened: the synthesised mousedown/click
+     * arrive right after the finger leaves, and a person who lifts at once and taps a row a beat later
+     * must not find that tap eaten. Only while a long-press guard is live (a normal tap sets none). */
+    const lift = () => { cancel(); if (opened || performance.now() < longPressSwallowRef.current) longPressSwallowRef.current = performance.now() + 250; opened = false; };
+    sc.addEventListener("pointerup", lift);
     sc.addEventListener("pointercancel", cancel);
     sc.addEventListener("mousedown", swallow, true);
     sc.addEventListener("click", swallow, true);
@@ -4695,7 +4740,7 @@ const NoteEditor = forwardRef(function NoteEditor({
       cancel();
       sc.removeEventListener("pointerdown", onDown);
       sc.removeEventListener("pointermove", onMove);
-      sc.removeEventListener("pointerup", cancel);
+      sc.removeEventListener("pointerup", lift);
       sc.removeEventListener("pointercancel", cancel);
       sc.removeEventListener("mousedown", swallow, true);
       sc.removeEventListener("click", swallow, true);
@@ -4874,6 +4919,12 @@ const NoteEditor = forwardRef(function NoteEditor({
    * React state — the same "the editor is the one source of truth" rule the toolbar's own
    * active-state reads follow. */
   const titleStyleNow = (!editor || editor.isDestroyed) ? {} : (editor.state.doc.attrs?.titleStyle || {});
+  /* One size answer shared by the title input and its width ghost (NEW-4). */
+  const titleFontStyle = {
+    fontSize: (titleStyleNow.sup || titleStyleNow.sub)
+      ? Math.round((titleStyleNow.fontSize || noteTitleFontPx(narrow)) * 0.7)
+      : (titleStyleNow.fontSize || noteTitleFontPx(narrow)),
+  };
 
   const edited = editedLabel(updatedAt);
 
@@ -5315,8 +5366,21 @@ const NoteEditor = forwardRef(function NoteEditor({
               so this is the same fixed `TITLE_BAND_GAP` it always was until something above the
               body's origin needs more room than that. */}
           <div style={{ marginBottom: TITLE_BAND_GAP + sheetGrowGap }}>
+            {/* ⛔ THE TITLE HUGS ITS TEXT (NEW-4). A ghost span holding the same text sizes an inline grid;
+                the input fills that one cell, so the box is as wide as the words (min = the placeholder),
+                wraps at the page edge, and the rest of the band is ordinary page for a double-click. */}
+            <div data-testid="note-title-wrap" style={{ display: "inline-grid", maxWidth: "100%", verticalAlign: "top" }}>
+            <span
+              aria-hidden="true"
+              style={{
+                gridArea: "1 / 1", visibility: "hidden", whiteSpace: "pre", overflow: "hidden",
+                fontWeight: titleStyleNow.bold ? 800 : 700, letterSpacing: "-0.01em", padding: "2px 2px 2px 0",
+                ...titleFontStyle,
+              }}
+            >{(title || "Untitled page") + " "}</span>
             <input
               data-testid="note-title"
+              size={1}
               value={title}
               placeholder="Untitled page"
               aria-label="Page title"
@@ -5335,7 +5399,7 @@ const NoteEditor = forwardRef(function NoteEditor({
                 editor.commands.focus("start");
               }}
               style={{
-                display: "block", width: "100%", border: "none", borderBottom: "1px solid transparent",
+                gridArea: "1 / 1", display: "block", width: "100%", minWidth: 0, border: "none", borderBottom: "1px solid transparent",
                 background: "transparent",
                 /* ⛔ NEW-5 — the title's OWN formatting, read off the document attribute the
                    toolbar writes (`titleStyle`). A field left unset here keeps the module's
@@ -5359,9 +5423,7 @@ const NoteEditor = forwardRef(function NoteEditor({
                    real name more room to actually show on a 390px-class phone before the
                    input's own internal scroll takes over. */
                 font: "inherit",
-                fontSize: (titleStyleNow.sup || titleStyleNow.sub)
-                  ? Math.round((titleStyleNow.fontSize || noteTitleFontPx(narrow)) * 0.7)
-                  : (titleStyleNow.fontSize || noteTitleFontPx(narrow)),
+                ...titleFontStyle,
                 letterSpacing: "-0.01em",
                 padding: "2px 0", outline: "none",
               }}
@@ -5371,8 +5433,9 @@ const NoteEditor = forwardRef(function NoteEditor({
                  made the field impossible to clear, because the write came straight back into a
                  controlled input. Folded into the existing blur rather than added beside it —
                  two onBlur props on one element and the second silently wins. */
-              onBlur={(e) => { e.target.style.borderBottomColor = "transparent"; setTitleActive(false); onTitleCommit?.(); }}
+              onBlur={(e) => { e.target.style.borderBottomColor = "transparent"; try { e.target.setSelectionRange(0, 0); } catch { /* not selectable */ } setTitleActive(false); onTitleCommit?.(); }}
             />
+            </div>
             {/* ⛔ THE ZOOM LEVEL IS NOT SHOWN HERE ANY MORE (NEW-2, owner report 2026-09-06:
                 "the zoom shouldn't be shown on the page"). It rendered as a real `<button>` inside
                 `note-sheet` — the document itself, not chrome around it — which is a control
@@ -5383,38 +5446,10 @@ const NoteEditor = forwardRef(function NoteEditor({
                 to 100%); only where its indicator sits moved. Same `data-testid="note-zoom-level"`
                 on the relocated control, so nothing that already asks "is a level shown, and does
                 it say what it is" had to change — only where it's rooted did. */}
-            {(projectLabel || edited) ? (
+            {edited ? (
               <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
-                {/* ⛔ WHICH PROJECT THIS NOTE BELONGS TO, WHILE YOU ARE READING IT (NEW-2).
-                    The owner could not see a note's filing anywhere near the note itself: the
-                    rail drops the per-row badge inside a project (everything there belongs where
-                    you are standing) and the Dashboard's grouping is a level up from the page. So
-                    a note copied into an unrelated pursuit looked exactly like a note in the
-                    right place. This is the one surface that is always on screen with the note.
-                    It is a LABEL, never a control — re-filing stays on the row's menu, one place,
-                    so there is no second way to change the fact. An id that no longer resolves
-                    wears the warning colour rather than being captioned as "no project": a failed
-                    lookup and a page that genuinely belongs nowhere are different states. */}
-                {projectLabel ? (
-                  <span
-                    data-testid="note-project-badge"
-                    data-project-id={projectLabel.projectId ?? ""}
-                    data-resolved={projectLabel.resolved ? "1" : "0"}
-                    // ⛔ THE NO-PROJECT CASE GETS ITS OWN SENTENCE (NEW-1, the banner-wording
-                    // fix's audit of every project-name interpolation in this module) —
-                    // projectLabel.name is "Not in a project" there, and "filed in Not in a
-                    // project" is a phrase inside a phrase. Org scope is unaffected: its label
-                    // ("Organization") reads fine in the same slot.
-                    title={projectLabel.projectId == null && !projectLabel.org ? "This note has no project" : `This note is filed in ${projectLabel.name}`}
-                    style={{
-                      flex: "0 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis",
-                      whiteSpace: "nowrap", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.04em",
-                      color: projectLabel.resolved ? "var(--text-secondary)" : "var(--warn-text)",
-                      border: `1px solid ${projectLabel.resolved ? "var(--border-default)" : "var(--warn-text)"}`,
-                      borderRadius: RADIUS.pill, padding: "3px 9px",
-                    }}
-                  >{projectLabel.name}</span>
-                ) : null}
+                {/* ⛔ NO PROJECT / ORGANIZATION CHIP HERE (NEW-3, owner 2026-10-05). The filing is unchanged and
+                    still shown by the rail and the Dashboard grouping; only this header label is gone. */}
                 {edited ? (
                   <span
                     data-testid="note-edited"
@@ -5515,38 +5550,12 @@ const NoteEditor = forwardRef(function NoteEditor({
             and clicking away. That box is one you made and then emptied yourself, it is visibly
             outlined the whole time, and the prune at the storage seam still takes it, silently, as
             it did before B1370546 existed. No toast covers that case any more. */}
-        {/* ⛔ A SELECTED BOX CAN BE DELETED ON A PHONE (NEW-5). With no right-click and no Delete key
-            on a phone, a box that is selected needs its own way out: a small pill pinned to the TOP
-            of the canvas (never the bottom — the soft keyboard covers that) with one 44 px action.
-            Coarse pointers only; the desktop selection model, keys and menu are untouched. It
-            deletes through the same command and the same undo step as the menu's row. */}
-        {selection.size > 0 && !readOnly && isCoarsePointerDevice() ? (
-          <div
-            data-testid="note-touch-box-bar"
-            onMouseDown={(e) => e.preventDefault()}
-            style={{
-              position: "absolute", top: 8, left: "50%", transform: "translateX(-50%)", zIndex: 6,
-              display: "flex", alignItems: "center", gap: 4, padding: 3,
-              background: "var(--surface-raised)", border: "1px solid var(--border-default)",
-              borderRadius: RADIUS.pill, boxShadow: "0 6px 18px rgba(0,0,0,0.18)", // design-exempt: floating-chip shadow, same value as the other canvas overlays
-            }}
-          >
-            <button
-              type="button"
-              data-testid="note-touch-box-delete"
-              onClick={() => {
-                if (!editor || editor.isDestroyed) return;
-                editor.commands.removeNoteAnchors([...selRef.current]);
-                clearSelection();
-                editor.commands.focus(null, { scrollIntoView: false });   // …so undo can reach it (B421489)
-              }}
-              style={{
-                minHeight: 44, minWidth: 44, padding: "0 16px", border: "none", borderRadius: RADIUS.pill,
-                background: "transparent", color: "var(--danger-text)", font: "inherit", fontSize: 14, fontWeight: 700, cursor: "pointer",
-              }}
-            >{selection.size > 1 ? `Delete ${selection.size} boxes` : "Delete box"}</button>
-          </div>
-        ) : null}
+        {/* ⛔ NO FLOATING "DELETE BOX" (owner direction 2026-10-04, B2078592). NEW-5 pinned a Delete pill
+            to the canvas whenever a box was selected; he does not want a banner offering to delete the
+            box he is typing in — nothing destructive sits permanently on screen. On touch a box is
+            deleted from the SAME menu right-click opens (press-and-hold → "Delete this box"), or by
+            Backspace in an empty box. Guard: ui-audit/verify-notes-touch-menus.mjs asserts no such
+            button renders. */}
         {pendingPlace ? (
           <div
             data-testid="note-pending-caret"
@@ -5623,6 +5632,7 @@ const NoteEditor = forwardRef(function NoteEditor({
       <DocMenu
         at={docMenu}
         editor={editor}
+        pressGuardRef={longPressSwallowRef}
         onPlainPaste={pastePlainFromClipboard}
         onClose={() => setDocMenu(null)}
         onClipboardNote={(m) => onPrintNotice?.(m)}
@@ -5631,7 +5641,9 @@ const NoteEditor = forwardRef(function NoteEditor({
         onDeleteBox={docMenu?.boxId ? () => {
           editor.commands.removeNoteAnchors([docMenu.boxId]);
           clearSelection();
-          editor.commands.focus();          // …so Ctrl+Z can reach it (B421489)
+          /* …so Ctrl+Z can reach it (B421489) — except on a touch menu opened with the keyboard DOWN,
+             where focusing would raise it for a gesture that never asked for text entry. */
+          if (!docMenu.touch || docMenu.hadFocus) editor.commands.focus();
         } : null}
         /* NEW-2 — "Convert table to text". Only offered when the right-click actually landed
            inside a table; the command itself also declines on its own if the caret has since

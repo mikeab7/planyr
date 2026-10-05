@@ -69,6 +69,9 @@ import { findInconsistencies } from "./lib/formulaConsistency.js";
 import { copyRange, pasteRange, fillDown, replaceAll, replaceInCellText } from "./lib/sheetOps.js";
 import { increaseDecimals, decreaseDecimals, toggleThousands } from "./lib/numberFormats.js";
 import { modelSaveState } from "./lib/modelSaveState.js";
+import { runCloudPush, shownModelStatus } from "./lib/modelPushGate.js";
+import { Button } from "../../shared/ui/controls.jsx";
+import { FONT_SIZE, SPACE } from "../../shared/ui/designTokens.js";
 import { readZoom, writeZoom } from "./lib/sheetZoom.js";
 import { readAutoColor, writeAutoColor } from "./lib/sheetColorMode.js";
 import {
@@ -115,6 +118,31 @@ function downloadBlob(blob, filename) {
   const a = document.createElement("a");
   a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/* V537648 — the visible, persistent "two different copies" bar. Module scope
+ * (MODULE-SCOPE-COMPONENTS). It stays until the user picks one; nothing is pushed to the cloud
+ * while it is up (lib/modelPushGate.js). `showing` says which copy is on screen right now. */
+function DivergedBar({ showing, onKeepDevice, onUseCloud }) {
+  const text = showing === "cloud"
+    ? "This spreadsheet has a different copy saved on this device from before you signed in. You're seeing the cloud copy. Nothing will be saved to the cloud until you choose which to keep."
+    : "This spreadsheet has a different copy saved in the cloud (from another device or browser). You're seeing this device's copy. Nothing will be saved to the cloud until you choose which to keep.";
+  return (
+    <div
+      role="alert"
+      data-testid="model-diverged-bar"
+      style={{
+        flex: "none", display: "flex", alignItems: "center", flexWrap: "wrap", gap: SPACE.md,
+        margin: `${SPACE.md}px ${SPACE.md}px 0`, padding: `${SPACE.sm}px ${SPACE.lg}px`,
+        background: "var(--danger-bg)", color: "var(--text-primary)", border: "1px solid var(--danger)", borderRadius: RADIUS.md,
+        fontSize: FONT_SIZE.control, lineHeight: 1.45,
+      }}
+    >
+      <span style={{ flex: "1 1 260px", fontWeight: 600 }}>{text}</span>
+      <Button variant="ghost" size="sm" data-testid="model-diverged-use-cloud" onClick={onUseCloud}>Use the cloud copy</Button>
+      <Button variant="ghost" size="sm" data-testid="model-diverged-keep-device" onClick={onKeepDevice}>Keep this device's copy</Button>
+    </div>
+  );
 }
 
 function EmptyProjectState({ onGoDashboard }) {
@@ -289,6 +317,25 @@ export default function ModelApp({
   const conceptName = useMemo(() => openConceptName(projectId), [projectId, siteTick]);
   const cloudVersionRef = useRef(null);
   const pushTimer = useRef(0);
+  // V537648 — the debounced push reads these at FIRE time (lib/modelPushGate.js). `statusRef`
+  // mirrors `status`; `divergedRef` is the divergence HOLD — a latch set synchronously the moment
+  // the load detects local ≠ cloud, released only by a fresh load or the user's own resolution
+  // (the two buttons in the "different copies" bar). `divergedCopiesRef` keeps both sides so the
+  // user can pick either one; `diverged` is its render mirror.
+  const statusRef = useRef(status);
+  useEffect(() => { statusRef.current = status; }, [status]);
+  const divergedRef = useRef(false);
+  const divergedCopiesRef = useRef(null); // { device, cloud, showing: "device" | "cloud" } | null
+  const [diverged, setDiverged] = useState(false);
+  const [pushNonce, setPushNonce] = useState(0); // bumped by a resolution so the push runs even with no edit
+  const markDiverged = useCallback((copies) => {
+    divergedRef.current = true;
+    divergedCopiesRef.current = copies;
+    clearTimeout(pushTimer.current);
+    setDiverged(true);
+    setStatus("diverged");
+  }, []);
+  const shownStatus = shownModelStatus(status, diverged);
   const loadTokenRef = useRef(0);
   // Ctrl+C/Ctrl+V's INTERNAL clipboard (item 6) — see lib/sheetOps.js's header for why this is
   // deliberately not the OS clipboard. A ref, not state: copying never re-renders anything.
@@ -465,6 +512,11 @@ export default function ModelApp({
     loadTokenRef.current += 1;
     const token = loadTokenRef.current;
     cloudVersionRef.current = null;
+    // V537648 — a fresh load re-decides divergence from scratch (a reload of a still-divergent
+    // copy re-detects it below, so this never silently forgets an unresolved one).
+    divergedRef.current = false;
+    divergedCopiesRef.current = null;
+    setDiverged(false);
     setStatus("idle");
     setCloudConfirmed(false);
     if (!openWorkbook) { const wb = createWorkbook(); reset(wb); setActiveSheetId(wb.activeSheetId); setReady(false); return undefined; }
@@ -489,8 +541,8 @@ export default function ModelApp({
           reset(adopted);
           setActiveSheetId(adopted.activeSheetId);
         } else if (!local && r.sheet) {
-          if (adoption === "diverged") setStatus("diverged");
           const cloudWorkbook = migrateWorkbook(r.sheet);
+          if (adoption === "diverged") markDiverged({ device: migrateWorkbook(anon), cloud: cloudWorkbook, showing: "cloud" });
           reset(cloudWorkbook);
           setActiveSheetId(cloudWorkbook.activeSheetId);
         } else if (local && r.sheet) {
@@ -501,7 +553,11 @@ export default function ModelApp({
           // raced — this device's `cloudVersionRef` is genuinely current). That is a real
           // second-device data-loss path, not a hypothetical one, so it is surfaced loudly
           // rather than left to happen quietly.
-          if (sheetsDiverge(migrateWorkbook(local), migrateWorkbook(r.sheet))) setStatus("diverged");
+          // ⛔ V537648 — and DETECTING it is not enough: the debounced push scheduled at mount
+          // (before this answer arrived) used to fire anyway and overwrite the cloud copy with no
+          // edit at all. `markDiverged` latches the hold the push body checks at fire time.
+          const localWorkbook = migrateWorkbook(local), cloudWorkbook = migrateWorkbook(r.sheet);
+          if (sheetsDiverge(localWorkbook, cloudWorkbook)) markDiverged({ device: localWorkbook, cloud: cloudWorkbook, showing: "device" });
         }
       } else if (r.reason === "not-provisioned") {
         setStatus("not-provisioned");
@@ -520,28 +576,52 @@ export default function ModelApp({
 
   /* Best-effort, debounced cloud push through the guarded save path. Reads `status` without
    * depending on it — this must fire only on a WORKBOOK change, not on every status transition
-   * the push itself causes (that would restart the debounce on its own "saving" flag). */
+   * the push itself causes (that would restart the debounce on its own "saving" flag).
+   * ⛔ V537648 — `runCloudPush` re-asks the gate from REFS when the timer FIRES (see its header). */
   useEffect(() => {
     if (!ready || !openWorkbook || !userId) return undefined;
     if (status === "not-provisioned") return undefined; // stop hammering a table that isn't there yet
+    if (divergedRef.current) return undefined; // V537648 — held until the user picks a copy
     clearTimeout(pushTimer.current);
-    pushTimer.current = setTimeout(async () => {
-      setStatus("saving");
-      const r = openProject
-        ? await saveCloudSheet({ uid: userId, projectId, sheet: workbook, expected: cloudVersionRef.current })
-        : await saveOrgWorkbookCloud({ uid: userId, id: orgWorkbookId, name: orgWorkbookName, sheet: workbook, expected: cloudVersionRef.current });
-      if (r.ok) {
-        cloudVersionRef.current = r.version; setCloudConfirmed(true); setStatus("saved");
-        if (!openProject) setOrgWorkbooks(touchLocalOrgIndex(userId, { id: orgWorkbookId, name: orgWorkbookName, updatedAt: Date.now() }));
-      }
-      else if (r.reason === "not-provisioned") setStatus("not-provisioned");
-      else if (r.reason === "conflict") setStatus("conflict");
-      else if (r.reason === "unavailable") setStatus("idle");
-      else setStatus("error");
+    pushTimer.current = setTimeout(() => {
+      runCloudPush({
+        readGate: () => ({ status: statusRef.current, diverged: divergedRef.current }),
+        save: async () => (openProject
+          ? await saveCloudSheet({ uid: userId, projectId, sheet: workbook, expected: cloudVersionRef.current })
+          : await saveOrgWorkbookCloud({ uid: userId, id: orgWorkbookId, name: orgWorkbookName, sheet: workbook, expected: cloudVersionRef.current })),
+        setStatus,
+        onSaved: (version) => {
+          cloudVersionRef.current = version; setCloudConfirmed(true);
+          if (!openProject) setOrgWorkbooks(touchLocalOrgIndex(userId, { id: orgWorkbookId, name: orgWorkbookName, updatedAt: Date.now() }));
+        },
+      });
     }, CLOUD_PUSH_DEBOUNCE_MS);
     return () => clearTimeout(pushTimer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workbook, ready, openWorkbook, openProject, projectId, orgWorkbookId, orgWorkbookName, userId]);
+  }, [workbook, ready, openWorkbook, openProject, projectId, orgWorkbookId, orgWorkbookName, userId, pushNonce]);
+
+  /* V537648 — the ONLY two ways out of a divergence besides opening a different workbook. Both
+   * are explicit user choices; neither deletes anything (the copy not chosen is reachable by
+   * Ctrl+Z, because the switch is a normal undoable commit, and a signed-out copy is never
+   * touched). Releasing the hold re-arms the ordinary push, which still goes through the CAS
+   * guard — so if the cloud moved AGAIN in the meantime, that surfaces as a conflict. */
+  const releaseDivergence = useCallback(() => {
+    divergedRef.current = false;
+    divergedCopiesRef.current = null;
+    setDiverged(false);
+    setStatus("idle");
+    setPushNonce((n) => n + 1);
+  }, []);
+  const onKeepDeviceCopy = useCallback(() => {
+    const c = divergedCopiesRef.current;
+    if (c && c.showing === "cloud") { commit(c.device); setActiveSheetId(c.device.activeSheetId); }
+    releaseDivergence();
+  }, [commit, releaseDivergence]);
+  const onUseCloudCopy = useCallback(() => {
+    const c = divergedCopiesRef.current;
+    if (c && c.showing === "device") { commit(c.cloud); setActiveSheetId(c.cloud.activeSheetId); }
+    releaseDivergence();
+  }, [commit, releaseDivergence]);
 
   // Ctrl/Cmd+Z / Ctrl/Cmd+Shift+Z (or +Y), Ctrl+G (Name Box), Ctrl+F / Ctrl+H (Find/Replace) —
   // SheetView deliberately leaves every Ctrl/Cmd chord alone so this can own them, gated on
@@ -1032,11 +1112,11 @@ export default function ModelApp({
         planSlot={conceptCrumb}
         authControl={authControl}
         accountActive={accountActive}
-        saveState={openWorkbook ? modelSaveState(status, accountActive, cloudConfirmed) : null}
+        saveState={openWorkbook ? modelSaveState(shownStatus, accountActive, cloudConfirmed) : null}
         saveDetail={
-          status === "not-provisioned" ? "Cloud backup for Spreadsheet isn't turned on yet — saved on this device only."
-          : status === "conflict" ? "This spreadsheet changed elsewhere — reload to see the latest (your edits here stayed on this device)."
-          : status === "diverged" ? "This spreadsheet has different content saved from another device or browser. What you see here is safe on this device, but saving here will overwrite that other copy. Reload without editing first if you want the other copy instead."
+          shownStatus === "not-provisioned" ? "Cloud backup for Spreadsheet isn't turned on yet — saved on this device only."
+          : shownStatus === "conflict" ? "This spreadsheet changed elsewhere — reload to see the latest (your edits here stayed on this device)."
+          : shownStatus === "diverged" ? "This spreadsheet has different content saved from another device or browser. Nothing is being saved to the cloud until you choose which copy to keep, using the bar above the sheet."
           : undefined
         }
         multiEditOk
@@ -1085,6 +1165,13 @@ export default function ModelApp({
 
       {openWorkbook ? (
         <>
+          {diverged && (
+            <DivergedBar
+              showing={divergedCopiesRef.current?.showing || "device"}
+              onKeepDevice={onKeepDeviceCopy}
+              onUseCloud={onUseCloudCopy}
+            />
+          )}
           {/* Round 3 visual pass (B1087904, owner verbatim: "rerun the loop to make it
               pretty, also i dont like the square edging"). The ribbon and formula bar used to be
               two full-bleed strips running edge to edge with 90-degree corners, separated by

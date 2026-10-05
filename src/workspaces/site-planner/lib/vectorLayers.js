@@ -492,6 +492,54 @@ export const VECTOR_SOURCES = {
     note: "USGS National Hydrography Dataset — screening inventory only.",
   },
 
+  /* NEW-1 (Georgia screening) — TWO COMPUTE-ONLY SOURCES for the Georgia stream-buffer layer
+   * (`ga_stream_buffers`, a `pipelineCorridor`-kind row). Neither is drawn by itself and neither has a
+   * `layers.js` row of its own that reads this entry — the buffer layer pulls them through the same cached
+   * `fetchCached` the drawn layers use, so a trout stream or the District outline is fetched once and shared.
+   * (The drawn "Trout streams" row is a plain `esriFeature` line layer, like the Houston fault traces.)
+   * Endpoints come from the GIS_SOURCES rows (B176 invariant), probed live 2026-10-04 with this exact query:
+   * trout lines 2,479 in the Georgia envelope; the District outline is ONE polygon. */
+  ga_trout: {
+    id: "ga_trout",
+    label: "Trout streams (Georgia DNR)",
+    style: "trout",
+    geometryType: "line",
+    sourceName: GIS_SOURCES.troutGa.provider,
+    query: {
+      url: GIS_SOURCES.troutGa.serviceUrl + "/query",
+      outFields: Object.values(GIS_SOURCES.troutGa.fields), // Name, Basin
+      where: "1=1",
+      pageSize: 1000,
+      maxFeatures: 4000,
+      ttl: 30 * 24 * 3600 * 1000, // designations change by rulemaking, not weekly
+      minVectorZoom: 10,
+      maxAreaDeg: 0.35,
+    },
+    note: "Georgia DNR trout streams — compute-only source for the stream-buffer layer.",
+  },
+  ga_mngwpd: {
+    id: "ga_mngwpd",
+    label: "Metro North Georgia Water Planning District",
+    style: "district",
+    geometryType: "polygon",
+    sourceName: GIS_SOURCES.mngwpd.provider,
+    query: {
+      url: GIS_SOURCES.mngwpd.serviceUrl + "/query",
+      outFields: ["*"],
+      where: "1=1",
+      pageSize: 100,
+      maxFeatures: 100,
+      ttl: 90 * 24 * 3600 * 1000, // the District's membership changes by statute
+      minVectorZoom: 0,
+      maxAreaDeg: Infinity,
+      // ONE source-level entry, whatever the view: the boundary is a single outline and "inside it" must be
+      // answered the same way at every pan. Light generalisation (≈50 m) — it decides a 75-vs-25 ft rule at
+      // the district line, so it is NOT thinned like a wide-zoom county boundary.
+      tiers: [{ scope: "all", offsetDeg: 0.0005, precision: 4 }],
+    },
+    note: "Metropolitan North Georgia Water Planning District outline — compute-only source for the stream-buffer layer.",
+  },
+
   /* NEW-1 / B1075 — BKDD drainage easements. A district drainage easement is a HARD
    * buildable-area constraint (the Tsakiris tract carries a 70-ft one with recorded
    * exhibit WF-10.pdf), so this is a vector layer with identify — the width and the
@@ -876,6 +924,10 @@ export function styleFor(source, props) {
     const ft = Number(p.ftype ?? p.FTYPE);
     const engineered = ft === 336 || ft === 420 || ft === 428;
     return { color: "#0e7490", weight: engineered ? 2.4 : 1.8, dashArray: ft === 420 ? "5 4" : null, fillOpacity: 0 };
+  }
+  if (style === "trout") {
+    // Designated trout water — the cold-water teal the buffer tier uses (georgiaStreamBuffers.js).
+    return { color: "#0f766e", weight: 2, fillOpacity: 0 };
   }
   if (style === "pipeline") {
     // B751: color/weight/dash by commodity (fixed map symbology, hazard-encoded). The

@@ -21,7 +21,7 @@
  * (lib/notesExtensions.js orders them), and this one takes what is left.
  */
 import { Node, mergeAttributes } from "@tiptap/core";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Plugin, PluginKey, NodeSelection, Selection } from "@tiptap/pm/state";
 import { newId } from "./notesModel.js";
 import { putNoteFile, readNoteFile, reportImageProblem } from "./notesStore.js";
 import { isImageFile } from "./notesImageIntake.js";
@@ -65,6 +65,27 @@ export function downloadDataUrl(dataUrl, name) {
   a.remove();
 }
 
+/** The transaction that drops one chip in.
+ *  ⛔ A block atom left selected is a NodeSelection, and `replaceSelectionWith` REPLACES the
+ *  selected node — so the 2nd of three quick attachments ate the 1st (PDF → XLSX → DWG left
+ *  two chips). Insert AFTER a selected node instead, and park the caret after the new chip
+ *  so the next one lands behind it. A caret / empty paragraph keeps the old behaviour. */
+export function attachmentTr(state, node) {
+  const sel = state.selection;
+  let tr = state.tr;
+  if (sel instanceof NodeSelection) {
+    tr = tr.insert(sel.to, node);
+    const after = tr.mapping.map(sel.to, 1) + node.nodeSize;
+    return tr.setSelection(Selection.near(tr.doc.resolve(Math.min(after, tr.doc.content.size)), 1));
+  }
+  tr = tr.replaceSelectionWith(node);
+  if (tr.selection instanceof NodeSelection) {
+    const end = tr.selection.to;
+    tr = tr.setSelection(Selection.near(tr.doc.resolve(end), 1));
+  }
+  return tr;
+}
+
 /** Store each file, then insert its chip. Sequential for the same reason pictures are: the
  *  per-page ceiling has to see the previous file's bytes already counted, or two drops
  *  could straddle the limit between them. */
@@ -92,7 +113,7 @@ async function insertFiles(ext, view, files) {
       mime: file.type || "",
       size: file.size || 0,
     });
-    view.dispatch(state.tr.replaceSelectionWith(node).scrollIntoView());
+    view.dispatch(attachmentTr(state, node).scrollIntoView());
   }
 }
 

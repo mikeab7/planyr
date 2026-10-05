@@ -60,6 +60,39 @@ export const SOURCE_FIXTURES = {
     { label: "El Paso, TX", point: [-106.485, 31.7619], expectMinCount: 1 }, // B209505 · live 2026-08-06: 1
   ],
   },
+  // NEW-1 (FL/GA pipelines) — every count below was taken LIVE 2026-09-30 against the row's own
+  // serviceUrl (esriGeometryEnvelope, inSR 4326, returnCountOnly). expectMinCount is deliberately 1
+  // (presence, not a magnitude) — the EIA layers are schematic and get re-edited.
+  eiaGas: {
+  fixtures: [
+    { label: "Tallahassee, FL", bbox: [-84.3, 30.3, -84.0, 30.6], expectMinCount: 1 }, // live 2026-09-30: 9
+    { label: "Ocala–Citrus corridor, FL (Florida Gas Transmission / Sabal Trail)", bbox: [-82.6, 28.6, -81.6, 29.6], expectMinCount: 1 }, // live 2026-09-30: 24
+    { label: "Tampa, FL", bbox: [-82.6, 27.8, -82.2, 28.2], expectMinCount: 1 }, // live 2026-09-30: 11
+    { label: "Savannah, GA", bbox: [-81.2, 31.9, -80.9, 32.2], expectMinCount: 1 }, // live 2026-09-30: 7
+    { label: "Metro Atlanta, GA", bbox: [-84.6, 33.5, -84.1, 34.0], expectMinCount: 1 }, // live 2026-09-30: 5
+  ],
+  },
+  eiaPetroleum: {
+  fixtures: [
+    { label: "Metro Atlanta, GA (Colonial / Plantation)", bbox: [-84.6, 33.5, -84.1, 34.0], expectMinCount: 1 }, // live 2026-09-30: 5
+    { label: "Augusta, GA", bbox: [-82.3, 33.3, -81.8, 33.7], expectMinCount: 1 }, // live 2026-09-30: 2
+    { label: "Tampa–Orlando, FL", bbox: [-82.0, 27.8, -81.0, 28.8], expectMinCount: 1 }, // live 2026-09-30: 2
+  ],
+  },
+  eiaCrude: {
+  fixtures: [
+    { label: "Houston, TX (service-alive probe — no crude line crosses FL/GA)", bbox: [-95.1, 29.6, -94.8, 29.9], expectMinCount: 1 }, // live 2026-09-30: 1
+    { label: "St. James, LA", bbox: [-91.0, 30.0, -90.6, 30.3], expectMinCount: 1 }, // live 2026-09-30: 6
+    { label: "Cushing, OK", bbox: [-97.0, 35.8, -96.6, 36.2], expectMinCount: 1 }, // live 2026-09-30: 19
+  ],
+  },
+  eiaHgl: {
+  fixtures: [
+    { label: "Dixie line, west-central GA", bbox: [-85.1, 32.5, -84.8, 32.8], expectMinCount: 1 }, // live 2026-09-30: 2 (Dixie vertex at -84.96, 32.63)
+    { label: "Mont Belvieu, TX (service-alive probe)", bbox: [-94.98, 29.75, -94.78, 29.9], expectMinCount: 1 }, // live 2026-09-30: 14
+  ],
+  },
+
   ccnWater: {
   fixtures: [
     // Cypress — dense CCN country (same point the `mud` fixture uses); a county-clipped or
@@ -173,6 +206,66 @@ export const SOURCE_FIXTURES = {
     { label: "Savannah", point: [-81.09, 32.08], expectMinCount: 1 }, // live: Savannah
     { label: "Athens-Clarke County (consolidated)", point: [-83.3776, 33.9519], expectMinCount: 1 }, // live: Athens-Clarke County
     { label: "Macon-Bibb County (consolidated)", point: [-83.63, 32.84], expectMinCount: 1 }, // live: Macon-Bibb County
+  ],
+  },
+  /* NEW-1 (Georgia screening) · every point below sits ON a real feature, found by asking each live service for its
+   * features inside the Georgia envelope and taking the one nearest an anchor city; each count is the number of
+   * features inside the ±0.01° box the verifier queries (live 2026-10-04). A fixture that only proves "the service
+   * answers somewhere" would pass a clipped copy — these are spread Atlanta ↔ Savannah ↔ west Georgia on purpose. */
+  hsiGa: {
+  fixtures: [
+    { label: "Atlanta (Fulton) HSI site", point: [-84.4011, 33.7453], expectMinCount: 1 }, // live: 1
+    { label: "Savannah (Chatham) HSI site", point: [-81.1, 32.0758], expectMinCount: 1 }, // live: 1
+    { label: "Columbus area HSI site", point: [-84.93, 32.4628], expectMinCount: 1 }, // live: 1
+  ],
+  },
+  ustGa: {
+  fixtures: [
+    { label: "Adairsville (Bartow Co.)", bbox: [-84.95, 34.3, -84.85, 34.4], expectMinCount: 1 }, // live 2026-10-05: 14
+    { label: "Atlanta (Fulton Co.)", bbox: [-84.45, 33.7, -84.35, 33.8], expectMinCount: 1 }, // live: 150
+    { label: "Savannah (Chatham Co.)", bbox: [-81.15, 32.0, -81.05, 32.1], expectMinCount: 1 }, // live: 55
+  ],
+  },
+  troutGa: {
+  fixtures: [
+    { label: "Chattahoochee headwaters (White Co.)", point: [-83.8921, 34.6906], expectMinCount: 1 }, // live: 4
+    { label: "Blue Ridge / Toccoa basin", point: [-84.1931, 34.7907], expectMinCount: 1 }, // live: 4
+    { label: "Rabun / Tallulah basin", point: [-83.4978, 34.9015], expectMinCount: 1 }, // live: 2
+  ],
+  },
+  mngwpd: {
+  fixtures: [
+    { label: "Downtown Atlanta (Fulton)", point: [-84.388, 33.749], expectMinCount: 1 },
+    { label: "Lawrenceville (Gwinnett)", point: [-83.95, 34.02], expectMinCount: 1 },
+    { label: "Canton (Cherokee)", point: [-84.48, 34.25], expectMinCount: 1 },
+  ],
+  },
+  critHabitat: {
+  fixtures: [
+    { label: "Flint River basin (Upson/Meriwether area)", point: [-84.4966, 33.4124], expectMinCount: 1 }, // live: 4
+    { label: "Ogeechee/Altamaha basin (south-east Georgia)", point: [-82.4755, 31.9712], expectMinCount: 1 }, // live: 1
+    { label: "Chattahoochee corridor (Stewart/Quitman area)", point: [-85.654, 31.9696], expectMinCount: 1 }, // live: 5
+  ],
+  },
+  gopherTortoiseGa: {
+  fixtures: [
+    { label: "Fort Benning / Chattahoochee sandhills", point: [-84.9, 32.3], expectMinCount: 1 }, // live: 6
+    { label: "Albany (Dougherty) coastal plain", point: [-84.15, 31.55], expectMinCount: 1 }, // live: 25
+    { label: "Savannah-Ogeechee coastal plain", point: [-81.7, 31.9], expectMinCount: 1 }, // live: 2
+  ],
+  },
+  nrhp: {
+  fixtures: [
+    { label: "Downtown Atlanta", point: [-84.3894, 33.7503], expectMinCount: 1 }, // live: 30
+    { label: "Savannah Historic District", point: [-81.099, 32.0805], expectMinCount: 1 }, // live: 18
+    { label: "Columbus area", point: [-84.9539, 32.4735], expectMinCount: 1 }, // live: 3
+  ],
+  },
+  cemeteries: {
+  fixtures: [
+    { label: "Atlanta (Oakland / Grant Park area)", point: [-84.3734, 33.755], expectMinCount: 1 }, // live: 2
+    { label: "Savannah", point: [-81.103, 32.073], expectMinCount: 1 }, // live: 3
+    { label: "Columbus area", point: [-84.9111, 32.4651], expectMinCount: 1 }, // live: 1
   ],
   },
   countyCa: {
@@ -567,6 +660,25 @@ export const SOURCE_FIXTURES = {
     { label: "Grand Junction (Mesa)", point: [-108.5506, 39.0639], expectMinCount: 1 }, // B209505 · live 2026-08-06: 2
   ],
   },
+  /* B2081249 — national rows, so spread over three well-separated metros (Atlanta/Gwinnett — the owner's own probe box —
+   * Phoenix, Seattle). Live 2026-10-05, NN=1 filter applied for the National Network row: Gwinnett 16, Phoenix 30,
+   * Seattle 41; HPMS: 27 / 117 / 229. Texas (Katy) 22 / 12 as a control that the national rows still answer there. */
+  ntaNationalNetwork: {
+  fixtures: [
+    { label: "Gwinnett Co. GA (I-85 / SR-316)", bbox: [-84.05, 33.9, -83.95, 34.0], expectMinCount: 1 }, // live: 16 with NN=1
+    { label: "Phoenix, AZ", bbox: [-112.1, 33.4, -112.0, 33.5], expectMinCount: 1 }, // live: 30
+    { label: "Seattle, WA", bbox: [-122.35, 47.55, -122.25, 47.65], expectMinCount: 1 }, // live: 41
+    { label: "Katy, TX (control)", bbox: [-95.9, 29.7, -95.8, 29.8], expectMinCount: 1 }, // live: 22
+  ],
+  },
+  hpmsAadt: {
+  fixtures: [
+    { label: "Gwinnett Co. GA (the owner's probe box)", bbox: [-84.05, 33.9, -83.95, 34.0], expectMinCount: 1 }, // live: 27, sample AADT 31300
+    { label: "Phoenix, AZ", bbox: [-112.1, 33.4, -112.0, 33.5], expectMinCount: 1 }, // live: 117
+    { label: "Seattle, WA", bbox: [-122.35, 47.55, -122.25, 47.65], expectMinCount: 1 }, // live: 229
+    { label: "Katy, TX (control)", bbox: [-95.9, 29.7, -95.8, 29.8], expectMinCount: 1 }, // live: 12
+  ],
+  },
   aadtCo: {
   fixtures: [
     { label: "Denver AADT stations", point: [-104.9903, 39.7392], expectMinCount: 1 },
@@ -679,6 +791,32 @@ export const SOURCE_DOCS = {
   notes:
     "RRC T-4 permit routes are SCHEMATIC, deliberately low-resolution — never a surveyed " +
     "alignment. Retired source: www.gis.hctx.net/arcgishcpid/…/TXRRC/Pipelines.",
+  },
+  eiaGas: {
+  tierReason:
+    "EIA's own ArcGIS host (atlas.eia.gov) and geo.dot.gov are denied by the build sandbox's egress policy, so " +
+    "EIA's service could not be verified live; this is Esri U.S. Federal Datasets' unmodified republication " +
+    "(item 9833ca6c…, credited to EIA, 'Data modification: None'). Swap to EIA's own service once verifiable.",
+  notes:
+    "Major natural-gas TRANSMISSION only — no local distribution mains; gathering lines are not reliably mapped. " +
+    "Schematic geometry (miles of error on some segments). Never a 'clear'.",
+  },
+  eiaPetroleum: {
+  tierReason:
+    "Same as eiaGas — Esri U.S. Federal Datasets republication of the EIA layer (item c745d9f4…); EIA's own host is egress-blocked.",
+  notes:
+    "Petroleum product lines (Colonial, Plantation, Kinder Morgan Central Florida…). Very schematic — Colonial is a handful of " +
+    "vertices across Georgia. Never a 'clear'.",
+  },
+  eiaCrude: {
+  tierReason:
+    "Same as eiaGas — Esri U.S. Federal Datasets republication of the EIA layer (item bb2aee97…); EIA's own host is egress-blocked.",
+  notes: "Crude trunk lines. None cross FL/GA as of 2026-09-30, so an empty answer there is expected and is still 'not confirmed'.",
+  },
+  eiaHgl: {
+  tierReason:
+    "Same as eiaGas — Esri U.S. Federal Datasets republication of the EIA layer (item 25e6c301…); EIA's own host is egress-blocked.",
+  notes: "Hydrocarbon gas liquids lines. Only Dixie (Enterprise) crosses Georgia. Never a 'clear'.",
   },
   ccnWater: {
   notes:
@@ -909,6 +1047,53 @@ export const SOURCE_DOCS = {
     "governs. Consolidated governments publish under their consolidated names (Athens-Clarke County, Augusta-Richmond " +
     "County, Macon-Bibb County; Columbus is plain 'Columbus'). A boundary means the city HAS JURISDICTION — never proof it serves utilities.",
   },
+  hsiGa: {
+  notes:
+    "Georgia EPD Hazardous Site Inventory (HSI) — sites with a release of a regulated substance above the reportable " +
+    "quantity, Class and listing date per site. EPD publishes each site's own lat/long, so these are points, not a " +
+    "geocode. A Phase I ESA PRE-SCREEN: a site on the list is a flag to pull the file, never a verdict on a neighbour.",
+  },
+  ustGa: {
+  notes:
+    "Georgia EPD's REGISTER of underground storage tank facilities (name, address, facility type, status). It is not a " +
+    "release list: leak, corrective-action and closure status are not in the layer (edited 2022-10-17), so a facility on it " +
+    "is a flag to pull EPD's UST Management Program file, never a finding of contamination.",
+  },
+  troutGa: {
+  notes:
+    "Georgia DNR trout streams (layer 1 `Trout_Stream`). The designated-trout-water lines the 50-ft buffer keys off; " +
+    "EPD's rule on designated trout waters is the legal authority — DNR's mapping is the screening copy of it.",
+  },
+  mngwpd: {
+  notes:
+    "ARC's Metropolitan North Georgia Water Planning District outline. Inside it the District's model stream-buffer " +
+    "ordinance (50 ft undisturbed + 25 ft impervious setback) is the typical local requirement — the county's own " +
+    "adopted ordinance governs; confirm with the county. Point-in-polygon decides membership, never a county list.",
+  },
+  critHabitat: {
+  notes:
+    "USFWS final critical habitat polygons (ESA §7). Critical habitat binds FEDERAL actions, not private land directly — " +
+    "but a Corps §404 permit is a federal action. Screening only; USFWS IPaC is the authoritative species list.",
+  },
+  gopherTortoiseGa: {
+  notes:
+    "Georgia DNR suitable-soils model for gopher tortoise (SSURGO map units scored into Tiers 1–3). A MODELED habitat " +
+    "screen — not a survey and not an occurrence record. The gopher tortoise is a state-protected species in Georgia, " +
+    "so a tortoise survey is the only real check.",
+  },
+  nrhp: {
+  notes:
+    "National Park Service National Register of Historic Places points (Esri Federal Data republication; the NPS server " +
+    "itself was not reachable from the build sandbox). One point per listing, a district is not drawn as a boundary. " +
+    "Georgia's own GNAHRGIS (SHPO) is login-only and is NOT used.",
+  },
+  cemeteries:
+    {
+    notes:
+      "USGS GNIS cemeteries. INCOMPLETE: recorded cemeteries only — unrecorded family burial grounds are not on this " +
+      "layer, so an empty result is never proof of none. A burial ground on the site is a hard constraint under Georgia " +
+      "law, so the county and a survey are the real check.",
+    },
   countyCa: {
   notes:
     "The California counterpart of `county` / `countyCo` / `countyGa`. CDT State Geoportal counties (58, one row per county). A point in NO " +
@@ -944,6 +1129,17 @@ export const SOURCE_DOCS = {
     "CDOT on-system state highway routes. A hit means CDOT is the access-permitting authority; " +
     "NO hit means the frontage is a city or county road, NOT that there is no road. Never read " +
     "an empty answer as 'unmaintained'.",
+  },
+  ntaNationalNetwork: {
+  notes:
+    "FHWA's STAA National Network from the USDOT BTS National Transportation Atlas: the routes a 53-ft trailer may use. " +
+    "The layer also holds NN = 0 segments (listed, but not on the network), so every read filters NN = 1. Data year " +
+    "2018 (layer edited 2023-04-03). A federal reference, not a state permit status. AADT_COM / AADT_SINGL are truck counts.",
+  },
+  hpmsAadt: {
+  notes:
+    "FHWA HPMS 2022 traffic (AADT) and functional class on the National Highway System only (the service is a view " +
+    "with NHS > 0). A road off the NHS has no line — a coverage gap, not low traffic. Some NHS segments carry no AADT.",
   },
   aadtCo: {
   notes:

@@ -171,10 +171,13 @@ export function wasProjectFreshlyMinted(id) {
 // not assumed pre-sorted — we keep the max updatedAt and the name that goes with it).
 export function groupProjects(records = []) {
   const byGroup = new Map();
+  const recsByGroup = new Map(); // B2064897 — every plan per group, so status resolves through groupStatusOf
   for (const s of records) {
     if (!s) continue;
     const id = s.groupId || s.id || null;
     if (!id) continue;
+    if (!recsByGroup.has(id)) recsByGroup.set(id, []);
+    recsByGroup.get(id).push(s);
     const updatedAt = Number(s.updatedAt) || 0;
     const name = s.site || s.name || "Untitled site";
     const status = s.status || null;
@@ -197,6 +200,7 @@ export function groupProjects(records = []) {
       prev.scheduleProjectId = scheduleProjectId;
     }
   }
+  for (const [id, g] of byGroup) { const st = groupStatusOf(recsByGroup.get(id)); if (st) g.status = st; }
   return [...byGroup.values()].sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
@@ -472,6 +476,25 @@ export function planRecencyMs(plan, elementRecencyBySite) {
   if (!plan) return null;
   const perPlan = elementRecencyBySite && plan.id != null ? elementRecencyBySite[plan.id] : null;
   return perPlan != null ? perPlan : planHeaderMs(plan);
+}
+
+/* THE one answer to "what STATUS is this project?" (B2064897, 2026-10-04). Status is a
+ * project-level fact written to every plan in the group, but the write is a per-plan loop with no
+ * atomic RPC (unlike role), so a partial write leaves a group split (production: one project with
+ * a pursuit plan and an active plan). Each surface then answered from a DIFFERENT plan — the Map
+ * and Dashboard from the element-recency representative, the breadcrumb/Library/MCP from the newest
+ * header — so one project read two statuses. Every reader now asks THIS function: the newest plan
+ * HEADER wins (a status change is a header write), ties keep input order, and a plan with no
+ * status never beats one that has it. Pure; accepts camel (`updatedAt`) or row (`updated_at`) plans. */
+export function groupStatusOf(plans) {
+  let best = null, bestMs = -Infinity;
+  for (const p of plans || []) {
+    if (!p || !p.status) continue;
+    const ms = planHeaderMs(p);
+    const v = ms == null ? -Infinity : ms;
+    if (best === null || v > bestMs) { best = p; bestMs = v; }
+  }
+  return best ? best.status : null;
 }
 
 /* THE one answer to "which plan represents this project?" (Map Sites list + Dashboard). Most

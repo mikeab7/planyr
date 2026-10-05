@@ -20,7 +20,7 @@ import VisitPanel from "./components/VisitPanel.jsx";
 import VisitList from "./components/VisitList.jsx";
 import SearchBox from "./components/SearchBox.jsx";
 import {
-  supabaseConfigured, fetchPlacesInBounds, fetchAllVisits, fetchPlacesByIds,
+  supabaseConfigured, fetchPlacesInBounds, reportBrowseError, BROWSE_ERROR_MESSAGE, fetchAllVisits, fetchPlacesByIds,
   insertVisit, updateVisit, deleteVisit, manualPinsFromVisits, loggedPlaceIds, avgRatingByPlaceId,
   searchPlacesByName, fetchAllWishlist, addWishlist, removeWishlist, wishlistedPlaceIds,
   manualWishlistFromRows, manualGroupKey, manualPinKey,
@@ -31,14 +31,18 @@ import { withVisitDate, matchingOpenDishWishlist } from "./lib/dishAggregates.js
 import { searchOverpass } from "./lib/overpass.js";
 import { existingRestaurants, findExisting, canonicalIdentity } from "./lib/placeIdentity.js";
 import { RADIUS } from "../../shared/ui/radius.js";
+import { useLandscapePhone } from "./lib/phoneLayout.js";
 import { Button, SegmentedControl, SIZE } from "../../shared/ui/controls.jsx";
 
 export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, authControl, accountActive, userId }) {
   const narrow = useNarrow(); // phone width — the toolbar must fit ONE screen (B2046224)
+  const landscape = useLandscapePhone(); // phone held sideways: one-row header, place card docks to the right (B2046224 ×4)
   const [view, setView] = useState("map"); // "map" | "list"
   const [bounds, setBounds] = useState(null);
   const [places, setPlaces] = useState([]);
   const [placesCap, setPlacesCap] = useState({ capped: false, totalMatched: 0 });
+  const [placesError, setPlacesError] = useState(null); // browse RPC failure — shown on the map, never silent
+  const [placesRetry, setPlacesRetry] = useState(0);
   const [overpassPlaces, setOverpassPlaces] = useState([]);
   const [visits, setVisits] = useState([]);
   const [wishlist, setWishlist] = useState([]); // "want to try" flags (B669312) — food_wishlist rows
@@ -60,6 +64,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   // full, mid-drag); VisitPanel forwards it up via onSheetHeightChange. 0 whenever no panel is
   // open (desktop never opens a sheet at all — VisitPanel's right-rail branch never calls this).
   const [sheetHeightPx, setSheetHeightPx] = useState(0);
+  const [sidePanelPx, setSidePanelPx] = useState(0); // width of the side-docked card (landscape phone), 0 when none
   // NEW-1 (2026-08-27 owner block) — a monotonic id for optimistic visit rows, mirroring
   // flyNonceRef's own pattern. Never collides with a real row's uuid (a distinct "optimistic-N"
   // shape), so filtering it back out on rollback can never accidentally remove a real visit.
@@ -75,13 +80,19 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   useEffect(() => {
     if (!bounds) return;
     let cancelled = false;
-    fetchPlacesInBounds(bounds).then(({ data, capped, totalMatched }) => {
+    fetchPlacesInBounds(bounds).then(({ data, capped, totalMatched, error }) => {
       if (cancelled) return;
+      if (error) {
+        reportBrowseError(error);
+        setPlacesError(BROWSE_ERROR_MESSAGE);
+        return; // keep the pins already drawn; the notice says the new view didn't load
+      }
+      setPlacesError(null);
       setPlaces(data);
       setPlacesCap({ capped, totalMatched });
     });
     return () => { cancelled = true; };
-  }, [bounds]);
+  }, [bounds, placesRetry]);
 
   // The signed-in user's own visit log.
   const reloadVisits = useCallback(async () => {
@@ -175,7 +186,13 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   const visitsForSelected = useMemo(() => {
     if (!selected) return [];
     if (selected.kind === "place") return visits.filter((v) => v.place_id === selected.place.id);
-    if (selected.kind === "manualPin") return visits.filter((v) => selected.pin.visitIds.includes(v.id));
+    // B2095123: match by the pin's own (name, lat, lon) key against the LIVE visits, never by the
+    // `visitIds` snapshot taken when the pin was selected — a visit logged while the panel is open
+    // (optimistic or reloaded) is not in that snapshot and so never appeared until a reselect.
+    if (selected.kind === "manualPin") {
+      const key = manualGroupKey(selected.pin.name, selected.pin.lat, selected.pin.lon);
+      return visits.filter((v) => !v.place_id && manualGroupKey(v.custom_name, v.custom_lat, v.custom_lon) === key);
+    }
     return [];
   }, [selected, visits]);
 
@@ -521,6 +538,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
         // rejected. Row 1 (wordmark + account controls) is untouched — that's the minimal header
         // this route is supposed to keep.
         showModuleTabs={false}
+        singleRow={landscape}
         multiEditOk
         toolbarContent={
           // NEW-1 (food controls) — ONE row that fits its slot (width 100%, min-width 0) so the search
@@ -559,7 +577,8 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
           Not connected to the cloud in this build — places will show, but visits can't be saved.
         </div>
       )}
-      {supabaseConfigured() && !accountActive && (
+      {/* Sideways the card itself already says "Sign in to log a visit here", and a phone has ~300 px of height: no banner row. */}
+      {supabaseConfigured() && !accountActive && !landscape && (
         <div role="status" style={{ padding: "6px 16px", fontSize: 12.5, color: "var(--text-secondary)", background: "var(--surface-raised)", borderBottom: "1px solid var(--border-default)" }}>
           Sign in to log visits — browsing the map works either way.
         </div>
@@ -571,6 +590,8 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
             places={places}
             placesCapped={placesCap.capped}
             placesTotalMatched={placesCap.totalMatched}
+            placesError={placesError}
+            onRetryPlaces={() => setPlacesRetry((n) => n + 1)}
             loggedPlaces={loggedPlaces}
             loggedIds={loggedIds}
             manualPins={manualPins}
@@ -587,6 +608,8 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
             selectedKey={selectedKey}
             selectedPlaceInfo={selectedPlaceInfo}
             sheetHeightPx={sheetHeightPx}
+            landscape={landscape}
+            sidePanelPx={sidePanelPx}
           />
         ) : (
           <VisitList
@@ -627,6 +650,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
             wishlisted={wishlistedForSelected}
             onToggleWishlist={accountActive ? toggleWishlist : undefined}
             onSheetHeightChange={setSheetHeightPx}
+            onSideWidthChange={setSidePanelPx}
             dishesWithDate={dishesForSelected}
             onSaveDish={accountActive ? saveDish : undefined}
             onDeleteDish={removeDish}

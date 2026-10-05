@@ -26,6 +26,7 @@ import { makeWriteSerializer } from "../../../shared/cloud/serializeWrites.js";
 import { STATUSES, STATUS_META, statusOf, ROLES, DEFAULT_ROLE } from "../../site-planner/lib/siteModel.js";
 import { categoryFor, FILE_STATES } from "../../../shared/files/fileFacts.js";
 import { uploadFileInChunks } from "../../../shared/files/chunkedUpload.js";
+import { notifyLibraryChanged } from "../../../shared/library/libraryChanged.js";
 
 export const BUCKET = "doc-review-files";
 // The OLD Supabase free-tier per-file cap. It no longer limits uploads (B409 rework:
@@ -151,6 +152,7 @@ export function upsertReview(record) {
     // (ReviewsBar autosave, refileReview, the Library) funnels through here, so the Library index
     // can never keep answering with the pre-edit project / discipline / needs-filing state.
     const sync = await syncFileFactsForReview(record);
+    notifyLibraryChanged(); // B2084480 - the row (and its facts) is written: the Library re-reads, in this tab and the others
     if (!sync.ok) return { ok: false, error: sync.error, factsSyncFailed: true }; // the review itself IS saved; retry is idempotent
     return res;
   });
@@ -426,7 +428,7 @@ export async function deleteReview(id) {
     .update({ deleted_at: new Date().toISOString() }).eq("id", id).select("id");
   if (error && isMissingColumn(error, "deleted_at")) return purgeReview(id); // un-migrated DB → old behavior
   const removed = Array.isArray(data) ? data.length : 0;
-  if (!error && removed > 0) { const uid = await currentUid(); if (uid) clearDraft(uid, id); }
+  if (!error && removed > 0) { const uid = await currentUid(); if (uid) clearDraft(uid, id); notifyLibraryChanged(); }
   return { ok: !error, removed, soft: true, error: error ? error.message : null };
 }
 
@@ -438,6 +440,7 @@ export async function restoreReview(id) {
   const { data, error } = await supabase.from("doc_reviews")
     .update({ deleted_at: null }).eq("id", id).select("id");
   const restored = Array.isArray(data) ? data.length : 0;
+  if (!error && restored > 0) notifyLibraryChanged();
   return { ok: !error && restored > 0, restored, error: error ? error.message : null };
 }
 

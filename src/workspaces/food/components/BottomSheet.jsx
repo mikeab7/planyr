@@ -47,35 +47,106 @@
  * up (`keyboardInset`, lib/keyboardInset.js) the sheet lifts by exactly the covered height, goes to
  * its "full" snap (the most room above the keyboard) and the focused field is scrolled into view.
  * Measured with a stubbed visualViewport in ui-audit/verify-food-visit-phone.mjs; the real keyboard is
- * V1476080 (on device). */
+ * V1476080 (on device).
+ *
+ * ⛔ RECURRENCE (B2046224 ×2, 2026-10-04 — owner, real iPhone, The Buffalo Grill → "+ Add a dish": the
+ * dish-name field sat behind the keyboard and the sheet never lifted, after the fix above had passed
+ * 136/136 emulated rows). Two causes, both fixed here and in lib/keyboardInset.js:
+ *  1. The inset read `window.innerHeight` as the layout height. On iOS WebKit innerHeight is the
+ *     VISIBLE height and shrinks with the keyboard, so the inset was ≈ 0 → no lift, no "full" snap.
+ *     It now measures the fixed-position containing block itself (keyboardInset.js header).
+ *  2. Revealing the focused field used `el.scrollIntoView`, which scrolls EVERY scrollable ancestor —
+ *     on iOS that includes the page/visual viewport, which then fights the sheet's own lift — and it
+ *     only ran when the inset was already non-zero at focus time (never true for an autoFocus field:
+ *     focus comes first, the keyboard after). `revealField` scrolls only this sheet's content box,
+ *     keeps clear of the sticky header / sticky Save bars (`data-sheet-sticky`), and is re-run on
+ *     focus, on every visualViewport change, and after the height transition settles.
+ * The harness that reproduces the real-phone failure (and was red on the old code) is
+ * ui-audit/verify-food-ios-keyboard.mjs; on-device confirmation is the V# in VERIFICATION.md. */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { resolveSnap, heightForSnap } from "../lib/bottomSheetSnap.js";
-import { currentKeyboardInset } from "../lib/keyboardInset.js";
+import { heightForSnap, resolveRelease, releaseVelocity, dragBounds, clampDragHeight } from "../lib/bottomSheetSnap.js";
+import { currentKeyboardInset, visualViewportBox } from "../lib/keyboardInset.js";
 import { publishBottomSheetHeight } from "../../../shared/ui/bottomSheetTracker.js";
 
 const TOP_INSET = 64; // px of the map always left visible above the sheet, even at "full"
 const TRANSITION_MS = 220;
+const TEXT_ENTRY = /^(INPUT|TEXTAREA|SELECT)$/;
+const REVEAL_MARGIN = 12; // breathing room between a revealed field and the sheet's visible edge
+const FOCUS_RECHECK_MS = [0, 120, 350, 700];
+const VIEWPORT_WATCH_MS = 120; // while typing, re-read the visual viewport this often (iOS can move it without an event)
+const textEntryFocused = () => TEXT_ENTRY.test(document.activeElement?.tagName || "");
+// While a field in the sheet has focus (`data-typing`): the "Log a visit" bar steps out of the way and
+// every sticky bar (header, the form's Save/Done) flows with its content instead of floating over the
+// card being edited (B2046224 ×3, owner: "while typing, the card being edited is fully visible").
+// Tried and measured first: keeping the form's own Save pinned (B2057920's choice) — it then covers
+// the lower part of any card taller than the space above the keyboard (a dish row's score buttons).
+// Save tucks while typing and is back the moment the keyboard closes.
+export const TYPING_CSS = `[data-food-sheet][data-typing] [data-hide-while-typing]{display:none !important}`
+  + `[data-food-sheet][data-typing] [data-sheet-sticky]{position:static !important}`;
+// While a form (a dish, a new visit, an edited visit) is open in the sheet, ONLY that form's own
+// actions are on screen — the "Log a visit" bar steps out for as long as the form exists, at every
+// sheet height, keyboard up or down (NEW-2, 2026-10-05). A form marks itself `data-sheet-form`;
+// a bar that must yield to it marks itself `data-hide-while-form`. CSS rather than state, so a
+// form opened from anywhere in the panel needs no wiring and nothing can come and go with the snap.
+export const FORM_OPEN_CSS = `[data-food-sheet]:has([data-sheet-form]) [data-hide-while-form],[data-food-panel]:has([data-sheet-form]) [data-hide-while-form]{display:none !important}`;
 
 export default function BottomSheet({ open, onDismiss, initialSnap = "half", peekHeight, onHeightChange, children }) {
   const contentRef = useRef(null);
   const [snap, setSnap] = useState(initialSnap);
   const [heightPx, setHeightPx] = useState(0);
   const [animated, setAnimated] = useState(false);
-  const dragRef = useRef(null); // { startY, startHeight, pointerId } while an active drag is in progress
+  const dragRef = useRef(null); // the live drag (handle OR content), or null — see beginDrag
+  const heightRef = useRef(0); // the height as of the LAST move — a release reads this, never a render's closure
+  const [dragging, setDragging] = useState(false);
   const didMountRef = useRef(false);
+  const selfScrollRef = useRef(false); // true between a reveal's own scrollTop write and the scroll event it fires
+  const foreignScrollAtRef = useRef(0); // when something other than a reveal last scrolled the content
+  const onContentScroll = useCallback(() => {
+    if (selfScrollRef.current) { selfScrollRef.current = false; return; }
+    foreignScrollAtRef.current = performance.now();
+  }, []);
 
-  const [kbInset, setKbInset] = useState(() => currentKeyboardInset());
+  // kbInset DETECTS the keyboard (and only while a field has focus); vvBox is where the sheet pins
+  // itself while it is up — the visual viewport's own box, so no layout-height estimate can open a
+  // gap between the sheet and the keyboard (see the header's ×3 note).
+  const [kbInset, setKbInset] = useState(0);
+  const [vvBox, setVvBox] = useState(null);
+  const vvBoxRef = useRef(null);
+  const [typing, setTyping] = useState(false);
+  const rootRef = useRef(null);
   const kbOpen = kbInset > 0;
+  const revealSoonRef = useRef(() => {});
+  const measureViewport = useCallback(() => {
+    const kb = textEntryFocused() ? currentKeyboardInset() : 0;
+    setKbInset(kb);
+    const box = kb ? visualViewportBox() : null;
+    const prev = vvBoxRef.current;
+    const same = box && prev ? box.top === prev.top && box.height === prev.height : box === prev;
+    if (same) return;
+    vvBoxRef.current = box;
+    setVvBox(box);
+    revealSoonRef.current();
+  }, []);
   const viewportHeight = () => window.visualViewport?.height || window.innerHeight;
-  const contentHeight = () => contentRef.current?.scrollHeight ?? 0;
+  // The sheet holds the drag handle AND the content; sizing it to the content alone left it one
+  // handle short, so the last strip of content always had to scroll (B2046224 ×3: a dropped pin's
+  // name field got a scroll area barely taller than itself).
+  const handleRef = useRef(null);
+  const handleHeight = () => handleRef.current?.offsetHeight ?? 0;
+  // The content's OWN height (the inner wrapper), never the scroller's scrollHeight: a scroller
+  // reports max(content, its own box), so once the sheet had been pulled taller than its content the
+  // "content height" grew with the box and the full stop ratcheted up by the overshoot (measured on
+  // main: a second over-pull moved full from 575 to 595 — blank space under the content, permanently).
+  const innerRef = useRef(null);
+  const contentHeight = () => (innerRef.current?.offsetHeight ?? contentRef.current?.scrollHeight ?? 0) + handleHeight();
 
   // Keyboard up -> always the "full" snap: the visible area is already short, so the content-
   // driven half/peek heights would leave the form cramped above the keyboard.
   const targetFor = useCallback((s) => heightForSnap(kbOpen ? "full" : s, {
-    contentHeight: contentHeight(), peekHeight, viewportHeight: viewportHeight(), topInset: kbOpen ? 8 : TOP_INSET,
+    contentHeight: contentHeight(), peekHeight: peekHeight + handleHeight(), viewportHeight: viewportHeight(), topInset: kbOpen ? 8 : TOP_INSET,
   // kbInset is read through viewportHeight(); re-derive when it changes
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [peekHeight, kbOpen, kbInset]);
+  }), [peekHeight, kbOpen, kbInset, vvBox?.height]);
 
   // The two-frame reveal (see header comment): frame 1 flips transitions on, frame 2 sets the
   // real content-driven target height so the browser has something to animate FROM.
@@ -99,29 +170,91 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
     setHeightPx(targetFor(snap));
   }, [snap, targetFor]);
 
-  // Track the visual viewport: it shrinks when the keyboard opens and grows back when it closes.
-  // On every change, keep the focused field inside the visible part of the scroller.
+  // Keep the focused field inside the visible part of THIS sheet's scroller — never the page's.
+  const revealField = useCallback((el) => {
+    const box = contentRef.current;
+    if (!box || !el || !box.contains(el) || !TEXT_ENTRY.test(el.tagName)) return;
+    const b = box.getBoundingClientRect();
+    const vv = window.visualViewport;
+    const visTop = Math.max(b.top, vv ? vv.offsetTop : b.top);
+    const visBottom = Math.min(b.bottom, vv ? vv.offsetTop + vv.height : b.bottom);
+    let topReserve = 0, bottomReserve = 0;
+    box.querySelectorAll("[data-sheet-sticky]").forEach((s) => {
+      if (s.contains(el) || getComputedStyle(s).position !== "sticky") return; // un-stuck while typing → plain content
+      const sr = s.getBoundingClientRect();
+      if (!sr.height) return;
+      if (s.dataset.sheetSticky === "top" && sr.top <= b.top + 2) topReserve = Math.max(topReserve, sr.bottom - b.top);
+      if (s.dataset.sheetSticky === "bottom" && Math.abs(sr.bottom - b.bottom) <= 2) bottomReserve = Math.max(bottomReserve, b.bottom - sr.top);
+    });
+    const lo = visTop + topReserve + REVEAL_MARGIN;
+    const hi = visBottom - bottomReserve - REVEAL_MARGIN;
+    // Reveal the field's whole CARD (`data-edit-card`: the dish editor, a visit-form row) when it
+    // fits; when it does not, keep the field visible with as much of the card above it as fits.
+    const f = el.getBoundingClientRect();
+    const cardEl = el.closest("[data-edit-card]");
+    let r = f;
+    if (cardEl && box.contains(cardEl)) {
+      const c = cardEl.getBoundingClientRect();
+      r = c.height <= hi - lo ? c : { top: Math.max(c.top, f.bottom - (hi - lo)), bottom: f.bottom };
+    }
+    if (f.height > hi - lo) r = { top: f.top, bottom: f.top }; // smaller than the field: show its top
+    const before = box.scrollTop;
+    if (r.top < lo) box.scrollTop -= lo - r.top;
+    else if (r.bottom > hi) box.scrollTop += Math.min(r.bottom - hi, r.top - lo);
+    if (box.scrollTop !== before) selfScrollRef.current = true; // the scroll event this causes is ours, not a finger's
+  }, []);
+  const revealActive = useCallback(() => revealField(document.activeElement), [revealField]);
+  revealSoonRef.current = () => { requestAnimationFrame(revealActive); setTimeout(revealActive, TRANSITION_MS + 40); };
+
+  // Track the visual viewport: it shrinks when the keyboard opens and grows back when it closes
+  // (and on iOS it may pan, `offsetTop`). On every change, re-measure and re-reveal.
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return undefined;
     const onVv = () => {
-      setKbInset(currentKeyboardInset());
-      const el = document.activeElement;
-      if (el && contentRef.current?.contains(el) && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) {
-        requestAnimationFrame(() => el.scrollIntoView?.({ block: "center", behavior: "auto" }));
-      }
+      measureViewport();
+      requestAnimationFrame(revealActive);
+      setTimeout(revealActive, TRANSITION_MS + 40); // again once the lift / full-snap has animated
     };
     vv.addEventListener("resize", onVv);
     vv.addEventListener("scroll", onVv);
-    return () => { vv.removeEventListener("resize", onVv); vv.removeEventListener("scroll", onVv); };
-  }, []);
+    // iOS also SCROLLS THE PAGE to reveal a field and the page-containment guard pins it back
+    // (production telemetry, the owner's own test) — the visual viewport moves with no vv event.
+    window.addEventListener("scroll", onVv, { passive: true });
+    return () => { vv.removeEventListener("resize", onVv); vv.removeEventListener("scroll", onVv); window.removeEventListener("scroll", onVv); };
+  }, [revealActive, measureViewport]);
 
-  // A field focused while the keyboard is already up (moving between fields) must also be revealed.
+  // …and because none of those events is guaranteed, re-read it on a short timer while typing.
+  useEffect(() => {
+    if (!typing) return undefined;
+    const id = setInterval(measureViewport, VIEWPORT_WATCH_MS);
+    return () => clearInterval(id);
+  }, [typing, measureViewport]);
+
+  // A focused field must be revealed whether or not the keyboard is up yet — an autoFocus field
+  // (the dish editor's name) is focused BEFORE the keyboard opens, and some iOS versions deliver the
+  // visualViewport change late, so re-check the inset and re-reveal a few times as it settles.
+  // The re-checks stand down the moment anything else scrolls the sheet (a finger moving on to the
+  // next field) — they exist to catch a late keyboard, never to drag the list back to the field.
   const onFocusIn = useCallback((e) => {
-    const el = e.target;
-    if (!currentKeyboardInset() || !/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
-    requestAnimationFrame(() => el.scrollIntoView?.({ block: "center", behavior: "auto" }));
-  }, []);
+    if (!TEXT_ENTRY.test(e.target.tagName)) return;
+    setTyping(true);
+    const focusedAt = performance.now();
+    for (const ms of FOCUS_RECHECK_MS) {
+      setTimeout(() => {
+        if (document.activeElement !== e.target || foreignScrollAtRef.current > focusedAt) return;
+        measureViewport();
+        revealField(e.target);
+      }, ms);
+    }
+  }, [revealField, measureViewport]);
+  const onFocusOut = useCallback(() => {
+    setTimeout(() => {
+      const a = document.activeElement;
+      setTyping(!!(a && TEXT_ENTRY.test(a.tagName) && rootRef.current?.contains(a)));
+      measureViewport();
+    }, 0);
+  }, [measureViewport]);
 
   useEffect(() => {
     if (!contentRef.current || typeof ResizeObserver === "undefined") return undefined;
@@ -130,6 +263,7 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
       setHeightPx(targetFor(snap));
     });
     ro.observe(contentRef.current);
+    if (innerRef.current) ro.observe(innerRef.current); // content growing (a form opening) inside an unchanged box
     return () => ro.disconnect();
   }, [snap, targetFor]);
 
@@ -151,62 +285,170 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
     return () => publishBottomSheetHeight(0);
   }, [heightPx]);
 
+  // ── ONE drag engine for every way of moving the sheet (NEW-3, 2026-10-05) ─────────────────────
+  // The handle (pointer events) and a pull on the content/header (touch events, below) both feed
+  // beginDrag → moveDrag → endDrag. The release decision is lib/bottomSheetSnap.js `resolveRelease`.
+  const setHeight = useCallback((h) => { heightRef.current = h; setHeightPx(h); }, []);
+  useLayoutEffect(() => { heightRef.current = heightPx; }, [heightPx]);
+  const formOpen = () => !!contentRef.current?.querySelector("[data-sheet-form]");
+  const beginDrag = useCallback((y, extra) => {
+    const stops = { peek: targetFor("peek"), half: targetFor("half"), full: targetFor("full") };
+    // Closing the place by dragging is only for a bare sheet: with the keyboard up or a form open it
+    // would throw away what was typed (measured on main: a 150 px pull down with a dish half-typed
+    // closed the whole place).
+    const canDismiss = !kbOpen && !formOpen();
+    dragRef.current = { startY: y, startHeight: heightRef.current, stops, canDismiss, kb: kbOpen, samples: [{ t: performance.now(), y }], ...extra };
+    setDragging(true);
+  }, [targetFor, kbOpen]);
+  const moveDrag = useCallback((y) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    drag.samples.push({ t: performance.now(), y });
+    if (drag.samples.length > 12) drag.samples.shift();
+    if (drag.kb) return; // keyboard up: the sheet is pinned to it; a pull down only puts the keyboard away on release
+    setHeight(clampDragHeight(drag.startHeight + (drag.startY - y), dragBounds(drag)));
+  }, [setHeight]);
+  const endDrag = useCallback((y) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    dragRef.current = null;
+    setDragging(false);
+    if (drag.kb) {
+      if (y - drag.startY > 40) document.activeElement?.blur?.(); // pull down = put the keyboard away; the sheet re-settles on its own
+      else setHeight(targetFor(snap));
+      return;
+    }
+    const resolved = resolveRelease({
+      heightPx: heightRef.current, startHeight: drag.startHeight, velocity: releaseVelocity(drag.samples),
+      stops: drag.stops, canDismiss: drag.canDismiss, dismissBelow: drag.stops.peek * 0.5,
+    });
+    if (resolved === "dismiss") { onDismiss?.(); return; }
+    // Re-settle to the exact content-driven height for the resolved snap, in the same render that
+    // turns the transition back on (no one-frame flash at the raw release height).
+    setHeight(targetFor(resolved));
+    if (resolved !== snap) setSnap(resolved);
+  }, [snap, targetFor, onDismiss, setHeight]);
+
   const onHandlePointerDown = useCallback((e) => {
     if (e.button != null && e.button !== 0) return;
+    // A MOUSE drag of the handle must not start a text selection: WebKit extends it across the
+    // page and hands focus to whatever input the pointer crosses (measured: the search box, whose
+    // results list then opened over the sheet). Touch never selects here; mouse-only so a tap stays a tap.
+    if (e.pointerType === "mouse") e.preventDefault();
     e.currentTarget.setPointerCapture?.(e.pointerId);
-    dragRef.current = { startY: e.clientY, startHeight: heightPx, pointerId: e.pointerId };
-  }, [heightPx]);
-
+    beginDrag(e.clientY, { pointerId: e.pointerId });
+  }, [beginDrag]);
   const onHandlePointerMove = useCallback((e) => {
     const drag = dragRef.current;
     if (!drag || e.pointerId !== drag.pointerId) return;
-    const deltaUp = drag.startY - e.clientY; // dragging UP (finger moves up) grows the sheet
-    const next = Math.max(0, Math.min(drag.startHeight + deltaUp, viewportHeight() - TOP_INSET));
-    setHeightPx(next);
-  }, []);
-
-  const endDrag = useCallback((e) => {
+    moveDrag(e.clientY);
+  }, [moveDrag]);
+  const onHandlePointerEnd = useCallback((e) => {
     const drag = dragRef.current;
-    if (!drag || (e && e.pointerId !== drag.pointerId)) return;
-    dragRef.current = null;
-    const peek = targetFor("peek");
-    const half = targetFor("half");
-    const full = targetFor("full");
-    const resolved = resolveSnap({ heightPx, peekHeight: peek, halfHeight: half, fullHeight: full, dismissBelow: peek * 0.5 });
-    if (resolved === "dismiss") { onDismiss?.(); return; }
-    // Re-settle to the exact content-driven height for the resolved snap — either the SAME snap
-    // (a small drag that didn't cross a boundary) or a new one (the snap-change effect above
-    // would also do this, but setting it here too means there's no one-frame flash at the raw
-    // drag-release height before that effect catches up).
-    setHeightPx(targetFor(resolved));
-    if (resolved !== snap) setSnap(resolved);
-  }, [heightPx, snap, targetFor, onDismiss]);
+    if (!drag || e.pointerId !== drag.pointerId) return;
+    endDrag(e.clientY);
+  }, [endDrag]);
+
+  // A pull on the CONTENT or the sticky header moves the sheet too, so the whole top of the sheet is
+  // a grab area, not just the thin handle (before: the finger scrolled the list and the sheet never
+  // moved). Standard nested-scroll rule, decided once per gesture on the first movement:
+  //   · finger UP while the sheet is below its tallest stop  → the sheet rises (the list scrolls once it is full)
+  //   · finger DOWN while the list is at its top             → the sheet lowers
+  //   · anything else (list scrolled, sheet already full)    → the list scrolls, the sheet stays
+  // Not started on a rating slider (its own horizontal drag), and not with the keyboard up.
+  // Native, non-passive listeners: React attaches touchmove passively, which cannot cancel a scroll.
+  const touchRef = useRef(null);
+  useEffect(() => {
+    const box = contentRef.current;
+    if (!box) return undefined;
+    const SLOP = 4;
+    const onStart = (e) => {
+      touchRef.current = null;
+      if (e.touches.length !== 1 || dragRef.current || kbOpen) return;
+      if (e.target.closest?.('input[type="range"], [data-no-sheet-drag]')) return;
+      touchRef.current = { y0: e.touches[0].clientY, mode: "pending", startScroll: box.scrollTop };
+    };
+    const onMove = (e) => {
+      const t = touchRef.current;
+      if (!t || e.touches.length !== 1) return;
+      const y = e.touches[0].clientY;
+      if (t.mode === "pending") {
+        const dy = y - t.y0;
+        if (Math.abs(dy) < SLOP) return;
+        const stops = { peek: targetFor("peek"), half: targetFor("half"), full: targetFor("full") };
+        const top = Math.max(stops.peek, stops.half, stops.full);
+        const cur = heightRef.current;
+        const up = dy < 0;
+        const lowest = formOpen() ? stops.peek : 0;
+        if (up && cur < top - 2) t.mode = "sheet";
+        else if (!up && box.scrollTop <= 0 && cur > lowest + 2) t.mode = "sheet";
+        else t.mode = "scroll";
+        if (t.mode === "sheet") beginDrag(t.y0, { touch: true });
+      }
+      if (t.mode === "sheet" && dragRef.current?.touch) {
+        if (e.cancelable) e.preventDefault();
+        moveDrag(y);
+      }
+    };
+    const onEnd = (e) => {
+      const t = touchRef.current;
+      touchRef.current = null;
+      if (t?.mode === "sheet" && dragRef.current?.touch) endDrag((e.changedTouches?.[0] ?? { clientY: dragRef.current.startY }).clientY);
+    };
+    box.addEventListener("touchstart", onStart, { passive: true });
+    box.addEventListener("touchmove", onMove, { passive: false });
+    box.addEventListener("touchend", onEnd, { passive: true });
+    box.addEventListener("touchcancel", onEnd, { passive: true });
+    return () => {
+      box.removeEventListener("touchstart", onStart); box.removeEventListener("touchmove", onMove);
+      box.removeEventListener("touchend", onEnd); box.removeEventListener("touchcancel", onEnd);
+    };
+  }, [open, kbOpen, targetFor, beginDrag, moveDrag, endDrag]);
 
   if (!open) return null;
 
+  // ROOT = the box the sheet is anchored to: the layout viewport normally, the VISUAL viewport's own
+  // box while the keyboard is up (so the sheet's bottom edge IS the keyboard's top edge). The skirt
+  // below the sheet is sheet-coloured and lives under the keyboard: if any reading is ever off and
+  // the sheet sits a little high, what shows between it and the keyboard is still the sheet — never
+  // the map (B2046224 ×3, owner: "a band of the satellite map shows through").
   return (
     <div
+      ref={rootRef}
+      data-food-sheet-root=""
+      data-keyboard-managed=""
+      style={{
+        position: "fixed", left: 0, right: 0, zIndex: 700, pointerEvents: "none",
+        ...(vvBox ? { top: vvBox.top, height: vvBox.height } : { top: 0, bottom: 0 }),
+      }}
+    >
+    <style>{TYPING_CSS + FORM_OPEN_CSS}</style>
+    <div
       data-testid="food-bottom-sheet"
+      data-food-sheet=""
+      data-typing={typing ? "" : undefined}
       data-sheet-snap={snap}
       style={{
-        position: "fixed", left: 0, right: 0, bottom: kbInset, zIndex: 700,
-        height: heightPx, maxHeight: kbOpen ? viewportHeight() - 8 : `calc(100vh - ${TOP_INSET}px)`,
+        position: "absolute", left: 0, right: 0, bottom: 0, pointerEvents: "auto",
+        height: heightPx, maxHeight: vvBox ? vvBox.height - 8 : `calc(100% - ${TOP_INSET}px)`,
         background: "var(--surface-raised)", borderTopLeftRadius: 16, borderTopRightRadius: 16,
         boxShadow: "0 -8px 24px rgba(0,0,0,0.22)", display: "flex", flexDirection: "column",
         overflow: "hidden", touchAction: "none",
-        transition: animated ? `height ${TRANSITION_MS}ms cubic-bezier(0.2, 0.8, 0.2, 1)` : "none",
+        transition: animated && !dragging ? `height ${TRANSITION_MS}ms cubic-bezier(0.2, 0.8, 0.2, 1)` : "none",
         // The home-indicator inset only matters when the sheet touches the screen bottom; with the
         // keyboard up the keyboard owns that edge.
         paddingBottom: kbOpen ? 0 : "env(safe-area-inset-bottom)",
       }}
       onFocus={onFocusIn}
+      onBlur={onFocusOut}
     >
       <div
+        ref={handleRef}
         data-testid="food-sheet-drag-handle"
         onPointerDown={onHandlePointerDown}
         onPointerMove={onHandlePointerMove}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
+        onPointerUp={onHandlePointerEnd}
+        onPointerCancel={onHandlePointerEnd}
         style={{
           flex: "0 0 auto", display: "flex", justifyContent: "center", alignItems: "center",
           height: 22, minHeight: 44, cursor: "grab", touchAction: "none",
@@ -214,9 +456,16 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
       >
         <span aria-hidden="true" style={{ width: 36, height: 4, borderRadius: 999, background: "var(--border-strong, var(--border-default))" }} />
       </div>
-      <div ref={contentRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain" }}>
-        {children}
+      <div ref={contentRef} onScroll={onContentScroll} style={{ flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain" }}>
+        <div ref={innerRef} style={{ display: "flow-root" }}>{children}</div>
       </div>
+    </div>
+    {vvBox && (
+      <div data-testid="food-sheet-skirt" aria-hidden="true" style={{
+        position: "absolute", left: 0, right: 0, top: "100%", height: "100vh", pointerEvents: "auto",
+        background: "var(--surface-raised)",
+      }} />
+    )}
     </div>
   );
 }

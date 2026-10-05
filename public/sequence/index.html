@@ -3075,7 +3075,7 @@ const GANTT_SCROLL_MEMO = new Map();
 // has no login/signup form, so nothing here needs autofill. Kept byte-identical to
 // src/shared/ui/noAutofill.js (guarded by test/noAutofill.test.js).
 const NO_AUTOFILL = {
-  autoComplete: "off",
+  autoComplete: "x-planyr",
   "data-1p-ignore": true,
   "data-lpignore": "true",
   "data-bwignore": true,
@@ -19933,6 +19933,18 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
         // skipped the row (0 rows touched) or genuinely wrote it -- the exact "a refused save tells
         // nobody" defect this repo already hit once for public.sites (B1693264). An empty `data`
         // array with no `error` IS the refusal signal.
+        // B2095121 LOUD-FAILURE: a refused cloud write (e.g. 403 RLS 42501 on planar_data for an account whose
+        // 'hs-v1' key is owned by another user) used to reach ONLY the console, while the grid still showed the
+        // edit as saved and a reload threw it away. Say so, once per burst.
+        const reportCloudSaveFailed = (err) => {
+          try {
+            const now = Date.now();
+            if (now - (window.__planarSaveFailToastAt || 0) < 8000) return;
+            window.__planarSaveFailToastAt = now;
+            showToast("Your change did NOT save to the cloud (" + ((err && (err.code || err.status)) || "error") + "). It is only on this screen — reloading will lose it.", { type: "error", duration: 10000 });
+            window.dispatchEvent(new CustomEvent("planar:cloud-save-failed", { detail: { key: k, code: err && err.code } }));
+          } catch (e) {}
+        };
         const attemptWrite = async (payload, baseRevForStamp) => {
           const toWrite = _deepClone(payload);
           if (toWrite && typeof toWrite === "object") toWrite.__rev = baseRevForStamp + 1;
@@ -19952,7 +19964,7 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
         };
 
         let attempt = await attemptWrite(parsed, cloudRev != null ? cloudRev : (knownRev[k] || 0));
-        if (attempt.error) { console.error("Supabase set error:", attempt.error); return null; }
+        if (attempt.error) { console.error("Supabase set error:", attempt.error); reportCloudSaveFailed(attempt.error); return null; }
 
         if (attempt.refused) {
           let freshOld = null, freshRev = null;
@@ -19975,7 +19987,7 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
             // and retry once. Never silently dropped: a second refusal is a LOUD failure, since these
             // are exactly the moments (about to delete/import/restore) where losing it is worst.
             attempt = await attemptWrite(parsed, freshRev);
-            if (attempt.error) { console.error("Supabase set error (explicit retry):", attempt.error); return null; }
+            if (attempt.error) { console.error("Supabase set error (explicit retry):", attempt.error); reportCloudSaveFailed(attempt.error); return null; }
             if (attempt.refused) {
               console.error("[planar guard] Explicit save ('" + label + "') was refused twice in a row -- a checkpoint could not be recorded.");
               if (typeof showToast === "function") showToast("Couldn't save a checkpoint before this action -- please try again.", { type: "error", duration: 6000 });
@@ -19994,7 +20006,7 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
             staleSnapped[k] = false;
             parsed = mergeResult.merged;
             attempt = await attemptWrite(parsed, freshRev);
-            if (attempt.error) { console.error("Supabase set error (merge retry):", attempt.error); return null; }
+            if (attempt.error) { console.error("Supabase set error (merge retry):", attempt.error); reportCloudSaveFailed(attempt.error); return null; }
             if (attempt.refused) {
               // A third writer landed in the retry's own window too -- vanishingly rare in practice,
               // but never loop or silently drop this tab's edits: block honestly instead.

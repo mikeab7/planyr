@@ -772,9 +772,9 @@ describe("B36(e)/B843: view-driven map layers guard against stale post-unmount r
     expect(src).toMatch(/try \{ feats = await fetchMapillary\(bb, token, sig\); \}/);
     expect(src).toMatch(/if \(sig\.aborted \|\| \(e && e\.name === "AbortError"\)\) return;/);
     expect(src).toMatch(/if \(!map \|\| sig\.aborted\) return; \/\/ B36e: removed \/ superseded mid-fetch/);
-    // Both layers expose abortPending, so releaseLayer (NEW-6) can cancel them on teardown.
-    expect((src.match(/group\.abortPending = \(\) =>/g) || []).length).toBe(2);
-    expect((src.match(/group\.onRemove = function \(m\) \{ group\.abortPending\(\);/g) || []).length).toBe(2);
+    // All three layers expose abortPending, so releaseLayer (NEW-6) can cancel them on teardown.
+    expect((src.match(/group\.abortPending = \(\) =>/g) || []).length).toBe(3);
+    expect((src.match(/group\.onRemove = function \(m\) \{ group\.abortPending\(\);/g) || []).length).toBe(3);
   });
   it("B843: terrainLayer has the post-await mount guard before paint (same class as overpass)", () => {
     const src = read("../src/workspaces/site-planner/lib/terrainLayers.js");

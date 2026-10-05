@@ -62,6 +62,10 @@ export const LAYER_TIER = {
   wetlands: "constraint",          // a 404 permit is a schedule-killer
   txrrc_pipe: "constraint",        // a pipeline crossing the tract
   txrrc_pipe_easement: "constraint", // …and the easement it carries
+  eia_gas: "constraint",           // NEW-1 — FL/GA approximate pipelines: same constraint, lower certainty
+  eia_petroleum: "constraint",
+  eia_crude: "constraint",
+  eia_hgl: "constraint",
   faults: "constraint",            // a growth fault under a slab
   bkdd_easements: "constraint",    // a district easement IS a hard buildable-area constraint
   hcfcd_row: "constraint",         // channel right-of-way, same
@@ -95,6 +99,18 @@ export const LAYER_TIER = {
   // publishes GIS — B1078). Neither is orientation furniture.
   jur_road_authority: "reference",
   nhd_flowlines: "reference",
+  // Georgia screening (NEW-1)
+  ga_hsi: "reference",             // a listed release site — a pull-the-file flag
+  ga_nrhp: "reference",
+  ga_cemeteries: "reference",
+  ga_crit_habitat: "reference",    // binds federal actions, not the parcel directly
+  ga_ust: "reference",             // NEW-1 (B2095744) — a facility register; a Phase I flag, not a stop
+  ga_gopher_tortoise: "reference", // a modeled habitat screen
+  ga_trout: "reference",           // the designation; the BUFFER it triggers is the constraint below
+  soil_bedrock: "reference",
+  bts_truck_network: "reference",  // B2081249 — federal truck-route reference
+  hpms_aadt: "reference",          // B2081249 — federal traffic volumes       // B2081251 — shallow rock is a cost flag (excavation, trenching), not a stop
+  ga_stream_buffers: "constraint", // 25/50/75 ft of land taken off each side of a stream
 
   // ---- CONTEXT: orientation furniture ----
   jur_county: "context",
@@ -124,7 +140,7 @@ export const LAYER_TIER = {
  * plan and the basemap", and contours are neither. They are an overlay he turned on and may want
  * off in the same click as everything else. The basemap needs no exemption at all — it is a
  * separate segmented control, not a member of the overlay registry. */
-export const EXEMPT_IDS = new Set(["elevation", "contours", "flowdir", "aerial", "basemap"]);
+export const EXEMPT_IDS = new Set(["elevation", "contours", "flowdir", "ga_slope", "aerial", "basemap"]); // ga_slope: a terrain wash, same family as the elevation shading
 
 export const tierOf = (id) => LAYER_TIER[id] || null;
 export const isExempt = (id) => EXEMPT_IDS.has(id);

@@ -41,6 +41,7 @@ export const LAYER_SCOPE = {
   // national
   fema: "national", wetlands: "national", hifld_tx: "national", elevation: "national",
   osm_power: "national", osm_hydrants: "national", mapillary: "national",
+  eia_gas: "national", eia_petroleum: "national", eia_crude: "national", eia_hgl: "national", // NEW-1 — EIA is national; the FL/GA gate is `states`, not scope
   // statewide
   txrrc_pipe: "statewide", txrrc_wells: "statewide",
   jur_county: "statewide", jur_city: "statewide", jur_mud: "statewide",

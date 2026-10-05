@@ -37,6 +37,7 @@
  * Mirrors ui-audit/*-audit.mjs: exports an audit fn the unit test imports; exits non-zero standalone.
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readText } from "./lib/ledger.mjs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 
@@ -212,7 +213,7 @@ export function renderIndex(items) {
  *  PR to also regenerate and commit BACKLOG_OPEN.md, colliding with every other such PR open at
  *  the same time. */
 export function auditTagLegend() {
-  const text = readFileSync(BACKLOG, "utf8");
+  const text = readText(REPO, "BACKLOG.md");
   const items = parseBacklog(text);
   const legend = parseLegend(text);
   const problems = [];
@@ -225,7 +226,7 @@ export function auditTagLegend() {
 }
 
 export function auditIndex() {
-  const text = readFileSync(BACKLOG, "utf8");
+  const text = readText(REPO, "BACKLOG.md");
   const items = parseBacklog(text);
   const expected = renderIndex(items);
   const problems = [...auditTagLegend().problems];
@@ -249,7 +250,7 @@ if (isMain) {
     if (!ok) { console.error("BACKLOG_OPEN.md drift check FAILED:\n" + problems.map((p) => "  • " + p).join("\n")); process.exit(1); }
     console.log("BACKLOG_OPEN.md drift check passed.");
   } else {
-    const items = parseBacklog(readFileSync(BACKLOG, "utf8"));
+    const items = parseBacklog(readText(REPO, "BACKLOG.md"));
     writeFileSync(INDEX, renderIndex(items));
     console.log(`BACKLOG_OPEN.md written — ${items.filter((i) => i.section === "open").length} open, ${items.filter((i) => i.section === "verify").length} verify.`);
   }

@@ -119,3 +119,22 @@ export function highlightParts(name, q) {
   if (i < s.length) out.push({ text: s.slice(i), hit: false });
   return out.length ? out : [{ text: s, hit: false }];
 }
+
+/* NEW-2 (company workspace card) — the company cards the switcher shows above the projects card.
+ * Pure so the dropdown and its tests agree. `orgNames` is the organization name(s) from Settings
+ * (a string, or an array when an account belongs to several — one card each). Today the data
+ * model carries ONE organization per account (the route's `org` flag has no id), so the list is
+ * one card; the shape is a list so a second organization is a data change, not a redesign.
+ * An empty name falls back to "Organization" — never to a stale or invented name. */
+export const COMPANY_SUBTITLE = "Company workspace";
+export const ORG_FALLBACK_NAME = "Organization";
+
+export function companyCardsFor(orgNames, q) {
+  const needle = String(q ?? "").trim().toLowerCase();
+  const names = [...new Set([].concat(orgNames).map((n) => String(n ?? "").trim() || ORG_FALLBACK_NAME))];
+  return names.filter((name) => !needle || name.toLowerCase().includes(needle))
+    .map((name) => ({ id: `org:${name}`, name, subtitle: COMPANY_SUBTITLE }));
+}
+
+/** The cards with no search applied. */
+export const companyCards = (orgNames) => companyCardsFor(orgNames, "");

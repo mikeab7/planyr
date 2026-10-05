@@ -8,7 +8,7 @@
 //
 // Spread NO_AUTOFILL onto every inline cell / free-text editor <input> so the extensions skip
 // it. Each key targets a specific extension's opt-out attribute; together they cover the field:
-//   - autoComplete:"off"      standard browser hint (rendered as autocomplete="off")
+//   - autoComplete:"x-planyr" a non-standard token (NOT "off" — iOS ignores "off"; see below)
 //   - data-1p-ignore          1Password  — presence means "ignore"
 //   - data-lpignore="true"    LastPass
 //   - data-bwignore           Bitwarden  — presence means "ignore"
@@ -25,8 +25,12 @@
 // The self-contained Sequence/Schedule iframe (public/sequence/index.html) can't import this
 // module (it runs in-browser Babel with no bundler), so it defines a byte-identical copy inline;
 // test/noAutofill.test.js guards the two against drift.
+// ⛔ B2088384: `autocomplete="off"` is what iOS Safari IGNORES for its "AutoFill Contact" bar (measured
+// on the owner's iPhone, B2046224 ×2), so the token is a deliberately NON-STANDARD one instead: browsers
+// that honour the attribute read an unknown token as "no known kind of data". The app-wide
+// shared/ui/phoneTyping.js stamps the same token on any field that has none.
 export const NO_AUTOFILL = Object.freeze({
-  autoComplete: "off",
+  autoComplete: "x-planyr",
   "data-1p-ignore": true,
   "data-lpignore": "true",
   "data-bwignore": true,
