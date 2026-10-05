@@ -234,7 +234,14 @@ export default function Shell() {
   // active" true for free (AppHeader's tabs highlight on `m.id === module`, and `active` here
   // never equals a real workspace id while it's null) and keeps a fresh dashboard boot from
   // mounting the Site Planner's chunk just to hide it underneath.
-  const active = isDashboardHash ? null : routedModule;
+  // NEW-2 (admin build-out) — the admin page, once it is ACTUALLY showing (a confirmed allowlisted
+  // account — AdminGate reports it), is a layer over a workspace that must not keep acting like the
+  // visible module: an "active" Site Planner rewrote `#/admin` to `#/site` the moment its boot
+  // resolved (measured: ~2.5 s after a cold load), dropping the owner off the page. So no workspace is
+  // active while it shows — the Dashboard's shape. Deliberately keyed on "shown", NOT on the hash: a
+  // non-admin typing #/admin must keep the ordinary active workspace (the 404-equivalent).
+  const [adminShown, setAdminShown] = useState(false);
+  const active = isDashboardHash || (isAdminHash && adminShown) ? null : routedModule;
   const [user,      setUser]      = useState(null);
   // NEW-1 — `user` starts null on every load and only resolves once Supabase's auth listener
   // reports back, so a signed-in visitor briefly sees the SIGNED-OUT "Sign in" pill before the
@@ -845,7 +852,7 @@ export default function Shell() {
         {isAdminHash && (
           <div style={{ position: "absolute", inset: 0, zIndex: 1, pointerEvents: "none" }}>
             <Suspense fallback={null}>
-              <AdminGate user={user} onExit={goDashboard} />
+              <AdminGate user={user} onExit={goDashboard} onShownChange={setAdminShown} />
             </Suspense>
           </div>
         )}

@@ -1,4 +1,6 @@
 -- Problem / "something was slow" reports (B842866) — public.problem_reports
+-- NOTE (2026-10-05): admin_panels.sql in the admin workspace adds `status`/`closed_at` to this table and
+-- admin_list_support_reports(); this file still defines the original admin_list_problem_reports().
 -- Run ONCE in the Supabase SQL editor. Idempotent (safe to re-run). Mirrors the
 -- client_errors.sql / criteria_requests.sql migration style — an owner-reported symptom
 -- (STANDING RULE #2) needs a write path that works even for a signed-out or half-broken

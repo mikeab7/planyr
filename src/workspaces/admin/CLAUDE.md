@@ -9,11 +9,15 @@ not a role system yet); anyone else hitting `#/admin` sees the ordinary app unde
 indistinguishable from any other unrecognized route — never a permission-denied page.
 
 **Files**
-- `AdminGate.jsx` — the ONE place that decides access. Calls the `is_admin()` Postgres RPC
-  (only while signed in; never for a signed-out visitor) and renders `AdminApp` only on a
-  confirmed `true`. Every other outcome (denied, still checking, RPC error) renders `null`.
-- `AdminApp.jsx` — the page shell: a small header + the four section placeholders NEW-2..
-  NEW-5 fill in (Usage / Issues / Support / Ops), listed in `lib/adminSections.js`.
+- `AdminGate.jsx` — the ONE place that decides access. Asks the shared per-user store
+  (`useIsAdmin`) and renders `AdminApp` only on a confirmed admin. Every other outcome (denied,
+  still checking, RPC error) renders `null`; an ERROR is retried twice. Reports "really shown" to
+  the shell (`onShownChange`) — while shown, no workspace is active (else the Site Planner rewrote
+  `#/admin` to `#/site` after boot).
+- `lib/adminStatus.js` + `lib/useIsAdmin.js` — ONE `is_admin()` answer per signed-in user id, shared by
+  the account menu and the gate; an error is never cached (retried on menu open).
+- `AdminApp.jsx` — the page shell; sections in `lib/adminSections.js` order: Issues, Problem reports,
+  Support, Usage, Signup activity, County criteria requests, Password reset, Ops.
 - `lib/adminAccess.js` — `checkIsAdmin(client)`, the pure wrapper around the RPC call. Fails
   closed on every path (no client, no session, an RPC error, a thrown exception) — never
   renders the admin page on an ambiguous result.
@@ -22,10 +26,15 @@ indistinguishable from any other unrecognized route — never a permission-denie
   INSERT-only design, B279 — never add a SELECT policy to make a future check easier); the
   RPC is the only door in or out, and reveals nothing but a boolean.
 
-**Depends on this landing:** B711905 (Usage), B711906 (Issues), B711907 (Support), B711908
-(Ops) all render inside `AdminApp`'s section shells and call through the same admin-gated
-RPC pattern — each mints its own `SECURITY DEFINER` function rather than a client-side SELECT
-policy on the table it reads.
+**Four sections built 2026-10-05 (B711905–B711908, owner block NEW-1) — `UsageSection.jsx`,
+`IssuesSection.jsx`, `SupportSection.jsx`, `OpsSection.jsx`, on the shared `AdminPanel.jsx` shell
+(loading / empty / VISIBLE error + Retry).** RPC wrappers + row shaping live in `lib/adminPanels.js`
+(unit-tested in the repo-root test folder); every RPC is in `db/admin_panels.sql` (SECURITY DEFINER,
+`is_admin()` first, fails closed). Usage = counts and dates only. Issues reads `client_errors` only
+through the RPC (no SELECT policy). Support = a status (open/closed) on `problem_reports` + the
+reporter's recent errors; the in-app Help form and email hook are NOT built (see B711907). Ops = a
+read-only ledger digest (the repo-root ops-snapshot script, run with --sql, loads it) + a session-sweep log. Local
+proof harness: ui-audit verify-admin-surfaces (repo-root ui-audit folder).
 
 **Fifth section, already shipped (B877442) — `CriteriaRequestsSection.jsx` + `lib/criteriaRequestsAdmin.js`.**
 Lists counties requested via B877440/B877441's "Request criteria for this county" action (the plan-side
