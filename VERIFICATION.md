@@ -171,6 +171,14 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1525216 — B2106752: Hybrid map has no yellow/cream road `Blocker: live-GIS`
+
+Unit-proven (`test/vectorBasemap.test.js` "no tinted roads"); the vector tiles come from an external host the sandbox cannot reach, so the picture itself is checked live.
+**Steps** (planyr.io `#/food`, Hybrid on, Houston at metro zoom; read the served chunk hash in the SAME observation and match it to the merge commit):
+1. Look at I-45 North Freeway, Gulf Freeway, South Loop West and Southwest Fwy plus interchanges. **Expect:** white like every other road, no cream/yellow band; freeways still visibly the widest.
+2. Zoom in to ramps. **Expect:** ramps white, dark hairline casing, no yellow.
+3. Zoom to where road names show. **Expect:** names white with dark halo, none yellow.
+
 ### V1512960 — B2088016: first click on "Select parcels" after a fresh load of the Map engages the mode `Blocker: real-data`
 
 Sandbox-proven only in part: the lost-press recovery (`e2e/select-parcels-first-click.spec.js`, red on unmodified main) and the signed-in test-account probe (`ui-audit/diagnose-select-parcels-first-click.mjs`, 10/10 engaged — the original symptom did NOT reproduce here). Not provable here: his account's data volume and his Chrome.
