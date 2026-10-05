@@ -76,7 +76,8 @@ async function openApp(browser, site, mocks, { rrc = "ok" } = {}) {
   await assertMeasurable(page, "verify-site-analysis-trust");
   const seen = { rrc: 0, nwiExport: 0, urls: [] };
   const state = { rrc };
-  await page.route(/^https?:\/\/(?!localhost)/, async (route) => {
+  const ORIGIN_HOST = new URL(ORIGIN).host.replace(/\./g, "\\.");   // so the harness can also be pointed at a deploy (planyr.io)
+  await page.route(new RegExp(`^https?:\\/\\/(?!localhost|${ORIGIN_HOST})`), async (route) => {
     const url = route.request().url();
     const json = (o) => route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(o) });
     if (url.includes("gis.rrc.texas.gov")) {
