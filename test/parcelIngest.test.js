@@ -123,3 +123,43 @@ describe("prepareParcel packs a lot's rings into ONE buffer (GC pressure on arri
     expect(prepareParcel({ type: "Polygon", coordinates: [] }).rings).toEqual([]);
   });
 });
+
+import { lotBoxCanHost, layoutLotNumbers, LOT_NO_FONT_PX } from "../src/workspaces/site-planner/lib/parcelLotNumbers.js";
+describe("lot-number relayout pre-filter (B2092656 ×2: a ~300 ms setTimeout task on pan at z14)", () => {
+  const measure = (t, px) => t.length * px * 0.6;
+  const rect = (x, y, w, h) => [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }];
+  it("rejects exactly what the layout would reject on the lot's box: too short for a line, or narrower than the padding", () => {
+    const lh = Math.ceil(LOT_NO_FONT_PX * 1.25);
+    expect(lotBoxCanHost(40, lh - 1)).toBe(false);
+    expect(lotBoxCanHost(40, lh)).toBe(true);
+    expect(lotBoxCanHost(4, 40)).toBe(false);
+    expect(lotBoxCanHost(5, 40)).toBe(true);
+    expect(lotBoxCanHost(0, 0)).toBe(false);
+  });
+  it("pre-filtering never changes the placed numbers (it only skips lots the layout would have dropped)", () => {
+    const lots = [];
+    let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let i = 0; i < 400; i++) {
+      const w = 2 + rnd() * 90, h = 2 + rnd() * 60;
+      lots.push({ id: `L${i}`, text: `P${1000 + i}`, ring: rect((i % 20) * 100, Math.floor(i / 20) * 80, w, h), w, h });
+    }
+    const all = layoutLotNumbers({ lots, origin: { x: 0, y: 0 }, measure });
+    const kept = lots.filter((l) => lotBoxCanHost(l.w, l.h));
+    expect(kept.length).toBeLessThan(lots.length); // the filter really skips some
+    const some = layoutLotNumbers({ lots: kept, origin: { x: 0, y: 0 }, measure });
+    expect(some).toEqual(all);
+    expect(all.length).toBeGreaterThan(0);
+  });
+  it("the label layer hands the lot's bbox to the filter before any per-vertex work", () => {
+    const src = readFileSync(new URL("../src/workspaces/site-planner/lib/parcelLotLabelLayer.js", import.meta.url), "utf8");
+    expect(src).toMatch(/cb\(lyr\.feature, lyr\.bbox\)/);
+    expect(src.indexOf("lotBoxCanHost(b.x - a.x")).toBeGreaterThan(0);
+    expect(src.indexOf("lotBoxCanHost(b.x - a.x")).toBeLessThan(src.indexOf("worldRing(map, f, z)"));
+  });
+});
+describe("turning Select parcels on does not run the display sync inside React's commit", () => {
+  it("syncDisplaysToView is its own timer task on entering select mode", () => {
+    const src = readFileSync(new URL("../src/workspaces/site-planner/MapFinder.jsx", import.meta.url), "utf8");
+    expect(src).toMatch(/let t = setTimeout\(\(\) => syncDisplaysToView\(true\), 0\);/);
+  });
+});

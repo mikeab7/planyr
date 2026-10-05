@@ -18,6 +18,7 @@
  * (not 5-point squares: parse/index/project cost scales with vertices), answered after a real-network-like delay.
  * It is SYNTHETIC — no recorded Bartow response is reachable from this sandbox (egress blocked); the live check on
  * Michael's Chrome is V-number in VERIFICATION.md.
+ * LOT NUMBERS ARE ON: the mock publishes Bartow's real number field (PARCELID) so the label layer's debounced relayout (a setTimeout) really runs — the first version published only OBJECTID, so that whole path was dead in the harness and a ~300 ms timer task Michael saw live never appeared (B2092656 ×2).
  * KNOWN-GOOD ARMS: void unless (a) a deliberate 60 ms block is seen by BOTH reads and (b) the layer actually holds
  * ≥ 5,000 lots at z14 (a run over an empty layer measures nothing). NOPARCELS=1 runs the same steps with Select
  * parcels off (the map's own floor). PROFILE=1 prints top self/inclusive JS functions per step.
@@ -35,6 +36,8 @@ import { assertMeasurable } from "./lib/tabTiming.mjs";
 const BASE = process.env.BASE_URL || "http://localhost:4188/";
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const BUDGET_MS = Number(process.env.ARRIVAL_BUDGET_MS || 33);
+/* Turning Select parcels on is React's commit for the toggle plus ONE layer construction (~25 ms in the display sync, its own timer task since B2092656 ×2) plus whatever GC lands in it (a 22-33 ms major GC was seen inside it). Main measured 48-85 ms as ONE task. Gated looser than the arrival arms, and said so. */
+const SELECT_ON_BUDGET_MS = Number(process.env.SELECT_ON_BUDGET_MS || 50);
 const FRAME_BUDGET_MS = Number(process.env.ARRIVAL_FRAME_BUDGET_MS || 50);
 const PROFILE = process.env.PROFILE === "1";
 const BARTOW = { lat: 34.20, lng: -84.83 };
@@ -42,7 +45,7 @@ const STEP = 0.001;
 let failures = 0;
 const expect = (label, cond, extra = "") => { if (!cond) failures++; console.log(`  [${cond ? "PASS" : "FAIL"}] ${label}${extra ? ` — ${extra}` : ""}`); };
 
-const META_OK = JSON.stringify({ name: "Parcels", type: "Feature Layer", geometryType: "esriGeometryPolygon", currentVersion: 11.1, capabilities: "Query", maxRecordCount: 100000, fields: [{ name: "OBJECTID", type: "esriFieldTypeOID", alias: "OBJECTID" }], extent: { xmin: -85.1, ymin: 34.0, xmax: -84.5, ymax: 34.5, spatialReference: { wkid: 4326 } } });
+const META_OK = JSON.stringify({ name: "Parcels", type: "Feature Layer", geometryType: "esriGeometryPolygon", currentVersion: 11.1, capabilities: "Query", maxRecordCount: 100000, fields: [{ name: "OBJECTID", type: "esriFieldTypeOID", alias: "OBJECTID" }, { name: "PARCELID", type: "esriFieldTypeString", alias: "PARCELID" }], extent: { xmin: -85.1, ymin: 34.0, xmax: -84.5, ymax: 34.5, spatialReference: { wkid: 4326 } } });
 const EMPTY = JSON.stringify({ type: "FeatureCollection", features: [] });
 const counts = { query: 0, lots: 0 };
 // A lot as a ~10-vertex ring (chamfered rectangle, deterministic wobble) so vertex-proportional work is realistic.
@@ -55,7 +58,7 @@ function parcelsIn(env) {
   const i0 = Math.floor(env.xmin / STEP), i1 = Math.ceil(env.xmax / STEP), j0 = Math.floor(env.ymin / STEP), j1 = Math.ceil(env.ymax / STEP);
   for (let i = i0; i < i1; i++) for (let j = j0; j < j1; j++) {
     const id = (i + 100000) * 100000 + (j + 100000);
-    feats.push({ type: "Feature", id, properties: { OBJECTID: id }, geometry: { type: "Polygon", coordinates: [ringFor(i * STEP, j * STEP, STEP * 0.45, id)] } });
+    feats.push({ type: "Feature", id, properties: { OBJECTID: id, PARCELID: `A${id}` }, geometry: { type: "Polygon", coordinates: [ringFor(i * STEP, j * STEP, STEP * 0.45, id)] } });
     if (feats.length > 30000) return feats;
   }
   return feats;
@@ -99,8 +102,8 @@ await page.route("**/*", async (route) => {
       const feats = env ? parcelsIn(env) : [];
       counts.lots += feats.length;
       if (new URL(u).searchParams.get("f") === "geojson") return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ type: "FeatureCollection", features: feats }) });
-      const esri = feats.map((f) => ({ attributes: { OBJECTID: f.id }, geometry: { rings: f.geometry.coordinates } }));
-      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ objectIdFieldName: "OBJECTID", geometryType: "esriGeometryPolygon", spatialReference: { wkid: 4326 }, fields: [{ name: "OBJECTID", type: "esriFieldTypeOID", alias: "OBJECTID" }], features: esri }) });
+      const esri = feats.map((f) => ({ attributes: { OBJECTID: f.id, PARCELID: f.properties.PARCELID }, geometry: { rings: f.geometry.coordinates } }));
+      return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ objectIdFieldName: "OBJECTID", geometryType: "esriGeometryPolygon", spatialReference: { wkid: 4326 }, fields: [{ name: "OBJECTID", type: "esriFieldTypeOID", alias: "OBJECTID" }, { name: "PARCELID", type: "esriFieldTypeString", alias: "PARCELID" }], features: esri }) });
     }
     return route.fulfill({ status: 200, contentType: "application/json", body: META_OK });
   }
@@ -115,7 +118,6 @@ await row.hover();
 await row.locator('[aria-label="Show on map"]').click();
 await page.waitForTimeout(1500);
 console.log("  served chunks:", (await page.evaluate(() => performance.getEntriesByType("resource").map((r) => r.name.split("/").pop()).filter((n) => /^(SitePlannerApp|map-vendor|MapFinder)-.*\.js$/.test(n)))).join(", "));
-if (process.env.NOPARCELS !== "1") await page.locator('[data-testid="map-toolbar-select-parcels"]').first().click(); // NOPARCELS=1: the no-parcel control run (what the map alone costs)
 await page.waitForTimeout(1500);
 
 const FP = `(() => { const fp = window.__fp = { gaps: [], on: false, last: 0 }; const loop = (t) => { if (fp.on) { if (fp.last) fp.gaps.push(t - fp.last); fp.last = t; } requestAnimationFrame(loop); }; requestAnimationFrame(loop); })()`;
@@ -149,15 +151,7 @@ console.log(`  idle control: longest task ${(idleW.tasks[0] || 0).toFixed(0)} ms
 
 let cdp = null;
 if (PROFILE) { cdp = await page.context().newCDPSession(page); await cdp.send("Profiler.enable"); await cdp.send("Profiler.setSamplingInterval", { interval: 200 }); }
-const act = async (label, fn, waitMs = 3500) => {
-  // The synchronous setView/panBy itself is the SETTLE (gated by verify-parcel-settle-cost); this gate is the
-  // ARRIVAL, so measuring starts when the action's own call has returned.
-  if (PROFILE) await cdp.send("Profiler.start");
-  await page.evaluate(fn);
-  const { tasks, frames } = await measureWindow(async () => {}, waitMs); // responses arrive (350 ms mock delay) and are absorbed
-  const max = tasks[0] || 0, over = tasks.filter((g) => g > BUDGET_MS), maxFrame = Math.max(0, ...frames);
-  console.log(`  ${label}: longest task ${max.toFixed(0)} ms · tasks over ${BUDGET_MS} ms: ${over.length} [${over.slice(0, 8).map((g) => g.toFixed(0)).join(", ")}] · longest frame gap ${maxFrame.toFixed(0)} ms (frames over ${FRAME_BUDGET_MS}: ${frames.filter((g) => g > FRAME_BUDGET_MS).length})`);
-  if (PROFILE) {
+async function printProfile() {
     const { profile } = await cdp.send("Profiler.stop");
     const key = (n) => `${n.callFrame.functionName || "(anon)"} ${n.callFrame.url.split("/").pop()}:${n.callFrame.lineNumber}`;
     const self = new Map(), byId = new Map(profile.nodes.map((n) => [n.id, n])), dt = profile.timeDeltas;
@@ -168,6 +162,25 @@ const act = async (label, fn, waitMs = 3500) => {
     profile.samples.forEach((id, i) => { const seen = new Set(); for (let cur = id; cur != null; cur = parent.get(cur)) { const k = key(byId.get(cur)); if (!seen.has(k)) { seen.add(k); incl.set(k, (incl.get(k) || 0) + (dt[i] || 0) / 1000); } } });
     [...incl.entries()].filter(([k]) => !/^\((root|program|idle)/.test(k)).sort((a, b) => b[1] - a[1]).slice(0, 12).forEach(([k, v]) => console.log(`      ${v.toFixed(0).padStart(5)} ms incl  ${k}`));
   }
+// ARM: turning Select parcels ON (Michael, build ccaca0c: frames of 283 and 211 ms). Everything is queued at once here:
+// the metadata read, six cell queries, the first label layout.
+let selectOn = { task: 0, frame: 0 };
+if (process.env.NOPARCELS !== "1") {
+  if (PROFILE) await cdp.send("Profiler.start");
+  const w = await measureWindow(() => page.locator('[data-testid="map-toolbar-select-parcels"]').first().click(), 3500);
+  selectOn = { task: w.tasks[0] || 0, frame: Math.max(0, ...w.frames) };
+  if (PROFILE) await printProfile();
+  console.log(`  Select parcels ON: longest task ${selectOn.task.toFixed(0)} ms · longest frame gap ${selectOn.frame.toFixed(0)} ms`);
+}
+const act = async (label, fn, waitMs = 3500) => {
+  // The synchronous setView/panBy itself is the SETTLE (gated by verify-parcel-settle-cost); this gate is the
+  // ARRIVAL, so measuring starts when the action's own call has returned.
+  if (PROFILE) await cdp.send("Profiler.start");
+  await page.evaluate(fn);
+  const { tasks, frames } = await measureWindow(async () => {}, waitMs); // responses arrive (350 ms mock delay) and are absorbed
+  const max = tasks[0] || 0, over = tasks.filter((g) => g > BUDGET_MS), maxFrame = Math.max(0, ...frames);
+  console.log(`  ${label}: longest task ${max.toFixed(0)} ms · tasks over ${BUDGET_MS} ms: ${over.length} [${over.slice(0, 8).map((g) => g.toFixed(0)).join(", ")}] · longest frame gap ${maxFrame.toFixed(0)} ms (frames over ${FRAME_BUDGET_MS}: ${frames.filter((g) => g > FRAME_BUDGET_MS).length})`);
+  if (PROFILE) await printProfile();
   return { task: max, frame: maxFrame };
 };
 // NB: never RETURN the Leaflet map from an evaluate (see header).
@@ -187,8 +200,9 @@ results.zoomInNew = await act("zoom 15 → 16 first time (new ground)", () => { 
 if (PROFILE) await cdp.send("Profiler.disable");
 
 if (process.env.NOPARCELS !== "1") expect("KNOWN-GOOD ARM: the mocked Bartow service answered and a z14-scale number of lots is held (else the run is void)", counts.query > 0 && heldZ14 >= 5000, `queries=${counts.query}, lots served=${counts.lots}, held@z14=${heldZ14}`);
-for (const [k, label] of [["zoomOutNew", "zoom onto new data"], ["panNew", "pan onto new ground"], ["zoomInNew", "zoom to a new level"]]) {
-  expect(`${label}: no single main-thread task over ${BUDGET_MS} ms while the response is absorbed`, results[k].task <= BUDGET_MS, `${results[k].task.toFixed(0)} ms`);
+results.selectOn = selectOn;
+for (const [k, label, budget = BUDGET_MS] of [["selectOn", "turning Select parcels on", SELECT_ON_BUDGET_MS], ["zoomOutNew", "zoom onto new data"], ["panNew", "pan onto new ground"], ["zoomInNew", "zoom to a new level"]]) {
+  expect(`${label}: no single main-thread task over ${budget} ms while the response is absorbed`, results[k].task <= budget, `${results[k].task.toFixed(0)} ms`);
   if (process.env.GATE_FRAMES === "1") expect(`${label}: no frame gap over ${FRAME_BUDGET_MS} ms (a blocking frame) while the response is absorbed`, results[k].frame <= FRAME_BUDGET_MS, `${results[k].frame.toFixed(0)} ms`);
 }
 expect("no uncaught page errors", errs.length === 0, errs.join(" | "));
