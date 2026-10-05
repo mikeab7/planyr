@@ -15,7 +15,7 @@
  * plus NUDGE buttons are not that rejected shape — they step the existing slider by one quarter
  * point each, they don't offer 37 individual stops to pick from.
  *
- * ⛔ PHONE: THE SAME SLIDER (2026-10-05, owner: ratings are one slider each, never tap buttons). #1941
+ * ⛔ PHONE: THE SAME SLIDER (2026-10-05, owner: ratings are one slider each, never tap buttons). PR 1941
  * (B2057920) had replaced the slider with a 1-10 whole-point tap grid on phones; the owner got whole
  * numbers back and wants the slider, so the phone renders the SAME range slider as desktop (taller
  * track, finger-sized nudges). Dragging it never moves the sheet or scrolls the list
