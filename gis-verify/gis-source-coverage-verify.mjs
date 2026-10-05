@@ -292,7 +292,7 @@ async function checkSource(key, s) {
   for (const fx of fixturesFor(key).fixtures || []) {
     const ep = fx.layer != null ? eps.find((e) => e.id === fx.layer) || eps[0] : eps[0];
     const params = new URLSearchParams({
-      f: "json", where: "1=1",
+      f: "json", where: s.where || "1=1",
       geometry: envelopeParam(fx), geometryType: "esriGeometryEnvelope",
       spatialRel: "esriSpatialRelIntersects", inSR: "4326", returnCountOnly: "true",
     });
@@ -365,7 +365,9 @@ allProblems.push(...audit.problems.map((p) => `registry: ${p}`));
 const noFixture = Object.keys(GIS_SOURCES).filter((k) => fixtureCount(null, fixturesFor(k)) === 0);
 allNotes.push(`registry: ${Object.keys(GIS_SOURCES).length} rows, ${noFixture.length} without a coverage fixture (must be 0).`);
 
+const ONLY = process.env.GIS_VERIFY_ONLY ? new Set(process.env.GIS_VERIFY_ONLY.split(",")) : null; // run just these rows (e.g. a newly added one)
 for (const [key, s] of Object.entries(GIS_SOURCES)) {
+  if (ONLY && !ONLY.has(key)) continue;
   const { problems, notes } = await checkWithAvailability(key, s);
   allProblems.push(...problems);
   allNotes.push(...notes);
