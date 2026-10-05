@@ -222,18 +222,9 @@ console.log("\n3 · The note says where it is filed, while you are reading it (N
 await tb("notes-integrity-open").click().catch(() => {});
 await pacedWait(page, 600);
 
-const badge = tb("note-project-badge");
-ok("⛔ THE OPEN NOTE WEARS ITS PROJECT — the thing that was invisible before", await badge.count() > 0);
-if (await badge.count()) {
-  const pid = await badge.getAttribute("data-project-id");
-  const label = (await badge.innerText()).trim();
-  const title = await tb("note-title").inputValue();
-  const node = (await readTree()).pages.find((p) => p.title === title);
-  ok("…and the project it names is the one the TREE says, not one the viewer supplied",
-    pid === String(node?.projectId ?? ""), `badge=${pid} tree=${node?.projectId ?? null}`);
-  ok("…by the project's own NAME, and marked as a resolved answer",
-    (await badge.getAttribute("data-resolved")) === "1" && label.length > 0, label);
-}
+/* ⛔ THE HEADER CHIP IS GONE ON PURPOSE (NEW-3, owner 2026-10-05) — the filing itself is unchanged
+ * (the tree still holds it, section 4 reads it back); only the label above the page was removed. */
+ok("the page header carries NO project / Organization chip", await tb("note-project-badge").count() === 0);
 
 /* …and the case the badge exists for: a note still filed under a project that has since been
  * deleted. That is NOT the same fact as "no project", and captioning it as if it were is the
@@ -250,9 +241,7 @@ await tb("notes-view-unfiled").click();
 await pacedWait(page, 400);
 await tb("notes-row-dead_note").click();
 await pacedWait(page, 600);
-const deadLabel = (await tb("note-project-badge").innerText()).trim();
-ok("⛔ AN ID WITH NO PROJECT BEHIND IT IS NAMED AS SUCH, never captioned as 'no project'",
-  (await tb("note-project-badge").getAttribute("data-resolved")) === "0" && /no longer exists|couldn/i.test(deadLabel), deadLabel);
+ok("a note filed under a deleted project still opens, with no chip in its header", await tb("note-project-badge").count() === 0 && await tb("note-title").count() > 0);
 
 /* …and the recovered note, which genuinely belongs nowhere, says exactly that instead.
  * "Show me" navigated INTO Grand Port (that is the point — the copy is usually somewhere
@@ -270,10 +259,7 @@ await tb("notes-view-tree").click();
 await pacedWait(page, 300);
 await tb(`notes-row-${LOST_ID}`).click();
 await pacedWait(page, 600);
-const lostLabel = (await tb("note-project-badge").innerText()).trim();
-ok("a note that genuinely belongs to no project says so, in words", /Not in a project/.test(lostLabel), lostLabel);
-ok("…and that is a RESOLVED answer, not a failed lookup wearing the same words",
-  (await tb("note-project-badge").getAttribute("data-resolved")) === "1");
+ok("the recovered no-project note opens with no chip either", await tb("note-project-badge").count() === 0 && await tb("note-title").count() > 0);
 
 /* ════ 4. IT SURVIVES A RELOAD — the recovery reached storage, not just React ══════════ */
 console.log("\n4 · The recovery is in storage, not in a render");
