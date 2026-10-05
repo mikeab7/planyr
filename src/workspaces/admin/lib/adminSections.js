@@ -11,3 +11,12 @@ export const SECTIONS = [
   { id: "password-reset", title: "Admin password reset" },
   { id: "ops", title: "Ops" },
 ];
+
+/* NEW-1 — the parcel-coverage map. Unlike the four placeholders above it is a real section
+ * (like CriteriaRequests / Reports / SignupActivity it is mounted by AdminApp with its own
+ * component, so it is NOT in SECTIONS, whose four-id shape test/adminApp.test.js pins). */
+export const PARCEL_COVERAGE_SECTION = {
+  id: "parcel-coverage",
+  title: "Parcel coverage",
+  blurb: "Every county, parish or borough Planyr can answer a parcel click for, coloured by where its parcels come from.",
+};

@@ -17,6 +17,7 @@ import CriteriaRequestsSection from "./CriteriaRequestsSection.jsx";
 import ReportsSection from "./ReportsSection.jsx";
 import SignupActivitySection from "./SignupActivitySection.jsx";
 import AdminPasswordResetSection from "./AdminPasswordResetSection.jsx";
+import ParcelCoverageSection from "./ParcelCoverageSection.jsx";
 
 export default function AdminApp({ onExit }) {
   return (
@@ -56,6 +57,8 @@ export default function AdminApp({ onExit }) {
         <SignupActivitySection />
         <CriteriaRequestsSection />
         <AdminPasswordResetSection />
+        {/* NEW-1 — US map of every county wired to a parcel source (read from the live registry). */}
+        <ParcelCoverageSection />
         <OpsSection />
       </div>
     </div>

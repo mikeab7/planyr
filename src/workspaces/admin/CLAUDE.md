@@ -71,5 +71,14 @@ alongside the table in the shared `reports/` folder's own migration — the same
 + `is_admin()` pattern as `admin_users.sql`. RLS proof (live, self-rolling-back, run via the
 Supabase MCP) lives in that same folder's `test/` subfolder.
 
+**Ninth section (B2123392, NEW-1) — `ParcelCoverageSection.jsx` + `lib/parcelCoverage.js` + `lib/countyMapGeometry.js`.**
+A US map of every county / parish / borough Planyr can answer a parcel click for, coloured by source kind
+(own server / statewide layer / third-party copy / unclassified). Nothing is a list: `parcelCoverage.buildCoverage`
+joins the county-polygons asset onto the live site-planner county registry (`COUNTIES_MAP`, `countyKeyForName`,
+`statewideKeysForState`), so a newly wired county shows up with no other edit; registry keys that join no
+outline are listed under the map. Source kind is inferred from structure + the provenance prose
+(the site-planner provenance module) and falls to "unclassified" rather than guess. Headless check: the
+parcel-coverage verify script under the repo's ui-audit folder.
+
 <!-- Keep this pointer current: if you rename/move/delete a key file in this folder, update the
      lines above in the same commit. The doc-pointer-audit check fails CI on a stale reference. -->
