@@ -109,6 +109,15 @@ export default function SiteAnalysis({
   const fresh = useMemo(() => freshnessOf(rows), [rows]);
   const pills = useMemo(() => (result && !result.partial ? pillsFor({ regions: result.regions || [], untrusted: result.untrusted || [], layers }) : []), [result, layers]);
 
+  // A layer switched off anywhere else (Layers panel, undo, Hide lines) forgets its rows' open flags, so a later switch-on
+  // by another route can never make an old detail pop open by itself. (Above the early return: hooks keep their order.)
+  const rowDraws = (r) => !!r.layer && r.severity !== "failed" && r.severity !== "green";
+  const rowOn = (r) => rowDraws(r) && !!(isLayerOn && isLayerOn(r.layer));
+  const onSig = rows.map((r) => (rowOn(r) ? "1" : "0")).join("");
+  useEffect(() => {
+    setOpenIds((m) => { let n = m; rows.forEach((r) => { if (m[r.id] && rowDraws(r) && !rowOn(r)) { if (n === m) n = { ...m }; delete n[r.id]; } }); return n; });
+  }, [onSig]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (state.empty) {
     return (
       <div style={{ fontSize: FONT_SIZE.control, color: "var(--text-secondary)", lineHeight: 1.6 }}>
@@ -127,12 +136,16 @@ export default function SiteAnalysis({
     const note = layerZoomNote ? layerZoomNote(k) : null;
     return note || (layerStatus?.[k]?.state === "failed" ? "This layer's map service isn't responding right now — try again shortly." : null);
   };
+  const isOpen = (r) => !!openIds[r.id] && (!drawable(r) || layerOn(r.layer));   // a drawn row's detail lives only while its layer is on
   const toggleRow = (r) => {
     if (!drawable(r)) { setOpenIds((m) => ({ ...m, [r.id]: !m[r.id] })); return; }
+    // Layer already on (from the Layers panel, "Show lines", or a sibling row) but THIS row's detail is closed: a click
+    // reads the detail and leaves the layer alone — it never switches off something the user did not ask to switch off.
+    if (layerOn(r.layer) && !isOpen(r)) { setOpenIds((m) => ({ ...m, [r.id]: true })); return; }
     const want = !layerOn(r.layer);
     if (onToggleLayer) onToggleLayer(r.layer, want);
-    // Rows that share one layer (100-/500-year both ride FEMA) go on and off together: closing one closes both.
-    setOpenIds((m) => { const n = { ...m }; rows.forEach((x) => { if (x.layer === r.layer) delete n[x.id]; }); if (want) n[r.id] = true; return n; });
+    // Rows that share one layer (100-/500-year both ride FEMA) go on and off together; only drawn siblings are touched.
+    setOpenIds((m) => { const n = { ...m }; rows.forEach((x) => { if (x.layer === r.layer && drawable(x)) delete n[x.id]; }); if (want) n[r.id] = true; return n; });
   };
   const calls = result?.calls || [];
   const ticked = callsChecked || localCalls;
@@ -207,12 +220,12 @@ export default function SiteAnalysis({
             const sev = SEV[r.severity] || SEV.failed;
             const draws = drawable(r);
             const onMap = draws && layerOn(r.layer);
-            const open = !!openIds[r.id] && (!draws || onMap);   // a drawn row's detail lives exactly as long as its layer is on
+            const open = isOpen(r);
             const toggle = () => toggleRow(r);
             return (
               <div key={r.id} data-check-row={r.id} data-severity={r.severity} data-on-map={onMap ? "1" : undefined}
                 style={{ borderLeft: `3px solid ${sev.bar}`, padding: "6px 0 6px 10px" }}>
-                <div role="button" tabIndex={0} aria-expanded={open} aria-pressed={draws ? onMap : undefined}
+                <div role="button" tabIndex={0} aria-expanded={draws ? undefined : open} aria-pressed={draws ? onMap : undefined}
                   onClick={toggle} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } }}
                   style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, cursor: "pointer" }}>
                   <span style={{ minWidth: 0 }}>
@@ -320,7 +333,7 @@ function FactRow({ label, value, note = null, chip = null, children = null }) {
         {chip && (
           <span data-governs-chip={chip} style={{ marginLeft: 6, padding: "1px 7px", borderRadius: RADIUS.pill, border: "1px solid var(--warn-border)", background: "var(--warn-bg)", color: "var(--warn-text)", fontSize: FONT_SIZE.micro, fontWeight: 700 }}>{chip}</span>
         )}
-        {note && <span data-fact-note="1" title={note} style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", color: "var(--text-secondary)", fontSize: FONT_SIZE.label }}>{note}</span>}
+        {note && <span data-fact-note="1" title={note} style={{ display: "block", color: "var(--text-secondary)", fontSize: FONT_SIZE.label }}>{note}</span>}
         {children}
       </span>
     </>

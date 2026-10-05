@@ -227,8 +227,9 @@ try {
   check("a reload with two rows on keeps both on", beforeReload.length === 2 && JSON.stringify(afterReload) === JSON.stringify(beforeReload), `${beforeReload} → ${afterReload}`);
   check("…and after the reload both rows still read 'On map' (in sync with the Layers panel's saved state)", (await page.locator("[data-on-map-tag]").count()) === 2);
   // turn a layer off in the Layers panel while its row's detail is open
-  await page.locator('[data-check-row="wetlands"] [role="button"]').click(); await page.waitForTimeout(500);   // off
-  await page.locator('[data-check-row="wetlands"] [role="button"]').click(); await page.waitForTimeout(800);   // on, detail open
+  // after the reload the layer is on but its detail is closed: ONE click must open the detail and leave the layer ON
+  await page.locator('[data-check-row="wetlands"] [role="button"]').click(); await page.waitForTimeout(600);
+  check("ATTACK: a row whose layer is already on opens its detail on the first click and does NOT switch the layer off", ((await layersOn(page)) || []).includes("wetlands") && (await page.locator('[data-check-expanded="wetlands"]').count()) === 1);
   check("(setup) wetlands on with its detail open", (await page.locator('[data-check-expanded="wetlands"]').count()) === 1);
   await page.getByRole("button", { name: /^Layers/ }).first().click(); await page.waitForTimeout(800);
   const wetBox = page.locator('[data-testid="layer-row-wetlands"] input[type="checkbox"]').first();
