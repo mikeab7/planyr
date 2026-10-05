@@ -157,3 +157,18 @@ describe("NEW-3 (sweep) — the 📍 emoji is gone from every Site Planner contr
     expect(icons).not.toMatch(/^import /m);   // dependency-free, so it cannot drag a chunk with it
   });
 });
+
+/* NEW-1 (B2147200-class follow-up to B2124304) — the dropdown never dims the page. #2040 added a
+ * full-viewport scrim; the owner does not want it. Outside-click dismissal is AnchoredMenu's own
+ * document mousedown listener (B1106256), exactly as before #2040. */
+describe("project switcher — no full-page scrim", () => {
+  const menu = code("../src/shared/ui/AnchoredMenu.jsx");
+  it("renders no scrim / portal overlay", () => {
+    expect(crumb).not.toMatch(/project-scrim|SCRIM_STYLE|createPortal/);
+    expect(crumb).not.toMatch(/position:\s*"fixed",\s*inset:\s*0/);
+  });
+  it("outside click and Escape still close via AnchoredMenu", () => {
+    expect(menu).toMatch(/addEventListener\("mousedown", onDown, true\)/);
+    expect(menu).toMatch(/e\.key === "Escape"/);
+  });
+});
