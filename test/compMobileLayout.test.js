@@ -135,24 +135,38 @@ function rowMarkup(html, key) {
   return m && m[0];
 }
 
-describe("compMobileLayout: every field row is tappable (NEW-1)", () => {
+// NEW-2 (2026-10-05) review-first phone sheet: every value is a REAL <input> mounted at rest (no
+// tap-to-swap editor), the row is a <label> (whole row = tap target), empty "More details" fields are
+// `＋ label` chips, and there is no "Needed to save" section nor a one-answer Unit row.
+describe("compMobileLayout: every field is reachable and tappable (NEW-1 → NEW-2)", () => {
   for (const t of ["lease", "building_sale", "land"]) {
-    it(`${t}: each emitted column renders an editor-opening row, or is read-only by design`, () => {
+    it(`${t}: each emitted column is a mounted input row, an action/read-only row, or an Add chip`, () => {
       const html = renderSheet(t);
+      expect(html).not.toMatch(/Needed to save/i);
+      expect(html).not.toMatch(/Before you save/i);
       const cols = [...neededToSaveColumns(t), ...mobileSections(t).flatMap((s) => s.cols)];
       for (const col of cols) {
-        const tag = rowMarkup(html, col.key);
-        expect(tag, `${t}/${col.key} has no data-field-key row`).toBeTruthy();
-        const kind = tag.match(/data-field-editor="(\w+)"/)?.[1];
-        if (col.kind === "derived") expect(kind, `${t}/${col.key}`).toBe("readonly");
-        else if (col.kind === "action") expect(kind, `${t}/${col.key}`).toBe("action");
-        else if (col.kind === "select") expect(kind, `${t}/${col.key}`).toBe("select");
-        else {
-          expect(kind, `${t}/${col.key}`).toBe("text");
-          // the WHOLE row is the control: a focusable button-role with its own click target
-          expect(tag, `${t}/${col.key} row must be a role=button tap target`).toMatch(/role="button"/);
+        if (col.key === "compType") continue; // the header badge is the type switch
+        const row = rowMarkup(html, col.key);
+        const chip = html.includes(`data-add-chip="${col.key}"`);
+        const inline = ["landSizeUnit", "leaseRatePeriod", "leaseRateExpense", "leaseAnnualRate", "salePricePerArea"].includes(col.key);
+        if (inline) continue; // segmented toggle / price read-back, covered below
+        expect(row || chip, `${t}/${col.key} is unreachable on the phone sheet`).toBeTruthy();
+        if (row) {
+          const kind = row.match(/data-field-editor="(\w+)"/)?.[1];
+          expect(["text", "action", "readonly"], `${t}/${col.key}`).toContain(kind);
+          if (kind === "text") expect(row, `${t}/${col.key}: whole row is a <label>`).toMatch(/^<label/);
         }
       }
+      expect((html.match(/<input[^>]*data-sheet-input/g) || []).length).toBeGreaterThan(2);
+    });
+    it(`${t}: Unit row only as an AC|SF toggle on land; Place on map while unplaced`, () => {
+      const html = renderSheet(t);
+      expect(html).toContain("Place on map");
+      expect(html).not.toMatch(/data-field-key="landSizeUnit"/);
+      if (t === "land") expect(html).toContain('aria-label="Size unit"');
+      else expect(html).not.toContain('aria-label="Size unit"');
+      if (t === "lease") { expect(html).toContain('aria-label="Rate period"'); expect(html).toContain('aria-label="Term unit"'); }
     });
     it(`${t}: an edit on every editable column lands in the draft via applyCellEdit`, () => {
       const cols = [...neededToSaveColumns(t), ...mobileSections(t).flatMap((s) => s.cols)]
