@@ -54,6 +54,8 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 ---
 
 ## 🔲 Open
+
+### B9000002 — EXP B control
 ### B2096359 — A stale site-plan row auto-PATCHes `project_id: "e2e-fixture"` (not a site id), 409s on the foreign key, and a NEW upload then hangs at "0.0 of 0.0 MB" `[comps / site-plans]` (bug) #comps #files #persistence  *(Found by the signed-in verification of #1998 2026-10-05, build b8658dc. Related to B2096355 (background-write banner) but a different symptom. DEDUPE-FIRST: B2096355 is the nearest; this is the upload-wedge half it did not cover. Constraint check: nothing contradicts `## Owner product constraints`.)*
 
 ⚠ **LOUD — NOT FIXED THIS SESSION (needs a diagnosis the session ran out of room for).** Evidence: an unattached site-plan row was auto-PATCHed with `project_id:"e2e-fixture"` (a PROJECT/GROUP id — the real site ids are `e2e-fixture-site` / `e2e-fixture-testfit`); Postgres refused on `site_plan_overlays_project_id_fkey` (409) and a red "Couldn't save — the document this points to may have been removed" banner showed (so the B2096355 quiet path did not cover this call); while the stale row existed a new "Place on map" upload sat at "Uploading the brochure… 0.0 of 0.0 MB" for 60 s+ and the insert POST was never sent; deleting the stale row let uploads finish. Suspect: `resolveOrCreateTrackedSiteForOverlay` returning a GROUP id where a SITE id is required, and the upload awaiting the resolve.
