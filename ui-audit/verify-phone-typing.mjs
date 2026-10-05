@@ -69,9 +69,11 @@ const seed = (signedIn) => `(() => { try {
 } catch (e) {} })();`;
 
 async function open(browser, phone, mode, { signedIn = true, route }) {
-  const ctx = await browser.newContext({ ...devices[phone], ignoreHTTPSErrors: true });
+  const ctx = await browser.newContext({ ...devices[phone] }); // certificate checks stay on (owner rule)
   await installStubSupabase(ctx, { tables: tables(), session });
-  await ctx.route(/^(?!.*(localhost|127\.0\.0\.1|stub\.supabase\.co)).*/, (r) => r.abort()); // no external network: tiles/GIS blocked
+  // no external network (tiles/GIS blocked) — except the app under test itself, so a deployed build (planyr.io) can be scored
+  const own = new URL(BASE).host;
+  await ctx.route((u) => !/localhost|127\.0\.0\.1|stub\.supabase\.co/.test(u.host) && u.host !== own, (r) => r.abort());
   await ctx.addInitScript(seed(signedIn));
   await ctx.addInitScript(IOS_MODEL, { kbPx: KEYBOARDS[phone], tallInner: mode === "ios-tallinner" });
   const page = await ctx.newPage();
