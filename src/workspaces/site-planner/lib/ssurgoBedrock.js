@@ -23,9 +23,9 @@ const CM_PER_IN = 2.54;
 
 /* Shallow-rock classes, by depth to the bedrock restriction (inches). Anything ≥ 60 in is not painted. */
 export const BEDROCK_CLASSES = [
-  { id: "very", maxIn: 20, color: "#7f1d1d", label: "Under 20 in" },
-  { id: "shallow", maxIn: 40, color: "#ea580c", label: "20–40 in" },
-  { id: "moderate", maxIn: 60, color: "#facc15", label: "40–60 in" },
+  { id: "very", maxIn: 20, color: "#7f1d1d", label: "Under 20 in" }, // design-exempt: map ink for a drawn depth class (cartography, not UI chrome)
+  { id: "shallow", maxIn: 40, color: "#ea580c", label: "20–40 in" }, // design-exempt: map ink for a drawn depth class (cartography, not UI chrome)
+  { id: "moderate", maxIn: 60, color: "#facc15", label: "40–60 in" }, // design-exempt: map ink for a drawn depth class (cartography, not UI chrome)
 ];
 export const BEDROCK_PAINT_MAX_IN = 60;
 
