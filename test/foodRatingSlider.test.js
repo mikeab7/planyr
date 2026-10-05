@@ -1,5 +1,5 @@
 /* foodRatingSlider — GUARD for the owner's rating decision (NEW-1, 2026-10-05; CLAUDE.md "Owner
- * product constraints" #15): a visit's Food rating and Ambiance rating are each ONE slider, 1 to 10
+ * product constraints" #16): a visit's Food rating and Ambiance rating are each ONE slider, 1 to 10
  * in HALF-point steps. This file fails if the range or step changes, or if tap buttons / a stepper
  * / whole numbers come back. Red on the code before this change (phone rendered a 1-10 tap grid;
  * desktop stepped by 0.25). Browser half: ui-audit/verify-food-rating-and-sheet.mjs. */
