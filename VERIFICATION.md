@@ -176,12 +176,6 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
-### V1532176 — B2112576: a layer that is ON but zoom-gated toasts once per crossing, and Zoom in fixes it
-Sandbox-proven (unit + e2e on a local build). Live steps, signed in as the test account on planyr.io (`ui-audit/lib/signedInSession.mjs`; read `/version.json` in the SAME observation as each PASS/FAIL and match it to the merge commit):
-1. Open a located plan zoomed out past the 1-ft terrain gate, Layers → turn Contour lines on. **Expect:** one toast "… is hidden at this zoom" with a Zoom in button, bottom-centre.
-2. Click Zoom in. **Expect:** the map animates in, contours draw, toast gone.
-3. Zoom back out past the gate and stay there, panning/zooming a bit. **Expect:** the toast returns exactly once, not on every tick.
-4. Reload with contours still on and zoomed out. **Expect:** the toast shows on load. On a phone width, **Expect:** it does not cover the map controls.
 ### V1529328 — B2109728: two concurrent PRs that each file a backlog + verification entry stay mergeable on github.com, in either order `Blocker: live-GitHub`
 
 Sandbox-proven: `test/ledgerConcurrentPRs.test.js` (GitHub-equivalent `git merge-tree`, red-proofed against the old layout). This item checks the one thing a sandbox cannot: github.com's own `mergeable_state` once the layout is on `main`.
