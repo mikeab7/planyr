@@ -4919,6 +4919,12 @@ const NoteEditor = forwardRef(function NoteEditor({
    * React state — the same "the editor is the one source of truth" rule the toolbar's own
    * active-state reads follow. */
   const titleStyleNow = (!editor || editor.isDestroyed) ? {} : (editor.state.doc.attrs?.titleStyle || {});
+  /* One size answer shared by the title input and its width ghost (NEW-4). */
+  const titleFontStyle = {
+    fontSize: (titleStyleNow.sup || titleStyleNow.sub)
+      ? Math.round((titleStyleNow.fontSize || noteTitleFontPx(narrow)) * 0.7)
+      : (titleStyleNow.fontSize || noteTitleFontPx(narrow)),
+  };
 
   const edited = editedLabel(updatedAt);
 
@@ -5369,9 +5375,7 @@ const NoteEditor = forwardRef(function NoteEditor({
               style={{
                 gridArea: "1 / 1", visibility: "hidden", whiteSpace: "pre", overflow: "hidden",
                 fontWeight: titleStyleNow.bold ? 800 : 700, letterSpacing: "-0.01em", padding: "2px 2px 2px 0",
-                fontSize: (titleStyleNow.sup || titleStyleNow.sub)
-                  ? Math.round((titleStyleNow.fontSize || noteTitleFontPx(narrow)) * 0.7)
-                  : (titleStyleNow.fontSize || noteTitleFontPx(narrow)),
+                ...titleFontStyle,
               }}
             >{(title || "Untitled page") + " "}</span>
             <input
@@ -5419,9 +5423,7 @@ const NoteEditor = forwardRef(function NoteEditor({
                    real name more room to actually show on a 390px-class phone before the
                    input's own internal scroll takes over. */
                 font: "inherit",
-                fontSize: (titleStyleNow.sup || titleStyleNow.sub)
-                  ? Math.round((titleStyleNow.fontSize || noteTitleFontPx(narrow)) * 0.7)
-                  : (titleStyleNow.fontSize || noteTitleFontPx(narrow)),
+                ...titleFontStyle,
                 letterSpacing: "-0.01em",
                 padding: "2px 0", outline: "none",
               }}
@@ -5452,7 +5454,7 @@ const NoteEditor = forwardRef(function NoteEditor({
                   <span
                     data-testid="note-edited"
                     title={absoluteStamp(updatedAt)}
-                    style={{ flex: "0 0 auto", fontSize: 11, fontWeight: 600, color: "var(--text-tertiary)" }}
+                    style={{ flex: "0 0 auto", fontSize: 12, fontWeight: 600, color: "var(--text-tertiary)" }}
                   >{edited}</span>
                 ) : null}
               </div>
