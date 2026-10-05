@@ -3833,3 +3833,7 @@ Sandbox-proven: `test/e2eSessionRoute.test.js` (18, mutation-checked). Pending: 
 3. Password sign-in still needs a captcha for real users. **Expect:** unchanged `captcha_failed`.
 
 **✅ PASSED 2026-10-04 (Claude Code session, signed in headlessly on planyr.io, build `21216dd` read in the same call via `/version.json`):** `node ui-audit/verify-signed-in-session.mjs https://planyr.io` → `PASS signed in as e2e@planyr.test | fixture e2e-fixture-site visible: true`. First attempt on build `2375282` answered 503 not-configured (deploy predated `SUPABASE_SERVICE_ROLE_KEY`); after Michael's republish the route works.
+
+### V1518160 — B2095824: the e2e sign-in route authenticates against production (re-proof) ✅ PASSED 2026-10-05
+**Steps → named expected result:** (1) `curl` `/version.json` no-store → build id; (2) `node ui-audit/verify-signed-in-session.mjs https://planyr.io` → route answers 200 with tokens (a 404 would mean disabled-or-wrong-key and fails the helper), then the page proves the Supabase user is `e2e@planyr.test` and RLS returns `e2e-fixture-site`.
+**Result:** PASS — `signed in as e2e@planyr.test | fixture e2e-fixture-site visible: true`; build `ccaca0c` read in the same run (= `origin/main` tip). Key value never printed; key-format mismatch refuted (admin calls succeeded).
