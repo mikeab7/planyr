@@ -171,21 +171,9 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
-### V1518689 — B2096353: retrying a failed overlay upload via "Change page…" rasterises the PDF page
+### V1517459 — B2095120: the e2e-fixture-testfit plan (legacy `line` elements) opens and draws
 
-**Steps** (signed in as `e2e@planyr.test`, after the fix deploys; `/version.json` in the same call): on a throwaway plan, add a PDF overlay, force a failed first upload (offline once), then use the row's "Change page…". **Expect:** the page renders, no "detached ArrayBuffer" error. Delete the throwaway plan.
-
-### V1518690 — B2096354: a diverged Model local copy is never auto-pushed; the Sync problem warning persists
-
-**Steps** (signed in as the test account, after deploy; `/version.json` in the same call; throwaway project): 1. Open Model, type `A` in A1, wait for green Synced; note `model_sheets.version`. 2. Make the local copy diverge (edit the `planyr:model:sheet:v1:<uid>:<projectId>` localStorage JSON so A1 is `LOCAL-B`). 3. Reload and touch nothing for 5 s. **Expect:** red 'Sync problem' badge stays, `data-testid="model-diverged-bar"` visible, NO `model_sheets` write, cloud version/data unchanged. 4. Edit a cell. **Expect:** still no cloud write. 5. Click "Use the cloud copy". **Expect:** grid shows the cloud content, bar gone, one write (+1), green; Ctrl+Z restores local. 6. Repeat 2–3, click "Keep this device's copy". **Expect:** one write replaces the cloud content, green. 7. Control: matching copies reload → no bar. Delete the throwaway model.
-
-### V1518691 — B2096355: opening a comp's detail writes nothing and shows no "Couldn't save" banner
-
-**Steps** (signed in, after deploy): open a comp's detail on an account that has an orphaned overlay row. **Expect:** no PATCH to `site_plan_overlays`, no banner.
-
-### V1518692 — B2096356: three attachments dropped in a row leave three chips
-
-**Steps** (signed in, after deploy): in a throwaway note drop a PDF, an XLSX and a DWG. **Expect:** three chips, each with its own type badge and size. Delete the note.
+Sandbox-proven: `test/unknownElementType.test.js`. **Steps** (signed in as `e2e@planyr.test` on planyr.io after the deploy; `/version.json` in the same call): open `#/project/e2e-fixture-testfit/site`. **Expect:** `planner-canvas` appears and no "Site Planyr hit an error" card. (Before: build 2f45a3d threw "reading 'label'"; build eafc260 threw "reading 'x'".)
 
 
 ### V1518688 — B2096352: Backspace after the Depth ▲ never deletes the building (focus parked on Zoom-to-fit)
@@ -193,11 +181,36 @@ was never clicked" quietly ships broken.
 Sandbox-proven: `test/keyContract.test.js`. **Steps** (signed in as `e2e@planyr.test` on planyr.io after the deploy; `/version.json` in the same call; own throwaway plan, one building drawn): 1. Open Properties, press **Zoom to fit** (focus stays on it), select the building. 2. Click the Depth ▲ (stepper). 3. Press Backspace (real key). **Expect:** the building survives (element count 1→1) and the key-scope toast shows. 4. Control: click the building, Backspace. **Expect:** it deletes (1→0). Delete the throwaway plan afterwards.
 
 
-### V1517459 — B2095120: the e2e-fixture-testfit plan (legacy `line` elements) opens and draws
+### V1518692 — B2096356: three attachments dropped in a row leave three chips
 
-Sandbox-proven: `test/unknownElementType.test.js`. **Steps** (signed in as `e2e@planyr.test` on planyr.io after the deploy; `/version.json` in the same call): open `#/project/e2e-fixture-testfit/site`. **Expect:** `planner-canvas` appears and no "Site Planyr hit an error" card. (Before: build 2f45a3d threw "reading 'label'"; build eafc260 threw "reading 'x'".)
+**Steps** (signed in, after deploy): in a throwaway note drop a PDF, an XLSX and a DWG. **Expect:** three chips, each with its own type badge and size. Delete the note.
 
 
+### V1518691 — B2096355: opening a comp's detail writes nothing and shows no "Couldn't save" banner
+
+**Steps** (signed in, after deploy): open a comp's detail on an account that has an orphaned overlay row. **Expect:** no PATCH to `site_plan_overlays`, no banner.
+
+### V1518690 — B2096354: a diverged Model local copy is never auto-pushed; the Sync problem warning persists
+
+**Steps** (signed in as the test account, after deploy; `/version.json` in the same call; throwaway project): 1. Open Model, type `A` in A1, wait for green Synced; note `model_sheets.version`. 2. Make the local copy diverge (edit the `planyr:model:sheet:v1:<uid>:<projectId>` localStorage JSON so A1 is `LOCAL-B`). 3. Reload and touch nothing for 5 s. **Expect:** red 'Sync problem' badge stays, `data-testid="model-diverged-bar"` visible, NO `model_sheets` write, cloud version/data unchanged. 4. Edit a cell. **Expect:** still no cloud write. 5. Click "Use the cloud copy". **Expect:** grid shows the cloud content, bar gone, one write (+1), green; Ctrl+Z restores local. 6. Repeat 2–3, click "Keep this device's copy". **Expect:** one write replaces the cloud content, green. 7. Control: matching copies reload → no bar. Delete the throwaway model.
+
+### V1518689 — B2096353: retrying a failed overlay upload via "Change page…" rasterises the PDF page
+
+**Steps** (signed in as `e2e@planyr.test`, after the fix deploys; `/version.json` in the same call): on a throwaway plan, add a PDF overlay, force a failed first upload (offline once), then use the row's "Change page…". **Expect:** the page renders, no "detached ArrayBuffer" error. Delete the throwaway plan.
+
+### V1518080 — B2081251: the Shallow rock (depth to bedrock) layer paints real SSURGO data on planyr.io `Blocker: live-GIS`
+
+**Steps** (Chrome on planyr.io, or `node ui-audit/verify-ssurgo-bedrock.mjs https://planyr.io`; read the served chunk hash in the same observation):
+1. Run the harness. **Expect:** the Piedmont (Gwinnett) KNOWN-GOOD arm paints ≥ 1 shallow-rock unit (a run where it paints none is VOID); Cherokee/Savannah/Katy answer without error (Savannah/Katy may legitimately paint few or none).
+2. Throwaway plan at **33.95 / -84.00**, Layers → Base & terrain → **Shallow rock (depth to bedrock)** on. **Expect:** dark-red / orange / yellow map-unit polygons, status dot blue, hover names the unit and "bedrock as shallow as N in", the row's ⓘ states depth is the shallowest soil in the unit and that unpainted ≠ no rock; **the map does not move**.
+3. Same on a Houston plan. **Expect:** the row is listed; few or no polygons (deep Gulf Coast soils) and no error.
+4. File → Export PDF with it on (Piedmont plan). **Expect:** the polygons print in the same colours.
+- **Stopping rule:** closes on a dated pass, or a failed step filed as a recurrence on B2081251 (a WFS/SDA format difference is the likely failure: paste the response into the item).
+
+### V1518081 — B2081252: point and polygon layers appear in the PDF/PNG export `Blocker: none`
+
+**Steps** (throwaway plan only): Houston-area plan, turn on **EPA Superfund / RCRA cleanups** and **Airports** at a zoom where dots show, File → Export PDF. **Expect:** the dots appear on the sheet in the screen's colours. Repeat on a Georgia plan with **Hazardous sites** and **Critical habitat**. **Expect:** points and the filled habitat polygon print.
+- **Stopping rule:** closes on a dated pass.
 ### V1504304 — B2086368: delete a file from the Library's Recent / Unfiled lists, restore it, delete it forever `Blocker: auth`
 
 Sandbox-proven: `ui-audit/verify-library-home-delete.mjs` (33 checks, real Chromium, signed-in against a stub database) and `test/libraryHomeDelete.test.js` (red on unmodified main). Not provable here: a real account and the real database.

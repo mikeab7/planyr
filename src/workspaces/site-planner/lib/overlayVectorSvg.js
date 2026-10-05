@@ -19,6 +19,7 @@
  * style: { stroke, strokeWidth, strokeOpacity, dash, fill, fillOpacity, radius }
  */
 import { xmlEscape } from "./kmzExport.js";
+import { pointSymbolOptions } from "./layerRequest.js";
 
 const clampNum = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 // Trim to `round` decimals without trailing-zero / exponent noise (kmzExport `num` idiom).
@@ -137,6 +138,31 @@ export function esriPolygonFeatures(geometry, style) {
   const g = geometry;
   const polys = g.type === "MultiPolygon" ? g.coordinates : g.type === "Polygon" ? [g.coordinates] : [];
   return polys.filter((rings) => rings && rings.length && rings[0].length >= 3).map((coords) => ({ kind: "polygon", coords, style }));
+}
+
+/* ONE esriFeature (a GeoJSON feature off a live FeatureServer layer) → every normalized print feature it draws:
+ * LINES, POINTS and POLYGONS, in the SAME symbology the screen uses (pointSymbolOptions for a point, the row's
+ * `styleFn` — or its flat colour/weight with no fill — for a polygon), all at BASE opacity (1): the emitter
+ * applies the layer's opacity slider once. PDF-PARITY (B2081252): this used to emit lines only, so every point
+ * layer (EPA cleanups, tanks, airports, substations, traffic counts) and every polygon layer drew on screen and
+ * was ABSENT from the PDF/PNG. A row opts OUT with `printGeometry: false`, never in. Pure. */
+export function esriPrintFeatures(gj, cfg, leafStyle) {
+  if (!gj || !gj.geometry) return [];
+  const g = gj.geometry;
+  const out = [];
+  const lineStyle = leafStyle(cfg.styleFn ? cfg.styleFn(gj.properties, 1) : { color: cfg.color, weight: cfg.weight, opacity: 1 });
+  out.push(...esriLineFeatures(g, lineStyle));
+  if (cfg.printGeometry === false) return out;
+  if (g.type === "Point" || g.type === "MultiPoint") {
+    const o = pointSymbolOptions(cfg, 1);
+    for (const c of (g.type === "Point" ? [g.coordinates] : g.coordinates)) {
+      out.push({ kind: "point", coords: c, style: { stroke: o.color, strokeWidth: o.weight, strokeOpacity: 1, fill: o.fillColor, fillOpacity: o.fillOpacity, radius: o.radius } });
+    }
+  } else if (g.type === "Polygon" || g.type === "MultiPolygon") {
+    const o = cfg.styleFn ? cfg.styleFn(gj.properties, 1) : { color: cfg.color, weight: cfg.weight, opacity: 1, fillColor: cfg.color, fillOpacity: 0 };
+    out.push(...esriPolygonFeatures(g, { stroke: o.color, strokeWidth: o.weight, strokeOpacity: 1, fill: o.fillColor || o.color, fillOpacity: o.fillOpacity ?? 0 }));
+  }
+  return out;
 }
 
 // terrain worker artifact coords are [lat,lng]; GeoJSON/our features are [lon,lat].
