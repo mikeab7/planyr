@@ -6,9 +6,9 @@
  * three pinned), 57 soft-deleted, an organization name in the profile. THEME=dark|light and
  * VIEWPORT=WxH (default 1440x900; use 390x844 for a phone) select the surface; SHOTS=dir saves screenshots.
  * Checks (each PASS/FAIL): no section labels · ONE card, pinned first, rest newest-opened first · pin
- * icons (pinned always visible + green, unpinned hover-only) · scrim + panel surface/border/shadow ·
+ * icons (pinned always visible + green, unpinned hover-only) · panel surface/border/shadow ·
  * exactly one scrollable element, footer inside the visible panel · right-cluster columns share left x ·
- * company card (org name / 'Company workspace' / search hides it) · tapping the scrim closes without
+ * company card (org name / 'Company workspace' / search hides it) · outside click closes (no scrim)
  * falling through · company scope keeps the tab from every org-capable tab, no project id · Site tab at
  * company scope = map with a labelled pin per located project, tap a pin opens that project.
  * KNOWN-GOOD ARM: the run is VOID unless the stub's 65 projects and 57 deleted count are really seen.
@@ -152,20 +152,21 @@ if (VIEW[0] >= 760) {
   ok(Number(await page.locator('[data-testid="project-pin-pj12"]').evaluate((e) => getComputedStyle(e).opacity)) === 1, "…and appears on hover");
 }
 
-console.log("\n3. Panel sits above the page: scrim, surface, border, shadow");
+console.log("\n3. Panel sits above the page: no page dim, surface, border, shadow");
 const look = await page.evaluate(() => {
   const panel = document.querySelector(".psw-panel"); const cs = getComputedStyle(panel);
-  const scrim = document.querySelector('[data-testid="project-scrim"]');
+  // Any full-page fixed overlay (a dim/scrim) other than the panel's own dismiss layer.
+  const dim = [...document.body.querySelectorAll("*")].filter((e) => { const c = getComputedStyle(e); const r = e.getBoundingClientRect(); return c.position === "fixed" && r.width >= innerWidth - 1 && r.height >= innerHeight - 1 && c.backgroundColor !== "rgba(0, 0, 0, 0)" && !e.closest(".psw-panel"); }).length;
   const header = document.querySelector("header, [data-testid='app-header']") || document.body;
   const lum = (c) => { const m = c.match(/[\d.]+/g).map(Number); return 0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]; };
   const card = document.querySelector('[data-testid="project-card"]');
   const chromeBg = getComputedStyle(document.documentElement).getPropertyValue("--chrome-bg");
   const probe = document.createElement("i"); probe.style.background = "var(--chrome-bg)"; document.body.appendChild(probe);
   const chrome = getComputedStyle(probe).backgroundColor; probe.remove();
-  return { panelBg: cs.backgroundColor, panelBorder: cs.borderTopWidth + " " + cs.borderTopStyle, shadow: cs.boxShadow, hasScrim: !!scrim, scrimBg: scrim && getComputedStyle(scrim).backgroundColor,
+  return { panelBg: cs.backgroundColor, panelBorder: cs.borderTopWidth + " " + cs.borderTopStyle, shadow: cs.boxShadow, dim,
     cardBg: getComputedStyle(card).backgroundColor, chrome, panelDarkerThanChrome: lum(cs.backgroundColor) < lum(chrome), cardLighterThanPanel: lum(getComputedStyle(card).backgroundColor) > lum(cs.backgroundColor) };
 });
-ok(look.hasScrim && /rgba\(0, 0, 0, 0\.\d+\)/.test(look.scrimBg), "the page dims behind the open dropdown", look.scrimBg);
+ok(look.dim === 0, "the page is NOT dimmed behind the open dropdown (no full-page overlay)", String(look.dim));
 ok(/^1px solid/.test(look.panelBorder) && look.shadow !== "none", "thin border + drop shadow", `${look.panelBorder} · ${look.shadow.slice(0, 40)}`);
 if (THEME === "dark") ok(look.panelDarkerThanChrome, "dark: panel surface is darker than the header", `${look.panelBg} vs header ${look.chrome}`);
 ok(look.cardLighterThanPanel === (THEME === "dark" || true), "cards are raised against the panel", `${look.cardBg} on ${look.panelBg}`);
@@ -217,12 +218,10 @@ await page.fill('[data-testid="project-search"]', "");
 
 if (SHOTS) { mkdirSync(SHOTS, { recursive: true }); await page.screenshot({ path: `${SHOTS}/switcher-${THEME}-${VIEW[0]}.png` }); }
 
-console.log("\n7. Scrim: tapping it closes the dropdown and nothing underneath activates");
-const before = page.url();
+console.log("\n7. Clicking outside closes the dropdown (pre-#2040 behaviour: the press then reaches the page)");
 await page.mouse.click(VIEW[0] - 6, VIEW[1] - 6);
 await page.waitForTimeout(400);
-ok((await page.locator('[data-testid="project-list-scroll"]').count()) === 0 && (await page.locator('[data-testid="project-scrim"]').count()) === 0, "dropdown and scrim both gone");
-ok(page.url() === before, "the press did not fall through to the page underneath", page.url().split("#")[1]);
+ok((await page.locator('[data-testid="project-list-scroll"]').count()) === 0, "outside click closed the dropdown");
 
 console.log("\n8. Company scope keeps the tab you are on");
 const TABS = [["site", "site-planner"], ["notes", "notes"], ["library", "library"], ["schedule", "scheduler"], ["spreadsheet", "model"], ["markup", "doc-review"]];
