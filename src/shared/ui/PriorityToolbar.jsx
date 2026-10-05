@@ -36,6 +36,7 @@
  */
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AnchoredMenu from "./AnchoredMenu.jsx";
+import { RADIUS } from "./radius.js";
 import { planToolbar, TOOLBAR_GAP, MORE_WIDTH } from "./toolbarPlan.js";
 
 /** `{ width: number|null, narrow: boolean }` — published by AppHeader for toolbars inside its rows. */
@@ -49,11 +50,11 @@ function stripIdentity(root) {
 
 const moreBtnStyle = (open) => ({
   display: "flex", alignItems: "center", justifyContent: "center", flex: "none",
-  height: 26, width: MORE_WIDTH, padding: 0, borderRadius: 7, cursor: "pointer",
+  height: 26, width: MORE_WIDTH, padding: 0, borderRadius: RADIUS.md, cursor: "pointer",
   border: `1px solid ${open ? "var(--accent-schedule-text)" : "var(--chrome-divider)"}`,
   background: open ? "var(--hover-ghost)" : "var(--chrome-bg)", color: "var(--chrome-text)", fontFamily: "inherit",
 });
-const rowStyle = { display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "7px 9px", borderRadius: 7, border: "none", cursor: "pointer", background: "transparent", fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)" };
+const rowStyle = { display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "7px 9px", borderRadius: RADIUS.md, border: "none", cursor: "pointer", background: "transparent", fontFamily: "inherit", fontSize: 12, fontWeight: 600, color: "var(--text-primary)" };
 
 function menuRowsOf(it) {
   if (it.menuRows) return it.menuRows.map((r) => ({ ...r, key: `${it.id}/${r.id}`, itemId: it.id }));
@@ -84,7 +85,11 @@ export default function PriorityToolbar({ name, items, gap = TOOLBAR_GAP, moreLa
   // a signature of everything that can change a measured width — re-measure when it moves
   const sig = norm.map((it) => `${it.id}|${it.label || ""}|${it.badge ?? ""}|${it.ghost ? 1 : 0}`).join("§");
 
-  /* ---- measure the hidden copies (layout effect: before paint, so a plan never flashes a wrong bar) -- */
+  /* ---- measure the hidden copies (layout effect: before paint, so a plan never flashes a wrong bar) ----
+   * The measuring layer exists ONLY for the commit in which `measuredSig !== sig` (first mount, an item's label or
+   * badge changing, web fonts arriving) and is unmounted again straight after: a permanent hidden duplicate of every
+   * control would be invisible to the eye but not to selectors, the control-signature crawl or a screen reader. */
+  const [measuredSig, setMeasuredSig] = useState(null);
   const measure = useCallback(() => {
     const layer = measureRef.current;
     if (!layer) return;
@@ -92,25 +97,17 @@ export default function PriorityToolbar({ name, items, gap = TOOLBAR_GAP, moreLa
     const next = {};
     for (const el of layer.querySelectorAll("[data-m]")) {
       const [id, mode] = el.getAttribute("data-m").split("::");
-      const w = el.getBoundingClientRect().width;
-      (next[id] = next[id] || {})[mode] = w;
+      (next[id] = next[id] || {})[mode] = el.getBoundingClientRect().width;
     }
     setWidths((prev) => {
       const same = Object.keys(next).length === Object.keys(prev).length && Object.keys(next).every((k) => prev[k] && Math.abs((prev[k].full ?? 0) - (next[k].full ?? 0)) < 0.5 && Math.abs((prev[k].icon ?? 0) - (next[k].icon ?? 0)) < 0.5);
       return same ? prev : next;
     });
   }, []);
-  useLayoutEffect(() => { measure(); }, [sig, measure]);
-  useEffect(() => {
-    const layer = measureRef.current;
-    if (!layer || typeof ResizeObserver !== "function") return undefined;
-    let raf = 0;
-    const ro = new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(measure); });
-    for (const el of layer.querySelectorAll("[data-m]")) ro.observe(el);
-    return () => { cancelAnimationFrame(raf); ro.disconnect(); };
-  }, [sig, measure]);
-  // web fonts changing a label's width is the one thing a ResizeObserver on a hidden layer can miss in some engines
-  useEffect(() => { try { document.fonts && document.fonts.ready && document.fonts.ready.then(measure); } catch (_) { /* optional */ } }, [measure]);
+  const layerShown = measuredSig !== sig && !narrow;
+  useLayoutEffect(() => { if (layerShown) { measure(); setMeasuredSig(sig); } }, [layerShown, sig, measure]);
+  // web fonts changing a label's width is the one thing a one-shot measurement can miss: measure again when they land
+  useEffect(() => { try { document.fonts && document.fonts.ready && document.fonts.ready.then(() => setMeasuredSig(null)); } catch (_) { /* optional */ } }, []);
 
   /* ---- no provider: the budget is this toolbar's own parent box ----------------------------------- */
   useLayoutEffect(() => {
@@ -188,19 +185,18 @@ export default function PriorityToolbar({ name, items, gap = TOOLBAR_GAP, moreLa
           <button ref={moreRef} type="button" data-toolbar-more="" title={moreLabel} aria-label={moreLabel} aria-haspopup="menu" aria-expanded={open}
             onClick={() => setOpen((o) => !o)} style={{ ...moreBtnStyle(open), position: "relative", alignSelf: "center" }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" /></svg>
-            {badgeTotal > 0 && <span aria-hidden="true" style={{ position: "absolute", top: -3, right: -3, width: 8, height: 8, borderRadius: 8, background: "var(--accent-schedule-text)", border: "1px solid var(--chrome-bg)" }} />}
+            {badgeTotal > 0 && <span aria-hidden="true" style={{ position: "absolute", top: -3, right: -3, width: 8, height: 8, borderRadius: RADIUS.pill, background: "var(--accent-schedule-text)", border: "1px solid var(--chrome-bg)" }} />}
           </button>
-          <AnchoredMenu open={open} onClose={() => close(false)} anchorRef={moreRef} placement="below-right" width={236} gap={8}
-            panelStyle={{ padding: 6, borderRadius: 10, background: "var(--surface-raised)", color: "var(--text-primary)", border: "1px solid var(--border-default)", boxShadow: "0 14px 34px rgba(0,0,0,0.28)", fontFamily: "system-ui, sans-serif" }}>
+          <AnchoredMenu open={open} onClose={() => close(false)} anchorRef={moreRef} placement="below-right" width={236} gap={8}>
             <div ref={menuRef} role="menu" data-toolbar-menu={name} onKeyDown={onMenuKey}>
               {menuItems.map((it) => (it.renderMenu
                 ? <div key={it.id} data-menu-item-id={it.id} role="none">{it.renderMenu({ close })}</div>
                 : menuRowsOf(it).map((r, k) => (
                   <button key={r.key} type="button" role="menuitem" data-menu-item-id={k === 0 ? it.id : r.key} disabled={r.disabled}
                     onClick={() => { close(true); r.onSelect && r.onSelect(); }}
-                    style={{ ...rowStyle, ...(r.sepBefore || (k === 0 && it.sepBefore) ? { borderTop: "1px solid var(--chrome-divider)", borderRadius: 0, marginTop: 3, paddingTop: 9 } : null), opacity: r.disabled ? 0.5 : 1, fontWeight: r.active ? 700 : 600 }}>
+                    style={{ ...rowStyle, ...(r.sepBefore || (k === 0 && it.sepBefore) ? { borderTop: "1px solid var(--chrome-divider)", borderRadius: RADIUS.sm, marginTop: 3, paddingTop: 9 } : null), opacity: r.disabled ? 0.5 : 1, fontWeight: r.active ? 700 : 600 }}>
                     <span style={{ flex: 1, minWidth: 0 }}>{r.label}</span>
-                    {Number(r.badge) > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: "var(--on-accent)", background: "var(--accent-schedule-text)", borderRadius: 20, padding: "1px 7px", minWidth: 18, textAlign: "center", lineHeight: 1.5 }}>{r.badge}</span>}
+                    {Number(r.badge) > 0 && <span style={{ fontSize: 10.5, fontWeight: 700, color: "var(--on-accent)", background: "var(--accent-schedule-text)", borderRadius: RADIUS.pill, padding: "1px 7px", minWidth: 18, textAlign: "center", lineHeight: 1.5 }}>{r.badge}</span>}
                     {r.active && <span aria-hidden="true" style={{ color: "var(--accent-schedule-text)" }}>●</span>}
                   </button>
                 )))
@@ -210,7 +206,7 @@ export default function PriorityToolbar({ name, items, gap = TOOLBAR_GAP, moreLa
         </>
       )}
       {/* measuring layer — see header. Never visible, never focusable, never read by assistive tech. */}
-      {!narrow && (
+      {layerShown && (
         <div ref={measureRef} aria-hidden="true" inert="" data-toolbar-measure=""
           style={{ position: "absolute", left: 0, top: 0, height: 0, overflow: "hidden", visibility: "hidden", pointerEvents: "none", display: "flex", width: "max-content", alignItems: "center", gap }}>
           {norm.map((it) => (

@@ -29,7 +29,8 @@
  */
 import { chromium } from "playwright";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { assertMeasurable, pacedWait } from "./lib/tabTiming.mjs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { pacedWait } from "./lib/tabTiming.mjs";
 import { collectSnapshot, auditSnapshot, auditMenu } from "./lib/widthSweep.mjs";
 
 const arg = (name) => { const a = process.argv.find((x) => x.startsWith(`--${name}=`)); return a ? a.slice(name.length + 3) : null; };
