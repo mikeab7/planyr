@@ -485,7 +485,7 @@ import {
  * render immediately; this lazy tier only ENRICHES that line with the regime name and the statute. */
 import { siteState as resolveSiteState } from "./lib/siteRegion.js";
 import { splitPolygonByCut, remapEdgeVector } from "./lib/polygonSplit.js";
-import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea } from "./lib/polyClip.js";
+import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea, mergeParcelRings } from "./lib/polyClip.js";
 import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom, mapChromeCardStyle } from "./lib/sheetFurniture.js";
 // B765985 — pure, dependency-free (safe on the boot path): the explicit engineering-scale math
 // the compose screen's frame-locking and fit-check use.
@@ -1383,54 +1383,6 @@ function nearestPointOnSeg(p, a, b) {
   let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
   t = Math.max(0, Math.min(1, t));
   return { x: a.x + t * dx, y: a.y + t * dy };
-}
-
-/* ----------------------- polygon union (combine) ------------------- */
-// Merge two adjacent simple polygons that share a boundary. Each shared edge
-// appears in opposite directions in the two rings (consistent winding), so we
-// cancel every edge that has a reverse twin in the other ring, then stitch the
-// surviving edges back into one outer loop. Returns the merged ring or null
-// (not adjacent / couldn't form a single loop).
-function mergeRings(ringA, ringB, tol = 0.75) {
-  const eq = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) <= tol;
-  const edges = [];
-  const add = (ring) => { for (let i = 0; i < ring.length; i++) edges.push({ a: ring[i], b: ring[(i + 1) % ring.length], dead: false }); };
-  add(ringA); add(ringB);
-  let shared = 0;
-  for (let i = 0; i < edges.length; i++) {
-    if (edges[i].dead) continue;
-    for (let j = 0; j < edges.length; j++) {
-      if (j === i || edges[j].dead) continue;
-      if (eq(edges[i].a, edges[j].b) && eq(edges[i].b, edges[j].a)) { edges[i].dead = edges[j].dead = true; shared++; break; }
-    }
-  }
-  if (!shared) return null; // no common boundary → nothing to fuse
-  const live = edges.filter((e) => !e.dead);
-  if (live.length < 3) return null;
-  const used = new Array(live.length).fill(false);
-  const ring = [live[0].a, live[0].b]; used[0] = true;
-  for (let guard = 0; guard < live.length + 2; guard++) {
-    const end = ring[ring.length - 1];
-    let f = -1;
-    for (let k = 0; k < live.length; k++) { if (!used[k] && eq(live[k].a, end)) { f = k; break; } }
-    if (f < 0) break;
-    used[f] = true;
-    ring.push(live[f].b);
-  }
-  if (ring.length > 1 && eq(ring[0], ring[ring.length - 1])) ring.pop();
-  // drop coincident / collinear vertices left over from the cancelled edges
-  const dedup = [];
-  for (const p of ring) if (!dedup.length || !eq(dedup[dedup.length - 1], p)) dedup.push(p);
-  if (dedup.length > 1 && eq(dedup[0], dedup[dedup.length - 1])) dedup.pop();
-  const out = [];
-  for (let i = 0; i < dedup.length; i++) {
-    const a = dedup[(i - 1 + dedup.length) % dedup.length], b = dedup[i], c = dedup[(i + 1) % dedup.length];
-    const cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-    const baseLen = Math.hypot(c.x - a.x, c.y - a.y) || 1; // |cross|/base = perpendicular deviation in ft — scale-independent (B28)
-    if (Math.abs(cross) / baseLen > 0.1) out.push(b); // keep a vertex only if it bends > ~0.1 ft off the a→c chord
-  }
-  const final = out.length >= 3 ? out : dedup;
-  return final.length >= 3 ? final : null;
 }
 
 /* ------------------------------ format ----------------------------- */
@@ -8243,17 +8195,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
       return;
     }
-    let result = chosen[0].points;
-    let remaining = chosen.slice(1).map((p) => p.points);
-    let progress = true;
-    while (remaining.length && progress) {
-      progress = false;
-      for (let i = 0; i < remaining.length; i++) {
-        const merged = mergeRings(result, remaining[i]);
-        if (merged) { result = merged; remaining.splice(i, 1); progress = true; break; }
+    // B2090352 — a real polygon union (lib/polyClip.js `mergeParcelRings`), not edge-twin cancellation:
+    // a shorter neighbour, an extra vertex on the common line, opposite winding and ~1 ft survey slop
+    // all fuse now. Lots that only touch at a corner, or are genuinely apart, are still refused — and
+    // the odd one out is NAMED instead of a blanket "don't share a boundary".
+    const merged = mergeParcelRings(chosen.map((p) => p.points));
+    if (!merged.ok) {
+      if (merged.code === "apart") {
+        const odd = chosen.filter((_, i) => !merged.groups[0].includes(i));
+        const info = parcelDisplayInfo(parcels);
+        const names = odd.map((p) => info.get(p.id)?.name || "a picked parcel");
+        flashWarn(merged.groups[0].length < 2
+          ? "⚠ Those parcels don't touch edge-to-edge — pick parcels that share a boundary."
+          : `⚠ ${names.join(", ")} ${odd.length === 1 ? "doesn't" : "don't"} touch the other picked parcels — unpick ${odd.length === 1 ? "it" : "them"} or pick the lots in between.`, 7000);
+      } else if (merged.code === "hole") {
+        flashWarn("⚠ Merging those would enclose a lot that isn't picked — pick that one too, or merge them in pieces.", 7000);
+      } else {
+        flashWarn("⚠ Those parcels couldn't be merged cleanly — their outlines are too far off to fuse.", 7000);
       }
+      return;
     }
-    if (remaining.length) { flashWarn("⚠ Those parcels don't all share a boundary — pick parcels that touch edge-to-edge.", 6000); return; } // B735: non-blocking notice, not a jarring alert()
+    const result = merged.ring;
     pushHistory("merge"); // NEW-1 (perf investigation) — was the bare "edit" fallback; a real OP_KINDS member so a merge is answerable from telemetry (op_kind on the written rows) instead of a fresh investigation next time.
     const np = { id: uid(), points: result, locked: true };
     // The merged-away parcels are genuinely removed (replaced by `np`), so TOMBSTONE them — the same
