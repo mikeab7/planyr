@@ -498,7 +498,7 @@ describe("B1574256/B1574257 — Louisiana parishes route by geometry, not just b
     expect(countyKeyForName("Orleans Parish", "LA")).toBe("la_orleans");
     expect(countyKeyForName("East Baton Rouge Parish", "LA")).toBe("la_eastbatonrouge");
     // …and a parish Planyr has NOT wired still answers honestly rather than borrowing a neighbour.
-    expect(countyKeyForName("Jefferson Parish", "LA")).toBe(null);
+    expect(countyKeyForName("Pointe Coupee Parish", "LA")).toBe(null);
   });
 
   it("the user-facing label and help say PARISH, never County", () => {
