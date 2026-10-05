@@ -11,3 +11,11 @@ describe("SitePlanner never reads TYPE[<element type>].label unguarded", () => {
     expect(bad.map(([n]) => n)).toEqual([]);
   });
 });
+
+describe("the draw list skips elements of an unknown type", () => {
+  const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+  it("drawEls filters on TYPE[el.type]", () => {
+    const block = src.slice(src.indexOf("const drawEls = useMemo"), src.indexOf("/* ------------ grid lines"));
+    expect(block).toMatch(/TYPE\[el\.type\]/);
+  });
+});

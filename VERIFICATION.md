@@ -171,6 +171,11 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1517459 — B2095120: the e2e-fixture-testfit plan (legacy `line` elements) opens and draws
+
+Sandbox-proven: `test/unknownElementType.test.js`. **Steps** (signed in as `e2e@planyr.test` on planyr.io after the deploy; `/version.json` in the same call): open `#/project/e2e-fixture-testfit/site`. **Expect:** `planner-canvas` appears and no "Site Planyr hit an error" card. (Before: build 2f45a3d threw "reading 'label'"; build eafc260 threw "reading 'x'".)
+
+
 ### V1517458 — B2095123: logging a visit on an open manual pin shows it in Past visits immediately
 
 Sandbox-proven: `test/foodPastVisitsLive.test.js`. **Steps** (signed in as `e2e@planyr.test` on planyr.io after the deploy; `/version.json` read in the same call): 1. Food → drop a manual pin, name it `zz-verify`, log a visit. **Expect:** the pin closes into a manual pin. 2. Reselect it, log a second visit without closing the panel. **Expect:** "Past visits · 2" appears at once. Delete the throwaway visits.
