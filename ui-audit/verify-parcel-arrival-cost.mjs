@@ -37,7 +37,7 @@ const BASE = process.env.BASE_URL || "http://localhost:4188/";
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const BUDGET_MS = Number(process.env.ARRIVAL_BUDGET_MS || 33);
 /* Turning Select parcels on is React's commit for the toggle plus ONE layer construction (~25 ms in the display sync, its own timer task since B2092656 ×2) plus whatever GC lands in it (a 22-33 ms major GC was seen inside it). Main measured 48-85 ms as ONE task. Gated looser than the arrival arms, and said so. */
-const SELECT_ON_BUDGET_MS = Number(process.env.SELECT_ON_BUDGET_MS || 50);
+const SELECT_ON_BUDGET_MS = Number(process.env.SELECT_ON_BUDGET_MS || 33); // B2092656 ×3: 50 → 33 (20 ms measured on both builds here; the live gap was the saved copies — see verify-select-parcels-on-cost.mjs)
 const FRAME_BUDGET_MS = Number(process.env.ARRIVAL_FRAME_BUDGET_MS || 50);
 const PROFILE = process.env.PROFILE === "1";
 const BARTOW = { lat: 34.20, lng: -84.83 };
