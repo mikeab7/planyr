@@ -38,7 +38,7 @@ import {
 import { countLiveCompsForProject } from "../../comps/lib/compsStore.js";
 import { overlayPlaced } from "../lib/sitePlanOverlays.js";
 import { imagePointToLatLon } from "../lib/overlayGeoref.js";
-import { friendlySaveError } from "../lib/overlayErrors.js";
+import { friendlySaveError, classifyOverlayWriteFailure } from "../lib/overlayErrors.js";
 import { withResolvedCounties } from "../lib/overlayCompCounty.js";
 import { notifyCompsChanged } from "../../comps/lib/compsChanged.js";
 import { uploadOverlayRaster, downloadOverlayRasterUrl } from "../lib/overlayRasterStorage.js";
@@ -720,7 +720,9 @@ export default function SitePlansSection({
       for (const o of data) {
         if (o.projectId || o.siteLinkDeclined || !overlayPlaced(o) || resolveAttemptedRef.current.has(o.id)) continue;
         resolveAttemptedRef.current.add(o.id);
-        resolveOverlaySite(o).then((groupId) => { if (groupId) patchAndReload(o, { projectId: groupId }); });
+        // `background: true` — the user only OPENED the panel; a failed auto-attach (e.g. the
+        // matched site was deleted elsewhere → FK 409) is quiet telemetry, never a banner.
+        resolveOverlaySite(o).then((groupId) => { if (groupId) patchAndReload(o, { projectId: groupId }, { background: true }); }).catch((e) => console.warn("[sitePlanOverlays] background site resolve failed:", e));
       }
     }
     return error ? null : data; // callers that need the FRESH rows (not a re-render's timing) read this
@@ -1068,7 +1070,7 @@ export default function SitePlansSection({
   // NEW-18 — same version-race fix as the placement-drag committer above: queued per overlay id,
   // reads the synchronously-updated version cache rather than a possibly-stale prop, and retries
   // once on a reported conflict before treating it as a genuine foreign edit.
-  const patchAndReload = (o, patch) => serialized(o.id, async () => {
+  const patchAndReload = (o, patch, { background = false } = {}) => serialized(o.id, async () => {
     const expected0 = Number.isFinite(overlayVersionsRef.current[o.id]) ? overlayVersionsRef.current[o.id] : o.version;
     let { error, data, conflict } = await updateOverlay(o.id, { ...o, ...patch, version: expected0 });
     if (conflict) {
@@ -1079,13 +1081,17 @@ export default function SitePlansSection({
         ({ error, data, conflict } = await updateOverlay(o.id, { ...o, ...patch, version: freshVersion }));
       }
     }
+    const verdict = classifyOverlayWriteFailure({ error, conflict, background });
     if (conflict) {
       console.warn("[sitePlanOverlays] update conflict survived retry — treating as a genuine concurrent edit:", o.id);
-      setPanelError("Someone else changed this site plan just now — your change hasn't saved. Try again.");
     } else if (error) {
-      console.error("[sitePlanOverlays] update failed:", error); setPanelError(friendlySaveError(error));
+      console.error("[sitePlanOverlays] update failed:", error);
     } else if (data && Number.isFinite(data.version)) {
       noteVersion(o.id, data.version);
+    }
+    if (verdict.banner) setPanelError(verdict.banner);
+    if (verdict.telemetry) {
+      import("../../telemetry/clientErrors.js").then((m) => m.reportClientEvent(verdict.telemetry.event, verdict.telemetry.message, { id: o.id })).catch(() => {});
     }
     await reload();
   });

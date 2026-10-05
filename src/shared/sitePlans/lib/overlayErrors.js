@@ -79,3 +79,33 @@ export function friendlySaveError(error) {
   // not the raw SQL/Postgres wording).
   return "Something went wrong saving that — try again, and let us know if it keeps happening.";
 }
+
+/* classifyOverlayWriteFailure — decides WHO hears about a failed overlay write.
+ *
+ * A write the user asked for (rename, opacity, lock, a drag, "Site" picker) stays LOUD: the
+ * friendly banner. A BACKGROUND write the user never asked for — the reload sweep that
+ * auto-attaches a placed plan to a matching site just because the Comps/Plans panel was opened —
+ * must never put a "Couldn't save" banner in front of someone who only LOOKED: it is reported as
+ * a quiet telemetry event instead (still recorded, never swallowed). The motivating case: the
+ * sweep matches against this device's cached site list; if that site has since been deleted
+ * elsewhere, the PATCH of project_id hits the sites FK (23503) and the user saw "Couldn't save"
+ * for an open. Pure — returns what to do, the caller does it.
+ *
+ * Returns { banner: string|null, telemetry: { event, message }|null }. */
+export function classifyOverlayWriteFailure({ error, conflict, background }) {
+  if (!error && !conflict) return { banner: null, telemetry: null };
+  if (background) {
+    const detail = conflict ? "version conflict" : String((error && (error.message || error.code)) || error);
+    return {
+      banner: null,
+      telemetry: {
+        event: "overlay-background-write-failed",
+        message: `automatic site-plan attach didn't save (${detail}) — skipped, nothing shown to the user`,
+      },
+    };
+  }
+  if (conflict) {
+    return { banner: "Someone else changed this site plan just now — your change hasn't saved. Try again.", telemetry: null };
+  }
+  return { banner: friendlySaveError(error), telemetry: null };
+}
