@@ -38,6 +38,8 @@
     "perf:recorder": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-perf-recorder.mjs",
     "perf:capturepipe": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-capture-pipe.mjs --build",
     "perf:pondcalls": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/count-pond-invocations.mjs --build --assert",
+    "perf:zoomthrash": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-zoom-no-resize-thrash.mjs",
+    "perf:zoomthrash:live": "node ui-audit/verify-zoom-no-resize-thrash-live.mjs",
     "perf:midzoom": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-midgesture-zoom.mjs --selftest",
     "perf:zoomab": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/zoom-smoothness-ab.mjs",
     "perf:fontblock": "xvfb-run -a --server-args=\"-screen 0 1600x1000x24\" node ui-audit/verify-font-blocking.mjs",
