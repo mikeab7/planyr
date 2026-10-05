@@ -109,7 +109,7 @@ export function attachSnapshotLotNumbers(layer, { field, getFeatures } = {}) {
   const relayout = () => {
     if (!map || !group) return;
     group.clearLayers();
-    paintLotNumbers({ map, group, field, floor: 0, measure, forEachFeature: (cb) => getFeatures().forEach(cb) });
+    paintLotNumbers({ map, group, field, floor: 0, measure, forEachFeature: (cb) => getFeatures().forEach((f) => cb(f)) }); // NOT forEach(cb): its 2nd argument is the INDEX, which the live path uses as a bbox (B2092656 ×2)
   };
   layer.on("add", () => { map = layer._map; if (map) group = L.layerGroup().addTo(map); });
   layer.on("remove", () => {
