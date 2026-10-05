@@ -5345,7 +5345,7 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 
 ## ⏳ Verify — awaiting live confirmation
 
-### B2095120 — Site Planner hard-crashed on open for a plan holding an element type not in the type table `[site-planner]` (bug) #site-planner #robustness  *(Found by the VERIFY-SELF v3 auth sweep 2026-10-04 on `e2e-fixture-testfit`. DEDUPE-FIRST: no prior item. Constraint check: nothing contradicts `## Owner product constraints`.)*
+### B2095120 — Site Planner hard-crashed on open for a plan holding an element type not in the type table `[site-planner]` (bug) #site-planner #persistence  *(Found by the VERIFY-SELF v3 auth sweep 2026-10-04 on `e2e-fixture-testfit`. DEDUPE-FIRST: no prior item. Constraint check: nothing contradicts `## Owner product constraints`.)*
 
 `[x]` **Symptom:** opening `#/project/e2e-fixture-testfit/site` signed in showed "Site Planyr hit an error and couldn't load: Cannot read properties of undefined (reading 'label')".
 `[x]` **Cause (AUDIT-FIRST, reproduced live on build 2f45a3d):** the fixture holds six legacy `type: "line"` setback elements; `SitePlanner.jsx` read `TYPE[el.type].label` unguarded in the element render pass (and 6 selection-panel sites), so any saved element whose type is not in `planStyle.TYPE` took the whole planner down.
