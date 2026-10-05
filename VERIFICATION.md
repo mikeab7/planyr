@@ -176,6 +176,18 @@ was never clicked" quietly ships broken.
 
 ## 🔲 Needs verification
 
+### V1536737 — B2117136: Michael's own Goose Creek reads red/amber/green BY LOCATION in the rebuilt Site Analysis panel `Blocker: real-data`
+
+Sandbox-proven (mocked sources, known ground truth): `ui-audit/verify-site-analysis-trust.mjs`, `test/siteChecks*.test.js`. This item checks the one thing a mock cannot: his real plan against the real FEMA / NWI / RRC services. Run by Cowork on Michael's browser (planyr.io, signed in as him); confirm the deployed chunk hash in the SAME observation as each reading (`document.querySelectorAll('script[src]')`, and `/version.json` = the merge commit).
+**Steps:**
+1. Open Goose Creek (4 parcels, 289.52 AC, Baytown/Harris) → left rail **Analysis**. **Expect:** header `4 parcels · 289.52 AC` with ONE line `Checked …`; boxes in this order: *Who governs this site*, *Checked for you*, *Show on the map*, *Calls to make*; footer `Screening data. Verify before relying on it.` No red banner, no INFO/PRESENT/NONE FOUND badges, no Activate-layer chips, no per-row ages.
+2. *Who governs this site.* **Expect:** County = Harris County; City reads Baytown with `part ETJ` and an amber `straddles` chip (the Baytown split, NOT collapsed to "Baytown" and NOT "unincorporated"); School district named; Roads names the county-maintained roads (`County maintains all 4 · John Martin …` or a per-road list if mixed). `Show lines` draws/hides the city limits & ETJ lines.
+3. *Checked for you* — the formerly identical red PRESENT cards. **Expect:** Floodplain, Wetlands and Pipelines now DIFFER: each shows a figure (flood = % of site; wetlands = acres · count; pipelines = `~distance` or `Crosses`) and a colour set by location. Record each row's colour + figure. The three must no longer be identical; a pipeline outside the ring and not crossing must be amber, never red.
+4. Click each verdict row. **Expect:** it opens in place (one at a time) with one or two plain sentences and a source line; pipelines say `Routes are approximate. Confirm with 811 and the operator.`; floodplain shows `Open in Drainage →` and it goes to Drainage. Hover a row. **Expect:** that layer shows on the map and the others dim; moving off restores it; nothing is left switched on in the Layers panel.
+5. *Show on the map.* **Expect:** pills only (no verdicts, no distances, no ticks) and the exact muted line `Tap one to turn it on. These come from public maps that are often off, so Planyr doesn't flag them for you.` Click **Rail** → the Rail row in the Layers panel is checked; untick it in the Layers panel → the pill un-presses; reload → state matches.
+6. *Calls to make.* **Expect:** `Water and sewer provider` (only if no certificate covers), `Zoning district · city part only` (part of the site is in city limits), `Pipeline operators · 811` (a pipeline row is red/amber), `Power service`. Tick two, reload. **Expect:** the ticks are still there.
+- **Stopping rule:** closes when steps 1–6 are recorded with the chunk hash and the colours/figures of step 3; a row that reads wrong against what Michael knows of the ground re-opens B2117136.
+
 ### V1529328 — B2109728: two concurrent PRs that each file a backlog + verification entry stay mergeable on github.com, in either order `Blocker: live-GitHub`
 
 Sandbox-proven: `test/ledgerConcurrentPRs.test.js` (GitHub-equivalent `git merge-tree`, red-proofed against the old layout). This item checks the one thing a sandbox cannot: github.com's own `mergeable_state` once the layout is on `main`.
@@ -183,6 +195,11 @@ Sandbox-proven: `test/ledgerConcurrentPRs.test.js` (GitHub-equivalent `git merge
 1. From fresh `origin/main` create branches `exp-a` and `exp-b`; on each add ONE new file `ledger/backlog/open/B<own-id>.md` and ONE `ledger/verification/pending/V<own-id>.md` (use ids from `npm run next-id -- --against-main`, distinct per branch). Open both as DRAFT PRs against `main` and a third, `exp-b → base exp-a` (so the two interact). **Expect:** neither PR to main reads `dirty`; `exp-b → exp-a` reads `unstable` or `clean`, NOT `dirty`.
 2. Re-read `mergeable_state` of #2009, #1978 and #1975 without touching them. **Expect:** record each (a PR that edited the old `BACKLOG.md`/`VERIFICATION.md` stays `dirty` until its owner runs `node scripts/ledger.mjs import-legacy <base> <tip>`; one that did not edit them is no longer dirty because of the ledgers).
 3. Close the throwaway PRs and delete their branches (never merge them). **Expect:** nothing left behind.
+- **Result 2026-10-05, main `03589a0` (PR #2027 merged):**
+  - ✅ **Step 1 PASSED.** Throwaway PRs #2029 (A→main) and #2030 (B→main), each adding one backlog + one verification entry file: `mergeable_state: blocked` (mergeable; required check not yet reported / draft) — NOT `dirty`. #2031 (B→base A, the interacting pair): `unstable` — NOT `dirty`.
+  - ✅ **Step 2 recorded, PRs untouched.** #2009, #1978, #1975 all read `dirty` — each edited the old `BACKLOG.md`/`VERIFICATION.md`, so each needs its owner's one-time `node scripts/ledger.mjs import-legacy <base> <tip>` (the touch guard now fails them for the old-way edit). #2026 (not in the brief) had no `dirty` reading in the open-PR list.
+  - ⚠ **Step 3 PARTIAL:** the three PRs are closed and the branches (`exp-ledger-a1`/`b1`) were reset to main's tip so they carry no entries, but this sandbox's proxy refuses branch DELETES (403) — the six `exp-ledger-*` branches still exist and need deleting by hand (GitHub → Branches).
+  - Found while running it: `next-id --against-main` crashed on a main that carries `ledger/` (invalid `encoding: "buffer"`); fixed in PR #2028.
 - **Stopping rule:** closes when steps 1–3 are recorded with the main sha; a `dirty` reading in step 1 re-opens B2109728.
 
 ### V1527936 — B2046224 (×4): Food on a phone held sideways — the card docks right, the pin stays in view, one compact header, nothing under the notch `Blocker: real-device (a real keyboard, notch and Safari toolbar cannot be raised headless); steps 1–6 are session-runnable on planyr.io after the deploy`
