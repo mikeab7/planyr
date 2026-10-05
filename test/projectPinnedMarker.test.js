@@ -68,7 +68,7 @@ describe("the pin button", () => {
     for (const k of ["SLOT_PIN", "SLOT_CAL", "SLOT_TIME", "SLOT_MENU"]) expect(crumb).toMatch(new RegExp(`const ${k} = \\{ \\.\\.\\.SLOT, width: \\d+`));
   });
   it("the calendar slot is ALWAYS rendered; only its icon is conditional", () => {
-    expect(body).toMatch(/<span data-testid=\{`project-slot-cal-\$\{p\.id\}`\} style=\{SLOT_CAL\}>\s*\{p\.scheduleProjectId != null && \(/);
+    expect(body).toMatch(/<span data-testid=\{`project-slot-cal-\$\{p\.id\}`\} style=\{SLOT_CAL\}>\s*\{resolveScheduleHint\(p, liveSchedules\) != null && \(/);
     expect(body).toMatch(/title="Has a schedule"/);
   });
 });
