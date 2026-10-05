@@ -54,7 +54,7 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 ---
 
 ## 🔲 Open
-### B2095121 — Schedule edits silently fail to save for any account not on the per-schedule `schedules` path (403 RLS on `planar_data`) `[scheduler / cloud]` (bug) #scheduler #persistence #cloud  *(Found by the VERIFY-SELF v3 auth sweep 2026-10-04 (V238480, batch b06), diagnosed same day. DEDUPE-FIRST: no prior item. Constraint check: nothing contradicts `## Owner product constraints`.)*
+### B2095121 — Schedule edits silently fail to save for any account not on the per-schedule `schedules` path (403 RLS on `planar_data`) `[scheduler / cloud]` (bug) #scheduler #persistence #sync  *(Found by the VERIFY-SELF v3 auth sweep 2026-10-04 (V238480, batch b06), diagnosed same day. DEDUPE-FIRST: no prior item. Constraint check: nothing contradicts `## Owner product constraints`.)*
 
 ⚠ **LOUD — HALF SHIPPED, ROOT FIX NEEDS MICHAEL'S DECISION (production schema change).**
 `[x]` **Reproduced live on build 2f45a3d** as `e2e@planyr.test`: edit a task's Owner in Schedule → `POST /rest/v1/planar_data?on_conflict=key` → **403 `42501` "new row violates row-level security policy (USING expression)"**; the grid showed the edit, a reload lost it, nothing told the user (console only).
