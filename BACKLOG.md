@@ -54,12 +54,6 @@ Add a new tag to this legend **in the same commit** you first use it (this preve
 ---
 
 ## 🔲 Open
-### B2096354 — Model: a DIVERGENT local copy is silently pushed over the cloud copy on reload `[model / cloud sync]` (bug) #model #sync #persistence  *(Found by the VERIFY-SELF v3 auth sweep 2026-10-04 (V537648, batch b12). DEDUPE-FIRST: no prior item. Constraint check: nothing contradicts `## Owner product constraints`.)*
-
-⚠ **LOUD — DATA-LOSS CLASS (silent overwrite of cloud data); fix in progress this session (patch from a fix agent, `docs/DATA.md` rules); if this line is still here the fix did not land.** The debounced push in `ModelApp.jsx` never skips the diverged status, and the 'Sync problem' warning flashes under a second and is lost.
-- **Stopping rule:** closes on a signed-in pass of V1518690 (a diverged local copy is never auto-pushed and the warning persists until resolved).
-- Verify: live — **V1518690**.
-
 ### B2096357 — Organization page "Belongs to" lists an extra "Unknown project ( org-dest) HERE" row `[dashboard / projects]` (bug, cosmetic) #dashboard #ui  *(Found by the VERIFY-SELF v3 auth sweep 2026-10-04 (V571104, batch b12). DEDUPE-FIRST: no prior item. Constraint check: nothing contradicts `## Owner product constraints`.)*
 
 `[ ]` **Not yet fixed this session (too many defects found in one sweep; this one is cosmetic and its cause is undiagnosed).** The Dashboard per-project group was not separately inspected, only the activity feed.
@@ -5361,6 +5355,12 @@ physical row is a later polish," so **B104** is that remaining polish for the *m
 ---
 
 ## ⏳ Verify — awaiting live confirmation
+
+### B2096354 — Model: a DIVERGENT local copy is silently pushed over the cloud copy on reload `[model / cloud sync]` (bug) #model #sync #persistence  *(Found by the VERIFY-SELF v3 auth sweep 2026-10-04 (V537648, batch b12). DEDUPE-FIRST: no prior item. Constraint check: nothing contradicts `## Owner product constraints`.)*
+
+`[x]` **Cause (AUDIT-FIRST, reproduced as a sequence in a known-bad-control unit test):** on every reload the load effect changes `workbook`, so the push effect schedules an 800 ms timer; the cloud load then finds local ≠ cloud and sets `diverged`; the timer fires, never looks at `diverged` (it only checked `not-provisioned`, from a stale closure), sets `saving` (wiping the warning — the sub-second flash) and writes at the CURRENT version, so the version guard cannot catch it. **Fix:** new pure `lib/modelPushGate.js` (`cloudPushVerdict` / `runCloudPush` / `shownModelStatus`) re-asks the gate when the timer FIRES; a synchronous `divergedRef` hold set at both detection sites; the warning persists until the user resolves it through a new `DivergedBar` ("Use the cloud copy" / "Keep this device's copy", both undoable); the non-diverged path is unchanged (parity-tested). Guard: `test/modelDivergedPushGate.test.js` (16; the 5 wiring tests red before the ModelApp change, the known-bad-control reproduces the overwrite 3→4). **Owner-visible:** a new persistent bar on a diverged Model; the old detail text ("reload to see the other copy") was wrong — local always wins on load — and is replaced.
+- **Stopping rule:** closes on a signed-in pass of V1518690 (a diverged local copy is never auto-pushed and the warning persists until resolved).
+- Verify: live — **V1518690**.
 
 ### B2096355 — Opening a comp's detail PATCHes orphaned `site_plan_overlays` rows, gets a 409 and shows a "Couldn't save" banner `[comps / site-plans]` (bug) #comps #files #persistence  *(Found by the VERIFY-SELF v3 auth sweep 2026-10-04 (V379872 side finding, batch b09). DEDUPE-FIRST: no prior item. Constraint check: nothing contradicts `## Owner product constraints`.)*
 

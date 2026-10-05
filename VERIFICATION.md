@@ -177,7 +177,7 @@ was never clicked" quietly ships broken.
 
 ### V1518690 — B2096354: a diverged Model local copy is never auto-pushed; the Sync problem warning persists
 
-**Steps** (signed in, after deploy): create a divergent local copy of a throwaway model (edit the stored local copy while the cloud row differs), reload. **Expect:** the cloud row is unchanged and the 'Sync problem' state stays until resolved. Delete the throwaway model.
+**Steps** (signed in as the test account, after deploy; `/version.json` in the same call; throwaway project): 1. Open Model, type `A` in A1, wait for green Synced; note `model_sheets.version`. 2. Make the local copy diverge (edit the `planyr:model:sheet:v1:<uid>:<projectId>` localStorage JSON so A1 is `LOCAL-B`). 3. Reload and touch nothing for 5 s. **Expect:** red 'Sync problem' badge stays, `data-testid="model-diverged-bar"` visible, NO `model_sheets` write, cloud version/data unchanged. 4. Edit a cell. **Expect:** still no cloud write. 5. Click "Use the cloud copy". **Expect:** grid shows the cloud content, bar gone, one write (+1), green; Ctrl+Z restores local. 6. Repeat 2–3, click "Keep this device's copy". **Expect:** one write replaces the cloud content, green. 7. Control: matching copies reload → no bar. Delete the throwaway model.
 
 ### V1518691 — B2096355: opening a comp's detail writes nothing and shows no "Couldn't save" banner
 
