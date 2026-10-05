@@ -43,6 +43,7 @@ import { TERRAIN_MIN_ZOOM } from "./terrainGate.js";
  * `evidenceLayers.js`, which is why nothing outside it could see them; that module now
  * imports them from here so there is ONE number per gate, not two that can drift. */
 export const OSM_MIN_ZOOM = 14;        // OSM power/hydrant data is dense — don't fetch zoomed out
+export const SOIL_BEDROCK_MIN_ZOOM = 13; // SSURGO map units are dense (hundreds per sq mi in town) — the WFS answer is capped, so do not fetch zoomed out
 export const MAPILLARY_MIN_ZOOM = 16;  // Mapillary bbox must be < 0.01° — high zoom only
 
 /* B427410 (×2) — the map finder's "Road names" reference-overlay gate (MapFinder.jsx's
@@ -65,6 +66,7 @@ const KIND_GATE = {
   flowdir: TERRAIN_MIN_ZOOM,
   overpass: OSM_MIN_ZOOM,
   mapillary: MAPILLARY_MIN_ZOOM,
+  sdaBedrock: SOIL_BEDROCK_MIN_ZOOM,
 };
 
 /* Kinds that gate on the registry's own `minZoom` and nothing else. A `vector` layer below

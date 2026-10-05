@@ -133,7 +133,7 @@ export function featureLayerOptions(cfg, opacity, pane, opts = {}) {
  *     feature, and elevation under the cursor already has its own honest readout;
  *   • a registry row that opts out (`identify: false`). */
 const VECTOR_KINDS = new Set(["esriFeature", "vector", "vectorLine", "pipelineCorridor",
-  "overpass", "mapillary", "contours", "flowdir"]);
+  "overpass", "mapillary", "contours", "flowdir", "sdaBedrock"]);
 
 export function identifyCapable(cfg) {
   if (!cfg || !cfg.url) return false;

@@ -17297,7 +17297,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
     } else {
       const bn = bldgNo.get(el.id); // B122: a standalone building shows "Building N"
-      const name = bn ? `Building ${bn}` : TYPE[el.type].label.split(" / ")[0];
+      const name = bn ? `Building ${bn}` : (TYPE[el.type]?.label || "Element").split(" / ")[0];
       if (el.type === "building" && !poly && !el.dogEar) {
         // B123: the building label is a 4-line stack — name / sf / (incl. N bump-outs) /
         // dims. sf is its own line and sits high in the drop order (lib/labelLayout), so it
@@ -20636,7 +20636,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const setStyleDefault = () => {
     if (!selEl || !curStyle) return;
     setTypeStyle(selEl.type, { fill: curStyle.fill, stroke: curStyle.stroke, fillOpacity: curStyle.fillOpacity });
-    flashWarn(`Saved to Standards — new ${TYPE[selEl.type].label.split(" / ")[0].toLowerCase()} elements start with these colors.`, 4000);
+    flashWarn(`Saved to Standards — new ${(TYPE[selEl.type]?.label || "Element").split(" / ")[0].toLowerCase()} elements start with these colors.`, 4000);
   };
   // Drop the selected element's per-element overrides (back to the type default).
   const clearElStyle = () => { if (!selEl) return; pushHistory(); const tid = styleHostOf(selEl).id; setEls((a) => a.map((e) => { if (e.id !== tid) return e; const { fill, stroke, fillOpacity, ...rest } = e; return rest; })); };
@@ -26928,7 +26928,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               drop a type whose label carries a " / " qualifier (paving) — that text exists nowhere
               else, so suppressing it there would be a real information loss, not just tidying. */}
           {!multiStyleable && selEl && (
-            <Section title={selEl.type === "pond" || (phoneSheetSolo && !(TYPE[selEl.type]?.label || "").includes(" / ")) ? false : `Selected · ${dockZoneDisplayLabel(selEl) || TYPE[selEl.type].label}`}>
+            <Section title={selEl.type === "pond" || (phoneSheetSolo && !(TYPE[selEl.type]?.label || "").includes(" / ")) ? false : `Selected · ${dockZoneDisplayLabel(selEl) || (TYPE[selEl.type]?.label || "Element")}`}>
               {/* NEW-1/B872 — a RESHAPED building (footEdit: points + a dock frame) keeps the full building
                   inspector (Footprint reshape controls, dock zones, structure, column grid), routed through
                   the isBuilding branch below whose Footprint group handles the polygon case. A hand-CLICK-
@@ -27069,7 +27069,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
                         {curStyle && (<>
                           {specHead("Display", [
-                            specAction("Set as default", setStyleDefault, `Use these colors for every new ${TYPE[selEl.type].label}`),
+                            specAction("Set as default", setStyleDefault, `Use these colors for every new ${(TYPE[selEl.type]?.label || "Element")}`),
                             specAction("Reset", clearElStyle, "Revert this element to the type default"),
                           ])}
                           <PairedFieldHead left="Outline" right="Fill" />
@@ -29277,7 +29277,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         right={<PercentField value={curStyle.fillOpacity} min={10} onCommit={(v) => { pushHistory(); setSelEl({ fillOpacity: v }); }} inputStyle={numInput} ariaLabel="Fill opacity" />}
                       />
                       <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
-                        <button style={{ ...chip, flex: 1 }} onClick={setStyleDefault} title={`Use these colors for every new ${TYPE[selEl.type].label}`}>Set as default</button>
+                        <button style={{ ...chip, flex: 1 }} onClick={setStyleDefault} title={`Use these colors for every new ${(TYPE[selEl.type]?.label || "Element")}`}>Set as default</button>
                         <button style={chip} onClick={clearElStyle} title="Revert this element to the type default">Reset</button>
                         <button style={linkBtn} onClick={() => jumpToStandards("colors")} title="New detention pond elements start from Standards → Colors">Standards → Colors ↗</button>
                         <RowInfo label="New pond defaults" sections={[{ text: "New detention pond elements start from Standards → Colors." }]} />
@@ -29308,11 +29308,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 right={<PercentField value={curStyle.fillOpacity} min={10} onCommit={(v) => { pushHistory(); setSelEl({ fillOpacity: v }); }} inputStyle={numInput} ariaLabel="Fill opacity" />}
               />
               <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-                <button style={{ ...chip, flex: 1 }} onClick={setStyleDefault} title={`Use these colors for every new ${TYPE[selEl.type].label}`}>Set as default</button>
+                <button style={{ ...chip, flex: 1 }} onClick={setStyleDefault} title={`Use these colors for every new ${(TYPE[selEl.type]?.label || "Element")}`}>Set as default</button>
                 <button style={chip} onClick={clearElStyle} title="Revert this element to the type default">Reset</button>
               </div>
               <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 6 }}>
-                New {TYPE[selEl.type].label.split(" / ")[0].toLowerCase()} elements start from <button style={linkBtn} onClick={() => jumpToStandards("colors")}>Standards → Colors ↗</button>
+                New {(TYPE[selEl.type]?.label || "Element").split(" / ")[0].toLowerCase()} elements start from <button style={linkBtn} onClick={() => jumpToStandards("colors")}>Standards → Colors ↗</button>
               </div>
             </Section>
           )}
