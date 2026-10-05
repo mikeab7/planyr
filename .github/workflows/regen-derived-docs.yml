@@ -68,6 +68,7 @@ jobs:
         run: |
           node scripts/build-map.mjs
           node scripts/build-backlog-index.mjs
+          node scripts/ledger.mjs render   # BACKLOG.md + VERIFICATION.md views of ledger/ (NEW-1, ledger)
 
       # docs/UI-INVENTORY.md needs a real build + a live Playwright crawl of it — the same steps
       # build.yml's own Signature-budget gate uses, reused here rather than duplicated by hand.
@@ -100,12 +101,12 @@ jobs:
       - name: Check whether anything actually changed
         id: diff
         run: |
-          if git diff --quiet -- MAP.md BACKLOG_OPEN.md docs/UI-INVENTORY.md; then
+          if git diff --quiet -- MAP.md BACKLOG_OPEN.md BACKLOG.md VERIFICATION.md docs/UI-INVENTORY.md; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "All three files are already up to date — nothing to do."
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
-            git diff --stat -- MAP.md BACKLOG_OPEN.md docs/UI-INVENTORY.md
+            git diff --stat -- MAP.md BACKLOG_OPEN.md BACKLOG.md VERIFICATION.md docs/UI-INVENTORY.md
           fi
 
       # Idempotent, same shape as gis-drift.yml/parcel-snapshot.yml's "bump, don't duplicate"
@@ -132,8 +133,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          git add MAP.md BACKLOG_OPEN.md docs/UI-INVENTORY.md
-          git commit -m "Regenerate derived docs (MAP.md / BACKLOG_OPEN.md / docs/UI-INVENTORY.md)"
+          git add MAP.md BACKLOG_OPEN.md BACKLOG.md VERIFICATION.md docs/UI-INVENTORY.md
+          git commit -m "Regenerate derived docs (MAP.md / BACKLOG_OPEN.md / BACKLOG.md / VERIFICATION.md / docs/UI-INVENTORY.md)"
           git push -u origin "$BRANCH"
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
 
@@ -168,7 +169,7 @@ jobs:
             await github.rest.pulls.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: "Regenerate derived docs (MAP.md / BACKLOG_OPEN.md / docs/UI-INVENTORY.md)",
+              title: "Regenerate derived docs (MAP.md / BACKLOG_OPEN.md / BACKLOG.md / VERIFICATION.md / docs/UI-INVENTORY.md)",
               head: "${{ steps.push.outputs.branch }}",
               base: "main",
               body,

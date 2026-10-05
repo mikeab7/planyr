@@ -43,6 +43,7 @@
  *     branch counts, and the peer fetch staying affordable.
  */
 import { readFileSync, existsSync } from "node:fs";
+import { readText, existsText } from "./lib/ledger.mjs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -209,7 +210,7 @@ export function announceVerdict({ subjects = [], filed = {} }) {
 
 /** Working-tree text of a family's file pair. */
 function localTexts(repo, files) {
-  return files.map((f) => join(repo, f)).filter(existsSync).map((p) => readFileSync(p, "utf8"));
+  return files.filter((f) => existsText(repo, f)).map((f) => readText(repo, f));
 }
 
 /** Local (working-tree) heading ids for a family — what this branch actually says today. */
