@@ -248,6 +248,17 @@ export function registrationLayoutMayHaveChanged(li, w, h, overscan) {
   return !li || li.w !== w || li.h !== h || li.overscan !== overscan;
 }
 
+/* ⛔ NEW-1 (B2096832) — the cached layout verdict AFTER Leaflet's size has been re-synced to the container.
+ * `registrationLayoutMayHaveChanged`'s cache holds `cachedStale` (the map's cached size disagreed with the
+ * container) and reuses it until a layout input moves. A verdict of "stale" is a statement about the world
+ * BEFORE `invalidateSize` ran; once it has run the world is in sync, and leaving the flag true makes every
+ * later commit re-enter the resize branch (clear transform + forced layout + setView) — the 300 ms-per-zoom-
+ * frame freeze. Returns a NEW record with `cachedStale: false` (and the same measured cw/ch); null stays null.
+ * Pure. */
+export function resolvedLayoutInputs(li) {
+  return li ? { ...li, cachedStale: false } : li;
+}
+
 /* ⛔ NEW-1 (site-route render-loop crash, B1189's own class recurring at a different call site) —
  * whether two `view` objects ({ppf, offX, offY}) carry the SAME field values. `setView` guards its
  * dispatch with this, the same way `setSize`/`setRegShift` already guard theirs: a functional
