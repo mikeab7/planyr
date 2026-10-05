@@ -200,3 +200,18 @@ workaround had to key on his display signature — and why the gate has to live 
 
 Retention is deliberately NOT applied here; it is proposed, with a number and a trigger, on **B270913**.
 The measurement says it is not yet the lever: **0 rows are older than 90 days.**
+
+
+## Reading a minified attribution (B2102272)
+
+A capture's `ltNames` carries the long-animation-frame script's `sourceFunctionName` — on a production build that is a minifier's
+one- or two-letter name, and **the same name exists in dozens of chunks**. It was left unresolved across four builds. The method that
+resolved it, so nobody repeats the search: rebuild the capture's commit with sourcemaps (`git worktree add ../x <sha>`; `npx vite build
+--sourcemap true --outDir dist-sm`), then walk every function declaration / arrow-assigned variable with that name in every chunk (acorn
++ `@jridgewell/trace-mapping`) and read the SOURCE each maps to — most are in unrelated lazy chunks; only the ones in the chunk the route
+loads matter. Resolved for the Site route: **`U` (or `W` after a rebuild — it is the same function) = React's scheduler loop
+`performWorkUntilDeadline`**, the `MessageChannel.onmessage` handler that runs every scheduled React render, so a long task attributed to it
+means "React render + commit work" and says nothing about WHICH component; **`Lv` = react-dom's `dispatchContinuousEvent`**. To get from
+there to a real function, profile the same gesture: `ui-audit/diagnose-silvestri-zoom-freeze.mjs --profile [--callers <fn>]` resolves every
+frame through the build's sourcemaps and prints self + inclusive time. The first thing it named: the basemap registration layout effect's
+`invalidateSize → getSize` (B2102272).
