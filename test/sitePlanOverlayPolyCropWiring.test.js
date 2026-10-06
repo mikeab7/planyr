@@ -12,7 +12,7 @@ const panelSrc = readFileSync("src/shared/sitePlans/components/SitePlansSection.
 
 describe("rotatedImageLayer.js — ONE clip mechanism for both crop shapes", () => {
   it("imports the shared clip-path function rather than hand-rolling inset() math itself", () => {
-    expect(layerSrc).toMatch(/import \{ clipPathValueForCrop \} from "\.\/overlayCrop\.js";/);
+    expect(layerSrc).toMatch(/import \{ clipPathValueForCrop \} from "\.\.\/\.\.\/\.\.\/shared\/overlay\/overlayCrop\.js";/);
   });
   it("applyCrop delegates entirely to clipPathValueForCrop — no second render path", () => {
     const start = layerSrc.indexOf("const applyCrop = (crop) => {");

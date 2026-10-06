@@ -5,7 +5,7 @@
  * facts captured at filing time, so we never reopen the file to decide. Pure logic: this
  * picks the method + explains every rung it skipped (never a silent fall-through); the
  * actual geometry handoff (reproject / boundary-fit / measure-scale / manual calibrate)
- * lives in the overlay machinery (overlayAlign.js / overlayScale.js / the EPSG:2278
+ * lives in the overlay machinery (overlayPlacement.js / overlayScale.js / the EPSG:2278
  * spine) which the caller invokes for the chosen rung.
  *
  * Rung order (best → fallback):

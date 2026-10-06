@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { effectiveRasterDpi, cappedRasterDims } from "../src/shared/sitePlans/lib/overlayRasterSize.js";
+import { effectiveRasterDpi, cappedRasterDims } from "../src/shared/overlay/overlayRaster.js";
 
 describe("overlayRasterSize — effectiveRasterDpi", () => {
   it("leaves a normal letter-size flyer page at the base DPI (the owner's real Airtex page, 8.5x11in)", () => {

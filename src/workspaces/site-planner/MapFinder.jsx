@@ -55,7 +55,7 @@ import { registerChromeDock } from "../../shared/ui/chromeDock.js";
 import { cornerClearanceFromBottom } from "../../shared/ui/cornerClearance.js";
 // B848496 — site-plan overlays (upload a site plan, place it on the map, pin comps to it).
 import { useSitePlanOverlayLayers } from "./lib/useSitePlanOverlayLayers.js";
-import { latLonToImagePoint, suggestFtPerPx, feetBetween } from "../../shared/sitePlans/lib/overlayGeoref.js";
+import { latLonToImagePoint, suggestFtPerPx, feetBetween } from "../../shared/overlay/overlayPlacement.js";
 import { overlayPlaced } from "../../shared/sitePlans/lib/sitePlanOverlays.js";
 // Reused (never a new raw hex literal) for text on the fixed COMP_ACCENT blue below — that
 // accent doesn't change with theme, so the LIGHT palette's on-accent value is correct in both.
@@ -866,7 +866,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   // A sensible starting size/position for a freshly placed overlay: centered on the current map
   // view (or `centerOverride`, below), sized to a fraction of it (mirrors the Site Planner
   // reference-image panel's own "Size to view" button). Pure sizing math lives in
-  // overlayGeoref.js; only the live view is read here.
+  // overlayPlacement.js; only the live view is read here.
   //
   // `centerOverride` ({lat,lng}) — NEW-17: this is the ONLY door through which a caller may pin
   // the placement to a specific point instead of the live view center (a drag-and-drop upload
