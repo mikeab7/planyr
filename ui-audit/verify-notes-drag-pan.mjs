@@ -284,8 +284,13 @@ console.log("\n4 · PLAIN CLICKS KEEP TODAY'S BEHAVIOUR");
   ok("…and it created no box", (await boxCount(page)) === 3);
   await page.keyboard.type("Zq");
   await pacedWait(page, 900);
-  const txt = await page.evaluate((k) => localStorage.getItem(k), pageKey("p1"));
-  ok("typing lands in the cell (stored document)", /Zq/.test(txt || ""));
+  /* The editor's own live document, not a storage key: a signed-in account stores under its USER scope, not `local`. */
+  const inCellDoc = await page.evaluate(() => {
+    const walk = (n, inCell) => (n.type === "tableCell" || n.type === "tableHeader" ? true : inCell);
+    const hit = (n, inCell) => { const c = walk(n, inCell); if (n.type === "text" && c && /Zq/.test(n.text || "")) return true; return (n.content || []).some((k) => hit(k, c)); };
+    return hit(window.__noteEditor.json(), false);
+  });
+  ok("typing lands in the cell (the editor's document has it inside a table cell)", inCellDoc);
   const w = await wordCenter(page, "Hello");
   await page.mouse.click(w.x, w.y); await pacedWait(page, 150);
   await page.mouse.click(w.x, w.y);
