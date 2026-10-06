@@ -95,6 +95,9 @@ import { assertMeasurable } from "./lib/tabTiming.mjs";
 const { chromium } = pw;
 
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
+/* The app root now boots to the Dashboard, which has no project picker; open the Site route unless
+ * the caller already named a route. */
+const START = BASE.includes("#") ? BASE : `${BASE.replace(/\/?$/, "/")}#/site`;
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1234/chrome-linux64/chrome";
 const LOCKED = process.argv.includes("--locked");
 const LABELS = process.argv.includes("--labels");
@@ -288,13 +291,13 @@ const pageErrors = [];
 page.on("pageerror", (e) => pageErrors.push(String(e)));
 
 try {
-  await page.goto(BASE, { waitUntil: "load" });
+  await page.goto(START, { waitUntil: "load" });
   await page.waitForTimeout(1800);
   /* Open the seeded project through the real project picker. Seeding `currentSite` instead looks
    * like a shortcut and is not one — the app boots to the landing / map surface and the planner
    * canvas never mounts, so every probe below times out for a reason that has nothing to do with
    * the contract under test. */
-  await page.locator('button[title="Choose a project"]:visible, button[title="Switch project"]:visible').first().click();
+  await page.locator('button[title^="Choose a project"]:visible, button[title="Switch project"]:visible').first().click();
   await page.waitForTimeout(400);
   await page.locator(`button:has-text(${JSON.stringify(site.site)})`).first().click();
   await page.waitForSelector('[data-testid="planner-canvas"]', { timeout: 25000 });

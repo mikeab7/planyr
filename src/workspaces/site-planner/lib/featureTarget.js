@@ -237,6 +237,53 @@ export const CHROME_ATTR = "data-chrome";
  * one — can mutate anything), exactly mirroring how `gestureAnchorRef` already anchors a
  * double-click to what press 1 SELECTED. See `gestureActionRef` in SitePlanner.jsx. */
 export const ACTION_ATTR = "data-el-action";
+/* `{ kind, id }` / `{ kind: "measure", i }` → the `data-feature` key that names it (the inverse of
+ * `parseFeatureKey`). Null for anything that is not a resolvable target. */
+export function featureKeyOf(t) {
+  if (!t || !FEATURE_KINDS.includes(t.kind)) return null;
+  if (t.kind === "measure") return Number.isInteger(t.i) && t.i >= 0 ? `measure:${t.i}` : null;
+  return t.id != null && t.id !== "" ? `${t.kind}:${t.id}` : null;
+}
+
+/* ⛔ NEW-1 — WHAT A PRESS ON IDENTITY-TRANSPARENT CHROME IS *ABOUT*, recorded at press time.
+ *
+ * THE REGRESSION THIS CLOSES. B280402 made the acreage badge `data-chrome` — invisible to "which
+ * feature was double-clicked" — and the stub rows of `audit-doubleclick-properties` went green. Then
+ * B1575232 (3100daa30, "a canvas click belongs to what's under the cursor") taught `startAcChip` to
+ * SELECT its own parcel on press, which is right for a single click on the badge. But the gesture
+ * anchor (rule 0 of `resolveDoubleClickTarget`) is stamped from whatever press 1 SELECTED, and it wins
+ * OUTRIGHT — so a double-click over a stub that the hover-armed badge happens to cover was anchored to
+ * the LOT: press 1 selected the parcel, press 2 resolved to the parcel, the Parcels panel opened (and
+ * its reflow shifted the whole drawing, which the harness read as "158 paths changed"). The resolver's
+ * look-through rule was intact and never consulted. Measured: `__plannerHitWhy` → stack
+ * `['parcel:zzlot1|handle','el:zzel15',…]`, selection/anchor `parcel:zzlot1`.
+ *
+ * THE RULE, at the anchor rather than at the badge: when press 1 was DELIVERED to `data-chrome`, the
+ * gesture is about what the resolver finds BENEATH that chrome, not about the selection the chrome's
+ * own handler made. Delivery is untouched — the badge still takes the press, still selects its lot on
+ * a single click, still drags.
+ *
+ * ⛔ DELIBERATELY NOT the handle layer. A grip there belongs to the feature that is ALREADY selected,
+ * so the selection is the right subject — and looking through it is exactly what B278576 forbids (the
+ * 6×12 stub's own endpoint grip covers it entirely; beneath the grip is a DIFFERENT road). `data-chrome`
+ * is different in kind: it is armed by HOVER, not by selection, and its press selects its OWN owner,
+ * which is generally not the thing painted under it.
+ *
+ * `press` is `{ chrome: boolean, beneath: string|null }` as stamped by the canvas's capture-phase
+ * press recorder. Pure. */
+export function gestureAnchorKey(selKey, press) {
+  if (!selKey) return null;                       // nothing selected ⇒ nothing in flight
+  if (press && press.chrome && parseFeatureKey(press.beneath)) return press.beneath;
+  return selKey;
+}
+
+/* For the press recorder: was this press delivered to identity-transparent stray chrome, and if so
+ * what does the resolver find beneath it? `entries` is the press point's stack (`stackEntries`). */
+export function chromePressFacts(onChrome, entries) {
+  if (!onChrome) return { chrome: false, beneath: null };
+  return { chrome: true, beneath: featureKeyOf(resolveDoubleClickTarget(entries)) };
+}
+
 export function stackEntries(nodes) {
   const out = [];
   for (const n of nodes || []) {
