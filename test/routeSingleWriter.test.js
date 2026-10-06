@@ -89,6 +89,13 @@ const ALLOWED = [
     // same direct way Shell.jsx reads it back off the raw hash (`isAdminRoute`).
     match: /setAcctOpen\(false\); window\.location\.hash = "#\/admin";/,
   },
+  {
+    file: "src/workspaces/admin/lib/adminRoute.js",
+    // goAdminSection() — the admin page's section nav (#/admin/<section>), the Overview tiles and the Users →
+    // Password-reset link. Same reason as the Admin row above: #/admin/* is not a module route navigate() resolves.
+    // The ONE writer inside the admin page; guarded against re-writing an unchanged hash.
+    match: /window\.location\.hash !== next\) window\.location\.hash = next;/,
+  },
 ];
 
 describe("NEW-4 — window.location.hash is written from exactly the reviewed set of places", () => {

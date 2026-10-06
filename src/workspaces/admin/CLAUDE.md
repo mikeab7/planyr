@@ -16,8 +16,13 @@ indistinguishable from any other unrecognized route — never a permission-denie
   `#/admin` to `#/site` after boot).
 - `lib/adminStatus.js` + `lib/useIsAdmin.js` — ONE `is_admin()` answer per signed-in user id, shared by
   the account menu and the gate; an error is never cached (retried on menu open).
-- `AdminApp.jsx` — the page shell; sections in `lib/adminSections.js` order: Issues, Problem reports,
-  Support, Usage, Signup activity, County criteria requests, Password reset, Ops.
+- `AdminApp.jsx` — the page shell (NEW-1, 2026-10-05): a left section nav (a select at phone width) showing ONE section
+  at a time with count badges; the section lives in the hash (`#/admin/<id>`, bare = Overview — `lib/adminRoute.js`).
+  Sections in `lib/adminSections.js` order: Overview, Users, Issues, Support (Problem reports merged in), Usage, County
+  requests, Parcel coverage, Password reset, Ops. `AdminData.jsx` loads the shared datasets once (accounts, support queue,
+  county requests, 7-day errors) and owns the "Hide internal" switch Overview and Users both follow. `AdminTable.jsx` is
+  THE table style (sticky header, right-aligned numbers, `RelTime` = relative with exact time on hover); `AdminPanel.jsx`
+  the section header + loading/empty/error states. Never hand-roll a table or a date in a section.
 - `lib/adminAccess.js` — `checkIsAdmin(client)`, the pure wrapper around the RPC call. Fails
   closed on every path (no client, no session, an RPC error, a thrown exception) — never
   renders the admin page on an ambiguous result.
@@ -25,6 +30,12 @@ indistinguishable from any other unrecognized route — never a permission-denie
   `admin_users` has RLS enabled with **zero policies** (same discipline as `client_errors`'
   INSERT-only design, B279 — never add a SELECT policy to make a future check easier); the
   RPC is the only door in or out, and reveals nothing but a boolean.
+
+**Overview / Users / Issues / Support tidy (NEW-1..NEW-4, same day).** `OverviewSection.jsx` (headline tiles + newest sign-ups + top errors),
+`UsersSection.jsx` reading `admin_users_overview()` / `admin_user_activity()` (`db/admin_users_overview.sql`; counts and dates only;
+status-chip rules and internal-account flagging in `lib/adminUsers.js`; the sign-up rate-limit log is a collapsed block at its foot),
+Issues folds deploy chunk-load errors into one line and groups by normalised message (`lib/adminIssues.js`), Support groups bare
+slow taps per account (`lib/adminSupport.js`). The old separate Problem reports and Signup activity sections no longer exist.
 
 **Four sections built 2026-10-05 (B711905–B711908, owner block NEW-1) — `UsageSection.jsx`,
 `IssuesSection.jsx`, `SupportSection.jsx`, `OpsSection.jsx`, on the shared `AdminPanel.jsx` shell
@@ -47,7 +58,7 @@ modeled-jurisdiction lists the app itself routes against (`detentionRules.COUNTY
 `easementRules.MODELED_COUNTIES`) — the database has no way to know what a given deploy has modeled, and
 this keeps "wired" self-correcting the moment a county is added, with nothing to update by hand.
 
-**Seventh section (B1160721, NEW-2) — `SignupActivitySection.jsx`.** Signup volume visibility —
+**Signup log (B1160721, NEW-2) — now the collapsed log inside `UsersSection.jsx`.** Signup volume visibility —
 reads through `admin_list_signup_attempts()` (the migration lives in the shared `auth/db/` folder), the
 read side of the server-side signup rate-limit trigger on `auth.users`. Only `created` rows are
 ever logged there (a rate-limited attempt can't survive the transaction it aborts — see that
@@ -62,7 +73,7 @@ INSIDE the function (not merely a hidden button); records who reset whom and whe
 `admin_password_resets` (read via `admin_list_password_resets()`). Never displays an EXISTING
 password — bcrypt hashes are one-way — only ever generates and shows a new one, once.
 
-**Sixth section (B842866) — `ReportsSection.jsx`.** Lists everything filed through the global
+**Problem reports (B842866) — now merged into `SupportSection.jsx`.** Lists everything filed through the global
 "help / report a problem" control the app shell mounts on every route (the shared `reports/`
 folder's model + the shell's own help-control component), newest first — category, who
 (email / signed-in / signed-out), description, and a collapsible context blob (route/build/
