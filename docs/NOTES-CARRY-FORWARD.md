@@ -1565,3 +1565,12 @@ consecutive runs of the SAME build, so diff identities, never counts. Carried by
 - **The first layout pass measures the sheet SHORT (213 px here) and the full height lands ~140 ms later.** Anything that centres the page vertically against the first measurement is a race. `frameView({align:"top"})` is height-independent — use it for opening/Ctrl+0; `fitView` keeps centring. Phones (canvas ≤ 640) open at fit width (`openingZoom`), saved per-page view still wins.
 - **TRAP: an unthrottled run can pass on unfixed code by luck of that race** — a framing harness needs a CPU-throttled arm AND settled-state thresholds (`verify-notes-open-framing.mjs`).
 - **Standing limit:** phone text is 11 px × the opening zoom (~1.0). Readability vs whole-page-width is an owner decision (OWNER-TODO), not a bug.
+
+
+## Pasting tables: the clipboard is a bundle, and the paste can land nowhere (B2142464, 2026-10-05)
+
+- **Test with committed real-shaped clipboards** (`test/fixtures/clipboard-tables`, harness `ui-audit/verify-notes-table-paste.mjs`), never a hand-written `<table><tr><td>`. The parser was fine; every failure was routing: a picture beside the table won (handlers claimed "any image file"), an empty `<td>` became a childless cell via the spacer-trim in `tidyPastedFragment` and crashed the column repair, and armed / box-selected / nothing-focused pastes never reached ProseMirror.
+- **Desktop press 1 on a box only SELECTS it and blurs the editor** — a harness that clicks a box once and pastes is testing "paste with nothing focused", not "paste in a box" (enter with a second, spaced press). Arming blank paper is a real DOUBLE-click (a single press no longer arms).
+- **Saves are gated on a trusted user event**: a synthetic paste into a freshly loaded page stores nothing until a real press happened first.
+- **A table at the end of a box parks the caret in the doc's hidden trailing paragraph**; `keepCaretInBox` fixes it. Ask where the caret went after any block paste.
+- Chrome sanitises html written via the async clipboard API; use a `DataTransfer` for exact bytes and `navigator.clipboard.write` + real Ctrl+V only for the trusted-event route.
