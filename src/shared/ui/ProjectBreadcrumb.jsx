@@ -56,7 +56,6 @@
  * pseudo-project (Pursuits / Operations, which no `sites` row describes) is bridge-only.
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { isCoarsePointer } from "./coarsePointer.js";
 import { RADIUS } from "./radius.js";
 import FloatingNotice from "./FloatingNotice.jsx";
@@ -72,6 +71,7 @@ import {
 } from "../projects/projects.js";
 import { validateName, announceNameNotice } from "../names/nameCore.js";
 import { liveSiteName } from "../schedule/scheduleOwnership.js";
+import { useLiveSchedules, resolveScheduleHint } from "../schedule/liveScheduleIndex.js";
 import { resolveCurrentName, withCurrentProject, unionProjectLists, resolveControlledId as resolveControlledIdPure, hasSavedProjectRecord, applyFrozenOrder } from "../projects/projectModel.js";
 import { readPinnedFromMirror, readOpenedMap, noteProjectOpened, lastOpenedAt, orderForSwitcher, relTimeShort, highlightParts, companyCardsFor } from "../projects/projectSwitcherModel.js";
 import { useOrgName } from "../profile/orgNameStore.js";
@@ -297,8 +297,6 @@ const switcherPanel = {
   border: "1px solid var(--border-strong)", boxShadow: "0 18px 48px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.30)", // design-exempt: no shadow-color token exists repo-wide — the strong drop shadow the spec asks for
   fontFamily: "system-ui, sans-serif", display: "flex", flexDirection: "column", overflow: "hidden",
 };
-// The dim behind an open dropdown. A fixed black wash reads the same over any map imagery or theme.
-const SCRIM_STYLE = { position: "fixed", inset: 0, zIndex: 4000, background: "rgba(0,0,0,0.5)" }; // design-exempt: fixed scrim over any imagery/theme
 // A raised rounded card inside the panel; rows inside it are separated by hairlines.
 // flexShrink 0: an overflow:hidden flex child has min-height 0 and would otherwise be squeezed to the
 // scroll box and clip its own rows instead of letting the list scroll.
@@ -399,6 +397,7 @@ export default function ProjectBreadcrumb({
   rowRef = null,
 }) {
   const controlled = Array.isArray(controlledProjects);
+  const liveSchedules = useLiveSchedules(); // NEW-2 — the calendar icon is verified against live schedules, not the stored hint alone
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [internalProjects, setInternalProjects] = useState([]);
@@ -989,7 +988,7 @@ export default function ProjectBreadcrumb({
                 ><PinIcon size={13} filled={isPinned} /></button>
               </span>
               <span data-testid={`project-slot-cal-${p.id}`} style={SLOT_CAL}>
-                {p.scheduleProjectId != null && (
+                {resolveScheduleHint(p, liveSchedules) != null && (
                   <span data-testid={`project-cal-${p.id}`} title="Has a schedule" aria-label="Has a schedule" style={{ display: "grid", placeItems: "center", color: "var(--text-secondary)" }}><CalendarIcon /></span>
                 )}
               </span>
@@ -1236,16 +1235,6 @@ export default function ProjectBreadcrumb({
         </>
       )}
 
-      {/* NEW-1 (grouped cards) — the page behind the dropdown dims while it is open; a tap on the
-          dim closes it. It is its own portal layer stacked just ABOVE the menu's dismiss layer
-          (`data-menu-layer` 4000.5 > the menu's 4000) so AnchoredMenu's document mousedown
-          listener stands down for it — otherwise the listener would unmount the scrim between
-          mousedown and click and the tap would land on whatever was underneath (a map pin). Its
-          paint order stays below the panel (zIndex 4000 < 4001). */}
-      {open && createPortal(
-        <div data-testid="project-scrim" data-menu-layer="4000.5" aria-hidden="true" onClick={() => setOpen(false)} style={SCRIM_STYLE} />,
-        document.body,
-      )}
       <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchorRef}
         placement="below-left" width={340} gap={8} panelStyle={switcherPanel} className="psw-panel">
         {/* A filled, rounded search field across the top; then ONE scrolling list of raised cards

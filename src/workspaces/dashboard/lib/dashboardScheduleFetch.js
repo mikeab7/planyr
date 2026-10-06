@@ -31,7 +31,24 @@ import {
   fetchScheduleLastWriteAtFromRows,
 } from "../../../shared/schedule/scheduleSource.js";
 
+import { dropSchedulesOfDeletedProjects } from "../../../shared/schedule/scheduleLiveness.js";
+
 const SCHEDULE_KEY = "hs-v1";
+
+/* NEW-1 (2026-10-05) — never list a schedule whose project is deleted. The cascade trigger
+ * (site-planner/db/project_schedule_cascade.sql) makes this true at the source; this is the reader's own
+ * check, so a row that predates it (or an account without the migration) still cannot reach a card. A failed
+ * `sites` read leaves the map untouched — the check can only remove, never invent. */
+async function withoutDeletedProjectSchedules(projects) {
+  if (!projects || !supabase) return projects;
+  try {
+    const { data, error } = await supabase.from("sites").select("id, group_id, deleted_at");
+    if (error || !Array.isArray(data)) return projects;
+    return dropSchedulesOfDeletedProjects(projects, data);
+  } catch (_) {
+    return projects;
+  }
+}
 
 /** Returns the current `hs-v1` projects map, or null if there's no schedule yet / the read
  * failed (never throws — a Dashboard card degrades to "no data" rather than crashing the page).
@@ -41,11 +58,11 @@ export async function fetchScheduleProjects() {
   if (!supabase) return null;
   try {
     if (await isScheduleRowsAuthoritative(supabase)) {
-      return await fetchScheduleProjectsFromRows(supabase);
+      return await withoutDeletedProjectSchedules(await fetchScheduleProjectsFromRows(supabase));
     }
     const { data, error } = await supabase.from("planar_data").select("value").eq("key", SCHEDULE_KEY).maybeSingle();
     if (error || !data?.value) return null;
-    return data.value.projects || null;
+    return await withoutDeletedProjectSchedules(data.value.projects || null);
   } catch (_) {
     return null;
   }

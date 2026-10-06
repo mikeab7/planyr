@@ -63,8 +63,9 @@ import { buildCompsCardData } from "./lib/compsCardModel.js";
 import { fetchRecentComps } from "./lib/dashboardCompsRecentFetch.js";
 import { fetchRecentNotePages } from "./lib/dashboardNotesRecentFetch.js";
 import { fetchLastTouchedDoc } from "./lib/dashboardDocFetch.js";
-import { planHintHealFromRows } from "../../shared/schedule/scheduleLinkHints.js";
-import { listProjects } from "../../shared/projects/projects.js";
+import { planHintHealFromRows, navListFromScheduleRows } from "../../shared/schedule/scheduleLinkHints.js";
+import { publishLiveSchedules } from "../../shared/schedule/liveScheduleIndex.js";
+import { listProjects, warmProjectsIfEmpty } from "../../shared/projects/projects.js";
 import { fetchScheduleProjects, fetchScheduleSettings, fetchScheduleLastWriteAt } from "./lib/dashboardScheduleFetch.js";
 import { fetchAllElementRecency } from "./lib/dashboardElementRecencyFetch.js";
 import { fetchElementsForSites } from "./lib/dashboardYieldFetch.js";
@@ -129,8 +130,14 @@ function useMeasuredWidth() {
 /* B2064898 — the Dashboard already holds the schedule ROWS (the source), so it heals the "has a
  * schedule" hint mirrored on the plans from them: a hint left stale by an unlink/delete done while
  * the Schedule tab was closed no longer waits for that tab. Lazy import — storage.js is heavy. */
-function healScheduleHints(rowsMap) {
+async function healScheduleHints(rowsMap) {
   try {
+    if (!rowsMap || typeof rowsMap !== "object") return;
+    publishLiveSchedules(navListFromScheduleRows(rowsMap)); // NEW-2 — the switcher's icon verifies against the live rows
+    // NEW-2 (2026-10-05) — the heal used to read `listProjects()` synchronously, which is empty when the
+    // schedule rows land before the project list is warm: it compared the schedules against NO groups and
+    // healed nothing (two Goose Creek plans kept a hint to a deleted schedule). Warm first.
+    await warmProjectsIfEmpty();
     const ops = planHintHealFromRows(rowsMap, listProjects());
     if (!ops.length) return;
     import("../site-planner/lib/storage.js")

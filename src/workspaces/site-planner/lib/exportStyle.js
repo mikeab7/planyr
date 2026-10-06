@@ -43,3 +43,36 @@ export function sheetFitScale(viewW, viewH, planW, planH) {
   const sx = planW / viewW, sy = planH / viewH;
   return Math.min(sx, sy);
 }
+
+// GIS OVERLAY line work on the sheet (B2095745). The generic retarget above is tuned for the plan's own
+// strokes (object line 0.6 pt) and was ALSO applied to the GIS layers drawn over the aerial, which print
+// as thin ~0.6 pt lines at the layer's on-screen alpha (<= 0.55) — invisible over a dark aerial. An overlay
+// is reference ink on a PHOTO, so it needs the opposite treatment: a firm weight, a pale casing under it,
+// and an opacity floor. All numbers are physical (points on paper), independent of the zoom at print time.
+export const OVERLAY_PRINT = { ptPerPx: 0.8, minPt: 1.0, maxPt: 2.4, casingExtraPt: 1.6, casingOpacity: 0.6, minOpacity: 0.85,
+  pointPtPerPx: 0.8, pointMinPt: 2.4, pointMaxPt: 4.5, pointKeylinePt: 0.7 };
+
+const unitsPerPt = (sheetScale) => 1 / (sheetScale * PT_PER_CENTI_INCH);
+
+// Printed line weight (pt) for a GIS overlay stroke authored at `sw` screen px.
+export function overlayLinePt(sw) {
+  const w = Number(sw);
+  const base = w > 0 ? w : 1.5;
+  return Math.max(OVERLAY_PRINT.minPt, Math.min(OVERLAY_PRINT.maxPt, base * OVERLAY_PRINT.ptPerPx));
+}
+// Same, in clone/viewBox units, for a sheet scale. `casing` adds the pale underlay's extra width.
+export function overlayStrokeWidth(sw, sheetScale, { casing = false } = {}) {
+  const s = Number(sheetScale);
+  if (!(s > 0)) return Number(sw);
+  const pt = overlayLinePt(sw) + (casing ? OVERLAY_PRINT.casingExtraPt : 0);
+  return pt * unitsPerPt(s);
+}
+// Printed point-marker radius (clone units) for a symbol authored at `r` screen px.
+export function overlayPointRadius(r, sheetScale) {
+  const s = Number(sheetScale), base = Number(r) > 0 ? Number(r) : 3.5;
+  if (!(s > 0)) return base;
+  const diaPt = Math.max(OVERLAY_PRINT.pointMinPt, Math.min(OVERLAY_PRINT.pointMaxPt, base * OVERLAY_PRINT.pointPtPerPx));
+  return diaPt * unitsPerPt(s);
+}
+export const overlayKeylineWidth = (sheetScale) => (Number(sheetScale) > 0 ? OVERLAY_PRINT.pointKeylinePt * unitsPerPt(Number(sheetScale)) : 0.5);
+export const overlayPrintOpacity = (op) => Math.max(OVERLAY_PRINT.minOpacity, Number.isFinite(Number(op)) ? Number(op) : 1);

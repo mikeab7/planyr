@@ -1,43 +1,59 @@
-/* CompEntryMobileSheet — the TRANSPOSED comp entry layout for narrow viewports (B1091712,
- * owner rule 2026-09-03). Below `MOBILE_BREAKPOINT_PX` (compMobileLayout.js), `CompEntryGrid.jsx`
- * renders this instead of its own horizontal sheet — the desktop table is untouched above the
- * breakpoint (see that file's own header). One comp per screen, fields as ROWS: a comp has ~18
- * fields and no horizontal table fits them at phone width (measured: even a 1191px DESKTOP
- * viewport ran 85px past its own scroller before this shipped).
+/* CompEntryMobileSheet — the REVIEW-FIRST phone comp sheet (NEW-2, owner-approved from interactive
+ * mockups 2026-10-05; replaces the B1091712 transposed layout). Below `MOBILE_BREAKPOINT_PX`
+ * (compMobileLayout.js) `CompEntryGrid.jsx` renders this instead of its own horizontal sheet — the
+ * desktop table is untouched above the breakpoint.
  *
- * Shares state and every mutation path with the desktop sheet — `rows` is the SAME lifted array
- * (CompsPanel.jsx owns it), and every edit here goes back through `CompEntryGrid.jsx`'s own
- * `commitRows`/undo stack via the `onCommitField`/`onSetToday`/`onResolvePeriod` props, so the two
- * layouts can never drift into two different ideas of what a "comp" is. `compMobileLayout.js` is
- * the pure half — which fields show, in which section, per comp type; read its own header before
- * touching field grouping.
+ * One scrolling column of grouped iOS-Settings-style cards (label left, value right): header card
+ * (type badge + deal name — deliberately NO hero number, input that may not exist yet), "Deal"
+ * (Location first, Name, Size with its unit INSIDE the value, Price + a derived read-back), "Rent"
+ * (lease), "Parties", "More details" (filled rows + `＋ label` chips), then a sticky footer with a
+ * live one-line read-back and one full-width Save. There is no "Needed to save" section: required-
+ * ness is the Location row's accent text and the Save copy.
  *
- * MODULE-SCOPE-COMPONENTS: every component here is defined at module scope.
+ * Shares state and every mutation path with the desktop sheet — `rows` is the SAME lifted array and
+ * every edit goes back through CompEntryGrid's `commitRows`/undo stack via `onCommitField` /
+ * `onSetToday` / `onResolvePeriod`, so the two layouts can never hold two ideas of what a comp is.
+ * `lib/compMobileSheetModel.js` is the pure half (read-back strings, Save copy, term unit).
+ *
+ * Every value is a real `<input>` mounted at rest (no tap-to-swap editor); the whole row is the tap
+ * target (a `<label>` wraps it). MODULE-SCOPE-COMPONENTS: every component here is module scope.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "../../ui/controls.jsx";
 import { RADIUS } from "../../ui/radius.js";
 import { FONT_SIZE } from "../../ui/designTokens.js";
-import { SHEET_COLUMNS, columnIndex, cellState, TYPE_OPTIONS, saveButtonLabel } from "../lib/compSheetColumns.js";
-import { mobileSections, neededToSaveColumns, mobileLabel, neededToSaveRemaining, rowStatusText, isRequiredColEmpty } from "../lib/compMobileLayout.js";
+import { cellState, TYPE_OPTIONS } from "../lib/compSheetColumns.js";
+import { rowStatusText } from "../lib/compMobileLayout.js";
 import { compHeadline, draftToComp } from "../lib/comps.js";
+import {
+  mobileCol, mobilePartyLabels, TERM_UNITS, termToMonths, termForDisplay, termOtherReading,
+  priceReadback, footerReadback, saveState, moreDetailFields, moreFieldHasValue, MORE_AFFIX,
+} from "../lib/compMobileSheetModel.js";
 
 const ROW_MIN_H = 48;
 const HIT_TARGET = 44;
 const JUMP_ROW_H = 60;
 const FOOTER_BTN_H = 46;
+const VALUE_FS = 15; // design-exempt: deliberate 15px value size — the one thing every row exists to show
 
 const TYPE_LABEL = Object.fromEntries(TYPE_OPTIONS.map((o) => [o.value, o.label]));
-// LEASE reuses the existing --info-bg/--info-text pair (no prior "info" background existed);
-// LAND reuses the existing warn tint (a land comp's badge is the same amber the rest of the app
-// already uses for "pay attention"); BUILDING SALE gets no dedicated hue — the owner's spec only
-// colored two of the three badges, so the third stays a neutral chip built from tokens every
-// other chrome control already uses, rather than inventing a third one-off color pair.
+// LEASE reuses the existing --info-bg/--info-text pair; LAND the existing warn tint; BUILDING SALE a
+// neutral chip from tokens every other chrome control already uses (no third one-off color pair).
 const BADGE_TOKENS = {
   lease: { bg: "var(--info-bg)", fg: "var(--info-text)" },
   land: { bg: "var(--warn-bg)", fg: "var(--warn-text)" },
   building_sale: { bg: "var(--hover-chrome)", fg: "var(--text-secondary)" },
 };
+
+// Term entry unit is remembered for the session (storage is always months).
+let sessionTermUnit = "months";
+
+// Placeholder "Add" in the accent colour (so empty rows read as tappable) + the focused-row tint —
+// neither expressible as an inline style.
+const SHEET_CSS = `
+.cm-input::placeholder{color:var(--accent);opacity:1;font-weight:500}
+.cm-row:focus-within{background:var(--focus-ring-soft)}
+`;
 
 function TypeBadge({ compType }) {
   const t = BADGE_TOKENS[compType] || BADGE_TOKENS.building_sale;
@@ -52,49 +68,10 @@ function TypeBadge({ compType }) {
   );
 }
 
-/** One status dot in the pager strip — a 20px accent PILL for the current comp, a 6px dot
- * (green/amber) for every other one. Deliberately not interactive: "you can see two of three
- * still need work without paging through them" is the whole job — jumping is the pager label's. */
-function StatusDot({ ready, current }) {
-  if (current) {
-    return <span aria-hidden="true" style={{ width: 20, height: 6, borderRadius: RADIUS.pill, background: "var(--accent)" }} />;
-  }
+/** One status dot — a green/amber 6px dot; used by the jump sheet only. */
+function StatusDot({ ready }) {
   return (
-    <span aria-hidden="true" style={{
-      width: 6, height: 6, borderRadius: RADIUS.pill,
-      background: ready ? "var(--success-text)" : "var(--warn-text)",
-    }} />
-  );
-}
-
-function ChevronButton({ dir, onClick, disabled, label }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={label}
-      style={{
-        width: HIT_TARGET, height: HIT_TARGET, flex: "none", display: "flex", alignItems: "center", justifyContent: "center",
-        border: "none", background: "transparent", color: disabled ? "var(--text-tertiary)" : "var(--text-primary)",
-        fontSize: FONT_SIZE.display, cursor: disabled ? "default" : "pointer", fontFamily: "inherit", padding: 0,
-      }}>
-      {dir === "prev" ? "‹" : "›"}
-    </button>
-  );
-}
-
-function ValueText({ text, empty, muted }) {
-  return (
-    <span style={{
-      // The transposed sheet's field VALUE is the one thing every row exists to show — the
-      // owner's spec steps it up from the 13px label to 15px specifically so it reads at a
-      // glance; the nearest token (14, "display") nearly erases that deliberate 2px gap.
-      fontSize: 15, // design-exempt: deliberate 15px value size, see comment above
-      fontWeight: 500, color: empty ? "var(--text-tertiary)" : muted ? "var(--text-secondary)" : "var(--text-primary)",
-      textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-    }}>
-      {empty ? "—" : text}
-    </span>
+    <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: RADIUS.pill, background: ready ? "var(--success-text)" : "var(--warn-text)" }} />
   );
 }
 
@@ -105,178 +82,140 @@ const rowShellStyle = {
   fontFamily: "inherit", textAlign: "left",
 };
 const labelStyle = { fontSize: FONT_SIZE.emphasis, fontWeight: 400, color: "var(--text-secondary)", flex: "none" };
-const caretStyle = { flex: "none", fontSize: FONT_SIZE.display, color: "var(--text-tertiary)" };
+const affixStyle = { fontSize: VALUE_FS, fontWeight: 500, color: "var(--text-secondary)", flex: "none" };
 const inputStyle = {
-  flex: 1, minWidth: 0, textAlign: "right", fontSize: 15, fontWeight: 500, fontFamily: "inherit", // design-exempt: matches ValueText's own reasoning above
-  color: "var(--text-primary)", background: "var(--surface-base)", border: "1px solid var(--accent)",
-  borderRadius: RADIUS.sm, padding: "4px 8px", outline: "none",
+  flex: 1, minWidth: 0, textAlign: "right", fontSize: VALUE_FS, fontWeight: 500, fontFamily: "inherit",
+  color: "var(--text-primary)", background: "transparent", border: "none", outline: "none", padding: "12px 0",
 };
+const noteStyle = { padding: "0 16px 10px", marginTop: 0, fontSize: FONT_SIZE.label, color: "var(--text-secondary)", textAlign: "right" };
 
-/** One editable text/number/date field row: static value at rest, an `<input>` while editing.
- * `col.kind === "date"` for `compDate` additionally carries the "Today" quick-set chip — the
- * owner's own answer to date friction: the user asserts today, the app never assumes it.
- *
- * NEW-1 (2026-10-01, iPhone Safari): the WHOLE ROW is the tap target, not just the value text.
- * Only the right-aligned value was a button, so an empty field ("—", a few px wide) and any tap
- * on the label or the blank middle of the row did nothing — measured: every text/number/date row
- * was dead to a touch tap at the row centre, filled or empty. The row now opens its editor from a
- * tap anywhere on it (min height = ROW_MIN_H, above the 44px touch minimum). */
-function EditableRow({ col, draft, onCommit, onToday }) {
-  const st = cellState(col, draft);
-  const [editing, setEditing] = useState(false);
-  const [val, setVal] = useState(st.raw ?? "");
-  const inputRef = useRef(null);
-  useEffect(() => { if (!editing) setVal(st.raw ?? ""); }, [st.raw, editing]);
-  // Layout effect (not passive): focus must happen inside the tap's own task for iOS Safari to
-  // raise the keyboard.
-  useLayoutEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
-  const commit = () => { onCommit(col, val); setEditing(false); };
-  const cancel = () => { setVal(st.raw ?? ""); setEditing(false); };
-  const isToday = col.key === "compDate";
-  const numeric = col.kind === "number";
-  const open = () => { if (!editing) setEditing(true); };
+/** Enter moves to the next input in DOM order (the last one just closes the keyboard). */
+function focusNextInput(el) {
+  const root = el.closest("[data-comp-entry-mobile]");
+  const all = root ? [...root.querySelectorAll("input[data-sheet-input]")] : [];
+  const next = all[all.indexOf(el) + 1];
+  if (next) next.focus(); else el.blur();
+}
+
+/** A segmented toggle (AC|SF, Monthly|Yearly, NNN|Gross, months|years). */
+function Segmented({ options, value, onChange, label, warn }) {
   return (
-    <div
-      data-field-key={col.key}
-      data-field-editor="text"
-      role={editing ? undefined : "button"}
-      tabIndex={editing ? undefined : 0}
-      aria-label={editing ? undefined : `Edit ${mobileLabel(col)}`}
-      onClick={open}
-      onKeyDown={(e) => { if (!editing && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); open(); } }}
-      style={{ ...rowShellStyle, cursor: editing ? "default" : "pointer" }}>
-      <span style={labelStyle}>{mobileLabel(col)}</span>
-      <span style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, minWidth: 0, justifyContent: "flex-end" }}>
-        {isToday && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onToday(); }}
+    <span role="group" aria-label={label} style={{
+      display: "inline-flex", flex: "none", borderRadius: RADIUS.sm, overflow: "hidden",
+      border: `1px solid ${warn ? "var(--warn-border)" : "var(--border-strong)"}`,
+      background: warn ? "var(--warn-bg)" : "transparent",
+    }}>
+      {options.map((o) => {
+        const on = o.value === value;
+        return (
+          <button key={o.value} type="button" aria-pressed={on} data-seg-value={o.value}
+            onClick={() => onChange(o.value)}
             style={{
-              flex: "none", border: "none", borderRadius: RADIUS.sm, padding: "3px 8px",
-              background: "var(--focus-ring-soft)", color: "var(--accent)", fontSize: FONT_SIZE.control, fontWeight: 600,
-              cursor: "pointer", fontFamily: "inherit",
+              border: "none", padding: "6px 10px", minHeight: 32, fontFamily: "inherit", cursor: "pointer",
+              fontSize: FONT_SIZE.control, fontWeight: on ? 700 : 500,
+              background: on ? "var(--accent)" : "transparent", color: on ? "var(--on-accent)" : "var(--text-primary)",
             }}>
-            Today
+            {o.label}
           </button>
-        )}
-        {editing ? (
-          <input
-            ref={inputRef}
-            value={val}
-            onChange={(e) => setVal(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") { e.preventDefault(); commit(); }
-              else if (e.key === "Escape") { e.preventDefault(); cancel(); }
-            }}
-            inputMode={numeric ? "decimal" : "text"}
-            enterKeyHint="done"
-            aria-label={mobileLabel(col)}
-            placeholder={col.editHint || undefined}
-            style={inputStyle}
-          />
-        ) : (
-          <ValueText text={st.text} empty={!st.text} />
-        )}
-      </span>
-    </div>
+        );
+      })}
+    </span>
   );
 }
 
-/** A choice field (Type/Unit/Per/Basis) — a visible value + caret with a real, visually-hidden
- * native `<select>` layered on top so a tap opens the OS picker directly (no dialog box: this is
- * a plain form control, not window.prompt/confirm). Committing a pick is the whole action, same
- * as the desktop sheet's own select cells. */
-function ChoiceRow({ col, draft, onCommit }) {
+/** One editable field row — a REAL input mounted at rest. `prefix`/`suffix` render only once the
+ * input has a value or focus. `display`/`toCommit` let Term show + commit in its chosen unit. */
+function InputRow({ col, label, draft, onCommit, prefix, suffix, trailing, display, toCommit, autoFocus, onAutoFocused, today }) {
   const st = cellState(col, draft);
+  const numeric = col.kind === "number";
+  const shownRaw = display ? display(col.getValue(draft)) : (st.raw ?? "");
+  const shownRest = display ? display(col.getValue(draft)) : st.text;
+  const [focused, setFocused] = useState(false);
+  const [val, setVal] = useState(shownRaw);
+  const ref = useRef(null);
+  useEffect(() => { if (!focused) setVal(shownRaw); }, [shownRaw, focused]);
+  // Layout effect (not passive): focus inside the tap's own task so iOS Safari raises the keyboard.
+  useLayoutEffect(() => { if (autoFocus) { ref.current?.focus(); onAutoFocused?.(); } }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  if (st.state === "derived") {
+    return (
+      <div data-field-key={col.key} data-field-editor="readonly" style={rowShellStyle}>
+        <span style={labelStyle}>{label}</span>
+        <span style={{ ...affixStyle, color: "var(--text-secondary)" }}>{st.text}</span>
+      </div>
+    );
+  }
+  const hasValue = (focused ? val : shownRest) !== "";
+  const commit = () => {
+    setFocused(false);
+    if (val === shownRaw) return;
+    onCommit(col, toCommit ? toCommit(val) : val);
+  };
   return (
-    <label data-field-key={col.key} data-field-editor="select" style={{ ...rowShellStyle, cursor: "pointer" }}>
-      <span style={labelStyle}>{mobileLabel(col)}</span>
-      <span style={{ position: "relative", display: "flex", alignItems: "center", gap: 4, flex: 1, minWidth: 0, justifyContent: "flex-end" }}>
-        <ValueText text={st.text} empty={!st.text} />
-        <span aria-hidden="true" style={caretStyle}>▾</span>
-        <select
-          value={st.raw ?? ""}
-          onChange={(e) => onCommit(col, e.target.value)}
-          aria-label={mobileLabel(col)}
-          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer" }}
-        >
-          <option value="" disabled hidden />
-          {col.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
+    <label className="cm-row" data-field-key={col.key} data-field-editor="text" style={{ ...rowShellStyle, cursor: "text" }}>
+      <span style={labelStyle}>{label}</span>
+      <span style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0, justifyContent: "flex-end" }}>
+        {today}
+        {prefix && hasValue && <span style={affixStyle}>{prefix}</span>}
+        <input
+          ref={ref}
+          className="cm-input"
+          data-sheet-input=""
+          value={focused ? val : shownRest}
+          onFocus={() => { setFocused(true); setVal(shownRaw); }}
+          onChange={(e) => setVal(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") { e.preventDefault(); focusNextInput(e.currentTarget); }
+            else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setVal(shownRaw); e.currentTarget.blur(); }
+          }}
+          inputMode={numeric ? "decimal" : "text"}
+          enterKeyHint="next"
+          aria-label={label}
+          placeholder="Add"
+          style={inputStyle}
+        />
+        {suffix && hasValue && <span style={affixStyle}>{suffix}</span>}
+        {trailing}
       </span>
     </label>
   );
 }
 
-/** A read-only row: derived value (Net rate, $/SF or $/AC) or an applicable-but-fixed one (Unit
- * on a non-land row, always "SF"). Never a caret — nothing here opens a picker. */
-function ReadOnlyRow({ col, draft }) {
-  const st = cellState(col, draft);
+/** The Location row — an action, never typed text. Unplaced: `Place on map ›` in accent; placed: the
+ * resolved location in plain text (the words "Place on map" are gone). */
+function LocationRow({ placed, locationText, onTap }) {
   return (
-    <div data-field-key={col.key} data-field-editor="readonly" style={rowShellStyle}>
-      <span style={labelStyle}>{mobileLabel(col)}</span>
-      <ValueText text={st.text} empty={!st.text} muted />
-    </div>
-  );
-}
-
-/** The Location row — always an action (never typed text): tapping arms the row for a map pick,
- * or re-focuses the map on its already-picked anchor. Mirrors the desktop sheet's own Location
- * cell (`CompEntryGrid.jsx`'s `triggerAction`). */
-function LocationRow({ col, draft, locationText, onTap }) {
-  return (
-    <button data-field-key={col.key} data-field-editor="action" onClick={onTap} style={rowShellStyle}>
-      <span style={labelStyle}>{mobileLabel(col)}</span>
-      <ValueText text={locationText || "Set"} empty={!locationText} />
+    <button data-field-key="location" data-field-editor="action" onClick={onTap} style={{ ...rowShellStyle, cursor: "pointer" }}>
+      <span style={labelStyle}>Location</span>
+      {placed ? (
+        <span style={{ fontSize: VALUE_FS, fontWeight: 500, color: "var(--text-primary)", textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {locationText || "Placed"}
+        </span>
+      ) : (
+        <span style={{ fontSize: VALUE_FS, fontWeight: 600, color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 4 }}>
+          Place on map <span aria-hidden="true">›</span>
+        </span>
+      )}
     </button>
   );
 }
 
-/** The Rate/Per pair when the paste parser flagged a genuine 12x ambiguity (no stated period) —
- * two quick-resolve chips instead of a normal row, same escape hatch as the desktop sheet's
- * `ProblemsList`. */
-function PeriodAmbiguityRow({ col, draft, onResolvePeriod }) {
-  const rate = draft.leaseRate || "0.00";
+function Group({ title, children }) {
   return (
-    <div style={{ ...rowShellStyle, flexDirection: "column", alignItems: "stretch", gap: 8, paddingTop: 8, paddingBottom: 8 }}>
-      <span style={{ fontSize: FONT_SIZE.label, color: "var(--danger-text)" }}>{mobileLabel(col)} — no period stated, monthly and annual differ by 12x.</span>
-      <span style={{ display: "flex", gap: 8 }}>
-        <Button size="sm" variant="danger" onClick={() => onResolvePeriod("monthly")}>${rate}/SF/mo</Button>
-        <Button size="sm" variant="danger" onClick={() => onResolvePeriod("annual")}>${rate}/SF/yr</Button>
-      </span>
+    <div style={{ margin: "14px 12px 0" }}>
+      {title && (
+        <div style={{ padding: "0 16px 6px", fontSize: FONT_SIZE.micro, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-tertiary)" }}>
+          {title}
+        </div>
+      )}
+      <div style={{ borderRadius: RADIUS.lg, border: "1px solid var(--border-default)", background: "var(--surface-raised)", overflow: "hidden" }}>
+        {children}
+      </div>
     </div>
   );
 }
 
-function FieldRow({ col, row, locationText, onCommitField, onToday, onResolvePeriod, onLocationTap }) {
-  const { draft, cellFlags } = row;
-  const flagKey = col.flagKey ? col.flagKey(draft) : col.key;
-  const flag = cellFlags[flagKey];
-  if (col.key === "leaseRatePeriod" && flag?.level === "blocking") {
-    return <PeriodAmbiguityRow col={col} draft={draft} onResolvePeriod={(p) => onResolvePeriod(row._id, p)} />;
-  }
-  if (col.kind === "action") return <LocationRow col={col} draft={draft} locationText={locationText} onTap={onLocationTap} />;
-  const st = cellState(col, draft);
-  if (col.kind === "derived" || st.state === "fixed") return <ReadOnlyRow col={col} draft={draft} />;
-  if (col.kind === "select") return <ChoiceRow col={col} draft={draft} onCommit={(c, v) => onCommitField(row._id, c, v)} />;
-  return <EditableRow col={col} draft={draft} onCommit={(c, v) => onCommitField(row._id, c, v)} onToday={() => onToday()} />;
-}
-
-function SectionCaption({ children, amber, count }) {
-  return (
-    <div style={{
-      display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px 4px",
-      fontSize: FONT_SIZE.micro, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase",
-      color: amber ? "var(--warn-text)" : "var(--text-tertiary)",
-    }}>
-      <span>{children}</span>
-      {count != null && <span>{count} left</span>}
-    </div>
-  );
-}
-
-/** The jump sheet — tapping the pager label opens this: the whole batch at a glance, so paging
- * through eight pasted comps blind is never the only way to find the one that needs a date. */
+/** The jump sheet — tapping the title opens this: the whole batch at a glance. */
 function JumpSheet({ rows, currentIndex, overlaysById, locationCellText, rowIsReady, onPick, onClose }) {
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 2700, display: "flex", flexDirection: "column", background: "var(--surface-page)" }}>
@@ -298,7 +237,7 @@ function JumpSheet({ rows, currentIndex, overlaysById, locationCellText, rowIsRe
                 background: i === currentIndex ? "var(--hover-menu)" : "transparent", cursor: "pointer",
                 fontFamily: "inherit", textAlign: "left",
               }}>
-              <StatusDot ready={rowIsReady(row)} current={false} />
+              <StatusDot ready={rowIsReady(row)} />
               <span style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: FONT_SIZE.control, fontWeight: 600, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {locationText || row.draft.title || "Untitled comp"}
@@ -308,9 +247,7 @@ function JumpSheet({ rows, currentIndex, overlaysById, locationCellText, rowIsRe
                 </div>
               </span>
               <span style={{
-                // The jump sheet's headline rate is the one number the whole row exists to
-                // surface at a glance — same reasoning as ValueText's 15px, one step further
-                // because this is the row's ONLY number rather than one of several.
+                // The jump sheet's headline rate is the one number each row exists to surface at a glance.
                 fontSize: 19, // design-exempt: deliberate 19px headline number, see comment above
                 fontWeight: 600, letterSpacing: "-0.02em", color: "var(--text-primary)", flex: "none",
               }}>
@@ -324,6 +261,21 @@ function JumpSheet({ rows, currentIndex, overlaysById, locationCellText, rowIsRe
   );
 }
 
+function TopBar({ title, onCancel, onTitle, onPaste, pasteOpen }) {
+  const btn = { border: "none", background: "transparent", color: "var(--accent)", fontFamily: "inherit", fontSize: FONT_SIZE.emphasis, cursor: "pointer", minHeight: HIT_TARGET, padding: "0 6px" };
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", padding: "2px 10px", borderBottom: "1px solid var(--border-default)" }}>
+      <button onClick={onCancel} style={{ ...btn, justifySelf: "start", fontWeight: 500 }}>Cancel</button>
+      {onTitle ? (
+        <button onClick={onTitle} aria-label="Jump to a comp" style={{ ...btn, color: "var(--text-primary)", fontWeight: 700 }}>{title} <span aria-hidden="true">⌄</span></button>
+      ) : (
+        <span style={{ fontSize: FONT_SIZE.emphasis, fontWeight: 700, color: "var(--text-primary)" }}>{title}</span>
+      )}
+      <button onClick={onPaste} aria-expanded={pasteOpen} style={{ ...btn, justifySelf: "end", fontWeight: 600 }}>＋ Paste</button>
+    </div>
+  );
+}
+
 export default function CompEntryMobileSheet({
   rows, overlaysById, locationCellText, onCommitField, onSetToday, onResolvePeriod,
   armedRowId, onArm, onFocusAnchor, onSave, onCancel, saving, saveError, readyRows, rowIsReady,
@@ -332,50 +284,80 @@ export default function CompEntryMobileSheet({
   const [currentIndex, setCurrentIndex] = useState(0);
   const [jumpOpen, setJumpOpen] = useState(false);
   const [minimized, setMinimized] = useState(false);
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [termUnit, setTermUnitState] = useState(sessionTermUnit);
+  const [added, setAdded] = useState({});       // `${rowId}:${key}` -> true (a chip the user mounted)
+  const [focusKey, setFocusKey] = useState(null);
+  const prevLen = useRef(rows.length);
+
+  const setTermUnit = (u) => { sessionTermUnit = u; setTermUnitState(u); };
 
   useEffect(() => {
     setCurrentIndex((i) => Math.max(0, Math.min(i, rows.length - 1)));
   }, [rows.length]);
 
+  // A paste that lands rows closes the paste panel (the list then shows the parsed row).
+  useEffect(() => {
+    if (rows.length > prevLen.current) setPasteOpen(false);
+    prevLen.current = rows.length;
+  }, [rows.length]);
+
   const currentRow = rows[currentIndex] || null;
 
-  // Arming the map for a pick (tapping an unset Location row) has nowhere to go on a phone if
-  // this sheet stays full-screen — MINIMIZE it to a slim banner the moment the CURRENT row is
-  // armed, so the map underneath becomes reachable, and restore full view the instant it's
-  // disarmed (a pick lands, or the user cancels). Purely local to this component — CompsPanel's
-  // own `armedRowId`/view state is untouched either way.
+  // Arming the map for a pick has nowhere to go on a phone if this sheet stays full-screen — MINIMIZE
+  // it to a slim banner while the CURRENT row is armed, restore the instant it is disarmed.
   useEffect(() => {
     if (armedRowId && currentRow && armedRowId === currentRow._id) setMinimized(true);
     else if (!armedRowId) setMinimized(false);
   }, [armedRowId, currentRow]);
 
+  const showPaste = pasteOpen || rows.length === 0;
+  const save = saveState({ rows, readyCount: readyRows.length, saving });
+
   if (!currentRow) {
     return (
-      <div style={{ position: "fixed", inset: 0, zIndex: 2600, display: "flex", flexDirection: "column", background: "var(--surface-page)" }}>
-        <MobileHeader onCancel={onCancel} />
+      <div data-comp-entry-mobile="1" style={{ position: "fixed", inset: 0, zIndex: 2600, display: "flex", flexDirection: "column", background: "var(--surface-page)" }}>
+        <style>{SHEET_CSS}</style>
+        <TopBar title="New comp" onCancel={onCancel} onPaste={() => {}} pasteOpen />
         {pasteBox}
         <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: 24, textAlign: "center", fontSize: FONT_SIZE.control, color: "var(--text-secondary)" }}>
-          Paste a few comps above to get started.
+          Paste a comp above to get started.
+        </div>
+        <div style={{ borderTop: "1px solid var(--border-default)", background: "var(--surface-raised)", padding: "8px 16px 10px" }}>
+          <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginBottom: 8 }}>Nothing entered yet</div>
+          <button disabled style={saveBtnStyle(true)}>{save.label}</button>
         </div>
       </div>
     );
   }
 
+  const draft = currentRow.draft;
+  const compType = draft.compType;
   const locationText = locationCellText(currentRow, overlaysById);
-  const compType = currentRow.draft.compType;
-  const needed = neededToSaveColumns(compType);
-  const neededLeft = neededToSaveRemaining(currentRow);
-  const sections = mobileSections(compType);
-  const isArmedHere = armedRowId === currentRow._id;
+  const placed = !!draft.anchor; // a pending reverse-geocode still counts as placed — never "Place on map"
+  const isLease = compType === "lease";
+  const isLand = compType === "land";
+  const dealName = draft.title || draft.partyAcquirer || "Untitled";
+  const parties = mobilePartyLabels(compType);
+  const flag = currentRow.cellFlags?.leaseRatePeriod;
+  const periodBlocking = isLease && flag?.level === "blocking";
+  const hasRate = isLease && draft.leaseRate !== "" && draft.leaseRate != null;
+  const periodMissing = hasRate && !draft.leaseRatePeriod;
 
+  const commit = (col, v) => onCommitField(currentRow._id, col, v);
   const onLocationTap = () => {
-    if (currentRow.draft.anchor) onFocusAnchor(currentRow.draft.anchor);
+    if (draft.anchor) onFocusAnchor(draft.anchor);
     else onArm(currentRow._id);
   };
-
-  const needDateCount = rows.filter((r) => isRequiredColEmpty(SHEET_COLUMNS[columnIndex("compDate")], r.draft)).length;
-  const footerParts = [`${rows.length} comp${rows.length === 1 ? "" : "s"}`, `${readyRows.length} ready`];
-  if (needDateCount > 0) footerParts.push(`${needDateCount} need${needDateCount === 1 ? "s" : ""} a date`);
+  const cl = (k) => mobileCol(k);
+  const price = priceReadback(draft);
+  const termCol = cl("leaseTerm");
+  const termMonths = isLease ? termCol.getValue(draft) : "";
+  const termReading = termOtherReading(termMonths, termUnit);
+  const more = moreDetailFields(compType);
+  const shownMore = more.filter((m) => moreFieldHasValue(m.col, draft) || added[`${currentRow._id}:${m.col.key}`]);
+  const chips = more.filter((m) => !shownMore.includes(m));
+  const common = { draft, onCommit: commit };
 
   if (minimized) {
     return (
@@ -385,7 +367,7 @@ export default function CompEntryMobileSheet({
         padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8,
       }}>
         <span style={{ fontSize: FONT_SIZE.control, color: "var(--warn-text)" }}>
-          Tap the map to drop the pin for {locationText || currentRow.draft.title || "this comp"} — or tap <strong>Comp from parcel</strong> on the map toolbar.
+          Tap the map to drop the pin for {locationText || draft.title || "this comp"} — or tap <strong>Comp from parcel</strong> on the map toolbar.
         </span>
         <button onClick={() => onArm(null)} style={{ alignSelf: "flex-start", border: "none", background: "none", color: "var(--warn-text)", textDecoration: "underline", fontFamily: "inherit", fontSize: FONT_SIZE.label, cursor: "pointer", padding: 0 }}>
           Cancel
@@ -396,96 +378,130 @@ export default function CompEntryMobileSheet({
 
   return (
     <div data-comp-entry-mobile="1" style={{ position: "fixed", inset: 0, zIndex: 2600, display: "flex", flexDirection: "column", background: "var(--surface-page)" }}>
-      <MobileHeader onCancel={onCancel} />
-      {pasteBox}
+      <style>{SHEET_CSS}</style>
+      <TopBar
+        title={rows.length > 1 ? `Comp ${currentIndex + 1} of ${rows.length}` : "New comp"}
+        onCancel={onCancel}
+        onTitle={rows.length > 1 ? () => setJumpOpen(true) : null}
+        onPaste={() => setPasteOpen((v) => !v)}
+        pasteOpen={showPaste}
+      />
 
-      {isArmedHere && (
-        <div style={{ padding: "6px 16px", fontSize: FONT_SIZE.label, color: "var(--warn-text)", background: "var(--warn-bg)", borderBottom: "1px solid var(--warn-border)" }}>
-          Placing this comp — tap the map.
+      {showPaste && (
+        <div data-paste-panel="1" style={{ flex: "none", maxHeight: "60%", overflowY: "auto", borderBottom: "1px solid var(--border-default)", background: "var(--surface-raised)" }}>
+          {pasteBox}
+          <div style={{ padding: "0 14px 10px", display: "flex", justifyContent: "flex-end" }}>
+            <Button size="sm" onClick={() => setPasteOpen(false)}>Done</Button>
+          </div>
         </div>
       )}
 
-      {/* PAGER — chevrons page ±1; the label opens the jump sheet, the batch at a glance. */}
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "6px 0 4px", borderBottom: "1px solid var(--border-default)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <ChevronButton dir="prev" label="Previous comp" disabled={currentIndex === 0} onClick={() => setCurrentIndex((i) => Math.max(0, i - 1))} />
-          <button onClick={() => setJumpOpen(true)} style={{ border: "none", background: "none", fontFamily: "inherit", cursor: "pointer", padding: "6px 10px", display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontSize: FONT_SIZE.emphasis, fontWeight: 700, color: "var(--text-primary)" }}>Comp {currentIndex + 1} of {rows.length}</span>
-            <span aria-hidden="true" style={{ fontSize: FONT_SIZE.control, color: "var(--text-secondary)" }}>⌄</span>
-          </button>
-          <ChevronButton dir="next" label="Next comp" disabled={currentIndex === rows.length - 1} onClick={() => setCurrentIndex((i) => Math.min(rows.length - 1, i + 1))} />
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 2 }}>
-          {rows.map((r, i) => <StatusDot key={r._id} ready={rowIsReady(r)} current={i === currentIndex} />)}
-        </div>
-      </div>
+      <div style={{ flex: 1, overflowY: "auto", paddingBottom: 16 }}>
+        {/* HEADER CARD — small, never a hero number. The badge doubles as the type switch. */}
+        <Group>
+          <label style={{ ...rowShellStyle, borderBottom: "none", justifyContent: "flex-start", position: "relative", cursor: "pointer" }}>
+            <TypeBadge compType={compType} />
+            <span aria-hidden="true" style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)" }}>▾</span>
+            <select
+              value={compType}
+              onChange={(e) => commit(cl("compType"), e.target.value)}
+              aria-label="Comp type"
+              style={{ position: "absolute", left: 0, top: 0, width: 110, height: "100%", opacity: 0, cursor: "pointer" }}
+            >
+              {TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            <span data-deal-name="1" style={{ fontSize: FONT_SIZE.emphasis, fontWeight: 700, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+              {dealName}
+            </span>
+          </label>
+        </Group>
 
-      {/* IDENTITY STRIP — sticky under the pager: a scrolled screen must always answer "which comp am I in". */}
-      <div style={{ position: "sticky", top: 0, zIndex: 1, display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", background: "var(--surface-page)", borderBottom: "1px solid var(--border-default)" }}>
-        <TypeBadge compType={compType} />
-        <span style={{ fontSize: FONT_SIZE.control, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {locationText || currentRow.draft.title || "New comp"}
-        </span>
-      </div>
-
-      {/* FIELD LIST */}
-      <div style={{ flex: 1, overflowY: "auto" }}>
-        <SectionCaption amber count={neededLeft}>Needed to save</SectionCaption>
-        {needed.map((col) => (
-          <FieldRow
-            key={col.key}
-            col={col}
-            row={currentRow}
-            locationText={locationText}
-            onCommitField={onCommitField}
-            onToday={() => onSetToday(currentIndex)}
-            onResolvePeriod={onResolvePeriod}
-            onLocationTap={onLocationTap}
+        <Group title="Deal">
+          <LocationRow placed={placed} locationText={locationText} onTap={onLocationTap} />
+          <InputRow {...common} col={cl("title")} label="Name" />
+          <InputRow
+            {...common} col={cl("size")} label="Size"
+            suffix={isLand ? null : "SF"}
+            trailing={isLand ? (
+              <Segmented label="Size unit" value={draft.landSizeUnit === "ac" ? "ac" : "sf"}
+                options={[{ value: "ac", label: "AC" }, { value: "sf", label: "SF" }]}
+                onChange={(v) => commit(cl("landSizeUnit"), v)} />
+            ) : null}
           />
-        ))}
-        {sections.map((section) => (
-          <div key={section.title}>
-            <SectionCaption>{section.title}</SectionCaption>
-            {section.cols.map((col) => (
-              <FieldRow
-                key={col.key}
-                col={col}
-                row={currentRow}
-                locationText={locationText}
-                onCommitField={onCommitField}
-                onToday={() => onSetToday(currentIndex)}
-                onResolvePeriod={onResolvePeriod}
-                onLocationTap={onLocationTap}
+          {!isLease && <InputRow {...common} col={cl("price")} label="Price" prefix="$" />}
+          {!isLease && price && <div data-readback="price" style={noteStyle}>{price}</div>}
+        </Group>
+
+        {isLease && (
+          <Group title="Rent">
+            <InputRow {...common} col={cl("leaseRate")} label="Rate" prefix="$" suffix="/SF" />
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", padding: "0 16px 10px", borderBottom: "1px solid var(--border-default)" }}>
+              <Segmented label="Rate period" warn={periodMissing || periodBlocking} value={draft.leaseRatePeriod || ""}
+                options={[{ value: "monthly", label: "Monthly" }, { value: "annual", label: "Yearly" }]}
+                onChange={(v) => (periodBlocking ? onResolvePeriod(currentRow._id, v) : commit(cl("leaseRatePeriod"), v))} />
+              <Segmented label="Rate basis" value={draft.leaseRateExpense || ""}
+                options={[{ value: "nnn", label: "NNN" }, { value: "gross", label: "Gross" }]}
+                onChange={(v) => commit(cl("leaseRateExpense"), v)} />
+            </div>
+            {periodBlocking && (
+              <div style={{ ...noteStyle, color: "var(--danger-text)" }}>No period stated — monthly and annual differ by 12x.</div>
+            )}
+            <InputRow
+              {...common} col={termCol} label="Term"
+              display={(m) => termForDisplay(m, termUnit)}
+              toCommit={(v) => termToMonths(v, termUnit)}
+              trailing={<Segmented label="Term unit" value={termUnit} options={TERM_UNITS.map((u) => ({ value: u, label: u }))} onChange={setTermUnit} />}
+            />
+            {termReading && <div data-readback="term" style={noteStyle}>{termReading}</div>}
+          </Group>
+        )}
+
+        <Group title="Parties">
+          <InputRow {...common} col={cl("partyProvider")} label={parties.provider} />
+          <InputRow {...common} col={cl("partyAcquirer")} label={parties.acquirer} />
+        </Group>
+
+        <Group title="More details">
+          {shownMore.map((m) => {
+            const aff = MORE_AFFIX[m.col.key] || {};
+            return (
+              <InputRow
+                key={`${currentRow._id}:${m.col.key}`} {...common} col={m.col} label={m.label}
+                prefix={aff.prefix} suffix={aff.suffix}
+                autoFocus={focusKey === m.col.key} onAutoFocused={() => setFocusKey(null)}
+                today={m.col.key === "compDate" ? (
+                  <button type="button" onClick={(e) => { e.preventDefault(); onSetToday(currentIndex); }}
+                    style={{ flex: "none", border: "none", borderRadius: RADIUS.sm, padding: "3px 8px", background: "var(--focus-ring-soft)", color: "var(--accent)", fontSize: FONT_SIZE.control, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>
+                    Today
+                  </button>
+                ) : null}
               />
-            ))}
-          </div>
-        ))}
+            );
+          })}
+          {chips.length > 0 && (
+            <div style={{ padding: "10px 16px 12px" }}>
+              <div style={{ fontSize: FONT_SIZE.micro, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-tertiary)", marginBottom: 8 }}>Add more</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {chips.map((m) => (
+                  <button key={m.col.key} type="button" data-add-chip={m.col.key}
+                    onClick={() => { setAdded((a) => ({ ...a, [`${currentRow._id}:${m.col.key}`]: true })); setFocusKey(m.col.key); }}
+                    style={{ border: "1px solid var(--border-strong)", borderRadius: RADIUS.pill, background: "transparent", color: "var(--accent)", fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 600, padding: "6px 12px", minHeight: 32, cursor: "pointer" }}>
+                    ＋ {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </Group>
       </div>
 
-      {/* FOOTER, sticky */}
+      {/* FOOTER, sticky — one live read-back, one full-width Save. */}
       <div style={{ borderTop: "1px solid var(--border-default)", background: "var(--surface-raised)", padding: "8px 16px 10px" }}>
-        <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginBottom: 8 }}>{footerParts.join(" · ")}</div>
+        <div data-footer-readback="1" style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginBottom: 8 }}>{footerReadback(draft)}</div>
         {saveError && <div style={{ fontSize: FONT_SIZE.label, color: "var(--danger-text)", marginBottom: 8 }}>{saveError}</div>}
-        <div style={{ display: "flex", gap: 10 }}>
-          <button onClick={onCancel} disabled={saving} style={{
-            flex: 1, height: FOOTER_BTN_H, borderRadius: RADIUS.md, border: "1px solid var(--border-strong)",
-            background: "transparent", color: "var(--text-primary)", fontSize: FONT_SIZE.emphasis, fontWeight: 600,
-            fontFamily: "inherit", cursor: saving ? "default" : "pointer",
-          }}>
-            Close
-          </button>
-          <button
-            onClick={() => onSave(readyRows)}
-            disabled={saving || readyRows.length === 0}
-            style={{
-              flex: 1, height: FOOTER_BTN_H, borderRadius: RADIUS.md, border: "none",
-              background: readyRows.length === 0 ? "var(--border-strong)" : "var(--accent)", color: "var(--on-accent)",
-              fontSize: FONT_SIZE.emphasis, fontWeight: 600, fontFamily: "inherit",
-              cursor: saving || readyRows.length === 0 ? "default" : "pointer",
-            }}>
-            {saving ? "Saving…" : saveButtonLabel(readyRows.length)}
-          </button>
-        </div>
+        <button data-save-button="1" onClick={() => onSave(readyRows)} disabled={save.disabled} style={saveBtnStyle(save.disabled)}>
+          {save.label}
+        </button>
       </div>
 
       {jumpOpen && (
@@ -503,17 +519,10 @@ export default function CompEntryMobileSheet({
   );
 }
 
-function MobileHeader({ onCancel }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 10px 6px 16px" }}>
-      <span style={{ fontSize: FONT_SIZE.emphasis, fontWeight: 700 }}>Paste comps</span>
-      <button onClick={onCancel} aria-label="Close" style={{
-        width: HIT_TARGET, height: HIT_TARGET, display: "flex", alignItems: "center", justifyContent: "center",
-        border: "none", background: "transparent", color: "var(--text-secondary)", fontFamily: "inherit",
-        fontSize: FONT_SIZE.emphasis, cursor: "pointer",
-      }}>
-        ✕
-      </button>
-    </div>
-  );
+function saveBtnStyle(disabled) {
+  return {
+    width: "100%", height: FOOTER_BTN_H, borderRadius: RADIUS.md, border: "none",
+    background: disabled ? "var(--border-strong)" : "var(--accent)", color: "var(--on-accent)",
+    fontSize: FONT_SIZE.emphasis, fontWeight: 600, fontFamily: "inherit", cursor: disabled ? "default" : "pointer",
+  };
 }
