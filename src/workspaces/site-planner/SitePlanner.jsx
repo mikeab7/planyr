@@ -58,7 +58,7 @@ import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFil
 import { isDwgFile, convertDwgToDxf } from "./lib/convertClient.js";
 import { uploadOverlayFile, downloadOverlayBytes, downloadOverlayDataUrl, fetchOverlayBytes, fetchOverlayDataUrl, deleteOverlayObject, MAX_BYTES as OVERLAY_MAX_BYTES } from "./lib/overlayStorage.js";
 import { ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale, SCALE_PRESETS, feetPerInchForPreset, matchScalePreset, feetPerInchFromPair, PAGE_UNITS, REAL_UNITS } from "../../shared/overlay/overlayScale.js";
-import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, imagePointToWorld } from "../../shared/overlay/overlayPlacement.js";
+import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, imagePointToWorld, visibleFrame, visibleCenterWorld, anchorVisibleCentre } from "../../shared/overlay/overlayPlacement.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, layerVintage, identifyOverlaysAt, rasterIdentifyLayers } from "./lib/layers.js";
 // NEW-3 — the per-building floodplain answer, off the SAME geometry the mitigation ledger uses.
@@ -3939,6 +3939,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // device save, and not a blank new site) — drives a loud, dismissible banner so a failed
   // cloud save is never silent again (B125). Cleared on the next successful save.
   const [cloudSaveFailed, setCloudSaveFailed] = useState(false);
+  // NEW-1 (B2163344) — the banner follows the NEWEST push's final outcome: a superseded push's failure
+  // (or its still-pending watchdog) must never paint — or keep — the banner after a later push has run.
+  const pushGenRef = useRef(0);
   // B473 — a verified-on-device-write failure (the write didn't read back). This is the silent
   // data-loss class the owner hit; it gets its OWN loud, accurately-worded banner (distinct from a
   // cloud-only failure, where the work IS safe on the device). Plus a transient "Saved ✓" confirmation
@@ -4004,7 +4007,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const cloudPushWithWatchdog = (id) => {
     setSaveStatus("saving");
-    const wd = setTimeout(() => setCloudSaveFailed(true), 6000);
+    const gen = ++pushGenRef.current;
+    const isLatest = () => gen === pushGenRef.current;
+    const wd = setTimeout(() => { if (isLatest()) setCloudSaveFailed(true); }, 6000);
     /* NEW-4 — the SAVE leg of a flood/drainage check. The check does not issue this write (it
      * rides the plan's own debounced push), so it is stamped from here, and `noteDrainageSave`
      * only attributes it when a check settled inside its window — outside it, a save is just a
@@ -4021,6 +4026,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       .then((c) => {
         clearTimeout(wd); stamp();
         if (c && c.ok && c.adopted) applyAdoptedHeader(c.adopted); // B1953797 — the heal merged another writer's header changes
+        if (!c.ok && !isLatest()) return; // superseded: a newer push owns the status/banner
         setSaveStatus(c.ok ? "saved" : "unsaved");
         // NEW-1 — an unresolved conflict gets its OWN banner (below), never the generic
         // "didn't reach the cloud, will retry" one: retrying from this tab's still-stale local
@@ -4028,7 +4034,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         setSiteConflict(!!c.unresolved);
         setCloudSaveFailed(!c.ok && !c.unresolved);
       })
-      .catch(() => { clearTimeout(wd); stamp(); setSaveStatus("unsaved"); setCloudSaveFailed(true); });
+      .catch(() => { clearTimeout(wd); stamp(); if (!isLatest()) return; setSaveStatus("unsaved"); setCloudSaveFailed(true); });
   };
   // Autosave this site (debounced). Persists on the FIRST real edit (so a 1-element
   // new site is written, not lost), and never persists a still-blank site.
@@ -4620,6 +4626,59 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     opTrackerRef.current.beginOperation("create");
     try { eng.reconcile(merged, { busy: false, afterSeed: true, exempt: new Set(healed.map((h) => "el:" + h.id)) }); } catch (_) {}
   };
+  /* Plan-switch first-write loss (2026-10-06, reproduced live 3/3 on planyr.io as the test account:
+   * New plan → draw a line → switch back within the engine's first seed → 0 `site_elements` rows,
+   * line visible only on the device that drew it). SitePlanner is keyed by plan id, so a switch
+   * UNMOUNTS it, and this effect's cleanup used to hard-`stop()` the engine. Measured: the new plan's
+   * engine had issued NO fetch and NO commit before the switch — it seeds on the realtime join (or
+   * the 4 s fallback), and until then `reconcile()` is a deliberate no-op — so the first markup was
+   * never even queued, nothing was journaled, and the teardown discarded the only path that would
+   * have committed it (the next seed's never-synced fold). The same hard stop also dropped a
+   * debounced update and a transport-failure retry waiting on its backoff.
+   *
+   * Now teardown DRAINS (elementSync `stop({ drain: true })`): a seeded engine diffs the final canvas
+   * once more and commits whatever is owed; a never-seeded one fetches the rows now and runs the
+   * same seed + rows ∪ never-synced fold + after-seed diff that refetchReplace runs — so rows stay
+   * canonical for anything the server already has (DATA.md inv. 3), tombstones stay deleted, and only
+   * elements the server has never seen become creates. Skipped (plain stop) when this tab must not
+   * write: signed out, a different account than the one that opened the plan, read-only, a deleted
+   * plan, or an unresolved header conflict. Fire-and-forget by design — the component is gone; a
+   * failure reports `element-drain-*` telemetry and the local mirror + next open's fold still hold
+   * the work. */
+  const drainElementsOnTeardown = (eng, openedByUid) => {
+    const mayWrite = isCloudActive() && !!supabase && activeUid() === openedByUid && !readOnlyRef.current
+      && !deletedSelfRef.current && !siteConflictRef.current;
+    if (!mayWrite) { eng.stop(); return; }
+    if (eng.isSeeded()) { try { reconcileElems(false); } catch (_) {} }
+    const s = stateRef.current;
+    const canvas = { els: s.els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels };
+    const seeded = eng.isSeeded();
+    eng.stop({ drain: true });
+    if (seeded) return;
+    const hasLocal = ["els", "markups", "measures", "callouts", "parcels"].some((f) => Array.isArray(canvas[f]) && canvas[f].length);
+    if (!hasLocal) return;
+    const sid = siteId;
+    // The header push the unmount cancelled (the autosave's 400 ms timer) — a no-op when the cloud
+    // header is already current; without it a lazily-materialised plan's elements would FK-fail.
+    Promise.resolve(pushSiteToCloud(sid)).catch(() => null)
+      .then(() => fetchElements(supabase, sid))
+      .then((r) => {
+        if (!r || !r.ok) {
+          reportClientEvent("element-drain-failed", "closing plan: site_elements fetch failed — never-synced elements stay local until the plan is reopened", { id: sid, error: (r && r.error) || "" });
+          return;
+        }
+        const rows = reconcileSeedRows(r.rows, eng.shadowSnapshot(), eng.tombstonedSnapshot());
+        const model = rowsToModel({}, rows);
+        const next = { els: model.els, markups: model.markups, measures: model.measures, callouts: model.callouts,
+          parcels: model.parcels.filter((pc) => !isHuskParcel("parcel", pc)) };
+        const rowKeys = new Set((rows || []).map((row) => row && (row.kind + ":" + row.id)));
+        const merged = foldNeverSyncedLocal(next, canvas, rowKeys, isHuskParcel);
+        merged.els = assemblyIntegrity(merged.els).els;
+        try { opTrackerRef.current.beginOperation("create"); } catch (_) {}
+        eng.drainSeed(rows, merged);
+      })
+      .catch((e) => reportClientEvent("element-drain-failed", "closing plan: drain threw", { id: sid, error: (e && e.message) || String(e) }));
+  };
   useEffect(() => {
     if (!isCloudActive() || !siteId || !supabase) {
       if (elSyncRef.current) { elSyncRef.current.stop(); elSyncRef.current = null; }
@@ -4814,7 +4873,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       document.removeEventListener("visibilitychange", onVis);
       try { supabase.removeChannel(ch); } catch (_) {}
       setPeers(null);
-      eng.stop();
+      drainElementsOnTeardown(eng, uid);   // never a bare stop() — see drainElementsOnTeardown
       if (elSyncRef.current === eng) elSyncRef.current = null;
     };
   }, [siteId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -9143,15 +9202,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setSheetOverlays((arr) => arr.map((o) => (o.id === d.id ? { ...o, x: d.ox + dx, y: d.oy + dy } : o)));
       return;
     }
-    if (d.mode === "ovScale") { // corner handle: uniform scale about the (fixed) center
+    if (d.mode === "ovScale") { // corner handle: uniform scale about the VISIBLE centre (the crop's, NEW-2) — whole-overlay scale, crop never drifts
       const ftPerPx = Math.max(0.001, d.ftPerPx0 * (Math.hypot(fp.x - d.C.x, fp.y - d.C.y) / d.grabDist));
-      const W = d.imgW * ftPerPx, H = d.imgH * ftPerPx;
-      setSheetOverlays((arr) => arr.map((o) => (o.id === d.id ? { ...o, ftPerPx, x: d.C.x - W / 2, y: d.C.y - H / 2 } : o)));
+      const patch = anchorVisibleCentre(d.o0, { ftPerPx });
+      setSheetOverlays((arr) => arr.map((o) => (o.id === d.id ? { ...o, ...patch } : o)));
       return;
     }
-    if (d.mode === "ovRotate") { // rotate handle: rotate about the center
+    if (d.mode === "ovRotate") { // rotate handle: rotate about the VISIBLE centre (NEW-2)
       const rotation = (((d.rot0 + (Math.atan2(fp.y - d.C.y, fp.x - d.C.x) - d.a0) * 180 / Math.PI) % 360) + 360) % 360;
-      setSheetOverlays((arr) => arr.map((o) => (o.id === d.id ? { ...o, rotation } : o)));
+      const patch = anchorVisibleCentre(d.o0, { rotation });
+      setSheetOverlays((arr) => arr.map((o) => (o.id === d.id ? { ...o, ...patch } : o)));
       return;
     }
     if (d.mode === "printMove") { setPrintFrame((f) => f ? { ...f, cx: d.cx + (fp.x - d.fx), cy: d.cy + (fp.y - d.fy) } : f); return; }
@@ -10316,9 +10376,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!o || o.locked || o.fromMap) return; // B848736 — the pinned map reference never resizes
     e.stopPropagation();
     const fp = p2f(e.clientX, e.clientY);
-    const C = { x: o.x + (o.imgW * o.ftPerPx) / 2, y: o.y + (o.imgH * o.ftPerPx) / 2 };
+    const C = visibleCenterWorld(o); // NEW-2 — the pivot is the centre of what the user can SEE (== the image centre when uncropped)
     setSel(null); setSelOverlay(id);
-    drag.current = { mode: "ovScale", id, C, grabDist: Math.max(1e-6, Math.hypot(fp.x - C.x, fp.y - C.y)), ftPerPx0: o.ftPerPx, imgW: o.imgW, imgH: o.imgH, ...startGate(e) };
+    drag.current = { mode: "ovScale", id, C, o0: o, grabDist: Math.max(1e-6, Math.hypot(fp.x - C.x, fp.y - C.y)), ftPerPx0: o.ftPerPx, imgW: o.imgW, imgH: o.imgH, ...startGate(e) };
     try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
   };
   const startRotateOverlay = (e, id) => {
@@ -10327,9 +10387,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!o || o.locked || o.fromMap) return; // B848736 — the pinned map reference never rotates
     e.stopPropagation();
     const fp = p2f(e.clientX, e.clientY);
-    const C = { x: o.x + (o.imgW * o.ftPerPx) / 2, y: o.y + (o.imgH * o.ftPerPx) / 2 };
+    const C = visibleCenterWorld(o); // NEW-2 — spin about the visible centre
     setSel(null); setSelOverlay(id);
-    drag.current = { mode: "ovRotate", id, C, a0: Math.atan2(fp.y - C.y, fp.x - C.x), rot0: o.rotation || 0, ...startGate(e) };
+    drag.current = { mode: "ovRotate", id, C, o0: o, a0: Math.atan2(fp.y - C.y, fp.x - C.x), rot0: o.rotation || 0, ...startGate(e) };
     try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
   };
   // Patch one overlay; `hist` gates an undo frame (off for continuous slider drags).
@@ -18553,9 +18613,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!o || tool !== "select") return calib || null;
     const tl = f2p({ x: o.x, y: o.y });
     const sy = o.ftPerPxY || o.ftPerPx; // B848736 — match renderSheetOverlay's non-uniform scale
-    const w = o.imgW * o.ftPerPx * rppf;
-    const h = o.imgH * sy * rppf;
-    const cx = tl.x + w / 2, cy = tl.y + h / 2;
+    const W = o.imgW * o.ftPerPx * rppf;
+    const H = o.imgH * sy * rppf;
+    const cx = tl.x + W / 2, cy = tl.y + H / 2; // the overlay's own rotation pivot (the full image centre) — the group transform below
+    // NEW-2 — the chrome fits the VISIBLE region: the crop rect (poly crop → its bounding box), the whole image when uncropped.
+    const vf = visibleFrame(o);
+    const w = vf.w * o.ftPerPx * rppf, h = vf.h * sy * rppf;
+    tl.x += vf.x * o.ftPerPx * rppf; tl.y += vf.y * sy * rppf;
+    const vcx = tl.x + w / 2; // visible-region centre x (the rotate handle's anchor)
     return (
       <g data-export="skip">
         <g transform={o.rotation ? `rotate(${o.rotation} ${cx} ${cy})` : undefined}>
@@ -18568,8 +18633,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <rect key={`hsc${hi}`} data-handle="overlay-scale" x={hx - 5} y={hy - 5} width={10} height={10} rx={2} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
                 style={{ cursor: hi % 2 === 0 ? "nwse-resize" : "nesw-resize" }} onPointerDown={(e) => startScaleOverlay(e, o.id)} />
             ))}
-            <line x1={cx} y1={tl.y} x2={cx} y2={tl.y - 22} stroke={PAL.accent} strokeWidth={1.5} pointerEvents="none" />
-            <circle data-handle="overlay-rotate" cx={cx} cy={tl.y - 22} r={5.5} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
+            <line x1={vcx} y1={tl.y} x2={vcx} y2={tl.y - 22} stroke={PAL.accent} strokeWidth={1.5} pointerEvents="none" />
+            <circle data-handle="overlay-rotate" cx={vcx} cy={tl.y - 22} r={5.5} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
               style={{ cursor: "grab" }} onPointerDown={(e) => startRotateOverlay(e, o.id)} />
           </>)}
         </g>

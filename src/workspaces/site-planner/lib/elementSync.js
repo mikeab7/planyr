@@ -241,9 +241,9 @@ export function createElementSync(opts = {}) {
     setTimer = (fn) => { fn(); return null; },   // (fn, ms) => handle
     clearTimer = () => {},
     serialize = makeWriteSerializer(),
-    onEvent = () => {},             // typed conflict events (B673 consumer)
+    onEvent: onEventRaw = () => {}, // typed conflict events (B673 consumer) — muted while draining (see stop)
     onStatus = () => {},            // { state, pending, attempt }
-    patchElement = null,            // (kind, id, patch) => void — write an assigned z back to canvas state
+    patchElement: patchElementRaw = null, // (kind, id, patch) => void — write an assigned z back to canvas state
     report = () => {},              // reportClientEvent-like telemetry
     selfUid = null,
     debounceMs = 750,
@@ -271,7 +271,7 @@ export function createElementSync(opts = {}) {
     // finds an element the server already has whose canvas copy diverges with nothing pending to
     // explain it — a stale on-device cache replaying an old edit. Rows are canonical there, so the
     // canvas adopts them instead of the divergence being committed as a fresh edit.
-    onRowsCanonical = null,
+    onRowsCanonical: onRowsCanonicalRaw = null,
     // NEW-1 — (summary) => void, called once every batch's result has settled (accepted, refused,
     // rolled back or transport-failed alike). The caller re-runs the bonded-assembly ASSERTION
     // against the live canvas there: "after every assembly write" is the moment a tear is newest
@@ -296,6 +296,30 @@ export function createElementSync(opts = {}) {
     // tracker) is unaffected.
     envelopeNow = null,
   } = opts;
+  /* Teardown DRAIN (plan-switch first-write loss, 2026-10-06). SitePlanner is keyed by plan id, so a
+   * plan switch UNMOUNTS it and its effect cleanup used to call a hard `stop()`: whatever the engine
+   * had not yet put on the wire — a debounced update, a transport-failure retry waiting on its
+   * backoff, and (the measured case) a brand-new plan's first markup that was never even enqueued
+   * because the engine had not seeded yet — was dropped. The local mirror still held it, so the
+   * device that drew it kept showing it; every other device and a fresh sign-in saw an empty plan.
+   * `stop({ drain: true })` keeps the WRITE side alive just long enough to land what is owed:
+   *   • no new diffs are accepted (`reconcile`/`restore` are no-ops — the component is gone);
+   *   • anything queued is flushed now, with the normal retry/backoff and conflict handling;
+   *   • `drainSeed(rows, collections)` lets the caller seed a never-seeded engine and run the one
+   *     after-seed diff over rows ∪ never-synced-local — the same rule refetchReplace applies, so
+   *     ROWS-CANONICAL-ON-SEED holds and only elements the server has never seen become creates;
+   *   • the canvas the engine re-reads at flush time is FROZEN at teardown (or set by drainSeed), so
+   *     nothing the next plan renders can reach this plan's rows;
+   *   • canvas-facing callbacks (conflict toasts, z write-back, row adoption) are muted — their owner
+   *     is unmounted. Telemetry (`report`) still fires, so a drain failure is never silent. */
+  let draining = false;
+  let frozenLive = null;
+  const onEvent = (ev) => {
+    if (!draining) return onEventRaw(ev);
+    report("element-drain-event", "a sync event arrived for a plan that is no longer open", { siteId, type: ev && ev.type, id: ev && ev.id });
+  };
+  const patchElement = (kind, id, patch) => { if (!draining && patchElementRaw) patchElementRaw(kind, id, patch); };
+  const onRowsCanonical = onRowsCanonicalRaw ? (list) => { if (!draining) onRowsCanonicalRaw(list); } : null;
   const envelopeForEnqueue = () => { try { return envelopeNow ? envelopeNow() : null; } catch (_) { return null; } };
 
   // key -> { kind, id, json, rev, z }  (last COMMITTED state)
@@ -615,7 +639,11 @@ export function createElementSync(opts = {}) {
   // would immediately adopt the TORN rows back over that repair — the two fixes would fight, and
   // the rows (which are the broken copy in this case) would win. A healed element is not a stale
   // cache replay; it is a deliberate repair that must diff and COMMIT.
-  function reconcile(collections, { busy, afterSeed, exempt } = {}) {
+  function reconcile(collections, opts) {
+    if (draining) return;           // torn down: only drainSeed() may diff now (see stop)
+    return diff(collections, opts);
+  }
+  function diff(collections, { busy, afterSeed, exempt } = {}) {
     if (stopped || !ready) return;  // not until the shadow is seeded from the DB (avoids load churn)
     if (busy) return;               // mid-drag: the flushGesture() hook re-runs this at gesture end
     const seen = new Set();
@@ -797,7 +825,7 @@ export function createElementSync(opts = {}) {
   // B673 — explicit user action from the "deleted by ⟨name⟩" toast: clear the tombstone and write
   // OUR data at a new rev. Immediate (like create/delete — a deliberate act, never debounced).
   function restore(kind, id, el) {
-    if (stopped || !ready || !el) return;
+    if (stopped || draining || !ready || !el) return;
     enqueue(skey(kind, id), { kind, id, cls: "restore", el, z: el.z, direct: true, envelope: envelopeForEnqueue() }); // an explicit user action is always direct
     schedule(true);
   }
@@ -831,9 +859,13 @@ export function createElementSync(opts = {}) {
    *  (b) FRESHNESS — every op's data is re-read from the live canvas, so the bytes on the wire are
    *      the state at flush time. A payload captured before the gesture can no longer be sent. */
   function liveIndex() {
+    if (draining) return frozenLive;               // teardown: the canvas as it stood, never the next plan's
     if (!liveCollections) return null;
     let c;
     try { c = liveCollections(); } catch (_) { return null; }
+    return indexOf(c);
+  }
+  function indexOf(c) {
     if (!c) return null;
     const byKey = new Map();
     for (const [kind, field] of FIELDS) {
@@ -1805,16 +1837,39 @@ export function createElementSync(opts = {}) {
     return { action: "upsert", kind: row.kind, id: row.id, el: row.data, row };
   }
 
-  function stop() {
+  function stop({ drain = false } = {}) {
+    if (stopped || draining) return;
+    if (drain) {
+      frozenLive = liveIndex();                    // read BEFORE `draining` flips liveIndex to the frozen copy
+      draining = true;
+      clearDebounce();
+      if (ready && dirty.size) {
+        report("element-drain", "plan closed with unsent element writes — committing them before teardown", { siteId, pending: dirty.size });
+        flush();
+      }
+      return;
+    }
     stopped = true;
     clearDebounce();
     if (backoffHandle != null) { clearTimer(backoffHandle); backoffHandle = null; }
   }
+  // Teardown of an engine that never seeded: seed it from rows fetched now and diff the plan's
+  // final canvas (the caller passes rows ∪ never-synced local, exactly as refetchReplace builds it)
+  // with the after-seed rule, then commit. Only valid after stop({ drain: true }).
+  function drainSeed(rows, collections) {
+    if (!draining || stopped || ready) return;
+    seed(rows);
+    frozenLive = indexOf(collections);
+    diff(collections, { busy: false, afterSeed: true });
+    if (dirty.size) report("element-drain", "plan closed before its first sync — committing its never-synced elements", { siteId, pending: dirty.size, seeded: true });
+    schedule(true);
+  }
 
   return {
-    reconcile, flushGesture, retryNow, seed, stop, restore, noteLocalAuthority, allowResurrect,
+    reconcile, flushGesture, retryNow, seed, stop, drainSeed, restore, noteLocalAuthority, allowResurrect,
     pendingOps, pendingCount, dirtyEntries, applyRemoteRow,
     isSeeded: () => ready,
+    isDraining: () => draining,
     // introspection for tests / B672-B673
     shadowSnapshot, tombstonedSnapshot, isRecent,
     get state() { return state; },

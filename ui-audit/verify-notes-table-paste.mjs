@@ -48,6 +48,11 @@ const LANDINGS = {
   "in-box-text": { doc: [box("b1", 40, 40, [para("Intro line")]), para("")], act: async () => { await enter("Intro line"); } },
   "box-selected-not-editing": { doc: [box("b1", 40, 40, [para("Intro line")]), para("")], act: async () => { await clickIn("Intro line"); } },
   "in-bullet": { doc: [box("b1", 40, 40, [{ type: "bulletList", content: [{ type: "listItem", content: [para("Bullet one")] }] }]), para("")], act: async () => { await enter("Bullet one"); } },
+  "in-heading": { doc: [box("b1", 40, 40, [{ type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Heading line" }] }]), para("")], act: async () => { await enter("Heading line"); } },
+  "in-ordered-item": { doc: [box("b1", 40, 40, [{ type: "orderedList", content: [{ type: "listItem", content: [para("Numbered one")] }] }]), para("")], act: async () => { await enter("Numbered one"); } },
+  "in-task-item": { doc: [box("b1", 40, 40, [{ type: "taskList", content: [{ type: "taskItem", attrs: { checked: false }, content: [para("Task one")] }] }]), para("")], act: async () => { await enter("Task one"); } },
+  "in-nested-bullet": { doc: [box("b1", 40, 40, [{ type: "bulletList", content: [{ type: "listItem", content: [para("Outer"), { type: "bulletList", content: [{ type: "listItem", content: [para("Inner bullet")] }] }] }] }]), para("")], act: async () => { await enter("Inner bullet"); } },
+  "in-blockquote": { doc: [box("b1", 40, 40, [{ type: "blockquote", content: [para("Quoted")] }]), para("")], act: async () => { await enter("Quoted"); } },
   "armed-empty-sheet": { doc: [para("")], act: async () => { await armBlank(0.5, 0.45); } },
   "armed-beside-box": { doc: [box("b1", 40, 40, [para("Existing box")]), para("")], act: async () => { await armBlank(0.55, 0.7); } },
   "nothing-focused": { doc: [box("b1", 40, 40, [para("Existing box")]), para("")], act: async () => {
@@ -279,6 +284,38 @@ if (!only || only.includes("onenote-desktop")) {
     const t = summariseTables(d)[0];
     const flat = t ? t.grid.map((r) => r.map((c) => (typeof c === "string" ? c : c.t))) : null;
     ok(`real Ctrl+V · ${land} — a 4-row × 3-column table arrives with every cell's text`, !!t && flat.length === 4 && flat[0].length === 3 && JSON.stringify(flat) === JSON.stringify(fx.grid), JSON.stringify(flat));
+  }
+}
+
+/* ── EXCEL IS THE MUST-SHIP (owner, 2026-10-06: "we need to 100% be able to paste from Excel") ─── */
+if (!only || only.includes("excel")) {
+  console.log("\n=== EXCEL: a single cell · a one-column range · a LARGE range (timed) ===");
+  const xl = (cells, extra = "") => `<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta name=ProgId content=Excel.Sheet><meta name=Generator content="Microsoft Excel 15"></head><body><table border=0 cellpadding=0 cellspacing=0 style='border-collapse:collapse'><!--StartFragment-->${extra}${cells}<!--EndFragment--></table></body></html>`;
+  const td = (t, n = "") => `<td class=xl65 ${n} style='border:.5pt solid black'>${t}</td>`;
+  for (const land of ["in-box-text", "armed-empty-sheet", "box-selected-not-editing"]) {
+    await seed(LANDINGS[land].doc); await LANDINGS[land].act();
+    await paste({ html: xl(`<tr height=20>${td("Hello cell")}</tr>`), text: "Hello cell\r\n", png: TINY_PNG_B64 });
+    const d = await stored();
+    ok(`excel single cell · ${land} — arrives as TEXT, not a one-cell table, and not a picture`, countType(d, "table") === 0 && /Hello cell/.test(textOfDoc(d)) && countType(d, "noteImage") === 0, textOfDoc(d));
+  }
+  await seed(LANDINGS["in-box-text"].doc); await LANDINGS["in-box-text"].act();
+  await paste({ html: xl([1, 2, 3, 4, 5].map((i) => `<tr height=20>${td("Item " + i)}</tr>`).join("")), text: "Item 1\r\nItem 2\r\nItem 3\r\nItem 4\r\nItem 5\r\n" });
+  {
+    const t = summariseTables(await stored())[0];
+    ok("excel one-column range (borders on) — stays a 5×1 table with every row", !!t && t.grid.length === 5 && t.grid.every((r, i) => r.length === 1 && r[0] === `Item ${i + 1}`), JSON.stringify(t && t.grid));
+  }
+  const R = 300, C = 12;
+  const big = Array.from({ length: R }, (_, r) => `<tr height=20>${Array.from({ length: C }, (_, c) => td(`r${r}c${c}`, c % 5 === 4 ? "x:num" : "")).join("")}</tr>`).join("");
+  const bigText = Array.from({ length: R }, (_, r) => Array.from({ length: C }, (_, c) => `r${r}c${c}`).join("\t")).join("\r\n") + "\r\n";
+  for (const land of ["in-box-text", "armed-empty-sheet"]) {
+    await seed(LANDINGS[land].doc); await LANDINGS[land].act();
+    const t0 = Date.now();
+    await paste({ html: xl(big, `<col width=64 span=${C}>`), text: bigText, png: TINY_PNG_B64 });
+    const d = await stored();
+    const t = summariseTables(d).find((x) => x.where === "box") || summariseTables(d)[0];
+    ok(`excel ${R}×${C} range · ${land} — every row and column arrives, first and last cell exact`, !!t && t.grid.length === R && t.grid.every((r) => r.length === C) && t.grid[0][0] === "r0c0" && t.grid[R - 1][C - 1] === `r${R - 1}c${C - 1}`, t && `${t.grid.length}×${t.grid[0] && t.grid[0].length}`);
+    await page.keyboard.type("Q"); await pacedWait(page, 800);
+    ok(`excel ${R}×${C} range · ${land} — the page is still responsive afterwards (typing lands)`, /Q/.test(textOfDoc(await stored())));
   }
 }
 

@@ -48,6 +48,7 @@
 import { projectToGrid, gridToProject } from "../coordinates/index.js";
 import { resolveZone, projectToZone, zoneToProject, gridConvergenceDeg } from "../coordinates/statePlane.js";
 import { solveSimilarityLSQ, similarityFromTwoPoints } from "../geometry/similarityTransform.js";
+import { effectiveCropRect } from "./overlayCrop.js";
 
 /** Degrees folded into [0, 360) — the ONE rotation normaliser (a drag, an align and a re-anchor all
  * land on the same stored range). */
@@ -280,4 +281,56 @@ export function applySimilarityToOverlay(o, S) {
 /* 2-point alignment: lands the two drawing points (p1,p2) on the two map points (q1,q2). */
 export function alignOverlaySimilarity(o, p1, p2, q1, q2) {
   return applySimilarityToOverlay(o, similarityFromTwoPoints(p1, p2, q1, q2));
+}
+
+
+/* =====================================================================================
+ * VISIBLE EXTENT (NEW-2, B2163345) — the selection chrome of a CROPPED overlay fits what the user
+ * can SEE (the crop rect, or a polygon crop's bounding box; the full image when uncropped), and
+ * resize / rotate pivot about that visible region's centre. ONE implementation for both surfaces.
+ *
+ * Nothing stored changes meaning: `ftPerPx`, `imgW/imgH`, `crop` are untouched; a gesture still
+ * scales/rotates the overlay AS A WHOLE, so the crop never drifts relative to the image. Only the
+ * pivot moves: after changing ftPerPx / rotation about the image centre, the placement is
+ * translated so the visible centre is exactly where it was at grab (`anchorVisibleCentre`).
+ * ===================================================================================== */
+
+/** The visible region in IMAGE PIXELS {x,y,w,h} — the crop (rect, or poly bbox) or the whole image. */
+export function visibleFrame(o) { const { x, y, w, h } = effectiveCropRect(o); return { x, y, w, h }; }
+
+/** Centre of the visible region, in image pixels. */
+export function visibleCenterPx(o) { const f = visibleFrame(o); return { x: f.x + f.w / 2, y: f.y + f.h / 2 }; }
+
+/** The visible region's four corners in image px, order [tl, tr, br, bl]. */
+export function visibleCornersPx(o) {
+  const f = visibleFrame(o);
+  return [{ x: f.x, y: f.y }, { x: f.x + f.w, y: f.y }, { x: f.x + f.w, y: f.y + f.h }, { x: f.x, y: f.y + f.h }];
+}
+
+/** CANVAS half — the visible centre in world feet under the overlay's current placement. */
+export function visibleCenterWorld(o) { const c = visibleCenterPx(o); return imagePointToWorld(o, c.x, c.y); }
+
+/** CANVAS half — apply `patch` (any of ftPerPx / rotation) to `o0`, then translate (x,y) so the
+ * VISIBLE centre stays exactly where it was in `o0`. Returns the changed fields {…patch, x, y}. */
+export function anchorVisibleCentre(o0, patch) {
+  const before = visibleCenterWorld(o0);
+  const o1 = { ...o0, ...patch };
+  const after = visibleCenterWorld(o1);
+  return { ...patch, x: o1.x + (before.x - after.x), y: o1.y + (before.y - after.y) };
+}
+
+/** GEO half — apply `patch` (ftPerPx / rotationDeg) to placement-bearing overlay `o0`, then move the
+ * anchor (centerLat/centerLon) so the VISIBLE centre keeps its lat/lon. Returns the full next overlay. */
+export function anchorVisibleCentreGeo(o0, patch) {
+  const c = visibleCenterPx(o0);
+  const before = imagePointToLatLon(o0, o0.imgW, o0.imgH, c.x, c.y);
+  let o1 = { ...o0, ...patch };
+  if (!before) return o1;
+  // Two passes: grid convergence depends (very slightly) on the anchor, which the first pass moves.
+  for (let i = 0; i < 2; i++) {
+    const after = imagePointToLatLon(o1, o1.imgW, o1.imgH, c.x, c.y);
+    if (!after) return o1;
+    o1 = { ...o1, centerLat: o1.centerLat + (before.lat - after.lat), centerLon: o1.centerLon + (before.lon - after.lon) };
+  }
+  return o1;
 }
