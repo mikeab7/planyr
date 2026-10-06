@@ -40,9 +40,10 @@ const nameOf = (key) => COUNTIES[key].label.replace(/ Parish, LA$/, "");
 
 describe("every wired Louisiana row is a PARISH row (NEW-1)", () => {
   it("has the rows this batch wired — a deleted row must fail here, not vanish", () => {
-    expect(LA_KEYS.length).toBeGreaterThanOrEqual(31);
+    expect(LA_KEYS.length).toBeGreaterThanOrEqual(34);
     for (const k of ["la_eastbatonrouge", "la_orleans", "la_ascension", "la_stjohnthebaptist", "la_sttammany", "la_tangipahoa", "la_livingston",
-               "la_calcasieu", "la_jefferson", "la_jeffersondavis", "la_stlandry", "la_westbatonrouge"])
+               "la_calcasieu", "la_jefferson", "la_jeffersondavis", "la_stlandry", "la_westbatonrouge",
+               "la_desoto", "la_washington", "la_westfeliciana"])
       expect(LA_KEYS).toContain(k);
   });
 
@@ -363,10 +364,11 @@ describe("queryAtPoint on a layer that only answers an envelope (Jefferson Paris
     return calls;
   };
 
-  it("is declared on the Jefferson layer only", () => {
+  it("is declared on the Jefferson and De Soto layers only", () => {
     expect(isPointViaEnvelopeLayerUrl(JEFF)).toBe(true);
     expect(isPointViaEnvelopeLayerUrl(JEFF + "/")).toBe(true);
-    for (const k of LA_KEYS.filter((x) => x !== "la_jefferson")) expect(isPointViaEnvelopeLayerUrl(COUNTIES[k].layerUrl), k).toBe(false);
+    expect(isPointViaEnvelopeLayerUrl(COUNTIES.la_desoto.layerUrl)).toBe(true);
+    for (const k of LA_KEYS.filter((x) => x !== "la_jefferson" && x !== "la_desoto")) expect(isPointViaEnvelopeLayerUrl(COUNTIES[k].layerUrl), k).toBe(false);
   });
 
   it("sends an ENVELOPE (not a bare point) around the click and returns the parcel that contains it", async () => {
@@ -394,5 +396,134 @@ describe("queryAtPoint on a layer that only answers an envelope (Jefferson Paris
     const calls = stub([]);
     await queryAtPoint(COUNTIES.la_calcasieu.layerUrl, -93.2174, 30.2266);
     expect(calls[0].searchParams.get("geometryType")).toBe("esriGeometryPoint");
+  });
+});
+
+
+/* NEW-1 (2026-10-06) — De Soto, Washington and West Feliciana. Found by an ArcGIS Online item search with a
+ * Louisiana bbox filter (name search missed all three), measured from Michael's Chrome at the planyr.io origin and
+ * independently re-probed from this sandbox. The attribute bags below are REAL rows from those services (long
+ * columns trimmed), including their fixed-width space padding — the shape production returns. */
+const NEW3 = ["la_desoto", "la_washington", "la_westfeliciana"];
+const pad = (v, n) => String(v).padEnd(n, " ");
+
+describe("the three 2026-10-06 parishes (De Soto, Washington, West Feliciana)", () => {
+  it("each is wired to the measured service with a pinned id and a stated first-party provenance", () => {
+    expect(COUNTIES.la_desoto).toMatchObject({ layerUrl: "https://services6.arcgis.com/pbafaqRkYgys7ElS/arcgis/rest/services/Parcels_AGOL_view/FeatureServer/0", idField: "PARCEL_ID", pinIdField: true, addrField: "Street_Name", pointViaEnvelope: true });
+    expect(COUNTIES.la_washington).toMatchObject({ layerUrl: "https://services7.arcgis.com/yE0LOKocwREqepjx/arcgis/rest/services/Parcels_Public_view_March_2024/FeatureServer/0", idField: "PARCEL_ID", pinIdField: true, addrField: "PHYSICAL_S" });
+    expect(COUNTIES.la_westfeliciana).toMatchObject({ layerUrl: "https://services5.arcgis.com/SkttgSmcq6CPonms/arcgis/rest/services/Parcels_06012022_Public/FeatureServer/14", idField: "PARCEL_ID", pinIdField: true, addrField: "Street_Nam" });
+    expect(COUNTY_VERIFICATION.la_desoto).toMatchObject({ publisher: "own", publisherName: "De Soto Parish Assessor" });
+    expect(COUNTY_VERIFICATION.la_washington).toMatchObject({ publisher: "own", publisherName: "Washington Parish Communications District (911)" });
+    expect(COUNTY_VERIFICATION.la_westfeliciana).toMatchObject({ publisher: "own", publisherName: "West Feliciana Parish Government" });
+    for (const k of NEW3) {
+      const v = COUNTY_VERIFICATION[k];
+      expect(v.verifiedOn).toBe("2026-10-06");
+      expect(v.verifiedNote).toMatch(/Michael's browser at the planyr\.io origin, 2026-10-06/);
+    }
+    // The vintage is stated, not hidden (West Feliciana is June 2022, Washington March 2024).
+    expect(COUNTY_VERIFICATION.la_westfeliciana.verifiedNote).toMatch(/JUNE 2022 vintage/);
+    expect(COUNTY_VERIFICATION.la_washington.verifiedNote).toMatch(/March 2024/);
+  });
+
+  it("the measured spread points resolve to the right parish, and the seats are inside it", () => {
+    const pts = {
+      la_desoto: [[32.038, -93.709], [31.94, -93.53], [32.18, -93.92]],            // Mansfield · mid-parish · NW
+      la_washington: [[30.791, -89.8486], [30.85, -90.15], [30.70, -90.05]],       // Bogalusa · W · S rural
+      la_westfeliciana: [[30.784, -91.377], [30.80, -91.45], [30.95, -91.30]],     // St. Francisville · W · N
+    };
+    for (const [k, list] of Object.entries(pts))
+      for (const [lat, lng] of list) expect(countyIdentity(lat, lng), `${k} @ ${lat},${lng}`).toMatchObject({ status: "ok", key: k, state: "LA" });
+  });
+
+  it("De Soto — the card never titles itself with the city/state/zip part of a split situs; mailing columns never reach it", () => {
+    // Real row, 103 Louisiana (Mansfield). Address_Number + Street_Name are the split situs; the blank-padded
+    // Physical_Address_City/State/Zip_Code siblings used to be matched by the physical-address rung.
+    const a = {
+      PARCEL_ID: "0400451500", TAX_PIN: "091213-001-25002", Owner_Name: "DESOTO HOSPITAL ASSOCIATION, INC.",
+      Owner_Address: "C/O LARRY TODD EPPLER 207 JEFFERSON ST.", Owner_CityStateZipCode: "MANSFIELD LA 71052-0000", ParcelNumber: "0400451500",
+      Address_Number: pad("103", 10), Street_Name: pad("LOUISIANA", 40), Street_Direction: "  ",
+      Physical_Address_City: pad("", 20), Physical_Address_State: pad("", 20), Physical_Address_Zip_Code: pad("", 10),
+      Legal_Description: "BLOCK 25, MANSFIELD", Assessed_Value: 125000, Ward: "1",
+    };
+    expect(ownerName(a)).toBe("DESOTO HOSPITAL ASSOCIATION, INC.");
+    expect(idAttrFor("la_desoto", a)).toBe("0400451500");          // detection alone would have taken TAX_PIN/ParcelNumber
+    expect(situsAddress(a)).toBeNull();                           // split situs: the card falls back to the searched address
+    // …and when the city IS populated it is still never the address.
+    expect(situsAddress({ ...a, Physical_Address_City: pad("MANSFIELD", 20), Physical_Address_Zip_Code: pad("71052", 10) })).toBeNull();
+    expect(situsAddress({ Physical_Address_State: "LA", Physical_Address_Zip_Code: "71052" })).toBeNull();
+    for (const split of [parcelCardRows({ ...a, Physical_Address_City: "MANSFIELD" }, {}), parcelPanelRows(a, {})])
+      for (const r of [...split.primary, ...split.more])
+        expect(String(r.value), JSON.stringify(r)).not.toMatch(/JEFFERSON ST|LARRY TODD|71052/);
+    expect(mailingAddressValues(a).has("MANSFIELD LA 71052-0000")).toBe(true);
+    expect(situsKey({ Owner_Address: "207 JEFFERSON ST." })).toBeNull();
+  });
+
+  it("Washington — PHYSICAL_A is the house NUMBER (never the title); PHYSICAL_S the street; HOUSE/HOUSEPIC never render", () => {
+    const a = {
+      PARCEL_ID: "0440465715", PHYSICAL_A: "1820", PHYSICAL_S: "SOUTH COLUMBIA ROAD", OWNER_NAME: "ROBERTS, BRITTANY", ACREAGE: 0.651733204761,
+      LEGAL_DESC: "LOT 4", HOUSE: '<img src ="M:\\house_images\\0440465715.jpg"width="400" height="200" />', HOUSEPIC: "\\\\wpaserver\\maps\\house_images\\0440465715.jpg", PARCEL_NUM: "0440465715",
+    };
+    expect(situsAddress(a)).toBeNull();                           // before the fix this read "1820"
+    expect(situsAddress({ PHYSICAL_A: "1820" })).toBeNull();
+    expect(situsAddress({ PHYSICAL_A: "1820 S COLUMBIA RD" })).toBe("1820 S COLUMBIA RD");   // a whole line still wins
+    expect(ownerName(a)).toBe("ROBERTS, BRITTANY");
+    expect(idAttrFor("la_washington", a)).toBe("0440465715");
+    // The rural rows carry a single space in both situs columns.
+    expect(situsAddress({ ...a, PHYSICAL_A: " ", PHYSICAL_S: " " })).toBeNull();
+    for (const split of [parcelCardRows(a, {}), parcelPanelRows(a, {})])
+      for (const r of [...split.primary, ...split.more]) expect(String(r.value), JSON.stringify(r)).not.toMatch(/img|wpaserver|house_images/);
+    const acres = [...parcelCardRows(a, {}).primary, ...parcelCardRows(a, {}).more].find((r) => /Acreage/.test(r.label));
+    expect(acres && String(acres.value)).toMatch(/0\.65/);
+  });
+
+  it("West Feliciana — Owner_Addr / Owner_City are MAILING; Address_Nu + Street_Nam is the split situs; Acres and Owner_Name resolve", () => {
+    const a = {
+      PARCEL_ID: "336G-068-000-020.000", Acres: 0.107469450796, Owner_Name: "TOWN OF ST. FRANCISVILLE",
+      Owner_Addr: "WATER WELL #3\r\nP. O. BOX 400", Owner_City: "ST. FRANCISVILLE LA 70775-", AISparcelN: "100002096", MappingNum: "336G-068-000-020.000",
+      Address_Nu: "4977", Street_Nam: "PARKER ST.", Street_Dir: " ", Physical_A: " ", Physical_1: " ", Physical_2: " ",
+      Legal_Desc: "0.06 ACRES, SECTION 68", Assessed_V: 3,
+    };
+    expect(ownerName(a)).toBe("TOWN OF ST. FRANCISVILLE");
+    expect(idAttrFor("la_westfeliciana", a)).toBe("336G-068-000-020.000");
+    expect(situsAddress(a)).toBeNull();                           // split situs, blank Physical_* → searched address
+    expect(situsAddress({ ...a, Physical_A: "4977 PARKER ST." })).toBe("4977 PARKER ST.");
+    for (const split of [parcelCardRows(a, {}), parcelPanelRows(a, {})])
+      for (const r of [...split.primary, ...split.more]) expect(String(r.value), JSON.stringify(r)).not.toMatch(/P\. O\. BOX 400|70775/);
+    expect(situsKey({ Owner_City: "ST. FRANCISVILLE LA 70775-" })).toBeNull();
+    expect(mailingAddressValues(a).has("ST. FRANCISVILLE LA 70775-")).toBe(true);
+  });
+
+  it("the shared-ladder change is narrow: whole-line situs columns on the older parishes read exactly as before", () => {
+    expect(situsAddress({ Physical_A: "1859 VIOLA ST" })).toBe("1859 VIOLA ST");           // St. Tammany
+    expect(situsAddress({ PHYSICALAD: "1200 RYAN ST" })).toBe("1200 RYAN ST");             // Calcasieu
+    expect(situsAddress({ SITUS_CITY: "OPELOUSAS", SITUS: "117 MAIN ST S" })).toBe("117 MAIN ST S");
+    expect(situsAddress({ SITUS_NUM: "1620" })).toBe("1620");                              // rung 0 unchanged
+  });
+
+  it("a bare-number situs on the physical-address rung must not title a card (red-proof: replays the pre-fix ladder)", () => {
+    // The pre-fix rule read PHYSICAL_A ("1820") and Physical_Address_City ("MANSFIELD") as the situs. If the guards
+    // above were removed these two assertions are the ones that go red.
+    expect(situsKey({ PHYSICAL_A: "1820", PHYSICAL_S: "SOUTH COLUMBIA ROAD" })).toBeNull();
+    expect(situsKey({ Address_Number: "103", Street_Name: "LOUISIANA", Physical_Address_City: "MANSFIELD" })).toBeNull();
+  });
+
+  it("an id search is pinned to PARCEL_ID on all three (detection would pick another column)", () => {
+    const ds = ["OBJECTID", "PARCEL_ID", "TAX_PIN", "ParcelNumber", "Owner_Name", "PIN"].map((name) => ({ name }));
+    expect(resolveSearchField(ds, "id", "PARCEL_ID", true)).toBe("PARCEL_ID");
+    expect(resolveSearchField(ds, "address", "Street_Name", true)).toBe("Street_Name");
+    const wa = ["OBJECTID", "PARCEL_ID", "PHYSICAL_A", "PHYSICAL_S", "OWNER_NAME", "PARCEL_NUM"].map((name) => ({ name }));
+    expect(resolveSearchField(wa, "id", "PARCEL_ID", true)).toBe("PARCEL_ID");
+    expect(resolveSearchField(wa, "address", "PHYSICAL_S", true)).toBe("PHYSICAL_S");
+  });
+
+  it("queryAtPoint sends an ENVELOPE to De Soto (the layer declares it) and a POINT to Washington / West Feliciana", async () => {
+    const calls = [];
+    vi.stubGlobal("fetch", vi.fn(async (u) => { calls.push(new URL(u)); return { ok: true, status: 200, json: async () => ({ features: [] }) }; }));
+    try {
+      await queryAtPoint(COUNTIES.la_desoto.layerUrl, -93.709, 32.038);
+      await queryAtPoint(COUNTIES.la_washington.layerUrl, -89.8486, 30.791);
+      await queryAtPoint(COUNTIES.la_westfeliciana.layerUrl, -91.377, 30.784);
+    } finally { vi.unstubAllGlobals(); }
+    expect(calls.map((c) => c.searchParams.get("geometryType"))).toEqual(["esriGeometryEnvelope", "esriGeometryPoint", "esriGeometryPoint"]);
   });
 });

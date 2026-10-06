@@ -185,7 +185,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   and the repo-root ui-audit instrument **diagnose-layer-gate-flash**. ⚠ That harness can watch the terrain
   layer ASK but never ANSWER — 3DEP is `ERR_CONNECTION_RESET` from Chromium here — and it says so
   rather than scoring itself; the paint-then-vanish half is **V121985**.
-  **`layerHiddenToast.js` (B2112576)** is the on-map companion: pure once-per-crossing toast decision (+ the "Zoom in" target) over the same gates; wired in `SitePlanner.jsx` through the shared toast stack. Guards: **layerHiddenToast** + e2e **layer-hidden-toast**.
+  **`layerHiddenToast.js` (B2112576)** is the on-map companion: pure once-per-crossing toast decision (+ the "Zoom in" target) over the same gates; shared by BOTH surfaces through `lib/useLayerHiddenToast.js` (the project canvas in `SitePlanner.jsx` AND the overview in `MapFinder.jsx`) over the shared toast stack. Guards: **layerHiddenToast** + e2e **layer-hidden-toast**.
 - `layers.js` + `components/LayerPanel.jsx` — map-layer system; `layerPrefs.js` (per-site Layers-panel
   toggle memory — NEW-1, sparse on/off overrides restored on open + persisted on toggle).
   **⛔ B385040 — `applyOnOverrides` / `applyAboveOverrides` ARE IDENTITY-STABLE, and that is load-bearing

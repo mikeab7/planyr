@@ -71,3 +71,32 @@ test("layer-hidden toast: on load out of range, Zoom in draws, zoom out toasts o
   for (let i = 0; i < 3; i++) { await page.mouse.wheel(0, 120); await page.waitForTimeout(400); }
   await expect(page.locator(TOAST, { hasText: "hidden at this zoom" })).toHaveCount(0); // still out of range: no re-fire
 });
+
+/* The Map / "Select a project" overview is where a layer is FIRST turned on, and it is a different
+ * component with its own Leaflet map — so it carries the same toast through the shared hook. */
+test("overview map: turning contours on zoomed out toasts; Zoom in draws; zooming out toasts once", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 860 });
+  await page.route(/\.(jpg|jpeg|png|webp)(\?|$)/, (route) => route.abort());
+  await page.addInitScript(() => {
+    try { localStorage.setItem("planarfit:relevance:v1", JSON.stringify({ mode: "all", radius: 2.5 })); } catch (_) {}
+  });
+  await page.goto("/#/site", { waitUntil: "load" });
+  await page.waitForTimeout(2500);
+  const finder = '[data-testid="layer-panel"][data-surface="finder"]';
+  const toggle = page.getByRole("button", { name: /^\s*❖?\s*Layers/ }).filter({ visible: true }).first();
+  if (await toggle.count()) await toggle.click().catch(() => {});
+  await expect(page.locator(finder)).toBeVisible({ timeout: 20000 });
+  const row = page.locator(`${finder} [data-testid="layer-row-contours"]`);
+  const t = page.locator(TOAST, { hasText: "hidden at this zoom" });
+  await expect(t).toHaveCount(0);
+  await row.locator('input[type="checkbox"]').first().check();
+  await expect(row).toHaveAttribute("data-layer-state", "dormant-zoom");
+  await expect(t).toHaveCount(1, { timeout: 5000 });
+  await t.getByRole("button", { name: "Zoom in" }).click();
+  await expect(row).toHaveAttribute("data-layer-state", "drawing", { timeout: 8000 });
+  await expect(t).toHaveCount(0);
+  // back out past the gate → once
+  for (let i = 0; i < 4; i++) { await page.getByRole("button", { name: /zoom out/i }).filter({ visible: true }).first().click(); await page.waitForTimeout(350); }
+  await expect(row).toHaveAttribute("data-layer-state", "dormant-zoom", { timeout: 5000 });
+  await expect(t).toHaveCount(1, { timeout: 5000 });
+});
