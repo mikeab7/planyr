@@ -19,6 +19,7 @@
 import { chromium } from "@playwright/test";
 import { existsSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { openSignedIn } from "./lib/signedInSession.mjs";
 
 const BASE = (process.env.BASE_URL || "http://localhost:4173").replace(/\/$/, "");
 const SHOTS = process.env.SHOTS_DIR || "";
@@ -34,19 +35,30 @@ const mkSite = (id) => ({
   els: [], measures: [], callouts: [], markups: [], settings: {}, underlay: null, updatedAt: Date.now(), status: "active", schemaVersion: 12,
 });
 
-const exe = existsSync(chromium.executablePath()) ? undefined : "/opt/pw-browsers/chromium";
-const browser = await chromium.launch({ executablePath: exe, args: ["--no-sandbox"] });
-const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-const page = await ctx.newPage();
-const errors = []; page.on("pageerror", (e) => errors.push(String(e)));
-await page.route("**/*.jpg", (r) => r.abort());
+const SIGNED = !!process.env.SIGNED_IN;
 const SITE_ID = "zz-parcels-" + Math.random().toString(36).slice(2, 7);
 const site = mkSite(SITE_ID);
-await page.addInitScript((s) => { try { if (!localStorage.getItem("zz-seeded-" + s.id)) { localStorage.setItem("planarfit:sites:v1", JSON.stringify({ [s.id]: s })); localStorage.setItem("planarfit:currentSite:v1", s.id); localStorage.setItem("zz-seeded-" + s.id, "1"); } } catch (e) {} }, site);
+let browser, ctx, page, UID = null;
+const errors = [];
+if (SIGNED) {
+  const s = await openSignedIn({ base: BASE });
+  browser = s.browser; ctx = s.context; page = s.page;
+  console.log("signed in as", s.proof.email, "| served build", JSON.stringify(s.build));
+  UID = await page.evaluate(async () => (await window.pfSupabase.auth.getUser()).data.user.id);
+  await page.evaluate(([uid, st]) => { localStorage.setItem("planarfit:sites:cloud:" + uid, JSON.stringify({ [st.id]: st })); localStorage.setItem("planarfit:currentSite:v1", st.id); }, [UID, site]);
+} else {
+  const exe = existsSync(chromium.executablePath()) ? undefined : "/opt/pw-browsers/chromium";
+  browser = await chromium.launch({ executablePath: exe, args: ["--no-sandbox"] });
+  ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  page = await ctx.newPage();
+  await page.addInitScript((s) => { try { if (!localStorage.getItem("zz-seeded-" + s.id)) { localStorage.setItem("planarfit:sites:v1", JSON.stringify({ [s.id]: s })); localStorage.setItem("planarfit:currentSite:v1", s.id); localStorage.setItem("zz-seeded-" + s.id, "1"); } } catch (e) {} }, site);
+}
+page.on("pageerror", (e) => errors.push(String(e)));
+await page.route("**/*.jpg", (r) => r.abort());
 
 const shot = async (n) => { if (SHOTS) await page.screenshot({ path: `${SHOTS}/${n}.png` }); };
 const T = (id) => page.getByTestId(id);
-const parcelsLS = () => page.evaluate((id) => { const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); return (m[id] && m[id].parcels) || null; }, SITE_ID);
+const parcelsLS = () => page.evaluate(([id, uid]) => { const m = JSON.parse(localStorage.getItem(uid ? "planarfit:sites:cloud:" + uid : "planarfit:sites:v1") || "{}"); return (m[id] && m[id].parcels) || null; }, [SITE_ID, UID]);
 const siteAcres = async () => parseFloat((await T("parcels-site-acres").innerText()).replace(/,/g, ""));
 const rowNames = () => page.$$eval('[data-testid^="parcel-table-row-"]', (els) => els.map((e) => e.querySelector('[data-testid^="parcel-row-"]:not([data-testid*="check"]):not([data-testid*="eye"]):not([data-testid*="more"]):not([data-testid*="pencil"])')?.getAttribute("title")?.split(" — ")[0] || e.innerText.split("\n")[0]));
 const flat = (ps) => JSON.stringify((ps || []).map((p) => ({ n: p.label || p.splitName || p.addr, pts: p.points.map((q) => [Math.round(q.x * 100) / 100, Math.round(q.y * 100) / 100]), a: p.active !== false, l: !!p.locked, from: (p.combined?.from || []).map((s) => s.id) })).sort((a, b) => a.n.localeCompare(b.n)));
@@ -229,6 +241,16 @@ try {
 } catch (e) {
   console.error("HARNESS ERROR:", e.message); ok("harness ran to completion", false, e.message); await shot("zz-error").catch(() => {});
 } finally {
+  if (SIGNED) { // the throwaway site is ALWAYS deleted (owner constraint 15) — and confirmed gone
+    const gone = await page.evaluate(async ([id, uid]) => {
+      await window.pfSupabase.from("site_elements").delete().eq("site_id", id);
+      await window.pfSupabase.from("sites").delete().eq("id", id);
+      const q = await window.pfSupabase.from("sites").select("id").eq("id", id);
+      try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse(localStorage.getItem(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
+      return !q.error && (q.data || []).length === 0;
+    }, [SITE_ID, UID]).catch(() => false);
+    ok("throwaway site deleted and confirmed gone from the cloud", gone);
+  }
   await browser.close();
 }
 const fails = results.filter((r) => !r.pass);
