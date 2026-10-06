@@ -67,7 +67,7 @@ export function siteMetrics(elements, parcels, parcelOverlapPairs, settings) {
     }
     else if (e.type === "paving" || e.type === "sidewalk" || e.type === "road") paving += a + curb;
     else if (e.type === "parking") { parkArea += a + curb; stalls += e.points ? estStalls(a, settings) : carStalls(e.w, e.h, cfgOf(e)).count; }
-    else if (e.type === "trailer") { trailArea += a + curb; trailers += e.points ? estTrailers(a, settings) : trailerStalls(e.w, e.h, cfgOf(e)).count; }
+    else if (e.type === "trailer") { trailArea += a + curb; trailers += e.points ? estTrailers(a, cfgOf(e)) : trailerStalls(e.w, e.h, cfgOf(e)).count; }
     else if (e.type === "pond") {
       pondArea += a;
       // Provided storage = the same stage/volume calc the pond panel shows, summed site-wide.

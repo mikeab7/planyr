@@ -1501,6 +1501,12 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   **verify-pond-label-fit** (the real plan, a zoom sweep, the rendered label text read back off the DOM,
   and the exported sheet — PDF-PARITY) and **diagnose-pond-pan** (the paired before/after probe this was
   found with).
+  **`trailerRows.js` (B2160240–B2160242) — the pure rules for a trailer parking ROW's label and stall spec.** The label's lines carry
+  `keepLine` (the COUNT): `labelLayout`'s `takeLines`/`fitLines` drop every other line first, and that kept line alone may spill across
+  a strip too thin for a line rather than vanish — never drop it back to "last line goes first" (a shallow upper row lost its number).
+  `labelHidden` is the user's per-row, label-only hide (menu "Hide label" + Properties) and is deliberately NOT `noLabel`, a bond role
+  tag the copy/heal paths strip. Stall depth/width/lane are per-row `cfg` overrides (floors 8/6/0 ft, far under any real stall); a row
+  drawn shallower than the standard adopts the drawn depth. Guards: repo-root `test/` **trailerRows**, e2e **trailer-row-labels**, ui-audit **verify-trailer-row-labels**.
   `calloutLayout.js` — pure text-box/callout box geometry: auto-size or wrap-to-width (B913).
 - **Parcel-chrome declutter trio (NEW-1/NEW-2/NEW-3) — the FIXED-SIZE sibling of the label engine above.**
   `labelLayout` reflows labels; these three govern the chrome that CANNOT reflow, whose count is set by how
