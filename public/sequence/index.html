@@ -5176,6 +5176,21 @@ const mkt = (id, name, start, dur, parentId=null, health="gray", predecessors=[]
   };
 };
 
+// NEW-1 (SCHED-EMPTY-ON-SLOW-LOAD, 2026-10-06) — tell the shell where this page's schedule-list load stands, so
+// the Schedule tab can say "still loading" / "couldn't reach" instead of mistaking an UNLOADED list for an
+// EMPTY one (which offered Create on a project that already had three schedules). State is "loading" or
+// "failed"; a successful load is announced by the ordinary planar:nav-state, never by this.
+window.__planarLoadStatus = "loading";
+function postLoadState(state) {
+  try {
+    if (window.self !== window.top) {
+      window.parent.postMessage({ source: "planar-seq", type: "planar:load-state", state }, window.location.origin);
+    }
+  } catch (_) {}
+}
+const LOAD_ATTEMPT_TIMEOUT_MS = 20000;   // one read attempt; a hung request is abandoned and retried
+const LOAD_RETRY_BASE_MS = 2000, LOAD_RETRY_MAX_MS = 30000;
+
 const SEED = {
   nPid: 4, nTid: {1:12, 2:5, 3:179}, aPid: 3, view: "split", section: "projects", editProjId: null, healthColStyle: "stoplight",
   settings: {...DEFAULT_SETTINGS, holidays:{...DEFAULT_HOLIDAYS}},
@@ -8678,8 +8693,15 @@ function App() {
   // defined INSIDE the load effect below, so importJSON + version-restore route through this ref rather
   // than re-calling them out of scope — calling them directly was a ReferenceError (import was broken).
   const applyLoadedDataRef = useRef(null);
+  // NEW-1 (SCHED-EMPTY-ON-SLOW-LOAD) — the initial read can fail or hang (a slow/unreachable cloud). Inside
+  // the shell a failed read must NOT fall back to the embedded demo SEED (that made an unreachable cloud look
+  // like a working account, and its edits could then autosave over the real one): `data` stays null, the shell
+  // is told "failed", and this effect re-runs on `loadTick` — on a backoff timer and on the shell's Retry.
+  const [loadTick, setLoadTick] = useState(0);
+  const loadAttemptRef = useRef(0);
 
   useEffect(() => {
+    let cancelled = false, retryTimer = null;   // a superseded attempt (Retry) must never apply its late result
     (async () => {
       // Auto-renumber every project's tasks on load so IDs are always sequential
       const normalizeIds = d => {
@@ -8765,7 +8787,25 @@ function App() {
         const isMobile = window.innerWidth < 768;
         // Supabase is the source of truth for live edits — check it first.
         // __PLANAR_DATA__ is the seed used only when Supabase has no record yet.
-        const r = await window.storage.get("hs-v1");
+        window.__planarCloudError = false; window.__planarAuthRequired = false;
+        let r = null, readThrew = false, timer = null;
+        try {
+          r = await Promise.race([
+            window.storage.get("hs-v1"),
+            new Promise((_, rej) => { timer = setTimeout(() => rej(new Error("hs-v1 read timed out")), LOAD_ATTEMPT_TIMEOUT_MS); }),
+          ]);
+        } catch { readThrew = true; }
+        clearTimeout(timer);
+        if (cancelled) return;
+        if (readThrew) window.__planarCloudError = true;
+        if (!r && window.__planarCloudError && window.self !== window.top) {
+          window.__planarLoadStatus = "failed";
+          postLoadState("failed");
+          const n = ++loadAttemptRef.current;
+          console.warn("[planar load] schedule read failed (attempt " + n + ") — retrying; nothing is written until it loads.");
+          retryTimer = setTimeout(() => setLoadTick(t => t + 1), Math.min(LOAD_RETRY_MAX_MS, LOAD_RETRY_BASE_MS * Math.pow(2, n - 1)));
+          return;
+        }
         if (r) {
           const d = normalizeScheduleOwnership(normalizeToV8(ensureContacts(normalizeOwnerLists(normalizeIds(ensureHolidays(normalizeToV7(normalizeToV6(normalizeMeetingCadence(JSON.parse(r.value))))))))));
           // NOTE: a narrow viewport forces the GRID layout at RENDER time (see the body switch),
@@ -8833,7 +8873,8 @@ function App() {
         setData(resolveViewState(d));
       }
     })();
-  }, []);
+    return () => { cancelled = true; clearTimeout(retryTimer); };
+  }, [loadTick]);
 
   useEffect(() => {
     if (!data) return;
@@ -10520,6 +10561,21 @@ function App() {
     window.addEventListener("message", onNames);
     return () => window.removeEventListener("message", onNames);
   }, []);
+  // NEW-1 (SCHED-EMPTY-ON-SLOW-LOAD) — the two shell messages that matter BEFORE the document has loaded
+  // (the handler below drops everything until `data` exists): the shell's nav-request is answered with
+  // where the load stands, and its Retry restarts the read. Neither writes anything.
+  useEffect(() => {
+    if (!inShell) return;
+    const onLoadMsg = (e) => {
+      if (e.origin !== window.location.origin) return;
+      const m = e.data;
+      if (!m || m.source !== "planar-shell" || latestData.current) return;
+      if (m.type === "planar:nav-request") postLoadState(window.__planarLoadStatus === "failed" ? "failed" : "loading");
+      else if (m.type === "planar:retry-load") { window.__planarLoadStatus = "loading"; setLoadTick(t => t + 1); }
+    };
+    window.addEventListener("message", onLoadMsg);
+    return () => window.removeEventListener("message", onLoadMsg);
+  }, [inShell]);
   useEffect(() => {
     if (!inShell) return;
     const onMsg = (e) => {
@@ -19455,6 +19511,7 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
   // shaped value. Also seeds the PER-SCHEDULE + index baselines (scheduleKnownRev/scheduleBase/
   // indexKnownRev/indexBase) the write path below diffs every future save against — this is the
   // ONLY place those are seeded, since a real page reads "hs-v1" exactly once per load.
+  let rowsReadFailed = false;
   const readFromScheduleRows = async (k) => {
     try {
       if (k !== "hs-v1" || scheduleRowsDisabled()) { setScheduleRowsAuthoritative(false); return null; }
@@ -19466,7 +19523,11 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
         sb.from("schedules").select("*").eq("user_id", ownerUid).is("deleted_at", null),
         sb.from(TABLE).select("rev:value->>__rev").eq("key", k).maybeSingle(),
       ]);
-      if (idxRes.error || schedRes.error || !idxRes.data) { setScheduleRowsAuthoritative(false); return null; }
+      // NEW-1 (SCHED-EMPTY-ON-SLOW-LOAD) — an ERRORED read is not "this account isn't flipped": falling through
+      // to the planar_data blob there would show (and let the user edit) a stale pre-flip copy of an account
+      // whose real data lives in the rows. Flag it so get() reports a failed read instead.
+      if (idxRes.error || schedRes.error) { rowsReadFailed = true; setScheduleRowsAuthoritative(false); return null; }
+      if (!idxRes.data) { setScheduleRowsAuthoritative(false); return null; }
       const authoritative = !!idxRes.data.rows_authoritative || scheduleRowsForced();
       setScheduleRowsAuthoritative(authoritative);
       if (!authoritative) return null;
@@ -19485,6 +19546,7 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
       const rev = (revRes.data && revRes.data.rev != null) ? (parseInt(revRes.data.rev, 10) || 0) : 0;
       return { ...recomposed, __rev: rev };
     } catch {
+      rowsReadFailed = true;   // a thrown read (network / timeout) — see the note on the errored read above
       setScheduleRowsAuthoritative(false);
       return null;
     }
@@ -19897,6 +19959,7 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
     },
     get: async (k) => {
       try {
+        if (k === "hs-v1") { rowsReadFailed = false; window.__planarHs1Read = "pending"; }
         // B1777120 — THE AUTHORITY FLIP: readFromScheduleRows itself decides whether this
         // account is flipped (schedule_account_index.rows_authoritative), the disable
         // kill-switch, and the dev force-on override — this call is unconditional for "hs-v1"
@@ -19908,8 +19971,10 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
             const val = JSON.stringify(fromRows);
             knownRev[k] = revOf(fromRows);
             baseByKey[k] = _mStripRev(_deepClone(fromRows));
+            window.__planarHs1Read = "ok";
             return { key: k, value: val };
           }
+          if (rowsReadFailed) { window.__planarCloudError = true; window.__planarHs1Read = "error"; return null; }
         }
         const { data, error } = await sb.from(TABLE).select("value").eq("key", k).single();
         if (error || !data) {
@@ -19917,18 +19982,29 @@ function NotesModal({ task, projectId, updateTask, onClose, initChar }) {
           // 42501 = RLS/grant denied this request — signed out or not on the schedule's
           // team, not a connectivity problem (B778/NEW-1: planar_data now requires an
           // authenticated, owner-or-team-scoped request).
-          if (error && error.code === "42501") window.__planarAuthRequired = true;
-          else if (error && error.code !== "PGRST116") window.__planarCloudError = true;
+          if (error && error.code === "42501") { window.__planarAuthRequired = true; if (k === "hs-v1") window.__planarHs1Read = "auth"; }
+          else if (error && error.code !== "PGRST116") { window.__planarCloudError = true; if (k === "hs-v1") window.__planarHs1Read = "error"; }
+          else if (k === "hs-v1") window.__planarHs1Read = "empty";
           return null;
         }
+        if (k === "hs-v1") window.__planarHs1Read = "ok";
         const val = typeof data.value === "string" ? data.value : JSON.stringify(data.value);
         try { const p = typeof data.value === "string" ? JSON.parse(data.value) : data.value; knownRev[k] = revOf(p); baseByKey[k] = _mStripRev(_deepClone(p)); } catch { knownRev[k] = 0; }
         return { key: k, value: val };
-      } catch { window.__planarCloudError = true; return null; }
+      } catch { window.__planarCloudError = true; if (k === "hs-v1") window.__planarHs1Read = "error"; return null; }
     },
     // The unserialized write — see the `set` wrapper below, which is what callers actually use.
     _rawSet: async (k, v, opts = {}) => {
       try {
+        // NEW-1 (SCHED-EMPTY-ON-SLOW-LOAD) — THE WRITE GUARD. No hs-v1 write may leave this page unless the
+        // document was really READ first: a read that is still pending or that failed means whatever this
+        // page holds (nothing, or the embedded demo copy) is NOT the account's data, and writing it would
+        // overwrite the cloud with an empty/partial list. Refused loudly, never queued, never retried here.
+        if (k === "hs-v1" && (window.__planarHs1Read === undefined || window.__planarHs1Read === "pending" || window.__planarHs1Read === "error")) {
+          console.error("[planar guard] hs-v1 write refused: the schedule document has not been read from the cloud (" + (window.__planarHs1Read || "unread") + "). Nothing was written.");
+          try { window.dispatchEvent(new CustomEvent("planar:write-refused-unloaded", { detail: { key: k, read: window.__planarHs1Read || "unread" } })); } catch {}
+          return null;
+        }
         let parsed;
         try { parsed = JSON.parse(v); } catch { parsed = v; }
 
