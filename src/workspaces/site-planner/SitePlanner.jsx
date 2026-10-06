@@ -4620,6 +4620,59 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     opTrackerRef.current.beginOperation("create");
     try { eng.reconcile(merged, { busy: false, afterSeed: true, exempt: new Set(healed.map((h) => "el:" + h.id)) }); } catch (_) {}
   };
+  /* Plan-switch first-write loss (2026-10-06, reproduced live 3/3 on planyr.io as the test account:
+   * New plan → draw a line → switch back within the engine's first seed → 0 `site_elements` rows,
+   * line visible only on the device that drew it). SitePlanner is keyed by plan id, so a switch
+   * UNMOUNTS it, and this effect's cleanup used to hard-`stop()` the engine. Measured: the new plan's
+   * engine had issued NO fetch and NO commit before the switch — it seeds on the realtime join (or
+   * the 4 s fallback), and until then `reconcile()` is a deliberate no-op — so the first markup was
+   * never even queued, nothing was journaled, and the teardown discarded the only path that would
+   * have committed it (the next seed's never-synced fold). The same hard stop also dropped a
+   * debounced update and a transport-failure retry waiting on its backoff.
+   *
+   * Now teardown DRAINS (elementSync `stop({ drain: true })`): a seeded engine diffs the final canvas
+   * once more and commits whatever is owed; a never-seeded one fetches the rows now and runs the
+   * same seed + rows ∪ never-synced fold + after-seed diff that refetchReplace runs — so rows stay
+   * canonical for anything the server already has (DATA.md inv. 3), tombstones stay deleted, and only
+   * elements the server has never seen become creates. Skipped (plain stop) when this tab must not
+   * write: signed out, a different account than the one that opened the plan, read-only, a deleted
+   * plan, or an unresolved header conflict. Fire-and-forget by design — the component is gone; a
+   * failure reports `element-drain-*` telemetry and the local mirror + next open's fold still hold
+   * the work. */
+  const drainElementsOnTeardown = (eng, openedByUid) => {
+    const mayWrite = isCloudActive() && !!supabase && activeUid() === openedByUid && !readOnlyRef.current
+      && !deletedSelfRef.current && !siteConflictRef.current;
+    if (!mayWrite) { eng.stop(); return; }
+    if (eng.isSeeded()) { try { reconcileElems(false); } catch (_) {} }
+    const s = stateRef.current;
+    const canvas = { els: s.els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels };
+    const seeded = eng.isSeeded();
+    eng.stop({ drain: true });
+    if (seeded) return;
+    const hasLocal = ["els", "markups", "measures", "callouts", "parcels"].some((f) => Array.isArray(canvas[f]) && canvas[f].length);
+    if (!hasLocal) return;
+    const sid = siteId;
+    // The header push the unmount cancelled (the autosave's 400 ms timer) — a no-op when the cloud
+    // header is already current; without it a lazily-materialised plan's elements would FK-fail.
+    Promise.resolve(pushSiteToCloud(sid)).catch(() => null)
+      .then(() => fetchElements(supabase, sid))
+      .then((r) => {
+        if (!r || !r.ok) {
+          reportClientEvent("element-drain-failed", "closing plan: site_elements fetch failed — never-synced elements stay local until the plan is reopened", { id: sid, error: (r && r.error) || "" });
+          return;
+        }
+        const rows = reconcileSeedRows(r.rows, eng.shadowSnapshot(), eng.tombstonedSnapshot());
+        const model = rowsToModel({}, rows);
+        const next = { els: model.els, markups: model.markups, measures: model.measures, callouts: model.callouts,
+          parcels: model.parcels.filter((pc) => !isHuskParcel("parcel", pc)) };
+        const rowKeys = new Set((rows || []).map((row) => row && (row.kind + ":" + row.id)));
+        const merged = foldNeverSyncedLocal(next, canvas, rowKeys, isHuskParcel);
+        merged.els = assemblyIntegrity(merged.els).els;
+        try { opTrackerRef.current.beginOperation("create"); } catch (_) {}
+        eng.drainSeed(rows, merged);
+      })
+      .catch((e) => reportClientEvent("element-drain-failed", "closing plan: drain threw", { id: sid, error: (e && e.message) || String(e) }));
+  };
   useEffect(() => {
     if (!isCloudActive() || !siteId || !supabase) {
       if (elSyncRef.current) { elSyncRef.current.stop(); elSyncRef.current = null; }
@@ -4814,7 +4867,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       document.removeEventListener("visibilitychange", onVis);
       try { supabase.removeChannel(ch); } catch (_) {}
       setPeers(null);
-      eng.stop();
+      drainElementsOnTeardown(eng, uid);   // never a bare stop() — see drainElementsOnTeardown
       if (elSyncRef.current === eng) elSyncRef.current = null;
     };
   }, [siteId]); // eslint-disable-line react-hooks/exhaustive-deps
