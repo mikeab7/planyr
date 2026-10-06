@@ -95,8 +95,9 @@ export function collectSnapshot() {
     box: rectOf(e.getBoundingClientRect()),
     allIds: (e.getAttribute("data-all-ids") || "").split(",").filter(Boolean),
     menuIds: (e.getAttribute("data-menu-ids") || "").split(",").filter(Boolean),
-    iconIds: (e.getAttribute("data-icon-ids") || "").split(",").filter(Boolean),
     ghostIds: (e.getAttribute("data-ghost-ids") || "").split(",").filter(Boolean),
+    settled: e.getAttribute("data-toolbar-settled") !== "false",
+    iconIds: (e.getAttribute("data-icon-ids") || "").split(",").filter(Boolean),
     barIds: [...e.querySelectorAll("[data-toolbar-bar] [data-toolbar-item-id]")].filter((i) => i.getBoundingClientRect().width > 0).map((i) => i.getAttribute("data-toolbar-item-id")),
     hasMore: !!e.querySelector("[data-toolbar-more]"),
   }));
