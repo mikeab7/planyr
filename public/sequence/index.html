@@ -3074,6 +3074,12 @@ function logMergeToastEvent(changedRows, changedPids, projects) {
 
 // ── Constants ─────────────────────────────────────────────
 let ROW_H = 24;
+// NEW-1 (Schedule grid, one light full grid) — THE one cell-line rule for every grid cell, ID and TASK
+// included: a faint solid line on the right (column divider) and bottom (row line), same token everywhere.
+// Each cell draws its OWN bottom line because the pinned ID/TASK cells paint an opaque background that
+// covers the row's border-bottom (the row is ROW_H tall, border-box, and its cells are ROW_H too).
+const GRID_LINE = "1px solid var(--bd)";
+const GRID_LINE_RANGE = "1px solid #93c5fd";
 const PPD = 22, TL_H = 30, BUF = 6;
 // NEW-1 (recurrence of B463922, ×3) — `<ErrorBoundary key={data.view}>` (App's render, well above
 // GridView/GanttView) remounts the whole Grid/Split/Gantt subtree fresh on every view switch, so
@@ -13777,7 +13783,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                         onBlur={e => { if (rv.onOwner) rv.onOwner(e.target.value); setRvEdit(null); }}
                         onKeyDown={e => { if (e.key==="Enter"){ e.preventDefault(); if(rv.onOwner) rv.onOwner(e.target.value); setRvEdit(null); } else if (e.key==="Escape"){ setRvEdit(null); } }} />
                     : <span style={{...cs, color: rv.propOwner ? "var(--txt)" : "var(--mut)", cursor:"text"}} title="Click to edit" onClick={()=>setRvEdit("owner")}>{rv.propOwner||""}</span>;
-                  const wrap = {width:w, flexShrink:0, height:ROW_H, position:"relative", overflow: c.k==="health" ? "visible" : "hidden", borderRight:"1px solid var(--bd)",
+                  const wrap = {width:w, flexShrink:0, height:ROW_H, position:"relative", overflow: c.k==="health" ? "visible" : "hidden", borderRight:GRID_LINE, borderBottom:GRID_LINE,
                     ...(pinStyle(c.k, [creating ? "#ecfdf3" : "#f3f0ff"], 5) || {})};
                   return <div key={c.k} className={pinCls(c.k) || undefined} style={wrap}>{inner}</div>;
                 })}
@@ -13820,7 +13826,8 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                     fontStyle: cfmt?.italic ? "italic" : undefined,
                     textDecoration: cfmt?.underline ? "underline" : undefined,
                     color: cfmt?.color || undefined,
-                    borderRight: (selected && hasRange) ? "1px solid #93c5fd" : "1px solid var(--bd)",
+                    borderRight: (selected && hasRange) ? GRID_LINE_RANGE : GRID_LINE,
+                    borderBottom: (selected && hasRange) ? GRID_LINE_RANGE : GRID_LINE,
                     boxShadow: selShadow(ri, ci, selected, active),
                     userSelect: isDraggingCells.current ? "none" : "auto",
                     cursor: isDraggingCells.current ? "crosshair" : "default",
@@ -13947,7 +13954,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                 background: isNewTaskFocused ? "#eff6ff" : (ri%2?"#f8fafc":"var(--bg)"),
                 cursor:ri===tasks.length?"pointer":"default"}}>
               {orderedCols.map(c => (
-                <div key={c.k} className={pinCls(c.k) || undefined} style={{width:dispW[c.k],flexShrink:0,borderRight:"1px solid var(--bd)",height:ROW_H,
+                <div key={c.k} className={pinCls(c.k) || undefined} style={{width:dispW[c.k],flexShrink:0,borderRight:GRID_LINE,borderBottom:GRID_LINE,height:ROW_H,
                   ...(pinStyle(c.k, [isNewTaskFocused ? "#eff6ff" : (ri%2?"#f8fafc":"var(--bg)")], 5) || {}),
                   ...(ri===tasks.length && c.k==="name" ? {
                     color: isNewTaskFocused ? "var(--blue)" : "var(--mut)",
