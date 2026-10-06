@@ -129,7 +129,7 @@ test.describe("click behavior — single-click selects, double-click opens Prope
     await page.mouse.down(); await page.mouse.up();
     await page.mouse.down(); await page.mouse.up();
     await expect(panel(page)).toBeVisible();
-    await expect(page.getByRole("button", { name: /Delete element/i })).toBeVisible();
+    await expect(page.getByTestId("building-lock")).toBeVisible(); // the building header (lock · ⋯ · ✕) is the control strip now
 
     // ✕ closes it (the element stays selected — but the panel is gone). Target by aria-label: the panel's
     // collapsible header is itself a role=button and rolls the ✕'s label into its own accessible name.

@@ -75,6 +75,13 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   CURRENT resolvable tree (`depth`), never the STAMPED lineage depth (`lineageDepth`, used only by
   `parcelSplitNames` to keep the letter/digit alternation correct once the parent is gone) — read
   `siteModel.parcelDisplayInfo`'s header before touching either field.
+- **`parcelOps.js` + `components/ParcelsPanel.jsx` (B2134368–B2134370) — the Land tab's Parcels table and the ONE combine / ONE split.**
+  `planCombine` / `planSplit` / `planRestoreCombined` / `planRestoreSplit` decide (pure; `mergeRings` is INJECTED, never restated),
+  `SitePlanner.jsx` `combineParcelsAction` / `performSplit` / `restoreCombinedOriginals` / `restoreSplitOriginal` apply — the map
+  toolbar and the panel both call them. Originals live INSIDE the tract (`combined.from`) / pieces (`splitFrom.from`) as snapshots,
+  tombstoned out of `parcels`, so no reader can see a hidden original as live land. The table's checkbox selects; the eye writes the
+  existing `active` flag (so no migration). Locked parcels may be combined/split (`LOCKED_PARCELS_MAY_COMBINE`). Guards: repo-root
+  `test/` suites **parcelOps** + **parcelOpsParity**; live: ui-audit **verify-parcel-combine-split**.
 - **`parcelIdentity.js` (B1964512) — THE one "which county lot is this?" key, shared by `SitePlanner.jsx` identify-and-add and `MapFinder.jsx` Select-parcels.** Exact `OBJECTID` → else a key ending `.OBJECTID` (prefer `…TaxParcels…` over a joined accounts table; Chambers publishes only prefixed names) → else a hash of the WHOLE ring set, never the first vertex (neighbouring lots share corners). A stored parcel is matched by `storedParcelKey(pc)` recomputed from its `attrs`, not its stored `gisKey`, so legacy `geo:` rows are still recognised. Guard: the repo-root `test/` suite **parcelIdentity** (replays the pre-fix rule on the real Grand Port lots).
 - **⛔ `projectName.js` (B1415–B1418) — A PROJECT'S NAME HAS ONE AUTHORITATIVE VALUE PER GROUP, and every
   plan's `site` field is a DERIVED MIRROR of it. Read it before touching any rename path.** The name was
@@ -920,7 +927,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   ⛔ the `established` gate is not ceremony — a legacy record can carry a `dockSide` that disagrees
   with what it renders, and honouring it unconditionally on load would strand (and therefore prune)
   the zones bonded to the walls the plan actually shows. `rotateDockAxisPatch` is the DELIBERATE way
-  to turn the face (Properties → Loading → `Dock face` → `turn ⟳`), which has to exist now that a
+  to turn the face (Properties → Loading → click a wall on the wall picker, `lib/loadingWalls.js` `wallClickPatch`), which has to exist now that a
   resize cannot do it by accident. B548's contract (depth/length readouts, massing panel, column
   grid, dock-door count) holds against the STORED value for free, because they all read
   `dockSidesFor`. **B416/B417 are the CONSEQUENCE of the old flip, not duplicates — they still prune
@@ -1922,6 +1929,8 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   Guards: the repo-root `test/` suite **numEditInPlace** + the ui-audit harness
   **verify-numedit-inplace** (real browser, two zooms × both themes, all three floating callers,
   with the parcel grips proven still clickable while the editor is open).
+
+- **`loadingWalls.js` (B2144160–B2144168, Building panel rethink) — the Loading wall picker's pure half:** the little rotated plan's geometry (`wallPickerLayout`, labels upright, never over the rectangle or the north arrow), what a wall click does (`wallClickPatch` — loading is one wall or an OPPOSITE pair, never an L), the words (`loadingSummary`/`loadedWallsLabel`, from `dockSideCompassLabel`) and the bump-outs a change strands (`strandedBumpIds`, two per loaded wall). `SitePlanner.jsx`'s `applyBuildingLoading` is the one writer. Outline width/opacity are element props `strokeWidth`/`strokeOpacity` resolved by `planStyle.elStyle` (`weight` follows `strokeWidth`; `strokeWidthSet` is null until someone sets one, so a road's zoom-derived curb stroke stays automatic). Guards: repo-root `test/` **loadingWalls**, **outlineStyle**; e2e **building-panel-rethink**.
 
 **Conventions:** feet everywhere internal (convert only at the map boundary); theme tokens
 never raw hex; inline editors never `window.prompt/confirm/alert`. See `/CLAUDE.md` KEY DECISIONS.
