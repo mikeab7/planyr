@@ -95,6 +95,7 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   **⛔ FOUR MEANINGS NOW COMPETE FOR ONE PRESS ON THE MAT** (B1597760/B1597761): a press that does
   not travel PLACES · a press that travels PANS the canvas · a press that travels with Shift held
   draws the marquee · a press that starts on one of the sheet's four edge grips resizes the page.
+  **A drag that starts on a box's content (table, picture, text) also pans (NEW-1/B2156912) — deferred, selects nothing; see §7 of the carry-forward file and the verify-notes-drag-pan harness under ui-audit/.**
   The order matters — distance first, modifier second — and it is written out as a table in
   `docs/NOTES-CARRY-FORWARD.md` §7. **Read that before adding a fifth claimant.** The decisions are
   pure and live in `lib/notesMarquee.js`; only the wiring is here.
