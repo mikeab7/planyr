@@ -24,27 +24,48 @@ const groupOfRec = (r) => (r && (r.groupId || r.id)) || null;
 
 /* ONE id → name index over the reconciled store, cached until the app's own "list moved" signal
  * (or a short TTL as a backstop for a writer that never fires it). Callers that ask per row of a
- * list (every schedule label on the Dashboard) would otherwise re-parse the whole site store per row. */
+ * list (every schedule label on the Dashboard) would otherwise re-parse the whole site store per row.
+ *
+ * ⛔ NEW-1 (B217540, recurrence ×2) — THE PLAN-NAME READ IS THE SAME INDEX, NOT A SECOND UNCACHED SCAN. `planNameOf`
+ * used to call `loadSiteSummaries()` itself — parse the ENTIRE device store, map every record, run the group name
+ * authority over all of them — and it is the `getSnapshot` of `usePlanName`, which the Site Planner calls from its own
+ * render body. `useSyncExternalStore` calls `getSnapshot` on every render (and again in the commit to check for
+ * tearing), and a drag renders the planner every pointer-move frame, so one building drag re-parsed the whole store
+ * ~40× — measured as the single largest self-time in the profile at a 3 MB store (20 s over three edit cycles, against
+ * 0.3 s with an empty store), i.e. cost that scales with every OTHER plan the device holds. Plan names now ride the
+ * project index's one pass, its one cache and its one invalidation signal (`onProjectsChanged`, which every rename
+ * and every cloud pull already fires), so a rename still reaches every reader and a render no longer reads the disk. */
 let nameIndex = null;
+let planIndex = null;
 let nameIndexAt = 0;
 const INDEX_TTL_MS = 2000;
-export function invalidateNameIndex() { nameIndex = null; }
+export function invalidateNameIndex() { nameIndex = null; planIndex = null; }
 if (typeof window !== "undefined") onProjectsChanged(invalidateNameIndex);
-export function allProjectNames() {
+function refreshNameIndexes() {
   const now = Date.now();
-  if (nameIndex && now - nameIndexAt < INDEX_TTL_MS) return nameIndex;
+  if (nameIndex && planIndex && now - nameIndexAt < INDEX_TTL_MS) return;
   const idx = {};
+  const pidx = {};
   try {
     for (const r of loadSiteSummaries()) {
       const g = groupOfRec(r);
       if (g && !idx[g] && (r.site || r.name)) idx[g] = r.site || r.name;
+      if (r && r.id && r.name) pidx[r.id] = r.name;
     }
   } catch (_) { /* an unreadable store answers "unknown", never a stale name */ }
   nameIndexAt = now;
   // keep the SAME object while nothing changed, so a subscriber's snapshot is stable across a TTL refresh
-  const same = nameIndex && Object.keys(idx).length === Object.keys(nameIndex).length && Object.keys(idx).every((k) => nameIndex[k] === idx[k]);
-  if (!same) nameIndex = idx;
+  const sameOf = (a, b) => a && Object.keys(b).length === Object.keys(a).length && Object.keys(b).every((k) => a[k] === b[k]);
+  if (!sameOf(nameIndex, idx)) nameIndex = idx;
+  if (!sameOf(planIndex, pidx)) planIndex = pidx;
+}
+export function allProjectNames() {
+  refreshNameIndexes();
   return nameIndex;
+}
+export function allPlanNames() {
+  refreshNameIndexes();
+  return planIndex;
 }
 /** The stored project name for a group, or null when this device holds no record of it. */
 export function storedProjectName(groupId) {
@@ -55,10 +76,7 @@ export function projectNameOf(groupId, fallback = "Untitled site") {
   return resolveProjectName(storedProjectName(groupId), groupId, fallback);
 }
 export function planNameOf(siteId, fallback = "Untitled plan") {
-  try {
-    const rec = loadSiteSummaries().find((r) => r && r.id === siteId);
-    return (rec && rec.name) || fallback;
-  } catch (_) { return fallback; }
+  try { return allPlanNames()[siteId] || fallback; } catch (_) { return fallback; }
 }
 
 const subscribeAll = (cb) => {

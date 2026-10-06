@@ -316,3 +316,43 @@ describe("⛔ every render pass that paints for an element asks the predicate", 
     expect(memoBody("roadNet")).toContain("isCenterlineRoad");
   });
 });
+
+/* NEW-1 (MAP-HANDLES, B2171808) — on-canvas handles follow their element's EFFECTIVE visibility.
+ * The owner's Goose Creek plan: View read "7 groups hidden", yet the building +/− clusters (green/orange
+ * plus, red minus) floated over the aerial. The hover scan walked the whole model, so hovering the
+ * footprint of a HIDDEN element still armed its cluster. One shared predicate now gates every handle
+ * group; the browser proof is e2e/hidden-group-handles.spec.js (red on the pre-fix build). */
+import { refHidden } from "../src/workspaces/site-planner/lib/contentVisibility.js";
+describe("refHidden — the ONE gate every handle / selection chrome asks", () => {
+  const els = [{ id: "b1", type: "building" }, { id: "p1", type: "parking" }, { id: "t1", type: "trailer" }];
+  it("resolves an element ref through its type's View row", () => {
+    const hidden = { "el:parking": true };
+    expect(refHidden(hidden, els, { kind: "el", id: "p1" })).toBe(true);
+    expect(refHidden(hidden, els, { kind: "el", id: "b1" })).toBe(false);
+    expect(refHidden(hidden, els, { kind: "el", id: "t1" })).toBe(false); // trailer is its own group
+  });
+  it("maps the other families to their rows, and fails open on nothing-hidden / unknown refs", () => {
+    expect(refHidden({ parcels: true }, els, { kind: "parcel", id: "x" })).toBe(true);
+    expect(refHidden({ markups: true }, els, { kind: "markup", id: "x" })).toBe(true);
+    expect(refHidden({ measures: true }, els, { kind: "measure", id: "x" })).toBe(true);
+    expect(refHidden({ callouts: true }, els, { kind: "callout", id: "x" })).toBe(true);
+    expect(refHidden(undefined, els, { kind: "el", id: "b1" })).toBe(false);
+    expect(refHidden({ "el:building": true }, els, null)).toBe(false);
+    expect(refHidden({ "el:building": true }, els, { kind: "el", id: "gone" })).toBe(false);
+  });
+});
+
+describe("NEW-1 — wiring: no handle group or hover path bypasses the gate", () => {
+  const src = readFileSync(resolve(here, "../src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+  it("the hover scan skips hidden elements and featActiveId is gated", () => {
+    expect(src).toMatch(/if \(elHidden\(hiddenGroups, x\)\) continue;/);
+    expect(src).toMatch(/refHidden\(hiddenGroups, els, \{ kind: "el", id \}\)/);
+  });
+  it("every selection-driven handle group asks selHiddenNow", () => {
+    for (const name of ["handleNodes", "parcelHandles", "elPolyHandles", "elSelOutline", "markupHandles", "calloutHandles", "measureHandles"]) {
+      const at = src.indexOf(`const ${name} = (() => {`);
+      expect(at, name).toBeGreaterThan(0);
+      expect(src.slice(at, at + 1500), name).toMatch(/selHiddenNow/);
+    }
+  });
+});

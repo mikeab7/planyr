@@ -1,0 +1,10 @@
+{
+  "_why": "NEW-1 (B217540 recurrence x2). Budgets for ui-audit/perf-edit-cycle.mjs --assert, run at the default store weight (--store-kb 1300, the size of his 143-plan cloud account) on the owner's real plan. They are SLOPES and one worst-task ceiling, never a level, and they are set from the same harness measured on origin/main (red) and on the fix (green) so that main FAILS them and the fix PASSES with margin \u2014 see docs/perf/PERF-EDIT-CYCLE.md for the two runs. Not a CI gate: the runtime half of the perf budget stays on-demand by policy (docs/perf/PERF-BUDGETS.md \u2014 a shared runner's frame time flakes); the deterministic, CI-gated half is test/gestureSave.test.js + e2e/gesture-save-deferral.spec.js, which count writes instead of timing them.",
+  "maxWorkSlopeMsPerCycle": 60,
+  "maxLongTaskSlopeMsPerCycle": 50,
+  "maxHeapSlopeMBPerCycle": 1.5,
+  "maxDomSlopePerCycle": 20,
+  "maxWorstTaskMs": 400,
+  "maxMedianWorkMs": 3200,
+  "maxMedianLongTaskMs": 1500
+}

@@ -245,6 +245,7 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   owns the privacy ALLOWLIST (never a denylist) and the encoder — whose frame floor is a LADDER, not
   a wall (B265541: on a real stall nearly every frame also costs an `fx` pair, and the old wall threw
   the whole episode away on exactly the captures worth having). Proof + what is still unproven:
+  **⛔ NEW-2 (B1317824 ×2): a capture the one row had to trim travels as the main row plus CONTINUATION rows** (`perfCapture.encodeSupplements` — frames in chronological chunks, the whole counter curve, the shed tasks; `suppRows` on the main row says it continues; if even three frame rows cannot hold the track the window is centred on the WORST frame, never the tail). The recorder reports delivered only when EVERY row was, and `perfcap` rows have their own rate budget in `clientErrors.js`. Guard: the repo-root `test/` suite **captureSupplements**. Re-ordering what sheds first was tried three times and recurred each time — the row cannot hold a real stall at any order.
   `/docs/perf/CAPTURE-PIPE.md`; the layer-arm standing note: `/docs/perf/PERF-LAYERS.md`. Guards: the repo-root
   `test/` suites **capturePipe**, **perfRecorder**, **perfInstrument**, **clientErrors**, plus the
   ui-audit harness **verify-capture-pipe** (`npm run perf:capturepipe`), whose `rejected` arm is the
