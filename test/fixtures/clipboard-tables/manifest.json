@@ -1,0 +1,35 @@
+{
+  "_about": "Expected result of pasting each committed clipboard fixture (<name>.html = text/html as Chrome hands it to a paste handler, <name>.txt = text/plain). `grid` is the table as a person sees it: one entry per cell, text with \\n between paragraphs/line breaks. `span` marks a merged cell's colspan. `marks` are text runs that must keep a mark. Sources are modelled on each product's real clipboard markup, not hand-simplified: the OneNote desktop one carries the ProgId/Generator meta and StartFragment markers, OneNote web the Office-Online OutlineElement/TextRun wrappers (a trailing &nbsp; end-of-paragraph span in every cell), Excel its xl-classes, <col> list and mso-* styles, Google Sheets its google-sheets-html-origin wrapper with <br> multi-line cells.",
+  "fixtures": {
+    "onenote-desktop": {
+      "grid": [["Unit", "Area (SF)", "Notes"], ["A-100", "12,500", "Dock high and cross-docked"], ["A-200", "", "Line one\nLine two"], ["B-300", "8,200", "Survey"]],
+      "marks": [["Dock high", "bold"], ["cross-docked", "italic"], ["Survey", "link"]]
+    },
+    "onenote-web": {
+      "grid": [["Unit", "Area (SF)", "Notes"], ["A-100", "12,500", "Dock high and cross-docked"], ["A-200", "", "Line one\nLine two"], ["B-300", "8,200", "Survey"]],
+      "marks": [["Dock high", "bold"], ["cross-docked", "italic"], ["Survey", "link"]]
+    },
+    "word-desktop": {
+      "grid": [["Unit", "Area (SF)", "Notes"], ["A-100", "12,500", "Dock high and cross-docked"], ["A-200", "", "Line one\nLine two"], [{ "t": "B-300 (merged across two columns)", "span": 2 }, "Survey"]],
+      "marks": [["Dock high", "bold"], ["cross-docked", "italic"], ["Survey", "link"]]
+    },
+    "outlook": {
+      "grid": [["Unit", "Area (SF)", "Notes"], ["A-100", "12,500", "Dock high and cross-docked"], ["A-200", "", "Line one\nLine two"], ["B-300", "8,200", "Survey"]],
+      "marks": [["Dock high", "bold"], ["cross-docked", "italic"], ["Survey", "link"]]
+    },
+    "excel": {
+      "grid": [["Unit", "Area (SF)", "Notes"], ["A-100", "12,500", "Dock high and cross-docked"], ["A-200", "", "Line one\nLine two"], ["B-300", "8,200", "Survey"]],
+      "marks": [["Survey", "link"]],
+      "plainTable": true
+    },
+    "google-sheets": {
+      "grid": [["Unit", "Area (SF)", "Notes"], ["A-100", "12,500", "Dock high and cross-docked"], ["A-200", "", "Line one\nLine two"], [{ "t": "B-300 (merged across two columns)", "span": 2 }, "Survey"]],
+      "marks": [["Dock high", "bold"], ["cross-docked", "italic"], ["Survey", "link"]],
+      "plainTable": true
+    },
+    "onenote-one-column": {
+      "grid": [["Order survey"], ["Request geotech"], ["Confirm utilities"]],
+      "marks": []
+    }
+  }
+}
