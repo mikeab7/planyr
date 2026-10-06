@@ -76,10 +76,10 @@ function DetailCard({ row, handlers }) {
   const deed = isTract ? deedAcresSummed(pc) : (pc.statedAcres != null && pc.statedAcres !== "" ? Number(pc.statedAcres) : null);
   return (
     <div role="region" aria-label={`${row.name} details`} data-testid={`parcel-detail-${row.id}`}
-      style={{ margin: `0 0 ${SPACE.sm}px`, padding: SPACE.xl, border: LINE, borderTop: "none", borderRadius: `0 0 ${RADIUS.md}px ${RADIUS.md}px`, background: "var(--surface-raised)" }}>
+      style={{ margin: `0 0 ${SPACE.sm}px`, padding: SPACE.xl, border: LINE, borderTop: "none", borderBottomLeftRadius: RADIUS.md, borderBottomRightRadius: RADIUS.md, background: "var(--surface-raised)" }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: SPACE.lg }}>
         <div style={{ minWidth: 0, fontSize: FONT_SIZE.emphasis, fontWeight: 700, color: "var(--text-primary)", overflowWrap: "anywhere" }}>{row.name}</div>
-        <div style={{ flex: "none", fontSize: 20 /* design-exempt: detail-card headline, the one large number */, fontWeight: 800, color: "var(--text-primary)", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{fmt(row.acres)} <span style={{ fontSize: FONT_SIZE.control, fontWeight: 700 }}>AC</span></div>
+        <div style={{ flex: "none", fontSize: "calc(var(--font-display) * 1.5)", fontWeight: 800, color: "var(--text-primary)", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{fmt(row.acres)} <span style={{ fontSize: FONT_SIZE.control, fontWeight: 700 }}>AC</span></div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: `${SPACE.md}px ${SPACE.xl}px`, marginTop: SPACE.lg }}>
         <Fact label="Owner" value={row.owner} />
@@ -130,7 +130,6 @@ function DetailCard({ row, handlers }) {
 
 /* A single table row. Selection checkbox · name block (opens the detail card) · acres · eye. */
 function ParcelRow({ row, open, selected, picked, pickMode, checked, renaming, menuOpen, handlers }) {
-  const { pc } = row;
   const dim = !row.included || row.superseded;
   const ink = { color: "var(--text-primary)" };
   const sub = [row.apn, row.owner].filter(Boolean).join(" · ");
@@ -167,7 +166,7 @@ function ParcelRow({ row, open, selected, picked, pickMode, checked, renaming, m
           {row.included ? <EyeIcon /> : <EyeOffIcon />}
         </button>
         {/* Row actions: hover / keyboard-focus only (.land-row-actions, index.css). Sit under the acres column. */}
-        <div className="land-row-actions" style={{ position: "absolute", right: 36, bottom: 3, display: "flex", gap: 2, background: selected ? "var(--surface-selected)" : "var(--surface-raised)", borderRadius: RADIUS.sm }}>
+        <div className="land-row-actions" style={{ position: "absolute", right: 108, bottom: 2, opacity: menuOpen ? 1 : undefined, display: "flex", gap: 2, background: selected ? "var(--surface-selected)" : "var(--surface-raised)", borderRadius: RADIUS.sm }}>
           <button type="button" style={iconBtn} title="Zoom to this parcel" aria-label={`Zoom to ${row.name}`} onClick={() => handlers.onZoom(row.id)}><ZoomIcon /></button>
           <button type="button" style={iconBtn} title={row.locked ? "Unlock this parcel's boundary" : "Lock this parcel's boundary"} aria-label={row.locked ? `Unlock ${row.name}` : `Lock ${row.name}`} onClick={() => handlers.onToggleLock(row.id)}>{row.locked ? <UnlockGlyph /> : <LockGlyph />}</button>
           <div style={{ position: "relative" }}>
@@ -199,14 +198,13 @@ function MenuRow({ label, onClick, danger, testid }) {
 
 /* Inline rename — commit on Enter / click-away, Esc cancels (no dialog boxes). */
 function RenameField({ row, handlers }) {
-  const [v, setV] = useState(row.name);
   const ref = useRef(null);
   useEffect(() => { if (ref.current) { ref.current.focus(); ref.current.select(); } }, []);
   const done = useRef(false);
-  const commit = () => { if (done.current) return; done.current = true; handlers.onRenameCommit(row.id, v); };
+  const commit = () => { if (done.current) return; done.current = true; handlers.onRenameCommit(row.id, ref.current ? ref.current.value : null); };
   return (
-    <input ref={ref} value={v} aria-label={`Rename ${row.name}`} data-testid={`parcel-rename-${row.id}`}
-      onChange={(e) => setV(e.target.value)} onBlur={commit}
+    <input ref={ref} defaultValue={row.name} aria-label={`Rename ${row.name}`} data-testid={`parcel-rename-${row.id}`}
+      onBlur={commit}
       onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") commit(); else if (e.key === "Escape") { done.current = true; handlers.onRenameCommit(row.id, null); } }}
       style={{ gridColumn: "2 / 4", minWidth: 0, margin: `0 ${SPACE.md}px 0 ${SPACE.xs}px`, height: CONTROL_H.lg, padding: `0 ${SPACE.md}px`, border: "1px solid var(--accent-site)", borderRadius: RADIUS.sm, background: "var(--surface-field)", color: "var(--text-primary)", fontFamily: "inherit", fontSize: FONT_SIZE.emphasis, fontWeight: 600 }} />
   );

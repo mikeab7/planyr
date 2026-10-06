@@ -225,3 +225,28 @@ describe("migration + display model", () => {
     expect(deedAcresSummed(d.tract)).toBeNull();
   });
 });
+
+describe("review fixes", () => {
+  it("stored size stays bounded over repeated split/combine cycles (snapshots do not nest)", () => {
+    let ps = [mk("k", 0, 0, 1000, 1000), mk("m", 1000, 0, 1000, 1000)];
+    const sizes = [];
+    for (let i = 0; i < 10; i++) {
+      const sp = S(ps, [{ x: 500, y: -10 }, { x: 500, y: 1010 }], { targetId: ps[0].id });
+      const cb = C(sp.parcels, sp.parcels.map((p) => p.id));
+      ps = cb.parcels;
+      sizes.push(JSON.stringify(ps).length);
+    }
+    expect(sizes[9]).toBeLessThan(sizes[3] * 1.5);          // plateaus; it used to double every cycle
+    expect(sizes[9]).toBeLessThan(20000);
+  });
+  it("Restore reports when the tract / pieces were edited since", () => {
+    const c = C(strip(), ["a", "b"]);
+    expect(planRestoreCombined(c.parcels, c.tract.id, { newId }).edited).toBe(false);
+    const moved = c.parcels.map((p) => (p.id === c.tract.id ? { ...p, points: rect(0, 0, 150, 100) } : p));
+    expect(planRestoreCombined(moved, c.tract.id, { newId }).edited).toBe(true);
+    const sp = S([mk("k", 0, 0, 100, 100)], [{ x: 50, y: -10 }, { x: 50, y: 110 }]);
+    expect(planRestoreSplit(sp.parcels, sp.made[0].id, { newId }).edited).toBe(false);
+    const off = sp.parcels.map((p, i) => (i === 0 ? { ...p, active: false } : p));
+    expect(planRestoreSplit(off, sp.made[0].id, { newId }).edited).toBe(true);
+  });
+});

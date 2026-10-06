@@ -8107,7 +8107,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     tombstone(plan.removeIds);
     setParcels(plan.parcels);
     setSel({ kind: "parcel", id: plan.restored.id });
-    pushToast({ text: `Restored the original from ${plan.count} pieces`, action: { label: "Undo", onClick: undo } });
+    pushToast({ text: `Restored the original from ${plan.count} pieces${plan.edited ? " — edits made to the pieces since the split were not kept" : ""}`, action: { label: "Undo", onClick: undo } });
     return plan;
   };
   const restoreCombinedOriginals = (tractId) => {
@@ -8117,7 +8117,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     tombstone(plan.removeIds);
     setParcels(plan.parcels);
     setSel({ kind: "parcel", id: plan.restored[0].id });
-    pushToast({ text: `Restored ${plan.restored.length} originals from ${plan.name}`, action: { label: "Undo", onClick: undo } });
+    pushToast({ text: `Restored ${plan.restored.length} originals from ${plan.name}${plan.edited ? " — edits made to the tract since it was combined were not kept" : ""}`, action: { label: "Undo", onClick: undo } });
     return plan;
   };
 
@@ -19134,6 +19134,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const vSep = <span style={{ width: 1, height: TB_H - 12, background: PAL.chromeLine, margin: "0 6px" }} />;
   // Switch tools and reset any in-progress drafting; also closes the Parcel menu.
   const selectTool = (id) => {
+    setSplitTarget(null); // a Split aimed from the panel never outlives a tool change (startPanelSplit re-sets it after)
     // NEW-1 (B900416) — the Pan tool is retired from the rail (Select already pans on empty
     // canvas, Space-drag pans over anything); a leftover "pan" from anywhere must boot to a
     // working Select rather than a dead mode, never a mode with no rail affordance.

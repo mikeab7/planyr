@@ -42,6 +42,19 @@ export const LOCKED_PARCELS_MAY_COMBINE = true;
 
 const clone = (o) => JSON.parse(JSON.stringify(o));
 // A snapshot carries the DISPLAY name it had (`snapName`) for the Made-from / Split-from lists; it is not a parcel field.
+/* A snapshot keeps the parcel's OWN history one level deep and nothing deeper — otherwise each split/combine
+ * cycle nests a full copy of every earlier generation and a parcel's stored size doubles per cycle
+ * (measured by the adversarial review: 1.1 KB → 257 KB over 8 cycles). Restoring a restore is bounded by this. */
+const stripHistory = (o) => { const c = { ...o }; delete c.combined; delete c.splitFrom; return c; };
+const snapshot = (p, name) => {
+  const c = clone(p);
+  if (c.combined && c.combined.from) c.combined = { ...c.combined, from: c.combined.from.map(stripHistory) };
+  if (c.splitFrom && c.splitFrom.from) c.splitFrom = { ...c.splitFrom, from: stripHistory(c.splitFrom.from) };
+  c.snapName = name;
+  return c;
+};
+// A cheap fingerprint of an outline, to tell whether a tract / piece was reshaped after it was made.
+const sigOf = (pts) => (pts || []).map((q) => `${Math.round(q.x * 100)},${Math.round(q.y * 100)}`).join(";");
 const unsnap = (s) => { const c = clone(s); delete c.snapName; return c; };
 const letter = (i) => { let s = "", n = i | 0; do { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1; } while (n >= 0); return s; };
 
@@ -110,7 +123,7 @@ export function planCombine(parcels, ids, { mergeRings, newId }) {
     id: newId(), points: result, active: true, label: name,
     locked: chosen.every((p) => !!p.locked),
     ...(holes.length ? { exceptions: holes } : {}),
-    combined: { from: chosen.map((p) => ({ ...clone(p), snapName: nm(p) })) },
+    combined: { sig: sigOf(result), from: chosen.map((p) => snapshot(p, nm(p))) },
   };
   const firstIdx = list.findIndex((p) => want.has(p.id));
   const next = [];
@@ -129,7 +142,8 @@ export function planRestoreCombined(parcels, tractId, { newId }) {
   const idx = list.findIndex((p) => p.id === tractId);
   const next = [];
   list.forEach((p, i) => { if (i === idx) next.push(...restored); if (p.id !== tractId) next.push(p); });
-  return { ok: true, parcels: next, removeIds: [tractId], restored, name: tract.label || "the tract" };
+  const edited = (tract.combined.sig != null && sigOf(tract.points) !== tract.combined.sig) || tract.active === false;
+  return { ok: true, parcels: next, removeIds: [tractId], restored, name: tract.label || "the tract", edited };
 }
 
 /* Which piece of the cut a save-and-except hole belongs to: the one that fully contains it. */
@@ -184,7 +198,7 @@ export function planSplit(parcels, path, { targetId = null, selId = null, newId,
     const born = parcelSplitNames(list, pc.id, pieces.length);
     const group = newId();
     const info0 = parcelDisplayInfo(list);
-    const snap = { ...clone(pc), snapName: (info0.get(pc.id) || {}).name || "the parcel" };
+    const snap = snapshot(pc, (info0.get(pc.id) || {}).name || "the parcel");
     const made = pieces.map(({ ring, edgeSrc }, i) => ({
       id: newId(), points: ring, active: pc.active !== false, locked: !!pc.locked, parentId: pc.id,
       addr: pc.addr || null, acct: pc.acct || null, attrs: pc.attrs || null,
@@ -193,7 +207,7 @@ export function planSplit(parcels, path, { targetId = null, selId = null, newId,
       roleOverrides: remapEdgeVector(pc.roleOverrides, edgeSrc, null),
       roles: remapEdgeVector(pc.roles, edgeSrc, null),
       ...(exc[i].length ? { exceptions: exc[i] } : {}),
-      splitFrom: { group, count: pieces.length, from: snap },
+      splitFrom: { group, count: pieces.length, sig: sigOf(ring), from: snap },
     }));
     const next = list.flatMap((p) => (p.id === pc.id ? made : [p]));
     const info = parcelDisplayInfo(list);
@@ -211,11 +225,12 @@ export function planRestoreSplit(parcels, pieceId, { newId }) {
   if (!sf || !sf.from) return refuse("nothing-to-restore", "This parcel wasn't made by a split, so there is no original to restore.");
   const sibs = list.filter((p) => p.splitFrom && p.splitFrom.group === sf.group);
   if (sibs.length !== sf.count) return refuse("pieces-changed", "One of the pieces has since been split, combined or removed. Restore from that one first, or use Undo.");
+  const edited = sibs.some((p) => p.splitFrom.sig != null && sigOf(p.points) !== p.splitFrom.sig) || sibs.some((p) => p.active === false) !== (sf.from.active === false);
   const orig = { ...unsnap(sf.from), id: newId() };
   const idx = list.findIndex((p) => p.splitFrom && p.splitFrom.group === sf.group);
   const next = [];
   list.forEach((p, i) => { if (i === idx) next.push(orig); if (!(p.splitFrom && p.splitFrom.group === sf.group)) next.push(p); });
-  return { ok: true, parcels: next, removeIds: sibs.map((p) => p.id), restored: orig, count: sibs.length };
+  return { ok: true, parcels: next, removeIds: sibs.map((p) => p.id), restored: orig, count: sibs.length, edited };
 }
 
 /* Deed acres of a tract: the sum of its originals' stated acres, or null if any is unknown (a sum
