@@ -2958,6 +2958,20 @@ const NoteEditor = forwardRef(function NoteEditor({
    * deadzone delays the start; it does not offset the canvas from the hand for the rest of the
    * gesture. (Leaflet does the same, for the same reason.)
    */
+  /* The pan's on/off switch, shared by the blank-paper pan and the content pan below it. */
+  const setMatPanning = useCallback((on) => {
+    const mat = scrollerRef.current;
+    if (mat) {
+      if (on) mat.setAttribute("data-panning", "1");
+      else mat.removeAttribute("data-panning");
+    }
+    /* The pointer can leave the mat mid-pan (over the toolbar, the rail, the window chrome).
+     * `cursor` is an inherited property, so body carries the glyph everywhere the mat's own
+     * rule does not reach. Same shape as `beginWidthDrag`'s col-resize. */
+    document.body.style.cursor = on ? "grabbing" : "";
+    document.body.style.userSelect = on ? "none" : "";
+  }, []);
+
   const beginBlankGesture = useCallback((e, { place = true } = {}) => {
     const f = frame();
     const from = toDoc(e.clientX, e.clientY);
@@ -2980,18 +2994,7 @@ const NoteEditor = forwardRef(function NoteEditor({
     /* What this gesture has committed to. `null` until it travels; never goes back. */
     let latched = null;
 
-    const setPanning = (on) => {
-      const mat = scrollerRef.current;
-      if (mat) {
-        if (on) mat.setAttribute("data-panning", "1");
-        else mat.removeAttribute("data-panning");
-      }
-      /* The pointer can leave the mat mid-pan (over the toolbar, the rail, the window chrome).
-       * `cursor` is an inherited property, so body carries the glyph everywhere the mat's own
-       * rule does not reach. Same shape as `beginWidthDrag`'s col-resize. */
-      document.body.style.cursor = on ? "grabbing" : "";
-      document.body.style.userSelect = on ? "none" : "";
-    };
+    const setPanning = setMatPanning;
 
     const onMove = (ev) => {
       const at = { x: ev.clientX, y: ev.clientY };
@@ -3035,7 +3038,7 @@ const NoteEditor = forwardRef(function NoteEditor({
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
     return true;
-  }, [frame, toDoc, boxesNow, placeBlockAt, clearSelection, setView]);
+  }, [frame, toDoc, boxesNow, placeBlockAt, clearSelection, setView, setMatPanning]);
 
   /** Dragging any SELECTED box moves the whole set, by one delta, as one undo step. */
   const beginGroupDrag = useCallback((e, id) => {
@@ -3938,6 +3941,126 @@ const NoteEditor = forwardRef(function NoteEditor({
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
   }, [setView]);
+
+  /* ⛔ A MOUSE DRAG PANS FROM ANYWHERE — INCLUDING ON A TABLE, A PICTURE AND AN UNFOCUSED BOX'S
+   * TEXT (NEW-1 / B2156912, owner report 2026-10-06: *"click and drag should ALWAYS pan the page,
+   * from any spot"*, and the press that becomes a pan should not select anything).
+   *
+   * WHY IT NEVER REACHED THE PAN. The pan lives in `beginBlankGesture`, which only a press that
+   * `focusFromMat` calls BLANK ever arms. A press on a box, a table or a picture is CONTENT, so it
+   * was claimed first — by ProseMirror (which put a caret / CellSelection in the table on the
+   * `mousedown`), by stage 1 of the box's select-then-enter model (which selected the box on the
+   * `mousedown`), and by the box body's own drag (`notesAnchorNode.js` `beginDrag`, a `pointerdown`
+   * that would have moved the BOX rather than the page).
+   *
+   * WHAT THIS DOES: for a plain left press on a box's content that is NOT already selected or being
+   * edited, it takes the press in the CAPTURE phase — before ProseMirror, the box and `focusFromMat`
+   * can see it — and DEFERS it. Nothing at all happens on the press. If the pointer travels it is a
+   * pan (the same `latchGesture` rule and the same view write as the blank-paper pan, followed from
+   * the press, not from where the slop was crossed) and NOTHING was ever selected, so there is
+   * nothing to undo. If it does not travel it is a click, and the click is REPLAYED into
+   * `focusFromMat` unchanged — so a plain click keeps today's behaviour exactly (it is still the
+   * stage-1 select that stage 2's native caret placement and word-select build on).
+   *
+   * ⛔ WHAT KEEPS ITS OWN DRAG, stated because a drag that is "always a pan" would otherwise eat
+   * them: the box move grip, the resize handles, the arrow connect dot, a table's column-resize
+   * handle, the page-edge grips, and any form control / link / `<summary>`; Shift / Ctrl / Alt /
+   * Cmd presses (marquee, toggle, context menu); a box that is already SELECTED (its body still
+   * drags the box / the whole selection, the same rule the touch pan uses); and — this one is a
+   * PROPOSAL awaiting the owner's say — a box that is being EDITED, where a drag inside it selects
+   * text, because otherwise selecting text with the mouse would be impossible.
+   *
+   * Mouse only: touch has its own pan below. A bare top-level table or picture (no box) is not
+   * claimed — `notesFlowMigration` folds those into boxes on read, so nothing can reach one. */
+  const suppressClickRef = useRef(false);
+  useEffect(() => {
+    const sc = scrollerRef.current;
+    if (!sc || !editor) return undefined;
+    const OWN = 'input, textarea, select, button, a, summary, [data-handle], .planyr-anchor-grip, '
+      + '.planyr-anchor-connect, .planyr-anchor-del, .planyr-anchor-size, .column-resize-handle, '
+      + '[class*="planyr-page-width-grip"], [class*="planyr-page-height-grip"], [data-testid="note-zoom-pill"]';
+    let claimed = false;
+    const claims = (e) => {
+      if (e.button !== 0 || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return false;
+      if (spaceHeldRef.current || arrowConnectRef.current || editor.isDestroyed) return false;
+      const el = e.target;
+      if (!(el instanceof Element)) return false;
+      const box = el.closest(".planyr-anchor");
+      if (!box || el.closest(OWN)) return false;
+      if (editor.view.dom.classList.contains("resize-cursor")) return false;     // on a column border
+      const id = box.getAttribute("data-anchor-id");
+      if (id && selRef.current.has(String(id))) return false;                    // selected: it keeps its drag
+      if (box.getAttribute("data-editing") === "1") return false;                // being edited: text selection
+      const s = document.getSelection();
+      if (editor.view.hasFocus() && s?.anchorNode && box.contains(s.anchorNode)) return false;
+      return true;
+    };
+    const onPointerDown = (e) => {
+      claimed = e.pointerType === "mouse" && claims(e);
+      /* Hide the press from the box body's own `pointerdown` drag (a bubble-phase listener on the
+       * box, which would move the BOX). `mousedown` still follows — it is not cancelled by this. */
+      if (claimed) e.stopPropagation();
+    };
+    const onMouseDown = (e) => {
+      const was = claimed;
+      claimed = false;
+      if (!was || !claims(e)) return;
+      e.preventDefault();         // no native caret / selection / drag image, and ProseMirror treats it as handled
+      e.stopPropagation();        // …and neither it nor `focusFromMat` ever sees the press
+      suppressClickRef.current = false;
+      cancelPendingPlace();       // "ANY press forgets an armed caret" — focusFromMat's own rule
+      const title = document.activeElement;
+      if (title instanceof HTMLInputElement && title.getAttribute("data-testid") === "note-title") {
+        try { title.setSelectionRange(0, 0); } catch { /* not selectable */ }
+        title.blur();
+      }
+      const start = { x: e.clientX, y: e.clientY };
+      const startView = { ...viewRef.current };
+      const press = {
+        target: e.target, clientX: e.clientX, clientY: e.clientY, detail: e.detail, timeStamp: e.timeStamp,
+        button: 0, shiftKey: false, defaultPrevented: false,
+        preventDefault() { this.defaultPrevented = true; }, stopPropagation() { /* the real one was stopped above */ },
+      };
+      let latched = null;
+      const onMove = (ev) => {
+        const at = { x: ev.clientX, y: ev.clientY };
+        const before = latched;
+        latched = latchGesture(latched, start, at, { shift: false });
+        if (!latched) return;                       // still inside the slop: nothing has happened
+        if (!before) setMatPanning(true);
+        setView({ x: startView.x - (at.x - start.x), y: startView.y - (at.y - start.y), z: startView.z });
+      };
+      const onUp = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        setMatPanning(false);
+        if (latched) {
+          /* A pan that ended over the same element it began on would otherwise still raise a `click`
+           * there (a fold toggle, a link) — the person was moving the page, not pressing. */
+          suppressClickRef.current = true;
+          setTimeout(() => { suppressClickRef.current = false; }, 60);
+          return;
+        }
+        focusFromMat(press);                        // a click: replayed unchanged
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    };
+    const onClick = (e) => {
+      if (!suppressClickRef.current) return;
+      suppressClickRef.current = false;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    sc.addEventListener("pointerdown", onPointerDown, true);
+    sc.addEventListener("mousedown", onMouseDown, true);
+    sc.addEventListener("click", onClick, true);
+    return () => {
+      sc.removeEventListener("pointerdown", onPointerDown, true);
+      sc.removeEventListener("mousedown", onMouseDown, true);
+      sc.removeEventListener("click", onClick, true);
+    };
+  }, [editor, focusFromMat, cancelPendingPlace, setView, setMatPanning]);
 
   /* ⛔ TOUCH ON THE CANVAS: ONE FINGER PANS, TWO FINGERS PINCH AND FOLLOW (NEW-2, iPhone review
    * 2026-09-29: *"one finger can't scroll or pan a note"*).
