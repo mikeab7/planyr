@@ -21,7 +21,7 @@
  */
 import { webkit, chromium } from "playwright";
 import { mkdirSync } from "node:fs";
-import { open as openRaw, openPlace, touchSession } from "./lib/foodIosPage.mjs";
+import { open as openRaw, openPlace, touchSession, LIVE, seedLive, cleanupLive, closeLeakedLive } from "./lib/foodIosPage.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 // FOREGROUND-OR-VOID: every page this harness measures is proven foreground + painting first.
@@ -32,7 +32,7 @@ const ONLY = (process.argv.find((a) => a.startsWith("--only=")) || "").slice(7);
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 const results = [];
 const check = (id, ok, detail = "") => { results.push({ id, ok: !!ok, detail }); console.log(`${ok ? "PASS" : "FAIL"}  ${id}${detail ? "  — " + detail : ""}`); };
-const section = async (name, fn) => { if (ONLY && !name.startsWith("0") && !new RegExp(ONLY).test(name)) return; try { await fn(); } catch (e) { check(`${name}: section aborted`, false, String(e.message).split("\n")[0]); } };
+const section = async (name, fn) => { if (ONLY && !name.startsWith("0") && !new RegExp(ONLY).test(name)) return; try { await fn(); } catch (e) { check(`${name}: section aborted`, false, String(e.message).split("\n")[0]); } finally { await closeLeakedLive(); } };
 const shot = async (page, name) => { if (SHOTS) await page.screenshot({ path: `${SHOTS}/${name}.png` }); };
 const SHEET = '[data-testid="food-bottom-sheet"]';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -81,6 +81,18 @@ async function learnStops(page, ts) {
   let st = await down(Math.round(s0.h * 0.25)); stops.half = st.h;
   st = await down(Math.round(st.h * 0.55)); stops.peek = st ? st.h : null;
   return stops;
+}
+
+
+// A FLICK must be fast ON THE PAGE, not just on the driver's clock: every CDP touch send costs ~30 ms in some containers
+// (measured 2026-10-06: a "70 ms" flick arrived as 4 moves 49 ms apart = 0.33 px/ms, under the 0.35 px/ms flick rule — so
+// every flick row went red on UNCHANGED code). So the moves go back-to-back, and the speed the page actually SAW (from the
+// pointer events' own timeStamps) is asserted: a flick that was too slow VOIDS its row loudly instead of blaming the sheet.
+async function flick(page, ts, x, y0, y1) {
+  await page.evaluate(() => { window.__fl = []; const rec = (e) => window.__fl.push([e.type, e.timeStamp, e.clientY]); for (const t of ["pointerdown", "pointermove", "pointerup"]) document.addEventListener(t, rec, { capture: true, once: false }); window.__flOff = () => { for (const t of ["pointerdown", "pointermove", "pointerup"]) document.removeEventListener(t, rec, true); }; });
+  await ts.drag(x, y0, y1, { ms: 0, steps: 3 });
+  const seen = await page.evaluate(() => { window.__flOff && window.__flOff(); const f = window.__fl || []; if (f.length < 2) return null; const a = f[0], b = f[f.length - 1]; return { v: Math.abs(a[2] - b[2]) / Math.max(1, b[1] - a[1]), ms: Math.round(b[1] - a[1]) }; });
+  check(`flick instrument: the page saw a real flick (≥ 0.4 px/ms, rule is 0.35)`, !!seen && seen.v >= 0.4, seen ? `${seen.v.toFixed(2)} px/ms over ${seen.ms} ms` : "no pointer events seen");
 }
 
 async function sheetSection(engine, phone) {
@@ -133,13 +145,13 @@ async function sheetSection(engine, phone) {
     await ts.drag(s.x, s.handleY, s.handleY + 380, { ms: 600 }); await sleep(700); // down to peek (or closed -> reopen)
     s = await sheetState(page);
     if (!s) { check(`${tagp} 3b a slow full-height pull leaves the place open`, false, "sheet closed"); await ctx.close(); return; }
-    await ts.drag(s.x, s.handleY, s.handleY - 60, { ms: 70, steps: 4 }); await sleep(700); s = await sheetState(page);
+    await flick(page, ts, s.x, s.handleY, s.handleY - 60); await sleep(700); s = await sheetState(page);
     check(`${tagp} 3c a short flick up from peek moves ONE stop (to half)`, near(s.h, stops.half), `h=${s.h} half=${stops.half}`);
-    await ts.drag(s.x, s.handleY, s.handleY - 60, { ms: 70, steps: 4 }); await sleep(700); s = await sheetState(page);
+    await flick(page, ts, s.x, s.handleY, s.handleY - 60); await sleep(700); s = await sheetState(page);
     check(`${tagp} 3c a short flick up from half moves ONE stop (to full)`, near(s.h, stops.full), `h=${s.h} full=${stops.full}`);
-    await ts.drag(s.x, s.handleY, s.handleY + 60, { ms: 70, steps: 4 }); await sleep(700); s = await sheetState(page);
+    await flick(page, ts, s.x, s.handleY, s.handleY + 60); await sleep(700); s = await sheetState(page);
     check(`${tagp} 3c a short flick down from full moves ONE stop (to half)`, near(s.h, stops.half), `h=${s.h} half=${stops.half}`);
-    await ts.drag(s.x, s.handleY, s.handleY + 60, { ms: 70, steps: 4 }); await sleep(700); s = await sheetState(page);
+    await flick(page, ts, s.x, s.handleY, s.handleY + 60); await sleep(700); s = await sheetState(page);
     check(`${tagp} 3c a short flick down from half moves ONE stop (to peek), not closed`, s && near(s.h, stops.peek), s ? `h=${s.h} peek=${stops.peek}` : "sheet closed");
     // a tap on the handle is not a drag
     s = await sheetState(page);
@@ -284,8 +296,12 @@ async function formStackingSection(engine, phone) {
       await shot(page, nm(`2-${height}-visit-form`));
       await page.locator('[data-testid="visit-form-actions"] button').first().evaluate((b) => b.click()).catch(() => {}); await sleep(600);
       // edit an old visit
-      await page.locator('[data-testid="food-visit-card"]').first().evaluate((b) => b.click()).catch(() => {}); await sleep(900);
-      const editing = await page.locator('[data-testid="food-visit-card-editing"]').count();
+      // (live: the visit list refetches after the form closes, so the card may not be there for a second or two — retry the press)
+      let editing = 0;
+      for (let tries = 0; tries < (LIVE ? 8 : 1) && !editing; tries++) {
+        await page.locator('[data-testid="food-visit-card"]').first().evaluate((b) => b.click(), null, { timeout: LIVE ? 3000 : 5000 }).catch(() => {}); await sleep(LIVE ? 1200 : 900);
+        editing = await page.locator('[data-testid="food-visit-card-editing"]').count();
+      }
       if (editing) {
         const ed = await actions(page);
         check(`${tagp} 2 ${height} · edit visit: no "Log a visit" under the edit form`, !ed.logShown, JSON.stringify(ed));
@@ -297,6 +313,7 @@ async function formStackingSection(engine, phone) {
 }
 
 // ── run ─────────────────────────────────────────────────────────────────────────────────────────
+if (LIVE) { await seedLive(); console.log("live: throwaway Aburi visit seeded on the test account"); }
 const wk = await webkit.launch();
 const cr = await chromium.launch({ executablePath: process.env.PW_CHROME || undefined, args: ["--no-sandbox"] });
 try {
@@ -354,6 +371,7 @@ try {
   for (const phone of ["iPhone 15", "iPhone SE"]) await sheetSection(cr, phone);
 } finally {
   await wk.close(); await cr.close();
+  if (LIVE) { const c = await cleanupLive(); console.log("live cleanup:", JSON.stringify(c)); if (c.error || c.left !== 0) { console.log("FAIL  live cleanup left rows behind"); process.exitCode = 1; } }
 }
 const failed = results.filter((r) => !r.ok);
 const voided = results.some((r) => r.id.startsWith("0") && !r.ok);
