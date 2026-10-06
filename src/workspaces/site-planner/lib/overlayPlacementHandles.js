@@ -17,7 +17,10 @@
  * release (so the caller persists exactly one write per gesture, not one per pointermove).
  */
 import L from "leaflet";
-import { overlayCornersFromPlacement, scalePlacement, rotatePlacement } from "../../../shared/overlay/overlayPlacement.js";
+import {
+  overlayCornersFromPlacement, scalePlacement, rotatePlacement, imagePointToLatLon,
+  visibleFrame, visibleCenterPx, visibleCornersPx, anchorVisibleCentreGeo,
+} from "../../../shared/overlay/overlayPlacement.js";
 import { compMarkerColor } from "../../../shared/comps/lib/compMarkerIcon.js";
 import { PALETTES } from "../../../shared/theme/palette.js";
 
@@ -94,17 +97,24 @@ export function createPlacementHandles(map) {
   let readoutMode = null; // null | "rotate" | "scale" — which gesture (if any) owns the readout
   let readoutValue = "";
 
-  const containerCenter = (overlay) => map.latLngToContainerPoint(L.latLng(overlay.centerLat, overlay.centerLon));
+  // NEW-2 — the pivot of scale + rotate is the centre of the VISIBLE region (the crop; the whole image when
+  // uncropped), so a small crop's handles hug it and it spins/scales about what the user can see.
+  const containerCenter = (overlay) => {
+    const c = visibleCenterPx(overlay);
+    const ll = imagePointToLatLon(overlay, current.imgW, current.imgH, c.x, c.y);
+    return map.latLngToContainerPoint(ll ? L.latLng(ll.lat, ll.lon) : L.latLng(overlay.centerLat, overlay.centerLon));
+  };
 
   const DIAMOND_R = 7; // half-diagonal, px — matches the corner squares' visual weight
 
   const redraw = () => {
     if (!current) { svg.style.display = "none"; return; }
-    const c = overlayCornersFromPlacement(current.overlay, current.imgW, current.imgH);
-    if (!c) { svg.style.display = "none"; return; }
+    if (!overlayCornersFromPlacement(current.overlay, current.imgW, current.imgH)) { svg.style.display = "none"; return; }
+    // NEW-2 — chrome fits the VISIBLE region: the crop rect's corners (poly crop → bbox), full image when uncropped.
+    const vc = visibleCornersPx(current.overlay).map((q) => imagePointToLatLon(current.overlay, current.imgW, current.imgH, q.x, q.y));
+    if (vc.some((q) => !q)) { svg.style.display = "none"; return; }
     svg.style.display = "";
-    const tl = map.latLngToLayerPoint(c.topLeft), tr = map.latLngToLayerPoint(c.topRight);
-    const bl = map.latLngToLayerPoint(c.bottomLeft), br = map.latLngToLayerPoint(c.bottomRight);
+    const [tl, tr, br, bl] = vc.map((q) => map.latLngToLayerPoint(L.latLng(q.lat, q.lon)));
     const ring = pointsAttr([tl, tr, br, bl]);
     moveHit.setAttribute("points", ring);
     boundary.setAttribute("points", ring);
@@ -212,10 +222,12 @@ export function createPlacementHandles(map) {
     runGesture(overlay0, (ev) => {
       const p = map.mouseEventToContainerPoint(ev);
       const d = Math.max(1e-6, Math.hypot(p.x - centerPt.x, p.y - centerPt.y));
-      const next = scalePlacement({ ...current.overlay, ftPerPx: ftPerPx0 }, d / grabDist);
-      current.overlay = { ...current.overlay, ftPerPx: next.ftPerPx };
+      const next = scalePlacement({ ...overlay0, ftPerPx: ftPerPx0 }, d / grabDist);
+      // Whole-overlay scale (the crop never drifts vs the image); re-anchored so the visible centre stays put.
+      current.overlay = anchorVisibleCentreGeo(overlay0, { ftPerPx: next.ftPerPx });
       current.onLive(current.overlay);
-      const wFt = Math.round(current.imgW * next.ftPerPx), hFt = Math.round(current.imgH * next.ftPerPx);
+      const vf = visibleFrame(current.overlay);
+      const wFt = Math.round(vf.w * next.ftPerPx), hFt = Math.round(vf.h * next.ftPerPx); // the VISIBLE extent
       readoutValue = `${wFt.toLocaleString()} × ${hFt.toLocaleString()} ft`;
     }, { mode: "scale" });
   };
@@ -231,8 +243,8 @@ export function createPlacementHandles(map) {
     runGesture(overlay0, (ev) => {
       const p = map.mouseEventToContainerPoint(ev);
       const a = (Math.atan2(p.y - centerPt.y, p.x - centerPt.x) * 180) / Math.PI;
-      const next = rotatePlacement(current.overlay, rot0, a - a0);
-      current.overlay = { ...current.overlay, rotationDeg: next.rotationDeg };
+      const next = rotatePlacement(overlay0, rot0, a - a0);
+      current.overlay = anchorVisibleCentreGeo(overlay0, { rotationDeg: next.rotationDeg }); // spins about the visible centre
       current.onLive(current.overlay);
       readoutValue = `${next.rotationDeg.toFixed(1)}°`;
     }, { mode: "rotate" });

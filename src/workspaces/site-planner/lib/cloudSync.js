@@ -5,7 +5,7 @@
  * logged-in user's data; localStorage remains the store when logged out.
  */
 import { supabase, supabaseRest, currentAccessToken } from "./supabase.js";
-import { casUpsert, keepaliveCasPush, isMissingVersionColumn, isMissingColumn } from "../../../shared/cloud/optimisticUpsert.js";
+import { casUpsert, keepaliveCasPush, isMissingVersionColumn, isMissingColumn, isTransientNetworkError } from "../../../shared/cloud/optimisticUpsert.js";
 import { makeWriteSerializer } from "../../../shared/cloud/serializeWrites.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { stableStringify } from "./elementSync.js";
@@ -320,6 +320,17 @@ async function cloudUpsertCore(uid, model, isRetry) {
       ({ error } = await supabase.from("sites").upsert({ ...noTeam, user_id: uid }, { onConflict: "user_id,id" }));
     if (!error) lastHeaderSig[m.id] = sig;
     return { ok: !error, error: error ? error.message : null };
+  }
+  /* NEW-1 (B2163344) — UNKNOWN OUTCOME, not failure. The reply to this write was lost (network), so
+   * the row may already hold it. Re-read the row (refreshes the CAS token — if our write landed this
+   * is the bumped version) and push the same content ONCE more: it lands either way (idempotent), and
+   * the caller — and so the banner — only ever hears the FINAL result. A second failure is genuine. */
+  if (!isRetry && isTransientNetworkError(r.error)) {
+    const fresh = await fetchSiteForReconcile(uid, m.id);
+    if (fresh !== null) {
+      reportClientEvent("cloud-write-retried", "write reply lost (network) → re-read the row and re-pushed once (sites)", { id: m.id, error: r.error });
+      return cloudUpsertCore(uid, model, true);
+    }
   }
   reportClientEvent("cloud-write-failed", (r.error || "cloud write failed") + " (sites)", { id: m.id });
   return { ok: false, error: r.error || "cloud write failed" };
