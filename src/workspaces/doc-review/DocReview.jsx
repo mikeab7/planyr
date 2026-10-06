@@ -2293,6 +2293,8 @@ export default function DocReview({
       return;
     }
     if (mod) return; // leave any other modified keys to the browser
+    // AUTH-SWEEP 2 — Enter/Space on a focused button/link/menu row is that control's own activation: do not preventDefault it (that cancelled the native click on Versions / Delete / Cancel).
+    if ((e.key === "Enter" || e.key === " " || e.code === "Space") && e.target.closest && e.target.closest("button, a[href], summary, [role='button'], [role='menuitem']")) return;
     if (e.key === " " || e.code === "Space") { if (!spaceHeld) setSpaceHeld(true); e.preventDefault(); return; } // hold-Space = pan (B289)
     if (e.key === "Enter") { e.preventDefault(); finishDraft(); }
     else if (e.key === "Escape") {
