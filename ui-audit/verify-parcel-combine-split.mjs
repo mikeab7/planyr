@@ -72,6 +72,7 @@ async function parcelBoxes() { return page.$$eval('[data-testid="parcel-outline"
 
 try {
   await page.goto(BASE + "/#/site-planner", { waitUntil: "load" });
+  if (SIGNED) { await page.reload({ waitUntil: "load" }); await sleep(3000); }   // pick up the seeded cloud-cache entry
   await page.getByText("ZZ Parcels Throwaway", { exact: false }).first().click();
   await T("planner-canvas").waitFor({ timeout: 25000 });
   await sleep(1500);
@@ -244,6 +245,8 @@ try {
   if (SIGNED) { // the throwaway site is ALWAYS deleted (owner constraint 15) — and confirmed gone
     const gone = await page.evaluate(async ([id, uid]) => {
       await window.pfSupabase.from("site_elements").delete().eq("site_id", id);
+      // the table refuses a hard delete of a live row (sites_block_delete_live_group): trash it first, then delete
+      await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id);
       await window.pfSupabase.from("sites").delete().eq("id", id);
       const q = await window.pfSupabase.from("sites").select("id").eq("id", id);
       try { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse(localStorage.getItem(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (e) {}
