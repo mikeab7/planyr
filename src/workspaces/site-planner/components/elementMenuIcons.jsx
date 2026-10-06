@@ -76,6 +76,14 @@ export const SplitRowsIcon = ({ size = 14 }) => (
 );
 
 // Properties — a short list with a dot lead, reading as "details" rather than "settings".
+// Label — a tag outline carrying two text lines; "Hide label" / "Show label" on an element's menu.
+export const LabelIcon = ({ size = 14 }) => (
+  <svg {...base(size)}>
+    <rect x="1.8" y="3" width="10.4" height="8" rx="1.6" />
+    <path d="M4.3 6h5.4M4.3 8.3h3.4" />
+  </svg>
+);
+
 export const PropertiesIcon = ({ size = 14 }) => (
   <svg {...base(size)}>
     <circle cx="2.3" cy="3.2" r="0.6" fill="currentColor" stroke="none" />
