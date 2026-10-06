@@ -4,217 +4,321 @@
 > One line per Open / Verify item so project-knowledge sync indexes the live open list and a
 > chat session can see what's already filed without opening the 200 KB backlog. Regenerate it
 > in the SAME commit as any `BACKLOG.md` edit; CI runs `--check` and fails the build on drift.
-> _268 open · 672 awaiting live verification._
+> _373 open · 936 awaiting live verification._
 
 ## 🔲 Open
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
-| B1262592 | Folder template v2 → v3: drop Sustainability, add Organization | [Library / shared] | #library #filing | sandbox |
-| B1272112 | Migrate Michael's existing Drive files into the v2 folder structure (Mesa, Jacintoport, GPL/Grand Port merge, I-170, Clay & Porter, 8 South, plus two Goose Creek survey files) | [Library / shared, Drive-side] | #library #filing | — |
-| B1260001 | `ui-audit/verify-notes-backspace.mjs`'s "REPRO A" row is intermittently flaky, pre-existing and unrelated to B1260000 | [Notes] | #notes #testing | sandbox |
+| B2154042 | Notes: a nested page tree did not reach the cloud in two runs (a fresh signed-in context saw no nesting; once flat "Recovered — <text>" copies appeared) — UNCONFIRMED, instrument contaminated by other writers on the shared test-account notes tree | [Notes / sync] | #notes #sync | — |
+| B2154041 | Opening a PDF with Review's "Open…" on a project also adds a Site overlay entry — confirm intended | [Review / overlays] | #doc-review | — |
+| B2154040 | Escape does not close the cloud-sync badge popover (only a click away does) | [Shell / a11y] | #a11y #ui | — |
+| B2154039 | Export sheet: a measurement outside the buildings' bounding box silently drops off the sheet; the Count "N items" label overlaps marker N | [Site Planner / export] | #export #site-planner | — |
+| B2154038 | Review: the lower part of a multi-line callout is not clickable (an 8-line callout 66 tall selects only in its top ~51; 5-line 44 → ~34) | [Review / callouts] | #doc-review #selection | — |
+| B2154037 | Renaming a project while offline shows a raw "TypeError: Failed to fetch", no "saved on this device but couldn't reach the cloud" banner, no retry, header still says "Saved and synced", and the cloud keeps the OLD name after reconnect | [Names / sync] | #persistence #sync | — |
+| B2154036 | HARD PAGE FREEZE: a real click on the Site Planner "Properties" rail tab followed immediately by Escape, repeated, freezes the page on a LOCATED plan with a building assembly (V562) | [Site Planner / registration] | #site-planner #view | — |
+| B2154035 | Downloaded PDF with "Flatten markups" OFF (the default) paints a markup sent "behind the plan" ON TOP of the buildings (screen and compose preview show it behind) | [Site Planner / export] | #export #site-planner | — |
+| B2154034 | Whole-network-offline folder rename shows a raw red "TypeError: Failed to fetch" that persists after reconnect while the footer stays "Synced" | [Library] | #library #drive | — |
+| B2154033 | A Library folder created inside a lazy "New project" leaves an orphan `project_folders` row + Drive mirror folder that cannot be reopened or deleted in the UI | [Library / Drive] | #library #drive #persistence | — |
+| B2154032 | PRIVACY: the signed-out Schedule seed (`public/sequence/index.html`, `window.__PLANAR_DATA__`) ships the real Goose Creek task list with owner names ("Michael Butler" ×17) and dated notes to everyone, including unauthenticated `curl https://planyr.io/sequence/` | [Schedule / privacy] | #scheduler #security | — |
+| B2146559 | Group arrival on a second session passes through partial frames; and with the multiwriter hatch off an edit in the read-only second tab still reaches the DB | [Site Planner / sync] | #site-planner #sync | — |
+| B2146558 | A failed later part of a multi-discipline PDF split is silent (Review files "done" when any part filed) | [Library / filing] | #filing #library | — |
+| B2146557 | Site map pan/zoom is NOT preserved across a module switch (the keep-alive planner reframes on return) | [Site Planner / view] | #site-planner #view | — |
+| B2146555 | Under a parcel-host outage, a click made before the saved-copy snapshot finishes downloading says "Parcel info unavailable" | [Map / parcels] | #parcel #gis | — |
+| B2146554 | Delete forever on a project removes its database rows but leaves its Drive folder tree behind | [Library / Drive] | #drive #files #persistence | — |
+| B2146553 | `markReviewPlaced` has no caller: nothing in the UI ever marks a file "on the map" | [Review] | #doc-review | — |
+| B2146552 | Saving an Organization on the Profile also writes auth `user_metadata` and creates a phantom "… Company workspace" in the project switcher; plans created then carry a dangling `team_id` | [Account] | #auth #persistence | — |
+| B2146551 | `/api/taxrates?county=Harris` fails on a cold cache (503, Cloudflare 1102 "Worker exceeded resource limits") twice, then 200 | [Taxes / functions] | #infra | — |
+| B2146550 | Opening an older unfiled review with no stored source while signed in says "Sign in to view …" instead of "wasn't stored in the cloud" | [Review] | #doc-review #ui | — |
+| B2146549 | "Delete team" leaves `team_members` and `team_invites` rows behind (UI says invites are removed for everyone) | [Teams] | #auth | — |
+| B2146548 | The test account cannot persist any schedule (every `planar_data` write 403 / 42501), which blocks the persistence half of ~10+ sweep checks | [Infra / verification] | #testing #scheduler | — |
+| B2146547 | `/api/files` whole-file 200 carries no `content-length`, so pdf.js never switches to Range reads (V282 step 2) | [Review / Drive] | #doc-review #drive | — |
+| B2118784 | Export BUILDINGS legend: two aligned columns, no dash | [Site Planner / export] | #site-planner #export | live |
+| B2099043 | Owner decision: a loose Notes page is no longer visible from inside a project | [Notes] | #notes | — |
+| B2099042 | Standards panel swatch may show the previous project's colour after switching project by URL until a reload | [Site Planner / Standards] | #site-planner #persistence | — |
+| B2099041 | Ctrl+Z after "Apply" restores the drawn objects but not the stored plan default colour | [Site Planner / Standards] | #site-planner | sandbox |
+| B2099040 | Notes: connected-box arrows do not print (the printed sheet has the boxes and words but no arrows) | [Notes] | #notes #export | live |
+| B2096360 | Loading `e2e-fixture-testfit` logs hundreds of NaN SVG attributes (rect x/y, line x1..y2, text x/y, a transform) | [site-planner] | #site-planner #ui | live |
+| B2096359 | A stale site-plan row auto-PATCHes `project_id: "e2e-fixture"` (not a site id), 409s on the foreign key, and a NEW upload then hangs at "0.0 of 0.0 MB" | [comps / site-plans] | #comps #files #persistence | live |
+| B2096358 | A new blank project on a one-team account with auto-share on stays private (`team_id` null) | [projects / teams] | #dashboard #sync | — |
+| B2096357 | Organization page "Belongs to" lists an extra "Unknown project ( org-dest) HERE" row | [dashboard / projects] | #dashboard #ui | live |
+| B2095121 | Schedule edits silently fail to save for any account not on the per-schedule `schedules` path (403 RLS on `planar_data`) | [scheduler / cloud] | #scheduler #persistence #sync | live |
+| B2087650 | `profiles_email_sync.sql` (#1974) is not applied: the repo has NO apply-on-deploy migration path, so it waits for an owner paste | [Auth / profiles] | #auth #persistence #infra | — |
+| B2081250 | Georgia Coastal Marshlands Protection Act jurisdiction line | [site-planner / GIS] | #site-planner #gis | sandbox |
+| B2078595 | Flaky unit tests in the Notes store: `notesTreeWriteThrough` / `notesTwoClientConflict` fail ~1 run in 4 on untouched main | [Notes] | #notes #persistence | sandbox |
+| B2063057 | Cross-device instant sync of the plan header via Supabase Realtime on `sites` (needs an owner go-ahead for a production DB change) | [architecture / sync] | #site-planner #persistence | live |
+| B2022929 | Document editor: Word fidelity gaps and no way to browse earlier saved versions | [doc-review] | #doc-review #files | sandbox |
+| B2020064 | Map view: the + / − zoom buttons sat under the Sites panel; a press there opened a site | [site-planner / map-finder] | #ui #site-planner | live |
+| B2001569 | Stitcher on a phone: the sheet tray plus the Details panel cover the whole canvas | [Doc Review] | #ui #doc-review | live |
+| B1992434 | Extend "no ETJ hit is not a finding" statewide | [site-planner / jurisdiction] | #gis #site-planner | sandbox |
+| B1992433 | DFW ETJ: verify and add the county/city sources the build environment cannot reach | [site-planner / jurisdiction] | #gis #site-planner | live |
+| B1953792 | Sweep: every stale copy of shared data (beyond names) | [architecture] | #persistence #sync | sandbox |
+| B1945761 | Close out V1366912 honestly | [Dashboard] | #dashboard #scheduler | sandbox |
+| B1945760 | The Dashboard's schedule cards name four different schedules "Master Schedule" | [Dashboard] | #dashboard #scheduler | live |
+| B1927953 | The retired hs-v1 blob is a trap and should say so | [Scheduler / db] | #scheduler #persistence | sandbox |
+| B1901172 | `verify-notes-bin-mode-exit.mjs` still clicks a sidebar tab the toolbar rebuild deleted | [Notes] | #notes #testing | sandbox |
+| B1900672 | Site Planner Row 2 toolbar: drop Zoom-to-fit, move Undo/Redo left of File | [Site Planner / UI] | #site-planner #ui | sandbox |
+| B1883840 (×2) | Notes reload bounces to first page (visibility guard race condition) | [Notes] | #notes #persistence | sandbox |
+| B1857905 | Reliability programme R3–R9 (persistence-transition coverage, planner state extraction, TS boundaries, scheduler build migration, outcome tracking) | [Infra / CI / Site Planner] | #infra #testing #site-planner #scheduler | live |
+| B1805153 | Nothing in CI proves the site-planner DB guard tests are still armed | [Site Planner / db] | #site-planner #infra #testing | sandbox |
+| B1801042 | `verify-notes-page-height.mjs`: "a genuinely short pin is stored as asked" fails — the height pin reads back `null` | [Notes / testing] | #notes #testing | sandbox |
+| B1764688 | Decide whether to move the `planyr` repo into a free GitHub organization, the only way to get GitHub's merge queue | [Infra / CI] | #infra #process | sandbox |
+| B1756546 | A drive running nearly PARALLEL to a pad edge builds a curb return hundreds of feet from the junction | [Site Planner / road] | #site-planner #road #geometry | sandbox |
+| B1756545 | A FLARED road→pad junction's throat never tapers back to the drive's real edge, so the outline reverses at the return's tangent point | [Site Planner / road] | #site-planner #road #geometry | live |
+| B1756544 | A site-plan graphic on a page headed "Spreadsheet" shows paisley/comma-shaped grey blobs where a drive meets a parking field — SURFACE NOT IDENTIFIED, needs Michael to point at the page | [Site Planner / road] | #site-planner #road #geometry | live |
+| B1749155 | Moving (not resizing) a side-parking field along its wall never records intent, so the next assembly-integrity heal silently snaps it back | [Site Planner] | #site-planner #geometry | sandbox |
+| B1711649 | On the FIRST linked-site Task Report row jump after a cold boot, the project breadcrumb can stay "Select a project" even though the route is correct | [Scheduler / reports] | #scheduler | live |
+| B1696401 | `db/test/sites_rename_stamp_guard.test.sql` has gone stale against `sites_enforce_version_monotonic`: 4 of 28 cases no longer exercise what they claim to | [Site Planner / testing] | #site-planner #persistence #testing | sandbox |
+| B1696400 | The project name's column/jsonb duplication is now database-enforced; `scheduleProjectName` is a separate fact, not a third copy | [Site Planner / Storage] | #site-planner #persistence #sync #testing | sandbox |
+| B1674161 | Prove the rebuilt text box / callout properties panel at phone width, with a real text box AND a real callout | [Site Planner / properties] | #site-planner #ui | sandbox |
+| B1674160 | The shared column-header row (PairedFieldHead) renders 2px inset from every row it labels | [Site Planner / properties] | #site-planner #ui | live |
+| B1644370 | `verify-schedule-dashboard-crumb.mjs` is stale against the current crumb-label rule and no longer runs | [global/testing] | #testing #scheduler #ui | sandbox |
+| B1631634 | A transient `<rect>` negative width/height DOM warning during a building resize, seen only after a long multi-panel interaction sequence | [Site Planner] | #site-planner #ui | live |
+| B1629617 | `comps` has no optimistic-concurrency guard at all — a stale edit-form save silently overwrites every field | [Shared / Comps] | #persistence #comps | sandbox |
+| B1609186 | The verification-queue ceiling gate goes red on EVERY PR with no code change, because it ratchets on the calendar | [Infra] | #infra #testing | sandbox |
+| B1600353 | LIVE: a hidden boot never commits a framing, so the canvas paints an aerial with the plan off-screen | [Site Planner] | #site-planner #ui #view | live |
+| B1600352 | The hidden-boot framing failure is OLDER than 453623a, the foregrounded case was never broken, and the rig that certified the blank build green is fixed | [Site Planner] | #site-planner #ui #view #testing | sandbox |
+| B1597762 | `verify-notes-anchor-soak` has been red on `main` for some time: a stale grid fixture, plus one genuinely flaky arm | [Notes] | #notes #testing | sandbox |
+| B1594320 | P0: the site planner canvas painted `visibility:hidden` on production and stayed that way — every plan was blank and unclickable | [Site Planner / canvas] | #site-planner #ui #view #testing | live |
+| B1589697 | `design-drift-audit`'s ceiling-breach message claims "New/moved offenders" but never actually diffs against a baseline | [Infra] | #infra #testing | sandbox |
+| B1584833 | `rename_site_group` trusts the client's clock for its own recency stamp | [Site Planner / storage] | #site-planner #persistence #sync | sandbox |
+| B1583297 | Record what discovery routes 1-3 could not find for 11 counties, and name a fourth route to try next | [Site Planner] | #gis #parcel #site-planner | sandbox |
+| B1583296 | Wire the City of Detroit as a CITY-scoped parcel source, not as Wayne County | [Site Planner] | #gis #parcel #site-planner | sandbox |
+| B1561104 | Set a note page's own width by hand — drag either edge, or pick Narrow/Normal/Wide/Full from the page menu | [Notes] | #notes #ui #export | sandbox |
+| B1554273 | A table column can be squeezed to one character wide, and his existing tables are already in that state | [Notes] | #notes #ui | sandbox |
+| B1554272 | Widening a table column squeezes its neighbours instead of growing the page | [Notes] | #notes #ui | sandbox |
+| B1551620 | `identifyRoadAuthority` still queries Texas's road-maintenance layer for a point outside Texas | [Site Planner] | #gis #road | sandbox |
+| B1551617 | Wire every remaining county in the country, using the new discovery harness | [Site Planner] | #gis #parcel | sandbox |
+| B1539888 | Right-click on the parcel acreage label opened the BUILDING's menu instead of the label's own — a label's hit region must belong to the object it describes, always | [Site Planner / selection] | #site-planner #ui #selection #parcel | sandbox |
+| B1489697 | Deleting the account's last remaining schedule silently does nothing | [Scheduler] | #scheduler #ui | sandbox |
+| B1450817 | several `ui-audit/` harnesses that assume the app boots directly into the Site Planner now time out, because the app defaults to the Dashboard workspace | [Site Planner / testing] | #testing #site-planner #dashboard | sandbox |
+| B1442592 | An empty new project is never written to the server | [Site Planner] | #site-planner #persistence #ui | sandbox |
+| B1430384 | Select parcels mode keeps the address field, which does nothing for picking lots | [Site Planner] | #site-planner #ui #parcel #selection | sandbox |
+| B1426608 | The Going quiet card (and every other list-style dashboard card) held a fixed height regardless of how little it had to show | [Dashboard] | #dashboard #ui | live |
+| B1422496 | A newly shipped dashboard card never reaches a layout that was already saved | [Dashboard] | #dashboard #persistence #ui | live |
+| B1405008 | A page can land in the notes index with no body row, and nothing ever noticed | [Notes] | #notes #persistence #sync #testing | sandbox |
+| B1391954 | Sweep every control for "reports the mark" instead of "reports the value" | [Notes] | #notes #ui #a11y #testing | sandbox |
+| B1391953 | Three encodings of one colour, and the colour control disagreed with itself | [Notes] | #notes #ui #a11y | — |
+| B1391952 | The font control said "Default" for text set in a real typeface | [Notes] | #notes #ui #a11y | sandbox |
+| B1382550 | ~~Font changes may not apply to headings~~ — INVESTIGATED, NOT A DEFECT | [Notes] | #notes #ui | sandbox |
+| B1382549 | Every toolbar control reports the selection, or reports nothing — eleven controls were guessing | [Notes] | #notes #ui #a11y #testing | sandbox |
+| B1382548 | A Word paste kept the font on some runs and dropped it on others, sometimes mid-line | [Notes] | #notes #ui | — |
+| B1382547 | 11pt and 11px both displayed as "11", and picking the "11" already shown shrank the text by a quarter | [Notes] | #notes #ui | sandbox |
+| B1382546 | The toolbar put the STYLE picker where the font belongs, and hid the font two levels deep | [Notes] | #notes #ui | sandbox |
+| B1382545 | The Font control had no mixed state | [Notes] | #notes #ui #a11y | sandbox |
+| B1382544 | The Font control reported "Default" for text that is genuinely Calibri | [Notes] | #notes #ui #a11y | sandbox |
+| B1372353 | The statewide-parcel probe only ever searched state `.gov` hosts, never states' own official ArcGIS Online organizations — the blind spot that lost California and Rhode Island | [Site Planner / GIS] | #gis #parcel #site-planner #testing | sandbox |
+| B1368145 | "Add a note" as a fourth verb on the map decide bar — needs a map-anchored note concept first | [Site Planner / Map] | #site-planner #ui #notes | — |
+| B1361683 | The local project list dropped a project BEFORE the server confirmed the delete — the same lie by a second, independent route | [Site Planner / persistence] | #site-planner #persistence #ui #testing | sandbox |
+| B1361682 | Nine ui-audit harnesses have been dead at boot on an obsolete crumb selector, reporting "0/0 checks passed" as if that were a pass | [global/ui-audit] | #testing #infra #ui | sandbox |
+| B1361681 | Rename in the Schedule project picker did nothing | [Scheduler / shared-ui] | #scheduler #ui | sandbox |
+| B1361680 | The delete confirmation never named the project | [shared-ui] | #ui #site-planner | sandbox |
+| B1358128 (×2) | Project delete rewrites the notes index and never writes the delete: the switcher's own row menu ERASED which project it was for, mid-gesture | [shared-ui / Scheduler / Site Planner] | #scheduler #site-planner #persistence #ui #testing | live |
+| B1345824 | `docs/STATEWIDE-PARCELS.md` rows show "Candidate: none found" while their own note names a real, specific candidate | [Site Planner / GIS] | #gis #parcel #site-planner | sandbox |
+| B1340512 | Replace the Site module loader with the "Stack" mark | [Site Planner] | #site-planner #ui | sandbox |
+| B1332288 | The regeneration tool for `docs/UI-INVENTORY.md` silently uses whatever Chromium happens to be pre-installed instead of the CI-pinned build, so it can produce a drifting inventory and block any PR at random | [Infra / Testing] | #testing #infra #ui | sandbox |
+| B1317843 | Record the 2026-09-07 V199 live result + today's fix in VERIFICATION.md | [docs] | #site-planner #gis | sandbox |
+| B1317842 | Deterministic ui-audit harness for the parcel-cache outage fallback, so V199 stops depending on a real outage | [Site Planner / GIS] | #site-planner #gis #testing | sandbox |
+| B1317841 | Degraded-mode banner mislabels cached outlines as "statewide" and overpromised a click that didn't work | [Site Planner / GIS] | #site-planner #gis | sandbox |
+| B1317840 | Cached county PARCEL SNAPSHOT (B629) never used to select a lot when live parcel sources are down | [Site Planner / GIS] | #site-planner #gis #drive | sandbox |
 | B1273298 | `verify-notes-anchor-zoom.mjs` §9 and `verify-notes-anchor-soak.mjs` both fail a multi-press sweep, pre-existing and unrelated to B1273296/B1273297 | [Notes] | #notes #testing | sandbox |
-| B1249616 | Four pre-existing, unrelated e2e failures found while A/B-triaging B1239328's own verification — none caused by this session, none fixed here | [global/testing] | #testing #ui | sandbox |
-| B1239330 | 41 of ~90 e2e specs fail at their FIRST step against a live/preview build — the new Dashboard landing route (B1213312, 2026-09-05) broke every spec whose boot helper assumed `page.goto("/")` lands straight in a workspace | [global/testing] | #testing #ui | sandbox |
-| B1239328 | Rebuild the Land tab as a list of land, not a tool tray | [Site Planner] | #site-planner #ui #parcel | — |
-| B1239329 | Remove Placement from the Site Planner | [Site Planner] | #site-planner #ui | — |
+| B1272112 | Migrate Michael's existing Drive files into the v2 folder structure (Mesa, Jacintoport, GPL/Grand Port merge, I-170, Clay & Porter, 8 South, plus two Goose Creek survey files) | [Library / shared, Drive-side] | #library #filing | — |
+| B1262592 | Folder template v2 → v3: drop Sustainability, add Organization | [Library / shared] | #library #filing | sandbox |
+| B1260001 | `ui-audit/verify-notes-backspace.mjs`'s "REPRO A" row is intermittently flaky, pre-existing and unrelated to B1260000 | [Notes] | #notes #testing | sandbox |
 | B1253249 | B1213312's Dashboard-as-bare-hash-default silently broke the local logged-out e2e suite's `goto("/")` navigation pattern, repo-wide | [global/testing] | #testing #infra #ui #dashboard | sandbox |
-| B1231284 | `verify-capture-pipe.mjs` reaches the wire again after a routing fix, and it surfaces 7 pre-existing failures unrelated to routing | [global/perf] | #perf #telemetry #testing | sandbox |
-| B1239217 | The global Help/Report FAB overlaps the Model workspace's own "+ Add sheet" tab-strip button and eats the click | [Model / Shell] | #model #ui | sandbox |
-| B1248208 | Opening a project's Library silently seeded its whole folder template (and mirrored it to Google Drive) before any real intent | [Library] | #library #drive #persistence #testing | live |
+| B1249616 | Four pre-existing, unrelated e2e failures found while A/B-triaging B1239328's own verification — none caused by this session, none fixed here | [global/testing] | #testing #ui | sandbox |
 | B1248209 | ~2,700 real Google Drive folders exist for project ids that never had a `sites` row; database wreckage cleaned up, Drive cleanup partially done and intentionally paused | [Library] | #library #drive #persistence #testing | sandbox |
+| B1248208 | Opening a project's Library silently seeded its whole folder template (and mirrored it to Google Drive) before any real intent | [Library] | #library #drive #persistence #testing | live |
+| B1239330 | 41 of ~90 e2e specs fail at their FIRST step against a live/preview build — the new Dashboard landing route (B1213312, 2026-09-05) broke every spec whose boot helper assumed `page.goto("/")` lands straight in a workspace | [global/testing] | #testing #ui | sandbox |
+| B1239329 | Remove Placement from the Site Planner | [Site Planner] | #site-planner #ui | — |
+| B1239328 | Rebuild the Land tab as a list of land, not a tool tray | [Site Planner] | #site-planner #ui #parcel | — |
+| B1231284 | `verify-capture-pipe.mjs` reaches the wire again after a routing fix, and it surfaces 7 pre-existing failures unrelated to routing | [global/perf] | #perf #telemetry #testing | sandbox |
 | B1219152 | The app records WHO MOVED THE VIEW, and what arrived just before — the instrument two live probes could not be | [Site Planner / Infra] | #site-planner #infra #testing #perf #view | — |
-| B1176978 | `nestingMismatches()`/`siblingMismatches()` never consider a crawl surface's own ROOT node as a candidate ancestor | [global/ui-audit] | #ui #testing | sandbox |
+| B1199216 | Two Site Planner phone questions from B1168128 remain untestable off-device: home-indicator clearance and Safari toolbar-collapse jump | [Site Planner] | #site-planner #ui #mobile | live |
 | B1179328 | Excel-parity formula library for the Model sheet engine: VLOOKUP, HLOOKUP, SUMIFS, COUNTIFS, AVERAGEIFS, SUMPRODUCT | [Model / formula] | #model #formula #testing | sandbox |
+| B1176978 | `nestingMismatches()`/`siblingMismatches()` never consider a crawl surface's own ROOT node as a candidate ancestor | [global/ui-audit] | #ui #testing | sandbox |
+| B1176482 | Viewport meta sets `user-scalable=no`, blocking pinch-zoom app-wide (WCAG 1.4.4) | [global/a11y] | #ui #a11y | sandbox |
+| B1176481 | Safe-area insets aren't handled app-wide beyond one control | [global/mobile] | #ui #mobile | sandbox |
 | B1167121 | No environment can author a visual-regression baseline that CI accepts, and no CI-side path exists to generate one | [global/ui-audit] | #ui #testing #infra | sandbox |
 | B1163827 | Analysis and Yield read flood freshness from THREE separate, disjoint stores — a re-check in one panel never updates what the other panel reports | [Site Planner / drainage] | #site-planner #floodplain #yield #gis | live |
-| B1199216 | Two Site Planner phone questions from B1168128 remain untestable off-device: home-indicator clearance and Safari toolbar-collapse jump | [Site Planner] | #site-planner #ui #mobile | live |
-| B1176481 | Safe-area insets aren't handled app-wide beyond one control | [global/mobile] | #ui #mobile | sandbox |
-| B1176482 | Viewport meta sets `user-scalable=no`, blocking pinch-zoom app-wide (WCAG 1.4.4) | [global/a11y] | #ui #a11y | sandbox |
-| B1160723 | Turn OFF the email-confirmation requirement | [Auth] | #auth | live |
-| B1156865 | A site holds plans, deals and notes in one place | [Site Planner / sites] | #site-planner #comps #ui | sandbox |
-| B1156866 | Several deals on one site plan, each with its own point | [Site Planner / site-plans] | #site-planner #comps | sandbox |
-| B1156867 | Buildings, created implicitly, never as a separate step | [Site Planner / comps] | #site-planner #comps | sandbox |
-| B1156868 | Notes and asking rates as first-class entries, excluded from comp averages | [Site Planner / comps] | #site-planner #comps | sandbox |
-| B848737 | On a georeferenced plan, Remove no longer silences the live basemap tiles — a real regression, pre-existing on `main`, found while auditing B848736 | [Site Planner / references] | #site-planner #gis #persistence | sandbox |
 | B1163664 | PR #1421 (Model sheet-tab chrome) broke two context-menu-near-viewport-edge e2e tests | [Model / testing] | #model #testing | sandbox |
+| B1160723 | Turn OFF the email-confirmation requirement | [Auth] | #auth | live |
+| B1156868 | Notes and asking rates as first-class entries, excluded from comp averages | [Site Planner / comps] | #site-planner #comps | sandbox |
+| B1156867 | Buildings, created implicitly, never as a separate step | [Site Planner / comps] | #site-planner #comps | sandbox |
+| B1156866 | Several deals on one site plan, each with its own point | [Site Planner / site-plans] | #site-planner #comps | sandbox |
+| B1156865 | A site holds plans, deals and notes in one place | [Site Planner / sites] | #site-planner #comps #ui | sandbox |
 | B1112834 | `e2e/model-spreadsheet.spec.js`'s Ctrl+wheel zoom test times out on the freeze-panes right-click step | [Model / testing] | #model #testing | sandbox |
-| B1109840 | Model workbooks: multiple sheets with a pinned tab strip | [Model] | #model #ui #persistence #formula | live |
-| B1109841 | Model: colour cells by kind — input (blue) / formula (black) / cross-sheet link (green) | [Model] | #model #ui #formula | sandbox |
 | B1112448 | "Duplicate" never renders in the Schedule module's switcher: AppHeader drops the onDuplicateProject prop | [shared-ui] | #scheduler #ui | sandbox |
+| B1109841 | Model: colour cells by kind — input (blue) / formula (black) / cross-sheet link (green) | [Model] | #model #ui #formula | sandbox |
+| B1109840 | Model workbooks: multiple sheets with a pinned tab strip | [Model] | #model #ui #persistence #formula | live |
 | B1106257 | `ui-audit/ui-inventory.mjs`'s "plan menu" scenario double-clicks the same trigger | [global/ui-audit] | #ui #testing | sandbox |
-| B1066370 (×2) | Edit / Delete / "Place on map" may need two clicks — confound eliminated, does NOT reproduce in isolation, instrumented rather than closed | [Site Planner / comps] | #comps #ui #site-planner | sandbox |
-| B849584 (×2) | An open rail flyout leaves its own trigger unhighlighted | [Site Planner] | #site-planner #ui | sandbox |
 | B1080976 | Share a schedule, from inside the Schedule module | [Scheduler] | #scheduler | live |
-| B1038016 | Give every crawled UI surface a hard signature BUDGET, not a ratchet | [global/ui-audit] | #ui #testing | sandbox |
-| B1038017 | Make the owner-facing number in docs/UI-INVENTORY.md the BUDGET, not a bare deviation count | [global/ui-audit] | #ui #testing | sandbox |
+| B1066370 (×2) | Edit / Delete / "Place on map" may need two clicks — confound eliminated, does NOT reproduce in isolation, instrumented rather than closed | [Site Planner / comps] | #comps #ui #site-planner | sandbox |
 | B1038018 | Two pre-existing red-main required-check failures, found while landing B1038016/B1038017 | [Infra / CI] | #infra #testing | sandbox |
-| B1026273 | The four states nobody designs: empty, loading, error, overloaded | [global/ui] | #ui | sandbox |
-| B1026274 | Keyboard, focus and hit targets | [global/a11y] | #ui #a11y | sandbox |
+| B1038017 | Make the owner-facing number in docs/UI-INVENTORY.md the BUDGET, not a bare deviation count | [global/ui-audit] | #ui #testing | sandbox |
+| B1038016 | Give every crawled UI surface a hard signature BUDGET, not a ratchet | [global/ui-audit] | #ui #testing | sandbox |
 | B1026275 | One name per thing: a terminology list | [global/docs] | #ui | sandbox |
+| B1026274 | Keyboard, focus and hit targets | [global/a11y] | #ui #a11y | sandbox |
+| B1026273 | The four states nobody designs: empty, loading, error, overloaded | [global/ui] | #ui | sandbox |
+| B1023024 | Cross-device sync for the org-scoped agenda | [schedule] | #scheduler | live |
 | B1020932 | Org-scoped Library, Tier B: a real folder tree + Drive-mirror parity with a project | [library] | #library #persistence | live |
 | B1020930 | SHIPPED (×1, amended from FILE-ONLY to a ship order): org-scoped agenda/checklist Schedule | [schedule] | #scheduler | sandbox |
-| B1023024 | Cross-device sync for the org-scoped agenda | [schedule] | #scheduler | live |
-| B1020931 | SHIPPED (×1, amended from FILE-ONLY to a ship order): project-contacts note template | [notes] | #notes | sandbox |
-| B989104 | Control geometry unauthorable: a component layer with locked size variants | [global/design-system] | #ui | sandbox |
 | B989106 | Change what ui-inventory.mjs's checks ask: known-component signatures, not value legality | [global/ui-audit] | #ui #testing | sandbox |
+| B989104 | Control geometry unauthorable: a component layer with locked size variants | [global/design-system] | #ui | sandbox |
 | B927104 | CI's base-ref bundle snapshot builds WITHOUT the production `VITE_*` secrets the head build inlines, so every byte attribution is off by the length of those literals and no local run can predict main's verdict | [infra / perf budgets] | #infra #perf #testing | live |
-| B853713 | Wire dedicated county appraisal districts (CADs) for the DFW & Austin metros | [Site Planner / map] | #gis #parcel #site-planner | live |
 | B858384 | Fix red required `build` check on `main`: verification-queue ceiling breached by calendar drift, not by any commit (×2) | [Infra / CI] | #infra #testing | sandbox |
+| B853713 | Wire dedicated county appraisal districts (CADs) for the DFW & Austin metros | [Site Planner / map] | #gis #parcel #site-planner | live |
+| B849584 (×2) | An open rail flyout leaves its own trigger unhighlighted | [Site Planner] | #site-planner #ui | sandbox |
+| B848737 | On a georeferenced plan, Remove no longer silences the live basemap tiles — a real regression, pre-existing on `main`, found while auditing B848736 | [Site Planner / references] | #site-planner #gis #persistence | sandbox |
 | B791520 | Fix red required `build` check on `main`: Site route bundle 0.4 KB over its performance-budget ceiling | [Infra / CI] | #infra #testing | sandbox |
-| B773729 | Road cross-section: median openings (driveway/intersection breaks) | [Site Planner / road] | #site-planner #road #ui | live |
 | B773731 | Legacy free-draw POLYGON road shows 8 edit handles instead of 4 | [Site Planner / road] | #site-planner #road #ui | sandbox |
+| B773729 | Road cross-section: median openings (driveway/intersection breaks) | [Site Planner / road] | #site-planner #road #ui | live |
 | B770897 | Port the Cloud tool into the Doc Review markup module via ONE shared scallop-generator, not a second implementation | [Doc Review / markup] | #doc-review #markup #ui | live |
-| B758545 | Cloud tool PHASE 2: Markups List panel, threaded replies, tool presets | [Site Planner / markup] | #site-planner #markup #ui #export | live |
-| B758546 | Cloud tool PHASE 3: revision delta tag (numbered triangle), flatten-on-export, iPad touch drawing | [Site Planner / markup] | #site-planner #markup #ui #export #mobile | live |
-| B765984 | Remove the .json project-file export and import from the File menu | [Site Planner] | #site-planner #ui | sandbox |
 | B768496 | Print compose screen: no legend for active GIS layers / pipeline commodities / zoning colors | [Site Planner / export] | #site-planner #export #ui | sandbox |
-| B724256 | Audited: "Already in front of everything" is TRUE, not the reported forward-direction twin of B548064 | [Site Planner / markup] | #site-planner #markup #testing | sandbox |
-| B724257 | A Bluebeam-style stack picker (Alt+click cycles the hit stack) + the missing "Force underneath everything" mirror | [Site Planner / selection] | #site-planner #selection #ui | sandbox |
-| B724258 | Audited: the topo contour layer already paints above every building, and every other GIS layer's role is already reasoned | [Site Planner / GIS] | #site-planner #gis | sandbox |
+| B765984 | Remove the .json project-file export and import from the File menu | [Site Planner] | #site-planner #ui | sandbox |
+| B758546 | Cloud tool PHASE 3: revision delta tag (numbered triangle), flatten-on-export, iPad touch drawing | [Site Planner / markup] | #site-planner #markup #ui #export #mobile | live |
+| B758545 | Cloud tool PHASE 2: Markups List panel, threaded replies, tool presets | [Site Planner / markup] | #site-planner #markup #ui #export | live |
 | B724259 | Keyboard shortcuts could be swallowed by a component's own `stopPropagation()`, outside the app's one keyboard router | [Site Planner / keyboard] | #site-planner #keyboard #selection | sandbox |
-| B711905 | Usage overview, derived from existing data | [Platform / Admin] | #admin #site-planner #ui | live |
-| B711906 | Issues view over `client_errors` | [Platform / Admin] | #admin #infra #testing | live |
-| B711907 | In-app Help + support tickets | [Platform / Admin / Support] | #admin #persistence #ui | live |
-| B711908 | Ops panel: outstanding work + Claude Code session hygiene | [Platform / Admin / Ops] | #admin #infra | live |
-| B647392 | `verify-schedule-row-move.mjs` check I (zero re-render during a drag) has NO discriminating mutation | [Schedule] | #scheduler #testing #selection | sandbox |
+| B724258 | Audited: the topo contour layer already paints above every building, and every other GIS layer's role is already reasoned | [Site Planner / GIS] | #site-planner #gis | sandbox |
+| B724257 | A Bluebeam-style stack picker (Alt+click cycles the hit stack) + the missing "Force underneath everything" mirror | [Site Planner / selection] | #site-planner #selection #ui | sandbox |
+| B724256 | Audited: "Already in front of everything" is TRUE, not the reported forward-direction twin of B548064 | [Site Planner / markup] | #site-planner #markup #testing | sandbox |
 | B647393 | No NAMED regression check asserts row-range-select still works after the B646272 drag-grip change | [Schedule] | #scheduler #testing #selection | sandbox |
-| B613760 | `ui-audit/verify-successor-complete.mjs` (incl. its new narrow-width sweep) is not enforced by CI — nothing catches a regression unless someone remembers to run it by hand | [Schedule] | #scheduler #testing #infra | sandbox |
-| B613761 | `verify-successor-complete.mjs` Section D (the narrow-width sweep) never re-checks stray grid-cell selection below 1600px | [Schedule] | #scheduler #testing | sandbox |
+| B647392 | `verify-schedule-row-move.mjs` check I (zero re-render during a drag) has NO discriminating mutation | [Schedule] | #scheduler #testing #selection | sandbox |
 | B613762 | `verify-successor-complete.mjs` Section D's "Update Successors is actually clickable" check has no mutation proof | [Schedule] | #scheduler #testing | sandbox |
+| B613761 | `verify-successor-complete.mjs` Section D (the narrow-width sweep) never re-checks stray grid-cell selection below 1600px | [Schedule] | #scheduler #testing | sandbox |
+| B613760 | `ui-audit/verify-successor-complete.mjs` (incl. its new narrow-width sweep) is not enforced by CI — nothing catches a regression unless someone remembers to run it by hand | [Schedule] | #scheduler #testing #infra | sandbox |
 | B603841 | MasterView's health-cell renderer has no `\|\| HEALTH.gray` fallback (crashes on an unknown health key) | [Scheduler] | #scheduler #ui | sandbox |
 | B590019 | Add a leader / arrow from a text box to what it is pointing at (the Bluebeam callout) | [Notes] | #notes #ui #persistence | sandbox |
 | B583011 | Ctrl+Z after ANY formatting change leaves a `density` attribute on the document, so 14 undo checks fail | [Notes] | #notes #ui #testing | sandbox |
-| B539650 | Resize a box from any edge or corner | [Notes] | #notes #ui | sandbox |
-| B820 (×2) | RE-OPENED: "Send to Back" silently does half the job against a BUILDING, then greys itself out as if it worked | [Site Planner / markup] | #site-planner #markup #selection #ui | live |
 | B540768 | Split lineage: the invariant is EXACTLY ONE ACTIVE GENERATION, and the rule as requested would have failed correct data | [Site Planner] | #site-planner #parcel #testing | sandbox |
-| B519904 | The instrument that finally reproduced B1121: his Richfield plan, drivable, with the two memory series the repo could never tell apart | [Site Planner / Infra] | #perf #testing #site-planner #infra | sandbox |
+| B539650 | Resize a box from any edge or corner | [Notes] | #notes #ui | sandbox |
 | B519906 | Naming the leak instead of characterising it: attribute every subscription to its call site, and refuse to guess when it does not concentrate | [Site Planner / Infra] | #perf #testing #site-planner #infra | sandbox |
 | B519905 | A ceiling, not a leak: Richfield settles at ~1.3 GB of renderer memory within two zoom cycles and then holds it | [Site Planner / Map] | #perf #site-planner #gis | live |
+| B519904 | The instrument that finally reproduced B1121: his Richfield plan, drivable, with the two memory series the repo could never tell apart | [Site Planner / Infra] | #perf #testing #site-planner #infra | sandbox |
 | B519681 | The arrow keys, instrumented: no global binding swallows them in text, and the failing set is elsewhere | [Notes] | #notes #ui #testing | live |
 | B500576 | Group CAS: three more ways one bad bet refused every save on a building, found by a second ordinary hour — and the flag is now ON | [Site Planner / persistence] | #site-planner #sync #testing | sandbox |
 | B487601 | Three near-identical plan names and no visible cue for which one you are editing | [Site Planner / wayfinding] | #site-planner #ui | sandbox |
 | B484336 | Group CAS would have refused EVERY save on a building, forever, over a sort order | [Site Planner / persistence] | #site-planner #sync #testing | sandbox |
 | B481328 | A red e2e check on `main` was a STALE TEST, not a defect — and it had been red long enough to become scenery | [Site Planner / testing] | #testing #site-planner #selection | sandbox |
 | B477808 | The inspector can hand back a different number than you typed, and says nothing | [Site Planner / inspector] | #site-planner #ui | sandbox |
-| B464048 | Typing in an inspector number box could DELETE the selected building — SEVEN of eight ordinary interactions armed the next Backspace | [Site Planner / keyboard] | #site-planner #selection #ui #testing | live |
-| B464049 (×2) | The Depth box "wasn't letting" him type. Nothing was rejecting it — and the app had NO error state at all | [Site Planner / UI · a11y] | #site-planner #ui | sandbox |
-| B464050 | "Undo re-spaces every element's layer key" — IT IS NOT UNDO. Legacy duplicate `z`, repaired at load | [Site Planner / undo] | #site-planner #selection #sync | sandbox |
 | B472049 | A notch split left the superseded parent drawn, so it read as a duplicate | [Site Planner] | #site-planner #parcel | live |
-| B472048 | An operation envelope: who did a write, and what operation it was part of | [Site Planner / data] | #site-planner #persistence #infra | live |
-| B454480 | "Tab sometimes doesn't work": instrumented, and the answer is one sentence | [Notes] | #notes #ui #testing | sandbox |
+| B464050 | "Undo re-spaces every element's layer key" — IT IS NOT UNDO. Legacy duplicate `z`, repaired at load | [Site Planner / undo] | #site-planner #selection #sync | sandbox |
+| B464049 (×2) | The Depth box "wasn't letting" him type. Nothing was rejecting it — and the app had NO error state at all | [Site Planner / UI · a11y] | #site-planner #ui | sandbox |
+| B464048 | Typing in an inspector number box could DELETE the selected building — SEVEN of eight ordinary interactions armed the next Backspace | [Site Planner / keyboard] | #site-planner #selection #ui #testing | live |
+| B463922 (×3) | Schedule grid: clicking/collapsing/undoing/switching views throws the view somewhere else | [Schedule] | #scheduler #ui #view | sandbox |
 | B454481 | Typing and formatting, attacked rather than confirmed | [Notes] | #notes #testing #ui | sandbox |
-| B434416 | A text box had no SELECTED state at all, so "click it and press Delete" could not work | [Notes] | #notes #ui | live |
-| B434417 | Resizing a box never saved: the gesture committed the width the box already had, while rendering the one you dragged to | [Notes] | #notes #ui #persistence | live |
-| B434418 | Every affordance appeared on hover | [Notes] | #notes #ui | sandbox |
-| B421488 | A box's delete button was visible, correctly labelled, and impossible to click | [Notes] | #notes #ui | sandbox |
-| B421489 | Deleting a box could not be undone | [Notes] | #notes #ui | sandbox |
-| B421490 (×3) | A box could hang off the page, where its controls were unreachable | [Notes] | #notes #ui | sandbox |
-| B421491 | "Edited 2 Jul 2025 ago" | [Notes] | #notes #ui | sandbox |
-| B421492 | Opening History crushed the page to a sliver | [Notes] | #notes #ui | sandbox |
-| B421493 | A re-file into another project did not travel between computers | [Notes] | #notes #sync | live |
-| B421494 | Marquee-select several boxes and move them together | [Notes] | #notes #ui | sandbox |
+| B454480 | "Tab sometimes doesn't work": instrumented, and the answer is one sentence | [Notes] | #notes #ui #testing | sandbox |
 | B435538 | A write must say WHO did it and WHAT OPERATION it was part of | [Site Planner / data] | #site-planner #persistence #infra | live |
+| B434418 | Every affordance appeared on hover | [Notes] | #notes #ui | sandbox |
+| B434417 | Resizing a box never saved: the gesture committed the width the box already had, while rendering the one you dragged to | [Notes] | #notes #ui #persistence | live |
+| B434416 | A text box had no SELECTED state at all, so "click it and press Delete" could not work | [Notes] | #notes #ui | live |
+| B421494 | Marquee-select several boxes and move them together | [Notes] | #notes #ui | sandbox |
+| B421493 | A re-file into another project did not travel between computers | [Notes] | #notes #sync | live |
+| B421492 | Opening History crushed the page to a sliver | [Notes] | #notes #ui | sandbox |
+| B421491 | "Edited 2 Jul 2025 ago" | [Notes] | #notes #ui | sandbox |
+| B421490 (×3) | A box could hang off the page, where its controls were unreachable | [Notes] | #notes #ui | sandbox |
+| B421489 | Deleting a box could not be undone | [Notes] | #notes #ui | sandbox |
+| B421488 | A box's delete button was visible, correctly labelled, and impossible to click | [Notes] | #notes #ui | sandbox |
 | B420257 | "create hit a live row (should be impossible)" fired twice in 36 hours, and it is NOT the duplicate-id collision | [Site Planner] | #site-planner #sync #persistence | live |
-| B400176 | A renamed note left the sidebar until a reload, because the stored tree lagged the screen by 400 ms | [Notes] | #notes #sync #persistence | live |
 | B400177 | The box width handle resized against a STALE left edge, so resizing a box you had moved gave the wrong width | [Notes] | #notes #ui | sandbox |
-| B393171 | `main`'s four-metric bundle drift: attributed, and STOPPED at the third ratchet by the item's own rule | [Infra / CI · perf] | #infra #perf | sandbox |
+| B400176 | A renamed note left the sidebar until a reload, because the stored tree lagged the screen by 400 ms | [Notes] | #notes #sync #persistence | live |
 | B393173 | The Anthropic SDK ships 144 KB to the browser for one API call, with the user's key in the page | [Site Planner / build · security] | #infra #perf #files | sandbox |
+| B393171 | `main`'s four-metric bundle drift: attributed, and STOPPED at the third ratchet by the item's own rule | [Infra / CI · perf] | #infra #perf | sandbox |
 | B329408 | `main`'s required build is RED on the performance budget, and it has been for at least three commits | [Infra / CI · perf] | #infra #perf #testing | sandbox |
 | B298759 | Version history is DEVICE-LOCAL, so losing the machine loses the history | [Notes] | #notes #persistence #sync | sandbox |
+| B297909 | The Site route's largest chunk is ~30 KB into a 32 KB band, and the measured payback is the References panel | [Site Planner / perf] | #site-planner #perf | sandbox |
 | B296224 | EVERY PR APPENDS TO THE SAME FIVE LEDGER FILES, so a PR that sits for an hour conflicts BY CONSTRUCTION — with zero source conflicts | [Infra / CI] | #infra #testing | sandbox |
 | B295168 | The site-route chunk guard snapshots AFTER its own gesture, so it reports input-driven chunks as boot-path ones | [Infra / Testing] | #infra #testing #perf | sandbox |
-| B287058 | `SitePlanner.jsx` is 27,146 lines with 206 `useState` in ONE component: extraction by STATE OWNERSHIP | [Site Planner] | #site-planner #perf #infra | sandbox |
-| B287059 | The clipper-lib polygon offsetting that sized 55,631 ms of a 55,760 ms gesture runs on the MAIN THREAD | [Site Planner] | #site-planner #perf #pond | live |
-| B297909 | The Site route's largest chunk is ~30 KB into a 32 KB band, and the measured payback is the References panel | [Site Planner / perf] | #site-planner #perf | sandbox |
-| B290245 | The Colorado CAPABILITY GUARD has no production call site: eight declared gaps render nothing | [Site Planner / Colorado] | #site-planner #gis #entitlements | sandbox |
-| B290246 | Colorado's statewide FFE floor (CWCB 2 CCR 408-1) is carried as a record and applied to nothing | [Site Planner / floodplain] | #site-planner #floodplain #entitlements | live |
-| B290247 | Site Analysis distances on a Colorado site are over-reported by 1.93% — the Texas projection measures them | [Site Planner / coordinates] | #site-planner #coordinates #gis | live |
-| B290248 | Colorado water law is absent from every surface: a permanent-pool pond can be drawn with no warning | [Site Planner / pond] | #site-planner #pond #entitlements #floodplain | sandbox |
-| B290249 | `drawdownHours` returns 0 for a zero volume, contradicting its own stated contract | [Site Planner / pond] | #site-planner #pond #yield | sandbox |
 | B290250 | Nothing tells a Colorado user whether a distance is GRID or GROUND, and `scaleFactor.js` has no consumer | [Site Planner / coordinates] | #site-planner #coordinates | sandbox |
-| B280402 | The parcel acreage badge is armed by the cursor merely RESTING on it, so it takes press 2 of a double-click | [Site Planner / selection] | #site-planner #selection #ui #parcel | live |
+| B290249 | `drawdownHours` returns 0 for a zero volume, contradicting its own stated contract | [Site Planner / pond] | #site-planner #pond #yield | sandbox |
+| B290248 | Colorado water law is absent from every surface: a permanent-pool pond can be drawn with no warning | [Site Planner / pond] | #site-planner #pond #entitlements #floodplain | sandbox |
+| B290247 | Site Analysis distances on a Colorado site are over-reported by 1.93% — the Texas projection measures them | [Site Planner / coordinates] | #site-planner #coordinates #gis | live |
+| B290246 | Colorado's statewide FFE floor (CWCB 2 CCR 408-1) is carried as a record and applied to nothing | [Site Planner / floodplain] | #site-planner #floodplain #entitlements | live |
+| B290245 | The Colorado CAPABILITY GUARD has no production call site: eight declared gaps render nothing | [Site Planner / Colorado] | #site-planner #gis #entitlements | sandbox |
+| B287059 | The clipper-lib polygon offsetting that sized 55,631 ms of a 55,760 ms gesture runs on the MAIN THREAD | [Site Planner] | #site-planner #perf #pond | live |
+| B287058 | `SitePlanner.jsx` is 27,146 lines with 206 `useState` in ONE component: extraction by STATE OWNERSHIP | [Site Planner] | #site-planner #perf #infra | sandbox |
 | B280403 | The instrument that answers "why did it fail on HIS machine" could not be armed on his machine | [Infra / Testing] | #infra #testing | sandbox |
-| B280400 | The stub's double-click works ONCE: a second one on the same feature fails back to the pre-fix signature | [Site Planner / selection] | #site-planner #selection #ui #road | live |
+| B280402 | The parcel acreage badge is armed by the cursor merely RESTING on it, so it takes press 2 of a double-click | [Site Planner / selection] | #site-planner #selection #ui #parcel | live |
 | B280401 | Harness rule: a probe that observes the middle of a gesture has changed the gesture | [Infra / Testing] | #infra #testing | sandbox |
-| B278576 | A road stub 6×12 px across will not open Properties: press 2 addressed a DIFFERENT road, because the feature is SMALLER THAN ITS OWN CHROME | [Site Planner / selection] | #site-planner #selection #ui #road | live |
+| B280400 | The stub's double-click works ONCE: a second one on the same feature fails back to the pre-fix signature | [Site Planner / selection] | #site-planner #selection #ui #road | live |
 | B278577 | The min-radius review flag's corner dot is WIDER THAN A SHORT ROAD, ate the press, and re-cut the alignment on a double-click | [Site Planner / roads] | #site-planner #selection #ui #road | sandbox |
-| B267536 | The pond outlet + detention family: 20 e2e cases per lane, red for 18 days, and NOT ONE of them was an engineering defect | [Site Planner / Infra] | #site-planner #yield #testing #infra | live |
-| B267537 | The drift gate's own fixture pinned two rows of a ledger designed to shrink, so the guard fails the first time the ledger does its job | [Infra / CI] | #infra #testing | sandbox |
-| B267538 | A full `local` sweep in a dev sandbox reports SEVEN "NEW REGRESSIONS" that are nothing of the kind, and the ledger has no record of which machine it was calibrated on | [Infra / CI] | #infra #testing | live |
+| B278576 | A road stub 6×12 px across will not open Properties: press 2 addressed a DIFFERENT road, because the feature is SMALLER THAN ITS OWN CHROME | [Site Planner / selection] | #site-planner #selection #ui #road | live |
 | B267539 | A guard that measures a DURATION fails on healthy code: the pond per-vertex bound sampled each arm once, in the millisecond band where noise lives | [Site Planner / Infra] | #testing #perf #infra #site-planner | sandbox |
+| B267538 | A full `local` sweep in a dev sandbox reports SEVEN "NEW REGRESSIONS" that are nothing of the kind, and the ledger has no record of which machine it was calibrated on | [Infra / CI] | #infra #testing | live |
+| B267537 | The drift gate's own fixture pinned two rows of a ledger designed to shrink, so the guard fails the first time the ledger does its job | [Infra / CI] | #infra #testing | sandbox |
+| B267536 | The pond outlet + detention family: 20 e2e cases per lane, red for 18 days, and NOT ONE of them was an engineering defect | [Site Planner / Infra] | #site-planner #yield #testing #infra | live |
 | B266081 | 29 + 32 e2e cases are red and now have an owner, a lane and a line in the repo | [Infra / CI] | #infra #testing #site-planner #yield | live |
 | B255200 | The app records ITSELF now: an always-on performance recorder with a self-calibrating trigger and an owner-reported button | [Platform / Infra] | #perf #infra #site-planner #testing #persistence | live |
-| B251136 | The one cost path never measured: a PDF-backed sheet overlay re-renders its whole page at 8192 px on ZOOM, and every wheel notch in the band paid for a new one | [Site Planner / Infra] | #site-planner #perf #infra #testing | sandbox |
 | B251137 | The fix: a re-raster ladder plus a per-rung cache, so crossing the zoom gate costs one page render instead of one per wheel notch — and zooming back in costs none | [Site Planner] | #site-planner #perf | live |
-| B242544 | The Layers panel could not scroll: a percentage max-height resolved to `none`, so the card grew past the map and the list below the fold was unreachable | [Site Planner / UI] | #site-planner #ui #gis | sandbox |
+| B251136 | The one cost path never measured: a PDF-backed sheet overlay re-renders its whole page at 8192 px on ZOOM, and every wheel notch in the band paid for a new one | [Site Planner / Infra] | #site-planner #perf #infra #testing | sandbox |
 | B242545 | Colorado's oil & gas layer: the authoritative ECMC endpoint is IDENTIFIED but unreachable from here, so the slot stays a named gap rather than a guess | [Site Planner / GIS] | #gis #site-planner | — |
-| B1422 (×2) | Colorado was a Texas registry with Colorado sites pointed at it: 38 of 43 sources returned zero | [Site Analysis / GIS] | #gis #site-planner #coordinates | — |
+| B242544 | The Layers panel could not scroll: a percentage max-height resolved to `none`, so the card grew past the map and the list below the fold was unreachable | [Site Planner / UI] | #site-planner #ui #gis | sandbox |
 | B233152 | The double-click audit certified a pond NOBODY COULD CLICK: three independent holes, each of which alone makes the suite green over a dead feature | [Site Planner / Infra] | #site-planner #testing #infra #selection | — |
 | B227888 | The pond result, split: is it pond COUNT or ring COMPLEXITY? | [Site Planner / Infra] | #site-planner #perf #infra #testing | live |
-| B227476 | The Quiddity plan, landed: the SLOW half of the owner's own A/B | [Site Planner / Infra] | #site-planner #perf #infra #testing | sandbox |
-| B227477 | The A/B, run: the slow plan is ELEVEN TIMES the main-thread work of the fast one | [Site Planner / Infra] | #site-planner #perf #infra #testing | live |
-| B227478 | The raster hypothesis for Bain, retired by IDENTITY rather than by statistics | [Site Planner / Infra] | #site-planner #perf #infra | sandbox |
 | B227479 | "Too many elements" is refuted by the owner's own pair, and it is 270× off | [Site Planner / Infra] | #site-planner #perf #infra #ui | sandbox |
-| B227472 | The real Bain and Sylvestri plans, landed from Supabase — and the synthesised stand-in deleted | [Site Planner / Infra] | #site-planner #perf #infra #testing | sandbox |
-| B227473 | The overlay's 1.5° rotation costs about half of what having the overlay at all costs | [Site Planner / Infra] | #site-planner #perf #infra #testing | live |
-| B227474 | The first plan with annotations anybody has ever measured — and the tier costs real render work | [Site Planner / Infra] | #site-planner #perf #infra #testing #ui | live |
+| B227478 | The raster hypothesis for Bain, retired by IDENTITY rather than by statistics | [Site Planner / Infra] | #site-planner #perf #infra | sandbox |
+| B227477 | The A/B, run: the slow plan is ELEVEN TIMES the main-thread work of the fast one | [Site Planner / Infra] | #site-planner #perf #infra #testing | live |
+| B227476 | The Quiddity plan, landed: the SLOW half of the owner's own A/B | [Site Planner / Infra] | #site-planner #perf #infra #testing | sandbox |
 | B227475 | What the real censuses do to the 304-layer question: the compositor layer count is not a function of the scene | [Site Planner / Infra] | #site-planner #perf #infra | sandbox |
-| B221760 | "Add one detention pond and it lags": measured, attributed, and the leading hypothesis killed | [Site Planner / Infra] | #site-planner #perf #pond #infra #testing | live |
+| B227474 | The first plan with annotations anybody has ever measured — and the tier costs real render work | [Site Planner / Infra] | #site-planner #perf #infra #testing #ui | live |
+| B227473 | The overlay's 1.5° rotation costs about half of what having the overlay at all costs | [Site Planner / Infra] | #site-planner #perf #infra #testing | live |
+| B227472 | The real Bain and Sylvestri plans, landed from Supabase — and the synthesised stand-in deleted | [Site Planner / Infra] | #site-planner #perf #infra #testing | sandbox |
 | B221761 | A pond's label re-solved its fit against the pond's interior on every frame of every pan | [Site Planner / UI] | #site-planner #perf #pond #ui | live |
-| B217537 | The enumerated violations, fixed in measured priority order | [Site Planner] | #site-planner #perf #road #pond | live |
-| B217540 | Dragging ONE building re-migrates and re-serialises the ENTIRE plan, dozens of times | [Site Planner / Persistence] | #site-planner #perf #persistence | sandbox |
+| B221760 | "Add one detention pond and it lags": measured, attributed, and the leading hypothesis killed | [Site Planner / Infra] | #site-planner #perf #pond #infra #testing | live |
 | B217541 | The coordinate readout is frozen through a wheel zoom | [Site Planner] | #site-planner #ui #coordinates | sandbox |
-| B209568 | Nobody had ever measured Bain: a fixture that CONTAINS the suspect, and the raster hypothesis killed with a number | [Site Planner / Infra] | #site-planner #perf #infra #testing | live |
-| B209569 | Every plan he actually works in can be measured now, permanently — not just the one that happened to be committed | [Site Planner / Infra] | #site-planner #perf #infra #testing | live |
+| B217540 | Dragging ONE building re-migrates and re-serialises the ENTIRE plan, dozens of times | [Site Planner / Persistence] | #site-planner #perf #persistence | sandbox |
+| B217537 | The enumerated violations, fixed in measured priority order | [Site Planner] | #site-planner #perf #road #pond | live |
 | B209570 | What Bain actually is, next to what we have been measuring all along | [Site Planner / Infra] | #site-planner #perf #infra | sandbox |
-| B6864 | Seven PRs, none mergeable, nothing red: the required check was a livelock between a ratchet and a 30-minute lag | [Infra / CI] | #infra #testing | live |
-| B6865 | A required status check that can never report is a repo-wide outage that looks like nothing is wrong — so assert the contract in the build | [Infra / CI] | #infra #testing | sandbox |
-| B6866 | Reserved B#/V# blocks per session: no allocator, no high-water mark, and a test that two concurrent allocations cannot overlap | [Infra / CI] | #infra #testing | sandbox |
+| B209569 | Every plan he actually works in can be measured now, permanently — not just the one that happened to be committed | [Site Planner / Infra] | #site-planner #perf #infra #testing | live |
+| B209568 | Nobody had ever measured Bain: a fixture that CONTAINS the suspect, and the raster hypothesis killed with a number | [Site Planner / Infra] | #site-planner #perf #infra #testing | live |
 | B6867 | Unblock the seven PRs without bypassing anything | [Infra / CI] | #infra #testing | live |
+| B6866 | Reserved B#/V# blocks per session: no allocator, no high-water mark, and a test that two concurrent allocations cannot overlap | [Infra / CI] | #infra #testing | sandbox |
+| B6865 | A required status check that can never report is a repo-wide outage that looks like nothing is wrong — so assert the contract in the build | [Infra / CI] | #infra #testing | sandbox |
+| B6864 | Seven PRs, none mergeable, nothing red: the required check was a livelock between a ratchet and a 30-minute lag | [Infra / CI] | #infra #testing | live |
 | B1448 | The 2.2-second post-draw tail, attributed: it is 453 ms, more than half of it idle, and the number it was named after measured something else | [Infra / Testing] | #infra #testing #perf #site-planner | live |
-| B1440 | The export builds its own view at export time, so a pan can be ONE transform instead of 1,200 re-emitted nodes | [Site Planner / UI] | #site-planner #perf #ui #export | live |
-| B1441 | The pixel bar is now about what the owner can SEE, not about whether the file changed | [Infra / Testing] | #infra #testing #perf #ui | sandbox |
-| B1442 | The flood/drainage check is manual only, and its freshness is a light | [Site Planner / Yield] | #site-planner #yield #floodplain #perf #ui | live |
 | B1443 | WHAT IS STILL BLOCKING US: every render constraint scored REAL / TEST-DEBT / OWNER-SETTABLE, and the render-architecture call taken | [Site Planner / Infra] | #site-planner #perf #infra #testing #ui | sandbox |
-| B1350 (×3) | The dock-door leaves: 424 nodes that cannot be collapsed, and NOT for the reason first recorded | [Site Planner / UI] | #site-planner #perf #ui | sandbox |
-| B1435 | Every browser-performance design principle, scored against this code, with a ranked table | [Site Planner / Infra] | #site-planner #perf #ui #infra #testing | live |
-| B1436 | A SESSION-SHAPED probe: the axes B1432 deliberately froze, and the instrument fixed so the floor stops blocking the answer | [Site Planner / Infra] | #site-planner #perf #infra #testing | live |
-| B1437 | The column grid and dock doors were re-solved for every building on every frame of every pan | [Site Planner / UI] | #site-planner #perf #ui | live |
+| B1442 | The flood/drainage check is manual only, and its freshness is a light | [Site Planner / Yield] | #site-planner #yield #floodplain #perf #ui | live |
+| B1441 | The pixel bar is now about what the owner can SEE, not about whether the file changed | [Infra / Testing] | #infra #testing #perf #ui | sandbox |
+| B1440 | The export builds its own view at export time, so a pan can be ONE transform instead of 1,200 re-emitted nodes | [Site Planner / UI] | #site-planner #perf #ui #export | live |
 | B1438 | The app measures its own SPEED in production now, so this is never a guess again | [Site Planner / Shell] | #infra #perf #site-planner #ui | live |
-| B1432 | The interaction-count axis, MEASURED: the same gesture after 1,000 gestures costs what it cost at zero | [Site Planner / Infra] | #site-planner #perf #infra #testing #gis | live |
-| B1433 | Think outside the JS profile: the compositor/raster hypothesis, TESTED rather than deferred — and it comes back clean | [Site Planner / Map] | #site-planner #perf #gis #infra | live |
+| B1437 | The column grid and dock doors were re-solved for every building on every frame of every pan | [Site Planner / UI] | #site-planner #perf #ui | live |
+| B1436 | A SESSION-SHAPED probe: the axes B1432 deliberately froze, and the instrument fixed so the floor stops blocking the answer | [Site Planner / Infra] | #site-planner #perf #infra #testing | live |
+| B1435 | Every browser-performance design principle, scored against this code, with a ranked table | [Site Planner / Infra] | #site-planner #perf #ui #infra #testing | live |
 | B1434 | No mechanism named, so no fix shipped: the shape and size of what is actually left | [Site Planner / Map] | #site-planner #perf #gis | sandbox |
-| B1121 (×4) | Map memory accumulates over a session until the site lags; a hard reload only helps briefly | [Site Planner / Map] | #site-planner #perf #gis | live |
+| B1433 | Think outside the JS profile: the compositor/raster hypothesis, TESTED rather than deferred — and it comes back clean | [Site Planner / Map] | #site-planner #perf #gis #infra | live |
+| B1432 | The interaction-count axis, MEASURED: the same gesture after 1,000 gestures costs what it cost at zero | [Site Planner / Infra] | #site-planner #perf #infra #testing #gis | live |
 | B1431 | The four seconds nobody could account for, ATTRIBUTED: a boot timeline with named phases | [Infra / Testing] | #infra #testing #perf #site-planner | sandbox |
+| B1422 (×2) | Colorado was a Texas registry with Colorado sites pointed at it: 38 of 43 sources returned zero | [Site Analysis / GIS] | #gis #site-planner #coordinates | — |
 | B1385 | The landing page's coverage claim undersold the product four to one, and it advertised a module that does not exist | [Landing / marketing] | #ui | sandbox |
-| B1382 | A road tee could not be SLID along its host: the connect path re-welded it to the control point it was already on | [Site Planner / roadGeometry] | #site-planner #road #ui | — |
 | B1383 | The tee position IS the road's bearing, and nothing showed him what that bearing was | [Site Planner / roadGeometry · UI] | #site-planner #road #ui | — |
-| B1359 | The drawing↔basemap registration layout effect is the largest named item in a zoom frame | [Site Planner / UI] | #site-planner #perf #ui | live |
+| B1382 | A road tee could not be SLID along its host: the connect path re-welded it to the control point it was already on | [Site Planner / roadGeometry] | #site-planner #road #ui | — |
 | B1360 | The wheel zoom cannot reach 30 fps without taking the VIEW out of every coordinate | [Site Planner / UI] | #site-planner #perf #ui | live |
-| B1349 | Five lazily-split chunks are pulled at BOOT anyway, on an idle page with no gesture | [Infra / Build] | #infra #perf #gis #site-planner | sandbox |
-| B1351 | Hoist the inspector panel's 1,084 JSX tags out of the canvas component behind memoised children | [Site Planner / UI] | #site-planner #perf #ui | live |
+| B1359 | The drawing↔basemap registration layout effect is the largest named item in a zoom frame | [Site Planner / UI] | #site-planner #perf #ui | live |
 | B1353 | Move `detentionRules` / `floodplainMitigation` / `mhfdDetention` behind a Web Worker | [Site Planner / Pond] | #site-planner #perf #pond #floodplain | live |
+| B1351 | Hoist the inspector panel's 1,084 JSX tags out of the canvas component behind memoised children | [Site Planner / UI] | #site-planner #perf #ui | live |
+| B1350 (×3) | The dock-door leaves: 424 nodes that cannot be collapsed, and NOT for the reason first recorded | [Site Planner / UI] | #site-planner #perf #ui | sandbox |
+| B1349 | Five lazily-split chunks are pulled at BOOT anyway, on an idle page with no gesture | [Infra / Build] | #infra #perf #gis #site-planner | sandbox |
 | B1341 | One assembly, one revision: make a partial apply unrepresentable in the DATABASE, not only in the client | [Site Planner / Persistence] | #site-planner #persistence #sync #infra | live |
 | B1318 | Link a note to a site, a plan element, or a Library file | [Notes] | #notes #library #site-planner | live |
 | B1208 | Lift the handle layer above the GIS line band, together with its pointer plumbing | [Site Planner / UI] | #site-planner #ui #selection #gis | live |
 | B1163 | `perf-harness.mjs`'s `siteRouteChunks` check can never pass as written: it compares FETCHED chunks against a STATIC allowlist | [Infra / Testing] | #testing #infra #perf | sandbox |
 | B1126 | "Computed but never RENDERED" is a class, and the ratchet only catches half of it: the unmounted-JSX half has no guard | [Site Planner / Yield] | #ui #yield #testing | sandbox |
+| B1121 (×4) | Map memory accumulates over a session until the site lags; a hard reload only helps briefly | [Site Planner / Map] | #site-planner #perf #gis | live |
 | B1106 | Ground vs grid: a real project-coordinate transform (combined factor + project origin on the site model) | [Platform / geo] | #coordinates | sandbox |
 | B1064 | Finish the SitePlannerApp split: extract SitePlanner's panels into lazily-loaded child components (the remaining ~750 KB that dynamic imports provably cannot move) | [Infra / Build] | #infra #perf #site-planner | live |
 | B1063 | The reference scenario now issues 513 aerial tile requests where the committed floor was 182 — a 2.8× jump that landed with the map-side perf merge, not with any bundle work | [Site Planner / map] | #site-planner #perf #gis | live |
-| B998 | NEW-28: consolidate ALL flood information into ONE "Flood" panel (FEMA zones + floodway + governing WSEs + check state/vintage + governing district + downstream implications) | [Site Planner / yield · floodplain] | #site-planner #yield #floodplain #ui | live |
-| B1000 | BKDD outfall/gravity feasibility should use the 25-YR receiving WSE, not the 100-yr (§5.D.2/§5.D.3) | [Site Planner / stormwater · pond] | #site-planner #yield #pond #floodplain | live |
-| B1001 | BKDD floodplain fill: compensating storage must band against the 500-YR too, not just the 100-yr (Art VI §1.B) | [Site Planner / stormwater · floodplain] | #site-planner #yield #pond #floodplain | live |
-| B1002 | BKDD maintenance-berm land-take should use the depth+slope Table C, not a flat width (§5.B.2 Table C / §5.B.3 Table D) | [Site Planner / stormwater · pond] | #site-planner #yield #pond | sandbox |
-| B1003 | BKDD emergency spillway: warn when a pond lacks a spillway allowance; model it (§5.B.4.e/§5.B.5.d/§5.B.7.d) | [Site Planner / stormwater · pond] | #site-planner #yield #pond | sandbox |
 | B1004 | BKDD pumped-discharge FORMULAS + TxDOT-ditch 75% auto-switch (§5.B.7.a/§5.B.7.b) | [Site Planner / stormwater · pond] | #site-planner #yield #pond | sandbox |
-| B993 | Right-size an OVERSIZED pond: the optimizer only closes shortfalls, never proposes SHRINKING a pond to give land/dirt back | [Site Planner / stormwater · pond] | #site-planner #yield #pond | — |
-| B994 | NEW-24: Buildability strip reads "not checked yet" on a fresh load of an already-checked plan, until a manual ↻ (though flood data is fresh) | [Site Planner / yield · persistence] | #site-planner #yield #floodplain #persistence | live |
+| B1003 | BKDD emergency spillway: warn when a pond lacks a spillway allowance; model it (§5.B.4.e/§5.B.5.d/§5.B.7.d) | [Site Planner / stormwater · pond] | #site-planner #yield #pond | sandbox |
+| B1002 | BKDD maintenance-berm land-take should use the depth+slope Table C, not a flat width (§5.B.2 Table C / §5.B.3 Table D) | [Site Planner / stormwater · pond] | #site-planner #yield #pond | sandbox |
+| B1001 | BKDD floodplain fill: compensating storage must band against the 500-YR too, not just the 100-yr (Art VI §1.B) | [Site Planner / stormwater · floodplain] | #site-planner #yield #pond #floodplain | live |
+| B1000 | BKDD outfall/gravity feasibility should use the 25-YR receiving WSE, not the 100-yr (§5.D.2/§5.D.3) | [Site Planner / stormwater · pond] | #site-planner #yield #pond #floodplain | live |
+| B998 | NEW-28: consolidate ALL flood information into ONE "Flood" panel (FEMA zones + floodway + governing WSEs + check state/vintage + governing district + downstream implications) | [Site Planner / yield · floodplain] | #site-planner #yield #floodplain #ui | live |
 | B995 | NEW-25: the Optimize card's pond-section band label reads "mitigation 63.9 ac-ft" while the CREDITED mitigation is 0.0 (berm-sealed) — a contradicting pair | [Site Planner / pond · ui] | #site-planner #yield #pond #ui | live |
+| B994 | NEW-24: Buildability strip reads "not checked yet" on a fresh load of an already-checked plan, until a manual ↻ (though flood data is fresh) | [Site Planner / yield · persistence] | #site-planner #yield #floodplain #persistence | live |
+| B993 | Right-size an OVERSIZED pond: the optimizer only closes shortfalls, never proposes SHRINKING a pond to give land/dirt back | [Site Planner / stormwater · pond] | #site-planner #yield #pond | — |
+| B988 | REMAINING criteria-truth critique items (backlog per R-PRINCIPLE: implement what the governing code requires, cited; flag assumptions; no generic best-practice as a site rule) | [Site Planner / stormwater · floodplain] | #site-planner #yield #pond #floodplain | — |
 | B986 | Criteria registry (R-PRINCIPLE): every detention/mitigation criteria value carries jurisdiction + citation + VERIFIED/ASSUMED, researched per-jurisdiction (folds R2/R3/R5/R7) | [Site Planner / stormwater · floodplain] | #site-planner #yield #pond #floodplain | live |
 | B985 | NEW-20: Re-check gives no feedback; first-load of a drawn plan should auto-check; pond callout too bulky | [Site Planner / yield · ui] | #site-planner #yield #ui | — |
-| B988 | REMAINING criteria-truth critique items (backlog per R-PRINCIPLE: implement what the governing code requires, cited; flag assumptions; no generic best-practice as a site rule) | [Site Planner / stormwater · floodplain] | #site-planner #yield #pond #floodplain | — |
 | B966 | `verify-pond-roles-ledger.mjs` harness drifted: its logged-out seed no longer triggers the detention/ledger-balancer render (17 stale assertions) | [Site Planner / tests] | #site-planner #testing #yield | sandbox |
 | B954 | v3 post-ship audit: spec-violations + polish (PR-B) | [Site Planner / yield · pond] | #site-planner #yield #pond #ui | live |
 | B950 | v3 post-ship audit: 5 critical Yield + Pond fixes (PR-A) | [Site Planner / yield · pond] | #site-planner #yield #pond #ui | live |
@@ -223,21 +327,22 @@
 | B937 | Pond inspector: collapsed-group summaries were ellipsizing at panel width (B934 follow-up) | [Site Planner / yield · pond] | #site-planner #yield #pond #ui | sandbox |
 | B936 | FINAL UI SPEC Part B: Yield-panel verdict strip + number format (PR 2) | [Site Planner / yield] | #site-planner #yield #ui | live |
 | B934 | FINAL UI SPEC Part A: condensed Detention-Pond inspector (At-a-glance table + watch-out chips + four collapsed groups) | [Site Planner / yield · pond] | #site-planner #yield #pond #ui | live |
-| B916 | Project sharing model: one grant per grantee, module-visibility mask, viewer-only v1 | [Backend / Sharing] | #infra #auth #persistence | — |
 | B917 | Share entry points, unified project-level dialog, and read-only client (viewer) mode | [Global / UI] | #ui #infra #auth | — |
+| B916 | Project sharing model: one grant per grantee, module-visibility mask, viewer-only v1 | [Backend / Sharing] | #infra #auth #persistence | — |
 | B908 | Scheduler indent→outdent round-trip leaves the task's Start/Finish shifted by one business day | [Scheduler] | #scheduler | live |
 | B906 | Floodplain-mitigation "anchored pond, WSE unknown" warning may not clear after a fresh Re-check (or may name a different pond) | [Site Planner / yield · floodplain] | #site-planner #yield #floodplain #pond | live |
+| B820 (×2) | RE-OPENED: "Send to Back" silently does half the job against a BUILDING, then greys itself out as if it worked | [Site Planner / markup] | #site-planner #markup #selection #ui | live |
 | B818 | Meeting-cadence Gantt view + loud row-state banners (the visual half of NEW-3) | [Scheduler] | #scheduler #entitlements #gantt #export | live |
 | B810 | Terrain honesty: provenance line + structure-masked flow arrows + canopy/vintage disclosure | [Site Planner / terrain · GIS] | #site-planner #gis #ui #export | live |
-| B776 | Special-district layers: ESD, TIRZ (+ audit LID/FWSD coverage of the TCEQ row) | [Site Planner / GIS] | #site-planner #gis | live |
 | B777 | Subsidence district boundaries (HGSD + Fort Bend SD) | [Site Planner / GIS] | #site-planner #gis | live |
-| B752 | Pipeline layer: crisp vector rendering + commodity styling + click-identify (replace raster at working zoom) | [Site Planner / GIS] | #site-planner #gis #export | live |
+| B776 | Special-district layers: ESD, TIRZ (+ audit LID/FWSD coverage of the TCEQ row) | [Site Planner / GIS] | #site-planner #gis | live |
 | B753 | Pipeline easement screening corridor (assumed buffer off centerline) | [Site Planner / GIS] | #site-planner #gis | live |
-| B722 | Config-driven ingestion adapters: surrounding jurisdictions (Harris · Fort Bend · Pearland · Montgomery · H-GAC) | [Site Planner / GIS · ingestion] | #thoroughfare #gis | live |
-| B723 | Map layer: "Thoroughfare Plan" overlay | [Site Planner / GIS · map layer] | #thoroughfare #gis #site-planner #ui | live |
-| B724 | Parcel analysis: frontage detection + ROW-dedication estimate | [Site Planner / analysis] | #thoroughfare #site-planner #yield #gis | live |
-| B725 | Auto-generated entitlement issues from thoroughfare-plan exposure | [Site Planner / entitlements] | #thoroughfare #entitlements #site-planner | live |
+| B752 | Pipeline layer: crisp vector rendering + commodity styling + click-identify (replace raster at working zoom) | [Site Planner / GIS] | #site-planner #gis #export | live |
 | B726 | Thoroughfare-plan versioning + data-freshness tracking | [Site Planner / GIS · data ops] | #thoroughfare #entitlements #gis #infra | live |
+| B725 | Auto-generated entitlement issues from thoroughfare-plan exposure | [Site Planner / entitlements] | #thoroughfare #entitlements #site-planner | live |
+| B724 | Parcel analysis: frontage detection + ROW-dedication estimate | [Site Planner / analysis] | #thoroughfare #site-planner #yield #gis | live |
+| B723 | Map layer: "Thoroughfare Plan" overlay | [Site Planner / GIS · map layer] | #thoroughfare #gis #site-planner #ui | live |
+| B722 | Config-driven ingestion adapters: surrounding jurisdictions (Harris · Fort Bend · Pearland · Montgomery · H-GAC) | [Site Planner / GIS · ingestion] | #thoroughfare #gis | live |
 | B663 | ONE-TIME migration: every existing project gets the standard tree + existing files move into their tree folders in Drive | [Library / storage] | #library #drive | — |
 | B662 | Unified Library: the folder tree IS the view, and files live inside it (+ the live-502 chunked Drive sync fix) | [Library / Doc Review / storage] | #library #drive #persistence | — |
 | B650 | Per-project standard folder tree, user-editable in-app, with continuous one-way sync to Google Drive | [Doc Review / Library / storage · drive-integration / persistence] | — | — |
@@ -245,10 +350,10 @@
 | B629 | Drive-backed county PARCEL snapshot cache so outages stop breaking the map | [Site Planner / GIS] | #site-planner #gis #drive | — |
 | B499 | Harden the LOAD-time self-heal for the OTHER bonded children (sidewalk / dock-zone stack / side-parking) | [Site Planner / Site Model] | #site-planner #persistence | — |
 | B495 | Schedule module: instant first paint (stale-while-revalidate local cache) | [Scheduler / perf] | #scheduler #perf #persistence | — |
-| B483 | A 100%-full localStorage boots the app signed-out (auth-token refresh write fails) | [Auth / Storage] | #auth #persistence | — |
 | B484 | Renderer freezes (~30 s main-thread stalls): PDF title-block reading, heavy map/parcel ops, and panel/rail scrolling (×3) | [Doc Review + Site Planner / perf] | #doc-review #site-planner #perf | live |
-| B474 | Move the Site Planner on-device cache off the 5 MB localStorage cap onto IndexedDB | [Site Planner / Persistence] | #site-planner #persistence | — |
+| B483 | A 100%-full localStorage boots the app signed-out (auth-token refresh write fails) | [Auth / Storage] | #auth #persistence | — |
 | B479 | Persistence "state-of-the-art" perf refactors (the deferred tail of the B485 review) | [Site Planner / Persistence] | #site-planner #persistence #perf | — |
+| B474 | Move the Site Planner on-device cache off the 5 MB localStorage cap onto IndexedDB | [Site Planner / Persistence] | #site-planner #persistence | — |
 | B471 | Revision compare (current vs. previous version), state-of-the-art | [Doc Review / compare] | #doc-review #compare | — |
 | B423 | Shared markup/measure tool engine + Bluebeam-parity refinement loop | [Site Planner + Doc Review / Markup] | #site-planner #doc-review #markup | — |
 | B422 | Named markup Layers (show / hide / lock / rename / reorder) | [Doc Review / Markup] | #doc-review #markup | — |
@@ -258,573 +363,846 @@
 | B370 | Migrate the remaining MAP-DISPLAY layer endpoints into the GIS source registry | [Site Planner / Platform] | #site-planner #gis | — |
 | B364 | Enable the scanned / image-only + DWG reading path for the no-text-layer minority | [Doc Review] | #doc-review #filing | — |
 | B309 | Retire client-side Mapillary token paths once the proxy lands | [Site Planner] | #site-planner #gis | — |
-| B267 | Auto-calibrate a sheet from its stated scale callout | [Doc Review / Markup] | #doc-review #markup | — |
-| B268 | Independent scale cross-check against on-sheet geometry (verify the stated scale) | [Doc Review / Markup] | #doc-review #markup | — |
-| B269 | Remove the uploaded sample drawing PDFs from GitHub (test fixtures, not for `main`) | [Doc Review / repo hygiene] | #doc-review #testing | — |
 | B273 | Filing-workflow practice: read a dropped file's title block → propose its project / discipline / sheet / date | [Doc Review / filing] | #doc-review #filing | — |
-| B180 | Project Files repository as a tagged-index with saved views | [Document Review / Files] | #doc-review #files | — |
-| B181 | Capture placement-readiness flags in file facts at filing time | [Document Review / Files] | #doc-review #files | — |
-| B182 | "Place on map" auto-placement cascade | [Site Planner / Files] | #site-planner #files | — |
+| B269 | Remove the uploaded sample drawing PDFs from GitHub (test fixtures, not for `main`) | [Doc Review / repo hygiene] | #doc-review #testing | — |
+| B268 | Independent scale cross-check against on-sheet geometry (verify the stated scale) | [Doc Review / Markup] | #doc-review #markup | — |
+| B267 | Auto-calibrate a sheet from its stated scale callout | [Doc Review / Markup] | #doc-review #markup | — |
 | B183 | Dimension-based calibration + auto-verification probe | [Site Planner / Document Review / Files] | #site-planner #doc-review #files | — |
+| B182 | "Place on map" auto-placement cascade | [Site Planner / Files] | #site-planner #files | — |
+| B181 | Capture placement-readiness flags in file facts at filing time | [Document Review / Files] | #doc-review #files | — |
+| B180 | Project Files repository as a tagged-index with saved views | [Document Review / Files] | #doc-review #files | — |
 | B178 | Combined-rate choropleth | [Site Planner] | #site-planner #gis | — |
 | B171 | Evaluate license-clean high-res imagery sources | [Site Planner] | #site-planner #gis | — |
 | B163 | Project `progress_pct` field on data model | [Site Planner] | #site-planner #persistence | — |
 | B147 | Site Analysis tool: multi-parcel constraint & context screen | [Site Planner / Site Analysis] | #site-planner #gis | — |
+| B134 | Edits silently lost on reload; app loads a stale earlier state | [Persistence] | #persistence | — |
+| B128 | Import reported 3 sites but the account total rose by 2 — confirm all imports land | [Persistence] | #persistence | — |
 | B115 | Revisit keyboard shortcuts: memorability + let the owner remap them | [Site Planner / UI] | #site-planner #ui | — |
 | B13 | Refine B11 county resolution: precise boundaries + per-area jurisdiction | [Site Planner / map] | #site-planner #gis | — |
-| B128 | Import reported 3 sites but the account total rose by 2 — confirm all imports land | [Persistence] | #persistence | — |
-| B134 | Edits silently lost on reload; app loads a stale earlier state | [Persistence] | #persistence | — |
-| B20 | `setProjectStatus` rewrites every plan in the group via `cloudUpsert` (strips inline underlay, heavy, clobber risk) | [Document Review] | #doc-review #persistence | — |
-| B38 | SQL/RLS & data-integrity audit (mostly clean) | [Document Review / DB] | #doc-review #persistence | — |
-| B63 | Parallel-session merge safety: branch → PR → green-build gate | [repo / workflow] | #infra #testing | — |
 | B95 | Jurisdiction → development-consequence summary | [Site Planner / GIS] | #site-planner #gis | — |
+| B63 | Parallel-session merge safety: branch → PR → green-build gate | [repo / workflow] | #infra #testing | — |
+| B38 | SQL/RLS & data-integrity audit (mostly clean) | [Document Review / DB] | #doc-review #persistence | — |
+| B20 | `setProjectStatus` rewrites every plan in the group via `cloudUpsert` (strips inline underlay, heavy, clobber risk) | [Document Review] | #doc-review #persistence | — |
 
 ## ⏳ Verify — awaiting live confirmation
 
 | B# | Title | Module | Tags | Verify |
 |---|---|---|---|---|
+| B2146556 | First edit made while OFFLINE hard-reloads the page into the browser's offline error page (a lazy chunk fails, `chunkReload` fires a cache-busting reload) | [Site Planner / offline] | #site-planner #persistence | ⏳ live — awaiting |
+| B2146546 | Undo of a Delete made before the delete reaches the cloud is lost: screen shows restored + "Synced", cloud keeps it deleted, reload drops the elements | [Site Planner / sync] | #site-planner #sync #persistence | ⏳ live — awaiting |
+| B2146545 | Review: Enter/Space on a focused button did nothing (window key handler cancelled the native click) | [Review] | #doc-review #keyboard | ⏳ live — awaiting |
+| B2146544 | Review: the "Reviews ▾" menu opened but never painted (clipped by the Row-2 toolbar zone) | [Review] | #doc-review #ui | ⏳ live — awaiting |
+| B2143584 | NEW-1: editable PDF markups keep their look when a recipient EDITS them (callout goes dark, fills go solid, cloud shrinks, measurement number vanishes) | [Site Planner / export] | #site-planner #export #markup | ⏳ live — awaiting |
+| B2142464 | NEW-1: pasting a table from OneNote (and Word / Excel / Sheets / Outlook) arrived mangled or not at all | [Notes] | #notes #ui | ⏳ live — awaiting |
+| B2140256 | NEW-1: admin parcel-coverage map labels first-party sources "Third-party copy" — source kind is now DATA (`publisher` / `publisherName` on every provenance record), not a regex over prose | [Admin / parcel coverage] | #admin #gis #parcel | ⏳ live — awaiting |
+| B2138080 | Phone keyboard made the page jump up then snap back down, with the focused field left under the keyboard | [shared/ui] | #ui #mobile #testing | ⏳ live — awaiting |
+| B2136275 | Admin Support and Ops tidy-up | [Platform / Admin] | #admin #ui | ⏳ live — awaiting |
+| B2136274 | Admin Users: who has signed up and who is using it | [Platform / Admin] | #admin #ui | ⏳ live — awaiting |
+| B2136273 | Issues is short by default: deploy reloads folded, errors grouped by bug | [Platform / Admin] | #admin #ui | ⏳ live — awaiting |
+| B2136272 | Admin page: professional layout — section nav, one section at a time, Overview landing | [Platform / Admin] | #admin #ui | ⏳ live — awaiting |
+| B2135312 | GIS layers draw on screen but are INVISIBLE on the exported PDF (Adairsville, V1518082 FAIL) | [Site Planner / export] | #site-planner #export #gis | ⏳ live — awaiting |
+| B2132256 | Schedule grid: ID/Task pin left, ●/Status pin right, Task capped to half the pane, so the grid holds at any window size | [Scheduler] | #scheduler #ui | ⏳ live — awaiting |
+| B2131922 | Hover-to-highlight replaced by click-to-show, kept on until clicked off | [Site Planner / Site Analysis] | #site-planner #ui #gis | ⏳ live — awaiting |
+| B2131921 | "Who governs this site" spills into paragraphs and the road list miscounts / mis-punctuates | [Site Planner / Site Analysis] | #site-planner #ui #gis | ⏳ live — awaiting |
+| B2131920 | Site Analysis panel reads as one flat gray wall: white surface, consistent rhythm | [Site Planner / Site Analysis] | #site-planner #ui | ⏳ live — awaiting |
+| B2127664 | NEW-1: site-plan PDF export keeps markups EDITABLE by default, with a "Flatten markups" toggle | [Site Planner / export] | #site-planner #export #markup | ⏳ live — awaiting |
+| B2123392 | Admin: parcel-coverage map of the US | [Admin] | #admin #gis #parcel | ⏳ live — awaiting |
+| B2122576 | (×2) Admin page reachable for every allowlisted account, from everywhere — and a cold load of `#/admin` no longer bounces to the map | [Platform / Admin] | #admin #auth #ui | ⏳ live — awaiting |
+| B2118880 | Louisiana: wire 5 more parishes from sources measured live in Michael's browser (Calcasieu, Jefferson, Jefferson Davis, St. Landry, West Baton Rouge) | [Site Planner / GIS] | #site-planner #gis #parcel | ⏳ live — awaiting |
+| B2117136 | NEW-1: Site Analysis panel rebuilt around TRUSTED verdicts — verdicts only where the data is trustworthy, severity by location | [Site Planner / Site Analysis] | #site-planner #gis #floodplain #ui | ⏳ live — awaiting |
+| B2109728 | BACKLOG.md and VERIFICATION.md conflicted on nearly every PR, so finished fixes sat unmerged for days: ledger is now ONE FILE PER ENTRY | [infra / repo] | #infra #persistence | ⏳ live — awaiting |
+| B2108336 | "Delete forever" on a whole project in the account bin could report success when nothing was deleted | [Site Planner / projects] | #site-planner #persistence #testing | ⏳ live — awaiting |
+| B2106752 | Hybrid map: freeways and highways are yellow | [shared basemap / Food] | #ui #food | ⏳ live — awaiting |
+| B2102272 | Silvestri freezes for ~300 ms per zoom step: the basemap size verdict B846384 cached never cleared, so EVERY view commit forced a layout and a `setView` | [Site Planner / perf] | #site-planner #perf | ⏳ live — awaiting |
+| B2097265 | Food: dragging the restaurant sheet up and down "doesn't work too great" | [Food] | #food #ui #mobile #testing | ⏳ live — awaiting |
+| B2097264 | Food: "Save and add another" stacked over "Log a visit", and "Log a visit" came and went with the sheet height | [Food] | #food #ui #mobile #testing | ⏳ live — awaiting |
+| B2095744 | Georgia Site Analysis lists Texas-only checks (TCEQ LPST, CCN water/sewer, growth faults, oil & gas wells) as "Not screened in Georgia" | [site-planner / analysis] | #site-planner #gis | ⏳ live — awaiting |
+| B2092656 | (×3) Select-parcels outlines still caught once when NEW lots arrived (first view of a zoom level / pan onto new ground, Georgia): a parcel response is now absorbed over several frames instead of one task | [map-finder] | #site-planner #gis #parcel #perf | ⏳ live — awaiting |
+| B2090352 | Merge parcels refused neighbouring lots that plainly touch ("the parcel boundary isn't shared") | [Site Planner] | #site-planner #parcel | ⏳ live — awaiting |
+| B2088384 | Every place you type in Planyr, on a phone: field and caret visible above the keyboard, no page/map showing through, nothing drawn over the edited area, no contact AutoFill on non-contact fields | [All modules] | #ui #mobile #testing | ⏳ live — awaiting |
+| B2087649 | Two Goose Creek plans pointed at a schedule that no longer exists; the "has a schedule" hint is now verified at read time and cleared at the source | [Site / Schedule] | #scheduler #site-planner #persistence #sync | ⏳ live — awaiting |
+| B2087648 | A deleted project's schedule stayed live and showed on the Dashboard; project and schedule now live and die together | [Schedule / Dashboard] | #scheduler #dashboard #persistence #sync | ⏳ live — awaiting |
+| B2086368 | No way to delete a file from the Library's Recent or Unfiled lists | [library] | #library #persistence | ⏳ live — awaiting |
+| B2085536 | Louisiana: wire 3 more parishes (De Soto, Washington, West Feliciana) + record the route-3 vendor sweep for the other 30 | [Site Planner / GIS] | #site-planner #gis #parcel | ⏳ live — awaiting |
+| B2084480 | Library doesn't show a file just saved in Review until a full reload | [library] | #library #persistence | ⏳ live — awaiting |
+| B2081252 | Point and polygon GIS layers do not print: the PDF/PNG export printed only LINES for every `esriFeature` layer | [site-planner / export] | #site-planner #export #gis | ⏳ live — awaiting |
+| B2081251 | Georgia depth-to-bedrock (SSURGO) shallow-rock zones — shipped NATIONAL | [site-planner / GIS] | #site-planner #gis | ⏳ live — awaiting |
+| B2081249 | Georgia road access: truck routes + traffic volumes — shipped as two NATIONAL federal layers (USDOT BTS) | [site-planner / GIS] | #site-planner #gis | ⏳ live — awaiting |
+| B2081248 | Georgia site screening: a state-aware Layers panel + Analysis, and the Georgia layer set (streams + buffers, slope, hazardous sites, historic places, cemeteries, critical habitat, gopher-tortoise soils, trout streams) | [site-planner / GIS] | #site-planner #gis #floodplain | ⏳ live — awaiting |
+| B2080753 | A status banner from one Review tab stays on screen after switching tabs | [doc-review] | #doc-review #ui | ⏳ live — awaiting |
+| B2080752 | A Word/txt file saved from Review gets another file's name (or "Untitled") in the Library | [library / doc-review] | #doc-review #files | ⏳ live — awaiting |
+| B2070432 | Food map search: a restaurant he has saved is not first, not tagged, and appears twice | [Food] | #food #ui #testing | ⏳ live — awaiting |
+| B2066227 | Crop: Edit crop sat below the fold on a short window | [Site Planner / overlays] | #site-planner #ui | ⏳ live — awaiting |
+| B2066226 | Crop: "Reset to full page" slid sideways when switching modes | [Site Planner / overlays] | #site-planner #ui | ⏳ live — awaiting |
+| B2066225 | Crop: Enter did not close the polygon unless focus was on the canvas | [Site Planner / overlays] | #site-planner #ui | ⏳ live — awaiting |
+| B2066224 | Crop: Done in one mode could silently drop the shape you drew in the other | [Site Planner / overlays] | #site-planner #ui #persistence | ⏳ live — awaiting |
+| B2064896 | Stored copies of shared data in OTHER tables / jsonb blobs: inventory, production drift, fixes, and an all-columns guard | [Database / all modules] | #persistence #sync | ⏳ live — awaiting |
+| B2064640 | Empty-spot click in a statewide-parcel state said "no parcel data wired here yet" for a covered county | [site-planner / map-finder] | #gis #parcel #site-planner | ⏳ live — awaiting |
+| B2063056 | A change in one tab shows up in the others right away, only where it is cheap: an open plan now adopts another tab's header settings live | [architecture / sync] | #site-planner #persistence | ⏳ live — awaiting |
+| B2061792 | A deed that doesn't close now WARNS on every surface by ONE rule (reader, queue row, plot toast, holes, Plot-all summary) — Tract 1 no longer reads "closes (misclosure 31.4′)" | [site-planner / deed] | #site-planner | ⏳ live — awaiting |
+| B2061600 | Select-parcels outlines hitched on every zoom/pan settle at site-scale zoom (Georgia): per-tile cached canvases replace the map-sized canvas that reprojected every held lot | [map-finder] | #site-planner #gis #parcel #perf | ⏳ live — awaiting |
+| B2058144 | Review opens files in tabs (Bluebeam-style), the tab set follows the account, and Review is blank when nothing is open | [doc-review] | #doc-review #ui #mobile | ⏳ live — awaiting |
+| B2057920 | Food on a phone: first visit takes dish ratings (no "What I had"), thumb-friendly ratings, keyboard no longer covers the form, no contact-card AutoFill | [Food] | #food #ui #mobile #testing | ⏳ live — awaiting |
+| B2057040 | Planyr owns parcel outlines AND lot numbers in every county: no county-drawn picture with its own colours and labels | [site-planner / parcels + map-finder] | #site-planner #gis #ui | ⏳ live — awaiting |
+| B2051665 | Food search: snapshot has no address/city search (typing "Dallas" or a street address finds nothing) | [Food] | #ui | ⏳ live — awaiting |
+| B2049312 | Team invites now actually send an email, on Invite and on Resend | [Settings › Team] | #site-planner | ⏳ live — awaiting |
+| B2046224 | Food on a phone: search listed the same restaurant twice, a pick didn't land the map on it, and typing pushed the Map / List toggle off-screen — and (×2) the field you type in hid behind the iPhone keyboard with AutoFill Contact still showing — and (×3) a band of map between the sheet and the keyboard, the edited card cut off, the zoom control over the sheet | [Food] | #food #ui #mobile #testing | ⏳ live — awaiting |
+| B2043888 | Module tab-strip chevrons: page by an absolute clamped target, snap flush to each end, stay truthful after smooth scroll / rubber-band | [nav / app shell] | #mobile #ui | ⏳ live — awaiting |
+| B2039233 | A Word/text/PDF file saved in Review with no project said "Saved to the Library." but appeared nowhere in the Library | [doc-review / library] | #doc-review #library #files | ⏳ live — awaiting |
+| B2039232 | Review: once a file is open there was no way back to the sheet index | [doc-review] | #doc-review #ui #mobile | ⏳ live — awaiting |
+| B2038784 | Settings › Team redesign: grouped by role, far less text, phone + desktop | [Settings / Team] | #ui #mobile #auth | ⏳ live — awaiting |
+| B2034128 | Version history: see, open and restore earlier saved versions of a document | [library / doc-review] | #library #doc-review #files #mobile | ⏳ live — awaiting |
+| B2025280 | Food map: default to the Site Plan module's map, plus a Hybrid option | [Food] | #food #ui | ⏳ live — awaiting |
+| B2022928 | Word and text files open in Review as editable documents, working like Word | [doc-review] | #doc-review #files #mobile | ⏳ live — awaiting |
+| B2022448 | Review "No drawing open" screen becomes a project-aware sheet index | [doc-review] | #doc-review #ui | ⏳ live — awaiting |
+| B2021649 | Food search: typing "dao" listed his saved Dairy Queen second | [Food] | #food #testing | ⏳ live — awaiting |
+| B2021648 | Food: the first search after opening the page still paused (1.6–2.2 s vs ~0.25 s after) | [Food] | #food #perf | ⏳ live — awaiting |
+| B2020273 | Locate button: navigation-arrow icon with idle / following / panned-away states | [map/shared] | #site-planner #mobile #ui | ⏳ live — awaiting |
+| B2020272 | My-location marker is now an Apple-style blue dot with accuracy circle and heading cone (was an orange site-pin lookalike) | [map/shared] | #site-planner #mobile #ui | ⏳ live — awaiting |
+| B2019264 | A plotted deed hides its own misclosure: every course draws as written and the gap is its own red dashed line | [site-planner / deed] | #site-planner #export | ⏳ live — awaiting |
+| B2018608 | Shared basemap as clean as Apple Maps: vector roads + labels, high-density toned imagery, no seams | [Food + site-planner] | #food #ui #export | ⏳ live — awaiting |
+| B2016112 | Pinch zoom stops where the fingers stop, not at the next whole zoom level | [Map Finder / Dashboard / Food] | #ui #site-planner #food #dashboard | ⏳ live — awaiting |
+| B2015808 | Schedule "Focus" toggles reset every time you come back to the page | [scheduler] | #scheduler #persistence | ⏳ live — awaiting |
+| B2010355 | Typing a comp line leaves unparsed words in Notes | [comps / paste entry] | #comps #model | ⏳ live — awaiting |
+| B2010354 | KMZ export: parcel outlines must read correctly whether they live on the site record, the comp, or both | [comps / KML export] | #comps #export | ⏳ live — awaiting |
+| B2010353 | KMZ comp balloon lists "Executed" twice | [comps / KML export] | #comps #export | ⏳ live — awaiting |
+| B2010352 | KMZ comp balloon shows the parcel number as "Location" | [comps / KML export] | #comps #export | ⏳ live — awaiting |
+| B2007360 | Mobile comp sheet: tapping most field rows does nothing (Deal name, Size, Clear Ht, Yr Built, Rate, Price, Notes …) | [Shared / Comps] | #comps #mobile #ui | ⏳ live — awaiting |
+| B2001568 | Dark mode follow-up: sweep with REAL drawings loaded; Stitcher hard-coded colours; Review status label | [Doc Review] | #ui #doc-review #site-planner | ⏳ live — awaiting |
+| B1998016 | Dark mode: form fields render white with near-white text (Settings > Profile, sign-in/sign-up, Account) + app-wide sweep | [Site Planner] | #ui #site-planner #doc-review #scheduler | ⏳ live — awaiting |
+| B1996464 | Left-rail panels: flatten the "box inside a box" on every tab | [Site] | #site-planner #ui | ⏳ live — awaiting |
+| B1994512 | Florida + Georgia pipeline layers (EIA, approximate, transmission-only) and a screen that never reports FL/GA "clear of pipelines" | [site-planner / GIS] | #site-planner #gis | ⏳ live — awaiting |
+| B1992435 | DFW ETJ gaps: the second sweep (Dallas, Ellis, Johnson/Tarrant, Grayson, Kaufman & Navarro side; Fort Worth 2018 → 2025) | [site-planner / jurisdiction] | #gis #site-planner | ⏳ live — awaiting |
+| B1992432 | DFW city limits + ETJ layers (50 mi of Dallas) and the "unavailable, not unincorporated" rule | [site-planner / map + jurisdiction] | #gis #site-planner | ⏳ live — awaiting |
+| B1991041 | Renaming a brand-new (never-drawn) project failed: "The rename didn't match any project in your account" | [Site / project switcher] | #site-planner #persistence | ⏳ live — awaiting |
+| B1991040 | A project rename left STALE COPIES of the name in other tables (schedules, doc_reviews) | [Schedule / Dashboard / Review] | #persistence #site-planner | ⏳ live — awaiting |
+| B1990960 (×2) | Georgia county boundaries + city limits in the jurisdiction stack | [Site Planner / GIS] | #site-planner #gis | ⏳ live — awaiting |
+| B1988288 | Louisiana: wire every parish that publishes its own parcel service | [Site Planner / GIS] | #site-planner #gis #parcel | ⏳ live — awaiting |
+| B1988272 | Clicking a lot at Grand Port takes 1.5–2 s before the app shows it heard the click | [site-planner / parcels] | #site-planner #parcel #perf #gis | ⏳ live — awaiting |
+| B1978048 | City names + state lines behave badly during zoom: labels snap ahead of the imagery, line hairlines fatten then re-thin | [site-planner / map] | #site-planner #gis #perf | ⏳ live — awaiting |
+| B1976336 | Map "Select parcels" outlines query every parcel source in the country for every tile | [map-finder] | #site-planner #gis #parcel #perf | ⏳ live — awaiting |
+| B1973921 | Show city names on the map finder | [site-planner / map] | #site-planner #gis | ⏳ live — awaiting |
+| B1973920 | State lines vanish too early when zooming in: now survive through metro zoom | [site-planner / map] | #site-planner #gis | ⏳ live — awaiting |
+| B1958144 | Designed road cross-sections paint as one plain road (regression from B1788912) | [site-planner/road] | #site-planner #road #export | ⏳ live — awaiting |
+| B1953797 | Plan-header state (settings, origin, layers) is last-write-wins across tabs/devices, and Model's Site.Acres / Plan.BuildingN.SF read a slim local header | [Site Planner / persistence + Model] | #site-planner #persistence | ⏳ live — awaiting |
+| B1953796 | Stale-copy audit (verdict A): Doc Review autosave dropped folderId/sourceFile, file_facts kept a stale copy of filing facts, and six more read-once copies | [Doc Review / Library / Model / Food / Comps / Shell] | #persistence #doc-review #library #sync #model #comps #food | ⏳ live — awaiting |
+| B1953795 | Scheduler / Dashboard stale copies: seven "same fact, two stores" bugs now read ONE answer | [Scheduler + Dashboard + Shell] | #scheduler #persistence #gantt #export | ⏳ live — awaiting |
+| B1953794 | Stale-copy group: flood-mitigation memo key, easement jurisdiction, Dashboard building count, representative plan, thumbnail | [Site Planner / Dashboard] | #site-planner #persistence #export | ⏳ live — awaiting |
+| B1953793 | Stale-copy family: account prefs lost-update, rule tables seeded once, pinned-folder label snapshot | [Site Planner / shell / Library] | #persistence #sync #site-planner #library | ⏳ live — awaiting |
+| B1953200 | Names have ONE source of truth: rename anywhere, every display updates | [architecture / Site + all modules] | #site-planner #persistence #export | ⏳ live — awaiting |
+| B1952736 | Restyle the project switcher dropdown (breadcrumb project picker) | [shell / header] | #ui #persistence | ⏳ live — awaiting |
+| B1940000 | Redesign the inline dish editor and dish rows in the Food module | [Food] | #food #ui #persistence #testing | ⏳ live — awaiting |
+| B1934529 | Bring back the building-SF table on the exhibit, as a compact toggle (not the old full-width column) | [Site Planner / export] | #site-planner #export #yield | ⏳ live — awaiting |
+| B1934528 | Exhibit (Compose exhibit / printed PDF) keeps a project's OLD name after a rename | [Site Planner / export] | #site-planner #export #persistence | ⏳ live — awaiting |
+| B1932784 | Selected parcel boundary moves relative to the aerial as you zoom in/out | [site-planner / map] | #site-planner #gis #coordinates #parcel #testing | ⏳ live — awaiting |
+| B1912208 | Organization scope gets a Spreadsheet module and a Review module | [global / org scope] | #model #doc-review #library #persistence #sync #ui | ⏳ live — awaiting |
+| B1895376 | Add a note doesn't dismiss the parcel selection bar after completing the workflow | [Site Planner / MapFinder] | #site-planner #ui #map-notes | ⏳ live — awaiting |
+| B1885600 (×2) | Wire 17 Florida counties (Jacksonville + Polk/Lakeland markets) off the Florida statewide FDOR cadastral layer — Fernandina Beach (and any barrier-island address) found no county, because the county-outline file clips Florida's coast | [Site Planner / GIS] | #site-planner #gis #parcel | ⏳ live — awaiting |
+| B1876624 | Replace the 1,000-lot vector cap banner with a zoom-based parcel display strategy | [Site Planner / map] | #site-planner #gis #parcel | ⏳ live — awaiting |
+| B1875248 | Wire 34 more Georgia county parcel endpoints, third pass; a consolidated-government name-resolution fix | [Site Planner / GIS] | #site-planner #gis #parcel | ⏳ live — awaiting |
+| B1874881 | Wire the rest of SGRC's Georgia counties + Middle Georgia RC through the new GIS pass-through | [Site Planner / GIS] | #site-planner #gis #parcel | ⏳ live — awaiting |
+| B1873777 | Georgia parcel coverage follow-ups: Long/Walton have no usable public source; DeKalb has a newer vintage; three counties are wired to stale snapshots | [Site Planner / GIS] | #site-planner #gis #parcel | ⏳ live — awaiting |
+| B1873776 | Wire eleven more Georgia county parcel endpoints; fix Rockdale's address search; make Bryan's search work | [Site Planner / GIS] | #site-planner #gis #parcel | ⏳ live — awaiting |
+| B1873392 | Dark mode: selected rows in project menu / sites list / markup list unreadable | [Site Planner] | #ui #site-planner #doc-review | ⏳ live — awaiting |
+| B1873008 | Dishes and per-dish ratings inside the existing Food module | [Food] | #food #persistence #ui #testing | ⏳ live — awaiting |
+| B1871968 | ArcGIS GET→POST fallback threshold was calibrated wrong for ArcGIS Online, 404ing most Site Analysis layers on a large multi-parcel site | [Site Planner / GIS] | #site-planner #gis | ⏳ live — awaiting |
+| B1870704 | Wire Georgia county parcel endpoints | [Site Planner / GIS] | #site-planner #gis #parcel | ⏳ live — awaiting |
+| B1870352 | Wetlands screening says "couldn't reach the GIS source" on Goose Creek | [Site Planner] | #site-planner #gis | ⏳ live — awaiting |
+| B1865936 | Clicking the Map crumb intermittently returns to the site | [Site Planner] | #site-planner #ui | ⏳ live — awaiting |
+| B1865408 | Notes: a brand-new page pushed by two of the store's own triggers racing itself could show a false "also changed in another window" conflict | [Notes / sync] | #notes #sync #persistence | ⏳ live — awaiting |
+| B1864976 | Retire the Notes sketch canvas; arrows connect the rich-text boxes directly, so the page is one free canvas with one box model | [Notes] | #notes #ui | ⏳ live — awaiting |
+| B1853664 | Audit the other SECURITY DEFINER functions over `public.sites` for the hole PR #1797 just closed | [db / rpc · security] | #persistence #security | ⏳ live — awaiting |
+| B1845681 | A meeting-bound task can silently count its own link lag AND the calendar's filing lead — flagged on the row with a reversible one-click fix | [Scheduler] | #scheduler | ⏳ live — awaiting |
+| B1845680 | A task bound to a meeting body on ANOTHER schedule showed "Meeting: Meeting body" instead of the real name | [Scheduler] | #scheduler | ⏳ live — awaiting |
+| B1838705 | One shared engine for overlay georef, scale and rasterising across the Site-tab canvas and Map/Comps — code only, stores untouched | [Site Planner / overlays] | #site-planner #gis #geometry #export | ⏳ live — awaiting |
+| B1838704 (×2) | Crop is not reachable from the Site tab OVERLAYS panel, which is where he actually works | [Site Planner / overlays] | #site-planner #ui #export #persistence | ⏳ live — awaiting |
+| B1832304 | Copy a notebook: "Make a copy" on any page duplicates it and every subpage under it — writing, pictures and files — right under the original, in the original's own project | [Notes] | #notes #ui #persistence #sync | ⏳ live — awaiting |
+| B1832210 | Junction arms measured their straight run to the next vertex instead of to where the road's own corner begins, and a corner next to a tee node was starved by the flat half-leg share rule | [Site Planner / road-geometry] | #site-planner #road #geometry | ⏳ live — awaiting |
+| B1832209 | An endpoint dropped inside a court stays inside it instead of moving to the court face | [Site Planner / road-connect] | #site-planner #road #geometry | ⏳ live — awaiting |
+| B1832208 | A road connected to a truck court painted its overshoot on top of the court since creation-order stacking; the road's pavement now ends at the court face whatever paints on top | [Site Planner / road-network] | #site-planner #road #geometry | ⏳ live — awaiting |
+| B1824576 | Reuse a meeting calendar from another schedule instead of rebuilding it | [Scheduler] | #scheduler #ui | ⏳ live — awaiting |
+| B1804993 | Remove the buildings table from the PDF/print export; the map area reflows into the freed width | [Site Planner / export] | #export #site-planner | ⏳ live — awaiting |
+| B1804992 | PDF/print export: site-plan overlay content (parcels, ponds, easements, dimensions) renders outside the dragged aerial crop frame | [Site Planner / export] | #export #site-planner | ⏳ live — awaiting |
+| B1802593 | The error boundary's recover-by-remount decision recorded nothing, so a silent auto-remount was indistinguishable from a random reload | [infra / ErrorBoundary + recoverableError] | #infra #telemetry #ui | ⏳ live — awaiting |
+| B1802592 | A second, previously unseen React error-185 render loop throws inside `AppHeader` while the Site route is mounted | [Shell / AppHeader] | #ui #site-planner #perf #mobile #testing | ⏳ live — awaiting |
+| B1801040 | Widening a Notes page from the LEFT grip still slides all the page content slightly right, in small discrete steps | [Notes] | #notes #ui | ⏳ live — awaiting |
+| B1790017 | Replace the "Drive aisle on the far side" checkbox with a two-card picture control | [Site Planner / inspector] | #site-planner #ui | ⏳ live — awaiting |
+| B1790016 | Rebuild the car-parking properties panel as a spec sheet | [Site Planner / inspector] | #site-planner #ui | ⏳ live — awaiting |
+| B1788913 | A selected element draws above everything, and drops back when deselected | [Site Planner / SitePlanner] | #site-planner #selection #ui | ⏳ live — awaiting |
+| B1788912 | Site elements stack in creation order, newest drawn on top — the type-layer rule retires | [Site Planner / planStyle] | #site-planner #ui | ⏳ live — awaiting |
+| B1783329 | Prove the whole crop path end to end against real sample sheets, closing B1134754 and B1154371 | [Site Planner / site-plans] | #site-planner #ui #gis #testing | ⏳ live — awaiting |
+| B1783328 | Crop a site-plan overlay to a freeform polygon, not just a rectangle | [Site Planner / site-plans] | #site-planner #ui #gis #persistence | ⏳ live — awaiting |
+| B1777120 | Every schedule in the account is one record, so any save contends with every other tab | [Scheduler / storage] | #scheduler #persistence #sync | ⏳ live — awaiting |
+| B1768080 | The schedule keeps showing a project's old name after it is renamed | [Shared / Storage] | #site-planner #scheduler #persistence #sync #testing | ⏳ live — awaiting |
+| B1767168 | Delete forever on a binned plan in the plan menu can never succeed | [Site Planner] | #site-planner #persistence | ⏳ live — awaiting |
+| B1754112 | The conflict banner's Reload button can discard an in-flight, uncommitted cell edit | [Scheduler] | #scheduler #persistence #sync | ⏳ live — awaiting |
+| B1735728 | Editing one schedule throws a false "newer version" banner and an inflated merge toast (687 tasks / nine schedules), from task-identity churn and view-only leakage, not real edits | [Scheduler / persistence] | #scheduler #persistence #sync | ⏳ live — awaiting |
+| B1727536 | Dashboard's "Jump back in" still surfaces the project-less dupe-check document, and it still does not go anywhere useful | [Dashboard / Doc Review] | #dashboard #doc-review #persistence #testing | ⏳ live — awaiting |
+| B1717617 (×3) | A reach-capped road-to-road tee return near a road's own end is truncated and closes with a kink | [Site Planner / road] | #site-planner #road #geometry | ⏳ live — awaiting |
+| B1717616 (×4) | An oblique road into a POLYGON paving pad loses its ACUTE-SIDE curb return entirely | [Site Planner / road] | #site-planner #road #geometry | ⏳ live — awaiting |
+| B1713104 | A road tee-ing into ANOTHER ROAD gets NO curb return at all when the through road carries no vertex at the tee point | [Site Planner / road] | #site-planner #road #geometry | ⏳ live — awaiting |
+| B1711648 | A Task Report row link lands on the schedule but not on the task, and still bounces through the report first | [Scheduler / reports] | #scheduler | ⏳ live — awaiting |
+| B1703665 | Road/pad junction: one side gets a real curb return, the other a raw bevel cut into the pavement; most contacts get no return at all | [Site Planner / road] | #site-planner #road #geometry | ⏳ live — awaiting |
+| B1701360 | The cascade-drift repair (B835/B836) walked a task's dates forward on every page load, forever, whenever a task's ONLY external date-input was a `minMeetingsAfter` floor or its predecessor named its own summary row | [Scheduler] | #scheduler #persistence #testing | ⏳ live — awaiting |
+| B1696640 | A task naming its own parent/ancestor as a predecessor loops forever, ratcheting a stored date further every reload | [Scheduler] | #scheduler #persistence #gantt | ⏳ live — awaiting |
+| B1693264 | A save the database refuses is reported to the user as a save that worked | [Shared / Storage] | #persistence #sync | ⏳ live — awaiting |
+| B1683297 | Two unrelated bugs in Notes sketch mode broke re-selecting/re-opening an existing box, found verifying B1683296's own test matrix | [Notes / sketch] | #notes #ui | ⏳ live — awaiting |
+| B1683296 (×2) | Double-clicking the sketch canvas while a blank box is pending destroys it and creates nothing | [Notes / sketch] | #notes #ui | ⏳ live — awaiting |
+| B1681521 | Build a real flood-fill acceptance test for road/pad junction paving BEFORE touching any geometry | [Site Planner / road-geometry] | #site-planner #road #geometry | ⏳ live — awaiting |
+| B1681520 | REGRESSION: near-perpendicular road into a rect pad leaves a detached curb return and a large gap | [Site Planner / road-geometry] | #site-planner #road #geometry | ⏳ live — awaiting |
+| B1675104 | Notes: merge concurrent edits per paragraph instead of raising a whole-document "pick one" banner | [Notes] | #notes #sync #persistence | ⏳ live — awaiting |
+| B1664513 | Parking tool's rect presets (Single/Double row) silently commit nothing on a plain click | [Site Planner / drawing-tools] | #site-planner #ui | ⏳ live — awaiting |
+| B1664512 | Free-drawn polygon pads and parking fields cannot be drive targets at all | [Site Planner / road-geometry] | #site-planner #road #geometry | ⏳ live — awaiting |
+| B1662464 | Opening a note writes to it: a load-time schema settle is treated as a real edit, stamping "Edited just now" and minting false "While you were typing" version rows | [Notes] | #notes #persistence | ⏳ live — awaiting |
+| B1657600 | Every Texas parcel click outside the 8 dialed-in Houston-metro counties makes a wasted, always-failing `/query` request | [Site Planner / GIS] | #site-planner #gis #parcel | ⏳ live — awaiting |
+| B1652706 | The text box / callout panel adopts the shared table layout | [Site Planner / properties] | #site-planner #ui #markup | ⏳ live — awaiting |
+| B1652705 | Text box fill and outline gain independent opacity | [Site Planner / properties] | #site-planner #ui #markup | ⏳ live — awaiting |
+| B1652704 | Text box / callout outline gains line weight and dash pattern | [Site Planner / properties] | #site-planner #ui #markup | ⏳ live — awaiting |
+| B1651254 | Wire the City of Independence, MO parcels | [Site Planner / GIS] | #site-planner #gis #parcel | ⏳ live — awaiting |
+| B1651253 | Wire the City of Kansas City, MO parcels, city-scoped across FOUR counties | [Site Planner / GIS] | #site-planner #gis #parcel | ⏳ live — awaiting |
+| B1651252 | Wire Macomb County, MI parcels | [Site Planner / GIS] | #site-planner #gis #parcel | ⏳ live — awaiting |
+| B1651251 | Wire Lackawanna County, PA parcels | [Site Planner / GIS] | #site-planner #gis #parcel | ⏳ live — awaiting |
+| B1651250 | Wire Luzerne County, PA parcels | [Site Planner / GIS] | #site-planner #gis #parcel | ⏳ live — awaiting |
+| B1651249 | Wire Minnehaha County, SD parcels with BOTH the county layer and the Sioux Falls city layer | [Site Planner / GIS] | #site-planner #gis #parcel | ⏳ live — awaiting |
+| B1651248 | Wire Pennington County, SD parcels | [Site Planner / GIS] | #site-planner #gis #parcel | ⏳ live — awaiting |
+| B1645792 (×2) | Road-to-pavement junctions render as raw angles and a knife-edge notch instead of curb returns | [Site Planner / road-geometry] | #site-planner #road #geometry | ⏳ live — awaiting |
+| B1644368 | PR #1712 fixed the ROUTE and the BREADCRUMB on a project-less Schedule arrival; the GRID kept showing a stranger project's real, editable data underneath | [Scheduler] | #scheduler #ui #infra #security | ⏳ live — awaiting |
+| B1639697 | The Texas statewide parcel fallback fires alongside a healthy county source instead of only behind it | [Site Planner / GIS] | #site-planner #gis #parcel | ⏳ live — awaiting |
+| B1639584 (×2) | Texas has only eight county parcel sources; everything outside them (Dallas–Fort Worth included) has no click-routing coverage | [Site Planner / GIS] | #site-planner #gis #parcel | ⏳ live — awaiting |
+| B1638835 | Route commits are undocumented and unguarded: nothing stops a second writer from being added silently | [App shell] | #infra #ui #testing | ⏳ live — awaiting |
+| B1638832 | A project-less module route silently adopts a project the user never chose | [Scheduler / App shell] | #scheduler #ui #infra | ⏳ live — awaiting |
+| B1631939 | Pin projects to the top of the project switcher, and reorder the pins | [Projects / navigation] | #ui #site-planner #persistence | ⏳ live — awaiting |
+| B1631649 | A road placed against a truck court / paving pad / parking field should join on placement, not require a second action | [Site Planner / road] | #site-planner #road #ui | ⏳ live — awaiting |
+| B1631648 | Road surface degrades at sharp interior angles: outside swells into a lobe, inside pinches to a narrow throat | [Site Planner / road] | #site-planner #road #geometry | ⏳ live — awaiting |
+| B1629618 | `planar_data` (the Schedule) has a revision token but no database-side enforcement of it — a cross-tab/cross-device race can still clobber a save | [Scheduler] | #scheduler #persistence #sync | ⏳ live — awaiting |
+| B1614656 | Sites list: org/entity badge covers the site name; shorten it to initials | [Site Planner] | #site-planner #ui | ⏳ live — awaiting |
+| B1614528 | Task Report row links are undone by the shell's own state-correction loop | [Scheduler / reports] | #scheduler | ⏳ live — awaiting |
+| B1613696 | A newly created project is born with no rename stamp, so the guard stands down on it | [Site Planner / Storage] | #site-planner #persistence #sync #security #testing | ⏳ live — awaiting |
+| B1597761 | Shift and drag should marquee-select several boxes at once | [Notes] | #notes #ui #selection | ⏳ live — awaiting |
+| B1597760 | Dragging the grey canvas should pan it the way a map does | [Notes] | #notes #ui #view | ⏳ live — awaiting |
+| B1597232 | A Wayne County, MI point queries OAKLAND County's parcel service — an unsourced county falls back to a neighbour's CAD | [Site Planner / GIS] | #gis #parcel #site-planner | ⏳ live — awaiting |
+| B1584528 | A project's name lives in four places and its group identity is computed two ways | [Site Planner / persistence] | #site-planner #sync #persistence #testing | ⏳ live — awaiting |
+| B1584512 | `sites_preserve_rename_stamp` tested presence instead of recency, and ignored column-only writes | [Site Planner / Storage] | #site-planner #persistence #sync #security #testing | ⏳ live — awaiting |
+| B1581952 | The Grid/Split/Gantt chip is off-centre on a SLOW-loading report; root cause found via the recorder, fixed and mutation-proven | [Scheduler] | #scheduler #ui #testing | ⏳ live — awaiting |
+| B1577424 | The comps importer accepted .kml but not .kmz, so Planyr couldn't read its own KMZ export back | [Site Planner / comps] | #comps #persistence #export | ⏳ live — awaiting |
+| B1574432 | The canvas painted a framing it was about to throw away: every cold load flashed the hardcoded default view before the real one | [Site Planner] | #site-planner #ui #perf #view | ⏳ live — awaiting |
+| B1574256 | Wire Orleans Parish, Louisiana (`la_orleans`) — found by route 3 after routes 1 and 2 came up empty | [Site Planner] | #gis #parcel #site-planner | ⏳ live — awaiting |
+| B1560993 | Add underline and text size to the Schedule cell formatting controls | [Scheduler] | #scheduler #ui #export | ⏳ live — awaiting |
+| B1555152 (×3) | Backspace after a single click on a floating note box deletes from the main page instead of the box | [Notes] | #notes #ui #selection #keyboard | ⏳ live — awaiting |
+| B1539585 | The "Next meeting"/"Previous meeting" confirmation toast only fires when React happens to apply the edit synchronously — most real clicks lose the race and show nothing | [Scheduler] | #scheduler #testing | ⏳ live — awaiting |
+| B1536176 | Ctrl+Z gets permanently stuck the moment an edit flips a task's "Needs Attn." flag, plus a meeting-bound row's pinned date was never checked against its own calendar | [Scheduler] | #scheduler #testing | ⏳ live — awaiting |
+| B1525088 | Changing a site's name or status does not refresh the map's cached copy, so the pin keeps the old name and status until a reload | [Site Planner / projects] | #site-planner #persistence #sync | ⏳ live — awaiting |
+| B1515824 | A project can only be renamed once; after that the database silently puts the old name back | [Site Planner / storage] | #site-planner #persistence #sync #testing | ⏳ live — awaiting |
+| B1497890 | The Dashboard's Comps card has its own, separate, uncached reverse-geocode call per comp | [Dashboard] | #comps #dashboard #perf | ⏳ live — awaiting |
+| B1497889 | Six third-party reverse-geocodes sit on the critical path when a project opens | [Site Planner / Comps] | #comps #perf #gis | ⏳ live — awaiting |
+| B1497888 | Opening one project fires the same handful of queries five to ten times each | [Site Planner / data-loading] | #site-planner #perf #auth | ⏳ live — awaiting |
+| B1496320 | The project-rename marker was written EMPTY by the ordinary save, so a rename had nothing left to win a conflict with | [Site Planner / persistence] | #site-planner #persistence #sync #testing | ⏳ live — awaiting |
+| B1490144 | Stop the cursor readout from reporting floodplain status | [Site Planner] | #site-planner #gis #floodplain #ui | ⏳ live — awaiting |
+| B1482353 | The stale-tab banner could stack without limit and offered no way to act on its own advice | [Site Planner / ui] | #site-planner #ui #sync | ⏳ live — awaiting |
+| B1482352 | ROUND EIGHT of the false stale-tab banner: the tab deadlocked against its OWN committed row, then told the user their tab was out of date | [Site Planner / multiwriter] | #site-planner #sync #persistence #testing | ⏳ live — awaiting |
+| B1482000 | Every row in the "Recently deleted" plan list (and the deep-link dialog) is labelled with the project name, not the plan name | [Site Planner / plan-menu] | #site-planner #persistence #ui | ⏳ live — awaiting |
+| B1473984 | A comp's rate period is never borrowed from another clause | [Site Planner] | #ui #testing | ⏳ live — awaiting |
+| B1469872 | A plan binned inside a live project is invisible in the bin but hard-deleted at 30 days | [Site Planner / persistence] | #site-planner #persistence #testing | ⏳ live — awaiting |
+| B1456896 | Opening a non-PDF document from a navigation row downloaded it to disk without asking | [Document Review / Library] | #doc-review #library #ui | ⏳ live — awaiting |
+| B1455635 | Record the 5 excluded parcel candidates + a 6th found during verification (Hinds MS), and the 16 counties not found by routes 1-2 | [Site Planner / GIS] | #gis #parcel #site-planner | ⏳ live — awaiting |
+| B1455634 | Wire 19 measured county parcel endpoints across 12 states (Cook/DuPage/Will IL · Allegheny/Northampton/Cumberland PA · Gwinnett GA · Oakland MI · Wyandotte KS · Platte MO · Multnomah/Clackamas OR · Jefferson KY · DeSoto MS · Oklahoma/Tulsa OK · East Baton Rouge LA · Jefferson AL) | [Site Planner / GIS] | #gis #parcel #site-planner | ⏳ live — awaiting |
+| B1455633 | Wire Idaho as 13 per-county sources — it is NOT statewide, the same shape that produced the Nebraska defect | [Site Planner / GIS] | #gis #parcel #site-planner | ⏳ live — awaiting |
+| B1455632 | Wire three newly-found statewide parcel sources: Nevada, District of Columbia, Maine | [Site Planner / GIS] | #gis #parcel #site-planner | ⏳ live — awaiting |
+| B1447442 | iPhone SE landscape: the map's Layers button and Zoom-in control fully overlap | [Site Planner / Map] | #site-planner #ui #mobile | ⏳ live — awaiting |
+| B1447441 | Notes' global help/report button sits on top of the Bin control on phone | [Notes] | #notes #mobile #ui | ⏳ live — awaiting |
+| B1440976 | Renaming a project still does not stick, from either entry point | [Site Planner] | #site-planner #persistence #sync | ⏳ live — awaiting |
+| B1435888 | Schedule access: project and schedule become two separate breadcrumb levels | [Scheduler] | #scheduler #ui | ⏳ live — awaiting |
+| B1433856 | A note level with the title band becomes a dead zone: the title can't be edited there and the note won't take the caret | [Notes] | #notes #ui | ⏳ live — awaiting |
+| B1427664 | Parcel outlines lag behind clickability, so a slow county's map looks empty while selection already works | [Site Planner] | #gis #parcel #site-planner #testing | ⏳ live — awaiting |
+| B1426592 | The map names a county 300 miles away as unavailable, and the notice never clears | [Site Planner] | #gis #site-planner #testing | ⏳ live — awaiting |
+| B1411504 | The "Needs attention" and "Pursuits" dashboard cards sort by a value that is the same on every row | [Dashboard] | #dashboard #scheduler #ui | ⏳ live — awaiting |
+| B1407824 | A truncated name renders with a dangling trailing comma and no ellipsis on five Dashboard surfaces; the feed also lower-cases county names | [Dashboard] | #dashboard #ui #testing | ⏳ live — awaiting |
+| B1405457 | The "Since you were last here" feed carries its own copy of the comp rate calculation, disagreeing with the Comps card for the same comp | [Dashboard / comps] | #dashboard #comps #ui | ⏳ live — awaiting |
+| B1405456 | "Since you were last here" reports a batch of tasks "closed" off a user-set status label, never a recorded completion event | [Dashboard] | #dashboard #scheduler #ui | ⏳ live — awaiting |
+| B1404352 | A schedule cannot be renamed or deleted, and the crumb loses the project name once a project has more than one | [Scheduler] | #scheduler #ui #persistence #testing | ⏳ live — awaiting |
+| B1401952 | Three fixes to the Dashboard Locations map card: a dead "fix locations" link, colliding pin labels, and the wrong basemap | [Dashboard / site-planner] | #dashboard #site-planner #ui #gis | ⏳ live — awaiting |
+| B1399568 | Planning a site on ground that already has a project mints a second project | [Site Planner / projects] | #site-planner #persistence #testing | ⏳ live — awaiting |
+| B1397568 | You cannot create a second schedule from a project that already has one | [Scheduler] | #scheduler #ui #testing | ⏳ live — awaiting |
+| B1396192 | The schedule list only renders in the empty state — a project's OTHER schedules become unreachable the instant it has one | [Scheduler] | #scheduler #ui #testing | ⏳ live — awaiting |
+| B1395568 | Michael picks the Comps card's rate period himself — per year or per month, his choice, everywhere a comp rate shows | [Dashboard / Site Planner] | #dashboard #comps #ui #persistence | ⏳ live — awaiting |
+| B1389520 | Deleting a map note closed the editor without deleting it: the confirm button's own relabel was a misclick trap | [Site Planner / map-notes] | #site-planner #map-notes #ui #testing | ⏳ live — awaiting |
+| B1380336 | A schedule belonged to nobody, so nothing could say which schedules a project has | [Scheduler] | #scheduler #persistence #ui #testing | ⏳ live — awaiting |
+| B1380112 | Four defects in the shipped Comps card: a mixed rate period, a peer set on four incompatible rulers, a tie reported as a rank, and a footer that contradicts itself | [Dashboard / comps] | #dashboard #comps #ui #testing | ⏳ live — awaiting |
+| B1376672 | A comp (or a SITE) outside Texas is given the same-named TEXAS county key: the county lookup resolves a name with no state | [Site Planner / GIS] | #gis #comps #site-planner #parcel | ⏳ live — awaiting |
+| B1373536 | Dashboard cards: schedule events silently dropped from the "Since you were last here" feed, and plan thumbnails with no size ceiling or attribute escaping | [Dashboard / site-planner] | #dashboard #scheduler #site-planner #ui #perf | ⏳ live — awaiting |
+| B1373057 | A parcel you pick lands on the topmost row missing a location, not the row you are working on | [Site Planner / comps] | #comps #ui #site-planner #parcel | ⏳ live — awaiting |
+| B1372352 | California and Rhode Island were both filed as `no-free-source` and both are real, live, official statewide parcel layers | [Site Planner / GIS] | #gis #parcel #site-planner | ⏳ live — awaiting |
+| B1372144 | You cannot put a note on the map | [Site Planner / map-notes] | #site-planner #map-notes #comps #persistence | ⏳ live — awaiting |
+| B1370548 | Prove what a placed note does when the page is printed — and it was never demonstrated | [Notes] | #notes #export #testing | ⏳ live — awaiting |
+| B1370545 | Nothing could be placed level with the page title: the coordinate space started at the body, not the sheet | [Notes] | #notes #ui | ⏳ live — awaiting |
+| B1368144 | Map toolbar goes GROUND-FIRST: the Site/Comp toggle is gone and the toolbar itself becomes the question | [Site Planner / Map] | #site-planner #ui #selection #parcel | ⏳ live — awaiting |
+| B1368064 | Dashboard "Recent plans" card: real-render thumbnails of the four most recently edited plans | [Dashboard / Site Planner] | #dashboard #site-planner #ui #persistence | ⏳ live — awaiting |
+| B1366384 | New dashboard card: "Since you were last here" — one merged activity feed anchored to the account's own last visit | [Dashboard] | #dashboard #ui #notes #comps #scheduler #persistence | ⏳ live — awaiting |
+| B1365936 | Dashboard Comps card: replace the bare count with the most-recently-added comp, placed against its real peers | [Dashboard / comps] | #dashboard #comps #site-planner #gis #ui | ⏳ live — awaiting |
+| B1361425 | County boundary polygons are nationwide now, not Texas/Colorado only — a same-session correction of a wrong "decided to defer" write-up | [Site Planner / GIS] | #gis #parcel #site-planner | ⏳ live — awaiting |
+| B1361424 | Wire Virginia and West Virginia; the earlier decline traced to a sandbox blind spot, not a real provenance problem | [Site Planner / GIS] | #gis #parcel #site-planner | ⏳ live — awaiting |
+| B1360256 | The notes reconciler reasons over a stale index and offers destructive buttons on unproven claims | [Notes] | #notes #sync #persistence | ⏳ live — awaiting |
+| B1359904 | Dashboard "Locations" map card — a real interactive map of every active project, pursuit and comp, with missing-location accounting | [Dashboard] | #dashboard #ui #gis | ⏳ live — awaiting |
+| B1359492 | The site plan card's Adjust button becomes a three-dot menu | [Site Planner / site-plans] | #site-planner #comps #ui | ⏳ live — awaiting |
+| B1359491 | Edit/Delete move into a three-dot menu on the comp detail header | [Comps] | #comps #ui | ⏳ live — awaiting |
+| B1359490 | The comp detail's bare "Date" row is relabeled "Executed" and disappears when blank | [Comps] | #comps #ui | ⏳ live — awaiting |
+| B1359489 | Drop "Total annual rent (face)" from the comp detail list | [Comps] | #comps #ui | ⏳ live — awaiting |
+| B1344608 | The parcel outline layer loads its image and then draws it at zero opacity | [Site Planner] | #gis #parcel #site-planner #testing | ⏳ live — awaiting |
+| B1342704 | double-click-to-open-Properties fired on the on-shape "+"/"−" add/remove controls too, so expanding a parking field opened the Properties panel | [Site Planner] | #site-planner #ui #selection | ⏳ live — awaiting |
+| B1341184 | Switching projects does not switch the schedule, so the breadcrumb names a schedule the project does not own | [Scheduler] | #scheduler #ui | ⏳ live — awaiting |
+| B1340400 | Remove the old schedule-switcher icon from the Schedule toolbar; the breadcrumb replaced it | [Scheduler] | #scheduler #ui #testing | ⏳ live — awaiting |
+| B1340368 (×2) | The Jump-back-in card's "Last document" row can point at a document filed under a project that no longer exists, dead-ending on click | [Dashboard / Doc Review] | #dashboard #doc-review #persistence #testing | ⏳ live — awaiting |
+| B1339920 | Maricopa County, AZ (Phoenix) parcel clicks silently queried Pinal County's service and returned zero | [Site Planner / GIS] | #gis #parcel #site-planner | ⏳ live — awaiting |
+| B1338896 | Pinal/Maricopa AZ parcel routing queries BOTH counties for a point solidly inside one — a race condition, not a straddle | [Site Planner / GIS] | #gis #parcel #site-planner | ⏳ live — awaiting |
+| B1336576 | "Recently deleted" still listed Richfield/Woods Road as deleted PROJECTS after B1164192 fixed the route gate — a second, independent implementation of the same question that never got the fix | [Site Planner / persistence] | #site-planner #persistence #testing | ⏳ live — awaiting |
+| B1336528 (×2) | The Help/Report control's clearance math is blind to the Schedule tab, because the Schedule lives in an iframe | [Shell / Scheduler] | #scheduler #ui | ⏳ live — awaiting |
 | B1332016 | Probe all 50 states + DC for a free statewide parcel service, wire the ones that pass | [Site Planner / GIS] | #gis #parcel #site-planner | ⏳ live — awaiting |
 | B1320512 | Opening a plan with PDF overlays freezes the canvas for ten seconds | [Site Planner / overlay] | #site-planner #perf #testing | ⏳ live — awaiting |
-| B1310208 | The plan card returns to identity-only at rest | [Site Planner / site-plans] | #site-planner #comps #ui | ⏳ live — awaiting |
-| B1310209 | "Adjust" opens a small panel DOCKED to the map | [Site Planner / site-plans] | #site-planner #comps #ui | ⏳ live — awaiting |
-| B1310210 | The plan row's three-dot menu is gone; Delete/Pin/Change page get real homes | [Site Planner / site-plans] | #site-planner #comps #ui | ⏳ live — awaiting |
-| B1310211 | Opacity and rotation stop sharing one visual weight | [Site Planner / site-plans] | #site-planner #comps #ui | ⏳ live — awaiting |
 | B1313552 | The phone Properties bottom sheet (B1223120) is unusable in practice on a real iPhone | [Site Planner] | #site-planner #ui #mobile | ⏳ live — awaiting |
-| B1303824 | Deleting a project is a silent no-op: the dialog closes and no write is issued | [Site Planner / persistence] | #site-planner #persistence #sync #testing | ⏳ live — awaiting |
-| B1307664 | The Library folder tree paints a decorative folder emoji (📁/📂) on every row, drowning out anything that actually distinguishes a folder | [Library] | #library #ui | ⏳ live — awaiting |
+| B1310211 | Opacity and rotation stop sharing one visual weight | [Site Planner / site-plans] | #site-planner #comps #ui | ⏳ live — awaiting |
+| B1310210 | The plan row's three-dot menu is gone; Delete/Pin/Change page get real homes | [Site Planner / site-plans] | #site-planner #comps #ui | ⏳ live — awaiting |
+| B1310209 | "Adjust" opens a small panel DOCKED to the map | [Site Planner / site-plans] | #site-planner #comps #ui | ⏳ live — awaiting |
+| B1310208 | The plan card returns to identity-only at rest | [Site Planner / site-plans] | #site-planner #comps #ui | ⏳ live — awaiting |
 | B1307665 | Folder rows should show a muted "has files" mark once the emoji is gone — audited: this already exists and is already wired into the same row | [Library] | #library #ui | ⏳ live — awaiting |
-| B1164192 | A project reads as deleted when its ANCHOR plan row is deleted, even with live sibling plans still in the group | [Site Planner / persistence] | #site-planner #persistence #testing | ⏳ live — awaiting |
+| B1307664 | The Library folder tree paints a decorative folder emoji (📁/📂) on every row, drowning out anything that actually distinguishes a folder | [Library] | #library #ui | ⏳ live — awaiting |
+| B1303824 | Deleting a project is a silent no-op: the dialog closes and no write is issued | [Site Planner / persistence] | #site-planner #persistence #sync #testing | ⏳ live — awaiting |
 | B1294592 | Site.* references read a fixed concept instead of the open one | [Model / Site Planner] | #model #formula #site-planner | ⏳ live — awaiting |
-| B1167712 | A site plan attaches to a site the same way a comp does, in any order | [Site Planner / site-plans] | #site-planner #comps #persistence | ⏳ live — awaiting |
-| B1167713 | Pinning a comp onto a plan is optional and offered, never hunted for | [Site Planner / comps] | #site-planner #comps #ui | ⏳ live — awaiting |
-| B1167714 | Site Plans stops being a top-level list; the plan draws itself when you're zoomed in and surfaces on the comp | [Site Planner / site-plans] | #site-planner #comps #ui | ⏳ live — awaiting |
 | B1281376 | Arrangeable dashboard grid: real drag/resize/add/remove/reset on react-grid-layout | [Shell / Dashboard] | #ui #dashboard #persistence | ⏳ live — awaiting |
-| B1268016 | "Needs attention" dashboard card: one flat cross-project task list, sorted by days in the needs-attention state | [Shell / Dashboard / Scheduler] | #ui #dashboard #scheduler | ⏳ live — awaiting |
+| B1273296 (×3) | Content placed outside the note's page stayed outside it, and the page never grew to hold it — a regression, not a never-shipped feature | [Notes] | #notes #ui #testing | ⏳ live — awaiting |
 | B1268017 | "Pursuits" dashboard card: open pursuits sorted by soonest contractual date, with a new "Deal dates" editor | [Shell / Dashboard / Site Planner] | #ui #dashboard #site-planner | ⏳ live — awaiting |
-| B1261232 | Rebuild the header presence chip: two-person silhouette, his own tabs counted separately from real teammates, initials for everyone else | [Site Planner] | #ui #site-planner | ⏳ live — awaiting |
-| B1263072 | The Comps tab opens on Site Plans, and an expanded plan pushed every comp off-screen | [Site Planner / comps] | #comps #site-planner #ui | ⏳ live — awaiting |
-| B1263073 | The expanded site-plan row buried a real action under a status label, and printed the sheet's own dimensions and a permanently-disabled control nobody asked for | [Site Planner / comps] | #comps #site-planner #ui | ⏳ live — awaiting |
-| B1263074 | The site-plan row's four action buttons rendered at three different heights, and the opacity slider overflowed the panel by 43px | [Site Planner / comps] | #comps #site-planner #ui | ⏳ live — awaiting |
-| B1263075 | AnchoredMenu rendered with NO surface unless the caller remembered to style it, and three callers didn't | [Shared UI] | #ui #comps | ⏳ live — awaiting |
-| B1260000 | Backspace on an empty bullet with a nested child deleted the paragraph ABOVE the list | [Notes] | #notes #keyboard | ⏳ live — awaiting |
-| B1238304 | The map's scale bar and north arrow sit in a fixed white plate that never follows dark mode | [Site Planner / Map Finder] | #site-planner #ui #gis #export | ⏳ live — awaiting |
-| B1241744 | The Gantt is unusable at phone width — tapping the "Gantt" tab silently kept showing the spreadsheet grid | [Scheduler] | #scheduler #gantt #ui #mobile | ⏳ live — awaiting |
-| B1241745 (×3) | The Schedule split view does not work at phone width — Split silently rendered Grid alone, with no way to reach Gantt | [Scheduler] | #scheduler #gantt #ui #mobile | ⏳ live — awaiting |
-| B1257072 | AMENDMENT to B1241745: the phone Split collapse built a SECOND view switcher instead of reusing the app's existing one | [Scheduler] | #scheduler #gantt #ui #mobile | ⏳ live — awaiting |
+| B1268016 | "Needs attention" dashboard card: one flat cross-project task list, sorted by days in the needs-attention state | [Shell / Dashboard / Scheduler] | #ui #dashboard #scheduler | ⏳ live — awaiting |
 | B1263824 | AMENDMENT to B1257072: the header pill loses its own "Split" highlight when switching panes at phone width, reading as "Split does not work" | [Scheduler] | #scheduler #gantt #ui #mobile | ⏳ live — awaiting |
+| B1263075 | AnchoredMenu rendered with NO surface unless the caller remembered to style it, and three callers didn't | [Shared UI] | #ui #comps | ⏳ live — awaiting |
+| B1263074 | The site-plan row's four action buttons rendered at three different heights, and the opacity slider overflowed the panel by 43px | [Site Planner / comps] | #comps #site-planner #ui | ⏳ live — awaiting |
+| B1263073 | The expanded site-plan row buried a real action under a status label, and printed the sheet's own dimensions and a permanently-disabled control nobody asked for | [Site Planner / comps] | #comps #site-planner #ui | ⏳ live — awaiting |
+| B1263072 | The Comps tab opens on Site Plans, and an expanded plan pushed every comp off-screen | [Site Planner / comps] | #comps #site-planner #ui | ⏳ live — awaiting |
+| B1261232 | Rebuild the header presence chip: two-person silhouette, his own tabs counted separately from real teammates, initials for everyone else | [Site Planner] | #ui #site-planner | ⏳ live — awaiting |
+| B1260000 | Backspace on an empty bullet with a nested child deleted the paragraph ABOVE the list | [Notes] | #notes #keyboard | ⏳ live — awaiting |
+| B1257072 | AMENDMENT to B1241745: the phone Split collapse built a SECOND view switcher instead of reusing the app's existing one | [Scheduler] | #scheduler #gantt #ui #mobile | ⏳ live — awaiting |
+| B1241745 (×3) | The Schedule split view does not work at phone width — Split silently rendered Grid alone, with no way to reach Gantt | [Scheduler] | #scheduler #gantt #ui #mobile | ⏳ live — awaiting |
+| B1241744 | The Gantt is unusable at phone width — tapping the "Gantt" tab silently kept showing the spreadsheet grid | [Scheduler] | #scheduler #gantt #ui #mobile | ⏳ live — awaiting |
+| B1238304 | The map's scale bar and north arrow sit in a fixed white plate that never follows dark mode | [Site Planner / Map Finder] | #site-planner #ui #gis #export | ⏳ live — awaiting |
 | B1237920 | The perf recorder is structurally blind for the exact "first 5 to 10 seconds" window the owner reports — confirmed, and now closed | [Shared / Telemetry] | #infra #testing #perf #site-planner | ⏳ live — awaiting |
-| B1235168 | `ensureProjectRow`'s local fast path bypasses the deletion check, so a binned project can still get a 133-folder Drive tree | [Site Planner / Library] | #site-planner #library #persistence #sync #drive #testing | ⏳ live — awaiting |
 | B1235169 | Purging a project forever leaves its `project_folders` rows in the database and its Drive folder tree orphaned | [Site Planner / Library] | #site-planner #library #persistence #drive #testing | ⏳ live — awaiting |
+| B1235168 | `ensureProjectRow`'s local fast path bypasses the deletion check, so a binned project can still get a 133-folder Drive tree | [Site Planner / Library] | #site-planner #library #persistence #sync #drive #testing | ⏳ live — awaiting |
 | B1228864 | What you tap slides out from under you before the tap lands | [Shell / Dashboard / Scheduler] | #ui #dashboard #scheduler #site-planner #testing | ⏳ live — awaiting |
 | B1227984 | A project created after PR #1464 still never reaches the cloud — TWO independent shapes, one fixed here, one already in flight elsewhere | [Site Planner / projects] | #site-planner #persistence #sync #testing | ⏳ live — awaiting |
-| B1225296 | The Site route crashes with a React render loop (error #185) on arrival, on today's build | [Site Planner] | #site-planner #view #perf #testing | ⏳ live — awaiting |
-| B1168128 (×2) | On a phone, panning the map drags the whole PAGE instead of the map — confirmed live with a screenshot, still unreproducible in any sandbox browser | [Site Planner] | #site-planner #ui #mobile #a11y | ⏳ live — awaiting |
+| B1225296 (×2) | The Site route crashes with a React render loop (error #185) — now during ordinary pan/zoom/road-drag on a phone, on build 27671fa | [Site Planner] | #site-planner #view #perf #testing #mobile #telemetry | ⏳ live — awaiting |
 | B1223120 | Properties panel becomes a bottom sheet on phone-sized screens, with finger-sized controls inside it | [Site Planner] | #site-planner #ui #mobile #keyboard | ⏳ live — awaiting |
-| B1213313 | Dashboard content: arrangeable cards, layout saved per user | [Shell / Dashboard] | #ui #dashboard #site-planner #scheduler #comps | ⏳ live — awaiting |
 | B1213314 | Almost no task in the scheduler has a responsible party — investigated, found REACHABLE not broken | [Scheduler] | #scheduler | ⏳ live — awaiting |
-| B1202176 (×2) | New project creates nothing and dead-ends on "This project doesn't exist" | [Site Planner / projects] | #site-planner #persistence #ui #testing | ⏳ live — awaiting |
+| B1213313 | Dashboard content: arrangeable cards, layout saved per user | [Shell / Dashboard] | #ui #dashboard #site-planner #scheduler #comps | ⏳ live — awaiting |
+| B1208864 | The cloud-write retry path replayed a queued group rename as N separate writes instead of the one atomic RPC, and the durable log was cleared before a single row landed | [Site Planner] | #site-planner #persistence #sync | ⏳ live — awaiting |
 | B1205297 | The Library files the same upload again every time, with no duplicate check | [Library] | #library #files #filing | ⏳ live — awaiting |
 | B1203344 | A comp's auto-created "tracked" market-record site gets the full 133-folder document tree, and the Library's org-scope organize job names it in its progress banner | [library] | #library #doc-review #comps | ⏳ live — awaiting |
-| B1208864 | The cloud-write retry path replayed a queued group rename as N separate writes instead of the one atomic RPC, and the durable log was cleared before a single row landed | [Site Planner] | #site-planner #persistence #sync | ⏳ live — awaiting |
-| B1191456 | Boot-time auto-fit races the user's first gesture and silently undoes it (×3) | [Site Planner] | #site-planner #view #ui | ⏳ live — awaiting |
+| B1202176 (×2) | New project creates nothing and dead-ends on "This project doesn't exist" | [Site Planner / projects] | #site-planner #persistence #ui #testing | ⏳ live — awaiting |
 | B1191457 | Dashboard clears the URL but a cold boot silently resumes the project you just left | [Site Planner] | #site-planner #persistence | ⏳ live — awaiting |
-| B1186256 | Split Yield into a dedicated Drainage module — Yield keeps only land use, coverage/FAR, stalls, cost | [Site Planner] | #site-planner #floodplain #yield #ui | ⏳ live — awaiting |
-| B1186259 | Four surfaces disagree on jurisdiction because the jurisdiction check only ever tests ONE parcel of a multi-parcel site | [Site Planner / gis] | #site-planner #gis #floodplain | ⏳ live — awaiting |
+| B1191456 | Boot-time auto-fit races the user's first gesture and silently undoes it (×3) | [Site Planner] | #site-planner #view #ui | ⏳ live — awaiting |
 | B1186260 | Two honest-`null` drainage facts that were actually resolvable: the HCFCD channel-discharge decision and a Regime-B pond's pool depth | [Site Planner / floodplain] | #site-planner #floodplain #pond | ⏳ live — awaiting |
+| B1186259 | Four surfaces disagree on jurisdiction because the jurisdiction check only ever tests ONE parcel of a multi-parcel site | [Site Planner / gis] | #site-planner #gis #floodplain | ⏳ live — awaiting |
+| B1186256 | Split Yield into a dedicated Drainage module — Yield keeps only land use, coverage/FAR, stalls, cost | [Site Planner] | #site-planner #floodplain #yield #ui | ⏳ live — awaiting |
 | B1184656 | Binning a site silently breaks its comps, and the 30-day purge destroyed the link for good | [sites/comps] | #site-planner #comps #persistence | ⏳ live — awaiting |
-| B1166768 | Rename the "Model" tab to "Spreadsheet" | [Model] | #model #ui | ⏳ live — awaiting |
-| B1167136 | A "tracked" site (market intel only) can appear in every cross-workspace project switcher | [Site Planner / sites] | #site-planner #comps #persistence | ⏳ live — awaiting |
-| B1167137 | The comp editor's Project select cannot display a tracked-site link once one exists | [Site Planner / comps] | #site-planner #comps #persistence | ⏳ live — awaiting |
+| B1168128 (×2) | On a phone, panning the map drags the whole PAGE instead of the map — confirmed live with a screenshot, still unreproducible in any sandbox browser | [Site Planner] | #site-planner #ui #mobile #a11y | ⏳ live — awaiting |
+| B1167714 | Site Plans stops being a top-level list; the plan draws itself when you're zoomed in and surfaces on the comp | [Site Planner / site-plans] | #site-planner #comps #ui | ⏳ live — awaiting |
+| B1167713 | Pinning a comp onto a plan is optional and offered, never hunted for | [Site Planner / comps] | #site-planner #comps #ui | ⏳ live — awaiting |
+| B1167712 | A site plan attaches to a site the same way a comp does, in any order | [Site Planner / site-plans] | #site-planner #comps #persistence | ⏳ live — awaiting |
+| B1167200 | The Schedule tab transpiles ~17,000 lines of JSX in the browser on every load | [Scheduler / Build] | #scheduler #perf #infra #testing | ⏳ live — awaiting |
 | B1167138 | Duplicate of B1165441: the site-matching rule that prevents a duplicate site must not exclude tracked sites | [Site Planner / sites] | #site-planner #comps | ⏳ live — awaiting |
-| B1163824 | A parcel-anchored comp shows a raw county APN where its Location should be | [Comps] | #comps | ⏳ live — awaiting |
-| B1163825 | Lease comp Rate is displayed rounded, but every derived total is computed from the unrounded value | [Comps] | #comps | ⏳ live — awaiting |
-| B1163826 | Yield panel's own Buildings row contradicts its own header — "checked Xd ago, stale" over "not checked, flood zones not pulled yet" | [Site Planner / drainage] | #site-planner #floodplain #yield | ⏳ live — awaiting |
-| B1163828 | Yield panel's Mitigation summary says "volume unknown" while its own detail shows a known, reconciled mitigation-pond volume | [Site Planner / drainage] | #site-planner #floodplain #pond #yield | ⏳ live — awaiting |
-| B842864 | Global help & report control in the app shell | [Shell] | #ui #telemetry | ⏳ live — awaiting |
+| B1167137 | The comp editor's Project select cannot display a tracked-site link once one exists | [Site Planner / comps] | #site-planner #comps #persistence | ⏳ live — awaiting |
+| B1167136 | A "tracked" site (market intel only) can appear in every cross-workspace project switcher | [Site Planner / sites] | #site-planner #comps #persistence | ⏳ live — awaiting |
 | B1167120 | Help/report control's bottom offset was a fixed 292px on every route, not a corner | [Shell] | #ui | ⏳ live — awaiting |
-| B842865 | Hoist the performance recorder's manual trigger to the shell — AUDIT-FIRST found the recorder engine was already global; the gap was narrower | [Shell] | #perf #telemetry | ⏳ live — awaiting |
-| B842866 | Report intake table and owner-only review view | [Admin] | #admin #infra #telemetry | ⏳ live — awaiting |
-| B848833 | A soft-deleted project stays fully open and writable; breadcrumb degrades to the placeholder word "Project" | [Site Planner] | #site-planner #persistence #model #ui #testing | ⏳ live — awaiting |
-| B1154368 | Comp mode's parcel popup still offered "Plan this site", a Site-module action | [Site Planner / comps] | #comps #site-planner #gis #comps #site-planner | ⏳ live — awaiting |
-| B1154369 | The lock button on a site plan doesn't stop it moving — the map handles and the rotation field never checked it | [Site Planner / site-plans] | #site-planner #ui #persistence | ⏳ live — awaiting |
-| B1154370 | Dragging the opacity slider wrote to Supabase and refetched the whole overlay list on every tick | [Site Planner / site-plans] | #site-planner #perf | ⏳ live — awaiting |
+| B1166768 | Rename the "Model" tab to "Spreadsheet" | [Model] | #model #ui | ⏳ live — awaiting |
+| B1164192 | A project reads as deleted when its ANCHOR plan row is deleted, even with live sibling plans still in the group | [Site Planner / persistence] | #site-planner #persistence #testing | ⏳ live — awaiting |
+| B1163828 | Yield panel's Mitigation summary says "volume unknown" while its own detail shows a known, reconciled mitigation-pond volume | [Site Planner / drainage] | #site-planner #floodplain #pond #yield | ⏳ live — awaiting |
+| B1163826 | Yield panel's own Buildings row contradicts its own header — "checked Xd ago, stale" over "not checked, flood zones not pulled yet" | [Site Planner / drainage] | #site-planner #floodplain #yield | ⏳ live — awaiting |
+| B1163825 | Lease comp Rate is displayed rounded, but every derived total is computed from the unrounded value | [Comps] | #comps | ⏳ live — awaiting |
+| B1163824 | A parcel-anchored comp shows a raw county APN where its Location should be | [Comps] | #comps | ⏳ live — awaiting |
+| B1160722 | Admin password reset | [Admin] | #admin #auth | ⏳ live — awaiting |
+| B1160720 | Cloudflare Turnstile on the sign-up form | [Auth] | #auth | ⏳ live — awaiting |
+| B1160480 | A brand-new project accepts Library uploads, then vanishes on reload and orphans the file | [library/projects] | #library #persistence #filing | ⏳ live — awaiting |
 | B1154371 | Four site-plan card layout defects: duplicated "Editing on map" with no exit, "Cropped ✓" reads as an action not a status, filename doubled | [Site Planner / site-plans] | #site-planner #ui | ⏳ live — awaiting |
-| B1146960 | A placed site plan has no way to edit it — the overflow menu offers only Delete | [Site Planner / site-plans] | #site-planner #ui | ⏳ live — awaiting |
+| B1154370 | Dragging the opacity slider wrote to Supabase and refetched the whole overlay list on every tick | [Site Planner / site-plans] | #site-planner #perf | ⏳ live — awaiting |
+| B1154369 | The lock button on a site plan doesn't stop it moving — the map handles and the rotation field never checked it | [Site Planner / site-plans] | #site-planner #ui #persistence | ⏳ live — awaiting |
+| B1154368 | Comp mode's parcel popup still offered "Plan this site", a Site-module action | [Site Planner / comps] | #comps #site-planner #gis #comps #site-planner | ⏳ live — awaiting |
 | B1146961 | The site plan does not track the map during zoom — it snaps instead of animating with the tiles | [Site Planner / site-plans] | #site-planner #gis #ui | ⏳ live — awaiting |
-| B1132464 | "Merging parcels lags for a second" — MEASURED, does not reproduce on the largest real parcel-count plan; none of the four named suspects cost more than ~2ms combined | [Site Planner] | #site-planner #perf | ⏳ live — awaiting |
-| B1135184 | A dropped-and-dragged site plan can insert with a center but no scale (`ft_per_px` null) — invisible, and "Editing on map" arms on nothing to grab | [Site Planner] | #site-planner #persistence | ⏳ live — awaiting |
+| B1146960 | A placed site plan has no way to edit it — the overflow menu offers only Delete | [Site Planner / site-plans] | #site-planner #ui | ⏳ live — awaiting |
 | B1135185 | "Someone else changed this site plan" fires for a single user editing alone, and can discard the user's own in-progress placement | [Site Planner] | #site-planner #persistence #sync | ⏳ live — awaiting |
-| B1134752 | A site-plan overlay renders visibly rotated even though `rotation_deg` is 0 | [Site Planner / overlay] | #site-planner #coordinates #gis | ⏳ live — awaiting |
-| B1134753 | No visible manipulation frame for a placed site-plan overlay: dragging ambiguously pans the map or grabs the plan, and there's no rotate/resize readout | [Site Planner / overlay] | #site-planner #ui #gis | ⏳ live — awaiting |
+| B1135184 | A dropped-and-dragged site plan can insert with a center but no scale (`ft_per_px` null) — invisible, and "Editing on map" arms on nothing to grab | [Site Planner] | #site-planner #persistence | ⏳ live — awaiting |
 | B1134754 | No way to crop a placed site-plan overlay (a broker flyer page's logos/margins can't be trimmed) | [Site Planner / overlay] | #site-planner #ui #gis | ⏳ live — awaiting |
+| B1134753 | No visible manipulation frame for a placed site-plan overlay: dragging ambiguously pans the map or grabs the plan, and there's no rotate/resize readout | [Site Planner / overlay] | #site-planner #ui #gis | ⏳ live — awaiting |
+| B1134752 | A site-plan overlay renders visibly rotated even though `rotation_deg` is 0 | [Site Planner / overlay] | #site-planner #coordinates #gis | ⏳ live — awaiting |
+| B1132464 | "Merging parcels lags for a second" — MEASURED, does not reproduce on the largest real parcel-count plan; none of the four named suspects cost more than ~2ms combined | [Site Planner] | #site-planner #perf | ⏳ live — awaiting |
 | B1129408 | OpEx as an optional input on lease comps | [Site Planner / comps] | #comps | ⏳ live — awaiting |
 | B1128272 | "Dashboard" on the Schedule module fires two navigations and lands on the Site Planner map | [Scheduler] | #scheduler #ui | ⏳ live — awaiting |
-| B850016 | Location "Set" arms placement, then the Paste-comps panel keeps covering the map it just told you to click | [Site Planner / comps] | #comps #site-planner #ui | ⏳ live — awaiting |
-| B850019 | Comp map markers wear a soft blurred halo instead of a crisp white border `[Site Planner / comps][map]` | — | #comps #site-planner #ui | ⏳ live — awaiting |
 | B1123425 | Numeric inputs in the comp panel show raw digits with no thousands separators | [Site Planner / comps] | #comps #ui | ⏳ live — awaiting |
-| B1114992 | Deleting a site plan with a comp pinned to it aborted the transaction — FK/CHECK conflict, comp now reverts to a plain pin `[Site Planner / comps][db]` | — | #comps #site-planner #persistence | ⏳ live — awaiting |
 | B1117408 | Typed cells are written to the previously-active sheet after a sheet-tab switch | [Model] | #model #ui #formula | ⏳ live — awaiting |
-| B1113712 | Gantt dependency arrows are not virtualized while the bars are, so a scrolled-off task's link terminates in an empty row | [Scheduler / Gantt] | #gantt #scheduler | ⏳ live — awaiting |
+| B1114992 | Deleting a site plan with a comp pinned to it aborted the transaction — FK/CHECK conflict, comp now reverts to a plain pin `[Site Planner / comps][db]` | — | #comps #site-planner #persistence | ⏳ live — awaiting |
 | B1113713 | A dependency link to/from a task hidden inside a collapsed summary row must never resolve to a nonexistent row | [Scheduler / Gantt] | #gantt #scheduler | ⏳ live — awaiting |
+| B1113712 | Gantt dependency arrows are not virtualized while the bars are, so a scrolled-off task's link terminates in an empty row | [Scheduler / Gantt] | #gantt #scheduler | ⏳ live — awaiting |
 | B1107680 | Per-tab Scheduler view state (aPid/view/section/zoom/columns/sort/filters) rode in the versioned hs-v1 document, so navigating rewrote 355KB and faked a cross-tab conflict | [Scheduler / persistence] | #scheduler #persistence #sync | ⏳ live — awaiting |
-| B1090466 | A comp can be shared with a team whose pinned site plan is not — renders for a teammate as a point on an invisible plan | [Site Planner / comps] | #comps #sync | ⏳ live — awaiting |
 | B1091712 | Comp entry: a transposed one-comp-per-screen layout below phone/tablet width | [Site Planner / comps] | #comps #ui #site-planner #mobile | ⏳ live — awaiting |
+| B1090466 | A comp can be shared with a team whose pinned site plan is not — renders for a teammate as a point on an invisible plan | [Site Planner / comps] | #comps #sync | ⏳ live — awaiting |
 | B1084000 | County appraisal panel can print the literal word "Null" and a bare "0" as if they were data; a split parcel silently shows its pre-split parent's whole-tract record | [Site Planner / parcel-data] | #site-planner #parcel | ⏳ live — awaiting |
-| B177 | Parcel tax breakdown panel | [Site Planner] | #site-planner | ⏳ live — awaiting |
-| B179 | Backend per-account exact tax fetch | [server] | #infra | ⏳ live — awaiting |
-| B851 (×4) | Schedule grid diverges from the route + a false "newer version — reload?" banner, same cause | [Scheduler / persistence] | #scheduler #persistence #ui | ⏳ live — awaiting |
-| B1080545 | "New project" in the Schedule module minted junk-named orphan schedules while the breadcrumb kept showing the previous project | [Scheduler] | #scheduler #ui | ⏳ live — awaiting |
-| B1080546 | Duplicate an existing schedule | [Scheduler] | #scheduler | ⏳ live — awaiting |
-| B1080547 (×2) | Allow multiple schedules per project | [Scheduler] | #scheduler #persistence | ⏳ live — awaiting |
 | B1080548 | Copy and paste tasks between schedules | [Scheduler] | #scheduler #persistence | ⏳ live — awaiting |
-| B778 | Tighten the migrated `planar_*` tables off wide-open anon RLS | [Infra / Scheduler] | #infra #scheduler #auth | ⏳ live — awaiting |
-| B850432 | A placed site plan overlay never renders on the map — a silent zoom gate hides it, with nothing telling you why | [Site Planner / comps] | #site-planner #comps #ui | ⏳ live — awaiting |
-| B850434 | Comps/site-plan panel: some buttons appeared to need TWO clicks (Edit/Delete on comp detail, Place on map) — investigated hard, not reproduced; needs a live signed-in re-test | [Site Planner / comps] | #site-planner #comps #ui | ⏳ live — awaiting |
-| B1066368 | A deleted comp is unrecoverable, and the panel's own "Recently deleted" never queries comps | [Site Planner / comps] | #comps #persistence #comps | ⏳ live — awaiting |
-| B1066369 | Delete has no confirmation step | [Site Planner / comps] | #comps #ui | ⏳ live — awaiting |
+| B1080547 (×2) | Allow multiple schedules per project | [Scheduler] | #scheduler #persistence | ⏳ live — awaiting |
+| B1080546 | Duplicate an existing schedule | [Scheduler] | #scheduler | ⏳ live — awaiting |
+| B1080545 | "New project" in the Schedule module minted junk-named orphan schedules while the breadcrumb kept showing the previous project | [Scheduler] | #scheduler #ui | ⏳ live — awaiting |
 | B1066560 | Map toolbar: collapse "Drop a pin" / "Comp from parcel" / the Comp-mode toggle's implied third meaning into ONE "Place comp" split button | [Site Planner / comps] | #comps #ui #site-planner | ⏳ live — awaiting |
-| B1037952 | A cloud write that fails must never look like it succeeded | [Site Planner] | #persistence #sync #ui | ⏳ live — awaiting |
-| B1037953 | Chunk recovery gives up silently after the second failure; audit of every lazy chunk that gates a write | [Site Planner / infra] | #infra #sync #ui | ⏳ live — awaiting |
-| B1048400 | "Retry now" replayed a queued group-scoped rename against ONE row instead of the whole group | [Site Planner] | #persistence #sync #ui | ⏳ live — awaiting |
-| B1023120 | The Notes conflict bar asked the owner to choose between two versions he could not see | [notes/sync · ui] | #notes #sync #ui | ⏳ live — awaiting |
-| B1053568 | The B1023120 compare surface's two buttons read as one instruction and its opposite, never a symmetric pair | [notes/ui] | #notes #ui #compare | ⏳ live — awaiting |
-| B1053569 | Two side-by-side text blocks make the owner diff a barely-changed note by eye; he asked for a redline instead | [notes/ui] | #notes #ui #compare | ⏳ live — awaiting |
-| B1053570 | The conflict compare surface seizes the top third of the window instead of a quiet notice you open on demand | [notes/ui] | #notes #ui #compare | ⏳ live — awaiting |
-| B842928 | Map finder road-name labels render oversized/blurry: the Reference layer lacked `detectRetina`, so it fetched tiles one native zoom level (and under real latency, several more) behind the aerial | [Site Planner / map] | #site-planner #gis #ui | ⏳ live — awaiting |
-| B1020928 | Org scope for Notes and Library, selected from the project switcher | [global] | #notes #library #ui #persistence #sync | ⏳ live — awaiting |
-| B1020929 | The chrome that assumes a project | [global/ui] | #ui #notes #library | ⏳ live — awaiting |
-| B846384 | Richfield editing-session degradation: the drawing↔basemap registration effect's forced-layout cost (B1359, already costed, never shipped) is the strongest lead; the persistent out-of-range condition never self-heals and its telemetry was unrate-limited | [Site Planner / perf] | #site-planner #perf #gis | ⏳ live — awaiting |
-| B989105 | Convert the map view and app header to the component layer (×2 — the MapFinder.jsx remainder) | [global/ui] | #ui #site-planner | ⏳ live — awaiting |
-| B986096 | Comp entry: a paste box over a row grid, with uncertainty shown inline | [Site Planner / comps] | #comps #ui #comps | ⏳ live — awaiting |
-| B986097 | A draft staging table, reachable only by the KML import | [Site Planner / comps] | #comps #gis #persistence #comps | ⏳ live — awaiting |
+| B1066369 | Delete has no confirmation step | [Site Planner / comps] | #comps #ui | ⏳ live — awaiting |
+| B1066368 | A deleted comp is unrecoverable, and the panel's own "Recently deleted" never queries comps | [Site Planner / comps] | #comps #persistence #comps | ⏳ live — awaiting |
 | B1063904 | Comps paste: two lines merge into one HYBRID row, silently corrupting the unit (5 AC becomes 5 SF) | [Site Planner / comps] | #comps #ui #comps | ⏳ live — awaiting |
-| B978272 | Overlay placement changes silently left every pinned comp's map position stale | [Site Planner / comps] | #comps #site-planner #doc-review | ⏳ live — awaiting |
-| B978273 | A teammate can see a shared overlay's ROW but its raster image 403s, because two different `team_id` columns govern the two checks | [Site Planner / comps] | #comps #site-planner #doc-review | ⏳ live — awaiting |
-| B978274 | Deleting a site plan with comps pinned to it fails with a raw Postgres constraint error instead of a clear, proactive message | [Site Planner / comps] | #comps #site-planner | ⏳ live — awaiting |
-| B978275 | No soft delete and no revision guard on `site_plan_overlays`, unlike every sibling table | [Site Planner / comps] | #comps #site-planner | ⏳ live — awaiting |
-| B978276 | Deleting the brochure a site plan is built from silently cascades, and a resulting failure names a table the user has never heard of | [Site Planner / doc-review / library] | #comps #site-planner #doc-review #files | ⏳ live — awaiting |
-| B978277 | `anchor_kind` is an exhaustive database CHECK, not open to extension the way the frontend implies | [Site Planner / comps] | #comps #site-planner | ⏳ live — awaiting |
-| B978278 | A newly-uploaded, team-shared site plan appeared on every teammate's map instantly, at its auto-guessed default position, before it was actually placed | [Site Planner / comps] | #comps #site-planner | ⏳ live — awaiting |
-| B978279 | A failed raster upload (oversize, network, not signed in) silently left a placed-but-invisible site plan with no explanation | [Site Planner / comps] | #comps #site-planner #files | ⏳ live — awaiting |
-| B978280 | A dropped/picked HEIC or TIFF file was accepted by the file gate, then silently failed to decode | [Site Planner / comps] | #comps #site-planner #files | ⏳ live — awaiting |
-| B978281 | PDF robustness: rotation, bad-input messages, and the rasterize cap | [Site Planner / comps] | #comps #site-planner #files | ⏳ live — awaiting |
-| B978282 | An unplaced overlay's "Move / resize" button armed editing on a map layer that didn't exist — a dead click | [Site Planner / comps] | #comps #site-planner | ⏳ live — awaiting |
-| B978283 | Nothing prevents (or surfaces) the same document+page being overlaid twice | [Site Planner / comps] | #comps #site-planner | ⏳ live — awaiting |
-| B978284 | `deleteOverlayRaster` was never called anywhere — every deleted overlay orphaned its raster in Storage forever; an interrupted upload left an unexplained blank plan | [Site Planner / comps] | #comps #site-planner #files | ⏳ live — awaiting |
-| B978285 | `locked` existed on the schema but had NO control anywhere in the UI, so the owner-only rule it depends on was never actually exercised | [Site Planner / comps] | #comps #site-planner | ⏳ live — awaiting |
-| B978286 | A one-finger drag on a corner scale handle plus an incidental second finger could start Leaflet's own pinch-zoom at the same time | [Site Planner / comps] | #comps #site-planner | ⏳ live — awaiting |
+| B1055088 | A stale window silently re-published its whole local store: 11 pages committed in ~1 second, and the one page the server had newer raised a false conflict | [Notes / sync] | #notes #sync #persistence | ⏳ live — awaiting |
+| B1053570 | The conflict compare surface seizes the top third of the window instead of a quiet notice you open on demand | [notes/ui] | #notes #ui #compare | ⏳ live — awaiting |
+| B1053569 | Two side-by-side text blocks make the owner diff a barely-changed note by eye; he asked for a redline instead | [notes/ui] | #notes #ui #compare | ⏳ live — awaiting |
+| B1053568 | The B1023120 compare surface's two buttons read as one instruction and its opposite, never a symmetric pair | [notes/ui] | #notes #ui #compare | ⏳ live — awaiting |
+| B1048400 | "Retry now" replayed a queued group-scoped rename against ONE row instead of the whole group | [Site Planner] | #persistence #sync #ui | ⏳ live — awaiting |
+| B1037953 | Chunk recovery gives up silently after the second failure; audit of every lazy chunk that gates a write | [Site Planner / infra] | #infra #sync #ui | ⏳ live — awaiting |
+| B1037952 | A cloud write that fails must never look like it succeeded | [Site Planner] | #persistence #sync #ui | ⏳ live — awaiting |
+| B1023120 | The Notes conflict bar asked the owner to choose between two versions he could not see | [notes/sync · ui] | #notes #sync #ui | ⏳ live — awaiting |
+| B1020929 | The chrome that assumes a project | [global/ui] | #ui #notes #library | ⏳ live — awaiting |
+| B1020928 | Org scope for Notes and Library, selected from the project switcher | [global] | #notes #library #ui #persistence #sync | ⏳ live — awaiting |
+| B989105 | Convert the map view and app header to the component layer (×2 — the MapFinder.jsx remainder) | [global/ui] | #ui #site-planner | ⏳ live — awaiting |
+| B986097 | A draft staging table, reachable only by the KML import | [Site Planner / comps] | #comps #gis #persistence #comps | ⏳ live — awaiting |
+| B986096 | Comp entry: a paste box over a row grid, with uncertainty shown inline | [Site Planner / comps] | #comps #ui #comps | ⏳ live — awaiting |
 | B978287 | Export/print parity, zoom-extreme rendering, and hidden-overlay comp visibility — investigated and decided | [Site Planner / comps] | #comps #site-planner | ⏳ live — awaiting |
-| B965344 (×2) | Model cloud save writes ZERO rows / returns HTTP 400 on every write, even after `model_sheets` is migrated and RLS-verified working | [Model / persistence] | #model #persistence #sync #testing | ⏳ live — awaiting |
-| B948496 | Upload a site plan, place it on the map, and pin comps to buildings shown on it | [Site Planner / comps] | #comps #site-planner #doc-review #files #gis | ⏳ live — awaiting |
+| B978286 | A one-finger drag on a corner scale handle plus an incidental second finger could start Leaflet's own pinch-zoom at the same time | [Site Planner / comps] | #comps #site-planner | ⏳ live — awaiting |
+| B978285 | `locked` existed on the schema but had NO control anywhere in the UI, so the owner-only rule it depends on was never actually exercised | [Site Planner / comps] | #comps #site-planner | ⏳ live — awaiting |
+| B978284 | `deleteOverlayRaster` was never called anywhere — every deleted overlay orphaned its raster in Storage forever; an interrupted upload left an unexplained blank plan | [Site Planner / comps] | #comps #site-planner #files | ⏳ live — awaiting |
+| B978281 | PDF robustness: rotation, bad-input messages, and the rasterize cap | [Site Planner / comps] | #comps #site-planner #files | ⏳ live — awaiting |
+| B978280 | A dropped/picked HEIC or TIFF file was accepted by the file gate, then silently failed to decode | [Site Planner / comps] | #comps #site-planner #files | ⏳ live — awaiting |
+| B978279 | A failed raster upload (oversize, network, not signed in) silently left a placed-but-invisible site plan with no explanation | [Site Planner / comps] | #comps #site-planner #files | ⏳ live — awaiting |
+| B978278 | A newly-uploaded, team-shared site plan appeared on every teammate's map instantly, at its auto-guessed default position, before it was actually placed | [Site Planner / comps] | #comps #site-planner | ⏳ live — awaiting |
+| B978277 | `anchor_kind` is an exhaustive database CHECK, not open to extension the way the frontend implies | [Site Planner / comps] | #comps #site-planner | ⏳ live — awaiting |
+| B978276 | Deleting the brochure a site plan is built from silently cascades, and a resulting failure names a table the user has never heard of | [Site Planner / doc-review / library] | #comps #site-planner #doc-review #files | ⏳ live — awaiting |
+| B978275 | No soft delete and no revision guard on `site_plan_overlays`, unlike every sibling table | [Site Planner / comps] | #comps #site-planner | ⏳ live — awaiting |
+| B978274 | Deleting a site plan with comps pinned to it fails with a raw Postgres constraint error instead of a clear, proactive message | [Site Planner / comps] | #comps #site-planner | ⏳ live — awaiting |
+| B978273 | A teammate can see a shared overlay's ROW but its raster image 403s, because two different `team_id` columns govern the two checks | [Site Planner / comps] | #comps #site-planner #doc-review | ⏳ live — awaiting |
+| B978272 | Overlay placement changes silently left every pinned comp's map position stale | [Site Planner / comps] | #comps #site-planner #doc-review | ⏳ live — awaiting |
+| B972513 | Compress the site-plan overlay raster: cap resolution, switch PNG→JPEG, add a list-row thumbnail | [Site Planner / comps] | #comps #site-planner #doc-review #files | ⏳ live — awaiting |
+| B972512 | Site-plan overlay save fails live with a raw Postgres constraint message (`review_user_id` NOT NULL, no default) | [Site Planner / comps] | #comps #site-planner #doc-review | ⏳ live — awaiting |
 | B972225 | Rework B948496's site-plan placement to direct manipulation + drag-and-drop (no control-point wizard, no scale-check step) | [Site Planner / comps] | #comps #site-planner #doc-review #files #gis | ⏳ live — awaiting |
 | B972224 | Rebuild the site-plans/comps left-hand map panel — scroll, actions, layout, provenance | [Site Planner / comps] | #comps #site-planner #ui | ⏳ live — awaiting |
-| B972512 | Site-plan overlay save fails live with a raw Postgres constraint message (`review_user_id` NOT NULL, no default) | [Site Planner / comps] | #comps #site-planner #doc-review | ⏳ live — awaiting |
-| B972513 | Compress the site-plan overlay raster: cap resolution, switch PNG→JPEG, add a list-row thumbnail | [Site Planner / comps] | #comps #site-planner #doc-review #files | ⏳ live — awaiting |
+| B965344 (×2) | Model cloud save writes ZERO rows / returns HTTP 400 on every write, even after `model_sheets` is migrated and RLS-verified working | [Model / persistence] | #model #persistence #sync #testing | ⏳ live — awaiting |
+| B948496 | Upload a site plan, place it on the map, and pin comps to buildings shown on it | [Site Planner / comps] | #comps #site-planner #doc-review #files #gis | ⏳ live — awaiting |
 | B941152 | Creating a comp from a multi-parcel selection silently does nothing on Enter | [Site Planner / comps] | #comps #site-planner #gis | ⏳ live — awaiting |
 | B922816 | One entry point for creating a plan, with "Select parcels" as the primary action | [Site Planner / Map] | #site-planner #ui | ⏳ live — awaiting |
 | B891184 | Build the Model module: a spreadsheet workspace for underwriting | [Model] | #model #persistence #ui #formula | ⏳ live — awaiting |
-| B881664 (×3) | Dashboard breadcrumb on Schedule reaches the dashboard route then bounces back to the project | [App shell / Site Planner boot-resume] | #site-planner #scheduler #ui | ⏳ live — awaiting |
+| B890560 | Reach the admin page from the account menu, and only when you are the admin | [Admin] | #admin #auth #ui | ⏳ live — awaiting |
 | B881668 | Prove the flood-check freshness states end to end | [Site Planner / Yield] | #site-planner #yield #floodplain #testing | ⏳ live — awaiting |
-| B877440 | A jurisdiction with no criteria on file renders a NAMED no-data state, never a Houston-derived placeholder number | [Site Planner / drainage] | #site-planner #floodplain #pond | ⏳ live — awaiting |
-| B877441 | "Request criteria for this county" button on the no-data state | [Site Planner / drainage] | #site-planner #floodplain #pond #persistence | ⏳ live — awaiting |
+| B881664 (×3) | Dashboard breadcrumb on Schedule reaches the dashboard route then bounces back to the project | [App shell / Site Planner boot-resume] | #site-planner #scheduler #ui | ⏳ live — awaiting |
 | B877442 | Admin page section: County criteria requests | [Admin] | #admin #site-planner | ⏳ live — awaiting |
-| B859504 | Map view Sites panel: kill the triple-status repeat, make acreage scannable, drop the useless status filter chip row | [Map view / site panel] | #site-planner #ui #persistence | ⏳ live — awaiting |
-| B845088 | Sites panel: shared-with shows the TEAM, never the roster | [Map view / site panel] | #site-planner #ui | ⏳ live — awaiting |
-| B845089 | Sites panel: right column is last edited, not acreage | [Map view / site panel] | #site-planner #ui #persistence | ⏳ live — awaiting |
+| B877440 | A jurisdiction with no criteria on file renders a NAMED no-data state, never a Houston-derived placeholder number | [Site Planner / drainage] | #site-planner #floodplain #pond | ⏳ live — awaiting |
 | B868960 | `fetchParcelSummaries` has the identical unbounded-select shape as `fetchElementRecency` and will fail the same silent way past 1,000 parcel rows | [Site Planner / elementApi] | #site-planner #persistence #gis | ⏳ live — awaiting |
-| B859505 | Right-click a site → "Pin to top" | [Map view / site panel] | #site-planner #ui #persistence | ⏳ live — awaiting |
 | B859506 | Drag a status group header to reorder Pursuit/Active/On Hold/Complete/Dead | [Map view / site panel] | #site-planner #ui #persistence #a11y | ⏳ live — awaiting |
-| B853266 | Project registry: three surfaces disagree about what a project is — an actively-worked project can be missing from its own switcher | [Projects / navigation] | #ui #site-planner #notes #library | ⏳ live — awaiting |
+| B859505 | Right-click a site → "Pin to top" | [Map view / site panel] | #site-planner #ui #persistence | ⏳ live — awaiting |
+| B859504 | Map view Sites panel: kill the triple-status repeat, make acreage scannable, drop the useless status filter chip row | [Map view / site panel] | #site-planner #ui #persistence | ⏳ live — awaiting |
 | B853267 | Searching the project switcher for the project you are currently in returns "No matching projects" | [Projects / navigation] | #ui #site-planner #notes #library | ⏳ live — awaiting |
-| B849344 | Sites panel + map pin read boundary/acreage from the dead legacy parcel mirror | [Site Planner / site-list] | #site-planner #parcel #persistence #ui | ⏳ live — awaiting |
+| B853266 | Project registry: three surfaces disagree about what a project is — an actively-worked project can be missing from its own switcher | [Projects / navigation] | #ui #site-planner #notes #library | ⏳ live — awaiting |
+| B850434 | Comps/site-plan panel: some buttons appeared to need TWO clicks (Edit/Delete on comp detail, Place on map) — investigated hard, not reproduced; needs a live signed-in re-test | [Site Planner / comps] | #site-planner #comps #ui | ⏳ live — awaiting |
+| B850432 | A placed site plan overlay never renders on the map — a silent zoom gate hides it, with nothing telling you why | [Site Planner / comps] | #site-planner #comps #ui | ⏳ live — awaiting |
+| B850019 | Comp map markers wear a soft blurred halo instead of a crisp white border `[Site Planner / comps][map]` | — | #comps #site-planner #ui | ⏳ live — awaiting |
+| B850016 | Location "Set" arms placement, then the Paste-comps panel keeps covering the map it just told you to click | [Site Planner / comps] | #comps #site-planner #ui | ⏳ live — awaiting |
 | B849345 | Drop "click to open" filler from the map pin tooltip | [Site Planner / site-list] | #site-planner #ui | ⏳ live — awaiting |
-| B832385 | Add a free-rent field to lease comps | [Site Planner / comps] | #comps #persistence | ⏳ live — awaiting |
-| B832387 | Comp detail header: "← All comps" back link collides with the type badge | [Site Planner / comps] | #comps #ui | ⏳ live — awaiting |
-| B832390 | Add tenant/owner-developer (lease), seller/buyer (land) and seller/buyer-user (building sale) party fields to comps | [Site Planner / comps] | #comps #persistence #ui | ⏳ live — awaiting |
+| B849344 | Sites panel + map pin read boundary/acreage from the dead legacy parcel mirror | [Site Planner / site-list] | #site-planner #parcel #persistence #ui | ⏳ live — awaiting |
+| B848833 | A soft-deleted project stays fully open and writable; breadcrumb degrades to the placeholder word "Project" | [Site Planner] | #site-planner #persistence #model #ui #testing | ⏳ live — awaiting |
+| B846384 | Richfield editing-session degradation: the drawing↔basemap registration effect's forced-layout cost (B1359, already costed, never shipped) is the strongest lead; the persistent out-of-range condition never self-heals and its telemetry was unrate-limited | [Site Planner / perf] | #site-planner #perf #gis | ⏳ live — awaiting |
+| B845089 | Sites panel: right column is last edited, not acreage | [Map view / site panel] | #site-planner #ui #persistence | ⏳ live — awaiting |
+| B845088 | Sites panel: shared-with shows the TEAM, never the roster | [Map view / site panel] | #site-planner #ui | ⏳ live — awaiting |
+| B842928 | Map finder road-name labels render oversized/blurry: the Reference layer lacked `detectRetina`, so it fetched tiles one native zoom level (and under real latency, several more) behind the aerial | [Site Planner / map] | #site-planner #gis #ui | ⏳ live — awaiting |
+| B842866 | Report intake table and owner-only review view | [Admin] | #admin #infra #telemetry | ⏳ live — awaiting |
+| B842865 | Hoist the performance recorder's manual trigger to the shell — AUDIT-FIRST found the recorder engine was already global; the gap was narrower | [Shell] | #perf #telemetry | ⏳ live — awaiting |
+| B842864 | Global help & report control in the app shell | [Shell] | #ui #telemetry | ⏳ live — awaiting |
+| B842531 | Panel header can scroll away, losing track of which place you're editing | [Food] | #food #ui #testing | ⏳ live — awaiting |
+| B842530 | Visit card layout: date and ··· were flung to the far edge, out of line with the rest of the card | [Food] | #food #ui #testing | ⏳ live — awaiting |
+| B842529 | Edit a past visit | [Food] | #food #persistence #ui #testing | ⏳ live — awaiting |
+| B842528 | Markers draw at wrong geographic positions during a zoom (regression from B707841) | [Food] | #food #ui #testing | ⏳ live — awaiting |
 | B832391 | Party names autocomplete from what has already been entered | [Site Planner / comps] | #comps #ui #a11y | ⏳ live — awaiting |
+| B832390 | Add tenant/owner-developer (lease), seller/buyer (land) and seller/buyer-user (building sale) party fields to comps | [Site Planner / comps] | #comps #persistence #ui | ⏳ live — awaiting |
+| B832387 | Comp detail header: "← All comps" back link collides with the type badge | [Site Planner / comps] | #comps #ui | ⏳ live — awaiting |
+| B832385 | Add a free-rent field to lease comps | [Site Planner / comps] | #comps #persistence | ⏳ live — awaiting |
 | B831779 | Remove the red "Go" button; replace it with a live suggestion list | [Site Planner / Map] | #site-planner #ui #comps | ⏳ live — awaiting |
+| B829616 | Quarter-point rating increments (0.25, not just 0.5) | [Food] | #food #persistence #ui #testing | ⏳ live — awaiting |
+| B817553 | Logging a visit gives no confirmation that anything happened | [Food] | #food #ui #testing | ⏳ live — awaiting |
+| B817552 | Street basemap got watermarked by CARTO — moved to Esri | [Food] | #food #ui #perf #testing | ⏳ live — awaiting |
 | B802400 | Contour lines: cold DEM/county-contour tile fetches through `/api/gis-cache`, not paint compute, were the confirmed source of "the contours thing seems to make my computer lag" — round 5 finds and fixes the ACTUAL multi-second block: a burst of tiles applied to Leaflet's canvas renderer inside one uninterrupted rAF-rooted call stack | [Site Planner / Terrain] | #site-planner #gis #perf #ui | ⏳ live — awaiting |
-| B800848 | Contour lines layer makes the app lag while panning/zooming: every moveend rebuilt EVERY contour polyline and label in view, not just the newly-exposed tile's | [Site Planner / Terrain] | #site-planner #gis #perf | ⏳ live — awaiting |
 | B800849 | Contour lines: `composeContourPaint`'s `joinSeams`/`pickLabels` re-derived their own sort key on every `.sort()` comparator call | [Site Planner / Terrain] | #site-planner #gis #perf | ⏳ live — awaiting |
+| B800848 | Contour lines layer makes the app lag while panning/zooming: every moveend rebuilt EVERY contour polyline and label in view, not just the newly-exposed tile's | [Site Planner / Terrain] | #site-planner #gis #perf | ⏳ live — awaiting |
 | B794960 | Print/PDF export: the callout leader's arrowhead (and easement/encumbrance hatch tiles) print far larger than they show on the canvas | [Site Planner / export] | #site-planner #export #markup | ⏳ live — awaiting |
-| B648353 | Undo/Redo have no history dropdown; Excel is the named reference | [Site Planner / toolbar] | #site-planner #ui #sync #testing | ⏳ live — awaiting |
-| B765985 | Picking a print frame should open a dedicated compose screen, not float a bar over the working canvas | [Site Planner / export] | #site-planner #export #ui | ⏳ live — awaiting |
 | B784832 | Undo does not restore a deleted callout; only "el" elements resurrect | [Site Planner / undo] | #site-planner #sync #testing | ⏳ live — awaiting |
-| B770896 | Cloud tool: kill the draw-mode popover (click=vertex, drag=freehand, one ring), move arc size into Properties, and account for the 917 lines against a plain polygon | [Site Planner / markup] | #site-planner #markup #ui #testing | ⏳ live — awaiting |
 | B780448 | Complete-beats-all: a task marked Complete without percentComplete also reaching 100 rendered RED once its finish date passed | [Scheduler] | #scheduler #ui #testing | ⏳ live — awaiting |
-| B752848 | Overdue task not turning red: `healthOverride`, set by ANY ordinary status click, silently and permanently blocked the health-rule engine | [Scheduler] | #scheduler #ui #testing | ⏳ live — awaiting |
+| B770896 | Cloud tool: kill the draw-mode popover (click=vertex, drag=freehand, one ring), move arc size into Properties, and account for the 917 lines against a plain polygon | [Site Planner / markup] | #site-planner #markup #ui #testing | ⏳ live — awaiting |
 | B768160 | OCR scanned deed PDFs in the metes-and-bounds plotter | [Site Planner / land] | #site-planner #files | ⏳ live — awaiting |
+| B765985 | Picking a print frame should open a dedicated compose screen, not float a bar over the working canvas | [Site Planner / export] | #site-planner #export #ui | ⏳ live — awaiting |
 | B758544 | Cloud (revision cloud) markup tool, PHASE 1 | [Site Planner / markup] | #site-planner #markup #ui #export | ⏳ live — awaiting |
 | B757920 | Roads categorically excluded their own ENDPOINTS from vertex deletion, and the disabled reason was FALSE | [Site Planner] | #site-planner #road #ui #testing | ⏳ live — awaiting |
+| B752848 | Overdue task not turning red: `healthOverride`, set by ANY ordinary status click, silently and permanently blocked the health-rule engine | [Scheduler] | #scheduler #ui #testing | ⏳ live — awaiting |
 | B750096 | The road-drawing "Done" chip is a click target parked on top of the drawing surface | [Site Planner / SitePlanner] | #site-planner #road #ui | ⏳ live — awaiting |
-| B742369 | A footprint corner drag could overshoot and write a self-crossing polygon that reached the database before the (release-only) revert guard ever ran | [Site Planner / footprintEdit] | #site-planner #ui #testing | ⏳ live — awaiting |
 | B748960 | Canvas furniture stacks on itself under narrow viewports — the Comps/Layers collision class, generalized | [Site Planner + Map] | #site-planner #ui #mobile #a11y | ⏳ live — awaiting |
+| B742369 | A footprint corner drag could overshoot and write a self-crossing polygon that reached the database before the (release-only) revert guard ever ran | [Site Planner / footprintEdit] | #site-planner #ui #testing | ⏳ live — awaiting |
 | B734529 | "Find my location" spins forever in a policy-blocked browser, can fly to a 20-50 km IP guess, and has no cancel | [Site Planner / Map] | #site-planner #ui #mobile #a11y | ⏳ live — awaiting |
-| B719776 | A healthy, permission-clean overlay (Richfield/Quiddity site plan) does not render — the client fetch-and-rasterise path, not the data | [Site Planner / overlay] | #site-planner #persistence #perf | ⏳ live — awaiting |
 | B719777 | Broken overlay reference: bytes confirmed gone forever, and the app offered exactly one way out the owner didn't want | [Site Planner / overlay] | #site-planner #persistence #ui | ⏳ live — awaiting |
-| B711328 | Leasing Comps: a global comp layer (land / building sale / lease), pin-or-parcel anchored, team-visible & owner-editable, basis-normalized | [Site Planner / comps] | #site-planner #comps #gis #sync | ⏳ live — awaiting |
-| B711329 | KML import/export for Leasing Comps (the Google Maps migration path) — filed, not built this session | [Site Planner / comps] | #site-planner #comps #export | ⏳ live — awaiting |
-| B711330 | Jordan Bookstaff's plans all carry `team_id: null`, so nothing team-shared (including Leasing Comps) reaches him — filed, not built this session | [Site Planner / teams] | #site-planner #auth #sync | ⏳ live — awaiting |
-| B705200 (×2) | Measurement vertex dots render on a shape that is NOT selected: an editing-affordance circle painted unconditionally, with no selection gate at all | [Site Planner / selection] | #site-planner #ui #selection | ⏳ live — awaiting |
+| B719776 | A healthy, permission-clean overlay (Richfield/Quiddity site plan) does not render — the client fetch-and-rasterise path, not the data | [Site Planner / overlay] | #site-planner #persistence #perf | ⏳ live — awaiting |
+| B711908 | Ops panel: outstanding work + Claude Code session hygiene | [Platform / Admin / Ops] | #admin #infra | ⏳ live — awaiting |
+| B711907 | In-app Help + support tickets | [Platform / Admin / Support] | #admin #persistence #ui | ⏳ live — awaiting |
+| B711906 | Issues view over `client_errors` | [Platform / Admin] | #admin #infra #testing | ⏳ live — awaiting |
+| B711905 | Usage overview, derived from existing data | [Platform / Admin] | #admin #site-planner #ui | ⏳ live — awaiting |
 | B711904 | Admin page shell + admin-only access path | [Platform / Admin] | #admin #auth #infra #ui | ⏳ live — awaiting |
 | B711792 | Deleting a building read the owner his own bonded assembly back as six "you just edited" banners (the SEVENTH round on the same-account-echo family) | [Site Planner / persistence · UI] | #site-planner #persistence #sync #ui | ⏳ live — awaiting |
+| B711330 | Jordan Bookstaff's plans all carry `team_id: null`, so nothing team-shared (including Leasing Comps) reaches him — filed, not built this session | [Site Planner / teams] | #site-planner #auth #sync | ⏳ live — awaiting |
+| B711329 | Export a SITE RECORD to Google Earth (KMZ) from a right-click on its comp marker | [Site Planner / comps · map] | #site-planner #comps #export | ⏳ live — awaiting |
+| B711328 | Leasing Comps: a global comp layer (land / building sale / lease), pin-or-parcel anchored, team-visible & owner-editable, basis-normalized | [Site Planner / comps] | #site-planner #comps #gis #sync | ⏳ live — awaiting |
 | B709696 | A place missing from the food snapshot silently returned ten wrong restaurants, with no "no match" signal | [Food / search] | #food #testing | ⏳ live — awaiting |
-| B709697 | A low-confidence corrupted row (concatenated addresses, wrong coordinates) outranked two clean records for the same restaurant; corporate-filing names and duplicate source records pollute results | [Food / search] | #food #testing | ⏳ live — awaiting |
+| B707842 | Dish-level "want to try" on a place you've already visited | [Food] | #food #persistence #testing | ⏳ live — awaiting |
+| B707841 | Scale markers continuously during a zoom animation, not just at zoomend | [Food] | #food #ui #perf #testing | ⏳ live — awaiting |
+| B707840 | Consolidate the zoom-gate/capped/"search live for more here" notices to one bottom stack | [Food] | #food #ui #testing | ⏳ live — awaiting |
+| B705200 (×2) | Measurement vertex dots render on a shape that is NOT selected: an editing-affordance circle painted unconditionally, with no selection gate at all | [Site Planner / selection] | #site-planner #ui #selection | ⏳ live — awaiting |
 | B703776 | Dock doors always export, and there is no flag and no checkbox for them | [Site Planner / export] | #site-planner #export #ui | ⏳ live — awaiting |
 | B688864 | "Map references" Aerial backdrop: Hide and Remove change nothing you can see, and Remove doesn't stick | [Site Planner] | #site-planner #gis #persistence #ui | ⏳ live — awaiting |
+| B685200 | A Colorado sub-source is offered on a Texas site (and vice versa) inside a merge group | [Site Planner / Layers] | #gis #site-planner #ui | ⏳ live — awaiting |
 | B683568 | The View card read a mid-load empty snapshot as "nothing to hide": a signed-in plan's real content vanished from the menu until its rows arrived | [Site Planner / view] | #site-planner #view #ui #sync #testing | ⏳ live — awaiting |
+| B681520 | Attribution painted through the detail sheet; move it off the bottom edge entirely | [Food] | #food #ui #testing | ⏳ live — awaiting |
+| B677040 | Rebuild the place detail panel: it reads like a debug view, not the main screen of the module | [Food] | #food #ui #testing | ⏳ live — awaiting |
 | B672115 | The planner must route a parcel click by WHERE IT IS, like the map already does | [Site Planner] | #site-planner #gis #ui | ⏳ live — awaiting |
 | B672114 | The error blamed his aim for the app's routing failure | [Site Planner] | #site-planner #gis #ui | ⏳ live — awaiting |
 | B672113 | A project the owner OWNS would not open on his own browser | [Site Planner] | #site-planner #auth #sync | ⏳ live — awaiting |
-| B677040 | Rebuild the place detail panel: it reads like a debug view, not the main screen of the module | [Food] | #food #ui #testing | ⏳ live — awaiting |
-| B651872 (×4) | Selecting a search result leaves the food map blank until you zoom or pan | [Food] | #food #gis #ui #testing | ⏳ live — awaiting |
-| B681520 | Attribution painted through the detail sheet; move it off the bottom edge entirely | [Food] | #food #ui #testing | ⏳ live — awaiting |
-| B707840 | Consolidate the zoom-gate/capped/"search live for more here" notices to one bottom stack | [Food] | #food #ui #testing | ⏳ live — awaiting |
-| B707841 | Scale markers continuously during a zoom animation, not just at zoomend | [Food] | #food #ui #perf #testing | ⏳ live — awaiting |
-| B707842 | Dish-level "want to try" on a place you've already visited | [Food] | #food #persistence #testing | ⏳ live — awaiting |
-| B817552 | Street basemap got watermarked by CARTO — moved to Esri | [Food] | #food #ui #perf #testing | ⏳ live — awaiting |
-| B817553 | Logging a visit gives no confirmation that anything happened | [Food] | #food #ui #testing | ⏳ live — awaiting |
-| B829616 | Quarter-point rating increments (0.25, not just 0.5) | [Food] | #food #persistence #ui #testing | ⏳ live — awaiting |
-| B842528 | Markers draw at wrong geographic positions during a zoom (regression from B707841) | [Food] | #food #ui #testing | ⏳ live — awaiting |
-| B842529 | Edit a past visit | [Food] | #food #persistence #ui #testing | ⏳ live — awaiting |
-| B842530 | Visit card layout: date and ··· were flung to the far edge, out of line with the rest of the card | [Food] | #food #ui #testing | ⏳ live — awaiting |
-| B842531 | Panel header can scroll away, losing track of which place you're editing | [Food] | #food #ui #testing | ⏳ live — awaiting |
 | B669312 | "Want to try" wishlist: flag a place before you've ever been | [Food] | #food #ui #testing | ⏳ live — awaiting |
-| B668193 | Restaurant pins are too small to tap on mobile | [Food] | #food #ui #testing | ⏳ live — awaiting |
 | B668194 | Logging a visit leaves what I just typed sitting in the boxes | [Food] | #food #ui #testing | ⏳ live — awaiting |
-| B616672 | The right-click share control does not say what it shares | [Site Planner / sharing] | #site-planner #auth #ui | ⏳ live — awaiting |
-| B616673 | A teammate can see only one plan of a shared project though the database returns all of them | [Site Planner / sharing] | #site-planner #auth #sync #persistence | ⏳ live — awaiting |
-| B568400 | /food: a private place-tracker for where the owner has eaten | [Food] | #food #infra #perf #testing | ⏳ live — awaiting |
-| B575952 | /food is an unlisted route, not a workspace tab | [Food] | #food #ui #testing #perf | ⏳ live — awaiting |
-| B576000 | planyr.io/food (no hash) 404s — the clean path he actually types | [Food] | #food #infra #testing | ⏳ live — awaiting |
-| B576001 | Food pins look geographically lopsided at metro-wide zoom | [Food] | #food #gis #testing | ⏳ live — awaiting |
-| B623728 | Food map: cleaner basemap + marker clustering | [Food] | #food #ui #testing | ⏳ live — awaiting |
-| B623776 | Food rating scale: 1-10, not 1-5 | [Food] | #food #testing | ⏳ live — awaiting |
-| B626576 | Food rating: half-point steps via ONE slider, and the visit date must never default | [Food] | #food #ui #testing | ⏳ live — awaiting |
-| B629376 | Food: search bar over the whole snapshot, his places first | [Food] | #food #ui #testing #gis | ⏳ live — awaiting |
-| B632176 | Food search results dropdown was clipped to nothing by the header toolbar's `overflow: hidden` | [Food] | #food #ui #testing | ⏳ live — awaiting |
-| B632177 | Food map: satellite view toggle | [Food] | #food #ui #testing #gis | ⏳ live — awaiting |
-| B632178 | Food: expand the reference snapshot to Dallas-Fort Worth + Austin, metro-parameterised loader | [Food] | #food #gis #perf #testing | ⏳ live — awaiting |
-| B634980 | db/food.sql drifted from production: the search RPC's distance-ranking rewrite never actually landed in the committed file | [Food] | #food #testing | ⏳ live — awaiting |
-| B634976 | Selecting a place isn't visually obvious — unmistakable pin, tied panel, centred pan, list row highlight, Escape clears | [Food] | #food #ui #testing | ⏳ live — awaiting |
-| B634977 | Categories render lowercase; address carries a noisy ZIP+4 | [Food] | #food #ui #testing | ⏳ live — awaiting |
-| B634978 | Add an ambiance rating alongside the food rating | [Food] | #food #ui #testing | ⏳ live — awaiting |
-| B634979 | Log the dishes worth ordering again | [Food] | #food #ui #testing | ⏳ live — awaiting |
-| B634981 | Satellite toggle crashed the whole /food module | [Food] | #food #ui #testing | ⏳ live — awaiting |
+| B668193 | Restaurant pins are too small to tap on mobile | [Food] | #food #ui #testing | ⏳ live — awaiting |
+| B662048 | Woods Road "Concept A 1M SF": 57 elements a teammate deleted from the wrong plan, restored + ROOT-CAUSED & FIXED | [Site Planner / persistence] | #site-planner #persistence #sync | ⏳ live — awaiting |
+| B651872 (×4) | Selecting a search result leaves the food map blank until you zoom or pan | [Food] | #food #gis #ui #testing | ⏳ live — awaiting |
+| B648353 | Undo/Redo have no history dropdown; Excel is the named reference | [Site Planner / toolbar] | #site-planner #ui #sync #testing | ⏳ live — awaiting |
 | B634982 | "add maui too" — the loader-parameterisation test | [Food] | #food #gis #testing | ⏳ live — awaiting |
+| B634981 | Satellite toggle crashed the whole /food module | [Food] | #food #ui #testing | ⏳ live — awaiting |
+| B634980 | db/food.sql drifted from production: the search RPC's distance-ranking rewrite never actually landed in the committed file | [Food] | #food #testing | ⏳ live — awaiting |
+| B634979 | Log the dishes worth ordering again | [Food] | #food #ui #testing | ⏳ live — awaiting |
+| B634978 | Add an ambiance rating alongside the food rating | [Food] | #food #ui #testing | ⏳ live — awaiting |
+| B634977 | Categories render lowercase; address carries a noisy ZIP+4 | [Food] | #food #ui #testing | ⏳ live — awaiting |
+| B634976 | Selecting a place isn't visually obvious — unmistakable pin, tied panel, centred pan, list row highlight, Escape clears | [Food] | #food #ui #testing | ⏳ live — awaiting |
+| B632178 | Food: expand the reference snapshot to Dallas-Fort Worth + Austin, metro-parameterised loader | [Food] | #food #gis #perf #testing | ⏳ live — awaiting |
+| B632177 | Food map: satellite view toggle | [Food] | #food #ui #testing #gis | ⏳ live — awaiting |
+| B632176 | Food search results dropdown was clipped to nothing by the header toolbar's `overflow: hidden` | [Food] | #food #ui #testing | ⏳ live — awaiting |
+| B629376 | Food: search bar over the whole snapshot, his places first | [Food] | #food #ui #testing #gis | ⏳ live — awaiting |
+| B626576 | Food rating: half-point steps via ONE slider (×2), and the visit date must never default | [Food] | #food #ui #testing | ⏳ live — awaiting |
+| B623776 | Food rating scale: 1-10, not 1-5 | [Food] | #food #testing | ⏳ live — awaiting |
+| B623728 | Food map: cleaner basemap + marker clustering | [Food] | #food #ui #testing | ⏳ live — awaiting |
+| B616673 | A teammate can see only one plan of a shared project though the database returns all of them | [Site Planner / sharing] | #site-planner #auth #sync #persistence | ⏳ live — awaiting |
+| B616672 | The right-click share control does not say what it shares | [Site Planner / sharing] | #site-planner #auth #ui | ⏳ live — awaiting |
+| B603840 | Remove the manual-override badge from the schedule status pickers | [Scheduler] | #scheduler #ui #testing | ⏳ live — awaiting |
+| B576001 | Food pins look geographically lopsided at metro-wide zoom | [Food] | #food #gis #testing | ⏳ live — awaiting |
+| B576000 | planyr.io/food (no hash) 404s — the clean path he actually types | [Food] | #food #infra #testing | ⏳ live — awaiting |
+| B575952 | /food is an unlisted route, not a workspace tab | [Food] | #food #ui #testing #perf | ⏳ live — awaiting |
+| B568400 | /food: a private place-tracker for where the owner has eaten | [Food] | #food #infra #perf #testing | ⏳ live — awaiting |
 | B559376 | The successor prompt could mark a successor In Progress but never Complete | [Schedule] | #scheduler #ui | ⏳ live — awaiting |
 | B550512 | Export-time aerial: a budget-driven sharpen pass reaches one zoom level deeper when it can, bounded to ~1s, never a stall | [Site Planner / export] | #site-planner #export #gis #perf #stitching | ⏳ live — awaiting |
-| B548064 | "Send to Back" silently did half the job against a building, then greyed itself to claim it was done | [Site Planner / markup] | #site-planner #markup #ui #selection #export | ⏳ live — awaiting |
 | B548065 | A markup sent behind a building could not be right-clicked back: the send-behind door was one-way | [Site Planner / selection] | #site-planner #markup #ui #selection | ⏳ live — awaiting |
-| B519907 | An undo rebuilt the entire basemap, because `origin` came back as a new object | [Site Planner / Map] | #site-planner #perf #gis #view | ⏳ live — awaiting |
+| B548064 | "Send to Back" silently did half the job against a building, then greyed itself to claim it was done | [Site Planner / markup] | #site-planner #markup #ui #selection #export | ⏳ live — awaiting |
 | B520560 | The owner's two split decisions, shipped: every piece kept, and the pieces numbered off the original | [Site Planner / parcels] | #site-planner #parcel #geometry #ui | ⏳ live — awaiting |
+| B519907 | An undo rebuilt the entire basemap, because `origin` came back as a new object | [Site Planner / Map] | #site-planner #perf #gis #view | ⏳ live — awaiting |
 | B512672 | Tab on the FIRST item of a list now INDENTS IT, and never invents an empty parent bullet | [Notes] | #notes #ui | ⏳ live — awaiting |
-| B342996 (×3) | A device whose tree is 98 revisions STALE is also flagged dirty, so a merge lets it overwrite newer titles | [Notes] | #notes #sync | ⏳ live — awaiting |
-| B371362 | The header offered a centred slot the jurisdiction pill could not use, so the pill went blank with room beside it | [Site Planner / UI] | #site-planner #ui | ⏳ live — awaiting |
 | B505664 | NO-ONE-OWNS-A-COMPOSITE: name the pattern that produced three defects in one day | [Docs / rules] | #infra #testing | ⏳ live — awaiting |
 | B503184 | Doc Review's Layers toggle hid nothing you could see: the sharp tile painted over the backdrop was never re-rendered | [Doc Review] | #doc-review #ui #testing | ⏳ live — awaiting |
-| B494048 | Zoom to fit framed the view around content that is not on screen, and the AUDIT that found it | [Site Planner / view] | #site-planner #view #testing | ⏳ live — awaiting |
-| B494049 | Three snap magnets could be pulled by an object you cannot see | [Site Planner / selection] | #site-planner #selection #geometry | ⏳ live — awaiting |
-| B494050 | The PRINT CROP was framed around hidden content, so the sheet wasted paper | [Site Planner / export] | #site-planner #export | ⏳ live — awaiting |
 | B494051 | Element labels dodged a measurement chip that was not on screen | [Site Planner / view] | #site-planner #view | ⏳ live — awaiting |
-| B3296 | Unchecking Roads hid everything about a road EXCEPT the road: the dissolved pavement kept painting | [Site Planner / view] | #site-planner #road #ui #testing | ⏳ live — awaiting |
-| B3297 | Delete did nothing on a selected area measurement: a slider and a dropdown were eating the key, and the second press said nothing at all | [Site Planner / keyboard] | #site-planner #keyboard #selection #ui #testing | ⏳ live — awaiting |
+| B494050 | The PRINT CROP was framed around hidden content, so the sheet wasted paper | [Site Planner / export] | #site-planner #export | ⏳ live — awaiting |
+| B494049 | Three snap magnets could be pulled by an object you cannot see | [Site Planner / selection] | #site-planner #selection #geometry | ⏳ live — awaiting |
+| B494048 | Zoom to fit framed the view around content that is not on screen, and the AUDIT that found it | [Site Planner / view] | #site-planner #view #testing | ⏳ live — awaiting |
 | B487600 | Deleting a picture from one plan DESTROYED it in every plan sharing it — a ref-count that could only see the current plan | [Site Planner / storage] | #site-planner #persistence #files #sync | ⏳ live — awaiting |
-| B367298 | The pill cut a jurisdiction MID-WORD on the two longest labels, and its shortener could not save them | [Site Planner / UI] | #site-planner #ui | ⏳ live — awaiting |
 | B484337 | The tab stops saving and the screen says "synced" | [Site Planner / persistence · UI] | #site-planner #sync #ui | ⏳ live — awaiting |
-| B463920 | The Enter that accepted the successor prompt re-opened the status menu it had just closed | [Scheduler] | #scheduler #ui | ⏳ live — awaiting |
+| B472048 | An operation envelope: who did a write, and what operation it was part of | [Site Planner / data] | #site-planner #persistence #infra | ⏳ live — awaiting |
 | B463921 | A press inside a floating menu armed drag-select in the grid cell underneath it | [Scheduler] | #scheduler #ui #selection | ⏳ live — awaiting |
+| B463920 | The Enter that accepted the successor prompt re-opened the status menu it had just closed | [Scheduler] | #scheduler #ui | ⏳ live — awaiting |
 | B463072 | A summary row's Duration cell printed the stale leftover: 40 working days rendered as "0d" | [Schedule] | #scheduler #ui #export | ⏳ live — awaiting |
 | B456208 | The Owner field turned any typo into a person, silently | [Scheduler] | #scheduler #ui #persistence | ⏳ live — awaiting |
 | B455360 | Parcel split only accepted trivial cuts; it now takes a general polyline cut | [Site Planner / parcels] | #site-planner #parcel #geometry #ui | ⏳ live — awaiting |
-| B443248 | A successor of a SUMMARY row was scheduled off the summary's collapsed START, not its real FINISH | [Schedule] | #scheduler #gantt | ⏳ live — awaiting |
-| B443249 | A predecessor that drives NOTHING looked identical to one that does | [Schedule] | #scheduler #ui | ⏳ live — awaiting |
-| B443250 | A pinned start that beats its predecessor chain won silently | [Schedule] | #scheduler #ui | ⏳ live — awaiting |
 | B447472 | `assembly_digest()` had no kind predicate, so the two sides of the group revision digested DIFFERENT MEMBER SETS | [Site Planner / Persistence] | #site-planner #persistence #sync #infra | ⏳ live — awaiting |
 | B443536 | The Owner cell ate the character that opened it: typing `Scott` saved `cott` | [Scheduler] | #scheduler #ui | ⏳ live — awaiting |
+| B443250 | A pinned start that beats its predecessor chain won silently | [Schedule] | #scheduler #ui | ⏳ live — awaiting |
+| B443249 | A predecessor that drives NOTHING looked identical to one that does | [Schedule] | #scheduler #ui | ⏳ live — awaiting |
+| B443248 | A successor of a SUMMARY row was scheduled off the summary's collapsed START, not its real FINISH | [Schedule] | #scheduler #gantt | ⏳ live — awaiting |
 | B442688 | The View menu toggled ORNAMENT when what he reaches for is hiding a CLASS of content | [Site Planner / UI] | #site-planner #ui | ⏳ live — awaiting |
-| B435536 | An easement's label rendered at a fixed screen size, so it dwarfed the easement it named | [Site Planner] | #site-planner #ui #markup | ⏳ live — awaiting |
 | B435537 | Baytown's flood ordinance, transcribed: the higher of the 500-year and BFE + 24 in | [Site Planner / drainage] | #site-planner #floodplain #gis | ⏳ live — awaiting |
+| B435536 | An easement's label rendered at a fixed screen size, so it dwarfed the easement it named | [Site Planner] | #site-planner #ui #markup | ⏳ live — awaiting |
 | B420256 | One id can name TWO live rows, and the commit results were keyed by id alone | [Site Planner] | #site-planner #sync #persistence | ⏳ live — awaiting |
 | B407328 | The screening hydrology engine rode the boot path of every page load | [Site Planner / perf] | #site-planner #perf #floodplain | ⏳ live — awaiting |
-| B393168 | `BT_City_Limit` is THREE jurisdiction classes in one layer; only `FEATURE='CITY'` is full purpose | [Site Planner / GIS] | #site-planner #gis | ⏳ live — awaiting |
-| B393169 | A jurisdiction share must be an AREA fraction on the real ring, at stated tolerance, with the polygon class named | [Site Planner / GIS] | #site-planner #gis #testing | ⏳ live — awaiting |
-| B393170 | Grand Port read "unincorporated, no ETJ" and is neither; Goose Creek's split is asserted by area | [Site Planner / GIS] | #site-planner #gis #testing | ⏳ live — awaiting |
 | B393172 | A plain selection click pushed an undo entry that changed nothing | [Site Planner] | #site-planner #selection #ui | ⏳ live — awaiting |
-| B391072 (×3) | A purged note reappeared in the LIVE list hours later, because rule 0 was CONDITIONAL | [Notes] | #notes #sync #persistence | ⏳ live — awaiting |
-| B391077 | Marquee-select several boxes and move them together | [Notes] | #notes #ui | ⏳ live — awaiting |
+| B393170 | Grand Port read "unincorporated, no ETJ" and is neither; Goose Creek's split is asserted by area | [Site Planner / GIS] | #site-planner #gis #testing | ⏳ live — awaiting |
+| B393169 | A jurisdiction share must be an AREA fraction on the real ring, at stated tolerance, with the polygon class named | [Site Planner / GIS] | #site-planner #gis #testing | ⏳ live — awaiting |
+| B393168 | `BT_City_Limit` is THREE jurisdiction classes in one layer; only `FEATURE='CITY'` is full purpose | [Site Planner / GIS] | #site-planner #gis | ⏳ live — awaiting |
 | B391078 | Sweep the whole Notes module rather than following his reports | [Notes / Testing] | #notes #testing | ⏳ live — awaiting |
-| B385040 | Every Ctrl+Z tore down and re-added the whole GIS layer stack | [Site Planner / Layers] | #site-planner #gis #ui #perf | ⏳ live — awaiting |
-| B385041 | A building's dock walls moved because you resized it | [Site Planner / dockZones] | #site-planner #ui | ⏳ live — awaiting |
+| B391077 | Marquee-select several boxes and move them together | [Notes] | #notes #ui | ⏳ live — awaiting |
+| B391072 (×3) | A purged note reappeared in the LIVE list hours later, because rule 0 was CONDITIONAL | [Notes] | #notes #sync #persistence | ⏳ live — awaiting |
 | B385042 | The plan switcher stated the current plan's name three times | [Site Planner / UI] | #site-planner #ui | ⏳ live — awaiting |
+| B385041 | A building's dock walls moved because you resized it | [Site Planner / dockZones] | #site-planner #ui | ⏳ live — awaiting |
+| B385040 | Every Ctrl+Z tore down and re-added the whole GIS layer stack | [Site Planner / Layers] | #site-planner #gis #ui #perf | ⏳ live — awaiting |
 | B384064 | The header centre slot was centred on the LEFTOVER space, not on the header | [Site Planner / Shell] | #site-planner #ui | ⏳ live — awaiting |
 | B377891 | Stop telling the owner his teammate deleted his work when it was his own second tab | [Site Planner / UI] | #site-planner #ui #auth #sync | ⏳ live — awaiting |
-| B371360 | The +/− zoom gate is STILL too late, and the third value is OWNER-SET plus a viewport term | [Site Planner / UI] | #site-planner #ui #selection | ⏳ live — awaiting |
+| B371362 | The header offered a centred slot the jurisdiction pill could not use, so the pill went blank with room beside it | [Site Planner / UI] | #site-planner #ui | ⏳ live — awaiting |
 | B371361 | The jurisdiction pill covered the plan switcher at laptop width and ate its caret | [Site Planner / Shell] | #site-planner #ui | ⏳ live — awaiting |
-| B366384 | Sharing an ALREADY-SHARED project reported "this project isn't in the cloud yet" — a row COUNT read as EXISTENCE | [Site Planner / teams] | #site-planner #auth #sync | ⏳ live — awaiting |
-| B366385 | The sharing pointer never SURVIVED a pull, so every "is this shared?" indicator was blank at once | [Site Planner / teams] | #site-planner #auth #sync #persistence | ⏳ live — awaiting |
-| B366386 | Sharing a MULTI-PLAN project keyed on the drifting `group_id` COLUMN — the rename bug's shape, still latent | [Site Planner / teams] | #site-planner #auth #sync | ⏳ live — awaiting |
-| B366387 | The project switcher carried a second "All projects" button inches from the first | [Shared UI] | #ui | ⏳ live — awaiting |
-| B366388 | The switcher's second rename, and the hover-gated kebab that made removing it unsafe | [Shared UI] | #ui #testing | ⏳ live — awaiting |
-| B366389 (×2) | The Rename/Delete glyphs were a text pencil beside a colour emoji, and the sweep that followed | [Shared UI] | #ui | ⏳ live — awaiting |
-| B367296 | The jurisdiction badge joins a GOVERNING authority and a merely-adjacent city with the same separator | [Site Planner] | #site-planner #gis #floodplain #ui | ⏳ live — awaiting |
-| B367297 | The floodplain administrator's city was recovered by PARSING the jurisdiction badge | [Site Planner] | #site-planner #floodplain #gis | ⏳ live — awaiting |
+| B371360 | The +/− zoom gate is STILL too late, and the third value is OWNER-SET plus a viewport term | [Site Planner / UI] | #site-planner #ui #selection | ⏳ live — awaiting |
 | B369536 | The retention policy has never DELETED anything, and until 2026-09-18 that is indistinguishable from a DELETE that matches nothing | [Platform / Infra] | #infra #persistence #testing | ⏳ live — awaiting |
-| B364016 (×2) | Delete forever STILL did not stick, and now the purged note came back into the LIVE list | [Notes] | #notes #sync #persistence | ⏳ live — awaiting |
+| B367298 | The pill cut a jurisdiction MID-WORD on the two longest labels, and its shortener could not save them | [Site Planner / UI] | #site-planner #ui | ⏳ live — awaiting |
+| B367297 | The floodplain administrator's city was recovered by PARSING the jurisdiction badge | [Site Planner] | #site-planner #floodplain #gis | ⏳ live — awaiting |
+| B367296 | The jurisdiction badge joins a GOVERNING authority and a merely-adjacent city with the same separator | [Site Planner] | #site-planner #gis #floodplain #ui | ⏳ live — awaiting |
+| B366389 (×2) | The Rename/Delete glyphs were a text pencil beside a colour emoji, and the sweep that followed | [Shared UI] | #ui | ⏳ live — awaiting |
+| B366388 | The switcher's second rename, and the hover-gated kebab that made removing it unsafe | [Shared UI] | #ui #testing | ⏳ live — awaiting |
+| B366387 | The project switcher carried a second "All projects" button inches from the first | [Shared UI] | #ui | ⏳ live — awaiting |
+| B366386 | Sharing a MULTI-PLAN project keyed on the drifting `group_id` COLUMN — the rename bug's shape, still latent | [Site Planner / teams] | #site-planner #auth #sync | ⏳ live — awaiting |
+| B366385 | The sharing pointer never SURVIVED a pull, so every "is this shared?" indicator was blank at once | [Site Planner / teams] | #site-planner #auth #sync #persistence | ⏳ live — awaiting |
+| B366384 | Sharing an ALREADY-SHARED project reported "this project isn't in the cloud yet" — a row COUNT read as EXISTENCE | [Site Planner / teams] | #site-planner #auth #sync | ⏳ live — awaiting |
 | B357011 | EMPTYING THE BIN DID NOT STICK: a stale window resurrected every purged entry and pushed it to the cloud | [Notes] | #notes #sync #persistence | ⏳ live — awaiting |
-| B350000 | Everything right of about the three-quarter mark was CLAMPED to the right margin, and the clamped number was written to storage | [Notes] | #notes #ui #export | ⏳ live — awaiting |
-| B350002 | The bin cannot be judged: 21 entries, 16 of them "Untitled page", and no way to see what one was without restoring it | [Notes] | #notes #ui | ⏳ live — awaiting |
 | B350003 | The duplicate banner reported a finding nobody could act on: a copy in the bin, in a project that was already deleted | [Notes] | #notes #ui | ⏳ live — awaiting |
+| B350002 | The bin cannot be judged: 21 entries, 16 of them "Untitled page", and no way to see what one was without restoring it | [Notes] | #notes #ui | ⏳ live — awaiting |
+| B350000 | Everything right of about the three-quarter mark was CLAMPED to the right margin, and the clamped number was written to storage | [Notes] | #notes #ui #export | ⏳ live — awaiting |
+| B342996 (×3) | A device whose tree is 98 revisions STALE is also flagged dirty, so a merge lets it overwrite newer titles | [Notes] | #notes #sync | ⏳ live — awaiting |
 | B342992 | A real note is unreachable: a body with no tree node, in local AND cloud | [Notes] | #notes #sync #persistence | ⏳ live — awaiting |
 | B335985 | The Google Earth export emitted one placemark per dock door, and inherited a canvas display toggle to decide | [Site Planner / export] | #site-planner #export #ui | ⏳ live — awaiting |
-| B326416 | New projects are born shared with your team (site plans only), and NOTHING that already exists changes | [Site Planner / teams · RLS] | #site-planner #auth #persistence #infra | ⏳ live — awaiting |
-| B326417 | A shared plan the owner wants left alone: the per-plan view-only lock | [Site Planner / teams · RLS] | #site-planner #auth #ui | ⏳ live — awaiting |
-| B326418 | The switch: turn the shared default off, in Team settings, in one click | [Site Planner / teams · UI] | #site-planner #ui #auth | ⏳ live — awaiting |
 | B326419 | An existing project can never become shared by any ordinary write path — deny-by-default in Postgres | [Site Planner / teams · RLS] | #auth #infra #persistence #testing | ⏳ live — awaiting |
-| B323424 (×3) | A zoom-gated layer that is ON but not drawing looks identical to one that is broken | [Site Planner / Layers] | #gis #site-planner #ui | ⏳ live — awaiting |
-| B685200 | A Colorado sub-source is offered on a Texas site (and vice versa) inside a merge group | [Site Planner / Layers] | #gis #site-planner #ui | ⏳ live — awaiting |
+| B326418 | The switch: turn the shared default off, in Team settings, in one click | [Site Planner / teams · UI] | #site-planner #ui #auth | ⏳ live — awaiting |
+| B326417 | A shared plan the owner wants left alone: the per-plan view-only lock | [Site Planner / teams · RLS] | #site-planner #auth #ui | ⏳ live — awaiting |
+| B326416 | New projects are born shared with your team (site plans only), and NOTHING that already exists changes | [Site Planner / teams · RLS] | #site-planner #auth #persistence #infra | ⏳ live — awaiting |
 | B323425 | Contours paint, then disappear about two seconds after load | [Site Planner / Layers] | #gis #site-planner #perf | ⏳ live — awaiting |
-| B312545 | Settings had no information architecture: change password was the front door | [Platform / UI] | #ui #auth | ⏳ live — awaiting |
-| B286000 (×2) | The smooth-zoom toggle is an INTERFACE preference, and neither the plan menu nor the View menu is where one belongs | [Site Planner / UI] | #site-planner #ui #perf | ⏳ live — awaiting |
-| B315712 | A synced note can be written into a different project than the one it belongs to | [Notes] | #notes #sync #persistence | ⏳ live — awaiting |
-| B315716 | A note whose tree node is lost is swept off the device on every load and re-downloaded on every sync, reachable from nowhere | [Notes] | #notes #persistence #sync | ⏳ live — awaiting |
-| B316864 | The owner ANSWERED the type-layer question: the default stays absolute, and one explicit action can force an element across it | [Site Planner / elements] | #site-planner #ui #selection #export #persistence | ⏳ live — awaiting |
+| B323424 (×3) | A zoom-gated layer that is ON but not drawing looks identical to one that is broken | [Site Planner / Layers] | #gis #site-planner #ui | ⏳ live — awaiting |
 | B316865 | A right-click was swallowed by hover-armed parcel chrome, so right-clicking his pond opened the PARCEL menu — with "Delete parcel" in it | [Site Planner / selection] | #site-planner #ui #selection | ⏳ live — awaiting |
+| B316864 | The owner ANSWERED the type-layer question: the default stays absolute, and one explicit action can force an element across it | [Site Planner / elements] | #site-planner #ui #selection #export #persistence | ⏳ live — awaiting |
+| B315716 | A note whose tree node is lost is swept off the device on every load and re-downloaded on every sync, reachable from nowhere | [Notes] | #notes #persistence #sync | ⏳ live — awaiting |
+| B315712 | A synced note can be written into a different project than the one it belongs to | [Notes] | #notes #sync #persistence | ⏳ live — awaiting |
+| B312545 | Settings had no information architecture: change password was the front door | [Platform / UI] | #ui #auth | ⏳ live — awaiting |
 | B304177 | Every clipboard and plan-integrity harness counted the wrong thing: | [data-el-id] | #infra #testing #selection #site-planner | ⏳ live — awaiting |
-| B298756 | Notes took pictures and nothing else; a PDF, an XLSX or a DWG could not be attached | [Notes] | #notes #files #persistence #export | ⏳ live — awaiting |
 | B298758 | A note had no way to say "this bit matters", and no way to fold a section away | [Notes] | #notes #ui #export | ⏳ live — awaiting |
-| B298560 | The bare-earth elevation transect is re-fetched from USGS on every check, for a byte-identical query, at 1 to 7.7 seconds a time | [Site Planner / Yield] | #site-planner #yield #floodplain #perf #gis | ⏳ live — awaiting |
-| B298561 | The panel waits 1 to 7.7 seconds on the elevation call for answers that landed in 145 ms | [Site Planner / Yield] | #site-planner #yield #floodplain #perf #ui | ⏳ live — awaiting |
-| B298562 | A third-party call with no latency budget and no loud state | [Site Planner / Yield] | #site-planner #yield #floodplain #gis #ui | ⏳ live — awaiting |
+| B298756 | Notes took pictures and nothing else; a PDF, an XLSX or a DWG could not be attached | [Notes] | #notes #files #persistence #export | ⏳ live — awaiting |
 | B298563 | The check's own cost is invisible to the production recorder | [Platform / Infra] | #perf #infra #site-planner #yield #testing | ⏳ live — awaiting |
+| B298562 | A third-party call with no latency budget and no loud state | [Site Planner / Yield] | #site-planner #yield #floodplain #gis #ui | ⏳ live — awaiting |
+| B298561 | The panel waits 1 to 7.7 seconds on the elevation call for answers that landed in 145 ms | [Site Planner / Yield] | #site-planner #yield #floodplain #perf #ui | ⏳ live — awaiting |
+| B298560 | The bare-earth elevation transect is re-fetched from USGS on every check, for a byte-identical query, at 1 to 7.7 seconds a time | [Site Planner / Yield] | #site-planner #yield #floodplain #perf #gis | ⏳ live — awaiting |
 | B298401 | The flood layer can draw from a baked per-county archive instead of calling FEMA on every pan | [Site Planner / GIS] | #gis #floodplain #perf #site-planner | ⏳ live — awaiting |
-| B286309 | An unsettled FFE must render as the fallback authority, never as a blank | [Site Planner] | #floodplain #yield | ⏳ live — awaiting |
-| B291536 | Backspace at the start of a LIST ITEM restructured a whole region in one press | [Notes] | #notes #ui | ⏳ live — awaiting |
-| B286308 | TxGIO and the City of Baytown DISAGREE about whether Grand Port is inside the city | [Site Planner] | #gis #site-planner #floodplain | ⏳ live — awaiting |
-| B286304 | Wire Baytown's own boundary layers, and stop trusting one ETJ aggregator | [Site Planner] | #gis #site-planner #floodplain | ⏳ live — awaiting |
-| B286305 | Baytown could never govern the floodplain, and NOTHING said so | [Site Planner] | #floodplain #yield #gis | ⏳ live — awaiting |
-| B286306 | Add the City of Katy's own ETJ layer | [Site Planner] | #gis #site-planner | ⏳ live — awaiting |
-| B286307 | Evaluate BaytownParcels as a parcel source for Baytown-area sites | [Site Planner] | #gis #site-planner | ⏳ live — awaiting |
-| B287056 | The chunk-load recovery decides between THREE outcomes and records NONE of them | [App Shell / Infra] | #infra #testing | ⏳ live — awaiting |
-| B287057 | Every perf report must name its ROUTE and its PHASE, because the worst blocks are in a lane nobody had attributed | [Infra / Telemetry] | #infra #perf #testing | ⏳ live — awaiting |
-| B287060 | One dead chunk became two hours of telemetry: the terrain lazy-loader retried on EVERY pointer move | [Site Planner / Infra] | #site-planner #infra #perf #testing | ⏳ live — awaiting |
-| B297904 | A plan started without the map could NEVER be georeferenced, so a boundary drawn during a county outage was stranded in blank space forever | [Site Planner / coordinates] | #site-planner #coordinates #gis | ⏳ live — awaiting |
-| B297905 | A plotted deed could not become the parcel, so with the county map down the best boundary in hand was stuck as a markup | [Site Planner / parcel] | #site-planner #parcel #gis | ⏳ live — awaiting |
-| B297906 | A hand-drawn parcel had geometry and nothing else, and a county-pulled one could not be corrected | [Site Planner / parcel] | #site-planner #parcel #ui | ⏳ live — awaiting |
-| B297907 | A county outage produced a banner and nothing else, leaving the owner on a map that would not give him a lot | [Site Planner / MapFinder] | #site-planner #gis #ui | ⏳ live — awaiting |
 | B297908 | The acreage badge sits at the parcel's dead centre — measured against B280402/B280403, and NOT a defect | [Site Planner / parcel] | #site-planner #selection #parcel | ⏳ live — awaiting |
-| B290240 | Unincorporated land was told "Texas counties have no zoning" in every state, including Colorado | [Site Planner / entitlements] | #site-planner #entitlements #gis | ⏳ live — awaiting |
-| B290243 | The Colorado 72-hour drawdown statute returned a soft pass on a plan with no pond at all | [Site Planner / pond] | #site-planner #pond #floodplain | ⏳ live — awaiting |
-| B295008 | A click that drifts a pixel MOVES the element — up to a couple of feet once the flush-snap catches a neighbour | [Site Planner / interaction] | #site-planner #selection #ui | ⏳ live — awaiting |
+| B297907 | A county outage produced a banner and nothing else, leaving the owner on a map that would not give him a lot | [Site Planner / MapFinder] | #site-planner #gis #ui | ⏳ live — awaiting |
+| B297906 | A hand-drawn parcel had geometry and nothing else, and a county-pulled one could not be corrected | [Site Planner / parcel] | #site-planner #parcel #ui | ⏳ live — awaiting |
+| B297905 | A plotted deed could not become the parcel, so with the county map down the best boundary in hand was stuck as a markup | [Site Planner / parcel] | #site-planner #parcel #gis | ⏳ live — awaiting |
+| B297904 | A plan started without the map could NEVER be georeferenced, so a boundary drawn during a county outage was stranded in blank space forever | [Site Planner / coordinates] | #site-planner #coordinates #gis | ⏳ live — awaiting |
 | B295009 | Every plain click on an element burns an undo frame, so Ctrl+Z "does nothing" several times in a row | [Site Planner / interaction] | #site-planner #selection #ui | ⏳ live — awaiting |
-| B280704 | A city-limit STRADDLE must be stated with its share, and the remainder named | [Site Planner] | #gis #site-planner #floodplain | ⏳ live — awaiting |
-| B280705 | The "regional" ETJ layer carries 34 cities, and the app read every other city's ETJ as "no ETJ" | [Site Planner] | #gis #site-planner #floodplain | ⏳ live — awaiting |
-| B280706 | Jurisdiction varies WITHIN a site, and every number downstream assumes it cannot | [Site Planner] | #floodplain #yield #site-planner | ⏳ live — awaiting |
+| B295008 | A click that drifts a pixel MOVES the element — up to a couple of feet once the flush-snap catches a neighbour | [Site Planner / interaction] | #site-planner #selection #ui | ⏳ live — awaiting |
+| B291536 | Backspace at the start of a LIST ITEM restructured a whole region in one press | [Notes] | #notes #ui | ⏳ live — awaiting |
+| B290243 | The Colorado 72-hour drawdown statute returned a soft pass on a plan with no pond at all | [Site Planner / pond] | #site-planner #pond #floodplain | ⏳ live — awaiting |
+| B290240 | Unincorporated land was told "Texas counties have no zoning" in every state, including Colorado | [Site Planner / entitlements] | #site-planner #entitlements #gis | ⏳ live — awaiting |
+| B287060 | One dead chunk became two hours of telemetry: the terrain lazy-loader retried on EVERY pointer move | [Site Planner / Infra] | #site-planner #infra #perf #testing | ⏳ live — awaiting |
+| B287057 | Every perf report must name its ROUTE and its PHASE, because the worst blocks are in a lane nobody had attributed | [Infra / Telemetry] | #infra #perf #testing | ⏳ live — awaiting |
+| B287056 | The chunk-load recovery decides between THREE outcomes and records NONE of them | [App Shell / Infra] | #infra #testing | ⏳ live — awaiting |
+| B286309 | An unsettled FFE must render as the fallback authority, never as a blank | [Site Planner] | #floodplain #yield | ⏳ live — awaiting |
+| B286308 | TxGIO and the City of Baytown DISAGREE about whether Grand Port is inside the city | [Site Planner] | #gis #site-planner #floodplain | ⏳ live — awaiting |
+| B286307 | Evaluate BaytownParcels as a parcel source for Baytown-area sites | [Site Planner] | #gis #site-planner | ⏳ live — awaiting |
+| B286306 | Add the City of Katy's own ETJ layer | [Site Planner] | #gis #site-planner | ⏳ live — awaiting |
+| B286305 | Baytown could never govern the floodplain, and NOTHING said so | [Site Planner] | #floodplain #yield #gis | ⏳ live — awaiting |
+| B286304 | Wire Baytown's own boundary layers, and stop trusting one ETJ aggregator | [Site Planner] | #gis #site-planner #floodplain | ⏳ live — awaiting |
+| B286000 (×2) | The smooth-zoom toggle is an INTERFACE preference, and neither the plan menu nor the View menu is where one belongs | [Site Planner / UI] | #site-planner #ui #perf | ⏳ live — awaiting |
 | B280707 | Per-parcel floodplain rules: make the yield ledger able to hold more than one jurisdiction | [Site Planner / yield · floodplain] | #site-planner #yield #floodplain | ⏳ live — awaiting |
-| B276576 | The app booted behind a render-blocking Google Fonts stylesheet; the landing page's fix was never carried across | [Infra / UI] | #infra #ui #perf #testing | ⏳ live — awaiting |
-| B276752 | Containment is a WHOLE-SITE question, and the badge was asking one lot | [Site Planner] | #gis #site-planner #floodplain | ⏳ live — awaiting |
-| B276753 | An unresolved jurisdiction must be first-class END TO END, not just in the badge | [Site Planner] | #floodplain #gis #yield | ⏳ live — awaiting |
-| B276754 | A regression fixture per jurisdiction SHAPE, driving the WHOLE chain | [Site Planner] | #testing #gis #site-planner | ⏳ live — awaiting |
+| B280706 | Jurisdiction varies WITHIN a site, and every number downstream assumes it cannot | [Site Planner] | #floodplain #yield #site-planner | ⏳ live — awaiting |
+| B280705 | The "regional" ETJ layer carries 34 cities, and the app read every other city's ETJ as "no ETJ" | [Site Planner] | #gis #site-planner #floodplain | ⏳ live — awaiting |
+| B280704 | A city-limit STRADDLE must be stated with its share, and the remainder named | [Site Planner] | #gis #site-planner #floodplain | ⏳ live — awaiting |
 | B276755 | The identify query 404s past a URL ceiling, and a 404 reads as "nothing here" | [Site Planner] | #gis #site-planner #floodplain | ⏳ live — awaiting |
-| B276448 | The one genuine cross-lane e2e failure was a spec B50010 had deliberately obsoleted the day before | [Site Planner / Canvas] | #testing #infra #site-planner | ⏳ live — awaiting |
-| B276449 | A flood spec was the last caller pinned to the pre-B1236 FEMA wording | [Site Planner / Flood] | #testing #floodplain #site-planner | ⏳ live — awaiting |
+| B276754 | A regression fixture per jurisdiction SHAPE, driving the WHOLE chain | [Site Planner] | #testing #gis #site-planner | ⏳ live — awaiting |
+| B276753 | An unresolved jurisdiction must be first-class END TO END, not just in the badge | [Site Planner] | #floodplain #gis #yield | ⏳ live — awaiting |
+| B276752 | Containment is a WHOLE-SITE question, and the badge was asking one lot | [Site Planner] | #gis #site-planner #floodplain | ⏳ live — awaiting |
+| B276576 | The app booted behind a render-blocking Google Fonts stylesheet; the landing page's fix was never carried across | [Infra / UI] | #infra #ui #perf #testing | ⏳ live — awaiting |
 | B276450 | The contour hover's worst-case ceiling was never well-posed: replaced with the invariant it was reaching for, not loosened | [Site Planner / Terrain] | #testing #grading #site-planner | ⏳ live — awaiting |
+| B276449 | A flood spec was the last caller pinned to the pre-B1236 FEMA wording | [Site Planner / Flood] | #testing #floodplain #site-planner | ⏳ live — awaiting |
+| B276448 | The one genuine cross-lane e2e failure was a spec B50010 had deliberately obsoleted the day before | [Site Planner / Canvas] | #testing #infra #site-planner | ⏳ live — awaiting |
 | B270912 | The recorder was drowning its own signal: 89% of production telemetry came from automated runs | [Platform / Infra] | #perf #infra #testing | ⏳ live — awaiting |
 | B265536 | The recorder's production path, PROVEN — and the telemetry sink that swallowed every write failure | [Platform / Infra] | #perf #infra #testing #persistence | ⏳ live — awaiting |
-| B221763 | The pond LEDGER is rebuilt in the render body, per pond, ~127 times a pan gesture | [Site Planner / UI] | #site-planner #perf #pond #yield #ui | ⏳ live — awaiting |
 | B236592 | A static pond re-derived its whole stage-storage model 156 times per pond per pan | [Site Planner / UI] | #site-planner #perf #pond #yield #ui | ⏳ live — awaiting |
 | B230080 | The canvas clipboard is destroyed by a plan switch, so nothing could be copied between plans of one site | [Site Planner / UI] | #site-planner #selection #ui #coordinates | ⏳ live — awaiting |
-| B779 | Concurrent-mint B#/V# collisions: catch loudly at PR time + prevent by late-binding (×3) | [repo / tooling · workflow] | #infra | ⏳ live — awaiting |
-| B50008 | A double-click opens Properties for nothing on a busy plan: the reconstructed double-tap is budgeted on a WALL CLOCK | [Site Planner / UI] | #site-planner #selection #ui #perf | ⏳ live — awaiting |
-| B50009 | The native double-click fallback is dead for every feature: the first press re-renders the node, so the event retargets to the bare `<svg>` | [Site Planner / UI] | #site-planner #selection #ui | ⏳ live — awaiting |
-| B209506 | An edge-only sliver must never be the headline jurisdiction | [Site Planner] | #gis #site-planner #floodplain | ⏳ live — awaiting |
-| B209507 | A failed lookup must never render as an absence | [Site Planner] | #gis #site-planner #floodplain | ⏳ live — awaiting |
+| B221763 | The pond LEDGER is rebuilt in the render body, per pond, ~127 times a pan gesture | [Site Planner / UI] | #site-planner #perf #pond #yield #ui | ⏳ live — awaiting |
 | B209508 | The floodplain administrator must refuse to settle on an incomplete jurisdiction | [Site Planner] | #floodplain #gis #yield | ⏳ live — awaiting |
-| B209502 | Route a point to its county by GEOMETRY, never by bounding box | [Site Planner] | #gis #site-planner | ⏳ live — awaiting |
-| B209503 | The Houston metro is nine counties; the registry had four | [Site Planner] | #gis #site-planner | ⏳ live — awaiting |
+| B209507 | A failed lookup must never render as an absence | [Site Planner] | #gis #site-planner #floodplain | ⏳ live — awaiting |
+| B209506 | An edge-only sliver must never be the headline jurisdiction | [Site Planner] | #gis #site-planner #floodplain | ⏳ live — awaiting |
 | B209504 | Five layers reported dead across six industrial sites: what is actually true | [Site Planner] | #gis #site-planner | ⏳ live — awaiting |
-| B208960 | Stitch: clicking a sheet row does nothing, silently, because a saved-set load holds a gate with no progress and no failure surface | [Doc Review / stitching] | #doc-review #stitching #ui | ⏳ live — awaiting |
-| B208961 | Stitch: "Rendering…" never clears — a fixed string, for the whole of a load, over an empty canvas | [Doc Review / stitching] | #doc-review #stitching #ui | ⏳ live — awaiting |
-| B208962 | The Review URL lands in a full-screen room with no doors: no logo, no breadcrumb, no module tabs | [Doc Review / stitching] | #doc-review #stitching #ui | ⏳ live — awaiting |
-| B208965 | The "Opening A227…" toast never dismisses — and the sheet under it stays dimmed | [Doc Review] | #doc-review #ui | ⏳ live — awaiting |
+| B209503 | The Houston metro is nine counties; the registry had four | [Site Planner] | #gis #site-planner | ⏳ live — awaiting |
+| B209502 | Route a point to its county by GEOMETRY, never by bounding box | [Site Planner] | #gis #site-planner | ⏳ live — awaiting |
 | B208966 | No visible zoom control in Review: it is in the DOM, several hundred pixels below the fold of the rail's own scroll | [Doc Review] | #doc-review #ui | ⏳ live — awaiting |
-| B1392 (×2) | Tab was defined in SOME contexts, not ALL — "the tab doesn't always work correctly" | [Notes / editor] | #notes #ui | ⏳ live — awaiting |
+| B208965 | The "Opening A227…" toast never dismisses — and the sheet under it stays dimmed | [Doc Review] | #doc-review #ui | ⏳ live — awaiting |
+| B208962 | The Review URL lands in a full-screen room with no doors: no logo, no breadcrumb, no module tabs | [Doc Review / stitching] | #doc-review #stitching #ui | ⏳ live — awaiting |
+| B208961 | Stitch: "Rendering…" never clears — a fixed string, for the whole of a load, over an empty canvas | [Doc Review / stitching] | #doc-review #stitching #ui | ⏳ live — awaiting |
+| B208960 | Stitch: clicking a sheet row does nothing, silently, because a saved-set load holds a gate with no progress and no failure surface | [Doc Review / stitching] | #doc-review #stitching #ui | ⏳ live — awaiting |
+| B50009 | The native double-click fallback is dead for every feature: the first press re-renders the node, so the event retargets to the bare `<svg>` | [Site Planner / UI] | #site-planner #selection #ui | ⏳ live — awaiting |
+| B50008 | A double-click opens Properties for nothing on a busy plan: the reconstructed double-tap is budgeted on a WALL CLOCK | [Site Planner / UI] | #site-planner #selection #ui #perf | ⏳ live — awaiting |
 | B36052 | A peer branch holding your number is an ADVISORY, not a build failure | [Infra / tooling] | #infra #testing | ⏳ live — awaiting |
-| B36050 | Remove the Recent view; the rail is Pages and Bin | [Notes / UI] | #notes #ui | ⏳ live — awaiting |
 | B36051 | Paste, properly: Word's three modes, its icons, and the Outlook signature that broke a real note | [Notes / editor] | #notes #ui | ⏳ live — awaiting |
-| B1393 (×2) | "i still cant double click and type SOMEWHERE" — CLICK AND TYPE, Word's, because focus is not placement — and the single-click claim was checked before it was believed | [Notes] | #notes #ui | ⏳ live — awaiting |
-| B1427 | A re-fetchable cache was crowding the owner's saved work out of a 5 MB store | [Site Planner / storage] | #persistence #gis #site-planner #perf | ⏳ live — awaiting |
-| B1428 | The "Retry device save" button could not succeed | [Site Planner / storage] | #persistence #ui #site-planner | ⏳ live — awaiting |
+| B36050 | Remove the Recent view; the rail is Pages and Bin | [Notes / UI] | #notes #ui | ⏳ live — awaiting |
+| B3297 | Delete did nothing on a selected area measurement: a slider and a dropdown were eating the key, and the second press said nothing at all | [Site Planner / keyboard] | #site-planner #keyboard #selection #ui #testing | ⏳ live — awaiting |
+| B3296 | Unchecking Roads hid everything about a road EXCEPT the road: the dissolved pavement kept painting | [Site Planner / view] | #site-planner #road #ui #testing | ⏳ live — awaiting |
 | B1429 | Neither store reported its size, so this failure was invisible until it was a banner | [Site Planner / Shell / storage] | #persistence #infra #ui | ⏳ live — awaiting |
-| B1421 | Two "production" flood layers were dead at every point, and the weekly drift job could not see them | [Site Analysis / GIS] | #gis #floodplain #testing #infra | ⏳ live — awaiting |
-| B1423 | The Layers panel and the map chrome were fighting, and the chrome was winning | [Site Planner / UI] | #site-planner #ui #gis | ⏳ live — awaiting |
-| B1424 | Ten layers on and the plan was the least legible thing on the screen | [Site Planner / UI] | #site-planner #ui #gis | ⏳ live — awaiting |
+| B1428 | The "Retry device save" button could not succeed | [Site Planner / storage] | #persistence #ui #site-planner | ⏳ live — awaiting |
+| B1427 | A re-fetchable cache was crowding the owner's saved work out of a 5 MB store | [Site Planner / storage] | #persistence #gis #site-planner #perf | ⏳ live — awaiting |
 | B1425 | A reload lost the project, and a hash edit left the old project on screen under the new URL | [Site Planner / routing] | #site-planner #ui #auth | ⏳ live — awaiting |
+| B1424 | Ten layers on and the plan was the least legible thing on the screen | [Site Planner / UI] | #site-planner #ui #gis | ⏳ live — awaiting |
+| B1423 | The Layers panel and the map chrome were fighting, and the chrome was winning | [Site Planner / UI] | #site-planner #ui #gis | ⏳ live — awaiting |
+| B1421 | Two "production" flood layers were dead at every point, and the weekly drift job could not see them | [Site Analysis / GIS] | #gis #floodplain #testing #infra | ⏳ live — awaiting |
 | B1420 | Collapse the Notes hierarchy: THE PROJECT IS THE NOTEBOOK, and a page can hold pages | [Notes / model · UI] | #notes #ui #persistence #sync | ⏳ live — awaiting |
-| B482 (×2) | A signed-in user's PROJECT LIST is empty on any route that never mounts the Site Planner, and every project name in that session is wrong | [Cross-module / projects] | #ui #sync #auth #notes | ⏳ live — awaiting |
 | B1419 | The Notes rail captioned a FAILED LOOKUP as if it were the owner's data | [Notes / UI] | #notes #ui | ⏳ live — awaiting |
-| B1414 | The right rail's Parcel flyout carried three of the eleven parcel actions, and "Parcel" named two different things on opposite sides of the screen | [Site Planner / parcel · UI] | #site-planner #ui #selection | ⏳ live — awaiting |
-| B1415 | A project's name had no single home: it was copied onto every plan, and nothing kept the copies in agreement | [Site Planner / persistence] | #site-planner #persistence #sync | ⏳ live — awaiting |
-| B1416 | A rename only reached the plans this browser happened to have cached, and said nothing when it didn't | [Site Planner / persistence] | #site-planner #persistence #sync | ⏳ live — awaiting |
-| B1417 | Repair the project already split by this bug, and keep it repaired | [Site Planner / persistence] | #site-planner #persistence #sync | ⏳ live — awaiting |
 | B1418 | Let a project be renamed where the owner actually looks for it | [Site Planner / UI] | #site-planner #ui | ⏳ live — awaiting |
-| B1401 | Larimer County rode the whole-state composite: 1.5 s per view, a truncated draw, and a false "server is slow" banner | [Site Planner / MapFinder · GIS] | #site-planner #gis #perf | ⏳ live — awaiting |
-| B1402 | One URL carried two health policies, and the same endpoint was added to the map twice | [Site Planner / MapFinder · GIS] | #site-planner #gis #perf | ⏳ live — awaiting |
-| B1403 | A truncated parcel draw looked exactly like a complete one | [Site Planner / MapFinder · GIS] | #site-planner #gis | ⏳ live — awaiting |
-| B1404 | The parcel acreage chip could not be deleted, and its drag was behind a gate that could only be opened from behind itself | [Site Planner / UI] | #site-planner #ui #selection | ⏳ live — awaiting |
+| B1417 | Repair the project already split by this bug, and keep it repaired | [Site Planner / persistence] | #site-planner #persistence #sync | ⏳ live — awaiting |
+| B1416 | A rename only reached the plans this browser happened to have cached, and said nothing when it didn't | [Site Planner / persistence] | #site-planner #persistence #sync | ⏳ live — awaiting |
+| B1415 | A project's name had no single home: it was copied onto every plan, and nothing kept the copies in agreement | [Site Planner / persistence] | #site-planner #persistence #sync | ⏳ live — awaiting |
+| B1414 | The right rail's Parcel flyout carried three of the eleven parcel actions, and "Parcel" named two different things on opposite sides of the screen | [Site Planner / parcel · UI] | #site-planner #ui #selection | ⏳ live — awaiting |
 | B1405 | Right-click a road end, get a real roundabout | [Site Planner / roadGeometry] | #site-planner #road #ui | ⏳ live — awaiting |
+| B1402 | One URL carried two health policies, and the same endpoint was added to the map twice | [Site Planner / MapFinder · GIS] | #site-planner #gis #perf | ⏳ live — awaiting |
+| B1401 | Larimer County rode the whole-state composite: 1.5 s per view, a truncated draw, and a false "server is slow" banner | [Site Planner / MapFinder · GIS] | #site-planner #gis #perf | ⏳ live — awaiting |
 | B1400 | Sketch mode (×2): REBUILT the authoring surface — double-click anywhere, type in the box, drag an arrow | [Notes / sketch] | #notes #ui #export | ⏳ live — awaiting |
+| B1393 (×5) | the whole flow-text-vs-blank-paper disambiguation is DELETED, not patched a sixth time — the Notes page is now a pure placement surface | [Notes] | #notes #ui | ⏳ live — awaiting |
+| B1392 (×2) | Tab was defined in SOME contexts, not ALL — "the tab doesn't always work correctly" | [Notes / editor] | #notes #ui | ⏳ live — awaiting |
 | B1391 | A FALSE CONFLICT: one person, one account, two windows — and the app said someone else was editing his note | [Notes / sync] | #notes #sync #persistence | ⏳ live — awaiting |
 | B1384 | The landing page rendered with NO VISIBLE TEXT: every word was gated on a vendor animation library | [Landing / marketing] | #ui | ⏳ live — awaiting |
 | B1377 | One-time repair: re-tag the orphaned pieces and restore the sidewalks they cost | [Site Planner / siteModel] | #site-planner #persistence | ⏳ live — awaiting |
 | B1374 | Notes were not where the project was: a notebook's project binding existed, was never surfaced, and could never be changed | [Notes] | #notes #ui #persistence #sync | ⏳ live — awaiting |
 | B1373 | A machine left open across a deploy serves a STALE BUILD and silently hides whole modules | [Infra / App shell] | #infra #ui #testing | ⏳ live — awaiting |
-| B1352 | Convert `renderElPx` from a module-level function to a `React.memo` component | [Site Planner / UI] | #site-planner #perf #ui | ⏳ live — awaiting |
 | B1356 | Shrinking the trailer parking pulled it in from BOTH ends: the model stored a SPAN with no ANCHOR | [Site Planner / dockZones] | #site-planner #ui | ⏳ live — awaiting |
 | B1355 | Measurements print as giant dots with no number, because the export inherits the screen's zoom level-of-detail | [Site Planner / export] | #site-planner #export #ui #markup | ⏳ live — awaiting |
-| B1344 | The perf harness cannot reproduce the owner's slowness: the benchmark that certifies the render path never runs it | [Infra / Testing] | #infra #testing #perf #site-planner | ⏳ live — awaiting |
-| B1345 | Stall striping has no geometry level-of-detail: 1,550 DOM nodes finer than one pixel | [Site Planner / UI] | #site-planner #perf #ui | ⏳ live — awaiting |
+| B1352 | Convert `renderElPx` from a module-level function to a `React.memo` component | [Site Planner / UI] | #site-planner #perf #ui | ⏳ live — awaiting |
 | B1346 | REFUTED: a pan does NOT commit two full renders per frame | [Site Planner / UI] | #site-planner #perf #ui #testing | ⏳ live — awaiting |
-| B1342 | Every Gantt task name renders ABOVE its bar; the on-bar centred label is removed | [Scheduler / Gantt] | #scheduler #gantt #export #ui | ⏳ live — awaiting |
+| B1345 | Stall striping has no geometry level-of-detail: 1,550 DOM nodes finer than one pixel | [Site Planner / UI] | #site-planner #perf #ui | ⏳ live — awaiting |
+| B1344 | The perf harness cannot reproduce the owner's slowness: the benchmark that certifies the render path never runs it | [Infra / Testing] | #infra #testing #perf #site-planner | ⏳ live — awaiting |
 | B1343 | Jumping into Schedule inside a project landed on the dashboard: the route carried the project, the Scheduler ignored it | [Cross-module / navigation] | #scheduler #ui #sync | ⏳ live — awaiting |
+| B1342 | Every Gantt task name renders ABOVE its bar; the on-bar centred label is removed | [Scheduler / Gantt] | #scheduler #gantt #export #ui | ⏳ live — awaiting |
 | B1340 (×2) | The bonded-assembly tear, at the root: a bonded child's FULL GEOMETRY — position AND span — is DERIVED | [Site Planner / Persistence] | #site-planner #persistence #sync | ⏳ live — awaiting |
-| B1327 | Double-clicking a building does not open Properties: the parcel acreage badge eats the press | [Site Planner] | #site-planner #selection #ui | ⏳ live — awaiting |
-| B1328 | A measurement can be layered: send it behind the plan, order it against its peers | [Site Planner] | #site-planner #ui #markup #export | ⏳ live — awaiting |
-| B1329 | Zoom is slow: the wheel was the one uncoalesced gesture, and every view change rendered twice | [Site Planner] | #site-planner #perf #ui | ⏳ live — awaiting |
-| B1330 | Four render-cost wins with provably complete inputs, plus the last unbounded cache | [Site Planner] | #site-planner #perf | ⏳ live — awaiting |
 | B1331 | The 278 MB tab: instrument the two retention suspects, cap only what the number justifies | [perf / memory] | #perf #site-planner | ⏳ live — awaiting |
-| B1291 | Notes belong in the cloud: the tree, the bodies AND the pictures sync to Supabase | [Notes / sync] | #notes #sync #persistence #auth | ⏳ live — awaiting |
+| B1330 | Four render-cost wins with provably complete inputs, plus the last unbounded cache | [Site Planner] | #site-planner #perf | ⏳ live — awaiting |
+| B1329 | Zoom is slow: the wheel was the one uncoalesced gesture, and every view change rendered twice | [Site Planner] | #site-planner #perf #ui | ⏳ live — awaiting |
+| B1328 | A measurement can be layered: send it behind the plan, order it against its peers | [Site Planner] | #site-planner #ui #markup #export | ⏳ live — awaiting |
+| B1327 | Double-clicking a building does not open Properties: the parcel acreage badge eats the press | [Site Planner] | #site-planner #selection #ui | ⏳ live — awaiting |
 | B1314 | A note could not be printed or turned into a PDF | [Notes] | #notes #export | ⏳ live — awaiting |
+| B1291 | Notes belong in the cloud: the tree, the bodies AND the pictures sync to Supabase | [Notes / sync] | #notes #sync #persistence #auth | ⏳ live — awaiting |
 | B1254 | Per-layer "Show above plan": opacity was never the escape hatch, and could not have been | [Site Planner / layers panel] | #site-planner #gis #ui | ⏳ live — awaiting |
 | B1253 | The map's landing view was hardcoded to Houston for EVERY account — it is now derived from the user's own sites | [Site Planner / MapFinder] | #site-planner #ui #gis | ⏳ live — awaiting |
-| B1235 | Shaded and unshaded Zone X were collapsed into one answer, and the 500-year fill trigger missed 54,000 real polygons | [Site Planner / flood] | #site-planner #gis #floodplain #yield | ⏳ live — awaiting |
-| B1236 | "Flood Hazard Zones: 08069c_2802 / Type: X" over an empty map: a correct answer in its most confusing possible form | [Site Planner / flood] | #site-planner #gis #floodplain #ui | ⏳ live — awaiting |
-| B1237 | Which county's FIRM answered was never said, and a county-line site can be covered by two | [Site Planner / flood] | #site-planner #gis #floodplain | ⏳ live — awaiting |
-| B1239 | "Not available in Colorado yet" reads as "this app has nothing for you here" | [Standards / detention] | #site-planner #yield #entitlements | ⏳ live — awaiting |
 | B1241 | "No data" must never look like "no floodplain" — the third state | [Site Planner / flood] | #site-planner #gis #floodplain #ui | ⏳ live — awaiting |
+| B1239 | "Not available in Colorado yet" reads as "this app has nothing for you here" | [Standards / detention] | #site-planner #yield #entitlements | ⏳ live — awaiting |
+| B1237 | Which county's FIRM answered was never said, and a county-line site can be covered by two | [Site Planner / flood] | #site-planner #gis #floodplain | ⏳ live — awaiting |
+| B1236 | "Flood Hazard Zones: 08069c_2802 / Type: X" over an empty map: a correct answer in its most confusing possible form | [Site Planner / flood] | #site-planner #gis #floodplain #ui | ⏳ live — awaiting |
+| B1235 | Shaded and unshaded Zone X were collapsed into one answer, and the 500-year fill trigger missed 54,000 real polygons | [Site Planner / flood] | #site-planner #gis #floodplain #yield | ⏳ live — awaiting |
+| B1215 | Instrument every delete attempt and outcome, so "delete is broken" is one query instead of a guessing game | [Site Planner / telemetry] | #site-planner #selection #infra #testing | ⏳ live — awaiting |
 | B1214 | The user can now OVERRIDE which boundary is Front, Side, Street side and Rear | [Site Planner / parcel] | #site-planner #ui | ⏳ live — awaiting |
-| B1205 | GIS layers draw UNDER the site elements, so contours placed under a building disappear — one fixed semantic stacking order for the whole map | [Site Planner / layers] | #site-planner #gis #ui | ⏳ live — awaiting |
-| B1206 | Per-layer opacity is the one escape hatch in the fixed stacking model, so every toggleable GIS layer must expose it in the same place | [Site Planner / layers panel] | #site-planner #gis #ui | ⏳ live — awaiting |
 | B1207 | "Is my building in the floodplain?" is a computation, not a picture — answer it as a number in the Yield panel | [Site Planner / Analysis · yield] | #site-planner #floodplain #yield | ⏳ live — awaiting |
-| B1189 | The planner CRASHES to the error boundary when Escape follows the Properties rail click within ~200 ms (runaway render loop) | [Site Planner / UI] | #site-planner #ui #perf | ⏳ live — awaiting |
-| B1190 | Document Review's markup inspector still derives its visibility from the selection (the B1188 defect, other workspace) | [Doc Review / Markup] | #doc-review #markup #selection #ui | ⏳ live — awaiting |
+| B1206 | Per-layer opacity is the one escape hatch in the fixed stacking model, so every toggleable GIS layer must expose it in the same place | [Site Planner / layers panel] | #site-planner #gis #ui | ⏳ live — awaiting |
+| B1205 | GIS layers draw UNDER the site elements, so contours placed under a building disappear — one fixed semantic stacking order for the whole map | [Site Planner / layers] | #site-planner #gis #ui | ⏳ live — awaiting |
 | B1204 | The setback chip RE-COUPLED to the setback line's colour: white plate, green border, green text | [Site Planner / parcel] | #site-planner #ui | ⏳ live — awaiting |
-| B1197 | A resize handle that falls under the parcel line is drawn behind it AND cannot be grabbed, so the object can't be resized from that corner | [Site Planner / references · UI] | #site-planner #ui #selection | ⏳ live — awaiting |
 | B1198 | References had no way to be brought in front of the plan at all | [Site Planner / references] | #site-planner #ui #persistence | ⏳ live — awaiting |
-| B1191 | The PARCELS panel still spoke in fifteen geometric SIDES, not the four setbacks a zoning ordinance writes | [Site Planner / parcel · UI] | #site-planner #ui | ⏳ live — awaiting |
+| B1197 | A resize handle that falls under the parcel line is drawn behind it AND cannot be grabbed, so the object can't be resized from that corner | [Site Planner / references · UI] | #site-planner #ui #selection | ⏳ live — awaiting |
+| B1196 | Address search showed the OWNER'S MAILING address instead of the situs — and that wrong address became the site NAME | [Site Planner / MapFinder] | #site-planner #gis #ui | ⏳ live — awaiting |
+| B1195 | A building's truck court and side parking carried a DIFFERENT building's length, overhanging it by ~195 ft | [Site Planner / dockZones] | #site-planner #ui #persistence | ⏳ live — awaiting |
 | B1192 | Default parcel + setback colour: indigo → the property-line green #34E802, with a casing so it survives green ground | [Site Planner / parcel · design] | #site-planner #ui | ⏳ live — awaiting |
-| B216 (×2) | Harden edge-run setbacks for IRREGULAR parcels: concave inward placement + gentle-curve grouping — and now TIGHT-curve chip grouping | [Site Planner] | #site-planner #ui | ⏳ live — awaiting |
-| B1184 | The PARCELS panel listed "Edge 18, Edge 19 … Edge 32" — thirty-odd identical 25′ inputs for one boundary | [Site Planner / parcel] | #site-planner #ui | ⏳ live — awaiting |
-| B1185 | Every parcel vertex drew a large blue handle, so a digitized curve became a chain of overlapping squares that hid the geometry | [Site Planner / parcel] | #site-planner #ui #selection | ⏳ live — awaiting |
-| B1186 | The parcel acreage badge floated off the parcel, labelling the neighbour's land | [Site Planner / parcel] | #site-planner #ui | ⏳ live — awaiting |
+| B1191 | The PARCELS panel still spoke in fifteen geometric SIDES, not the four setbacks a zoning ordinance writes | [Site Planner / parcel · UI] | #site-planner #ui | ⏳ live — awaiting |
+| B1190 | Document Review's markup inspector still derives its visibility from the selection (the B1188 defect, other workspace) | [Doc Review / Markup] | #doc-review #markup #selection #ui | ⏳ live — awaiting |
+| B1189 | The planner CRASHES to the error boundary when Escape follows the Properties rail click within ~200 ms (runaway render loop) | [Site Planner / UI] | #site-planner #ui #perf | ⏳ live — awaiting |
 | B1187 | Parcel + setback default to indigo, and the setback chip's border and numerals go black | [Site Planner / parcel · design] | #site-planner #ui | ⏳ live — awaiting |
-| B1173 (×2) | Fullscreen dropped both header rows, so switching project or plan meant leaving it | [Shell / UI] | #ui #site-planner #doc-review | ⏳ live — awaiting |
+| B1186 | The parcel acreage badge floated off the parcel, labelling the neighbour's land | [Site Planner / parcel] | #site-planner #ui | ⏳ live — awaiting |
+| B1185 | Every parcel vertex drew a large blue handle, so a digitized curve became a chain of overlapping squares that hid the geometry | [Site Planner / parcel] | #site-planner #ui #selection | ⏳ live — awaiting |
+| B1184 | The PARCELS panel listed "Edge 18, Edge 19 … Edge 32" — thirty-odd identical 25′ inputs for one boundary | [Site Planner / parcel] | #site-planner #ui | ⏳ live — awaiting |
 | B1175 | A plain click on the canvas jumps the map a full panel width | [Site Planner] | #site-planner #ui #selection | ⏳ live — awaiting |
-| B1156 | `f` now goes to REAL fullscreen, not just a hidden header | [Shell / UI] | #ui #site-planner | ⏳ live — awaiting |
-| B1157 | Dragging a polygon vertex lagged: every pointer move re-ran a 13,700-line render body | [Site Planner] | #site-planner #perf | ⏳ live — awaiting |
-| B1158 | The yield/drainage derivation ran on every render even with no panel open | [Site Planner / Yield] | #yield #perf #site-planner | ⏳ live — awaiting |
-| B1160 | No canvas backing store was ever released, anywhere in the tree | [Platform / perf] | #perf #infra #doc-review #site-planner | ⏳ live — awaiting |
-| B1161 | MapFinder keeps a second Leaflet map that never got the B1121 tile cap | [Site Planner / map] | #perf #gis #site-planner | ⏳ live — awaiting |
+| B1173 (×2) | Fullscreen dropped both header rows, so switching project or plan meant leaving it | [Shell / UI] | #ui #site-planner #doc-review | ⏳ live — awaiting |
+| B1167 | Sign-up and password-reset copy never said who the email comes from | [Site Planner / AuthPanel] | #auth #ui #site-planner | ⏳ live — awaiting |
+| B1166 | The address-search parcel card was a wall of text: a metes-and-bounds Legal blob made it taller than the map | [Site Planner / MapFinder] | #ui #gis #site-planner | ⏳ live — awaiting |
 | B1162 | Two GIS caches grew without bound, and one could never evict its biggest entries | [Site Planner / GIS] | #perf #gis #site-planner | ⏳ live — awaiting |
+| B1161 | MapFinder keeps a second Leaflet map that never got the B1121 tile cap | [Site Planner / map] | #perf #gis #site-planner | ⏳ live — awaiting |
+| B1160 | No canvas backing store was ever released, anywhere in the tree | [Platform / perf] | #perf #infra #doc-review #site-planner | ⏳ live — awaiting |
+| B1158 | The yield/drainage derivation ran on every render even with no panel open | [Site Planner / Yield] | #yield #perf #site-planner | ⏳ live — awaiting |
+| B1157 | Dragging a polygon vertex lagged: every pointer move re-ran a 13,700-line render body | [Site Planner] | #site-planner #perf | ⏳ live — awaiting |
+| B1156 | `f` now goes to REAL fullscreen, not just a hidden header | [Shell / UI] | #ui #site-planner | ⏳ live — awaiting |
 | B1155 | Where a road SPLITS on a curve the branch never resolved into one surface: the outline stepped and one armpit got NO curb return at all | [Site Planner / roadGeometry] | #site-planner #road #ui | ⏳ live — awaiting |
-| B1152 | You can pin the zoom at which a measurement's label appears, per measurement and as a project default | [Site Planner / measure] | #site-planner #ui #markup | ⏳ live — awaiting |
 | B1153 | A measurement's numbers are redrawn as a proper drawing annotation: one headline value, a subordinate detail line, a real chip, and per-edge dimensions | [Site Planner / measure] | #site-planner #ui #markup #export | ⏳ live — awaiting |
-| B1141 | Screen→ground transform sat ~1 CSS px off the imagery; hover and click now ride ONE welded transform | [Site Planner / GIS] | #site-planner #gis #coordinates | ⏳ live — awaiting |
+| B1152 | You can pin the zoom at which a measurement's label appears, per measurement and as a project default | [Site Planner / measure] | #site-planner #ui #markup | ⏳ live — awaiting |
 | B1142 | The basemap re-centre never watched its own container, so the aerial could sit TENS of pixels off the drawing | [Site Planner / Map] | #site-planner #gis #coordinates | ⏳ live — awaiting |
-| B1131 | Hovering an electric line, substation or pipeline must say what it is | [Site Planner / layers] | #site-planner #gis #ui | ⏳ live — awaiting |
+| B1141 | Screen→ground transform sat ~1 CSS px off the imagery; hover and click now ride ONE welded transform | [Site Planner / GIS] | #site-planner #gis #coordinates | ⏳ live — awaiting |
 | B1132 | State and country outlines on the zoomed-out map | [Site Planner / map] | #site-planner #ui #gis #perf | ⏳ live — awaiting |
-| B1105 | Colorado detention sizing: a new `ruleType` + calculator per regime (MHFD WQCV+EURV, then Larimer / Weld / El Paso) | [Standards / detention] | #yield #floodplain | ⏳ live — awaiting |
-| B1123 | A spurious `alongLen` pins the trailer parking so it stops following its truck court | [Site Planner / dockZones] | #site-planner #ui | ⏳ live — awaiting |
+| B1131 | Hovering an electric line, substation or pipeline must say what it is | [Site Planner / layers] | #site-planner #gis #ui | ⏳ live — awaiting |
 | B1124 | Duplicating a building does not remap `forCourt`, so the copy's trailer bonds to the ORIGINAL building's court | [Site Planner / duplicate] | #site-planner #persistence | ⏳ live — awaiting |
+| B1123 | A spurious `alongLen` pins the trailer parking so it stops following its truck court | [Site Planner / dockZones] | #site-planner #ui | ⏳ live — awaiting |
 | B1122 | Elements visibly come undone from the aerial DURING a map drag | [Site Planner / Map] | #site-planner #gis #coordinates | ⏳ live — awaiting |
 | B1120 | The client never sent `p_atomic` in production, so B1116/B1117 did nothing | [Site Planner / sync] | #site-planner #sync #persistence #testing | ⏳ live — awaiting |
 | B1118 | The heal misses a whole-assembly translation, because reach scales with the host | [Site Planner / Site Model] | #site-planner #persistence | ⏳ live — awaiting |
-| B1113 | A stale local cache still wins on load, for a SUBSET of an assembly, dribbled across transactions | [Site Planner / sync] | #site-planner #sync #persistence | ⏳ live — awaiting |
-| B1114 | `strandedFromHost` missed a large-but-not-absurd displacement | [Site Planner / Site Model] | #site-planner #persistence | ⏳ live — awaiting |
 | B1115 | A rejected commit hot-loops at ~1 RPC/second with no backoff and no give-up | [Site Planner / sync] | #site-planner #sync #perf | ⏳ live — awaiting |
+| B1114 | `strandedFromHost` missed a large-but-not-absurd displacement | [Site Planner / Site Model] | #site-planner #persistence | ⏳ live — awaiting |
+| B1113 | A stale local cache still wins on load, for a SUBSET of an assembly, dribbled across transactions | [Site Planner / sync] | #site-planner #sync #persistence | ⏳ live — awaiting |
 | B1111 | Colorado county GIS registry: nine counties, a statewide fallback tier, and state-scoped click routing | [Platform / gis] | #gis #coordinates | ⏳ live — awaiting |
-| B1103 | Colorado floodplain: the CWCB statewide floor, and the 72-hour drawdown statute as a real pass/fail | [Standards / flood] | #floodplain #pond | ⏳ live — awaiting |
+| B1105 | Colorado detention sizing: a new `ruleType` + calculator per regime (MHFD WQCV+EURV, then Larimer / Weld / El Paso) | [Standards / detention] | #yield #floodplain | ⏳ live — awaiting |
 | B1104 | The Colorado capability guard: no Texas-derived number, no silent fallback, no blank that reads as zero | [Standards / detention] | #yield #floodplain #ui | ⏳ live — awaiting |
+| B1103 | Colorado floodplain: the CWCB statewide floor, and the 72-hour drawdown statute as a real pass/fail | [Standards / flood] | #floodplain #pond | ⏳ live — awaiting |
 | B1101 | The Standards footer's `Project \| All` toggle looked like one axis with Apply and was two — three explicitly named actions, a pending draft, and a footer that stops slicing the settings list | [Site Planner / standards] | #site-planner #ui #persistence | ⏳ live — awaiting |
-| B1093 | "Select parcels: off" strands the user: clicking a parcel does nothing, with no feedback | [Site Planner / parcelSelect] | #site-planner #selection #ui | ⏳ live — awaiting |
-| B1095 | Hover ANY contour to read its elevation, not just the labelled every-5-ft index lines | [Site Planner / GIS] | #site-planner #gis #ui | ⏳ live — awaiting |
 | B1096 | The ground-elevation readout must ALWAYS show a state (it silently vanished), and must also show PROPOSED elevation + cut/fill | [Site Planner / GIS · grading] | #site-planner #gis #grading #ui | ⏳ live — awaiting |
-| B1091 (×3) | Non-governing district rows in the Flood & drainage group — the scoping named the governing district BACKWARDS — and then the group could go SILENT again | [Site Planner / layers panel · GIS] | #site-planner #gis #floodplain #ui | ⏳ live — awaiting |
+| B1095 | Hover ANY contour to read its elevation, not just the labelled every-5-ft index lines | [Site Planner / GIS] | #site-planner #gis #ui | ⏳ live — awaiting |
+| B1093 | "Select parcels: off" strands the user: clicking a parcel does nothing, with no feedback | [Site Planner / parcelSelect] | #site-planner #selection #ui | ⏳ live — awaiting |
 | B1092 | The BKDD easement identify never fires on the planner canvas: identify was wired for the map finder only | [Site Planner / GIS] | #site-planner #gis #floodplain | ⏳ live — awaiting |
+| B1091 (×3) | Non-governing district rows in the Flood & drainage group — the scoping named the governing district BACKWARDS — and then the group could go SILENT again | [Site Planner / layers panel · GIS] | #site-planner #gis #floodplain #ui | ⏳ live — awaiting |
 | B1089 | The screening study fails SILENTLY on the exact sites it was built for: a committed estimate suppressed its honest unknown | [Site Planner / floodplain · ui] | #site-planner #floodplain #ui | ⏳ live — awaiting |
-| B1087 | Contour labels double-stamp and go stale: a superseded terrain compute still paints into the live group | [Site Planner / GIS] | #site-planner #gis #ui | ⏳ live — awaiting |
 | B1088 | Contour lines and labels re-roll on every pan/zoom: anchor the DEM grid to a fixed tile lattice and label deterministically | [Site Planner / GIS] | #site-planner #gis #ui | ⏳ live — awaiting |
-| B1085 | An export sheet inherited the LIVE declutter tier, so a PDF taken while zoomed OUT silently shipped with a building unlabelled | [Site Planner / export] | #site-planner #export #ui | ⏳ live — awaiting |
+| B1087 | Contour labels double-stamp and go stale: a superseded terrain compute still paints into the live group | [Site Planner / GIS] | #site-planner #gis #ui | ⏳ live — awaiting |
 | B1086 | The committed frame-time budget was seeded from a browser session whose tab was hidden, where Chrome suspends rAF entirely | [Infra / Perf] | #infra #perf #testing | ⏳ live — awaiting |
-| B1074 | Waller floodplain: flip the BFE-data requirement to VERIFIED against the county's own ordinance, and make the 5-acre trigger FIRE | [Site Planner / jurisdiction] | #site-planner #floodplain #entitlements | ⏳ live — awaiting |
-| B1057 | Independent screening estimate of the base flood elevation, beside FEMA's | [Site Planner / floodplain] | #floodplain #site-planner #gis | ⏳ live — awaiting |
-| B1075 | Register the Brookshire–Katy Drainage District (BKDD) as a first-class GIS source family | [Site Planner / GIS] | #site-planner #gis #floodplain | ⏳ live — awaiting |
-| B1076 | "Flood & Drainage" layer group: one master toggle, district auto-scoping, provenance tiers | [Site Planner / layers panel] | #site-planner #gis #ui #floodplain | ⏳ live — awaiting |
-| B1079 | Per-source `timeoutMs` + cache-proxy routing for COLD-START map services (BKDD's first call takes 16.5–18.3 s) | [Site Planner / GIS] | #site-planner #gis #infra | ⏳ live — awaiting |
-| B1080 | Drainage context must be district-aware, not HCFCD-only | [Site Planner / GIS · yield] | #site-planner #gis #yield #floodplain | ⏳ live — awaiting |
-| B1070 | Standards carried an Apply and a scope row per SETTING; the owner asked for one of each for the whole panel | [Site Planner / standards] | #site-planner #ui #persistence | ⏳ live — awaiting |
-| B1073 | Trailer parking was structurally locked to the truck court's length | [Site Planner / dockZones] | #site-planner #ui | ⏳ live — awaiting |
+| B1085 | An export sheet inherited the LIVE declutter tier, so a PDF taken while zoomed OUT silently shipped with a building unlabelled | [Site Planner / export] | #site-planner #export #ui | ⏳ live — awaiting |
 | B1083 | Free draw is gone from the Road tool; "Custom width…" keeps an off-preset road reachable | [Site Planner / road] | #site-planner #road #ui | ⏳ live — awaiting |
-| B1067 | Branch a road off another with a right-click, tee'd at the point you clicked | [Site Planner / SitePlanner] | #site-planner #road #ui | ⏳ live — awaiting |
+| B1080 | Drainage context must be district-aware, not HCFCD-only | [Site Planner / GIS · yield] | #site-planner #gis #yield #floodplain | ⏳ live — awaiting |
+| B1079 | Per-source `timeoutMs` + cache-proxy routing for COLD-START map services (BKDD's first call takes 16.5–18.3 s) | [Site Planner / GIS] | #site-planner #gis #infra | ⏳ live — awaiting |
+| B1076 | "Flood & Drainage" layer group: one master toggle, district auto-scoping, provenance tiers | [Site Planner / layers panel] | #site-planner #gis #ui #floodplain | ⏳ live — awaiting |
+| B1075 | Register the Brookshire–Katy Drainage District (BKDD) as a first-class GIS source family | [Site Planner / GIS] | #site-planner #gis #floodplain | ⏳ live — awaiting |
+| B1074 | Waller floodplain: flip the BFE-data requirement to VERIFIED against the county's own ordinance, and make the 5-acre trigger FIRE | [Site Planner / jurisdiction] | #site-planner #floodplain #entitlements | ⏳ live — awaiting |
+| B1073 | Trailer parking was structurally locked to the truck court's length | [Site Planner / dockZones] | #site-planner #ui | ⏳ live — awaiting |
+| B1070 | Standards carried an Apply and a scope row per SETTING; the owner asked for one of each for the whole panel | [Site Planner / standards] | #site-planner #ui #persistence | ⏳ live — awaiting |
 | B1068 | A line's name label can ride the CENTRE line, not only beside or inside it | [Site Planner / SitePlanner] | #site-planner #ui #road | ⏳ live — awaiting |
-| B1042 | NEW-9 step 3: split the SitePlannerApp monolith (1,711,381 bytes — 55% of all JS, on the critical path) | [Infra / Build] | #infra #perf #site-planner | ⏳ live — awaiting |
-| B1060 | Standards only seeds NEW objects: no way to apply a standard to what's already drawn, and no cross-project default | [Standards] | #site-planner #ui #persistence | ⏳ live — awaiting |
-| B1053 | The pond Optimize / design-pond affordance vanished from the pond inspector | [Site Planner / pond] | #pond #ui #site-planner | ⏳ live — awaiting |
-| B1054 | The Yield / pond panel had become a wall of text | [Site Planner / yield] | #yield #ui #site-planner | ⏳ live — awaiting |
-| B1056 | Flood-level sensitivity: show how the obligation moves as the WSE varies | [Site Planner / yield · floodplain] | #yield #floodplain #site-planner | ⏳ live — awaiting |
-| B1050 | NEW-1: the link-schedule panel trapped the user — pressing Dashboard did not dismiss it | [Scheduler / route-sync] | #scheduler #ui | ⏳ live — awaiting |
-| B1065 | the link-schedule surface could be dismissed away permanently, stranding a project with no way to link a schedule | [Scheduler / navState] | #scheduler #ui | ⏳ live — awaiting |
+| B1067 | Branch a road off another with a right-click, tee'd at the point you clicked | [Site Planner / SitePlanner] | #site-planner #road #ui | ⏳ live — awaiting |
 | B1066 | rebuild the link-schedule surface as the Schedule tab's EMPTY STATE, not a modal | [Scheduler / LinkSchedulePanel] | #scheduler #ui | ⏳ live — awaiting |
+| B1065 | the link-schedule surface could be dismissed away permanently, stranding a project with no way to link a schedule | [Scheduler / navState] | #scheduler #ui | ⏳ live — awaiting |
+| B1060 | Standards only seeds NEW objects: no way to apply a standard to what's already drawn, and no cross-project default | [Standards] | #site-planner #ui #persistence | ⏳ live — awaiting |
+| B1057 | Independent screening estimate of the base flood elevation, beside FEMA's | [Site Planner / floodplain] | #floodplain #site-planner #gis | ⏳ live — awaiting |
+| B1056 | Flood-level sensitivity: show how the obligation moves as the WSE varies | [Site Planner / yield · floodplain] | #yield #floodplain #site-planner | ⏳ live — awaiting |
+| B1054 | The Yield / pond panel had become a wall of text | [Site Planner / yield] | #yield #ui #site-planner | ⏳ live — awaiting |
+| B1053 | The pond Optimize / design-pond affordance vanished from the pond inspector | [Site Planner / pond] | #pond #ui #site-planner | ⏳ live — awaiting |
 | B1052 | Roads carried control points the owner never placed: every connect SPLICED a vertex in and nothing ever took one back out | [Site Planner / roadGeometry] | #site-planner #road #ui | ⏳ live — awaiting |
-| B1043 | NEW-1: drawn elements drift off the aerial on N–S pan, cumulatively — the feet frame and the basemap used inconsistent latitude models | [Site Planner / Map] | #site-planner #gis #coordinates #perf | ⏳ live — awaiting |
-| B1045 | NEW-3: GIS overlays load off the critical path — the map is interactive before the data arrives | [Site Planner / Map] | #site-planner #gis #perf | ⏳ live — awaiting |
-| B1046 | NEW-4: progressive slowdown is per-gesture allocation CHURN, not retention — the anti-flash ghost cloned the entire overscanned tile container | [Site Planner / Map] | #site-planner #perf | ⏳ live — awaiting |
-| B1047 | NEW-5: viewport culling for the feet-frame SVG — a FRAME-TIME fix, with the export deliberately exempt | [Site Planner / Map] | #site-planner #perf #export | ⏳ live — awaiting |
-| B1048 | NEW-6: overlay lifecycle — raster tiles now released on toggle-off, superseded fetches aborted on pan, identical requests deduped | [Site Planner / Map] | #site-planner #gis #perf | ⏳ live — awaiting |
+| B1050 | NEW-1: the link-schedule panel trapped the user — pressing Dashboard did not dismiss it | [Scheduler / route-sync] | #scheduler #ui | ⏳ live — awaiting |
 | B1049 | NEW-7: tile footprint — adaptive overscan, retina gated by zoom band, tiles reused across a same-grid commit, bounded cache | [Site Planner / Map] | #site-planner #gis #perf | ⏳ live — awaiting |
+| B1048 | NEW-6: overlay lifecycle — raster tiles now released on toggle-off, superseded fetches aborted on pan, identical requests deduped | [Site Planner / Map] | #site-planner #gis #perf | ⏳ live — awaiting |
+| B1047 | NEW-5: viewport culling for the feet-frame SVG — a FRAME-TIME fix, with the export deliberately exempt | [Site Planner / Map] | #site-planner #perf #export | ⏳ live — awaiting |
+| B1046 | NEW-4: progressive slowdown is per-gesture allocation CHURN, not retention — the anti-flash ghost cloned the entire overscanned tile container | [Site Planner / Map] | #site-planner #perf | ⏳ live — awaiting |
+| B1045 | NEW-3: GIS overlays load off the critical path — the map is interactive before the data arrives | [Site Planner / Map] | #site-planner #gis #perf | ⏳ live — awaiting |
+| B1043 | NEW-1: drawn elements drift off the aerial on N–S pan, cumulatively — the feet frame and the basemap used inconsistent latitude models | [Site Planner / Map] | #site-planner #gis #coordinates #perf | ⏳ live — awaiting |
+| B1042 | NEW-9 step 3: split the SitePlannerApp monolith (1,711,381 bytes — 55% of all JS, on the critical path) | [Infra / Build] | #infra #perf #site-planner | ⏳ live — awaiting |
 | B1040 | NEW-8: standing performance budget + regression harness, gated in CI | [Infra / QA] | #infra #perf #testing | ⏳ live — awaiting |
-| B1038 | NEW-2: wall sidewalks drift off the bump-out-extended side on a HOST RESIZE (only re-laid on bump-out add/delete/resize) | [Site Planner / refitChildren] | #site-planner #selection | ⏳ live — awaiting |
 | B1039 | NEW-3: side parking drifts off the sidewalk it should be flush against (stale `perpGap` replayed by `fitKid`) | [Site Planner / refitChildren] | #site-planner #selection | ⏳ live — awaiting |
-| B1032 | NEW-1: the SAME below-flood storage was credited to BOTH the detention and the mitigation ledger (Tsakiris: 29.65 ac-ft counted twice, reported as 12.2) | [Site Planner / stormwater · pond] | #site-planner #yield #pond #floodplain | ⏳ live — awaiting |
+| B1038 | NEW-2: wall sidewalks drift off the bump-out-extended side on a HOST RESIZE (only re-laid on bump-out add/delete/resize) | [Site Planner / refitChildren] | #site-planner #selection | ⏳ live — awaiting |
 | B1036 | NEW-5 (owner amendment): a pond-berm contribution to the mitigation REQUIREMENT that cannot be priced looked identical to a confident zero | [Site Planner / stormwater · floodplain] | #site-planner #yield #pond #floodplain | ⏳ live — awaiting |
-| B1030 | NEW-1: the pond's detention verdict row headlined "Buildable" and never named its own ledger | [Site Planner / pond · ui] | #site-planner #pond #yield #ui #floodplain | ⏳ live — awaiting |
+| B1032 | NEW-1: the SAME below-flood storage was credited to BOTH the detention and the mitigation ledger (Tsakiris: 29.65 ac-ft counted twice, reported as 12.2) | [Site Planner / stormwater · pond] | #site-planner #yield #pond #floodplain | ⏳ live — awaiting |
 | B1031 | NEW-2: a per-pond detention ledger provided ~2× over rendered as a clean green pass, with no over-dug state | [Site Planner / pond · ui] | #site-planner #pond #yield #ui #grading | ⏳ live — awaiting |
-| B1019 | NEW-1: Yield reported Detention OK and Mitigation OK while the two together claimed 42.8 ac-ft MORE storage than the ponds physically hold | [Site Planner / yield · pond] | #site-planner #yield #pond #floodplain | ⏳ live — awaiting |
-| B1020 | NEW-2: the panel printed a between-storms recovery assumption but gave the reader nothing to evaluate it with (no drawdown time) | [Site Planner / yield · pond] | #site-planner #yield #pond | ⏳ live — awaiting |
-| B1021 | NEW-3: mitigation was compared as a lump sum, so a total that ties could hide every foot of the offset being at the wrong elevation | [Site Planner / stormwater · floodplain] | #site-planner #yield #pond #floodplain | ⏳ live — awaiting |
-| B1022 | NEW-4: the mitigation trigger elevation was effectively hardcoded to the 100-yr line instead of following the jurisdiction | [Site Planner / stormwater · floodplain] | #site-planner #yield #floodplain | ⏳ live — awaiting |
-| B1023 | NEW-5: surface the delta between a naive footprint×depth read and the real sloped-prism volume | [Site Planner / yield · pond] | #site-planner #yield #pond | ⏳ live — awaiting |
-| B1024 | NEW-6: split each pond's storage above vs below the outfall invert and run the two gravity-drain tests | [Site Planner / stormwater · pond] | #site-planner #yield #pond #floodplain | ⏳ live — awaiting |
-| B1025 | NEW-7: a +97% surplus and a +0.5% surplus rendered identical green OK chips | [Site Planner / yield · ui] | #site-planner #yield #ui | ⏳ live — awaiting |
-| B1026 | NEW-8: the panel showed three candidate floodplain authorities but never said whose rule produced the FFE | [Site Planner / yield · floodplain] | #site-planner #yield #floodplain #entitlements | ⏳ live — awaiting |
-| B1027 | NEW-9: Buildability tested only the building pad, hiding a truck court sitting ~4 ft lower | [Site Planner / yield · floodplain] | #site-planner #yield #floodplain | ⏳ live — awaiting |
-| B1028 | NEW-10: a 197% detention overbuild read as slack when it was borrow-driven | [Site Planner / yield · grading] | #site-planner #yield #pond #grading | ⏳ live — awaiting |
+| B1030 | NEW-1: the pond's detention verdict row headlined "Buildable" and never named its own ledger | [Site Planner / pond · ui] | #site-planner #pond #yield #ui #floodplain | ⏳ live — awaiting |
 | B1029 | The Buildability DETAIL rows were built every render and never displayed anywhere — every FFE honesty line has been silently invisible since the group was deleted | [Site Planner / yield · ui] | #site-planner #yield #floodplain #ui | ⏳ live — awaiting |
+| B1028 | NEW-10: a 197% detention overbuild read as slack when it was borrow-driven | [Site Planner / yield · grading] | #site-planner #yield #pond #grading | ⏳ live — awaiting |
+| B1027 | NEW-9: Buildability tested only the building pad, hiding a truck court sitting ~4 ft lower | [Site Planner / yield · floodplain] | #site-planner #yield #floodplain | ⏳ live — awaiting |
+| B1026 | NEW-8: the panel showed three candidate floodplain authorities but never said whose rule produced the FFE | [Site Planner / yield · floodplain] | #site-planner #yield #floodplain #entitlements | ⏳ live — awaiting |
+| B1025 | NEW-7: a +97% surplus and a +0.5% surplus rendered identical green OK chips | [Site Planner / yield · ui] | #site-planner #yield #ui | ⏳ live — awaiting |
+| B1024 | NEW-6: split each pond's storage above vs below the outfall invert and run the two gravity-drain tests | [Site Planner / stormwater · pond] | #site-planner #yield #pond #floodplain | ⏳ live — awaiting |
+| B1023 | NEW-5: surface the delta between a naive footprint×depth read and the real sloped-prism volume | [Site Planner / yield · pond] | #site-planner #yield #pond | ⏳ live — awaiting |
+| B1022 | NEW-4: the mitigation trigger elevation was effectively hardcoded to the 100-yr line instead of following the jurisdiction | [Site Planner / stormwater · floodplain] | #site-planner #yield #floodplain | ⏳ live — awaiting |
+| B1021 | NEW-3: mitigation was compared as a lump sum, so a total that ties could hide every foot of the offset being at the wrong elevation | [Site Planner / stormwater · floodplain] | #site-planner #yield #pond #floodplain | ⏳ live — awaiting |
+| B1020 | NEW-2: the panel printed a between-storms recovery assumption but gave the reader nothing to evaluate it with (no drawdown time) | [Site Planner / yield · pond] | #site-planner #yield #pond | ⏳ live — awaiting |
+| B1019 | NEW-1: Yield reported Detention OK and Mitigation OK while the two together claimed 42.8 ac-ft MORE storage than the ponds physically hold | [Site Planner / yield · pond] | #site-planner #yield #pond #floodplain | ⏳ live — awaiting |
 | B1017 | Junction outline-cut polylines were DOUBLE-ROTATED: stray element-coloured lines projected outside rotated rect elements | [Site Planner / renderElPx] | #site-planner #road #drive #export | ⏳ live — awaiting |
 | B1016 | Pond BERM-height and FLOOR-elevation numbers painted at a fixed size at site-overview zoom, out-shouting the building dimensions | [Site Planner / pond] | #site-planner #pond #ui #yield | ⏳ live — awaiting |
-| B1007 | Detention criteria keyed off the FLOODPLAIN county, not the drainage AUTHORITY — so BKDD's VERIFIED criteria (B999) never surfaced on a Brookshire–Katy site | [Site Planner / stormwater · floodplain] | #site-planner #yield #pond #floodplain | ⏳ live — awaiting |
-| B1005 | NEW-1: clamp the curb-return fillet to the DRIVE WIDTH (the reach = R) so oblique tees stop scooping | [Site Planner / road] | #site-planner #road #drive | ⏳ live — awaiting |
-| B1006 | NEW-2: flatten the junction pavement to ONE opaque tone; one continuous curb line (kill the faint curved seam) | [Site Planner / road] | #site-planner #road #ui | ⏳ live — awaiting |
-| B1010 | Connect debris judged by DISTANCE let a 3.4 ft stub carrying a 37° bend through, starving the corner and mis-aiming the junction | [Site Planner / road] | #site-planner #road | ⏳ live — awaiting |
-| B1011 | A tee that lands ON a bend in the through road was solved as if the through road were straight | [Site Planner / roadGeometry] | #site-planner #road | ⏳ live — awaiting |
 | B1015 | The new corner tag sprawled across the plan and its "Fix" printed on top of its own label — and the corner still drew as a blob because the OLD auto-fixer's clamped radius was baked into the vertex | [Site Planner / roadGeometry] | #site-planner #road #ui | ⏳ live — awaiting |
 | B1014 | Three clicks made a road, but nothing on the canvas said how to END it — and the instinctive Esc threw the draft away | [Site Planner / SitePlanner] | #site-planner #road #ui | ⏳ live — awaiting |
 | B1013 | A corner near a road's END had half its approach taken away by a clamp meant for shared legs, then the app flagged the geometry instead of fixing it | [Site Planner / roadGeometry] | #site-planner #road | ⏳ live — awaiting |
 | B1012 | The road cleanup ran on only ONE of the two read paths, so it did nothing on a signed-in element-synced plan | [Site Planner / sync] | #site-planner #road #sync | ⏳ live — awaiting |
+| B1011 | A tee that lands ON a bend in the through road was solved as if the through road were straight | [Site Planner / roadGeometry] | #site-planner #road | ⏳ live — awaiting |
+| B1010 | Connect debris judged by DISTANCE let a 3.4 ft stub carrying a 37° bend through, starving the corner and mis-aiming the junction | [Site Planner / road] | #site-planner #road | ⏳ live — awaiting |
 | B1009 | Junction pavement ran UNDER buildings, the target's outline was ruled across the drive mouth, and a corner clamped below its civil minimum said nothing | [Site Planner / road] | #site-planner #road #drive | ⏳ live — awaiting |
 | B1008 | NEW-3: collapse near-duplicate road vertices at connect/insert time + a one-shot load migration that dedupes stored `pts` (index-aligned with `vtx`) | [Site Planner / road] | #site-planner #road | ⏳ live — awaiting |
+| B1007 | Detention criteria keyed off the FLOODPLAIN county, not the drainage AUTHORITY — so BKDD's VERIFIED criteria (B999) never surfaced on a Brookshire–Katy site | [Site Planner / stormwater · floodplain] | #site-planner #yield #pond #floodplain | ⏳ live — awaiting |
+| B1006 | NEW-2: flatten the junction pavement to ONE opaque tone; one continuous curb line (kill the faint curved seam) | [Site Planner / road] | #site-planner #road #ui | ⏳ live — awaiting |
+| B1005 | NEW-1: clamp the curb-return fillet to the DRIVE WIDTH (the reach = R) so oblique tees stop scooping | [Site Planner / road] | #site-planner #road #drive | ⏳ live — awaiting |
 | B999 | BKDD Rules 22-01 criteria-truth: flip the registry's Brookshire–Katy row ASSUMED → VERIFIED from the owner-supplied signed full text (freeboard, storms, orifice C, pumped share, coincident/tailwater, +0.65 floor, +spillway, +sediment) | [Site Planner / stormwater · floodplain] | #site-planner #yield #pond #floodplain | ⏳ live — awaiting |
 | B997 | NEW-27: pumped detention must NOT ask the user for an outflow CFS — derive the allowed pump rate from a per-jurisdiction pumped-share criterion, with an optional override | [Site Planner / stormwater · pond] | #site-planner #yield #pond | ⏳ live — awaiting |
 | B996 | NEW-26: mitigation credit must be CONNECTED-by-default (the flood backs in through the pond's own outfall), gated only on an explicitly gated / absent outfall — supersedes the B990 berm-seal + role gates | [Site Planner / stormwater · pond] | #site-planner #yield #pond #floodplain | ⏳ live — awaiting |
-| B990 | NEW-21: mitigation credit was computed TWO ways (verdict SHORT 0.0 vs Optimize card "already covers 0.2") | [Site Planner / stormwater · pond] | #site-planner #yield #pond #floodplain | ⏳ live — awaiting |
 | B992 | NEW-23: the per-pond "holds" chip showed the inward-crest gross, not the drawn-ring total the explainer uses (mismatched pair) | [Site Planner / yield · pond] | #site-planner #yield #pond #ui | ⏳ live — awaiting |
-| B983 | NEW-18: a mitigation shortfall hung the one-click ⚡ Optimize, which can't reliably close mitigation (button honesty) | [Site Planner / stormwater] | #site-planner #yield #pond | ⏳ live — awaiting |
-| B982 | NEW-17: pond berm fill in the mapped floodplain reads ~0 in the mitigation requirement (outward-vs-inward geometry) | [Site Planner / stormwater · floodplain] | #site-planner #yield #pond #floodplain | ⏳ live — awaiting |
+| B990 | NEW-21: mitigation credit was computed TWO ways (verdict SHORT 0.0 vs Optimize card "already covers 0.2") | [Site Planner / stormwater · pond] | #site-planner #yield #pond #floodplain | ⏳ live — awaiting |
+| B989 | Drive/road → court junctions: WIDTH-cap the curb return + ONE seamless "mouth" cover (kill the oblique balloon/scoop/notch/blotch) | [Site Planner / road] | #site-planner #road #drive | ⏳ live — awaiting |
 | B987 | R1: pond recovers to NORMAL (dry-weather) tailwater between storms, not the 100-yr level — dead storage = below NORMAL tailwater | [Site Planner / stormwater · pond] | #site-planner #yield #pond #floodplain | ⏳ live — awaiting |
 | B984 | NEW-19: the flood-data header and the WSE-driven numbers now read ONE truth (no "not checked" over definite remembered numbers) | [Site Planner / yield · persistence] | #site-planner #yield #floodplain #persistence | ⏳ live — awaiting |
-| B989 | Drive/road → court junctions: WIDTH-cap the curb return + ONE seamless "mouth" cover (kill the oblique balloon/scoop/notch/blotch) | [Site Planner / road] | #site-planner #road #drive | ⏳ live — awaiting |
-| B980 | NEW-15: the detention explainer no longer claims "none counts" over a pond that counts 34.0 of 63.9 (partial vs total dead) | [Site Planner / yield · ui] | #site-planner #yield #pond #ui | ⏳ live — awaiting |
+| B983 | NEW-18: a mitigation shortfall hung the one-click ⚡ Optimize, which can't reliably close mitigation (button honesty) | [Site Planner / stormwater] | #site-planner #yield #pond | ⏳ live — awaiting |
+| B982 | NEW-17: pond berm fill in the mapped floodplain reads ~0 in the mitigation requirement (outward-vs-inward geometry) | [Site Planner / stormwater · floodplain] | #site-planner #yield #pond #floodplain | ⏳ live — awaiting |
 | B981 | NEW-16: a trace mitigation requirement (0.01 ac-ft) rendered as a red SHORT "0.0 of 0.0" — materiality floor + display invariant | [Site Planner / yield · ui] | #site-planner #yield #pond #floodplain #ui | ⏳ live — awaiting |
+| B980 | NEW-15: the detention explainer no longer claims "none counts" over a pond that counts 34.0 of 63.9 (partial vs total dead) | [Site Planner / yield · ui] | #site-planner #yield #pond #ui | ⏳ live — awaiting |
 | B978 | Grading engine: balance-optimal finished-floor float (DECISION 3) + net earthwork residual (DECISION 2) | [Site Planner / yield · pond · floodplain] | #site-planner #yield #pond #floodplain #ui | ⏳ live — awaiting |
 | B977 | Map/panel storage+depth consistency (O3) + label every acreage (O4) | [Site Planner / yield · pond] | #site-planner #yield #pond #ui | ⏳ live — awaiting |
 | B976 | Pond buildability copy + berm rule: fix the garbled drainage warning (O1) and UNIFY the design-vs-optimizer berm stance (O2) | [Site Planner / yield · pond] | #site-planner #yield #pond #ui | ⏳ live — awaiting |
@@ -838,7 +1216,6 @@
 | B968 | Wire the buildable envelope into the ACTUAL Optimize path + verdict (PR-H, live-path fix of B967) | [Site Planner / yield · pond] | #site-planner #yield #pond #floodplain #ui | ⏳ live — awaiting |
 | B967 | Buildability GATES the verdict; Optimize never over-promises (PR-G) | [Site Planner / yield · pond] | #site-planner #yield #pond #floodplain #ui | ⏳ live — awaiting |
 | B965 | Pond inspector residuals: status headline usable == the "Usable detention" row · em-dash sweep of the sizing assistant · non-monotonic peak solve applies (PR-F) | [Site Planner / yield · pond] | #site-planner #yield #pond #ui | ⏳ live — awaiting |
-| B842 | Un-ghosted late `invalidateSize` on the Site map / MapFinder reveal (possible one-frame tile flash on map↔plan flip + workspace-tab return) | [Site Planner / Map] | #site-planner #ui #perf | ⏳ live — awaiting |
 | B964 | Malformed curb-return geometry on the road/drive→truck-court connection (spiky/star apron + seam) | [Site Planner / drawing] | #site-planner #road #ui | ⏳ live — awaiting |
 | B963 | Inward berm geometry (outer-toe model) + function-based pond label + computed berm cap (PR-D) | [Site Planner / yield · pond] | #site-planner #yield #pond #ui | ⏳ live — awaiting |
 | B961 | Road connect engages at the target's OUTER CURB EDGE, not just the hidden centerline (NEW-3) | [Site Planner / drawing] | #site-planner #road #ui | ⏳ live — awaiting |
@@ -846,22 +1223,21 @@
 | B959 | Truck-court connection: WB-62 driveway return (~50 ft, no compound curve) + NEVER pave over the building (NEW-1) | [Site Planner / drawing] | #site-planner #road #ui | ⏳ live — awaiting |
 | B958 | v3 post-ship audit: Optimize created a 2nd pond + mitigation-card-at-0 + number/berm inconsistencies (PR-E) | [Site Planner / yield · pond] | #site-planner #yield #pond #ui | ⏳ live — awaiting |
 | B957 | v3 post-ship audit: Optimize-applies bug fix + berm-height cap + FFE/gravity screening chips + on-plan berm ring (PR-C) | [Site Planner / yield · pond] | #site-planner #yield #pond #ui | ⏳ live — awaiting |
-| B956 | Remember Layers-panel toggle state per site (restore enabled GIS overlays on load) | [Site Planner / Layers] | #site-planner #gis #persistence #ui | ⏳ live — awaiting |
 | B955 | Connect roads to parking drives + truck-court drives (type-aware intersection) | [Site Planner / drawing] | #site-planner #road #ui | ⏳ live — awaiting |
 | B953 | Clean T-intersection at a road tee: curb return radii + widened throat + merged pavement | [Site Planner / drawing] | #site-planner #road #ui | ⏳ live — awaiting |
-| B951 | Element-label collision must also avoid parcel-area badges (B121 round 4) | [Site Planner / labels] | #site-planner #ui | ⏳ live — awaiting |
 | B952 | Deleting a Library file leaves a stray map Overlay; make the two features' independence clear | [Site Planner + Library / overlays] | #site-planner #library #files #ui | ⏳ live — awaiting |
-| B947 | Callout border rounds into a bubble when zoomed out; render as a rectangle at every zoom | [Site Planner + Doc Review / Callouts] | #markup #site-planner #doc-review #ui | ⏳ live — awaiting |
+| B951 | Element-label collision must also avoid parcel-area badges (B121 round 4) | [Site Planner / labels] | #site-planner #ui | ⏳ live — awaiting |
 | B948 | Callout double-click is now LOCATION-based: text area edits text, border opens Properties | [Site Planner + Doc Review / Callouts] | #markup #site-planner #doc-review #ui #selection | ⏳ live — awaiting |
-| B945 | Snap-and-connect road endpoints (magnet + clean junction) | [Site Planner / drawing] | #site-planner #road #ui | ⏳ live — awaiting |
+| B947 | Callout border rounds into a bubble when zoomed out; render as a rectangle at every zoom | [Site Planner + Doc Review / Callouts] | #markup #site-planner #doc-review #ui | ⏳ live — awaiting |
 | B946 | Auto-fix sub-minimum road radius: fix, don't just warn | [Site Planner / drawing] | #site-planner #road #ui | ⏳ live — awaiting |
+| B945 | Snap-and-connect road endpoints (magnet + clean junction) | [Site Planner / drawing] | #site-planner #road #ui | ⏳ live — awaiting |
 | B928 | Rail / menu / tool chrome audit-and-fix pass, both themes, screenshot-verified | [App-wide / UI] | #ui | ⏳ live — awaiting |
-| B914 | Review resume leaks one project's last loose PDF (its "upload didn't finish" banner) onto every OTHER project's Review tab | [Doc Review] | #doc-review #persistence #ui | ⏳ live — awaiting |
-| B918 | Callout text overflows its box in Document Review | [Doc Review] | #markup #doc-review | ⏳ live — awaiting |
 | B919 | Add / remove leaders on a callout, Bluebeam-style | [Site Planner / Doc Review] | #markup #site-planner #doc-review | ⏳ live — awaiting |
-| B911 | Parcel/edge dimension labels stay oversized on zoom-out (don't declutter or scale like building dims) | [Site Planner] | #site-planner #ui | ⏳ live — awaiting |
-| B912 | Editable dimension length: single-click to select, double-click to edit the length inline | [Site Planner] | #site-planner #ui #selection | ⏳ live — awaiting |
+| B918 | Callout text overflows its box in Document Review | [Doc Review] | #markup #doc-review | ⏳ live — awaiting |
+| B914 | Review resume leaks one project's last loose PDF (its "upload didn't finish" banner) onto every OTHER project's Review tab | [Doc Review] | #doc-review #persistence #ui | ⏳ live — awaiting |
 | B913 | Resizable text boxes / callouts (horizontal width handles + text wrap) | [Site Planner] | #site-planner #ui #markup | ⏳ live — awaiting |
+| B912 | Editable dimension length: single-click to select, double-click to edit the length inline | [Site Planner] | #site-planner #ui #selection | ⏳ live — awaiting |
+| B911 | Parcel/edge dimension labels stay oversized on zoom-out (don't declutter or scale like building dims) | [Site Planner] | #site-planner #ui | ⏳ live — awaiting |
 | B909 | Detention + mitigation: ONE unified one-click "⚡ Design pond" on the Yield panel (novice-proof) | [Site Planner / yield · pond] | #site-planner #yield #pond #ui | ⏳ live — awaiting |
 | B907 | Civil-engineering roadmap #7: tie detention SIZING to LAND TAKE + EARTHWORK $ | [Site Planner / Pond] | #site-planner #pond | ⏳ live — awaiting |
 | B905 | Civil-engineering upgrade #3: COMPUTED time of concentration (Kirpich), replacing the hard-coded 15-min screening assumption | [Site Planner / Pond] | #site-planner #pond | ⏳ live — awaiting |
@@ -873,131 +1249,127 @@
 | B888 | Pond economics optimizer: ranked deeper-smaller vs shallower-bigger configurations (earthwork $ / land-take / buildable-SF) | [Site Planner] | #site-planner #yield #pond #grading | ⏳ live — awaiting |
 | B885 | Deal screens: upstream/offsite drainage flag (3DEP flow-accumulation) + regional-detention/fee-in-lieu registry | [Site Planner] | #site-planner #yield #floodplain #gis | ⏳ live — awaiting |
 | B884 | Public-data inputs for detention/pond screening: NOAA Atlas-14 rainfall + SSURGO soils + TWDB wells + subsidence districts + Curve-Number | [Site Planner] | #site-planner #yield #floodplain #pond #gis | ⏳ live — awaiting |
-| B882 | Estimated BFE for FEMA Zone A / unstudied areas from FEMA InFRM EBFE + HCFCD MAAPnext (pluggable provider registry) + a "challenge the estimate" layer | [Site Planner / GIS · floodplain] | #site-planner #gis #floodplain #yield #ui | ⏳ live — awaiting |
 | B883 | Detention outlet structure + release-rate proof (Post ≤ Pre routing) + cited jurisdiction criteria registry + NHD receiving-water | [Site Planner] | #site-planner #yield #floodplain #pond #gis | ⏳ live — awaiting |
+| B882 | Estimated BFE for FEMA Zone A / unstudied areas from FEMA InFRM EBFE + HCFCD MAAPnext (pluggable provider registry) + a "challenge the estimate" layer | [Site Planner / GIS · floodplain] | #site-planner #gis #floodplain #yield #ui | ⏳ live — awaiting |
 | B880 | Setback offset line "messes up" on zoom-out: scale its dash + stroke with zoom and drop it when the inset goes sub-pixel | [Site Planner] | #site-planner #ui #selection | ⏳ live — awaiting |
 | B879 | Header: drop the school district (ISD) from the jurisdiction badge + fix the Row-1 breadcrumb/badge overlap at narrow widths | [Site Planner] | #site-planner #ui #gis | ⏳ live — awaiting |
 | B878 | Re-verify buildability-quiet-state (B868) + site-based-FFE (B869) AFTER B874 lands live — do NOT patch blind | [Site Planner] | #site-planner #yield #floodplain #testing | ⏳ live — awaiting |
-| B868 | Buildability regression: outside-floodplain suppression lost, stale "SET BFE" chip, duplicate-basis copy | [Site Planner] | #site-planner #yield #floodplain #entitlements | ⏳ live — awaiting |
-| B870 | Sizing-assistant suggestions become one-click applicable (apply-gated, preview, atomic undo — never silent auto) | [Site Planner] | #site-planner #yield #pond #floodplain | ⏳ live — awaiting |
 | B871 | Berm materialization: an applied TOB raise becomes modeled dirt with full downstream propagation | [Site Planner] | #site-planner #yield #pond #floodplain #grading | ⏳ live — awaiting |
+| B870 | Sizing-assistant suggestions become one-click applicable (apply-gated, preview, atomic undo — never silent auto) | [Site Planner] | #site-planner #yield #pond #floodplain | ⏳ live — awaiting |
+| B868 | Buildability regression: outside-floodplain suppression lost, stale "SET BFE" chip, duplicate-basis copy | [Site Planner] | #site-planner #yield #floodplain #entitlements | ⏳ live — awaiting |
 | B865 | Suppress password-manager autofill on inline grid editors | [Scheduler] | #scheduler #ui | ⏳ live — awaiting |
-| B860 | Facts pass auto-recompute: kill the manual Re-check for stale math | [Site Planner / yield · GIS] | #site-planner #yield #gis #perf #persistence | ⏳ live — awaiting |
-| B861 | BKDD: auto-detect the district boundary + transcribe its rate-control rule records | [Site Planner / stormwater · GIS] | #site-planner #floodplain #yield #gis | ⏳ live — awaiting |
-| B862 | Yield readout overhaul: verdict-first hierarchy, required-vs-provided bars, caveat consolidation | [Site Planner / yield] | #site-planner #yield #ui #export #floodplain | ⏳ live — awaiting |
-| B839 | Export aerial reuses cached basemap tiles instead of a slow on-demand render (fixes the timeout that blanked the PDF) | [Site Planner] | #site-planner #export #gis #perf #stitching | ⏳ live — awaiting |
-| B840 | Interim: aerial-specific inline timeout + retry + Esri↔USGS source fallback on export | [Site Planner] | #site-planner #export #gis | ⏳ live — awaiting |
-| B837 | Left-rail panel switch flashes the basemap and jumps the site sideways | [Site Planner / Map + UI] | #site-planner #ui #perf | ⏳ live — awaiting |
-| B863 | One-time cascade-drift sweep over hs-v1 (677 tasks): every fossil surfaced for owner ruling, then repaired | [Scheduler / data] | #scheduler #persistence #testing | ⏳ live — awaiting |
 | B864 | Scheduler meeting-body lost to a multi-writer clobber: bound tasks kept an ORPHANED meetingBodyId (election date at risk on reload) | [Scheduler / persistence] | #scheduler #persistence #infra | ⏳ live — awaiting |
+| B863 | One-time cascade-drift sweep over hs-v1 (677 tasks): every fossil surfaced for owner ruling, then repaired | [Scheduler / data] | #scheduler #persistence #testing | ⏳ live — awaiting |
+| B862 | Yield readout overhaul: verdict-first hierarchy, required-vs-provided bars, caveat consolidation | [Site Planner / yield] | #site-planner #yield #ui #export #floodplain | ⏳ live — awaiting |
+| B861 | BKDD: auto-detect the district boundary + transcribe its rate-control rule records | [Site Planner / stormwater · GIS] | #site-planner #floodplain #yield #gis | ⏳ live — awaiting |
+| B860 | Facts pass auto-recompute: kill the manual Re-check for stale math | [Site Planner / yield · GIS] | #site-planner #yield #gis #perf #persistence | ⏳ live — awaiting |
+| B851 (×4) | Schedule grid diverges from the route + a false "newer version — reload?" banner, same cause | [Scheduler / persistence] | #scheduler #persistence #ui | ⏳ live — awaiting |
+| B842 | Un-ghosted late `invalidateSize` on the Site map / MapFinder reveal (possible one-frame tile flash on map↔plan flip + workspace-tab return) | [Site Planner / Map] | #site-planner #ui #perf | ⏳ live — awaiting |
+| B840 | Interim: aerial-specific inline timeout + retry + Esri↔USGS source fallback on export | [Site Planner] | #site-planner #export #gis | ⏳ live — awaiting |
+| B839 | Export aerial reuses cached basemap tiles instead of a slow on-demand render (fixes the timeout that blanked the PDF) | [Site Planner] | #site-planner #export #gis #perf #stitching | ⏳ live — awaiting |
+| B837 | Left-rail panel switch flashes the basemap and jumps the site sideways | [Site Planner / Map + UI] | #site-planner #ui #perf | ⏳ live — awaiting |
 | B836 | Cascade-drift guard on load: flag non-pinned tasks whose stored dates ≠ engine dates (LOUD-FAILURE) | [Scheduler] | #scheduler #testing #persistence | ⏳ live — awaiting |
 | B832 | Drainage facts auto-revalidate; the ↻ button becomes an override, not a gate | [Site Planner / yield · GIS] | #site-planner #yield #gis #persistence #perf | ⏳ live — awaiting |
 | B821 | Map flashes/blanks on single- & double-click: docked-panel resize → un-ghosted `setView` tile-wipe | [Site Planner / Map] | #site-planner #ui #perf | ⏳ live — awaiting |
-| B691 | Fort Bend 1-ft contours layer dead: browser CORS-blocks `arcgisweb.fortbendcountytx.gov` — route it through the server-side GIS proxy (×2) | [Site Planner / GIS] | #site-planner #gis | ⏳ live — awaiting |
 | B816 | Meeting-bound tasks: snap to cadence, auto-roll on miss, derived agenda deadline | [Scheduler] | #scheduler #entitlements #gantt #perf #export | ⏳ live — awaiting |
-| B802 | 0.2% (500-yr) WSE: name the missing FIS input, label the Atlas-14 basis distinction, flag a below-1% derived value | [Site Planner / GIS · yield] | #site-planner #floodplain #yield #ui | ⏳ live — awaiting |
-| B791 | File deletes bypass Drive trash: PERMANENT delete with no recovery window | [Doc Review / storage] | #doc-review #drive #persistence | ⏳ live — awaiting |
-| B792 | Review delete-safety: same-name re-upload cross-wires two reviews; delete permanently destroys the markup layer; a network blip renders an empty Library | [Doc Review / Library] | #doc-review #library #persistence #drive #files | ⏳ live — awaiting |
-| B793 | Planner: an edit whose cloud commit failed is silently reverted by the reload refetch | [Site Planner / Persistence] | #site-planner #persistence | ⏳ live — awaiting |
-| B789 | Per-source `timeoutMs` override in the GIS screening-fetch registry (FEMA flood answered at ~9.5 s, past the 9 s default) | [Site Planner / GIS] | #site-planner #gis #floodplain | ⏳ live — awaiting |
-| B787 | Re-point Chambers County parcels at CCAD's own live public service (ChambersCADPublic) | [Site Planner / GIS] | #site-planner #gis | ⏳ live — awaiting |
-| B784 | Site-plan overlay stuck on "Loading drawing…" forever when its Storage object is missing | [Site Planner / overlay] | #site-planner #persistence #files | ⏳ live — awaiting |
-| B785 | Overlay keeps a dead `storageKey`; the download layer couldn't tell "file gone" from "network blip" | [Site Planner / overlay] | #site-planner #persistence #files | ⏳ live — awaiting |
-| B786 | `doc-review-files` bucket allowed only `application/pdf`, so image/CAD overlays silently failed to back up | [Site Planner / storage config] | #site-planner #persistence #files #infra | ⏳ live — awaiting |
-| B409 (×2) | Unlimited-size file uploads: chunked Drive upload through the Worker proxy (replaces the CORS-dead browser-direct path) | [Doc Review / storage] | #doc-review #drive | ⏳ live — awaiting |
 | B812 | The single-tab false "another window" toast BURST on a building resize (survived B759×2 + B811) — own-echo-by-rev | [Site Planner / persistence] | #site-planner #persistence #infra | ⏳ live — awaiting |
 | B811 | A resized building's bonded sidewalk / paving "separates" (snaps back) when a stale refetch re-seeds the shadow | [Site Planner / persistence] | #site-planner #persistence #infra | ⏳ live — awaiting |
+| B802 | 0.2% (500-yr) WSE: name the missing FIS input, label the Atlas-14 basis distinction, flag a below-1% derived value | [Site Planner / GIS · yield] | #site-planner #floodplain #yield #ui | ⏳ live — awaiting |
+| B793 | Planner: an edit whose cloud commit failed is silently reverted by the reload refetch | [Site Planner / Persistence] | #site-planner #persistence | ⏳ live — awaiting |
+| B792 | Review delete-safety: same-name re-upload cross-wires two reviews; delete permanently destroys the markup layer; a network blip renders an empty Library | [Doc Review / Library] | #doc-review #library #persistence #drive #files | ⏳ live — awaiting |
+| B791 | File deletes bypass Drive trash: PERMANENT delete with no recovery window | [Doc Review / storage] | #doc-review #drive #persistence | ⏳ live — awaiting |
+| B789 | Per-source `timeoutMs` override in the GIS screening-fetch registry (FEMA flood answered at ~9.5 s, past the 9 s default) | [Site Planner / GIS] | #site-planner #gis #floodplain | ⏳ live — awaiting |
+| B787 | Re-point Chambers County parcels at CCAD's own live public service (ChambersCADPublic) | [Site Planner / GIS] | #site-planner #gis | ⏳ live — awaiting |
+| B786 | `doc-review-files` bucket allowed only `application/pdf`, so image/CAD overlays silently failed to back up | [Site Planner / storage config] | #site-planner #persistence #files #infra | ⏳ live — awaiting |
+| B785 | Overlay keeps a dead `storageKey`; the download layer couldn't tell "file gone" from "network blip" | [Site Planner / overlay] | #site-planner #persistence #files | ⏳ live — awaiting |
+| B784 | Site-plan overlay stuck on "Loading drawing…" forever when its Storage object is missing | [Site Planner / overlay] | #site-planner #persistence #files | ⏳ live — awaiting |
+| B779 | Concurrent-mint B#/V# collisions: catch loudly at PR time + prevent by late-binding (×3) | [repo / tooling · workflow] | #infra | ⏳ live — awaiting |
+| B778 | Tighten the migrated `planar_*` tables off wide-open anon RLS | [Infra / Scheduler] | #infra #scheduler #auth | ⏳ live — awaiting |
 | B759 | False "someone else edited this in another tab" pop-up while actively editing in ONE tab (×2) | [Site Planner / persistence] | #site-planner #persistence #infra | ⏳ live — awaiting |
 | B757 | Deliberately-deleted PLAN can resurrect on reload/sign-in when its cloud delete never landed (offline / transient) — no DURABLE record-delete tombstone | [Site Planner / Persistence] | #site-planner #persistence | ⏳ live — awaiting |
 | B756 | DATA LOSS: a new signed-in site created from the map ("Plan N parcels →") silently loses ALL its parcels | [Site Planner / persistence] | #site-planner #persistence #infra | ⏳ live — awaiting |
-| B625 | Metes-and-bounds deed rotates grossly off-angle on "Align to county parcel" (×2) | [Site Planner] | #site-planner #coordinates #gis | ⏳ live — awaiting |
 | B751 | Detention: make the HCFCD-channel-drainage + reviewing-agency assumptions transparent AND user-overridable, and remember the last drainage check | [Site Planner / GIS · yield] | #site-planner #gis #yield #persistence | ⏳ live — awaiting |
-| B747 | Overlay tool accepts CAD files: client-side DXF import with true-units auto-scale | [Site Planner] | #site-planner #files | ⏳ live — awaiting |
 | B748 | Wire DWG into the overlay via the B238 conversion service (gated live, never a dead end) | [Site Planner / server] | #site-planner #files #infra | ⏳ live — awaiting |
-| B745 | Vector / thin-line GIS map layers (transmission, road-authority, county/city/ETJ boundaries, contours, drainage arrows, OSM/Mapillary) now composite into the PDF/PNG export | [Site Planner / GIS · export] | #site-planner #export #gis | ⏳ live — awaiting |
+| B747 | Overlay tool accepts CAD files: client-side DXF import with true-units auto-scale | [Site Planner] | #site-planner #files | ⏳ live — awaiting |
 | B746 | Ctrl+Z doesn't always work; make it Bluebeam-style when drawing an element | [Site Planner / Doc Review] | #site-planner #doc-review #selection #markup #ui #persistence | ⏳ live — awaiting |
-| B742 | Delete on a road silently no-ops for many clicks, then suddenly works | [Site Planner] | #site-planner #road #selection #persistence #ui | ⏳ live — awaiting |
+| B745 | Vector / thin-line GIS map layers (transmission, road-authority, county/city/ETJ boundaries, contours, drainage arrows, OSM/Mapillary) now composite into the PDF/PNG export | [Site Planner / GIS · export] | #site-planner #export #gis | ⏳ live — awaiting |
 | B743 | Harden the shared element-delete path so no element type can silently no-op (×2) | [Site Planner] | #site-planner #selection #persistence #testing #ui | ⏳ live — awaiting |
-| B1215 | Instrument every delete attempt and outcome, so "delete is broken" is one query instead of a guessing game | [Site Planner / telemetry] | #site-planner #selection #infra #testing | ⏳ live — awaiting |
+| B742 | Delete on a road silently no-ops for many clicks, then suddenly works | [Site Planner] | #site-planner #road #selection #persistence #ui | ⏳ live — awaiting |
 | B738 | Satellite/aerial basemap missing from PDF/PNG export (plan prints on a blank white background) | [Site Planner] | #site-planner #export #gis | ⏳ live — awaiting |
 | B737 | Unify the ParcelDrawing overlay onto the shared per-object style model (fill/weight/dash/opacity + capability-driven panel) | [Site Planner / Markup] | #site-planner #markup #selection | ⏳ live — awaiting |
 | B716 | Clean up phantom drawn parcels on the Martini site (`smqsfzqc72pw`): soft-deleted 2 attr-less outlines + 1 degenerate dup sliver → ~88.6 ac | [Site Planner / data] | #site-planner #persistence | ⏳ live — awaiting |
-| B707 | Floodplain mitigation engine: rules matrix + elevation-based compensating-storage volume | [Site Planner / Stormwater] | #site-planner #gis #pond | ⏳ live — awaiting |
+| B714 | Sharing a project silently REVERTS: any ordinary save from the owner's open tab overwrote `sites.team_id` back to null, locking the collaborator out | [Site Planner / Review / teams · RLS] | #site-planner #persistence #auth | ⏳ live — awaiting |
 | B712 | Floodplain surfacing & integration: mitigation/buildability card, combined detention readout, inputs, cost lines, print | [Site Planner] | #site-planner #ui #yield #export #gis | ⏳ live — awaiting |
-| B699 | Whole content pane is the drop target; drag-onto-folder files into it; ONE empty state; folder drops preserve your subfolder structure | [Library / storage] | #library #files #filing #drive | ⏳ live — awaiting |
+| B707 | Floodplain mitigation engine: rules matrix + elevation-based compensating-storage volume | [Site Planner / Stormwater] | #site-planner #gis #pond | ⏳ live — awaiting |
 | B701 | Honest Drive-sync footer: backend-driven resting status, "Synced · N min ago", loud failure | [Library / storage] | #library #drive #persistence | ⏳ live — awaiting |
+| B699 | Whole content pane is the drop target; drag-onto-folder files into it; ONE empty state; folder drops preserve your subfolder structure | [Library / storage] | #library #files #filing #drive | ⏳ live — awaiting |
 | B692 | ROOT-CAUSE fix for the B690 husk-parcel crash: sanitize the model funnel so a null/points-less entry can never be manufactured, persisted, or re-ingested | [Site Planner / model] | #site-planner #persistence | ⏳ live — awaiting |
+| B691 | Fort Bend 1-ft contours layer dead: browser CORS-blocks `arcgisweb.fortbendcountytx.gov` — route it through the server-side GIS proxy (×2) | [Site Planner / GIS] | #site-planner #gis | ⏳ live — awaiting |
 | B684 | Export to Google Earth (KMZ) via right-click, in both the map viewer and the canvas | [Site Planner / Map] | #site-planner #export #coordinates | ⏳ live — awaiting |
 | B682 | Dragging a parcel's acreage label spawns a "bunch of copies" (id-less parcels + value-based union merge) | [Site Planner] | #site-planner #persistence #selection | ⏳ live — awaiting |
-| B675 | Planyr MCP connector: read-only `/api/mcp/<token>` endpoint gives Claude live cross-project context | [functions/api/mcp] | #infra #files | ⏳ live — awaiting |
 | B676 | Library pins follow the ACCOUNT (Supabase cloud sync) instead of per-device | [Library] | #library #persistence #auth | ⏳ live — awaiting |
+| B675 | Planyr MCP connector: read-only `/api/mcp/<token>` endpoint gives Claude live cross-project context | [functions/api/mcp] | #infra #files | ⏳ live — awaiting |
+| B674 | Element-level sync, phase 5/5: remove the edit lock — multi-writer cutover + presence pill | [Site Planner / Shell] | #site-planner #ui #persistence | ⏳ live — awaiting |
+| B673 | Element-level sync, phase 4/5: loud-conflict surface + delete/edit matrix | [Site Planner] | #site-planner #ui #persistence | ⏳ live — awaiting |
+| B672 (×2) | Element-level sync, phase 3/5: realtime read path + rejoin refetch (read cutover; blob frozen) | [Site Planner] | #site-planner #persistence | ⏳ live — awaiting |
 | B669 | Keep-alive module switching: visited workspaces stay mounted (hidden), switching is instant | [Shell / all modules] | #ui #perf #infra | ⏳ live — awaiting |
 | B668 | Library Home: pinned folders/files + recent drawings + project cards | [Library] | #library #ui #files | ⏳ live — awaiting |
 | B667 | Review remembers the last document PER PROJECT (+ the resume self-clobber fix) | [Doc Review] | #doc-review #persistence | ⏳ live — awaiting |
 | B664 | Drag a whole FOLDER onto the Library and it auto-files every PDF inside it | [Library / storage] | #library #files #filing | ⏳ live — awaiting |
-| B651 | Parcel split double-counts acreage; make split REPLACE the parent (parent + children can never both be active) | [Site Planner] | #site-planner #yield #selection | ⏳ live — awaiting |
 | B659 | Sheet reader + file organizer revamp: rotated/offset pages, set-aware titles, left-edge & vertical title blocks, title-first grouping, date-first names | [Doc Review / Library] | #doc-review #library #files #filing | ⏳ live — awaiting |
-| B672 (×2) | Element-level sync, phase 3/5: realtime read path + rejoin refetch (read cutover; blob frozen) | [Site Planner] | #site-planner #persistence | ⏳ live — awaiting |
-| B673 | Element-level sync, phase 4/5: loud-conflict surface + delete/edit matrix | [Site Planner] | #site-planner #ui #persistence | ⏳ live — awaiting |
-| B674 | Element-level sync, phase 5/5: remove the edit lock — multi-writer cutover + presence pill | [Site Planner / Shell] | #site-planner #ui #persistence | ⏳ live — awaiting |
-| B714 | Sharing a project silently REVERTS: any ordinary save from the owner's open tab overwrote `sites.team_id` back to null, locking the collaborator out | [Site Planner / Review / teams · RLS] | #site-planner #persistence #auth | ⏳ live — awaiting |
-| B1166 | The address-search parcel card was a wall of text: a metes-and-bounds Legal blob made it taller than the map | [Site Planner / MapFinder] | #ui #gis #site-planner | ⏳ live — awaiting |
-| B1167 | Sign-up and password-reset copy never said who the email comes from | [Site Planner / AuthPanel] | #auth #ui #site-planner | ⏳ live — awaiting |
-| B1195 | A building's truck court and side parking carried a DIFFERENT building's length, overhanging it by ~195 ft | [Site Planner / dockZones] | #site-planner #ui #persistence | ⏳ live — awaiting |
-| B1196 | Address search showed the OWNER'S MAILING address instead of the situs — and that wrong address became the site NAME | [Site Planner / MapFinder] | #site-planner #gis #ui | ⏳ live — awaiting |
-| B603840 | Remove the manual-override badge from the schedule status pickers | [Scheduler] | #scheduler #ui #testing | ⏳ live — awaiting |
-| B662048 | Woods Road "Concept A 1M SF": 57 elements a teammate deleted from the wrong plan, restored + ROOT-CAUSED & FIXED | [Site Planner / persistence] | #site-planner #persistence #sync | ⏳ live — awaiting |
-| B890560 | Reach the admin page from the account menu, and only when you are the admin | [Admin] | #admin #auth #ui | ⏳ live — awaiting |
-| B897440 | `enablePullRequestAutoMerge` fails "Protected branch rules not configured for this branch" on PR #1245, a NEW failure mode distinct from B793696 | [Infra / CI] | #infra | ⏳ live — awaiting |
-| B1055088 | A stale window silently re-published its whole local store: 11 pages committed in ~1 second, and the one page the server had newer raised a false conflict | [Notes / sync] | #notes #sync #persistence | ⏳ live — awaiting |
-| B1160720 | Cloudflare Turnstile on the sign-up form | [Auth] | #auth | ⏳ live — awaiting |
-| B1160722 | Admin password reset | [Admin] | #admin #auth | ⏳ live — awaiting |
-| B1160480 | A brand-new project accepts Library uploads, then vanishes on reload and orphans the file | [library/projects] | #library #persistence #filing | ⏳ live — awaiting |
-| B1273296 | Content placed outside the note's page stayed outside it, and the page never grew to hold it — a regression, not a never-shipped feature | [Notes] | #notes #ui #testing | ⏳ live — awaiting |
-| B1167200 | The Schedule tab transpiles ~17,000 lines of JSX in the browser on every load | [Scheduler / Build] | #scheduler #perf #infra #testing | ⏳ live — awaiting |
+| B651 | Parcel split double-counts acreage; make split REPLACE the parent (parent + children can never both be active) | [Site Planner] | #site-planner #yield #selection | ⏳ live — awaiting |
+| B625 | Metes-and-bounds deed rotates grossly off-angle on "Align to county parcel" (×2) | [Site Planner] | #site-planner #coordinates #gis | ⏳ live — awaiting |
+| B482 (×2) | A signed-in user's PROJECT LIST is empty on any route that never mounts the Site Planner, and every project name in that session is wrong | [Cross-module / projects] | #ui #sync #auth #notes | ⏳ live — awaiting |
+| B409 (×2) | Unlimited-size file uploads: chunked Drive upload through the Worker proxy (replaces the CORS-dead browser-direct path) | [Doc Review / storage] | #doc-review #drive | ⏳ live — awaiting |
+| B216 (×2) | Harden edge-run setbacks for IRREGULAR parcels: concave inward placement + gentle-curve grouping — and now TIGHT-curve chip grouping | [Site Planner] | #site-planner #ui | ⏳ live — awaiting |
+| B179 | Backend per-account exact tax fetch | [server] | #infra | ⏳ live — awaiting |
+| B177 | Parcel tax breakdown panel | [Site Planner] | #site-planner | ⏳ live — awaiting |
 
 ## By tag
 
-- **#a11y** — B1176482, B1026274, B1168128, B859506, B832391, B748960, B734529
-- **#admin** — B711905, B711906, B711907, B711908, B842866, B877442, B711904, B890560, B1160722
-- **#auth** — B1160723, B916, B917, B483, B778, B711330, B711904, B672113, B616672, B616673, B377891, B366384, B366385, B366386, B326416, B326417, B326418, B326419, B312545, B1425, B482, B1291, B676, B714, B1167, B890560, B1160720, B1160722
-- **#compare** — B471, B1053568, B1053569, B1053570
-- **#comps** — B1156865, B1156866, B1156867, B1156868, B1066370, B1310208, B1310209, B1310210, B1310211, B1167712, B1167713, B1167714, B1263072, B1263073, B1263074, B1263075, B1213313, B1203344, B1184656, B1167136, B1167137, B1167138, B1163824, B1163825, B1154368, B1154368, B1129408, B850016, B850019, B1123425, B1114992, B1090466, B1091712, B850432, B850434, B1066368, B1066368, B1066369, B1066560, B986096, B986096, B986097, B986097, B1063904, B1063904, B978272, B978273, B978274, B978275, B978276, B978277, B978278, B978279, B978280, B978281, B978282, B978283, B978284, B978285, B978286, B978287, B948496, B972225, B972224, B972512, B972513, B941152, B832385, B832387, B832390, B832391, B831779, B711328, B711329
-- **#coordinates** — B290247, B290250, B1422, B217541, B1106, B1134752, B297904, B230080, B1141, B1142, B1122, B1111, B1043, B625, B684
-- **#dashboard** — B1253249, B1281376, B1268016, B1268017, B1228864, B1213313
-- **#doc-review** — B770897, B484, B471, B423, B422, B413, B411, B406, B364, B267, B268, B269, B273, B180, B181, B183, B20, B38, B1203344, B978272, B978273, B978276, B948496, B972225, B972512, B972513, B503184, B208960, B208961, B208962, B208965, B208966, B1190, B1173, B1160, B947, B948, B914, B918, B919, B791, B792, B409, B746, B667, B659
-- **#drive** — B1248208, B1248209, B663, B662, B629, B1235168, B1235169, B1017, B1005, B1009, B989, B791, B792, B409, B699, B701
-- **#entitlements** — B290245, B290246, B290248, B818, B725, B726, B290240, B1239, B1074, B1026, B868, B816
-- **#export** — B758545, B758546, B768496, B1440, B818, B810, B752, B1238304, B794960, B765985, B758544, B711329, B703776, B550512, B548064, B494050, B463072, B350000, B335985, B316864, B298756, B298758, B1400, B1355, B1342, B1328, B1314, B1153, B1085, B1047, B1017, B862, B839, B840, B816, B745, B738, B712, B684
-- **#files** — B393173, B180, B181, B182, B183, B1205297, B978276, B978279, B978280, B978281, B978284, B948496, B972225, B972513, B768160, B487600, B298756, B952, B792, B784, B785, B786, B747, B748, B699, B675, B668, B664, B659
-- **#filing** — B1262592, B1272112, B411, B364, B273, B1205297, B699, B664, B659, B1160480
-- **#floodplain** — B1163827, B290246, B290248, B1442, B1353, B998, B1000, B1001, B994, B986, B988, B906, B1186256, B1186259, B1186260, B1163826, B1163828, B881668, B877440, B877441, B435537, B407328, B367296, B367297, B298560, B298561, B298562, B298401, B286309, B286308, B286304, B286305, B290243, B280704, B280705, B280706, B280707, B276752, B276753, B276755, B276449, B209506, B209507, B209508, B1421, B1235, B1236, B1237, B1241, B1207, B1105, B1103, B1104, B1091, B1092, B1089, B1074, B1057, B1075, B1076, B1080, B1056, B1032, B1036, B1030, B1019, B1021, B1022, B1024, B1026, B1027, B1029, B1007, B999, B996, B990, B982, B987, B984, B981, B978, B975, B972, B968, B967, B885, B884, B882, B883, B878, B868, B870, B871, B861, B862, B802, B789
-- **#food** — B709696, B709697, B677040, B651872, B681520, B707840, B707841, B707842, B817552, B817553, B829616, B842528, B842529, B842530, B842531, B669312, B668193, B668194, B568400, B575952, B576000, B576001, B623728, B623776, B626576, B629376, B632176, B632177, B632178, B634980, B634976, B634977, B634978, B634979, B634981, B634982
-- **#formula** — B1179328, B1109840, B1109841, B1294592, B1117408, B891184
-- **#gantt** — B818, B1241744, B1241745, B1257072, B1263824, B1113712, B1113713, B443248, B1342, B816
-- **#geometry** — B520560, B494049, B455360
-- **#gis** — B1163827, B848737, B853713, B724258, B519905, B290245, B290247, B242544, B242545, B1422, B1432, B1433, B1434, B1121, B1349, B1208, B1063, B810, B776, B777, B752, B753, B722, B723, B724, B726, B629, B370, B309, B178, B171, B147, B13, B95, B1332016, B1238304, B1186259, B1154368, B1146961, B1134752, B1134753, B1134754, B842928, B846384, B986097, B948496, B972225, B941152, B868960, B802400, B800848, B800849, B711328, B688864, B672115, B672114, B651872, B576001, B629376, B632177, B632178, B634982, B550512, B519907, B435537, B393168, B393169, B393170, B385040, B367296, B367297, B323424, B685200, B323425, B298560, B298562, B298401, B286308, B286304, B286305, B286306, B286307, B297904, B297905, B297907, B290240, B280704, B280705, B276752, B276753, B276754, B276755, B209506, B209507, B209508, B209502, B209503, B209504, B1427, B1421, B1423, B1424, B1401, B1402, B1403, B1254, B1253, B1235, B1236, B1237, B1241, B1205, B1206, B1161, B1162, B1141, B1142, B1131, B1132, B1122, B1111, B1095, B1096, B1091, B1092, B1087, B1088, B1057, B1075, B1076, B1079, B1080, B1043, B1045, B1048, B1049, B975, B972, B956, B885, B884, B882, B883, B879, B860, B861, B839, B840, B832, B691, B789, B787, B625, B751, B745, B738, B707, B712, B1166, B1196
+- **#a11y** — B2154040, B1391954, B1391953, B1391952, B1382549, B1382545, B1382544, B1176482, B1026274, B1168128, B859506, B832391, B748960, B734529
+- **#admin** — B2140256, B2136275, B2136274, B2136273, B2136272, B2123392, B2122576, B1160722, B890560, B877442, B842866, B711908, B711907, B711906, B711905, B711904
+- **#auth** — B2146552, B2146549, B2087650, B1160723, B917, B916, B483, B2122576, B2038784, B1497888, B1160722, B1160720, B890560, B711904, B711330, B672113, B616673, B616672, B377891, B366386, B366385, B366384, B326419, B326418, B326417, B326416, B312545, B1425, B1291, B1167, B778, B714, B676, B482
+- **#compare** — B471, B1053570, B1053569, B1053568
+- **#comps** — B2096359, B1629617, B1156868, B1156867, B1156866, B1156865, B1066370, B2010355, B2010354, B2010353, B2010352, B2007360, B1953796, B1577424, B1497890, B1497889, B1405457, B1395568, B1380112, B1376672, B1373057, B1372144, B1366384, B1365936, B1359492, B1359491, B1359490, B1359489, B1310211, B1310210, B1310209, B1310208, B1263075, B1263074, B1263073, B1263072, B1213313, B1203344, B1184656, B1167714, B1167713, B1167712, B1167138, B1167137, B1167136, B1163825, B1163824, B1154368, B1154368, B1129408, B1123425, B1114992, B1091712, B1090466, B1066560, B1066369, B1066368, B1066368, B1063904, B1063904, B986097, B986097, B986096, B986096, B978287, B978286, B978285, B978284, B978281, B978280, B978279, B978278, B978277, B978276, B978275, B978274, B978273, B978272, B972513, B972512, B972225, B972224, B948496, B941152, B850434, B850432, B850019, B850016, B832391, B832390, B832387, B832385, B831779, B711329, B711328
+- **#coordinates** — B290250, B290247, B217541, B1422, B1106, B1932784, B1134752, B297904, B230080, B1142, B1141, B1122, B1111, B1043, B684, B625
+- **#dashboard** — B2096358, B2096357, B1945761, B1945760, B1450817, B1426608, B1422496, B1253249, B2087648, B2016112, B1727536, B1497890, B1411504, B1407824, B1405457, B1405456, B1401952, B1395568, B1380112, B1373536, B1368064, B1366384, B1365936, B1359904, B1340368, B1281376, B1268017, B1268016, B1228864, B1213313
+- **#doc-review** — B2154041, B2154038, B2146553, B2146550, B2146547, B2022929, B2001569, B770897, B484, B471, B423, B422, B413, B411, B406, B364, B273, B269, B268, B267, B183, B181, B180, B38, B20, B2146545, B2146544, B2080753, B2080752, B2058144, B2039233, B2039232, B2034128, B2022928, B2022448, B2001568, B1998016, B1953796, B1912208, B1873392, B1727536, B1456896, B1340368, B1203344, B978276, B978273, B978272, B972513, B972512, B972225, B948496, B503184, B208966, B208965, B208962, B208961, B208960, B1190, B1173, B1160, B948, B947, B919, B918, B914, B792, B791, B746, B667, B659, B409
+- **#drive** — B2154034, B2154033, B2146554, B2146547, B1317840, B1248209, B1248208, B663, B662, B629, B1235169, B1235168, B1017, B1009, B1005, B989, B792, B791, B701, B699, B409
+- **#entitlements** — B290248, B290246, B290245, B818, B726, B725, B290240, B1239, B1074, B1026, B868, B816
+- **#export** — B2154039, B2154035, B2118784, B2099040, B1561104, B768496, B758546, B758545, B1440, B818, B810, B752, B2143584, B2135312, B2127664, B2081252, B2019264, B2018608, B2010354, B2010353, B2010352, B1958144, B1953795, B1953794, B1953200, B1934529, B1934528, B1838705, B1838704, B1804993, B1804992, B1577424, B1560993, B1370548, B1238304, B794960, B765985, B758544, B711329, B703776, B550512, B548064, B494050, B463072, B350000, B335985, B316864, B298758, B298756, B1400, B1355, B1342, B1328, B1314, B1153, B1085, B1047, B1017, B862, B840, B839, B816, B745, B738, B712, B684
+- **#files** — B2146554, B2096359, B2022929, B393173, B183, B182, B181, B180, B2080752, B2039233, B2034128, B2022928, B1205297, B978284, B978281, B978280, B978279, B978276, B972513, B972225, B948496, B768160, B487600, B298756, B952, B792, B786, B785, B784, B748, B747, B699, B675, B668, B664, B659
+- **#filing** — B2146558, B1272112, B1262592, B411, B364, B273, B1205297, B1160480, B699, B664, B659
+- **#floodplain** — B1163827, B290248, B290246, B1442, B1353, B1001, B1000, B998, B994, B988, B986, B906, B2117136, B2081248, B1490144, B1186260, B1186259, B1186256, B1163828, B1163826, B881668, B877440, B435537, B407328, B367297, B367296, B298562, B298561, B298560, B298401, B290243, B286309, B286308, B286305, B286304, B280707, B280706, B280705, B280704, B276755, B276753, B276752, B276449, B209508, B209507, B209506, B1421, B1241, B1237, B1236, B1235, B1207, B1105, B1104, B1103, B1092, B1091, B1089, B1080, B1076, B1075, B1074, B1057, B1056, B1036, B1032, B1030, B1029, B1027, B1026, B1024, B1022, B1021, B1019, B1007, B999, B996, B990, B987, B984, B982, B981, B978, B975, B972, B968, B967, B885, B884, B883, B882, B878, B871, B870, B868, B862, B861, B802, B789
+- **#food** — B2106752, B2097265, B2097264, B2070432, B2057920, B2046224, B2025280, B2021649, B2021648, B2018608, B2016112, B1953796, B1940000, B1873008, B842531, B842530, B842529, B842528, B829616, B817553, B817552, B709696, B707842, B707841, B707840, B681520, B677040, B669312, B668194, B668193, B651872, B634982, B634981, B634980, B634979, B634978, B634977, B634976, B632178, B632177, B632176, B629376, B626576, B623776, B623728, B576001, B576000, B575952, B568400
+- **#formula** — B1179328, B1109841, B1109840, B1294592, B1117408, B891184
+- **#gantt** — B818, B1953795, B1696640, B1263824, B1257072, B1241745, B1241744, B1113713, B1113712, B443248, B1342, B816
+- **#geometry** — B1756546, B1756545, B1756544, B1749155, B1838705, B1832210, B1832209, B1832208, B1717617, B1717616, B1713104, B1703665, B1681521, B1681520, B1664512, B1645792, B1631648, B520560, B494049, B455360
+- **#gis** — B2146555, B2081250, B1992434, B1992433, B1583297, B1583296, B1551620, B1551617, B1372353, B1345824, B1317843, B1317842, B1317841, B1317840, B1163827, B853713, B848737, B724258, B519905, B290247, B290245, B242545, B242544, B1434, B1433, B1432, B1422, B1349, B1208, B1121, B1063, B810, B777, B776, B753, B752, B726, B724, B723, B722, B629, B370, B309, B178, B171, B147, B13, B95, B2140256, B2135312, B2131922, B2131921, B2123392, B2118880, B2117136, B2095744, B2092656, B2085536, B2081252, B2081251, B2081249, B2081248, B2064640, B2061600, B2057040, B1994512, B1992435, B1992432, B1990960, B1988288, B1988272, B1978048, B1976336, B1973921, B1973920, B1932784, B1885600, B1876624, B1875248, B1874881, B1873777, B1873776, B1871968, B1870704, B1870352, B1838705, B1783329, B1783328, B1657600, B1651254, B1651253, B1651252, B1651251, B1651250, B1651249, B1651248, B1639697, B1639584, B1597232, B1574256, B1497889, B1490144, B1455635, B1455634, B1455633, B1455632, B1427664, B1426592, B1401952, B1376672, B1372352, B1365936, B1361425, B1361424, B1359904, B1344608, B1339920, B1338896, B1332016, B1238304, B1186259, B1154368, B1146961, B1134754, B1134753, B1134752, B986097, B972225, B948496, B941152, B868960, B846384, B842928, B802400, B800849, B800848, B711328, B688864, B685200, B672115, B672114, B651872, B634982, B632178, B632177, B629376, B576001, B550512, B519907, B435537, B393170, B393169, B393168, B385040, B367297, B367296, B323425, B323424, B298562, B298560, B298401, B297907, B297905, B297904, B290240, B286308, B286307, B286306, B286305, B286304, B280705, B280704, B276755, B276754, B276753, B276752, B209508, B209507, B209506, B209504, B209503, B209502, B1427, B1424, B1423, B1421, B1402, B1401, B1254, B1253, B1241, B1237, B1236, B1235, B1206, B1205, B1196, B1166, B1162, B1161, B1142, B1141, B1132, B1131, B1122, B1111, B1096, B1095, B1092, B1091, B1088, B1087, B1080, B1079, B1076, B1075, B1057, B1049, B1048, B1045, B1043, B975, B972, B885, B884, B883, B882, B879, B861, B860, B840, B839, B832, B789, B787, B751, B745, B738, B712, B707, B691, B625
 - **#grading** — B276450, B1096, B1031, B1028, B888, B871
-- **#infra** — B1253249, B1219152, B1167121, B1038018, B927104, B858384, B791520, B711906, B711908, B613760, B519904, B519906, B472048, B435538, B393171, B393173, B329408, B296224, B295168, B287058, B280403, B280401, B267536, B267537, B267538, B267539, B266081, B255200, B251136, B233152, B227888, B227476, B227477, B227478, B227479, B227472, B227473, B227474, B227475, B221760, B209568, B209569, B209570, B6864, B6865, B6866, B6867, B1448, B1441, B1443, B1435, B1436, B1438, B1432, B1433, B1431, B1349, B1341, B1163, B1064, B916, B917, B726, B406, B63, B1237920, B842866, B179, B778, B1037953, B711904, B568400, B576000, B505664, B447472, B369536, B326416, B326419, B304177, B298563, B287056, B287057, B287060, B276576, B276448, B270912, B265536, B779, B36052, B1429, B1421, B1373, B1344, B1160, B1086, B1079, B1042, B1040, B864, B786, B812, B811, B759, B756, B748, B1215, B675, B669, B897440, B1167200
-- **#keyboard** — B724259, B1260000, B1223120, B3297
-- **#library** — B1262592, B1272112, B1248208, B1248209, B1020932, B1318, B663, B662, B1307664, B1307665, B1235168, B1235169, B1205297, B1203344, B1020928, B1020929, B853266, B853267, B952, B792, B699, B701, B676, B668, B664, B659, B1160480
-- **#markup** — B770897, B758545, B758546, B724256, B820, B423, B422, B267, B268, B794960, B770896, B758544, B548064, B548065, B435536, B1355, B1328, B1190, B1152, B1153, B947, B948, B918, B919, B913, B746, B737
-- **#mobile** — B1199216, B1176481, B758546, B1313552, B1241744, B1241745, B1257072, B1263824, B1168128, B1223120, B1091712, B748960, B734529
-- **#model** — B1239217, B1179328, B1163664, B1112834, B1109840, B1109841, B1294592, B1166768, B848833, B1117408, B965344, B891184
-- **#notes** — B1260001, B1273298, B1020931, B590019, B583011, B539650, B519681, B454480, B454481, B434416, B434417, B434418, B421488, B421489, B421490, B421491, B421492, B421493, B421494, B400176, B400177, B298759, B1318, B1260000, B1023120, B1053568, B1053569, B1053570, B1020928, B1020929, B853266, B853267, B512672, B342996, B391072, B391077, B391078, B364016, B357011, B350000, B350002, B350003, B342992, B315712, B315716, B298756, B298758, B291536, B1392, B36050, B36051, B1393, B1420, B482, B1419, B1400, B1391, B1374, B1291, B1314, B1055088, B1273296
-- **#parcel** — B1239328, B853713, B540768, B472049, B280402, B1332016, B1084000, B849344, B520560, B455360, B297905, B297906, B297908
-- **#perf** — B1231284, B1219152, B927104, B519904, B519906, B519905, B393171, B393173, B329408, B295168, B287058, B287059, B297909, B267539, B255200, B251136, B251137, B227888, B227476, B227477, B227478, B227479, B227472, B227473, B227474, B227475, B221760, B221761, B217537, B217540, B209568, B209569, B209570, B1448, B1440, B1441, B1442, B1443, B1350, B1435, B1436, B1437, B1438, B1432, B1433, B1434, B1121, B1431, B1359, B1360, B1349, B1351, B1353, B1163, B1064, B1063, B495, B484, B479, B1320512, B1237920, B1225296, B842865, B1154370, B1132464, B846384, B802400, B800848, B800849, B719776, B707841, B817552, B568400, B575952, B632178, B550512, B519907, B407328, B385040, B323425, B286000, B298560, B298561, B298563, B298401, B287057, B287060, B276576, B270912, B265536, B221763, B236592, B50008, B1427, B1401, B1402, B1352, B1344, B1345, B1346, B1329, B1330, B1331, B1189, B1157, B1158, B1160, B1161, B1162, B1132, B1115, B1086, B1042, B1043, B1045, B1046, B1047, B1048, B1049, B1040, B842, B860, B839, B837, B832, B821, B816, B669, B1167200
-- **#persistence** — B1248208, B1248209, B848737, B1109840, B1020932, B711907, B590019, B472048, B434417, B435538, B420257, B400176, B298759, B255200, B217540, B1341, B994, B916, B662, B648, B499, B495, B483, B474, B479, B163, B128, B134, B20, B38, B1303824, B1164192, B1167712, B1281376, B1235168, B1235169, B1227984, B1202176, B1208864, B1191457, B1184656, B1167136, B1167137, B848833, B1154369, B1135184, B1135185, B1114992, B1107680, B851, B1080547, B1080548, B1066368, B1037952, B1048400, B1020928, B986097, B965344, B891184, B877441, B859504, B845089, B868960, B859505, B859506, B849344, B832385, B832390, B719776, B719777, B711792, B688864, B707842, B829616, B842529, B616673, B487600, B456208, B447472, B420256, B391072, B366385, B369536, B364016, B357011, B342992, B326416, B326419, B315712, B315716, B316864, B298756, B265536, B1427, B1428, B1429, B1420, B1415, B1416, B1417, B1391, B1377, B1374, B1340, B1291, B1198, B1124, B1120, B1118, B1113, B1114, B1101, B1070, B1060, B984, B956, B914, B860, B863, B864, B836, B832, B791, B792, B793, B784, B785, B786, B812, B811, B759, B757, B756, B751, B746, B742, B743, B716, B701, B692, B682, B676, B667, B672, B673, B674, B714, B1195, B662048, B1055088, B1160480
-- **#pond** — B287059, B290248, B290249, B221760, B221761, B217537, B1353, B1000, B1001, B1002, B1003, B1004, B993, B995, B986, B988, B954, B950, B943, B937, B934, B906, B1186260, B1163828, B877440, B877441, B290243, B221763, B236592, B1103, B1053, B1032, B1036, B1030, B1031, B1019, B1020, B1021, B1023, B1024, B1028, B1016, B1007, B999, B997, B996, B990, B992, B983, B982, B987, B980, B981, B978, B977, B976, B975, B974, B973, B972, B970, B969, B968, B967, B965, B963, B958, B957, B909, B907, B905, B904, B903, B902, B901, B900, B888, B884, B883, B870, B871, B707
-- **#road** — B773729, B773731, B280400, B278576, B278577, B217537, B1382, B1383, B757920, B750096, B3296, B1405, B1155, B1083, B1067, B1068, B1052, B1017, B1005, B1006, B1010, B1011, B1015, B1014, B1013, B1012, B1009, B1008, B989, B971, B964, B961, B960, B959, B955, B953, B945, B946, B742
-- **#scheduler** — B1112448, B1080976, B1020930, B1023024, B647392, B647393, B613760, B613761, B613762, B603841, B908, B818, B495, B1268016, B1241744, B1241745, B1257072, B1263824, B1228864, B1213313, B1213314, B1128272, B1113712, B1113713, B1107680, B851, B1080545, B1080546, B1080547, B1080548, B778, B881664, B780448, B752848, B559376, B463920, B463921, B463072, B456208, B443248, B443249, B443250, B443536, B1342, B1343, B1050, B1065, B1066, B865, B863, B864, B836, B816, B603840, B1167200
-- **#selection** — B724257, B724259, B647392, B647393, B820, B481328, B464048, B464050, B280402, B280400, B278576, B278577, B233152, B1208, B705200, B548064, B548065, B494049, B3297, B463921, B393172, B371360, B316864, B316865, B304177, B297908, B295008, B295009, B230080, B50008, B50009, B1414, B1404, B1327, B1190, B1197, B1185, B1175, B1093, B1038, B1039, B948, B912, B880, B746, B742, B743, B1215, B737, B682, B651
-- **#site-planner** — B1239328, B1239329, B1219152, B1163827, B1199216, B1156865, B1156866, B1156867, B1156868, B848737, B1066370, B849584, B853713, B773729, B773731, B758545, B758546, B765984, B768496, B724256, B724257, B724258, B724259, B711905, B820, B540768, B519904, B519906, B519905, B500576, B487601, B484336, B481328, B477808, B464048, B464049, B464050, B472049, B472048, B435538, B420257, B287058, B287059, B297909, B290245, B290246, B290247, B290248, B290249, B290250, B280402, B280400, B278576, B278577, B267536, B267539, B266081, B255200, B251136, B251137, B242544, B242545, B1422, B233152, B227888, B227476, B227477, B227478, B227479, B227472, B227473, B227474, B227475, B221760, B221761, B217537, B217540, B217541, B209568, B209569, B209570, B1448, B1440, B1442, B1443, B1350, B1435, B1436, B1437, B1438, B1432, B1433, B1434, B1121, B1431, B1382, B1383, B1359, B1360, B1349, B1351, B1353, B1341, B1318, B1208, B1064, B1063, B998, B1000, B1001, B1002, B1003, B1004, B993, B994, B995, B986, B985, B988, B966, B954, B950, B944, B943, B937, B936, B934, B906, B810, B776, B777, B752, B753, B723, B724, B725, B629, B499, B484, B474, B479, B423, B406, B370, B309, B182, B183, B178, B171, B163, B147, B115, B13, B95, B1332016, B1320512, B1310208, B1310209, B1310210, B1310211, B1313552, B1303824, B1164192, B1294592, B1167712, B1167713, B1167714, B1268017, B1261232, B1263072, B1263073, B1263074, B1238304, B1237920, B1235168, B1235169, B1228864, B1227984, B1225296, B1168128, B1223120, B1213313, B1202176, B1208864, B1191456, B1191457, B1186256, B1186259, B1186260, B1184656, B1167136, B1167137, B1167138, B1163826, B1163828, B848833, B1154368, B1154368, B1154369, B1154370, B1154371, B1146960, B1146961, B1132464, B1135184, B1135185, B1134752, B1134753, B1134754, B850016, B850019, B1114992, B1091712, B1084000, B177, B850432, B850434, B1066560, B842928, B846384, B989105, B978272, B978273, B978274, B978275, B978276, B978277, B978278, B978279, B978280, B978281, B978282, B978283, B978284, B978285, B978286, B978287, B948496, B972225, B972224, B972512, B972513, B941152, B922816, B881664, B881668, B877440, B877441, B877442, B859504, B845088, B845089, B868960, B859505, B859506, B853266, B853267, B849344, B849345, B831779, B802400, B800848, B800849, B794960, B648353, B765985, B784832, B770896, B768160, B758544, B757920, B750096, B742369, B748960, B734529, B719776, B719777, B711328, B711329, B711330, B705200, B711792, B703776, B688864, B683568, B672115, B672114, B672113, B616672, B616673, B550512, B548064, B548065, B519907, B520560, B371362, B494048, B494049, B494050, B494051, B3296, B3297, B487600, B367298, B484337, B455360, B447472, B442688, B435536, B435537, B420256, B407328, B393168, B393169, B393170, B393172, B385040, B385041, B385042, B384064, B377891, B371360, B371361, B366384, B366385, B366386, B367296, B367297, B335985, B326416, B326417, B326418, B323424, B685200, B323425, B286000, B316864, B316865, B304177, B298560, B298561, B298562, B298563, B298401, B286308, B286304, B286306, B286307, B287060, B297904, B297905, B297906, B297907, B297908, B290240, B290243, B295008, B295009, B280704, B280705, B280706, B280707, B276752, B276754, B276755, B276448, B276449, B276450, B221763, B236592, B230080, B50008, B50009, B209506, B209507, B209502, B209503, B209504, B1427, B1428, B1423, B1424, B1425, B1414, B1415, B1416, B1417, B1418, B1401, B1402, B1403, B1404, B1405, B1377, B1352, B1356, B1355, B1344, B1345, B1346, B1340, B1327, B1328, B1329, B1330, B1331, B1254, B1253, B1235, B1236, B1237, B1239, B1241, B1214, B1205, B1206, B1207, B1189, B1204, B1197, B1198, B1191, B1192, B216, B1184, B1185, B1186, B1187, B1173, B1175, B1156, B1157, B1158, B1160, B1161, B1162, B1155, B1152, B1153, B1141, B1142, B1131, B1132, B1123, B1124, B1122, B1120, B1118, B1113, B1114, B1115, B1101, B1093, B1095, B1096, B1091, B1092, B1089, B1087, B1088, B1085, B1074, B1057, B1075, B1076, B1079, B1080, B1070, B1073, B1083, B1067, B1068, B1042, B1060, B1053, B1054, B1056, B1052, B1043, B1045, B1046, B1047, B1048, B1049, B1038, B1039, B1032, B1036, B1030, B1031, B1019, B1020, B1021, B1022, B1023, B1024, B1025, B1026, B1027, B1028, B1029, B1017, B1016, B1007, B1005, B1006, B1010, B1011, B1015, B1014, B1013, B1012, B1009, B1008, B999, B997, B996, B990, B992, B983, B982, B987, B984, B989, B980, B981, B978, B977, B976, B975, B974, B973, B972, B971, B970, B969, B968, B967, B965, B842, B964, B963, B961, B960, B959, B958, B957, B956, B955, B953, B951, B952, B947, B948, B945, B946, B919, B911, B912, B913, B909, B907, B905, B904, B903, B902, B901, B900, B888, B885, B884, B882, B883, B880, B879, B878, B868, B870, B871, B860, B861, B862, B839, B840, B837, B832, B821, B691, B802, B793, B789, B787, B784, B785, B786, B812, B811, B759, B757, B756, B625, B751, B747, B748, B745, B746, B742, B743, B1215, B738, B737, B716, B707, B712, B692, B684, B682, B651, B672, B673, B674, B714, B1166, B1167, B1195, B1196, B662048
-- **#stitching** — B413, B550512, B208960, B208961, B208962, B839
-- **#sync** — B500576, B484336, B464050, B421493, B420257, B400176, B298759, B1341, B1303824, B1235168, B1227984, B1208864, B1135185, B1107680, B1090466, B1037952, B1037953, B1048400, B1023120, B1020928, B965344, B648353, B784832, B711328, B711330, B711792, B683568, B672113, B616673, B342996, B487600, B484337, B447472, B420256, B391072, B377891, B366384, B366385, B366386, B364016, B357011, B342992, B315712, B315716, B1420, B482, B1415, B1416, B1417, B1391, B1374, B1343, B1340, B1291, B1120, B1113, B1115, B1012, B662048, B1055088
-- **#telemetry** — B1231284, B842864, B842865, B842866
-- **#testing** — B1260001, B1273298, B1249616, B1239330, B1253249, B1231284, B1248208, B1248209, B1219152, B1176978, B1179328, B1167121, B1163664, B1112834, B1106257, B1038016, B1038017, B1038018, B989106, B927104, B858384, B791520, B724256, B711906, B647392, B647393, B613760, B613761, B613762, B583011, B540768, B519904, B519906, B519681, B500576, B484336, B481328, B464048, B454480, B454481, B329408, B296224, B295168, B280403, B280401, B267536, B267537, B267538, B267539, B266081, B255200, B251136, B233152, B227888, B227476, B227477, B227472, B227473, B227474, B221760, B209568, B209569, B6864, B6865, B6866, B6867, B1448, B1441, B1443, B1435, B1436, B1432, B1431, B1163, B1126, B966, B269, B63, B1320512, B1303824, B1164192, B1237920, B1235168, B1235169, B1228864, B1227984, B1225296, B1202176, B848833, B965344, B881668, B648353, B784832, B770896, B780448, B752848, B757920, B742369, B709696, B709697, B683568, B677040, B651872, B681520, B707840, B707841, B707842, B817552, B817553, B829616, B842528, B842529, B842530, B842531, B669312, B668193, B668194, B568400, B575952, B576000, B576001, B623728, B623776, B626576, B629376, B632176, B632177, B632178, B634980, B634976, B634977, B634978, B634979, B634981, B634982, B505664, B503184, B494048, B3296, B3297, B393169, B393170, B391078, B366388, B369536, B326419, B304177, B298563, B287056, B287057, B287060, B276576, B276754, B276448, B276449, B276450, B270912, B265536, B36052, B1421, B1373, B1344, B1346, B1120, B1086, B1040, B878, B863, B836, B743, B1215, B603840, B1273296, B1167200
-- **#thoroughfare** — B722, B723, B724, B725, B726
-- **#ui** — B1249616, B1239330, B1239328, B1239329, B1253249, B1239217, B1176978, B1167121, B1199216, B1176481, B1176482, B1156865, B1109840, B1109841, B1112448, B1106257, B1066370, B849584, B1038016, B1038017, B1026273, B1026274, B1026275, B989104, B989106, B773729, B773731, B770897, B758545, B758546, B765984, B768496, B724257, B711905, B711907, B603841, B590019, B583011, B539650, B820, B519681, B487601, B477808, B464048, B464049, B454480, B454481, B434416, B434417, B434418, B421488, B421489, B421490, B421491, B421492, B421494, B400177, B280402, B280400, B278576, B278577, B242544, B227479, B227474, B221761, B217541, B1440, B1441, B1442, B1443, B1350, B1435, B1437, B1438, B1385, B1382, B1383, B1359, B1360, B1351, B1208, B1126, B998, B995, B985, B954, B950, B944, B943, B937, B936, B934, B917, B810, B723, B115, B1310208, B1310209, B1310210, B1310211, B1313552, B1307664, B1307665, B1167713, B1167714, B1281376, B1268016, B1268017, B1261232, B1263072, B1263073, B1263074, B1263075, B1238304, B1241744, B1241745, B1257072, B1263824, B1228864, B1168128, B1223120, B1213313, B1202176, B1191456, B1186256, B1166768, B842864, B1167120, B848833, B1154369, B1154371, B1146960, B1146961, B1134753, B1134754, B1128272, B850016, B850019, B1123425, B1117408, B1091712, B851, B1080545, B850432, B850434, B1066369, B1066560, B1037952, B1037953, B1048400, B1023120, B1053568, B1053569, B1053570, B842928, B1020928, B1020929, B989105, B986096, B1063904, B972224, B922816, B891184, B881664, B859504, B845088, B845089, B859505, B859506, B853266, B853267, B849344, B849345, B832387, B832390, B832391, B831779, B802400, B648353, B765985, B770896, B780448, B752848, B758544, B757920, B750096, B742369, B748960, B734529, B719777, B705200, B711904, B711792, B703776, B688864, B683568, B672115, B672114, B677040, B651872, B681520, B707840, B707841, B817552, B817553, B829616, B842528, B842529, B842530, B842531, B669312, B668193, B668194, B616672, B575952, B623728, B626576, B629376, B632176, B632177, B634976, B634977, B634978, B634979, B634981, B559376, B548064, B548065, B520560, B512672, B371362, B503184, B3296, B3297, B367298, B484337, B463920, B463921, B463072, B456208, B455360, B443249, B443250, B443536, B442688, B435536, B393172, B391077, B385040, B385041, B385042, B384064, B377891, B371360, B371361, B366387, B366388, B366389, B367296, B350000, B350002, B350003, B335985, B326417, B326418, B323424, B685200, B312545, B286000, B316864, B316865, B298758, B298561, B298562, B291536, B297906, B297907, B295008, B295009, B276576, B221763, B236592, B230080, B50008, B50009, B208960, B208961, B208962, B208965, B208966, B1392, B36050, B36051, B1393, B1428, B1429, B1423, B1424, B1425, B1420, B482, B1419, B1414, B1418, B1404, B1405, B1400, B1384, B1374, B1373, B1352, B1356, B1355, B1345, B1346, B1342, B1343, B1327, B1328, B1329, B1254, B1253, B1236, B1241, B1214, B1205, B1206, B1189, B1190, B1204, B1197, B1198, B1191, B1192, B216, B1184, B1185, B1186, B1187, B1173, B1175, B1156, B1155, B1152, B1153, B1131, B1132, B1123, B1104, B1101, B1093, B1095, B1096, B1091, B1089, B1087, B1088, B1085, B1076, B1070, B1073, B1083, B1067, B1068, B1060, B1053, B1054, B1050, B1065, B1066, B1052, B1030, B1031, B1025, B1029, B1016, B1006, B1015, B1014, B992, B980, B981, B978, B977, B976, B975, B974, B973, B972, B971, B970, B969, B968, B967, B965, B842, B964, B963, B961, B960, B959, B958, B957, B956, B955, B953, B951, B952, B947, B948, B945, B946, B928, B914, B911, B912, B913, B909, B903, B902, B901, B900, B882, B880, B879, B865, B862, B837, B821, B802, B746, B742, B743, B712, B669, B668, B673, B674, B1166, B1167, B1195, B1196, B603840, B890560, B1273296
-- **#view** — B1219152, B1225296, B1191456, B683568, B519907, B494048, B494051
-- **#yield** — B1163827, B290249, B267536, B266081, B1442, B1126, B998, B1000, B1001, B1002, B1003, B1004, B993, B994, B995, B986, B985, B988, B966, B954, B950, B944, B943, B937, B936, B934, B906, B724, B1186256, B1163826, B1163828, B881668, B298560, B298561, B298562, B298563, B286309, B286305, B280706, B280707, B276753, B221763, B236592, B209508, B1235, B1239, B1207, B1158, B1105, B1104, B1080, B1054, B1056, B1032, B1036, B1030, B1031, B1019, B1020, B1021, B1022, B1023, B1024, B1025, B1026, B1027, B1028, B1029, B1016, B1007, B999, B997, B996, B990, B992, B983, B982, B987, B984, B980, B981, B978, B977, B976, B975, B974, B973, B972, B970, B969, B968, B967, B965, B963, B958, B957, B909, B888, B885, B884, B882, B883, B878, B868, B870, B871, B860, B861, B862, B832, B802, B751, B712, B651
+- **#infra** — B2146551, B2087650, B1857905, B1805153, B1764688, B1609186, B1589697, B1361682, B1332288, B1253249, B1219152, B1167121, B1038018, B927104, B858384, B791520, B613760, B519906, B519904, B435538, B393173, B393171, B329408, B296224, B295168, B287058, B280403, B280401, B267539, B267538, B267537, B267536, B266081, B255200, B251136, B233152, B227888, B227479, B227478, B227477, B227476, B227475, B227474, B227473, B227472, B221760, B209570, B209569, B209568, B6867, B6866, B6865, B6864, B1448, B1443, B1441, B1438, B1436, B1435, B1433, B1432, B1431, B1349, B1341, B1163, B1064, B917, B916, B726, B406, B63, B2109728, B1802593, B1644368, B1638835, B1638832, B1237920, B1167200, B1037953, B842866, B711908, B711906, B711904, B576000, B568400, B505664, B472048, B447472, B369536, B326419, B326416, B304177, B298563, B287060, B287057, B287056, B276576, B276448, B270912, B265536, B36052, B1429, B1421, B1373, B1344, B1215, B1160, B1086, B1079, B1042, B1040, B864, B812, B811, B786, B779, B778, B759, B756, B748, B675, B669, B179
+- **#keyboard** — B724259, B2146545, B1555152, B1260000, B1223120, B3297
+- **#library** — B2154034, B2154033, B2146558, B1272112, B1262592, B1248209, B1248208, B1020932, B1318, B663, B662, B2086368, B2084480, B2039233, B2034128, B1953796, B1953793, B1912208, B1456896, B1307665, B1307664, B1235169, B1235168, B1205297, B1203344, B1160480, B1020929, B1020928, B853267, B853266, B952, B792, B701, B699, B676, B668, B664, B659
+- **#map-notes** — B1895376, B1389520, B1372144
+- **#markup** — B770897, B758546, B758545, B724256, B820, B423, B422, B268, B267, B2143584, B2127664, B1652706, B1652705, B1652704, B794960, B770896, B758544, B548065, B548064, B435536, B1355, B1328, B1190, B1153, B1152, B948, B947, B919, B918, B913, B746, B737
+- **#mobile** — B1199216, B1176481, B758546, B2138080, B2097265, B2097264, B2088384, B2058144, B2057920, B2046224, B2043888, B2039232, B2038784, B2034128, B2022928, B2020273, B2020272, B2007360, B1802592, B1447442, B1447441, B1313552, B1263824, B1257072, B1241745, B1241744, B1225296, B1223120, B1168128, B1091712, B748960, B734529
+- **#model** — B1179328, B1163664, B1112834, B1109841, B1109840, B2010355, B1953796, B1912208, B1294592, B1166768, B1117408, B965344, B891184, B848833
+- **#notes** — B2154042, B2099043, B2099040, B2078595, B1901172, B1883840, B1801042, B1597762, B1561104, B1554273, B1554272, B1405008, B1391954, B1391953, B1391952, B1382550, B1382549, B1382548, B1382547, B1382546, B1382545, B1382544, B1368145, B1273298, B1260001, B590019, B583011, B539650, B519681, B454481, B454480, B434418, B434417, B434416, B421494, B421493, B421492, B421491, B421490, B421489, B421488, B400177, B400176, B298759, B1318, B2142464, B1865408, B1864976, B1832304, B1801040, B1683297, B1683296, B1675104, B1662464, B1597761, B1597760, B1555152, B1447441, B1433856, B1370548, B1370545, B1366384, B1360256, B1273296, B1260000, B1055088, B1053570, B1053569, B1053568, B1023120, B1020929, B1020928, B853267, B853266, B512672, B391078, B391077, B391072, B357011, B350003, B350002, B350000, B342996, B342992, B315716, B315712, B298758, B298756, B291536, B36051, B36050, B1420, B1419, B1400, B1393, B1392, B1391, B1374, B1314, B1291, B482
+- **#parcel** — B2146555, B1583297, B1583296, B1551617, B1539888, B1430384, B1372353, B1345824, B1239328, B853713, B540768, B472049, B280402, B2140256, B2123392, B2118880, B2092656, B2090352, B2085536, B2064640, B2061600, B1988288, B1988272, B1976336, B1932784, B1885600, B1876624, B1875248, B1874881, B1873777, B1873776, B1870704, B1657600, B1651254, B1651253, B1651252, B1651251, B1651250, B1651249, B1651248, B1639697, B1639584, B1597232, B1574256, B1455635, B1455634, B1455633, B1455632, B1427664, B1376672, B1373057, B1372352, B1368144, B1361425, B1361424, B1344608, B1339920, B1338896, B1332016, B1084000, B849344, B520560, B455360, B297908, B297906, B297905
+- **#perf** — B1231284, B1219152, B927104, B519906, B519905, B519904, B393173, B393171, B329408, B297909, B295168, B287059, B287058, B267539, B255200, B251137, B251136, B227888, B227479, B227478, B227477, B227476, B227475, B227474, B227473, B227472, B221761, B221760, B217540, B217537, B209570, B209569, B209568, B1448, B1443, B1442, B1441, B1440, B1438, B1437, B1436, B1435, B1434, B1433, B1432, B1431, B1360, B1359, B1353, B1351, B1350, B1349, B1163, B1121, B1064, B1063, B495, B484, B479, B2102272, B2092656, B2061600, B2021648, B1988272, B1978048, B1976336, B1802592, B1574432, B1497890, B1497889, B1497888, B1373536, B1320512, B1237920, B1225296, B1167200, B1154370, B1132464, B846384, B842865, B817552, B802400, B800849, B800848, B719776, B707841, B632178, B575952, B568400, B550512, B519907, B407328, B385040, B323425, B298563, B298561, B298560, B298401, B287060, B287057, B286000, B276576, B270912, B265536, B236592, B221763, B50008, B1427, B1402, B1401, B1352, B1346, B1345, B1344, B1331, B1330, B1329, B1189, B1162, B1161, B1160, B1158, B1157, B1132, B1115, B1086, B1049, B1048, B1047, B1046, B1045, B1043, B1042, B1040, B860, B842, B839, B837, B832, B821, B816, B669
+- **#persistence** — B2154037, B2154033, B2146554, B2146552, B2099042, B2096359, B2095121, B2087650, B2078595, B2063057, B1953792, B1927953, B1883840, B1696401, B1696400, B1629617, B1584833, B1442592, B1422496, B1405008, B1361683, B1358128, B1248209, B1248208, B1109840, B1020932, B848737, B590019, B435538, B434417, B420257, B400176, B298759, B255200, B217540, B1341, B994, B916, B662, B648, B499, B495, B483, B479, B474, B163, B134, B128, B38, B20, B2146556, B2146546, B2109728, B2108336, B2087649, B2087648, B2086368, B2084480, B2066224, B2064896, B2063056, B2015808, B1991041, B1991040, B1953797, B1953796, B1953795, B1953794, B1953793, B1953200, B1952736, B1940000, B1934528, B1912208, B1873008, B1865408, B1853664, B1838704, B1832304, B1783328, B1777120, B1768080, B1767168, B1754112, B1735728, B1727536, B1701360, B1696640, B1693264, B1675104, B1662464, B1631939, B1629618, B1613696, B1584528, B1584512, B1577424, B1525088, B1515824, B1496320, B1482352, B1482000, B1469872, B1440976, B1404352, B1399568, B1395568, B1380336, B1372144, B1368064, B1366384, B1360256, B1340368, B1336576, B1303824, B1281376, B1235169, B1235168, B1227984, B1208864, B1202176, B1191457, B1184656, B1167712, B1167137, B1167136, B1164192, B1160480, B1154369, B1135185, B1135184, B1114992, B1107680, B1080548, B1080547, B1066368, B1055088, B1048400, B1037952, B1020928, B986097, B965344, B891184, B868960, B859506, B859505, B859504, B849344, B848833, B845089, B842529, B832390, B832385, B829616, B719777, B719776, B711907, B711792, B707842, B688864, B662048, B616673, B487600, B472048, B456208, B447472, B420256, B391072, B369536, B366385, B357011, B342992, B326419, B326416, B316864, B315716, B315712, B298756, B265536, B1429, B1428, B1427, B1420, B1417, B1416, B1415, B1391, B1377, B1374, B1340, B1291, B1198, B1195, B1124, B1120, B1118, B1114, B1113, B1101, B1070, B1060, B984, B914, B864, B863, B860, B851, B836, B832, B812, B811, B793, B792, B791, B786, B785, B784, B759, B757, B756, B751, B746, B743, B742, B716, B714, B701, B692, B682, B676, B674, B673, B672, B667
+- **#pond** — B290249, B290248, B287059, B221761, B221760, B217537, B1353, B1004, B1003, B1002, B1001, B1000, B995, B993, B988, B986, B954, B950, B943, B937, B934, B906, B1186260, B1163828, B877440, B290243, B236592, B221763, B1103, B1053, B1036, B1032, B1031, B1030, B1028, B1024, B1023, B1021, B1020, B1019, B1016, B1007, B999, B997, B996, B992, B990, B987, B983, B982, B981, B980, B978, B977, B976, B975, B974, B973, B972, B970, B969, B968, B967, B965, B963, B958, B957, B909, B907, B905, B904, B903, B902, B901, B900, B888, B884, B883, B871, B870, B707
+- **#process** — B1764688
+- **#road** — B1756546, B1756545, B1756544, B1551620, B773731, B773729, B280400, B278577, B278576, B217537, B1383, B1382, B1958144, B1832210, B1832209, B1832208, B1717617, B1717616, B1713104, B1703665, B1681521, B1681520, B1664512, B1645792, B1631649, B1631648, B757920, B750096, B3296, B1405, B1155, B1083, B1068, B1067, B1052, B1017, B1015, B1014, B1013, B1012, B1011, B1010, B1009, B1008, B1006, B1005, B989, B971, B964, B961, B960, B959, B955, B953, B946, B945, B742
+- **#scheduler** — B2154032, B2146548, B2095121, B1945761, B1945760, B1927953, B1857905, B1711649, B1644370, B1489697, B1361681, B1358128, B1112448, B1080976, B1023024, B1020930, B647393, B647392, B613762, B613761, B613760, B603841, B463922, B908, B818, B495, B2132256, B2087649, B2087648, B2015808, B1998016, B1953795, B1845681, B1845680, B1824576, B1777120, B1768080, B1754112, B1735728, B1711648, B1701360, B1696640, B1644368, B1638832, B1629618, B1614528, B1581952, B1560993, B1539585, B1536176, B1435888, B1411504, B1405456, B1404352, B1397568, B1396192, B1380336, B1373536, B1366384, B1341184, B1340400, B1336528, B1268016, B1263824, B1257072, B1241745, B1241744, B1228864, B1213314, B1213313, B1167200, B1128272, B1113713, B1113712, B1107680, B1080548, B1080547, B1080546, B1080545, B881664, B780448, B752848, B603840, B559376, B463921, B463920, B463072, B456208, B443536, B443250, B443249, B443248, B1343, B1342, B1066, B1065, B1050, B865, B864, B863, B851, B836, B816, B778
+- **#security** — B2154032, B1853664, B1644368, B1613696, B1584512
+- **#selection** — B2154038, B1539888, B1430384, B724259, B724257, B647393, B647392, B481328, B464050, B464048, B280402, B280400, B278577, B278576, B233152, B1208, B820, B1788913, B1597761, B1555152, B1368144, B1342704, B705200, B548065, B548064, B494049, B463921, B393172, B371360, B316865, B316864, B304177, B297908, B295009, B295008, B230080, B50009, B50008, B3297, B1414, B1327, B1215, B1197, B1190, B1185, B1175, B1093, B1039, B1038, B948, B912, B880, B746, B743, B742, B737, B682, B651
+- **#site-planner** — B2154039, B2154036, B2154035, B2146559, B2146557, B2118784, B2099042, B2099041, B2096360, B2081250, B2063057, B2020064, B1992434, B1992433, B1900672, B1857905, B1805153, B1756546, B1756545, B1756544, B1749155, B1696401, B1696400, B1674161, B1674160, B1631634, B1600353, B1600352, B1594320, B1584833, B1583297, B1583296, B1539888, B1450817, B1442592, B1430384, B1372353, B1368145, B1361683, B1361680, B1358128, B1345824, B1340512, B1317843, B1317842, B1317841, B1317840, B1239329, B1239328, B1219152, B1199216, B1163827, B1156868, B1156867, B1156866, B1156865, B1066370, B853713, B849584, B848737, B773731, B773729, B768496, B765984, B758546, B758545, B724259, B724258, B724257, B724256, B540768, B519906, B519905, B519904, B500576, B487601, B484336, B481328, B477808, B472049, B464050, B464049, B464048, B435538, B420257, B297909, B290250, B290249, B290248, B290247, B290246, B290245, B287059, B287058, B280402, B280400, B278577, B278576, B267539, B267536, B266081, B255200, B251137, B251136, B242545, B242544, B233152, B227888, B227479, B227478, B227477, B227476, B227475, B227474, B227473, B227472, B221761, B221760, B217541, B217540, B217537, B209570, B209569, B209568, B1448, B1443, B1442, B1440, B1438, B1437, B1436, B1435, B1434, B1433, B1432, B1431, B1422, B1383, B1382, B1360, B1359, B1353, B1351, B1350, B1349, B1341, B1318, B1208, B1121, B1064, B1063, B1004, B1003, B1002, B1001, B1000, B998, B995, B994, B993, B988, B986, B985, B966, B954, B950, B944, B943, B937, B936, B934, B906, B820, B810, B777, B776, B753, B752, B725, B724, B723, B629, B499, B484, B479, B474, B423, B406, B370, B309, B183, B182, B178, B171, B163, B147, B115, B13, B95, B2146556, B2146546, B2143584, B2135312, B2131922, B2131921, B2131920, B2127664, B2118880, B2117136, B2108336, B2102272, B2095744, B2092656, B2090352, B2087649, B2085536, B2081252, B2081251, B2081249, B2081248, B2066227, B2066226, B2066225, B2066224, B2064640, B2063056, B2061792, B2061600, B2057040, B2049312, B2020273, B2020272, B2019264, B2016112, B2001568, B1998016, B1996464, B1994512, B1992435, B1992432, B1991041, B1991040, B1990960, B1988288, B1988272, B1978048, B1976336, B1973921, B1973920, B1958144, B1953797, B1953794, B1953793, B1953200, B1934529, B1934528, B1932784, B1895376, B1885600, B1876624, B1875248, B1874881, B1873777, B1873776, B1873392, B1871968, B1870704, B1870352, B1865936, B1838705, B1838704, B1832210, B1832209, B1832208, B1804993, B1804992, B1802592, B1790017, B1790016, B1788913, B1788912, B1783329, B1783328, B1768080, B1767168, B1717617, B1717616, B1713104, B1703665, B1681521, B1681520, B1664513, B1664512, B1657600, B1652706, B1652705, B1652704, B1651254, B1651253, B1651252, B1651251, B1651250, B1651249, B1651248, B1645792, B1639697, B1639584, B1631939, B1631649, B1631648, B1614656, B1613696, B1597232, B1584528, B1584512, B1574432, B1574256, B1525088, B1515824, B1497888, B1496320, B1490144, B1482353, B1482352, B1482000, B1469872, B1455635, B1455634, B1455633, B1455632, B1447442, B1440976, B1427664, B1426592, B1401952, B1399568, B1389520, B1376672, B1373536, B1373057, B1372352, B1372144, B1368144, B1368064, B1365936, B1361425, B1361424, B1359492, B1344608, B1342704, B1339920, B1338896, B1336576, B1332016, B1320512, B1313552, B1310211, B1310210, B1310209, B1310208, B1303824, B1294592, B1268017, B1263074, B1263073, B1263072, B1261232, B1238304, B1237920, B1235169, B1235168, B1228864, B1227984, B1225296, B1223120, B1213313, B1208864, B1202176, B1191457, B1191456, B1186260, B1186259, B1186256, B1184656, B1168128, B1167714, B1167713, B1167712, B1167138, B1167137, B1167136, B1164192, B1163828, B1163826, B1154371, B1154370, B1154369, B1154368, B1154368, B1146961, B1146960, B1135185, B1135184, B1134754, B1134753, B1134752, B1132464, B1114992, B1091712, B1084000, B1066560, B989105, B978287, B978286, B978285, B978284, B978281, B978280, B978279, B978278, B978277, B978276, B978275, B978274, B978273, B978272, B972513, B972512, B972225, B972224, B948496, B941152, B922816, B881668, B881664, B877442, B877440, B868960, B859506, B859505, B859504, B853267, B853266, B850434, B850432, B850019, B850016, B849345, B849344, B848833, B846384, B845089, B845088, B842928, B831779, B802400, B800849, B800848, B794960, B784832, B770896, B768160, B765985, B758544, B757920, B750096, B748960, B742369, B734529, B719777, B719776, B711905, B711792, B711330, B711329, B711328, B705200, B703776, B688864, B685200, B683568, B672115, B672114, B672113, B662048, B648353, B616673, B616672, B550512, B548065, B548064, B520560, B519907, B494051, B494050, B494049, B494048, B487600, B484337, B472048, B455360, B447472, B442688, B435537, B435536, B420256, B407328, B393172, B393170, B393169, B393168, B385042, B385041, B385040, B384064, B377891, B371362, B371361, B371360, B367298, B367297, B367296, B366386, B366385, B366384, B335985, B326418, B326417, B326416, B323425, B323424, B316865, B316864, B304177, B298563, B298562, B298561, B298560, B298401, B297908, B297907, B297906, B297905, B297904, B295009, B295008, B290243, B290240, B287060, B286308, B286307, B286306, B286304, B286000, B280707, B280706, B280705, B280704, B276755, B276754, B276752, B276450, B276449, B276448, B236592, B230080, B221763, B209507, B209506, B209504, B209503, B209502, B50009, B50008, B3297, B3296, B1428, B1427, B1425, B1424, B1423, B1418, B1417, B1416, B1415, B1414, B1405, B1402, B1401, B1377, B1356, B1355, B1352, B1346, B1345, B1344, B1340, B1331, B1330, B1329, B1328, B1327, B1254, B1253, B1241, B1239, B1237, B1236, B1235, B1215, B1214, B1207, B1206, B1205, B1204, B1198, B1197, B1196, B1195, B1192, B1191, B1189, B1187, B1186, B1185, B1184, B1175, B1173, B1167, B1166, B1162, B1161, B1160, B1158, B1157, B1156, B1155, B1153, B1152, B1142, B1141, B1132, B1131, B1124, B1123, B1122, B1120, B1118, B1115, B1114, B1113, B1101, B1096, B1095, B1093, B1092, B1091, B1089, B1088, B1087, B1085, B1083, B1080, B1079, B1076, B1075, B1074, B1073, B1070, B1068, B1067, B1060, B1057, B1056, B1054, B1053, B1052, B1049, B1048, B1047, B1046, B1045, B1043, B1042, B1039, B1038, B1036, B1032, B1031, B1030, B1029, B1028, B1027, B1026, B1025, B1024, B1023, B1022, B1021, B1020, B1019, B1017, B1016, B1015, B1014, B1013, B1012, B1011, B1010, B1009, B1008, B1007, B1006, B1005, B999, B997, B996, B992, B990, B989, B987, B984, B983, B982, B981, B980, B978, B977, B976, B975, B974, B973, B972, B971, B970, B969, B968, B967, B965, B964, B963, B961, B960, B959, B958, B957, B955, B953, B952, B951, B948, B947, B946, B945, B919, B913, B912, B911, B909, B907, B905, B904, B903, B902, B901, B900, B888, B885, B884, B883, B882, B880, B879, B878, B871, B870, B868, B862, B861, B860, B842, B840, B839, B837, B832, B821, B812, B811, B802, B793, B789, B787, B786, B785, B784, B759, B757, B756, B751, B748, B747, B746, B745, B743, B742, B738, B737, B716, B714, B712, B707, B692, B691, B684, B682, B674, B673, B672, B651, B625, B216, B177
+- **#stitching** — B413, B550512, B208962, B208961, B208960, B839
+- **#sync** — B2154042, B2154037, B2146559, B2096358, B2095121, B1953792, B1696400, B1584833, B1405008, B500576, B484336, B464050, B421493, B420257, B400176, B298759, B1341, B2146546, B2087649, B2087648, B2064896, B1953796, B1953793, B1912208, B1865408, B1832304, B1777120, B1768080, B1754112, B1735728, B1693264, B1675104, B1629618, B1613696, B1584528, B1584512, B1525088, B1515824, B1496320, B1482353, B1482352, B1440976, B1360256, B1303824, B1235168, B1227984, B1208864, B1135185, B1107680, B1090466, B1055088, B1048400, B1037953, B1037952, B1023120, B1020928, B965344, B784832, B711792, B711330, B711328, B683568, B672113, B662048, B648353, B616673, B487600, B484337, B447472, B420256, B391072, B377891, B366386, B366385, B366384, B357011, B342996, B342992, B315716, B315712, B1420, B1417, B1416, B1415, B1391, B1374, B1343, B1340, B1291, B1120, B1115, B1113, B1012, B482
+- **#telemetry** — B1231284, B1802593, B1225296, B842866, B842865, B842864
+- **#testing** — B2146548, B1901172, B1857905, B1805153, B1801042, B1696401, B1696400, B1644370, B1609186, B1600352, B1597762, B1594320, B1589697, B1450817, B1405008, B1391954, B1382549, B1372353, B1361683, B1361682, B1358128, B1332288, B1317842, B1273298, B1260001, B1253249, B1249616, B1248209, B1248208, B1239330, B1231284, B1219152, B1179328, B1176978, B1167121, B1163664, B1112834, B1106257, B1038018, B1038017, B1038016, B989106, B927104, B858384, B791520, B724256, B647393, B647392, B613762, B613761, B613760, B583011, B540768, B519906, B519904, B519681, B500576, B484336, B481328, B464048, B454481, B454480, B329408, B296224, B295168, B280403, B280401, B267539, B267538, B267537, B267536, B266081, B255200, B251136, B233152, B227888, B227477, B227476, B227474, B227473, B227472, B221760, B209569, B209568, B6867, B6866, B6865, B6864, B1448, B1443, B1441, B1436, B1435, B1432, B1431, B1163, B1126, B966, B269, B63, B2138080, B2108336, B2097265, B2097264, B2088384, B2070432, B2057920, B2046224, B2021649, B1940000, B1932784, B1873008, B1802592, B1783329, B1768080, B1727536, B1701360, B1638835, B1613696, B1584528, B1584512, B1581952, B1539585, B1536176, B1515824, B1496320, B1482352, B1473984, B1469872, B1427664, B1426592, B1407824, B1404352, B1399568, B1397568, B1396192, B1389520, B1380336, B1380112, B1370548, B1344608, B1340400, B1340368, B1336576, B1320512, B1303824, B1273296, B1237920, B1235169, B1235168, B1228864, B1227984, B1225296, B1202176, B1167200, B1164192, B965344, B881668, B848833, B842531, B842530, B842529, B842528, B829616, B817553, B817552, B784832, B780448, B770896, B757920, B752848, B742369, B711906, B709696, B707842, B707841, B707840, B683568, B681520, B677040, B669312, B668194, B668193, B651872, B648353, B634982, B634981, B634980, B634979, B634978, B634977, B634976, B632178, B632177, B632176, B629376, B626576, B623776, B623728, B603840, B576001, B576000, B575952, B568400, B505664, B503184, B494048, B393170, B393169, B391078, B369536, B366388, B326419, B304177, B298563, B287060, B287057, B287056, B276754, B276576, B276450, B276449, B276448, B270912, B265536, B36052, B3297, B3296, B1421, B1373, B1346, B1344, B1215, B1120, B1086, B1040, B878, B863, B836, B743
+- **#thoroughfare** — B726, B725, B724, B723, B722
+- **#ui** — B2154040, B2146550, B2096360, B2096357, B2020064, B2001569, B1900672, B1674161, B1674160, B1644370, B1631634, B1600353, B1600352, B1594320, B1561104, B1554273, B1554272, B1539888, B1489697, B1442592, B1430384, B1426608, B1422496, B1391954, B1391953, B1391952, B1382550, B1382549, B1382548, B1382547, B1382546, B1382545, B1382544, B1368145, B1361683, B1361682, B1361681, B1361680, B1358128, B1340512, B1332288, B1253249, B1249616, B1239330, B1239329, B1239328, B1199216, B1176978, B1176482, B1176481, B1167121, B1156865, B1112448, B1109841, B1109840, B1106257, B1066370, B1038017, B1038016, B1026275, B1026274, B1026273, B989106, B989104, B849584, B773731, B773729, B770897, B768496, B765984, B758546, B758545, B724257, B603841, B590019, B583011, B539650, B519681, B487601, B477808, B464049, B464048, B463922, B454481, B454480, B434418, B434417, B434416, B421494, B421492, B421491, B421490, B421489, B421488, B400177, B280402, B280400, B278577, B278576, B242544, B227479, B227474, B221761, B217541, B1443, B1442, B1441, B1440, B1438, B1437, B1435, B1385, B1383, B1382, B1360, B1359, B1351, B1350, B1208, B1126, B998, B995, B985, B954, B950, B944, B943, B937, B936, B934, B917, B820, B810, B723, B115, B2146544, B2142464, B2138080, B2136275, B2136274, B2136273, B2136272, B2132256, B2131922, B2131921, B2131920, B2122576, B2117136, B2106752, B2097265, B2097264, B2088384, B2080753, B2070432, B2066227, B2066226, B2066225, B2066224, B2058144, B2057920, B2057040, B2051665, B2046224, B2043888, B2039232, B2038784, B2025280, B2022448, B2020273, B2020272, B2018608, B2016112, B2007360, B2001568, B1998016, B1996464, B1952736, B1940000, B1912208, B1895376, B1873392, B1873008, B1865936, B1864976, B1838704, B1832304, B1824576, B1802593, B1802592, B1801040, B1790017, B1790016, B1788913, B1788912, B1783329, B1783328, B1683297, B1683296, B1664513, B1652706, B1652705, B1652704, B1644368, B1638835, B1638832, B1631939, B1631649, B1614656, B1597761, B1597760, B1581952, B1574432, B1560993, B1555152, B1490144, B1482353, B1482000, B1473984, B1456896, B1447442, B1447441, B1435888, B1433856, B1411504, B1407824, B1405457, B1405456, B1404352, B1401952, B1397568, B1396192, B1395568, B1389520, B1380336, B1380112, B1373536, B1373057, B1370545, B1368144, B1368064, B1366384, B1365936, B1359904, B1359492, B1359491, B1359490, B1359489, B1342704, B1341184, B1340400, B1336528, B1313552, B1310211, B1310210, B1310209, B1310208, B1307665, B1307664, B1281376, B1273296, B1268017, B1268016, B1263824, B1263075, B1263074, B1263073, B1263072, B1261232, B1257072, B1241745, B1241744, B1238304, B1228864, B1223120, B1213313, B1202176, B1191456, B1186256, B1168128, B1167714, B1167713, B1167120, B1166768, B1154371, B1154369, B1146961, B1146960, B1134754, B1134753, B1128272, B1123425, B1117408, B1091712, B1080545, B1066560, B1066369, B1063904, B1053570, B1053569, B1053568, B1048400, B1037953, B1037952, B1023120, B1020929, B1020928, B989105, B986096, B972224, B922816, B891184, B890560, B881664, B859506, B859505, B859504, B853267, B853266, B850434, B850432, B850019, B850016, B849345, B849344, B848833, B845089, B845088, B842928, B842864, B842531, B842530, B842529, B842528, B832391, B832390, B832387, B831779, B829616, B817553, B817552, B802400, B780448, B770896, B765985, B758544, B757920, B752848, B750096, B748960, B742369, B734529, B719777, B711907, B711905, B711904, B711792, B707841, B707840, B705200, B703776, B688864, B685200, B683568, B681520, B677040, B672115, B672114, B669312, B668194, B668193, B651872, B648353, B634981, B634979, B634978, B634977, B634976, B632177, B632176, B629376, B626576, B623728, B616672, B603840, B575952, B559376, B548065, B548064, B520560, B512672, B503184, B484337, B463921, B463920, B463072, B456208, B455360, B443536, B443250, B443249, B442688, B435536, B393172, B391077, B385042, B385041, B385040, B384064, B377891, B371362, B371361, B371360, B367298, B367296, B366389, B366388, B366387, B350003, B350002, B350000, B335985, B326418, B326417, B323424, B316865, B316864, B312545, B298758, B298562, B298561, B297907, B297906, B295009, B295008, B291536, B286000, B276576, B236592, B230080, B221763, B208966, B208965, B208962, B208961, B208960, B50009, B50008, B36051, B36050, B3297, B3296, B1429, B1428, B1425, B1424, B1423, B1420, B1419, B1418, B1414, B1405, B1400, B1393, B1392, B1384, B1374, B1373, B1356, B1355, B1352, B1346, B1345, B1343, B1342, B1329, B1328, B1327, B1254, B1253, B1241, B1236, B1214, B1206, B1205, B1204, B1198, B1197, B1196, B1195, B1192, B1191, B1190, B1189, B1187, B1186, B1185, B1184, B1175, B1173, B1167, B1166, B1156, B1155, B1153, B1152, B1132, B1131, B1123, B1104, B1101, B1096, B1095, B1093, B1091, B1089, B1088, B1087, B1085, B1083, B1076, B1073, B1070, B1068, B1067, B1066, B1065, B1060, B1054, B1053, B1052, B1050, B1031, B1030, B1029, B1025, B1016, B1015, B1014, B1006, B992, B981, B980, B978, B977, B976, B975, B974, B973, B972, B971, B970, B969, B968, B967, B965, B964, B963, B961, B960, B959, B958, B957, B955, B953, B952, B951, B948, B947, B946, B945, B928, B914, B913, B912, B911, B909, B903, B902, B901, B900, B882, B880, B879, B865, B862, B851, B842, B837, B821, B802, B746, B743, B742, B712, B674, B673, B669, B668, B482, B216
+- **#view** — B2154036, B2146557, B1600353, B1600352, B1594320, B1219152, B463922, B1597760, B1574432, B1225296, B1191456, B683568, B519907, B494051, B494048
+- **#yield** — B1163827, B290249, B267536, B266081, B1442, B1126, B1004, B1003, B1002, B1001, B1000, B998, B995, B994, B993, B988, B986, B985, B966, B954, B950, B944, B943, B937, B936, B934, B906, B724, B1934529, B1186256, B1163828, B1163826, B881668, B298563, B298562, B298561, B298560, B286309, B286305, B280707, B280706, B276753, B236592, B221763, B209508, B1239, B1235, B1207, B1158, B1105, B1104, B1080, B1056, B1054, B1036, B1032, B1031, B1030, B1029, B1028, B1027, B1026, B1025, B1024, B1023, B1022, B1021, B1020, B1019, B1016, B1007, B999, B997, B996, B992, B990, B987, B984, B983, B982, B981, B980, B978, B977, B976, B975, B974, B973, B972, B970, B969, B968, B967, B965, B963, B958, B957, B909, B888, B885, B884, B883, B882, B878, B871, B870, B868, B862, B861, B860, B832, B802, B751, B712, B651
