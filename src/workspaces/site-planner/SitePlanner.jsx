@@ -148,7 +148,6 @@ const OverlayCropDialog = lazy(() => import("./components/OverlayCropDialog.jsx"
 /* NEW-1 / NEW-3 — the Parcel panel's record body, lazily loaded for exactly the reason the appraisal
  * panels above are: it renders only inside the Parcel panel, only for a selected lot, and the Site
  * route's largest chunk has no headroom to spend on code most sessions never reach. */
-const ParcelRecord = lazy(() => import("./components/ParcelRecordPanel.jsx").then((m) => ({ default: m.ParcelRecord })));
 /* B765985 — the print compose screen. Reached only after File ▾ → Download PDF / pick frame…
  * → Continue, so it has no business on the boot chunk; it also imports lib/printSheet.js
  * (the paper-size list), which must never gain a static edge from the boot path (B1042). */
@@ -180,6 +179,12 @@ import { anchorTransform, anchorTransformAttr, anchorHolds, wheelZoomFactor, ZOO
 import { readSmoothZoom, subscribeSmoothZoom } from "../../shared/prefs/smoothZoom.js";
 import { featureEditOpacity, FEAT_CTRL_R, FEAT_CTRL_STROKE } from "./lib/featureEditZoom.js";
 import ColorField from "../../shared/ui/ColorField.jsx";
+import ParcelPage from "./components/ParcelPage.jsx";
+import SetbackSections, { sectionPath, sectionColor } from "./components/SetbackSections.jsx";
+import { boundarySections, setSectionSetback, toggleBreak, shiftBreaksOnInsert, shiftBreaksOnDelete, sectionOfEdge } from "./lib/boundarySections.js";
+import { cadNameOf, parcelOrigin } from "./lib/parcelOrigin.js";
+import { taxTableFor, taxTableForCombined } from "./lib/taxRates.js";
+import { ownerName as apprOwnerName } from "./lib/appraisal.js";
 /* LAZY (B1064 tranche a). The Standards footer renders only while the Standards panel is the
  * open one, docked or floating — never at first paint. */
 const StandardsBar = lazy(() => import("./components/StandardsBar.jsx"));
@@ -288,7 +293,7 @@ import { edgeRuns, runSetbackValue, resizeRunLength } from "./lib/edgeRuns.js";
 // `cornerTurns` are the shared screen-space thinning used by BOTH the setback chips and the vertex
 // handles; `polylabel` puts the acreage badge at the parcel's visual centre instead of its
 // vertex average. All three are pure + unit-tested; see their module headers for the why.
-import { setbackChipRuns, setbackChipsVisible, chipRoleWords, CHIP_MIN_EDGE_PX, CHIP_MIN_SEP_PX, CHIP_MIN_GAP_PX } from "./lib/setbackChips.js";
+import { setbackChipRuns, setbackChipsVisible, CHIP_MIN_EDGE_PX, CHIP_MIN_SEP_PX, CHIP_MIN_GAP_PX } from "./lib/setbackChips.js";
 // NEW-1 — the setback ring's inward offset (and the line-intersection primitive it is built on)
 // moved out of this file unchanged, so the buildable envelope a parcel's setbacks produce can be
 // proven in a unit test against real production geometry instead of only by rendering.
@@ -297,7 +302,7 @@ import { offsetPolygon, outsetPolygon, lineIntersect } from "./lib/parcelOffset.
 // setbacks (Front / Side / Street side / Rear), not fifteen digitized sides. Pure + unit-tested;
 // roles are labels over edges and never an input to a measurement, so the canonical per-edge
 // `pc.setbacks` array the yield engine reads is untouched by anything in here.
-import { SETBACK_ROLES, ROLE_LABEL, ROLE_SHORT, resolveRoles, resolveOverrides, runRole, runOverridden, setRunOverride, hasRoleOverrides, shiftOverridesOnInsert, shiftOverridesOnDelete, roleGroups } from "./lib/setbackRoles.js";
+import { resolveRoles, shiftOverridesOnInsert, shiftOverridesOnDelete } from "./lib/setbackRoles.js";
 import { spaceOut, cornerTurns } from "./lib/screenDeclutter.js";
 import { polylabel } from "./lib/polylabel.js";
 // NEW-1 — the ONE model behind the right rail's "Parcel tools" menu: the full inventory of what a
@@ -783,7 +788,7 @@ const MK_CLOUD_DEFAULT = { stroke: "#2563EB", weight: 2, dash: "solid", fill: "#
 // palette (every element type's fill + line, plus the markup accent), so the row is never blank.
 // Derived from TYPE, never a second hardcoded list that could drift from it.
 const COLOR_SEED = [...new Set([MK_DEFAULT.stroke, ...Object.values(TYPE).flatMap((t) => [t.fill, t.stroke])].map((c) => (c || "").toLowerCase()))].filter(Boolean);
-const dashArray = (d, w) => d === "dashed" ? `${w * 3} ${w * 2.4}` : d === "dotted" ? `${w} ${w * 2}` : undefined;
+const dashArray = (d, w) => d === "dashed" ? `${w * 3} ${w * 2.4}` : d === "dotted" ? `${w} ${w * 2}` : d === "dashdot" ? `${w * 3} ${w * 1.6} ${w} ${w * 1.6}` : d === "longdash" ? `${w * 6} ${w * 3}` : undefined;
 
 // B619 — neutral, handle-based selection chrome for the planner canvas. Selecting an object must
 // NEVER recolor the object's own fill/stroke (that reads as "the object turned orange" and hides a
@@ -959,10 +964,13 @@ const ENCUMBER_LABEL_BASE_PX = 11;    // deed encumbrance boundary
 const TRACED_LABEL_BASE_PX = 9.5;     // traced overlay line
 /* The one line-style choice list, shared by every dash <select> (parcel boundary + setback, as a
  * Standards default and as a per-object override, plus the markup/easement pickers). */
+const PARCEL_FILL_DEFAULT = "#5b6650"; // the fill colour a parcel takes when its Fill opacity is first raised above 0
 const DASH_OPTIONS = [
   <option key="solid" value="solid">Solid</option>,
   <option key="dashed" value="dashed">Dashed</option>,
   <option key="dotted" value="dotted">Dotted</option>,
+  <option key="dashdot" value="dashdot">Dash-dot</option>,
+  <option key="longdash" value="longdash">Long dash</option>,
 ];
 
 function inlineLabelPlaces(ptsFeet, spacingFt, offsetPx, f2p, interiorScreen) {
@@ -2294,6 +2302,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // one on an edge and Shift-clicking one off have always worked in Select with a parcel selected.
   // It arms Select, keeps a parcel selected, and shows the banner that TEACHES the three gestures.
   const [boundaryEdit, setBoundaryEdit] = useState(false);
+  // Parcels rework — which parcel's own PAGE the Land panel shows (null = the list), and which
+  // boundary SECTION of it is selected for editing (a key from lib/boundarySections.js).
+  const [parcelPageId, setParcelPageId] = useState(null);
+  const [selSectionKey, setSelSectionKey] = useState(null);
   // NEW-1 (B1264944) — RECURRENCE of the B1253248 placement-cursor fix: "Edit boundary corners"
   // arms the plain Select tool (see startBoundaryEdit above) rather than a distinct mode, so every
   // "tool === 'select'" cursor ternary in this file — buildings, parcels, markups, the base canvas —
@@ -6631,7 +6643,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     if (t.kind === "parcel") {
       const pc = parcels.find((p) => p.id === t.id);
-      if (!pc || pc.locked) return false;                           // NEW-1 (B1239328): a locked parcel is click-through on the map
+      if (!pc) return false;                                        // NEW-5: lock only guards Edit parcels — a locked parcel still selects / opens
       setSel({ kind: "parcel", id: t.id });
       setCombineSel([]);
       openParcelPanel();
@@ -6659,7 +6671,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (t.kind === "measure") { if (!measures[t.i]) return false; onMeasureContext(e, t.i); return true; }
     if (t.kind === "parcel") {
       const pc = parcels.find((p) => p.id === t.id);
-      if (!pc || pc.locked) return false;                           // NEW-1 (B1239328): a locked parcel is click-through on the map
+      if (!pc) return false;                                        // NEW-5: lock only guards Edit parcels
       onParcelContext(e, t.id); return true;
     }
     return false;
@@ -7965,7 +7977,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // wins — a locked parcel's body is click-through, same as its boundary (NEW-1, B1239328).
       // A click on empty canvas falls through to pan (never clears the merge selection).
       if (mergePick) {
-        const hit = [...parcels].reverse().find((pc) => !pc.locked && pc.points && pc.points.length >= 3 && pointInRing(fp, pc.points));
+        const hit = [...parcels].reverse().find((pc) => pc.points && pc.points.length >= 3 && pointInRing(fp, pc.points));
         if (hit) { toggleMerge(hit.id); setSel({ kind: "parcel", id: hit.id }); return; }
       }
       if (e.shiftKey) {
@@ -7977,7 +7989,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // B735: shiftPickParcel SEEDS the set from the current single selection so a plain-click
         // A then Shift-click B keeps A (a plain click only ever put A in `sel`, not combineSel).
         {
-          const hit = [...parcels].reverse().find((pc) => !pc.locked && pc.points && pc.points.length >= 3 && pointInRing(fp, pc.points));
+          const hit = [...parcels].reverse().find((pc) => pc.points && pc.points.length >= 3 && pointInRing(fp, pc.points));
           if (hit) { shiftPickParcel(hit.id); return; } // shiftPickParcel owns `sel` (B735)
         }
         // Shift-drag empty canvas → marquee select
@@ -8822,7 +8834,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Which closed/open path (if any) is vertex-editable right now, given the selection.
   const editablePath = () => {
     if (tool !== "select" || !sel) return null;
-    if (sel.kind === "parcel") { const pc = parcels.find((p) => p.id === sel.id); return pc && !pc.locked ? { layer: "parcel", id: pc.id, pts: pc.points, closed: true, min: 3 } : null; }
+    if (sel.kind === "parcel") { if (!editingCorners) return null; const pc = parcels.find((p) => p.id === sel.id); return pc && !pc.locked ? { layer: "parcel", id: pc.id, pts: pc.points, closed: true, min: 3 } : null; }
     if (sel.kind === "el") {
       const el = els.find((x) => x.id === sel.id);
       if (!el || el.locked) return null;
@@ -8925,7 +8937,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // NEW-6 — a role override is per EDGE, so inserting a control point has to carry it across the
     // split (both halves are still the same side). Without this the vector stops matching the ring
     // and every correction the user made is silently dropped on the next re-derive.
-    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id ? { ...pc, points: ins(pc.points), roleOverrides: shiftOverridesOnInsert(pc.roleOverrides, edgeIndex), roles: shiftOverridesOnInsert(pc.roles, edgeIndex) } : pc));
+    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id ? { ...pc, points: ins(pc.points), roleOverrides: shiftOverridesOnInsert(pc.roleOverrides, edgeIndex), roles: shiftOverridesOnInsert(pc.roles, edgeIndex), ...(pc.sectionBreaks || pc.sectionJoins ? { sectionBreaks: shiftBreaksOnInsert(pc.sectionBreaks || [], edgeIndex), sectionJoins: shiftBreaksOnInsert(pc.sectionJoins || [], edgeIndex) } : {}) } : pc));
     else if (layer === "el") setEls((a) => a.map((x) => x.id === id ? { ...x, points: ins(x.points) } : x));
     else if (layer === "measure") setMeasures((arr) => arr.map((mm, k) => k === id ? { ...mm, mode: measMode(mm), pts: ins(measPts(mm)) } : mm));
     else if (layer === "ease") setMarkups((a) => a.map((x) => x.id === id ? setEasePath(x, ins(easeEditPath(x))) : x));
@@ -8975,7 +8987,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     // NEW-6 — deleting a vertex merges two edges into one; the merged edge keeps the first half's
     // role and the vector stays aligned to the ring (see `shiftOverridesOnDelete`).
-    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id ? { ...pc, points: rm(pc.points), roleOverrides: shiftOverridesOnDelete(pc.roleOverrides, index), roles: shiftOverridesOnDelete(pc.roles, index) } : pc));
+    if (layer === "parcel") setParcels((a) => a.map((pc) => pc.id === id ? { ...pc, points: rm(pc.points), roleOverrides: shiftOverridesOnDelete(pc.roleOverrides, index), roles: shiftOverridesOnDelete(pc.roles, index), ...(pc.sectionBreaks || pc.sectionJoins ? { sectionBreaks: shiftBreaksOnDelete(pc.sectionBreaks || [], index), sectionJoins: shiftBreaksOnDelete(pc.sectionJoins || [], index) } : {}) } : pc));
     else if (layer === "el") setEls((a) => a.map((x) => x.id === id ? { ...x, points: rm(x.points) } : x));
     else if (layer === "measure") setMeasures((arr) => arr.map((mm, k) => k === id ? { ...mm, mode: measMode(mm), pts: rm(measPts(mm)) } : mm));
     else if (layer === "ease") setMarkups((a) => a.map((x) => x.id === id ? setEasePath(x, rm(easeEditPath(x))) : x));
@@ -9978,7 +9990,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const closePoly = () => {
     if (draftPoly && draftPoly.length >= 3) {
       pushHistory();
-      const pc = { id: uid(), points: draftPoly, locked: true, ...parcelDefaultStyle(settings) }; // B929: born with the user's Standards parcel defaults
+      const pc = { id: uid(), points: draftPoly, ...parcelDefaultStyle(settings) }; // B929: born with the user's Standards parcel defaults
       setParcels((a) => [...a, pc]);
       flashPolyWarn(draftPoly, "Parcel");
       requestFit();
@@ -10293,7 +10305,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const addRectParcel = () => {
     const w = Math.max(20, +lotW || 0), d = Math.max(20, +lotD || 0);
     pushHistory();
-    const pc = { id: uid(), points: [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: d }, { x: 0, y: d }], locked: true, ...parcelDefaultStyle(settings) }; // B929
+    const pc = { id: uid(), points: [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: d }, { x: 0, y: d }], ...parcelDefaultStyle(settings) }; // B929
     setParcels((a) => [...a, pc]);
     requestFit();
   };
@@ -10976,7 +10988,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let n = 0, slon = 0, slat = 0;
     rings.forEach((r) => r.forEach(([lon, lat]) => { slon += lon; slat += lat; n++; }));
     const lon0 = slon / n, lat0 = slat / n;
-    const pcs = rings.map((r) => ({ id: uid(), points: lngLatRingToFeet(r, lon0, lat0), locked: true, ...parcelDefaultStyle(settings) })).filter((pc) => pc.points.length >= 3); // B929
+    const pcs = rings.map((r) => ({ id: uid(), points: lngLatRingToFeet(r, lon0, lat0), ...parcelDefaultStyle(settings) })).filter((pc) => pc.points.length >= 3); // B929
     if (!pcs.length) { setLookupErr("That record has no usable polygon geometry."); return; }
     pushHistory("import"); // NEW-7 (NEW-1) — a county-record parcel brought onto the plan
     setParcels((a) => [...a, ...pcs]);
@@ -12107,13 +12119,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // protects the boundary from being moved or reshaped, and every parcel is born locked — so without
     // this the map's Combine could never pick anything until each lot was unlocked by hand.
     if (mergePick) { e.stopPropagation(); toggleMerge(id); setSel({ kind: "parcel", id }); return; } // B720: plain click picks in merge mode
-    if (pc.locked) {
-      setPanning(true);
-      drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY };
-      capturePidRef.current = e.pointerId;
-      svgRef.current.setPointerCapture(e.pointerId);
-      return;
-    }
     if (e.shiftKey) { e.stopPropagation(); shiftPickParcel(id); return; } // Shift-click: additive multi-select to merge (B735 seeds from `sel`; shiftPickParcel owns `sel`)
     // NEW-1 — parcels join B750's click contract. Selecting a lot used to open the Parcel panel from
     // an EFFECT on `sel`, so a single click swung the left rail open (and the panel then belonged to
@@ -12125,9 +12130,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return;
     }
     e.stopPropagation();
-    // Unlocked = a press grabs it to drag (like an element).
     setSel({ kind: "parcel", id });
     setCombineSel([]); // B735: a plain click is a fresh single-select — drop any accumulated merge picks
+    // NEW-5 (Parcels rework) — A BOUNDARY MOVES ONLY INSIDE "EDIT PARCELS". Outside it a press selects
+    // and a drag PANS the map, so a stray click or drag can never nudge land; inside it a locked
+    // parcel is untouchable too (Lock now means "even Edit parcels can't touch it").
+    if (!editingCorners || pc.locked) {
+      setPanning(true);
+      drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY };
+      capturePidRef.current = e.pointerId;
+      svgRef.current.setPointerCapture(e.pointerId);
+      return;
+    }
     // NEW-1/NEW-2 — same gate as the element move: an unlocked lot that is merely CLICKED selects
     // and does not shift, and costs no undo frame (history moves to first real travel).
     drag.current = { mode: "move", kind: "parcel", id, fx: fp.x, fy: fp.y, opts: pc.points, canceler: stateRef.current, ...startGate(e) }; // canceler: B315 Esc/abort-mid-drag revert
@@ -12687,7 +12701,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const toggleParcelLock = (id) => {
     pushHistory();
-    setParcels((a) => a.map((pc) => (pc.id === id ? { ...pc, locked: !pc.locked } : pc)));
+    setParcels((a) => a.map((pc) => (pc.id === id ? { ...pc, locked: !pc.locked, lockSem: 2 } : pc))); // lockSem: 2 = a deliberate lock (siteModel.withLockSemantics)
   };
   // NEW-1 (B1239328) — lock/unlock every parcel in one gesture, the replacement for the old
   // plan-wide "Select parcels" mode toggle (which made every parcel click-through at once). Locks
@@ -12697,7 +12711,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!parcels.length) return;
     const allLocked = parcels.every((p) => p.locked);
     pushHistory();
-    setParcels((a) => a.map((p) => ({ ...p, locked: !allLocked })));
+    setParcels((a) => a.map((p) => ({ ...p, locked: !allLocked, lockSem: 2 })));
   };
   /* NEW-3 — type the facts the county would have supplied. A lot drawn by hand (or promoted from a
    * deed) had geometry and nothing else; a lot pulled from the county could not be corrected when
@@ -12805,7 +12819,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * here so a pan / zoom never re-derives them (VIEW-INDEPENDENT-ONCE) — and the panel gets ONE stable
    * handlers object whose methods delegate to this render's closures, so its row list can be memoised
    * too. Every action below is a thin call into the single combine / split / restore functions. */
-  const parcelRows = useMemo(() => buildParcelRows(parcels), [parcels]);
+  const parcelCadName = cadNameOf(COUNTIES[restored?.county]?.label || null);
+  const parcelRows = useMemo(() => buildParcelRows(parcels, { cadName: parcelCadName }), [parcels, parcelCadName]);
   const pickedParcelIds = useMemo(() => new Set(combineSel), [combineSel]);
   const parcelSiteAcres = useMemo(() => includedAcres(parcels), [parcels]);
   const parcelActsRef = useRef({});
@@ -12823,7 +12838,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!picked.length) return;
     const allL = picked.every((p) => p.locked);
     pushHistory();
-    setParcels((a) => a.map((p) => (set.has(p.id) ? { ...p, locked: !allL } : p)));
+    setParcels((a) => a.map((p) => (set.has(p.id) ? { ...p, locked: !allL, lockSem: 2 } : p)));
   };
   parcelActsRef.current = {
     onSelectRow: (id) => { setCombineSel([]); setSel({ kind: "parcel", id }); },
@@ -12834,13 +12849,50 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     onRename: (id, v) => setParcelField(id, "label", v),
     onRestoreCombined: restoreCombinedOriginals, onRestoreSplit: restoreSplitOriginal,
     acresOf: (pc) => parcelNetSqft(pc) / SQFT_PER_ACRE,
+    // Parcels rework: a row opens the parcel's own page; Edit parcels is the ONLY way a boundary changes.
+    onOpenPage: (id) => { setCombineSel([]); setSel({ kind: "parcel", id }); setSelSectionKey(null); setParcelPageId(id); },
+    onBack: () => { setParcelPageId(null); setSelSectionKey(null); },
+    onEditParcels: () => { setParcelPageId(null); startBoundaryEdit(); },
+    onDelete: (id) => { setParcelPageId(null); setSel({ kind: "parcel", id }); deleteParcelById(id); },
+    onField: setParcelField,
     combinePreview: (ids) => planCombine(parcels, ids, { unionRings: mergeParcelRings, newId: () => "preview" }),
   };
   const parcelPanelH = useMemo(() => {
     const o = {};
-    for (const k of ["onSelectRow", "onPickRow", "onToggleInclude", "onToggleLock", "onToggleAllLock", "onZoom", "onRemove", "onSplit", "onCancelSplit", "onCombine", "onLockMany", "onRename", "onRestoreCombined", "onRestoreSplit", "acresOf", "combinePreview"]) o[k] = (...a) => parcelActsRef.current[k](...a);
+    for (const k of ["onSelectRow", "onPickRow", "onToggleInclude", "onToggleLock", "onToggleAllLock", "onZoom", "onRemove", "onSplit", "onCancelSplit", "onCombine", "onLockMany", "onRename", "onRestoreCombined", "onRestoreSplit", "acresOf", "onOpenPage", "onBack", "onEditParcels", "onDelete", "onField", "combinePreview"]) o[k] = (...a) => parcelActsRef.current[k](...a);
     return o;
   }, []);
+  /* Parcels rework (NEW-3) — the boundary SECTIONS of the parcel whose page is open. Only computed while
+   * a page is open; reads `els` for the road names a section can border and the other parcels for its
+   * neighbours. Setback VALUES stay per-edge on the parcel — a section is only a view over edges. */
+  const pageParcelObj = parcelPageId ? (parcels.find((p) => p.id === parcelPageId) || null) : null;
+  const sectionOptsFor = (pc) => {
+    const streets = [];
+    for (const el of els) {
+      if (!isCenterlineRoad(el)) continue;
+      const outside = el.pts.reduce((k, pt) => k + (pointInRing(pt, pc.points) ? 0 : 1), 0);
+      if (outside >= el.pts.length * 0.6) streets.push({ name: (typeof el.inlineLabel === "string" && el.inlineLabel.trim()) || null, pts: el.pts });
+    }
+    const neighbours = parcels.filter((o) => o.id !== pc.id && o.active !== false && o.points && o.points.length >= 3)
+      .map((o) => ({ id: o.id, name: (parcelInfo.get(o.id) && parcelInfo.get(o.id).name) || null, points: o.points }));
+    return {
+      setbacks: Array.isArray(pc.setbacks) && pc.setbacks.length === pc.points.length ? pc.setbacks : null,
+      defaultSetback: +settings.setback || 0, streets, neighbours, breaks: pc.sectionBreaks || [], joins: pc.sectionJoins || [],
+    };
+  };
+  const pageSections = useMemo(() => {
+    const pc = pageParcelObj;
+    if (!pc || !pc.points || pc.points.length < 3) return null;
+    return { parcelId: pc.id, list: boundarySections(pc.points, sectionOptsFor(pc)) };
+  }, [pageParcelObj, els, parcels, settings.setback]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The parcel PAGE follows the selection: selecting another parcel moves it; deselecting (or the parcel
+  // going away) returns to the list. Opening a row sets the selection in the same batch, so this never races it.
+  useEffect(() => {
+    if (!parcelPageId) return;
+    if (!parcels.some((p) => p.id === parcelPageId)) { setParcelPageId(null); setSelSectionKey(null); return; }
+    if (sel?.kind === "parcel") { if (sel.id !== parcelPageId) { setParcelPageId(sel.id); setSelSectionKey(null); } }
+    else { setParcelPageId(null); setSelSectionKey(null); }
+  }, [sel, parcels, parcelPageId]);
   // A panel-aimed Split is a mode of the Split tool: leaving the tool by any route ends it.
   useEffect(() => { if (tool !== "split" && splitTarget) setSplitTarget(null); }, [tool, splitTarget]);
   // B652 — overlap safety net: any two ACTIVE parcels whose geometry overlaps by more than a
@@ -16132,7 +16184,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const parcelsFromRings = (rings, addr, attrs) => {
     const key = parcelGisKey(attrs, rings);
     return rings
-      .map((r) => ({ id: uid(), points: lngLatRingToFeet(r, origin.lon, origin.lat), locked: true, addr: addr || null, attrs: attrs || null, gisKey: key, ...parcelDefaultStyle(settings) })) // B929
+      .map((r) => ({ id: uid(), points: lngLatRingToFeet(r, origin.lon, origin.lat), addr: addr || null, attrs: attrs || null, gisKey: key, ...parcelDefaultStyle(settings) })) // B929
       .filter((pc) => pc.points.length >= 3);
   };
   // B93/B94 — jurisdiction (city/ETJ/county) + road maintenance authority, on
@@ -18380,7 +18432,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return spaceOut(cands, VTX_MIN_SEP_PX);
   };
   const parcelHandles = (() => {
-    if (selHiddenNow || sel?.kind !== "parcel" || tool !== "select") return null;
+    if (selHiddenNow || sel?.kind !== "parcel" || tool !== "select" || !editingCorners) return null; // NEW-5: corners are grabbable only inside Edit parcels
     const pc = parcels.find((p) => p.id === sel.id);
     // B-VTX-SEL — locked parity with elPolyHandles/markupHandles/measureHandles (a false
     // affordance otherwise: startVertex no-ops on a locked parcel anyway).
@@ -20400,31 +20452,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return out;
   };
   const parcelRoles = (pc) => (pc ? resolveRoles(pc.points, pc.roles, { streets: parcelStreets(pc), overrides: pc.roleOverrides }) : []);
-  /* NEW-6 — the SPARSE override vector in force (null = "still tracking the inference"). Legacy
-   * plans carrying the old dense `pc.roles` are narrowed to their genuine corrections on read, so
-   * an untouched side goes back to re-deriving without anything changing on screen. */
-  const parcelRoleOverrides = (pc) => (pc ? resolveOverrides(pc.points, { overrides: pc.roleOverrides, legacy: pc.roles }, { streets: parcelStreets(pc) }) : []);
-  // Reassign one whole SIDE's role — or, with `role == null`, clear it back to the automatic
-  // inference. Writes the sparse override vector (aligned to the ring, exactly like `pc.setbacks`)
-  // and retires the legacy dense array in the same frame, so one Ctrl-Z undoes the whole change.
-  const setRunRoleOn = (pc, run, role) => {
-    pushHistory();
-    const next = setRunOverride(parcelRoleOverrides(pc), run, role, pc.points.length);
-    setParcels((a) => a.map((p) => p.id === pc.id ? { ...p, roleOverrides: next, roles: null } : p));
-  };
-  // Clear EVERY role override on this parcel — the whole boundary goes back to the app's inference.
-  const clearRunRoles = (pc) => {
-    pushHistory();
-    setParcels((a) => a.map((p) => p.id === pc.id ? { ...p, roleOverrides: null, roles: null } : p));
-  };
-  // One ordinance number → every edge that carries that role, through the same canonical
-  // per-edge `setbacks` array `setRunSetback` writes.
-  const setRoleSetback = (pc, edges, v) => {
-    pushHistory();
-    const arr = parcelSetbacks(pc).slice();
-    edges.forEach((i) => { arr[i] = Math.max(0, v); });
-    setParcels((a) => a.map((p) => p.id === pc.id ? { ...p, setbacks: arr } : p));
-  };
   /* Setback value chips on the selected ACTIVE parcel — ONE per labelled RUN by default
      (B214/B215/B216 gave one per geometric SIDE; B1184 regrouped by shared VALUE + direction so a
      filleted corner digitized as a dozen segments is one chip, not a dozen); per SEGMENT when the
@@ -20559,13 +20586,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         });
     // The role word is decided over the parcel's whole candidate set (before the declutter drops
     // any), so what a chip says doesn't change as neighbours come and go with the zoom.
-    const words = chipRoleWords(cands);
     const labelled = cands.map((c, i) => ({
       ...c,
       // B966627 — a "~" ahead of the number is the ONE thing that changes when this parcel has no
       // setback of its own: "not set for this parcel — showing the project default" is what's
       // going on, and "~25′" says the same thing in one glyph instead of a wordy chip.
-      txt: `${words[i] ? `${ROLE_SHORT[c.role] || "Side"} · ` : ""}${sbExplicit ? "" : "~"}${Number.isFinite(c.value) ? `${f0(c.value)}′` : "—"}`,
+      txt: `${sbExplicit ? "" : "~"}${Number.isFinite(c.value) ? `${f0(c.value)}′` : "—"}`,
     }));
     const shown = spaceOut(
       labelled
@@ -20602,12 +20628,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     );
   })();
 
-  // "Front" = the longest edge (street frontage heuristic).
-  const frontEdge = (pc) => {
-    let best = 0, bl = -1;
-    for (let i = 0; i < pc.points.length; i++) { const d = dist(pc.points[i], pc.points[(i + 1) % pc.points.length]); if (d > bl) { bl = d; best = i; } }
-    return best;
-  };
   const selCallout = sel?.kind === "callout" ? callouts.find((c) => c.id === sel.id) : null;
   const setSelCallout = (patch) => { pushHistory(); setCallout(selCallout.id, patch); };
   const curHint = TOOLS.find((t) => t.id === tool)?.hint;
@@ -21371,7 +21391,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const panelTitle = {
     yield: "Yield",
     drainage: "Drainage", // the rail tab had no entry, so its header strip rendered EMPTY (× alone)
-    parcel: `Parcels · ${parcels.length - supersededParcelIds.size}`,
+    parcel: "Parcels", // Parcels rework: the header is just the name + ✕; the count rides the list's own summary line
     analysis: "Site Analysis",
     properties: "Properties", // B733 (dock-only; the companion supplies its body)
     references: "Overlays",
@@ -21387,6 +21407,70 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Render one left-rail panel's body for a given id, hosted in EITHER the docked column or a
   // floating card. A called render FUNCTION (never a mounted <Component/>) so the same JSX inlines
   // into either host with no remount on drag (MODULE-SCOPE-COMPONENTS).
+  const pageOpen = !!parcelPageId && !!selParcel && selParcel.id === parcelPageId;
+  /* Parcels rework (NEW-2/3) — the parcel's own page. The frame is components/ParcelPage.jsx; the Setbacks
+   * and Style sections are built here because they need this file's colour / number primitives. */
+  const sbSectionValue = (sec, v) => {
+    const pc = selParcel; if (!pc) return;
+    pushHistory();
+    setParcels((a) => a.map((p) => (p.id === pc.id ? { ...p, setbacks: setSectionSetback(parcelSetbacks(p), sec, v, p.points.length) } : p)));
+  };
+  const sbToggleVertex = (vertex) => {
+    const pc = selParcel; if (!pc) return;
+    const r = toggleBreak({ ...sectionOptsFor(pc), points: pc.points }, vertex);
+    pushHistory();
+    setParcels((a) => a.map((p) => (p.id === pc.id ? { ...p, sectionBreaks: r.breaks, sectionJoins: r.joins } : p)));
+  };
+  const renderParcelPage = () => {
+    const pc = selParcel;
+    if (!pc) return null;
+    const row = parcelRows.find((r) => r.id === pc.id);
+    const origin = parcelOrigin(pc, { cadName: parcelCadName });
+    const fillOp = pc.fillOpacity ?? (pc.fill ? 0.12 : 0);
+    const sbs = setbackLineStyle(pc, PAL.setback);
+    const lineSel = (val, onChange, label) => (
+      <select value={val} aria-label={label} onChange={(e) => onChange(e.target.value)} style={{ ...numInput, width: "100%", minWidth: 0, cursor: "pointer", fontFamily: "inherit" }}>{DASH_OPTIONS}</select>
+    );
+    const style = (
+      <section data-testid="parcel-style" style={{ borderTop: BORDER_1, paddingTop: 10, marginTop: 14 }}>
+        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700 }}>Style</div>
+        <PairedFieldHead left="Outline" right="Fill" />
+        <PairedField label="Colour"
+          left={<span style={ROW6}><ColorField value={toHex6(pc.stroke ?? PAL.parcel)} {...colorCtl((v) => setSelParcel({ stroke: v }))} seed={COLOR_SEED} title="Outline colour" /></span>}
+          right={<span style={ROW6}><ColorField value={toHex6(pc.fill ?? PARCEL_FILL_DEFAULT)} {...colorCtl((v) => setSelParcel({ fill: v }))} seed={COLOR_SEED} title="Fill colour" /></span>} />
+        <PairedField label="Opacity"
+          left={<PercentField value={pc.strokeOpacity ?? 1} onCommit={(v) => { pushHistory(); setSelParcel({ strokeOpacity: v }); }} inputStyle={numInput} ariaLabel="Outline opacity" />}
+          right={<PercentField value={fillOp} onCommit={(v) => { pushHistory(); setSelParcel({ fillOpacity: v, fill: pc.fill ?? PARCEL_FILL_DEFAULT }); }} inputStyle={numInput} ariaLabel="Fill opacity" />} />
+        <PairedField label="Width" left={<NumInput style={{ ...numInput, width: "100%" }} value={pc.weight ?? 2} min={0.5} step={0.5} coarse={2} ariaLabel="Outline width" onCommit={(n) => { pushHistory(); setSelParcel({ weight: n }); }} />} />
+        <PairedField label="Line" left={lineSel(pc.dash || "solid", (v) => { pushHistory(); setSelParcel({ dash: v }); }, "Outline line style")} />
+        <PairedFieldHead left="Setback line" right="" />
+        <PairedField label="Colour" left={<span style={ROW6}><ColorField value={toHex6(pc.sbStroke ?? PAL.setback)} {...colorCtl((v) => setSelParcel({ sbStroke: v }))} seed={COLOR_SEED} title="Setback line colour" /></span>} right={<span />} />
+        <PairedField label="Opacity" left={<PercentField value={sbs.opacity} onCommit={(v) => { pushHistory(); setSelParcel({ sbOpacity: v }); }} inputStyle={numInput} ariaLabel="Setback line opacity" />} right={<span />} />
+        <PairedField label="Width" left={<NumInput style={{ ...numInput, width: "100%" }} value={pc.sbWeight ?? SETBACK_LINE.weight} min={0.25} step={0.25} coarse={2} ariaLabel="Setback line width" onCommit={(n) => { pushHistory(); setSelParcel({ sbWeight: n }); }} />} right={<span />} />
+        <PairedField label="Line" left={lineSel(pc.sbDash || SETBACK_LINE.dash, (v) => { pushHistory(); setSelParcel({ sbDash: v }); }, "Setback line style")} right={<span />} />
+        <button type="button" data-testid="parcel-reset-style" onClick={() => { pushHistory(); setSelParcel({ stroke: null, weight: null, dash: null, strokeOpacity: null, fill: null, fillOpacity: null, sbStroke: null, sbWeight: null, sbDash: null, sbOpacity: null }); }}
+          style={{ padding: 0, border: "none", background: "transparent", color: PAL.muted, fontFamily: "inherit", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Reset style</button>
+      </section>
+    );
+    const secs = pageSections && pageSections.parcelId === pc.id ? pageSections.list : [];
+    const setbacks = secs.length ? (
+      <section style={{ borderTop: BORDER_1, paddingTop: 10, marginTop: 14 }}>
+        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 6 }}>Setbacks</div>
+        <SetbackSections points={pc.points} sections={secs} selectedKey={selSectionKey} onSelect={setSelSectionKey} onSetValue={sbSectionValue} onToggleVertex={sbToggleVertex}
+          showLine={settings.showSetback} onShowLine={(v) => setSettings((st) => ({ ...st, showSetback: v }))}
+          resetLabel={`Reset to default (${settings.setback}′)`}
+          onResetAll={() => { pushHistory(); setParcels((a) => a.map((p) => p.id === pc.id ? { ...p, setbacks: Array.from({ length: p.points.length }, () => +settings.setback || 0) } : p)); }}
+          renderNum={(value, onCommit, ariaLabel) => <NumInput style={{ ...numInput, width: 54 }} value={value} min={0} ariaLabel={ariaLabel} onCommit={onCommit} />} />
+      </section>
+    ) : null;
+    const from = (pc.combined && pc.combined.from) || [];
+    const taxTable = origin.kind === "combined" ? taxTableForCombined(from, { county: restored?.county }) : (origin.kind === "county" ? taxTableFor(pc, { county: restored?.county }) : null);
+    return (
+      <ParcelPage parcel={pc} name={row ? row.name : (pc.label || "Parcel")} acres={parcelNetSqft(pc) / SQFT_PER_ACRE} included={pc.active !== false}
+        origin={origin} ownerText={apprOwnerName} cadName={parcelCadName} drawnAcresOf={(p) => parcelNetSqft(p) / SQFT_PER_ACRE}
+        handlers={parcelPanelH} taxTable={taxTable} setbacks={setbacks} style={style} deedFrom={selectDeedOfGroup} />
+    );
+  };
   const renderPanelBody = (_pid) => (<>
           {/* Overlays (B654; user-facing name via B966630; data model unified in B848736) — every
               backdrop the plan sits over, in ONE list, ONE add flow, and ONE shared calibration
@@ -21815,19 +21899,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // VIEW-INDEPENDENT-ONCE: the rows / site acres are functions of `parcels` alone — memoised at the top
                 // level (parcelRows / parcelSiteAcres), so a pan or zoom never re-derives them.
                 const addParcelNode = (
-                  <div ref={addParcelAnchor} style={{ position: "relative" }}>
+                  <div ref={addParcelAnchor} style={{ position: "relative", flex: 1 }}>
                         <button
-                          aria-haspopup="menu" aria-expanded={addParcelMenu} aria-label="＋ Add" data-testid="land-add-btn"
-                          style={iconBtn}
-                          onClick={() => setAddParcelMenu((o) => !o)} title="Add land to this plan — draw a boundary, plot a deed, click a lot on the map, or add by address">
-                          ＋
+                          aria-haspopup="menu" aria-expanded={addParcelMenu} aria-label="Add parcels" data-testid="land-add-btn"
+                          style={{ ...chip, width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, fontWeight: 600 }}
+                          onClick={() => setAddParcelMenu((o) => !o)} title="Add land to this plan — click lots on the map, draw a boundary, or plot a deed">
+                          + Add parcels ▾
                         </button>
                         <AnchoredMenu open={addParcelMenu} onClose={() => setAddParcelMenu(false)} anchorRef={addParcelAnchor} placement="below-left" width={Math.max(248, leftWidth - 48)} panelStyle={menuPanel}>
                           {/* Identify from the county's parcel map — the headline path (needs a georeferenced frame). */}
                           {origin ? (
                             <button style={menuItem(identifyMode)} onClick={() => { setIdentifyMode(true); ensureBasemapOn(); setIdentifyRes(null); setJurInfo(null); setAddParcelMenu(false); }}>
-                              <div style={{ fontWeight: 650, fontSize: 13 }}>🔍 Click a lot on the map</div>
-                              <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Property lines from the county appraisal district light up on the aerial — click one lot or several.</div>
+                              <div style={{ fontWeight: 650, fontSize: 13 }}>Pick lots on the map</div>
+                              <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>County property lines light up on the aerial — click one lot or several.</div>
                             </button>
                           ) : (
                             // NEW-1 — a dead end no more: the reason this is off is that the plan has no
@@ -21866,26 +21950,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           )}
                           {/* Draw a new boundary — always available (no GIS frame needed). */}
                           <button style={menuItem(tool === "parcel")} onClick={() => { selectTool("parcel"); setAddParcelMenu(false); }}>
-                            <div style={{ fontWeight: 650, fontSize: 13 }}>✏️ Draw a new boundary</div>
+                            <div style={{ fontWeight: 650, fontSize: 13 }}>Draw a parcel</div>
                             <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>For a lot that's not in county records yet.</div>
                           </button>
                           {/* Deed / Title metes & bounds (NEW-1, B1239328) — used to live only in the
                               right rail's Parcel tools flyout; folded in here so ＋ Add is the one
                               place that offers every way to add land. Same handler the rail uses. */}
                           <button style={menuItem(false)} onClick={() => { setAddParcelMenu(false); setTitleErr(""); setDeedErr(""); setDeedBusy(false); setTitleOpen(true); }}>
-                            <div style={{ fontWeight: 650, fontSize: 13 }}>📜 Deed / Title — metes &amp; bounds…</div>
+                            <div style={{ fontWeight: 650, fontSize: 13 }}>Plot from a deed</div>
                             <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.4, marginTop: 2 }}>Type in the legal description's calls and it plots the boundary for you.</div>
                           </button>
                         </AnchoredMenu>
                       </div>
                 );
                 const splitRow = splitTarget ? parcelRows.find((r) => r.id === splitTarget) : null;
+                if (pageOpen) return renderParcelPage();
                 return (
                   <ParcelsPanel
-                    rows={parcelRows} siteAcres={parcelSiteAcres} headerRight={addParcelNode}
-                    allLocked={parcels.length > 0 && parcels.every((p) => p.locked)}
+                    rows={parcelRows} siteAcres={parcelSiteAcres} addMenu={addParcelNode}
                     splitMode={splitRow ? { name: splitRow.name, acres: splitRow.acres } : null}
-                    selectedId={selParcel?.id || null} openRequest={parcelOpen} pickMode={mergePick} pickedIds={pickedParcelIds}
+                    selectedId={selParcel?.id || null} pickMode={mergePick} pickedIds={pickedParcelIds}
                     combinePreview={parcelPanelH.combinePreview} handlers={parcelPanelH} />
                 );
               })()}
@@ -21942,22 +22026,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 )}
               </div>
               )}
-              {/* NEW-1 (B1239328) — the return half of the cross-link, now one quiet text line
-                  instead of a bordered card: this panel owns what a parcel HAS; everything you DO
-                  to one lives in the right rail's Parcel tools menu. Opens that menu directly (and
-                  slides the rail in first on a phone, where it's hidden behind the Tools edge tab). */}
-              <button type="button" data-testid="land-to-parcel-tools" onClick={openParcelToolsMenu}
-                title="Draw, plot from a deed, split, combine, reshape or remove a parcel"
-                style={{ display: "block", width: "100%", marginTop: 10, padding: 0, border: "none", background: "transparent", color: PAL.muted, fontWeight: 500, fontSize: 11, cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
-                Draw, split, combine, reshape… <span style={{ color: PAL.accent, fontWeight: 700 }}>{PARCEL_SURFACES.rail.name} →</span>
-              </button>
             </Section>
           )}
           {/* NEW-1 (B1239328) — promoted OUT of the collapsed Boundary section, to the top of the
               selected-parcel view: a county-vs-drawn (or deed-called-vs-drawn) acreage mismatch used
               to surface only if you opened Boundary. Both checks share one shape and read as one
               idea (a stated number vs. what's actually drawn), so they move together. */}
-          {_pid === "parcel" && selParcel && (() => {
+          {_pid === "parcel" && pageOpen && selParcel && (() => {
             const cmp = acreageComparison(selParcel);
             const ca = countyAcres(selParcel.attrs);
             const hasStated = cmp.stated && cmp.measured;
@@ -22002,234 +22077,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </Section>
             );
           })()}
-          {/* NEW-3 — PARCEL RECORD. One place the parcel's facts live, whatever the lot came from:
-              typed by hand for a drawn or deed-derived boundary, and EDITABLE for a county-pulled
-              one (a county record with a wrong address should be correctable). The provenance chip
-              is the load-bearing part — a plan that is later reviewed must never present a
-              hand-drawn boundary as though it came from the county. Body in
-              components/ParcelRecordPanel.jsx — LAZY (B1064 tranche). */}
-          {_pid === "parcel" && selParcel && (
-            <Section title="Parcel record">
-              <LazyPanel name="Parcel record" minHeight={180} label="Loading parcel record…">
-                <ParcelRecord parcel={selParcel} PAL={PAL} border={BORDER_1} surface={SURF_RAISED} chip={chip}
-                  onField={setParcelField} onSelectDeed={selectDeedOfGroup} />
-              </LazyPanel>
-            </Section>
-          )}
           {/* Appraisal record + taxing units for the selected lot — LAZY (B1064 tranche).
               Both bodies live in components/ParcelDataPanel.jsx and load only when a lot that
               came from a county identify is actually selected; they used to ride the planner's
               boot chunk for every session. NEW-5 fixed the duplicated Owner row and folded the
               Legal blob away in the same move — see that file's header. */}
-          {_pid === "parcel" && selParcel && selParcel.attrs && (
+          {_pid === "parcel" && pageOpen && selParcel && selParcel.attrs && (
             <Section title="Appraisal data">
               <LazyPanel name="Appraisal data" minHeight={140} label="Loading county record…">
                 <ParcelAppraisal attrs={selParcel.attrs} PAL={PAL} />
               </LazyPanel>
             </Section>
           )}
-          {_pid === "parcel" && selParcel && selParcel.attrs && (
+          {_pid === "parcel" && pageOpen && selParcel && selParcel.attrs && (
             <Section title="Taxes" collapsed>
               <LazyPanel name="Taxes" minHeight={64} label="Loading taxes…">
                 <ParcelTaxes taxInfo={taxInfo} PAL={PAL} />
               </LazyPanel>
             </Section>
           )}
-          {/* selected parcel — translucence + setback standards */}
-          {_pid === "parcel" && selParcel && (
-            <Section title="Boundary">
-              <div style={{ fontSize: 12, color: PAL.muted, marginBottom: 8, lineHeight: 1.6 }}>
-                Area: <b style={{ color: PAL.ink }}>{f0(parcelNetSqft(selParcel))} SF</b> · {f2(parcelNetSqft(selParcel) / SQFT_PER_ACRE)} AC · {selParcel.points.length} corners
-                {/* NEW-2 — a promoted deed's save-and-except tracts are inside the outline but are
-                    not part of the land, so the number above is NET and says so. */}
-                {parcelExceptSqft(selParcel) > 0 && (
-                  <div style={{ marginTop: 2 }}>
-                    less {selParcel.exceptions.length} save-and-except · {f2(parcelExceptSqft(selParcel) / SQFT_PER_ACRE)} AC (gross {f2(parcelGrossSqft(selParcel) / SQFT_PER_ACRE)} AC)
-                  </div>
-                )}
-              </div>
-              {/* NEW-1 (B1239328) — the stated-vs-measured / county-geometry checks that used to
-                  render here moved to the top of the selected-parcel view (promoted out of this
-                  collapsed section) — see the standalone Section right after the parcel list. */}
-              <div style={{ display: "flex", gap: 6, marginBottom: 9 }}>
-                <button style={chip} onClick={() => toggleParcelActive(selParcel.id)} title={selParcel.active === false ? "Excluded from yield / coverage / detention — click to include" : "Counted in yield / coverage / detention — click to exclude (stays visible, dimmed)"}>{selParcel.active === false ? "◯ Inactive" : "✓ Active"}</button>
-                <button style={chip} onClick={() => toggleParcelLock(selParcel.id)} title="Lock the boundary so it can't be moved or reshaped">{selParcel.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
-              </div>
-              {/* B214 — setback editor mode. NEW-1: THREE tiers, not two, and the toggle is no
-                  longer gated on the boundary being multi-segment — "By role" changes what the
-                  list means on every parcel, including a four-sided one.
-                    By role     the four setbacks a zoning ordinance writes (DEFAULT)
-                    By side     one row per labelled run — the middle tier
-                    Per segment one row per digitized edge — the exception tier */}
-              {settings.showSetback && selRuns && (
-                <div style={{ fontSize: 12, color: PAL.muted, marginBottom: 9, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                  <span>Edit setbacks:</span>
-                  <button style={{ ...chip, ...(sbEditMode === "role" ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }}
-                    onClick={() => setSbEditMode("role")} title="One value per zoning role — Front, Side, Street side, Rear. Each input writes to every side carrying that role.">By role</button>
-                  <button style={{ ...chip, ...(sbEditMode === "side" ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }}
-                    onClick={() => setSbEditMode("side")} title="One value per whole side — a side digitized as many segments edits in a single click (Alt-click a side to override just one segment). Each row also shows the side's role, and you can change it here.">By side</button>
-                  <button style={{ ...chip, ...(sbEditMode === "segment" ? { background: PAL.accent, color: "#fff", borderColor: PAL.accent } : {}) }}
-                    onClick={() => setSbEditMode("segment")} title="Each segment on its own — for a notch or jog that needs its own setback">Per segment</button>
-                </div>
-              )}
-              <label style={{ display: "flex", gap: 8, fontSize: 12, color: PAL.muted, marginBottom: 8, cursor: "pointer" }}>
-                <input type="checkbox" checked={!!selParcel.fill} onChange={(e) => { pushHistory(); setSelParcel(e.target.checked ? { fill: "#5b6650" } : { fill: null }); }} /> Fill the parcel (off by default)
-              </label>
-              {/* Outline (boundary line) style — always available; fill only once the checkbox above is
-                  on, so there's only ever a real second side to pair against then (B1618656 NEW-1) —
-                  otherwise this stays the plain single-column Outline group it always was. `livePick`
-                  gives the color its own one-frame undo; the discrete weight/style/reset commits push
-                  their own frame (setSelParcel does not). Renders live via pc.stroke/pc.weight/pc.dash/
-                  pc.fill/pc.fillOpacity at the parcel <polygon>. */}
-              {selParcel.fill ? (<>
-                <PairedFieldHead left="Outline" right="Fill" />
-                <PairedField label="Colour"
-                  left={<span style={ROW6}><ColorField value={toHex6(selParcel.stroke ?? PAL.parcel)} {...colorCtl((v) => setSelParcel({ stroke: v }))} seed={COLOR_SEED} title="Outline color" /></span>}
-                  right={<span style={ROW6}><ColorField value={toHex6(selParcel.fill)} {...colorCtl((v) => setSelParcel({ fill: v }))} seed={COLOR_SEED} title="Fill color" /></span>}
-                />
-                <PairedField label="Width"
-                  left={<NumInput style={{ ...numInput, width: "100%" }} value={selParcel.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => { pushHistory(); setSelParcel({ weight: n }); }} />}
-                />
-                <PairedField label="Pattern"
-                  left={<select value={selParcel.dash || "solid"} onChange={(e) => { pushHistory(); setSelParcel({ dash: e.target.value }); }} style={{ ...numInput, width: "100%", cursor: "pointer" }}>{DASH_OPTIONS}</select>}
-                />
-                {/* RC-5/RC-7: an opacity edit must coalesce into ONE undo frame — setSelParcel never
-                    pushes, so PercentField's own onCommit (fires once, on blur/Enter) replaces the old
-                    sliderHistory-wrapped range input without losing that guarantee. */}
-                <PairedField label="Opacity"
-                  right={<PercentField value={selParcel.fillOpacity ?? 0.12} max={60} onCommit={(v) => { pushHistory(); setSelParcel({ fillOpacity: v }); }} inputStyle={numInput} ariaLabel="Fill opacity" />}
-                />
-              </>) : (<>
-                <Field label="Outline color">
-                  <span style={ROW6}>
-                    <ColorField value={toHex6(selParcel.stroke ?? PAL.parcel)} {...colorCtl((v) => setSelParcel({ stroke: v }))} seed={COLOR_SEED} title="Outline color" />
-                  </span>
-                </Field>
-                <Field label="Line weight">
-                  <NumInput style={numInput} value={selParcel.weight ?? 2} min={0.5} step={0.5} coarse={2} onCommit={(n) => { pushHistory(); setSelParcel({ weight: n }); }} />
-                </Field>
-                <Field label="Line style">
-                  <select value={selParcel.dash || "solid"} onChange={(e) => { pushHistory(); setSelParcel({ dash: e.target.value }); }}
-                    style={{ ...numInput, width: "auto", cursor: "pointer" }}>
-                    {DASH_OPTIONS}
-                  </select>
-                </Field>
-              </>)}
-              <button style={{ ...chip, marginTop: 2 }} onClick={() => { pushHistory(); setSelParcel({ stroke: null, weight: null, dash: null }); }} title="Reset the outline back to the default color, weight and solid line">Reset outline</button>
-              {/* NEW-1 — the SETBACK line gets the same three controls as the boundary above, on
-                  this parcel only. Renders live via pc.sbStroke/pc.sbWeight/pc.sbDash at the
-                  setback <polygon> (and its dimension chips follow the colour). */}
-              <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "12px 0 6px" }}>Setback line</div>
-              <Field label="Line color">
-                <span style={ROW6}>
-                  <ColorField value={toHex6(selParcel.sbStroke ?? PAL.setback)} {...colorCtl((v) => setSelParcel({ sbStroke: v }))} seed={COLOR_SEED} title="Setback line color" />
-                </span>
-              </Field>
-              <Field label="Line weight">
-                <NumInput style={numInput} value={selParcel.sbWeight ?? SETBACK_LINE.weight} min={0.25} step={0.25} coarse={2} onCommit={(n) => { pushHistory(); setSelParcel({ sbWeight: n }); }} />
-              </Field>
-              <Field label="Line style">
-                <select value={selParcel.sbDash || SETBACK_LINE.dash} onChange={(e) => { pushHistory(); setSelParcel({ sbDash: e.target.value }); }}
-                  style={{ ...numInput, width: "auto", cursor: "pointer" }}>
-                  {DASH_OPTIONS}
-                </select>
-              </Field>
-              <button style={{ ...chip, marginTop: 2 }} onClick={() => { pushHistory(); setSelParcel({ sbStroke: null, sbWeight: null, sbDash: null }); }} title="Reset the setback line back to the default color, weight and dashes">Reset setback line</button>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", margin: "10px 0 4px" }}>
-                <span style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>{sbEditMode === "segment" ? "Setbacks per edge" : sbEditMode === "side" ? "Setbacks by side" : "Setbacks by role"}</span>
-                <label style={{ display: "flex", gap: 6, fontSize: 11, color: PAL.muted, cursor: "pointer" }} title="Show the setback line inside the parcel boundary"><input type="checkbox" checked={settings.showSetback} onChange={(e) => setSettings((s) => ({ ...s, showSetback: e.target.checked }))} /> Show setback line</label>
-              </div>
-              {/* NEW-1 — in "By side" mode this list is ONE ROW PER RUN, not one per edge. A
-                  subdivision boundary that follows a curve is digitized as dozens of segments, so
-                  the old list was "Edge 18, Edge 19 … Edge 32", thirty-odd identical 25′ inputs
-                  that had to be typed one at a time (owner, 2026-07-30). A run row writes every
-                  edge in the run at once through the same canonical `setRunSetback`, and the row
-                  count now matches the on-canvas chip count exactly — the two surfaces read the
-                  same grouping. "Per segment" still lists every edge, for a notch or jog. */}
-              {/* NEW-1 — "By role" is the DEFAULT list: four rows, the ordinance's own vocabulary,
-                  each input writing to every side that carries the role. A role no side currently
-                  carries still gets its row (so the four are always the four) but shows an em-dash
-                  instead of an input — there is nothing to write to yet. Reassignment happens on
-                  the "By side" rows, where each side shows its resolved role in a picker. */}
-              {(() => {
-                const sb = parcelSetbacks(selParcel), fe = frontEdge(selParcel);
-                const roles = parcelRoles(selParcel);
-                const overrides = parcelRoleOverrides(selParcel);
-                const chipRuns = parcelChipRuns(selParcel);
-                const rows = sbEditMode === "segment"
-                  ? sb.map((v, i) => ({ key: `e${i}`, label: i === fe ? "Front" : `Edge ${i + 1}`, note: "", value: v, commit: (n) => setEdgeSetback(selParcel, i, n) }))
-                  : sbEditMode === "role"
-                  ? roleGroups(chipRuns, roles, sb).map((g) => ({
-                      key: `g${g.role}`,
-                      role: g.role,
-                      label: g.label,
-                      // Only worth saying when the role covers more than one side; the row's job
-                      // is the number, not an explanation.
-                      note: g.sides > 1 ? `${g.sides} sides` : "",
-                      value: g.value ?? 0,
-                      mixed: g.mixed,
-                      empty: g.empty,
-                      commit: (n) => setRoleSetback(selParcel, g.edges, n),
-                    }))
-                  : chipRuns.map((run, ri) => {
-                      const shared = runSetbackValue(run, sb);
-                      return {
-                        key: `r${ri}`,
-                        label: `Side ${ri + 1}`,
-                        note: run.edges.length > 1 ? `${run.edges.length} seg` : "",
-                        // The resolved role, visible AND correctable on the side it belongs to.
-                        // NEW-6 — `overridden` says whether this row is the app's inference or the
-                        // user's own call, so a manual role is never mistaken for a derived one.
-                        role: runRole(run, roles),
-                        overridden: runOverridden(run, overrides),
-                        setRole: (role) => setRunRoleOn(selParcel, run, role),
-                        value: shared == null ? (sb[run.edges[0]] ?? 0) : shared,
-                        mixed: shared == null,
-                        commit: (n) => setRunSetback(selParcel, run, n),
-                      };
-                    });
-                return (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                    {rows.map((r) => (
-                      <div key={r.key} data-testid="setback-row" data-role={r.role} data-role-source={r.setRole ? (r.overridden ? "yours" : "auto") : undefined}
-                        style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ flex: 1, fontSize: 12, color: r.empty ? PAL.muted : PAL.ink }}>{r.label}
-                          {r.note && <span style={{ color: PAL.muted, fontSize: 11 }}> · {r.note}</span>}
-                          {r.mixed && <span style={{ color: PAL.warn, fontSize: 11 }} title="This side's segments carry different setbacks — typing a value here sets them all"> · mixed</span>}
-                          {r.overridden && <span style={{ color: PAL.accent, fontSize: 11, fontWeight: 700 }} title="You set this side's role yourself — it stays put when the boundary is re-read. Pick “Automatic” to hand it back to the app."> · yours</span>}
-                        </span>
-                        {/* NEW-6 — derive-by-default, preserve-once-touched. "Automatic" is the top
-                            option AND the way back: it names the role the app infers, so choosing it
-                            both clears the override and shows what will take over. */}
-                        {r.setRole && (
-                          <select value={r.overridden ? r.role : ""} onChange={(e) => r.setRole(e.target.value || null)} data-testid="side-role"
-                            title="Which setback this side takes — Front, Side, Street side (a corner lot's second street) or Rear. The app infers it from the boundary; set it yourself here and your choice is kept, and the By-role rows follow it."
-                            style={{ ...numInput, width: "auto", padding: "1px 4px", fontSize: 11, cursor: "pointer" }}>
-                            <option value="">Automatic ({ROLE_LABEL[r.role]})</option>
-                            {SETBACK_ROLES.map((k) => <option key={k} value={k}>{ROLE_LABEL[k]}</option>)}
-                          </select>
-                        )}
-                        {r.empty
-                          ? <span style={{ width: 54, textAlign: "center", fontSize: 12, color: PAL.muted }} title="No side currently carries this role — assign one on a By side row">—</span>
-                          : <NumInput style={{ ...numInput, width: 54 }} value={Math.round(r.value)} min={0} onCommit={r.commit} />}
-                      </div>
-                    ))}
-                    <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
-                      <button style={chip} onClick={() => { pushHistory(); setParcels((a) => a.map((p) => p.id === selParcel.id ? { ...p, setbacks: Array.from({ length: p.points.length }, () => +settings.setback || 0) } : p)); }}>Reset to default ({settings.setback}′)</button>
-                      {hasRoleOverrides(overrides) && (
-                        <button style={chip} data-testid="roles-reset" onClick={() => clearRunRoles(selParcel)}
-                          title="Hand every side's role back to the app's own reading of the boundary">Roles: back to automatic</button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })()}
-              <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
-                <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:parcel" })}>Delete parcel</button>
-              </div>
-            </Section>
-          )}
-
           {/* metrics. NEW-1 — `data-testid="yield-metrics"` marks the numbers as ONE readable
               region: the content-visibility harness compares this subtree's text before and after
               every hide, and its first cut scoped to `[data-surface="planner"]`'s parent instead,
@@ -24270,7 +24136,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const sbCase = strokeZoom(sbs.weight + PARCEL_CASING_W, zk);
                 return <g key={`sb${pc.id}`} opacity={explicit ? 1 : 0.65}>
                   <polygon data-testid="setback-casing" points={ring} fill="none" stroke={PAL.lineCasing} strokeWidth={sbCase} strokeDasharray={dashZoom(dash, zk)} strokeLinejoin="round" pointerEvents="none" />
-                  <polygon data-testid="setback-ring" data-setback-explicit={explicit ? "1" : "0"} points={ring} fill="none" stroke={sbs.stroke} strokeWidth={strokeZoom(sbs.weight, zk)} strokeDasharray={dashZoom(dash, zk)} pointerEvents="none" />
+                  <polygon data-testid="setback-ring" data-setback-explicit={explicit ? "1" : "0"} points={ring} fill="none" stroke={sbs.stroke} strokeWidth={strokeZoom(sbs.weight, zk)} strokeDasharray={dashZoom(dash, zk)} strokeOpacity={sbs.opacity} pointerEvents="none" />
                   {/* NEW-4 — the SELECTED lot's grab band is not drawn here: it moves up into the
                       selection-chrome layer with the chips, so it isn't buried under a building
                       that sits hard against the setback line. Every other parcel keeps it here. */}
@@ -24311,6 +24177,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 // where the colour IS the message, and on an inactive parcel, which is deliberately
                 // faint context.
                 const cased = !removeHover && !picked && !inactive;
+                const pcFillOp = pc.fillOpacity ?? (pc.fill ? 0.12 : 0); // Fill is an option with its own opacity; 0 = no fill
+                // Parcels rework — while this parcel's page is open, its boundary SECTIONS answer a press (selecting
+                // the section for editing) and the selected one is drawn heavier. Off in Edit parcels, where the
+                // corners and edges own the press; a press still selects the parcel and a drag still pans.
+                const secOv = pageSections && pageSections.parcelId === pc.id && !editingCorners && tool === "select" ? pageSections.list : null;
                 return <g key={pc.id} data-feature={`parcel:${pc.id}`}>
                   {cased && (
                     <polygon data-testid="parcel-casing" points={ring} fill="none" stroke={PAL.lineCasing}
@@ -24318,7 +24189,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       strokeDasharray={dashArray(pc.dash, baseW)} strokeLinejoin="round" pointerEvents="none" />
                   )}
                   <polygon data-testid="parcel-outline" points={ring}
-                    fill={removeHover ? PAL.danger : picked ? "#2563eb" : (pc.fill || "none")} fillOpacity={removeHover ? 0.16 : picked ? 0.16 : (pc.fill ? (pc.fillOpacity ?? 0.12) : 1)}
+                    fill={removeHover ? PAL.danger : picked ? "#2563eb" : (pcFillOp > 0 ? (pc.fill || PARCEL_FILL_DEFAULT) : "none")} fillOpacity={removeHover ? 0.16 : picked ? 0.16 : (pcFillOp > 0 ? pcFillOp : 1)} strokeOpacity={pc.strokeOpacity ?? 1}
                     stroke={removeHover ? PAL.danger : picked ? "#2563eb" : (pc.stroke || PAL.parcel)} strokeWidth={strokeZoom((removeHover || picked || isSel) ? Math.max(3, baseW) : baseW, zk)}
                     strokeDasharray={inactive ? "8 6" : dashArray(pc.dash, baseW)} opacity={inactive ? 0.4 : 1}
                     pointerEvents="none" />
@@ -24332,6 +24203,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       : (editingCorners && insHint && sel?.kind === "parcel" && sel.id === pc.id) ? "copy" : "crosshair" }}
                     onPointerDown={(e) => startMoveParcel(e, pc.id)}
                     onContextMenu={(e) => onParcelContext(e, pc.id)} />
+                  {secOv && secOv.map((sec, si) => {
+                    const sd = sectionPath(pc.points, sec).map((q) => { const c = f2p(q); return `${c.x},${c.y}`; }).join(" ");
+                    const on = sec.key === selSectionKey;
+                    return (
+                      <g key={sec.key} data-export="skip" data-testid={`map-section-${sec.key}`}>
+                        {on && <polyline points={sd} fill="none" stroke={sectionColor(si)} strokeWidth={6} strokeLinecap="round" strokeLinejoin="round" pointerEvents="none" />}
+                        <polyline points={sd} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={14} strokeLinecap="round" strokeLinejoin="round" pointerEvents="stroke" style={{ cursor: "pointer" }}
+                          onPointerDown={(e) => { setSelSectionKey(sec.key); startMoveParcel(e, pc.id); }} />
+                      </g>
+                    );
+                  })}
                 </g>;
               })}
               {/* elements (drawn in PIXELS; coords pre-transformed by f2p).
@@ -25965,7 +25847,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const bp = sel?.kind === "parcel" ? parcels.find((p) => p.id === sel.id) : null;
             return (
             <div data-testid="boundary-edit-banner" onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}
-              style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", zIndex: 6, whiteSpace: "nowrap", background: "rgba(25,22,19,0.94)", color: "#fff", padding: "6px 8px 6px 15px", borderRadius: 99, fontSize: 12.5, fontWeight: 500, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 6px 22px rgba(0,0,0,0.28)" }}>
+              style={{ position: "absolute", top: 56, // below the View / Layers buttons (the banner grew a Split button and would otherwise sit under them)
+              left: "50%", transform: "translateX(-50%)", zIndex: 6, whiteSpace: "nowrap", background: "rgba(25,22,19,0.94)", color: "#fff", padding: "6px 8px 6px 15px", borderRadius: 99, fontSize: 12.5, fontWeight: 500, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 6px 22px rgba(0,0,0,0.28)" }}>
               <span style={{ color: "rgba(255,255,255,0.92)" }}>{boundaryEditHint({ hasSelection: !!bp, locked: !!(bp && bp.locked) })}</span>
               {/* A drawn parcel arrives LOCKED, and a locked boundary has no editable path — so the
                   mode would teach three gestures and then swallow all of them. Say so, and put the
@@ -25973,6 +25856,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {bp && bp.locked && (
                 <button className="dbtn" data-testid="boundary-edit-unlock" style={{ ...btn(true), padding: "5px 12px" }} onClick={() => toggleParcelLock(bp.id)}>🔓 Unlock</button>
               )}
+              {bp && <button className="dbtn" data-testid="boundary-edit-split" style={{ ...chip, padding: "5px 13px" }} title="Draw a line across this parcel to split it in two" onClick={() => { exitBoundaryEdit(); startPanelSplit(bp.id); }}>Split</button>}
               <button className="dbtn" style={{ ...chip, padding: "5px 13px" }} title="Finish reshaping (Esc)" onClick={exitBoundaryEdit}>Done</button>
             </div>
             );
@@ -29729,9 +29613,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               there, and Properties is intentionally dock-only / non-floating). */}
           {leftPanel && !propsTab && (<>
           <PanelChrome
-            title={panelTitle[leftPanel]} icon={<RailIcon id={leftPanel} size={18} />} subtitle={panelHeaderSubtitle}
+            title={panelTitle[leftPanel]} icon={<RailIcon id={leftPanel} size={18} />} subtitle={leftPanel === "parcel" ? null : panelHeaderSubtitle}
             actionsRef={leftPanel === "drainage" ? setDockActionsEl : undefined}
-            floating={false} canFloat={!narrow}
+            floating={false} canFloat={!narrow && leftPanel !== "parcel"} // Parcels rework: no detach icon on the Parcels header — double-clicking the header still floats/docks it
             onDetach={() => detachPanel(leftPanel)}
             onClose={() => setLeftPanel(null)}
             onToggle={() => { if (!narrow) detachPanel(leftPanel); }}
@@ -29756,7 +29640,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           each renders the SAME body as its docked form via renderPanelBody, so there's no
           duplicated JSX. Gated to !narrow — below the breakpoint the app is docked-only. */}
       {!narrow && Object.keys(floating).map((id) => (
-        <FloatingPanel key={id} title={panelTitle[id]} icon={<RailIcon id={id} size={18} />} subtitle={panelHeaderSubtitle}
+        <FloatingPanel key={id} title={panelTitle[id]} icon={<RailIcon id={id} size={18} />} subtitle={id === "parcel" ? null : panelHeaderSubtitle}
           actionsRef={id === "drainage" ? setFloatActionsEl : undefined} pos={floating[id]}
           onMove={(p) => moveFloating(id, p)} onDock={() => dockPanel(id)} onClose={() => closeFloating(id)}
           boundsRef={wrapRef} width={leftWidth} data-testid={`floating-panel-${id}`}

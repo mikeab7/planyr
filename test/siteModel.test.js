@@ -742,12 +742,23 @@ describe("Parcel split lineage (B651)", () => {
 // B682 — id-less parcels (map-finder hand-off / legacy saves) get a stable, geometry-derived id at
 // the createSiteModel funnel, so a dragged acreage-label offset can no longer spawn phantom copies
 // through the cross-copy union merge.
+describe("Lock means 'Edit parcels can't touch it' and is off by default (Parcels rework NEW-5)", () => {
+  const RING = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];
+  it("a legacy born-locked flag (no lockSem stamp) reads as unlocked; a deliberate lock survives", () => {
+    const m = createSiteModel({ parcels: [{ id: "a", points: RING, locked: true }, { id: "b", points: RING, locked: true, lockSem: 2 }, { id: "c", points: RING }] });
+    const by = Object.fromEntries(m.parcels.map((p) => [p.id, p]));
+    expect(by.a.locked).toBeUndefined();
+    expect(by.b.locked).toBe(true);
+    expect(by.c.locked).toBeUndefined();
+  });
+});
+
 describe("Stable parcel ids heal the acreage-label duplication (B682)", () => {
   const RING = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];
 
   it("createSiteModel backfills a stable id for an id-less parcel, deterministically", () => {
-    const a = createSiteModel({ parcels: [{ points: RING, locked: true }] }).parcels[0];
-    const b = createSiteModel({ parcels: [{ points: RING, locked: true }] }).parcels[0];
+    const a = createSiteModel({ parcels: [{ points: RING, locked: true, lockSem: 2 }] }).parcels[0];
+    const b = createSiteModel({ parcels: [{ points: RING, locked: true, lockSem: 2 }] }).parcels[0];
     expect(a.id).toBeTruthy();
     expect(a.id).toBe(b.id); // same geometry → same id, run to run
     expect(a.locked).toBe(true); // other fields preserved
@@ -771,7 +782,7 @@ describe("Stable parcel ids heal the acreage-label duplication (B682)", () => {
   });
 
   it("REPRO: dragging an id-less parcel's label no longer duplicates it on merge", () => {
-    const stored = { id: "s1", updatedAt: 1000, parcels: [{ points: RING, locked: true }] };
+    const stored = { id: "s1", updatedAt: 1000, parcels: [{ points: RING, locked: true, lockSem: 2 }] };
     const live = { id: "s1", updatedAt: 2000, parcels: [{ points: RING, locked: true, labelOffset: { x: 5, y: 5 } }] };
     const merged = mergeSiteContent(live, stored);
     expect(merged.parcels).toHaveLength(1);            // was 2 before the fix (the phantom copy)

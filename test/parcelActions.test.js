@@ -219,7 +219,9 @@ describe("the two-sided 'Parcel' collision is resolved", () => {
   });
 
   it("each side carries a one-click path to the other", () => {
-    expect(src).toMatch(/data-testid="land-to-parcel-tools"/);        // panel → rail
+    // Parcels rework (NEW-1): the "Draw, split, combine… Parcel tools →" line is gone; the panel carries its own Add / Edit buttons.
+    expect(src).not.toMatch(/data-testid="land-to-parcel-tools"/);
+    expect(src).toMatch(/data-testid="land-add-btn"/);                // panel → add flows
     expect(src).toMatch(/setbacks:\s*\(\)\s*=>\s*openLandPanel\(\)/); // rail → panel (setbacks)
   });
 });

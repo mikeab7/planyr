@@ -343,9 +343,9 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     //  Appearance Collapse replaces its slot in the shared Properties section but the section stays for
     //  every other type, so 33 → 35 and 34 → 36.)
     expect(src).toMatch(/const colorCtl = \(apply, hist = true, commit = null\) => \(\{\s*\n\s*pick: livePick\(apply, hist, commit\),/);
-    expect((src.match(/\{\.\.\.colorCtl\(\(v\) =>/g) || []).length).toBe(35);
+    expect((src.match(/\{\.\.\.colorCtl\(\(v\) =>/g) || []).length).toBe(34); // Parcels rework: the parcel Boundary section (5 colour controls) became the page's Style grid (4)
     expect((src.match(/pick=\{livePick\(\(v\) =>/g) || []).length).toBe(1);
-    expect((src.match(/<ColorField /g) || []).length).toBe(36);
+    expect((src.match(/<ColorField /g) || []).length).toBe(35);
     // A swatch click is a DISCRETE commit: exactly one undo frame, then the color is recorded.
     expect(src).toMatch(/onSwatch: \(v\) => \{ if \(hist\) pushHistory\(\); apply\(v\); pushRecent\(v\);/);
     // NEW-4 (bug) — the wheel picks LIVE, so `change` fires for EVERY shade the cursor crosses.

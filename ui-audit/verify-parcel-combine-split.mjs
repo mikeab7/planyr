@@ -27,7 +27,7 @@ const results = [];
 const ok = (name, cond, extra = "") => { results.push({ name, pass: !!cond }); console.log(`${cond ? "PASS" : "FAIL"} — ${name}${extra ? "  ::  " + extra : ""}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const sq = (x, y, id, extra = {}) => ({ id, points: [{ x, y }, { x: x + 400, y }, { x: x + 400, y: y + 400 }, { x, y: y + 400 }], locked: true, ...extra });
+const sq = (x, y, id, extra = {}) => ({ id, points: [{ x, y }, { x: x + 400, y }, { x: x + 400, y: y + 400 }, { x, y: y + 400 }], ...extra });
 const NAMES = { p1: "Gordon Smith Tract", p2: "Kilgore Parcel", p3: "Third Lot", p4: "Fourth Lot", p5: "Far Away" };
 const mkSite = (id) => ({
   id, groupId: id, site: "ZZ Parcels Throwaway", name: "Plan 1", origin: { lat: 29.76, lon: -95.37 }, county: "harris",
@@ -109,7 +109,7 @@ try {
   for (const id of ["p1", "p2", "p3"]) await T(`parcel-row-check-${id}`).check();
   await sleep(300);
   const bar3 = await T("parcels-action-bar").innerText();
-  ok("3 touching selected → bar reads '3 selected / 11.02 AC · all touching'", /3 selected/.test(bar3) && /11\.02 AC/.test(bar3) && /all touching/.test(bar3), bar3.replace(/\n/g, " | "));
+  ok("3 touching selected → bar reads '3 selected' + Combine", /3 selected/.test(bar3) && /Combine/.test(bar3), bar3.replace(/\n/g, " | "));
   await shot("02-bar");
   await T("parcels-bar-combine").click(); await sleep(700);
   const afterPanel = await parcelsLS();
@@ -117,17 +117,20 @@ try {
   ok("(2) panel combine → ONE new parcel named Tract A (no prompt)", tractP && tractP.label === "Tract A" && afterPanel.length === 3, `names=${afterPanel.map((p) => p.label || p.addr).join(", ")}`);
   ok("(2) originals are NOT live parcels in the model (nothing hidden to leak)", !afterPanel.some((p) => ["p1", "p2", "p3"].includes(p.id)));
   ok("(2) site total unchanged by the combine", Math.abs((await siteAcres()) - a0) < 0.006, String(await siteAcres()));
-  ok("(2) its detail card opened by itself, with Made from + Deed acres, summed", /made from/i.test(await T(`parcel-detail-${tractP.id}`).innerText()) && /deed acres, summed/i.test(await T(`parcel-detail-${tractP.id}`).innerText()));
-  const det = await T(`parcel-detail-${tractP.id}`).innerText();
+  await T(`parcel-row-${tractP.id}`).click(); await T("parcel-page").waitFor({ timeout: 8000 });   // Parcels rework: a row opens the parcel's own PAGE
+  ok("(2) its page shows 'Made from' (and never 'Drawn')", /made from/i.test(await T("parcel-made-from").locator("xpath=..").innerText()) && !/drawn/i.test(await T("parcel-source").innerText()));
+  const det = await T("parcel-made-from").innerText();
   ok("(2) Made from lists each original by name, APN and acres", /Gordon Smith Tract/.test(det) && /Kilgore Parcel/.test(det) && /Third Lot/.test(det) && /1002/.test(det) && /3\.67 AC/.test(det));
-  ok("(2) Combined tag on the row; Undo toast shown", (await T(`parcel-table-row-${tractP.id}`).innerText()).includes("Combined") && (await page.getByText("Combined 3 parcels into Tract A").count()) > 0);
+  await T("parcel-page-back").click(); await T("parcels-panel").waitFor({ timeout: 8000 });
+  ok("(2) 'Combined from 3 lots' on the row; Undo toast shown", (await T(`parcel-table-row-${tractP.id}`).innerText()).includes("Combined from 3 lots") && (await page.getByText("Combined 3 parcels into Tract A").count()) > 0);
   await shot("03-tract");
   const stateA = flat(afterPanel).replace(/"from":\[[^\]]*\]/g, '"from":3');
 
   // (3) restore
-  await T(`parcel-restore-combined-${tractP.id}`).click(); await sleep(700);
+  await T(`parcel-row-${tractP.id}`).click(); await T("parcel-page").waitFor({ timeout: 8000 });
+  await T("parcel-restore-combined").click(); await sleep(700);
   const restored = await parcelsLS();
-  ok("(3) Restore puts the 3 originals back (names, locks) and the total is unchanged", restored.length === 5 && Object.values(NAMES).every((n) => restored.some((p) => p.addr === n && p.locked === true)) && Math.abs((await siteAcres()) - a0) < 0.006, `n=${restored.length}`);
+  ok("(3) Restore puts the 3 originals back (names, locks) and the total is unchanged", restored.length === 5 && Object.values(NAMES).every((n) => restored.some((p) => p.addr === n && !p.locked)) && Math.abs((await siteAcres()) - a0) < 0.006, `n=${restored.length}`);
 
   // (4) the SAME combine from the MAP TOOLBAR
   await page.getByTestId("rail-parcel-tools").click();
@@ -158,8 +161,9 @@ try {
   const stateM = flat(afterMap).replace(/"from":\[[^\]]*\]/g, '"from":3');
   ok("(4) PARITY — panel combine and map-toolbar combine give an identical resulting state", stateA === stateM, stateA === stateM ? "" : `\n  panel: ${stateA}\n  map:   ${stateM}`);
   ok("(4) PARITY — the tract remembers the same three originals either way", JSON.stringify(tractM.combined.from.map((s) => s.addr).sort()) === JSON.stringify(tractP.combined.from.map((s) => s.addr).sort()));
-  ok("(4) map combine opened the tract's detail card too", (await page.$$(`[data-testid="parcel-detail-${tractM.id}"]`)).length === 1);
-  await T(`parcel-restore-combined-${tractM.id}`).click(); await sleep(600);
+  await openPanel(); await T(`parcel-row-${tractM.id}`).click(); await T("parcel-page").waitFor({ timeout: 8000 });
+  ok("(4) the map-made tract's page shows its originals too", (await T("parcel-made-from").count()) === 1);
+  await T("parcel-restore-combined").click(); await sleep(600);
   ok("(4) Restore after a map combine behaves identically", (await parcelsLS()).length === 5);
 
   // (5) split from the MAP TOOLBAR by drawing a line
@@ -190,10 +194,11 @@ try {
 
   // panel-aimed split + Restore original
   await openPanel();
-  await T("parcel-row-p2").click({ position: { x: 24, y: 12 } }).catch(() => {});
   const id2 = (await parcelsLS()).find((p) => p.addr === NAMES.p2).id;
-  await T(`parcel-row-${id2}`).click({ position: { x: 24, y: 12 } }); await sleep(300);
-  await T(`parcel-split-${id2}`).click(); await sleep(500);
+  await T(`parcel-row-${id2}`).click(); await T("parcel-page").waitFor({ timeout: 8000 });        // select it (its page opens)
+  await T("parcel-page-back").click(); await T("parcels-panel").waitFor({ timeout: 8000 });
+  await T("parcels-edit-btn").click(); await T("boundary-edit-banner").waitFor({ timeout: 8000 }); // Edit parcels → Split
+  await T("boundary-edit-split").click(); await sleep(500);
   const hdr = await T("parcels-split-header").innerText();
   ok("panel Split → header reads 'Splitting <name> · <acres> AC' with Cancel and the one instruction", /Splitting Kilgore Parcel · 3\.67 AC/.test(hdr) && /double-click to finish/.test(hdr) && (await T("parcels-split-cancel").count()) === 1, hdr.replace(/\n/g, " | "));
   await fit(); await sleep(500);
@@ -204,14 +209,15 @@ try {
   const afterPanelSplit = await parcelsLS();
   ok("panel-aimed split applied on double-click (no Apply, no name prompt) and exited split mode", afterPanelSplit.filter((p) => p.splitName).length === 2 && (await T("parcels-split-header").count()) === 0);
   const piece = afterPanelSplit.find((p) => p.splitName);
-  ok("the piece's detail card is open with a 'Split from' link + Restore original", (await T(`parcel-detail-${piece.id}`).innerText()).includes("Split from") && (await T(`parcel-restore-split-${piece.id}`).count()) === 1);
-  await T(`parcel-restore-split-${piece.id}`).click(); await sleep(700);
+  await openPanel(); await T(`parcel-row-${piece.id}`).click(); await T("parcel-page").waitFor({ timeout: 8000 });
+  ok("the piece's page has 'Split from' + Restore original", (await T("parcel-split-from").innerText()).includes("Split from") && (await T("parcel-restore-split").count()) === 1);
+  await T("parcel-restore-split").click(); await sleep(700);
   const afterRestoreSplit = await parcelsLS();
-  ok("Restore original puts the parcel back exactly (name, lock, outline), total unchanged", afterRestoreSplit.length === 5 && afterRestoreSplit.some((p) => p.addr === NAMES.p2 && p.locked === true && p.points.length === 4) && Math.abs((await siteAcres()) - a0) < 0.006);
+  ok("Restore original puts the parcel back exactly (name, lock, outline), total unchanged", afterRestoreSplit.length === 5 && afterRestoreSplit.some((p) => p.addr === NAMES.p2 && !p.locked && p.points.length === 4) && Math.abs((await siteAcres()) - a0) < 0.006);
 
   // a bad line is refused with a plain message
-  await T(`parcel-row-${id2}`).click({ position: { x: 24, y: 12 } }).catch(() => {});
-  await page.getByTestId("parcels-split-btn").click(); await sleep(300);
+  await openPanel(); await T("parcels-edit-btn").click(); await T("boundary-edit-banner").waitFor({ timeout: 8000 });
+  await T("boundary-edit-split").click(); await sleep(300);
   await fit();
   const bx3 = await parcelBoxes(); const ord4 = (await parcelsLS()).map((p) => p.addr);
   const k3 = bx3[ord4.indexOf(NAMES.p2)];
@@ -230,8 +236,8 @@ try {
   const names7 = await T("parcels-list").innerText();
   ok("(7) reload → Tract A persisted (Combined, total unchanged)", /Tract A/.test(names7) && /Combined/.test(names7) && Math.abs((await siteAcres()) - a0) < 0.006);
   const tr7 = (await parcelsLS()).find((p) => p.combined);
-  await T(`parcel-row-${tr7.id}`).click({ position: { x: 24, y: 12 } }); await sleep(300);
-  await T(`parcel-restore-combined-${tr7.id}`).click(); await sleep(600);
+  await T(`parcel-row-${tr7.id}`).click(); await T("parcel-page").waitFor({ timeout: 8000 });
+  await T("parcel-restore-combined").click(); await sleep(600);
   ok("(7) …and Restore still works after the reload (durable, unlike Undo)", (await parcelsLS()).length === 5);
 
   // keyboard / labels
