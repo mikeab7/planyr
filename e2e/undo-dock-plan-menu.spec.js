@@ -255,7 +255,7 @@ test.describe("B385041 — a resize never moves a building's dock walls", () => 
     const panelText = await page.getByTestId("property-panel").innerText().catch(() => "");
     if (panelText) {
       const len = /Length \(ft\)[^\d-]*(\d+)/.exec(panelText);
-      const dep = /Depth \(ft\)[^\d-]*(\d+)/.exec(panelText);
+      const dep = /Depth\s*(\d+)/.exec(panelText);
       if (len && dep) {
         expect(Number(len[1])).toBe(Math.round(s.w));
         expect(Number(dep[1])).toBe(Math.round(s.h));
@@ -267,7 +267,8 @@ test.describe("B385041 — a resize never moves a building's dock walls", () => 
     await startBlank(page);
     const b = await drawWideBuilding(page);
     await openProps(page, b.id);
-    const turn = page.getByTestId("dock-face-turn");
+    // The deliberate quarter-turn is a wall click now: click a wall on the OTHER axis of the picker.
+    const turn = page.locator('[data-testid="loading-wall-picker"] [data-wall="right"]');
     await expect(turn).toBeVisible();
     await turn.click();
     await page.waitForTimeout(250);

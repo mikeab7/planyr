@@ -33,7 +33,7 @@ const els = () => ([
 describe("key sets", () => {
   it("cover the standards the owner named (outline color, line weight, fill, dash, …)", () => {
     expect(PARCEL_STD_KEYS).toEqual(["stroke", "weight", "dash", "fill", "fillOpacity", "sbStroke", "sbWeight", "sbDash"]);
-    expect(TYPE_STD_KEYS).toEqual(["fill", "stroke"]);
+    expect(TYPE_STD_KEYS).toEqual(["fill", "stroke", "strokeOpacity", "strokeWidth"]);
   });
 });
 

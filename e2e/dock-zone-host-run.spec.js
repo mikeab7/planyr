@@ -169,7 +169,7 @@ test.describe("NEW-1 — the owner's real Weld County plan", () => {
     // rows, which intercept the pointer.
     await page.locator(`[data-el-id="${B3}"] rect`).first().click();
     await page.getByRole("button", { name: /^Properties$/ }).click();
-    const len = fieldInput(page, "Length (ft)");
+    const len = fieldInput(page, "Length");
     await expect(len).toBeVisible({ timeout: 8000 });
     await len.fill("400");
     await len.press("Enter");

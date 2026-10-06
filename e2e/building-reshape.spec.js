@@ -40,8 +40,8 @@ test.describe("building footprint reshape (logged out)", () => {
     // The drawn building auto-selects; open its inspector (the "Properties" tab).
     await page.getByRole("button", { name: /^Properties$/ }).click();
 
-    // The building inspector shows a "✎ Edit footprint…" action for a placed rectangle.
-    const editBtn = page.getByRole("button", { name: /Edit footprint/i }).first();
+    // The building inspector shows a "✎ Edit outline" action for a placed rectangle.
+    const editBtn = page.getByRole("button", { name: /Edit outline/i }).first();
     await expect(editBtn).toBeVisible({ timeout: 8000 });
     await editBtn.click();
 

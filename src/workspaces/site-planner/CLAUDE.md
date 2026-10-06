@@ -927,7 +927,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   ⛔ the `established` gate is not ceremony — a legacy record can carry a `dockSide` that disagrees
   with what it renders, and honouring it unconditionally on load would strand (and therefore prune)
   the zones bonded to the walls the plan actually shows. `rotateDockAxisPatch` is the DELIBERATE way
-  to turn the face (Properties → Loading → `Dock face` → `turn ⟳`), which has to exist now that a
+  to turn the face (Properties → Loading → click a wall on the wall picker, `lib/loadingWalls.js` `wallClickPatch`), which has to exist now that a
   resize cannot do it by accident. B548's contract (depth/length readouts, massing panel, column
   grid, dock-door count) holds against the STORED value for free, because they all read
   `dockSidesFor`. **B416/B417 are the CONSEQUENCE of the old flip, not duplicates — they still prune
@@ -1929,6 +1929,8 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   Guards: the repo-root `test/` suite **numEditInPlace** + the ui-audit harness
   **verify-numedit-inplace** (real browser, two zooms × both themes, all three floating callers,
   with the parcel grips proven still clickable while the editor is open).
+
+- **`loadingWalls.js` (B2144160–B2144168, Building panel rethink) — the Loading wall picker's pure half:** the little rotated plan's geometry (`wallPickerLayout`, labels upright, never over the rectangle or the north arrow), what a wall click does (`wallClickPatch` — loading is one wall or an OPPOSITE pair, never an L), the words (`loadingSummary`/`loadedWallsLabel`, from `dockSideCompassLabel`) and the bump-outs a change strands (`strandedBumpIds`, two per loaded wall). `SitePlanner.jsx`'s `applyBuildingLoading` is the one writer. Outline width/opacity are element props `strokeWidth`/`strokeOpacity` resolved by `planStyle.elStyle` (`weight` follows `strokeWidth`; `strokeWidthSet` is null until someone sets one, so a road's zoom-derived curb stroke stays automatic). Guards: repo-root `test/` **loadingWalls**, **outlineStyle**; e2e **building-panel-rethink**.
 
 **Conventions:** feet everywhere internal (convert only at the map boundary); theme tokens
 never raw hex; inline editors never `window.prompt/confirm/alert`. See `/CLAUDE.md` KEY DECISIONS.

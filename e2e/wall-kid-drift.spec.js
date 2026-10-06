@@ -40,7 +40,7 @@ const fieldInput = (p, label) => p.getByText(label, { exact: true }).locator("xp
 async function selectBuilding(page) {
   await page.locator(`[data-el-id="${B3}"]`).click({ position: { x: 5, y: 5 } });
   await page.getByRole("button", { name: /^Properties$/ }).click();
-  await expect(fieldInput(page, "Depth (ft)")).toBeVisible({ timeout: 8000 });
+  await expect(fieldInput(page, "Depth")).toBeVisible({ timeout: 8000 });
 }
 
 async function loadPlan(page, els = FIXTURE.els) {
@@ -175,7 +175,7 @@ test.describe("NEW-2 / NEW-3 — wall strips + side parking on the owner's real 
 
     // Retype the Depth through the real Properties field — the gesture the owner actually performs.
     await selectBuilding(page);
-    const depth = fieldInput(page, "Depth (ft)");
+    const depth = fieldInput(page, "Depth");
     await depth.fill("210");
     await depth.press("Enter");
     await expect.poll(async () => Math.round((await readPlan(page, IDS)).host.h), { timeout: 8000 }).toBe(210);
@@ -191,7 +191,7 @@ test.describe("NEW-2 / NEW-3 — wall strips + side parking on the owner's real 
     await loadPlan(page);
     await assertRules(page, "before resize");
     await selectBuilding(page);
-    const depth = fieldInput(page, "Depth (ft)");
+    const depth = fieldInput(page, "Depth");
     await depth.fill("210");
     await depth.press("Enter");
     await expect.poll(async () => Math.round((await readPlan(page, IDS)).host.h), { timeout: 8000 }).toBe(210);
