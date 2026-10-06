@@ -95,6 +95,8 @@ export function collectSnapshot() {
     box: rectOf(e.getBoundingClientRect()),
     allIds: (e.getAttribute("data-all-ids") || "").split(",").filter(Boolean),
     menuIds: (e.getAttribute("data-menu-ids") || "").split(",").filter(Boolean),
+    ghostIds: (e.getAttribute("data-ghost-ids") || "").split(",").filter(Boolean),
+    settled: e.getAttribute("data-toolbar-settled") !== "false",
     iconIds: (e.getAttribute("data-icon-ids") || "").split(",").filter(Boolean),
     barIds: [...e.querySelectorAll("[data-toolbar-bar] [data-toolbar-item-id]")].filter((i) => i.getBoundingClientRect().width > 0).map((i) => i.getAttribute("data-toolbar-item-id")),
     hasMore: !!e.querySelector("[data-toolbar-more]"),
@@ -174,7 +176,10 @@ export function auditSnapshot(s) {
     if (t.box.h > TOL.rowMax) v.push({ kind: "toolbar-wrapped", detail: `toolbar "${t.name}" is ${t.box.h.toFixed(0)}px tall` });
     // nothing is simply dropped: every declared item is on the bar OR named as living in the menu
     const accounted = new Set([...t.barIds, ...t.menuIds]);
-    for (const id of t.allIds) if (!accounted.has(id)) v.push({ kind: "item-dropped", detail: `toolbar "${t.name}": item "${id}" is neither on the bar nor in the overflow menu` });
+    // a GHOST (reserved-but-unavailable, invisible, never in the menu by design) is not a control the user has —
+    // the plan giving up its placeholder room is not "dropping" anything. Every real item is still owed a place.
+    const ghosts = new Set(t.ghostIds || []);
+    for (const id of t.allIds) if (!accounted.has(id) && !ghosts.has(id)) v.push({ kind: "item-dropped", detail: `toolbar "${t.name}": item "${id}" is neither on the bar nor in the overflow menu` });
     if (t.menuIds.length && !t.hasMore) v.push({ kind: "no-more-button", detail: `toolbar "${t.name}" moved ${t.menuIds.join(", ")} to a menu but renders no More button` });
   }
   return v;
