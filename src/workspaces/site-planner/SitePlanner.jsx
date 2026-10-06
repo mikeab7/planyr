@@ -51,7 +51,7 @@ import { isDiagArmed, latchDiagArm } from "./lib/diagArm.js";
 import { noteEffectRun } from "../../app/renderLoopProbe.js";
 import { createViewChangeRecorder, attachTimeline } from "./lib/viewChangeRecorder.js";
 import { createViewFramingGate } from "./lib/viewFramingGate.js";
-import { resolveDoubleClickTarget, gestureAnchorTarget, stackEntries, pressIsOverElementBody, stackHoldsFeature, parseFeatureKey, stackAtPoint, nextPickIndex, ACTION_ATTR } from "./lib/featureTarget.js";
+import { resolveDoubleClickTarget, gestureAnchorTarget, stackEntries, pressIsOverElementBody, stackHoldsFeature, parseFeatureKey, stackAtPoint, nextPickIndex, ACTION_ATTR, CHROME_ATTR, gestureAnchorKey, chromePressFacts } from "./lib/featureTarget.js";
 import { parkDepthForRows, parkRowsForDepth, parkFlipIsNoOp, explodeParkingBands, edgeAbutsPaving, freeParkStack, relayoutFreeStack } from "./lib/parking.js";
 import { trailerRowLabel, elementLabelHidden, labelHiddenPatch, trailerCfgPatch, drawnTrailerCfg, TRAILER_FIELD_MIN } from "./lib/trailerRows.js";
 import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale, overlayRasterKey, HIRES_CACHE_PER_OVERLAY } from "./lib/overlayPdf.js";
@@ -10107,7 +10107,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * only a press that is NOT a continuation starts a new anchor. Everything else fails open to the
    * stack: no anchor, or one outside the double-click's own time/distance budget, resolves exactly
    * as it did before. */
-  const lastPressRef = useRef({ t: 0, x: 0, y: 0, action: false });
+  const lastPressRef = useRef({ t: 0, x: 0, y: 0, action: false, chrome: false, beneath: null });
   const gestureAnchorRef = useRef(null);
   /* ⛔ B1342704 — THE GESTURE-ON-ACTION-CONTROL ANCHOR, same shape as `gestureAnchorRef` one line up
    * and deliberately SEPARATE from it (see featureTarget.js's `ACTION_ATTR` header for why a
@@ -10122,7 +10122,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const notePress = (e) => {
     if (!e) return;
     const action = !!(e.target && typeof e.target.closest === "function" && e.target.closest(`[${ACTION_ATTR}]`));
-    lastPressRef.current = { t: tapTime(e), x: e.clientX, y: e.clientY, action };
+    /* NEW-1 — a press DELIVERED to identity-transparent stray chrome (the hover-armed acreage badge)
+     * records what the resolver finds BENEATH it, read here in the capture phase before the chrome's
+     * own handler re-renders anything. The anchor effect below uses it instead of the selection the
+     * chrome's handler makes — see `gestureAnchorKey` in lib/featureTarget.js. */
+    const onChrome = !!(e.target && typeof e.target.closest === "function" && e.target.closest(`[${CHROME_ATTR}]`));
+    const chromeFacts = chromePressFacts(onChrome, onChrome ? hitStackAt(e.clientX, e.clientY) : null);
+    lastPressRef.current = { t: tapTime(e), x: e.clientX, y: e.clientY, action, ...chromeFacts };
   };
   const selFeatureKey = (s) => {
     if (!s || !s.kind) return null;
@@ -10152,9 +10158,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * gesture at itself. Otherwise it is re-stamped. The old `held.key !== key` clause could only ever
    * hold an anchor against a DIFFERENT feature, which is the narrow half of the rule. */
   useLayoutEffect(() => {
-    const key = selFeatureKey(sel);
-    if (!key) { gestureAnchorRef.current = null; return; }
     const p = lastPressRef.current;
+    const key = gestureAnchorKey(selFeatureKey(sel), p);   // NEW-1: a press on `data-chrome` anchors to what is beneath it
+    if (!key) { gestureAnchorRef.current = null; return; }
     const held = gestureAnchorRef.current;
     if (held && gestureAnchorTarget(held, p)) return;   // still in flight — press 1 keeps it
     gestureAnchorRef.current = { key, t: p.t, x: p.x, y: p.y };
