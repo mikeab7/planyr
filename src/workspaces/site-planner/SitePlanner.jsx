@@ -522,6 +522,7 @@ import { resolveDraftStepBack } from "./lib/drafts.js";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { FONT_SIZE, SPACE, CONTROL_H } from "../../shared/ui/designTokens.js";
 import { parcelKey as parcelKeyOf, storedParcelKey } from "./lib/parcelIdentity.js";
+import { canvasBox, nextCanvasSize, framePad } from "./lib/canvasBox.js"; // NEW-1 — the canvas box IS the element box (no 320×360 floor)
 // B845584 — the element context-menu rebuild's own 14px/1.3-stroke icon family (see that file's
 // header for why it is separate from icons.jsx's 24px/stroke-2 idiom). Two names collide with
 // icons.jsx's existing exports (Duplicate, Delete/Lock-ish), so they are aliased at the import site.
@@ -2078,7 +2079,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * see the ResizeObserver and the visibilitychange effect below, and lib/viewFramingGate.js's
    * `mayFrame` readiness check, which refuses to commit a framing (`fit()`) until this is true. A
    * ResizeObserver's mandatory FIRST callback fires even for a container that was never laid out
-   * (a page that loaded backgrounded), and `Math.max(320, r.width)` turns that degenerate box into a
+   * (a page that loaded backgrounded), and the old 320-px width floor (removed — lib/canvasBox.js) turned that degenerate box into a
    * plausible-looking 320×360 that must not be trusted as "the real canvas". */
   const sizeMeasuredRef = useRef(false);
   // NEW-1 (B881): the calibration badge is text-width (not viewport-capped like the scale
@@ -5773,13 +5774,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!wrapRef.current) return;
     const ro = new ResizeObserver((ents) => {
       const r = ents[0].contentRect;
-      const w = Math.max(320, r.width), h = Math.max(360, r.height);
       // B1234400 — trust this observation only if the tab was actually visible when it landed; a
       // callback delivered while hidden can report a degenerate box for a page never laid out.
       if (typeof document === "undefined" || document.visibilityState === "visible") sizeMeasuredRef.current = true;
       // Bail when unchanged — the B962 layout effect often syncs the same width one frame earlier
       // (on a panel toggle), so an identical RO callback would otherwise force a redundant re-render.
-      setSize((s) => (s.w === w && s.h === h ? s : { w, h, rawW: r.width, rawH: r.height }));
+      setSize((s) => nextCanvasSize(s, r));
     });
     ro.observe(wrapRef.current);
     return () => ro.disconnect();
@@ -5799,8 +5799,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!el) return;
       const r = el.getBoundingClientRect();
       sizeMeasuredRef.current = true;
-      const w = Math.max(320, r.width), h = Math.max(360, r.height);
-      setSize((s) => (s.w === w && s.h === h ? s : { w, h, rawW: r.width, rawH: r.height }));
+      setSize((s) => nextCanvasSize(s, r));
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
@@ -6235,8 +6234,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     pts.forEach((p) => { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); });
     const bw = Math.max(maxX - minX, 10), bh = Math.max(maxY - minY, 10);
-    const pad = 60;
-    const ppf = Math.min((box2.w - pad * 2) / bw, (box2.h - pad * 2) / bh);
+    const pad = framePad(box2.w, box2.h, 60);
+    const ppf = Math.max(1e-6, Math.min((box2.w - pad * 2) / bw, (box2.h - pad * 2) / bh));
     setView({ ppf, offX: pad - minX * ppf + (box2.w - pad * 2 - bw * ppf) / 2, offY: pad - minY * ppf + (box2.h - pad * 2 - bh * ppf) / 2 });
     if (framedFromRealBox) markFramed();   // B1574432 — the reveal, in the same commit as the view
   }, [parcels, els, sheetOverlays, size, hiddenGroups, setView, markFramed]);
@@ -6273,13 +6272,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const el = wrapRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    /* ⛔ NEVER FRAME FROM A DEGENERATE BOX. The `Math.max(320, …)` floor below turns a never-laid-out
+    /* ⛔ NEVER FRAME FROM A DEGENERATE BOX. The old `Math.max(320, …)` floor (removed, lib/canvasBox.js) turned a never-laid-out
        container into a plausible-looking 320x360 — the exact trap lib/viewFramingGate.js's `measured`
        flag exists for. The RAW rect is the verdict. */
     if (!(r.width > 1 && r.height > 1)) return;
     sizeMeasuredRef.current = true;
-    const w = Math.max(320, r.width), h = Math.max(360, r.height);
-    setSize((sz) => (sz.w === w && sz.h === h ? sz : { w, h, rawW: r.width, rawH: r.height }));
+    const { w, h } = canvasBox(r);
+    setSize((sz) => nextCanvasSize(sz, r));
     const ticket = framingGate.current.framingTicket();
     const verdict = framingGate.current.mayFrame(ticket, { visible: true, measured: true });
     if (!verdict.ok) { viewRecRef.current?.noteEvent("frame:suppressed", verdict.why); return; }
@@ -6315,7 +6314,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const r = el ? el.getBoundingClientRect() : null;
       if (r && r.width > 1 && r.height > 1) {
         sizeMeasuredRef.current = true;
-        fitRef.current({ w: Math.max(320, r.width), h: Math.max(360, r.height) });
+        fitRef.current(canvasBox(r));
       }
       if (revealReasonRef.current) return;   // the late framing above succeeded — not a rescue
       revealReasonRef.current = "ceiling";
@@ -6453,7 +6452,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
          this framing was requested?), which is the check that actually matters and is untouched. */
       const verdict = framingGate.current.mayFrame(fitReq.ticket, { visible: true, measured: true });
       if (!verdict.ok) { viewRecRef.current?.noteEvent("frame:suppressed", verdict.why); return true; }
-      fit({ w: Math.max(320, r.width), h: Math.max(360, r.height) });   // the MEASURED box, never the placeholder
+      fit(canvasBox(r));   // the MEASURED box, never the placeholder
       return true;
     };
     const stop = () => {
@@ -6751,8 +6750,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // offX pan-compensation below, so the drawing neither squishes nor jumps. Same clamp as the
     // ResizeObserver; the functional bail keeps steady-state re-runs a no-op (VIEWPORT-STABLE (a):
     // measure the real edge, fold the delta in the same frame — the panel-open twin of the B837 pan).
-    const w = Math.max(320, r.width), h = Math.max(360, r.height);
-    setSize((s) => (s.w === w && s.h === h ? s : { w, h, rawW: r.width, rawH: r.height }));
+    setSize((s) => nextCanvasSize(s, r));
     // NEW-1/B754752 — the bottom-center canvas toast (flashWarn) centers on the DRAWING, not the
     // window. `r.left + r.width/2` is the canvas's real horizontal center in viewport px — a docked
     // left-rail panel narrows `r` and this follows it, so the toast can never land on a docked
@@ -9582,7 +9580,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const bw = Math.max(b.x1 - b.x0, 10), bh = Math.max(b.y1 - b.y0, 10);
     const minX = b.x0 - bw * marginFrac, maxX = b.x1 + bw * marginFrac;
     const minY = b.y0 - bh * marginFrac, maxY = b.y1 + bh * marginFrac;
-    const ebw = maxX - minX, ebh = maxY - minY, pad = 40;
+    const ebw = maxX - minX, ebh = maxY - minY, pad = framePad(size.w, size.h, 40);
     const ppf = Math.max(0.02, Math.min(8, Math.min((size.w - pad * 2) / ebw, (size.h - pad * 2) / ebh)));
     setView({ ppf, offX: pad - minX * ppf + (size.w - pad * 2 - ebw * ppf) / 2, offY: pad - minY * ppf + (size.h - pad * 2 - ebh * ppf) / 2 });
     const selectable = list.filter((m) => m.kind === "el" || m.kind === "markup" || m.kind === "callout" || m.kind === "parcel");
