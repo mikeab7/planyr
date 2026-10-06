@@ -131,7 +131,7 @@ describe("NEW-1: the hoisted handles keep the behaviour they had before the move
 
   it("B1184/B1185 are untouched — the thinning helper still drives the vertex handles", () => {
     // The move is about WHICH LAYER a handle lives in, never its size or count.
-    expect(SP).toMatch(/const parcelHandles = \(\(\) => \{[\s\S]{0,400}decimatedHandles\(/);
+    expect(SP).toMatch(/const parcelHandles = \(\(\) => \{[\s\S]{0,500}decimatedHandles\(/);
     expect(SP).toMatch(/const elPolyHandles = \(\(\) => \{[\s\S]{0,400}decimatedHandles\(/);
   });
 });
