@@ -1,0 +1,36 @@
+<!doctype html>
+<!-- NEW-1 (one overlay engine) — pixel-parity probe for the TWO PDF rasterisers the engine now routes
+     through one page→canvas step: the Map/Comps+OCR path (pdfRaster.renderPdfPageToImageData) and the
+     Site-tab canvas path (overlayPdf.rasterizePage, with and without the white knockout). Hashes the
+     real pixels for the four committed sample sheets; ui-audit/verify-overlay-raster-parity.mjs runs
+     this against a BEFORE tree and an AFTER tree and requires identical hashes. -->
+<html><head><meta charset="utf-8" /><title>overlay raster parity</title></head><body>
+<script type="module">
+import { renderPdfPageToImageData } from "/src/shared/files/pdfRaster.js";
+import { loadPdf } from "/src/workspaces/doc-review/lib/pdf.js";
+import { rasterizePage } from "/src/workspaces/site-planner/lib/overlayPdf.js";
+
+const BASE = "/test/fixtures/site-plan-crop";
+const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+const sha = async (bytes) => hex(await crypto.subtle.digest("SHA-256", bytes));
+const bytesOf = async (n) => (await (await fetch(`${BASE}/${n}`)).arrayBuffer());
+
+window.runRasterParity = async function () {
+  const out = {};
+  for (const name of ["broker-flyer.pdf", "e-size-title-block.pdf", "rotated-landscape.pdf"]) {
+    try {
+      const r = await renderPdfPageToImageData((await bytesOf(name)).slice(0), 1, { targetDpi: 72, maxLongEdgePx: 3000 });
+      out[`${name} · comps/OCR`] = { w: r.imageData.width, h: r.imageData.height, widthPt: r.widthPt, heightPt: r.heightPt, sha: await sha(r.imageData.data) };
+    } catch (e) { out[`${name} · comps/OCR`] = { error: String(e) }; }
+    for (const knockout of [true, false]) {
+      try {
+        const pdf = await loadPdf((await bytesOf(name)).slice(0));
+        const r = await rasterizePage(pdf, 1, { knockout });
+        out[`${name} · site tab · knockout=${knockout}`] = { imgW: r.imgW, imgH: r.imgH, scale: r.scale, sha: await sha(new TextEncoder().encode(r.src)) };
+        try { pdf.destroy(); } catch (_) {}
+      } catch (e) { out[`${name} · site tab · knockout=${knockout}`] = { error: String(e) }; }
+    }
+  }
+  return out;
+};
+</script></body></html>

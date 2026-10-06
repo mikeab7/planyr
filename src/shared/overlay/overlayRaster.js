@@ -1,4 +1,4 @@
-/* overlayRasterSize — pure sizing math for the site-plan-overlay raster (B972225 NEW-5).
+/* overlayRaster — (was overlayRasterSize.js) pure sizing + encoding math for the site-plan-overlay raster (B972225 NEW-5).
  *
  * THE DECISION (measured on the owner's real C5IP_Airtex_BldgA_PropertyFlyer_Rd5.pdf, see
  * scripts/_tmp_measure_compress.mjs's numbers on the item): rasterizing a PDF page is the
@@ -41,3 +41,25 @@ export const OVERLAY_RASTER_MAX_LONG_EDGE_PX = 4000;
 export const OVERLAY_RASTER_JPEG_QUALITY = 0.85;
 export const OVERLAY_THUMB_MAX_LONG_EDGE_PX = 320;
 export const OVERLAY_THUMB_JPEG_QUALITY = 0.7;
+
+/** THE one "paint a PDF page onto a fresh canvas at a device `scale`" step — used by the Map/Comps
+ * + OCR rasteriser (`shared/files/pdfRaster.js`) AND the Site tab's canvas rasteriser
+ * (`site-planner/lib/overlayPdf.js`), which previously each carried their own copy (NEW-1).
+ * Takes an already-open pdf.js PAGE (so this module stays pdf.js-free and costs the lazy chunks
+ * nothing). The two callers differ only in policy, passed as options — never by forking the step:
+ *   dims       "round" (Comps/OCR) | "floor" (Site tab) — how the viewport's fractional size becomes px
+ *   background a CSS colour painted first (Comps/OCR: a white page) | null (Site tab: transparent, so
+ *              the knockout pass can key the paper out)
+ *   readback   true when the caller will getImageData the whole canvas (CPU-backed context hint)
+ * Returns { canvas, ctx, viewport }. The caller owns (and releases) the canvas. */
+export async function renderPageToCanvas(page, scale, { dims = "round", background = null, readback = false } = {}) {
+  const viewport = page.getViewport({ scale });
+  const px = dims === "floor" ? Math.floor : Math.round;
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, px(viewport.width));
+  canvas.height = Math.max(1, px(viewport.height));
+  const ctx = readback ? canvas.getContext("2d", { willReadFrequently: true }) : canvas.getContext("2d");
+  if (background) { ctx.fillStyle = background; ctx.fillRect(0, 0, canvas.width, canvas.height); }
+  await page.render({ canvasContext: ctx, viewport, canvas }).promise;
+  return { canvas, ctx, viewport };
+}

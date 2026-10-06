@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   detectSheet, parseScaleNote, ftPerPointForScale, scaleForFtPerPoint, COMMON_SCALES, chooseOverlayScale,
   parseDistanceInput, feetPerInchFromPair, SCALE_PRESETS, feetPerInchForPreset, matchScalePreset,
-} from "../src/workspaces/site-planner/lib/overlayScale.js";
+} from "../src/shared/overlay/overlayScale.js";
 
 const IN = 72; // points per inch
 

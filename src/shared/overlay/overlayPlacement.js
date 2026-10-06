@@ -1,4 +1,16 @@
-/* Pure georeferencing math for an uploaded site-plan overlay (B848496 NEW-2 — the owner
+/* THE ONE PLACEMENT ENGINE for a site-plan overlay — both surfaces call this file (NEW-1,
+ * one-overlay-engine; owner rule 2026-09-23, "the same FEATURE must not be written twice").
+ *   • GEO half   — placement {centerLat, centerLon, ftPerPx, rotationDeg} ↔ lat/lon (State Plane,
+ *                  convergence-aware). Used by the Map/Comps surface (Leaflet, `site_plan_overlays`).
+ *   • CANVAS half — overlay record {x, y, imgW, imgH, ftPerPx[, ftPerPxY], rotation} in the Site
+ *                  planner's own feet frame (the SVG canvas, `sheetOverlays`). Used by SitePlanner.jsx.
+ * Storage stays split by owner decision; only the MATH is shared, and the two halves bottom out in
+ * the SAME helpers below (`rotateOffset`, `normalizeDeg`, and shared/geometry/similarityTransform.js
+ * for every fit) — there is no second copy of rotate / scale / fit anywhere. This file merges the former
+ * `shared/sitePlans/lib/overlayGeoref.js` (geo) and `site-planner/lib/overlayAlign.js` (canvas).
+ *
+ * ---- former overlayGeoref.js header ----
+ * Pure georeferencing math for an uploaded site-plan overlay (B848496 NEW-2 — the owner
  * rejected the original 2-point control-point wizard: "just mimic the way it works on the
  * site planner module for references" — i.e. the Site Planner's own on-canvas reference-image
  * tool (SitePlanner.jsx `sheetOverlays` + its move/scale/rotate handles), which places an
@@ -33,8 +45,13 @@
  * hardcoded projection, UNCHANGED from today, for anywhere neither zone covers (Dallas
  * included) rather than inventing an unverified new zone's survey constants from memory.
  */
-import { projectToGrid, gridToProject } from "../../coordinates/index.js";
-import { resolveZone, projectToZone, zoneToProject, gridConvergenceDeg } from "../../coordinates/statePlane.js";
+import { projectToGrid, gridToProject } from "../coordinates/index.js";
+import { resolveZone, projectToZone, zoneToProject, gridConvergenceDeg } from "../coordinates/statePlane.js";
+import { solveSimilarityLSQ, similarityFromTwoPoints } from "../geometry/similarityTransform.js";
+
+/** Degrees folded into [0, 360) — the ONE rotation normaliser (a drag, an align and a re-anchor all
+ * land on the same stored range). */
+export function normalizeDeg(deg) { return ((deg % 360) + 360) % 360; }
 
 /** The projector pair to use for a placement anchored at (lat, lon): the resolved State Plane
  * zone's own math when this app has one modeled for that point, else the legacy hardcoded
@@ -60,7 +77,7 @@ function projectorsFor(lat, lon) {
  * aerial's own road grid at rest, no drag involved). A user-facing `rotationDeg` of 0 has to mean
  * "this overlay's top points at TRUE north on screen" — that's what the rotate handle's own
  * screen-pixel angle already assumes (overlayPlacementHandles.js) — so the GRID-space rotation
- * actually fed into `rotatedOffset` has to be `rotationDeg` compensated by the local convergence,
+ * actually fed into `rotateOffset` has to be `rotationDeg` compensated by the local convergence,
  * not `rotationDeg` verbatim. Applied identically in the forward direction (this function,
  * `imagePointToLatLon`) and inverted the same way the user's own `rotationDeg` already was
  * (`latLonToImagePoint`), so a round trip through all three still agrees exactly.
@@ -93,7 +110,7 @@ export function validPlacement(p) {
 // rotates CLOCKWISE as drawn on screen — exactly how the Site Planner's SVG `rotate(deg)` on
 // its own reference-image handle already behaves, so a user familiar with that control feels
 // the same rotation sense here.
-function rotatedOffset(dx, dy, rotationDeg) {
+export function rotateOffset(dx, dy, rotationDeg) {
   const rad = ((rotationDeg || 0) * Math.PI) / 180;
   const cos = Math.cos(rad), sin = Math.sin(rad);
   return { rx: dx * cos - dy * sin, ry: dx * sin + dy * cos };
@@ -108,7 +125,7 @@ export function overlayCornersFromPlacement(placement, imgW, imgH) {
   const halfW = (imgW * placement.ftPerPx) / 2, halfH = (imgH * placement.ftPerPx) / 2;
   const rotDeg = gridRotationDeg(placement);
   const at = (dx, dy) => {
-    const { rx, ry } = rotatedOffset(dx, dy, rotDeg);
+    const { rx, ry } = rotateOffset(dx, dy, rotDeg);
     // grid y is north-positive; a "down" (+y) image-local offset is south, so flip it going in.
     return toProject({ x: center.x + rx, y: center.y - ry });
   };
@@ -132,7 +149,7 @@ export function latLonToImagePoint(placement, imgW, imgH, lat, lon) {
   const p = toGrid(lat, lon);
   const rx = p.x - center.x, ry = -(p.y - center.y); // grid offset -> image-local (y-down) rotated frame
   // Invert the rotation: [dx,dy] = R(-gridRotationDeg) * [rx,ry].
-  const { rx: dx, ry: dy } = rotatedOffset(rx, ry, -gridRotationDeg(placement));
+  const { rx: dx, ry: dy } = rotateOffset(rx, ry, -gridRotationDeg(placement));
   const halfW = (imgW * placement.ftPerPx) / 2, halfH = (imgH * placement.ftPerPx) / 2;
   return { x: (dx + halfW) / placement.ftPerPx, y: (dy + halfH) / placement.ftPerPx };
 }
@@ -150,7 +167,7 @@ export function imagePointToLatLon(placement, imgW, imgH, x, y) {
   const center = toGrid(placement.centerLat, placement.centerLon);
   const halfW = (imgW * placement.ftPerPx) / 2, halfH = (imgH * placement.ftPerPx) / 2;
   const dx = x * placement.ftPerPx - halfW, dy = y * placement.ftPerPx - halfH;
-  const { rx, ry } = rotatedOffset(dx, dy, gridRotationDeg(placement));
+  const { rx, ry } = rotateOffset(dx, dy, gridRotationDeg(placement));
   return toProject({ x: center.x + rx, y: center.y - ry });
 }
 
@@ -203,5 +220,64 @@ export function scalePlacement(placement, ratio) {
  * angle (atan2, degrees) from grab to now. Mirrors the Site Planner's own `ovRotate` handler
  * exactly. */
 export function rotatePlacement(placement, rot0, deltaDeg) {
-  return { ...placement, rotationDeg: (((rot0 + deltaDeg) % 360) + 360) % 360 };
+  return { ...placement, rotationDeg: normalizeDeg(rot0 + deltaDeg) };
+}
+
+/* =====================================================================================
+ * CANVAS half — the Site planner's own feet frame (formerly overlayAlign.js, B73 fallbacks).
+ * Pure + browser-free. All points are world feet {x,y}. The overlay's image→world placement
+ * (mirrored from the SVG render) is: translate an image point by ftPerPx out of the top-left
+ * (x,y), then rotate the whole sheet about its center by `rotation`°. `imagePointToWorld`
+ * reproduces that exactly so the alignment can be checked end-to-end.
+ * ===================================================================================== */
+
+// B848736 — an overlay's Y-axis scale is USUALLY the same as its X (ftPerPx); a map-captured
+// reference is the one case it isn't (aerialPlacement's ftPerPxY — Web Mercator's non-square
+// pixels at scale). Every caller here falls back to ftPerPx when ftPerPxY is absent.
+const scaleY = (o) => o.ftPerPxY || o.ftPerPx;
+const centerOf = (o) => ({ x: o.x + (o.imgW * o.ftPerPx) / 2, y: o.y + (o.imgH * scaleY(o)) / 2 });
+// Top-left {x,y} that puts the sheet's center at C (given size + ftPerPx/ftPerPxY).
+const tlFromCenter = (C, imgW, imgH, ftPerPx, ftPerPxY = ftPerPx) => ({ x: C.x - (imgW * ftPerPx) / 2, y: C.y - (imgH * ftPerPxY) / 2 });
+
+/* Map an image-space point (px, in [0..imgW]×[0..imgH]) to world feet under the
+ * overlay's current placement. */
+export function imagePointToWorld(o, ix, iy) {
+  const C = centerOf(o);
+  const pre = { x: o.x + ix * o.ftPerPx, y: o.y + iy * scaleY(o) };
+  const { rx, ry } = rotateOffset(pre.x - C.x, pre.y - C.y, o.rotation);
+  return { x: C.x + rx, y: C.y + ry };
+}
+
+/* Uniform-scale an overlay by factor k about a fixed world point p0 (rotation kept) —
+ * the trace-a-known-dimension result. Returns changed fields {ftPerPx,x,y} or null. */
+export function scaleOverlayAbout(o, p0, k) {
+  if (!(k > 0) || !isFinite(k)) return null;
+  const ftPerPx = o.ftPerPx * k;
+  const C = centerOf(o);
+  const C2 = { x: p0.x + (C.x - p0.x) * k, y: p0.y + (C.y - p0.y) * k };
+  return { ftPerPx, ...tlFromCenter(C2, o.imgW, o.imgH, ftPerPx) };
+}
+
+/* The similarity fits are shared/geometry/similarityTransform.js — surfaced here under the names
+ * both overlay surfaces have always imported. (Aliases of the ONE implementation, not copies.) */
+export { solveSimilarityLSQ };
+export const similarityTransform = similarityFromTwoPoints;
+
+/* Apply a similarity transform S (from similarityTransform / solveSimilarityLSQ) to an
+ * overlay: scales ftPerPx, adds rotation, repositions via the center. Returns changed
+ * fields {ftPerPx,rotation,x,y} or null. */
+export function applySimilarityToOverlay(o, S) {
+  if (!S) return null;
+  const ftPerPx = o.ftPerPx * S.scale;
+  const C2 = S.apply(centerOf(o));
+  return {
+    ftPerPx,
+    rotation: normalizeDeg((o.rotation || 0) + S.rotDeg),
+    ...tlFromCenter(C2, o.imgW, o.imgH, ftPerPx),
+  };
+}
+
+/* 2-point alignment: lands the two drawing points (p1,p2) on the two map points (q1,q2). */
+export function alignOverlaySimilarity(o, p1, p2, q1, q2) {
+  return applySimilarityToOverlay(o, similarityFromTwoPoints(p1, p2, q1, q2));
 }

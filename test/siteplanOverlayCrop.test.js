@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { rowToOverlay, overlayToRow } from "../src/shared/sitePlans/lib/sitePlanOverlays.js";
-import { imagePointToLatLon, overlayCornersFromPlacement } from "../src/shared/sitePlans/lib/overlayGeoref.js";
-import { clampCropRect, normalizeCrop } from "../src/workspaces/site-planner/lib/overlayCrop.js";
+import { imagePointToLatLon, overlayCornersFromPlacement } from "../src/shared/overlay/overlayPlacement.js";
+import { clampCropRect, normalizeCrop } from "../src/shared/overlay/overlayCrop.js";
 
 // B1134754 NEW-21 — a placement near Airtex (north Houston), well off the TX South Central
 // central meridian, so any accidental coupling between crop and the placement/rotation math

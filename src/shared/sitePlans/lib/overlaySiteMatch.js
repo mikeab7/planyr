@@ -12,7 +12,7 @@
  * THE RULE, chosen and justified (not silently re-derived from the comp radius): does an existing
  * site's own recorded point fall ON THE GROUND THIS PLAN ACTUALLY DRAWS — inside the plan's own
  * placed rectangle (center/ft_per_px/rotation_deg — the exact same direct placement the map
- * renders it at, reusing `latLonToImagePoint` from overlayGeoref.js rather than a second
+ * renders it at, reusing `latLonToImagePoint` from overlayPlacement.js rather than a second
  * projection), padded by a small FIXED buffer in FEET (SITE_MATCH_BUFFER_FT), never a fraction of
  * the plan's own size. A fixed buffer is the point: a bigger plan's footprint reaches further
  * because it genuinely covers more ground, not because of a size-scaled fudge factor that would
@@ -31,7 +31,7 @@
  * "should I act on it."
  */
 import { normalizeProjectName } from "../../projects/projectModel.js";
-import { latLonToImagePoint } from "./overlayGeoref.js";
+import { latLonToImagePoint } from "../../overlay/overlayPlacement.js";
 
 export const SITE_MATCH_BUFFER_FT = 300;
 
