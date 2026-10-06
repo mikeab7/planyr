@@ -573,7 +573,7 @@ describe("Parcel split lineage (B651)", () => {
         { id: "p1", points: [] }, kid("a", "p1"), kid("b", "p1"), kid("c", "p1"),
       ]);
       expect(info.get("p1").name).toBe("Parcel 1");
-      expect(["a", "b", "c"].map((k) => info.get(k).name)).toEqual(["Parcel 1A", "Parcel 1B", "Parcel 1C"]);
+      expect(["a", "b", "c"].map((k) => info.get(k).name)).toEqual(["Parcel 1A", "Parcel 1B", "Parcel 1C"]); // legacy/unstamped derivation is deliberately unchanged
     });
 
     it("splitting a piece again alternates: 1A → 1A1 / 1A2, and 1A1 → 1A1A", () => {
@@ -648,7 +648,7 @@ describe("Parcel split lineage (B651)", () => {
 
       it("pieces keep 1A / 1B / 1C with the parent gone", () => {
         const plan = cut([{ id: "p1", points: RING }], "p1", 3);
-        expect(names(plan).sort()).toEqual(["Parcel 1A", "Parcel 1B", "Parcel 1C"]);
+        expect(names(plan).sort()).toEqual(["Parcel 1 · A", "Parcel 1 · B", "Parcel 1 · C"]);
       });
 
       it("RED without the stamped DEPTH: re-splitting 1A gives 1A1 / 1A2, never 1AA / 1AB", () => {
@@ -657,18 +657,18 @@ describe("Parcel split lineage (B651)", () => {
          * past-Z carry. Two different lots, one name, on one plan. */
         let plan = cut([{ id: "p1", points: RING }], "p1", 2);
         plan = cut(plan, "p1_0", 2);
-        expect(names(plan).sort()).toEqual(["Parcel 1A1", "Parcel 1A2", "Parcel 1B"]);
+        expect(names(plan).sort()).toEqual(["Parcel 1 · A1", "Parcel 1 · A2", "Parcel 1 · B"]);
         plan = cut(plan, "p1_0_0", 2);           // and it keeps alternating
-        expect(names(plan)).toContain("Parcel 1A1A");
+        expect(names(plan)).toContain("Parcel 1 · A1A");
       });
 
       it("the 27th sibling and a re-split can never draw the same name", () => {
         const wide = cut([{ id: "w", points: RING }], "w", 28);
         const twentySeventh = parcelDisplayInfo(wide).get("w_26").name;
-        expect(twentySeventh).toBe("Parcel 1AA");
+        expect(twentySeventh).toBe("Parcel 1 · AA");
         let deep = cut([{ id: "w", points: RING }], "w", 1);
         deep = cut(deep, "w_0", 2);
-        expect(parcelDisplayInfo(deep).get("w_0_0").name).toBe("Parcel 1A1");
+        expect(parcelDisplayInfo(deep).get("w_0_0").name).toBe("Parcel 1 · A1");
         expect(parcelDisplayInfo(deep).get("w_0_0").name).not.toBe(twentySeventh);
       });
 
@@ -685,7 +685,7 @@ describe("Parcel split lineage (B651)", () => {
         plan = plan.map((p) => (p.id === "p1_0" ? { ...p, label: "The Wooded Half" } : p));
         expect(parcelDisplayInfo(plan).get("p1_0").name).toBe("The Wooded Half");
         plan = cut(plan, "p1_0", 2);
-        expect(names(plan)).toContain("The Wooded Half 1");
+        expect(names(plan)).toContain("The Wooded Half · A");
       });
     });
 

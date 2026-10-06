@@ -168,6 +168,7 @@ export default function PriorityToolbar({ name, items, gap = TOOLBAR_GAP, moreLa
       data-priority-toolbar={name}
       data-chrome-toolbar=""
       data-all-ids={allIds.join(",")}
+      data-ghost-ids={norm.filter((it) => it.ghost).map((it) => it.id).join(",")} /* a ghost is absent from the bar AND the menu by contract (state-dependent: nothing to show yet) — the width sweep must not call it dropped */
       data-menu-ids={menuIds.join(",")}
       data-icon-ids={plan ? plan.iconIds.join(",") : ""}
       style={{ position: "relative", display: "flex", alignItems: align, gap, flex: "0 0 auto", minWidth: 0, ...style }}
