@@ -17,7 +17,7 @@
 // fixed: catalog -> pages -> page -> {image XObject, content stream} -> info. The image
 // is embedded with /DCTDecode, which stores the JPEG bytes verbatim (no re-encode).
 
-import { annotationDict, BASE_FONTS } from "./pdfAnnotations.js";
+import { annotationDict, BASE_FONTS, DA_FONT_NAMES } from "./pdfAnnotations.js";
 
 const PT_PER_IN = 72; // PDF user-space unit = 1/72 inch
 
@@ -66,6 +66,7 @@ export function jpegToPdf({ jpeg, pixelW, pixelH, widthIn, heightIn, title = "",
   const needFont = (k) => { if (!fontNum[k]) fontNum[k] = nextNum++; };
   const hasFreeText = annots.some((a) => a.subtype === "FreeText");
   if (hasFreeText) needFont("F1"); // the /Helv the FreeText /DA names
+  for (const a of annots) if (a.subtype === "FreeText") needFont(a.DA.font); // …and the bold/oblique face a /DA may name
   for (const a of annots) for (const k of a.ap.fonts) needFont(k);
   for (const a of annots) for (const ps of a.ap.patternStreams) for (const k of ps.fonts) needFont(k);
   const annotObjs = annots.map((a) => ({
@@ -77,7 +78,7 @@ export function jpegToPdf({ jpeg, pixelW, pixelH, widthIn, heightIn, title = "",
   const gsRes = (gs) => (gs.length ? `/ExtGState << ${gs.map((g) => `/${g.name} << /Type /ExtGState /ca ${g.ca} /CA ${g.CA} >>`).join(" ")} >>` : "");
 
   const dicts = {
-    1: `<< /Type /Catalog /Pages 2 0 R${hasFreeText ? ` /AcroForm << /Fields [] /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv ${fontNum.F1} 0 R >> >> >>` : ""} >>`,
+    1: `<< /Type /Catalog /Pages 2 0 R${hasFreeText ? ` /AcroForm << /Fields [] /DA (/Helv 0 Tf 0 g) /DR << /Font << ${[...new Set(["F1", ...annots.filter((a) => a.subtype === "FreeText").map((a) => a.DA.font)])].map((k) => `/${DA_FONT_NAMES[k]} ${fontNum[k]} 0 R`).join(" ")} >> >> >>` : ""} >>`,
     2: `<< /Type /Pages /Kids [3 0 R] /Count 1 >>`,
     3: `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageW} ${pageH}]`
       + ` /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R${annotsEntry} >>`,
