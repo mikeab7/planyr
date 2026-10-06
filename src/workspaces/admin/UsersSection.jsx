@@ -114,10 +114,42 @@ function SignupLog() {
   );
 }
 
+/* Column plan (laptop widths must NEVER scroll sideways — owner report 2026-10-06): fixed layout, percentages sum to 100,
+ * the account's e-mail sits UNDER its name, the status chip is the 2nd column, and the open-detail ("compact") view drops
+ * the columns the panel already shows. `abbr` headers carry the full word in a tooltip. */
 const COLS = [
-  ["name", "Name"], ["email", "Email"], ["org", "Company / team"], ["createdAt", "Signed up"], ["lastSignIn", "Last sign-in"], ["lastActivity", "Last activity"],
-  ["projects", "Projects", true], ["plans", "Plans", true], ["files", "Files", true], ["reviews", "Reviews", true], ["schedules", "Schedules", true], ["status", "Status"],
+  { k: "name", label: "Account", w: 21, cw: 30 },
+  { k: "status", label: "Status", w: 8, cw: 14 },
+  { k: "org", label: "Company / team", w: 12, compact: false },
+  { k: "createdAt", label: "Signed up", w: 9, cw: 16 },
+  { k: "lastActivity", label: "Last activity", w: 10.5, cw: 17 },
+  { k: "lastSignIn", label: "Last sign-in", w: 10.5, compact: false },
+  { k: "projects", label: "Proj.", full: "Projects", num: true, w: 5.8, cw: 11 },
+  { k: "plans", label: "Plans", num: true, w: 5.8, cw: 12 },
+  { k: "files", label: "Files", num: true, w: 5.8, compact: false },
+  { k: "reviews", label: "Rev.", full: "Reviews", num: true, w: 5.8, compact: false },
+  { k: "schedules", label: "Sched.", full: "Schedules", num: true, w: 5.8, compact: false },
 ];
+const CELL = { padding: "0 8px" };
+const HEAD = { ...CELL, overflow: "hidden", textOverflow: "ellipsis" }; // a header that cannot fit clips; it never widens the table
+
+function UserCell({ c, u }) {
+  switch (c.k) {
+    case "name":
+      return (
+        <Td style={{ ...CELL, paddingTop: 4, paddingBottom: 4 }}>
+          <Clip max="100%" title={u.name ? `${u.name} <${u.email}>` : u.email}><span style={{ fontWeight: 600 }}>{u.name || u.email}</span>{u.internal && <> <Chip tone="info">Internal</Chip></>}</Clip>
+          {u.name && <div style={{ color: "var(--text-secondary)", fontSize: FONT_SIZE.label }}><Clip max="100%">{u.email}</Clip></div>}
+        </Td>
+      );
+    case "status": return <Td style={CELL}><StatusChip status={u.status} /></Td>;
+    case "org": return <Td style={CELL}><Clip max="100%">{teamLabel(u) || "—"}</Clip></Td>;
+    case "createdAt": return <Td style={CELL}><span title={exactTime(u.createdAt)} style={{ whiteSpace: "nowrap" }}>{fmtDate(u.createdAt)}</span></Td>;
+    case "lastSignIn": return <Td style={CELL}><RelTime iso={u.lastSignIn} empty="never" /></Td>;
+    case "lastActivity": return <Td style={CELL}><RelTime iso={u.lastActivity} empty="none" /></Td>;
+    default: return <Td num style={CELL}>{u[c.k]}</Td>;
+  }
+}
 
 export default function UsersSection({ go }) {
   const d = useAdminData();
@@ -130,6 +162,7 @@ export default function UsersSection({ go }) {
   const counts = statusCounts(base);
   const rows = useMemo(() => sortUsers(status ? base.filter((u) => u.status === status) : base, sort.key, sort.dir), [base, status, sort]);
   const selected = sel && d.users.list.find((u) => u.id === sel);
+  const cols = selected ? COLS.filter((c) => c.compact !== false) : COLS;
   const hiddenCount = d.users.list.length - filterUsers(d.users.list, { hideInternal: true }).length;
   const goReset = (id) => goAdminSection("password-reset", { user: id });
   return (
@@ -157,21 +190,15 @@ export default function UsersSection({ go }) {
       {!d.users.loading && !d.users.error && rows.length > 0 && (
         <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-start" }}>
           <div style={{ flex: "2 1 520px", minWidth: 0 }}>
-          <AdminTable maxHeight={560} minWidth={selected ? 0 : 1000}>
+          <AdminTable maxHeight={560} fixed narrowMin={980}>
+            <colgroup>{cols.map((c) => <col key={c.k} style={{ width: `${selected ? c.cw : c.w}%` }} />)}</colgroup>
             <thead>
-              <tr>{COLS.map(([k, label, num]) => <Th key={k} sortKey={k} sort={sort} num={num} onSort={(key) => setSort((s) => nextSort(s, key))}>{label}</Th>)}</tr>
+              <tr>{cols.map((c) => <Th key={c.k} sortKey={c.k} sort={sort} num={c.num} style={HEAD} title={c.full} onSort={(key) => setSort((s) => nextSort(s, key))}>{c.label}</Th>)}</tr>
             </thead>
             <tbody>
               {rows.map((u) => (
                 <tr key={u.id} onClick={() => setSel(u.id === sel ? null : u.id)} data-testid="user-row" style={{ cursor: "pointer", background: u.id === sel ? "var(--surface-page)" : undefined }}>
-                  <Td style={{ fontWeight: 600 }}><Clip max={170}>{u.name || "—"}</Clip></Td>
-                  <Td><Clip max={220}>{u.email}</Clip>{u.internal && <> <Chip tone="info">Internal</Chip></>}</Td>
-                  <Td><Clip max={180}>{teamLabel(u) || "—"}</Clip></Td>
-                  <Td style={{ whiteSpace: "nowrap" }}><span title={exactTime(u.createdAt)}>{fmtDate(u.createdAt)}</span></Td>
-                  <Td><RelTime iso={u.lastSignIn} empty="never" /></Td>
-                  <Td><RelTime iso={u.lastActivity} empty="none" /></Td>
-                  <Td num>{u.projects}</Td><Td num>{u.plans}</Td><Td num>{u.files}</Td><Td num>{u.reviews}</Td><Td num>{u.schedules}</Td>
-                  <Td><StatusChip status={u.status} /></Td>
+                  {cols.map((c) => <UserCell key={c.k} c={c} u={u} />)}
                 </tr>
               ))}
             </tbody>

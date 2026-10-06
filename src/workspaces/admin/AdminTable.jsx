@@ -14,10 +14,13 @@ export const th = {
 export const td = { padding: "0 12px", height: 36, verticalAlign: "middle", borderTop: "1px solid var(--border-default)", color: "var(--text-primary)" };
 
 /** Scroll container with a capped height, so the sticky header has something to stick to. */
-export function AdminTable({ children, maxHeight = 520, minWidth }) {
+export function AdminTable({ children, maxHeight = 520, minWidth, fixed = false, narrowMin }) {
+  // `fixed` = table-layout:fixed (the columns share the card's width, cells truncate with a tooltip) so a wide
+  // table never scrolls sideways at laptop widths; `narrowMin` re-imposes a minimum width ONLY below tablet width,
+  // where sideways scroll inside the card is the accepted fallback (see .admin-tbl-narrow in AdminApp's style block).
   return (
-    <div style={{ overflow: "auto", maxHeight, border: "1px solid var(--border-default)", borderRadius: RADIUS.md, background: "var(--surface-raised)" }}>
-      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: FONT_SIZE.control, minWidth }}>{children}</table>
+    <div className={narrowMin ? "admin-tbl-narrow" : undefined} style={{ overflow: "auto", maxHeight, border: "1px solid var(--border-default)", borderRadius: RADIUS.md, background: "var(--surface-raised)", "--tbl-min": narrowMin ? `${narrowMin}px` : undefined }}>
+      <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: FONT_SIZE.control, minWidth, tableLayout: fixed ? "fixed" : undefined }}>{children}</table>
     </div>
   );
 }
@@ -33,7 +36,7 @@ export function Th({ children, num, sortKey, sort, onSort, style, ...rest }) {
         type="button" onClick={() => onSort(sortKey)}
         style={{ all: "unset", cursor: "pointer", display: "inline-flex", gap: 4, alignItems: "center", flexDirection: num ? "row-reverse" : "row", color: active ? "var(--text-primary)" : "inherit" }}
       >
-        {children}<span aria-hidden style={{ fontSize: FONT_SIZE.micro, lineHeight: 1, display: "inline-block", minWidth: 8 }}>{active ? (sort.dir === "asc" ? "▲" : "▼") : ""}</span>
+        {children}{active && <span aria-hidden style={{ fontSize: FONT_SIZE.micro, lineHeight: 1 }}>{sort.dir === "asc" ? "▲" : "▼"}</span>}
       </button>
     </th>
   );
@@ -44,8 +47,8 @@ export function Td({ children, num, style, ...rest }) {
 }
 
 /** Truncating cell text that keeps the full value on hover. */
-export function Clip({ children, max = 280 }) {
-  const title = typeof children === "string" ? children : undefined;
+export function Clip({ children, max = 280, title: titleProp }) {
+  const title = titleProp ?? (typeof children === "string" ? children : undefined);
   return <span title={title} style={{ display: "block", maxWidth: max, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{children}</span>;
 }
 
