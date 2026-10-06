@@ -677,6 +677,20 @@ export function createElementSync(opts = {}) {
           continue;
         }
         const json = stableStringify(el);
+        /* ⛔ AUTH-SWEEP 2 / V182 step 1 — an UNDO OF THE USER'S OWN DELETE. The canvas holds the element again
+         * while the delete we authored is still ours to cancel or already on the wire. Before this, the diff saw
+         * "shadow json === canvas json" and produced nothing, so the buffered delete was still flushed (or the
+         * in-flight one landed with nothing following it): the screen read restored + Synced while the server
+         * kept the tombstone, and a reload dropped the element. (Invariant 4's "never resurrect a REMOTE
+         * tombstone" is untouched — this only reacts to a delete WE queued/sent.) */
+        if (pend && pend.cls === "delete" && shad.json === json) { dirty.delete(key); continue; } // still buffered → cancel it
+        if (inf && inf.cls === "delete") {                                                          // already on the wire → follow it with a restore
+          if (!pend || pend.cls !== "restore" || stableStringify(pend.el) !== json) {
+            enqueue(key, { kind, id: el.id, cls: "restore", el, z: el.z, direct: true, envelope: envelopeForEnqueue() });
+            sawCreateOrDelete = true;
+          }
+          continue;
+        }
         if (shad.json !== json) {
           // NEW-1 — rows are canonical across a seed. The server already has this element (it has a
           // shadow entry), and NOTHING is pending to explain the difference, so the canvas copy is a
