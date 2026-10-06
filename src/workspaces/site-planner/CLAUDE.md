@@ -275,7 +275,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   (Brookshire–Katy Drainage District) endpoints live in the shared GIS source registry like every
   other source; `detentionRules.js` owns the district-aware `resolveDrainageContext`.
 - Site-plan overlay import (B72/B73/B747/B748/B749): `overlayPdf.js` (PDF+DXF raster, banded
-  white-knockout, zoom-aware re-raster) + `overlayScale.js` (scale/trace math) + `overlayStorage.js`
+  white-knockout, zoom-aware re-raster) + the shared overlay scale/trace math (`src/shared/overlay/`) + `overlayStorage.js`
   **⛔ B251136/B251137 — `chooseOverlayRasterScale` QUANTISES THE RE-RASTER SCALE TO AN OCTAVE
   LADDER AND ROUNDS **UP**, and `SitePlanner.jsx` CACHES the rungs. Read both headers before
   touching either.** Measured on the owner's real Bain overlay (1728 × 2592 pt, both his Bain
@@ -299,7 +299,8 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   issuing a request and the whole path dies silently; its `pdfDeliveryFault` refuses such a run.
   (Storage backup) + `dxf/` (worker parse via `dxf-parser` + entity→SVG render + true-units auto-scale)
   + `convertClient.js` (DWG→DXF through the B238 convert service, gated on `VITE_CONVERT_URL`).
-  **`overlayCrop.js` is the ONE crop model for BOTH overlay systems** (rect | poly, image px);
+  **The ONE overlay engine now lives in `src/shared/overlay/` (NEW-1; see its CLAUDE.md): the crop model (rect | poly, image px) for BOTH overlay systems, the placement math (geo + canvas — rotate/scale/align), and the raster sizing.** Do not add a second copy here.
+  The crop model is shared: (rect | poly, image px);
   the Site tab's "Crop…" (`components/OverlayCropDialog.jsx`, B1838704) reuses the shared
   `ImageCropTool`, clips via `cropClipShapeScreen` → an SVG `<clipPath>` (what the export clone
   carries), and every write goes through `setOverlayCrop` (lock enforced at the write). `crop` is in

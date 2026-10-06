@@ -16,7 +16,7 @@ export const BUCKET = "doc-review-files";
 export const MAX_BYTES = 20 * 1024 * 1024; // a single rasterized page, generous ceiling
 
 // The overlay raster is a resolution-capped JPEG now, not a lossless PNG (B972225 NEW-5 — see
-// shared/sitePlans/lib/overlayRasterSize.js's header for why).
+// shared/overlay/overlayRaster.js's header for why).
 export const overlayRasterKey = (uid, overlayId) => `${uid}/site-plan-overlays/${overlayId}.jpg`;
 
 /** Upload a rasterized page (a resolution-capped JPEG Blob, PDF-sourced or from a plain
