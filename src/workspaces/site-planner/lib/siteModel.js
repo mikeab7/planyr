@@ -1634,8 +1634,12 @@ export function parcelSplitNames(parcels, parentId, count) {
   // LINEAGE depth (its own stamped `splitDepth`, surviving the parent's tombstone), never from
   // `depth` (the walked, display-only value `parcelOutline` indents by — 0 for an orphaned
   // parent, which would restart the alternation and collide with an unrelated sibling's name).
-  const depth = (parent ? parent.lineageDepth : 0) + 1;
-  const sep = (parent && parent.suffixed) || /[0-9]$/.test(base) ? "" : " ";
+  // A name the user typed (not a generated suffix) starts a fresh chain: "Creek Tract" → "Creek Tract · A".
+  const depth = (parent && parent.suffixed ? parent.lineageDepth : 0) + 1;
+  // NEW-1 (Parcels panel redesign): a piece reads "<name> · A" — a root's name, a dot, the letter —
+  // so "Kilgore P." never fuses into "Kilgore P.A". A piece already ending in a generated suffix
+  // ("Kilgore P. · A") takes the next level bare ("Kilgore P. · A1"), as before.
+  const sep = parent && parent.suffixed ? "" : " · ";
   const names = Array.from({ length: Math.max(0, count | 0) }, (_, i) =>
     base + sep + (depth % 2 === 1 ? birthLetter(i) : String(i + 1)));
   return names.map((name) => ({ name, depth }));

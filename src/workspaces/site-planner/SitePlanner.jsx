@@ -489,6 +489,8 @@ import {
  * render immediately; this lazy tier only ENRICHES that line with the regime name and the statute. */
 import { siteState as resolveSiteState } from "./lib/siteRegion.js";
 import { splitPolygonByCut, remapEdgeVector } from "./lib/polygonSplit.js";
+import { planCombine, planSplit, planRestoreCombined, planRestoreSplit, includedAcres, buildParcelRows } from "./lib/parcelOps.js";
+import ParcelsPanel from "./components/ParcelsPanel.jsx";
 import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea, mergeParcelRings } from "./lib/polyClip.js";
 import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom, mapChromeCardStyle } from "./lib/sheetFurniture.js";
 // B765985 — pure, dependency-free (safe on the boot path): the explicit engineering-scale math
@@ -2276,6 +2278,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [measureMode, setMeasureMode] = useState(() => lsGet("measureMode", "line"));
   const [measureMenu, setMeasureMenu] = useState(false);  // Measure ▾ dropdown open
   const [splitPath, setSplitPath] = useState([]);    // vertices of a split cut polyline
+  const [splitTarget, setSplitTarget] = useState(null); // Parcels panel: the parcel a Split was aimed at (null = the bare map tool)
+  const [parcelOpen, setParcelOpen] = useState(null);   // { id, n } — asks the Parcels table to open that parcel's detail card
   // B598 — the Parcel tool now stays active (so several lots draw in a row) with an explicit
   // banner: a Draw/Remove sub-mode + a Done exit. "add" = click to drop boundary points (the
   // original behaviour); "remove" = click an existing parcel to delete it. Reset to "add" on
@@ -8043,118 +8047,59 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * ships and SAYS what it had to account for (a scrap too small to be a parcel, a parent whose
    * own outline self-overlaps).
    */
+  /* ⛔ THE ONE SPLIT (Parcels panel redesign). The map's Split tool (Finish / Enter / double-click)
+   * and the Parcels panel's Split entry points ALL end here — `lib/parcelOps.planSplit` decides,
+   * this applies. Nothing else in this file constructs split pieces. `splitTarget` is the parcel the
+   * panel aimed the cut at ("Splitting Kilgore P."); the bare map tool leaves it null and the cut
+   * goes to the selected parcel first, then any parcel it crosses — the long-standing behaviour.
+   * The cut engine, its refusals and the NEW-9 tombstone-the-parent rule are unchanged (lib). */
   const performSplit = (path) => {
-    // Drop consecutive coincident points (a finishing double-click adds the last twice).
-    const pts = path.filter((p, i) => i === 0 || dist(p, path[i - 1]) > 0.01);
-    if (pts.length < 2) return;
-    const ordered = sel?.kind === "parcel"
-      ? [parcels.find((p) => p.id === sel.id), ...parcels.filter((p) => p.id !== sel.id)].filter(Boolean)
-      : parcels;
-    let firstRefusal = null;
-    for (const pc of ordered) {
-      const res = splitPolygonByCut(pc.points, pts);
-      if (!res.ok) {
-        // Remember only the FIRST parcel's reason: with several parcels on the plan, the ones the
-        // cut never went near would otherwise overwrite it with "never crosses the parcel".
-        if (!firstRefusal) firstRefusal = res;
-        continue;
-      }
-      {
-        const pieces = res.pieces;
-        pushHistory("split"); // NEW-7 (NEW-1) — parent tombstoned + children created share this ONE op_id, atomically
-        // B651 — split is a REPLACEMENT, not an addition: create + activate the pieces as
-        // CHILDREN (each carries parentId), and SUPERSEDE the parent in place (mark it inactive
-        // so it drops out of every yield/area sum, but keep it in the list — greyed, with the
-        // children nested under it — so the original real parcel stays visible). The parent +
-        // its children can never both be active (the Active toggle enforces mutual exclusion),
-        // so the active set that feeds Yield/Analysis stays spatially non-overlapping.
-        /* Attributes ride onto every piece; anything DERIVED from the outline is recomputed, not
-         * copied. Acreage and the badge are already derived from `points` at render, so they are
-         * right for free. The per-edge vectors are the ones that would go stale silently: a piece
-         * has different edges from its parent, so `setbacks` and the role overrides are REMAPPED
-         * through the engine's edge provenance and an edge the CUT created takes the plan's
-         * default setback and no role assignment, rather than a neighbour's value.
-         * `label` is deliberately NOT carried: naming the pieces is an owner decision (see the
-         * backlog item), and copying one name onto three parcels would pre-empt it. */
-        const baseSb = +settings.setback || 0;
-        const inherit = { addr: pc.addr || null, acct: pc.acct || null, attrs: pc.attrs || null };
-        /* B520560 — each piece is BORN with its name (Parcel 1 → 1A / 1B / 1C), stamped rather
-         * than re-derived: B472048 deletes the parent, so there is no lineage left to walk. The
-         * DEPTH is stamped with it — it decides whether the next cut appends a letter or a digit,
-         * and without it a re-split of 1A produced 1AA, which is also the 27th sibling's name. One
-         * derivation, in siteModel, shared with the panel. */
-        const bornNames = parcelSplitNames(parcels, pc.id, pieces.length);
-        const made = pieces.map(({ ring, edgeSrc }, pi) => ({
-          id: uid(), points: ring, locked: true, active: true, parentId: pc.id, ...inherit,
-          splitName: bornNames[pi] && bornNames[pi].name, splitDepth: bornNames[pi] && bornNames[pi].depth,
-          setbacks: remapEdgeVector(pc.setbacks, edgeSrc, baseSb),
-          roleOverrides: remapEdgeVector(pc.roleOverrides, edgeSrc, null),
-          roles: remapEdgeVector(pc.roles, edgeSrc, null),
-        }));
-        /* ⛔ NEW-9 (B472049) — THE PARENT IS REMOVED, NOT RETAINED. THIS REVERSES B651 DELIBERATELY.
-         *
-         * B651 kept the parent as a SUPERSEDED, non-counting, still-DRAWN parcel so the original
-         * surveyed outline stayed visible. The owner reported the consequence: *"it seems like the
-         * tool now just leaves the parent parcel and creates a new parcel almost with the split
-         * tool."* On a NOTCH cut the remainder is 99.4% of the parent (his numbers: 104.475 of
-         * 105.122 ac), so the drawing showed two near-identical outlines and read as a duplicate
-         * rather than a cut.
-         *
-         * ⛔ HIS REASONING IS THE REASON, AND IT IS BETTER THAN THE ALTERNATIVES EITHER OF US
-         * FRAMED: *"no because the two new parcels would have the same exterior outline."* The
-         * union of a split's children REPRODUCES the parent's exterior outline exactly — that is
-         * what a split IS. So the retained parent adds NO information to the drawing; it only adds
-         * a second coincident boundary. There is nothing to preserve visually.
-         * The dimmed / dashed / superseded-styling route was considered and rejected on the merits.
-         * `splitIntegrity.unionOutlineMatches` turns that reasoning into the assertion.
-         *
-         * ⛔ AND IT IS TOMBSTONED, which REVERSES B651's explicit instruction not to. That
-         * instruction was correct while the parent remained a live record — a tombstone would have
-         * stripped it on the next cross-copy merge. Now that the parent is genuinely gone, the
-         * tombstone is what makes it STAY gone: without it, a merge from another device that still
-         * holds the parent would resurrect it, overlapping its own children.
-         *
-         * LINEAGE SURVIVES WITHOUT A DRAWABLE PARCEL, and nothing is lost:
-         *   • the HCAD-derived facts (`addr`, `acct`, `attrs`) are COPIED onto every child by
-         *     `inherit` above — they were never read back off the parent row;
-         *   • `parentId` stays on each child as a historical STAMP rather than a live reference,
-         *     and `siteModel.childrenByParent` already ignores a child whose parent is absent
-         *     (`has.has(p.parentId)`), so the nesting simply stops rather than dangling.
-         * ⚠ EXISTING PLANS ARE NOT MIGRATED BY THIS. Parents superseded by earlier splits are
-         * already on disk as `active:false` drawable rows (on the owner's Bain plan alone:
-         * `e1454855gyzzln` and `e1455071mkspvo`). They keep drawing until someone removes them.
-         * That cleanup is REPORTED to the owner, never run automatically over his live data. */
-        tombstone([pc.id]);
-        setParcels((arr) => arr.flatMap((p) => (p.id === pc.id ? made : [p])));
-        setSel({ kind: "parcel", id: made[0].id });
-        /* Say what happened. Three or more pieces is a real outcome of a real cut and the plan
-         * should not leave you counting them; a scrap dropped or a parent whose outline overlaps
-         * itself is never swallowed. Every clause here is a fact about THIS cut. */
-        const notes = [];
-        if (made.length > 2) notes.push(`Cut made ${made.length} pieces`);
-        /* B520560 — a piece too small to SEE is still a parcel and still keeps its acreage (owner
-         * rule: nothing discarded silently). It is named here only because an eight-square-foot lot
-         * on a hundred-acre plan is invisible, and he should know it is there to delete. This ONLY
-         * fires when nothing was small enough to SNAP (below) — see B966628. */
-        if (res.tiny) notes.push(`${res.tiny.count === 1 ? "one piece is" : `${res.tiny.count} pieces are`} too small to see (${Math.round(res.tiny.area).toLocaleString()} SF) — kept, not dropped`);
-        /* B966628 (NEW-5) — a fragment under threshold is fused into its neighbour rather than left
-         * as its own throwaway row; the acreage still isn't lost, it's just not a separate parcel. */
-        if (res.snapped) notes.push(`${res.snapped.count === 1 ? "a sliver" : `${res.snapped.count} slivers`} too small to be ${res.snapped.count === 1 ? "its" : "their"} own parcel (${Math.round(res.snapped.area).toLocaleString()} SF total) — merged into the piece next to it, acreage kept`);
-        if (res.outlineDrift) notes.push(`this parcel's outline overlaps itself, so its stated acreage runs ${Math.round(res.outlineDrift.sqft).toLocaleString()} SF above the land it encloses`);
-        /* LOUD-FAILURE on a name clash. The lineage names cannot collide with each other, but a
-         * name the user TYPED on another parcel can duplicate one — so the check runs against the
-         * plan the split actually produced (the parent is REMOVED by B472048, not retained), and
-         * reports rather than silently renaming his parcel. */
-        const clashes = [...parcelDisplayInfo(parcels.flatMap((p) => (p.id === pc.id ? made : [p])))]
-          .filter(([, v]) => v.nameCollision);
-        if (clashes.length) notes.push(`heads up: “${clashes[0][1].name}” is now the name of ${clashes.length > 2 ? "several parcels" : "two parcels"} on this plan — rename one`);
-        if (notes.length) flashWarn(`${notes.join(" — ")}.`, 9000);
-        return;
-      }
-    }
-    // Nothing took the cut. Report what was wrong with THIS cut against the parcel it was aimed
-    // at, never generic advice to draw something simpler.
-    if (firstRefusal) flashWarn(`⚠ ${firstRefusal.message}`, 7000); // NEW-4/B872 — a refusal, error-pill prefix
+    const plan = planSplit(parcels, path, {
+      targetId: splitTarget, selId: sel?.kind === "parcel" ? sel.id : null,
+      newId: uid, baseSetback: +settings.setback || 0,
+    });
+    if (!plan.ok) { flashWarn(`⚠ ${plan.message}`, 7000); return plan; } // NEW-4/B872 — a refusal, error-pill prefix
+    const { made, res, parentName } = plan;
+    pushHistory("split"); // NEW-7 — parent tombstoned + children created share this ONE op_id, atomically
+    tombstone(plan.removeIds); // B472049: the parent is REMOVED, not retained; the tombstone keeps it gone across devices
+    setParcels(plan.parcels);
+    setSel({ kind: "parcel", id: made[0].id });
+    setParcelOpen((o) => ({ id: made[0].id, n: (o?.n || 0) + 1 }));
+    if (splitTarget) { setSplitTarget(null); setSplitPath([]); setTool("select"); } // panel-aimed split is one-shot
+    /* Say what happened — every clause is a fact about THIS cut (LOUD-FAILURE). */
+    const notes = [];
+    if (made.length > 2) notes.push(`Cut made ${made.length} pieces`);
+    if (res.tiny) notes.push(`${res.tiny.count === 1 ? "one piece is" : `${res.tiny.count} pieces are`} too small to see (${Math.round(res.tiny.area).toLocaleString()} SF) — kept, not dropped`);
+    if (res.snapped) notes.push(`${res.snapped.count === 1 ? "a sliver" : `${res.snapped.count} slivers`} too small to be ${res.snapped.count === 1 ? "its" : "their"} own parcel (${Math.round(res.snapped.area).toLocaleString()} SF total) — merged into the piece next to it, acreage kept`);
+    if (res.outlineDrift) notes.push(`this parcel's outline overlaps itself, so its stated acreage runs ${Math.round(res.outlineDrift.sqft).toLocaleString()} SF above the land it encloses`);
+    const clashes = [...parcelDisplayInfo(plan.parcels)].filter(([, v]) => v.nameCollision);
+    if (clashes.length) notes.push(`heads up: “${clashes[0][1].name}” is now the name of ${clashes.length > 2 ? "several parcels" : "two parcels"} on this plan — rename one`);
+    if (notes.length) flashWarn(`${notes.join(" — ")}.`, 9000);
+    const pieceNames = made.map((m) => m.splitName);
+    pushToast({ text: `Split ${parentName} into ${pieceNames.length === 2 ? `${pieceNames[0].split(" · ").pop()} and ${pieceNames[1].split(" · ").pop()}` : `${pieceNames.length} pieces`}`, action: { label: "Undo", onClick: undo } });
+    return plan;
+  };
+  // Restore the original of a split / the originals of a combine — durable, unlike Undo (which is
+  // session history). Replaced parcels are tombstoned; the restored ones are born with fresh ids.
+  const restoreSplitOriginal = (pieceId) => {
+    const plan = planRestoreSplit(parcels, pieceId, { newId: uid });
+    if (!plan.ok) { flashWarn(`⚠ ${plan.message}`, 7000); return plan; }
+    pushHistory("split");
+    tombstone(plan.removeIds);
+    setParcels(plan.parcels);
+    setSel({ kind: "parcel", id: plan.restored.id });
+    pushToast({ text: `Restored the original from ${plan.count} pieces${plan.edited ? " — edits made to the pieces since the split were not kept" : ""}`, action: { label: "Undo", onClick: undo } });
+    return plan;
+  };
+  const restoreCombinedOriginals = (tractId) => {
+    const plan = planRestoreCombined(parcels, tractId, { newId: uid });
+    if (!plan.ok) { flashWarn(`⚠ ${plan.message}`, 7000); return plan; }
+    pushHistory("merge");
+    tombstone(plan.removeIds);
+    setParcels(plan.parcels);
+    setSel({ kind: "parcel", id: plan.restored[0].id });
+    pushToast({ text: `Restored ${plan.restored.length} originals from ${plan.name}${plan.edited ? " — edits made to the tract since it was combined were not kept" : ""}`, action: { label: "Undo", onClick: undo } });
+    return plan;
   };
 
   /* ------------ merge parcels (Shift-click multi-select) ------------ */
@@ -8211,59 +8156,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Fuse the selected parcels (any that share a boundary) into one parcel on the
   // editable layer — a working merge for test-fit/yield, NOT a recorded legal
   // consolidation. Merges greedily so a connected group of 2+ collapses to one.
-  const mergeParcels = () => {
-    const chosen = parcels.filter((p) => combineSel.includes(p.id) && p.active !== false); // inactive parcels never merge (B170)
-    if (chosen.length < 2) {
-      // B966626 — defense in depth: `toggleMerge`/`shiftPickParcel` already refuse to let an
-      // inactive parcel into `combineSel`, but a pick can still go stale (e.g. toggled inactive
-      // from the panel checkbox after being picked) — never let that combination fall through to
-      // a silent no-op on the Merge button too.
-      const droppedCount = combineSel.length - chosen.length;
-      if (droppedCount > 0) {
-        flashWarn(`⚠ ${droppedCount} of the picked parcels ${droppedCount === 1 ? "is" : "are"} excluded from yield totals, so ${droppedCount === 1 ? "it" : "they"} can't be merged — turn ${droppedCount === 1 ? "its" : "their"} Active checkbox back on first.`, 7000);
-      }
-      return;
-    }
-    // B2090352 — a real polygon union (lib/polyClip.js `mergeParcelRings`), not edge-twin cancellation:
-    // a shorter neighbour, an extra vertex on the common line, opposite winding and ~1 ft survey slop
-    // all fuse now. Lots that only touch at a corner, or are genuinely apart, are still refused — and
-    // the odd one out is NAMED instead of a blanket "don't share a boundary".
-    const merged = mergeParcelRings(chosen.map((p) => p.points));
-    if (!merged.ok) {
-      if (merged.code === "apart") {
-        const odd = chosen.filter((_, i) => !merged.groups[0].includes(i));
-        const info = parcelDisplayInfo(parcels);
-        const names = odd.map((p) => info.get(p.id)?.name || "a picked parcel");
-        flashWarn(merged.groups[0].length < 2
-          ? "⚠ Those parcels don't touch edge-to-edge — pick parcels that share a boundary."
-          : `⚠ ${names.join(", ")} ${odd.length === 1 ? "doesn't" : "don't"} touch the other picked parcels — unpick ${odd.length === 1 ? "it" : "them"} or pick the lots in between.`, 7000);
-      } else if (merged.code === "hole") {
-        flashWarn("⚠ Merging those would enclose a lot that isn't picked — pick that one too, or merge them in pieces.", 7000);
-      } else {
-        flashWarn("⚠ Those parcels couldn't be merged cleanly — their outlines are too far off to fuse.", 7000);
-      }
-      return;
-    }
-    const result = merged.ring;
-    pushHistory("merge"); // NEW-1 (perf investigation) — was the bare "edit" fallback; a real OP_KINDS member so a merge is answerable from telemetry (op_kind on the written rows) instead of a fresh investigation next time.
-    const np = { id: uid(), points: result, locked: true };
-    // The merged-away parcels are genuinely removed (replaced by `np`), so TOMBSTONE them — the same
-    // invariant every other delete honors (B276/B556). Two reasons, both real bugs without it (B596):
-    //   1. A reload / cross-tab / cross-device union-merge (mergeSiteContent) would otherwise RESURRECT
-    //      them from a copy that still holds their ids, silently undoing the merge.
-    //   2. Collapsing 3+ parcels into one drops contentCount by ≥2 with nothing to explain it, so the
-    //      thin-clobber guard (B459) misreads a legitimate active-tab merge as a stale-tab clobber and
-    //      blocks the save with a false "changed in another session" conflict (the owner's report).
-    // pushHistory() above already snapshotted the pre-merge deletedIds, so undo cleanly drops these
-    // tombstones and restores the parcels; the new parcel's fresh uid() can never collide with them.
-    const goneIds = parcels.filter((p) => combineSel.includes(p.id)).map((p) => p.id);
-    setParcels((arr) => [...arr.filter((p) => !combineSel.includes(p.id)), np]);
-    tombstone(goneIds);
+  /* ⛔ THE ONE COMBINE (Parcels panel redesign). The map's Merge banner / Enter key / right-click
+   * menu and the Parcels panel's Combine button ALL end here — `lib/parcelOps.planCombine` decides
+   * (the touching test is `mergeParcelRings` from polyClip.js, injected, untouched), this applies. A combine is a working
+   * merge for test-fit/yield, NOT a recorded legal consolidation. The originals live on inside the
+   * new tract so Restore brings them back exactly; they are tombstoned out of `parcels` (B596: a
+   * reload / cross-tab merge must not resurrect them beside the tract, and the thin-clobber guard
+   * must be able to explain the dropped count). No naming prompt: the tract is auto-named. */
+  const combineParcelsAction = (ids) => {
+    const plan = planCombine(parcels, ids, { unionRings: mergeParcelRings, newId: uid });
+    if (!plan.ok) { if (plan.code !== "pick-two" || ids.length) flashWarn(`⚠ ${plan.message}`, 6500); return plan; } // B735: non-blocking notice, not a jarring alert()
+    pushHistory("merge"); // a real OP_KINDS member so a merge is answerable from telemetry
+    tombstone(plan.removeIds);
+    setParcels(plan.parcels);
     setCombineSel([]);
     setMergePick(false); // B720: a completed merge exits pick mode
-    setSel({ kind: "parcel", id: np.id });
+    setSel({ kind: "parcel", id: plan.tract.id });
+    setParcelOpen((o) => ({ id: plan.tract.id, n: (o?.n || 0) + 1 })); // its detail card opens by itself
     setTool("select");
+    pushToast({ text: `Combined ${plan.count} parcels into ${plan.name}`, action: { label: "Undo", onClick: undo } });
+    return plan;
   };
+  const mergeParcels = () => combineParcelsAction(combineSel);
   // Remove ONE parcel by id (B598) — used by the Parcel tool's Remove mode AND the panel-row ✕.
   // Mirrors deleteSel's parcel branch exactly: pushHistory (so it's undoable) + filter it out +
   // tombstone so the deletion sticks across reload / cross-tab / cross-device merge and never trips
@@ -12060,6 +11974,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // stop propagation, let the press fall through to the background pan exactly as if it had
     // landed on empty canvas — no select, no move, no tap-to-select fallback either. It stays
     // reachable from the Land tab's own list (which never gates on lock).
+    // Combine pick mode (entered deliberately from Parcel tools) picks a LOCKED parcel too: lock only
+    // protects the boundary from being moved or reshaped, and every parcel is born locked — so without
+    // this the map's Combine could never pick anything until each lot was unlocked by hand.
+    if (mergePick) { e.stopPropagation(); toggleMerge(id); setSel({ kind: "parcel", id }); return; } // B720: plain click picks in merge mode
     if (pc.locked) {
       setPanning(true);
       drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY };
@@ -12067,7 +11985,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       svgRef.current.setPointerCapture(e.pointerId);
       return;
     }
-    if (mergePick) { e.stopPropagation(); toggleMerge(id); setSel({ kind: "parcel", id }); return; } // B720: plain click picks in merge mode
     if (e.shiftKey) { e.stopPropagation(); shiftPickParcel(id); return; } // Shift-click: additive multi-select to merge (B735 seeds from `sel`; shiftPickParcel owns `sel`)
     // NEW-1 — parcels join B750's click contract. Selecting a lot used to open the Parcel panel from
     // an EFFECT on `sel`, so a single click swung the left rail open (and the panel then belonged to
@@ -12737,6 +12654,48 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // was split) is hidden from the canvas (its children represent it) but kept in the list.
   const parcelInfo = parcelDisplayInfo(parcels);
   const supersededParcelIds = new Set([...parcelInfo].filter(([, v]) => v.superseded).map(([pid]) => pid));
+  /* Parcels panel (redesign). Rows and the SITE acreage are pure functions of `parcels` — memoised
+   * here so a pan / zoom never re-derives them (VIEW-INDEPENDENT-ONCE) — and the panel gets ONE stable
+   * handlers object whose methods delegate to this render's closures, so its row list can be memoised
+   * too. Every action below is a thin call into the single combine / split / restore functions. */
+  const parcelRows = useMemo(() => buildParcelRows(parcels), [parcels]);
+  const pickedParcelIds = useMemo(() => new Set(combineSel), [combineSel]);
+  const parcelSiteAcres = useMemo(() => includedAcres(parcels), [parcels]);
+  const parcelActsRef = useRef({});
+  const startPanelSplit = (id) => {
+    const target = id || (sel?.kind === "parcel" ? sel.id : null) || (parcels.length === 1 ? parcels[0].id : null);
+    if (!target || !parcels.some((p) => p.id === target)) { flashWarn("⚠ Click the parcel you want to split in the list, then press Split.", 6500); return; }
+    setBoundaryEdit(false); setMergePick(false); setCombineSel([]);
+    selectTool("split"); // arms the SAME map tool the right-hand toolbar's Split uses…
+    setSplitTarget(target); setSplitPath([]); setSel({ kind: "parcel", id: target }); // …aimed at this parcel
+  };
+  const cancelPanelSplit = () => { setSplitTarget(null); setSplitPath([]); setTool("select"); };
+  const lockParcelsMany = (ids) => {
+    const set = new Set(ids);
+    const picked = parcels.filter((p) => set.has(p.id));
+    if (!picked.length) return;
+    const allL = picked.every((p) => p.locked);
+    pushHistory();
+    setParcels((a) => a.map((p) => (set.has(p.id) ? { ...p, locked: !allL } : p)));
+  };
+  parcelActsRef.current = {
+    onSelectRow: (id) => { setCombineSel([]); setSel({ kind: "parcel", id }); },
+    onPickRow: (id) => { toggleMerge(id); setSel({ kind: "parcel", id }); }, // combine-pick mode: a row click picks, exactly as it always did
+    onToggleInclude: toggleParcelActive, onToggleLock: toggleParcelLock, onToggleAllLock: toggleAllParcelsLock,
+    onZoom: (id) => zoomToElements([{ kind: "parcel", id }]), onRemove: removeParcelById,
+    onSplit: startPanelSplit, onCancelSplit: cancelPanelSplit, onCombine: combineParcelsAction, onLockMany: lockParcelsMany,
+    onRename: (id, v) => setParcelField(id, "label", v),
+    onRestoreCombined: restoreCombinedOriginals, onRestoreSplit: restoreSplitOriginal,
+    acresOf: (pc) => parcelNetSqft(pc) / SQFT_PER_ACRE,
+    combinePreview: (ids) => planCombine(parcels, ids, { unionRings: mergeParcelRings, newId: () => "preview" }),
+  };
+  const parcelPanelH = useMemo(() => {
+    const o = {};
+    for (const k of ["onSelectRow", "onPickRow", "onToggleInclude", "onToggleLock", "onToggleAllLock", "onZoom", "onRemove", "onSplit", "onCancelSplit", "onCombine", "onLockMany", "onRename", "onRestoreCombined", "onRestoreSplit", "acresOf", "combinePreview"]) o[k] = (...a) => parcelActsRef.current[k](...a);
+    return o;
+  }, []);
+  // A panel-aimed Split is a mode of the Split tool: leaving the tool by any route ends it.
+  useEffect(() => { if (tool !== "split" && splitTarget) setSplitTarget(null); }, [tool, splitTarget]);
   // B652 — overlap safety net: any two ACTIVE parcels whose geometry overlaps by more than a
   // small tolerance are double-counting acreage. Surface a non-blocking Yield banner naming them.
   const parcelOverlaps = (() => {
@@ -19125,6 +19084,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const vSep = <span style={{ width: 1, height: TB_H - 12, background: PAL.chromeLine, margin: "0 6px" }} />;
   // Switch tools and reset any in-progress drafting; also closes the Parcel menu.
   const selectTool = (id) => {
+    setSplitTarget(null); // a Split aimed from the panel never outlives a tool change (startPanelSplit re-sets it after)
     // NEW-1 (B900416) — the Pan tool is retired from the rail (Select already pans on empty
     // canvas, Space-drag pans over anything); a leftover "pan" from anywhere must boot to a
     // working Select rather than a dead mode, never a mode with no rail affordance.
@@ -21695,21 +21655,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </button>
                 </>
               ) : (() => {
-                const rows = parcelOutline(parcels);
-                const counted = rows.filter((r) => !r.superseded);
-                const totalAc = counted.reduce((s, r) => s + parcelNetSqft(r.pc), 0) / SQFT_PER_ACRE;
-                const allLocked = parcels.every((p) => p.locked);
-                return (
-                  <>
-                    {/* NEW-1 (B1239328) — THE HEADER: total acreage across every parcel, prominent
-                        and above the list — nothing in the app showed this sum before. Superseded
-                        (split) parents are excluded so their children aren't double-counted. */}
-                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 14 }}>
-                      <div>
-                        <div style={{ fontSize: 22, fontWeight: 800, color: PAL.ink, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, lineHeight: 1.15 }}>{f2(totalAc)} AC</div>
-                        <div style={{ fontSize: 11.5, color: PAL.muted, marginTop: 1 }}>{counted.length} parcel{counted.length === 1 ? "" : "s"}</div>
-                      </div>
-                      <div ref={addParcelAnchor} style={{ position: "relative" }}>
+                // VIEW-INDEPENDENT-ONCE: the rows / site acres are functions of `parcels` alone — memoised at the top
+                // level (parcelRows / parcelSiteAcres), so a pan or zoom never re-derives them.
+                const addParcelNode = (
+                  <div ref={addParcelAnchor} style={{ position: "relative" }}>
                         <button
                           aria-haspopup="menu" aria-expanded={addParcelMenu} aria-label="＋ Add" data-testid="land-add-btn"
                           style={iconBtn}
@@ -21772,78 +21721,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           </button>
                         </AnchoredMenu>
                       </div>
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                      {/* B720 — "Active" microlabel over the checkbox column: the checkbox reads as
-                          "counted in the totals," NOT "pick for a bulk action" (merge picking is the
-                          blue row highlight, never the checkbox). NEW-1 (B1239328) — "Lock all" rides
-                          the same row: the one-gesture replacement for the old plan-wide "Select
-                          parcels" toggle, which made every parcel click-through at once. */}
-                      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 1 }}>
-                        <span style={{ flex: "none", fontSize: 8, fontWeight: 700, letterSpacing: "0.02em", textTransform: "uppercase", color: PAL.muted, lineHeight: 1, paddingLeft: 1 }}>Active</span>
-                        <span style={{ flex: 1 }} />
-                        <button type="button" onClick={toggleAllParcelsLock}
-                          style={{ border: "none", background: "transparent", padding: 0, color: PAL.muted, fontSize: 10.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
-                          title={allLocked ? "Unlock every parcel's boundary" : "Lock every parcel's boundary — none can be moved or reshaped on the map until unlocked (selecting from this list still works)"}>
-                          {allLocked ? "🔓 Unlock all" : "🔒 Lock all"}
-                        </button>
-                      </div>
-                      {/* B651 — lineage-aware list: children of a split nest under their parent (indented),
-                          and the split parent is greyed + labelled "· split" as a SUPERSEDED, non-counting
-                          row (it's inactive, so excluded from yield/coverage/detention) with the original
-                          real parcel still visible. Names follow lineage: Parcel 3 → 3A / 3B. */}
-                      {rows.map(({ pc, depth, name, superseded }) => {
-                        const on = selParcel?.id === pc.id;
-                        const picked = combineSel.includes(pc.id);
-                        const inactive = pc.active === false;
-                        const tag = superseded ? " · split" : inactive ? " · inactive" : "";
-                        return (
-                          // Per-row Active checkbox (B175): checked = participates in yield / coverage /
-                          // detention / merge; unchecked = stays listed + on the map but dimmed and excluded.
-                          // The `active` flag persists per-parcel via the Site Model (same path as B100).
-                          <div key={pc.id} className="land-parcel-row" style={{ display: "flex", alignItems: "stretch", gap: 7, marginLeft: depth * 16 }}>
-                            <label
-                              title={superseded ? "Split into the parcels nested below — superseded, so excluded from yield / coverage / detention. Check to make it active again (its children go inactive)." : inactive ? "Inactive — excluded from yield / coverage / detention / merge. Check to include." : "Active — counted in yield / coverage / detention. Uncheck to exclude (stays visible, dimmed)."}
-                              onClick={(e) => e.stopPropagation()}
-                              style={{ display: "flex", alignItems: "center", flex: "none", paddingLeft: 2, cursor: "pointer" }}
-                            >
-                              <input type="checkbox" checked={!inactive} onChange={() => toggleParcelActive(pc.id)}
-                                data-testid={`parcel-row-active-${pc.id}`}
-                                style={{ width: 15, height: 15, cursor: "pointer" }} />
-                            </label>
-                            {/* NEW-1 (B1239328) — the row itself never gates on lock: selecting a
-                                parcel from this LIST always works, even when it's locked against the
-                                map (see startMoveParcel). Lock only ever affects the CANVAS. */}
-                            <button onClick={(e) => { if (mergePick) { toggleMerge(pc.id); setSel({ kind: "parcel", id: pc.id }); } else if (e.shiftKey) { shiftPickParcel(pc.id); } else { setCombineSel([]); setSel({ kind: "parcel", id: pc.id }); } }}
-                              data-testid={`parcel-row-${pc.id}`}
-                              style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 8, textAlign: "left", padding: "7px 9px", borderRadius: RADIUS.md, borderLeft: depth ? `2px solid ${PAL.panelLine || "var(--border-default)"}` : undefined, border: `1px solid ${picked ? "#2563eb" : on ? PAL.accent : "var(--border-default)"}`, background: picked ? "rgba(37,99,235,0.14)" : on ? PAL.accentSoft : SURF_RAISED, cursor: "pointer", fontFamily: "inherit", opacity: superseded ? 0.5 : inactive ? 0.55 : 1 }}>
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{name}{tag}{picked ? " ✓" : ""}{pc.locked ? " 🔒" : ""}</div>
-                                {pc.acct && <div style={{ fontSize: 10.5, color: PAL.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{pc.acct}</div>}
-                              </div>
-                              <div style={{ flex: "none", minWidth: 58, textAlign: "right", fontSize: 12, fontWeight: 600, color: PAL.ink, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{f2(parcelNetSqft(pc) / SQFT_PER_ACRE)} AC</div>
-                            </button>
-                            {/* NEW-1 (B1239328) — the hover cluster: zoom-to (new — nothing used to jump
-                                the map to a parcel), lock/unlock, and remove. Replaces the always-visible
-                                ✕ column; reveals on row hover or keyboard focus (.land-row-actions, index.css). */}
-                            <div className="land-row-actions" style={{ display: "flex", gap: 3, flex: "none" }}>
-                              <button type="button" title="Zoom to this parcel" aria-label={`Zoom to ${name}`}
-                                onClick={(e) => { e.stopPropagation(); zoomToElements([{ kind: "parcel", id: pc.id }]); }}
-                                style={{ ...iconBtn, width: 26, height: 30 }}>🔍</button>
-                              <button type="button" title={pc.locked ? "Unlock this parcel's boundary" : "Lock this parcel's boundary so it can't be moved or reshaped on the map"} aria-label={pc.locked ? `Unlock ${name}` : `Lock ${name}`}
-                                onClick={(e) => { e.stopPropagation(); toggleParcelLock(pc.id); }}
-                                style={{ ...iconBtn, width: 26, height: 30 }}>{pc.locked ? <LockIcon /> : <UnlockIcon />}</button>
-                              {/* B598 — per-row remove. Undo-able (removeParcelById pushes history); the
-                                  tombstone keeps it deleted across reload/merge. */}
-                              <button type="button" title="Remove this parcel" aria-label={`Remove ${name}`}
-                                onClick={(e) => { e.stopPropagation(); removeParcelById(pc.id); }}
-                                style={{ ...iconBtn, width: 26, height: 30, color: PAL.danger }}>✕</button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </>
+                );
+                const splitRow = splitTarget ? parcelRows.find((r) => r.id === splitTarget) : null;
+                return (
+                  <ParcelsPanel
+                    rows={parcelRows} siteAcres={parcelSiteAcres} headerRight={addParcelNode}
+                    allLocked={parcels.length > 0 && parcels.every((p) => p.locked)}
+                    splitMode={splitRow ? { name: splitRow.name, acres: splitRow.acres } : null}
+                    selectedId={selParcel?.id || null} openRequest={parcelOpen} pickMode={mergePick} pickedIds={pickedParcelIds}
+                    combinePreview={parcelPanelH.combinePreview} handlers={parcelPanelH} />
                 );
               })()}
               {/* identify result + armed status (B383) — the body of the ＋ Add parcel menu's
@@ -25842,10 +25728,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           {tool === "split" && (
             <div onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}
               style={{ position: "absolute", top: 14, left: "50%", transform: "translateX(-50%)", zIndex: 6, whiteSpace: "nowrap", background: "rgba(25,22,19,0.94)", color: "#fff", padding: "6px 8px 6px 15px", borderRadius: 99, fontSize: 12.5, fontWeight: 500, display: "flex", alignItems: "center", gap: 10, boxShadow: "0 6px 22px rgba(0,0,0,0.28)" }}>
-              <span>{splitPath.length >= 2 ? `${splitPath.length} points on the cut — click to extend or Finish` : "Click a cut line across a parcel"}</span>
+              <span data-testid="split-banner-text">{splitPath.length >= 2 ? `${splitPath.length} points on the cut — double-click or Finish to split` : splitTarget ? "Draw a line across it, double-click to finish" : "Click a cut line across a parcel, double-click to finish"}</span>
               <button className="dbtn" style={{ ...btn(splitPath.length >= 2), padding: "5px 12px", opacity: splitPath.length >= 2 ? 1 : 0.5, cursor: splitPath.length >= 2 ? "pointer" : "default" }}
                 disabled={splitPath.length < 2} onClick={finishSplit}>Finish ⏎</button>
-              <button className="dbtn" style={{ ...chip, padding: "5px 10px" }} onClick={() => { setSplitPath([]); setTool("select"); }}>Done</button>
+              <button className="dbtn" style={{ ...chip, padding: "5px 10px" }} onClick={() => { setSplitTarget(null); setSplitPath([]); setTool("select"); }}>{splitTarget ? "Cancel" : "Done"}</button>
             </div>
           )}
 
