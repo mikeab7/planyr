@@ -36,13 +36,15 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffec
 import { EditorContent, useEditor } from "@tiptap/react";
 import { TextSelection } from "@tiptap/pm/state";
 import { noteExtensions, EMPTY_DOC } from "../lib/notesExtensions.js";
-import { ANCHOR_MIN_HEIGHT, anchorExtent, anchorExtentLeft, anchorExtentTop, anchorExtentX, anchorPosAtSelection, fitAnchorBox, placeAnchor } from "../lib/notesAnchorNode.js";
+import { ANCHOR_MIN_HEIGHT, anchorExtent, anchorExtentLeft, anchorExtentTop, anchorExtentX, anchorPosAtSelection, fitAnchorBox, nextAnchorSpot, placeAnchor } from "../lib/notesAnchorNode.js";
+import { ANCHOR_WIDTH } from "../lib/notesBoxResize.js";
+import { clipboardHasTable, tableBoxWidth } from "../lib/notesTablePaste.js";
 import { edgePoint as arrowEdgePoint } from "../lib/notesArrows.js";
 import {
   isBlankDoublePress, BLANK_DBLTAP_TOUCH_PX, isTouchPointerType, isCoarsePointerDevice, touchBoxOrigin,
   isTextInsertInputType,
 } from "../lib/notesBlankPaper.js";
-import { migrateFlowBody, migrateSketchesToBoxes } from "../lib/notesFlowMigration.js";
+import { MIGRATED_BOX_WIDTH, migrateFlowBody, migrateSketchesToBoxes } from "../lib/notesFlowMigration.js";
 import {
   applyMarquee, boxesInMarquee, latchGesture, marqueeRect, moveSelection, nudgeDelta,
   toggleSelection,
@@ -907,6 +909,28 @@ const CLIPBOARD_BODY = (
     <path d="M5.6 2.6V2a1 1 0 0 1 1-1h0.8a1 1 0 0 1 1 1v0.6" />
   </>
 );
+
+/** ⛔ A BOX MADE FOR A PASTED TABLE IS WIDE ENOUGH FOR ITS COLUMNS (NEW-1). A new box starts a
+ *  sticky-note wide; three table columns in that collapse to slivers behind a horizontal scroll.
+ *  Called right after a paste into a box this paste itself created: finds the box the caret is in,
+ *  and if it now holds a table, widens it to the table's column count (the same writing-column cap
+ *  "Insert table" uses). Never touches a box that already existed. */
+function widenFreshBoxForTable(editor) {
+  try {
+    if (!editor || editor.isDestroyed) return;
+    const { $from } = editor.state.selection;
+    for (let d = $from.depth; d > 0; d -= 1) {
+      const node = $from.node(d);
+      if (node.type.name !== "noteAnchor") continue;
+      let cols = 0;
+      node.descendants((n) => { if (n.type.name === "table") cols = Math.max(cols, n.firstChild ? n.firstChild.childCount : 0); return cols === 0; });
+      if (!cols) return;
+      const w = tableBoxWidth({ cols, current: node.attrs.w, max: MIGRATED_BOX_WIDTH });
+      if (w > (node.attrs.w || 0)) editor.commands.setNoteAnchorWidth($from.before(d), w);
+      return;
+    }
+  } catch (_) { /* a missed widening is cosmetic: the table is already in the box and scrolls */ }
+}
 
 const PASTE_ICONS = {
   source: (
@@ -2139,6 +2163,79 @@ const NoteEditor = forwardRef(function NoteEditor({
     return true;
   }, [editor]);
 
+  /** Paste a clipboard into the editor AT ITS CURRENT SELECTION through ProseMirror's own paste
+   *  pipeline (`transformPastedHTML` → parse → `transformPasted` → `handlePaste`), so a paste that
+   *  arrives from outside the editor behaves exactly like one made with the caret in it. HTML when
+   *  there is any, else the text. LOUD-FAILURE: a pipeline that throws is announced, never silent. */
+  const pasteClipboardIntoEditor = useCallback((html, text, e) => {
+    if (!editor || editor.isDestroyed) return false;
+    try {
+      if (html) editor.view.pasteHTML(html, e);
+      else editor.view.pasteText(text, e);
+      return true;
+    } catch (err) {
+      onPrintNotice?.("Planyr couldn't paste that. Try Ctrl+Shift+V to paste it as plain text.");
+      return false;
+    }
+  }, [editor, onPrintNotice]);
+
+  /* ⛔ A PASTE WITH NOTHING FOCUSED, OR A BOX MERELY SELECTED, LANDS SOMEWHERE (NEW-1, owner report
+   * 2026-10-05: a table copied from OneNote "didn't copy at all"). Desktop is two-stage — the first
+   * press on a box only SELECTS it and moves focus off the editor — so Ctrl+V right after clicking a
+   * box (or after clicking anywhere that is not the editor) reached no listener at all and did
+   * nothing, in silence. Now: one box selected → the paste goes in at its end; otherwise it makes a
+   * box at the next free spot and pastes there (the same rule "Insert table" already follows). A
+   * real field (the title, the rail's rename box) still owns its own paste, and a paste aimed at
+   * the editor itself is left to ProseMirror. Pictures alone are untouched (they have their own
+   * route); a picture BESIDE a table is the table's. */
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return undefined;
+    const onLoosePaste = (e) => {
+      if (e.defaultPrevented || pendingRef2.current) return;          // armed: the effect above owns it
+      const dom = editor.view.dom;
+      const t = e.target;
+      if (t instanceof Node && dom.contains(t)) return;               // aimed at the editor: ProseMirror's
+      if (t instanceof Element && t.closest("input, textarea, select, [contenteditable='true']")) return;
+      const root = noteRootRef.current;
+      if (!root || root.offsetParent === null) return;                // this Notes surface is not on screen
+      const bodyLike = t === document.body || t === document.documentElement || t == null;
+      if (!bodyLike && !(t instanceof Node && root.contains(t))) return;   // focus is somewhere else in the app
+      const dt = e.clipboardData;
+      const html = dt?.getData("text/html") || "";
+      const text = dt?.getData("text/plain") || "";
+      if (!html && !text) return;
+      const hasImage = [...(dt?.files || [])].some((f) => f.type?.startsWith("image/"));
+      if (hasImage && !clipboardHasTable(dt)) return;                 // a picture on its own has its own route
+      e.preventDefault();
+      e.stopPropagation();
+      const sel = selRef.current;
+      let landed = false;
+      if (sel && sel.size === 1) {
+        const aid = [...sel][0];
+        editor.state.doc.forEach((node, pos) => {
+          if (landed || node.type.name !== "noteAnchor" || String(node.attrs.aid || "") !== aid) return;
+          const end = pos + node.nodeSize - 1;
+          editor.view.dispatch(editor.state.tr.setSelection(TextSelection.near(editor.state.doc.resolve(end), -1)));
+          setEditingId(aid);
+          landed = true;
+        });
+      }
+      let fresh = null;
+      if (!landed) {
+        const { x, y } = nextAnchorSpot(editor.state.doc);
+        fresh = `a${Date.now().toString(36)}p${Math.floor(Math.random() * 1e6).toString(36)}`;
+        editor.commands.addNoteAnchorAt({ x, y, w: ANCHOR_WIDTH, aid: fresh });
+        setSelection(new Set([fresh]));
+        setEditingId(fresh);
+      }
+      if (!editor.view.hasFocus()) editor.view.focus();
+      pasteClipboardIntoEditor(html, text, e);
+      if (fresh) widenFreshBoxForTable(editor);
+    };
+    window.addEventListener("paste", onLoosePaste, { capture: true });
+    return () => window.removeEventListener("paste", onLoosePaste, { capture: true });
+  }, [editor, pasteClipboardIntoEditor]);
+
   /* ⛔ THE FIRST KEYSTROKE, CAUGHT BEFORE THE EDITOR SEES IT. Bound on `window` in CAPTURE, for
    * the same reason the rest of this module's global bindings are: the editor's DOM holds focus
    * while a placement is armed, so a keydown bound on the editor would arrive only after
@@ -2204,7 +2301,9 @@ const NoteEditor = forwardRef(function NoteEditor({
      * a point) — this reuses it rather than writing a second image-placement path. */
     const onPaste = (e) => {
       const files = [...(e.clipboardData?.files || [])].filter((f) => f.type?.startsWith("image/"));
-      if (files.length) {
+      /* ⛔ A TABLE OUTRANKS THE PICTURE BESIDE IT (NEW-1) — Excel/OneNote put a PNG of the cells next
+       * to the HTML table; see lib/notesTablePaste.js. */
+      if (files.length && !clipboardHasTable(e.clipboardData)) {
         const at = pendingRef2.current;
         setPendingPlace(null);
         e.preventDefault();
@@ -2212,11 +2311,19 @@ const NoteEditor = forwardRef(function NoteEditor({
         if (at) editor.commands.insertNoteImages(files, at);
         return;
       }
+      const html = e.clipboardData?.getData("text/html") || "";
       const text = e.clipboardData?.getData("text/plain") || "";
-      if (!text) { cancelPendingPlace(); return; }
+      if (!text && !html) { cancelPendingPlace(); return; }
       e.preventDefault();
       e.stopPropagation();
-      commitPendingPlace(text);
+      /* ⛔ THE FIRST PASTE ON BLANK PAPER GOES THROUGH THE EDITOR'S OWN PASTE PIPELINE (NEW-1). It
+       * used to take `text/plain` only and `insertContent` it, so a table pasted here arrived as
+       * its cells run together in one line. Make the (empty) box — selection and focus move into it
+       * synchronously — then let ProseMirror paste into it exactly as it would anywhere else:
+       * tables stay tables, the paste-options chip appears, the three paste modes apply. */
+      if (!commitPendingPlace()) return;
+      pasteClipboardIntoEditor(html, text, e);
+      widenFreshBoxForTable(editor);
     };
     /* ⛔ TEXT THAT ARRIVES WITHOUT A PRINTABLE KEYDOWN (NEW-1, iOS review). Predictive-bar taps,
      * QuickPath swipe, dictation, emoji (`key.length` 2) and IME composition report `Unidentified`
@@ -2250,7 +2357,7 @@ const NoteEditor = forwardRef(function NoteEditor({
       window.removeEventListener("beforeinput", onBeforeInput, { capture: true });
       window.removeEventListener("compositionstart", onCompositionStart, { capture: true });
     };
-  }, [pendingPlace, editor, commitPendingPlace, cancelPendingPlace]);
+  }, [pendingPlace, editor, commitPendingPlace, cancelPendingPlace, pasteClipboardIntoEditor]);
 
   /* The attribute the stylesheet above keys the hidden native caret off. Written straight to the
    * editor's own element rather than through React, which does not own it. */
