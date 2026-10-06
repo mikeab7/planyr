@@ -55,6 +55,11 @@ export const FIXTURE_FILES = {
    * hiding that overlay is what relieved his symptom, so an instrument that cannot open this plan
    * cannot see the defect. */
   richfield: "richfield-concept-a.json",
+  /* The owner's Goose Creek "Phase II - 1.2M" plan — the one the 2026-10-06 slow report (5f82f13a,
+   * build 6338802) was filed on: 16 bonded building assemblies, 12 centreline roads and a rotated,
+   * polygon-cropped, knocked-out sheet overlay. The fixture the paste → move → resize edit-cycle
+   * harness (perf-edit-cycle.mjs) drives. */
+  goose2: "goose-creek-phase2-1-2m.json",
 };
 
 /** Resolve a short name (or a bare filename) to a parsed fixture. Throws NAMING the options,
