@@ -88,7 +88,7 @@ import { cullRectFor, cullToView, shouldCull } from "./lib/viewCull.js";
  * beside `cullToView`, because "drawn ≠ exists" is a rule this codebase already relies on and
  * hiding is that same rule with a different predicate. Read that module's header before adding a
  * consumer: the metrics pass iterates `els`/`parcels` and must never read a draw set. */
-import { elHidden, isHidden, parcelAcreageHidden, normalizeRetiredToggles, visibleEls, visibleParcels, visibleMeasures } from "./lib/contentVisibility.js";
+import { elHidden, isHidden, refHidden, parcelAcreageHidden, normalizeRetiredToggles, visibleEls, visibleParcels, visibleMeasures } from "./lib/contentVisibility.js";
 import { makeLabelFrame } from "./lib/exportLabelScale.js";
 import { orderLayersByPriority, LAYER_STAGE_SIZE } from "./lib/layerSchedule.js";
 import { prefetchExtents, computeCoverage, sameCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
@@ -9095,6 +9095,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         let hovered = null;
         for (const x of els) {
           if (x.attachedTo || x.dogEar || x.locked || x.points || x.w == null) continue;
+          if (elHidden(hiddenGroups, x)) continue; // NEW-1 — a hidden building is not hoverable, so its +/− cluster never pops over empty ground
           const hw = Math.abs(x.w) / 2, hh = Math.abs(x.h) / 2; // unrotated footprint bbox (generous on rotation — fine for hover)
           if (!(fp.x >= x.cx - hw && fp.x <= x.cx + hw && fp.y >= x.cy - hh && fp.y <= x.cy + hh)) continue;
           if (!hovered || byZ(x, hovered) >= 0) hovered = x;
@@ -17123,15 +17124,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    *
    * The Properties panel follows `sel`, so it closes with it — which is right: a panel editing an
    * object the owner has just hidden is a panel he cannot see the effect of. */
-  const selKindHidden = (ref) => {
-    if (!ref) return false;
-    if (ref.kind === "el") { const el = els.find((e) => e.id === ref.id); return !!el && elHidden(hiddenGroups, el); }
-    if (ref.kind === "parcel") return isHidden(hiddenGroups, "parcels");
-    if (ref.kind === "markup") return isHidden(hiddenGroups, "markups");
-    if (ref.kind === "measure") return isHidden(hiddenGroups, "measures");
-    if (ref.kind === "callout") return isHidden(hiddenGroups, "callouts");
-    return false;
-  };
+  const selKindHidden = (ref) => refHidden(hiddenGroups, els, ref);
+  /* NEW-1 — the RENDER-TIME half of the same gate. The effect below drops a hidden selection one
+     commit late; every handle group asks this directly so a grip can never paint (or catch a press)
+     for an object that is not drawn — including the hover-driven +/− cluster, which no selection
+     clearing ever reached. */
+  const selHiddenNow = selKindHidden(sel);
   const selKindHiddenRef = useRef(selKindHidden);
   selKindHiddenRef.current = selKindHidden;
   useEffect(() => {
@@ -17857,7 +17855,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // in view. featActiveId is that building; each node group below ALSO gates each button
   // on the building's on-screen footprint size (FEAT_BTN_MIN_PX) so they vanish before
   // they can cluster/spill when zoomed out.
-  const featActiveId = sel?.kind === "el" ? sel.id : (tool === "select" ? hoverElId : null);
+  const featActiveId = (() => {
+    const id = sel?.kind === "el" ? sel.id : (tool === "select" ? hoverElId : null);
+    return id && !refHidden(hiddenGroups, els, { kind: "el", id }) ? id : null; // NEW-1: a hidden element's +/− clusters never exist
+  })();
   /* NEW-2 — the ZOOM half of the gate, shared by every on-building edit cluster below. 0 means the
      edit these controls make is not legible yet, so they must not exist at this zoom at all.
      NEW-1 (third value) — it takes the CANVAS WIDTH as well as the zoom: the floor is the earlier
@@ -18107,7 +18108,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // new element. Every sibling handle group (elPolyHandles, markupHandles, calloutHandles,
     // measureHandles) already carries this exact `tool !== "select"` guard; this one was the
     // outlier.
-    if (sel?.kind !== "el" || tool !== "select" || multi.length > 1) return null; // B740: no single-element transform grips while multi-selecting
+    if (selHiddenNow || sel?.kind !== "el" || tool !== "select" || multi.length > 1) return null; // B740: no single-element transform grips while multi-selecting
     const el = els.find((x) => x.id === sel.id);
     if (!el || el.points || el.locked) return null; // locked / polygon: no resize/rotate handles
     const cpx0 = f2p({ x: el.cx, y: el.cy });
@@ -18203,7 +18204,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      units as pc.weight (so it scales with zoom exactly like the line does). Just enough to read
      as a halo on a busy aerial; any more and the boundary starts reading as a double line. */
   const PARCEL_CASING_W = 1.4;
-  const selParcel = sel?.kind === "parcel" ? parcels.find((p) => p.id === sel.id) : null;
+  const selParcel = sel?.kind === "parcel" && !selHiddenNow ? parcels.find((p) => p.id === sel.id) : null;
   const selRuns = (selParcel && selParcel.active !== false) ? edgeRuns(selParcel.points, SETBACK_RUN_TOL_DEG) : null;
   // Screen anchors for a run's fanned labels (B215): the boundary/run-length dimension sits
   // OUTBOARD of the edge and the setback value pill sits INBOARD (toward the setback line it
@@ -18343,7 +18344,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return spaceOut(cands, VTX_MIN_SEP_PX);
   };
   const parcelHandles = (() => {
-    if (sel?.kind !== "parcel" || tool !== "select") return null;
+    if (selHiddenNow || sel?.kind !== "parcel" || tool !== "select") return null;
     const pc = parcels.find((p) => p.id === sel.id);
     // B-VTX-SEL — locked parity with elPolyHandles/markupHandles/measureHandles (a false
     // affordance otherwise: startVertex no-ops on a locked parcel anyway).
@@ -18357,7 +18358,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // NEW-2 — same screen-space decimation: an imported / traced pond outline carries the identical
   // dense-vertex problem as a surveyed parcel boundary.
   const elPolyHandles = (() => {
-    if (sel?.kind !== "el" || tool !== "select" || multi.length > 1) return null; // B740
+    if (selHiddenNow || sel?.kind !== "el" || tool !== "select" || multi.length > 1) return null; // B740
     const el = els.find((x) => x.id === sel.id);
     if (!el || !el.points || el.locked) return null;
     const on = (i) => isSelVtx("el", el.id, i);
@@ -18377,7 +18378,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // (a bounding box around a line is wrong, per the owner rule) → grips only, no outline here. Never
   // exported (data-export="skip").
   const elSelOutline = (() => {
-    if (sel?.kind !== "el" || tool !== "select" || multi.length > 1) return null; // B740: multi uses per-member outlines
+    if (selHiddenNow || sel?.kind !== "el" || tool !== "select" || multi.length > 1) return null; // B740: multi uses per-member outlines
     const el = els.find((x) => x.id === sel.id);
     if (!el) return null;
     if (isCenterlineRoad(el) || el.type === "road") {
@@ -18404,7 +18405,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   //    Shift-click a dot to delete one
   // Semantic markups (utilRoute/traced/encumbrance/…) get no grips (move-only, as before).
   const markupHandles = (() => {
-    if (sel?.kind !== "markup" || tool !== "select" || multi.length > 1) return null; // B740
+    if (selHiddenNow || sel?.kind !== "markup" || tool !== "select" || multi.length > 1) return null; // B740
     const m = markups.find((x) => x.id === sel.id);
     if (!m || m.locked) return null;
     if (MK_BOX_KINDS.includes(m.kind)) {
@@ -18652,7 +18653,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B619/B913 width grips + per-leader re-aim grips for the SELECTED callout. Hidden while its
   // text editor is open (the editor's own accent outline cues focus).
   const calloutHandles = (() => {
-    if (sel?.kind !== "callout" || tool !== "select") return null;
+    if (selHiddenNow || sel?.kind !== "callout" || tool !== "select") return null;
     const c = callouts.find((x) => x.id === sel.id);
     if (!c || editCallout?.id === c.id) return null;
     const st = calloutStyle(c);
@@ -18745,7 +18746,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // NEW-1 — no × delete badge on a measurement (owner rule): it sat right where the count markers
   // do and read as part of the measurement itself. Delete key or the right-click menu removes it.
   const measureHandles = (() => {
-    if (sel?.kind !== "measure" || tool !== "select") return null;
+    if (selHiddenNow || sel?.kind !== "measure" || tool !== "select") return null;
     const m = measures[sel.i];
     if (!m || m.locked) return null;
     const fpts = measPts(m);
@@ -24554,6 +24555,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {multi.length > 1 && (
                 <g data-export="skip" pointerEvents="none">
                   {multi.map((m) => {
+                    if (selKindHidden(m)) return null; // NEW-1: no ring around a hidden member
                     // NEW-6 — measures, callouts and parcels have no styleable footprint ring, so
                     // they show the AABB selection box. (Callouts + parcels can now join a
                     // multi-selection because a pasted mixed set selects itself.)
