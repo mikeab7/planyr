@@ -1,0 +1,8 @@
+Cross Dock		Front Load		Rear Load	
+SF:	Depth:	SF:	Depth:	SF:	Depth:
+400K	520'	350K	480'		
+500K	550'	450K	500'	300K	420'
+600K	580'			250K	400'
+800K	620'				
+700K	600'	500K	520'	350K	450'
+					
