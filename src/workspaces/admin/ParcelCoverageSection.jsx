@@ -15,6 +15,7 @@ import { PARCEL_COVERAGE_SECTION } from "./lib/adminSections.js";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../shared/ui/designTokens.js";
 import { IconButton } from "../../shared/ui/controls.jsx";
+import AdminPanel from "./AdminPanel.jsx";
 
 const KIND_FILL = {
   own: "var(--status-active)",
@@ -82,7 +83,7 @@ const CountyShapes = memo(function CountyShapes({ rows, paths }) {
 function readoutOf(r) {
   if (!r) return "Hover or tap a county.";
   if (!r.wired) return `${r.displayName} — not wired for parcels.`;
-  return `${r.displayName} — ${SOURCE_KIND_LABEL[r.kind]}${r.host ? ` · reads from ${r.host}` : ""}`;
+  return `${r.displayName} — ${SOURCE_KIND_LABEL[r.kind]}${r.publisherName ? ` · ${r.publisherName}` : ""}${r.host ? ` · reads from ${r.host}` : ""}`;
 }
 
 export default function ParcelCoverageSection({ loadPayload = fetchPayload }) {
@@ -193,18 +194,8 @@ export default function ParcelCoverageSection({ loadPayload = fetchPayload }) {
   const summary = useMemo(() => (data ? totalLine(data.coverage.totals) : ""), [data]);
 
   return (
-    <section
-      data-testid="parcel-coverage-section"
-      style={{
-        background: "var(--surface-raised)", border: "1px solid var(--border-default)",
-        borderRadius: RADIUS.lg, padding: 18, display: "flex", flexDirection: "column", gap: 8,
-        gridColumn: "1 / -1",
-      }}
-    >
-      <h2 style={{ margin: 0, fontSize: FONT_SIZE.display, fontWeight: 700, color: "var(--text-primary)" }}>
-        {PARCEL_COVERAGE_SECTION.title}
-      </h2>
-      <p style={{ margin: 0, fontSize: FONT_SIZE.control, color: "var(--text-tertiary)" }}>{PARCEL_COVERAGE_SECTION.blurb}</p>
+    <AdminPanel id="parcel-coverage" title={PARCEL_COVERAGE_SECTION.title} blurb={PARCEL_COVERAGE_SECTION.blurb}>
+      <div data-testid="parcel-coverage-section" style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 0 }}>
       {state.loading && <div style={{ fontSize: FONT_SIZE.control, color: "var(--text-tertiary)" }}>Loading county outlines…</div>}
       {state.error && (
         <div role="alert" style={{ fontSize: FONT_SIZE.control, color: "var(--danger-text)" }}>
@@ -271,6 +262,7 @@ export default function ParcelCoverageSection({ loadPayload = fetchPayload }) {
           )}
         </>
       )}
-    </section>
+    </div>
+    </AdminPanel>
   );
 }

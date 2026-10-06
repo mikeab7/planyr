@@ -20,6 +20,7 @@ import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { scheduleSaveState } from "./lib/saveState.js";
 import { ScheduleCenter, ScheduleActions } from "./components/ScheduleToolbar.jsx";
 import { planScheduleHintSync } from "../../shared/schedule/scheduleLinkHints.js";
+import { publishLiveSchedules } from "../../shared/schedule/liveScheduleIndex.js";
 import { allProjectNames } from "../../shared/names/names.js";
 import { listProjects, warmProjectsIfEmpty, suggestNameMatch, onProjectsChanged } from "../../shared/projects/projects.js";
 import { resolveControlledId } from "../../shared/projects/projectModel.js";
@@ -231,6 +232,8 @@ export default function Scheduler({
       // nav-state (not from one-shot link events), so unlink / relink / delete / two-schedule sites
       // all converge and stale hints already on disk heal. Source wins; never clears on an empty list.
       try {
+        if (nav.projects.length) publishLiveSchedules(nav.projects); // (an empty list = not loaded yet)
+        // NEW-2 — the switcher's calendar icon verifies against this
         for (const op of planScheduleHintSync(nav.projects, listProjects())) {
           onScheduleLinkChanged?.(op.groupId, { scheduleProjectId: op.scheduleProjectId, name: op.name });
         }

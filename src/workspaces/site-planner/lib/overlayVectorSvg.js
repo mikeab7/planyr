@@ -32,7 +32,7 @@ const attr = (k, v) => (v == null || v === "" ? "" : ` ${k}="${v}"`);
 /* Project one feature's coords and emit its SVG element STRING, or null if ANY projected vertex
  * is non-finite (skip the WHOLE feature — a half-drawn floodplain/contour is worse than an honest
  * omission). `projectLngLat([lon,lat]) -> {x,y}`; a `space:"pixel"` feature bypasses it. Pure. */
-export function featureToSvg(feature, projectLngLat, { round = 2, opacity = 1 } = {}) {
+export function featureToSvg(feature, projectLngLat, { round = 2, opacity = 1, casing = false } = {}) {
   if (!feature || !feature.coords) return null;
   const proj = feature.space === "pixel" ? identityPx : projectLngLat;
   const s = feature.style || {};
@@ -57,7 +57,12 @@ export function featureToSvg(feature, projectLngLat, { round = 2, opacity = 1 } 
     const pts = projLine(feature.coords);
     if (!pts || pts.length < 2) return null;
     const d = "M" + pts.join(" L");
-    return `<path d="${d}" fill="none"${stroke}${sw}${so}${dash} stroke-linejoin="round" stroke-linecap="round"/>`;
+    // `casing` (export only): a pale underlay of the SAME path so a line reads over a dark aerial. It carries
+    // data-vcase so the export restyle can size it from the line's own authored weight.
+    const under = casing && feature.space !== "pixel"
+      ? `<path data-vcase="1" d="${d}" fill="none" stroke="white"${sw} stroke-opacity="0.6" stroke-linejoin="round" stroke-linecap="round"/>`
+      : "";
+    return `${under}<path d="${d}" fill="none"${stroke}${sw}${so}${dash} stroke-linejoin="round" stroke-linecap="round"/>`;
   }
 
   if (feature.kind === "polygon") {
@@ -103,11 +108,11 @@ function labelSvg(labels, round) {
  * { svg, emitted, skipped } — a feature that couldn't be fully projected is SKIPPED and counted
  * (the caller logs it), never emitted partial. Labels ride after the geometry. Pure. */
 export function buildOverlayVectorFragment(features, projectLngLat, opts = {}) {
-  const { opacity = 1, labels = [], round = 2 } = opts;
+  const { opacity = 1, labels = [], round = 2, casing = false } = opts;
   let svg = "";
   let emitted = 0, skipped = 0;
   for (const f of features || []) {
-    const el = featureToSvg(f, projectLngLat, { round, opacity });
+    const el = featureToSvg(f, projectLngLat, { round, opacity, casing });
     if (el) { svg += el; emitted++; } else { skipped++; }
   }
   svg += labelSvg(labels, round);

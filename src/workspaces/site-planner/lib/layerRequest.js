@@ -114,9 +114,11 @@ export function featureLayerOptions(cfg, opacity, pane, opts = {}) {
   // B2081249 — a row may narrow its service with a SQL `where` (the National Network layer must draw only NN = 1).
   if (cfg.where) o.where = cfg.where;
   if (typeof opts.pointToLayer === "function") o.pointToLayer = opts.pointToLayer;
+  // A LINE-role row never fills: a polyline answered by a service as one long ring must not paint as a solid wedge.
+  const noFill = cfg.role === "line" ? { fill: false } : null;
   o.style = typeof cfg.styleFn === "function"
-    ? (feature) => cfg.styleFn(feature && feature.properties, opacity)
-    : () => ({ color: cfg.color || "#b91c1c", weight: cfg.weight || 2, opacity, fillOpacity: 0 });
+    ? (feature) => (noFill ? { ...noFill, ...cfg.styleFn(feature && feature.properties, opacity) } : cfg.styleFn(feature && feature.properties, opacity))
+    : () => ({ color: cfg.color || "#b91c1c", weight: cfg.weight || 2, opacity, fillOpacity: 0, ...(noFill || {}) });
   return o;
 }
 

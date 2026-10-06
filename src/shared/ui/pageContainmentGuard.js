@@ -32,11 +32,28 @@ import { layoutViewportHeight } from "./layoutViewport.js";
 const SCROLL_EPS = 0; // html/body are pinned — ANY nonzero scroll offset is already the defect
 const SCALE_EPS = 0.01; // visualViewport.scale drift tolerance (float rounding only)
 
+const KEYBOARD_MIN_SHRINK = 100; // visualViewport shorter than the layout viewport by more than this = keyboard
+
+/** PURE — is a document scroll explained by the soft keyboard? See `detectDrift`. */
+export function keyboardDrivenScroll({ focusedEditable = false, layoutHeight = 0, vvHeight = 0, scaleDrift = false } = {}) {
+  if (focusedEditable) return true;
+  return !scaleDrift && vvHeight > 0 && layoutHeight > 0 && layoutHeight - vvHeight > KEYBOARD_MIN_SHRINK;
+}
+
 /** PURE — given a window's current scroll + visualViewport reading, decide whether containment
  * has drifted and, if so, describe it. Node-testable (no DOM writes). */
-export function detectDrift({ scrollX = 0, scrollY = 0, scale = 1 } = {}) {
-  const scrollDrift = Math.abs(scrollX) > SCROLL_EPS || Math.abs(scrollY) > SCROLL_EPS;
+export function detectDrift({ scrollX = 0, scrollY = 0, scale = 1, focusedEditable = false, layoutHeight = 0, vvHeight = 0 } = {}) {
   const scaleDrift = Math.abs(scale - 1) > SCALE_EPS;
+  /* ⛔ NEW-1 (2026-10-05): iOS Safari lifts a focused field above the soft keyboard BY SCROLLING THE
+   * DOCUMENT, even with a `position: fixed` body — so a scroll while the keyboard is the reason for
+   * it is Safari's own keyboard avoidance, never the stray-drag defect. Healing it (scrollTo(0,0))
+   * made the page jump up and snap back down with the field under the keyboard, app-wide; 49
+   * production `client_errors` rows (scrollY 100–350, scale 1, on #/site #/food #/notes #/admin) are
+   * the keyboard, not the drag. Keyboard-driven = an editable is focused, OR the visual viewport is
+   * markedly shorter than the layout viewport at scale 1 (a pinch also shrinks it — that is the
+   * scale branch's business, not a keyboard). Either is enough. */
+  const keyboardDriven = keyboardDrivenScroll({ focusedEditable, layoutHeight, vvHeight, scaleDrift });
+  const scrollDrift = !keyboardDriven && (Math.abs(scrollX) > SCROLL_EPS || Math.abs(scrollY) > SCROLL_EPS);
   if (!scrollDrift && !scaleDrift) return null;
   return {
     kind: "page-containment-drift",
@@ -62,9 +79,21 @@ export function keyboardUp(win) {
   } catch (_) { return false; }
 }
 
+function focusedEditable(win) {
+  try {
+    const a = win.document && win.document.activeElement;
+    return !!(a && (a.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)));
+  } catch (_) { return false; }
+}
+
 function readState(win) {
   const vv = win.visualViewport;
-  return { scrollX: win.scrollX || 0, scrollY: win.scrollY || 0, scale: vv ? vv.scale : 1 };
+  let layoutHeight = 0;
+  try { layoutHeight = layoutViewportHeight(win); } catch (_) { /* no DOM */ }
+  return {
+    scrollX: win.scrollX || 0, scrollY: win.scrollY || 0, scale: vv ? vv.scale : 1,
+    focusedEditable: focusedEditable(win), layoutHeight, vvHeight: vv ? (vv.height || 0) : 0,
+  };
 }
 
 /* Force Safari to recompute and reset its own zoom level: toggling the viewport meta's
@@ -100,32 +129,24 @@ export function installPageContainmentGuard(win = typeof window === "undefined" 
 
   const check = () => {
     try {
-      const found = detectDrift(readState(win));
-      if (!found) return;
+      const state = readState(win);
+      const found = detectDrift(state);
+      if (!found) {
+        /* Keyboard-driven scroll: leave it exactly where Safari put it, report nothing. Announce it
+         * so the Notes canvas / phoneTyping can re-check the caret (they also listen to the
+         * visualViewport themselves — this is only a nudge). */
+        if ((win.scrollX || win.scrollY) && keyboardDrivenScroll({ ...state, scaleDrift: false })) {
+          try { win.dispatchEvent(new Event("planyr:viewport-healed")); } catch (_) { /* best-effort */ }
+        }
+        return;
+      }
       // Self-heal first — the fix matters more than the report, and healing before reporting
       // means the extra carries what was OBSERVED, not a value already corrected out from under it.
       if (found.extra.scrollDrift) win.scrollTo(0, 0);
       if (found.extra.scaleDrift) resetViewportScale(doc);
-      /* ⛔ NEW-6a — A SCROLL WITH THE KEYBOARD UP IS iOS REVEALING THE FOCUSED FIELD, NOT A STRAY
-       * DRAG. Production `client_errors` held iPhone rows "document scrolled to (0, 244/264/275/276)"
-       * — about a keyboard's height — i.e. iOS scrolling the pinned document to lift the field, and
-       * this guard undoing it. The pin stays (the header must not slide away), but (1) the heal is
-       * ANNOUNCED so the Notes canvas can pan the caret above the keyboard itself — the two now
-       * cooperate instead of fighting — and (2) it reports as its own kind, so a real drag is still
-       * distinguishable from the expected one. Inference, not proof: no real iPhone here. */
-      const kb = keyboardUp(win);
-      if (found.extra.scrollDrift && kb) {
-        try { win.dispatchEvent(new Event("planyr:viewport-healed")); } catch (_) { /* best-effort */ }
-      }
       const now = Date.now();
       if (now - lastReportAt < REPORT_THROTTLE_MS) return;
       lastReportAt = now;
-      if (found.extra.scrollDrift && kb && !found.extra.scaleDrift) {
-        report("page-containment-keyboard-reveal",
-          `document scrolled to (${found.extra.scrollX}, ${found.extra.scrollY}) with the keyboard up — iOS revealing the focused field; pinned back and announced so the canvas can reveal the caret`,
-          { ...found.extra, keyboardUp: true, url: win.location ? win.location.hash : "" });
-        return;
-      }
       report(found.kind, found.message, { ...found.extra, url: win.location ? win.location.hash : "" });
     } catch (_) { /* never throw into the app */ }
   };
