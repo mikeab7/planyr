@@ -187,6 +187,16 @@ jobs:
         env:
           BASE_URL: "http://localhost:4173/"
         run: node ui-audit/verify-notes-table-click.mjs
+      # Notes drag-pans-from-anywhere gate (NEW-1 / B2156912, 2026-10-06). Owner: "click-and-drag should
+      # ALWAYS pan the page, from any spot" — a drag that began on a table selected it instead. Trusted
+      # `page.mouse` only; table cell / header / border, box text and picture each must move the workspace
+      # by the drag delta and leave NOTHING selected, with plain clicks, the exceptions (grip, resize handle,
+      # column border) and text-selection-in-the-edited-box asserted beside them. 21 ✗ on pre-fix main.
+      # Reuses the preview server and Chromium the gates above already paid for.
+      - name: Notes drag pans from anywhere, incl. on a table (nothing selected by the press — NEW-1, B2156912)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/verify-notes-drag-pan.mjs
       # App-shell WIDTH SWEEP (NEW-3, 2026-10-05). Owner: "I want the frame to always work regardless of the
       # size of computer or screen." His Schedule header wrapped onto a second row, clipped at the window
       # edge and showed a page scrollbar because CI only ever looked at one width. For every module route at
