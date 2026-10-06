@@ -450,7 +450,7 @@ describe("Scheduler.jsx — the ROUTE outranks the embed's section", () => {
     const i = SRC.indexOf("<iframe\n");
     expect(i).toBeGreaterThan(-1);
     const block = SRC.slice(i, SRC.indexOf("/>", i));
-    expect(block).toMatch(/visibility:\s*\(showEmptyState \|\| gridMismatched\)\s*\?\s*"hidden"\s*:\s*"visible"/);
+    expect(block).toMatch(/visibility:\s*\(showEmptyState \|\| gridMismatched \|\| showLoadState\)\s*\?\s*"hidden"\s*:\s*"visible"/);
   });
 
   // B1644368 (NEW-1 amendment) — the SCHEDULE crumb must never name a schedule the grid itself is

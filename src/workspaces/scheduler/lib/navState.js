@@ -169,9 +169,14 @@ export function dashboardNavActions({ projectId } = {}) {
 // the only surface from which a schedule can be created or linked (the breadcrumb's New project
 // makes an UNLINKED schedule). Pressing Dashboard clears `projectId`, which is what closes this.
 export function shouldShowLinkPanel({
-  ready = false, projectId = null, linkedSchedule = null, routedSiteName = null,
+  ready = false, projectId = null, linkedSchedule = null, routedSiteName = null, listLoaded = false,
 } = {}) {
   if (!ready) return false;              // never flash before the iframe reports in
+  // NEW-1 (SCHED-EMPTY-ON-SLOW-LOAD, 2026-10-06) — "no schedule for X" is a claim about a LIST, so it
+  // may only be made once that list has actually arrived. An unloaded / failed list is not an empty one
+  // (the cloud was slow, `ready` flipped on its fallback timer, `projects` was still [] — and the
+  // owner was offered "Create schedule" on a project that already had three). See scheduleListState.
+  if (!listLoaded) return false;
   if (projectId == null) return false;   // no routed site → nothing to resolve
   if (linkedSchedule) return false;      // already linked → the grid is the answer
   if (!routedSiteName) return false;     // never surface (or create) a schedule named the raw id (B560)
@@ -458,3 +463,36 @@ export function newProjectAction({ projectId = null, routedSiteName = null } = {
  * project crumb answers "which project" on its own, with nothing to relabel. If a future session
  * needs to rebuild a combined single-crumb label, the git history has both functions and their
  * tests intact as of this commit. */
+
+
+/* ---- NEW-1 (SCHED-EMPTY-ON-SLOW-LOAD, 2026-10-06) — the schedule LIST has three states, not two ---------
+ *
+ * Owner report: with Supabase slow, every schedule "disappeared" — the Schedule tab said "No schedule for
+ * Goose Creek" and offered Create. Nothing was lost; the shell had treated "the list has not arrived" as
+ * "the list is empty". `ready` (the loader latch) flips on a 2.5 s / 6 s FALLBACK timer so a broken embed
+ * never holds a spinner forever, and `projects` starts as [] — so a slow cloud read looked exactly like a
+ * project with zero schedules, and Create on a project that really had one is how Goose Creek (2)/(3)/(4)
+ * were minted on 2026-09-08.
+ *
+ * `listLoaded` is true only once a genuine `planar:nav-state` has landed (the embedded app emits it only
+ * when its document has really loaded — never for a failed read). Until then the answer is one of:
+ *   loading — quiet, no actions
+ *   slow    — still loading, past SCHEDULE_SLOW_MS: say the cloud is slow
+ *   failed  — the embed reported a failed read, or SCHEDULE_FAIL_MS passed with nothing: "couldn't reach"
+ *             + Retry. The embed keeps retrying on its own, so a late success still opens the schedule.
+ * Only `loaded` may show "No schedule for X" / Create.
+ */
+export const SCHEDULE_SLOW_MS = 4000;
+export const SCHEDULE_FAIL_MS = 20000;
+export function scheduleListState({ listLoaded = false, reportedFailure = false, waitedMs = 0 } = {}) {
+  if (listLoaded) return "loaded";
+  if (reportedFailure || waitedMs >= SCHEDULE_FAIL_MS) return "failed";
+  if (waitedMs >= SCHEDULE_SLOW_MS) return "slow";
+  return "loading";
+}
+
+// Parse the embedded app's `planar:load-state` message ({state: "loading" | "failed"}), or null.
+export function parseLoadState(message) {
+  if (!message || message.source !== "planar-seq" || message.type !== "planar:load-state") return null;
+  return message.state === "failed" ? "failed" : message.state === "loading" ? "loading" : null;
+}
