@@ -11,21 +11,54 @@
 const list = (v) => (Array.isArray(v) ? v.filter((s) => s != null && s !== "").map(String) : []);
 const join = (a, sep = " + ") => a.join(sep);
 
-/* The city line. `b` is `formatJurisdictionBadge(...)` output (or null when it could not be built). */
+const stripCity = (n) => String(n).replace(/^City of\s+/i, "");
+const pct = (x) => `${Math.round(x * 100)}%`;
+const LIMIT_WORD = { limited: "limited purpose", strip: "strip annexation", unknown: "class not stated" };
+
+/* The class + area-share line under a city value: "Full purpose 4% · limited purpose 67% · rest ETJ". The classes are
+ * kept honest and are never folded into the headline value — they ride a second muted line instead. Null when the site
+ * carries no limited-purpose / strip area (the plain share note then applies). */
+export function cityClassDetail(b) {
+  const lim = Array.isArray(b && b.cityLimitedAreas) ? b.cityLimitedAreas : [];
+  if (!lim.length) return null;
+  const bits = [];
+  const hasFull = list(b.governingCities).length > 0 || list(b.partialCities).length > 0;
+  if (hasFull) bits.push(b.citySharePct != null ? `Full purpose ${pct(b.citySharePct)}` : "Full purpose");
+  const multi = new Set(lim.map((a) => String(a.name))).size > 1;
+  lim.forEach((a) => {
+    const word = LIMIT_WORD[a.class] || LIMIT_WORD.unknown;
+    const lead = multi ? `${stripCity(a.name)} ${word}` : (bits.length ? word : `${word[0].toUpperCase()}${word.slice(1)}`);
+    bits.push(a.share != null ? `${lead} ${pct(a.share)}` : lead);
+  });
+  const etj = list(b.etjLabels);
+  if (b.shape === "split" || hasFull || lim.length) bits.push(etj.length ? "rest ETJ" : b.shape === "split" ? "rest unincorporated" : null);
+  return bits.filter(Boolean).join(" · ");
+}
+
+/* The city line. `b` is `formatJurisdictionBadge(...)` output (or null when it could not be built).
+ * `text` is always a SHORT VALUE ("Baytown, part ETJ"); anything longer (class split, area shares, the touch tail) is
+ * `note`, a second muted line. */
 export function cityLineOf(b) {
   if (!b) return { text: "Couldn't check", failed: true, note: null };
-  const gov = list(b.governingCities), part = list(b.partialCities), etj = list(b.etjLabels);
+  const gov = list(b.governingCities).map(stripCity), part = list(b.partialCities).map(stripCity), etj = list(b.etjLabels).map(stripCity);
+  const limited = Array.isArray(b.cityLimitedAreas) ? b.cityLimitedAreas : [];
   const complicated = !!b.state                       // GA / CA: the county governs — the badge says how
-    || list(b.cityLimitedAreas).length > 0            // limited-purpose / strip annexation keeps its class
     || list(b.etjUndetermined).length > 0 || list(b.etjReleased).length > 0 || !!b.etjUnavailable
     || list(b.touchesCities).length > 0 || !!b.unresolved || b.shape === "unknown";
   if (complicated) return { text: b.jur || "Couldn't check", failed: b.shape === "unknown", note: b.tail || null };
-  const share = b.citySharePct != null ? `${Math.round(b.citySharePct * 100)}% of the site by area is in city limits` : null;
+  const share = b.citySharePct != null ? `${pct(b.citySharePct)} of the site by area is in city limits` : null;
+  const detail = cityClassDetail(b) || share || b.tail || null;
   if (b.shape === "split") {
-    return { text: `${join(part)}, part ${etj.length ? "ETJ" : "unincorporated"}`, failed: false, note: share || b.tail || null };
+    return { text: `${join(part)}, part ${etj.length ? "ETJ" : "unincorporated"}`, failed: false, note: detail };
   }
-  if (b.shape === "in-city") return { text: join(gov), failed: false, note: b.tail || null };
-  if (b.shape === "in-city-etj") return { text: `${join(gov)}, plus ${join(etj)} ETJ`, failed: false, note: b.tail || null };
+  if (b.shape === "in-city") return { text: join(gov), failed: false, note: detail };
+  if (b.shape === "in-city-etj") return { text: `${join(gov)}, plus ${join(etj)} ETJ`, failed: false, note: detail };
+  // No full-purpose city holds the site, but a limited-purpose / strip area does: say so in the value, never "Baytown".
+  if (limited.length) {
+    const names = [...new Set(limited.map((a) => stripCity(a.name)))];
+    const word = LIMIT_WORD[limited[0].class] || LIMIT_WORD.unknown;
+    return { text: `${join(names)}, ${word}`, failed: false, note: detail };
+  }
   if (b.shape === "etj") return { text: `${join(etj)} ETJ`, failed: false, note: b.tail || null };
   if (b.shape === "unincorporated") return { text: "Unincorporated", failed: false, note: b.tail || null };
   return { text: b.jur || "Couldn't check", failed: false, note: b.tail || null };
@@ -45,7 +78,7 @@ export function mergeRoadAnswers(answers) {
   if (!usable.length) return list.find((a) => a.__error) || { roads: [], error: (failed[0] && failed[0].error) || "Couldn't check" };
   const by = new Map();
   for (const a of usable) for (const r of a.roads || []) {
-    const key = (r.name && String(r.name).toLowerCase()) || (r.route != null ? "route:" + r.route : null) || "u:" + by.size;
+    const key = (r.name && normalizeRoadName(r.name).toLowerCase()) || (r.route != null ? "route:" + r.route : null) || "u:" + by.size;
     const cur = by.get(key);
     if (!cur) { by.set(key, { ...r, _max: r.lengthM || 0 }); continue; }
     cur.lengthM = (cur.lengthM || 0) + (r.lengthM || 0);
@@ -56,27 +89,73 @@ export function mergeRoadAnswers(answers) {
   return { roads, error: null, partialError: failed.length > 0 && failed.length < list.length };
 }
 
+/* ── Road names ──────────────────────────────────────────────────────────────────────────────────
+ * The sources publish a street type twice ("Chambers Parkway Pkwy", "Lake Groove Lane Ln") and join a road's two names
+ * with a bare hyphen. A name is cleaned here, once, so every row of the list reads the same way. */
+const SUFFIX_FORMS = {
+  parkway: ["pkwy", "pky"], lane: ["ln"], road: ["rd"], drive: ["dr"], street: ["st"], avenue: ["ave"], boulevard: ["blvd"],
+  highway: ["hwy"], court: ["ct"], circle: ["cir"], trail: ["trl"], place: ["pl"], freeway: ["fwy"], expressway: ["expy", "expwy"],
+  terrace: ["ter"], way: ["wy"],
+};
+const dedupeSuffix = (segment) => {
+  const toks = segment.split(" ").filter(Boolean);
+  const n = toks.length;
+  if (n >= 3) {                                  // keep a bare "Lane Ln" style 2-word name untouched: needs a real name before it
+    const a = toks[n - 2].toLowerCase().replace(/\.$/, ""), z = toks[n - 1].toLowerCase().replace(/\.$/, "");
+    if ((SUFFIX_FORMS[a] && SUFFIX_FORMS[a].includes(z)) || (SUFFIX_FORMS[z] && SUFFIX_FORMS[z].includes(a))) {
+      const keep = SUFFIX_FORMS[a] ? toks[n - 2] : toks[n - 1];  // the long form
+      return [...toks.slice(0, n - 2), keep].join(" ");
+    }
+  }
+  return toks.join(" ");
+};
+/* One clean road name: whitespace collapsed, a doubled street type removed, and a spaced hyphen / dash between two
+ * names written as " / " (so no dash character is left to be mistaken for the name↔maintainer separator). */
+export function normalizeRoadName(raw) {
+  const s = String(raw == null ? "" : raw).replace(/\s+/g, " ").trim();
+  return s.split(/\s+[-–—]\s+/).map(dedupeSuffix).filter(Boolean).join(" / ");
+}
+
+const AUTH_SHORT = { "State (TxDOT)": "state", County: "county", City: "city", Federal: "federal", Unknown: "unknown", "Toll / managed-lane authority": "toll" };
+const AUTH_ORDER = ["state", "county", "city", "toll", "federal", "unknown"];
+const authShort = (label) => AUTH_SHORT[label] || String(label).replace(/\s*\(.*?\)\s*/g, " ").trim().toLowerCase();
+export const ROADS_LIST_MAX = 10;
+
 /* The roads line from identifyRoadAuthority's `{ roads: [{ name, route, authority:{label} }], error }`.
- * kind: "all" (one maintainer for every road) · "mixed" (a per-road list) · "none" · "failed" · "not-screened". */
+ * kind: "all" (one maintainer for every road) · "mixed" (a per-road list) · "none" · "failed" · "not-screened".
+ * The count in the headline IS the length of `items` — one array feeds both, so they cannot disagree. A road the source
+ * names two ways collapses to one row. */
 export function roadsLineOf(road, { notScreenedIn = null } = {}) {
   if (road && road.__notScreened) return { kind: "not-screened", text: `Not screened in ${notScreenedIn || "this state"}`, items: [] };
   if (!road || road.__error || (road.error && !(Array.isArray(road.roads) && road.roads.length))) return { kind: "failed", text: "Couldn't check", items: [] };
-  const roads = Array.isArray(road.roads) ? road.roads : [];
-  if (!roads.length) return { kind: "none", text: "No fronting road found", items: [] };
-  const nameOf = (r) => r.name || (r.route ? `Route ${r.route}` : "Unnamed road");
+  const raw = Array.isArray(road.roads) ? road.roads : [];
+  if (!raw.length) return { kind: "none", text: "No fronting road found", items: [] };
+  const nameOf = (r) => normalizeRoadName(r.name || (r.route ? `Route ${r.route}` : "")) || "Unnamed road";
   const authOf = (r) => (r.authority && r.authority.label) || "Unknown";
-  const auths = [...new Set(roads.map(authOf))];
+  const seen = new Set();
+  const items = [];
+  for (const r of raw) {
+    const name = nameOf(r), authority = authOf(r);
+    const key = `${name.toLowerCase()}|${authority}`;
+    if (name !== "Unnamed road" && seen.has(key)) continue;
+    seen.add(key);
+    items.push({ name, authority, authorityShort: authShort(authority) });
+  }
+  const n = items.length;
+  const auths = [...new Set(items.map((i) => i.authority))];
   const partial = road.partialError ? " (some parcels couldn't be checked)" : "";
-  const names = roads.map(nameOf);
+  const names = items.map((i) => i.name);
   if (auths.length === 1) {
     const a = auths[0];
-    const head = a === "Unknown" ? (roads.length === 1 ? "Maintainer unknown" : `Maintainer unknown for all ${roads.length}`)
-      : roads.length === 1 ? `${a} maintains` : `${a} maintains all ${roads.length}`;
+    const head = a === "Unknown" ? (n === 1 ? "Maintainer unknown" : `Maintainer unknown for all ${n}`)
+      : n === 1 ? `${a} maintains` : `${a} maintains all ${n}`;
     const shown = names.slice(0, 3).join(", ") + (names.length > 3 ? ", …" : "");
-    return { kind: "all", text: (roads.length === 1 ? `${head} ${shown}` : `${head} · ${shown}`) + partial, items: roads.map((r) => ({ name: nameOf(r), authority: authOf(r) })) };
+    return { kind: "all", text: (n === 1 ? `${head} ${shown}` : `${head} · ${shown}`) + partial, items };
   }
-  const items = roads.map((r) => ({ name: nameOf(r), authority: authOf(r) }));
-  return { kind: "mixed", text: `Mixed — ${roads.length} roads${partial}`, items };
+  const counts = new Map();
+  items.forEach((i) => counts.set(i.authorityShort, (counts.get(i.authorityShort) || 0) + 1));
+  const split = [...counts.entries()].sort((x, y) => (AUTH_ORDER.indexOf(x[0]) + 1 || 99) - (AUTH_ORDER.indexOf(y[0]) + 1 || 99)).map(([k, c]) => `${c} ${k}`).join(", ");
+  return { kind: "mixed", text: `Mixed · ${n} road${n === 1 ? "" : "s"} · ${split}${partial}`, items, listed: items.slice(0, ROADS_LIST_MAX), more: Math.max(0, n - ROADS_LIST_MAX) };
 }
 
 /* The whole "Who governs this site" model. */

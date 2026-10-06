@@ -61,6 +61,7 @@ export const VERDICT_REGISTRY = {
   "food_rls.test.sql": passedCommaFailed,
   "parcel_active_deleted_invariant.test.sql": allPassedOrCountedFail,
   "profiles_email_sync.test.sql": allPassedOrCountedFail,
+  "project_schedule_cascade.test.sql": allPassedOrCountedFail,
   "reconcile_site_group_name.test.sql": proofPassedOrFailed,
   "security_definer_ownership_audit.test.sql": passedCommaFailed,
   "sites_block_delete_live_group.test.sql": allPassedOrCountedFail,
