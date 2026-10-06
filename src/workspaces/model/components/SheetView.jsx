@@ -1153,7 +1153,9 @@ const SheetView = forwardRef(function SheetView({
       {/* width+minWidth, not Math.max(totalW, "100%") — that mixes a number with a CSS percent
           string, which Number("100%") coerces to NaN and React then rejects the whole style
           ("`NaN` is an invalid value for the `width` css style property"), measured live. */}
-      <div style={{ position: "relative", height: headerH + rowOffsets[totalRows], width: totalW, minWidth: "100%" }}>
+      {/* NEW-3 (Schedule grid, narrow widths) — the last rows can scroll CLEAR of the two floating corner controls
+          (the zoom pill and the shell's Help "?" stacked above it): trailing blank scroll room, ~1 pill + 1 button. */}
+      <div style={{ position: "relative", height: headerH + rowOffsets[totalRows] + 96, width: totalW, minWidth: "100%" }}>
         {/* Header row — sticky vertically, scrolls horizontally with the body via the shared
             container; individual FROZEN-column cells within it are ALSO sticky-left (below).
             Grid-line hierarchy (Stage 2 visual pass): a STRONGER rule under the whole band. */}

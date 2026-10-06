@@ -114,8 +114,10 @@ export function featureLayerOptions(cfg, opacity, pane, opts = {}) {
   // B2081249 — a row may narrow its service with a SQL `where` (the National Network layer must draw only NN = 1).
   if (cfg.where) o.where = cfg.where;
   if (typeof opts.pointToLayer === "function") o.pointToLayer = opts.pointToLayer;
+  // A LINE-role row never fills: a polyline answered by a service as one long ring must not paint as a solid wedge.
+  const noFill = cfg.role === "line" ? { fill: false } : null;
   o.style = typeof cfg.styleFn === "function"
-    ? (feature) => cfg.styleFn(feature && feature.properties, opacity)
+    ? (feature) => (noFill ? { ...noFill, ...cfg.styleFn(feature && feature.properties, opacity) } : cfg.styleFn(feature && feature.properties, opacity))
     : () => featureBaseStyle(cfg, opacity);
   return o;
 }
@@ -127,7 +129,7 @@ export function featureLayerOptions(cfg, opacity, pane, opts = {}) {
  * line fetched after the first opacity write was born with Leaflet's default stroke (the default blue,
  * weight 3) and only the first batch kept the row's colour. */
 export function featureBaseStyle(cfg, opacity) {
-  return { color: cfg.color || "#b91c1c", weight: cfg.weight || 2, opacity, fillOpacity: 0 };
+  return { color: cfg.color || "#b91c1c", weight: cfg.weight || 2, opacity, fillOpacity: 0, ...(cfg.role === "line" ? { fill: false } : {}) };
 }
 
 /* Can this layer's service answer an ArcGIS `/identify` at a point (NEW-2)?

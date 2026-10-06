@@ -69,7 +69,6 @@ import {
   PANE_AREA_FRONT, PANE_AREA_FRONT_LABEL, FRONT_BAND_ATTR,
 } from "./lib/mapStack.js";
 import { loadRasterIdentify, makeHoverIdentify, rasterIdentifyNow } from "./lib/rasterIdentifyLazy.js";
-import { focusOverlays } from "./lib/layerFocus.js";
 import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, applyOnOverrides, overridesSig } from "./lib/layerPrefs.js";
 // NEW-1 — the per-site "Show above plan" twin of the four above: which GIS layers this site had
 // lifted over the site elements. Its own sparse map, so nothing about layerOverrides changes.
@@ -182,7 +181,7 @@ import ColorField from "../../shared/ui/ColorField.jsx";
 /* LAZY (B1064 tranche a). The Standards footer renders only while the Standards panel is the
  * open one, docked or floating — never at first paint. */
 const StandardsBar = lazy(() => import("./components/StandardsBar.jsx"));
-import { loadUserPrefs, updateUserPrefs, applyPrefs, getPrefsSnapshot, subscribePrefs, setStandardPref, getStandardPref } from "./lib/userPrefs.js";
+import { loadUserPrefs, updateUserPrefs, applyPrefs, getPrefsSnapshot, subscribePrefs, setStandardPref, getStandardPref, setExportPref } from "./lib/userPrefs.js";
 import {
   PARCEL_STD_KEYS, TYPE_STD_KEYS, MEASURE_STD_KEYS, applyAllStandards, allStandardsImpact, appliedObjectsLabel,
   EMPTY_STD_DRAFT, draftParcelValue, draftTypeValue, draftMeasureValue, withParcelDraft, withTypeDraft, withMeasureDraft,
@@ -487,7 +486,7 @@ import {
  * render immediately; this lazy tier only ENRICHES that line with the regime name and the statute. */
 import { siteState as resolveSiteState } from "./lib/siteRegion.js";
 import { splitPolygonByCut, remapEdgeVector } from "./lib/polygonSplit.js";
-import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea } from "./lib/polyClip.js";
+import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea, mergeParcelRings } from "./lib/polyClip.js";
 import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom, mapChromeCardStyle } from "./lib/sheetFurniture.js";
 // B765985 — pure, dependency-free (safe on the boot path): the explicit engineering-scale math
 // the compose screen's frame-locking and fit-check use.
@@ -1385,54 +1384,6 @@ function nearestPointOnSeg(p, a, b) {
   let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
   t = Math.max(0, Math.min(1, t));
   return { x: a.x + t * dx, y: a.y + t * dy };
-}
-
-/* ----------------------- polygon union (combine) ------------------- */
-// Merge two adjacent simple polygons that share a boundary. Each shared edge
-// appears in opposite directions in the two rings (consistent winding), so we
-// cancel every edge that has a reverse twin in the other ring, then stitch the
-// surviving edges back into one outer loop. Returns the merged ring or null
-// (not adjacent / couldn't form a single loop).
-function mergeRings(ringA, ringB, tol = 0.75) {
-  const eq = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) <= tol;
-  const edges = [];
-  const add = (ring) => { for (let i = 0; i < ring.length; i++) edges.push({ a: ring[i], b: ring[(i + 1) % ring.length], dead: false }); };
-  add(ringA); add(ringB);
-  let shared = 0;
-  for (let i = 0; i < edges.length; i++) {
-    if (edges[i].dead) continue;
-    for (let j = 0; j < edges.length; j++) {
-      if (j === i || edges[j].dead) continue;
-      if (eq(edges[i].a, edges[j].b) && eq(edges[i].b, edges[j].a)) { edges[i].dead = edges[j].dead = true; shared++; break; }
-    }
-  }
-  if (!shared) return null; // no common boundary → nothing to fuse
-  const live = edges.filter((e) => !e.dead);
-  if (live.length < 3) return null;
-  const used = new Array(live.length).fill(false);
-  const ring = [live[0].a, live[0].b]; used[0] = true;
-  for (let guard = 0; guard < live.length + 2; guard++) {
-    const end = ring[ring.length - 1];
-    let f = -1;
-    for (let k = 0; k < live.length; k++) { if (!used[k] && eq(live[k].a, end)) { f = k; break; } }
-    if (f < 0) break;
-    used[f] = true;
-    ring.push(live[f].b);
-  }
-  if (ring.length > 1 && eq(ring[0], ring[ring.length - 1])) ring.pop();
-  // drop coincident / collinear vertices left over from the cancelled edges
-  const dedup = [];
-  for (const p of ring) if (!dedup.length || !eq(dedup[dedup.length - 1], p)) dedup.push(p);
-  if (dedup.length > 1 && eq(dedup[0], dedup[dedup.length - 1])) dedup.pop();
-  const out = [];
-  for (let i = 0; i < dedup.length; i++) {
-    const a = dedup[(i - 1 + dedup.length) % dedup.length], b = dedup[i], c = dedup[(i + 1) % dedup.length];
-    const cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-    const baseLen = Math.hypot(c.x - a.x, c.y - a.y) || 1; // |cross|/base = perpendicular deviation in ft — scale-independent (B28)
-    if (Math.abs(cross) / baseLen > 0.1) out.push(b); // keep a vertex only if it bends > ~0.1 ft off the a→c chord
-  }
-  const final = out.length >= 3 ? out : dedup;
-  return final.length >= 3 ? final : null;
 }
 
 /* ------------------------------ format ----------------------------- */
@@ -2881,10 +2832,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Wetlands presence lifted from the Site Analysis screen's own finding (B710's
   // Section-404 cross-flag consumes it — no new fetch).
   const [analysisWetlands, setAnalysisWetlands] = useState(null);
-  // NEW-1 — the Site Analysis panel's hover/open highlight: a layer id the DRAWN overlays are focused on. Transient by
-  // construction — it only ever feeds `syncOverlays` (below), never `overlays`, so it is neither persisted nor undoable.
-  const [analysisFocus, setAnalysisFocus] = useState(null);
-  const syncOverlays = useMemo(() => focusOverlays(overlays, analysisFocus, ALL_LAYERS), [overlays, analysisFocus]);
   // ⛔ B877440 — no `|| "harris"` fallback. A plan with no saved county is genuinely
   // unresolved, so `jurKey` starts null (easementRules.defaultJurForCounty now returns null
   // for a county with no easement record, rather than silently routing to City of Houston's
@@ -3636,7 +3583,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // point.
     let staged = overlayStagedRef.current ? Infinity : 0;
     let idleId = null, idleTimer = null;
-    const order = orderLayersByPriority(syncOverlays, ALL_LAYERS);
+    const order = orderLayersByPriority(overlays, ALL_LAYERS);
     /* ⛔ NEW-2 — THE ZOOM GATE RESOLVES BEFORE FIRST PAINT, and this is where that is enforced.
      *
      * The owner's report: opening the site, contour lines rendered IMMEDIATELY and then vanished
@@ -3659,7 +3606,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      * It gates ADDS ONLY. A removal, an opacity change and a lift are untouched, exactly as with
      * the staging gate it composes with. */
     const gateResolved = layerGateReady;
-    const sync = () => syncOverlayLayers(geoMapRef.current, syncOverlays, overlayRefs.current, {
+    const sync = () => syncOverlayLayers(geoMapRef.current, overlays, overlayRefs.current, {
       // NEW-1 — the two stacking bands (lib/mapStack.js). Each layer lands in the one its
       // declared ROLE names: fills under the plan, strokes and points over it.
       panes: {
@@ -3694,7 +3641,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (idleId != null && typeof cancelIdleCallback === "function") { try { cancelIdleCallback(idleId); } catch (_) {} }
       if (idleTimer) clearTimeout(idleTimer);
     };
-  }, [syncOverlays, origin, basemapOn, layerGateReady]); // eslint-disable-line
+  }, [overlays, origin, basemapOn, layerGateReady]); // eslint-disable-line
 
   /* NEW-2 — the latch itself. It flips exactly once, when the framed view has been COMMITTED to
    * the backdrop map, and does nothing thereafter — so a zoom gesture (which moves `view.ppf`
@@ -6413,15 +6360,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (wantOn) ensureBasemapOn();
   }, [setOverlays, ensureBasemapOn]);
 
-  /* NEW-1 — the Site Analysis panel's row highlight. Setting a layer focuses it immediately; clearing waits a beat so
-     moving the pointer from one row to the next never flashes the whole map through "unfocused". */
-  const focusClearRef = useRef(null);
-  const focusAnalysisLayer = useCallback((id) => {
-    clearTimeout(focusClearRef.current);
-    if (id) { setAnalysisFocus(id); return; }
-    focusClearRef.current = setTimeout(() => setAnalysisFocus(null), 140);
-  }, []);
-  useEffect(() => () => clearTimeout(focusClearRef.current), []);
   /* NEW-1 — a "Calls to make" tick, persisted PER SITE in the plan's own settings (sparse: only ticked ids exist). */
   const toggleAnalysisCall = useCallback((id, on) => {
     setSettings((s) => {
@@ -8290,17 +8228,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       }
       return;
     }
-    let result = chosen[0].points;
-    let remaining = chosen.slice(1).map((p) => p.points);
-    let progress = true;
-    while (remaining.length && progress) {
-      progress = false;
-      for (let i = 0; i < remaining.length; i++) {
-        const merged = mergeRings(result, remaining[i]);
-        if (merged) { result = merged; remaining.splice(i, 1); progress = true; break; }
+    // B2090352 — a real polygon union (lib/polyClip.js `mergeParcelRings`), not edge-twin cancellation:
+    // a shorter neighbour, an extra vertex on the common line, opposite winding and ~1 ft survey slop
+    // all fuse now. Lots that only touch at a corner, or are genuinely apart, are still refused — and
+    // the odd one out is NAMED instead of a blanket "don't share a boundary".
+    const merged = mergeParcelRings(chosen.map((p) => p.points));
+    if (!merged.ok) {
+      if (merged.code === "apart") {
+        const odd = chosen.filter((_, i) => !merged.groups[0].includes(i));
+        const info = parcelDisplayInfo(parcels);
+        const names = odd.map((p) => info.get(p.id)?.name || "a picked parcel");
+        flashWarn(merged.groups[0].length < 2
+          ? "⚠ Those parcels don't touch edge-to-edge — pick parcels that share a boundary."
+          : `⚠ ${names.join(", ")} ${odd.length === 1 ? "doesn't" : "don't"} touch the other picked parcels — unpick ${odd.length === 1 ? "it" : "them"} or pick the lots in between.`, 7000);
+      } else if (merged.code === "hole") {
+        flashWarn("⚠ Merging those would enclose a lot that isn't picked — pick that one too, or merge them in pieces.", 7000);
+      } else {
+        flashWarn("⚠ Those parcels couldn't be merged cleanly — their outlines are too far off to fuse.", 7000);
       }
+      return;
     }
-    if (remaining.length) { flashWarn("⚠ Those parcels don't all share a boundary — pick parcels that touch edge-to-edge.", 6000); return; } // B735: non-blocking notice, not a jarring alert()
+    const result = merged.ring;
     pushHistory("merge"); // NEW-1 (perf investigation) — was the bare "edit" fallback; a real OP_KINDS member so a merge is answerable from telemetry (op_kind on the written rows) instead of a fresh investigation next time.
     const np = { id: uid(), points: result, locked: true };
     // The merged-away parcels are genuinely removed (replaced by `np`), so TOMBSTONE them — the same
@@ -16779,8 +16727,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // `doPrint`'s 7th argument (the "Stats band" toggle) never reached the actual PDF even though
   // the live compose PREVIEW (a separate, direct `buildComposedSheet` call) honored it — a real
   // pre-existing bug, found and fixed incidentally while adding the 8th (Fit-to-frame page).
-  const exportPDF = (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true) =>
-    withExportSheet((x) => x.exportPDF(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride, includeBuildingsTable));
+  const exportPDF = (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true, flattenMarkups = true) =>
+    withExportSheet((x) => x.exportPDF(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride, includeBuildingsTable, flattenMarkups));
 
   /* ------------ export frame geometry (stays here — the print-frame drag reads it) ----
      devExtent also seeds the initial print crop, so it can't live in the lazy chunk. */
@@ -17092,12 +17040,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       preCanvasDisplayRef.current = null;
     }
   };
+  // Read at CALL time off the one shared prefs snapshot (never a mount-time copy of it).
+  const flattenMarkupsPref = () => getPrefsSnapshot().exportPrefs?.flattenMarkups === true;
   const doPrint = async () => {
     setComposeDownloading(true);
     try {
       const scaleText = printScale ? scaleLabel(printScale) : "";
       const preparedBy = (settings.printPreparedBy || "").trim();
-      await exportPDF(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false, composePageOverride, settings.printBuildingsTable !== false);
+      // NEW-1 — "Flatten markups" is a per-USER choice (account prefs), default OFF = editable annotations.
+      await exportPDF(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false, composePageOverride, settings.printBuildingsTable !== false, flattenMarkupsPref());
       cancelPrint();
     } finally { setComposeDownloading(false); }
   };
@@ -21579,7 +21530,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <LazyPanel name="Site Analysis" minHeight={220} label="Loading site analysis…">
                       <SiteAnalysis rings={rings} holes={holeRings} acres={acres} parcelCount={act.length}
                         isLayerOn={(id) => !!overlays?.[id]?.on} onToggleLayer={toggleAnalysisLayer} layerStatus={layerStatus} layerZoomNote={analysisLayerZoomNote}
-                        onFocusLayer={focusAnalysisLayer}
                         callsChecked={settings.analysisCalls || null} onToggleCall={toggleAnalysisCall}
                         onOpenDrainage={() => setLeftPanel("drainage")}
                         onFindings={(fs) => { const w = fs && fs.find((f) => f.id === "wetlands"); setAnalysisWetlands(w ? w.status : null); }} />
@@ -25781,6 +25731,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 mapLayersPrintable={mapLayersPrintable} printMapLayers={printMapLayers} onToggleMapLayers={setPrintMapLayers}
                 showMetricsBand={settings.printMetricsBand !== false} onToggleMetricsBand={(v) => setSettings((s) => ({ ...s, printMetricsBand: v }))}
                 buildingsTablePrintable={buildingsTablePrintable} showBuildingsTable={settings.printBuildingsTable !== false} onToggleBuildingsTable={(v) => setSettings((s) => ({ ...s, printBuildingsTable: v }))}
+                flattenMarkups={prefsSnap.exportPrefs?.flattenMarkups === true} onToggleFlattenMarkups={(v) => commitUserPrefs((p) => setExportPref(p, { flattenMarkups: v }))}
                 onReposition={exitToReposition} onCancel={cancelPrint} onDownload={doPrint}
                 downloading={composeDownloading}
               />
@@ -29490,7 +29441,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             onClose={() => setLeftPanel(null)}
             onToggle={() => { if (!narrow) detachPanel(leftPanel); }}
             data-testid={`panel-chrome-${leftPanel}`} />
-          <div data-wheelscroll="1" style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "13px 13px 24px" }}>
+          <div data-wheelscroll="1" data-panel-body={leftPanel} style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "13px 13px 24px",
+            // Site Analysis reads on the same white surface the Layers / Properties panels use — its verdict rows are not
+            // filled cards, so on the gray column ground the whole panel read as one flat gray wall.
+            ...(leftPanel === "analysis" ? { background: "var(--surface-overlay)" } : null) }}>
           {renderPanelBody(leftPanel)}
           </div>
           {leftPanel === "standards" && standardsFooter}

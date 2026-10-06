@@ -71,6 +71,7 @@ import {
 } from "../projects/projects.js";
 import { validateName, announceNameNotice } from "../names/nameCore.js";
 import { liveSiteName } from "../schedule/scheduleOwnership.js";
+import { useLiveSchedules, resolveScheduleHint } from "../schedule/liveScheduleIndex.js";
 import { resolveCurrentName, withCurrentProject, unionProjectLists, resolveControlledId as resolveControlledIdPure, hasSavedProjectRecord, applyFrozenOrder } from "../projects/projectModel.js";
 import { readPinnedFromMirror, readOpenedMap, noteProjectOpened, lastOpenedAt, orderForSwitcher, relTimeShort, highlightParts, companyCardsFor } from "../projects/projectSwitcherModel.js";
 import { useOrgName } from "../profile/orgNameStore.js";
@@ -396,6 +397,7 @@ export default function ProjectBreadcrumb({
   rowRef = null,
 }) {
   const controlled = Array.isArray(controlledProjects);
+  const liveSchedules = useLiveSchedules(); // NEW-2 — the calendar icon is verified against live schedules, not the stored hint alone
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [internalProjects, setInternalProjects] = useState([]);
@@ -986,7 +988,7 @@ export default function ProjectBreadcrumb({
                 ><PinIcon size={13} filled={isPinned} /></button>
               </span>
               <span data-testid={`project-slot-cal-${p.id}`} style={SLOT_CAL}>
-                {p.scheduleProjectId != null && (
+                {resolveScheduleHint(p, liveSchedules) != null && (
                   <span data-testid={`project-cal-${p.id}`} title="Has a schedule" aria-label="Has a schedule" style={{ display: "grid", placeItems: "center", color: "var(--text-secondary)" }}><CalendarIcon /></span>
                 )}
               </span>

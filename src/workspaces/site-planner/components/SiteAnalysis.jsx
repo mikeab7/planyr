@@ -19,15 +19,16 @@ import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
  * figure colour — the rows are not filled cards. A source that errors is "Couldn't check" with a Retry
  * — never blank, never "None", never green.
  *
- * The panel owns NO layer state: pills read and write the SAME overlay keys the Layers panel does (via
- * `isLayerOn` / `onToggleLayer`), and hovering or opening a row asks the planner to focus that row's
- * layer (`onFocusLayer`) — shown, with the other overlays dimmed, and never persisted.
+ * The panel owns NO layer state: pills AND rows read and write the SAME overlay keys the Layers panel does (via
+ * `isLayerOn` / `onToggleLayer`). Clicking a "Checked for you" row turns its layer on and keeps it on (it persists like
+ * any layer toggle) and opens the row's detail; clicking again turns it off and closes the detail. There is no hover
+ * behaviour anywhere: nothing is highlighted, dimmed or shown until a click. A row with nothing to draw (None, or
+ * "Couldn't check") opens its detail and says so — it never silently does nothing.
  *
  * Props:
  *   rings, holes   — active-parcel outer rings + save-and-except holes, [[ [lng,lat], … ]] (EPSG:4326)
  *   acres, parcelCount
  *   isLayerOn(id) / onToggleLayer(id, wantOn) / layerStatus / layerZoomNote(id)
- *   onFocusLayer(id|null) — hover / open highlight (transient)
  *   callsChecked / onToggleCall(id, checked) — the persisted ticks (per site); local fallback when absent
  *   onOpenDrainage — the "Open in Drainage →" link
  *   onFindings(findings) — the legacy wetlands status the buildability card reads
@@ -41,6 +42,11 @@ const SEV = {
   failed: { bar: "var(--border-strong)", ink: "var(--text-secondary)" },
 };
 
+/* One spacing step between rows, a larger step between sections — measured off the other docked left-rail panels in the
+ * running app (Land: 14 between sections / 10 between rows; Yield: 12 / 7; Standards: 10), not a new scale. */
+const GAP_ROW = 7;
+const GAP_SECTION = 14;
+
 const sectionLabel = {
   fontSize: FONT_SIZE.micro, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase",
   color: "var(--text-secondary)",
@@ -52,16 +58,14 @@ const linkBtn = {
 
 export default function SiteAnalysis({
   rings, holes = [], acres, parcelCount, isLayerOn, onToggleLayer, layerStatus = {}, layerZoomNote = null,
-  onFocusLayer = null, callsChecked = null, onToggleCall = null, onOpenDrainage = null, onFindings = null,
+  callsChecked = null, onToggleCall = null, onOpenDrainage = null, onFindings = null,
   runAnalysis = runSiteScreen, layers = ALL_LAYERS,
 }) {
   const [state, setState] = useState({ loading: false, result: null, error: null, empty: !rings || !rings.length });
-  const [openId, setOpenId] = useState(null);
+  const [openIds, setOpenIds] = useState({});   // detail open per row id (several rows can be on at once)
   const [retrying, setRetrying] = useState({});
   const [localCalls, setLocalCalls] = useState({});
   const reqRef = useRef(0);
-  const openRef = useRef(null);
-  openRef.current = openId;
 
   // Every coordinate of every ring and hole — a moved vertex must re-screen (the stored answers are keyed the same way).
   const sig = rings && rings.length ? ringsHash(rings, holes) : "";
@@ -96,8 +100,6 @@ export default function SiteAnalysis({
   // Run automatically when the screened parcel set changes (keyed by `sig`).
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { run(false); }, [sig]);
-  // Never leave a hover highlight behind when the panel goes away.
-  useEffect(() => () => { if (onFocusLayer) onFocusLayer(null); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const result = state.result;
   // The legacy wetlands status is lifted from an EFFECT, never from inside a state updater (a side effect there can
@@ -106,6 +108,15 @@ export default function SiteAnalysis({
   const rows = useMemo(() => result?.rows || [], [result]);
   const fresh = useMemo(() => freshnessOf(rows), [rows]);
   const pills = useMemo(() => (result && !result.partial ? pillsFor({ regions: result.regions || [], untrusted: result.untrusted || [], layers }) : []), [result, layers]);
+
+  // A layer switched off anywhere else (Layers panel, undo, Hide lines) forgets its rows' open flags, so a later switch-on
+  // by another route can never make an old detail pop open by itself. (Above the early return: hooks keep their order.)
+  const rowDraws = (r) => !!r.layer && r.severity !== "failed" && r.severity !== "green";
+  const rowOn = (r) => rowDraws(r) && !!(isLayerOn && isLayerOn(r.layer));
+  const onSig = rows.map((r) => (rowOn(r) ? "1" : "0")).join("");
+  useEffect(() => {
+    setOpenIds((m) => { let n = m; rows.forEach((r) => { if (m[r.id] && rowDraws(r) && !rowOn(r)) { if (n === m) n = { ...m }; delete n[r.id]; } }); return n; });
+  }, [onSig]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (state.empty) {
     return (
@@ -116,7 +127,26 @@ export default function SiteAnalysis({
     );
   }
 
-  const focus = (id) => { if (onFocusLayer) onFocusLayer(id || null); };
+  const layerOn = (k) => !!(isLayerOn && isLayerOn(k));
+  // A row draws only when it has something to show: a "None" row (nothing near the site) and a failed row do not.
+  const drawable = (r) => !!r.layer && r.severity !== "failed" && r.severity !== "green";
+  // Why a layer that is ON may still show nothing right now (zoomed out past its gate, or its map service down).
+  const layerNote = (k) => {
+    if (!layerOn(k)) return null;
+    const note = layerZoomNote ? layerZoomNote(k) : null;
+    return note || (layerStatus?.[k]?.state === "failed" ? "This layer's map service isn't responding right now — try again shortly." : null);
+  };
+  const isOpen = (r) => !!openIds[r.id] && (!drawable(r) || layerOn(r.layer));   // a drawn row's detail lives only while its layer is on
+  const toggleRow = (r) => {
+    if (!drawable(r)) { setOpenIds((m) => ({ ...m, [r.id]: !m[r.id] })); return; }
+    // Layer already on (from the Layers panel, "Show lines", or a sibling row) but THIS row's detail is closed: a click
+    // reads the detail and leaves the layer alone — it never switches off something the user did not ask to switch off.
+    if (layerOn(r.layer) && !isOpen(r)) { setOpenIds((m) => ({ ...m, [r.id]: true })); return; }
+    const want = !layerOn(r.layer);
+    if (onToggleLayer) onToggleLayer(r.layer, want);
+    // Rows that share one layer (100-/500-year both ride FEMA) go on and off together; only drawn siblings are touched.
+    setOpenIds((m) => { const n = { ...m }; rows.forEach((x) => { if (x.layer === r.layer && drawable(x)) delete n[x.id]; }); if (want) n[r.id] = true; return n; });
+  };
   const calls = result?.calls || [];
   const ticked = callsChecked || localCalls;
   const tick = (id) => {
@@ -126,7 +156,7 @@ export default function SiteAnalysis({
   const governs = result?.governs;
 
   return (
-    <div data-site-analysis="1" style={{ fontSize: FONT_SIZE.control, color: "var(--text-primary)", display: "flex", flexDirection: "column", gap: 14 }}>
+    <div data-site-analysis="1" style={{ fontSize: FONT_SIZE.control, color: "var(--text-primary)", display: "flex", flexDirection: "column", gap: GAP_SECTION }}>
       {/* header: what was screened + ONE freshness line */}
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
         <div style={{ lineHeight: 1.4 }}>
@@ -148,49 +178,59 @@ export default function SiteAnalysis({
 
       {/* ── Who governs this site ─────────────────────────────────────────────────────────── */}
       {governs && (
-        <div data-section="governs" style={{ border: "1px solid var(--border-default)", borderRadius: RADIUS.md, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
+        <div data-section="governs" style={{ border: "1px solid var(--border-default)", borderRadius: RADIUS.md, padding: "10px 12px", display: "flex", flexDirection: "column", gap: GAP_ROW }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
             <span style={sectionLabel}>Who governs this site</span>
-            {governs.lineLayers && governs.lineLayers.length > 0 && (
-              <button type="button" data-governs-lines="1" style={linkBtn}
-                onClick={() => { const on = !governs.lineLayers.some((k) => isLayerOn && isLayerOn(k)); governs.lineLayers.forEach((k) => onToggleLayer && onToggleLayer(k, on)); }}>
-                {governs.lineLayers.some((k) => isLayerOn && isLayerOn(k)) ? "Hide lines" : "Show lines"}
-              </button>
-            )}
+            {governs.lineLayers && governs.lineLayers.length > 0 && (() => {
+              const linesOn = governs.lineLayers.some((k) => layerOn(k));
+              return (
+                <button type="button" data-governs-lines="1" aria-pressed={linesOn} style={linkBtn}
+                  onClick={() => governs.lineLayers.forEach((k) => onToggleLayer && onToggleLayer(k, !linesOn))}>
+                  {linesOn ? "Hide lines" : "Show lines"}
+                </button>
+              );
+            })()}
           </div>
-          <FactRow label="County" value={governs.county || "—"} />
-          <FactRow label="City" value={governs.city.text} note={governs.city.note}
-            chip={governs.city.straddles ? "straddles" : null} />
-          <FactRow label="School district" value={governs.school || "—"} />
-          <FactRow label="Roads" value={governs.roads.text}>
-            {governs.roads.kind === "mixed" && (
-              <ul data-roads-list="1" style={{ margin: "3px 0 0", padding: 0, listStyle: "none", color: "var(--text-secondary)" }}>
-                {governs.roads.items.slice(0, 6).map((it, i) => <li key={i}>{it.name} — {it.authority}</li>)}
-                {governs.roads.items.length > 6 && <li>+{governs.roads.items.length - 6} more</li>}
-              </ul>
-            )}
-          </FactRow>
+          {/* The label column is only as wide as its longest label (max-content), so the values get the room. */}
+          <div data-governs-grid="1" style={{ display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", columnGap: 12, rowGap: GAP_ROW, alignItems: "baseline" }}>
+            <FactRow label="County" value={governs.county || "—"} />
+            <FactRow label="City" value={governs.city.text} note={governs.city.note}
+              chip={governs.city.straddles ? "straddles" : null} />
+            <FactRow label="School district" value={governs.school || "—"} />
+            <FactRow label="Roads" value={governs.roads.text}>
+              {governs.roads.kind === "mixed" && (
+                <ul data-roads-list="1" style={{ margin: "3px 0 0", padding: 0, listStyle: "none", color: "var(--text-secondary)", fontSize: FONT_SIZE.label, lineHeight: 1.45 }}>
+                  {(governs.roads.listed || governs.roads.items).map((it, i) => (
+                    <li key={i} data-road-row="1">{it.name} · {it.authority}</li>
+                  ))}
+                  {governs.roads.more > 0 && <li data-roads-more="1">+{governs.roads.more} more</li>}
+                </ul>
+              )}
+            </FactRow>
+          </div>
         </div>
       )}
 
       {/* ── Checked for you ───────────────────────────────────────────────────────────────── */}
       <div data-section="checked" style={{ opacity: state.loading && rows.length ? 0.5 : 1 }}>
-        <div style={{ ...sectionLabel, marginBottom: 4 }}>Checked for you</div>
+        <div style={{ ...sectionLabel, marginBottom: GAP_ROW }}>Checked for you</div>
         {state.loading && !rows.length && <div style={{ color: "var(--text-secondary)", padding: "6px 0" }}>Checking the maps…</div>}
-        <div style={{ display: "flex", flexDirection: "column" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: GAP_ROW }}>
           {rows.map((r) => {
             const sev = SEV[r.severity] || SEV.failed;
-            const open = openId === r.id;
-            const toggle = () => { const next = open ? null : r.id; setOpenId(next); focus(next ? r.layer : null); };
+            const draws = drawable(r);
+            const onMap = draws && layerOn(r.layer);
+            const open = isOpen(r);
+            const toggle = () => toggleRow(r);
             return (
-              <div key={r.id} data-check-row={r.id} data-severity={r.severity}
-                onMouseEnter={() => focus(r.layer)} onMouseLeave={() => focus(openRef.current ? (rows.find((x) => x.id === openRef.current) || {}).layer : null)}
-                style={{ borderLeft: `3px solid ${sev.bar}`, padding: "7px 0 7px 10px", marginBottom: 6 }}>
-                <div role="button" tabIndex={0} aria-expanded={r.severity === "failed" ? undefined : open}
+              <div key={r.id} data-check-row={r.id} data-severity={r.severity} data-on-map={onMap ? "1" : undefined}
+                style={{ borderLeft: `3px solid ${sev.bar}`, padding: "6px 0 6px 10px" }}>
+                <div role="button" tabIndex={0} aria-expanded={draws ? undefined : open} aria-pressed={draws ? onMap : undefined}
                   onClick={toggle} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } }}
                   style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, cursor: "pointer" }}>
                   <span style={{ minWidth: 0 }}>
                     <span style={{ fontWeight: 700 }}>{r.label}</span>
+                    {onMap && <span data-on-map-tag="1" style={{ marginLeft: 6, padding: "1px 7px", borderRadius: RADIUS.pill, border: "1px solid var(--accent-site-text)", color: "var(--accent-site-text)", fontSize: FONT_SIZE.micro, fontWeight: 700, whiteSpace: "nowrap" }}>On map</span>}
                     <span data-check-line="1" style={{ display: "block", color: "var(--text-secondary)", fontSize: FONT_SIZE.label }}>
                       {r.line}{fresh.stale[r.id] ? ` · checked ${fresh.stale[r.id]}` : ""}
                     </span>
@@ -205,9 +245,17 @@ export default function SiteAnalysis({
                     {retrying[r.id] ? "Retrying…" : "↻ Retry"}
                   </button>
                 )}
-                {open && r.severity !== "failed" && (
+                {open && !draws && (
+                  <div data-check-expanded={r.id} data-check-nodraw="1" style={{ marginTop: 6, fontSize: FONT_SIZE.label, lineHeight: 1.5 }}>
+                    {r.severity === "failed"
+                      ? "Nothing to show on the map yet — this check couldn't run. Use Retry."
+                      : "Nothing to show on the map — this check found none near the site, so no layer was turned on."}
+                  </div>
+                )}
+                {open && draws && (
                   <div data-check-expanded={r.id} style={{ marginTop: 6, fontSize: FONT_SIZE.label, lineHeight: 1.5 }}>
                     {(r.sentences || []).map((s, i) => <div key={i}>{s}</div>)}
+                    {layerNote(r.layer) && <div data-analysis-zoom-note={r.layer} style={{ color: "var(--warn-text)" }}>{layerNote(r.layer)}</div>}
                     {r.link && r.link.id === "drainage" && onOpenDrainage && (
                       <button type="button" style={{ ...linkBtn, marginTop: 3 }} onClick={onOpenDrainage}>{r.link.label}</button>
                     )}
@@ -277,16 +325,17 @@ export default function SiteAnalysis({
 
 function FactRow({ label, value, note = null, chip = null, children = null }) {
   return (
-    <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
-      <span style={{ flex: "none", width: 92, color: "var(--text-secondary)" }}>{label}</span>
-      <span style={{ minWidth: 0, flex: 1 }}>
-        <span style={{ fontWeight: 600 }}>{value}</span>
+    <>
+      <span data-fact-label="1" style={{ color: "var(--text-secondary)", whiteSpace: "nowrap" }}>{label}</span>
+      <span style={{ minWidth: 0 }}>
+        {/* each " · " part stays whole, so "1 state, 5 county" never breaks across two lines */}
+        <span style={{ fontWeight: 600 }}>{String(value).split(" · ").map((seg, i) => <React.Fragment key={i}>{i > 0 && " · "}<span style={{ display: "inline-block" }}>{seg}</span></React.Fragment>)}</span>
         {chip && (
           <span data-governs-chip={chip} style={{ marginLeft: 6, padding: "1px 7px", borderRadius: RADIUS.pill, border: "1px solid var(--warn-border)", background: "var(--warn-bg)", color: "var(--warn-text)", fontSize: FONT_SIZE.micro, fontWeight: 700 }}>{chip}</span>
         )}
-        {note && <span style={{ display: "block", color: "var(--text-secondary)", fontSize: FONT_SIZE.label }}>{note}</span>}
+        {note && <span data-fact-note="1" title={note} style={{ display: "block", color: "var(--text-secondary)", fontSize: FONT_SIZE.label }}>{note}</span>}
         {children}
       </span>
-    </div>
+    </>
   );
 }
