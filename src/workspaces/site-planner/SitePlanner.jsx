@@ -90,7 +90,7 @@ import { cullRectFor, cullToView, shouldCull } from "./lib/viewCull.js";
 import { elHidden, isHidden, parcelAcreageHidden, normalizeRetiredToggles, visibleEls, visibleParcels, visibleMeasures } from "./lib/contentVisibility.js";
 import { makeLabelFrame } from "./lib/exportLabelScale.js";
 import { orderLayersByPriority, LAYER_STAGE_SIZE } from "./lib/layerSchedule.js";
-import { prefetchExtents, computeCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
+import { prefetchExtents, computeCoverage, sameCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
 import { fetchOverpass } from "./lib/evidenceLayers.js";
 import { loadEasementRules, patchEasementRule, subscribeEasementRules, defaultJurForCounty, resolveEasementJur } from "./lib/easementRules.js";
 import { requestCriteria, wasRequested } from "./lib/criteriaRequests.js";
@@ -2812,6 +2812,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const overlayStagedRef = useRef(false); // has the staged first-load pass finished? (NEW-3)
   const overlayRefs = useRef({});
   const [coverage, setCoverage] = useState({}); // id -> "in"|"out"|"unknown" (NEW-1; picker-only)
+  const coverageRef = useRef(coverage); // the last map actually dispatched — the coverage effect's dispatch guard
   const geoCommitRef = useRef(null);   // last view actually setView'd: {center, zoom, w, h}
   const geoCommitTimer = useRef(null); // debounce handle for the crisp re-render
   const geoGhostRef = useRef(null);    // frozen tile snapshot kept on-screen during a re-render
@@ -3667,16 +3668,37 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   /* Coverage (NEW-1/B283): which layers' DATA reaches the planner's current view, for
      the Layers panel relevance picker. The geo basemap follows the SVG view, so recompute
      when the view/size/origin settle (debounced past the basemap commit) and when the
-     nearby-range pref changes. Picker-only — never alters a layer's map request. */
+     nearby-range pref changes. Picker-only — never alters a layer's map request.
+
+     ⛔ NEW-1 — THE HARD PAGE FREEZE (Properties rail tab + an immediate Escape, looped, on a LOCATED
+     plan). This effect used to list `[overlays, origin, view, size]` — whole OBJECTS — and dispatch
+     an unconditional `setCoverage(<fresh object>)` from `prefetchExtents(…).then(recompute)`, which
+     is an already-resolved promise, so the dispatch lands in a MICROTASK. B1189 recorded that a
+     panel toggle can leave `setSize`'s updater RETAINED in the queue, after which every render
+     mints a new `{w,h}` holding the SAME numbers. Together: render → new `size` identity → this
+     effect re-runs → microtask `setCoverage(new {})` → render → … The microtask queue never drains,
+     so the main thread never returns to the event loop (and the retained default-lane `setSize`
+     that would end the churn never gets to run). React's error-185 breaker never fires either:
+     each dispatch arrives AFTER the commit that scheduled it, so its nested-update counter resets
+     every lap. Measured on the unfixed build: ~300 commits/s, indefinitely, `evaluate` unanswered.
+     Two guards, each sufficient alone and both kept: depend on the view/size NUMBERS (B1189's rule
+     — this effect was the second one still keyed on identity), and never dispatch an unchanged
+     map (`sameCoverage`). Guard: test/coverageDispatchGuard.test.js + ui-audit
+     verify-properties-escape-freeze.mjs (the real loop on a located plan). */
   useEffect(() => {
     if (!origin) return;
     let t;
-    const recompute = () => setCoverage(computeCoverage(boundsFromLeaflet(geoMapRef.current), overlays, getNearbyRadiusMiles()));
+    const recompute = () => {
+      const next = computeCoverage(boundsFromLeaflet(geoMapRef.current), overlays, getNearbyRadiusMiles());
+      if (sameCoverage(coverageRef.current, next)) return; // guard the DISPATCH — an equal map is not a change
+      coverageRef.current = next;
+      setCoverage(next);
+    };
     prefetchExtents(ALL_LAYERS, probeService).then(recompute);
     t = setTimeout(recompute, 300); // let the basemap commit (≤160ms) settle first
     const unsub = subscribeRelevance(recompute);
     return () => { clearTimeout(t); unsub(); };
-  }, [overlays, origin, view, size]);
+  }, [overlays, origin, view.ppf, view.offX, view.offY, size.w, size.h]); // value deps: re-measure when the view/size NUMBERS move, never on identity
 
   const wrapRef = useRef(null);
   const svgRef = useRef(null);
