@@ -170,7 +170,7 @@ import AppHeader from "../../shared/ui/AppHeader.jsx";
 import { CRUMB_MIN_W } from "../../shared/ui/ProjectBreadcrumb.jsx";
 import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.jsx";
 import { layerVisibility, dormantZoomLine } from "./lib/layerZoomGate.js";
-import { nextHiddenToast } from "./lib/layerHiddenToast.js";
+import { useLayerHiddenToast } from "./lib/useLayerHiddenToast.js";
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 /* B1449 — the anchored render (the zoom half of B1440's increment) + the proportional wheel factor.
    `viewAnchor.js` holds the proof that an anchored frame lands exactly where a direct one would. */
@@ -4311,7 +4311,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B673 — the loud-but-non-blocking conflict surface: toast stack + name resolver + the
   // late-bound sync-event handler (assigned each render further down, once zoomToElements and
   // featBBox exist in scope).
-  const { toasts, pushToast, dismissToast } = useToasts();
+  const { toasts, pushToast, dismissToast, dismissByKey: dismissToastByKey } = useToasts();
   const nameResolverRef = useRef(null);
   const syncEventRef = useRef(() => {});
   // NEW-1 (round 2) — one entry per in-flight commit BATCH (see the comment beside syncEventRef.current
@@ -6385,7 +6385,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      `layerGateReady` so the opening default view (never the zoom the plan lands on) is not judged.
      The action animates the zoom about the canvas centre (the ＋/－ anchor) to the nearest zoom
      where the layers draw. */
-  const hiddenToastAnnouncedRef = useRef(null);
   const zoomAnimRef = useRef(0);
   const animateZoomTo = useCallback((z) => {
     if (!origin) return;
@@ -6406,22 +6405,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     };
     requestAnimationFrame(step);
   }, [origin, size.w, size.h]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (!active || !origin || !layerGateReady) return undefined;
-    const zoom = ppfToZoom(view.ppf, origin.lat);
-    const t = setTimeout(() => {
-      const layers = Object.keys(overlays || {}).map((id) => ({ id, cfg: ALL_LAYERS[id], on: !!overlays[id]?.on }));
-      const r = nextHiddenToast(hiddenToastAnnouncedRef.current, layers, zoom);
-      hiddenToastAnnouncedRef.current = r.announced;
-      if (!r.toast) return;
-      const { action } = r.toast;
-      pushToast({
-        text: r.toast.text, dedupeKey: "layer-hidden-at-zoom",
-        action: action ? { label: action.label, onClick: () => animateZoomTo(action.target) } : null,
-      });
-    }, 250);
-    return () => clearTimeout(t);
-  }, [active, origin, layerGateReady, overlays, view.ppf]); // eslint-disable-line react-hooks/exhaustive-deps
+  useLayerHiddenToast({
+    enabled: !!(active && origin && layerGateReady),
+    zoom: origin ? ppfToZoom(view.ppf, origin.lat) : null,
+    overlays, pushToast, dismissByKey: dismissToastByKey, zoomTo: animateZoomTo,
+  });
 
   /* ⛔ REMOVED (B-VTX-SEL) — this used to auto-select "the single restored parcel so its handles
    * are ready to use". It ran on every MOUNT, not just the moment a parcel was first drawn, so
