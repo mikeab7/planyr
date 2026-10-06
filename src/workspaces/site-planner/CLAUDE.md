@@ -1862,6 +1862,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   Helvetica (not embedded), `Tz`-squeezed to the browser's measured widths — read the B2127664 deviations list before
   promising more. Guards: repo-root `test/` suite **pdfAnnotations** (incl. a second-library round-trip) + ui-audit
   **verify-pdf-markup-annotations** (real compose flow, poppler render parity, known-good arm).
+  **B2143584 — the `/AP` stream is only what shows UNTIL a viewer REGENERATES the annotation (Bluebeam/Acrobat on any edit), so every key a regenerating viewer reads must agree with it:** FreeText `/C` is the box FILL (border in `/DA` `RG`, never `/IC`), a translucent fill's opacity is `/CA`, a cloud's `/BE /I` comes from the scallop pitch, a two-point measurement's number is its `/Cap` caption. Guards: **pdfAnnotations** (regeneration block) + ui-audit **verify-pdf-annotation-regeneration** (MuPDF `update()` drift).
   **B765985 — the compose screen.** Picking a print frame no longer downloads straight off the
   canvas: `components/PrintCompose.jsx` (also lazy, its own chunk, warmed alongside the export
   chunk) is a dedicated full-screen surface for paper size (incl. ARCH C/D, ANSI C/D),
