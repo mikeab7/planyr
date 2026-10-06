@@ -580,6 +580,10 @@ const PANEL_SHIFT_DEPS = Object.freeze(["leftPanel", "narrow", "companionSel", "
  * and is this change's matching optimization for the bundle budget — the site chunk had 0.3 KB
  * of headroom band left when the setback-chip fix landed on it. Spell new uses `SURF_RAISED`. */
 const SURF_RAISED = "var(--surface-raised)";
+/* NEW-1 — the ONE surface every docked left-rail panel (Land, Analysis, Drainage, Yield, Properties, Overlays,
+ * Standards) sits on: white in light, the matching overlay surface in dark. It used to be the grey column
+ * backdrop (--planner-panel) with only Analysis overridden per-panel, so every other panel read as a grey wall. */
+const LEFT_PANEL_SURFACE = "var(--surface-overlay)";
 const MONO_FONT = "ui-monospace, monospace";   // same reason — spelled out 21× before this
 const BORDER_1 = "1px solid var(--border-default)"; // …and this hairline 15× (4 quoted, 11 templated)
 
@@ -26444,14 +26448,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               // on-screen keyboard (`sheetRenderBottom`) and never taller than the keyboard-aware
               // clamp (`sheetRenderH`, from lib/propertiesSheet.js).
               position: "fixed", left: 0, right: 0, bottom: sheetRenderBottom, zIndex: 1200,
-              background: "var(--planner-panel)", display: "flex", flexDirection: "column", minHeight: 0,
+              background: LEFT_PANEL_SURFACE, display: "flex", flexDirection: "column", minHeight: 0,
               height: sheetRenderH, maxHeight: sheetMaxH != null ? sheetMaxH : "calc(100vh - 48px)", // keyboard up: never taller than the visible area (NEW-1)
               borderTopLeftRadius: RADIUS.lg, borderTopRightRadius: RADIUS.lg,
               boxShadow: "0 -10px 28px rgba(0,0,0,0.32)",
               transition: sheetAnimated ? "height 220ms cubic-bezier(0.2,0.8,0.2,1), bottom 160ms ease-out" : "none",
             } : {
               width: narrow ? `min(320px, calc(100vw - ${54 + TOOLS_TAB_WIDTH_PX}px))` : leftWidth, // narrow: stop at the Tools edge tab so it never paints over the header ×/↻ (it did, at 20px of overlap)
-              flex: "none", background: "var(--planner-panel)", display: "flex", flexDirection: "column", minHeight: 0,
+              flex: "none", background: LEFT_PANEL_SURFACE, display: "flex", flexDirection: "column", minHeight: 0,
               ...(narrow ? { position: "absolute", left: 54, top: 0, bottom: 0, zIndex: 1100, boxShadow: "10px 0 28px rgba(0,0,0,0.35)" } : null),
             }}>
           {phoneSheetSolo && (<>
@@ -29737,9 +29741,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             onToggle={() => { if (!narrow) detachPanel(leftPanel); }}
             data-testid={`panel-chrome-${leftPanel}`} />
           <div data-wheelscroll="1" data-panel-body={leftPanel} style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "13px 13px 24px",
-            // Site Analysis reads on the same white surface the Layers / Properties panels use — its verdict rows are not
-            // filled cards, so on the gray column ground the whole panel read as one flat gray wall.
-            ...(leftPanel === "analysis" ? { background: "var(--surface-overlay)" } : null) }}>
+}}>
           {renderPanelBody(leftPanel)}
           </div>
           {leftPanel === "standards" && standardsFooter}
