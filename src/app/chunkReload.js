@@ -355,6 +355,12 @@ export function installChunkReloadGuard(win = typeof window !== "undefined" ? wi
     // Only "reload" auto-recovers; "stuck" (still failing after a fresh reload) and
     // "cooldown" (just reloaded) fall through to the ErrorBoundary instead of looping.
     if (stage !== "reload") return;
+    /* AUTH-SWEEP 2 / V221 — OFFLINE IS NOT STALE. A chunk that fails to load while the browser is offline
+     * failed because there is no network, not because a deploy replaced it. A cache-busting reload there
+     * navigates to the browser's offline error page and destroys the canvas (measured: the first drag of a
+     * building while offline lazy-loads a chunk). Leave the page alone; the import is retried on the next use
+     * and a genuine stale chunk is rescued once the network is back. */
+    try { if (win.navigator && win.navigator.onLine === false) return; } catch { /* unreadable → fall through to the reload */ }
     try { win.sessionStorage.setItem(RELOAD_GUARD_KEY, String(now)); }
     catch { /* storage blocked — reload anyway; worst case we can't suppress a loop */ }
     reloadFresh(win);
