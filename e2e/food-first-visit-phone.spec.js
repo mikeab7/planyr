@@ -7,8 +7,8 @@
  * unchanged, visual viewport shrinks) and AutoFill is checked by the ATTRIBUTES iOS keys off.
  *
  * Writes ONE visit + ONE dish on the test account's own data and deletes them in `finally`, asserting
- * they are gone. The thumb-friendly rating control is paused by the owner: the dish rating is set the
- * simplest way that works and nothing here asserts how ratings feel to enter. */
+ * they are gone. The rating controls are sliders (owner constraint #16; the slider itself is
+ * proven by food-rating-slider-phone.spec.js): the dish score is set here by filling the slider. */
 import { test, expect, devices } from "@playwright/test";
 import { hasAccount, STORAGE_STATE } from "./helpers.js";
 
@@ -89,7 +89,8 @@ for (const { label, keyboard } of PHONES) {
         expect(labels.some((t) => /what i had/i.test(t)), `no "What I had" label (labels: ${JSON.stringify(labels.map((t) => t.split("\n")[0]))})`).toBe(false);
         expect(await form.getByText(/what i had/i).count(), 'no "What I had" text anywhere in the form').toBe(0);
         expect(await page.locator('[data-testid="visit-dishes"] [data-testid="visit-dish-name"]').count()).toBeGreaterThanOrEqual(1);
-        expect(await page.locator('[data-testid="visit-dishes"] [data-testid="score-tap-grid"]').count(), "a dish rating control").toBeGreaterThanOrEqual(1);
+        expect(await page.locator('[data-testid="visit-dishes"] [data-testid="dish-score-slider"]').count(), "a dish rating control (a slider)").toBeGreaterThanOrEqual(1);
+        expect(await page.locator('[data-testid^="score-tap"]').count(), "no tap-button rating grid (owner constraint #16)").toBe(0);
         note('PASS first-visit form: Dishes block with name + rating control, no "What I had"');
 
         // ── 2. AUTOFILL attributes on EVERY Food text field in the form ─────────────────────────
@@ -162,7 +163,7 @@ for (const { label, keyboard } of PHONES) {
         // ── 4. add one dish with a rating, save ──────────────────────────────────────────────────
         await form.locator('[data-testid="visit-dish-name"]').first().fill("E2E test dish");
         const row = form.locator('[data-testid="visit-dish-row"]').first();
-        await row.locator('[data-testid="score-tap-8"]').tap();
+        await row.locator('[data-testid="dish-score-slider"]').fill("8");
         await expect(row.locator('[data-testid="dish-score-numeral"]')).toHaveText(/^\s*8/);
         await submit.scrollIntoViewIfNeeded();
         await submit.tap();

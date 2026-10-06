@@ -1,5 +1,5 @@
 /* The shared combine / split / restore (lib/parcelOps.js) — the one implementation the Parcels
- * panel AND the map toolbar both call. `mergeRings` is injected, so these tests drive the real
+ * panel AND the map toolbar both call. `mergeParcelRings` is injected, so these tests drive the real
  * planner with a tiny rectangle-union stand-in for the boundary-detection function (which belongs to
  * a different change and is NOT restated here). */
 import { describe, it, expect } from "vitest";
@@ -7,15 +7,16 @@ import { planCombine, planSplit, planRestoreCombined, planRestoreSplit, nextTrac
 import { parcelNetSqft, SQFT_PER_ACRE } from "../src/workspaces/site-planner/lib/parcelArea.js";
 
 const rect = (x, y, w, h) => [{ x, y, w: 0 }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }].map(({ x: px, y: py }) => ({ x: px, y: py }));
-const bbox = (r) => ({ x0: Math.min(...r.map((p) => p.x)), x1: Math.max(...r.map((p) => p.x)), y0: Math.min(...r.map((p) => p.y)), y1: Math.max(...r.map((p) => p.y)) });
-// Stand-in union for axis-aligned rectangles that share a full edge (null = not touching).
-const mergeRings = (a, b) => {
-  const A = bbox(a), B = bbox(b);
-  const sameY = A.y0 === B.y0 && A.y1 === B.y1 && (A.x1 === B.x0 || B.x1 === A.x0);
-  const sameX = A.x0 === B.x0 && A.x1 === B.x1 && (A.y1 === B.y0 || B.y1 === A.y0);
-  if (!sameY && !sameX) return null;
-  const x0 = Math.min(A.x0, B.x0), x1 = Math.max(A.x1, B.x1), y0 = Math.min(A.y0, B.y0), y1 = Math.max(A.y1, B.y1);
-  return rect(x0, y0, x1 - x0, y1 - y0);
+// Stand-in for polyClip's mergeParcelRings over axis-aligned rectangles that share a full edge.
+const bboxOf = (r) => ({ x0: Math.min(...r.map((p) => p.x)), x1: Math.max(...r.map((p) => p.x)), y0: Math.min(...r.map((p) => p.y)), y1: Math.max(...r.map((p) => p.y)) });
+const touches = (A, B) => (A.y0 === B.y0 && A.y1 === B.y1 && (A.x1 === B.x0 || B.x1 === A.x0)) || (A.x0 === B.x0 && A.x1 === B.x1 && (A.y1 === B.y0 || B.y1 === A.y0));
+const unionRings = (rings) => {
+  const bs = rings.map(bboxOf);
+  const seen = new Set([0]); let grew = true;
+  while (grew) { grew = false; bs.forEach((b, i) => { if (!seen.has(i) && [...seen].some((j) => touches(bs[j], b))) { seen.add(i); grew = true; } }); }
+  if (seen.size < bs.length) return { ok: false, code: "apart", groups: [[...seen], bs.map((_, i) => i).filter((i) => !seen.has(i))] };
+  const x0 = Math.min(...bs.map((b) => b.x0)), x1 = Math.max(...bs.map((b) => b.x1)), y0 = Math.min(...bs.map((b) => b.y0)), y1 = Math.max(...bs.map((b) => b.y1));
+  return { ok: true, ring: [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }] };
 };
 let n = 0;
 const newId = () => `id${++n}`;
@@ -23,7 +24,7 @@ const mk = (id, x, y, w = 100, h = 100, extra = {}) => ({ id, points: rect(x, y,
 // A 4-wide strip of parcels, side by side.
 const strip = () => [mk("a", 0, 0), mk("b", 100, 0), mk("c", 200, 0), mk("d", 300, 0)];
 const total = (ps) => includedAcres(ps);
-const C = (ps, ids) => planCombine(ps, ids, { mergeRings, newId });
+const C = (ps, ids) => planCombine(ps, ids, { unionRings, newId });
 const S = (ps, path, o = {}) => planSplit(ps, path, { newId, ...o });
 
 describe("combine", () => {
@@ -57,7 +58,7 @@ describe("combine", () => {
     const r = C(strip(), ["a", "c"]);
     expect(r.ok).toBe(false);
     expect(r.code).toBe("not-touching");
-    expect(r.message).toMatch(/don't all touch/);
+    expect(r.message).toMatch(/don't touch/);
   });
   it("refuses fewer than two, and an excluded (eye-off) parcel — by name", () => {
     expect(C(strip(), ["a"]).ok).toBe(false);

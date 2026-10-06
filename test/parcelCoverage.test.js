@@ -6,7 +6,7 @@ import {
 import { setCountyPolygons } from "../src/workspaces/site-planner/lib/countyPolygons.js";
 import { COUNTY_VERIFICATION } from "../src/workspaces/site-planner/lib/countiesProvenance.js";
 import {
-  buildCoverage, classifySourceKind, countyDisplayName, provenanceSaysThirdParty, totalLine,
+  buildCoverage, classifySourceKind, countyDisplayName, totalLine, PUBLISHERS,
 } from "../src/workspaces/admin/lib/parcelCoverage.js";
 import { buildCountyPaths } from "../src/workspaces/admin/lib/countyMapGeometry.js";
 
@@ -59,18 +59,43 @@ describe("parcel coverage join (NEW-1)", () => {
     expect(cov.rows.filter((r) => r.state === "FL").every((r) => r.wired)).toBe(true);
   });
 
-  it("third-party republications are labelled, and a denial is not read as a label", () => {
+  it("third-party republications are labelled; a first-party source that names the copy it superseded is NOT", () => {
     expect(rowFor(cov, "LA", "Lafayette Parish").kind).toBe("third-party");
-    expect(provenanceSaysThirdParty({ verifiedNote: "Montgomery County's OWN GIS org, not a republication: 336,769 polygons." })).toBe(false);
-    expect(provenanceSaysThirdParty({ verifiedNote: "SOURCE: Westwood/CSRS engineering-firm ArcGIS Online org." })).toBe(true);
+    expect(rowFor(cov, "LA", "Allen Parish")).toMatchObject({ kind: "third-party", publisherName: expect.stringContaining("DesireLine") });
+    // The owner-found defect: both notes mention the Westwood copy they REPLACED.
+    expect(COUNTY_VERIFICATION.la_calcasieu.verifiedNote).toMatch(/westwood/i);
+    expect(COUNTY_VERIFICATION.la_jefferson.verifiedNote).toMatch(/westwood/i);
+    expect(rowFor(cov, "LA", "Calcasieu Parish")).toMatchObject({ kind: "own", publisherName: "Calcasieu Parish Police Jury", host: "lak-dc-arcgis2.cppj.net" });
+    expect(rowFor(cov, "LA", "Jefferson Parish")).toMatchObject({ kind: "own", host: "jpgis.jeffparish.net" });
+    expect(rowFor(cov, "LA", "Jefferson Davis Parish").kind).toBe("own"); // TotaLand-hosted for the parish EDC
+    expect(rowFor(cov, "FL", "Orange County")?.kind ?? rowFor(cov, "FL", "Orange").kind).toBe("statewide");
   });
 
-  it("never guesses: an ArcGIS Online host with no provenance is unclassified", () => {
-    const kind = classifySourceKind({
-      entry: { layerUrl: "https://services1.arcgis.com/abc/arcgis/rest/services/P/FeatureServer/0" },
-      cfg: {}, prov: undefined, isStatewideUrl: () => false,
-    });
-    expect(kind).toBe("unclassified");
+  it("DATA, NOT PROSE: the publisher field alone decides, whatever the note says", () => {
+    const base = { entry: { layerUrl: "https://services1.arcgis.com/x/arcgis/rest/services/P/FeatureServer/0" }, cfg: {}, isStatewideUrl: () => false };
+    const prose = { verifiedNote: "Westwood copy, superseded; a THIRD-PARTY REPUBLICATION was rejected." };
+    expect(classifySourceKind({ ...base, prov: { ...prose, publisher: "own" } })).toBe("own");
+    expect(classifySourceKind({ ...base, prov: { ...prose, publisher: "third-party" } })).toBe("third-party");
+    expect(classifySourceKind({ ...base, prov: { ...prose, publisher: "unverified" } })).toBe("unclassified");
+    // never guessed: no field → unclassified, whatever the prose or host says
+    expect(classifySourceKind({ ...base, prov: prose })).toBe("unclassified");
+    expect(classifySourceKind({ ...base, entry: { layerUrl: "https://gis.county.gov/x/MapServer/0" }, prov: undefined })).toBe("unclassified");
+  });
+
+  it("EVERY wired registry entry carries a valid publisher + publisherName (a wiring session cannot skip it)", () => {
+    const bad = [];
+    for (const [key, entry] of Object.entries(COUNTIES_MAP)) {
+      if (entry.statewide || entry.statewideDerived || isStatewideLayerUrl(entry.layerUrl || entry.mapServer || "")) continue; // registry-structural
+      const p = COUNTY_VERIFICATION[key];
+      if (!p || !PUBLISHERS.includes(p.publisher) || typeof p.publisherName !== "string" || p.publisherName.trim().length < 3) bad.push(key);
+    }
+    expect(bad, `entries missing publisher/publisherName in countiesProvenance.js: ${bad.join(", ")}`).toEqual([]);
+  });
+
+  it("every 'unverified' record says why in its publisherName, and the set is the known short list", () => {
+    const unverified = Object.entries(COUNTY_VERIFICATION).filter(([, v]) => v.publisher === "unverified");
+    for (const [k, v] of unverified) expect(v.publisherName, k).toMatch(/not established|affiliation/i);
+    expect(cov.totals.byKind.unclassified).toBe(unverified.length);
   });
 
   it("an unwired county is unfilled", () => {

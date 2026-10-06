@@ -8,7 +8,7 @@
  * `test/parcelOps.test.js` pins the behaviour; `test/parcelOpsParity.test.js` pins that no second
  * implementation can grow back in SitePlanner.jsx.
  *
- * Pure (no React, no DOM). The union geometry (`mergeRings`) is INJECTED rather than imported: it
+ * Pure (no React, no DOM). The union geometry (`mergeParcelRings`) is INJECTED rather than imported: it
  * lives in SitePlanner.jsx and belongs to the boundary-detection work, which this file must not
  * fork or restate — one touching test, theirs.
  *
@@ -91,7 +91,7 @@ const refuse = (code, message) => ({ ok: false, code, message });
 /* Dry-run AND plan in one: the panel calls this on every selection change to decide whether
  * Combine is enabled (and what to say if not); the appliers call it again to act. Same function,
  * so the button can never promise what the action then refuses. */
-export function planCombine(parcels, ids, { mergeRings, newId }) {
+export function planCombine(parcels, ids, { unionRings, newId }) {
   const list = parcels || [];
   const want = new Set(ids || []);
   const chosen = list.filter((p) => want.has(p.id));
@@ -106,17 +106,20 @@ export function planCombine(parcels, ids, { mergeRings, newId }) {
   }
   const off = chosen.filter((p) => p.active === false);
   if (off.length) return refuse("excluded", `${nm(off[0])} is excluded from the site total (eye off) — include it or deselect it, then combine.`);
-  let result = chosen[0].points;
-  let remaining = chosen.slice(1).map((p) => p.points);
-  let progress = true;
-  while (remaining.length && progress) {
-    progress = false;
-    for (let i = 0; i < remaining.length; i++) {
-      const merged = mergeRings(result, remaining[i]);
-      if (merged) { result = merged; remaining.splice(i, 1); progress = true; break; }
+  // The touching test + union is the injected `unionRings` (polyClip.js `mergeParcelRings`, B2090352) — never restated here.
+  const merged = unionRings(chosen.map((p) => p.points));
+  if (!merged.ok) {
+    if (merged.code === "apart") {
+      const odd = chosen.filter((_, i) => !merged.groups[0].includes(i));
+      const names = odd.map(nm);
+      return refuse("not-touching", merged.groups[0].length < 2
+        ? "These parcels don't touch edge-to-edge — pick parcels that share a boundary."
+        : `${names.join(", ")} ${odd.length === 1 ? "doesn't" : "don't"} touch the other picked parcels — unpick ${odd.length === 1 ? "it" : "them"} or pick the lots in between.`);
     }
+    if (merged.code === "hole") return refuse("hole", "Combining those would enclose a lot that isn't picked — pick that one too, or combine them in pieces.");
+    return refuse("bad-outline", "Those parcels couldn't be combined cleanly — their outlines are too far off to fuse.");
   }
-  if (remaining.length) return refuse("not-touching", "These parcels don't all touch — pick parcels that share a boundary edge to edge.");
+  const result = merged.ring;
   const name = nextTractName(list);
   const holes = chosen.flatMap((p) => (Array.isArray(p.exceptions) ? clone(p.exceptions) : []));
   const tract = {

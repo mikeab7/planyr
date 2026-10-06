@@ -20,6 +20,7 @@ import { parseFeet } from "./lib/parseLength.js";
 import Stitcher from "./Stitcher.jsx";
 import CompareView from "./CompareView.jsx";
 import ReviewsBar from "./components/ReviewsBar.jsx";
+import PriorityToolbar from "../../shared/ui/PriorityToolbar.jsx";
 import { useReviewPersistence, docSaveState } from "./lib/usePersistence.js";
 import { isAutoTitle, liveReviewProject } from "./lib/reviewNaming.js";
 import { metaForOpenedFile, noticeForTab } from "./lib/openedFileMeta.js";
@@ -2637,29 +2638,36 @@ export default function DocReview({
         ) : null}
         toolbarContent={
           <>
-            <button style={chromeBtn()} title="Open a PDF, Word or text file" onClick={() => fileRef.current?.click()}>Open…</button>
             <input ref={fileRef} type="file" accept={REVIEW_ACCEPT} data-testid="review-file-input" style={{ display: "none" }} onChange={(e) => { openFile(e.target.files?.[0]); e.target.value = ""; }} />
-            <button style={chromeBtn()} title="Compare two revisions of a drawing — see exactly what changed" onClick={() => compareInputRef.current?.click()}>⇄ Compare…</button>
-            <button style={chromeBtn()} onClick={() => setMode("stitch")} title="Stitch multiple sheets into one continuous plan">Stitch ▸</button>
-            {/* Reviews (file/save this review) lives in the Row-2 tools row (B360). Its own
-                save chip was retired — the app-wide Row-1 CloudSyncBadge (NEW-1) is the single
-                save indicator now, so there's no longer a second chip competing here. The old
-                📁 Library door is gone too — the 🗂 Files drawer browses by project + discipline. */}
-            <ReviewsBar signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={openReview} onNew={resetSingle} />
-            {(docFile || pdfRef.current) && source && <button style={iconBtn(false)} onClick={() => { setHistMsg(""); setHistErr(""); setHistoryOpen(true); }} title="Version history — see earlier saved versions" data-testid="version-history-open">Versions</button>}
-            {/* Drawing/measure tools + zoom controls now live in the right-side tool rail (B330).
-                Undo/Redo stay here as document-history actions, beside the doc-level controls. */}
-            {pdfRef.current && <>
-              <span style={tbDiv} />
-              <button style={iconBtn(!canUndo)} disabled={!canUndo} onClick={undo} title="Undo (⌘/Ctrl-Z)">↶</button>
-              <button style={iconBtn(!canRedo)} disabled={!canRedo} onClick={redo} title="Redo (⌘/Ctrl-Shift-Z)">↷</button>
-              {/* B490 — Layers: show/hide the PDF's optional-content groups (e.g. Electrical). Only when the
-                  drawing carries layers; visibility is a view filter (in-memory), never the markups. The popover
-                  is portaled (AnchoredMenu) so the toolbar row's overflow:hidden can't clip it. */}
-              {ocgLayers.length > 0 && (
+            {/* NEW-2 (2026-10-05) — Row 2 is a PriorityToolbar: nothing wraps or clips; the lowest-priority actions fold into
+                one More menu. Priority (higher = kept longest): Open 90 · Reviews 80 · Undo/Redo 70 · Compare 60 · Stitch 50 ·
+                Versions 40 · Layers 30. Reviews and Layers own their own popovers, so they stay on the bar. */}
+            <PriorityToolbar name="review-actions" moreLabel="More review actions" items={[
+              { id: "open", label: "Open…", priority: 90, onSelect: () => fileRef.current?.click(), render: () => (
+                <button style={chromeBtn()} title="Open a PDF, Word or text file" onClick={() => fileRef.current?.click()}>Open…</button>
+              ) },
+              { id: "compare", label: "Compare two revisions…", priority: 60, onSelect: () => compareInputRef.current?.click(), render: () => (
+                <button style={chromeBtn()} title="Compare two revisions of a drawing — see exactly what changed" onClick={() => compareInputRef.current?.click()}>⇄ Compare…</button>
+              ) },
+              { id: "stitch", label: "Stitch sheets", priority: 50, onSelect: () => setMode("stitch"), render: () => (
+                <button style={chromeBtn()} onClick={() => setMode("stitch")} title="Stitch multiple sheets into one continuous plan">Stitch ▸</button>
+              ) },
+              // Reviews (file/save this review) lives in the Row-2 tools row (B360); the app-wide Row-1 CloudSyncBadge is the single save indicator.
+              { id: "reviews", label: "Reviews", priority: 80, collapsible: false, render: () => (
+                <ReviewsBar signedIn={signedIn} meta={meta} onMeta={onMeta} onOpen={openReview} onNew={resetSingle} />
+              ) },
+              ...((docFile || pdfRef.current) && source ? [{ id: "versions", label: "Version history", priority: 40, onSelect: () => { setHistMsg(""); setHistErr(""); setHistoryOpen(true); }, render: () => (
+                <button style={iconBtn(false)} onClick={() => { setHistMsg(""); setHistErr(""); setHistoryOpen(true); }} title="Version history — see earlier saved versions" data-testid="version-history-open">Versions</button>
+              ) }] : []),
+              ...(pdfRef.current ? [
+                { id: "undo", label: "Undo", priority: 70, disabled: !canUndo, onSelect: undo, render: () => (<span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><span style={tbDiv} /><button style={iconBtn(!canUndo)} disabled={!canUndo} onClick={undo} title="Undo (⌘/Ctrl-Z)">↶</button></span>) },
+                { id: "redo", label: "Redo", priority: 70, disabled: !canRedo, onSelect: redo, render: () => (<button style={iconBtn(!canRedo)} disabled={!canRedo} onClick={redo} title="Redo (⌘/Ctrl-Shift-Z)">↷</button>) },
+              ] : []),
+              // B490 — Layers: show/hide the PDF's optional-content groups. A view filter only; the popover is portaled (AnchoredMenu).
+              ...(pdfRef.current && ocgLayers.length > 0 ? [{ id: "layers", label: "Layers", priority: 30, collapsible: false, render: ({ measuring }) => (
                 <>
-                  <button ref={layersBtnRef} style={iconBtn(false)} onClick={() => setLayersOpen((o) => !o)} title="Layers — show/hide parts of the drawing" aria-expanded={layersOpen} aria-haspopup="menu">▤</button>
-                  <AnchoredMenu open={layersOpen} onClose={() => setLayersOpen(false)} anchorRef={layersBtnRef} placement="below-right" width={200} className=""
+                  <button ref={measuring ? undefined : layersBtnRef} style={iconBtn(false)} onClick={() => setLayersOpen((o) => !o)} title="Layers — show/hide parts of the drawing" aria-expanded={layersOpen} aria-haspopup="menu">▤</button>
+                  <AnchoredMenu open={!measuring && layersOpen} onClose={() => setLayersOpen(false)} anchorRef={layersBtnRef} placement="below-right" width={200} className=""
                     panelStyle={{ padding: "8px 10px", borderRadius: 10, background: "var(--surface-raised)", border: `1px solid ${PAL.line}`, boxShadow: "0 6px 24px rgba(0,0,0,0.18)", color: PAL.ink, fontFamily: "system-ui, sans-serif" }}>
                     <div data-testid="layers-menu">
                       <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em", color: PAL.muted, margin: "0 0 6px" }}>Layers</div>
@@ -2672,8 +2680,8 @@ export default function DocReview({
                     </div>
                   </AnchoredMenu>
                 </>
-              )}
-            </>}
+              ) }] : []),
+            ]} />
           </>
         }
       />

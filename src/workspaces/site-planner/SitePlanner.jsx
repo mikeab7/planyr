@@ -69,7 +69,6 @@ import {
   PANE_AREA_FRONT, PANE_AREA_FRONT_LABEL, FRONT_BAND_ATTR,
 } from "./lib/mapStack.js";
 import { loadRasterIdentify, makeHoverIdentify, rasterIdentifyNow } from "./lib/rasterIdentifyLazy.js";
-import { focusOverlays } from "./lib/layerFocus.js";
 import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, applyOnOverrides, overridesSig } from "./lib/layerPrefs.js";
 // NEW-1 — the per-site "Show above plan" twin of the four above: which GIS layers this site had
 // lifted over the site elements. Its own sparse map, so nothing about layerOverrides changes.
@@ -154,6 +153,7 @@ const ParcelRecord = lazy(() => import("./components/ParcelRecordPanel.jsx").the
 const PrintCompose = lazy(() => import("./components/PrintCompose.jsx"));
 import LazyPanel from "./components/LazyPanel.jsx";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
+import PriorityToolbar from "../../shared/ui/PriorityToolbar.jsx";
 import PanelChrome from "../../shared/ui/PanelChrome.jsx";
 import FloatingPanel from "../../shared/ui/FloatingPanel.jsx";
 import { clampToBounds, initialFloatPos, reconcileForNarrow, shouldInspectorTakeDock, dockAfterRelinquish, FLOAT_MIN_WIDTH, FLOAT_SIZE } from "../../shared/ui/floatingPanel.js";
@@ -170,6 +170,7 @@ import AppHeader from "../../shared/ui/AppHeader.jsx";
 import { CRUMB_MIN_W } from "../../shared/ui/ProjectBreadcrumb.jsx";
 import RotationStepper, { normalizeDeg } from "../../shared/ui/RotationStepper.jsx";
 import { layerVisibility, dormantZoomLine } from "./lib/layerZoomGate.js";
+import { nextHiddenToast } from "./lib/layerHiddenToast.js";
 import { worldToScreen, screenToWorld, zoomAround, midpoint, distance, pinchZoom } from "../../shared/viewport/viewportTransform.js";
 /* B1449 — the anchored render (the zoom half of B1440's increment) + the proportional wheel factor.
    `viewAnchor.js` holds the proof that an anchored frame lands exactly where a direct one would. */
@@ -180,7 +181,7 @@ import ColorField from "../../shared/ui/ColorField.jsx";
 /* LAZY (B1064 tranche a). The Standards footer renders only while the Standards panel is the
  * open one, docked or floating — never at first paint. */
 const StandardsBar = lazy(() => import("./components/StandardsBar.jsx"));
-import { loadUserPrefs, updateUserPrefs, applyPrefs, getPrefsSnapshot, subscribePrefs, setStandardPref, getStandardPref } from "./lib/userPrefs.js";
+import { loadUserPrefs, updateUserPrefs, applyPrefs, getPrefsSnapshot, subscribePrefs, setStandardPref, getStandardPref, setExportPref } from "./lib/userPrefs.js";
 import {
   PARCEL_STD_KEYS, TYPE_STD_KEYS, MEASURE_STD_KEYS, applyAllStandards, allStandardsImpact, appliedObjectsLabel,
   EMPTY_STD_DRAFT, draftParcelValue, draftTypeValue, draftMeasureValue, withParcelDraft, withTypeDraft, withMeasureDraft,
@@ -487,7 +488,7 @@ import { siteState as resolveSiteState } from "./lib/siteRegion.js";
 import { splitPolygonByCut, remapEdgeVector } from "./lib/polygonSplit.js";
 import { planCombine, planSplit, planRestoreCombined, planRestoreSplit, includedAcres, buildParcelRows } from "./lib/parcelOps.js";
 import ParcelsPanel from "./components/ParcelsPanel.jsx";
-import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea } from "./lib/polyClip.js";
+import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea, mergeParcelRings } from "./lib/polyClip.js";
 import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom, mapChromeCardStyle } from "./lib/sheetFurniture.js";
 // B765985 — pure, dependency-free (safe on the boot path): the explicit engineering-scale math
 // the compose screen's frame-locking and fit-check use.
@@ -1385,54 +1386,6 @@ function nearestPointOnSeg(p, a, b) {
   let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
   t = Math.max(0, Math.min(1, t));
   return { x: a.x + t * dx, y: a.y + t * dy };
-}
-
-/* ----------------------- polygon union (combine) ------------------- */
-// Merge two adjacent simple polygons that share a boundary. Each shared edge
-// appears in opposite directions in the two rings (consistent winding), so we
-// cancel every edge that has a reverse twin in the other ring, then stitch the
-// surviving edges back into one outer loop. Returns the merged ring or null
-// (not adjacent / couldn't form a single loop).
-function mergeRings(ringA, ringB, tol = 0.75) {
-  const eq = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) <= tol;
-  const edges = [];
-  const add = (ring) => { for (let i = 0; i < ring.length; i++) edges.push({ a: ring[i], b: ring[(i + 1) % ring.length], dead: false }); };
-  add(ringA); add(ringB);
-  let shared = 0;
-  for (let i = 0; i < edges.length; i++) {
-    if (edges[i].dead) continue;
-    for (let j = 0; j < edges.length; j++) {
-      if (j === i || edges[j].dead) continue;
-      if (eq(edges[i].a, edges[j].b) && eq(edges[i].b, edges[j].a)) { edges[i].dead = edges[j].dead = true; shared++; break; }
-    }
-  }
-  if (!shared) return null; // no common boundary → nothing to fuse
-  const live = edges.filter((e) => !e.dead);
-  if (live.length < 3) return null;
-  const used = new Array(live.length).fill(false);
-  const ring = [live[0].a, live[0].b]; used[0] = true;
-  for (let guard = 0; guard < live.length + 2; guard++) {
-    const end = ring[ring.length - 1];
-    let f = -1;
-    for (let k = 0; k < live.length; k++) { if (!used[k] && eq(live[k].a, end)) { f = k; break; } }
-    if (f < 0) break;
-    used[f] = true;
-    ring.push(live[f].b);
-  }
-  if (ring.length > 1 && eq(ring[0], ring[ring.length - 1])) ring.pop();
-  // drop coincident / collinear vertices left over from the cancelled edges
-  const dedup = [];
-  for (const p of ring) if (!dedup.length || !eq(dedup[dedup.length - 1], p)) dedup.push(p);
-  if (dedup.length > 1 && eq(dedup[0], dedup[dedup.length - 1])) dedup.pop();
-  const out = [];
-  for (let i = 0; i < dedup.length; i++) {
-    const a = dedup[(i - 1 + dedup.length) % dedup.length], b = dedup[i], c = dedup[(i + 1) % dedup.length];
-    const cross = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-    const baseLen = Math.hypot(c.x - a.x, c.y - a.y) || 1; // |cross|/base = perpendicular deviation in ft — scale-independent (B28)
-    if (Math.abs(cross) / baseLen > 0.1) out.push(b); // keep a vertex only if it bends > ~0.1 ft off the a→c chord
-  }
-  const final = out.length >= 3 ? out : dedup;
-  return final.length >= 3 ? final : null;
 }
 
 /* ------------------------------ format ----------------------------- */
@@ -2883,10 +2836,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Wetlands presence lifted from the Site Analysis screen's own finding (B710's
   // Section-404 cross-flag consumes it — no new fetch).
   const [analysisWetlands, setAnalysisWetlands] = useState(null);
-  // NEW-1 — the Site Analysis panel's hover/open highlight: a layer id the DRAWN overlays are focused on. Transient by
-  // construction — it only ever feeds `syncOverlays` (below), never `overlays`, so it is neither persisted nor undoable.
-  const [analysisFocus, setAnalysisFocus] = useState(null);
-  const syncOverlays = useMemo(() => focusOverlays(overlays, analysisFocus, ALL_LAYERS), [overlays, analysisFocus]);
   // ⛔ B877440 — no `|| "harris"` fallback. A plan with no saved county is genuinely
   // unresolved, so `jurKey` starts null (easementRules.defaultJurForCounty now returns null
   // for a county with no easement record, rather than silently routing to City of Houston's
@@ -3638,7 +3587,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // point.
     let staged = overlayStagedRef.current ? Infinity : 0;
     let idleId = null, idleTimer = null;
-    const order = orderLayersByPriority(syncOverlays, ALL_LAYERS);
+    const order = orderLayersByPriority(overlays, ALL_LAYERS);
     /* ⛔ NEW-2 — THE ZOOM GATE RESOLVES BEFORE FIRST PAINT, and this is where that is enforced.
      *
      * The owner's report: opening the site, contour lines rendered IMMEDIATELY and then vanished
@@ -3661,7 +3610,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      * It gates ADDS ONLY. A removal, an opacity change and a lift are untouched, exactly as with
      * the staging gate it composes with. */
     const gateResolved = layerGateReady;
-    const sync = () => syncOverlayLayers(geoMapRef.current, syncOverlays, overlayRefs.current, {
+    const sync = () => syncOverlayLayers(geoMapRef.current, overlays, overlayRefs.current, {
       // NEW-1 — the two stacking bands (lib/mapStack.js). Each layer lands in the one its
       // declared ROLE names: fills under the plan, strokes and points over it.
       panes: {
@@ -3696,7 +3645,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (idleId != null && typeof cancelIdleCallback === "function") { try { cancelIdleCallback(idleId); } catch (_) {} }
       if (idleTimer) clearTimeout(idleTimer);
     };
-  }, [syncOverlays, origin, basemapOn, layerGateReady]); // eslint-disable-line
+  }, [overlays, origin, basemapOn, layerGateReady]); // eslint-disable-line
 
   /* NEW-2 — the latch itself. It flips exactly once, when the framed view has been COMMITTED to
    * the backdrop map, and does nothing thereafter — so a zoom gesture (which moves `view.ppf`
@@ -6415,15 +6364,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (wantOn) ensureBasemapOn();
   }, [setOverlays, ensureBasemapOn]);
 
-  /* NEW-1 — the Site Analysis panel's row highlight. Setting a layer focuses it immediately; clearing waits a beat so
-     moving the pointer from one row to the next never flashes the whole map through "unfocused". */
-  const focusClearRef = useRef(null);
-  const focusAnalysisLayer = useCallback((id) => {
-    clearTimeout(focusClearRef.current);
-    if (id) { setAnalysisFocus(id); return; }
-    focusClearRef.current = setTimeout(() => setAnalysisFocus(null), 140);
-  }, []);
-  useEffect(() => () => clearTimeout(focusClearRef.current), []);
   /* NEW-1 — a "Calls to make" tick, persisted PER SITE in the plan's own settings (sparse: only ticked ids exist). */
   const toggleAnalysisCall = useCallback((id, on) => {
     setSettings((s) => {
@@ -6441,6 +6381,51 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const v = layerVisibility({ cfg: ALL_LAYERS[layerId], on: true, zoom: ppfToZoom(view.ppf, origin.lat), status: layerStatus?.[layerId] });
     return v.state === "dormant-zoom" ? dormantZoomLine(v.levels) : null;
   }, [origin, overlays, view.ppf, layerStatus]);
+
+  /* NEW-1 — "layer hidden at this zoom" toast. One combined toast per CROSSING into a layer's
+     no-draw range (turn-on, load, or in→out), re-armed when it draws again or is switched off;
+     the decision is the pure `nextHiddenToast` (lib/layerHiddenToast.js). Evaluated on a short
+     SETTLE debounce so a zoom gesture hovering at a gate cannot flicker toasts, and only after
+     `layerGateReady` so the opening default view (never the zoom the plan lands on) is not judged.
+     The action animates the zoom about the canvas centre (the ＋/－ anchor) to the nearest zoom
+     where the layers draw. */
+  const hiddenToastAnnouncedRef = useRef(null);
+  const zoomAnimRef = useRef(0);
+  const animateZoomTo = useCallback((z) => {
+    if (!origin) return;
+    const want = zoomToPpf(z, origin.lat);
+    const id = ++zoomAnimRef.current;
+    const t0 = performance.now(), DUR = 260;
+    let start = null;
+    const step = (now) => {
+      if (zoomAnimRef.current !== id) return;
+      const k = Math.min(1, (now - t0) / DUR), e = 1 - Math.pow(1 - k, 3);
+      setView((v) => {
+        if (!start) start = v;
+        const f = Math.exp(Math.log(want / start.ppf) * e);
+        const nv = zoomAround({ scale: start.ppf, tx: start.offX, ty: start.offY }, f, size.w / 2, size.h / 2, 0.02, 8);
+        return { ppf: nv.scale, offX: nv.tx, offY: nv.ty };
+      });
+      if (k < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }, [origin, size.w, size.h]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!active || !origin || !layerGateReady) return undefined;
+    const zoom = ppfToZoom(view.ppf, origin.lat);
+    const t = setTimeout(() => {
+      const layers = Object.keys(overlays || {}).map((id) => ({ id, cfg: ALL_LAYERS[id], on: !!overlays[id]?.on }));
+      const r = nextHiddenToast(hiddenToastAnnouncedRef.current, layers, zoom);
+      hiddenToastAnnouncedRef.current = r.announced;
+      if (!r.toast) return;
+      const { action } = r.toast;
+      pushToast({
+        text: r.toast.text, dedupeKey: "layer-hidden-at-zoom",
+        action: action ? { label: action.label, onClick: () => animateZoomTo(action.target) } : null,
+      });
+    }, 250);
+    return () => clearTimeout(t);
+  }, [active, origin, layerGateReady, overlays, view.ppf]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ⛔ REMOVED (B-VTX-SEL) — this used to auto-select "the single restored parcel so its handles
    * are ready to use". It ran on every MOUNT, not just the moment a parcel was first drawn, so
@@ -8177,13 +8162,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // consolidation. Merges greedily so a connected group of 2+ collapses to one.
   /* ⛔ THE ONE COMBINE (Parcels panel redesign). The map's Merge banner / Enter key / right-click
    * menu and the Parcels panel's Combine button ALL end here — `lib/parcelOps.planCombine` decides
-   * (the touching test is `mergeRings`, injected, untouched), this applies. A combine is a working
+   * (the touching test is `mergeParcelRings` from polyClip.js, injected, untouched), this applies. A combine is a working
    * merge for test-fit/yield, NOT a recorded legal consolidation. The originals live on inside the
    * new tract so Restore brings them back exactly; they are tombstoned out of `parcels` (B596: a
    * reload / cross-tab merge must not resurrect them beside the tract, and the thin-clobber guard
    * must be able to explain the dropped count). No naming prompt: the tract is auto-named. */
   const combineParcelsAction = (ids) => {
-    const plan = planCombine(parcels, ids, { mergeRings, newId: uid });
+    const plan = planCombine(parcels, ids, { unionRings: mergeParcelRings, newId: uid });
     if (!plan.ok) { if (plan.code !== "pick-two" || ids.length) flashWarn(`⚠ ${plan.message}`, 6500); return plan; } // B735: non-blocking notice, not a jarring alert()
     pushHistory("merge"); // a real OP_KINDS member so a merge is answerable from telemetry
     tombstone(plan.removeIds);
@@ -12739,7 +12724,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     onRename: (id, v) => setParcelField(id, "label", v),
     onRestoreCombined: restoreCombinedOriginals, onRestoreSplit: restoreSplitOriginal,
     acresOf: (pc) => parcelNetSqft(pc) / SQFT_PER_ACRE,
-    combinePreview: (ids) => planCombine(parcels, ids, { mergeRings, newId: () => "preview" }),
+    combinePreview: (ids) => planCombine(parcels, ids, { unionRings: mergeParcelRings, newId: () => "preview" }),
   };
   const parcelPanelH = useMemo(() => {
     const o = {};
@@ -16701,8 +16686,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // `doPrint`'s 7th argument (the "Stats band" toggle) never reached the actual PDF even though
   // the live compose PREVIEW (a separate, direct `buildComposedSheet` call) honored it — a real
   // pre-existing bug, found and fixed incidentally while adding the 8th (Fit-to-frame page).
-  const exportPDF = (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true) =>
-    withExportSheet((x) => x.exportPDF(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride, includeBuildingsTable));
+  const exportPDF = (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true, flattenMarkups = true) =>
+    withExportSheet((x) => x.exportPDF(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride, includeBuildingsTable, flattenMarkups));
 
   /* ------------ export frame geometry (stays here — the print-frame drag reads it) ----
      devExtent also seeds the initial print crop, so it can't live in the lazy chunk. */
@@ -17014,12 +16999,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       preCanvasDisplayRef.current = null;
     }
   };
+  // Read at CALL time off the one shared prefs snapshot (never a mount-time copy of it).
+  const flattenMarkupsPref = () => getPrefsSnapshot().exportPrefs?.flattenMarkups === true;
   const doPrint = async () => {
     setComposeDownloading(true);
     try {
       const scaleText = printScale ? scaleLabel(printScale) : "";
       const preparedBy = (settings.printPreparedBy || "").trim();
-      await exportPDF(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false, composePageOverride, settings.printBuildingsTable !== false);
+      // NEW-1 — "Flatten markups" is a per-USER choice (account prefs), default OFF = editable annotations.
+      await exportPDF(printPaper, printOrient, printOverlay, printMapLayers, scaleText, preparedBy, settings.printMetricsBand !== false, composePageOverride, settings.printBuildingsTable !== false, flattenMarkupsPref());
       cancelPrint();
     } finally { setComposeDownloading(false); }
   };
@@ -20916,138 +20904,173 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // can't-miss interrupt; the badge is the always-present at-a-glance state.
 
   const plannerToolbar = (
-    <>
-      {/* History group — Undo / Redo. B648352: both icons are drawn in the app's own stroke idiom
-          (fill:none, round cap/join — matching ToolIcon/RailIcon) rather than filled Material
-          glyphs; see components/icons.jsx's header for the measured reason and what's still
-          filled/reported (Layers — not fixed here, on purpose).
-          B648353 — a caret beside each opens a dropdown of recent actions (the Excel Quick Access
-          Toolbar shape Michael asked for): newest first, real names from lib/historyLabel.js's
-          snapshot diff, hover highlights a contiguous run from the top, click undoes/redoes that
-          whole run as one gesture. See openUndoMenu/openRedoMenu/undoRun/redoRun above.
-          ⛔ B755808 — NO FILLED TRAY. This group used to sit inside its own filled
-          `background: var(--hover-chrome)` pill, which is the exact token a disabled icon fades
-          toward — so a disabled Undo/Redo read as one indistinct grey smear instead of two clearly
-          off controls. The container never carries the disabled treatment; only the glyph does.
-          ⛔ NEW-1 (B1900672, 2026-09-24) — owner: move Undo/Redo to the LEFT of File, and drop
-          Zoom-to-fit from this row entirely (reachable via `fit()`'s other entry points — the
-          canvas's own empty-space right-click menu and the print-compose screen's own zoom-to-fit
-          button — neither of which this removal touches). Undo/Redo now leads the row; the pair
-          sits bare, grouped only by the `vSep` divider that follows it — one chrome language for
-          the whole bar, not a fourth invented for this one pair. */}
-      <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-        {/* ⛔ NEW-5 — UNDO IS ASKED ABOUT THE LIVE STATE, not merely about the stack's depth: a
-            plain selection click pushed a frame and armed this button while the plan was
-            byte-identical, which killed the only "this plan has been modified" signal the owner
-            has. See `history.js` → canUndo. `stateRef.current` is the live snapshot the same
-            predicate compares against inside `undo()`.
-            And BOTH buttons carry `aria-disabled` beside `disabled`: a disabled <button> has no
-            aria-disabled attribute at all, so a checker reading that attribute got null and
-            reported the empty Redo control as ENABLED — a mislabelled control, not a state bug,
-            and it cost a real investigation. The caret beside each mirrors the same `disabled` so
-            the button and its caret grey out together, never independently. */}
-        <div ref={undoAnchor} style={{ display: "flex" }}>
-          <button className="dbtn tb-icon-btn" style={{ ...dIcon, borderRadius: `${TB_R}px 0 0 ${TB_R}px`, borderRight: "none" }} onClick={undo} disabled={!canUndoNow} aria-disabled={!canUndoNow} aria-label="Undo" title="Undo (Ctrl+Z)"><UndoIcon /></button>
-          <button className="dbtn tb-icon-btn" style={dCaret} onClick={() => (undoMenuOpen ? setUndoMenuOpen(false) : openUndoMenu())}
-            disabled={!canUndoNow} aria-disabled={!canUndoNow} aria-haspopup="menu" aria-expanded={undoMenuOpen}
-            aria-label="Recent actions to undo" title="Recent actions to undo">
-            <span aria-hidden="true" style={{ fontSize: 9, lineHeight: 1 }}>▾</span>
-          </button>
-        </div>
-        <AnchoredMenu open={undoMenuOpen} onClose={() => setUndoMenuOpen(false)} anchorRef={undoAnchor} placement="below-left" gap={4} width={230} panelStyle={menuPanel}>
-          {undoRows.map((label, i) => (
-            <button key={i} style={menuItem(i <= undoHover)} data-hist-hi={i <= undoHover ? "1" : undefined} onMouseEnter={() => setUndoHover(i)} onFocus={() => setUndoHover(i)} onClick={() => undoRun(i + 1)}>{label}</button>
-          ))}
-          <div style={{ borderTop: `1px solid ${PAL.chromeLine}`, marginTop: 4, padding: "7px 10px 3px", fontSize: 11, fontWeight: 650, color: PAL.chromeMuted, textTransform: "uppercase", letterSpacing: "0.02em" }}>
-            {historyRunLabel("Undo", undoHover + 1)}
-          </div>
-        </AnchoredMenu>
-        <div ref={redoAnchor} style={{ display: "flex" }}>
-          <button className="dbtn tb-icon-btn" style={{ ...dIcon, borderRadius: `${TB_R}px 0 0 ${TB_R}px`, borderRight: "none" }} onClick={redo} disabled={!histRef.current.canRedo()} aria-disabled={!histRef.current.canRedo()} aria-label="Redo" title="Redo (Ctrl+Shift+Z)"><RedoIcon /></button>
-          <button className="dbtn tb-icon-btn" style={dCaret} onClick={() => (redoMenuOpen ? setRedoMenuOpen(false) : openRedoMenu())}
-            disabled={!histRef.current.canRedo()} aria-disabled={!histRef.current.canRedo()} aria-haspopup="menu" aria-expanded={redoMenuOpen}
-            aria-label="Recent actions to redo" title="Recent actions to redo">
-            <span aria-hidden="true" style={{ fontSize: 9, lineHeight: 1 }}>▾</span>
-          </button>
-        </div>
-        <AnchoredMenu open={redoMenuOpen} onClose={() => setRedoMenuOpen(false)} anchorRef={redoAnchor} placement="below-left" gap={4} width={230} panelStyle={menuPanel}>
-          {redoRows.map((label, i) => (
-            <button key={i} style={menuItem(i <= redoHover)} data-hist-hi={i <= redoHover ? "1" : undefined} onMouseEnter={() => setRedoHover(i)} onFocus={() => setRedoHover(i)} onClick={() => redoRun(i + 1)}>{label}</button>
-          ))}
-          <div style={{ borderTop: `1px solid ${PAL.chromeLine}`, marginTop: 4, padding: "7px 10px 3px", fontSize: 11, fontWeight: 650, color: PAL.chromeMuted, textTransform: "uppercase", letterSpacing: "0.02em" }}>
-            {historyRunLabel("Redo", redoHover + 1)}
-          </div>
-        </AnchoredMenu>
-      </div>
-      {vSep}
-      {/* File group — after Undo/Redo (NEW-1, B1900672, 2026-09-24: moved right of Undo/Redo, see
-          the History group comment above for the full reorder).
-          B1042 — opening the File menu warms the lazy export chunk, so by the time a download is
-          clicked the code is already in hand (no perceptible fetch).
-          ⛔ TOOLBAR PASS (B727504) — a bare word with no boundary and no caret reads as a heading,
-          not a control (owner report: "I can't tell what's going on with it"). It carries a real
-          1px border and a disclosure caret, and stays visibly "pressed" (accent border + tinted
-          fill) for as long as its menu is open.
-          ⛔ B755808 — the border-radius and height now come from the shared `TB_R`/`TB_H` (see
-          above) instead of a one-off 3px/29px, so File sits on the same grid as the icon buttons
-          beside it; the caret is de-emphasized with the same muted chrome token + lighter weight
-          every other disclosure caret in this app uses (`railHint`, the plan-caret at the
-          breadcrumb) instead of full-ink text jammed against the word. */}
-      <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-        <div ref={exportAnchor} style={{ position: "relative" }}>
-          {/* No aria-label here on purpose — the visible "File ▾" text is already a complete
-              accessible name (an aria-label would SILENTLY OVERRIDE it instead of adding to it,
-              and several ui-audit harnesses match this button by that exact visible name). The
-              caret stays plain text, not aria-hidden, for the same reason. */}
-          <button className="dbtn" aria-haspopup="menu" aria-expanded={exportMenu}
-            title="File — export a PNG or print a PDF"
-            style={{ ...dGhost, fontWeight: 600, display: "flex", alignItems: "center", gap: 6, height: TB_H, borderRadius: TB_R,
-              // ⛔ B1807200 AMENDMENT — resting border/background now match dGhost's own new box
-              // (var(--border-default)/var(--surface-raised)) instead of hardcoding PAL.chromeLine
-              // over a transparent fill; the open-menu accent border + hover-chrome tint still
-              // layers ON TOP of that box rather than replacing it.
-              border: `1px solid ${exportMenu ? PAL.accent : "var(--border-default)"}`,
-              background: exportMenu ? "var(--hover-chrome)" : "var(--surface-raised)" }}
-            onClick={() => setExportMenu((o) => { if (!o) warmExportSheet(); return !o; })}>
-            File <span style={{ fontSize: 10.5, lineHeight: 1, fontWeight: 500, color: PAL.chromeMuted }}>▾</span>
-          </button>
-          {/* B765984 — the .json project-file export/import pair was removed (owner: "no one should
-              really be using that"). The import's own tooltip admitted it REPLACES THE CURRENT
-              CANVAS with no confirmation, one row below a harmless PNG download — a destructive
-              whole-plan overwrite sitting where a misclick could reach it. Cloud save/load is the
-              real persistence path; this was a redundant, riskier side door. */}
-          <AnchoredMenu open={exportMenu} onClose={() => setExportMenu(false)} anchorRef={exportAnchor} placement="below-right" gap={8} width={220} panelStyle={menuPanel}>
-            <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
-            <button style={menuItem(false)} title="Pick a print frame, then download a finished PDF (no browser print dialog)" onClick={() => { setExportMenu(false); enterPrintMode(); }}>Download PDF / pick frame…</button>
-          </AnchoredMenu>
-        </div>
-      </div>
-      {/* Zoom-to-fit's Row 2 button was removed (NEW-1, B1900672, 2026-09-24, owner request) — the
-          same `fit()` handler is still reachable from the canvas's empty-space right-click menu and
-          from the print-compose screen's own zoom-to-fit button, both untouched by this removal. */}
-      {/* Snap's interactive toggle moved to the on-canvas View (eye) menu with the other
-          view/drawing aids (B653) — the top-bar duplicate is gone. S still toggles it. */}
-      {/* ⛔ TOOLBAR PASS (B727504) — "Select parcels" moved OFF this permanent bar. It's how a site
-          gets its parcel basis (identify / draw / split / merge) and the only way to add a lot
-          that was missed or swap the one you started from — genuinely not pointless — but it's
-          touched once per site, so it doesn't earn a permanent seat beside Undo/Redo/File. It now
-          lives in the Parcels panel (the site-setup context where choosing ground actually
-          happens; see `_pid === "parcel"` below), with a route back from the canvas via
-          right-click on any parcel (`onParcelContext` → the parcelMenu). */}
-      {tool === "select" && (() => {
-        const canG = multi.length > 1, canU = !!selectedGroupId();
-        if (!canG && !canU) return null;
-        return (
+    // NEW-2 (2026-10-05) — Row 2 is a `PriorityToolbar`: it never wraps or clips; Undo/Redo and File keep their
+    // chrome (unchanged JSX below), and when the row is tight they fold into one More menu. Priority (higher =
+    // kept longest): Undo/Redo 90 · File 80 · Group/Ungroup 60.
+    <PriorityToolbar name="site-actions" moreLabel="More plan actions" items={[
+      {
+        id: "history", label: "Undo / Redo", priority: 90,
+        menuRows: [
+          { id: "undo", label: "Undo", disabled: !canUndoNow, onSelect: undo },
+          { id: "redo", label: "Redo", disabled: !histRef.current.canRedo(), onSelect: redo },
+        ],
+        render: ({ measuring }) => (
           <>
-            {vSep}
+            {/* History group — Undo / Redo. B648352: both icons are drawn in the app's own stroke idiom
+                (fill:none, round cap/join — matching ToolIcon/RailIcon) rather than filled Material
+                glyphs; see components/icons.jsx's header for the measured reason and what's still
+                filled/reported (Layers — not fixed here, on purpose).
+                B648353 — a caret beside each opens a dropdown of recent actions (the Excel Quick Access
+                Toolbar shape Michael asked for): newest first, real names from lib/historyLabel.js's
+                snapshot diff, hover highlights a contiguous run from the top, click undoes/redoes that
+                whole run as one gesture. See openUndoMenu/openRedoMenu/undoRun/redoRun above.
+                ⛔ B755808 — NO FILLED TRAY. This group used to sit inside its own filled
+                `background: var(--hover-chrome)` pill, which is the exact token a disabled icon fades
+                toward — so a disabled Undo/Redo read as one indistinct grey smear instead of two clearly
+                off controls. The container never carries the disabled treatment; only the glyph does.
+                ⛔ NEW-1 (B1900672, 2026-09-24) — owner: move Undo/Redo to the LEFT of File, and drop
+                Zoom-to-fit from this row entirely (reachable via `fit()`'s other entry points — the
+                canvas's own empty-space right-click menu and the print-compose screen's own zoom-to-fit
+                button — neither of which this removal touches). Undo/Redo now leads the row; the pair
+                sits bare, grouped only by the `vSep` divider that follows it — one chrome language for
+                the whole bar, not a fourth invented for this one pair. */}
             <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-              {canG && <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={groupSel} title="Group the selected items so they move, copy & select as one unit — you can still double-click a member to edit it in place (Ctrl+G)">⊞ Group</button>}
-              {canU && <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={ungroupSel} title="Ungroup — split this group back into individual items (Ctrl+Shift+G)">⊟ Ungroup</button>}
+              {/* ⛔ NEW-5 — UNDO IS ASKED ABOUT THE LIVE STATE, not merely about the stack's depth: a
+                  plain selection click pushed a frame and armed this button while the plan was
+                  byte-identical, which killed the only "this plan has been modified" signal the owner
+                  has. See `history.js` → canUndo. `stateRef.current` is the live snapshot the same
+                  predicate compares against inside `undo()`.
+                  And BOTH buttons carry `aria-disabled` beside `disabled`: a disabled <button> has no
+                  aria-disabled attribute at all, so a checker reading that attribute got null and
+                  reported the empty Redo control as ENABLED — a mislabelled control, not a state bug,
+                  and it cost a real investigation. The caret beside each mirrors the same `disabled` so
+                  the button and its caret grey out together, never independently. */}
+              <div ref={measuring ? undefined : undoAnchor} style={{ display: "flex" }}>
+                <button className="dbtn tb-icon-btn" style={{ ...dIcon, borderRadius: `${TB_R}px 0 0 ${TB_R}px`, borderRight: "none" }} onClick={undo} disabled={!canUndoNow} aria-disabled={!canUndoNow} aria-label="Undo" title="Undo (Ctrl+Z)"><UndoIcon /></button>
+                <button className="dbtn tb-icon-btn" style={dCaret} onClick={() => (undoMenuOpen ? setUndoMenuOpen(false) : openUndoMenu())}
+                  disabled={!canUndoNow} aria-disabled={!canUndoNow} aria-haspopup="menu" aria-expanded={undoMenuOpen}
+                  aria-label="Recent actions to undo" title="Recent actions to undo">
+                  <span aria-hidden="true" style={{ fontSize: 9, lineHeight: 1 }}>▾</span>
+                </button>
+              </div>
+              <AnchoredMenu open={!measuring && undoMenuOpen} onClose={() => setUndoMenuOpen(false)} anchorRef={undoAnchor} placement="below-left" gap={4} width={230} panelStyle={menuPanel}>
+                {undoRows.map((label, i) => (
+                  <button key={i} style={menuItem(i <= undoHover)} data-hist-hi={i <= undoHover ? "1" : undefined} onMouseEnter={() => setUndoHover(i)} onFocus={() => setUndoHover(i)} onClick={() => undoRun(i + 1)}>{label}</button>
+                ))}
+                <div style={{ borderTop: `1px solid ${PAL.chromeLine}`, marginTop: 4, padding: "7px 10px 3px", fontSize: 11, fontWeight: 650, color: PAL.chromeMuted, textTransform: "uppercase", letterSpacing: "0.02em" }}>
+                  {historyRunLabel("Undo", undoHover + 1)}
+                </div>
+              </AnchoredMenu>
+              <div ref={measuring ? undefined : redoAnchor} style={{ display: "flex" }}>
+                <button className="dbtn tb-icon-btn" style={{ ...dIcon, borderRadius: `${TB_R}px 0 0 ${TB_R}px`, borderRight: "none" }} onClick={redo} disabled={!histRef.current.canRedo()} aria-disabled={!histRef.current.canRedo()} aria-label="Redo" title="Redo (Ctrl+Shift+Z)"><RedoIcon /></button>
+                <button className="dbtn tb-icon-btn" style={dCaret} onClick={() => (redoMenuOpen ? setRedoMenuOpen(false) : openRedoMenu())}
+                  disabled={!histRef.current.canRedo()} aria-disabled={!histRef.current.canRedo()} aria-haspopup="menu" aria-expanded={redoMenuOpen}
+                  aria-label="Recent actions to redo" title="Recent actions to redo">
+                  <span aria-hidden="true" style={{ fontSize: 9, lineHeight: 1 }}>▾</span>
+                </button>
+              </div>
+              <AnchoredMenu open={!measuring && redoMenuOpen} onClose={() => setRedoMenuOpen(false)} anchorRef={redoAnchor} placement="below-left" gap={4} width={230} panelStyle={menuPanel}>
+                {redoRows.map((label, i) => (
+                  <button key={i} style={menuItem(i <= redoHover)} data-hist-hi={i <= redoHover ? "1" : undefined} onMouseEnter={() => setRedoHover(i)} onFocus={() => setRedoHover(i)} onClick={() => redoRun(i + 1)}>{label}</button>
+                ))}
+                <div style={{ borderTop: `1px solid ${PAL.chromeLine}`, marginTop: 4, padding: "7px 10px 3px", fontSize: 11, fontWeight: 650, color: PAL.chromeMuted, textTransform: "uppercase", letterSpacing: "0.02em" }}>
+                  {historyRunLabel("Redo", redoHover + 1)}
+                </div>
+              </AnchoredMenu>
             </div>
           </>
-        );
-      })()}
-    </>
+        ),
+      },
+      {
+        id: "file", label: "File", priority: 80, sepBefore: true,
+        menuRows: [
+          { id: "export-png", label: "File · Export PNG", onSelect: exportPNG },
+          { id: "export-pdf", label: "File · Download PDF / pick frame…", onSelect: enterPrintMode },
+        ],
+        render: ({ measuring }) => (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+            {vSep}
+            {/* File group — after Undo/Redo (NEW-1, B1900672, 2026-09-24: moved right of Undo/Redo, see
+                the History group comment above for the full reorder).
+                B1042 — opening the File menu warms the lazy export chunk, so by the time a download is
+                clicked the code is already in hand (no perceptible fetch).
+                ⛔ TOOLBAR PASS (B727504) — a bare word with no boundary and no caret reads as a heading,
+                not a control (owner report: "I can't tell what's going on with it"). It carries a real
+                1px border and a disclosure caret, and stays visibly "pressed" (accent border + tinted
+                fill) for as long as its menu is open.
+                ⛔ B755808 — the border-radius and height now come from the shared `TB_R`/`TB_H` (see
+                above) instead of a one-off 3px/29px, so File sits on the same grid as the icon buttons
+                beside it; the caret is de-emphasized with the same muted chrome token + lighter weight
+                every other disclosure caret in this app uses (`railHint`, the plan-caret at the
+                breadcrumb) instead of full-ink text jammed against the word. */}
+            <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+              <div ref={measuring ? undefined : exportAnchor} style={{ position: "relative" }}>
+                {/* No aria-label here on purpose — the visible "File ▾" text is already a complete
+                    accessible name (an aria-label would SILENTLY OVERRIDE it instead of adding to it,
+                    and several ui-audit harnesses match this button by that exact visible name). The
+                    caret stays plain text, not aria-hidden, for the same reason. */}
+                <button className="dbtn" aria-haspopup="menu" aria-expanded={exportMenu}
+                  title="File — export a PNG or print a PDF"
+                  style={{ ...dGhost, fontWeight: 600, display: "flex", alignItems: "center", gap: 6, height: TB_H, borderRadius: TB_R,
+                    // ⛔ B1807200 AMENDMENT — resting border/background now match dGhost's own new box
+                    // (var(--border-default)/var(--surface-raised)) instead of hardcoding PAL.chromeLine
+                    // over a transparent fill; the open-menu accent border + hover-chrome tint still
+                    // layers ON TOP of that box rather than replacing it.
+                    border: `1px solid ${exportMenu ? PAL.accent : "var(--border-default)"}`,
+                    background: exportMenu ? "var(--hover-chrome)" : "var(--surface-raised)" }}
+                  onClick={() => setExportMenu((o) => { if (!o) warmExportSheet(); return !o; })}>
+                  File <span style={{ fontSize: 10.5, lineHeight: 1, fontWeight: 500, color: PAL.chromeMuted }}>▾</span>
+                </button>
+                {/* B765984 — the .json project-file export/import pair was removed (owner: "no one should
+                    really be using that"). The import's own tooltip admitted it REPLACES THE CURRENT
+                    CANVAS with no confirmation, one row below a harmless PNG download — a destructive
+                    whole-plan overwrite sitting where a misclick could reach it. Cloud save/load is the
+                    real persistence path; this was a redundant, riskier side door. */}
+                <AnchoredMenu open={!measuring && exportMenu} onClose={() => setExportMenu(false)} anchorRef={exportAnchor} placement="below-right" gap={8} width={220} panelStyle={menuPanel}>
+                  <button style={menuItem(false)} title="Save the current view as a PNG image" onClick={() => { setExportMenu(false); exportPNG(); }}>Export PNG</button>
+                  <button style={menuItem(false)} title="Pick a print frame, then download a finished PDF (no browser print dialog)" onClick={() => { setExportMenu(false); enterPrintMode(); }}>Download PDF / pick frame…</button>
+                </AnchoredMenu>
+              </div>
+            </div>
+            {/* Zoom-to-fit's Row 2 button was removed (NEW-1, B1900672, 2026-09-24, owner request) — the
+                same `fit()` handler is still reachable from the canvas's empty-space right-click menu and
+                from the print-compose screen's own zoom-to-fit button, both untouched by this removal. */}
+            {/* Snap's interactive toggle moved to the on-canvas View (eye) menu with the other
+                view/drawing aids (B653) — the top-bar duplicate is gone. S still toggles it. */}
+            {/* ⛔ TOOLBAR PASS (B727504) — "Select parcels" moved OFF this permanent bar. It's how a site
+                gets its parcel basis (identify / draw / split / merge) and the only way to add a lot
+                that was missed or swap the one you started from — genuinely not pointless — but it's
+                touched once per site, so it doesn't earn a permanent seat beside Undo/Redo/File. It now
+                lives in the Parcels panel (the site-setup context where choosing ground actually
+                happens; see `_pid === "parcel"` below), with a route back from the canvas via
+                right-click on any parcel (`onParcelContext` → the parcelMenu). */}
+          </span>
+        ),
+      },
+      ...((() => {
+        if (tool !== "select") return [];
+        const canG = multi.length > 1, canU = !!selectedGroupId();
+        if (!canG && !canU) return [];
+        return [{
+          id: "group", label: "Group", priority: 60, sepBefore: true,
+          menuRows: [
+            ...(canG ? [{ id: "group", label: "Group selection", onSelect: groupSel }] : []),
+            ...(canU ? [{ id: "ungroup", label: "Ungroup", onSelect: ungroupSel }] : []),
+          ],
+          render: () => (
+            <>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                  {vSep}
+                  <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+                    {canG && <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={groupSel} title="Group the selected items so they move, copy & select as one unit — you can still double-click a member to edit it in place (Ctrl+G)">⊞ Group</button>}
+                    {canU && <button className="dbtn" style={{ ...dGhost, fontWeight: 600 }} onClick={ungroupSel} title="Ungroup — split this group back into individual items (Ctrl+Shift+G)">⊟ Ungroup</button>}
+                  </div>
+                </span>
+            </>
+          ),
+        }];
+      })()),
+    ]} />
   );
 
   // Header breadcrumb switcher (B191): open another project (site group) in place.
@@ -21467,7 +21490,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <LazyPanel name="Site Analysis" minHeight={220} label="Loading site analysis…">
                       <SiteAnalysis rings={rings} holes={holeRings} acres={acres} parcelCount={act.length}
                         isLayerOn={(id) => !!overlays?.[id]?.on} onToggleLayer={toggleAnalysisLayer} layerStatus={layerStatus} layerZoomNote={analysisLayerZoomNote}
-                        onFocusLayer={focusAnalysisLayer}
                         callsChecked={settings.analysisCalls || null} onToggleCall={toggleAnalysisCall}
                         onOpenDrainage={() => setLeftPanel("drainage")}
                         onFindings={(fs) => { const w = fs && fs.find((f) => f.id === "wetlands"); setAnalysisWetlands(w ? w.status : null); }} />
@@ -25595,6 +25617,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 mapLayersPrintable={mapLayersPrintable} printMapLayers={printMapLayers} onToggleMapLayers={setPrintMapLayers}
                 showMetricsBand={settings.printMetricsBand !== false} onToggleMetricsBand={(v) => setSettings((s) => ({ ...s, printMetricsBand: v }))}
                 buildingsTablePrintable={buildingsTablePrintable} showBuildingsTable={settings.printBuildingsTable !== false} onToggleBuildingsTable={(v) => setSettings((s) => ({ ...s, printBuildingsTable: v }))}
+                flattenMarkups={prefsSnap.exportPrefs?.flattenMarkups === true} onToggleFlattenMarkups={(v) => commitUserPrefs((p) => setExportPref(p, { flattenMarkups: v }))}
                 onReposition={exitToReposition} onCancel={cancelPrint} onDownload={doPrint}
                 downloading={composeDownloading}
               />
@@ -29304,7 +29327,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             onClose={() => setLeftPanel(null)}
             onToggle={() => { if (!narrow) detachPanel(leftPanel); }}
             data-testid={`panel-chrome-${leftPanel}`} />
-          <div data-wheelscroll="1" style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "13px 13px 24px" }}>
+          <div data-wheelscroll="1" data-panel-body={leftPanel} style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", padding: "13px 13px 24px",
+            // Site Analysis reads on the same white surface the Layers / Properties panels use — its verdict rows are not
+            // filled cards, so on the gray column ground the whole panel read as one flat gray wall.
+            ...(leftPanel === "analysis" ? { background: "var(--surface-overlay)" } : null) }}>
           {renderPanelBody(leftPanel)}
           </div>
           {leftPanel === "standards" && standardsFooter}

@@ -68,3 +68,5 @@ export function navListFromScheduleRows(projectsMap) {
 export function planHintHealFromRows(projectsMap, groups) {
   return planScheduleHintSync(navListFromScheduleRows(projectsMap), groups);
 }
+
+export { resolveScheduleHint } from "./liveScheduleIndex.js"; // NEW-2 — lives in the leaf so the switcher (boot path) need not import this module

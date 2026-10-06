@@ -96,8 +96,9 @@ describe("Schedule header Row 2 — exactly ONE zone grows, so leftover width ca
     expect(threeZone).toContain('justifyContent: "flex-end"');
   });
 
-  it("the row still wraps (flexWrap) rather than clipping when content genuinely can't fit", () => {
-    expect(header).toContain('flexWrap: narrow ? "nowrap" : "wrap"');
+  it("NEW-1 (2026-10-05) — the row NEVER wraps: a shortfall collapses the tabs/toolbar (PriorityToolbar) instead of pushing the toolbar to a second line", () => {
+    expect(header).toContain('flexWrap: "nowrap"');
+    expect(header).not.toContain('flexWrap: narrow ? "nowrap" : "wrap"');
   });
 });
 

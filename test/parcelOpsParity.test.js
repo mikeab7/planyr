@@ -17,11 +17,16 @@ const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx
 const panel = readFileSync(new URL("../src/workspaces/site-planner/components/ParcelsPanel.jsx", import.meta.url), "utf8");
 
 const rect = (x, y, w, h) => [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }];
-const mergeRings = (a, b) => {
-  const bb = (r) => ({ x0: Math.min(...r.map((p) => p.x)), x1: Math.max(...r.map((p) => p.x)), y0: Math.min(...r.map((p) => p.y)), y1: Math.max(...r.map((p) => p.y)) });
-  const A = bb(a), B = bb(b);
-  if (!(A.y0 === B.y0 && A.y1 === B.y1 && (A.x1 === B.x0 || B.x1 === A.x0))) return null;
-  return rect(Math.min(A.x0, B.x0), A.y0, Math.max(A.x1, B.x1) - Math.min(A.x0, B.x0), A.y1 - A.y0);
+// Stand-in for polyClip's mergeParcelRings over axis-aligned rectangles that share a full edge.
+const bboxOf = (r) => ({ x0: Math.min(...r.map((p) => p.x)), x1: Math.max(...r.map((p) => p.x)), y0: Math.min(...r.map((p) => p.y)), y1: Math.max(...r.map((p) => p.y)) });
+const touches = (A, B) => (A.y0 === B.y0 && A.y1 === B.y1 && (A.x1 === B.x0 || B.x1 === A.x0)) || (A.x0 === B.x0 && A.x1 === B.x1 && (A.y1 === B.y0 || B.y1 === A.y0));
+const unionRings = (rings) => {
+  const bs = rings.map(bboxOf);
+  const seen = new Set([0]); let grew = true;
+  while (grew) { grew = false; bs.forEach((b, i) => { if (!seen.has(i) && [...seen].some((j) => touches(bs[j], b))) { seen.add(i); grew = true; } }); }
+  if (seen.size < bs.length) return { ok: false, code: "apart", groups: [[...seen], bs.map((_, i) => i).filter((i) => !seen.has(i))] };
+  const x0 = Math.min(...bs.map((b) => b.x0)), x1 = Math.max(...bs.map((b) => b.x1)), y0 = Math.min(...bs.map((b) => b.y0)), y1 = Math.max(...bs.map((b) => b.y1));
+  return { ok: true, ring: [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }] };
 };
 const fresh = () => { let n = 0; return () => `n${++n}`; };
 const plan = () => ["a", "b", "c", "d"].map((id, i) => ({ id, points: rect(i * 100, 0, 100, 100), locked: true, acct: `APN${i}` }));
@@ -29,8 +34,8 @@ const strip = (o) => JSON.parse(JSON.stringify(o));
 
 describe("behavioural parity — panel entry vs map entry", () => {
   it("combine: the panel's checked rows and the map's picked set give identical state", () => {
-    const viaPanel = planCombine(plan(), ["a", "b", "c"], { mergeRings, newId: fresh() });
-    const viaMap = planCombine(plan(), ["c", "a", "b"].sort(), { mergeRings, newId: fresh() }); // pick order is not significant
+    const viaPanel = planCombine(plan(), ["a", "b", "c"], { unionRings, newId: fresh() });
+    const viaMap = planCombine(plan(), ["c", "a", "b"].sort(), { unionRings, newId: fresh() }); // pick order is not significant
     expect(strip(viaPanel.parcels)).toEqual(strip(viaMap.parcels));
     expect(viaPanel.name).toBe(viaMap.name);
     expect(viaPanel.removeIds.sort()).toEqual(viaMap.removeIds.sort());
@@ -46,8 +51,8 @@ describe("behavioural parity — panel entry vs map entry", () => {
     expect(viaPanel.made.map((m) => m.splitName)).toEqual(viaMap.made.map((m) => m.splitName));
   });
   it("refusals are identical too (same message from either entry)", () => {
-    const a = planCombine(plan(), ["a", "c"], { mergeRings, newId: fresh() });
-    const b = planCombine(plan(), ["c", "a"], { mergeRings, newId: fresh() });
+    const a = planCombine(plan(), ["a", "c"], { unionRings, newId: fresh() });
+    const b = planCombine(plan(), ["c", "a"], { unionRings, newId: fresh() });
     expect(a.message).toBe(b.message);
   });
 });
@@ -68,11 +73,11 @@ describe("structural parity — SitePlanner.jsx has ONE combine and ONE split", 
   });
   it("nothing else builds a tract or a piece, or runs the cut / union engines directly", () => {
     expect(count(src, "splitPolygonByCut(")).toBe(0);
-    expect(src).not.toMatch(/const merged = mergeRings\(/);   // the old inline union loop is gone; the combine receives mergeRings by injection
+    expect(src).not.toMatch(/const merged = mergeParcelRings\(/);   // the old inline union is gone; the combine receives mergeParcelRings by injection
     expect(src).not.toMatch(/combined:\s*\{\s*from/);
     expect(src).not.toMatch(/splitFrom:\s*\{/);
   });
   it("the panel component is presentational — it imports no planner", () => {
-    expect(panel).not.toMatch(/planCombine|planSplit|mergeRings|splitPolygonByCut/);
+    expect(panel).not.toMatch(/planCombine|planSplit|mergeParcelRings|splitPolygonByCut/);
   });
 });
