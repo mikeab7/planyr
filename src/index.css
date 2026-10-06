@@ -688,6 +688,28 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
 .rbtn:hover:not(:disabled):not(.on) .rbtn-icon { color: var(--accent); }
 .rbtn:hover:not(:disabled):not(.on) .rbtn-hint { color: var(--chrome-text) !important; }
 
+/* NEW-1 — RIGHT TOOL RAIL (see components/RailSplit.jsx, lib/toolRailModel.js).
+   The rail's scrollbar is hidden (still scrolls by wheel / touch / keyboard) instead of taking a
+   permanent strip on the right: with the strip, every row sat closer to the left edge than the right.
+   `.rail-hdr` is the ONE heading rule: label + hairline to the right edge; its margins are the model's
+   RAIL numbers (above ≈ 2× below; below a little LESS than the gap between two tools). */
+.rail-scroll { scrollbar-width: none; }
+.rail-scroll::-webkit-scrollbar { display: none; }
+.rail-hdr { display: flex; align-items: center; gap: 8px; height: 12px; line-height: 1; margin: 22px 0 4px; padding: 0 0 0 11px;
+  font-size: 10.5px; font-weight: 700; letter-spacing: 1.1px; text-transform: uppercase; color: var(--chrome-muted); }
+.rail-hdr::after { content: ""; flex: 1; height: 1px; background: var(--chrome-divider); }
+.rail-scroll > .rail-hdr:first-child { margin-top: 4px; }
+/* Shortcut letters: hidden at rest, shown on hover / keyboard focus (they stay in the accessible name). */
+.rail-scroll .rbtn-hint { opacity: 0; transition: opacity .12s ease; }
+.rail-scroll .rbtn:hover .rbtn-hint, .rail-scroll .rbtn:focus-visible .rbtn-hint { opacity: 1; }
+/* The ▾ column: every caret is the same box, right-aligned inside its pill. */
+.rail-caret { display: inline-block; width: 12px; text-align: center; flex: none; }
+.rail-pill-val { font-size: 10.5px; letter-spacing: 0; white-space: nowrap; }
+.rail-split { border-radius: 8px; }
+.rail-split.on { background: var(--accent); }
+.rail-split.on > .rbtn { background: transparent !important; }
+.rail-split .rbtn:focus-visible { position: relative; z-index: 1; }
+
 /* dropdown menus (floating panels) */
 .menu button:hover:not(:disabled) { background: var(--hover-menu) !important; filter: none; }
 /* B648353 — the history dropdown's contiguous "will be undone/redone" highlight (rows [0..hover])

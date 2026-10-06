@@ -198,7 +198,7 @@ export function solveDeedAlignment(deedRing, parcelRing, opts = {}) {
  * it rotates a surveyed boundary.
  *
  * B1134752 — MOVED to `shared/coordinates/statePlane.js` (re-exported here unchanged): the
- * site-plan-overlay placement math (`shared/sitePlans/lib/overlayGeoref.js`) needed this same
+ * site-plan-overlay placement math (`shared/overlay/overlayPlacement.js`) needed this same
  * fact and lives in `shared/`, which must not import a workspace-scoped module — this is a plain
  * geodetic fact about a zone at a point, the same category as `gridScaleFactor` already there. */
 export { gridConvergenceDeg } from "../../../shared/coordinates/statePlane.js";

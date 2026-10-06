@@ -176,8 +176,8 @@ export function auditSnapshot(s) {
     if (t.box.h > TOL.rowMax) v.push({ kind: "toolbar-wrapped", detail: `toolbar "${t.name}" is ${t.box.h.toFixed(0)}px tall` });
     // nothing is simply dropped: every declared item is on the bar OR named as living in the menu
     const accounted = new Set([...t.barIds, ...t.menuIds]);
-    // a GHOST (reserved-but-unavailable, invisible, never in the menu by design) is not a control the user has —
-    // the plan giving up its placeholder room is not "dropping" anything. Every real item is still owed a place.
+    // a GHOST item (unavailable right now — PriorityToolbar `ghost`) is absent from the bar and the menu BY CONTRACT,
+    // so it is never "dropped"; a visible item still is. (Schedule: inbox/format wait for projects, zoom for a zoomable view.)
     const ghosts = new Set(t.ghostIds || []);
     for (const id of t.allIds) if (!accounted.has(id) && !ghosts.has(id)) v.push({ kind: "item-dropped", detail: `toolbar "${t.name}": item "${id}" is neither on the bar nor in the overflow menu` });
     if (t.menuIds.length && !t.hasMore) v.push({ kind: "no-more-button", detail: `toolbar "${t.name}" moved ${t.menuIds.join(", ")} to a menu but renders no More button` });

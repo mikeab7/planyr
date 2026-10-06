@@ -59,6 +59,12 @@ describe("auditSnapshot", () => {
     const s = clean(); s.toolbars = [{ name: "t", box: box(0, 40, 400, 80), allIds: ["a"], menuIds: [], iconIds: [], barIds: ["a"], hasMore: false }];
     expect(kinds(s)).toContain("toolbar-wrapped");
   });
+  it("a GHOST item (absent from bar and menu by contract) is not 'dropped' — but a visible one still is", () => {
+    const s = clean(); s.toolbars = [{ name: "t", box: box(0, 40, 400, 40), allIds: ["a", "g", "b"], menuIds: [], iconIds: [], ghostIds: ["g"], barIds: ["a"], hasMore: false }];
+    const dropped = auditSnapshot(s).filter((v) => v.kind === "item-dropped");
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0].detail).toMatch(/"b"/);        // the visible item still counts; the ghost does not
+  });
   it("NOTHING IS DROPPED — an item neither on the bar nor in the menu is caught", () => {
     const s = clean(); s.toolbars = [{ name: "t", box: box(0, 40, 400, 40), allIds: ["a", "b", "c"], menuIds: ["c"], iconIds: [], barIds: ["a"], hasMore: true }];
     expect(auditSnapshot(s).find((v) => v.kind === "item-dropped").detail).toMatch(/"b"/);
@@ -66,10 +72,6 @@ describe("auditSnapshot", () => {
   it("a GHOST (invisible, unavailable, never in the menu by design) given up by the plan is not 'dropped' — the Schedule bar's fallback placeholder state", () => {
     const s = clean(); s.toolbars = [{ name: "t", box: box(0, 40, 400, 40), allIds: ["a", "ghosty", "c"], menuIds: ["c"], ghostIds: ["ghosty"], settled: false, iconIds: [], barIds: ["a"], hasMore: true }];
     expect(kinds(s)).toEqual([]);
-  });
-  it("…but the ghost exemption is per-id: a REAL item missing beside a ghost is still caught", () => {
-    const s = clean(); s.toolbars = [{ name: "t", box: box(0, 40, 400, 40), allIds: ["a", "ghosty", "b"], menuIds: [], ghostIds: ["ghosty"], iconIds: [], barIds: ["a"], hasMore: false }];
-    expect(auditSnapshot(s).filter((v) => v.kind === "item-dropped").map((v) => v.detail)).toEqual([expect.stringMatching(/"b"/)]);
   });
   it("items in a menu with no More button to open it are caught", () => {
     const s = clean(); s.toolbars = [{ name: "t", box: box(0, 40, 400, 40), allIds: ["a", "b"], menuIds: ["b"], iconIds: [], barIds: ["a"], hasMore: false }];
