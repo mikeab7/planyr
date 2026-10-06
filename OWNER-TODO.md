@@ -1084,3 +1084,5 @@ a look-ahead at what that study will produce, clearly labelled as screening and 
 - B484 — the PDF/map stutter above (needs the heavy PDF to profile).
 
 - **Decision (B2099043):** should a loose Notes page (not bound to any project) show inside a project's Notes list, or only under "Not in a project" / "See all your notes"? Today it does not show inside a project.
+
+- **Decision (B2154032, privacy):** the logged-out Schedule page at `planyr.io/sequence/` currently ships the real Goose Creek task list with your name ("Michael Butler") and dated notes to anyone who opens it. Should the logged-out starter be (a) truly blank, (b) a made-up demo project, or (c) is the Goose Creek copy intentional? Nothing was changed yet — a blind edit could break the signed-out Schedule.
