@@ -7,10 +7,14 @@
  *   B  toggling the layers draws real EIA lines at metro Atlanta (gas + petroleum products) and an
  *      empty layer (crude, HGL) says "None mapped in this view — not proof there are none", never
  *      "No features";
- *   C  SCREENING — the load-bearing one: downtown Atlanta has NO EIA line within a mile of the
- *      parcel, and the Analysis panel must say "Not confirmed" + title commitment / ALTA survey /
- *      Georgia 811 — and NEVER "None found" / "No mapped RRC pipelines". A Florida parcel ON a
- *      Florida Gas Transmission line must read Present + Approximate;
+ *   C  SCREENING — since the Site Analysis redesign (B2117136) Pipelines in FL/GA is a "SHOW ON THE MAP —
+ *      check these yourself" pill with NO verdict, so the rendered arm asserts exactly that (no "Present" /
+ *      "Not confirmed" / "None" on the Pipelines row) and the screen's own answer is proven against the live
+ *      service: a Florida parcel ON a Florida Gas Transmission line (count > 0), downtown Atlanta (0), and the
+ *      owner's Georgia project — its STORED parcels (0 within a mile of FID 23971) vs the envelope quoted in
+ *      the 2026-10-05 report (the line crosses it) — see also test/eiaPipelineGeorgia.test.js (PLANYR_LIVE_EIA=1);
+ *   E  STYLE (NEW-2) — every EIA layer's rendered stroke is its Texas-commodity colour; Leaflet's default
+ *      #3388ff appears on NONE of them (it did, on lines fetched after the first opacity write);
  *   D  ROUTING — the Texas RRC service is never asked about a Florida/Georgia coordinate, the EIA
  *      services are never asked about a Texas one, and Texas keeps its verified "No mapped RRC
  *      pipelines crossing the site" wording.
@@ -118,32 +122,22 @@ async function openLayers(page) {
 }
 const eiaRows = (page) => page.locator(`${PANEL} [data-testid^="layer-row-eia_"]`);
 
-/* The Analysis panel's Pipelines card, read as the user sees it. The card is a run of lines:
- *   <glyph> / Pipelines / <STATUS> / <summary…> / ▸        — so slice from the "Pipelines" line to the
- * next status glyph line. Never a page-wide grep: the Layers panel (hidden) carries pipeline words too. */
-async function settle(page) {
-  await page.locator('button[title="Analysis"]').first().click();
-  await page.waitForFunction(() => /\nPipelines\n/.test(document.body.innerText) && !/Querying GIS sources/.test(document.body.innerText), null, { timeout: 90000 });
-  await page.waitForTimeout(800);
-}
-const cardOf = (page) => page.evaluate(() => {
-  const m = document.body.innerText.match(/\nPipelines\n([\s\S]*?)\n(?:[⚠✓ℹ↻⚑○])\n/);
-  return m ? m[1] : "";
-});
-async function pipelinesCard(page) { await settle(page); return cardOf(page); }
-async function expandCard(page) {
-  await page.locator("text=/^Pipelines$/").filter({ visible: true }).first().click().catch(() => {});
-  await page.waitForTimeout(500);
-  return cardOf(page);
-}
-
 /* ═══ KNOWN-GOOD ARM — independent of the app ═══════════════════════════════════════════════════ */
 console.log("\nKnown-good arm (live, outside the browser)");
 const flKnown = liveCount(SERVICES.gas, -82.404864, 29.35936);
 const gaKnown = liveCount(SERVICES.gas, -84.39, 33.75) + liveCount(SERVICES.petroleum, -84.39, 33.75);
 ok("Florida Gas Transmission parcel: live EIA count within a mile is > 0", flKnown > 0, `${flKnown}`);
 ok("downtown Atlanta parcel: live EIA count within a mile is 0 (a real no-hit site)", gaKnown === 0, `${gaKnown}`);
-if (!(flKnown > 0) || gaKnown !== 0) { console.log("\nVOID — the known-good arms did not report their known values; refusing to score."); await browser.close(); process.exit(2); }
+/* The owner's Georgia project. Stored parcels (plan smun2bc1cvzu, origin 34.3876/-84.9096) → bbox below; the envelope
+ * quoted in the 2026-10-05 report is a different piece of ground the line does cross. Independent of the app. */
+const bboxCount = (serviceUrl, [x0, y0, x1, y1], miles) => JSON.parse(execFileSync("curl", ["-sS", "-m", "40", `${serviceUrl}/query`,
+  "--data-urlencode", `geometry=${JSON.stringify({ xmin: x0, ymin: y0, xmax: x1, ymax: y1, spatialReference: { wkid: 4326 } })}`,
+  "-d", `geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&distance=${miles}&units=esriSRUnit_StatuteMile&returnCountOnly=true&f=json`]).toString()).count;
+const GA_STORED = [-84.91895, 34.37821, -84.90030, 34.39709], GA_QUOTED = [-85.020, 34.409, -84.979, 34.451];
+const gaStored1 = bboxCount(SERVICES.gas, GA_STORED, 1), gaQuoted1 = bboxCount(SERVICES.gas, GA_QUOTED, 1);
+ok("Georgia project, STORED parcels: no EIA gas line within a mile (so 'Not confirmed' is the right answer)", gaStored1 === 0, `${gaStored1}`);
+ok("Georgia project, QUOTED envelope: FID 23971 is within a mile (so a screen there must say Present)", gaQuoted1 > 0, `${gaQuoted1}`);
+if (!(flKnown > 0) || gaKnown !== 0 || gaStored1 !== 0 || !(gaQuoted1 > 0)) { console.log("\nVOID — the known-good arms did not report their known values; refusing to score."); await browser.close(); process.exit(2); }
 
 /* ═══ A + B — Georgia: layers offered, labelled, draw ═══════════════════════════════════════════ */
 console.log("\nA/B — Georgia plan: the four layers");
@@ -169,9 +163,12 @@ console.log("\nA/B — Georgia plan: the four layers");
     await page.locator(`${PANEL} [data-testid="layer-row-${id}"] input[type=checkbox]`).first().check();
   }
   await page.waitForTimeout(6000);
-  const strokes = await page.evaluate(() => { const c = {}; document.querySelectorAll(".leaflet-overlay-pane path, .leaflet-pane svg path").forEach((p) => { const k = p.getAttribute("stroke"); if (k) c[k] = (c[k] || 0) + 1; }); return c; });
-  ok("natural gas lines are DRAWN (its stroke colour is on the map)", (strokes["#c2410c"] || 0) > 0, JSON.stringify(strokes));
-  ok("petroleum product lines are DRAWN", (strokes["#a16207"] || 0) > 0);
+  const strokes = await page.evaluate(() => { const c = {}; document.querySelectorAll(".leaflet-gisLine-pane path").forEach((p) => { const k = (p.getAttribute("stroke") || "").toLowerCase(); if (k) c[k] = (c[k] || 0) + 1; }); return c; });
+  ok("E: natural gas lines are DRAWN in the Texas natural-gas colour", (strokes["#ef9f27"] || 0) > 0, JSON.stringify(strokes));
+  ok("E: petroleum product lines are DRAWN in the Texas refined-products colour", (strokes["#1d9e75"] || 0) > 0);
+  ok("E: NO line on the map is Leaflet's default #3388ff (lines fetched after the opacity write used to be)", !strokes["#3388ff"], `${strokes["#3388ff"] || 0}`);
+  const widths = await page.evaluate(() => [...document.querySelectorAll(".leaflet-gisLine-pane path")].filter((p) => (p.getAttribute("stroke") || "").toLowerCase() === "#ef9f27").map((p) => p.getAttribute("stroke-width")));
+  ok("E: …and at the constraint-tier weight", widths.length > 0 && widths.every((w) => w === "3"), widths.join(","));
   const empt = await page.locator(`${PANEL} [data-testid="layer-row-eia_crude"]`).innerText();
   ok("an empty layer (crude) says it is not proof, and never 'No features'", /not proof there are none/i.test(empt) && !/No features/i.test(empt), empt.replace(/\n+/g, " | ").slice(0, 160));
   ok("no page errors", log.errs.length === 0, log.errs.join(" ; ").slice(0, 200));
@@ -179,35 +176,21 @@ console.log("\nA/B — Georgia plan: the four layers");
   await ctx.close();
 }
 
-/* ═══ C (no-hit) + D — Georgia screening ═════════════════════════════════════════════════════════ */
-console.log("\nC/D — Georgia screening (downtown Atlanta: no EIA line within a mile)");
-{
-  const { ctx, page, log } = await open("ga");
-  const card = await pipelinesCard(page);
-  ok("the pipelines card reads 'Not confirmed'", /Not confirmed/.test(card), card.replace(/\n+/g, " | ").slice(0, 260));
-  ok("…and NEVER 'None found' / 'No mapped RRC pipelines'", !/None found|No mapped RRC/i.test(card));
-  const full = await expandCard(page);
-  ok("the real site checks are named — title commitment, ALTA survey, Georgia 811", /title commitment/i.test(full) && /ALTA survey/i.test(full) && /Georgia 811/.test(full), full.replace(/\n+/g, " | ").slice(0, 400));
-  ok("the Texas RRC service was NEVER asked about a Georgia coordinate", log.rrc.length === 0, `${log.rrc.length} request(s)`);
-  ok("the EIA services WERE asked", log.eia.some((u) => /Natural_Gas/.test(u)) && log.eia.some((u) => /Petroleum/.test(u)));
-  const wells = await page.evaluate(() => document.body.innerText);
-  ok("Texas-only wells card is 'Not available in Georgia', not 'No mapped oil & gas wells'", /Not available in Georgia/.test(wells) && !/No mapped oil/i.test(wells));
-  await page.screenshot({ path: `${OUT}ga-analysis.png` });
-  await ctx.close();
-}
-
-/* ═══ C (hit) + D — Florida screening ════════════════════════════════════════════════════════════ */
-console.log("\nC/D — Florida screening (parcel on a Florida Gas Transmission line)");
-{
-  const { ctx, page, log } = await open("fl");
-  const card = await pipelinesCard(page);
-  ok("KNOWN-GOOD ARM: the pipelines card reads Present", /Present/i.test(card), card.replace(/\n+/g, " | ").slice(0, 300));
-  ok("…and is labelled Approximate", /Approximate/i.test(card));
-  const full = await expandCard(page);
-  ok("the operator is named (Florida Gas Trans)", /Florida Gas Trans/i.test(full));
-  ok("Sunshine 811 (Florida's one-call), never Georgia 811", /Sunshine 811/.test(full) && !/Georgia 811/.test(full));
-  ok("the Texas RRC service was NEVER asked about a Florida coordinate", log.rrc.length === 0, `${log.rrc.length} request(s)`);
-  await page.screenshot({ path: `${OUT}fl-analysis.png` });
+/* ═══ C + D — Georgia / Florida Site Analysis: Pipelines is a map pill, not a verdict ═══════════ */
+const PIPE_ROW = (t) => { const m = t.match(/SHOW ON THE MAP[\s\S]*?\n(Pipelines)\n/); return m ? m[1] : null; };
+for (const key of ["ga", "fl"]) {
+  console.log(`\nC/D — ${key === "ga" ? "Georgia" : "Florida"} Site Analysis`);
+  const { ctx, page, log } = await open(key);
+  await page.locator('button[title="Analysis"]').first().click();
+  await page.waitForFunction(() => /SHOW ON THE MAP/.test(document.body.innerText), null, { timeout: 90000 });
+  await page.waitForTimeout(1500);
+  const t = await page.evaluate(() => document.body.innerText);
+  ok("Pipelines is offered under 'SHOW ON THE MAP — check these yourself'", PIPE_ROW(t) === "Pipelines");
+  ok("…the panel says it does not flag them for you", /doesn't flag them for you/.test(t));
+  const mapSec = t.slice(t.search(/SHOW ON THE MAP/), t.search(/CALLS TO MAKE/));
+  ok("…and carries NO pipeline verdict (no Present / Not confirmed / None found / No mapped)", !/Present|Not confirmed|None found|No mapped/i.test(mapSec), mapSec.replace(/\n+/g, " | ").slice(0, 200));
+  ok("the Texas RRC service was NEVER asked about this coordinate", log.rrc.length === 0, `${log.rrc.length} request(s)`);
+  await page.screenshot({ path: `${OUT}${key}-analysis.png` });
   await ctx.close();
 }
 
@@ -219,9 +202,12 @@ console.log("\nTexas — unchanged");
   const rows = await eiaRows(page).count();
   ok("the EIA layers are NOT offered on a Texas plan", rows === 0, `${rows} row(s)`);
   ok("the authoritative Texas pipeline layer still is", (await page.locator(`${PANEL} [data-testid="layer-row-txrrc_pipe"]`).count()) === 1);
-  await settle(page);
+  await page.locator('button[title="Analysis"]').first().click();
+  await page.waitForFunction(() => /CHECKED FOR YOU/.test(document.body.innerText) && !/Checking the maps/.test(document.body.innerText), null, { timeout: 120000 });
+  await page.waitForTimeout(1000);
   const text = await page.evaluate(() => document.body.innerText);
-  ok("Texas keeps the RRC wording: 'No mapped RRC pipelines crossing the site'", /No mapped RRC pipelines crossing the site/.test(text));
+  const checked = text.slice(text.search(/CHECKED FOR YOU/), text.search(/SHOW ON THE MAP|CALLS TO MAKE/));
+  ok("Texas keeps a TRUSTED Pipelines check under 'CHECKED FOR YOU' (RRC permit routes)", /Pipelines/.test(checked), checked.replace(/\n+/g, " | ").slice(0, 200));
   ok("the Texas RRC service WAS asked", log.rrc.length > 0, `${log.rrc.length} request(s)`);
   ok("no EIA service was asked about a Texas coordinate", log.eia.filter((u) => /\/query/.test(u)).length === 0, log.eia.map((u) => u.slice(62, 200)).join(" ; "));
   await ctx.close();
