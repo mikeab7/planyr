@@ -99,6 +99,7 @@ export default function AdminApp({ onExit, user }) {
           .admin-shell{display:flex;flex:1;min-height:0}
           .admin-nav-narrow{display:none}
           @media (max-width: 760px){ .admin-shell{flex-direction:column} .admin-nav-wide{display:none !important} .admin-nav-narrow{display:block} }
+          @media (max-width: 900px){ .admin-tbl-narrow table{min-width:var(--tbl-min)} }
         `}</style>
         <header style={{ flex: "none", display: "flex", alignItems: "center", gap: 12, padding: "10px 18px", background: "var(--chrome-bg)", borderBottom: "1px solid var(--chrome-divider)" }}>
           <h1 style={{ margin: 0, fontSize: FONT_SIZE.display, fontWeight: 700, color: "var(--chrome-text)" }}>Admin</h1>

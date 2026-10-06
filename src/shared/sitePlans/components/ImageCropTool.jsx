@@ -59,7 +59,7 @@ import {
   clampPolyPoints, normalizePolyCrop, isUsablePoly, cropKind,
   rectToPolyPoints, MIN_POLY_VERTICES, MAX_POLY_VERTICES,
   constrainOctant, nearestOnSegment, savedRectOf, savedPtsOf, isFullImagePoly,
-} from "../../../workspaces/site-planner/lib/overlayCrop.js";
+} from "../../overlay/overlayCrop.js";
 import {
   emptyHistory, pushHistory, undoHistory, redoHistory, canUndo, canRedo, scaleToSlider, sliderToScale,
 } from "../../../workspaces/site-planner/lib/cropHistory.js";

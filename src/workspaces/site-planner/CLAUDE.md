@@ -46,6 +46,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   EVERY role so a second deal on an already-tracked property attaches to it instead of minting a
   duplicate, then an exact normalized-title fallback) and mints a new "tracked" site only when
   nothing plausible matches. The owner must never have to create a site before recording a deal.
+- **Right tool rail (B2142832):** `components/RailSplit.jsx` (`RailSplit` = label + ▾ pill carrying the tool's current size; `RailHeading` = label + hairline) and pure `lib/toolRailModel.js` (pill values/tooltips/aria, dock glyph kind, heading spacing `RAIL`, mirrored by `.rail-hdr` in the global stylesheet). Never copy a value into the rail — read `settings.stallW/stallDepth`, `roadWidth`, `buildingDock`. Guards: the repo-root `test/` suite **toolRailModel** and the e2e spec **tool-rail-values**.
 - **⛔ Site Analysis = TRUSTED VERDICTS ONLY (B2117136, owner-approved 2026-10-05) — read before adding a check or a card.**
   A verdict (colour, amount, "None") is issued only by `siteChecks.js`'s declared `TRUSTED_CHECKS` registry, and only where the
   site's region is in that check's `regions` (FEMA + NWI: all; RRC wells + pipelines: TX). Everything else is a map-layer PILL
@@ -178,7 +179,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   and the repo-root ui-audit instrument **diagnose-layer-gate-flash**. ⚠ That harness can watch the terrain
   layer ASK but never ANSWER — 3DEP is `ERR_CONNECTION_RESET` from Chromium here — and it says so
   rather than scoring itself; the paint-then-vanish half is **V121985**.
-  **`layerHiddenToast.js` (B2112576)** is the on-map companion: pure once-per-crossing toast decision (+ the "Zoom in" target) over the same gates; wired in `SitePlanner.jsx` through the shared toast stack. Guards: **layerHiddenToast** + e2e **layer-hidden-toast**.
+  **`layerHiddenToast.js` (B2112576)** is the on-map companion: pure once-per-crossing toast decision (+ the "Zoom in" target) over the same gates; shared by BOTH surfaces through `lib/useLayerHiddenToast.js` (the project canvas in `SitePlanner.jsx` AND the overview in `MapFinder.jsx`) over the shared toast stack. Guards: **layerHiddenToast** + e2e **layer-hidden-toast**.
 - `layers.js` + `components/LayerPanel.jsx` — map-layer system; `layerPrefs.js` (per-site Layers-panel
   toggle memory — NEW-1, sparse on/off overrides restored on open + persisted on toggle).
   **⛔ B385040 — `applyOnOverrides` / `applyAboveOverrides` ARE IDENTITY-STABLE, and that is load-bearing
@@ -274,7 +275,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   (Brookshire–Katy Drainage District) endpoints live in the shared GIS source registry like every
   other source; `detentionRules.js` owns the district-aware `resolveDrainageContext`.
 - Site-plan overlay import (B72/B73/B747/B748/B749): `overlayPdf.js` (PDF+DXF raster, banded
-  white-knockout, zoom-aware re-raster) + `overlayScale.js` (scale/trace math) + `overlayStorage.js`
+  white-knockout, zoom-aware re-raster) + the shared overlay scale/trace math (`src/shared/overlay/`) + `overlayStorage.js`
   **⛔ B251136/B251137 — `chooseOverlayRasterScale` QUANTISES THE RE-RASTER SCALE TO AN OCTAVE
   LADDER AND ROUNDS **UP**, and `SitePlanner.jsx` CACHES the rungs. Read both headers before
   touching either.** Measured on the owner's real Bain overlay (1728 × 2592 pt, both his Bain
@@ -298,7 +299,8 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   issuing a request and the whole path dies silently; its `pdfDeliveryFault` refuses such a run.
   (Storage backup) + `dxf/` (worker parse via `dxf-parser` + entity→SVG render + true-units auto-scale)
   + `convertClient.js` (DWG→DXF through the B238 convert service, gated on `VITE_CONVERT_URL`).
-  **`overlayCrop.js` is the ONE crop model for BOTH overlay systems** (rect | poly, image px);
+  **The ONE overlay engine now lives in `src/shared/overlay/` (NEW-1; see its CLAUDE.md): the crop model (rect | poly, image px) for BOTH overlay systems, the placement math (geo + canvas — rotate/scale/align), and the raster sizing.** Do not add a second copy here.
+  The crop model is shared: (rect | poly, image px);
   the Site tab's "Crop…" (`components/OverlayCropDialog.jsx`, B1838704) reuses the shared
   `ImageCropTool`, clips via `cropClipShapeScreen` → an SVG `<clipPath>` (what the export clone
   carries), and every write goes through `setOverlayCrop` (lock enforced at the write). `crop` is in
@@ -1862,6 +1864,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   Helvetica (not embedded), `Tz`-squeezed to the browser's measured widths — read the B2127664 deviations list before
   promising more. Guards: repo-root `test/` suite **pdfAnnotations** (incl. a second-library round-trip) + ui-audit
   **verify-pdf-markup-annotations** (real compose flow, poppler render parity, known-good arm).
+  **B2143584 — the `/AP` stream is only what shows UNTIL a viewer REGENERATES the annotation (Bluebeam/Acrobat on any edit), so every key a regenerating viewer reads must agree with it:** FreeText `/C` is the box FILL (border in `/DA` `RG`, never `/IC`), a translucent fill's opacity is `/CA`, a cloud's `/BE /I` comes from the scallop pitch, a two-point measurement's number is its `/Cap` caption. Guards: **pdfAnnotations** (regeneration block) + ui-audit **verify-pdf-annotation-regeneration** (MuPDF `update()` drift).
   **B765985 — the compose screen.** Picking a print frame no longer downloads straight off the
   canvas: `components/PrintCompose.jsx` (also lazy, its own chunk, warmed alongside the export
   chunk) is a dedicated full-screen surface for paper size (incl. ARCH C/D, ANSI C/D),

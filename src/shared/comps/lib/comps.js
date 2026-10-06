@@ -48,7 +48,7 @@ export function validAnchor(anchor) {
   // (every comp's one required, universally-read position — every map marker, list, filter and
   // proximity screen in the app reads ONLY lat/lon, never anchor-kind-specific fields) is a
   // DERIVED CACHE: `sitePlanPoint` run through the overlay's CURRENT placement transform
-  // (center/scale/rotation — shared/sitePlans/lib/overlayGeoref.js `imagePointToLatLon`). That
+  // (center/scale/rotation — shared/overlay/overlayPlacement.js `imagePointToLatLon`). That
   // cache is why it must be NOT NULL and always populated (a comp is otherwise unfindable on the
   // map), and why it goes stale — silently wrong — the instant someone drags, scales, rotates or
   // re-anchors the overlay. `SitePlansSection.jsx`'s placement-commit handler is the one place

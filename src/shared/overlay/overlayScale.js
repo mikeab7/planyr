@@ -201,4 +201,4 @@ export function matchScalePreset(feetPerInch, eps = 1e-3) {
  * shared layer importing back into this workspace. Re-exported here so the overlay's existing
  * callers (and test/sheetScale.test.js) keep importing `parseSheetScale` from overlayScale.js
  * unchanged, and the scale↔feet-per-point conversion (ftPerPointForScale) stays alongside it. */
-export { parseSheetScale } from "../../../shared/files/sheetScale.js";
+export { parseSheetScale } from "../files/sheetScale.js";

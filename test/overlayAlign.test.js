@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   imagePointToWorld, scaleOverlayAbout, similarityTransform, alignOverlaySimilarity,
   solveSimilarityLSQ, applySimilarityToOverlay,
-} from "../src/workspaces/site-planner/lib/overlayAlign.js";
+} from "../src/shared/overlay/overlayPlacement.js";
 
 const ov = (over = {}) => ({ x: 100, y: 50, imgW: 800, imgH: 600, ftPerPx: 0.5, rotation: 0, ...over });
 const near = (a, b, p = 5) => { expect(a.x).toBeCloseTo(b.x, p); expect(a.y).toBeCloseTo(b.y, p); };

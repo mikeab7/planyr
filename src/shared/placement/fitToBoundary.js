@@ -24,10 +24,10 @@
  * over the boundary's characteristic size (√area), so a high fraction flags a distorted
  * drawing that a rigid fit can't honor (a true rubber-sheet/affine would be needed).
  *
- * Self-contained on purpose: this lives in shared/ and must not import the site-planner
- * workspace, so it carries its own small Procrustes solve (mirrors overlayAlign.js's
- * solveSimilarityLSQ — the proven B73 math — kept in sync by the parallel tests).
+ * The Procrustes solve and the similarity builder are shared/geometry/similarityTransform.js —
+ * the ONE copy, also used by the overlay engine (NEW-1; this file used to carry a private duplicate).
  */
+import { solveSimilarityLSQ, makeSimilarity } from "../geometry/similarityTransform.js";
 
 // RMS landing error over the boundary's √area, above which a rigid fit is "not confident".
 export const CONFIDENT_FRAC = 0.02; // 2%
@@ -60,35 +60,6 @@ function areaOf(pts) {
   return Math.abs(a) / 2;
 }
 
-/* Closed-form least-squares similarity over paired points [{from,to}] (Procrustes).
- * Returns { scale, rotDeg, apply, residual } (residual = RMS feet) or null. Identical in
- * form to overlayAlign.solveSimilarityLSQ; duplicated here to keep shared/ self-contained. */
-function solveSimilarity(pairs) {
-  const n = pairs.length;
-  if (n < 2) return null;
-  let Px = 0, Py = 0, Qx = 0, Qy = 0;
-  for (const { from, to } of pairs) { Px += from.x; Py += from.y; Qx += to.x; Qy += to.y; }
-  const Pb = { x: Px / n, y: Py / n }, Qb = { x: Qx / n, y: Qy / n };
-  let C = 0, S = 0, Spp = 0;
-  for (const { from, to } of pairs) {
-    const px = from.x - Pb.x, py = from.y - Pb.y, qx = to.x - Qb.x, qy = to.y - Qb.y;
-    C += px * qx + py * qy;
-    S += px * qy - py * qx;
-    Spp += px * px + py * py;
-  }
-  if (!(Spp > 1e-12)) return null;
-  const scale = Math.hypot(C, S) / Spp;
-  const ang = Math.atan2(S, C);
-  const c = Math.cos(ang), s = Math.sin(ang);
-  const apply = (pt) => {
-    const dx = pt.x - Pb.x, dy = pt.y - Pb.y;
-    return { x: Qb.x + scale * (c * dx - s * dy), y: Qb.y + scale * (s * dx + c * dy) };
-  };
-  let se = 0;
-  for (const { from, to } of pairs) { const r = apply(from); se += (r.x - to.x) ** 2 + (r.y - to.y) ** 2; }
-  return { scale, rotDeg: (ang * 180) / Math.PI, apply, residual: Math.sqrt(se / n) };
-}
-
 /* Principal-axis angle (radians) of a point set, from the 2×2 covariance. */
 function principalAngle(pts, c) {
   let sxx = 0, syy = 0, sxy = 0;
@@ -98,12 +69,7 @@ function principalAngle(pts, c) {
 
 /* Build a similarity transform from explicit (scale, angle, source→target centroid). */
 function makeTransform(scale, angRad, srcC, tgtC) {
-  const c = Math.cos(angRad), s = Math.sin(angRad);
-  const apply = (pt) => {
-    const dx = pt.x - srcC.x, dy = pt.y - srcC.y;
-    return { x: tgtC.x + scale * (c * dx - s * dy), y: tgtC.y + scale * (s * dx + c * dy) };
-  };
-  return { scale, rotDeg: ((((angRad * 180) / Math.PI) % 360) + 360) % 360, apply };
+  return { scale, rotDeg: ((((angRad * 180) / Math.PI) % 360) + 360) % 360, apply: makeSimilarity(scale, angRad, srcC, tgtC) };
 }
 
 /* Symmetric nearest-vertex RMS distance (feet) after applying a transform to source —
@@ -147,7 +113,7 @@ export function fitToBoundary(source, target, opts = {}) {
           const j = dir === 1 ? (i + k) % n : ((k - i) % n + n) % n;
           pairs.push({ from: S[i], to: T[j] });
         }
-        const sol = solveSimilarity(pairs);
+        const sol = solveSimilarityLSQ(pairs);
         if (sol && (!best || sol.residual < best.residual)) best = sol;
       }
     }
