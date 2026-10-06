@@ -89,7 +89,7 @@ try {
   ok("checkbox selects without changing the total or include state", Math.abs((await siteAcres()) - a0) < 0.006 && (await T("parcel-table-row-p5").getAttribute("data-included")) === "1");
   await T("parcel-row-check-p1").check(); await sleep(250);
   const bar2 = await T("parcels-action-bar").innerText();
-  ok("2 non-touching selected → Combine is disabled with a plain reason", (await T("parcels-bar-combine").isDisabled()) && /don't all touch/.test(bar2), bar2.replace(/\n/g, " | "));
+  ok("2 non-touching selected → Combine is disabled with a plain reason", (await T("parcels-bar-combine").isDisabled()) && /don't touch/.test(bar2), bar2.replace(/\n/g, " | "));
   await T("parcel-row-check-p5").uncheck(); await T("parcel-row-check-p1").uncheck();
 
   // (2) combine from the PANEL
@@ -177,9 +177,9 @@ try {
 
   // panel-aimed split + Restore original
   await openPanel();
-  await T("parcel-row-p2").click().catch(() => {});
+  await T("parcel-row-p2").click({ position: { x: 24, y: 12 } }).catch(() => {});
   const id2 = (await parcelsLS()).find((p) => p.addr === NAMES.p2).id;
-  await T(`parcel-row-${id2}`).click(); await sleep(300);
+  await T(`parcel-row-${id2}`).click({ position: { x: 24, y: 12 } }); await sleep(300);
   await T(`parcel-split-${id2}`).click(); await sleep(500);
   const hdr = await T("parcels-split-header").innerText();
   ok("panel Split → header reads 'Splitting <name> · <acres> AC' with Cancel and the one instruction", /Splitting Kilgore Parcel · 3\.67 AC/.test(hdr) && /double-click to finish/.test(hdr) && (await T("parcels-split-cancel").count()) === 1, hdr.replace(/\n/g, " | "));
@@ -197,7 +197,7 @@ try {
   ok("Restore original puts the parcel back exactly (name, lock, outline), total unchanged", afterRestoreSplit.length === 5 && afterRestoreSplit.some((p) => p.addr === NAMES.p2 && p.locked === true && p.points.length === 4) && Math.abs((await siteAcres()) - a0) < 0.006);
 
   // a bad line is refused with a plain message
-  await T(`parcel-row-${id2}`).click().catch(() => {});
+  await T(`parcel-row-${id2}`).click({ position: { x: 24, y: 12 } }).catch(() => {});
   await page.getByTestId("parcels-split-btn").click(); await sleep(300);
   await fit();
   const bx3 = await parcelBoxes(); const ord4 = (await parcelsLS()).map((p) => p.addr);
@@ -217,7 +217,7 @@ try {
   const names7 = await T("parcels-list").innerText();
   ok("(7) reload → Tract A persisted (Combined, total unchanged)", /Tract A/.test(names7) && /Combined/.test(names7) && Math.abs((await siteAcres()) - a0) < 0.006);
   const tr7 = (await parcelsLS()).find((p) => p.combined);
-  await T(`parcel-row-${tr7.id}`).click(); await sleep(300);
+  await T(`parcel-row-${tr7.id}`).click({ position: { x: 24, y: 12 } }); await sleep(300);
   await T(`parcel-restore-combined-${tr7.id}`).click(); await sleep(600);
   ok("(7) …and Restore still works after the reload (durable, unlike Undo)", (await parcelsLS()).length === 5);
 
