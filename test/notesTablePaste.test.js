@@ -14,7 +14,7 @@ import { EditorState, TextSelection } from "@tiptap/pm/state";
 import { NOTE_EXTENSIONS } from "../src/workspaces/notes/lib/notesExtensions.js";
 import {
   parseTabular, rowsToTableHtml, tabularFromClipboard, tableRowsToText, htmlHasTable, clipboardHasTable,
-  tableOwnsClipboard, tableBoxWidth, isBorderedTable, isSingleColumn, fillEmptyCells,
+  tableOwnsClipboard, tableBoxWidth, isBorderedTable, isSingleColumn, fillEmptyCells, repairTableFragment,
 } from "../src/workspaces/notes/lib/notesTablePaste.js";
 import { tidyPastedFragment, textOfNode, isLayoutTable, keepCaretInBox } from "../src/workspaces/notes/lib/notesPastePlain.js";
 
@@ -44,6 +44,7 @@ describe("cause 1 — a picture beside the table must not win", () => {
   });
   it("every committed fixture really is a table clipboard", () => {
     for (const name of Object.keys(manifest)) {
+      if (name === "html-no-table-tsv-text") continue;      // deliberately html with NO table: the text-fallback fixture
       expect(htmlHasTable(fs.readFileSync(path.join(FX, `${name}.html`), "utf8")), name).toBe(true);
     }
   });
@@ -81,6 +82,11 @@ describe("cause 4 — a bordered one-column table is data, an Outlook layout tab
   });
   it("a `keep` table is never treated as layout scaffolding", () => {
     expect(isLayoutTable(oneCol({ keep: true }))).toBe(false);
+  });
+  it("a 1×1 table (one Excel cell) is text, even when marked keep", () => {
+    expect(isLayoutTable(node(table([row(cell(p("only"))) ], { keep: true })))).toBe(true);
+    const out = tidyPastedFragment(node({ type: "doc", content: [table([row(cell(p("only")))], { keep: true })] }).content, schema);
+    expect(out.firstChild.type.name).toBe("paragraph");
   });
   it("tidy leaves a keep table alone and flattens the unmarked one", () => {
     const keep = tidyPastedFragment(node({ type: "doc", content: [table([row(cell(p("a"))), row(cell(p("b")))], { keep: true })] }).content, schema);
@@ -211,5 +217,50 @@ describe("a paste must not leave the caret outside the box it started in", () =>
     expect(keepCaretInBox([tr], old, old.apply(tr))).toBeNull();
     const tr2 = old.tr.insertText("y", 7);
     expect(keepCaretInBox([tr2], old, old.apply(tr2))).toBeNull();
+  });
+});
+
+describe("B2142464 ×2 — the owner's own-machine failure (rows with no <table> tag; text fallback)", () => {
+  const rows = "<tr><td><p>Cross Dock</p></td><td><p>&nbsp;</p></td></tr><tr><td><p>SF:</p></td><td><p>Depth:</p></td></tr>";
+  it("a row-fragment (rows and cells, no <table>) is still a table clipboard, so a picture beside it loses", () => {
+    expect(htmlHasTable("<ul><li>x</li></ul>" + rows)).toBe(true);
+    expect(tableOwnsClipboard(dt({ "text/html": rows }))).toBe(true);
+  });
+  it("repairTableFragment wraps the run of rows in a table (the browser would otherwise strip tr/td and leave one paragraph per cell)", () => {
+    const out = repairTableFragment("<html><body><!--StartFragment-->" + rows + "<!--EndFragment--></body></html>");
+    expect(out).toContain("<table><tbody><tr>");
+    expect(out.indexOf("<table>")).toBeLessThan(out.indexOf("<tr>"));
+    expect(out).toContain("</tr></tbody></table><!--EndFragment-->");
+  });
+  it("a bare run of cells gets a row too, and anything that already has a <table> is returned untouched", () => {
+    expect(repairTableFragment("<td>a</td><td>b</td>")).toBe("<table><tbody><tr><td>a</td><td>b</td></tr></tbody></table>");
+    const whole = "<table><tr><td>a</td></tr></table>";
+    expect(repairTableFragment(whole)).toBe(whole);
+    expect(repairTableFragment("<p>no table here</p>")).toBe("<p>no table here</p>");
+    expect(repairTableFragment(null)).toBe(null);
+  });
+  it("the committed fragment fixture really has rows and no table element, and the repair gives it one", () => {
+    const frag = fs.readFileSync(path.join(FX, "onenote-fragment-no-table-tag.html"), "utf8");
+    expect(/<table[\s>]/i.test(frag)).toBe(false);
+    expect(/<tr[\s>]/i.test(frag)).toBe(true);
+    expect(/<table[\s>]/i.test(repairTableFragment(frag))).toBe(true);
+  });
+  it("a spreadsheet grid in text/plain claims the clipboard even when the html has no table (picture loses)", () => {
+    const grid = "a\tb\nc\td";
+    expect(tableOwnsClipboard(dt({ "text/html": "<p>a</p><p>b</p>", "text/plain": grid }))).toBe(true);
+    expect(tableOwnsClipboard(dt({ "text/html": '<img src="x.png">', "text/plain": "https://example.com/x.png" }))).toBe(false);
+  });
+  it("tabularFromClipboard is the FALLBACK when told the html produced no table", () => {
+    const c = dt({ "text/html": "<table><tr><td>x</td></tr></table>", "text/plain": "a\tb\nc\td" });
+    expect(tabularFromClipboard(c)).toBeNull();
+    expect(tabularFromClipboard(c, { ignoreHtml: true })).toEqual([["a", "b"], ["c", "d"]]);
+  });
+  it("every committed fixture's text/plain that is tab-separated parses to a grid of the manifest's width", () => {
+    for (const [name, m] of Object.entries(manifest)) {
+      const text = fs.readFileSync(path.join(FX, `${name}.txt`), "utf8");
+      const g = parseTabular(text);
+      if (!g || !m.synthetic) continue;
+      expect(g[0].length, name).toBeGreaterThanOrEqual(2);
+    }
   });
 });

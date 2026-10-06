@@ -1,5 +1,9 @@
 #!/usr/bin/env node
-/* verify-notes-table-paste-live — V1559744 / B2142464. Signed in as the TEST account on a real deploy,
+/* ⛔ THIS PROVES THE WIRING ON A DEPLOY, NOT THE REAL CLIPBOARD. It pastes the committed fixtures, several of which are
+ * SYNTHETIC (manifest `synthetic: true`); its 2026-10-06 PASS was retracted when the owner's own OneNote paste failed.
+ * Re-point it at REAL captured clipboards before it is ever cited as verification.
+ *
+ * verify-notes-table-paste-live — V1559744 / B2142464. Signed in as the TEST account on a real deploy,
  * on a THROWAWAY page it creates and deletes: pastes the committed OneNote fixtures (exact bytes via a
  * real paste event, plus a real Ctrl+V through the browser clipboard) and reads the table back off the
  * rendered page. `BASE_URL` (default https://planyr.io) · `EXPECT_BUILD=<sha>` fails if /version.json differs. */

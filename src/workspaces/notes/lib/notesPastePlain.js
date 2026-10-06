@@ -30,7 +30,7 @@ import { Extension } from "@tiptap/core";
 import { Fragment } from "@tiptap/pm/model";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import { pushDownInherited } from "./notesPasteInherit.js";
-import { normalizeTableMarkup, fillEmptyCells, tabularFromClipboard, rowsToTableHtml } from "./notesTablePaste.js";
+import { normalizeTableMarkup, fillEmptyCells, tabularFromClipboard, rowsToTableHtml, repairTableFragment } from "./notesTablePaste.js";
 
 export const pastePlainKey = new PluginKey("notePastePlain");
 
@@ -125,6 +125,9 @@ export function isSpacerParagraph(node) {
  *  one row with more than one column, so this cannot swallow data the user meant to keep. */
 export function isLayoutTable(node) {
   if (node?.type?.name !== "table" || node.childCount === 0) return false;
+  /* ONE CELL IS TEXT, NOT A TABLE (B2142464 ×2, Excel): copying a single cell puts a 1×1 table on the clipboard,
+   * and pasting that as a one-cell table is never what anyone meant. Always unwrapped, `keep` or not. */
+  if (node.childCount === 1 && node.firstChild.childCount === 1) return true;
   if (node.attrs?.keep) return false;       // a bordered one-column table is DATA (OneNote's checklist), not scaffolding
   let single = true;
   node.forEach((row) => { if (row.childCount !== 1) single = false; });
@@ -174,6 +177,8 @@ export function tidyPastedFragment(fragment, schema, depth = 0) {
   const done = Fragment.fromArray(out);
   return depth === 0 ? fillEmptyCells(done, schema) : done;
 }
+
+let tsvReentry = false;
 
 /** Does this slice hold a table anywhere? */
 function sliceHasTable(slice) {
@@ -324,7 +329,7 @@ const NotePastePlain = Extension.create({
            * See lib/notesPasteInherit.js for the measured before/after. */
           transformPastedHTML(html) {
             try {
-              const doc2 = new DOMParser().parseFromString(html, "text/html");
+              const doc2 = new DOMParser().parseFromString(repairTableFragment(html), "text/html");
               normalizeTableMarkup(doc2.body);
               pushDownInherited(doc2.body);
               return doc2.body.innerHTML;
@@ -353,10 +358,14 @@ const NotePastePlain = Extension.create({
              * a table cell fills cells, a paste into a list lands after it, the chip appears). The
              * re-entry carries a table in its slice, which is what stops this firing twice. Shift
              * held is the person asking for plain text; Ctrl+Shift+V never reaches here at all. */
-            if (!view.input?.shiftKey && !sliceHasTable(slice)) {
-              const rows = tabularFromClipboard(event?.clipboardData);
+            if (!view.input?.shiftKey && !tsvReentry && !sliceHasTable(slice)) {
+              /* `ignoreHtml`: the slice already shows the html produced NO table, so the text is the
+               * fallback — whatever the html said (B2142464 ×2). `tsvReentry` stops the re-entrant paste
+               * below from firing this again if its own slice still carries no table. */
+              const rows = tabularFromClipboard(event?.clipboardData, { ignoreHtml: true });
               if (rows) {
-                try { view.pasteHTML(rowsToTableHtml(rows), event); return true; } catch (_) { /* fall through to the ordinary paste */ }
+                tsvReentry = true;
+                try { view.pasteHTML(rowsToTableHtml(rows), event); return true; } catch (_) { /* fall through to the ordinary paste */ } finally { tsvReentry = false; }
               }
             }
             const listDepth = enclosingListDepth(state.selection.$from);
