@@ -5,7 +5,7 @@
  *
  *   combined — made by Combine. DERIVED FROM THE COMBINE SNAPSHOT (`pc.combined.from`), never from
  *              a stored flag: a tract has no county attrs and no `source`, so the old provenance
- *              rule read it as "Drawn by hand" (the Goose Creek Phase II "Parcel 1" report). Every
+ *              rule read it as "Drawn by hand". (Goose Creek Phase II "Parcel 1" was the OWNER'S GUESS for a combine result and is NOT one: it has no combine record and correctly reads "Drawn" — never force it.) Every
  *              combined parcel already on a real site carries the snapshot, so it reads right
  *              without any migration.
  *   county   — a lot pulled from the county appraisal district (attrs / gisKey / source:"county").

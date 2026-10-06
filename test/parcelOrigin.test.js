@@ -1,5 +1,5 @@
 /* Parcels rework (NEW-2) — where a parcel came from, in the words the list row and the page use.
- * The reported defect: Goose Creek Phase II "Parcel 1" (99.43 AC) is a COMBINE result and read "Drawn by hand". */
+ * A real Combine result has no county attrs and no `source`, so the old rule read it as "Drawn by hand". (Goose Creek Phase II "Parcel 1" is NOT a known combine result — no combine record — and must keep reading "Drawn".) */
 import { describe, it, expect } from "vitest";
 import { parcelOrigin, originKind, combinedCount, cadNameOf, ORIGIN_CHIP } from "../src/workspaces/site-planner/lib/parcelOrigin.js";
 import { parcelProvenance, provenanceLabel } from "../src/workspaces/site-planner/lib/parcelRecord.js";
