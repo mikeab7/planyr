@@ -75,8 +75,8 @@ check("VIEWPORT-STABLE — canvas box unchanged across a rail interaction", canv
  *      carries its own rule, and Measure is folded into Tools (three headings, not four). ─────────── */
 const dividerCount = await page.locator("[data-rail-divider]").count();
 check("no separate group dividers (the heading carries the rule)", dividerCount === 0, `found ${dividerCount}`);
-const headings = await page.locator("[data-rail-heading]").allTextContents();
-check("three headings — Tools · Site elements · Markup (no Measure heading)", JSON.stringify(headings.map((h) => h.toLowerCase())) === JSON.stringify(["tools", "site elements", "markup"]), headings.join(" | "));
+const railHeadings = await page.locator("[data-rail-heading]").allTextContents();
+check("three railHeadings — Tools · Site elements · Markup (no Measure heading)", JSON.stringify(railHeadings.map((h) => h.toLowerCase())) === JSON.stringify(["tools", "site elements", "markup"]), railHeadings.join(" | "));
 const parcelToolsBtn = page.locator('[data-testid="rail-parcel-tools"]');
 await parcelToolsBtn.click();
 await page.waitForTimeout(150);
