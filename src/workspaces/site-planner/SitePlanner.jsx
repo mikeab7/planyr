@@ -5,7 +5,7 @@ import { startClickAck } from "../../shared/ui/clickAck.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useProjectName, usePlanName, renameProjectChecked, renamePlanChecked } from "../../shared/names/names.js";
-import { loadSite, saveSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
+import { loadSite, saveSite, siteExistsLocally, readBackSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
 import { relTime } from "../../shared/projects/projectModel.js";
 import { collectAssetRefs, releasePlanForOverlay } from "./lib/sharedAssetRefs.js";
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
@@ -47,6 +47,7 @@ import {
 } from "./lib/cloudGeometry.js";
 import { EMPTY_TAP, tapTime, stepDoubleTap, pairsWithLastTap } from "./lib/doubleTap.js";
 import { DRAG_SLOP_PX, makeDragGate, stepDragGate, dragArmed } from "./lib/dragGate.js";
+import { GESTURE_SAVE_POLL_MS, deferSaveDecision } from "./lib/gestureSave.js";
 import { isDiagArmed, latchDiagArm } from "./lib/diagArm.js";
 import { noteEffectRun } from "../../app/renderLoopProbe.js";
 import { createViewChangeRecorder, attachTimeline } from "./lib/viewChangeRecorder.js";
@@ -88,7 +89,7 @@ import { cullRectFor, cullToView, shouldCull } from "./lib/viewCull.js";
  * beside `cullToView`, because "drawn ≠ exists" is a rule this codebase already relies on and
  * hiding is that same rule with a different predicate. Read that module's header before adding a
  * consumer: the metrics pass iterates `els`/`parcels` and must never read a draw set. */
-import { elHidden, isHidden, parcelAcreageHidden, normalizeRetiredToggles, visibleEls, visibleParcels, visibleMeasures } from "./lib/contentVisibility.js";
+import { elHidden, isHidden, refHidden, parcelAcreageHidden, normalizeRetiredToggles, visibleEls, visibleParcels, visibleMeasures } from "./lib/contentVisibility.js";
 import { makeLabelFrame } from "./lib/exportLabelScale.js";
 import { orderLayersByPriority, LAYER_STAGE_SIZE } from "./lib/layerSchedule.js";
 import { prefetchExtents, computeCoverage, sameCoverage, boundsFromLeaflet, getNearbyRadiusMiles, subscribeRelevance } from "./lib/coverage.js";
@@ -4045,11 +4046,48 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const deletedSelfRef = useRef(false);
   // B458 — coalesce the immediate per-edit mirror write so a fast drag doesn't thrash writeSites.
   const lastLocalWrite = useRef(0);
+  /* ⛔ NEW-1 (B217540, recurrence ×2 — the owner's 2026-10-06 "Something was slow just now") — A GESTURE IN FLIGHT
+   * IS NOT A SAVE POINT. This effect runs on every `els` change, and a drag changes `els` on every pointer-move
+   * frame, so a single building drag ran the WHOLE persistence stack ~20×: `loadSite` (parse the ENTIRE device
+   * store, `migrate`, `createSiteModel`, name authority over every plan) for the "is this new?" check, `saveSite`
+   * (parse it again, snapshot, `createSiteModel` ×2, stringify and `setItem` the ENTIRE store), then `loadSite`
+   * once more to verify the write — every ≥ 50 ms. None of that scales with the plan being edited; it scales with
+   * everything else the device has stored. Measured on a replica of his plan (ui-audit/perf-edit-cycle.mjs, same
+   * sequence, only the stored-plan weight varied): the drag step cost 1.0 s with an empty store, 2.4 s at 1.3 MB
+   * (his cloud account: 143 plans, 1.30 MB) and 3.7 s at 3 MB (his device held 3.88 MB), with single tasks of
+   * 316 → 561 ms — his 700–940 ms `dispatchDiscreteEvent` blocks.
+   * So while a gesture is active the effect only keeps the per-element sync diff current (`reconcileElems(true)`,
+   * which already defers its own flush) and polls (a ref read every 120 ms, no React state) for the gesture to end;
+   * the first run AFTER it ends is the ordinary full save — mirror, history and the cloud push, unchanged.
+   * LOUD-FAILURE / the B458 guarantee: a `drag.current` that never clears (a lost pointer-up) must not turn
+   * autosave off, so a deferral never lasts past `GESTURE_SAVE_DEFER_MAX_MS` — past it the normal write runs
+   * anyway, and a mid-gesture write every few seconds is the crash-safety net for a very long drag. The unload
+   * flush (pagehide / beforeunload, below) still writes the live state, so nothing waits on this timer to survive
+   * a reload. */
+  const [saveTick, setSaveTick] = useState(0);
+  const deferSaveSince = useRef(0);
   useEffect(() => {
     if (!siteId || deletedSelfRef.current) return;
     // Skip only the initial mount (whatever the state) — must run BEFORE the blank
     // check, or a fresh blank site keeps the flag and swallows its first real edit.
     if (firstSave.current) { firstSave.current = false; return; }
+    if (drag.current && deferSaveDecision(deferSaveSince.current, Date.now()) === "defer") {
+      if (!deferSaveSince.current) deferSaveSince.current = Date.now();
+      reconcileElems(true);
+      setSaveStatus("saving");
+      let poll = null;
+      const wait = () => {
+        poll = setTimeout(() => {
+          poll = null;
+          if (deletedSelfRef.current) return;
+          if (drag.current && deferSaveDecision(deferSaveSince.current, Date.now()) === "defer") wait();
+          else setSaveTick((n) => n + 1);          // the gesture ended (or the deferral expired): run the ordinary save now
+        }, GESTURE_SAVE_POLL_MS);
+      };
+      wait();
+      return () => { if (poll) clearTimeout(poll); };
+    }
+    deferSaveSince.current = 0;
     // NEW-4 (interaction sweep, owner chat block 2026-08-22) — the "don't save a still-blank
     // site" guard below is right for a plan that has NEVER been saved (drawing nothing on a
     // fresh "Start blank" must not clutter storage with an empty record). It is WRONG for a plan
@@ -4058,7 +4096,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // its save left the stale pre-undo data in storage — resurrected on the next reload, even
     // though the canvas correctly showed it gone. `fresh` (no existing record yet) is the right
     // discriminator, so it's computed BEFORE the blank check rather than after.
-    const fresh = !loadSite(siteId); // first save of a brand-new site → tell App to list it
+    const fresh = !siteExistsLocally(siteId); // first save of a brand-new site → tell App to list it (NEW-1 B217540: no whole-store parse for a yes/no)
     if (fresh && isBlankSite({ parcels, els, measures, callouts, markups, sheetOverlays }) && !deletedIds.length) return; // don't save a still-blank NEW site (but DO persist a tombstone so a delete sticks even on an otherwise-empty site)
     setSaveStatus("saving");
     // B671 — per-element sync (signed-in): diff the vector collections and enqueue per-element
@@ -4084,7 +4122,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // clear any prior alarm. (Sole-tab save is a plain replace, so got==want normally; a cross-tab
       // union only ever adds, so got>=want — no false alarm.)
       const want = parcels.length + els.length + measures.length + callouts.length + markups.length + sheetOverlays.length;
-      const back = loadSite(siteId);
+      const back = readBackSite(siteId);   // NEW-1 (B217540): byte-exact proof from the write itself while the store is untouched; the full read otherwise
       const got = drawnCount(back);
       // B592 — verify by MEMBERSHIP, not only count. A same-count swap (one item dropped while
       // another lands — exactly the tombstone/id-collision fold that vanished the polyline) leaves
@@ -4156,7 +4194,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       else setSaveStatus("unsaved"); // logged out + device full: the red localSaveFailed banner (writeMirror) covers it
     }, 400);
     return () => { clearTimeout(t); if (microT) clearTimeout(microT); };
-  }, [siteId, parcels, els, measures, callouts, markups, settings, sheetOverlays, deletedIds, layerOverrides, layerAbove]);
+  }, [siteId, saveTick, parcels, els, measures, callouts, markups, settings, sheetOverlays, deletedIds, layerOverrides, layerAbove]);
   /* B1953797 (H1) — INBOUND plan-header path: an open, signed-in tab asks the cloud (one header row,
    * no elements) whether another writer changed this plan's settings, on focus / tab-visible / a slow
    * visible-tab tick, and adopts the change per leaf through the ONE apply above. Read-only + no push,
@@ -9095,6 +9133,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         let hovered = null;
         for (const x of els) {
           if (x.attachedTo || x.dogEar || x.locked || x.points || x.w == null) continue;
+          if (elHidden(hiddenGroups, x)) continue; // NEW-1 — a hidden building is not hoverable, so its +/− cluster never pops over empty ground
           const hw = Math.abs(x.w) / 2, hh = Math.abs(x.h) / 2; // unrotated footprint bbox (generous on rotation — fine for hover)
           if (!(fp.x >= x.cx - hw && fp.x <= x.cx + hw && fp.y >= x.cy - hh && fp.y <= x.cy + hh)) continue;
           if (!hovered || byZ(x, hovered) >= 0) hovered = x;
@@ -17123,15 +17162,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    *
    * The Properties panel follows `sel`, so it closes with it — which is right: a panel editing an
    * object the owner has just hidden is a panel he cannot see the effect of. */
-  const selKindHidden = (ref) => {
-    if (!ref) return false;
-    if (ref.kind === "el") { const el = els.find((e) => e.id === ref.id); return !!el && elHidden(hiddenGroups, el); }
-    if (ref.kind === "parcel") return isHidden(hiddenGroups, "parcels");
-    if (ref.kind === "markup") return isHidden(hiddenGroups, "markups");
-    if (ref.kind === "measure") return isHidden(hiddenGroups, "measures");
-    if (ref.kind === "callout") return isHidden(hiddenGroups, "callouts");
-    return false;
-  };
+  const selKindHidden = (ref) => refHidden(hiddenGroups, els, ref);
+  /* NEW-1 — the RENDER-TIME half of the same gate. The effect below drops a hidden selection one
+     commit late; every handle group asks this directly so a grip can never paint (or catch a press)
+     for an object that is not drawn — including the hover-driven +/− cluster, which no selection
+     clearing ever reached. */
+  const selHiddenNow = selKindHidden(sel);
   const selKindHiddenRef = useRef(selKindHidden);
   selKindHiddenRef.current = selKindHidden;
   useEffect(() => {
@@ -17857,7 +17893,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // in view. featActiveId is that building; each node group below ALSO gates each button
   // on the building's on-screen footprint size (FEAT_BTN_MIN_PX) so they vanish before
   // they can cluster/spill when zoomed out.
-  const featActiveId = sel?.kind === "el" ? sel.id : (tool === "select" ? hoverElId : null);
+  const featActiveId = (() => {
+    const id = sel?.kind === "el" ? sel.id : (tool === "select" ? hoverElId : null);
+    return id && !refHidden(hiddenGroups, els, { kind: "el", id }) ? id : null; // NEW-1: a hidden element's +/− clusters never exist
+  })();
   /* NEW-2 — the ZOOM half of the gate, shared by every on-building edit cluster below. 0 means the
      edit these controls make is not legible yet, so they must not exist at this zoom at all.
      NEW-1 (third value) — it takes the CANVAS WIDTH as well as the zoom: the floor is the earlier
@@ -18107,7 +18146,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // new element. Every sibling handle group (elPolyHandles, markupHandles, calloutHandles,
     // measureHandles) already carries this exact `tool !== "select"` guard; this one was the
     // outlier.
-    if (sel?.kind !== "el" || tool !== "select" || multi.length > 1) return null; // B740: no single-element transform grips while multi-selecting
+    if (selHiddenNow || sel?.kind !== "el" || tool !== "select" || multi.length > 1) return null; // B740: no single-element transform grips while multi-selecting
     const el = els.find((x) => x.id === sel.id);
     if (!el || el.points || el.locked) return null; // locked / polygon: no resize/rotate handles
     const cpx0 = f2p({ x: el.cx, y: el.cy });
@@ -18203,7 +18242,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      units as pc.weight (so it scales with zoom exactly like the line does). Just enough to read
      as a halo on a busy aerial; any more and the boundary starts reading as a double line. */
   const PARCEL_CASING_W = 1.4;
-  const selParcel = sel?.kind === "parcel" ? parcels.find((p) => p.id === sel.id) : null;
+  const selParcel = sel?.kind === "parcel" && !selHiddenNow ? parcels.find((p) => p.id === sel.id) : null;
   const selRuns = (selParcel && selParcel.active !== false) ? edgeRuns(selParcel.points, SETBACK_RUN_TOL_DEG) : null;
   // Screen anchors for a run's fanned labels (B215): the boundary/run-length dimension sits
   // OUTBOARD of the edge and the setback value pill sits INBOARD (toward the setback line it
@@ -18343,7 +18382,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return spaceOut(cands, VTX_MIN_SEP_PX);
   };
   const parcelHandles = (() => {
-    if (sel?.kind !== "parcel" || tool !== "select") return null;
+    if (selHiddenNow || sel?.kind !== "parcel" || tool !== "select") return null;
     const pc = parcels.find((p) => p.id === sel.id);
     // B-VTX-SEL — locked parity with elPolyHandles/markupHandles/measureHandles (a false
     // affordance otherwise: startVertex no-ops on a locked parcel anyway).
@@ -18357,7 +18396,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // NEW-2 — same screen-space decimation: an imported / traced pond outline carries the identical
   // dense-vertex problem as a surveyed parcel boundary.
   const elPolyHandles = (() => {
-    if (sel?.kind !== "el" || tool !== "select" || multi.length > 1) return null; // B740
+    if (selHiddenNow || sel?.kind !== "el" || tool !== "select" || multi.length > 1) return null; // B740
     const el = els.find((x) => x.id === sel.id);
     if (!el || !el.points || el.locked) return null;
     const on = (i) => isSelVtx("el", el.id, i);
@@ -18377,7 +18416,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // (a bounding box around a line is wrong, per the owner rule) → grips only, no outline here. Never
   // exported (data-export="skip").
   const elSelOutline = (() => {
-    if (sel?.kind !== "el" || tool !== "select" || multi.length > 1) return null; // B740: multi uses per-member outlines
+    if (selHiddenNow || sel?.kind !== "el" || tool !== "select" || multi.length > 1) return null; // B740: multi uses per-member outlines
     const el = els.find((x) => x.id === sel.id);
     if (!el) return null;
     if (isCenterlineRoad(el) || el.type === "road") {
@@ -18404,7 +18443,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   //    Shift-click a dot to delete one
   // Semantic markups (utilRoute/traced/encumbrance/…) get no grips (move-only, as before).
   const markupHandles = (() => {
-    if (sel?.kind !== "markup" || tool !== "select" || multi.length > 1) return null; // B740
+    if (selHiddenNow || sel?.kind !== "markup" || tool !== "select" || multi.length > 1) return null; // B740
     const m = markups.find((x) => x.id === sel.id);
     if (!m || m.locked) return null;
     if (MK_BOX_KINDS.includes(m.kind)) {
@@ -18652,7 +18691,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B619/B913 width grips + per-leader re-aim grips for the SELECTED callout. Hidden while its
   // text editor is open (the editor's own accent outline cues focus).
   const calloutHandles = (() => {
-    if (sel?.kind !== "callout" || tool !== "select") return null;
+    if (selHiddenNow || sel?.kind !== "callout" || tool !== "select") return null;
     const c = callouts.find((x) => x.id === sel.id);
     if (!c || editCallout?.id === c.id) return null;
     const st = calloutStyle(c);
@@ -18745,7 +18784,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // NEW-1 — no × delete badge on a measurement (owner rule): it sat right where the count markers
   // do and read as part of the measurement itself. Delete key or the right-click menu removes it.
   const measureHandles = (() => {
-    if (sel?.kind !== "measure" || tool !== "select") return null;
+    if (selHiddenNow || sel?.kind !== "measure" || tool !== "select") return null;
     const m = measures[sel.i];
     if (!m || m.locked) return null;
     const fpts = measPts(m);
@@ -24554,6 +24593,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               {multi.length > 1 && (
                 <g data-export="skip" pointerEvents="none">
                   {multi.map((m) => {
+                    if (selKindHidden(m)) return null; // NEW-1: no ring around a hidden member
                     // NEW-6 — measures, callouts and parcels have no styleable footprint ring, so
                     // they show the AABB selection box. (Callouts + parcels can now join a
                     // multi-selection because a pasted mixed set selects itself.)

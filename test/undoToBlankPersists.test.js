@@ -28,9 +28,9 @@ describe("NEW-4: undoing back to a blank plan persists on an EXISTING record, ne
   it("the blank-skip guard is scoped to a plan with no existing saved record (`fresh`)", () => {
     const at = SP.indexOf("if (firstSave.current) { firstSave.current = false; return; }");
     expect(at, "the autosave effect's mount-skip moved — update this slice").toBeGreaterThan(-1);
-    const region = SP.slice(at, at + 1200);
+    const region = SP.slice(at, at + 2800);   // NEW-1 (B217540): the gesture-deferral block now sits between the mount-skip and `fresh`
     // `fresh` must be computed BEFORE the blank check, and the blank check must require it.
-    const freshIdx = region.indexOf("const fresh = !loadSite(siteId)");
+    const freshIdx = region.indexOf("const fresh = !siteExistsLocally(siteId)");
     const guardIdx = region.indexOf("if (fresh && isBlankSite(");
     expect(freshIdx, "fresh must be computed").toBeGreaterThan(-1);
     expect(guardIdx, "the blank-skip guard must require `fresh`").toBeGreaterThan(-1);
