@@ -187,6 +187,16 @@ jobs:
         env:
           BASE_URL: "http://localhost:4173/"
         run: node ui-audit/verify-notes-table-click.mjs
+      # Notes table COPY / CUT / PASTE gate (NEW-1, 2026-10-06). Owner report: "I'm trying to copy a table that's
+      # already in the notebook module, and I can't paste it." Real Ctrl+C / Ctrl+X / Ctrl+V with the real
+      # clipboard (not synthetic events) across box → box, blank paper, nothing focused, another page, another
+      # notebook, cut + undo, a cell range, a selected box, the right-click menu and the outbound text/html +
+      # tab-separated text/plain; each case asserts the STORED document's structure after a reload. Red-proofed
+      # against pre-fix main in the PR. Reuses the preview server and Chromium the gates above paid for.
+      - name: Notes table copy / cut / paste (a table already on the page copies, moves and pastes — NEW-1, 2026-10-06)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/verify-notes-table-copy-paste.mjs
       # App-shell WIDTH SWEEP (NEW-3, 2026-10-05). Owner: "I want the frame to always work regardless of the
       # size of computer or screen." His Schedule header wrapped onto a second row, clipped at the window
       # edge and showed a page scrollbar because CI only ever looked at one width. For every module route at

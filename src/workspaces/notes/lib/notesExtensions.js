@@ -50,6 +50,7 @@ import NoteTabKey from "./notesTabKey.js";
 import NoteListIndent from "./notesListIndent.js";
 import { enterInheritHandler } from "./notesEnterInherit.js";
 import NotePastePlain from "./notesPastePlain.js";
+import NoteTableClipboard from "./notesTableClipboard.js";
 import NoteBlockKeys from "./notesBlockKeys.js";
 import NoteSearchHighlight from "./notesSearchHighlight.js";
 import NoteTableToText from "./notesTableToText.js";
@@ -618,6 +619,10 @@ export const NOTE_EXTENSIONS = [
   // default Ctrl+V is deliberately unchanged — so the "Keep text only" option can be offered
   // afterwards, the way Word's is. See lib/notesPastePlain.js.
   NotePastePlain,
+
+  // A table already on the page copies / cuts / pastes: tab-separated text half, whole-table cut, and the
+  // "select table" command. See lib/notesTableClipboard.js (NEW-1, 2026-10-06).
+  NoteTableClipboard,
 
   // Backspace at the START of a block undoes a formatting difference before it restructures
   // anything (B36051). Registered ABOVE the default keymap so it is asked before joinBackward

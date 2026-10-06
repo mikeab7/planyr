@@ -35,6 +35,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { TextSelection } from "@tiptap/pm/state";
+import { contentOfBoxes } from "../lib/notesTableClipboard.js";
 import { noteExtensions, EMPTY_DOC } from "../lib/notesExtensions.js";
 import { ANCHOR_MIN_HEIGHT, anchorExtent, anchorExtentLeft, anchorExtentTop, anchorExtentX, anchorPosAtSelection, fitAnchorBox, nextAnchorSpot, placeAnchor } from "../lib/notesAnchorNode.js";
 import { ANCHOR_WIDTH } from "../lib/notesBoxResize.js";
@@ -2215,7 +2216,16 @@ const NoteEditor = forwardRef(function NoteEditor({
         editor.state.doc.forEach((node, pos) => {
           if (landed || node.type.name !== "noteAnchor" || String(node.attrs.aid || "") !== aid) return;
           const end = pos + node.nodeSize - 1;
-          editor.view.dispatch(editor.state.tr.setSelection(TextSelection.near(editor.state.doc.resolve(end), -1)));
+          /* ⛔ A BOX THAT ENDS IN A TABLE PARKS THE CARET INSIDE ITS LAST CELL, so a paste "at the box's end"
+           * poured into the table's own cells (a copied table came back merged into its source as a 5×5 —
+           * NEW-1, 2026-10-06). Land on a fresh paragraph AFTER the table instead. */
+          if (node.lastChild?.type?.name === "table" && editor.schema.nodes.paragraph) {
+            const tr = editor.state.tr.insert(end, editor.schema.nodes.paragraph.create());
+            tr.setSelection(TextSelection.create(tr.doc, end + 1));
+            editor.view.dispatch(tr);
+          } else {
+            editor.view.dispatch(editor.state.tr.setSelection(TextSelection.near(editor.state.doc.resolve(end), -1)));
+          }
           setEditingId(aid);
           landed = true;
         });
@@ -2235,6 +2245,44 @@ const NoteEditor = forwardRef(function NoteEditor({
     window.addEventListener("paste", onLoosePaste, { capture: true });
     return () => window.removeEventListener("paste", onLoosePaste, { capture: true });
   }, [editor, pasteClipboardIntoEditor]);
+
+  /* ⛔ COPY AND CUT WITH A BOX SELECTED (NEW-1, owner report 2026-10-06: "I'm trying to copy a table that's
+   * already in the notebook module, and I can't paste it."). The first press on a box only SELECTS it and takes
+   * focus off the editor, so Ctrl+C / Ctrl+X reached no listener and the clipboard kept whatever it held before —
+   * the next Ctrl+V pasted THAT, or nothing. The selected boxes' CONTENT (a table, text, a picture) is written
+   * through ProseMirror's own clipboard serializer, so it pastes back exactly like a copy made with the caret in
+   * the box: into another box it inserts, onto blank paper it makes a box. Cut also removes the boxes (one undo).
+   * Declines whenever a real field or the editor itself has focus — those own their copy. */
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return undefined;
+    const onClip = (e) => {
+      if (e.defaultPrevented || !e.clipboardData) return;
+      const sel = selRef.current;
+      if (!sel || !sel.size) return;
+      const dom = editor.view.dom;
+      const a = document.activeElement;
+      if (a && a !== document.body && a !== document.documentElement && (dom.contains(a) || a.closest?.("input, textarea, select, [contenteditable='true']"))) return;
+      const root = noteRootRef.current;
+      if (!root || root.offsetParent === null) return;                 // this Notes surface is not on screen
+      if (String(window.getSelection?.() || "").length) return;         // a highlighted run of page text owns the copy
+      const slice = contentOfBoxes(editor.state.doc, sel);
+      if (!slice) return;
+      try {
+        const { dom: out, text } = editor.view.serializeForClipboard(slice);
+        e.clipboardData.setData("text/html", out.innerHTML);
+        e.clipboardData.setData("text/plain", text);
+      } catch (_) { onPrintNotice?.("Planyr couldn't copy that box. Open it and select what you want, then press Ctrl+C."); return; }
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.type === "cut") {
+        editor.commands.removeNoteAnchors([...sel]);
+        clearSelection();
+      }
+    };
+    window.addEventListener("copy", onClip, { capture: true });
+    window.addEventListener("cut", onClip, { capture: true });
+    return () => { window.removeEventListener("copy", onClip, { capture: true }); window.removeEventListener("cut", onClip, { capture: true }); };
+  }, [editor, onPrintNotice]);
 
   /* ⛔ THE FIRST KEYSTROKE, CAUGHT BEFORE THE EDITOR SEES IT. Bound on `window` in CAPTURE, for
    * the same reason the rest of this module's global bindings are: the editor's DOM holds focus
@@ -4926,6 +4974,28 @@ const NoteEditor = forwardRef(function NoteEditor({
      * carry the formatting (LOUD-FAILURE). The plain route is the one that works everywhere,
      * which is why it is the one bound to the shortcut. */
     if (mode !== "text") {
+      /* ⛔ A TABLE (OR ANYTHING FORMATTED) PASTES FROM THE MENU TOO (NEW-1, 2026-10-06). `readText()` only sees the
+       * plain half, so "Keep source formatting" used to say it could not and paste nothing — a copied table could
+       * not be pasted from the right-click menu at all. The async read can hand back the html half when the
+       * browser allows it; it goes through the editor's own paste pipeline, exactly like Ctrl+V. A browser that
+       * refuses still gets the old, honest message. */
+      let html = "";
+      try {
+        const items = await navigator.clipboard.read();
+        for (const it of items) if (it.types.includes("text/html")) { html = await (await it.getType("text/html")).text(); break; }
+      } catch (_) { html = ""; }
+      if (html) {
+        if (!editor.view.hasFocus()) editor.view.focus();
+        const from = editor.state.selection.from;
+        try {
+          editor.view.pasteHTML(html);
+        } catch (_) { onPrintNotice?.("Planyr couldn't paste that. Try Ctrl+Shift+V to paste it as plain text."); return; }
+        if (mode === "merge") {
+          const to = editor.state.selection.from;
+          if (to > from) editor.commands.mergeFormatting({ from, to });
+        }
+        return;
+      }
       onPrintNotice?.("A browser only hands a menu the plain text of the clipboard. Press Ctrl+V to paste with its formatting, then choose Keep source or Merge from the badge that appears.");
       return;
     }
