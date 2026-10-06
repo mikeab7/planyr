@@ -1103,6 +1103,37 @@ const COUNTIES_RAW = {
     idField: "ParcelNumb", pinIdField: true, addrField: "AISAddress", pinAddrField: true,
     help: "West Baton Rouge Parish parcels (parish tax assessor). Search by parcel number or a site address.",
   },
+  /* NEW-1 (Louisiana, 2026-10-06) — three more parishes, found by an ArcGIS Online item search with a Louisiana
+   * bbox filter (name search missed all three) and MEASURED from Michael's own Chrome at the planyr.io origin
+   * (CORS-confirmed, no gis-proxy). Provenance + every caveat: countiesProvenance.js and docs/STATEWIDE-PARCELS.md
+   * "Louisiana route-3 sweep 2026-10-05/06". */
+  la_desoto: {
+    // De Soto Parish Assessor, first-party (live roll, edited 2026-10-03). Situs is split (Address_Number +
+    // Street_Name + Street_Direction + Physical_Address_City) and often blank on rural parcels; Owner_Address /
+    // Owner_CityStateZipCode are MAILING. ⛔ pointViaEnvelope: a bare point at Mansfield returned 0 while the
+    // envelope returned the hospital parcel — Jefferson's shape.
+    state: "LA", label: "De Soto Parish, LA",
+    layerUrl: "https://services6.arcgis.com/pbafaqRkYgys7ElS/arcgis/rest/services/Parcels_AGOL_view/FeatureServer/0",
+    idField: "PARCEL_ID", pinIdField: true, addrField: "Street_Name", pinAddrField: true,
+    pointViaEnvelope: true,
+    help: "De Soto Parish parcels (parish assessor roll). Search by parcel ID or a street name.",
+  },
+  la_washington: {
+    // Washington Parish Communications District (911), first-party parish body. Situs is split (PHYSICAL_A house
+    // number + PHYSICAL_S street). HOUSE / HOUSEPIC hold internal image paths and are never rendered.
+    state: "LA", label: "Washington Parish, LA",
+    layerUrl: "https://services7.arcgis.com/yE0LOKocwREqepjx/arcgis/rest/services/Parcels_Public_view_March_2024/FeatureServer/0",
+    idField: "PARCEL_ID", pinIdField: true, addrField: "PHYSICAL_S", pinAddrField: true,
+    help: "Washington Parish parcels (parish 911 district GIS). Search by parcel ID or a street name.",
+  },
+  la_westfeliciana: {
+    // West Feliciana Parish Government's own AGOL (item owner gmego@wfparish.org), June 2022 vintage — layer 14 of
+    // Parcels_06012022_Public. Owner_Addr / Owner_City are MAILING; situs is Address_Nu + Street_Nam + Street_Dir.
+    state: "LA", label: "West Feliciana Parish, LA",
+    layerUrl: "https://services5.arcgis.com/SkttgSmcq6CPonms/arcgis/rest/services/Parcels_06012022_Public/FeatureServer/14",
+    idField: "PARCEL_ID", pinIdField: true, addrField: "Street_Nam", pinAddrField: true,
+    help: "West Feliciana Parish parcels (parish government GIS, June 2022). Search by parcel ID or a street name.",
+  },
   al_jefferson: {
     state: "AL", label: "Jefferson County, AL",
     layerUrl: "https://jccgis.jccal.org/server/rest/services/Basemap/Parcels/MapServer/0",
@@ -2814,6 +2845,10 @@ const COUNTIES_MAP_RAW = {
   la_jeffersondavis: { state: "LA", center: [30.2695, -92.8540], zoom: 10, bbox: [30.04, -93.13, 30.50, -92.58], mapServer: null, layerUrl: COUNTIES.la_jeffersondavis.layerUrl },
   la_stlandry: { state: "LA", center: [30.5795, -92.0825], zoom: 10, bbox: [30.31, -92.49, 30.85, -91.67], mapServer: null, layerUrl: COUNTIES.la_stlandry.layerUrl },
   la_westbatonrouge: { state: "LA", center: [30.4947, -91.3120], zoom: 10, bbox: [30.33, -91.48, 30.66, -91.15], mapServer: null, layerUrl: COUNTIES.la_westbatonrouge.layerUrl },
+  // NEW-1 (Louisiana, 2026-10-06) — center/bbox read from public/geo/county-polygons.json, never hand-typed.
+  la_desoto: { state: "LA", center: [32.0990, -93.6923], zoom: 10, bbox: [31.85, -94.04, 32.35, -93.34], mapServer: null, layerUrl: COUNTIES.la_desoto.layerUrl, pointViaEnvelope: true },
+  la_washington: { state: "LA", center: [30.8368, -90.0330], zoom: 10, bbox: [30.66, -90.35, 31.01, -89.72], mapServer: null, layerUrl: COUNTIES.la_washington.layerUrl },
+  la_westfeliciana: { state: "LA", center: [30.8592, -91.4615], zoom: 10, bbox: [30.65, -91.75, 31.06, -91.17], mapServer: null, layerUrl: COUNTIES.la_westfeliciana.layerUrl },
   al_jefferson: { state: "AL", center: [33.5207, -86.8025], zoom: 10, bbox: [33.25, -87.15, 33.80, -86.45], mapServer: null, layerUrl: COUNTIES.al_jefferson.layerUrl },
   // B1551617 — Tier 1 counties (see the matching COUNTIES block above); bbox/center read directly
   // from public/geo/county-polygons.json (the same nationwide asset resolveCounty uses), never
