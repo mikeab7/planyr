@@ -7847,7 +7847,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // wins — a locked parcel's body is click-through, same as its boundary (NEW-1, B1239328).
       // A click on empty canvas falls through to pan (never clears the merge selection).
       if (mergePick) {
-        const hit = [...parcels].reverse().find((pc) => !pc.locked && pc.points && pc.points.length >= 3 && pointInRing(fp, pc.points));
+        // NEW-1 (merge-pick amendment) — LOCKED parcels ARE pickable here: county lots arrive locked:true, and
+        // lock only guards a drag/select, never a deliberate pick. `!pc.locked` made every county lot unpickable
+        // by canvas click ("0 picked") while the Land list row picked it at once. Inactive lots still refuse (toggleMerge).
+        const hit = [...parcels].reverse().find((pc) => pc.points && pc.points.length >= 3 && pointInRing(fp, pc.points));
         if (hit) { toggleMerge(hit.id); setSel({ kind: "parcel", id: hit.id }); return; }
       }
       if (e.shiftKey) {
@@ -8244,7 +8247,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       } else if (merged.code === "hole") {
         flashWarn("⚠ Merging those would enclose a lot that isn't picked — pick that one too, or merge them in pieces.", 7000);
       } else {
-        flashWarn("⚠ Those parcels couldn't be merged cleanly — their outlines are too far off to fuse.", 7000);
+        flashWarn(merged.code === "invalid" ? "⚠ Those outlines couldn't be combined — check each picked parcel has a closed outline." : "⚠ Merging would have changed the combined area by more than survey slop allows, so nothing was merged — the parcels are untouched.", 7000);
       }
       return;
     }
@@ -12097,7 +12100,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // stop propagation, let the press fall through to the background pan exactly as if it had
     // landed on empty canvas — no select, no move, no tap-to-select fallback either. It stays
     // reachable from the Land tab's own list (which never gates on lock).
-    if (pc.locked) {
+    if (pc.locked && !mergePick) { // merge-pick mode picks locked lots too (see the body-press branch in onDown)
       setPanning(true);
       drag.current = { mode: "pan", sx: e.clientX, sy: e.clientY, ox: view.offX, oy: view.offY };
       capturePidRef.current = e.pointerId;
