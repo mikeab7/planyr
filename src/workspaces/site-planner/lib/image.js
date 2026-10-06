@@ -4,6 +4,7 @@
  * localStorage (~5 MB origin budget) and keep the canvas responsive.
  */
 import { releaseCanvas } from "./releaseCanvas.js";
+import { cappedRasterDims } from "../../../shared/overlay/overlayRaster.js"; // the ONE long-edge cap rule (NEW-1)
 
 export function loadAndDownscaleImage(file, maxDim = 2400) {
   return new Promise((resolve, reject) => {
@@ -15,10 +16,8 @@ export function loadAndDownscaleImage(file, maxDim = 2400) {
       img.onload = () => {
         const w = img.naturalWidth || img.width;
         const h = img.naturalHeight || img.height;
-        const scale = Math.min(1, maxDim / Math.max(w, h));
-        if (scale < 1) {
-          const cw = Math.max(1, Math.round(w * scale));
-          const ch = Math.max(1, Math.round(h * scale));
+        const { w: cw, h: ch } = cappedRasterDims(w, h, maxDim);
+        if (cw !== w || ch !== h) {
           const canvas = document.createElement("canvas");
           canvas.width = cw;
           canvas.height = ch;

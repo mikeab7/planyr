@@ -28,7 +28,7 @@
 // honest; a plan that never set them stores nothing and renders exactly as before.
 export const PARCEL_STD_KEYS = ["stroke", "weight", "dash", "fill", "fillOpacity", "sbStroke", "sbWeight", "sbDash"];
 // The per-element-type keys Standards → Colors can set.
-export const TYPE_STD_KEYS = ["fill", "stroke"];
+export const TYPE_STD_KEYS = ["fill", "stroke", "strokeOpacity", "strokeWidth"];
 // NEW-1 — MEASUREMENTS. Same mechanics as parcels (stamped at creation), so the retroactive
 // Apply WRITES the value onto each measurement. `labelPpf` is NEW-2's per-measurement
 // "show label from this zoom in" threshold; it travels with the style keys because it is

@@ -4,12 +4,12 @@
  * third-party "rotated image overlay" plugins use): position a plain <img> inside a dedicated
  * pane and drive its CSS `transform: matrix(...)` from the three corners' current on-screen
  * position, recomputed on every pan/zoom. The GEOREFERENCING MATH lives in
- * shared/sitePlans/lib/overlayGeoref.js (which itself reuses the Site Planner's own
+ * shared/overlay/overlayPlacement.js (which itself reuses the Site Planner's own
  * reference-overlay align-mode solver) — this module only turns three already-resolved
  * lat/lon corners into pixels on screen; it holds no georeferencing logic of its own.
  */
 import L from "leaflet";
-import { clipPathValueForCrop } from "./overlayCrop.js";
+import { clipPathValueForCrop } from "../../../shared/overlay/overlayCrop.js";
 
 const PANE = "sitePlanOverlayPane";
 

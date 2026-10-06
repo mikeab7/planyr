@@ -243,6 +243,26 @@ export function computeCoverage(viewport, overlays, bufferMiles = 2.5) {
   return out;
 }
 
+/* Do two coverage maps ({ id: "in"|"out"|"unknown" }) hold the same verdicts?
+ *
+ * ⛔ NEW-1 — THE PLANNER'S COVERAGE EFFECT MUST NOT DISPATCH AN UNCHANGED MAP. `computeCoverage`
+ * returns a FRESH object on every call, so an unguarded `setCoverage(computeCoverage(…))` is a
+ * re-render every time it runs. In the planner it runs from `prefetchExtents(…).then(recompute)` —
+ * an already-resolved promise, i.e. a MICROTASK — on every run of an effect that re-runs on a
+ * re-render. That closed a loop that never returns to the event loop (render → effect → microtask
+ * dispatch → render …): a hard page freeze, not React's error 185, because each dispatch lands
+ * after the commit that scheduled it, so React's nested-update counter resets every lap. The fix
+ * is a guard on the DISPATCH (callers compare against the last map they committed and skip an
+ * equal one) plus value-only effect dependencies. Pure, so the decision is unit-tested. */
+export function sameCoverage(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const ka = Object.keys(a), kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  for (const k of ka) if (!Object.prototype.hasOwnProperty.call(b, k) || a[k] !== b[k]) return false;
+  return true;
+}
+
 /* A Leaflet map → a plain {s,w,n,e} viewport bbox (or null). */
 export function boundsFromLeaflet(map) {
   try {

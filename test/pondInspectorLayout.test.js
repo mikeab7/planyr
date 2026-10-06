@@ -43,7 +43,7 @@ describe("B1/B2 — header + status card sit above the Dimensions rows", () => {
     // NEW-2/B1818257 — the shown-when-not-false text now prefers dockZoneDisplayLabel(selEl) (a
     // compass-suffixed name like "Truck court · N" for a cross-dock building's dock-zone stack
     // members) over the bare TYPE label, falling back to it for every other element unchanged.
-    expect(src).toContain('title={selEl.type === "pond" || (phoneSheetSolo && !(TYPE[selEl.type]?.label || "").includes(" / ")) ? false : `Selected · ${dockZoneDisplayLabel(selEl) || (TYPE[selEl.type]?.label || "Element")}`}');
+    expect(src).toContain('title={selEl.type === "pond" || bldgPanel || (phoneSheetSolo && !(TYPE[selEl.type]?.label || "").includes(" / ")) ? false : `Selected · ${dockZoneDisplayLabel(selEl) || (TYPE[selEl.type]?.label || "Element")}`}');
     expect(src.includes('title={selEl.type === "pond" ? TYPE[selEl.type].label')).toBe(false);
   });
 });

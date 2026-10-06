@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   isPhoneSheetMode, SHEET_SNAPS, heightForSnap, resolveDragSnap, keyboardInsetPx,
-  clampSheetHeightForKeyboard, selectionCoverDeltaPx,
+  clampSheetHeightForKeyboard, selectionCoverDeltaPx, keyboardHeightPx, sheetMaxHeightForKeyboard,
 } from "../src/workspaces/site-planner/lib/propertiesSheet.js";
 
 // B1215682/NEW-1 — pure geometry + decisions for the phone Properties bottom sheet.
@@ -69,6 +69,38 @@ describe("keyboardInsetPx", () => {
   it("ignores a sub-pixel rounding gap (never reports a phantom keyboard)", () => {
     const win = { innerHeight: 800, visualViewport: { height: 799.6, offsetTop: 0 } };
     expect(keyboardInsetPx(win)).toBe(0);
+  });
+});
+
+// NEW-1 (2026-10-06, live signed-in WebKit pass): with the keyboard up iOS also SCROLLS the visual viewport (offsetTop > 0) to
+// reveal the field. keyboardInsetPx counts that scroll (the sheet's BOTTOM must sit on the visible band's bottom), so the clamp's
+// `layout − inset` is the visible height PLUS the scroll: the sheet could stand taller than the band and its top rows — the first
+// field, "Building number" — ended up above the top of the screen. Measured: sheet top 47 vs visible top 130 on the iPhone 15
+// descriptor, both iOS models, `ui-audit/verify-phone-typing.mjs` "view scrolled late by iOS". The CEILING must come from the
+// keyboard's HEIGHT (layout − visible height, scroll-free) and be applied as a max-height, so it takes effect instantly.
+describe("keyboardHeightPx vs keyboardInsetPx on a scrolled visual viewport", () => {
+  // iPhone 15 descriptor: layout 659, keyboard 380 → visible height 279; iOS has scrolled the viewport by 109
+  const win = (offsetTop) => ({ innerHeight: 659, visualViewport: { height: 279, offsetTop } });
+  it("the inset subtracts the scroll (the bottom anchor); the keyboard height does not (the ceiling)", () => {
+    expect(keyboardInsetPx(win(109))).toBe(271);
+    expect(keyboardHeightPx(win(109))).toBe(380);
+  });
+  it("agree when the viewport has not scrolled, and are 0 with no keyboard / no visualViewport", () => {
+    expect(keyboardHeightPx(win(0))).toBe(keyboardInsetPx(win(0)));
+    expect(keyboardHeightPx({ innerHeight: 659, visualViewport: { height: 659, offsetTop: 0 } })).toBe(0);
+    expect(keyboardHeightPx({ innerHeight: 659 })).toBe(0);
+    expect(keyboardHeightPx(null)).toBe(0);
+  });
+});
+describe("sheetMaxHeightForKeyboard", () => {
+  it("is the visible height minus the top margin while a keyboard is up — the same whatever the scroll", () => {
+    expect(sheetMaxHeightForKeyboard(659, 380)).toBe(255);
+  });
+  it("has no ceiling without a keyboard (the caller keeps its own max-height)", () => {
+    expect(sheetMaxHeightForKeyboard(659, 0)).toBeNull();
+  });
+  it("never collapses below the minimum on a very short visible area", () => {
+    expect(sheetMaxHeightForKeyboard(500, 460)).toBe(120);
   });
 });
 

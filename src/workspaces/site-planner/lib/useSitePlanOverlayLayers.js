@@ -12,7 +12,7 @@
  */
 import { useEffect, useRef } from "react";
 import { createRotatedImageLayer } from "./rotatedImageLayer.js";
-import { overlayCornersFromPlacement } from "../../../shared/sitePlans/lib/overlayGeoref.js";
+import { overlayCornersFromPlacement } from "../../../shared/overlay/overlayPlacement.js";
 import { overlayPlaced } from "../../../shared/sitePlans/lib/sitePlanOverlays.js";
 import { downloadOverlayRasterUrl } from "../../../shared/sitePlans/lib/overlayRasterStorage.js";
 

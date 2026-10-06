@@ -102,7 +102,16 @@ export const elStyle = (el, settings) => {
     fill: el.fill ?? base.fill,
     stroke: el.stroke ?? base.stroke,
     fillOpacity: el.fillOpacity ?? base.fillOpacity ?? 1,
-    weight: base.weight ?? 1,
+    // NEW-8 — outline OPACITY and outline WIDTH (px) are real, per-element, standard-able props like
+    // fillOpacity. `weight` (the width every outline draw already reads) now honours the element's own
+    // `strokeWidth`, then the type default's, then the type's built-in weight, so every existing draw
+    // site picks the override up without being touched. `strokeWidthSet` is the EXPLICIT value or null,
+    // for the draws (a road's curb stroke) whose automatic width is zoom-derived and must stay so
+    // until a width is actually set.
+    strokeOpacity: el.strokeOpacity ?? base.strokeOpacity ?? 1,
+    strokeWidth: el.strokeWidth ?? base.strokeWidth ?? base.weight ?? 1,
+    strokeWidthSet: el.strokeWidth ?? base.strokeWidth ?? null,
+    weight: el.strokeWidth ?? base.strokeWidth ?? base.weight ?? 1,
     shadow: !!base.shadow,
     hatch: !!base.hatch,
     cartoWater: !!base.cartoWater,

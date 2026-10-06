@@ -42,7 +42,7 @@ export const leafKey = (key) => String(key).replace(/^.*\./, "");
 
 /** Keys that are an OWNER / BILLING address by name. Excluded at every rung of the ladder. */
 export const MAILING_KEY_RE =
-  /(mail|owner_?ad(dr)?|own_?addr|full_?owner_?a|care_?of|^c_?o$|^c_?o_|billing|bill_?to|remit|correspond|agent_?addr|tax_?addr|^m_(addr|street|city|zip|state))/i;
+  /(mail|owner_?ad(dr)?|owner_?(city|state|zip)|own_?addr|full_?owner_?a|care_?of|^c_?o$|^c_?o_|billing|bill_?to|remit|correspond|agent_?addr|tax_?addr|^m_(addr|street|city|zip|state))/i;
 
 /* NEW-1 (Louisiana parishes) — keys that CONTAIN the word "address" but hold something that is not
  * one, measured on real Regrid-schema parish layers: Cameron's `ADDRESS_SO` reads the literal
@@ -50,6 +50,12 @@ export const MAILING_KEY_RE =
  * first; `ll_address_count` reads "1". A situs ladder that matched them would title a parcel card
  * "county". Excluded at every rung, exactly like a mailing key. */
 const NON_SITUS_KEY_RE = /(address_?so(urce)?$|addr(ess)?_?count$)/i;
+
+/* NEW-1 (Louisiana, 2026-10-06) — a CITY / STATE / ZIP part of a split situs is never the address, whatever
+ * its key's prefix says. De Soto Parish publishes `Physical_Address_City` beside `Address_Number` +
+ * `Street_Name`, and the physical-address rung matched that key by its prefix and titled the card "MANSFIELD".
+ * Applied from the second rung up only: the bare-`situs` rung keeps its documented `SITUS_CITY` behaviour. */
+const SITUS_PART_NOT_LINE_RE = /(^|_)(city|state|zip(_?code)?|county)$/i;
 
 /* A value that is a serialised JSON object (Regrid's `original_address` = {"scity":"Parish"}) is
  * never a street address, however its key is spelled. */
@@ -128,6 +134,7 @@ export function situsKey(attrs, { skip = null } = {}) {
         const lk = leafKey(key);
         if (isMailingKey(lk, rung)) continue;
         if (NON_SITUS_KEY_RE.test(lk)) continue;
+        if (rung >= 1 && SITUS_PART_NOT_LINE_RE.test(lk)) continue;
         if (!re.test(lk)) continue;
         // NEW-1 (Louisiana) — a column that is literally `SITUS` is the whole line, and wins over its own
         // `SITUS_CITY` / `SITUS_ZIP` siblings whatever order the service lists them (St. Landry's schema).
@@ -137,11 +144,13 @@ export function situsKey(attrs, { skip = null } = {}) {
         if (wantComposed === false && COMPOSED_ADDR_RE.test(lk)) continue; // already tried above
         const v = attrs[key];
         if (isPlaceholderValue(v) || looksLikeJsonBlob(v)) continue;
-        // NEW-1 (Louisiana) — on the generic catch-all rung ONLY, a value that is a bare house NUMBER
+        // NEW-1 (Louisiana) — below the bare-`situs` rung, a value that is a bare house NUMBER
         // ("1653", "240") is one half of a split address (Address_Nu + Street_Nam on Lafourche, St. Mary,
         // St. John, St. Bernard, Iberville, Webster), never a situs: as a card title it names nothing.
-        // Rungs 0-1 still return a number-only value (`SITUS_NUM` behaviour is unchanged).
-        if (rung === 2 && /^\s*\d+[A-Za-z]?\s*$/.test(String(v))) continue;
+        // Rung 0 still returns a number-only value (`SITUS_NUM` behaviour is unchanged).
+        // NEW-1 (Louisiana, 2026-10-06) — rung 1 refuses it too: Washington Parish's `PHYSICAL_A` is the house
+        // number alone (its street is `PHYSICAL_S`), and it matched the physical-address rung by name.
+        if (rung >= 1 && /^\s*\d+[A-Za-z]?\s*$/.test(String(v))) continue;
         if (String(v).replace(/\s+/g, " ").trim()) return key;
       }
     }

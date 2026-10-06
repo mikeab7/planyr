@@ -64,6 +64,10 @@ async function run({ view, w, h, coarse, label }) {
   const label_ = view === "grid" ? "Grid" : view === "split" ? "Split" : "Gantt";
   await frame.evaluate(l => { [...document.querySelectorAll(".hdr-view button")].find(b => b.textContent.trim() === l).click(); }, label_);
   await pacedWait(page, 800);
+  /* NEW-1 (empty band): the page now FILLS the window and each scroll surface pads its END by --fab-dock, so the
+     contract is "scrolled to the end, the button covers no row" — measured at the end of every scroller. */
+  await frame.evaluate(() => { for (const g of document.querySelectorAll("[data-grid-scroll], [data-gantt-scroll]")) g.scrollTop = g.scrollHeight; });
+  await pacedWait(page, 400);
   const m = await page.evaluate(async ({ coarsePx }) => {
     const { cornerClearanceFromBottom } = await import("/cc.mjs");
     const size = coarsePx ? 44 : 30, right = 14;
@@ -91,7 +95,7 @@ async function run({ view, w, h, coarse, label }) {
     }
     // anything else painted in the iframe under the button (Gantt bars, svg, canvas)
     const probe = [[fab.l + 2, fab.t + 2], [fab.r - 2, fab.t + 2], [fab.l + 2, fab.b - 2], [fab.r - 2, fab.b - 2], [(fab.l + fab.r) / 2, (fab.t + fab.b) / 2]];
-    const under = probe.map(([x, y]) => { const e = d.elementFromPoint(x - fr.left, y - fr.top); return e && e.tagName !== "HTML" && e.tagName !== "BODY" ? e.tagName + (e.className && e.className.baseVal === undefined ? "." + String(e.className).slice(0, 30) : "") : null; }).filter(Boolean);
+    const under = probe.map(([x, y]) => { const e = d.elementFromPoint(x - fr.left, y - fr.top); return e && !e.hasAttribute("data-grid-scroll") && !e.hasAttribute("data-gantt-scroll") && e.tagName !== "HTML" && e.tagName !== "BODY" ? e.tagName + (e.className && e.className.baseVal === undefined ? "." + String(e.className).slice(0, 30) : "") : null; }).filter(Boolean);
     return { fab, bottom, hit: [...new Set(hit)].slice(0, 6), under: [...new Set(under)] };
   }, { coarsePx: coarse });
   await ctx.close();

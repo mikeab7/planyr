@@ -25,10 +25,15 @@
 import { webkit, devices } from "playwright";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { openSignedIn } from "./lib/signedInSession.mjs";
+import { LIVE_PREFIX, seedThrowawayPlan, cleanupLive, listIds } from "./lib/liveFixtures.mjs";
 import { installStubSupabase } from "./lib/stubSupabase.mjs";
 import { IOS_MODEL, KEYBOARDS, probeFocused, shootWithKeyboard, CONTACT_WORDS, REAL_TOKEN } from "./lib/iosKeyboard.mjs";
 
-const BASE = (process.argv.find((a, i) => i > 1 && a.startsWith("http")) || "http://localhost:4190").replace(/\/$/, "");
+// --live: score the DEPLOYED site signed in as the test account (e2e@planyr.test) through the shared helper —
+// real Supabase, the account's own fixture site (no stub). The signed-out surfaces still open signed out.
+const LIVE = process.argv.includes("--live");
+const BASE = (process.argv.find((a, i) => i > 1 && a.startsWith("http")) || (LIVE ? "https://planyr.io" : "http://localhost:4190")).replace(/\/$/, "");
 const SHOTS = (process.argv.find((a) => a.startsWith("--shots=")) || "").slice(8);
 const ONLY = (process.argv.find((a) => a.startsWith("--only=")) || "").slice(7);
 const JSON_OUT = (process.argv.find((a) => a.startsWith("--json=")) || "").slice(7);
@@ -48,7 +53,7 @@ const session = {
   refresh_token: "stub-refresh", expires_at: Math.floor(Date.now() / 1000) + 3600, expires_in: 3600, token_type: "bearer",
   user: { id: UID, aud: "authenticated", role: "authenticated", email: "owner@example.com", app_metadata: {}, user_metadata: { first_name: "Test", last_name: "Owner" }, created_at: new Date().toISOString() },
 };
-const PROJ = "zzproj";
+const PROJ = LIVE ? LIVE_PREFIX + "typing" : "zzproj"; // live: a throwaway plan seeded on the test account, removed at the end
 // a minimal plan in the app's CURRENT element shape (one parcel, one building — synthetic, no real
 // data), so the panels show the fields a real plan has (parcel record, yield, the Properties sheet).
 // (The committed e2e test-fit fixture was tried first: its element shapes predate the current planner
@@ -68,7 +73,40 @@ const seed = (signedIn) => `(() => { try {
   localStorage.setItem('planyr:firstLanding:v1', '1');
 } catch (e) {} })();`;
 
+// each live page owns a whole browser: a section that throws never closes it, so the section wrapper sweeps stragglers (14 GB / load 100 measured otherwise)
+const liveOpen = new Set();
+const closeLeakedLive = async () => { const all = [...liveOpen]; liveOpen.clear(); await Promise.all(all.map((c) => c().catch(() => {}))); };
+
+async function openLive(phone, mode, { signedIn = true, route }) {
+  const initScripts = [[IOS_MODEL, { kbPx: KEYBOARDS[phone], tallInner: mode === "ios-tallinner" }]];
+  let ctx, page, close;
+  if (signedIn) {
+    const s = await openSignedIn({ base: BASE, engine: "webkit", device: phone, initScripts });
+    ({ context: ctx, page } = s); close = s.close;
+  } else {
+    const b = await webkit.launch();
+    ctx = await b.newContext({ ...devices[phone] });
+    for (const [fn, arg] of initScripts) await ctx.addInitScript(fn, arg);
+    page = await ctx.newPage(); close = () => b.close();
+  }
+  page.setDefaultTimeout(8000);
+  const errs = []; page.on("pageerror", (e) => errs.push(String(e.message).slice(0, 160)));
+  await page.goto(`${BASE}/${route}`, { waitUntil: "domcontentloaded" });
+  await page.reload({ waitUntil: "domcontentloaded" }); // a fresh load with the session stored and the keyboard model installed
+  await page.waitForTimeout(2500);
+  errs.length = 0; // fetches the reload itself aborted ("…due to access control checks") are not app errors
+  await assertMeasurable(page, `verify-phone-typing:live:${phone}:${mode}`);
+  // The page-containment guard arms ~4.5 s after boot and loads as a chunk, which on the live network can take far longer
+  // than the stub's instant fetch. Scoring before it is armed measures iOS's raw reveal WITHOUT the app's pin-back — a wrong
+  // picture (it flipped the known-answer arm under parallel network load) — so wait for the app's own armed flag.
+  await page.waitForFunction(() => window.__PLANYR_PAGE_CONTAINMENT_GUARD_INSTALLED === true, null, { timeout: 45000 }).catch(() => { throw new Error("the page-containment guard never armed on the live page — scoring now would measure the wrong thing"); });
+  const closer = () => { liveOpen.delete(closer); return close(); };
+  liveOpen.add(closer);
+  return { ctx: { close: closer }, page, errs };
+}
+
 async function open(browser, phone, mode, { signedIn = true, route }) {
+  if (LIVE) return openLive(phone, mode, { signedIn, route });
   const ctx = await browser.newContext({ ...devices[phone] }); // certificate checks stay on (owner rule)
   await installStubSupabase(ctx, { tables: tables(), session });
   // no external network (tiles/GIS blocked) — except the app under test itself, so a deployed build (planyr.io) can be scored
@@ -86,8 +124,20 @@ async function open(browser, phone, mode, { signedIn = true, route }) {
   return { ctx, page, errs };
 }
 
-const tapText = async (page, re) => { const l = page.getByRole("button", { name: re }).first(); await l.click({ timeout: 4000 }); await page.waitForTimeout(500); };
-const tapSel = async (page, sel) => { await page.locator(sel).locator("visible=true").first().click({ timeout: 4000 }); await page.waitForTimeout(500); };
+// Benign on the LIVE page and not the app's: WebKit's "ResizeObserver loop completed…" notice, and third-party GIS hosts the sandbox egress refuses
+// ("…due to access control checks" = a blocked cross-origin fetch). Any OTHER page error still fails the row.
+const notBenign = (m) => !(LIVE && (/ResizeObserver loop/.test(m) || /due to access control checks/.test(m)));
+const TAP_MS = LIVE ? 25000 : 4000; // live: the page is still booting/fetching for seconds where the stub answers instantly
+const tapText = async (page, re) => { const l = page.getByRole("button", { name: re }).first(); await l.click({ timeout: TAP_MS }); await page.waitForTimeout(500); };
+const tapSel = async (page, sel) => {
+  try { await page.locator(sel).locator("visible=true").first().click({ timeout: TAP_MS }); }
+  catch (e) { // say what WAS on the page, and keep the picture: a bare timeout names nothing
+    const ids = await page.evaluate(() => [...new Set([...document.querySelectorAll("[data-testid]")].map((n) => n.dataset.testid))].join(",").slice(0, 400)).catch(() => "?");
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/FAILED-tap-${sel.replace(/\W+/g, "_")}.png` }).catch(() => {});
+    throw new Error(`${String(e.message).split("\n")[0]} — waiting for ${sel}; on the page: ${ids}; url ${page.url()}`);
+  }
+  await page.waitForTimeout(500);
+};
 // select the parcel (a point inside it, clear of the building) so the Land panel shows its record
 const tapParcel = async (page) => {
   const pt = await page.evaluate(() => { const e = document.querySelector('[data-feature^="parcel:"]'); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left + r.width * 0.15, y: r.top + r.height * 0.2 }; });
@@ -133,18 +183,33 @@ const SURFACES = [
     open: async (p) => {
       const pt = await p.evaluate(() => { const e = document.querySelector('[data-el-id="b1"]'); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
       if (pt) { await p.touchscreen.tap(pt.x, pt.y); await p.waitForTimeout(700); }
-      await p.locator('[data-testid="mobile-panels-tab"]').locator("visible=true").first().click({ timeout: 2500 }).catch(() => {});
-      await p.getByRole("button", { name: /^Properties$/ }).first().click({ timeout: 2500 }).catch(() => {});
+      await p.locator('[data-testid="mobile-panels-tab"]').locator("visible=true").first().click({ timeout: TAP_MS }).catch(() => {});
+      await p.getByRole("button", { name: /^Properties$/ }).first().click({ timeout: TAP_MS }).catch(() => {});
       await p.waitForTimeout(700); await unfoldPanel(p);
     } },
+  // NEW-1 (2026-10-06): the live pass saw the sheet's FIRST field ("Building number") end up ~24 px above the top of the visible area, 1 run in 2,
+  // in the model where innerHeight stays tall: iOS scrolls the view AFTER the sheet has lifted. This surface makes that deterministic — the first
+  // fields are focused, then the view is scrolled by a fixed amount the way iOS does it, and the field must still be inside the visible band.
+  { id: "site — Properties, view scrolled late by iOS", route: `#/project/${PROJ}/site`, signedIn: false, max: 3, noType: true, lateScroll: 130,
+    open: async (p) => {
+      const pt = await p.evaluate(() => { const e = document.querySelector('[data-el-id="b1"]'); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+      if (pt) { await p.touchscreen.tap(pt.x, pt.y); await p.waitForTimeout(700); }
+      await p.locator('[data-testid="mobile-panels-tab"]').locator("visible=true").first().click({ timeout: TAP_MS }).catch(() => {});
+      await p.getByRole("button", { name: /^Properties$/ }).first().click({ timeout: TAP_MS }).catch(() => {});
+      await p.waitForTimeout(700);
+    } },
   { id: "site — set location dialog", route: `#/project/${PROJ}/site`, signedIn: false, open: async (p) => { await tapSel(p, '[data-testid="mobile-panels-tab"]'); await p.getByRole("button", { name: /^Land$/ }).first().click(); await p.waitForTimeout(500); await tapSel(p, '[data-testid="set-location-cta"]'); }, scope: '[role="dialog"]' },
-  { id: "notes", route: "#/notes", open: async (p) => { await p.getByRole("button", { name: /new (page|note)|\+ page|add page/i }).first().click({ timeout: 2500 }).catch(() => {}); await p.waitForTimeout(600); } },
+  { id: "notes", route: "#/notes", open: async (p) => { if (!LIVE) await p.getByRole("button", { name: /new (page|note)|\+ page|add page/i }).first().click({ timeout: 2500 }).catch(() => {}); await p.waitForTimeout(600); } }, // live: the account's existing "Untitled page" — never create a note
   { id: "spreadsheet", route: `#/project/${PROJ}/spreadsheet`, open: async () => {} },
   { id: "schedule — agenda", route: "#/org/schedule", open: async () => {} },
   { id: "schedule — new schedule", route: `#/project/${PROJ}/schedule`, open: async (p) => { await p.getByRole("button", { name: /create|new schedule/i }).first().click({ timeout: 3000 }).catch(() => {}); await p.waitForTimeout(500); } },
   { id: "library", route: `#/project/${PROJ}/library`, open: async () => {} },
   { id: "review — reviews menu", route: "#/markup", open: async (p) => { await p.getByRole("button", { name: /^Reviews/ }).first().click(); await p.waitForTimeout(500); } },
 ];
+
+// Live: the stub's "signed-out" Site surfaces read a plan from localStorage, which a real signed-out session does not have, so they
+// run signed in on the throwaway plan. Only the sign-in/up and Help surfaces genuinely need the signed-out state.
+if (LIVE) for (const sf of SURFACES) if (sf.signedIn === false && !/^(auth|help) /.test(sf.id)) sf.signedIn = true;
 
 const FIELD_SEL = 'input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):not([type=color]):not([type=button]):not([type=submit]), textarea, select, [contenteditable="true"]';
 const listFields = (page, scope) => page.evaluate(([FIELD_SEL, scope]) => {
@@ -161,21 +226,7 @@ const listFields = (page, scope) => page.evaluate(([FIELD_SEL, scope]) => {
   return out;
 }, [FIELD_SEL, scope || null]);
 
-async function scoreField(page, tag, f, shotPath, { noType = false } = {}) {
-  const sel = `[data-ptyp="${f.i}"]`;
-  // leave it where a person scrolling down to it would: near the BOTTOM of its scroller, then tap
-  await page.evaluate((sel) => { const el = document.querySelector(sel); el.scrollIntoView({ block: "end", inline: "nearest" }); el.focus(); }, sel);
-  await page.waitForTimeout(1100);
-  let p = await probeFocused(page);
-  if (p.none) { check(`${tag} — focus`, false, "field would not take focus"); return; }
-  const isSelect = p.tag === "SELECT";
-  // (Site Planner surfaces: focus only — typing edits the plan, and the stub backend answers the
-  // resulting save with a "tab is out of date" notice no real session would see.)
-  if (!noType && !isSelect && !/^(date|time|number)$/.test(p.type)) {
-    await page.keyboard.type(p.ce ? "Typing a line on the phone" : "abc", { delay: 10 }).catch(() => {});
-    await page.waitForTimeout(450);
-    p = await probeFocused(page);
-  }
+function judge(page, tag, p, isSelect) {
   check(`${tag} — keyboard up`, p.kbOpen, p.tag);
   check(`${tag} — FIELD visible above the keyboard`, p.inBand, p.detail + (p.iosReveals ? ` (iOS tried to reveal it ${p.iosReveals}× — the page guard pins that back)` : ""));
   check(`${tag} — OVER nothing drawn over it`, p.over.length === 0, p.over.join(", "));
@@ -187,29 +238,155 @@ async function scoreField(page, tag, f, shotPath, { noType = false } = {}) {
   check(`${tag} — AUTOFILL no contact AutoFill hooks`, tokenOk && nameOk, `autocomplete="${p.ac}" name="${p.nm}"${real ? " (a real contact/credential field — AutoFill wanted)" : ""}`);
   const wording = real ? [] : [p.ph, p.al, p.lbl].filter((w) => w && CONTACT_WORDS.test(w));
   fieldRows.push({ tag, ok: p.inBand && p.over.length === 0 && !p.gap && tokenOk && nameOk, real, wording, ac: p.ac, detail: p.detail });
+}
+
+async function scoreField(page, tag, f, shotPath, { noType = false, lateScroll = 0 } = {}) {
+  const sel = `[data-ptyp="${f.i}"]`;
+  // leave it where a person scrolling down to it would: near the BOTTOM of its scroller, then tap
+  if (process.env.DEBUGSHEET === "3") await page.evaluate((sel) => { const el = document.querySelector(sel); window.__tl = []; const t0 = performance.now(); const iv = setInterval(() => { const a = window.__kbDeep && window.__kbDeep().el; if (!a) return; let sc = null, fx = null; for (let n = a.parentElement; n; n = n.parentElement) { const cs = getComputedStyle(n); if (!sc && /(auto|scroll)/.test(cs.overflowY) && n.scrollHeight > n.clientHeight + 1) sc = n; if (!fx && cs.position === "fixed") fx = n; } const fr = a.getBoundingClientRect(), sr = fx && fx.getBoundingClientRect(); window.__tl.push([Math.round(performance.now() - t0), sc && sc.scrollTop, sr && Math.round(sr.bottom), sr && Math.round(sr.height), Math.round(fr.top), window.__kb.pan, window.__kb.px]); if (performance.now() - t0 > 1500) clearInterval(iv); }, 100); }, sel);
+  await page.evaluate((sel) => { const el = document.querySelector(sel); el.scrollIntoView({ block: "end", inline: "nearest" }); el.focus(); }, sel);
+  await page.waitForTimeout(Number(process.env.FOCUS_WAIT) || 1100);
+  if (lateScroll) { await page.evaluate((y) => window.scrollTo(0, y), lateScroll); await page.waitForTimeout(900); } // iOS scrolls the view to reveal the field, after the app has already lifted the sheet
+  if (lateScroll) { // the invariant behind the live failure: a bottom sheet's TOP edge must never stand above the visible area (its first rows are then off-screen)
+    const sheetTop = await page.evaluate(() => { let el = window.__kbDeep().el; while (el && el !== document.body && getComputedStyle(el).position !== "fixed") el = el.parentElement; return el && el !== document.body ? { top: Math.round(el.getBoundingClientRect().top), band: window.__kb.band().top } : null; });
+    check(`${tag} — SHEET top edge inside the visible area`, !!sheetTop && sheetTop.top >= sheetTop.band - 1, sheetTop ? `sheet top ${sheetTop.top} vs visible top ${sheetTop.band}` : "no fixed sheet found");
+  }
+  let p = await probeFocused(page);
+  if (p.none) { check(`${tag} — focus`, false, "field would not take focus"); return; }
+  const isSelect = p.tag === "SELECT";
+  // (Site Planner surfaces: focus only — typing edits the plan, and the stub backend answers the
+  // resulting save with a "tab is out of date" notice no real session would see.)
+  if (!noType && !isSelect && !/^(date|time|number)$/.test(p.type)) {
+    await page.keyboard.type(p.ce ? "Typing a line on the phone" : "abc", { delay: 10 }).catch(() => {});
+    await page.waitForTimeout(450);
+    p = await probeFocused(page);
+  }
+  judge(page, tag, p, isSelect);
+  if (process.env.DEBUGSHEET === "3") console.log("   TL", tag.slice(-22), JSON.stringify(await page.evaluate(() => window.__tl)), p.inBand ? "OK" : "HIDDEN");
+  if (process.env.DEBUGSHEET === "2" && !p.inBand) console.log("   DEBUG2", tag.slice(-30), JSON.stringify(await page.evaluate(() => { const el = window.__kbDeep().el; const f = el.getBoundingClientRect(); const cd = el.closest("[data-edit-card]"); const cr = cd && cd.getBoundingClientRect(); const out = { field: [Math.round(f.top), Math.round(f.bottom)], band: window.__kb.band(), card: cr && [Math.round(cr.top), Math.round(cr.bottom)], mgd: !!el.closest("[data-keyboard-managed]") && el.closest("[data-keyboard-managed]").dataset.keyboardManaged, scrollers: [] }; for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) { const cs = getComputedStyle(n); if (/(auto|scroll)/.test(cs.overflowY) && n.scrollHeight > n.clientHeight + 1) { const r = n.getBoundingClientRect(); const stick = [...n.children].flatMap((c) => [c, ...c.children]).filter((k) => !k.contains(el) && getComputedStyle(k).position === "sticky").map((k) => { const kr = k.getBoundingClientRect(); return [Math.round(kr.top - r.top), Math.round(kr.height)]; }); out.scrollers.push({ top: Math.round(r.top), bottom: Math.round(r.bottom), st: n.scrollTop, sh: n.scrollHeight, ch: n.clientHeight, stick }); } } return out; })));
+  if (process.env.DEBUGSHEET) console.log("   DEBUG", tag.slice(-40), JSON.stringify(await page.evaluate(() => { let el = (window.__kbDeep().el); while (el && el !== document.body && getComputedStyle(el).position !== "fixed") el = el.parentElement; const r = el && el.getBoundingClientRect(); const sc = el && [...el.querySelectorAll("*")].find((n) => n.scrollHeight > n.clientHeight + 4 && /(auto|scroll)/.test(getComputedStyle(n).overflowY)); return { fixed: r && [Math.round(r.top), Math.round(r.bottom), Math.round(r.height)], pan: window.__kb.pan, kb: window.__kb.px, ih: innerHeight, scroller: sc && [sc.scrollTop, sc.scrollHeight, sc.clientHeight] }; })));
   if (SHOTS && shotPath) await shootWithKeyboard(page, shotPath);
   await page.evaluate(() => document.activeElement?.blur?.());
   await page.waitForTimeout(400);
 }
 
-const section = async (name, fn) => { if (ONLY && !new RegExp(ONLY).test(name)) return; try { await fn(); } catch (e) { check(`${name}: section aborted`, false, String(e.message).split("\n")[0]); } };
+
+// ── LIVE ONLY: the Schedule GRID cells (they assemble only signed in, inside the /sequence/ frame) ──
+// The account's schedule is the app's built-in demo (Goose Creek). Cells are scrolled into view IN-PAGE (never the
+// driver's actionability scroll), double-clicked, typed into and left with Escape — which abandons the text, so the
+// demo schedule is never changed (EDITOR-EXIT-CONTRACT: Escape on a text cell discards typed-but-uncommitted text).
+// [label, column index, type into it?, open with Enter?] — the Notes cell opens a modal editor on Enter/F2 (its dblclick only selects);
+// it is focused but never typed into, so no note entry is written to the demo schedule
+const GRID_COLS = [["Task name", 1, true, false], ["Owner", 9, false, false], ["Cost", 10, true, false], ["Notes", 11, false, true]];
+async function gridSection(phone, mode) {
+  const name = `[${phone} · ${mode}] schedule — grid cells (live)`;
+  await section(name, async () => {
+    // open the demo schedule by pressing its row under ORGANIZATION in the owner list — NOT the row's menu "link" (that would write a
+    // link onto the demo schedule) and no schedule is created
+    const { ctx, page, errs } = await open(null, phone, mode, { signedIn: true, route: `#/project/${PROJ}/schedule` });
+    await page.locator('[data-testid="schedule-owner-row"]').filter({ hasText: /Goose Creek/ }).first().click({ timeout: TAP_MS }).catch(() => {});
+    await page.waitForTimeout(1500);
+    const fr = await (async () => { for (let i = 0; i < 40; i++) { const f = page.frames().find((x) => /\/sequence\//.test(x.url())); if (f && await f.locator("[data-task-row]").count()) return f; await page.waitForTimeout(500); } return null; })();
+    check(`${name} — grid assembled`, !!fr, fr ? "" : "no [data-task-row] in the /sequence/ frame");
+    if (!fr) { await ctx.close(); return; }
+    await fr.evaluate(() => { const g = [...document.querySelectorAll("button")].find((b) => /^Grid$/.test((b.innerText || "").trim())); if (g) g.click(); });
+    await page.waitForTimeout(1200);
+    const leafId = await fr.evaluate(() => { const rs = [...document.querySelectorAll("[data-task-row]")]; const leaf = rs.filter((d) => !/[▾▸]/.test((d.children[1] && d.children[1].innerText) || ""))[2]; return leaf ? leaf.getAttribute("data-task-row") : null; });
+    check(`${name} — a leaf task row to edit`, !!leafId);
+    for (const [label, col, typeIn, viaEnter] of GRID_COLS) {
+      const tag = `${name} › ${label}`;
+      try {
+        const cell = fr.locator(`[data-task-row="${leafId}"] > div`).nth(col);
+        await cell.evaluate((el) => el.scrollIntoView({ block: "nearest", inline: "center" })); // in-page, never the driver's actionability scroll
+        await page.waitForTimeout(500);
+        // a real mouse double-click at the cell's centre in TOP-page coordinates (the grid lives in a same-origin iframe).
+        // Live: the schedule is still hydrating from Supabase for a few seconds and a re-render closes an editor opened too early
+        // (a stable run of "no editor" is a real failure only after the grid has had time to settle), so retry the gesture.
+        let p, at, fb;
+        for (let attempt = 0; attempt < (LIVE ? 5 : 1); attempt++) {
+          await cell.evaluate((el) => el.scrollIntoView({ block: "nearest", inline: "center" })); // in-page, never the driver's actionability scroll
+          await page.waitForTimeout(LIVE ? 2500 : 500);
+          // aim at the part of the cell that is NOT under the grid's sticky ID/Task columns (on a narrow phone they cover the cell's left edge)
+          at = await cell.evaluate((el) => { const r = el.getBoundingClientRect(); const kids = [...el.parentElement.children]; const sticky = Math.max(0, ...kids.slice(0, 2).map((k) => k.getBoundingClientRect().right)); const left = Math.max(r.left, el.cellIndex === undefined && kids.indexOf(el) > 1 ? sticky : r.left); return { x: Math.min(left + 24, r.right - 4), y: r.top + r.height / 2 }; });
+          fb = await (await fr.frameElement()).boundingBox();
+          await page.mouse.dblclick(fb.x + at.x, fb.y + at.y);
+          await page.waitForTimeout(1200);
+          if (viaEnter) { await page.keyboard.press("Enter"); for (let w = 0; w < 6; w++) { await page.waitForTimeout(800); if (!(await probeFocused(page)).none) break; } } // the modal opens and normally focuses its textarea; on SE the page-level focus did not follow, so a person simply taps the note box (below)
+          p = await probeFocused(page);
+          if (p.none && viaEnter) { // the Notes modal is open but nothing holds focus: tap the note box, as a person would
+            const box = await fr.evaluate(() => { const t = document.querySelector("textarea"); if (!t) return null; const r = t.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+            if (box) { await page.mouse.click(fb.x + box.x, fb.y + box.y); await page.waitForTimeout(1200); p = await probeFocused(page); }
+          }
+          if (!p.none) break;
+        }
+        if (p.none) {
+          const why = await fr.evaluate((li) => ({ inputs: [...document.querySelectorAll("input")].filter((i) => i.getBoundingClientRect().width).length, active: document.activeElement && document.activeElement.tagName, cols: (document.querySelector(`[data-task-row="${li}"]`) || { children: [] }).children.length, header: [...document.querySelectorAll("[data-col-header], [role=columnheader]")].map((h) => (h.innerText || "").trim()).join("|").slice(0, 120) }), leafId).catch(() => null);
+          if (SHOTS) await page.screenshot({ path: `${SHOTS}/${phone.replace(/\s+/g, "")}-${mode}-grid-${label.replace(/\W+/g, "_")}-FAILED.png` });
+          check(`${tag} — focus`, false, `double-click at (${Math.round(fb.x + at.x)}, ${Math.round(fb.y + at.y)}) never opened an editor — frame: ${JSON.stringify(why)}`); continue;
+        }
+        if (typeIn) { await page.keyboard.type("abc", { delay: 10 }).catch(() => {}); await page.waitForTimeout(450); p = await probeFocused(page); }
+        judge(page, tag, p, p.tag === "SELECT");
+        if (SHOTS) await shootWithKeyboard(page, `${SHOTS}/${phone.replace(/\s+/g, "")}-${mode}-grid-${label.replace(/\W+/g, "_")}.png`);
+        await page.keyboard.press("Escape"); await page.waitForTimeout(500);
+        await page.evaluate(() => document.activeElement?.blur?.());
+      } catch (e) { check(`${tag} — scored`, false, String(e.message).split("\n")[0]); }
+    }
+    const realErrs = errs.filter(notBenign);
+    if (realErrs.length) check(`${name} — no page errors`, false, realErrs.slice(0, 2).join(" | "));
+    await ctx.close();
+  });
+}
+
+const section = async (name, fn) => { if (ONLY && !new RegExp(ONLY).test(name)) return; try { await fn(); } catch (e) { check(`${name}: section aborted`, false, String(e.message).split("\n")[0]); } finally { await closeLeakedLive(); } };
 
 const browser = await webkit.launch();
+let liveSchedulesBefore = null;
+if (LIVE) { // seed the throwaway plan the Site Planner surfaces need (a parcel + a building), remembering the schedules that already exist
+  const sd = await openSignedIn({ base: BASE });
+  try { liveSchedulesBefore = await listIds(sd.page, "schedules"); await cleanupLive(sd.page, { planId: PROJ }); await seedThrowawayPlan(sd.page, PROJ); } finally { await sd.close(); }
+}
 try {
   // ── 0. KNOWN-ANSWER ARM ───────────────────────────────────────────────────────────────────────
   await section("0 known answer", async () => {
     const { ctx, page } = await open(browser, "iPhone 15", "ios", { signedIn: false, route: "#/" });
+    // ARM 1 (FIELD): a field planted BELOW the layout viewport can never be revealed — iOS pans at most the keyboard's height —
+    // so it must read HIDDEN. (This replaces the old "pinned panel with the app's reveal off" arm: B2138080/#2063 deliberately
+    // stopped pinning the page back after the keyboard's own scroll, so iOS's reveal now shows that planted field — the arm's
+    // premise changed, the probe did not. This one needs nothing from the app, which is what a known answer must be.)
+    // The probe is handed a field whose reported box lies BELOW the visible band and must say HIDDEN. (The box is overridden
+    // rather than the field placed there: a field placed off-screen is pulled back by the page's own relayout when the keyboard
+    // opens — measured — so no placement is stable; the override tests exactly the decision the probe makes.)
     await page.evaluate(() => {
-      const d = document.createElement("div");
-      d.style.cssText = "position:fixed;left:0;right:0;bottom:0;height:90px;background:#fff;z-index:9999";
-      d.setAttribute("data-keyboard-managed", ""); // switch the app's reveal OFF for this planted panel
-      d.innerHTML = '<input id="__planted" style="margin:30px 10px;width:200px" autocomplete="x-test">';
-      document.body.appendChild(d);
+      const a = document.createElement("div");
+      a.style.cssText = "position:fixed;left:0;right:0;top:20px;height:60px;background:#fff;z-index:9999";
+      a.innerHTML = '<input id="__planted" style="margin:10px;width:200px" autocomplete="x-test">';
+      document.body.appendChild(a);
+      document.getElementById("__planted").focus({ preventScroll: true });
     });
-    await page.evaluate(() => document.getElementById("__planted").focus());
+    await page.waitForTimeout(900);
+    await page.evaluate(() => {
+      const el = document.getElementById("__planted");
+      const band = window.__kb.band();
+      const lie = () => ({ top: band.bottom + 60, bottom: band.bottom + 86, left: 10, right: 210, width: 200, height: 26, x: 10, y: band.bottom + 60, toJSON() {} });
+      el.getBoundingClientRect = lie;
+    });
+    await page.waitForTimeout(300);
+    let p = await probeFocused(page);
+    check("0 KNOWN ANSWER (FIELD): a field whose box lies below the visible band reads as HIDDEN", p.kbOpen && !p.inBand, p.detail);
+    // ARM 2 (OVER): a field with a layer painted over it must list that layer.
+    await page.evaluate(() => {
+      document.getElementById("__planted").blur();
+      const f = document.createElement("div"); f.id = "__planted2";
+      f.style.cssText = "position:fixed;left:0;right:0;top:120px;height:60px;background:#fff;z-index:9999";
+      f.innerHTML = '<input id="__planted3" style="margin:10px;width:200px" autocomplete="x-test">';
+      const cover = document.createElement("div"); cover.setAttribute("data-planted-cover", "");
+      cover.style.cssText = "position:fixed;left:0;right:0;top:100px;height:100px;background:rgba(255,0,0,.2);z-index:10000";
+      document.body.append(f, cover);
+      document.getElementById("__planted3").focus();
+    });
     await page.waitForTimeout(1100);
-    const p = await probeFocused(page);
-    check("0 KNOWN ANSWER: a field pinned under the keyboard with no reveal reads as HIDDEN", p.kbOpen && !p.inBand, p.detail);
+    p = await probeFocused(page);
+    check("0 KNOWN ANSWER (OVER): a field with a layer drawn over it reports that layer", p.kbOpen && p.over.length > 0, p.over.join(", ") || "nothing reported");
     await ctx.close();
   });
   const voided = results.some((r) => r.id.startsWith("0 KNOWN") && !r.ok);
@@ -228,15 +405,21 @@ try {
       for (const f of fields) {
         const tag = `${name} › ${f.label}`;
         const shot = SHOTS ? `${SHOTS}/${phone.replace(/\s+/g, "")}-${mode}-${s.id.replace(/[^a-z0-9]+/gi, "_")}-${f.i}.png` : null;
-        await scoreField(page, tag, f, mode === "ios" ? shot : null, { noType: !!s.noType }).catch((e) => check(`${tag} — scored`, false, String(e.message).split("\n")[0]));
+        await scoreField(page, tag, f, mode === "ios" ? shot : null, { noType: !!s.noType, lateScroll: s.lateScroll || 0 }).catch((e) => check(`${tag} — scored`, false, String(e.message).split("\n")[0]));
       }
-      if (errs.length) check(`${name} — no page errors`, false, errs.slice(0, 2).join(" | "));
+      const real = errs.filter(notBenign);
+      if (real.length) check(`${name} — no page errors`, false, real.slice(0, 2).join(" | "));
       await ctx.close();
     });
   }
+  if (LIVE) for (const phone of PHONES) for (const mode of MODES) await gridSection(phone, mode);
   if (voided) console.log("\nVOID — the known-answer arm failed: the probe cannot see a hidden field.");
 } finally {
   await browser.close();
+  if (LIVE) { // owner rule 15: clear what the run made, then PROVE it is gone
+    const sd = await openSignedIn({ base: BASE });
+    try { const c = await cleanupLive(sd.page, { planId: PROJ, scheduleIdsBefore: liveSchedulesBefore }); console.log("live cleanup:", JSON.stringify(c)); check("live cleanup left nothing behind", !c.errors.length && c.left.site === 0 && !c.left.schedules, JSON.stringify(c)); } finally { await sd.close(); }
+  }
 }
 if (JSON_OUT) writeFileSync(JSON_OUT, JSON.stringify({ results, fieldRows }, null, 1));
 const failed = results.filter((r) => !r.ok);

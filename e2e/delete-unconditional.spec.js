@@ -87,7 +87,8 @@ test.describe("delete is unconditional and never silent (logged out)", () => {
     const b = await drawBuilding(page, 0.3, 0.35, 0.55, 0.5);
     await select(page, b);
     await page.getByRole("button", { name: /^Properties$/ }).first().click();
-    await page.getByRole("button", { name: /Delete element/i }).click();
+    await page.getByTestId("building-more").click();
+    await page.getByTestId("building-delete").click();
     await expect.poll(() => buildings(page)).toBe(0);
   });
 
@@ -106,7 +107,10 @@ test.describe("delete is unconditional and never silent (logged out)", () => {
     await select(page, b);
     await page.getByRole("button", { name: /^Properties$/ }).first().click();
     // Give it bonded children (each feature row is "label · [－] count [＋]"; the ＋ is its last button).
-    const plus = (label) => page.getByText(label, { exact: true }).first().locator("xpath=..").getByRole("button").last();
+    // Old "Car parking ＋" walked sidewalk → parking rows; the end-wall stack now has "+ Sidewalk" and a Parking rows stepper.
+    const plus = (label) => (label === "Car parking"
+      ? { click: async () => { const sw = page.getByTestId("add-end-sidewalk"); if (await sw.count()) await sw.click(); else await page.getByTestId("park-rows-plus").click(); } }
+      : page.getByTestId({ "Dock zones": "add-dock-zone", "Bump-outs": "bump-plus" }[label]));
     for (const label of ["Dock zones", "Car parking"]) { await plus(label).click(); await page.waitForTimeout(400); }
     await expect.poll(() => readModel(page).then((m) => m.els.length)).toBeGreaterThan(2);
     const before = await readModel(page);
@@ -184,9 +188,10 @@ test.describe("delete is unconditional and never silent (logged out)", () => {
     const b = await drawBuilding(page, 0.3, 0.35, 0.55, 0.5);
     await select(page, b);
     await page.getByRole("button", { name: /^Properties$/ }).first().click();
-    await page.getByRole("button", { name: /Pin/ }).first().click();
+    await page.getByTestId("building-lock").click();
     await page.waitForTimeout(300);
-    await page.getByRole("button", { name: /Delete element/i }).click();
+    await page.getByTestId("building-more").click();
+    await page.getByTestId("building-delete").click();
     await expect.poll(() => buildings(page)).toBe(0);
   });
 

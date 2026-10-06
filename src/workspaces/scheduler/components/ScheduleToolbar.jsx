@@ -255,5 +255,5 @@ export function ScheduleActions({ toolbar, post }) {
       </IconCmd>
     ),
   });
-  return <PriorityToolbar name="schedule-actions" items={items} moreLabel="More schedule actions" />;
+  return <PriorityToolbar name="schedule-actions" items={items} moreLabel="More schedule actions" settled={!!toolbar.settled} />;
 }

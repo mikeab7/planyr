@@ -23,7 +23,7 @@
  *   const s = await openSignedIn({ base: "https://planyr.io" });   // or a *.planyr.pages.dev preview
  *   ... s.page ...; console.log(s.build, s.proof);  await s.close();
  */
-import { chromium } from "@playwright/test";
+import { chromium, webkit, devices } from "@playwright/test";
 import { existsSync } from "node:fs";
 
 export const FIXTURE_SITE_ID = "e2e-fixture-site";
@@ -40,17 +40,28 @@ export function routeFailure(status, body) {
 
 /** Sign the page in via the key route. Returns the proof object; throws with the exact error. */
 export async function signInViaRoute(page, key) {
-  const r = await page.evaluate(async (k) => {
-    const res = await fetch("/api/auth/e2e-session", { method: "POST", headers: { "x-e2e-login-key": k } });
-    return { status: res.status, body: await res.json().catch(() => null) };
-  }, key);
+  // The route intermittently answers 5xx (a 502 for ~3 min during every Pages deploy, measured 2026-10-06); retry those only — a 404/401 is a real answer.
+  let r;
+  for (let attempt = 0; attempt < 14; attempt++) {
+    r = await page.evaluate(async (k) => {
+      const res = await fetch("/api/auth/e2e-session", { method: "POST", headers: { "x-e2e-login-key": k } }).catch(() => null);
+      return res ? { status: res.status, body: await res.json().catch(() => null) } : { status: 599, body: null };
+    }, key);
+    if (r.status < 500) break;
+    await page.waitForTimeout(15000); // a Pages deploy in flight answers 502 for ~3 min
+  }
   const fail = routeFailure(r.status, r.body);
   if (fail) throw new Error("signedInSession: " + fail);
   await page.waitForFunction(() => !!window.pfSupabase, null, { timeout: 20000 });
-  const set = await page.evaluate(async (t) => {
-    const { error } = await window.pfSupabase.auth.setSession({ access_token: t.access_token, refresh_token: t.refresh_token });
-    return error ? String(error.message || error) : null;
-  }, r.body);
+  let set = null; // setSession can answer "Failed to fetch" on a flaky egress hop (measured 2026-10-06): retry a few times
+  for (let attempt = 0; attempt < 4; attempt++) {
+    set = await page.evaluate(async (t) => {
+      const { error } = await window.pfSupabase.auth.setSession({ access_token: t.access_token, refresh_token: t.refresh_token });
+      return error ? String(error.message || error) : null;
+    }, r.body);
+    if (!set || !/failed to fetch|network|timeout/i.test(set)) break;
+    await page.waitForTimeout(2000);
+  }
   if (set) throw new Error("signedInSession: setSession failed — " + set);
 }
 
@@ -64,14 +75,25 @@ export async function proveSignedIn(page) {
   }, FIXTURE_SITE_ID);
 }
 
-export async function openSignedIn({ base = "https://planyr.io", viewport = { width: 1440, height: 900 }, contextOptions = {} } = {}) {
+/* engine: "chromium" (default) or "webkit". device: a Playwright descriptor name, e.g. "iPhone 15" — its viewport /
+ * touch / UA / scale factor become the context options (an explicit contextOptions still wins). WebKit is
+ * installed on demand (initScripts: [[fn, arg], …] run in every page before it loads): `npx playwright install webkit` (docs/PHONE-TESTING.md); a missing build is a LOUD throw. */
+export async function openSignedIn({ base = "https://planyr.io", viewport = { width: 1440, height: 900 }, contextOptions = {}, engine = "chromium", device = null, initScripts = [] } = {}) {
+  if (device && !devices[device]) throw new Error("signedInSession: unknown device descriptor " + device);
+  if (device) { contextOptions = { ...devices[device], ...contextOptions }; viewport = undefined; }
   const key = process.env.E2E_LOGIN_KEY, email = process.env.E2E_EMAIL, pw = process.env.E2E_PASSWORD;
   if (!key && !(email && pw)) throw new Error("signedInSession: set E2E_LOGIN_KEY (preferred) or E2E_EMAIL / E2E_PASSWORD");
   // Pinned-revision mismatch in this sandbox: fall back to the pre-installed Chromium (never download).
-  const exe = existsSync(chromium.executablePath()) ? undefined : "/opt/pw-browsers/chromium";
-  const browser = await chromium.launch({ executablePath: exe, args: ["--no-sandbox"] }); // no ignore-cert flags, ever
+  let browser;
+  if (engine === "webkit") {
+    browser = await webkit.launch(); // no ignore-cert flags, ever
+  } else {
+    const exe = existsSync(chromium.executablePath()) ? undefined : "/opt/pw-browsers/chromium";
+    browser = await chromium.launch({ executablePath: exe, args: ["--no-sandbox"] }); // no ignore-cert flags, ever
+  }
   try {
-    const context = await browser.newContext({ viewport, ...contextOptions }); // contextOptions: e.g. a Playwright device descriptor (isMobile/hasTouch) for a phone check
+    const context = await browser.newContext({ ...(viewport ? { viewport } : {}), ...contextOptions }); // contextOptions: e.g. a Playwright device descriptor (isMobile/hasTouch) for a phone check
+    for (const [fn, arg] of initScripts) await context.addInitScript(fn, arg); // before any navigation (e.g. the iOS keyboard model)
     const page = await context.newPage();
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));

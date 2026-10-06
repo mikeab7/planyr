@@ -78,7 +78,9 @@ export function useToasts() {
   const [toasts, setToasts] = useState([]);
   const push = useCallback((t) => setToasts((l) => pushToastPure(l, t)), []);
   const dismiss = useCallback((id) => setToasts((l) => l.filter((t) => t.id !== id)), []);
-  return { toasts, pushToast: push, dismissToast: dismiss };
+  // Withdraw a toast by its `dedupeKey` (a notice whose condition has ended must not outlive it).
+  const dismissByKey = useCallback((key) => setToasts((l) => (l.some((t) => t && t.dedupeKey === key) ? l.filter((t) => !t || t.dedupeKey !== key) : l)), []);
+  return { toasts, pushToast: push, dismissToast: dismiss, dismissByKey };
 }
 
 // One toast row. Its lifetime timer PAUSES while hovered (hover-hold) and resumes with the
