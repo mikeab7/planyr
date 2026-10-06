@@ -31,6 +31,9 @@
  *     three cannot be put in a menu, so it is treated as non-collapsible (it never moves).
  *   - `ghost` — reserves its place while unavailable (visibility:hidden), absent from the menu; it is the
  *     first thing to give up room. Used where a control mounts late and must not shift its neighbours.
+ *   - `settled` (default true) — a toolbar whose items are still a fallback placeholder (the Schedule bar before the
+ *     embedded scheduler's first real report) passes false; it is published as `data-toolbar-settled` so a width
+ *     sweep measures the REAL bar, never the placeholder (the width sweep once read it mid-handoff).
  *   - Menu-open state is owned here, so focus is handed to the first row on open, returned to the More
  *     button on Escape/select, and an item moving between bar and menu mid-resize never takes focus with it.
  */
@@ -62,7 +65,7 @@ function menuRowsOf(it) {
   return [];
 }
 
-export default function PriorityToolbar({ name, items, gap = TOOLBAR_GAP, moreLabel = "More actions", style, budget: budgetProp, align = "center" }) {
+export default function PriorityToolbar({ name, items, gap = TOOLBAR_GAP, moreLabel = "More actions", style, budget: budgetProp, align = "center", settled = true }) {
   const ctx = useContext(ToolbarBudgetContext);
   const rootRef = useRef(null);
   const measureRef = useRef(null);
@@ -168,7 +171,9 @@ export default function PriorityToolbar({ name, items, gap = TOOLBAR_GAP, moreLa
       data-priority-toolbar={name}
       data-chrome-toolbar=""
       data-all-ids={allIds.join(",")}
+      data-ghost-ids={norm.filter((it) => it.ghost).map((it) => it.id).join(",")} /* a ghost is absent from the bar AND the menu by contract (state-dependent: nothing to show yet) — the width sweep must not call it dropped */
       data-menu-ids={menuIds.join(",")}
+      data-toolbar-settled={settled ? "true" : "false"}
       data-icon-ids={plan ? plan.iconIds.join(",") : ""}
       style={{ position: "relative", display: "flex", alignItems: align, gap, flex: "0 0 auto", minWidth: 0, ...style }}
     >

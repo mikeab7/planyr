@@ -6,90 +6,90 @@
   "surfaces": {
     "map-landing": {
       "light": {
-        "approvedAt": "2026-10-04",
-        "approvedCommit": "c83f7718",
-        "note": "locate button: crosshair replaced by navigation arrow (B2020273)"
+        "approvedAt": "2026-10-06",
+        "approvedCommit": "3ed0765b",
+        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
       },
       "dark": {
-        "approvedAt": "2026-10-04",
-        "approvedCommit": "c83f7718",
-        "note": "locate button: crosshair replaced by navigation arrow (B2020273)"
+        "approvedAt": "2026-10-06",
+        "approvedCommit": "3ed0765b",
+        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-04",
-        "approvedCommit": "c83f7718",
-        "note": "locate button: crosshair replaced by navigation arrow (B2020273)"
+        "approvedAt": "2026-10-06",
+        "approvedCommit": "3ed0765b",
+        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-04",
-        "approvedCommit": "c83f7718",
-        "note": "locate button: crosshair replaced by navigation arrow (B2020273)"
+        "approvedAt": "2026-10-06",
+        "approvedCommit": "3ed0765b",
+        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
       }
     },
     "site-planner-header": {
       "light": {
-        "approvedAt": "2026-09-29",
-        "approvedCommit": "490b1b9d",
-        "note": "B1978048: state/country outlines now drawn on our own canvas at exact sub-pixel positions (Leaflet's renderer rounded every vertex to whole pixels), so hairline antialiasing shifts on every outline pixel; Medellin drops out where it collides with Bogota (same-tier ties now break by name, order-independent). Verified by diff image: outlines + that one label only, nothing else moved."
+        "approvedAt": "2026-10-06",
+        "approvedCommit": "3ed0765b",
+        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
       },
       "dark": {
-        "approvedAt": "2026-09-29",
-        "approvedCommit": "490b1b9d",
-        "note": "B1978048: state/country outlines now drawn on our own canvas at exact sub-pixel positions (Leaflet's renderer rounded every vertex to whole pixels), so hairline antialiasing shifts on every outline pixel; Medellin drops out where it collides with Bogota (same-tier ties now break by name, order-independent). Verified by diff image: outlines + that one label only, nothing else moved."
+        "approvedAt": "2026-10-06",
+        "approvedCommit": "3ed0765b",
+        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
       },
       "light--phone": {
-        "approvedAt": "2026-09-29",
-        "approvedCommit": "490b1b9d",
-        "note": "B1978048: state/country outlines now drawn on our own canvas at exact sub-pixel positions (Leaflet's renderer rounded every vertex to whole pixels), so hairline antialiasing shifts on every outline pixel; Medellin drops out where it collides with Bogota (same-tier ties now break by name, order-independent). Verified by diff image: outlines + that one label only, nothing else moved."
+        "approvedAt": "2026-10-06",
+        "approvedCommit": "3ed0765b",
+        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
       },
       "dark--phone": {
-        "approvedAt": "2026-09-29",
-        "approvedCommit": "490b1b9d",
-        "note": "B1978048: state/country outlines now drawn on our own canvas at exact sub-pixel positions (Leaflet's renderer rounded every vertex to whole pixels), so hairline antialiasing shifts on every outline pixel; Medellin drops out where it collides with Bogota (same-tier ties now break by name, order-independent). Verified by diff image: outlines + that one label only, nothing else moved."
+        "approvedAt": "2026-10-06",
+        "approvedCommit": "3ed0765b",
+        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
       }
     },
     "site-planner-left-rail": {
       "light": {
-        "approvedAt": "2026-09-30",
-        "approvedCommit": "0b47a6ea",
-        "note": "Flat left-rail panels (B1996464): one header row, no inner card, label/value status rows"
+        "approvedAt": "2026-10-06",
+        "approvedCommit": "3ed0765b",
+        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
       },
       "dark": {
-        "approvedAt": "2026-09-30",
-        "approvedCommit": "0b47a6ea",
-        "note": "Flat left-rail panels (B1996464): one header row, no inner card, label/value status rows"
+        "approvedAt": "2026-10-06",
+        "approvedCommit": "3ed0765b",
+        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
       },
       "light--phone": {
-        "approvedAt": "2026-09-30",
-        "approvedCommit": "0b47a6ea",
-        "note": "Flat left-rail panels (B1996464): one header row, no inner card, label/value status rows"
+        "approvedAt": "2026-10-06",
+        "approvedCommit": "3ed0765b",
+        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
       },
       "dark--phone": {
-        "approvedAt": "2026-09-30",
-        "approvedCommit": "0b47a6ea",
-        "note": "Flat left-rail panels (B1996464): one header row, no inner card, label/value status rows"
+        "approvedAt": "2026-10-06",
+        "approvedCommit": "3ed0765b",
+        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
       }
     },
     "library": {
       "light": {
-        "approvedAt": "2026-09-29",
-        "approvedCommit": "490b1b9d",
-        "note": "B1978048: state/country outlines now drawn on our own canvas at exact sub-pixel positions (Leaflet's renderer rounded every vertex to whole pixels), so hairline antialiasing shifts on every outline pixel; Medellin drops out where it collides with Bogota (same-tier ties now break by name, order-independent). Verified by diff image: outlines + that one label only, nothing else moved."
+        "approvedAt": "2026-10-06",
+        "approvedCommit": "3ed0765b",
+        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
       },
       "dark": {
-        "approvedAt": "2026-09-29",
-        "approvedCommit": "490b1b9d",
-        "note": "B1978048: state/country outlines now drawn on our own canvas at exact sub-pixel positions (Leaflet's renderer rounded every vertex to whole pixels), so hairline antialiasing shifts on every outline pixel; Medellin drops out where it collides with Bogota (same-tier ties now break by name, order-independent). Verified by diff image: outlines + that one label only, nothing else moved."
+        "approvedAt": "2026-10-06",
+        "approvedCommit": "3ed0765b",
+        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
       },
       "light--phone": {
-        "approvedAt": "2026-09-29",
-        "approvedCommit": "490b1b9d",
-        "note": "B1978048: state/country outlines now drawn on our own canvas at exact sub-pixel positions (Leaflet's renderer rounded every vertex to whole pixels), so hairline antialiasing shifts on every outline pixel; Medellin drops out where it collides with Bogota (same-tier ties now break by name, order-independent). Verified by diff image: outlines + that one label only, nothing else moved."
+        "approvedAt": "2026-10-06",
+        "approvedCommit": "3ed0765b",
+        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
       },
       "dark--phone": {
-        "approvedAt": "2026-09-29",
-        "approvedCommit": "490b1b9d",
-        "note": "B1978048: state/country outlines now drawn on our own canvas at exact sub-pixel positions (Leaflet's renderer rounded every vertex to whole pixels), so hairline antialiasing shifts on every outline pixel; Medellin drops out where it collides with Bogota (same-tier ties now break by name, order-independent). Verified by diff image: outlines + that one label only, nothing else moved."
+        "approvedAt": "2026-10-06",
+        "approvedCommit": "3ed0765b",
+        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
       }
     }
   }

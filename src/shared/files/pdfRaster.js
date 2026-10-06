@@ -14,6 +14,7 @@
  */
 import * as pdfjsLib from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { effectiveRasterDpi, renderPageToCanvas } from "../overlay/overlayRaster.js";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -53,9 +54,9 @@ export async function pdfPageCount(fileOrBuffer) {
  *  `opts.maxLongEdgePx` — optional, additive, unused by the OCR caller: caps the RENDER DPI down
  *  (never up) so the rendered page's long edge never exceeds this many pixels — a large sheet
  *  (e.g. a 24x36" civil site plan) renders at a lower effective DPI instead of an oversized
- *  raster nobody's screen can show. See shared/sitePlans/lib/overlayRasterSize.js, whose
- *  `effectiveRasterDpi` this mirrors — kept separate rather than imported, because this module
- *  must not import anything outside `shared/files/` (see its own OCR-only header). */
+ *  raster nobody's screen can show. The cap itself is
+ *  shared/overlay/overlayRaster.js's `effectiveRasterDpi` — the ONE copy (NEW-1; this used to mirror
+ *  it by hand). That module is pure (no pdf.js, no DOM), so importing it costs the OCR path nothing. */
 export async function renderPdfPageToImageData(fileOrBuffer, pageNum, opts = {}) {
   const targetDpi = opts.targetDpi ?? 300;
   // pdf.js transfers (detaches) the buffer it is given — pass a private copy so the caller can reuse theirs.
@@ -64,22 +65,12 @@ export async function renderPdfPageToImageData(fileOrBuffer, pageNum, opts = {})
   try {
     const page = await pdf.getPage(pageNum);
     const base = page.getViewport({ scale: 1 });
-    let dpi = targetDpi;
-    if (opts.maxLongEdgePx) {
-      const longEdgePt = Math.max(base.width, base.height);
-      const capDpi = (opts.maxLongEdgePx / longEdgePt) * PDF_BASE_DPI;
-      dpi = Math.min(targetDpi, capDpi);
-    }
+    const dpi = opts.maxLongEdgePx
+      ? effectiveRasterDpi(base.width, base.height, { baseDpi: targetDpi, maxLongEdgePx: opts.maxLongEdgePx })
+      : targetDpi;
     const scale = dpi / PDF_BASE_DPI;
-    const viewport = page.getViewport({ scale });
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(viewport.width));
-    canvas.height = Math.max(1, Math.round(viewport.height));
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
     // white background — a scanned page's margin, and what adaptiveThreshold expects outside ink
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    await page.render({ canvasContext: ctx, viewport, canvas }).promise;
+    const { canvas, ctx } = await renderPageToCanvas(page, scale, { dims: "round", background: "#fff", readback: true });
     const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     // release the canvas's backing store now that its pixels are copied out (releaseCanvas.js
     // precedent, site-planner lib) — this module is called once per page across a whole PDF, so a

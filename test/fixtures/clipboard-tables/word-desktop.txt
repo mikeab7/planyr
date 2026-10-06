@@ -1,0 +1,5 @@
+Unit	Area (SF)	Notes
+A-100	12,500	Dock high and cross-docked
+A-200		Line one
+Line two
+B-300 (merged across two columns)		Survey

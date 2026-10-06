@@ -58,12 +58,12 @@ async function buildingWithProps(page) {
   return centre;
 }
 
-/** The inspector's Depth (ft) number input — the field the owner was editing. */
+/** The inspector's Depth number input — the field the owner was editing. */
 async function depthField(page) {
   const h = await page.evaluateHandle(() => {
     for (const row of document.querySelectorAll("div")) {
       const label = row.firstElementChild;
-      if (label && label.tagName === "SPAN" && (label.textContent || "").trim() === "Depth (ft)") {
+      if (label && label.tagName === "SPAN" && (label.textContent || "").trim() === "Depth") {
         const input = row.querySelector("input");
         if (input) return input;
       }
@@ -71,7 +71,7 @@ async function depthField(page) {
     return null;
   });
   const el = h.asElement();
-  expect(el, "the ELEMENT · BUILDING inspector has no Depth (ft) input").not.toBeNull();
+  expect(el, "the ELEMENT · BUILDING inspector has no Depth input").not.toBeNull();
   return el;
 }
 
@@ -160,7 +160,7 @@ test.describe("a key typed in an inspector field never reaches the plan (logged 
     /* The Dock zones ＋ — an ordinary panel control that is not a value row. This is the exact flow
      * the second, over-broad cut of the fix broke, and it is a flow this repo already tests
      * (e2e/delete-unconditional.spec.js "a building takes its whole bonded assembly with it"). */
-    await page.getByText("Dock zones", { exact: true }).first().locator("xpath=..").getByRole("button").last().click();
+    await page.getByTestId("add-dock-zone").click();
     await page.waitForTimeout(400);
     await page.keyboard.press("Escape");   // close the inspector; the building stays selected
     await page.keyboard.press("Delete");

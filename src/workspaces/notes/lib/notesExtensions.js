@@ -137,6 +137,23 @@ function deriveBlockSizes(doc, tr) {
  * `view.domAtPos`, and `ignoreMutation`, also unchanged, is what stops ProseMirror's mutation
  * observer from fighting that preview mid-drag). */
 const NoteTable = Table.extend({
+  /* ⛔ `keep` — "THIS ONE-COLUMN TABLE IS DATA" (NEW-1, OneNote paste). The paste path unwraps a
+   * single-column table into plain lines because that is what an Outlook signature's layout
+   * scaffolding is (`isLayoutTable`, notesPastePlain.js). A bordered one-column table — OneNote's
+   * checklist — is a real table and was being flattened with it. Set by `normalizeTableMarkup` from
+   * the clipboard's own markup, round-tripped through `data-planyr-keep-table` so copy/paste inside
+   * Notes keeps it too. Default false and absent from the stored JSON's meaning: nothing existing
+   * changes. */
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      keep: {
+        default: false,
+        parseHTML: (el) => el.hasAttribute("data-planyr-keep-table"),
+        renderHTML: (attrs) => (attrs.keep ? { "data-planyr-keep-table": "1" } : {}),
+      },
+    };
+  },
   addNodeView() {
     return ({ node, view, HTMLAttributes }) => {
       const mergedAttributes = mergeAttributes(this.options.HTMLAttributes, HTMLAttributes);

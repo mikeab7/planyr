@@ -20,6 +20,7 @@
  * called `image.png`. Both plugins see the same drop; the image plugin is asked first
  * (lib/notesExtensions.js orders them), and this one takes what is left.
  */
+import { tableOwnsClipboard } from "./notesTablePaste.js";
 import { Node, mergeAttributes } from "@tiptap/core";
 import { Plugin, PluginKey, NodeSelection, Selection } from "@tiptap/pm/state";
 import { newId } from "./notesModel.js";
@@ -242,6 +243,10 @@ export const NoteAttachment = Node.create({
       key: new PluginKey("noteAttachmentIntake"),
       props: {
         handlePaste(view, event) {
+          /* ⛔ A TABLE OUTRANKS THE PICTURE BESIDE IT (NEW-1). Excel — and some OneNote builds — put a
+           * PNG of the cells on the clipboard next to the HTML table; claiming "any image file" here
+           * pasted a screenshot of the table instead of the table. See notesTablePaste.js. */
+          if (tableOwnsClipboard(event.clipboardData)) return false;
           const split = splitFiles(event.clipboardData);
           if (!claims(split)) return false;
           event.preventDefault();

@@ -14280,12 +14280,38 @@ function depCellFullTitle(items, renderLabel, renderName, extraNote) {
   const list = items.map(item => `${renderLabel(item)} · ${renderName(item)}`).join("\n");
   return extraNote ? `${list}\n\n${extraNote}` : list;
 }
+// B2132257 — the owner's answer: two lines at every normal width, ONE line only when this column is
+// too narrow for the two-line form to read. Driven by the cell's OWN measured width (a ResizeObserver on
+// the cell, never the window), so Split's grid pane and a user-resized column behave the same. The
+// two-line form needs the label's hanging indent (up to ~38px for "20FS+360d") PLUS a readable run of
+// name on the continuation line; below ~110px that run is a word or two, and "24 · Find and send…" on
+// one line reads better. The default column is 148px, so it stays two-line. Hysteresis (enter one-line
+// under 110, leave it only at 126 or wider) stops a cell flickering when a drag parks on the boundary.
+const DEPCELL_ONE_LINE_BELOW = 110;
+const DEPCELL_TWO_LINE_AT = 126;
+function depCellNarrowNext(prevNarrow, width) {
+  if (!(width > 0)) return prevNarrow;               // not laid out yet — keep what we had
+  if (width < DEPCELL_ONE_LINE_BELOW) return true;
+  if (width >= DEPCELL_TWO_LINE_AT) return false;
+  return prevNarrow;                                  // inside the dead band: hold
+}
 function DepCell({items, renderLabel, renderName, s, title, flagged}) {
   const [hovered, setHovered] = useState(false);
   const [pos, setPos] = useState({top:0, left:0, width:0});
+  const [narrow, setNarrow] = useState(false);
+  const [cellEl, setCellEl] = useState(null);
   const ref = useRef(null);
+  const setRef = useCallback(el => { ref.current = el; setCellEl(el); }, []);
+  React.useLayoutEffect(() => {
+    if (!cellEl) return;
+    const measure = () => setNarrow(prev => depCellNarrowNext(prev, cellEl.offsetWidth));
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(measure); ro.observe(cellEl);
+    return () => ro.disconnect();
+  }, [cellEl]);
   const canTwoLine = (s.height || 0) >= DEPCELL_TWO_LINE_MIN_H;
-  const visibleCount = canTwoLine ? 2 : 1;
+  const visibleCount = canTwoLine && !narrow ? 2 : 1;
   const extra = items.length - visibleCount;
 
   const onEnter = () => {
@@ -14295,13 +14321,13 @@ function DepCell({items, renderLabel, renderName, s, title, flagged}) {
     setHovered(true);
   };
 
-  if (!items.length) return <span style={{...s}} />;
+  if (!items.length) return <span ref={setRef} style={{...s}} />;
 
   const fullTitle = depCellFullTitle(items, renderLabel, renderName, title);
 
   // Exactly one link, with room for a second line: let the name WRAP into the otherwise-unused
   // second line instead of ellipsizing on line 1 while line 2 sits empty.
-  if (items.length === 1 && canTwoLine) {
+  if (items.length === 1 && canTwoLine && !narrow) {
     const item = items[0];
     // B655552 (round 3) — a HANGING INDENT: without it, a wrapped continuation line starts flush
     // left under the ID/lag label, so it visually reads as a second entry rather than the tail of
@@ -14319,7 +14345,7 @@ function DepCell({items, renderLabel, renderName, s, title, flagged}) {
     const indent = _cpMeasure(prefixText, `500 ${DEPCELL_FONT_SIZE}px 'Inter', system-ui, sans-serif`)
       + _cpMeasure(" · ", `${DEPCELL_FONT_SIZE}px 'Inter', system-ui, sans-serif`);
     return (
-      <div ref={ref} title={fullTitle} style={{...s, alignItems:"flex-start", padding:"0 8px", whiteSpace:"normal"}}>
+      <div ref={setRef} data-dep-lines="2" title={fullTitle} style={{...s, alignItems:"flex-start", padding:"0 8px", whiteSpace:"normal"}}>
         <span style={{display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical",
           overflow:"hidden", maxHeight:DEPCELL_LINE_H*2, lineHeight:`${DEPCELL_LINE_H}px`, fontSize:DEPCELL_FONT_SIZE, fontFamily:"'Inter',system-ui,sans-serif",
           whiteSpace:"normal", width:"100%", minWidth:0, wordBreak:"break-word",
@@ -14335,8 +14361,8 @@ function DepCell({items, renderLabel, renderName, s, title, flagged}) {
 
   return (
     <>
-      <div ref={ref} title={fullTitle}
-        style={{...s, flexDirection:"column", alignItems:"flex-start", justifyContent:"flex-start", gap:0, padding:"0 8px"}}
+      <div ref={setRef} title={fullTitle} data-dep-lines={narrow ? "1" : "2"}
+        style={{...s, flexDirection:"column", alignItems:"flex-start", justifyContent: narrow ? "center" : "flex-start", gap:0, padding:"0 8px"}}
         onMouseEnter={onEnter} onMouseLeave={() => setHovered(false)}>
         {slots.map((item, i) => (
           <div key={i} style={{display:"flex", alignItems:"baseline", gap:3, overflow:"hidden", width:"100%", lineHeight:`${DEPCELL_LINE_H}px`, minHeight:DEPCELL_LINE_H}}>

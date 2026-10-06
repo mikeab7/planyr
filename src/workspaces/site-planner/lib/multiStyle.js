@@ -17,18 +17,19 @@ import { ptsOf } from "../../../shared/markup/markupModel.js";
 const CLOSED_MARKUP = new Set(["rect", "ellipse", "polygon", "cloud"]);
 
 // A stable display order for the shared controls (opacity first — it's the driver).
-const CAP_ORDER = ["fillOpacity", "fill", "stroke", "weight", "dash"];
+const CAP_ORDER = ["fillOpacity", "fill", "strokeOpacity", "stroke", "weight", "strokeWidth", "dash"];
 
 /**
  * The style properties a single selected item can have edited in the shared panel.
- * - el: fill / stroke / fillOpacity are the ONLY per-element overrides (weight is a
- *   type-level token, so it isn't editable per element and never enters the set).
+ * - el: fill / stroke / fillOpacity plus the NEW-8 outline pair strokeOpacity / strokeWidth are the
+ *   per-element overrides (`weight` stays a type-level token on an el; an el's per-element outline
+ *   width is `strokeWidth`, so a markup's `weight` and an el's `strokeWidth` never intersect).
  * - markup: stroke / weight / dash always; fill / fillOpacity only on a closed shape.
  * - anything else (measure, callout): no shared style properties.
  */
 export function styleCapsOf(item, kind) {
   if (!item) return [];
-  if (kind === "el") return ["fill", "stroke", "fillOpacity"];
+  if (kind === "el") return ["fill", "stroke", "fillOpacity", "strokeOpacity", "strokeWidth"];
   if (kind === "markup") {
     const base = ["stroke", "weight", "dash"];
     return CLOSED_MARKUP.has(item.kind) ? [...base, "fill", "fillOpacity"] : base;
@@ -44,6 +45,8 @@ function valueOf(item, kind, prop, settings) {
     if (prop === "fill") return st.fill;
     if (prop === "stroke") return st.stroke;
     if (prop === "fillOpacity") return st.fillOpacity;
+    if (prop === "strokeOpacity") return st.strokeOpacity;
+    if (prop === "strokeWidth") return st.strokeWidth;
     return undefined;
   }
   if (kind === "markup") {
@@ -61,7 +64,7 @@ function valueOf(item, kind, prop, settings) {
 // and "#aabbcc" match), numbers coerced, dash left as its string.
 function normVal(prop, v) {
   if (prop === "fill" || prop === "stroke") return toHex6(v || "").toLowerCase();
-  if (prop === "fillOpacity" || prop === "weight") return Number(v);
+  if (prop === "fillOpacity" || prop === "weight" || prop === "strokeOpacity" || prop === "strokeWidth") return Number(v);
   return v;
 }
 

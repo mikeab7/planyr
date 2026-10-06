@@ -30,7 +30,7 @@
 import { chromium } from "playwright";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
-import { pacedWait } from "./lib/tabTiming.mjs";
+import { pacedWait } from "./lib/tabTiming.mjs"; // still used inside the More-menu open/close probe (waits on a click, not on layout)
 import { collectSnapshot, auditSnapshot, auditMenu } from "./lib/widthSweep.mjs";
 
 const arg = (name) => { const a = process.argv.find((x) => x.startsWith(`--${name}=`)); return a ? a.slice(name.length + 3) : null; };
@@ -79,19 +79,51 @@ async function newContexts() {
   return { build: null, proof: null, normal: await mk(1), dsf2: await mk(2), close: () => browser.close() };
 }
 
-async function settle(page) {
-  await pacedWait(page, 350);
-  // two frames: let the layout effects + ResizeObserver cascade of a width change finish
-  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
-  await pacedWait(page, 150);
+/* SETTLED = a real signal, never a sleep. Three conditions, all read from the page itself:
+ *   1. fonts are ready (a label's width changes when web fonts land, and the toolbars re-measure then);
+ *   2. every shared toolbar reports `data-toolbar-settled="true"` — the Schedule bar renders a fallback
+ *      placeholder until the embedded scheduler's first real report, and measuring that placeholder is what made
+ *      this gate answer differently on every run (it failed 8 sizes, then 4, then 0 on one commit);
+ *   3. the chrome's own layout is IDENTICAL for STABLE_FRAMES consecutive frames (bars, menus, row boxes, control
+ *      boxes), so a ResizeObserver → plan → re-render cascade has finished, however long it takes.
+ * A page that never gets there within the ceiling is a FAILURE (`never-settled`), not a measurement. */
+const STABLE_FRAMES = 12;
+const SETTLE_CEILING_MS = 30000;
+async function settle(page, label) {
+  const verdict = await page.evaluate(({ frames, ceiling }) => new Promise((resolve) => {
+    const t0 = performance.now();
+    const sigOf = () => {
+      const r = (e) => { const b = e.getBoundingClientRect(); return `${Math.round(b.x * 10)},${Math.round(b.y * 10)},${Math.round(b.width * 10)},${Math.round(b.height * 10)}`; };
+      const parts = [window.innerWidth, window.innerHeight];
+      for (const e of document.querySelectorAll("[data-priority-toolbar]")) parts.push(e.getAttribute("data-priority-toolbar"), e.getAttribute("data-menu-ids"), e.getAttribute("data-icon-ids"), e.getAttribute("data-ghost-ids"), r(e));
+      for (const e of document.querySelectorAll("[data-header-row]")) parts.push(r(e));
+      for (const e of document.querySelectorAll("header button, header a[href], [data-chrome-toolbar] button")) parts.push(r(e));
+      return parts.join("|");
+    };
+    const unsettled = () => [...document.querySelectorAll('[data-priority-toolbar][data-toolbar-settled="false"]')].map((e) => e.getAttribute("data-priority-toolbar"));
+    const fontsReady = (document.fonts && document.fonts.ready) || Promise.resolve();
+    fontsReady.then(() => {
+      let last = null, same = 0;
+      const tick = () => {
+        const waiting = unsettled();
+        const sig = sigOf();
+        same = waiting.length === 0 && sig === last ? same + 1 : 0;
+        last = sig;
+        if (same >= frames) return resolve({ ok: true, ms: Math.round(performance.now() - t0) });
+        if (performance.now() - t0 > ceiling) return resolve({ ok: false, waiting, ms: Math.round(performance.now() - t0) });
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+  }), { frames: STABLE_FRAMES, ceiling: SETTLE_CEILING_MS });
+  if (!verdict.ok) return [{ kind: "never-settled", detail: `${label}: layout did not settle within ${verdict.ms}ms${verdict.waiting && verdict.waiting.length ? ` (toolbar still a placeholder: ${verdict.waiting.join(", ")})` : " (chrome kept moving)"}` }];
+  return [];
 }
 
 async function gotoRoute(page, route) {
   await page.goto(`${BASE}/${route.hash}`, { waitUntil: "load" });
   if (page.url().indexOf(route.hash) < 0) await page.evaluate((h) => { location.hash = h; }, route.hash);
-  const ok = await page.waitForSelector(route.ready, { state: "attached", timeout: 30000 }).then(() => true, () => false);
-  await pacedWait(page, 1500);
-  return ok;
+  return page.waitForSelector(route.ready, { state: "attached", timeout: 30000 }).then(() => true, () => false);
 }
 
 /** Open each shared toolbar's More menu, list its items, close with Escape, confirm focus came back. */
@@ -124,10 +156,10 @@ async function sweepRoute({ page }, route, heightsToRun, pass, results) {
   for (const h of heightsToRun) {
     for (const w of widths) {
       await page.setViewportSize({ width: w, height: h });
-      await settle(page);
+      const unsettled = await settle(page, `${route.id} ${w}x${h}`);
       await assertMeasurable(page, `verify-width-sweep ${route.id} ${w}x${h}`, { raf: false });
       const snap = await page.evaluate(collectSnapshot);
-      const violations = auditSnapshot(snap);
+      const violations = [...unsettled, ...auditSnapshot(snap)];
       violations.push(...(await checkMenus(page, snap)));
       // a probe that opened a menu must leave the page as it found it
       await page.keyboard.press("Escape").catch(() => {});
