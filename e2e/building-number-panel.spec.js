@@ -78,7 +78,7 @@ test.describe("NEW-1 — Properties panel Building number field", () => {
 
     // Swap: the two buildings trade numbers. Building 1 (still selected in this same panel
     // instance would be wrong to assume — re-read the model instead of trusting field state).
-    await page.getByRole("button", { name: /^Swap with Building 5$/ }).click();
+    await page.getByRole("button", { name: /^Swap with Building 5/ }).click();
     let bs = await buildingsOf(page);
     expect(numberOf(bs, b2.id)).toBe(5);
     expect(numberOf(bs, b1.id)).toBe(2); // took building 2's PRE-swap number (2), not its old "5"
@@ -92,7 +92,7 @@ test.describe("NEW-1 — Properties panel Building number field", () => {
     await field1b.fill("5");
     await field1b.press("Enter");
     await expect(page.getByText(/That number belongs to Building 5/)).toBeVisible();
-    await page.getByRole("button", { name: /^Shift 5 and up by one$/ }).click();
+    await page.getByRole("button", { name: /^Insert at 5, shift the rest up/ }).click();
     bs = await buildingsOf(page);
     expect(numberOf(bs, b1.id)).toBe(5);
     expect(numberOf(bs, b2.id)).toBe(6);

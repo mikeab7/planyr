@@ -359,7 +359,8 @@ import { calloutStyle } from "./lib/calloutStyle.js";
 import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand, isPinnedMapReference } from "./lib/overlayOrder.js";
 import { hasCrop, cropClipShapeScreen, cropTrimFeet, cropFromTrimFeet, cropKind, cropEditBlock, normalizeCropShape, recropForRaster } from "./lib/overlayCrop.js";
 import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerialVisibility.js";
-import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, dockAxisOf, healDockAxes, withDockAxis, rotateDockAxisPatch, dockSideCompassLabel } from "./lib/dockZones.js";
+import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, dockAxisOf, healDockAxes, withDockAxis, dockSideCompassLabel } from "./lib/dockZones.js";
+import { wallPickerLayout, wallClickPatch, wallClickTitle, loadingSummary, loadingTypeLabel, loadedWallsLabel, strandedBumpIds, bumpOutCap } from "./lib/loadingWalls.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors, gridLinesVisible } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent, clipSegmentToRing } from "./lib/footprintEdit.js";
 import { pondAreaLabelLine, pondAreaDeltaLine } from "./lib/pondLabelText.js";
@@ -11156,7 +11157,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Add a 5′ sidewalk flush against a building side, full wall length. If pads
   // (paving/parking) already sit on that side, push them out by the sidewalk's
   // thickness so they stay flush beyond it.
-  const addSidewalkSide = (b, name) => {
+  const addSidewalkSide = (b, name, { history = true } = {}) => {
     if (sidewalkOnSide(b, name)) return;
     // Full wall length, then folded out to the full building side if bump-outs already lengthen
     // this wall (B492) — so a sidewalk added after the bumps starts at the right length.
@@ -11165,12 +11166,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Side-parking rows are excluded: relayoutWallKids re-derives their distance out from the wall
     // against the just-added strip, so hand-shifting them here would push them out twice (NEW-3).
     const shift = new Set(els.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && !x.sideParkSide && !isWallStrip(x) && sideOfKid(b, x) === name).map((x) => x.id));
-    pushHistory();
+    if (history) pushHistory();
     setEls((a) => relayoutWallKids([...a.map((x) => shift.has(x.id) ? { ...x, cx: x.cx + out.x * SIDEWALK_W, cy: x.cy + out.y * SIDEWALK_W } : x), sw], b));
     setSel({ kind: "el", id: b.id });
   };
   const addParkingRowSide = (b, name) => {
     if (sideParkingOn(b, name)) return;
+    addBuildingEls([makeParkingRowEl(b, name, 1)], b.id);
+  };
+  // The new side-parking field for wall `name`, `rows` stall rows deep (1 = the classic one row +
+  // aisle). Pure over the current `els` (the sidewalk already on the wall sets how far out it starts).
+  const makeParkingRowEl = (b, name, rows = 1) => {
     const [nx, ny] = SIDE_N[name];
     const sw = sidewalkOnSide(b, name);
     // Offset only by the sidewalk's THICKNESS (never its run) — swThick resolves the
@@ -11178,7 +11184,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const swDepth = sw ? swThick(sw) : 0;
     // Parking row depth is a FIXED constant (one stall row + aisle) — it must never
     // be derived from adjacent or just-deleted geometry.
-    const parkDepth = settings.stallDepth + settings.aisle;
+    const parkDepth = parkDepthForRows(rows, settings.stallDepth, settings.aisle);
     // Start on the span DEFAULT — the same extended-side run the sidewalk uses (building side +
     // the projection of any corner bump-out that lengthens it). A field still sitting on that
     // default counts as UNTOUCHED and keeps tracking the host; once the user slides or resizes it
@@ -11190,9 +11196,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // strip's inner (local y=0) edge sits against the wall and carStalls lays the first
     // row there by default, so DON'T flip the depth (flipDepth would put the aisle against
     // the building). growParking then extends rows outward, away from the wall.
-    const el = { id: uid(), type: "parking", cx: b.cx + off.x, cy: b.cy + off.y, w: along, h: parkDepth,
+    return { id: uid(), type: "parking", cx: b.cx + off.x, cy: b.cy + off.y, w: along, h: parkDepth,
       rot: ((b.rot + SIDE_PARK_ANGLE[name]) % 360 + 360) % 360, attachedTo: b.id, sideParkSide: name };
-    addBuildingEls([el], b.id);
   };
   /* NEW-2 — "+" on a wall whose parking has been EXPLODED. The set is a stack of individual bands,
      so a new stall row is appended BEYOND the outermost piece rather than growing a band that has
@@ -11453,26 +11458,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     });
     setSel({ kind: "el", id: b.id });
   };
-  // "−" — pull the apron in by one ring: peel the OUTERMOST zone off EVERY dock side that has
-  // one (LIFO per side: buffer → trailer → court); cascade children; re-lay each side.
-  const removeOuterDockZone = (b) => {
-    const { dockSides } = dockSidesOf(b);
-    if (!dockSides.some((s) => stackCountIn(els, b, s) > 0)) return;
-    pushHistory();
-    const src = stateRef.current.els;
-    const rm = [];
-    // Peel the OUTERMOST element of each side's chain — an appended road/landscape goes before the
-    // buffer → trailer → court (true LIFO, B495).
-    dockSides.forEach((side) => { const chain = dockChainOnSide(src, b, side); if (chain.length) rm.push(chain[chain.length - 1].id); });
-    const killed = killSetWithChildren(src, rm); // B556/NEW-1 — tombstone each peeled zone + its bonded children
-    setEls((a) => {
-      let next = removeWithChildren(a, rm);
-      dockSides.forEach((side) => { next = relayoutSide(next, b, side); });
-      return next;
-    });
-    tombstone([...killed]);
-    setSel({ kind: "el", id: b.id });
-  };
   // Remove the outermost zone on ONE dock side (the on-canvas per-side "−"): peel the LAST element of
   // the chain (an appended road/landscape first, then buffer → trailer → court). removeFeature
   // cascades children + re-lays the side.
@@ -11555,20 +11540,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const addLayerToSides = (b, sides, key) => sides.forEach((s) => { if (layersForSide(b, s).includes(key)) addLayerOnSide(b, s, key); });
   // True if ANY / the given dock side can still grow / shrink (for enabling the +/− controls).
   const dockCanAdd = (b) => { const { dockSides } = dockSidesOf(b); return dockSides.some((s) => stackCountIn(els, b, s) < MAX_DOCK_ZONES); };
-  const dockCanRemove = (b) => { const { dockSides } = dockSidesOf(b); return dockSides.some((s) => stackCountIn(els, b, s) > 0); };
-  // Inline depth edit for zone index `i`, applied across every dock side (the stack is
-  // mirrored, so depths stay uniform); outer zones shift out via relayout.
-  const setZoneDepthAll = (b, i, newDepth) => {
-    const { dockSides } = dockSidesOf(b);
-    const nd = Math.max(1, Math.round(newDepth));
-    pushHistory();
-    setEls((a) => {
-      let next = a;
-      dockSides.forEach((side) => { const z = findZoneIn(next, b, side, i); if (z) next = next.map((x) => (x.id === z.id ? { ...x, zd: nd } : x)); });
-      dockSides.forEach((side) => { next = relayoutSide(next, b, side); });
-      return next;
-    });
-  };
   // NEW-2 (B1818257) — the single-side sibling of setZoneDepthAll: a cross-dock building's two
   // truck courts (one per dock side) are independent site elements bonded via `truckCourt.side`
   // (they always have been — `findCourtIn` is already keyed on `side`), but every edit path used
@@ -11648,9 +11619,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     } else if (sw) removeFeature(sw.id);
   };
   const empSideAddTitle = (b, side) => { const sw = empSideSidewalk(b, side), park = empSidePark(b, side); return (!sw && !park) ? "Add a 5′ sidewalk" : !park ? "Add a parking row" : "Add another parking row"; };
-  const employeeSideHasAny = (b) => carEndsSides(b).some((s) => empSideSidewalk(b, s) || empSidePark(b, s));
-  const addEmployeeParking = (b) => carEndsSides(b).forEach((s) => growEmployeeSide(b, s, +1));
-  const shrinkEmployeeParking = (b) => carEndsSides(b).forEach((s) => growEmployeeSide(b, s, -1));
   // Remove every bump-out at once (the "−" counterpart to "+ Bump-outs"; footprint modifier).
   const removeAllDogEars = (b) => {
     const des = els.filter((x) => x.attachedTo === b.id && x.dogEar);
@@ -12022,7 +11990,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * ONE derivation rather than a second copy free to drift. */
   // Edit a sidewalk's Width (thickness): grow OUTWARD (inner face stays flush to
   // the building) and slide any pads beyond it out by the same delta.
-  const setSidewalkWidth = (el, newT) => {
+  const setSidewalkWidth = (el, newT, { history = true } = {}) => {
     const b = buildingOf(el); if (!b) return;
     const side = swSide(el), isH = swThickIsH(el), oldT = isH ? el.h : el.w, dT = Math.max(1, newT) - oldT;
     if (!dT) return;
@@ -12030,7 +11998,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const l = rot2(el.cx - b.cx, el.cy - b.cy, -b.rot), s = SIDE_N[side][isH ? 1 : 0];
     const refOutPerp = s * (isH ? l.y : l.x);
     const beyond = new Set(stripsBeyond(b, side, refOutPerp, el.id).map((x) => x.id));
-    pushHistory();
+    if (history) pushHistory();
     setEls((a) => relayoutWallKids(a.map((x) => {
       if (x.id === el.id) return { ...x, ...(isH ? { h: newT } : { w: newT }), cx: x.cx + out.x * dT / 2, cy: x.cy + out.y * dT / 2 };
       if (beyond.has(x.id)) return { ...x, cx: x.cx + out.x * dT, cy: x.cy + out.y * dT };
@@ -19833,29 +19801,138 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setEls((a) => renumberBuilding(a, id, n, mode));
     setBldgNumConflict(null);
   };
-  /* NEW-2 (B385041) — TURN THE DOCK FACE A QUARTER TURN, DELIBERATELY.
-     A resize can no longer move the loaded walls by accident, so the app owes the owner a way to
-     move them ON PURPOSE. Same shape as `changeBuildingDock` above: stamp the new orientation, then
-     prune the apron the old walls owned (a truck court cannot follow its building around a corner —
-     it is a different piece of pavement), and tombstone it so it stays gone across a merge. One undo
-     frame, so a mis-click is one Ctrl+Z. */
-  const rotateBuildingDockFace = () => {
-    if (!selEl || selEl.type !== "building" || selEl.dogEar) return;
-    pushHistory();
+  /* The deliberate quarter-turn of the dock face (B385041) is now a wall click in the Loading picker —
+     `wallClickPatch` (lib/loadingWalls.js) produces the same axis patch `rotateDockAxisPatch` does, and
+     `applyBuildingLoading` below prunes + re-lays exactly as the old `turn ⟳` button did. */
+  /* NEW-4 — APPLY A LOADING CHANGE FROM THE WALL PICKER. One entry for every click, built from the
+     same moves `changeBuildingDock` / `rotateBuildingDockFace` make so zones re-lay and strand the
+     same way: stamp the patch (`dock` / `dockAxis` / `dockSide`), drop the dock-zone chains left on
+     walls that are no longer loaded (`strandedZoneIds`), drop the corner bump-outs on those walls
+     too (a building holds at most two per LOADED wall — `strandedBumpIds`), then re-lay everything
+     that is still bonded. ONE undo frame; every removed id is tombstoned so a merge can't bring it
+     back. (The old Docks dropdown and the `turn ⟳` row both end here now.) */
+  const applyBuildingLoading = (patch) => {
+    if (!selEl || selEl.type !== "building" || selEl.dogEar || !patch) return;
     const src = stateRef.current.els;
     const b = src.find((x) => x.id === selEl.id);
     if (!b) return;
-    const patch = rotateDockAxisPatch(b);
-    let next = src.map((e) => (e.id === selEl.id ? { ...e, ...patch } : e));
-    const stranded = strandedZoneIds(next, { ...b, ...patch });
-    if (stranded.length) next = next.filter((x) => !stranded.includes(x.id));
-    // Re-lay the stack onto the walls that are loaded NOW, so the docks visibly move rather than
-    // silently vanishing with their apron.
-    const nb = next.find((x) => x.id === selEl.id);
-    if (nb) next = relayoutAllSides(next, nb);
+    pushHistory();
+    const nb = { ...b, ...patch };
+    const keepSides = dockSidesFor(nb).dockSides;
+    let next = src.map((e) => (e.id === b.id ? nb : e));
+    const bumpIds = new Set(strandedBumpIds(next.filter((x) => x.attachedTo === b.id && x.dogEar), keepSides));
+    const gone = new Set([...strandedZoneIds(next, nb), ...bumpIds]);
+    const killed = next.filter((x) => gone.has(x.id) || bumpIds.has(x.forCourt)).map((x) => x.id);
+    if (killed.length) { const k = new Set(killed); next = next.filter((x) => !k.has(x.id)); }
+    const host = next.find((x) => x.id === b.id);
+    if (host) next = relayoutWallKids(relayoutAllSides(next, host), host);
     setEls(next);
-    if (stranded.length) tombstone(stranded);
+    if (killed.length) tombstone(killed);
   };
+  // NEW-5 — pull zone `i` OUT of the dock-wall stack, and everything beyond it, on EVERY loaded wall
+  // (`removeOuterDockZone` generalised from "the outermost" to "this one and outward"). The stack is
+  // a chain, so removing a middle zone would leave the ones beyond floating off the wall; the ✕ on a
+  // row therefore always means "this and everything outside it". One undo frame, whole cascade tombstoned.
+  const removeDockZonesFrom = (b, i) => {
+    const { dockSides } = dockSidesOf(b);
+    const src = stateRef.current.els;
+    const rm = [];
+    dockSides.forEach((side) => { const z = dockChainOnSide(src, b, side)[i]; if (z) rm.push(z.id); });
+    if (!rm.length) return;
+    pushHistory();
+    const killed = killSetWithChildren(src, rm);
+    setEls((a) => {
+      let next = removeWithChildren(a, rm);
+      dockSides.forEach((side) => { next = relayoutSide(next, b, side); });
+      return next;
+    });
+    tombstone([...killed]);
+    setSel({ kind: "el", id: b.id });
+  };
+  // NEW-5 — a zone's depth by its place in the OUTWARD chain (0 = truck court … then any appended
+  // layer), across every loaded wall. `setZoneDepthAll` is keyed on the three preset zones; the panel's
+  // list also carries appended layers (a landscape buffer behind the buffer, a road), so it is chain-indexed.
+  const setChainZoneDepthAll = (b, i, newDepth) => {
+    const { dockSides } = dockSidesOf(b);
+    const nd = Math.max(1, Math.round(newDepth));
+    pushHistory();
+    setEls((a) => {
+      let next = a;
+      dockSides.forEach((side) => { const z = dockChainOnSide(next, b, side)[i]; if (z) next = next.map((x) => (x.id === z.id ? { ...x, zd: nd } : x)); });
+      dockSides.forEach((side) => { next = relayoutSide(next, b, side); });
+      return next;
+    });
+  };
+  /* NEW-6 — HOW MANY PARKING ROWS the non-dock walls carry, and SET it in one commit.
+     The owner adds parking in bulk (sometimes eight rows), so typing 8 must lay out eight rows at once,
+     not eight clicks. For each non-dock wall: no parking → build one `n` rows deep (starting beyond the
+     sidewalk, if there is one); one field → resize it in place keeping its wall-side edge fixed (exactly
+     `growParking`'s geometry); 0 → remove it. ONE history entry, ONE relayout. A wall whose parking has
+     been split into pieces cannot be set by number (there is no single band to resize) — it is left
+     alone and SAID so, never silently skipped (LOUD-FAILURE). */
+  const MAX_EMP_PARK_ROWS = 24;
+  const empParkRowsOn = (b, side) => sideParkPadsOn(b, side).reduce((t, p) => t + (p.type === "parking" ? empSideRows(p) : 0), 0);
+  const empParkRows = (b) => carEndsSides(b).reduce((m, s) => Math.max(m, empParkRowsOn(b, s)), 0);
+  const setEmployeeParkingRows = (b, nRaw) => {
+    const n = Math.max(0, Math.min(MAX_EMP_PARK_ROWS, Math.round(Number(nRaw))));
+    if (!Number.isFinite(n)) return;
+    if (b.footEdit) { flashWarn("Reset the footprint to a rectangle to set end-wall parking (an angled end wall would misplace it).", 5000); return; }
+    const sides = carEndsSides(b);
+    if (!sides.length) return;
+    const src = stateRef.current.els;
+    let next = src, killIds = [], skipped = 0, changed = false;
+    sides.forEach((side) => {
+      const pads = sideParkPadsOn(b, side);
+      if (pads.length > 1) { skipped++; return; }
+      const pad = pads[0];
+      if (!pad) {
+        if (n > 0) { next = [...next, makeParkingRowEl(b, side, n)]; changed = true; }
+        return;
+      }
+      if (pad.type !== "parking") { skipped++; return; }
+      if (n === 0) { killIds.push(...killSetWithChildren(src, [pad.id])); changed = true; return; }
+      const cfg = cfgOf(pad), sd = cfg.stallDepth || settings.stallDepth, ai = cfg.aisle ?? settings.aisle;
+      if (parkRowsForDepth(pad.h, sd, ai) === n) return;
+      const newH = parkDepthForRows(n, sd, ai);
+      const yAxis = rot2(0, 1, pad.rot);
+      const outSign = (yAxis.x * (pad.cx - b.cx) + yAxis.y * (pad.cy - b.cy)) >= 0 ? 1 : -1;
+      const off = rot2(0, outSign * (newH - pad.h) / 2, pad.rot);
+      next = next.map((x) => (x.id === pad.id ? { ...x, h: newH, cx: x.cx + off.x, cy: x.cy + off.y } : x));
+      changed = true;
+    });
+    if (skipped) flashWarn("Some end-wall parking is split into separate pieces — set those with the + / − on the canvas, or merge them first.", 6000);
+    if (!changed) return;
+    pushHistory();
+    if (killIds.length) { const k = new Set(killIds); next = next.filter((x) => !k.has(x.id)); }
+    setEls(relayoutWallKids(next, b));
+    if (killIds.length) tombstone(killIds);
+    setSel({ kind: "el", id: b.id });
+  };
+  // NEW-6 — the end-wall sidewalks (one per non-dock wall that has one) and the verbs on them as ONE row.
+  const endSidewalks = (b) => carEndsSides(b).map((s) => empSideSidewalk(b, s)).filter(Boolean);
+  const setEndSidewalkWidth = (b, n) => {
+    const sws = endSidewalks(b); if (!sws.length) return;
+    pushHistory();
+    sws.forEach((sw) => setSidewalkWidth(sw, n, { history: false }));
+  };
+  const addEndSidewalks = (b) => {
+    if (b.footEdit) { flashWarn("Reset the footprint to a rectangle to add end-wall layers (an angled end wall would misplace them).", 5000); return; }
+    pushHistory();
+    carEndsSides(b).forEach((s) => addSidewalkSide(b, s, { history: false }));
+  };
+  const removeEndSidewalks = (b) => {
+    const sws = endSidewalks(b); if (!sws.length) return;
+    pushHistory();
+    const src = stateRef.current.els;
+    const killed = killSetWithChildren(src, sws.map((x) => x.id));
+    setEls((a) => relayoutWallKids(relayoutAllSides(removeWithChildren(a, sws.map((x) => x.id)), b), b)); // parking pulls back flush against the wall (NEW-3)
+    tombstone([...killed]);
+  };
+  // NEW-7 — does this building carry any per-building column-grid override? (The panel no longer
+  // edits them, but a plan saved with one must not hide it.) `resetBuildingGridOverrides` clears them.
+  const GRID_OVERRIDE_KEYS = ["speedBayOverride", "bayLengthOverride", "bayDepthOverride", "doorOCOverride"];
+  const hasGridOverrides = (b) => GRID_OVERRIDE_KEYS.some((k) => b[k] != null);
+  const resetBuildingGridOverrides = () => { pushHistory(); setSelEl(Object.fromEntries(GRID_OVERRIDE_KEYS.map((k) => [k, null]))); };
   // NEW-1 / B872 — reshape a placed rectangular building. PROMOTE it to an editable polygon
   // (`el.points`), pinning the loaded (dock) walls as fixed world-feet lines so the shared B230
   // vertex engine can angle an end wall / clip a corner while the dock frame is preserved: a dock
@@ -20483,6 +20560,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   /* ------------ element colors / defaults (Bluebeam-style Properties) ------------ */
   const curStyle = selEl ? elStyle(styleHostOf(selEl), settings) : null;
+  // NEW-1/NEW-7/NEW-8 — a real (rectangular or reshaped) building gets the redesigned inspector: the
+  // header carries its number, lock and ⋯ menu, and Footprint / Loading / Structure / Appearance are Collapse sections.
+  const bldgPanel = !multiStyleable && !!selEl && isBuilding(selEl) && (!selEl.points || !!selEl.footEdit);
+  // NEW-8 — the two outline props the Appearance rows edit (outline opacity, outline width), shared by
+  // the building's Appearance, the pond's, the parking Display group and the generic Properties section.
+  const strokeOpacityCell = curStyle ? <PercentField value={curStyle.strokeOpacity} min={0} onCommit={(v) => { pushHistory(); setSelEl({ strokeOpacity: v }); }} inputStyle={numInput} ariaLabel="Outline opacity" /> : null;
+  const fillOpacityCell = curStyle ? <PercentField value={curStyle.fillOpacity} min={10} onCommit={(v) => { pushHistory(); setSelEl({ fillOpacity: v }); }} inputStyle={numInput} ariaLabel="Fill opacity" /> : null;
+  const strokeWidthRow = curStyle ? (
+    <PairedField label="Width"
+      left={<span style={{ display: "flex", alignItems: "center", gap: SPACE.xxs, minWidth: 0 }}>
+        <NumInput style={{ ...numInput, width: "100%", minWidth: 0 }} value={curStyle.strokeWidth} min={0.5} max={12} step={0.5} coarse={2} ariaLabel="Outline width"
+          onCommit={(n) => { pushHistory(); setSelEl({ strokeWidth: Math.max(0.5, Math.min(12, n)) }); }} />
+        <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", flex: "none" }}>px</span>
+      </span>}
+    />
+  ) : null;
   // B740 — the styleable members of a multi-selection (els resolved to their style host), and the
   // COMMON editable style across them (each property uniform-value-or-"mixed"). Non-styleable refs
   // (measures) are simply ignored so the user can still restyle the buildings/strips in the set.
@@ -20723,11 +20816,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Make the selected element's current colors the default for its type — and say so (B653).
   const setStyleDefault = () => {
     if (!selEl || !curStyle) return;
-    setTypeStyle(selEl.type, { fill: curStyle.fill, stroke: curStyle.stroke, fillOpacity: curStyle.fillOpacity });
+    setTypeStyle(selEl.type, { fill: curStyle.fill, stroke: curStyle.stroke, fillOpacity: curStyle.fillOpacity, strokeOpacity: curStyle.strokeOpacity, strokeWidth: curStyle.strokeWidth });
     flashWarn(`Saved to Standards — new ${(TYPE[selEl.type]?.label || "Element").split(" / ")[0].toLowerCase()} elements start with these colors.`, 4000);
   };
   // Drop the selected element's per-element overrides (back to the type default).
-  const clearElStyle = () => { if (!selEl) return; pushHistory(); const tid = styleHostOf(selEl).id; setEls((a) => a.map((e) => { if (e.id !== tid) return e; const { fill, stroke, fillOpacity, ...rest } = e; return rest; })); };
+  const clearElStyle = () => { if (!selEl) return; pushHistory(); const tid = styleHostOf(selEl).id; setEls((a) => a.map((e) => { if (e.id !== tid) return e; return withoutStyleOverrides(e); })); };
 
   /* ---- B740: shared style editing across a multi-selection ----
    * Fan a style patch across EVERY selected element / markup in one setEls/setMarkups (so the
@@ -20747,7 +20840,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // A discrete commit (dash select, weight commit, Reset): exactly one undo frame.
   const applyMultiStyle = (patch) => { pushHistory(); liveMultiStyle(patch); };
   // Drop per-element overrides across every selected element (multi "Reset" → back to type defaults).
-  const clearMultiElStyle = () => { const ids = multiElHostIds(); if (!ids.size) return; pushHistory(); setEls((a) => a.map((e) => { if (!ids.has(e.id)) return e; const { fill, stroke, fillOpacity, ...rest } = e; return rest; })); };
+  const clearMultiElStyle = () => { const ids = multiElHostIds(); if (!ids.size) return; pushHistory(); setEls((a) => a.map((e) => { if (!ids.has(e.id)) return e; return withoutStyleOverrides(e); })); };
   // Opacity slider drag = ONE undo frame (a <input type=range> has no focus/input split like a
   // color picker): snapshot lazily on the first change of a drag, reset on pointer-down. Shared
   // ref is safe because only one slider can be dragged at a time. `apply(e)` is a NO-history
@@ -22707,6 +22800,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       {...colorCtl((v) => draftTypeStd(k, { fill: v }), false)} />
                     <ColorField title="Line" value={toHex6(st.stroke)} seed={COLOR_SEED} style={{ width: 30, height: 24 }}
                       {...colorCtl((v) => draftTypeStd(k, { stroke: v }), false)} />
+                    {/* NEW-8 — the type's default OUTLINE opacity and width, beside its two colours. */}
+                    <NumInput style={{ ...numInput, width: 44 }} ariaLabel={`${TYPE[k].label.split(" / ")[0]} outline opacity (%)`} value={Math.round((st.strokeOpacity ?? 1) * 100)} min={0} max={100} step={5}
+                      onCommit={(n) => draftTypeStd(k, { strokeOpacity: Math.max(0, Math.min(100, Math.round(n))) / 100 })} />
+                    <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)" }}>%</span>
+                    <NumInput style={{ ...numInput, width: 44 }} ariaLabel={`${TYPE[k].label.split(" / ")[0]} outline width (px)`} value={st.strokeWidth ?? st.weight ?? 1} min={0.5} max={12} step={0.5} coarse={2}
+                      onCommit={(n) => draftTypeStd(k, { strokeWidth: Math.max(0.5, Math.min(12, n)) })} />
+                    <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)" }}>px</span>
                   </div>
                 </div>
               );
@@ -22714,7 +22814,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {/* NEW-2 — a reset is a draft edit like any other (a null per key = "clear it"), so it
                 previews immediately but still goes through one of the footer's three actions. */}
             <button style={{ ...chip, marginTop: 4, color: PAL.accent }}
-              onClick={() => setStdDraft({ ...stdDraft, typeStyles: Object.fromEntries(Object.keys(TYPE).map((t) => [t, { fill: null, stroke: null }])) })}>Reset all to built-in</button>
+              onClick={() => setStdDraft({ ...stdDraft, typeStyles: Object.fromEntries(Object.keys(TYPE).map((t) => [t, { fill: null, stroke: null, strokeOpacity: null, strokeWidth: null }])) })}>Reset all to built-in</button>
           </Section>
           </div>
 
@@ -23154,7 +23254,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         <path data-testid="road-network-surface" data-export="road-network" d={r.d} fillRule="evenodd"
           fill={r.st.fill} fillOpacity={r.st.fillOpacity ?? 1} stroke="none" />
         <path data-testid="road-network-edge" d={r.edgeD || r.d} fillRule="evenodd" fill="none"
-          stroke={r.st.stroke} strokeWidth={curbStrokePx(roadCurbWidth(styleEl || {}), r.ppf, CURB_STROKE_MIN_PX * labelK)}
+          stroke={r.st.stroke} strokeOpacity={r.st.strokeOpacity} strokeWidth={r.st.strokeWidthSet ?? curbStrokePx(roadCurbWidth(styleEl || {}), r.ppf, CURB_STROKE_MIN_PX * labelK)}
           strokeLinejoin="round" />
         {/* NEW-5 — the CENTRAL ISLAND: a real hole in the dissolved region, not a disc drawn on
             top, so the landscaped surface shows THROUGH it — painted with this region's own group. */}
@@ -26410,6 +26510,54 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               the inspector is open. */}
           {(companionOpen || propsTab) && companionSel && (
           <div data-testid="property-panel" style={{ flex: (narrow && leftPanel && !propsTab) ? "0 1 auto" : "1 1 auto", maxHeight: (narrow && leftPanel && !propsTab) ? "45%" : "none", minHeight: 0, overflowY: "auto", padding: "13px 13px 12px", borderBottom: (narrow && leftPanel && !propsTab) ? BORDER_1 : "none" }}>
+          {bldgPanel && (() => {
+            // NEW-1 — the building inspector's header: [icon] Building [ number ]   lock · ⋯ · ✕, then ONE
+            // summary line. The number is the ONLY place a building's assigned number can be edited (the
+            // on-canvas label stays display-only); its conflict dialog is rendered by the body below.
+            // The old "📌 Pin" chip at the bottom is this padlock now (the owner did not know what Pin was).
+            const b = selEl;
+            const props = effectiveBuildingProps(b, buildingSqft(b), buildingRules);
+            const HB = CONTROL_H.lg;
+            const hdrBtn = { width: HB, height: HB, padding: 0, display: "grid", placeItems: "center", borderRadius: RADIUS.sm, border: BORDER_1, background: SURF_RAISED, color: "var(--text-secondary)", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.emphasis, lineHeight: 1, listStyle: "none" };
+            const lockStyle = b.locked ? { ...hdrBtn, background: "var(--accent)", borderColor: "var(--accent)", color: "var(--on-accent)" } : hdrBtn;
+            const numBox = { width: 34, height: HB, padding: 0, textAlign: "center", boxSizing: "border-box", fontSize: FONT_SIZE.emphasis, fontWeight: 600, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, border: BORDER_1, borderRadius: RADIUS.sm, color: "var(--text-primary)", background: "var(--surface-field)" };
+            return (
+              <div data-testid="building-header" style={{ padding: "2px 0 8px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: SPACE.md }}>
+                  <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" style={{ flex: "none", color: "var(--text-secondary)" }}>
+                    <rect x="1.5" y="4" width="13" height="8.5" rx="1" /><path d="M4.5 12.5v-2.5M8 12.5v-2.5M11.5 12.5v-2.5" />
+                  </svg>
+                  <span style={{ fontSize: FONT_SIZE.display, fontWeight: 700, color: "var(--text-primary)" }}>Building</span>
+                  <BuildingNumberField
+                    id={b.id}
+                    value={buildingNumbers(els).get(b.id)}
+                    style={numBox}
+                    resetToken={bldgNumResetSeq}
+                    onAttempt={(n) => attemptBuildingNumber(b.id, n)}
+                    onCancelConflict={() => setBldgNumConflict(null)}
+                  />
+                  <span style={{ flex: 1 }} />
+                  <button type="button" data-testid="building-lock" style={lockStyle} aria-pressed={!!b.locked}
+                    aria-label={b.locked ? "Unlock — allow moving and resizing" : "Lock in place"}
+                    title="Lock in place so it can't be moved or resized by accident" onClick={() => toggleLock(b.id)}>
+                    <MenuLockIcon size={14} open={!b.locked} />
+                  </button>
+                  <details style={{ position: "relative" }}>
+                    <summary data-testid="building-more" style={hdrBtn} aria-label="More building actions" title="More">⋯</summary>
+                    <div style={{ position: "absolute", right: 0, top: HB + 4, zIndex: 20, minWidth: 128, padding: SPACE.xs, background: SURF_RAISED, border: BORDER_1, borderRadius: RADIUS.md, boxShadow: "0 8px 22px rgba(28,25,20,0.16)" }}>
+                      <button type="button" data-testid="building-delete" style={{ ...chip, width: "100%", border: "none", color: "var(--danger)", textAlign: "left" }}
+                        onClick={() => deleteSel(null, { entry: "panel:element" })}>Delete building</button>
+                    </div>
+                  </details>
+                  <button type="button" data-testid="building-close" style={{ ...hdrBtn, border: "none", background: "transparent", color: "var(--text-tertiary)", fontSize: FONT_SIZE.display }} title="Close (the element stays selected; double-click it to reopen) — Esc" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); closeInspector(); }}>✕</button>
+                </div>
+                <div data-testid="building-summary" style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", marginTop: SPACE.xs, fontVariantNumeric: TABULAR_NUMS }}>
+                  {f0(buildingSqft(b))} SF · {loadingSummary(b)} · {props.clearHeight.value}′ clear{b.locked ? " · locked" : ""}
+                </div>
+              </div>
+            );
+          })()}
+          {!bldgPanel && (
           <div role="button" tabIndex={0} aria-expanded={!propsCollapsed} onClick={() => setPropsCollapsed((c) => !c)}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPropsCollapsed((c) => !c); } }}
             style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", padding: "2px 0 6px" }}>
@@ -26443,7 +26591,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {(!narrow || !propsTab) && <button style={{ border: "none", background: "transparent", color: PAL.muted, cursor: "pointer", fontSize: 13, fontFamily: "inherit", lineHeight: 1, padding: "0 2px" }} title="Close (the element stays selected; double-click it to reopen) — Esc" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); closeInspector(); }}>✕</button>}
             <span style={{ fontSize: 10.5, color: PAL.muted, transform: propsCollapsed ? "none" : "rotate(90deg)", transition: "transform .18s ease", width: 9 }}>▶</span>
           </div>
-          {!propsCollapsed && (<>
+          )}
+          {(bldgPanel || !propsCollapsed) && (<>
           {/* B740 — SHARED properties for a multi-selection: only the style props common to every
               selected element/markup, each showing a "Mixed" state where they disagree. Setting a
               control writes to the WHOLE selection at once (the driver: raise opacity on a building +
@@ -26493,6 +26642,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     left={<NumInput style={{ ...numInput, width: "100%" }} value={props.weight.mixed ? null : props.weight.value} placeholder="—" min={0.5} step={0.5} coarse={2} onCommit={(n) => applyMultiStyle({ weight: n })} />}
                   />
                 )}
+                {caps.includes("strokeWidth") && (
+                  <PairedField label="Width"
+                    left={<span style={{ display: "flex", alignItems: "center", gap: SPACE.xxs, minWidth: 0, flexWrap: "wrap" }}>
+                      <NumInput style={{ ...numInput, width: "100%", minWidth: 0 }} value={props.strokeWidth.mixed ? null : props.strokeWidth.value} placeholder="—" min={0.5} max={12} step={0.5} coarse={2}
+                        ariaLabel="Outline width" onCommit={(n) => applyMultiStyle({ strokeWidth: Math.max(0.5, Math.min(12, n)) })} />
+                      <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", flex: "none" }}>px</span>
+                      {props.strokeWidth.mixed && <span style={mixNote}>Mixed</span>}
+                    </span>}
+                  />
+                )}
                 {caps.includes("dash") && (
                   <PairedField label="Pattern"
                     left={<select style={{ ...numInput, width: "100%", fontFamily: "inherit" }} value={props.dash.mixed ? "" : (props.dash.value || "solid")} onChange={(e) => { if (e.target.value) applyMultiStyle({ dash: e.target.value }); }}>
@@ -26501,9 +26660,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </select>}
                   />
                 )}
-                {caps.includes("fillOpacity") && (
+                {(caps.includes("fillOpacity") || caps.includes("strokeOpacity")) && (
                   <PairedField label="Opacity"
-                    right={
+                    left={caps.includes("strokeOpacity") ? (
+                      <span style={{ display: "flex", alignItems: "center", gap: SPACE.xxs, minWidth: 0, flexWrap: "wrap" }}>
+                        <NumInput style={{ ...numInput, width: "100%", minWidth: 0 }} value={props.strokeOpacity.mixed ? null : Math.round(props.strokeOpacity.value * 100)} placeholder="—" min={0} max={100} step={5}
+                          ariaLabel="Outline opacity" onCommit={(n) => applyMultiStyle({ strokeOpacity: Math.max(0, Math.min(100, Math.round(n))) / 100 })} />
+                        <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", flex: "none" }}>%</span>
+                        {props.strokeOpacity.mixed && <span style={mixNote}>Mixed</span>}
+                      </span>
+                    ) : undefined}
+                    right={caps.includes("fillOpacity") ? (
                       /* Mixed → no committed value to show (matches Weight's own "—" placeholder
                          above); typing any number, including 100, is a real change written to every
                          member, same as the slider it replaces. */
@@ -26513,7 +26680,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", flex: "none" }}>%</span>
                         {props.fillOpacity.mixed && <span style={mixNote}>Mixed</span>}
                       </span>
-                    }
+                    ) : undefined}
                   />
                 )}
                 {hasEl && (
@@ -27074,7 +27241,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               drop a type whose label carries a " / " qualifier (paving) — that text exists nowhere
               else, so suppressing it there would be a real information loss, not just tidying. */}
           {!multiStyleable && selEl && (
-            <Section title={selEl.type === "pond" || (phoneSheetSolo && !(TYPE[selEl.type]?.label || "").includes(" / ")) ? false : `Selected · ${dockZoneDisplayLabel(selEl) || (TYPE[selEl.type]?.label || "Element")}`}>
+            <Section title={selEl.type === "pond" || bldgPanel || (phoneSheetSolo && !(TYPE[selEl.type]?.label || "").includes(" / ")) ? false : `Selected · ${dockZoneDisplayLabel(selEl) || (TYPE[selEl.type]?.label || "Element")}`}>
               {/* NEW-1/B872 — a RESHAPED building (footEdit: points + a dock frame) keeps the full building
                   inspector (Footprint reshape controls, dock zones, structure, column grid), routed through
                   the isBuilding branch below whose Footprint group handles the polygon case. A hand-CLICK-
@@ -27223,9 +27390,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             left={<span style={ROW6}><ColorField value={toHex6(curStyle.stroke)} {...colorCtl((v) => setSelEl({ stroke: v }))} seed={COLOR_SEED} title="Outline color" /></span>}
                             right={<span style={ROW6}><ColorField value={toHex6(curStyle.fill)} {...colorCtl((v) => setSelEl({ fill: v }))} seed={COLOR_SEED} title="Fill color" /></span>}
                           />
-                          <PairedField label="Opacity"
-                            right={<PercentField value={curStyle.fillOpacity} min={10} onCommit={(v) => { pushHistory(); setSelEl({ fillOpacity: v }); }} inputStyle={numInput} ariaLabel="Fill opacity" />}
-                          />
+                          <PairedField label="Opacity" left={strokeOpacityCell} right={fillOpacityCell} />
+                          {strokeWidthRow}
                           <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 6 }}>
                             New parking elements start from <button style={linkBtn} onClick={() => jumpToStandards("colors")}>Standards → Colors ↗</button>
                           </div>
@@ -27461,54 +27627,58 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(swRun(selEl))} min={1} onCommit={(n) => setSidewalkLength(selEl, n)} /></Field>
                     </>
                   ) : isBuilding(selEl) ? (() => {
-                    // B548 + B549 — grouped building inspector. Four concept groups (Footprint ·
-                    // Loading · Structure · Placement); headers build hierarchy by weight + size +
-                    // uppercase tracking, never by fading (house rule). Footprint dimensions are
-                    // dock-relative (B548): Length runs ALONG the dock wall (dock doors array on it),
-                    // Depth PERPENDICULAR to it (dock face → rear; dock-wall → dock-wall for cross-dock),
-                    // via footprintAxes/footprintLength/footprintDepth — never a hardcoded X/Y axis, so
-                    // they stay correct when docks move walls. resizeSelEl drives the mapped physical edge.
+                    // NEW-1..NEW-8 (Building panel rethink) — the approved layout, top to bottom:
+                    //   header (icon · Building · [number] · lock · ⋯ · ✕ + one summary line) lives in the
+                    //   inspector chrome above; here: Footprint · Loading · Structure · Appearance, each a
+                    //   <Collapse> so every section header looks and behaves the same.
+                    // Footprint dimensions stay dock-relative (B548): Length runs ALONG the dock wall,
+                    // Depth PERPENDICULAR to it, via footprintAxes/footprintLength/footprintDepth — never a
+                    // hardcoded X/Y axis. resizeSelEl drives the mapped physical edge.
                     const b = selEl;
                     const ax = footprintAxes(b);
                     const sf = buildingSqft(b);
                     const props = effectiveBuildingProps(b, sf, buildingRules);
                     const { dockSides } = dockSidesOf(b);
                     const noDock = dockSides.length === 0;
-                    const level = dockStackLevel(b);
                     const bumpN = els.filter((x) => x.attachedTo === b.id && x.dogEar).length;
-                    const carN = carEndsSides(b).filter((s) => empSideSidewalk(b, s) || empSidePark(b, s)).length;
-                    const grpHdr = (t) => <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: PAL.ink, margin: "15px 0 8px", paddingBottom: 4, borderBottom: `1px solid ${PAL.panelLine}` }}>{t}</div>;
-                    const autoTag = { fontSize: 10, color: PAL.muted, marginLeft: 2 };
-                    const resetBtn = { ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent, marginLeft: 2 };
-                    const muteHdr = { fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", margin: "2px 0 6px" };
-                    const note = { fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, marginTop: 4 };
-                    // B549 — compact single-line feature stepper: "label · [−] count [＋]". Replaces the old
-                    // tall label/sub-label/two-big-buttons row; the sub-caption moves to the button title.
-                    const stepBtn = (on, danger) => ({ width: 24, height: 24, padding: 0, display: "grid", placeItems: "center", fontSize: 15, lineHeight: 1, fontWeight: 700, borderRadius: 6, border: BORDER_1, background: SURF_RAISED, fontFamily: "inherit", cursor: on ? "pointer" : "default", color: danger ? (on ? "#b3361b" : "#e3cfc9") : (on ? PAL.ink : "#cfc7b5"), opacity: on ? 1 : 0.6 });
-                    const featRow = (label, count, { onAdd, addOn, addTitle, onRem, remOn, remTitle }) => (
-                      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6 }}>
-                        <span style={{ flex: 1, minWidth: 0, fontSize: 12, color: PAL.ink }}>{label}</span>
-                        <button disabled={!remOn} title={remTitle} onClick={remOn ? onRem : undefined} style={stepBtn(remOn, true)}>－</button>
-                        <span style={{ minWidth: 14, textAlign: "center", fontSize: 12, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, color: count ? PAL.ink : PAL.muted }}>{count}</span>
-                        <button disabled={!addOn} title={addTitle} onClick={addOn ? onAdd : undefined} style={stepBtn(addOn, false)}>＋</button>
+                    const endSides = carEndsSides(b);
+                    const sidewalks = endSidewalks(b);
+                    const parkRows = empParkRows(b);
+                    const txtPrimary = "var(--text-primary)", txtSecondary = "var(--text-secondary)", txtTertiary = "var(--text-tertiary)";
+                    const subHdr = { fontSize: FONT_SIZE.label, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: txtSecondary };
+                    const muted = { fontSize: FONT_SIZE.label, color: txtTertiary };
+                    const unit = (t) => <span style={{ ...muted, flex: "none" }}>{t}</span>;
+                    const resetBtn = { ...chip, padding: "2px 6px", fontSize: FONT_SIZE.micro, color: "var(--accent-text, var(--accent))", marginLeft: 2 };
+                    const stepBtn = (on) => ({ width: CONTROL_H.md, height: CONTROL_H.md, padding: 0, display: "grid", placeItems: "center", fontSize: FONT_SIZE.display, lineHeight: 1, fontWeight: 700, borderRadius: RADIUS.sm, border: BORDER_1, background: SURF_RAISED, color: txtPrimary, fontFamily: "inherit", cursor: on ? "pointer" : "default", opacity: on ? 1 : 0.45 });
+                    const xBtn = (title, onClick, testid) => (
+                      <button type="button" data-testid={testid} title={title} aria-label={title} onClick={onClick}
+                        style={{ flex: "none", width: CONTROL_H.sm, height: CONTROL_H.md, padding: 0, border: "none", background: "transparent", color: txtTertiary, cursor: "pointer", fontSize: FONT_SIZE.control, lineHeight: 1, fontFamily: "inherit" }}>✕</button>
+                    );
+                    const xGap = <span style={{ flex: "none", width: CONTROL_H.sm }} />;
+                    // One row of an outward stack: "1  Label        [ctl] unit  ✕".
+                    const stackRow = ({ key, idx, label, control, onRemove, removeTitle, testid }) => (
+                      <div key={key} data-testid={testid} style={{ display: "flex", alignItems: "center", gap: SPACE.md, marginBottom: SPACE.sm }}>
+                        <span style={{ flex: "none", width: 12, textAlign: "right", ...muted, fontVariantNumeric: TABULAR_NUMS }}>{idx}</span>
+                        <span style={{ flex: 1, minWidth: 0, fontSize: FONT_SIZE.control, color: txtPrimary }}>{label}</span>
+                        {control}
+                        {onRemove ? xBtn(removeTitle, onRemove, testid ? `${testid}-remove` : undefined) : xGap}
                       </div>
                     );
-                    const layerChip = { fontSize: 11.5, padding: "4px 8px", borderRadius: RADIUS.sm, border: BORDER_1, background: SURF_RAISED, color: PAL.ink, cursor: "pointer", fontFamily: "inherit" };
-                    const layerChooserRow = (label, groupKey, sides) => {
+                    const addLine = (children) => <div style={{ display: "flex", alignItems: "center", gap: SPACE.xs, margin: `${SPACE.xs}px 0 ${SPACE.md}px 20px` }}>{children}</div>;
+                    const addLink = { ...linkBtn, fontSize: FONT_SIZE.control, textDecoration: "none", fontWeight: 600 };
+                    const layerChip = { fontSize: FONT_SIZE.control, padding: "4px 8px", borderRadius: RADIUS.sm, border: BORDER_1, background: SURF_RAISED, color: txtPrimary, cursor: "pointer", fontFamily: "inherit" };
+                    // "+ Add layer ▾" for a group of walls — the existing catalog (buffer / sidewalk / parking / road).
+                    const layerChooserRow = (groupKey, sides) => {
                       const opts = sides.length ? layersForSides(b, sides) : [];
                       if (!opts.length) return null;
                       const open = layerMenu === groupKey;
                       return (
-                        <div style={{ marginBottom: 6 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            <div style={{ flex: 1, minWidth: 0, fontSize: 12, color: PAL.ink }}>{label}</div>
-                            <button title="Pick a specific outward layer to add" onClick={() => setLayerMenu(open ? null : groupKey)}
-                              style={{ ...layerChip, fontWeight: 600 }}>Add layer ▾</button>
-                          </div>
+                        <div>
+                          {addLine(<button type="button" data-testid={`add-layer-${groupKey}`} style={addLink} title="Pick a specific outward layer to add" onClick={() => setLayerMenu(open ? null : groupKey)}>+ Add layer ▾</button>)}
                           {open && (
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: SPACE.sm, margin: `0 0 ${SPACE.md}px 20px` }}>
                               {opts.map((k) => (
-                                <button key={k} style={layerChip}
+                                <button key={k} type="button" style={layerChip}
                                   title={`Add ${ZONE_CATALOG[k].label.toLowerCase()} on ${sides.length > 1 ? "every" : "this"} ${groupKey === "dock" ? "dock" : "non-dock"} side`}
                                   onClick={() => { addLayerToSides(b, sides, k); setLayerMenu(null); }}>＋ {ZONE_CATALOG[k].label}</button>
                               ))}
@@ -27517,182 +27687,232 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         </div>
                       );
                     };
-                    return (
-                      <>
-                        {/* NEW-1 — the ONE place a building's assigned number can be changed
-                            without deleting and recreating it (CLAUDE.md — the on-canvas label
-                            stays display-only, no click-to-edit there). A free number commits on
-                            blur/Enter with no confirmation; a number another building already
-                            holds blocks the plain commit and offers Swap or Shift instead, so two
-                            buildings can never end up sharing a number, even for a moment. Gaps
-                            left behind by a Shift (or by typing a number well past the current
-                            count) are expected and are never auto-compacted. */}
-                        <Field label="Building number">
-                          <BuildingNumberField
-                            id={b.id}
-                            value={buildingNumbers(els).get(b.id)}
-                            style={numInput}
-                            resetToken={bldgNumResetSeq}
-                            onAttempt={(n) => attemptBuildingNumber(b.id, n)}
-                            onCancelConflict={() => setBldgNumConflict(null)}
-                          />
-                        </Field>
-                        {bldgNumConflict && bldgNumConflict.id === b.id && els.some((e) => e.id === bldgNumConflict.holderId) && (() => {
-                          const holderLabel = `Building ${buildingNumbers(els).get(bldgNumConflict.holderId) ?? bldgNumConflict.n}`;
-                          return (
-                            <div style={{ fontSize: 11, lineHeight: 1.5, margin: "-2px 0 12px", padding: "8px 9px", borderRadius: RADIUS.sm, border: BORDER_1, background: SURF_RAISED }}>
-                              <div style={{ color: PAL.ink, marginBottom: 6 }}>That number belongs to {holderLabel} — what should happen?</div>
-                              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                                <button style={chip} onClick={() => resolveBuildingNumberConflict("swap")}>Swap with {holderLabel}</button>
-                                <button style={chip} onClick={() => resolveBuildingNumberConflict("shift")}>Shift {bldgNumConflict.n} and up by one</button>
-                                <button style={{ ...chip, background: "transparent", boxShadow: "none" }}
-                                  onClick={() => { setBldgNumConflict(null); setBldgNumResetSeq((s) => s + 1); }}>Cancel</button>
-                              </div>
-                            </div>
-                          );
-                        })()}
-                        {grpHdr("Footprint")}
+                    // ---- NEW-2 — building-number conflict: plain-English options WITH their outcomes ----
+                    const conflict = bldgNumConflict && bldgNumConflict.id === b.id && els.some((e) => e.id === bldgNumConflict.holderId) ? bldgNumConflict : null;
+                    const conflictDialog = conflict && (() => {
+                      const nums = buildingNumbers(els);
+                      const holderNo = nums.get(conflict.holderId) ?? conflict.n;
+                      const cur = nums.get(b.id);
+                      const n = conflict.n;
+                      const optBtn = (extra) => ({ display: "block", width: "100%", textAlign: "left", padding: "7px 9px", marginBottom: SPACE.sm, borderRadius: RADIUS.sm, border: BORDER_1, background: SURF_RAISED, color: txtPrimary, cursor: "pointer", fontFamily: "inherit", ...extra });
+                      return (
+                        <div data-testid="bldg-num-conflict" style={{ margin: `0 0 ${SPACE.xl}px`, padding: "8px 9px", borderRadius: RADIUS.sm, border: BORDER_1, background: SURF_RAISED }}>
+                          <div style={{ fontSize: FONT_SIZE.label, lineHeight: 1.5, color: txtPrimary, marginBottom: SPACE.md }}>That number belongs to Building {holderNo} — what should happen?</div>
+                          <button type="button" data-testid="bldg-num-swap" style={optBtn()} onClick={() => resolveBuildingNumberConflict("swap")}>
+                            <span style={{ display: "block", fontSize: FONT_SIZE.control, fontWeight: 600 }}>Swap with Building {holderNo}</span>
+                            <span style={{ display: "block", fontSize: FONT_SIZE.label, color: txtTertiary, lineHeight: 1.4 }}>This becomes {n} · Building {holderNo} becomes {cur}</span>
+                          </button>
+                          <button type="button" data-testid="bldg-num-shift" style={optBtn({ borderColor: "var(--accent)" })} onClick={() => resolveBuildingNumberConflict("shift")}>
+                            <span style={{ display: "block", fontSize: FONT_SIZE.control, fontWeight: 600 }}>Insert at {n}, shift the rest up</span>
+                            <span style={{ display: "block", fontSize: FONT_SIZE.label, color: txtTertiary, lineHeight: 1.4 }}>{n}→{n + 1}, {n + 1}→{n + 2} … · this building becomes {n}</span>
+                          </button>
+                          <div style={{ textAlign: "right" }}>
+                            <button type="button" data-testid="bldg-num-cancel" style={{ ...linkBtn, fontSize: FONT_SIZE.control, textDecoration: "none", color: txtSecondary }}
+                              onClick={() => { setBldgNumConflict(null); setBldgNumResetSeq((q) => q + 1); }}>Cancel</button>
+                          </div>
+                        </div>
+                      );
+                    })();
+                    // ---- NEW-3 — Footprint ----
+                    const footprint = (
+                      <Collapse sectionId="building-footprint" title="Footprint" defaultOpen summary={`${Math.round(footprintLength(b))} × ${Math.round(footprintDepth(b))} ft`}>
                         {b.points ? (
                           // NEW-1/B872 — an irregular building: Length/Depth become the read-only BOUNDING dims
                           // (true area is polygon-exact). A reshaped-from-rect building (footEdit) can reset;
                           // a hand-click-drawn one just reads out (no rectangle to go back to).
                           <>
-                            <Field label="Length (ft)"><span style={{ fontSize: 12.5, color: PAL.ink }}>{Math.round(footprintLength(b))} <span style={{ color: PAL.muted, fontSize: 10 }}>bounding</span></span></Field>
-                            <Field label="Depth (ft)"><span style={{ fontSize: 12.5, color: PAL.ink }}>{Math.round(footprintDepth(b))} <span style={{ color: PAL.muted, fontSize: 10 }}>bounding</span></span></Field>
-                            <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.4, margin: "2px 0 6px" }}>Irregular footprint · <b style={{ color: PAL.ink }}>{f0(buildingSqft(b))} SF</b>. Length/Depth show the bounding box.{b.footEdit ? " Drag corners on the canvas to reshape — loaded walls stay straight (their corners slide along the wall); Shift-click an end/rear wall to add a control point." : ""}</div>
-                            {b.footEdit && <button style={{ ...chip, width: "100%" }} title="Discard the reshape — back to the bounding rectangle" onClick={() => resetBuildingFootprint(b.id)}>↺ Reset to rectangle</button>}
+                            <Field label="Length"><span style={ROW6}><span style={{ fontSize: FONT_SIZE.control, color: txtPrimary }}>{Math.round(footprintLength(b))}</span>{unit("ft bounding")}</span></Field>
+                            <Field label="Depth"><span style={ROW6}><span style={{ fontSize: FONT_SIZE.control, color: txtPrimary }}>{Math.round(footprintDepth(b))}</span>{unit("ft bounding")}</span></Field>
+                            <div style={{ ...muted, lineHeight: 1.4, margin: "2px 0 6px" }}>Irregular footprint · <b style={{ color: txtPrimary }}>{f0(buildingSqft(b))} SF</b>. Length/Depth show the bounding box.{b.footEdit ? " Drag corners on the canvas to reshape — loaded walls stay straight (their corners slide along the wall); Shift-click an end/rear wall to add a control point." : ""}</div>
+                            {b.footEdit && <button style={{ ...chip, width: "100%", marginBottom: SPACE.md }} title="Discard the reshape — back to the bounding rectangle" onClick={() => resetBuildingFootprint(b.id)}>↺ Reset to rectangle</button>}
                           </>
                         ) : (
                           <>
-                            <Field label="Length (ft)"><NumInput style={numInput} value={Math.round(footprintLength(b))} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ [ax.length]: n })} /></Field>
-                            <Field label="Depth (ft)"><NumInput style={numInput} value={Math.round(footprintDepth(b))} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ [ax.depth]: n })} /></Field>
-                            <button style={{ ...chip, width: "100%", marginTop: 2 }} title="Convert to an editable outline — angle an end wall or clip a corner (loaded walls stay straight)" onClick={() => editBuildingFootprint(b.id)}>✎ Edit footprint…</button>
+                            <Field label="Length">
+                              <span style={ROW6}>
+                                <NumInput style={{ ...numInput, width: 58 }} value={Math.round(footprintLength(b))} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ [ax.length]: n })} />
+                                {unit("ft")}
+                                <span style={{ flex: 1 }} />
+                                <button type="button" style={linkBtn} data-testid="edit-outline" title="Convert to an editable outline — angle an end wall or clip a corner (loaded walls stay straight)" onClick={() => editBuildingFootprint(b.id)}>✎ Edit outline</button>
+                              </span>
+                            </Field>
+                            <Field label="Depth">
+                              <span style={ROW6}>
+                                <NumInput style={{ ...numInput, width: 58 }} value={Math.round(footprintDepth(b))} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ [ax.depth]: n })} />
+                                {unit("ft")}
+                              </span>
+                            </Field>
                           </>
                         )}
-
-                        {grpHdr("Loading")}
-                        <Field label="Docks">
-                          <select style={{ ...numInput, width: 120, fontFamily: "inherit" }} value={b.dock || "cross"} onChange={(e) => changeBuildingDock(e.target.value)}>
-                            <option value="single">Single-load</option>
-                            <option value="cross">Cross-dock</option>
-                            <option value="none">No docks</option>
-                          </select>
-                        </Field>
-                        {/* NEW-2 (B385041) — the dock face is now a STORED choice, so it needs a
-                            deliberate control. A resize used to turn it by accident (shrink a
-                            cross-dock past square and the whole apron rotated 90° mid-drag); it
-                            never does now, which is exactly why this button has to exist. One row,
-                            stating the current face and offering the verb — no explanatory prose. */}
-                        {(b.dock || "cross") !== "none" && (() => {
-                          // NEW-2 (B1818257) — the compass suffix is what actually distinguishes the
-                          // two rows on an angled building; "Top / Bottom" alone is only true at rot=0.
-                          const faces = dockSidesFor(b).dockSides.map((s) => `${s[0].toUpperCase() + s.slice(1)} (${dockSideCompassLabel(s, b.rot || 0)})`);
-                          return (
-                            <Field label="Dock face">
-                              <span style={ROW4}>
-                                <span style={{ fontSize: 12, color: PAL.ink }}>{faces.join(" / ")}</span>
-                                <button style={resetBtn} data-testid="dock-face-turn"
-                                  title="Turn the loaded walls a quarter turn. Resizing never moves them on its own — the truck courts on the old walls are removed."
-                                  onClick={rotateBuildingDockFace}>turn ⟳</button>
-                              </span>
-                            </Field>
-                          );
-                        })()}
-                        {featRow("Dock zones", level, {
-                          onAdd: () => addDockZone(b), addOn: !noDock && dockCanAdd(b),
-                          addTitle: noDock ? "Pick a dock side first (Docks, above)" : "Extend every dock side out by one zone — truck court → trailer parking → buffer",
-                          onRem: () => removeOuterDockZone(b), remOn: dockCanRemove(b), remTitle: "Pull every dock side in by one zone",
-                        })}
-                        {featRow("Car parking", carN, {
-                          onAdd: () => addEmployeeParking(b), addOn: carEndsSides(b).length > 0 && !b.footEdit,
-                          addTitle: b.footEdit ? "Reset the footprint to a rectangle to add end-wall parking (an angled end wall would misplace it)" : "Build out the non-dock sides — sidewalk, then parking rows (one more each click)",
-                          onRem: () => shrinkEmployeeParking(b), remOn: employeeSideHasAny(b), remTitle: "Pull the non-dock-side parking in by one row (then the sidewalk)",
-                        })}
-                        {featRow("Bump-outs", bumpN, {
-                          // NEW-3/B872 — one corner per press now, matching Dock zones / Car parking above
-                          // (was all-4-at-once on both ends; the − button's own title said "Remove all
-                          // bump-outs" while looking exactly like the other rows' one-unit steppers).
-                          onAdd: () => addOneDogEar(b), addOn: !noDock && !b.footEdit && bumpN < dockSidesOf(b).dockSides.length * 2, addTitle: b.footEdit ? "Reset the footprint to a rectangle first — bump-outs anchor to square corners" : `Add one dock-corner bump-out · ${DOGEAR_W}′×${DOGEAR_D}′`,
-                          onRem: () => removeOneDogEar(b), remOn: bumpN > 0, remTitle: "Remove one bump-out",
-                        })}
-                        {layerChooserRow("Behind the dock stack", "dock", dockSides)}
-                        {layerChooserRow("Rear / non-dock sides", "nondock", carEndsSides(b))}
-                        {noDock && <div style={note}>This building's dock layout is “No docks” — set Cross-dock or Single-load (Docks, above) to stack zones.</div>}
-                        {level > 0 && (
-                          <div style={{ marginTop: 9 }}>
-                            <div style={muteHdr}>Zone depths · outward{dockSides.length > 1 ? " · both dock sides" : ""}</div>
-                            {DOCK_ZONES.slice(0, level).map((z, i) => (
-                              <div key={z.key} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
-                                <span style={{ flex: 1, fontSize: 12, color: PAL.ink }}>{i + 1}. {z.label}</span>
-                                <NumInput style={{ ...numInput, width: 52 }} value={zoneDepthShown(b, i)} min={1} onCommit={(n) => setZoneDepthAll(b, i, n)} />
-                                <span style={{ fontSize: 11, color: PAL.muted }}>′</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        {grpHdr("Structure")}
-                        <Field label="Clear height (ft)">
-                          <span style={ROW4}>
-                            <NumInput style={{ ...numInput, width: 52 }} value={props.clearHeight.value} min={1} onCommit={(n) => { pushHistory(); setSelEl({ clearHeightOverride: n }); }} />
-                            {props.clearHeight.overridden
-                              ? <button title="Revert to auto (by size)" onClick={() => { pushHistory(); setSelEl({ clearHeightOverride: null }); }} style={resetBtn}>set ↺</button>
-                              : <span style={autoTag}>auto</span>}
-                          </span>
-                        </Field>
-                        <Field label="Slab (in)">
-                          <span style={ROW4}>
-                            <NumInput style={{ ...numInput, width: 52 }} value={props.slab.value} min={1} onCommit={(n) => { pushHistory(); setSelEl({ slabThicknessOverride: n }); }} />
-                            {props.slab.overridden
-                              ? <button title="Revert to auto (by size)" onClick={() => { pushHistory(); setSelEl({ slabThicknessOverride: null }); }} style={resetBtn}>set ↺</button>
-                              : <span style={autoTag}>auto</span>}
-                          </span>
-                        </Field>
-
-                        {/* Column grid (B568) — per-building overrides on the plan defaults. Each field
-                            falls back to the plan-wide Structural-grid setting until pinned here. */}
-                        {grpHdr("Column grid")}
-                        {(() => {
-                          const grd = resolveGridSettings(b, settings);
-                          const gg = computeBuildingGrid({ length: footprintLength(b), depth: footprintDepth(b), dock: b.dock || "cross", grid: grd });
-                          const ovRow = (label, valueShown, ovKey, floor) => (
-                            <Field label={label} key={ovKey}>
-                              <span style={ROW4}>
-                                <NumInput style={{ ...numInput, width: 52 }} value={Math.round(valueShown)} min={floor} onCommit={(n) => { pushHistory(); setSelEl({ [ovKey]: n }); }} />
-                                {b[ovKey] != null
-                                  ? <button title="Revert to plan default" onClick={() => { pushHistory(); setSelEl({ [ovKey]: null }); }} style={resetBtn}>set ↺</button>
-                                  : <button title="Plan standard — edit in Standards" onClick={() => jumpToStandards("building")} style={{ ...linkBtn, fontSize: 10, marginLeft: 2 }}>default ↗</button>}
-                              </span>
-                            </Field>
-                          );
-                          return (
-                            <>
-                              {(b.dock || "cross") !== "none" && ovRow("Speed bay (ft)", grd.speedBay, "speedBayOverride", 1)}
-                              {ovRow("Typ. bay — length", grd.bayLengthTarget, "bayLengthOverride", 1)}
-                              {ovRow("Typ. bay — depth", grd.bayDepthTarget, "bayDepthOverride", 1)}
-                              {ovRow("Dock door o.c. (ft)", grd.doorOC, "doorOCOverride", 2)}
-                              {gg.summary && <div style={note}>{gg.summary.lengthCount} × {gg.summary.depthCount} bays · {gg.summary.lengthTyp}′ × {gg.summary.depthTyp}′ typ{gg.summary.speedBay ? ` · speed bay ${gg.summary.speedBay}′` : ""}.</div>}
-                              {/* B653 write-back: this building's resolved grid becomes the plan standard, and says so. */}
-                              <button style={{ ...chip, width: "100%", marginTop: 6 }} title="Make this building's column grid the plan standard for new buildings"
-                                onClick={() => { setSettings((s) => ({ ...s, speedBay: grd.speedBay, bayLengthTarget: grd.bayLengthTarget, bayDepthTarget: grd.bayDepthTarget, doorOC: grd.doorOC })); flashWarn("Saved to Standards — new buildings start with this column grid.", 4000); }}>
-                                Set as standard
-                              </button>
-                            </>
-                          );
-                        })()}
-
-                        {grpHdr("Placement")}
-                        <Field label="Rotation (°)">
-                          <RotationStepper value={b.rot || 0} disabled={!!b.locked} disabledReason="Unlock this element to rotate it"
+                        <Field label="Rotation">
+                          <RotationStepper value={b.rot || 0} disabled={!!b.locked || !!b.points}
+                            disabledReason={b.points ? "Reset the footprint to a rectangle to rotate it" : "Unlock this element to rotate it"}
                             onCommit={(deg) => rotateSelTo(deg)}
                             onStep={(d) => rotateSelTo(normalizeDeg((b.rot || 0) + d))} />
                         </Field>
-                        {/* NEW-2 — the owner nearly built a second way to edit the column grid
-                            because this pointer didn't exist; same style as the Colors line
-                            every selected element ends with, below. */}
-                        <div style={{ fontSize: 10.5, color: PAL.muted, marginTop: 10 }}>
-                          This building's column grid, clear height & slab start from <button style={linkBtn} onClick={() => jumpToStandards("building")}>Standards → Buildings ↗</button>
+                      </Collapse>
+                    );
+                    // ---- NEW-4/5/6 — Loading: wall picker, dock-wall stack, end-wall stack, bump-outs ----
+                    const chains = dockSides.map((s) => dockChainOnSide(els, b, s));
+                    const longest = chains.reduce((m, c) => (c.length > m.length ? c : m), []);
+                    const stackLevel = dockStackLevel(b);
+                    const nextPreset = !noDock && stackLevel < MAX_DOCK_ZONES ? DOCK_ZONES[stackLevel] : null;
+                    const chainLabel = (z, i) => (i === 0 ? ZONE_CATALOG.court.label : z.type === "trailer" ? ZONE_CATALOG.trailer.label : z.type === "landscape" ? ZONE_CATALOG.buffer.label : z.type === "road" ? ZONE_CATALOG.road.label : z.type === "sidewalk" ? ZONE_CATALOG.sidewalk.label : ((TYPE[z.type]?.label || "Layer").split(" / ")[0]));
+                    const chainDepth = (z, i) => { const side = dockSides.find((s) => dockChainOnSide(els, b, s)[i]); return side ? Math.round(zoneDepthOf(dockChainOnSide(els, b, side)[i], b, side, i)) : 0; };
+                    const dockStack = noDock ? (
+                      <div style={{ ...muted, lineHeight: 1.4, marginTop: SPACE.xs }}>No walls loaded — click a wall above to load it, then stack the truck court, trailer parking and buffer outside it.</div>
+                    ) : (
+                      <div data-testid="dock-wall-stack" style={{ marginTop: SPACE.xl }}>
+                        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", margin: `0 0 ${SPACE.md}px` }}>
+                          <span style={subHdr}>Outside the dock walls</span>
+                          {dockSides.length > 1 && <span style={muted}>both sides</span>}
                         </div>
+                        {longest.map((z, i) => stackRow({
+                          key: z.id, idx: i + 1, label: chainLabel(z, i), testid: `dock-zone-row-${i}`,
+                          control: (<>
+                            <NumInput style={{ ...numInput, width: 52 }} value={chainDepth(z, i)} min={1} onCommit={(n) => setChainZoneDepthAll(b, i, n)} />
+                            {unit("ft")}
+                          </>),
+                          onRemove: () => removeDockZonesFrom(b, i),
+                          removeTitle: i === longest.length - 1 ? `Remove the ${chainLabel(z, i).toLowerCase()}` : `Remove the ${chainLabel(z, i).toLowerCase()} and everything outside it`,
+                        }))}
+                        {nextPreset ? (
+                          layersForSides(b, dockSides).length ? addLine(<>
+                            <button type="button" data-testid="add-dock-zone" style={addLink} disabled={!dockCanAdd(b)} title="Extend every dock wall out by one zone" onClick={() => addDockZone(b)}>+ {ZONE_CATALOG[nextPreset.key].label}</button>
+                            <button type="button" data-testid="add-layer-dock" style={addLink} title="Pick a specific outward layer to add" onClick={() => setLayerMenu(layerMenu === "dock" ? null : "dock")}>▾</button>
+                          </>) : addLine(<button type="button" data-testid="add-dock-zone" style={addLink} onClick={() => addDockZone(b)}>+ {ZONE_CATALOG[nextPreset.key].label}</button>)
+                        ) : null}
+                        {nextPreset && layerMenu === "dock" && (
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: SPACE.sm, margin: `0 0 ${SPACE.md}px 20px` }}>
+                            {layersForSides(b, dockSides).map((k) => (
+                              <button key={k} type="button" style={layerChip} title={`Add ${ZONE_CATALOG[k].label.toLowerCase()} on every dock side`}
+                                onClick={() => { addLayerToSides(b, dockSides, k); setLayerMenu(null); }}>＋ {ZONE_CATALOG[k].label}</button>
+                            ))}
+                          </div>
+                        )}
+                        {!nextPreset && layerChooserRow("dock", dockSides)}
+                      </div>
+                    );
+                    const endSwTitle = sidewalks.length > 1 ? "Remove the sidewalks (parking pulls back to the wall)" : "Remove the sidewalk (parking pulls back to the wall)";
+                    const endStack = endSides.length ? (
+                      <div data-testid="end-wall-stack" style={{ marginTop: SPACE.xl }}>
+                        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", margin: `0 0 ${SPACE.md}px` }}>
+                          <span style={subHdr}>{noDock ? "Outside the walls" : dockSides.length === 1 ? "Outside the rear & end walls" : "Outside the end walls"}</span>
+                          {endSides.length > 1 && <span style={muted}>both sides</span>}
+                        </div>
+                        {sidewalks.length ? stackRow({
+                          key: "sw", idx: 1, label: "Sidewalk", testid: "end-sidewalk-row",
+                          control: (<>
+                            <NumInput style={{ ...numInput, width: 52 }} value={Math.round(swThick(sidewalks[0]))} min={1} onCommit={(n) => setEndSidewalkWidth(b, n)} />
+                            {unit("ft")}
+                          </>),
+                          onRemove: () => removeEndSidewalks(b), removeTitle: endSwTitle,
+                        }) : addLine(<button type="button" data-testid="add-end-sidewalk" style={addLink} disabled={!!b.footEdit} title={b.footEdit ? "Reset the footprint to a rectangle first" : "Add a sidewalk along the end walls"} onClick={() => addEndSidewalks(b)}>+ Sidewalk</button>)}
+                        {stackRow({
+                          key: "pk", idx: sidewalks.length ? 2 : 1, label: "Parking rows", testid: "end-parking-row",
+                          control: (<>
+                            <button type="button" data-testid="park-rows-minus" disabled={parkRows < 1 || !!b.footEdit} aria-label="One fewer parking row" title="One fewer parking row" onClick={() => setEmployeeParkingRows(b, parkRows - 1)} style={stepBtn(parkRows >= 1 && !b.footEdit)}>－</button>
+                            <NumInput style={{ ...numInput, width: 40, textAlign: "center", padding: "6px 4px" }} ariaLabel="Parking rows" value={parkRows} min={0} max={MAX_EMP_PARK_ROWS} step={1} onCommit={(n) => setEmployeeParkingRows(b, n)} />
+                            <button type="button" data-testid="park-rows-plus" disabled={!!b.footEdit} aria-label="One more parking row" title={b.footEdit ? "Reset the footprint to a rectangle to add end-wall parking" : "One more parking row"} onClick={() => setEmployeeParkingRows(b, parkRows + 1)} style={stepBtn(!b.footEdit)}>＋</button>
+                          </>),
+                          onRemove: parkRows > 0 ? () => setEmployeeParkingRows(b, 0) : null, removeTitle: "Clear all parking rows",
+                        })}
+                        {layerChooserRow("nondock", endSides)}
+                      </div>
+                    ) : null;
+                    const bumpRow = !noDock && (
+                      <div style={{ display: "flex", alignItems: "center", gap: SPACE.md, margin: `${SPACE.xl}px 0 ${SPACE.sm}px` }}>
+                        <span style={{ flex: 1, fontSize: FONT_SIZE.control, color: txtPrimary }}>Corner bump-outs</span>
+                        <button type="button" data-testid="bump-minus" disabled={bumpN < 1} aria-label="Remove one bump-out" title="Remove one bump-out" onClick={bumpN > 0 ? () => removeOneDogEar(b) : undefined} style={stepBtn(bumpN > 0)}>－</button>
+                        <span style={{ minWidth: 14, textAlign: "center", fontSize: FONT_SIZE.control, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, color: bumpN ? txtPrimary : txtTertiary }}>{bumpN}</span>
+                        {(() => { const on = !b.footEdit && bumpN < bumpOutCap(b); return (
+                          <button type="button" data-testid="bump-plus" disabled={!on} aria-label="Add one bump-out"
+                            title={b.footEdit ? "Reset the footprint to a rectangle first — bump-outs anchor to square corners" : bumpN >= bumpOutCap(b) ? "Two bump-outs per loaded wall is the most" : `Add one dock-corner bump-out · ${DOGEAR_W}′×${DOGEAR_D}′`}
+                            onClick={on ? () => addOneDogEar(b) : undefined} style={stepBtn(on)}>＋</button>
+                        ); })()}
+                      </div>
+                    );
+                    const loading = (
+                      <Collapse sectionId="building-loading" title="Loading" defaultOpen summary={loadingSummary(b)}>
+                        <div style={{ display: "flex", alignItems: "center", gap: SPACE.xl }}>
+                          <LoadingWallPicker b={b} onWall={(side) => applyBuildingLoading(wallClickPatch(b, side))} />
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div data-testid="loading-type" style={{ fontSize: FONT_SIZE.emphasis, fontWeight: 600, color: txtPrimary }}>{loadingTypeLabel(b)}</div>
+                            <div data-testid="loading-walls-label" style={{ fontSize: FONT_SIZE.control, color: txtPrimary, marginTop: SPACE.xxs }}>{loadedWallsLabel(b) || "No walls loaded"}</div>
+                            <div style={{ ...muted, fontSize: FONT_SIZE.micro, lineHeight: 1.4, marginTop: SPACE.md }}>Click a wall to load or unload it. The plan turns with Rotation.</div>
+                          </div>
+                        </div>
+                        {dockStack}
+                        {endStack}
+                        {bumpRow}
+                      </Collapse>
+                    );
+                    // ---- NEW-7 — Structure (closed by default); the column grid is edited ONLY in Standards ----
+                    const autoBoth = !props.clearHeight.overridden && !props.slab.overridden;
+                    const autoLink = (title) => <button type="button" style={{ ...linkBtn, fontSize: FONT_SIZE.micro, marginLeft: 2 }} title={title} onClick={() => jumpToStandards("building")}>auto</button>;
+                    const structure = (
+                      <Collapse sectionId="building-structure" title="Structure" defaultOpen={false}
+                        summary={`${props.clearHeight.value}′ clear · ${props.slab.value}″ slab${autoBoth ? " · auto" : ""}`}>
+                        <Field label="Clear height">
+                          <span style={ROW4}>
+                            <NumInput style={{ ...numInput, width: 52 }} value={props.clearHeight.value} min={1} onCommit={(n) => { pushHistory(); setSelEl({ clearHeightOverride: n }); }} />
+                            {unit("ft")}
+                            {props.clearHeight.overridden
+                              ? <button title="Revert to auto (by size)" onClick={() => { pushHistory(); setSelEl({ clearHeightOverride: null }); }} style={resetBtn}>set ↺</button>
+                              : autoLink("Automatic by size — change the rule in Standards → Buildings")}
+                          </span>
+                        </Field>
+                        <Field label="Slab">
+                          <span style={ROW4}>
+                            <NumInput style={{ ...numInput, width: 52 }} value={props.slab.value} min={1} onCommit={(n) => { pushHistory(); setSelEl({ slabThicknessOverride: n }); }} />
+                            {unit("in")}
+                            {props.slab.overridden
+                              ? <button title="Revert to auto (by size)" onClick={() => { pushHistory(); setSelEl({ slabThicknessOverride: null }); }} style={resetBtn}>set ↺</button>
+                              : autoLink("Automatic by size — change the rule in Standards → Buildings")}
+                          </span>
+                        </Field>
+                        {hasGridOverrides(b) && (
+                          <div data-testid="grid-overrides-note" style={{ ...muted, fontSize: FONT_SIZE.micro, margin: `${SPACE.xs}px 0` }}>
+                            Grid overrides set on this building · <button type="button" style={{ ...linkBtn, fontSize: FONT_SIZE.micro }} onClick={resetBuildingGridOverrides}>reset</button>
+                          </div>
+                        )}
+                        <div style={{ ...muted, fontSize: FONT_SIZE.micro, marginTop: SPACE.sm }}>
+                          Column grid lives in <button type="button" style={{ ...linkBtn, fontSize: FONT_SIZE.micro }} onClick={() => jumpToStandards("building")}>Standards → Buildings ↗</button>
+                        </div>
+                      </Collapse>
+                    );
+                    // ---- NEW-8 — Appearance (replaces the standalone Properties section for a real building) ----
+                    const appearance = curStyle && (
+                      <Collapse sectionId="building-appearance" title="Appearance" defaultOpen summary="outline · fill">
+                        <PairedFieldHead left="Outline" right="Fill" />
+                        <PairedField label="Colour"
+                          left={<span style={ROW6}><ColorField value={toHex6(curStyle.stroke)} {...colorCtl((v) => setSelEl({ stroke: v }))} seed={COLOR_SEED} title="Outline color" /></span>}
+                          right={<span style={ROW6}><ColorField value={toHex6(curStyle.fill)} {...colorCtl((v) => setSelEl({ fill: v }))} seed={COLOR_SEED} title="Fill color" /></span>}
+                        />
+                        <PairedField label="Opacity" left={strokeOpacityCell} right={fillOpacityCell} />
+                        {strokeWidthRow}
+                        <div style={{ display: "flex", gap: SPACE.sm, marginTop: SPACE.md, alignItems: "center" }}>
+                          <button type="button" style={chip} onClick={setStyleDefault} title="Use these colors, opacity and outline width for every new building">Set as default</button>
+                          <button type="button" style={chip} onClick={clearElStyle} title="Revert this element to the type default">Reset</button>
+                          <span style={{ flex: 1 }} />
+                          <button type="button" style={linkBtn} onClick={() => jumpToStandards("colors")} title="New buildings start from Standards → Colors">Standards ↗</button>
+                        </div>
+                      </Collapse>
+                    );
+                    return (
+                      <>
+                        {/* NEW-1 — the ONE place a building's assigned number can be changed without deleting and
+                            recreating it is the inspector header's inline box (CLAUDE.md — the on-canvas label stays
+                            display-only, no click-to-edit there). A free number commits on blur/Enter with no
+                            confirmation; a number another building already holds blocks the plain commit and offers
+                            Swap or Insert instead, so two buildings can never end up sharing a number, even for a
+                            moment. Gaps left behind by an Insert (or by typing a number well past the current count)
+                            are expected and are never auto-compacted. */}
+                        {conflictDialog}
+                        {footprint}
+                        {loading}
+                        {structure}
+                        {appearance}
                       </>
                     );
                   })() : (
@@ -27918,7 +28138,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   chords — see arrangeSel/arrangePeers and /CLAUDE.md's owner-constraints entry 10. */}
               {/* Car parking carries its own Pin/Delete footer at the bottom of the spec sheet
                   above (B1790016 NEW-1) — excluded here so it isn't rendered twice. */}
-              {selEl.type !== "pond" && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (
+              {selEl.type !== "pond" && !bldgPanel && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (
               <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
                 <button style={chip} onClick={() => toggleLock(selEl.id)} title="Pin in place: prevents accidental moves/edits">{selEl.locked ? "📌 Unpin" : "📌 Pin"}</button>
                 <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:element" })}>Delete element</button>
@@ -29419,9 +29639,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         left={<span style={ROW6}><ColorField value={toHex6(curStyle.stroke)} {...colorCtl((v) => setSelEl({ stroke: v }))} seed={COLOR_SEED} title="Outline color" /></span>}
                         right={<span style={ROW6}><ColorField value={toHex6(curStyle.fill)} {...colorCtl((v) => setSelEl({ fill: v }))} seed={COLOR_SEED} title="Fill color" /></span>}
                       />
-                      <PairedField label="Opacity"
-                        right={<PercentField value={curStyle.fillOpacity} min={10} onCommit={(v) => { pushHistory(); setSelEl({ fillOpacity: v }); }} inputStyle={numInput} ariaLabel="Fill opacity" />}
-                      />
+                      <PairedField label="Opacity" left={strokeOpacityCell} right={fillOpacityCell} />
+                      {strokeWidthRow}
                       <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
                         <button style={{ ...chip, flex: 1 }} onClick={setStyleDefault} title={`Use these colors for every new ${(TYPE[selEl.type]?.label || "Element")}`}>Set as default</button>
                         <button style={chip} onClick={clearElStyle} title="Revert this element to the type default">Reset</button>
@@ -29443,16 +29662,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               so the standalone Properties section is suppressed for them. Car parking renders its
               own "Display" group inside the spec sheet above (B1790016 NEW-1), so it is suppressed
               here too — same reasoning as the pond exception right above. */}
-          {!multiStyleable && selEl && curStyle && selEl.type !== "pond" && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (
+          {!multiStyleable && selEl && curStyle && selEl.type !== "pond" && !bldgPanel && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (
             <Section title="Properties">
               <PairedFieldHead left="Outline" right="Fill" />
               <PairedField label="Colour"
                 left={<span style={ROW6}><ColorField value={toHex6(curStyle.stroke)} {...colorCtl((v) => setSelEl({ stroke: v }))} seed={COLOR_SEED} title="Outline color" /></span>}
                 right={<span style={ROW6}><ColorField value={toHex6(curStyle.fill)} {...colorCtl((v) => setSelEl({ fill: v }))} seed={COLOR_SEED} title="Fill color" /></span>}
               />
-              <PairedField label="Opacity"
-                right={<PercentField value={curStyle.fillOpacity} min={10} onCommit={(v) => { pushHistory(); setSelEl({ fillOpacity: v }); }} inputStyle={numInput} ariaLabel="Fill opacity" />}
-              />
+              <PairedField label="Opacity" left={strokeOpacityCell} right={fillOpacityCell} />
+              {strokeWidthRow}
               <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
                 <button style={{ ...chip, flex: 1 }} onClick={setStyleDefault} title={`Use these colors for every new ${(TYPE[selEl.type]?.label || "Element")}`}>Set as default</button>
                 <button style={chip} onClick={clearElStyle} title="Revert this element to the type default">Reset</button>
@@ -30766,6 +30984,9 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
   // handles, not a colour change.
   const waterFill = st.cartoWater ? "url(#grad-water)" : st.fill;
   const waterOp = st.cartoWater ? 0.8 : fillOp;
+  // NEW-8 — a pond's cartographic outline is a fixed 2 px (3 selected) UNTIL the element, or its type
+  // default, carries an explicit outline width; then that width wins (+1 while selected).
+  const cartoStrokeW = st.strokeWidthSet != null ? (isSel ? st.strokeWidthSet + 1 : st.strokeWidthSet) : (isSel ? 3 : 2);
   const elStroke = st.stroke; // B619: no accent recolor on select — the element keeps its own outline color (blue chrome cues the selection)
   // Detention "expand vs. existing" ghost: the locked baseline footprint, in world
   // feet, drawn dashed so the user sees what the pond grew from. Same path for the
@@ -30865,12 +31086,12 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
         {/* B617: a polygon element is a filled AREA (irregular pond / building / paving / landscape) —
             its outline is a filled-area edge, so it keeps a FIXED pixel weight (the fill carries the
             shape). Only linear features (roads, markup/utility lines) scale. */}
-        <path d={dPath} fill="none" stroke={outlineCutSegs ? "none" : elStroke} strokeWidth={st.cartoWater ? (isSel ? 3 : 2) : (isSel ? st.weight + 1.25 : st.weight)} />
+        <path d={dPath} fill="none" stroke={outlineCutSegs ? "none" : elStroke} strokeOpacity={st.strokeOpacity} strokeWidth={st.cartoWater ? cartoStrokeW : (isSel ? st.weight + 1.25 : st.weight)} />
         {outlineCutSegs && outlineCutSegs.length > 0 && (
           <g data-testid="polygon-outline-cut" data-el-id={el.id}>
             {outlineCutSegs.map((seg, i) => (
               <polyline key={`polol${i}`} points={seg.map((q) => { const sp = f2p(q); return `${sp.x},${sp.y}`; }).join(" ")}
-                fill="none" stroke={elStroke} strokeWidth={st.cartoWater ? (isSel ? 3 : 2) : (isSel ? st.weight + 1.25 : st.weight)}
+                fill="none" stroke={elStroke} strokeOpacity={st.strokeOpacity} strokeWidth={st.cartoWater ? cartoStrokeW : (isSel ? st.weight + 1.25 : st.weight)}
                 strokeLinecap="butt" pointerEvents="none" />
             ))}
           </g>
@@ -31043,7 +31264,7 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
     const stripeLines = inNetwork ? (roadNet.stripes.get(el.id) || []) : roadCurbLines(el, settings, sharpFor(el), roadNet && roadNet.trims ? roadNet.trims.get(el.id) : undefined);
     stripeLines.forEach((cl, i) => {
       if (!cl || cl.length < 2) return;
-      rparts.push(<polyline key={`curb${i}`} points={cl.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")} fill="none" stroke={st.stroke} strokeWidth={curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX * lfK)} pointerEvents="none" />);
+      rparts.push(<polyline key={`curb${i}`} points={cl.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ")} fill="none" stroke={st.stroke} strokeOpacity={st.strokeOpacity} strokeWidth={st.strokeWidthSet ?? curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX * lfK)} pointerEvents="none" />);
     });
     // Travel-width dimension anchored to the CENTERLINE MIDPOINT (excludes the curb — reads the
     // true travel width). B149 detail tier (a road width hides at site-overview zoom); kept while
@@ -31119,9 +31340,9 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
   // NEW-4 — a rect a drive tees into paints its FILL here but its OUTLINE as interrupted edges below,
   // so the entrance reads as one continuous curb instead of a line ruled across the opening.
   const outlineCut = roadNet && roadNet.outlineCuts ? roadNet.outlineCuts.get(el.id) : null;
-  const rectStrokeW = st.cartoWater ? (isSel ? 3 : 2) : el.type === "road" ? curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX * lfK) /* B719: legacy rect road border to scale */ : (isSel ? st.weight + 0.75 : st.weight);
+  const rectStrokeW = st.cartoWater ? cartoStrokeW : el.type === "road" ? (st.strokeWidthSet ?? curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX * lfK)) /* B719: legacy rect road border to scale; NEW-8 an explicit outline width wins */ : (isSel ? st.weight + 0.75 : st.weight);
   parts.push(<rect key="r" x={tl.x} y={tl.y} width={w} height={h} fill={ghostPath ? rectAddF : waterFill} fillOpacity={waterOp}
-    stroke={outlineCut ? "none" : st.stroke /* B619: no accent recolor on select */} strokeWidth={outlineCut ? 0 : rectStrokeW} rx={rx} />);
+    stroke={outlineCut ? "none" : st.stroke /* B619: no accent recolor on select */} strokeOpacity={st.strokeOpacity} strokeWidth={outlineCut ? 0 : rectStrokeW} rx={rx} />);
   if (outlineCut) {
     // NEW-1 — rectOutlineCutSegments returns WORLD feet with el.rot ALREADY BAKED into the corners,
     // but this whole branch renders inside a `rotate(el.rot, c)` group (see the return at the end of
@@ -31135,7 +31356,7 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
       <g key="olcut" transform={`rotate(${-(el.rot || 0)} ${c.x} ${c.y})`} data-testid="rect-outline-cut" data-el-id={el.id}>
         {segs.map((seg, i) => (
           <polyline key={`ol${i}`} points={seg.map((q) => { const sp = f2p(q); return `${sp.x},${sp.y}`; }).join(" ")}
-            fill="none" stroke={st.stroke} strokeWidth={rectStrokeW} strokeLinecap="butt" pointerEvents="none" />
+            fill="none" stroke={st.stroke} strokeOpacity={st.strokeOpacity} strokeWidth={rectStrokeW} strokeLinecap="butt" pointerEvents="none" />
         ))}
       </g>);
   }
@@ -31739,6 +31960,47 @@ function BuildingNumberField({ id, value, onAttempt, onCancelConflict, style, ar
         }
       }}
     />
+  );
+}
+// The per-element appearance overrides (back to the type default when dropped) — one list for the single
+// and the multi-selection Reset, so a new override key (NEW-8's outline pair) cannot be missed by one of them.
+const STYLE_OVERRIDE_KEYS = ["fill", "stroke", "fillOpacity", "strokeOpacity", "strokeWidth"];
+function withoutStyleOverrides(e) { const r = { ...e }; STYLE_OVERRIDE_KEYS.forEach((k) => { delete r[k]; }); return r; }
+// LoadingWallPicker — NEW-4. The building inspector's Loading control: a small plan of the building,
+// turned by its rotation so it matches the canvas, with four CLICKABLE walls (loaded = thick accent,
+// unloaded = thin neutral), each labelled outside it with its compass point, and a fixed north arrow.
+// All geometry and every click's meaning comes from lib/loadingWalls.js (pure, unit-tested); this only
+// draws it. Labels are positioned on the rotated frame but the text itself never rotates. A wall is a
+// real button (role/tab/Enter/Space) with a wide invisible hit line so a 3px wall is still easy to hit.
+// Module scope per MODULE-SCOPE-COMPONENTS; theme tokens only.
+function LoadingWallPicker({ b, onWall }) {
+  const L = wallPickerLayout(b);
+  const loaded = new Set(dockSidesFor(b).dockSides);
+  const poly = L.corners.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const a = L.arrow;
+  return (
+    <svg data-testid="loading-wall-picker" width={L.width} height={L.height} viewBox={`0 0 ${L.width} ${L.height}`} role="group" aria-label="Loading walls" style={{ flex: "none", display: "block" }}>
+      <polygon points={poly} fill="var(--surface-field)" stroke="none" />
+      {L.walls.map((w) => {
+        const on = loaded.has(w.side);
+        const act = () => onWall(w.side);
+        return (
+          <g key={w.side} data-wall={w.side} data-loaded={on ? "1" : "0"} data-compass={w.label} role="button" tabIndex={0} aria-pressed={on}
+            aria-label={`${w.label} wall — ${on ? "loaded" : "not loaded"}`} style={{ cursor: "pointer", outline: "none" }}
+            onClick={act} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); act(); } }}>
+            <title>{wallClickTitle(b, w.side)}</title>
+            <line x1={w.x1} y1={w.y1} x2={w.x2} y2={w.y2} stroke="transparent" strokeWidth={14} strokeLinecap="round" />
+            <line x1={w.x1} y1={w.y1} x2={w.x2} y2={w.y2} stroke={on ? "var(--accent)" : "var(--border-strong)"} strokeWidth={on ? 5 : 3} strokeLinecap="round" pointerEvents="none" />
+            <text x={w.lx} y={w.ly} textAnchor="middle" dominantBaseline="central" fontSize={FONT_SIZE.micro} fontWeight={on ? 700 : 600}
+              fill={on ? "var(--accent-text, var(--accent))" : "var(--text-secondary)"} pointerEvents="none" style={{ userSelect: "none" }}>{w.label}</text>
+          </g>
+        );
+      })}
+      <g data-testid="loading-wall-north" pointerEvents="none" aria-hidden="true">
+        <path d={`M${a.x} ${a.box.y0 + 1} L${a.x + 4.5} ${a.box.y0 + 10} L${a.x} ${a.box.y0 + 7.5} L${a.x - 4.5} ${a.box.y0 + 10} Z`} fill="var(--text-secondary)" />
+        <text x={a.x} y={a.box.y1 - 1.5} textAnchor="middle" fontSize={FONT_SIZE.micro} fontWeight={700} fill="var(--text-secondary)">N</text>
+      </g>
+    </svg>
   );
 }
 // A numeric input you can edit freely (clear it, type partial values) — it only
