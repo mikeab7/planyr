@@ -160,7 +160,7 @@ import { clampToBounds, initialFloatPos, reconcileForNarrow, shouldInspectorTake
 import { safeAreaInsets } from "../../shared/ui/safeAreaInsets.js";
 import { registerChromeDock } from "../../shared/ui/chromeDock.js";
 import { publishBottomSheetHeight } from "../../shared/ui/bottomSheetTracker.js";
-import { isPhoneSheetMode, heightForSnap, resolveDragSnap, keyboardInsetPx, clampSheetHeightForKeyboard, selectionCoverDeltaPx } from "./lib/propertiesSheet.js";
+import { isPhoneSheetMode, heightForSnap, resolveDragSnap, keyboardInsetPx, keyboardHeightPx, sheetMaxHeightForKeyboard, clampSheetHeightForKeyboard, selectionCoverDeltaPx } from "./lib/propertiesSheet.js";
 import { layoutViewportHeight } from "../../shared/ui/layoutViewport.js";
 import { isPhoneShape } from "./lib/deviceShape.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
@@ -18712,7 +18712,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [sheetSnap, setSheetSnap] = useState("half");        // "half" | "tall"
   const [sheetHeightPx, setSheetHeightPx] = useState(() => { try { return heightForSnap("half", window.innerHeight); } catch (_) { return 0; } });
   const [sheetAnimated, setSheetAnimated] = useState(false);
-  const [sheetKbInset, setSheetKbInset] = useState(0);       // px the on-screen keyboard covers
+  const [sheetKbInset, setSheetKbInset] = useState(0);       // px the on-screen keyboard covers, net of iOS's own scroll of the view (anchors the sheet's bottom)
+  const [sheetKbHeight, setSheetKbHeight] = useState(0);     // the keyboard's own height, scroll-free (caps the sheet so its top stays on screen)
   const [sheetBottomSafe, setSheetBottomSafe] = useState(0); // px of safe-area (home indicator) when the keyboard is closed
   const sheetDragRef = useRef(null);   // { startY, startHeight, pointerId } while the handle is being dragged
   const sheetOpenedRef = useRef(false); // did we already reset snap/height for THIS open?
@@ -18749,6 +18750,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!phoneSheetSolo) return undefined;
     const measure = () => {
       setSheetKbInset(keyboardInsetPx(window));
+      setSheetKbHeight(keyboardHeightPx(window));
       setSheetBottomSafe(safeAreaInsets().bottom);
     };
     measure();
@@ -18766,11 +18768,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // The ACTUAL rendered height + bottom offset, clamped so the keyboard can never push the sheet's
   // top edge off-screen (propertiesSheet.js's clampSheetHeightForKeyboard) — rising above the
   // keyboard is only safe once the sheet is also allowed to shrink to make room for it.
-  let sheetRenderH = 0, sheetRenderBottom = 0;
+  let sheetRenderH = 0, sheetRenderBottom = 0, sheetMaxH = null;
   if (phoneSheetSolo) {
     let vh = 0; try { vh = layoutViewportHeight(window); } catch (_) {} // B2088384: measured, never innerHeight (iOS moves it with the keyboard)
     sheetRenderBottom = sheetKbInset > 0 ? sheetKbInset : sheetBottomSafe;
     sheetRenderH = clampSheetHeightForKeyboard(sheetHeightPx, vh, sheetKbInset);
+    sheetMaxH = sheetMaxHeightForKeyboard(vh, sheetKbHeight);
   }
 
   /* B1215682/NEW-3 (owner iPhone review) — the global help/report "?" FAB (app/HelpReportControl.jsx)
@@ -26287,7 +26290,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               // clamp (`sheetRenderH`, from lib/propertiesSheet.js).
               position: "fixed", left: 0, right: 0, bottom: sheetRenderBottom, zIndex: 1200,
               background: "var(--planner-panel)", display: "flex", flexDirection: "column", minHeight: 0,
-              height: sheetRenderH, maxHeight: "calc(100vh - 48px)",
+              height: sheetRenderH, maxHeight: sheetMaxH != null ? sheetMaxH : "calc(100vh - 48px)", // keyboard up: never taller than the visible area (NEW-1)
               borderTopLeftRadius: RADIUS.lg, borderTopRightRadius: RADIUS.lg,
               boxShadow: "0 -10px 28px rgba(0,0,0,0.32)",
               transition: sheetAnimated ? "height 220ms cubic-bezier(0.2,0.8,0.2,1), bottom 160ms ease-out" : "none",
