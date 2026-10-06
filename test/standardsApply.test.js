@@ -263,7 +263,7 @@ describe("setback line standards", () => {
     expect(s.dash).toBe("7 6");
   });
   it("an empty / missing parcel is the same default (no crash on an unstyled ring)", () => {
-    expect(setbackLineStyle(null, "#b45309")).toEqual({ stroke: "#b45309", weight: 1.25, dash: "7 6" });
+    expect(setbackLineStyle(null, "#b45309")).toEqual({ stroke: "#b45309", weight: 1.25, dash: "7 6", opacity: 1 });
     expect(setbackLineStyle({}, "#b45309").dash).toBe("7 6");
   });
   it("a per-parcel override wins over the theme default, key by key", () => {

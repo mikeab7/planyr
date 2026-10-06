@@ -77,7 +77,8 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   CURRENT resolvable tree (`depth`), never the STAMPED lineage depth (`lineageDepth`, used only by
   `parcelSplitNames` to keep the letter/digit alternation correct once the parent is gone) — read
   `siteModel.parcelDisplayInfo`'s header before touching either field.
-- **`parcelOps.js` + `components/ParcelsPanel.jsx` (B2134368–B2134370) — the Land tab's Parcels table and the ONE combine / ONE split.**
+- **Parcels panel REWORK (B2179968–B2179973, owner-approved 2026-10-06) — read before touching the Land tab.** `components/ParcelsPanel.jsx` is now only the LIST (header is just "Parcels"; one summary line; Active column; Add parcels ▾ / Edit parcels; checkboxes exist ONLY to Combine). A row opens `components/ParcelPage.jsx` — the parcel's own page (name · source chip · Source by provenance · tax table · Setbacks · Style). **Provenance is one rule** (`lib/parcelOrigin.js` `originKind`; `parcelRecord.parcelProvenance` delegates): a combine result is "Combined", DERIVED from its `combined.from` snapshot — never "Drawn". **Setbacks are BOUNDARY SECTIONS, not roles** (`lib/boundarySections.js` — corners, border changes, a curve stays one section; per-edge `pc.setbacks` is still the only stored value, a section is a view; user fixes ride sparse `pc.sectionBreaks`/`pc.sectionJoins`; the Front/Side/Rear role UI and the canvas role words are gone, `setbackRoles.js` survives only for the inherited street-abutment helpers' tests). `components/SetbackSections.jsx` is the sketch + list. **Lock changed meaning (NEW-5):** a boundary moves ONLY inside Edit parcels (`startMoveParcel` pans otherwise; corner grips and node insertion require `editingCorners`), Lock = "even Edit parcels can't touch it", off by default — a legacy `locked` with no `lockSem: 2` stamp reads as unlocked (`siteModel.withLockSemantics`). Style fields: `strokeOpacity`, `fillOpacity` (0 = no fill), `sbOpacity`, dash keys `dashdot`/`longdash`. Tax table: `lib/taxRates.js` — hidden everywhere until a county has a complete sourced per-account list (`TAX_COVERAGE` says why, per county). Guards: repo-root `test/` **boundarySections**, **taxRates**, **parcelOrigin**; live: ui-audit **verify-parcels-rework** (+ **verify-parcel-combine-split**).
+- **`parcelOps.js` + `components/ParcelsPanel.jsx` (B2134368–B2134370) — the ONE combine / ONE split (the table UI is superseded by the rework above).**
   `planCombine` / `planSplit` / `planRestoreCombined` / `planRestoreSplit` decide (pure; `mergeRings` is INJECTED, never restated),
   `SitePlanner.jsx` `combineParcelsAction` / `performSplit` / `restoreCombinedOriginals` / `restoreSplitOriginal` apply — the map
   toolbar and the panel both call them. Originals live INSIDE the tract (`combined.from`) / pieces (`splitFrom.from`) as snapshots,
@@ -1534,9 +1535,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   vector on purpose, so typing a setback can't reshuffle the labels. `parcelOffset.js` holds the setback
   ring's inward offset + `lineIntersect`, lifted out of `SitePlanner.jsx` unchanged so the buildable envelope
   is provable in a unit test. Guards: the repo-root `test/` suite **setbackRoles** (which runs the REAL
-  production snapshot `test/fixtures/weldParcelProduction.json`, site `sms7v3ua7ksy`) + the ui-audit harness
-  **verify-setback-roles** (that same geometry, driven in a browser: default tier, auto-assignment,
-  correction, one-input-many-sides, role chips, and the ring proven identical across all of it).
+  production snapshot `test/fixtures/weldParcelProduction.json`, site `sms7v3ua7ksy`) + (its browser harness was retired with the role UI — see the Parcels rework entry).
   **`roundabout.js` (NEW-5) — a roundabout at a road TERMINUS, and it is real rather than decorative
   in three specific ways.** (1) The pavement math knows: `roundaboutArea` is the ANNULUS (the island
   is landscaped, so counting it would overstate impervious cover — which is what detention is priced
