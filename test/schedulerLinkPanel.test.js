@@ -27,7 +27,7 @@ import {
 
 // The owner's starting state: routed at an unlinked site, iframe ready, empty state showing.
 const UNLINKED = {
-  ready: true, projectId: "smrjdgmlinea",
+  ready: true, listLoaded: true, projectId: "smrjdgmlinea",
   linkedSchedule: null, routedSiteName: "Tsakiris",
 };
 
