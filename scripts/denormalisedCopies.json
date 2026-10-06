@@ -471,6 +471,13 @@
       "custom_name",
       "place_id"
     ],
+    "food_lists": [
+      "name"
+    ],
+    "food_list_items": [
+      "custom_name",
+      "place_id"
+    ],
     "food_dish_wishlist": [
       "custom_name",
       "dish_name",
