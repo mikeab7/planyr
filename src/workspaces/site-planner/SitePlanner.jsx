@@ -208,6 +208,8 @@ import { setCanvasClip, getCanvasClip, hasCanvasClip, setOverlayClip, getOverlay
 import { remapBondRefs, carryHostRoleTags } from "./lib/bondRemap.js";
 import { SETBACK_CHIP, setbackChipPlateW, setbackChipSpawn, numEditBox } from "./lib/numEditBox.js";
 import NumEditField from "./components/NumEditField.jsx";
+import { RailSplit, RailHeading } from "./components/RailSplit.jsx";
+import { roadPill, parkingPill, buildingPill } from "./lib/toolRailModel.js";
 import { usePalette } from "../../shared/theme/ThemeProvider.jsx";
 import { NUM_FONT, TABULAR_NUMS } from "../../shared/theme/typography.js";
 import { pickInMarquee, hasSelMod, nextSelection } from "../../shared/markup/selection.js";
@@ -647,6 +649,11 @@ const ICON_PATHS = {
   select: <path d="M4 2.5 L12.8 8 L8.8 9 L11.2 13.6 L9.2 14.6 L6.9 9.9 L4 12.4 Z" fill="currentColor" stroke="none" />,
   parcel: <path d="M3 5.2 L8 2.6 L13.2 5.6 L12.2 12.4 L4.2 13.2 Z" />,
   building: <><rect x="2.5" y="4" width="11" height="8.5" rx="0.5" /><path d="M5.5 12.5 v-2.5 h2 v2.5 M10 6.8 h1.5 M4.5 6.8 H6" /></>,
+  // NEW-1 (right tool rail) — the Building row's icon SHOWS the current dock layout: a short bar along
+  // each loaded long side of the rectangle (cross-dock = both, single-load = one, no docks = none).
+  buildingNone: <rect x="2.5" y="4.5" width="11" height="7" rx="0.5" />,
+  buildingSingle: <><rect x="2.5" y="4.5" width="11" height="7" rx="0.5" /><path d="M5 14 H11" /></>,
+  buildingCross: <><rect x="2.5" y="4.5" width="11" height="7" rx="0.5" /><path d="M5 2 H11 M5 14 H11" /></>,
   paving: <><rect x="2.5" y="2.5" width="11" height="11" rx="1" /><path d="M2.5 9.8 L9.8 2.5 M6.2 13.5 L13.5 6.2" /></>,
   parking: <path d="M5.2 13.5 V2.8 h3.6 a3.1 3.1 0 0 1 0 6.2 H5.2" />,
   trailer: <><rect x="1.8" y="4.5" width="9" height="5.5" rx="0.5" /><path d="M10.8 6.5 h2.6 l0.8 2.4 v1.1 h-3.4" /><circle cx="4.6" cy="11.8" r="1.3" /><circle cx="12.2" cy="11.8" r="1.3" /></>,
@@ -18777,10 +18784,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
   /* ----------------------------- UI ----------------------------- */
   // Bluebeam-style left rail: a thin column of small buttons, each opening one menu.
-  const railHdr = (t) => <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase", color: PAL.chromeMuted, padding: "8px 4px 4px" }}>{t}</div>;
+  const railHdr = (t) => <RailHeading>{t}</RailHeading>;
   // NEW-1 (B900416) — one hairline between RAIL GROUPS only (never between rows inside a group,
   // never inside a group's own dropdown) — the owner's rail-redesign brief, change 2.
-  const railDivider = () => <div data-rail-divider="1" style={{ borderTop: `1px solid ${PAL.chromeLine}`, margin: "3px 2px 1px" }} />;
   // B721 — workflow order (was build order Yield/Parcel/Analysis…): you pick the land
   // first (Parcel), screen it (Analysis), read the result (Yield), edit a selected element
   // (Properties), bring in backdrops (References), then defaults (Standards). Icons are real
@@ -19021,7 +19027,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     background: active ? PAL.ember : (open ? "var(--hover-chrome)" : "transparent"),
     color: active ? PAL.onAccent : PAL.chromeInk,
     fontWeight: active ? 650 : 500,
-    boxShadow: active ? "0 2px 8px rgba(0,0,0,0.28)" : "none", // neutral shadow (was the retired ember glow)
+    boxShadow: "none", // NEW-1 (right rail): an armed row is one FLAT shape — no drop shadow
   });
   // B925 — the trailing keyboard-shortcut / dropdown-caret on a tool-rail row. De-emphasized vs
   // the tool LABEL through a muted chrome TOKEN + lighter weight, never an opacity fade (the house
@@ -25938,7 +25944,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         {/* right-side tool rail — dark chrome. On phones it overlays the canvas
             (slide-in from the right) instead of permanently eating 168px (B113). */}
         {narrow && mobileTools && <div onClick={() => setMobileTools(false)} style={{ position: "absolute", inset: 0, order: 2, zIndex: 1200, background: "rgba(20,18,15,0.35)" }} />}
-        <div className="dark-scroll" style={{ width: narrow ? 200 : 168, flex: "none", order: 3, background: PAL.chrome, borderLeft: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", gap: 3, padding: "4px 11px 13px",
+        <div className="dark-scroll rail-scroll" style={{ width: narrow ? 200 : 168, flex: "none", order: 3, background: PAL.chrome, borderLeft: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", gap: 3, padding: "4px 11px 13px",
           overflowY: "auto", minHeight: 0,
           position: narrow ? "absolute" : "relative", right: 0, top: 0, bottom: narrow ? 0 : undefined,
           zIndex: narrow ? 1205 : 30,
@@ -25971,10 +25977,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               Road/Parking/Easement do, so both halves open the SAME menu — there is nothing for the
               row to do differently from the caret. */}
           <div ref={boundaryAnchor} style={{ position: "relative" }}>
-            <div style={{ display: "flex", gap: 2 }}>
-              <button className={`rbtn${["parcel", "split"].includes(tool) || mergePick || boundaryEdit ? " on" : ""}`} style={{ ...rbtn(["parcel", "split"].includes(tool) || mergePick || boundaryEdit, toolMenu), flex: 1 }} onClick={() => setToolMenu((o) => !o)} aria-haspopup="menu" aria-expanded={toolMenu} data-testid="rail-parcel-tools" title="Everything you can do to a parcel — draw, plot from a deed, split, combine, reshape, remove"><ToolIcon id="parcel" /> {PARCEL_SURFACES.rail.name}</button>
-              <button className={`rbtn${["parcel", "split"].includes(tool) || mergePick || boundaryEdit ? " on" : ""}`} style={{ ...rbtn(["parcel", "split"].includes(tool) || mergePick || boundaryEdit, toolMenu), width: narrow ? 44 : 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setToolMenu((o) => !o)} aria-haspopup="menu" aria-expanded={toolMenu} aria-label="Parcel tools">▾</button>
-            </div>
+            <RailSplit icon={<ToolIcon id="parcel" />} label={PARCEL_SURFACES.rail.name} narrow={narrow}
+              active={["parcel", "split"].includes(tool) || mergePick || boundaryEdit}
+              rowStyle={rbtn(["parcel", "split"].includes(tool) || mergePick || boundaryEdit, toolMenu)}
+              onMain={() => setToolMenu((o) => !o)} expanded={toolMenu} testid="rail-parcel-tools"
+              mainProps={{ "aria-haspopup": "menu", title: "Everything you can do to a parcel — draw, plot from a deed, split, combine, reshape, remove" }}
+              onCaret={() => setToolMenu((o) => !o)} caretLabel="Parcel tools" />
             {/* NEW-3 (B849586) — `gap={0}` gives the flyout an UNBROKEN shared edge with the rail
                 instead of floating with a visible seam: the panel's right edge sits flush against
                 the rail's left edge, so it reads as a surface that belongs to the rail rather than a
@@ -26045,17 +26053,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </AnchoredMenu>
           </div>
 
-          {railDivider()}
-          {railHdr("Measure")}
-
           {/* measure with line / polyline / area / count modes — promoted to sit just below Tools (B605) */}
           <div ref={measureAnchor} style={{ position: "relative" }}>
-            <div style={{ display: "flex", gap: 2 }}>
-              <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure", measureMenu), flex: 1 }} onClick={() => selectTool("measure")} aria-pressed={tool === "measure"} aria-expanded={measureMenu}>
-                <ToolIcon id="measure" /> Measure
-              </button>
-              <button className={`rbtn${tool === "measure" ? " on" : ""}`} style={{ ...rbtn(tool === "measure", measureMenu), width: narrow ? 44 : 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setMeasureMenu((o) => !o)} aria-haspopup="menu" aria-expanded={measureMenu} aria-label="Measure modes">▾</button>
-            </div>
+            <RailSplit icon={<ToolIcon id="measure" />} label="Measure" narrow={narrow} active={tool === "measure"}
+              rowStyle={rbtn(tool === "measure", measureMenu)} onMain={() => selectTool("measure")} expanded={measureMenu}
+              mainProps={{ "aria-pressed": tool === "measure" }}
+              onCaret={() => setMeasureMenu((o) => !o)} caretLabel="Measure modes" />
             {/* NEW-4 (B849587) — `below-right`, anchored on the WHOLE split control: the panel's
                 right edge lands under the caret's own right edge (the control actually pressed),
                 never off to the left of the entire row. */}
@@ -26067,7 +26070,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             </AnchoredMenu>
           </div>
 
-          {railDivider()}
           {railHdr("Site elements")}
 
           {DRAW_TYPES.filter((id) => id !== "trailer").map((id) => {
@@ -26078,12 +26080,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             if (id === "building") {
               return (
                 <div key={id} ref={buildingAnchor} style={{ position: "relative" }}>
-                  <div style={{ display: "flex", gap: 2 }}>
-                    <button className={`rbtn${tool === "building" ? " on" : ""}`} style={{ ...rbtn(tool === "building", buildingMenu), flex: 1 }} onClick={() => selectTool("building")} aria-pressed={tool === "building"} aria-expanded={buildingMenu}>
-                      <ToolIcon id="building" /> Building
-                    </button>
-                    <button className={`rbtn${tool === "building" ? " on" : ""}`} style={{ ...rbtn(tool === "building", buildingMenu), width: narrow ? 44 : 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setBuildingMenu((o) => !o)} aria-haspopup="menu" aria-expanded={buildingMenu} aria-label="Dock layout">▾</button>
-                  </div>
+                  {(() => {
+                    const bp = buildingPill(buildingDock);
+                    return (
+                      <RailSplit icon={<ToolIcon id={{ cross: "buildingCross", single: "buildingSingle", none: "buildingNone" }[bp.kind]} />} label="Building" narrow={narrow} active={tool === "building"}
+                        rowStyle={rbtn(tool === "building", buildingMenu)} onMain={() => selectTool("building")} expanded={buildingMenu}
+                        mainProps={{ "aria-pressed": tool === "building" }}
+                        onCaret={() => setBuildingMenu((o) => !o)} caretLabel={bp.aria} valueTitle={bp.title} />
+                    );
+                  })()}
                   <AnchoredMenu open={buildingMenu} onClose={() => setBuildingMenu(false)} anchorRef={buildingAnchor} placement="below-right" width={200} panelStyle={menuPanel}>
                     <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Dock layout</div>
                     {[["single", "Single-load (1 side)"], ["cross", "Cross-dock (2 sides)"], ["none", "No docks"]].map(([k, label]) => (
@@ -26103,12 +26108,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               const parkingOn = tool === "parking" || tool === "trailer";
               return (
                 <div key={id} ref={parkingAnchor} style={{ position: "relative" }}>
-                  <div style={{ display: "flex", gap: 2 }}>
-                    <button className={`rbtn${parkingOn ? " on" : ""}`} style={{ ...rbtn(parkingOn, parkingMenu), flex: 1 }} onClick={() => selectTool(parkingKind === "trailer" ? "trailer" : "parking")} aria-pressed={parkingOn} aria-expanded={parkingMenu} title={parkingKind === "trailer" ? "Trailer Parking" : "Car Parking"}>
-                      <ToolIcon id="parking" /> Parking
-                    </button>
-                    <button className={`rbtn${parkingOn ? " on" : ""}`} style={{ ...rbtn(parkingOn, parkingMenu), width: narrow ? 44 : 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setParkingMenu((o) => !o)} aria-haspopup="menu" aria-expanded={parkingMenu} aria-label="Parking type">▾</button>
-                  </div>
+                  {(() => {
+                    const pp = parkingPill({ kind: parkingKind, stallW: settings.stallW, stallDepth: sd, trailerW: settings.trailerW, trailerL: settings.trailerL });
+                    return (
+                      <RailSplit icon={<ToolIcon id="parking" />} label="Parking" narrow={narrow} active={parkingOn}
+                        rowStyle={rbtn(parkingOn, parkingMenu)} onMain={() => selectTool(parkingKind === "trailer" ? "trailer" : "parking")} expanded={parkingMenu}
+                        mainProps={{ "aria-pressed": parkingOn, title: parkingKind === "trailer" ? "Trailer Parking" : "Car Parking" }}
+                        onCaret={() => setParkingMenu((o) => !o)} caretLabel={pp ? pp.aria : "Parking type"}
+                        value={pp ? pp.text : null} valueTitle={pp ? pp.title : undefined} />
+                    );
+                  })()}
                   {/* Car's own row-preset rows, then Trailer's single entry — one flat list, no
                       divider between the two sub-options (see change 2 of the rail redesign). */}
                   <AnchoredMenu open={parkingMenu} onClose={() => setParkingMenu(false)} anchorRef={parkingAnchor} placement="below-right" width={248} panelStyle={menuPanel}>
@@ -26126,23 +26135,30 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               const roadIsCustom = +roadWidth > 0 && !roadPresets.includes(String(roadWidth));
               return (
                 <div key={id} ref={roadAnchor} style={{ position: "relative" }}>
-                  <div style={{ display: "flex", gap: 2 }}>
-                    <button className={`rbtn${tool === "road" ? " on" : ""}`} style={{ ...rbtn(tool === "road", roadMenu), flex: 1 }} onClick={() => selectTool("road")} aria-pressed={tool === "road"} aria-expanded={roadMenu}>
-                      <ToolIcon id="road" /> Road
-                    </button>
-                    <button className={`rbtn${tool === "road" ? " on" : ""}`} style={{ ...rbtn(tool === "road", roadMenu), width: narrow ? 44 : 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setRoadMenu((o) => !o)} aria-haspopup="menu" aria-expanded={roadMenu} aria-label="Road presets">▾</button>
-                  </div>
+                  {(() => {
+                    const rp = roadPill({ roadWidth, xsectionWidth: roadXSection ? curbToCurbWidth(roadXSection) : null });
+                    return (
+                      <RailSplit icon={<ToolIcon id="road" />} label="Road" narrow={narrow} active={tool === "road"}
+                        rowStyle={rbtn(tool === "road", roadMenu)} onMain={() => selectTool("road")} expanded={roadMenu}
+                        mainProps={{ "aria-pressed": tool === "road" }}
+                        onCaret={() => setRoadMenu((o) => !o)} caretLabel={rp ? rp.aria : "Road presets"}
+                        value={rp ? rp.text : null} valueTitle={rp ? rp.title : undefined} />
+                    );
+                  })()}
                   {/* NEW-1/NEW-2/NEW-3/NEW-4 — a row is JUST the width (no per-row how-to repeated five
                       times), the how-to + the curb-face-to-curb-face meaning live once in the footer,
                       "Free draw" is gone (a road is always a clicked centerline), and "Custom width…"
                       keeps an off-preset width (28′, 32′) reachable by the same centerline method. */}
                   <AnchoredMenu open={roadMenu} onClose={() => { setRoadMenu(false); setRoadCustom(false); }} anchorRef={roadAnchor} placement="below-right" width={230} panelStyle={menuPanel}>
                     <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Road width</div>
-                    {roadPresets.map((w) => (
-                      <button key={w} style={menuItem(tool === "road" && roadWidth === w)} onClick={() => { setRoadWidth(w); setRoadCustom(false); selectTool("road"); setRoadMenu(false); }}>{w}′</button>
-                    ))}
-                    <button style={menuItem(tool === "road" && roadIsCustom)} onClick={() => setRoadCustom((o) => !o)} aria-expanded={roadCustom || roadIsCustom} aria-haspopup="true">
-                      {roadIsCustom ? `Custom — ${Math.round(+roadWidth)}′` : "Custom width…"}
+                    {roadPresets.map((w) => {
+                      const cur = !roadXSection && roadWidth === w; // NEW-1 — the width the tool will draw
+                      return (
+                        <button key={w} data-current={cur || undefined} aria-current={cur || undefined} style={{ ...menuItem(tool === "road" && roadWidth === w), display: "flex", justifyContent: "space-between", alignItems: "center" }} onClick={() => { setRoadWidth(w); setRoadCustom(false); selectTool("road"); setRoadMenu(false); }}>{w}′{cur && <span aria-hidden="true">✓</span>}</button>
+                      );
+                    })}
+                    <button data-current={(!roadXSection && roadIsCustom) || undefined} aria-current={(!roadXSection && roadIsCustom) || undefined} style={{ ...menuItem(tool === "road" && roadIsCustom), display: "flex", justifyContent: "space-between", alignItems: "center" }} onClick={() => setRoadCustom((o) => !o)} aria-expanded={roadCustom || roadIsCustom} aria-haspopup="true">
+                      {roadIsCustom ? `Custom — ${Math.round(+roadWidth)}′` : "Custom width…"}{!roadXSection && roadIsCustom && <span aria-hidden="true">✓</span>}
                     </button>
                     {(roadCustom || roadIsCustom) && (
                       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 10px 6px" }}>
@@ -26181,12 +26197,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
           {/* Easement — folded into Site elements (B606); was its own section */}
           <div ref={easeAnchor} style={{ position: "relative" }}>
-            <div style={{ display: "flex", gap: 2 }}>
-              <button className={`rbtn${tool === "easement" ? " on" : ""}`} style={{ ...rbtn(tool === "easement", easeMenu), flex: 1 }} onClick={() => selectTool("easement")} aria-pressed={tool === "easement"} aria-expanded={easeMenu}>
-                <ToolIcon id="easement" /> Easement
-              </button>
-              <button className={`rbtn${tool === "easement" ? " on" : ""}`} style={{ ...rbtn(tool === "easement", easeMenu), width: narrow ? 44 : 26, flex: "none", padding: 0, justifyContent: "center" }} onClick={() => setEaseMenu((o) => !o)} aria-haspopup="menu" aria-expanded={easeMenu} aria-label="Easement options">▾</button>
-            </div>
+            <RailSplit icon={<ToolIcon id="easement" />} label="Easement" narrow={narrow} active={tool === "easement"}
+              rowStyle={rbtn(tool === "easement", easeMenu)} onMain={() => selectTool("easement")} expanded={easeMenu}
+              mainProps={{ "aria-pressed": tool === "easement" }}
+              onCaret={() => setEaseMenu((o) => !o)} caretLabel="Easement options" />
             <AnchoredMenu open={easeMenu} onClose={() => setEaseMenu(false)} anchorRef={easeAnchor} placement="below-right" width={248} panelStyle={menuPanel}>
               <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Input mode</div>
               {[["centerline", "Centerline + width"], ["boundary", "Boundary polygon"], ["parceledge", "Offset from parcel edge"]].map(([k, label]) => (
@@ -26216,7 +26230,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               is a plain button like every other draw tool — NO pre-draw popover: there is no mode to
               pick (a click vs. a drag is inferred per-gesture) and arc size lives in Properties, on
               the selected object, like every other style field. */}
-          {railDivider()}
           {railHdr("Markup")}
           {MARKUP_TOOLS.map((id) => {
             const t = TOOLS.find((x) => x.id === id);
