@@ -36,6 +36,7 @@ import { readFixture, buildFixtureState } from "./lib/fixtureSeeding.mjs";
 import { fixtureSite } from "./lib/planFixture.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { pacedWait } from "./lib/tabTiming.mjs";
+import { waitForSelectorReleased } from "./lib/waitRelease.mjs";
 import { selfTimeByFunction } from "./lib/cpuProfile.mjs";
 import { editCycleVerdict, linearFitXY } from "./lib/editCycle.mjs";
 
@@ -161,7 +162,7 @@ try {
   const cdp = await context.newCDPSession(page);
   await cdp.send("Performance.enable"); await cdp.send("HeapProfiler.enable");
   await page.goto(`${BASE}#/project/${SITE}/site`, { waitUntil: "load" });
-  await page.waitForSelector('[data-testid="planner-canvas"]', { timeout: 60000 });
+  await waitForSelectorReleased(page, '[data-testid="planner-canvas"]', { timeout: 60000 });   // never a bare waitForSelector: its ElementHandle retains the previous shell (B1439)
   await pacedWait(page, 3500);
   await assertMeasurable(page, "perf-edit-cycle");
 
