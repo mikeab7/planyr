@@ -14,8 +14,6 @@
  * (one source for fill / ink / open-ring) and only adjust the corners, the pill's padding and the
  * divider here, so a change to the row's look still happens in exactly one place.
  */
-import { RADIUS } from "../../../shared/ui/radius.js";
-
 export function RailHeading({ children }) {
   return <div className="rail-hdr" data-rail-heading="1">{children}</div>;
 }
@@ -27,17 +25,17 @@ export function RailSplit({
   value, valueTitle, testid, pillTestid,
 }) {
   const inner = active ? "color-mix(in srgb, var(--on-accent) 38%, transparent)" : "transparent";
-  const main = {
-    ...rowStyle, flex: 1, minWidth: 0, boxShadow: "none",
-    borderTopLeftRadius: RADIUS.md, borderBottomLeftRadius: RADIUS.md, borderTopRightRadius: 0, borderBottomRightRadius: 0, paddingRight: 2,
-  };
+  // Signature budget (ui-inventory): the label button is the SAME shape as every plain rail row (the
+  // row style already carries the 4px right padding), and the pill is the one other shape. The armed
+  // "one flat shape" is painted by the wrapper (`.rail-split.on`, index.css) with both halves
+  // transparent, so no half needs its own corner geometry.
+  const main = { ...rowStyle, flex: 1, minWidth: 0, boxShadow: "none" };
   const pill = {
     ...rowStyle, flex: "none", width: "auto", boxShadow: "none", gap: 1, justifyContent: "flex-end",
     // Tightened padding — the value pill gives up room, never the tool name (brief). Caret centre = 1 + pr + 6
     // for every pill (plain ones are held to `minWidth` and right-aligned), so the ▾ column cannot shift.
     padding: narrow ? "0 15px 0 6px" : "0 4px 0 5px", minWidth: narrow ? 44 : 26,
-    borderTopLeftRadius: 0, borderBottomLeftRadius: 0, borderTopRightRadius: RADIUS.md, borderBottomRightRadius: RADIUS.md, borderLeft: `1px solid ${inner}`,
-    fontWeight: active ? 650 : 600,
+    borderLeft: `1px solid ${inner}`, fontWeight: active ? 650 : 600,
   };
   return (
     <div className={`rail-split${active ? " on" : ""}`} data-rail-split={testid || undefined} style={{ display: "flex", gap: 0 }}>

@@ -18972,7 +18972,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // measured at 27px tall against Apple's 44px / Material's 48dp floor. `minHeight` (not just more
     // padding) is what actually guarantees the floor — a caret sibling overrides this padding to 0
     // (see the `▾` buttons below) and would otherwise stay tiny. Desktop is untouched.
-    padding: narrow ? "12px 10px" : "5px 10px", minHeight: narrow ? 44 : undefined,
+    padding: narrow ? "12px 10px" : "5px 4px 5px 10px", minHeight: narrow ? 44 : undefined,
     fontSize: FONT_SIZE.control, borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap",
     border: `1px solid ${open ? PAL.chromeMuted : "transparent"}`, fontFamily: "inherit",
     background: active ? PAL.ember : (open ? "var(--hover-chrome)" : "transparent"),

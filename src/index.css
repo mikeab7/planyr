@@ -705,6 +705,9 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
 /* The ▾ column: every caret is the same box, right-aligned inside its pill. */
 .rail-caret { display: inline-block; width: 12px; text-align: center; flex: none; }
 .rail-pill-val { font-size: 10.5px; letter-spacing: 0; white-space: nowrap; }
+.rail-split { border-radius: 8px; }
+.rail-split.on { background: var(--accent); }
+.rail-split.on > .rbtn { background: transparent !important; }
 .rail-split .rbtn:focus-visible { position: relative; z-index: 1; }
 
 /* dropdown menus (floating panels) */
