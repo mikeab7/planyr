@@ -8,19 +8,20 @@ import { supabase } from "../site-planner/lib/supabase.js";
 import { Button } from "../../shared/ui/controls.jsx";
 import { FONT_SIZE } from "../../shared/ui/designTokens.js";
 import { RADIUS } from "../../shared/ui/radius.js";
-import AdminPanel, { PanelState, useAdminLoad } from "./AdminPanel.jsx";
+import AdminPanel, { Card, PanelState, useAdminLoad } from "./AdminPanel.jsx";
+import { exactTime } from "./lib/adminFormat.js";
 import { fetchOps, shapeOps, recordSessionSweep, parseStillOpen, ago } from "./lib/adminPanels.js";
 
 function Digest({ title, d }) {
   return (
     <div style={{ minWidth: 0 }}>
-      <h3 style={{ margin: "0 0 4px", fontSize: FONT_SIZE.emphasis }}>{title}: {d.count}</h3>
+      <h4 style={{ margin: "0 0 4px", fontSize: FONT_SIZE.emphasis }}>{title}: {d.count}</h4>
       {d.recent.map((r) => (
         <div key={r.id} style={{ fontSize: FONT_SIZE.control, padding: "2px 0", wordBreak: "break-word" }}>
           <strong>{r.id}</strong> {r.title}
         </div>
       ))}
-      {d.count > d.recent.length && <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)" }}>…and {d.count - d.recent.length} more in the ledger</div>}
+      {d.count > d.recent.length && <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)" }}>…and {d.count - d.recent.length} more in the ledger</div>}
     </div>
   );
 }
@@ -61,31 +62,35 @@ export default function OpsSection() {
   const ops = data ? shapeOps(data) : null;
   const last = ops && ops.sweeps[0];
   return (
-    <AdminPanel id="ops" title="Ops" blurb="What is outstanding, and the state of Claude Code session clean-up.">
+    <AdminPanel id="ops" title="Ops" blurb="What is outstanding, and the state of Claude Code session clean-up." actions={<Button variant="ghost" size="sm" onClick={reload}>Refresh</Button>}>
       <PanelState loading={loading} error={error} onRetry={reload} />
       {ops && (
         <>
-          <h3 style={{ margin: 0, fontSize: FONT_SIZE.emphasis }}>Session sweeps</h3>
+          <Card title="Session sweeps">
           {last ? (
             <div style={{ fontSize: FONT_SIZE.control }}>
               Last sweep {ago(last.at)}: {last.archived} archived, {last.stillOpen.length} still open.
               {last.stillOpen.map((o, i) => <div key={i} style={{ padding: "2px 0" }}>• {o.title}{o.waitingOn ? ` — waiting on ${o.waitingOn}` : ""}</div>)}
               {last.note && <div style={{ color: "var(--text-secondary)" }}>{last.note}</div>}
             </div>
-          ) : <div style={{ fontSize: FONT_SIZE.control, color: "var(--text-tertiary)" }}>No sweep recorded yet.</div>}
-          <SweepForm onSaved={reload} />
+          ) : (
+            <PanelState empty emptyText="No session sweep recorded yet." emptyHint="A sweep logs how many Claude Code sessions were archived and what is still open. Record the first one below, or the weekly sweep run will."  />
+          )}
+          <div style={{ marginTop: 10 }}><SweepForm onSaved={reload} /></div>
           {ops.sweeps.length > 1 && (
             <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)" }}>
-              Earlier: {ops.sweeps.slice(1).map((s) => `${s.at.slice(0, 10)} (${s.archived} archived, ${s.stillOpen.length} open)`).join(" · ")}
+              Earlier: {ops.sweeps.slice(1).map((s) => `${new Date(s.at).toLocaleDateString()} (${s.archived} archived, ${s.stillOpen.length} open)`).join(" · ")}
             </div>
           )}
-          <h3 style={{ margin: "8px 0 0", fontSize: FONT_SIZE.emphasis }}>Outstanding work</h3>
+          </Card>
+          <Card title="Outstanding work">
           {!ops.backlog && !ops.verification ? (
-            <div style={{ fontSize: FONT_SIZE.control, color: "var(--text-tertiary)" }}>No ledger snapshot loaded yet.</div>
+            <PanelState empty emptyText="No ledger digest loaded yet." emptyHint="The digest is pushed from the repo (node scripts/ops-snapshot.mjs --sql); nothing on this page can create it." />
           ) : (
             <>
-              <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)" }}>
-                Digest of the repo ledger, taken {ago((ops.backlog || ops.verification).updatedAt)} — the ledger files stay canonical.
+              <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginBottom: 8 }}>
+                Digest taken <strong title={exactTime((ops.backlog || ops.verification).updatedAt)}>{ago((ops.backlog || ops.verification).updatedAt)}</strong> ({exactTime((ops.backlog || ops.verification).updatedAt)}).
+                It is a snapshot of the repo ledger, written by <code>node scripts/ops-snapshot.mjs --sql</code> run from the repo — not recomputed by this page, so “Refresh” re-reads the stored digest and shows a newer one only after that script has run. The ledger files stay canonical.
                 {ops.backlog && ops.backlog.open.topTags.length > 0 && ` Biggest themes: ${ops.backlog.open.topTags.map((x) => `${x.tag} ${x.count}`).join(", ")}.`}
               </div>
               <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
@@ -95,6 +100,7 @@ export default function OpsSection() {
               </div>
             </>
           )}
+          </Card>
         </>
       )}
     </AdminPanel>

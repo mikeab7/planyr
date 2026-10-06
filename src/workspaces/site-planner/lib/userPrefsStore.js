@@ -35,6 +35,15 @@ export const EMPTY_PREFS = {
   newProjectSharing: DEFAULT_SHARE_PREF,
   roadCrossSectionPresets: [],
   sitesPanel: { order: [], collapsed: { complete: true, dead: true }, pinned: [], sort: "recent" },
+  // NEW-1 (2026-10-05) — PDF export choices that follow the PERSON, not the plan. `flattenMarkups`
+  // is the compose screen's "Flatten markups" toggle: false (the default) writes markups into the
+  // PDF as editable Bluebeam/Acrobat annotations, true burns them into the page. Remembered per user.
+  exportPrefs: { flattenMarkups: false },
+};
+
+const normalizeExportPrefs = (raw) => {
+  const r = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  return { flattenMarkups: r.flattenMarkups === true };
 };
 
 const SITES_PANEL_SORTS = new Set(["largest", "az", "recent"]);
@@ -60,6 +69,7 @@ const normalize = (p) => ({
   newProjectSharing: normalizeSharePref(p && p.newProjectSharing),
   roadCrossSectionPresets: normalizeXSectionPresets(p && p.roadCrossSectionPresets),
   sitesPanel: normalizeSitesPanel(p && p.sitesPanel),
+  exportPrefs: normalizeExportPrefs(p && p.exportPrefs),
   planStandards: {
     parcelStyle: { ...((p && p.planStandards && p.planStandards.parcelStyle) || {}) },
     typeStyles: { ...((p && p.planStandards && p.planStandards.typeStyles) || {}) },
@@ -199,6 +209,12 @@ export function getStandardPref(prefs, group, key, type) {
 export function setSitesPanelPref(prefs, patch) {
   const p = normalize(prefs);
   return { ...p, sitesPanel: normalizeSitesPanel({ ...p.sitesPanel, ...patch }) };
+}
+
+/** Set the PDF "Flatten markups" choice (pure edit — persist it through `updatePrefs`). */
+export function setExportPref(prefs, patch) {
+  const p = normalize(prefs);
+  return { ...p, exportPrefs: normalizeExportPrefs({ ...p.exportPrefs, ...patch }) };
 }
 
 export const _normalizePrefs = normalize;

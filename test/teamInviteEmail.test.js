@@ -1,14 +1,18 @@
 /* NEW-1 — team invite emails. Drives the real server core (functions/api/lib/inviteEmail.js)
- * with a fake Supabase + fake Resend, and the real client wrappers (lib/teams.js) with a mocked
+ * with a fake Supabase + fake Gmail, and the real client wrappers (lib/teams.js) with a mocked
  * supabase client + fetch. Acceptance rows: invite → exactly one send · resend → one send, no new
  * row · second resend inside the window refused server-side · a send failure keeps the row and
  * surfaces the failure · provider failure/no key releases the throttle slot. */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
+import { generateKeyPairSync } from "node:crypto";
 import { handleInviteEmail, buildInviteEmail, inviteLink } from "../functions/api/lib/inviteEmail.js";
 import { resendCooldownMs, groupRoster } from "../src/workspaces/site-planner/lib/teamRoster.js";
 
-const ENV = { SUPABASE_URL: "https://x.supabase.co", SUPABASE_ANON_KEY: "anon", RESEND_API_KEY: "re_test" };
+// A real throwaway RSA key so the service-account JWT is genuinely signed in these tests.
+const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+const SA_JSON = JSON.stringify({ client_email: "inviter@proj.iam.gserviceaccount.com", private_key: privateKey.export({ type: "pkcs8", format: "pem" }) });
+const ENV = { SUPABASE_URL: "https://x.supabase.co", SUPABASE_ANON_KEY: "anon", GMAIL_SERVICE_ACCOUNT_JSON: SA_JSON, INVITE_SENDER: "mike@planyr.io" };
 const CLAIM_OK = { ok: true, invite_id: "inv1", email: "a@b.com", role: "member", team_name: "HIP Houston", inviter_name: "Mike Abbott", prev_sent_at: null };
 
 function fakeNet({ claim = CLAIM_OK, resend = { ok: true, status: 200 } } = {}) {
@@ -19,13 +23,14 @@ function fakeNet({ claim = CLAIM_OK, resend = { ok: true, status: 200 } } = {}) 
     if (u.endsWith("/auth/v1/user")) return new Response(JSON.stringify({ id: "u1", email: "m@x.com" }), { status: 200 });
     if (u.endsWith("/rpc/claim_invite_send")) return new Response(JSON.stringify(claim), { status: 200 });
     if (u.endsWith("/rpc/release_invite_send")) return new Response("null", { status: 200 });
-    if (u === "https://api.resend.com/emails") {
+    if (u === "https://oauth2.googleapis.com/token") return new Response('{"access_token":"gat","expires_in":3600}', { status: 200 });
+    if (u === "https://gmail.googleapis.com/gmail/v1/users/me/messages/send") {
       if (resend.throw) throw new Error("network down");
-      return new Response(resend.ok ? '{"id":"e1"}' : '{"message":"domain not verified"}', { status: resend.status });
+      return new Response(resend.ok ? '{"id":"m1"}' : '{"error":"forbidden"}', { status: resend.status });
     }
     throw new Error("unexpected " + u);
   });
-  return { fetchImpl, calls, sends: () => calls.filter((c) => c.url.includes("api.resend.com")).length, released: () => calls.filter((c) => c.url.endsWith("release_invite_send")).length };
+  return { fetchImpl, calls, sends: () => calls.filter((c) => c.url.includes("gmail.googleapis.com")).length, released: () => calls.filter((c) => c.url.endsWith("release_invite_send")).length };
 }
 const req = (body = { teamId: "t1", email: "a@b.com" }, auth = "Bearer tok") =>
   new Request("https://planyr.io/api/team/invite-email", { method: "POST", headers: { authorization: auth, "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -36,12 +41,18 @@ describe("server send core", () => {
     const net = fakeNet(); const r = await run(net);
     expect(r).toEqual({ status: 200, body: { ok: true } });
     expect(net.sends()).toBe(1);
-    const sent = JSON.parse(net.calls.find((c) => c.url.includes("resend")).init.body);
-    expect(sent.from).toMatch(/@planyr\.io>/);
-    expect(sent.to).toEqual(["a@b.com"]);
-    expect(sent.subject).toBe("Mike Abbott invited you to HIP Houston on Planyr");
-    expect(sent.html).toContain("HIP Houston"); expect(sent.text).toContain("a@b.com");
-    expect(sent.text).toContain("auth=signin&email=a%40b.com");
+    const raw = JSON.parse(net.calls.find((c) => c.url.includes("gmail.googleapis.com")).init.body).raw;
+    const mime = Buffer.from(raw, "base64url").toString("utf8");
+    expect(mime).toMatch(/^From: Planyr <mike@planyr\.io>/m);
+    expect(mime).toMatch(/^To: a@b\.com/m);
+    const subj = /^Subject: =\?UTF-8\?B\?(.+)\?=/m.exec(mime)[1];
+    expect(Buffer.from(subj, "base64").toString("utf8")).toBe("Mike Abbott invited you to HIP Houston on Planyr");
+    const parts = mime.split(/--planyr-[a-z0-9]+/).map((p) => Buffer.from(p.split("\r\n\r\n")[1] || "", "base64").toString("utf8"));
+    expect(parts.join("\n")).toContain("HIP Houston");
+    expect(parts.join("\n")).toContain("auth=signin&email=a%40b.com");
+    // the token request carried the delegated mailbox as `sub`
+    const tokCall = net.calls.find((c) => c.url.includes("oauth2.googleapis.com"));
+    if (tokCall) { const jwt = new URLSearchParams(tokCall.init.body).get("assertion").split(".")[1]; expect(JSON.parse(Buffer.from(jwt, "base64url")).sub).toBe("mike@planyr.io"); }
     expect(net.released()).toBe(0);
   });
   it("a second send inside the window is refused (429) and sends nothing", async () => {
@@ -60,8 +71,8 @@ describe("server send core", () => {
     const net = fakeNet({ resend: { throw: true } });
     expect((await run(net)).status).toBe(502); expect(net.released()).toBe(1);
   });
-  it("no RESEND_API_KEY yet → 503 not_configured, slot released, no send", async () => {
-    const net = fakeNet(); const r = await run(net, { ...ENV, RESEND_API_KEY: undefined });
+  it("no Gmail credentials yet → 503 not_configured, slot released, no send", async () => {
+    const net = fakeNet(); const r = await run(net, { ...ENV, GMAIL_SERVICE_ACCOUNT_JSON: undefined });
     expect(r.status).toBe(503); expect(r.body.reason).toBe("not_configured");
     expect(net.sends()).toBe(0); expect(net.released()).toBe(1);
   });

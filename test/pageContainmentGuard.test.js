@@ -63,6 +63,22 @@ function makeFakeWindow({ visualViewport = true } = {}) {
   return { win, fire, fireVv, listeners, vvListeners };
 }
 
+describe("pageContainmentGuard — detectDrift keyboard inputs (NEW-1)", () => {
+  it("focused editable → null (the scroll is Safari's keyboard avoidance)", () => {
+    expect(detectDrift({ scrollY: 280, focusedEditable: true })).toBe(null);
+  });
+  it("shrunken visual viewport → null", () => {
+    expect(detectDrift({ scrollY: 280, layoutHeight: 800, vvHeight: 456 })).toBe(null);
+  });
+  it("neither → still reports", () => {
+    expect(detectDrift({ scrollY: 280, layoutHeight: 800, vvHeight: 800 }).kind).toBe("page-containment-drift");
+    expect(detectDrift({ scrollY: 280 }).extra.scrollDrift).toBe(true);
+  });
+  it("scale drift is reported even while the keyboard is up", () => {
+    expect(detectDrift({ scale: 1.4, focusedEditable: true }).extra.scaleDrift).toBe(true);
+  });
+});
+
 describe("pageContainmentGuard — installPageContainmentGuard (DOM-driven, injected reporter)", () => {
   it("does nothing at rest — a normal session never reports or scrolls", () => {
     const { win, fire } = makeFakeWindow();
@@ -171,32 +187,56 @@ describe("NEW-6a — a scroll with the soft keyboard up is iOS revealing the fie
     win.document.createElement = () => { probeEl.ownerDocument = win.document; return probeEl; };
     expect(keyboardUp(win)).toBe(true);
   });
-  it("still pins the document back, but ANNOUNCES the heal so the canvas can reveal the caret", () => {
+  it("NEW-1 — with the keyboard up the guard LEAVES Safari's scroll alone, reports nothing, and announces so the canvas can re-check the caret", () => {
     const { win, fire } = withKeyboard(true);
     const reporter = vi.fn();
     installPageContainmentGuard(win, reporter);
     win.scrollY = 264;                       // the production figure: ~a keyboard's height
     fire("scroll");
-    expect(win.scrollTo).toHaveBeenCalledWith(0, 0);
-    expect(win.dispatchEvent).toHaveBeenCalledTimes(1);
+    expect(win.scrollTo).not.toHaveBeenCalled();
+    expect(win.scrollY).toBe(264);
+    expect(reporter).not.toHaveBeenCalled();
     expect(win.dispatchEvent.mock.calls[0][0].type).toBe("planyr:viewport-healed");
   });
-  it("…and reports it as its OWN kind, so a real stray drag is still distinguishable", () => {
-    const { win, fire } = withKeyboard(true);
-    const reporter = vi.fn();
-    installPageContainmentGuard(win, reporter);
-    win.scrollY = 264;
-    fire("scroll");
-    expect(reporter.mock.calls[0][0]).toBe("page-containment-keyboard-reveal");
-    expect(reporter.mock.calls[0][2].keyboardUp).toBe(true);
-  });
-  it("with NO keyboard a scroll is still the impossible drift, unchanged, and nothing is announced", () => {
+  it("NEW-1 — a focused editable alone is enough (the visual viewport has not shrunk yet)", () => {
     const { win, fire } = withKeyboard(false);
     const reporter = vi.fn();
     installPageContainmentGuard(win, reporter);
+    win.scrollY = 280;
+    fire("scroll");
+    expect(win.scrollTo).not.toHaveBeenCalled();
+    expect(reporter).not.toHaveBeenCalled();
+  });
+  it("NEW-1 — a shrunken visual viewport alone is enough (nothing focused, e.g. the field blurred mid-lift)", () => {
+    const { win, fire } = withKeyboard(true);
+    win.document.activeElement = { isContentEditable: false, tagName: "BODY" };
+    const reporter = vi.fn();
+    installPageContainmentGuard(win, reporter);
+    win.scrollY = 280;
+    fire("scroll");
+    expect(win.scrollTo).not.toHaveBeenCalled();
+    expect(reporter).not.toHaveBeenCalled();
+  });
+  it("with NO keyboard and nothing focused a scroll is still the impossible drift: healed + reported, nothing announced", () => {
+    const { win, fire } = withKeyboard(false);
+    win.document.activeElement = { isContentEditable: false, tagName: "BODY" };
+    const reporter = vi.fn();
+    installPageContainmentGuard(win, reporter);
     win.scrollY = 264;
     fire("scroll");
+    expect(win.scrollTo).toHaveBeenCalledWith(0, 0);
     expect(reporter.mock.calls[0][0]).toBe("page-containment-drift");
     expect(win.dispatchEvent).not.toHaveBeenCalled();
+  });
+  it("a pinch (scale drift) also shrinks the visual viewport — that is NOT a keyboard, and scale drift is still reported", () => {
+    const { win, fire } = withKeyboard(true);
+    win.document.activeElement = { isContentEditable: false, tagName: "BODY" };
+    win.visualViewport.scale = 1.5;
+    const reporter = vi.fn();
+    installPageContainmentGuard(win, reporter);
+    win.scrollY = 90;
+    fire("scroll");
+    expect(reporter.mock.calls[0][2].scaleDrift).toBe(true);
+    expect(reporter.mock.calls[0][2].scrollDrift).toBe(true);
   });
 });

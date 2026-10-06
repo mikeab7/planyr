@@ -216,8 +216,9 @@ const fail = (code, extra) => ({ ok: false, pieces: null, code, message: CUT_REA
  * below — one number, not a second one to keep in sync or disagree with.
  *
  * Two pieces of one cut are faces of the SAME planar arrangement, so a shared boundary is
- * EDGE-EXACT — this is the identical cancellation `SitePlanner.jsx`'s `mergeRings` uses to undo a
- * user-requested merge, specialised here to also carry `edgeSrc` (setback/role provenance) through
+ * EDGE-EXACT — this is the same edge cancellation the user-requested merge used before B2090352 (that merge is now
+ * `polyClip.mergeParcelRings`, a real union whose result for an exact split is the same outline — see
+ * test/parcelMerge.test.js's split-then-merge round trip), specialised here to also carry `edgeSrc` (setback/role provenance) through
  * the join. If merging the smallest sliver into its best neighbour would leave FEWER THAN 2 pieces
  * (the whole cut only ever clipped off a fragment), snapping is not attempted — the cut is refused
  * instead, by the caller, with a real reason ("too small to make its own parcel") rather than a

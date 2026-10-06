@@ -70,6 +70,7 @@ export default function PrintCompose({
   mapLayersPrintable, printMapLayers, onToggleMapLayers,
   showMetricsBand, onToggleMetricsBand,
   buildingsTablePrintable, showBuildingsTable, onToggleBuildingsTable,
+  flattenMarkups, onToggleFlattenMarkups,
   onReposition, onCancel, onDownload,
   downloading,
 }) {
@@ -156,6 +157,10 @@ export default function PrintCompose({
             {mapLayersPrintable && <ContentToggle label="Map / GIS layers" title="The live map layers (floodplain, pipelines, utilities…), exactly as shown on the map" checked={printMapLayers} onChange={onToggleMapLayers} />}
             {buildingsTablePrintable && <ContentToggle label="Buildings table" title="A small corner inset listing each building's name and square footage, plus a total — the same numbers the map labels and the Yield panel show" checked={showBuildingsTable} onChange={onToggleBuildingsTable} />}
             <ContentToggle label="Stats band" title="The stormwater required-vs-provided bars, the site-metrics line and the screening disclaimer printed below the plan. Off reclaims that space for the plan image." checked={showMetricsBand} onChange={onToggleMetricsBand} />
+          </Section>
+
+          <Section title="PDF markups" accent="var(--accent)">
+            <ContentToggle label="Flatten markups" title="Off (default): your callouts, lines, shapes, clouds and measurements are saved in the PDF as real markups that Bluebeam or Acrobat can move, edit or delete. On: they are printed into the page as a plain picture, like the aerial." checked={!!flattenMarkups} onChange={onToggleFlattenMarkups} />
           </Section>
         </div>
         <div style={panelFooter}>

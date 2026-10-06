@@ -692,6 +692,7 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   two layouts can never hold two different ideas of what a "comp" is. The paste box is shared
   verbatim (`pasteBoxNode`, computed once, rendered in both branches) — mobile has no separate
   create surface; rows land on a phone the same way they do on desktop (paste, or a map pick).**
+  **⛔ B2138081 (2026-10-05) REPLACED that phone layout with a REVIEW-FIRST one** — same component, same lifted `rows` / `onCommitField` / `onSetToday` / `onResolvePeriod` paths, new presentation: top bar (Cancel · New comp / Comp N of M ⌄ · ＋ Paste, the paste box now lives in a panel), a small header card (no hero number), grouped Deal / Rent / Parties / More details cards where every value is a mounted `<input>` with its unit INSIDE (no Unit row; `AC|SF`, `Monthly|Yearly`, `NNN|Gross`, `months|years` toggles — Term stores months, years ×12), and a sticky footer read-back + one Save. The pure half is `lib/compMobileSheetModel.js` (read-backs, Save copy, term unit, More-details set); `compMobileLayout.js` is still the breakpoint + the jump-sheet status text. Its live harness is the repo-root ui-audit one named verify-comp-sheet-review-first.
   **⛔ ROUND 16 (B1125024/B1125025/B1125026, second-half adversarial review, 2026-09-03) —
   KEYBOARD/A11Y HARDENING, AND A LIVE OWNER RETRACTION MID-SESSION. Read before touching
   `onGridKeyDown`'s Tab branch, `finishEdit`'s reopen check, or either action-cell's tabIndex.**
