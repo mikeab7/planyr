@@ -55,6 +55,8 @@ export function summariseTables(doc) {
         }));
       });
       out.push({ where, grid, marks });
+      // a table pasted INTO a cell nests (Word does the same) — summarise those too
+      (n.content || []).forEach((row) => (row.content || []).forEach((cell) => (cell.content || []).forEach((c) => walk(c, "nested"))));
       return;
     }
     const next = n.type === "noteAnchor" ? "box" : where;

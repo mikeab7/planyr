@@ -1574,3 +1574,11 @@ consecutive runs of the SAME build, so diff identities, never counts. Carried by
 - **Saves are gated on a trusted user event**: a synthetic paste into a freshly loaded page stores nothing until a real press happened first.
 - **A table at the end of a box parks the caret in the doc's hidden trailing paragraph**; `keepCaretInBox` fixes it. Ask where the caret went after any block paste.
 - Chrome sanitises html written via the async clipboard API; use a `DataTransfer` for exact bytes and `navigator.clipboard.write` + real Ctrl+V only for the trusted-event route.
+
+### B2142464 ×2 — a green live check on SYNTHETIC fixtures proved nothing (2026-10-06, owner's own machine)
+
+- **The failure:** #2077 was "verified live" by pasting this repo's own hand-modelled fixtures through a real browser. On the owner's Windows/Chrome/OneNote desktop a 6-column table nested in a bullet arrived as one paragraph per non-empty cell, empties dropped, no table. **A harness that pastes fixtures it also wrote can only prove the wiring, never the clipboard.** Fixtures flagged `"synthetic": true` in `test/fixtures/clipboard-tables/manifest.json` must be replaced by REAL captures (every type: text/html, text/plain, rtf) before anything is called verified; until then a result reads "wiring proven, real clipboards unproven".
+- **The signature to recognise:** one paragraph per non-empty cell + empty cells vanishing + no table = the browser's HTML parser stripping `tr`/`td` because the fragment had rows but **no opening `<table>` tag** (OneNote cells hold a `<p>` each; the `<p>&nbsp;</p>` of an empty cell is then trimmed as a spacer). `repairTableFragment` re-wraps such a fragment BEFORE the parse. This is a reproduced mechanism matching his symptom, **not yet confirmed against his real clipboard**.
+- **Excel's hidden helper row:** `<tr height=0 style='display:none'>` inside `<![if supportMisalignedColumns]>` parsed as a real blank bottom row. Hidden rows/cells are removed in `normalizeTableMarkup`.
+- **A single Excel cell is a 1×1 table on the clipboard** — always pasted as text (`isLayoutTable`).
+- **Tab-separated `text/plain` is the fallback** whenever the html route yields no table, and a spreadsheet grid in the text beats a picture beside it.

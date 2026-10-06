@@ -18,7 +18,9 @@ describe("overlay engine — single source of truth", () => {
   });
   it("nothing imports a retired path", () => {
     const bad = files.filter((p) => /from\s+["'][^"']*(overlayGeoref|overlayAlign|overlayRasterSize)\.js["']/.test(text(p)) ||
-      /from\s+["'][^"']*site-planner\/lib\/overlayCrop\.js["']/.test(text(p)) || /from\s+["']\.\/overlayCrop\.js["']/.test(text(p)));
+      /from\s+["'][^"']*site-planner\/lib\/overlayCrop\.js["']/.test(text(p)) ||
+      // a sibling-relative import is only a retired path OUTSIDE shared/overlay (where overlayCrop.js now lives; NEW-2 imports it from overlayPlacement.js)
+      (!/shared\/overlay\//.test(p.replace(/\\/g, "/")) && /from\s+["']\.\/overlayCrop\.js["']/.test(text(p))));
     expect(bad.map(rel)).toEqual([]);
   });
   it("the crop model and the placement engine are defined once, under shared/overlay", () => {

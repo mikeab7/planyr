@@ -38,7 +38,7 @@ import { TextSelection } from "@tiptap/pm/state";
 import { noteExtensions, EMPTY_DOC } from "../lib/notesExtensions.js";
 import { ANCHOR_MIN_HEIGHT, anchorExtent, anchorExtentLeft, anchorExtentTop, anchorExtentX, anchorPosAtSelection, fitAnchorBox, nextAnchorSpot, placeAnchor } from "../lib/notesAnchorNode.js";
 import { ANCHOR_WIDTH } from "../lib/notesBoxResize.js";
-import { clipboardHasTable, tableBoxWidth } from "../lib/notesTablePaste.js";
+import { tableOwnsClipboard, tableBoxWidth } from "../lib/notesTablePaste.js";
 import { edgePoint as arrowEdgePoint } from "../lib/notesArrows.js";
 import {
   isBlankDoublePress, BLANK_DBLTAP_TOUCH_PX, isTouchPointerType, isCoarsePointerDevice, touchBoxOrigin,
@@ -2205,7 +2205,7 @@ const NoteEditor = forwardRef(function NoteEditor({
       const text = dt?.getData("text/plain") || "";
       if (!html && !text) return;
       const hasImage = [...(dt?.files || [])].some((f) => f.type?.startsWith("image/"));
-      if (hasImage && !clipboardHasTable(dt)) return;                 // a picture on its own has its own route
+      if (hasImage && !tableOwnsClipboard(dt)) return;                 // a picture on its own has its own route
       e.preventDefault();
       e.stopPropagation();
       const sel = selRef.current;
@@ -2303,7 +2303,7 @@ const NoteEditor = forwardRef(function NoteEditor({
       const files = [...(e.clipboardData?.files || [])].filter((f) => f.type?.startsWith("image/"));
       /* ⛔ A TABLE OUTRANKS THE PICTURE BESIDE IT (NEW-1) — Excel/OneNote put a PNG of the cells next
        * to the HTML table; see lib/notesTablePaste.js. */
-      if (files.length && !clipboardHasTable(e.clipboardData)) {
+      if (files.length && !tableOwnsClipboard(e.clipboardData)) {
         const at = pendingRef2.current;
         setPendingPlace(null);
         e.preventDefault();

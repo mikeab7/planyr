@@ -32,7 +32,36 @@ import { Fragment } from "@tiptap/pm/model";
 
 /** Does this HTML hold a table? Cheap and deliberately loose — it only decides who owns the paste. */
 export function htmlHasTable(html) {
-  return typeof html === "string" && /<table[\s>]/i.test(html);
+  /* ⛔ ROWS OR CELLS COUNT, NOT ONLY `<table>` (B2142464 ×2). A clipboard fragment can be cut INSIDE a
+   * table — rows and cells present, the opening `<table>` tag outside the fragment — and that is still
+   * a table clipboard (the picture beside it must still lose, the repair below must still run). */
+  return typeof html === "string" && /<(table|tr|td|th)[\s>]/i.test(html);
+}
+
+/** ⛔ A ROW-FRAGMENT WITH NO `<table>` ELEMENT BECOMES A TABLE AGAIN, BEFORE THE PARSE.
+ *  The browser's HTML parser, handed `<tr><td>…` outside a table, DISCARDS `tr`/`td` and keeps what was
+ *  inside the cells. OneNote cells hold a `<p>` each, so the result is exactly what the owner reported
+ *  from his own machine: every non-empty cell its own paragraph in reading order, the empty cells (a
+ *  `<p>&nbsp;</p>` each — "spacers") trimmed away, and no table. So: if the html has rows or cells and
+ *  no `<table`, wrap the run of rows in `<table><tbody>` (and a bare run of cells in a `<tr>` first).
+ *  A no-op for anything that already has a table element. Pure string work. */
+export function repairTableFragment(html) {
+  if (typeof html !== "string" || /<table[\s>]/i.test(html)) return html;
+  const firstRow = html.search(/<tr[\s>]/i);
+  if (firstRow >= 0) {
+    const lastClose = html.toLowerCase().lastIndexOf("</tr>");
+    if (lastClose < 0) return html;
+    const end = lastClose + "</tr>".length;
+    return `${html.slice(0, firstRow)}<table><tbody>${html.slice(firstRow, end)}</tbody></table>${html.slice(end)}`;
+  }
+  const firstCell = html.search(/<t[dh][\s>]/i);
+  if (firstCell >= 0) {
+    const m = [...html.matchAll(/<\/t[dh]>/gi)].pop();
+    if (!m) return html;
+    const end = m.index + m[0].length;
+    return `${html.slice(0, firstCell)}<table><tbody><tr>${html.slice(firstCell, end)}</tr></tbody></table>${html.slice(end)}`;
+  }
+  return html;
 }
 
 /** A clipboard (DataTransfer-like) whose HTML carries a table. Never throws on a hostile one. */
@@ -42,7 +71,13 @@ export function clipboardHasTable(dt) {
 
 /** ⛔ Should the picture/file paste handlers STAND DOWN for this clipboard? Yes when it is a table:
  *  the picture beside it is just Excel's/OneNote's rendering of the same cells. */
-export const tableOwnsClipboard = clipboardHasTable;
+export function tableOwnsClipboard(dt) {
+  if (clipboardHasTable(dt)) return true;
+  /* A tab-separated GRID in `text/plain` is a spreadsheet copy even when the html carries no table: a
+   * picture of the cells beside it is the spreadsheet's own rendering, not a picture the person copied.
+   * (A picture copied from a web page has no such grid in its text.) */
+  try { return !!parseTabular(dt?.getData?.("text/plain") || ""); } catch (_) { return false; }
+}
 
 /* ── plain tab-separated text → rows ──────────────────────────────────────────────────── */
 
@@ -112,10 +147,13 @@ export function rowsToTableHtml(rows) {
   return `<table><tbody>${body}</tbody></table>`;
 }
 
-/** The grid in a clipboard that has NO html table but a tab-separated `text/plain`, else null. */
-export function tabularFromClipboard(dt) {
+/** The grid in a clipboard's tab-separated `text/plain`, else null. By default only when the clipboard has
+ *  no html table (the html is then the better source). `ignoreHtml` is the FALLBACK ("tab-separated rows
+ *  must always become a table, whenever the HTML route yields none" — owner, 2026-10-06): the caller has
+ *  already seen the html produce no table, so the text is all that is left. */
+export function tabularFromClipboard(dt, { ignoreHtml = false } = {}) {
   try {
-    if (clipboardHasTable(dt)) return null;
+    if (!ignoreHtml && clipboardHasTable(dt)) return null;
     return parseTabular(dt?.getData?.("text/plain") || "");
   } catch (_) { return null; }
 }
@@ -158,6 +196,14 @@ export function isSingleColumn(tableEl) {
  *     email scaffolding. Returns the element. */
 export function normalizeTableMarkup(root) {
   if (!root?.querySelectorAll) return root;
+  /* ⛔ HIDDEN ROWS AND CELLS ARE NOT CONTENT (B2142464 ×2, Excel). Excel writes a zero-height helper row —
+   * `<tr height=0 style='display:none'>` of empty cells, inside `<![if supportMisalignedColumns]>` — to
+   * keep its column widths honest. On screen it is invisible; parsed, it became a real blank row at the
+   * bottom of every pasted table. */
+  for (const el of root.querySelectorAll("tr,td,th")) {
+    const st = (el.getAttribute("style") || "").replace(/\s+/g, "").toLowerCase();
+    if (st.includes("display:none") || (el.tagName === "TR" && el.getAttribute("height") === "0")) el.remove();
+  }
   for (const cell of root.querySelectorAll("td,th")) {
     const hasBlock = cell.querySelector("p,div,ul,ol,table,h1,h2,h3,h4,h5,h6,pre,blockquote,img");
     if (!hasBlock && !(cell.textContent || "").replace(/[\s ]/g, "")) {

@@ -54,11 +54,12 @@ import { createViewChangeRecorder, attachTimeline } from "./lib/viewChangeRecord
 import { createViewFramingGate } from "./lib/viewFramingGate.js";
 import { resolveDoubleClickTarget, gestureAnchorTarget, stackEntries, pressIsOverElementBody, stackHoldsFeature, parseFeatureKey, stackAtPoint, nextPickIndex, ACTION_ATTR } from "./lib/featureTarget.js";
 import { parkDepthForRows, parkRowsForDepth, parkFlipIsNoOp, explodeParkingBands, edgeAbutsPaving, freeParkStack, relayoutFreeStack } from "./lib/parking.js";
+import { trailerRowLabel, elementLabelHidden, labelHiddenPatch, trailerCfgPatch, drawnTrailerCfg, TRAILER_FIELD_MIN } from "./lib/trailerRows.js";
 import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale, overlayRasterKey, HIRES_CACHE_PER_OVERLAY } from "./lib/overlayPdf.js";
 import { isDwgFile, convertDwgToDxf } from "./lib/convertClient.js";
 import { uploadOverlayFile, downloadOverlayBytes, downloadOverlayDataUrl, fetchOverlayBytes, fetchOverlayDataUrl, deleteOverlayObject, MAX_BYTES as OVERLAY_MAX_BYTES } from "./lib/overlayStorage.js";
 import { ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale, SCALE_PRESETS, feetPerInchForPreset, matchScalePreset, feetPerInchFromPair, PAGE_UNITS, REAL_UNITS } from "../../shared/overlay/overlayScale.js";
-import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, imagePointToWorld } from "../../shared/overlay/overlayPlacement.js";
+import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, imagePointToWorld, visibleFrame, visibleCenterWorld, anchorVisibleCentre } from "../../shared/overlay/overlayPlacement.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, layerVintage, identifyOverlaysAt, rasterIdentifyLayers } from "./lib/layers.js";
 // NEW-3 — the per-building floodplain answer, off the SAME geometry the mitigation ledger uses.
@@ -526,7 +527,7 @@ import { parcelKey as parcelKeyOf, storedParcelKey } from "./lib/parcelIdentity.
 // icons.jsx's existing exports (Duplicate, Delete/Lock-ish), so they are aliased at the import site.
 import {
   ReshapeIcon, ResetFootprintIcon, BumpOutIcon, DockZonesIcon, GroupIcon, UngroupIcon, SplitRowsIcon,
-  PropertiesIcon, CopyIcon, DuplicateIcon as MenuDuplicateIcon, LockIcon as MenuLockIcon,
+  PropertiesIcon, LabelIcon, CopyIcon, DuplicateIcon as MenuDuplicateIcon, LockIcon as MenuLockIcon,
   AlignRotationIcon, AttachIcon, DetachIcon, DeleteIcon as MenuDeleteIcon,
   BringToFrontIcon, BringForwardIcon, SendBackwardIcon, SendToBackIcon,
   PondSettingsIcon, PondSizingIcon, RoadBranchIcon, SwapIcon,
@@ -3939,6 +3940,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // device save, and not a blank new site) — drives a loud, dismissible banner so a failed
   // cloud save is never silent again (B125). Cleared on the next successful save.
   const [cloudSaveFailed, setCloudSaveFailed] = useState(false);
+  // NEW-1 (B2163344) — the banner follows the NEWEST push's final outcome: a superseded push's failure
+  // (or its still-pending watchdog) must never paint — or keep — the banner after a later push has run.
+  const pushGenRef = useRef(0);
   // B473 — a verified-on-device-write failure (the write didn't read back). This is the silent
   // data-loss class the owner hit; it gets its OWN loud, accurately-worded banner (distinct from a
   // cloud-only failure, where the work IS safe on the device). Plus a transient "Saved ✓" confirmation
@@ -4004,7 +4008,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const cloudPushWithWatchdog = (id) => {
     setSaveStatus("saving");
-    const wd = setTimeout(() => setCloudSaveFailed(true), 6000);
+    const gen = ++pushGenRef.current;
+    const isLatest = () => gen === pushGenRef.current;
+    const wd = setTimeout(() => { if (isLatest()) setCloudSaveFailed(true); }, 6000);
     /* NEW-4 — the SAVE leg of a flood/drainage check. The check does not issue this write (it
      * rides the plan's own debounced push), so it is stamped from here, and `noteDrainageSave`
      * only attributes it when a check settled inside its window — outside it, a save is just a
@@ -4021,6 +4027,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       .then((c) => {
         clearTimeout(wd); stamp();
         if (c && c.ok && c.adopted) applyAdoptedHeader(c.adopted); // B1953797 — the heal merged another writer's header changes
+        if (!c.ok && !isLatest()) return; // superseded: a newer push owns the status/banner
         setSaveStatus(c.ok ? "saved" : "unsaved");
         // NEW-1 — an unresolved conflict gets its OWN banner (below), never the generic
         // "didn't reach the cloud, will retry" one: retrying from this tab's still-stale local
@@ -4028,7 +4035,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         setSiteConflict(!!c.unresolved);
         setCloudSaveFailed(!c.ok && !c.unresolved);
       })
-      .catch(() => { clearTimeout(wd); stamp(); setSaveStatus("unsaved"); setCloudSaveFailed(true); });
+      .catch(() => { clearTimeout(wd); stamp(); if (!isLatest()) return; setSaveStatus("unsaved"); setCloudSaveFailed(true); });
   };
   // Autosave this site (debounced). Persists on the FIRST real edit (so a 1-element
   // new site is written, not lost), and never persists a still-blank site.
@@ -4657,6 +4664,59 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     opTrackerRef.current.beginOperation("create");
     try { eng.reconcile(merged, { busy: false, afterSeed: true, exempt: new Set(healed.map((h) => "el:" + h.id)) }); } catch (_) {}
   };
+  /* Plan-switch first-write loss (2026-10-06, reproduced live 3/3 on planyr.io as the test account:
+   * New plan → draw a line → switch back within the engine's first seed → 0 `site_elements` rows,
+   * line visible only on the device that drew it). SitePlanner is keyed by plan id, so a switch
+   * UNMOUNTS it, and this effect's cleanup used to hard-`stop()` the engine. Measured: the new plan's
+   * engine had issued NO fetch and NO commit before the switch — it seeds on the realtime join (or
+   * the 4 s fallback), and until then `reconcile()` is a deliberate no-op — so the first markup was
+   * never even queued, nothing was journaled, and the teardown discarded the only path that would
+   * have committed it (the next seed's never-synced fold). The same hard stop also dropped a
+   * debounced update and a transport-failure retry waiting on its backoff.
+   *
+   * Now teardown DRAINS (elementSync `stop({ drain: true })`): a seeded engine diffs the final canvas
+   * once more and commits whatever is owed; a never-seeded one fetches the rows now and runs the
+   * same seed + rows ∪ never-synced fold + after-seed diff that refetchReplace runs — so rows stay
+   * canonical for anything the server already has (DATA.md inv. 3), tombstones stay deleted, and only
+   * elements the server has never seen become creates. Skipped (plain stop) when this tab must not
+   * write: signed out, a different account than the one that opened the plan, read-only, a deleted
+   * plan, or an unresolved header conflict. Fire-and-forget by design — the component is gone; a
+   * failure reports `element-drain-*` telemetry and the local mirror + next open's fold still hold
+   * the work. */
+  const drainElementsOnTeardown = (eng, openedByUid) => {
+    const mayWrite = isCloudActive() && !!supabase && activeUid() === openedByUid && !readOnlyRef.current
+      && !deletedSelfRef.current && !siteConflictRef.current;
+    if (!mayWrite) { eng.stop(); return; }
+    if (eng.isSeeded()) { try { reconcileElems(false); } catch (_) {} }
+    const s = stateRef.current;
+    const canvas = { els: s.els, markups: s.markups, measures: s.measures, callouts: s.callouts, parcels: s.parcels };
+    const seeded = eng.isSeeded();
+    eng.stop({ drain: true });
+    if (seeded) return;
+    const hasLocal = ["els", "markups", "measures", "callouts", "parcels"].some((f) => Array.isArray(canvas[f]) && canvas[f].length);
+    if (!hasLocal) return;
+    const sid = siteId;
+    // The header push the unmount cancelled (the autosave's 400 ms timer) — a no-op when the cloud
+    // header is already current; without it a lazily-materialised plan's elements would FK-fail.
+    Promise.resolve(pushSiteToCloud(sid)).catch(() => null)
+      .then(() => fetchElements(supabase, sid))
+      .then((r) => {
+        if (!r || !r.ok) {
+          reportClientEvent("element-drain-failed", "closing plan: site_elements fetch failed — never-synced elements stay local until the plan is reopened", { id: sid, error: (r && r.error) || "" });
+          return;
+        }
+        const rows = reconcileSeedRows(r.rows, eng.shadowSnapshot(), eng.tombstonedSnapshot());
+        const model = rowsToModel({}, rows);
+        const next = { els: model.els, markups: model.markups, measures: model.measures, callouts: model.callouts,
+          parcels: model.parcels.filter((pc) => !isHuskParcel("parcel", pc)) };
+        const rowKeys = new Set((rows || []).map((row) => row && (row.kind + ":" + row.id)));
+        const merged = foldNeverSyncedLocal(next, canvas, rowKeys, isHuskParcel);
+        merged.els = assemblyIntegrity(merged.els).els;
+        try { opTrackerRef.current.beginOperation("create"); } catch (_) {}
+        eng.drainSeed(rows, merged);
+      })
+      .catch((e) => reportClientEvent("element-drain-failed", "closing plan: drain threw", { id: sid, error: (e && e.message) || String(e) }));
+  };
   useEffect(() => {
     if (!isCloudActive() || !siteId || !supabase) {
       if (elSyncRef.current) { elSyncRef.current.stop(); elSyncRef.current = null; }
@@ -4851,7 +4911,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       document.removeEventListener("visibilitychange", onVis);
       try { supabase.removeChannel(ch); } catch (_) {}
       setPeers(null);
-      eng.stop();
+      drainElementsOnTeardown(eng, uid);   // never a bare stop() — see drainElementsOnTeardown
       if (elSyncRef.current === eng) elSyncRef.current = null;
     };
   }, [siteId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -9180,15 +9240,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setSheetOverlays((arr) => arr.map((o) => (o.id === d.id ? { ...o, x: d.ox + dx, y: d.oy + dy } : o)));
       return;
     }
-    if (d.mode === "ovScale") { // corner handle: uniform scale about the (fixed) center
+    if (d.mode === "ovScale") { // corner handle: uniform scale about the VISIBLE centre (the crop's, NEW-2) — whole-overlay scale, crop never drifts
       const ftPerPx = Math.max(0.001, d.ftPerPx0 * (Math.hypot(fp.x - d.C.x, fp.y - d.C.y) / d.grabDist));
-      const W = d.imgW * ftPerPx, H = d.imgH * ftPerPx;
-      setSheetOverlays((arr) => arr.map((o) => (o.id === d.id ? { ...o, ftPerPx, x: d.C.x - W / 2, y: d.C.y - H / 2 } : o)));
+      const patch = anchorVisibleCentre(d.o0, { ftPerPx });
+      setSheetOverlays((arr) => arr.map((o) => (o.id === d.id ? { ...o, ...patch } : o)));
       return;
     }
-    if (d.mode === "ovRotate") { // rotate handle: rotate about the center
+    if (d.mode === "ovRotate") { // rotate handle: rotate about the VISIBLE centre (NEW-2)
       const rotation = (((d.rot0 + (Math.atan2(fp.y - d.C.y, fp.x - d.C.x) - d.a0) * 180 / Math.PI) % 360) + 360) % 360;
-      setSheetOverlays((arr) => arr.map((o) => (o.id === d.id ? { ...o, rotation } : o)));
+      const patch = anchorVisibleCentre(d.o0, { rotation });
+      setSheetOverlays((arr) => arr.map((o) => (o.id === d.id ? { ...o, ...patch } : o)));
       return;
     }
     if (d.mode === "printMove") { setPrintFrame((f) => f ? { ...f, cx: d.cx + (fp.x - d.fx), cy: d.cy + (fp.y - d.fy) } : f); return; }
@@ -9770,7 +9831,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // screen, but the rows (and the double-loaded modules) lie along the long side.
         let w = draftRect.w, h = draftRect.h, rot = 0;
         if (draftRect.type === "parking" && h > w) { w = draftRect.h; h = draftRect.w; rot = 90; }
-        const el = { id: uid(), type: draftRect.type, cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w, h, rot, ...roadExtra, ...buildingExtra };
+        // NEW-3 — a trailer row drawn shallower than the plan's standard stall (a 50′ row at a 53′ standard)
+        // held no stall and counted zero, which read as the tool refusing 50′. It adopts the drawn depth.
+        const trailerExtra = draftRect.type === "trailer" ? (() => { const c = h <= w ? drawnTrailerCfg({ depthFt: h, standardDepthFt: settings.trailerL }) : null; return c ? { cfg: c } : {}; })() : {};
+        const el = { id: uid(), type: draftRect.type, cx: draftRect.x + draftRect.w / 2, cy: draftRect.y + draftRect.h / 2, w, h, rot, ...roadExtra, ...buildingExtra, ...trailerExtra };
         setEls((a) => [...a, el]);
         setSel({ kind: "el", id: el.id });
         setTool("select"); // one element per click — drop back to Select
@@ -10350,9 +10414,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!o || o.locked || o.fromMap) return; // B848736 — the pinned map reference never resizes
     e.stopPropagation();
     const fp = p2f(e.clientX, e.clientY);
-    const C = { x: o.x + (o.imgW * o.ftPerPx) / 2, y: o.y + (o.imgH * o.ftPerPx) / 2 };
+    const C = visibleCenterWorld(o); // NEW-2 — the pivot is the centre of what the user can SEE (== the image centre when uncropped)
     setSel(null); setSelOverlay(id);
-    drag.current = { mode: "ovScale", id, C, grabDist: Math.max(1e-6, Math.hypot(fp.x - C.x, fp.y - C.y)), ftPerPx0: o.ftPerPx, imgW: o.imgW, imgH: o.imgH, ...startGate(e) };
+    drag.current = { mode: "ovScale", id, C, o0: o, grabDist: Math.max(1e-6, Math.hypot(fp.x - C.x, fp.y - C.y)), ftPerPx0: o.ftPerPx, imgW: o.imgW, imgH: o.imgH, ...startGate(e) };
     try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
   };
   const startRotateOverlay = (e, id) => {
@@ -10361,9 +10425,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!o || o.locked || o.fromMap) return; // B848736 — the pinned map reference never rotates
     e.stopPropagation();
     const fp = p2f(e.clientX, e.clientY);
-    const C = { x: o.x + (o.imgW * o.ftPerPx) / 2, y: o.y + (o.imgH * o.ftPerPx) / 2 };
+    const C = visibleCenterWorld(o); // NEW-2 — spin about the visible centre
     setSel(null); setSelOverlay(id);
-    drag.current = { mode: "ovRotate", id, C, a0: Math.atan2(fp.y - C.y, fp.x - C.x), rot0: o.rotation || 0, ...startGate(e) };
+    drag.current = { mode: "ovRotate", id, C, o0: o, a0: Math.atan2(fp.y - C.y, fp.x - C.x), rot0: o.rotation || 0, ...startGate(e) };
     try { svgRef.current.setPointerCapture(e.pointerId); } catch (_) {}
   };
   // Patch one overlay; `hist` gates an undo frame (off for continuous slider drags).
@@ -12597,6 +12661,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const toggleLock = (id) => {
     pushHistory();
     setEls((a) => a.map((el) => (el.id === id ? { ...el, locked: !el.locked } : el)));
+  };
+  // NEW-2 (2026-10-06) — hide / show ONE element's label. Label-only, like a parcel's "Hide acreage label":
+  // the row keeps its geometry, its count and every yield number. One undo frame per flip.
+  const toggleElLabel = (id) => {
+    pushHistory();
+    setEls((a) => a.map((el) => (el.id === id ? { ...el, ...labelHiddenPatch(el) } : el)));
+  };
+  // NEW-3 — set one stall-spec value (depth / width / drive lane) on a trailer row. The row's own `cfg`
+  // overrides Standards (cfgOf), so geometry, count and label all follow. A value under the sanity floor is
+  // refused out loud rather than clamped quietly.
+  const setTrailerSpec = (id, key, value) => {
+    const el = els.find((x) => x.id === id);
+    if (!el) return;
+    const cfg = trailerCfgPatch(el.cfg, key, value);
+    if (!cfg) { flashWarn(`⚠ ${key === "trailerL" ? "Stall depth" : key === "trailerW" ? "Stall width" : "Drive lane"} needs a number of at least ${TRAILER_FIELD_MIN[key]}′ — left as it was`); return; }
+    if (cfg[key] === (el.cfg ? el.cfg[key] : undefined)) return;
+    pushHistory();
+    setEls((a) => a.map((x) => (x.id === id ? { ...x, cfg } : x)));
   };
   const toggleParcelLock = (id) => {
     pushHistory();
@@ -17232,14 +17314,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      outside its element's own bounds — and on an EXPORT pass `cullRect` is null, so `drawEls === els`
      and PDF-PARITY holds by construction (asserted in test/viewCull.test.js). */
   for (const el of drawEls) {
-    if (NO_LABEL.includes(el.type) || el.noLabel) continue;
+    if (NO_LABEL.includes(el.type) || elementLabelHidden(el)) continue; // NEW-2: `labelHidden` is the user's own per-row choice, `noLabel` the structural role tag
     const poly = !!el.points;
     const area = poly ? polyArea(el.points) : el.w * el.h;
     let fc = poly ? centroid(el.points) : { x: el.cx, y: el.cy };
     const dupKey = `${el.type}@${Math.round(fc.x / 12)},${Math.round(fc.y / 12)}`;
     if (seenLabels.has(dupKey)) continue; // same type stacked at (nearly) the same spot
     seenLabels.add(dupKey);
-    let lines, pondAdd = null;
+    let lines, pondAdd = null, keepLine = null;
     if (el.type === "sidewalk" || el.type === "landscape") {
       // e.g. "5′ Sidewalk" / "15′ Buffer" / "5′ Landscape" — width only, no sf / length
       const name = el.buffer ? "Buffer" : el.type === "landscape" ? "Landscape" : "Sidewalk";
@@ -17330,8 +17412,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         // sits in), read straight off the element's own cfg (cfgOf) — NOT the overall row length,
         // and not recomputed. The old third line (overall row dims, e.g. "360′ × 50′") is dropped.
         const tc = cfgOf(el);
-        const count = poly ? estTrailers(area, settings) : trailerStalls(el.w, el.h, tc).count;
-        lines = [`${f0(tc.trailerL)}′ ${name}`, `${f0(count)} trailers${poly ? " (est)" : ""}`];
+        const count = poly ? estTrailers(area, tc) : trailerStalls(el.w, el.h, tc).count;
+        // NEW-1 — the COUNT is the line a too-shallow row keeps (keepLine): a 50′ row used to lose its count
+        // first and read as unlabelled beside the deeper row under it.
+        ({ lines, keepLine } = trailerRowLabel({ depthFt: tc.trailerL, count, est: poly, name }));
       } else {
         lines = [name];
         if (showAreas) lines.push(`${f0(area)} SF`);        // sf is an AREA line — drop with areas off
@@ -17364,7 +17448,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // and the label may slide within that interior to clear an obstacle. A pond is additionally
     // `mustLabel`: it may never end a frame unnamed (see lib/labelFitLadder's header).
     const ringOpts = poly ? { ring: el.points, ringOrigin: fc, ringPpf: rppf } : null;
-    labelCands.push({ el, lid: el.id, c: f2p(fc), lines, importance: (bldgNo.has(el.id) ? 1e12 : 0) + area, halfW, halfH, rot: stripLabelRot(el, flat, ccharW, rppf), fs: cfs, lh: clh, charW: ccharW, textW: textWidths(lines, cfs), noLeader, carto: el.type === "pond", ...ringOpts, mustLabel: el.type === "pond" });
+    labelCands.push({ el, lid: el.id, c: f2p(fc), lines, importance: (bldgNo.has(el.id) ? 1e12 : 0) + area, halfW, halfH, rot: stripLabelRot(el, flat, ccharW, rppf), fs: cfs, lh: clh, charW: ccharW, textW: textWidths(lines, cfs), noLeader, keepLine, carto: el.type === "pond", ...ringOpts, mustLabel: el.type === "pond" });
     if (pondAdd) {
       // B157: the added-detention label, seated on the thickest part of the NEW ground.
       // Rides the SAME LOD/collision pool (its own label id) — not a parallel renderer.
@@ -17528,7 +17612,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   });
 
   const labelShow = layoutLabels(
-    labelCands.map((d) => ({ id: d.lid, cx: d.c.x, cy: d.c.y, lines: d.lines, lh: d.lh, charW: d.charW, textW: d.textW, halfW: d.halfW, halfH: d.halfH, rot: d.rot, noLeader: d.noLeader, ring: d.ring, ringOrigin: d.ringOrigin, ringPpf: d.ringPpf, mustLabel: d.mustLabel })),
+    labelCands.map((d) => ({ id: d.lid, cx: d.c.x, cy: d.c.y, lines: d.lines, lh: d.lh, charW: d.charW, textW: d.textW, halfW: d.halfW, halfH: d.halfH, rot: d.rot, noLeader: d.noLeader, keepLine: d.keepLine, ring: d.ring, ringOrigin: d.ringOrigin, ringPpf: d.ringPpf, mustLabel: d.mustLabel })),
     // A measurement's summary chip joins the parcel badges as an immovable obstacle, so an element
     // label yields around it. B1147's fit ladder still guarantees a `mustLabel` element (a pond) an
     // outside placement, so seeding these can shorten or relocate a label but never blank one.
@@ -18567,9 +18651,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!o || tool !== "select") return calib || null;
     const tl = f2p({ x: o.x, y: o.y });
     const sy = o.ftPerPxY || o.ftPerPx; // B848736 — match renderSheetOverlay's non-uniform scale
-    const w = o.imgW * o.ftPerPx * rppf;
-    const h = o.imgH * sy * rppf;
-    const cx = tl.x + w / 2, cy = tl.y + h / 2;
+    const W = o.imgW * o.ftPerPx * rppf;
+    const H = o.imgH * sy * rppf;
+    const cx = tl.x + W / 2, cy = tl.y + H / 2; // the overlay's own rotation pivot (the full image centre) — the group transform below
+    // NEW-2 — the chrome fits the VISIBLE region: the crop rect (poly crop → its bounding box), the whole image when uncropped.
+    const vf = visibleFrame(o);
+    const w = vf.w * o.ftPerPx * rppf, h = vf.h * sy * rppf;
+    tl.x += vf.x * o.ftPerPx * rppf; tl.y += vf.y * sy * rppf;
+    const vcx = tl.x + w / 2; // visible-region centre x (the rotate handle's anchor)
     return (
       <g data-export="skip">
         <g transform={o.rotation ? `rotate(${o.rotation} ${cx} ${cy})` : undefined}>
@@ -18582,8 +18671,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               <rect key={`hsc${hi}`} data-handle="overlay-scale" x={hx - 5} y={hy - 5} width={10} height={10} rx={2} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
                 style={{ cursor: hi % 2 === 0 ? "nwse-resize" : "nesw-resize" }} onPointerDown={(e) => startScaleOverlay(e, o.id)} />
             ))}
-            <line x1={cx} y1={tl.y} x2={cx} y2={tl.y - 22} stroke={PAL.accent} strokeWidth={1.5} pointerEvents="none" />
-            <circle data-handle="overlay-rotate" cx={cx} cy={tl.y - 22} r={5.5} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
+            <line x1={vcx} y1={tl.y} x2={vcx} y2={tl.y - 22} stroke={PAL.accent} strokeWidth={1.5} pointerEvents="none" />
+            <circle data-handle="overlay-rotate" cx={vcx} cy={tl.y - 22} r={5.5} fill="#fff" stroke={PAL.accent} strokeWidth={1.5}
               style={{ cursor: "grab" }} onPointerDown={(e) => startRotateOverlay(e, o.id)} />
           </>)}
         </g>
@@ -27933,6 +28022,38 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </>
                 );
               })()}
+              {/* NEW-2/NEW-3 — a trailer row's own stall spec + label switch. Depth/width/lane are per-row
+                  overrides in `cfg` (they beat Standards, which stays the default for new rows); a dock-zone
+                  member (`noFit`) takes its depth from the stack's own Depth control, so only its label switch
+                  and width show. Hiding the label changes the picture only — never the count or the yield. */}
+              {selEl.type === "trailer" && (() => {
+                const tc = cfgOf(selEl);
+                const own = selEl.cfg || {};
+                const specField = (key, label, extra = {}) => (
+                  <Field label={label}>
+                    <span style={ROW4}>
+                      <NumInput style={{ ...numInput, width: 52 }} value={tc[key]} min={TRAILER_FIELD_MIN[key]} ariaLabel={`Trailer ${label}`} onCommit={(n) => setTrailerSpec(selEl.id, key, n)} />
+                      {own[key] != null && !extra.noReset
+                        ? <button title="Back to the plan Standards value" onClick={() => { pushHistory(); const { [key]: _drop, ...rest } = own; setSelEl({ cfg: Object.keys(rest).length ? rest : null }); }} style={{ ...chip, padding: "2px 6px", fontSize: 10, color: PAL.accent }}>std ↺</button>
+                        : <span style={{ fontSize: 10, color: PAL.muted }}>std</span>}
+                    </span>
+                  </Field>
+                );
+                return (
+                  <div style={{ marginTop: 6 }} data-testid="trailer-stall-spec">
+                    <div style={subHead}>Stalls</div>
+                    {!selEl.noFit && specField("trailerL", "Stall depth (ft)")}
+                    {specField("trailerW", "Stall width (ft)")}
+                    {!tc.single && specField("trailerAisle", "Drive lane (ft)")}
+                    <Field label="Label">
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: FONT_SIZE.control, color: PAL.ink, cursor: "pointer" }}>
+                        <input type="checkbox" data-testid="trailer-label-toggle" checked={!selEl.labelHidden} onChange={() => toggleElLabel(selEl.id)} style={{ accentColor: PAL.accent, width: 14, height: 14 }} />
+                        <span>{selEl.labelHidden ? "Hidden" : "Shown on the plan"}</span>
+                      </label>
+                    </Field>
+                  </div>
+                );
+              })()}
               {/* Car parking's own Footprint/Stalls readout is now the spec-sheet's stat strip
                   (B1790016 NEW-1) — excluded here so it isn't rendered twice. */}
               {selEl.type !== "pond" && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (() => {
@@ -27948,7 +28069,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       return <span style={{ color: PAL.purple }}>+ {bumps.length} bump-out{bumps.length > 1 ? "s" : ""} ({f0(ba)} SF) → <b style={{ color: PAL.ink }}>{f0(area + ba)} SF</b> total<br /></span>;
                     })()}
                     {selEl.type === "parking" && <>Stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estStalls(area, settings) : carStalls(selEl.w, selEl.h, cfgOf(selEl)).count)}</b>{poly ? " (est.)" : <> @ {settings.stallW}′×{settings.stallDepth}′ {settings.parkAngle}°, {settings.aisle}′ aisle <button style={linkBtn} title="Plan standards for new parking" onClick={() => jumpToStandards("parking")}>↗</button></>}</>}
-                    {selEl.type === "trailer" && (() => { const tc = cfgOf(selEl); return <>Trailer stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estTrailers(area, settings) : trailerStalls(selEl.w, selEl.h, tc).count)}</b>{poly ? " (est.)" : <> @ {tc.trailerW}′×{tc.trailerL}′{tc.single ? "" : `, ${tc.trailerAisle}′ drive lane`} <button style={linkBtn} title="Plan standards for new trailer courts" onClick={() => jumpToStandards("trailers")}>↗</button></>}</>; })()}
+                    {selEl.type === "trailer" && (() => { const tc = cfgOf(selEl); return <>Trailer stalls: <b style={{ color: PAL.ink }}>{f0(poly ? estTrailers(area, tc) : trailerStalls(selEl.w, selEl.h, tc).count)}</b>{poly ? " (est.)" : <> @ {tc.trailerW}′×{tc.trailerL}′{tc.single ? "" : `, ${tc.trailerAisle}′ drive lane`} <button style={linkBtn} title="Plan standards for new trailer courts" onClick={() => jumpToStandards("trailers")}>↗</button></>}</>; })()}
                     {selEl.type === "building" && !poly && (() => {
                       // Door count + column-grid readout track the SAME pure layout the canvas draws
                       // (B568/B569): doors fall between columns, so the count reflects the column
@@ -30548,6 +30669,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {miRow({ icon: <CopyIcon />, text: "Copy", onClick: () => { copyRef({ kind: "el", id: typeMenu.id }); setTypeMenu(null); } })}
                   {miRow({ icon: <MenuDuplicateIcon />, text: "Duplicate", hint: `${MOD}D`, onClick: () => { duplicateEl(typeMenu.id); setTypeMenu(null); } })}
                   {miRow({ icon: <MenuLockIcon open={!t.locked} />, text: t.locked ? "Unlock" : "Lock", onClick: () => { toggleLock(typeMenu.id); setTypeMenu(null); } })}
+                  {t.type === "trailer" && miRow({ icon: <LabelIcon />, text: t.labelHidden ? "Show label" : "Hide label", testId: "el-menu-label-toggle", onClick: () => { toggleElLabel(typeMenu.id); setTypeMenu(null); } })}
                   {!t.points && miRow({ icon: <AlignRotationIcon />, text: "Align rotation…", onClick: () => { setSel({ kind: "el", id: typeMenu.id }); setAlignFor({ kind: "el", id: typeMenu.id }); setTypeMenu(null); } })}
                   {t.attachedTo
                     ? miRow({ icon: <DetachIcon />, text: "Detach", onClick: () => { detach(typeMenu.id); setTypeMenu(null); } })
