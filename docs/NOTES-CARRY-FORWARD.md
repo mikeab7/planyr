@@ -1520,6 +1520,24 @@ was, Shift or no Shift:
 | travels, Shift held | **select** — the rubber band; every box it touches, replacing the selection |
 | starts on one of the four sheet edge grips | **resize the page** — the grip's `pointerdown` calls `preventDefault()`, which suppresses the compat `mousedown`, so `focusFromMat` never runs at all |
 
+**⛔ AND A FIFTH ROW SINCE 2026-10-06 (NEW-1 / B2156912): a plain mouse press that starts on a BOX'S CONTENT
+(table cell / header / border, picture, text) of a box that is neither selected nor being edited is DEFERRED —
+the capture-phase effect above the touch pan in `NoteEditor.jsx` takes the `pointerdown`/`mousedown` before
+ProseMirror, the box body drag and `focusFromMat` can see them, so nothing is selected on the press. Travels →
+the same pan as above (followed from the press); does not travel → the press is REPLAYED into `focusFromMat`
+unchanged (a plain click is exactly what it was). It does NOT claim: the grip / resize handles / connect dot /
+column-resize handle / page grips, controls and links, any modifier, middle button, Space, click-to-connect,
+touch, a selected box (its press is the click-in; a group still drags) or the box being edited (text
+selection). Guard: `ui-audit/verify-notes-drag-pan.mjs` (required `build` step; 21 ✗ on pre-fix main).
+- **Trap 47 — a pan arm's start point must not be a column border.** The first top-border arm pressed at the
+  table's horizontal midpoint, which in a 2-column table is the column-resize handle — correctly NOT a pan; the
+  arm reported "table border does not pan" about working code. Press at a quarter of the width.
+- **Trap 48 — a harness that clicks, clicks, then double-clicks lands a TRIPLE click.** Presses at the same
+  spot inside the multi-click window accumulate `detail`; wait out the window (~800ms) before the double-click
+  or "double-click selects a word" selects the whole paragraph.
+- **`verify-notes-free-placement` §7 "dragging a note by its BODY moves it" is red on `main` too (stored 0,0)
+  and encodes behaviour that is retired for an unselected box — left red, not weakened.**
+
 Pure decisions in `lib/notesMarquee.js` (`gestureOutcome`, `latchGesture`, `panTarget`), wiring in
 `NoteEditor.jsx`'s `beginBlankGesture`, guard in `ui-audit/verify-notes-pan.mjs` at **1191×465,
 which is his real window**. Two things that window changes and a taller one hides: the mat's own box
