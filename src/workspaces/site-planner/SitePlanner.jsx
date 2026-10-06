@@ -8063,7 +8063,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       newId: uid, baseSetback: +settings.setback || 0,
     });
     if (!plan.ok) { flashWarn(`⚠ ${plan.message}`, 7000); return plan; } // NEW-4/B872 — a refusal, error-pill prefix
-    const { made, res, parent, parentName } = plan;
+    const { made, res, parentName } = plan;
     pushHistory("split"); // NEW-7 — parent tombstoned + children created share this ONE op_id, atomically
     tombstone(plan.removeIds); // B472049: the parent is REMOVED, not retained; the tombstone keeps it gone across devices
     setParcels(plan.parcels);
