@@ -53,7 +53,6 @@ try {
     const theme = await page.evaluate(() => document.documentElement.getAttribute("data-theme") || getComputedStyle(document.documentElement).colorScheme);
     console.log("theme attr:", theme);
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/${scheme}-open.png` }).catch(() => {});
-    console.log("els in DOM:", await page.evaluate(() => [...document.querySelectorAll("[data-el-id]")].map((n) => n.getAttribute("data-el-id")).slice(0, 8)), "model els:", ((await model())?.els || []).length);
     const pt = await page.evaluate(() => { const r = document.querySelector('[data-el-id="bz1"]').querySelector("rect, path").getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
     await page.mouse.dblclick(pt.x, pt.y);
     await T("building-header").waitFor({ timeout: 10000 });
