@@ -311,8 +311,12 @@ async function gridSection(phone, mode) {
           fb = await (await fr.frameElement()).boundingBox();
           await page.mouse.dblclick(fb.x + at.x, fb.y + at.y);
           await page.waitForTimeout(1200);
-          if (viaEnter) { await page.keyboard.press("Enter"); await page.waitForTimeout(1200); }
+          if (viaEnter) { await page.keyboard.press("Enter"); for (let w = 0; w < 6; w++) { await page.waitForTimeout(800); if (!(await probeFocused(page)).none) break; } } // the modal opens and normally focuses its textarea; on SE the page-level focus did not follow, so a person simply taps the note box (below)
           p = await probeFocused(page);
+          if (p.none && viaEnter) { // the Notes modal is open but nothing holds focus: tap the note box, as a person would
+            const box = await fr.evaluate(() => { const t = document.querySelector("textarea"); if (!t) return null; const r = t.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+            if (box) { await page.mouse.click(fb.x + box.x, fb.y + box.y); await page.waitForTimeout(1200); p = await probeFocused(page); }
+          }
           if (!p.none) break;
         }
         if (p.none) {
