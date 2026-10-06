@@ -15,7 +15,8 @@
  */
 import { loadAndDownscaleImage } from "./image.js";
 import { releaseCanvas } from "./releaseCanvas.js";
-import { detectSheet, parseScaleNote } from "./overlayScale.js";
+import { renderPageToCanvas } from "../../../shared/overlay/overlayRaster.js";
+import { detectSheet, parseScaleNote } from "../../../shared/overlay/overlayScale.js";
 import { runBudgeted, PAINT_FRAME_BUDGET_MS } from "./paintSchedule.js";
 
 // B749 — base raster cap raised 2600 → 4500 px so a 36×24 sheet has headroom to zoom into a
@@ -109,12 +110,8 @@ export async function knockoutCanvas(ctx, w, h, { budgetMs = PAINT_FRAME_BUDGET_
 async function renderPageCanvas(pdf, n, scale, knockout) {
   const page = await pdf.getPage(n);
   const base = page.getViewport({ scale: 1 });
-  const viewport = page.getViewport({ scale });
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.floor(viewport.width));
-  canvas.height = Math.max(1, Math.floor(viewport.height));
-  const ctx = canvas.getContext("2d");
-  await page.render({ canvasContext: ctx, viewport }).promise;
+  // The shared page→canvas step (NEW-1) — transparent paper (no background) so the knockout can key it out.
+  const { canvas, ctx } = await renderPageToCanvas(page, scale, { dims: "floor" });
   if (knockout) await knockoutCanvas(ctx, canvas.width, canvas.height);
   return { canvas, base };
 }

@@ -44,7 +44,7 @@ describe("B570 — Deed / Title (metes & bounds) tool lives in the Parcel tools 
   });
 
   it("the rail group is labelled 'Parcel tools' and keeps Draw + Split", () => {
-    expect(src).toMatch(/<ToolIcon id="parcel" \/> \{PARCEL_SURFACES\.rail\.name\}/);
+    expect(src).toMatch(/icon=\{<ToolIcon id="parcel" \/>\} label=\{PARCEL_SURFACES\.rail\.name\}/);
     expect(actions).toMatch(/rail: \{ id: "rail", name: "Parcel tools"/);
     expect(actions).toMatch(/id: "draw"[^\n]*Draw new parcel/);
     expect(actions).toMatch(/id: "split"[^\n]*Split a parcel/);

@@ -17,7 +17,7 @@
  * release (so the caller persists exactly one write per gesture, not one per pointermove).
  */
 import L from "leaflet";
-import { overlayCornersFromPlacement, scalePlacement, rotatePlacement } from "../../../shared/sitePlans/lib/overlayGeoref.js";
+import { overlayCornersFromPlacement, scalePlacement, rotatePlacement } from "../../../shared/overlay/overlayPlacement.js";
 import { compMarkerColor } from "../../../shared/comps/lib/compMarkerIcon.js";
 import { PALETTES } from "../../../shared/theme/palette.js";
 

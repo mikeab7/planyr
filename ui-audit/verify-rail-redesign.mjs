@@ -71,10 +71,12 @@ const canvasBoxAfter = await svg.boundingBox();
 check("VIEWPORT-STABLE — canvas box unchanged across a rail interaction", canvasBoxBefore.x === canvasBoxAfter.x && canvasBoxBefore.width === canvasBoxAfter.width,
   `${JSON.stringify(canvasBoxBefore)} → ${JSON.stringify(canvasBoxAfter)}`);
 
-/* ── 3. Dividers between groups only ───────────────────────────────────────────────────────────── */
+/* ── 3. NEW-1 (right-rail redesign) — the separate hairline dividers are GONE: each section heading
+ *      carries its own rule, and Measure is folded into Tools (three headings, not four). ─────────── */
 const dividerCount = await page.locator("[data-rail-divider]").count();
-check("exactly 3 group dividers (between 4 groups)", dividerCount === 3, `found ${dividerCount}`);
-// None inside the Parcel Tools dropdown menu.
+check("no separate group dividers (the heading carries the rule)", dividerCount === 0, `found ${dividerCount}`);
+const railHeadings = await page.locator("[data-rail-heading]").allTextContents();
+check("three railHeadings — Tools · Site elements · Markup (no Measure heading)", JSON.stringify(railHeadings.map((h) => h.toLowerCase())) === JSON.stringify(["tools", "site elements", "markup"]), railHeadings.join(" | "));
 const parcelToolsBtn = page.locator('[data-testid="rail-parcel-tools"]');
 await parcelToolsBtn.click();
 await page.waitForTimeout(150);

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   validPlacement, overlayCornersFromPlacement, latLonToImagePoint, imagePointToLatLon, suggestFtPerPx,
   scalePlacement, rotatePlacement, OVERLAY_SUGGEST_MIN_WIDTH_FT, OVERLAY_SUGGEST_MAX_WIDTH_FT,
-} from "../src/shared/sitePlans/lib/overlayGeoref.js";
+} from "../src/shared/overlay/overlayPlacement.js";
 import { projectToGrid, gridToProject } from "../src/shared/coordinates/index.js";
 import { projectToZone, gridConvergenceDeg } from "../src/shared/coordinates/statePlane.js";
 
