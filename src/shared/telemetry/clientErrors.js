@@ -31,6 +31,8 @@ const BUILD_ID = typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "dev";
 export const DUP_MS = 10_000;          // drop an identical signature seen again within 10s
 export const RATE_WINDOW_MS = 60_000;  // per-minute window…
 export const RATE_MAX = 20;            // …at most this many sends within it (burst/storm guard)
+export const PERFCAP_RATE_MAX = 36;      // NEW-2 (B1317824) — a capture is up to six rows; three of them a minute is already a stall storm
+export const PERFCAP_SESSION_MAX = 180;
 export const SESSION_MAX = 100;        // hard ceiling on TOTAL sends for the page's lifetime.
                                        // The per-minute window re-arms forever, so it only tames
                                        // bursts; this caps a slow sustained drip (a persistent
@@ -120,6 +122,7 @@ export function decideReport(sig, now, state = {}, opts = {}) {
 // ——— impure layer (browser only) ————————————————————————————————————————————————
 
 let _state = { seen: new Map(), windowStart: 0, sent: 0, total: 0 };
+let _perfState = { seen: new Map(), windowStart: 0, sent: 0, total: 0 };   // NEW-2 (B1317824) — the performance captures' own budget, below
 let _module = null;
 let _installed = false;
 let _win = null;                       // the window the telemetry was installed against (B270912)
@@ -223,8 +226,16 @@ export function reportClientEvent(kind, message, extra) {
     const row = buildErrorRow(null, { source: "event:" + k, module: _module });
     row.message = truncate(msg, MSG_MAX);
     if (!row.message) return notSent("empty");
-    const decision = decideReport(errorSignature(row.source, row.message), Date.now(), _state);
-    _state = decision.state;
+    /* ⛔ NEW-2 (B1317824) — A PERFORMANCE CAPTURE HAS ITS OWN BUDGET, in both directions. A trimmed capture now travels as
+     * a main row plus up to five continuation rows (perfCapture.encodeSupplements), and it is the highest-value signal in
+     * this programme — it must not be starved by the generic error-storm window (20 / minute, 100 / session), and an
+     * error storm must not be able to spend the captures' budget either. Same duplicate guard and same per-window /
+     * per-session ceilings, counted apart. */
+    const perf = k === "perfcap";
+    const decision = perf
+      ? decideReport(errorSignature(row.source, row.message), Date.now(), _perfState, { maxPerWindow: PERFCAP_RATE_MAX, maxPerSession: PERFCAP_SESSION_MAX })
+      : decideReport(errorSignature(row.source, row.message), Date.now(), _state);
+    if (perf) _perfState = decision.state; else _state = decision.state;
     if (!decision.report) return notSent("suppressed");
     _recent.push(row);
     if (_recent.length > RECENT_MAX) _recent.shift();

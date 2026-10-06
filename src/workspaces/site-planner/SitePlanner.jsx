@@ -5,7 +5,7 @@ import { startClickAck } from "../../shared/ui/clickAck.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useProjectName, usePlanName, renameProjectChecked, renamePlanChecked } from "../../shared/names/names.js";
-import { loadSite, saveSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
+import { loadSite, saveSite, siteExistsLocally, readBackSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
 import { relTime } from "../../shared/projects/projectModel.js";
 import { collectAssetRefs, releasePlanForOverlay } from "./lib/sharedAssetRefs.js";
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
@@ -47,6 +47,7 @@ import {
 } from "./lib/cloudGeometry.js";
 import { EMPTY_TAP, tapTime, stepDoubleTap, pairsWithLastTap } from "./lib/doubleTap.js";
 import { DRAG_SLOP_PX, makeDragGate, stepDragGate, dragArmed } from "./lib/dragGate.js";
+import { GESTURE_SAVE_POLL_MS, deferSaveDecision } from "./lib/gestureSave.js";
 import { isDiagArmed, latchDiagArm } from "./lib/diagArm.js";
 import { noteEffectRun } from "../../app/renderLoopProbe.js";
 import { createViewChangeRecorder, attachTimeline } from "./lib/viewChangeRecorder.js";
@@ -4038,11 +4039,48 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const deletedSelfRef = useRef(false);
   // B458 — coalesce the immediate per-edit mirror write so a fast drag doesn't thrash writeSites.
   const lastLocalWrite = useRef(0);
+  /* ⛔ NEW-1 (B217540, recurrence ×2 — the owner's 2026-10-06 "Something was slow just now") — A GESTURE IN FLIGHT
+   * IS NOT A SAVE POINT. This effect runs on every `els` change, and a drag changes `els` on every pointer-move
+   * frame, so a single building drag ran the WHOLE persistence stack ~20×: `loadSite` (parse the ENTIRE device
+   * store, `migrate`, `createSiteModel`, name authority over every plan) for the "is this new?" check, `saveSite`
+   * (parse it again, snapshot, `createSiteModel` ×2, stringify and `setItem` the ENTIRE store), then `loadSite`
+   * once more to verify the write — every ≥ 50 ms. None of that scales with the plan being edited; it scales with
+   * everything else the device has stored. Measured on a replica of his plan (ui-audit/perf-edit-cycle.mjs, same
+   * sequence, only the stored-plan weight varied): the drag step cost 1.0 s with an empty store, 2.4 s at 1.3 MB
+   * (his cloud account: 143 plans, 1.30 MB) and 3.7 s at 3 MB (his device held 3.88 MB), with single tasks of
+   * 316 → 561 ms — his 700–940 ms `dispatchDiscreteEvent` blocks.
+   * So while a gesture is active the effect only keeps the per-element sync diff current (`reconcileElems(true)`,
+   * which already defers its own flush) and polls (a ref read every 120 ms, no React state) for the gesture to end;
+   * the first run AFTER it ends is the ordinary full save — mirror, history and the cloud push, unchanged.
+   * LOUD-FAILURE / the B458 guarantee: a `drag.current` that never clears (a lost pointer-up) must not turn
+   * autosave off, so a deferral never lasts past `GESTURE_SAVE_DEFER_MAX_MS` — past it the normal write runs
+   * anyway, and a mid-gesture write every few seconds is the crash-safety net for a very long drag. The unload
+   * flush (pagehide / beforeunload, below) still writes the live state, so nothing waits on this timer to survive
+   * a reload. */
+  const [saveTick, setSaveTick] = useState(0);
+  const deferSaveSince = useRef(0);
   useEffect(() => {
     if (!siteId || deletedSelfRef.current) return;
     // Skip only the initial mount (whatever the state) — must run BEFORE the blank
     // check, or a fresh blank site keeps the flag and swallows its first real edit.
     if (firstSave.current) { firstSave.current = false; return; }
+    if (drag.current && deferSaveDecision(deferSaveSince.current, Date.now()) === "defer") {
+      if (!deferSaveSince.current) deferSaveSince.current = Date.now();
+      reconcileElems(true);
+      setSaveStatus("saving");
+      let poll = null;
+      const wait = () => {
+        poll = setTimeout(() => {
+          poll = null;
+          if (deletedSelfRef.current) return;
+          if (drag.current && deferSaveDecision(deferSaveSince.current, Date.now()) === "defer") wait();
+          else setSaveTick((n) => n + 1);          // the gesture ended (or the deferral expired): run the ordinary save now
+        }, GESTURE_SAVE_POLL_MS);
+      };
+      wait();
+      return () => { if (poll) clearTimeout(poll); };
+    }
+    deferSaveSince.current = 0;
     // NEW-4 (interaction sweep, owner chat block 2026-08-22) — the "don't save a still-blank
     // site" guard below is right for a plan that has NEVER been saved (drawing nothing on a
     // fresh "Start blank" must not clutter storage with an empty record). It is WRONG for a plan
@@ -4051,7 +4089,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // its save left the stale pre-undo data in storage — resurrected on the next reload, even
     // though the canvas correctly showed it gone. `fresh` (no existing record yet) is the right
     // discriminator, so it's computed BEFORE the blank check rather than after.
-    const fresh = !loadSite(siteId); // first save of a brand-new site → tell App to list it
+    const fresh = !siteExistsLocally(siteId); // first save of a brand-new site → tell App to list it (NEW-1 B217540: no whole-store parse for a yes/no)
     if (fresh && isBlankSite({ parcels, els, measures, callouts, markups, sheetOverlays }) && !deletedIds.length) return; // don't save a still-blank NEW site (but DO persist a tombstone so a delete sticks even on an otherwise-empty site)
     setSaveStatus("saving");
     // B671 — per-element sync (signed-in): diff the vector collections and enqueue per-element
@@ -4077,7 +4115,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // clear any prior alarm. (Sole-tab save is a plain replace, so got==want normally; a cross-tab
       // union only ever adds, so got>=want — no false alarm.)
       const want = parcels.length + els.length + measures.length + callouts.length + markups.length + sheetOverlays.length;
-      const back = loadSite(siteId);
+      const back = readBackSite(siteId);   // NEW-1 (B217540): byte-exact proof from the write itself while the store is untouched; the full read otherwise
       const got = drawnCount(back);
       // B592 — verify by MEMBERSHIP, not only count. A same-count swap (one item dropped while
       // another lands — exactly the tombstone/id-collision fold that vanished the polyline) leaves
@@ -4149,7 +4187,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       else setSaveStatus("unsaved"); // logged out + device full: the red localSaveFailed banner (writeMirror) covers it
     }, 400);
     return () => { clearTimeout(t); if (microT) clearTimeout(microT); };
-  }, [siteId, parcels, els, measures, callouts, markups, settings, sheetOverlays, deletedIds, layerOverrides, layerAbove]);
+  }, [siteId, saveTick, parcels, els, measures, callouts, markups, settings, sheetOverlays, deletedIds, layerOverrides, layerAbove]);
   /* B1953797 (H1) — INBOUND plan-header path: an open, signed-in tab asks the cloud (one header row,
    * no elements) whether another writer changed this plan's settings, on focus / tab-visible / a slow
    * visible-tab tick, and adopts the change per leaf through the ONE apply above. Read-only + no push,

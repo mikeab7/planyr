@@ -67,7 +67,8 @@
     "resolve-ledgers": "node scripts/resolve-ledgers.mjs",
     "safe-merge": "node scripts/merge-ledgers-safe.mjs",
     "mark-shared-ids": "node scripts/mark-shared-ids.mjs",
-    "verify:widthsweep": "node ui-audit/verify-width-sweep.mjs"
+    "verify:widthsweep": "node ui-audit/verify-width-sweep.mjs",
+    "perf:editcycle": "xvfb-run -a --server-args=\"-screen 0 1800x1000x24\" node ui-audit/perf-edit-cycle.mjs --cycles 10 --store-kb 1300 --assert"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.104.1",

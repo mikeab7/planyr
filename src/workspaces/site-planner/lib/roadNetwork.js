@@ -24,6 +24,7 @@
 import ClipperLib from "clipper-lib";
 import { pointInRing, ringArea } from "./ringMath.js";
 import { DEFAULT_TESS_DEG } from "./roadGeometry.js";
+import { boundedCache, pointsSignature } from "./pureCache.js";
 
 const SCALE = 100;            // feet → centi-feet (~1/8"), matching pondOffset.js / polyClip.js
 const CLEAN_DELTA = SCALE * 0.01;
@@ -268,7 +269,7 @@ export function collapseRingSpikes(ring, opts = {}) {
  * Returns [{ outer, holes: [ring…] }, …] — one entry per resulting region, holes separated so a caller
  * can emit an even-odd path. Returns [] for no valid input; on any clipper failure it degrades to the
  * input rings as separate regions (a visible but honest fallback — never a blank canvas). */
-export function dissolveRings(rings, opts = {}) {
+function dissolveRingsUncached(rings, opts = {}) {
   const valid = (rings || []).filter(isRing);
   if (!valid.length) return [];
   if (valid.length === 1 && !(opts.subtract && opts.subtract.length)) return [{ outer: collapseRingSpikes(valid[0].map((p) => ({ x: p.x, y: p.y }))), holes: [] }];
@@ -341,8 +342,41 @@ export function dissolveRings(rings, opts = {}) {
  * stripes are clipped against the OTHER pieces of the junction, so the stripe ends at the pavement it
  * runs into. Returns an array of surviving polyline segments (possibly empty). Falls back to the whole
  * line if clipper can't process it — a stripe that runs slightly long beats a stripe that vanishes. */
+
+/* ⛔ NEW-1 (B217540, recurrence ×2 — the owner's 2026-10-06 "Something was slow just now"): THE DISSOLVE AND THE
+ * STRIPE CLIP ARE PURE FUNCTIONS OF THEIR ARGUMENTS, AND THE PLANNER CALLS THEM AGAIN ON EVERY FRAME OF AN
+ * UNRELATED DRAG. `roadNet` (SitePlanner.jsx) is keyed on `els`, so dragging a BUILDING re-runs the whole
+ * dissolved road network — Clipper twice per cluster, then `collapseRingSpikes`' quadratic `ringDrift` scan per
+ * spike candidate, then one clipper difference per curb stripe — although no road moved and every ring handed in
+ * is value-for-value the one handed in on the previous frame. Measured on the owner's real plan (12 centreline
+ * roads) the drag step cost ~100 ms per pointer-move and the CPU profile put ~2.8 s of an 11 s run in exactly
+ * these functions (`nD`/`ringDrift` 1.6 s self, Clipper ~1 s) plus the garbage collector clearing what they
+ * allocate. The honest fix is not a cleverer dissolve, it is not asking the question twice: the answer is keyed on
+ * the exact ring VALUES (`pointsSignature`, a ten-thousandth of a foot — four orders finer than anything drawn, so
+ * it cannot merge two different alignments), so a road that really moved, or a pad that really moved against a
+ * road, is a different key and is recomputed. Returned arrays are SHARED and read-only, like every memo in this
+ * tree (B236592); both consumers only measure them or map them to a path string. */
+const ringsSig = (rs) => (Array.isArray(rs) ? rs.map(pointsSignature).join(";") : "-");
+const dissolveCache = boundedCache(48);
+const clipCache = boundedCache(400);
+export const roadNetworkStats = { dissolveCalls: 0, dissolveHits: 0, clipCalls: 0, clipHits: 0 };
+export function resetRoadNetworkCaches() {
+  dissolveCache.clear(); clipCache.clear();
+  roadNetworkStats.dissolveCalls = roadNetworkStats.dissolveHits = roadNetworkStats.clipCalls = roadNetworkStats.clipHits = 0;
+}
+
+export function dissolveRings(rings, opts = {}) {
+  roadNetworkStats.dissolveCalls++;
+  const close = Number.isFinite(opts.close) ? opts.close : "d";
+  const key = `${close}#${ringsSig(rings)}#${ringsSig(opts.subtract)}`;
+  const hit = dissolveCache.get(key);
+  if (hit) { roadNetworkStats.dissolveHits++; return hit; }
+  return dissolveCache.set(key, dissolveRingsUncached(rings, opts));
+}
+
 export function clipPolylineOutside(line, rings) {
   if (!isLine(line)) return [];
+  roadNetworkStats.clipCalls++;
   const whole = () => [line.map((p) => ({ x: p.x, y: p.y }))];
   const cutters = (rings || []).filter(isRing);
   if (!cutters.length) return whole();
@@ -354,6 +388,13 @@ export function clipPolylineOutside(line, rings) {
   const lb = bb(line);
   const near = cutters.filter((r) => { const c = bb(r); return !(c.x1 < lb.x0 || c.x0 > lb.x1 || c.y1 < lb.y0 || c.y0 > lb.y1); });
   if (!near.length) return whole();
+  const key = `${pointsSignature(line)}#${ringsSig(near)}`;   // NEW-1 (B217540) — see the note above `dissolveRings`
+  const hit = clipCache.get(key);
+  if (hit) { roadNetworkStats.clipHits++; return hit; }
+  return clipCache.set(key, clipAgainst(line, near, whole));
+}
+
+function clipAgainst(line, near, whole) {
   try {
     const clip = new ClipperLib.Clipper();
     clip.AddPath(toPath(line), ClipperLib.PolyType.ptSubject, false); // false = OPEN path

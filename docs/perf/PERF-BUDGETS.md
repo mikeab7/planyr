@@ -18,6 +18,7 @@ attributable one — a number that goes red in the pull request that moved it.
 |---|---|---|---|
 | `ui-audit/perf-bundle-audit.mjs` | Bundle weight, per-route download cost, the Site-route chunk allowlist | After `npm run build`, no browser | **Yes** |
 | `ui-audit/perf-harness.mjs` | Time-to-first-drag, aerial coverage, frame time, peak heap, tile requests, FCP | Chromium against a built app | No — on demand |
+| `ui-audit/perf-edit-cycle.mjs` (`npm run perf:editcycle`) | The SAME edit sequence repeated N times on the owner's real plan, at a stated device-store weight: median cycle work, long-task time, worst task, and the per-cycle SLOPE of work / heap / DOM — budgets in `ui-audit/perf-edit-cycle.budget.json` (origin/main fails them, the fix passes; `docs/perf/PERF-EDIT-CYCLE.md`) | Chromium against a built app | No — on demand; its CI-gated half is count-based (`test/gestureSave.test.js`, `e2e/gesture-save-deferral.spec.js`) |
 
 Bundle weight is **deterministic**: it falls out of the build with no browser, no network and no
 CPU contention, so a breach is unambiguously caused by the diff in front of you. That half gates

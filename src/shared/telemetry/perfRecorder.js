@@ -48,7 +48,7 @@ import {
   createStringTable, internString, ringOrder, ringOrderSince, COUNTER_COLUMNS,
 } from "./perfRing.js";
 import { createTrigger, feedFrame, feedBootTask, sealBaselineLate, triggerState, worstWindow } from "./perfTrigger.js";
-import { buildCapture, encodeCapture, assertCaptureClean, frameStats, attributionLabel, CAPTURE_MAX_CHARS } from "./perfCapture.js";
+import { buildCapture, encodeCapture, encodeSupplements, assertCaptureClean, frameStats, attributionLabel, CAPTURE_MAX_CHARS } from "./perfCapture.js";
 import { savePerfCapture } from "./perfCaptureStore.js";
 
 const BUILD_ID = typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "dev";
@@ -382,7 +382,21 @@ export function capture(reason) {
       if (!r.ok) reportClientEvent("perfcap-store", "local capture store unavailable");
     }, () => {});
 
-    const enc = encodeCapture(cap, { maxChars: CAPTURE_MAX_CHARS });
+    /* ⛔ NEW-2 (B1317824) — A CAPTURE THE ONE ROW HAD TO TRIM TRAVELS AS THE MAIN ROW PLUS CONTINUATION ROWS.
+     * Measured on the owner's 2026-10-06 report: 2,100 frames / 229 long tasks / 23 counter samples were
+     * squeezed to 8 frames (the smooth tail AFTER the stall), 16 tasks and 6 counter samples. Re-ordering
+     * what sheds first had been tried three times (B265541, B846385, B1317824); the row simply cannot hold it.
+     * The main row is encoded first with a one-digit `suppRows` stub (same width as the real value, so its
+     * trim decisions are identical), the continuation rows carry exactly what it shed, then the real count is
+     * stamped. A capture that fits in one row sends none. See perfCapture.encodeSupplements. */
+    let enc = encodeCapture({ ...cap, suppRows: 1 }, { maxChars: CAPTURE_MAX_CHARS });
+    let supp = encodeSupplements(cap, enc);
+    if (supp.length) {
+      enc = encodeCapture({ ...cap, suppRows: Math.min(9, supp.length) }, { maxChars: CAPTURE_MAX_CHARS });
+      supp = encodeSupplements(cap, enc);
+    } else {
+      enc = encodeCapture(cap, { maxChars: CAPTURE_MAX_CHARS });
+    }
     _sent++;
 
     /* ⛔ B265536 — THE DELIVERY IS TRACKED, NOT ASSUMED. Until this, `capture()` returned true the
@@ -396,8 +410,15 @@ export function capture(reason) {
     _captures.push(rec);
     if (_captures.length > 10) _captures.shift();
 
-    _lastDelivery = Promise.resolve(reportClientEvent("perfcap", enc.text)).then((out) => {
-      const r = out || { ok: false, reason: "unknown" };
+    rec.suppRows = supp.length;
+    const partSends = supp.map((text) => Promise.resolve(reportClientEvent("perfcap", text)).then((o) => o || { ok: false, reason: "unknown" }, () => ({ ok: false, reason: "threw" })));
+    _lastDelivery = Promise.all([Promise.resolve(reportClientEvent("perfcap", enc.text)), ...partSends]).then(([out, ...partOuts]) => {
+      /* The capture is delivered only when EVERY row of it is — a continuation that never left the machine
+       * must not read as a delivered capture (LOUD-FAILURE). A suppressed (automated-run) part follows the
+       * main row's own verdict; a real failure of any part is reported as such. */
+      const failedPart = partOuts.find((p) => !p.ok && p.reason !== SUPPRESSED_AUTOMATED);
+      const r0 = out || { ok: false, reason: "unknown" };
+      const r = failedPart && r0.ok ? { ok: false, reason: `part-undelivered:${failedPart.reason || "rejected"}` } : r0;
       rec.delivered = !!r.ok;
       rec.reason = r.ok ? null : (r.reason || (r.error && (r.error.code || r.error.message)) || "rejected");
       /* B270912 — A SUPPRESSED SEND IS NOT AN UNDELIVERED ONE, and the two must not share a

@@ -780,25 +780,34 @@ export function _resetHistoryForTest() { historyMem = null; historyHydrated = fa
 // kept) by halving the per-site keep count until under budget; at most ~log2(15) re-serializes, and
 // only when actually over budget.
 const HISTORY_BYTE_BUDGET = 700 * 1024;
-function capHistoryBytes(h) {
+function capHistoryBytes(h, fullLen) {
   let keep = HISTORY_PER_SITE, out = h;
-  while (keep > 1 && JSON.stringify(out).length > HISTORY_BYTE_BUDGET) {
+  // `fullLen` — the length of `JSON.stringify(h)` when the caller already has it (writeHistoryAll does), so
+  // the first budget test does not serialise the whole ring a second time.
+  let len = Number.isFinite(fullLen) ? fullLen : JSON.stringify(out).length;
+  while (keep > 1 && len > HISTORY_BYTE_BUDGET) {
     keep = Math.floor(keep / 2);
     out = {}; for (const [id, list] of Object.entries(h)) out[id] = (list || []).slice(0, keep);
+    len = JSON.stringify(out).length;
   }
   return out;
 }
 function writeHistoryAll(h) {
   historyMem = h;                                   // in-memory ring = the synchronous source of truth (uncapped depth)
   let lsOk = false;
-  const capped = capHistoryBytes(h);                // localStorage keeps a BYTE-CAPPED mirror (the no-IndexedDB fallback)
-  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(capped)); lsOk = true; }
+  /* NEW-1 (B217540 ×2) — ONE serialisation of the full ring, reused three ways. This used to stringify it for the
+   * budget test, again for the localStorage write when under budget, and again for the IndexedDB copy — three passes
+   * over a ring that holds up to 15 whole-plan snapshots for every plan edited on the device, on EVERY snapshot
+   * (every paste / delete / count change). Same bytes out, a third of the serialising. */
+  const full = JSON.stringify(h);
+  const capped = capHistoryBytes(h, full.length); // localStorage keeps a BYTE-CAPPED mirror (the no-IndexedDB fallback)
+  try { localStorage.setItem(HISTORY_KEY, capped === h ? full : JSON.stringify(capped)); lsOk = true; }
   catch (_) { // over quota — keep only the newest few per site and retry
     try { const t = {}; for (const [id, list] of Object.entries(capped)) t[id] = (list || []).slice(0, 4); localStorage.setItem(HISTORY_KEY, JSON.stringify(t)); lsOk = true; } catch (_2) {}
   }
   // Durable, UNCAPPED copy in IndexedDB — gated until hydration so a pre-hydration partial ring can't
   // clobber the fuller stored one (initHistoryStore merges, then persists). Fire-and-forget.
-  if (historyHydrated && idbAvailable()) idbPut(HISTORY_KEY, JSON.stringify(h));
+  if (historyHydrated && idbAvailable()) idbPut(HISTORY_KEY, full);
   // Return ONLY the synchronously-VERIFIED localStorage result (B474 review #14). The idb write above is
   // fire-and-forget — idbAvailable() means "the API exists", not "the write committed" — so counting it
   // here let backupNow() (the Restore safety gate) report a backup that may not exist when localStorage is
@@ -970,19 +979,53 @@ function dropIdbBackedSrc(m) {
     s = { ...s, parcelDrawings: s.parcelDrawings.map((d) => (d && d.idbKey && isDataUrl(d.src) ? { ...d, src: null } : d)) };
   return s;
 }
+/* ⛔ NEW-1 (B217540, recurrence ×2) — THE LAST WHOLE-STORE WRITE, REMEMBERED, SO THE NEXT TWO QUESTIONS NEED NO PARSE.
+ * Every autosave asked "does this plan already exist here?" (`loadSite` — parse the entire store, migrate and
+ * normalise the plan, run the name authority over every plan) and then, after writing, read the plan back the same
+ * way to verify the write (B473 / B592). Both are answered by something this module already holds the instant it has
+ * written: the exact string it stored and the object it stored. So `writeSites` remembers `{ key, str, obj }`, and the
+ * two questions are answered from it ONLY while `localStorage` still holds exactly that string — the moment any other
+ * writer (another tab, a cloud pull, a test) has touched the key the bytes differ and the original full read runs, so
+ * the cross-tab honesty of the B473/B592 check is unchanged. It is not a cache of the plan: it is a byte-exact proof
+ * that nothing has changed since this tab wrote it, which is a STRONGER persistence check than the id-membership
+ * comparison it replaces on the single-tab path. Measured at a 3 MB store: three whole-store parses per autosave → one. */
+let lastSitesWrite = null;   // { key, str, obj }
+function rememberSitesWrite(key, str, obj) { lastSitesWrite = { key, str, obj }; }
+function lastWriteStillCurrent() {
+  const w = lastSitesWrite;
+  if (!w) return null;
+  try { return localStorage.getItem(w.key) === w.str ? w : null; } catch (_) { return null; }
+}
+/** Does this device hold a record for `id`? Identical truthiness to `!!loadSite(id)`, without the parse and the heal. */
+export function siteExistsLocally(id) {
+  if (!id) return false;
+  const w = lastWriteStillCurrent();
+  if (w && w.key === sitesKey()) return !!w.obj[id];
+  return !!readSites()[id];
+}
+/** The stored record for `id` as the persistence verifier needs it (its drawn collections). While nothing has touched
+ *  the store since THIS module wrote it, that is the object it wrote; otherwise the full `loadSite` read. */
+export function readBackSite(id) {
+  const w = lastWriteStillCurrent();
+  if (w && w.key === sitesKey() && w.obj[id]) return w.obj[id];
+  return loadSite(id);
+}
 function writeSites(obj) {
   // B474 — proactively shed IndexedDB-backed raster src so the persisted record stays small (off cap).
   const persist = {};
   for (const [id, s] of Object.entries(obj)) persist[id] = dropIdbBackedSrc(s);
-  try { localStorage.setItem(sitesKey(), JSON.stringify(persist)); return true; }
+  const key = sitesKey();
+  try { const str = JSON.stringify(persist); localStorage.setItem(key, str); rememberSitesWrite(key, str, persist); return true; }
   catch (_) {
     // Over quota anyway — shed ALL inline rasters (geometry still persists; rasters re-hydrate). B473.
     try {
       const slim = {};
       for (const [id, s] of Object.entries(persist)) slim[id] = stripDataUrls(s);
-      localStorage.setItem(sitesKey(), JSON.stringify(slim));
+      const str = JSON.stringify(slim);
+      localStorage.setItem(key, str);
+      rememberSitesWrite(key, str, slim);
       return true;
-    } catch (_2) { return false; }
+    } catch (_2) { lastSitesWrite = null; return false; }
   }
 }
 
