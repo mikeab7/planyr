@@ -30,6 +30,7 @@ import { Extension } from "@tiptap/core";
 import { Fragment } from "@tiptap/pm/model";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import { pushDownInherited } from "./notesPasteInherit.js";
+import { normalizeTableMarkup, fillEmptyCells, tabularFromClipboard, rowsToTableHtml } from "./notesTablePaste.js";
 
 export const pastePlainKey = new PluginKey("notePastePlain");
 
@@ -40,6 +41,22 @@ export function textOfNode(node) {
     if (!n) return;
     if (n.isText) { out.push(n.text || ""); return; }
     if (n.type?.name === "hardBreak") { out.push("\n"); return; }
+    /* ⛔ A TABLE IS TEXT AS TAB-SEPARATED ROWS (NEW-1, "Keep text only" on a table): one line per
+     * ROW, cells joined by a tab — what Excel and Word's own "convert to text" give, and what
+     * pastes back into a spreadsheet as a grid. Previously every cell became its own line, which
+     * threw the row structure away. A cell's own paragraphs are joined by a space so a row stays
+     * one line. */
+    if (n.type?.name === "table") {
+      if (out.length && out[out.length - 1] !== "\n") out.push("\n");
+      const rows = [];
+      n.forEach((row) => {
+        const cells = [];
+        row.forEach((cell) => cells.push(textOfNode(cell).replace(/\n+/g, " ").trim()));
+        rows.push(cells.join("\t"));
+      });
+      out.push(rows.join("\n"), "\n");
+      return;
+    }
     const block = n.isBlock && n.type?.name !== "doc";
     if (block && out.length && out[out.length - 1] !== "\n") out.push("\n");
     n.forEach?.((child) => walk(child));
@@ -108,6 +125,7 @@ export function isSpacerParagraph(node) {
  *  one row with more than one column, so this cannot swallow data the user meant to keep. */
 export function isLayoutTable(node) {
   if (node?.type?.name !== "table" || node.childCount === 0) return false;
+  if (node.attrs?.keep) return false;       // a bordered one-column table is DATA (OneNote's checklist), not scaffolding
   let single = true;
   node.forEach((row) => { if (row.childCount !== 1) single = false; });
   return single;
@@ -147,7 +165,53 @@ export function tidyPastedFragment(fragment, schema, depth = 0) {
   // A leading or trailing blank line from a copied block is noise, not content.
   while (out.length && isSpacerParagraph(out[0])) out.shift();
   while (out.length && isSpacerParagraph(out[out.length - 1])) out.pop();
-  return Fragment.fromArray(out);
+  /* ⛔ AND A TABLE CELL MUST NEVER COME OUT OF THE TIDY CHILDLESS (NEW-1). The trim above is right
+   * for a page of paragraphs and wrong for a cell: an empty cell is ONE empty paragraph, which is a
+   * "spacer", which the loop above removes — leaving a `tableCell` with no content, which the schema
+   * forbids. It sat there silently until a table carrying column widths (Excel's) reached the
+   * column-width repair pass, which threw on it and killed the whole paste. The fill runs once, on the
+   * finished top level, so it covers every depth. */
+  const done = Fragment.fromArray(out);
+  return depth === 0 ? fillEmptyCells(done, schema) : done;
+}
+
+/** Does this slice hold a table anywhere? */
+function sliceHasTable(slice) {
+  let found = false;
+  slice?.content?.descendants?.((n) => { if (n.type?.name === "table") found = true; return !found; });
+  return found;
+}
+
+/** Depth of the `noteAnchor` (a placed box) a resolved position is inside, or 0. */
+function anchorDepthOf($pos) {
+  for (let d = $pos.depth; d > 0; d -= 1) if ($pos.node(d).type.name === "noteAnchor") return d;
+  return 0;
+}
+
+/** ⛔ A PASTE MUST NOT LEAVE THE CARET OUTSIDE THE BOX IT STARTED IN (NEW-1). A table pasted at the
+ *  end of a box leaves ProseMirror nowhere inside the box to put the caret after it (a table cannot be
+ *  the last thing the cursor can sit after), so it hops to the document's one structural trailing
+ *  paragraph — which no click can reach and the box model cannot see (`selectionInsideAnchor`'s own
+ *  header). Found by pasting the OneNote fixture and asking where the caret went. If a paste began in
+ *  a box and ended outside it, give the box an empty paragraph under its last table (so there is a
+ *  line to type on, as in Word) and put the caret there. Pure over two states; returns a transaction
+ *  or null. */
+export function keepCaretInBox(trs, oldState, newState) {
+  if (!trs.some((t) => t.getMeta("paste"))) return null;
+  const was = anchorDepthOf(oldState.selection.$from);
+  if (!was) return null;
+  if (anchorDepthOf(newState.selection.$from)) return null;          // still inside a box: nothing to do
+  let pos = oldState.selection.$from.before(was);
+  for (const t of trs) pos = t.mapping.map(pos, -1);
+  const box = newState.doc.nodeAt(pos);
+  if (!box || box.type.name !== "noteAnchor") return null;
+  const endInside = pos + box.nodeSize - 1;
+  const tr = newState.tr;
+  if (box.lastChild && box.lastChild.type.name === "table") {
+    tr.insert(endInside, newState.schema.nodes.paragraph.create());
+  }
+  tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(endInside + (box.lastChild?.type.name === "table" ? 1 : 0), tr.doc.content.size)), -1));
+  return tr;
 }
 
 /** The list the caret is inside, outermost first — or -1. */
@@ -245,6 +309,7 @@ const NotePastePlain = Extension.create({
     return [
       new Plugin({
         key: pastePlainKey,
+        appendTransaction: (trs, oldState, newState) => keepCaretInBox(trs, oldState, newState),
         props: {
           /* ⛔ C — RUNS ON THE ORDINARY PASTE TOO. He should not have to know about a special
            * paste to avoid inheriting Outlook's spacer paragraphs and layout tables. This is
@@ -260,6 +325,7 @@ const NotePastePlain = Extension.create({
           transformPastedHTML(html) {
             try {
               const doc2 = new DOMParser().parseFromString(html, "text/html");
+              normalizeTableMarkup(doc2.body);
               pushDownInherited(doc2.body);
               return doc2.body.innerHTML;
             } catch {
@@ -279,8 +345,20 @@ const NotePastePlain = Extension.create({
           /* ⛔ RETURNS FALSE for the ordinary case — the default paste is NOT intercepted.
            * The ONE exception is B: a multi-block payload pasted into a list item, which the
            * default nests INSIDE the item (four levels deep, in his note). */
-          handlePaste(view, _event, slice) {
+          handlePaste(view, event, slice) {
             const { state } = view;
+            /* ⛔ PLAIN TAB-SEPARATED TEXT IS A GRID (NEW-1). What Excel/Sheets put in `text/plain`,
+             * with no HTML table beside it, becomes a real table — by rebuilding the table HTML a
+             * spreadsheet would have sent and handing it back to the SAME pipeline (so a paste into
+             * a table cell fills cells, a paste into a list lands after it, the chip appears). The
+             * re-entry carries a table in its slice, which is what stops this firing twice. Shift
+             * held is the person asking for plain text; Ctrl+Shift+V never reaches here at all. */
+            if (!view.input?.shiftKey && !sliceHasTable(slice)) {
+              const rows = tabularFromClipboard(event?.clipboardData);
+              if (rows) {
+                try { view.pasteHTML(rowsToTableHtml(rows), event); return true; } catch (_) { /* fall through to the ordinary paste */ }
+              }
+            }
             const listDepth = enclosingListDepth(state.selection.$from);
             if (listDepth > 0 && slice.content.childCount > 1 && !sliceIsList(slice)) {
               const after = state.selection.$from.after(listDepth);

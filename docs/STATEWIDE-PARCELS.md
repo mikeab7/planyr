@@ -66,7 +66,7 @@
 | Indiana (IN) | county assessor by default since a 2008 reform; a handful of larger townships above a population threshold retain their own elected township assessor | blocked-in-sandbox | [Parcel Boundaries of Indiana (Indiana Geographic Information Office, Data Harvest)](https://gisdata.in.gov/server/rest/services/Hosted/Parcel_Boundaries_of_Indiana_Current/FeatureServer/0) | gov | blocked (sandbox policy) | — | — | — | — | — | ✅ (Verify: live — gisdata.in.gov) |
 | Kansas (KS) | county | no-free-source | none found | — | — | — | — | — | — | — | — |
 | Kentucky (KY) | county | no-free-source | none found | — | — | — | — | — | — | — | — |
-| Louisiana (LA) | parish (64 parishes, each with an elected parish assessor — no county, no appraisal-district concept) | no-free-source **at STATE level; 31 parishes wired individually** (2 first-party + 24 from the 2026-09-30 pass, mostly third-party republications, + 5 measured from Michael's browser 2026-10-04) | none found statewide — see "Louisiana parishes — 64-parish dispatch, 2026-09-30" at the end of this file | — | — | — | — | — | — | — | — |
+| Louisiana (LA) | parish (64 parishes, each with an elected parish assessor — no county, no appraisal-district concept) | no-free-source **at STATE level; 34 parishes wired individually** (2 first-party + 24 from the 2026-09-30 pass, mostly third-party republications, + 5 measured from Michael's browser 2026-10-04, + 3 from the 2026-10-05/06 route-3 sweep) | none found statewide — see "Louisiana parishes — 64-parish dispatch, 2026-09-30" at the end of this file | — | — | — | — | — | — | — | — |
 | Massachusetts (MA) | city/town (351 cities/towns; counties have no assessing function) | measured-reachable | [Massachusetts Property Tax Parcels (MassGIS, EOTSS)](https://services1.arcgis.com/hGdibHYSPO59RG1h/arcgis/rest/services/Massachusetts_Property_Tax_Parcels/FeatureServer/0) | gov | yes (200, 119ms) | 2,559,319 | esriGeometryPolygon | parcelId=`PROP_ID`, owner=`OWNER1`, situsAddress=`SITE_ADDR`, landArea=`LOT_SIZE`, appraisedValue=`LAND_VAL` | lat 98% · lon 100% of state | 5684ms, 2000 feat. | ✅ |
 | Maryland (MD) | state-run — SDAT (Dept. of Assessments & Taxation) runs 24 local offices directly; not independent county assessors | blocked-in-sandbox | [MD iMAP — Parcel Boundaries (SDAT-sourced, monthly)](https://mdgeodata.md.gov/imap/rest/services/PlanningCadastre/MD_ParcelBoundaries/MapServer/0) | gov | blocked (sandbox policy) | — | — | — | — | — | ✅ (Verify: live — mdgeodata.md.gov) |
 | Maine (ME) | town/municipality (482 towns); Unorganized Territory assessed directly by Maine Revenue Services | measured-reachable | ["Maine Parcels Organized Towns", layer 10 (the ONLY layer on this service)](https://services1.arcgis.com/RbMX0mRVOFNTdLzd/ArcGIS/rest/services/Maine_Parcels_Organized_Towns/FeatureServer/10) | agol | yes (200, 158–174ms) | 708,382 | esriGeometryPolygon | parcelId=`STATE_ID`, owner=absent, situsAddress=`PROP_LOC`, landArea=absent, appraisedValue=absent | lat 98% · lon 102% of state | 378ms, 2000 feat. | ✅ |
@@ -941,6 +941,8 @@ Parish", "LA")` back to the key, and a point INSIDE each parish resolving to tha
 
 **⚠ SUPERSEDED IN PART 2026-10-04 — read "Louisiana route 3, run from Michael's browser 2026-10-04" at the end of this section: 5 parishes below (Calcasieu, Jefferson, Jefferson Davis, St. Landry, West Baton Rouge) moved to WIRED, and the counts in this paragraph are corrected there (31 wired · 7 blocked · 5 rejected · 21 not found = 64).**
 
+**⚠ SUPERSEDED AGAIN 2026-10-06 — De Soto, Washington and West Feliciana were also found and WIRED; read "Louisiana 2026-10-05/06 route-3 sweep" at the very end of this file for the current 34-wired state and for what every one of the 30 still-unwired parishes actually uses. "Not found" below is a statement about the 2026-09-30 sandbox only — it never meant "no source exists".**
+
 **Outcome for all 64 (as of 2026-09-30):** **2** already wired (East Baton Rouge B1455634, Orleans B1574256) · **24 wired
 now** (table below) · **10** with a real candidate on a parish-owned host this sandbox's egress blocks →
 "Candidates needing a live measurement" below (V1413377) · **6** measured and REJECTED, with the reason (West Baton Rouge's stale 2018 copy is recorded with its first-party lead in the blocked table) ·
@@ -1094,9 +1096,9 @@ Bossier/Caddo/Natchitoches via the same `romlc` service (`/7`, `/3`, `/5`).
 
 #### Not found by any reachable route — 22 parishes
 
-Beauregard · Caldwell · Claiborne · Concordia · De Soto · East Carroll · Franklin · Jackson · ~~Jefferson Davis~~ (✅ found and wired 2026-10-04) ·
-La Salle · Madison · Morehouse · Pointe Coupee · Red River · Sabine · St. Helena · Tensas · Union · Washington ·
-West Carroll · West Feliciana · Winn.
+Beauregard · Caldwell · Claiborne · Concordia · ~~De Soto~~ (✅ found and wired 2026-10-06) · East Carroll · Franklin · Jackson · ~~Jefferson Davis~~ (✅ found and wired 2026-10-04) ·
+La Salle · Madison · Morehouse · Pointe Coupee · Red River · Sabine · St. Helena · Tensas · Union · ~~Washington~~ (✅ found and wired 2026-10-06) ·
+West Carroll · ~~West Feliciana~~ (✅ found and wired 2026-10-06) · Winn.
 
 **Recorded as NOT FOUND ON 2026-09-30 by routes 1, 2 and 3-substitute above — never as "no source".** For each:
 the Hub API and the AGOL item search (Feature Service + Map Service, three wordings) returned only
@@ -1182,9 +1184,103 @@ vendor is known; the rest are **not yet route-3-checked** — which is NOT "not 
 - Catahoula, Vernon — route 3 run 2026-10-04 from Michael's browser: **efsedge.com, login-gated.**
 - Iberia — route 3 run 2026-10-04 from Michael's browser: **`gis.iberiagov.net` unreachable (connection error); also an Atlas/GeoPortal Maps parish.**
 - Beauregard, Sabine, Caldwell, Ouachita — route 3 run 2026-10-04 from Michael's browser: **actDataScout, login/token-gated.**
-- Pointe Coupee, West Feliciana — route 3 run 2026-10-04 from Michael's browser: **Atlas / GeoPortal Maps (WMS only, no public REST).**
+- Pointe Coupee — route 3 run 2026-10-04 from Michael's browser: **Atlas / GeoPortal Maps (WMS only, no public REST).** (West Feliciana was on this line; ✅ it is now WIRED from the parish government's own AGOL, 2026-10-06.)
 - Evangeline — token required (ES2), 2026-09-30.
 - Vermilion (Abbeville city-hole), Richland (2021, test account), Bienville (2018) — rejected 2026-09-30, unchanged.
-- **Not yet route-3-checked** (only the 2026-09-30 sandbox routes were tried): Claiborne · Concordia · De Soto · East
+- **Not yet route-3-checked** (as of 2026-10-04; **SUPERSEDED — every parish here was route-3-checked 2026-10-05/06, see the final section**; De Soto and Washington are now WIRED): Claiborne · Concordia · De Soto · East
   Carroll · Franklin · Jackson · La Salle · Madison · Morehouse · Red River · St. Helena · Tensas · Union ·
   Washington · West Carroll · Winn.
+
+### Louisiana 2026-10-05/06 route-3 sweep, measured from Michael's own Chrome (NEW-1, B2085536 — closes the rest of V1413377)
+
+Everything in this section is **"measured live from Michael's browser at the planyr.io origin, 2026-10-06"** (the
+unwired-parish survey is dated 2026-10-05/06), with `fetch()` running **at the planyr.io origin, so every source below is
+CORS-confirmed from production** and needs no gis-proxy. The three wired parishes were **also re-probed independently from
+this sandbox on 2026-10-06** — `services5/6/7.arcgis.com` ARE reachable here (unlike the TotaLand/parish hosts), so each
+count, extent, spread point and seat check below was reproduced, not only relayed.
+
+**How they were found — the route that beat name search.** An ArcGIS Online item search with a Louisiana bbox filter
+(`search?q=parcel … &bbox=-94.1,28.9,-88.8,33.1`), keeping the items whose extent covers more than half of a parish's bbox.
+**Name search ("<Parish> parcels", "<Parish> assessor") missed all three.** Reuse this route before declaring any parish
+"not found".
+
+**Wired — 3 parishes (34 of 64):**
+
+| Parish | Key | Parcels | Source (class) | Vintage | Id column | Situs (SPLIT) | Mailing — NEVER the address |
+|---|---|---|---|---|---|---|---|
+| De Soto | `la_desoto` | 41,968 (40,028 with owner) | De Soto Parish Assessor (linked from desotoassessor.org "Maps"), AGOL `services6.arcgis.com/pbafaqRkYgys7ElS` Parcels_AGOL_view/FeatureServer/0 — **first-party** | live roll, edited 2026-10-03 | `PARCEL_ID` (pinned; `TAX_PIN`, `ParcelNumber`, `PIN` also published) | `Address_Number` + `Street_Name` (+ `Street_Direction`, `Physical_Address_City/State/Zip_Code`); often blank on rural parcels | `Owner_Address`, `Owner_CityStateZipCode` |
+| Washington | `la_washington` | 33,297 (32,992 with owner) | Washington Parish Communications District (911), AGOL `services7.arcgis.com/yE0LOKocwREqepjx` Parcels_Public_view_March_2024/FeatureServer/0 — **first-party parish body** | edited 2024-03-18 | `PARCEL_ID` (pinned; `PARCEL_NUM` also published) | `PHYSICAL_A` (**house number only**) + `PHYSICAL_S` (street) | none published; `HOUSE` / `HOUSEPIC` hold internal image paths — never rendered |
+| West Feliciana | `la_westfeliciana` | 6,406 (6,149 with owner) | West Feliciana Parish Government (AGOL owner gmego@wfparish.org), `services5.arcgis.com/SkttgSmcq6CPonms` Parcels_06012022_Public/FeatureServer/**14** — **first-party** | **June 2022** (inside the 5-year bar; stated, the oldest of the batch) | `PARCEL_ID` (pinned; `AISparcelN`, `MappingNum` also published) | `Address_Nu` + `Street_Nam` + `Street_Dir`; `Physical_A/1/2` exist but were blank on every sampled row | `Owner_Addr`, `Owner_City` |
+
+Extents (4326): De Soto −94.05,31.84 to −93.35,32.35 · Washington −90.35,30.66 to −89.73,31.01 (whole parish) · West
+Feliciana −91.75,30.65 to −91.18,31.05. **Spread hits (small envelope; browser + sandbox agree):**
+- **De Soto** — Mansfield −93.709,32.038 → `0400451500` "DESOTO HOSPITAL ASSOCIATION, INC.", 103 LOUISIANA; −93.53,31.94 →
+  `0701061800` "NABORS PROPERTIES, L.L.C."; −93.92,32.18 → `0100026880B` "SATS 4C LAND & CATTLE, L.L.C."; also −93.70,32.20 →
+  `0600921900` and −93.80,31.95 → `0300284400`. 1 km box round Mansfield: 827 parcels.
+- **Washington** — Bogalusa −89.8486,30.7910 → `0440115800` "VINCE, CHARLES RAY", 1006 LOUISIANA AVENUE; `0440465715`
+  "ROBERTS, BRITTANY", 1820 SOUTH COLUMBIA ROAD, 0.65 ac; −90.15,30.85 → `0330162800` 811 14TH AVENUE; rural −90.05,30.70 →
+  `0600109400`, 13.3 ac. 1 km boxes: Bogalusa 298, Franklinton 344.
+- **West Feliciana** — St. Francisville −91.377,30.784 → `336G-068-000-020.000` "TOWN OF ST. FRANCISVILLE", 4977 PARKER ST.;
+  −91.45,30.80 → `333L-072-000-001.000` "BUTLER, R. O.,JR., VIRGINIA P.", 338 ac; −91.30,30.95 → `126M-081-000-001.000`
+  "WILKINSON, BEN EST.", 11185 WALKER RD. 1 km box round St. Francisville: 299. Three further points picked from the bbox
+  corners (−91.60,30.70 · −91.65,30.95 · −91.40,30.70) held nothing — outside the parish outline / on the river, not a service
+  hole; and the same for De Soto −93.45,32.25.
+
+**Rejected siblings, so nobody re-hunts them:** Washington `services7.arcgis.com/HsavlueFx5YZacwn/…/WP_PARCEL_2022` answers
+**Token Required**; West Feliciana `…/Parcels/FeatureServer/0` (6,104, edited 2019-10, outside the 5-year bar).
+
+**⛔ Two contradictions, recorded rather than smoothed over.** (1) **De Soto's bare-point query.** The browser found a bare
+point at Mansfield returning 0 while the envelope returned the hospital parcel (Jefferson's shape), so the row declares
+`pointViaEnvelope`. From this sandbox a bare point and a JSON point with a `spatialReference` BOTH returned a parcel at all five
+in-parish points tried. The browser's exact failing shape is therefore unreproduced here; the envelope is harmless either way and
+stays until V1510480 step 5 settles it. (2) The shared ladder fixes below exist because of how these schemas are split.
+
+**Shared resolvers fixed at the ONE implementation (`appraisal.js`), each red-proofed in `test/louisianaParishes.test.js`:**
+the physical-address rung used to read **De Soto's `Physical_Address_City` as the situs** (a card titled "MANSFIELD") and
+**Washington's `PHYSICAL_A` — the house number alone — as the situs** (a card titled "1820"); a city/state/zip part is now never
+a situs below the bare-`situs` rung, and a bare number is never a situs below that rung either (rung 0's `SITUS_NUM` behaviour is
+unchanged). `Owner_City` / `Owner_State` / `Owner_Zip` are mailing keys. All three schemas split the situs, so — like Lafourche —
+the parcel card's title falls back to the searched address; an address search runs a `LIKE` on the street column
+(`Street_Name` · `PHYSICAL_S` · `Street_Nam`). All text columns are fixed-width **space-padded** — a blank is "          ", which the
+shared placeholder test already treats as empty.
+
+#### What was verified live, 2026-10-05/06 (Cowork chat, Michael's signed-in Chrome — recorded as observed)
+
+- **2026-10-05, planyr.io, a build containing #2039 (the B2118880 live check):** address search returned the right parcel card in
+  all five parishes wired 2026-10-04 — **Lake Charles** 949 Ryan St → SUGAR BOWL 2004 LLC / `061008-1397-13 -000G` ·
+  **Jennings** 414 N Broadway → PARKER, RICHARD K. CAROLYN L / `221556545` · **Opelousas** 117 S Main → BATISTE SENIC M /
+  `0101120288` · **Metairie** 3301 Veterans Blvd → CAUSEWAY LLC / `0820046558` · **Port Allen** 880 N Alexander → PARISH OF WEST
+  BATON ROUGE / `030359014000`. This is the PASS for the address-search steps of the B2118880 live check (V1538480).
+- **2026-10-06, build `ba0cb72` (the admin coverage map, #2038 + #2064):** Calcasieu, Jefferson, Jefferson Davis, St. Landry
+  and West Baton Rouge all show "County's own server" with their publisher names — recorded against V1557536.
+
+#### The 30 still-unwired parishes — what each actually uses (route 3, Michael's browser, 2026-10-05/06)
+
+For **every parish in the first five groups below, a parcel source exists only behind a vendor login or a vendor's private
+proxy. That is a legitimate "no public server". It MUST NOT be worked around** — no scraping, no token-guessing, no replaying a
+vendor viewer's own session or proxy. **The 4 "not yet identified" parishes are the only ones a future pass should spend time
+on.**
+
+- **actDataScout** (`onemap.actdatascout.com`; login/token-gated, proprietary, no public REST — never scrape) — **18:**
+  Beauregard · Bienville · Caldwell · Claiborne · Concordia · East Carroll · Evangeline · Grant · Jackson · Morehouse · Ouachita ·
+  Rapides · Red River · Richland · Sabine · Union · Vermilion · West Carroll. (Taken from actDataScout's own Louisiana parish list
+  plus the assessor sites for Beauregard, Sabine, Caldwell, Ouachita, Union, Jackson.)
+- **Atlas / GeoPortal Maps** (`atlas.geoportalmaps.com`; QGIS WMS behind the app's own `proxy.ashx` to a private 192.168.x host —
+  not a public API) — **3 more:** Iberia · La Salle · Pointe Coupee (Grant is also on actDataScout; West Feliciana is now WIRED
+  above from the parish government's AGOL). Atlas once published
+  `services.geoportalmaps.com/arcgis/rest/services/Iberia_Parcels_DB/MapServer`; it now returns **404**, as does every Atlas parish
+  service name tried there. Iberia's own `gis.iberiagov.net` does not answer from Michael's browser at all, and the AGOL-indexed
+  `gis.iberiagov.net/…/Parcels/AssessorFeb2019` is the same dead host.
+- **Token/login-gated ArcGIS** — **4:** Avoyelles · Lincoln (`gissrv1.romlc.net` LA_Assessors, "Token Required" 499) ·
+  Catahoula · Vernon (`efsedge.com`; every REST call redirects to a login page).
+- **Greenstone** (`localgreenstone.com`, MapGuide behind a login session) — **1:** Winn.
+- **Evangeline** — ES2 `Parcel_Search_Widget_AGOL` still answers Token Required (also on the actDataScout list above).
+- **Not yet identified — 4:** Franklin · Madison (madisonparish.org assessor page: email only, no online map) · St. Helena · Tensas.
+  None has an assessor website with a map, and the Louisiana-bbox AGOL sweep found nothing for them. **These are the only ones a
+  future pass should spend time on.**
+- **Also seen, not used:** `gis2.totaland.com` LTA/RealChoropleth (90,084 Lafayette parcels; an assessor research/choropleth layer, no
+  owner/situs fields, "Pagination is not supported" on an envelope query) — not a better Lafayette source than the one wired.
+  The `gis2`/`gis3.totaland.com` folders were walked in full; **every Louisiana folder with a parcel layer there is now wired.**
+
+Count check: 18 + 3 + 4 + 1 + 4 = **30** unwired, and 34 wired = 64.
+
