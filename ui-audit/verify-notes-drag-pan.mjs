@@ -26,6 +26,7 @@
  */
 import { chromium } from "playwright";
 import { assertMeasurable, pacedWait } from "./lib/tabTiming.mjs";
+import { openSignedIn } from "./lib/signedInSession.mjs";
 
 const BASE = process.env.BASE_URL || "http://localhost:4173";
 const EXEC = process.env.PW_CHROME || undefined;
@@ -40,7 +41,14 @@ const ok = (label, cond, detail = "") => {
   else { fail += 1; failures.push(label); console.log(`  ✗ ${label}${detail ? ` — ${detail}` : ""}`); }
 };
 
-const browser = await chromium.launch({ ...(EXEC ? { executablePath: EXEC } : {}), args: ["--no-sandbox"] });
+/* ⛔ LIVE MODE (V1572160): `LIVE_BASE=https://planyr.io node ui-audit/verify-notes-drag-pan.mjs` signs in as the
+ * test account (shared `openSignedIn`, E2E_LOGIN_KEY), creates ONE throwaway page, and re-seeds it through the
+ * E2E-gated `window.__noteEditor.setDoc` before every arm (view, selection and focus reset too), then deletes the
+ * page at the end. `EXPECT_BUILD=<sha>` asserts the served build in the same call as the assertions. */
+const LIVE = process.env.LIVE_BASE || "";
+const browser = LIVE ? null : await chromium.launch({ ...(EXEC ? { executablePath: EXEC } : {}), args: ["--no-sandbox"] });
+let live = null;
+const LIVE_TITLE = "ZZ throwaway drag-pan " + Date.now().toString(36);
 
 const P = (t) => ({ type: "paragraph", content: t ? [{ type: "text", text: t }] : [] });
 const cell = (t) => ({ type: "tableCell", content: [P(t)] });
@@ -59,6 +67,7 @@ const DOC = { type: "doc", content: [
 ] };
 
 async function openNote(viewport = { width: 1400, height: 900 }) {
+  if (LIVE) return openLive();
   const page = await (await browser.newContext({ viewport })).newPage();
   page.on("pageerror", (e) => console.log("  [pageerror]", e.message));
   await assertMeasurable(page, "verify-notes-drag-pan");
@@ -76,6 +85,36 @@ async function openNote(viewport = { width: 1400, height: 900 }) {
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForSelector('[data-testid="note-anchor"]', { timeout: 20000 });
   await pacedWait(page, 900);
+  return page;
+}
+
+async function openLive() {
+  if (!live) {
+    const s = await openSignedIn({ base: LIVE.replace(/\/$/, ""), viewport: { width: 1400, height: 900 }, initScripts: [[() => { window.__PLANYR_E2E = true; }, null]] });
+    const page = s.page;
+    await assertMeasurable(page, "verify-notes-drag-pan");
+    console.log(`signed in as ${s.proof.email} · served build ${JSON.stringify(s.build)}`);
+    if (process.env.EXPECT_BUILD) ok(`served build is the merge commit ${process.env.EXPECT_BUILD}`, JSON.stringify(s.build).includes(process.env.EXPECT_BUILD), JSON.stringify(s.build));
+    await page.goto(`${LIVE.replace(/\/$/, "")}/?cb=${Date.now()}#/notes`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector('[data-testid="notes-new-page"]', { timeout: 30000 });
+    live = { s, page, before: await page.locator('[data-testid^="notes-row-"]').count() };
+    await page.locator('[data-testid="notes-new-page"]').click();
+    await page.waitForSelector('[data-testid="note-title"]', { timeout: 20000 });
+    await page.locator('[data-testid="note-title"]').fill(LIVE_TITLE);
+    await page.locator('[data-testid="note-title"]').press("Tab").catch(() => {});
+    await pacedWait(page, 800);
+    live.view0 = null;
+    page.close = async () => {};           // arms close their page; the live page is shared and closed once, at the end
+  }
+  const { page } = live;
+  await page.evaluate(() => { document.activeElement?.blur?.(); document.getSelection()?.removeAllRanges(); });
+  await page.keyboard.press("Escape");
+  await page.evaluate((doc) => window.__noteEditor.setDoc(doc), DOC);
+  await page.waitForSelector('[data-testid="note-anchor"]', { timeout: 20000 });
+  await pacedWait(page, 700);
+  if (!live.view0) live.view0 = await view(page);
+  await page.evaluate((v) => window.__noteEditor.setView({ x: -v.x, y: -v.y, z: v.z }), live.view0);
+  await pacedWait(page, 400);
   return page;
 }
 
@@ -358,7 +397,22 @@ console.log("\n5 · EXCEPTIONS KEEP THEIR OWN DRAG, AND THE BOX BEING EDITED SEL
   await page.close();
 }
 
-await browser.close();
+if (LIVE && live) {
+  console.log("\n[cleanup] deleting the throwaway page");
+  const page = live.page;
+  try {
+    const row = page.locator(`[data-testid^="notes-row-"]`, { hasText: LIVE_TITLE }).first();
+    await row.click({ button: "right" });
+    await page.waitForTimeout(300);
+    await page.locator('[data-testid^="notes-menu-"]', { hasText: /^Delete/ }).first().click();
+    await page.waitForTimeout(800);
+    const yes = page.locator('button[aria-label*="Confirm" i], button:has-text("✓")').first();
+    if (await yes.count()) { await yes.click(); await page.waitForTimeout(1200); }
+  } catch (e) { console.log("  cleanup step error:", String(e).slice(0, 200)); }
+  ok("the throwaway page is gone from the list", await page.locator(`[data-testid^="notes-row-"]`, { hasText: LIVE_TITLE }).count() === 0);
+  ok("page count is back to what it was", await page.locator('[data-testid^="notes-row-"]').count() === live.before);
+  await live.s.close();
+} else await browser.close();
 console.log(`\n${fail === 0 ? "PASS" : "FAIL"} — ${pass} passed, ${fail} failed${voidRun ? " (RUN VOID: a known-good arm failed)" : ""}`);
 if (fail) console.log("failed:\n  " + failures.join("\n  "));
 process.exit(fail === 0 ? 0 : 1);
