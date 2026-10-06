@@ -46,6 +46,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   EVERY role so a second deal on an already-tracked property attaches to it instead of minting a
   duplicate, then an exact normalized-title fallback) and mints a new "tracked" site only when
   nothing plausible matches. The owner must never have to create a site before recording a deal.
+- **Right tool rail (B2142832):** `components/RailSplit.jsx` (`RailSplit` = label + ▾ pill carrying the tool's current size; `RailHeading` = label + hairline) and pure `lib/toolRailModel.js` (pill values/tooltips/aria, dock glyph kind, heading spacing `RAIL`, mirrored by `.rail-hdr` in the global stylesheet). Never copy a value into the rail — read `settings.stallW/stallDepth`, `roadWidth`, `buildingDock`. Guards: the repo-root `test/` suite **toolRailModel** and the e2e spec **tool-rail-values**.
 - **⛔ Site Analysis = TRUSTED VERDICTS ONLY (B2117136, owner-approved 2026-10-05) — read before adding a check or a card.**
   A verdict (colour, amount, "None") is issued only by `siteChecks.js`'s declared `TRUSTED_CHECKS` registry, and only where the
   site's region is in that check's `regions` (FEMA + NWI: all; RRC wells + pipelines: TX). Everything else is a map-layer PILL
