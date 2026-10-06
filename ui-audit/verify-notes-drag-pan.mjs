@@ -25,7 +25,8 @@
  * which already panned) — if those two fail the run is VOID, not a score.
  */
 import { chromium } from "playwright";
-import { assertMeasurable, pacedWait } from "./lib/tabTiming.mjs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { pacedWait } from "./lib/tabTiming.mjs";
 import { openSignedIn } from "./lib/signedInSession.mjs";
 
 const BASE = process.env.BASE_URL || "http://localhost:4173";
