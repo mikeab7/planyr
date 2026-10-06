@@ -11,6 +11,7 @@ Map/Comps: the `site_plan_overlays` table + Leaflet). **Math, never storage, is 
   `latLonToImagePoint`, `scalePlacement`, `rotatePlacement`) and CANVAS half (`imagePointToWorld`,
   `scaleOverlayAbout`, `applySimilarityToOverlay`, `alignOverlaySimilarity`) share `rotateOffset` and
   `normalizeDeg`; every fit comes from the shared similarity-transform module (`geometry/`).
+- Visible extent (NEW-2): `visibleFrame` / `visibleCenterPx` / `visibleCornersPx` + `anchorVisibleCentre` (canvas) / `anchorVisibleCentreGeo` (map) in `overlayPlacement.js` — the selection chrome of a CROPPED overlay fits the crop (poly → bbox) and scale/rotate pivot about its centre; stored scale/crop meaning unchanged.
 - `overlayRaster.js` — raster sizing (DPI / long-edge caps, JPEG + thumbnail constants). the OCR PDF rasteriser and the Site tab
   image loader call it instead of mirroring it.
 

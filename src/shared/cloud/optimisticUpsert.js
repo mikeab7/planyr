@@ -49,6 +49,14 @@ export const isMissingColumn = (error, col) => {
 // VERSION column specifically — a table can have OTHER optional columns that also 404 (e.g.
 // doc_reviews' library columns), and those must NOT be mistaken for "degrade the version guard".
 export const isMissingVersionColumn = (error) => isMissingColumn(error, "version");
+/* NEW-1 (B2163344) — a write whose RESPONSE never arrived ("Failed to fetch", a reset connection, a
+ * timeout) has an UNKNOWN outcome, not a failed one: the PATCH can have been applied and only the
+ * reply lost. Measured on the owner's plans: the row already carried the committed crop at the new
+ * version while the banner said "didn't reach the cloud". A caller must therefore re-read the row
+ * and retry once before it reports failure — never paint the banner off the first attempt. */
+export const isTransientNetworkError = (error) =>
+  /failed to fetch|networkerror|network request failed|load failed|timed? ?out|aborted|connection (reset|closed)|econnreset/i
+    .test(String((error && error.message) || error || ""));
 // unique_violation (23505) — an INSERT hit an existing primary key: we thought the row was
 // new but it already exists (another session created it) → treat as a conflict, not an error.
 const isUniqueViolation = (error) => String((error && error.code) || "") === "23505";
