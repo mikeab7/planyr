@@ -527,7 +527,8 @@ import { resolveDraftStepBack } from "./lib/drafts.js";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { FONT_SIZE, SPACE, CONTROL_H } from "../../shared/ui/designTokens.js";
 import { parcelKey as parcelKeyOf, storedParcelKey } from "./lib/parcelIdentity.js";
-import { canvasBox, nextCanvasSize, framePad } from "./lib/canvasBox.js"; // NEW-1 — the canvas box IS the element box (no 320×360 floor)
+import { snapPanelWidth } from "./lib/panelWidth.js";
+import { canvasBox, nextCanvasSize, framePad, canvasEdgeLeft, EDGE_EPS } from "./lib/canvasBox.js"; // NEW-1 — the canvas box IS the element box (no 320×360 floor)
 // B845584 — the element context-menu rebuild's own 14px/1.3-stroke icon family (see that file's
 // header for why it is separate from icons.jsx's 24px/stroke-2 idiom). Two names collide with
 // icons.jsx's existing exports (Duplicate, Delete/Lock-ish), so they are aliased at the import site.
@@ -6775,10 +6776,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // toast falls back to true viewport-center in that case. Identity-cheap: only writes on change.
     const cx = Math.round(r.left + r.width / 2);
     setToastCenterX((prev) => (prev === cx ? prev : cx));
-    const left = Math.round(el.offsetLeft);
+    // NEW-1 (B2154768) — the EXACT (fractional) edge, never the integer-rounded offsetLeft. On a Windows display
+    // scaled 125%/150% the pointer reports fractional CSS px, so a dragged panel is fractional-wide and the
+    // canvas edge moves by a fraction; compensating by the rounded integer left a ±0.5 px residual that flipped
+    // frame to frame — the map "shaking" while the panel is dragged. Same self-gating measure as before
+    // (an overlaid/portaled panel steals no layout width → zero delta), just without the rounding.
+    const parentLeft = el.offsetParent ? el.offsetParent.getBoundingClientRect().left : 0;
+    const left = canvasEdgeLeft(r.left, parentLeft);
     if (panelShiftRef.current == null) { panelShiftRef.current = left; return; } // seed baseline — no shift on first mount
     const delta = left - panelShiftRef.current;
-    if (delta !== 0) {
+    if (Math.abs(delta) > EDGE_EPS) {
       panelShiftRef.current = left;
       setView((v) => ({ ...v, offX: v.offX - delta }));
       // NEW-3 — REBASE A LIVE PAN ONTO THE SAME FRAME. A pan captures its origin offset (`ox`) from
@@ -6810,7 +6817,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const startLeftResize = (e) => {
     e.preventDefault();
     const startX = e.clientX, startW = leftWidth;
-    const onMove = (ev) => setLeftWidth(Math.max(240, Math.min(620, startW + (ev.clientX - startX))));
+    const onMove = (ev) => setLeftWidth(snapPanelWidth(startW + (ev.clientX - startX), window.devicePixelRatio)); // B2154768 — device-pixel-aligned (no sub-pixel shake)
     const onUp = () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
