@@ -38,3 +38,14 @@ export function framePad(w, h, want = 60) {
   const short = Math.max(CANVAS_MIN_PX, Math.min(w, h));
   return Math.max(0, Math.min(want, short / 4));
 }
+
+/** Below this a left-edge change is layout noise, not a panel moving (the compensation threshold). */
+export const EDGE_EPS = 0.01;
+
+/** The canvas's left edge relative to its offset parent, EXACT (fractional). `Math.round(offsetLeft)` was
+ *  the B2154768 shake: a fractional-wide panel (fractional pointer coords on a scaled Windows display) moved
+ *  the edge by a fraction, the pan was corrected by the rounded integer, and the ±0.5 residual flipped per frame. */
+export function canvasEdgeLeft(rectLeft, parentLeft) {
+  const a = Number.isFinite(rectLeft) ? rectLeft : 0, b = Number.isFinite(parentLeft) ? parentLeft : 0;
+  return a - b;
+}
