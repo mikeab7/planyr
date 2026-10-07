@@ -35,6 +35,7 @@ const log = (ok, msg) => { console.log((ok ? "✓ " : "✗ ") + msg); if (!ok) f
 /* In the page: start a per-rAF recorder over ONE fixed element + ONE fixed tile (held by reference). */
 const startRec = () => {
   const svg = document.querySelector('[data-testid="planner-canvas"]');
+  // el-tier: one fixed ELEMENT is the yardstick (its screen rect), not a census of plan contents.
   const el = [...svg.querySelectorAll("[data-el-id]")].map((n) => [n, n.getBoundingClientRect()]).filter(([, q]) => q.width > 0)
     .sort((a, b) => b[1].width * b[1].height - a[1].width * a[1].height)[0]?.[0];
   const cont = [...document.querySelectorAll(".leaflet-container")].find((c) => c.getBoundingClientRect().width > 0);
