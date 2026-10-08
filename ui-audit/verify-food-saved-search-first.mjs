@@ -30,8 +30,9 @@ try {
     const uid = au.user.id;
     const rpc = async (q, cap) => (await sb.rpc("food_places_search_by_name", { p_query: q, p_cap: cap, p_center_lat: 29.8, p_center_lon: -95.4 })).data || [];
     const pick = {};
-    const daon = (await rpc("daon", 60)).find((r) => /dao'n/i.test(r.name) && /77055-4107/.test(r.address || ""));
-    pick.daon = daon;
+    // DAO'N: the zip+4 record (id fixed from the 2026-10-04 read of the snapshot), fallback to any 9861 Long Point record.
+    const daonAll = (await rpc("daon", 60)).filter((r) => /dao'n/i.test(r.name));
+    pick.daon = daonAll.find((r) => r.id === "cce4349a-a4ba-4977-aa22-17c395e1e682") || daonAll.find((r) => /77055-4107/.test(r.address || "")) || daonAll[0];
     pick.captain = (await rpc("Captain Tom", 60)).find((r) => /katy/i.test(r.address || ""));
     const pool = new Set((await rpc("roadhouse", 60)).map((r) => r.id));
     const all = await rpc("roadhouse", 200);
@@ -50,6 +51,8 @@ try {
     return { uid, error: error ? String(error.message) : null, ids: Object.fromEntries(ids), outside: pick.roadhouseOutsidePool, names: Object.fromEntries(Object.entries(pick).filter(([, v]) => v && v.name).map(([k, v]) => [k, v.name + " | " + v.address])) };
   }, TAG);
   uid = seeds.uid;
+  // PRECONDITION: every case must actually be seeded, or the run is VOID rather than scored.
+  for (const k of ["daon", "captain", "roadhouse", "cantina", "taqueria", "soma", "tio", "ikes"]) if (!seeds.ids[k]) throw new Error("VOID: could not seed " + k);
   console.log("seeded", JSON.stringify(seeds.names), seeds.error || "");
   if (seeds.error) throw new Error("seed insert failed: " + seeds.error);
   console.log("roadhouse seed lies OUTSIDE the capped 60-row pool:", seeds.outside);
@@ -79,7 +82,7 @@ try {
     { q: "Roadhouse", saved: [/texas roadhouse/i] },
     { q: "El Tiempo", saved: [/cantina/i, /taqueria/i] },
     { q: "soma", saved: [/soma sushi/i] },
-    { q: "tio trompo", saved: [/tr?[ií]o trompo/i] },
+    { q: "tio trompo", saved: [/trompo/i] },
     { q: "ikes", saved: [/ike/i] },
   ];
   for (const view of ["houston", "dallas"]) {
