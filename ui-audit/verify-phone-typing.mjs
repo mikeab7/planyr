@@ -25,7 +25,7 @@
 import { webkit, devices } from "playwright";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
-import { openSignedIn } from "./lib/signedInSession.mjs";
+import { openSignedIn, proveSignedIn, TEST_ACCOUNT_EMAIL } from "./lib/signedInSession.mjs";
 import { LIVE_PREFIX, seedThrowawayPlan, cleanupLive, listIds } from "./lib/liveFixtures.mjs";
 import { installStubSupabase } from "./lib/stubSupabase.mjs";
 import { IOS_MODEL, KEYBOARDS, probeFocused, shootWithKeyboard, CONTACT_WORDS, REAL_TOKEN } from "./lib/iosKeyboard.mjs";
@@ -77,10 +77,29 @@ const seed = (signedIn) => `(() => { try {
 const liveOpen = new Set();
 const closeLeakedLive = async () => { const all = [...liveOpen]; liveOpen.clear(); await Promise.all(all.map((c) => c().catch(() => {}))); };
 
+let liveSession = null; // a Playwright storageState captured from the ONE live sign-in
+// a signed-in page for data work (cleanup) on the stored session — falls back to a real sign-in only if none is stored
+async function liveDataPage() {
+  if (!liveSession) return openSignedIn({ base: BASE, engine: "webkit" });
+  const b = await webkit.launch();
+  const page = await (await b.newContext({ storageState: liveSession })).newPage();
+  await page.goto(BASE + "/", { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => !!window.pfSupabase, null, { timeout: 20000 });
+  const proof = await proveSignedIn(page);
+  if (proof.email !== TEST_ACCOUNT_EMAIL) { await b.close(); return openSignedIn({ base: BASE, engine: "webkit" }); }
+  return { page, close: () => b.close() };
+}
 async function openLive(phone, mode, { signedIn = true, route }) {
   const initScripts = [[IOS_MODEL, { kbPx: KEYBOARDS[phone], tallInner: mode === "ios-tallinner" }]];
   let ctx, page, close;
-  if (signedIn) {
+  if (signedIn && liveSession) {
+    // SIGN IN ONCE: reuse the stored session (Supabase rate-limits /auth/v1/verify per IP — signing in afresh per
+    // surface tripped `over_request_rate_limit` mid-run on 2026-10-08). Each surface still PROVES the session below.
+    const b = await webkit.launch();
+    ctx = await b.newContext({ ...devices[phone], storageState: liveSession });
+    for (const [fn, arg] of initScripts) await ctx.addInitScript(fn, arg);
+    page = await ctx.newPage(); close = () => b.close();
+  } else if (signedIn) {
     const s = await openSignedIn({ base: BASE, engine: "webkit", device: phone, initScripts });
     ({ context: ctx, page } = s); close = s.close;
   } else {
@@ -100,7 +119,15 @@ async function openLive(phone, mode, { signedIn = true, route }) {
   // than the stub's instant fetch. Scoring before it is armed measures iOS's raw reveal WITHOUT the app's pin-back — a wrong
   // picture (it flipped the known-answer arm under parallel network load) — so wait for the app's own armed flag.
   await page.waitForFunction(() => window.__PLANYR_PAGE_CONTAINMENT_GUARD_INSTALLED === true, null, { timeout: 45000 }).catch(() => { throw new Error("the page-containment guard never armed on the live page — scoring now would measure the wrong thing"); });
-  const closer = () => { liveOpen.delete(closer); return close(); };
+  if (signedIn) {
+    // getUser() is a network call that can come back empty once under live load (seen 2026-10-08 with the fixture row
+    // visible, i.e. signed in) — ask again rather than void the surface; still BOTH halves of the proof are required
+    let proof = null;
+    for (let i = 0; i < 3; i++) { proof = await proveSignedIn(page); if (proof.email === TEST_ACCOUNT_EMAIL && proof.fixtureVisible) break; await page.waitForTimeout(1000); }
+    if (proof.email !== TEST_ACCOUNT_EMAIL || !proof.fixtureVisible) throw new Error("live surface not provably signed in — " + JSON.stringify(proof));
+  }
+  // carry the LATEST tokens forward (the client may have rotated the refresh token), so the next surface needs no sign-in
+  const closer = async () => { liveOpen.delete(closer); if (signedIn) liveSession = await ctx.storageState().catch(() => liveSession); return close(); };
   liveOpen.add(closer);
   return { ctx: { close: closer }, page, errs };
 }
@@ -342,8 +369,8 @@ const section = async (name, fn) => { if (ONLY && !new RegExp(ONLY).test(name)) 
 const browser = await webkit.launch();
 let liveSchedulesBefore = null;
 if (LIVE) { // seed the throwaway plan the Site Planner surfaces need (a parcel + a building), remembering the schedules that already exist
-  const sd = await openSignedIn({ base: BASE });
-  try { liveSchedulesBefore = await listIds(sd.page, "schedules"); await cleanupLive(sd.page, { planId: PROJ }); await seedThrowawayPlan(sd.page, PROJ); } finally { await sd.close(); }
+  const sd = await openSignedIn({ base: BASE, engine: "webkit" }) /* same engine as the scored runs: one trust store, one browser */;
+  try { liveSchedulesBefore = await listIds(sd.page, "schedules"); await cleanupLive(sd.page, { planId: PROJ }); await seedThrowawayPlan(sd.page, PROJ); liveSession = await sd.context.storageState(); } finally { await sd.close(); }
 }
 try {
   // ── 0. KNOWN-ANSWER ARM ───────────────────────────────────────────────────────────────────────
@@ -417,7 +444,7 @@ try {
 } finally {
   await browser.close();
   if (LIVE) { // owner rule 15: clear what the run made, then PROVE it is gone
-    const sd = await openSignedIn({ base: BASE });
+    const sd = await liveDataPage();
     try { const c = await cleanupLive(sd.page, { planId: PROJ, scheduleIdsBefore: liveSchedulesBefore }); console.log("live cleanup:", JSON.stringify(c)); check("live cleanup left nothing behind", !c.errors.length && c.left.site === 0 && !c.left.schedules, JSON.stringify(c)); } finally { await sd.close(); }
   }
 }
