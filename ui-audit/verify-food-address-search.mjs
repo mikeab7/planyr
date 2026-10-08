@@ -33,7 +33,7 @@ try {
   row("0 PRECONDITION: signed in as the test account", s.proof.email === "e2e@planyr.test" && s.proof.fixtureVisible, JSON.stringify(s.proof));
 
   const moveTo = async ([lat, lon]) => {
-    await page.evaluate(([la, lo]) => window.__foodMap.setView([la, lo], 14, { animate: false }), [lat, lon]);
+    await page.evaluate(([la, lo]) => { window.__foodMap.setView([la, lo], 14, { animate: false }); }, [lat, lon]);
     await page.waitForTimeout(1500);
   };
   const box = page.locator('[data-testid="food-search-box"]');
@@ -83,7 +83,9 @@ try {
   const pct = await search("%%%");
   row("5a '%%%' shows the no-match state, no rows", pct.length === 0 && (await noMatch()) > 0, `rows=${pct.length}`);
   const ab = await search("ab");
-  row("5b 'ab' (too short) shows no rows and no error banner", ab.length === 0 && !(await bannerErr()), `rows=${ab.length}`);
+  // "ab" is a legitimate NAME query (Abuelo's, Abe's…): the NAME search answers it. What must hold is that the address half
+  // (which refuses words under 3 letters) adds nothing odd — every row's NAME carries "ab" — and no error banner shows.
+  row("5b 'ab' (2 letters): rows, if any, are name matches, and no error banner", ab.every((t) => /ab/i.test(t.split(/\s\d/)[0])) && !(await bannerErr()), `rows=${ab.length}: ${ab.slice(0, 3).join(" ‖ ")}`);
   row("5c no console/page errors from the search path", s.errors.filter((e) => /search_by_address|food_places/.test(String(e))).length === 0, `${s.errors.length} total page errors`);
 } catch (e) {
   if (String(e.message) !== "void") { console.log("ERROR " + (e && e.stack || e)); exit = exit || 1; }
