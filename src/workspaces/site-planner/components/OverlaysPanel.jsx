@@ -60,6 +60,8 @@ const WARN = "var(--warn-text)";
 
 // compact regular-weight button: the input height, control-size text, never wraps
 const btnCompact = { height: H, minWidth: 0, padding: "0 10px", fontSize: C, fontWeight: 400, lineHeight: 1, whiteSpace: "nowrap", boxShadow: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: SPACE.xs };
+const FOCUS_CSS = `[data-testid="overlays-panel"] :is(button,input,select):focus-visible{outline:2px solid ${ACCENT};outline-offset:1px;box-shadow:none}
+[data-testid="overlays-panel"] input:not([type=range],[type=checkbox]):focus{border-color:${ACCENT};box-shadow:none}`;
 const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 function Ico({ children, size = 14 }) {
@@ -326,7 +328,7 @@ function DrawsToggle({ id, band, onSet }) {
     return (
       <button key={key} type="button" aria-pressed={on} title={title} data-testid={`reference-${key}-${id}`} onClick={() => onSet(key === "above")}
         style={{ border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: C, fontWeight: 400, lineHeight: 1, whiteSpace: "nowrap", height: "100%", padding: "0 5px", borderRadius: RADIUS.sm,
-          background: on ? "var(--text-primary)" : "transparent", color: on ? "var(--surface-page)" : "var(--text-primary)" }}>{label}</button>
+          background: on ? "var(--text-primary)" : "transparent", color: on ? "var(--surface-raised)" : "var(--text-primary)" }}>{label}</button>
     );
   };
   return (
@@ -533,6 +535,8 @@ export default function OverlaysPanel({
       onDragOver={(e) => { if (hasFiles(e)) e.preventDefault(); }}
       onDragLeave={(e) => { if (!hasFiles(e)) return; depth.current = Math.max(0, depth.current - 1); if (depth.current === 0) setFileOver(false); }}
       onDrop={(e) => { if (!hasFiles(e)) return; e.preventDefault(); e.stopPropagation(); depth.current = 0; setFileOver(false); const fs = e.dataTransfer.files; const f = fs && fs[0]; if (f) h.onDropFile(f, fs.length); }}>
+      {/* one accent: the global focus ring is the orange --accent; inside this panel it is the Site green */}
+      <style>{FOCUS_CSS}</style>
       <div role="list" aria-label="Overlays" style={{ display: "flex", flexDirection: "column" }} onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setOver(null); }}>
         {rows.map((o) => {
           const isMap = !!o.fromMap;

@@ -176,7 +176,25 @@ async function run(surface, { w, vw = 1440, vh = 1000, floating = false, phone =
     }
     if (BROKEN) await page.addStyleTag({ content: BREAK_CSS });
     await page.waitForTimeout(300);
+    // FOCUS must be green too: focus each control in turn and read its ring / border
+    const focusOrange = await page.evaluate(() => {
+      const root = document.querySelector('[data-testid="overlays-panel"]');
+      if (!root) return [];
+      const probe = document.createElement("i"); probe.style.cssText = "color:var(--accent)"; root.appendChild(probe);
+      const o = getComputedStyle(probe).color; probe.remove();
+      const bad = [];
+      for (const el of root.querySelectorAll("button,input:not([type=file]),select")) {
+        if (el.disabled || !el.getBoundingClientRect().width) continue;
+        el.focus({ focusVisible: true });
+        const cs = getComputedStyle(el);
+        const seen = [cs.outlineColor, cs.borderTopColor, cs.boxShadow].join(" ");
+        if (seen.includes(o) || /rgba\(194, 65, 12/.test(seen)) bad.push(el.getAttribute("data-testid") || el.getAttribute("aria-label") || el.tagName);
+        el.blur();
+      }
+      return bad;
+    });
     const m = await page.evaluate(measure, floating);
+    m.focusOrange = focusOrange;
     const tag = `${surface} · ${v.label}`;
     if (m.missing) { log(false, `${tag}: Overlays panel not found`); await ctx.close(); continue; }
     if (errs.length) log(false, `${tag}: page error ${errs[0].slice(0, 90)}`);
@@ -188,6 +206,7 @@ async function run(surface, { w, vw = 1440, vh = 1000, floating = false, phone =
     const sz = Object.keys(m.sizes).sort();
     log(sz.length <= 2 && sz.every((s) => s === "12px" || s === "10.5px"), `${tag}: only two text sizes (${sz.join(", ")}${sz.length > 2 || sz.some((x) => x !== "12px" && x !== "10.5px") ? " — " + JSON.stringify(m.sizeWho) : ""})`);
     log(m.badPairs.length === 0, `${tag}: every text is an allowed (size, weight) pair${m.badPairs.length ? " — " + m.badPairs.slice(0, 4).join("; ") : ""}`);
+    log(m.focusOrange.length === 0, `${tag}: focus ring / border is never orange${m.focusOrange.length ? " — " + m.focusOrange.slice(0, 4).join("; ") : ""}`);
     log(m.orange.length === 0 && !!m.orangeRef, `${tag}: no orange accent anywhere (ref ${m.orangeRef})${m.orange.length ? " — " + m.orange.slice(0, 4).join("; ") : ""}`);
     log(m.unreachable.length === 0, `${tag}: every control reachable${m.unreachable.length ? " — " + m.unreachable.slice(0, 3).join("; ") : ""}`);
     for (const id of v.must) log(m.testids.includes(id), `${tag}: has ${id}`);
