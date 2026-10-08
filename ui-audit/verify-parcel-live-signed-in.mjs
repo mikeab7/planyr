@@ -63,7 +63,11 @@ async function turnSelectOn() {
   await selectToggle().click();
   return t0;
 }
-async function turnSelectOff() { await selectToggle().click(); await page.waitForTimeout(600); }
+async function turnSelectOff() {
+  const vis = await selectToggle().isVisible().catch(() => false);
+  if (!vis) { console.log("  (toolbar toggle not visible: " + JSON.stringify(await page.evaluate(() => [...document.querySelectorAll('[data-testid^="map-"]')].map((e) => e.getAttribute("data-testid") + ":" + (e.getAttribute("aria-pressed") || "") + ":" + e.className.slice(0, 40)))) + ")"); return; }
+  await selectToggle().click(); await page.waitForTimeout(600);
+}
 
 /* Click around the centre until a click yields "1 parcel" (a road or a gap answers nothing), then prove it is the lot under the
  * cursor and that a second click toggles it off. Returns the summary text of the selection (it names the county). */
