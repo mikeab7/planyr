@@ -42,7 +42,7 @@ import { measuresUnderPoint, nextMeasureSelection } from "./lib/measureHit.js";
 import { nearestBoundaryEdge, constrainToEdgeAngle, edgeLockTolFt } from "./lib/edgeConstrain.js";
 import { markupsUnderPoint, nextMarkupSelection, boxCorners, closedMarkupSize, openMarkupLength } from "./lib/markupPick.js";
 import {
-  CLOUD_ARC_PRESETS, CLOUD_ARC_MIN_FT, CLOUD_ARC_MAX_FT, CLOUD_ARC_DEFAULT_FT, CLOUD_STATUS_OPTIONS,
+  CLOUD_ARC_MIN_FT, CLOUD_ARC_STEP_FT, CLOUD_ARC_MAX_FT, CLOUD_ARC_DEFAULT_FT, CLOUD_STATUS_OPTIONS,
   clampCloudArcFt, cloudScallopPath, simplifyPath, cloudMetaDefaults,
 } from "./lib/cloudGeometry.js";
 import { EMPTY_TAP, tapTime, stepDoubleTap, pairsWithLastTap } from "./lib/doubleTap.js";
@@ -124,6 +124,8 @@ import { useGroundElevation } from "./components/useGroundElevation.js";
 import CursorChip from "./components/CursorChip.jsx";
 import ViewMenu from "./components/ViewMenu.jsx";
 // NEW-4 (B366389 ×2) — the plan menu's icons, in the route-local stroke idiom. See components/icons.jsx.
+import { LockGlyph, LockCue } from "../../shared/ui/LockToggle.jsx";
+import { propsPanelTitle } from "./lib/propsPanelTitle.js";
 import { SaveIcon, HistoryIcon, StorageIcon, PadlockIcon, PlusIcon, DuplicateIcon, CloseXIcon, UndoIcon, RedoIcon, LayersIcon } from "./components/icons.jsx";
 import PresenceChip from "./components/PresenceChip.jsx";
 /* LAZY (B1064 tranche a). Site Analysis mounts ONLY when the Analysis panel is the open one
@@ -538,7 +540,7 @@ import { canvasBox, nextCanvasSize, framePad, canvasEdgeLeft, EDGE_EPS } from ".
 // icons.jsx's existing exports (Duplicate, Delete/Lock-ish), so they are aliased at the import site.
 import {
   ReshapeIcon, ResetFootprintIcon, BumpOutIcon, DockZonesIcon, GroupIcon, UngroupIcon, SplitRowsIcon,
-  PropertiesIcon, LabelIcon, CopyIcon, DuplicateIcon as MenuDuplicateIcon, LockIcon as MenuLockIcon,
+  PropertiesIcon, LabelIcon, CopyIcon, DuplicateIcon as MenuDuplicateIcon,
   AlignRotationIcon, AttachIcon, DetachIcon, DeleteIcon as MenuDeleteIcon,
   BringToFrontIcon, BringForwardIcon, SendBackwardIcon, SendToBackIcon,
   PondSettingsIcon, PondSizingIcon, RoadBranchIcon, SwapIcon,
@@ -17893,7 +17895,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             menu. Route it to the same onElContext the pond body uses so the "Detention pond" section
             (Pond settings / Sizing assistant / Set purpose ▸) appears wherever you right-click a pond. */}
         {leader && <line x1={leader.x} y1={leader.y} x2={x} y2={top + lines.length * dlh} stroke={PAL.ink} strokeWidth={1} opacity={0.5} />}
-        {!d.added && d.el.locked && <text x={x} y={top - 3 * dls} textAnchor="middle" fontSize={12 * dls}>🔒</text>}
+        {!d.added && d.el.locked && <LockCue x={x} y={top - 3 * dls} size={12 * dls} data-export="skip" />}
         <text x={x} y={first} textAnchor="middle" fontSize={dfs}
           transform={rot ? `rotate(${rot} ${x} ${y})` : undefined}
           fontFamily={fam} fill={ink}
@@ -23754,7 +23756,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     {node}
                     {/* B922/NEW-3 — a small 🔒 on the SELECTED locked markup (mirrors the element lock
                         glyph), so it's obvious WHY dragging does nothing: it's locked, not stuck. */}
-                    {isSel && m.locked && tool === "select" && (() => { const a = mkLockAnchor(); return a ? <text x={a.x} y={a.y} textAnchor="middle" fontSize={13} pointerEvents="none" data-export="skip">🔒</text> : null; })()}
+                    {isSel && m.locked && tool === "select" && (() => { const a = mkLockAnchor(); return a ? <LockCue x={a.x} y={a.y} size={13} pointerEvents="none" data-export="skip" /> : null; })()}
                   </g>
                 );
   };
@@ -25938,7 +25940,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   mode would teach three gestures and then swallow all of them. Say so, and put the
                   one control that fixes it right here (never unlock behind the user's back). */}
               {bp && bp.locked && (
-                <button className="dbtn" data-testid="boundary-edit-unlock" style={{ ...btn(true), padding: "5px 12px" }} onClick={() => toggleParcelLock(bp.id)}>🔓 Unlock</button>
+                <button className="dbtn" data-testid="boundary-edit-unlock" style={{ ...btn(true), padding: "5px 12px" }} onClick={() => toggleParcelLock(bp.id)}><span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.xs }}><LockGlyph locked size={13} />Unlock</span></button>
               )}
               {bp && <button className="dbtn" data-testid="boundary-edit-split" style={{ ...chip, padding: "5px 13px" }} title="Draw a line across this parcel to split it in two" onClick={() => { exitBoundaryEdit(); startPanelSplit(bp.id); }}>Split</button>}
               <button className="dbtn" style={{ ...chip, padding: "5px 13px" }} title="Finish reshaping (Esc)" onClick={exitBoundaryEdit}>Done</button>
@@ -26482,7 +26484,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const props = effectiveBuildingProps(b, buildingSqft(b), buildingRules);
             const HB = CONTROL_H.lg;
             const hdrBtn = { width: HB, height: HB, padding: 0, display: "grid", placeItems: "center", borderRadius: RADIUS.sm, border: BORDER_1, background: SURF_RAISED, color: "var(--text-secondary)", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.emphasis, lineHeight: 1, listStyle: "none" };
-            const lockStyle = b.locked ? { ...hdrBtn, background: "var(--accent)", borderColor: "var(--accent)", color: "var(--on-accent)" } : hdrBtn;
+            const lockStyle = hdrBtn; // NEW-2 — greyscale: state rides the glyph's shape/weight (LockGlyph), never an accent fill
             const numBox = { width: 34, height: HB, padding: 0, textAlign: "center", boxSizing: "border-box", fontSize: FONT_SIZE.emphasis, fontWeight: 600, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, border: BORDER_1, borderRadius: RADIUS.sm, color: "var(--text-primary)", background: "var(--surface-field)" };
             return (
               <div data-testid="building-header" style={{ padding: "2px 0 8px" }}>
@@ -26503,7 +26505,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <button type="button" data-testid="building-lock" style={lockStyle} aria-pressed={!!b.locked}
                     aria-label={b.locked ? "Unlock — allow moving and resizing" : "Lock in place"}
                     title="Lock in place so it can't be moved or resized by accident" onClick={() => toggleLock(b.id)}>
-                    <MenuLockIcon size={14} open={!b.locked} />
+                    <LockGlyph locked={!!b.locked} size={16} />
                   </button>
                   <details style={{ position: "relative" }}>
                     <summary data-testid="building-more" style={hdrBtn} aria-label="More building actions" title="More">⋯</summary>
@@ -26524,15 +26526,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <div role="button" tabIndex={0} aria-expanded={!propsCollapsed} onClick={() => setPropsCollapsed((c) => !c)}
             onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setPropsCollapsed((c) => !c); } }}
             style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", userSelect: "none", padding: "2px 0 6px" }}>
-            <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.09em", textTransform: "uppercase", color: PAL.muted, flex: 1 }}>
-              {multiStyleable ? `${multi.length} selected` : selMeasure ? "Measurement" : simpleClosedMarkup ? simpleClosedMarkupLabel : <>Element{(() => { const l = selEl ? (selEl.type === "pond" ? pondDisplayNameFor(detWithAuto(selEl.det), pondSplitOf(selEl)) : (dockZoneDisplayLabel(selEl) || (TYPE[selEl.type]?.label || "").split(" / ")[0])) : selCallout ? "Callout" : selMarkup ? (selMarkup.kind === "easement" ? "Easement" : "Markup") : ""; return l ? ` · ${l}` : ""; })()}</>}
+            <span data-testid="props-panel-title" style={{ fontSize: FONT_SIZE.display, fontWeight: 700, color: "var(--text-primary)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {propsPanelTitle({
+                multiCount: multiStyleable ? multi.length : 0,
+                measureMode: selMeasure ? measMode(selMeasure) : null,
+                callout: selCallout,
+                markup: selMarkup,
+                elementLabel: selEl ? (selEl.type === "pond" ? pondDisplayNameFor(detWithAuto(selEl.det), pondSplitOf(selEl)) : (dockZoneDisplayLabel(selEl) || (TYPE[selEl.type]?.label || ""))) : "",
+              })}
             </span>
             {simpleClosedMarkup && <>
               <button type="button" style={{ ...chip, width: 30, height: 30, padding: 0 }}
                 title={`${selMarkup.locked ? "Unlock" : "Lock"} ${simpleClosedMarkupLabel.toLowerCase()}`}
                 aria-label={`${selMarkup.locked ? "Unlock" : "Lock"} ${simpleClosedMarkupLabel.toLowerCase()}`}
                 onClick={(e) => { e.stopPropagation(); toggleMarkupLock(selMarkup.id); }}>
-                {selMarkup.locked ? "🔒" : "🔓"}
+                <LockGlyph locked={!!selMarkup.locked} size={16} />
               </button>
               <details style={{ position: "relative" }} onClick={(e) => e.stopPropagation()}>
                 <summary style={{ ...chip, width: 30, height: 30, padding: 0, display: "grid", placeItems: "center", listStyle: "none" }} aria-label={`More ${simpleClosedMarkupLabel.toLowerCase()} actions`}>•••</summary>
@@ -26592,7 +26600,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   byte-for-byte duplicate, unlike the desktop docked panel where this Section is
                   the ONLY place that count appears. Suppressing it here (not on desktop) reclaims
                   a whole card's worth of vertical space with zero information loss. */}
-              <Section title={phoneSheetSolo ? false : `${multi.length} selected`}>
+              <Section title={null}>
                 {(caps.includes("fill") || caps.includes("stroke")) && (<>
                   <PairedFieldHead left="Outline" right="Fill" />
                   <PairedField label="Colour"
@@ -26673,7 +26681,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </label>
             );
             return (
-              <Section title={`Easement · ${{ centerline: "Centerline strip", boundary: "Boundary", parceledge: "Parcel-edge strip" }[e.mode] || "Easement"}`} accent={t.color}>
+              <Section title={null}>
                 {/* Map label — what the map and the PDF draw. Empty = the automatic name (type + width),
                     which keeps tracking those while no custom text is set. One undo frame per typing session. */}
                 <Field label={<b style={{ color: PAL.ink }}>Map label</b>}>
@@ -26745,7 +26753,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     the same class of lie as a false disabled-reason string). */}
                 <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 6 }}>{isStrip ? "Drag a centerline dot to reshape (the strip re-offsets); Shift-click an edge to add a point, right-click a dot to remove one." : "Drag a boundary dot to reshape; Shift-click an edge to add a point, right-click a dot to remove one."}</div>
                 <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-                  <button style={chip} onClick={() => toggleMarkupLock(e.id)}>{e.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
+                  <button style={chip} onClick={() => toggleMarkupLock(e.id)}><span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.xs }}><LockGlyph locked={!!e.locked} size={13} />{e.locked ? "Unlock" : "Lock"}</span></button>
                   <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:easement" })}>Delete</button>
                 </div>
               </Section>
@@ -26771,7 +26779,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             return (
               // NEW-1 — plain wrapper (see the multi-select branch above for why the duplicate testid was removed).
               <div>
-              <Section title={simpleClosedMarkup ? null : (isCloud ? "Markup · Cloud" : `Markup · ${selMarkup.kind[0].toUpperCase()}${selMarkup.kind.slice(1)}`)}>
+              <Section title={null}>
                 {/* NEW-1 (B1618656) — the owner's two-column properties-panel mockup: OUTLINE and FILL
                     as column heads over a shared label gutter (PairedFieldHead/PairedField), so
                     "Colour"/"Pattern"/"Opacity" are written once instead of twice and the two sides
@@ -26849,15 +26857,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "8px 0", paddingTop: 8 }}>
                       <Field label="Arc size">
                         <span style={{ display: "flex", gap: 5, alignItems: "center" }}>
-                          <NumInput style={{ ...numInput, width: 56 }} value={selMarkup.arcFt ?? CLOUD_ARC_DEFAULT_FT} min={CLOUD_ARC_MIN_FT} max={CLOUD_ARC_MAX_FT} step={0.5} onCommit={(n) => setSelMarkupCloud({ arcFt: clampCloudArcFt(n) })} />
+                          <NumInput style={{ ...numInput, width: 56 }} value={selMarkup.arcFt ?? CLOUD_ARC_DEFAULT_FT} min={CLOUD_ARC_MIN_FT} max={CLOUD_ARC_MAX_FT} step={CLOUD_ARC_STEP_FT} onCommit={(n) => setSelMarkupCloud({ arcFt: clampCloudArcFt(n) })} />
                           <span style={{ fontSize: 11, color: PAL.muted }}>ft</span>
                         </span>
                       </Field>
-                      <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
-                        {Object.entries(CLOUD_ARC_PRESETS).map(([k, ft]) => (
-                          <button key={k} style={{ ...chip, flex: 1, fontSize: 10.5, textTransform: "capitalize", background: (selMarkup.arcFt ?? CLOUD_ARC_DEFAULT_FT) === ft ? PAL.accent : SURF_RAISED, color: (selMarkup.arcFt ?? CLOUD_ARC_DEFAULT_FT) === ft ? "#fff" : PAL.ink }} onClick={() => setSelMarkupCloud({ arcFt: ft })}>{k}</button>
-                        ))}
-                      </div>
+                      {/* NEW-4 — the reviewer metadata the owner never uses is tucked into ONE collapsed "More"
+                          (nothing deleted: every value still round-trips when expanded and edited), with the
+                          Created / Modified dates inside it. */}
+                      <Collapse sectionId="cloud-more" title="More" defaultOpen={false}>
                       <Field label="Subject"><input value={selMarkup.subject ?? ""} maxLength={80} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, subject: e.target.value, modifiedAt: new Date().toISOString() } : m)))} placeholder="Cloud" style={textInput} /></Field>
                       <Field label="Comment" title="Reviewer notes on this markup"><textarea value={selMarkup.comment ?? ""} onFocus={() => pushHistory()} onChange={(e) => setMarkups((a) => a.map((m) => (m.id === selMarkup.id ? { ...m, comment: e.target.value, modifiedAt: new Date().toISOString() } : m)))} rows={2} style={{ width: 150, boxSizing: "border-box", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: BORDER_1, borderRadius: 8, color: PAL.ink, resize: "vertical" }} /></Field>
                       <Field label="Status">
@@ -26873,6 +26880,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.6, marginTop: 4 }}>
                         Created {fmtWhen(selMarkup.createdAt)}<br />Modified {fmtWhen(selMarkup.modifiedAt)}
                       </div>
+                      </Collapse>
                     </div>
                   );
                 })()}
@@ -26959,23 +26967,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     </div>
                   );
                 })()}
-                <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>
-                  {/* B922/NEW-3 — a locked markup renders no reshape dots (editablePath returns null
-                      when locked), so the "drag a dot" instruction was a lie. Tell the truth instead. */}
-                  {selMarkup.locked
-                    ? "Locked — click 🔓 Unlock below to move or reshape it."
-                    : MK_BOX_KINDS.includes(selMarkup.kind)
-                    ? "Drag the corner/edge grips to resize, the top handle to rotate."
-                    : selMarkup.kind === "encumbrance"
-                      ? "Move the deed as one piece; use Align to parcel (or Rotate) above to line it up."
-                      : selMarkup.kind === "line"
-                        ? "Drag either end dot to move it."
-                        // NEW-1/B649504 — see the easement hint above: Shift-click never removed a point
-                        // (only adds, on an edge); removal is right-click a dot, or select + Delete.
-                        : "Drag a dot to reshape; Shift-click an edge to add a point, right-click a dot to remove one."}
-                </div>
+                {/* NEW-5 — the Cloud panel carries NO how-to text (owner 2026-10-08); the gestures themselves are unchanged. */}
+                {!isCloud && (
+                  <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>
+                    {/* B922/NEW-3 — a locked markup renders no reshape dots (editablePath returns null
+                        when locked), so the "drag a dot" instruction was a lie. Tell the truth instead. */}
+                    {selMarkup.locked
+                      ? "Locked — click Unlock below to move or reshape it."
+                      : MK_BOX_KINDS.includes(selMarkup.kind)
+                      ? "Drag the corner/edge grips to resize, the top handle to rotate."
+                      : selMarkup.kind === "encumbrance"
+                        ? "Move the deed as one piece; use Align to parcel (or Rotate) above to line it up."
+                        : selMarkup.kind === "line"
+                          ? "Drag either end dot to move it."
+                          // NEW-1/B649504 — see the easement hint above: Shift-click never removed a point
+                          // (only adds, on an edge); removal is right-click a dot, or select + Delete.
+                          : "Drag a dot to reshape; Shift-click an edge to add a point, right-click a dot to remove one."}
+                  </div>
+                )}
                 {!simpleClosedMarkup && <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
-                  <button style={chip} onClick={() => toggleMarkupLock(selMarkup.id)}>{selMarkup.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
+                  <button style={chip} onClick={() => toggleMarkupLock(selMarkup.id)}><span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.xs }}><LockGlyph locked={!!selMarkup.locked} size={13} />{selMarkup.locked ? "Unlock" : "Lock"}</span></button>
                   <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:markup" })}>Delete</button>
                 </div>}
               </Section>
@@ -27005,7 +27016,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             return (
               // NEW-1 — plain wrapper (see the multi-select branch above for why the duplicate testid was removed).
               <div>
-              <Section title={selCallout.noLeader ? "Text box" : "Callout"}>
+              <Section title={null}>
                 <StdSubLabel>Text</StdSubLabel>
                 <Field label="Colour"><ColorField value={toHex6(cs.color)} {...colorCtl((v) => liveCallout({ color: v }))} seed={COLOR_SEED} title="Text color" style={swatch} /></Field>
                 <Field label="Size"><NumInput style={numInput} value={cs.size} min={1} max={96} step={1} coarse={4} onCommit={(n) => setSelCallout({ size: n })} /></Field>
@@ -27077,7 +27088,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {/* NEW-1 — the markup and measurement inspectors both carry a Lock chip here; this
                       one carried only Delete, so an annotation was the one drawn object with no lock
                       control anywhere in the app despite the render honouring `locked` throughout. */}
-                  <button style={chip} onClick={() => toggleCalloutLock(selCallout.id)}>{selCallout.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
+                  <button style={chip} onClick={() => toggleCalloutLock(selCallout.id)}><span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.xs }}><LockGlyph locked={!!selCallout.locked} size={13} />{selCallout.locked ? "Unlock" : "Lock"}</span></button>
                   <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:callout" })}>{selCallout.noLeader ? "Delete text box" : "Delete callout"}</button>
                 </div>
               </Section>
@@ -27110,7 +27121,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const hasOverride = MEASURE_STD_KEYS.some((k) => m[k] !== undefined) || !!m.labelOffset;
             return (
               <div>
-              <Section title={`Measurement · ${modeLabel}`}>
+              <Section title={null}>
                 {uncal && <div style={{ fontSize: 11, color: "var(--warn-text)", lineHeight: 1.5, marginBottom: 8 }}>⚠ This drawing isn’t calibrated yet — the value below is in raw units, not real feet. Calibrate to a known distance first.</div>}
                 {rows.map(([k, v], j) => <Field key={j} label={k}><span style={valStyle}>{v}</span></Field>)}
                 <Field label="Label"><input value={m.label || ""} maxLength={80}
@@ -27182,13 +27193,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 </>}
                 <div style={{ fontSize: 11, color: PAL.muted, lineHeight: 1.5, marginTop: 8 }}>
                   {m.locked
-                    ? "Locked — click 🔓 Unlock below to move or reshape it."
+                    ? "Locked — click Unlock below to move or reshape it."
                     : mode === "count"
                       ? "Drag any marker to move the whole set; drag a grip to reposition one."
                       : "Drag the line to move it, or a square grip to reshape."}
                 </div>
                 <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
-                  <button style={chip} onClick={() => toggleMeasureLock(m.id)}>{m.locked ? "🔒 Unlock" : "🔓 Lock"}</button>
+                  <button style={chip} onClick={() => toggleMeasureLock(m.id)}><span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.xs }}><LockGlyph locked={!!m.locked} size={13} />{m.locked ? "Unlock" : "Lock"}</span></button>
                   {hasOverride && <button style={chip} title="Back to your Standards defaults, including where the label sits"
                     onClick={() => setSelMeasure({ ...Object.fromEntries(MEASURE_STD_KEYS.map((k) => [k, null])), labelOffset: null })}>Reset style</button>}
                   <button style={{ ...chip, color: PAL.danger }} onClick={() => deleteSel(null, { entry: "panel:measure" })}>Delete</button>
@@ -27212,7 +27223,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               drop a type whose label carries a " / " qualifier (paving) — that text exists nowhere
               else, so suppressing it there would be a real information loss, not just tidying. */}
           {!multiStyleable && selEl && (
-            <Section title={selEl.type === "pond" || bldgPanel || (phoneSheetSolo && !(TYPE[selEl.type]?.label || "").includes(" / ")) ? false : `Selected · ${dockZoneDisplayLabel(selEl) || (TYPE[selEl.type]?.label || "Element")}`}>
+            <Section title={null}>
               {/* NEW-1/B872 — a RESHAPED building (footEdit: points + a dock frame) keeps the full building
                   inspector (Footprint reshape controls, dock zones, structure, column grid), routed through
                   the isBuilding branch below whose Footprint group handles the polygon case. A hand-CLICK-
@@ -30375,7 +30386,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               title: deedAlreadyPromoted(dm) ? "This deed is already a parcel on the plan" : "Turn this deed into a real parcel — acreage, setbacks and the area math all start working on it",
               on: () => { promoteDeedToParcel(dm.id); close(); },
             })}
-            {row({ text: m.locked ? "Unlock" : "Lock", hint: m.locked ? "🔒" : "🔓", on: () => { toggleMarkupLock(m.id); close(); } })}
+            {row({ text: m.locked ? "Unlock" : "Lock", hint: <LockGlyph locked={!!m.locked} size={13} />, on: () => { toggleMarkupLock(m.id); close(); } })}
             {/* NEW-6 — every drawn kind is copyable, and says so in its own menu. */}
             {row({ text: "Copy", hint: `${MOD}C`, on: () => { copyRef({ kind: "markup", id: m.id }); close(); } })}
             {/* NEW-1 — and every drawn kind is DUPLICABLE. Only elements and references had this. */}
@@ -30401,7 +30412,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               title: m.behindEls ? "Draw this measurement over the buildings again" : "Draw this measurement under the buildings, so the plan sits on top of it",
               on: () => { setMeasureBand(m.id, !m.behindEls); close(); } })}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
-            {row({ text: m.locked ? "Unlock" : "Lock", hint: m.locked ? "🔒" : "🔓", on: () => { toggleMeasureLock(m.id); close(); } })}
+            {row({ text: m.locked ? "Unlock" : "Lock", hint: <LockGlyph locked={!!m.locked} size={13} />, on: () => { toggleMeasureLock(m.id); close(); } })}
             {row({ text: "Copy", hint: `${MOD}C`, on: () => { copyRef({ kind: "measure", id: m.id, i: mapMenu.i }); close(); } })}
             {row({ text: "Duplicate", hint: `${MOD}D`, on: () => { duplicateRef({ kind: "measure", id: m.id, i: mapMenu.i }); close(); } })}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
@@ -30652,7 +30663,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   {miRow({ icon: <PropertiesIcon />, text: "Properties…", onClick: () => { setSel({ kind: "el", id: typeMenu.id }); openInspector(); setTypeMenu(null); } })}
                   {miRow({ icon: <CopyIcon />, text: "Copy", onClick: () => { copyRef({ kind: "el", id: typeMenu.id }); setTypeMenu(null); } })}
                   {miRow({ icon: <MenuDuplicateIcon />, text: "Duplicate", hint: `${MOD}D`, onClick: () => { duplicateEl(typeMenu.id); setTypeMenu(null); } })}
-                  {miRow({ icon: <MenuLockIcon open={!t.locked} />, text: t.locked ? "Unlock" : "Lock", onClick: () => { toggleLock(typeMenu.id); setTypeMenu(null); } })}
+                  {miRow({ icon: <LockGlyph locked={!!t.locked} size={14} />, text: t.locked ? "Unlock" : "Lock", onClick: () => { toggleLock(typeMenu.id); setTypeMenu(null); } })}
                   {t.type === "trailer" && miRow({ icon: <LabelIcon />, text: t.labelHidden ? "Show label" : "Hide label", testId: "el-menu-label-toggle", onClick: () => { toggleElLabel(typeMenu.id); setTypeMenu(null); } })}
                   {!t.points && miRow({ icon: <AlignRotationIcon />, text: "Align rotation…", onClick: () => { setSel({ kind: "el", id: typeMenu.id }); setAlignFor({ kind: "el", id: typeMenu.id }); setTypeMenu(null); } })}
                   {t.attachedTo
@@ -30698,7 +30709,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {item({ text: "Send to back", dis: atBack, on: () => { reorderOverlay(ovMenu.id, "back"); setOvMenu(null); } })}
             {!isAerialRow && item({ text: isAbove ? CROSS_BAND_BEHIND : CROSS_BAND_FRONT, title: isAbove ? "Put this overlay back under the parcel and the site elements" : "Lift this overlay over the parcel boundary, the setback ring and the site elements", on: () => { toggleOverlayBand(ovMenu.id, !isAbove); setOvMenu(null); } })}
             <div style={hdr(true)}>Place</div>
-            {item({ text: locked ? "Unlock" : "Lock", hint: locked ? "🔒" : "🔓", on: () => { patchOverlay(ovMenu.id, { locked: !locked }); setOvMenu(null); } })}
+            {item({ text: locked ? "Unlock" : "Lock", hint: <LockGlyph locked={!!locked} size={13} />, on: () => { patchOverlay(ovMenu.id, { locked: !locked }); setOvMenu(null); } })}
             {item({ text: "Align to base edge…", dis: locked || !hasParcel || isAerialRow, title: isAerialRow ? "This aerial came from the map — it's already to scale, so manual alignment is disabled" : locked ? "Unlock to align" : (!hasParcel ? "Draw or load a parcel first" : "Click a parcel edge to snap this drawing parallel to it"), on: () => { setSelOverlay(ovMenu.id); setOvAlignBase(ovMenu.id); setOvMenu(null); flashWarn("Click a parcel boundary to align this drawing parallel to it.", 6000); } })}
             <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
             {item({ text: "Delete", hint: "Del", danger: true, on: () => { removeOverlay(ovMenu.id); if (isAerialRow) setShowAerial(true); setOvMenu(null); } })}

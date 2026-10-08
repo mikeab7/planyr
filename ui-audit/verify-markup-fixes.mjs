@@ -74,7 +74,7 @@ if (lineGeom) {
   // 5px BELOW the horizontal line: outside the 2px visible stroke, inside the 6px hit-stroke.
   await page.mouse.click(lineGeom.midX, lineGeom.midY + 5);
   await page.waitForTimeout(300);
-  ok("click ~5px off the line selects it (panel shows 'Markup · Line')", /Markup · Line/.test(await panelText()));
+  ok("click ~5px off the line selects it (panel title row reads 'Line')", /^\s*Line\b/.test(await panelText()));
   await page.screenshot({ path: OUT + "markup-line-selected.png" });
 
   // Bound the hit area: deselect, then a click 40px away must NOT select it.
@@ -82,7 +82,7 @@ if (lineGeom) {
   await page.waitForTimeout(200);
   await page.mouse.click(lineGeom.midX, lineGeom.midY + 40);
   await page.waitForTimeout(250);
-  ok("click ~40px away does NOT select it (hit area is bounded, not infinite)", !/Markup · Line/.test(await panelText()));
+  ok("click ~40px away does NOT select it (hit area is bounded, not infinite)", !/^\s*Line\b/.test(await panelText()));
 }
 
 /* ---------------- NEW-3: color picker applies live (onInput) ---------------- */

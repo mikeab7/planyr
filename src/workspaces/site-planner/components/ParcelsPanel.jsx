@@ -15,6 +15,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE, SPACE, CONTROL_H } from "../../../shared/ui/designTokens.js";
 import { NUM_FONT, TABULAR_NUMS } from "../../../shared/theme/typography.js";
+import { LockGlyph as SharedLockGlyph } from "../../../shared/ui/LockToggle.jsx";
 
 export const LINE = "1px solid var(--border-default)";
 export const fmt = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -25,8 +26,8 @@ export const Ico = ({ children, size = 15 }) => (
 );
 export const EyeIcon = () => <Ico><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></Ico>;
 export const EyeOffIcon = () => <Ico><path d="M3 3l18 18" /><path d="M10.6 5.1A10.6 10.6 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.1" /><path d="M6.6 6.6A16.6 16.6 0 0 0 2 12s3.6 7 10 7a10 10 0 0 0 4.4-1" /><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" /></Ico>;
-export const LockGlyph = ({ size }) => <Ico size={size}><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></Ico>;
-export const UnlockGlyph = () => <Ico><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 0 1 7.5-2" /></Ico>;
+export const LockGlyph = ({ size }) => <SharedLockGlyph locked size={size} />;
+export const UnlockGlyph = () => <SharedLockGlyph locked={false} size={14} />;
 export const ZoomIcon = () => <Ico><circle cx="11" cy="11" r="6" /><path d="M20 20l-4.2-4.2" /></Ico>;
 export const MoreIcon = () => <Ico><circle cx="5" cy="12" r="1.2" /><circle cx="12" cy="12" r="1.2" /><circle cx="19" cy="12" r="1.2" /></Ico>;
 export const PencilIcon = ({ size }) => <Ico size={size}><path d="M4 20h4L19 9l-4-4L4 16v4z" /><path d="M13.5 6.5l4 4" /></Ico>;

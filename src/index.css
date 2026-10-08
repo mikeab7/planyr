@@ -142,6 +142,10 @@
   --text-primary:   #1B1E26;
   --text-secondary: #353B49;
   --text-tertiary:  #4B5263;
+  /* The ONE greyscale lock (shared/ui/LockToggle.jsx, NEW-2 2026-10-08): neutral greys, never tinted/yellow.
+     State is shape (solid vs outline), these only set how dark. */
+  --lock-locked: #404040;
+  --lock-open:   #6E6E6E;
 
   /* Site Planner inspector surfaces (B686 → B689). B689: the LIGHT-mode inspector now
      uses the cool app surfaces — the owner rejected the warm "parchment" cream; the open
@@ -396,6 +400,8 @@
   --text-primary:   #E8EBF0;
   --text-secondary: #CAD0DA;
   --text-tertiary:  #A4ABB8;
+  --lock-locked: #D6D6D6;
+  --lock-open:   #A0A0A0;
 
   /* Site Planner "drafting parchment" surfaces (B686) — dark-slate variants. */
   --planner-panel:  #15171D;   /* backdrop, darkest (behind the raised cards) */
