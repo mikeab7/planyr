@@ -59,7 +59,6 @@ const summary = () => page.evaluate(() => { const el = document.querySelector('[
 const waitFor = async (fn, ms = 8000) => { const t = Date.now(); let v; while (Date.now() - t < ms) { v = await fn(); if (v) return v; await page.waitForTimeout(200); } return v; };
 const setView = (la, ln, z) => page.evaluate(([a, b, c]) => { window.__mapFinderMap.setView([a, b], c, { animate: false }); }, [la, ln, z]);
 const selectToggle = () => page.locator('[data-testid="map-toolbar-select-parcels"]').first();
-const selectIsOn = () => selectToggle().evaluate((el) => el.getAttribute("aria-pressed") === "true" || /active|on|selected/.test(el.className + " " + (el.getAttribute("data-state") || ""))).catch(() => false);
 const blockingSince = (t0) => page.evaluate((t) => { const w = window.__loaf.filter((e) => e.t >= t && e.d < 900 || e.t >= t && e.b > 100); return { max: Math.max(0, ...w.map((e) => e.b)), n: w.filter((e) => e.b > 0).length }; }, t0);
 const nowMark = () => page.evaluate(() => performance.now());
 const screenOf = ([la, ln]) => page.evaluate(([a, b]) => { const p = window.__mapFinderMap.latLngToContainerPoint([a, b]); const r = window.__mapFinderMap.getContainer().getBoundingClientRect(); return { x: r.left + p.x, y: r.top + p.y }; }, [la, ln]);
@@ -70,10 +69,12 @@ async function turnSelectOn() {
   await selectToggle().click();
   return t0;
 }
-async function turnSelectOff() {
-  const vis = await selectToggle().isVisible().catch(() => false);
-  if (!vis) { console.log("  (toolbar toggle not visible: " + JSON.stringify(await page.evaluate(() => [...document.querySelectorAll('[data-testid^="map-"]')].map((e) => e.getAttribute("data-testid") + ":" + (e.getAttribute("aria-pressed") || "") + ":" + e.className.slice(0, 40)))) + ")"); return; }
-  await selectToggle().click(); await page.waitForTimeout(600);
+/* While Select parcels is ON the toolbar is replaced (the toggle is not on the page), so "off" is a fresh load of the
+ * dashboard Map — select mode starts OFF, nothing is persisted by it, and every region starts from the same state. */
+async function freshMap() {
+  await page.goto(BASE + "/?planyrDiag=1#/site", { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => !!window.__mapFinderMap, null, { timeout: 30000 });
+  await page.waitForTimeout(1500);
 }
 
 /* Click around the centre until a click yields "1 parcel" (a road or a gap answers nothing), then prove it is the lot under the
@@ -102,9 +103,9 @@ async function clickALot(center, label) {
 
 async function regionArm({ name, lat, lng, z, expectNumbers = false }) {
   console.log(`\n== ${name} (${lat}, ${lng}) z${z}`);
+  await freshMap();
   await setView(lat, lng, z);
   await page.waitForTimeout(1500);
-  if (await selectIsOn()) { await turnSelectOff(); await setView(lat, lng, z); await page.waitForTimeout(800); }
   const t0 = await turnSelectOn();
   const h = await waitFor(async () => { const d = await held(); return d.held > 0 ? d : null; }, 40000);
   await page.waitForTimeout(2500); // let the outlines + lot numbers settle
@@ -115,7 +116,6 @@ async function regionArm({ name, lat, lng, z, expectNumbers = false }) {
   expect(`${name}: outlines are drawn (not just held)`, d.drawn > 0, `${d.drawn} drawn`);
   if (expectNumbers) expect(`${name}: lot numbers draw`, n > 0, `${n} numbers`);
   await clickALot([lat, lng], name);
-  await turnSelectOff();
 }
 
 // ── TEXAS, REAL SERVERS ────────────────────────────────────────────────────────────────────────
@@ -128,8 +128,8 @@ const c = cellOf(BARTOW.lng, BARTOW.lat);
 const lotA = lotAt(c.i, c.j), lotB = lotAt(c.i + 3, c.j - 2);
 const clickLot = async (lot) => { const pt = await screenOf([lot.lat, lot.lng]); pt.coveredBefore = await highlightCovers(pt); await page.mouse.click(pt.x, pt.y); return pt; };
 
+await freshMap();
 await setView(BARTOW.lat, BARTOW.lng, 16); await page.waitForTimeout(1500);
-if (await selectIsOn()) await turnSelectOff();
 await turnSelectOn();
 const h16 = await waitFor(async () => { const d = await held(); return d.held > 50 ? d.held : 0; }, 12000);
 expect("KNOWN-GOOD ARM: z16 outlines are drawn before the click (the layer holds lots)", h16 > 50, `${h16} lots held · ${bartow.query} Bartow queries`);
@@ -139,8 +139,8 @@ expect("Georgia z16: a click selects one lot", /^1 parcel/.test(s1 || ""), s1 ||
 expect("Georgia z16: …the lot under the cursor (a highlight covers the point after, none before)", !ptA.coveredBefore && await highlightCovers(ptA));
 await clickLot(lotA);
 expect("Georgia z16: a second click on the same lot toggles it off", !!(await waitFor(async () => !/^1 parcel/.test(await summary()))), (await summary()) || "(no selection)");
-await turnSelectOff();
 
+await freshMap();
 await setView(BARTOW.lat, BARTOW.lng, 14); await page.waitForTimeout(1500);
 await turnSelectOn(); await page.waitForTimeout(4500);
 const d14 = await held();
@@ -151,8 +151,8 @@ expect("Georgia z14: a click selects one lot", /^1 parcel/.test(s3 || ""), s3 ||
 expect("Georgia z14: …the lot under the cursor (covered after, not before)", !ptB.coveredBefore && await highlightCovers(ptB));
 await clickLot(lotB);
 await waitFor(async () => !/^1 parcel/.test(await summary()));
-await turnSelectOff();
 
+await freshMap();
 await setView(BARTOW.lat, BARTOW.lng, 16); await page.waitForTimeout(1500);
 const q0 = bartow.query;
 await turnSelectOn();
@@ -163,7 +163,6 @@ expect("Georgia, before outlines arrive: the click still adds the lot (answered 
 expect("…the lot under the cursor (covered after, not before)", !ptC.coveredBefore && await highlightCovers(ptC));
 expect("the (synthetic) service was really asked", bartow.query > q0, `${bartow.query - q0} queries`);
 await clickLot(lotA); await page.waitForTimeout(800);
-await turnSelectOff();
 
 expect("no uncaught page errors", s.errors.length === 0, s.errors.join(" | "));
 await s.close();
