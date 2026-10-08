@@ -75,6 +75,8 @@ import { groupProjectsByGroupId, pipelineCounts, goingQuiet, recentProjects } fr
 import { summarizeScheduleHealth } from "./lib/scheduleHealth.js";
 import { needsAttentionList } from "./lib/needsAttentionList.js";
 import { pursuitsTable, quietDaysByGroupFromRows } from "./lib/pursuitsList.js";
+import { orderedIds, moveProject, buildSavedOrder } from "../../shared/projects/projectOrder.js";
+import { loadProjectOrder, saveProjectOrder } from "./lib/dashboardProjectOrderPrefs.js";
 import { buildSinceLastHereFeed } from "./lib/sinceLastHereFeed.js";
 import { spanWords } from "./lib/dashboardDates.js";
 
@@ -255,6 +257,21 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
   // from under a tap already in flight (event:click-swallowed, "moved": true). Nothing renders a
   // real, variable-height card until every source has resolved — see CardSkeleton's own header.
   const [dataReady, setDataReady] = useState(false);
+  // NEW-1 (2026-10-08) — the saved project order loads with the rest and gates the real cards the
+  // same way, so the Pursuits list never paints alphabetical and then jumps into his order.
+  const [projectOrder, setProjectOrder] = useState(null);
+  const [orderReady, setOrderReady] = useState(false);
+  const [orderError, setOrderError] = useState(null);
+  useEffect(() => {
+    let live = true;
+    setOrderReady(false);
+    loadProjectOrder(userId).then(({ order }) => {
+      if (!live) return;
+      setProjectOrder(order);
+      setOrderReady(true);
+    });
+    return () => { live = false; };
+  }, [userId]);
   useEffect(() => {
     let live = true;
     setDataReady(false);
@@ -328,7 +345,26 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
   const projects = useMemo(() => groupProjectsByGroupId(sites, elementRecencyBySite), [sites, elementRecencyBySite]);
   const yieldBySiteMap = useMemo(() => yieldBySite(yieldRows), [yieldRows]);
   const needsAttentionRows = useMemo(() => (scheduleProjects ? needsAttentionList(scheduleProjects, Date.now(), scheduleSettings) : []), [scheduleProjects, scheduleSettings]);
-  const pursuitsRows = useMemo(() => pursuitsTable(projects, quietDaysByGroup), [projects, quietDaysByGroup]);
+  const pursuitsRows = useMemo(() => pursuitsTable(projects, quietDaysByGroup, projectOrder), [projects, quietDaysByGroup, projectOrder]);
+
+  // NEW-1 (2026-10-08) — the order Michael sets on the Pursuits card (grip drag, or the row's
+  // Move to top / Move to bottom). ONE saved list for his projects (shared/projects/projectOrder.js,
+  // persisted in profiles.prefs); every move rewrites it from the projects that exist now, so a
+  // stale id drops out. The new order is applied on screen FIRST and kept if the save fails — a
+  // failed save is shown on the card with a Retry, never swallowed.
+  const applyProjectOrder = (next) => {
+    setProjectOrder(next);
+    setOrderError(null);
+    saveProjectOrder(userId, next).then((res) => { if (!res.ok) setOrderError(res.error || "save failed"); });
+  };
+  const moveProjectInOrder = (groupId, dest) => {
+    if (!orderReady) return; // the saved order hasn't loaded yet — a move now would overwrite it blind
+    const today = [...projects].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    const full = orderedIds(today, projectOrder);
+    const next = moveProject(full, pursuitsRows.map((r) => r.groupId), groupId, dest);
+    if (next.every((id, i) => id === full[i])) return;
+    applyProjectOrder(buildSavedOrder(next));
+  };
 
   const cardData = useMemo(() => ({
     jumpBackIn: { projects: recentProjects(projects, jumpBackInCount), doc },
@@ -367,12 +403,12 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
   // NEW-1 — while data is still loading every slot renders the SAME stable-height skeleton
   // instead of its real (variable-height) content; see the `dataReady` effect above.
   const SKELETON_ROWS = { jumpBackIn: JUMP_BACK_IN_COUNT_DEFAULT + 1, recentPlans: 2, pipelineStatus: 2, scheduleHealth: 3, needsAttention: 4, pursuitsTable: 4, compsSummary: 6, goingQuiet: 3, sinceLastHere: 6, locationsMap: 6 };
-  const CARD_RENDERERS = dataReady ? {
+  const CARD_RENDERERS = dataReady && orderReady ? {
     jumpBackIn: () => <JumpBackInCard {...cardData.jumpBackIn} onOpenProject={openProject} onOpenDoc={openDoc} />,
     recentPlans: () => <RecentPlansCard {...cardData.recentPlans} onOpenProject={openProject} />,
     pipelineStatus: () => <PipelineCard {...cardData.pipelineStatus} />,
     needsAttention: () => <NeedsAttentionCard {...cardData.needsAttention} onOpenTask={openTask} />,
-    pursuitsTable: () => <PursuitsCard {...cardData.pursuitsTable} onOpenProject={openProject} />,
+    pursuitsTable: () => <PursuitsCard {...cardData.pursuitsTable} onOpenProject={openProject} onMove={moveProjectInOrder} orderError={orderError} onRetryOrder={() => projectOrder && applyProjectOrder(projectOrder)} />,
     goingQuiet: () => <GoingQuietCard {...cardData.goingQuiet} onOpenProject={openProject} />,
     compsSummary: () => <CompsCard {...cardData.compsSummary} onOpenComp={openComp} onAddComp={addComp} onChangePeriod={changeCompsPeriod} />,
     scheduleHealth: () => <ScheduleHealthCard {...cardData.scheduleHealth} onOpenSchedule={openSchedule} />,
@@ -397,7 +433,7 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
 
   // NEW-COMPS-CARD — the header row's quiet right-side "latest of N" meta, computed only once
   // real data is in (a skeleton card has nothing to count yet).
-  const compsHeaderMeta = dataReady && cardData.compsSummary.data.total
+  const compsHeaderMeta = dataReady && orderReady && cardData.compsSummary.data.total
     ? `latest of ${cardData.compsSummary.data.total}` : undefined;
 
   const toAdd = availableToAdd(layout);
@@ -415,7 +451,7 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
         headerRight={entry.key === "sinceLastHere" ? sinceLastHere?.headerSpan : null}
         customizing={customizing}
         showDragHandle={!isNarrow}
-        sizeToContent={dataReady && SIZE_TO_CONTENT_CARDS.has(entry.key)}
+        sizeToContent={dataReady && orderReady && SIZE_TO_CONTENT_CARDS.has(entry.key)}
         customizeControls={entry.key === "jumpBackIn" ? (
           <JumpBackInCountControl
             count={jumpBackInCount}
