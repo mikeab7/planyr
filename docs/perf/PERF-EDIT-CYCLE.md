@@ -123,3 +123,88 @@ Each discrete save still parses the store once, stringifies it and writes it, pl
 **per-plan storage keys instead of one blob holding every plan** — a persistence-layout change with a migration,
 which touches `docs/DATA.md`'s invariants and every reader of `planarfit:sites:v1`. It is filed as a follow-up with
 this measurement rather than done blind in the same change.
+
+---
+
+## 6. Follow-up — after #2112 the hitches that were left (NEW-1, 2026-10-08, B217540 ×3)
+
+**The report.** `public.problem_reports` `0c68509b-0a4f-4587-8c89-d7b39b014f2c` (2026-10-07 20:54:51Z, build `a7f43c3`, plan
+`sms4zs8unbkg` "Concept D - Sylvestri Retail", Windows Chrome 154, dpr 2.98). The near-freeze was gone; what remained, from the
+four `event:perfcap` rows of tab `ecd8bbfd` (main + `c` + `f` seq 0–1 + `t`, `of:4`, the whole 2,074-frame track arrived — that is
+V1580369 passing): 160 long tasks / 20.8 s in 220 s of activity, 248 jank frames, **~10 tasks of 255–275 ms (≈200 ms of each
+blocking) attributed to `c`, repeating roughly every 30–60 frames**, and a heap read of **157 → 399 MB in the last 8 s**.
+
+**What fired on that cadence — worked out from the capture, not guessed.** The counter track (cols `t heap dom cv el ly pn tiles ppf
+ed sw act`) over the cluster, t≈16–26 s: `ed` (edits = `pushHistory` calls) 4 → 15 — about one edit per second; `ppf` constant
+at 0.59 from t=18.4 to 24.3 s (so NOT zoom steps — a zoom step was B2186144's mechanism, attributed to `U`, and that fix landed
+after this build); `sw` constant at 7 (no plan switch). Eleven edits, ten tasks: **one task per edit**. The element-count swings
+(67→54→52→101→70→110) are viewport culling under pan/zoom (`el` counts drawn elements), not plan switches.
+**`c` is the autosave effect's immediate-mirror closure** — `SitePlanner.jsx`, `const writeMirror = () => { saveSite(payload); … readBackSite … }`
+(minified `const c=()=>{const g=ca(s);…`). A minified name is build-specific and `a7f43c3` is not in the clone, so this is
+established by the correlation above plus the same name resolving to this closure in the current bundle's CPU profile
+(`c@SitePlannerApp:10:317973`, 3.3 s inclusive over 24 edits), not by reading his bundle. `wI` / `z0` (one task each) were not
+resolved. The 1,182 ms `longTaskMaxMs` is not in any kept row (11 tasks were dropped by the row budget) — most plausibly a plan
+mount; it is unattributed, and V1580368 step 2 is NOT closed by this capture.
+
+**What inside the closure (CPU profile of the harness below, 3 MB device store, 24 edits).** Per edit: `readSites` parse 553 ms
+total (a 3.9 MB store is ~40 MB of fresh objects), `writeSites` 1,896 ms (stringify ≈ 940 + one native `setItem` ≈ 956), plus
+the 400 ms settle tick, which then did **all of it again** for byte-identical content, plus the header's names index re-parsing
+the whole store about every 2 s (`siteListLight`). That is also the heap: the sampling heap profiler over the same run shows
+**11.2 GB allocated on main vs 5.0 GB on the fix** (main: 654 MB `JSON.parse`, 328 MB `writeSites`, and 5.8 GB of boxed numbers from the
+quadratic ring-drift scan below) — i.e. the 157 → 399 MB climb is **uncollected garbage from whole-store work, not retention**.
+
+**The lead "something retains old plans after a switch" is REFUTED**, and the refutation is as much a result as the finding: 24
+plan switches / 72 edits at a 3 MB store, heap read after a forced GC at every visit — slope **0.23 MB/switch on origin/main and
+0.24 on the fix** (after a 6-visit warm-up that climbs ~9 MB on its own), detached DOM nodes **0** in a heap snapshot on both.
+
+**The fixes (all behaviour-preserving; each has a test that is red on the pre-fix source).**
+1. `storage.js` — `readSharedStore()` answers from the remembered parse while `localStorage` still holds EXACTLY the string it was
+   parsed from / written as (the B217540 byte-exact proof, now shared through the leaf `sitesSnapshot.js`); `saveSite` and
+   `loadSite` take a private `plainCopy` of the ONE record they change and treat every other plan as read-only (a deep-frozen-store
+   test makes a violation a thrown error). `plansToJson()` re-uses the text an unchanged plan serialised to last time, so a
+   one-plan edit stringifies one plan, byte-identically.
+2. `SitePlanner.jsx` — the 400 ms settle tick no longer re-writes what the mirror already wrote: `sitesWriteStillCurrent(stamp)`
+   proves the store still holds the mirror's write; any other writer fails the proof and the real write runs as before.
+3. `siteListLight.js` — the names/project read is memoised on the store's exact bytes and, when this tab has just saved, takes
+   storage's parse instead of parsing again.
+4. `roadNetwork.js` `collapseRingSpikes` — the one-sided Hausdorff drift bound is maintained incrementally (a removal changes two
+   segments, so only vertices that were nearest to them are re-scanned): same ring vertex-for-vertex (tested against the verbatim
+   original on 65 random rings, including runs where the cumulative bound binds), ~130× faster on a 2,440-vertex ring. On the
+   harness this took a drag of a road-connected parking field on the Richfield fixture from five tasks of 0.5–1.2 s to ≤ 110 ms.
+
+**Instrument.** `ui-audit/perf-edit-switch.mjs` (`npm run perf:editswitch`; also `perf-edit-cycle.mjs --switches N`): the owner's
+Sylvestri plan + three other real plans on the same device, ≥ 7 plan switches (12 by default), ≥ 20 edits (3 real pointer drags
+per visit, rotated over element TYPES — a building drag is cheap, which kind is slow is itself a result), a device store padded
+to `--store-kb` (his held 3.88 MB; below 2,500 KB the run is VOID). Per edit it counts whole-store `JSON.parse` /
+`JSON.stringify` / `setItem` calls (counts, not milliseconds), long tasks with LoAF script attribution, every frame over 100 ms
+with its timestamp (the cadence), and per visit the post-GC heap; at the end a heap-snapshot detached-node count. Pure verdict
+`ui-audit/lib/editSwitch.mjs` (tested in `test/editSwitchVerdict.test.js`, including every VOID condition), budget
+`ui-audit/perf-edit-switch.budget.json` with its reasoning. Same harness, same build, only the fix toggled:
+
+| 3 MB device store, 12 switches / 36 edits | origin/main | fix |
+|:--|--:|--:|
+| median long-task ms per edit | 99 | 58 |
+| worst single task, ms | 1,098 | 99 |
+| frames over 100 ms while editing | 8 | 0 |
+| whole-store `JSON.parse` in the worst edit | 5 | 0 |
+| whole-store `JSON.stringify` in the worst edit | 2 | 0 |
+| whole-store `setItem` in the worst edit | 2 | 1 |
+| `--assert` exit | **1** | **0** |
+
+At 3.9 MB (his size) on his own plan the per-edit worst task read 109–188 ms on main (median ≈ 115) against 62–73 ms on the fix.
+His production number (255–275 ms) is higher than any sandbox reproduces — the sandbox has no cloud round-trip, no 156-key
+localStorage, no dpr 2.98 — so the mechanism is reproduced and halved, the magnitude is not claimed; V-item below asks his next capture.
+
+**What is still O(store), and now stated as a floor.** One native `setItem` of the single-key blob per edit (30–60 ms at 3–4 MB,
+occasionally spiking to ~290 ms when the browser flushes) — that is the work **B2165120 (per-plan storage keys)** removes, and it
+is still not done: it changes the persistence layout (483 test/ui-audit files read or seed `planarfit:sites:v1`, `siteListLight`
+and the cross-tab fold read it raw), so it needs its own session and a migration test, per its own filing.
+
+**The other perfcaps since #2112 (27 `event:perfcap` main rows from 2026-10-06 20:24Z to 2026-10-08), classified.** 25 are boot-window
+auto captures (`atMs` 0.9–2.9 s, `ed 0`, `sw 0`, `jank 0`, ≤ 6 long tasks, worst 99–469 ms, attributed to `mount`) — none has the
+editing signature. Eleven of them are the owner's own plan loads (uid `b147d90d`, dpr 2.98, Windows Chrome). The five within 3 s at
+22:22:54–22:22:57Z on 10-06 (build `611b077`, signed-out, dpr 1, user agents spanning Windows / Linux / iPhone, all `#/site`) are
+automated multi-device test traffic, not a person. Only two are editing sessions, and they are the same tab: the 20:40:43Z auto row
+(31.7 s active, 18 jank frames, 10 long tasks, worst 337 ms) and the 20:54:49Z manual row analysed above.
+**Not the answer to V1599664 step 3:** that capture is build `a7f43c3` (2026-10-06 22:39Z), which predates #2157 (`65ac8db`,
+2026-10-08), so it says nothing about whether B2186144's zoom freeze is gone.

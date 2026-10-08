@@ -8,6 +8,7 @@
  * Site records are persisted as the canonical Site Model (see lib/siteModel.js):
  * loadSite migrates on read, saveSite normalizes on write.
  */
+import { rememberSnapshot, currentSnapshot, clearSnapshot, snapshotIfCurrent } from "./sitesSnapshot.js";
 import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding, toMs, countJunkEntries,
   shareMirrorOf, withShareMirror, normRole } from "./siteModel.js";
 import { cloudUpsert, cloudDelete, cloudDeleteGroup, cloudHardDelete, cloudRowsPresent, cloudPurgeOnePlan, cloudRestore, cloudDeletedRows, cloudCheckDeleted, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile, refreshHeaderFromCloud } from "./cloudSync.js";
@@ -989,10 +990,9 @@ function dropIdbBackedSrc(m) {
  * the cross-tab honesty of the B473/B592 check is unchanged. It is not a cache of the plan: it is a byte-exact proof
  * that nothing has changed since this tab wrote it, which is a STRONGER persistence check than the id-membership
  * comparison it replaces on the single-tab path. Measured at a 3 MB store: three whole-store parses per autosave → one. */
-let lastSitesWrite = null;   // { key, str, obj }
-function rememberSitesWrite(key, str, obj) { lastSitesWrite = { key, str, obj }; }
+function rememberSitesWrite(key, str, obj) { rememberSnapshot(key, str, obj); }   // NEW-1 (B217540 ×3): the pair lives in sitesSnapshot.js so the light list reader shares the parse
 function lastWriteStillCurrent() {
-  const w = lastSitesWrite;
+  const w = currentSnapshot();
   if (!w) return null;
   try { return localStorage.getItem(w.key) === w.str ? w : null; } catch (_) { return null; }
 }
@@ -1001,7 +1001,7 @@ export function siteExistsLocally(id) {
   if (!id) return false;
   const w = lastWriteStillCurrent();
   if (w && w.key === sitesKey()) return !!w.obj[id];
-  return !!readSites()[id];
+  return !!readSharedStore()[id];
 }
 /** The stored record for `id` as the persistence verifier needs it (its drawn collections). While nothing has touched
  *  the store since THIS module wrote it, that is the object it wrote; otherwise the full `loadSite` read. */
@@ -1010,12 +1010,65 @@ export function readBackSite(id) {
   if (w && w.key === sitesKey() && w.obj[id]) return w.obj[id];
   return loadSite(id);
 }
+/* ⛔ NEW-1 (B217540 ×3 / B1317824 ×3, the follow-up to #2112) — THE PER-EDIT FLOOR WAS THE WHOLE-STORE PARSE + STRINGIFY.
+ * The owner's 2026-10-07 capture (build a7f43c3, plan sms4zs8unbkg): ~10 long tasks of 255-275 ms, ~200 ms of each in ONE
+ * function, one per edit at ~1/s, with the heap climbing 157 → 399 MB across three edits while the element count stayed
+ * flat. That function is the autosave's `writeMirror` closure; inside it `saveSite` did, per call, a `JSON.parse` of EVERY
+ * plan on the device (a 3.9 MB store is ~40 MB of fresh objects — that IS the heap climb, garbage not retention), a
+ * `JSON.stringify` of every plan again, and one `setItem` of the whole blob — and the settle tick then did all of it a
+ * second time for byte-identical content. Two cures here, both PROVEN-equal rather than assumed:
+ *   • `readSharedStore()` — the parse is skipped while `localStorage` still holds EXACTLY the string this module last
+ *     wrote or parsed (the B217540 byte-exact proof; any other writer changes the bytes and the real parse runs). Its plan
+ *     objects are SHARED, so the contract is READ-ONLY: a caller that will change a record takes `plainCopy` of that one
+ *     record first. `test/storageSharedReads.test.js` deep-freezes the store and runs every shared reader against it.
+ *   • `plansToJson()` — a plan that is the SAME OBJECT as last time re-uses the text it serialised to last time, so a
+ *     one-plan edit serialises ONE plan, not every plan. Byte-identical to `JSON.stringify(persist)` (asserted).
+ * What this does NOT remove is the single `setItem` of the blob (the native write, ~30-60 ms at 3-4 MB): that needs the
+ * per-plan key layout, B2165120. */
+const planJsonCache = new WeakMap();   // plan object → the JSON text it serialised to (valid while that object is not mutated)
+function plansToJson(persist) {
+  const parts = [];
+  for (const [id, s] of Object.entries(persist)) {
+    let frag;
+    if (s && typeof s === "object") {
+      frag = planJsonCache.get(s);
+      if (frag === undefined) { frag = JSON.stringify(s); if (frag !== undefined) planJsonCache.set(s, frag); }
+    } else frag = JSON.stringify(s);
+    if (frag !== undefined) parts.push(JSON.stringify(id) + ":" + frag);   // JSON.stringify omits a key whose value has no JSON form
+  }
+  return "{" + parts.join(",") + "}";
+}
+/** A private, mutable copy of ONE stored record — what a caller that will change a record must take from a shared read. */
+function plainCopy(rec) {
+  if (!rec || typeof rec !== "object") return rec;
+  try { const t = planJsonCache.get(rec); return JSON.parse(t !== undefined ? t : JSON.stringify(rec)); } catch (_) { return rec; }
+}
+/** The store as a shallow map of SHARED plan objects (read-only by contract — see the header above). Parses only when the
+ *  bytes in `localStorage` are not the bytes this module already holds the parse of; a fresh parse is remembered, so the
+ *  NEXT read is free. */
+function readSharedStore() {
+  const key = sitesKey();
+  let raw;
+  try { raw = localStorage.getItem(key); } catch (_) { return {}; }
+  if (raw == null) return {};
+  const w = snapshotIfCurrent(key, raw);
+  if (w) return { ...w.obj };
+  let obj;
+  try { obj = JSON.parse(raw) || {}; } catch (_) { return {}; }
+  rememberSitesWrite(key, raw, obj);
+  return { ...obj };
+}
+/** An opaque stamp of this module's most recent whole-store write, and whether the store STILL holds exactly that write.
+ *  The autosave uses the pair to skip a second, byte-identical write. Any other writer (another tab, a cloud pull) makes
+ *  `sitesWriteStillCurrent` false, so the caller then does the real write it would have done anyway. */
+export function sitesWriteStamp() { return currentSnapshot(); }
+export function sitesWriteStillCurrent(stamp) { return !!stamp && stamp === currentSnapshot() && lastWriteStillCurrent() === stamp; }
 function writeSites(obj) {
   // B474 — proactively shed IndexedDB-backed raster src so the persisted record stays small (off cap).
   const persist = {};
   for (const [id, s] of Object.entries(obj)) persist[id] = dropIdbBackedSrc(s);
   const key = sitesKey();
-  try { const str = JSON.stringify(persist); localStorage.setItem(key, str); rememberSitesWrite(key, str, persist); return true; }
+  try { const str = plansToJson(persist); localStorage.setItem(key, str); rememberSitesWrite(key, str, persist); return true; }
   catch (_) {
     // Over quota anyway — shed ALL inline rasters (geometry still persists; rasters re-hydrate). B473.
     try {
@@ -1025,7 +1078,7 @@ function writeSites(obj) {
       localStorage.setItem(key, str);
       rememberSitesWrite(key, str, slim);
       return true;
-    } catch (_2) { lastSitesWrite = null; return false; }
+    } catch (_2) { clearSnapshot(); return false; }
   }
 }
 
@@ -1117,7 +1170,7 @@ export function loadSitesList() {
 // which is unnecessary work just to answer "is this empty" — and this needs to be cheap because
 // it runs on every route-less boot.
 export function hasAnyLocalSites() {
-  try { return Object.keys(readSites()).length > 0; } catch (_) { return false; }
+  try { return Object.keys(readSharedStore()).length > 0; } catch (_) { return false; }
 }
 
 /* Resolve every group's authoritative name across a set of models, reporting any group with no
@@ -1899,8 +1952,8 @@ function bondedHealWatch(id) {
   };
 }
 export function loadSite(id, { persistHeal = false } = {}) {
-  const all = id ? readSites() : null;
-  const rec = all ? all[id] : null;
+  const all = id ? readSharedStore() : null;      // NEW-1 (B217540 ×3): SHARED objects — read-only; the one record handed on is copied
+  const rec = all && all[id] ? plainCopy(all[id]) : null;
   if (!rec) return null;
   const watch = bondedHealWatch(id);
   let m = migrate(rec, { onHeal: watch.onHeal });
@@ -1969,8 +2022,8 @@ export function notifySitesListChanged() {
 // splits immediate-mirror from debounced-cloud this way; this brings the Site Planner to parity.)
 export function saveSite(partial, { skipHistory = false } = {}) {
   if (!partial || !partial.id) return false;
-  const sites = readSites();
-  const existing = sites[partial.id];
+  const sites = readSharedStore();     // NEW-1 (B217540 ×3): shared objects, READ-ONLY — only `existing` is ever changed, and it is a private copy
+  const existing = sites[partial.id] ? plainCopy(sites[partial.id]) : sites[partial.id];
   // Resurrection guard (B372): once a site is deleted in this tab, a late flush from the
   // unmounting planner (persist-on-leave / beforeunload) or an already-queued debounced autosave
   // must NOT re-insert it. Block ONLY a re-create of a deleted, currently-absent row — a normal

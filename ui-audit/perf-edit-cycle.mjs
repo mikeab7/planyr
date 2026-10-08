@@ -41,6 +41,9 @@ import { selfTimeByFunction } from "./lib/cpuProfile.mjs";
 import { editCycleVerdict, linearFitXY } from "./lib/editCycle.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+/* NEW-1 (B217540 ×3): `--switches N` runs the plan-switch + ordinary-editing scenario (perf-edit-switch.mjs) — same fixtures, same
+ * paced/visible-tab discipline, its own budget file beside this one. The cycle below is the paste/drag/resize loop on ONE plan. */
+if (process.argv.includes("--switches")) { await import("./perf-edit-switch.mjs"); process.exit(process.exitCode ?? 0); }
 const BASE = (process.env.BASE_URL || "http://localhost:4173/").replace(/\/?$/, "/");
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const argOf = (f, d) => { const i = process.argv.indexOf(f); return i > -1 && process.argv[i + 1] && !process.argv[i + 1].startsWith("--") ? process.argv[i + 1] : d; };
