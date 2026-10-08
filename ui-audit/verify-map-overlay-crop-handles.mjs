@@ -58,17 +58,19 @@ try {
   await page.evaluate(() => { [...document.querySelectorAll("button")].find((x) => /site plan/i.test(x.innerText || ""))?.click(); }); await sleep(2000);
   await page.locator('input[type=file]:not([accept*=".kml"])').first().setInputFiles({ name: NAME + ".png", mimeType: "image/png", buffer: pngBuffer(1000, 800) });
   await page.getByRole("button", { name: /^Crop…/ }).first().click({ timeout: 30000 }); await sleep(2000);
-  // The crop tool opens INLINE in the left panel (no modal). "Fit" so the whole picture is inside the panel, then the rect's
+  // The crop tool opens INLINE in the left panel (no modal). Fit + zoom out so the whole picture is inside the panel, then the rect's
   // full-image corner handles ARE the picture's corners — derive every target from them rather than from an <img> box.
   const tool = page.locator('[data-testid="crop-done"]').first();
   await tool.waitFor({ timeout: 30000 });
-  await page.locator('[data-testid="crop-zoom-fit"]').first().click(); await sleep(800);
+  await page.locator('[data-testid="crop-zoom-fit"]').first().click(); await sleep(500);
+  for (let i = 0; i < 3; i++) { await page.locator('[data-testid="crop-zoom-out"]').first().click(); await sleep(250); } // the picture overflows the narrow panel at Fit — zoom out until every corner grip is on screen
+  await sleep(500);
   const center = async (id) => { const b = await page.locator(`[data-testid="${id}"]`).first().boundingBox(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; };
-  const nw0 = await center("crop-handle-nw"), se0 = await center("crop-handle-se");
-  const at = (fx, fy) => ({ x: nw0.x + fx * (se0.x - nw0.x), y: nw0.y + fy * (se0.y - nw0.y) });
+  const tl0 = await center("crop-handle-tl"), br0 = await center("crop-handle-br");
+  const at = (fx, fy) => ({ x: tl0.x + fx * (br0.x - tl0.x), y: tl0.y + fy * (br0.y - tl0.y) });
   const dragTo = async (from, to) => { await page.mouse.move(from.x, from.y); await page.mouse.down(); for (let i = 1; i <= 6; i++) { await page.mouse.move(from.x + (to.x - from.x) * i / 6, from.y + (to.y - from.y) * i / 6); await sleep(30); } await page.mouse.up(); await sleep(400); };
-  await dragTo(nw0, at(0.6, 0.125));
-  await dragTo(await center("crop-handle-se"), at(0.8, 0.3125));
+  await dragTo(tl0, at(0.6, 0.125));
+  await dragTo(await center("crop-handle-br"), at(0.8, 0.3125));
   await shot("map-crop-dialog");
   await tool.click(); await sleep(1500);
   await page.getByRole("button", { name: "Place on map" }).first().click({ timeout: 15000 });
