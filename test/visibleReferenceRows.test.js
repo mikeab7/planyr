@@ -42,7 +42,7 @@ describe("sibling offers and wiring", () => {
   it("the panel and the View menu read the filtered list; the record is kept for print/calibration", () => {
     const sp = fs.readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
     expect(sp).toMatch(/const refRows = visibleReferenceRows\(sheetOverlays, origin\)/);
-    expect(sp).toMatch(/overlayPanelOrder\(refRows\)/);
+    expect(sp).toMatch(/overlays=\{\[\.\.\.refRows, \.\.\.foreignOverlays\.rows/); // the redesigned OverlaysPanel (B2158080) is handed the filtered list
     expect(sp).toMatch(/overlays=\{refRows\}/);
     expect(sp).toMatch(/const mapRef = sheetOverlays\.find\(isPinnedMapReference\)/); // untouched
   });

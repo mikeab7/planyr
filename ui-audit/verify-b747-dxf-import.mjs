@@ -83,7 +83,7 @@ check("B747 — a units-KNOWN DXF shows NO 'units assumed' flag", !feet.assumed)
 
 // ---- 2) unitless DXF → assumed-feet flag ----
 // remove the first overlay, then drop the unitless one
-await page.evaluate(() => { const b = document.querySelector('[title="Remove"]'); if (b) b.click(); });
+await page.locator('[data-testid^="reference-more-"]').first().click(); await page.locator("[role=menuitem]", { hasText: /^Remove overlay$/ }).click(); // NEW-1: ⋯ → Remove overlay
 await page.waitForTimeout(500);
 await dropDxf(0, "unitless");
 await page.waitForTimeout(600);

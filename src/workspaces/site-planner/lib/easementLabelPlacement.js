@@ -98,6 +98,22 @@ function orientedFrame(m) {
   return { anchor, a: edge.a, b: edge.b, lengthFt: u1 - u0, widthFt: v1 - v0 };
 }
 
+/* NEW-1 (pull-out) — the INLINE anchor of an easement label (feet) and the strip's own on-screen
+ * bearing (degrees, NOT folded upright — a pulled-out label may snap to either direction of it).
+ * Same frame, same elongation rule as placeEasementLabel, so a pulled-out label's offset is measured
+ * from exactly the point the inline label would have sat at. A shape that is not elongated anchors at
+ * the centroid with no strip angle. null when the easement has no usable geometry. */
+export function easementLabelFrame(m, toScreen) {
+  if (!m) return null;
+  const fr = orientedFrame(m);
+  if (fr && fr.widthFt > 0 && fr.lengthFt / fr.widthFt >= ELONGATED_RATIO) {
+    const sa = toScreen(fr.a), sb = toScreen(fr.b);
+    return { anchor: fr.anchor, stripDeg: (Math.atan2(sb.y - sa.y, sb.x - sa.x) * 180) / Math.PI };
+  }
+  const c = Array.isArray(m.pts) && m.pts.length ? centroidOf(m.pts) : null;
+  return c ? { anchor: c, stripDeg: null } : null;
+}
+
 /**
  * @param m           the easement markup (mode, centerline, pts, width, …)
  * @param text        the name line

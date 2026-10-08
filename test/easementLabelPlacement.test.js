@@ -156,7 +156,7 @@ describe("boundary + parcel-edge modes", () => {
 describe("wiring", () => {
   const src = fs.readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
   it("the easement render uses the placement and no longer draws a bare centroid <text>", () => {
-    expect(src).toMatch(/placeEasementLabel\(m, txt/);
+    expect(src).toMatch(/resolveEasementLabel\(m, txt/);
     expect(src).not.toMatch(/<text x=\{cp\.x\} y=\{cp\.y\} textAnchor="middle" fontSize=\{featureNameFontPx\(labelPpf, EASE_LABEL_BASE_PX\)/);
   });
 });
