@@ -96,8 +96,8 @@ async function loadSnapshot(features) {
 
 // Leaflet's own order: onAdd, then the "add" event, then animation frames (the budgeted ingest drains in them).
 const mounted = [];
-const mount = async (map) => {
-  const layer = makeSnapshotLayer("chambers");
+const mount = async (map, opts) => {
+  const layer = makeSnapshotLayer("chambers", opts);
   mounted.push([layer, map]);
   layer._map = map;
   layer.onAdd(map);
@@ -159,5 +159,28 @@ describe("the saved-copy layer draws the number", () => {
     await loadSnapshot([feature(LOT_15835)]);
     await mount(fakeMap(10));
     expect(rec.markers).toHaveLength(0);
+  });
+});
+
+describe("the Map view's acreage chip over a selected lot (V1475200 step 8, found live on production 2026-10-08)", () => {
+  // The chip ("10.78 AC") sits at the middle of the selected lot — exactly where the number wants to be.
+  const CHIP = { x: 200, y: 262, w: 104, h: 38 };   // container px, centred on the lot below
+  const boxOf = (m) => {
+    const [w, h] = m.o.icon.iconSize, min = px(NW.lng, NW.lat);
+    const c = { x: (m.ll.lng + 180) * SCALE - min.x, y: (90 - m.ll.lat) * SCALE - min.y };
+    return { x0: c.x - w / 2, y0: c.y - h / 2, x1: c.x + w / 2, y1: c.y + h / 2 };
+  };
+  const overlaps = (b) => !(b.x1 <= CHIP.x || b.x0 >= CHIP.x + CHIP.w || b.y1 <= CHIP.y || b.y0 >= CHIP.y + CHIP.h);
+  it("known-good arm: with no obstacle the number lands under the chip (so the test can see the problem)", async () => {
+    await loadSnapshot([feature(LOT_15835)]);
+    await mount(fakeMap());
+    expect(rec.markers).toHaveLength(1);
+    expect(overlaps(boxOf(rec.markers[0]))).toBe(true);
+  });
+  it("with the chip as an obstacle the number clears it (or is hidden — never printed over it)", async () => {
+    await loadSnapshot([feature(LOT_15835)]);
+    await mount(fakeMap(), { getObstacles: () => [CHIP] });   // RED on main: makeSnapshotLayer took no obstacles
+    for (const m of rec.markers) expect(overlaps(boxOf(m))).toBe(false);
+    expect(rec.markers.length).toBeLessThanOrEqual(1);
   });
 });
