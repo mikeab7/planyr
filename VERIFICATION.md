@@ -795,6 +795,11 @@ Sandbox-proven logged-out (both entry points, reload; red on main). **The signed
 4. Delete the throwaway project. Read the served chunk hash in the same observation.
 - **Stopping rule:** closes on a dated pass of 1–3, or a failure is filed as a recurrence on B1991041.
 
+**Run record — 2026-10-08, signed in as the test account, planyr.io (build read in the same call as each run; `ui-audit/verify-rename-signed-in.mjs`):**
+- Build `c3ce700` / `e29a76f` / `ae1f837` (all contain #1892): steps 1–3 PASSED in 4 of 7 runs — "+ New project" opens untitled with **no** sites row (lazy creation intact); rename shows no "didn't match" toast; the cloud row appears under the new name; after a reload the breadcrumb and the Map switcher still show it.
+- **FAILED in the other runs** (row never landed; reload → "doesn't have this project"): a real durability gap, root-caused and fixed locally-first in the follow-up PR (see B1991041). Not closed by this record.
+- **Still to do before closing:** re-run the harness on the build that contains the local-first fix; steps 2e/2f (reload ~1 s after the rename keeps the project; the cloud row still arrives) must pass.
+
 ### V1416128 — B1991040: a project rename reaches schedule + review labels (Dashboard, Reports, Review lists) `Blocker: auth`
 
 Sandbox-proven: `test/nameCopiesGuard.test.js` (live-name rule, the production row verbatim in both title shapes, typed-title-untouched, column guard) and `e2e/names-matrix.spec.js` (the Schedule tab receives the LIVE name and again after a rename). **Needs a signed-in pass on real data** (the Dashboard reads the account's schedules/reviews from the cloud).
