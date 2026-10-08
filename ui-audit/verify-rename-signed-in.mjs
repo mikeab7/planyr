@@ -65,8 +65,14 @@ try {
   await page.waitForTimeout(500);
   const t2 = (await crumb().innerText()).trim();
   record("2b breadcrumb shows the new name", t2.includes(NAME1), `crumb="${t2}"`);
-  const stored = await page.evaluate(async (g) => { const q = await window.pfSupabase.from("sites").select("id,site").eq("group_id", g); return q.data || []; }, gid);
-  record("2c a sites row now exists in the cloud under the new name", stored.length >= 1 && stored.every((r) => r.site === NAME1), JSON.stringify(stored));
+  // The row lands a moment after the rename (measured 1.5–3 s: ensureProjectRow → push). Poll up to 15 s and record the time.
+  let stored = [], tRow = null; const t0 = Date.now();
+  while (Date.now() - t0 < 15000) {
+    stored = await page.evaluate(async (g) => { const q = await window.pfSupabase.from("sites").select("id,site").eq("group_id", g); return q.data || []; }, gid);
+    if (stored.length) { tRow = Date.now() - t0; break; }
+    await page.waitForTimeout(500);
+  }
+  record("2c a sites row now exists in the cloud under the new name", stored.length >= 1 && stored.every((r) => r.site === NAME1), `${JSON.stringify(stored)} after ~${tRow == null ? ">15000" : tRow}ms`);
 
   // 3. reload, then the Map: the project is still listed under the new name
   await page.reload({ waitUntil: "domcontentloaded" });
