@@ -152,7 +152,8 @@ try {
 
   /* ---- STEP 5 (desktop): detach Drainage to a floating card and back ---- */
   if (!PHONE) {
-    await page.evaluate(() => document.querySelector('[data-rail-tab="drainage"]').click());
+    // a rail tab toggles: only press it when Drainage is not already the open panel
+    await page.evaluate(() => { if (!document.querySelector('[data-testid="panel-chrome-drainage"]')) document.querySelector('[data-rail-tab="drainage"]').click(); });
     await page.waitForTimeout(800);
     await page.evaluate(() => document.querySelector('[aria-label="Detach panel"]')?.click());
     await page.waitForSelector('[data-testid^="floating-panel-"]', { timeout: 10000 }).catch(() => {});
