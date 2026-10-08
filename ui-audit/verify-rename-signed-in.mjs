@@ -25,6 +25,7 @@ const record = (step, ok, detail) => { results.push({ step, ok, detail }); conso
 
 const s = await openSignedIn({ base });
 let gid = null;
+const extraGids = []; // other throwaway projects this run created (all are trashed in cleanup)
 const { page } = s;
 try {
   await assertMeasurable(page, "verify-rename-signed-in");
@@ -65,14 +66,14 @@ try {
   await page.waitForTimeout(500);
   const t2 = (await crumb().innerText()).trim();
   record("2b breadcrumb shows the new name", t2.includes(NAME1), `crumb="${t2}"`);
-  // The row lands a moment after the rename (measured 1.5–3 s: ensureProjectRow → push). Poll up to 15 s and record the time.
+  // The row lands a moment after the rename (measured 1.5–3 s: ensureProjectRow → push). Poll up to 60 s (27 s measured on a slow day) and record the time.
   let stored = [], tRow = null; const t0 = Date.now();
-  while (Date.now() - t0 < 15000) {
+  while (Date.now() - t0 < 60000) {
     stored = await page.evaluate(async (g) => { const q = await window.pfSupabase.from("sites").select("id,site").eq("group_id", g); return q.data || []; }, gid);
     if (stored.length) { tRow = Date.now() - t0; break; }
     await page.waitForTimeout(500);
   }
-  record("2c a sites row now exists in the cloud under the new name", stored.length >= 1 && stored.every((r) => r.site === NAME1), `${JSON.stringify(stored)} after ~${tRow == null ? ">15000" : tRow}ms`);
+  record("2c a sites row now exists in the cloud under the new name", stored.length >= 1 && stored.every((r) => r.site === NAME1), `${JSON.stringify(stored)} after ~${tRow == null ? ">60000" : tRow}ms`);
 
   // 3. reload, then the Map: the project is still listed under the new name
   await page.reload({ waitUntil: "domcontentloaded" });
@@ -85,6 +86,29 @@ try {
   const listed = await page.getByTestId(`project-row-${gid}`).innerText().catch(() => "");
   record("3b the Map's project switcher lists it under the new name", listed.includes(NAME1), `row="${listed.replace(/\s+/g, " ").slice(0, 80)}"`);
   await page.keyboard.press("Escape");
+
+    // 2e. DURABILITY (the follow-up found 2026-10-08): reload ~1 s after the rename, BEFORE the cloud row can land. The new
+  //     name must already be on this device (local-first), and the project must still be there after the reload.
+  {
+    await page.goto(`${base}/#/project/e2e-fixture/site`, { waitUntil: "domcontentloaded" });
+    await page.locator('[data-testid="planner-canvas"]').waitFor({ state: "visible", timeout: 60000 });
+    await crumb().click(); await page.getByTestId("project-new").click();
+    await page.locator('[data-testid="planner-canvas"]:visible').waitFor({ timeout: 30000 });
+    const g2 = await page.evaluate(() => (location.hash.match(/project\/([^/]+)/) || [])[1]);
+    extraGids.push(g2);
+    const NAME_E = `zz-rename-check-${stamp}-e`;
+    await crumb().click(); await page.getByTestId(`project-row-${g2}`).hover(); await page.getByTestId(`project-kebab-${g2}`).click(); await page.getByTestId("project-rename").click();
+    const inpE = page.getByRole("textbox", { name: /^Rename / }); await inpE.fill(NAME_E); await inpE.press("Enter");
+    await page.waitForTimeout(1000);
+    const cloudAtReload = await page.evaluate(async (g) => (await window.pfSupabase.from("sites").select("id").eq("group_id", g)).data.length, g2);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    const back = await page.locator('[data-testid="planner-canvas"]').waitFor({ state: "visible", timeout: 60000 }).then(() => true, () => false);
+    const tE = back ? (await crumb().innerText()).trim() : "";
+    record("2e a reload ~1 s after the rename keeps the project and its new name (local-first)", back && tE.includes(NAME_E), `cloudRowsAtReload=${cloudAtReload} canvas=${back} crumb="${tE}"`);
+    let landed = false; const tE0 = Date.now();
+    while (Date.now() - tE0 < 90000) { const n = await page.evaluate(async (g) => (await window.pfSupabase.from("sites").select("id").eq("group_id", g)).data.length, g2).catch(() => 0); if (n) { landed = true; break; } await page.waitForTimeout(2000); }
+    record("2f …and the cloud row still arrives on its own after that reload", landed, landed ? `after ~${Date.now() - tE0}ms` : "no row within 90 s");
+  }
 
   // ── V1416128 schedule leg ───────────────────────────────────────────────────────────────────────────────────
   // B. the embedded Schedule page resolves a linked project's name LIVE by id: hand its own label function a schedule
@@ -139,21 +163,23 @@ try {
     if (process.env.HARNESS_SHOT) await page.screenshot({ path: process.env.HARNESS_SHOT });
   } catch (_) { /* best effort */ }
 } finally {
-  // 4. delete the throwaway (always)
+  // 4. trash the throwaways (always) — NEVER hard-delete (see the note below)
   try {
-    if (gid) {
-      const del = await page.evaluate(async (g) => {
-        const q = await window.pfSupabase.from("sites").select("id").eq("group_id", g);
-        const ids = (q.data || []).map((r) => r.id);
-        if (!ids.length) return { removed: 0 };
-        // The database refuses to permanently delete a LIVE project (sites_block_delete_live_group): move it to the
-        // trash first — exactly what the app's own Delete does — then remove it for good.
+    const all = [gid, ...extraGids].filter(Boolean);
+    if (all.length) {
+      const del = await page.evaluate(async (gs) => {
+        const q = await window.pfSupabase.from("sites").select("id,site").in("group_id", gs);
+        const rows = (q.data || []).filter((r) => /^zz-rename-(check|after)-/.test(r.site));
+        const ids = rows.map((r) => r.id);
+        if (!ids.length) return { trashed: 0 };
+        // Move to the TRASH, exactly what the app's own Delete does — and stop there. NEVER hard-delete from a harness:
+        // another signed-in browser on this shared account may still hold the row in its local cache and, with no trash
+        // marker to honour, would re-push it as unsynced work (measured 2026-10-08: three hard-deleted throwaway
+        // projects came back minutes later). The app purges trashed rows itself after 30 days.
         const t = await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).in("id", ids);
-        if (t.error) return { removed: 0, error: "trash: " + String(t.error.message) };
-        const r = await window.pfSupabase.from("sites").delete().in("id", ids);
-        return { removed: ids.length, error: r.error ? String(r.error.message) : null };
-      }, gid);
-      record("4 throwaway project removed", !del.error, JSON.stringify(del));
+        return { trashed: ids.length, error: t.error ? String(t.error.message) : null };
+      }, all);
+      record("4 throwaway projects moved to the trash", !del.error, JSON.stringify(del));
     }
   } catch (e) { record("4 cleanup", false, String(e.message || e).slice(0, 200)); }
   console.log("build served (re-read):", JSON.stringify(await page.evaluate(() => fetch("/version.json", { cache: "no-store" }).then((r) => r.json()).catch(() => null))));
