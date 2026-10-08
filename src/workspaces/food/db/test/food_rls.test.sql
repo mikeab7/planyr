@@ -14,6 +14,12 @@
 --      2026-08-23) has the identical owner-only shape, PLUS an update policy
 --      (striking a dish done is an in-place update, not delete+reinsert), and
 --      the (user, place, dish) uniqueness is enforced at the database.
+--   5. food_lists + food_list_items (named restaurant lists, NEW-1 / B2088288) have the
+--      identical owner-only shape: invisible to anon, invisible to another signed-in user,
+--      not renameable/deletable/extendable by another user (the composite (list_id, user_id)
+--      foreign key refuses an item on someone else's list), list names unique per user
+--      case-insensitively, and deleting a list removes ITS items only — never a visit, a
+--      wishlist flag or the place.
 --
 -- Self-rolling-back: runs inside a DO block and raises an exception at the end
 -- carrying the report, so every fixture (fake users + rows) is discarded. Paste
@@ -31,6 +37,9 @@ declare
   visit_id uuid;
   dish_id uuid;
   dish_place text;
+  list_a uuid;
+  item_a uuid;
+  visit2_id uuid;
   n int;
   rep text := '';
   passed int := 0;
@@ -270,6 +279,176 @@ begin
   select count(*) into n from public.food_dishes where id = dish_id;
   if n = 0 then passed := passed + 1; rep := rep || 'PASS 23: deleting a visit cascades to its dishes (on delete cascade). ' || E'\n';
   else failed := failed + 1; rep := rep || format('FAIL 23: %s dish row(s) survived deleting their visit, expected 0.', n) || E'\n'; end if;
+
+
+  -- ================= restaurant lists (NEW-1 / B2088288) =======================
+  -- fixtures as postgres: A's list "Lunch @ Work" holding the test place, plus a visit and a
+  -- want-to-try flag at the same place (to prove deleting a LIST touches neither)
+  insert into public.food_lists (user_id, name, color, position) values (ua, 'Lunch @ Work', '#0E8A8A', 0) returning id into list_a;
+  insert into public.food_list_items (user_id, list_id, place_id) values (ua, list_a, test_place_id) returning id into item_a;
+  insert into public.food_visits (user_id, place_id, rating, notes) values (ua, test_place_id, 7, 'list test visit') returning id into visit2_id;
+  insert into public.food_wishlist (user_id, place_id) values (ua, test_place_id);
+
+  -- ---------- Test 24: anon reads food_lists + food_list_items (expect 0 rows) -
+  execute 'set local role anon'; execute 'set local request.jwt.claims = default';
+  select count(*) into n from public.food_lists where id = list_a;
+  execute 'reset role';
+  if n = 0 then passed := passed + 1; rep := rep || 'PASS 24: anon (signed out) sees ZERO food_lists rows. ' || E'\n';
+  else failed := failed + 1; rep := rep || format('FAIL 24: anon food_lists read returned %s rows, expected 0.', n) || E'\n'; end if;
+  execute 'set local role anon'; execute 'set local request.jwt.claims = default';
+  select count(*) into n from public.food_list_items where id = item_a;
+  execute 'reset role';
+  if n = 0 then passed := passed + 1; rep := rep || 'PASS 25: anon (signed out) sees ZERO food_list_items rows. ' || E'\n';
+  else failed := failed + 1; rep := rep || format('FAIL 25: anon food_list_items read returned %s rows, expected 0.', n) || E'\n'; end if;
+
+  -- ---------- Test 26: a DIFFERENT signed-in user (B) reads A's lists and items -
+  execute 'set local role authenticated';
+  execute format('set local request.jwt.claims = %L', json_build_object('sub', ub, 'role', 'authenticated')::text);
+  select count(*) into n from public.food_lists where id = list_a;
+  execute 'reset role'; execute 'set local request.jwt.claims = default';
+  if n = 0 then passed := passed + 1; rep := rep || 'PASS 26: a DIFFERENT signed-in user (B) sees ZERO of A''s food_lists rows. ' || E'\n';
+  else failed := failed + 1; rep := rep || format('FAIL 26: user B saw %s of A''s food_lists rows, expected 0.', n) || E'\n'; end if;
+  execute 'set local role authenticated';
+  execute format('set local request.jwt.claims = %L', json_build_object('sub', ub, 'role', 'authenticated')::text);
+  select count(*) into n from public.food_list_items where id = item_a;
+  execute 'reset role'; execute 'set local request.jwt.claims = default';
+  if n = 0 then passed := passed + 1; rep := rep || 'PASS 27: user B sees ZERO of A''s food_list_items rows. ' || E'\n';
+  else failed := failed + 1; rep := rep || format('FAIL 27: user B saw %s of A''s food_list_items rows, expected 0.', n) || E'\n'; end if;
+
+  -- ---------- Test 28: B cannot ADD an item to A's list, naming themself as the owner ----
+  -- (RLS alone passes user_id = B; the composite FK (list_id, user_id) is what refuses it)
+  begin
+    execute 'set local role authenticated';
+    execute format('set local request.jwt.claims = %L', json_build_object('sub', ub, 'role', 'authenticated')::text);
+    insert into public.food_list_items (user_id, list_id, place_id) values (ub, list_a, test_place_id);
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    failed := failed + 1; rep := rep || 'FAIL 28: user B added an item to A''s list (should be refused). ' || E'\n';
+  exception when foreign_key_violation then
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    passed := passed + 1; rep := rep || 'PASS 28: user B cannot add an item to A''s list (composite list/owner foreign key refuses it). ' || E'\n';
+  end;
+
+  -- ---------- Test 29: B cannot insert a row claiming A as the owner (RLS with check) ----
+  begin
+    execute 'set local role authenticated';
+    execute format('set local request.jwt.claims = %L', json_build_object('sub', ub, 'role', 'authenticated')::text);
+    insert into public.food_list_items (user_id, list_id, place_id) values (ua, list_a, test_place_id);
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    failed := failed + 1; rep := rep || 'FAIL 29: user B inserted a list item as user A (should be refused). ' || E'\n';
+  exception when others then
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    passed := passed + 1; rep := rep || 'PASS 29: user B cannot insert a list item claiming A as owner. ' || E'\n';
+  end;
+
+  -- ---------- Test 30: B cannot rename or delete A's list (0 rows touched) ---------------
+  execute 'set local role authenticated';
+  execute format('set local request.jwt.claims = %L', json_build_object('sub', ub, 'role', 'authenticated')::text);
+  update public.food_lists set name = 'Hijacked' where id = list_a;
+  get diagnostics n = row_count;
+  execute 'reset role'; execute 'set local request.jwt.claims = default';
+  if n = 0 then passed := passed + 1; rep := rep || 'PASS 30: user B cannot rename A''s list (0 rows updated). ' || E'\n';
+  else failed := failed + 1; rep := rep || format('FAIL 30: user B renamed %s of A''s lists, expected 0.', n) || E'\n'; end if;
+  execute 'set local role authenticated';
+  execute format('set local request.jwt.claims = %L', json_build_object('sub', ub, 'role', 'authenticated')::text);
+  delete from public.food_lists where id = list_a;
+  get diagnostics n = row_count;
+  execute 'reset role'; execute 'set local request.jwt.claims = default';
+  if n = 0 then passed := passed + 1; rep := rep || 'PASS 31: user B cannot delete A''s list (0 rows deleted). ' || E'\n';
+  else failed := failed + 1; rep := rep || format('FAIL 31: user B deleted %s of A''s lists, expected 0.', n) || E'\n'; end if;
+  execute 'set local role authenticated';
+  execute format('set local request.jwt.claims = %L', json_build_object('sub', ub, 'role', 'authenticated')::text);
+  delete from public.food_list_items where id = item_a;
+  get diagnostics n = row_count;
+  execute 'reset role'; execute 'set local request.jwt.claims = default';
+  if n = 0 then passed := passed + 1; rep := rep || 'PASS 32: user B cannot remove an item from A''s list (0 rows deleted). ' || E'\n';
+  else failed := failed + 1; rep := rep || format('FAIL 32: user B deleted %s of A''s list items, expected 0.', n) || E'\n'; end if;
+
+  -- ---------- Test 33: the owner reads, renames and recolours their own list ---------------
+  execute 'set local role authenticated';
+  execute format('set local request.jwt.claims = %L', json_build_object('sub', ua, 'role', 'authenticated')::text);
+  update public.food_lists set name = 'Lunch at Work', color = '#7A4FD6' where id = list_a;
+  get diagnostics n = row_count;
+  execute 'reset role'; execute 'set local request.jwt.claims = default';
+  if n = 1 then passed := passed + 1; rep := rep || 'PASS 33: owner can rename + recolour their own list. ' || E'\n';
+  else failed := failed + 1; rep := rep || format('FAIL 33: owner rename touched %s rows, expected 1.', n) || E'\n'; end if;
+
+  -- ---------- Test 34: list names are unique per user, case-insensitively -----------------
+  begin
+    execute 'set local role authenticated';
+    execute format('set local request.jwt.claims = %L', json_build_object('sub', ua, 'role', 'authenticated')::text);
+    insert into public.food_lists (user_id, name, color) values (ua, '  LUNCH AT WORK ', '#0E8A8A');
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    failed := failed + 1; rep := rep || 'FAIL 34: a second list named "LUNCH AT WORK" was accepted (should be refused). ' || E'\n';
+  exception when unique_violation then
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    passed := passed + 1; rep := rep || 'PASS 34: a second list with the same name (any case/padding) is refused. ' || E'\n';
+  end;
+  -- ...but ANOTHER user may use the same name
+  begin
+    execute 'set local role authenticated';
+    execute format('set local request.jwt.claims = %L', json_build_object('sub', ub, 'role', 'authenticated')::text);
+    insert into public.food_lists (user_id, name, color) values (ub, 'Lunch at Work', '#0E8A8A');
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    passed := passed + 1; rep := rep || 'PASS 35: another user may use the same list name (uniqueness is per user). ' || E'\n';
+  exception when others then
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    failed := failed + 1; rep := rep || 'FAIL 35: user B could not use a name A already has. ' || E'\n';
+  end;
+
+  -- ---------- Test 36: the same place cannot be on the same list twice --------------------
+  begin
+    execute 'set local role authenticated';
+    execute format('set local request.jwt.claims = %L', json_build_object('sub', ua, 'role', 'authenticated')::text);
+    insert into public.food_list_items (user_id, list_id, place_id) values (ua, list_a, test_place_id);
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    failed := failed + 1; rep := rep || 'FAIL 36: the same place was added to the same list twice. ' || E'\n';
+  exception when unique_violation then
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    passed := passed + 1; rep := rep || 'PASS 36: one row per (user, list, place) — a duplicate add is refused by the unique index. ' || E'\n';
+  end;
+
+  -- ---------- Test 37: a manual-pin item keeps the 4dp identity (a few feet apart = same pin) ----
+  begin
+    execute 'set local role authenticated';
+    execute format('set local request.jwt.claims = %L', json_build_object('sub', ua, 'role', 'authenticated')::text);
+    insert into public.food_list_items (user_id, list_id, custom_name, custom_lat, custom_lon) values (ua, list_a, 'Taco Truck', 29.76041, -95.36991);
+    insert into public.food_list_items (user_id, list_id, custom_name, custom_lat, custom_lon) values (ua, list_a, 'Taco Truck', 29.76043, -95.36989);
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    failed := failed + 1; rep := rep || 'FAIL 37: the same manual pin (a few feet apart) was added twice. ' || E'\n';
+  exception when unique_violation then
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    passed := passed + 1; rep := rep || 'PASS 37: a manual pin is one membership at 4dp rounding (second press refused). ' || E'\n';
+  end;
+
+  -- ---------- Test 38: an item must be a place OR a complete manual pin ---------------------
+  begin
+    execute 'set local role authenticated';
+    execute format('set local request.jwt.claims = %L', json_build_object('sub', ua, 'role', 'authenticated')::text);
+    insert into public.food_list_items (user_id, list_id, custom_name) values (ua, list_a, 'No Location Cafe');
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    failed := failed + 1; rep := rep || 'FAIL 38: a list item with a typed name but no location was accepted. ' || E'\n';
+  exception when check_violation then
+    execute 'reset role'; execute 'set local request.jwt.claims = default';
+    passed := passed + 1; rep := rep || 'PASS 38: a restaurant cannot be minted from a typed name alone (needs a place or coordinates). ' || E'\n';
+  end;
+
+  -- ---------- Test 39: deleting a LIST removes ITS items only — never the visit, the wishlist flag or the place
+  execute 'set local role authenticated';
+  execute format('set local request.jwt.claims = %L', json_build_object('sub', ua, 'role', 'authenticated')::text);
+  delete from public.food_lists where id = list_a;
+  execute 'reset role'; execute 'set local request.jwt.claims = default';
+  select count(*) into n from public.food_list_items where list_id = list_a;
+  if n = 0 then passed := passed + 1; rep := rep || 'PASS 39a: deleting a list removes its item rows (cascade on list_id). ' || E'\n';
+  else failed := failed + 1; rep := rep || format('FAIL 39a: %s item row(s) survived deleting their list.', n) || E'\n'; end if;
+  select count(*) into n from public.food_visits where id = visit2_id;
+  if n = 1 then passed := passed + 1; rep := rep || 'PASS 39b: the visit at the listed place survived deleting the list. ' || E'\n';
+  else failed := failed + 1; rep := rep || 'FAIL 39b: deleting a list removed a visit.' || E'\n'; end if;
+  select count(*) into n from public.food_wishlist where user_id = ua and place_id = test_place_id;
+  if n = 1 then passed := passed + 1; rep := rep || 'PASS 39c: the want-to-try flag survived deleting the list. ' || E'\n';
+  else failed := failed + 1; rep := rep || 'FAIL 39c: deleting a list removed a wishlist flag.' || E'\n'; end if;
+  select count(*) into n from public.food_places where id = test_place_id;
+  if n = 1 then passed := passed + 1; rep := rep || 'PASS 39d: the place itself survived deleting the list. ' || E'\n';
+  else failed := failed + 1; rep := rep || 'FAIL 39d: deleting a list removed a place.' || E'\n'; end if;
 
   -- ---------- cleanup + report (rollback via exception) ---------------------
   raise exception E'\n==== FOOD RLS TEST REPORT: % passed, % failed ====\n%', passed, failed, rep;

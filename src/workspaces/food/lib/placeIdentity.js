@@ -83,10 +83,13 @@ export function samePlace(a, b) {
  *  object — a manual pin ({key,name,lat,lon,visitIds}) or a place ({id,name,lat,lon}) — so a caller
  *  can open exactly the thing that already exists. Manual pins come first so a tie resolves to the
  *  pin (the older, hand-made record is the one his past visits are attached to). */
-export function existingRestaurants({ manualPins = [], wishlistManualPins = [], loggedPlaces = [], wishlistPlaces = [] } = {}) {
+export function existingRestaurants({ manualPins = [], wishlistManualPins = [], loggedPlaces = [], wishlistPlaces = [], listManualPins = [], listPlaces = [] } = {}) {
   const out = [];
-  for (const p of [...manualPins, ...wishlistManualPins]) out.push({ kind: "manual", name: p.name, lat: p.lat, lon: p.lon, ref: p });
-  for (const p of [...loggedPlaces, ...wishlistPlaces]) out.push({ kind: "place", name: p.name, lat: p.lat, lon: p.lon, address: p.address, ref: p });
+  // listManualPins / listPlaces (NEW-1 / B2088288): restaurants he has only put on a named list. They are
+  // "his" for the save-path guard, so the same restaurant reached through a second search row resolves
+  // onto the record already on the list instead of becoming a second membership.
+  for (const p of [...manualPins, ...wishlistManualPins, ...listManualPins]) out.push({ kind: "manual", name: p.name, lat: p.lat, lon: p.lon, ref: p });
+  for (const p of [...loggedPlaces, ...wishlistPlaces, ...listPlaces]) out.push({ kind: "place", name: p.name, lat: p.lat, lon: p.lon, address: p.address, ref: p });
   return out;
 }
 
@@ -133,7 +136,7 @@ export function mergeSearchRows({ manualRows = [], snapshotRows = [], liveRows =
     if (hit && hit.kind === "manual") {
       // The snapshot's record of a restaurant he already has as a manual pin: show the PIN.
       const visited = (hit.ref.visitIds || []).length > 0;
-      push(pinRowFor ? pinRowFor(hit) : { ...hit.ref, kind: "manual", mine: visited, wishlisted: !visited });
+      push(pinRowFor ? pinRowFor(hit) : { ...hit.ref, kind: "manual", mine: visited, wishlisted: !visited && !hit.ref.listOnly });
     } else if (hit && hit.kind === "place" && hit.ref.id !== r.id) {
       // A second snapshot record for a restaurant he's logged under another id: stay on his.
       const own = snapshotRows.find((s) => s.id === hit.ref.id);

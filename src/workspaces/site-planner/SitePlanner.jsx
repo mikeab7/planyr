@@ -493,6 +493,7 @@ import {
  * precedent. The GUARD itself is unaffected: its verdict and copy live in detentionRules.js and
  * render immediately; this lazy tier only ENRICHES that line with the regime name and the statute. */
 import { siteState as resolveSiteState } from "./lib/siteRegion.js";
+import { jurisdictionSourceName, GA_JURISDICTION_SOURCE_NAME } from "./lib/georgiaJurisdiction.js";
 import { splitPolygonByCut, remapEdgeVector } from "./lib/polygonSplit.js";
 import { planCombine, planSplit, planRestoreCombined, planRestoreSplit, includedAcres, buildParcelRows } from "./lib/parcelOps.js";
 import ParcelsPanel from "./components/ParcelsPanel.jsx";
@@ -1809,6 +1810,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // never true for a mouse-driven session, so this can only ever ADD phone-shaped devices to what
   // `narrowWidth` already caught — a real desktop, at any height, is untouched.
   const narrow = isPhoneShape({ narrowWidth, shortHeight, coarsePointer });
+  const hintRow = narrow && shortHeight && typeof window !== "undefined" && window.innerWidth > window.innerHeight; // (a 568-tall PORTRAIT phone is also shortHeight) // phone held sideways: the strip is ONE row (V1414592 — the two-row strip was half the visible map)
   // NEW-2 (phone-chrome-parity pass) — the real safe-area inset (the notch/dynamic-island/home-
   // indicator no-go strip), as a NUMBER, for the bottom canvas furniture's own math. Reuses
   // B1176480's approach (`shared/ui/safeAreaInsets.js`) rather than a second env() probe — the
@@ -16231,7 +16233,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           ? `ETJ boundaries: ${layerVintage("jur_etj") || "vintage unknown"}. ETJs shrink as landowners opt out (SB 2038) — screening only, verify before relying on an ETJ answer.`
           : null;
         // B689905 — carried through so the tooltip never claims a parcel that isn't there.
-        const badge = { ...b, ageMs: j.ages?.county ?? j.ages?.city ?? j.ages?.etj ?? null, sourceName: "TxDOT / TxGIO / county & city ETJ publishers", etjNote, parcelBased: hasParcel };
+        const badge = { ...b, ageMs: j.ages?.county ?? j.ages?.city ?? j.ages?.etj ?? null, sourceName: jurisdictionSourceName(b.state), etjNote, parcelBased: hasParcel };
         /* NEW-2 — CACHE ONLY A RESOLVED ANSWER. This cache is keyed on parcel geometry and lives for
          * the session, so caching a badge whose ETJ lookup failed pinned that site to "couldn't
          * check" until a reload, on a source measured flaky at exactly this. An unresolved badge is
@@ -16256,7 +16258,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           straddle: false, governingCities: [], edgeOnlyCities: [], partialCities: [], touchesCities: [],
           unresolvedRoles: ["city", "etj", "county"], unresolved: true,
           cityContainment: "unknown", etjLabels: [],
-          sourceName: "TxDOT / TxGIO / H-GAC",
+          sourceName: siteStateId === "GA" ? GA_JURISDICTION_SOURCE_NAME : "TxDOT / TxGIO / H-GAC",
           failureNote: `The jurisdiction lookup could not be completed (${String((e && e.message) || e)}). Nothing here is settled — re-check before relying on the floodplain rule.`,
         });
       });
@@ -21430,7 +21432,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return (
       <ParcelPage parcel={pc} name={row ? row.name : (pc.label || "Parcel")} acres={parcelNetSqft(pc) / SQFT_PER_ACRE} included={pc.active !== false}
         origin={origin} ownerText={apprOwnerName} cadName={parcelCadName} drawnAcresOf={(p) => parcelNetSqft(p) / SQFT_PER_ACRE}
-        handlers={parcelPanelH} taxTable={taxTable} setbacks={setbacks} style={style} deedFrom={selectDeedOfGroup} idField={parcelIdField} addrField={parcelAddrField} />
+        handlers={parcelPanelH} taxTable={taxTable} taxSource={taxTable || !restored?.county || (origin.kind !== "county" && origin.kind !== "combined") ? null : { county: restored.county, lots: origin.kind === "combined" ? from : [pc], combined: origin.kind === "combined", idField: COUNTIES_MAP[restored.county]?.idField }} setbacks={setbacks} style={style} deedFrom={selectDeedOfGroup} idField={parcelIdField} addrField={parcelAddrField} />
     );
   };
   const renderPanelBody = (_pid) => (<>
@@ -25399,19 +25401,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               (`lib/parcelActions.js`): "Click a lot on the map" = a county-recorded lot. */}
           {parcels.length === 0 && els.length === 0 && !sheetOverlays.length && !startHintDismissed
             && tool === "select" && !identifyMode && !addParcelMenu && !draftPoly && !ovCalib && (
-            <div data-testid="start-hint" style={{ position: "absolute", top: narrow ? 66 : 12, left: narrow ? TOOLS_TAB_WIDTH_PX + 8 : 12, right: narrow ? TOOLS_TAB_WIDTH_PX + 8 : "auto", maxWidth: narrow ? undefined : 420, zIndex: 5, boxSizing: "border-box", background: "var(--surface-overlay)", padding: narrow ? "6px 38px 8px 10px" : "9px 40px 10px 12px", borderRadius: RADIUS.md, border: `1px solid ${PAL.panelLine}`, boxShadow: "0 4px 16px rgba(28,25,20,0.10)" }}>
-              <div style={{ fontSize: FONT_SIZE.display, fontWeight: 700, color: PAL.ink, marginBottom: narrow ? 4 : 7 }}>Start your site</div>
+            <div data-testid="start-hint" style={{ position: "absolute", top: narrow ? 66 : 12, left: narrow ? TOOLS_TAB_WIDTH_PX + 8 : 12, right: narrow ? TOOLS_TAB_WIDTH_PX + 8 : "auto", maxWidth: narrow ? undefined : 420, zIndex: 5, boxSizing: "border-box", background: "var(--surface-overlay)", padding: hintRow ? "4px 6px 4px 8px" : narrow ? "6px 8px 8px 8px" : "9px 40px 10px 12px", ...(hintRow ? { display: "flex", alignItems: "center", gap: 6 } : null), borderRadius: RADIUS.md, border: `1px solid ${PAL.panelLine}`, boxShadow: "0 4px 16px rgba(28,25,20,0.10)" }}>
+              <div style={{ fontSize: FONT_SIZE.display, fontWeight: 700, color: PAL.ink, marginBottom: hintRow ? 0 : narrow ? 6 : 7, lineHeight: 1.2, whiteSpace: "nowrap", flex: "none" }}>Start your site</div>
               <button data-testid="start-hint-dismiss" onClick={dismissStartHint} aria-label="Dismiss" title="Dismiss"
-                style={{ position: "absolute", top: 0, right: 0, width: 36, height: 36, border: "none", background: "transparent", color: PAL.muted, fontSize: FONT_SIZE.emphasis, cursor: "pointer", fontFamily: "inherit" }}>✕</button>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                style={{ ...(hintRow ? { order: 3, flex: "none", width: 28, height: 30 } : { position: "absolute", top: 0, right: 0, width: 36, height: narrow ? 30 : 36 }), border: "none", background: "transparent", color: PAL.muted, fontSize: FONT_SIZE.emphasis, cursor: "pointer", fontFamily: "inherit" }}>✕</button>
+              <div style={{ display: "grid", gridTemplateColumns: hintRow ? "repeat(4, auto)" : "1fr 1fr", gap: narrow ? 4 : 6, ...(hintRow ? { flex: 1, minWidth: 0 } : null) }}>
+                {/* [testid, full label, short label, tiny label (phone held sideways: one row), action] (narrow: a 320-wide phone wrapped every option to three lines and the strip reached the middle of the map), action] */}
                 {[
-                  ["start-hint-lot", "Click a lot on the map", () => { setIdentifyMode(true); ensureBasemapOn(); setIdentifyRes(null); setJurInfo(null); }],
-                  ["start-hint-address", "Search an address", () => openLandPanel({ select: false, addMenu: true })],
-                  ["start-hint-draw", "Trace your boundary", () => selectTool("parcel")],
-                  ["start-hint-screenshot", "Use a screenshot", () => startHintFileRef.current?.click()],
-                ].map(([tid, label, act]) => (
-                  <button key={tid} data-testid={tid} onClick={act}
-                    style={{ minHeight: narrow ? 34 : 36, padding: "4px 7px", borderRadius: RADIUS.sm, border: `1px solid ${PAL.panelLine}`, background: "var(--planner-raised)", color: PAL.ink, fontSize: FONT_SIZE.control, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", textAlign: "left", lineHeight: 1.25 }}>{label}</button>
+                  ["start-hint-lot", "Click a lot on the map", "Click a lot", "Click a lot", () => { setIdentifyMode(true); ensureBasemapOn(); setIdentifyRes(null); setJurInfo(null); }],
+                  ["start-hint-address", "Search an address", "Search address", "Address", () => openLandPanel({ select: false, addMenu: true })],
+                  ["start-hint-draw", "Trace your boundary", "Trace boundary", "Trace", () => selectTool("parcel")],
+                  ["start-hint-screenshot", "Use a screenshot", "Screenshot", "Screenshot", () => startHintFileRef.current?.click()],
+                ].map(([tid, label, short, tiny, act]) => (
+                  <button key={tid} data-testid={tid} onClick={act} title={label}
+                    style={{ minHeight: hintRow ? 30 : narrow ? 34 : 36, padding: narrow ? "4px 3px 4px 5px" : "4px 7px", borderRadius: RADIUS.sm, border: `1px solid ${PAL.panelLine}`, background: "var(--planner-raised)", color: PAL.ink, fontSize: FONT_SIZE.control, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", textAlign: "left", lineHeight: 1.25, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{hintRow ? tiny : narrow ? short : label}</button>
                 ))}
               </div>
               <input ref={startHintFileRef} type="file" accept="application/pdf,image/*,.dxf,.dwg" style={{ display: "none" }} onChange={(e) => { addOverlayFile(e.target.files?.[0]); e.target.value = ""; }} />
@@ -32628,7 +32631,7 @@ function DrainagePanel({
               // the drawn area" banner, and the border no longer demotes to dashed on stale (that
               // read as trapping the reviewing-agency selector inside a warning box).
               return (
-                <div key="assumptions" style={{ marginTop: 7, border: `1px solid ${Y.border}`, borderRadius: 8, padding: "7px 9px", background: Y.cardBg }}>
+                <div key="assumptions" data-flat-group="assumptions" style={{ marginTop: 7, borderTop: `1px solid ${Y.border}`, padding: "8px 0 2px" }}>
                   <div title={d.channelDischarge?.overrideIgnored ? "HCFCD n/a outside Harris: saved channel answer ignored." : ""} style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: Y.rowLabel, marginBottom: 4, cursor: d.channelDischarge?.overrideIgnored ? "help" : undefined }}>Assumptions: correct if needed{d.channelDischarge?.overrideIgnored ? <span style={{ fontSize: 9, marginLeft: 4, letterSpacing: 0 }} aria-hidden="true">ⓘ</span> : null}</div>
                   {rows}
                 </div>

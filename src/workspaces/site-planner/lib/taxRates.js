@@ -34,7 +34,7 @@
  * An account's codes come from parcel attrs[codeField] (comma separated). Any code missing from
  * `units` => the list is incomplete => null (hide).
  */
-const r5 = (n) => Math.round(n * 1e5) / 1e5;
+export const r6 = (n) => Math.round(n * 1e6) / 1e6; // rates carry up to 6 decimals (0.004798) — 5 would corrupt the total
 
 export const TAX_COVERAGE = {
   harris: { covered: false, reason: "HCAD GIS has no taxing-unit fields; hcad.org / hctax.net blocked from sandbox. Existing Comptroller+polygon panel is an incomplete estimate." },
@@ -76,11 +76,12 @@ export function taxTableFor(parcel, ctx = {}) {
     rows.push({ unit: u.unit, rate: u.rate });
   }
   if (!rows.length) return null;
-  return { year: data.year, source: data.source, sourceUrl: data.sourceUrl || "", rows, total: r5(rows.reduce((s, r) => s + r.rate, 0)) };
+  return { year: data.year, source: data.source, sourceUrl: data.sourceUrl || "", rows, total: r6(rows.reduce((s, r) => s + r.rate, 0)) };
 }
 
 export function taxTableForCombined(parcels, ctx = {}) {
-  const per = (parcels || []).map((p) => ({ name: p?.label || p?.name || p?.acct || "Lot", t: taxTableFor(p, ctx) }));
+  const tableOf = ctx.tableOf || ((p) => taxTableFor(p, ctx)); // B2158065: async per-account tables plug in here
+  const per = (parcels || []).map((p) => ({ name: p?.label || p?.name || p?.acct || "Lot", t: tableOf(p) }));
   if (!per.length || per.some((x) => !x.t)) return null;
   const totals = per.map((x) => x.t.total);
   const allShare = totals.every((t) => t === totals[0]);

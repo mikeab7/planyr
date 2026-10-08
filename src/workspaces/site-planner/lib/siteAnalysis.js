@@ -35,6 +35,7 @@ import { summarizeWells } from "./wellStatus.js";
 // NEW-1 — which STATE the site is in, geometrically and without a network call, so the zoning
 // answer holds when every GIS endpoint is down (siteRegion.js is pure geometry, no prose).
 import { siteState } from "./siteRegion.js";
+import { GA_JURISDICTION_SOURCE_NAME } from "./georgiaJurisdiction.js";
 // NEW-1 (FL/GA pipelines) — the pure half of the "never clear outside Texas" rule (see that module).
 import { EIA_COMMODITIES, EIA_BUFFER_MI, isEiaScreenState } from "./eiaPipelineScreen.js";
 // The wording + combiner are loaded ON DEMAND (only a non-Texas site reads them): `eiaPipelineScreenCopy.js`.
@@ -906,7 +907,7 @@ export function analyzeSource(source, rings, opts = {}) {
 // Jurisdiction / road / zoning findings (reuse the verified jurisdiction.js engine)
 // ---------------------------------------------------------------------------
 // Whose boundary services the jurisdiction card actually read — by state (the Texas string was shown on every site).
-const JURISDICTION_SOURCE_NAME = { TX: "TxDOT / TxGIO / H-GAC", GA: "Georgia DCA (county + municipal boundaries)", CO: "Colorado county + municipal boundary services", CA: "California CDT State Geoportal (county + city boundaries)" };
+const JURISDICTION_SOURCE_NAME = { TX: "TxDOT / TxGIO / H-GAC", GA: GA_JURISDICTION_SOURCE_NAME, CO: "Colorado county + municipal boundary services", CA: "California CDT State Geoportal (county + city boundaries)" };
 export function buildJurisdictionFinding(j, state = null) {
   const rows = [];
   rows.push(["County", j.county.length ? j.county.join(" + ") : "—", j.ages.county]);
