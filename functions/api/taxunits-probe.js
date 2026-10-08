@@ -6,6 +6,7 @@
  *   ?zip=URL&entry=NAME&bytes=N    first N inflated bytes of one entry
  *   ?zip=URL&entry=NAME&find=STR[&maxmb=N]   stream-inflate, find a line containing STR, time it */
 const HOSTS = /^(www\.)?(hcad\.org|pdata\.hcad\.org|download\.hcad\.org|hctax\.net|fbcad\.org|search\.fbcad\.org|galvestoncad\.org|gcad\.org|mcad-tx\.org|montgomerycad\.org|esearch\.mcad-tx\.org|comptroller\.texas\.gov|tax\.fortbendcountytx\.gov|fortbendcountytx\.gov|data\.texas\.gov|gis\.hctx\.net|[a-z0-9]*\.?arcgis\.com)$/i;
+import { streamXlsxRows } from "./lib/xlsxRows.js";
 const json = (o) => new Response(JSON.stringify(o, null, 1), { headers: { "content-type": "application/json" } });
 const u16 = (b, o) => b[o] | (b[o + 1] << 8);
 const u32 = (b, o) => (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0;
@@ -51,6 +52,17 @@ export async function onRequestGet({ request }) {
       if (!name) return json(dir);
       const e = dir.entries.find((x) => x.name === name);
       if (!e) return json({ error: "no such entry", names: dir.entries.map((x) => x.name) });
+      if (u.searchParams.get("xlsx")) {
+        const chunks = [];
+        const r0 = (await entryStream(zip, e)).getReader();
+        for (;;) { const { value, done } = await r0.read(); if (done) break; chunks.push(value); }
+        const all = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+        let o = 0; for (const c of chunks) { all.set(c, o); o += c.length; }
+        const rows = [];
+        const want = u.searchParams.get("grep");
+        await streamXlsxRows(all, (row, n) => { if (!want || n < 4 || new RegExp(want, "i").test(row.join(" | "))) rows.push([n, ...row.map((x) => (typeof x === "string" ? x.slice(0, 160) : x))]); });
+        return json({ rows: rows.slice(0, 400) });
+      }
       const rd = (await entryStream(zip, e)).getReader();
       const find = u.searchParams.get("find");
       const want = Math.min(Number(u.searchParams.get("bytes") || 3000), 60000);
