@@ -72,3 +72,13 @@ export async function readZipEntryText(url, entry, fetchImpl = fetch) {
   await scanZipEntryChunks(url, entry, (c) => { text += dec.decode(c, { stream: true }); return false; }, fetchImpl);
   return text + dec.decode();
 }
+
+/** The 13-digit account starting the FIRST COMPLETE line of a chunk, or null. Bytes only — no decoding. */
+export function firstAcct(c) {
+  const i = c.indexOf(10);
+  if (i < 0 || i + 14 > c.length) return null;
+  let s = "";
+  for (let k = i + 1; k < i + 14; k++) { const b = c[k]; if (b < 48 || b > 57) return null; s += String.fromCharCode(b); }
+  return s;
+}
+export const concatBytes = (parts) => { const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0)); let o = 0; for (const p of parts) { out.set(p, o); o += p.length; } return out; };
