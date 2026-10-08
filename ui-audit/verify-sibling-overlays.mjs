@@ -49,25 +49,25 @@ try {
     await page.evaluate((i) => localStorage.setItem("planarfit:currentSite:v1", i), id);
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.getByTestId("module-tab-site-planner").filter({ visible: true }).click().catch(() => {});
-    for (let k = 0; k < 4; k++) {
+    await page.evaluate((i) => { window.location.hash = `#/project/${i}/site`; }, A); // the PROJECT (group) id; the newest plan opens
+    for (let k = 0; k < 20; k++) {
       const cur = await page.evaluate(() => window.__plannerForeign && window.__plannerForeign.siteId()).catch(() => null);
       if (cur === id) break;
-      await page.getByPlaceholder("Filter by name…").fill(NAME).catch(() => {});
-      const row = page.getByText(NAME, { exact: false }).first();
-      if (await row.waitFor({ state: "visible", timeout: 15000 }).then(() => true, () => false)) {
-        await row.click(); await pacedWait(page, 1500);
-        const open = page.getByRole("button", { name: /^open( project| plan| site)?$/i }).first();
-        if (await open.count()) await open.click().catch(() => {});
-        await pacedWait(page, 3000);
-      }
+      await pacedWait(page, 1000);
     }
     await page.getByTestId("planner-canvas").first().waitFor({ state: "visible", timeout: 30000 });
+    if ((await page.evaluate(() => window.__plannerForeign && window.__plannerForeign.siteId())) !== id) {
+      // the project opened its newest plan: switch through the real plan switcher
+      await page.getByTestId("plan-crumb").first().click();
+      await page.getByText(id === A ? "Concept A" : "Concept B", { exact: true }).last().click();
+      for (let k = 0; k < 20; k++) { if ((await page.evaluate(() => window.__plannerForeign && window.__plannerForeign.siteId()).catch(() => null)) === id) break; await pacedWait(page, 1000); }
+    }
     const cur = await page.evaluate(() => window.__plannerForeign && window.__plannerForeign.siteId());
     if (cur !== id) throw new Error(`opened ${cur}, wanted ${id} (switch plans by hand-driving the Sites list)`);
     await pacedWait(page, 1500);
     await assertMeasurable(page, "verify-sibling-overlays");
   };
-  const F = (fn, ...args) => page.evaluate(([f, a]) => window.__plannerForeign[f](...a), [fn, args]);
+  const F = (fn, ...args) => page.evaluate(([f, a]) => (window.__plannerForeign ? window.__plannerForeign[f](...a) : Promise.reject(new Error("hook-null"))), [fn, args]).catch((e) => { if (/hook-null/.test(String(e))) return undefined; throw e; });
   const until = async (fn, what, ms = 40000) => { const t0 = Date.now(); for (;;) { const v = await fn(); if (v) return v; if (Date.now() - t0 > ms) throw new Error("timed out: " + what); await pacedWait(page, 500); } };
   const dbOverlays = (id) => page.evaluate(async (i) => { const r = await window.pfSupabase.from("sites").select("o:data->sheetOverlays").eq("id", i).maybeSingle(); return r.error ? null : (r.data && r.data.o) || []; }, id);
   const readable = (key) => page.evaluate(async (k) => { const r = await window.pfSupabase.storage.from("doc-review-files").createSignedUrl(k, 30); return !r.error; }, key);
@@ -75,7 +75,7 @@ try {
   /* ---- plan A: add a PDF (real upload), crop it, and put page 1 + page 3 on the plan ---- */
   await openPlan(A);
   await page.locator('input[type="file"][accept*="pdf"]').first().setInputFiles({ name: "zz-sibling.pdf", mimeType: "application/pdf", buffer: pdf3() });
-  const first = await until(async () => (await F("own")).find((o) => o.storageKey), "overlay uploaded on A");
+  const first = await until(async () => ((await F("own")) || []).find((o) => o.storageKey), "overlay uploaded on A");
   uploaded.add(first.storageKey);
   const CROP = { kind: "rect", x: 100, y: 80, w: 500, h: 400 };
   check(await F("crop", first.id, CROP), "A: crop committed through setOverlayCrop");
@@ -88,35 +88,37 @@ try {
 
   /* ---- plan B: listed hidden, not drawn ---- */
   await openPlan(B);
-  const r1 = await until(async () => { await F("refresh"); const r = await F("rows"); return r.length ? r : null; }, "foreign rows on B");
+  await until(async () => (await F("status")) !== undefined, "planner hook present on B", 30000).catch(async (e) => { console.log("URL:", page.url(), "canvas:", await page.getByTestId("planner-canvas").count(), "body:", (await page.locator("body").innerText()).slice(0, 300).replace(/\n/g, " | ")); await page.screenshot({ path: "/tmp/claude-0/sib-fail.png" }); throw e; });
+  console.log("B status before wait:", JSON.stringify(await F("status")), "A in db:", (await dbOverlays(A) || []).length, "B grp:", JSON.stringify(await page.evaluate(() => { try { const o = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); return o["zz-sibling-ovl-b"] && o["zz-sibling-ovl-b"].groupId; } catch (e) { return String(e); } })));
+  const r1 = await until(async () => { await F("refresh"); const r = await F("rows"); return r && r.length ? r : null; }, "foreign rows on B");
   check(r1.length === 2, `B lists TWO foreign rows for the page-1 and page-3 overlays (got ${r1.length})`);
   check(r1.every((r) => /Concept A/.test(r.planName)), "each row says it was added on Concept A");
-  check((await F("own")).length === 0, "B's own overlay list is empty — nothing auto-overlays");
+  check(((await F("own")) || [null]).length === 0, "B's own overlay list is empty — nothing auto-overlays");
   check(await page.locator("[data-overlay-id], [data-overlay]").count() === 0, "B's map draws no overlay");
 
   /* ---- show: copy lands lined up + cropped; survives reload; edits do not propagate ---- */
   const row1 = r1.find((r) => r.page === 1);
   await F("show", row1.key);
-  const copy = await until(async () => (await F("own")).find((o) => o.sharedFrom), "copy on B");
+  const copy = await until(async () => ((await F("own")) || []).find((o) => o.sharedFrom), "copy on B");
   check(copy.id !== first.id && copy.sharedFrom.siteId === A && copy.sharedFrom.overlayId === first.id, "copy has a fresh id, stamped sharedFrom A");
   check(JSON.stringify(copy.crop && { x: copy.crop.x, y: copy.crop.y, w: copy.crop.w, h: copy.crop.h }) === JSON.stringify({ x: CROP.x, y: CROP.y, w: CROP.w, h: CROP.h }), "copy arrives cropped as on A");
   check(copy.idbKey === null || copy.idbKey === undefined, "copy carries no device-cache key from A");
   check(Math.abs(copy.x - first.x) < 1 && Math.abs(copy.y - first.y) < 1, "copy lands where it sits on A (same origin)");
-  await until(async () => (await F("own")).find((o) => o.sharedFrom && o.hasSrc), "copy hydrates its picture from the stored file");
+  await until(async () => ((await F("own")) || []).find((o) => o.sharedFrom && o.hasSrc), "copy hydrates its picture from the stored file");
   check((await F("rows")).filter((r) => r.page === 1).length === 0, "the shown row leaves the foreign list");
   await until(async () => { const d = await dbOverlays(B); return d && d.some((o) => o.sharedFrom) ? d : null; }, "B's copy pushed to the cloud");
   await openPlan(B); // reload B
-  await until(async () => (await F("own")).find((o) => o.sharedFrom), "copy still there after reload");
+  await until(async () => ((await F("own")) || []).find((o) => o.sharedFrom), "copy still there after reload");
   check(true, "B: still there after reload");
   const edited = { kind: "rect", x: 150, y: 120, w: 300, h: 250 };
-  await F("crop", (await F("own")).find((o) => o.sharedFrom).id, edited);
+  await F("crop", ((await F("own")) || []).find((o) => o.sharedFrom).id, edited);
   await pacedWait(page, 4000);
   check(JSON.stringify(await dbOverlays(A)) === aSnap, "edit on B left A's stored overlays byte-identical");
 
   /* ---- remove on B: this plan only, back as a foreign row, undo restores ---- */
-  const bId = (await F("own")).find((o) => o.sharedFrom).id;
+  const bId = ((await F("own")) || []).find((o) => o.sharedFrom).id;
   await F("remove", bId);
-  await until(async () => (await F("own")).length === 0, "removed from B");
+  await until(async () => ((await F("own")) || [null]).length === 0, "removed from B");
   const back = await until(async () => { await F("refresh"); const r = await F("rows"); return r.find((x) => x.page === 1) ? r : null; }, "row returns on B after remove");
   check(!!back, "removed overlay is back as a hidden foreign row");
   const toast = await page.locator("body").innerText();
@@ -125,16 +127,16 @@ try {
   check(await readable(first.storageKey), "stored object kept (A still references it)");
   await page.locator('[data-testid="planner-canvas"]').first().click({ position: { x: 5, y: 5 } }).catch(() => {});
   await page.keyboard.press("Control+z");
-  await until(async () => (await F("own")).find((o) => o.sharedFrom), "undo restores the copy on B");
+  await until(async () => ((await F("own")) || []).find((o) => o.sharedFrom), "undo restores the copy on B");
   check(true, "undo on B restores the overlay");
 
   /* ---- bytes released only after NOTHING references them ---- */
   await openPlan(A);
-  for (const o of await F("own")) { await F("remove", o.id); await until(async () => !(await F("own")).some((x) => x.id === o.id), "A removal " + o.id); }
+  for (const o of await F("own")) { await F("remove", o.id); await until(async () => !((await F("own")) || []).some((x) => x.id === o.id), "A removal " + o.id); }
   await pacedWait(page, 4000);
   check(await readable(first.storageKey), "after removing everything on A, the object is KEPT (B's copy still references it)");
   await openPlan(B);
-  await F("remove", (await F("own")).find((o) => o.sharedFrom).id);
+  await F("remove", ((await F("own")) || []).find((o) => o.sharedFrom).id);
   await until(async () => !(await readable(first.storageKey)), "object released once nothing references it (30 s undo grace)", 100000);
   check(true, "object released after the last holder let go");
   await F("refresh");
@@ -143,14 +145,16 @@ try {
 finally {
   if (s) {
     try {
+      await pacedWait(s.page, 6000); // let any in-flight autosave land first, or it re-creates the row we delete
       const gone = await s.page.evaluate(async ([ids, keys]) => {
         const out = {};
-        if (keys.length) { const r = await window.pfSupabase.storage.from("doc-review-files").remove(keys); out.storage = r.error ? String(r.error.message) : "removed"; }
-        for (const id of ids) {
+        for (let pass = 0; pass < 3; pass++) for (const id of ids) {
           await window.pfSupabase.from("site_elements").delete().eq("site_id", id);
           await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id);
           await window.pfSupabase.from("sites").delete().eq("id", id);
+          await new Promise((r) => setTimeout(r, 1500));
         }
+        if (keys.length) { const r = await window.pfSupabase.storage.from("doc-review-files").remove(keys); out.storage = r.error ? String(r.error.message) : "removed"; }
         for (const k of ["planarfit:sites:v1", "planarfit:sites:history:v1"]) { try { const o = JSON.parse(localStorage.getItem(k) || "{}"); ids.forEach((i) => delete o[i]); localStorage.setItem(k, JSON.stringify(o)); } catch (_) {} }
         localStorage.removeItem("planarfit:currentSite:v1");
         const left = await window.pfSupabase.from("sites").select("id").in("id", ids);
