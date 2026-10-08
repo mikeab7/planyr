@@ -673,6 +673,8 @@ export const JURISDICTIONS = {
     // NEW-1 stacking role (lib/mapStack.js): Boundary outlines (fill: false).
     role: "line",
     states: ["TX"],
+    // B1990960 — a Georgia view HAS county lines: say where they are instead of "no equivalent is wired yet".
+    noEquivalentIn: { GA: "Texas county lines — Georgia's are the \"County boundaries (Georgia)\" row above." },
     group: "jurisdiction", order: 1,
   },
   // B761: city limits + ETJ are presented as ONE panel row ("City limits & ETJ") that
@@ -689,6 +691,9 @@ export const JURISDICTIONS = {
     // NEW-1 stacking role (lib/mapStack.js): Boundary outlines.
     role: "line",
     states: ["TX"],
+    // B1990960 — this row is the panel face of the merged "City limits & ETJ" pair, so THIS is the reason a Georgia
+    // reader sees (found live: the ETJ-has-no-reach reason sat on the merged-away ETJ child and never showed).
+    noEquivalentIn: { GA: "Texas city limits & ETJ — Georgia's are the \"City limits (Georgia)\" row above. Georgia cities have no reach beyond their limits; the county governs outside them." },
     group: "jurisdiction", order: 2,
   },
   jur_etj: {
