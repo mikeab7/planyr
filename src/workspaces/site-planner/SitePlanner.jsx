@@ -2351,7 +2351,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [ovRowMenu, setOvRowMenu] = useState(null);      // NEW-1 — id of the overlay whose row ⋯ menu is open
   const [ovRenaming, setOvRenaming] = useState(null);      // NEW-1 — id of the overlay being renamed inline
   const [ovPageFocus, setOvPageFocus] = useState(0);        // NEW-1 — bumped by ⋯ → Change page… to focus the open row's page stepper
-  useEffect(() => { setOvRowMenu(null); setOvRenaming(null); }, [selOverlay]); // a different row expands → drop the previous row's menu / rename
+  useEffect(() => { setOvRowMenu((m) => (m === selOverlay ? m : null)); setOvRenaming((r) => (r === selOverlay ? r : null)); }, [selOverlay]);
+  // a menu / rename whose row no longer exists (undo of a duplicate, a remove) must not wait to reappear on redo
+  useEffect(() => { if (ovRowMenu && !sheetOverlays.some((x) => x.id === ovRowMenu)) setOvRowMenu(null); if (ovRenaming && !sheetOverlays.some((x) => x.id === ovRenaming)) setOvRenaming(null); }, [sheetOverlays, ovRowMenu, ovRenaming]); // a different row expands → drop the previous row's menu / rename
   // B912 — the highlighted parcel side belongs to the currently-selected parcel only; drop it whenever
   // the parcel selection changes or clears (covers Escape + background deselect + switching parcels) so
   // a stale side highlight can't linger on another parcel. Same-parcel edge clicks don't change the id.
@@ -10355,6 +10357,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         ov.x = prev.x; ov.y = prev.y; ov.ftPerPx = prev.ftPerPx;
         ov.rotation = prev.rotation || 0; ov.opacity = prev.opacity ?? 0.85;
         ov.locked = !!prev.locked; ov.visible = prev.visible; ov.knockout = prev.knockout;
+        // NEW-1 — the band and (when the raster is the same size) the crop and a DXF's confirmed units are the user's work too.
+        if (prev.aboveParcel === true) ov.aboveParcel = true;
+        if (prev.ftPerPxY) ov.ftPerPxY = prev.ftPerPxY;
+        if (prev.crop && prev.imgW === ov.imgW && prev.imgH === ov.imgH) ov.crop = prev.crop;
+        if (ov.kind === "dxf" && prev.unitsAssumed === false) ov.unitsAssumed = false;
         // NEW-1 — the re-add keeps the user's scale WORK, so it keeps the "scaled" verdict that came with it (a traced overlay must not turn amber).
         if (prev.unscaled === true) ov.unscaled = true; else delete ov.unscaled;
         ov.storageMissing = false; // healed — a fresh upload/idb stash follows below

@@ -178,6 +178,7 @@ export function dropOverlay(list, dragId, overId, side) {
   if (!dragId || !overId || dragId === overId) return a;
   const drag = a.find((o) => o && o.id === dragId), over = a.find((o) => o && o.id === overId);
   if (!drag || !over || isPinnedMapReference(drag) || overlayBand(drag) !== overlayBand(over)) return a;
+  if (isPinnedMapReference(over) && side !== "front") return a;   // nothing can land beneath the pinned map capture
   const { below, above } = splitOverlayBands(a);
   const group = overlayBand(drag) === OVERLAY_BAND_ABOVE ? above : below;
   const without = group.filter((o) => o.id !== dragId);

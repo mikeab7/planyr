@@ -71,6 +71,11 @@ async function menuPick(page, id, label) {
   ok((await sub(page, "a1")) === `1" = 30'`, "the PDF row reads its ratio");
   ok(!/not scaled/.test(await sub(page, "c3")), "a legacy overlay (no flag) shows no amber");
 
+  // ---- rename from a row that is NOT open (review defect 1: the selection effect used to eat it) -----
+  await menuPick(page, "b2", "Rename…");
+  ok((await page.locator('[data-testid="overlay-rename-input"]').count()) === 1, "Rename… on a row that is not open still opens the inline editor");
+  await page.locator('[data-testid="overlay-rename-input"]').press("Escape"); await page.waitForTimeout(250);
+  ok((await page.evaluate(() => document.activeElement && document.activeElement.getAttribute("data-testid"))) === "reference-more-b2", "after Esc focus returns to the row's ⋯ button");
   // ---- rename + undo -------------------------------------------------------------------------
   await open(page, "c3");
   await menuPick(page, "c3", "Rename…");

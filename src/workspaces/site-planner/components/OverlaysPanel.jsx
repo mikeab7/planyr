@@ -125,7 +125,7 @@ function ScaleGroup({ buttons, active, disabled, onPick, why }) {
   return (
     <div data-testid="overlay-scale-group" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(88px, 1fr))", gap: SPACE.sm, alignItems: "stretch" }}>
       {buttons.map((k) => (
-        <Button key={k} variant="ghost" size="md" active={active === k} disabled={disabled} style={btnFill} data-testid={`overlay-scale-${k}`}
+        <Button key={k} variant="ghost" size="md" disabled={disabled} style={btnFill} data-testid={`overlay-scale-${k}`}
           title={disabled ? why : defs[k].title} aria-pressed={active === k} onClick={() => onPick(k)}>{defs[k].label}</Button>
       ))}
     </div>
@@ -143,15 +143,14 @@ function ScaleTools({ o, onApply }) {
   const [pageUnit, setPageUnit] = useState("in");
   const [real, setReal] = useState(String(detected && o.unscaled ? detected : Math.round(curFpi * 100) / 100));
   const [realUnit, setRealUnit] = useState("ft");
+  const [dirty, setDirty] = useState({ page: false, real: false });   // a unit change only commits a distance the person actually typed
   const selVal = mode === "custom" ? "custom" : (matched ? matched.id : (detected && Math.abs(detected - curFpi) < 1e-6 ? "sheet" : "custom"));
   const commit = (next = {}) => {
     const fpi = feetPerInchFromPair({ pageVal: next.page ?? page, pageUnit: next.pageUnit ?? pageUnit, realVal: next.real ?? real, realUnit: next.realUnit ?? realUnit });
     if (fpi) onApply(fpi);
   };
-  const nonStd = o.sheet && !o.sheet.std;
   return (
     <div data-testid="overlay-scale-tools" style={{ display: "flex", flexDirection: "column", gap: SPACE.sm, paddingTop: SPACE.sm }}>
-      {nonStd && <div role="note" style={{ ...subStyle, color: WARN, fontWeight: 600 }}>Non-standard sheet ({o.sheet.label}) — it may have been shrunk. Scale assumes true plot size.</div>}
       <select data-testid="overlay-scale-preset" aria-label="Scale" style={{ ...inputStyle, fontFamily: "inherit", width: "100%" }} value={selVal}
         onChange={(e) => {
           const v = e.target.value;
@@ -168,15 +167,15 @@ function ScaleTools({ o, onApply }) {
       </select>
       {selVal === "custom" && (
         <div data-testid="overlay-scale-custom" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: SPACE.xs }}>
-          <input style={{ ...inputStyle, width: 46 }} value={page} aria-label="Distance on the page" placeholder="1 or 1/2" onChange={(e) => setPage(e.target.value)}
+          <input style={{ ...inputStyle, width: 46 }} value={page} aria-label="Distance on the page" placeholder="1 or 1/2" onChange={(e) => { setPage(e.target.value); setDirty((d) => ({ ...d, page: true })); }}
             onBlur={(e) => commit({ page: e.currentTarget.value })} onKeyDown={(e) => { if (e.key === "Enter") commit({ page: e.currentTarget.value }); }} />
-          <select style={{ ...inputStyle, fontFamily: "inherit" }} value={pageUnit} aria-label="Page unit" onChange={(e) => { setPageUnit(e.target.value); commit({ pageUnit: e.target.value }); }}>
+          <select style={{ ...inputStyle, fontFamily: "inherit" }} value={pageUnit} aria-label="Page unit" onChange={(e) => { setPageUnit(e.target.value); if (dirty.page || dirty.real) commit({ pageUnit: e.target.value }); }}>
             {PAGE_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
           </select>
           <span style={{ ...valueStyle, fontWeight: 700 }}>=</span>
-          <input style={{ ...inputStyle, width: 56 }} value={real} aria-label="Real-world distance" placeholder="real" onChange={(e) => setReal(e.target.value)}
+          <input style={{ ...inputStyle, width: 76 }} value={real} aria-label="Real-world distance" placeholder="real" onChange={(e) => { setReal(e.target.value); setDirty((d) => ({ ...d, real: true })); }}
             onBlur={(e) => commit({ real: e.currentTarget.value })} onKeyDown={(e) => { if (e.key === "Enter") commit({ real: e.currentTarget.value }); }} />
-          <select style={{ ...inputStyle, fontFamily: "inherit" }} value={realUnit} aria-label="Real-world unit" onChange={(e) => { setRealUnit(e.target.value); commit({ realUnit: e.target.value }); }}>
+          <select style={{ ...inputStyle, fontFamily: "inherit" }} value={realUnit} aria-label="Real-world unit" onChange={(e) => { setRealUnit(e.target.value); if (dirty.page || dirty.real) commit({ realUnit: e.target.value }); }}>
             {REAL_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
           </select>
         </div>
@@ -190,8 +189,9 @@ function ScaleTools({ o, onApply }) {
 function PlacementSection({ o, plan, calib, calibMsg, locked, h, pageFocusTick }) {
   const [tool, setTool] = useState(null);                 // "set" while the Set-scale tools are open
   const pageRef = useRef(null);
+  const pageNextRef = useRef(null);
   useEffect(() => { setTool(null); }, [o.id]);
-  useEffect(() => { if (pageFocusTick && pageRef.current) pageRef.current.focus(); }, [pageFocusTick]);
+  useEffect(() => { if (!pageFocusTick) return; const t = pageRef.current && !pageRef.current.disabled ? pageRef.current : pageNextRef.current; if (t && !t.disabled) t.focus(); }, [pageFocusTick]);
   const mine = calib && calib.id === o.id ? calib : null;
   const pick = (k) => {
     if (k === "set") { setTool((t) => (t === "set" ? null : "set")); return; }
@@ -199,7 +199,7 @@ function PlacementSection({ o, plan, calib, calibMsg, locked, h, pageFocusTick }
     if (k === "trace") h.onTrace(o.id); else h.onMatch(o.id);
   };
   const group = plan.scaleButtons.length ? (
-    <ScaleGroup buttons={plan.scaleButtons} active={mine ? mine.kind : tool} disabled={false} onPick={pick} />
+    <ScaleGroup buttons={plan.scaleButtons} active={mine ? (mine.kind === "align" ? "match" : mine.kind) : null} disabled={locked} why="Unlock this overlay to change its scale" onPick={pick} />
   ) : null;
   const pairs = mine && mine.kind === "align" ? Math.floor(mine.pts.length / 2) : 0;
   return (
@@ -226,7 +226,8 @@ function PlacementSection({ o, plan, calib, calibMsg, locked, h, pageFocusTick }
         )}
         {group}
       </>)}
-      {tool === "set" && plan.scaleButtons.includes("set") && <ScaleTools key={o.id + ":" + Math.round(o.ftPerPx * 1e6)} o={o} onApply={(fpi) => h.onApplyScale(o.id, fpi)} />}
+      {o.sheet && !o.sheet.std && plan.kind === OV_KIND.PDF && <div role="note" style={{ ...subStyle, color: WARN, fontWeight: 600 }}>Non-standard sheet ({o.sheet.label}) — it may have been shrunk; a scale assumes true plot size.</div>}
+      {tool === "set" && plan.scaleButtons.includes("set") && <ScaleTools key={o.id} o={o} onApply={(fpi) => h.onApplyScale(o.id, fpi)} />}
       {mine && (
         <div role="status" data-testid="overlay-calib-status" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: SPACE.sm }}>
           <span style={{ ...valueStyle, flex: "1 1 120px", minWidth: 0 }}>{calibMsg}</span>
@@ -239,7 +240,7 @@ function PlacementSection({ o, plan, calib, calibMsg, locked, h, pageFocusTick }
           <span style={{ ...valueStyle, color: "var(--text-secondary)" }}>Page</span>
           <button type="button" ref={pageRef} data-page-stepper style={{ ...rowIconBtn, border: LINE, color: "var(--text-primary)", fontSize: C }} aria-label="Previous page" disabled={!h.pageReady(o) || o.page <= 1} onClick={() => h.onSetPage(o.id, o.page - 1)}>‹</button>
           <span style={valueStyle}>{o.page} / {o.pageCount}</span>
-          <button type="button" style={{ ...rowIconBtn, border: LINE, color: "var(--text-primary)", fontSize: C }} aria-label="Next page" disabled={!h.pageReady(o) || o.page >= o.pageCount} onClick={() => h.onSetPage(o.id, o.page + 1)}>›</button>
+          <button type="button" ref={pageNextRef} style={{ ...rowIconBtn, border: LINE, color: "var(--text-primary)", fontSize: C }} aria-label="Next page" disabled={!h.pageReady(o) || o.page >= o.pageCount} onClick={() => h.onSetPage(o.id, o.page + 1)}>›</button>
           {!h.pageReady(o) && <span style={subStyle}>re-add to change page</span>}
         </div>
       )}
@@ -326,7 +327,8 @@ function RowMenu({ open, anchorRef, o, flags, hidden, hasParcel, isMap, onClose,
   }, [open]);
   if (!open) return null;
   const locked = !!o.locked;
-  const run = (fn) => () => { onClose(); fn(); };
+  // after an action focus returns to the ⋯ button (never <body>); Rename / Change page hand focus to their own field instead
+  const run = (fn, keepFocus) => () => { onClose(); fn(); if (!keepFocus) setTimeout(() => { if (anchorRef.current) anchorRef.current.focus(); }, 0); };
   const onKeyDown = (e) => {
     const items = Array.from(ref.current.querySelectorAll("button:not([disabled])"));
     const i = items.indexOf(document.activeElement);
@@ -334,23 +336,23 @@ function RowMenu({ open, anchorRef, o, flags, hidden, hasParcel, isMap, onClose,
     else if (e.key === "ArrowUp") { e.preventDefault(); items[(i - 1 + items.length) % items.length]?.focus(); }
     else if (e.key === "Home") { e.preventDefault(); items[0]?.focus(); }
     else if (e.key === "End") { e.preventDefault(); items[items.length - 1]?.focus(); }
-    else if (e.key === "Tab") { onClose(); }
+    else if (e.key === "Tab") { if (anchorRef.current) anchorRef.current.focus(); onClose(); }   // focus the trigger, let Tab carry on from it
     // Escape is handled HERE as well as by AnchoredMenu's window listener: the planner's own window-level Escape
     // handling (clear the selection) must not also run, and the focus goes back to the ⋯ button that opened it.
     else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose(); if (anchorRef.current) anchorRef.current.focus(); }
   };
-  const it = (text, fn, extra = {}) => <MenuItem key={text} role="menuitem" disabled={!!extra.disabled} title={extra.title} style={extra.danger ? { color: "var(--danger-text)" } : undefined} onClick={run(fn)}>{text}</MenuItem>;
+  const it = (text, fn, extra = {}) => <MenuItem key={text} role="menuitem" disabled={!!extra.disabled} title={extra.title} style={extra.danger ? { color: "var(--danger-text)" } : undefined} onClick={run(fn, extra.keepFocus)}>{text}</MenuItem>;
   return (
     <AnchoredMenu open onClose={() => { onClose(); if (anchorRef.current) anchorRef.current.focus(); }} anchorRef={anchorRef} placement="below-right" width={210}>
       <div ref={ref} role="menu" aria-label={`${o.name} actions`} data-testid="overlay-row-menu" onKeyDown={onKeyDown}>
-        {it("Rename…", () => h.onRename(o.id))}
-        {(o.pageCount || 1) > 1 && it("Change page…", () => h.onChangePage(o.id))}
+        {it("Rename…", () => h.onRename(o.id), { keepFocus: true })}
+        {(o.pageCount || 1) > 1 && it("Change page…", () => h.onChangePage(o.id), { keepFocus: true })}
         {it(locked ? "Unlock" : "Lock in place", () => h.onPatch(o.id, { locked: !locked }))}
         {it(hidden ? "Show" : "Hide", () => h.onToggleHide(o))}
         {it("Zoom to", () => h.onZoomTo(o.id))}
         {it("Size to view", () => h.onSizeToView(o.id), { disabled: isMap || locked, title: isMap ? "The map capture is already to scale" : locked ? "Unlock to resize" : undefined })}
-        {it("Copy", () => h.onCopy(o.id))}
-        {it("Duplicate", () => h.onDuplicate(o.id))}
+        {it("Copy", () => h.onCopy(o.id), { disabled: isMap, title: isMap ? "The map capture can't be copied — it is pinned to this plan" : undefined })}
+        {it("Duplicate", () => h.onDuplicate(o.id), { disabled: isMap, title: isMap ? "The map capture can't be duplicated — it is pinned to this plan" : undefined })}
         {it("Align to parcel edge", () => h.onAlignEdge(o.id), { disabled: locked || !hasParcel || isMap, title: isMap ? "The map capture is already to scale" : locked ? "Unlock to align" : !hasParcel ? "Draw or load a parcel first" : "Click a parcel edge to snap this overlay parallel to it" })}
         {it("Move up", () => h.onStep(o.id, 1), { disabled: flags.atFront })}
         {it("Move down", () => h.onStep(o.id, -1), { disabled: flags.atBack })}
@@ -374,6 +376,7 @@ function OverlayRow({ o, on, hidden, flags, menuOpen, renaming, drag, h, isMap, 
   const finishRename = (commit) => {
     const name = (nameDraft == null ? o.name || "" : nameDraft).trim();
     h.onRenameDone(o.id, commit && name && name !== o.name ? name : null);
+    setTimeout(() => { const b = document.querySelector(`[data-testid="reference-more-${o.id}"]`); if (b) b.focus(); }, 0);
   };
   const indicator = drag.over && drag.over.id === o.id ? drag.over.side : null;
   const line = { position: "absolute", left: 0, right: 0, height: 2, background: "var(--accent-site, var(--accent))", pointerEvents: "none" };
@@ -401,7 +404,7 @@ function OverlayRow({ o, on, hidden, flags, menuOpen, renaming, drag, h, isMap, 
             onContextMenu={(e) => h.onContext(e, o.id)}
             title={`${o.name}${isMap ? " — the map capture; always draws beneath everything" : ""}`}
             style={{ flex: 1, minWidth: 0, textAlign: "left", border: "none", background: "transparent", padding: 0, cursor: "pointer", fontFamily: "inherit", color: "inherit", display: "flex", flexDirection: "column", gap: 1 }}>
-            <span data-testid="overlay-row-name" style={{ ...valueStyle, fontWeight: on ? 700 : 600, color: on ? "var(--accent-site, var(--accent))" : "var(--text-primary)", overflowWrap: "anywhere", lineHeight: 1.25 }}>{o.name}</span>
+            <span data-testid="overlay-row-name" style={{ ...valueStyle, fontWeight: on ? 700 : 600, color: on ? "var(--accent-site-text, var(--accent-site, var(--accent)))" : "var(--text-primary)", overflowWrap: "anywhere", lineHeight: 1.25 }}>{o.name}</span>
             <span data-testid="overlay-row-sub" style={{ ...subStyle, color: sub.warn ? WARN : "var(--text-secondary)", fontWeight: sub.warn ? 700 : 400 }}>{sub.text}</span>
           </button>
         )}

@@ -99,7 +99,8 @@ describe("panel reorder", () => {
     const l = [{ id: "m", fromMap: true }, { id: "a" }, { id: "b" }];
     expect(moveOverlayStep(l, "m", 1)).toBe(l);
     expect(dropOverlay(l, "m", "b", "front")).toBe(l);
-    expect(ids(dropOverlay(l, "b", "m", "behind"))).toBe("mba");
+    expect(dropOverlay(l, "b", "m", "behind")).toBe(l);            // nothing lands beneath the pinned capture (indicator must not promise it)
+    expect(ids(dropOverlay(l, "b", "m", "front"))).toBe("mba");
   });
   it("the panel lists front-most first", () => { expect(ids(overlayPanelOrder(L()))).toBe("upcba"); });
 });
