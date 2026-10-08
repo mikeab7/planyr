@@ -362,7 +362,8 @@ import {
   bandLayout, bandStripeMarksWithWidth, BAND_FILL_TOKEN, BAND_FILL_OPACITY, designatedRowFt, rowMarginFt, rowWidth,
   XSEC_BAND_FILL_MIN_PX, XSEC_STRIPE_MIN_PX,
 } from "./lib/roadCrossSection.js";
-import { placeEasementLabel, AREA_FONT_PX } from "./lib/easementLabelPlacement.js";
+import { AREA_FONT_PX } from "./lib/easementLabelPlacement.js";
+import { resolveEasementLabel, pullOf, withPull, withoutPull, snapLabelAngle, showAreaOn, normDeg } from "./lib/easementLabelPull.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF, stallStripesExplicit, segmentsPath, featureNameLabelVisible, featureNameFontPx, featureExtentFt } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
@@ -2498,6 +2499,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Delete-key target + emphasis); `vtxMenu` = the portal-mounted Add/Delete-control-point
   // context menu; `insHint` = the transient candidate-insertion dot; `shiftHeld` arms + emphasizes it.
   const [selVtx, setSelVtx] = useState(null);   // {layer, id, index}
+  const [easeLabelSel, setEaseLabelSel] = useState(null); // B-NEW-1 — id of the easement whose LABEL (not its strip) is the selection
   const [vtxMenu, setVtxMenu] = useState(null); // {mode:"vertex"|"edge", layer, id, index, ptFeet?, canDelete?, x, y}
   const [insHint, setInsHint] = useState(null); // {x,y} screen px (snapped to the nearest edge point)
   const [shiftHeld, setShiftHeld] = useState(false);
@@ -5171,6 +5173,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     resize: "resize", edgeResize: "resize", mkResize: "resize", ovScale: "resize", calloutResize: "resize",
     vertex: "resize", elVertex: "resize", measureVertex: "resize", mkVertex: "resize", roadEnd: "resize", roadVtx: "resize", easeVertex: "resize",
     rotate: "rotate", mkRotate: "rotate", ovRotate: "rotate", calloutRotate: "rotate",
+    easeLabelMove: "move", easeLabelRot: "rotate",
   };
   const pushHistory = (kind = "edit") => { opTrackerRef.current.beginOperation(kind); lastPushAtRef.current = Date.now(); histRef.current.push(stateRef.current); notePerfEdit(); touchHist(); };
   /* ⛔ NEW-5 — "CAN I UNDO?" IS ASKED OF THE DOCUMENT, ONCE PER REAL CHANGE.
@@ -8515,6 +8518,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       featureDoubleAction({ kind: "markup", id }, e);   // NEW-2 — ONE decision, shared with the root dblclick
       return;
     }
+    if (easeLabelSel) setEaseLabelSel(null); // NEW-1 — a press on the strip selects the easement, not its label
     // B740 — Shift (or Ctrl/⌘) TOGGLES the markup in/out of the multi-selection (see startMoveEl).
     if (hasSelMod(e)) {
       const mods = { toggle: true, add: false };
@@ -8690,6 +8694,61 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setSelVtx({ layer: "ease", id, index });
     drag.current = { mode: "easeVertex", id, index, ...startGate(ev, { rebase: false }) };
     svgRef.current.setPointerCapture(ev.pointerId);
+  };
+  /* ------------ NEW-1 — an easement's LABEL as its own object (pull out · move · rotate · snap back) ------------
+   * The label is stored ON the easement (`labelPull` = feet offset from the inline anchor + angle), so it
+   * follows every move/reshape of the strip, saves/syncs/undoes/duplicates with it, and dies with it. All
+   * geometry questions are answered by lib/easementLabelPull.js `resolveEasementLabel` — render, hit
+   * target, selection outline, rotate grip and these drag starters read the SAME answer. */
+  useEffect(() => { if (easeLabelSel && !(sel?.kind === "markup" && sel.id === easeLabelSel)) setEaseLabelSel(null); }, [sel, easeLabelSel]);
+  const easeAreaText = (m) => { const a = easementArea(m); return `${Math.round(a).toLocaleString()} SF · ${(a / SQFT_PER_ACRE).toFixed(2)} AC`; };
+  const easeLabelOf = (m) => {
+    if (!m || m.kind !== "easement") return null;
+    const txt = `${easementLabel(m)}${m.status === "proposed" ? " (proposed)" : ""}`;
+    return { txt, lab: resolveEasementLabel(m, txt, { labelPpf, basePx: EASE_LABEL_BASE_PX, toScreen: f2p, labelK, areaText: easeAreaText(m) }) };
+  };
+  // Press on the label. CHROME-NEVER-EATS-A-PRESS: an easement that is NOT yet selected treats its label
+  // as part of the strip (the press is forwarded to the strip's own handler, same double-tap key); only a
+  // selected easement's label is its own object.
+  const startEaseLabel = (e, id) => {
+    if (tool !== "select" || e.button !== 0) return;
+    const m = markups.find((x) => x.id === id);
+    if (!m) return;
+    const selected = sel?.kind === "markup" && sel.id === id && multi.length <= 1;
+    if (!selected) { startMoveMarkup(e, id); return; }
+    e.stopPropagation();
+    if (!m.locked && isDoubleTap(e, id, true)) { featureDoubleAction({ kind: "markup", id }, e); return; }
+    setEaseLabelSel(id);
+    if (m.locked) return;
+    const L = easeLabelOf(m)?.lab;
+    if (!L) return;
+    drag.current = { mode: "easeLabelMove", id, start: p2f(e.clientX, e.clientY), base: { x: L.x, y: L.y }, anchor: L.anchor, angle0: L.angle, ...startGate(e) };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
+  const startEaseLabelRotate = (e, id) => {
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    const m = markups.find((x) => x.id === id);
+    const L = m && !m.locked ? easeLabelOf(m)?.lab : null;
+    if (!L) return;
+    drag.current = { mode: "easeLabelRot", id, centre: { x: L.x, y: L.y }, anchor: L.anchor, stripDeg: L.stripDeg, ...startGate(e, { rebase: false }) };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
+  const onEaseLabelContext = (e, id) => {
+    e.preventDefault(); e.stopPropagation();
+    if (!markups.some((m) => m.id === id)) return;
+    setSel({ kind: "markup", id }); setEaseLabelSel(id);
+    setParcelMenu(null); setOvMenu(null);
+    setMapMenu({ x: e.clientX, y: e.clientY, kind: "easeLabel", id });
+  };
+  const snapBackEaseLabel = (id) => {
+    if (!markups.some((m) => m.id === id && pullOf(m))) return;
+    pushHistory();
+    setMarkups((a) => a.map((m) => (m.id === id ? withoutPull(m) : m)));
+  };
+  const setEaseShowArea = (id, on) => {
+    pushHistory();
+    setMarkups((a) => a.map((m) => (m.id === id ? { ...m, showArea: !!on } : m)));
   };
   const startMoveCallout = (e, id, part, tipIndex = 0) => {
     if (tool !== "select" || e.button !== 0) return;
@@ -9039,6 +9098,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     deleteSel(target, { entry: "vtxMenu:wholeDelete" });
   };
   const onCanvasVtxContextCapture = (e) => {
+    // NEW-1 — an easement label has its own menu. An inline label sits ON the centerline, so without this
+    // the path-edge test below would answer "Add control point" for a right-click aimed at the label.
+    if (e.target && e.target.closest && e.target.closest("[data-easement-label-hit]")) return;
     const path = editablePath();
     if (!path) return;
     const fp = p2f(e.clientX, e.clientY);
@@ -9322,6 +9384,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (d.mode === "easeVertex") { // drag an easement's centerline/boundary vertex → re-offset the strip
       const sp = snapPt(fp);
       setMarkups((a) => a.map((m) => m.id === d.id ? setEasePath(m, easeEditPath(m).map((p, j) => (j === d.index ? sp : p))) : m));
+      return;
+    }
+    if (d.mode === "easeLabelMove") { // NEW-1 — drag an easement label off its strip (offset kept in feet from the inline anchor)
+      const dx = d.base.x + (fp.x - d.start.x) - d.anchor.x, dy = d.base.y + (fp.y - d.start.y) - d.anchor.y;
+      setMarkups((a) => a.map((m) => m.id === d.id ? withPull(m, { dx, dy, angle: d.angle0 }) : m));
+      return;
+    }
+    if (d.mode === "easeLabelRot") { // NEW-1 — free 360° rotation about the label centre, soft snap to level / plumb / the strip's angle
+      const raw = (Math.atan2(fp.y - d.centre.y, fp.x - d.centre.x) * 180) / Math.PI + 90; // the grip sits "above" the label
+      const sn = altSnapOffRef.current ? { angle: normDeg(raw) } : snapLabelAngle(raw, d.stripDeg);
+      setMarkups((a) => a.map((m) => m.id === d.id ? withPull(m, { dx: d.centre.x - d.anchor.x, dy: d.centre.y - d.anchor.y, angle: sn.angle }) : m));
       return;
     }
     if (d.mode === "mkResize") { // resize a rect/ellipse in its own (rotated) frame; opposite side fixed
@@ -18647,6 +18720,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return <g>{px.map((p, i) => vtxRect(`mkv${i}`, p, isSelVtx("markup", m.id, i), "move", (e) => startMarkupVertex(e, m.id, i)))}</g>;
   })();
 
+  // NEW-1 — the selected easement LABEL's outline + round rotate grip. Chrome, so it lives in the handle layer;
+  // positions are computed in screen px from the SAME resolver the label renders with.
+  const easeLabelHandles = (() => {
+    if (selHiddenNow || !easeLabelSel || sel?.kind !== "markup" || sel.id !== easeLabelSel || tool !== "select" || multi.length > 1) return null;
+    const m = markups.find((x) => x.id === easeLabelSel);
+    const L = m && m.kind === "easement" ? easeLabelOf(m)?.lab : null;
+    if (!L) return null;
+    const c = f2p({ x: L.x, y: L.y });
+    const th = (L.angle * Math.PI) / 180, cs = Math.cos(th), sn = Math.sin(th);
+    const at = (u, v) => ({ x: c.x + (u * cs - v * sn) * labelK, y: c.y + (u * sn + v * cs) * labelK });
+    const hw = L.halfW, hh = L.halfH;
+    const box = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([u, v]) => at(u, v));
+    const top = at(0, -hh), grip = at(0, -hh - 22 / labelK);
+    return (
+      <g data-easement-label-handles={m.id} data-export="skip">
+        <polygon points={box.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={SEL_BLUE} strokeWidth={1.25} strokeDasharray="4 3" pointerEvents="none" />
+        {!m.locked && (
+          <>
+            <line x1={top.x} y1={top.y} x2={grip.x} y2={grip.y} stroke={SEL_BLUE} strokeWidth={1.25} pointerEvents="none" />
+            <circle data-easement-label-rotate={m.id} cx={grip.x} cy={grip.y} r={6} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.5}
+              style={{ cursor: "grab" }} onPointerDown={(e) => startEaseLabelRotate(e, m.id)} />
+          </>
+        )}
+      </g>
+    );
+  })();
+
   /* ================= NEW-1 — THE ALWAYS-ON-TOP HANDLE LAYER =================================
    * A manipulation handle is CHROME, not content. It must render above every map layer and win
    * the hit test whenever the pointer is over it, whatever is drawn underneath — otherwise a
@@ -23637,14 +23737,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           rotated to it and kept upright; see lib/easementLabelPlacement.js. A shape that is
                           not elongated keeps the old horizontal-at-centroid label exactly. */}
                       {(() => {
-                        const txt = `${easementLabel(m)}${proposed ? " (proposed)" : ""}`;
-                        const pl = placeEasementLabel(m, txt, { labelPpf, basePx: EASE_LABEL_BASE_PX, toScreen: f2p, withArea: isSel && labelPpf > 0.05 });
+                        /* NEW-1/NEW-2 — one resolver answers inline AND pulled-out (lib/easementLabelPull.js). The
+                           area line is the owner's per-easement "Show area" choice (default OFF), no longer a
+                           side-effect of selection. A pulled-out label wears a thin leader to the nearest point of
+                           the easement and is a hit target of its own; an inline one is a hit target only so a
+                           right-click on it reaches the label menu — its press is forwarded to the strip. */
+                        const { txt, lab: pl } = easeLabelOf(m);
                         if (!pl) return null;
                         const at = f2p({ x: pl.x, y: pl.y });
+                        const hit = tool === "select" && !m.locked;
                         return (
-                          <g transform={`translate(${at.x} ${at.y}) rotate(${pl.angle}) scale(${labelK})`} pointerEvents="none" data-easement-label={m.id} data-label-angle={pl.angle.toFixed(1)}>
+                          <g transform={`translate(${at.x} ${at.y}) rotate(${pl.angle}) scale(${labelK})`} pointerEvents="none" data-easement-label={m.id} data-label-angle={pl.angle.toFixed(1)} data-label-pulled={pl.pulled ? "1" : "0"} data-label-area={pl.showArea ? "1" : "0"}>
+                            {pl.leader && (
+                              <g data-easement-leader={m.id} pointerEvents="none">
+                                <line x1={pl.leader.x1} y1={pl.leader.y1} x2={pl.leader.x2} y2={pl.leader.y2} stroke={ecol} strokeWidth={1} />
+                                <circle cx={pl.leader.x2} cy={pl.leader.y2} r={2.5} fill={ecol} stroke="#fff" strokeWidth={0.8} />
+                              </g>
+                            )}
                             <text x={0} y={pl.nameDy} textAnchor="middle" fontSize={pl.fontPx} fontWeight="700" fill={ecol} pointerEvents="none" style={INK_HALO}>{txt}</text>
-                            {pl.showArea && <text x={0} y={pl.areaDy} textAnchor="middle" fontSize={AREA_FONT_PX} fontWeight="600" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{Math.round(area).toLocaleString()} SF · {(area / SQFT_PER_ACRE).toFixed(2)} AC</text>}
+                            {pl.showArea && <text x={0} y={pl.areaDy} textAnchor="middle" fontSize={AREA_FONT_PX} fontWeight="600" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{easeAreaText(m)}</text>}
+                            {hit && <rect data-export="skip" data-easement-label-hit={m.id} x={-pl.halfW} y={-pl.halfH} width={pl.halfW * 2} height={pl.halfH * 2} fill="rgba(0,0,0,0.001)" pointerEvents="all"
+                              style={{ cursor: pl.pulled || (sel?.kind === "markup" && sel.id === m.id) ? "move" : "pointer" }}
+                              onPointerDown={(e) => startEaseLabel(e, m.id)} onContextMenu={(e) => onEaseLabelContext(e, m.id)} />}
                           </g>
                         );
                       })()}
@@ -25114,6 +25228,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {elSelOutline}
                 {elPolyHandles}
                 {markupHandles}
+                {easeLabelHandles}
                 {/* NEW-1 — hoisted out of their content passes so they stop being buried: the
                     reference overlay's scale/rotate grips + calibration marks, the callout's width
                     and leader grips, and the measurement's control points. */}
@@ -26664,6 +26779,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     onBlur={() => { labelSessionRef.current = null; }}
                     placeholder={easementLabel({ ...e, labelOverride: "" })} style={txt} />
                 </Field>
+                {/* NEW-2 — the area line under the label is OFF by default; this is the same toggle the label's right-click menu carries. */}
+                {check("Show area on label", e.showArea === true, "showArea")}
                 <Field label="Type">
                   <button ref={easeTypeAnchor} style={{ ...chip, display: "flex", alignItems: "center", gap: 6 }} onClick={() => setEaseTypeMenu((o) => !o)}>
                     <span style={{ width: 9, height: 9, borderRadius: 2, background: t.color }} /> {t.label} <span style={{ color: PAL.muted }}>▾</span>
@@ -30366,6 +30483,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {row({ text: m.behindEls ? CROSS_BAND_FRONT : CROSS_BAND_BEHIND, on: setBehind })}
             {sep}
             {row({ text: delText, hint: "Del", danger: true, on: () => { deleteMarkupById(m.id); } })}
+          </>;
+        } else if (mapMenu.kind === "easeLabel") {
+          // NEW-1/NEW-2 — the easement LABEL's own menu: snap it back to the strip, show/hide its area line.
+          const m = markups.find((x) => x.id === mapMenu.id);
+          if (!m) return null;
+          const pulled = !!pullOf(m), areaOn = showAreaOn(m);
+          header = "Easement label";
+          body = <>
+            {row({ text: areaOn ? "Hide area" : "Show area", dis: !!m.locked, title: m.locked ? "Unlock this easement first" : "", on: () => { setEaseShowArea(m.id, !areaOn); close(); } })}
+            {row({ text: "Snap back to strip", dis: !pulled || !!m.locked, title: !pulled ? "The label is already on the strip" : m.locked ? "Unlock this easement first" : "Return the label to the strip and remove its leader", on: () => { snapBackEaseLabel(m.id); close(); } })}
+            {sep}
+            {row({ text: "Easement properties\u2026", on: () => { setSel({ kind: "markup", id: m.id }); openInspector(); close(); } })}
           </>;
         } else if (mapMenu.kind === "measure") {
           // NEW — measurements get a right-click menu just like every other element.

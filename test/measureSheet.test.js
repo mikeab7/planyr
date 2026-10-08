@@ -260,7 +260,7 @@ describe("(d) constant-screen-px sizing that used to survive onto the sheet", ()
     }
     // B2198432 — the EASEMENT label moved into lib/easementLabelPlacement.js (rotated along the strip):
     // the ramp + fit rule live there, and the render scales the whole label group by labelK.
-    expect(SP).toMatch(/placeEasementLabel\(m, txt, \{ labelPpf, basePx: EASE_LABEL_BASE_PX/);
+    expect(SP).toMatch(/resolveEasementLabel\(m, txt, \{ labelPpf, basePx: EASE_LABEL_BASE_PX/);
     expect(SP).toMatch(/rotate\(\$\{pl\.angle\}\) scale\(\$\{labelK\}\)/);
     const PL = fs.readFileSync(new URL("../src/workspaces/site-planner/lib/easementLabelPlacement.js", import.meta.url), "utf8");
     expect(PL).toMatch(/featureNameFontPx\(labelPpf, basePx\)/);
