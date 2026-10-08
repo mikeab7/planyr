@@ -65,7 +65,9 @@ export async function onRequestPost({ request, env }) {
       }
       const r = await resumeStep({
         readRange: (a, b) => readRange(url, a, b), dataStart, csize: entry.csize, state,
-        budgetMs: Number(q.get("budget")) || 1500, fetchBytes: (Number(q.get("mb")) || 6) * 1048576,
+        // A Worker's clock is FROZEN during pure computation (Date.now() only advances across I/O), so a time budget
+        // never fires — each step is bounded by OUTPUT BYTES instead (`out` MB, default 24; `mb` = compressed MB fetched).
+        maxOut: (Number(q.get("out")) || 24) * 1048576, fetchBytes: (Number(q.get("mb")) || 3) * 1048576,
       });
       if (!dry) {
         await upsert(env, r.flushed.map(([prefix, data]) => ({ county, roll_year: year, prefix, data })));

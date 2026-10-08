@@ -9,7 +9,8 @@
  * inflateBlocks({ input, startBit, window, maxOut, deadline, marginBytes, onOut, cap }) decodes whole blocks from
  * `input` (starting `startBit` bits in), hands each committed block's bytes to onOut(Uint8Array), and returns
  *   { bitPos, done, window }  — bitPos is RELATIVE to input[0] at the last committed block boundary.
- * A block that runs past the end of `input` is rolled back (never half-committed). Pure; no I/O.
+ * NB `deadline` uses Date.now(), which a Cloudflare Worker FREEZES during pure computation — in a Worker bound the work
+ * with `maxOut` (output bytes) instead; `deadline` is for Node/tests. A block that runs past the end of `input` is rolled back (never half-committed). Pure; no I/O.
  * Verified against node:zlib in test/inflateResume.test.js (stored, fixed and dynamic blocks, many resume points).
  */
 const LBASE = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
