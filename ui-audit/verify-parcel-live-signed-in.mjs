@@ -57,7 +57,18 @@ const held = () => page.evaluate(() => { const d = window.__mapParcelDisplay && 
 const numbers = () => page.evaluate(() => document.querySelectorAll(".planyr-lot-no").length);
 const summary = () => page.evaluate(() => { const el = document.querySelector('[data-testid="map-decide-summary"]'); return el ? el.textContent.trim() : ""; });
 const waitFor = async (fn, ms = 8000) => { const t = Date.now(); let v; while (Date.now() - t < ms) { v = await fn(); if (v) return v; await page.waitForTimeout(200); } return v; };
-const setView = (la, ln, z) => page.evaluate(([a, b, c]) => { window.__mapFinderMap.setView([a, b], c, { animate: false }); }, [la, ln, z]);
+/* The map's own landing view (fit to the user's sites, once the site list arrives) can move the camera AFTER a first setView —
+ * a reload put Katy's check on the wrong ground and read "0 lots held" (a harness fault, found by reading the sources list:
+ * it named six counties for a view that should name three). So the view is re-asserted until it has HELD for a beat. */
+const setView = async (la, ln, z) => {
+  for (let i = 0; i < 6; i++) {
+    await page.evaluate(([a, b, c]) => { window.__mapFinderMap.setView([a, b], c, { animate: false }); }, [la, ln, z]);
+    await page.waitForTimeout(1500);
+    const at = await page.evaluate(() => { const m = window.__mapFinderMap, c = m.getCenter(); return { lat: c.lat, lng: c.lng, z: m.getZoom() }; });
+    if (Math.abs(at.lat - la) < 0.01 && Math.abs(at.lng - ln) < 0.01 && at.z === z) return;
+  }
+  throw new Error(`the map would not hold ${la},${ln} z${z} (landing view kept moving it)`);
+};
 const selectToggle = () => page.locator('[data-testid="map-toolbar-select-parcels"]').first();
 const blockingSince = (t0) => page.evaluate((t) => { const w = window.__loaf.filter((e) => e.t >= t && e.d < 900 || e.t >= t && e.b > 100); return { max: Math.max(0, ...w.map((e) => e.b)), n: w.filter((e) => e.b > 0).length }; }, t0);
 const nowMark = () => page.evaluate(() => performance.now());
