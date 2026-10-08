@@ -72,8 +72,9 @@ async function turnSelectOn() {
 /* While Select parcels is ON the toolbar is replaced (the toggle is not on the page), so "off" is a fresh load of the
  * dashboard Map — select mode starts OFF, nothing is persisted by it, and every region starts from the same state. */
 async function freshMap() {
-  await page.goto(BASE + "/?planyrDiag=1#/site", { waitUntil: "domcontentloaded" });
+  await page.reload({ waitUntil: "domcontentloaded" }); // a goto to the SAME url+hash is a same-document navigation and reloads nothing
   await page.waitForFunction(() => !!window.__mapFinderMap, null, { timeout: 30000 });
+  await page.waitForFunction(() => !!document.querySelector('[data-testid="map-toolbar-select-parcels"]'), null, { timeout: 30000 });
   await page.waitForTimeout(1500);
 }
 
