@@ -780,3 +780,67 @@ alter table public.food_dishes add constraint food_dishes_score_check
 -- Verify (read-only; safe to run any time) -----------------------------------
 --   select numeric_precision, numeric_scale from information_schema.columns
 --     where table_name = 'food_dishes' and column_name = 'score';               -- expect 4, 2
+
+-- ── food_places_search_by_address (B2051665, owner NEW-1 follow-up: typing a CITY or a full STREET
+-- ADDRESS must find that place, not just a restaurant NAME). The name search above only ever matches
+-- `lower(name)`, so "Dallas" or "7170 Skillman St" returned nothing from the snapshot. This is a
+-- read-only sibling: a row matches when EVERY typed word (letters/digits only, so punctuation and
+-- LIKE wildcards in the query can never act as patterns) appears in lower(address) — "7170 skillman
+-- st dallas" finds "7170 Skillman St, Dallas, TX, 75231-5651". Needs one word of 3+ chars so the
+-- trigram index can serve it; a query of only 1-2 char words returns nothing rather than scanning.
+-- Ordered nearest-first from the optional centre (the map view's midpoint), the same ordering the
+-- client then applies across both sources (lib/searchProximity.js). Same corrupted-concatenated-
+-- address exclusion as the name search. `sim` is a fixed 0.95 (all words matched), `confidence` rides
+-- along so the client's registry/confidence de-ranking works unchanged. Abbreviations ("Street" vs
+-- "St") are NOT expanded — a stated limit, not silent.
+create index if not exists food_places_address_trgm_idx
+  on public.food_places using gin (lower(address) gin_trgm_ops);
+
+create or replace function public.food_places_search_by_address(
+  p_query text, p_cap integer default 15,
+  p_center_lat double precision default null, p_center_lon double precision default null
+)
+returns table (
+  id text, name text, lat double precision, lon double precision,
+  category text, cuisine text, address text, brand text,
+  source text, source_licence text, metro text, confidence double precision,
+  sim real, distance_km double precision
+)
+language sql stable
+set search_path = public, extensions, pg_temp
+as $$
+  with q as (
+    select array(
+      select distinct w from unnest(string_to_array(
+        btrim(regexp_replace(lower(coalesce(p_query, '')), '[^a-z0-9]+', ' ', 'g')), ' ')) w
+      where w <> ''
+    ) as words
+  )
+  select m.id, m.name, m.lat, m.lon, m.category, m.cuisine, m.address, m.brand,
+    m.source, m.source_licence, m.metro, m.confidence, 0.95::real as sim,
+    case when p_center_lat is null or p_center_lon is null then null
+      else extensions.st_distance(
+        m.geom,
+        extensions.st_setsrid(extensions.st_makepoint(p_center_lon, p_center_lat), 4326)::extensions.geography
+      ) / 1000.0
+    end as distance_km
+  from (
+    -- Rank on a CHEAP flat-earth distance (no PostGIS per row: a city word like "Dallas" matches ~30k
+    -- rows, and a true geography distance on each measured 412 ms); only the p_cap survivors get the
+    -- exact st_distance above. Flat-earth ordering is exact enough to pick the nearest handful.
+    select fp.*
+    from public.food_places fp, q
+    where fp.address is not null
+      and cardinality(q.words) between 1 and 8
+      and exists (select 1 from unnest(q.words) w where length(w) >= 3)
+      and not exists (select 1 from unnest(q.words) w where lower(fp.address) not like '%' || w || '%')
+      and fp.address !~ '\d{5}(-\d{4})?\s+and\s+\d+\s+\S'
+    order by case when p_center_lat is null or p_center_lon is null then 0
+      else power(fp.lat - p_center_lat, 2) + power((fp.lon - p_center_lon) * cos(radians(p_center_lat)), 2) end asc,
+      fp.name asc
+    limit least(greatest(1, p_cap), 100)
+  ) m
+  order by distance_km asc nulls last, m.name asc;
+$$;
+
+grant execute on function public.food_places_search_by_address(text, integer, double precision, double precision) to anon, authenticated;

@@ -89,15 +89,51 @@ export async function fetchPlaceById(id) {
  *  closer (see the RPC's `order by sim desc, distance_km asc` — distance is the TIEBREAK). */
 const SEARCH_RESULT_CAP = 60; // a pool well past the ~10 shown: the client re-ranks it nearest-the-map-first (lib/searchProximity.js), so the nearby comparable matches must be IN it
 
+/** Name rows first (their order is the RPC's relevance order), then any address-only rows not
+ *  already present. Pure — the id is the dedupe key, so a place found both ways is listed once. */
+export function mergeNameAndAddressRows(nameRows, addressRows) {
+  const seen = new Set((nameRows || []).map((r) => r.id));
+  const extra = (addressRows || []).filter((r) => r && !seen.has(r.id) && (seen.add(r.id), true));
+  return [...(nameRows || []), ...extra];
+}
+
+let _lastAddressReport = { msg: "", at: 0 };
+/** The address half failing must not hide the name results — but it must not be silent either
+ *  (LOUD-FAILURE): record it to client_errors through this module's own client, at most once a
+ *  minute per message, exactly like reportBrowseError. */
+export function reportAddressSearchError(error, now = Date.now()) {
+  try {
+    const message = `food_places_search_by_address: ${(error && (error.message || error.code)) || "unknown error"}`;
+    if (message === _lastAddressReport.msg && now - _lastAddressReport.at < 60000) return Promise.resolve(false);
+    _lastAddressReport = { msg: message, at: now };
+    if (!supabase) return Promise.resolve(false);
+    const row = {
+      build: typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "dev",
+      module: "food", source: "food:address-search-rpc", message: message.slice(0, 500),
+      url: typeof location !== "undefined" ? location.href : null,
+      user_agent: typeof navigator !== "undefined" ? navigator.userAgent : null,
+    };
+    return Promise.resolve(supabase.from("client_errors").insert(row)).then((r) => !(r && r.error), () => false);
+  } catch (_) { return Promise.resolve(false); }
+}
+
 export async function searchPlacesByName(query, center, signal) {
   if (!supabase || !query || !query.trim()) return { data: [], error: null };
-  let call = supabase.rpc("food_places_search_by_name", {
+  const args = {
     p_query: query.trim(), p_cap: SEARCH_RESULT_CAP,
     p_center_lat: center?.lat ?? null, p_center_lon: center?.lon ?? null,
-  });
-  if (signal) call = call.abortSignal(signal); // NEW-1: a newer keystroke cancels this request (lib/searchSession.js)
-  const { data, error } = await call;
-  return { data: data || [], error };
+  };
+  let nameCall = supabase.rpc("food_places_search_by_name", args);
+  // B2051665: the name search only ever matches a restaurant's NAME, so a typed city or street
+  // address found nothing. `food_places_search_by_address` (db/food.sql) matches every typed word
+  // against the address; it runs in parallel and its rows are merged in (cap 30: enough to hold
+  // the nearest matches without drowning the name results).
+  let addrCall = supabase.rpc("food_places_search_by_address", { ...args, p_cap: 30 });
+  if (signal) { nameCall = nameCall.abortSignal(signal); addrCall = addrCall.abortSignal(signal); } // NEW-1: a newer keystroke cancels these (lib/searchSession.js)
+  const [nameRes, addrRes] = await Promise.all([nameCall, addrCall]);
+  if (addrRes.error && !(signal && signal.aborted)) reportAddressSearchError(addrRes.error);
+  const data = mergeNameAndAddressRows(nameRes.data || [], addrRes.error ? [] : (addrRes.data || []));
+  return { data, error: nameRes.error };
 }
 
 /** Batch name/location lookup for a set of place ids — used to label the visit LIST, which
