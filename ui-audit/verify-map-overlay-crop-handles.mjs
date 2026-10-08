@@ -29,6 +29,8 @@ function pngBuffer(w, h) { // solid amber 8-bit RGB PNG
 
 const s = await openSignedIn({ base: BASE });
 const page = s.page;
+const pageErrors = [];
+page.on("pageerror", (e) => pageErrors.push(String(e && e.message || e).slice(0, 160)));
 console.log("served build:", JSON.stringify(s.build), "| signed in as", s.proof.email);
 const shot = async (n) => { if (process.env.SHOTS_DIR) await page.screenshot({ path: `${process.env.SHOTS_DIR}/${n}.png` }).catch(() => {}); };
 const row = () => page.evaluate(async (nm) => { const q = await window.pfSupabase.from("site_plan_overlays").select("id,version,center_lat,center_lon,ft_per_px,rotation_deg,crop,raster_key,review_id").like("source_file_name", nm + "%").is("deleted_at", null).maybeSingle(); return q.data; }, NAME);
@@ -39,9 +41,14 @@ async function cleanup() {
       const c = window.pfSupabase;
       const { data } = await c.from("site_plan_overlays").select("id,review_id,raster_key").like("source_file_name", nm + "%");
       for (const o of data || []) { await c.from("site_plan_overlays").delete().eq("id", o.id); if (o.raster_key) await c.storage.from("doc-review-files").remove([o.raster_key]); if (o.review_id) await c.from("doc_reviews").delete().eq("id", o.review_id); }
-      return (await c.from("site_plan_overlays").select("id").like("source_file_name", nm + "%")).data?.length ?? -1;
+      // the upload flow mints a TRACKED SITE named after the file — remove it too (soft-delete, then delete)
+      const { data: sites } = await c.from("sites").select("id").like("site", nm + "%");
+      for (const st of sites || []) { await c.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", st.id); await c.from("sites").delete().eq("id", st.id); }
+      const ov = (await c.from("site_plan_overlays").select("id").like("source_file_name", nm + "%")).data?.length ?? -1;
+      const st = (await c.from("sites").select("id").like("site", nm + "%")).data?.length ?? -1;
+      return ov === 0 && st === 0 ? 0 : ov + st + 1;
     }, NAME);
-    console.log("cleanup pass", pass, "overlays remaining:", left);
+    console.log("cleanup pass", pass, left === 0 ? "— overlay + tracked site + review + raster all gone" : "— something remains");
     if (left === 0) return true;
     await sleep(4000);
   }
@@ -101,6 +108,7 @@ try {
   }
   await shot("map-handles-cropped");
   check("placed through the real flow; the Map handles are armed (4 grips, outline, rotate grip, image layer)", !!g.boundary && g.grips.length === 4 && !!g.rot && !!g.img, JSON.stringify({ grips: g.grips && g.grips.length, img: !!g.img }));
+  if (!g.boundary || g.grips.length !== 4 || !g.img) console.log("  diag:", JSON.stringify(await page.evaluate(() => { const p = document.querySelector(".leaflet-sitePlanHandlesPane-pane"); return { pane: !!p, svgDisplay: p && p.querySelector("svg") && p.querySelector("svg").style.display, polys: p ? [...p.querySelectorAll("polygon")].map((e) => (e.getAttribute("points") || "").slice(0, 60)) : null, overlayPane: !!document.querySelector(".leaflet-sitePlanOverlayPane-pane"), imgs: document.querySelectorAll(".leaflet-sitePlanOverlayPane-pane *").length }; })), "| page errors:", JSON.stringify(pageErrors.slice(0, 5)));
   if (!g.boundary || g.grips.length !== 4 || !g.img) throw new Error("VOID — handles not armed; the instrument cannot see them");
   const r0 = await row();
   check("the saved overlay carries the rect crop I drew (≈ x 60%–80%, y 12.5%–31%)", !!r0 && !!r0.crop && near(r0.crop.x, 600, 40) && near(r0.crop.y, 100, 40) && near(r0.crop.w, 200, 50) && near(r0.crop.h, 150, 50), JSON.stringify(r0 && r0.crop));
