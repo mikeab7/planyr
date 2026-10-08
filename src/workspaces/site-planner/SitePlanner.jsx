@@ -5,7 +5,7 @@ import { startClickAck } from "../../shared/ui/clickAck.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useProjectName, usePlanName, renameProjectChecked, renamePlanChecked } from "../../shared/names/names.js";
-import { loadSite, saveSite, siteExistsLocally, readBackSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
+import { loadSite, saveSite, siteExistsLocally, sitesWriteStamp, sitesWriteStillCurrent, readBackSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
 import { relTime } from "../../shared/projects/projectModel.js";
 import { collectAssetRefs, releasePlanForOverlay } from "./lib/sharedAssetRefs.js";
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
@@ -4134,8 +4134,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // AND makes the rollback snapshot reload-safe too. Runs even when the cloud push is gated by a
     // conflict/read-only tab — a local save is always safe and is the whole recovery net. Coalesced to
     // ~50ms (snapshotVersion's count-based sig-dedup already keeps a same-shape drag from snapshotting).
+    let mirrorStamp = null;   // NEW-1 (B217540 ×3): the whole-store write the mirror made, so the settle tick can tell it is already on disk
     const writeMirror = () => {
       const ok = saveSite(payload);
+      mirrorStamp = ok ? sitesWriteStamp() : null;
       lastLocalWrite.current = Date.now();
       // B473 — VERIFY the write actually persisted by reading it back. A write that silently doesn't
       // land is exactly the owner's "I placed a bunch of stuff and it didn't save at all." If the
@@ -4165,7 +4167,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const t = setTimeout(() => {
       // Settle tick = the cloud push. skipHistory so this re-write can't double-snapshot what the
       // immediate write already captured; the mirror is already current from writeMirror above.
-      const okSave = saveSite(payload, { skipHistory: true });
+      /* NEW-1 (B217540 ×3 / B1317824 ×3) — AND WHEN IT IS ALREADY THERE, DO NOT WRITE IT AGAIN. This re-write was a second
+       * whole-store parse + stringify + setItem of byte-identical content for every edit (the owner's ~200 ms `c` hitch ran
+       * twice per edit at his 3.9 MB store). The mirror's write is proven to still be the store's content by the same
+       * byte-exact check B217540 uses for the read-back; any other writer (another tab, a cloud pull) fails that proof and
+       * the real write below runs exactly as it always did. A mirror that never ran or failed has no stamp, so it also falls
+       * through to the real write. */
+      const okSave = mirrorStamp && sitesWriteStillCurrent(mirrorStamp) ? true : saveSite(payload, { skipHistory: true });
       if (fresh && okSave) onSiteSaved?.();
       // Badge tracks the REAL write: local write done; when logged in, stay
       // "saving" until the cloud upsert resolves, then "saved" only if it succeeded.
