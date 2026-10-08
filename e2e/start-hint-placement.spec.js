@@ -20,6 +20,8 @@ const canvas = (p) => p.getByTestId("planner-canvas");
 
 const VIEWPORTS = {
   phone: { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 3 },
+  // V1414592 (2026-10-08): the iPhone SE class (320 wide) — the live WebKit run found every option wrapping to 3 lines and the strip reaching the middle of the map
+  smallPhone: { viewport: { width: 320, height: 568 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 },
   desktop: { viewport: { width: 1440, height: 900 }, hasTouch: false, isMobile: false, deviceScaleFactor: 1 },
 };
 
@@ -57,7 +59,11 @@ async function measure(page) {
 }
 
 /* Overlap with the central area = the middle half of the canvas on both axes. */
+/* DISCLOSED TRADE-OFF (V1414592, 2026-10-08): on a canvas under 520px tall (iPhone SE portrait: ~487px under
+ * the View/Layers row) four options cannot fit above the middle half, so the bar there is "the strip ends
+ * above 45% of the map height" (clear of the centre point with margin) — never looser than that. */
 function overlapsCentre({ cb, card }) {
+  if (cb.height < 520) return card.y + card.height > cb.y + cb.height * 0.45;
   const cx0 = cb.x + cb.width * 0.25, cx1 = cb.x + cb.width * 0.75;
   const cy0 = cb.y + cb.height * 0.25, cy1 = cb.y + cb.height * 0.75;
   return card.x < cx1 && card.x + card.width > cx0 && card.y < cy1 && card.y + card.height > cy0;
@@ -74,6 +80,9 @@ for (const [name, dev] of Object.entries(VIEWPORTS)) {
       expect(m.card, "hint card found").not.toBeNull();
       expect(overlapsCentre(m), `card ${JSON.stringify(m.card)} overlaps the middle of canvas ${JSON.stringify(m.cb)}`).toBe(false);
       expect(m.centreHitsCard).toBe(false);
+      const wraps = await page.evaluate(() => [...document.querySelectorAll('[data-testid^="start-hint-"]')].filter((b) => b.dataset.testid !== "start-hint-dismiss").map((b) => { const r = document.createRange(); r.selectNodeContents(b); return r.getClientRects().length > 1 || b.scrollWidth > b.clientWidth + 1; }));
+      expect(wraps.length, "four options").toBe(4);
+      expect(wraps.some(Boolean), `no option wraps or clips (${wraps})`).toBe(false);
       expect(m.centreHitIsCanvas, "canvas centre answers to the canvas").toBe(true);
       await page.screenshot({ path: test.info().outputPath(`start-hint-${name}.png`) });
       await test.info().attach(`start-hint-${name}`, { path: test.info().outputPath(`start-hint-${name}.png`), contentType: "image/png" });

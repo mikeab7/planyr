@@ -1182,15 +1182,25 @@ export function renameSiteGroup(idOrGroup, site, _afterMaterialize = false) {
   if (!localPlans.length && !_afterMaterialize && wasProjectFreshlyMinted(groupId)) {
     // ONLY a project this device just minted through the lazy "New project" flow (the cross-reload
     // `freshProjects` hint) — an id nobody minted stays the harmless no-op it always was.
-    if (!activeUid()) {
-      const saved = saveSite({ id: groupId, groupId, site: name, name: "Concept A", origin: null, county: null, parcels: [], els: [], measures: [], settings: {} });
-      if (!saved) return Promise.resolve({ ok: false, groupId, name, error: "Couldn't save the new name on this device — try again in a moment." });
-      return Promise.resolve({ ok: true, groupId, name, plans: 1, materialized: true, cloud: { skipped: true } });
-    }
-    return ensureProjectRow(groupId, { name }).then((r) => {
-      if (!r || r.ok === false) return { ok: false, groupId, name, error: (r && r.error) || "Couldn't create this project to rename it." };
-      return renameSiteGroup(groupId, name, true); // once only — a cloud-only project has no local plan even now
-    });
+    //
+    // ⛔ LOCAL FIRST, THEN THE CLOUD (B1991041 follow-up, measured live 2026-10-08 on a slow network). The first
+    // version went through `ensureProjectRow`, which makes a network round trip (the deleted-project check)
+    // BEFORE it saves anything — so for the several seconds that trip took, the new name existed only on
+    // screen, and a reload or closed tab in that window lost the project and the name SILENTLY (2 of 7 live
+    // runs: the cloud row never landed and a reload said "this account doesn't have that project"). The local
+    // record is now written synchronously, in the same tick as the typed name — durable before any network —
+    // and the cloud push follows. A freshly minted project cannot be soft-deleted, so the deletion check
+    // `ensureProjectRow` exists for is not needed here.
+    const saved = saveSite({ id: groupId, groupId, site: name, name: "Concept A", origin: null, county: null, parcels: [], els: [], measures: [], settings: {} });
+    if (!saved) return Promise.resolve({ ok: false, groupId, name, error: "Couldn't save the new name on this device — try again in a moment." });
+    if (!activeUid()) return Promise.resolve({ ok: true, groupId, name, plans: 1, materialized: true, cloud: { skipped: true } });
+    return pushSiteToCloud(groupId).then((r) => {
+      if (r && r.ok === false) {
+        reportClientEvent("cloud-push-failed", "a renamed never-drawn project's row failed to reach the cloud (kept on this device)", { id: groupId, error: r.error || "" });
+        return { ok: false, groupId, name, plans: 1, materialized: true, error: r.error || "The new name is saved on this device but couldn't reach the cloud yet." };
+      }
+      return renameSiteGroup(groupId, name, true); // once only — the row exists now, so the group rename can match it
+    }).catch((e) => ({ ok: false, groupId, name, plans: 1, materialized: true, error: (e && e.message) || "rename failed" }));
   }
   const at = Math.max(Date.now(), maxStampOf(localPlans) + 1);
   localPlans.forEach((s) => saveSite({ id: s.id, site: name, siteRenamedAt: at }));

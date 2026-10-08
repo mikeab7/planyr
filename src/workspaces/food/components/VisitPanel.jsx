@@ -809,7 +809,7 @@ export default function VisitPanel({
   place, pastVisits, onClose, onSubmitVisit, onDeleteVisit, onEditVisit, pending, error,
   manualNameEditable, manualName, onManualNameChange,
   wishlisted, onToggleWishlist, onSheetHeightChange, onSideWidthChange,
-  dishesWithDate, onSaveDish, onDeleteDish, dishPending, openDishWishlistNames,
+  dishesWithDate, onSaveDish, onDeleteDish, dishPending, openDishWishlistNames, listsControl,
 }) {
   const narrowPhone = useIsMobile();
   // B2046224 ×4 — a phone held sideways docks the card to the right edge instead of a bottom sheet.
@@ -917,6 +917,8 @@ export default function VisitPanel({
         {everVisited && <ScoreStrip aggregates={aggregates} bestDish={bestDish} />}
         {!everVisited && !adding && <EmptyStateNote />}
       </div>
+
+      {listsControl}
 
       {everVisited && <OrderAgain entries={orderAgain} />}
 

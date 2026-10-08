@@ -143,7 +143,7 @@ function paintLotNumbers({ map, group, field, floor, measure, getObstacles, getI
  * numbers from `field` — the same account the live CAD would show — so a lot reads the SAME number whether
  * the county server is up or down. `getFeatures()` is the snapshot's in-view features. Attached to the
  * snapshot's GeoJSON layer; returns { relayout }. */
-export function attachSnapshotLotNumbers(layer, { field, getFeatures } = {}) {
+export function attachSnapshotLotNumbers(layer, { field, getFeatures, getObstacles, getInset } = {}) {
   if (!layer || !field || typeof getFeatures !== "function") return { relayout() {}, clear() {} };
   const measure = bestMeasurer({ weight: 600 });
   let map = null, group = null, job = null;
@@ -151,14 +151,14 @@ export function attachSnapshotLotNumbers(layer, { field, getFeatures } = {}) {
     if (job) job.cancel();
     job = null;
     if (!map || !group) return;
-    job = paintLotNumbers({ map, group, field, floor: 0, measure, forEachFeature: (cb) => getFeatures().forEach((f) => cb(f, featureBbox(f))) }); // NOT forEach(cb): its 2nd argument is the INDEX, which the live path uses as a bbox (B2092656 ×2). The bbox (memoised on the feature) lets the pixel-box reject skip a too-small lot before any per-vertex work (B2092656 ×3)
+    job = paintLotNumbers({ map, group, field, floor: 0, measure, getObstacles, getInset, forEachFeature: (cb) => getFeatures().forEach((f) => cb(f, featureBbox(f))) }); // NOT forEach(cb): its 2nd argument is the INDEX, which the live path uses as a bbox (B2092656 ×2). The bbox (memoised on the feature) lets the pixel-box reject skip a too-small lot before any per-vertex work (B2092656 ×3)
   };
   layer.on("add", () => { map = layer._map; if (map) group = L.layerGroup().addTo(map); });
   layer.on("remove", () => {
     if (group && map) { try { map.removeLayer(group); } catch (_) { /* detached */ } }
     group = null; map = null;
   });
-  return { relayout, clear: () => { if (job) job.cancel(); job = null; if (group) group.clearLayers(); } };
+  return { relayout, clear: () => { if (job) job.cancel(); job = null; if (group) group.clearLayers(); }, field: () => field };
 }
 
 export function attachLotNumbers(layer, { hint, getObstacles, getInset } = {}) {
