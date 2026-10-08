@@ -61,11 +61,11 @@ const waitFor = async (fn, ms = 8000) => { const t = Date.now(); let v; while (D
  * a reload put Katy's check on the wrong ground and read "0 lots held" (a harness fault, found by reading the sources list:
  * it named six counties for a view that should name three). So the view is re-asserted until it has HELD for a beat. */
 const setView = async (la, ln, z) => {
-  for (let i = 0; i < 6; i++) {
+  const holds = () => page.evaluate(([a, b, c]) => { const m = window.__mapFinderMap, k = m.getCenter(); return Math.abs(k.lat - a) < 0.01 && Math.abs(k.lng - b) < 0.01 && m.getZoom() === c; }, [la, ln, z]);
+  for (let i = 0; i < 8; i++) {
     await page.evaluate(([a, b, c]) => { window.__mapFinderMap.setView([a, b], c, { animate: false }); }, [la, ln, z]);
-    await page.waitForTimeout(1500);
-    const at = await page.evaluate(() => { const m = window.__mapFinderMap, c = m.getCenter(); return { lat: c.lat, lng: c.lng, z: m.getZoom() }; });
-    if (Math.abs(at.lat - la) < 0.01 && Math.abs(at.lng - ln) < 0.01 && at.z === z) return;
+    await page.waitForTimeout(2500);
+    if (await holds()) { await page.waitForTimeout(2500); if (await holds()) return; } // held across a second beat: the landing fit is done
   }
   throw new Error(`the map would not hold ${la},${ln} z${z} (landing view kept moving it)`);
 };
