@@ -21,7 +21,14 @@ const uid = () => "zztr" + Math.random().toString(36).slice(2, 10);
 const recFor = (id, name) => ({ id, groupId: id, site: name, name: "Concept A", origin: { lat: 29.78, lon: -95.82 }, county: "harris", status: "pursuit", role: "pursuit",
   parcels: [], els: [], measures: [], callouts: [], markups: [], settings: {}, underlay: null, parcelDrawings: [], sheetOverlays: [], updatedAt: Date.now() });
 
-let s, failed = false, originalPref;
+let s, failed = false, originalPref, origIndex;
+// The app reloads itself (`_r=`) when a newer build deploys mid-run; a navigation interrupted by that is retried, not failed.
+const gotoSafe = async (page, url) => {
+  for (let n = 0; n < 4; n++) {
+    try { await page.goto(url, { waitUntil: "domcontentloaded" }); await page.reload({ waitUntil: "domcontentloaded" }); return; }
+    catch (e) { if (!/interrupted by another navigation|Navigation.*(failed|aborted)/i.test(String(e.message)) || n === 3) throw e; await page.waitForTimeout(3000); }
+  }
+};
 const check = (ok, msg) => { console.log((ok ? "PASS " : "FAIL ") + msg); if (!ok) failed = true; };
 
 try {
@@ -32,6 +39,10 @@ try {
 
   const prefsOf = () => page.evaluate(async () => { const { data: u } = await window.pfSupabase.auth.getUser(); const r = await window.pfSupabase.from("profiles").select("prefs").eq("id", u.user.id).maybeSingle(); return r.data && r.data.prefs ? r.data.prefs : {}; });
   const savedIds = async () => { const p = await prefsOf(); return (p.dashboardProjectOrder && p.dashboardProjectOrder.ids) || null; };
+  // The test account has NO stored schedule document and is not rows-authoritative (measured), so its Task Report shows
+  // the built-in demo data. The page has a local test override that reads schedule ROWS instead (localStorage
+  // `planar:scheduleRowsRead`), which needs the account's own (empty, non-authoritative) schedule_account_index row — the
+  // account may insert it but not delete it, so that one empty row stays (harmless: not authoritative = unchanged behaviour).
   const seed = async (name) => {
     const id = uid(); ids[name] = id;
     const r = await page.evaluate(async ([i, n, rec]) => {
@@ -39,28 +50,57 @@ try {
       const e1 = (await sb.from("sites").upsert({ id: i, user_id: u.user.id, group_id: i, site: n, name: rec.name, county: "harris", updated_at: new Date().toISOString(), data: rec })).error;
       if (e1) return { error: "site: " + e1.message };
       const task = { id: 1, name: n + " task", start: "2026-12-27", end: "2026-12-28", duration: 2, predecessors: [], health: "red", percentComplete: 0, parentId: null, responsibleParty: "", notes: [], isExpanded: true };
-      const sc = await sb.from("schedules").insert({ user_id: u.user.id, linked_site_id: i, linked_site_name: n, name: "Master Schedule", data: { name: "Master Schedule", ownerKind: "site", linkedSiteId: i, linkedSiteName: n, tasks: [task] } }).select("id").single();
-      if (sc.error) return { error: "schedule: " + sc.error.message };
-      await sb.from("schedules").update({ data: { id: sc.data.id, name: "Master Schedule", ownerKind: "site", linkedSiteId: i, linkedSiteName: n, tasks: [task] } }).eq("id", sc.data.id);
+      const base = { name: "Master Schedule", ownerKind: "site", linkedSiteId: i, linkedSiteName: n, tasks: [task] };
+      const want = 910000 + Math.floor(Math.random() * 80000); // an id of its own, so data.id can be set at insert time
+      let sc = await sb.from("schedules").insert({ id: want, user_id: u.user.id, linked_site_id: i, linked_site_name: n, name: "Master Schedule", data: { ...base, id: want } }).select("id").single();
+      if (sc.error) { // identity column refuses explicit ids: insert, then patch data.id and VERIFY it took
+        sc = await sb.from("schedules").insert({ user_id: u.user.id, linked_site_id: i, linked_site_name: n, name: "Master Schedule", data: base }).select("id").single();
+        if (sc.error) return { error: "schedule: " + sc.error.message };
+        const up = await sb.from("schedules").update({ data: { ...base, id: sc.data.id } }).eq("id", sc.data.id).select("data");
+        if (up.error || !up.data || !up.data.length || up.data[0].data.id !== sc.data.id) return { error: "patch data.id refused: " + (up.error ? up.error.message : "0 rows updated") };
+      }
       return { sid: sc.data.id };
     }, [id, name, recFor(id, name)]);
     if (r.error) throw new Error("seed " + name + ": " + r.error);
     schedIds[name] = r.sid;
   };
 
+  // The account-wide index row a rows account carries (view settings + flags live there). Original kept; reset at cleanup.
+  const seedIndex = async () => {
+    const r = await page.evaluate(async ([sids]) => {
+      const sb = window.pfSupabase; const { data: u } = await sb.auth.getUser();
+      const cur = await sb.from("schedule_account_index").select("*").eq("user_id", u.user.id).maybeSingle();
+      const first = Math.min(...sids), next = Math.max(...sids) + 1;
+      const row = {
+        user_id: u.user.id, n_pid: next, n_tid: Object.fromEntries(sids.map((i) => [i, 2])), last_active_by_site: {},
+        settings: { defaultSplit: 60, snapDefault: true, holidays: {}, customHealth: [], healthLabelOverrides: {} },
+        migration_flags: { aPid: first, view: "grid", section: "projects", editProjId: null, healthColStyle: "stoplight", masterHealthFilter: true },
+        rev: (cur.data ? cur.data.rev : 0) + 1,
+      };
+      const w = cur.data ? await sb.from("schedule_account_index").update(row).eq("user_id", u.user.id) : await sb.from("schedule_account_index").insert(row);
+      return w.error ? { error: w.error.message } : { orig: cur.data || null };
+    }, [Object.values(schedIds)]);
+    if (r.error) throw new Error("index row: " + r.error);
+    origIndex = r.orig;
+  };
+
   originalPref = (await prefsOf()).dashboardProjectOrder ?? null; // put back exactly at the end
   await page.evaluate(async () => { const { data: u } = await window.pfSupabase.auth.getUser(); const r = await window.pfSupabase.from("profiles").select("prefs").eq("id", u.user.id).maybeSingle(); const p = { ...((r.data && r.data.prefs) || {}) }; delete p.dashboardProjectOrder; await window.pfSupabase.from("profiles").upsert({ id: u.user.id, prefs: p, updated_at: new Date().toISOString() }, { onConflict: "id" }); });
   for (const n of NAMES) { await seed(n); await pacedWait(page, 1100); } // distinct created_at, Alpha oldest
+  await seedIndex();
 
+  await page.evaluate(() => localStorage.setItem("planar:scheduleRowsRead", "1")); // the page's own local override: read schedule ROWS
   const frameOf = async () => (await (await page.waitForSelector("iframe", { timeout: 45000 })).contentFrame());
   const openReport = async () => {
-    await page.goto(`${base}/?cb=${Date.now()}#/schedule`, { waitUntil: "domcontentloaded" });
-    await page.reload({ waitUntil: "domcontentloaded" });
+    await gotoSafe(page, `${base}/?cb=${Date.now()}#/schedule`);
     const frame = await frameOf();
-    await frame.waitForSelector("[data-task-row], text=TASK REPORT", { timeout: 60000 });
+    await frame.waitForFunction(() => !!document.body && /TASK|Group by/i.test(document.body.innerText), null, { timeout: 60000 });
     // reach the Task Report the way the shell's Dashboard/Reports press does
     await page.evaluate(() => { const f = document.querySelector("iframe"); f.contentWindow.postMessage({ source: "planar-shell", type: "planar:nav-dashboard" }, location.origin); });
-    await frame.waitForSelector("text=TASK REPORT", { timeout: 30000 });
+    await frame.waitForFunction(() => /TASK REPORT/.test(document.body.innerText), null, { timeout: 30000 }).catch(async (e) => {
+      console.log("report page text:", JSON.stringify((await frame.evaluate(() => document.body.innerText)).slice(0, 500)));
+      throw e;
+    });
     // show every status so the seeded tasks are listed whatever the filter pill defaulted to, and group by project
     await frame.evaluate(() => {
       const pill = [...document.querySelectorAll("button")].find((b) => /In Progress/.test(b.textContent)); void pill;
@@ -68,7 +108,10 @@ try {
       const seg = m && [...m.parentElement.querySelectorAll("span")].find((x) => x.textContent.trim() === "Project");
       if (seg) seg.click();
     });
-    await frame.waitForSelector("tr[data-grp-site]", { timeout: 30000 });
+    await frame.waitForSelector("tr[data-grp-site]", { timeout: 30000 }).catch(async (e) => {
+      console.log("no group headers; report page text:", JSON.stringify((await frame.evaluate(() => document.body.innerText)).slice(0, 400)), "| groupBy buttons:", JSON.stringify(await frame.evaluate(() => [...document.querySelectorAll("span")].filter((x) => ["None", "Project"].includes(x.textContent.trim())).map((x) => x.textContent.trim() + ":" + getComputedStyle(x).backgroundColor))));
+      throw e;
+    });
     await pacedWait(page, 1500);
     await assertMeasurable(page, "verify-task-report-project-order-live");
     return frame;
@@ -83,6 +126,7 @@ try {
   };
 
   let frame = await openReport();
+  console.log("all group headers:", JSON.stringify(await frame.evaluate(() => [...document.querySelectorAll("tr[data-grp-site]")].map((t) => t.textContent.replace(/[⠿⋯]/g, "").trim()))), "rows:", JSON.stringify(await page.evaluate(async () => (await window.pfSupabase.from("schedules").select("id,linked_site_name,deleted_at").is("deleted_at", null)).data)));
   const first = await zz(frame);
   check(NAMES.every((n) => first.includes(n)), `known-good arm: all three seeded projects are group headers on the Task Report (${first.join(" | ")})`);
   check(first.join() === "ZZ TaskRpt Charlie,ZZ TaskRpt Bravo,ZZ TaskRpt Alpha", "1. no order saved yet: new projects land on top, newest first (Charlie, Bravo, Alpha)");
@@ -110,8 +154,7 @@ try {
   const want1 = (await zz(frame)).join();
 
   // 5. the Dashboard's Pursuits card shows the SAME order (one store)
-  await page.goto(`${base}/?cb=${Date.now()}#/dashboard`, { waitUntil: "domcontentloaded" });
-  await page.reload({ waitUntil: "domcontentloaded" });
+  await gotoSafe(page, `${base}/?cb=${Date.now()}#/dashboard`);
   await page.waitForFunction(() => document.querySelectorAll('[data-card-key="pursuitsTable"] [data-project-row]').length > 0, null, { timeout: 45000 });
   await pacedWait(page, 800);
   const dash = () => page.evaluate(() => [...document.querySelectorAll('[data-card-key="pursuitsTable"] [data-project-row]')].map((tr) => tr.querySelector("td:nth-child(2) div")?.textContent?.trim()).filter((t) => t && t.startsWith("ZZ TaskRpt")));
@@ -148,8 +191,16 @@ try {
 finally {
   if (s) {
     try {
-      const left = await s.page.evaluate(async ([idList, schedList, orig]) => {
+      await s.page.waitForLoadState("domcontentloaded").catch(() => {}); await s.page.waitForFunction(() => !!window.pfSupabase, null, { timeout: 30000 }).catch(() => {});
+      const left = await s.page.evaluate(async ([idList, schedList, orig, origIdx]) => {
         const sb = window.pfSupabase; await sb.auth.getUser();
+        try { localStorage.removeItem("planar:scheduleRowsRead"); } catch (_) {}
+        { // reset the index row to what it was (it cannot be deleted by this account: empty defaults when it did not exist)
+          const { data: uu } = await sb.auth.getUser();
+          const back = origIdx ? { n_pid: origIdx.n_pid, n_tid: origIdx.n_tid, last_active_by_site: origIdx.last_active_by_site, settings: origIdx.settings, migration_flags: origIdx.migration_flags }
+            : { n_pid: 1, n_tid: {}, last_active_by_site: {}, settings: {}, migration_flags: {} };
+          await sb.from("schedule_account_index").update({ ...back, rev: 1000 + Date.now() % 100000 }).eq("user_id", uu.user.id);
+        }
         for (const sid of schedList) await sb.from("schedules").update({ deleted_at: new Date().toISOString() }).eq("id", sid);
         for (const id of idList) {
           await sb.from("schedules").update({ deleted_at: new Date().toISOString() }).eq("linked_site_id", id);
@@ -168,7 +219,7 @@ finally {
         const live = await sb.from("schedules").select("id").in("linked_site_id", idList).is("deleted_at", null);
         const pr = await sb.from("profiles").select("prefs").eq("id", u.user.id).maybeSingle();
         return { sitesRemaining: (q.data || []).length, liveSchedulesRemaining: (live.data || []).length, prefRestored: JSON.stringify((pr.data && pr.data.prefs && pr.data.prefs.dashboardProjectOrder) ?? null) === JSON.stringify(orig ?? null) };
-      }, [Object.values(ids), Object.values(schedIds), originalPref ?? null]);
+      }, [Object.values(ids), Object.values(schedIds), originalPref ?? null, origIndex ?? null]);
       console.log("cleanup:", JSON.stringify(left));
       if (left.sitesRemaining !== 0 || left.liveSchedulesRemaining !== 0 || !left.prefRestored) failed = true;
     } catch (e) { console.error("cleanup ERROR", e.message); failed = true; }
