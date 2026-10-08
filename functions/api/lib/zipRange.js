@@ -82,3 +82,16 @@ export function firstAcct(c) {
   return s;
 }
 export const concatBytes = (parts) => { const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0)); let o = 0; for (const p of parts) { out.set(p, o); o += p.length; } return out; };
+
+/** Absolute byte offset where an entry's compressed data begins (after its local header). */
+export async function zipEntryDataStart(url, entry, fetchImpl = fetch) {
+  const lh = new Uint8Array(await (await fetchImpl(url, { headers: { ...UA, range: `bytes=${entry.off}-${entry.off + 63}` } })).arrayBuffer());
+  return entry.off + 30 + u16(lh, 26) + u16(lh, 28);
+}
+
+/** Inclusive byte range [a, b] of a remote file. */
+export async function readRange(url, a, b, fetchImpl = fetch) {
+  const r = await fetchImpl(url, { headers: { ...UA, range: `bytes=${a}-${b}` } });
+  if (!r.ok) throw new Error(`range read failed: HTTP ${r.status}`);
+  return new Uint8Array(await r.arrayBuffer());
+}
