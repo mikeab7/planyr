@@ -379,7 +379,7 @@ export function makeParcelDisplayLayer(url, opts) {
  * the per-tile cached canvases (`ParcelTiles`), and the lot numbers are laid out once ingestion drains. B137 holds the
  * same way it does for the live layer: a lot is in `_layers` (what `eachFeature` walks) exactly when it is in the
  * tile index. */
-export function makeSnapshotLayer(county) {
+export function makeSnapshotLayer(county, { getObstacles } = {}) {
   const index = new ParcelIndex();
   let tiles = null;
   const held = new Map(); // lot key (`__k`, stable per vintage) -> { f, g } — g is its ghost once ingested, null while queued (a ghost's ring prep is per-lot work, so it happens in the budgeted drain)
@@ -393,7 +393,8 @@ export function makeSnapshotLayer(county) {
   layer.getLayers = function () { return Object.keys(this._layers).map((k) => this._layers[k]); };
   // The saved copy numbers its lots too (owner decision 2026-10-05): the SAME account the live CAD shows,
   // read off the snapshot's own attributes, so a lot reads one number whether the county server is up or down.
-  const numbers = attachSnapshotLotNumbers(layer, { field: snapshotLotNumberField(county), getFeatures: () => layer.getLayers().map((g) => g.feature) });
+  const numbers = attachSnapshotLotNumbers(layer, { field: snapshotLotNumberField(county), getObstacles, getFeatures: () => layer.getLayers().map((g) => g.feature) });
+  layer._lotNumbers = numbers; // a host that moves a chip over the lots asks for a relayout
   let mapRef = null, unsub = null, pumpRaf = null;
   const queue = new IngestQueue({
     process: (k) => {

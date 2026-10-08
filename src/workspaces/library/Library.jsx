@@ -303,6 +303,7 @@ export default function Library({
             uid={uid}
             active={isActive}
             onOpenFile={(row) => onOpenReviewInDocReview?.(row)}
+            onOpenHistory={(row) => onOpenReviewInDocReview?.(row, { history: true })}
             onOpenFolder={openPinnedFolder}
             onPickProject={(id) => onNavigate?.({ projectId: id, cross: false, org: false })}
           />

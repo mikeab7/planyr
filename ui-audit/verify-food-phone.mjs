@@ -21,6 +21,7 @@
 import { webkit, chromium, devices } from "playwright";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { makeFixture, installFixture } from "./lib/foodFixture.mjs";
+import { listsLayoutProbe } from "./lib/foodListsKit.mjs";
 
 const BASE = process.argv.find((a, i) => i > 1 && a.startsWith("http")) || "http://localhost:4180";
 const results = [];
@@ -199,6 +200,14 @@ async function armLayout(browser, { label, viewport, device }) {
     const kb = await measure();
     row(`3 LAYOUT (${label}): keyboard-up (emulated), toggle + field still on screen & hittable`, allOk(kb), JSON.stringify(kb));
   }
+  await ctx.close();
+}
+
+/* NEW-1 / B2088288 — a list made and selected through the real UI must not break the frame (lib/foodListsKit.mjs). */
+async function armLists(browser, { label, viewport, device }) {
+  const { ctx, page } = await open(browser, { viewport, device, kbStub: !!device });
+  try { await listsLayoutProbe(page, (name, ok, detail) => row(name, ok, detail), label); }
+  catch (e) { row(`lists layout (${label})`, false, `probe error: ${String(e.message).split("\n")[0]}`); }
   await ctx.close();
 }
 
@@ -401,16 +410,19 @@ try {
   await armMapFollowFromList(wk);
   await armLayout(wk, { label: "WebKit iPhone 15", device: "iPhone 15" });
   await armLayout(wk, { label: "WebKit iPhone SE", device: "iPhone SE" });
+  await armLists(wk, { label: "WebKit iPhone 15", device: "iPhone 15" });
+  await armLists(wk, { label: "WebKit iPhone SE", device: "iPhone SE" });
   await armChain(wk);
  }
   await armFieldsKnownGood(wk);
   await armFields(wk);
 } finally { await wk.close(); }
 
-const cr = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium", args: ["--ignore-certificate-errors"] });
+const cr = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || "/opt/pw-browsers/chromium", args: ["--ignore-certificate-errors"] });
 try {
   await armLayout(cr, { label: "Chromium desktop 1440", viewport: { width: 1440, height: 900 }, device: null });
   await armMapFollow(cr, { label: "Chromium desktop 1440", viewport: { width: 1440, height: 900 }, device: null });
+  await armLists(cr, { label: "Chromium desktop 1440", viewport: { width: 1440, height: 900 }, device: null });
 }
 finally { await cr.close(); }
 

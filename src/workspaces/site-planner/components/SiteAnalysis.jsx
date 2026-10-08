@@ -178,7 +178,7 @@ export default function SiteAnalysis({
 
       {/* ── Who governs this site ─────────────────────────────────────────────────────────── */}
       {governs && (
-        <div data-section="governs" style={{ border: "1px solid var(--border-default)", borderRadius: RADIUS.md, padding: "10px 12px", display: "flex", flexDirection: "column", gap: GAP_ROW }}>
+        <div data-section="governs" style={{ borderTop: "1px solid var(--planner-border)", borderBottom: "1px solid var(--planner-border)", padding: "10px 0", display: "flex", flexDirection: "column", gap: GAP_ROW }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
             <span style={sectionLabel}>Who governs this site</span>
             {governs.lineLayers && governs.lineLayers.length > 0 && (() => {
