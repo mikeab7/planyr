@@ -10,7 +10,8 @@
  * and creates no cloud row, so there is nothing to clean up.
  */
 import { openSignedIn, FIXTURE_SITE_ID } from "./lib/signedInSession.mjs";
-import { assertMeasurable, pacedWait } from "./lib/tabTiming.mjs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { pacedWait } from "./lib/tabTiming.mjs";
 import { attribute } from "./lib/jurisdictionSwitch.mjs";
 import { chromium } from "playwright";
 import { readFileSync } from "node:fs";
