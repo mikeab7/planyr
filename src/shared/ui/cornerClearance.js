@@ -133,6 +133,10 @@ function iframeOccupantNeeded(frame, cx, cy, vh) {
   let doc;
   try { doc = frame.contentDocument; } catch (_) { return null; } // cross-origin — inaccessible by design
   if (!doc || typeof doc.elementsFromPoint !== "function") return null;
+  // NEW-1 (schedule empty band) — an embedded page that carries its own scroll-end clearance for this control
+  // (the Schedule iframe pads the end of every scroll surface by the button's dock height) marks its root
+  // `data-corner-free`: nothing of its content is permanently under the corner, so never lift the control for it.
+  if (doc.documentElement && doc.documentElement.hasAttribute("data-corner-free")) return null;
   let hits;
   try { hits = doc.elementsFromPoint(px, py); } catch (_) { return null; }
   const hit = hits && hits[0];

@@ -16,6 +16,7 @@
  */
 import { useState, useRef } from "react";
 import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
+import PriorityToolbar from "../../../shared/ui/PriorityToolbar.jsx";
 
 const ACCENT = "var(--accent-schedule-text)";
 
@@ -88,7 +89,7 @@ function ExportMenu({ post }) {
   return (
     <>
       <button ref={anchor} onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open}
-        title="Export — PDF exhibit or web snapshot" style={btn(open)}>
+        title="Export — PDF exhibit or web snapshot" aria-label="Export" style={btn(open)}>
         <Glyph size={13}><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7" /><polyline points="16 6 12 2 8 6" /><line x1="12" y1="2" x2="12" y2="15" /></Glyph>
         <span style={{ fontSize: 8, opacity: 0.6 }}>▾</span>
       </button>
@@ -139,91 +140,120 @@ export function ScheduleCenter({ toolbar, post }) {
   return <ViewToggle view={toolbar.view} onSet={(v) => post({ type: "planar:view-set", view: v })} />;
 }
 
-/* Right slot — zoom, export, save, then the panel toggles (history, contacts, automation,
- * format, settings). Mirrors the embedded app's gating: zoom only in split/gantt, format only
- * in Projects; the rest show in both Projects and Dashboard. Renders nothing until ready. */
+/* Right slot — zoom, export, then the panel toggles (history, contacts, automation, format, settings).
+ * Mirrors the embedded app's gating: zoom only in split/gantt, format only in Projects; the rest show in
+ * both Projects and Dashboard. Renders nothing until ready.
+ *
+ * ⛔ NEW-2 (2026-10-05) — NOW A `PriorityToolbar` (shared/ui/PriorityToolbar.jsx). The owner's Schedule
+ * header wrapped this whole cluster onto its own second row at a laptop window. As the room narrows it now
+ * collapses instead: "Automation" drops to the bolt, then the lowest-priority items move into a "More" menu
+ * (original order, full labels, the inbox count kept). It never wraps, never clips. PRIORITY (higher =
+ * kept longest) — reorder here and nowhere else:
+ *     Settings 90 · Review inbox 80 · Automation 75 · Version history 70 · Contacts 65 · Export 60 ·
+ *     Format 40 · Zoom 20
+ * The reserved-but-invisible idiom (NEW-1, B1218496 — a control that MOUNTS late shifts every sibling) is
+ * kept as `ghost`: the item holds its place while unavailable, absent from the menu, and is the first thing
+ * to give up its room. */
 export function ScheduleActions({ toolbar, post }) {
   if (!toolbar.ready) return null;
   const projects = toolbar.section === "projects";
-  return (
-    <>
-      {/* ⛔ B1547280 (AMENDMENT to B1511712) — the review-inbox button, RELOCATED here from
-          ScheduleCenter (see that function's own header for the full reasoning: bundling it with
-          the ViewToggle made AppHeader's Row-2 centering measure and position a wider "chip" than
-          the Grid/Split/Gantt control the owner actually meant). Placed first — spatially closest
-          to the ViewToggle it sat beside before — and Projects-only, using the IDENTICAL
-          reserved-visibility idiom as Format below (never a conditional MOUNT, which is exactly
-          the class of bug B1218496 already fixed once for this same badge: a control that mounts
-          a beat late shifts every already-pressable sibling sideways). The badge span inside it
-          keeps its own pre-existing reservation (visibility, permanently mounted) unchanged. */}
-      {(toolbar.settled ? projects : true) && (
-        <span aria-hidden={!projects} style={{ display: "inline-flex", visibility: projects ? "visible" : "hidden" }}>
-          <button onClick={() => post({ type: "planar:review-toggle" })} aria-pressed={toolbar.reviewOpen}
-            title="Review suggested updates from forwarded emails"
-            style={{ ...btn(toolbar.reviewOpen || toolbar.reviewCount > 0), marginRight: 1 }}>
-            <Glyph size={15}><polyline points="22 12 16 12 14 15 10 15 8 12 2 12" /><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></Glyph>
-            {/* NEW-1 — ALWAYS mounted once this button is (was conditional on reviewCount > 0),
-                just invisible at 0: the iframe re-posts the whole planar:toolbar-state payload
-                whenever ANYTHING it tracks changes, including its own review-suggestions count.
-                A badge that mounts later would grow this button and shift every sibling flush
-                against it — reserving its box (visibility, never display/mount) keeps this
-                zone's width, and every icon in it, fixed regardless of when the count lands. */}
-            <span aria-hidden={!(toolbar.reviewCount > 0)} style={{
-              fontSize: 11, fontWeight: 700, color: "var(--on-accent)", background: ACCENT, borderRadius: 20,
-              padding: "1px 7px", minWidth: 18, textAlign: "center", lineHeight: 1.5,
-              visibility: toolbar.reviewCount > 0 ? "visible" : "hidden",
-            }}>{toolbar.reviewCount > 0 ? toolbar.reviewCount : 0}</span>
-          </button>
-        </span>
-      )}
-      {/* NEW-1 — reserved (mounted, visibility-toggled) rather than conditionally MOUNTED only
-          while the toolbar hasn't SETTLED yet (toolbar.settled — first flips true on a REAL
-          planar:toolbar-state report, never on markToolbarReadyFallback's bare ready-only flip).
-          Before settling, `zoomable` can be a stale fallback guess; if the real report then
-          confirms zoomable:true, mounting this block for the first time INSERTS it before Version
-          History (flex:"none", right-flush), pushing that already-pressable icon button sideways
-          (event:click-swallowed, "moved": true). Once settled, a genuine view switch is the user's
-          own doing — this collapses back to the original plain conditional mount, unchanged. */}
-      {(toolbar.settled ? toolbar.zoomable : true) && (
-        <div aria-hidden={!toolbar.zoomable} style={{ display: "flex", alignItems: "center", gap: 1, paddingRight: 7, marginRight: 1, borderRight: "1px solid var(--chrome-divider)", visibility: toolbar.zoomable ? "visible" : "hidden" }}>
+  const showIf = (available) => (toolbar.settled ? available : true);
+  const items = [];
+  if (showIf(projects)) {
+    items.push({
+      id: "inbox", label: "Review suggested updates", priority: 80, ghost: !projects, badge: toolbar.reviewCount, active: toolbar.reviewOpen,
+      onSelect: () => post({ type: "planar:review-toggle" }),
+      // ⛔ B1547280 — the review-inbox button lives HERE (not in ScheduleCenter) so the Row-2 centring measures
+      // the Grid/Split/Gantt chip alone. The badge span is always mounted (visibility, never conditional) so a
+      // count arriving late never shifts a sibling.
+      render: () => (
+        <button onClick={() => post({ type: "planar:review-toggle" })} aria-pressed={toolbar.reviewOpen}
+          title="Review suggested updates from forwarded emails" aria-label="Review suggested updates from forwarded emails"
+          style={{ ...btn(toolbar.reviewOpen || toolbar.reviewCount > 0), marginRight: 1 }}>
+          <Glyph size={15}><polyline points="22 12 16 12 14 15 10 15 8 12 2 12" /><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></Glyph>
+          <span aria-hidden={!(toolbar.reviewCount > 0)} style={{
+            fontSize: 11, fontWeight: 700, color: "var(--on-accent)", background: ACCENT, borderRadius: 20,
+            padding: "1px 7px", minWidth: 18, textAlign: "center", lineHeight: 1.5,
+            visibility: toolbar.reviewCount > 0 ? "visible" : "hidden",
+          }}>{toolbar.reviewCount > 0 ? toolbar.reviewCount : 0}</span>
+        </button>
+      ),
+    });
+  }
+  if (showIf(toolbar.zoomable)) {
+    items.push({
+      id: "zoom", label: "Zoom", priority: 20, ghost: !toolbar.zoomable, collapsible: true,
+      menuRows: [
+        { id: "zoom-out", label: `Zoom out (${toolbar.zoomPct}%)`, onSelect: () => post({ type: "planar:zoom", dir: "out" }) },
+        { id: "zoom-in", label: "Zoom in", onSelect: () => post({ type: "planar:zoom", dir: "in" }) },
+      ],
+      render: () => (
+        <div style={{ display: "flex", alignItems: "center", gap: 1, paddingRight: 7, marginRight: 1, borderRight: "1px solid var(--chrome-divider)" }}>
           <button title="Zoom out" aria-label="Zoom out" tabIndex={toolbar.zoomable ? 0 : -1} onClick={() => post({ type: "planar:zoom", dir: "out" })} style={{ ...btn(false), padding: "0 8px", fontSize: 15 }}>−</button>
           <span style={{ fontSize: 11, color: "var(--chrome-text)", width: 36, textAlign: "center", userSelect: "none" }}>{toolbar.zoomPct}%</span>
           <button title="Zoom in" aria-label="Zoom in" tabIndex={toolbar.zoomable ? 0 : -1} onClick={() => post({ type: "planar:zoom", dir: "in" })} style={{ ...btn(false), padding: "0 8px", fontSize: 15 }}>+</button>
         </div>
-      )}
-      <ExportMenu post={post} />
-      <span style={{ width: 1, height: 20, background: "var(--chrome-divider)", flex: "none", margin: "0 2px" }} />
-      <IconCmd title="Version history — browse & restore snapshots" cmd="planar:history" post={post} active={toolbar.activePanel === "history"}>
-        <path d="M1 4v6h6" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" /><polyline points="12 7 12 12 15 14" />
-      </IconCmd>
+      ),
+    });
+  }
+  items.push({
+    id: "export", label: "Export", priority: 60,
+    menuRows: [
+      { id: "export-pdf", label: "Export · PDF / Print Exhibit", onSelect: () => post({ type: "planar:export", mode: "pdf" }) },
+      { id: "export-html", label: "Export · Web Snapshot (.html)", onSelect: () => post({ type: "planar:export", mode: "html" }) },
+    ],
+    render: () => <ExportMenu post={post} />,
+  });
+  items.push({
+    id: "history", label: "Version history", priority: 70, sepBefore: true, active: toolbar.activePanel === "history",
+    onSelect: () => post({ type: "planar:history" }),
+    render: () => (
+      <>
+        <span aria-hidden="true" style={{ width: 1, height: 20, background: "var(--chrome-divider)", flex: "none", margin: "0 4px 0 2px" }} />
+        <IconCmd title="Version history — browse & restore snapshots" cmd="planar:history" post={post} active={toolbar.activePanel === "history"}>
+          <path d="M1 4v6h6" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" /><polyline points="12 7 12 12 15 14" />
+        </IconCmd>
+      </>
+    ),
+  });
+  items.push({
+    id: "contacts", label: "Contacts", priority: 65, active: toolbar.activePanel === "contacts",
+    onSelect: () => post({ type: "planar:contacts" }),
+    render: () => (
       <IconCmd title="Contacts" cmd="planar:contacts" post={post} active={toolbar.activePanel === "contacts"}>
         <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
       </IconCmd>
-      <button onClick={() => post({ type: "planar:automation" })} title="Automation rules" aria-pressed={toolbar.activePanel === "automation"} style={btn(toolbar.activePanel === "automation")}>
+    ),
+  });
+  items.push({
+    id: "automation", label: "Automation rules", priority: 75, active: toolbar.activePanel === "automation",
+    onSelect: () => post({ type: "planar:automation" }),
+    render: ({ iconOnly }) => (
+      <button onClick={() => post({ type: "planar:automation" })} title="Automation rules" aria-label={iconOnly ? "Automation rules" : undefined} aria-pressed={toolbar.activePanel === "automation"} style={btn(toolbar.activePanel === "automation")}>
         <Glyph size={13}><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></Glyph>
-        Automation
+        {iconOnly ? null : "Automation"}
       </button>
-      {/* NEW-1 — reserved (mounted, visibility-toggled) rather than conditionally MOUNTED only
-          while unsettled, exactly like the zoom block above, and for a reason that is easy to
-          miss: this RIGHT ZONE is anchored to the row's right edge (the center zone is the only
-          growing item, so this one's own left edge sits wherever the center zone happens to end).
-          Widening this zone by inserting Format therefore moves EVERY control already in it,
-          including ones that render BEFORE Format in the markup — "Version history" measurably
-          shifted left the moment `section` first confirmed "projects" (the same message that also
-          reveals Format), not because anything moved Version history's own markup, but because
-          the zone it sits in grew and is pinned by its right edge, not its left. Once settled, a
-          genuine Dashboard↔Projects section switch is the user's own doing and reflows normally,
-          same as before this fix. */}
-      {(toolbar.settled ? projects : true) && (
-        <span aria-hidden={!projects} style={{ display: "inline-flex", visibility: projects ? "visible" : "hidden" }}>
-          <IconCmd title="Format — row height & bar labels" cmd="planar:format" post={post} active={toolbar.activePanel === "format"}>
-            <line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" />
-          </IconCmd>
-        </span>
-      )}
+    ),
+  });
+  if (showIf(projects)) {
+    items.push({
+      id: "format", label: "Format — row height & bar labels", priority: 40, ghost: !projects, active: toolbar.activePanel === "format",
+      onSelect: () => post({ type: "planar:format" }),
+      render: () => (
+        <IconCmd title="Format — row height & bar labels" cmd="planar:format" post={post} active={toolbar.activePanel === "format"}>
+          <line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" />
+        </IconCmd>
+      ),
+    });
+  }
+  items.push({
+    id: "settings", label: "Settings", priority: 90, active: toolbar.activePanel === "settings",
+    onSelect: () => post({ type: "planar:settings" }),
+    render: () => (
       <IconCmd title="Settings" cmd="planar:settings" post={post} active={toolbar.activePanel === "settings"}>
         <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><circle cx="12" cy="12" r="3" />
       </IconCmd>
-    </>
-  );
+    ),
+  });
+  return <PriorityToolbar name="schedule-actions" items={items} moreLabel="More schedule actions" settled={!!toolbar.settled} />;
 }

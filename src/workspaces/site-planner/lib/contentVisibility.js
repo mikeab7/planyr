@@ -115,6 +115,25 @@ export function elHidden(hidden, el) {
 }
 
 /**
+ * NEW-1 (B2171xxx) — is the thing a selection/hover REFERENCE points at currently hidden by a View
+ * group? THE one gate every piece of on-canvas chrome (grips, +/− clusters, selection rings) asks, so
+ * a handle can never outlive the object it edits. `ref` is `{ kind, id }` like `sel`/`multi` members;
+ * `els` is the model's element array (an el ref is resolved to its type's row).
+ */
+export function refHidden(hidden, els, ref) {
+  if (!ref || !hidden) return false;
+  if (ref.kind === "el") {
+    const el = (els || []).find((e) => e.id === ref.id);
+    return !!el && elHidden(hidden, el);
+  }
+  if (ref.kind === "parcel") return isHidden(hidden, "parcels");
+  if (ref.kind === "markup") return isHidden(hidden, "markups");
+  if (ref.kind === "measure") return isHidden(hidden, "measures");
+  if (ref.kind === "callout") return isHidden(hidden, "callouts");
+  return false;
+}
+
+/**
  * The acreage chip's TWO independent authorities, composed in one place.
  *
  * `parcel.chipHidden` (B1404) is the per-lot choice made from the parcel's right-click menu and it

@@ -24,23 +24,22 @@
 
 /* Where this boundary CAME FROM. `county` = a county GIS identify · `deed` = promoted from a
  * plotted metes-and-bounds description · `drawn` = digitized by hand. */
+import { originKind } from "./parcelOrigin.js";
+
 export const PARCEL_SOURCES = ["county", "deed", "drawn"];
 
 /* The provenance of a parcel, including one saved before the field existed: a parcel carrying a
  * county appraisal record (`attrs`) or a county GIS key came from the county; anything else was
  * drawn. Never guesses `deed` — that is stamped only at promotion time (NEW-2), because a
  * deed-derived boundary is indistinguishable from a hand-drawn one after the fact. */
-export function parcelProvenance(pc) {
-  const s = pc && typeof pc.source === "string" ? pc.source : null;
-  if (s && PARCEL_SOURCES.includes(s)) return s;
-  return (pc && (pc.attrs || pc.gisKey)) ? "county" : "drawn";
-}
+export const parcelProvenance = (pc) => originKind(pc); // the one rule lives in parcelOrigin.js (boot-safe leaf)
 
 /* How the provenance reads on screen. `short` rides the parcel row; `long` explains it. */
 export const PROVENANCE_LABEL = {
   county: { short: "County record", long: "Boundary and details came from the county appraisal district." },
   deed: { short: "From deed", long: "Boundary plotted from a metes-and-bounds legal description, not from county mapping." },
   drawn: { short: "Drawn by hand", long: "Boundary digitized by hand — not a county record and not a survey." },
+  combined: { short: "Combined", long: "Made by combining county lots — each original is kept and can be split back out." },
 };
 export const provenanceLabel = (pc) => PROVENANCE_LABEL[parcelProvenance(pc)] || PROVENANCE_LABEL.drawn;
 

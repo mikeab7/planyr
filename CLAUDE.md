@@ -629,6 +629,15 @@ were split out of this file.
     (`LANDSCAPE_PHONE_QUERY`, `src/workspaces/food/lib/phoneLayout.js`: landscape + short + touch);
     `ui-audit/verify-food-landscape.mjs` fails if the pin is hidden or the sheet comes back. (B2046224 ×4.)
 
+18. **(2026-10-05) Combine and Split on parcels NEVER ask for a name, and the map toolbar and the Parcels panel are ONE
+    action.** Michael, verbatim: "Owner is on the fly; never block on a name" — a combine auto-names the tract
+    ("Tract A", "Tract B", …) and a split names its pieces "<name> · A", "· B"; renaming is an optional pencil afterwards,
+    never a prompt. Both operations show an Undo toast, keep the originals reachable (Restore) and never alter county data.
+    And: "if I do the split without ever coming into the left-hand menu, just from the right-hand menu, it'll still work,
+    same thing with merge" — the map's Split tool / Merge banner and the panel call the same single functions
+    (`site-planner/lib/parcelOps.js`; `test/parcelOpsParity.test.js` fails if a second implementation grows back). In the
+    Parcels table the checkbox only SELECTS rows; the eye includes/excludes a parcel from the site total. (B2134368–B2134370.)
+
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by
 Michael (industrial developer, Dallas/Houston). It is becoming a multi-workspace
@@ -1548,6 +1557,20 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
   spec and nothing in the session contradicted it. Caught by hand; should have been caught by the
   repo.) The reciprocal check lives in the Definition of Done below: before opening a PR, confirm
   nothing built contradicts `## Owner product constraints`, and say so.
+
+- **ONE SHELL, ONE TOOLBAR, ONE SWEEP (owner rule, 2026-10-05, B2090336–B2090338: "I want the frame to always work
+  regardless of the size of computer or screen")** — browser zoom and OS display scaling SHRINK the CSS viewport, so
+  "big monitor" never means "wide viewport". (1) **Any new header, tab-row or toolbar control goes through the shared
+  shell/toolbar**: the header rows live in `AppHeader` (never wrap; Row 2 is `nowrap`, every zone is handed a budget
+  measured on the row's own box), and every action row is a `PriorityToolbar` (`src/shared/ui/PriorityToolbar.jsx`, pure
+  rules in `toolbarPlan.js`) — labels drop to icons, then the lowest-priority items fold into a More menu; never a
+  second row, never clipped, never sideways scroll on desktop. Declare each item's `priority`; do not write a
+  per-module media query or a hard-coded chrome width. Use a ResizeObserver / container query on the element's own
+  box for chrome inside a resizable region, never window width. (2) **The width sweep is a required CI gate**
+  (`ui-audit/verify-width-sweep.mjs`, verdict in `ui-audit/lib/widthSweep.mjs`): a NEW MODULE ROUTE MUST BE ADDED to its
+  `ROUTES` list in the same commit, and a strip that scrolls on purpose must say why with `data-sweep-exempt="<reason>"`.
+  A control that owns a shared ref or a portaled menu must honour `render({ measuring })` (the hidden measuring copies must
+  not steal it). Phone `narrow` behaviour is unchanged by this rule.
 
 ### Definition of Done (every item)
 1. **Implemented** — the whole job, including the hard / real part (STANDING RULE #1). No diagnosis-only.

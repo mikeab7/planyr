@@ -14,12 +14,13 @@ import { menuPanelStyle } from "../../shared/ui/controls.jsx";
 import {
   parseNavState, deriveCurrentProject, findBySiteId, needsScheduleCarryIn,
   dashboardNavActions, shouldShowLinkPanel, shouldAdoptLinkedSiteIntoRoute, shouldNeutralizeToReports, isPickShowing,
-  isGridMismatched, newProjectAction, resolveReportRowNavigation,
+  isGridMismatched, newProjectAction, resolveReportRowNavigation, scheduleListState, parseLoadState,
 } from "./lib/navState.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { scheduleSaveState } from "./lib/saveState.js";
 import { ScheduleCenter, ScheduleActions } from "./components/ScheduleToolbar.jsx";
 import { planScheduleHintSync } from "../../shared/schedule/scheduleLinkHints.js";
+import { publishLiveSchedules } from "../../shared/schedule/liveScheduleIndex.js";
 import { allProjectNames } from "../../shared/names/names.js";
 import { listProjects, warmProjectsIfEmpty, suggestNameMatch, onProjectsChanged } from "../../shared/projects/projects.js";
 import { resolveControlledId } from "../../shared/projects/projectModel.js";
@@ -28,6 +29,7 @@ import NewScheduleModal from "./components/NewScheduleModal.jsx";
 import ScheduleOwnerList from "./components/ScheduleOwnerList.jsx";
 import ScheduleCrumb from "./components/ScheduleCrumb.jsx";
 import AgendaView from "./components/AgendaView.jsx";
+import ScheduleLoadState from "./components/ScheduleLoadState.jsx";
 
 export default function Scheduler({
   shellModule, onShellSwitch, authControl, accountActive = false,
@@ -89,6 +91,24 @@ export default function Scheduler({
   // render gate below.
   const navConfirmedRef = useRef(false);
   const [navConfirmed, setNavConfirmed] = useState(false);
+  // NEW-1 (SCHED-EMPTY-ON-SLOW-LOAD, 2026-10-06) — has the schedule LIST itself ever arrived? A one-way
+  // latch set by the first genuine `planar:nav-state` (the embed emits it only once its document has
+  // really loaded — never for a failed read). `ready` is NOT this: it flips on a 2.5 s fallback timer so
+  // a broken embed can't hold a spinner, which is exactly why a slow cloud read used to read as "zero
+  // schedules". Everything that claims "no schedule" or offers Create is gated on this; see
+  // navState.js scheduleListState.
+  const [listEverLoaded, setListEverLoaded] = useState(false);
+  // The embed's own `planar:load-state` "failed" report (its read errored or timed out; it keeps
+  // retrying itself). Cleared by the next real nav-state or by pressing Retry.
+  const [reportedFailure, setReportedFailure] = useState(false);
+  const loadStartRef = useRef(Date.now());
+  const iframeLoadedRef = useRef(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (listEverLoaded) return undefined;
+    const t = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [listEverLoaded]);
   const setNavConfirmedBoth = useCallback((v) => { navConfirmedRef.current = v; setNavConfirmed(v); }, []);
   // B388 — the embedded app's action toolbar, lifted into this shell header. The embedded app
   // reports its live toolbar state up over the bridge (planar:toolbar-state); the lifted
@@ -217,8 +237,12 @@ export default function Scheduler({
       // parseNavState validates source/type and SANITIZES the project list to plain
       // {id,name,linkedSiteId,linkedSiteName} objects (B380), so the breadcrumb can never
       // deref an undefined entry.
+      const loadMsg = parseLoadState(e.data);
+      if (loadMsg) { setReportedFailure(loadMsg === "failed"); return; }
       const nav = parseNavState(e.data);
       if (!nav) return;
+      setListEverLoaded(true);   // a genuine nav-state ⇒ the list has really arrived (see listEverLoaded)
+      setReportedFailure(false);
       // B1614528 — capture BEFORE overwriting: was this load's last CONFIRMED section "reports"?
       // See resolveReportRowNavigation's header (navState.js) for why this is the safe signal.
       const cameFromReports = prevConfirmedSectionRef.current === "reports";
@@ -231,6 +255,8 @@ export default function Scheduler({
       // nav-state (not from one-shot link events), so unlink / relink / delete / two-schedule sites
       // all converge and stale hints already on disk heal. Source wins; never clears on an empty list.
       try {
+        if (nav.projects.length) publishLiveSchedules(nav.projects); // (an empty list = not loaded yet)
+        // NEW-2 — the switcher's calendar icon verifies against this
         for (const op of planScheduleHintSync(nav.projects, listProjects())) {
           onScheduleLinkChanged?.(op.groupId, { scheduleProjectId: op.scheduleProjectId, name: op.name });
         }
@@ -329,6 +355,8 @@ export default function Scheduler({
     // else so the render gate (isGridMismatched's `navConfirmed` arg) fails closed for the whole
     // window between this load and that document's own first nav-state.
     setNavConfirmedBoth(false);
+    iframeLoadedRef.current = true;
+    loadStartRef.current = Date.now();   // the slow/failed clock runs from THIS document's load
     // B1614528 — this load hasn't confirmed any section yet, so a first nav-state reporting
     // "projects" must never be mistaken for a came-from-reports transition (ambient aPid drift
     // vs. a genuine Task Report row click — see resolveReportRowNavigation's header).
@@ -701,7 +729,18 @@ export default function Scheduler({
   // signals now resolve on the same schedule (see markToolbarReadyFallback above), so this never
   // waits any longer on a slow/broken embed than `ready` alone already did.
   const iframeFullyReported = ready && toolbar.ready;
-  const showEmptyState = !pickShowing && shouldShowLinkPanel({ ready: iframeFullyReported, projectId, linkedSchedule, routedSiteName });
+  // NEW-1 (SCHED-EMPTY-ON-SLOW-LOAD) — three list states. Only a LOADED list may claim "no schedule"
+  // and offer Create; loading / slow / could-not-load get ScheduleLoadState (Retry only, writes nothing).
+  const listState = scheduleListState({ listLoaded: listEverLoaded, reportedFailure, waitedMs: nowMs - loadStartRef.current });
+  const listLoaded = listState === "loaded";
+  const showLoadState = ready && !listLoaded;
+  const showEmptyState = !pickShowing && shouldShowLinkPanel({ ready: iframeFullyReported, projectId, linkedSchedule, routedSiteName, listLoaded });
+  const retryScheduleLoad = () => {
+    loadStartRef.current = Date.now(); setNowMs(Date.now()); setReportedFailure(false);
+    post({ type: "planar:retry-load" });
+    // The embed's own document never finished loading (hung): re-load it — a read that writes nothing.
+    if (!iframeLoadedRef.current) { try { iframeRef.current?.contentWindow?.location.reload(); } catch (_) {} }
+  };
   const suggestedMatch = showEmptyState ? suggestNameMatch(routedSiteName, projects) : null;
 
   // B566 — the Schedule workspace now shows the SAME unified top-right cloud sync badge as the
@@ -835,6 +874,7 @@ export default function Scheduler({
             // back to ScheduleCrumb's own "Select a schedule" label, matching the empty state
             // rendered below it.
             activeId={showEmptyState ? null : activeId}
+            listLoaded={listLoaded}
             siteId={projectId}
             siteName={routedSiteName}
             onSelect={selectSchedule}
@@ -878,14 +918,14 @@ export default function Scheduler({
           src="/sequence/"
           title="Sequence Planyr"
           onLoad={onIframeLoad}
-          aria-hidden={showEmptyState || gridMismatched || undefined}
+          aria-hidden={showEmptyState || gridMismatched || showLoadState || undefined}
           style={{
             position: "absolute", inset: 0, border: "none", width: "100%", height: "100%", display: "block",
-            visibility: (showEmptyState || gridMismatched) ? "hidden" : "visible",
-            pointerEvents: (showEmptyState || gridMismatched) ? "none" : "auto",
+            visibility: (showEmptyState || gridMismatched || showLoadState) ? "hidden" : "visible",
+            pointerEvents: (showEmptyState || gridMismatched || showLoadState) ? "none" : "auto",
           }}
         />
-        {(showLoader || (!showEmptyState && gridMismatched)) && (
+        {(showLoader || (!showEmptyState && !showLoadState && gridMismatched)) && (
           <div
             aria-hidden={ready && !gridMismatched}
             style={{
@@ -918,6 +958,23 @@ export default function Scheduler({
             original fix is unchanged; only the layout that combines it with the empty state moved.
             Once a schedule IS loaded (showEmptyState false), none of this renders — the identical
             list is reachable instead from the Row-1 breadcrumb's schedule crumb. */}
+        {showLoadState && (
+          <div
+            data-testid="schedule-load-shell"
+            style={{
+              position: "absolute", inset: 0, zIndex: 6, overflow: "auto",
+              background: "var(--surface-page)", color: "var(--text-primary)",
+              display: "flex", alignItems: "center", justifyContent: "center", padding: 24, boxSizing: "border-box",
+            }}
+          >
+            <ScheduleLoadState
+              state={listState}
+              siteName={routedSiteName}
+              hasScheduleHint={!!(routedSite && routedSite.scheduleProjectId != null)}
+              onRetry={retryScheduleLoad}
+            />
+          </div>
+        )}
         {showEmptyState && (
           <div
             data-testid="schedule-empty-shell"

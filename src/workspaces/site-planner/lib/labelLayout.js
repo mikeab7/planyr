@@ -27,11 +27,26 @@ export const boxesOverlap = (a, b, pad = 0) =>
 // drop; the trailing lines — dimensions — drop first). Keep as many leading lines as fit
 // within `maxH` px of vertical room, always keeping at least one (you never fully blank a
 // label here — collision resolution decides full hiding).
-export const fitLines = (lines, lh, maxH) => {
+export const fitLines = (lines, lh, maxH, keepLine) => {
   if (!lines || lines.length === 0) return [];
   let keep = lines.length;
   if (Number.isFinite(maxH) && lh > 0) keep = Math.min(keep, Math.floor(maxH / lh));
-  return lines.slice(0, Math.max(1, keep));
+  return takeLines(lines, Math.max(1, keep), keepLine);
+};
+
+// The first `n` lines — except that an item may name ONE line (`keepLine`, an index) that is the point
+// of the label and must be the LAST to go. Lines still come back in their authored order; the line
+// dropped first is the last one that is not the kept line. (A trailer row's count is its second line;
+// without this a row too shallow for two lines lost the very number the label exists to show and kept
+// the name, so a shallow row read as unlabelled beside a deep one — NEW-1, 2026-10-06.)
+export const takeLines = (lines, n, keepLine) => {
+  if (!(n < lines.length)) return lines.slice();
+  if (!Number.isInteger(keepLine) || keepLine < 0 || keepLine >= lines.length) return lines.slice(0, n);
+  const idx = lines.map((_, i) => i);
+  while (idx.length > n) {
+    for (let k = idx.length - 1; k >= 0; k--) { if (idx[k] !== keepLine) { idx.splice(k, 1); break; } }
+  }
+  return idx.map((i) => lines[i]);
 };
 
 /* ⛔ B548818 — THE BOX IS SIZED FROM MEASURED TEXT, NOT A CHARACTER COUNT.
@@ -139,13 +154,13 @@ export const layoutLabelsSolve = (items, opts = {}) => {
     // this fallback at the shared-engine boundary because older/export callers may not yet carry
     // the explicit flag through their candidate projection.
     const hideOverflow = it.hideOverflow || forms.some((f) => f.lines.some((line) => /Trailer Parking/.test(line)));
-    const capped = forms.map((f) => ({ rung: f.rung, lines: fitLines(f.lines, it.lh, halfH * 2) })); // LOD height cap
+    const capped = forms.map((f) => ({ rung: f.rung, lines: fitLines(f.lines, it.lh, halfH * 2, it.keepLine) })); // LOD height cap
     const candidates = [];
     const seenForm = new Set();
     const deepest = Math.max(...capped.map((f) => f.lines.length));
     for (let drop = 0; drop < deepest; drop++) {
       for (const f of capped) {
-        const lines = f.lines.slice(0, Math.max(1, f.lines.length - drop));
+        const lines = takeLines(f.lines, Math.max(1, f.lines.length - drop), it.keepLine);
         const key = `${lines.length}|${lines.join(" ")}`;
         if (seenForm.has(key)) continue;
         seenForm.add(key);
@@ -168,7 +183,11 @@ export const layoutLabelsSolve = (items, opts = {}) => {
         // shortest readable form no longer fits inside the strip.
         const box = boxOf(it.cx, it.cy, w, h);
         if (free(box)) {
-          if (w <= halfW * 2 && h <= halfH * 2) { chosen = { box, lines: cand.lines, x: it.cx, y: it.cy, leader: null, rung: cand.rung }; break; }
+          // The kept line standing ALONE (`keepLine` set, one line left) may overrun a strip too thin
+          // for even one line: it is the point of the label, so across the strip it is allowed to
+          // spill rather than vanish (it must still fit ALONG the strip, and still win a free spot).
+          const keptAlone = Number.isInteger(it.keepLine) && cand.lines.length === 1;
+          if (w <= halfW * 2 && (h <= halfH * 2 || keptAlone)) { chosen = { box, lines: cand.lines, x: it.cx, y: it.cy, leader: null, rung: cand.rung }; break; }
           if (!hideOverflow && !overflow) overflow = { box, lines: cand.lines, x: it.cx, y: it.cy, leader: null, rung: cand.rung };
         }
         continue;
@@ -291,7 +310,7 @@ const itemSig = (it) => [
   /* B548818 — measured widths are an INPUT to placement, so they belong in the memo key: two
      frames with identical text but different measured widths must not be merged. */
   it.textW ? Object.entries(it.textW).map(([k, v]) => `${k}=${v}`).join("|") : "-",
-  it.rot || 0, it.noLeader ? 1 : 0, it.hideOverflow ? 1 : 0, it.mustLabel ? 1 : 0, it.importance,
+  it.rot || 0, it.noLeader ? 1 : 0, it.hideOverflow ? 1 : 0, it.mustLabel ? 1 : 0, Number.isInteger(it.keepLine) ? it.keepLine : "-", it.importance,
   ringToken(it.ring), it.ringPpf, it.ringOrigin ? `${it.ringOrigin.x},${it.ringOrigin.y}` : "-",
   (it.lines || []).map(lineSig).join(""),
 ].join("");

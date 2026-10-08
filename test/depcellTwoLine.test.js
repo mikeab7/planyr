@@ -105,7 +105,7 @@ describe("B655552 — DepCell two-line threshold, never a partial second line", 
 
   it("below the threshold, exactly ONE line renders — never a doomed partial second line", () => {
     expect(depCellSrc, "visibleCount must collapse to 1 when canTwoLine is false")
-      .toMatch(/const visibleCount = canTwoLine \? 2 : 1;/);
+      .toMatch(/const visibleCount = canTwoLine && !narrow \? 2 : 1;/);
   });
 
   it("the 2-slot layout has NO vertical padding (defect A's fix: 2 natural-height lines must fit the row's height exactly, whatever that height now is)", () => {
@@ -123,8 +123,8 @@ describe("B655552 — DepCell two-line threshold, never a partial second line", 
      * `if (false && items.length === 1 && canTwoLine) {`, since that string still CONTAINS the
      * matched substring. Mutation-caught during the B655552 close-out audit: the loose form let
      * exactly that mutation through undetected. */
-    expect(depCellSrc, "the single-item branch must exist, gated on EXACTLY `if (items.length === 1 && canTwoLine) {` — not merely contain that text as a substring of a disabled condition")
-      .toMatch(/if \(items\.length === 1 && canTwoLine\) \{/);
+    expect(depCellSrc, "the single-item branch must exist, gated on EXACTLY `if (items.length === 1 && canTwoLine && !narrow) {` — not merely contain that text as a substring of a disabled condition")
+      .toMatch(/if \(items\.length === 1 && canTwoLine && !narrow\) \{/);
     expect(depCellSrc, "it must use line-clamp to allow up to 2 lines")
       .toMatch(/WebkitLineClamp:2/);
     /* Scoped to the line-clamp SPAN's own occurrence specifically (`whiteSpace:"normal"` also
@@ -179,7 +179,7 @@ describe("B655552 (round 2) — hovering a predecessor/successor cell reveals ev
 
   it("both DepCell render branches use the computed full title, not the caller's raw (often name-less) title prop", () => {
     expect(depCellSrc, "the wrap branch (single item) must use fullTitle")
-      .toMatch(/<div ref=\{ref\} title=\{fullTitle\}/);
+      .toMatch(/<div ref=\{setRef\} data-dep-lines="2" title=\{fullTitle\}/);
     // The multi-slot branch's own <div ref={ref} title={fullTitle} ...> — same literal text, so a
     // single occurrence count below confirms BOTH branches (wrap + multi-slot) were updated, since
     // the old `title={title || undefined}` form must be gone entirely from DepCell.
@@ -204,7 +204,7 @@ describe("B655552 (round 2) — hovering a predecessor/successor cell reveals ev
 
 describe("B655552 (round 3) — hanging indent so a wrapped single link reads as ONE item, never a second entry", () => {
   const wrapBranchSrc = depCellSrc.slice(
-    depCellSrc.indexOf("if (items.length === 1 && canTwoLine) {"),
+    depCellSrc.indexOf("if (items.length === 1 && canTwoLine && !narrow) {"),
     depCellSrc.indexOf("const slots = Array.from(")
   );
 
@@ -250,5 +250,47 @@ describe("B655552 — export parity (buildPDFHtml)", () => {
   it("the PDF export's predecessors column is still a plain id list (no name/line-wrap logic to diverge)", () => {
     const matches = seq.match(/case "predecessors": return \(t\.predecessors\|\|\[\]\)\.map\(p=>p\.id\|\|p\)\.join\(", "\);/g) || [];
     expect(matches.length, "buildPDFHtml's predecessors cases must still be the bare id-list form").toBeGreaterThan(0);
+  });
+});
+
+// B2132257 — owner: "At my normal ultrawide ... I want it to be two lines, but if we get small enough ...
+// the predecessor and successor text [can be] one line." The switch follows the CELL'S OWN measured width.
+describe("B2132257 — one line only when the column itself is too narrow, with hysteresis", () => {
+  const narrowNext = new Function(
+    `${seq.match(/const DEPCELL_ONE_LINE_BELOW = \d+;/)[0]}
+     ${seq.match(/const DEPCELL_TWO_LINE_AT = \d+;/)[0]}
+     ${bodyOf(seq, "depCellNarrowNext")}
+     return depCellNarrowNext;`)();
+
+  it("the default 148-wide column and every wider one stay two-line", () => {
+    for (const w of [148, 200, 260, 600]) expect(narrowNext(false, w), `w=${w}`).toBe(false);
+    for (const w of [148, 200, 260, 600]) expect(narrowNext(true, w), `w=${w} (was narrow)`).toBe(false);
+  });
+  it("a column under the one-line threshold goes one-line", () => {
+    for (const w of [40, 96, 109]) expect(narrowNext(false, w), `w=${w}`).toBe(true);
+  });
+  it("hysteresis: the dead band holds whichever mode the cell was already in (no flicker at the boundary)", () => {
+    for (const w of [110, 118, 125]) { expect(narrowNext(false, w)).toBe(false); expect(narrowNext(true, w)).toBe(true); }
+  });
+  it("an unmeasured cell (width 0) keeps its mode; the two-line form is the default", () => {
+    expect(narrowNext(false, 0)).toBe(false);
+    expect(narrowNext(true, 0)).toBe(true);
+    expect(depCellSrc).toMatch(/useState\(false\)/);
+  });
+  it("thresholds leave a real dead band, and the default column width sits clear above it", () => {
+    const below = Number(seq.match(/const DEPCELL_ONE_LINE_BELOW = (\d+);/)[1]);
+    const at = Number(seq.match(/const DEPCELL_TWO_LINE_AT = (\d+);/)[1]);
+    const dflt = Number(seq.match(/\{k:"predecessors",\s+l:"Predecessor",\s+w:(\d+)/)[1]);
+    expect(at).toBeGreaterThan(below);
+    expect(dflt, "the default Predecessor column must stay two-line").toBeGreaterThanOrEqual(at);
+  });
+  it("the mode comes from the cell's own box (ResizeObserver on the element), never the window", () => {
+    expect(depCellSrc).toMatch(/new ResizeObserver\(measure\)/);
+    expect(depCellSrc).toMatch(/cellEl\.offsetWidth/);
+    expect(depCellSrc).not.toMatch(/innerWidth|matchMedia/);
+  });
+  it("the one-line form is vertically centred and tagged for the geometry gate", () => {
+    expect(depCellSrc).toMatch(/justifyContent: narrow \? "center" : "flex-start"/);
+    expect(depCellSrc).toMatch(/data-dep-lines=\{narrow \? "1" : "2"\}/);
   });
 });

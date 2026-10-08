@@ -293,6 +293,15 @@ no swallowed `catch` that reads as success. Concretely, in the sync engine:
   `assembly-tear-detected`/`-healed`/`-persisted` with ids and the delta — its own header states
   this was learned the hard way, after "eight merged PRs each closed one interleaving" with no
   observer, so nobody but the owner noticed a ninth recurrence.
+- **Closing a plan DRAINS its element writes; it never hard-stops them (2026-10-06).** A plan switch
+  unmounts SitePlanner (it is keyed by plan id), and its teardown used to call a bare `stop()`,
+  silently dropping whatever was not yet on the wire — a debounced update, a backoff retry, and (the
+  measured case) a brand-new plan's first markup, which was never even queued because the engine had
+  not seeded yet. Teardown is now `drainElementsOnTeardown` → `stop({ drain: true })`, plus
+  `drainSeed(rows, rows ∪ never-synced local)` for a never-seeded engine — the same after-seed rule
+  as `refetchReplace`, so inv. 3 (rows canonical) and inv. 12 (tombstones) hold. A drain accepts no
+  new diffs, mutes canvas callbacks, and reports `element-drain` / `element-drain-failed`.
+  Proof: `test/elementSyncDrainOnStop.test.js`.
 
 ---
 
@@ -318,6 +327,14 @@ no swallowed `catch` that reads as success. Concretely, in the sync engine:
   deleting the row I think it is" vs. "did I lose a race against an edit").
 
 ---
+
+**A project and its schedule live and die together (B2087648/B2087649, 2026-10-05).** `schedules.linked_site_id` is the
+source; `sites.data.scheduleProjectId` is a mirror of it. Both directions are enforced at the DATABASE by
+`site-planner/db/project_schedule_cascade.sql`, not by a client remembering: soft-deleting a project's LAST live plan
+soft-deletes its schedules with the same `deleted_at` (tag `schedules.deleted_with_project`), restoring the project restores
+exactly the tagged ones, and a schedule leaving (soft or hard delete) clears the plan hints naming it (with a `version`
+bump). Readers still verify: `scheduleLiveness.dropSchedulesOfDeletedProjects` (Dashboard) and
+`scheduleLinkHints.resolveScheduleHint` (switcher icon). Proof: `db/test/project_schedule_cascade.test.sql`.
 
 ## 7. This session's findings, stated plainly (so a ninth round is never scheduled on stale evidence)
 

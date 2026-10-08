@@ -24,7 +24,7 @@ describe("one header row per rail panel", () => {
     expect(chrome).toContain("data-panel-actions");
     expect(chrome).toMatch(/textOverflow: "ellipsis"/);
     expect(floating).toContain("actionsRef={actionsRef}");
-    expect(src).toContain("subtitle={panelHeaderSubtitle}");
+    expect(src).toContain("panelHeaderSubtitle}"); // Parcels rework: the Parcels header drops the subtitle, every other panel keeps it
   });
   it("Yield and Drainage no longer draw a header of their own", () => {
     for (const fn of ["function YieldPanel(", "function DrainagePanel("]) {

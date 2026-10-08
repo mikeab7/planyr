@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseSheetScale, ftPerPointForScale } from "../src/workspaces/site-planner/lib/overlayScale.js";
+import { parseSheetScale, ftPerPointForScale } from "../src/shared/overlay/overlayScale.js";
 
 describe("parseSheetScale — Document Review stated-scale auto-calibration (B267)", () => {
   it("reads engineer's scales (civil)", () => {

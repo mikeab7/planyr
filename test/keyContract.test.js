@@ -536,7 +536,7 @@ describe("no component keydown handler routes around keyScope", () => {
   const BANNED = /onKeyDown=\{[^}]*?=>\s*\{\s*e\.stopPropagation\(\);/;
   const filesToSweep = [
     "../src/workspaces/site-planner/SitePlanner.jsx",
-    "../src/workspaces/site-planner/components/ParcelRecordPanel.jsx",
+    "../src/workspaces/site-planner/components/ParcelPage.jsx",
     "../src/workspaces/site-planner/components/SetLocationDialog.jsx",
     // NEW-1 (B1012832) — the project-breadcrumb's inline rename editor (RenameInput) and the
     // project-switcher search box: both live inside an AnchoredMenu portal, and neither had ever

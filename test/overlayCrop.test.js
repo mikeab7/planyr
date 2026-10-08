@@ -10,7 +10,7 @@ import {
   MIN_POLY_VERTICES, MAX_POLY_VERTICES, cropKind, polygonAreaPx, clampPolyPoints, isUsablePoly, normalizePolyCrop,
   rectToPolyPoints, polyPointsToRect, isValidCropShape, normalizeCropShape, clipPathValueForCrop,
   constrainOctant, nearestOnSegment, savedRectOf, savedPtsOf, isFullImagePoly,
-} from "../src/workspaces/site-planner/lib/overlayCrop.js";
+} from "../src/shared/overlay/overlayCrop.js";
 
 describe("clampCropRect", () => {
   it("passes through an already-valid rect unchanged", () => {
@@ -390,7 +390,7 @@ describe("MAX_POLY_VERTICES — the stated ceiling", () => {
 
 describe("geo invariant — a crop (rect OR poly) cannot move a surviving pixel's ground position", () => {
   it("imagePointToLatLon's signature carries no crop parameter", async () => {
-    const mod = await import("../src/shared/sitePlans/lib/overlayGeoref.js");
+    const mod = await import("../src/shared/overlay/overlayPlacement.js");
     // arity = declared parameter count; a crop argument would show up here if one existed.
     expect(mod.imagePointToLatLon.length).toBeLessThanOrEqual(5);
     expect(mod.imagePointToLatLon.toString()).not.toMatch(/\bcrop\b/);

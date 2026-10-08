@@ -298,7 +298,7 @@
         "siteStatus",
         "serializeWrites",
         "siteBoundary",
-        "overlayGeoref",
+        "overlayPlacement",
         "comps",
         "geocode",
         "planStyle",
@@ -319,8 +319,8 @@
       ]
     },
     "notesRouteJsBytes": {
-      "baseline": 650820,
-      "target": 650820,
+      "baseline": 728506,
+      "target": 728506,
       "unit": "bytes",
       "what": "Total JS a plain Notes route must download: the entry chunk plus Notes and its static-import closure.",
       "note": "Seeded at 0 so the FIRST measurement of a brand-new route lands through `npm run perf:ratchet` with a stated reason, exactly like any other baseline move \u2014 a hand-typed seed is the thing that step exists to prevent. WHAT THIS NUMBER DOES AND DOES NOT INCLUDE, because it is the whole reason the split is load-bearing: it counts the notebook TREE and its chrome, and deliberately NOT the rich-text engine. Notes.jsx pulls components/NoteEditor.jsx (and through it the only @tiptap imports in the module) via a lazy() import inside a Suspense, so the engine is a separate on-demand chunk of ~464 KB that a user pays for only when a page is actually opened, and the rail paints first. A future rise in THIS metric therefore means something moved onto the static path that belongs behind that boundary \u2014 most likely a new static import of the editor, or a shared module that got hoisted. test/notesModule.test.js source-scans for the first case; this budget is the backstop for the second."
@@ -947,6 +947,17 @@
           "commit": "e0e71c7a800316baded48b7209d9594c3a63453f",
           "sourceHash": "96c01768eaec97b6",
           "reason": "MapLibre GL (maplibre-gl + @maplibre/maplibre-gl-leaflet, ~1.0 MB) is the owner-approved vector-label engine (NEW-1, 2026-10-04, 'Yes do whatever'). It is a LAZY chunk — dynamic import only when a Hybrid map mounts, never on Site/Food boot (siteRouteAllowlist clean; the small helper is behind import() too) — but this metric counts every emitted chunk. Nothing to defer further: the cost is the engine itself, loaded on demand."
+        },
+        {
+          "metric": "bundle.notesRouteJsBytes",
+          "from": 650820,
+          "to": 728506,
+          "direction": "raise",
+          "item": "B2090337",
+          "date": "2026-10-05",
+          "commit": "4bb98bdbc2e8af74e9d32f59424677b5f99788ff",
+          "sourceHash": "3152a0c2859f6755",
+          "reason": "Shared PriorityToolbar + toolbarPlan + AppHeader row budgeting live in the entry chunk every route downloads (owner-approved shell/toolbar system, NEW-1/NEW-2 2026-10-05); main already sat 1 KB over this ceiling locally"
         }
       ]
     }

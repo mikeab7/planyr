@@ -20,6 +20,12 @@ _Last updated: 2026-10-05._
 - [x] ~~**Pick one for how a note opens on your phone.**~~ **Decided 2026-10-04: a note opens showing the whole page width, accepting the smaller text.** That is what it already does (both page edges on screen; a page you have saved a view for still opens exactly as you left it), so nothing changed in the app. Recorded on B2061331. (If the small text ever bothers you, pinch to zoom in — it stays put for that page.)
 
 
+## 🗓 Three database scripts to paste, in this order (B2087648, B2087649, B2087650)
+
+> **What they do:** (1) `project_schedule_cascade.sql` — a deleted project now takes its schedule with it (and restoring the project brings it back), and a schedule that goes away clears the "has a schedule" calendar on the plans that pointed at it. (2) `schedule_orphans_repair_20261005.sql` — fixes the two leftovers (schedule 24 "Untitled site"; the two Goose Creek calendar icons). Non-destructive, safe to run twice, deletes nothing. (3) `profiles_email_sync.sql` — the team-roster email trigger the sessions could not apply (the repo has no automatic migration path, so it is a paste).
+> - [ ] **Paste the three files** into the Supabase SQL editor, in that order. After that a session re-runs the drift report and checks delete/restore on a throwaway project.
+> - [ ] **Decide:** 3 reviews (documents) are still showing as live under projects you deleted. Should deleting a project hide its reviews too, or leave them filed? I left them alone.
+
 ## 🧾 A decision on shared child items, plus two database scripts to apply (B2064896)
 
 > **What I found:** I compared every stored copy of a fact in your database with where that fact really lives (read-only). Almost everything agrees. Six items (a review, an overlay, comps) are marked with a different team than the project they belong to. By your 2026-08-09 decision, sharing is decided per item (site plans only), so I did **not** change them.
@@ -27,13 +33,17 @@ _Last updated: 2026-10-05._
 > - [ ] **Decide:** should a project's reviews / overlays / comps follow the project's team, or stay private until shared on their own? (Today: they stay private. Five of the six are reviews of shared projects — Papadopoulos, 8 South ×2, Mason & Clay, Grand Port — that your teammates cannot see.)
 > - [ ] **Apply two SQL files** (I'll hand them to you in order): `single_source_backfill_20261004.sql` (fills blank filing fields and aligns one project's status; takes a safety copy first) and `profiles_email_sync.sql` (keeps the team roster email right). Both are safe to run twice.
 
-## ✉️ Two steps to make team invites actually send email (B2049312)
+## ✉️ Make team invites send email — Google steps only, no new accounts (B2049312)
 
-> **What changed:** Invite and Resend invite now email the person (subject "<you> invited you to <team> on Planyr").
-> Until these two steps are done, Invite still saves the invite and tells you "saved, but the email didn't send".
+> **What changed:** Invite and Resend invite now email the person, through your own Google Workspace (no Resend, no new service). The database part is already done. Until the steps below are, Invite still saves the invite and says "saved, but the email didn't send".
 >
-> - [ ] **Run one SQL script in Supabase** (I'll hand you `team_invite_email.sql`): SQL Editor → paste → Run. Adds a "last emailed" stamp so Resend can't be spammed. Touches no existing invite; safe to re-run.
-> - [ ] **Create a Resend account (resend.com), verify planyr.io there, and add the key to Cloudflare** — Pages → planyr → Settings → Variables and Secrets → Production → add secret **`RESEND_API_KEY`**. Resend will give you a few DNS records to add for planyr.io. Never paste the key in chat or the repo. Optional: `INVITE_FROM` (default `Planyr <no-reply@planyr.io>`).
+> A credential is needed because Planyr's server has to prove to Google that it may send mail as a planyr.io address; Google only allows that with a key you create and approve.
+>
+> 1. **Google Cloud console** → the project already used for Drive → *APIs & Services → Library* → enable **Gmail API**.
+> 2. Same project → *IAM & Admin → Service Accounts → Create* (name it `planyr-invites`, no roles) → open it, copy its **Unique ID** (a long number), then *Keys → Add key → JSON* and download the file. (If key creation is blocked by an organization policy, tell Claude — there's a fallback.)
+> 3. **Google Admin** (admin.google.com) → *Security → Access and data control → API controls → Manage domain-wide delegation → Add new*: Client ID = the Unique ID from step 2, OAuth scope = `https://www.googleapis.com/auth/gmail.send` → Authorize.
+> 4. Decide the sending address: any planyr.io mailbox you already have (e.g. yours). Invites will arrive from "Planyr <that address>". A free alias like no-reply@ works too if it's set up as a "send as" address on a mailbox you already own.
+> 5. **Cloudflare** → Workers & Pages → planyr → *Settings → Variables and Secrets → Production*: add a **secret** named **`GMAIL_SERVICE_ACCOUNT_JSON`** and paste the entire contents of the downloaded file; add a plain **variable** named **`INVITE_SENDER`** = the planyr.io address from step 4. Redeploy (or push any commit) so it takes effect, then delete the downloaded file. Never paste the key in chat or the repo.
 
 ## 🗺 One database script so comps follow their county when you move a site plan (B1953796)
 
@@ -1074,3 +1084,7 @@ a look-ahead at what that study will produce, clearly labelled as screening and 
 - B484 — the PDF/map stutter above (needs the heavy PDF to profile).
 
 - **Decision (B2099043):** should a loose Notes page (not bound to any project) show inside a project's Notes list, or only under "Not in a project" / "See all your notes"? Today it does not show inside a project.
+
+- **Decision (B2154032, privacy):** the logged-out Schedule page at `planyr.io/sequence/` currently ships the real Goose Creek task list with your name ("Michael Butler") and dated notes to anyone who opens it. Should the logged-out starter be (a) truly blank, (b) a made-up demo project, or (c) is the Goose Creek copy intentional? Nothing was changed yet — a blind edit could break the signed-out Schedule.
+
+- **Tax rate table on a county parcel (B2179971) — needs something only you can get.** The table is built but stays hidden in every county, because no appraisal district's list of taxing units per account is reachable from here (hcad.org, fbcad.org, gcad, mcad are blocked for Claude). To switch it on for a county I need, for ONE tax year: the district's **entity legend** (the code → taxing-unit name list, e.g. what "D01" or "S07" means) and the tax office's **adopted rates**. Easiest: paste or send me the Harris and Fort Bend ones and I'll load them; the table then appears for those counties and stays hidden for any county without a complete list.

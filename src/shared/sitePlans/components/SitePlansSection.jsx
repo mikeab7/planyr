@@ -37,17 +37,17 @@ import {
 } from "../lib/sitePlanOverlayStore.js";
 import { countLiveCompsForProject } from "../../comps/lib/compsStore.js";
 import { overlayPlaced } from "../lib/sitePlanOverlays.js";
-import { imagePointToLatLon } from "../lib/overlayGeoref.js";
+import { imagePointToLatLon } from "../../overlay/overlayPlacement.js";
 import { friendlySaveError, classifyOverlayWriteFailure } from "../lib/overlayErrors.js";
 import { withResolvedCounties } from "../lib/overlayCompCounty.js";
 import { notifyCompsChanged } from "../../comps/lib/compsChanged.js";
 import { uploadOverlayRaster, downloadOverlayRasterUrl } from "../lib/overlayRasterStorage.js";
 import ImageCropTool from "./ImageCropTool.jsx";
-import { hasCrop } from "../../../workspaces/site-planner/lib/overlayCrop.js";
+import { hasCrop } from "../../overlay/overlayCrop.js";
 import {
   OVERLAY_RASTER_BASE_DPI, OVERLAY_RASTER_MAX_LONG_EDGE_PX, OVERLAY_RASTER_JPEG_QUALITY,
   OVERLAY_THUMB_MAX_LONG_EDGE_PX, OVERLAY_THUMB_JPEG_QUALITY, cappedRasterDims,
-} from "../lib/overlayRasterSize.js";
+} from "../../overlay/overlayRaster.js";
 import { fileNewReview, loadReview, downloadFromDrive, stripFileExt } from "../../../workspaces/doc-review/lib/reviewStore.js";
 import { listMyTeams, currentIdentity } from "../../../workspaces/site-planner/lib/teams.js";
 import { loadSiteSummaries } from "../../../workspaces/site-planner/lib/siteListLight.js";
@@ -70,7 +70,7 @@ const ACTION_BTN_STYLE = { height: 26, boxSizing: "border-box", display: "inline
 // lossless PNG (B972225 NEW-5 — measured on the owner's real Airtex flyer: rasterizing the page
 // costs ~700-1300ms, re-encoding it costs tens of ms either way, so the codec choice is nearly
 // free — the real saving from resolution capping only shows up on a page bigger than a normal
-// flyer sheet; see overlayRasterSize.js's header for the full numbers).
+// flyer sheet; see overlayRaster.js's header for the full numbers).
 // B972512-HARDENING item 12 — four clear, distinct messages for the ways a picked PDF can fail
 // to become a site plan, none of them a crash: an empty (0-byte) file, a password-protected
 // PDF, a corrupt/invalid PDF, and anything else pdf.js can't make sense of (a malformed page,
@@ -746,7 +746,7 @@ export default function SitePlansSection({
   //
   // B972512-HARDENING item 1: a placement change silently left every comp pinned to this overlay
   // at its OLD lat/lon — the map position is DERIVED (site_plan_point run through the placement
-  // transform, see overlayGeoref.js), so it goes stale the instant the plan moves. Fixed by
+  // transform, see overlayPlacement.js), so it goes stale the instant the plan moves. Fixed by
   // recomputing every referencing comp's position here, in the SAME commit as the placement
   // write: fetch each comp's plan-space point (fetchOverlayCompPoints — works across owners,
   // since a teammate's comp is otherwise invisible to this user's normal RLS-scoped reads),

@@ -66,8 +66,18 @@ function vn(x, y, z) {
   const y0 = x00 + (x10 - x00) * v, y1 = x01 + (x11 - x01) * v;
   return (y0 + (y1 - y0) * w) * 2 - 1;
 }
+// NEW-1 (2026-10-05, owner: "a couple of hills equally spaced"): raw value noise on an integer
+// lattice reads as round hills at near-equal spacing. Re-rolled seed + a rotation (breaks axis
+// alignment) + a domain warp (elongated ridges, varied spacing). Measured variant "C"; a seed
+// offset alone was still lattice-like and is ruled out.
 function fbm(x, y, z) {
-  return vn(x, y, z) * 0.64 + vn(x * 2.17 + 11.3, y * 2.17 - 7.7, z * 1.55 + 3.1) * 0.30;
+  x += 37.7; y += 91.3; z += 5.9;
+  const c = 0.8253, s = 0.5646;
+  let rx = x * c - y * s, ry = x * s + y * c;
+  const wx = vn(rx * 0.55 + 5.2, ry * 0.55 + 1.3, z * 0.7 + 9.1) * 0.9;
+  const wy = vn(rx * 0.55 - 3.7, ry * 0.55 + 8.4, z * 0.7 - 2.2) * 0.9;
+  rx += wx; ry += wy;
+  return vn(rx, ry, z) * 0.64 + vn(rx * 2.17 + 11.3, ry * 2.17 - 7.7, z * 1.55 + 3.1) * 0.30;
 }
 function ex(v0, v1, L) {
   if (v1 === v0) return 0.5;

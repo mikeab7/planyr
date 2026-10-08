@@ -95,6 +95,7 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
   **⛔ FOUR MEANINGS NOW COMPETE FOR ONE PRESS ON THE MAT** (B1597760/B1597761): a press that does
   not travel PLACES · a press that travels PANS the canvas · a press that travels with Shift held
   draws the marquee · a press that starts on one of the sheet's four edge grips resizes the page.
+  **A drag that starts on a box's content (table, picture, text) also pans (NEW-1/B2156912) — deferred, selects nothing; see §7 of the carry-forward file and the verify-notes-drag-pan harness under ui-audit/.**
   The order matters — distance first, modifier second — and it is written out as a table in
   `docs/NOTES-CARRY-FORWARD.md` §7. **Read that before adding a fifth claimant.** The decisions are
   pure and live in `lib/notesMarquee.js`; only the wiring is here.
@@ -1168,6 +1169,8 @@ written out in the header of `lib/notesStore.js`; read it there rather than re-d
     its structural `nested` branch and returns `outdent-indent-attr`, which runs the same
     `shiftIndent(-1)` Shift+Tab uses — checked first so it also wins for a compound item that is
     BOTH really nested and wearing the attribute (the "Tab again" case).
+- `lib/notesTablePaste.js` — **tables pasted from OneNote/Word/Excel/Sheets/Outlook (NEW-1, B2142464).** PURE: `tableOwnsClipboard` (a table beats the picture beside it), `parseTabular`/`rowsToTableHtml` (plain tab-separated text → grid), `normalizeTableMarkup` (empty cells, bordered one-column `keep`), `fillEmptyCells`, `tableBoxWidth`. Its header lists the five measured causes; guard: the verify-notes-table-paste harness under ui-audit/ plus the clipboard fixtures under test/fixtures/clipboard-tables.
+- `lib/notesTableClipboard.js` — **a table already on the page copies / cuts / pastes (NEW-1, B2155520).** TSV `text/plain` for tables, whole-table cut that removes the table (and its box, one undo step), `selectWholeTable` (toolbar "Select table"), `contentOfBoxes` (Ctrl+C/X on a SELECTED box, wired in `NoteEditor.jsx`). Guard: the verify-notes-table-copy-paste harness under ui-audit/ (required `build` step) + the repo-root `test/` suite **notesTableClipboard**.
 - `lib/notesPastePlain.js` — **paste JUST the text** (B36051), Word's "Keep Text Only". ⛔ The
   DEFAULT PASTE IS UNCHANGED — the owner asked for an *option*, so this WATCHES the paste
   (`handlePaste` returns false) rather than intercepting it. Two ways in: **Ctrl/Cmd+Shift+V**,

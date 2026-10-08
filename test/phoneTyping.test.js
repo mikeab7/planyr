@@ -5,7 +5,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { autofillStamp, keyboardBand, revealDelta, isTextEntry } from "../src/shared/ui/phoneTyping.js";
+import { autofillStamp, keyboardBand, revealDelta, revealTarget, isTextEntry } from "../src/shared/ui/phoneTyping.js";
 import { keyboardInsetPx } from "../src/workspaces/site-planner/lib/propertiesSheet.js";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -31,11 +31,29 @@ describe("autofillStamp — no contact AutoFill on a field that isn't a contact 
   });
 });
 
+// NEW-1 (2026-10-06): the reveal brings a field's whole edit CARD into view when the card fits "the room". It measured the room
+// against the keyboard-free BAND, not against the scroller the card actually scrolls in — so in a short bottom sheet (visible band
+// 279, sheet scroller 211) a 230-tall card "fit", its top was targeted, and the field in its lower half stayed under the keyboard.
+describe("revealTarget", () => {
+  const field = { top: 650, bottom: 694, height: 44 }, card = { top: 440, bottom: 700, height: 260 };
+  it("brings the card into view only when it fits the room it will scroll in", () => {
+    expect(revealTarget(field, card, 280)).toBe(card);
+    expect(revealTarget(field, card, 187)).toBe(field);
+  });
+  it("is the field when there is no card", () => { expect(revealTarget(field, null, 500)).toBe(field); });
+});
+
 describe("keyboardBand / revealDelta", () => {
   it("is null with no keyboard, the visible strip with one", () => {
     expect(keyboardBand({ layoutHeight: 659, vvHeight: 659 })).toBe(null);
     expect(keyboardBand({ layoutHeight: 659, vvHeight: 279 })).toEqual({ top: 0, bottom: 279 });
     expect(keyboardBand({ layoutHeight: 659, vvHeight: 279, vvOffsetTop: 60 })).toEqual({ top: 60, bottom: 339 });
+  });
+  // NEW-1 (2026-10-06): iOS reveals a field low in a bottom sheet by scrolling the view by up to the keyboard's FULL height, which
+  // puts the visible area's bottom at the layout bottom (layout − visible − offsetTop = 0). That read as "no keyboard", so the
+  // field-reveal never ran and a field sitting on the sheet's bottom edge stayed there, half under the keyboard's old place.
+  it("still sees the keyboard when iOS has scrolled the view by its full height", () => {
+    expect(keyboardBand({ layoutHeight: 659, vvHeight: 279, vvOffsetTop: 380 })).toEqual({ top: 380, bottom: 659 });
   });
   it("moves a box just enough to sit inside the strip, preferring its top", () => {
     expect(revealDelta({ top: 100, bottom: 140 }, 12, 267)).toBe(0);

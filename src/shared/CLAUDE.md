@@ -245,6 +245,7 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   owns the privacy ALLOWLIST (never a denylist) and the encoder — whose frame floor is a LADDER, not
   a wall (B265541: on a real stall nearly every frame also costs an `fx` pair, and the old wall threw
   the whole episode away on exactly the captures worth having). Proof + what is still unproven:
+  **⛔ NEW-2 (B1317824 ×2): a capture the one row had to trim travels as the main row plus CONTINUATION rows** (`perfCapture.encodeSupplements` — frames in chronological chunks, the whole counter curve, the shed tasks; `suppRows` on the main row says it continues; if even three frame rows cannot hold the track the window is centred on the WORST frame, never the tail). The recorder reports delivered only when EVERY row was, and `perfcap` rows have their own rate budget in `clientErrors.js`. Guard: the repo-root `test/` suite **captureSupplements**. Re-ordering what sheds first was tried three times and recurred each time — the row cannot hold a real stall at any order.
   `/docs/perf/CAPTURE-PIPE.md`; the layer-arm standing note: `/docs/perf/PERF-LAYERS.md`. Guards: the repo-root
   `test/` suites **capturePipe**, **perfRecorder**, **perfInstrument**, **clientErrors**, plus the
   ui-audit harness **verify-capture-pipe** (`npm run perf:capturepipe`), whose `rejected` arm is the
@@ -692,6 +693,7 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   two layouts can never hold two different ideas of what a "comp" is. The paste box is shared
   verbatim (`pasteBoxNode`, computed once, rendered in both branches) — mobile has no separate
   create surface; rows land on a phone the same way they do on desktop (paste, or a map pick).**
+  **⛔ B2138081 (2026-10-05) REPLACED that phone layout with a REVIEW-FIRST one** — same component, same lifted `rows` / `onCommitField` / `onSetToday` / `onResolvePeriod` paths, new presentation: top bar (Cancel · New comp / Comp N of M ⌄ · ＋ Paste, the paste box now lives in a panel), a small header card (no hero number), grouped Deal / Rent / Parties / More details cards where every value is a mounted `<input>` with its unit INSIDE (no Unit row; `AC|SF`, `Monthly|Yearly`, `NNN|Gross`, `months|years` toggles — Term stores months, years ×12), and a sticky footer read-back + one Save. The pure half is `lib/compMobileSheetModel.js` (read-backs, Save copy, term unit, More-details set); `compMobileLayout.js` is still the breakpoint + the jump-sheet status text. Its live harness is the repo-root ui-audit one named verify-comp-sheet-review-first.
   **⛔ ROUND 16 (B1125024/B1125025/B1125026, second-half adversarial review, 2026-09-03) —
   KEYBOARD/A11Y HARDENING, AND A LIVE OWNER RETRACTION MID-SESSION. Read before touching
   `onGridKeyDown`'s Tab branch, `finishEdit`'s reopen check, or either action-cell's tabIndex.**

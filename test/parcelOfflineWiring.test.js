@@ -28,7 +28,7 @@ const planner = read("../src/workspaces/site-planner/SitePlanner.jsx");
 const app = read("../src/workspaces/site-planner/SitePlannerApp.jsx");
 const finder = read("../src/workspaces/site-planner/MapFinder.jsx");
 const layerPanel = read("../src/workspaces/site-planner/components/LayerPanel.jsx");
-const recordPanel = read("../src/workspaces/site-planner/components/ParcelRecordPanel.jsx");
+const recordPanel = read("../src/workspaces/site-planner/components/ParcelPage.jsx");
 const infoCard = read("../src/workspaces/site-planner/components/ParcelInfoCard.jsx");
 
 describe("NEW-1 — a plan's location is SETTABLE, and everything gated on it re-reads the live value", () => {
@@ -125,13 +125,12 @@ describe("NEW-2 — a plotted deed can BECOME the parcel, and the menus can reac
     const fn = read("../src/workspaces/site-planner/lib/plannerPlacementCmds.js");
     expect(fn).toMatch(/deedMisclosureFt: Number\.isFinite\(gap\)/);
     expect(recordPanel).toContain('data-testid="parcel-misclosure"');
-    expect(recordPanel).toContain("closes to {parcel.deedMisclosureFt}′");
+    expect(recordPanel).toContain("close to {parcel.deedMisclosureFt}′");
     /* …and a loose deed is visually DISTINCT from a tight one, not just numerically different.
        Asserted on the whole call, both arguments: an earlier version of this guard matched the
        phrase anywhere in the file and stayed green when the fill tone was reverted and only the
        border kept it — a guard that survives half the defect is half a guard. */
-    expect(recordPanel).toContain(
-      "chipBox(parcel.deedMisclosureFt > 1 ? PAL.warn : PAL.muted, parcel.deedMisclosureFt > 1 ? PAL.warn : PAL.panelLine)");
+    expect(recordPanel).toContain('color: parcel.deedMisclosureFt > 1 ? "var(--warn-text)" : "var(--text-secondary)"'); // a loose deed reads in the warning ink, a tight one quiet
   });
 
   /* Mutation: remove `skipDeedGroup` → red. Without it a promoted deed fits its own copy at a
@@ -149,8 +148,8 @@ describe("NEW-2 — a plotted deed can BECOME the parcel, and the menus can reac
      lost to the product. This is the door back in. */
   it("the deed a parcel came from stays REACHABLE, from the parcel it produced", () => {
     expect(recordPanel).toContain('data-testid="parcel-select-deed"');
-    expect(recordPanel).toMatch(/parcel\.fromDeedGroup && onSelectDeed/);
-    expect(planner).toMatch(/onSelectDeed=\{selectDeedOfGroup\}/);
+    expect(recordPanel).toMatch(/parcel\.fromDeedGroup && deedFrom/);
+    expect(planner).toMatch(/deedFrom=\{selectDeedOfGroup\}/);
     const fn = planner.slice(planner.indexOf("const selectDeedOfGroup = "), planner.indexOf("const deedAlreadyPromoted = "));
     expect(fn).toMatch(/setSel\(\{ kind: "markup", id: main\.id \}\)/);
     expect(fn).toContain("openInspector()");
@@ -168,11 +167,10 @@ describe("NEW-3 — a hand-drawn parcel carries the same record as a clicked one
   /* Mutation: delete the provenance chip → red. This is not cosmetic: a plan that goes to review
      must never present a hand-drawn boundary as though it came from the county. */
   it("provenance renders on the parcel, for every lot and not just drawn ones", () => {
-    expect(recordPanel).toContain('data-testid="parcel-provenance"');
-    expect(recordPanel).toContain("provenanceLabel(parcel)");
-    expect(planner).toMatch(/<ParcelRecord parcel=\{selParcel\}/);
-    // Rendered for ANY selected parcel — a county lot's record is editable too.
-    expect(planner).toMatch(/\{_pid === "parcel" && selParcel && \(\s*\n\s*<Section title="Parcel record">/);
+    // Parcels rework (NEW-2): the page's source chip carries it, derived by lib/parcelOrigin.js (combined / county / deed / drawn).
+    expect(read("../src/workspaces/site-planner/components/ParcelPage.jsx")).toContain('data-testid="parcel-provenance"');
+    expect(planner).toMatch(/const origin = parcelOrigin\(pc, \{ cadName: parcelCadName \}\);/);
+    expect(planner).toMatch(/<ParcelPage parcel=\{pc\}/);
   });
 
   /* Mutation: point the badge / list / Boundary rows back at `polyArea(pc.points)` → red.
@@ -183,8 +181,8 @@ describe("NEW-3 — a hand-drawn parcel carries the same record as a clicked one
     expect(planner).toContain('const txt = `${(parcelInfo.get(pc.id) || {}).name || "Parcel"} ${f2(parcelNetSqft(pc) / SQFT_PER_ACRE)} AC`;'); // canvas badge
     // NEW-1 (B1239328) — the Land tab row moved acreage into its own right-aligned column
     // (account number, when present, now gets its own secondary line instead of sharing this one).
-    expect(planner).toContain("{f2(parcelNetSqft(pc) / SQFT_PER_ACRE)} AC</div>");                   // panel list
-    expect(planner).toContain("Area: <b style={{ color: PAL.ink }}>{f0(parcelNetSqft(selParcel))} SF</b>"); // Boundary
+    expect(read("../src/workspaces/site-planner/lib/parcelOps.js")).toContain("acres: parcelNetSqft(pc) / SQFT_PER_ACRE"); // panel table rows (buildParcelRows)
+    expect(planner).toContain("acres={parcelNetSqft(pc) / SQFT_PER_ACRE}"); // the parcel page's sub-line
     expect(planner).toContain("acres: parcelNetSqft(p) / SQFT_PER_ACRE");                            // report/print
   });
 
@@ -201,7 +199,7 @@ describe("NEW-3 — a hand-drawn parcel carries the same record as a clicked one
     const fn = planner.slice(planner.indexOf("const setParcelField = "), planner.indexOf("const setParcelField = ") + 900);
     expect(fn).toMatch(/if \(!cur \|\| \(cur\[key\] \?\? null\) === v\) return;/);
     expect(fn).toContain("pushHistory()");
-    expect(recordPanel).toContain("onBlur={(e) => onField(parcel.id, f.key, e.target.value)}");
+    expect(recordPanel).toContain("onBlur={(e) => { if (e.target.value !== (value || \"\")) onCommit(e.target.value); }}");
   });
 });
 

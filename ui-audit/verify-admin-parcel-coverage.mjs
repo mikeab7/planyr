@@ -37,7 +37,7 @@ const flCounty = cov.rows.find((r) => r.state === "FL" && r.wired);
 const lafayette = find("LA", "Lafayette Parish");
 const unwired = cov.rows.find((r) => !r.wired);
 const expectReadout = (r) => (r.wired
-  ? `${r.displayName} — ${SOURCE_KIND_LABEL[r.kind]}${r.host ? ` · reads from ${r.host}` : ""}`
+  ? `${r.displayName} — ${SOURCE_KIND_LABEL[r.kind]}${r.publisherName ? ` · ${r.publisherName}` : ""}${r.host ? ` · reads from ${r.host}` : ""}`
   : `${r.displayName} — not wired for parcels.`);
 
 const fails = [];

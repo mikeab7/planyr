@@ -339,11 +339,13 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     //  B1790016 NEW-1 — the car-parking spec sheet gave parking its own "Display" group
     //  (Outline + Fill), rather than sharing the generic Properties Section every other type uses,
     //  adding one more Outline/Fill PairedField pair — two more `{...colorCtl(...)}` calls and two
-    //  more `<ColorField>` tags.)
+    //  more `<ColorField>` tags. NEW-8 (Building panel rethink) adds another such pair: a real building's
+    //  Appearance Collapse replaces its slot in the shared Properties section but the section stays for
+    //  every other type, so 33 → 35 and 34 → 36.)
     expect(src).toMatch(/const colorCtl = \(apply, hist = true, commit = null\) => \(\{\s*\n\s*pick: livePick\(apply, hist, commit\),/);
-    expect((src.match(/\{\.\.\.colorCtl\(\(v\) =>/g) || []).length).toBe(33);
+    expect((src.match(/\{\.\.\.colorCtl\(\(v\) =>/g) || []).length).toBe(34); // Parcels rework: the parcel Boundary section (5 colour controls) became the page's Style grid (4)
     expect((src.match(/pick=\{livePick\(\(v\) =>/g) || []).length).toBe(1);
-    expect((src.match(/<ColorField /g) || []).length).toBe(34);
+    expect((src.match(/<ColorField /g) || []).length).toBe(35);
     // A swatch click is a DISCRETE commit: exactly one undo frame, then the color is recorded.
     expect(src).toMatch(/onSwatch: \(v\) => \{ if \(hist\) pushHistory\(\); apply\(v\); pushRecent\(v\);/);
     // NEW-4 (bug) — the wheel picks LIVE, so `change` fires for EVERY shade the cursor crosses.
@@ -416,7 +418,8 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     // itself is still curbFt × ppf, to scale, which is what this guard is about.)
     expect(src).toMatch(/key="edge"[^\n]*strokeWidth=\{curbStrokePx\(roadCurbWidth\(el\), ppf, CURB_STROKE_MIN_PX \* lfK\)\}/);
     // the face-of-curb stripes too
-    expect(src).toMatch(/key=\{`curb\$\{i\}`\}[^\n]*strokeWidth=\{curbStrokePx\(roadCurbWidth\(el\), ppf, CURB_STROKE_MIN_PX \* lfK\)\}/);
+    // NEW-8 — an explicit outline width (st.strokeWidthSet) now wins; the to-scale curb width is still the automatic default.
+    expect(src).toMatch(/key=\{`curb\$\{i\}`\}[^\n]*strokeWidth=\{(?:st\.strokeWidthSet \?\? )?curbStrokePx\(roadCurbWidth\(el\), ppf, CURB_STROKE_MIN_PX \* lfK\)\}/);
     // and the legacy rect road border/stripes are on the same to-scale width (no strokeZoom for roads)
     expect(src).toMatch(/cw = curbStrokePx\(el\.curb \?\? CURB, ppf, CURB_STROKE_MIN_PX \* lfK\)/);
     expect(src).not.toMatch(/el\.type === "road" \? strokeZoom\(/);
