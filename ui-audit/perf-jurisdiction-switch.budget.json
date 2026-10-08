@@ -1,0 +1,7 @@
+{
+  "_why": "Slow report 55807aa9 (NEW-1). Written against a REPLAYED run (recorded GIS payloads, no network jitter) of the fixture built from plan smun6o2o628f. Measured on build 99c87bb (3 runs): jurisdiction work 1.0-1.1 s per Bolt-on open, worst single script 544-629 ms, worst frame 588-672 ms. With the share window + slicing (3 runs): 19-67 ms total, worst single 16-31 ms, worst frame 52-106 ms. The ceilings sit ~2-3x above the fixed numbers and 3-7x below the stalled ones, so runner jitter cannot trip them and a regression cannot hide. Raising one needs the cost named on the item.",
+  "maxSingleJurisdictionScriptMs": 50,
+  "maxJurisdictionMsPerScenario": 150,
+  "maxJurisdictionFrameMs": 200,
+  "minGisRequests": 4
+}
