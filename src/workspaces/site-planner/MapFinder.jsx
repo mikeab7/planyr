@@ -1,4 +1,4 @@
-import { Fragment, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { Fragment, lazy, memo, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { validateName, announceNameNotice } from "../../shared/names/nameCore.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -102,6 +102,7 @@ import { PanelErrorBoundary } from "./components/LazyPanel.jsx";
 import { makeParcelDisplayLayer, makeSnapshotLayer, parcelDisplayIsImageOnly, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
 import { layerInDrawRange } from "./lib/parcelDisplayZoom.js"; // V1475200 — the hang-guard may only arm while a layer is inside the zoom range it can draw in
 import { siteBoundaryInfo, siteDrawParcels } from "./lib/siteBoundary.js";
+import { skipWhileHidden } from "./lib/hiddenRenderGate.js";
 import { siteAnchorLatLon } from "./lib/siteAnchor.js";
 import { pinClusterOffsets, pinOffsetsSig } from "./lib/pinCluster.js";
 // B1923744 — the pure zoom-gate/filter/reproject-outcome half of "draw the record's own active
@@ -522,7 +523,7 @@ function RailTab({ label, count, active, onClick, title }) {
   );
 }
 
-export default function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], allSites = null, parcelSummary = null, lastEditedByGroup = null, activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onSetDates, onRenameSite, onSharedChange, onUseParcels, onSkip, comps = [], onPlaceComp, onCompClick, pendingCompAnchor = null, onCompAnchorConsumed, focusCompId = null, onCompFocusHandled, onCompsChange, onOpenReviewInDocReview, focusMissingLocations = null }) {
+function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatus = {}, setLayerStatus, sites = [], allSites = null, parcelSummary = null, lastEditedByGroup = null, activeSiteId, onOpenSite, onDeleteSite, onSetStatus, onSetDates, onRenameSite, onSharedChange, onUseParcels, onSkip, comps = [], onPlaceComp, onCompClick, pendingCompAnchor = null, onCompAnchorConsumed, focusCompId = null, onCompFocusHandled, onCompsChange, onOpenReviewInDocReview, focusMissingLocations = null }) {
   const elRef = useRef(null);
   // B1310209 (NEW-2) — the map's own relatively-positioned host box (below), the same one every
   // other floating map panel (the Comps rail, the Layers panel) is already a position:absolute
@@ -5386,3 +5387,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     </div>
   );
 }
+
+/* NEW-1 (Silvestri zoom freeze) — kept alive behind the planner; do not re-render it while hidden (see
+ * lib/hiddenRenderGate.js). Renders exactly as before the moment it is visible. */
+export default memo(MapFinder, skipWhileHidden);

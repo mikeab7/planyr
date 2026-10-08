@@ -872,7 +872,11 @@ export default function App({
   //    writer is now honest about what it knows: it may CLEAR a route-named project only when
   //    the user deliberately left it (`userLeftProjectRef`), never merely because nothing is
   //    loaded. Opening or keeping a project still writes freely, so the URL stays shareable.
-  const effGroup = groupForPlan(activeSiteId, mode);
+  /* NEW-1 (Silvestri zoom freeze) — `groupForPlan` is `loadSite()`, which JSON-parses the WHOLE on-device plan
+   * store. It sat in the render body, and this component re-renders on every layer-status report (several per
+   * zoom step), so a device with many saved plans paid that parse each time. Memoised on what can change the
+   * answer: the open plan, the mode, and `sites` (re-read by `refreshSites` after every store mutation). */
+  const effGroup = useMemo(() => groupForPlan(activeSiteId, mode), [activeSiteId, mode, sites]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!isActive || !mayReconcileUrl(bootResolved)) return;

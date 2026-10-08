@@ -38,6 +38,14 @@ function readRawSites() {
   try { return JSON.parse(localStorage.getItem(key)) || {}; } catch (_) { return {}; }
 }
 
+/* The raw stored text of the site store (or null). A caller that caches `loadSiteSummaries()` compares this string
+ * to the one it cached under, so a TTL backstop can confirm "nothing changed" with one string compare instead of
+ * re-parsing every saved plan (NEW-1, Silvestri zoom freeze). */
+export function sitesRawSnapshot() {
+  const uid = activeUid();
+  try { return localStorage.getItem(uid ? cloudSitesKey(uid) : SITES_KEY); } catch (_) { return null; }
+}
+
 // The same six-ish scalar fields createSiteModel() defaults, and the same defaulting rules —
 // so a caller of this light reader sees byte-identical values to what loadSitesList() would
 // have handed it for these fields.
