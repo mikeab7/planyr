@@ -192,10 +192,23 @@ export function tileNwFeet(z, x, y, lat0, lon0) {
  * transform has been cleared). `overscan` is the wrap's negative inset. Used as the FALLBACK
  * reference when no tile is on screen to read (the aerial switched off, or before the first
  * tile arrives) — the map's own projection, which every Leaflet VECTOR layer is placed by. */
-export const basemapWrapPoint = (worldPx, pixelOrigin, panePos, overscan = 0) => {
+export const basemapWrapPoint = (worldPx, pixelOrigin, panePos, overscan = 0, dockX = 0) => {
   const p = exactContainerPoint(worldPx, pixelOrigin, panePos);
-  return { x: p.x - overscan, y: p.y - overscan };
+  return { x: p.x - overscan - dockX, y: p.y - overscan };
 };
+
+/* ── NEW-2 (2026-10-08) — the map's box reaches under the docked left column ───────────────────────
+ * The container is the canvas plus `overscan` on every side PLUS `dockX` more on the left, where `dockX`
+ * is the canvas's measured left edge within the planner row (rail + any docked panel). Its left edge is
+ * therefore pinned to the row and its width is `w + dockX + 2·overscan` — both constant while a docked
+ * panel is dragged, opened or closed, so Leaflet is never resized or panned by one (see SitePlanner's
+ * `geoDockX`). `dockX` 0 is exactly the old symmetric box. */
+export const mapBoxInset = (overscan = 0, dockX = 0) => ({
+  top: -overscan, right: -overscan, bottom: -overscan, left: -(overscan + (Number.isFinite(dockX) && dockX > 0 ? dockX : 0)),
+});
+
+/** The container's horizontal middle in CANVAS px — the point the map is centred on. */
+export const mapBoxCenterX = (w, dockX = 0) => (w - (Number.isFinite(dockX) && dockX > 0 ? dockX : 0)) / 2;
 
 /* Same, DURING a live gesture, when the wrap carries `translate(tx,ty) scale(s)` about its
  * own top-left. Kept separate (rather than reading the DOM back) so the gesture branch is
@@ -244,8 +257,8 @@ export function hasRegisterableContainer(leafletSize) {
  * has actually changed since the last time it was measured; `li` (the previous check's inputs +
  * verdict, or null before the first one) says whether it has. Pure so the boundary conditions
  * (no previous check, each field alone changing, nothing changing) are asserted without a DOM. */
-export function registrationLayoutMayHaveChanged(li, w, h, overscan) {
-  return !li || li.w !== w || li.h !== h || li.overscan !== overscan;
+export function registrationLayoutMayHaveChanged(li, w, h, overscan, dockX = 0) {
+  return !li || li.w !== w || li.h !== h || li.overscan !== overscan || (li.dockX || 0) !== dockX;
 }
 
 /* ⛔ NEW-1 (B2096832) — the cached layout verdict AFTER Leaflet's size has been re-synced to the container.

@@ -263,7 +263,9 @@ export function siteNameFromParcel(attrs, { addr = null, searched = null, acct =
  * express "OWNERNME1 outranks OWNERNME2". A record with two co-owners would have shown whichever
  * the service happened to list first. So the owner row resolves through `ownerKey`, which prefers
  * the UN-numbered column, then the lowest-numbered one — the same discipline as `situsKey`. */
-export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?nme\d*|name|owner\d)$/i;
+// B2191xxx — `owner_?name_?\d+` is HCAD's own spelling (`owner_name_1` / `owner_name_2`); without it the
+// Harris owner resolved to nothing and the parcel page read "—" for every Harris lot.
+export const OWNER_KEY_RE = /^(owner|own_?name|owner_?name|owner_?name_?\d+|owner_?nme\d*|owner_?ln_?\d*|name|owner\d)$/i;
 /** Fallback owner spellings — consulted only when nothing in OWNER_KEY_RE resolves. */
 export const OWNER_FALLBACK_RE = /^(tax_?payer|owners|own_?name_|owner_?name_|ais_?name)$/i;
 
@@ -366,7 +368,8 @@ export const APPR_FIELDS = [
   [SITUS_FIELD, "Situs address"],
   // ...|parcel_?id matches CCAD's Parcel_Id; |account matches CCAD's Account.
   // ...|parcel_?apn matches California's statewide PARCEL_APN (the assessor parcel number IS the account id there).
-  [/(hcad_?num|^acct|account|parcel_?id|parcel_?apn|prop_?id|geo_?id|quick_?ref|^pid)/i, "Account / ID"],
+  // B2191xxx — + sched_?num (Denver), parcel_?(number|no|num) (Clackamas), ^pin$/taxpin (Montgomery, Gwinnett), assess…_num (E. Baton Rouge)
+  [/(hcad_?num|^acct|account|parcel_?id|parcel_?apn|prop_?id|geo_?id|quick_?ref|^pid|sched_?num|parcel_?(number|no|num)$|^pin$|^tax_?pin$|assess\w*_?num)/i, "Account / ID"],
   // Statewide layers such as California's name the county in a column (COUNTYNAME); shown in the panel's
   // collapsed tail. Exact-name match so no other source's county CODE column is swept in.
   [/^county_?name$/i, "County"],
@@ -528,4 +531,55 @@ export function parcelFallbackName(attrs) {
   const legal = apprRows(attrs).find((r) => r.label === "Legal");
   const v = legal ? String(legal.value).replace(/\s+/g, " ").trim() : "";
   return v ? (v.length > 40 ? `${v.slice(0, 39).trimEnd()}…` : v) : null;
+}
+
+/* ---- THE COUNTY RECORD (B2191xxx) --------------------------------------------------------------
+ *
+ * What the parcel page's county record shows, read from the county's own attribute bag through the
+ * SAME resolvers the old Appraisal block used (so the two can never disagree), never from the copies
+ * stamped on the parcel at identify time: `pc.acct` is the identify path's pick and, on HCAD's schema,
+ * was the internal OBJECTID (634440) rather than the HCAD account (0421030000123), and `pc.addr` was the
+ * bare street name. The stamped values are only the FALLBACK for a record that has no attribute bag.
+ *
+ * @returns { owner, account, address, deedAcres, taxYear } — each null when the record does not say. */
+const STREET_PART = {
+  num: /^(site|situs|prop(erty)?)_?(str(eet)?_?)?(num(ber)?|no)$/i,
+  pfx: /^(site|situs|prop(erty)?)_?str(eet)?_?(pfx|prefix|dir)$/i,
+  name: /^(site|situs|prop(erty)?)_?str(eet)?_?name$/i,
+  sfx: /^(site|situs|prop(erty)?)_?str(eet)?_?(sfx|suffix|type)$/i,
+};
+/* A street composed from HCAD-style decomposed columns ("SCHIEL" + "RD"). Null when there is no street NAME. */
+export function streetFromParts(attrs) {
+  if (!attrs) return null;
+  const pick = (re) => { const k = Object.keys(attrs).find((key) => re.test(leafKey(key)) && !isPlaceholderValue(attrs[key])); return k ? String(attrs[k]).replace(/\s+/g, " ").trim() : null; };
+  const name = pick(STREET_PART.name);
+  if (!name) return null;
+  let num = pick(STREET_PART.num);
+  if (num && /^0+$/.test(num)) num = null; // HCAD publishes 0 for "no house number"
+  return [num, pick(STREET_PART.pfx), name, pick(STREET_PART.sfx)].filter(Boolean).join(" ");
+}
+
+export function countyRecord(attrs, { acct = null, addr = null, idField = null, addrField = null } = {}) {
+  /* The county's DECLARED id / address column (lib/counties.js) is the fallback when the generic resolvers
+   * miss it: the registry already names the column each service publishes its account and situs in. */
+  const declared = (name) => {
+    if (!name || !attrs) return null;
+    const k = Object.keys(attrs).find((key) => leafKey(key).toLowerCase() === String(name).toLowerCase() && !isPlaceholderValue(attrs[key]));
+    return k ? String(attrs[k]).replace(/\s+/g, " ").trim() : null;
+  };
+  const rows = apprRows(attrs);
+  const row = (label) => { const r = rows.find((x) => x.label === label); return r ? r.value : null; };
+  const clean = (v) => (v == null || isPlaceholderValue(v) ? null : String(v).replace(/\s+/g, " ").trim());
+  let deed = null;
+  const ac = row("Acreage");
+  if (ac != null) { const n = Number(String(ac).replace(/[^0-9.]/g, "")); deed = Number.isFinite(n) && n > 0 ? n : null; }
+  let taxYear = null;
+  for (const k of Object.keys(attrs || {})) if (/^(tax_?yea?r|taxyr|tax_yr|appraisal_?year|apprYear)$/i.test(k)) { const v = String(attrs[k] ?? "").trim(); if (/^\d{4}$/.test(v)) { taxYear = v; break; } }
+  return {
+    owner: ownerName(attrs) || null,
+    account: clean(row("Account / ID")) || declared(idField) || clean(acct),
+    address: clean(situsAddress(attrs)) || streetFromParts(attrs) || declared(addrField) || clean(addr),
+    deedAcres: deed,
+    taxYear,
+  };
 }

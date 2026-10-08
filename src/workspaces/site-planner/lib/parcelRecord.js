@@ -41,7 +41,8 @@ export const PROVENANCE_LABEL = {
   drawn: { short: "Drawn by hand", long: "Boundary digitized by hand — not a county record and not a survey." },
   combined: { short: "Combined", long: "Made by combining county lots — each original is kept and can be split back out." },
 };
-export const provenanceLabel = (pc) => PROVENANCE_LABEL[parcelProvenance(pc)] || PROVENANCE_LABEL.drawn;
+/* An `unknown` provenance has NO label — never the "drawn" one (B2191xxx: no positive evidence, no claim). */
+export const provenanceLabel = (pc) => PROVENANCE_LABEL[parcelProvenance(pc)] || { short: "", long: "" };
 
 /* The typed fields, in panel order. `county` marks the ones a county identify also fills, so the
  * panel can say when it is overriding a county value. */

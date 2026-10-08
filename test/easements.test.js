@@ -235,3 +235,21 @@ describe("encumbranceStyle — shares the SAME appearance primitives as easement
     expect(encumbrancePatternId(enc)).toBe("pat-encumber-el-x2");
   });
 });
+
+describe("NEW-1 recording summary (collapsed header)", () => {
+  it("joins the filled recording fields, hides when none", async () => {
+    const { easementRecordingSummary } = await import("../src/workspaces/site-planner/lib/easements.js");
+    expect(easementRecordingSummary({ holder: "CenterPoint", recording: "Vol 412 Pg 88", exclusive: true })).toBe("CenterPoint · Vol 412 Pg 88 · Exclusive");
+    expect(easementRecordingSummary({ holder: "  ", recording: "", exclusive: false })).toBe("");
+    expect(easementRecordingSummary({ recording: "Clerk 77" })).toBe("Clerk 77");
+  });
+  it("custom label wins, clearing restores the auto name, width/type changes leave a custom label alone", () => {
+    const e = { mode: "centerline", easeType: "pipeline", width: 50 };
+    expect(easementLabel(e)).toBe("50′ Pipeline Esmt");
+    const c = { ...e, labelOverride: "Enterprise 12in" };
+    expect(easementLabel(c)).toBe("Enterprise 12in");
+    expect(easementLabel({ ...c, width: 30, easeType: "water" })).toBe("Enterprise 12in");
+    expect(easementLabel({ ...c, labelOverride: "" })).toBe("50′ Pipeline Esmt");
+    expect(easementLabel({ ...e, width: 40 })).toBe("40′ Pipeline Esmt"); // auto name tracks width
+  });
+});

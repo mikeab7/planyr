@@ -410,6 +410,12 @@
     }
   ],
   "ownedColumns": {
+    "recovery_20261008_parcel_account_snapshot": [
+      "site_id"
+    ],
+    "recovery_20261008_combined_madefrom_snapshot": [
+      "site_id"
+    ],
     "ops_ingest_tokens": ["label"],
     "signup_attempts_log": [
       "email_domain"
