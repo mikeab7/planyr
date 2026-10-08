@@ -729,7 +729,7 @@ describe("basemap crash fix — no explicit undefined subdomains, degrades inste
 describe("VisitPanel — rating slider (not a button row) and a date field that never defaults", () => {
   it("the date field starts empty for a FRESH log — never pre-filled with today (edit mode pre-fills from the visit being edited, see the edit-a-visit describe block below)", () => {
     const panel = src("components/VisitPanel.jsx");
-    expect(panel).toMatch(/const \[visitedOn, setVisitedOn\] = useState\(\(\) => initial\?\.visited_on \|\| ""\)/);
+    expect(panel).toMatch(/const \[visitedOn, setVisitedOn\] = useDraftField\(draftKey, "visitedOn", \(\) => initial\?\.visited_on \|\| ""\)/); // kept across a remount (lib/draftStore.js); the INITIAL value is still empty for a fresh log
     expect(panel).not.toMatch(/new Date\(\)\.toISOString\(\)\.slice\(0,\s*10\)/);
   });
 
@@ -2376,7 +2376,7 @@ describe("VisitPanel — Actions row (block 4): want-to-try disappears once visi
   it("clicking 'Log a visit' opens the form in place — never auto-opens on mount, even for a never-visited place (NEW-2 changed this default from the old always-open-when-zero-visits behavior)", () => {
     expect(panel).toMatch(/const \[adding, setAdding\] = useState\(false\); \/\/ NEW-2: never auto-opens, even on a never-visited place/);
     // Also closes any in-progress edit (2026-08-28 owner block) — only one form open at a time.
-    expect(panel).toMatch(/const handleOpenForm = \(\) => \{ setEditingVisitId\(null\); setAdding\(true\); \};/);
+    expect(panel).toMatch(/const handleOpenForm = \(\) => \{ if \(editingVisitId\) drafts\.clear\(`edit:\$\{editingVisitId\}`\); drafts\.clear\("new"\); setEditingVisitId\(null\); setAdding\(true\); \};/);
   });
 });
 
@@ -2475,13 +2475,13 @@ describe("VisitPanel — edit a past visit: reuses VisitForm, opens via card tap
   it("VisitForm pre-fills every field from `initial` when editing, and stays blank for a fresh log (initial undefined)", () => {
     const formStart = panel.indexOf("function VisitForm(");
     const formBody = panel.slice(formStart, panel.indexOf("\n}", panel.indexOf("return (", formStart)));
-    expect(formBody).toMatch(/useState\(\(\) => \(initial\?\.rating != null \? Number\(initial\.rating\) : null\)\)/);
-    expect(formBody).toMatch(/useState\(\(\) => \(initial\?\.rating_ambiance != null \? Number\(initial\.rating_ambiance\) : null\)\)/);
-    expect(formBody).toMatch(/useState\(\(\) => \(initial\?\.cost != null \? String\(initial\.cost\) : ""\)\)/);
+    expect(formBody).toMatch(/useDraftField\(draftKey, "rating", \(\) => \(initial\?\.rating != null \? Number\(initial\.rating\) : null\)\)/);
+    expect(formBody).toMatch(/useDraftField\(draftKey, "ratingAmbiance", \(\) => \(initial\?\.rating_ambiance != null \? Number\(initial\.rating_ambiance\) : null\)\)/);
+    expect(formBody).toMatch(/useDraftField\(draftKey, "cost", \(\) => \(initial\?\.cost != null \? String\(initial\.cost\) : ""\)\)/);
     expect(formBody).not.toMatch(/useState\(\(\) => initial\?\.what_i_had/); // NEW-1: no editable "What I had"; the saved text is shown read-only
-    expect(formBody).toMatch(/useState\(\(\) => initial\?\.what_was_good \|\| ""\)/);
-    expect(formBody).toMatch(/useState\(\(\) => initial\?\.notes \|\| ""\)/);
-    expect(formBody).toMatch(/useState\(\(\) => initial\?\.would_return \?\? null\)/);
+    expect(formBody).toMatch(/useDraftField\(draftKey, "whatWasGood", \(\) => initial\?\.what_was_good \|\| ""\)/);
+    expect(formBody).toMatch(/useDraftField\(draftKey, "notes", \(\) => initial\?\.notes \|\| ""\)/);
+    expect(formBody).toMatch(/useDraftField\(draftKey, "wouldReturn", \(\) => initial\?\.would_return \?\? null\)/);
   });
 
   it("the date field has an explicit Clear affordance (a native date input's own clear gesture isn't reliably reachable on every platform)", () => {
@@ -2512,8 +2512,8 @@ describe("VisitPanel — edit a past visit: reuses VisitForm, opens via card tap
 
   it("editingVisitId is lifted to VisitPanel (not local to VisitCard) so only one form — the new-visit form or ONE card's edit — is ever open at once", () => {
     expect(panel).toMatch(/const \[editingVisitId, setEditingVisitId\] = useState\(null\);/);
-    expect(panel).toMatch(/const handleOpenEdit = useCallback\(\(id\) => \{ setAdding\(false\); setEditingVisitId\(id\); \}, \[\]\);/);
-    expect(panel).toMatch(/const handleOpenForm = \(\) => \{ setEditingVisitId\(null\); setAdding\(true\); \};/);
+    expect(panel).toMatch(/const handleOpenEdit = useCallback\(\(id\) => \{ drafts\.clear\("new"\); drafts\.clear\(`edit:\$\{id\}`\); setAdding\(false\); setEditingVisitId\(id\); \}, \[drafts\]\);/);
+    expect(panel).toMatch(/const handleOpenForm = \(\) => \{ if \(editingVisitId\) drafts\.clear\(`edit:\$\{editingVisitId\}`\); drafts\.clear\("new"\); setEditingVisitId\(null\); setAdding\(true\); \};/);
   });
 
   it("FoodApp's editVisit uses the SAME optimistic-update/rollback shape submitVisit already uses", () => {

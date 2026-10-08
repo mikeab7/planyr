@@ -24,6 +24,7 @@
  * STEP CHANGED 0.5 -> 0.25 (NEW-1) — the scale is still 1.0-10.0; only the resolution moved,
  * matching db/food.sql's food_dishes_score_check widen to numeric(4,2)/quarter-point.
  */
+import { useScrollSafeSlider } from "../lib/sliderScrollGuard.js";
 import { colorForRating } from "../lib/ratingColor.js";
 import { formatScore } from "../lib/dishAggregates.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
@@ -84,6 +85,7 @@ export default function ScoreMeter({ value, onChange, label = "Score", isMobile 
   const shown = active ? value : DISH_SCORE_MIN;
   const color = active ? (colorForRating(shown) || "var(--accent-food)") : "var(--border-default)";
   const nudgeStyle = isMobile ? NUDGE_BTN_STYLE_PHONE : NUDGE_BTN_STYLE;
+  const scrollGuard = useScrollSafeSlider(value, onChange); // a vertical swipe that starts on the slider scrolls the card and leaves the score alone
 
   return (
     <div data-testid="dish-score-meter">
@@ -124,7 +126,7 @@ export default function ScoreMeter({ value, onChange, label = "Score", isMobile 
             type="range" min={DISH_SCORE_MIN} max={DISH_SCORE_MAX} step={DISH_SCORE_STEP}
             value={shown} onChange={(e) => onChange(clampScore(Number(e.target.value)))}
             aria-label={label} aria-valuetext={active ? `${formatScore(shown)} out of ${DISH_SCORE_MAX}` : "not scored"}
-            data-testid="dish-score-slider"
+            data-testid="dish-score-slider" {...scrollGuard}
             style={{
               width: "100%", accentColor: color, cursor: "pointer", borderRadius: RADIUS.sm,
               minHeight: isMobile ? 40 : 32, height: isMobile ? 40 : undefined,

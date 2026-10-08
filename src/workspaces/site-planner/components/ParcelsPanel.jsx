@@ -65,7 +65,7 @@ function ParcelRow({ row, selected, picked, pickMode, checked, handlers }) {
   return (
     <div style={{ marginLeft: row.depth * SPACE.xl }}>
       <div className="land-parcel-row" data-testid={`parcel-table-row-${row.id}`} data-included={row.included ? "1" : "0"}
-        style={{ position: "relative", display: "grid", gridTemplateColumns: COLS, alignItems: "center", minHeight: 52, border: picked ? "1px solid var(--accent-site)" : LINE, borderRadius: RADIUS.md, background: selected || picked ? "var(--surface-selected)" : "var(--surface-raised)" }}>
+        style={{ position: "relative", display: "grid", gridTemplateColumns: COLS, alignItems: "center", minHeight: 52, borderBottom: LINE, borderLeft: `2px solid ${selected || picked ? "var(--accent-site)" : "transparent"}`, borderRadius: 0, background: selected || picked ? "var(--surface-selected)" : "transparent" }}>
         <label style={{ display: "flex", alignItems: "center", justifyContent: "center", alignSelf: "stretch", cursor: "pointer" }}>
           <input type="checkbox" checked={checked} onChange={() => handlers.onCheck(row.id)} aria-label={`Select ${row.name} to combine`} data-testid={`parcel-row-check-${row.id}`} style={{ width: 15, height: 15, margin: 0, cursor: "pointer" }} />
         </label>

@@ -43,9 +43,10 @@ function envelopeOf(u) {
 
 /** Route every GIS host: Bartow /query → the synthetic grid after `delayMs`; other /query → empty; /export → 1 px PNG;
  *  anything else under /MapServer|/FeatureServer → layer metadata. Returns live counters. */
-export async function routeBartowGis(page, { delayMs = 350 } = {}) {
+export async function routeBartowGis(page, { delayMs = 350, bartowOnly = false } = {}) {
   const counts = { query: 0, lots: 0 };
-  await page.route(/\/(MapServer|FeatureServer)\//i, async (route) => {
+  /* bartowOnly: leave every OTHER host to the real network (a live Texas arm beside a synthetic Georgia one). */
+  await page.route(bartowOnly ? (url) => url.hostname.includes("bartowgis.org") : /\/(MapServer|FeatureServer)\//i, async (route) => {
     const u = route.request().url();
     if (u.includes("bartowgis.org") && /\/query(\?|$)/i.test(u)) {
       await new Promise((r) => setTimeout(r, delayMs));

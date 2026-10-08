@@ -26,10 +26,18 @@ import {
   manualWishlistFromRows, manualGroupKey, manualPinKey,
   fetchAllDishes, insertDish, updateDish, deleteDish,
   fetchAllDishWishlist, markDishDone,
+  fetchAllLists, fetchAllListItems, createList, updateList, deleteList, addListItem, removeListItem,
 } from "./lib/foodStore.js";
 import { withVisitDate, matchingOpenDishWishlist } from "./lib/dishAggregates.js";
 import { searchOverpass } from "./lib/overpass.js";
 import { existingRestaurants, findExisting, canonicalIdentity } from "./lib/placeIdentity.js";
+import ListChips from "./components/ListChips.jsx";
+import ListPanel from "./components/ListPanel.jsx";
+import AddToListControl from "./components/AddToListControl.jsx";
+import {
+  validateListName, nextListColor, nextListPosition, identityKey, itemIdentity, toListIdentity, findItem, listIdsFor,
+  emphasisKeys as listEmphasisKeys, memberRecords, pickerRows as buildPickerRows,
+} from "./lib/foodLists.js";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { useLandscapePhone } from "./lib/phoneLayout.js";
 import { Button, SegmentedControl, SIZE } from "../../shared/ui/controls.jsx";
@@ -49,6 +57,15 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   const [dishes, setDishes] = useState([]); // per-dish ratings (B1873008) — food_dishes rows
   const [dishWishlist, setDishWishlist] = useState([]); // dish-level "want to try" (NEW-3) — food_dish_wishlist rows
   const [dishPending, setDishPending] = useState(false);
+  // Named restaurant lists (NEW-1 / B2088288) — a grouping orthogonal to status; see lib/foodLists.js.
+  const [lists, setLists] = useState([]);
+  const [listItems, setListItems] = useState([]);
+  const [listPlaceNames, setListPlaceNames] = useState({}); // id -> {name, lat, lon} for places that are ONLY on a list
+  const [selectedListId, setSelectedListId] = useState(""); // "" = All (the map is exactly what it was before lists)
+  const [listMode, setListMode] = useState("members"); // "members" | "add" (the picker)
+  const [listFilter, setListFilter] = useState("all");
+  const [listCollapsed, setListCollapsed] = useState(true);
+  const [listError, setListError] = useState(null);
   const [placeNames, setPlaceNames] = useState({}); // id -> {name, lat, lon}
   const [selected, setSelected] = useState(null); // {kind:'place'|'manualPin'|'newPin', ...}
   const [pinMode, setPinMode] = useState(false);
@@ -131,6 +148,14 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   }, [accountActive]);
   useEffect(() => { reloadDishWishlist(); }, [reloadDishWishlist]);
 
+  const reloadLists = useCallback(async () => {
+    if (!accountActive) { setLists([]); setListItems([]); return; }
+    const [l, i] = await Promise.all([fetchAllLists(), fetchAllListItems()]);
+    if (l.error || i.error) { setListError((l.error || i.error).message || "Couldn't load your lists."); return; }
+    setLists(l.data); setListItems(i.data);
+  }, [accountActive]);
+  useEffect(() => { reloadLists(); }, [reloadLists]);
+
   // A name/lat/lon lookup for every place he's logged OR flagged (which can be well outside
   // whatever the map currently shows) — the union of both tables' place_ids, one batch fetch.
   useEffect(() => {
@@ -148,6 +173,16 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     return () => { cancelled = true; };
   }, [accountActive, visits, wishlist]);
 
+  // Names for places that are on a list but neither visited nor flagged — kept OUT of `placeNames`, which
+  // drives `loggedPlaces` (everything in it draws as a visited pin).
+  useEffect(() => {
+    const ids = [...new Set(listItems.filter((i) => i.place_id).map((i) => i.place_id))].filter((id) => !placeNames[id]);
+    if (!accountActive || !ids.length) { setListPlaceNames({}); return undefined; }
+    let cancelled = false;
+    fetchPlacesByIds(ids).then(({ data }) => { if (!cancelled) setListPlaceNames(Object.fromEntries(data.map((r) => [r.id, r]))); });
+    return () => { cancelled = true; };
+  }, [accountActive, listItems, placeNames]);
+
   const loggedIds = useMemo(() => loggedPlaceIds(visits), [visits]);
   const manualPins = useMemo(() => manualPinsFromVisits(visits), [visits]);
   const avgRatings = useMemo(() => avgRatingByPlaceId(visits), [visits]);
@@ -155,8 +190,10 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
   // redesign's "his places are always visible, at every zoom level." Carries avgRating so
   // the map can colour the pin along the 1-10 ramp.
   const loggedPlaces = useMemo(
-    () => Object.values(placeNames).map((p) => ({ ...p, avgRating: avgRatings.get(p.id) })),
-    [placeNames, avgRatings]
+    // Only places he has actually VISITED: `placeNames` also holds flagged (want-to-try) places, which draw as
+    // hollow rings via wishlistPlaces — mapping them here too drew every flagged place a second time as a filled dot.
+    () => Object.values(placeNames).filter((p) => loggedIds.has(p.id)).map((p) => ({ ...p, avgRating: avgRatings.get(p.id) })),
+    [placeNames, avgRatings, loggedIds]
   );
 
   // "Want to try" (B669312) — flagged places/pins, EXCLUDING anything already visited (a place
@@ -178,9 +215,34 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
 
   // Everything he already HAS, flat — the one list search-merge, open-existing and the save guard all
   // match against (B2046224; lib/placeIdentity.js).
+  const nameOfPlace = useCallback((ident) => placeNames[ident.place_id] || listPlaceNames[ident.place_id] || null, [placeNames, listPlaceNames]);
+  // Restaurants he has ONLY put on a list (no visit, no flag) — part of "what he already has" so a second search
+  // row of the same restaurant resolves onto the record already on the list (one membership, never two).
+  const listOnlyPlaces = useMemo(() => {
+    const seen = new Set();
+    const out = [];
+    for (const i of listItems) {
+      if (!i.place_id || loggedIds.has(i.place_id) || wishlistIds.has(i.place_id) || seen.has(i.place_id)) continue;
+      seen.add(i.place_id);
+      const p = listPlaceNames[i.place_id];
+      if (p) out.push(p);
+    }
+    return out;
+  }, [listItems, loggedIds, wishlistIds, listPlaceNames]);
+  const listOnlyManualPins = useMemo(() => {
+    const drawn = new Set([...manualPinKeys, ...wishlistManualPins.map((p) => p.key)]);
+    const out = new Map();
+    for (const i of listItems) {
+      if (i.place_id) continue;
+      const key = manualGroupKey(i.custom_name, i.custom_lat, i.custom_lon);
+      if (drawn.has(key) || out.has(key)) continue;
+      out.set(key, { key, name: i.custom_name, lat: i.custom_lat, lon: i.custom_lon, visitIds: [], listOnly: true });
+    }
+    return [...out.values()];
+  }, [listItems, manualPinKeys, wishlistManualPins]);
   const existing = useMemo(
-    () => existingRestaurants({ manualPins, wishlistManualPins, loggedPlaces, wishlistPlaces }),
-    [manualPins, wishlistManualPins, loggedPlaces, wishlistPlaces]
+    () => existingRestaurants({ manualPins, wishlistManualPins, loggedPlaces, wishlistPlaces, listManualPins: listOnlyManualPins, listPlaces: listOnlyPlaces }),
+    [manualPins, wishlistManualPins, loggedPlaces, wishlistPlaces, listOnlyManualPins, listOnlyPlaces]
   );
 
   const visitsForSelected = useMemo(() => {
@@ -404,6 +466,134 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
     await reloadWishlist();
   }, [selected, accountActive, wishlist, manualDraftName, reloadWishlist, existing]);
 
+  // ── Named restaurant lists (NEW-1 / B2088288) ─────────────────────────────────────────────
+  const selectedList = useMemo(() => lists.find((l) => l.id === selectedListId) || null, [lists, selectedListId]);
+  const emphasis = useMemo(() => (selectedList ? listEmphasisKeys(listItems, selectedList.id) : null), [listItems, selectedList]);
+  const statusCtx = useMemo(() => ({
+    loggedIds, visitedManualKeys: manualPinKeys, wishlistIds, wishlistManualKeys: new Set(manualWishlistAll.map((p) => p.key)),
+  }), [loggedIds, manualPinKeys, wishlistIds, manualWishlistAll]);
+  const members = useMemo(
+    () => (selectedList ? memberRecords(listItems, selectedList.id, { nameOf: nameOfPlace, statusCtx }) : []),
+    [listItems, selectedList, nameOfPlace, statusCtx]
+  );
+  // The list's members that nothing else draws — handed to the map ONLY while the list is selected.
+  const mapListPlaces = useMemo(() => (emphasis ? listOnlyPlaces.filter((p) => emphasis.has(`place:${p.id}`)) : undefined), [emphasis, listOnlyPlaces]);
+  const mapListManualPins = useMemo(() => (emphasis ? listOnlyManualPins.filter((p) => emphasis.has(manualPinKey(p.name, p.lat, p.lon))) : undefined), [emphasis, listOnlyManualPins]);
+  const pickerRows = useMemo(() => {
+    if (!selectedList || listMode !== "add") return [];
+    const place = (p) => ({ ident: { place_id: p.id }, name: p.name, lat: p.lat, lon: p.lon });
+    const pin = (p) => ({ ident: { custom_name: p.name, custom_lat: p.lat, custom_lon: p.lon }, name: p.name, lat: p.lat, lon: p.lon });
+    return buildPickerRows({ been: [...loggedPlaces.map(place), ...manualPins.map(pin)], want: [...wishlistPlaces.map(place), ...wishlistManualPins.map(pin)] }, listItems, selectedList.id, listFilter === "none" ? "all" : listFilter)
+      .map((r) => ({ ...r, status: r.status === "want" ? "want" : r.status }));
+  }, [selectedList, listMode, loggedPlaces, manualPins, wishlistPlaces, wishlistManualPins, listItems, listFilter]);
+
+  const failList = useCallback((err, fallback) => { setListError(err?.message || fallback); return false; }, []);
+
+  const createListNamed = useCallback(async (name) => {
+    const v = validateListName(name, lists);
+    if (!v.ok) return { ok: false, message: v.message };
+    const { data, error: err } = await createList({ name: v.name, color: nextListColor(lists), position: nextListPosition(lists) });
+    if (err) return { ok: false, message: /duplicate|unique/i.test(err.message || "") ? `You already have a list called "${v.name}".` : (err.message || "Couldn't make that list.") };
+    await reloadLists();
+    setListError(null);
+    return { ok: true, list: data };
+  }, [lists, reloadLists]);
+  const createAndSelect = useCallback(async (name) => {
+    const r = await createListNamed(name);
+    if (r.ok) { setSelectedListId(r.list.id); setListMode("members"); setListCollapsed(false); }
+    return r;
+  }, [createListNamed]);
+  const renameListTo = useCallback(async (id, name) => {
+    const v = validateListName(name, lists, id);
+    if (!v.ok) return { ok: false, message: v.message };
+    const { error: err } = await updateList(id, { name: v.name });
+    if (err) return { ok: false, message: err.message || "Couldn't rename that list." };
+    await reloadLists();
+    return { ok: true };
+  }, [lists, reloadLists]);
+  const recolorList = useCallback(async (id, color) => {
+    const { error: err } = await updateList(id, { color });
+    if (err) { failList(err, "Couldn't change that colour."); return; }
+    await reloadLists();
+  }, [reloadLists, failList]);
+  const removeList = useCallback(async (id) => {
+    const { error: err } = await deleteList(id);
+    if (err) { failList(err, "Couldn't delete that list."); return; }
+    setSelectedListId((cur) => (cur === id ? "" : cur)); // deleting the selected list falls back to All — never a blank map
+    setListMode("members");
+    await reloadLists();
+  }, [reloadLists, failList]);
+
+  const addIdentToList = useCallback(async (listId, rawIdent, candidate) => {
+    const ident = toListIdentity(rawIdent, candidate);
+    if (!ident) { setListError("Couldn't add that place — it has no location."); return false; }
+    if (findItem(listItems, listId, ident)) { setListError(null); return true; } // already on it: one membership, never two
+    const { error: err } = await addListItem(listId, ident, listItems.filter((i) => i.list_id === listId).length);
+    if (err) return failList(err, "Couldn't add that to the list.");
+    setListError(null);
+    await reloadLists();
+    return true;
+  }, [listItems, reloadLists, failList]);
+  const removeItemRow = useCallback(async (item) => {
+    const { error: err } = await removeListItem(item.id);
+    if (err) return failList(err, "Couldn't remove that from the list.");
+    setListError(null);
+    await reloadLists();
+    return true;
+  }, [reloadLists, failList]);
+
+  // The selected place/pin on the place card → the one identity a membership is stored under.
+  const identForSelected = useCallback(() => {
+    if (!selected) return null;
+    if (selected.kind === "newPin" && !manualDraftName.trim()) { setError("Give this place a name first."); return null; }
+    const ident = canonicalIdentity(selected, manualDraftName.trim(), existing);
+    const cand = selected.kind === "place" ? selected.place : selected.kind === "manualPin" ? selected.pin : { name: manualDraftName.trim(), lat: selected.lat, lon: selected.lon };
+    return ident && { ident, cand };
+  }, [selected, manualDraftName, existing]);
+  const toggleSelectedOnList = useCallback(async (listId) => {
+    const got = identForSelected();
+    if (!got) return;
+    setError(null);
+    const ident = toListIdentity(got.ident, got.cand);
+    const row = ident && findItem(listItems, listId, ident);
+    if (row) await removeItemRow(row); else await addIdentToList(listId, got.ident, got.cand);
+  }, [identForSelected, listItems, removeItemRow, addIdentToList]);
+  const listIdsForSelected = useMemo(() => {
+    if (!selected) return new Set();
+    if (selected.kind === "newPin" && !manualDraftName.trim()) return new Set();
+    const ident = canonicalIdentity(selected, manualDraftName.trim(), existing);
+    const cand = selected.kind === "place" ? selected.place : selected.kind === "manualPin" ? selected.pin : { name: manualDraftName.trim(), lat: selected.lat, lon: selected.lon };
+    return listIdsFor(listItems, toListIdentity(ident, cand));
+  }, [selected, manualDraftName, existing, listItems]);
+
+  // While the picker is open, tapping a map pin or choosing a search row ADDS it to the list instead of opening it.
+  const picking = !!selectedList && listMode === "add";
+  const pickPlace = useCallback((place) => {
+    const ident = canonicalIdentity({ kind: "place", place }, null, existing);
+    return addIdentToList(selectedList.id, ident, place);
+  }, [existing, selectedList, addIdentToList]);
+  const pickManual = useCallback((pin) => addIdentToList(selectedList.id, { custom_name: pin.name, custom_lat: pin.lat, custom_lon: pin.lon }, pin), [selectedList, addIdentToList]);
+  const onPickPlace = picking ? pickPlace : openPlace;
+  const onPickManual = picking ? pickManual : openManualPin;
+
+  // "Want to try" from a list row — a food_wishlist row, same add/remove the place card uses.
+  const toggleWantFor = useCallback(async (rec) => {
+    const ident = rec.ident;
+    const flagged = ident.place_id
+      ? wishlist.find((w) => w.place_id === ident.place_id)
+      : wishlist.find((w) => !w.place_id && manualGroupKey(w.custom_name, w.custom_lat, w.custom_lon) === manualGroupKey(ident.custom_name, ident.custom_lat, ident.custom_lon));
+    const { error: err } = flagged ? await removeWishlist(flagged.id) : await addWishlist(ident);
+    if (err) { failList(err, "Couldn't update that flag."); return; }
+    setListError(null);
+    await reloadWishlist();
+  }, [wishlist, reloadWishlist, failList]);
+  const openMember = useCallback((rec) => {
+    if (rec.lat == null || rec.lon == null) return;
+    if (rec.ident.place_id) openPlace({ id: rec.ident.place_id, name: rec.name, lat: rec.lat, lon: rec.lon });
+    else openManualPin({ name: rec.name, lat: rec.lat, lon: rec.lon, visitIds: [] });
+    flyTo({ lat: rec.lat, lon: rec.lon });
+  }, [openPlace, openManualPin, flyTo]);
+
   const removeVisit = useCallback(async (id) => {
     const { error: err } = await deleteVisit(id);
     if (err) { setError(err.message || "Couldn't delete that visit."); return; }
@@ -564,7 +754,7 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
             <SearchBox
               query={searchQuery} onQueryChange={setSearchQuery} view={view}
               manualPins={manualPins} loggedIds={loggedIds} wishlistIds={wishlistIds} existing={existing} bounds={bounds}
-              searchSnapshot={searchPlacesByName} onSelectPlace={openPlace} onSelectManualPin={openManualPin}
+              searchSnapshot={searchPlacesByName} onSelectPlace={onPickPlace} onSelectManualPin={onPickManual}
               onFlyTo={flyTo} onRequestLiveSearch={searchHere} overpassPlaces={overpassPlaces}
               onStartDropPinFor={startDropPinFor}
             />
@@ -598,8 +788,12 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
             wishlistPlaces={wishlistPlaces}
             wishlistManualPins={wishlistManualPins}
             overpassPlaces={overpassPlaces}
-            onSelectPlace={openPlace}
-            onSelectManualPin={openManualPin}
+            onSelectPlace={onPickPlace}
+            onSelectManualPin={onPickManual}
+            emphasisKeys={emphasis}
+            emphasisColor={selectedList?.color || null}
+            listPlaces={mapListPlaces}
+            listManualPins={mapListManualPins}
             pinMode={pinMode}
             onDropPin={dropPin}
             onViewChanged={setBounds}
@@ -633,6 +827,37 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
           />
         )}
 
+        {/* NEW-1 / B2088288 — the list switcher + the selected list's card FLOAT on the map (never in the header, so
+            they cannot push the search field or the Map | List switch off screen, and add no header row). On a phone
+            they start under the basemap switch and clear the zoom stack; sideways they stay beside the docked card; on an upright
+            phone they step aside while a place card is open (the pin is centred in the thin strip of map above the sheet,
+            exactly where they would sit). The selected list and its emphasis stay. */}
+        {accountActive && view === "map" && !(narrow && !landscape && selected) && (
+          <div
+            data-testid="food-lists-overlay"
+            style={{
+              position: "absolute", zIndex: 520, pointerEvents: "none", display: "flex", flexDirection: "column", gap: 6,
+              top: narrow ? 50 : 10,
+              left: landscape ? "calc(56px + env(safe-area-inset-left, 0px))" : 56,
+              right: landscape ? (sidePanelPx ? sidePanelPx + 10 : "calc(10px + env(safe-area-inset-right, 0px))") : narrow ? 10 : (selected ? 350 : 10) + 190,
+              maxHeight: "calc(100% - 70px)",
+            }}
+          >
+            <ListChips lists={lists} selectedId={selectedListId} onSelect={(id) => { setSelectedListId(id); setListMode("members"); setListError(null); setListCollapsed(true); }} onCreate={createAndSelect} style={{ pointerEvents: "auto" }} />
+            {selectedList && (
+              <ListPanel
+                list={selectedList} lists={lists} members={members} pickerRows={pickerRows}
+                mode={listMode} onMode={setListMode} filter={listFilter} onFilter={setListFilter}
+                collapsed={listCollapsed} onCollapsed={setListCollapsed}
+                onRename={renameListTo} onRecolor={recolorList} onDelete={removeList}
+                onRemoveMember={(m) => removeItemRow(m.item)} onAddRow={(r) => addIdentToList(selectedList.id, r.ident, r)}
+                onToggleWant={toggleWantFor} onOpenMember={openMember} error={listError}
+                style={{ pointerEvents: "auto", maxWidth: 360 }}
+              />
+            )}
+          </div>
+        )}
+
         {selected && (
           <VisitPanel
             key={selected.kind === "place" ? `place:${selected.place.id}` : selected.kind === "manualPin" ? manualPinKey(selected.pin.name, selected.pin.lat, selected.pin.lon) : "new-pin"}
@@ -656,6 +881,13 @@ export default function FoodApp({ shellModule, onShellSwitch, onGoDashboard, aut
             onDeleteDish={removeDish}
             dishPending={dishPending}
             openDishWishlistNames={openDishWishlistNamesForSelected}
+            listsControl={accountActive ? (
+              <AddToListControl lists={lists} onListIds={listIdsForSelected} onToggle={toggleSelectedOnList} onCreate={async (name) => {
+                const r = await createListNamed(name);
+                if (r.ok) await toggleSelectedOnList(r.list.id);
+                return r;
+              }} />
+            ) : null}
           />
         )}
       </div>
