@@ -253,7 +253,7 @@ import { loadDeed, deedNow } from "./lib/deedLazy.js";
  * call site in the deed-drop handler). It is a self-contained .docx/ZIP reader that only runs
  * once someone drops a deed or survey file, so it has no business on the boot path; the same
  * treatment B1123 gave the title reader and B1042 gave the export path. */
-import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip, easementStyle, easementPatternId, encumbranceStyle, encumbrancePatternId, deedCallsShown, DEFAULT_EASE_FILL_OPACITY, DEFAULT_EASE_HATCH, ENCUMBRANCE_DEFAULT } from "./lib/easements.js";
+import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementRecordingSummary, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip, easementStyle, easementPatternId, encumbranceStyle, encumbrancePatternId, deedCallsShown, DEFAULT_EASE_FILL_OPACITY, DEFAULT_EASE_HATCH, ENCUMBRANCE_DEFAULT } from "./lib/easements.js";
 import { deedTrace, deedGapText, deedClosure, deedReaderSummary, deedQueueClosure, deedPlotWarning } from "./lib/deedGap.js";
 import { HATCH_OPTIONS, hatchSpec } from "../../shared/style/hatchPatterns.js";
 // NEW-EASE-STYLE — the ONE renderer that turns a hatch catalog spec (shared/style/hatchPatterns.js)
@@ -26619,7 +26619,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             );
             return (
               <Section title={`Easement · ${{ centerline: "Centerline strip", boundary: "Boundary", parceledge: "Parcel-edge strip" }[e.mode] || "Easement"}`} accent={t.color}>
-                {/* Type — shared portal popover so it never hides behind the rail / zoom rail */}
+                {/* Map label — what the map and the PDF draw. Empty = the automatic name (type + width),
+                    which keeps tracking those while no custom text is set. One undo frame per typing session. */}
+                <Field label={<b style={{ color: PAL.ink }}>Map label</b>}>
+                  <input value={e.labelOverride || ""} maxLength={120} data-testid="easement-map-label"
+                    onChange={(ev) => { const v = ev.target.value; coalesceLabelWrite(`ease-label-${e.id}`, (p) => setMarkups((a) => a.map((m) => (m.id === e.id ? withEaseRing(m, p) : m))))({ labelOverride: v }, { live: true }); }}
+                    onBlur={() => { labelSessionRef.current = null; }}
+                    placeholder={easementLabel({ ...e, labelOverride: "" })} style={txt} />
+                </Field>
                 <Field label="Type">
                   <button ref={easeTypeAnchor} style={{ ...chip, display: "flex", alignItems: "center", gap: 6 }} onClick={() => setEaseTypeMenu((o) => !o)}>
                     <span style={{ width: 9, height: 9, borderRadius: 2, background: t.color }} /> {t.label} <span style={{ color: PAL.muted }}>▾</span>
@@ -26632,17 +26639,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     ))}
                   </AnchoredMenu>
                 </Field>
-                <Field label="Holder / beneficiary"><input value={e.holder || ""} onChange={(ev) => setSelEasement({ holder: ev.target.value })} placeholder="e.g. CenterPoint" style={txt} /></Field>
                 {isStrip && <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(e.width || 0)} min={1} onCommit={(n) => setSelEasement({ width: n })} /></Field>}
-                <Field label="Recording ref"><input value={e.recording || ""} onChange={(ev) => setSelEasement({ recording: ev.target.value })} placeholder="Vol/Pg or Clerk's #" style={txt} /></Field>
                 <Field label="Status">
                   <span style={{ display: "flex", gap: 5, width: 150 }}>
                     <button style={seg(e.status !== "proposed")} onClick={() => setSelEasement({ status: "existing" })}>Existing</button>
                     <button style={seg(e.status === "proposed")} onClick={() => setSelEasement({ status: "proposed" })}>Proposed</button>
                   </span>
                 </Field>
+                <Collapse sectionId="easement-recording" title="Recording details" defaultOpen={false} summary={easementRecordingSummary(e)}>
+                  <Field label="Holder / beneficiary"><input value={e.holder || ""} onChange={(ev) => setSelEasement({ holder: ev.target.value })} placeholder="e.g. CenterPoint" style={txt} /></Field>
+                  <Field label="Recording ref"><input value={e.recording || ""} onChange={(ev) => setSelEasement({ recording: ev.target.value })} placeholder="Vol/Pg or Clerk's #" style={txt} /></Field>
+                  {check("Exclusive easement", e.exclusive, "exclusive")}
+                </Collapse>
                 <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "8px 0", paddingTop: 8 }}>
-                  {check("Exclusive use", e.exclusive, "exclusive")}
                   {check("Restricts buildings", e.restrictsBuildings !== false, "restrictsBuildings")}
                   {check("Restricts paving", e.restrictsPaving === true, "restrictsPaving")}
                 </div>
@@ -26663,7 +26672,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   />
                   {est.hasOverride && <button style={{ ...chip, marginTop: 4 }} onClick={() => setSelEasement({ fill: null, stroke: null, fillOpacity: null, hatch: null })} title={`Revert to the ${t.label} type's default appearance`}>↺ Reset to type default</button>}
                 </div>
-                <Field label="Label"><input value={e.labelOverride || ""} onChange={(ev) => setSelEasement({ labelOverride: ev.target.value })} placeholder={easementLabel({ ...e, labelOverride: "" })} style={txt} /></Field>
                 {/* B620 — inline label riding the easement (distinct from the centroid caption above; double-click the
                     easement also opens this in place). inlineLabel doesn't touch the ring, so a plain spread is safe;
                     onFocus pushes one undo frame per edit. */}
