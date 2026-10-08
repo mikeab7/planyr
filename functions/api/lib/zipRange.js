@@ -34,33 +34,41 @@ export async function remoteZipEntries(url, fetchImpl = fetch) {
   return entries;
 }
 
-/** Stream an entry as blocks of COMPLETE lines: `onBlock(text) → true to stop` (text = whole lines, each ending
- * "\n"). Handing the caller a block rather than a line at a time is the point — a 570 MB roll is ~1.8M lines and
- * any per-line JavaScript blows the Worker's CPU budget (Cloudflare error 1102, measured); native indexOf over a
- * block does not. Returns { bytes, stopped }. */
-export async function scanZipEntryBlocks(url, entry, onBlock, fetchImpl = fetch) {
+/** Stream an entry's INFLATED BYTES in the chunks the runtime hands back: `onChunk(Uint8Array) → true to stop`.
+ * Pulled in bounded Range segments on demand: a single ranged GET of a 60 MB entry is read ahead by the runtime
+ * far faster than it is inflated, and buffering the compressed bytes ran deep scans out of memory (Cloudflare
+ * 1102). A ReadableStream with highWaterMark 0 only fetches the next segment when asked. */
+export async function scanZipEntryChunks(url, entry, onChunk, fetchImpl = fetch, seg = 16 * 1024 * 1024) {
   const lh = new Uint8Array(await (await fetchImpl(url, { headers: { ...UA, range: `bytes=${entry.off}-${entry.off + 63}` } })).arrayBuffer());
   const start = entry.off + 30 + u16(lh, 26) + u16(lh, 28);
-  const res = await fetchImpl(url, { headers: { ...UA, range: `bytes=${start}-${start + entry.csize - 1}` } });
-  if (!res.ok || !res.body) throw new Error(`zip entry read failed: HTTP ${res.status}`);
-  const body = entry.method === 0 ? res.body : res.body.pipeThrough(new DecompressionStream("deflate-raw"));
-  const rd = body.getReader();
-  const dec = new TextDecoder();
-  let pending = "", bytes = 0, stopped = false;
+  let pos = start;
+  const end = start + entry.csize;
+  const src = new ReadableStream({
+    async pull(c) {
+      if (pos >= end) { c.close(); return; }
+      const hi = Math.min(end, pos + seg) - 1;
+      const r = await fetchImpl(url, { headers: { ...UA, range: `bytes=${pos}-${hi}` } });
+      if (!r.ok) throw new Error(`zip entry read failed: HTTP ${r.status}`);
+      c.enqueue(new Uint8Array(await r.arrayBuffer()));
+      pos = hi + 1;
+    },
+  }, { highWaterMark: 0 });
+  const rd = (entry.method === 0 ? src : src.pipeThrough(new DecompressionStream("deflate-raw"))).getReader();
+  let bytes = 0, stopped = false;
   for (;;) {
     const { value, done } = await rd.read();
-    if (value) { bytes += value.length; pending += dec.decode(value, { stream: !done }); }
-    let block;
-    if (done) { block = pending && !pending.endsWith("\n") ? pending + "\n" : pending; pending = ""; }
-    else {
-      const L = pending.lastIndexOf("\n");
-      if (L < 0) continue;
-      block = pending.slice(0, L + 1);
-      pending = pending.slice(L + 1);
-    }
-    if (block && onBlock(block)) { stopped = true; break; }
     if (done) break;
+    bytes += value.length;
+    if (onChunk(value)) { stopped = true; break; }
   }
   await rd.cancel().catch(() => {});
   return { bytes, stopped };
+}
+
+/** Whole text of a SMALL entry (the rate table, ~2 MB). Never use on the 570 MB roll. */
+export async function readZipEntryText(url, entry, fetchImpl = fetch) {
+  const dec = new TextDecoder();
+  let text = "";
+  await scanZipEntryChunks(url, entry, (c) => { text += dec.decode(c, { stream: true }); return false; }, fetchImpl);
+  return text + dec.decode();
 }

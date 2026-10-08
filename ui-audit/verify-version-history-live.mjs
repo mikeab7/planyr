@@ -7,7 +7,7 @@ import { openSignedIn } from "./lib/signedInSession.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { buildFixtureDocx } from "../test/fixtures/docxFixture.js";
 
-const BASE = process.argv[2] || "https://planyr.io";
+const BASE = process.argv.slice(2).find((a) => a.startsWith("http")) || "https://planyr.io";
 const stamp = Date.now().toString(36);
 const TXT = `/tmp/vh-live-${stamp}.txt`, DOCX = `/tmp/vh-live-${stamp}.docx`;
 writeFileSync(TXT, "live first.\n"); writeFileSync(DOCX, buildFixtureDocx());
@@ -31,6 +31,7 @@ const saveWith = async (text) => {
 const openHistory = async () => { await page.locator('[data-testid="doc-history"]').click(); await page.waitForSelector('[data-testid="version-history"]'); };
 
 try {
+  if (process.argv.includes("--cleanup-only")) throw new Error("cleanup-only"); // `node … --cleanup-only` just deletes leftover vh-live-* files
   /* 1-3: .txt saved three times, persisted, reloaded */
   await openFile(TXT);
   await page.waitForTimeout(4000); // let the initial upload + first autosave land
@@ -93,7 +94,7 @@ try {
   ok("no download at any point", downloads.length === 0, downloads.join(","));
   const real = s.errors.filter((e) => !/tesseract|importScripts/i.test(e));
   ok("no page errors", real.length === 0, real.join(" | "));
-} catch (e) { ok("harness ran to the end", false, e.message.split("\n")[0]); await page.screenshot({ path: "/tmp/vh-live-fail.png" }).catch(() => {}); }
+} catch (e) { if (e.message !== "cleanup-only") ok("harness ran to the end", false, e.message.split("\n")[0]); await page.screenshot({ path: "/tmp/vh-live-fail.png" }).catch(() => {}); }
 /* CLEANUP — delete every throwaway this run made (names carry "vh-live-"), then delete forever from the bin. */
 try {
   await page.goto(BASE + "/#/library", { waitUntil: "load" });

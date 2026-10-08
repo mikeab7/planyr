@@ -913,6 +913,12 @@ export async function fileNewReview({ projectId = null, project = "", discipline
     sources: [{ srcId, name: fileName || "document.pdf", size: blob ? blob.size : 0, storageKey: stored.storageKey, oversize: stored.oversize, driveKey: stored.driveKey }],
     single: { srcId, fileName: fileName || "document.pdf", numPages: 0, page: 1, markups: [], calByPage: {} },
   };
+  // B2064899 (follow-up, 2026-10-08) — the upload already wrote this review's file_facts row with BLANK
+  // item / date / revision, and the first upsert of a never-seen review id used to just RECORD its filing
+  // signature as "already mirrored" (syncFileFactsForReview's never-loaded rule), so the index kept the blanks
+  // forever (production 2026-10-06: two fresh uploads, item "zz-sweep-v191/192" on the review, "" in the index).
+  // Priming the signature with an EMPTY record makes this first save count as the filing edit it is.
+  rememberFiledSignature(id, {});
   const res = await upsertReview({ ...record, updatedAt: Date.now() });
   return { ok: res.ok, id, error: res.error, uploadFailed, oversize: stored.oversize, large: stored.large, name: fileName || "document.pdf",
     driveError: stored.driveError };
