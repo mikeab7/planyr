@@ -144,6 +144,7 @@ import { dirname, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+import { swallowReportWrites } from "./lib/reportCleanup.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { pacedWait } from "./lib/tabTiming.mjs";
 
@@ -169,6 +170,7 @@ try {
 
   async function openScreen({ width, height = 900, mode }) {
     const ctx = await browser.newContext({ viewport: { width, height } });
+    await swallowReportWrites(ctx); // B2159505: never file a real report from a harness
     if (mode === "plan") await ctx.addInitScript(seedPlan);
     const page = await ctx.newPage();
     await assertMeasurable(page, "verify-help-report-control");
@@ -484,6 +486,7 @@ try {
 
     async function openPhoneScreen({ device, insets, disablePollMs }) {
       const ctx = await engine.newContext({ ...device, ignoreHTTPSErrors: true });
+      await swallowReportWrites(ctx); // B2159505: never file a real report from a harness
       if (insets) await ctx.addInitScript(insetOverrideScript(...insets));
       if (disablePollMs) {
         // Defeats ONLY the CORNER_POLL_MS-cadence setInterval (never blanket — other app
@@ -704,6 +707,7 @@ try {
     for (const route of ROUTES) {
       for (const width of WIDTHS) {
         const ctx = await browser.newContext({ viewport: { width, height: 900 } });
+        await swallowReportWrites(ctx); // B2159505: never file a real report from a harness
         if (route.seedPlan) await ctx.addInitScript(seedPlan);
         if (route.seedModel) await ctx.addInitScript(seedModelSite);
         const page = await ctx.newPage();
@@ -804,6 +808,7 @@ try {
     }
     async function openChromeFreeScreen(ctxOpts) {
       const ctx = await browser.newContext(ctxOpts);
+      await swallowReportWrites(ctx); // B2159505: never file a real report from a harness
       const page = await ctx.newPage();
       await assertMeasurable(page, "verify-help-report-control PART I");
       await page.goto(URL + "#/schedule", { waitUntil: "load" }); // chrome-free route — no Leaflet, no canvas, isolates the button's own sizing
@@ -870,6 +875,7 @@ try {
         };
       })();`;
       const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+      await swallowReportWrites(ctx); // B2159505: never file a real report from a harness
       await ctx.addInitScript(mockMatchMediaScript);
       const page = await ctx.newPage();
       await assertMeasurable(page, "verify-help-report-control PART I (live switch)");
@@ -910,6 +916,7 @@ try {
     const modulePath = resolvePath(HERE, "../src/shared/ui/cornerClearance.js");
     const moduleSource = readFileSync(modulePath, "utf8");
     const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    await swallowReportWrites(ctx); // B2159505: never file a real report from a harness
     const page = await ctx.newPage();
     await page.goto("about:blank");
 

@@ -121,17 +121,31 @@ export function shapeOps(raw) {
   return {
     backlog: backlog && {
       updatedAt: backlog.updated_at || null,
+      commit: (backlog.payload && backlog.payload.commit) || null,
       open: { ...digest(backlog.payload && backlog.payload.open), topTags: (backlog.payload && backlog.payload.open && backlog.payload.open.topTags) || [] },
       verify: digest(backlog.payload && backlog.payload.verify),
     },
     verification: verification && {
       updatedAt: verification.updated_at || null,
+      commit: (verification.payload && verification.payload.commit) || null,
       pending: digest(verification.payload && verification.payload.pending),
     },
     sweeps: (Array.isArray(raw && raw.sweeps) ? raw.sweeps : []).map((s) => ({
       id: s.id, at: s.at, archived: n(s.archived), note: s.note || "",
       stillOpen: (Array.isArray(s.still_open) ? s.still_open : []).map((o) => ({ title: String(o.title || ""), waitingOn: String(o.waiting_on || "") })),
     })),
+  };
+}
+/** "Updated <relative> after <short commit>" for the Outstanding-work header (B2159504). `commit` is null for a digest
+ * loaded by hand (no merge recorded). `stale` = older than 3 days, i.e. the post-merge refresh has stopped. */
+export const DIGEST_STALE_MS = 3 * 86_400_000;
+export function digestStamp(ops, now = Date.now()) {
+  const d = ops && (ops.backlog || ops.verification);
+  if (!d) return null;
+  const at = d.updatedAt;
+  return {
+    at, ago: ago(at, now), commit: d.commit ? String(d.commit).slice(0, 7) : null,
+    stale: !at || now - new Date(at).getTime() > DIGEST_STALE_MS,
   };
 }
 /** Parse the "still open" textarea: one session per line, "title — waiting on …" (dash optional). */

@@ -94,6 +94,11 @@ jobs:
       # `--ci` draws exactly that line, and the pre-push hook is the strict first line of defence.
       - name: Mint gate (new B#/V# unclaimed on main and on in-flight branches — B779)
         run: node scripts/check-mint.mjs --ci
+      # Ops digest dry run (B2159504). The `ops-digest` job in build.yml pushes the ledger digest to the admin
+      # Ops page after every merge to main; this proves on every PR that the payload still builds and validates
+      # and the request is well formed, without sending anything or needing the OPS_INGEST_TOKEN secret.
+      - name: Ops digest dry run (payload builds + validates, nothing sent — B2159504)
+        run: node scripts/ops-snapshot.mjs --push --dry-run
       - name: Test (pure-logic smoke tests)
         run: npm test
       - name: Build

@@ -1,6 +1,7 @@
 /* Ops (B711908) — outstanding work + Claude Code session hygiene, as a page instead of a chat.
  * Outstanding work is a READ-ONLY DIGEST of the repo ledger (counts + the newest items), stored in
- * public.ops_snapshots by `node scripts/ops-snapshot.mjs --sql`; the ledger files stay canonical.
+ * public.ops_snapshots; the Build workflow's `ops-digest` job refreshes it after every merge to main
+ * (B2159504, scripts/ops-snapshot.mjs --push); the ledger files stay canonical.
  * The session-sweep log is public.ops_session_sweeps, written through admin_record_session_sweep()
  * (is_admin()-gated) — by the form below or by the weekly sweep run on the owner's own account. */
 import { useState } from "react";
@@ -8,9 +9,9 @@ import { supabase } from "../site-planner/lib/supabase.js";
 import { Button } from "../../shared/ui/controls.jsx";
 import { FONT_SIZE } from "../../shared/ui/designTokens.js";
 import { RADIUS } from "../../shared/ui/radius.js";
-import AdminPanel, { Card, PanelState, useAdminLoad } from "./AdminPanel.jsx";
+import AdminPanel, { Card, Chip, PanelState, useAdminLoad } from "./AdminPanel.jsx";
 import { exactTime } from "./lib/adminFormat.js";
-import { fetchOps, shapeOps, recordSessionSweep, parseStillOpen, ago } from "./lib/adminPanels.js";
+import { fetchOps, shapeOps, recordSessionSweep, parseStillOpen, ago, digestStamp } from "./lib/adminPanels.js";
 
 function Digest({ title, d }) {
   return (
@@ -42,7 +43,7 @@ function SweepForm({ onSaved }) {
   };
   return (
     <details>
-      <summary style={{ cursor: "pointer", fontSize: FONT_SIZE.control, fontWeight: 700 }}>Record a session sweep</summary>
+      <summary style={{ cursor: "pointer", fontSize: FONT_SIZE.control, fontWeight: 700 }} data-testid="record-manually">Record manually</summary>
       <div style={{ display: "grid", gap: 8, marginTop: 8, maxWidth: 560 }}>
         <label style={{ fontSize: FONT_SIZE.control }}>Sessions archived<input type="number" min="0" value={archived} onChange={(e) => setArchived(e.target.value)} style={{ ...field, display: "block", width: 90, marginTop: 2 }} /></label>
         <label style={{ fontSize: FONT_SIZE.control }}>Still open — one per line, “title — what it is waiting on”
@@ -61,6 +62,7 @@ export default function OpsSection() {
   const { loading, data, error, reload } = useAdminLoad(() => fetchOps(supabase), []);
   const ops = data ? shapeOps(data) : null;
   const last = ops && ops.sweeps[0];
+  const stamp = ops && digestStamp(ops);
   return (
     <AdminPanel id="ops" title="Ops" blurb="What is outstanding, and the state of Claude Code session clean-up." actions={<Button variant="ghost" size="sm" onClick={reload}>Refresh</Button>}>
       <PanelState loading={loading} error={error} onRetry={reload} />
@@ -74,7 +76,7 @@ export default function OpsSection() {
               {last.note && <div style={{ color: "var(--text-secondary)" }}>{last.note}</div>}
             </div>
           ) : (
-            <PanelState empty emptyText="No session sweep recorded yet." emptyHint="A sweep logs how many Claude Code sessions were archived and what is still open. Record the first one below, or the weekly sweep run will."  />
+            <PanelState empty emptyText="No session sweep recorded yet." emptyHint="Recorded automatically by the weekly sweep." />
           )}
           <div style={{ marginTop: 10 }}><SweepForm onSaved={reload} /></div>
           {ops.sweeps.length > 1 && (
@@ -85,13 +87,15 @@ export default function OpsSection() {
           </Card>
           <Card title="Outstanding work">
           {!ops.backlog && !ops.verification ? (
-            <PanelState empty emptyText="No ledger digest loaded yet." emptyHint="The digest is pushed from the repo (node scripts/ops-snapshot.mjs --sql); nothing on this page can create it." />
+            <PanelState empty emptyText="No ledger digest loaded yet." emptyHint="The digest is pushed from the repo after every merge to main; nothing on this page can create it." />
           ) : (
             <>
-              <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginBottom: 8 }}>
-                Digest taken <strong title={exactTime((ops.backlog || ops.verification).updatedAt)}>{ago((ops.backlog || ops.verification).updatedAt)}</strong> ({exactTime((ops.backlog || ops.verification).updatedAt)}).
-                It is a snapshot of the repo ledger, written by <code>node scripts/ops-snapshot.mjs --sql</code> run from the repo — not recomputed by this page, so “Refresh” re-reads the stored digest and shows a newer one only after that script has run. The ledger files stay canonical.
-                {ops.backlog && ops.backlog.open.topTags.length > 0 && ` Biggest themes: ${ops.backlog.open.topTags.map((x) => `${x.tag} ${x.count}`).join(", ")}.`}
+              <div data-testid="digest-stamp" style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginBottom: 8, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <span title={exactTime(stamp.at)}>
+                  Updated <strong>{stamp.ago}</strong>{stamp.commit ? <> after <code>{stamp.commit}</code></> : " (loaded by hand — no merge recorded)"}. Refreshed after every merge to main.
+                </span>
+                {stamp.stale && <Chip tone="warn">Not updating — check the OPS_INGEST_TOKEN secret</Chip>}
+                {ops.backlog && ops.backlog.open.topTags.length > 0 && <span>Biggest themes: {ops.backlog.open.topTags.map((x) => `${x.tag} ${x.count}`).join(", ")}.</span>}
               </div>
               <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
                 {ops.backlog && <Digest title="Open backlog items" d={ops.backlog.open} />}

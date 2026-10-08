@@ -31,17 +31,30 @@ const USERS = [
   { id: "u5", email: "old@acme.com", name: "Old Timer", org: null, team: null, team_role: null, created_at: iso(200), last_sign_in_at: iso(100), email_confirmed_at: iso(200), provider: "email", projects: 1, plans: 1, files: 1, reviews: 0, schedules: 0, last_activity: iso(100) },
 ];
 const SLOW = Array.from({ length: 11 }, (_, i) => ({ id: "s" + i, at: iso(12 + i), user_id: "u1", user_email: "ann@acme.com", category: "slow", description: "", context: {}, build: "abc", route: "site-planner", status: "open", closed_at: null }));
+// B2159505: automated-test reports that must NOT pad the Support queue by default (the owner's 17-open case).
+const TESTY = [
+  { id: "z1", at: iso(5), user_id: null, user_email: null, category: "problem", description: "test — please ignore (zz-sweep-V464176)", context: {}, build: "abc", route: "site", status: "open", closed_at: null },
+  { id: "z2", at: iso(5), user_id: null, user_email: null, category: "problem", description: "test — please ignore (zz-sweep-V464176)", context: {}, build: "abc", route: "site", status: "open", closed_at: null },
+  { id: "z3", at: iso(5), user_id: "u3", user_email: "e2e@planyr.test", category: "problem", description: "test — please ignore (zz-sweep-V464176)", context: {}, build: "abc", route: "site", status: "open", closed_at: null },
+  { id: "z4", at: iso(4), user_id: "u3", user_email: "e2e@planyr.test", category: "slow", description: "", context: {}, build: "abc", route: "site", status: "open", closed_at: null },
+];
+// B2159506: a user's recent errors — two real, plus deploy reloads that must collapse into one muted line.
+const USER_ERRORS = [
+  { id: "e1", at: iso(1), build: "abc", module: "site-planner", source: "react", message: "Cannot read properties of undefined" },
+  ...["Notes", "Library", "DocReview"].map((f, i) => ({ id: "d" + i, at: iso(1), build: "abc", module: null, source: "vite:preloadError", message: `Failed to fetch dynamically imported module: https://planyr.io/assets/${f}-Hh${i}abcdEF.js` })),
+];
 const answers = {
   admin_error_groups: () => (mock.empty ? [] : [GROUP, ...CHUNKS]),
   admin_error_group_rows: () => [{ id: "r1", at: "2026-10-04T12:00:00Z", user_id: null, build: "abc1234", module: "site-planner", url: "https://planyr.io/#/site", user_agent: "UA", stack: "Error: x\n  at y" }],
   admin_list_problem_reports: () => [],
-  admin_list_support_reports: () => (mock.empty ? [] : [{ id: "t1", at: "2026-10-03T00:00:00Z", user_id: "u1", user_email: "ann@acme.com", category: "problem", description: "it broke", context: { route: "site-planner" }, build: "abc", route: "site-planner", status: "open", closed_at: null }, ...SLOW]),
-  admin_recent_errors_for_user: () => [],
+  admin_list_support_reports: () => (mock.empty ? [] : [{ id: "t1", at: "2026-10-03T00:00:00Z", user_id: "u1", user_email: "ann@acme.com", category: "problem", description: "it broke", context: { route: "site-planner" }, build: "abc", route: "site-planner", status: "open", closed_at: null }, ...SLOW, ...TESTY]),
+  admin_recent_errors_for_user: () => USER_ERRORS,
   admin_set_report_status: () => true,
+  admin_record_session_sweep: () => "11111111-1111-4111-8111-111111111111",
   admin_users_overview: () => (mock.empty ? [] : USERS),
   admin_user_activity: () => ({ plans: [iso(2), iso(3)], reviews: [], schedules: [iso(9)], files: [iso(30)] }),
   admin_usage_overview: () => ({ generated_at: "2026-10-05T00:00:00Z", totals: { accounts: 10, active_7d: 1, active_30d: 4, projects: 69, plans: 103, reviews: 48, files: 64, schedules: 10, teams: 1, team_members: 4, pending_invites: 1 }, weekly: Array.from({ length: 12 }, (_, i) => ({ week: new Date(now - (11 - i) * 7 * 86400000).toISOString().slice(0, 10), signups: i % 3, plans_created: 2 + (i % 5), plans_edited: 5 + i })), accounts: [] }),
-  admin_get_ops: () => ({ snapshots: { backlog: { updated_at: "2026-10-05T00:00:00Z", payload: { open: { count: 339, recent: [{ id: "B1", title: "Thing" }], topTags: [{ tag: "#ui", count: 2 }] }, verify: { count: 1, recent: [] } } } }, sweeps: [] }),
+  admin_get_ops: () => ({ snapshots: { backlog: { updated_at: iso(0.1), payload: { commit: "abc1234def5678", open: { count: 339, recent: [{ id: "B1", title: "Thing" }], topTags: [{ tag: "#ui", count: 2 }] }, verify: { count: 1, recent: [] } } } }, sweeps: [] }),
   admin_list_criteria_requests: () => [], admin_list_signup_attempts: () => [], admin_list_password_resets: () => [], admin_list_users: () => USERS.map((u) => ({ id: u.id, email: u.email, first_name: u.name, last_name: null, org: u.org, created_at: u.created_at })),
 };
 
@@ -157,6 +170,7 @@ try {
     await page.locator('[data-testid="user-row"]').first().click(); await page.waitForTimeout(700);
     const det = await page.locator('[data-testid="user-detail"]').innerText();
     check("Users: detail panel shows facts, activity dates, open support item", /Email confirmed/.test(det) && /Plans edited/.test(det) && /it broke/.test(det) && /via email/.test(det));
+    check("Users: detail 'Recent errors' drops deploy reloads → 1 real error + ONE muted '3 deploy reloads (expected)' line (B2159506)", /Cannot read properties of undefined/.test(det) && !/Failed to fetch dynamically/.test(det) && /3 deploy reloads \(expected\)/.test(det) && (await page.locator('[data-testid="user-detail"] [data-testid="deploy-reloads-line"]').count()) === 1);
     await page.screenshot({ path: `${SHOTDIR}/users-detail-laptop.png` });
     await page.getByRole("button", { name: "Reset password…" }).click(); await page.waitForTimeout(1200);
     check("Users → Password reset link prefilled with that account", (await page.evaluate(() => location.hash)).includes("password-reset?user=u1") && (await page.getByLabel("Select a user").inputValue()) === "u1");
@@ -175,10 +189,25 @@ try {
     await page.getByRole("button", { name: "Close all" }).click(); await page.waitForTimeout(200);
     check("Support: Close all asks to confirm first", /Close 11\?/.test(await main().innerText()));
     await page.getByRole("button", { name: "Cancel" }).click();
+    // B2159505 — test reports are hidden by default (the 4 mock test rows), badge + blurb follow the toggle, then it reveals them
+    const sup = page.locator('[data-testid="admin-section-support"]');
+    check("Support: 'Hide internal' ON by default and hides the 4 test reports (2 signed-out marked tests + 2 from the e2e account)", await page.locator('[data-testid="support-hide-internal"]').isChecked() && /Hide internal \(4\)/.test(await sup.innerText()) && /12 open/.test(await sup.innerText()) && !/zz-sweep/.test(await sup.innerText()));
+    check("Support: nav badge follows the toggle (12, not 16)", (await page.locator('[data-testid="admin-badge-support"]').innerText()).trim() === "12");
+    await page.locator('[data-testid="support-hide-internal"]').uncheck(); await page.waitForTimeout(300);
+    check("Support: switching Hide internal OFF shows them (16 open, badge 16)", /16 open/.test(await sup.innerText()) && /zz-sweep/.test(await sup.innerText()) && (await page.locator('[data-testid="admin-badge-support"]').innerText()).trim() === "16");
+    await page.locator('[data-testid="support-hide-internal"]').check(); await page.waitForTimeout(200);
+    await page.locator('[data-testid="admin-nav-overview"]').click(); await page.waitForTimeout(500);
+    check("Overview: 'Open support' tile follows the toggle and says so ('12 … excl. 4 internal/test')", /12/.test(await page.locator('[data-testid="tile-support"]').innerText()) && /excl\. 4 internal\/test/.test(await page.locator('[data-testid="tile-support"]').innerText()));
+    await page.locator('[data-testid="admin-nav-support"]').click(); await page.waitForTimeout(400);
     // Ops
     await page.locator('[data-testid="admin-nav-ops"]').click(); await page.waitForTimeout(800);
     const ot = await main().innerText();
-    check("Ops: proper empty state + digest time + source explained", /No session sweep recorded yet/.test(ot) && /Digest taken/.test(ot) && /ops-snapshot/.test(ot) && /339/.test(ot));
+    check("Ops: empty sweep state says it is recorded automatically; digest header reads 'Updated … after abc1234' (B2159504/7)", /No session sweep recorded yet/.test(ot) && /Recorded automatically by the weekly sweep/.test(ot) && /Updated\s+\d+ (min|hr) ago\s+after\s+abc1234/.test(await page.locator('[data-testid="digest-stamp"]').innerText()) && /339/.test(ot) && !/Not updating/.test(ot));
+    check("Ops: manual form is collapsed under 'Record manually'", (await page.locator('[data-testid="record-manually"]').count()) === 1 && !(await page.getByLabel("Sessions archived").isVisible()));
+    const hook = await page.evaluate(async () => typeof window.pfAdminRecordSweep);
+    check("Ops: the sweep's record hook (window.pfAdminRecordSweep) is installed while the admin page is open", hook === "function");
+    const hookRes = await page.evaluate(() => window.pfAdminRecordSweep({ archived: 3, stillOpen: [{ title: "A session", waitingOn: "a decision" }], note: "harness" }));
+    check("Ops: calling the hook reaches admin_record_session_sweep and answers { ok: true }", hookRes && hookRes.ok === true);
     check("no 'Coming soon' placeholders", !/Coming soon/.test(await page.locator('[data-testid="admin-app"]').innerText()));
     // sub-path cold load + back/forward
     await page.goto(base + "/#/admin/usage"); await page.waitForTimeout(2500);
