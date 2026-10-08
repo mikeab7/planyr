@@ -22,11 +22,12 @@ describe("B828: undo records a frame on every editable-state mutation (wiring gu
     expect(src).not.toMatch(/onCommit=\{\(v\) => setSelParcel\(\{ fillOpacity: v \}\)\}/);
   });
 
-  it("raster overlay 'Width' input pushes one history frame per edit session (onFocus)", () => {
+  it("the Width box is GONE from the Overlays panel (owner, NEW-1 redesign) and RENAME is undoable: `name` is in the history signature", () => {
     const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
-    // typing a new width (patchOverlay hist=false) is checkpointed by onFocus, mirroring the
-    // opacity number input above it; without it the resize was un-undoable though ftPerPx IS snapshotted
-    expect(src).toMatch(/value=\{Math\.round\(o\.imgW \* o\.ftPerPx\)\} onFocus=\{\(\) => pushHistory\(\)\} onChange=\{\(e\) => \{ const v = \+e\.target\.value; if \(v > 0\) patchOverlay\(o\.id, \{ ftPerPx:/);
+    const panel = read("../src/workspaces/site-planner/components/OverlaysPanel.jsx");
+    expect(panel).not.toMatch(/>\s*Width\s*<|"Width"|ft wide|′ wide|ft-per-pixel|imgW \* o\.ftPerPx/);
+    // a rename is a patchOverlay (pushHistory) — it only undoes if the dedup signature can SEE the name
+    expect(src).toMatch(/\$\{o\.crop \? JSON\.stringify\(o\.crop\) : ""\},\$\{o\.name \|\| ""\}/);
   });
 
   it("Stitcher auto-calibrate checkpoints BEFORE setting ftPerUnit (undo can't eat an earlier measure)", () => {

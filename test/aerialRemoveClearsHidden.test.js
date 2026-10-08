@@ -27,14 +27,14 @@ import { isAerialVisible, withAerialVisible } from "../src/workspaces/site-plann
 const src = readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
 
 describe("the References panel row's Remove clears aerialHidden for the pinned map reference", () => {
-  const removeRowLine = src.split("\n").find((l) => l.includes("const removeRow = "));
+  const removeRowLine = src.split("\n").find((l) => l.includes("onRemove: (o) => {"));
 
   it("exists (the anchor text didn't move)", () => {
     expect(removeRowLine).toBeTruthy();
   });
   it("calls removeOverlay unconditionally, then setShowAerial(true) ONLY for the pinned row", () => {
     expect(removeRowLine).toMatch(/removeOverlay\(o\.id\)/);
-    expect(removeRowLine).toMatch(/if \(isAerialRow\) setShowAerial\(true\)/);
+    expect(removeRowLine).toMatch(/if \(o\.fromMap\) setShowAerial\(true\)/);
   });
   it("never calls setShowAerial(false) on removal (that is the exact pre-fix defect)", () => {
     expect(removeRowLine).not.toMatch(/setShowAerial\(false\)/);

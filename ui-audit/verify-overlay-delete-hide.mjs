@@ -10,6 +10,7 @@
  * Image overlay (not PDF): the sandbox Chromium can't run pdf.js, so we seed an SVG/raster
  * overlay `src` directly — the same render/persist path a dropped sheet uses.
  */
+import { removeFirstOverlay } from "./lib/overlayPanel.mjs";
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
 const { chromium } = pw;
 import { mkdirSync } from "node:fs";
@@ -52,7 +53,7 @@ const hasOverlayImg = () => page.evaluate(() => !!document.querySelector('image[
 const overlayRowListed = () => page.evaluate(() => Array.from(document.querySelectorAll("button")).some((b) => b.textContent.trim() === "Jacinto Port.pdf"));
 const storedSite = () => page.evaluate(() => { try { return JSON.parse(localStorage.getItem("planarfit:sites:v1")).J; } catch (e) { return null; } });
 const boot = async () => { await page.goto(BASE, { waitUntil: "load" }); await page.waitForTimeout(1500); try { await page.locator('[title="Zoom to fit"]').first().click({ timeout: 4000 }); } catch (e) {} await page.waitForTimeout(500); };
-const openOverlayPanel = async () => { try { await page.locator('[title="Overlay"]').first().click({ timeout: 4000 }); } catch (e) {} await page.waitForTimeout(300); };
+const openOverlayPanel = async () => { await page.evaluate(() => document.querySelector('[data-rail-tab="references"]')?.click()); await page.waitForTimeout(300); };
 
 await boot();
 check("overlay renders on the map at boot", await hasOverlayImg());
@@ -61,7 +62,7 @@ await page.screenshot({ path: OUT + "overlay-1-shown.png" });
 // ---- B277: hide ----
 await openOverlayPanel();
 check("Overlay panel lists the overlay", await overlayRowListed());
-await page.locator('[title="Hide overlay"]').first().click(); await page.waitForTimeout(900);
+await page.locator('[data-testid^="reference-eye-"]').first().click(); await page.waitForTimeout(900);
 check("B277 hide — overlay removed from the map", !(await hasOverlayImg()));
 check("B277 hide — overlay STILL listed in the panel (hidden, not deleted)", await overlayRowListed());
 await page.screenshot({ path: OUT + "overlay-2-hidden.png" });
@@ -77,11 +78,11 @@ check("B277 hide PERSISTS — overlay still listed (recoverable)", await overlay
 }
 
 // ---- B277: show again ----
-await page.locator('[title="Show overlay"]').first().click(); await page.waitForTimeout(700);
+await page.locator('[data-testid^="reference-eye-"]').first().click(); await page.waitForTimeout(700);
 check("B277 show — overlay returns to the map", await hasOverlayImg());
 
 // ---- B276: delete persists ----
-await page.locator('[title="Remove"]').first().click(); await page.waitForTimeout(900);
+await removeFirstOverlay(page); await page.waitForTimeout(900);
 check("B276 delete — overlay removed from the map", !(await hasOverlayImg()));
 check("B276 delete — overlay no longer listed in the panel", !(await overlayRowListed()));
 await page.screenshot({ path: OUT + "overlay-3-deleted.png" });

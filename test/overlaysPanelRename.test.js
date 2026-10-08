@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
  * drift back to "References" without turning this red.
  */
 const SRC = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+const PANEL = readFileSync(new URL("../src/workspaces/site-planner/components/OverlaysPanel.jsx", import.meta.url), "utf8");
 
 describe("Overlays panel — user-facing name, internal id untouched (B966630)", () => {
   it("the Sections/rail-tab entry shows Overlays, keyed on the untouched `references` id", () => {
@@ -24,13 +25,14 @@ describe("Overlays panel — user-facing name, internal id untouched (B966630)",
     expect(SRC).toMatch(/title="Show Land \/ Analysis \/ Yield \/ Properties \/ Overlays \/ Standards"/);
   });
 
-  it("the B952 Library-independence note is reworded to Overlays, meaning intact both directions", () => {
-    expect(SRC).toMatch(/Map overlays are managed here, separate from your Library documents — deleting a Library file won't remove an overlay from the map, and adding a Library file won't add one\./);
+  it("the two explanatory paragraphs are GONE from the panel (owner, NEW-1 redesign) — independence is a property of the stores, guarded by libraryOverlayIndependence", () => {
+    expect(SRC).not.toMatch(/Map overlays are managed here, separate from your Library documents/);
+    expect(SRC).not.toMatch(/Drop a site-plan \/ survey PDF or image/);
   });
 
-  it("the add-overlay button, drop hint, and one-at-a-time warning all say overlay, not reference", () => {
-    expect(SRC).toMatch(/Add overlay \(PDF \/ image \/ CAD\)…/);
-    expect(SRC).toMatch(/Drop to add this overlay/);
+  it("the add row reads exactly 'Add overlay'; the drop warning for a multi-file drop is kept", () => {
+    expect(PANEL).toMatch(/\{busy \? "Loading…" : "Add overlay"\}/);
+    expect(PANEL).not.toMatch(/PDF \/ image \/ CAD/);
     expect(SRC).toMatch(/Added the first file — one overlay is added at a time\./);
   });
 
@@ -38,10 +40,10 @@ describe("Overlays panel — user-facing name, internal id untouched (B966630)",
     expect(SRC).toMatch(/✕ remove this overlay/);
   });
 
-  it("front/back and above-the-plan tooltips say overlay, not reference", () => {
-    expect(SRC).toMatch(/title="Draw this overlay above the other overlays"/);
-    expect(SRC).toMatch(/title="Draw this overlay beneath the other overlays"/);
-    expect(SRC).toMatch(/title="Draw this overlay over the parcel boundary, the setback ring and the site elements instead of underneath them"/);
+  it("the Draws control and the row menu say overlay, not reference", () => {
+    expect(PANEL).toMatch(/Under the parcel boundary, the setback ring and the site elements/);
+    expect(PANEL).toMatch(/Over the parcel boundary, the setback ring and the site elements/);
+    expect(PANEL).toMatch(/"Remove overlay"/);
   });
 
   it("the right-click menu's cross-band item says overlay, not reference", () => {

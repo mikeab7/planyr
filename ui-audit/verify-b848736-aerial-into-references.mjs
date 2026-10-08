@@ -89,12 +89,12 @@ async function openScenario(id) {
   const page = await ctx.newPage();
   page.on("pageerror", (e) => errors.push(`[${id}] ${e}`));
   page.on("console", (m) => { if (m.type() === "error" && !NOISE.test(m.text())) errors.push(`[${id}] ${m.text()}`); });
-  await page.goto(BASE, { waitUntil: "load" });
+  await page.goto(`${BASE}#/project/${id}/site`, { waitUntil: "load" });
   await assertMeasurable(page, "verify-b848736-aerial-into-references");
   await page.waitForTimeout(1200);
   try { await page.locator('[title="Zoom to fit"]').first().click({ timeout: 5000 }); } catch (e) { /* noop */ }
   await page.waitForTimeout(400);
-  try { await page.locator('button:has-text("Overlays")').first().click({ timeout: 5000 }); } catch (e) { /* noop */ }
+  await page.evaluate(() => document.querySelector('[data-rail-tab="references"]')?.click());
   await page.waitForTimeout(400);
   return page;
 }
@@ -103,7 +103,7 @@ async function openScenario(id) {
 {
   const page = await openScenario("b848736-a");
   const txt = await page.evaluate(() => document.body.innerText);
-  log(txt.includes("Add overlay (PDF / image / CAD)"), "(a) the one dropzone is present");
+  log(txt.includes("Add overlay"), "(a) the one dropzone is present");
   log(!txt.includes("Add an aerial"), "(a) no separate \"Add an aerial\" empty state");
   log(!txt.includes("Aerial backdrop"), "(a) nothing announces an aerial on a plan that has none");
   const rows = await page.locator('[data-testid^="reference-row-"]').count();
@@ -129,19 +129,18 @@ async function openScenario(id) {
   // features (element/markup arrange menus also say "Bring to front") can't produce a false pass.
   const row = page.locator('[data-testid="reference-row-map1"]');
   const rowTxt = await row.evaluate((el) => el.innerText);
-  const calBtn = row.locator('button:has-text("Calibrate")').first();
-  log(await calBtn.count() === 1, "(b) a single disabled \"Calibrate\" chip (not Trace-a-length/Align-to-map)");
-  log(await calBtn.isDisabled(), "(b) Calibrate is disabled for the pinned row");
-  const calTitle = await calBtn.getAttribute("title");
-  log(!!calTitle && calTitle.includes("already to scale"), `(b) the disabled explanation is on the button's title ("${calTitle}")`);
-  // the pinned row IS a permanent front/back no-op (overlayOrderFlags forces atFront/atBack for it),
-  // so the panel keeps the SAME buttons every other row has (never a special-cased row shape) and
-  // simply greys them — matching how "already at the front/back of its band" reads for any row.
-  const frontBtn = row.locator('button:has-text("Bring to front")').first();
-  const backBtn = row.locator('button:has-text("Send to back")').first();
-  log((await frontBtn.count()) === 1 && (await backBtn.count()) === 1, "(b) front/back controls are present (not a special-cased row)");
-  log(await frontBtn.isDisabled() && await backBtn.isDisabled(), "(b) front/back controls are disabled — the pinned row can never move within its band");
-  log(!rowTxt.includes("Draw this overlay over the parcel"), "(b) no \"Draw above the plan\" promote row on the pinned reference");
+  // NEW-1 (2026-10-08 Overlays redesign): the pinned map capture has NO placement section at all — no scale row, no
+  // amber, no calibrate, no rotate, no crop — only Appearance (opacity). It is already to scale.
+  log(await row.locator('[data-testid="overlay-placement"]').count() === 0, "(b) no Placement section (no scale / trace / match / rotate) for the pinned map capture");
+  log(!/not scaled|Calibrate|Trace a length|Match 2 points/.test(rowTxt), "(b) no amber, no calibrate, no scale buttons");
+  log(await row.locator('[data-testid="overlay-crop-open"]').count() === 0, "(b) no crop on the pinned map capture");
+  // the pinned row IS a permanent front/back no-op (overlayOrderFlags forces atFront/atBack for it): its ⋯ menu greys Move up / Move down.
+  await row.locator('[data-testid^="reference-more-"]').first().click(); await page.waitForTimeout(250);
+  const upDis = await page.locator("[role=menuitem]", { hasText: /^Move up$/ }).isDisabled();
+  const downDis = await page.locator("[role=menuitem]", { hasText: /^Move down$/ }).isDisabled();
+  log(upDis && downDis, "(b) Move up / Move down are disabled — the pinned row can never move within its band");
+  await page.keyboard.press("Escape"); await page.waitForTimeout(200);
+  log(!rowTxt.includes("In front"), "(b) no Draws (Behind / In front) control on the pinned reference");
   await page.screenshot({ path: OUT + "b848736-b-frommap.png" });
   await page.context().close();
 }
@@ -153,12 +152,10 @@ async function openScenario(id) {
   await page.waitForTimeout(300);
   const row = page.locator('[data-testid="reference-row-drop1"]');
   const rowTxt = await row.evaluate((el) => el.innerText);
-  log(rowTxt.includes("Trace a length") && rowTxt.includes("Align to map"), "(c) the STANDARD calibration flow is offered (not the disabled aerial chip)");
-  // drop1 is a plain image (no `.sheet`), so the "Now ≈ 1″=X′" readout never renders for it (that's
-  // the PDF/sheet-scale row) — read the Width control's value instead, which IS this overlay's
-  // real-world-size readout (imgW * ftPerPx, rounded).
-  const widthInput = row.locator('label:has-text("Width") input').first();
-  const before = await widthInput.inputValue().catch(() => null);
+  log(rowTxt.includes("Trace a length") && rowTxt.includes("Match 2 points"), "(c) the STANDARD calibration flow is offered (Trace a length / Match 2 points)");
+  // NEW-1: the Width box is GONE (owner: "WHY DO WE EVEN HAVE A WIDTH BOX?") — the rescale is read from the stored overlay instead.
+  const ftPerPxOf = () => page.evaluate(() => { const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); const o = Object.values(m).flatMap((x) => x.sheetOverlays || []).find((x) => x.id === "drop1"); return o ? o.ftPerPx : null; });
+  const before = await ftPerPxOf();
   await row.locator('button:has-text("Trace a length")').first().click();
   await page.waitForTimeout(400);
   const banner = await page.evaluate(() => document.body.innerText);
@@ -174,8 +171,8 @@ async function openScenario(id) {
     await numEdit.fill("500");
     await page.keyboard.press("Enter");
     await page.waitForTimeout(500);
-    const after = await widthInput.inputValue().catch(() => null);
-    log(!!before && !!after && before !== after, `(c) the reference rescaled (${before}ft → ${after}ft)`);
+    const after = await ftPerPxOf();
+    log(!!before && !!after && before !== after, `(c) the reference rescaled (${before} → ${after} ft/px)`);
   }
   await page.screenshot({ path: OUT + "b848736-c-calibrating.png" });
   await page.context().close();

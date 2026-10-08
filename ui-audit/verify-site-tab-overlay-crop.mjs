@@ -52,21 +52,14 @@ page.on("dialog", async (d) => { console.log("  [DIALOG — never allowed]", d.m
 await assertMeasurable(page, "verify-site-tab-overlay-crop");
 
 const openPlan = async () => {
-  await page.goto(BASE, { waitUntil: "load" });
-  await page.waitForTimeout(1500);
-  if (!(await page.locator("text=Overlays").count())) {
-    await page.locator('[data-testid="module-tab-site-planner"]').first().click();
-    await page.waitForTimeout(1200);
-    await page.locator("text=CropT").first().dblclick();
-    await page.waitForTimeout(2200);
-  }
-  await page.locator("text=Overlays").first().click();
-  await page.waitForTimeout(500);
+  await page.goto(`${BASE}#/project/C1/site`, { waitUntil: "load" });
+  await page.waitForTimeout(3000);
+  await page.evaluate(() => { if (!document.querySelector('[data-testid="overlays-panel"]')) document.querySelector('[data-rail-tab="references"]')?.click(); }); // NEW-1: the Overlays rail tab (a reload may restore it open — a second click would close it)
+  await page.waitForTimeout(700);
   await page.locator('button[title^="Zoom to fit"]').first().click(); // the panel narrows the canvas — frame the sheet in what's left
   await page.waitForTimeout(700);
 };
-// NEW-6: the expanded row now survives a reload, so this is idempotent — clicking an open row would COLLAPSE it.
-const expandRow = async (name) => { if (await page.locator('[data-testid="overlay-crop-open"]').count()) return; await page.locator("button", { hasText: name }).first().click(); await page.waitForTimeout(400); };
+const expandRow = async (name) => { if (await page.locator('[data-testid="overlay-crop-open"]').count()) return; await page.locator('[data-testid^="reference-open-"]', { hasText: name }).first().click(); await page.waitForTimeout(400); };
 const stored = (id) => page.evaluate((id) => {
   const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
   const o = raw.C1 && raw.C1.sheetOverlays.find((x) => x.id === id);
@@ -189,20 +182,20 @@ check("Ctrl+Shift+Z brings the polygon crop back", !!(sRedo && sRedo.crop && sRe
   const c = await clipInfo("ovA");
   check("Opacity 50% applies AND the clip is kept", c.opacity === "0.5" && c.ref === "url(#ov-crop-ovA)", JSON.stringify(c));
   await pct.fill("100"); await pct.blur();
-  await page.locator('[data-testid="reference-above-ovA"]').check();
+  await page.locator('[data-testid="reference-above-ovA"]').click() // NEW-1: Draws → In front;
   await page.waitForTimeout(400);
   const c2 = await clipInfo("ovA");
   check("\"Bring in front of the plan\" keeps the clip (same shape, still referenced)", c2.shape === "poly" && c2.ref === "url(#ov-crop-ovA)");
   await page.mouse.move(5, 450);
   await pixCheck("pixels in front of the plan");
-  await page.locator('[data-testid="reference-above-ovA"]').uncheck();
+  await page.locator('[data-testid="reference-below-ovA"]').click(); // NEW-1: Draws → Behind the plan
   await page.waitForTimeout(300);
 }
 
 /* ---- 6. Lock refuses ------------------------------------------------------------------------- */
 {
   const before = JSON.stringify((await stored("ovA")).crop);
-  await page.locator('[data-testid="reference-row-ovA"] [title="Lock"]').click();
+  await page.locator('[data-testid="reference-row-ovA"] [data-testid="reference-lock-ovA"]').click();
   await waitStored("ovA", (s) => s && s.locked);
   await page.waitForTimeout(300);
   check("locked: Crop… is disabled", await page.locator('[data-testid="overlay-crop-open"]').isDisabled());
@@ -212,7 +205,7 @@ check("Ctrl+Shift+Z brings the polygon crop back", !!(sRedo && sRedo.crop && sRe
   await page.waitForTimeout(400);
   check("locked: a forced click on Reset / Crop… changes nothing and opens nothing",
     JSON.stringify((await stored("ovA")).crop) === before && (await page.locator('[data-testid="overlay-crop-dialog"]').count()) === 0);
-  await page.locator('[data-testid="reference-row-ovA"] [title="Unlock"]').click();
+  await page.locator('[data-testid="reference-row-ovA"] [data-testid="reference-lock-ovA"]').click();
   await waitStored("ovA", (s) => s && !s.locked);
 }
 
@@ -248,8 +241,8 @@ await openPlan();
   const c = await clipInfo("ovA");
   check("after a reload the polygon crop is still applied", c.shape === "poly" && c.ref === "url(#ov-crop-ovA)", JSON.stringify(c));
   await expandRow("sheet-A.png");
-  check("the row now offers Edit crop… and a polygon note instead of trim fields",
-    (await page.locator('[data-testid="overlay-crop-open"]').textContent()).includes("Edit crop") && (await page.locator("text=Cropped to a polygon").count()) === 1);
+  check("the Crop section reads Polygon · N points, with Edit (NEW-1: ONE crop control; trim fields live in the dialog)",
+    (await page.locator('[data-testid="overlay-crop-open"]').textContent()).includes("Edit") && /Polygon · \d+ points/.test(await page.locator('[data-testid="overlay-crop-shape"]').innerText()));
 }
 
 /* ---- 8. Rect mode + Reset crop ---------------------------------------------------------------- */
@@ -265,11 +258,14 @@ await openPlan();
   const sR = await waitStored("ovA", (s) => s && (s.crop === null || (s.crop && s.crop.kind !== "poly")));
   check("Rectangle → Reset to full page → Done commits no crop — full sheet (polygon cleared too)", sR && sR.crop === null, JSON.stringify(sR && sR.crop));
   // A real rect via the trim fields, then Reset crop.
-  const f = page.locator('input[aria-label="Crop Left edge"]');
+  // NEW-1: the four trim fields live INSIDE the Crop dialog now; typing one writes the crop and the dialog stays open.
+  await page.locator('[data-testid="overlay-crop-open"]').click(); await page.waitForTimeout(500);
+  const f = page.locator('[data-testid="overlay-crop-dialog"] input[aria-label="Crop Left edge"]');
   await f.fill("200");
   const sT = await waitStored("ovA", (s) => s && s.crop && s.crop.kind === "rect");
   check("trim field writes a kind-stamped rect crop", !!(sT && sT.crop && sT.crop.kind === "rect" && sT.crop.x === 200), JSON.stringify(sT && sT.crop));
   check("…drawn as a rect <clipPath>", (await clipInfo("ovA")).shape === "rect");
+  await page.locator('[data-testid="overlay-crop-dialog"] button', { hasText: "Cancel" }).click(); await page.waitForTimeout(300);
   await page.locator('[data-testid="overlay-crop-reset"]').click();
   const s0 = await waitStored("ovA", (s) => s && !s.crop);
   check("Reset crop returns the full sheet (crop cleared, no clipPath)", !!(s0 && !s0.crop) && !(await clipInfo("ovA")).hasClip);
@@ -282,7 +278,7 @@ await openPlan();
     "0", "LINE", "8", "0", "10", "0", "20", "300", "30", "0", "11", "400", "21", "0", "31", "0",
     "0", "ENDSEC", "0", "EOF"].join("\n");
   const p = OUT + "tiny-crop.dxf"; writeFileSync(p, dxf);
-  await page.locator('[data-testid="left-menu-panel"] input[type="file"][accept="application/pdf,image/*,.dxf,.dwg"]').setInputFiles(p);
+  await page.locator('[data-testid="overlay-file-input"]').setInputFiles(p);
   await page.waitForTimeout(4000);
   const dx = await page.evaluate(() => {
     const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
@@ -291,7 +287,7 @@ await openPlan();
   });
   check("[precondition] the DXF overlay was placed through the real file input", !!dx, JSON.stringify(dx));
   if (dx) {
-    const rows = page.locator("button", { hasText: dx.name });
+    const rows = page.locator('[data-testid^="reference-open-"]', { hasText: dx.name });
     if (!(await page.locator(`[data-testid="overlay-crop-${dx.id}"]`).count())) await rows.first().click();
     await page.waitForTimeout(400);
     const btn = page.locator(`[data-testid="overlay-crop-${dx.id}"] [data-testid="overlay-crop-open"]`);
@@ -336,13 +332,16 @@ await openPlan();
   }, null, { timeout: 15000 }).then((h) => h.jsonValue()).catch(() => null);
   check("[precondition] the PDF overlay was placed through the real file input", !!pd, JSON.stringify(pd));
   if (pd) {
-    if (!(await page.locator(`[data-testid="overlay-crop-${pd.id}"]`).count())) await page.locator("button", { hasText: pd.name }).first().click();
+    if (!(await page.locator(`[data-testid="overlay-crop-${pd.id}"]`).count())) await page.locator('[data-testid^="reference-open-"]', { hasText: pd.name }).first().click();
     await page.waitForTimeout(400);
     const row = page.locator(`[data-testid="reference-row-${pd.id}"]`);
-    await row.locator('input[aria-label="Crop Bottom edge"]').fill("40");
+    // NEW-1: the trim-by-feet fields live in the Crop dialog now.
+    await row.locator('[data-testid="overlay-crop-open"]').click(); await page.waitForTimeout(500);
+    await page.locator('[data-testid="overlay-crop-dialog"] input[aria-label="Crop Bottom edge"]').fill("40");
     const cropOf = () => page.evaluate((id) => { const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); const o = raw.C1.sheetOverlays.find((x) => x.id === id); return o ? { crop: o.crop || null, ko: o.knockout, srcLen: (o.src || "").length } : null; }, pd.id);
     const t0 = Date.now(); let c0; while (Date.now() - t0 < 4000) { c0 = await cropOf(); if (c0 && c0.crop) break; await page.waitForTimeout(150); }
     check("PDF overlay: a trim-field crop is stored", !!(c0 && c0.crop && c0.crop.kind === "rect"), JSON.stringify(c0 && c0.crop));
+    await page.locator('[data-testid="overlay-crop-dialog"] button', { hasText: "Cancel" }).click(); await page.waitForTimeout(300);
     const ko = row.locator("text=Knock out white paper");
     if (await ko.count()) {
       await ko.click();

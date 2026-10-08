@@ -30,37 +30,38 @@ describe("the drawn overlay image applies a crop clipPath, non-destructively", (
   });
 });
 
-describe("the References panel exposes a non-destructive, reversible crop editor", () => {
-  const panelStart = src.indexOf("Knock out white paper");
-  const panelEnd = src.indexOf("{o.sheet && (() => {", panelStart);
-  const panelBody = src.slice(panelStart, panelEnd);
+describe("the Overlays panel exposes a non-destructive, reversible crop editor", () => {
+  // NEW-1 (Overlays redesign): the panel is components/OverlaysPanel.jsx; the four trim-by-feet fields moved
+  // INSIDE the Crop dialog. There is ONE crop control in the panel (Edit + Reset), not two.
+  const panel = readFileSync("src/workspaces/site-planner/components/OverlaysPanel.jsx", "utf8");
+  const dlg = readFileSync("src/workspaces/site-planner/components/OverlayCropDialog.jsx", "utf8");
 
-  it("offers four edge-trim fields, in FEET (not raw image px — feet-everywhere-internal)", () => {
-    expect(panelBody).toContain('field("L", "left"');
-    expect(panelBody).toContain('field("T", "top"');
-    expect(panelBody).toContain('field("R", "right"');
-    expect(panelBody).toContain('field("B", "bottom"');
+  it("offers four edge-trim fields, in FEET, inside the Crop dialog (not the panel)", () => {
+    for (const edge of ["left", "top", "right", "bottom"]) expect(dlg).toContain(`"${edge}"`);
+    expect(dlg).toContain("overlay-crop-trim");
+    expect(panel).not.toMatch(/Crop (Left|Top|Right|Bottom) edge/);
   });
   it("reads/writes through the pure module (cropTrimFeet / cropFromTrimFeet), not inline arithmetic", () => {
-    expect(panelBody).toMatch(/cropTrimFeet\(o\)/);
-    expect(panelBody).toMatch(/cropFromTrimFeet\(next, o\)/);
+    expect(src).toMatch(/trim=\{cropTrimFeet\(o\)\}/);
+    expect(src).toMatch(/cropFromTrimFeet\(next, o\)/);
   });
   it("commits through setOverlayCrop (lock check + undo history + persistence via patchOverlay)", () => {
-    expect(panelBody).toMatch(/setOverlayCrop\(o\.id, cropFromTrimFeet\(next, o\), false\)/);
-    expect(panelBody).toMatch(/onFocus=\{\(\) => pushHistory\(\)\}/);
+    expect(src).toMatch(/setOverlayCrop\(o\.id, cropFromTrimFeet\(next, o\), false\)/);
+    expect(src).toMatch(/onTrimFocus=\{\(\) => pushHistory\(\)\}/);
   });
-  it('offers a "Reset crop" action that restores the full image (crop: null, not a re-import)', () => {
-    expect(panelBody).toMatch(/hasCrop\(o\) && <button[\s\S]*?setOverlayCrop\(o\.id, null\)/);
+  it('offers a "Reset" action that restores the full image (crop: null, not a re-import)', () => {
+    expect(panel).toContain('data-testid="overlay-crop-reset"');
+    expect(src).toMatch(/onResetCrop: \(id\) => setOverlayCrop\(id, null\)/);
   });
-  it("is available for BOTH sheet (PDF) and plain image overlays — not gated on o.sheet", () => {
-    // panelBody is sliced to END right where the `o.sheet &&` scale-picker block begins, so the crop
-    // editor being findable in it at all proves it renders BEFORE (i.e. outside) that conditional.
-    expect(panelBody).toContain('data-testid="overlay-crop-open"');
+  it("is available for BOTH sheet (PDF) and plain image overlays — not gated on a PDF-only field", () => {
+    expect(panel).toContain('data-testid="overlay-crop-open"');
+    const crop = panel.slice(panel.indexOf("function CropSection"), panel.indexOf("function AppearanceSection"));
+    expect(crop).not.toMatch(/o\.sheet/);
   });
-  it("NEW-1 — offers the visual Crop… tool (rect + polygon) and gates it on the ONE lock predicate", () => {
-    expect(panelBody).toMatch(/const cropWhy = cropEditBlock\(o\)/);
-    expect(panelBody).toMatch(/disabled=\{!!cropWhy\}/);
-    expect(panelBody).toMatch(/setOvCropId\(o\.id\)/);
+  it("there is exactly ONE crop entry point in the panel, and it gates on the ONE lock predicate", () => {
+    expect((panel.match(/data-testid="overlay-crop-open"/g) || []).length).toBe(1);
+    expect(panel).toMatch(/const why = cropEditBlock\(o\)/);
+    expect(src).toMatch(/onCrop: \(id\) => \{ setSelOverlay\(id\); setOvCropId\(id\); \}/);
   });
 });
 

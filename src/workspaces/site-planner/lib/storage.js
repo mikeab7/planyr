@@ -125,6 +125,11 @@ function contentSig(m, headerOnly) {
     ]),
     sigArr(m && m.sheetOverlays).slice().sort(sigById),
     sigArr(m && m.parcelDrawings).slice().sort(sigById),
+    // NEW-1 (Overlays redesign) — an overlay list's ARRAY ORDER is its draw order (lib/overlayOrder.js), so a
+    // REORDER-ONLY change is a real content change. The id-sorted copies above cannot see it (a drag reorder
+    // moves no field), which would let the boot re-push skip a reorder the cloud never received. Ids only:
+    // cheap, and the fields themselves are already in the sorted copy.
+    sigArr(m && m.sheetOverlays).map((o) => (o && o.id) ?? null),
   ]);
 }
 // NEW-1 — `opts` carries the server's view of deletion, which is what makes a delete stick across
