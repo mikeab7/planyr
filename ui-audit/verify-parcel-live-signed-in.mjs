@@ -22,14 +22,21 @@ const BASE = process.argv[2] || "https://planyr.io";
 let failures = 0;
 const expect = (label, cond, extra = "") => { if (!cond) failures++; console.log(`  [${cond ? "PASS" : "FAIL"}] ${label}${extra ? ` — ${extra}` : ""}`); };
 
-const s = await openSignedIn({
+// The e2e-session route sits behind Cloudflare → Supabase and answers a transient 502 under load (seen 2026-10-08, three in a row,
+// then 200): retry the SIGN-IN only, loudly, never the checks.
+const signInOpts = {
   base: BASE,
   initScripts: [[() => {
     window.__PLANYR_E2E = true; // read-only map handle (__mapFinderMap) + __mapParcelDisplay; arms nothing that mutates
     window.__loaf = [];
     try { new PerformanceObserver((l) => l.getEntries().forEach((e) => window.__loaf.push({ t: e.startTime, d: Math.round(e.duration), b: Math.round(e.blockingDuration || 0) }))).observe({ type: "long-animation-frame", buffered: true }); } catch (_) { /* no LoAF in this engine */ }
   }, null]],
-});
+};
+let s = null;
+for (let attempt = 1; attempt <= 8 && !s; attempt++) {
+  try { s = await openSignedIn(signInOpts); }
+  catch (e) { if (!/answered 50\d/.test(String(e.message)) || attempt === 8) throw e; console.log(`  sign-in attempt ${attempt} → ${e.message.slice(0, 80)}; retrying in 25 s`); await new Promise((r) => setTimeout(r, 25000)); }
+}
 const page = s.page;
 await assertMeasurable(page, "verify-parcel-live-signed-in");
 const bartow = await routeBartowGis(page, { bartowOnly: true });
