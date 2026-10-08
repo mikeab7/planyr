@@ -138,7 +138,8 @@ import { compMarkerSvg, compMarkerSize } from "../../shared/comps/lib/compMarker
 // existing ground-first plumbing wholesale (the dropped pin, the parcel selection, the decide bar)
 // and adds only its own marker, editor and layer. It is NOT the Notes WORKSPACE
 // (src/workspaces/notes) — see shared/mapNotes/db/map_notes.sql's header for why that split holds.
-import { mapNoteMarkerSvg, mapNoteMarkerSize } from "../../shared/mapNotes/lib/mapNoteMarkerIcon.js";
+import { mapNoteMarkerSvg, mapNoteMarkerSize, NOTE_MARKER_COLOR } from "../../shared/mapNotes/lib/mapNoteMarkerIcon.js";
+import { noteTargetLabel, selectionLabel, composerBox, panToFitRect, keyboardInset } from "../../shared/mapNotes/lib/noteTarget.js";
 import { sitePinSvg, pinHitBox, pinHtml, PIN_KEYLINE_R } from "../../shared/mapNotes/lib/mapPinSymbol.js";
 import { emptyMapNote, mapNoteHeadline } from "../../shared/mapNotes/lib/mapNotes.js";
 import { fetchAllMapNotes, insertMapNote, updateMapNote, deleteMapNote } from "../../shared/mapNotes/lib/mapNotesStore.js";
@@ -720,6 +721,19 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const [mapNotes, setMapNotes] = useState([]);
   const [mapNotesErr, setMapNotesErr] = useState("");
   const [editingNote, setEditingNote] = useState(null); // the note in the editor card, or null
+  /* NEW-1 (2026-10-08) — WHILE THE COMPOSER IS OPEN THE MAP IS HOLDING A PROMISE: the thing being
+   * annotated stays selected and visible, and nothing underneath can silently retarget or discard
+   * the note. `editingNoteRef` is read by every once-bound map handler (a stray tap on the map, a
+   * site / comp / note marker, an identify popup) so each of them yields to the composer; Save or
+   * Cancel is the only way out. `notePulseId` rings the just-saved note's marker for a few seconds
+   * so the owner sees where it landed. */
+  const editingNoteRef = useRef(null);
+  useEffect(() => { editingNoteRef.current = editingNote; }, [editingNote]);
+  const [notePulseId, setNotePulseId] = useState(null);
+  const [kbInset, setKbInset] = useState(0);        // px of the map's bottom the on-screen keyboard covers
+  const [mapBoxH, setMapBoxH] = useState(0);
+  const noteCardRef = useRef(null);
+  const noteTargetRef = useRef(null);               // the highlight layer drawn on the note's target
   const [showNotesLayer, setShowNotesLayer] = useState(() => {
     try { return localStorage.getItem("planarfit:mapShowNotes:v1") !== "0"; } catch (_) { return true; }
   });
@@ -741,6 +755,12 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     const res = draft.id ? await updateMapNote(draft.id, draft) : await insertMapNote(draft);
     if (res.error) return res;
     setMapNotes((prev) => [res.data, ...prev.filter((n) => n.id !== res.data.id)]);
+    /* NEW-1 (2026-10-08) — the ground the note was begun on (parcel selection / dropped pin) is held
+     * for the whole time the composer is open, so Cancel puts the owner back exactly where they
+     * were. It is released HERE, on a successful Save only, and the new note's marker is ringed so
+     * the owner lands on the same ground with the note visible on it. */
+    if (!draft.id) { finishGroundAction(); clearDecidePin(); }
+    if (res.data?.id != null) setNotePulseId(res.data.id);
     return res;
   };
   const removeMapNote = async (id) => {
@@ -1762,6 +1782,10 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     L.control.scale({ imperial: true, metric: false, position: "bottomright", maxWidth: 130 }).addTo(map); // graphic scale (B96b)
     setZoom(map.getZoom());
     const onClick = (e) => {
+      // NEW-1 (2026-10-08) — a tap on the map while the note composer is open is NOT a new pick: it
+      // must neither re-aim the note (select a parcel, mark a pin) nor discard it. Save / Cancel are
+      // the only exits; panning and zooming still work because they are not clicks.
+      if (editingNoteRef.current) return;
       // NEW-1 (2026-09-08) — one armed pin, two callers, and they want different things from the
       // same click. The toolbar's "Drop a pin" is ground-first: the click MARKS the point and the
       // decide bar then asks what it is. The comps panel's armed Location cell is not a question —
@@ -1922,7 +1946,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       layerHealthy: (id) => (layerStatusRef.current?.[id]?.state ?? null) !== "failed",
       // Parcel-select owns the pointer while it's on (the B98 rule) — the same gate the
       // vector boundary identify reads. Panning is gated inside attachRasterIdentify.
-      identifyOk: () => !selectModeRef.current,
+      identifyOk: () => !selectModeRef.current && !editingNoteRef.current,
     });
     return () => { cancelled = true; detachRasterIdentify(); detachPermWatch(); map.off("click", onClick); map.off("zoomend", onZoom); map.off("moveend", onMove); map.off("mousemove", onMouseMove); map.off("mousemove", onCoordMove); map.off("mouseout", onCoordOut); map.off("contextmenu", onMapCtx); map.off("dragstart", onDragStart); map.off("dragend", onDragEnd); map.off("dragstart", markUserMoved); containerEl.removeEventListener("pointerdown", onPress); containerEl.removeEventListener("pointerup", onRelease); containerEl.removeEventListener("pointercancel", onRelease); window.removeEventListener("pointerup", onRelease); window.removeEventListener("pointercancel", onRelease); containerEl.removeEventListener("wheel", markUserMoved); detachFreeWheel(); if (typeof window !== "undefined" && window.__mapFinderMap === map) window.__mapFinderMap = null; map.remove(); mapRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2130,7 +2154,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       onError: (cfg, msg) => setErr(`“${cfg.label}” layer failed: ${msg || "service may be down or moved"}.`),
       // Boundary hover/click identify (B695) — read live per event; parcel-select mode
       // owns the map's clicks, so the identify yields while it's on (the B98 rule).
-      identifyOk: () => !selectModeRef.current,
+      identifyOk: () => !selectModeRef.current && !editingNoteRef.current,
     });
     sync();
     /* NEW-6 — the re-probe is gated on VISIBLE. This map is never unmounted (SitePlannerApp hides
@@ -2373,10 +2397,10 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       const boundary = siteBoundaryInfo(site, parcelSummary);
       const acreText = !boundary.known ? "checking boundary…" : boundary.hasBoundary ? `${boundary.acres.toFixed(1)} AC` : "no boundary";
       const tip = `${name} · ${acreText} · ${STATUS_META[status]?.label || status}`;
-      const openSiteNow = () => onOpenSiteRef.current && onOpenSiteRef.current(site.id);
+      const openSiteNow = () => { if (editingNoteRef.current) return; /* the composer owns the map (NEW-1, 2026-10-08) */ return onOpenSiteRef.current && onOpenSiteRef.current(site.id); };
       // Right-click anywhere on a site → status picker at the cursor. (Suppress
       // the browser's native menu via the underlying DOM event.)
-      const onCtx = (e) => { if (selectModeRef.current) return; const oe = e.originalEvent; if (oe) { oe.preventDefault(); oe.stopPropagation(); } setStatusMenu({ site, x: (oe && oe.clientX) || 0, y: (oe && oe.clientY) || 0 }); };
+      const onCtx = (e) => { if (selectModeRef.current || editingNoteRef.current) return; const oe = e.originalEvent; if (oe) { oe.preventDefault(); oe.stopPropagation(); } setStatusMenu({ site, x: (oe && oe.clientX) || 0, y: (oe && oe.clientY) || 0 }); };
 
       // B849344 — the same canonical parcels the acreage number above was built from, not
       // `site.parcels`: drawing the boundary from a different source than the number describes
@@ -2524,11 +2548,12 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
           // site record to Google Earth. Same "select mode wins every click" discipline the site
           // pins' own onCtx uses, via the same open-state-menu shape (compMenu / ContextMenu).
           const onCompCtx = (e) => {
+            if (editingNoteRef.current) return;
             const oe = e.originalEvent;
             if (oe) { oe.preventDefault(); oe.stopPropagation(); }
             setCompMenu({ comp: c, x: (oe && oe.clientX) || 0, y: (oe && oe.clientY) || 0 });
           };
-          marker.on("click", () => onCompClickRef.current && onCompClickRef.current(c.id)).on("contextmenu", onCompCtx).bindTooltip(tip, { direction: "top" });
+          marker.on("click", () => { if (editingNoteRef.current) return; return onCompClickRef.current && onCompClickRef.current(c.id); }).on("contextmenu", onCompCtx).bindTooltip(tip, { direction: "top" });
         }
         marker.addTo(group);
       });
@@ -2555,7 +2580,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       const group = L.layerGroup();
       (showNotesLayer ? mapNotes : []).forEach((n) => {
         if (!n?.anchor || typeof n.anchor.lat !== "number" || typeof n.anchor.lon !== "number") return;
-        const isOpen = editingNote?.id != null && editingNote.id === n.id; // ring on the note being edited
+        const isOpen = (editingNote?.id != null && editingNote.id === n.id) || (notePulseId != null && notePulseId === n.id); // ring on the note being edited / just saved
         const { size, anchor: iconAnchor } = mapNoteMarkerSize(isOpen);
         // The marker carries its own note id so a check (or a future "focus this note" path) can
         // address ONE note rather than guessing from marker order. Deliberately `data-note-id` and
@@ -2568,7 +2593,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         });
         const marker = L.marker([n.anchor.lat, n.anchor.lon], { icon, interactive: !selectMode && !placingCompPin, keyboard: false, riseOnHover: true });
         if (!selectMode && !placingCompPin) {
-          marker.on("click", () => setEditingNote(n)).bindTooltip(mapNoteHeadline(n), { direction: "top", offset: [0, -(PIN_KEYLINE_R + 2)] });
+          marker.on("click", () => { if (editingNoteRef.current) return; /* never silently swap or drop the open composer (NEW-1, 2026-10-08) */ setEditingNote(n); }).bindTooltip(mapNoteHeadline(n), { direction: "top", offset: [0, -(PIN_KEYLINE_R + 2)] });
         }
         marker.addTo(group);
       });
@@ -2578,7 +2603,117 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     if (pressedRef.current) { pendingNotesRebuildRef.current = build; return; }
     build();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapNotes, selectMode, placingCompPin, showNotesLayer, editingNote?.id, pinOffsets]);
+  }, [mapNotes, selectMode, placingCompPin, showNotesLayer, editingNote?.id, notePulseId, pinOffsets]);
+
+  /* ── NEW-1 (2026-10-08): THE NOTE COMPOSER KEEPS ITS TARGET IN VIEW ─────────────────────────────
+   * Owner report (iPhone): choosing "Add a note" made the thing he had clicked disappear and left a
+   * card that said only "On a parcel". Four pieces, each a decision rather than drawing:
+   *   1. the composer NAMES its target (`noteTargetLabel`: saved site → parcel address/account → pin);
+   *   2. the target is OUTLINED / RINGED in the notes colour for as long as the composer is open;
+   *   3. the map pans the smallest amount that puts the target in the part of the map the card (and
+   *      the on-screen keyboard) is NOT covering, and re-does it when the card or keyboard resizes;
+   *   4. the composer is capped to the room above the keyboard and scrolls inside that cap.
+   * The ground itself (parcel selection / dropped pin) is held by the verb and released on Save. */
+  const noteTarget = useMemo(
+    () => (editingNote ? noteTargetLabel(editingNote.anchor, sites) : null),
+    [editingNote?.anchor, sites], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const [noteCardH, setNoteCardH] = useState(0);
+  const noteOpen = !!editingNote;
+
+  // The target outline / ring. Redrawn only when the ANCHOR changes, never on a keystroke.
+  const nAnchor = editingNote?.anchor || null;
+  const nKind = nAnchor?.kind || "", nLat = nAnchor?.lat, nLon = nAnchor?.lon, nGeom = nAnchor?.parcelGeom || null, nIsNew = noteOpen && !editingNote.id;
+  useEffect(() => {
+    const map = mapRef.current;
+    if (noteTargetRef.current) {
+      try { map && map.removeLayer(noteTargetRef.current); } catch (_) { /* map already torn down */ }
+      noteTargetRef.current = null;
+    }
+    if (!map || !nAnchor || typeof nLat !== "number" || typeof nLon !== "number") return undefined;
+    const group = L.layerGroup();
+    if (nKind === "parcel" && nGeom) {
+      try {
+        L.geoJSON(nGeom, {
+          interactive: false,
+          style: () => ({ color: NOTE_MARKER_COLOR, weight: 4, fillColor: NOTE_MARKER_COLOR, fillOpacity: 0.2, interactive: false, className: "map-note-target-outline" }),
+        }).addTo(group);
+      } catch (e) { console.warn("[map-notes] could not outline the note's parcel", e); }
+    }
+    if (nIsNew && nKind === "pin") {
+      const html = `<div data-testid="map-note-target-pin" style="width:30px;height:30px;border-radius:${RADIUS.pill}px;transform:translate(-50%,-50%);`
+        + `border:3px solid ${NOTE_MARKER_COLOR};background:${NOTE_MARKER_COLOR}2e;box-shadow:${MAP_PIN_SHADOW};"></div>`;
+      L.marker([nLat, nLon], { icon: L.divIcon({ className: "", html, iconSize: [0, 0] }), interactive: false, keyboard: false, zIndexOffset: 650 }).addTo(group);
+    }
+    group.addTo(map);
+    noteTargetRef.current = group;
+    return () => {
+      try { map.removeLayer(group); } catch (_) { /* map already torn down */ }
+      if (noteTargetRef.current === group) noteTargetRef.current = null;
+    };
+  }, [nKind, nLat, nLon, nGeom, nIsNew]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The on-screen keyboard: its overlap with the map's bottom edge, from the visual viewport.
+  useEffect(() => {
+    if (!noteOpen) { setKbInset(0); return undefined; }
+    const vv = typeof window !== "undefined" ? window.visualViewport : null;
+    const upd = () => {
+      const host = mapHostRef.current;
+      if (!host) return;
+      setMapBoxH(host.clientHeight);
+      if (!vv) return;
+      setKbInset(keyboardInset({ mapBottom: host.getBoundingClientRect().bottom, vvTop: vv.offsetTop, vvHeight: vv.height, innerHeight: window.innerHeight }));
+    };
+    upd();
+    if (vv) { vv.addEventListener("resize", upd); vv.addEventListener("scroll", upd); }
+    window.addEventListener("resize", upd);
+    return () => {
+      if (vv) { vv.removeEventListener("resize", upd); vv.removeEventListener("scroll", upd); }
+      window.removeEventListener("resize", upd);
+    };
+  }, [noteOpen]);
+
+  const noteTypingKb = noteOpen && kbInset > 0;   // phone, keyboard up: compact card, no address bar
+  const noteBox = composerBox({ containerH: mapBoxH || 600, kbInset });
+
+  // The card's own height, so the pan below leaves exactly its footprint clear.
+  useEffect(() => {
+    const el = noteCardRef.current;
+    if (!noteOpen || !el || typeof ResizeObserver === "undefined") { if (!noteOpen) setNoteCardH(0); return undefined; }
+    const ro = new ResizeObserver(() => setNoteCardH(Math.round(el.getBoundingClientRect().height)));
+    ro.observe(el);
+    setNoteCardH(Math.round(el.getBoundingClientRect().height));
+    return () => ro.disconnect();
+  }, [noteOpen]);
+
+  // Pan (never zoom) the target into the visible part of the map. Re-runs when the card or the
+  // keyboard changes the covered area, NOT on a user's own pan afterwards.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !noteOpen || !noteCardH || typeof nLat !== "number" || typeof nLon !== "number") return;
+    const size = map.getSize();
+    let a = map.latLngToContainerPoint([nLat, nLon]);
+    let rect = { left: a.x, right: a.x, top: a.y, bottom: a.y };
+    if (nKind === "parcel" && nGeom) {
+      try {
+        const b = L.geoJSON(nGeom).getBounds();
+        const p1 = map.latLngToContainerPoint(b.getNorthWest()), p2 = map.latLngToContainerPoint(b.getSouthEast());
+        rect = { left: Math.min(p1.x, p2.x), right: Math.max(p1.x, p2.x), top: Math.min(p1.y, p2.y), bottom: Math.max(p1.y, p2.y) };
+      } catch (_) { /* fall back to the anchor point */ }
+    }
+    const { dx, dy } = panToFitRect(rect, { w: size.x, h: size.y }, {
+      // margins are pin-aware: the target ring is 30 px across, so its far edge must clear the card too
+      top: noteTypingKb ? 18 : 76, left: 16, right: 16, bottom: noteBox.bottom + noteCardH + (noteTypingKb ? 20 : 28),
+    });
+    if (dx || dy) map.panBy([-dx, -dy], { animate: true, duration: 0.25 });
+  }, [noteOpen, noteCardH, noteBox.bottom, noteTypingKb, nKind, nLat, nLon, nGeom]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The just-saved note keeps its ring for a few seconds so the owner sees where it landed.
+  useEffect(() => {
+    if (notePulseId == null) return undefined;
+    const t = setTimeout(() => setNotePulseId(null), 6000);
+    return () => clearTimeout(t);
+  }, [notePulseId]);
 
   const flyToSite = (site) => {
     if (!site.origin || !mapRef.current) return;
@@ -3101,6 +3236,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
      query point used only for the Chambers→true-county relabel. Returns
      { key, attrs, rings } or null if the record has no polygon. */
   const addParcelHit = (hit, at) => {
+    if (editingNoteRef.current) return null; // a stray pick must not re-aim an open note (NEW-1, 2026-10-08)
     const { county, feature: feat } = hit;
     // ALL outer parts: a multipart parcel ("TRS 3 & 5" = two tracts) must highlight +
     // plan every piece, not just the largest (B36c).
@@ -3445,6 +3581,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
    * bar always has exactly ONE target and can never present three verbs whose meaning depends on
    * which of two things you thought you had selected. */
   const markDecidePin = (latlng) => {
+    if (editingNoteRef.current) return; // the note composer owns the ground until Save / Cancel (NEW-1, 2026-10-08)
     setPlacingCompPin(false);
     setPinDecideArmed(false);
     setSelectMode(false);
@@ -3727,20 +3864,20 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       onAccent: "var(--on-accent-notes)",
       title: "Pin a note to this ground",
       run: (target) => {
+        /* NEW-1 (2026-10-08) — THIS VERB NO LONGER CLEARS THE GROUND IT WAS PRESSED ON. It used to
+         * `finishGroundAction()` / `clearDecidePin()` the instant the composer opened, so the parcel
+         * highlight and the decide bar vanished and the owner (on a phone, the composer covering the
+         * map) could no longer tell what the note was for. The selection / pin now stays on the map,
+         * outlined, for as long as the composer is open: Cancel returns to the decide bar as it was,
+         * Save releases the ground (`saveMapNote`). The anchor carries a `label` so the composer can
+         * name its target even when no saved site sits there. */
         if (target === "parcels") {
           const anchor = parcelAnchorFromSelection(selected, asm);
           if (!anchor) return;
-          beginNoteAt(anchor);
-          // NEW-1 (2026-09-24) — `finishGroundAction`, not a bare `clearSel()`: this verb finishes
-          // without leaving the map, so it must exit select mode itself or the toolbar falls back
-          // to "Selecting…" with nothing selected instead of its normal AT-REST row (the reported
-          // "Add a note doesn't dismiss the parcel selection bar" defect). See that helper's own
-          // comment, beside `clearSel`.
-          finishGroundAction();
+          beginNoteAt({ ...anchor, label: selectionLabel(selected) });
           return;
         }
         const pin = droppedPin;
-        clearDecidePin();
         if (pin) beginNoteAtPoint({ lat: pin.lat, lng: pin.lon });
       },
     },
@@ -3893,6 +4030,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     if (!decideTarget || !orderedVerbs.length) return undefined;
     const onKey = (e) => {
       if (e.key !== "Enter") return;
+      if (editingNoteRef.current) return; // the note composer is open — Enter belongs to it
       const ae = document.activeElement;
       const tag = ae && ae.tagName;
       // NEW-1 (B1012832) — the text-entry half reads the ONE shared authority
@@ -4212,10 +4350,13 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
             a modal). Lazy, like every other panel here, so a user who never places a note downloads
             none of it. */}
         {editingNote && (
-          <div style={{ position: "absolute", left: "50%", bottom: 44, transform: "translateX(-50%)", zIndex: MAP_CHROME_Z.alert }}>
+          <div ref={noteCardRef} data-testid="map-note-card" style={{ position: "absolute", left: "50%", bottom: noteBox.bottom, transform: "translateX(-50%)", zIndex: MAP_CHROME_Z.alert }}>
             <Suspense fallback={null}>
               <MapNoteEditor
                 note={editingNote}
+                targetLabel={noteTarget}
+                maxHeight={noteBox.maxHeight}
+                compact={noteTypingKb}
                 onSave={saveMapNote}
                 onDelete={removeMapNote}
                 onClose={() => setEditingNote(null)}
@@ -4269,9 +4410,11 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
             different number from the corner chips' MAP_OVERLAY_CHIP_H_PX (this is a compound
             cluster, not a single-label toggle — see mapChromeStack.js's own header), named so it
             reads as an intentional choice rather than a fourth hand-picked literal. */}
-        <div style={{
+        <div data-testid="map-toolbar" style={{
           position: "absolute", zIndex: narrow ? 1100 : 1000,
-          display: "flex", alignItems: "center",
+          // NEW-1 (2026-10-08) — typing a note with the on-screen keyboard up leaves a sliver of map;
+          // the address bar is not needed for that and its strip is what lets the note's target stay visible.
+          display: noteTypingKb ? "none" : "flex", alignItems: "center",
           background: PAL.chrome,
           borderRadius: RADIUS.lg,
           boxShadow: "0 4px 20px rgba(0,0,0,0.45), 0 1px 4px rgba(0,0,0,0.25)",
@@ -4457,7 +4600,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
               note — see `recordVerbs` above). Four buttons wide was reported back as reading
               cluttered next to the count it follows; two reads at a glance as "design it, or just
               write something down about it" — the same choice, one fold deep for the second half. */}
-          {decideTarget && (
+          {decideTarget && !editingNote && (
             <>
               <span data-testid="map-decide-dot" style={{ width: 7, height: 7, borderRadius: RADIUS.pill, background: PAL.chromeMuted, flex: "none" }} />
               {/* NEW-1 (B1892544) — a headless probe used to read the sticky order straight off the
