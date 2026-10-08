@@ -101,9 +101,15 @@ try {
   if (SIGNED && UID) {
     try {
       await page.evaluate(([uid, id]) => { const k = "planarfit:sites:cloud:" + uid; const m = JSON.parse(localStorage.getItem(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); }, [UID, SITE_ID]);
-      const gone = await page.evaluate(async (id) => { const { data } = await window.pfSupabase.from("sites").select("id").eq("id", id); return !data || data.length === 0; }, SITE_ID);
-      console.log(gone ? "cleanup — throwaway site not in the cloud" : "cleanup — NOTE: a cloud row exists for the throwaway site; deleting it");
-      if (!gone) await page.evaluate(async (id) => { await window.pfSupabase.from("sites").delete().eq("id", id); }, SITE_ID);
+      // The database refuses to PERMANENTLY delete a live site (sites_block_delete_live_group) — the sanctioned path is
+      // trash first, then purge. A bare delete silently matched nothing and left a row per run (found 2026-10-08).
+      await page.evaluate(async (id) => {
+        await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+        await window.pfSupabase.from("site_elements").delete().eq("site_id", id);
+        await window.pfSupabase.from("sites").delete().eq("id", id);
+      }, SITE_ID);
+      const left = await page.evaluate(async (id) => { const { data } = await window.pfSupabase.from("sites").select("id,deleted_at").eq("id", id); return (data || []).length; }, SITE_ID);
+      console.log(left === 0 ? "cleanup — throwaway site purged from the cloud (verified)" : `cleanup — WARNING: ${left} row(s) for ${SITE_ID} remain (trashed at minimum); delete them by hand`);
     } catch (e) { console.log("cleanup error —", e.message); }
   }
   await browser.close();

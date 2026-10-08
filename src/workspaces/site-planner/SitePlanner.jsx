@@ -5,7 +5,7 @@ import { startClickAck } from "../../shared/ui/clickAck.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useProjectName, usePlanName, renameProjectChecked, renamePlanChecked } from "../../shared/names/names.js";
-import { loadSite, saveSite, siteExistsLocally, readBackSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
+import { loadSite, saveSite, siteExistsLocally, sitesWriteStamp, sitesWriteStillCurrent, readBackSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
 import { relTime } from "../../shared/projects/projectModel.js";
 import { collectAssetRefs, releasePlanForOverlay } from "./lib/sharedAssetRefs.js";
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
@@ -358,6 +358,7 @@ import {
   bandLayout, bandStripeMarksWithWidth, BAND_FILL_TOKEN, BAND_FILL_OPACITY, designatedRowFt, rowMarginFt, rowWidth,
   XSEC_BAND_FILL_MIN_PX, XSEC_STRIPE_MIN_PX,
 } from "./lib/roadCrossSection.js";
+import { placeEasementLabel, AREA_FONT_PX } from "./lib/easementLabelPlacement.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF, stallStripesExplicit, segmentsPath, featureNameLabelVisible, featureNameFontPx, featureExtentFt } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
@@ -4096,8 +4097,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // AND makes the rollback snapshot reload-safe too. Runs even when the cloud push is gated by a
     // conflict/read-only tab — a local save is always safe and is the whole recovery net. Coalesced to
     // ~50ms (snapshotVersion's count-based sig-dedup already keeps a same-shape drag from snapshotting).
+    let mirrorStamp = null;   // NEW-1 (B217540 ×3): the whole-store write the mirror made, so the settle tick can tell it is already on disk
     const writeMirror = () => {
       const ok = saveSite(payload);
+      mirrorStamp = ok ? sitesWriteStamp() : null;
       lastLocalWrite.current = Date.now();
       // B473 — VERIFY the write actually persisted by reading it back. A write that silently doesn't
       // land is exactly the owner's "I placed a bunch of stuff and it didn't save at all." If the
@@ -4127,7 +4130,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const t = setTimeout(() => {
       // Settle tick = the cloud push. skipHistory so this re-write can't double-snapshot what the
       // immediate write already captured; the mirror is already current from writeMirror above.
-      const okSave = saveSite(payload, { skipHistory: true });
+      /* NEW-1 (B217540 ×3 / B1317824 ×3) — AND WHEN IT IS ALREADY THERE, DO NOT WRITE IT AGAIN. This re-write was a second
+       * whole-store parse + stringify + setItem of byte-identical content for every edit (the owner's ~200 ms `c` hitch ran
+       * twice per edit at his 3.9 MB store). The mirror's write is proven to still be the store's content by the same
+       * byte-exact check B217540 uses for the read-back; any other writer (another tab, a cloud pull) fails that proof and
+       * the real write below runs exactly as it always did. A mirror that never ran or failed has no stamp, so it also falls
+       * through to the real write. */
+      const okSave = mirrorStamp && sitesWriteStillCurrent(mirrorStamp) ? true : saveSite(payload, { skipHistory: true });
       if (fresh && okSave) onSiteSaved?.();
       // Badge tracks the REAL write: local write done; when logged in, stay
       // "saving" until the cloud upsert resolves, then "saved" only if it succeeded.
@@ -23488,12 +23497,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           across the drawing. Selecting something you cannot see must not make its name the
                           largest thing on screen. The hatched fill + centerline geometry always stay
                           (keep-geometry, avoid the on/off flicker) and the edit handles are unaffected. */}
+                      {/* NEW-1 — the name (and the selected-state area line) ride the easement's long axis,
+                          rotated to it and kept upright; see lib/easementLabelPlacement.js. A shape that is
+                          not elongated keeps the old horizontal-at-centroid label exactly. */}
                       {(() => {
                         const txt = `${easementLabel(m)}${proposed ? " (proposed)" : ""}`;
-                        if (!featureNameLabelVisible(txt, featureExtentFt(m.pts), labelPpf, EASE_LABEL_BASE_PX)) return null;
-                        return <text x={cp.x} y={cp.y} textAnchor="middle" fontSize={featureNameFontPx(labelPpf, EASE_LABEL_BASE_PX) * labelK} fontWeight="700" fill={ecol} pointerEvents="none" style={INK_HALO}>{txt}</text>;
+                        const pl = placeEasementLabel(m, txt, { labelPpf, basePx: EASE_LABEL_BASE_PX, toScreen: f2p, withArea: isSel && labelPpf > 0.05 });
+                        if (!pl) return null;
+                        const at = f2p({ x: pl.x, y: pl.y });
+                        return (
+                          <g transform={`translate(${at.x} ${at.y}) rotate(${pl.angle}) scale(${labelK})`} pointerEvents="none" data-easement-label={m.id} data-label-angle={pl.angle.toFixed(1)}>
+                            <text x={0} y={pl.nameDy} textAnchor="middle" fontSize={pl.fontPx} fontWeight="700" fill={ecol} pointerEvents="none" style={INK_HALO}>{txt}</text>
+                            {pl.showArea && <text x={0} y={pl.areaDy} textAnchor="middle" fontSize={AREA_FONT_PX} fontWeight="600" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{Math.round(area).toLocaleString()} SF · {(area / SQFT_PER_ACRE).toFixed(2)} AC</text>}
+                          </g>
+                        );
                       })()}
-                      {isSel && labelPpf > 0.05 && <text x={cp.x} y={cp.y + 12 * labelK} textAnchor="middle" fontSize={9 * labelK} fontWeight="600" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{Math.round(area).toLocaleString()} SF · {(area / SQFT_PER_ACRE).toFixed(2)} AC</text>}
                       {inlineLabelEls(easePathFeet, m.inlineLabel, ecol, m.labelSpacing || INLINE_LABEL_SPACING.easement, rppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo, lf: labelFrame, ...easementInsetOpts(m) })}
                     </g>
                   );

@@ -77,3 +77,13 @@ describe("/api/taxrates county normalisation (B2158064)", () => {
     expect(normalizeCounty("Fort  Bend County")).toBe("fort bend");
   });
 });
+
+describe("transient answers are never cached", () => {
+  it("a 'try again' answer is retried on the next open", async () => {
+    _resetTaxUnitsCache();
+    const f = vi.fn(async () => ({ ok: true, json: async () => ({ complete: false, transient: true }) }));
+    await fetchTaxUnits("harris", "0591420000105", f);
+    await fetchTaxUnits("harris", "0591420000105", f);
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+});

@@ -39,7 +39,7 @@
  * Foursquare one (0.77) — so it's used here purely as a sort tiebreaker, never a filter.
  */
 
-import { samePlace } from "./placeIdentity.js";
+import { samePlace, normalizeName } from "./placeIdentity.js";
 
 // ── "strong match": word coverage ─────────────────────────────────────────────────────────────
 export const SIGNIFICANT_WORD_MIN_LEN = 3; // drop "a", "of" — too short to carry any meaning
@@ -164,6 +164,21 @@ function haversineMeters(a, b) {
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+/** B2051665 — the 150 m "same storefront, two sources" collapse used to ignore NAMES, which was fine
+ *  while every candidate matched the typed NAME (they were all the same brand). An ADDRESS search
+ *  returns whatever shares that address — Fish City Grill, Jersey Mike's and Yogurtland in one
+ *  shopping centre — and those are different restaurants that must all stay listed. So the radius
+ *  only collapses records whose names are alike: equal once normalised, one containing the other, or
+ *  sharing a first word (the "Taco Shack" / "Taco Shack Express" source variants). */
+export function namesAlike(a, b) {
+  const na = normalizeName(a.name), nb = normalizeName(b.name);
+  if (!na || !nb) return true; // no name to tell them apart — keep the old geometric behaviour
+  if (na === nb || na.includes(nb) || nb.includes(na)) return true;
+  let n = 0;
+  while (n < na.length && n < nb.length && na[n] === nb[n]) n++;
+  return n >= 5; // a shared 5-letter start = one brand ("fadis…"); "tacob…" vs "tacoc…" is not
+}
+
 /** The full pipeline: exclude known-corrupted rows, exclude weak matches (see isStrongMatch),
  *  rank clean/high-confidence/non-registry records first, then collapse near-duplicate records
  *  of the same real-world spot down to one. `protectedIds` (his own logged visits + "want to
@@ -202,7 +217,7 @@ export function rankSearchCandidates(query, rawResults, protectedIds = new Set()
 
   const kept = [];
   for (const r of ranked) {
-    if (!isProtected(r) && kept.some((k) => haversineMeters(k, r) < DEDUPE_RADIUS_METERS || samePlace(k, r))) continue;
+    if (!isProtected(r) && kept.some((k) => (haversineMeters(k, r) < DEDUPE_RADIUS_METERS && namesAlike(k, r)) || samePlace(k, r))) continue;
     kept.push(r);
   }
   return kept;

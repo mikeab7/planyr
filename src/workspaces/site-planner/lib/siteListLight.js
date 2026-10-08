@@ -26,16 +26,16 @@
  * fields, that is a sign it needs the real `loadSitesList()`, not an extension of this one.
  */
 import { activeUid, cloudSitesKey } from "./activeUser.js";
+import { snapshotIfCurrent } from "./sitesSnapshot.js";
 import { reconcileGroupNames, renameStamp } from "./projectName.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { DEFAULT_STATUS, LEGACY_STATUS, normStatus, isLegacyRecord, normRole } from "./siteStatus.js";
 
 const SITES_KEY = "planarfit:sites:v1"; // legacy / logged-out store — mirrors storage.js's own key
 
-function readRawSites() {
+function sitesKeyNow() {
   const uid = activeUid();
-  const key = uid ? cloudSitesKey(uid) : SITES_KEY;
-  try { return JSON.parse(localStorage.getItem(key)) || {}; } catch (_) { return {}; }
+  return uid ? cloudSitesKey(uid) : SITES_KEY;
 }
 
 // The same six-ish scalar fields createSiteModel() defaults, and the same defaulting rules —
@@ -66,8 +66,28 @@ function projectSummaryOf(p) {
  * fields, name-authority reconciled (the same split-project-name fix loadSitesList() runs), newest
  * first. Never geometry-healed — callers that need the drawn content must use the real
  * loadSitesList()/loadSite(). */
+/* ⛔ NEW-1 (B217540 ×3 / B1317824 ×3) — THIS READ IS MEMOISED ON THE STORE'S EXACT BYTES, NOT ON A CLOCK.
+ * `usePlanName` / `useProjectName` (shared/names) and the header's project switcher reach this on every render, and the
+ * names index in front of it only holds for 2 s — so an editing session re-parsed the ENTIRE device store (every plan, a
+ * 3.9 MB store is ~40 MB of fresh objects) about every other second, plus the name-authority pass over all of it. That is
+ * the recurring parse in the owner's 2026-10-07 capture, and the garbage behind its heap climbing 157 → 399 MB in 8 s.
+ * Nothing it reads can change unless the string in `localStorage` changes, so the string IS the cache key: while it is
+ * byte-for-byte what it was, the answer is too (a pure function of it and of the active account, which is in the key). Any
+ * other writer — a rename, a cloud pull, another tab — changes the bytes and the real read runs. Callers get FLAT COPIES of
+ * the summaries, as they always got fresh objects, so none can corrupt the memo. */
+let summariesMemo = null;   // { key, raw, models }
 export function loadSiteSummaries() {
-  const raw = Object.values(readRawSites()).map(projectSummaryOf);
+  const key = sitesKeyNow();
+  let rawStr = null;
+  try { rawStr = localStorage.getItem(key); } catch (_) { rawStr = null; }
+  if (summariesMemo && summariesMemo.key === key && summariesMemo.raw === rawStr) return summariesMemo.models.map((m) => ({ ...m }));
+  /* …and when the bytes DID change, it is usually because this very tab just saved a plan, and storage.js is holding the
+   * object it wrote: take that (byte-exact proof, read-only) instead of parsing the whole store again. */
+  const held = snapshotIfCurrent(key, rawStr);
+  let parsed = {};
+  if (held) parsed = held.obj;
+  else { try { parsed = JSON.parse(rawStr) || {}; } catch (_) { parsed = {}; } }
+  const raw = Object.values(parsed).map(projectSummaryOf);
   const { models, ambiguous } = reconcileGroupNames(raw);
   for (const a of ambiguous) {
     try {
@@ -76,5 +96,7 @@ export function loadSiteSummaries() {
       });
     } catch (_) {}
   }
-  return models.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  const sorted = models.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  summariesMemo = { key, raw: rawStr, models: sorted };
+  return sorted.map((m) => ({ ...m }));
 }
