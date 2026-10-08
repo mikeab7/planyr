@@ -78,17 +78,18 @@ function liveCount(serviceUrl, lng, lat, meters = 1609) {
   return JSON.parse(out.toString()).count;
 }
 
-const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox", "--ignore-certificate-errors"] });
+const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
 
 async function open(key) {
   const site = SITES[key];
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 }, ignoreHTTPSErrors: true });
+  const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 } });
   await ctx.addInitScript((s) => { try { localStorage.setItem("planarfit:sites:v1", s); localStorage.setItem("planarfit:relevance:v1", JSON.stringify({ mode: "all", radius: 2.5 })); } catch (_) {} }, JSON.stringify({ [site.id]: site }));
   const page = await ctx.newPage();
   await assertMeasurable(page, "verify-eia-pipelines");
   const log = { eia: [], rrc: [], errs: [] };
   page.on("pageerror", (e) => log.errs.push(String(e)));
-  await page.route(/^https?:\/\/(?!localhost|127\.0\.0\.1)/, async (route) => {
+  const OWN_HOST = new URL(BASE).host; // BASE_URL=https://planyr.io/ runs this against production; the app's own host is never intercepted
+  await page.route((u) => /^https?:/.test(u.href) && !/^(localhost|127\.0\.0\.1)/.test(u.host) && u.host !== OWN_HOST, async (route) => {
     const req = route.request(); const url = req.url();
     if (/services2\.arcgis\.com\/FiaPA4ga0iQKduv3/.test(url)) {
       // The org also hosts the pre-existing HIFLD electric-transmission row — relay it, but only the four
