@@ -37,9 +37,12 @@ const SHEETS = {
   ],
 };
 
-vi.mock("xlsx", () => ({
-  read: vi.fn((buf) => ({ SheetNames: ["Detail"], Sheets: { Detail: buf._sheetKey } })),
-  utils: { sheet_to_json: vi.fn((sheetKey) => SHEETS[sheetKey]) },
+
+
+
+// B2158064: the handler now streams rows via lib/xlsxRows.js (covered by xlsxRows.test.js) — stub it.
+vi.mock("../functions/api/lib/xlsxRows.js", () => ({
+  countyRowsFromXlsx: vi.fn(async (buf) => SHEETS[buf._sheetKey]),
 }));
 
 function makeCaches() {
