@@ -23,3 +23,24 @@ export function summarizeParcelRows(rows) {
   }
   return out;
 }
+
+// NEW-1 (B2224000) — the SAME summary, computed in time slices. The sync one runs inside the continuation of the account-wide parcel fetch
+// (`Response.text.then` in the owner's perfcap: a 134 ms task), and its cost is the SUM over every site on the account of an O(parcels²) overlap
+// scan — it grows with the library, not with the plan being opened. A site is the unit of work (never split: `dissolvedParcelSqft` needs the whole
+// set), so each slice is bounded by `budgetMs` plus one site. Same result as `summarizeParcelRows`, key for key.
+const yieldMacrotask = () => new Promise((resolve) => setTimeout(resolve, 0));
+export async function summarizeParcelRowsAsync(rows, { budgetMs = 12, yieldFn = yieldMacrotask, now = () => performance.now() } = {}) {
+  const bySite = new Map();
+  for (const r of (rows || [])) {
+    if (!r || !r.site_id || !r.data) continue;
+    const list = bySite.get(r.site_id);
+    if (list) list.push(r.data); else bySite.set(r.site_id, [r.data]);
+  }
+  const out = {};
+  let sliceStart = now();
+  for (const [siteId, parcels] of bySite) {
+    out[siteId] = { count: parcels.length, acres: dissolvedParcelSqft(parcels) / 43560, parcels };
+    if (now() - sliceStart >= budgetMs) { await yieldFn(); sliceStart = now(); }
+  }
+  return out;
+}

@@ -19,7 +19,7 @@ import { loadUserPrefs } from "./lib/userPrefs.js";
 const SHARE_LOADERS = { loadPrefs: loadUserPrefs, listTeams: listMyTeams };
 import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, initHistoryStore, loadSitesList, loadPlansOfGroup, renameSiteGroup, deleteSiteGroup as storageDeleteSiteGroup, repairSplitProjectNames, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount, stageLegacySite, discardLegacySite } from "./lib/storage.js";
 import { cloudParcelRows, cloudElementRecency } from "./lib/cloudSync.js";
-import { summarizeParcelRows } from "./lib/parcelSummary.js";
+import { summarizeParcelRowsAsync } from "./lib/parcelSummary.js";
 import { summarizeElementRecency, groupRecencyMs, pickRepresentativePlan } from "./lib/siteRecency.js";
 import { STATUS_META, roleOf } from "./lib/siteModel.js";
 import { isPinnedMapReference } from "./lib/overlayOrder.js";
@@ -451,16 +451,23 @@ export default function App({
   const [parcelSummary, setParcelSummary] = useState({});
   const [parcelSummaryLoaded, setParcelSummaryLoaded] = useState(() => !supabaseConfigured());
   const parcelSummaryFetching = useRef(false);
+  const parcelSummaryEpoch = useRef(0);   // bumped by every refresh and by sign-out: a slice-computed summary of a superseded call is dropped
   const refreshParcelSummary = async (uid) => {
-    if (!uid) { setParcelSummary({}); setParcelSummaryLoaded(true); return; }
+    if (!uid) { parcelSummaryEpoch.current++; setParcelSummary({}); setParcelSummaryLoaded(true); return; }
     if (parcelSummaryFetching.current) return;
     parcelSummaryFetching.current = true;
+    const epoch = ++parcelSummaryEpoch.current;
     try {
       const r = await cloudParcelRows(uid).catch(() => ({ ok: false }));
       // A failed fetch leaves the last-known summary in place (stale-while-revalidate, same
       // discipline as cloudError above) rather than reporting every site boundary-less. The
       // dissolve happens here, not in cloudSync.js — see cloudParcelRows's own header for why.
-      if (r && r.ok) { setParcelSummary(summarizeParcelRows(r.rows)); setParcelSummaryLoaded(true); }
+      if (r && r.ok) {
+        /* NEW-1 (B2224000) — summarised in ≤12 ms slices (the sync pass was one 134 ms task billed to the response). A sign-out during the slices
+           bumps the epoch, so a finished summary of the old account is never applied over the signed-out state. */
+        const summary = await summarizeParcelRowsAsync(r.rows);
+        if (epoch === parcelSummaryEpoch.current) { setParcelSummary(summary); setParcelSummaryLoaded(true); }
+      }
     } finally { parcelSummaryFetching.current = false; }
   };
 
