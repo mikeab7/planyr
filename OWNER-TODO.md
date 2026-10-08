@@ -26,12 +26,12 @@ _Last updated: 2026-10-05._
 > - [ ] **Paste the three files** into the Supabase SQL editor, in that order. After that a session re-runs the drift report and checks delete/restore on a throwaway project.
 > - [ ] **Decide:** 3 reviews (documents) are still showing as live under projects you deleted. Should deleting a project hide its reviews too, or leave them filed? I left them alone.
 
-## 🧾 A decision on shared child items, plus two database scripts to apply (B2064896)
+## 🧾 A decision on shared child items (B2064896)
 
 > **What I found:** I compared every stored copy of a fact in your database with where that fact really lives (read-only). Almost everything agrees. Six items (a review, an overlay, comps) are marked with a different team than the project they belong to. By your 2026-08-09 decision, sharing is decided per item (site plans only), so I did **not** change them.
 >
 > - [ ] **Decide:** should a project's reviews / overlays / comps follow the project's team, or stay private until shared on their own? (Today: they stay private. Five of the six are reviews of shared projects — Papadopoulos, 8 South ×2, Mason & Clay, Grand Port — that your teammates cannot see.)
-> - [ ] **Apply two SQL files** (I'll hand them to you in order): `single_source_backfill_20261004.sql` (fills blank filing fields and aligns one project's status; takes a safety copy first) and `profiles_email_sync.sql` (keeps the team roster email right). Both are safe to run twice.
+> - [x] ~~**Apply `single_source_backfill_20261004.sql`**~~ — already applied to production 2026-10-05 (checked read-only 2026-10-08). `profiles_email_sync.sql` is left to the drift-report session by your 2026-10-08 instruction.
 
 ## ✉️ Make team invites send email — Google steps only, no new accounts (B2049312)
 
