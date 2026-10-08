@@ -410,6 +410,9 @@
     }
   ],
   "ownedColumns": {
+    "recovery_20261008_parcel_account_snapshot": [
+      "site_id"
+    ],
     "recovery_20261008_combined_madefrom_snapshot": [
       "site_id"
     ],
