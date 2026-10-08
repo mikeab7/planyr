@@ -640,24 +640,18 @@ Sandbox-proven: `test/deedGap.test.js` (real Tract 1 + hole calls), `ui-audit/ve
 4. File → export PDF. **Expect:** the red dashed gap line is on the sheet.
 - **Stopping rule:** closes on a dated pass of 1-4, or a failed step filed as a recurrence on B2019264.
 
-### V1443696 — B2018608: vector roads + labels basemap (Food + Site Plan map) `Blocker: live-GIS` (REAL vector tiles only — everything else below PASSED live 2026-10-08)
+### V1443696 — B2018608: vector roads + labels basemap (Food + Site Plan map) `Blocker: live-GIS`
 
-**2026-10-08 — LIVE PASS (partial) on planyr.io, signed in as the test account `e2e@planyr.test` (fixture proof: account email + `e2e-fixture-site` row), served build `252fb42` read from `/version.json` in the same call as every assertion; throwaway account only, nothing created or changed.** Harnesses: `node ui-audit/verify-basemap-live.mjs https://planyr.io` (17 checks, ALL PASSED; queries scoped per map — the Site Map stays mounted behind /food and a page-wide query read ITS panes on the first try) and `node ui-audit/verify-basemap-live-export.mjs https://planyr.io` (4 checks, ALL PASSED).
-**What the production run proved**
-- `/food` opens on **Satellite** (current default since B2078128, which superseded this item's original "Site Plan" default) with **Hybrid** the other choice: photo only at metro AND neighbourhood zoom — no road layer, no city names, untoned.
-- **Hybrid** on production: toned imagery, no Planyr city layer, credit reads "Imagery © Esri, Maxar · OpenFreeMap © OpenMapTiles data © OpenStreetMap", fully visible and clear of the ? button; the "Loading imagery…" pill clear of the zoom control.
-- **LOUD-FAILURE fallback verified for real:** with the vector source unreachable, Hybrid draws the Esri raster road names AND shows the visible "Crisp road labels unavailable" notice — never silent, never a blank map.
-- **Site tab Map** (unchanged look): imagery untoned; at metro zoom Planyr's own city names and NO road lines; at neighbourhood zoom city names gone and roads present (raster fallback here, for the same reason as above).
-- **PDF export (step 6):** the print sheet for the fixture plan builds, carries an inlined aerial image, and contains no tone-grade filter anywhere.
-- Credit/pill step 8; switching Satellite ⇄ Hybrid never blanked the map; no page errors.
-**STILL PARKED — `Blocker: live-GIS` (named, per step):** this network's egress policy DENIES `tiles.openfreemap.org` (the proxy answers 403 to CONNECT — organization policy, not retried; the production browser logged 2 failed OpenFreeMap requests, 0 finished), so the REAL vector road/label data cannot be seen from any session here:
-- step 2 (Hybrid looks right on real OSM data: freeways first, locals only up close, no overlapping labels, soft halos),
-- step 3 (labels glued to the aerial through pan/zoom with real tiles; pins above labels),
-- OpenFreeMap's own CORS/terms from planyr.io (the one fact this item exists to confirm),
-- the Site Map's close-zoom roads drawn from the VECTOR source rather than the raster fallback (step 5, plus the Road names opacity slider on vector roads).
-**Not run this pass, with the reason:** step 7 (faint tile-seam hairlines at fractional zoom on a 2x display) is an eye judgement on a real display — `Blocker: real-device (his display)`; sandbox pixel evidence for the fix is in `docs/evidence/B2018608-basemap/`.
-**Closure condition (anyone with a network that reaches `tiles.openfreemap.org`):** `node ui-audit/verify-basemap-live.mjs https://planyr.io --shots <dir>` — the hybrid line "REAL vector roads drawn" must report `vectorRoads:true` with no fallback notice, and the Site Map z16 line must too; then eyeball steps 2/3 in the shots. Failed → recurrence on B2018608 (the source would then swap in `VECTOR_SOURCE` only).
-- **Stopping rule:** closes on a dated pass of the parked live-GIS steps above, or a failed step filed as a recurrence on B2018608.
+Sandbox-proven at dpr 2 against a SYNTHETIC OpenMapTiles fixture (`ui-audit/verify-vector-basemap.mjs`, 28/28); the sandbox cannot reach `tiles.openfreemap.org`, so the **real source, its CORS headers and the real map look are unverified**. **Steps** (planyr.io, read the served chunk hash in the same observation; `node ui-audit/verify-vector-basemap.mjs https://planyr.io --live` runs the mechanical half):
+1. Open `/food` fresh (clear `planyr:food:basemap`) at Houston metro zoom, and the Site tab's Map at the same zoom. **Expect:** /food opens on **Site Plan** and looks IDENTICAL to the Site map — satellite + Planyr's clean white city names, NO road lines. Zoom in past parcel zoom on both: clean thin roads + names appear on both at the same zoom; no "Crisp road labels unavailable" notice (if it shows, OpenFreeMap was blocked/CORS-refused — file that on B2018608).
+2. Tap **Hybrid** on /food at metro zoom, then neighbourhood zoom. **Expect:** freeways/major roads and place names at metro, no edge-to-edge bands; local streets only at neighbourhood zoom; road names follow the road line; no two labels overlap; no heavy black outlines; the aerial is slightly toned.
+3. Pan and zoom (wheel + buttons). **Expect:** labels stay glued to the aerial through the animation; Food pins sit above labels; no blank map after a search jump.
+4. Switch between Site Plan and Hybrid and reload. **Expect:** the choice persists; switching never blanks the map.
+5. Site tab → Map view, Layers → Road names slider (close zoom). **Expect:** the slider fades the roads; parcels / FEMA / draw tools still paint above; at metro zoom still no road lines.
+6. Open a plan, File → Download PDF. **Expect:** the aerial in the PDF is NOT darkened or desaturated.
+7. Look along tile joins at fractional zoom on a 2x display. **Expect:** no light hairlines.
+8. Desktop: the credit reads "…OpenFreeMap © OpenMapTiles data © OpenStreetMap", fully visible beside (not under) the ? button; the "Loading imagery…" pill never overlaps the zoom control.
+- **Stopping rule:** closes on a dated pass of 1–8, or a failed step filed as a recurrence on B2018608.
 
 ### V1441200 — B2016112: pinching Map Finder on a real phone settles exactly where the fingers stop `Blocker: real-data`
 
