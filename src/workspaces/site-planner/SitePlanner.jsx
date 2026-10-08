@@ -10535,6 +10535,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // included — releasing device + cloud together or neither, and tell the user when a sibling still holds it.
   const releaseOverlayAssets = async (o) => {
     try {
+      // Tell the user NOW which sibling still holds it (the bytes themselves wait out the undo grace below).
+      const gid = groupIdOfThisPlan();
+      if (gid && isCloudActive() && supabase) {
+        const seen = await fetchSiblingPlans(supabase, gid, siteId);
+        if (seen.ok) {
+          setSibState({ status: "ok", plans: seen.plans, error: null });
+          const still = siblingsStillHolding(o, seen.plans, siteId);
+          if (still.length) flashWarn(`Removed from ${planLabel}. Still on ${still.join(", ")}.`, 6000);
+        }
+      }
       // Grace window: bytes go only after the user can no longer Ctrl+Z the removal, and never if it came back.
       await new Promise((r) => setTimeout(r, 30000));
       if (stateRef.current.sheetOverlays.some((x) => x.id === o.id)) return;
@@ -10571,8 +10581,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       reportClientEvent("overlay-asset-retained", "kept a source file another plan still references", {
         siteId, overlayId: o.id, kept: kept.map((k) => ({ what: k.what, reason: k.reason, heldBy: k.heldBy })),
       });
-    const still = siblingsStillHolding(o, sibs, siteId);
-    if (still.length) flashWarn(`Removed from ${planLabel}. Still on ${still.join(", ")}.`, 6000);
   };
   const removeOverlay = (id) => {
     const o = sheetOverlays.find((x) => x.id === id);
