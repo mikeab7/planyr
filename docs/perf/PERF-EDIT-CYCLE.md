@@ -208,3 +208,17 @@ automated multi-device test traffic, not a person. Only two are editing sessions
 (31.7 s active, 18 jank frames, 10 long tasks, worst 337 ms) and the 20:54:49Z manual row analysed above.
 **Not the answer to V1599664 step 3:** that capture is build `a7f43c3` (2026-10-06 22:39Z), which predates #2157 (`65ac8db`,
 2026-10-08), so it says nothing about whether B2186144's zoom freeze is gone.
+
+## 7. B2165120 — the last whole-library write is gone (one device-storage entry per plan)
+
+§6 left one native `setItem` of the whole-library blob per edit (30–60 ms at 3–4 MB, ~290 ms flush spikes) because removing it needs a storage-layout change. That change is `lib/planStore.js` (header + `docs/DATA.md` §2 inv. 17). **Measured with `npm run perf:planstore` — the same harness, same build, same plans, only the layout toggled** (the old layout is planStore's kill switch; real pointer drags on the owner's real plan; filler plans sized to his real median; 12 edits per arm):
+
+| plans on device | library | per-plan layout: KB written per edit | old layout: KB written per edit | old layout: median `setItem` |
+|---:|---:|---:|---:|---:|
+| 5 | 133 KB | **36.2** | 134.1 | 1.1 ms |
+| 50 | 439 KB | **36.2** | 440.2 | 3.9 ms |
+| 150 | 1,116 KB | **36.2** | 1,116.9 | 10.7 ms |
+
+Flat at 36.2 KB (the edited plan's own entry plus a ~60-byte index; two writes) against a write that is the whole library and grows with it. The harness is VOID, never green, if the per-plan arm did not actually run per-plan (`layoutObserved` + plan-entry write counts) or the old arm fails to reproduce.
+
+**⛔ What this did NOT show, and why:** the owner's own 3.88 MB device cannot be reproduced here as a per-plan arm — the split needs the library's size again in free localStorage beside the kept original, and Chromium's cap is ~5.2M characters (measured), so a 2.9 MB store plus its copy does not fit and the build refuses the split by design (reason `headroom`, B2200385). That refusal is the correct behaviour and it is also the finding: whether the speed-up reaches his device is read from `client_errors` after his next load.
