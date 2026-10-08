@@ -181,3 +181,21 @@ describe("registry + layers", () => {
     expect(LAYERS_BY_ID.jur_etj.noEquivalentIn.GA).not.toMatch(/etj/i);
   });
 });
+
+describe("live-recheck defects (V1416048 steps 3/7)", () => {
+  it("the badge hover's Source line names Georgia publishers on a Georgia site, never Texas ones or ETJ", async () => {
+    const m = await import("../src/workspaces/site-planner/lib/georgiaJurisdiction.js");
+    expect(m.jurisdictionSourceName("GA")).toMatch(/Georgia/);
+    expect(m.jurisdictionSourceName("GA")).not.toMatch(/Tx|ETJ|H-GAC/i);
+    expect(m.jurisdictionSourceName("TX")).toBe(m.TX_JURISDICTION_SOURCE_NAME);
+    expect(m.jurisdictionSourceName(undefined)).toBe(m.TX_JURISDICTION_SOURCE_NAME);
+  });
+  it("every Texas jurisdiction row states why it is not drawn on a Georgia site, naming the Georgia row", () => {
+    for (const id of ["jur_county", "jur_city", "jur_etj"]) {
+      const why = LAYERS_BY_ID[id].noEquivalentIn && LAYERS_BY_ID[id].noEquivalentIn.GA;
+      expect(why, id).toBeTruthy();
+    }
+    expect(LAYERS_BY_ID.jur_county.noEquivalentIn.GA).toMatch(/Georgia/);
+    expect(LAYERS_BY_ID.jur_city.noEquivalentIn.GA).toMatch(/Georgia/);
+  });
+});
