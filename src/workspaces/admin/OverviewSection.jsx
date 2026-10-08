@@ -59,7 +59,7 @@ export default function OverviewSection({ go }) {
             <Tile testid="tile-active7" label="Active, 7 days" value={stats.active7} hint="signed in or edited" onClick={() => go("users")} />
             <Tile testid="tile-active30" label="Active, 30 days" value={stats.active30} hint="signed in or edited" onClick={() => go("users")} />
             <Tile testid="tile-signups" label="New sign-ups, 7 days" value={stats.newSignups7} hint={scope} onClick={() => go("users")} />
-            <Tile testid="tile-support" label="Open support" value={openSupport} hint={openSupport ? "waiting on you" : "nothing waiting"} tone={openSupport ? "warn" : undefined} onClick={() => go("support")} />
+            <Tile testid="tile-support" label="Open support" value={openSupport} hint={`${openSupport ? "waiting on you" : "nothing waiting"}${hideInternal && d.support.hiddenOpen ? `, excl. ${d.support.hiddenOpen} internal/test` : ""}`} tone={openSupport ? "warn" : undefined} onClick={() => go("support")} />
             <Tile testid="tile-errors" label="Error groups, 24 h" value={errors24.length} hint={`excl. ${d.errors7.issues.deploy.occurrences} deploy reloads (7 d)`} tone={errors24.length ? "danger" : undefined} onClick={() => go("issues")} />
           </div>
           <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))" }}>
