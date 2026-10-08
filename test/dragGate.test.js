@@ -161,7 +161,7 @@ describe("NEW-1: a POINT drag opts out of the rebase and stays under the pointer
 
   it("the planner opts every vertex layer and the road end out, and nothing else", () => {
     const optedOut = DRAG_STARTS.filter((d) => /rebase: false/.test(d.literal)).map((d) => d.mode).sort();
-    expect(optedOut).toEqual(["easeVertex", "elVertex", "measureVertex", "mkVertex", "roadEnd", "roadVtx", "vertex"]);
+    expect(optedOut).toEqual(["easeLabelRot", "easeVertex", "elVertex", "measureVertex", "mkVertex", "roadEnd", "roadVtx", "vertex"]);
   });
 });
 

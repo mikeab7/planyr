@@ -18,8 +18,9 @@ import { recordPinchGesture } from "../../shared/telemetry/gestureTelemetry.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
 import { createOperationTracker, undoOwnership, undoRiskEnvelope, groupRowsIntoOperations, describeOperation } from "./lib/operationEnvelope.js";
 import { planDelete } from "./lib/deletePlan.js";
-import { focusScope, resolveKeyEntry, keyScopeVerdict, shouldHintRefusal, SCOPE_GUARD_HINT } from "./lib/keyContract.js";
+import { SCOPE, focusScope, resolveKeyEntry, keyScopeVerdict, shouldHintRefusal, SCOPE_GUARD_HINT } from "./lib/keyContract.js";
 import { touchLatch, touchFactsOf, TOUCH, isTextControl } from "../../shared/keyboard/keyScope.js";
+import { imageFileFromClipboard, pastedImageName } from "./lib/pasteImage.js"; // NEW-1 — Ctrl+V a clipboard image as an overlay
 import { rowsToModel, KIND_TO_FIELD, foldNeverSyncedLocal, foldJournal, reconcileSeedRows } from "./lib/elementRows.js";
 import { writeJournal, readJournal, clearJournal, sweepJournals, journalSessionId } from "./lib/elementJournal.js";
 import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
@@ -59,7 +60,7 @@ import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFil
 import { isDwgFile, convertDwgToDxf } from "./lib/convertClient.js";
 import { uploadOverlayFile, downloadOverlayBytes, downloadOverlayDataUrl, fetchOverlayBytes, fetchOverlayDataUrl, deleteOverlayObject, probeOverlayObject, MAX_BYTES as OVERLAY_MAX_BYTES } from "./lib/overlayStorage.js";
 import { fetchSiblingPlans, foreignOverlaysFor, planForeignCopy, siblingPlansAsRefs, siblingsStillHolding, identityKey as overlayIdentityKey } from "./lib/siblingOverlays.js";
-import { ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale, SCALE_PRESETS, feetPerInchForPreset, matchScalePreset, feetPerInchFromPair, PAGE_UNITS, REAL_UNITS } from "../../shared/overlay/overlayScale.js";
+import { ftPerPointForScale, chooseOverlayScale } from "../../shared/overlay/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, imagePointToWorld, visibleFrame, visibleCenterWorld, anchorVisibleCentre } from "../../shared/overlay/overlayPlacement.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, layerVintage, identifyOverlaysAt, rasterIdentifyLayers } from "./lib/layers.js";
@@ -146,6 +147,8 @@ const SetLocationDialog = lazy(() => import("./components/SetLocationDialog.jsx"
 const RoadCrossSectionDialog = lazy(() => import("./components/RoadCrossSectionDialog.jsx"));
 // NEW-1 (B1838704) — the OVERLAYS panel's visual Crop… (rectangle + polygon). Opened rarely.
 const OverlayCropDialog = lazy(() => import("./components/OverlayCropDialog.jsx"));
+// NEW-1 (2026-10-08, Overlays redesign) — the panel body is lazy: it only exists once the Overlays tab is opened, and a static import put ~12 KB on the Site route's critical path (perf budget bundle.siteRouteJsBytes).
+const OverlaysPanel = lazy(() => import("./components/OverlaysPanel.jsx"));
 /* NEW-1 / NEW-3 — the Parcel panel's record body, lazily loaded for exactly the reason the appraisal
  * panels above are: it renders only inside the Parcel panel, only for a selected lot, and the Site
  * route's largest chunk has no headroom to spend on code most sessions never reach. */
@@ -364,12 +367,14 @@ import {
   bandLayout, bandStripeMarksWithWidth, BAND_FILL_TOKEN, BAND_FILL_OPACITY, designatedRowFt, rowMarginFt, rowWidth,
   XSEC_BAND_FILL_MIN_PX, XSEC_STRIPE_MIN_PX,
 } from "./lib/roadCrossSection.js";
-import { placeEasementLabel, AREA_FONT_PX } from "./lib/easementLabelPlacement.js";
+import { AREA_FONT_PX } from "./lib/easementLabelPlacement.js";
+import { resolveEasementLabel, pullOf, withPull, withoutPull, snapLabelAngle, showAreaOn, normDeg } from "./lib/easementLabelPull.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF, stallStripesExplicit, segmentsPath, featureNameLabelVisible, featureNameFontPx, featureExtentFt } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { calloutStyle } from "./lib/calloutStyle.js";
-import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand, isPinnedMapReference } from "./lib/overlayOrder.js";
+import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand, isPinnedMapReference, moveOverlayStep, dropOverlay } from "./lib/overlayOrder.js";
+import { scaledPatch } from "./lib/overlayPanelModel.js";
 import { hasCrop, cropClipShapeScreen, cropTrimFeet, cropFromTrimFeet, cropKind, cropEditBlock, normalizeCropShape, recropForRaster } from "../../shared/overlay/overlayCrop.js";
 import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerialVisibility.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, dockAxisOf, healDockAxes, withDockAxis, dockSideCompassLabel } from "./lib/dockZones.js";
@@ -1509,58 +1514,23 @@ const DEFAULT_SETTINGS = {
   drainage: {}, // { drainsToHcfcdChannel, authorityId, lastCheck }
 };
 
-// Eye / eye-off icons for the per-overlay visibility toggle (B277) — inline SVG so
-// the show/hide affordance renders crisply and identically everywhere (the standard
-// layers-UI pattern: Bluebeam/ArcGIS/Photoshop). currentColor lets the button tint them.
-const EyeIcon = () => (
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
-  </svg>
-);
-const EyeOffIcon = () => (
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" />
-  </svg>
-);
-// Lock / Unlock / Remove icons — inline SVG (B574) so the overlay header buttons share the eye
-// icon's exact metrics instead of mixing emoji (🔒/✕) whose glyph boxes never matched.
-const LockIcon = () => (
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
-  </svg>
-);
-const UnlockIcon = () => (
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 7.5-1.9" />
-  </svg>
-);
-const XIcon = () => (
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" />
-  </svg>
-);
-// Compact number formatting for the scale picker (B574–B578). trimNum: a field value without
-// trailing-zero noise (0.125 → "0.125", 1 → "1"). fmtScaleNum: the "1″=X′" readout (integer when
-// near-integer, else one decimal — so an architectural 3/4″=1′ shows 1.3, not a misleading 1).
 // NEW-1 (phone-chrome-parity pass) — an alpha-blended variant of a theme HEX token (never a raw
 // literal — the mobile edge tabs read PAL.chrome through this so the slight see-through reads
 // correctly in both themes instead of a fixed rgba() that would go wrong in one of them).
-// ⛔ Kept BEFORE `fmtScaleNum`, not after — `hiddenContentReads.js`'s audit sweep attributes a
-// module-scope binding's "body" from its own line to the NEXT module-scope binding, and
-// `export default function SitePlanner` doesn't match that sweep's pattern (`export default`,
-// not `export const/function`) — so whichever module-scope const sits LAST before it silently
-// swallows the sweep's attribution for the entire component as its own "body" (see
-// `fmtScaleNum`'s own DECLARATIONS entry for why that name, specifically, carries that
-// documented quirk). Adding a new module-scope const AFTER it would inherit that role instead —
-// see test/hiddenContentReads.test.js's "stale declaration" guard, which caught exactly this.
+// ⛔ NEW-1 (Overlays redesign): this is now the LAST module-scope const before the component (the scale
+// formatters `trimNum`/`fmtScaleNum` that used to hold that slot went with the old panel). `hiddenContentReads.js`'s
+// audit sweep attributes a module-scope binding's "body" from its own line to the NEXT module-scope binding, and
+// `export default function SitePlanner` doesn't match that sweep's pattern (`export default`, not `export
+// const/function`) — so whichever module-scope const sits LAST before it silently swallows the sweep's
+// attribution for the entire component as its own "body" (see `hexA`'s own DECLARATIONS entry). Adding a new
+// module-scope const AFTER it would inherit that role instead — see test/hiddenContentReads.test.js's "stale
+// declaration" guard, which caught exactly this.
 const hexA = (hex, a) => {
   const h = String(hex).replace("#", "");
   const n = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
   const r = parseInt(n.slice(0, 2), 16), g = parseInt(n.slice(2, 4), 16), b = parseInt(n.slice(4, 6), 16);
   return `rgba(${r},${g},${b},${a})`;
 };
-const trimNum = (n) => String(Math.round(n * 1000) / 1000);
-const fmtScaleNum = (n) => { const r = Math.round(n * 10) / 10; return Number.isInteger(r) ? String(r) : r.toFixed(1); };
 
 export default function SitePlanner({ active = true, siteId = null, overlays, setOverlays, cloud = null, layerStatus = {}, setLayerStatus, onBackToMap, onGoDashboard, onSelectOrg, sites = [], onOpenSite, onNewSite, onNewPlanSameParcel, onDuplicateSite, onDeletePlan, onRenameSite, onRenamePlan, onSiteDropped, onSiteSaved, shellModule, onShellSwitch, onOpenReviewInDocReview, authControl, accountActive = false,
   backgroundPushFailed = false, backgroundPushDetail, onRetryBackgroundPush } = {}) {
@@ -2365,9 +2335,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Transient editor state for the ONE expanded overlay row (B575 opacity field draft + B576 scale
   // picker mode/paired fields). Keyed by overlay id; `null` = follow the overlay's stored values.
   // Reset whenever the expanded overlay changes so a fresh row derives its display from the model.
-  const [ovEdit, setOvEdit] = useState(null);           // { id, opacityText?, scaleMode?, page?, pageUnit?, real?, realUnit? } | null
-  const setOvEditFor = (id, patch) => setOvEdit((cur) => ({ id, ...(cur && cur.id === id ? cur : {}), ...patch }));
-  useEffect(() => { setOvEdit(null); }, [selOverlay]); // a different row expands → drop the previous row's draft
+  const [ovRowMenu, setOvRowMenu] = useState(null);      // NEW-1 — id of the overlay whose row ⋯ menu is open
+  const [ovRenaming, setOvRenaming] = useState(null);      // NEW-1 — id of the overlay being renamed inline
+  const [ovPageFocus, setOvPageFocus] = useState(0);        // NEW-1 — bumped by ⋯ → Change page… to focus the open row's page stepper
+  useEffect(() => { setOvRowMenu((m) => (m === selOverlay ? m : null)); setOvRenaming((r) => (r === selOverlay ? r : null)); }, [selOverlay]);
+  // a menu / rename whose row no longer exists (undo of a duplicate, a remove) must not wait to reappear on redo
+  useEffect(() => { if (ovRowMenu && !sheetOverlays.some((x) => x.id === ovRowMenu)) setOvRowMenu(null); if (ovRenaming && !sheetOverlays.some((x) => x.id === ovRenaming)) setOvRenaming(null); }, [sheetOverlays, ovRowMenu, ovRenaming]); // a different row expands → drop the previous row's menu / rename
   // B912 — the highlighted parcel side belongs to the currently-selected parcel only; drop it whenever
   // the parcel selection changes or clears (covers Escape + background deselect + switching parcels) so
   // a stale side highlight can't linger on another parcel. Same-parcel edge clicks don't change the id.
@@ -2379,7 +2352,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [overlayBusy, setOverlayBusy] = useState(false);
   // Drag-and-drop affordance for the site-plan overlay (B445). Two independent hover flags:
   // the left References panel dropzone, and a full-canvas "drop to place" hint.
-  const [overlayDropOver, setOverlayDropOver] = useState(false);
   const [canvasDropOver, setCanvasDropOver] = useState(false);
   // B736 — dragenter/dragleave DEPTH COUNTERS (one per dropzone). dragenter/dragleave bubble,
   // so the child <svg>'s own drag events must not flip the highlight off mid-hover; the highlight
@@ -2387,7 +2359,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // exit (the old currentTarget===target guard missed that case). Refs, not state — read via
   // .current inside the window listeners with no stale-closure risk; forced to 0 on drop/reset.
   const canvasDragDepth = useRef(0);
-  const overlayDragDepth = useRef(0);
   // B556 — a DELIBERATE delete must leave a tombstone (`deletedIds`), the same invariant
   // removeOverlay/B276 already follow. WITHOUT it two things break: (1) the B459 thin-clobber guard
   // sees ≥2 items vanish with no tombstone to explain them and FALSELY rejects the save as an
@@ -2402,8 +2373,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!add.length) return;
     setDeletedIds((d) => { const s = new Set(d); for (const x of add) s.add(x); return s.size === d.length ? d : [...s]; });
   };
-  const overlayFileRef = useRef(null);
   const reAddFileRef = useRef(null);                    // B784 — always-mounted picker for re-adding a missing overlay's file
+  const addOverlayFileRef = useRef(null);               // NEW-1 — latest addOverlayFile, for the window paste listener
+  const keyPasteTimerRef = useRef(null);                // NEW-1 — Ctrl+V keydown defers the INTERNAL paste one tick so a clipboard image can win
   const reAddIdRef = useRef(null);                      // B784 — id of the overlay a re-add picker will replace in place
   const overlayDocs = useRef(new Map());                // id -> live PDFDocumentProxy (session-only, for the page picker)
   /* NEW-5(ii) — SHORTER LIFETIMES FOR THE PDF PROXIES, WITH RE-OPEN MADE TRANSPARENT FIRST.
@@ -2500,6 +2472,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Delete-key target + emphasis); `vtxMenu` = the portal-mounted Add/Delete-control-point
   // context menu; `insHint` = the transient candidate-insertion dot; `shiftHeld` arms + emphasizes it.
   const [selVtx, setSelVtx] = useState(null);   // {layer, id, index}
+  const [easeLabelSel, setEaseLabelSel] = useState(null); // B-NEW-1 — id of the easement whose LABEL (not its strip) is the selection
   const [vtxMenu, setVtxMenu] = useState(null); // {mode:"vertex"|"edge", layer, id, index, ptFeet?, canDelete?, x, y}
   const [insHint, setInsHint] = useState(null); // {x,y} screen px (snapped to the nearest edge point)
   const [shiftHeld, setShiftHeld] = useState(false);
@@ -2604,9 +2577,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // component-scope and stable, so deps stay [] with no stale-closure risk.
     const resetAll = () => {
       canvasDragDepth.current = 0;
-      overlayDragDepth.current = 0;
       setCanvasDropOver(false);
-      setOverlayDropOver(false);
       setDeedDrag(false);
     };
     // True ONLY when the drag actually left the window — not an in-page element move. In-page
@@ -5132,7 +5103,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     JSON.stringify({ p: s.parcels, e: s.els, m: s.measures, c: s.callouts, k: s.markups }) +
     // B848736 — the aerial backdrop is now just a sheetOverlays record (bottom-pinned), so its
     // position/scale/lock ride the SAME per-item signature below; there is no second field to sign.
-    "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${o.x},${o.y},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0},${o.visible === false ? 0 : 1},${o.aboveParcel === true ? 1 : 0},${o.crop ? JSON.stringify(o.crop) : ""}`).join(";") || "no") + // NEW-2: aboveParcel is in the signature so promoting a reference over the plan is its own undo frame (like `visible`). RC-8: no Math.round — a sub-foot overlay nudge must be a distinct undo frame. NEW-1 (B1838704): `crop` too — without it the history deduped every crop edit as a no-op, so neither the Crop… tool NOR the older B719779 trim fields were ever undoable (measured: Undo stayed disabled after a crop)
+    "|" + ((s.sheetOverlays || []).map((o) => `${o.id}:${o.x},${o.y},${o.ftPerPx},${o.rotation},${o.opacity},${o.locked},${o.page},${o.src ? o.src.length : 0},${o.visible === false ? 0 : 1},${o.aboveParcel === true ? 1 : 0},${o.crop ? JSON.stringify(o.crop) : ""},${o.name || ""},${o.unscaled === true ? 1 : 0},${o.knockout === false ? 0 : 1}`).join(";") || "no") + // NEW-2: aboveParcel is in the signature so promoting a reference over the plan is its own undo frame (like `visible`). RC-8: no Math.round — a sub-foot overlay nudge must be a distinct undo frame. NEW-1 (B1838704): `crop` too — without it the history deduped every crop edit as a no-op, so neither the Crop… tool NOR the older B719779 trim fields were ever undoable (measured: Undo stayed disabled after a crop)
     "|O:" + (s.origin ? `${s.origin.lat.toFixed(9)},${s.origin.lon.toFixed(9)}` : "none") + // NEW-1 — the geo anchor, so "Set location" / a placement nudge is its own undo frame
     "|L:" + overridesSig(s.layerOverrides) + // NEW-1 — GIS Layers-panel visibility set, so a layer toggle is a distinct, undoable frame (matches sheetOverlays.visible)
     "|A:" + aboveSig(s.layerAbove); // NEW-1 — …and which layers are LIFTED above the plan, so "Show above plan" is its own undoable frame too
@@ -5173,6 +5144,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     resize: "resize", edgeResize: "resize", mkResize: "resize", ovScale: "resize", calloutResize: "resize",
     vertex: "resize", elVertex: "resize", measureVertex: "resize", mkVertex: "resize", roadEnd: "resize", roadVtx: "resize", easeVertex: "resize",
     rotate: "rotate", mkRotate: "rotate", ovRotate: "rotate", calloutRotate: "rotate",
+    easeLabelMove: "move", easeLabelRot: "rotate",
   };
   const pushHistory = (kind = "edit") => { opTrackerRef.current.beginOperation(kind); lastPushAtRef.current = Date.now(); histRef.current.push(stateRef.current); notePerfEdit(); touchHist(); };
   /* ⛔ NEW-5 — "CAN I UNDO?" IS ASKED OF THE DOCUMENT, ONCE PER REAL CHANGE.
@@ -7055,6 +7027,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return () => { window.removeEventListener("pointerdown", onDown, true); window.removeEventListener("focusin", onFocusIn, true); };
   }, []);
 
+  /* ------------ NEW-1 — paste a clipboard image (screenshot) as a new overlay ------------
+   * Goes through addOverlayFile — the SAME path as "Add overlay" — so storage, undo, the panel row and
+   * cross-plan offering are identical. Never hijacks a text field / slider / dropdown (same focusScope the
+   * keyboard uses); a text-only or empty clipboard is a silent no-op and the Ctrl+V keydown's internal paste
+   * runs as before. */
+  useEffect(() => {
+    const onPaste = (e) => {
+      if (!active) return;
+      const file = imageFileFromClipboard(e.clipboardData);
+      if (!file) return;
+      const t = document.activeElement;
+      const tgt = e.target && e.target.nodeType === 1 ? e.target : null;
+      const canvasEl = wrapRef.current || svgRef.current;
+      const editable = (n) => !!n && (n.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(n.tagName));
+      if (editable(tgt) || editable(t)) return;
+      const scope = focusScope({
+        tag: t ? t.tagName : null, type: t ? t.type : null, isContentEditable: !!(t && t.isContentEditable),
+        insideCanvas: !!(t && canvasEl && (canvasEl === t || canvasEl.contains(t))),
+        lastTouchedCanvas: canvasTouchRef.current === TOUCH.CANVAS,
+      });
+      if (scope !== SCOPE.CANVAS) return;
+      e.preventDefault();
+      clearTimeout(keyPasteTimerRef.current); keyPasteTimerRef.current = null; // the image wins — no element paste on top
+      const name = pastedImageName((stateRef.current.sheetOverlays || []).map((o) => o.name));
+      addOverlayFileRef.current?.(file, null, name);
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [active]);
+
   /* ------------ keyboard ------------ */
   useEffect(() => {
     const onKey = (e) => {
@@ -7102,7 +7104,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // its own path because a backdrop copy has to clone the raster payload, not just geometry.
       if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) { if (hasCopyableSel()) { e.preventDefault(); copySel(); } else if (selOverlay) { e.preventDefault(); copyOverlay(selOverlay); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "x" || e.key === "X")) { if (hasCopyableSel()) { e.preventDefault(); cutSel(); } return; }
-      if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) { if (hasCanvasClip()) { e.preventDefault(); pasteClip(); } else if (hasOverlayClip()) { e.preventDefault(); pasteOverlay(); } return; }
+      /* NEW-1 — Ctrl+V: a clipboard IMAGE wins over the internal element/overlay clipboard. The browser's `paste`
+       * event (below) is what can see the clipboard, and it fires in the same task as this keydown's default
+       * action — so we do NOT preventDefault here and run the internal paste one tick later, unless the paste
+       * event found an image and cancelled it (no double-fire). No image → identical behaviour, one tick late. */
+      if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) {
+        if (hasCanvasClip() || hasOverlayClip()) {
+          clearTimeout(keyPasteTimerRef.current);
+          keyPasteTimerRef.current = setTimeout(() => { keyPasteTimerRef.current = null; if (hasCanvasClip()) pasteClip(); else if (hasOverlayClip()) pasteOverlay(); }, 0);
+        }
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) { const gid = selectedGroupId(); if (gid) { e.preventDefault(); duplicateGroup(gid); } else if (multi.length > 1) { e.preventDefault(); multi.filter((m) => m.kind === "el").forEach((m) => duplicateEl(m.id)); } else if (sel?.kind === "el") { e.preventDefault(); duplicateEl(sel.id); } else if (selOverlay) { e.preventDefault(); duplicateOverlay(selOverlay); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "g" || e.key === "G")) { e.preventDefault(); if (e.shiftKey) ungroupSel(); else groupSel(); return; } // B261: Group / Ungroup
       // B820 — Arrange (z-order) chords, matching Document Review / Bluebeam. e.code (not e.key)
@@ -8517,6 +8529,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       featureDoubleAction({ kind: "markup", id }, e);   // NEW-2 — ONE decision, shared with the root dblclick
       return;
     }
+    if (easeLabelSel) setEaseLabelSel(null); // NEW-1 — a press on the strip selects the easement, not its label
     // B740 — Shift (or Ctrl/⌘) TOGGLES the markup in/out of the multi-selection (see startMoveEl).
     if (hasSelMod(e)) {
       const mods = { toggle: true, add: false };
@@ -8692,6 +8705,61 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setSelVtx({ layer: "ease", id, index });
     drag.current = { mode: "easeVertex", id, index, ...startGate(ev, { rebase: false }) };
     svgRef.current.setPointerCapture(ev.pointerId);
+  };
+  /* ------------ NEW-1 — an easement's LABEL as its own object (pull out · move · rotate · snap back) ------------
+   * The label is stored ON the easement (`labelPull` = feet offset from the inline anchor + angle), so it
+   * follows every move/reshape of the strip, saves/syncs/undoes/duplicates with it, and dies with it. All
+   * geometry questions are answered by lib/easementLabelPull.js `resolveEasementLabel` — render, hit
+   * target, selection outline, rotate grip and these drag starters read the SAME answer. */
+  useEffect(() => { if (easeLabelSel && !(sel?.kind === "markup" && sel.id === easeLabelSel)) setEaseLabelSel(null); }, [sel, easeLabelSel]);
+  const easeAreaText = (m) => { const a = easementArea(m); return `${Math.round(a).toLocaleString()} SF · ${(a / SQFT_PER_ACRE).toFixed(2)} AC`; };
+  const easeLabelOf = (m) => {
+    if (!m || m.kind !== "easement") return null;
+    const txt = `${easementLabel(m)}${m.status === "proposed" ? " (proposed)" : ""}`;
+    return { txt, lab: resolveEasementLabel(m, txt, { labelPpf, basePx: EASE_LABEL_BASE_PX, toScreen: f2p, labelK, areaText: easeAreaText(m) }) };
+  };
+  // Press on the label. CHROME-NEVER-EATS-A-PRESS: an easement that is NOT yet selected treats its label
+  // as part of the strip (the press is forwarded to the strip's own handler, same double-tap key); only a
+  // selected easement's label is its own object.
+  const startEaseLabel = (e, id) => {
+    if (tool !== "select" || e.button !== 0) return;
+    const m = markups.find((x) => x.id === id);
+    if (!m) return;
+    const selected = sel?.kind === "markup" && sel.id === id && multi.length <= 1;
+    if (!selected) { startMoveMarkup(e, id); return; }
+    e.stopPropagation();
+    if (!m.locked && isDoubleTap(e, id, true)) { featureDoubleAction({ kind: "markup", id }, e); return; }
+    setEaseLabelSel(id);
+    if (m.locked) return;
+    const L = easeLabelOf(m)?.lab;
+    if (!L) return;
+    drag.current = { mode: "easeLabelMove", id, start: p2f(e.clientX, e.clientY), base: { x: L.x, y: L.y }, anchor: L.anchor, angle0: L.angle, ...startGate(e) };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
+  const startEaseLabelRotate = (e, id) => {
+    if (tool !== "select" || e.button !== 0) return;
+    e.stopPropagation();
+    const m = markups.find((x) => x.id === id);
+    const L = m && !m.locked ? easeLabelOf(m)?.lab : null;
+    if (!L) return;
+    drag.current = { mode: "easeLabelRot", id, centre: { x: L.x, y: L.y }, anchor: L.anchor, stripDeg: L.stripDeg, ...startGate(e, { rebase: false }) };
+    svgRef.current.setPointerCapture(e.pointerId);
+  };
+  const onEaseLabelContext = (e, id) => {
+    e.preventDefault(); e.stopPropagation();
+    if (!markups.some((m) => m.id === id)) return;
+    setSel({ kind: "markup", id }); setEaseLabelSel(id);
+    setParcelMenu(null); setOvMenu(null);
+    setMapMenu({ x: e.clientX, y: e.clientY, kind: "easeLabel", id });
+  };
+  const snapBackEaseLabel = (id) => {
+    if (!markups.some((m) => m.id === id && pullOf(m))) return;
+    pushHistory();
+    setMarkups((a) => a.map((m) => (m.id === id ? withoutPull(m) : m)));
+  };
+  const setEaseShowArea = (id, on) => {
+    pushHistory();
+    setMarkups((a) => a.map((m) => (m.id === id ? { ...m, showArea: !!on } : m)));
   };
   const startMoveCallout = (e, id, part, tipIndex = 0) => {
     if (tool !== "select" || e.button !== 0) return;
@@ -9041,6 +9109,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     deleteSel(target, { entry: "vtxMenu:wholeDelete" });
   };
   const onCanvasVtxContextCapture = (e) => {
+    // NEW-1 — an easement label has its own menu. An inline label sits ON the centerline, so without this
+    // the path-edge test below would answer "Add control point" for a right-click aimed at the label.
+    if (e.target && e.target.closest && e.target.closest("[data-easement-label-hit]")) return;
     const path = editablePath();
     if (!path) return;
     const fp = p2f(e.clientX, e.clientY);
@@ -9324,6 +9395,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (d.mode === "easeVertex") { // drag an easement's centerline/boundary vertex → re-offset the strip
       const sp = snapPt(fp);
       setMarkups((a) => a.map((m) => m.id === d.id ? setEasePath(m, easeEditPath(m).map((p, j) => (j === d.index ? sp : p))) : m));
+      return;
+    }
+    if (d.mode === "easeLabelMove") { // NEW-1 — drag an easement label off its strip (offset kept in feet from the inline anchor)
+      const dx = d.base.x + (fp.x - d.start.x) - d.anchor.x, dy = d.base.y + (fp.y - d.start.y) - d.anchor.y;
+      setMarkups((a) => a.map((m) => m.id === d.id ? withPull(m, { dx, dy, angle: d.angle0 }) : m));
+      return;
+    }
+    if (d.mode === "easeLabelRot") { // NEW-1 — free 360° rotation about the label centre, soft snap to level / plumb / the strip's angle
+      const raw = (Math.atan2(fp.y - d.centre.y, fp.x - d.centre.x) * 180) / Math.PI + 90; // the grip sits "above" the label
+      const sn = altSnapOffRef.current ? { angle: normDeg(raw) } : snapLabelAngle(raw, d.stripDeg);
+      setMarkups((a) => a.map((m) => m.id === d.id ? withPull(m, { dx: d.centre.x - d.anchor.x, dy: d.centre.y - d.anchor.y, angle: sn.angle }) : m));
       return;
     }
     if (d.mode === "mkResize") { // resize a rect/ellipse in its own (rotated) frame; opposite side fixed
@@ -10316,7 +10398,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B784 — `reuseId` re-imports a file for an EXISTING overlay (the "click to re-add" flow for one whose
   // Storage object went missing): it replaces that overlay's raster in place and preserves its transform
   // (position / scale / rotation / opacity), rather than dropping a brand-new overlay at view center.
-  const addOverlayFile = async (rawFile, reuseId = null) => {
+  const addOverlayFile = async (rawFile, reuseId = null, nameOverride = null) => {
     if (!rawFile) return;
     setOverlayBusy(true);
     try {
@@ -10350,19 +10432,31 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // B474 — cache the raster in IndexedDB so the saved record can stay off the ~5MB localStorage cap.
       const ovIdbKey = siteId ? `raster:${siteId}:overlay:${id}` : undefined;
       const ov = {
-        id, name: (prev && prev.name) || rawFile.name || file.name || "Site plan", src: r.src, imgW: r.imgW, imgH: r.imgH,
+        id, name: (prev && prev.name) || nameOverride || rawFile.name || file.name || "Site plan", src: r.src, imgW: r.imgW, imgH: r.imgH,
         page: r.page || 1, pageCount: r.pageCount || 1,
         x: c.x - (r.imgW * ftPerPx) / 2, y: c.y - (r.imgH * ftPerPx) / 2,
         ftPerPx, rotation: 0, opacity: 0.85, locked: false,
         detectedScale: r.detectedScale || null, sheet: r.sheet || null,
         kind: r.kind || null, unitsAssumed: !!r.unitsAssumed, unitsLabel: r.unitsLabel || null,
       };
+      // NEW-1 (Overlays redesign) — an overlay whose initial size came from the size-to-fit FALLBACK (no
+      // trusted scale note) is "not scaled" until a trace / match / typed scale says otherwise. ADDITIVE: only
+      // written when true; a trusted scale note (or a DXF, which has true units) leaves the field absent, and
+      // every overlay that already exists has no field → reads as scaled.
+      if (pick && !pick.trusted) ov.unscaled = true;
       // B784 — re-add: keep WHERE and HOW BIG the user had placed it (position / scale / rotation / opacity /
       // lock / visibility). The user may have calibrated ftPerPx via "Trace a length" — that's their work to keep.
       if (prev) {
         ov.x = prev.x; ov.y = prev.y; ov.ftPerPx = prev.ftPerPx;
         ov.rotation = prev.rotation || 0; ov.opacity = prev.opacity ?? 0.85;
         ov.locked = !!prev.locked; ov.visible = prev.visible; ov.knockout = prev.knockout;
+        // NEW-1 — the band and (when the raster is the same size) the crop and a DXF's confirmed units are the user's work too.
+        if (prev.aboveParcel === true) ov.aboveParcel = true;
+        if (prev.ftPerPxY) ov.ftPerPxY = prev.ftPerPxY;
+        if (prev.crop && prev.imgW === ov.imgW && prev.imgH === ov.imgH) ov.crop = prev.crop;
+        if (ov.kind === "dxf" && prev.unitsAssumed === false) ov.unitsAssumed = false;
+        // NEW-1 — the re-add keeps the user's scale WORK, so it keeps the "scaled" verdict that came with it (a traced overlay must not turn amber).
+        if (prev.unscaled === true) ov.unscaled = true; else delete ov.unscaled;
         ov.storageMissing = false; // healed — a fresh upload/idb stash follows below
       }
       pushHistory();
@@ -10402,6 +10496,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setOverlayBusy(false);
     }
   };
+  addOverlayFileRef.current = addOverlayFile; // NEW-1
   // B784 — open the file picker to re-add a specific overlay's missing file; the chosen file replaces
   // that overlay in place (transform preserved) via addOverlayFile(file, id). The picker input is
   // always-mounted (below the canvas) so this works whether or not the References panel is open.
@@ -10760,11 +10855,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (o.id !== id) return o;
       const cx = o.x + (o.imgW * o.ftPerPx) / 2, cy = o.y + (o.imgH * o.ftPerPx) / 2;
       const ftPerPx = ftPerPointForScale(S);
-      return { ...o, ftPerPx, x: cx - (o.imgW * ftPerPx) / 2, y: cy - (o.imgH * ftPerPx) / 2 };
+      return { ...o, ...scaledPatch(o), ftPerPx, x: cx - (o.imgW * ftPerPx) / 2, y: cy - (o.imgH * ftPerPx) / 2 };
     }));
   };
-  // Which scale-preset matches an overlay's current size (else null → the picker shows "Custom").
-  const overlayScalePreset = (o) => matchScalePreset(scaleForFtPerPoint(o.ftPerPx));
   // B73 fallbacks — calibrate by clicking the canvas. trace: 2 points on the drawing +
   // a real length → rescale (pinned at the first click). align: 2 points on the drawing
   // then the 2 matching points on the map → similarity (move + rotate + scale).
@@ -10783,7 +10876,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const patch = realFt > 0 && measuredFt > 0 ? scaleOverlayAbout(o, pts[0], realFt / measuredFt) : null;
         if (!patch) return;
         pushHistory();
-        setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, ...patch } : x)));
+        setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, ...patch, ...scaledPatch(x) } : x)));
       } });
     } else {
       // align: collect alternating drawing→map points (pairs); apply on demand (≥2 pairs)
@@ -10804,7 +10897,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setOvCalib(null);
     if (!patch) return;
     pushHistory();
-    setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, ...patch } : x)));
+    setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, ...patch, ...scaledPatch(x) } : x)));
     flashWarn(`Aligned to ${nPairs} point${nPairs > 1 ? "s" : ""} — fit residual ≈ ${Math.round(S.residual)}′.`, 5000);
   };
   const ovCalibMsg = () => {
@@ -18667,6 +18760,33 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return <g>{px.map((p, i) => vtxRect(`mkv${i}`, p, isSelVtx("markup", m.id, i), "move", (e) => startMarkupVertex(e, m.id, i)))}</g>;
   })();
 
+  // NEW-1 — the selected easement LABEL's outline + round rotate grip. Chrome, so it lives in the handle layer;
+  // positions are computed in screen px from the SAME resolver the label renders with.
+  const easeLabelHandles = (() => {
+    if (selHiddenNow || !easeLabelSel || sel?.kind !== "markup" || sel.id !== easeLabelSel || tool !== "select" || multi.length > 1) return null;
+    const m = markups.find((x) => x.id === easeLabelSel);
+    const L = m && m.kind === "easement" ? easeLabelOf(m)?.lab : null;
+    if (!L) return null;
+    const c = f2p({ x: L.x, y: L.y });
+    const th = (L.angle * Math.PI) / 180, cs = Math.cos(th), sn = Math.sin(th);
+    const at = (u, v) => ({ x: c.x + (u * cs - v * sn) * labelK, y: c.y + (u * sn + v * cs) * labelK });
+    const hw = L.halfW, hh = L.halfH;
+    const box = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([u, v]) => at(u, v));
+    const top = at(0, -hh), grip = at(0, -hh - 22 / labelK);
+    return (
+      <g data-easement-label-handles={m.id} data-export="skip">
+        <polygon points={box.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke={SEL_BLUE} strokeWidth={1.25} strokeDasharray="4 3" pointerEvents="none" />
+        {!m.locked && (
+          <>
+            <line x1={top.x} y1={top.y} x2={grip.x} y2={grip.y} stroke={SEL_BLUE} strokeWidth={1.25} pointerEvents="none" />
+            <circle data-easement-label-rotate={m.id} cx={grip.x} cy={grip.y} r={6} fill={SEL_HANDLE_FILL} stroke={SEL_BLUE} strokeWidth={1.5}
+              style={{ cursor: "grab" }} onPointerDown={(e) => startEaseLabelRotate(e, m.id)} />
+          </>
+        )}
+      </g>
+    );
+  })();
+
   /* ================= NEW-1 — THE ALWAYS-ON-TOP HANDLE LAYER =================================
    * A manipulation handle is CHROME, not content. It must render above every map layer and win
    * the hit test whenever the pointer is over it, whatever is drawn underneath — otherwise a
@@ -21600,6 +21720,63 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         handlers={parcelPanelH} taxTable={taxTable} taxSource={taxTable || !restored?.county || (origin.kind !== "county" && origin.kind !== "combined") ? null : { county: restored.county, lots: origin.kind === "combined" ? from : [pc], combined: origin.kind === "combined", idField: parcelIdField }} setbacks={setbacks} style={style} deedFrom={selectDeedOfGroup} idField={parcelIdField} addrField={parcelAddrField} />
     );
   };
+  /* NEW-1 (Overlays panel redesign) — ONE handler table for the module-scope OverlaysPanel. Every entry is
+     an EXISTING overlay function of this file (patchOverlay, applyOverlayScale, removeOverlay, …) — the panel
+     is a UI change, not a data change — except the three small additions the new menu needs (Zoom to, Size to
+     view, the reorder pair), each of which writes through the same history + sheetOverlays path. */
+  const zoomToOverlay = (id) => {
+    const o = sheetOverlays.find((x) => x.id === id);
+    if (!o || !size.w || !size.h) return;
+    const w = o.imgW * o.ftPerPx, h = o.imgH * (o.ftPerPxY || o.ftPerPx);
+    const c = { x: o.x + w / 2, y: o.y + h / 2 }, a = ((o.rotation || 0) * Math.PI) / 180;
+    const ex = Math.max(1, (Math.abs(w * Math.cos(a)) + Math.abs(h * Math.sin(a))) / 2), ey = Math.max(1, (Math.abs(w * Math.sin(a)) + Math.abs(h * Math.cos(a))) / 2);
+    const pad = framePad(size.w, size.h, 40);
+    const ppf = Math.max(0.02, Math.min(8, Math.min((size.w - pad * 2) / (ex * 2), (size.h - pad * 2) / (ey * 2))));
+    setView({ ppf, offX: size.w / 2 - c.x * ppf, offY: size.h / 2 - c.y * ppf });
+  };
+  // Resize this overlay to ~60% of the view and recentre it — and mark it NOT SCALED again, because the size
+  // is a guess again until it is traced / matched / typed.
+  const sizeOverlayToView = (id) => {
+    const o = sheetOverlays.find((x) => x.id === id);
+    if (!o || o.fromMap) return;
+    if (o.locked) { flashWarn("⚠ Unlock this overlay to resize it.", 4000); return; }
+    const f = Math.max(0.01, ((size.w / view.ppf) * 0.6) / Math.max(1, o.imgW));
+    const vc = p2fStatic(size.w / 2, size.h / 2);
+    patchOverlay(id, { ftPerPx: f, x: vc.x - (o.imgW * f) / 2, y: vc.y - (o.imgH * f) / 2, unscaled: true });
+  };
+  const overlayPanelHandlers = {
+    onSelect: (id) => { setSelOverlay(id); },
+    onToggleHide: (o) => { if (o.fromMap) setShowAerial((v) => !v); else patchOverlay(o.id, { visible: o.visible === false }); },
+    onPatch: patchOverlay,
+    onRemove: (o) => { removeOverlay(o.id); if (o.fromMap) setShowAerial(true); },
+    onStep: (id, dir) => { const next = moveOverlayStep(sheetOverlays, id, dir); if (next === sheetOverlays) return; pushHistory(); setSheetOverlays(next); },
+    onDropRow: (dragId, overId, side) => { const next = dropOverlay(sheetOverlays, dragId, overId, side); if (next === sheetOverlays) return; pushHistory(); setSheetOverlays(next); },
+    onSetBand: toggleOverlayBand,
+    onApplyScale: applyOverlayScale,
+    onTrace: (id) => { setSelOverlay(id); setOvCalib({ id, kind: "trace", pts: [] }); },
+    onMatch: (id) => { setSelOverlay(id); setOvCalib({ id, kind: "align", pts: [] }); },
+    onCalibCancel: () => setOvCalib(null),
+    onCalibApply: applyOvAlign,
+    onCrop: (id) => { setSelOverlay(id); setOvCropId(id); },
+    onResetCrop: (id) => setOverlayCrop(id, null),
+    onZoomTo: zoomToOverlay,
+    onSizeToView: sizeOverlayToView,
+    onCopy: copyOverlay,
+    onDuplicate: duplicateOverlay,
+    onAlignEdge: (id) => { setSelOverlay(id); setOvAlignBase(id); flashWarn("Click a parcel boundary to align this drawing parallel to it.", 6000); },
+    onSetPage: setOverlayPage,
+    onKnockout: setOverlayKnockout,
+    pageReady: overlayPageReady,
+    onRename: (id) => { setSelOverlay(id); setOvRenaming(id); },
+    onRenameDone: (id, name) => { setOvRenaming(null); if (name) patchOverlay(id, { name }); },
+    onChangePage: (id) => { setSelOverlay(id); setOvPageFocus((n) => n + 1); },
+    onMenu: setOvRowMenu,
+    onContext: onOverlayContext,
+    onAddFile: addOverlayFile,
+    onDropFile: (f, n = 1) => { if (f && (isPdfFile(f) || isDxfFile(f) || isDwgFile(f) || (f.type || "").startsWith("image/"))) { if (n > 1) flashWarn("Added the first file — one overlay is added at a time.", 6000); addOverlayFile(f); } },
+    sliderHistory,
+    pushHistory,
+  };
   const renderPanelBody = (_pid) => (<>
           {/* Overlays (B654; user-facing name via B966630; data model unified in B848736) — every
               backdrop the plan sits over, in ONE list, ONE add flow, and ONE shared calibration
@@ -21611,316 +21788,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               to this same list, through the same dropzone below. */}
           {_pid === "references" && (
           <Section>
-            {/* The whole block is a drop target (NEW-1): drop a PDF/image here or on the map,
-                or click to browse. Mirrors the Doc-Review FileBrowser dropzone pattern —
-                dashed border + accent highlight on hover, anti-flicker via currentTarget. */}
-            <div
-              onClick={() => { if (!overlayBusy) overlayFileRef.current?.click(); }}
-              onDragEnter={(e) => { if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return; e.preventDefault(); overlayDragDepth.current += 1; setOverlayDropOver(true); }}
-              onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) e.preventDefault(); }}
-              onDragLeave={(e) => { if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return; overlayDragDepth.current = Math.max(0, overlayDragDepth.current - 1); if (overlayDragDepth.current === 0) setOverlayDropOver(false); }}
-              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); overlayDragDepth.current = 0; setOverlayDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || isDxfFile(f) || isDwgFile(f) || (f.type || "").startsWith("image/"))) { if (fs.length > 1) flashWarn("Added the first file — one overlay is added at a time.", 6000); addOverlayFile(f); } }}
-              style={{ border: `2px dashed ${overlayDropOver ? PAL.accent : PAL.panelLine}`, borderRadius: 10, padding: 12, textAlign: "center", cursor: overlayBusy ? "default" : "pointer", background: overlayDropOver ? PAL.accentSoft : SURF_RAISED, transition: "border-color 120ms, background 120ms" }}>
-              <button style={{ ...btn(false), width: "100%" }} disabled={overlayBusy} onClick={(e) => { e.stopPropagation(); overlayFileRef.current?.click(); }}>{overlayBusy ? "Loading…" : "Add overlay (PDF / image / CAD)…"}</button>
-              <input ref={overlayFileRef} type="file" accept="application/pdf,image/*,.dxf,.dwg" style={{ display: "none" }} onChange={(e) => { addOverlayFile(e.target.files?.[0]); e.target.value = ""; }} />
-              <div style={{ fontSize: 11, color: PAL.muted, marginTop: 9, lineHeight: 1.5 }}>
-                {overlayDropOver ? <b style={{ color: PAL.accentText }}>Drop to add this overlay</b> : <>Drop a site-plan / survey PDF or image <b>here or on the map</b> — or browse. White paper is knocked out so the map shows through (per-sheet toggle below).</>}
-              </div>
-            </div>
-
-            {!sheetOverlays.length ? null : (
-              <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-                {/* B952 — map overlays live ONLY in the Site Planner and are a SEPARATE feature
-                    from Library documents: the two write to disjoint stores (overlays → the site
-                    model's sheetOverlays; Library files → doc_reviews/file_facts), with no bridge in
-                    either direction. A plain Library upload never creates an overlay here, and
-                    removing a Library file never removes one from the map. This one honest line keeps
-                    a user from expecting a Library delete to clear a map backdrop (the B952 report).
-                    B966630 — reworded the panel's old capitalized display name to "Overlays"; the
-                    independence claim is unchanged. */}
-                <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45 }}>
-                  Map overlays are managed here, separate from your Library documents — deleting a Library file won't remove an overlay from the map, and adding a Library file won't add one.
-                </div>
-                {/* NEW-2 — the list IS the stacking order, front-most first (the way every layers
-                    panel reads), so what draws over what is visible without opening a menu. */}
-                {sheetOverlays.length > 1 && (
-                  <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45 }}>Listed front to back — the top one draws over the others.</div>
-                )}
-                {overlayPanelOrder(sheetOverlays).map((o) => {
-                  const on = selOverlay === o.id;
-                  const zf = overlayOrderFlags(sheetOverlays, o.id);
-                  // B848736 — the pinned map reference keeps the OLD aerial's exact Hide/Remove
-                  // wiring: Hide drives the plan-level `showAerial` (it also stands down the live
-                  // basemap tiles — B688864), never its own `visible` field, and Remove clears the
-                  // same "hide" preference (B719778) so a future map-captured reference on this plan
-                  // isn't born invisible.
-                  const isAerialRow = !!o.fromMap;
-                  const hideOn = isAerialRow ? showAerial : o.visible !== false;
-                  const toggleHide = isAerialRow ? () => setShowAerial((v) => !v) : () => patchOverlay(o.id, { visible: o.visible === false });
-                  const removeRow = () => { removeOverlay(o.id); if (isAerialRow) setShowAerial(true); };
-                  return (
-                    <div key={o.id} data-testid={`reference-row-${o.id}`} data-reference-band={overlayBand(o)} data-reference-frommap={isAerialRow ? "1" : undefined} style={{ borderBottom: "1px solid var(--planner-border)", borderLeft: `2px solid ${on ? PAL.accent : "transparent"}`, padding: "9px 0 9px 8px" }}>
-                      {/* Flat panel (owner NEW-1): a list row divided by a rule — no card. The selected row keeps its accent as a left rule. */}
-                      {/* Filename gets its own full-width row (B578) and WRAPS instead of truncating, so a long
-                          sheet name is fully readable; the hide / lock / remove controls drop to their own row. */}
-                      <button style={{ ...chip, width: "100%", textAlign: "left", whiteSpace: "normal", overflowWrap: "anywhere", lineHeight: 1.35, borderColor: on ? PAL.accent : "var(--border-default)", color: on ? PAL.accent : PAL.ink }} title={isAerialRow ? `${o.name} — the map capture; always beneath everything else` : `${o.name} — right-click for Copy, Duplicate, z-order, Lock, Align to base`} onClick={() => setSelOverlay(on ? null : o.id)} onContextMenu={(e) => onOverlayContext(e, o.id)}>{o.name}</button>
-                      {/* Hide / lock / remove — one shared square icon style (B574) so the three render identically. */}
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
-                        <button style={{ ...iconBtn, color: hideOn ? PAL.ink : PAL.muted }} title={hideOn ? "Hide" : "Show"} onClick={toggleHide}>{hideOn ? <EyeIcon /> : <EyeOffIcon />}</button>
-                        <button style={iconBtn} title={o.locked ? "Unlock" : "Lock"} onClick={() => patchOverlay(o.id, { locked: !o.locked })}>{o.locked ? <LockIcon /> : <UnlockIcon />}</button>
-                        <button style={{ ...iconBtn, color: PAL.accent }} title="Remove" onClick={removeRow}><XIcon /></button>
-                        {/* B2066227 — the crop entry point rides the always-visible row. On a short window the
-                            expanded body's own Crop… sat below the fold of the scrolling panel. Same handler. */}
-                        {!isAerialRow && (() => {
-                          const why = cropEditBlock(o);
-                          return (
-                            <button style={{ ...chip, marginLeft: "auto", opacity: why ? 0.55 : 1 }} data-testid={`overlay-crop-open-row-${o.id}`} disabled={!!why}
-                              title={why || "Trim the logo band, title block and margins with a rectangle or a polygon — reversible, the full sheet is kept"}
-                              onClick={() => { setSelOverlay(o.id); setOvCropId(o.id); }}>{hasCrop(o) ? "Edit crop…" : "Crop…"}</button>
-                          );
-                        })()}
-                      </div>
-                      {on && (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>
-                          <label style={ovRow}><span style={{ width: 48 }}>Opacity</span>
-                            <input type="range" min={0.1} max={1} step={0.05} value={o.opacity ?? 1} style={{ flex: 1 }} {...sliderHistory((e) => { patchOverlay(o.id, { opacity: +e.target.value }, false); if (ovEdit && ovEdit.id === o.id) setOvEditFor(o.id, { opacityText: null }); })} />
-                            {/* Numeric percent alongside the slider (B575), two-way bound. While typing we hold a
-                                raw draft (so a half-typed value isn't clobbered); the slider + overlay update live;
-                                on blur the draft clears so the field follows the overlay again. Stored 0.1–1.0 ↔ 10–100%. */}
-                            <input type="number" min={10} max={100} step={5} aria-label="Overlay opacity percent" data-testid="overlay-opacity-pct"
-                              style={{ ...numInput, width: 54, textAlign: "right" }}
-                              value={(ovEdit && ovEdit.id === o.id && ovEdit.opacityText != null) ? ovEdit.opacityText : Math.round((o.opacity ?? 1) * 100)}
-                              onFocus={() => pushHistory()}
-                              onChange={(e) => { const txt = e.target.value; setOvEditFor(o.id, { opacityText: txt }); const n = Math.round(+txt); if (txt !== "" && Number.isFinite(n)) patchOverlay(o.id, { opacity: Math.min(1, Math.max(0.1, n / 100)) }, false); }}
-                              onBlur={() => setOvEditFor(o.id, { opacityText: null })} />
-                            <span style={{ fontSize: 11, color: PAL.muted }}>%</span>
-                          </label>
-                          {/* B848736 — the pinned map reference never rotates: it's placed true-to-scale
-                              and axis-aligned from the map capture, and rotating it would be exactly the
-                              kind of manual transform "Georeferencing survives" rules out. */}
-                          {!isAerialRow && (
-                          <label style={ovRow}><span style={{ width: 48 }}>Rotate</span>
-                            <RotationStepper value={o.rotation || 0} disabled={!!o.locked} disabledReason="Unlock this drawing to rotate it" data-testid="overlay-rotation"
-                              onCommit={(deg) => patchOverlay(o.id, { rotation: deg })}
-                              onStep={(d) => patchOverlay(o.id, { rotation: normalizeDeg((o.rotation || 0) + d) })} />
-                          </label>
-                          )}
-                          {/* Numeric width — kept ONLY for image overlays (B577). A PDF carries a `sheet`
-                              (intrinsic inches) so the scale picker below owns its sizing and Width is redundant;
-                              a raster (PNG/JPG) has no physical inch dimension, so the scale picker can't apply
-                              and this stays its one direct numeric size + ±10% nudge control. Excluded for the
-                              pinned map reference too — resizing it would fight its true-to-scale placement. */}
-                          {!o.sheet && !isAerialRow && (
-                            <label style={ovRow}><span style={{ width: 48 }}>Width</span>
-                              {/* onFocus pushes ONE history frame per width-edit session (patchOverlay runs
-                                  with hist=false so live typing doesn't flood the stack) — same coalescing as
-                                  the opacity number input above. Without it, retyping the width to rescale a
-                                  raster overlay recorded no undo frame even though ftPerPx IS in the snapshot. */}
-                              <input style={numInput} value={Math.round(o.imgW * o.ftPerPx)} onFocus={() => pushHistory()} onChange={(e) => { const v = +e.target.value; if (v > 0) patchOverlay(o.id, { ftPerPx: v / Math.max(1, o.imgW) }, false); }} />
-                              <span>ft</span>
-                              <button style={chip} title="Bigger" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx * 1.1 })}>＋</button>
-                              <button style={chip} title="Smaller" onClick={() => patchOverlay(o.id, { ftPerPx: o.ftPerPx / 1.1 })}>－</button>
-                            </label>
-                          )}
-                          {/* B747 — a DXF with no declared units ($INSUNITS = 0) was placed at assumed feet; flag it
-                              (never a silent guess). Verify with the Width control above or "Trace a length" below. */}
-                          {o.kind === "dxf" && o.unitsAssumed && (
-                            <div style={{ fontSize: 11, color: PAL.warnText, fontWeight: 600, lineHeight: 1.35 }}>
-                              ⚠ Units assumed: feet — verify. This DXF declares no units; confirm the Width above, or use “Trace a length”.
-                            </div>
-                          )}
-                          {o.pageCount > 1 && (
-                            <div style={ovRow}><span style={{ width: 48 }}>Page</span>
-                              {/* NEW-5(ii) — gated on RE-OPENABLE, not on "loaded right now": the idle
-                                  teardown releases a proxy only when the stored bytes can bring it
-                                  back, so this control must not go dead the moment one is released. */}
-                              <button style={chip} disabled={!overlayPageReady(o) || o.page <= 1} onClick={() => setOverlayPage(o.id, o.page - 1)}>‹</button>
-                              <span style={{ color: PAL.ink }}>{o.page} / {o.pageCount}</span>
-                              <button style={chip} disabled={!overlayPageReady(o) || o.page >= o.pageCount} onClick={() => setOverlayPage(o.id, o.page + 1)}>›</button>
-                              {!overlayPageReady(o) && <span style={{ fontSize: 10 }}>re-add to change page</span>}
-                            </div>
-                          )}
-                          {/* B848736 — the pinned map reference keeps the OLD aerial's exact Calibrate
-                              affordance: a single disabled chip with the same explanation, instead of the
-                              ordinary Trace-a-length / Align-to-map pair (it's already to scale). */}
-                          {isAerialRow ? (
-                            <button style={{ ...chip, opacity: 0.55, cursor: "not-allowed" }} disabled
-                              title="This aerial came from the map — it's already to scale, so manual calibration is disabled">Calibrate</button>
-                          ) : (
-                          <div style={{ display: "flex", gap: 6 }}>
-                            <button style={{ ...chip, flex: 1 }} title="Click two ends of a known dimension on the drawing, then enter its real length" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "trace", pts: [] }); }}>Trace a length</button>
-                            <button style={{ ...chip, flex: 1 }} title="Click a point on the drawing then its spot on the map; repeat for 2+ pairs, then Apply (moves, rotates & scales; 3+ pairs = robust best-fit + residual)" onClick={() => { setSelOverlay(o.id); setOvCalib({ id: o.id, kind: "align", pts: [] }); }}>Align to map</button>
-                          </div>
-                          )}
-                          {/* B654: above/below moved into the panel (the right-click menu keeps them too).
-                              NEW-2 — these order a reference against the OTHER references, within its band.
-                              zf.atFront/atBack already read true for the pinned map reference (overlayOrderFlags),
-                              so both grey out with no extra check here. */}
-                          <div style={{ display: "flex", gap: 6 }}>
-                            <button style={{ ...chip, flex: 1, opacity: zf.atFront ? 0.5 : 1 }} disabled={zf.atFront} title="Draw this overlay above the other overlays" onClick={() => reorderOverlay(o.id, "front")}>Bring to front</button>
-                            <button style={{ ...chip, flex: 1, opacity: zf.atBack ? 0.5 : 1 }} disabled={zf.atBack} title="Draw this overlay beneath the other overlays" onClick={() => reorderOverlay(o.id, "back")}>Send to back</button>
-                          </div>
-                          {/* NEW-2 — the cross-layer control the owner asked for. Off by default: the usual
-                              job is tracing over a scanned plan, where your own property line has to stay on
-                              top. Turn it on for an exhibit you're working ON and the whole reference —
-                              including its resize corners — comes over the parcel and the site elements.
-                              B848736 — hidden for the pinned map reference: it always renders beneath
-                              everything, including the parcel, and never promotes. */}
-                          {!isAerialRow && (
-                          <label style={{ ...ovRow, cursor: "pointer" }} title="Draw this overlay over the parcel boundary, the setback ring and the site elements instead of underneath them">
-                            <input type="checkbox" data-testid={`reference-above-${o.id}`} checked={overlayBand(o) === "above"} onChange={(e) => toggleOverlayBand(o.id, e.target.checked)} />
-                            <span>{CROSS_BAND_FRONT}</span>
-                          </label>
-                          )}
-                          {/* B654: per-sheet white knockout — re-renders the page, so it needs a PDF source */}
-                          {overlayPageReady(o) && (   /* NEW-5(ii) — the same "live or re-openable" question, one helper */
-                            <label style={{ ...ovRow, cursor: "pointer" }} title="Make the sheet's white paper transparent so the map shows through the linework">
-                              <input type="checkbox" checked={o.knockout !== false} onChange={(e) => setOverlayKnockout(o.id, e.target.checked)} />
-                              <span>Knock out white paper</span>
-                            </label>
-                          )}
-                          {/* NEW-1 (B1838704) — CROP, where the owner actually works. Before this the panel had
-                              only the four B719779 edge-trim number fields, which read as a faint label and never
-                              got found ("I cant see how to crop this overlay?"). "Crop…" opens the SAME visual tool
-                              the Comps surface uses (rectangle or polygon, ImageCropTool); the trim fields stay as
-                              the precise-entry path for a rectangle. Non-destructive: `o.crop` in IMAGE px clips
-                              what draws, the stored raster is never touched, Reset returns the full sheet. Every
-                              write goes through setOverlayCrop, which refuses on a locked overlay.
-                              Not offered on the pinned map capture — it prints through its own aerial path, so a
-                              crop there would draw on screen and not on the sheet (PDF-PARITY). */}
-                          {!isAerialRow && (() => {
-                            const cropWhy = cropEditBlock(o);
-                            const isPoly = cropKind(o.crop) === "poly";
-                            const trim = cropTrimFeet(o);
-                            const editTrim = (edge, val) => {
-                              const next = { ...trim, [edge]: Math.max(0, +val || 0) };
-                              setOverlayCrop(o.id, cropFromTrimFeet(next, o), false);
-                            };
-                            const field = (label, edge, title) => (
-                              <label key={edge} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: PAL.muted }} title={title}>
-                                <span style={{ width: 12 }}>{label}</span>
-                                <input type="number" min={0} aria-label={`Crop ${title}`} style={{ ...numInput, width: 50 }} disabled={!!cropWhy}
-                                  value={f0(trim[edge])} onFocus={() => pushHistory()} onChange={(e) => editTrim(edge, e.target.value)} />
-                              </label>
-                            );
-                            return (
-                              <div data-testid={`overlay-crop-${o.id}`} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                                <div style={{ display: "flex", gap: 6 }}>
-                                  <button style={{ ...chip, flex: 1, opacity: cropWhy ? 0.55 : 1 }} data-testid="overlay-crop-open" disabled={!!cropWhy}
-                                    title={cropWhy || "Trim the logo band, title block and margins with a rectangle or a polygon — reversible, the full sheet is kept"}
-                                    onClick={() => { setSelOverlay(o.id); setOvCropId(o.id); }}>{hasCrop(o) ? "Edit crop…" : "Crop…"}</button>
-                                  {hasCrop(o) && <button style={{ ...chip, flex: 1, opacity: cropWhy ? 0.55 : 1 }} data-testid="overlay-crop-reset" disabled={!!cropWhy} title={cropWhy || "Show the whole sheet again"} onClick={() => setOverlayCrop(o.id, null)}>Reset crop</button>}
-                                </div>
-                                {isPoly ? (
-                                  <div style={{ fontSize: 11, color: PAL.muted }}>Cropped to a polygon — use Edit crop… to change it.</div>
-                                ) : (
-                                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4 }} title="Trim white space off any edge, in feet — reversible, the full image is kept">
-                                    {field("L", "left", "Left edge")}{field("T", "top", "Top edge")}
-                                    {field("R", "right", "Right edge")}{field("B", "bottom", "Bottom edge")}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })()}
-                          {o.sheet && (() => {
-                            // Bluebeam-style scale entry (B576): the page→real ratio is the single source of
-                            // truth. A preset just fills page=1 + real=preset; "Custom…" reveals the editable
-                            // [page][unit] = [real][unit] fields. The mode lives in explicit editor state (ovEdit),
-                            // NOT derived from the current size — so picking Custom always reveals the fields.
-                            const ed = ovEdit && ovEdit.id === o.id ? ovEdit : null;
-                            const curFpi = scaleForFtPerPoint(o.ftPerPx);
-                            const matched = overlayScalePreset(o);
-                            const selVal = ed?.scaleMode ?? (matched ? matched.id : "custom");
-                            const pageUnit = ed?.pageUnit ?? "in";
-                            const realUnit = ed?.realUnit ?? "ft";
-                            // DISPLAY values (rounded for readability) vs COMMIT defaults (full precision). A field
-                            // the user never edited must re-apply its EXACT current value, never the rounded display
-                            // string — otherwise an idle focus→blur on a non-round scale (e.g. metric 1″=1m → 3.2808)
-                            // would quantize it to 3.3. The per-field *Dirty flags below then skip the commit entirely
-                            // when a field wasn't touched, so an idle blur is a true no-op (no scale change, no history).
-                            const pageVal = ed?.page ?? (matched ? trimNum(matched.pageIn) : "1");
-                            const realVal = ed?.real ?? (matched ? trimNum(matched.realFt) : fmtScaleNum(curFpi));
-                            const pageCommit = ed?.page ?? (matched ? matched.pageIn : 1);
-                            const realCommit = ed?.real ?? (matched ? matched.realFt : curFpi);
-                            const commit = (next) => {
-                              const fpi = feetPerInchFromPair({ pageVal: next.page ?? pageCommit, pageUnit: next.pageUnit ?? pageUnit, realVal: next.real ?? realCommit, realUnit: next.realUnit ?? realUnit });
-                              if (fpi) applyOverlayScale(o.id, fpi);
-                            };
-                            return (
-                              <div style={{ borderTop: `1px dashed var(--planner-border)`, paddingTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-                                <div style={{ fontSize: 11, color: PAL.muted }}>Sheet: <b style={{ color: PAL.ink }}>{o.sheet.label}</b>{!o.sheet.std && <span style={{ color: PAL.accent }}> · non-standard (may be shrunk) — scale below assumes true plot size</span>}</div>
-                                <label style={ovRow}><span style={{ width: 48 }}>Scale</span>
-                                  <select data-testid="overlay-scale-preset" style={textInput} value={selVal}
-                                    onChange={(e) => {
-                                      const v = e.target.value;
-                                      if (v === "custom") { setOvEditFor(o.id, { scaleMode: "custom", page: pageVal, pageUnit, real: realVal, realUnit }); return; }
-                                      const p = SCALE_PRESETS.find((x) => x.id === v);
-                                      if (p) { setOvEditFor(o.id, { scaleMode: p.id, page: trimNum(p.pageIn), pageUnit: "in", real: trimNum(p.realFt), realUnit: "ft" }); applyOverlayScale(o.id, feetPerInchForPreset(p)); }
-                                    }}>
-                                    <optgroup label="Engineering">{SCALE_PRESETS.filter((p) => p.group === "Engineering").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</optgroup>
-                                    <optgroup label="Architectural">{SCALE_PRESETS.filter((p) => p.group === "Architectural").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</optgroup>
-                                    <option value="custom">Custom…</option>
-                                  </select>
-                                </label>
-                                {selVal === "custom" && (
-                                  <label style={ovRow} data-testid="overlay-scale-custom">
-                                    <input style={{ ...numInput, width: 48 }} value={pageVal} placeholder="0.5 or 1/2" title="Distance measured on the page (decimals or fractions)"
-                                      onChange={(e) => setOvEditFor(o.id, { scaleMode: "custom", page: e.target.value, pageDirty: true })}
-                                      onKeyDown={(e) => { if (e.key === "Enter" && ed?.pageDirty) commit({ page: e.currentTarget.value }); }}
-                                      onBlur={(e) => { if (ed?.pageDirty) commit({ page: e.currentTarget.value }); }} />
-                                    <select style={{ ...numInput, width: 50, fontFamily: "inherit" }} value={pageUnit} title="Page unit"
-                                      onChange={(e) => { setOvEditFor(o.id, { scaleMode: "custom", pageUnit: e.target.value }); commit({ pageUnit: e.target.value }); }}>
-                                      {PAGE_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-                                    </select>
-                                    <span style={{ fontWeight: 700, color: PAL.ink }}>=</span>
-                                    <input style={{ ...numInput, width: 48 }} value={realVal} placeholder="real" title="Real-world distance"
-                                      onChange={(e) => setOvEditFor(o.id, { scaleMode: "custom", real: e.target.value, realDirty: true })}
-                                      onKeyDown={(e) => { if (e.key === "Enter" && ed?.realDirty) commit({ real: e.currentTarget.value }); }}
-                                      onBlur={(e) => { if (ed?.realDirty) commit({ real: e.currentTarget.value }); }} />
-                                    <select style={{ ...numInput, width: 50, fontFamily: "inherit" }} value={realUnit} title="Real-world unit"
-                                      onChange={(e) => { setOvEditFor(o.id, { scaleMode: "custom", realUnit: e.target.value }); commit({ realUnit: e.target.value }); }}>
-                                      {REAL_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-                                    </select>
-                                  </label>
-                                )}
-                                {o.detectedScale && (
-                                  <div style={{ fontSize: 11, color: PAL.muted }}>Read from sheet: <b style={{ color: PAL.ink }}>1″={o.detectedScale}′</b>{Math.round(scaleForFtPerPoint(o.ftPerPx)) !== o.detectedScale && <button style={{ ...chip, marginLeft: 6, padding: "3px 8px" }} onClick={() => applyOverlayScale(o.id, o.detectedScale)}>Apply</button>}</div>
-                                )}
-                                <div style={{ fontSize: 10.5, color: PAL.muted }}>Now ≈ <b style={{ color: PAL.ink }}>1″={fmtScaleNum(scaleForFtPerPoint(o.ftPerPx))}′</b> · {Math.round(o.imgW * o.ftPerPx)}′ wide</div>
-                              </div>
-                            );
-                          })()}
-                          <div style={{ display: "flex", gap: 6 }}>
-                            {/* Resize THIS drawing to ~60% of the current view and recentre it — the
-                                one-click rescue when a drawing came in far too big/small (then set the
-                                real scale above). Distinct from "Fit view", which zooms the canvas.
-                                B848736 — never offered for the pinned map reference (would fight its
-                                true-to-scale placement, same reason Width/Rotate are hidden above). */}
-                            {!isAerialRow && (
-                            <button style={{ ...chip, flex: 1 }} title="Resize this drawing to fit your current view (use when it came in far too big or small), then set the real scale above"
-                              onClick={() => { const f = Math.max(0.01, ((size.w / view.ppf) * 0.6) / Math.max(1, o.imgW)); const vc = p2fStatic(size.w / 2, size.h / 2); patchOverlay(o.id, { ftPerPx: f, x: vc.x - (o.imgW * f) / 2, y: vc.y - (o.imgH * f) / 2 }); }}>Size to view</button>
-                            )}
-                            <button style={{ ...chip, flex: 1 }} title="Zoom the canvas to fit everything" onClick={() => requestFit()}>Fit view</button>
-                          </div>
-                          {/* B848736 — item 4: on a georeferenced plan the live map tiles ARE the aerial,
-                              so the static image (this row) stands down while they're on — matching the
-                              old aerial card's exact note. */}
-                          {isAerialRow && origin && basemapOn && showAerial && (
-                            <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45 }}>Hidden while the live map basemap is on — the basemap IS the aerial there.</div>
-                          )}
-                        </div>
-                      )}
-                      {/* B848736 — a remote fetch failure (the map-captured reference loads straight
-                          from the GIS export endpoint, not a locally-cached raster) is shown regardless
-                          of whether the row is expanded, mirroring the old aerial card's error banner. */}
-                      {isAerialRow && overlayLoadErr[o.id] === "remote" && (
-                        <div style={{ fontSize: 11, color: PAL.accent, marginTop: 6, lineHeight: 1.45 }}>Aerial image didn't load from the source. Your boundary and tools still work — go back to the map and re-pick the site, or drop a screenshot here instead.</div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            {/* NEW-1 (2026-10-08 redesign) — the panel body lives in components/OverlaysPanel.jsx; every
+                handler below is one of this file's EXISTING overlay functions. */}
+            <LazyPanel name="Overlays" minHeight={180} label="Loading overlays…">
+            <OverlaysPanel
+              overlays={[...sheetOverlays, ...foreignOverlays.rows.map((r) => ({ ...r.overlay, id: "foreign:" + r.key, foreign: { planName: r.planName }, _fr: r }))]} selId={selOverlay} showAerial={showAerial} hasParcel={parcels.length > 0}
+              busy={overlayBusy} loadErr={overlayLoadErr} basemapNote={!!(origin && basemapOn && showAerial)}
+              calib={ovCalib} calibMsg={ovCalibMsg()} menuId={ovRowMenu} renamingId={ovRenaming} pageFocusTick={ovPageFocus}
+              onShowForeign={(row) => showForeignOverlay(row._fr)}
+              handlers={overlayPanelHandlers} />
+            </LazyPanel>
           </Section>
           )}
 
@@ -23657,14 +23534,28 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           rotated to it and kept upright; see lib/easementLabelPlacement.js. A shape that is
                           not elongated keeps the old horizontal-at-centroid label exactly. */}
                       {(() => {
-                        const txt = `${easementLabel(m)}${proposed ? " (proposed)" : ""}`;
-                        const pl = placeEasementLabel(m, txt, { labelPpf, basePx: EASE_LABEL_BASE_PX, toScreen: f2p, withArea: isSel && labelPpf > 0.05 });
+                        /* NEW-1/NEW-2 — one resolver answers inline AND pulled-out (lib/easementLabelPull.js). The
+                           area line is the owner's per-easement "Show area" choice (default OFF), no longer a
+                           side-effect of selection. A pulled-out label wears a thin leader to the nearest point of
+                           the easement and is a hit target of its own; an inline one is a hit target only so a
+                           right-click on it reaches the label menu — its press is forwarded to the strip. */
+                        const { txt, lab: pl } = easeLabelOf(m);
                         if (!pl) return null;
                         const at = f2p({ x: pl.x, y: pl.y });
+                        const hit = tool === "select" && !m.locked;
                         return (
-                          <g transform={`translate(${at.x} ${at.y}) rotate(${pl.angle}) scale(${labelK})`} pointerEvents="none" data-easement-label={m.id} data-label-angle={pl.angle.toFixed(1)}>
+                          <g transform={`translate(${at.x} ${at.y}) rotate(${pl.angle}) scale(${labelK})`} pointerEvents="none" data-easement-label={m.id} data-label-angle={pl.angle.toFixed(1)} data-label-pulled={pl.pulled ? "1" : "0"} data-label-area={pl.showArea ? "1" : "0"}>
+                            {pl.leader && (
+                              <g data-easement-leader={m.id} pointerEvents="none">
+                                <line x1={pl.leader.x1} y1={pl.leader.y1} x2={pl.leader.x2} y2={pl.leader.y2} stroke={ecol} strokeWidth={1} />
+                                <circle cx={pl.leader.x2} cy={pl.leader.y2} r={2.5} fill={ecol} stroke="#fff" strokeWidth={0.8} />
+                              </g>
+                            )}
                             <text x={0} y={pl.nameDy} textAnchor="middle" fontSize={pl.fontPx} fontWeight="700" fill={ecol} pointerEvents="none" style={INK_HALO}>{txt}</text>
-                            {pl.showArea && <text x={0} y={pl.areaDy} textAnchor="middle" fontSize={AREA_FONT_PX} fontWeight="600" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{Math.round(area).toLocaleString()} SF · {(area / SQFT_PER_ACRE).toFixed(2)} AC</text>}
+                            {pl.showArea && <text x={0} y={pl.areaDy} textAnchor="middle" fontSize={AREA_FONT_PX} fontWeight="600" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{easeAreaText(m)}</text>}
+                            {hit && <rect data-export="skip" data-easement-label-hit={m.id} x={-pl.halfW} y={-pl.halfH} width={pl.halfW * 2} height={pl.halfH * 2} fill="rgba(0,0,0,0.001)" pointerEvents="all"
+                              style={{ cursor: pl.pulled || (sel?.kind === "markup" && sel.id === m.id) ? "move" : "pointer" }}
+                              onPointerDown={(e) => startEaseLabel(e, m.id)} onContextMenu={(e) => onEaseLabelContext(e, m.id)} />}
                           </g>
                         );
                       })()}
@@ -25134,6 +25025,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 {elSelOutline}
                 {elPolyHandles}
                 {markupHandles}
+                {easeLabelHandles}
                 {/* NEW-1 — hoisted out of their content passes so they stop being buried: the
                     reference overlay's scale/rotate grips + calibration marks, the callout's width
                     and leader grips, and the measurement's control points. */}
@@ -26690,6 +26582,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     onBlur={() => { labelSessionRef.current = null; }}
                     placeholder={easementLabel({ ...e, labelOverride: "" })} style={txt} />
                 </Field>
+                {/* NEW-2 — the area line under the label is OFF by default; this is the same toggle the label's right-click menu carries. */}
+                {check("Show area on label", e.showArea === true, "showArea")}
                 <Field label="Type">
                   <button ref={easeTypeAnchor} style={{ ...chip, display: "flex", alignItems: "center", gap: 6 }} onClick={() => setEaseTypeMenu((o) => !o)}>
                     <span style={{ width: 9, height: 9, borderRadius: 2, background: t.color }} /> {t.label} <span style={{ color: PAL.muted }}>▾</span>
@@ -29721,7 +29615,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           <PanelChrome
             title={panelTitle[leftPanel]} icon={<RailIcon id={leftPanel} size={18} />} subtitle={leftPanel === "parcel" ? null : panelHeaderSubtitle}
             actionsRef={leftPanel === "drainage" ? setDockActionsEl : undefined}
-            floating={false} canFloat={!narrow && leftPanel !== "parcel"} // Parcels rework: no detach icon on the Parcels header — double-clicking the header still floats/docks it
+            floating={false} canFloat={!narrow && leftPanel !== "parcel" && leftPanel !== "references"} // Parcels rework: no detach icon on the Parcels header — double-clicking the header still floats/docks it
             onDetach={() => detachPanel(leftPanel)}
             onClose={() => setLeftPanel(null)}
             onToggle={() => { if (!narrow) detachPanel(leftPanel); }}
@@ -29773,7 +29667,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         return (
           <Suspense fallback={null}>
             <OverlayCropDialog overlay={o} onCancel={() => setOvCropId(null)}
-              onCommit={(crop) => { if (setOverlayCrop(o.id, crop)) setOvCropId(null); }} />
+              onCommit={(crop) => { if (setOverlayCrop(o.id, crop)) setOvCropId(null); }}
+              trim={cropTrimFeet(o)} isPoly={cropKind(o.crop) === "poly"} onTrimFocus={() => pushHistory()}
+              onTrim={(edge, val) => { const next = { ...cropTrimFeet(o), [edge]: Math.max(0, +val || 0) }; setOverlayCrop(o.id, cropFromTrimFeet(next, o), false); }} />
           </Suspense>
         );
       })()}
@@ -30395,6 +30291,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             {row({ text: m.behindEls ? CROSS_BAND_FRONT : CROSS_BAND_BEHIND, on: setBehind })}
             {sep}
             {row({ text: delText, hint: "Del", danger: true, on: () => { deleteMarkupById(m.id); } })}
+          </>;
+        } else if (mapMenu.kind === "easeLabel") {
+          // NEW-1/NEW-2 — the easement LABEL's own menu: snap it back to the strip, show/hide its area line.
+          const m = markups.find((x) => x.id === mapMenu.id);
+          if (!m) return null;
+          const pulled = !!pullOf(m), areaOn = showAreaOn(m);
+          header = "Easement label";
+          body = <>
+            {row({ text: areaOn ? "Hide area" : "Show area", dis: !!m.locked, title: m.locked ? "Unlock this easement first" : "", on: () => { setEaseShowArea(m.id, !areaOn); close(); } })}
+            {row({ text: "Snap back to strip", dis: !pulled || !!m.locked, title: !pulled ? "The label is already on the strip" : m.locked ? "Unlock this easement first" : "Return the label to the strip and remove its leader", on: () => { snapBackEaseLabel(m.id); close(); } })}
+            {sep}
+            {row({ text: "Easement properties\u2026", on: () => { setSel({ kind: "markup", id: m.id }); openInspector(); close(); } })}
           </>;
         } else if (mapMenu.kind === "measure") {
           // NEW — measurements get a right-click menu just like every other element.

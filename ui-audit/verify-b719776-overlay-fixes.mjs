@@ -54,11 +54,11 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
   });
   check("[precondition] plan seeded with the STALE aerialHidden:true flag", (await readAerialHidden()) === true);
 
-  const removeBtn = page.locator('[title="Remove"]').first();
+  const removeBtn = page.locator('[data-testid^="reference-more-"]').first(); // NEW-1: ⋯ → Remove overlay
   const hasRemove = await removeBtn.count();
   check("Aerial row's Remove (✕) button is present", hasRemove > 0);
   if (hasRemove) {
-    await removeBtn.click();
+    await removeBtn.click(); await page.locator("[role=menuitem]", { hasText: /^Remove overlay$/ }).click();
     await page.waitForTimeout(400);
     const after = await readAerialHidden();
     check("Remove CLEARS aerialHidden (no residue key), not sets it", after === null || after === undefined, `settings.aerialHidden=${JSON.stringify(after)}`);
@@ -156,7 +156,7 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
   }
 
   // Reset crop clears it entirely.
-  await page.locator("button", { hasText: "Reset crop" }).first().click();
+  await page.locator('[data-testid="overlay-crop-reset"]').first().click();
   await page.waitForTimeout(300);
   const afterReset = await page.evaluate(() => {
     const raw = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");

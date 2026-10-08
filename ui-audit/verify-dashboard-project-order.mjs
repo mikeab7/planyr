@@ -99,7 +99,12 @@ try {
   check(other.join() === wantOrder, `4b. a second sign-in on a fresh browser shows the same order (${other.join(", ")})`);
 
   // 5. rename one and open one: order does not move
-  await page.evaluate(async ([id]) => { const r = await window.pfSupabase.from("sites").select("data").eq("id", id).maybeSingle(); const d = { ...(r.data.data || {}), site: "ZZ Order Charlie RENAMED" }; await window.pfSupabase.from("sites").update({ site: "ZZ Order Charlie RENAMED", data: d, updated_at: new Date().toISOString() }).eq("id", id); }, [ids["ZZ Order Charlie"]]);
+  // The app's own rename path: the rename_site_group RPC (a plain write is refused by the DB's name guard).
+  const renameErr = await page.evaluate(async ([id]) => {
+    const r = await window.pfSupabase.rpc("rename_site_group", { p_group_id: id, p_site: "ZZ Order Charlie RENAMED", p_renamed_at: Date.now() });
+    return r.error ? String(r.error.message) : "ok";
+  }, [ids["ZZ Order Charlie"]]);
+  check(renameErr === "ok", "5.0 the app's own rename RPC accepted the rename (" + renameErr + ")");
   await open();
   const afterRename = await zzOrder();
   check(afterRename.join() === wantOrder.replace("ZZ Order Charlie", "ZZ Order Charlie RENAMED"), `5a. renaming Charlie did not reshuffle (${afterRename.join(", ")})`);
