@@ -14,6 +14,8 @@ import { useEffect, useRef, useState } from "react";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE, SPACE, CONTROL_H } from "../../../shared/ui/designTokens.js";
 import { NUM_FONT, TABULAR_NUMS } from "../../../shared/theme/typography.js";
+import { fetchTaxUnits, tableFromUnits, accountOf, TAX_UNIT_COUNTIES } from "../lib/taxUnitsClient.js";
+import { taxTableForCombined } from "../lib/taxRates.js";
 import { LINE, fmt, iconBtn, textBtn, LockGlyph, UnlockGlyph, MoreIcon, ZoomIcon, TrashIcon } from "./ParcelsPanel.jsx";
 
 const eyebrow = { fontSize: FONT_SIZE.micro, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-secondary)" };
@@ -57,7 +59,7 @@ function MenuItem({ children, onClick, danger, testid }) {
   );
 }
 
-export default function ParcelPage({ parcel, name, acres, included, origin, ownerText, cadName, drawnAcresOf, handlers, taxTable, setbacks, style, deedFrom }) {
+export default function ParcelPage({ parcel, name, acres, included, origin, ownerText, cadName, drawnAcresOf, handlers, taxTable, taxSource, setbacks, style, deedFrom }) {
   const [menu, setMenu] = useState(false);
   const [addFields, setAddFields] = useState(false);
   useEffect(() => { setMenu(false); setAddFields(false); }, [parcel.id]);
@@ -164,7 +166,7 @@ export default function ParcelPage({ parcel, name, acres, included, origin, owne
         )}
       </PageSection>
 
-      {taxTable && <TaxTable data={taxTable} />}
+      {taxTable ? <TaxTable data={taxTable} /> : (taxSource && <ServerTaxTable {...taxSource} />)}
       {setbacks}
       {style}
     </div>
@@ -180,13 +182,30 @@ function TaxTable({ data }) {
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: FONT_SIZE.control, color: "var(--text-primary)" }}>
         <thead><tr style={{ textAlign: "left" }}><th style={{ ...eyebrow, padding: `${SPACE.xs}px 0` }}>{data.rows ? "Taxing unit" : "Lot"}</th><th style={{ ...eyebrow, textAlign: "right" }}>{data.rows ? "Rate per $100" : "Total"}</th></tr></thead>
         <tbody>
-          {rows.map((r, i) => <tr key={i} style={{ borderTop: LINE }}><td style={{ padding: `${SPACE.xs}px 0` }}>{r.unit || r.name}</td><td style={{ textAlign: "right", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{(r.rate ?? r.total).toFixed(4)}</td></tr>)}
-          <tr style={{ borderTop: LINE, fontWeight: 700 }}><td style={{ padding: `${SPACE.xs}px 0` }}>Total{data.rows ? "" : data.allShare ? " · all lots share it" : " · lots differ"}</td><td style={{ textAlign: "right", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{data.total != null ? data.total.toFixed(4) : "—"}</td></tr>
+          {rows.map((r, i) => <tr key={i} style={{ borderTop: LINE }}><td style={{ padding: `${SPACE.xs}px 0` }}>{r.unit || r.name}</td><td style={{ textAlign: "right", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{(r.rate ?? r.total).toFixed(6)}</td></tr>)}
+          <tr style={{ borderTop: LINE, fontWeight: 700 }}><td style={{ padding: `${SPACE.xs}px 0` }}>Total{data.rows ? "" : data.allShare ? " · all lots share it" : " · lots differ"}</td><td style={{ textAlign: "right", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{data.total != null ? data.total.toFixed(6) : "—"}</td></tr>
         </tbody>
       </table>
       {data.source && <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: SPACE.sm }}>{data.source}{data.year ? ` · ${data.year}` : ""}</div>}
     </PageSection>
   );
+}
+
+/* B2158065 — the table from /api/taxunits (the CAD's own per-account unit list + adopted rates).
+ * Renders nothing until every lot's answer is complete: a partial list would understate the total. */
+function ServerTaxTable({ county, lots, combined, idField }) {
+  const accts = lots.map((l) => accountOf(l, idField));
+  const key = `${county}|${accts.join(",")}`;
+  const [res, setRes] = useState({ key: "", tables: null });
+  useEffect(() => {
+    let live = true;
+    if (!TAX_UNIT_COUNTIES.has(county) || !accts.length || accts.some((a) => !a)) { setRes({ key, tables: null }); return undefined; }
+    Promise.all(accts.map((a) => fetchTaxUnits(county, a))).then((rs) => { if (live) setRes({ key, tables: rs.map(tableFromUnits) }); });
+    return () => { live = false; };
+  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (res.key !== key || !res.tables || res.tables.some((t) => !t)) return null;
+  const data = combined ? taxTableForCombined(lots, { tableOf: (p) => res.tables[lots.indexOf(p)] }) : res.tables[0];
+  return data ? <TaxTable data={data} /> : null;
 }
 
 /* A tax year, only when the county record itself carries one. */

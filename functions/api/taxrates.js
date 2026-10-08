@@ -27,8 +27,8 @@
  * rates-and-levies workbook) returns a 502 naming what happened — never an empty 200 that would
  * read as "no taxing units this year".
  */
-import * as XLSX from "xlsx";
-import { extractCountyRows } from "./lib/comptrollerRates.js";
+import { extractCountyRows, findHeader } from "./lib/comptrollerRates.js";
+import { countyRowsFromXlsx } from "./lib/xlsxRows.js";
 
 const DOCS_BASE = "https://comptroller.texas.gov/taxes/property-tax/docs";
 const TYPES = { county: "county", cities: "city", isds: "school-district", special: "special-district" };
@@ -43,14 +43,19 @@ function sameOriginOk(origin, host) {
   try { return new URL(origin).host === host; } catch (_) { return false; }
 }
 
-async function fetchWorkbookRows(year, type) {
+/** "harris", "Harris County", " HARRIS  " → "harris"; "Fort Bend" → "fort bend". The cache key and the
+ * workbook match both use this, so one county is one cache entry however it was spelled. */
+export function normalizeCounty(raw) {
+  return String(raw || "").toLowerCase().replace(/\s+/g, " ").replace(/\s*county$/, "").trim();
+}
+
+// B2158064: rows are STREAMED out of the workbook (lib/xlsxRows.js) keeping only the wanted county —
+// the old SheetJS whole-workbook parse sat at the Worker's memory ceiling (Cloudflare error 1102).
+async function fetchWorkbookRows(year, type, county) {
   const url = `${DOCS_BASE}/${year}-${type}-rates-levies.xlsx`;
   const res = await fetch(url, { headers: { "user-agent": "planyr-taxrates-proxy" } });
   if (!res.ok) return null;
-  const buf = await res.arrayBuffer();
-  const wb = XLSX.read(buf, { type: "array" });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  return XLSX.utils.sheet_to_json(ws, { header: 1, raw: true });
+  return countyRowsFromXlsx(await res.arrayBuffer(), county);
 }
 
 /** Find the most recent year (>= currentYear - PROBE_YEARS_BACK) whose county-type workbook
@@ -66,15 +71,24 @@ async function latestYear() {
 }
 
 export async function onRequestGet(context) {
+  try {
+    return await handle(context);
+  } catch (e) {
+    // B2158064: whatever goes wrong, the caller gets JSON it can show — never an HTML error page.
+    return json({ error: `taxrates failed: ${e && e.message ? e.message : e}` }, 502);
+  }
+}
+
+async function handle(context) {
   const { request } = context;
   const url = new URL(request.url);
   if (!sameOriginOk(request.headers.get("Origin"), url.host)) return json({ error: "forbidden" }, 403);
 
-  const county = (url.searchParams.get("county") || "").trim();
+  const county = normalizeCounty(url.searchParams.get("county"));
   if (!county) return json({ error: "missing county" }, 400);
 
   const cache = caches.default;
-  const cacheKey = new Request(url.toString(), { method: "GET" });
+  const cacheKey = new Request(`${url.origin}${url.pathname}?county=${encodeURIComponent(county)}`, { method: "GET" });
   const hit = await cache.match(cacheKey);
   if (hit) return hit;
 
@@ -90,8 +104,12 @@ export async function onRequestGet(context) {
   const out = { county: null, cities: [], isds: [], special: [] };
   try {
     for (const [key, type] of Object.entries(TYPES)) {
-      const rows = await fetchWorkbookRows(year, type);
+      const rows = await fetchWorkbookRows(year, type, county);
       if (!rows) return json({ error: `Comptroller ${type} workbook missing for ${year}` }, 502);
+      const hdr = findHeader(rows);
+      if (hdr && key !== "county" && hdr.cols.taxingUnitName == null) {
+        return json({ error: `Comptroller ${type} workbook for ${year} has no unit-name column (header: ${(rows[hdr.headerRow] || []).join(" | ")})` }, 502);
+      }
       const extracted = extractCountyRows(rows, county);
       if (!extracted) return json({ error: `Comptroller ${type} workbook for ${year} did not parse as rates-and-levies (source shape may have changed)` }, 502);
       if (extracted.versionDate) versionDate = versionDate || extracted.versionDate;

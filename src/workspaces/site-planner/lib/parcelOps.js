@@ -118,7 +118,10 @@ export function planCombine(parcels, ids, { unionRings, newId }) {
         : `${names.join(", ")} ${odd.length === 1 ? "doesn't" : "don't"} touch the other picked parcels — unpick ${odd.length === 1 ? "it" : "them"} or pick the lots in between.`);
     }
     if (merged.code === "hole") return refuse("hole", "Combining those would enclose a lot that isn't picked — pick that one too, or combine them in pieces.");
-    return refuse("bad-outline", "Those parcels couldn't be combined cleanly — their outlines are too far off to fuse.");
+    // B2090352 amendment — say what actually happened (the old text blamed the outlines even when the safety net fired).
+    return refuse("bad-outline", merged.code === "invalid"
+      ? "Those outlines couldn't be combined — check each picked parcel has a closed outline."
+      : "Combining would have changed the combined area by more than survey slop allows, so nothing was combined — the parcels are untouched.");
   }
   const result = merged.ring;
   const name = nextTractName(list);
