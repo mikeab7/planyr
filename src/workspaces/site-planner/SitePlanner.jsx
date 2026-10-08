@@ -495,6 +495,7 @@ import {
  * precedent. The GUARD itself is unaffected: its verdict and copy live in detentionRules.js and
  * render immediately; this lazy tier only ENRICHES that line with the regime name and the statute. */
 import { siteState as resolveSiteState } from "./lib/siteRegion.js";
+import { jurisdictionSourceName, GA_JURISDICTION_SOURCE_NAME } from "./lib/georgiaJurisdiction.js";
 import { splitPolygonByCut, remapEdgeVector } from "./lib/polygonSplit.js";
 import { planCombine, planSplit, planRestoreCombined, planRestoreSplit, includedAcres, buildParcelRows } from "./lib/parcelOps.js";
 import ParcelsPanel from "./components/ParcelsPanel.jsx";
@@ -16285,7 +16286,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           ? `ETJ boundaries: ${layerVintage("jur_etj") || "vintage unknown"}. ETJs shrink as landowners opt out (SB 2038) — screening only, verify before relying on an ETJ answer.`
           : null;
         // B689905 — carried through so the tooltip never claims a parcel that isn't there.
-        const badge = { ...b, ageMs: j.ages?.county ?? j.ages?.city ?? j.ages?.etj ?? null, sourceName: "TxDOT / TxGIO / county & city ETJ publishers", etjNote, parcelBased: hasParcel };
+        const badge = { ...b, ageMs: j.ages?.county ?? j.ages?.city ?? j.ages?.etj ?? null, sourceName: jurisdictionSourceName(b.state), etjNote, parcelBased: hasParcel };
         /* NEW-2 — CACHE ONLY A RESOLVED ANSWER. This cache is keyed on parcel geometry and lives for
          * the session, so caching a badge whose ETJ lookup failed pinned that site to "couldn't
          * check" until a reload, on a source measured flaky at exactly this. An unresolved badge is
@@ -16310,7 +16311,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           straddle: false, governingCities: [], edgeOnlyCities: [], partialCities: [], touchesCities: [],
           unresolvedRoles: ["city", "etj", "county"], unresolved: true,
           cityContainment: "unknown", etjLabels: [],
-          sourceName: "TxDOT / TxGIO / H-GAC",
+          sourceName: siteStateId === "GA" ? GA_JURISDICTION_SOURCE_NAME : "TxDOT / TxGIO / H-GAC",
           failureNote: `The jurisdiction lookup could not be completed (${String((e && e.message) || e)}). Nothing here is settled — re-check before relying on the floodplain rule.`,
         });
       });
@@ -21479,7 +21480,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return (
       <ParcelPage parcel={pc} name={row ? row.name : (pc.label || "Parcel")} acres={parcelNetSqft(pc) / SQFT_PER_ACRE} included={pc.active !== false}
         origin={origin} ownerText={apprOwnerName} cadName={parcelCadName} drawnAcresOf={(p) => parcelNetSqft(p) / SQFT_PER_ACRE}
-        handlers={parcelPanelH} taxTable={taxTable} setbacks={setbacks} style={style} deedFrom={selectDeedOfGroup} />
+        handlers={parcelPanelH} taxTable={taxTable} taxSource={taxTable || !restored?.county || (origin.kind !== "county" && origin.kind !== "combined") ? null : { county: restored.county, lots: origin.kind === "combined" ? from : [pc], combined: origin.kind === "combined", idField: COUNTIES_MAP[restored.county]?.idField }} setbacks={setbacks} style={style} deedFrom={selectDeedOfGroup} />
     );
   };
   const renderPanelBody = (_pid) => (<>
@@ -32730,7 +32731,7 @@ function DrainagePanel({
               // the drawn area" banner, and the border no longer demotes to dashed on stale (that
               // read as trapping the reviewing-agency selector inside a warning box).
               return (
-                <div key="assumptions" style={{ marginTop: 7, border: `1px solid ${Y.border}`, borderRadius: 8, padding: "7px 9px", background: Y.cardBg }}>
+                <div key="assumptions" data-flat-group="assumptions" style={{ marginTop: 7, borderTop: `1px solid ${Y.border}`, padding: "8px 0 2px" }}>
                   <div title={d.channelDischarge?.overrideIgnored ? "HCFCD n/a outside Harris: saved channel answer ignored." : ""} style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: Y.rowLabel, marginBottom: 4, cursor: d.channelDischarge?.overrideIgnored ? "help" : undefined }}>Assumptions: correct if needed{d.channelDischarge?.overrideIgnored ? <span style={{ fontSize: 9, marginLeft: 4, letterSpacing: 0 }} aria-hidden="true">ⓘ</span> : null}</div>
                   {rows}
                 </div>

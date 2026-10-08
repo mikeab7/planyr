@@ -12,13 +12,30 @@
 // site (whose jsonb mirror is correctly empty too) and a signed-out / local-only site, which has
 // no `site_elements` at all and for which `parcels` IS the live store.
 import { dissolvedParcelSqft } from "./polyClip.js";
+import { boundedCache, pointsSignature } from "./pureCache.js";
 
 // Acreage of a stored site from its planner-feet parcels. B715: dissolve the ACTIVE parcels so
 // overlapping ground counts once (matches the planner's siteSqft), instead of an additive sum over
 // EVERY parcel — the old version double-counted overlaps AND summed inactive/superseded parcels too.
+/* NEW-1 (Silvestri zoom freeze) — `siteAcres` is a PURE function of the parcels' geometry, but it runs the
+ * O(n²) overlap scan + a clipper union, and the map's site list asked it once per saved plan on EVERY render of
+ * the (hidden) map. Measured: with ~90 saved plans that was ~60% of a zoom step on the planner. Keyed on a
+ * structural signature of exactly what `dissolvedParcelSqft` reads (active flag, ring vertices, save-and-except
+ * holes), so an edited parcel is a MISS and a stale acreage is impossible. Bounded: clears at the cap. */
+const acresCache = boundedCache(512);
+const parcelsKey = (parcels) => {
+  let k = "";
+  for (const p of parcels) {
+    k += p ? `${p.active === false ? 0 : 1}:${pointsSignature(p.points)}:${p.exceptions ? JSON.stringify(p.exceptions) : ""};` : "-;";
+  }
+  return k;
+};
 export function siteAcres(site) {
   if (!site.parcels?.length) return 0;
-  return dissolvedParcelSqft(site.parcels) / 43560;
+  const key = parcelsKey(site.parcels);
+  const hit = acresCache.get(key);
+  if (hit !== undefined) return hit;
+  return acresCache.set(key, dissolvedParcelSqft(site.parcels) / 43560);
 }
 
 // `parcelSummary` is `null` until it has loaded at least once (never fetched, or every attempt

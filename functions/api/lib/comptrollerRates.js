@@ -47,6 +47,12 @@ export function findHeader(rows) {
       for (const [key, re] of Object.entries(HEADER_HINTS)) if (re.test(t)) cols[key] = j;
     });
     if (cols.countyName == null || cols.rate == null) continue; // not the real header row
+    if (cols.taxingUnitName == null) {
+      // B2158064: the special-district workbook's unit-name header is not spelled like the city/ISD
+      // ones, so every special row fell back to the COUNTY's name. Take the first other "…NAME" column.
+      const j = row.findIndex((c, k) => typeof c === "string" && k !== cols.countyName && /name$/i.test(c.trim()) && !/^(county|cad|version)\b/i.test(c.trim()));
+      if (j !== -1) cols.taxingUnitName = j;
+    }
     return { headerRow: i, cols };
   }
   return null;
