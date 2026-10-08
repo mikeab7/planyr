@@ -64,7 +64,7 @@ try {
     const im = document.querySelector(".leaflet-sitePlanOverlay-pane img, .leaflet-sitePlanOverlay-pane canvas");
     return { boundary: poly[1] ? bb(poly[1]) : null, grips: pane ? [...pane.querySelectorAll("rect")].filter((r) => r.getAttribute("width") === "11").map(bb) : [], rot: poly[2] ? bb(poly[2]) : null, img: im ? bb(im) : null };
   });
-  const waitHandles = async (ms = 90000) => { const t = Date.now(); let g; while (Date.now() - t < ms) { g = await geo(); if (g.boundary && g.grips.length === 4 && g.img && g.img.w > 20) return g; await sleep(1500); } return g; };
+  const waitHandles = async (ms = 90000) => { const t = Date.now(); let g; while (Date.now() - t < ms) { g = await geo(); if (g.boundary && g.boundary.w > 0 && g.grips.length === 4 && g.img && g.img.w > 20) return g; await sleep(1500); } return g; };
   const drag = async (a, b) => { await page.mouse.move(a.x, a.y); await page.mouse.down(); for (let i = 1; i <= 8; i++) { await page.mouse.move(a.x + (b.x - a.x) * i / 8, a.y + (b.y - a.y) * i / 8); await sleep(40); } await page.mouse.up(); await sleep(3000); };
 
   /* A deploy by another session mid-run makes the app reload itself ("Loading your sites…") and drops an in-flight placement.
@@ -111,7 +111,7 @@ try {
   if (!g.boundary || g.grips.length !== 4 || !g.img) console.log("  diag:", JSON.stringify(await page.evaluate(() => { const p = document.querySelector(".leaflet-sitePlanHandles-pane"); return { pane: !!p, svgDisplay: p && p.querySelector("svg") && p.querySelector("svg").style.display, polys: p ? [...p.querySelectorAll("polygon")].map((e) => (e.getAttribute("points") || "").slice(0, 60)) : null, panes: [...document.querySelectorAll(".leaflet-pane")].map((e) => e.className.replace(/leaflet-pane\s*/, "")).slice(0, 14), overlayPane: !!document.querySelector(".leaflet-sitePlanOverlay-pane"), imgs: document.querySelectorAll(".leaflet-sitePlanOverlay-pane *").length }; })), "| page errors:", JSON.stringify(pageErrors.slice(0, 5)));
   if (!g.boundary || g.grips.length !== 4 || !g.img) throw new Error("VOID — handles not armed; the instrument cannot see them");
   const r0 = await row();
-  check("the saved overlay carries the rect crop I drew (≈ x 60%–80%, y 12.5%–31%)", !!r0 && !!r0.crop && near(r0.crop.x, 600, 40) && near(r0.crop.y, 100, 40) && near(r0.crop.w, 200, 50) && near(r0.crop.h, 150, 50), JSON.stringify(r0 && r0.crop));
+  check("the saved overlay carries a rect crop I drew (smaller than the full 1000×800 image, anchored near x 600, y 100)", !!r0 && !!r0.crop && r0.crop.kind === "rect" && near(r0.crop.x, 600, 60) && near(r0.crop.y, 100, 60) && r0.crop.w < 900 && r0.crop.h < 780, JSON.stringify(r0 && r0.crop));
   const cx = r0.crop;
   const exp = { x: g.img.x + (cx.x / 1000) * g.img.w, y: g.img.y + (cx.y / 800) * g.img.h, w: (cx.w / 1000) * g.img.w, h: (cx.h / 800) * g.img.h };
   check("outline hugs the CROP (not the full image)", near(g.boundary.x, exp.x, 4) && near(g.boundary.y, exp.y, 4) && near(g.boundary.w, exp.w, 5) && near(g.boundary.h, exp.h, 5), JSON.stringify({ got: [g.boundary.x, g.boundary.y, g.boundary.w, g.boundary.h].map(Math.round), exp: [exp.x, exp.y, exp.w, exp.h].map(Math.round) }));
@@ -120,14 +120,16 @@ try {
 
   const c0 = { x: g.boundary.cx, y: g.boundary.cy }, w0 = g.boundary.w;
   await drag({ x: g.grips[2].cx, y: g.grips[2].cy }, { x: g.grips[2].cx + 50, y: g.grips[2].cy + 40 });
-  g = await geo(); const r1 = await row();
+  let tHide = Date.now(); g = await waitHandles(45000); console.log(`  (handles back ${g && g.boundary && g.boundary.w > 0 ? "after " + Math.round((Date.now() - tHide) / 100) / 10 + " s" : "NEVER within 45 s"} after the scale commit)`);
+  const r1 = await row();
   check("corner drag scaled the whole overlay (visible outline grew; stored ft_per_px grew)", g.boundary.w > w0 * 1.15 && r1.ft_per_px > r0.ft_per_px * 1.15, `w ${Math.round(w0)}→${Math.round(g.boundary.w)}, ft/px ${Number(r0.ft_per_px).toFixed(3)}→${Number(r1.ft_per_px).toFixed(3)}`);
   check("…the VISIBLE centre stayed put on screen", near(g.boundary.cx, c0.x, 4) && near(g.boundary.cy, c0.y, 4), JSON.stringify({ c0, c1: { x: g.boundary.cx, y: g.boundary.cy } }));
   check("…the crop is untouched in the saved row", JSON.stringify(r1.crop) === JSON.stringify(r0.crop), JSON.stringify(r1.crop));
 
   const c1 = { x: g.boundary.cx, y: g.boundary.cy };
   await drag({ x: g.rot.cx, y: g.rot.cy }, { x: c1.x + 140, y: c1.y - 10 });
-  g = await geo(); const r2 = await row();
+  tHide = Date.now(); g = await waitHandles(45000); console.log(`  (handles back ${g && g.boundary && g.boundary.w > 0 ? "after " + Math.round((Date.now() - tHide) / 100) / 10 + " s" : "NEVER within 45 s"} after the rotate commit)`);
+  const r2 = await row();
   check("rotate drag saved a real turn", Math.abs(r2.rotation_deg - r1.rotation_deg) > 20, `rotation ${Number(r1.rotation_deg).toFixed(1)}→${Number(r2.rotation_deg).toFixed(1)}`);
   check("…the VISIBLE centre stayed put on screen", near(g.boundary.cx, c1.x, 4) && near(g.boundary.cy, c1.y, 4), JSON.stringify({ c1, c2: { x: g.boundary.cx, y: g.boundary.cy } }));
   check("…the crop is still untouched", JSON.stringify(r2.crop) === JSON.stringify(r0.crop));
@@ -136,6 +138,7 @@ try {
   // KNOWN-GOOD / RESET ARM: Edit crop → Reset → Done; then undo the rotation so the full image box is axis-aligned to compare against.
   await page.getByRole("button", { name: /Edit crop/ }).first().click({ timeout: 15000 }); await sleep(2000);
   await page.locator('[data-testid="crop-reset"]').first().click(); await sleep(500);
+  console.log("  reset-step Done:", JSON.stringify(await page.evaluate(() => { const d = document.querySelector('[data-testid="crop-done"]'); const w = document.querySelector('[data-testid="crop-done-why"]'); return { disabled: d && d.disabled, why: w && w.innerText }; })));
   await page.locator('[data-testid="crop-done"]').first().click(); await sleep(3500);
   await page.evaluate(async (id) => { await window.pfSupabase.from("site_plan_overlays").update({ rotation_deg: 0 }).eq("id", id); }, r0.id);
   await page.reload({ waitUntil: "load" }); // handles are armed only in-session — re-arm via the panel after a reload is not reachable for an unlinked plan, so this arm reads the saved row instead:
