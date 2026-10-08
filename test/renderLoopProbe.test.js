@@ -189,7 +189,7 @@ describe("the two effects the #185 crashes threw from stay instrumented", () => 
   it("⛔ the geo-registration effect depends on the view's NUMBERS, never on the state object", () => {
     // B1189's own documented rule — "depend on view.ppf/offX/offY, size.w/h" — had been applied to
     // `size` and left undone for `view`.
-    expect(planner).toContain("}, [view.ppf, view.offX, view.offY, size.w, size.h, origin, geoOverscan]);");
+    expect(planner).toContain("}, [view.ppf, view.offX, view.offY, size.w, size.h, origin, geoOverscan, geoDockX]);");
     expect(planner).not.toContain("}, [view, size.w, size.h, origin, geoOverscan]);");
   });
 
