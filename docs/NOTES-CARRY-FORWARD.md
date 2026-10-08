@@ -6,7 +6,7 @@
 > a half-built harness). A warm container is not a reason.
 >
 > **⛔ WHY IT EXISTS, stated plainly because the failure is the point.** The project rule is one
-> task per session, then archive. It was ignored for a week: everything went into one session,
+> task per session, then stop. It was ignored for a week: everything went into one session,
 > which ended up re-reading roughly **half a million tokens of history on every dispatch**. The
 > justification each time was that a fresh session would have to rediscover too much — and that
 > was TRUE, because everything a fresh session needed lived only in the old one's memory. Writing
