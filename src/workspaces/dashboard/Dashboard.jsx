@@ -75,6 +75,8 @@ import { groupProjectsByGroupId, pipelineCounts, goingQuiet, recentProjects } fr
 import { summarizeScheduleHealth } from "./lib/scheduleHealth.js";
 import { needsAttentionList } from "./lib/needsAttentionList.js";
 import { pursuitsTable, quietDaysByGroupFromRows } from "./lib/pursuitsList.js";
+import { orderedIds, moveProject, buildSavedOrder } from "../../shared/projects/projectOrder.js";
+import { loadProjectOrder, saveProjectOrder } from "./lib/dashboardProjectOrderPrefs.js";
 import { buildSinceLastHereFeed } from "./lib/sinceLastHereFeed.js";
 import { spanWords } from "./lib/dashboardDates.js";
 
@@ -255,16 +257,23 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
   // from under a tap already in flight (event:click-swallowed, "moved": true). Nothing renders a
   // real, variable-height card until every source has resolved — see CardSkeleton's own header.
   const [dataReady, setDataReady] = useState(false);
+  // NEW-1 (2026-10-08) — the saved project order loads INSIDE the same gate as every other source
+  // (see the effect below), so the Pursuits list never paints alphabetical and then jumps into his order.
+  const [projectOrder, setProjectOrder] = useState(null);
+  const [orderReady, setOrderReady] = useState(false);
+  const [orderError, setOrderError] = useState(null);
   useEffect(() => {
     let live = true;
     setDataReady(false);
+    setOrderReady(false);
     (async () => {
       // The since-last-here mark has to be known BEFORE the recent-comps/recent-notes fetches
       // fire — both are bounded by it (`since`), never an account-wide pull. It's one small,
       // fast read (profiles.prefs, same row dashboardLayout already reads), not a second waterfall.
       const nowMs = Date.now();
-      const { mark } = await loadSinceLastHere(userId);
+      const [{ mark }, { order: loadedOrder }] = await Promise.all([loadSinceLastHere(userId), loadProjectOrder(userId)]);
       if (!live) return;
+      setProjectOrder(loadedOrder);
       const windowStartMs = mark.lastVisitAt != null ? Number(mark.lastVisitAt) : nowMs - 24 * 60 * 60 * 1000;
       const sinceIso = new Date(windowStartMs).toISOString();
 
@@ -315,6 +324,7 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
       // fresh 24h window)", not a broken dashboard.
       saveSinceLastHere(userId, { lastVisitAt: nowMs, snapshot: feed.nextSnapshot });
 
+      setOrderReady(true);
       setDataReady(true);
     })();
     return () => { live = false; };
@@ -328,7 +338,26 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
   const projects = useMemo(() => groupProjectsByGroupId(sites, elementRecencyBySite), [sites, elementRecencyBySite]);
   const yieldBySiteMap = useMemo(() => yieldBySite(yieldRows), [yieldRows]);
   const needsAttentionRows = useMemo(() => (scheduleProjects ? needsAttentionList(scheduleProjects, Date.now(), scheduleSettings) : []), [scheduleProjects, scheduleSettings]);
-  const pursuitsRows = useMemo(() => pursuitsTable(projects, quietDaysByGroup), [projects, quietDaysByGroup]);
+  const pursuitsRows = useMemo(() => pursuitsTable(projects, quietDaysByGroup, projectOrder), [projects, quietDaysByGroup, projectOrder]);
+
+  // NEW-1 (2026-10-08) — the order Michael sets on the Pursuits card (grip drag, or the row's
+  // Move to top / Move to bottom). ONE saved list for his projects (shared/projects/projectOrder.js,
+  // persisted in profiles.prefs); every move rewrites it from the projects that exist now, so a
+  // stale id drops out. The new order is applied on screen FIRST and kept if the save fails — a
+  // failed save is shown on the card with a Retry, never swallowed.
+  const applyProjectOrder = (next) => {
+    setProjectOrder(next);
+    setOrderError(null);
+    saveProjectOrder(userId, next).then((res) => { if (!res.ok) setOrderError(res.error || "save failed"); });
+  };
+  const moveProjectInOrder = (groupId, dest) => {
+    if (!orderReady) return; // the saved order hasn't loaded yet — a move now would overwrite it blind
+    const today = [...projects].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    const full = orderedIds(today, projectOrder);
+    const next = moveProject(full, pursuitsRows.map((r) => r.groupId), groupId, dest);
+    if (next.every((id, i) => id === full[i])) return;
+    applyProjectOrder(buildSavedOrder(next));
+  };
 
   const cardData = useMemo(() => ({
     jumpBackIn: { projects: recentProjects(projects, jumpBackInCount), doc },
@@ -372,7 +401,7 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
     recentPlans: () => <RecentPlansCard {...cardData.recentPlans} onOpenProject={openProject} />,
     pipelineStatus: () => <PipelineCard {...cardData.pipelineStatus} />,
     needsAttention: () => <NeedsAttentionCard {...cardData.needsAttention} onOpenTask={openTask} />,
-    pursuitsTable: () => <PursuitsCard {...cardData.pursuitsTable} onOpenProject={openProject} />,
+    pursuitsTable: () => <PursuitsCard {...cardData.pursuitsTable} onOpenProject={openProject} onMove={moveProjectInOrder} orderError={orderError} onRetryOrder={() => projectOrder && applyProjectOrder(projectOrder)} />,
     goingQuiet: () => <GoingQuietCard {...cardData.goingQuiet} onOpenProject={openProject} />,
     compsSummary: () => <CompsCard {...cardData.compsSummary} onOpenComp={openComp} onAddComp={addComp} onChangePeriod={changeCompsPeriod} />,
     scheduleHealth: () => <ScheduleHealthCard {...cardData.scheduleHealth} onOpenSchedule={openSchedule} />,

@@ -63,7 +63,7 @@ const HOST_BUILDING = "e1455330pwyncw";   // a real dock-door building with a fu
 const ROAD = "e1455353iiphwv";             // the long centreline road the owner resized
 
 const INSTRUMENT = `(() => {
-  window.__E2E = true;
+  window.__E2E = true; window.__PLANYR_LEGACY_MIRROR = "idle"; // B2165120: production mirror policy
   window.__lt = [];
   try { new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__lt.push([Math.round(e.startTime), +e.duration.toFixed(1)]); }).observe({ type: "longtask", buffered: true }); } catch (_) {}
   window.__ltReset = () => { window.__lt.length = 0; };

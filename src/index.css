@@ -142,6 +142,10 @@
   --text-primary:   #1B1E26;
   --text-secondary: #353B49;
   --text-tertiary:  #4B5263;
+  /* The ONE greyscale lock (shared/ui/LockToggle.jsx, NEW-2 2026-10-08): neutral greys, never tinted/yellow.
+     State is shape (solid vs outline), these only set how dark. */
+  --lock-locked: #404040;
+  --lock-open:   #6E6E6E;
 
   /* Site Planner inspector surfaces (B686 → B689). B689: the LIGHT-mode inspector now
      uses the cool app surfaces — the owner rejected the warm "parchment" cream; the open
@@ -396,6 +400,8 @@
   --text-primary:   #E8EBF0;
   --text-secondary: #CAD0DA;
   --text-tertiary:  #A4ABB8;
+  --lock-locked: #D6D6D6;
+  --lock-open:   #A0A0A0;
 
   /* Site Planner "drafting parchment" surfaces (B686) — dark-slate variants. */
   --planner-panel:  #15171D;   /* backdrop, darkest (behind the raised cards) */
@@ -726,6 +732,14 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
 .land-row-actions { opacity: 0; transition: opacity .12s; }
 .land-parcel-row:hover .land-row-actions,
 .land-parcel-row:focus-within .land-row-actions { opacity: 1; }
+
+/* B2194741 — the parcel row's unlocked padlock / rename pencil reveal on row hover or keyboard focus; on a
+   touch screen (no hover) they are always shown so they stay reachable. */
+.land-row-hover { opacity: 0; transition: opacity .12s; }
+.land-parcel-row:hover .land-row-hover,
+.land-parcel-row:focus-within .land-row-hover,
+.land-row-hover:focus-visible { opacity: 1; }
+@media (hover: none) { .land-row-hover { opacity: 1; } }
 
 /* card section headers */
 .sec-head:hover .sec-title { color: var(--text-primary); }

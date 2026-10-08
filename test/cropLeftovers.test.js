@@ -20,7 +20,9 @@ describe("crop tool leftovers", () => {
     expect(tool.indexOf('data-testid="crop-reset"')).toBeGreaterThan(0);
     expect(tool.indexOf('data-testid="crop-reset"')).toBeLessThan(tool.indexOf('data-testid="crop-clear-polygon"'));
   });
-  it("the collapsed overlay row carries its own Crop entry (B2066227)", () => {
-    expect(planner).toMatch(/overlay-crop-open-row-\$\{o\.id\}/);
+  it("the panel carries ONE Crop entry (B2066227's second, row-level button was retired by the Overlays redesign — owner: one crop control)", () => {
+    const panel = readFileSync("src/workspaces/site-planner/components/OverlaysPanel.jsx", "utf8");
+    expect((panel.match(/data-testid="overlay-crop-open"/g) || []).length).toBe(1);
+    expect(planner).not.toMatch(/overlay-crop-open-row-/);
   });
 });

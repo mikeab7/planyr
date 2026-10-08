@@ -43,6 +43,17 @@ export const overlayBand = (o) => (o && o.aboveParcel === true ? OVERLAY_BAND_AB
  * no extra plumbing at the call sites. */
 export const isPinnedMapReference = (o) => !!(o && o.fromMap === true);
 
+/* NEW-1 (B2217648) — the map-captured snapshot is the print fallback's picture and calibration's
+ * "georeferenced" signal, never something the user added. On a plan that has a map `origin` the live
+ * basemap IS the aerial (and print builds a fresh frame-exact one from it), so the record stays in
+ * the data but is not a ROW: the Overlays panel, the View ▾ Overlays list, their counts and empty
+ * state all read the list through `visibleReferenceRows`. A plan with NO origin keeps the row so a
+ * legacy snapshot is never orphaned out of reach; a hand-dropped screenshot (not `fromMap`) always
+ * shows. ONE helper so the panel redesign (B2200992 family) picks this up with a one-line change. */
+export const isHiddenMapSnapshot = (o, origin) => isPinnedMapReference(o) && !!origin;
+export const visibleReferenceRows = (list, origin) =>
+  Array.isArray(list) ? list.filter((o) => !isHiddenMapSnapshot(o, origin)) : [];
+
 /** Stable-sort a "below"-band group so every pinned record leads (their own relative order
  * preserved) — the sub-ordering `splitOverlayBands`/`overlayDrawOrder` enforce alongside the
  * band grouping. Returns the SAME array reference when it's already pin-leading. */
@@ -151,4 +162,40 @@ export function setOverlayBand(list, id, above) {
   const { below, above: aboveGroup } = splitOverlayBands(rest);
   if (want === OVERLAY_BAND_ABOVE) aboveGroup.push(moved); else below.push(moved);
   return below.concat(aboveGroup);
+}
+
+/* NEW-1 (Overlays panel redesign) — draw-order moves driven by the PANEL, which lists front-most
+ * first. Both stay inside the record's own band (crossing the parcel is the "Draws" control's job)
+ * and both return the SAME array reference on a no-op, so a caller skips its history push. */
+const sameOrder = (a, b) => a.length === b.length && a.every((o, i) => o === b[i]);
+
+/** One step toward the front (`dir` +1 = up the panel list) or the back (-1), within the band. */
+export function moveOverlayStep(list, id, dir) {
+  const a = arr(list);
+  const flags = overlayOrderFlags(a, id);
+  if (!flags.found || flags.pinned || (dir > 0 ? flags.atFront : flags.atBack)) return a;
+  const { below, above } = splitOverlayBands(a);
+  const group = flags.band === OVERLAY_BAND_ABOVE ? above : below;
+  const i = flags.index, j = i + (dir > 0 ? 1 : -1);
+  [group[i], group[j]] = [group[j], group[i]];
+  return below.concat(above);
+}
+
+/** Drag-and-drop: put `dragId` directly in front of (`side` "front") or directly behind
+ *  ("behind") `overId`. A drop across bands, onto itself, or involving a pinned map capture is a
+ *  no-op (same array back). */
+export function dropOverlay(list, dragId, overId, side) {
+  const a = arr(list);
+  if (!dragId || !overId || dragId === overId) return a;
+  const drag = a.find((o) => o && o.id === dragId), over = a.find((o) => o && o.id === overId);
+  if (!drag || !over || isPinnedMapReference(drag) || overlayBand(drag) !== overlayBand(over)) return a;
+  if (isPinnedMapReference(over) && side !== "front") return a;   // nothing can land beneath the pinned map capture
+  const { below, above } = splitOverlayBands(a);
+  const group = overlayBand(drag) === OVERLAY_BAND_ABOVE ? above : below;
+  const without = group.filter((o) => o.id !== dragId);
+  const at = without.findIndex((o) => o.id === overId);
+  without.splice(side === "front" ? at + 1 : at, 0, drag);
+  const isAbove = overlayBand(drag) === OVERLAY_BAND_ABOVE;
+  const next = overlayDrawOrder((isAbove ? below : without).concat(isAbove ? without : above));
+  return sameOrder(next, a) ? a : next;
 }

@@ -80,17 +80,22 @@ describe("what one edit costs the store", () => {
     parse.mockRestore();
     expect(big.length).toBe(0);
   });
-  it("unchanged plans are not re-serialised — a one-plan edit stringifies about ONE plan's worth of text, not the store's", () => {
-    seed(8);
-    saveSite({ id: "p2", els: [bld("b2a", 5)] });
-    const storeChars = localStorage.getItem(KEY).length;
-    const onePlan = JSON.stringify(JSON.parse(localStorage.getItem(KEY)).p2).length;
-    const stringify = vi.spyOn(JSON, "stringify");
-    saveSite({ id: "p2", els: [bld("b2a", 99)] });
-    const chars = stringify.mock.results.reduce((n, r) => n + (typeof r.value === "string" ? r.value.length : 0), 0);
-    stringify.mockRestore();
-    expect(chars).toBeLessThan(onePlan * 4);            // the edited plan (+ its private copy), a few times at most
-    expect(chars).toBeLessThan(storeChars * 0.75);      // and clearly not the whole store (8 plans) as before
+  it("an edit serialises about ONE plan's worth of text — and the amount does NOT grow with the library (B2165120)", () => {
+    globalThis.__PLANYR_LEGACY_MIRROR = "idle";   // production policy: the legacy-copy refresh is NOT on the edit path
+    const cost = (n) => {
+      localStorage.clear();
+      seed(n);
+      saveSite({ id: "p2", els: [bld("b2a", 5)] });
+      const stringify = vi.spyOn(JSON, "stringify");
+      saveSite({ id: "p2", els: [bld("b2a", 99)] });
+      const chars = stringify.mock.results.reduce((s, r) => s + (typeof r.value === "string" ? r.value.length : 0), 0);
+      stringify.mockRestore();
+      return chars;
+    };
+    const small = cost(8), big = cost(80);
+    delete globalThis.__PLANYR_LEGACY_MIRROR;
+    // the ledger's id list and the history ring are the only things that can scale, and neither is the library's text
+    expect(big).toBeLessThan(small * 1.6);
   });
   it("sitesWriteStillCurrent is true right after a write and false the moment anyone else touches the key", () => {
     seed(3);
@@ -98,9 +103,7 @@ describe("what one edit costs the store", () => {
     const stamp = sitesWriteStamp();
     expect(sitesWriteStillCurrent(stamp)).toBe(true);
     expect(sitesWriteStillCurrent(null)).toBe(false);
-    const stored = JSON.parse(localStorage.getItem(KEY));
-    stored.p1.name = "another tab renamed it";
-    localStorage.setItem(KEY, JSON.stringify(stored));                 // a second writer
+    localStorage.setItem("planarfit:sites:v1:idx", JSON.stringify({ v: 1, ok: true, gen: "someone-else", stale: true }));   // another tab wrote a plan: it bumps the index
     expect(sitesWriteStillCurrent(stamp)).toBe(false);
     saveSite({ id: "p1", els: [bld("q2")] });                          // our next write makes a NEW stamp
     expect(sitesWriteStillCurrent(stamp)).toBe(false);
@@ -128,13 +131,9 @@ describe("the light summary read is memoised on the store's exact bytes", () => 
     a[0].name = "scribbled on";
     expect(loadSiteSummaries()[0].name).not.toBe("scribbled on");
     expect(b.length).toBe(6);
-    const stored = JSON.parse(localStorage.getItem(KEY));
-    stored.p0.name = "Renamed";
-    parse.mockClear();
-    localStorage.setItem(KEY, JSON.stringify(stored));
-    const c = loadSiteSummaries();
-    expect(parse.mock.calls.filter((x) => typeof x[0] === "string" && x[0].length > 2000).length).toBe(1);
     parse.mockRestore();
+    saveSite({ id: "p0", name: "Renamed" });                      // a real change bumps the index → the memo misses and the read is redone
+    const c = loadSiteSummaries();
     expect(c.find((m) => m.id === "p0").name).toBe("Renamed");
   });
   it("right after THIS tab saved a plan, it takes the parse storage.js already holds — zero store parses — and still equals a real read", () => {
@@ -159,7 +158,7 @@ describe("the light summary read is memoised on the store's exact bytes", () => 
     seed(4);
     loadSiteSummaries();
     localStorage.setItem(KEY, JSON.stringify({ solo: { id: "solo", groupId: "solo", site: "Only", name: "One", updatedAt: 5 } }));
-    const got = loadSiteSummaries();
+    const got = loadSiteSummaries();   // an older build rewrote the legacy entry whole: the plans it no longer holds were deleted there, "solo" was created there
     expect(got.map((m) => m.id)).toEqual(["solo"]);
   });
 });

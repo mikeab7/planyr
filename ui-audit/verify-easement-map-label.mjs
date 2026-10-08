@@ -73,7 +73,7 @@ try {
   check(await page.getByLabel("Exclusive easement").isChecked(), "'Exclusive easement' checkbox present and checked");
   check((await page.getByText(/Exclusive use/).count()) === 0, "old 'Exclusive use' text gone, no hint line");
   await input.fill("Enterprise 12in"); await pacedWait(page, 600);
-  check((await mapLabel().innerText()) === "Enterprise 12in", "map draws the custom label");
+  check((await mapLabel().textContent()) === "Enterprise 12in", "map draws the custom label");
   const sheet = await page.evaluate(async () => {
     const markup = await window.__plannerExportSvg({ cx: 1200, cy: 600, wFt: 2600, hFt: 1400 });
     if (!markup) return null;
@@ -81,12 +81,12 @@ try {
   });
   check(Array.isArray(sheet) && sheet.includes("Enterprise 12in"), `the REAL built export sheet draws the custom label (${JSON.stringify(sheet)})`);
   await input.fill(""); await pacedWait(page, 600);
-  check((await mapLabel().innerText()) === "50′ Pipeline Esmt", "clearing the box restores the automatic name");
+  check((await mapLabel().textContent()) === "50′ Pipeline Esmt", "clearing the box restores the automatic name");
   await input.fill("WL-A"); await pacedWait(page, 2500);
   await page.screenshot({ path: process.env.SHOT || "/tmp/easement-maplabel-live.png" });
   await page.reload({ waitUntil: "domcontentloaded" });
   await openPlan(page);
-  check((await mapLabel().innerText()) === "WL-A", "custom label survives a reload");
+  check((await mapLabel().textContent()) === "WL-A", "custom label survives a reload");
 } catch (e) { console.error("ERROR", e.message); failed = true; }
 finally {
   if (s) {

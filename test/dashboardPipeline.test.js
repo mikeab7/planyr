@@ -11,7 +11,7 @@ describe("groupProjectsByGroupId", () => {
       { id: "p2", group_id: "g1", site: "Goose Creek", county: "chambers", status: "active", role: "pursuit", updated_at: daysAgo(1) },
     ];
     const out = groupProjectsByGroupId(rows);
-    expect(out).toEqual([{ groupId: "g1", siteId: "p2", name: "Goose Creek", county: "chambers", status: "active", role: "pursuit", updatedAt: daysAgo(1), planCount: 2, origin: null }]);
+    expect(out).toEqual([{ groupId: "g1", siteId: "p2", name: "Goose Creek", county: "chambers", status: "active", role: "pursuit", updatedAt: daysAgo(1), planCount: 2, origin: null, createdAt: null }]);
   });
 
   it("uses the MOST RECENTLY UPDATED plan as the group's representative status/name/county", () => {
@@ -26,7 +26,7 @@ describe("groupProjectsByGroupId", () => {
 
   it("a plan with no group_id falls back to its own id (never dropped)", () => {
     const rows = [{ id: "solo", group_id: null, site: "Solo Plan", status: "pursuit", role: "pursuit", updated_at: daysAgo(1) }];
-    expect(groupProjectsByGroupId(rows)).toEqual([{ groupId: "solo", siteId: "solo", name: "Solo Plan", county: null, status: "pursuit", role: "pursuit", updatedAt: daysAgo(1), planCount: 1, origin: null }]);
+    expect(groupProjectsByGroupId(rows)).toEqual([{ groupId: "solo", siteId: "solo", name: "Solo Plan", county: null, status: "pursuit", role: "pursuit", updatedAt: daysAgo(1), planCount: 1, origin: null, createdAt: null }]);
   });
 
   it("carries the representative plan's origin (geo anchor) through, or null when unset", () => {

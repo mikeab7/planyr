@@ -50,7 +50,9 @@ import { etjNamesOf } from "./etjNames.js";
  * area is 96.2% on the owner's own Goose Creek parcel, and 70–85% where it is 99% at Grand Port. */
 import {
   areaShare, unionAreaSqM, ringsAsPolygons, esriPolygons, SQM_PER_ACRE,
+  siteWindow, clipPolysToWindow, normalizePolys, distanceToBoundaryM,
 } from "./jurisdictionShare.js";
+import { yieldToMain } from "./yieldToMain.js";
 /* ⛔ NEW-1 — "city limits" is three jurisdiction classes, not a boolean. */
 import { classifyCityLimit, CITY_LIMIT_CLASSES, dominantClass } from "./cityLimitClass.js";
 
@@ -1027,10 +1029,24 @@ export function shareQueryRing(rings, padDeg = 0.0008) {
 /* Turn one source's returned features into per-city, per-CLASS area shares — whole-site and
  * per-parcel. Pure (no network): the fetch is the caller's. */
 export function cityAreasFromFeatures(src, features, rings, ref, opts = {}) {
+  const it = cityAreasSteps(src, features, rings, ref, opts);
+  for (;;) { const r = it.next(); if (r.done) return r.value; }
+}
+
+/* ⛔ THE SAME COMPUTATION, AS A STEP GENERATOR — slow report 55807aa9. A share is the one place the app runs clipper over a
+ * whole published city boundary, and it runs INSIDE the continuation of the response that carried it, so every millisecond of
+ * it is charged to `Response.json.then` and blocks the page (measured: ~0.5–0.9 s per plan open on Bolt-on). Each `yield` below
+ * is a unit of work small enough to be a task of its own; `cityAreasFromFeaturesAsync` drives them with a time budget and lets
+ * the page paint between. The sync wrapper above drives the identical steps to completion, so every caller that wants the
+ * answer NOW (the unit suites, the recorded fixtures) gets byte-for-byte the same result. */
+function* cityAreasSteps(src, features, rings, ref, opts = {}) {
   const toleranceM = Number(opts.toleranceM) || 0;
   const site = ringsAsPolygons(rings);
   const totalSqM = unionAreaSqM(site, ref);
   const parcels = (rings || []).map((r) => ringsAsPolygons([r]));
+  // Everything below measures ground under the SITE, so a jurisdiction is cut to a window around it first (see siteWindow).
+  const pad = opts.windowPadM != null ? opts.windowPadM : SHARE_WINDOW_PAD_M;
+  const win = siteWindow(rings, pad);
   const groups = new Map();
   for (const f of features || []) {
     const n = normalizeFeature(src, f.attrs || {});
@@ -1052,19 +1068,35 @@ export function cityAreasFromFeatures(src, features, rings, ref, opts = {}) {
    * repo predates the geometry request, and without this they would all have read "no city".) */
   const withGeom = (features || []).filter((f) => f && f.geometry && (f.geometry.rings || []).length).length;
   if ((features || []).length && !withGeom) return null;
+  yield;
   const rows = [];
   for (const g of groups.values()) {
     if (!g.polys.length) continue;
-    const whole = areaShare(site, g.polys, ref, { toleranceM, totalSqM });
+    const near = clipPolysToWindow(g.polys, win);
+    // dissolved ONCE per jurisdiction and reused by the whole-site measurement and every parcel's
+    const clipNorm = near.length ? normalizePolys(near, ref) : null;
+    yield;
+    const whole = areaShare(site, near, ref, { toleranceM, totalSqM, clipNorm, skipDistance: true });
+    /* `distanceM` stays EXACT. The nearest-boundary distance is measured on the windowed polygon, which is exact whenever it is
+     * under the window's pad (every cut edge is at least that far away); a boundary further than the pad — or an empty
+     * window — takes the full published polygon, so the answer never changes, it only stops being paid for in the common case. */
+    let distanceM = distanceToBoundaryM(site, near, ref);
+    if (!(distanceM < pad)) distanceM = distanceToBoundaryM(site, g.polys, ref);
+    whole.distanceM = distanceM;
+    yield;
+    const perParcel = [];
+    for (let i = 0; i < parcels.length; i++) {
+      // a parcel's own distance is not part of any answer (only the whole-site one is carried), so it is not computed
+      const r = areaShare(parcels[i], near, ref, { toleranceM, clipNorm, skipDistance: true });
+      perParcel.push({ index: i, id: (opts.parcelIds || [])[i] || null, acres: r.totalAcres, share: r.share, insideAcres: r.insideAcres });
+      yield;
+    }
     rows.push({
       name: g.name, class: g.class, sourceId: src.id, uniqueIds: uniq(g.uniqueIds),
       share: whole.share, rawShare: whole.rawShare,
       insideAcres: whole.insideAcres, distanceM: whole.distanceM,
       confident: whole.confident, refusedReason: whole.refusedReason,
-      perParcel: parcels.map((p, i) => {
-        const r = areaShare(p, g.polys, ref, { toleranceM });
-        return { index: i, id: (opts.parcelIds || [])[i] || null, acres: r.totalAcres, share: r.share, insideAcres: r.insideAcres };
-      }),
+      perParcel,
     });
   }
   rows.sort((a, b) => (b.rawShare || 0) - (a.rawShare || 0));
@@ -1076,6 +1108,28 @@ export function cityAreasFromFeatures(src, features, rings, ref, opts = {}) {
     parcelIds: (opts.parcelIds || []).slice(0, (rings || []).length),
     rows,
   };
+}
+
+/* How far around the site a jurisdiction is kept when it is measured. Must exceed any distance a caller reads as exact; 3 km is
+ * the margin the recorded fixtures were cut at (`record-jurisdiction-areas`), and the exact fallback above covers the rest. */
+export const SHARE_WINDOW_PAD_M = 3000;
+/* The longest one slice of share work may run before it hands the thread back. Well under the 50 ms long-task line, because a
+ * slice can only be as short as its smallest indivisible step. */
+export const SHARE_SLICE_MS = 12;
+
+/* Drive the steps with a time budget. `yieldFn` hands the thread back (default: scheduler.yield, else a macrotask), `now` is
+ * injectable so the slicing is testable without a clock. Resolves to exactly what `cityAreasFromFeatures` returns. */
+export async function cityAreasFromFeaturesAsync(src, features, rings, ref, opts = {}) {
+  const now = opts.now || (() => (typeof performance !== "undefined" ? performance.now() : Date.now()));
+  const yieldFn = opts.yieldFn || yieldToMain;
+  const budget = opts.sliceMs ?? SHARE_SLICE_MS;
+  const it = cityAreasSteps(src, features, rings, ref, opts);
+  let sliceStart = now();
+  for (;;) {
+    const r = it.next();
+    if (r.done) return r.value;
+    if (now() - sliceStart >= budget) { await yieldFn(); sliceStart = now(); }
+  }
 }
 
 /* Merge several sources' answers. Where two sources both hold a city in the same class, the larger
@@ -1125,6 +1179,14 @@ export function identifyCityShares(src, rings, ref, opts = {}) {
   const ring = shareQueryRing(rings);
   if (!ring) return Promise.resolve(null);
   const key = "jurshare:" + src.id + ":" + ringKey(rings.flat());
+  /* ⛔ ONE COMPUTE PER (cache, key) AT A TIME. The header badge and the drainage authority both ask for the same share the
+   * moment a plan opens, and `cache.swr` only dedupes a FETCH (via the shared request coalescer), not the clipper work that
+   * follows it — so a cold open measured the same city boundary being dissolved twice, back to back. A second caller now
+   * joins the first's promise; the entry is dropped when it settles, so a later call (after an edit, or a failed attempt)
+   * computes afresh exactly as before. Keyed per cache object so an injected test cache never shares state with the app's. */
+  let live = _shareInFlight.get(cache);
+  if (!live) { live = new Map(); _shareInFlight.set(cache, live); }
+  if (live.has(key)) return live.get(key);
   const fetcher = async () => {
     const params = buildIdentifyParams(src, { ring, returnGeometry: true, maxVerts: 8 });
     const direct = buildQueryUrl(src.url, params);
@@ -1133,14 +1195,18 @@ export function identifyCityShares(src, rings, ref, opts = {}) {
     if (proxied) { try { j = await fetchJson(proxied); } catch (_) { j = await fetchJson(direct); } }
     else j = await fetchJson(direct);
     const feats = (j.features || []).map((f) => ({ attrs: f.attributes || {}, geometry: f.geometry || null }));
-    const res = cityAreasFromFeatures(src, feats, rings, ref, { parcelIds: opts.parcelIds });
+    const res = await cityAreasFromFeaturesAsync(src, feats, rings, ref, { parcelIds: opts.parcelIds, sliceMs: opts.sliceMs, yieldFn: opts.yieldFn, now: opts.now });
     // A null here is "could not measure" — cache nothing, so the next call retries.
     if (!res) throw new Error("city share: source answered without geometry");
     return res;
   };
   const { fresh } = cache.swr(key, fetcher, { ttl: src.ttl || 0 });
-  return fresh.then((r) => (r && r.data && r.data.rows ? r.data : null)).catch(() => null);
+  const out = fresh.then((r) => (r && r.data && r.data.rows ? r.data : null)).catch(() => null)
+    .finally(() => { live.delete(key); });
+  live.set(key, out);
+  return out;
 }
+const _shareInFlight = new WeakMap();
 
 export async function identifyJurisdiction(lng, lat, opts = {}) {
   const geom = opts.ring && opts.ring.length >= 3 ? { ring: opts.ring } : { lng, lat };

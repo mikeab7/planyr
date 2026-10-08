@@ -1821,7 +1821,6 @@ export default function Notes({
                     }}
                   >‹ Notes</button>
                 ) : null}
-                <span aria-hidden="true" style={{ fontSize: 12.5 }}>🔒</span>
                 <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   Read-only preview from the bin — nothing you do here changes it.
                 </span>

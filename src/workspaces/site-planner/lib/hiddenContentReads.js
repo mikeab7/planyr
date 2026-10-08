@@ -76,8 +76,8 @@ export const DECLARATIONS = Object.freeze([
     why: "Hosts the ambient flush-snap's neighbour set (B494049). Everything else it reads is the element being dragged, which cannot be hidden — hiding clears the selection into it." },
 
   /* ── CORRECT-UNFILTERED: judged, and filtering any of these would be the worse bug ─────────── */
-  { name: "fmtScaleNum", verdict: U,
-    why: "A number FORMATTER. Its body is swept only because the sweep reads a whole top-level span; it produces no picture." },
+  { name: "hexA", verdict: U,
+    why: "A colour helper (alpha-blend of a theme hex). Its body is swept only because it is the LAST module-scope const before the component and the sweep reads a whole top-level span; it produces no picture." },
   { name: "probeRef", verdict: U, why: "The E2E read-only probe store. It reports what the app holds, so it must report ALL of it." },
   { name: "onBgDown", verdict: U,
     why: "A press handler. Its element reads resolve what was pressed, and a hidden element cannot be pressed (it is not rendered) — proven by the HIT arm of verify-hidden-content-behaviour." },
@@ -102,6 +102,7 @@ export const DECLARATIONS = Object.freeze([
   { name: "handleNodes", verdict: U,
     why: "The handle layer renders from `sel`/`multi`, and hiding a group CLEARS any selection into it (B442688) — so the grips cannot outlive their object." },
   { name: "markupHandles", verdict: U, why: "Same as handleNodes — the handle layer renders from a selection a hide clears." },
+  { name: "easeLabelHandles", verdict: U, why: "Same as markupHandles — the selected easement label's outline + rotate grip render from a selection a hide clears." },
   { name: "calloutHandles", verdict: U, why: "Same as handleNodes — the handle layer renders from a selection a hide clears." },
   { name: "startRoute", verdict: U, why: "Utility-route drawing; acts on what the user clicked." },
   { name: "onDimNumberDown", verdict: U, why: "A press on a dimension number, which only exists for a drawn element." },

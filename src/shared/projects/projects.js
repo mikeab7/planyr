@@ -117,7 +117,7 @@ export function notifyProjectsChanged() {
 /** Subscribe to "the project list may have moved". Returns an unsubscribe. */
 export function onProjectsChanged(cb) {
   if (typeof window === "undefined") return () => {};
-  const onStorage = (e) => { if (!e.key || e.key.startsWith("planarfit:sites")) cb(); };
+  const onStorage = (e) => { if (!e.key || (e.key.startsWith("planarfit:sites") && !/^planarfit:sites:.*(:p:|:led$)/.test(e.key))) cb(); };   // B2165120: see ProjectBreadcrumb — the index write is the one signal per edit
   window.addEventListener("storage", onStorage);
   return () => window.removeEventListener("storage", onStorage);
 }

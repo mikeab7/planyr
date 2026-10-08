@@ -578,7 +578,7 @@ export default function ProjectBreadcrumb({
     refresh();
     warmThenRefresh();
     refreshPins(); // warm the pinned mirror before the first open, so the first list frame already has it
-    const onStorage = (e) => { if (!e.key || e.key.startsWith("planarfit:sites")) refresh(); };
+    const onStorage = (e) => { if (!e.key || (e.key.startsWith("planarfit:sites") && !/^planarfit:sites:.*(:p:|:led$)/.test(e.key))) refresh(); };   // B2165120: a per-plan entry / ledger write is announced by the index write that follows it — one refresh per edit, not three
     window.addEventListener("storage", onStorage);
     return () => { window.removeEventListener("storage", onStorage); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
