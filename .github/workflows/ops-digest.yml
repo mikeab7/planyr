@@ -1,0 +1,48 @@
+name: Ops digest
+
+# Refreshes the admin page's Ops → "Outstanding work" digest after EVERY merge to main (B2159504, owner
+# follow-up to B711908). That panel is a copy of the repo ledger; it used to move only when someone ran
+# scripts/ops-snapshot.mjs by hand, so it drifted daily. This runs when the Build workflow finishes
+# SUCCESSFULLY on a push to main (never on a PR, never on a schedule), so it is never more than one merge old.
+#
+# It is its own workflow — not a job inside build.yml — because build.yml's contract (ui-audit/required-check-audit,
+# test/requiredChecks.test.js) is a single `build` job whose check must always report; a second job there could only
+# add risk to the required check, and this one is allowed to be red without blocking anything.
+#
+# Needs ONE repository secret: OPS_INGEST_TOKEN (setup: src/workspaces/admin/db/admin_ops_ingest.sql). The URL and
+# anon key it also sends are the existing public, RLS-protected VITE_ secrets. With the secret absent the step warns
+# loudly and passes (setup not done); a request the server REFUSES fails the run. Every PR dry-runs the same script
+# (ci-gates.yml → "Ops digest dry run").
+on:
+  workflow_run:
+    workflows: ["Build"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ops-digest
+  cancel-in-progress: false
+
+jobs:
+  digest:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the merged commit
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Push the ledger digest to the admin Ops page
+        run: node scripts/ops-snapshot.mjs --push
+        env:
+          GITHUB_SHA: ${{ github.event.workflow_run.head_sha }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          OPS_INGEST_TOKEN: ${{ secrets.OPS_INGEST_TOKEN }}

@@ -47,6 +47,13 @@ reporter's recent errors; the in-app Help form and email hook are NOT built (see
 read-only ledger digest (the repo-root ops-snapshot script, run with --sql, loads it) + a session-sweep log. Local
 proof harness: ui-audit verify-admin-surfaces (repo-root ui-audit folder).
 
+**2026-10-08 follow-ups (B2159504–B2159507).** Ops digest refreshes itself: `.github/workflows/ops-digest.yml` runs
+the repo-root ops-snapshot script (`--push`) after each successful Build on main, through the token-gated `ops_ingest_snapshots()` door
+(`db/admin_ops_ingest.sql`; needs the `OPS_INGEST_TOKEN` secret + a one-time hash insert); header reads "Updated … after <commit>".
+Support has the shared "Hide internal" switch (`lib/adminSupport.js` `filterTickets`; badge + Overview tile follow it). Deploy-reload
+rule for a user's recent errors = `adminIssues.splitDeployReloads`. The weekly sweep records via `window.pfAdminRecordSweep`
+(`lib/sweepHook.js`). Harnesses that file reports clean up with the repo-root ui-audit report-cleanup helper.
+
 **Fifth section, already shipped (B877442) — `CriteriaRequestsSection.jsx` + `lib/criteriaRequestsAdmin.js`.**
 Lists counties requested via B877440/B877441's "Request criteria for this county" action (the plan-side
 no-data state), most-requested first, with state, first/last asked, and a "Wired ✓ / Outstanding" status —

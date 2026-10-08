@@ -410,6 +410,7 @@
     }
   ],
   "ownedColumns": {
+    "ops_ingest_tokens": ["label"],
     "signup_attempts_log": [
       "email_domain"
     ],
