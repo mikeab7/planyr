@@ -78,7 +78,7 @@ import { sanitizeLayerAbove, aboveFromOverlays, applyAboveOverrides, aboveSig } 
 import { BASEMAPS, SITE_PLAN_BASEMAP, IMAGERY_GRADE } from "../../shared/basemaps/basemaps.js";
 import {
   ppfToZoom, zoomToPpf, exactContainerPoint,
-  basemapWrapPoint, registrationShift, sanitizeShift, tileNwFeet, registrationLayoutMayHaveChanged, resolvedLayoutInputs,
+  basemapWrapPoint, mapBoxInset, mapBoxCenterX, registrationShift, sanitizeShift, tileNwFeet, registrationLayoutMayHaveChanged, resolvedLayoutInputs,
   hasRegisterableContainer, viewValuesEqual,
 } from "./lib/mapLock.js";
 import { overscanPx, keepBufferFor, retinaForZoom, tileWeight, tileCacheLimit } from "./lib/tileBudget.js";
@@ -256,6 +256,7 @@ import { loadDeed, deedNow } from "./lib/deedLazy.js";
 import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip, easementStyle, easementPatternId, encumbranceStyle, encumbrancePatternId, deedCallsShown, DEFAULT_EASE_FILL_OPACITY, DEFAULT_EASE_HATCH, ENCUMBRANCE_DEFAULT } from "./lib/easements.js";
 import { deedTrace, deedGapText, deedClosure, deedReaderSummary, deedQueueClosure, deedPlotWarning } from "./lib/deedGap.js";
 import { HATCH_OPTIONS, hatchSpec } from "../../shared/style/hatchPatterns.js";
+import { hatchPatternTransform, hatchAnchorFor } from "./lib/hatchAnchor.js";
 // NEW-EASE-STYLE — the ONE renderer that turns a hatch catalog spec (shared/style/hatchPatterns.js)
 // into an SVG <pattern>. MODULE-SCOPE (never defined inside SitePlanner's render body — a component
 // authored per-render is a fresh type every render, which remounts and thrashes). Used for the
@@ -273,10 +274,12 @@ import { HATCH_OPTIONS, hatchSpec } from "../../shared/style/hatchPatterns.js";
 // rescale is exactly as zoom-dependent for a pattern tile as it is for the callout arrowhead this
 // item also fixes. `patternTransform` composing a uniform `scale(labelK)` with any existing
 // rotation is safe because a uniform scale commutes with rotation.
-function HatchPatternDef({ id, hatchKey, color, washColor = color, wash = 0, lineOpacity = 0.5, labelK = 1 }) {
+// NEW-1 (hatchAnchor.js) — `anchor` pins the tile lattice to the GROUND (the render view's feet
+// origin) instead of the canvas corner, so a panel drag / resize / pan never slides the stripes.
+function HatchPatternDef({ id, hatchKey, color, washColor = color, wash = 0, lineOpacity = 0.5, labelK = 1, anchor = null }) {
   const spec = hatchSpec(hatchKey);
   const size = spec ? spec.size : 7;
-  const tf = [spec ? `rotate(${spec.rotate})` : null, labelK !== 1 ? `scale(${labelK})` : null].filter(Boolean).join(" ") || undefined;
+  const tf = hatchPatternTransform({ rotate: spec ? spec.rotate : 0, scale: labelK, anchor });
   return (
     <pattern id={id} width={size} height={size} patternUnits="userSpaceOnUse" patternTransform={tf}>
       {wash > 0 && <rect width={size} height={size} fill={washColor} opacity={wash} />}
@@ -529,7 +532,7 @@ import { resolveDraftStepBack } from "./lib/drafts.js";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { FONT_SIZE, SPACE, CONTROL_H } from "../../shared/ui/designTokens.js";
 import { parcelKey as parcelKeyOf, storedParcelKey } from "./lib/parcelIdentity.js";
-import { snapPanelWidth } from "./lib/panelWidth.js";
+import { snapPanelWidth, panelFlowWidth } from "./lib/panelWidth.js";
 import { canvasBox, nextCanvasSize, framePad, canvasEdgeLeft, EDGE_EPS } from "./lib/canvasBox.js"; // NEW-1 — the canvas box IS the element box (no 320×360 floor)
 // B845584 — the element context-menu rebuild's own 14px/1.3-stroke icon family (see that file's
 // header for why it is separate from icons.jsx's 24px/stroke-2 idiom). Two names collide with
@@ -546,7 +549,7 @@ import {
  * (see src/app/renderLoopProbe.js for why this is recorded unconditionally). The dep NAMES are what
  * make a report readable — "view=51i" is a diagnosis, "dep[0]=51i" is another character count. */
 const GEO_REG_EFFECT = "site-planner:geo-registration";
-const GEO_REG_DEPS = Object.freeze(["view.ppf", "view.offX", "view.offY", "size.w", "size.h", "origin", "geoOverscan"]);
+const GEO_REG_DEPS = Object.freeze(["view.ppf", "view.offX", "view.offY", "size.w", "size.h", "origin", "geoOverscan", "geoDockX"]);
 /* A frozen module-scope zero so the reset path cannot allocate a fresh object per call. */
 const ZERO_REG_SHIFT = Object.freeze({ dx: 0, dy: 0 });
 const PANEL_SHIFT_EFFECT = "site-planner:panel-shift";
@@ -1750,6 +1753,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [standardsFocus, setStandardsFocus] = useState(null);
   const jumpToStandards = useCallback((key) => { setStandardsFocus(key); setLeftPanel("standards"); }, []);
   const [leftWidth, setLeftWidth] = useState(() => { try { return Math.max(240, Math.min(620, +localStorage.getItem("planarfit:leftWidth") || 320)); } catch (_) { return 320; } });
+  // NEW-2 (lib/panelWidth.js) — the room the docked panel RESERVES: `leftWidth` floored to a notch that is whole in
+  // CSS AND device px, so the canvas's left edge never re-snaps mid-drag. The leftover overlaps the canvas edge.
+  const leftOverlap = leftWidth - panelFlowWidth(leftWidth, typeof window !== "undefined" ? window.devicePixelRatio : 1);
   // B113: phone-width responsive mode. Below ~760px the fixed side rails would crush
   // the canvas to a sliver, so they OVERLAY it instead of consuming row width, and the
   // right tool palette collapses behind a toggle. matchMedia keeps it in sync with
@@ -2113,7 +2119,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      resize the basemap container mid-edit. */
   const drawableCount = els.length + markups.length + parcels.length;
   const geoWeight = tileWeight({ elementCount: drawableCount, deviceMemoryGb: typeof navigator !== "undefined" ? navigator.deviceMemory : null });
-  const geoOverscan = overscanPx({ elementCount: drawableCount, deviceMemoryGb: typeof navigator !== "undefined" ? navigator.deviceMemory : null, viewportW: size.w, viewportH: size.h });
+  /* NEW-2 (2026-10-08) — THE BASEMAP'S BOX DOES NOT MOVE WHEN A DOCKED PANEL DOES. `geoDockX` is how far the canvas's
+     left edge sits from the planner row's left (the rail plus whatever docked column is in flow — the same measured
+     edge the B837 pan compensation reads). The map container reaches left by exactly that much beyond its overscan, so
+     its LEFT edge is pinned to the row and its width is constant while a docked panel is dragged, opened or closed:
+     Leaflet is not resized, not panned, and no raster overlay is re-requested. Before, the container followed the
+     panel's edge; Leaflet can only pan by whole CSS px and the browser snaps a moving box to whole DEVICE px, so on a
+     scaled display (the owner's ≈ 2.15×) every drag step re-seated the tiles on a different device-pixel phase and
+     re-blended every tile seam, and every step re-requested FEMA's picture, whose "Zone AE" labels re-flow with the
+     extent. The cost is tiles held under the docked panel (it is opaque; the canvas clip hides them). The overscan is
+     sized off the same fixed width so it cannot change mid-drag either. */
+  const [geoDockX, setGeoDockX] = useState(0);
+  const geoDockXRef = useRef(0);
+  const geoOverscan = overscanPx({ elementCount: drawableCount, deviceMemoryGb: typeof navigator !== "undefined" ? navigator.deviceMemory : null, viewportW: size.w + geoDockX, viewportH: size.h });
+  const geoBoxInset = mapBoxInset(geoOverscan, geoDockX);
   const geoKeepBuffer = keepBufferFor({ elementCount: drawableCount, deviceMemoryGb: typeof navigator !== "undefined" ? navigator.deviceMemory : null });
   // An EXPORT pass must render the complete model whatever the view is (NEW-5's hard
   // constraint). buildExportSvg clones the LIVE svg, so it flips this off, flushes a full
@@ -2255,10 +2274,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // ancestor (see HatchPatternDef's header); `labelK` is what keeps that tile's PHYSICAL size on a
   // printed sheet independent of the live zoom at capture. Undefined patternTransform on both
   // (rot=0, labelK=1) reproduces every existing pattern byte-for-byte on screen.
-  const patHatchTf = (rotDeg) => {
-    const parts = [rotDeg ? `rotate(${rotDeg})` : null, labelK !== 1 ? `scale(${labelK})` : null].filter(Boolean);
-    return parts.length ? parts.join(" ") : undefined;
-  };
+  // NEW-1 — and every hatch is pinned to the GROUND (the render view's feet origin), never the canvas
+  // corner, so dragging/resizing a panel or panning never slides the stripes (lib/hatchAnchor.js).
+  const hatchAnchor = hatchAnchorFor(renderView, exportPass ? 1 : (typeof window !== "undefined" ? window.devicePixelRatio : 1));
+  const patHatchTf = (rotDeg) => hatchPatternTransform({ rotate: rotDeg, scale: labelK, anchor: hatchAnchor });
   const cullActive = !exportPass && shouldCull(drawableCount);
   /* VIEW-INDEPENDENT-ONCE (NEW-2). The cull rect is LATCHED: `cullRectFor` hands back the rect we
      already hold for as long as the true viewport is still comfortably inside it, and only builds
@@ -3192,7 +3211,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Site-route error 185 in `client_errors` back to 2026-07-30 (the crash lands on the `setGeoZoom`
     // dispatch inside `commit`), so it is the first place a diagnosis needs a run count and a
     // per-dependency churn verdict. See src/app/renderLoopProbe.js.
-    noteEffectRun(GEO_REG_EFFECT, GEO_REG_DEPS, [view.ppf, view.offX, view.offY, size.w, size.h, origin, geoOverscan]);
+    noteEffectRun(GEO_REG_EFFECT, GEO_REG_DEPS, [view.ppf, view.offX, view.offY, size.w, size.h, origin, geoOverscan, geoDockX]);
     const map = geoMapRef.current;
     const wrap = geoWrapRef.current;
     /* NEW-1 — every write to the wrap's gesture transform is mirrored onto the map-top host
@@ -3219,7 +3238,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // loop below. Reading `regShift` from the closure is safe (an effect always closes over the
     // current render's values) and the functional updater still guards the write itself.
     if (!map || !wrap || !origin) { commitRegShift(ZERO_REG_SHIFT); return; }
-    const fx = (size.w / 2 - view.offX) / view.ppf;
+    // NEW-2 — the map is centred on the ground under its CONTAINER's middle, which sits `geoDockX / 2` left of the
+    // canvas middle now that the container reaches under the docked column (mapLock.mapBoxCenterX).
+    const boxCx = mapBoxCenterX(size.w, geoDockX);
+    const fx = (boxCx - view.offX) / view.ppf;
     const fy = (size.h / 2 - view.offY) / view.ppf;
     const center = feetToLatLng({ x: fx, y: fy }, origin.lat, origin.lon);
     // NEW-1 — the scale is anchored at the SITE ORIGIN latitude, the same latitude the feet
@@ -3342,8 +3364,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Fallback when there is no tile to read (aerial off, or none arrived yet): the map's own
     // projection, which is the frame every Leaflet VECTOR overlay is placed in.
     const projRef = (c) => ({
-      imgPt: basemapWrapPoint(projectAt(c), ...mapFrame(), geoOverscan),
-      drawPt: { x: size.w / 2, y: size.h / 2 },
+      imgPt: basemapWrapPoint(projectAt(c), ...mapFrame(), geoOverscan, geoDockX),
+      drawPt: { x: boxCx, y: size.h / 2 },
     });
     const syncReg = (c) => {
       try {
@@ -3412,7 +3434,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         try {
           const target = exactPt(c);
           const half = map.getSize().divideBy(2);
-          map.panBy(L.point(target.x - half.x, target.y - half.y), { animate: false, noMoveStart: true });
+          const step = L.point(target.x - half.x, target.y - half.y);
+          // NEW-2 — a pan that rounds to nothing is not issued: Leaflet would still fire `moveend`, and every raster
+          // overlay answers `moveend` by re-requesting its picture (FEMA's labels re-flow with each one). A docked
+          // panel drag lands here on every frame now that the map's box no longer moves with the panel.
+          if (Math.round(step.x) || Math.round(step.y)) map.panBy(step, { animate: false, noMoveStart: true });
         } catch (_) { try { map.setView(c, zoom, { animate: false }); } catch (_) {} }
         // Store the map's ACTUAL settled center (panBy rounds to whole pixels), so the
         // next sizeChanged test compares against reality, not the pre-round target.
@@ -3472,10 +3498,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      * (this sandbox has none either); the owner's real 2026-09-01 Richfield session — this same
      * effect running for 24 minutes of active editing, not one synthetic gesture — is the live
      * cost evidence that was missing, so this ships now under `Verify: live` (V467696). */
-    const layoutInputs = { w: size.w, h: size.h, overscan: geoOverscan };
+    const layoutInputs = { w: size.w, h: size.h, overscan: geoOverscan, dockX: geoDockX };
     const li = geoLayoutInputsRef.current;
     let cw, ch, cachedStale;
-    if (registrationLayoutMayHaveChanged(li, layoutInputs.w, layoutInputs.h, layoutInputs.overscan)) {
+    if (registrationLayoutMayHaveChanged(li, layoutInputs.w, layoutInputs.h, layoutInputs.overscan, layoutInputs.dockX)) {
       cw = wrap.clientWidth; ch = wrap.clientHeight;
       cachedStale = false;
       try {
@@ -3593,7 +3619,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      * `size.w` would put a whole pixel of slop into the view maths that
      * `ui-audit/diagnose-pointer-accuracy.mjs` asserts to a quarter of a pixel.
      */
-  }, [view.ppf, view.offX, view.offY, size.w, size.h, origin, geoOverscan]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [view.ppf, view.offX, view.offY, size.w, size.h, origin, geoOverscan, geoDockX]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => { clearTimeout(geoCommitTimer.current); if (geoGhostRef.current) { try { geoGhostRef.current.remove(); } catch (_) {} geoGhostRef.current = null; } }, []);
 
@@ -6794,6 +6820,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // (an overlaid/portaled panel steals no layout width → zero delta), just without the rounding.
     const parentLeft = el.offsetParent ? el.offsetParent.getBoundingClientRect().left : 0;
     const left = canvasEdgeLeft(r.left, parentLeft);
+    // NEW-2 — the basemap box reaches left by this much, so its left edge stays pinned to the row (see `geoDockX`).
+    // Guarded: a dispatch that lands on the same number is still a dispatch (B1189).
+    if (geoDockXRef.current !== left) { geoDockXRef.current = left; setGeoDockX(left); }
     if (panelShiftRef.current == null) { panelShiftRef.current = left; return; } // seed baseline — no shift on first mount
     const delta = left - panelShiftRef.current;
     if (Math.abs(delta) > EDGE_EPS) {
@@ -6828,7 +6857,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const startLeftResize = (e) => {
     e.preventDefault();
     const startX = e.clientX, startW = leftWidth;
-    const onMove = (ev) => setLeftWidth(snapPanelWidth(startW + (ev.clientX - startX), window.devicePixelRatio)); // B2154768 — device-pixel-aligned (no sub-pixel shake)
+    const onMove = (ev) => setLeftWidth(snapPanelWidth(startW + (ev.clientX - startX), window.devicePixelRatio)); // B2154768/NEW-2 — paints at whole CSS px; the canvas edge moves in notches (leftFlowWidth)
     const onUp = () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
@@ -17590,8 +17619,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      handler that reads it can only run after the frame is committed. */
   parcelChipsRef.current = parcelChips.map((p) => ({ id: p.pc.id, box: p.box }));
   // The map container is the canvas plus `geoOverscan` on every side, so a canvas-space box moves by that much.
-  lotNoInsetRef.current = geoOverscan;
-  lotNoObstaclesRef.current = () => parcelChipsRef.current.map(({ box }) => ({ x: box.x + geoOverscan, y: box.y + geoOverscan, w: box.w, h: box.h }));
+  // NEW-2 — and by `geoDockX` more on the LEFT, where the container reaches under the docked column.
+  lotNoInsetRef.current = { left: geoOverscan + geoDockX, top: geoOverscan, right: geoOverscan, bottom: geoOverscan };
+  lotNoObstaclesRef.current = () => parcelChipsRef.current.map(({ box }) => ({ x: box.x + geoOverscan + geoDockX, y: box.y + geoOverscan, w: box.w, h: box.h }));
   /* NEW-1 (2026-10-04) — the county lot numbers must keep clear of this plan's own parcel chips, which move when
    * the view settles or a parcel is added / moved / hidden WITHOUT the map firing a move. A signature of the
    * chips' boxes (not the raw `parcels` list) is the trigger, so it changes exactly when a chip does. */
@@ -17600,7 +17630,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!identifyMode) return undefined;
     const t = setTimeout(() => { const set = outlineLayersRef.current; if (set && set.relayoutLabels) set.relayoutLabels(); }, 200);
     return () => clearTimeout(t);
-  }, [identifyMode, lotNoChipSig, geoOverscan]);
+  }, [identifyMode, lotNoChipSig, geoOverscan, geoDockX]);
 
   /* NEW-3 — the MEASUREMENT summary chip.
    *
@@ -23895,7 +23925,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               half-fixed. */}
           {origin && (
             <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, overflow: "hidden", pointerEvents: "none", visibility: revealed ? undefined : "hidden", background: (basemapOn && showAerial) ? "#3f3f3f" : PAL.paper }}>
-              <div ref={geoWrapRef} style={{ position: "absolute", inset: -geoOverscan, background: (basemapOn && showAerial) ? "#3f3f3f" : PAL.paper }} />
+              <div ref={geoWrapRef} style={{ position: "absolute", ...geoBoxInset, background: (basemapOn && showAerial) ? "#3f3f3f" : PAL.paper }} />
             </div>
           )}
           {/* NEW-1 — the MAP-TOP HOST: the stacking band that sits ABOVE the plan. It holds the
@@ -23907,7 +23937,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               takes a pointer event, so it can neither block a click nor steal a handle. */}
           {origin && (
             <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: CANVAS_Z.gisLine, overflow: "hidden", pointerEvents: "none", visibility: revealed ? undefined : "hidden" }}>
-              <div ref={geoTopWrapRef} style={{ position: "absolute", inset: -geoOverscan }}>
+              <div ref={geoTopWrapRef} style={{ position: "absolute", ...geoBoxInset }}>
                 <div ref={geoTopPaneRef} style={{ position: "absolute", left: 0, top: 0, width: 0, height: 0 }} />
               </div>
             </div>
@@ -24070,7 +24100,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   further down, only for an easement/encumbrance a user has actually styled)
                   are the exact same recipe. `pat-encumber` unchanged in every visible respect
                   (purple line, no wash) — see easements.js's ENCUMBRANCE_DEFAULT header. */}
-              <HatchPatternDef id="pat-encumber" hatchKey={ENCUMBRANCE_DEFAULT.hatch} color={ENCUMBRANCE_DEFAULT.stroke} wash={ENCUMBRANCE_DEFAULT.fillOpacity} lineOpacity={0.55} labelK={labelK} />
+              <HatchPatternDef id="pat-encumber" hatchKey={ENCUMBRANCE_DEFAULT.hatch} color={ENCUMBRANCE_DEFAULT.stroke} wash={ENCUMBRANCE_DEFAULT.fillOpacity} lineOpacity={0.55} labelK={labelK} anchor={hatchAnchor} />
               {/* v3 C4 — the pond's earthen berm ring: a warm-earth body at ~45% opacity + a 45°
                   hatch in a darker tone, so the embankment around a bermed pond reads as raised
                   ground distinct from the water it holds. */}
@@ -24091,7 +24121,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   now DEFAULT-only — the per-type pattern is exactly today's historic look and is
                   shared by every unedited easement of that type. */}
               {EASEMENT_TYPES.map((t) => (
-                <HatchPatternDef key={t.key} id={`pat-ease-${t.key}`} hatchKey={DEFAULT_EASE_HATCH} color={t.color} wash={DEFAULT_EASE_FILL_OPACITY} lineOpacity={0.5} labelK={labelK} />
+                <HatchPatternDef key={t.key} id={`pat-ease-${t.key}`} hatchKey={DEFAULT_EASE_HATCH} color={t.color} wash={DEFAULT_EASE_FILL_OPACITY} lineOpacity={0.5} labelK={labelK} anchor={hatchAnchor} />
               ))}
               {/* NEW-EASE-STYLE — one <pattern> per easement/encumbrance a user has actually
                   styled (colour/opacity/hatch edited in Properties). The common case — an
@@ -24099,18 +24129,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   above, so this stays cheap even on a plan with many easements. */}
               {markups.filter((m) => m.kind === "easement" && easementStyle(m).hasOverride).map((m) => {
                 const st = easementStyle(m);
-                return <HatchPatternDef key={`pat-ep-${m.id}`} id={`pat-ease-el-${m.id}`} hatchKey={st.hatch} color={st.fill} wash={st.fillOpacity} lineOpacity={0.5} labelK={labelK} />;
+                return <HatchPatternDef key={`pat-ep-${m.id}`} id={`pat-ease-el-${m.id}`} hatchKey={st.hatch} color={st.fill} wash={st.fillOpacity} lineOpacity={0.5} labelK={labelK} anchor={hatchAnchor} />;
               })}
               {markups.filter((m) => m.kind === "encumbrance" && encumbranceStyle(m).hasOverride).map((m) => {
                 const st = encumbranceStyle(m);
-                return <HatchPatternDef key={`pat-ec-${m.id}`} id={`pat-encumber-el-${m.id}`} hatchKey={st.hatch} color={st.fill} wash={st.fillOpacity} lineOpacity={0.55} labelK={labelK} />;
+                return <HatchPatternDef key={`pat-ec-${m.id}`} id={`pat-encumber-el-${m.id}`} hatchKey={st.hatch} color={st.fill} wash={st.fillOpacity} lineOpacity={0.55} labelK={labelK} anchor={hatchAnchor} />;
               })}
               {/* Closed markup hatch uses the shared catalog. Fill color remains the wash while
                   hatch color controls only the pattern, matching the two controls in Properties. */}
               {markups.filter((m) => ["rect", "ellipse", "polygon"].includes(m.kind) && m.hatch && m.hatch !== "none").map((m) => (
                 <HatchPatternDef key={`pat-mk-${m.id}`} id={`pat-markup-${m.id}`} hatchKey={m.hatch}
                   color={m.hatchColor || m.stroke || m.fill} washColor={m.fill} wash={m.fillOpacity ?? 0}
-                  lineOpacity={1} labelK={labelK} />
+                  lineOpacity={1} labelK={labelK} anchor={hatchAnchor} />
               ))}
             </defs>
 
@@ -24467,7 +24497,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <foreignObject data-export="skip" x={0} y={0} width={Math.max(1, size.w)} height={Math.max(1, size.h)} pointerEvents="none" style={{ overflow: "hidden" }}>
                     <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none",
                       transform: (regShift.dx || regShift.dy) ? `translate(${-regShift.dx}px, ${-regShift.dy}px)` : undefined }}>
-                      <div ref={geoFrontWrapRef} style={{ position: "absolute", inset: -geoOverscan }}>
+                      <div ref={geoFrontWrapRef} style={{ position: "absolute", ...geoBoxInset }}>
                         <div ref={geoFrontPaneRef} style={{ position: "absolute", left: 0, top: 0, width: 0, height: 0 }} />
                       </div>
                     </div>
@@ -26368,6 +26398,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             } : {
               width: narrow ? `min(320px, calc(100vw - ${54 + TOOLS_TAB_WIDTH_PX}px))` : leftWidth, // narrow: stop at the Tools edge tab so it never paints over the header ×/↻ (it did, at 20px of overlap)
               flex: "none", background: LEFT_PANEL_SURFACE, display: "flex", flexDirection: "column", minHeight: 0,
+              // NEW-2 (lib/panelWidth.js) — the panel paints at `leftWidth` but reserves only `leftFlowWidth` (whole
+              // notches), so the canvas edge never lands between pixel grids; the < one-notch leftover overlaps it.
+              ...(!narrow && leftOverlap > 0 ? { marginRight: -leftOverlap, position: "relative", zIndex: 3 } : null),
               ...(narrow ? { position: "absolute", left: 54, top: 0, bottom: 0, zIndex: 1100, boxShadow: "10px 0 28px rgba(0,0,0,0.35)" } : null),
             }}>
           {phoneSheetSolo && (<>
@@ -29661,7 +29694,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </div>
           {/* drag handle to resize the menu (desktop only — on phones the panel is a fixed-width overlay) */}
           {!narrow && <div onPointerDown={startLeftResize} title="Drag to resize"
-            style={{ width: 6, flex: "none", cursor: "col-resize", background: PAL.panelLine, borderRight: `1px solid ${PAL.panelLine}` }} />}
+            style={{ width: 6, flex: "none", cursor: "col-resize", background: PAL.panelLine, borderRight: `1px solid ${PAL.panelLine}`,
+              ...(leftOverlap > 0 ? { transform: `translateX(${leftOverlap}px)`, position: "relative", zIndex: 3 } : null) }} />}
           </>)}
         </div>
       </div>

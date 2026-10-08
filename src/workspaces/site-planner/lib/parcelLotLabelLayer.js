@@ -77,9 +77,16 @@ function paintLotNumbers({ map, group, field, floor, measure, getObstacles, getI
   const size = map.getSize();
   // `getInset`: a host whose map container is larger than what the person can see (the Site planner
   // over-scans its basemap so a pan never shows blank tile) says how much, so numbers sit in the VISIBLE part.
-  let inset = VIEW_INSET;
-  try { inset += Math.max(0, Number(getInset && getInset()) || 0); } catch (_) { /* default inset */ }
-  const view = { x0: min.x + inset, y0: min.y + inset, x1: min.x + size.x - inset, y1: min.y + size.y - inset };
+  // A number insets every side alike; `{ left, top, right, bottom }` per side (the Site planner's container reaches
+  // further under the docked left column than it over-scans elsewhere — NEW-2, `geoDockX`).
+  const ins = { left: VIEW_INSET, top: VIEW_INSET, right: VIEW_INSET, bottom: VIEW_INSET };
+  try {
+    const g = getInset && getInset();
+    const pos = (v) => Math.max(0, Number(v) || 0);
+    if (g && typeof g === "object") for (const k of Object.keys(ins)) ins[k] += pos(g[k]);
+    else for (const k of Object.keys(ins)) ins[k] += pos(g);
+  } catch (_) { /* default inset */ }
+  const view = { x0: min.x + ins.left, y0: min.y + ins.top, x1: min.x + size.x - ins.right, y1: min.y + size.y - ins.bottom };
   const origin = { x: min.x, y: min.y };
   const cands = [];
   forEachFeature((f, bbox) => { if (f) cands.push(f, bbox); });
