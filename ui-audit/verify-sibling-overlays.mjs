@@ -135,7 +135,7 @@ try {
   check(await readable(first.storageKey), "after removing everything on A, the object is KEPT (B's copy still references it)");
   await openPlan(B);
   await F("remove", (await F("own")).find((o) => o.sharedFrom).id);
-  await until(async () => !(await readable(first.storageKey)), "object released once nothing references it", 60000);
+  await until(async () => !(await readable(first.storageKey)), "object released once nothing references it (30 s undo grace)", 100000);
   check(true, "object released after the last holder let go");
   await F("refresh");
   check((await F("rows")).length === 0, "nothing is offered on B any more");

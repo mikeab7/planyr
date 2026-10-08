@@ -10518,8 +10518,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const foreignOverlays = { rows: foreignRows, status: sibState.status, error: sibState.error, refresh: refreshSiblings };
   // The eye on a foreign row. COPIES the record into THIS plan only (new id, re-framed to this plan's
   // origin, stamped `sharedFrom`); every refusal says why and writes nothing.
+  const showingForeign = useRef(new Set());
   const showForeignOverlay = async (row) => {
-    if (!row) return;
+    if (!row || showingForeign.current.has(row.key)) return; // a second press while the first is still checking must not add it twice
+    showingForeign.current.add(row.key);
+    try { await showForeignOverlayOnce(row); } finally { showingForeign.current.delete(row.key); }
+  };
+  const showForeignOverlayOnce = async (row) => {
     const fresh = await refreshSiblings();
     const verdict = await planForeignCopy({ foreign: row, fresh, selfOrigin: stateRef.current.origin, probe: probeOverlayObject, mint: uid });
     if (!verdict.ok) { flashWarn(`⚠ ${verdict.message}`, 8000); return; }
@@ -10555,6 +10560,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Release a removed overlay's stored bytes only when NO plan references them — this site's other plans
   // included — releasing device + cloud together or neither, and tell the user when a sibling still holds it.
   const releaseOverlayAssets = async (o) => {
+    try {
+      // Grace window: bytes go only after the user can no longer Ctrl+Z the removal, and never if it came back.
+      await new Promise((r) => setTimeout(r, 30000));
+      if (stateRef.current.sheetOverlays.some((x) => x.id === o.id)) return;
+      await releaseOverlayAssetsNow(o);
+    } catch (e) {
+      reportClientEvent("overlay-asset-retained", "kept a source file: release check threw", { siteId, overlayId: o.id, error: (e && e.message) || "" });
+    }
+  };
+  const releaseOverlayAssetsNow = async (o) => {
     let plans = loadSitesList();
     let sibs = [];
     const gid = groupIdOfThisPlan();
@@ -10569,6 +10584,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       plans = [...plans, ...siblingPlansAsRefs(sibs)];
       setSibState({ status: "ok", plans: sibs, error: null });
     }
+    // This plan's OWN remaining overlays hold bytes too (two pages of one PDF): count them as a holder.
+    plans = [...plans, { id: "__this-plan-remaining", sheetOverlays: stateRef.current.sheetOverlays.filter((x) => x.id !== o.id) }];
     const assetRefs = collectAssetRefs(plans);
     const { release, kept } = releasePlanForOverlay(assetRefs, o, siteId);
     for (const r of release) {
