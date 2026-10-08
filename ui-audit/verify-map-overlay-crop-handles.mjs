@@ -72,6 +72,7 @@ try {
   await page.getByText("ZZ MapOv Throwaway", { exact: false }).first().click({ timeout: 15000 }); await sleep(3500); // opens the planner on the site
   await page.evaluate(() => { location.hash = "#/site-planner"; }); await sleep(3500);          // back to the Map (no reload)
   await page.locator('button[role="tab"][title^="Site record"]').first().click({ timeout: 15000 }); await sleep(3000);
+  if (process.env.SHOTS_DIR) { await page.screenshot({ path: process.env.SHOTS_DIR + "/map-records.png" }); console.log("buttons:", JSON.stringify(await page.evaluate(() => [...document.querySelectorAll("button")].map((b) => (b.innerText || b.title || b.getAttribute("aria-label") || "").trim().replace(/\s+/g, " ")).filter((t) => /plan|adjust|move|place|zz|overlay/i.test(t)).slice(0, 20)))); }
   const arm = page.getByRole("button", { name: /Move \/ resize/ }).first();
   await arm.click({ timeout: 15000 }); await sleep(2500);
 
