@@ -21,7 +21,7 @@
  * here (ATTEMPT-BEFORE-YOU-PARK). The signed-in pass on his real plan is the live V###.
  */
 import { test, expect } from "@playwright/test";
-import { armPlannerHooks } from "./helpers.js";
+import { armPlannerHooks, openModule } from "./helpers.js";
 import { assertMeasurable, pacedWait } from "../ui-audit/lib/tabTiming.mjs";
 
 const canvas = (p) => p.getByTestId("planner-canvas");
@@ -72,6 +72,7 @@ async function boot(page) {
     localStorage.setItem("planarfit:currentSite:v1", id);
   }, [SITE_ID, site]);
   await page.goto("/");
+  if (!(await canvas(page).count())) await openModule(page, "site-planner");   // the app opens on the Dashboard now
   await expect(canvas(page)).toBeVisible({ timeout: 20_000 });
   /* ⚠ TWO planner canvases are mounted at once — measured, not assumed: both matches sit under a
    * `[data-testid="planner-canvas"]` svg, at different nesting depths, and both paint the label.

@@ -360,6 +360,7 @@ import {
   bandLayout, bandStripeMarksWithWidth, BAND_FILL_TOKEN, BAND_FILL_OPACITY, designatedRowFt, rowMarginFt, rowWidth,
   XSEC_BAND_FILL_MIN_PX, XSEC_STRIPE_MIN_PX,
 } from "./lib/roadCrossSection.js";
+import { placeEasementLabel, AREA_FONT_PX } from "./lib/easementLabelPlacement.js";
 import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible, pondParamLabelVisible, pondParamFontPx, suppressedDimIds, dimFontScale, dimFontPx, boxOf, DIM_CALLOUT_MIN_PPF, stallStripesExplicit, segmentsPath, featureNameLabelVisible, featureNameFontPx, featureExtentFt } from "./lib/labelLayout.js";
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
@@ -23590,12 +23591,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           across the drawing. Selecting something you cannot see must not make its name the
                           largest thing on screen. The hatched fill + centerline geometry always stay
                           (keep-geometry, avoid the on/off flicker) and the edit handles are unaffected. */}
+                      {/* NEW-1 — the name (and the selected-state area line) ride the easement's long axis,
+                          rotated to it and kept upright; see lib/easementLabelPlacement.js. A shape that is
+                          not elongated keeps the old horizontal-at-centroid label exactly. */}
                       {(() => {
                         const txt = `${easementLabel(m)}${proposed ? " (proposed)" : ""}`;
-                        if (!featureNameLabelVisible(txt, featureExtentFt(m.pts), labelPpf, EASE_LABEL_BASE_PX)) return null;
-                        return <text x={cp.x} y={cp.y} textAnchor="middle" fontSize={featureNameFontPx(labelPpf, EASE_LABEL_BASE_PX) * labelK} fontWeight="700" fill={ecol} pointerEvents="none" style={INK_HALO}>{txt}</text>;
+                        const pl = placeEasementLabel(m, txt, { labelPpf, basePx: EASE_LABEL_BASE_PX, toScreen: f2p, withArea: isSel && labelPpf > 0.05 });
+                        if (!pl) return null;
+                        const at = f2p({ x: pl.x, y: pl.y });
+                        return (
+                          <g transform={`translate(${at.x} ${at.y}) rotate(${pl.angle}) scale(${labelK})`} pointerEvents="none" data-easement-label={m.id} data-label-angle={pl.angle.toFixed(1)}>
+                            <text x={0} y={pl.nameDy} textAnchor="middle" fontSize={pl.fontPx} fontWeight="700" fill={ecol} pointerEvents="none" style={INK_HALO}>{txt}</text>
+                            {pl.showArea && <text x={0} y={pl.areaDy} textAnchor="middle" fontSize={AREA_FONT_PX} fontWeight="600" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{Math.round(area).toLocaleString()} SF · {(area / SQFT_PER_ACRE).toFixed(2)} AC</text>}
+                          </g>
+                        );
                       })()}
-                      {isSel && labelPpf > 0.05 && <text x={cp.x} y={cp.y + 12 * labelK} textAnchor="middle" fontSize={9 * labelK} fontWeight="600" fill={ecol} pointerEvents="none" style={{ paintOrder: "stroke", stroke: "#fff", strokeWidth: 2.5 }}>{Math.round(area).toLocaleString()} SF · {(area / SQFT_PER_ACRE).toFixed(2)} AC</text>}
                       {inlineLabelEls(easePathFeet, m.inlineLabel, ecol, m.labelSpacing || INLINE_LABEL_SPACING.easement, rppf, f2p, `il${m.id}-`, { size: m.labelSize, halo: m.labelHalo, lf: labelFrame, ...easementInsetOpts(m) })}
                     </g>
                   );
