@@ -32731,7 +32731,7 @@ function DrainagePanel({
               // the drawn area" banner, and the border no longer demotes to dashed on stale (that
               // read as trapping the reviewing-agency selector inside a warning box).
               return (
-                <div key="assumptions" style={{ marginTop: 7, border: `1px solid ${Y.border}`, borderRadius: 8, padding: "7px 9px", background: Y.cardBg }}>
+                <div key="assumptions" data-flat-group="assumptions" style={{ marginTop: 7, borderTop: `1px solid ${Y.border}`, padding: "8px 0 2px" }}>
                   <div title={d.channelDischarge?.overrideIgnored ? "HCFCD n/a outside Harris: saved channel answer ignored." : ""} style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.05em", textTransform: "uppercase", color: Y.rowLabel, marginBottom: 4, cursor: d.channelDischarge?.overrideIgnored ? "help" : undefined }}>Assumptions: correct if needed{d.channelDischarge?.overrideIgnored ? <span style={{ fontSize: 9, marginLeft: 4, letterSpacing: 0 }} aria-hidden="true">ⓘ</span> : null}</div>
                   {rows}
                 </div>
