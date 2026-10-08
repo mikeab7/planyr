@@ -13172,7 +13172,8 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
     const s=[];
     if(ri===minR) s.push("inset 0 2px 0 0 #2563eb");
     if(ri===maxR) s.push("inset 0 -2px 0 0 #2563eb");
-    else           s.push("inset 0 -1px 0 0 #93c5fd");
+    // (B2160464) no inner 1px row separator here any more: every cell now draws its OWN bottom line
+    // (GRID_LINE_RANGE inside a range), so an inset one would stack a second blue line beside it.
     if(ci===minC) s.push("inset 2px 0 0 0 #2563eb");
     if(ci===maxC) s.push("inset -2px 0 0 0 #2563eb");
     return s.join(",");
