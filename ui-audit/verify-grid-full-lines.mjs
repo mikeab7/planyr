@@ -120,6 +120,18 @@ for (const theme of THEMES) {
   const png = decodePng(await page.screenshot());
   const px = (x, y) => { const i = (y * png.width + x) * png.channels; return `${png.data[i]},${png.data[i+1]},${png.data[i+2]}`; };
   data.paint = geo.map(g => ({ id: g.id, mid: px(g.xs.name, g.mid), line: Object.fromEntries(Object.entries(g.xs).map(([k, x]) => [k, px(x, g.bottom - 1)])) }));
+  // range drag TASK..DUR over rows 2..4: the shared row edge (row 3 | row 4, neither is the anchor) is ONE 1px range line
+  {
+    const g = geo.map(x => ({ ...x }));
+    const pts = await page.evaluate(() => [...document.querySelectorAll("[data-task-row]")].slice(0, 6).map(r => { const c = k => { const b = r.querySelector(`[data-col-key="${k}"]`).getBoundingClientRect(); return { x: Math.round(b.left + b.width * 0.62), r: Math.round(b.right) }; }; const rb = r.getBoundingClientRect(); return { mid: Math.round(rb.top + rb.height / 2), bottom: Math.round(rb.bottom), name: c("name"), dur: c("duration") }; }));
+    const a = { x: pts[1].name.x, y: pts[1].mid }, b = { x: pts[3].dur.x, y: pts[3].mid };
+    await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(b.x, b.y, { steps: 8 }); await page.mouse.up();
+    await new Promise(r => setTimeout(r, 400));
+    const png2 = decodePng(await page.screenshot());
+    const p2 = (x, y) => { const i = (y * png2.width + x) * png2.channels; return `${png2.data[i]},${png2.data[i+1]},${png2.data[i+2]}`; };
+    const rr = pts[2], x = rr.name.x, y = rr.bottom - 1;
+    data.range = { line: p2(x, y), above: p2(x, y - 1), next: p2(x, rr.bottom) };
+  }
   if (PROBE) { console.log(JSON.stringify(data, null, 1)); }
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/grid-${theme}.png` });
 
@@ -155,6 +167,9 @@ for (const theme of THEMES) {
     ok(`${tag} row ${g.id} · painted bottom line is a line (differs from the cell fill)`, ref !== g.mid, `line=${ref} fill=${g.mid}`);
     for (const k of ["id", "name", "duration", "notes"]) if (!(k === "duration" && g.id === "2")) ok(`${tag} row ${g.id} · painted bottom line under ${k.toUpperCase()} equals START's`, g.line[k] === ref, `${k}=${g.line[k]} start=${ref}`);
   }
+  ok(`${tag} range: the shared row edge is one range-blue line`, data.range.line === "147,197,253", data.range.line);
+  ok(`${tag} range: the pixel above it is the range fill, not a second blue line (no doubling)`, data.range.above !== "147,197,253" && data.range.above !== "225,228,232", data.range.above);
+  ok(`${tag} range: the pixel below it is not a stacked line`, data.range.next !== "147,197,253", data.range.next);
   // header lines up with body: header cell right divider === body cell right divider, per column
   for (const k of ["id", "name", "duration", "notes"]) {
     const b = plain?.cells[k]; if (!b || !data.hdr[k]) continue;

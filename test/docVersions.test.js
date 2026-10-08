@@ -143,6 +143,12 @@ describe("wiring guards", () => {
   it("DocReview persists the save stamp (packSource) and saves/restores through the shared ops", () => {
     expect(dr).toMatch(/saveVersion\(/); expect(dr).toMatch(/restoreVersion\(/); expect(dr).toMatch(/packSource\(/);
   });
+  it("a file with no project (Library home 'Unfiled' rows) has the same Versions button as a project row — found by the live run, V1459216", () => {
+    const home = readFileSync(new URL("../src/workspaces/library/components/LibraryHome.jsx", import.meta.url), "utf8");
+    const lib = readFileSync(new URL("../src/workspaces/library/Library.jsx", import.meta.url), "utf8");
+    expect(home).toMatch(/data-testid="library-version-history"/);
+    expect(lib).toMatch(/<LibraryHome[\s\S]*?onOpenHistory=\{[^}]*history: true/);
+  });
   it("opening an earlier version never downloads", () => {
     const ed = readFileSync(new URL("../src/workspaces/doc-review/components/VersionHistorySheet.jsx", import.meta.url), "utf8");
     expect(ed).not.toMatch(/createObjectURL|\.download\s*=|download=/);
