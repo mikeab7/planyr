@@ -11,9 +11,15 @@
 import { openSignedIn } from "./lib/signedInSession.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 
-const base = process.argv[2] || "https://planyr.io";
+const base = process.argv.find((a) => /^https?:/.test(a)) || "https://planyr.io";
+// --dashboard-fixture: also writes ONE throwaway schedule into the test account's own schedule blob (planar_data
+// "hs-v1", the table the app itself writes) so the Dashboard's Schedule Health card can be read. The account cannot
+// DELETE that row (no delete policy), so it is cleared back to empty afterwards and a row is left — opt-in for that reason.
+const WITH_DASH = process.argv.includes("--dashboard-fixture");
 const stamp = Date.now().toString(36);
 const NAME1 = `zz-rename-check-${stamp}`;
+const NAME2 = `zz-rename-after-${stamp}`;
+const SCHED = `zz-sched-${stamp}`;
 const results = [];
 const record = (step, ok, detail) => { results.push({ step, ok, detail }); console.log(`${ok ? "PASS" : "FAIL"}  ${step}${detail ? " — " + detail : ""}`); };
 
@@ -73,6 +79,51 @@ try {
   const listed = await page.getByTestId(`project-row-${gid}`).innerText().catch(() => "");
   record("3b the Map's project switcher lists it under the new name", listed.includes(NAME1), `row="${listed.replace(/\s+/g, " ").slice(0, 80)}"`);
   await page.keyboard.press("Escape");
+
+  // ── V1416128 schedule leg ───────────────────────────────────────────────────────────────────────────────────
+  // B. the embedded Schedule page resolves a linked project's name LIVE by id: hand its own label function a schedule
+  //    whose STORED copy is deliberately wrong, and require the project's current name (before and after a rename).
+  const iframeLabel = async () => {
+    const fr = page.frames().find((f) => f !== page.mainFrame());
+    if (!fr) return "no-iframe";
+    return fr.evaluate((g) => { try { return typeof crossScheduleLabel === "function" ? crossScheduleLabel({ id: 1, name: "S", ownerKind: "site", linkedSiteId: g, linkedSiteName: "STALE-STORED-COPY" }) : "no-fn"; } catch (e) { return "err " + e.message; } }, gid);
+  };
+  const renameTo = async (name) => {
+    await page.goto(`${base}/#/project/${gid}/site`, { waitUntil: "domcontentloaded" });
+    await page.locator('[data-testid="planner-canvas"]').waitFor({ state: "visible", timeout: 60000 });
+    await crumb().click(); await page.getByTestId(`project-row-${gid}`).hover(); await page.getByTestId(`project-kebab-${gid}`).click(); await page.getByTestId("project-rename").click();
+    const inp = page.getByRole("textbox", { name: /^Rename / }); await inp.fill(name); await inp.press("Enter"); await page.waitForTimeout(2500); await page.keyboard.press("Escape");
+  };
+  const openSchedule = async () => {
+    await page.goto(`${base}/#/project/${gid}/schedule`, { waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: /create schedule|link an existing/i }).first().waitFor({ timeout: 60000 }).catch(() => {});
+    await page.waitForTimeout(8000);
+  };
+  await openSchedule();
+  const l1 = await iframeLabel();
+  record("5a Schedule page label uses the project's live name, not the stored copy", l1 === `${NAME1} / S`, `label="${l1}"`);
+  await renameTo(NAME2);
+  await openSchedule();
+  const l2 = await iframeLabel();
+  record("5b …and follows a rename (stored copy still wrong)", l2 === `${NAME2} / S`, `label="${l2}"`);
+
+  // C. (opt-in) the Dashboard's Schedule Health card — the surface the owner reported ("Pappadoupolos / Master Schedule").
+  if (WITH_DASH) {
+    const ownerId = (await page.evaluate(async () => (await window.pfSupabase.auth.getUser()).data.user.id));
+    const blob = (name, rev) => ({ __rev: rev, projects: name ? { 1: { id: 1, name: SCHED, ownerKind: "site", linkedSiteId: gid, linkedSiteName: "STALE-STORED-COPY", tasks: [{ id: 1, name: "zz task", start: "2026-10-01", finish: "2026-10-10", dur: 10, pct: 0 }] } } : {}, settings: {} });
+    const ins = await page.evaluate(async ({ uid, v }) => { const r = await window.pfSupabase.from("planar_data").insert({ key: "hs-v1", user_id: uid, value: v }); return r.error ? String(r.error.message) : null; }, { uid: ownerId, v: blob(true, 1) });
+    record("6 fixture schedule written to the test account's own blob", !ins, ins || "ok");
+    if (!ins) {
+      const dashText = async () => { await page.goto(`${base}/#/`, { waitUntil: "domcontentloaded" }); await page.waitForTimeout(12000); const t = await page.evaluate(() => document.body.innerText.replace(/\n+/g, " | ")); const i = t.toLowerCase().indexOf("schedule health"); return i >= 0 ? t.slice(i, i + 240) : t.slice(0, 240); };
+      const d1 = await dashText();
+      record("7 Dashboard Schedule Health shows the project's CURRENT name, not the stored copy", d1.includes(`${NAME2} / ${SCHED}`) && !d1.includes("STALE-STORED-COPY"), d1.slice(0, 140));
+      await renameTo(NAME1 + "-b");
+      const d2 = await dashText();
+      record("8 …and follows a second rename without touching the schedule", d2.includes(`${NAME1}-b / ${SCHED}`), d2.slice(0, 140));
+      const clr = await page.evaluate(async (v) => { const r = await window.pfSupabase.from("planar_data").update({ value: v }).eq("key", "hs-v1"); return r.error ? String(r.error.message) : null; }, blob(false, 2));
+      record("9 fixture blob cleared back to empty", !clr, clr || "ok (one empty blob row remains: the account has no delete policy)");
+    }
+  }
 } catch (e) {
   record("harness error", false, String(e && e.message || e).slice(0, 300));
 } finally {
@@ -83,6 +134,10 @@ try {
         const q = await window.pfSupabase.from("sites").select("id").eq("group_id", g);
         const ids = (q.data || []).map((r) => r.id);
         if (!ids.length) return { removed: 0 };
+        // The database refuses to permanently delete a LIVE project (sites_block_delete_live_group): move it to the
+        // trash first — exactly what the app's own Delete does — then remove it for good.
+        const t = await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).in("id", ids);
+        if (t.error) return { removed: 0, error: "trash: " + String(t.error.message) };
         const r = await window.pfSupabase.from("sites").delete().in("id", ids);
         return { removed: ids.length, error: r.error ? String(r.error.message) : null };
       }, gid);
