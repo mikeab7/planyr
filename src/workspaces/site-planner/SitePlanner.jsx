@@ -511,6 +511,7 @@ import { planCombine, planSplit, planRestoreCombined, planRestoreSplit, included
 import ParcelsPanel from "./components/ParcelsPanel.jsx";
 import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea, mergeParcelRings } from "./lib/polyClip.js";
 import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom, mapChromeCardStyle } from "./lib/sheetFurniture.js";
+import { MAP_CORNER_PX, MAP_CORNER_GAP_PX, paneInsetFor, cornerGroupWidth, cursorChipFit } from "./lib/mapCorners.js";
 // B765985 — pure, dependency-free (safe on the boot path): the explicit engineering-scale math
 // the compose screen's frame-locking and fit-check use.
 import { scaleLabel, frameFootprintForScale, checkScaleFits } from "./lib/printScale.js";
@@ -23681,7 +23682,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // right-anchored scale bar on the same row? Pure decision in sheetFurniture.js: when they'd
   // meet the badge is lifted to its own row above the bar (and its width capped). `calibBadgeW`
   // is measured below; 0 until then → never raised.
-  const calibPlace = calibBadgePlacement({ paneW, badgeW: calibBadgeW, scaleBarW: furnPlates.scaleBar.plateW, scaleBarH: furnPlates.scaleBar.plateH, row: FURNITURE_ROW });
+  // NEW-1 (B2206704–B2206706) — THE LEFT-ANCHORED FURNITURE (north arrow, calibration badge, coordinate chip, the Standards toast)
+  // IS POSITIONED AGAINST THE VISIBLE MAP PANE, NOT THE CANVAS BOX. A docked left panel PAINTS `leftOverlap` px wider than
+  // the room it reserves (lib/panelWidth.js), so the canvas box reaches left under its right edge; `paneInset` is exactly that
+  // overlap, so `left: paneInset + margin` is the panel's own painted edge + margin on every frame of a drag.
+  const paneInset = paneInsetFor({ narrow, docked: !!leftPanel, overlap: leftOverlap });
+  const visPaneW = paneW - paneInset; // the visible pane — what every width decision below must be made against
+  // NEW-2 (B2206704–B2206706) — desktop bottom-right corner group: scale bar · help · zoom stack on one baseline, owned by ONE flex
+  // container (rendered with the zoom stack below). Phone keeps its own vertical arrangement. The zoom/help button size is the
+  // same `zb` size the stack renders at.
+  const cornerBtn = coarsePointer ? 35 : CONTROL_H.lg;
+  const cornerGroupW = narrow ? 0 : cornerGroupWidth({ scaleBarW: furnPlates.scaleBar.plateW, helpW: cornerBtn, zoomW: cornerBtn });
+  const cursorFit = narrow ? { show: false, maxWidth: 0 } : cursorChipFit({ visW: visPaneW, groupW: cornerGroupW });
+  const calibPlace = calibBadgePlacement({
+    paneW: visPaneW, badgeW: calibBadgeW,
+    // Desktop: the thing to clear on the right is the whole corner group (scale bar + help + zoom) — which stands
+    // MAP_CORNER_PX off the right edge and, being taller than the badge's band, is clear only horizontally.
+    scaleBarW: narrow ? furnPlates.scaleBar.plateW : cornerGroupW, scaleBarH: furnPlates.scaleBar.plateH,
+    sbRight: narrow ? 14 : MAP_CORNER_PX, zoomRight: narrow ? 14 : MAP_CORNER_PX, zoomW: narrow ? 30 : cornerBtn * 2 + MAP_CORNER_GAP_PX,
+    row: FURNITURE_ROW,
+  });
   // Measure the badge's natural width. The ref sits on the LABEL span, whose `scrollWidth`
   // reports the FULL text width even after the pill caps + ellipsis-truncates it — so raising
   // the badge (which applies the cap) can never feed back and shrink this measurement into an
@@ -25102,9 +25122,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 dangerouslySetInnerHTML={{ __html: p.markup }} />
             );
             return (
-              <div data-export="skip" style={{ position: "absolute", left: 0, right: 0, bottom: 0, top: 0, pointerEvents: "none", zIndex: MAP_CHROME_Z.furniture }}>
-                <div data-testid="north-arrow-plate" style={{ position: "absolute", left: 14, bottom: FURNITURE_ROW }}>{plate(furn.north)}</div>
-                <div data-testid="scale-bar-plate" style={{ position: "absolute", right: 14, bottom: FURNITURE_ROW }}>{plate(furn.scaleBar)}</div>
+              <div data-export="skip" data-testid="map-furniture-frame" style={{ position: "absolute", left: paneInset, right: 0, bottom: 0, top: 0, pointerEvents: "none", zIndex: MAP_CHROME_Z.furniture }}>
+                <div data-testid="north-arrow-plate" data-map-furniture="north" style={{ position: "absolute", left: narrow ? 14 : MAP_CORNER_PX, bottom: FURNITURE_ROW }}>{plate(furn.north)}</div>
+                {/* Phone only: desktop's scale bar lives in the bottom-right corner group (rendered with the zoom stack). */}
+                {narrow && <div data-testid="scale-bar-plate" data-map-furniture="scale-bar" style={{ position: "absolute", right: 14, bottom: FURNITURE_ROW }}>{plate(furn.scaleBar)}</div>}
               </div>
             );
           })()}
@@ -25119,7 +25140,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               Behaviour is untouched: same 7s life, same single undo frame. */}
           {stdToast && (
             <div data-testid="standards-apply-toast" style={{
-              position: "absolute", left: 14, zIndex: 8, maxWidth: "min(340px, calc(100% - 28px))",
+              position: "absolute", left: paneInset + 14, zIndex: 8, maxWidth: `min(340px, calc(100% - ${paneInset + 28}px))`,
               bottom: canvasPillBottom({ northH: furnPlates.north.plateH, scaleBarH: furnPlates.scaleBar.plateH, calibBottom: calibrationState ? calibPlace.bottom : null, row: FURNITURE_ROW }),
               background: PAL.accent, color: "var(--on-accent)", padding: "8px 14px", borderRadius: 99,
               fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)",
@@ -25531,9 +25552,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const dividerH = Math.round(chrome.fontSize + 2);
             return (
               <div onClick={warn && mapRef ? () => { setShowAerial(true); setLeftPanel("references"); setSelOverlay(mapRef.id); setOvCalib({ id: mapRef.id, kind: "trace", pts: [] }); } : undefined}
-                data-testid="calibration-badge"
+                data-testid="calibration-badge" data-map-furniture="calibration"
                 style={{
-                  position: "absolute", left: calibPlace.left, bottom: calibPlace.bottom, maxWidth: badgeMaxW,
+                  position: "absolute", left: calibPlace.left + paneInset, bottom: calibPlace.bottom, maxWidth: badgeMaxW,
                   display: "flex", alignItems: "center", gap: 8,
                   background: chrome.background, border: `${chrome.borderWidth}px solid ${chrome.borderColor}`, borderRadius: chrome.borderRadius,
                   padding: "5px 11px", fontSize: chrome.fontSize,
@@ -25626,14 +25647,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               floor: FURNITURE_ROW + furnPlates.scaleBar.plateH + 2,
               topReserve: narrow ? TOOLS_TAB_RESERVE_PX : undefined,
             });
-            return (
-              <>
-              {/* data-canvas-corner: read by the shared help/report control (shared/ui/
-                  cornerClearance.js) so it can clear this stack when — and only when — it
-                  genuinely reaches the true viewport corner (narrow width; on desktop the
-                  docked tool rail insets this pane away from that corner, so the measured
-                  rect naturally stops overlapping and this stack is ignored for free). */}
-              <div data-export="skip" data-canvas-corner="zoom-stack" style={{ position: "absolute", right: 14, bottom: zoomBottom, display: "flex", flexDirection: "column", borderRadius: 9, overflow: "hidden", boxShadow: "0 4px 14px rgba(0,0,0,0.18)", zIndex: MAP_CHROME_Z.control }}>
+            const dockSlot = (
+              <div data-export="skip" data-canvas-dock-slot="planner" data-map-furniture="help" style={narrow ? { position: "absolute", right: 14 + zb.width + 8, bottom: zoomBottom, zIndex: MAP_CHROME_Z.control } : { position: "relative", pointerEvents: "auto", flex: "none", zIndex: MAP_CHROME_Z.control }}>
+                <div ref={helpDockRef} data-canvas-dock="planner" data-dock-size={zb.width} />
+              </div>
+            );
+            const zoomStack = (
+              <div data-export="skip" data-canvas-corner="zoom-stack" data-testid="zoom-stack" data-map-furniture="zoom" style={{ position: narrow ? "absolute" : "relative", ...(narrow ? { right: 14, bottom: zoomBottom } : { pointerEvents: "auto", flex: "none" }), display: "flex", flexDirection: "column", borderRadius: 9, overflow: "hidden", boxShadow: "0 4px 14px rgba(0,0,0,0.18)", zIndex: MAP_CHROME_Z.control }}>
                 <button className="gbtn" aria-label="Zoom in" title="Zoom in" style={{ ...zb, borderRadius: 0 }} onClick={() => zoomBy(1.25)}>＋</button>
                 <button className="gbtn" aria-label="Zoom out" title="Zoom out" style={{ ...zb, borderTop: "none", borderRadius: 0 }} onClick={() => zoomBy(1 / 1.25)}>－</button>
                 <button className="gbtn" aria-label="Zoom to fit" title="Zoom to fit" style={{ ...zb, borderTop: "none", borderRadius: 0 }} onClick={fit}>⤢</button>
@@ -25644,27 +25664,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     to fold into one. See that file's own B1231280/B1231281 header note for the
                     capture-at-open mechanics and the one-press-vs-two tradeoff this removal makes. */}
               </div>
-              {/* NEW-B# (owner, 2026-09-07) — dock anchor for the global Help/Report control
-                  (shared/ui/chromeDock.js). Sits on the SAME `bottom: zoomBottom` row as the zoom
-                  stack, offset left by its known column width (`zb.width`) plus an 8px gap — the
-                  zoom stack's own `data-canvas-corner="zoom-stack"` div is left untouched by this
-                  addition on purpose (see the header note above). It becomes a genuine furniture
-                  item INSIDE this pane instead of separate `position:fixed` app chrome.
-                  `data-export="skip"` so it never rides a PDF/PNG export clone (PDF-PARITY: it
-                  isn't part of the plan).
-                  ⛔ SUPERSEDED (NEW-4, phone-chrome-parity pass) — this used to say the docked
-                  button renders at its own fixed 44×44/30×30 (B1162016) "never shrunk to this
-                  stack's 30px zb rows, which would breach the deliberate B1176976 tap-target
-                  minimum." Two controls sharing one corner at two different sizes read as a
-                  mismatch (owner decision), so `data-dock-size` publishes THIS stack's own
-                  pointer-driven size (`zb.width` — 35 on a coarse pointer, 30 on a fine one) and
-                  HelpReportControl.jsx reads it when docked here, sizing itself to match instead
-                  of its own standalone floor. The B1176976 44px tap-target minimum still governs
-                  every OTHER (floating, undocked) rendering of that control — this is a
-                  deliberately narrower exception, made explicit rather than silently generalised. */}
-              <div data-export="skip" data-canvas-dock-slot="planner" style={{ position: "absolute", right: 14 + zb.width + 8, bottom: zoomBottom, zIndex: MAP_CHROME_Z.control }}>
-                <div ref={helpDockRef} data-canvas-dock="planner" data-dock-size={zb.width} />
-              </div>
+            );
+            return (
+              <>
+              {/* NEW-2 (B2206704–B2206706) — ON DESKTOP ONE CONTAINER OWNS THE BOTTOM-RIGHT CORNER: scale bar · help · zoom stack, in that
+                  order, on a shared baseline, MAP_CORNER_PX off the pane's bottom and right edges (the same small margin the
+                  bottom-left group keeps). Order and spacing are flex's job, so the three cannot overlap by construction, and the
+                  container is a child of the canvas box, so it can never reach the right Tools rail or the left panel. The
+                  container itself takes no presses (`pointerEvents: none`); the help slot and the zoom stack opt back in.
+                  On a phone (`narrow`) the three keep their own absolute positions exactly as before (the phone harnesses own
+                  that arrangement), and the scale bar stays in the furniture frame above. */}
+              {!narrow && (
+                <div data-export="skip" data-testid="map-corner-br" data-map-furniture="corner-br"
+                  style={{ position: "absolute", right: MAP_CORNER_PX, bottom: MAP_CORNER_PX, display: "flex", alignItems: "flex-end", gap: MAP_CORNER_GAP_PX, pointerEvents: "none", zIndex: MAP_CHROME_Z.control }}>
+                  <div data-testid="scale-bar-plate" data-map-furniture="scale-bar" style={{ flex: "none" }}>
+                    <svg width={furnPlates.scaleBar.plateW} height={furnPlates.scaleBar.plateH} viewBox={`0 0 ${furnPlates.scaleBar.plateW} ${furnPlates.scaleBar.plateH}`}
+                      fontFamily="Inter, system-ui, sans-serif" style={{ display: "block", overflow: "visible" }}
+                      dangerouslySetInnerHTML={{ __html: furnPlates.scaleBar.markup }} />
+                  </div>
+                  {dockSlot}
+                  {zoomStack}
+                </div>
+              )}
+              {narrow && (<>{zoomStack}{dockSlot}</>)}
               </>
             );
           })()}
@@ -25847,9 +25869,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               — passive, decorative telemetry, not a control and not a safety-relevant state
               (unlike the calibration badge). Hiding it here is strictly better than letting it
               render invisibly behind a FAB, which is what it did before this fix. */}
-          {!narrow && (
+          {!narrow && cursorFit.show && (
             <CursorChip ll={cursorLL} el={cursorEl} prop={cursorProp}
-              style={{ bottom: 8, left: 10, maxWidth: "calc(100% - 20px)" }} />
+              style={{ bottom: MAP_CORNER_PX, left: paneInset + MAP_CORNER_PX, maxWidth: cursorFit.maxWidth }} />
           )}
         </div>
 

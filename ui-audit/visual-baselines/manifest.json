@@ -6,90 +6,90 @@
   "surfaces": {
     "map-landing": {
       "light": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-10-08",
+        "approvedCommit": "dca11fe92",
+        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
       },
       "dark": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-10-08",
+        "approvedCommit": "dca11fe92",
+        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-10-08",
+        "approvedCommit": "dca11fe92",
+        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-10-08",
+        "approvedCommit": "dca11fe92",
+        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
       }
     },
     "site-planner-header": {
       "light": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-10-08",
+        "approvedCommit": "dca11fe92",
+        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
       },
       "dark": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-10-08",
+        "approvedCommit": "dca11fe92",
+        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-10-08",
+        "approvedCommit": "dca11fe92",
+        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-10-08",
+        "approvedCommit": "dca11fe92",
+        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
       }
     },
     "site-planner-left-rail": {
       "light": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "1d2a174fa",
-        "note": "B2175312: docked left-rail panels moved from the grey column backdrop to the white overlay surface (intended, owner-requested); only the left-rail region of the site-planner-left-rail surface changes [CI-authored by run 37533177908 on 1d2a174fa65d7933161d7f1b2eb53deb94a51a88]"
+        "approvedAt": "2026-10-08",
+        "approvedCommit": "dca11fe92",
+        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
       },
       "dark": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "1d2a174fa",
-        "note": "B2175312: docked left-rail panels moved from the grey column backdrop to the white overlay surface (intended, owner-requested); only the left-rail region of the site-planner-left-rail surface changes [CI-authored by run 37533177908 on 1d2a174fa65d7933161d7f1b2eb53deb94a51a88]"
+        "approvedAt": "2026-10-08",
+        "approvedCommit": "dca11fe92",
+        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-10-08",
+        "approvedCommit": "dca11fe92",
+        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-10-08",
+        "approvedCommit": "dca11fe92",
+        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
       }
     },
     "library": {
       "light": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-10-08",
+        "approvedCommit": "dca11fe92",
+        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
       },
       "dark": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-10-08",
+        "approvedCommit": "dca11fe92",
+        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-10-08",
+        "approvedCommit": "dca11fe92",
+        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-06",
-        "approvedCommit": "3ed0765b",
-        "note": "B2142832: right tool rail redesign (tool sizes in the pill, Measure under Tools, new heading rule, hidden scrollbar). Only the rail region changes, on the desktop site-planner surfaces. [CI-authored by run 37401522445 on 3ed0765b173e8d4e0b443ba0c3062a8e1340d68b]"
+        "approvedAt": "2026-10-08",
+        "approvedCommit": "dca11fe92",
+        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
       }
     }
   }
