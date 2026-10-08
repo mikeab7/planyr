@@ -117,7 +117,7 @@ try {
   await undo(); m = await measure(page, "ovB"); log(boxEq(m, before), "3 · rotate: Undo restores the exact box");
 
   before = await measure(page, "ovB");
-  await page.getByRole("button", { name: "Align to map", exact: true }).click(); await page.waitForTimeout(500);
+  await page.getByRole("button", { name: "Match 2 points", exact: true }).click(); await page.waitForTimeout(500);
   const pt = async (id, fx, fy) => { const r = await page.evaluate((id) => { const b = document.querySelector(`image[data-overlay-id="${id}"]`).getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height }; }, id); return { x: r.x + r.w * fx, y: r.y + r.h * fy }; };
   const d1 = await pt("ovB", 0.45, 0.5), d2 = await pt("ovB", 0.62, 0.5);
   for (const [dp, mp] of [[d1, { x: d1.x + 30, y: d1.y + 60 }], [d2, { x: d2.x + 90, y: d2.y + 70 }]]) { await page.mouse.click(dp.x, dp.y); await page.waitForTimeout(400); await page.mouse.click(mp.x, mp.y); await page.waitForTimeout(500); }
