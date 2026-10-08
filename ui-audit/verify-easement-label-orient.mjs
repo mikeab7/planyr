@@ -16,7 +16,7 @@ const V = ease("ev", { x: 600, y: 300 }, { x: 600, y: 1900 }, 100);
 const D30 = ease("e30", { x: 1500, y: 300 }, { x: 1500 + 1500 * Math.cos(rad(30)), y: 300 + 1500 * Math.sin(rad(30)) }, 90);
 const D120 = ease("e120", { x: 3200, y: 300 }, { x: 3200 + 1500 * Math.cos(rad(120)), y: 300 + 1500 * Math.sin(rad(120)) }, 90);
 const site = { id: ID, groupId: ID, site: "ZZ label verify (throwaway)", name: "A", origin: { lat: 29.78, lon: -95.82 }, county: "harris",
-  parcels: [{ id: "p", active: true, pts: [{ x: 0, y: 0 }, { x: 4200, y: 0 }, { x: 4200, y: 2400 }, { x: 0, y: 2400 }] }],
+  parcels: [{ id: "p", active: true, points: [{ x: 0, y: 0 }, { x: 4200, y: 0 }, { x: 4200, y: 2400 }, { x: 0, y: 2400 }] }],
   els: [], measures: [], callouts: [], markups: [V, D30, D120], settings: {}, underlay: null, parcelDrawings: [], updatedAt: Date.now() };
 
 let s, failed = false;
@@ -31,10 +31,28 @@ try {
     localStorage.setItem("planarfit:sites:history:v1", JSON.stringify({ [id]: [] }));
     localStorage.setItem("planarfit:currentSite:v1", id);
   }, [ID, site]);
+  // signed in, a device-only plan is not listed: give the throwaway an account row too (deleted in cleanup)
+  const ins = await page.evaluate(async (rec) => {
+    const r = await window.pfSupabase.from("sites").upsert({ id: rec.id, group_id: rec.id, site: rec.site, name: rec.name, county: "harris", updated_at: new Date().toISOString(), data: rec });
+    return r.error ? String(r.error.message) : null;
+  }, site);
+  if (ins) throw new Error("could not create the throwaway account row: " + ins);
   await page.reload({ waitUntil: "domcontentloaded" });
   const tab = page.getByTestId("module-tab-site-planner").filter({ visible: true });
-  if (!(await page.getByTestId("planner-canvas").count())) await tab.click();
-  await page.getByTestId("planner-canvas").first().waitFor({ state: "visible", timeout: 30000 });
+  await tab.click().catch(() => {});
+  for (let attempt = 0; attempt < 4 && !(await page.getByTestId("planner-canvas").first().isVisible().catch(() => false)); attempt++) {
+    // signed in, the app lands on the project map: open the throwaway plan from the Sites list (it loads async)
+    await page.getByPlaceholder("Filter by name…").fill("ZZ label verify").catch(() => {});
+    const row = page.getByText("ZZ label verify", { exact: false }).first();
+    if (await row.waitFor({ state: "visible", timeout: 15000 }).then(() => true, () => false)) {
+      await row.click();
+      await pacedWait(page, 1500);
+      const open = page.getByRole("button", { name: /^open( project| plan| site)?$/i }).first();
+      if (await open.count()) await open.click().catch(() => {});
+      await pacedWait(page, 3000);
+    }
+  }
+  await page.getByTestId("planner-canvas").first().waitFor({ state: "visible", timeout: 30000 }).catch(async (e) => { await page.screenshot({ path: (process.env.SHOT || "/tmp/easement-live.png").replace(".png", "-fail.png") }); throw e; });
   await pacedWait(page, 1500);
   await assertMeasurable(page, "verify-easement-label-orient");
   const chunks = await page.evaluate(() => [...document.querySelectorAll("script[src]")].map((x) => x.src.split("/").pop()).filter((n) => /SitePlanner/.test(n)));
@@ -69,21 +87,24 @@ try {
   }
   await page.screenshot({ path: process.env.SHOT || "/tmp/easement-live.png" });
   const sheet = await page.evaluate(async () => {
-    const markup = window.__plannerExportSvg ? await window.__plannerExportSvg() : null;
-    if (!markup) return null;
+    if (typeof window.__plannerExportSvg !== "function") return { hook: typeof window.__plannerExportSvg, gate: !!window.__PLANYR_E2E };
+    const markup = await window.__plannerExportSvg({ cx: 2100, cy: 1200, wFt: 4400, hFt: 2600 });
+    if (!markup) return { hook: "function", markup: String(markup) };
     const root = new DOMParser().parseFromString(markup, "image/svg+xml").documentElement;
     return [...root.querySelectorAll("[data-easement-label]")].map((g) => g.getAttribute("data-label-angle"));
   });
   console.log("export sheet label angles:", JSON.stringify(sheet));
-  check(!!sheet && sheet.length >= 3, "the REAL built export sheet carries the easement labels");
-  check(!!sheet && ["-90.0", "30.0", "-60.0"].every((a) => sheet.includes(a)), "export sheet carries the same rotated angles as the canvas");
+  check(Array.isArray(sheet) && sheet.length >= 3, "the REAL built export sheet carries the easement labels");
+  check(Array.isArray(sheet) && ["-90.0", "30.0", "-60.0"].every((a) => sheet.includes(a)), "export sheet carries the same rotated angles as the canvas");
 } catch (e) { console.error("ERROR", e.message); failed = true; }
 finally {
   if (s) {
     try {
       const gone = await s.page.evaluate(async (id) => {
         const out = {};
-        for (const [t, col] of [["site_elements", "site_id"], ["sites", "id"]]) { const r = await window.pfSupabase.from(t).delete().eq(col, id); out[t] = r.error ? String(r.error.message) : "deleted"; }
+        { const e = await window.pfSupabase.from("site_elements").delete().eq("site_id", id); out.site_elements = e.error ? String(e.error.message) : "deleted";
+          const t = await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id); out.trashed = t.error ? String(t.error.message) : "trashed"; // trash first, then permanent (the DB refuses a live delete)
+          const d = await window.pfSupabase.from("sites").delete().eq("id", id); out.sites = d.error ? String(d.error.message) : "deleted"; }
         for (const k of ["planarfit:sites:v1", "planarfit:sites:history:v1"]) { try { const o = JSON.parse(localStorage.getItem(k) || "{}"); delete o[id]; localStorage.setItem(k, JSON.stringify(o)); } catch (_) {} }
         localStorage.removeItem("planarfit:currentSite:v1");
         const left = await window.pfSupabase.from("sites").select("id").eq("id", id);
