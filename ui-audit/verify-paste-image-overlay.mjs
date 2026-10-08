@@ -9,9 +9,9 @@ import { assertMeasurable, pacedWait } from "./lib/tabTiming.mjs";
 const base = process.argv[2] || "https://planyr.io";
 const want = process.argv[3] || "";
 const A = "zz-paste-ovl-a", B = "zz-paste-ovl-b", NAME = "ZZ paste overlay verify";
-const rec = (id, name) => ({ id, groupId: A, site: NAME, name, origin: { lat: 29.78, lon: -95.82 }, county: "harris",
+const rec = (id, name, age = 0) => ({ id, groupId: A, site: NAME, name, origin: { lat: 29.78, lon: -95.82 }, county: "harris",
   parcels: [{ id: "p", active: true, points: [{ x: 0, y: 0 }, { x: 800, y: 0 }, { x: 800, y: 600 }, { x: 0, y: 600 }] }],
-  els: [], measures: [], callouts: [], markups: [], settings: {}, underlay: null, parcelDrawings: [], sheetOverlays: [], updatedAt: Date.now() });
+  els: [], measures: [], callouts: [], markups: [], settings: {}, underlay: null, parcelDrawings: [], sheetOverlays: [], updatedAt: Date.now() - age });
 
 /* a minimal, valid 3-page PDF (xref offsets computed) */
 function pdf3() {
@@ -42,7 +42,7 @@ try {
       if (e.error) throw new Error("seed " + r.id + ": " + e.error.message);
     }
     localStorage.setItem("planarfit:sites:v1", JSON.stringify(all));
-  }, [rec(A, "Concept A"), rec(B, "Concept B"), A]);
+  }, [rec(A, "Concept A"), rec(B, "Concept B", 120000), A]);
 
   const openPlan = async (id) => {
     await page.evaluate((i) => localStorage.setItem("planarfit:currentSite:v1", i), id);
@@ -121,6 +121,17 @@ finally {
         out.remaining = (left.data || []).length;
         return out;
       }, [[A, B], [...uploaded]]);
+      // The planner can re-sync a just-deleted row while it is still mounted: stop it, clear the local copy, then delete.
+      await s.page.goto("about:blank").catch(() => {});
+      await s.page.goto(base, { waitUntil: "domcontentloaded" }).catch(() => {});
+      await s.page.waitForFunction(() => !!window.pfSupabase, null, { timeout: 20000 }).catch(() => {});
+      gone.remaining = await s.page.evaluate(async (ids) => {
+        for (const k of ["planarfit:sites:v1", "planarfit:sites:history:v1"]) { try { const o = JSON.parse(localStorage.getItem(k) || "{}"); ids.forEach((i) => delete o[i]); localStorage.setItem(k, JSON.stringify(o)); } catch (_) {} }
+        localStorage.removeItem("planarfit:currentSite:v1");
+        await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).in("id", ids); // the DB refuses a hard delete of a live row
+        for (const id of ids) { await window.pfSupabase.from("site_elements").delete().eq("site_id", id); await window.pfSupabase.from("sites").delete().eq("id", id); }
+        const left = await window.pfSupabase.from("sites").select("id").in("id", ids); return (left.data || []).length;
+      }, [A, B]);
       console.log("cleanup:", JSON.stringify(gone));
       if (gone.remaining !== 0) failed = true;
     } catch (e) { console.error("cleanup ERROR", e.message); failed = true; }
