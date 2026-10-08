@@ -173,22 +173,37 @@ try {
   console.log("❌ harness error:", e && e.stack ? e.stack.split("\n").slice(0, 4).join(" | ") : e);
   failed++;
 } finally {
-  // cleanup: every throwaway site, local + cloud; verify gone
+  // cleanup: every throwaway site, local + cloud; verify gone. The open planner autosaves its site again after a delete, so leave
+  // the planner FIRST, sweep, reload, sweep again, and only then count.
   try {
-    const gone = await page.evaluate(async (ids) => {
-      const keys = Object.keys(localStorage).filter((k) => /^planarfit:sites:(v1|cloud:)/.test(k));
-      for (const k of keys) { try { const m = JSON.parse(localStorage.getItem(k) || "{}"); for (const id of ids) delete m[id]; localStorage.setItem(k, JSON.stringify(m)); } catch (_) {} }
+    const sweep = (ids) => page.evaluate(async (ids) => {
+      const hasId = (str) => ids.some((id) => (str || "").includes(id));
+      for (const k of Object.keys(localStorage)) {
+        const raw = localStorage.getItem(k) || "";
+        if (!hasId(raw)) continue;
+        try {
+          const m = JSON.parse(raw);
+          if (m && typeof m === "object" && !Array.isArray(m)) { for (const id of ids) delete m[id]; if (hasId(JSON.stringify(m))) localStorage.removeItem(k); else localStorage.setItem(k, JSON.stringify(m)); continue; }
+        } catch (_) {}
+        localStorage.removeItem(k); // a scalar pointer (last route / current site) at a throwaway
+      }
       let cloud = null;
       if (window.pfSupabase) {
+        // soft-delete FIRST: the server's BEFORE DELETE guard refuses a hard delete of a row that was never soft-deleted (B1517888)
         await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).in("id", ids);
-        await window.pfSupabase.from("sites").delete().in("id", ids);
+        const d = await window.pfSupabase.from("sites").delete().in("id", ids).select("id");
+        if (d.error) return { cloudLeft: "err:" + d.error.message, localLeft: -1 };
         const q = await window.pfSupabase.from("sites").select("id").in("id", ids);
         cloud = q.error ? "err:" + q.error.message : (q.data || []).length;
       }
-      const local = keys.reduce((n, k) => { try { const m = JSON.parse(localStorage.getItem(k) || "{}"); return n + ids.filter((id) => m[id]).length; } catch (_) { return n; } }, 0);
+      const local = Object.keys(localStorage).filter((k) => hasId(localStorage.getItem(k))).length;
       return { cloudLeft: cloud, localLeft: local };
     }, ids);
-    check("every throwaway site deleted (local + cloud) and verified gone", gone.cloudLeft === 0 && gone.localLeft === 0, JSON.stringify(gone));
+    await page.goto(`${base}/#/`, { waitUntil: "load" }); await page.waitForTimeout(3000);
+    await sweep(ids);
+    await page.reload({ waitUntil: "load" }); await page.waitForTimeout(4000);
+    const gone = await sweep(ids);
+    check("every throwaway site deleted (local + cloud) and verified gone (swept after leaving the planner, re-counted after a reload)", gone.cloudLeft === 0 && gone.localLeft === 0, JSON.stringify(gone));
   } catch (e) { check("cleanup ran", false, String(e).slice(0, 120)); }
   await s.close().catch(() => {});
 }
