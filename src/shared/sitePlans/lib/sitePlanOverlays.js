@@ -5,13 +5,13 @@
  * The uploaded file itself is NOT duplicated storage — the whole brochure is stored WHOLE as
  * a `doc_reviews` row (Review/Library's existing document store, reused rather than a second
  * one), and an overlay row is a reference into it: which review, which page, plus the page's
- * PLACEMENT on the map (see lib/overlayGeoref.js — a direct center/scale/rotation, not a
+ * PLACEMENT on the map (see overlay/overlayPlacement.js — a direct center/scale/rotation, not a
  * fitted transform) and how it renders. One review can hold several overlay pages (phases,
  * multiple buildings on one flyer); a site can hold several dated reviews (a 2024 flyer and a
  * 2026 flyer describe different buildings).
  */
-import { validPlacement } from "./overlayGeoref.js";
-import { isValidCropShape } from "../../../workspaces/site-planner/lib/overlayCrop.js";
+import { validPlacement } from "../../overlay/overlayPlacement.js";
+import { isValidCropShape } from "../../overlay/overlayCrop.js";
 
 export function validOverlayUpload({ imgW, imgH } = {}) {
   return Number.isFinite(imgW) && imgW > 0 && Number.isFinite(imgH) && imgH > 0;

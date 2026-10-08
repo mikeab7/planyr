@@ -67,7 +67,7 @@ test.describe("single-occupancy left dock (NEW-1, logged out)", () => {
     await page.keyboard.press("Escape");
     await doubleTap(page, cx, cy);
     await expect(panel(page)).toBeVisible();
-    await expect(page.getByRole("button", { name: /Delete element/i })).toBeVisible();
+    await expect(page.getByTestId("building-lock")).toBeVisible();
     await expect(page.locator('[data-testid="panel-chrome-yield"]')).toHaveCount(0); // never stacked — single occupancy
 
     // ✕ the inspector → the dock is handed BACK to Yield (the element stays selected, the inspector is gone).

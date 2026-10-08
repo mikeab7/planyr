@@ -74,7 +74,9 @@ function stamp(el) {
 /** PURE — the visible band (layout coordinates) while the keyboard is up, or null when it is down. */
 export function keyboardBand({ layoutHeight, vvHeight, vvOffsetTop = 0 }) {
   if (![layoutHeight, vvHeight, vvOffsetTop].every(Number.isFinite)) return null;
-  if (layoutHeight - vvHeight - vvOffsetTop <= KEYBOARD_MIN_PX) return null;
+  // the keyboard is the visible area being SHORTER than the layout — NOT "shorter by more than its scroll": iOS scrolls the view by
+  // up to the keyboard's full height to reveal a field, and layout − visible − offsetTop then reads 0 (no keyboard) while it is up.
+  if (layoutHeight - vvHeight <= KEYBOARD_MIN_PX) return null;
   return { top: vvOffsetTop, bottom: vvOffsetTop + vvHeight };
 }
 
@@ -83,6 +85,14 @@ export function revealDelta(rect, lo, hi) {
   if (rect.top < lo) return rect.top - lo;
   if (rect.bottom > hi) return Math.min(rect.bottom - hi, rect.top - lo);
   return 0;
+}
+
+/** PURE — which box to bring into view: the whole edit card when it fits the ROOM it will scroll in, else just the field.
+ *  `room` is the height actually available where the card scrolls (the scroller's window, not the keyboard-free band — a short
+ *  bottom sheet has a scroller far smaller than the band, and a card that "fits" the band can still bury its own field). */
+export function revealTarget(fieldRect, cardRect, room) {
+  if (!cardRect) return fieldRect;
+  return cardRect.height <= room ? cardRect : fieldRect;
 }
 
 export function installPhoneTyping(win = typeof window !== "undefined" ? window : undefined) {
@@ -138,12 +148,7 @@ export function installPhoneTyping(win = typeof window !== "undefined" ? window 
     // "position": the surface already sits itself above the keyboard (the Site Planner phone sheet) —
     // only scroll the field into view inside it; never resize or lift it (that raced its own rise)
     const card = el.closest("[data-edit-card]");
-    const target = () => {
-      const f = rectOf(el);
-      if (!card) return f;
-      const c = rectOf(card);
-      return c.height <= b.bottom - b.top - 2 * MARGIN ? c : f;
-    };
+    const target = (room) => revealTarget(rectOf(el), card ? rectOf(card) : null, room);
     // 1. scroll through the field's own scrolling containers, innermost first (crossing out of a frame)
     for (let n = parentOf(el); n && n !== doc.body && n !== doc.documentElement; n = parentOf(n)) {
       if (n === n.ownerDocument.body || !isScroller(n)) continue;
@@ -162,12 +167,12 @@ export function installPhoneTyping(win = typeof window !== "undefined" ? window 
       }
       const lo = Math.max(b.top, box.top + stuck) + MARGIN, hi = Math.min(b.bottom, box.bottom) - MARGIN;
       if (hi - lo < 8) continue;
-      const d = revealDelta(target(), lo, hi);
+      const d = revealDelta(target(hi - lo), lo, hi); // the room is THIS scroller's window, not the whole band
       if (d) n.scrollTop += d;
     }
     // 2. still under the keyboard? the field is in a layer a scroll can't move
     if (managed) return;
-    const r = target();
+    const r = target(b.bottom - b.top - 2 * MARGIN);
     const over = r.bottom - (b.bottom - MARGIN);
     if (over <= 0) return;
     const layoutH = layoutViewportHeight(win);

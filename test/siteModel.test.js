@@ -573,7 +573,7 @@ describe("Parcel split lineage (B651)", () => {
         { id: "p1", points: [] }, kid("a", "p1"), kid("b", "p1"), kid("c", "p1"),
       ]);
       expect(info.get("p1").name).toBe("Parcel 1");
-      expect(["a", "b", "c"].map((k) => info.get(k).name)).toEqual(["Parcel 1A", "Parcel 1B", "Parcel 1C"]);
+      expect(["a", "b", "c"].map((k) => info.get(k).name)).toEqual(["Parcel 1A", "Parcel 1B", "Parcel 1C"]); // legacy/unstamped derivation is deliberately unchanged
     });
 
     it("splitting a piece again alternates: 1A → 1A1 / 1A2, and 1A1 → 1A1A", () => {
@@ -648,7 +648,7 @@ describe("Parcel split lineage (B651)", () => {
 
       it("pieces keep 1A / 1B / 1C with the parent gone", () => {
         const plan = cut([{ id: "p1", points: RING }], "p1", 3);
-        expect(names(plan).sort()).toEqual(["Parcel 1A", "Parcel 1B", "Parcel 1C"]);
+        expect(names(plan).sort()).toEqual(["Parcel 1 · A", "Parcel 1 · B", "Parcel 1 · C"]);
       });
 
       it("RED without the stamped DEPTH: re-splitting 1A gives 1A1 / 1A2, never 1AA / 1AB", () => {
@@ -657,18 +657,18 @@ describe("Parcel split lineage (B651)", () => {
          * past-Z carry. Two different lots, one name, on one plan. */
         let plan = cut([{ id: "p1", points: RING }], "p1", 2);
         plan = cut(plan, "p1_0", 2);
-        expect(names(plan).sort()).toEqual(["Parcel 1A1", "Parcel 1A2", "Parcel 1B"]);
+        expect(names(plan).sort()).toEqual(["Parcel 1 · A1", "Parcel 1 · A2", "Parcel 1 · B"]);
         plan = cut(plan, "p1_0_0", 2);           // and it keeps alternating
-        expect(names(plan)).toContain("Parcel 1A1A");
+        expect(names(plan)).toContain("Parcel 1 · A1A");
       });
 
       it("the 27th sibling and a re-split can never draw the same name", () => {
         const wide = cut([{ id: "w", points: RING }], "w", 28);
         const twentySeventh = parcelDisplayInfo(wide).get("w_26").name;
-        expect(twentySeventh).toBe("Parcel 1AA");
+        expect(twentySeventh).toBe("Parcel 1 · AA");
         let deep = cut([{ id: "w", points: RING }], "w", 1);
         deep = cut(deep, "w_0", 2);
-        expect(parcelDisplayInfo(deep).get("w_0_0").name).toBe("Parcel 1A1");
+        expect(parcelDisplayInfo(deep).get("w_0_0").name).toBe("Parcel 1 · A1");
         expect(parcelDisplayInfo(deep).get("w_0_0").name).not.toBe(twentySeventh);
       });
 
@@ -685,7 +685,7 @@ describe("Parcel split lineage (B651)", () => {
         plan = plan.map((p) => (p.id === "p1_0" ? { ...p, label: "The Wooded Half" } : p));
         expect(parcelDisplayInfo(plan).get("p1_0").name).toBe("The Wooded Half");
         plan = cut(plan, "p1_0", 2);
-        expect(names(plan)).toContain("The Wooded Half 1");
+        expect(names(plan)).toContain("The Wooded Half · A");
       });
     });
 
@@ -742,12 +742,23 @@ describe("Parcel split lineage (B651)", () => {
 // B682 — id-less parcels (map-finder hand-off / legacy saves) get a stable, geometry-derived id at
 // the createSiteModel funnel, so a dragged acreage-label offset can no longer spawn phantom copies
 // through the cross-copy union merge.
+describe("Lock means 'Edit parcels can't touch it' and is off by default (Parcels rework NEW-5)", () => {
+  const RING = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];
+  it("a legacy born-locked flag (no lockSem stamp) reads as unlocked; a deliberate lock survives", () => {
+    const m = createSiteModel({ parcels: [{ id: "a", points: RING, locked: true }, { id: "b", points: RING, locked: true, lockSem: 2 }, { id: "c", points: RING }] });
+    const by = Object.fromEntries(m.parcels.map((p) => [p.id, p]));
+    expect(by.a.locked).toBeUndefined();
+    expect(by.b.locked).toBe(true);
+    expect(by.c.locked).toBeUndefined();
+  });
+});
+
 describe("Stable parcel ids heal the acreage-label duplication (B682)", () => {
   const RING = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 100 }, { x: 0, y: 100 }];
 
   it("createSiteModel backfills a stable id for an id-less parcel, deterministically", () => {
-    const a = createSiteModel({ parcels: [{ points: RING, locked: true }] }).parcels[0];
-    const b = createSiteModel({ parcels: [{ points: RING, locked: true }] }).parcels[0];
+    const a = createSiteModel({ parcels: [{ points: RING, locked: true, lockSem: 2 }] }).parcels[0];
+    const b = createSiteModel({ parcels: [{ points: RING, locked: true, lockSem: 2 }] }).parcels[0];
     expect(a.id).toBeTruthy();
     expect(a.id).toBe(b.id); // same geometry → same id, run to run
     expect(a.locked).toBe(true); // other fields preserved
@@ -771,7 +782,7 @@ describe("Stable parcel ids heal the acreage-label duplication (B682)", () => {
   });
 
   it("REPRO: dragging an id-less parcel's label no longer duplicates it on merge", () => {
-    const stored = { id: "s1", updatedAt: 1000, parcels: [{ points: RING, locked: true }] };
+    const stored = { id: "s1", updatedAt: 1000, parcels: [{ points: RING, locked: true, lockSem: 2 }] };
     const live = { id: "s1", updatedAt: 2000, parcels: [{ points: RING, locked: true, labelOffset: { x: 5, y: 5 } }] };
     const merged = mergeSiteContent(live, stored);
     expect(merged.parcels).toHaveLength(1);            // was 2 before the fix (the phantom copy)

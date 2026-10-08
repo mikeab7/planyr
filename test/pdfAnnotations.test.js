@@ -5,69 +5,15 @@
 import { describe, it, expect } from "vitest";
 import { jpegToPdf } from "../src/workspaces/site-planner/lib/imagePdf.js";
 import {
-  buildAnnotations, flattenTree, parsePathD, parseTransform, parseColor, arcToBeziers, winAnsi, compose,
+  buildAnnotations, flattenTree, parsePathD, parseTransform, parseColor, arcToBeziers, winAnsi, compose, annotationDict, cloudIntensity, cloudPitch,
 } from "../src/workspaces/site-planner/lib/pdfAnnotations.js";
 import { cloudScallopPath } from "../src/workspaces/site-planner/lib/cloudGeometry.js";
 
 const fakeJpeg = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0xff, 0xd9]);
 const latin1 = (u8) => { let s = ""; for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); return s; };
 
-// A 792×612 pt Letter sheet; the plan window is the clone viewBox (0 0 1000 800) fitted "meet" into
-// a 700×500 pt box — so k = 0.625 and the window is 625 pt tall... computed the same way exportSheet does.
-const VB = { x: 0, y: 0, w: 1000, h: 800 };
-const PAGE = { w: 792, h: 612 };
-const PLAN = { x: 40, y: 40, w: 700, h: 500 };
-const s = Math.min(PLAN.w / VB.w, PLAN.h / VB.h);           // 0.625
-const ox = PLAN.x + (PLAN.w - VB.w * s) / 2, oy = PLAN.y + (PLAN.h - VB.h * s) / 2;
-const M0 = [s, 0, 0, -s, ox - VB.x * s, PAGE.h - (oy - VB.y * s)];
-const frame = [ox, PAGE.h - (oy + VB.h * s), ox + VB.w * s, PAGE.h - oy];
-
-const T = (tag, a = {}, kids = [], extra = {}) => ({ tag, a, kids, ...extra });
-const g = (a, ...kids) => T("g", a, kids);
-const HIT = "rgba(0,0,0,0.001)";
-const mk = (kind, id, inner, meta = {}, hints) => ({ family: "markup", id, kind, tree: g({ "data-feature": `markup:${id}`, "data-markup": id }, ...inner), meta, hints });
-
-// One of every markup type, in the same primitives the planner's renderMarkupNode emits.
-const poly = "100,100 300,120 280,260 120,240";
-const cloudPts = [{ x: 600, y: 100 }, { x: 800, y: 100 }, { x: 800, y: 220 }, { x: 600, y: 220 }];
-const descriptors = [
-  mk("line", "L1", [T("line", { x1: 50, y1: 50, x2: 250, y2: 90, stroke: HIT, "stroke-width": 16 }),
-    T("line", { x1: 50, y1: 50, x2: 250, y2: 90, stroke: "#dc2626", "stroke-width": 1.2, "stroke-dasharray": "6 3", fill: "none" })], { subject: "Line", comment: "check this", author: "Michael", createdAt: "2026-10-01T12:00:00Z" }),
-  mk("polyline", "P1", [T("polyline", { points: "60,300 160,340 260,310 360,380", fill: "none", stroke: "#2563eb", "stroke-width": 1.5 })]),
-  mk("rect", "R1", [T("rect", { x: 400, y: 300, width: 120, height: 80, stroke: "#16a34a", "stroke-width": 1, fill: "#16a34a", "fill-opacity": 0.25 })]),
-  mk("rect", "R2", [T("rect", { x: 400, y: 450, width: 120, height: 60, stroke: "#16a34a", "stroke-width": 1, fill: "none", transform: "rotate(30 460 480)" })]),
-  mk("ellipse", "E1", [T("ellipse", { cx: 700, cy: 400, rx: 80, ry: 40, stroke: "#9333ea", "stroke-width": 1, fill: "none" })]),
-  mk("polygon", "G1", [T("polygon", { points: poly, stroke: "#ea580c", "stroke-width": 1.2, fill: "#ea580c", "fill-opacity": 0.2 })]),
-  mk("cloud", "C1", [T("path", { d: cloudScallopPath(cloudPts, 12), stroke: "#dc2626", "stroke-width": 1.3, fill: "none", "stroke-linejoin": "round" })],
-    { subject: "Cloud", comment: "revise", author: "Michael", createdAt: "2026-10-02T09:30:00Z", modifiedAt: "2026-10-03T10:00:00Z" }, { verts: cloudPts, arcFt: 3 }),
-  { family: "callout", id: "K1", kind: "callout", meta: { lines: ["Move this", "away from the pad"], align: "center", rot: 0 },
-    tree: g({ "data-testid": "callout-K1", "data-feature": "callout:K1", "data-callout-leaders": 1 },
-      g({ "data-testid": "callout-leader-K1-0" },
-        T("line", { "data-testid": "callout-leader-stub-K1-0", x1: 500, y1: 600, x2: 480, y2: 640, stroke: "#334155", "stroke-width": 1.4 }),
-        T("line", { "data-testid": "callout-leader-run-K1-0", x1: 480, y1: 640, x2: 420, y2: 700, stroke: "#334155", "stroke-width": 1.4 }),
-        T("polygon", { "data-testid": "callout-leader-arrow-K1-0", points: "420,700 430,688 436,696", fill: "#334155" })),
-      g({},
-        T("rect", { "data-testid": "callout-box-K1", x: 500, y: 560, width: 160, height: 60, rx: 4, fill: "#fff8e1", "fill-opacity": 1, stroke: "#334155", "stroke-width": 1.4 }),
-        T("text", { x: 580, y: 580, "text-anchor": "middle", "dominant-baseline": "middle", "font-size": 13, fill: "#1e293b", "font-weight": 500 }, [], { str: "Move this", tw: 58 }),
-        T("text", { x: 580, y: 600, "text-anchor": "middle", "dominant-baseline": "middle", "font-size": 13, fill: "#1e293b", "font-weight": 500 }, [], { str: "away from the pad", tw: 104 }))) },
-  { family: "callout", id: "K2", kind: "textbox", meta: { lines: ["Note ⚠ 12°"], align: "left", rot: 0 },
-    tree: g({ "data-testid": "callout-K2", "data-feature": "callout:K2", "data-callout-leaders": 0 },
-      g({}, T("rect", { "data-testid": "callout-box-K2", x: 700, y: 620, width: 120, height: 40, rx: 4, fill: "none", stroke: "#334155", "stroke-width": 1 }),
-        T("text", { x: 714, y: 640, "text-anchor": "start", "dominant-baseline": "middle", "font-size": 12, fill: "#1e293b", "font-weight": 700 }, [], { str: "Note ⚠ 12°", tw: 70 }))) },
-  { family: "measure", id: "M1", kind: "line", meta: { chipTexts: ["142′ 6″"] },
-    tree: g({ "data-feature": "measure:0", "data-measure": "M1", "data-measure-mode": "line" },
-      T("polyline", { points: "100,700 300,690", fill: "none", stroke: "#0ea5e9", "stroke-width": 1.2 }),
-      g({ "data-print-chip": "measure" }, T("text", { "data-chip-text": "", x: 200, y: 680, "text-anchor": "middle", "dominant-baseline": "middle", "font-size": 11, fill: "#111827", stroke: "#ffffff", "stroke-width": 3, "paint-order": "stroke" }, [], { str: "142′ 6″", tw: 40 }))) },
-  { family: "measure", id: "M2", kind: "area", meta: { chipTexts: ["1.20 ac"] },
-    tree: g({ "data-feature": "measure:1", "data-measure": "M2", "data-measure-mode": "area" },
-      T("polygon", { points: "600,600 700,610 690,700 610,690", fill: "#0ea5e9", "fill-opacity": 0.15, stroke: "#0ea5e9", "stroke-width": 1.2 })) },
-  { family: "measure", id: "M3", kind: "polyline", meta: { chipTexts: ["310′"] },
-    tree: g({ "data-feature": "measure:2", "data-measure": "M3", "data-measure-mode": "polyline" },
-      T("polyline", { points: "800,100 850,200 900,180", fill: "none", stroke: "#0ea5e9", "stroke-width": 1.2 })) },
-  { family: "measure", id: "M4", kind: "count", meta: { chipTexts: ["3"] },
-    tree: g({ "data-feature": "measure:3", "data-measure": "M4", "data-measure-mode": "count" },
-      g({}, T("circle", { cx: 900, cy: 500, r: 8, fill: "#0ea5e928", stroke: "#0ea5e9", "stroke-width": 1 }), T("text", { x: 900, y: 503, "text-anchor": "middle", "font-size": 8.5, fill: "#0ea5e9", "font-weight": 700 }, [], { str: "1", tw: 5 }))) },
-];
+import { VB, PAGE, PLAN, M0, frame, T, g, mk, cloudPts, descriptors } from "./fixtures/pdfAnnotationsFixture.js";
+void VB; void PLAN;
 
 const built = buildAnnotations(descriptors, { M0, frame });
 const pdf = jpegToPdf({ jpeg: fakeJpeg, pixelW: 3300, pixelH: 2550, widthIn: 11, heightIn: 8.5, title: "t", annotations: built.annots });
@@ -84,7 +30,7 @@ describe("buildAnnotations — one native annotation per markup, right subtype",
   });
   it("a cloud carries the cloudy border effect and its real vertex ring", () => {
     const c = built.annots.find((a) => a.id === "C1");
-    expect(c.BE).toEqual({ S: "C", I: 1 });
+    expect(c.BE).toEqual({ S: "C", I: 2 });
     expect(c.vertices).toHaveLength(8);
   });
   it("a callout is a FreeText callout with a closed-arrow leader and a knee", () => {
@@ -122,7 +68,8 @@ describe("buildAnnotations — one native annotation per markup, right subtype",
     expect(cl.modified).toBe("D:20261003100000Z");
   });
   it("a measurement keeps its number as the annotation's contents", () => {
-    expect(built.annots.find((a) => a.id === "M1").contents).toBe("142′ 6″");
+    expect(built.annots.find((a) => a.id === "M1").contents).toBe(`142' 6"`);   // a Line's caption: WinAnsi stand-ins (see regeneration block)
+    expect(built.annots.find((a) => a.id === "M3").contents).toBe("310′");
     expect(built.annots.find((a) => a.id === "M2").subj).toBe("Area measurement");
   });
   it("a markup wholly outside the plan window is reported, never silently lost", () => {
@@ -227,5 +174,73 @@ describe("pure pieces", () => {
       T("line", { x1: 0, y1: 0, x2: 1, y2: 1, stroke: "#000", "stroke-width": 1, display: "none" }),
       T("line", { x1: 0, y1: 0, x2: 1, y2: 1, stroke: "#000", "stroke-width": 1 })), [1, 0, 0, 1, 0, 0]);
     expect(r.items).toHaveLength(1);
+  });
+});
+
+// NEW-1 (2026-10-06, amends B2127664) — REGENERATION. A viewer that REBUILDS an annotation's appearance from its
+// dictionary (Bluebeam / Acrobat when a recipient edits text or properties) must get the same look back. The /AP
+// stream only covers the as-written page, so every key a regenerating viewer reads has to agree with it.
+// Red-proof: each of these fails on the pre-amendment writer (FreeText /C = border colour; /CA 1 on translucent fills;
+// cloud /I fixed at 1 or 2 by an unrelated hint; measurement label only in the AP).
+describe("regeneration inputs agree with the appearance stream", () => {
+  const dictOf = (id) => { const a = built.annots.find((x) => x.id === id); return { a, d: annotationDict(a, "9 0 R") }; };
+  const arrOf = (d, key) => { const m = new RegExp(`/${key} \\[([^\\]]*)\\]`).exec(d); return m ? m[1].trim().split(/\s+/).map(Number) : null; };
+  const rgb255 = (v) => v.map((x) => Math.round(x * 255));
+
+  it("FreeText /C is the BOX FILL (absent for an unfilled box), never the border colour", () => {
+    const k1 = dictOf("K1").d, k2 = dictOf("K2").d;
+    expect(rgb255(arrOf(k1, "C"))).toEqual([255, 248, 225]);        // #fff8e1, the callout's fill
+    expect(arrOf(k2, "C")).toBeNull();                               // K2's box has fill="none" → no /C at all
+  });
+  it("FreeText carries its border colour in /DA (RG) and its width in /BS, text colour in rg", () => {
+    for (const id of ["K1", "K2"]) {
+      const d = dictOf(id).d;
+      expect(d).toMatch(/\/DA \(\/\w+ [\d.]+ Tf [\d. ]+ rg 0\.2 0\.255 0\.333 RG\)/);
+      expect(d).toMatch(/\/BS << \/Type \/Border \/W [\d.]+ /);
+    }
+  });
+  it("a FreeText never carries /IC (MuPDF would read it as the box background)", () => {
+    expect(dictOf("K1").d).not.toMatch(/\/IC /);
+  });
+  it("filled shapes carry their FILL opacity as /CA, outside the appearance stream", () => {
+    expect(dictOf("R1").a.ca).toBeCloseTo(0.25, 6);
+    expect(dictOf("G1").a.ca).toBeCloseTo(0.2, 6);
+    expect(dictOf("M2").a.ca).toBeCloseTo(0.15, 6);
+    expect(dictOf("R1").d).toMatch(/\/CA 0\.25 /);
+    // an opaque stroke-only shape is untouched
+    expect(dictOf("P1").d).toMatch(/\/CA 1 /);
+  });
+  it("a cloud's /BE /I is derived from the scallop pitch the appearance really draws", () => {
+    const c = dictOf("C1").a;
+    // the pitch helper: 26 scallops round a 400 pt ring = ~15.4 pt
+    const ring = [0, 0, 100, 0, 100, 100, 0, 100];
+    expect(cloudPitch({ segs: Array.from({ length: 16 }, () => ["C"]) }, ring)).toBeCloseTo(50, 6);
+    expect(c.BE.I).toBeGreaterThanOrEqual(0.5);
+    expect(c.BE.I).toBeLessThanOrEqual(2);
+    // ~15 pt scallops on the fixture → the spec ceiling (2); a tiny scallop asks for a small /I
+    expect(c.BE.I).toBe(2);
+    expect(cloudIntensity(3)).toBe(0.5);
+    expect(cloudIntensity(6.2)).toBe(1);
+    expect(cloudIntensity(40)).toBe(2);
+    expect(cloudIntensity(0)).toBe(1);
+  });
+  it("a two-point measurement keeps its label as an on-line caption (/Cap, /Contents) so it survives a rebuild", () => {
+    const { a, d } = dictOf("M1");
+    expect(a.cap).toBe(true);
+    expect(d).toMatch(/\/Cap true /);
+    expect(d).toMatch(/\/CP \/Top /);
+    expect(d).toContain(`/Contents (142' 6")`);          // WinAnsi stand-ins for ′ ″, the glyphs a regenerated caption can set
+    // a typed note rides after the number instead of replacing it
+    const noted = buildAnnotations([{ ...descriptors.find((x) => x.id === "M1"), meta: { chipTexts: ["142′ 6″"], comment: "check width" } }], { M0, frame }).annots[0];
+    expect(noted.contents).toBe(`142' 6" — check width`);
+  });
+  it("only a Line can carry a caption", () => {
+    for (const id of ["M2", "M3", "L1"]) expect(dictOf(id).d).not.toMatch(/\/Cap /);
+  });
+  it("every FreeText names a font its AcroForm /DR actually defines", () => {
+    const m = /\/DA \(\/(\w+) /.exec(dictOf("K2").d);
+    expect(["Helv", "HeBo", "HeOb", "HeBO"]).toContain(m[1]);
+    expect(text).toContain(`/${m[1]} `);                    // present in the catalog's /DR font dictionary
+    expect(/\/AcroForm [^\n]*\/DR << \/Font << ([^>]*)>>/.exec(text)[1]).toContain(`/${m[1]} `);
   });
 });

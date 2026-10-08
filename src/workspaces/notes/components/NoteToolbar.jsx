@@ -1438,6 +1438,7 @@ export default function NoteToolbar({
 
   const tableGroupControls = inTable ? (
     <>
+      <TBButton title="Select the whole table (then Ctrl+C / Ctrl+X to copy or move it)" testid="nt-table-select" wide big={narrow} label="Select table" onClick={() => chain().selectWholeTable().run()} />
       <TBButton title="Insert row above" testid="nt-row-before" wide big={narrow} label="Row ↑" onClick={() => chain().addRowBefore().run()} />
       <TBButton title="Insert row below" testid="nt-row-after" wide big={narrow} label="Row ↓" onClick={() => chain().addRowAfter().run()} />
       <TBButton title="Delete row" testid="nt-row-del" wide big={narrow} label="Row ✕" onClick={() => chain().deleteRow().run()} />

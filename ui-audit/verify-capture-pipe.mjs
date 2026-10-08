@@ -441,6 +441,7 @@ if (!capRows.length) {
 } else {
   pass("row", `${capRows.length} perfcap insert(s) observed on the wire`);
   const kinds = new Set();
+  const partRows = [], announced = [];
   for (const r of capRows) {
     const m = r.body.message || "";
     if (!/^POST$/.test(r.method)) fail("row", `an insert used ${r.method}, not POST`);
@@ -453,6 +454,17 @@ if (!capRows.length) {
     let cap;
     try { cap = JSON.parse(m.slice(jsonAt)); } catch (e) { fail("row", `the message does not parse as JSON: ${e.message}`); continue; }
     if (cap.v !== 1) fail("row", `capture version is ${cap.v}, expected 1`);
+    /* NEW-2 (B1317824) — a CONTINUATION row of a trimmed capture (perfCapture.encodeSupplements): it is not a capture of
+     * its own and carries no summary keys, so it is checked as what it is — numbered, keyed to its capture, and
+     * (for the frame part) decodable — and counted against the `suppRows` its main row announced. */
+    if (cap.part) {
+      partRows.push(cap);
+      if (!["f", "c", "t"].includes(cap.part)) fail("row", `a continuation row has an unknown part ${JSON.stringify(cap.part)}`);
+      else if (!Number.isFinite(cap.seq) || !Number.isFinite(cap.of) || !Number.isFinite(cap.atWall) || !cap.kind) fail("row", `a continuation row is not keyed (seq/of/atWall/kind): ${m.slice(jsonAt, jsonAt + 120)}`);
+      else if (cap.part === "f") { try { decodeTrack(cap.ft || "", cap.fx); pass("row", `continuation part=f seq ${cap.seq + 1}/${cap.of} · ${(cap.ft || "").length} frames from index ${cap.f0} · ${m.length}/${MSG_MAX} chars`); } catch (e) { fail("row", `a continuation frame track does not decode: ${e.message}`); } }
+      else pass("row", `continuation part=${cap.part} seq ${cap.seq + 1}/${cap.of} · ${m.length}/${MSG_MAX} chars`);
+      continue;
+    }
     if (!cap.kind) fail("row", "the capture carries no kind — auto and manual would be indistinguishable");
     kinds.add(cap.kind);
     if (!/^\[tab [0-9a-z-]{4,}\]/.test(m)) fail("row", "the row carries no tab id — two tabs would be unseparable");
@@ -468,6 +480,13 @@ if (!capRows.length) {
       else pass("row", `kind=${cap.kind} · ${frames.length} frames decoded · p95 ${cap.p95Ms} ms · max ${cap.maxMs} ms · ${m.length}/${MSG_MAX} chars`);
     } catch (e) { fail("row", `the frame track does not decode: ${e.message}`); }
     for (const k of ["atMs", "atWall", "frames"]) if (cap[k] === undefined) fail("row", `the capture is missing \`${k}\``);
+    if (Number.isFinite(cap.suppRows)) announced.push({ atWall: cap.atWall, n: cap.suppRows });
+  }
+  /* every capture that announced a continuation must have all of it on the wire (the recorder reports delivered only then) */
+  for (const a of announced) {
+    const got = partRows.filter((p) => p.atWall === a.atWall).length;
+    if (got !== a.n) fail("row", `a capture announced ${a.n} continuation row(s) and ${got} reached the wire`);
+    else pass("row", `a capture announced ${a.n} continuation row(s) and all ${got} reached the wire`);
   }
   /* ⛔ THE MANUAL KIND MUST ROUND-TRIP. It is the owner pressing "that felt slow just now" — the
    * one signal in this programme that comes from the person who has the symptom — so it is the

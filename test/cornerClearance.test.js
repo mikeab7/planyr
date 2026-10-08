@@ -270,3 +270,24 @@ describe("regression: a same-origin iframe's content was invisible before NEW-1"
     expect(fixedBehavior).not.toBe(oldBehavior);
   });
 });
+
+/* NEW-1 (schedule empty band) — an embedded page that pads its own scroll ends for this control declares
+ * `data-corner-free` on its root; the shell must then leave the control in the bare corner. */
+describe("an embedded page marked data-corner-free is never a corner occupant", () => {
+  it("rests at base even though a row sits under the corner", () => {
+    installDom({
+      innerWidth: 1440, innerHeight: 900,
+      iframeEls: [{
+        ...fakeIframe({
+          frameRect: { left: 0, top: 61, right: 1440, bottom: 900 },
+          hitElement: fakeElement({ left: 0, top: 815, right: 1440, bottom: 839 }),
+        }),
+        get contentDocument() {
+          return { documentElement: { hasAttribute: n => n === "data-corner-free" },
+                   elementsFromPoint: () => [fakeElement({ left: 0, top: 815, right: 1440, bottom: 839 })] };
+        },
+      }],
+    });
+    expect(cornerClearanceFromBottom({ right: 14, width: 30, base: 14 })).toBe(14);
+  });
+});

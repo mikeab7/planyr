@@ -5,7 +5,7 @@
  * Layered + fail-safe (a WRONG auto-align is worse than asking for 2 clicks — same doctrine as
  * matchLineRefine):
  *   1. coarse TRANSLATION via row/col ink-profile cross-correlation (reuses matchLineFit.slideRefine);
- *   2. ink-bounding-box correspondence → TRANSLATION + uniform SCALE (reuses overlayAlign.solveSimilarityLSQ);
+ *   2. ink-bounding-box correspondence → TRANSLATION + uniform SCALE (reuses similarityTransform.solveSimilarityLSQ);
  *   3. score every candidate by ink AGREEMENT and keep the best; low agreement ⇒ confidence:'low'
  *      so the UI nudges the user to the manual 2-point fallback (manualRegister, which — via the same
  *      solver — also recovers ROTATION, the one thing the bbox path can't).
@@ -13,11 +13,11 @@
  * Registering on the DRAWING-AREA interior only (caller passes a `mask` from readSheetMeta) keeps a
  * reflowed title block from poisoning the fit.
  *
- * Reuse discipline: the similarity math is overlayAlign.solveSimilarityLSQ (the canonical, tested
+ * Reuse discipline: the similarity math is similarityTransform.solveSimilarityLSQ (the canonical, tested
  * Procrustes solver) — this module is orchestration, not a second aligner.
  */
 import { slideRefine } from "./matchLineFit.js";
-import { solveSimilarityLSQ } from "../../workspaces/site-planner/lib/overlayAlign.js";
+import { solveSimilarityLSQ } from "../geometry/similarityTransform.js";
 
 const clampMask = (mask, W, H) => {
   if (!mask) return { x: 0, y: 0, w: W, h: H };

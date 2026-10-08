@@ -55,7 +55,7 @@ import { registerChromeDock } from "../../shared/ui/chromeDock.js";
 import { cornerClearanceFromBottom } from "../../shared/ui/cornerClearance.js";
 // B848496 — site-plan overlays (upload a site plan, place it on the map, pin comps to it).
 import { useSitePlanOverlayLayers } from "./lib/useSitePlanOverlayLayers.js";
-import { latLonToImagePoint, suggestFtPerPx, feetBetween } from "../../shared/sitePlans/lib/overlayGeoref.js";
+import { latLonToImagePoint, suggestFtPerPx, feetBetween } from "../../shared/overlay/overlayPlacement.js";
 import { overlayPlaced } from "../../shared/sitePlans/lib/sitePlanOverlays.js";
 // Reused (never a new raw hex literal) for text on the fixed COMP_ACCENT blue below — that
 // accent doesn't change with theme, so the LIGHT palette's on-accent value is correct in both.
@@ -71,6 +71,9 @@ import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import { startClickAck } from "../../shared/ui/clickAck.js";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import FloatingNotice from "../../shared/ui/FloatingNotice.jsx";
+import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
+import { useLayerHiddenToast } from "./lib/useLayerHiddenToast.js";
+import { GATE_CLEARANCE } from "./lib/layerZoomGate.js";
 import { menuPanelStyle, MenuItem } from "../../shared/ui/controls.jsx";
 // NEW-1 (B1892544, 2026-09-24) — the "Record info" dropdown's three row icons — see that item's
 // note in icons.jsx for why each shape was picked.
@@ -866,7 +869,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
   // A sensible starting size/position for a freshly placed overlay: centered on the current map
   // view (or `centerOverride`, below), sized to a fraction of it (mirrors the Site Planner
   // reference-image panel's own "Size to view" button). Pure sizing math lives in
-  // overlayGeoref.js; only the live view is read here.
+  // overlayPlacement.js; only the live view is read here.
   //
   // `centerOverride` ({lat,lng}) — NEW-17: this is the ONLY door through which a caller may pin
   // the placement to a specific point instead of the live view center (a drag-and-drop upload
@@ -2138,6 +2141,21 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     const iv = setInterval(sync, 45000);
     return () => clearInterval(iv);
   }, [overlays, visible]); // eslint-disable-line
+
+  /* NEW-1 (B2112576) — the SAME "layer hidden at this zoom" toast the project canvas shows, on the
+     overview map (this is where a layer is first turned on). One shared rule + hook
+     (lib/useLayerHiddenToast.js); only the zoom action is this map's own: Leaflet's animated
+     setZoom to the nearest whole level inside the layers' range, centre kept. */
+  const { toasts: hiddenToasts, pushToast: pushHiddenToast, dismissToast: dismissHiddenToast, dismissByKey: dismissHiddenByKey } = useToasts();
+  useLayerHiddenToast({
+    enabled: !!(visible && isActive),
+    zoom,
+    overlays, pushToast: pushHiddenToast, dismissByKey: dismissHiddenByKey,
+    zoomTo: (target, label) => {
+      const m = mapRef.current; if (!m) return;
+      try { m.setZoom(label === "Zoom out" ? Math.floor(target + GATE_CLEARANCE) : Math.ceil(target - GATE_CLEARANCE)); } catch (_) {}
+    },
+  });
 
   /* NEW-6 — hand memory back while the Map view is hidden. Two things are released, both pure
      eviction with no visual consequence: the two basemap layers are squeezed to a token ceiling
@@ -5093,6 +5111,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
             map keeps painting over the planner. See the map<->plan reset effect below, which is
             the other half of this fix (it now clears this state on the flip, in both directions,
             instead of relying on the gate alone). */}
+        {visible && isActive && <ToastHost toasts={hiddenToasts} onDismiss={dismissHiddenToast} />}
         {visible && isActive && backupNotice && !err && (
           <FloatingNotice testId="parcel-backup-notice" maxWidth="min(420px, calc(100vw - 16px))">
             <div style={{ background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45, pointerEvents: "none" }}>

@@ -293,6 +293,15 @@ no swallowed `catch` that reads as success. Concretely, in the sync engine:
   `assembly-tear-detected`/`-healed`/`-persisted` with ids and the delta — its own header states
   this was learned the hard way, after "eight merged PRs each closed one interleaving" with no
   observer, so nobody but the owner noticed a ninth recurrence.
+- **Closing a plan DRAINS its element writes; it never hard-stops them (2026-10-06).** A plan switch
+  unmounts SitePlanner (it is keyed by plan id), and its teardown used to call a bare `stop()`,
+  silently dropping whatever was not yet on the wire — a debounced update, a backoff retry, and (the
+  measured case) a brand-new plan's first markup, which was never even queued because the engine had
+  not seeded yet. Teardown is now `drainElementsOnTeardown` → `stop({ drain: true })`, plus
+  `drainSeed(rows, rows ∪ never-synced local)` for a never-seeded engine — the same after-seed rule
+  as `refetchReplace`, so inv. 3 (rows canonical) and inv. 12 (tombstones) hold. A drain accepts no
+  new diffs, mutes canvas callbacks, and reports `element-drain` / `element-drain-failed`.
+  Proof: `test/elementSyncDrainOnStop.test.js`.
 
 ---
 

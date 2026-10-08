@@ -50,7 +50,10 @@ test.describe("bonded assembly integrity on move + undo (logged out)", () => {
     // court → trailer parking), the sidewalk+parking pair, and the corner dock bump-outs. Each
     // feature row is "label · [－] count [＋]"; the ＋ is its last button.
     await page.getByRole("button", { name: /^Properties$/ }).click();
-    const plus = (label) => page.getByText(label, { exact: true }).first().locator("xpath=..").getByRole("button").last();
+    // Old "Car parking ＋" walked sidewalk → parking rows; the end-wall stack now has "+ Sidewalk" and a Parking rows stepper.
+    const plus = (label) => (label === "Car parking"
+      ? { click: async () => { const sw = page.getByTestId("add-end-sidewalk"); if (await sw.count()) await sw.click(); else await page.getByTestId("park-rows-plus").click(); } }
+      : page.getByTestId({ "Dock zones": "add-dock-zone", "Bump-outs": "bump-plus" }[label]));
     for (const [label, times] of [["Dock zones", 2], ["Car parking", 1], ["Bump-outs", 1]]) {
       for (let i = 0; i < times; i++) { await plus(label).click(); await page.waitForTimeout(300); }
     }

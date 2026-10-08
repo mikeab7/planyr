@@ -34,6 +34,10 @@ import ScheduleOwnerList from "./ScheduleOwnerList.jsx";
 
 export default function ScheduleCrumb({
   schedules = [], activeId = null, siteId = null, siteName = null,
+  // NEW-1 (SCHED-EMPTY-ON-SLOW-LOAD) — false until the schedule list has really arrived. Until then
+  // the crumb offers nothing (no "No schedules here yet.", no New schedule): an unloaded list is not
+  // an empty one. See navState.js scheduleListState.
+  listLoaded = true,
   onSelect, onCreate, onRename, onDelete, onDuplicate,
 }) {
   const anchorRef = useRef(null);
@@ -42,7 +46,7 @@ export default function ScheduleCrumb({
   // "Project / Schedule" merged label B1404352 used before this item: the project already has its
   // own crumb immediately to the left, so this one shows the bare schedule name only.
   const current = activeId != null ? (schedules.find((s) => s && s.id === activeId) || null) : null;
-  const label = current ? (current.name || "Untitled schedule") : "Select a schedule";
+  const label = !listLoaded ? "Loading schedules…" : current ? (current.name || "Untitled schedule") : "Select a schedule";
 
   return (
     <div ref={anchorRef} style={{ position: "relative", flex: "0 1 auto", minWidth: 0 }}>
@@ -50,8 +54,9 @@ export default function ScheduleCrumb({
           two breadcrumb levels share one hit-target size and read as one connected control. */}
       <button
         data-testid="schedule-crumb"
-        onClick={() => setOpen((o) => !o)}
-        title="Switch schedule"
+        onClick={() => { if (listLoaded) setOpen((o) => !o); }}
+        disabled={!listLoaded}
+        title={listLoaded ? "Switch schedule" : "Your schedules haven’t loaded yet"}
         aria-haspopup="menu"
         aria-expanded={open}
         style={{
@@ -67,7 +72,7 @@ export default function ScheduleCrumb({
       </button>
       {/* No `panelStyle` override — AnchoredMenu's own default (`menuPanelStyle`, controls.jsx) is
           the shared token-driven surface every plain dropdown in this app already falls back to. */}
-      <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={anchorRef} placement="below-left" gap={8} width={284}>
+      <AnchoredMenu open={open && listLoaded} onClose={() => setOpen(false)} anchorRef={anchorRef} placement="below-left" gap={8} width={284}>
         <ScheduleOwnerList
           schedules={schedules}
           activeId={activeId}

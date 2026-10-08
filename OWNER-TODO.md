@@ -1084,3 +1084,7 @@ a look-ahead at what that study will produce, clearly labelled as screening and 
 - B484 — the PDF/map stutter above (needs the heavy PDF to profile).
 
 - **Decision (B2099043):** should a loose Notes page (not bound to any project) show inside a project's Notes list, or only under "Not in a project" / "See all your notes"? Today it does not show inside a project.
+
+- **Decision (B2154032, privacy):** the logged-out Schedule page at `planyr.io/sequence/` currently ships the real Goose Creek task list with your name ("Michael Butler") and dated notes to anyone who opens it. Should the logged-out starter be (a) truly blank, (b) a made-up demo project, or (c) is the Goose Creek copy intentional? Nothing was changed yet — a blind edit could break the signed-out Schedule.
+
+- **Tax rate table on a county parcel (B2179971) — needs something only you can get.** The table is built but stays hidden in every county, because no appraisal district's list of taxing units per account is reachable from here (hcad.org, fbcad.org, gcad, mcad are blocked for Claude). To switch it on for a county I need, for ONE tax year: the district's **entity legend** (the code → taxing-unit name list, e.g. what "D01" or "S07" means) and the tax office's **adopted rates**. Easiest: paste or send me the Harris and Fort Bend ones and I'll load them; the table then appears for those counties and stays hidden for any county without a complete list.

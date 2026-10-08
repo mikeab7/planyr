@@ -25,6 +25,7 @@ import {
   FEATURE_KINDS, parseFeatureKey, resolveDoubleClickTarget, pressIsOverElementBody,
   stackEntries, gestureAnchorTarget, FEATURE_ATTR, HANDLE_ATTR, EL_DIM_ATTR, CHROME_ATTR,
   stackAtPoint, nextPickIndex, PICK_SAME_POINT_PX,
+  featureKeyOf, gestureAnchorKey, chromePressFacts,
 } from "../src/workspaces/site-planner/lib/featureTarget.js";
 import { DBLTAP_MS, DBLTAP_PX } from "../src/workspaces/site-planner/lib/doubleTap.js";
 
@@ -309,6 +310,61 @@ describe("B280402 — chrome outside the handle layer is identity-transparent to
   });
 });
 
+/* ⛔ NEW-1 — THE REGRESSION B1575232 REOPENED. `startAcChip` now SELECTS its own lot on press (right
+ * for a single click on the badge), and the gesture anchor is stamped from what press 1 selected and
+ * wins outright — so a double-click on a stub under the hover-armed badge anchored to the LOT and
+ * opened the Parcels panel. The B280402 look-through rule above was intact and never consulted.
+ * Measured with `audit-doubleclick-properties` (stub rows red on 8887a4b, local preview and live).
+ * The fix lives at the anchor: a press DELIVERED to `data-chrome` is about what is beneath it. */
+describe("NEW-1 — a press on identity-transparent chrome anchors to what is BENEATH it", () => {
+  // The press-1 stack captured on the harness's stub row: the hover-armed badge, then the stub.
+  const press1Stack = [feat("parcel:zzlot1", { handle: true }), feat("el:zzel15"), feat("parcel:zzlot1")];
+
+  it("the selection the badge's own handler made does NOT become the anchor — the stub does", () => {
+    const press = chromePressFacts(true, press1Stack);
+    expect(press).toEqual({ chrome: true, beneath: "el:zzel15" });
+    expect(gestureAnchorKey("parcel:zzlot1", press)).toBe("el:zzel15");
+  });
+
+  it("end to end: press 2 then resolves to the stub, not the parcel press 1 selected", () => {
+    const key = gestureAnchorKey("parcel:zzlot1", chromePressFacts(true, press1Stack));
+    const anchor = { key, t: 1000, x: 400, y: 300 };
+    expect(resolveDoubleClickTarget(press1Stack, { anchor, at: { t: 1100, x: 400, y: 300 } }))
+      .toEqual({ kind: "el", id: "zzel15" });
+  });
+
+  it("the defect, pinned: anchoring to the selection hands the gesture to the parcel", () => {
+    const anchor = { key: "parcel:zzlot1", t: 1000, x: 400, y: 300 };
+    expect(resolveDoubleClickTarget(press1Stack, { anchor, at: { t: 1100, x: 400, y: 300 } }))
+      .toEqual({ kind: "parcel", id: "zzlot1" });
+  });
+
+  it("a badge over nothing but its own lot still anchors to the lot", () => {
+    const press = chromePressFacts(true, [feat("parcel:lot1", { handle: true }), feat("parcel:lot1")]);
+    expect(gestureAnchorKey("parcel:lot1", press)).toBe("parcel:lot1");
+  });
+
+  it("chrome over NOTHING falls back to the selection rather than to no anchor", () => {
+    expect(gestureAnchorKey("parcel:lot1", chromePressFacts(true, [feat("parcel:lot1", { handle: true })]))).toBe("parcel:lot1");
+  });
+
+  it("a press NOT on chrome keeps the selection as the anchor — the B278576 stub rule is untouched", () => {
+    // a handle-layer grip over the selected stub, a DIFFERENT road beneath: the selection must win
+    expect(chromePressFacts(false, [feat(null, { handle: true }), feat("el:otherRoad")])).toEqual({ chrome: false, beneath: null });
+    expect(gestureAnchorKey("el:stub", { chrome: false, beneath: null })).toBe("el:stub");
+    expect(gestureAnchorKey("el:stub", undefined)).toBe("el:stub");
+  });
+
+  it("no selection is still no anchor, chrome or not", () => {
+    expect(gestureAnchorKey(null, { chrome: true, beneath: "el:x" })).toBeNull();
+  });
+
+  it("featureKeyOf is the inverse of parseFeatureKey", () => {
+    for (const k of ["el:a", "markup:m1", "callout:c2", "parcel:p3", "measure:4", "el:a:b"]) expect(featureKeyOf(parseFeatureKey(k))).toBe(k);
+    for (const t of [null, {}, { kind: "nope", id: "x" }, { kind: "el", id: "" }, { kind: "measure", i: -1 }]) expect(featureKeyOf(t)).toBeNull();
+  });
+});
+
 describe("source guard — the render must keep stamping what the resolver reads", () => {
   const SP = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
 
@@ -361,7 +417,7 @@ describe("source guard — the render must keep stamping what the resolver reads
    * EVERY commit (keyed on `[sel]`, a press that re-selected the already-selected feature never
    * re-stamped it). */
   it("a cleared selection CLEARS the anchor, and the effect has no dependency array", () => {
-    const at = SP.indexOf("const key = selFeatureKey(sel);");
+    const at = SP.indexOf("const key = gestureAnchorKey(selFeatureKey(sel), p);");
     expect(at).toBeGreaterThan(0);
     const block = SP.slice(at, at + 420);
     expect(block, "a deselect must clear the anchor, never return early and leave it standing")
@@ -373,7 +429,8 @@ describe("source guard — the render must keep stamping what the resolver reads
   });
 
   it("press 1 keeps the anchor by the PRESS, not by the key", () => {
-    const at = SP.indexOf("const key = selFeatureKey(sel);");
+    const at = SP.indexOf("const key = gestureAnchorKey(selFeatureKey(sel), p);");
+    expect(at).toBeGreaterThan(0);
     const block = SP.slice(at, at + 420);
     expect(block).toMatch(/if \(held && gestureAnchorTarget\(held, p\)\) return;/);
     // the old clause could only ever hold an anchor against a DIFFERENT feature — the narrow half
@@ -396,7 +453,10 @@ describe("source guard — the render must keep stamping what the resolver reads
     // B1342704 — extended with `action` (was this press over an add/remove on-shape control?),
     // stamped in the same capture-phase statement for the same reason: a control's own
     // `stopPropagation()` must not hide it from the gesture-level swallow check either.
-    expect(SP).toMatch(/lastPressRef\.current = \{ t: tapTime\(e\), x: e\.clientX, y: e\.clientY, action \}/);
+    // NEW-1 — and whether it was delivered to `data-chrome`, with what lies beneath it (read here,
+    // before the chrome's own handler re-renders anything).
+    expect(SP).toMatch(/lastPressRef\.current = \{ t: tapTime\(e\), x: e\.clientX, y: e\.clientY, action, \.\.\.chromeFacts \}/);
+    expect(SP).toMatch(/const chromeFacts = chromePressFacts\(onChrome, onChrome \? hitStackAt\(e\.clientX, e\.clientY\) : null\)/);
     /* …and UNCONDITIONALLY. It shares the capture handler with the vertex-drag hook, which bails
      * during a 2-finger pinch, and (B548822) the stack picker, which bails on anything but a plain
      * Alt+click; a press swallowed by either is still a press, and gating the stamp behind them
@@ -511,8 +571,8 @@ describe("NEW-1 — a label's right-click never forwards to whatever it sits ove
     /* A measurement is addressed by INDEX, not by id — the selection model's asymmetry, and the
      * reason a bare `on${kind}Context` lookup table would be wrong here. */
     expect(block).toMatch(/measures\[t\.i\]/);
-    /* NEW-1 (B1239328) — a locked parcel is click-through, same as the map. */
-    expect(block).toMatch(/pc\.locked/);
+    /* Parcels rework (NEW-5) — Lock now guards only Edit parcels, so a locked parcel answers a right-click like any other. */
+    expect(block).not.toMatch(/pc\.locked/);
   });
 
   /* Every OTHER label on the canvas already followed this rule (a direct `on${kind}Context(e, id)`

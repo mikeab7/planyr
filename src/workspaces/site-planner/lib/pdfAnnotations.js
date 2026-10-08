@@ -396,6 +396,8 @@ export function pathVertices(it) {
 
 /* ---------------------------------------------------------------- items → appearance stream */
 const FONT_KEY = (bold, italic) => (bold ? (italic ? "F4" : "F2") : (italic ? "F3" : "F1"));
+/** The /DR resource names a FreeText /DA uses for each face (the AcroForm standard names Acrobat itself writes). */
+export const DA_FONT_NAMES = { F1: "Helv", F2: "HeBo", F3: "HeOb", F4: "HeBO" };
 export const BASE_FONTS = { F1: "Helvetica", F2: "Helvetica-Bold", F3: "Helvetica-Oblique", F4: "Helvetica-BoldOblique" };
 
 /** Draw `items` into one content stream. Returns { stream, fonts:Set, gs:[{name,ca,CA}], patterns:[…] }. */
@@ -474,6 +476,23 @@ const pdfDate = (iso) => {
 const SUBJECT = { line: "Line", polyline: "Polyline", rect: "Rectangle", ellipse: "Ellipse", polygon: "Polygon", cloud: "Cloud" };
 const MEASURE_SUBJECT = { line: "Length measurement", path: "Length measurement", polyline: "Length measurement", area: "Area measurement", count: "Count" };
 
+/* A viewer that REGENERATES a cloud draws its own scallops from /BE /I; the AP stream's are Planyr's. The
+ * spec bounds /I to 0..2. Calibrated against MuPDF 1.28 (the one regenerating engine runnable here): its
+ * scallop pitch is ≈ 6.2 pt per unit of /I (I=1 → ~6 pt, I=2 → ~12 pt), so asking for the pitch the AP
+ * really has gets the same arc size back, up to the spec ceiling (a very large Planyr scallop caps at ~12 pt). */
+export const MUPDF_CLOUD_PITCH_PER_I = 6.2;
+export function cloudPitch(main, ring) {
+  // one scallop = one semicircle = two béziers (arcToBeziers splits at 90°)
+  const scallops = main ? main.segs.filter((s) => s[0] === "C").length / 2 : 0;
+  let perim = 0;
+  for (let i = 0; i < ring.length; i += 2) {
+    const j = (i + 2) % ring.length;
+    perim += Math.hypot(ring[j] - ring[i], ring[j + 1] - ring[i + 1]);
+  }
+  return scallops >= 1 ? perim / scallops : 0;
+}
+export const cloudIntensity = (pitch) => (pitch > 0 ? Math.round(Math.max(0.5, Math.min(2, pitch / MUPDF_CLOUD_PITCH_PER_I)) * 10) / 10 : 1);
+
 const rgbOf = (c) => (c ? c.rgb.slice() : null);
 const aligned = (it, tol = 0.5) => {
   // is this closed path an axis-aligned rectangle? (all vertices on its bbox's four corners)
@@ -517,7 +536,11 @@ export function buildAnnotations(descriptors, opts) {
     const st = main || {};
     base.color = rgbOf(st.stroke); base.ic = rgbOf(st.fill);
     base.bw = st.stroke ? st.sw : 0; base.dash = st.dash || [];
-    base.ca = st.stroke ? st.strokeA : (st.fill ? st.fillA : 1);
+    // /CA is the one opacity a regenerating viewer honours (it paints fill AND stroke with it). The AP stream
+    // keeps the true per-channel values, so as-written pages are exact; this is what an editor rebuilds from.
+    // A translucent fill therefore wins /CA — an opaque fill with a faint stroke is the far worse regeneration.
+    base.ca = st.fill && st.fillA < 0.995 ? st.fillA : st.stroke ? st.strokeA : (st.fill ? st.fillA : 1);
+    base.fillRgb = null;
     if (st.pat) base.degraded = base.degraded.concat(["hatch drawn as a tiling pattern in the appearance only"]);
 
     if (d.family === "markup") {
@@ -531,7 +554,7 @@ export function buildAnnotations(descriptors, opts) {
         annots.push({ ...base, subtype: "PolyLine", vertices: pathVertices(main).flat(), LE: ["None", "None"] });
       } else if (d.kind === "cloud" && main) {
         const hv = d.hints && d.hints.verts ? d.hints.verts.map((p) => apply(M0, p.x, p.y)) : pathVertices(main);
-        annots.push({ ...base, subtype: "Polygon", vertices: hv.flat(), BE: { S: "C", I: d.hints && d.hints.arcFt > 4 ? 2 : 1 } });
+        annots.push({ ...base, subtype: "Polygon", vertices: hv.flat(), BE: { S: "C", I: cloudIntensity(cloudPitch(main, hv.flat())) } });
       } else if (d.kind === "polygon" && main) {
         annots.push({ ...base, subtype: "Polygon", vertices: pathVertices(main).flat() });
       } else if (d.kind === "rect" && main) {
@@ -575,11 +598,20 @@ export function buildAnnotations(descriptors, opts) {
       void dx;
       const fk = FONT_KEY(!!t0.bold, !!t0.italic);
       const col = t0.fill ? t0.fill.rgb : [0, 0, 0];
+      // FreeText: /C is the BOX FILL (Acrobat + MuPDF), absent when the box has none; the border colour and width
+      // ride in /DA ("RG") + /BS. The generic stroke-as-/C mapping above would paint the border colour as a solid fill.
+      const boxFill = box && box.fill && box.fillA > 0.02 ? box.fill.rgb : null;
+      const boxStroke = box && box.stroke && box.sw > 0 ? box.stroke.rgb : null;
+      // NOT /IC: MuPDF reads a FreeText's /IC as the box background, so an arrow-head fill there turns the box dark.
+      // A regenerated callout arrow head is therefore hollow — the one visible difference left.
+      base.ic = null;
+      base.color = boxFill; base.bw = boxStroke ? box.sw : 0; base.dash = box && boxStroke ? box.dash : [];
+      base.ca = box && boxFill ? box.fillA : box && boxStroke ? box.strokeA : 1;
       annots.push({
         ...base, subtype: "FreeText", subj: base.subj || (cl ? "Callout" : "Text Box"), contents: lines.join("\n"),
         IT: cl ? "FreeTextCallout" : "FreeText", CL: cl, LE: cl ? "ClosedArrow" : null,
         Q: align, RD: [Math.max(0, innerBox[0] - rect[0] - boxPad), Math.max(0, innerBox[1] - rect[1] - boxPad), Math.max(0, rect[2] - innerBox[2] - boxPad), Math.max(0, rect[3] - innerBox[3] - boxPad)],
-        DA: { font: fk, size: t0.size || 12, rgb: col },
+        DA: { font: fk, size: t0.size || 12, rgb: col, border: boxStroke },
         extraLeaders: Math.max(0, runs.length - 1),
         rotated: !!(d.meta && d.meta.rot && d.meta.rot % 90 !== 0) || (d.meta && d.meta.rot % 90 === 0 && d.meta.rot !== 0),
       });
@@ -595,8 +627,14 @@ export function buildAnnotations(descriptors, opts) {
       else if (mode === "count") { annots.push({ ...base, subtype: "Stamp" }); degraded.push(`measure ${d.id}: a count has no native subtype — written as a Stamp`); }
       else if (main) {
         const v = pathVertices(main);
-        if (v.length === 2) annots.push({ ...base, subtype: "Line", L: [v[0][0], v[0][1], v[1][0], v[1][1]], LE: ["None", "None"] });
-        else annots.push({ ...base, subtype: "PolyLine", vertices: v.flat(), LE: ["None", "None"] });
+        // /Cap puts /Contents on the line as a caption, so the number survives a viewer rebuilding the appearance
+        if (v.length === 2) {
+          // The caption IS /Contents, set in WinAnsi Helvetica by the viewer (no ′ ″) — so write the AP's own stand-ins,
+          // and fold a typed note in after the number rather than losing either.
+          const cap = chipLines.length > 0;
+          const contents = cap ? winAnsi([chipLines.join(" "), meta.comment].filter(Boolean).join(" — ")).text : base.contents;
+          annots.push({ ...base, contents, subtype: "Line", L: [v[0][0], v[0][1], v[1][0], v[1][1]], LE: ["None", "None"], cap });
+        } else annots.push({ ...base, subtype: "PolyLine", vertices: v.flat(), LE: ["None", "None"] });
       } else { annots.push({ ...base, subtype: "Stamp" }); degraded.push(`measure ${d.id}: no line geometry — written as a Stamp`); }
     }
   }
@@ -643,18 +681,20 @@ export function annotationDict(a, apRef) {
   if (a.modified) f.push(`/M (${a.modified})`);
   if (a.created) f.push(`/CreationDate (${a.created})`);
   if (a.color) f.push(`/C ${arr(a.color)}`);
-  if (a.ic && a.subtype !== "Line" && a.subtype !== "PolyLine") f.push(`/IC ${arr(a.ic)}`);
+  if (a.ic && (a.subtype === "Square" || a.subtype === "Circle" || a.subtype === "Polygon")) f.push(`/IC ${arr(a.ic)}`);
   f.push(`/CA ${n3(a.ca)}`);
   if (a.bw > 0 || a.dash.length) {
     f.push(`/BS << /Type /Border /W ${n3(a.bw)} /S ${a.dash.length ? "/D" : "/S"}${a.dash.length ? ` /D ${arr(a.dash)}` : ""} >>`);
   }
   if (a.subtype === "Line") f.push(`/L ${arr(a.L)}`, `/LE [/${a.LE[0]} /${a.LE[1]}]`);
+  if (a.subtype === "Line" && a.cap) f.push(`/Cap true`, `/CP /Top`);
   if (a.subtype === "PolyLine" || a.subtype === "Polygon") f.push(`/Vertices ${arr(a.vertices)}`);
   if (a.subtype === "PolyLine") f.push(`/LE [/${a.LE[0]} /${a.LE[1]}]`);
   if (a.BE) f.push(`/BE << /S /${a.BE.S} /I ${a.BE.I} >>`);
   if (a.subtype === "FreeText") {
     const c = a.DA.rgb.map(n3).join(" ");
-    f.push(`/DA (/Helv ${n3(a.DA.size)} Tf ${c} rg)`, `/Q ${a.Q}`, `/IT /${a.IT}`, `/RD ${arr(a.RD)}`);
+    const bd = a.DA.border ? ` ${a.DA.border.map(n3).join(" ")} RG` : "";
+    f.push(`/DA (/${DA_FONT_NAMES[a.DA.font] || "Helv"} ${n3(a.DA.size)} Tf ${c} rg${bd})`, `/Q ${a.Q}`, `/IT /${a.IT}`, `/RD ${arr(a.RD)}`);
     f.push(`/DS ${textString(`font: Helvetica ${n3(a.DA.size)}pt; text-align:${["left", "center", "right"][a.Q]}`)}`);
     if (a.CL) f.push(`/CL ${arr(a.CL)}`, `/LE /${a.LE}`);
   }
