@@ -325,7 +325,7 @@ function DrawsToggle({ id, band, onSet }) {
     const on = band === key;
     return (
       <button key={key} type="button" aria-pressed={on} title={title} data-testid={`reference-${key}-${id}`} onClick={() => onSet(key === "above")}
-        style={{ border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: C, fontWeight: 400, lineHeight: 1, whiteSpace: "nowrap", height: "100%", padding: "0 7px", borderRadius: RADIUS.sm,
+        style={{ border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: C, fontWeight: 400, lineHeight: 1, whiteSpace: "nowrap", height: "100%", padding: "0 5px", borderRadius: RADIUS.sm,
           background: on ? "var(--text-primary)" : "transparent", color: on ? "var(--surface-page)" : "var(--text-primary)" }}>{label}</button>
     );
   };

@@ -244,7 +244,7 @@ async function fitCheck() {
   }
 }
 
-const WIDTHS = [240, 300, 400, 520, 620];
+const WIDTHS = process.env.WIDTHS ? process.env.WIDTHS.split(",").map(Number) : [240, 300, 400, 520, 620];
 for (const w of WIDTHS) await run(`docked ${w}`, { w });
 for (const w of WIDTHS) await run(`floating ${w}`, { w, floating: true });
 await fitCheck();
