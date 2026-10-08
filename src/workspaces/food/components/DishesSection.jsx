@@ -21,6 +21,7 @@
  * exist only in the ADD flow, where there are genuinely two different next steps; editing has one.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useDraftField, useDraftStore } from "../lib/draftStore.js";
 import ScoreMeter from "./ScoreMeter.jsx";
 import { formatVisitDate } from "../lib/dateFormat.js";
 import {
@@ -166,13 +167,17 @@ function DishHistoryPanel({ row, dishesAtSamePlace }) {
  * redesign's FIELD HIERARCHY): a "NEW DISH"/"EDIT DISH" label + close X, the dish name as the
  * page's one hero field, Course + Price sharing a row, the Score block, the Order-again block,
  * Note last. Enter commits (and, only when adding a NEW dish, reopens a blank row); Esc cancels. */
-function DishEditRow({ initial, existingNames, openWishlistNames, onSave, onCancel, pending, isMobile }) {
-  const [name, setName] = useState(initial?.name || "");
-  const [course, setCourse] = useState(initial?.course || "");
-  const [score, setScore] = useState(initial?.score != null ? Number(initial.score) : null);
-  const [orderAgain, setOrderAgain] = useState(initial?.order_again || null);
-  const [price, setPrice] = useState(initial?.price_cents != null ? (initial.price_cents / 100).toFixed(2) : "");
-  const [note, setNote] = useState(initial?.note || "");
+function DishEditRow({ initial, existingNames, openWishlistNames, onSave, onCancel: onCancelRaw, pending, isMobile, scope = "place" }) {
+  // Kept across the card remounting (rotate the phone — lib/draftStore.js); an explicit close/cancel/save-and-close clears it.
+  const drafts = useDraftStore();
+  const draftKey = `dish:${scope}:${initial?.id || "new"}`;
+  const onCancel = () => { drafts?.clear(draftKey); onCancelRaw(); };
+  const [name, setName] = useDraftField(draftKey, "name", () => initial?.name || "");
+  const [course, setCourse] = useDraftField(draftKey, "course", () => initial?.course || "");
+  const [score, setScore] = useDraftField(draftKey, "score", () => (initial?.score != null ? Number(initial.score) : null));
+  const [orderAgain, setOrderAgain] = useDraftField(draftKey, "orderAgain", () => initial?.order_again || null);
+  const [price, setPrice] = useDraftField(draftKey, "price", () => (initial?.price_cents != null ? (initial.price_cents / 100).toFixed(2) : ""));
+  const [note, setNote] = useDraftField(draftKey, "note", () => initial?.note || "");
   const listId = `dish-name-suggestions-${initial?.id || "new"}`;
   const suggestions = [...new Set([...existingNames, ...openWishlistNames])];
 
@@ -467,10 +472,11 @@ const SORTS = {
   last: (a, b) => (b.visited_on || "").localeCompare(a.visited_on || ""),
 };
 
-export default function DishesSection({ dishesWithDate, visits, onSaveDish, onDeleteDish, pending, openWishlistNames = [] }) {
+export default function DishesSection({ dishesWithDate, visits, onSaveDish, onDeleteDish, pending, openWishlistNames = [], scope = "place" }) {
   const [sortKey, setSortKey] = useState("score");
-  const [addingNew, setAddingNew] = useState(false);
-  const [editingKey, setEditingKey] = useState(null);
+  // Which add/edit row is open survives the card remounting (lib/draftStore.js); `scope` keeps the place-wide section and the one inside an editing visit apart.
+  const [addingNew, setAddingNew] = useDraftField(`dishes-ui:${scope}`, "addingNew", false);
+  const [editingKey, setEditingKey] = useDraftField(`dishes-ui:${scope}`, "editingKey", null);
   const [openHistoryKey, setOpenHistoryKey] = useState(null);
   const isMobile = useIsMobile();
 
@@ -533,7 +539,7 @@ export default function DishesSection({ dishesWithDate, visits, onSaveDish, onDe
             <div key={row.key}>
               <DishEditRow
                 initial={row} existingNames={existingNames} openWishlistNames={openWishlistNames}
-                pending={pending} onCancel={() => setEditingKey(null)} isMobile={isMobile}
+                pending={pending} onCancel={() => setEditingKey(null)} isMobile={isMobile} scope={scope}
                 onSave={(fields) => onSaveDish({ ...fields, id: row.id })}
               />
             </div>
@@ -550,7 +556,7 @@ export default function DishesSection({ dishesWithDate, visits, onSaveDish, onDe
         {addingNew ? (
           <DishEditRow
             existingNames={existingNames} openWishlistNames={openWishlistNames} pending={pending} isMobile={isMobile}
-            onCancel={() => setAddingNew(false)}
+            onCancel={() => setAddingNew(false)} scope={scope}
             onSave={(fields) => onSaveDish({ ...fields, visit_id: targetVisitId })}
           />
         ) : (

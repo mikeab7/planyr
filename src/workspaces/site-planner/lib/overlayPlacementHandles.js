@@ -17,6 +17,7 @@
  * release (so the caller persists exactly one write per gesture, not one per pointermove).
  */
 import L from "leaflet";
+import { markGestureEnd } from "./handleGestureClock.js";
 import {
   overlayCornersFromPlacement, scalePlacement, rotatePlacement, imagePointToLatLon,
   visibleFrame, visibleCenterPx, visibleCornersPx, anchorVisibleCentreGeo,
@@ -175,6 +176,7 @@ export function createPlacementHandles(map) {
       if (wasTouchZoom && map.touchZoom) map.touchZoom.enable();
     };
     const onUp = () => {
+      markGestureEnd(); // the release's click must not reach the map's background-deselect (see handleGestureClock.js)
       cleanup();
       const done = current;
       redraw(); // drop the readout before the (possibly async) commit round-trips
