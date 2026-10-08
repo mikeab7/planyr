@@ -18,7 +18,7 @@ const A = [[-125.932,178.349],[-136.264,178.423],[-127.355,133.821],[-120.149,88
 const B = [[892.997,-236.68],[899.414,171.025],[887.17,171.113],[498.875,173.883],[496.278,-236.517]];
 const ID = "zz-britt-" + Math.random().toString(36).slice(2, 7);
 const site = { id: ID, groupId: ID, site: "ZZ Brittmoore Throwaway", name: "Plan 1", origin: { lat: 29.8, lon: -95.5 }, county: "harris",
-  parcels: [{ id: "pA", points: P(A), locked: true, acct: "0210690010025" }, { id: "pB", points: P(B), locked: true, acct: "0210690010007" }],
+  parcels: [{ id: "pA", points: P(A), locked: true, lockSem: 2, acct: "0210690010025" }, { id: "pB", points: P(B), locked: true, lockSem: 2, acct: "0210690010007" }],
   els: [], measures: [], callouts: [], markups: [], settings: {}, underlay: null, updatedAt: Date.now(), status: "active", schemaVersion: 12 };
 const area = (r) => Math.abs(r.reduce((s, p, i) => { const q = r[(i + 1) % r.length]; return s + p.x * q.y - q.x * p.y; }, 0) / 2);
 
@@ -48,7 +48,9 @@ try {
   console.log("served build (same call as the assertions):", served);
   if (EXPECT) ok("served build contains the merge commit", contains(String(served)), `${served} ⊇ ${EXPECT}`);
   const before = await parcelsLS();
-  ok("known-good: untouched plan holds the two seeded LOCKED parcels at ~9.51 ac", before && before.length === 2 && before.every((p) => p.locked) && Math.abs((area(before[0].points) + area(before[1].points)) / 43560 - 9.514) < 0.01);
+  const kgAc = before ? before.reduce((t, p) => t + area(p.points), 0) / 43560 : 0;
+  ok("known-good: untouched plan holds the two seeded LOCKED parcels at ~9.51 ac", before && before.length === 2 && before.every((p) => p.locked) && Math.abs(kgAc - 9.514) < 0.01,
+    `n=${before && before.length} locked=${before && JSON.stringify(before.map((p) => p.locked))} ac=${kgAc.toFixed(4)}`);
   if (!(before && before.length === 2)) throw new Error("VOID run — seeded parcels not seen");
   await page.locator('[data-rail-tab="parcel"]').first().click(); await T("parcels-panel").waitFor({ timeout: 15000 });
   await page.getByTestId("rail-parcel-tools").click();
