@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { parseJurValueLine, parseRateTable, buildUnits, lookupHarris } from "../functions/api/lib/hcadUnits.js";
+import { findAccountRows, hcadZipUrl, parseJurValueLine, parseRateTable, buildUnits, lookupHarris } from "../functions/api/lib/hcadUnits.js";
 
 // Ground truth (Cowork, search.hcad.org, acct 0591420000105, 2025 rates per $100) and the HCAD bulk-data
 // rows measured from download.hcad.org on 2026-10-08.
@@ -94,5 +94,34 @@ describe("lookupHarris (stubbed zip)", () => {
     const f = await rangedFetch();
     const r = await lookupHarris(ACCT, { years: [2027, 2026], fetchImpl: f });
     expect(r.year).toBe(2026);
+  });
+});
+
+describe("findAccountRows — segment boundaries and early exit", () => {
+  const FILE = ["acct\ttax_district\ttp_cd\tpct_district\tappraised_val\ttaxable_val",
+    "0000000000001\t001\tI\t1.0000\t1\t0", "0000000000001\t040\tT\t1.0000\t1\t0",
+    "0000000000007\t001\tI\t1.0000\t1\t0", "0000000000007\t040\tT\t1.0000\t1\t0", "0000000000007\t041\tT\t1.0000\t1\t0",
+    "0000000000009\t001\tI\t1.0000\t1\t0"].join("\r\n") + "\r\n";
+  const enc = new TextEncoder().encode(FILE);
+  const entry = { method: 0, csize: enc.length, off: 0 };
+  const mk = (counter) => async (_u, o) => {
+    counter.n++;
+    const m = /bytes=(\d+)-(\d+)/.exec(o.headers.range);
+    const s = Number(m[1]), e = Math.min(enc.length - 1, Number(m[2]));
+    // the "local header" probe at off 0 must report name/extra lengths of 0 → data starts at 30
+    if (s === 0 && e === 63) return new Response(new Uint8Array(64), { status: 206 });
+    return new Response(enc.slice(s - 30, e - 30 + 1), { status: 206 });
+  };
+  for (const seg of [7, 50, 1e6]) {
+    it(`finds the contiguous group whatever the segment size (${seg})`, async () => {
+      const rows = await findAccountRows("u", entry, "0000000000007", mk({ n: 0 }), seg);
+      expect(rows.map((r) => r.code)).toEqual(["001", "040", "041"]);
+    });
+  }
+  it("returns nothing for an account that is absent, and stops reading once past it", async () => {
+    const c = { n: 0 };
+    const rows = await findAccountRows("u", entry, "0000000000005", mk(c), 25);
+    expect(rows).toEqual([]);
+    expect(c.n).toBeLessThan(1 + Math.ceil(enc.length / 25)); // did not read the whole file
   });
 });

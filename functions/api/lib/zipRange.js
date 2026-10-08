@@ -38,12 +38,25 @@ export async function remoteZipEntries(url, fetchImpl = fetch) {
  * "\n"). Handing the caller a block rather than a line at a time is the point — a 570 MB roll is ~1.8M lines and
  * any per-line JavaScript blows the Worker's CPU budget (Cloudflare error 1102, measured); native indexOf over a
  * block does not. Returns { bytes, stopped }. */
-export async function scanZipEntryBlocks(url, entry, onBlock, fetchImpl = fetch) {
+export async function scanZipEntryBlocks(url, entry, onBlock, fetchImpl = fetch, seg = 16 * 1024 * 1024) {
   const lh = new Uint8Array(await (await fetchImpl(url, { headers: { ...UA, range: `bytes=${entry.off}-${entry.off + 63}` } })).arrayBuffer());
   const start = entry.off + 30 + u16(lh, 26) + u16(lh, 28);
-  const res = await fetchImpl(url, { headers: { ...UA, range: `bytes=${start}-${start + entry.csize - 1}` } });
-  if (!res.ok || !res.body) throw new Error(`zip entry read failed: HTTP ${res.status}`);
-  const body = entry.method === 0 ? res.body : res.body.pipeThrough(new DecompressionStream("deflate-raw"));
+  // Pulled in bounded Range segments, on demand: a single ranged GET of a 60 MB entry is read ahead by the
+  // runtime far faster than it is inflated, and buffering the compressed bytes is what ran deep scans out of
+  // memory (Cloudflare 1102). A ReadableStream with highWaterMark 0 only fetches the next segment when asked.
+  let pos = start;
+  const end = start + entry.csize;
+  const src = new ReadableStream({
+    async pull(c) {
+      if (pos >= end) { c.close(); return; }
+      const hi = Math.min(end, pos + seg) - 1;
+      const r = await fetchImpl(url, { headers: { ...UA, range: `bytes=${pos}-${hi}` } });
+      if (!r.ok) throw new Error(`zip entry read failed: HTTP ${r.status}`);
+      c.enqueue(new Uint8Array(await r.arrayBuffer()));
+      pos = hi + 1;
+    },
+  }, { highWaterMark: 0 });
+  const body = entry.method === 0 ? src : src.pipeThrough(new DecompressionStream("deflate-raw"));
   const rd = body.getReader();
   const dec = new TextDecoder();
   let pending = "", bytes = 0, stopped = false;
