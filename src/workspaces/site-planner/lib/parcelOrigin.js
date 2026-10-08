@@ -14,6 +14,8 @@
  *
  * Pure: no DOM, no React.
  */
+import { countyRecord } from "./appraisal.js";
+
 /* THE ONE provenance rule (parcelRecord.js's `parcelProvenance` delegates here). It lives in THIS
  * boot-safe leaf, not in parcelRecord.js, because the Parcels list reads it on the planner's boot
  * path and parcelRecord.js is deliberately lazy-only (its header explains the chunk-hoist trap). */
@@ -22,10 +24,18 @@ export function originKind(pc) {
   const s = pc && typeof pc.source === "string" ? pc.source : null;
   if (s && SOURCES.includes(s)) return s;
   if (combinedCount(pc) > 0) return "combined";
-  return (pc && (pc.attrs || pc.gisKey)) ? "county" : "drawn";
+  if (pc && (pc.attrs || pc.gisKey)) return "county";
+  /* A piece cut by Split is what the lot it was cut from was. */
+  const parent = pc && pc.splitFrom && pc.splitFrom.from;
+  if (parent && parent !== pc) { const k = originKind(parent); if (k !== "unknown") return k === "combined" ? "unknown" : k; }
+  /* "Drawn" needs POSITIVE evidence (a `source: "drawn"` stamped when the outline was digitised). A lot
+   * saved before that stamp, with no county record and no combine/deed trail, could be anything — say
+   * nothing rather than guess (B2191xxx NEW-3: a Combined parcel read "Drawn" because nothing proved it
+   * otherwise and "drawn" was the default). */
+  return "unknown";
 }
 
-export const ORIGIN_CHIP = { combined: "Combined", county: "From the county", deed: "From deed", drawn: "Drawn" };
+export const ORIGIN_CHIP = { combined: "Combined", county: "From the county", deed: "From deed", drawn: "Drawn", unknown: null };
 
 /* How many original lots a combined parcel was made from (0 when it is not a combined parcel). */
 export const combinedCount = (pc) => {
@@ -42,13 +52,30 @@ export function cadNameOf(countyLabel) {
 
 /* @returns { kind, chip, line, count }
  *   line — the row's short second line: "Combined from 3 lots" · "Harris CAD · 045-123-000-0012" · "Drawn" */
-export function parcelOrigin(pc, { cadName = null } = {}) {
+/* "Combined from 3 lots" when EVERY source is a county lot, otherwise "Combined from 3 parcels". */
+export function combinedLine(pc) {
+  const from = pc && pc.combined && Array.isArray(pc.combined.from) ? pc.combined.from : [];
+  const n = from.length;
+  const allCounty = n > 0 && from.every((f) => originKind(f) === "county");
+  return `Combined from ${n} ${allCounty ? (n === 1 ? "lot" : "lots") : (n === 1 ? "parcel" : "parcels")}`;
+}
+
+/* The account a county lot is known by: the county's own attribute bag first (the identify-time `pc.acct`
+ * was the internal OBJECTID on HCAD's schema), the stamped value only as the fallback. */
+export function accountOf(pc, { idField = null } = {}) {
+  if (!pc) return null;
+  if (pc.attrs) return countyRecord(pc.attrs, { acct: pc.acct, idField }).account;
+  return pc.acct || null;
+}
+
+export function parcelOrigin(pc, { cadName = null, idField = null } = {}) {
   const count = combinedCount(pc);
   const kind = count > 0 ? "combined" : originKind(pc);
   let line;
-  if (kind === "combined") line = `Combined from ${count} lot${count === 1 ? "" : "s"}`;
-  else if (kind === "county") line = [cadName, pc && pc.acct].filter(Boolean).join(" · ") || "From the county";
+  if (kind === "combined") line = combinedLine(pc);
+  else if (kind === "county") line = [cadName, accountOf(pc, { idField })].filter(Boolean).join(" · ") || "From the county";
   else if (kind === "deed") line = "From a deed";
-  else line = "Drawn";
-  return { kind, chip: ORIGIN_CHIP[kind] || ORIGIN_CHIP.drawn, line, count };
+  else if (kind === "drawn") line = "Drawn";
+  else line = ""; // unknown — no source line rather than a guess
+  return { kind, chip: ORIGIN_CHIP[kind] || null, line, count };
 }

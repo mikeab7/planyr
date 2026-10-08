@@ -135,8 +135,6 @@ const SiteAnalysis = lazy(() => import("./components/SiteAnalysis.jsx"));
 /* LAZY (B1064 tranche). The county appraisal record + the taxing-unit list render ONLY for a lot
  * that came from a county identify, and only while the Parcels panel is the open one — never at
  * first paint. Both bodies come from the same module, so they share one chunk and one load. */
-const ParcelAppraisal = lazy(() => import("./components/ParcelDataPanel.jsx").then((m) => ({ default: m.ParcelAppraisal })));
-const ParcelTaxes = lazy(() => import("./components/ParcelDataPanel.jsx").then((m) => ({ default: m.ParcelTaxes })));
 /* NEW-1 — "Set this plan's location", the way back for a plan drawn while the county GIS was down.
  * Lazy for the same reason as the panels above: a modal opened at most once per session, carrying
  * its own interactive Leaflet map, has no business on the planner's boot chunk. */
@@ -226,7 +224,7 @@ import { bestMeasurer } from "../../shared/markup/textWrap.js"; // B548818 — m
 import { CROSS_BAND_BEHIND, CROSS_BAND_FRONT } from "./lib/paintOrder.js"; // B548819 — ONE name for the cross-band command
 import { nearestRectPerimeterPoint, calloutCornerRadius } from "../../shared/markup/geometry.js";
 import { calloutDblZone } from "../../shared/markup/hitTest.js";
-import { COUNTIES, COUNTIES_MAP, countyKeyForName, resolveTaxRates, candidateCountiesForPoint, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote, displayFloorForPoint, displaySourcesForView, statewideKeysForState, statewideBackupScope, isStatewideLayerUrl, loadCountyPolygons } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, countyKeyForName, candidateCountiesForPoint, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote, displayFloorForPoint, displaySourcesForView, statewideKeysForState, statewideBackupScope, isStatewideLayerUrl, loadCountyPolygons } from "./lib/counties.js";
 import { lookupParcels } from "./lib/parcelQuery.js";
 import {
   resolveLayerUrl,
@@ -1442,42 +1440,7 @@ const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimu
 /* --------------- county appraisal-district attribute view --------------- */
 // The curated attribute view (APPR_FIELDS / apprRows / apprAll / apprVal / findAttr)
 // now lives in ./lib/appraisal.js so the map finder's address-search info card shares
-// the exact same labelling (B233). countyAcres stays here (planner-only geometry check).
-// County stated acreage from the attributes. Prefer an explicit acres field;
-// fall back to Shape_Area (EPSG:2278 → US survey ft² → ÷43560). Returns
-// { acres, source } or null. Caller flags a ~10× gap (likely m²) rather than
-// silently "fixing" it.
-const countyAcres = (attrs) => {
-  if (!attrs) return null;
-  const keys = Object.keys(attrs);
-  const num = (k) => +attrs[k];
-  const ok = (k) => k && attrs[k] != null && attrs[k] !== "" && !isNaN(num(k)) && num(k) > 0;
-  // 1) An explicit, already-in-acres field. A CAD record often carries SEVERAL acreage
-  //    fields — total tract PLUS sub-acreages like a HOMESITE carve-out, an ag-use
-  //    portion, or an exemption acreage. A "PT TR ... (HOMESITE)" parcel can show a
-  //    ~0.5 ac homesite field beside a 17 ac total; picking the first match grabbed the
-  //    homesite and falsely flagged the geometry ~3,300% off (B166). The total tract is
-  //    always the LARGEST of these, so take the max — never a partial-tract sub-acreage.
-  //    (Belt-and-suspenders: also skip fields whose name marks them as a homesite/
-  //    exemption/improvement sub-acreage even if they happened to be larger.)
-  const isSubAcre = (k) => /(home_?site|homestead|\bhs_|hmst|exempt|imprv|improv)/i.test(k);
-  const acresKeys = keys.filter((k) => /(gis_?acres|legal_?acres|deed_?acres|calc_?acres|acreage|^acres$)/i.test(k) && ok(k));
-  const totalKeys = acresKeys.filter((k) => !isSubAcre(k));
-  const pick = (totalKeys.length ? totalKeys : acresKeys);
-  if (pick.length) { const best = pick.reduce((a, b) => (num(b) > num(a) ? b : a)); return { acres: num(best), source: best }; }
-  // 2) TxGIO statewide (the Chambers source) publishes GIS_AREA / LEGAL_AREA already in acres,
-  //    with a sibling *_UNIT field naming the unit — prefer these over the projected Shape area
-  //    so we don't misread square-metres as square-feet (the old regex matched neither, then
-  //    divided a m² value by 43560 → ~10.76× too small, flagging every correct lot as wrong).
-  const unitOf = (areaK) => { const want = (areaK + "_unit").toLowerCase(); const uk = keys.find((k) => k.toLowerCase() === want); return uk ? String(attrs[uk]) : ""; };
-  const areaAcresKey = keys.find((k) => /(gis_?area|legal_?area)$/i.test(k) && ok(k) && /acre/i.test(unitOf(k)));
-  if (areaAcresKey) return { acres: num(areaAcresKey), source: areaAcresKey };
-  // 3) Last resort: a projected Shape area. Assume EPSG:2278 US-ft² (÷43560); the caller flags a
-  //    ~10.76× gap as a likely square-metre projection rather than silently trusting it.
-  const areaKey = keys.find((k) => /(shape_?area|shape\.starea|st_area)/i.test(k) && ok(k));
-  if (areaKey) return { acres: num(areaKey) / 43560, source: areaKey, fromArea: true };
-  return null;
-};
+// the exact same labelling (B233).
 
 // B591 — collision-resistant element ids. A per-TAB salt is appended to every minted id so
 // two tabs (or a reopen after a delete) can never mint the same id, and a freshly drawn item
@@ -6757,24 +6720,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }, 30);
     return () => clearTimeout(t);
   }, [standardsFocus, leftPanel]);
-  // Resolve taxing jurisdictions for the selected parcel (async, graceful).
-  useEffect(() => {
-    const pc = sel?.kind === "parcel" ? parcels.find((p) => p.id === sel.id) : null;
-    if (!pc || !pc.attrs) { setTaxInfo(null); return; }
-    let live = true;
-    // NEW-1 — Harris's real rate source spatially resolves city/ISD, so it needs the parcel's own
-    // centroid (never the site origin) converted feet → lng/lat, the same conversion `jurActiveRings`
-    // uses. Missing/degenerate geometry just omits lng/lat — resolveTaxRates degrades gracefully.
-    let ll = null;
-    if (origin && pc.points?.length >= 3) {
-      const ring = pc.points.map((pt) => { const [la, ln] = feetToLatLng(pt, origin.lat, origin.lon); return [ln, la]; });
-      const c = ringCentroid(ring);
-      if (c) ll = { lng: c.lng, lat: c.lat };
-    }
-    resolveTaxRates(siteCounty, pc.attrs, ll || {}).then((r) => { if (live) setTaxInfo(r); }).catch(() => { if (live) setTaxInfo(null); });
-    return () => { live = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sel?.kind, sel?.id]);
   // The left menu opening/closing resizes the canvas; pan to compensate so the drawing doesn't
   // jump sideways (e.g. on the first element click of a session, or a panel→panel switch).
   //
@@ -10042,7 +9987,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const closePoly = () => {
     if (draftPoly && draftPoly.length >= 3) {
       pushHistory();
-      const pc = { id: uid(), points: draftPoly, ...parcelDefaultStyle(settings) }; // B929: born with the user's Standards parcel defaults
+      const pc = { id: uid(), points: draftPoly, source: "drawn", ...parcelDefaultStyle(settings) }; // B929: born with the user's Standards parcel defaults · source:"drawn" is the POSITIVE evidence a Drawn label needs (B2191xxx)
       setParcels((a) => [...a, pc]);
       flashPolyWarn(draftPoly, "Parcel");
       requestFit();
@@ -10357,7 +10302,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const addRectParcel = () => {
     const w = Math.max(20, +lotW || 0), d = Math.max(20, +lotD || 0);
     pushHistory();
-    const pc = { id: uid(), points: [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: d }, { x: 0, y: d }], ...parcelDefaultStyle(settings) }; // B929
+    const pc = { id: uid(), points: [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: d }, { x: 0, y: d }], source: "drawn", ...parcelDefaultStyle(settings) }; // B929
     setParcels((a) => [...a, pc]);
     requestFit();
   };
@@ -11145,7 +11090,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let n = 0, slon = 0, slat = 0;
     rings.forEach((r) => r.forEach(([lon, lat]) => { slon += lon; slat += lat; n++; }));
     const lon0 = slon / n, lat0 = slat / n;
-    const pcs = rings.map((r) => ({ id: uid(), points: lngLatRingToFeet(r, lon0, lat0), ...parcelDefaultStyle(settings) })).filter((pc) => pc.points.length >= 3); // B929
+    const pcs = rings.map((r) => ({ id: uid(), points: lngLatRingToFeet(r, lon0, lat0), source: "county", ...parcelDefaultStyle(settings) })).filter((pc) => pc.points.length >= 3); // B929 · looked up from a county record
     if (!pcs.length) { setLookupErr("That record has no usable polygon geometry."); return; }
     pushHistory("import"); // NEW-7 (NEW-1) — a county-record parcel brought onto the plan
     setParcels((a) => [...a, ...pcs]);
@@ -12977,7 +12922,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * handlers object whose methods delegate to this render's closures, so its row list can be memoised
    * too. Every action below is a thin call into the single combine / split / restore functions. */
   const parcelCadName = cadNameOf(COUNTIES[restored?.county]?.label || null);
-  const parcelRows = useMemo(() => buildParcelRows(parcels, { cadName: parcelCadName }), [parcels, parcelCadName]);
+  const parcelIdField = (COUNTIES[restored?.county] || {}).idField || null;
+  const parcelAddrField = (COUNTIES[restored?.county] || {}).addrField || null;
+  const parcelRows = useMemo(() => buildParcelRows(parcels, { cadName: parcelCadName, idField: parcelIdField }), [parcels, parcelCadName, parcelIdField]);
   const pickedParcelIds = useMemo(() => new Set(combineSel), [combineSel]);
   const parcelSiteAcres = useMemo(() => includedAcres(parcels), [parcels]);
   const parcelActsRef = useRef({});
@@ -16276,7 +16223,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   });
   // `origin` is declared once near the top (geographic basemap state).
   // Resolve taxing jurisdictions + rate for the selected parcel (graceful-degrade).
-  const [taxInfo, setTaxInfo] = useState(null);
   // In-planner parcel identify → ADD (B383): arm identify mode, the county parcel
   // outlines light up on the aerial, and each click ADDS that lot to the plan (one or
   // many) — the same "boundaries light up, click to add" feel as the map's Select-parcels
@@ -21573,6 +21519,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     setParcels((a) => a.map((p) => (p.id === pc.id ? { ...p, setbacks: setSectionSetback(parcelSetbacks(p), sec, v, p.points.length) } : p)));
   };
+  const sbAllValue = (v) => { // "Setback [N] ft · all sections" — every edge of this parcel, one undo frame
+    const pc = selParcel; if (!pc || !Number.isFinite(+v)) return;
+    pushHistory();
+    setParcels((a) => a.map((p) => (p.id === pc.id ? { ...p, setbacks: Array.from({ length: p.points.length }, () => Math.max(0, +v)) } : p)));
+  };
   const sbToggleVertex = (vertex) => {
     const pc = selParcel; if (!pc) return;
     const r = toggleBreak({ ...sectionOptsFor(pc), points: pc.points }, vertex);
@@ -21583,7 +21534,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const pc = selParcel;
     if (!pc) return null;
     const row = parcelRows.find((r) => r.id === pc.id);
-    const origin = parcelOrigin(pc, { cadName: parcelCadName });
+    const origin = parcelOrigin(pc, { cadName: parcelCadName, idField: parcelIdField });
     const fillOp = pc.fillOpacity ?? (pc.fill ? 0.12 : 0);
     const sbs = setbackLineStyle(pc, PAL.setback);
     const lineSel = (val, onChange, label) => (
@@ -21614,7 +21565,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const setbacks = secs.length ? (
       <section style={{ borderTop: BORDER_1, paddingTop: 10, marginTop: 14 }}>
         <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 6 }}>Setbacks</div>
-        <SetbackSections points={pc.points} sections={secs} selectedKey={selSectionKey} onSelect={setSelSectionKey} onSetValue={sbSectionValue} onToggleVertex={sbToggleVertex}
+        <SetbackSections points={pc.points} sections={secs} selectedKey={selSectionKey} onSelect={setSelSectionKey} onSetValue={sbSectionValue} onSetAll={sbAllValue} onToggleVertex={sbToggleVertex}
           showLine={settings.showSetback} onShowLine={(v) => setSettings((st) => ({ ...st, showSetback: v }))}
           resetLabel={`Reset to default (${settings.setback}′)`}
           onResetAll={() => { pushHistory(); setParcels((a) => a.map((p) => p.id === pc.id ? { ...p, setbacks: Array.from({ length: p.points.length }, () => +settings.setback || 0) } : p)); }}
@@ -21626,7 +21577,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return (
       <ParcelPage parcel={pc} name={row ? row.name : (pc.label || "Parcel")} acres={parcelNetSqft(pc) / SQFT_PER_ACRE} included={pc.active !== false}
         origin={origin} ownerText={apprOwnerName} cadName={parcelCadName} drawnAcresOf={(p) => parcelNetSqft(p) / SQFT_PER_ACRE}
-        handlers={parcelPanelH} taxTable={taxTable} taxSource={taxTable || !restored?.county || (origin.kind !== "county" && origin.kind !== "combined") ? null : { county: restored.county, lots: origin.kind === "combined" ? from : [pc], combined: origin.kind === "combined", idField: COUNTIES_MAP[restored.county]?.idField }} setbacks={setbacks} style={style} deedFrom={selectDeedOfGroup} />
+        handlers={parcelPanelH} taxTable={taxTable} taxSource={taxTable || !restored?.county || (origin.kind !== "county" && origin.kind !== "combined") ? null : { county: restored.county, lots: origin.kind === "combined" ? from : [pc], combined: origin.kind === "combined", idField: COUNTIES_MAP[restored.county]?.idField }} setbacks={setbacks} style={style} deedFrom={selectDeedOfGroup} idField={parcelIdField} addrField={parcelAddrField} />
     );
   };
   const renderPanelBody = (_pid) => (<>
@@ -22186,74 +22137,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               )}
             </Section>
           )}
-          {/* NEW-1 (B1239328) — promoted OUT of the collapsed Boundary section, to the top of the
-              selected-parcel view: a county-vs-drawn (or deed-called-vs-drawn) acreage mismatch used
-              to surface only if you opened Boundary. Both checks share one shape and read as one
-              idea (a stated number vs. what's actually drawn), so they move together. */}
+          {/* Stated-vs-measured acreage for a parcel that carries a typed deed / stated figure. The county's own
+              acreage now sits BESIDE the drawn acres inside the parcel page's county record (B2191xxx), and the
+              old Geometry check / Appraisal data / Taxes blocks that used to follow are gone. */}
           {_pid === "parcel" && pageOpen && selParcel && (() => {
             const cmp = acreageComparison(selParcel);
-            const ca = countyAcres(selParcel.attrs);
-            const hasStated = cmp.stated && cmp.measured;
-            const hasCounty = ca && ca.acres;
-            if (!hasStated && !hasCounty) return null;
+            if (!(cmp.stated && cmp.measured)) return null;
+            const [color, mark] = cmp.agreement === "match" ? ["#2f7a3e", "✓"] : cmp.agreement === "close" ? ["var(--text-secondary)", "≈"] : ["#b45309", "▲"];
             return (
               <Section>
-                {hasStated && (() => {
-                  const [color, mark] = cmp.agreement === "match" ? ["#2f7a3e", "✓"] : cmp.agreement === "close" ? ["var(--text-secondary)", "≈"] : ["#b45309", "▲"];
-                  return (
-                    <div data-testid="parcel-stated-check" style={{ fontSize: 11, color, marginBottom: hasCounty ? 8 : 0, lineHeight: 1.5 }}>
-                      <b>{mark} Stated vs measured</b> · stated {f2(cmp.stated)} AC vs {f2(cmp.measured)} AC drawn ({f0(cmp.diffFrac * 100)}% {cmp.agreement === "match" ? "match" : "off"})
-                    </div>
-                  );
-                })()}
-                {hasCounty && (() => {
-                  const mine = parcelNetSqft(selParcel) / SQFT_PER_ACRE;
-                  // A projected Shape area read as ft² but actually in m² lands ~10.76× too small; if
-                  // multiplying it back by that factor matches our geometry, treat it as m² and use the
-                  // corrected county acreage (so a correct parcel reads ✓, not a false ~900% off).
-                  const m2 = ca.fromArea && Math.abs(mine - ca.acres * 10.7639) / (ca.acres * 10.7639) < 0.12;
-                  const county = m2 ? ca.acres * 10.7639 : ca.acres;
-                  const diff = Math.abs(mine - county) / county;
-                  const [color, mark] = diff <= 0.02 ? ["#2f7a3e", "✓"] : diff <= 0.05 ? ["var(--text-secondary)", "≈"] : ["#b45309", "▲"];
-                  // NEW-2 — a split child still carries its PRE-split parent's whole-tract county
-                  // record verbatim (performSplit copies attrs onto both children; nothing re-fetches
-                  // a freshly subdivided CAD account). That is legitimate lineage, not a bad match, so
-                  // telling the user to "check calibration/projection" here is actively wrong — the
-                  // record is real, it just describes the larger tract this piece was cut from.
-                  const inheritedParent = !!selParcel.parentId;
-                  return (
-                    <div style={{ fontSize: 11, color, lineHeight: 1.5 }}>
-                      <b>{mark} Geometry check</b> · county {f2(county)} AC vs {f2(mine)} AC ({f0(diff * 100)}% {diff <= 0.02 ? "match" : "off"})
-                      {m2 && <div style={{ marginTop: 2, color: PAL.muted }}>County area field was in m² — converted to acres.</div>}
-                      {inheritedParent && diff > 0.05 && (
-                        <div style={{ marginTop: 2, color: PAL.muted }}>This county record is inherited from the parcel's pre-split parent tract — it describes the larger original tract, not this piece.</div>
-                      )}
-                      {!m2 && !inheritedParent && diff > 0.05 && <div style={{ marginTop: 2, color: PAL.muted }}>County acreage is approximate; check calibration/projection.</div>}
-                    </div>
-                  );
-                })()}
+                <div data-testid="parcel-stated-check" style={{ fontSize: 11, color, lineHeight: 1.5 }}>
+                  <b>{mark} Stated vs measured</b> · stated {f2(cmp.stated)} AC vs {f2(cmp.measured)} AC drawn ({f0(cmp.diffFrac * 100)}% {cmp.agreement === "match" ? "match" : "off"})
+                </div>
               </Section>
             );
           })()}
-          {/* Appraisal record + taxing units for the selected lot — LAZY (B1064 tranche).
-              Both bodies live in components/ParcelDataPanel.jsx and load only when a lot that
-              came from a county identify is actually selected; they used to ride the planner's
-              boot chunk for every session. NEW-5 fixed the duplicated Owner row and folded the
-              Legal blob away in the same move — see that file's header. */}
-          {_pid === "parcel" && pageOpen && selParcel && selParcel.attrs && (
-            <Section title="Appraisal data">
-              <LazyPanel name="Appraisal data" minHeight={140} label="Loading county record…">
-                <ParcelAppraisal attrs={selParcel.attrs} PAL={PAL} />
-              </LazyPanel>
-            </Section>
-          )}
-          {_pid === "parcel" && pageOpen && selParcel && selParcel.attrs && (
-            <Section title="Taxes" collapsed>
-              <LazyPanel name="Taxes" minHeight={64} label="Loading taxes…">
-                <ParcelTaxes taxInfo={taxInfo} PAL={PAL} />
-              </LazyPanel>
-            </Section>
-          )}
           {/* metrics. NEW-1 — `data-testid="yield-metrics"` marks the numbers as ONE readable
               region: the content-visibility harness compares this subtree's text before and after
               every hide, and its first cut scoped to `[data-surface="planner"]`'s parent instead,

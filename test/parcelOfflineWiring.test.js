@@ -169,7 +169,7 @@ describe("NEW-3 — a hand-drawn parcel carries the same record as a clicked one
   it("provenance renders on the parcel, for every lot and not just drawn ones", () => {
     // Parcels rework (NEW-2): the page's source chip carries it, derived by lib/parcelOrigin.js (combined / county / deed / drawn).
     expect(read("../src/workspaces/site-planner/components/ParcelPage.jsx")).toContain('data-testid="parcel-provenance"');
-    expect(planner).toMatch(/const origin = parcelOrigin\(pc, \{ cadName: parcelCadName \}\);/);
+    expect(planner).toMatch(/const origin = parcelOrigin\(pc, \{ cadName: parcelCadName, idField: parcelIdField \}\);/);
     expect(planner).toMatch(/<ParcelPage parcel=\{pc\}/);
   });
 
