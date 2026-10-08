@@ -102,6 +102,7 @@ export const DECLARATIONS = Object.freeze([
   { name: "handleNodes", verdict: U,
     why: "The handle layer renders from `sel`/`multi`, and hiding a group CLEARS any selection into it (B442688) — so the grips cannot outlive their object." },
   { name: "markupHandles", verdict: U, why: "Same as handleNodes — the handle layer renders from a selection a hide clears." },
+  { name: "easeLabelHandles", verdict: U, why: "Same as markupHandles — the selected easement label's outline + rotate grip render from a selection a hide clears." },
   { name: "calloutHandles", verdict: U, why: "Same as handleNodes — the handle layer renders from a selection a hide clears." },
   { name: "startRoute", verdict: U, why: "Utility-route drawing; acts on what the user clicked." },
   { name: "onDimNumberDown", verdict: U, why: "A press on a dimension number, which only exists for a drawn element." },
