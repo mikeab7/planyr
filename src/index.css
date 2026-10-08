@@ -1092,3 +1092,15 @@ html[data-notes-typing="1"] [data-testid="help-report-fab"] { display: none !imp
 @media (pointer: coarse) {
   .trash-del { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
 }
+
+/* Overlays panel focus (B2215024): ONE accent in that panel — the global focus rules above use the orange
+   --accent; here they are the Site green. The doubled attribute out-ranks the global !important border rule. */
+[data-testid="overlays-panel"][data-fine-pointer] :is(button, input, select):focus-visible {
+  outline: 2px solid var(--accent-site);
+  outline-offset: 1px;
+}
+[data-testid="overlays-panel"][data-fine-pointer] input:not([type="range"], [type="checkbox"], [type="color"]):focus,
+[data-testid="overlays-panel"][data-fine-pointer] select:focus {
+  border-color: var(--accent-site) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-site) 18%, transparent) !important;
+}
