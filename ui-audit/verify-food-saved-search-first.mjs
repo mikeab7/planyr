@@ -28,7 +28,10 @@ try {
     const sb = window.pfSupabase;
     const { data: au } = await sb.auth.getUser();
     const uid = au.user.id;
-    const rpc = async (q, cap) => (await sb.rpc("food_places_search_by_name", { p_query: q, p_cap: cap, p_center_lat: 29.8, p_center_lon: -95.4 })).data || [];
+    const rpc = async (q, cap) => { // retried: the RPC occasionally answers empty/errored right after a deploy
+      for (let i = 0; i < 4; i++) { const r = await sb.rpc("food_places_search_by_name", { p_query: q, p_cap: cap, p_center_lat: 29.8, p_center_lon: -95.4 }); if (!r.error && r.data && r.data.length) return r.data; await new Promise((res) => setTimeout(res, 1500)); }
+      return [];
+    };
     const pick = {};
     // DAO'N: the zip+4 record (id fixed from the 2026-10-04 read of the snapshot), fallback to any 9861 Long Point record.
     const daonAll = (await rpc("daon", 60)).filter((r) => /dao'n/i.test(r.name));
@@ -43,7 +46,8 @@ try {
     pick.cantina = et.find((r) => /cantina/i.test(r.name));
     pick.taqueria = et.find((r) => /taqueria/i.test(r.name));
     pick.soma = (await rpc("soma", 20)).find((r) => /soma sushi/i.test(r.name));
-    pick.tio = (await rpc("tio trompo", 20))[0];
+    const tios = await rpc("tio trompo", 40);
+    pick.tio = tios.find((r) => /t[ií]o trompo/i.test(r.name)) || tios[0];
     pick.ikes = (await rpc("ikes", 20)).find((r) => /ike/i.test(r.name));
     const ids = Object.entries(pick).filter(([, v]) => v && v.id).map(([k, v]) => [k, v.id]);
     const rows = ids.map(([, id]) => ({ user_id: uid, place_id: id, visited_on: "2026-01-01", rating: 7, notes: tag }));
@@ -82,7 +86,7 @@ try {
     { q: "Roadhouse", saved: [/texas roadhouse/i] },
     { q: "El Tiempo", saved: [/cantina/i, /taqueria/i] },
     { q: "soma", saved: [/soma sushi/i] },
-    { q: "tio trompo", saved: [/trompo/i] },
+    { q: "tio trompo", saved: [/t[ií]o trompo|trompo/i] },
     { q: "ikes", saved: [/ike/i] },
   ];
   for (const view of ["houston", "dallas"]) {
