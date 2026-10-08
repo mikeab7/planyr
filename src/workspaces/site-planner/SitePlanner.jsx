@@ -369,7 +369,7 @@ import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { calloutStyle } from "./lib/calloutStyle.js";
-import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand, isPinnedMapReference } from "./lib/overlayOrder.js";
+import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand, isPinnedMapReference, visibleReferenceRows } from "./lib/overlayOrder.js";
 import { hasCrop, cropClipShapeScreen, cropTrimFeet, cropFromTrimFeet, cropKind, cropEditBlock, normalizeCropShape, recropForRaster } from "../../shared/overlay/overlayCrop.js";
 import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerialVisibility.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, dockAxisOf, healDockAxes, withDockAxis, dockSideCompassLabel } from "./lib/dockZones.js";
@@ -18693,6 +18693,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // `splitOverlayBands` keeps each band's relative order — so the canvas paints `below` under the
   // plan and `above` over it from the same renderer.
   const overlayBands = splitOverlayBands(sheetOverlays);
+  // NEW-1 (B2217648) — what the Overlays panel and View ▾ list: a map-captured snapshot on a located plan is data, not a row.
+  const refRows = visibleReferenceRows(sheetOverlays, origin);
 
   // The reference overlay's CONTENT only (raster or its honest placeholder). All of its selection
   // chrome moved to overlayChrome below, so this renderer can be dropped into either band pass.
@@ -21628,7 +21630,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               </div>
             </div>
 
-            {!sheetOverlays.length ? null : (
+            {!refRows.length ? null : (
               <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
                 {/* B952 — map overlays live ONLY in the Site Planner and are a SEPARATE feature
                     from Library documents: the two write to disjoint stores (overlays → the site
@@ -21643,10 +21645,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 </div>
                 {/* NEW-2 — the list IS the stacking order, front-most first (the way every layers
                     panel reads), so what draws over what is visible without opening a menu. */}
-                {sheetOverlays.length > 1 && (
+                {refRows.length > 1 && (
                   <div style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.45 }}>Listed front to back — the top one draws over the others.</div>
                 )}
-                {overlayPanelOrder(sheetOverlays).map((o) => {
+                {overlayPanelOrder(refRows).map((o) => {
                   const on = selOverlay === o.id;
                   const zf = overlayOrderFlags(sheetOverlays, o.id);
                   // B848736 — the pinned map reference keeps the OLD aerial's exact Hide/Remove
@@ -25396,7 +25398,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               elementsReady={elementsReady}
               // NEW-4 — the same overlay set + visibility the Overlays rail tab controls
               // (References panel), reachable here too.
-              overlays={sheetOverlays} showAerial={showAerial} onToggleAerial={setShowAerial}
+              overlays={refRows} showAerial={showAerial} onToggleAerial={setShowAerial}
               onToggleOverlay={(id, checked) => patchOverlay(id, { visible: checked })} />
           </div>
           {/* Layers control — same shared layers as the map finder. ALWAYS rendered
@@ -25439,7 +25441,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                        different facts, and only one of them is a finding. */
                     siteState={siteStateId}
                     basemap={{
-                      value: origin ? basemapSrc : "off",
+                      value: origin ? (showAerial ? basemapSrc : "off") : "off", // NEW-1 (B2217648): with the snapshot row gone from Overlays, this control is where a hidden (`aerialHidden`) aerial shows as Off and is turned back on
                       // B688864 — a direct pick here is an explicit, authoritative choice about
                       // what's visible, so it stands down any earlier "Hide aerial" from the
                       // References panel rather than leaving a picked source silently suppressed.
