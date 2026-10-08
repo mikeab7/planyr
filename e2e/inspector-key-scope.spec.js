@@ -21,7 +21,7 @@
  * Proven RED on the pre-fix build: the four refusal cases each lost the building.
  */
 import { test, expect } from "@playwright/test";
-import { openModule } from "./helpers.js";
+import { openModule, panelPlus } from "./helpers.js";
 
 const canvas = (p) => p.getByTestId("planner-canvas");
 
@@ -160,7 +160,7 @@ test.describe("a key typed in an inspector field never reaches the plan (logged 
     /* The Dock zones ＋ — an ordinary panel control that is not a value row. This is the exact flow
      * the second, over-broad cut of the fix broke, and it is a flow this repo already tests
      * (e2e/delete-unconditional.spec.js "a building takes its whole bonded assembly with it"). */
-    await page.getByTestId("add-dock-zone").click();
+    await panelPlus(page, "Dock zones").click();
     await page.waitForTimeout(400);
     await page.keyboard.press("Escape");   // close the inspector; the building stays selected
     await page.keyboard.press("Delete");

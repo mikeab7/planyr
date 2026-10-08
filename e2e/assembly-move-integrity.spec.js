@@ -11,7 +11,7 @@
  * instead of riding the debounce) needs a real account + a live Supabase and is logged in
  * VERIFICATION.md; the pure engine behaviour is covered by test/assemblyTear.test.js. */
 import { test, expect } from "@playwright/test";
-import { openModule } from "./helpers.js";
+import { openModule, panelPlus } from "./helpers.js";
 
 // Every drawn element in the logged-out site model, keyed by id (on-disk truth).
 function readEls(page) {
@@ -50,10 +50,8 @@ test.describe("bonded assembly integrity on move + undo (logged out)", () => {
     // court → trailer parking), the sidewalk+parking pair, and the corner dock bump-outs. Each
     // feature row is "label · [－] count [＋]"; the ＋ is its last button.
     await page.getByRole("button", { name: /^Properties$/ }).click();
-    // Old "Car parking ＋" walked sidewalk → parking rows; the end-wall stack now has "+ Sidewalk" and a Parking rows stepper.
-    const plus = (label) => (label === "Car parking"
-      ? { click: async () => { const sw = page.getByTestId("add-end-sidewalk"); if (await sw.count()) await sw.click(); else await page.getByTestId("park-rows-plus").click(); } }
-      : page.getByTestId({ "Dock zones": "add-dock-zone", "Bump-outs": "bump-plus" }[label]));
+    // The Loading rows (Building panel v2): see panelPlus in e2e/helpers.js.
+    const plus = (label) => panelPlus(page, label);
     for (const [label, times] of [["Dock zones", 2], ["Car parking", 1], ["Bump-outs", 1]]) {
       for (let i = 0; i < times; i++) { await plus(label).click(); await page.waitForTimeout(300); }
     }
