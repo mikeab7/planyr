@@ -20,7 +20,7 @@
  * (the real cloud round trip on the owner's own site) is the live-verify entry in VERIFICATION.md.
  */
 import { test, expect } from "@playwright/test";
-import { openModule } from "./helpers.js";
+import { openModule, panelPlus } from "./helpers.js";
 import { assemblyIntegrity } from "../src/workspaces/site-planner/lib/assemblyIntegrity.js";
 
 const SITE_KEY = "planarfit:sites:v1";
@@ -55,10 +55,8 @@ async function drawAssembly(page, { parking = 1 } = {}) {
   await page.mouse.up();
   // Give it the children that stayed behind in the owner's plan.
   await page.getByRole("button", { name: /^Properties$/ }).click();
-  // Old "Car parking ＋" walked sidewalk → parking rows; the end-wall stack now has "+ Sidewalk" and a Parking rows stepper.
-    const plus = (label) => (label === "Car parking"
-      ? { click: async () => { const sw = page.getByTestId("add-end-sidewalk"); if (await sw.count()) await sw.click(); else await page.getByTestId("park-rows-plus").click(); } }
-      : page.getByTestId({ "Dock zones": "add-dock-zone", "Bump-outs": "bump-plus" }[label]));
+  // The Loading rows (Building panel v2): see panelPlus in e2e/helpers.js.
+    const plus = (label) => panelPlus(page, label);
   for (const [label, times] of [["Dock zones", 2], ["Car parking", parking], ["Bump-outs", 1]]) {
     for (let i = 0; i < times; i++) { await plus(label).click(); await page.waitForTimeout(300); }
   }

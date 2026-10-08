@@ -235,3 +235,30 @@ export const netSurfaces = (p) => p.locator('[data-testid="road-network-surface"
 export const netEdges = (p) => p.locator('[data-testid="road-network-edge"]');
 /* |ring| area, for "did a sliver survive the dissolve" assertions. */
 export const ringArea = (r) => Math.abs(r.reduce((s, p, i) => { const q = r[(i + 1) % r.length]; return s + p.x * q.y - q.x * p.y; }, 0) / 2);
+
+/* ---- Building panel v2 (the Loading rows) ---------------------------------------------------
+ * The old "Dock zones ＋ / Car parking ＋ / Bump-outs ＋" steppers are gone: a building's layers are now
+ * per-wall rows with chips and a dashed "+" (src/workspaces/site-planner/SitePlanner.jsx, WallRows).
+ * `panelPlus(page, label).click()` gives specs that only need "a building with bonded children" the same
+ * three one-step additions in the new UI — a truck court (then trailer parking), a sidewalk on every
+ * non-dock wall (then parking), and a corner bump-out from the wall picker. */
+export function panelPlus(page, label) {
+  return {
+    click: async () => {
+      if (label === "Dock zones") {
+        await page.locator('[data-testid="wall-row"][data-role="dock"]').first().getByTestId("wall-add").click();
+        const court = page.getByTestId("wall-add-court");
+        if (await court.count()) await court.click(); else await page.getByTestId("wall-add-trailer").click();
+      } else if (label === "Car parking") {
+        const rows = page.locator('[data-testid="wall-row"]:not([data-role="dock"])');
+        for (let i = 0, n = await rows.count(); i < n; i++) {
+          await rows.nth(i).getByTestId("wall-add").click();
+          const sw = page.getByTestId("wall-add-sidewalk"), pk = page.getByTestId("wall-add-parking");
+          if (await sw.count()) await sw.click(); else if (await pk.count()) await pk.click(); else await rows.nth(i).getByTestId("wall-add").click();
+        }
+      } else if (label === "Bump-outs") {
+        await page.getByTestId("picker-corner-add").first().click({ force: true });
+      }
+    },
+  };
+}
