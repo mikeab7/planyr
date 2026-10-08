@@ -137,13 +137,15 @@ try {
   check("…the crop is still untouched", JSON.stringify(r2.crop) === JSON.stringify(r0.crop));
   await shot("map-handles-rotated");
 
-  // KNOWN-GOOD / RESET ARM: Edit crop → Reset → Done; then undo the rotation so the full image box is axis-aligned to compare against.
+  // KNOWN-GOOD / RESET ARM: Edit crop → Reset → Done, then read the handles again.
   await page.getByRole("button", { name: /Edit crop/ }).first().click({ timeout: 15000 }); await sleep(2000);
   await page.locator('[data-testid="crop-reset"]').first().click(); await sleep(500);
   console.log("  reset-step Done:", JSON.stringify(await page.evaluate(() => { const d = document.querySelector('[data-testid="crop-done"]'); const w = document.querySelector('[data-testid="crop-done-why"]'); return { disabled: d && d.disabled, why: w && w.innerText }; })));
   await page.evaluate(() => document.querySelector('[data-testid="crop-done"]').click()); await sleep(3500);
-  await page.evaluate(async (id) => { await window.pfSupabase.from("site_plan_overlays").update({ rotation_deg: 0 }).eq("id", id); }, r0.id);
-  await page.reload({ waitUntil: "load" }); // handles are armed only in-session — re-arm via the panel after a reload is not reachable for an unlinked plan, so this arm reads the saved row instead:
+  g = await waitHandles(45000); await shot("map-handles-reset");
+  // The plan is still armed in-session, so the SAME instrument reads the handles after Reset. The overlay is rotated here, so compare
+  // the handles' bounding box with the image layer's bounding box (same rotated rect when there is no crop).
+  check("Reset crop: the handles return to the FULL image (outline bbox == image bbox)", !!g && !!g.boundary && !!g.img && near(g.boundary.x, g.img.x, 5) && near(g.boundary.y, g.img.y, 5) && near(g.boundary.w, g.img.w, 6) && near(g.boundary.h, g.img.h, 6), JSON.stringify({ b: g && g.boundary && [g.boundary.x, g.boundary.y, g.boundary.w, g.boundary.h].map(Math.round), img: g && g.img && [g.img.x, g.img.y, g.img.w, g.img.h].map(Math.round) }));
   const r3 = await row();
   check("Reset crop saved a full-image overlay (crop cleared)", !!r3 && !r3.crop, JSON.stringify(r3 && r3.crop));
 } catch (e) {
