@@ -165,18 +165,20 @@ export const setbackDashArray = (dash, weight) => {
   const w = weight != null ? weight : SETBACK_LINE.weight;
   if (dash === "solid") return undefined;
   if (dash === "dotted") return `${round3(w)} ${round3(w * 2.4)}`;
+  if (dash === "dashdot") return [5.6, 3.2, 1, 3.2].map((m) => round3(w * m)).join(" ");
+  if (dash === "longdash") return `${round3(w * 11)} ${round3(w * 5)}`;
   return `${round3(w * 5.6)} ${round3(w * 4.8)}`; // "dashed" — the historic ring
 };
 
 /**
  * Resolved setback-line style for one parcel. `fallbackStroke` is the theme's setback colour
  * (PAL.setback), passed in because SVG attributes can't read a CSS var.
- * @returns { stroke, weight, dash } — `dash` is the ready-to-use strokeDasharray (undefined = solid)
+ * @returns { stroke, weight, dash, opacity } — `dash` is the ready-to-use strokeDasharray (undefined = solid)
  */
 export const setbackLineStyle = (pc, fallbackStroke) => {
   const weight = pc && pc.sbWeight != null ? pc.sbWeight : SETBACK_LINE.weight;
   const dash = (pc && pc.sbDash) || SETBACK_LINE.dash;
-  return { stroke: (pc && pc.sbStroke) || fallbackStroke, weight, dash: setbackDashArray(dash, weight) };
+  return { stroke: (pc && pc.sbStroke) || fallbackStroke, weight, dash: setbackDashArray(dash, weight), opacity: pc && pc.sbOpacity != null ? pc.sbOpacity : 1 };
 };
 
 /* ------------------------------------------------------------ the setback CHIP's ink (NEW-1)

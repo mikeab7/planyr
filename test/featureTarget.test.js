@@ -571,8 +571,8 @@ describe("NEW-1 — a label's right-click never forwards to whatever it sits ove
     /* A measurement is addressed by INDEX, not by id — the selection model's asymmetry, and the
      * reason a bare `on${kind}Context` lookup table would be wrong here. */
     expect(block).toMatch(/measures\[t\.i\]/);
-    /* NEW-1 (B1239328) — a locked parcel is click-through, same as the map. */
-    expect(block).toMatch(/pc\.locked/);
+    /* Parcels rework (NEW-5) — Lock now guards only Edit parcels, so a locked parcel answers a right-click like any other. */
+    expect(block).not.toMatch(/pc\.locked/);
   });
 
   /* Every OTHER label on the canvas already followed this rule (a direct `on${kind}Context(e, id)`

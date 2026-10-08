@@ -37,6 +37,7 @@ import { parcelNetSqft, SQFT_PER_ACRE, parseAcres } from "./parcelArea.js";
 import { dissolvedParcelSqft } from "./polyClip.js";
 import { parcelDisplayInfo, parcelSplitNames, parcelOutline } from "./siteModel.js";
 import { ownerName } from "./appraisal.js";
+import { parcelOrigin } from "./parcelOrigin.js";
 
 export const LOCKED_PARCELS_MAY_COMBINE = true;
 
@@ -124,7 +125,7 @@ export function planCombine(parcels, ids, { unionRings, newId }) {
   const holes = chosen.flatMap((p) => (Array.isArray(p.exceptions) ? clone(p.exceptions) : []));
   const tract = {
     id: newId(), points: result, active: true, label: name,
-    locked: chosen.every((p) => !!p.locked),
+    locked: chosen.every((p) => !!p.locked), ...(chosen.every((p) => !!p.locked) ? { lockSem: 2 } : {}),
     ...(holes.length ? { exceptions: holes } : {}),
     combined: { sig: sigOf(result), from: chosen.map((p) => snapshot(p, nm(p))) },
   };
@@ -203,7 +204,7 @@ export function planSplit(parcels, path, { targetId = null, selId = null, newId,
     const info0 = parcelDisplayInfo(list);
     const snap = snapshot(pc, (info0.get(pc.id) || {}).name || "the parcel");
     const made = pieces.map(({ ring, edgeSrc }, i) => ({
-      id: newId(), points: ring, active: pc.active !== false, locked: !!pc.locked, parentId: pc.id,
+      id: newId(), points: ring, active: pc.active !== false, locked: !!pc.locked, ...(pc.locked ? { lockSem: 2 } : {}), parentId: pc.id,
       addr: pc.addr || null, acct: pc.acct || null, attrs: pc.attrs || null,
       splitName: born[i] && born[i].name, splitDepth: born[i] && born[i].depth,
       setbacks: remapEdgeVector(pc.setbacks, edgeSrc, baseSetback),
@@ -247,9 +248,10 @@ export function deedAcresSummed(tract) {
 }
 
 /* One display row per parcel for the table — everything the row, the filter and the sort read. */
-export function buildParcelRows(parcels) {
+export function buildParcelRows(parcels, { cadName = null } = {}) {
   return parcelOutline(parcels).map(({ pc, depth, name, superseded }) => ({
     pc, depth, name, superseded,
+    origin: parcelOrigin(pc, { cadName }),
     id: pc.id,
     acres: parcelNetSqft(pc) / SQFT_PER_ACRE,
     included: pc.active !== false,

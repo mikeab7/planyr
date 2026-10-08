@@ -1520,6 +1520,24 @@ was, Shift or no Shift:
 | travels, Shift held | **select** — the rubber band; every box it touches, replacing the selection |
 | starts on one of the four sheet edge grips | **resize the page** — the grip's `pointerdown` calls `preventDefault()`, which suppresses the compat `mousedown`, so `focusFromMat` never runs at all |
 
+**⛔ AND A FIFTH ROW SINCE 2026-10-06 (NEW-1 / B2156912): a plain mouse press that starts on a BOX'S CONTENT
+(table cell / header / border, picture, text) of a box that is neither selected nor being edited is DEFERRED —
+the capture-phase effect above the touch pan in `NoteEditor.jsx` takes the `pointerdown`/`mousedown` before
+ProseMirror, the box body drag and `focusFromMat` can see them, so nothing is selected on the press. Travels →
+the same pan as above (followed from the press); does not travel → the press is REPLAYED into `focusFromMat`
+unchanged (a plain click is exactly what it was). It does NOT claim: the grip / resize handles / connect dot /
+column-resize handle / page grips, controls and links, any modifier, middle button, Space, click-to-connect,
+touch, a selected box (its press is the click-in; a group still drags) or the box being edited (text
+selection). Guard: `ui-audit/verify-notes-drag-pan.mjs` (required `build` step; 21 ✗ on pre-fix main).
+- **Trap 47 — a pan arm's start point must not be a column border.** The first top-border arm pressed at the
+  table's horizontal midpoint, which in a 2-column table is the column-resize handle — correctly NOT a pan; the
+  arm reported "table border does not pan" about working code. Press at a quarter of the width.
+- **Trap 48 — a harness that clicks, clicks, then double-clicks lands a TRIPLE click.** Presses at the same
+  spot inside the multi-click window accumulate `detail`; wait out the window (~800ms) before the double-click
+  or "double-click selects a word" selects the whole paragraph.
+- **`verify-notes-free-placement` §7 "dragging a note by its BODY moves it" is red on `main` too (stored 0,0)
+  and encodes behaviour that is retired for an unselected box — left red, not weakened.**
+
 Pure decisions in `lib/notesMarquee.js` (`gestureOutcome`, `latchGesture`, `panTarget`), wiring in
 `NoteEditor.jsx`'s `beginBlankGesture`, guard in `ui-audit/verify-notes-pan.mjs` at **1191×465,
 which is his real window**. Two things that window changes and a taller one hides: the mat's own box
@@ -1574,6 +1592,15 @@ consecutive runs of the SAME build, so diff identities, never counts. Carried by
 - **Saves are gated on a trusted user event**: a synthetic paste into a freshly loaded page stores nothing until a real press happened first.
 - **A table at the end of a box parks the caret in the doc's hidden trailing paragraph**; `keepCaretInBox` fixes it. Ask where the caret went after any block paste.
 - Chrome sanitises html written via the async clipboard API; use a `DataTransfer` for exact bytes and `navigator.clipboard.write` + real Ctrl+V only for the trusted-event route.
+
+### B2155520 — copying a table that is ALREADY on a page (2026-10-06) — the outbound half
+
+- **The reported symptom ("I can't paste a table that's already in the notebook") is mostly a COPY problem, not a paste problem.** Desktop press 1 on a box only SELECTS it and blurs the editor, so Ctrl+C/Ctrl+X reach no editor listener and the clipboard keeps its OLD contents. A harness that drags cell-to-cell inside an already-open box (focus in the editor) sees copy/paste working perfectly — that is the WRONG CASE; click the box once, then Ctrl+C. `NoteEditor.jsx` now has a window `copy`/`cut` listener for a selected box (`contentOfBoxes`).
+- **Cut of a whole table (a full cell selection) used to clear the cells and keep the table; and the emptied box is then pruned by a transaction kept OUT of undo history, so "cut → click elsewhere → Ctrl+Z" restored nothing.** The cut now removes the box in the SAME step when the table was its only content (`lib/notesTableClipboard.js`). Any future "cut leaves a box empty" path has the same trap: an empty box is pruned with `addToHistory:false` and undo cannot map back into it.
+- **A box that ENDS in a table parks the caret in its last cell**: "paste at the box's end" poured into the source table (5×5 merge). `onLoosePaste` now lands on a fresh paragraph after it.
+- **`text/plain` of a table is tab-separated now** (`clipboardTextSerializer`); the right-click Paste ▸ Keep source/Merge reads the html half with `navigator.clipboard.read()` (a refusing browser still gets the honest message).
+- **Instrument traps hit while building the harness (`ui-audit/verify-notes-table-copy-paste.mjs`):** `End` does not move the caret to the end of a box's text (click at the text's end instead); `Ctrl+A` selects the whole DOCUMENT (use a triple-click for one paragraph); a seeded column width under the 100 minimum is silently rewritten on load (use ≥ 100 or the ORIGINAL table will "differ" and look like a paste bug); `page.mouse.click(...,{clickCount:3})` is the real triple-click. The harness carries a known-good arm (plain text copy/paste) that VOIDS the run.
+- **Neighbouring harnesses that fail identically on clean main (do not blame your change):** verify-notes-context-menu 23/27, verify-notes-table-to-text 13/17, verify-notes-box-selection 81/131, verify-notes-table-select (crashes on a timeout). Measured 2026-10-06 against an unmodified build of the same commit.
 
 ### B2142464 ×2 — a green live check on SYNTHETIC fixtures proved nothing (2026-10-06, owner's own machine)
 
