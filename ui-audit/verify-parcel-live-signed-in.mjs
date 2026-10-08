@@ -142,6 +142,7 @@ const clickLot = async (lot) => { const pt = await screenOf([lot.lat, lot.lng]);
 
 await freshMap();
 await setView(BARTOW.lat, BARTOW.lng, 16); await page.waitForTimeout(1500);
+console.log("  bundle under test:", JSON.stringify(await stamp()));
 await turnSelectOn();
 const h16 = await waitFor(async () => { const d = await held(); return d.held > 50 ? d.held : 0; }, 12000);
 expect("KNOWN-GOOD ARM: z16 outlines are drawn before the click (the layer holds lots)", h16 > 50, `${h16} lots held · ${bartow.query} Bartow queries`);
