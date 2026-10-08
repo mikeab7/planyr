@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, startTransition, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import MapFinder from "./MapFinder.jsx";
 import SitePlanner from "./SitePlanner.jsx";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
@@ -586,7 +586,7 @@ export default function App({
       window.removeEventListener("focus", maybePull);
     };
   }, [signedInUid]);
-  const goPlan = (id) => { setCurrentSiteId(id); setActiveSiteId(id); setMode("plan"); };
+  const goPlan = (id) => { startTransition(() => { setCurrentSiteId(id); setActiveSiteId(id); setMode("plan"); }); };
   /* NEW-5 — the ONE way to leave a project, and the ONE place the intent is recorded.
    *
    * The URL writer refuses to clear a route-named project unless it is told the user meant to

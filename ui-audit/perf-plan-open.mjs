@@ -83,6 +83,9 @@ const reading = (page) => page.evaluate(() => ({ now: performance.now(), gaps: w
 const named = (page, n) => page.waitForFunction((x) => (document.body.innerText || "").includes(x), n, { timeout: 60000 });
 const chip = (page, text) => page.locator("span:visible", { hasText: new RegExp(`^${text}$`) }).first();
 const pick = (page, text) => page.locator("*:visible", { hasText: new RegExp(`^${text}$`) }).last();
+/* THE CLICK THAT IS SCORED MUST BE THE APP'S, NOT THE DRIVER'S: a locator like `*:visible` + hasText walks every element of the page (a 48-59 ms task in the CPU
+ * profile of a switch) and would run inside the window. So the chip is clicked and the menu settles FIRST, the target is resolved to a handle, and the window opens in
+ * the same page task that dispatches the click (page-JS .click() — no actionability polling, no driver scroll). */
 const features = (page) => page.evaluate(() => new Set([...document.querySelectorAll("[data-feature]")].map((n) => n.getAttribute("data-feature"))).size);
 
 /* the known-good arm: a deliberate 200 ms busy loop MUST read as ~200 ms, or nothing below is trusted */
@@ -104,6 +107,12 @@ async function score(page, t0, label, planKey, extra = {}) {
   return { label, plan: planKey, feat: await features(page), maxMs: Math.max(0, ...gaps.map((g) => g[2])), gaps: gaps.map((g) => [g[0] - Math.round(t0), g[2]]), over50: gaps.filter((g) => g[2] > 50).length, sumOver50: gaps.filter((g) => g[2] > 50).reduce((s, g) => s + g[2], 0),
     frames: loaf.map((f) => ({ at: f.t - Math.round(t0), d: f.d, scripts: f.s.filter((s) => s.d >= 20).map((s) => `${s.inv || s.fn}:${s.u}:${s.p}=${s.d}`) })), rowFetches: r.rows, ...extra };
 }
+
+/* Chromium's own accounting of where main-thread time went (Performance.getMetrics, deltas over an action): script vs style-recalc vs layout, and how many of each.
+ * A frame whose LoAF entry lists no script is rendering-pipeline work, which a CPU profile of JS cannot see. */
+const METRIC_KEYS = ["ScriptDuration", "RecalcStyleDuration", "LayoutDuration", "TaskDuration", "RecalcStyleCount", "LayoutCount", "Nodes"];
+async function metricsStart(page) { const c = await page.context().newCDPSession(page); await c.send("Performance.enable"); const get = async () => Object.fromEntries((await c.send("Performance.getMetrics")).metrics.map((m) => [m.name, m.value])); return { c, m0: await get(), get }; }
+async function metricsStop(h) { const m1 = await h.get(); const out = {}; for (const k of METRIC_KEYS) out[k] = k.endsWith("Duration") ? Math.round((m1[k] - h.m0[k]) * 1000) : k === "Nodes" ? m1[k] : m1[k] - h.m0[k]; await h.c.detach().catch(() => {}); return out; }
 
 /* --profile: a CDP sampling profile over each action, folded to SELF time per function and mapped through the build's sourcemaps.
  * Samples are also bucketed by time since the action so "the click handler" and "the render 4 s later" are separable. */
@@ -137,10 +146,13 @@ const SCEN = {
     await pacedWait(page, 6000);
     const out = [];
     const hop = async (from, to, label, key) => {
+      await chip(page, from).click(); await pacedWait(page, 700);
+      const h = await pick(page, to).elementHandle();
       const pc = await profStart(page);
-      const t0 = await page.evaluate(() => performance.now());
-      await chip(page, from).click(); await pick(page, to).click(); await named(page, to);
-      const sc = await score(page, t0, label, key); sc.profile = await profStop(pc);
+      const mh = await metricsStart(page);
+      const t0 = await h.evaluate((el) => { const t = performance.now(); el.click(); return t; });
+      await named(page, to);
+      const sc = await score(page, t0, label, key); sc.profile = await profStop(pc); sc.chromium = await metricsStop(mh);
       out.push(sc);
     };
     await hop("Bolt-on", "Concept A", "Bolt-on → Concept A (first visit)", "concept-a");
@@ -155,13 +167,17 @@ const SCEN = {
     await page.locator('[data-testid="planner-canvas"]').waitFor({ timeout: 60000 }); await named(page, "Bolt-on");
     await pacedWait(page, 6000);
     const out = [];
+    await chip(page, "Grand Port").click(); await pacedWait(page, 700);
+    let h = await pick(page, "Richfield").elementHandle();
     let pc = await profStart(page);
-    let t0 = await page.evaluate(() => performance.now());
-    await chip(page, "Grand Port").click(); await pick(page, "Richfield").click(); await chip(page, "Richfield").waitFor({ timeout: 60000 });
+    let t0 = await h.evaluate((el) => { const t = performance.now(); el.click(); return t; });
+    await chip(page, "Richfield").waitFor({ timeout: 60000 });
     let sc = await score(page, t0, "Grand Port → Richfield (larger plan)", "richfield"); sc.profile = await profStop(pc); out.push(sc);
+    await chip(page, "Richfield").click(); await pacedWait(page, 700);
+    h = await pick(page, "Grand Port").elementHandle();
     pc = await profStart(page);
-    t0 = await page.evaluate(() => performance.now());
-    await chip(page, "Richfield").click(); await pick(page, "Grand Port").click(); await chip(page, "Grand Port").waitFor({ timeout: 60000 });
+    t0 = await h.evaluate((el) => { const t = performance.now(); el.click(); return t; });
+    await chip(page, "Grand Port").waitFor({ timeout: 60000 });
     sc = await score(page, t0, "Richfield → Grand Port (back)", "bolt-on"); sc.profile = await profStop(pc); out.push(sc);
     out[0].selfTestMs = await selfTest(page); await ctx.close(); return out;
   },
