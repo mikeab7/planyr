@@ -51,3 +51,30 @@ That is B2225425 (open). The budget (`ui-audit/perf-plan-open.budget.json`) is t
 - Two builds, not one build with a toggle.
 
 Guards: repo-root `test/` **polylabelPerf** (the verbatim original replayed as the reference; ratio, not a wall-clock figure), **parcelSummaryAsync**, **relTimeShort** (red on the old code), **planOpenVerdict**; browser: `npm run perf:planopen -- --assert` (baseline fails the Concept A budgets, the fix passes) — deliberately **not** a required CI gate (timing on a shared runner; the unit guards above are the CI-runnable half). Live: V1644528 (`ui-audit/verify-plan-open-live.mjs`).
+
+## ⛔ Round 2 — the owner's own account after round 1 (build 980040d, ~5:25 PM Central, same heartbeat re-proven on a 200 ms busy loop)
+| | before | after round 1 |
+|---|---|---|
+| Bolt-on → Concept A | 908 + 560 + 118 ms | **256 + 58** — the badge-anchor fix is real |
+| Concept A → Bolt-on | 226 + 253 ms | **215 + 219 + 59 — UNCHANGED** |
+
+**The refutation, said as loudly as the finding:** round 1 did not touch the Bolt-on open path, and my signed-in arm was VOID, so I shipped saying the brief's acceptance was unmet but had no owner-account number for it. His number says: partial.
+
+**What round 2 found.** (1) *My own window was wrong.* The harness opened its window before Playwright resolved the target with a `*:visible` + `hasText` locator — a 48–59 ms task in the page's CPU profile that is the **driver's**, not the app's (the DRIVER-SCROLL-IS-NOT-APP-SCROLL species). The switch is now scored from the page task that dispatches the click, after the menu settled (the chip click is separate). (2) *The click was ONE task: React rendered the new plan and committed it synchronously inside the click* — render ≈ 120 ms + commit ≈ 56 ms in the profile (`SitePlanner` render, a second pass of children, `PriorityToolbar`'s forced layout, a layout effect, GC). A style/layout split from Chromium's own counters shows layout + style are ≈ 50 ms of 5 s: it is script, not rendering.
+
+**The change.** `SitePlannerApp.goPlan` — the ONE place every open/switch passes through (chip pick, project pick, route sync, new plan) — now sets `currentSiteId` / `activeSiteId` / `mode` inside `startTransition`. The old plan stays on screen while the new one renders, and the browser can take input between React's slices.
+
+| clean window, 4 runs, `--library 140`, worst gap (median) | round 1 | round 2 |
+|---|---|---|
+| Bolt-on → Concept A, first visit | 71 (worst 117) | **65 (worst 70)** |
+| Concept A → Bolt-on (back) | 140 (worst 180) | **91 (worst 156)** |
+| Bolt-on → Concept A, revisit | 156 (worst 170) | **114 (worst 149)** |
+| Richfield → Grand Port (back) | 189 (worst 246) | **101 (worst 130)** |
+| Grand Port → Richfield (first-time, 193 rows) | 350 (worst 361) | 344 (worst 395) — **not fixed** |
+A Chromium trace of the back-switch (no heartbeat running) shows two tasks of 42 and 76 ms, where the click used to be one ~200 ms task.
+
+## ⛔ STILL NOT MET — and exactly what is left
+- **The 50 ms target is not met.** The first render of a plan is ONE `SitePlanner` fiber (≈ 75–125 ms render + commit); a transition can slice between components, never inside one. On Richfield the first-time road dissolve (`dissolveRings` ≈ 85 ms: `collapseRingSpikes` 42, clipper `closePaths` 30), pond offsets (≈ 25), `siteMetrics` (43) and `clipPolylineOutside` (≈ 40) are all in that one render. That is B2225425, with the next moves in order.
+- **The owner's second ~219 ms task on the Bolt-on back-switch is not reproduced.** In the rig the tasks after the click are ≤ 76 ms. Suspect, unproven: his real aerial tiles (decode + `onload` per tile; the rig answers every tile with one solid PNG), or the realtime-join seed (the rig always takes the 4 s fallback). It needs his machine (`--profile`) or a LoAF row in the perfcap.
+- **Bolt-on is the heavier of his two plans** (56 live elements vs Concept A's 19; 127 rows vs 73 counting tombstones). The brief called Richfield "the larger plan" because it has the most rows (193); on the plans he actually switches between, Bolt-on is the one to watch.
+- **No e2e specs were run for the transition** (the Playwright setup project needs the seeded test-account secrets, absent here), and `verify-plan-switch-release.mjs` fails identically on the pre-change build (its "plan switch proven" precondition — not caused by this). The transition's safety rests on: `goPlan` is the single writer of the three states; the rig's own switches (names, feature counts, row fetches) behave; and V1644528's live seeded arm. A reviewer should treat that as the open risk.

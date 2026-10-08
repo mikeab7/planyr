@@ -1,13 +1,13 @@
 {
-  "_note": "NEW-1 / B2224000. Worst single main-thread gap (MessageChannel ping-gap heartbeat) in the 5 s after a plan open/switch, worst of 3 runs, signed-in rig + 140 filler plans (the owner has 143). Budgets are the FIXED build's measurements plus ~40% headroom — they fail the measured defect (polylabel: 426-650 ms on Concept A before, 99-203 after), NOT the 50 ms target, which the remaining distributed render cost (SitePlanner render ~100 ms, the 600 ms basemap detail layer, the first-time road dissolve on Richfield) does not yet meet. targetGapMs is reported, never gating.",
+  "_note": "NEW-1 / B2224000 + B2225424. Worst single main-thread gap (MessageChannel ping-gap heartbeat) in the 5 s after a plan open/switch, worst of the runs, signed-in rig + 140 filler plans (the owner has 143), the switch scored from the page-task that dispatches the click (the driver's own locator work is outside the window). Budgets = the FIXED build's measurements plus headroom for a shared runner; they fail the measured defects (polylabel: 374-544 ms before on Concept A, 65-117 after; the one-task switch render), NOT the 50 ms target, which the remaining first-render cost (SitePlanner render + commit ~75-125 ms; first-time road dissolve + pond geometry on Richfield ~350-430 ms) does not meet. targetGapMs is reported, never gating.",
   "targetGapMs": 50,
   "maxGapMs": 350,
   "byLabel": {
     "cold open Bolt-on": 450,
-    "Bolt-on → Concept A (first visit)": 250,
-    "Concept A → Bolt-on (back)": 350,
-    "Bolt-on → Concept A (revisit)": 300,
-    "Grand Port → Richfield (larger plan)": 650,
-    "Richfield → Grand Port (back)": 380
+    "Bolt-on → Concept A (first visit)": 200,
+    "Concept A → Bolt-on (back)": 250,
+    "Bolt-on → Concept A (revisit)": 250,
+    "Grand Port → Richfield (larger plan)": 520,
+    "Richfield → Grand Port (back)": 260
   }
 }

@@ -86,7 +86,14 @@ try {
     const chip = (t) => page.locator("span:visible", { hasText: new RegExp(`^${t}$`) }).first();
     const pick = (t) => page.locator("*:visible", { hasText: new RegExp(`^${t}$`) }).last();
     const out = [];
-    const hop = async (from, to, label) => { const t0 = await page.evaluate(() => performance.now()); await chip(from).click(); await pick(to).click(); await chip(to).waitFor({ timeout: 60000 }); out.push(await window5s(page, t0, label)); };
+    /* the window opens in the page task that dispatches the click, after the menu has settled — the driver's own locator work (it walks every element of the page) is outside it */
+    const hop = async (from, to, label) => {
+      await chip(from).click(); await pacedWait(page, 700);
+      const h = await pick(to).elementHandle();
+      const t0 = await h.evaluate((el) => { const t = performance.now(); el.click(); return t; });
+      await chip(to).waitFor({ timeout: 60000 });
+      out.push(await window5s(page, t0, label));
+    };
     await hop("Grand Port B", "Grand Port A", "Bolt-on → Concept A (first visit)");
     await hop("Grand Port A", "Grand Port B", "Concept A → Bolt-on (back)");
     await hop("Grand Port B", "Grand Port A", "Bolt-on → Concept A (revisit)");
