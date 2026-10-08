@@ -1847,6 +1847,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // never true for a mouse-driven session, so this can only ever ADD phone-shaped devices to what
   // `narrowWidth` already caught — a real desktop, at any height, is untouched.
   const narrow = isPhoneShape({ narrowWidth, shortHeight, coarsePointer });
+  const hintRow = narrow && shortHeight && typeof window !== "undefined" && window.innerWidth > window.innerHeight; // (a 568-tall PORTRAIT phone is also shortHeight) // phone held sideways: the strip is ONE row (V1414592 — the two-row strip was half the visible map)
   // NEW-2 (phone-chrome-parity pass) — the real safe-area inset (the notch/dynamic-island/home-
   // indicator no-go strip), as a NUMBER, for the bottom canvas furniture's own math. Reuses
   // B1176480's approach (`shared/ui/safeAreaInsets.js`) rather than a second env() probe — the
@@ -25502,20 +25503,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               (`lib/parcelActions.js`): "Click a lot on the map" = a county-recorded lot. */}
           {parcels.length === 0 && els.length === 0 && !sheetOverlays.length && !startHintDismissed
             && tool === "select" && !identifyMode && !addParcelMenu && !draftPoly && !ovCalib && (
-            <div data-testid="start-hint" style={{ position: "absolute", top: narrow ? 66 : 12, left: narrow ? TOOLS_TAB_WIDTH_PX + 8 : 12, right: narrow ? TOOLS_TAB_WIDTH_PX + 8 : "auto", maxWidth: narrow ? undefined : 420, zIndex: 5, boxSizing: "border-box", background: "var(--surface-overlay)", padding: narrow ? "6px 8px 8px 8px" : "9px 40px 10px 12px", borderRadius: RADIUS.md, border: `1px solid ${PAL.panelLine}`, boxShadow: "0 4px 16px rgba(28,25,20,0.10)" }}>
-              <div style={{ fontSize: FONT_SIZE.display, fontWeight: 700, color: PAL.ink, marginBottom: narrow ? 6 : 7, lineHeight: 1.2 }}>Start your site</div>
+            <div data-testid="start-hint" style={{ position: "absolute", top: narrow ? 66 : 12, left: narrow ? TOOLS_TAB_WIDTH_PX + 8 : 12, right: narrow ? TOOLS_TAB_WIDTH_PX + 8 : "auto", maxWidth: narrow ? undefined : 420, zIndex: 5, boxSizing: "border-box", background: "var(--surface-overlay)", padding: hintRow ? "4px 6px 4px 8px" : narrow ? "6px 8px 8px 8px" : "9px 40px 10px 12px", ...(hintRow ? { display: "flex", alignItems: "center", gap: 6 } : null), borderRadius: RADIUS.md, border: `1px solid ${PAL.panelLine}`, boxShadow: "0 4px 16px rgba(28,25,20,0.10)" }}>
+              <div style={{ fontSize: FONT_SIZE.display, fontWeight: 700, color: PAL.ink, marginBottom: hintRow ? 0 : narrow ? 6 : 7, lineHeight: 1.2, whiteSpace: "nowrap", flex: "none" }}>Start your site</div>
               <button data-testid="start-hint-dismiss" onClick={dismissStartHint} aria-label="Dismiss" title="Dismiss"
-                style={{ position: "absolute", top: 0, right: 0, width: 36, height: narrow ? 30 : 36, border: "none", background: "transparent", color: PAL.muted, fontSize: FONT_SIZE.emphasis, cursor: "pointer", fontFamily: "inherit" }}>✕</button>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: narrow ? 4 : 6 }}>
-                {/* [testid, full label, short label (narrow: a 320-wide phone wrapped every option to three lines and the strip reached the middle of the map), action] */}
+                style={{ ...(hintRow ? { order: 3, flex: "none", width: 28, height: 30 } : { position: "absolute", top: 0, right: 0, width: 36, height: narrow ? 30 : 36 }), border: "none", background: "transparent", color: PAL.muted, fontSize: FONT_SIZE.emphasis, cursor: "pointer", fontFamily: "inherit" }}>✕</button>
+              <div style={{ display: "grid", gridTemplateColumns: hintRow ? "repeat(4, auto)" : "1fr 1fr", gap: narrow ? 4 : 6, ...(hintRow ? { flex: 1, minWidth: 0 } : null) }}>
+                {/* [testid, full label, short label, tiny label (phone held sideways: one row), action] (narrow: a 320-wide phone wrapped every option to three lines and the strip reached the middle of the map), action] */}
                 {[
-                  ["start-hint-lot", "Click a lot on the map", "Click a lot", () => { setIdentifyMode(true); ensureBasemapOn(); setIdentifyRes(null); setJurInfo(null); }],
-                  ["start-hint-address", "Search an address", "Search address", () => openLandPanel({ select: false, addMenu: true })],
-                  ["start-hint-draw", "Trace your boundary", "Trace boundary", () => selectTool("parcel")],
-                  ["start-hint-screenshot", "Use a screenshot", "Screenshot", () => startHintFileRef.current?.click()],
-                ].map(([tid, label, short, act]) => (
+                  ["start-hint-lot", "Click a lot on the map", "Click a lot", "Click a lot", () => { setIdentifyMode(true); ensureBasemapOn(); setIdentifyRes(null); setJurInfo(null); }],
+                  ["start-hint-address", "Search an address", "Search address", "Address", () => openLandPanel({ select: false, addMenu: true })],
+                  ["start-hint-draw", "Trace your boundary", "Trace boundary", "Trace", () => selectTool("parcel")],
+                  ["start-hint-screenshot", "Use a screenshot", "Screenshot", "Screenshot", () => startHintFileRef.current?.click()],
+                ].map(([tid, label, short, tiny, act]) => (
                   <button key={tid} data-testid={tid} onClick={act} title={label}
-                    style={{ minHeight: narrow ? 34 : 36, padding: narrow ? "4px 3px 4px 5px" : "4px 7px", borderRadius: RADIUS.sm, border: `1px solid ${PAL.panelLine}`, background: "var(--planner-raised)", color: PAL.ink, fontSize: FONT_SIZE.control, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", textAlign: "left", lineHeight: 1.25, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{narrow ? short : label}</button>
+                    style={{ minHeight: hintRow ? 30 : narrow ? 34 : 36, padding: narrow ? "4px 3px 4px 5px" : "4px 7px", borderRadius: RADIUS.sm, border: `1px solid ${PAL.panelLine}`, background: "var(--planner-raised)", color: PAL.ink, fontSize: FONT_SIZE.control, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", textAlign: "left", lineHeight: 1.25, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{hintRow ? tiny : narrow ? short : label}</button>
                 ))}
               </div>
               <input ref={startHintFileRef} type="file" accept="application/pdf,image/*,.dxf,.dwg" style={{ display: "none" }} onChange={(e) => { addOverlayFile(e.target.files?.[0]); e.target.value = ""; }} />

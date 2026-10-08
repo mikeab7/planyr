@@ -22,6 +22,9 @@ const VIEWPORTS = {
   phone: { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 3 },
   // V1414592 (2026-10-08): the iPhone SE class (320 wide) — the live WebKit run found every option wrapping to 3 lines and the strip reaching the middle of the map
   smallPhone: { viewport: { width: 320, height: 568 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 },
+  // V1414592 live finding (2026-10-08): a phone held SIDEWAYS — the strip was ~half the visible map and spanned it
+  smallLandscape: { viewport: { width: 568, height: 320 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 },
+  landscape: { viewport: { width: 734, height: 343 }, hasTouch: true, isMobile: true, deviceScaleFactor: 3 },
   desktop: { viewport: { width: 1440, height: 900 }, hasTouch: false, isMobile: false, deviceScaleFactor: 1 },
 };
 
@@ -91,7 +94,7 @@ for (const [name, dev] of Object.entries(VIEWPORTS)) {
     test("Draw new parcel from the rail menu removes it", async ({ page }) => {
       await startBlank(page);
       await expect(heading(page)).toBeVisible({ timeout: 15_000 });
-      if (name === "phone") await page.getByTestId("mobile-tools-tab").click();
+      if (name !== "desktop") await page.getByTestId("mobile-tools-tab").click();
       await page.getByRole("button", { name: /Parcel tools/ }).first().click();
       await page.locator('[data-parcel-action="draw"]').click();
       await expect(heading(page)).toHaveCount(0);

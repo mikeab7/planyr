@@ -120,6 +120,8 @@ import ScoreMeter from "./ScoreMeter.jsx";
 import { RATING_MIN, RATING_MAX, RATING_STEP, RATING_SLIDER_REST } from "../lib/ratingScale.js";
 import { cleanDraftDishes, newDraftDish } from "../lib/draftDishes.js";
 import { noAutofill } from "../lib/noAutofill.js";
+import { createDraftStore, DraftStoreContext, useDraftStore, useDraftField } from "../lib/draftStore.js";
+import { useScrollSafeSlider } from "../lib/sliderScrollGuard.js";
 
 // var(--accent-food) — a real DOM/CSS element (unlike FoodMap's canvas-drawn pin, which must use
 // the literal hex because a 2D canvas context has no cascade to resolve var() against), so this
@@ -165,6 +167,7 @@ export function RatingSlider({ value, onChange, label, isMobile = false }) {
   const active = value != null;
   const shown = active ? value : RATING_SLIDER_REST;
   const color = colorForRating(shown) || "var(--accent-food)";
+  const scrollGuard = useScrollSafeSlider(value, onChange); // a vertical swipe that starts on the slider scrolls the card and leaves the rating alone
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
@@ -192,7 +195,7 @@ export function RatingSlider({ value, onChange, label, isMobile = false }) {
         type="range" min={RATING_MIN} max={RATING_MAX} step={RATING_STEP}
         value={shown} onChange={(e) => onChange(Number(e.target.value))}
         aria-label={label} aria-valuetext={active ? `${shown} out of ${RATING_MAX}` : "not rated"}
-        data-testid="rating-slider"
+        data-testid="rating-slider" {...scrollGuard}
         style={{ width: "100%", accentColor: color, cursor: "pointer", height: isMobile ? 40 : undefined, margin: 0 }}
       />
       <div aria-hidden="true" style={{ position: "relative", height: 12, marginTop: 1 }}>
@@ -272,18 +275,23 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, submitLabel 
   const narrowForm = useIsMobile();
   const landscapeForm = useLandscapePhone();
   const isMobile = narrowForm || landscapeForm; // a phone held sideways is a touch screen too
-  const [rating, setRating] = useState(() => (initial?.rating != null ? Number(initial.rating) : null));
-  const [ratingAmbiance, setRatingAmbiance] = useState(() => (initial?.rating_ambiance != null ? Number(initial.rating_ambiance) : null));
-  const [cost, setCost] = useState(() => (initial?.cost != null ? String(initial.cost) : ""));
-  const [visitedOn, setVisitedOn] = useState(() => initial?.visited_on || ""); // never pre-filled on a FRESH log — see header comment
+  // Every field below is KEPT across a remount of the card (rotating the phone swaps SideDock <-> BottomSheet, which remounts this
+  // form): `useDraftField` is `useState` that reads/writes the panel's draft store. See lib/draftStore.js (V1476080 step 6).
+  const drafts = useDraftStore();
+  const draftKey = initial ? `edit:${initial.id}` : "new";
+  const cancel = () => { drafts?.clear(draftKey); onCancel?.(); }; // an explicit Cancel starts the next open fresh (never a stale draft)
+  const [rating, setRating] = useDraftField(draftKey, "rating", () => (initial?.rating != null ? Number(initial.rating) : null));
+  const [ratingAmbiance, setRatingAmbiance] = useDraftField(draftKey, "ratingAmbiance", () => (initial?.rating_ambiance != null ? Number(initial.rating_ambiance) : null));
+  const [cost, setCost] = useDraftField(draftKey, "cost", () => (initial?.cost != null ? String(initial.cost) : ""));
+  const [visitedOn, setVisitedOn] = useDraftField(draftKey, "visitedOn", () => initial?.visited_on || ""); // never pre-filled on a FRESH log — see header comment
   // NEW-1 (Food on a phone): there is no "What I had" box any more. A NEW visit captures dishes
   // (below); an EXISTING visit keeps whatever it already had in `what_i_had` — shown read-only in
   // the edit form and never rewritten (see the header's "WHAT I HAD" note).
-  const [dishRows, setDishRows] = useState(() => (initial ? [] : [newDraftDish()]));
+  const [dishRows, setDishRows] = useDraftField(draftKey, "dishRows", () => (initial ? [] : [newDraftDish()]));
   const [dishError, setDishError] = useState(null);
-  const [whatWasGood, setWhatWasGood] = useState(() => initial?.what_was_good || "");
-  const [notes, setNotes] = useState(() => initial?.notes || "");
-  const [wouldReturn, setWouldReturn] = useState(() => initial?.would_return ?? null);
+  const [whatWasGood, setWhatWasGood] = useDraftField(draftKey, "whatWasGood", () => initial?.what_was_good || "");
+  const [notes, setNotes] = useDraftField(draftKey, "notes", () => initial?.notes || "");
+  const [wouldReturn, setWouldReturn] = useDraftField(draftKey, "wouldReturn", () => initial?.would_return ?? null);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -399,7 +407,7 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, submitLabel 
         }}>
           {pending ? "Saving…" : submitLabel}
         </button>
-        <button type="button" onClick={onCancel} style={{
+        <button type="button" onClick={cancel} style={{
           border: "1px solid var(--border-default)", borderRadius: RADIUS.md, padding: "10px 14px", minHeight: 44, cursor: "pointer",
           background: "transparent", color: "var(--text-secondary)", font: "inherit", fontSize: 13,
         }}>
@@ -664,6 +672,7 @@ function VisitCard({ visit, onDelete, editing, onOpenEdit, onCloseEdit, onSubmit
           <DishesSection
             dishesWithDate={(dishesWithDate || []).filter((d) => d.visit_id === visit.id)}
             visits={[visit]} onSaveDish={onSaveDish} onDeleteDish={onDeleteDish} pending={dishPending}
+            scope={`visit:${visit.id}`}
           />
         )}
       </div>
@@ -806,6 +815,9 @@ export default function VisitPanel({
   // B2046224 ×4 — a phone held sideways docks the card to the right edge instead of a bottom sheet.
   const landscape = useLandscapePhone();
   const isMobile = narrowPhone && !landscape;
+  // Half-typed forms survive the card changing parent (rotate the phone: SideDock <-> BottomSheet remounts everything below). Lives
+  // exactly as long as this panel does — a different place, or the close ✕, drops it. lib/draftStore.js.
+  const [drafts] = useState(createDraftStore);
   const [adding, setAdding] = useState(false); // NEW-2: never auto-opens, even on a never-visited place
   // Edit-a-visit (owner block, 2026-08-28) — which existing visit's card (if any) is showing its
   // edit form inline, in place of the card. Lifted here rather than local to VisitCard so this
@@ -813,7 +825,8 @@ export default function VisitPanel({
   // opening one closes the other, so `pending`/`error` (both FoodApp-global) always describe the
   // ONE write actually in flight.
   const [editingVisitId, setEditingVisitId] = useState(null);
-  const handleOpenEdit = useCallback((id) => { setAdding(false); setEditingVisitId(id); }, []);
+  // Opening a form always starts it from the CURRENT saved row / a blank log — never from a draft left by a closed one.
+  const handleOpenEdit = useCallback((id) => { drafts.clear("new"); drafts.clear(`edit:${id}`); setAdding(false); setEditingVisitId(id); }, [drafts]);
   const handleCloseEdit = useCallback(() => setEditingVisitId(null), []);
   const peekRef = useRef(null);
   const [peekHeight, setPeekHeight] = useState(140);
@@ -864,7 +877,7 @@ export default function VisitPanel({
 
   // Opening the log-a-new-visit form also closes any in-progress edit — see the state comment
   // above on why only one form is ever open at once.
-  const handleOpenForm = () => { setEditingVisitId(null); setAdding(true); };
+  const handleOpenForm = () => { if (editingVisitId) drafts.clear(`edit:${editingVisitId}`); drafts.clear("new"); setEditingVisitId(null); setAdding(true); };
 
   const actionsRow = onSubmitVisit && !adding ? (
     <ActionsRow
@@ -940,18 +953,21 @@ export default function VisitPanel({
   );
 
   if (landscape) {
-    return <SideDock onWidthChange={onSideWidthChange}>{body}</SideDock>;
+    return <DraftStoreContext.Provider value={drafts}><SideDock onWidthChange={onSideWidthChange}>{body}</SideDock></DraftStoreContext.Provider>;
   }
 
   if (isMobile) {
     return (
-      <BottomSheet open onDismiss={onClose} initialSnap="half" peekHeight={peekHeight} onHeightChange={onSheetHeightChange}>
-        {body}
-      </BottomSheet>
+      <DraftStoreContext.Provider value={drafts}>
+        <BottomSheet open onDismiss={onClose} initialSnap="half" peekHeight={peekHeight} onHeightChange={onSheetHeightChange}>
+          {body}
+        </BottomSheet>
+      </DraftStoreContext.Provider>
     );
   }
 
   return (
+    <DraftStoreContext.Provider value={drafts}>
     <div data-testid="food-visit-panel" data-food-panel="" style={{
       position: "absolute", top: 0, right: 0, bottom: 0, width: 340, maxWidth: "90vw", // matches FoodMap.jsx's own PANEL_WIDTH (its fly-to pan-offset assumes this)
       background: "var(--surface-raised)", borderLeft: "1px solid var(--border-default)",
@@ -961,5 +977,6 @@ export default function VisitPanel({
       <style>{FORM_OPEN_CSS}</style>
       {body}
     </div>
+    </DraftStoreContext.Provider>
   );
 }

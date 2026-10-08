@@ -140,9 +140,14 @@ try {
   // C. (opt-in) the Dashboard's Schedule Health card — the surface the owner reported ("Pappadoupolos / Master Schedule").
   if (WITH_DASH) {
     const ownerId = (await page.evaluate(async () => (await window.pfSupabase.auth.getUser()).data.user.id));
+    const REV0 = Date.now();
     const blob = (name, rev) => ({ __rev: rev, projects: name ? { 1: { id: 1, name: SCHED, ownerKind: "site", linkedSiteId: gid, linkedSiteName: "STALE-STORED-COPY", tasks: [{ id: 1, name: "zz task", start: "2026-10-01", finish: "2026-10-10", dur: 10, pct: 0 }] } } : {}, settings: {} });
-    const ins = await page.evaluate(async ({ uid, v }) => { const r = await window.pfSupabase.from("planar_data").insert({ key: "hs-v1", user_id: uid, value: v }); return r.error ? String(r.error.message) : null; }, { uid: ownerId, v: blob(true, 1) });
-    record("6 fixture schedule written to the test account's own blob", !ins, ins || "ok");
+    // planar_data's primary key is `key` ALONE, so the legacy account-wide "hs-v1" row belongs to whichever account
+    // wrote it first (not the test account) — this fixture can never write its own. NEVER touch that row: the insert is
+    // refused by the key, and a refusal here is reported as BLOCKED (a stated limit), not as a rename defect.
+    const ins = await page.evaluate(async ({ uid, v }) => { const r = await window.pfSupabase.from("planar_data").insert({ key: "hs-v1", user_id: uid, value: v }); return r.error ? String(r.error.message) : null; }, { uid: ownerId, v: blob(true, REV0) });
+    if (ins && /planar_data_pkey/.test(ins)) console.log("BLOCKED 6-9 Dashboard Schedule Health leg — the test account cannot own an hs-v1 row (primary key is `key` alone; the row belongs to another account). Needs the test account switched to row-based schedules, or a different fixture. NOT a rename defect.");
+    else     record("6 fixture schedule written to the test account's own blob", !ins, ins || "ok");
     if (!ins) {
       const dashText = async () => { await page.goto(`${base}/#/`, { waitUntil: "domcontentloaded" }); await page.waitForTimeout(12000); const t = await page.evaluate(() => document.body.innerText.replace(/\n+/g, " | ")); const i = t.toLowerCase().indexOf("schedule health"); return i >= 0 ? t.slice(i, i + 240) : t.slice(0, 240); };
       const d1 = await dashText();
@@ -150,7 +155,7 @@ try {
       await renameTo(NAME1 + "-b");
       const d2 = await dashText();
       record("8 …and follows a second rename without touching the schedule", d2.includes(`${NAME1}-b / ${SCHED}`), d2.slice(0, 140));
-      const clr = await page.evaluate(async (v) => { const r = await window.pfSupabase.from("planar_data").update({ value: v }).eq("key", "hs-v1"); return r.error ? String(r.error.message) : null; }, blob(false, 2));
+      const clr = await page.evaluate(async (v) => { const r = await window.pfSupabase.from("planar_data").update({ value: v }).eq("key", "hs-v1"); return r.error ? String(r.error.message) : null; }, blob(false, REV0 + 1));
       record("9 fixture blob cleared back to empty", !clr, clr || "ok (one empty blob row remains: the account has no delete policy)");
     }
   }
