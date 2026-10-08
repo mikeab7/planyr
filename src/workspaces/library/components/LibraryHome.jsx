@@ -107,7 +107,7 @@ function FolderCard({ pin, label, projectName, onOpen, onUnpin }) {
 }
 
 /* One Unfiled row: the file (opens in Review) + a "Move to project…" picker that files it for real. */
-export function UnfiledCard({ doc, projects = [], busy = false, onOpen, onMove, trash }) {
+export function UnfiledCard({ doc, projects = [], busy = false, onOpen, onMove, onHistory, trash }) {
   const title = doc.title || doc.sfile || doc.item || "Untitled file";
   return (
     <div data-testid="unfiled-row" data-review-id={doc.id} style={{ ...cardBase, cursor: "default", flexWrap: "wrap" }}>
@@ -119,6 +119,8 @@ export function UnfiledCard({ doc, projects = [], busy = false, onOpen, onMove, 
           <span style={{ display: "block", fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", marginTop: 2 }}>{[doc.discipline, fmtWhen(Date.parse(doc.updated_at || "") || 0)].filter(Boolean).join(" · ")}</span>
         </span>
       </button>
+      {onHistory && <button onClick={onHistory} title="Version history — see earlier saved versions" data-testid="library-version-history"
+        style={{ flex: "none", fontSize: FONT_SIZE.label, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.sm, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Versions</button>}
       <select aria-label={`Move “${title}” to a project`} data-testid="unfiled-move" disabled={busy || !projects.length} value=""
         onChange={(e) => { if (e.target.value) onMove?.(e.target.value); }}
         style={{ flex: "0 1 170px", minWidth: 0, maxWidth: "100%", minHeight: 30, fontSize: FONT_SIZE.control, fontFamily: "inherit", borderRadius: RADIUS.sm, border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-primary)" }}>
@@ -130,7 +132,7 @@ export function UnfiledCard({ doc, projects = [], busy = false, onOpen, onMove, 
   );
 }
 
-export default function LibraryHome({ uid = null, active = true, onOpenFile, onOpenFolder, onPickProject }) {
+export default function LibraryHome({ uid = null, active = true, onOpenFile, onOpenHistory, onOpenFolder, onPickProject }) {
   const [pins, setPins] = useState([]);
   const [recents, setRecents] = useState([]);
   const [reviews, setReviews] = useState([]);   // doc_reviews rows, for names/projects on cards
@@ -193,6 +195,7 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
   const trash = useReviewTrash({ titleOf: (id) => { const d = byId.get(id); return d && (d.title || d.sfile || d.item); }, refresh: reloadAll });
   const rowTrash = (id) => ({ armed: trash.pendingDel === id, onArm: trash.setPendingDel, onCancel: () => trash.setPendingDel(null), onConfirm: trash.del });
   const docProject = (doc, fallback) => (doc && (doc.project_id || doc.projectId)) || fallback || null;
+  const openHistory = (id) => { const doc = byId.get(id); onOpenHistory?.(doc || { id, project_id: null }); }; // B2034128
   const openDoc = (id, fallbackProjectId) => {
     const doc = byId.get(id);
     onOpenFile?.(doc || { id, project_id: fallbackProjectId || null });
@@ -331,7 +334,7 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
             {unfiled.map((d) => (
               <div key={`unfiled:${d.id}`} style={{ marginBottom: 6 }}>
                 <UnfiledCard doc={d} projects={projects} busy={moving === d.id}
-                  onOpen={() => openDoc(d.id, null)} onMove={(pid) => moveUnfiled(d, pid)} trash={rowTrash(d.id)} />
+                  onOpen={() => openDoc(d.id, null)} onMove={(pid) => moveUnfiled(d, pid)} onHistory={onOpenHistory ? () => openHistory(d.id) : undefined} trash={rowTrash(d.id)} />
               </div>
             ))}
           </>
