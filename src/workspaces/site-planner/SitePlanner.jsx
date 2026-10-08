@@ -19496,10 +19496,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     else { if (labelSessionRef.current !== key) pushHistory(); labelSessionRef.current = null; }
     applyFn(patch);
   };
-  const ovRow = { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: PAL.muted };
-  // One shared square icon-button (B574) — identical width/height/padding/hit-target for the overlay
-  // header's hide / lock / remove controls, so they can never render at mismatched sizes again.
-  const iconBtn = { width: 30, height: 30, padding: 0, flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 8, border: BORDER_1, background: SURF_RAISED, color: PAL.ink, cursor: "pointer", boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
   const spinBtn = { width: 20, height: 13, padding: 0, display: "grid", placeItems: "center", fontSize: 10.5, lineHeight: 1, border: BORDER_1, borderRadius: 4, background: SURF_RAISED, color: PAL.muted, cursor: "pointer", fontFamily: "inherit" };
   // B845584 — brought down from ~15px/~44px rows to the system's own density tokens (measured off
   // the live app, not guessed): --font-md 11.5px text, a ~22-23px row (padding + line-height), the
