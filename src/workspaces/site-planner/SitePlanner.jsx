@@ -12270,11 +12270,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       reportClientEvent("delete-outcome", "menu:parcel → no-op (stale)", { entry: "menu:parcel", result: "no-op", reason: "stale", id });
       return;
     }
+    const delName = (parcelInfo.get(id) && parcelInfo.get(id).name) || "Parcel";
     pushHistory();
     setParcels((a) => a.filter((p) => p.id !== id));
     setCombineSel((s) => s.filter((x) => x !== id));
     if (sel?.kind === "parcel" && sel.id === id) { setSel(null); setMulti([]); setDrillId(null); }
     tombstone(id);
+    pushToast({ text: `Deleted ${delName}`, action: { label: "Undo", onClick: undo } }); // B2194741
     reportClientEvent("delete-outcome", "menu:parcel → removed parcel", { entry: "menu:parcel", result: "removed", n: 1, ids: [id] });
   };
   /* ------------ dedicated canvas right-click menu (B627) ------------
@@ -12947,7 +12949,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   parcelActsRef.current = {
     onSelectRow: (id) => { setCombineSel([]); setSel({ kind: "parcel", id }); },
     onPickRow: (id) => { toggleMerge(id); setSel({ kind: "parcel", id }); }, // combine-pick mode: a row click picks, exactly as it always did
-    onToggleInclude: toggleParcelActive, onToggleLock: toggleParcelLock, onToggleAllLock: toggleAllParcelsLock,
+    onToggleInclude: toggleParcelActive,
+    // B2194741 — Lock from the list / page / menu: one undo frame, and an Undo toast naming what changed.
+    onToggleLock: (id) => {
+      const pc = parcels.find((p) => p.id === id); if (!pc) return;
+      const nm = (parcelInfo.get(id) && parcelInfo.get(id).name) || "Parcel";
+      toggleParcelLock(id);
+      pushToast({ text: `${pc.locked ? "Unlocked" : "Locked"} ${nm}`, action: { label: "Undo", onClick: undo } });
+    },
+    onToggleAllLock: toggleAllParcelsLock,
     onZoom: (id) => zoomToElements([{ kind: "parcel", id }]), onRemove: removeParcelById,
     onSplit: startPanelSplit, onCancelSplit: cancelPanelSplit, onCombine: combineParcelsAction, onLockMany: lockParcelsMany,
     onRename: (id, v) => setParcelField(id, "label", v),

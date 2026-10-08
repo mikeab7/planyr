@@ -49,7 +49,7 @@ function Tag({ children }) {
 }
 
 /* The grid every row AND the column header share, so the eye sits exactly under "Active". */
-const COLS = "28px minmax(0, 1fr) auto 52px";
+const COLS = "24px minmax(0, 1fr) 44px 38px 26px"; // check · name+acres · lock/pencil · eye · ⋯ (each icon in its OWN cell, so none can sit on the name)
 const FILTER_MIN_ROWS = 8; // the filter box only earns its space once the list is long
 
 function secondLine(row) {
@@ -58,10 +58,54 @@ function secondLine(row) {
   return row.origin ? row.origin.line : "";
 }
 
-/* One row. Checkbox (combine only) · name + where it came from (opens the parcel page) · acres · eye (Active). */
+/* The row's ⋯ menu (B2194741): Zoom to · Lock/Unlock · Delete. Delete is a TWO-STEP inline confirm (the same
+ * arm-then-confirm shape the plan list uses) and the delete itself shows an Undo toast. Fixed-position so a scrolling
+ * panel can never clip it; flips upward near the bottom edge. Module scope (MODULE-SCOPE-COMPONENTS). */
+function RowMenu({ row, handlers, open, armed, onOpen, onClose, onArm }) {
+  const btnRef = useRef(null);
+  const [pos, setPos] = useState(null);
+  useEffect(() => {
+    if (!open) { setPos(null); return undefined; }
+    const r = btnRef.current && btnRef.current.getBoundingClientRect();
+    if (r) { const H = armed ? 96 : 128, up = r.bottom + H > window.innerHeight - 8; setPos({ left: Math.max(8, r.right - 168), top: up ? Math.max(8, r.top - H) : r.bottom + 2 }); }
+    const off = (e) => { if (e.type === "keydown" ? e.key === "Escape" : !(e.target.closest && e.target.closest("[data-row-menu]"))) onClose(); };
+    document.addEventListener("pointerdown", off); document.addEventListener("keydown", off);
+    return () => { document.removeEventListener("pointerdown", off); document.removeEventListener("keydown", off); };
+  }, [open, armed]); // eslint-disable-line react-hooks/exhaustive-deps
+  const item = (label, onClick, testid, danger) => (
+    <button type="button" role="menuitem" onClick={onClick} data-testid={testid}
+      style={{ display: "block", width: "100%", textAlign: "left", padding: `${SPACE.sm}px ${SPACE.lg}px`, border: "none", borderRadius: RADIUS.sm, background: "transparent", fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 600, color: danger ? "var(--danger-text)" : "var(--text-primary)", cursor: "pointer" }}>{label}</button>
+  );
+  return (
+    <div data-row-menu="1" style={{ justifySelf: "center" }}>
+      <button ref={btnRef} type="button" style={iconBtn} aria-haspopup="menu" aria-expanded={open} aria-label={`More actions for ${row.name}`} title="More" data-testid={`parcel-row-more-${row.id}`} onClick={() => (open ? onClose() : onOpen())}><MoreIcon /></button>
+      {open && pos && (
+        <div role="menu" data-testid={`parcel-row-menu-${row.id}`} style={{ position: "fixed", left: pos.left, top: pos.top, zIndex: 50, width: 168, padding: SPACE.xs, border: LINE, borderRadius: RADIUS.md, background: "var(--surface-raised)", boxShadow: "var(--shadow-popover, 0 4px 14px var(--border-strong))" }}>
+          {!armed && <>
+            {item("Zoom to", () => { onClose(); handlers.onZoom(row.id); }, `parcel-row-menu-zoom-${row.id}`)}
+            {item(row.locked ? "Unlock" : "Lock", () => { onClose(); handlers.onToggleLock(row.id); }, `parcel-row-menu-lock-${row.id}`)}
+            {item("Delete…", onArm, `parcel-row-menu-delete-${row.id}`, true)}
+          </>}
+          {armed && <div data-testid={`parcel-row-delete-confirm-${row.id}`}>
+            <div style={{ padding: `${SPACE.sm}px ${SPACE.lg}px`, fontSize: FONT_SIZE.control, color: "var(--text-primary)", overflowWrap: "anywhere" }}>Delete {row.name}?</div>
+            {item("Delete", () => { onClose(); handlers.onDelete(row.id); }, `parcel-row-delete-yes-${row.id}`, true)}
+            {item("Cancel", onClose, `parcel-row-delete-no-${row.id}`)}
+          </div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* One row. Checkbox (combine only) · name + where it came from (opens the parcel page) · acres · lock / rename ·
+ * eye (Active) · ⋯. The lock and the rename pencil live in their OWN grid cell beside the name (B2194741): the
+ * pencil used to be absolutely positioned over the first letter of the name. The padlock is a real button — shown
+ * always when locked, on hover / keyboard focus when not (always on touch) — and toggles Lock with an Undo toast. */
 function ParcelRow({ row, selected, picked, pickMode, checked, handlers }) {
   const dim = !row.included || row.superseded;
   const sub = secondLine(row);
+  const [menu, setMenu] = useState(null); // null | "menu" | "confirm"
+  const renameable = row.splitFrom || row.origin.kind === "combined";
   return (
     <div style={{ marginLeft: row.depth * SPACE.xl }}>
       <div className="land-parcel-row" data-testid={`parcel-table-row-${row.id}`} data-included={row.included ? "1" : "0"}
@@ -71,25 +115,30 @@ function ParcelRow({ row, selected, picked, pickMode, checked, handlers }) {
         </label>
         <button type="button" onClick={() => handlers.onRowClick(row.id, pickMode)} aria-pressed={pickMode ? picked : undefined} data-testid={`parcel-row-${row.id}`}
           title={`${row.name}${sub ? ` — ${sub}` : ""}`}
-          style={{ gridColumn: "2 / 4", display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center", columnGap: SPACE.md, minWidth: 0, alignSelf: "stretch", padding: `${SPACE.sm}px ${SPACE.md}px ${SPACE.sm}px ${SPACE.xs}px`, border: "none", background: "transparent", textAlign: "left", cursor: "pointer", fontFamily: "inherit", opacity: dim ? 0.55 : 1 }}>
+          onKeyDown={(e) => { if ((e.key === "Delete" || e.key === "Backspace") && !pickMode) { e.preventDefault(); e.stopPropagation(); setMenu("confirm"); } }}
+          style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center", columnGap: SPACE.xs, minWidth: 0, alignSelf: "stretch", padding: `${SPACE.sm}px ${SPACE.sm}px ${SPACE.sm}px ${SPACE.xs}px`, border: "none", background: "transparent", textAlign: "left", cursor: "pointer", fontFamily: "inherit", opacity: dim ? 0.55 : 1 }}>
           <span style={{ minWidth: 0, display: "block" }}>
-            <span style={{ display: "flex", alignItems: "center", gap: SPACE.sm, minWidth: 0 }}>
-              <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: FONT_SIZE.emphasis, fontWeight: 650, color: "var(--text-primary)" }}>{row.name}</span>
-              {row.locked && <span style={{ flex: "none", display: "inline-flex", color: "var(--text-secondary)" }} aria-label="Locked" title="Locked — Edit parcels can't change it"><LockGlyph size={12} /></span>}
-            </span>
+            <span data-testid={`parcel-row-name-${row.id}`} style={{ display: "block", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: FONT_SIZE.emphasis, fontWeight: 650, color: "var(--text-primary)" }}>{row.name}</span>
             <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: FONT_SIZE.label, color: "var(--text-secondary)" }}>{sub}</span>
           </span>
-          <span style={{ minWidth: 56, textAlign: "right", fontSize: FONT_SIZE.emphasis, fontWeight: 650, color: "var(--text-primary)", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, textDecoration: row.included ? "none" : "line-through" }} data-testid={`parcel-row-acres-${row.id}`}>{fmt(row.acres)}</span>
+          <span style={{ minWidth: 48, textAlign: "right", fontSize: FONT_SIZE.emphasis, fontWeight: 650, color: "var(--text-primary)", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, textDecoration: row.included ? "none" : "line-through" }} data-testid={`parcel-row-acres-${row.id}`}>{fmt(row.acres)}</span>
         </button>
-        {(row.splitFrom || row.origin.kind === "combined") && (
-          <button type="button" style={{ ...iconBtn, position: "absolute", left: 28, top: 2, width: 18, height: 18 }} title="Rename — opens the name field" aria-label={`Rename ${row.name}`} onClick={() => handlers.onOpenPage(row.id)} data-testid={`parcel-row-pencil-${row.id}`}><PencilIcon size={11} /></button>
-        )}
+        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "flex-end", gap: 0 }}>
+          <button type="button" className={row.locked ? undefined : "land-row-hover"} onClick={() => handlers.onToggleLock(row.id)} aria-pressed={!!row.locked} data-testid={`parcel-row-lock-${row.id}`}
+            aria-label={row.locked ? `Unlock ${row.name}` : `Lock ${row.name}`}
+            title={row.locked ? "Locked — even Edit parcels can't change it. Click to unlock." : "Unlocked. Click to lock — keeps Edit parcels from changing this boundary."}
+            style={{ ...iconBtn, width: 22, height: 22, color: "var(--text-secondary)" }}>{row.locked ? <LockGlyph size={13} /> : <UnlockGlyph size={13} />}</button>
+          {renameable
+            ? <button type="button" className="land-row-hover" style={{ ...iconBtn, width: 22, height: 22 }} title="Rename — opens the name field" aria-label={`Rename ${row.name}`} onClick={() => handlers.onOpenPage(row.id)} data-testid={`parcel-row-pencil-${row.id}`}><PencilIcon size={12} /></button>
+            : null}
+        </span>
         <button type="button" onClick={() => handlers.onToggleInclude(row.id)} aria-pressed={row.included} data-testid={`parcel-row-eye-${row.id}`}
           aria-label={row.included ? `Make ${row.name} not active` : `Make ${row.name} active`}
           title={row.included ? "Active — counted in the site total. Click to leave it out." : "Not active — left out of the site total. Click to count it."}
           style={{ ...iconBtn, justifySelf: "center", color: row.included ? "var(--text-primary)" : "var(--text-secondary)" }}>
           {row.included ? <EyeIcon /> : <EyeOffIcon />}
         </button>
+        <RowMenu row={row} handlers={handlers} open={menu !== null} armed={menu === "confirm"} onOpen={() => setMenu("menu")} onClose={() => setMenu(null)} onArm={() => setMenu("confirm")} />
       </div>
     </div>
   );
@@ -159,9 +208,10 @@ export default function ParcelsPanel({
       {/* Column header — same grid as every row, so the eye sits directly under "Active". */}
       <div style={{ display: "grid", gridTemplateColumns: COLS, alignItems: "center", padding: `0 0 ${SPACE.xs}px`, border: "1px solid transparent", fontSize: FONT_SIZE.micro, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--text-secondary)" }}>
         <span />
-        <span style={{ paddingLeft: SPACE.xs }}>Parcel</span>
-        <span style={{ minWidth: 56, textAlign: "right", paddingRight: SPACE.md }}>Acres</span>
+        <span style={{ display: "flex", justifyContent: "space-between", paddingLeft: SPACE.xs, paddingRight: SPACE.md }}><span>Parcel</span><span style={{ minWidth: 48, textAlign: "right" }}>Acres</span></span>
+        <span />
         <span style={{ textAlign: "center" }} data-testid="parcels-active-head">Active</span>
+        <span />
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: SPACE.xs }} data-testid="parcels-list">
