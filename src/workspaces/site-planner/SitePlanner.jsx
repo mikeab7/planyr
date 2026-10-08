@@ -18,8 +18,9 @@ import { recordPinchGesture } from "../../shared/telemetry/gestureTelemetry.js";
 import { createElementSync, stableStringify } from "./lib/elementSync.js";
 import { createOperationTracker, undoOwnership, undoRiskEnvelope, groupRowsIntoOperations, describeOperation } from "./lib/operationEnvelope.js";
 import { planDelete } from "./lib/deletePlan.js";
-import { focusScope, resolveKeyEntry, keyScopeVerdict, shouldHintRefusal, SCOPE_GUARD_HINT } from "./lib/keyContract.js";
+import { SCOPE, focusScope, resolveKeyEntry, keyScopeVerdict, shouldHintRefusal, SCOPE_GUARD_HINT } from "./lib/keyContract.js";
 import { touchLatch, touchFactsOf, TOUCH, isTextControl } from "../../shared/keyboard/keyScope.js";
+import { imageFileFromClipboard, pastedImageName } from "./lib/pasteImage.js"; // NEW-1 — Ctrl+V a clipboard image as an overlay
 import { rowsToModel, KIND_TO_FIELD, foldNeverSyncedLocal, foldJournal, reconcileSeedRows } from "./lib/elementRows.js";
 import { writeJournal, readJournal, clearJournal, sweepJournals, journalSessionId } from "./lib/elementJournal.js";
 import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
@@ -2402,6 +2403,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
   const overlayFileRef = useRef(null);
   const reAddFileRef = useRef(null);                    // B784 — always-mounted picker for re-adding a missing overlay's file
+  const addOverlayFileRef = useRef(null);               // NEW-1 — latest addOverlayFile, for the window paste listener
+  const keyPasteTimerRef = useRef(null);                // NEW-1 — Ctrl+V keydown defers the INTERNAL paste one tick so a clipboard image can win
   const reAddIdRef = useRef(null);                      // B784 — id of the overlay a re-add picker will replace in place
   const overlayDocs = useRef(new Map());                // id -> live PDFDocumentProxy (session-only, for the page picker)
   /* NEW-5(ii) — SHORTER LIFETIMES FOR THE PDF PROXIES, WITH RE-OPEN MADE TRANSPARENT FIRST.
@@ -7053,6 +7056,36 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return () => { window.removeEventListener("pointerdown", onDown, true); window.removeEventListener("focusin", onFocusIn, true); };
   }, []);
 
+  /* ------------ NEW-1 — paste a clipboard image (screenshot) as a new overlay ------------
+   * Goes through addOverlayFile — the SAME path as "Add overlay" — so storage, undo, the panel row and
+   * cross-plan offering are identical. Never hijacks a text field / slider / dropdown (same focusScope the
+   * keyboard uses); a text-only or empty clipboard is a silent no-op and the Ctrl+V keydown's internal paste
+   * runs as before. */
+  useEffect(() => {
+    const onPaste = (e) => {
+      if (!active) return;
+      const file = imageFileFromClipboard(e.clipboardData);
+      if (!file) return;
+      const t = document.activeElement;
+      const tgt = e.target && e.target.nodeType === 1 ? e.target : null;
+      const canvasEl = wrapRef.current || svgRef.current;
+      const editable = (n) => !!n && (n.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(n.tagName));
+      if (editable(tgt) || editable(t)) return;
+      const scope = focusScope({
+        tag: t ? t.tagName : null, type: t ? t.type : null, isContentEditable: !!(t && t.isContentEditable),
+        insideCanvas: !!(t && canvasEl && (canvasEl === t || canvasEl.contains(t))),
+        lastTouchedCanvas: canvasTouchRef.current === TOUCH.CANVAS,
+      });
+      if (scope !== SCOPE.CANVAS) return;
+      e.preventDefault();
+      clearTimeout(keyPasteTimerRef.current); keyPasteTimerRef.current = null; // the image wins — no element paste on top
+      const name = pastedImageName((stateRef.current.sheetOverlays || []).map((o) => o.name));
+      addOverlayFileRef.current?.(file, null, name);
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [active]);
+
   /* ------------ keyboard ------------ */
   useEffect(() => {
     const onKey = (e) => {
@@ -7100,7 +7133,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // its own path because a backdrop copy has to clone the raster payload, not just geometry.
       if ((e.ctrlKey || e.metaKey) && (e.key === "c" || e.key === "C")) { if (hasCopyableSel()) { e.preventDefault(); copySel(); } else if (selOverlay) { e.preventDefault(); copyOverlay(selOverlay); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "x" || e.key === "X")) { if (hasCopyableSel()) { e.preventDefault(); cutSel(); } return; }
-      if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) { if (hasCanvasClip()) { e.preventDefault(); pasteClip(); } else if (hasOverlayClip()) { e.preventDefault(); pasteOverlay(); } return; }
+      /* NEW-1 — Ctrl+V: a clipboard IMAGE wins over the internal element/overlay clipboard. The browser's `paste`
+       * event (below) is what can see the clipboard, and it fires in the same task as this keydown's default
+       * action — so we do NOT preventDefault here and run the internal paste one tick later, unless the paste
+       * event found an image and cancelled it (no double-fire). No image → identical behaviour, one tick late. */
+      if ((e.ctrlKey || e.metaKey) && (e.key === "v" || e.key === "V")) {
+        if (hasCanvasClip() || hasOverlayClip()) {
+          clearTimeout(keyPasteTimerRef.current);
+          keyPasteTimerRef.current = setTimeout(() => { keyPasteTimerRef.current = null; if (hasCanvasClip()) pasteClip(); else if (hasOverlayClip()) pasteOverlay(); }, 0);
+        }
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) { const gid = selectedGroupId(); if (gid) { e.preventDefault(); duplicateGroup(gid); } else if (multi.length > 1) { e.preventDefault(); multi.filter((m) => m.kind === "el").forEach((m) => duplicateEl(m.id)); } else if (sel?.kind === "el") { e.preventDefault(); duplicateEl(sel.id); } else if (selOverlay) { e.preventDefault(); duplicateOverlay(selOverlay); } return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "g" || e.key === "G")) { e.preventDefault(); if (e.shiftKey) ungroupSel(); else groupSel(); return; } // B261: Group / Ungroup
       // B820 — Arrange (z-order) chords, matching Document Review / Bluebeam. e.code (not e.key)
@@ -10314,7 +10357,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // B784 — `reuseId` re-imports a file for an EXISTING overlay (the "click to re-add" flow for one whose
   // Storage object went missing): it replaces that overlay's raster in place and preserves its transform
   // (position / scale / rotation / opacity), rather than dropping a brand-new overlay at view center.
-  const addOverlayFile = async (rawFile, reuseId = null) => {
+  const addOverlayFile = async (rawFile, reuseId = null, nameOverride = null) => {
     if (!rawFile) return;
     setOverlayBusy(true);
     try {
@@ -10348,7 +10391,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // B474 — cache the raster in IndexedDB so the saved record can stay off the ~5MB localStorage cap.
       const ovIdbKey = siteId ? `raster:${siteId}:overlay:${id}` : undefined;
       const ov = {
-        id, name: (prev && prev.name) || rawFile.name || file.name || "Site plan", src: r.src, imgW: r.imgW, imgH: r.imgH,
+        id, name: (prev && prev.name) || nameOverride || rawFile.name || file.name || "Site plan", src: r.src, imgW: r.imgW, imgH: r.imgH,
         page: r.page || 1, pageCount: r.pageCount || 1,
         x: c.x - (r.imgW * ftPerPx) / 2, y: c.y - (r.imgH * ftPerPx) / 2,
         ftPerPx, rotation: 0, opacity: 0.85, locked: false,
@@ -10400,6 +10443,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setOverlayBusy(false);
     }
   };
+  addOverlayFileRef.current = addOverlayFile; // NEW-1
   // B784 — open the file picker to re-add a specific overlay's missing file; the chosen file replaces
   // that overlay in place (transform preserved) via addOverlayFile(file, id). The picker input is
   // always-mounted (below the canvas) so this works whether or not the References panel is open.
