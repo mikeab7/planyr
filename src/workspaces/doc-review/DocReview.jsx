@@ -466,6 +466,7 @@ export default function DocReview({
     setDocFile(o);
     setDocPool((p) => { const cur = p[o.tabId]; return cur && cur.key === o.key && !!cur.readOnly === !!o.readOnly ? p : { ...p, [o.tabId]: o }; });
   };
+  const pendingUploadRef = useRef(null); // {srcId, upload} — the document upload still in flight, if any
   const [priorSources, setPriorSources] = useState([]); // earlier saved versions of this file — kept, never overwritten
   useEffect(() => { let live = true; getUser().then((u) => { if (live && u) setDocAuthor(displayNameFor(null, u) || "Reviewer"); }).catch(() => {}); return () => { live = false; }; }, []);
   const [openErr, setOpenErr] = useState("");      // visible banner when an open no-ops / loadReview returns null (NEW-1) — so it can't fail silently
@@ -874,7 +875,9 @@ export default function DocReview({
     setSource({ ...base, savedAt: Date.now(), savedBy: docAuthor, storageKey: null, driveKey: null, oversize: false });
     putDocFile({ blob: file, name: file.name, kind, key: srcId });
     const filing = filingNow(meta); adoptFiling(filing);
-    storeSource(srcId, file, { projectId: filing.projectId, discipline: meta.discipline, fileName: file.name, folderId: meta.folderId || null, orgScope: filing.orgScope }).then(async (r) => {
+    const upload = storeSource(srcId, file, { projectId: filing.projectId, discipline: meta.discipline, fileName: file.name, folderId: meta.folderId || null, orgScope: filing.orgScope });
+    pendingUploadRef.current = { srcId, upload }; // a Save made before this finishes waits for it, so the original still becomes a kept version (B2034128)
+    upload.then(async (r) => {
       setSource((s0) => (s0 && s0.srcId === srcId ? { ...s0, storageKey: r.storageKey || null, driveKey: r.driveKey || null, oversize: !!r.oversize } : s0));
       noteSourceKeys(srcId, r);
       if (!r.ok && !r.oversize && (await cloudReady())) { const m = `Couldn’t save this file to the cloud. ${r.driveError || "Check your connection and drop it again."}`; setErr(m); setOpenErr(m); }
@@ -903,8 +906,15 @@ export default function DocReview({
       await openReview({ id: res.id });
       return { ok: true, message: `Saved as “${name}”. The original is kept. ${where}` };
     }
-    const old = source;
+    let old = source;
     if (!old) return { ok: false, error: "There is no file to save to." };
+    // The original upload may still be in flight (slow connection): without its keys it is not a stored version and a
+    // Save would drop it from Version history. Wait for it, and use the keys it returned (state hasn't updated yet).
+    const pend = pendingUploadRef.current;
+    if (ready && !isStoredSource(old) && pend && pend.srcId === old.srcId) {
+      const r0 = await pend.upload.catch(() => null);
+      if (r0 && (r0.driveKey || r0.storageKey)) old = { ...old, storageKey: r0.storageKey || null, driveKey: r0.driveKey || null, oversize: !!r0.oversize };
+    }
     const io = { newId: newSourceId, cache: cacheSourceBytes, store: (id, b) => storeSource(id, b, { ...scope, fileName: old.name }) };
     const res = await saveVersion({ source: old, prior: priorSources, blob, io, by: docAuthor, online: ready, restoredFrom });
     if (!res.ok) return { ok: false, error: res.error };
