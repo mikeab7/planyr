@@ -4396,6 +4396,47 @@ describe("groupRowsByProject — MasterView's 'Group by project' sections, never
   });
 });
 
+describe("groupRowsByProject — NEW-1 (B2210992 follow-up): Task Report groups follow the owner's project order", () => {
+  const row = (id, projId, projOwnerLabel, projName, projSiteId) => ({ id, projId, projSiteId, projOwnerLabel, projName, projLabel: `${projOwnerLabel} / ${projName}` });
+  const rows = () => [
+    row(1, 1, "8 South", "Master Schedule", "g-8s"),
+    row(1, 2, "Goose Creek", "Master Schedule", "g-gc"),
+    row(1, 3, "Grand Port", "Master Schedule", "g-gp"),
+  ];
+
+  it("RED-PROOF shape — with no order, '8 South' sorts first (digit before letters); with his order it does not", () => {
+    expect(E.groupRowsByProject(rows()).map(g => g.label)[0]).toBe("8 South / Master Schedule");
+    const ordered = E.groupRowsByProject(rows(), ["g-gp", "g-gc", "g-8s"]);
+    expect(ordered.map(g => g.label)).toEqual(["Grand Port / Master Schedule", "Goose Creek / Master Schedule", "8 South / Master Schedule"]);
+  });
+
+  it("a project's several schedules stay together at its position, ordered by schedule name", () => {
+    const rs = [...rows(), row(1, 4, "Goose Creek", "MUD v PID", "g-gc")];
+    const labels = E.groupRowsByProject(rs, ["g-gc", "g-gp", "g-8s"]).map(g => g.label);
+    expect(labels).toEqual(["Goose Creek / Master Schedule", "Goose Creek / MUD v PID", "Grand Port / Master Schedule", "8 South / Master Schedule"]);
+  });
+
+  it("projects missing from the order, and org-owned schedules, keep today's order BENEATH the positioned ones", () => {
+    const rs = [...rows(), row(1, 9, "Organization", "Pursuits", null)];
+    const labels = E.groupRowsByProject(rs, ["g-gp"]).map(g => g.label);
+    expect(labels).toEqual(["Grand Port / Master Schedule", "8 South / Master Schedule", "Goose Creek / Master Schedule", "Organization / Pursuits"]);
+  });
+
+  it("stale ids in the order are skipped, never fatal; a null/empty order is today's order", () => {
+    expect(E.groupRowsByProject(rows(), ["gone", "g-gc"]).map(g => g.siteId)[0]).toBe("g-gc");
+    expect(E.groupRowsByProject(rows(), null).map(g => g.label)).toEqual(E.groupRowsByProject(rows()).map(g => g.label));
+    expect(E.groupRowsByProject(rows(), []).map(g => g.label)).toEqual(E.groupRowsByProject(rows()).map(g => g.label));
+  });
+
+  it("column sort orders rows WITHIN a group and never moves a group (rows arrive already sorted)", () => {
+    const rs = [row(5, 1, "8 South", "Master Schedule", "g-8s"), row(1, 3, "Grand Port", "Master Schedule", "g-gp"), row(2, 1, "8 South", "Master Schedule", "g-8s"), row(9, 3, "Grand Port", "Master Schedule", "g-gp")];
+    const g = E.groupRowsByProject(rs, ["g-gp", "g-8s"]);
+    expect(g.map(x => x.siteId)).toEqual(["g-gp", "g-8s"]);
+    expect(g[0].gRows.map(r => r.id)).toEqual([1, 9]); // input (sorted) order preserved inside the group
+    expect(g[1].gRows.map(r => r.id)).toEqual([5, 2]);
+  });
+});
+
 describe("otherScheduleMeetingBodies — schedName is the qualified label, never a bare (possibly ambiguous) name", () => {
   it("a site-owned schedule's schedName is crossScheduleLabel, not the bare name", () => {
     const data = { projects: { 1: { id: 1, name: "Master Schedule", ownerKind: "site", linkedSiteId: "s1", linkedSiteName: "Goose Creek", meetingBodies: [{ id: "b1", name: "X", recurrence: [] }] } } };
@@ -4509,8 +4550,9 @@ describe("B1873360/B1873361 — every cross-schedule display in MasterView/the s
     expect(src).toMatch(/projOwnerLabel: ownerLabel, projLabel, depth, isLeaf/);
   });
   it("'Group by project' groups via groupRowsByProject, keyed by projId", () => {
-    expect(src).toMatch(/return groupRowsByProject\(sortedRows\)\.flatMap\(\(\{projId, gRows, label\}\) => \[/);
-    expect(src).toMatch(/<tr key=\{`grp-\$\{projId\}`\}>/);
+    expect(src).toMatch(/groupRowsByProject\(sortedRows, projOrder\.ids\)/);
+    expect(src).toMatch(/return groupedRows\.flatMap\(\(\{projId, gRows, label, siteId, rank\}, gi\) => \{/);
+    expect(src).toMatch(/<tr key=\{`grp-\$\{projId\}`\} data-grp-site=/);
     // The old buggy shape keyed a plain object by the bare name (`groups[t.projName]`) — that
     // exact code construct is gone from the render path (it still appears once, in this fix's
     // own explanatory comment, which is why this isn't a blanket file-wide `not.toMatch`).

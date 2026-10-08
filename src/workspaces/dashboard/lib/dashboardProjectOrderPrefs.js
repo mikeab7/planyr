@@ -45,6 +45,20 @@ export async function loadProjectOrder(uid) {
   }
 }
 
+/* The order changed on THIS device (a save from the Dashboard card or the Task Report). The Schedule
+ * tab stays mounted behind other tabs, so a surface already on screen listens for this instead of
+ * waiting for a remount — that is what makes "reorder in either place changes both" hold live. */
+export const PROJECT_ORDER_EVENT = "planyr:project-order-changed";
+export function onProjectOrderChanged(fn) {
+  if (typeof window === "undefined") return () => {};
+  const h = (e) => fn(e && e.detail ? e.detail.order : null);
+  window.addEventListener(PROJECT_ORDER_EVENT, h);
+  return () => window.removeEventListener(PROJECT_ORDER_EVENT, h);
+}
+function announce(order) {
+  try { if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent(PROJECT_ORDER_EVENT, { detail: { order } })); } catch { /* no window */ }
+}
+
 let writeChain = Promise.resolve();
 
 /** Persist `order` ({ids, at}). Mirror first (instant; the signed-out home), then a fresh
@@ -53,6 +67,7 @@ export function saveProjectOrder(uid, order) {
   const next = normalizeProjectOrder(order);
   if (!next) return Promise.resolve({ ok: false, order: null, error: "invalid order" });
   writeMirror(next);
+  announce(next);
   if (!supabase || !uid) return Promise.resolve({ ok: true, order: next, local: true });
   const run = async () => {
     try {

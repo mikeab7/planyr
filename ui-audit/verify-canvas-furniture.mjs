@@ -63,6 +63,7 @@
  */
 import { chromium } from "playwright";
 import { mkdirSync, writeFileSync } from "node:fs";
+import { MAP_CORNER_PX } from "../src/workspaces/site-planner/lib/mapCorners.js";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { pacedWait } from "./lib/tabTiming.mjs";
 
@@ -155,10 +156,11 @@ try {
       const cursorInner = document.querySelector("[data-ground-el]");
       let cursorChip = cursorInner;
       while (cursorChip && !(cursorChip.style && cursorChip.style.position === "absolute")) cursorChip = cursorChip.parentElement;
-      const furnContainer = [...document.querySelectorAll('div[data-export="skip"]')].find((d) => d.children.length === 2 && d.style.zIndex === "400");
-      const plates = furnContainer ? [...furnContainer.children] : [];
-      const scaleBarWrap = plates.find((p) => p.style.right);
-      const northWrap = plates.find((p) => p.style.left);
+      // NEW-1/NEW-2 (B2206704–B2206706) — found by their own `data-map-furniture` stamp, not by "the 2-child z=400 container with a
+      // right/left style": desktop's scale bar now lives in the bottom-right corner group with the help control and the
+      // zoom stack, so the old structural guess describes a layout that no longer exists.
+      const scaleBarWrap = document.querySelector('[data-map-furniture="scale-bar"]');
+      const northWrap = document.querySelector('[data-map-furniture="north"]');
       // B914500 — the bottom-right zoom control column (+/−/fit, "gbtn" buttons; the report-slow
       // 4th button was folded into the global help/report control by B1231281) joins the
       // furniture-collision set.
@@ -265,8 +267,18 @@ try {
       const sbRow = paneBottom - data.scaleBar.b;
       const zoomRow = paneBottom - data.zoomStack.b; // the stack's own `bottom` CSS offset
       check(`${w} · desktop FURNITURE_ROW is still 40px`, Math.abs(northRow - 40) <= 2, `row=${northRow.toFixed(1)}px`);
-      check(`${w} · desktop scale-bar row matches the north-arrow row`, Math.abs(sbRow - northRow) <= 2, `sb row=${sbRow.toFixed(1)}px`);
-      check(`${w} · desktop zoom stack's un-clamped offset is still 100px`, Math.abs(zoomRow - 100) <= 2, `zoom row=${zoomRow.toFixed(1)}px`);
+      // NEW-2 (B2206704–B2206706) — the bottom-right corner group: scale bar · help · zoom stack share ONE baseline, MAP_CORNER_PX
+      // (12) off the pane's bottom and right edges. (Supersedes "scale bar on the north-arrow row" and "zoom stack 100px up",
+      // which pinned the floating arrangement the owner asked to bring down into the corner.)
+      check(`${w} · desktop scale bar sits in the bottom-right corner (${MAP_CORNER_PX}px from the bottom)`, Math.abs(sbRow - MAP_CORNER_PX) <= 2, `sb row=${sbRow.toFixed(1)}px`);
+      check(`${w} · desktop zoom stack sits on the same baseline as the scale bar`, Math.abs(zoomRow - sbRow) <= 1.5, `zoom row=${zoomRow.toFixed(1)}px, sb row=${sbRow.toFixed(1)}px`);
+      const paneRight = svgBox.x + svgBox.width;
+      check(`${w} · desktop zoom stack is ${MAP_CORNER_PX}px from the pane's right edge`, Math.abs(paneRight - data.zoomStack.r - MAP_CORNER_PX) <= 2, `gap=${(paneRight - data.zoomStack.r).toFixed(1)}px`);
+      if (data.helpFab && data.helpDocked) {
+        check(`${w} · desktop help button shares that baseline`, Math.abs((paneBottom - data.helpFab.b) - sbRow) <= 1.5, `help bottom gap=${(paneBottom - data.helpFab.b).toFixed(1)}px`);
+        const order = data.scaleBar.r <= data.helpFab.l + 1 && data.helpFab.r <= data.zoomStack.l + 1;
+        check(`${w} · desktop order is scale bar · help · zoom, left to right, without overlap`, order, `sb.r=${data.scaleBar.r.toFixed(1)} help=${data.helpFab.l.toFixed(1)}…${data.helpFab.r.toFixed(1)} zoom.l=${data.zoomStack.l.toFixed(1)}`);
+      }
       const zoomBtnH = data.zoomStack.h / 3;
       check(`${w} · desktop zoom buttons are still 30×30 (CONTROL_H.lg, fine pointer)`, Math.abs(zoomBtnH - 30) <= 1, `btnH=${zoomBtnH.toFixed(1)}px`);
     }
