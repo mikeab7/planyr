@@ -25,7 +25,7 @@ import { OSM_MIN_ZOOM, MAPILLARY_MIN_ZOOM, SOIL_BEDROCK_MIN_ZOOM } from "./layer
 const PIPELINE_VECTOR_MIN_ZOOM = 13;
 import { loadTerrain } from "./terrainLazy.js";
 import {
-  isTransientStatus, dynamicLayerOptions, imageLayerOptions, featureLayerOptions, featureRetryDecision,
+  isTransientStatus, dynamicLayerOptions, imageLayerOptions, featureLayerOptions, featureBaseStyle, featureRetryDecision,
   wireRasterStatus, RASTER_STALL_MS, pointSymbolOptions, identifyCapable,
 } from "./layerRequest.js";
 import { cachedVectorLayer, cachedPipelineLayer, cachedCorridorLayer, isPointFeature } from "./vectorOverlay.js";
@@ -33,7 +33,7 @@ import { cachedVectorLayer, cachedPipelineLayer, cachedCorridorLayer, isPointFea
 // why the rest of the hover engine is deferred.
 const hoverIdentifyEnabled = (cfg) => !!(cfg && cfg.hoverIdentify);
 import { installDefaultMarkerIcon, pointToLayerFor } from "./mapSymbols.js";
-import { PIPELINE_LEGEND } from "./pipelineCommodity.js";
+import { PIPELINE_LEGEND, commodityBucketRecord } from "./pipelineCommodity.js";
 import { DEFAULT_CORRIDOR_WIDTH_FT } from "./pipelineCorridor.js";
 import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
 // NEW-2 — the baked-flood-tile DECISION only (pure, a few hundred bytes). The renderer and the
@@ -137,10 +137,19 @@ function reportCacheAge(lyr, k, onStatus) {
  * Texas", exactly like every other out-of-state row). The URL comes from the registry — never inline. */
 const EIA_APPROX_INFO = "Approximate — major transmission lines only. No local gas mains or gathering lines, and geometry can be miles off.";
 const EIA_APPROX_CAVEAT = "Not a survey and not complete. Confirm with the title commitment (easements), an ALTA survey and an 811 locate — Sunshine 811 in Florida, Georgia 811 in Georgia.";
-const eiaPipelineRow = (regKey, { label, color, order, title }) => ({
+/* NEW-2 — each EIA line is drawn in the SAME commodity class the Texas RRC layer uses for that product
+ * (pipelineCommodity.js: colour, dash and weight — natural gas amber, refined/petroleum green dashed, crude
+ * violet, gas liquids red), so one product reads as one colour in every state, and none is a hydrography or
+ * flood blue. Solid strokes at the hierarchy's constraint ceiling (0.85, weight 3): the commodity is told apart by colour + dash, never by fading.
+ * `styleFn` (not a flat colour) so an opacity change re-derives the WHOLE style rather than a bare `{opacity}`. */
+const eiaPipelineRow = (regKey, { label, bucket, order, title }) => {
+  const b = commodityBucketRecord(bucket);
+  const w = Math.min(b.weight, 3); // the layer hierarchy caps a constraint line at 3 (the HVL class is 4 on the Texas layer)
+  return {
   kind: "esriFeature", label,
   source: "US EIA (via Esri U.S. Federal Datasets)",
-  url: GIS_SOURCES[regKey].serviceUrl, minZoom: 9, color, weight: 2.2, opacity: 0.8,
+  url: GIS_SOURCES[regKey].serviceUrl, minZoom: 9, color: b.color, weight: w, opacity: 0.85,
+  styleFn: (_props, opacity) => ({ color: b.color, weight: w, dashArray: b.dash || null, opacity, fill: false }),
   hoverIdentify: true, canvasIdentify: true, hoverTitle: title + " (approximate)", hoverSource: "US EIA",
   hoverFields: [{ names: ["Pipename", "PIPENAME"] }, { names: ["Operator", "Opername", "OPERATOR"] }],
   sublabel: EIA_APPROX_INFO,
@@ -152,7 +161,8 @@ const eiaPipelineRow = (regKey, { label, color, order, title }) => ({
   role: "line",
   states: ["FL", "GA"],
   group: "environmental", order,
-});
+  };
+};
 
 
 export const STATEWIDE = {
@@ -285,10 +295,10 @@ export const STATEWIDE = {
     states: ["TX"],
     group: "environmental", order: 4,
   },
-  eia_gas: eiaPipelineRow("eiaGas", { label: "Gas pipelines (approx.)", title: "Natural gas pipeline", color: "#c2410c", order: 8 }),
-  eia_petroleum: eiaPipelineRow("eiaPetroleum", { label: "Petroleum product pipelines (approx.)", title: "Petroleum product pipeline", color: "#a16207", order: 9 }),
-  eia_crude: eiaPipelineRow("eiaCrude", { label: "Crude oil pipelines (approx.)", title: "Crude oil pipeline", color: "#7c2d12", order: 10 }),
-  eia_hgl: eiaPipelineRow("eiaHgl", { label: "Gas liquids pipelines (approx.)", title: "Hydrocarbon gas liquids pipeline", color: "#be185d", order: 11 }),
+  eia_gas: eiaPipelineRow("eiaGas", { label: "Gas pipelines (approx.)", title: "Natural gas pipeline", bucket: "gas", order: 8 }),
+  eia_petroleum: eiaPipelineRow("eiaPetroleum", { label: "Petroleum product pipelines (approx.)", title: "Petroleum product pipeline", bucket: "refined", order: 9 }),
+  eia_crude: eiaPipelineRow("eiaCrude", { label: "Crude oil pipelines (approx.)", title: "Crude oil pipeline", bucket: "crude", order: 10 }),
+  eia_hgl: eiaPipelineRow("eiaHgl", { label: "Gas liquids pipelines (approx.)", title: "Hydrocarbon gas liquids pipeline", bucket: "hvl", order: 11 }),
   ccn_service: {
     // Public-data screening PHASE 1 — water & sewer CCN service areas ("who holds the
     // certificate to serve this site"). The Site Analysis Water/Sewer CCN cards drive this
@@ -1856,7 +1866,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
             // disc symbology and everything else keeps the stroke-only behaviour.
             lyr.setOpacity = typeof cfg.styleFn === "function"
               ? (oo) => { try { const sf = (f) => cfg.styleFn(f && f.properties, oo); lyr._originalStyle = sf; lyr.setStyle(sf); } catch (_) {} }
-              : (oo) => { try { lyr.setStyle((f) => (isPointFeature(f) ? pointSymbolOptions(cfg, oo) : { opacity: oo })); } catch (_) {} };
+              : (oo) => { try { lyr.setStyle((f) => (isPointFeature(f) ? pointSymbolOptions(cfg, oo) : featureBaseStyle(cfg, oo))); } catch (_) {} };
             // FeatureServer GeoJSON queries get retry/backoff (NEW-5/B287): esri-leaflet
             // won't retry its own request, so a transient 5xx/blip on City ETJ or County
             // boundaries would otherwise drop the layer on a single hiccup.
