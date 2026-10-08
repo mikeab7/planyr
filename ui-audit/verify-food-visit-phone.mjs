@@ -12,7 +12,7 @@
  * dev server — logged out, no Supabase, no real data.
  * Usage: npx vite --port 5199 & ; node ui-audit/verify-food-visit-phone.mjs [baseUrl]   (exit 1 on any FAIL)
  */
-import { webkit, devices } from "playwright";
+import { webkit, chromium, devices } from "playwright";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const BASE = process.argv[2] || "http://localhost:5199";
@@ -169,6 +169,77 @@ try {
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);
     check("5i desktop has no horizontal overflow", !overflow);
     await ctx.close();
+  });
+
+  // ── 6. ROTATING THE PHONE keeps what was typed (V1476080 step 6 — measured LIVE on planyr.io 2026-10-08, iPhone 15 + SE) ──────────
+  //    Turning the phone swaps the card's parent (BottomSheet <-> SideDock), which remounts the form: before lib/draftStore.js every
+  //    field came back empty. KNOWN-GOOD ARM: the card must REALLY have changed parent (sheet gone, side panel there) or the run is VOID.
+  await section(async () => {
+    const { ctx, page, errs } = await open(browser, FIX);
+    await tap(page, '[data-testid="food-log-visit-btn"]');
+    await page.waitForTimeout(400);
+    await page.locator('[data-testid="visit-dish-name"]').first().fill("Brisket plate");
+    await page.locator('[data-testid="visit-cost-input"]').fill("12.50");
+    await page.locator('[data-testid="visit-notes-input"]').fill("great smoke ring");
+    await page.locator('[data-testid="rating-slider"]').first().fill("7");
+    const vals = () => page.evaluate(() => ({
+      dish: document.querySelector('[data-testid="visit-dish-name"]')?.value, cost: document.querySelector('[data-testid="visit-cost-input"]')?.value,
+      notes: document.querySelector('[data-testid="visit-notes-input"]')?.value, food: document.querySelector('[data-testid="rating-slider"]')?.value,
+      sheet: !!document.querySelector('[data-testid="food-bottom-sheet"]'), side: !!document.querySelector('[data-testid="food-visit-panel"]'),
+    }));
+    const vp = page.viewportSize();
+    await page.setViewportSize({ width: vp.height, height: vp.width });
+    await page.waitForTimeout(1500);
+    const land = await vals();
+    check("6a known-good — rotating really swapped the card's parent (bottom sheet gone, side panel there)", !land.sheet && land.side, JSON.stringify({ sheet: land.sheet, side: land.side }));
+    check("6b dish name, cost, notes and the Food rating typed before rotating are still there after rotating", land.dish === "Brisket plate" && land.cost === "12.50" && land.notes === "great smoke ring" && land.food === "7", JSON.stringify(land));
+    await page.setViewportSize(vp);
+    await page.waitForTimeout(1500);
+    const back = await vals();
+    check("6c …and still there after rotating back", back.sheet && back.dish === "Brisket plate" && back.cost === "12.50" && back.notes === "great smoke ring" && back.food === "7", JSON.stringify(back));
+    await page.locator("form button", { hasText: /^Cancel$/ }).first().tap();
+    await page.waitForTimeout(500);
+    await tap(page, '[data-testid="food-log-visit-btn"]');
+    await page.waitForTimeout(500);
+    const fresh = await vals();
+    check("6d an explicit Cancel then re-opening starts blank (a draft never outlives a Cancel)", fresh.dish === "" && fresh.cost === "" && fresh.notes === "", JSON.stringify(fresh));
+    check("6e no page errors", errs.length === 0, errs.join(" | "));
+    await ctx.close();
+  });
+
+  // ── 7. A VERTICAL SWIPE THAT STARTS ON A RATING SLIDER SCROLLS THE CARD AND LEAVES THE RATING ALONE (V1476080 step 3) ─────────────────
+  //    Engine: CHROMIUM with the iPhone 15 descriptor and real touch events through CDP (WebKit has no touch-swipe primitive — docs/PHONE-TESTING.md),
+  //    so this proves the guard in Chromium's touch pipeline; what iOS Safari does is a real-finger step. KNOWN-GOOD ARMS: a HORIZONTAL touch
+  //    drag over the same slider must still change it, and the card must really scroll under the vertical swipe (else the arm is VOID).
+  await section(async () => {
+    const cb = await chromium.launch({ executablePath: process.env.PW_CHROME || "/opt/pw-browsers/chromium", args: ["--no-sandbox"] });
+    try {
+      for (const [label, sel] of [["dish score slider", '[data-testid="visit-dishes"] [data-testid="dish-score-slider"]'], ["Food rating slider", 'form [data-testid="rating-slider"]']]) {
+        for (const [from, frac] of [["mid-track", 0.5], ["left end", 0.1]]) {
+          const ctx = await cb.newContext({ ...devices["iPhone 15"], ignoreHTTPSErrors: true });
+          const page = await ctx.newPage(); page.setDefaultTimeout(5000);
+          await page.goto(FIX, { waitUntil: "domcontentloaded" });
+          await page.waitForSelector('[data-testid="food-log-visit-btn"]', { timeout: 15000 });
+          await page.locator('[data-testid="food-log-visit-btn"]').tap(); await page.waitForTimeout(600);
+          const slider = page.locator(sel).first();
+          await slider.evaluate((el) => el.scrollIntoView({ block: "center" })); await page.waitForTimeout(500);
+          const cdp = await ctx.newCDPSession(page);
+          const touch = async (pts) => { await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [pts[0]] }); for (const p of pts.slice(1, -1)) { await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [p] }); await page.waitForTimeout(16); } await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [pts[pts.length - 1]] }); await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] }); await page.waitForTimeout(500); };
+          const geom = () => slider.evaluate((el) => { const r = el.getBoundingClientRect(); let n = el.parentElement, sc = null; while (n) { const o = getComputedStyle(n).overflowY; if ((o === "auto" || o === "scroll") && n.scrollHeight > n.clientHeight + 2) { sc = n; break; } n = n.parentElement; } return { left: r.left, width: r.width, y: r.top + r.height / 2, value: el.value, st: sc ? sc.scrollTop : null }; });
+          let g = await geom();
+          await touch(Array.from({ length: 10 }, (_, i) => ({ x: g.left + g.width * (0.2 + 0.06 * i), y: g.y, id: 1 })));
+          const afterDrag = await geom();
+          check(`7 known-good (${label}, ${from}) — a HORIZONTAL touch drag over the slider still changes it`, afterDrag.value !== g.value, `${g.value} → ${afterDrag.value}`);
+          await slider.evaluate((el) => el.scrollIntoView({ block: "center" })); await page.waitForTimeout(400);
+          const a = await geom();
+          await touch(Array.from({ length: 10 }, (_, i) => ({ x: a.left + a.width * frac, y: a.y - 12 * i, id: 1 })));
+          const z = await geom();
+          check(`7 known-good (${label}, ${from}) — the card really scrolled under the vertical swipe`, a.st != null && z.st !== a.st, `scrollTop ${a.st} → ${z.st}`);
+          check(`7 ${label}: a vertical swipe that starts ${from} on the slider does not change the rating`, z.value === a.value, `value ${a.value} → ${z.value}`);
+          await ctx.close();
+        }
+      }
+    } finally { await cb.close(); }
   });
 } finally {
   await browser.close();
