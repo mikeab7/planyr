@@ -120,7 +120,10 @@ async function openLive(phone, mode, { signedIn = true, route }) {
   // picture (it flipped the known-answer arm under parallel network load) — so wait for the app's own armed flag.
   await page.waitForFunction(() => window.__PLANYR_PAGE_CONTAINMENT_GUARD_INSTALLED === true, null, { timeout: 45000 }).catch(() => { throw new Error("the page-containment guard never armed on the live page — scoring now would measure the wrong thing"); });
   if (signedIn) {
-    const proof = await proveSignedIn(page);
+    // getUser() is a network call that can come back empty once under live load (seen 2026-10-08 with the fixture row
+    // visible, i.e. signed in) — ask again rather than void the surface; still BOTH halves of the proof are required
+    let proof = null;
+    for (let i = 0; i < 3; i++) { proof = await proveSignedIn(page); if (proof.email === TEST_ACCOUNT_EMAIL && proof.fixtureVisible) break; await page.waitForTimeout(1000); }
     if (proof.email !== TEST_ACCOUNT_EMAIL || !proof.fixtureVisible) throw new Error("live surface not provably signed in — " + JSON.stringify(proof));
   }
   // carry the LATEST tokens forward (the client may have rotated the refresh token), so the next surface needs no sign-in
