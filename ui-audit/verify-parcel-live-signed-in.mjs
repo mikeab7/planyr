@@ -37,9 +37,7 @@ console.log(`signed in as ${s.proof.email} · /version.json build ${JSON.stringi
 
 await page.goto(BASE + "/?planyrDiag=1#/site", { waitUntil: "domcontentloaded" });
 await page.waitForTimeout(2500);
-const row = page.locator('div[title*="Open site"]').first();
-await row.hover();
-await row.locator('[aria-label="Show on map"]').click();
+// The dashboard Map is the default view of #/site — no site is opened, so no project row is touched.
 await page.waitForFunction(() => !!window.__mapFinderMap, null, { timeout: 30000 });
 
 // Build identity, read in the same call as whatever it vouches for.
