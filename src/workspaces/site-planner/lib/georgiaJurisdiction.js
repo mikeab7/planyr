@@ -66,3 +66,9 @@ export const GA_DETENTION_DETAIL =
   "stormwater manual (many follow the Georgia Stormwater Management Manual), so there is no honest way to convert " +
   "a Texas number. Nothing is shown rather than something wrong. Size detention with your engineer against the " +
   "reviewing jurisdiction's manual.";
+
+/* The badge hover's "Source:" line. It used to be one hard-coded Texas string on every site (found live on a Georgia site:
+ * "TxDOT / TxGIO / county & city ETJ publishers" — Texas publishers, and the word ETJ, on a state that has neither). */
+export const GA_JURISDICTION_SOURCE_NAME = "Georgia DCA (county + municipal boundaries)";
+export const TX_JURISDICTION_SOURCE_NAME = "TxDOT / TxGIO / county & city ETJ publishers";
+export const jurisdictionSourceName = (state) => (state === "GA" ? GA_JURISDICTION_SOURCE_NAME : TX_JURISDICTION_SOURCE_NAME);

@@ -10,6 +10,7 @@
  * row in food_places — that table is service-role-write-only by design.
  */
 import { supabase, supabaseConfigured } from "./supabaseClient.js";
+import { manualGroupKey, manualPinKey } from "./pinKeys.js";
 
 export { supabaseConfigured };
 
@@ -180,20 +181,9 @@ export async function deleteVisit(id) {
   return { error };
 }
 
-/** The identity key a manual pin (place_id null) groups under — (name, rounded lat/lon), 4dp
- *  (~11m) so two presses a few feet apart still count as "the same taco truck." Shared between
- *  manualPinsFromVisits (visits) and manualWishlistFromRows (want-to-try flags, B669312) so a
- *  manual pin resolves to the SAME key regardless of which table it came from — that's what lets
- *  FoodApp tell a flagged-but-unvisited manual pin apart from an already-visited one. */
-export function manualGroupKey(name, lat, lon) {
-  return `${name}|${Number(lat).toFixed(4)}|${Number(lon).toFixed(4)}`;
-}
-
-/** B1953796 (R5) — the ONE selection/row key for a manual pin (name + rounded lat/lon), used by the
- *  map, the list row highlight and the panel, so two different "Taco Stand" pins never merge. */
-export function manualPinKey(name, lat, lon) {
-  return `pin:${manualGroupKey(name, lat, lon)}`;
-}
+// The manual-pin identity keys live in lib/pinKeys.js (pure, no Supabase) so the restaurant-lists logic
+// shares the same functions; re-exported here so every existing import is unchanged.
+export { manualGroupKey, manualPinKey };
 
 /** Manual pins, derived from the visit log rather than stored separately: every distinct
  *  (custom_name, rounded custom_lat/lon) among the user's place_id-null visits is one pin,
@@ -407,5 +397,71 @@ export async function updateDish(id, patch) {
 export async function deleteDish(id) {
   if (!supabase) return { error: new Error("Supabase not configured") };
   const { error } = await supabase.from("food_dishes").delete().eq("id", id);
+  return { error };
+}
+
+/** ── Named restaurant lists (NEW-1 / B2088288) ───────────────────────────────────────────
+ *  food_lists + food_list_items (db/food_lists.sql): a user-named GROUPING of places ("Lunch @ Work"),
+ *  orthogonal to status — "been" is still food_visits, "want to try" is still food_wishlist, and
+ *  nothing here is a status. A small personal pair of tables fetched in full, exactly like the
+ *  wishlist; the membership logic itself (identity collapse, name uniqueness, status derivation) is
+ *  the pure lib/foodLists.js, which has no Supabase import. Every write returns { data, error } so
+ *  the UI can say so out loud (LOUD-FAILURE). Deleting a list cascades to ITS item rows only (the FK
+ *  is on list_id) — never a visit, dish, rating or wishlist row. */
+
+export async function fetchAllLists() {
+  if (!supabase) return { data: [], error: null };
+  const { data, error } = await supabase.from("food_lists").select("*").order("position", { ascending: true }).order("created_at", { ascending: true });
+  return { data: data || [], error };
+}
+
+export async function fetchAllListItems() {
+  if (!supabase) return { data: [], error: null };
+  const { data, error } = await supabase.from("food_list_items").select("*").order("created_at", { ascending: true });
+  return { data: data || [], error };
+}
+
+async function signedInUserId(message) {
+  const { data: auth } = await supabase.auth.getUser();
+  const uid = auth?.user?.id;
+  return uid ? { uid } : { error: new Error(message) };
+}
+
+export async function createList({ name, color, position }) {
+  if (!supabase) return { data: null, error: new Error("Supabase not configured") };
+  const { uid, error: authErr } = await signedInUserId("Sign in to make a list");
+  if (authErr) return { data: null, error: authErr };
+  const { data, error } = await supabase.from("food_lists").insert({ user_id: uid, name, color, position: position ?? 0 }).select().single();
+  return { data, error };
+}
+
+/** Rename and/or recolour in place — `patch` is { name } and/or { color }. */
+export async function updateList(id, patch) {
+  if (!supabase) return { error: new Error("Supabase not configured") };
+  const { error } = await supabase.from("food_lists").update(patch).eq("id", id);
+  return { error };
+}
+
+/** Removes the list and (by the list_id cascade) its item rows — nothing else. */
+export async function deleteList(id) {
+  if (!supabase) return { error: new Error("Supabase not configured") };
+  const { error } = await supabase.from("food_lists").delete().eq("id", id);
+  return { error };
+}
+
+/** `identity` is { place_id } or { custom_name, custom_lat, custom_lon } — the same two shapes
+ *  canonicalIdentity returns and food_wishlist stores. */
+export async function addListItem(listId, identity, position = 0) {
+  if (!supabase) return { data: null, error: new Error("Supabase not configured") };
+  const { uid, error: authErr } = await signedInUserId("Sign in to use lists");
+  if (authErr) return { data: null, error: authErr };
+  const { data, error } = await supabase.from("food_list_items").insert({ ...identity, list_id: listId, user_id: uid, position }).select().single();
+  return { data, error };
+}
+
+/** Deletes exactly one membership row — never the place, its visits, or its wishlist flag. */
+export async function removeListItem(id) {
+  if (!supabase) return { error: new Error("Supabase not configured") };
+  const { error } = await supabase.from("food_list_items").delete().eq("id", id);
   return { error };
 }
