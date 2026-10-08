@@ -58,7 +58,8 @@ export function makeFixture({ variant = "plain", aburi = false } = {}) {
       created_at: "2026-09-20T12:00:00Z", updated_at: "2026-09-20T12:00:00Z",
     });
   }
-  return { places, visits, writes: [], manualName };
+  // lists / listItems / wishlist (NEW-1 / B2088288): in-memory, stateful, so a harness can drive the real list UI.
+  return { places, visits, writes: [], manualName, lists: [], listItems: [], wishlist: [] };
 }
 
 export async function installFixture(page, state, { e2e = true } = {}) {
@@ -104,7 +105,37 @@ export async function installFixture(page, state, { e2e = true } = {}) {
       state.writes.push({ method: req.method(), table: "food_visits", body: req.postData() });
       return json([]);
     }
-    if (path.startsWith("/rest/v1/")) return json([]); // wishlist, dishes, dish wishlist: empty
+    // Named restaurant lists + the want-to-try flag: a tiny stateful PostgREST (id=eq.<id> filters, unique list name,
+    // composite-owner FK and ON DELETE CASCADE modelled the way db/food_lists.sql defines them).
+    const LIST_TABLES = { "/rest/v1/food_lists": "lists", "/rest/v1/food_list_items": "listItems", "/rest/v1/food_wishlist": "wishlist" };
+    if (LIST_TABLES[path]) {
+      const key = LIST_TABLES[path];
+      state[key] = state[key] || [];
+      const idEq = (u.searchParams.get("id") || "").replace(/^eq\./, "");
+      if (req.method() === "GET") return json(state[key]);
+      const body = req.postData() ? JSON.parse(req.postData()) : {};
+      if (req.method() === "POST") {
+        const row = { id: `00000000-0000-4000-9000-${String(Date.now() % 1e9).padStart(9, "0")}${String((state._seq = (state._seq || 0) + 1)).padStart(3, "0")}`, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), ...body };
+        if (key === "lists" && state.lists.some((l) => l.name.trim().toLowerCase() === String(row.name).trim().toLowerCase())) {
+          return json({ code: "23505", message: 'duplicate key value violates unique constraint "food_lists_user_name_uidx"' }, 409);
+        }
+        state[key] = [...state[key], row];
+        state.writes.push({ method: "POST", table: path.split("/").pop(), body });
+        return json(row, 201);
+      }
+      if (req.method() === "PATCH") {
+        state[key] = state[key].map((r) => (r.id === idEq ? { ...r, ...body, updated_at: new Date().toISOString() } : r));
+        state.writes.push({ method: "PATCH", table: path.split("/").pop(), body });
+        return json([]);
+      }
+      if (req.method() === "DELETE") {
+        state[key] = state[key].filter((r) => r.id !== idEq);
+        if (key === "lists") state.listItems = (state.listItems || []).filter((i) => i.list_id !== idEq); // cascade on list_id ONLY
+        state.writes.push({ method: "DELETE", table: path.split("/").pop(), id: idEq });
+        return json([]);
+      }
+    }
+    if (path.startsWith("/rest/v1/")) return json([]); // dishes, dish wishlist: empty
     return json({});
   });
 }

@@ -2635,6 +2635,21 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     });
   };
 
+  /* The Map view's own chip over a selected lot (the acreage chip, "10.78 AC") is the one piece of chrome that sits
+   * where a lot's number wants to be — the number's interior fit knows the lot, not the chip (V1475200 step 8, found
+   * live on production 2026-10-08: the chip printed straight over the account). The lot-number layout takes screen
+   * boxes it must clear (the same pre-committed-box mechanism the Site planner's parcel chips use); this hands it the
+   * chip's, in map-container pixels, a few pixels fatter than the chip so a number never kisses it. */
+  const lotNumberObstacles = () => {
+    const map = mapRef.current, chip = acreChipRef.current && acreChipRef.current._icon;
+    if (!map || !chip) return [];
+    const el = chip.firstElementChild || chip;
+    const r = el.getBoundingClientRect(), c = map.getContainer().getBoundingClientRect();
+    if (!(r.width > 0)) return [];
+    const PAD = 6;
+    return [{ x: r.left - c.left - PAD, y: r.top - c.top - PAD, w: r.width + 2 * PAD, h: r.height + 2 * PAD }];
+  };
+
   /* B1164656 (NEW-1/NEW-2) — swap a county's on-map display to its Drive PARCEL SNAPSHOT (B629),
    * replacing whatever's there now. The one entry point `addDisplay`'s always-preferred branch AND
    * `markDown`'s outage fallback below both call, so "the map is showing the cache" has exactly one
@@ -2645,7 +2660,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     const cur = displaysRef.current[key];
     if (cur && cur._isSnapshot) return;
     if (cur) removeDisplay(key);
-    const snapLayer = makeSnapshotLayer(key);
+    const snapLayer = makeSnapshotLayer(key, { getObstacles: lotNumberObstacles });
     snapLayer.addTo(map);
     displaysRef.current[key] = snapLayer;
   };
@@ -2709,7 +2724,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     // also backs the instant click highlight while close-in. What you SEE stays == what you
     // can SELECT (the B137 rule) in every regime: the click path (queryAtPoint) always
     // identifies via a live point query, never against what happened to be drawn.
-    const fl = makeParcelDisplayLayer(url);
+    const fl = makeParcelDisplayLayer(url, { getObstacles: lotNumberObstacles });
     // B1427664 — NEW-3: `fl.addTo(map)` is deferred to the END of this function, after every
     // listener below is wired. `onAdd` (fired synchronously inside `addTo`) is what actually
     // KICKS OFF this layer's first request — a vector FeatureLayer's own metadata fetch fires
@@ -3798,6 +3813,11 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
    * plan on, so the chip marks the spot the verb is about.
    * (Also corrected 2026-09-08 from the retired "Track as site" label — see the block above.) */
   const acreChipRef = useRef(null);
+  // The chip came, moved or went: every on-map lot-number layer re-lays out around it (one rAF so the chip's DOM box exists).
+  const relayoutLotNumbers = () => {
+    const go = () => Object.values(displaysRef.current).forEach((l) => { try { l && l._lotNumbers && l._lotNumbers.relayout(); } catch (_) { /* a layer mid-teardown */ } });
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(go); else go();
+  };
   const acreChipKey = asm ? `${asm.totalAc.toFixed(2)}|${asm.origin.lat.toFixed(6)}|${asm.origin.lon.toFixed(6)}` : "";
   useEffect(() => {
     const map = mapRef.current;
@@ -3805,7 +3825,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       try { map && map.removeLayer(acreChipRef.current); } catch (_) { /* map already torn down */ }
       acreChipRef.current = null;
     }
-    if (!map || !acreChipKey) return undefined;
+    if (!map || !acreChipKey) { relayoutLotNumbers(); return undefined; }
     const [ac, lat, lon] = acreChipKey.split("|");
     const html = `<div data-testid="map-acreage-chip" style="`
       + `display:inline-block;white-space:nowrap;transform:translate(-50%,-50%);`
@@ -3819,6 +3839,7 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
     });
     marker.addTo(map);
     acreChipRef.current = marker;
+    relayoutLotNumbers();
     return undefined;
   }, [acreChipKey]);
 
