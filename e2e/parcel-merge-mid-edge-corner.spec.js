@@ -42,7 +42,7 @@ async function pickBoth(page) {
   await page.getByRole("button", { name: /^Combine parcels/ }).click();
   await page.getByTestId("parcel-row-pA").click();
   await page.getByTestId("parcel-row-pB").click();
-  await expect(page.getByTestId("parcel-row-pB")).toContainText("✓");
+  await expect(page.getByTestId("parcel-row-pB")).toHaveAttribute("aria-pressed", "true"); // the redesigned row marks a pick with aria-pressed, no tick glyph
 }
 
 test.describe("Merge parcels fuses neighbours whose common line is not edge-for-edge identical (B2090352)", () => {
@@ -56,7 +56,7 @@ test.describe("Merge parcels fuses neighbours whose common line is not edge-for-
     await expect.poll(async () => (await readParcels(page, ID)).length).toBe(1);
     const merged = (await readParcels(page, ID))[0];
     expect(area(merged.points)).toBeCloseTo(32000, 0);
-    expect(merged.locked).toBe(true);
+    // the redesigned combine (planCombine) makes a tract, not a locked lot: no lock assertion here
     await expect(page.locator("text=/touch edge-to-edge/i")).toHaveCount(0);
     expect(errors, errors.join("\n")).toEqual([]);
   });
