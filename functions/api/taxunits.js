@@ -8,7 +8,8 @@
  * `complete:false` with the reason they are not wired — see the B2158065 ledger entry for each county's blocker.
  * Results are cached at the edge (a complete answer for a week; a "not yet" answer for an hour).
  */
-import { lookupHarris } from "./lib/hcadUnits.js";
+import { lookupHarris, hcadZipUrl, findAccountRows } from "./lib/hcadUnits.js";
+import { remoteZipEntries } from "./lib/zipRange.js";
 import { normalizeCounty } from "./taxrates.js";
 
 const COUNTIES = { harris: { acct: /^\d{13}$/, lookup: lookupHarris } };
@@ -26,6 +27,18 @@ export async function onRequestGet(context) {
     const cfg = COUNTIES[county];
     if (!cfg) return json({ county, acct, complete: false, reason: "per-account taxing units are not available for this county yet" });
     if (!cfg.acct.test(acct)) return json({ county, acct, complete: false, reason: "not a valid account number for this county" });
+
+    // Diagnostics (read-only): which stage of the lookup a failing environment dies in — Cloudflare's 1102 is
+    // an uncatchable platform kill, so each stage is separately callable. ?stage=dir | rows
+    const stage = url.searchParams.get("stage");
+    if (stage && county === "harris") {
+      const t0 = Date.now();
+      const zu = hcadZipUrl(Number(url.searchParams.get("year")) || new Date().getUTCFullYear() - 1);
+      const entries = await remoteZipEntries(zu);
+      if (stage === "dir") return json({ stage, ms: Date.now() - t0, entries: entries && Object.keys(entries) });
+      const rows = await findAccountRows(zu, entries["jur_value.txt"], acct, fetch);
+      return json({ stage, ms: Date.now() - t0, rows: rows.length });
+    }
 
     const cache = caches.default;
     const key = new Request(`${url.origin}${url.pathname}?county=${county}&acct=${acct}`, { method: "GET" });
