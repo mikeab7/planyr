@@ -36,27 +36,3 @@ describe("siteAcres cache", () => {
     expect(siteAcres(site([]))).toBe(0);
   });
 });
-
-describe("names.js summaries cache (planNameOf)", () => {
-  it("serves repeat reads from one parse, and is never stale after a write + the list-moved signal OR a raw change", async () => {
-    const store = new Map();
-    let reads = 0;
-    globalThis.localStorage = { getItem: (k) => { reads++; return store.has(k) ? store.get(k) : null; }, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
-    const key = "planarfit:sites:v1";
-    const rec = (name) => JSON.stringify({ s1: { id: "s1", groupId: "g1", site: "Proj", name, updatedAt: 1 } });
-    store.set(key, rec("Concept A"));
-    const names = await import("../src/shared/names/names.js");
-    names.invalidateNameIndex();
-    expect(names.planNameOf("s1")).toBe("Concept A");
-    const parsesBefore = reads;
-    for (let i = 0; i < 50; i++) names.planNameOf("s1");
-    expect(reads).toBe(parsesBefore);                         // 50 snapshot reads, zero extra store reads
-    store.set(key, rec("Concept B"));                          // a writer that fires the signal
-    names.invalidateNameIndex();
-    expect(names.planNameOf("s1")).toBe("Concept B");
-    store.set(key, rec("Concept C"));                          // a writer that never fires it: TTL backstop catches it by raw text
-    const realNow = Date.now; Date.now = () => realNow() + 5000;
-    try { expect(names.planNameOf("s1")).toBe("Concept C"); } finally { Date.now = realNow; }
-    delete globalThis.localStorage;
-  });
-});

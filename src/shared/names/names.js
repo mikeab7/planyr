@@ -11,7 +11,7 @@
  * another tab, another device's pull) reaches every mounted reader with no second mechanism.
  */
 import { useSyncExternalStore } from "react";
-import { loadSiteSummaries, sitesRawSnapshot } from "../../workspaces/site-planner/lib/siteListLight.js";
+import { loadSiteSummaries } from "../../workspaces/site-planner/lib/siteListLight.js";
 import { onProjectsChanged, renameProject } from "../projects/projects.js";
 import {
   validateName, resolveProjectName, setPendingProjectName, clearPendingProjectName,
@@ -39,26 +39,7 @@ let nameIndex = null;
 let planIndex = null;
 let nameIndexAt = 0;
 const INDEX_TTL_MS = 2000;
-/* NEW-1 (Silvestri zoom freeze) — the reconciled summary LIST is cached on the same signal + TTL as the index
- * above. `planNameOf` used to call `loadSiteSummaries()` (a JSON.parse of the WHOLE on-device plan store, plus a
- * name reconcile) from a `useSyncExternalStore` getSnapshot, which React calls on every render — so every
- * render of anything showing a plan name re-parsed every saved plan. Measured: ~40% of a zoom step with ~90 saved
- * plans. One parse per list change (or per TTL, the backstop for a writer that never fires the signal). */
-let summaries = null;
-let summariesAt = 0;
-let summariesRaw = null;
-function cachedSummaries() {
-  const now = Date.now();
-  if (summaries && now - summariesAt < INDEX_TTL_MS) return summaries;
-  // TTL backstop: the stored text is unchanged → the parsed answer is too; skip the re-parse.
-  const raw = sitesRawSnapshot();
-  if (summaries && raw !== null && raw === summariesRaw) { summariesAt = now; return summaries; }
-  summaries = loadSiteSummaries();
-  summariesAt = now;
-  summariesRaw = raw;
-  return summaries;
-}
-export function invalidateNameIndex() { nameIndex = null; planIndex = null; summaries = null; summariesRaw = null; }
+export function invalidateNameIndex() { nameIndex = null; planIndex = null; }
 if (typeof window !== "undefined") onProjectsChanged(invalidateNameIndex);
 function refreshNameIndexes() {
   const now = Date.now();
@@ -66,7 +47,7 @@ function refreshNameIndexes() {
   const idx = {};
   const pidx = {};
   try {
-    for (const r of cachedSummaries()) {
+    for (const r of loadSiteSummaries()) {
       const g = groupOfRec(r);
       if (g && !idx[g] && (r.site || r.name)) idx[g] = r.site || r.name;
       if (r && r.id && r.name) pidx[r.id] = r.name;
