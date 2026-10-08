@@ -373,7 +373,7 @@ import { layoutLabels, buildingLabelLines, dimCalloutVisible, detailLabelVisible
 import { inlineLines } from "./lib/labelFitLadder.js";
 import { calloutLayout, minCalloutWidthFt } from "./lib/calloutLayout.js";
 import { calloutStyle } from "./lib/calloutStyle.js";
-import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand, isPinnedMapReference, moveOverlayStep, dropOverlay } from "./lib/overlayOrder.js";
+import { splitOverlayBands, overlayPanelOrder, overlayOrderFlags, reorderOverlays, setOverlayBand, overlayBand, isPinnedMapReference, moveOverlayStep, dropOverlay, visibleReferenceRows } from "./lib/overlayOrder.js";
 import { scaledPatch } from "./lib/overlayPanelModel.js";
 import { hasCrop, cropClipShapeScreen, cropTrimFeet, cropFromTrimFeet, cropKind, cropEditBlock, normalizeCropShape, recropForRaster } from "../../shared/overlay/overlayCrop.js";
 import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerialVisibility.js";
@@ -18813,6 +18813,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // `splitOverlayBands` keeps each band's relative order — so the canvas paints `below` under the
   // plan and `above` over it from the same renderer.
   const overlayBands = splitOverlayBands(sheetOverlays);
+  // NEW-1 (B2217648) — what the Overlays panel and View ▾ list: a map-captured snapshot on a located plan is data, not a row.
+  const refRows = visibleReferenceRows(sheetOverlays, origin);
 
   // The reference overlay's CONTENT only (raster or its honest placeholder). All of its selection
   // chrome moved to overlayChrome below, so this renderer can be dropped into either band pass.
@@ -19496,10 +19498,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     else { if (labelSessionRef.current !== key) pushHistory(); labelSessionRef.current = null; }
     applyFn(patch);
   };
-  const ovRow = { display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: PAL.muted };
-  // One shared square icon-button (B574) — identical width/height/padding/hit-target for the overlay
-  // header's hide / lock / remove controls, so they can never render at mismatched sizes again.
-  const iconBtn = { width: 30, height: 30, padding: 0, flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 8, border: BORDER_1, background: SURF_RAISED, color: PAL.ink, cursor: "pointer", boxShadow: "0 1px 2px rgba(28,25,20,0.04)" };
   const spinBtn = { width: 20, height: 13, padding: 0, display: "grid", placeItems: "center", fontSize: 10.5, lineHeight: 1, border: BORDER_1, borderRadius: 4, background: SURF_RAISED, color: PAL.muted, cursor: "pointer", fontFamily: "inherit" };
   // B845584 — brought down from ~15px/~44px rows to the system's own density tokens (measured off
   // the live app, not guessed): --font-md 11.5px text, a ~22-23px row (padding + line-height), the
@@ -21792,7 +21790,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 handler below is one of this file's EXISTING overlay functions. */}
             <LazyPanel name="Overlays" minHeight={180} label="Loading overlays…">
             <OverlaysPanel
-              overlays={[...sheetOverlays, ...foreignOverlays.rows.map((r) => ({ ...r.overlay, id: "foreign:" + r.key, foreign: { planName: r.planName }, _fr: r }))]} selId={selOverlay} showAerial={showAerial} hasParcel={parcels.length > 0}
+              overlays={[...refRows, ...foreignOverlays.rows.map((r) => ({ ...r.overlay, id: "foreign:" + r.key, foreign: { planName: r.planName }, _fr: r }))]} selId={selOverlay} showAerial={showAerial} hasParcel={parcels.length > 0}
               busy={overlayBusy} loadErr={overlayLoadErr} basemapNote={!!(origin && basemapOn && showAerial)}
               calib={ovCalib} calibMsg={ovCalibMsg()} menuId={ovRowMenu} renamingId={ovRenaming} pageFocusTick={ovPageFocus}
               onShowForeign={(row) => showForeignOverlay(row._fr)}
@@ -23510,7 +23508,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   const ring = m.pts.map((p) => { const q = f2p(p); return `${q.x},${q.y}`; }).join(" ");
                   const cen = (m.centerline && m.mode !== "boundary") ? m.centerline.map(f2p) : [];
                   const cp = f2p(centroid(m.pts));
-                  const area = easementArea(m);
                   // B620 — inline label rides the easement's centerline (strip) or its CLOSED ring (boundary — append
                   // the first point so the label walks the closing edge too, not just 3 of 4 sides).
                   const easePathFeet = (m.centerline && m.mode !== "boundary" && m.centerline.length >= 2)
@@ -25288,7 +25285,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               elementsReady={elementsReady}
               // NEW-4 — the same overlay set + visibility the Overlays rail tab controls
               // (References panel), reachable here too.
-              overlays={sheetOverlays} showAerial={showAerial} onToggleAerial={setShowAerial}
+              overlays={refRows} showAerial={showAerial} onToggleAerial={setShowAerial}
               onToggleOverlay={(id, checked) => patchOverlay(id, { visible: checked })} />
           </div>
           {/* Layers control — same shared layers as the map finder. ALWAYS rendered
@@ -25331,7 +25328,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                        different facts, and only one of them is a finding. */
                     siteState={siteStateId}
                     basemap={{
-                      value: origin ? basemapSrc : "off",
+                      value: origin ? (showAerial ? basemapSrc : "off") : "off", // NEW-1 (B2217648): with the snapshot row gone from Overlays, this control is where a hidden (`aerialHidden`) aerial shows as Off and is turned back on
                       // B688864 — a direct pick here is an explicit, authoritative choice about
                       // what's visible, so it stands down any earlier "Hide aerial" from the
                       // References panel rather than leaving a picked source silently suppressed.

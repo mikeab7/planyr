@@ -4,8 +4,8 @@
  * desktop table is untouched above the breakpoint.
  *
  * One scrolling column of grouped iOS-Settings-style cards (label left, value right): header card
- * (type badge + deal name — deliberately NO hero number, input that may not exist yet), "Deal"
- * (Location first, Name, Size with its unit INSIDE the value, Price + a derived read-back), "Rent"
+ * (a Lease|Land|Bldg sale segmented control + the deal name typed in place — deliberately NO hero
+ * number), "Deal" (Location first, Size with its unit INSIDE the value, Price + a derived read-back), "Rent"
  * (lease), "Parties", "More details" (filled rows + `＋ label` chips), then a sticky footer with a
  * live one-line read-back and one full-width Save. There is no "Needed to save" section: required-
  * ness is the Location row's accent text and the Save copy.
@@ -27,7 +27,7 @@ import { rowStatusText } from "../lib/compMobileLayout.js";
 import { compHeadline, draftToComp } from "../lib/comps.js";
 import {
   mobileCol, mobilePartyLabels, TERM_UNITS, termToMonths, termForDisplay, termOtherReading,
-  priceReadback, footerReadback, saveState, moreDetailFields, moreFieldHasValue, MORE_AFFIX,
+  priceReadback, footerReadback, saveState, rowFieldState, hugWidthCh, moreDetailFields, moreFieldHasValue, MORE_AFFIX,
 } from "../lib/compMobileSheetModel.js";
 
 const ROW_MIN_H = 48;
@@ -35,16 +35,11 @@ const HIT_TARGET = 44;
 const JUMP_ROW_H = 60;
 const FOOTER_BTN_H = 46;
 const VALUE_FS = 15; // design-exempt: deliberate 15px value size — the one thing every row exists to show
+const NAME_FS = 18; // design-exempt: deliberate 18px deal name — the one headline on the sheet, typed in place
 
+// Segmented type order on the phone: the owner's order, Lease first.
+const TYPE_SEG = ["lease", "land", "building_sale"].map((v) => ({ value: v, label: { lease: "Lease", land: "Land", building_sale: "Bldg sale" }[v] }));
 const TYPE_LABEL = Object.fromEntries(TYPE_OPTIONS.map((o) => [o.value, o.label]));
-// LEASE reuses the existing --info-bg/--info-text pair; LAND the existing warn tint; BUILDING SALE a
-// neutral chip from tokens every other chrome control already uses (no third one-off color pair).
-const BADGE_TOKENS = {
-  lease: { bg: "var(--info-bg)", fg: "var(--info-text)" },
-  land: { bg: "var(--warn-bg)", fg: "var(--warn-text)" },
-  building_sale: { bg: "var(--hover-chrome)", fg: "var(--text-secondary)" },
-};
-
 // Term entry unit is remembered for the session (storage is always months).
 let sessionTermUnit = "months";
 
@@ -54,19 +49,6 @@ const SHEET_CSS = `
 .cm-input::placeholder{color:var(--accent);opacity:1;font-weight:500}
 .cm-row:focus-within{background:var(--focus-ring-soft)}
 `;
-
-function TypeBadge({ compType }) {
-  const t = BADGE_TOKENS[compType] || BADGE_TOKENS.building_sale;
-  return (
-    <span style={{
-      display: "inline-flex", alignItems: "center", padding: "3px 7px", borderRadius: RADIUS.sm,
-      fontSize: FONT_SIZE.micro, fontWeight: 800, letterSpacing: "0.09em", textTransform: "uppercase",
-      background: t.bg, color: t.fg,
-    }}>
-      {(TYPE_LABEL[compType] || compType || "").toUpperCase()}
-    </span>
-  );
-}
 
 /** One status dot — a green/amber 6px dot; used by the jump sheet only. */
 function StatusDot({ ready }) {
@@ -97,11 +79,15 @@ function focusNextInput(el) {
   if (next) next.focus(); else el.blur();
 }
 
-/** A segmented toggle (AC|SF, Monthly|Yearly, NNN|Gross, months|years). */
-function Segmented({ options, value, onChange, label, warn }) {
+const SEG_H = 36; // one height for every segmented control in the sheet (type, rate, basis, term, size unit)
+
+/** A segmented toggle (Lease|Land|Bldg sale, AC|SF, Monthly|Yearly, NNN|Gross, months|years).
+ * `fill` stretches it to its container with equal-width segments. */
+function Segmented({ options, value, onChange, label, warn, fill }) {
   return (
     <span role="group" aria-label={label} style={{
-      display: "inline-flex", flex: "none", borderRadius: RADIUS.sm, overflow: "hidden",
+      display: fill ? "flex" : "inline-flex", flex: fill ? "1 1 0%" : "none", minWidth: 0, height: SEG_H, boxSizing: "border-box",
+      borderRadius: RADIUS.sm, overflow: "hidden",
       border: `1px solid ${warn ? "var(--warn-border)" : "var(--border-strong)"}`,
       background: warn ? "var(--warn-bg)" : "transparent",
     }}>
@@ -111,8 +97,8 @@ function Segmented({ options, value, onChange, label, warn }) {
           <button key={o.value} type="button" aria-pressed={on} data-seg-value={o.value}
             onClick={() => onChange(o.value)}
             style={{
-              border: "none", padding: "6px 10px", minHeight: 32, fontFamily: "inherit", cursor: "pointer",
-              fontSize: FONT_SIZE.control, fontWeight: on ? 700 : 500,
+              border: "none", padding: "0 10px", height: "100%", flex: fill ? "1 1 0%" : "none", fontFamily: "inherit", cursor: "pointer",
+              fontSize: FONT_SIZE.control, fontWeight: on ? 700 : 500, whiteSpace: "nowrap",
               background: on ? "var(--accent)" : "transparent", color: on ? "var(--on-accent)" : "var(--text-primary)",
             }}>
             {o.label}
@@ -126,7 +112,7 @@ function Segmented({ options, value, onChange, label, warn }) {
 /** One editable field row — a REAL input mounted at rest. `prefix`/`suffix` render only once the
  * input has a value or focus. `display`/`toCommit` let Term show + commit in its chosen unit. */
 function InputRow({ col, label, draft, onCommit, prefix, suffix, trailing, display, toCommit, autoFocus, onAutoFocused, today }) {
-  const st = cellState(col, draft);
+  const st = rowFieldState(cellState(col, draft));
   const numeric = col.kind === "number";
   const shownRaw = display ? display(col.getValue(draft)) : (st.raw ?? "");
   const shownRest = display ? display(col.getValue(draft)) : st.text;
@@ -136,7 +122,7 @@ function InputRow({ col, label, draft, onCommit, prefix, suffix, trailing, displ
   useEffect(() => { if (!focused) setVal(shownRaw); }, [shownRaw, focused]);
   // Layout effect (not passive): focus inside the tap's own task so iOS Safari raises the keyboard.
   useLayoutEffect(() => { if (autoFocus) { ref.current?.focus(); onAutoFocused?.(); } }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  if (st.state === "derived") {
+  if (st.state === "derived") { // read-only ONLY when the triangle really derived a number (never a bare dash)
     return (
       <div data-field-key={col.key} data-field-editor="readonly" style={rowShellStyle}>
         <span style={labelStyle}>{label}</span>
@@ -145,6 +131,7 @@ function InputRow({ col, label, draft, onCommit, prefix, suffix, trailing, displ
     );
   }
   const hasValue = (focused ? val : shownRest) !== "";
+  const hug = !!(prefix || suffix || trailing); // value + its unit read as one unit at the right edge
   const commit = () => {
     setFocused(false);
     if (val === shownRaw) return;
@@ -153,7 +140,7 @@ function InputRow({ col, label, draft, onCommit, prefix, suffix, trailing, displ
   return (
     <label className="cm-row" data-field-key={col.key} data-field-editor="text" style={{ ...rowShellStyle, cursor: "text" }}>
       <span style={labelStyle}>{label}</span>
-      <span style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0, justifyContent: "flex-end" }}>
+      <span style={{ display: "flex", alignItems: "center", gap: hug ? 2 : 6, flex: 1, minWidth: 0, justifyContent: "flex-end" }}>
         {today}
         {prefix && hasValue && <span style={affixStyle}>{prefix}</span>}
         <input
@@ -172,12 +159,37 @@ function InputRow({ col, label, draft, onCommit, prefix, suffix, trailing, displ
           enterKeyHint="next"
           aria-label={label}
           placeholder="Add"
-          style={inputStyle}
+          style={hug ? { ...inputStyle, flex: "0 1 auto", width: `${hugWidthCh(focused ? val : shownRest)}ch`, minWidth: "3ch", maxWidth: "100%" } : inputStyle}
         />
         {suffix && hasValue && <span style={affixStyle}>{suffix}</span>}
         {trailing}
       </span>
     </label>
+  );
+}
+
+/** The header's deal name — a large text input, typed straight into (no picker, no fallback to the
+ * tenant/buyer: an empty name shows the `Deal name` placeholder). Commits on blur / Enter like InputRow. */
+function DealNameField({ col, draft, onCommit }) {
+  const stored = col.getValue(draft) ?? "";
+  const [focused, setFocused] = useState(false);
+  const [val, setVal] = useState(stored);
+  useEffect(() => { if (!focused) setVal(stored); }, [stored, focused]);
+  const commit = () => { setFocused(false); if (val !== stored) onCommit(col, val); };
+  return (
+    <input
+      className="cm-input" data-sheet-input="" data-deal-name="1" data-field-key="title"
+      value={focused ? val : stored}
+      onFocus={() => { setFocused(true); setVal(stored); }}
+      onChange={(e) => setVal(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") { e.preventDefault(); focusNextInput(e.currentTarget); }
+        else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setVal(stored); e.currentTarget.blur(); }
+      }}
+      enterKeyHint="next" aria-label="Deal name" placeholder="Deal name"
+      style={{ ...inputStyle, flex: "none", width: "100%", boxSizing: "border-box", textAlign: "left", fontSize: NAME_FS, fontWeight: 700, padding: "10px 16px 14px" }}
+    />
   );
 }
 
@@ -337,7 +349,6 @@ export default function CompEntryMobileSheet({
   const placed = !!draft.anchor; // a pending reverse-geocode still counts as placed — never "Place on map"
   const isLease = compType === "lease";
   const isLand = compType === "land";
-  const dealName = draft.title || draft.partyAcquirer || "Untitled";
   const parties = mobilePartyLabels(compType);
   const flag = currentRow.cellFlags?.leaseRatePeriod;
   const periodBlocking = isLease && flag?.level === "blocking";
@@ -397,28 +408,17 @@ export default function CompEntryMobileSheet({
       )}
 
       <div style={{ flex: 1, overflowY: "auto", paddingBottom: 16 }}>
-        {/* HEADER CARD — small, never a hero number. The badge doubles as the type switch. */}
+        {/* HEADER CARD — type switch + the deal name, typed in place. Never a hero number. */}
         <Group>
-          <label style={{ ...rowShellStyle, borderBottom: "none", justifyContent: "flex-start", position: "relative", cursor: "pointer" }}>
-            <TypeBadge compType={compType} />
-            <span aria-hidden="true" style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)" }}>▾</span>
-            <select
-              value={compType}
-              onChange={(e) => commit(cl("compType"), e.target.value)}
-              aria-label="Comp type"
-              style={{ position: "absolute", left: 0, top: 0, width: 110, height: "100%", opacity: 0, cursor: "pointer" }}
-            >
-              {TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-            <span data-deal-name="1" style={{ fontSize: FONT_SIZE.emphasis, fontWeight: 700, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
-              {dealName}
-            </span>
-          </label>
+          <div style={{ padding: "12px 16px 0", display: "flex" }}>
+            <Segmented fill label="Comp type" value={compType} options={TYPE_SEG}
+              onChange={(v) => commit(cl("compType"), v)} />
+          </div>
+          <DealNameField col={cl("title")} draft={draft} onCommit={commit} />
         </Group>
 
         <Group title="Deal">
           <LocationRow placed={placed} locationText={locationText} onTap={onLocationTap} />
-          <InputRow {...common} col={cl("title")} label="Name" />
           <InputRow
             {...common} col={cl("size")} label="Size"
             suffix={isLand ? null : "SF"}
@@ -435,11 +435,11 @@ export default function CompEntryMobileSheet({
         {isLease && (
           <Group title="Rent">
             <InputRow {...common} col={cl("leaseRate")} label="Rate" prefix="$" suffix="/SF" />
-            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", padding: "0 16px 10px", borderBottom: "1px solid var(--border-default)" }}>
-              <Segmented label="Rate period" warn={periodMissing || periodBlocking} value={draft.leaseRatePeriod || ""}
+            <div style={{ display: "flex", gap: 16, padding: "0 16px 10px", borderBottom: "1px solid var(--border-default)" }}>
+              <Segmented fill label="Rate period" warn={periodMissing || periodBlocking} value={draft.leaseRatePeriod || ""}
                 options={[{ value: "monthly", label: "Monthly" }, { value: "annual", label: "Yearly" }]}
                 onChange={(v) => (periodBlocking ? onResolvePeriod(currentRow._id, v) : commit(cl("leaseRatePeriod"), v))} />
-              <Segmented label="Rate basis" value={draft.leaseRateExpense || ""}
+              <Segmented fill label="Rate basis" value={draft.leaseRateExpense || ""}
                 options={[{ value: "nnn", label: "NNN" }, { value: "gross", label: "Gross" }]}
                 onChange={(v) => commit(cl("leaseRateExpense"), v)} />
             </div>

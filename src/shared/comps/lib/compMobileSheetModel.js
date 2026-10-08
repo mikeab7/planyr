@@ -6,8 +6,9 @@
  * per comp type, and the Term months/years entry unit. Nothing here changes what a comp IS — all
  * values are read off the same draft the desktop sheet edits (`draftToComp`, the column getters).
  */
-import { SHEET_COLUMNS, columnIndex, NOTES_COLUMN, saveButtonLabel, formatNumberDisplay, sanitizeNumericInput } from "./compSheetColumns.js";
-import { draftToComp, buildingPricePerSf, landPricePerAreaUnit, annualLeaseRate } from "./comps.js";
+import { SHEET_COLUMNS, columnIndex, NOTES_COLUMN, saveButtonLabel, formatNumberDisplay, sanitizeNumericInput, activeCellFlags } from "./compSheetColumns.js";
+import { draftToComp, buildingPricePerSf, landPricePerAreaUnit, annualLeaseRate, validateComp } from "./comps.js";
+import { rowHasBlockingFlags } from "./compParse.js";
 
 export const SF_PER_ACRE = 43560;
 
@@ -61,6 +62,24 @@ export function termOtherReading(monthsRaw, unit) {
   const yr = Math.round((m / 12) * 10) / 10;
   const mo = Math.round(m * 100) / 100;
   return unit === "years" ? `${yr} yr = ${mo} mo` : `${mo} mo = ${yr} yr`;
+}
+
+/** What a phone row renders for a `cellState`: `derived` ONLY when it carries a real computed
+ * number; a `na` state or a derived cell with no number is an EMPTY editable input (the `Add`
+ * placeholder), never a bare dash that looks untappable. (Land Price owner report 2026-10-08.) */
+export function rowFieldState(st) {
+  const bare = (t) => t == null || String(t).trim() === "" || /^[—–-]$/.test(String(t).trim());
+  if (st.state === "derived" && !bare(st.text)) return st;
+  return { state: "editable", text: st.state === "editable" ? st.text : "", raw: st.state === "editable" ? (st.raw ?? "") : "" };
+}
+
+/** Width, in `ch`, of an input that hugs its own text (digits are one ch; commas/dots are narrower).
+ * The empty state is as wide as its `Add` placeholder. */
+export function hugWidthCh(text) {
+  const t = String(text ?? "");
+  if (!t) return 3;
+  const narrow = (t.match(/[.,]/g) || []).length;
+  return Math.max(2, t.length - narrow * 0.5 + 0.2);
 }
 
 /* ---- Derived read-backs ------------------------------------------------------------------- */
@@ -128,15 +147,32 @@ export function footerReadback(draft) {
 
 /* ---- Save button ------------------------------------------------------------------------- */
 
-/** `{ label, disabled }` for the one full-width Save button. `rowReadyFn(row)` is the grid's own
- * readiness test. Three blocker states: no rows · only the location missing · otherwise-blocked. */
+/** The ONE plain-words reason a row cannot be saved yet, or null when it can. Reads the row's own
+ * `validateComp` errors and its blocking flags (limited to flags that still apply to the row's
+ * current type) — never a guess. What each type really requires: ALL types a type + a placed
+ * location; a LEASE also a rent period. Land and building sale need no size or price (nullable in
+ * `comps.sql`, and `validateComp` does not ask), so no copy ever claims they do. */
+export function rowBlocker(row) {
+  const comp = draftToComp(row.draft);
+  const errors = validateComp(comp);
+  const flags = activeCellFlags(row.cellFlags, row.draft.compType);
+  if (errors.some((e) => /comp type/i.test(e))) return "Pick a comp type to save";
+  if (errors.some((e) => /pin|parcel/i.test(e))) return "Place it on the map to save";
+  if (errors.some((e) => /rent period/i.test(e)) || flags.leaseRatePeriod?.level === "blocking") return "Pick monthly or yearly to save";
+  if (rowHasBlockingFlags(flags)) return "Fix the flagged field to save";
+  if (errors.length) return "Finish the missing field to save";
+  return null;
+}
+
+/** `{ label, disabled }` for the one full-width Save button. `readyCount` is the grid's own count of
+ * saveable rows; with none, the label names the first not-ready row's real blocker (`rowBlocker`). */
 export function saveState({ rows, readyCount, saving }) {
   if (saving) return { label: "Saving…", disabled: true };
   if (!rows.length) return { label: "Nothing to save yet", disabled: true };
   if (readyCount > 0) return { label: saveButtonLabel(readyCount), disabled: false };
-  const missingLocation = rows.some((r) => !r.draft.anchor);
-  if (missingLocation) return { label: "Place it on the map to save", disabled: true };
-  return { label: "Pick mo or yr to save", disabled: true };
+  const reasons = rows.map(rowBlocker).filter(Boolean);
+  // every row looks saveable to the model yet the grid counted none ready: never invent a reason
+  return { label: reasons[0] || "Not ready to save yet", disabled: true };
 }
 
 /* ---- More details ------------------------------------------------------------------------ */

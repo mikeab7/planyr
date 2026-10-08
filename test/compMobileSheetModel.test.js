@@ -94,7 +94,7 @@ describe("NEW-2 — Save copy, three blocker states", () => {
   });
   it("placed lease with no period is blocked on the period, not the map", () => {
     const r = { _id: "r", draft: d("lease", { anchor: PIN }), cellFlags: {} };
-    expect(saveState({ rows: [r], readyCount: 0 }).label).toBe("Pick mo or yr to save");
+    expect(saveState({ rows: [r], readyCount: 0 }).label).toBe("Pick monthly or yearly to save");
   });
 });
 
