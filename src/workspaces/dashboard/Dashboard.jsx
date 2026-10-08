@@ -257,31 +257,23 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
   // from under a tap already in flight (event:click-swallowed, "moved": true). Nothing renders a
   // real, variable-height card until every source has resolved — see CardSkeleton's own header.
   const [dataReady, setDataReady] = useState(false);
-  // NEW-1 (2026-10-08) — the saved project order loads with the rest and gates the real cards the
-  // same way, so the Pursuits list never paints alphabetical and then jumps into his order.
+  // NEW-1 (2026-10-08) — the saved project order loads INSIDE the same gate as every other source
+  // (see the effect below), so the Pursuits list never paints alphabetical and then jumps into his order.
   const [projectOrder, setProjectOrder] = useState(null);
   const [orderReady, setOrderReady] = useState(false);
   const [orderError, setOrderError] = useState(null);
   useEffect(() => {
     let live = true;
-    setOrderReady(false);
-    loadProjectOrder(userId).then(({ order }) => {
-      if (!live) return;
-      setProjectOrder(order);
-      setOrderReady(true);
-    });
-    return () => { live = false; };
-  }, [userId]);
-  useEffect(() => {
-    let live = true;
     setDataReady(false);
+    setOrderReady(false);
     (async () => {
       // The since-last-here mark has to be known BEFORE the recent-comps/recent-notes fetches
       // fire — both are bounded by it (`since`), never an account-wide pull. It's one small,
       // fast read (profiles.prefs, same row dashboardLayout already reads), not a second waterfall.
       const nowMs = Date.now();
-      const { mark } = await loadSinceLastHere(userId);
+      const [{ mark }, { order: loadedOrder }] = await Promise.all([loadSinceLastHere(userId), loadProjectOrder(userId)]);
       if (!live) return;
+      setProjectOrder(loadedOrder);
       const windowStartMs = mark.lastVisitAt != null ? Number(mark.lastVisitAt) : nowMs - 24 * 60 * 60 * 1000;
       const sinceIso = new Date(windowStartMs).toISOString();
 
@@ -332,6 +324,7 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
       // fresh 24h window)", not a broken dashboard.
       saveSinceLastHere(userId, { lastVisitAt: nowMs, snapshot: feed.nextSnapshot });
 
+      setOrderReady(true);
       setDataReady(true);
     })();
     return () => { live = false; };
@@ -403,7 +396,7 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
   // NEW-1 — while data is still loading every slot renders the SAME stable-height skeleton
   // instead of its real (variable-height) content; see the `dataReady` effect above.
   const SKELETON_ROWS = { jumpBackIn: JUMP_BACK_IN_COUNT_DEFAULT + 1, recentPlans: 2, pipelineStatus: 2, scheduleHealth: 3, needsAttention: 4, pursuitsTable: 4, compsSummary: 6, goingQuiet: 3, sinceLastHere: 6, locationsMap: 6 };
-  const CARD_RENDERERS = dataReady && orderReady ? {
+  const CARD_RENDERERS = dataReady ? {
     jumpBackIn: () => <JumpBackInCard {...cardData.jumpBackIn} onOpenProject={openProject} onOpenDoc={openDoc} />,
     recentPlans: () => <RecentPlansCard {...cardData.recentPlans} onOpenProject={openProject} />,
     pipelineStatus: () => <PipelineCard {...cardData.pipelineStatus} />,
@@ -433,7 +426,7 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
 
   // NEW-COMPS-CARD — the header row's quiet right-side "latest of N" meta, computed only once
   // real data is in (a skeleton card has nothing to count yet).
-  const compsHeaderMeta = dataReady && orderReady && cardData.compsSummary.data.total
+  const compsHeaderMeta = dataReady && cardData.compsSummary.data.total
     ? `latest of ${cardData.compsSummary.data.total}` : undefined;
 
   const toAdd = availableToAdd(layout);
@@ -451,7 +444,7 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
         headerRight={entry.key === "sinceLastHere" ? sinceLastHere?.headerSpan : null}
         customizing={customizing}
         showDragHandle={!isNarrow}
-        sizeToContent={dataReady && orderReady && SIZE_TO_CONTENT_CARDS.has(entry.key)}
+        sizeToContent={dataReady && SIZE_TO_CONTENT_CARDS.has(entry.key)}
         customizeControls={entry.key === "jumpBackIn" ? (
           <JumpBackInCountControl
             count={jumpBackInCount}
