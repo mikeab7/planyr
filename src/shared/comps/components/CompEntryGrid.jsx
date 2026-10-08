@@ -40,7 +40,7 @@ import { emptyDraft, draftToComp, validateComp, summarizeLeaseComps, summarizeSa
 import {
   SHEET_COLUMNS, NOTES_COLUMN, cellState, applyCellEdit, fillDownColumn, spillPaste, visibleColumnIndices,
   computeFlexWidths, widthFor, frozenLeftOffsets, saveButtonLabel, matchOption, optionsForColumn,
-  absorbPasteIntoSheet, groupLabelIsRedundant,
+  absorbPasteIntoSheet, groupLabelIsRedundant, activeCellFlags,
 } from "../lib/compSheetColumns.js";
 import { siteplanLocationText, pinFallbackText } from "../lib/compLocationText.js";
 import { todayIso } from "../lib/compDates.js";
@@ -708,7 +708,8 @@ function compAverageParts(rows) {
 function ProblemsList({ rows, onResolvePeriod, attemptedSave }) {
   const items = [];
   rows.forEach((row, i) => {
-    const { cellFlags, draft } = row;
+    const { draft } = row;
+    const cellFlags = activeCellFlags(row.cellFlags, draft.compType); // a flag from the row's previous type no longer shows
     const periodFlag = cellFlags.leaseRatePeriod;
     if (periodFlag?.level === "blocking") {
       const rate = draft.leaseRate || "0.00";
@@ -1757,10 +1758,10 @@ export default function CompEntryGrid({
   };
 
   function rowIsReady(row) {
-    return !rowHasBlockingFlags(row.cellFlags) && validateComp(draftToComp(row.draft)).length === 0;
+    return !rowHasBlockingFlags(activeCellFlags(row.cellFlags, row.draft.compType)) && validateComp(draftToComp(row.draft)).length === 0;
   }
   const readyRows = rows.filter(rowIsReady);
-  const blockingCount = rows.filter((r) => rowHasBlockingFlags(r.cellFlags)).length;
+  const blockingCount = rows.filter((r) => rowHasBlockingFlags(activeCellFlags(r.cellFlags, r.draft.compType))).length;
   // ⛔ HARDENING-13 (B986096, owner P0 live-test, "the footer used to name the reason, now it
   // just says '1 blocking'") — `missingCount` counts ANY row with a validateComp error, blocking
   // or not — a row can appear in both counts.
