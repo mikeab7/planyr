@@ -49,32 +49,7 @@ async function cleanup() {
 }
 
 try {
-  await page.goto(BASE + "/#/site-planner", { waitUntil: "load" });
-  await page.reload({ waitUntil: "load" });
-  await page.waitForFunction(() => !/Loading your sites/.test(document.body.innerText) && /Sites\s*\d+/.test(document.body.innerText), null, { timeout: 90000 });
-  await sleep(2000);
-  await assertMeasurable(page, "verify-map-overlay-crop-handles");
-  await page.locator('button[role="tab"][title^="Site record"]').first().click({ timeout: 15000 }); await sleep(2500);
-  await page.evaluate(() => { [...document.querySelectorAll("button")].find((x) => /site plan/i.test(x.innerText || ""))?.click(); }); await sleep(2000);
-  await page.locator('input[type=file]:not([accept*=".kml"])').first().setInputFiles({ name: NAME + ".png", mimeType: "image/png", buffer: pngBuffer(1000, 800) });
-  await page.getByRole("button", { name: /^Crop…/ }).first().click({ timeout: 30000 }); await sleep(2000);
-  // The crop tool opens INLINE in the left panel (no modal). Fit + zoom out so the whole picture is inside the panel, then the rect's
-  // full-image corner handles ARE the picture's corners — derive every target from them rather than from an <img> box.
-  const tool = page.locator('[data-testid="crop-done"]').first();
-  await tool.waitFor({ timeout: 30000 });
-  await page.locator('[data-testid="crop-zoom-fit"]').first().click(); await sleep(500);
-  for (let i = 0; i < 3; i++) { await page.locator('[data-testid="crop-zoom-out"]').first().click(); await sleep(250); } // the picture overflows the narrow panel at Fit — zoom out until every corner grip is on screen
-  await sleep(500);
-  const center = async (id) => { const b = await page.locator(`[data-testid="${id}"]`).first().boundingBox(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; };
-  const tl0 = await center("crop-handle-tl"), br0 = await center("crop-handle-br");
-  const at = (fx, fy) => ({ x: tl0.x + fx * (br0.x - tl0.x), y: tl0.y + fy * (br0.y - tl0.y) });
-  const dragTo = async (from, to) => { await page.mouse.move(from.x, from.y); await page.mouse.down(); for (let i = 1; i <= 6; i++) { await page.mouse.move(from.x + (to.x - from.x) * i / 6, from.y + (to.y - from.y) * i / 6); await sleep(30); } await page.mouse.up(); await sleep(400); };
-  await dragTo(tl0, at(0.6, 0.125));
-  await dragTo(await center("crop-handle-br"), at(0.8, 0.3125));
-  await shot("map-crop-dialog");
-  await tool.click(); await sleep(1500);
-  await page.getByRole("button", { name: "Place on map" }).first().click({ timeout: 15000 });
-
+  const buildNow = () => page.evaluate(() => fetch("/version.json", { cache: "no-store" }).then((r) => r.json()).then((j) => j.build).catch(() => null));
   const geo = () => page.evaluate(() => {
     const pane = document.querySelector(".leaflet-sitePlanHandlesPane-pane");
     const bb = (el) => { const b = el.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height, cx: b.x + b.width / 2, cy: b.y + b.height / 2 }; };
@@ -85,7 +60,46 @@ try {
   const waitHandles = async (ms = 90000) => { const t = Date.now(); let g; while (Date.now() - t < ms) { g = await geo(); if (g.boundary && g.grips.length === 4 && g.img && g.img.w > 20) return g; await sleep(1500); } return g; };
   const drag = async (a, b) => { await page.mouse.move(a.x, a.y); await page.mouse.down(); for (let i = 1; i <= 8; i++) { await page.mouse.move(a.x + (b.x - a.x) * i / 8, a.y + (b.y - a.y) * i / 8); await sleep(40); } await page.mouse.up(); await sleep(3000); };
 
-  let g = await waitHandles(); await shot("map-handles-cropped");
+  /* A deploy by another session mid-run makes the app reload itself ("Loading your sites…") and drops an in-flight placement.
+   * That is the INSTRUMENT being interrupted, not the product failing — so restart the flow (≤3 attempts) when the served build
+   * changed or the handles never armed, instead of scoring it. */
+  let g = null;
+  for (let attempt = 1; attempt <= 3 && !(g && g.boundary && g.grips.length === 4); attempt++) {
+    const b0 = await buildNow();
+    if (attempt > 1) { console.log(`  … attempt ${attempt} (served build ${b0})`); await cleanup(); }
+    try {
+    await page.goto(BASE + "/#/site-planner", { waitUntil: "load" });
+    await page.reload({ waitUntil: "load" });
+    await page.waitForFunction(() => !/Loading your sites/.test(document.body.innerText) && /Sites\s*\d+/.test(document.body.innerText), null, { timeout: 90000 });
+    await sleep(2000);
+    await assertMeasurable(page, "verify-map-overlay-crop-handles");
+    await page.locator('button[role="tab"][title^="Site record"]').first().click({ timeout: 15000 }); await sleep(2500);
+    await page.evaluate(() => { [...document.querySelectorAll("button")].find((x) => /site plan/i.test(x.innerText || ""))?.click(); }); await sleep(2000);
+    await page.locator('input[type=file]:not([accept*=".kml"])').first().setInputFiles({ name: NAME + ".png", mimeType: "image/png", buffer: pngBuffer(1000, 800) });
+    await page.getByRole("button", { name: /^Crop…/ }).first().click({ timeout: 30000 }); await sleep(2000);
+    // The crop tool opens INLINE in the left panel (no modal). Fit + zoom out so the whole picture is inside the panel, then the rect's
+    // full-image corner handles ARE the picture's corners — derive every target from them rather than from an <img> box.
+    const tool = page.locator('[data-testid="crop-done"]').first();
+    await tool.waitFor({ timeout: 30000 });
+    await page.locator('[data-testid="crop-zoom-fit"]').first().click(); await sleep(500);
+    for (let i = 0; i < 3; i++) { await page.locator('[data-testid="crop-zoom-out"]').first().click(); await sleep(250); } // the picture overflows the narrow panel at Fit — zoom out until every corner grip is on screen
+    await sleep(500);
+    const center = async (id) => { const b = await page.locator(`[data-testid="${id}"]`).first().boundingBox(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; };
+    const tl0 = await center("crop-handle-tl"), br0 = await center("crop-handle-br");
+    const at = (fx, fy) => ({ x: tl0.x + fx * (br0.x - tl0.x), y: tl0.y + fy * (br0.y - tl0.y) });
+    const dragTo = async (from, to) => { await page.mouse.move(from.x, from.y); await page.mouse.down(); for (let i = 1; i <= 6; i++) { await page.mouse.move(from.x + (to.x - from.x) * i / 6, from.y + (to.y - from.y) * i / 6); await sleep(30); } await page.mouse.up(); await sleep(400); };
+    await dragTo(tl0, at(0.6, 0.125));
+    await dragTo(await center("crop-handle-br"), at(0.8, 0.3125));
+    await shot("map-crop-dialog");
+    await tool.click(); await sleep(1500);
+    await page.getByRole("button", { name: "Place on map" }).first().click({ timeout: 15000 });
+
+    g = await waitHandles(attempt < 3 ? 60000 : 90000);
+    } catch (e) { console.log(`  … attempt ${attempt} interrupted: ${String((e && e.message) || e).split("\n")[0].slice(0, 120)}`); g = null; if (attempt === 3) throw e; }
+    const b1 = await buildNow();
+    if (!(g && g.boundary && g.grips.length === 4) && b0 !== b1) console.log(`  … served build moved ${b0} → ${b1} mid-run; retrying`);
+  }
+  await shot("map-handles-cropped");
   check("placed through the real flow; the Map handles are armed (4 grips, outline, rotate grip, image layer)", !!g.boundary && g.grips.length === 4 && !!g.rot && !!g.img, JSON.stringify({ grips: g.grips && g.grips.length, img: !!g.img }));
   if (!g.boundary || g.grips.length !== 4 || !g.img) throw new Error("VOID — handles not armed; the instrument cannot see them");
   const r0 = await row();
