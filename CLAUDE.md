@@ -585,6 +585,20 @@ were split out of this file.
     site plan on four plans points at ONE stored object), and canvas overlays with a null
     `storageKey` naming a real PDF are the old local-only-overlay problem, NOT duplication — keep
     them out of this work.
+    **AMENDED 2026-10-08 (owner-authorised exception, NEW-1) — sibling plans of ONE site share
+    overlays as OPTIONS, not as stored data.** Michael, verbatim: "overlays should go to each
+    individual plan or like should flow through each individual plan. Like if I've got a project or
+    a site and I put an overlay on one like concept A, it should also show up on concept B as an
+    option. It shouldn't automatically overlay, but if I go to show it, it should, I should be able
+    to show it if that makes sense." He approved the design and said ship it. What this does NOT
+    change: the Site tab / Map-Comps split above is untouched (no store merge, Map/Comps surface out
+    of scope), there is still NO site-level overlay store and NO migration — every plan keeps its own
+    `sheetOverlays` exactly as stored. What it ADDS: the Overlays panel lists an overlay held by a
+    sibling plan on the same site (and not by this plan) as a hidden "added on <that plan>" row; its
+    eye COPIES the record into THIS plan only (new id, re-framed through `resolveClipFrame`, a
+    `sharedFrom` stamp), after which it is this plan's own record and edits never propagate.
+    Remove is this-plan-only. Pure rules: `lib/siblingOverlays.js`. The null-`storageKey` carve-out
+    above and #12 (crop is keep-inside only) stand.
 12. **(2026-09-22) Overlay crop is KEEP-INSIDE only.** No keep-outside / hole-punch inverse, on
     either overlay surface. (B1783328.)
 13. **(2026-10-04) Review opens files in TABS, is BLANK when none are open, and the open tabs FOLLOW HIS ACCOUNT between
