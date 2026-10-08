@@ -15,21 +15,33 @@ import { normalizeCounty } from "./taxrates.js";
 
 const SOURCE = { source: "Harris Central Appraisal District — taxing units & adopted rates", sourceUrl: HCAD_PDATA_URL };
 
-/** The precomputed index (Supabase cad_taxunit_shards, public read). Null when it is absent or unreachable —
- * the caller then falls back to the slow live scan, so the table degrades to slow, never to wrong. */
-async function indexedLookup(county, acct, env) {
-  if (!env || !env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return null;
+/** The precomputed index (Supabase cad_taxunit_shards, public read). One of:
+ *   { kind: "ok", result }   — answered from the index
+ *   { kind: "noindex" }      — Supabase answered but no complete index exists (never built) → the slow scan may help
+ *   { kind: "error" }        — Supabase unreachable/erroring after a retry → say "try again", NEVER scan: the live
+ *                              scan cannot survive deep accounts and a Worker kill (1102) returns an HTML error page. */
+async function indexedLookup(county, acct, env, fetchImpl = fetch) {
+  if (!env || !env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return { kind: "noindex" };
   const pre = acct.slice(0, PREFIX_LEN);
-  const r = await fetch(`${env.SUPABASE_URL}/rest/v1/cad_taxunit_shards?county=eq.${county}&prefix=in.(${pre},_meta,_rates)&select=roll_year,prefix,data`, {
-    headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_ANON_KEY}` },
-  });
-  if (!r.ok) return null;
-  return answerFromIndex(acct, await r.json(), SOURCE);
+  const url = `${env.SUPABASE_URL}/rest/v1/cad_taxunit_shards?county=eq.${county}&prefix=in.(${pre},_meta,_rates)&select=roll_year,prefix,data`;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await fetchImpl(url, { headers: { apikey: env.SUPABASE_ANON_KEY, authorization: `Bearer ${env.SUPABASE_ANON_KEY}` } });
+      if (r.ok) {
+        const result = answerFromIndex(acct, await r.json(), SOURCE);
+        return result ? { kind: "ok", result } : { kind: "noindex" };
+      }
+    } catch (_) { /* retry */ }
+    if (attempt < 2) await new Promise((res) => setTimeout(res, 150 * (attempt + 1)));
+  }
+  return { kind: "error" };
 }
 
 const COUNTIES = { harris: { acct: /^\d{13}$/, lookup: lookupHarris } };
 const json = (obj, status = 200, extra = {}) =>
   new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json; charset=utf-8", ...extra } });
+
+export { indexedLookup };
 
 export async function onRequestGet(context) {
   try {
@@ -60,7 +72,9 @@ export async function onRequestGet(context) {
     const hit = await cache.match(key);
     if (hit) return hit;
 
-    const r = (await indexedLookup(county, acct, context.env)) || (await cfg.lookup(acct));
+    const idx = await indexedLookup(county, acct, context.env);
+    if (idx.kind === "error") return json({ county, acct, complete: false, transient: true, reason: "the tax-rate index could not be reached just now" }, 200, { "cache-control": "no-store" });
+    const r = idx.kind === "ok" ? idx.result : await cfg.lookup(acct);
     const body = { county, acct, ...r };
     const res = json(body, 200, { "cache-control": `public, max-age=${r.complete ? 7 * 24 * 3600 : 3600}` });
     context.waitUntil(cache.put(key, res.clone()));

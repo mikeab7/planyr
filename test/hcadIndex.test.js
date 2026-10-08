@@ -96,3 +96,22 @@ describe("answerFromIndex", () => {
     expect(answerFromIndex("0421030000123", rows, {})).toMatchObject({ complete: true, year: 2025, total: 1.45096 });
   });
 });
+
+describe("indexedLookup (the handler's index read)", () => {
+  const env = { SUPABASE_URL: "https://x.supabase.co", SUPABASE_ANON_KEY: "k" };
+  const rows = [{ roll_year: 2025, prefix: "_meta", data: "{}" }, { roll_year: 2025, prefix: "_rates", data: JSON.stringify({ "016": ["GOOSE CREEK CISD", 1.07, 1.07] }) }, { roll_year: 2025, prefix: "04210300", data: "00123=016I" }];
+  it("retries a transient Supabase failure and then answers", async () => {
+    const { indexedLookup } = await import("../functions/api/taxunits.js");
+    let n = 0;
+    const f = async () => (++n < 3 ? new Response("boom", { status: 502 }) : new Response(JSON.stringify(rows), { status: 200 }));
+    const r = await indexedLookup("harris", "0421030000123", env, f);
+    expect(r.kind).toBe("ok");
+    expect(r.result.complete).toBe(true);
+    expect(n).toBe(3);
+  });
+  it("a persistent failure is 'error' (never the slow scan); no index at all is 'noindex'", async () => {
+    const { indexedLookup } = await import("../functions/api/taxunits.js");
+    expect((await indexedLookup("harris", "0421030000123", env, async () => { throw new Error("down"); })).kind).toBe("error");
+    expect((await indexedLookup("harris", "0421030000123", env, async () => new Response("[]", { status: 200 }))).kind).toBe("noindex");
+  });
+});
