@@ -248,13 +248,10 @@ test.describe("the right rail is the complete answer to 'what can I do to a parc
     await boot(page);
     await drawParcel(page, 240, 150, 430, 300);
 
-    // Right rail → the Land panel's Boundary section, where the setback editor lives.
+    // Right rail → the Land panel (Parcels rework: the list; a parcel's own page carries the sections-based setbacks).
     await pick(page, "setbacks");
-    await expect(page.getByRole("button", { name: /By role/i })).toBeVisible();
-    await expect(page.getByText(/Edit setbacks:/i)).toBeVisible();
-
-    // …and the return path: the Land panel opens the Parcel tools menu.
-    await page.getByTestId("land-to-parcel-tools").click();
-    await expect(row(page, "draw")).toBeVisible();
+    await expect(page.getByTestId("parcels-panel")).toBeVisible();
+    // …and the panel carries its own Add / Edit buttons now (the old "Parcel tools →" line is gone).
+    await expect(page.getByTestId("parcels-edit-btn")).toBeVisible();
   });
 });

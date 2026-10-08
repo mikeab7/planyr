@@ -116,7 +116,7 @@ test.describe("NEW-2 · the legal description becomes the boundary when the coun
     // …and the closure READS on the parcel, tight-toned.
     const chip = page.getByTestId("parcel-misclosure");
     await expect(chip).toBeVisible({ timeout: 20_000 });
-    await expect(chip).toHaveText(/closes to 0\.3′/);
+    await expect(chip).toHaveText(/close to 0\.3′/);
     await expect(chip).not.toHaveText(/⚠/);
     await expect(page.getByTestId("parcel-provenance")).toHaveText(/From deed/i);
   });

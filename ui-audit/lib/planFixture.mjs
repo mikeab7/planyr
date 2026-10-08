@@ -655,6 +655,8 @@ export function fixtureSite(fixture, { id, name = "fixture", site = "fixture", p
     ftPerPx: s.ftPerPx, ...(s.ftPerPxY ? { ftPerPxY: s.ftPerPxY } : {}),
     opacity: s.opacity, rotation: s.rotation, locked: s.locked,
     ...(s.page ? { page: s.page } : {}),
+    ...(s.crop ? { crop: s.crop } : {}),
+    ...(s.knockout ? { knockout: true } : {}),
     ...(s.fromMap ? { fromMap: true } : {}),
     visible: s.visible,
     name: s.role === "underlay" ? "aerial" : `reference ${s.id}`,

@@ -145,6 +145,23 @@ const layerAboveObj = (v) => {
   return changed ? out : src;
 };
 
+/* NEW-5 (Parcels rework) — "Lock" CHANGED MEANING: it used to make a parcel click-through on the
+ * map, and every parcel was BORN locked; it now means "even Edit parcels can't touch this
+ * boundary" and is OFF by default. A `locked` flag with no `lockSem: 2` stamp is the old default,
+ * not a decision — it is read as unlocked (a deliberate lock under the new meaning is always written
+ * with the stamp, by `toggleParcelLock`). Derived on every read, so a stale device or a cloud row
+ * still carrying the old flag converges; identity-preserving when nothing changes. */
+export function withLockSemantics(parcels) {
+  let changed = false;
+  const out = (parcels || []).map((pc) => {
+    if (!pc || pc.locked !== true || pc.lockSem === 2) return pc;
+    changed = true;
+    const { locked: _drop, ...rest } = pc; // eslint-disable-line no-unused-vars
+    return rest;
+  });
+  return changed ? out : parcels;
+}
+
 // B682 — every parcel MUST carry a stable `id`. The map-finder hand-off (MapFinder.computeAssembly)
 // and legacy saved sites can hold id-LESS parcels ({points, addr, acct, attrs} with no id). Two bugs
 // flow from that. (1) The acreage-chip drag matches parcels by `pc.id === draggedId`; with both
@@ -1259,7 +1276,7 @@ export function createSiteModel(p = {}, { onHeal } = {}) {
     loiDate: p.loiDate || null,
     closingDate: p.closingDate || null,
     // inputs
-    parcels: ensureZ(withStableParcelIds(parcelArr(p.parcels))),
+    parcels: ensureZ(withLockSemantics(withStableParcelIds(parcelArr(p.parcels)))),
     // placed site-plan overlays (B72): backdrop PDFs/images positioned on the map by
     // hand. Each: {id,name,src,imgW,imgH,page,pageCount,x,y,ftPerPx,rotation,opacity,locked}
     // v14 (B848736) — ALSO the one home for the aerial backdrop: a legacy `underlay` folds in
@@ -1634,8 +1651,12 @@ export function parcelSplitNames(parcels, parentId, count) {
   // LINEAGE depth (its own stamped `splitDepth`, surviving the parent's tombstone), never from
   // `depth` (the walked, display-only value `parcelOutline` indents by — 0 for an orphaned
   // parent, which would restart the alternation and collide with an unrelated sibling's name).
-  const depth = (parent ? parent.lineageDepth : 0) + 1;
-  const sep = (parent && parent.suffixed) || /[0-9]$/.test(base) ? "" : " ";
+  // A name the user typed (not a generated suffix) starts a fresh chain: "Creek Tract" → "Creek Tract · A".
+  const depth = (parent && parent.suffixed ? parent.lineageDepth : 0) + 1;
+  // NEW-1 (Parcels panel redesign): a piece reads "<name> · A" — a root's name, a dot, the letter —
+  // so "Kilgore P." never fuses into "Kilgore P.A". A piece already ending in a generated suffix
+  // ("Kilgore P. · A") takes the next level bare ("Kilgore P. · A1"), as before.
+  const sep = parent && parent.suffixed ? "" : " · ";
   const names = Array.from({ length: Math.max(0, count | 0) }, (_, i) =>
     base + sep + (depth % 2 === 1 ? birthLetter(i) : String(i + 1)));
   return names.map((name) => ({ name, depth }));

@@ -38,8 +38,11 @@ async function newPhone() {
 
 async function openSheet(page) {
   await page.goto(`${root}/#/site`, { waitUntil: "domcontentloaded", timeout: 30000 });
-  await pacedWait(page, 3000);
-  await assertMeasurable(page, "verify-comp-sheet-review-first");
+  await page.waitForLoadState("load").catch(() => {});
+  await pacedWait(page, 5000);
+  for (let i = 0; ; i++) { // a signed-in boot can reload once; retry the precondition across it
+    try { await assertMeasurable(page, "verify-comp-sheet-review-first"); break; } catch (e) { if (i >= 3 || !/context was destroyed|navigation/i.test(String(e))) throw e; await pacedWait(page, 2500); }
+  }
   const tab = page.getByRole("tab", { name: /^Records/ }).first();
   if ((await tab.getAttribute("aria-selected")) !== "true") await tab.evaluate((el) => el.click()); // in-page click: a map-layers chip overlaps the tab at phone width
   await pacedWait(page, 500);

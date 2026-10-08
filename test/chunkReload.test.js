@@ -169,3 +169,22 @@ describe("stripReloadParam (B239)", () => {
     expect(rs).toHaveLength(0);
   });
 });
+
+// AUTH-SWEEP 2 / V221 — a preloadError while OFFLINE must not navigate the page away.
+import { installChunkReloadGuard } from "../src/app/chunkReload.js";
+describe("offline preloadError (V221)", () => {
+  const make = (onLine) => {
+    const handlers = {}; const nav = [];
+    const store = {};
+    const win = {
+      addEventListener: (n, fn) => { handlers[n] = fn; }, navigator: { onLine },
+      sessionStorage: { getItem: (k) => store[k] ?? null, setItem: (k, v) => { store[k] = v; }, removeItem: (k) => { delete store[k]; } },
+      location: { href: "https://planyr.io/#/site", pathname: "/", search: "", hash: "#/site", assign: (u) => nav.push(u), replace: (u) => nav.push(u) },
+      history: { state: null, replaceState() {} },
+    };
+    installChunkReloadGuard(win);
+    return { fire: () => handlers["vite:preloadError"]?.({ payload: new Error("Failed to fetch dynamically imported module: /assets/terrainLayers-abc.js") }), nav, store };
+  };
+  it("does not reload while offline", () => { const w = make(false); w.fire(); expect(w.nav).toEqual([]); });
+  it("still rescues a stale chunk while online", () => { const w = make(true); w.fire(); expect(w.nav.length + (w.store["planyr:chunkReloadAt"] ? 1 : 0)).toBeGreaterThan(0); });
+});

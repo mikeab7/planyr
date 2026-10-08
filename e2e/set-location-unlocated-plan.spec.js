@@ -199,7 +199,7 @@ test.describe("NEW-3 · a hand-drawn parcel carries a record, and says where it 
     // Select the parcel so its record panel has a subject.
     await selectParcelWithPanel(page);
     const prov = page.getByTestId("parcel-provenance");
-    await expect(prov).toHaveText(/Drawn by hand/i);
+    await expect(prov).toHaveText(/^Drawn$/i);
     // A drawn lot has no county record — so it must not claim one.
     await expect(prov).not.toHaveText(/County record/i);
   });
@@ -209,6 +209,7 @@ test.describe("NEW-3 · a hand-drawn parcel carries a record, and says where it 
     await selectParcelWithPanel(page);
     await expect(page.getByTestId("parcel-field-label")).toBeVisible({ timeout: 15_000 });
     await page.getByTestId("parcel-field-label").fill("North tract");
+    await page.getByTestId("parcel-add-facts").click(); // Parcels rework: deed acres sit behind "+ Add owner, account and deed acres"
     await page.getByTestId("parcel-field-statedAcres").fill("12.50");
     await page.getByTestId("parcel-field-statedAcres").blur();
 

@@ -7,7 +7,7 @@ import { describe, it, expect } from "vitest";
 import {
   cropClipShapeScreen, cropClipRectScreen, cropEditBlock, recropForRaster, effectiveCropRect, cropTrimFeet,
   normalizeCropShape,
-} from "../src/workspaces/site-planner/lib/overlayCrop.js";
+} from "../src/shared/overlay/overlayCrop.js";
 
 const base = { id: "a", src: "data:image/png;base64,x", imgW: 1000, imgH: 800, ftPerPx: 0.5 };
 

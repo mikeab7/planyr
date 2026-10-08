@@ -46,6 +46,10 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   EVERY role so a second deal on an already-tracked property attaches to it instead of minting a
   duplicate, then an exact normalized-title fallback) and mints a new "tracked" site only when
   nothing plausible matches. The owner must never have to create a site before recording a deal.
+- **`lib/canvasBox.js` (B2174224) — the canvas's viewBox IS its measured box, never floored.** A 320×360 floor made the browser shrink the whole drawing whenever a wide docked panel left the map pane narrower than 320 (or the window shorter than 360). Every `setSize` goes through `nextCanvasSize`; degenerate boxes are refused at the framing sites, not by a floor. Guards: the repo-root `test/` suite **canvasBox** + ui-audit **verify-panel-resize-scale** (real grip drag, six window sizes, red on the pre-fix build).
+- **`lib/panelWidth.js` (B2154768) — the docked panel's width is snapped to whole DEVICE pixels, and the pan compensation reads the EXACT canvas edge.** A fractional pointer (Windows display scaling) made the canvas edge a different sub-pixel every frame, Leaflet re-snapped its tile lattice, and the welded drawing followed — the map "shook" during the grip drag. `startLeftResize` → `snapPanelWidth`; the layout effect uses `canvasEdgeLeft`, never a rounded `offsetLeft`. Guards: repo-root `test/` suite **panelWidth** + ui-audit **verify-panel-resize-steady** (per-frame fixed element + tile; red on the pre-fix build).
+- **⛔ `lib/gestureSave.js` + the autosave effect (B217540 ×2) — A GESTURE IN FLIGHT IS NOT A SAVE POINT, and the cost of an edit follows the DEVICE STORE, not the plan.** `planarfit:sites:v1` holds EVERY plan, so each autosave parses and rewrites all of them; the effect used to do that on every pointer-move frame of a drag (29 whole-store writes in one 40-frame drag). It now defers while `drag.current` is set (re-checking by a 120 ms ref poll) and runs the ordinary save when the gesture ends, **with a 5 s expiry** so a stuck `drag.current` can never switch autosave off. `storage.js`'s `siteExistsLocally` / `readBackSite` answer "is this new?" / "did it land?" from the last write **only while `localStorage` still holds exactly that string** (any other writer → the full read, so the B473/B592 cross-tab check is unchanged). Three sibling fixes belong to the same finding: the shared names module's `planNameOf` rides the project-name index (it re-parsed the whole store per render), `roadNetwork.js` memoises `dissolveRings`/`clipPolylineOutside` on exact ring values, `writeHistoryAll` serialises the ring once. **Still O(store) per discrete save: B2165120 (per-plan storage keys).** Instrument: the repo-root ui-audit harness **perf-edit-cycle** (`npm run perf:editcycle`; the owner's real plan is its committed fixture; its budget is a JSON beside it); account: `docs/perf/PERF-EDIT-CYCLE.md`. Guards (counts, not times): repo-root `test/` suites **gestureSave** · **storageFastPath** · **roadNetworkCache** · **namesIndexCache** and the e2e spec **gesture-save-deferral**.
+- **Right tool rail (B2142832):** `components/RailSplit.jsx` (`RailSplit` = label + ▾ pill carrying the tool's current size; `RailHeading` = label + hairline) and pure `lib/toolRailModel.js` (pill values/tooltips/aria, dock glyph kind, heading spacing `RAIL`, mirrored by `.rail-hdr` in the global stylesheet). Never copy a value into the rail — read `settings.stallW/stallDepth`, `roadWidth`, `buildingDock`. Guards: the repo-root `test/` suite **toolRailModel** and the e2e spec **tool-rail-values**.
 - **⛔ Site Analysis = TRUSTED VERDICTS ONLY (B2117136, owner-approved 2026-10-05) — read before adding a check or a card.**
   A verdict (colour, amount, "None") is issued only by `siteChecks.js`'s declared `TRUSTED_CHECKS` registry, and only where the
   site's region is in that check's `regions` (FEMA + NWI: all; RRC wells + pipelines: TX). Everything else is a map-layer PILL
@@ -74,6 +78,14 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   CURRENT resolvable tree (`depth`), never the STAMPED lineage depth (`lineageDepth`, used only by
   `parcelSplitNames` to keep the letter/digit alternation correct once the parent is gone) — read
   `siteModel.parcelDisplayInfo`'s header before touching either field.
+- **Parcels panel REWORK (B2179968–B2179973, owner-approved 2026-10-06) — read before touching the Land tab.** `components/ParcelsPanel.jsx` is now only the LIST (header is just "Parcels"; one summary line; Active column; Add parcels ▾ / Edit parcels; checkboxes exist ONLY to Combine). A row opens `components/ParcelPage.jsx` — the parcel's own page (name · source chip · Source by provenance · tax table · Setbacks · Style). **Provenance is one rule** (`lib/parcelOrigin.js` `originKind`; `parcelRecord.parcelProvenance` delegates): a combine result is "Combined", DERIVED from its `combined.from` snapshot — never "Drawn". **Setbacks are BOUNDARY SECTIONS, not roles** (`lib/boundarySections.js` — corners, border changes, a curve stays one section; per-edge `pc.setbacks` is still the only stored value, a section is a view; user fixes ride sparse `pc.sectionBreaks`/`pc.sectionJoins`; the Front/Side/Rear role UI and the canvas role words are gone, `setbackRoles.js` survives only for the inherited street-abutment helpers' tests). `components/SetbackSections.jsx` is the sketch + list. **Lock changed meaning (NEW-5):** a boundary moves ONLY inside Edit parcels (`startMoveParcel` pans otherwise; corner grips and node insertion require `editingCorners`), Lock = "even Edit parcels can't touch it", off by default — a legacy `locked` with no `lockSem: 2` stamp reads as unlocked (`siteModel.withLockSemantics`). Style fields: `strokeOpacity`, `fillOpacity` (0 = no fill), `sbOpacity`, dash keys `dashdot`/`longdash`. Tax table: `lib/taxRates.js` — hidden everywhere until a county has a complete sourced per-account list (`TAX_COVERAGE` says why, per county). Guards: repo-root `test/` **boundarySections**, **taxRates**, **parcelOrigin**; live: ui-audit **verify-parcels-rework** (+ **verify-parcel-combine-split**).
+- **`parcelOps.js` + `components/ParcelsPanel.jsx` (B2134368–B2134370) — the ONE combine / ONE split (the table UI is superseded by the rework above).**
+  `planCombine` / `planSplit` / `planRestoreCombined` / `planRestoreSplit` decide (pure; `mergeRings` is INJECTED, never restated),
+  `SitePlanner.jsx` `combineParcelsAction` / `performSplit` / `restoreCombinedOriginals` / `restoreSplitOriginal` apply — the map
+  toolbar and the panel both call them. Originals live INSIDE the tract (`combined.from`) / pieces (`splitFrom.from`) as snapshots,
+  tombstoned out of `parcels`, so no reader can see a hidden original as live land. The table's checkbox selects; the eye writes the
+  existing `active` flag (so no migration). Locked parcels may be combined/split (`LOCKED_PARCELS_MAY_COMBINE`). Guards: repo-root
+  `test/` suites **parcelOps** + **parcelOpsParity**; live: ui-audit **verify-parcel-combine-split**.
 - **`parcelIdentity.js` (B1964512) — THE one "which county lot is this?" key, shared by `SitePlanner.jsx` identify-and-add and `MapFinder.jsx` Select-parcels.** Exact `OBJECTID` → else a key ending `.OBJECTID` (prefer `…TaxParcels…` over a joined accounts table; Chambers publishes only prefixed names) → else a hash of the WHOLE ring set, never the first vertex (neighbouring lots share corners). A stored parcel is matched by `storedParcelKey(pc)` recomputed from its `attrs`, not its stored `gisKey`, so legacy `geo:` rows are still recognised. Guard: the repo-root `test/` suite **parcelIdentity** (replays the pre-fix rule on the real Grand Port lots).
 - **⛔ `projectName.js` (B1415–B1418) — A PROJECT'S NAME HAS ONE AUTHORITATIVE VALUE PER GROUP, and every
   plan's `site` field is a DERIVED MIRROR of it. Read it before touching any rename path.** The name was
@@ -178,7 +190,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   and the repo-root ui-audit instrument **diagnose-layer-gate-flash**. ⚠ That harness can watch the terrain
   layer ASK but never ANSWER — 3DEP is `ERR_CONNECTION_RESET` from Chromium here — and it says so
   rather than scoring itself; the paint-then-vanish half is **V121985**.
-  **`layerHiddenToast.js` (B2112576)** is the on-map companion: pure once-per-crossing toast decision (+ the "Zoom in" target) over the same gates; wired in `SitePlanner.jsx` through the shared toast stack. Guards: **layerHiddenToast** + e2e **layer-hidden-toast**.
+  **`layerHiddenToast.js` (B2112576)** is the on-map companion: pure once-per-crossing toast decision (+ the "Zoom in" target) over the same gates; shared by BOTH surfaces through `lib/useLayerHiddenToast.js` (the project canvas in `SitePlanner.jsx` AND the overview in `MapFinder.jsx`) over the shared toast stack. Guards: **layerHiddenToast** + e2e **layer-hidden-toast**.
 - `layers.js` + `components/LayerPanel.jsx` — map-layer system; `layerPrefs.js` (per-site Layers-panel
   toggle memory — NEW-1, sparse on/off overrides restored on open + persisted on toggle).
   **⛔ B385040 — `applyOnOverrides` / `applyAboveOverrides` ARE IDENTITY-STABLE, and that is load-bearing
@@ -274,7 +286,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   (Brookshire–Katy Drainage District) endpoints live in the shared GIS source registry like every
   other source; `detentionRules.js` owns the district-aware `resolveDrainageContext`.
 - Site-plan overlay import (B72/B73/B747/B748/B749): `overlayPdf.js` (PDF+DXF raster, banded
-  white-knockout, zoom-aware re-raster) + `overlayScale.js` (scale/trace math) + `overlayStorage.js`
+  white-knockout, zoom-aware re-raster) + the shared overlay scale/trace math (`src/shared/overlay/`) + `overlayStorage.js`
   **⛔ B251136/B251137 — `chooseOverlayRasterScale` QUANTISES THE RE-RASTER SCALE TO AN OCTAVE
   LADDER AND ROUNDS **UP**, and `SitePlanner.jsx` CACHES the rungs. Read both headers before
   touching either.** Measured on the owner's real Bain overlay (1728 × 2592 pt, both his Bain
@@ -298,7 +310,8 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   issuing a request and the whole path dies silently; its `pdfDeliveryFault` refuses such a run.
   (Storage backup) + `dxf/` (worker parse via `dxf-parser` + entity→SVG render + true-units auto-scale)
   + `convertClient.js` (DWG→DXF through the B238 convert service, gated on `VITE_CONVERT_URL`).
-  **`overlayCrop.js` is the ONE crop model for BOTH overlay systems** (rect | poly, image px);
+  **The ONE overlay engine now lives in `src/shared/overlay/` (NEW-1; see its CLAUDE.md): the crop model (rect | poly, image px) for BOTH overlay systems, the placement math (geo + canvas — rotate/scale/align), and the raster sizing.** Do not add a second copy here.
+  The crop model is shared: (rect | poly, image px);
   the Site tab's "Crop…" (`components/OverlayCropDialog.jsx`, B1838704) reuses the shared
   `ImageCropTool`, clips via `cropClipShapeScreen` → an SVG `<clipPath>` (what the export clone
   carries), and every write goes through `setOverlayCrop` (lock enforced at the write). `crop` is in
@@ -918,7 +931,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   ⛔ the `established` gate is not ceremony — a legacy record can carry a `dockSide` that disagrees
   with what it renders, and honouring it unconditionally on load would strand (and therefore prune)
   the zones bonded to the walls the plan actually shows. `rotateDockAxisPatch` is the DELIBERATE way
-  to turn the face (Properties → Loading → `Dock face` → `turn ⟳`), which has to exist now that a
+  to turn the face (Properties → Loading → click a wall on the wall picker, `lib/loadingWalls.js` `wallClickPatch`), which has to exist now that a
   resize cannot do it by accident. B548's contract (depth/length readouts, massing panel, column
   grid, dock-door count) holds against the STORED value for free, because they all read
   `dockSidesFor`. **B416/B417 are the CONSEQUENCE of the old flip, not duplicates — they still prune
@@ -1492,6 +1505,12 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   **verify-pond-label-fit** (the real plan, a zoom sweep, the rendered label text read back off the DOM,
   and the exported sheet — PDF-PARITY) and **diagnose-pond-pan** (the paired before/after probe this was
   found with).
+  **`trailerRows.js` (B2160240–B2160242) — the pure rules for a trailer parking ROW's label and stall spec.** The label's lines carry
+  `keepLine` (the COUNT): `labelLayout`'s `takeLines`/`fitLines` drop every other line first, and that kept line alone may spill across
+  a strip too thin for a line rather than vanish — never drop it back to "last line goes first" (a shallow upper row lost its number).
+  `labelHidden` is the user's per-row, label-only hide (menu "Hide label" + Properties) and is deliberately NOT `noLabel`, a bond role
+  tag the copy/heal paths strip. Stall depth/width/lane are per-row `cfg` overrides (floors 8/6/0 ft, far under any real stall); a row
+  drawn shallower than the standard adopts the drawn depth. Guards: repo-root `test/` **trailerRows**, e2e **trailer-row-labels**, ui-audit **verify-trailer-row-labels**.
   `calloutLayout.js` — pure text-box/callout box geometry: auto-size or wrap-to-width (B913).
 - **Parcel-chrome declutter trio (NEW-1/NEW-2/NEW-3) — the FIXED-SIZE sibling of the label engine above.**
   `labelLayout` reflows labels; these three govern the chrome that CANNOT reflow, whose count is set by how
@@ -1517,9 +1536,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   vector on purpose, so typing a setback can't reshuffle the labels. `parcelOffset.js` holds the setback
   ring's inward offset + `lineIntersect`, lifted out of `SitePlanner.jsx` unchanged so the buildable envelope
   is provable in a unit test. Guards: the repo-root `test/` suite **setbackRoles** (which runs the REAL
-  production snapshot `test/fixtures/weldParcelProduction.json`, site `sms7v3ua7ksy`) + the ui-audit harness
-  **verify-setback-roles** (that same geometry, driven in a browser: default tier, auto-assignment,
-  correction, one-input-many-sides, role chips, and the ring proven identical across all of it).
+  production snapshot `test/fixtures/weldParcelProduction.json`, site `sms7v3ua7ksy`) + (its browser harness was retired with the role UI — see the Parcels rework entry).
   **`roundabout.js` (NEW-5) — a roundabout at a road TERMINUS, and it is real rather than decorative
   in three specific ways.** (1) The pavement math knows: `roundaboutArea` is the ANNULUS (the island
   is landscaped, so counting it would overstate impervious cover — which is what detention is priced
@@ -1862,6 +1879,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   Helvetica (not embedded), `Tz`-squeezed to the browser's measured widths — read the B2127664 deviations list before
   promising more. Guards: repo-root `test/` suite **pdfAnnotations** (incl. a second-library round-trip) + ui-audit
   **verify-pdf-markup-annotations** (real compose flow, poppler render parity, known-good arm).
+  **B2143584 — the `/AP` stream is only what shows UNTIL a viewer REGENERATES the annotation (Bluebeam/Acrobat on any edit), so every key a regenerating viewer reads must agree with it:** FreeText `/C` is the box FILL (border in `/DA` `RG`, never `/IC`), a translucent fill's opacity is `/CA`, a cloud's `/BE /I` comes from the scallop pitch, a two-point measurement's number is its `/Cap` caption. Guards: **pdfAnnotations** (regeneration block) + ui-audit **verify-pdf-annotation-regeneration** (MuPDF `update()` drift).
   **B765985 — the compose screen.** Picking a print frame no longer downloads straight off the
   canvas: `components/PrintCompose.jsx` (also lazy, its own chunk, warmed alongside the export
   chunk) is a dedicated full-screen surface for paper size (incl. ARCH C/D, ANSI C/D),
@@ -1919,6 +1937,8 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   Guards: the repo-root `test/` suite **numEditInPlace** + the ui-audit harness
   **verify-numedit-inplace** (real browser, two zooms × both themes, all three floating callers,
   with the parcel grips proven still clickable while the editor is open).
+
+- **`loadingWalls.js` (B2144160–B2144168, Building panel rethink) — the Loading wall picker's pure half:** the little rotated plan's geometry (`wallPickerLayout`, labels upright, never over the rectangle or the north arrow), what a wall click does (`wallClickPatch` — loading is one wall or an OPPOSITE pair, never an L), the words (`loadingSummary`/`loadedWallsLabel`, from `dockSideCompassLabel`) and the bump-outs a change strands (`strandedBumpIds`, two per loaded wall). `SitePlanner.jsx`'s `applyBuildingLoading` is the one writer. Outline width/opacity are element props `strokeWidth`/`strokeOpacity` resolved by `planStyle.elStyle` (`weight` follows `strokeWidth`; `strokeWidthSet` is null until someone sets one, so a road's zoom-derived curb stroke stays automatic). Guards: repo-root `test/` **loadingWalls**, **outlineStyle**; e2e **building-panel-rethink**.
 
 **Conventions:** feet everywhere internal (convert only at the map boundary); theme tokens
 never raw hex; inline editors never `window.prompt/confirm/alert`. See `/CLAUDE.md` KEY DECISIONS.

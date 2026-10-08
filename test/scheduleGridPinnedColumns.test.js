@@ -49,10 +49,17 @@ describe("Schedule grid — pinned columns (NEW-1)", () => {
 });
 
 describe("Schedule grid — the Help button's corner (NEW-3)", () => {
-  it("reserves --fab-dock at the bottom of the embedded page (taller under a coarse pointer), 0 standalone", () => {
+  it("pads the END of each scroll surface by --fab-dock (taller under a coarse pointer), and never shortens the page (NEW-1)", () => {
     expect(seq).toMatch(/html\.in-iframe \{ --fab-dock: 48px; \}/);
     expect(seq).toMatch(/@media \(pointer: coarse\) \{ html\.in-iframe \{ --fab-dock: 64px; \} \}/);
-    expect(seq).toMatch(/id="root" style="height:calc\(100vh - var\(--fab-dock, 0px\)\)"/);
-    expect(seq).toMatch(/height:"calc\(100vh - var\(--fab-dock, 0px\)\)",display:"flex",flexDirection:"column"/);
+    // the page itself fills the window — a shortened root/app box is the dead band the owner reported
+    expect(seq).toMatch(/id="root" style="height:100vh"/);
+    expect(seq).toMatch(/height:"100vh",display:"flex",flexDirection:"column"/);
+    expect(seq).not.toMatch(/height:calc\(100vh - var\(--fab-dock/);
+    expect(seq).not.toMatch(/height:"calc\(100vh - var\(--fab-dock/);
+    // grid, Gantt and Task Report scrollers carry the clearance as scroll-end padding
+    expect((seq.match(/paddingBottom:`?"?calc\(var\(--fab-dock|paddingBottom:"var\(--fab-dock/g) || []).length).toBeGreaterThanOrEqual(3);
+    // and the shell is told not to lift the "?" for this page
+    expect(seq).toContain('setAttribute("data-corner-free","1")');
   });
 });

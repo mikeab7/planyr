@@ -57,6 +57,25 @@ export function keyboardInsetPx(win) {
   return inset > 1 ? Math.round(inset) : 0;
 }
 
+// The keyboard's own HEIGHT — layout minus the visible height, WITHOUT the visual viewport's scroll. `keyboardInsetPx` above
+// subtracts offsetTop too (the sheet's bottom must sit on the visible band's bottom, wherever iOS has scrolled it); for SIZING that
+// is wrong: `layout − inset` = visible height + scroll, so on a scrolled viewport the sheet could stand taller than the band and its
+// top rows end up above the top of the screen (NEW-1, 2026-10-06, measured on WebKit). The height is also stable while iOS scrolls.
+export function keyboardHeightPx(win) {
+  const vv = win && win.visualViewport;
+  if (!vv) return 0;
+  const h = (layoutViewportHeight(win) || 0) - vv.height;
+  return h > 1 ? Math.round(h) : 0;
+}
+
+// The tallest the sheet may stand while a keyboard is up: the visible height minus the top margin — a CEILING (CSS max-height,
+// which has no transition, so it bites at once instead of mid-way through the sheet's own 220 ms height animation, which
+// the page's field-reveal would measure half-done). null = no keyboard, the caller keeps its normal max-height.
+export function sheetMaxHeightForKeyboard(viewportH, kbHeight, topMargin = 24, minH = 120) {
+  if (!(kbHeight > 0)) return null;
+  return Math.max(minH, (viewportH || 0) - kbHeight - topMargin);
+}
+
 // The sheet's rendered height must never push its TOP edge above the visible viewport once the
 // keyboard has taken `kbInset` px off the bottom — otherwise "rise above the keyboard" becomes
 // "run off the top of the screen". Clamps to at least `minH` so the sheet never collapses to

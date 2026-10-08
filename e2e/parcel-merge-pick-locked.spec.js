@@ -48,7 +48,7 @@ test("canvas clicks pick locked parcels in merge-pick mode, and the merge comple
   const a = await centre("pA");
   await page.mouse.click(a.x, a.y);
   await expect(page.getByText(/Click parcels to merge — 1 picked/)).toBeVisible();
-  await expect(page.getByTestId("parcel-row-pA")).toContainText("✓");
+  await expect(page.getByTestId("parcel-row-pA")).toHaveAttribute("aria-pressed", "true");
   const b = await centre("pB");
   await page.mouse.click(b.x, b.y);
   await expect(page.getByText(/2 parcels picked/)).toBeVisible();

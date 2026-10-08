@@ -16,7 +16,7 @@
 import { readSheetMeta } from "../../../shared/files/sheetMeta.js";
 import { refineSheetTitles } from "../../../shared/files/sheetTitleSet.js";
 import { groupSheets, markAdjacentDuplicateNumbers } from "../../../shared/files/sheetGroups.js";
-import { detectSheet, ftPerPointForScale } from "../../site-planner/lib/overlayScale.js";
+import { detectSheet, ftPerPointForScale } from "../../../shared/overlay/overlayScale.js";
 
 // pdf.js is imported LAZILY (it pulls a browser-only worker + DOMMatrix) so this module loads
 // in Node/tests; pdf.js only spins up when a real read runs. Mirrors localRead.js's pattern.

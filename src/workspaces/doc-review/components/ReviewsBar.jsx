@@ -6,6 +6,7 @@
  * when the menu opens. Cloud writes are RLS-scoped to the signed-in user.
  */
 import { useEffect, useRef, useState } from "react";
+import AnchoredMenu from "../../../shared/ui/AnchoredMenu.jsx";
 import { listReviews, deleteReview, listProjects, composeTitle, DISCIPLINES } from "../lib/reviewStore.js";
 
 const PAL = { ink: "var(--text-primary)", muted: "var(--text-secondary)", line: "var(--border-default)", accent: "var(--accent)", chromeInk: "var(--chrome-text)", chromeMuted: "var(--chrome-muted)" };
@@ -41,12 +42,6 @@ export default function ReviewsBar({ signedIn = false, meta = {}, onMeta, onOpen
     if (signedIn) refresh(); else { setRows([]); setProjects([]); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, signedIn]);
-  useEffect(() => { // outside-click to close — its own effect so it isn't rebound on every fetch (B44)
-    if (!open) return;
-    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
 
   const fld = { width: "100%", padding: "5px 7px", fontSize: 12, fontFamily: "inherit", border: `1px solid ${PAL.line}`, borderRadius: 6, color: PAL.ink, marginTop: 4, boxSizing: "border-box", background: "var(--surface-raised)" };
   const lbl = { fontSize: 10, color: PAL.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" };
@@ -82,8 +77,9 @@ export default function ReviewsBar({ signedIn = false, meta = {}, onMeta, onOpen
         style={{ padding: "6px 10px", fontSize: 11.5, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontWeight: 600, border: "1px solid var(--chrome-divider)", background: "var(--chrome-bg-elev)", color: PAL.chromeInk }}
       >Reviews ▾</button>
 
-      {open && (
-        <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 300, maxHeight: 460, overflowY: "auto", background: "var(--surface-raised)", border: `1px solid ${PAL.line}`, borderRadius: 10, boxShadow: "0 10px 30px rgba(0,0,0,0.25)", zIndex: 50, padding: 12, fontFamily: "system-ui, sans-serif", color: PAL.ink }}>
+      <AnchoredMenu open={open} onClose={() => setOpen(false)} anchorRef={ref} placement="below-right" width={300}
+        panelStyle={{ maxHeight: 460, overflowY: "auto", background: "var(--surface-raised)", border: `1px solid ${PAL.line}`, borderRadius: 10, boxShadow: "0 10px 30px rgba(0,0,0,0.25)", padding: 12, fontFamily: "system-ui, sans-serif", color: PAL.ink }}>
+        <div>
           {!signedIn && (
             <div style={{ fontSize: 11.5, color: "var(--warn-text)", lineHeight: 1.5, marginBottom: 10 }}>
               Sign in (in the Site Planner workspace) to save & file reviews to the cloud. Your work stays in memory until then.
@@ -141,7 +137,7 @@ export default function ReviewsBar({ signedIn = false, meta = {}, onMeta, onOpen
             ))}
           </div>
         </div>
-      )}
+      </AnchoredMenu>
     </div>
   );
 }

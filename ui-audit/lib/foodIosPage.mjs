@@ -8,8 +8,17 @@ import { devices } from "playwright";
 import { deflateSync } from "node:zlib";
 import { assertMeasurable } from "./tabTiming.mjs";
 import { makeFixture, installFixture } from "./foodFixture.mjs";
+import { openSignedIn } from "./signedInSession.mjs";
 
-export const BASE = process.argv.find((a, i) => i > 1 && a.startsWith("http")) || "http://localhost:4180";
+/* --live: score the DEPLOYED site signed in as the test account (real Supabase, real Overture places) through the
+ * shared helper instead of the stubbed fixture. Everything it writes carries LIVE_MARK and is deleted by cleanupLive
+ * (owner rule 15: test artifacts are always cleared). The seeded visit is the same shape the fixture has ("Aburi Sushi",
+ * rated 8.75 food / 8 ambiance), on the REAL Aburi Sushi row. */
+export const LIVE = process.argv.includes("--live");
+export const LIVE_MARK = "ZZ-E2E-THROWAWAY";
+export const LIVE_ABURI = "81f01ab6-64d4-46b1-bf67-d99c4eb98dd4";
+
+export const BASE = process.argv.find((a, i) => i > 1 && a.startsWith("http")) || (LIVE ? "https://planyr.io" : "http://localhost:4180");
 export const PHONES = { "iPhone 15": { kb: 380 }, "iPhone SE": { kb: 304 } };
 
 // ── a painted stand-in for satellite imagery (so a gap is visible in the screenshot) ─────────────
@@ -61,7 +70,63 @@ export const IOS_MODEL = ({ kbPx, late, latePan, loseLateEvent, tallInner }) => 
 
 const LATE_PAN = 56;
 const LOSE_LATE_EVENT = false;
+/** LIVE: write the throwaway visit (a REAL place, so search finds it exactly as it would for the owner). */
+export async function seedLive(base = BASE) {
+  const s = await openSignedIn({ base });
+  try {
+    const r = await s.page.evaluate(async ([mark, placeId]) => {
+      const { data: u } = await window.pfSupabase.auth.getUser();
+      const del = await window.pfSupabase.from("food_visits").delete().like("notes", mark + "%"); // idempotent re-seed
+      const ins = await window.pfSupabase.from("food_visits").insert({ user_id: u.user.id, place_id: placeId, visited_on: "2026-09-20", rating: 8.75, rating_ambiance: 8, cost: 64.2, what_was_good: "the aburi salmon", notes: mark + " seeded by ui-audit (deleted at the end of the run)" }).select("id");
+      return { del: del.error && String(del.error.message), ins: ins.error ? String(ins.error.message) : ins.data };
+    }, [LIVE_MARK, LIVE_ABURI]);
+    if (r.del || typeof r.ins === "string") throw new Error("seedLive failed — " + JSON.stringify(r));
+    return r.ins;
+  } finally { await s.close(); }
+}
+/** LIVE: delete every row this run (or a crashed earlier one) created, then PROVE none is left (delete-must-verify). */
+export async function cleanupLive(base = BASE) {
+  const s = await openSignedIn({ base });
+  try {
+    return await s.page.evaluate(async (mark) => {
+      const c = window.pfSupabase;
+      // visits the harness SAVED have no marker in notes only if a form was submitted — none is, but sweep by owner anyway:
+      // the test account owns no real visits, so "everything of this user's in food_visits" is the throwaway set.
+      const { data: u } = await c.auth.getUser();
+      const del = await c.from("food_visits").delete().eq("user_id", u.user.id);
+      const left = await c.from("food_visits").select("id").eq("user_id", u.user.id);
+      return { error: del.error && String(del.error.message), left: left.data ? left.data.length : "?" };
+    }, LIVE_MARK);
+  } finally { await s.close(); }
+}
+
+// Every live page owns a whole browser (openSignedIn launches one). A section that THROWS mid-way never reaches its
+// ctx.close(), and each leaked WebKit/Chromium holds ~300 MB: measured 2026-10-06, 14 GB used / load 100 / a browser launch
+// timing out after 180 s. So every open is tracked and the harness sweeps the stragglers after each section.
+const liveOpen = new Set();
+export async function closeLeakedLive() { const all = [...liveOpen]; liveOpen.clear(); await Promise.all(all.map((c) => c().catch(() => {}))); }
+
+async function openLive(phone, mode) {
+  const desktop = phone === "desktop";
+  const initScripts = desktop ? [] : [[IOS_MODEL, { kbPx: (PHONES[phone] || { kb: 0 }).kb, late: mode === "ios-late", latePan: LATE_PAN, loseLateEvent: LOSE_LATE_EVENT, tallInner: mode === "ios-tallinner" }]];
+  return { initScripts, desktop };
+}
+
 export async function open(browser, phone, mode) {
+  if (LIVE) {
+    const { initScripts, desktop } = await openLive(phone, mode);
+    const s = await openSignedIn({ base: BASE, engine: browser.browserType().name() === "webkit" ? "webkit" : "chromium", device: desktop ? null : phone, viewport: { width: 1280, height: 800 }, initScripts });
+    const page = s.page; page.setDefaultTimeout(30000); // live Supabase answers in seconds (a cold name search ~5-10 s), not the fixture's milliseconds
+    const errs = []; page.on("pageerror", (e) => errs.push(e.message));
+    await page.goto(`${BASE}/#/food`, { waitUntil: "domcontentloaded" });
+    await page.reload({ waitUntil: "domcontentloaded" }); // fresh load: stored session + keyboard model installed
+    await page.waitForSelector('[data-testid="food-map"]', { timeout: 30000 });
+    await assertMeasurable(page, `verify-food-rating-and-sheet:live:${phone}:${mode}`);
+    await page.waitForTimeout(1500);
+    const closer = () => { liveOpen.delete(closer); return s.close(); };
+    liveOpen.add(closer);
+    return { ctx: { close: closer }, page, errs };
+  }
   const desktop = phone === "desktop";
   const ctx = await browser.newContext(desktop ? { viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true } : { ...devices[phone], ignoreHTTPSErrors: true });
   const page = await ctx.newPage();

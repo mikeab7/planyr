@@ -298,7 +298,7 @@
         "siteStatus",
         "serializeWrites",
         "siteBoundary",
-        "overlayGeoref",
+        "overlayPlacement",
         "comps",
         "geocode",
         "planStyle",

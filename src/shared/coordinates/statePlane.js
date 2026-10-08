@@ -254,7 +254,7 @@ export function gridScaleFactor(zone, lat) {
  * grid north lies EAST of true north. Moved here from the site-planner workspace's `deedAlign.js`
  * (B1134752) — this is a plain geodetic fact about a zone at a point, the exact same category as
  * `gridScaleFactor` right above it, and it has a SECOND consumer now (the site-plan-overlay
- * placement math, `shared/sitePlans/lib/overlayGeoref.js`) that lives in `shared/` and must not
+ * placement math, `shared/overlay/overlayPlacement.js`) that lives in `shared/` and must not
  * import a workspace-scoped module. `deedAlign.js` re-exports this unchanged so its own callers
  * (SitePlanner.jsx's deed-align flow) are untouched.
  *

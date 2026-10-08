@@ -13,8 +13,12 @@
  *   4. ID + Task stay pinned: after scrolling right their left edge is still the grid's left edge;
  *   5. the pinned Task column never exceeds half the grid pane (so START/FINISH stay visible);
  *   6. header cells and body cells stay column-aligned after a sideways scroll;
- *   7. the predecessor cell is ONE line, ends in an ellipsis when cut, keeps the ID visible and
- *      carries the full text in a tooltip.
+ *   7. the predecessor cell stays inside its row, keeps the ID visible and carries the full text in a tooltip;
+ *   8. (B2132257) Predecessor/Successor cells are TWO lines while the column's own measured width is
+ *      >= 126 and ONE line (ID + ellipsis, "+N" for several links) below 110 — the width of the COLUMN, not of
+ *      the window. Three column configs make that observable: `dflt` (148-wide default columns, every window
+ *      width: two lines), `owner` (260-wide, user-resized wider: two lines) and `narrow` (96-wide, user-resized
+ *      narrower: one line). The known-good arm is `dflt` at a wide window, which must report two lines.
  * The help "?" button is a Shell control (fixed bottom-right over the iframe) so it is checked by
  * verify-grid-help-clearance.mjs against the real app shell.
  *
@@ -32,11 +36,11 @@ import { pacedWait } from "./lib/tabTiming.mjs";
 import { ensureVendored, rewriteCdn, serveVendored } from "./lib/vendorCdn.mjs";
 
 const ROOT = new URL("../public/", import.meta.url).pathname;
-const HTML_PATH = new URL("../public/sequence/index.html", import.meta.url).pathname;
+const HTML_PATH = process.env.HTML || new URL("../public/sequence/index.html", import.meta.url).pathname;
 const EXEC = process.env.PW_CHROME || undefined;
 const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json" };
 const SHOTS = process.env.SHOTS_DIR || null;
-const WIDTHS = (process.env.WIDTHS || "800,960,1024,1280,1440").split(",").map(Number);
+const WIDTHS = (process.env.WIDTHS || "800,960,1024,1280,1440,1920,2560").split(",").map(Number);
 const HEIGHTS = (process.env.HEIGHTS || "450,900").split(",").map(Number);
 const VIEWS = (process.env.VIEWS || "grid,split").split(",");
 
@@ -65,15 +69,22 @@ const tasks = [task({ id: 1, name: "Entitlements", isExpanded: true })];
 for (let i = 2; i <= 40; i++) {
   tasks.push(task({ id: i, name: i % 7 === 0 ? `A very long task name number ${i} that must truncate instead of wrapping` : NAMES[i % NAMES.length] + ` (${i})`,
     parentId: i % 9 === 0 ? 1 : null,
-    predecessors: i === 5 ? [{id:2,type:"FS",lag:0},{id:3,type:"FS",lag:0},{id:4,type:"FS",lag:0}] : [{ id: i - 1, type: "FS", lag: 0 }] }));
+    // task 5: three predecessors; task 6 also hangs off task 2, so task 2 has three successors (3, 5, 6)
+    predecessors: i === 5 ? [{id:2,type:"FS",lag:0},{id:3,type:"FS",lag:0},{id:4,type:"FS",lag:0}]
+      : i === 6 ? [{ id: 5, type: "FS", lag: 0 }, { id: 2, type: "FS", lag: 0 }] : [{ id: i - 1, type: "FS", lag: 0 }] }));
 }
 const CONFIGS = {
   // the owner's screenshotted column set, columns user-resized wider (the "user-resized columns still work" edge)
   owner: { visible: ["id","name","start","end","duration","predecessors","successors","health"], widths: { name: 380, predecessors: 260, successors: 260 } },
+  // default column widths (148 wide): the wide-window look B655552 specified — two lines
+  dflt:  { visible: ["id","name","start","end","duration","predecessors","successors","health"], widths: {} },
+  // Predecessor/Successor user-resized NARROW (96 wide): below the one-line threshold
+  narrow: { visible: ["id","name","start","end","duration","predecessors","successors","health"], widths: { predecessors: 96, successors: 96 } },
   // the default twelve + a few extras: overflows at EVERY sweep width, ●/Status are mid-table (not a trailing run)
   full:  { visible: ["id","name","start","end","duration","predecessors","successors","health","status","responsibleParty","cost","notes","percentComplete","budget"], widths: {} },
 };
-const CFG = process.env.CFG || "owner";
+let CFG = "owner";
+const CFGS = (process.env.CFG || "dflt,owner,narrow").split(",");
 const mkFixture = view => ({ aPid: 1, nPid: 2, nTid: 1000, view, section: "projects",
   projects: { 1: { id: 1, name: "Narrow Width Fixture", tasks,
     colConfig: CONFIGS[CFG] } } });
@@ -113,6 +124,24 @@ async function measure(page) {
       if (bad) predSpill++;
       if (c.scrollHeight > c.clientHeight + 1) predMultiline++;
     }
+    // B2132257 — per-cell line mode, measured off the cell's own box
+    const depInfo = [];
+    for (const r of rows) for (const k of ["predecessors", "successors"]) {
+      const c = cell(r, k); if (!c) continue;
+      const root = c.matches("[data-dep-lines]") ? c : c.querySelector("[data-dep-lines]");
+      if (!root) continue;
+      const cr = c.getBoundingClientRect();
+      const kids = [...root.querySelectorAll("span")];
+      const label = kids.find(x => x.style.fontWeight === "500" || getComputedStyle(x).fontWeight === "500");
+      const nameSpan = kids.find(x => getComputedStyle(x).textOverflow === "ellipsis");
+      const slots = [...root.children].filter(x => x.tagName === "DIV");
+      const boxH = Math.max(0, ...[...root.querySelectorAll("*")].filter(d => { const cs = getComputedStyle(d); return cs.overflow === "hidden" || cs.display === "-webkit-box"; }).map(d => d.getBoundingClientRect().height));
+      depInfo.push({ k, id: (cell(r, "id")?.innerText || "").trim(), w: Math.round(cr.width * 10) / 10, h: cr.height,
+        lines: root.getAttribute("data-dep-lines"), text: (root.innerText || "").trim().replace(/\s+/g, " "),
+        slots: slots.length, boxH, items: (root.getAttribute("title") || "").split("\n\n")[0].split("\n").length,
+        labelClipped: label ? label.scrollWidth > label.clientWidth + 0.5 || label.getBoundingClientRect().right > cr.right + 0.5 : null,
+        ellipsis: nameSpan ? nameSpan.scrollWidth > nameSpan.clientWidth + 0.5 : false, plus: (root.innerText.match(/\+\d+/) || [null])[0] });
+    }
     const sample = predCells.find(c => /·|·/.test(c.innerText || "")) || predCells[0];
     return {
       vw, vh, docSW: doc.scrollWidth, docCW: doc.clientWidth, bodySW: document.body.scrollWidth,
@@ -121,7 +150,7 @@ async function measure(page) {
       lastCell: rect([...row0.querySelectorAll('[data-col-key]')].pop()), health: rect(cell(row0, "health")), colsBtn: rect(colsBtn),
       id: rect(cell(row0, "id")), name: rect(cell(row0, "name")), start: rect(cell(row0, "start")), end: rect(cell(row0, "end")),
       hHealth: rect(hdr("health")), hName: rect(hdr("name")), hId: rect(hdr("id")), hPred: rect(hdr("predecessors")), pred0: rect(cell(row0, "predecessors")),
-      predSpill, predMultiline, spillDetail: window.__spill || null,
+      depInfo, predSpill, predMultiline, spillDetail: window.__spill || null,
       predSample: sample ? { text: sample.innerText, title: sample.querySelector("[title]")?.getAttribute("title") || sample.getAttribute("title") || null } : null,
     };
   });
@@ -129,7 +158,8 @@ async function measure(page) {
 const inside = (r, vw, vh, tol = 0.5) => r && r.l >= -tol && r.r <= vw + tol && r.t >= -tol && r.b <= vh + tol;
 
 let voidRun = false;
-for (const view of VIEWS) for (const h of HEIGHTS) for (const w of WIDTHS) {
+for (const cfgName of CFGS) for (const view of VIEWS) for (const h of HEIGHTS) for (const w of WIDTHS) {
+  CFG = cfgName;
   const page = await browser.newPage({ viewport: { width: w, height: h } });
   page.on("dialog", d => d.accept());
   const errs = []; page.on("pageerror", e => errs.push(e.message));
@@ -172,14 +202,39 @@ for (const view of VIEWS) for (const h of HEIGHTS) for (const w of WIDTHS) {
   ok(`${tag} · after scrolling right: ${CFG === "owner" ? "● (pinned right)" : "the last column"} fully inside the grid pane`, pinnedTail && pinnedTail.l >= m1.grid.l - 0.5 && pinnedTail.r <= m1.grid.r + 0.5 && inside(pinnedTail, m1.vw, m1.vh), JSON.stringify(pinnedTail) + " grid " + m1.grid.l + "-" + m1.grid.r);
   ok(`${tag} · after scrolling right: ID + Task still pinned at the left edge`, m1.id && m1.name && Math.abs(m1.id.l - m1.grid.l) <= 3 && m1.name.l < m1.grid.l + (m1.id?.w || 0) + 4, `id.l=${m1.id?.l} name.l=${m1.name?.l} grid.l=${m1.grid.l}`);
   ok(`${tag} · after scrolling right: header and body stay column-aligned`, m1.hName && m1.name && Math.abs(m1.hName.l - m1.name.l) <= 1 && Math.abs(m1.hName.w - m1.name.w) <= 1 && m1.hHealth && m1.health && Math.abs(m1.hHealth.l - m1.health.l) <= 1, `hName=${m1.hName?.l}/${m1.name?.l} hHealth=${m1.hHealth?.l}/${m1.health?.l}`);
+  // B2132257 — line mode follows the COLUMN's own width, and every shape the brief names is on the page
+  {
+    const dep = m0.depInfo, wide = dep.filter(d => d.w >= 126), narrowC = dep.filter(d => d.w < 110);
+    ok(`${tag} · dep cells measured (pred+succ columns rendered)`, dep.length > 20, `n=${dep.length}`);
+    ok(`${tag} · Pred/Succ columns >=126 wide render TWO lines`, wide.every(d => d.lines === "2"), JSON.stringify(wide.filter(d => d.lines !== "2").slice(0, 2)));
+    ok(`${tag} · Pred/Succ columns <110 wide render ONE line`, narrowC.every(d => d.lines === "1"), JSON.stringify(narrowC.filter(d => d.lines !== "1").slice(0, 2)));
+    ok(`${tag} · no dep text box taller than its row`, dep.every(d => d.boxH <= d.h + 0.5), JSON.stringify(dep.filter(d => d.boxH > d.h + 0.5).slice(0, 2)));
+    if (narrowC.length) {
+      const one = narrowC.filter(d => d.lines === "1");
+      ok(`${tag} · one-line: exactly one text row, ID never clipped`, one.every(d => d.slots === 1 && d.labelClipped === false && /^\S*\d/.test(d.text)), JSON.stringify(one.filter(d => !(d.slots === 1 && d.labelClipped === false)).slice(0, 2)));
+      ok(`${tag} · one-line: a long name ends in an ellipsis`, one.some(d => d.ellipsis), `ellipsised=${one.filter(d => d.ellipsis).length}/${one.length}`);
+      const t5 = one.find(d => d.k === "predecessors" && d.items === 3), t2 = one.find(d => d.k === "successors" && d.items === 3);
+      ok(`${tag} · one-line: three predecessors -> first + "+2"`, t5 && t5.plus === "+2" && /^\d/.test(t5.text), JSON.stringify(t5));
+      ok(`${tag} · one-line: three successors -> first + "+2"`, t2 && t2.plus === "+2" && t2.items === 3, JSON.stringify(t2));
+    }
+    if (wide.length) {
+      const t5 = wide.find(d => d.k === "predecessors" && d.items === 3);
+      ok(`${tag} · two-line: three predecessors still show two + "+1" (unchanged)`, t5 && t5.plus === "+1" && t5.slots === 2, JSON.stringify(t5));
+      const lone = wide.find(d => d.k === "predecessors" && d.items === 1 && d.text.length > 40);
+      ok(`${tag} · two-line: one long-named predecessor wraps onto line 2 (unchanged)`, lone && lone.slots === 0 && lone.lines === "2", JSON.stringify(lone));
+    }
+  }
   if (m0.predSample) ok(`${tag} · predecessor keeps its ID, has a tooltip with the full text`, /^\d+/.test((m0.predSample.text || "").trim()) && !!m0.predSample.title, JSON.stringify(m0.predSample));
   if (errs.length) ok(`${tag} · no page errors`, false, errs.join(" | "));
   // KNOWN-GOOD arm: the wide desktop run must see the whole table with nothing to scroll.
-  if (view === "grid" && w === 1440 && h === 900 && !(m0.grid.maxSl <= 1 && m0.rows >= 10)) { voidRun = true; console.log(`VOID — known-good arm (1440×900) did not report a fully-fitting table: maxSl=${m0.grid.maxSl} rows=${m0.rows}`); }
+  if (CFG === "owner" && view === "grid" && w === 1440 && h === 900 && !(m0.grid.maxSl <= 1 && m0.rows >= 10)) { voidRun = true; console.log(`VOID — known-good arm (1440×900) did not report a fully-fitting table: maxSl=${m0.grid.maxSl} rows=${m0.rows}`); }
+  // KNOWN-GOOD arm for B2132257: default 148-wide columns at a wide window must report TWO lines.
+  if (CFG === "dflt" && view === "grid" && w >= 1920 && !(m0.depInfo.length > 20 && m0.depInfo.every(d => d.lines === "2"))) { voidRun = true; console.log(`VOID — known-good arm (dflt ${w}×${h}) did not report two-line dep cells: ${JSON.stringify(m0.depInfo.slice(0, 2))}`); }
   await page.close();
 }
 
 // ── SECTION B — edge cases (owner config, 960×700): keyboard reveal, grid zoom, Split divider extremes ──────────
+CFG = "owner";
 if (!process.env.SKIP_EDGE) {
   async function openFixture(page, view, extra = {}) {
     page.on("dialog", d => d.accept());
