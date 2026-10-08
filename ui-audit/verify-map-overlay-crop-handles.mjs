@@ -58,10 +58,10 @@ async function cleanup() {
 try {
   const buildNow = () => page.evaluate(() => fetch("/version.json", { cache: "no-store" }).then((r) => r.json()).then((j) => j.build).catch(() => null));
   const geo = () => page.evaluate(() => {
-    const pane = document.querySelector(".leaflet-sitePlanHandlesPane-pane");
+    const pane = document.querySelector(".leaflet-sitePlanHandles-pane");
     const bb = (el) => { const b = el.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height, cx: b.x + b.width / 2, cy: b.y + b.height / 2 }; };
     const poly = pane ? [...pane.querySelectorAll("polygon")] : [];
-    const im = document.querySelector(".leaflet-sitePlanOverlayPane-pane img, .leaflet-sitePlanOverlayPane-pane canvas");
+    const im = document.querySelector(".leaflet-sitePlanOverlay-pane img, .leaflet-sitePlanOverlay-pane canvas");
     return { boundary: poly[1] ? bb(poly[1]) : null, grips: pane ? [...pane.querySelectorAll("rect")].filter((r) => r.getAttribute("width") === "11").map(bb) : [], rot: poly[2] ? bb(poly[2]) : null, img: im ? bb(im) : null };
   });
   const waitHandles = async (ms = 90000) => { const t = Date.now(); let g; while (Date.now() - t < ms) { g = await geo(); if (g.boundary && g.grips.length === 4 && g.img && g.img.w > 20) return g; await sleep(1500); } return g; };
@@ -108,7 +108,7 @@ try {
   }
   await shot("map-handles-cropped");
   check("placed through the real flow; the Map handles are armed (4 grips, outline, rotate grip, image layer)", !!g.boundary && g.grips.length === 4 && !!g.rot && !!g.img, JSON.stringify({ grips: g.grips && g.grips.length, img: !!g.img }));
-  if (!g.boundary || g.grips.length !== 4 || !g.img) console.log("  diag:", JSON.stringify(await page.evaluate(() => { const p = document.querySelector(".leaflet-sitePlanHandlesPane-pane"); return { pane: !!p, svgDisplay: p && p.querySelector("svg") && p.querySelector("svg").style.display, polys: p ? [...p.querySelectorAll("polygon")].map((e) => (e.getAttribute("points") || "").slice(0, 60)) : null, overlayPane: !!document.querySelector(".leaflet-sitePlanOverlayPane-pane"), imgs: document.querySelectorAll(".leaflet-sitePlanOverlayPane-pane *").length }; })), "| page errors:", JSON.stringify(pageErrors.slice(0, 5)));
+  if (!g.boundary || g.grips.length !== 4 || !g.img) console.log("  diag:", JSON.stringify(await page.evaluate(() => { const p = document.querySelector(".leaflet-sitePlanHandles-pane"); return { pane: !!p, svgDisplay: p && p.querySelector("svg") && p.querySelector("svg").style.display, polys: p ? [...p.querySelectorAll("polygon")].map((e) => (e.getAttribute("points") || "").slice(0, 60)) : null, panes: [...document.querySelectorAll(".leaflet-pane")].map((e) => e.className.replace(/leaflet-pane\s*/, "")).slice(0, 14), overlayPane: !!document.querySelector(".leaflet-sitePlanOverlay-pane"), imgs: document.querySelectorAll(".leaflet-sitePlanOverlay-pane *").length }; })), "| page errors:", JSON.stringify(pageErrors.slice(0, 5)));
   if (!g.boundary || g.grips.length !== 4 || !g.img) throw new Error("VOID — handles not armed; the instrument cannot see them");
   const r0 = await row();
   check("the saved overlay carries the rect crop I drew (≈ x 60%–80%, y 12.5%–31%)", !!r0 && !!r0.crop && near(r0.crop.x, 600, 40) && near(r0.crop.y, 100, 40) && near(r0.crop.w, 200, 50) && near(r0.crop.h, 150, 50), JSON.stringify(r0 && r0.crop));
