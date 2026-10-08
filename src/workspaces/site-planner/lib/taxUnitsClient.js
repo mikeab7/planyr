@@ -31,7 +31,7 @@ export function fetchTaxUnits(county, acct, fetchImpl = (typeof fetch === "funct
   const p = fetchImpl(`/api/taxunits?county=${encodeURIComponent(county)}&acct=${encodeURIComponent(acct)}`)
     .then((r) => (r.ok ? r.json() : null))
     .catch(() => null)
-    .then((j) => { if (!j) cache.delete(key); return j; }); // a failure is retried on the next open, never cached
+    .then((j) => { if (!j || j.transient) cache.delete(key); return j; }); // a failure (or a "try again" answer) is retried on the next open, never cached
   cache.set(key, p);
   return p;
 }

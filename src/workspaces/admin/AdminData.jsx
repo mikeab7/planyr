@@ -8,6 +8,7 @@ import { useAdminLoad } from "./AdminPanel.jsx";
 import { fetchErrorGroups, shapeErrorGroups, fetchSupportReports, shapeTickets } from "./lib/adminPanels.js";
 import { fetchUsersOverview, shapeUsers, isInternalEmail } from "./lib/adminUsers.js";
 import { foldIssues } from "./lib/adminIssues.js";
+import { filterTickets } from "./lib/adminSupport.js";
 import { prepareCriteriaRequestRows } from "./lib/criteriaRequestsAdmin.js";
 
 const Ctx = createContext(null);
@@ -42,14 +43,19 @@ export function AdminDataProvider({ selfEmail, children }) {
 
   const value = useMemo(() => {
     const users = shapeUsers(usersLoad.data, { selfEmail, marked, now: Date.now() });
-    const tickets = shapeTickets(supportLoad.data);
+    const allTickets = shapeTickets(supportLoad.data);
+    const isInternal = (email) => isInternalEmail(email, { selfEmail, marked });
+    // `tickets` is what Support, the nav badge and the Overview tile SHOW: the same "Hide internal" switch as Users
+    // holds back internal/test-account reports and signed-out reports whose text marks them as a test (B2159505).
+    const { open: tOpen, closed: tClosed, hiddenOpen, hiddenClosed } = filterTickets(allTickets, { hideInternal, isInternal });
+    const tickets = { open: tOpen, closed: tClosed };
     const issues = foldIssues(shapeErrorGroups(errorsLoad.data));
     const criteriaRows = Array.isArray(criteriaLoad.data) ? criteriaLoad.data : [];
     return {
-      users: { ...usersLoad, list: users }, support: { ...supportLoad, tickets }, errors7: { ...errorsLoad, issues },
+      users: { ...usersLoad, list: users }, support: { ...supportLoad, tickets, hiddenOpen, hiddenClosed, allCount: allTickets.open.length + allTickets.closed.length }, errors7: { ...errorsLoad, issues },
       criteria: { ...criteriaLoad, rows: criteriaRows, outstanding: criteriaRows.filter((r) => !r.wired).length },
       hideInternal, setHideInternal, marked, toggleMarked, selfEmail,
-      isInternal: (email) => isInternalEmail(email, { selfEmail, marked }),
+      isInternal,
     };
   }, [usersLoad, supportLoad, errorsLoad, criteriaLoad, hideInternal, marked, toggleMarked, selfEmail]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -12,7 +12,7 @@
  * incomplete and the table stays hidden (owner rule — a partial list understates the total).
  * Verified against HCAD's own page for acct 0591420000105: 016/040/041/042/043/044/046/640, total 1.970988.
  */
-import { remoteZipEntries, scanZipEntryChunks, readZipEntryText } from "./zipRange.js";
+import { remoteZipEntries, scanZipEntryChunks, readZipEntryText, firstAcct, concatBytes } from "./zipRange.js";
 
 export const HCAD_PDATA_URL = "https://hcad.org/hcad-online-services/pdata/";
 export const hcadZipUrl = (year) => `https://download.hcad.org/data/CAMA/${year}/Real_jur_exempt.zip`;
@@ -62,16 +62,6 @@ export function buildUnits(rows, rates) {
   return { complete: true, units, total: round6(units.reduce((s, u) => s + u.rate, 0)) };
 }
 
-/** The 13-digit account that starts the FIRST COMPLETE line of a chunk, or null. Bytes only — no decoding. */
-function firstAcct(c) {
-  const i = c.indexOf(10);
-  if (i < 0 || i + 14 > c.length) return null;
-  let s = "";
-  for (let k = i + 1; k < i + 14; k++) { const b = c[k]; if (b < 48 || b > 57) return null; s += String.fromCharCode(b); }
-  return s;
-}
-const concat = (parts) => { const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0)); let o = 0; for (const p of parts) { out.set(p, o); o += p.length; } return out; };
-
 /**
  * The account's rows from jur_value.txt. The file is ~570 MB and SORTED by account, and Cloudflare kills a Worker
  * whose JavaScript works too hard (error 1102) — decoding the whole prefix to text did exactly that for any
@@ -89,7 +79,7 @@ export async function findAccountRows(url, entry, acct, fetchImpl, seg) {
     return false;
   }, fetchImpl, seg);
   if (!cand.length) return [];
-  const text = "\n" + new TextDecoder().decode(concat(cand));
+  const text = "\n" + new TextDecoder().decode(concatBytes(cand));
   const needle = `\n${acct}\t`;
   const lines = [];
   for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + 1)) {

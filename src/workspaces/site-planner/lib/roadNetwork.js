@@ -241,6 +241,22 @@ export function collapseRingSpikes(ring, opts = {}) {
   const orig = ring.map((p) => ({ x: p.x, y: p.y }));
   let pts = ring.slice();
   let guard = ring.length + 8; // one removal per pass — this can never run long
+  /* ⛔ NEW-1 (B217540 ×3) — THE DRIFT BOUND IS MAINTAINED INCREMENTALLY, NOT RE-MEASURED FROM SCRATCH.
+   * Every candidate removal used to be tested with `ringDrift(orig, next)`: for every ORIGINAL vertex, scan every segment of
+   * the candidate ring — O(n·m) per candidate, per pass. On a dissolved road cluster that is thousands of vertices, and it
+   * was the single largest self-time in a profile of dragging a drive-connected parking field on the owner's Richfield plan
+   * (`yD`/segDist 4.9 s over 24 edits; tasks of 0.5-1.2 s, repeating once per pointer frame). It is the one-sided Hausdorff
+   * distance, and removing ONE vertex changes only TWO segments: an original vertex whose nearest segment is neither of
+   * them keeps exactly its distance (the segment is still there), and can only be pulled CLOSER by the one new segment. So
+   * `best[i]` (distance to the current ring) and `owner[i]` (which segment is nearest — named by the id of its START vertex)
+   * are carried across passes, and a candidate costs O(n) plus a full rescan for the few vertices whose owner was one of the
+   * two removed segments. Same per-pair `segDist`, same max-of-min, so the numbers are IDENTICAL to `ringDrift`'s — asserted
+   * against it, removal for removal, in test/ringDriftIncremental.test.js. */
+  const n0 = orig.length;
+  let ids = ring.map((_, i) => i);
+  let best = new Float64Array(n0);                // every original vertex sits ON the starting ring
+  let owner = new Int32Array(n0);
+  for (let i = 0; i < n0; i++) owner[i] = i;
   while (guard-- > 0 && pts.length > 3) {
     const spikes = ringSpikes(pts, opts);
     if (!spikes.length) break;
@@ -254,11 +270,34 @@ export function collapseRingSpikes(ring, opts = {}) {
     // an unrelated genuine spike elsewhere on the same ring still goes.
     let removed = false;
     for (const s of spikes) {
-      const next = pts.slice();
-      next.splice(s.i, 1);
-      if (next.length < 3) continue;
-      if (ringDrift(orig, next) > passDriftFt) continue;
-      pts = next; removed = true; break;
+      if (pts.length - 1 < 3) continue;
+      const m = pts.length, q = s.i, pi = (q - 1 + m) % m, ni = (q + 1) % m;
+      const idA = ids[pi], idB = ids[q];            // the two segments that disappear: pi→q (start idA) and q→ni (start idB)
+      const next = pts.slice(); next.splice(q, 1);
+      const nb = new Float64Array(n0), no = new Int32Array(n0);
+      const A = pts[pi], B = pts[ni];
+      let worst = 0;
+      for (let i = 0; i < n0; i++) {
+        let b, o;
+        if (owner[i] === idA || owner[i] === idB) {
+          // its nearest segment is gone: the real question again, against the candidate ring
+          b = Infinity; o = -1;
+          const nm = next.length, nids = ids; // ids of `next` = ids without position q
+          for (let j = 0; j < nm; j++) {
+            const d = segDist(orig[i], next[j], next[(j + 1) % nm]);
+            if (d < b) { b = d; o = j < q ? nids[j] : nids[j + 1]; }
+          }
+        } else {
+          b = best[i]; o = owner[i];
+          const d = segDist(orig[i], A, B);          // the one NEW segment can only pull it closer
+          if (d < b) { b = d; o = idA; }
+        }
+        nb[i] = b; no[i] = o;
+        if (b > worst) worst = b;
+      }
+      if (worst > passDriftFt) continue;
+      pts = next; best = nb; owner = no; ids = ids.slice(0, q).concat(ids.slice(q + 1));
+      removed = true; break;
     }
     if (!removed) break;
   }

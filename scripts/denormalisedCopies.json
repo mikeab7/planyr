@@ -410,9 +410,11 @@
     }
   ],
   "ownedColumns": {
+    "ops_ingest_tokens": ["label"],
     "signup_attempts_log": [
       "email_domain"
     ],
+    "cad_taxunit_shards": ["county"],
     "comp_import_drafts": [
       "raw_name",
       "status"

@@ -7,6 +7,12 @@
 
 _Last updated: 2026-10-05._
 
+## 🛠 Admin page: two small one-time steps to finish the automatic Ops refresh and report clean-up (B2159504–B2159507)
+Everything else is built and live. Two things only you can do (the files are attached in chat):
+1. **Ops refreshes itself after every merge** — make up a random string (32+ characters), save it as a GitHub secret named `OPS_INGEST_TOKEN` (repo → Settings → Secrets and variables → Actions), then run the one-line `insert into public.ops_ingest_tokens …` from the top of `admin_ops_ingest.sql` once in the Supabase SQL editor, pasting the SAME string. Until then Ops shows "Not updating" after 3 days.
+2. **Test reports clean themselves up** — run `problem_reports_cleanup.sql` once in the Supabase SQL editor (my tool holds any DELETE for a confirmation, so I couldn't apply it).
+3. (Cowork chat can do this for you) add one closing step to the weekly session-sweep skill so it records itself — the exact wording is on B2159507.
+
 ## 🗄 A decision: schedule edits don't save for any account except yours (B2095121)
 - [ ] **Decide how to fix it.** I found that any account other than yours that edits a schedule gets a silent "refused" from the database — the edit shows on screen and is gone on reload (your account is fine because it already uses the newer per-schedule storage). Today it now shows a red "did NOT save" message instead of failing silently. **Option A (my recommendation):** new accounts start on the newer per-schedule storage — no database change, I build it. **Option B:** change the old table's key so each account gets its own row — small, but it alters the production database, so I won't do it without your yes.
 
