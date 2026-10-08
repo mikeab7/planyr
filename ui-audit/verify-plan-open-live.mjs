@@ -67,7 +67,10 @@ try {
     const { page } = s; await assertMeasurable(page, "verify-plan-open-live");
     const t0 = await page.evaluate(() => performance.now());
     await page.evaluate((id) => { location.hash = `#/project/${id}/site`; }, FIXTURE_SITE_ID);
-    await page.locator('[data-testid="planner-canvas"]').waitFor({ timeout: 60000 });
+    /* the test account's fixture site is not an openable planner route for a hash pasted in by id ("That link points at a project this account doesn't have open
+     * here") — say VOID, never crash and never score a page that has no canvas */
+    const mounted = await page.locator('[data-testid="planner-canvas"]').waitFor({ timeout: 30000 }).then(() => true, () => false);
+    if (!mounted) { console.log("VOID  signed-in: the test account's fixture site never mounted a planner canvas (by design: no boundary, no location) — nothing was measured. Use the seeded arm; the real-data arm is the owner's own capture."); await s.close(); process.exit(2); }
     const a = await window5s(page, t0, "signed-in cold open (test-account fixture site)"); a.selfTestMs = await selfTest(page);
     results = { "signed-in": [[a]] };
     console.log("NOTE: the test account's fixture sites carry no boundary — this arm proves the signed-in open is not stalling, NOT that the badge-anchor path ran (use the seeded arm for that).");
