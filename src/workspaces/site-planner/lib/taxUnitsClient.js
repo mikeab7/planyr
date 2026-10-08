@@ -8,6 +8,7 @@
  * guessed (owner rule, taxRates.js header).
  */
 import { r6 } from "./taxRates.js";
+import { countyRecord } from "./appraisal.js";
 
 // Counties whose per-account answer is wired server-side. A county not listed here never fetches.
 export const TAX_UNIT_COUNTIES = new Set(["harris"]);
@@ -19,7 +20,11 @@ export const acctKey = (county, acct) => `${county}:${String(acct || "").trim()}
 /** The CAD account number off a stored county lot, or null. Pure. */
 export function accountOf(parcel, idField) {
   const a = parcel?.attrs || {};
-  const v = (idField && a[idField]) ?? parcel?.acct ?? null;
+  /* B2194744 — the county record's own account FIRST (any lot with an attribute bag), the stored `acct` only as the
+   * fallback. 36 of 136 Harris lots carry no stored `acct`, and the caller used to pass `COUNTIES_MAP[c].idField`
+   * (always undefined — the registry keeps idField on COUNTIES), so those lots never fetched and showed no table. */
+  const rec = parcel?.attrs ? countyRecord(a, { idField }).account : null;
+  const v = (idField && a[idField]) ?? rec ?? parcel?.acct ?? null;
   const s = v == null ? "" : String(v).replace(/\D/g, "");
   return s || null;
 }

@@ -11,7 +11,7 @@
 import { resolveLayerUrl, getLayerInfo, queryFeatures } from "./arcgis.js";
 import { COUNTIES, COUNTIES_MAP, detectField, statewideFallbackFor, STATEWIDE_PARCEL_LAYER } from "./counties.js";
 import { recordSourceResult } from "./sourceHealth.js";
-import { isPlaceholderValue } from "./appraisal.js";
+import { isPlaceholderValue, countyRecord } from "./appraisal.js";
 
 // A field name gets interpolated into the where-clause and may come from a live (or a
 // user-pasted) layer's metadata, so it must be a plain identifier — reject anything
@@ -76,6 +76,7 @@ export function resolveSearchField(fields, kind, hint, pinned) {
  * silently disagreed. `attrs` is a raw identify-hit attribute bag, keyed by field name; returns the
  * resolved field's value as a string, or null when nothing id-shaped is present or the value is a
  * placeholder ("Null", ""...). */
+const SURROGATE_ID_RE = /^(objectid|fid|oid|objectid_?\d+)$/i;
 export function idAttrFor(county, attrs) {
   if (!attrs) return null;
   const fields = Object.keys(attrs).map((name) => ({ name }));
@@ -84,6 +85,14 @@ export function idAttrFor(county, attrs) {
    * showed the layer's OBJECTID row number as the parcel's account id. */
   const c = COUNTIES[county] || COUNTIES_MAP[county];
   const field = resolveSearchField(fields, "id", c?.idField, !!c?.pinIdField);
+  /* B2194740 — a layer's own ROW NUMBER (OBJECTID/FID) is never a parcel's account. The detector falls back to
+   * it when no id-shaped column matches (measured on real rows: Bernalillo NM `UPC`, Macomb MI `TAX_ID`, whose
+   * stored account was "1"); the county record's resolvers know more column spellings, so ask them, and store
+   * NOTHING rather than a surrogate when they find none. */
+  if (field && SURROGATE_ID_RE.test(String(field).replace(/^.*\./, ""))) {
+    const rec = countyRecord(attrs, { idField: c?.idField }).account;
+    return rec || null;
+  }
   if (!field || !(field in attrs) || isPlaceholderValue(attrs[field])) return null;
   return String(attrs[field]);
 }

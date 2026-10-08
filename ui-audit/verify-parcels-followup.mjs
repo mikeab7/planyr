@@ -31,6 +31,8 @@ const site = {
     { id: "schiel", label: "SCHIEL", points: P(J.schiel), acct: "634440", addr: "SCHIEL", attrs: J.schielAttrs, gisKey: "oid:634440" },
     { id: "p2", label: "Parcel 2", points: P(J.parcel2) },
     { id: "trs", label: "TRS 1B-10", points: P(J.trs), source: "drawn" },
+    // B2194744 — a Harris lot with NO stored acct (36 of 136 real ones): the tax table must still resolve its account from the record.
+    { id: "h129", points: P(J.parcel2).map((q) => ({ x: q.x + 6000, y: q.y })), gisKey: "oid:504281", attrs: { OBJECTID: 504281, HCAD_NUM: "0421030000129", acct_num: "0421030000129", owner_name_1: "BAUER HOCKLEY 550 LP", Acreage: "157.9468 AC", tax_year: "2025" } },
   ],
   els: J.roads.map((r, i) => ({ id: "rd" + i, type: "road", pts: P(r.pts), inlineLabel: r.name, width: 40 })),
   measures: [], callouts: [], markups: [], settings: { setback: 25 }, underlay: null, updatedAt: Date.now(), status: "active", schemaVersion: 12,
@@ -68,8 +70,8 @@ try {
   await page.locator('[data-rail-tab="parcel"]').first().click();
   await T("parcels-panel").waitFor({ timeout: 15000 });
   const rows = await page.locator('[data-testid^="parcel-table-row-"]').count();
-  if (rows !== 3) throw new Error(`VOID: expected the 3 seeded parcels, saw ${rows}`);
-  ok("known-good arm: the untouched list shows the 3 seeded parcels", true);
+  if (rows !== 4) throw new Error(`VOID: expected the 4 seeded parcels, saw ${rows}`);
+  ok("known-good arm: the untouched list shows the 4 seeded parcels", true);
 
   // ---- NEW-2 list row + NEW-3 origin lines
   const rowText = async (id) => (await T("parcel-table-row-" + id).innerText()).replace(/\s+/g, " ");
@@ -123,6 +125,14 @@ try {
   ok("the old Geometry check / APPRAISAL DATA / TAXES blocks are gone", !/Geometry check|Appraisal data|Taxes|Rate source/i.test(pageText), pageText.slice(0, 200));
   ok("'More county fields' disclosure sits inside the record", (await T("parcel-more-fields").count()) === 1);
   await shot("followup-record");
+
+  // ---- B2194744 tax table for a Harris lot with no stored acct (needs the live /api/taxunits — a real deploy, not the preview)
+  if (/^https:/.test(BASE)) {
+    await T("parcel-page-back").click(); await T("parcels-panel").waitFor();
+    await T("parcel-row-h129").click(); await T("parcel-page").waitFor();
+    const tt = await T("parcel-tax-table").waitFor({ timeout: 20000 }).then(() => true, () => false);
+    ok("the 158.20-style Harris lot (no stored acct, HCAD_NUM 0421030000129) shows its tax table", tt);
+  } else console.log("SKIP (preview has no /api/taxunits) — the tax-table arm runs only against a deployed https BASE_URL");
 
   // ---- stall check: the page open and idle must not be a render loop
   const idle = await page.evaluate(() => new Promise((res) => {
