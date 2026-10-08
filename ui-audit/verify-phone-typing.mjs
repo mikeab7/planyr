@@ -342,7 +342,7 @@ const section = async (name, fn) => { if (ONLY && !new RegExp(ONLY).test(name)) 
 const browser = await webkit.launch();
 let liveSchedulesBefore = null;
 if (LIVE) { // seed the throwaway plan the Site Planner surfaces need (a parcel + a building), remembering the schedules that already exist
-  const sd = await openSignedIn({ base: BASE });
+  const sd = await openSignedIn({ base: BASE, engine: "webkit" }) /* same engine as the scored runs: one trust store, one browser */;
   try { liveSchedulesBefore = await listIds(sd.page, "schedules"); await cleanupLive(sd.page, { planId: PROJ }); await seedThrowawayPlan(sd.page, PROJ); } finally { await sd.close(); }
 }
 try {
@@ -417,7 +417,7 @@ try {
 } finally {
   await browser.close();
   if (LIVE) { // owner rule 15: clear what the run made, then PROVE it is gone
-    const sd = await openSignedIn({ base: BASE });
+    const sd = await openSignedIn({ base: BASE, engine: "webkit" });
     try { const c = await cleanupLive(sd.page, { planId: PROJ, scheduleIdsBefore: liveSchedulesBefore }); console.log("live cleanup:", JSON.stringify(c)); check("live cleanup left nothing behind", !c.errors.length && c.left.site === 0 && !c.left.schedules, JSON.stringify(c)); } finally { await sd.close(); }
   }
 }
