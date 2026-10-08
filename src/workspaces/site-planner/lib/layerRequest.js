@@ -118,8 +118,18 @@ export function featureLayerOptions(cfg, opacity, pane, opts = {}) {
   const noFill = cfg.role === "line" ? { fill: false } : null;
   o.style = typeof cfg.styleFn === "function"
     ? (feature) => (noFill ? { ...noFill, ...cfg.styleFn(feature && feature.properties, opacity) } : cfg.styleFn(feature && feature.properties, opacity))
-    : () => ({ color: cfg.color || "#b91c1c", weight: cfg.weight || 2, opacity, fillOpacity: 0, ...(noFill || {}) });
+    : () => featureBaseStyle(cfg, opacity);
   return o;
+}
+
+/* The flat path style of a `esriFeature` row with no per-feature `styleFn`. ONE definition, read by
+ * the layer's construction (`featureLayerOptions`) AND by its opacity setter in layers.js. NEW-2
+ * (EIA pipelines): the setter used to restyle with a bare `{ opacity }`, and esri-leaflet keeps the
+ * LAST style handed to `setStyle` as the style for every feature it loads afterwards — so every
+ * line fetched after the first opacity write was born with Leaflet's default stroke (the default blue,
+ * weight 3) and only the first batch kept the row's colour. */
+export function featureBaseStyle(cfg, opacity) {
+  return { color: cfg.color || "#b91c1c", weight: cfg.weight || 2, opacity, fillOpacity: 0, ...(cfg.role === "line" ? { fill: false } : {}) };
 }
 
 /* Can this layer's service answer an ArcGIS `/identify` at a point (NEW-2)?

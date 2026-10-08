@@ -387,6 +387,10 @@ const SHEET_SETTLE_MS = 1200;
 // --accent-food, literal for the same canvas reason as COLORS — ties the selected pin's ring
 // and halo to the panel's own accent dot (VisitPanel.jsx), "the eye connects them."
 const SELECTED_ACCENT = "#BE3B22";
+// NEW-1 / B2088288 — a selected restaurant list: members grow by LIST_GROW, his other saved pins shrink by
+// LIST_SHRINK ("one size down"); the ring + name label carry the list colour (data, passed in as `emphasisColor`).
+const LIST_GROW = 3;
+const LIST_SHRINK = 2;
 
 function boundsOf(map) {
   const b = map.getBounds();
@@ -509,6 +513,7 @@ export default function FoodMap({
   // B2046224 ×4 — phone held sideways: the place card is docked down the RIGHT edge (`sidePanelPx` wide, measured
   // by the card itself), there is no bottom sheet, and every selection frames the pin in what is left beside it.
   landscape = false, sidePanelPx = 0,
+  emphasisKeys = null, emphasisColor = null, listPlaces, listManualPins,
 }) {
   const hostRef = useRef(null);
   const mapRef = useRef(null);
@@ -941,11 +946,28 @@ export default function FoodMap({
     // otherwise have no pin at all until that snapshot refetches.
     let selectedDrawn = false;
     selectedPosRef.current = null;
+    // NEW-1 / B2088288 — a SELECTED restaurant list emphasises its members over everything else of his:
+    // on-list = bigger + a ring in the list's colour + its name always shown; his other saved pins step
+    // down one size and keep their (hover-only) name. Pin COLOUR is never touched (the rating ramp), nothing
+    // fades, and the browse snapshot's white dots are not his — they are left exactly as they were. With no
+    // list selected (`emphasisKeys` null) none of this runs and the map is what it was before lists existed.
+    const emphasised = [];
+    const listTier = (opts) => {
+      if (!emphasisKeys || !opts.own) return "plain";
+      return opts.key != null && emphasisKeys.has(opts.key) ? "on" : "off";
+    };
+    const listRadius = (tier, base) => (tier === "on" ? base + LIST_GROW : tier === "off" ? Math.max(base - LIST_SHRINK, 3) : base);
+    const drawListRing = (lat, lon, radius) => L.circleMarker([lat, lon], {
+      renderer: layer.options.renderer, radius: radius + 4, weight: 3, color: emphasisColor || SELECTED_ACCENT,
+      fillOpacity: 0, interactive: false,
+    }).addTo(layer);
     const addPin = (lat, lon, color, title, onClick, opts = {}) => {
       const isSelected = opts.key != null && opts.key === selectedKey;
       if (isSelected) selectedDrawn = true;
       if (isSelected) selectedPosRef.current = [lat, lon];
-      const baseRadius = opts.radius ?? 7;
+      const tier = listTier(opts);
+      const baseRadius = listRadius(tier, opts.radius ?? 7);
+      if (tier === "on") { drawListRing(lat, lon, baseRadius); emphasised.push(opts.key); }
       // Selected: noticeably larger, an accent-coloured ring (never the plain white every other
       // state uses), PLUS a soft halo behind it — unmistakable at a glance, distinct from both
       // the unrated-neutral and the rated-colour states (owner, 2026-08-19).
@@ -963,7 +985,8 @@ export default function FoodMap({
         color: isSelected ? SELECTED_ACCENT : "#fff",
         fillColor: color, fillOpacity: opts.fillOpacity ?? 0.95,
       });
-      m.bindTooltip(title, { direction: "top", offset: [0, -6] });
+      if (tier === "on") m.bindTooltip(title, { permanent: true, direction: "right", offset: [baseRadius + 8, 0], className: "food-list-label" });
+      else m.bindTooltip(title, { direction: "top", offset: [0, -6] });
       if (onClick) {
         // B668193 — on a coarse (touch) pointer, resolution happens centrally instead (the
         // resolver effect below), where a wider, nearest-centre-aware hit test replaces Leaflet's
@@ -984,7 +1007,9 @@ export default function FoodMap({
       const isSelected = opts.key != null && opts.key === selectedKey;
       if (isSelected) selectedDrawn = true;
       if (isSelected) selectedPosRef.current = [lat, lon];
-      const baseRadius = opts.radius ?? 7;
+      const tier = listTier(opts);
+      const baseRadius = listRadius(tier, opts.radius ?? 7);
+      if (tier === "on") { drawListRing(lat, lon, baseRadius); emphasised.push(opts.key); }
       if (isSelected) {
         L.circleMarker([lat, lon], {
           renderer: layer.options.renderer, radius: baseRadius + 12, weight: 0,
@@ -1002,7 +1027,8 @@ export default function FoodMap({
         color: isSelected ? SELECTED_ACCENT : COLORS.wishlist,
         fillColor: COLORS.wishlist, fillOpacity: 0,
       });
-      m.bindTooltip(`${title} · want to try`, { direction: "top", offset: [0, -6] });
+      if (tier === "on") m.bindTooltip(`${title} · want to try`, { permanent: true, direction: "right", offset: [baseRadius + 8, 0], className: "food-list-label" });
+      else m.bindTooltip(`${title} · want to try`, { direction: "top", offset: [0, -6] });
       // B668193 — the same coarse-pointer nearest-centre resolution as addPin's own pins; a
       // wishlist ring is exactly as small and exactly as easy to tap-miss on a phone.
       if (onClick) {
@@ -1018,20 +1044,30 @@ export default function FoodMap({
     // 1-10 ramp so a glance shows where the good ones are; a visited-but-not-yet-rated place
     // falls back to the flat logged/manual colour.
     for (const p of loggedPlaces || []) {
-      addPin(p.lat, p.lon, colorForRating(p.avgRating) || COLORS.logged, p.name, () => onSelectPlace?.(p), { key: `place:${p.id}` });
+      addPin(p.lat, p.lon, colorForRating(p.avgRating) || COLORS.logged, p.name, () => onSelectPlace?.(p), { key: `place:${p.id}`, own: true });
     }
     for (const pin of manualPins || []) {
-      addPin(pin.lat, pin.lon, colorForRating(pin.avgRating) || COLORS.manual, pin.name, () => onSelectManualPin?.(pin), { key: manualPinKey(pin.name, pin.lat, pin.lon) });
+      addPin(pin.lat, pin.lon, colorForRating(pin.avgRating) || COLORS.manual, pin.name, () => onSelectManualPin?.(pin), { key: manualPinKey(pin.name, pin.lat, pin.lon), own: true });
     }
     // Flagged-but-unvisited places/pins — FoodApp already excludes anything also visited, so
     // there's never a double-draw here. Survives the zoomed-out gate below (drawn here, outside
     // the tooSmall-gated block further down) — a shortlist has to be visible at the zoom it's useful.
     for (const p of wishlistPlaces || []) {
-      addHollowPin(p.lat, p.lon, p.name, () => onSelectPlace?.(p), { key: `place:${p.id}` });
+      addHollowPin(p.lat, p.lon, p.name, () => onSelectPlace?.(p), { key: `place:${p.id}`, own: true });
     }
     for (const pin of wishlistManualPins || []) {
-      addHollowPin(pin.lat, pin.lon, pin.name, () => onSelectManualPin?.(pin), { key: manualPinKey(pin.name, pin.lat, pin.lon) });
+      addHollowPin(pin.lat, pin.lon, pin.name, () => onSelectManualPin?.(pin), { key: manualPinKey(pin.name, pin.lat, pin.lon), own: true });
     }
+    // Members of the SELECTED list that are neither visited nor flagged (App passes them only while a list is
+    // selected, so with no list selected the map is unchanged). An unmarked place has no rating, so it keeps the
+    // neutral colour — the list shows as size + ring + label, never as a recolour.
+    for (const p of listPlaces || []) {
+      addPin(p.lat, p.lon, COLORS.unlogged, p.name, () => onSelectPlace?.(p), { key: `place:${p.id}`, own: true });
+    }
+    for (const pin of listManualPins || []) {
+      addPin(pin.lat, pin.lon, COLORS.unlogged, pin.name, () => onSelectManualPin?.(pin), { key: manualPinKey(pin.name, pin.lat, pin.lon), own: true });
+    }
+    const listDrawnIds = new Set((listPlaces || []).map((p) => p.id));
 
     // The reference snapshot — a lookup table he reaches into once zoomed to a neighbourhood,
     // never metro-wide content. loggedIds excludes places already drawn above. Deliberately
@@ -1042,11 +1078,11 @@ export default function FoodMap({
     const REFERENCE_PIN = { radius: 5, fillOpacity: 0.7 };
     if (!tooSmall) {
       for (const p of places || []) {
-        if (loggedIds?.has(p.id)) continue;
+        if (loggedIds?.has(p.id) || listDrawnIds.has(p.id)) continue;
         addPin(p.lat, p.lon, COLORS.unlogged, p.name, () => onSelectPlace?.(p), { ...REFERENCE_PIN, key: `place:${p.id}` });
       }
       for (const p of overpassPlaces || []) {
-        if (loggedIds?.has(p.id)) continue; // already shown from the snapshot pass, avoid a double pin
+        if (loggedIds?.has(p.id) || listDrawnIds.has(p.id)) continue; // already shown from the snapshot pass, avoid a double pin
         addPin(p.lat, p.lon, COLORS.unlogged, `${p.name} (live search)`, () => onSelectPlace?.(p), { ...REFERENCE_PIN, key: `place:${p.id}` });
       }
     }
@@ -1068,9 +1104,11 @@ export default function FoodMap({
     // drawn selected). Lets a harness assert "picking it marks it as the selected one" without reading
     // canvas pixels; nothing in the app reads it.
     if (hostRef.current) hostRef.current.dataset.selectedPin = selectedKey && selectedDrawn ? selectedKey : "";
+    // NEW-1 / B2088288 — read-only probe: the pin keys drawn in the on-list style ("" when no list is selected).
+    if (hostRef.current) hostRef.current.dataset.listEmphasis = emphasisKeys ? emphasised.join("\n") : "";
     // B2046224 ×4 — read-only: where the selected pin is, so a harness can find it on a live (non-fixture) place.
     if (hostRef.current) { hostRef.current.dataset.selectedLat = selectedPosRef.current ? String(selectedPosRef.current[0]) : ""; hostRef.current.dataset.selectedLon = selectedPosRef.current ? String(selectedPosRef.current[1]) : ""; }
-  }, [places, loggedPlaces, loggedIds, manualPins, wishlistPlaces, wishlistManualPins, overpassPlaces, tooSmall, basemap, selectedKey, selectedPlaceInfo, onSelectPlace, onSelectManualPin, coarsePointer]);
+  }, [places, loggedPlaces, loggedIds, manualPins, wishlistPlaces, wishlistManualPins, overpassPlaces, tooSmall, basemap, selectedKey, selectedPlaceInfo, onSelectPlace, onSelectManualPin, coarsePointer, emphasisKeys, emphasisColor, listPlaces, listManualPins]);
 
   // B668193 — the coarse-pointer nearest-centre tap resolver. Only ever registered on a coarse
   // pointer (desktop is untouched — no listener, no behaviour change); skipped while `pinMode` is

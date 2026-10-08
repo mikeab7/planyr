@@ -22,6 +22,7 @@
  * Usage: build with the fixture env (ui-audit/lib/foodFixture.mjs), serve it, then
  *   node ui-audit/verify-food-landscape.mjs [baseUrl] [--shots=<dir>] [--only=<regex>]
  */
+import { listsLayoutProbe } from "./lib/foodListsKit.mjs";
 import { webkit, chromium, devices } from "playwright";
 import { mkdirSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
@@ -177,6 +178,9 @@ async function landscapeFlow({ engine, browser, phoneName, label, insets }) {
   await assertMeasurable(page, "verify-food-landscape"); // landscape-flow — FOREGROUND-OR-VOID: visible tab + live rAF before anything is scored
   try {
     if (insets) { const r = await readSafeAreas(page); check(`${tag} — KNOWN ANSWER: injected safe-area insets read back`, r.left === insets.left && r.right === insets.right && r.bottom === insets.bottom, JSON.stringify(r)); }
+    // 0. NEW-1 / B2088288 — a selected restaurant list must not break the sideways frame (lib/foodListsKit.mjs)
+    await listsLayoutProbe(page, (name, ok, detail) => check(name, ok, detail), tag);
+    await page.locator('[data-testid="food-list-chip-all"]').tap(); await page.waitForTimeout(400);
     // 1. pick
     await pick(page, "aburi", /aburi/i);
     let p = await probe(page, ABURI);
