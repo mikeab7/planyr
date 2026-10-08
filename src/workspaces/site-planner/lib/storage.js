@@ -1010,7 +1010,7 @@ export function readBackSite(id) {
   if (w && w.key === sitesKey() && w.obj[id]) return w.obj[id];
   return loadSite(id);
 }
-/* ⛔ NEW-1 (B217540 ×3 / B1317824 ×3, the follow-up to #2112) — THE PER-EDIT FLOOR WAS THE WHOLE-STORE PARSE + STRINGIFY.
+/* ⛔ NEW-1 (B217540 ×3 / B1317824 ×3, the follow-up to PR 2112) — THE PER-EDIT FLOOR WAS THE WHOLE-STORE PARSE + STRINGIFY.
  * The owner's 2026-10-07 capture (build a7f43c3, plan sms4zs8unbkg): ~10 long tasks of 255-275 ms, ~200 ms of each in ONE
  * function, one per edit at ~1/s, with the heap climbing 157 → 399 MB across three edits while the element count stayed
  * flat. That function is the autosave's `writeMirror` closure; inside it `saveSite` did, per call, a `JSON.parse` of EVERY
