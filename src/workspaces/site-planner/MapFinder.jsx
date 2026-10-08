@@ -2642,7 +2642,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     }
     if (nIsNew && nKind === "pin") {
       const html = `<div data-testid="map-note-target-pin" style="width:30px;height:30px;border-radius:${RADIUS.pill}px;transform:translate(-50%,-50%);`
-        + `border:3px solid ${NOTE_MARKER_COLOR};background:rgba(184,65,140,0.18);box-shadow:${MAP_PIN_SHADOW};"></div>`;
+        + `border:3px solid ${NOTE_MARKER_COLOR};background:${NOTE_MARKER_COLOR}2e;box-shadow:${MAP_PIN_SHADOW};"></div>`;
       L.marker([nLat, nLon], { icon: L.divIcon({ className: "", html, iconSize: [0, 0] }), interactive: false, keyboard: false, zIndexOffset: 650 }).addTo(group);
     }
     group.addTo(map);
@@ -4479,7 +4479,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
               SAME thing (a plan) competing for the same press. These three make different things,
               and hiding two of them behind a caret is what forced the toolbar to guess with a mode
               in the first place. The caret and its AnchoredMenu are gone with it. */}
-          {!selectMode && !placingCompPin && !decideTarget && !editingNote && (
+          {!selectMode && !placingCompPin && !decideTarget && (
             <>
               <Button
                 variant="primary"

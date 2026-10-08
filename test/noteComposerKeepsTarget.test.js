@@ -70,6 +70,7 @@ describe("a stray tap cannot retarget or discard the note", () => {
   it("Enter and the decide / selecting bars step aside while the composer is open", () => {
     expect(finder).toMatch(/if \(editingNoteRef\.current\) return; \/\/ the note composer is open/);
     expect(finder).toMatch(/\{decideTarget && !editingNote && \(/);
-    expect(finder).toMatch(/!selectMode && !placingCompPin && !decideTarget && !editingNote && \(/);
+    // the at-rest row is already gated on `!decideTarget`, and the held ground keeps decideTarget set
+    expect(finder).toMatch(/!selectMode && !placingCompPin && !decideTarget && \(/);
   });
 });
