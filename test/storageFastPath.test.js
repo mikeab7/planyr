@@ -46,18 +46,24 @@ describe("siteExistsLocally", () => {
 });
 
 describe("readBackSite — the persistence verifier's read", () => {
-  it("returns the stored record's drawn collections (what the B473/B592 check counts) without a parse while untouched", () => {
+  it("returns the stored record's drawn collections (what the B473/B592 check counts) by parsing ONE plan entry, never the library", () => {
+    for (let i = 0; i < 20; i++) saveSite({ id: `o${i}`, els: [bld("a"), bld("b"), bld("c")] });
     saveSite({ id: "p1", els: [bld("a"), bld("b")] });
+    const storeChars = Object.keys(localStorage).length ? 1 : 1;   // (keys not enumerable on the mock; size is asserted via the parse below)
     const parse = vi.spyOn(JSON, "parse");
     const back = readBackSite("p1");
-    expect(parse).not.toHaveBeenCalled();
+    const parsed = parse.mock.calls.reduce((n, c) => n + (typeof c[0] === "string" ? c[0].length : 0), 0);
     parse.mockRestore();
     expect((back.els || []).map((e) => e.id).sort()).toEqual(["a", "b"]);
+    expect(parsed).toBeLessThan(JSON.stringify(back).length * 2 + 50);   // one entry's worth, not 21 plans'
+    expect(storeChars).toBe(1);
   });
-  it("sees ANOTHER writer's change (the cross-tab case the check exists for) — it reads the real store then", () => {
+  it("sees ANOTHER writer's change (the cross-tab case the check exists for) — it reads the real entry then", () => {
     saveSite({ id: "p1", els: [bld("a"), bld("b")] });
-    const stored = JSON.parse(localStorage.getItem(KEY));
-    stored.p1.els = stored.p1.els.filter((e) => e.id === "a");   // a second tab dropped "b"
+    const stored = JSON.parse(localStorage.getItem(KEY));       // an older-build tab deletes "b" and writes the legacy entry whole
+    stored.p1.els = stored.p1.els.filter((e) => e.id === "a");
+    stored.p1.deletedIds = ["b"];
+    stored.p1.updatedAt = (stored.p1.updatedAt || 0) + 5000;
     localStorage.setItem(KEY, JSON.stringify(stored));
     const back = readBackSite("p1");
     expect((back.els || []).map((e) => e.id)).toEqual(["a"]);

@@ -26,7 +26,7 @@
  * fields, that is a sign it needs the real `loadSitesList()`, not an extension of this one.
  */
 import { activeUid, cloudSitesKey } from "./activeUser.js";
-import { snapshotIfCurrent } from "./sitesSnapshot.js";
+import * as planStore from "./planStore.js";
 import { reconcileGroupNames, renameStamp } from "./projectName.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { DEFAULT_STATUS, LEGACY_STATUS, normStatus, isLegacyRecord, normRole } from "./siteStatus.js";
@@ -78,15 +78,14 @@ function projectSummaryOf(p) {
 let summariesMemo = null;   // { key, raw, models }
 export function loadSiteSummaries() {
   const key = sitesKeyNow();
+  /* B2165120 — the change token is the per-plan store's tiny index (a unique `gen` per write), not the library's bytes: it costs
+   * a ~60-byte read to learn "nothing changed", whatever the library weighs. In the blob fallback it is still the blob's text. */
   let rawStr = null;
-  try { rawStr = localStorage.getItem(key); } catch (_) { rawStr = null; }
+  try { rawStr = planStore.changeStamp(key); } catch (_) { rawStr = null; }
   if (summariesMemo && summariesMemo.key === key && summariesMemo.raw === rawStr) return summariesMemo.models.map((m) => ({ ...m }));
-  /* …and when the bytes DID change, it is usually because this very tab just saved a plan, and storage.js is holding the
-   * object it wrote: take that (byte-exact proof, read-only) instead of parsing the whole store again. */
-  const held = snapshotIfCurrent(key, rawStr);
+  /* …and when it DID change, read the shared plan objects (already parsed and cached by the store — read-only here). */
   let parsed = {};
-  if (held) parsed = held.obj;
-  else { try { parsed = JSON.parse(rawStr) || {}; } catch (_) { parsed = {}; } }
+  try { parsed = planStore.readShared(key) || {}; } catch (_) { parsed = {}; }
   const raw = Object.values(parsed).map(projectSummaryOf);
   const { models, ambiguous } = reconcileGroupNames(raw);
   for (const a of ambiguous) {
