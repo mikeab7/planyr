@@ -17036,23 +17036,119 @@ const DEFAULT_MASTER_WIDTHS = {
 // Groups are ordered by owner label, then schedule name, then `projId` as a stable tiebreak (two
 // schedules can share BOTH a name and an owner before either is renamed) — never insertion order,
 // which scattered one project's several schedules across the table instead of keeping them together.
-function groupRowsByProject(rows) {
+function groupRowsByProject(rows, order) {
+  // NEW-1 (2026-10-08, B2210992 follow-up) — `order` is the owner's project order: the project (group)
+  // ids the shell pushes (planar:project-order), the SAME list the Dashboard's Pursuits card uses. A
+  // schedule linked to a project in that list sorts by that project's position; anything else (an
+  // org-owned schedule, a project the shell doesn't know) keeps the owner-label order BENEATH them.
+  // Schedules of ONE project stay together, by schedule name. The column sort never reaches this
+  // function — it orders the rows WITHIN each group (they arrive already sorted).
+  const rank = new Map();
+  if (Array.isArray(order)) order.forEach((id, i) => { if (!rank.has(String(id))) rank.set(String(id), i); });
   const groups = new Map();
   rows.forEach(t => {
     if (!groups.has(t.projId)) groups.set(t.projId, []);
     groups.get(t.projId).push(t);
   });
   return [...groups.entries()]
-    .map(([projId, gRows]) => ({
-      projId, gRows,
-      ownerLabel: gRows[0].projOwnerLabel || "",
-      name: gRows[0].projName || "",
-      label: gRows[0].projLabel || "",
-    }))
+    .map(([projId, gRows]) => {
+      const siteId = gRows[0].projSiteId != null ? gRows[0].projSiteId : null;
+      return {
+        projId, gRows, siteId,
+        rank: siteId != null && rank.has(String(siteId)) ? rank.get(String(siteId)) : Infinity,
+        ownerLabel: gRows[0].projOwnerLabel || "",
+        name: gRows[0].projName || "",
+        label: gRows[0].projLabel || "",
+      };
+    })
     .sort((a, b) =>
+      (a.rank !== b.rank ? (a.rank < b.rank ? -1 : 1) : 0) ||
       a.ownerLabel.localeCompare(b.ownerLabel) ||
       a.name.localeCompare(b.name) ||
       String(a.projId).localeCompare(String(b.projId)));
+}
+
+// NEW-1 (2026-10-08) — the owner's project order, pushed by the shell. Held at module scope (a single
+// listener, installed once) so a push that lands before the Task Report is on screen is not lost; the
+// report asks for a fresh push when it mounts. The page never decides or stores the order itself: a move
+// is only ever REQUESTED (planar:project-order-move) and comes back as a new push.
+let _projectOrder = { ids: null, canOrder: false, error: null };
+const _projectOrderSubs = new Set();
+if (typeof window !== "undefined") {
+  window.addEventListener("message", (e) => {
+    if (e.origin !== window.location.origin) return;
+    const m = e.data;
+    if (!m || m.source !== "planar-shell" || m.type !== "planar:project-order") return;
+    _projectOrder = {
+      ids: Array.isArray(m.ids) ? m.ids.filter(x => typeof x === "string") : null,
+      canOrder: !!m.canOrder,
+      error: m.error ? String(m.error) : null,
+    };
+    _projectOrderSubs.forEach(f => f());
+  });
+}
+function postToShell(msg) {
+  try { if (window.parent && window.parent !== window) window.parent.postMessage({ source: "planar-seq", ...msg }, window.location.origin); } catch (_) {}
+}
+function useProjectOrder() {
+  const [, tick] = React.useState(0);
+  React.useEffect(() => {
+    const f = () => tick(n => n + 1);
+    _projectOrderSubs.add(f);
+    postToShell({ type: "planar:project-order-request" });
+    return () => { _projectOrderSubs.delete(f); };
+  }, []);
+  return _projectOrder;
+}
+
+// The ⋯ menu on a project group header: Move to top / up / down / bottom. Module scope on purpose
+// (MODULE-SCOPE-COMPONENTS) — defined inside MasterView it would remount every render and drop its open state.
+function GroupOrderMenu({label, isFirst, isLast, onPick}) {
+  const [pos, setPos] = React.useState(null); // {top, right} while open (fixed — the table wrap clips absolute menus)
+  const btnRef = useRef(null);
+  useEffect(() => {
+    if (!pos) return;
+    const close = (e) => { if (e && e.type === "keydown" && e.key !== "Escape") return; setPos(null); };
+    const down = (e) => { if (!e.target.closest || !e.target.closest("[data-grp-menu]")) setPos(null); };
+    window.addEventListener("pointerdown", down, true);
+    window.addEventListener("keydown", close, true);
+    window.addEventListener("resize", close);
+    document.addEventListener("scroll", close, true);
+    return () => {
+      window.removeEventListener("pointerdown", down, true);
+      window.removeEventListener("keydown", close, true);
+      window.removeEventListener("resize", close);
+      document.removeEventListener("scroll", close, true);
+    };
+  }, [pos]);
+  const open = (e) => {
+    e.stopPropagation();
+    if (pos) { setPos(null); return; }
+    const r = btnRef.current.getBoundingClientRect();
+    setPos({top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right)});
+  };
+  const item = (txt, to, disabled) => (
+    <button type="button" role="menuitem" disabled={disabled} onClick={() => { setPos(null); onPick(to); }}
+      style={{display:"block",width:"100%",textAlign:"left",padding:"9px 14px",border:"none",background:"transparent",
+        fontFamily:"inherit",fontSize:13,color:disabled?"var(--bd2)":"var(--txt)",cursor:disabled?"default":"pointer"}}>{txt}</button>
+  );
+  return (
+    <span data-grp-menu="1" style={{display:"inline-flex"}}>
+      <button ref={btnRef} type="button" data-grp-menu-btn="1" onClick={open} aria-haspopup="menu" aria-expanded={!!pos}
+        title={`Order options for ${label}`} aria-label={`Order options for ${label}`}
+        style={{width:30,height:30,borderRadius:6,border:"1px solid var(--bd2)",background:"var(--surf)",color:"var(--txt)",
+          fontSize:16,lineHeight:1,cursor:"pointer",fontFamily:"inherit"}}>⋯</button>
+      {pos && (
+        <div role="menu" style={{position:"fixed",top:pos.top,right:pos.right,zIndex:1000,minWidth:170,padding:"4px 0",
+          background:"var(--surf)",border:"1px solid var(--bd2)",borderRadius:8,boxShadow:"0 6px 20px rgba(27,31,36,.18)"}}>
+          {item("Move to top", "top", isFirst)}
+          {item("Move up", "up", isFirst)}
+          {item("Move down", "down", isLast)}
+          {item("Move to bottom", "bottom", isLast)}
+        </div>
+      )}
+    </span>
+  );
 }
 
 function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
@@ -17129,6 +17225,8 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
       // schedule object `p`, so every row of this schedule shares one (cheap) computation.
       const { ownerLabel } = scheduleLabelParts(p);
       const projLabel = crossScheduleLabel(p);
+      const _own = ownerOf(p); // NEW-1 — the project (group) this schedule belongs to; null for an org-owned one
+      const projSiteId = _own.kind === OWNER_KIND_SITE ? _own.siteId : null;
       return p.tasks
         .filter(t => !masterHealthFilter || (h => h==="red" || h==="yellow")(dispOf(t, childIds.has(t.id), rolled, byId)))
         .map(t => {
@@ -17138,7 +17236,7 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
             cur = p.tasks.find(x => x.id === cur.parentId) || null;
           }
           const isLeaf = !childIds.has(t.id);
-          return {...t, projName: p.name, projId: p.id, projOwnerLabel: ownerLabel, projLabel, depth, isLeaf, _disp: dispOf(t, !isLeaf, rolled, byId), _pct: effectivePercentComplete(t, p.tasks)};
+          return {...t, projName: p.name, projId: p.id, projSiteId, projOwnerLabel: ownerLabel, projLabel, depth, isLeaf, _disp: dispOf(t, !isLeaf, rolled, byId), _pct: effectivePercentComplete(t, p.tasks)};
         });
     });
   }, [data.projects, masterHealthFilter, data.settings, NOW]);
@@ -17245,6 +17343,94 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
       return 0;
     });
   }, [filteredRows, masterSort]);
+
+  // NEW-1 (2026-10-08) — project groups follow the owner's project order (the shell's push). The column
+  // sort above orders the rows WITHIN a group and never reaches this.
+  const projOrder = useProjectOrder();
+  const groupedRows = useMemo(
+    () => masterGroupBy === "project" ? groupRowsByProject(sortedRows, projOrder.ids) : null,
+    [masterGroupBy, sortedRows, projOrder.ids]);
+  // The projects that can be moved: a group is movable only when it belongs to a project the shell has
+  // in the order list (an org-owned schedule is not a project, so it has no grip).
+  const movableIds = useMemo(() => {
+    const out = [];
+    (groupedRows || []).forEach(g => { if (g.siteId != null && g.rank !== Infinity && !out.includes(g.siteId)) out.push(g.siteId); });
+    return out;
+  }, [groupedRows]);
+  const canReorderGroups = !!projOrder.canOrder && movableIds.length > 1;
+  const [grpDrag, setGrpDrag] = useState(null); // {siteId, at} while a group grip is held
+  const grpStopRef = useRef(null);
+  useEffect(() => () => { if (grpStopRef.current) grpStopRef.current(); }, []);
+  const requestGroupMove = (siteId, dest) =>
+    postToShell({type: "planar:project-order-move", groupId: siteId, dest, visibleIds: movableIds});
+  const pickGroupMenu = (siteId, to) => {
+    const pos = movableIds.indexOf(siteId);
+    if (pos < 0) return;
+    if (to === "top" || to === "bottom") requestGroupMove(siteId, {to});
+    else requestGroupMove(siteId, {index: to === "up" ? pos - 1 : pos + 1}); // index among the OTHER visible projects
+  };
+  // Drag a whole project group by its grip. Works with a finger (the grip has touch-action:none); the
+  // table wrap auto-scrolls near its edges so a long report can be dragged past what is visible; Esc cancels.
+  const startGroupDrag = (e, siteId) => {
+    if (e.button != null && e.button !== 0) return;
+    const wrap = tableWrapRef.current;
+    if (!wrap) return;
+    e.preventDefault(); e.stopPropagation();
+    const others = movableIds.filter(x => x !== siteId);
+    const firstHeaders = () => {
+      const m = new Map();
+      wrap.querySelectorAll("tr[data-grp-site]").forEach(tr => { const k = tr.getAttribute("data-grp-site"); if (k && !m.has(k)) m.set(k, tr); });
+      return m;
+    };
+    const atFor = (y) => {
+      const hs = firstHeaders();
+      let at = 0;
+      for (const id of others) {
+        const tr = hs.get(id);
+        if (!tr) continue;
+        const b = tr.getBoundingClientRect();
+        if (y > b.top + b.height / 2) at++;
+      }
+      return at;
+    };
+    let y = e.clientY, raf = 0, last = atFor(y);
+    setGrpDrag({siteId, at: last});
+    const tick = () => {
+      const b = wrap.getBoundingClientRect();
+      const zone = 28;
+      if (y < b.top + zone) wrap.scrollTop -= 8;
+      else if (y > b.bottom - zone) wrap.scrollTop += 8;
+      const at = atFor(y);
+      if (at !== last) { last = at; setGrpDrag({siteId, at}); }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    const move = (ev) => { y = ev.clientY; };
+    const end = (commit) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+      window.removeEventListener("keydown", key, true);
+      cancelAnimationFrame(raf);
+      grpStopRef.current = null;
+      setGrpDrag(null);
+      if (commit) requestGroupMove(siteId, {index: last});
+    };
+    const up = () => end(true);
+    const cancel = () => end(false);
+    const key = (ev) => { if (ev.key === "Escape") { ev.stopPropagation(); end(false); } };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+    window.addEventListener("keydown", key, true);
+    grpStopRef.current = () => end(false);
+  };
+  // Where the drop line sits while dragging: above the first header of the project now at `at`
+  // among the others, or below the last header of the last one.
+  const dragOthers = grpDrag ? movableIds.filter(x => x !== grpDrag.siteId) : [];
+  const lineAboveSite = grpDrag && grpDrag.at < dragOthers.length ? dragOthers[grpDrag.at] : null;
+  const lineBelowSite = grpDrag && grpDrag.at >= dragOthers.length && dragOthers.length ? dragOthers[dragOthers.length - 1] : null;
+  const lastGroupOfSite = (sid) => { let idx = -1; (groupedRows || []).forEach((g, i) => { if (g.siteId === sid) idx = i; }); return idx; };
 
   const [colWidths, setColWidths] = useState(() => {
     const saved = data.masterColWidths || {};
@@ -17637,6 +17823,14 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
         </div>
       </div>
 
+      {masterGroupBy === "project" && projOrder.error && (
+        <div role="alert" style={{display:"flex",alignItems:"center",gap:10,flexShrink:0,marginBottom:10,padding:"6px 12px",
+          borderRadius:8,border:"1px solid var(--red, #dc2626)",color:"var(--red, #dc2626)",fontSize:12,fontWeight:600}}>
+          <span>Couldn't save your project order. It's kept on screen for now.</span>
+          <button type="button" onClick={()=>postToShell({type:"planar:project-order-retry"})}
+            style={{fontSize:12,fontWeight:700,color:"var(--red, #dc2626)",background:"none",border:"1px solid var(--red, #dc2626)",borderRadius:6,padding:"2px 10px",cursor:"pointer",fontFamily:"inherit"}}>Retry</button>
+        </div>
+      )}
       {/* Table — framed card; the card itself is the scroll container so the
           column headers stay pinned while rows scroll underneath */}
       <div ref={tableWrapRef} data-scroll-bounds tabIndex={0} onKeyDown={handleTableKey}
@@ -17705,13 +17899,31 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
             // label / schedule name / projId, so two schedules sharing a name (e.g. two accounts'
             // "Master Schedule") get their own section instead of merging into one with a summed
             // count badge. See groupRowsByProject's own header for the full reasoning.
-            return groupRowsByProject(sortedRows).flatMap(({projId, gRows, label}) => [
-              <tr key={`grp-${projId}`}>
+            return groupedRows.flatMap(({projId, gRows, label, siteId, rank}, gi) => {
+              const movable = canReorderGroups && siteId != null && rank !== Infinity;
+              const pos = movable ? movableIds.indexOf(siteId) : -1;
+              const dragging = grpDrag && grpDrag.siteId === siteId;
+              const first = siteId != null && groupedRows.findIndex(g => g.siteId === siteId) === gi; // a project's first schedule header carries the controls
+              const showCtl = movable && first;
+              const line = !grpDrag ? null
+                : (siteId === lineAboveSite && first) ? "inset 0 3px 0 var(--blue)"
+                : (siteId === lineBelowSite && gi === lastGroupOfSite(siteId)) ? "inset 0 -3px 0 var(--blue)" : null;
+              return [
+              <tr key={`grp-${projId}`} data-grp-site={siteId != null ? siteId : ""} style={{opacity: dragging ? 0.45 : 1}}>
                 <td colSpan={displayCols.length + 2} style={{
                   padding:"10px 12px 8px", borderBottom:"1px solid var(--bd)",
-                  background:"#f0f0f5", borderLeft:"4px solid var(--amber)"}}>
-                  <span style={{fontSize:15,fontWeight:700,color:"var(--txt)",letterSpacing:"-.01em"}}>{label}</span>
-                  <span style={{marginLeft:8,fontSize:10,color:"var(--mut)",background:"#dbeafe",color:"#1d4ed8",borderRadius:8,padding:"1px 7px",verticalAlign:"middle"}}>{gRows.length}</span>
+                  background:"#f0f0f5", borderLeft:"4px solid var(--amber)", boxShadow: line || "none"}}>
+                  <span style={{display:"inline-flex",alignItems:"center",gap:8}}>
+                    {showCtl && (
+                      <span data-grp-grip={siteId} role="button" tabIndex={0} title="Drag to reorder" aria-label={`Drag to reorder ${label}`}
+                        onPointerDown={e=>startGroupDrag(e, siteId)}
+                        style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:26,height:30,color:"var(--mut)",
+                          fontSize:16,lineHeight:1,cursor:grpDrag?"grabbing":"grab",touchAction:"none",userSelect:"none"}}>⠿</span>
+                    )}
+                    <span style={{fontSize:15,fontWeight:700,color:"var(--txt)",letterSpacing:"-.01em"}}>{label}</span>
+                    <span style={{fontSize:10,color:"var(--mut)",background:"#dbeafe",color:"#1d4ed8",borderRadius:8,padding:"1px 7px",verticalAlign:"middle"}}>{gRows.length}</span>
+                    {showCtl && <GroupOrderMenu label={label} isFirst={pos === 0} isLast={pos === movableIds.length - 1} onPick={(to)=>pickGroupMenu(siteId, to)} />}
+                  </span>
                 </td>
               </tr>,
               ...gRows.map((t,gri) => {
@@ -17724,7 +17936,8 @@ function MasterView({data, setData, updateTask, setNotesCtx, goToTask}) {
                 </tr>
                 );
               })
-            ]);
+            ];
+            });
           })()
           : sortedRows.map((t, ri) => (
             <tr key={`${t.projId}-${t.id}`} style={{background:t.rowColor||(ri%2?"#f8fafc":"var(--bg)")}}>
