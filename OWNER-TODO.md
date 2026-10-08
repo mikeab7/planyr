@@ -20,10 +20,8 @@ _Last updated: 2026-10-05._
 - [x] ~~**Pick one for how a note opens on your phone.**~~ **Decided 2026-10-04: a note opens showing the whole page width, accepting the smaller text.** That is what it already does (both page edges on screen; a page you have saved a view for still opens exactly as you left it), so nothing changed in the app. Recorded on B2061331. (If the small text ever bothers you, pinch to zoom in — it stays put for that page.)
 
 
-## 🗓 Three database scripts to paste, in this order (B2087648, B2087649, B2087650)
-
-> **What they do:** (1) `project_schedule_cascade.sql` — a deleted project now takes its schedule with it (and restoring the project brings it back), and a schedule that goes away clears the "has a schedule" calendar on the plans that pointed at it. (2) `schedule_orphans_repair_20261005.sql` — fixes the two leftovers (schedule 24 "Untitled site"; the two Goose Creek calendar icons). Non-destructive, safe to run twice, deletes nothing. (3) `profiles_email_sync.sql` — the team-roster email trigger the sessions could not apply (the repo has no automatic migration path, so it is a paste).
-> - [ ] **Paste the three files** into the Supabase SQL editor, in that order. After that a session re-runs the drift report and checks delete/restore on a throwaway project.
+## 🗓 Deleting a project: should its reviews go with it? (B2087648)
+> The three database scripts are **applied** (2026-10-08, by a session — nothing left for you to paste). A deleted project now takes its schedule with it.
 > - [ ] **Decide:** 3 reviews (documents) are still showing as live under projects you deleted. Should deleting a project hide its reviews too, or leave them filed? I left them alone.
 
 ## 🧾 A decision on shared child items, plus two database scripts to apply (B2064896)
