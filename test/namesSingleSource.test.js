@@ -28,7 +28,6 @@ const STATE_FROM_NAME = /useState\((?:\(\) *=> *)?[^;]*?(siteLabel|planLabel|pro
 const DRAFT_EDITORS = [
   "src/shared/mapNotes/components/MapNoteEditor.jsx",
   "src/workspaces/model/components/NameManager.jsx",
-  "src/workspaces/food/components/DishesSection.jsx",
 ];
 
 describe("no component seeds state from a name", () => {
