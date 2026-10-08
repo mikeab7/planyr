@@ -19,6 +19,7 @@ export default function CursorChip({ ll, el, prop = null, style = {} }) {
   const { parts, title } = groundReadout({ el, prop });
   return (
     <div
+      data-map-furniture="cursor"
       title={[GROUND_EL_TITLE, title].filter(Boolean).join(" ")}
       style={{
         position: "absolute", zIndex: 5, pointerEvents: "none",

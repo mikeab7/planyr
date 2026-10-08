@@ -27,7 +27,7 @@
  * (desktop labels the same column "Title / Address" — mobile already shows the resolved address
  * in the identity strip and the pinned Location row, so it only needs the free-text half here).
  */
-import { SHEET_COLUMNS, columnIndex, NOTES_COLUMN } from "./compSheetColumns.js";
+import { SHEET_COLUMNS, columnIndex, NOTES_COLUMN, activeCellFlags } from "./compSheetColumns.js";
 import { rowHasBlockingFlags } from "./compParse.js";
 
 export const MOBILE_BREAKPOINT_PX = 820;
@@ -108,7 +108,7 @@ export function neededToSaveRemaining(row) {
  * 12x-ambiguity case) always wins over a plain missing-field reading, since it names a real
  * data-quality problem rather than an empty box. */
 export function rowStatusText(row) {
-  if (rowHasBlockingFlags(row.cellFlags)) return "rate needs a period";
+  if (rowHasBlockingFlags(activeCellFlags(row.cellFlags, row.draft.compType))) return "rate needs a period";
   const missing = neededToSaveColumns(row.draft.compType).filter((c) => isRequiredColEmpty(c, row.draft));
   if (!missing.length) return "ready";
   // NEW-5 — Executed is no longer required, so "location" is the only key this can name today;

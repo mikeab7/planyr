@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
-  normalizeProjectOrder, orderProjects, orderedIds, moveProject, buildSavedOrder, ORDER_EPOCH_MS,
+  normalizeProjectOrder, orderProjects, orderedIds, moveProject, buildSavedOrder, ORDER_EPOCH_MS, planProjectMove, byNameToday,
 } from "../src/shared/projects/projectOrder.js";
 import { pursuitsTable } from "../src/workspaces/dashboard/lib/pursuitsList.js";
 import { groupProjectsByGroupId } from "../src/workspaces/dashboard/lib/dashboardPipeline.js";
@@ -164,5 +164,24 @@ describe("dashboardProjectOrderPrefs", () => {
     const res = await prefs.saveProjectOrder("u1", buildSavedOrder(["g"], 1));
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/rls says no/);
+  });
+});
+
+describe("planProjectMove / byNameToday — the one move shared by the Dashboard card and the Task Report", () => {
+  const P = [
+    { groupId: "e", name: "8 South", createdAt: Date.parse("2026-01-01") },
+    { groupId: "g", name: "Goose Creek", createdAt: Date.parse("2026-01-02") },
+    { groupId: "p", name: "Grand Port", createdAt: Date.parse("2026-01-03") },
+  ];
+  it("today's order is alphabetical by name ('8 South' first)", () => {
+    expect(byNameToday(P).map((p) => p.groupId)).toEqual(["e", "g", "p"]);
+  });
+  it("moving Grand Port to the top writes a full list with it first", () => {
+    const next = planProjectMove(P, null, "p", { to: "top" }, ["e", "g", "p"], 123);
+    expect(next).toEqual({ ids: ["p", "e", "g"], at: 123 });
+  });
+  it("index moves are relative to the visible ids; a no-op returns null", () => {
+    expect(planProjectMove(P, null, "e", { index: 2 }, ["e", "g", "p"]).ids).toEqual(["g", "p", "e"]);
+    expect(planProjectMove(P, null, "e", { to: "top" }, ["e", "g", "p"])).toBeNull();
   });
 });
