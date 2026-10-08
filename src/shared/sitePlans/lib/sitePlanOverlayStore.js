@@ -109,7 +109,7 @@ export async function fetchOverlayCompPoints(overlayId) {
  * new position and its pins' new positions land together or not at all, and a teammate's pin
  * moves too even though `comps` update is normally owner-only RLS. `compPositions` is
  * `[{id, lat, lon}, ...]`, already computed client-side (the projection math lives in
- * overlayGeoref.js, not duplicated here). `expectedVersion` is the version-guard (item 7) — the
+ * overlayPlacement.js, not duplicated here). `expectedVersion` is the version-guard (item 7) — the
  * version this client last saw for the overlay; the RPC refuses (40001) if it's stale. Returns
  * `{ movedCount, version, conflict, error }` — on conflict, `version` is absent and the caller
  * should reload to pick up whatever actually landed. */

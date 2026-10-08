@@ -9,11 +9,20 @@ not a role system yet); anyone else hitting `#/admin` sees the ordinary app unde
 indistinguishable from any other unrecognized route — never a permission-denied page.
 
 **Files**
-- `AdminGate.jsx` — the ONE place that decides access. Calls the `is_admin()` Postgres RPC
-  (only while signed in; never for a signed-out visitor) and renders `AdminApp` only on a
-  confirmed `true`. Every other outcome (denied, still checking, RPC error) renders `null`.
-- `AdminApp.jsx` — the page shell: a small header + the four section placeholders NEW-2..
-  NEW-5 fill in (Usage / Issues / Support / Ops), listed in `lib/adminSections.js`.
+- `AdminGate.jsx` — the ONE place that decides access. Asks the shared per-user store
+  (`useIsAdmin`) and renders `AdminApp` only on a confirmed admin. Every other outcome (denied,
+  still checking, RPC error) renders `null`; an ERROR is retried twice. Reports "really shown" to
+  the shell (`onShownChange`) — while shown, no workspace is active (else the Site Planner rewrote
+  `#/admin` to `#/site` after boot).
+- `lib/adminStatus.js` + `lib/useIsAdmin.js` — ONE `is_admin()` answer per signed-in user id, shared by
+  the account menu and the gate; an error is never cached (retried on menu open).
+- `AdminApp.jsx` — the page shell (NEW-1, 2026-10-05): a left section nav (a select at phone width) showing ONE section
+  at a time with count badges; the section lives in the hash (`#/admin/<id>`, bare = Overview — `lib/adminRoute.js`).
+  Sections in `lib/adminSections.js` order: Overview, Users, Issues, Support (Problem reports merged in), Usage, County
+  requests, Parcel coverage, Password reset, Ops. `AdminData.jsx` loads the shared datasets once (accounts, support queue,
+  county requests, 7-day errors) and owns the "Hide internal" switch Overview and Users both follow. `AdminTable.jsx` is
+  THE table style (sticky header, right-aligned numbers, `RelTime` = relative with exact time on hover); `AdminPanel.jsx`
+  the section header + loading/empty/error states. Never hand-roll a table or a date in a section.
 - `lib/adminAccess.js` — `checkIsAdmin(client)`, the pure wrapper around the RPC call. Fails
   closed on every path (no client, no session, an RPC error, a thrown exception) — never
   renders the admin page on an ambiguous result.
@@ -22,10 +31,21 @@ indistinguishable from any other unrecognized route — never a permission-denie
   INSERT-only design, B279 — never add a SELECT policy to make a future check easier); the
   RPC is the only door in or out, and reveals nothing but a boolean.
 
-**Depends on this landing:** B711905 (Usage), B711906 (Issues), B711907 (Support), B711908
-(Ops) all render inside `AdminApp`'s section shells and call through the same admin-gated
-RPC pattern — each mints its own `SECURITY DEFINER` function rather than a client-side SELECT
-policy on the table it reads.
+**Overview / Users / Issues / Support tidy (NEW-1..NEW-4, same day).** `OverviewSection.jsx` (headline tiles + newest sign-ups + top errors),
+`UsersSection.jsx` reading `admin_users_overview()` / `admin_user_activity()` (`db/admin_users_overview.sql`; counts and dates only;
+status-chip rules and internal-account flagging in `lib/adminUsers.js`; the sign-up rate-limit log is a collapsed block at its foot),
+Issues folds deploy chunk-load errors into one line and groups by normalised message (`lib/adminIssues.js`), Support groups bare
+slow taps per account (`lib/adminSupport.js`). The old separate Problem reports and Signup activity sections no longer exist.
+
+**Four sections built 2026-10-05 (B711905–B711908, owner block NEW-1) — `UsageSection.jsx`,
+`IssuesSection.jsx`, `SupportSection.jsx`, `OpsSection.jsx`, on the shared `AdminPanel.jsx` shell
+(loading / empty / VISIBLE error + Retry).** RPC wrappers + row shaping live in `lib/adminPanels.js`
+(unit-tested in the repo-root test folder); every RPC is in `db/admin_panels.sql` (SECURITY DEFINER,
+`is_admin()` first, fails closed). Usage = counts and dates only. Issues reads `client_errors` only
+through the RPC (no SELECT policy). Support = a status (open/closed) on `problem_reports` + the
+reporter's recent errors; the in-app Help form and email hook are NOT built (see B711907). Ops = a
+read-only ledger digest (the repo-root ops-snapshot script, run with --sql, loads it) + a session-sweep log. Local
+proof harness: ui-audit verify-admin-surfaces (repo-root ui-audit folder).
 
 **Fifth section, already shipped (B877442) — `CriteriaRequestsSection.jsx` + `lib/criteriaRequestsAdmin.js`.**
 Lists counties requested via B877440/B877441's "Request criteria for this county" action (the plan-side
@@ -38,7 +58,7 @@ modeled-jurisdiction lists the app itself routes against (`detentionRules.COUNTY
 `easementRules.MODELED_COUNTIES`) — the database has no way to know what a given deploy has modeled, and
 this keeps "wired" self-correcting the moment a county is added, with nothing to update by hand.
 
-**Seventh section (B1160721, NEW-2) — `SignupActivitySection.jsx`.** Signup volume visibility —
+**Signup log (B1160721, NEW-2) — now the collapsed log inside `UsersSection.jsx`.** Signup volume visibility —
 reads through `admin_list_signup_attempts()` (the migration lives in the shared `auth/db/` folder), the
 read side of the server-side signup rate-limit trigger on `auth.users`. Only `created` rows are
 ever logged there (a rate-limited attempt can't survive the transaction it aborts — see that
@@ -53,7 +73,7 @@ INSIDE the function (not merely a hidden button); records who reset whom and whe
 `admin_password_resets` (read via `admin_list_password_resets()`). Never displays an EXISTING
 password — bcrypt hashes are one-way — only ever generates and shows a new one, once.
 
-**Sixth section (B842866) — `ReportsSection.jsx`.** Lists everything filed through the global
+**Problem reports (B842866) — now merged into `SupportSection.jsx`.** Lists everything filed through the global
 "help / report a problem" control the app shell mounts on every route (the shared `reports/`
 folder's model + the shell's own help-control component), newest first — category, who
 (email / signed-in / signed-out), description, and a collapsible context blob (route/build/
@@ -61,6 +81,16 @@ viewport/plan/perf-capture outcome). Read through `admin_list_problem_reports()`
 alongside the table in the shared `reports/` folder's own migration — the same SECURITY DEFINER
 + `is_admin()` pattern as `admin_users.sql`. RLS proof (live, self-rolling-back, run via the
 Supabase MCP) lives in that same folder's `test/` subfolder.
+
+**Ninth section (B2123392, NEW-1) — `ParcelCoverageSection.jsx` + `lib/parcelCoverage.js` + `lib/countyMapGeometry.js`.**
+A US map of every county / parish / borough Planyr can answer a parcel click for, coloured by source kind
+(own server / statewide layer / third-party copy / unclassified). Nothing is a list: `parcelCoverage.buildCoverage`
+joins the county-polygons asset onto the live site-planner county registry (`COUNTIES_MAP`, `countyKeyForName`,
+`statewideKeysForState`), so a newly wired county shows up with no other edit; registry keys that join no
+outline are listed under the map. Source kind is DATA: each provenance record
+(the site-planner provenance module) carries `publisher` + `publisherName`; no prose inference, and a wiring
+session that omits it fails the parcel-coverage unit test. Headless check: the
+parcel-coverage verify script under the repo's ui-audit folder.
 
 <!-- Keep this pointer current: if you rename/move/delete a key file in this folder, update the
      lines above in the same commit. The doc-pointer-audit check fails CI on a stale reference. -->

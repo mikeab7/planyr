@@ -16,6 +16,7 @@
  * then inserts a node. A refusal at any step is a NAMED banner and NO node — the one thing
  * that must never happen is a paste that quietly does nothing.
  */
+import { tableOwnsClipboard } from "./notesTablePaste.js";
 import { Node } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { newId } from "./notesModel.js";
@@ -250,6 +251,10 @@ export const NoteImage = Node.create({
          *  that node. So both halves of his rule are the selection's own behaviour, and adding a
          *  second pointer-tracking path would be a way for them to disagree. */
         handlePaste(view, event) {
+          /* ⛔ A TABLE OUTRANKS THE PICTURE BESIDE IT (NEW-1). Excel — and some OneNote builds — put a
+           * PNG of the cells on the clipboard next to the HTML table; claiming "any image file" here
+           * pasted a screenshot of the table instead of the table. See notesTablePaste.js. */
+          if (tableOwnsClipboard(event.clipboardData)) return false;
           const files = filesFrom(event.clipboardData);
           if (!files.length) return false;
           event.preventDefault();

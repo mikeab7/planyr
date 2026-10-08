@@ -35,14 +35,17 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { TextSelection } from "@tiptap/pm/state";
+import { contentOfBoxes } from "../lib/notesTableClipboard.js";
 import { noteExtensions, EMPTY_DOC } from "../lib/notesExtensions.js";
-import { ANCHOR_MIN_HEIGHT, anchorExtent, anchorExtentLeft, anchorExtentTop, anchorExtentX, anchorPosAtSelection, fitAnchorBox, placeAnchor } from "../lib/notesAnchorNode.js";
+import { ANCHOR_MIN_HEIGHT, anchorExtent, anchorExtentLeft, anchorExtentTop, anchorExtentX, anchorPosAtSelection, fitAnchorBox, nextAnchorSpot, placeAnchor } from "../lib/notesAnchorNode.js";
+import { ANCHOR_WIDTH } from "../lib/notesBoxResize.js";
+import { tableOwnsClipboard, tableBoxWidth } from "../lib/notesTablePaste.js";
 import { edgePoint as arrowEdgePoint } from "../lib/notesArrows.js";
 import {
   isBlankDoublePress, BLANK_DBLTAP_TOUCH_PX, isTouchPointerType, isCoarsePointerDevice, touchBoxOrigin,
   isTextInsertInputType,
 } from "../lib/notesBlankPaper.js";
-import { migrateFlowBody, migrateSketchesToBoxes } from "../lib/notesFlowMigration.js";
+import { MIGRATED_BOX_WIDTH, migrateFlowBody, migrateSketchesToBoxes } from "../lib/notesFlowMigration.js";
 import {
   applyMarquee, boxesInMarquee, latchGesture, marqueeRect, moveSelection, nudgeDelta,
   toggleSelection,
@@ -198,12 +201,10 @@ const TOP_EDGE_REACH_GAP = 10;
  * retune the title. A title that wants the smaller, size-tracks-body look is free to say so
  * explicitly via its own size control (NEW-5, `titleStyle.fontSize`), which this redesign adds. */
 const NOTE_BODY_FONT_PX = 11;
-const TITLE_SCALE = { narrow: 1.75, wide: 2.05 };
-const TITLE_TUNED_BODY_PX = 15;
-const TITLE_DEFAULT_PX = {
-  narrow: Math.round(TITLE_TUNED_BODY_PX * TITLE_SCALE.narrow),
-  wide: Math.round(TITLE_TUNED_BODY_PX * TITLE_SCALE.wide),
-};
+/* ⛔ THE TITLE DEFAULTS TO 16 ON EVERY DEVICE (NEW-1, owner 2026-10-05: "I like that" about 16). The old
+ * ratio-to-body scale (42px desktop / 34px phone, B1203504) read as far too big; weight (700), not size,
+ * now carries the heading hierarchy. A size picked in the toolbar (`titleStyle.fontSize`) still wins. */
+const TITLE_DEFAULT_PX = { narrow: 16, wide: 16 };
 export const noteTitleFontPx = (narrow) => (narrow ? TITLE_DEFAULT_PX.narrow : TITLE_DEFAULT_PX.wide);
 
 /* Editor surface styling. It lives here (rather than in src/index.css) so it rides the lazy
@@ -909,6 +910,28 @@ const CLIPBOARD_BODY = (
     <path d="M5.6 2.6V2a1 1 0 0 1 1-1h0.8a1 1 0 0 1 1 1v0.6" />
   </>
 );
+
+/** ⛔ A BOX MADE FOR A PASTED TABLE IS WIDE ENOUGH FOR ITS COLUMNS (NEW-1). A new box starts a
+ *  sticky-note wide; three table columns in that collapse to slivers behind a horizontal scroll.
+ *  Called right after a paste into a box this paste itself created: finds the box the caret is in,
+ *  and if it now holds a table, widens it to the table's column count (the same writing-column cap
+ *  "Insert table" uses). Never touches a box that already existed. */
+function widenFreshBoxForTable(editor) {
+  try {
+    if (!editor || editor.isDestroyed) return;
+    const { $from } = editor.state.selection;
+    for (let d = $from.depth; d > 0; d -= 1) {
+      const node = $from.node(d);
+      if (node.type.name !== "noteAnchor") continue;
+      let cols = 0;
+      node.descendants((n) => { if (n.type.name === "table") cols = Math.max(cols, n.firstChild ? n.firstChild.childCount : 0); return cols === 0; });
+      if (!cols) return;
+      const w = tableBoxWidth({ cols, current: node.attrs.w, max: MIGRATED_BOX_WIDTH });
+      if (w > (node.attrs.w || 0)) editor.commands.setNoteAnchorWidth($from.before(d), w);
+      return;
+    }
+  } catch (_) { /* a missed widening is cosmetic: the table is already in the box and scrolls */ }
+}
 
 const PASTE_ICONS = {
   source: (
@@ -2141,6 +2164,126 @@ const NoteEditor = forwardRef(function NoteEditor({
     return true;
   }, [editor]);
 
+  /** Paste a clipboard into the editor AT ITS CURRENT SELECTION through ProseMirror's own paste
+   *  pipeline (`transformPastedHTML` → parse → `transformPasted` → `handlePaste`), so a paste that
+   *  arrives from outside the editor behaves exactly like one made with the caret in it. HTML when
+   *  there is any, else the text. LOUD-FAILURE: a pipeline that throws is announced, never silent. */
+  const pasteClipboardIntoEditor = useCallback((html, text, e) => {
+    if (!editor || editor.isDestroyed) return false;
+    try {
+      if (html) editor.view.pasteHTML(html, e);
+      else editor.view.pasteText(text, e);
+      return true;
+    } catch (err) {
+      onPrintNotice?.("Planyr couldn't paste that. Try Ctrl+Shift+V to paste it as plain text.");
+      return false;
+    }
+  }, [editor, onPrintNotice]);
+
+  /* ⛔ A PASTE WITH NOTHING FOCUSED, OR A BOX MERELY SELECTED, LANDS SOMEWHERE (NEW-1, owner report
+   * 2026-10-05: a table copied from OneNote "didn't copy at all"). Desktop is two-stage — the first
+   * press on a box only SELECTS it and moves focus off the editor — so Ctrl+V right after clicking a
+   * box (or after clicking anywhere that is not the editor) reached no listener at all and did
+   * nothing, in silence. Now: one box selected → the paste goes in at its end; otherwise it makes a
+   * box at the next free spot and pastes there (the same rule "Insert table" already follows). A
+   * real field (the title, the rail's rename box) still owns its own paste, and a paste aimed at
+   * the editor itself is left to ProseMirror. Pictures alone are untouched (they have their own
+   * route); a picture BESIDE a table is the table's. */
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return undefined;
+    const onLoosePaste = (e) => {
+      if (e.defaultPrevented || pendingRef2.current) return;          // armed: the effect above owns it
+      const dom = editor.view.dom;
+      const t = e.target;
+      if (t instanceof Node && dom.contains(t)) return;               // aimed at the editor: ProseMirror's
+      if (t instanceof Element && t.closest("input, textarea, select, [contenteditable='true']")) return;
+      const root = noteRootRef.current;
+      if (!root || root.offsetParent === null) return;                // this Notes surface is not on screen
+      const bodyLike = t === document.body || t === document.documentElement || t == null;
+      if (!bodyLike && !(t instanceof Node && root.contains(t))) return;   // focus is somewhere else in the app
+      const dt = e.clipboardData;
+      const html = dt?.getData("text/html") || "";
+      const text = dt?.getData("text/plain") || "";
+      if (!html && !text) return;
+      const hasImage = [...(dt?.files || [])].some((f) => f.type?.startsWith("image/"));
+      if (hasImage && !tableOwnsClipboard(dt)) return;                 // a picture on its own has its own route
+      e.preventDefault();
+      e.stopPropagation();
+      const sel = selRef.current;
+      let landed = false;
+      if (sel && sel.size === 1) {
+        const aid = [...sel][0];
+        editor.state.doc.forEach((node, pos) => {
+          if (landed || node.type.name !== "noteAnchor" || String(node.attrs.aid || "") !== aid) return;
+          const end = pos + node.nodeSize - 1;
+          /* ⛔ A BOX THAT ENDS IN A TABLE PARKS THE CARET INSIDE ITS LAST CELL, so a paste "at the box's end"
+           * poured into the table's own cells (a copied table came back merged into its source as a 5×5 —
+           * NEW-1, 2026-10-06). Land on a fresh paragraph AFTER the table instead. */
+          if (node.lastChild?.type?.name === "table" && editor.schema.nodes.paragraph) {
+            const tr = editor.state.tr.insert(end, editor.schema.nodes.paragraph.create());
+            tr.setSelection(TextSelection.create(tr.doc, end + 1));
+            editor.view.dispatch(tr);
+          } else {
+            editor.view.dispatch(editor.state.tr.setSelection(TextSelection.near(editor.state.doc.resolve(end), -1)));
+          }
+          setEditingId(aid);
+          landed = true;
+        });
+      }
+      let fresh = null;
+      if (!landed) {
+        const { x, y } = nextAnchorSpot(editor.state.doc);
+        fresh = `a${Date.now().toString(36)}p${Math.floor(Math.random() * 1e6).toString(36)}`;
+        editor.commands.addNoteAnchorAt({ x, y, w: ANCHOR_WIDTH, aid: fresh });
+        setSelection(new Set([fresh]));
+        setEditingId(fresh);
+      }
+      if (!editor.view.hasFocus()) editor.view.focus();
+      pasteClipboardIntoEditor(html, text, e);
+      if (fresh) widenFreshBoxForTable(editor);
+    };
+    window.addEventListener("paste", onLoosePaste, { capture: true });
+    return () => window.removeEventListener("paste", onLoosePaste, { capture: true });
+  }, [editor, pasteClipboardIntoEditor]);
+
+  /* ⛔ COPY AND CUT WITH A BOX SELECTED (NEW-1, owner report 2026-10-06: "I'm trying to copy a table that's
+   * already in the notebook module, and I can't paste it."). The first press on a box only SELECTS it and takes
+   * focus off the editor, so Ctrl+C / Ctrl+X reached no listener and the clipboard kept whatever it held before —
+   * the next Ctrl+V pasted THAT, or nothing. The selected boxes' CONTENT (a table, text, a picture) is written
+   * through ProseMirror's own clipboard serializer, so it pastes back exactly like a copy made with the caret in
+   * the box: into another box it inserts, onto blank paper it makes a box. Cut also removes the boxes (one undo).
+   * Declines whenever a real field or the editor itself has focus — those own their copy. */
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return undefined;
+    const onClip = (e) => {
+      if (e.defaultPrevented || !e.clipboardData) return;
+      const sel = selRef.current;
+      if (!sel || !sel.size) return;
+      const dom = editor.view.dom;
+      const a = document.activeElement;
+      if (a && a !== document.body && a !== document.documentElement && (dom.contains(a) || a.closest?.("input, textarea, select, [contenteditable='true']"))) return;
+      const root = noteRootRef.current;
+      if (!root || root.offsetParent === null) return;                 // this Notes surface is not on screen
+      if (String(window.getSelection?.() || "").length) return;         // a highlighted run of page text owns the copy
+      const slice = contentOfBoxes(editor.state.doc, sel);
+      if (!slice) return;
+      try {
+        const { dom: out, text } = editor.view.serializeForClipboard(slice);
+        e.clipboardData.setData("text/html", out.innerHTML);
+        e.clipboardData.setData("text/plain", text);
+      } catch (_) { onPrintNotice?.("Planyr couldn't copy that box. Open it and select what you want, then press Ctrl+C."); return; }
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.type === "cut") {
+        editor.commands.removeNoteAnchors([...sel]);
+        clearSelection();
+      }
+    };
+    window.addEventListener("copy", onClip, { capture: true });
+    window.addEventListener("cut", onClip, { capture: true });
+    return () => { window.removeEventListener("copy", onClip, { capture: true }); window.removeEventListener("cut", onClip, { capture: true }); };
+  }, [editor, onPrintNotice]);
+
   /* ⛔ THE FIRST KEYSTROKE, CAUGHT BEFORE THE EDITOR SEES IT. Bound on `window` in CAPTURE, for
    * the same reason the rest of this module's global bindings are: the editor's DOM holds focus
    * while a placement is armed, so a keydown bound on the editor would arrive only after
@@ -2206,7 +2349,9 @@ const NoteEditor = forwardRef(function NoteEditor({
      * a point) — this reuses it rather than writing a second image-placement path. */
     const onPaste = (e) => {
       const files = [...(e.clipboardData?.files || [])].filter((f) => f.type?.startsWith("image/"));
-      if (files.length) {
+      /* ⛔ A TABLE OUTRANKS THE PICTURE BESIDE IT (NEW-1) — Excel/OneNote put a PNG of the cells next
+       * to the HTML table; see lib/notesTablePaste.js. */
+      if (files.length && !tableOwnsClipboard(e.clipboardData)) {
         const at = pendingRef2.current;
         setPendingPlace(null);
         e.preventDefault();
@@ -2214,11 +2359,19 @@ const NoteEditor = forwardRef(function NoteEditor({
         if (at) editor.commands.insertNoteImages(files, at);
         return;
       }
+      const html = e.clipboardData?.getData("text/html") || "";
       const text = e.clipboardData?.getData("text/plain") || "";
-      if (!text) { cancelPendingPlace(); return; }
+      if (!text && !html) { cancelPendingPlace(); return; }
       e.preventDefault();
       e.stopPropagation();
-      commitPendingPlace(text);
+      /* ⛔ THE FIRST PASTE ON BLANK PAPER GOES THROUGH THE EDITOR'S OWN PASTE PIPELINE (NEW-1). It
+       * used to take `text/plain` only and `insertContent` it, so a table pasted here arrived as
+       * its cells run together in one line. Make the (empty) box — selection and focus move into it
+       * synchronously — then let ProseMirror paste into it exactly as it would anywhere else:
+       * tables stay tables, the paste-options chip appears, the three paste modes apply. */
+      if (!commitPendingPlace()) return;
+      pasteClipboardIntoEditor(html, text, e);
+      widenFreshBoxForTable(editor);
     };
     /* ⛔ TEXT THAT ARRIVES WITHOUT A PRINTABLE KEYDOWN (NEW-1, iOS review). Predictive-bar taps,
      * QuickPath swipe, dictation, emoji (`key.length` 2) and IME composition report `Unidentified`
@@ -2252,7 +2405,7 @@ const NoteEditor = forwardRef(function NoteEditor({
       window.removeEventListener("beforeinput", onBeforeInput, { capture: true });
       window.removeEventListener("compositionstart", onCompositionStart, { capture: true });
     };
-  }, [pendingPlace, editor, commitPendingPlace, cancelPendingPlace]);
+  }, [pendingPlace, editor, commitPendingPlace, cancelPendingPlace, pasteClipboardIntoEditor]);
 
   /* The attribute the stylesheet above keys the hidden native caret off. Written straight to the
    * editor's own element rather than through React, which does not own it. */
@@ -2805,6 +2958,20 @@ const NoteEditor = forwardRef(function NoteEditor({
    * deadzone delays the start; it does not offset the canvas from the hand for the rest of the
    * gesture. (Leaflet does the same, for the same reason.)
    */
+  /* The pan's on/off switch, shared by the blank-paper pan and the content pan below it. */
+  const setMatPanning = useCallback((on) => {
+    const mat = scrollerRef.current;
+    if (mat) {
+      if (on) mat.setAttribute("data-panning", "1");
+      else mat.removeAttribute("data-panning");
+    }
+    /* The pointer can leave the mat mid-pan (over the toolbar, the rail, the window chrome).
+     * `cursor` is an inherited property, so body carries the glyph everywhere the mat's own
+     * rule does not reach. Same shape as `beginWidthDrag`'s col-resize. */
+    document.body.style.cursor = on ? "grabbing" : "";
+    document.body.style.userSelect = on ? "none" : "";
+  }, []);
+
   const beginBlankGesture = useCallback((e, { place = true } = {}) => {
     const f = frame();
     const from = toDoc(e.clientX, e.clientY);
@@ -2827,18 +2994,7 @@ const NoteEditor = forwardRef(function NoteEditor({
     /* What this gesture has committed to. `null` until it travels; never goes back. */
     let latched = null;
 
-    const setPanning = (on) => {
-      const mat = scrollerRef.current;
-      if (mat) {
-        if (on) mat.setAttribute("data-panning", "1");
-        else mat.removeAttribute("data-panning");
-      }
-      /* The pointer can leave the mat mid-pan (over the toolbar, the rail, the window chrome).
-       * `cursor` is an inherited property, so body carries the glyph everywhere the mat's own
-       * rule does not reach. Same shape as `beginWidthDrag`'s col-resize. */
-      document.body.style.cursor = on ? "grabbing" : "";
-      document.body.style.userSelect = on ? "none" : "";
-    };
+    const setPanning = setMatPanning;
 
     const onMove = (ev) => {
       const at = { x: ev.clientX, y: ev.clientY };
@@ -2882,7 +3038,7 @@ const NoteEditor = forwardRef(function NoteEditor({
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
     return true;
-  }, [frame, toDoc, boxesNow, placeBlockAt, clearSelection, setView]);
+  }, [frame, toDoc, boxesNow, placeBlockAt, clearSelection, setView, setMatPanning]);
 
   /** Dragging any SELECTED box moves the whole set, by one delta, as one undo step. */
   const beginGroupDrag = useCallback((e, id) => {
@@ -3087,6 +3243,14 @@ const NoteEditor = forwardRef(function NoteEditor({
      * is side-effect-free beyond clearing that one piece of state, so calling it unconditionally
      * changes nothing about how the input itself handles the press. */
     cancelPendingPlace();
+    /* ⛔ A PRESS ELSEWHERE LEAVES THE TITLE (NEW-5). Every press below that claims the canvas calls
+     * preventDefault, which also stops the browser moving focus off the title <input> — so its text stayed
+     * highlighted after a click or double-click on the page. Blur it and collapse its selection first. */
+    const ae = document.activeElement;
+    if (ae instanceof HTMLInputElement && ae.getAttribute("data-testid") === "note-title" && ae !== el) {
+      try { ae.setSelectionRange(0, 0); } catch { /* not selectable */ }
+      ae.blur();
+    }
     if (el.closest("input, textarea, select, button, a")) return;
 
     /* ⛔ A PRESS INSIDE AN ANCHORED BLOCK IS A PRESS ON CONTENT. This was the owner's ORIGINAL
@@ -3777,6 +3941,126 @@ const NoteEditor = forwardRef(function NoteEditor({
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
   }, [setView]);
+
+  /* ⛔ A MOUSE DRAG PANS FROM ANYWHERE — INCLUDING ON A TABLE, A PICTURE AND AN UNFOCUSED BOX'S
+   * TEXT (NEW-1 / B2156912, owner report 2026-10-06: *"click and drag should ALWAYS pan the page,
+   * from any spot"*, and the press that becomes a pan should not select anything).
+   *
+   * WHY IT NEVER REACHED THE PAN. The pan lives in `beginBlankGesture`, which only a press that
+   * `focusFromMat` calls BLANK ever arms. A press on a box, a table or a picture is CONTENT, so it
+   * was claimed first — by ProseMirror (which put a caret / CellSelection in the table on the
+   * `mousedown`), by stage 1 of the box's select-then-enter model (which selected the box on the
+   * `mousedown`), and by the box body's own drag (`notesAnchorNode.js` `beginDrag`, a `pointerdown`
+   * that would have moved the BOX rather than the page).
+   *
+   * WHAT THIS DOES: for a plain left press on a box's content that is NOT already selected or being
+   * edited, it takes the press in the CAPTURE phase — before ProseMirror, the box and `focusFromMat`
+   * can see it — and DEFERS it. Nothing at all happens on the press. If the pointer travels it is a
+   * pan (the same `latchGesture` rule and the same view write as the blank-paper pan, followed from
+   * the press, not from where the slop was crossed) and NOTHING was ever selected, so there is
+   * nothing to undo. If it does not travel it is a click, and the click is REPLAYED into
+   * `focusFromMat` unchanged — so a plain click keeps today's behaviour exactly (it is still the
+   * stage-1 select that stage 2's native caret placement and word-select build on).
+   *
+   * ⛔ WHAT KEEPS ITS OWN DRAG, stated because a drag that is "always a pan" would otherwise eat
+   * them: the box move grip, the resize handles, the arrow connect dot, a table's column-resize
+   * handle, the page-edge grips, and any form control / link / `<summary>`; Shift / Ctrl / Alt /
+   * Cmd presses (marquee, toggle, context menu); a box that is already SELECTED (its body still
+   * drags the box / the whole selection, the same rule the touch pan uses); and — this one is a
+   * PROPOSAL awaiting the owner's say — a box that is being EDITED, where a drag inside it selects
+   * text, because otherwise selecting text with the mouse would be impossible.
+   *
+   * Mouse only: touch has its own pan below. A bare top-level table or picture (no box) is not
+   * claimed — `notesFlowMigration` folds those into boxes on read, so nothing can reach one. */
+  const suppressClickRef = useRef(false);
+  useEffect(() => {
+    const sc = scrollerRef.current;
+    if (!sc || !editor) return undefined;
+    const OWN = 'input, textarea, select, button, a, summary, [data-handle], .planyr-anchor-grip, '
+      + '.planyr-anchor-connect, .planyr-anchor-del, .planyr-anchor-size, .column-resize-handle, '
+      + '[class*="planyr-page-width-grip"], [class*="planyr-page-height-grip"], [data-testid="note-zoom-pill"]';
+    let claimed = false;
+    const claims = (e) => {
+      if (e.button !== 0 || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return false;
+      if (spaceHeldRef.current || arrowConnectRef.current || editor.isDestroyed) return false;
+      const el = e.target;
+      if (!(el instanceof Element)) return false;
+      const box = el.closest(".planyr-anchor");
+      if (!box || el.closest(OWN)) return false;
+      if (editor.view.dom.classList.contains("resize-cursor")) return false;     // on a column border
+      const id = box.getAttribute("data-anchor-id");
+      if (id && selRef.current.has(String(id))) return false;                    // selected: it keeps its drag
+      if (box.getAttribute("data-editing") === "1") return false;                // being edited: text selection
+      const s = document.getSelection();
+      if (editor.view.hasFocus() && s?.anchorNode && box.contains(s.anchorNode)) return false;
+      return true;
+    };
+    const onPointerDown = (e) => {
+      claimed = e.pointerType === "mouse" && claims(e);
+      /* Hide the press from the box body's own `pointerdown` drag (a bubble-phase listener on the
+       * box, which would move the BOX). `mousedown` still follows — it is not cancelled by this. */
+      if (claimed) e.stopPropagation();
+    };
+    const onMouseDown = (e) => {
+      const was = claimed;
+      claimed = false;
+      if (!was || !claims(e)) return;
+      e.preventDefault();         // no native caret / selection / drag image, and ProseMirror treats it as handled
+      e.stopPropagation();        // …and neither it nor `focusFromMat` ever sees the press
+      suppressClickRef.current = false;
+      cancelPendingPlace();       // "ANY press forgets an armed caret" — focusFromMat's own rule
+      const title = document.activeElement;
+      if (title instanceof HTMLInputElement && title.getAttribute("data-testid") === "note-title") {
+        try { title.setSelectionRange(0, 0); } catch { /* not selectable */ }
+        title.blur();
+      }
+      const start = { x: e.clientX, y: e.clientY };
+      const startView = { ...viewRef.current };
+      const press = {
+        target: e.target, clientX: e.clientX, clientY: e.clientY, detail: e.detail, timeStamp: e.timeStamp,
+        button: 0, shiftKey: false, defaultPrevented: false,
+        preventDefault() { this.defaultPrevented = true; }, stopPropagation() { /* the real one was stopped above */ },
+      };
+      let latched = null;
+      const onMove = (ev) => {
+        const at = { x: ev.clientX, y: ev.clientY };
+        const before = latched;
+        latched = latchGesture(latched, start, at, { shift: false });
+        if (!latched) return;                       // still inside the slop: nothing has happened
+        if (!before) setMatPanning(true);
+        setView({ x: startView.x - (at.x - start.x), y: startView.y - (at.y - start.y), z: startView.z });
+      };
+      const onUp = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+        setMatPanning(false);
+        if (latched) {
+          /* A pan that ended over the same element it began on would otherwise still raise a `click`
+           * there (a fold toggle, a link) — the person was moving the page, not pressing. */
+          suppressClickRef.current = true;
+          setTimeout(() => { suppressClickRef.current = false; }, 60);
+          return;
+        }
+        focusFromMat(press);                        // a click: replayed unchanged
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    };
+    const onClick = (e) => {
+      if (!suppressClickRef.current) return;
+      suppressClickRef.current = false;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    sc.addEventListener("pointerdown", onPointerDown, true);
+    sc.addEventListener("mousedown", onMouseDown, true);
+    sc.addEventListener("click", onClick, true);
+    return () => {
+      sc.removeEventListener("pointerdown", onPointerDown, true);
+      sc.removeEventListener("mousedown", onMouseDown, true);
+      sc.removeEventListener("click", onClick, true);
+    };
+  }, [editor, focusFromMat, cancelPendingPlace, setView, setMatPanning]);
 
   /* ⛔ TOUCH ON THE CANVAS: ONE FINGER PANS, TWO FINGERS PINCH AND FOLLOW (NEW-2, iPhone review
    * 2026-09-29: *"one finger can't scroll or pan a note"*).
@@ -4813,6 +5097,28 @@ const NoteEditor = forwardRef(function NoteEditor({
      * carry the formatting (LOUD-FAILURE). The plain route is the one that works everywhere,
      * which is why it is the one bound to the shortcut. */
     if (mode !== "text") {
+      /* ⛔ A TABLE (OR ANYTHING FORMATTED) PASTES FROM THE MENU TOO (NEW-1, 2026-10-06). `readText()` only sees the
+       * plain half, so "Keep source formatting" used to say it could not and paste nothing — a copied table could
+       * not be pasted from the right-click menu at all. The async read can hand back the html half when the
+       * browser allows it; it goes through the editor's own paste pipeline, exactly like Ctrl+V. A browser that
+       * refuses still gets the old, honest message. */
+      let html = "";
+      try {
+        const items = await navigator.clipboard.read();
+        for (const it of items) if (it.types.includes("text/html")) { html = await (await it.getType("text/html")).text(); break; }
+      } catch (_) { html = ""; }
+      if (html) {
+        if (!editor.view.hasFocus()) editor.view.focus();
+        const from = editor.state.selection.from;
+        try {
+          editor.view.pasteHTML(html);
+        } catch (_) { onPrintNotice?.("Planyr couldn't paste that. Try Ctrl+Shift+V to paste it as plain text."); return; }
+        if (mode === "merge") {
+          const to = editor.state.selection.from;
+          if (to > from) editor.commands.mergeFormatting({ from, to });
+        }
+        return;
+      }
       onPrintNotice?.("A browser only hands a menu the plain text of the clipboard. Press Ctrl+V to paste with its formatting, then choose Keep source or Merge from the badge that appears.");
       return;
     }
@@ -4913,6 +5219,12 @@ const NoteEditor = forwardRef(function NoteEditor({
    * React state — the same "the editor is the one source of truth" rule the toolbar's own
    * active-state reads follow. */
   const titleStyleNow = (!editor || editor.isDestroyed) ? {} : (editor.state.doc.attrs?.titleStyle || {});
+  /* One size answer shared by the title input and its width ghost (NEW-4). */
+  const titleFontStyle = {
+    fontSize: (titleStyleNow.sup || titleStyleNow.sub)
+      ? Math.round((titleStyleNow.fontSize || noteTitleFontPx(narrow)) * 0.7)
+      : (titleStyleNow.fontSize || noteTitleFontPx(narrow)),
+  };
 
   const edited = editedLabel(updatedAt);
 
@@ -5354,8 +5666,21 @@ const NoteEditor = forwardRef(function NoteEditor({
               so this is the same fixed `TITLE_BAND_GAP` it always was until something above the
               body's origin needs more room than that. */}
           <div style={{ marginBottom: TITLE_BAND_GAP + sheetGrowGap }}>
+            {/* ⛔ THE TITLE HUGS ITS TEXT (NEW-4). A ghost span holding the same text sizes an inline grid;
+                the input fills that one cell, so the box is as wide as the words (min = the placeholder),
+                wraps at the page edge, and the rest of the band is ordinary page for a double-click. */}
+            <div data-testid="note-title-wrap" style={{ display: "inline-grid", maxWidth: "100%", verticalAlign: "top" }}>
+            <span
+              aria-hidden="true"
+              style={{
+                gridArea: "1 / 1", visibility: "hidden", whiteSpace: "pre", overflow: "hidden",
+                fontWeight: titleStyleNow.bold ? 800 : 700, letterSpacing: "-0.01em", padding: "2px 2px 2px 0",
+                ...titleFontStyle,
+              }}
+            >{(title || "Untitled page") + " "}</span>
             <input
               data-testid="note-title"
+              size={1}
               value={title}
               placeholder="Untitled page"
               aria-label="Page title"
@@ -5374,7 +5699,7 @@ const NoteEditor = forwardRef(function NoteEditor({
                 editor.commands.focus("start");
               }}
               style={{
-                display: "block", width: "100%", border: "none", borderBottom: "1px solid transparent",
+                gridArea: "1 / 1", display: "block", width: "100%", minWidth: 0, border: "none", borderBottom: "1px solid transparent",
                 background: "transparent",
                 /* ⛔ NEW-5 — the title's OWN formatting, read off the document attribute the
                    toolbar writes (`titleStyle`). A field left unset here keeps the module's
@@ -5398,9 +5723,7 @@ const NoteEditor = forwardRef(function NoteEditor({
                    real name more room to actually show on a 390px-class phone before the
                    input's own internal scroll takes over. */
                 font: "inherit",
-                fontSize: (titleStyleNow.sup || titleStyleNow.sub)
-                  ? Math.round((titleStyleNow.fontSize || noteTitleFontPx(narrow)) * 0.7)
-                  : (titleStyleNow.fontSize || noteTitleFontPx(narrow)),
+                ...titleFontStyle,
                 letterSpacing: "-0.01em",
                 padding: "2px 0", outline: "none",
               }}
@@ -5410,8 +5733,9 @@ const NoteEditor = forwardRef(function NoteEditor({
                  made the field impossible to clear, because the write came straight back into a
                  controlled input. Folded into the existing blur rather than added beside it —
                  two onBlur props on one element and the second silently wins. */
-              onBlur={(e) => { e.target.style.borderBottomColor = "transparent"; setTitleActive(false); onTitleCommit?.(); }}
+              onBlur={(e) => { e.target.style.borderBottomColor = "transparent"; try { e.target.setSelectionRange(0, 0); } catch { /* not selectable */ } setTitleActive(false); onTitleCommit?.(); }}
             />
+            </div>
             {/* ⛔ THE ZOOM LEVEL IS NOT SHOWN HERE ANY MORE (NEW-2, owner report 2026-09-06:
                 "the zoom shouldn't be shown on the page"). It rendered as a real `<button>` inside
                 `note-sheet` — the document itself, not chrome around it — which is a control
@@ -5422,38 +5746,10 @@ const NoteEditor = forwardRef(function NoteEditor({
                 to 100%); only where its indicator sits moved. Same `data-testid="note-zoom-level"`
                 on the relocated control, so nothing that already asks "is a level shown, and does
                 it say what it is" had to change — only where it's rooted did. */}
-            {(projectLabel || edited) ? (
+            {edited ? (
               <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 6 }}>
-                {/* ⛔ WHICH PROJECT THIS NOTE BELONGS TO, WHILE YOU ARE READING IT (NEW-2).
-                    The owner could not see a note's filing anywhere near the note itself: the
-                    rail drops the per-row badge inside a project (everything there belongs where
-                    you are standing) and the Dashboard's grouping is a level up from the page. So
-                    a note copied into an unrelated pursuit looked exactly like a note in the
-                    right place. This is the one surface that is always on screen with the note.
-                    It is a LABEL, never a control — re-filing stays on the row's menu, one place,
-                    so there is no second way to change the fact. An id that no longer resolves
-                    wears the warning colour rather than being captioned as "no project": a failed
-                    lookup and a page that genuinely belongs nowhere are different states. */}
-                {projectLabel ? (
-                  <span
-                    data-testid="note-project-badge"
-                    data-project-id={projectLabel.projectId ?? ""}
-                    data-resolved={projectLabel.resolved ? "1" : "0"}
-                    // ⛔ THE NO-PROJECT CASE GETS ITS OWN SENTENCE (NEW-1, the banner-wording
-                    // fix's audit of every project-name interpolation in this module) —
-                    // projectLabel.name is "Not in a project" there, and "filed in Not in a
-                    // project" is a phrase inside a phrase. Org scope is unaffected: its label
-                    // ("Organization") reads fine in the same slot.
-                    title={projectLabel.projectId == null && !projectLabel.org ? "This note has no project" : `This note is filed in ${projectLabel.name}`}
-                    style={{
-                      flex: "0 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis",
-                      whiteSpace: "nowrap", fontSize: 10.5, fontWeight: 700, letterSpacing: "0.04em",
-                      color: projectLabel.resolved ? "var(--text-secondary)" : "var(--warn-text)",
-                      border: `1px solid ${projectLabel.resolved ? "var(--border-default)" : "var(--warn-text)"}`,
-                      borderRadius: RADIUS.pill, padding: "3px 9px",
-                    }}
-                  >{projectLabel.name}</span>
-                ) : null}
+                {/* ⛔ NO PROJECT / ORGANIZATION CHIP HERE (NEW-3, owner 2026-10-05). The filing is unchanged and
+                    still shown by the rail and the Dashboard grouping; only this header label is gone. */}
                 {edited ? (
                   <span
                     data-testid="note-edited"

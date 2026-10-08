@@ -9,12 +9,10 @@
  *
  * This is a WORKING SURFACE, not a hero — every difference from the pasted source is
  * deliberate and stated here so a future edit doesn't quietly undo one:
- *  - Lines render at a fraction of the source's opacity (DIM_ALPHA below) so they read as
- *    quiet texture in the gutters between cards, never competing with a card's own text —
- *    tuned by looking at a real screenshot of the dashboard, not guessed.
- *  - Colors come from this app's own theme tokens (usePalette(), light/dark-aware — the
- *    landing page is permanently dark, the dashboard is not) for the contour lines, and the
- *    real brand coral (BRAND.coral, src/shared/brand/tokens.js) for the cursor highlight —
+ *  - Lines render at a fraction of the source's opacity so they read as quiet texture in the
+ *    gutters between cards. Line ink, alpha and widths are OWNER-TUNED (TOPO_INK in
+ *    lib/topoMotion.js, NEW-2 of TOPO-TUNE-2026-10-05), day/night switched by the resolved theme.
+ *  - The cursor highlight uses the real brand coral (BRAND.coral, src/shared/brand/tokens.js) for the cursor highlight —
  *    never the pasted source's literal hex approximations.
  *  - The loop stops dead whenever `paused` is true (Dashboard.jsx passes this while a card is
  *    being dragged or resized in react-grid-layout) — repainting a full-viewport canvas every
@@ -37,18 +35,13 @@
  * large-scale drift (DEPTH) is pure ambient time, untouched by this item.
  */
 import { useEffect, useRef } from "react";
-import { useTheme, usePalette } from "../../../shared/theme/ThemeProvider.jsx";
+import { useTheme } from "../../../shared/theme/ThemeProvider.jsx";
 import { BRAND } from "../../../shared/brand/tokens.js";
-import { FOLLOW_RADIUS2, FOLLOW_STRENGTH, DEPTH_RATE, SETTLE_POS, SETTLE_STRENGTH, easeToward } from "../lib/topoMotion.js";
+import { FOLLOW_RADIUS2, FOLLOW_STRENGTH, DEPTH_RATE, SETTLE_POS, SETTLE_STRENGTH, TOPO_INK, easeToward } from "../lib/topoMotion.js";
 
 const L0 = -0.86, LSTEP = 0.098, LN = 32;
 const SC = 0.0042;
 const NARROW_PX = 720;
-
-// A working surface reads the lines as quiet texture behind the cards, never the main event
-// the way they are on the landing page (which strokes at full alpha) — the one deliberate
-// intensity departure from the pasted source.
-const DIM_ALPHA = 0.32;
 
 function hexToRgb(hex) {
   const n = parseInt(hex.slice(1), 16);
@@ -73,8 +66,18 @@ function vn(x, y, z) {
   const y0 = x00 + (x10 - x00) * v, y1 = x01 + (x11 - x01) * v;
   return (y0 + (y1 - y0) * w) * 2 - 1;
 }
+// NEW-1 (2026-10-05, owner: "a couple of hills equally spaced"): raw value noise on an integer
+// lattice reads as round hills at near-equal spacing. Re-rolled seed + a rotation (breaks axis
+// alignment) + a domain warp (elongated ridges, varied spacing). Measured variant "C"; a seed
+// offset alone was still lattice-like and is ruled out.
 function fbm(x, y, z) {
-  return vn(x, y, z) * 0.64 + vn(x * 2.17 + 11.3, y * 2.17 - 7.7, z * 1.55 + 3.1) * 0.30;
+  x += 37.7; y += 91.3; z += 5.9;
+  const c = 0.8253, s = 0.5646;
+  let rx = x * c - y * s, ry = x * s + y * c;
+  const wx = vn(rx * 0.55 + 5.2, ry * 0.55 + 1.3, z * 0.7 + 9.1) * 0.9;
+  const wy = vn(rx * 0.55 - 3.7, ry * 0.55 + 8.4, z * 0.7 - 2.2) * 0.9;
+  rx += wx; ry += wy;
+  return vn(rx, ry, z) * 0.64 + vn(rx * 2.17 + 11.3, ry * 2.17 - 7.7, z * 1.55 + 3.1) * 0.30;
 }
 function ex(v0, v1, L) {
   if (v1 === v0) return 0.5;
@@ -88,7 +91,6 @@ export default function DashboardTopoBackground({ paused = false }) {
   const pausedRef = useRef(paused);
   const controllerRef = useRef(null);
   const { resolved } = useTheme();
-  const palette = usePalette();
 
   // A lightweight effect just to forward the latest `paused` value into the loop — this must
   // NOT rebuild the whole canvas/listener setup below on every drag start/stop.
@@ -107,8 +109,7 @@ export default function DashboardTopoBackground({ paused = false }) {
     try { reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { /* ignore */ }
     try { coarse = window.matchMedia("(pointer: coarse)").matches; } catch { /* ignore */ }
 
-    const lineColor = palette.borderStrong;
-    const lineIdxColor = palette.textTertiary;
+    const ink = TOPO_INK[resolved === "dark" ? "dark" : "light"];
     const coralTopRgb = hexToRgb(BRAND.coral.top.face);
     const coralMidRgb = hexToRgb(BRAND.coral.mid.face);
 
@@ -192,11 +193,11 @@ export default function DashboardTopoBackground({ paused = false }) {
       }
 
       ctx.lineCap = "round";
-      ctx.globalAlpha = DIM_ALPHA;
+      ctx.globalAlpha = ink.alpha;
       for (let l = 0; l < LN; l++) {
         const isIndex = l % 5 === 0;
-        ctx.strokeStyle = isIndex ? lineIdxColor : lineColor;
-        ctx.lineWidth = isIndex ? 1.3 : 0.75;
+        ctx.strokeStyle = isIndex ? ink.index : ink.minor;
+        ctx.lineWidth = isIndex ? ink.indexWidth : ink.minorWidth;
         ctx.stroke(paths[l]);
       }
       ctx.globalAlpha = 1;
@@ -209,7 +210,11 @@ export default function DashboardTopoBackground({ paused = false }) {
         g.addColorStop(0.5, `rgba(${coralMidRgb},${(0.40 * ptr.s).toFixed(3)})`); // design-exempt: canvas gradient stop built from BRAND.coral (a token), not a literal
         g.addColorStop(1, `rgba(${coralMidRgb},0)`); // design-exempt: canvas gradient stop built from BRAND.coral (a token), not a literal
         ctx.fillStyle = g;
-        ctx.fillRect(0, 0, W, H);
+        // The gradient is fully transparent past its radius, so filling only that clamped box is
+        // the identical picture (NEW-3: the full-canvas fill was the biggest per-frame cost).
+        const bx0 = Math.max(0, ptr.x - 340), by0 = Math.max(0, ptr.y - 340);
+        const bx1 = Math.min(W, ptr.x + 340), by1 = Math.min(H, ptr.y + 340);
+        if (bx1 > bx0 && by1 > by0) ctx.fillRect(bx0, by0, bx1 - bx0, by1 - by0);
         ctx.restore();
       }
     }
@@ -292,7 +297,7 @@ export default function DashboardTopoBackground({ paused = false }) {
     // `resolved` (light/dark) intentionally re-runs this whole setup so the contour lines pick
     // up the new theme's tokens — a rare event, and simplest done as one clean remount rather
     // than threading a second color-only update path through the closures above.
-  }, [resolved, palette]);
+  }, [resolved]);
 
   return (
     <canvas

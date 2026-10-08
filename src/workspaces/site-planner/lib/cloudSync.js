@@ -5,7 +5,7 @@
  * logged-in user's data; localStorage remains the store when logged out.
  */
 import { supabase, supabaseRest, currentAccessToken } from "./supabase.js";
-import { casUpsert, keepaliveCasPush, isMissingVersionColumn, isMissingColumn } from "../../../shared/cloud/optimisticUpsert.js";
+import { casUpsert, keepaliveCasPush, isMissingVersionColumn, isMissingColumn, isTransientNetworkError } from "../../../shared/cloud/optimisticUpsert.js";
 import { makeWriteSerializer } from "../../../shared/cloud/serializeWrites.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { stableStringify } from "./elementSync.js";
@@ -321,6 +321,17 @@ async function cloudUpsertCore(uid, model, isRetry) {
     if (!error) lastHeaderSig[m.id] = sig;
     return { ok: !error, error: error ? error.message : null };
   }
+  /* NEW-1 (B2163344) — UNKNOWN OUTCOME, not failure. The reply to this write was lost (network), so
+   * the row may already hold it. Re-read the row (refreshes the CAS token — if our write landed this
+   * is the bumped version) and push the same content ONCE more: it lands either way (idempotent), and
+   * the caller — and so the banner — only ever hears the FINAL result. A second failure is genuine. */
+  if (!isRetry && isTransientNetworkError(r.error)) {
+    const fresh = await fetchSiteForReconcile(uid, m.id);
+    if (fresh !== null) {
+      reportClientEvent("cloud-write-retried", "write reply lost (network) → re-read the row and re-pushed once (sites)", { id: m.id, error: r.error });
+      return cloudUpsertCore(uid, model, true);
+    }
+  }
   reportClientEvent("cloud-write-failed", (r.error || "cloud write failed") + " (sites)", { id: m.id });
   return { ok: false, error: r.error || "cloud write failed" };
 }
@@ -554,6 +565,25 @@ export async function cloudHardDelete(uid, id) {
   } catch (e) {
     reportClientEvent("cloud-write-failed", "delete threw (sites)", { id, error: (e && e.message) || "" });
     return { ok: false, error: (e && e.message) || "delete threw" };
+  }
+}
+
+/* NEW-1 (project "Delete forever" looked like it worked and did nothing) — the FRESH READ that makes a
+ * hard delete a fact. `cloudHardDelete` answers `{ ok: true, removed: 0 }` for a DELETE that matched
+ * nothing (a policy refusal reads exactly like that), and `interpretDelete` has always called that
+ * ok — so a caller that only reads `ok` reports a purge that never happened. This asks the database
+ * which of these ids it STILL holds, so "gone" is proven by a read, never inferred from a write's
+ * return value. Returns { ok, present: [ids still in the table], error }. ok:false means the read
+ * itself failed — the caller must NOT treat that as "gone". */
+export async function cloudRowsPresent(uid, ids) {
+  const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
+  if (!supabase || !uid || !list.length) return { ok: true, present: [] };
+  try {
+    const { data, error } = await supabase.from("sites").select("id").in("id", list);
+    if (error) return { ok: false, present: [], error: error.message || "read failed" };
+    return { ok: true, present: (data || []).map((r) => r.id) };
+  } catch (e) {
+    return { ok: false, present: [], error: (e && e.message) || "read threw" };
   }
 }
 

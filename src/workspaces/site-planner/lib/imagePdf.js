@@ -17,6 +17,8 @@
 // fixed: catalog -> pages -> page -> {image XObject, content stream} -> info. The image
 // is embedded with /DCTDecode, which stores the JPEG bytes verbatim (no re-encode).
 
+import { annotationDict, BASE_FONTS, DA_FONT_NAMES } from "./pdfAnnotations.js";
+
 const PT_PER_IN = 72; // PDF user-space unit = 1/72 inch
 
 // ASCII string -> bytes. PDF structural syntax is ASCII; the only binary in the file is
@@ -42,7 +44,12 @@ const pad10 = (n) => String(n).padStart(10, "0");
 // page. `pixelW`/`pixelH` are the JPEG's pixel dimensions (they set resolution only;
 // the cm matrix scales the image to fill the page regardless). DeviceRGB / 8-bpc, which
 // is what a browser canvas toBlob("image/jpeg") always produces.
-export function jpegToPdf({ jpeg, pixelW, pixelH, widthIn, heightIn, title = "", date = new Date() } = {}) {
+//
+// NEW-1 (2026-10-05) — `annotations` (the specs `pdfAnnotations.buildAnnotations` returns) are
+// written as native, UNLOCKED PDF annotations on the page, each with an explicit appearance stream,
+// so Bluebeam / Acrobat can select, move, restyle and delete them. Empty/omitted → the file is
+// byte-for-byte what it always was.
+export function jpegToPdf({ jpeg, pixelW, pixelH, widthIn, heightIn, title = "", date = new Date(), annotations = [] } = {}) {
   if (!(jpeg instanceof Uint8Array) || jpeg.length === 0) throw new TypeError("jpeg must be a non-empty Uint8Array");
   if (!(pixelW > 0 && pixelH > 0)) throw new RangeError("pixelW/pixelH must be > 0");
   if (!(widthIn > 0 && heightIn > 0)) throw new RangeError("widthIn/heightIn must be > 0");
@@ -52,11 +59,29 @@ export function jpegToPdf({ jpeg, pixelW, pixelH, widthIn, heightIn, title = "",
   // Content stream: scale the unit image square up to the full page (cm matrix), draw it.
   const content = strBytes(`q\n${pageW} 0 0 ${pageH} 0 0 cm\n/Im0 Do\nQ\n`);
 
+  // ---- annotation objects (numbers assigned up front so the page dict can list them) ----
+  const annots = Array.isArray(annotations) ? annotations : [];
+  let nextNum = 7;
+  const fontNum = {};
+  const needFont = (k) => { if (!fontNum[k]) fontNum[k] = nextNum++; };
+  const hasFreeText = annots.some((a) => a.subtype === "FreeText");
+  if (hasFreeText) needFont("F1"); // the /Helv the FreeText /DA names
+  for (const a of annots) if (a.subtype === "FreeText") needFont(a.DA.font); // …and the bold/oblique face a /DA may name
+  for (const a of annots) for (const k of a.ap.fonts) needFont(k);
+  for (const a of annots) for (const ps of a.ap.patternStreams) for (const k of ps.fonts) needFont(k);
+  const annotObjs = annots.map((a) => ({
+    a, apNum: nextNum++, annotNum: nextNum++, patNums: a.ap.patternStreams.map(() => nextNum++),
+  }));
+  const N = nextNum - 1;
+  const annotsEntry = annotObjs.length ? ` /Annots [${annotObjs.map((o) => `${o.annotNum} 0 R`).join(" ")}]` : "";
+  const fontRes = (fonts) => (fonts.size ? `/Font << ${[...fonts].map((k) => `/${k} ${fontNum[k]} 0 R`).join(" ")} >>` : "");
+  const gsRes = (gs) => (gs.length ? `/ExtGState << ${gs.map((g) => `/${g.name} << /Type /ExtGState /ca ${g.ca} /CA ${g.CA} >>`).join(" ")} >>` : "");
+
   const dicts = {
-    1: `<< /Type /Catalog /Pages 2 0 R >>`,
+    1: `<< /Type /Catalog /Pages 2 0 R${hasFreeText ? ` /AcroForm << /Fields [] /DA (/Helv 0 Tf 0 g) /DR << /Font << ${[...new Set(["F1", ...annots.filter((a) => a.subtype === "FreeText").map((a) => a.DA.font)])].map((k) => `/${DA_FONT_NAMES[k]} ${fontNum[k]} 0 R`).join(" ")} >> >> >>` : ""} >>`,
     2: `<< /Type /Pages /Kids [3 0 R] /Count 1 >>`,
     3: `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageW} ${pageH}]`
-      + ` /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>`,
+      + ` /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R${annotsEntry} >>`,
     4: `<< /Type /XObject /Subtype /Image /Width ${pixelW} /Height ${pixelH}`
       + ` /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>`,
     5: `<< /Length ${content.length} >>`,
@@ -84,8 +109,27 @@ export function jpegToPdf({ jpeg, pixelW, pixelH, widthIn, heightIn, title = "",
   pushObj(5, dicts[5] + "\nstream\n", content, "\nendstream");   // page content stream
   pushObj(6, dicts[6]);
 
+  // Shared base-14 fonts, then each annotation's appearance stream (+ any tiling patterns) and dict.
+  for (const k of Object.keys(fontNum)) {
+    pushObj(fontNum[k], `<< /Type /Font /Subtype /Type1 /BaseFont /${BASE_FONTS[k]} /Encoding /WinAnsiEncoding >>`);
+  }
+  for (const o of annotObjs) {
+    const ap = o.a.ap;
+    const pats = ap.patternStreams;
+    pats.forEach((ps, i) => {
+      const body = strBytes(ps.stream);
+      const res = `<< ${fontRes(ps.fonts)} ${gsRes(ps.gs)} >>`;
+      pushObj(o.patNums[i], `<< /Type /Pattern /PatternType 1 /PaintType 1 /TilingType 1 /BBox [0 0 ${ps.w} ${ps.h}] /XStep ${ps.w} /YStep ${ps.h}`
+        + ` /Matrix [${ps.matrix.map((v) => +v.toFixed(5)).join(" ")}] /Resources ${res} /Length ${body.length} >>\nstream\n`, body, "\nendstream");
+    });
+    const patRes = pats.length ? `/Pattern << ${pats.map((ps, i) => `/${ps.name} ${o.patNums[i]} 0 R`).join(" ")} >>` : "";
+    const body = strBytes(ap.stream);
+    pushObj(o.apNum, `<< /Type /XObject /Subtype /Form /FormType 1 /BBox [${ap.bbox.map((v) => +v.toFixed(3)).join(" ")}]`
+      + ` /Resources << ${fontRes(ap.fonts)} ${gsRes(ap.gs)} ${patRes} >> /Length ${body.length} >>\nstream\n`, body, "\nendstream");
+    pushObj(o.annotNum, annotationDict(o.a, `${o.apNum} 0 R`));
+  }
+
   // Cross-reference table — byte offset of every object, in order.
-  const N = 6;
   const xrefStart = offset;
   let xref = `xref\n0 ${N + 1}\n0000000000 65535 f\r\n`;
   for (let i = 1; i <= N; i++) xref += `${pad10(offsets[i])} 00000 n\r\n`;

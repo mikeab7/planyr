@@ -244,7 +244,7 @@ export function siteToFeatures(model, project, opts = {}) {
     const ring = elToRingFeet(el);
     if (!ring || ring.length < 3) return;
     const st = elStyle(el, settings);
-    const style = { line: st.stroke, fill: st.fill, fillOpacity: Math.min(0.92, st.fillOpacity ?? 1) };
+    const style = { line: st.stroke, fill: st.fill, fillOpacity: Math.min(0.92, st.fillOpacity ?? 1), lineOpacity: st.strokeOpacity ?? 1, lineWidth: st.strokeWidthSet ?? 2 };
     const layer = (TYPE[el.type] && TYPE[el.type].label) || (el.type.charAt(0).toUpperCase() + el.type.slice(1));
     let name = layer, height, extrude = false;
     if (el.type === "building") {
@@ -281,7 +281,7 @@ export function siteToFeatures(model, project, opts = {}) {
 }
 
 /* ------------------------------- KML / KMZ build ----------------------------- */
-const styleKey = (s) => (s ? `${s.line || ""}|${s.fill == null ? "none" : s.fill}|${s.fillOpacity ?? 1}` : "");
+const styleKey = (s) => (s ? `${s.line || ""}|${s.fill == null ? "none" : s.fill}|${s.fillOpacity ?? 1}|${s.lineOpacity ?? 1}|${s.lineWidth ?? 2}` : "");
 
 // Build a KML document (string) from a doc name + a normalized feature list.
 export function buildKml(name, features) {
@@ -293,7 +293,8 @@ export function buildKml(name, features) {
     if (!styleMap.has(k)) styleMap.set(k, { id: `s${styleMap.size + 1}`, style: f.style });
   }
   const styleDefs = [...styleMap.values()].map(({ id, style }) => {
-    const line = `<LineStyle><color>${hexToKmlColor(style.line || "#000000", 1)}</color><width>2</width></LineStyle>`;
+    // NEW-8 — the element's own outline opacity + width ride into the KML line style (default 1 / 2 = unchanged).
+    const line = `<LineStyle><color>${hexToKmlColor(style.line || "#000000", style.lineOpacity ?? 1)}</color><width>${style.lineWidth ?? 2}</width></LineStyle>`;
     const noFill = style.fill == null || (style.fillOpacity ?? 1) <= 0;
     const poly = noFill
       ? `<PolyStyle><fill>0</fill><outline>1</outline></PolyStyle>`

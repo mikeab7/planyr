@@ -6,11 +6,10 @@ import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, count
 import { landingView, milesBetween, CLUSTER_RADIUS_MI, locatedPoints } from "./lib/landingView.js";
 import { decideTargetOf, orderVerbs, verbLabel } from "./lib/decideBar.js";
 import { addLocateControl } from "../../shared/map/locateControl.js";
-import { ensureSnapshot, getSnapshot, snapshotVintage, onSnapshotChange, featureAtPoint, preferSnapshotForDisplay } from "./lib/parcelSnapshot.js";
+import { ensureSnapshot, getSnapshot, snapshotVintage, onSnapshotChange, snapshotHitAt as snapshotHitAtLib, preferSnapshotForDisplay } from "./lib/parcelSnapshot.js";
 import { recordSourceResult, filterHealthyCandidates, isSourceOpen, isStatewideBackup, suppressRedundantStatewide } from "./lib/sourceHealth.js";
 import { syncOverlayLayers, withTileRetry, ALL_LAYERS, probeService, releaseOverlayRef } from "./lib/layers.js";
 import { isDiagArmed } from "./lib/diagArm.js";
-import { createPressWatch, createModeTrace, pointInRect } from "./lib/pressWatch.js";
 import { PANE_AREA, PANE_LINE, PANE_AREA_LABEL, PANE_LINE_LABEL } from "./lib/mapStack.js";
 import { tileCacheLimit } from "./lib/tileBudget.js";
 import { boundTileCache, capTileCache, armBlankTileHeal } from "./lib/tileLifecycle.js";
@@ -56,7 +55,7 @@ import { registerChromeDock } from "../../shared/ui/chromeDock.js";
 import { cornerClearanceFromBottom } from "../../shared/ui/cornerClearance.js";
 // B848496 — site-plan overlays (upload a site plan, place it on the map, pin comps to it).
 import { useSitePlanOverlayLayers } from "./lib/useSitePlanOverlayLayers.js";
-import { latLonToImagePoint, suggestFtPerPx, feetBetween } from "../../shared/sitePlans/lib/overlayGeoref.js";
+import { latLonToImagePoint, suggestFtPerPx, feetBetween } from "../../shared/overlay/overlayPlacement.js";
 import { overlayPlaced } from "../../shared/sitePlans/lib/sitePlanOverlays.js";
 // Reused (never a new raw hex literal) for text on the fixed COMP_ACCENT blue below — that
 // accent doesn't change with theme, so the LIGHT palette's on-accent value is correct in both.
@@ -72,6 +71,9 @@ import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import { startClickAck } from "../../shared/ui/clickAck.js";
 import AnchoredMenu from "../../shared/ui/AnchoredMenu.jsx";
 import FloatingNotice from "../../shared/ui/FloatingNotice.jsx";
+import { ToastHost, useToasts } from "../../shared/ui/Toast.jsx";
+import { useLayerHiddenToast } from "./lib/useLayerHiddenToast.js";
+import { GATE_CLEARANCE } from "./lib/layerZoomGate.js";
 import { menuPanelStyle, MenuItem } from "../../shared/ui/controls.jsx";
 // NEW-1 (B1892544, 2026-09-24) — the "Record info" dropdown's three row icons — see that item's
 // note in icons.jsx for why each shape was picked.
@@ -597,22 +599,6 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const imageryRef = useRef(null);
   const labelsRef = useRef(null);
   const selectModeRef = useRef(false); // read by the once-bound map handlers
-  // NEW-1 — "first click on Select parcels does nothing". Instrument + lost-press recovery; see
-  // lib/pressWatch.js for why this is an instrument and not a one-line fix.
-  const modeTraceRef = useRef(null);
-  if (!modeTraceRef.current) modeTraceRef.current = createModeTrace();
-  const selectPressRef = useRef(null);
-  if (!selectPressRef.current) {
-    selectPressRef.current = createPressWatch({
-      // A completed press over the button with no click: the node was replaced mid-press. Do what the
-      // press asked for (idempotent), and say so — a recovered press is still a defect to chase.
-      onLost: (info) => {
-        modeTraceRef.current.note("press-lost-recovered", info);
-        reportClientEvent("select-parcels-click-lost", "press on Select parcels completed with no click — recovered", { ...info, trace: modeTraceRef.current.snapshot().slice(-8) });
-        setSelectMode(true);
-      },
-    });
-  }
   const placingCompPinRef = useRef(false); // NEW-COMPS: armed by "+ Comp", read by the once-bound click handler
   const activeOverlayIdRef = useRef(null); // NEW-2 (B848496): read by the once-bound click handler, to deselect on a background click
   const selectedRef = useRef([]);
@@ -884,7 +870,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   // A sensible starting size/position for a freshly placed overlay: centered on the current map
   // view (or `centerOverride`, below), sized to a fraction of it (mirrors the Site Planner
   // reference-image panel's own "Size to view" button). Pure sizing math lives in
-  // overlayGeoref.js; only the live view is read here.
+  // overlayPlacement.js; only the live view is read here.
   //
   // `centerOverride` ({lat,lng}) — NEW-17: this is the ONLY door through which a caller may pin
   // the placement to a specific point instead of the live view center (a drag-and-drop upload
@@ -2157,6 +2143,21 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     return () => clearInterval(iv);
   }, [overlays, visible]); // eslint-disable-line
 
+  /* NEW-1 (B2112576) — the SAME "layer hidden at this zoom" toast the project canvas shows, on the
+     overview map (this is where a layer is first turned on). One shared rule + hook
+     (lib/useLayerHiddenToast.js); only the zoom action is this map's own: Leaflet's animated
+     setZoom to the nearest whole level inside the layers' range, centre kept. */
+  const { toasts: hiddenToasts, pushToast: pushHiddenToast, dismissToast: dismissHiddenToast, dismissByKey: dismissHiddenByKey } = useToasts();
+  useLayerHiddenToast({
+    enabled: !!(visible && isActive),
+    zoom,
+    overlays, pushToast: pushHiddenToast, dismissByKey: dismissHiddenByKey,
+    zoomTo: (target, label) => {
+      const m = mapRef.current; if (!m) return;
+      try { m.setZoom(label === "Zoom out" ? Math.floor(target + GATE_CLEARANCE) : Math.ceil(target - GATE_CLEARANCE)); } catch (_) {}
+    },
+  });
+
   /* NEW-6 — hand memory back while the Map view is hidden. Two things are released, both pure
      eviction with no visual consequence: the two basemap layers are squeezed to a token ceiling
      (a hidden map needs no look-ahead ring), and every esri raster OVERLAY this map holds — a
@@ -2292,7 +2293,6 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
      itself (`selected`/hilites/`parcelInfo`/`placingCompPin`) stays return-only, matching the
      existing "clears a committed selection on return" contract above. */
   useEffect(() => {
-    modeTraceRef.current.willExit("visible-flip");
     setSelectMode(false); setBackupNotice(null); setCachedNotice(null);
     if (visible) { clearHilites(); setSelected([]); setParcelInfo(null); setPlacingCompPin(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2845,6 +2845,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
    * (which also drops their in-flight tile work and their attribution). Runs on entering select
    * mode, after each moveend, and as each source's URL resolves. */
   const wantedDisplaysRef = useRef(null);
+  const snapshotsWarmedRef = useRef(new Set()); // B2092656 ×3 — counties whose saved copy this select session already warmed (one Drive check each, as before)
   const syncDisplaysToView = (stagger = false) => {
     const map = mapRef.current;
     if (!map || !selectModeRef.current) return;
@@ -2856,6 +2857,13 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       if (want.has(k)) statewideKeysForState(COUNTIES_MAP[k] && COUNTIES_MAP[k].state).forEach((sk) => want.add(sk));
     });
     wantedDisplaysRef.current = want;
+    /* B2092656 ×3 — warm a county's whole-county saved copy only when the view needs that county. It used to warm
+     * Chambers + Waller on EVERY Select-parcels-on, in Georgia too — Michael's two long frames (161 / 308 ms). */
+    CLIENT_SNAPSHOT_COUNTIES.forEach((c) => {
+      if (!want.has(c) || snapshotsWarmedRef.current.has(c)) return;
+      snapshotsWarmedRef.current.add(c);
+      ensureSnapshot(c).catch(() => {});
+    });
     setOutlineFloor(Math.max(PARCEL_MINZOOM, displayFloorForView({ south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() })));
     Object.keys(displaysRef.current).forEach((k) => { if (!want.has(k)) removeDisplay(k); });
     // A statewide BACKUP draws only the counties whose own live source failed, never the whole view (V1475200 follow-up).
@@ -2899,6 +2907,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   }, []);
   const clearDisplays = () => {
     wantedDisplaysRef.current = null;
+    snapshotsWarmedRef.current.clear();
     const map = mapRef.current;
     const seen = new Set(); // NEW-2 — aliased keys share ONE layer; remove it once
     Object.values(displaysRef.current).forEach((fl) => {
@@ -2975,21 +2984,6 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* NEW-1 — record every committed select-mode value; an EARLY exit nobody asked for (the "it engaged
-     and something reset it" half of the first-click report) is reported once with its reason. */
-  useEffect(() => {
-    const reset = modeTraceRef.current.transition(selectMode);
-    if (reset) {
-      reportClientEvent("select-parcels-mode-reset", `select mode dropped ${reset.heldMs}ms after engaging (${reset.reason})`, { ...reset, trace: modeTraceRef.current.snapshot().slice(-8) });
-    }
-  }, [selectMode]);
-  useEffect(() => {
-    // Read-only, armed at CALL time (diagArm.js) — never gates behaviour.
-    const hook = () => (isDiagArmed(window) ? modeTraceRef.current.snapshot() : null);
-    window.__selectParcelsTrace = hook;
-    return () => { if (window.__selectParcelsTrace === hook) window.__selectParcelsTrace = null; };
-  }, []);
-
   /* enter/leave select mode: show all counties' outlines, set the +/− cursor,
      enable click-to-identify. */
   useEffect(() => {
@@ -3001,9 +2995,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     // parcel cursor — the tool owns the cursor, not the fill (see index.css).
     try { map.getContainer().classList.toggle("pf-select-mode", !!selectMode); } catch (_) {}
     if (selectMode) {
-      // Warm the cached parcel snapshots (instant from IndexedDB, SWR-refresh from Drive) so a
-      // county whose live server is down still draws + clicks from the local copy (B629).
-      CLIENT_SNAPSHOT_COUNTIES.forEach((c) => { ensureSnapshot(c).catch(() => {}); });
+      // The cached parcel snapshots (B629) are warmed by `syncDisplaysToView` for the counties IN VIEW only
+      // (B2092656 ×3) — warming both Texas counties here froze the toggle wherever the map was.
       /* B2092656 — turning Select parcels on ran React's commit AND the whole display sync (two county-polygon
        * sweeps, layer construction) in ONE task: 43–85 ms measured, 283 ms on Michael's Chrome. The sync is
        * its own task now (next tick) so the toggle's commit paints first; nothing reads the displays between. */
@@ -3154,15 +3147,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
 
   // B629 — the parcel under a point from any LOADED Drive snapshot, shaped like an identify hit
   // ({county, feature}), or null. The last-resort answer when every live source is unreachable.
-  const snapshotHitAt = (lng, lat) => {
-    for (const c of SNAPSHOT_COUNTIES) {
-      const snap = getSnapshot(c);
-      if (!snap) continue;
-      const feature = featureAtPoint(snap.features, lng, lat);
-      if (feature) return { county: c, feature };
-    }
-    return null;
-  };
+  // B2092656 ×3 — the copy lives in a worker now, so this asks it (async); the answer is one lot, not the county.
+  const snapshotHitAt = (lng, lat) => snapshotHitAtLib(lng, lat, SNAPSHOT_COUNTIES);
 
   const handleClick = async (latlng, ack = null) => {
     // Auto-route: figure out which configured county/counties could contain this
@@ -3243,7 +3229,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
          * queries the loaded snapshot directly — the SAME lookup `selectParcelAt`'s address-search
          * path already uses — regardless of what's currently painted on the map. */
         if (res.responded === 0) {
-          const cached = snapshotHitAt(latlng.lng, latlng.lat);
+          const cached = await snapshotHitAt(latlng.lng, latlng.lat);
           if (cached) {
             const added = addParcelHit(cached, latlng);
             if (added) {
@@ -3342,7 +3328,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     if (!res.hits.length) {
       // Live gave nothing. If NO service responded, try the Drive snapshot for a cached lot before
       // reporting unavailable (B629); a real "no parcel here" from a healthy server stays empty.
-      const cached = res.responded === 0 ? snapshotHitAt(latlng.lng, latlng.lat) : null;
+      const cached = res.responded === 0 ? await snapshotHitAt(latlng.lng, latlng.lat) : null;
       if (cached) {
         const added = addParcelHit(cached, latlng);
         if (added) {
@@ -3435,7 +3421,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
    * selection bar" defect). Deliberately NOT folded into `clearSel()` itself: the decide bar's own
    * ✕ "Clear selection" button calls `clearSel()` to let the user pick different parcels WITHOUT
    * leaving select mode, and that stays correct. */
-  const finishGroundAction = () => { modeTraceRef.current.willExit("verb"); clearSel(); setSelectMode(false); };
+  const finishGroundAction = () => { clearSel(); setSelectMode(false); };
 
   /* NEW-1 (2026-09-08) — GROUND FIRST. A raw point the user pointed at, with the question of what
    * it IS deliberately not yet asked; the decide bar asks it. Clears any parcel selection, so the
@@ -3444,7 +3430,6 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const markDecidePin = (latlng) => {
     setPlacingCompPin(false);
     setPinDecideArmed(false);
-    modeTraceRef.current.willExit("verb");
     setSelectMode(false);
     clearSel();
     setDroppedPin({ lat: latlng.lat, lon: latlng.lon != null ? latlng.lon : latlng.lng });
@@ -4332,15 +4317,8 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
             <>
               <Button
                 variant="primary"
+                onClick={() => setSelectMode(true)}
                 data-testid="map-toolbar-select-parcels"
-                onClick={() => { selectPressRef.current && selectPressRef.current.click(); modeTraceRef.current.note("click"); setSelectMode(true); }}
-                onPointerDown={(e) => { selectPressRef.current && selectPressRef.current.down(e.pointerId); modeTraceRef.current.note("press-down"); }}
-                onPointerUp={(e) => {
-                  const inside = pointInRect(e.clientX, e.clientY, e.currentTarget.getBoundingClientRect());
-                  modeTraceRef.current.note("press-up", { inside });
-                  selectPressRef.current && selectPressRef.current.up(e.pointerId, inside);
-                }}
-                onPointerCancel={() => { selectPressRef.current && selectPressRef.current.cancel(); }}
                 title="Click parcels on the map to select them, then say what they are"
                 style={{ ...NESTED_ACTION_SIZE, fontWeight: 700, flex: "0 1 auto", minWidth: 44, overflow: "hidden", boxShadow: "none" }}
               >
@@ -4428,7 +4406,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
               {(
                 <Button
                   variant="ghost"
-                  onClick={() => { modeTraceRef.current.willExit("user"); setSelectMode(false); setPinDecideArmed(true); setPlacingCompPin(true); }}
+                  onClick={() => { setSelectMode(false); setPinDecideArmed(true); setPlacingCompPin(true); }}
                   title="Drop a pin instead of anchoring to a parcel"
                   style={{ ...NESTED_ACTION_SIZE, flex: "0 1 auto", minWidth: 40, overflow: "hidden", color: PAL.chromeInk, background: "var(--chrome-bg-elev)", border: "1px solid var(--chrome-divider)", boxShadow: "none" }}
                 >
@@ -4437,7 +4415,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
               )}
               <Button
                 variant="ghost"
-                onClick={() => { modeTraceRef.current.willExit("user"); setSelectMode(false); }}
+                onClick={() => setSelectMode(false)}
                 style={{ ...NESTED_ACTION_SIZE, flex: "none", color: PAL.chromeInk, background: "var(--chrome-bg-elev)", border: "1px solid var(--chrome-divider)", boxShadow: "none" }}
               >
                 Cancel
@@ -5134,6 +5112,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
             map keeps painting over the planner. See the map<->plan reset effect below, which is
             the other half of this fix (it now clears this state on the flip, in both directions,
             instead of relying on the gate alone). */}
+        {visible && isActive && <ToastHost toasts={hiddenToasts} onDismiss={dismissHiddenToast} />}
         {visible && isActive && backupNotice && !err && (
           <FloatingNotice testId="parcel-backup-notice" maxWidth="min(420px, calc(100vw - 16px))">
             <div style={{ background: "rgba(255,250,240,0.96)", border: "1px solid #e6c478", borderRadius: RADIUS.lg, padding: "8px 11px", fontSize: 12, color: "#8a5a00", lineHeight: 1.45, pointerEvents: "none" }}>

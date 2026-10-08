@@ -10,6 +10,7 @@
  * the historical collisions that predate this guard and can't be renumbered in place; `next-id
  * --against-main` prevents minting OVER an archived id in the first place. The full-pair audit is
  * still available via findDuplicateIds(REPO, B_FILES, "B") for a future archive cleanup. */
+import { readText } from "../scripts/lib/ledger.mjs";
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -104,7 +105,7 @@ describe("no leftover git conflict markers in the ledgers (B1592848 — the CI b
 
   for (const file of MARKER_FILES) {
     it(`${file} has no leftover conflict-marker lines`, () => {
-      const text = readFileSync(join(REPO, file), "utf8");
+      const text = readText(REPO, file);
       const bad = [...text.matchAll(new RegExp(MARKER_RE, "gm"))].map((m) => m[0]);
       expect(bad, `${file} contains a leftover git conflict marker — a merge was hand-resolved incompletely`).toEqual([]);
     });

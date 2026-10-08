@@ -152,40 +152,53 @@ export function scaleBarPlate({ lengthU, feet, m, pal = {}, fmtFeet = (n) => Str
   return { markup: s, plateW, plateH };
 }
 
-// Compact "Buildings" inset (B1934529) — one line per building plus a Total row, on the SAME
-// card look as the scale bar / north arrow plates (chromeCardColors + furnitureMetrics), sized
-// to its own content so a one-building plan gets a small card, not a fixed-width column (the
-// B1804993 full-width table this replaces). `rows`: [{ name, sf }], already in DISPLAY order;
+// Compact "Buildings" inset (B1934529; two-column layout NEW-1/B2118784) — one line per building plus a
+// Total row, on the SAME card look as the scale bar / north arrow plates (chromeCardColors +
+// furnitureMetrics), sized to its own content so a one-building plan gets a small card, not a
+// fixed-width column. Layout: header "BUILDINGS" left / "SF" right (the unit lives in the header only);
+// each row is the name left-aligned and the number right-aligned to ONE shared edge in tabular digits
+// (so digits and commas line up down the column); Total is bold with a thin rule above it. No dash of
+// any kind separates name from number. `rows`: [{ name, sf }], already in DISPLAY order;
 // `total`: the plan's whole building SF — passed in rather than summed here so the printed total
 // can never silently disagree with the number the Yield panel/canvas already agree on
-// (buildingSfTable.js is the ONE place that sums it). Returns { markup, plateW, plateH }.
+// (buildingSfTable.js is the ONE place that sums it). THE one builder for the compose preview, the
+// PDF and the PNG (all consume `furnitureLayout`). Returns { markup, plateW, plateH }.
 export function buildingsPlate({ rows = [], total = 0, m, pal = {}, fmtSf = (n) => Math.round(n).toLocaleString() }) {
   const ink = pal.ink || "#2c2a26";
   const muted = pal.muted || "#8a8473";
   const { fill: plate, line } = chromeCardColors(pal);
   const rowFs = m.fs * 0.92;
   const rowH = m.fs * 1.55;
-  const rowText = (name, sf) => `${name} — ${fmtSf(sf)} SF`;
-  const lines = [...rows.map((r) => rowText(r.name, r.sf)), rowText("Total", total)];
   const charW = rowFs * 0.6; // matches this codebase's other text-width estimates (metricsRowsFor)
-  const headerW = "BUILDINGS".length * m.unitFs * 0.72;
-  const contentW = lines.reduce((w, s) => Math.max(w, s.length * charW), headerW);
+  const numW = (str) => str.length * rowFs * 0.64; // bold tabular digits run a touch wider
+  const all = [...rows.map((r) => ({ name: String(r.name), num: fmtSf(r.sf) })), { name: "Total", num: fmtSf(total) }];
+  const nameColW = all.reduce((w, r) => Math.max(w, r.name.length * charW), 0);
+  const numColW = all.reduce((w, r) => Math.max(w, numW(r.num)), 0);
+  const gap = rowFs * 1.4; // air between the name column and the number column
+  const headW = "BUILDINGS".length * m.unitFs * 0.72 + gap + "SF".length * m.unitFs * 0.72;
+  const contentW = Math.max(nameColW + gap + numColW, headW);
   const plateW = contentW + 2 * m.pad;
+  const right = plateW - m.pad; // the ONE shared right edge
   const headBase = m.pad + m.unitFs;
+  const tabular = 'font-variant-numeric="tabular-nums slashed-zero"';
   let cy = headBase + rowH * 0.9;
-  let s = "";
-  rows.forEach((r) => {
-    s += `<text x="${r2(m.pad)}" y="${r2(cy)}" font-size="${r2(rowFs)}" fill="${ink}">${esc(r.name)} — <tspan font-weight="700" font-variant-numeric="tabular-nums slashed-zero">${esc(fmtSf(r.sf))} SF</tspan></text>`;
+  let body = "";
+  rows.forEach((r, i) => {
+    body += `<text x="${r2(m.pad)}" y="${r2(cy)}" font-size="${r2(rowFs)}" fill="${ink}">${esc(all[i].name)}</text>`;
+    body += `<text x="${r2(right)}" y="${r2(cy)}" text-anchor="end" font-size="${r2(rowFs)}" font-weight="700" ${tabular} fill="${ink}">${esc(all[i].num)}</text>`;
     cy += rowH;
   });
-  const dividerY = cy - rowH * 0.62;
-  const totalBase = cy + rowH * 0.02;
+  const dividerY = cy - rowH * 0.5; // a little extra air above the rule, then the Total row
+  const totalBase = cy + rowH * 0.2;
   const plateH = totalBase + m.pad * 0.6;
-  let head = `<rect x="0" y="0" width="${r2(plateW)}" height="${r2(plateH)}" rx="${r2(m.rx)}" fill="${plate}" stroke="${line}" stroke-width="${r2(m.plateStroke)}"/>`;
-  head += `<text x="${r2(m.pad)}" y="${r2(headBase)}" font-size="${r2(m.unitFs)}" font-weight="700" letter-spacing="${r2(m.unitFs * 0.15)}" fill="${muted}">BUILDINGS</text>`;
-  s = head + s;
-  s += `<line x1="${r2(m.pad)}" y1="${r2(dividerY)}" x2="${r2(plateW - m.pad)}" y2="${r2(dividerY)}" stroke="${line}" stroke-width="${r2(m.plateStroke)}"/>`;
-  s += `<text x="${r2(m.pad)}" y="${r2(totalBase)}" font-size="${r2(rowFs)}" font-weight="700" fill="${ink}">${rowText("Total", total)}</text>`;
+  let s = `<rect x="0" y="0" width="${r2(plateW)}" height="${r2(plateH)}" rx="${r2(m.rx)}" fill="${plate}" stroke="${line}" stroke-width="${r2(m.plateStroke)}"/>`;
+  const headAttrs = `y="${r2(headBase)}" font-size="${r2(m.unitFs)}" font-weight="700" letter-spacing="${r2(m.unitFs * 0.15)}" fill="${muted}"`;
+  s += `<text x="${r2(m.pad)}" ${headAttrs}>BUILDINGS</text>`;
+  s += `<text x="${r2(right)}" text-anchor="end" ${headAttrs}>SF</text>`;
+  s += body;
+  s += `<line x1="${r2(m.pad)}" y1="${r2(dividerY)}" x2="${r2(right)}" y2="${r2(dividerY)}" stroke="${line}" stroke-width="${r2(m.plateStroke)}"/>`;
+  s += `<text x="${r2(m.pad)}" y="${r2(totalBase)}" font-size="${r2(rowFs)}" font-weight="700" fill="${ink}">Total</text>`;
+  s += `<text x="${r2(right)}" y="${r2(totalBase)}" text-anchor="end" font-size="${r2(rowFs)}" font-weight="700" ${tabular} fill="${ink}">${esc(all[all.length - 1].num)}</text>`;
   return { markup: s, plateW, plateH };
 }
 

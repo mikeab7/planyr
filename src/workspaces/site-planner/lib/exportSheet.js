@@ -43,7 +43,7 @@ import { buildingSfRows } from "./buildingSfTable.js";
 import { buildSheetFurnitureSvg } from "./sheetFurnitureLayout.js";
 import { printSheetLayout, buildPrintSheetSvg, sheetFileName, formatDateStamp, pageSizeForFit } from "./printSheet.js";
 export { pageSizeForFit };
-import { printStrokeWidth, sheetFitScale } from "./exportStyle.js";
+import { printStrokeWidth, sheetFitScale, overlayStrokeWidth, overlayPointRadius, overlayKeylineWidth, overlayPrintOpacity } from "./exportStyle.js";
 import { sheetLabelPpf } from "./exportLabelScale.js";
 import { enforceMeasureValueOnSheet, droppedMeasureWarning } from "./measureSheet.js";
 import { jpegToPdf } from "./imagePdf.js";
@@ -75,7 +75,7 @@ export function sheetLayoutBoxesIn({ paper, orient, metricsPairs, stormwaterBars
 export function createExportSheet(ctx) {
   const {
     // --- drawn model + geometry -------------------------------------------------
-    parcels, els, measures, settings, underlay, sheetOverlays,
+    parcels, els, measures, callouts, markups, settings, underlay, sheetOverlays,
     DEV_TYPES, devExtent, elCorners, f2p, view, size, origin, hidden,
     // --- live DOM / Leaflet handles ---------------------------------------------
     svgRef, stateRef, overlayRefs, geoMapRef,
@@ -360,7 +360,7 @@ export function createExportSheet(ctx) {
     const projectLngLat = (ll) => f2p(lngLatRingToFeet([ll], origin.lon, origin.lat)[0]); // the ONE projection seam
     const placeVector = (list, append) => {
       for (const v of list) {
-        const { svg, skipped } = buildOverlayVectorFragment(v.features, projectLngLat, { opacity: v.opacity, labels: v.labels });
+        const { svg, skipped } = buildOverlayVectorFragment(v.features, projectLngLat, { opacity: v.opacity, labels: v.labels, casing: true });
         if (skipped) console.warn(`[export] ${v.label || v.id}: ${skipped} vector feature(s) skipped (non-finite projection)`);
         if (!svg) continue;
         const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
@@ -478,6 +478,39 @@ export function createExportSheet(ctx) {
     if (sheetScale > 0) {
       root.querySelectorAll("*").forEach((node) => {
         if (typeof node.closest === "function" && node.closest("[data-furniture]")) return;
+        // GIS overlay ink (B2095745) has its OWN print treatment: firm physical weight + casing + opacity floor.
+        // The plan-stroke retarget below would print a layer's weight-2 line at 0.6 pt and 0.55 alpha over a
+        // dark aerial — drawn on screen, invisible on paper.
+        if (typeof node.closest === "function" && node.closest("[data-export-vector]")) {
+          const tag = node.tagName && node.tagName.toLowerCase();
+          if (tag === "path" || tag === "circle") {
+            const authored = parseFloat(node.getAttribute("stroke-width"));
+            const isCase = node.hasAttribute("data-vcase");
+            if (tag === "circle") {
+              const nr = overlayPointRadius(parseFloat(node.getAttribute("r")), sheetScale);
+              if (Number.isFinite(nr)) node.setAttribute("r", r6(nr));
+              node.setAttribute("stroke", "white");
+              node.setAttribute("stroke-width", r6(overlayKeylineWidth(sheetScale)));
+              node.setAttribute("stroke-opacity", "0.95");
+              node.setAttribute("fill-opacity", String(overlayPrintOpacity(node.getAttribute("fill-opacity"))));
+            } else if (node.getAttribute("fill") === "none" || isCase) {
+              const nw = overlayStrokeWidth(authored, sheetScale, { casing: isCase });
+              if (Number.isFinite(nw)) node.setAttribute("stroke-width", r6(nw));
+              if (!isCase) node.setAttribute("stroke-opacity", String(overlayPrintOpacity(node.getAttribute("stroke-opacity"))));
+              const da = node.getAttribute("stroke-dasharray");
+              if (da && /[\d.]/.test(da) && authored > 0 && Number.isFinite(nw)) {
+                const f = nw / authored;
+                const scaled = da.trim().split(/[\s,]+/).map((n) => parseFloat(n) * f).filter((v) => Number.isFinite(v)).map((v) => Number(Number(v).toPrecision(6)));
+                if (scaled.length) node.setAttribute("stroke-dasharray", scaled.join(" "));
+              }
+            } else {
+              // polygon outline: same weight rule, fill left exactly as authored.
+              const nw = overlayStrokeWidth(authored, sheetScale);
+              if (Number.isFinite(nw)) node.setAttribute("stroke-width", r6(nw));
+            }
+          }
+          return;
+        }
         const cur = node.getAttribute && node.getAttribute("stroke-width");
         if (cur != null && cur !== "") {
           const nw = printStrokeWidth(parseFloat(cur), sheetScale);
@@ -1068,7 +1101,7 @@ export function createExportSheet(ctx) {
    * reserves no height for the band at all — the plan reclaims the freed strip rather than
    * leaving a gap — and `buildPrintSheetSvg` omits the band (bars, metrics line AND the
    * disclaimer note, which is part of the band, not a separate thing being evaded). */
-  const buildComposedSheet = async (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true) => {
+  const buildComposedSheet = async (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true, annotate = false) => {
     const exportAerial = await exportAerialForFrame(printFrame); // B735/B839 — capture the live basemap (a Leaflet <div> the SVG can't clone) as a frame-exact image: stitched cached tiles, or the dynamic /export fallback
     const exportOverlays = exportOverlaysForFrame(printFrame); // B739 — capture the live GIS raster layers (floodplain, pipelines, …) for the print frame
     await warmTerrainForFrame(); // NEW-1 — the persistent cache tier is async now; make sure the frame's terrain tiles are resident before the SYNC capture below
@@ -1093,6 +1126,27 @@ export function createExportSheet(ctx) {
     // the real sheet-fit factor (centi-inches of paper per viewBox unit) so the result
     // is identical regardless of the zoom the user was at when they hit print.
     restyleExportClone(built.clone, sheetFitScale(built.w, built.h, layout.plan.w, layout.plan.h));
+    /* NEW-1 (2026-10-05) — EDITABLE MARKUPS. With `annotate` (the PDF's "Flatten markups" toggle OFF) the
+       annotation-class nodes are lifted OUT of the clone — AFTER the print restyle above, so their stroke
+       weights and label sizes are exactly what the flattened sheet would have drawn — and written into
+       the PDF as native annotations by exportPDF. Everything else (aerial, GIS, parcels, buildings,
+       furniture) stays page content. The preview never passes `annotate`, so it still shows the markups. */
+    let annotationSet = null;
+    if (annotate) {
+      const [{ extractMarkupAnnotations }, { buildAnnotations }] = await Promise.all([import("./annotationExtract.js"), import("./pdfAnnotations.js")]);
+      const mctx = document.createElement("canvas").getContext("2d");
+      const measureText = (str, font) => { mctx.font = font; return mctx.measureText(str).width; };
+      const { descriptors, patterns } = extractMarkupAnnotations(built.clone, { markups, callouts, measures, f2p, measureText });
+      // clone user units → PDF points: the nested <svg> is fitted "meet" into the plan box, then the page
+      // unit (page.w units across wIn inches) converts to points; PDF y runs up, so it flips.
+      const [vx, vy, vw, vh] = built.clone.getAttribute("viewBox").split(/[\s,]+/).map(parseFloat);
+      const sFit = sheetFitScale(vw, vh, layout.plan.w, layout.plan.h);
+      const ox = layout.plan.x + (layout.plan.w - vw * sFit) / 2, oy = layout.plan.y + (layout.plan.h - vh * sFit) / 2;
+      const pu = (layout.page.wIn * 72) / layout.page.w, pageHpt = layout.page.hIn * 72, k = sFit * pu;
+      const M0 = [k, 0, 0, -k, (ox - vx * sFit) * pu, pageHpt - (oy - vy * sFit) * pu];
+      const frame = [ox * pu, pageHpt - (oy + vh * sFit) * pu, (ox + vw * sFit) * pu, pageHpt - oy * pu];
+      annotationSet = buildAnnotations(descriptors, { M0, frame, patterns, now: new Date().toISOString() });
+    }
     const plan = built.clone; // a full <svg viewBox=…> — nest it, keeping its viewBox
     plan.setAttribute("x", layout.plan.x); plan.setAttribute("y", layout.plan.y);
     plan.setAttribute("width", layout.plan.w); plan.setAttribute("height", layout.plan.h);
@@ -1110,18 +1164,21 @@ export function createExportSheet(ctx) {
         : "Concept site plan — planning-level estimates, not a survey.",
       pal: { ...PAL, paper: "#ffffff" }, // white sheet — the cream PAL.paper is a screen-only page colour
     });
-    return { sheetSvg, layout, aerialDropped, overlaysDropped };
+    return { sheetSvg, layout, aerialDropped, overlaysDropped, annotationSet };
   };
 
-  const exportPDF = async (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true) => {
+  // NEW-1 (2026-10-05) — `flattenMarkups` (the compose screen's "Flatten markups" toggle). TRUE keeps the
+  // exact pre-existing behaviour (markups burned into the page); the DEFAULT HERE is true so any other
+  // caller is untouched — the compose screen is what passes the user's remembered choice (default OFF).
+  const exportPDF = async (paper = "letter", orient = "landscape", includeOverlay = true, includeMapLayers = true, scaleLabelText = "", preparedBy = "", includeMetricsBand = true, pageOverride = null, includeBuildingsTable = true, flattenMarkups = true) => {
     const now = () => (typeof performance !== "undefined" && performance.now ? performance.now() : Date.now());
     const t0 = now();
     const mark = (label) => { try { console.debug(`[pdf] ${label}: ${Math.round(now() - t0)}ms`); } catch (_) {} };
     setExportingPDF(true);
     try {
-      const composed = await buildComposedSheet(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride, includeBuildingsTable);
+      const composed = await buildComposedSheet(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride, includeBuildingsTable, !flattenMarkups);
       if (!composed) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
-      const { sheetSvg, layout, aerialDropped, overlaysDropped } = composed;
+      const { sheetSvg, layout, aerialDropped, overlaysDropped, annotationSet } = composed;
       mark("composed sheet");
       // Rasterize the composed sheet at high DPI. The browser renders the SVG exactly as it
       // appears on screen (fills, filters, the inlined aerial), so the PDF is pixel-faithful.
@@ -1142,7 +1199,13 @@ export function createExportSheet(ctx) {
         releaseCanvas(canvas); // NEW-5 — a full-page sheet at print DPI; released once encoded
         const jpeg = new Uint8Array(await jpegBlob.arrayBuffer());
         const fileName = sheetFileName({ project: siteLabel, plan: planLabel }); // B201 — date · project · plan
-        const pdf = jpegToPdf({ jpeg, pixelW: pxW, pixelH: pxH, widthIn: page.wIn, heightIn: page.hIn, title: fileName });
+        const pdf = jpegToPdf({ jpeg, pixelW: pxW, pixelH: pxH, widthIn: page.wIn, heightIn: page.hIn, title: fileName, annotations: annotationSet ? annotationSet.annots : [] });
+        // LOUD-FAILURE: a markup that could not become a fully native annotation is still in the file (as a
+        // look-alike) — but say so, never let it pass as a clean editable export.
+        if (annotationSet && annotationSet.degraded.length) {
+          try { console.debug("[pdf] annotation notes:", annotationSet.degraded); } catch (_) {}
+          flashWarn(`⚠ ${annotationSet.degraded.length} markup detail${annotationSet.degraded.length === 1 ? " was" : "s were"} simplified in the editable PDF (it looks the same, but may not edit exactly like a native Bluebeam markup). Turn on “Flatten markups” for an exact picture.`, 9000);
+        }
         const aEl = document.createElement("a");
         aEl.href = URL.createObjectURL(new Blob([pdf], { type: "application/pdf" }));
         aEl.download = `${fileName}.pdf`;

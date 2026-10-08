@@ -12,8 +12,8 @@ const lineMk = (over = {}) => ({ id: "m2", kind: "line", a: { x: 0, y: 0 }, b: {
 const M = (item, kind = "el") => ({ item, kind });
 
 describe("styleCapsOf", () => {
-  it("an element exposes fill/stroke/fillOpacity only (weight is type-level)", () => {
-    expect(styleCapsOf(bldg(), "el").sort()).toEqual(["fill", "fillOpacity", "stroke"]);
+  it("an element exposes fill/stroke/fillOpacity + the NEW-8 outline pair (weight stays type-level)", () => {
+    expect(styleCapsOf(bldg(), "el").sort()).toEqual(["fill", "fillOpacity", "stroke", "strokeOpacity", "strokeWidth"]);
   });
   it("a closed markup exposes stroke/weight/dash/fill/fillOpacity", () => {
     expect(styleCapsOf(rectMk(), "markup").sort()).toEqual(["dash", "fill", "fillOpacity", "stroke", "weight"]);
@@ -29,7 +29,7 @@ describe("styleCapsOf", () => {
 describe("commonStyleState — uniform vs mixed", () => {
   it("3 elements with the same fill → not mixed, opacity uniform at the default 1", () => {
     const s = commonStyleState([M(bldg({ fill: "#ffffff" })), M(bldg({ id: "b2", fill: "#ffffff" })), M(bldg({ id: "b3", fill: "#ffffff" }))], {});
-    expect(s.caps).toEqual(["fillOpacity", "fill", "stroke"]);
+    expect(s.caps).toEqual(["fillOpacity", "fill", "strokeOpacity", "stroke", "strokeWidth"]);
     expect(s.props.fill.mixed).toBe(false);
     expect(s.props.fill.value.toLowerCase()).toBe("#ffffff");
     expect(s.props.fillOpacity).toEqual({ value: 1, mixed: false });
@@ -51,7 +51,7 @@ describe("commonStyleState — uniform vs mixed", () => {
 describe("commonStyleState — mixed types intersect capabilities", () => {
   it("building + trailer + paving → caps are fill/stroke/fillOpacity", () => {
     const s = commonStyleState([M(bldg()), M(trailer()), M(paving())], {});
-    expect(s.caps).toEqual(["fillOpacity", "fill", "stroke"]);
+    expect(s.caps).toEqual(["fillOpacity", "fill", "strokeOpacity", "stroke", "strokeWidth"]);
   });
   it("el + closed markup → weight/dash dropped, fill/stroke/fillOpacity shared", () => {
     const s = commonStyleState([M(bldg()), M(rectMk(), "markup")], {});
@@ -79,7 +79,22 @@ describe("commonStyleState — edges", () => {
   });
   it("null members are ignored", () => {
     const s = commonStyleState([null, M(bldg()), { item: null, kind: "el" }], {});
-    expect(s.caps).toEqual(["fillOpacity", "fill", "stroke"]);
+    expect(s.caps).toEqual(["fillOpacity", "fill", "strokeOpacity", "stroke", "strokeWidth"]);
+  });
+  it("NEW-8 — outline opacity/width resolve to the type default and show Mixed when they disagree", () => {
+    const one = commonStyleState([M(bldg())], {});
+    expect(one.props.strokeOpacity).toEqual({ value: 1, mixed: false });
+    expect(one.props.strokeWidth).toEqual({ value: 2, mixed: false });      // building's built-in weight
+    const two = commonStyleState([M(bldg({ strokeWidth: 4, strokeOpacity: 0.5 })), M(bldg({ id: "b2" }))], {});
+    expect(two.props.strokeWidth.mixed).toBe(true);
+    expect(two.props.strokeOpacity.mixed).toBe(true);
+    const same = commonStyleState([M(bldg({ strokeWidth: 4 })), M(bldg({ id: "b2", strokeWidth: 4 }))], {});
+    expect(same.props.strokeWidth).toEqual({ value: 4, mixed: false });
+  });
+  it("NEW-8 — a markup's weight and an el's strokeWidth never intersect (no half-applied mixed selection)", () => {
+    const s = commonStyleState([M(bldg()), M({ id: "m1", kind: "rect" }, "markup")], {});
+    expect(s.caps).not.toContain("strokeWidth");
+    expect(s.caps).not.toContain("strokeOpacity");
   });
 });
 

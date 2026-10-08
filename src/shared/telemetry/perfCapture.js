@@ -58,6 +58,10 @@ export const CAPTURE_NUMERIC_KEYS = [
   "heapMB", "domNodes", "canvasNodes", "featuresDrawn", "elementsDrawn", "layersOn", "panelsOpen", "tiles",
   "ppf", "editsSinceLoad", "planSwitches", "dpr", "viewportW", "viewportH", "hardwareThreads",
   "deviceMemoryGB", "recorderSelfUs", "counterSamples", "sentRows",
+  /* NEW-2 (B1317824) — the SUPPLEMENT rows' own facts (see encodeSupplements): how many continuation
+   * rows this capture sent, which one this is, how many of its series it carries, and where its
+   * frame chunk starts in the full track. Present only on a capture the one-row budget could not hold. */
+  "suppRows", "seq", "of", "f0", "fCount", "tasksDroppedSupp", "countersDroppedSupp", "fSpan0", "fSpan1",
 ];
 
 export const CAPTURE_ENUM_KEYS = [
@@ -73,7 +77,11 @@ export const CAPTURE_ENUM_KEYS = [
 
   "note",        // free-form ONLY from a fixed internal vocabulary — see NOTE_VOCAB
   "bootTrigger", // NEW-3 — "single" | "cumulative", which bar the boot judgment tripped; see BOOT_TRIGGER_VOCAB
+  "part",        // NEW-2 (B1317824) — a supplement row's series: "f" frames | "c" counters | "t" tasks; see PART_VOCAB
 ];
+
+/* A supplement row's `part` may only ever be one of these — same discipline as NOTE_VOCAB. */
+export const PART_VOCAB = ["f", "c", "t"];
 
 /* A capture's `bootTrigger` may only ever be one of these — same discipline as NOTE_VOCAB. */
 export const BOOT_TRIGGER_VOCAB = ["", "single", "cumulative"];
@@ -219,6 +227,7 @@ export function buildCapture(parts) {
   num("deviceMemoryGB", p.deviceMemoryGB, 1);
   num("recorderSelfUs", p.recorderSelfUs, 2);
   num("counterSamples", p.counterSamples);
+  num("suppRows", p.suppRows);   // NEW-2 (B1317824) — set by the recorder AFTER it has built the supplements
 
   /* Series. Arrays of NUMBERS only — never of records, never of strings except the interned
    * attribution table, which holds script URLs from this app's own build. */
@@ -289,6 +298,7 @@ export function assertCaptureClean(cap) {
       else if (v.length > 48) bad.push(`${k}: over-long`);
       else if (k === "note" && !NOTE_VOCAB.includes(v)) bad.push(`note: outside the fixed vocabulary`);
       else if (k === "bootTrigger" && !BOOT_TRIGGER_VOCAB.includes(v)) bad.push(`bootTrigger: outside the fixed vocabulary`);
+      else if (k === "part" && !PART_VOCAB.includes(v)) bad.push(`part: outside the fixed vocabulary`);
       else if (k === "plan" && !/^[A-Za-z0-9_-]*$/.test(v)) bad.push(`plan: unsanitised`);
       else if (k === "layers" && !/^[a-z0-9_,+]*$/i.test(v)) bad.push(`layers: unsanitised`);
     } else if (series.has(k)) {
@@ -537,8 +547,169 @@ export function encodeCapture(cap, { maxChars = CAPTURE_MAX_CHARS } = {}) {
     delete bare.lt; delete bare.ltNames; delete bare.c; delete bare.cCols;
     s = JSON.stringify(bare);
   }
-  return { text: s, chars: s.length, trimmedFrames, trimmedTasks, trimmedCounters, fits: s.length <= maxChars };
+  return {
+    text: s, chars: s.length, trimmedFrames, trimmedTasks, trimmedCounters, fits: s.length <= maxChars,
+    /* NEW-2 (B1317824) — what the MAIN row kept, so a supplement can carry exactly the remainder. Tasks
+     * are a PREFIX of the worst-first array (the tail is what sheds); counters are a SUFFIX (oldest shed). */
+    keptTasks: tasks.length, keptCounters: counters.length, keptFrames: frames.length,
+  };
 }
 
 const r1 = (v) => (Number.isFinite(v) ? Math.round(v * 10) / 10 : null);
 const r2 = (v) => (Number.isFinite(v) ? Math.round(v * 100) / 100 : null);
+
+/* ── Supplement rows (NEW-2, B1317824 — recurrence of B265541 / B846385 / B1317824) ──────────────
+ *
+ * ⛔ WHY THE ONE-ROW BUDGET WAS NEVER GOING TO HOLD, AND WHY SHEDDING HARDER CANNOT FIX IT. The row is
+ * one `client_errors.message` (≤ 2000 chars), the ~60 numeric summary keys alone cost ~1,000 of the 1,750
+ * the encoder is given, and a frame costs a character PLUS ~10 more when it is a spike (> 63 ms) — and on a
+ * stall that is exactly the frame that matters. Three prior sessions re-ordered what sheds first (long-task
+ * table, frame ladder, task floor) and it recurred anyway, because the problem is not the ORDER: on the
+ * owner's 2026-10-06 report 2,100 frames, 229 long tasks and 23 counter samples were squeezed into ~750
+ * characters, and what survived was 8 frames, 16 tasks and 6 counter samples — the manual capture's 8
+ * frames were the SMOOTH tail AFTER the stall (`RRRRRRRR`), i.e. the evidence was discarded and a
+ * flattering remainder shipped. The honest fix is to stop pretending one row can carry it.
+ *
+ * So a capture the main row had to trim travels as the MAIN row (summary + the top of every series, exactly
+ * as before — nothing about it changed) plus up to `SUPPLEMENT_MAX_ROWS` CONTINUATION rows carrying what it
+ * dropped, each a self-contained JSON row keyed `(tab prefix, kind, atWall)` and numbered `seq`/`of`:
+ *   part "f" — the frame track in chronological chunks (same packed-digit + spike pairs as the main row),
+ *              `f0` = the chunk's first index in the full track. If even the supplement budget cannot hold
+ *              every frame the kept window is CENTRED ON THE WORST FRAME, never the tail, and
+ *              `fSpan0`/`fSpan1` say exactly which frames of the track it covers.
+ *   part "c" — the counter history (the heap/DOM/edit-count curve — the "is something growing" evidence),
+ *              newest samples kept when it must trim.
+ *   part "t" — the long tasks the main row shed, worst-first, with their own re-indexed name table.
+ * Nothing here widens the privacy surface: the same numeric-only series, the same `sanitizeAttribution`
+ * names, `part` is a three-value vocabulary. The main row says `suppRows: N` so a reader knows the capture
+ * continues, and a capture that fit in one row sends none.
+ */
+export const SUPPLEMENT_MAX_CHARS = 1800;
+export const SUPPLEMENT_MAX_ROWS = { f: 3, c: 1, t: 1 };
+
+const supplementHeader = (cap, part, extra) => ({
+  v: CAPTURE_VERSION, kind: cap.kind === "manual" ? "manual" : "auto", atWall: cap.atWall, part, ...extra,
+});
+
+/* Cost of one frame in a row: its packed digit, plus an `[index,ms],` pair when it is a spike. */
+const frameCost = (ms) => (Math.round(ms) > 63 ? 13 : 1);
+
+/** Pick the contiguous slice of `deltas` that fits `budget` characters, preferring ALL of it, and — when
+ *  it cannot — the slice around the single worst frame (the stall), grown outward evenly. Returns [a, b). */
+export function frameWindowAroundWorst(deltas, budget) {
+  const n = deltas.length;
+  let total = 0;
+  for (let i = 0; i < n; i++) total += frameCost(deltas[i]);
+  if (total <= budget) return [0, n];
+  let worst = 0;
+  for (let i = 1; i < n; i++) if (deltas[i] > deltas[worst]) worst = i;
+  let a = worst, b = worst + 1, used = frameCost(deltas[worst]);
+  for (;;) {
+    const canL = a > 0 && used + frameCost(deltas[a - 1]) <= budget;
+    const canR = b < n && used + frameCost(deltas[b]) <= budget;
+    if (!canL && !canR) break;
+    // grow the shorter side first, so the window stays centred on the worst frame
+    if (canL && (!canR || worst - a <= b - 1 - worst)) { a--; used += frameCost(deltas[a]); }
+    else { used += frameCost(deltas[b]); b++; }
+  }
+  return [a, b];
+}
+
+/** Build the continuation rows for a capture whose main row (`enc`, from encodeCapture) trimmed something.
+ *  Returns `[]` when nothing was cut. Pure; every row is a JSON string ≤ `maxChars`. */
+export function encodeSupplements(cap, enc, { maxChars: hardMax = SUPPLEMENT_MAX_CHARS } = {}) {
+  /* Slack for the keys stamped AFTER a row is measured (`of`, a wider `fSpan1`) — measuring against the
+   * hard limit and then growing the row is how a row ends up 20 characters over. */
+  const maxChars = hardMax - 24;
+  if (!enc || !(enc.trimmedFrames || enc.trimmedTasks || enc.trimmedCounters)) return [];
+  const parts = [];
+
+  /* — frames — */
+  const deltas = Array.isArray(cap.f) ? cap.f : [];
+  if (deltas.length) {
+    const headRoom = JSON.stringify({ ...supplementHeader(cap, "f", { seq: 9, of: 9, f0: 99999, fSpan0: 99999, fSpan1: 99999, ft: "", fx: [] }) }).length + 8;
+    const rowBudget = maxChars - headRoom;
+    const [a, b] = frameWindowAroundWorst(deltas, rowBudget * SUPPLEMENT_MAX_ROWS.f);
+    const chunks = [];
+    let i = a;
+    while (i < b) {
+      let j = i, used = 0;
+      while (j < b && used + frameCost(deltas[j]) <= rowBudget) { used += frameCost(deltas[j]); j++; }
+      if (j === i) break;                       // a single frame cannot exceed the budget; guard anyway
+      chunks.push([i, j]);
+      i = j;
+    }
+    /* The per-frame cost above is an ESTIMATE (a spike pair's width depends on its chunk-local index and
+     * its ms), so each chunk is MEASURED and shed from its end until it genuinely fits — the budget is a
+     * property of the real string, never of the estimate. The shed frames are simply left to the next chunk
+     * when there is room, and otherwise fall outside the stated [fSpan0, fSpan1) window. */
+    let consumed = a;
+    for (let k = 0; k < SUPPLEMENT_MAX_ROWS.f && consumed < b; k++) {
+      let hi = chunks[k] ? Math.max(chunks[k][1], consumed + 1) : consumed + 1;
+      if (hi > b) hi = b;
+      const build = (end) => {
+        const { track, spikes } = encodeFrames(deltas.slice(consumed, end));
+        const row = { ...supplementHeader(cap, "f", { seq: k, f0: consumed, fSpan0: a, fSpan1: b, fCount: deltas.length }), ft: track };
+        if (spikes.length) row.fx = spikes;
+        return row;
+      };
+      let row = build(hi);
+      while (JSON.stringify(row).length > maxChars && hi - consumed > 1) { hi -= Math.max(1, Math.ceil((JSON.stringify(row).length - maxChars) / 8)); if (hi <= consumed) hi = consumed + 1; row = build(hi); }
+      parts.push(row);
+      consumed = hi;
+    }
+    // the window actually carried may be shorter than the plan if a chunk had to shed — say so honestly
+    for (const r of parts) if (r.part === "f") r.fSpan1 = consumed;
+  }
+
+  /* — counters (the heap / DOM / edit-count curve): all of it if it fits, the NEWEST samples otherwise — */
+  const counters = Array.isArray(cap.c) ? cap.c : [];
+  if (counters.length && enc.trimmedCounters) {
+    let keep = counters.slice();
+    let dropped = 0;
+    const mk = () => ({ ...supplementHeader(cap, "c", { seq: 0 }), ...(dropped ? { countersDroppedSupp: dropped } : {}), c: keep, cCols: Array.isArray(cap.cCols) ? cap.cCols : [] });
+    while (keep.length > 1 && JSON.stringify(mk()).length > maxChars) { keep = keep.slice(1); dropped++; }
+    parts.push(mk());
+  }
+
+  /* — tasks the main row shed (it keeps a worst-first prefix, so the remainder is the tail) — */
+  const allTasks = Array.isArray(cap.lt) ? cap.lt : [];
+  if (enc.trimmedTasks && allTasks.length > enc.keptTasks) {
+    const names = Array.isArray(cap.ltNames) ? cap.ltNames : [];
+    let rest = allTasks.slice(enc.keptTasks);
+    let dropped = 0;
+    const mk = (tasks) => {
+      const remap = new Map(); const nm = [];
+      const lt = tasks.map((t) => {
+        const label = names[t[3] | 0] || "";
+        let idx = remap.get(label);
+        if (idx == null) { idx = nm.length; nm.push(label); remap.set(label, idx); }
+        return [t[0], t[1], t[2], idx];
+      });
+      return { ...supplementHeader(cap, "t", { seq: 0 }), ...(dropped ? { tasksDroppedSupp: dropped } : {}), lt, ltNames: nm };
+    };
+    while (rest.length > 1 && JSON.stringify(mk(rest)).length > maxChars) { rest = rest.slice(0, -1); dropped++; }
+    parts.push(mk(rest));
+  }
+
+  parts.forEach((r, k) => { r.seq = k; r.of = parts.length; });
+  return parts.map((r) => JSON.stringify(r));
+}
+
+/** Re-join a main row and its continuation rows (the reader's half; the tests use it to prove the
+ *  round trip). Frames come back as `{ deltas, from, to }` — only the window the rows carried. */
+export function decodeSupplements(rows) {
+  const out = { frames: null, counters: null, cCols: null, tasks: [], taskNames: [] };
+  for (const r of rows || []) {
+    const row = typeof r === "string" ? JSON.parse(r) : r;
+    if (row.part === "f") {
+      const d = decodeFrames(row.ft || "", row.fx || []);
+      if (!out.frames) out.frames = { deltas: [], from: row.fSpan0, to: row.fSpan1 };
+      out.frames.deltas.push(...d);
+    } else if (row.part === "c") { out.counters = row.c; out.cCols = row.cCols; }
+    else if (row.part === "t") {
+      for (const t of row.lt || []) { out.tasks.push([t[0], t[1], t[2], row.ltNames[t[3]] || ""]); }
+    }
+  }
+  return out;
+}

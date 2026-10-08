@@ -12,15 +12,18 @@
  * Isolated in its own file because it WARMS the county-polygons singleton (counties.test.js's own
  * "reports pending before the geometry is resident" test needs it cold; vitest gives each file its
  * own module registry). */
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterEach, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import {
-  COUNTIES, COUNTIES_MAP, countyIdentity, countyKeyForName, sharedLayerUrlConflicts,
+  COUNTIES, COUNTIES_MAP, countyIdentity, countyKeyForName, sharedLayerUrlConflicts, detectField,
+  isPointViaEnvelopeLayerUrl,
 } from "../src/workspaces/site-planner/lib/counties.js";
+import { queryAtPoint } from "../src/workspaces/site-planner/lib/arcgis.js";
+import { idAttrFor, resolveSearchField } from "../src/workspaces/site-planner/lib/parcelQuery.js";
 import { COUNTY_VERIFICATION } from "../src/workspaces/site-planner/lib/countiesProvenance.js";
 import { setCountyPolygons } from "../src/workspaces/site-planner/lib/countyPolygons.js";
 import { buildIndex, pointInRing } from "../src/workspaces/site-planner/lib/countyPolygonsCore.js";
-import { situsKey, situsAddress, ownerKey, ownerName } from "../src/workspaces/site-planner/lib/appraisal.js";
+import { situsKey, situsAddress, ownerKey, ownerName, parcelCardRows, parcelPanelRows, mailingAddressValues } from "../src/workspaces/site-planner/lib/appraisal.js";
 
 const LA_KEYS = Object.keys(COUNTIES).filter((k) => k.startsWith("la_"));
 // Louisiana's bounding box, with a little slack for the coastal marsh and the Sabine/Pearl borders.
@@ -37,8 +40,10 @@ const nameOf = (key) => COUNTIES[key].label.replace(/ Parish, LA$/, "");
 
 describe("every wired Louisiana row is a PARISH row (NEW-1)", () => {
   it("has the rows this batch wired — a deleted row must fail here, not vanish", () => {
-    expect(LA_KEYS.length).toBeGreaterThanOrEqual(26);
-    for (const k of ["la_eastbatonrouge", "la_orleans", "la_ascension", "la_stjohnthebaptist", "la_sttammany", "la_tangipahoa", "la_livingston"])
+    expect(LA_KEYS.length).toBeGreaterThanOrEqual(34);
+    for (const k of ["la_eastbatonrouge", "la_orleans", "la_ascension", "la_stjohnthebaptist", "la_sttammany", "la_tangipahoa", "la_livingston",
+               "la_calcasieu", "la_jefferson", "la_jeffersondavis", "la_stlandry", "la_westbatonrouge",
+               "la_desoto", "la_washington", "la_westfeliciana"])
       expect(LA_KEYS).toContain(k);
   });
 
@@ -231,5 +236,294 @@ describe("pinned id/address columns (NEW-1)", () => {
     const scoped = LA_KEYS.filter((k) => COUNTIES[k].scopeWhere);
     expect(scoped).toEqual(["la_lafayette"]);
     expect(COUNTIES.la_lafayette.scopeWhere).toBe("geoid='22055'"); // Lafayette Parish FIPS 22055
+  });
+});
+
+
+/* NEW-1 (2026-10-04) — five more parishes, wired from sources MEASURED LIVE from Michael's own Chrome on a
+ * planyr.io tab (this sandbox cannot reach the hosts). The attribute bags below are built from the field
+ * lists and sample records in that measurement; they are the card-resolver half of the bar. */
+const NEW5 = ["la_calcasieu", "la_jefferson", "la_jeffersondavis", "la_stlandry", "la_westbatonrouge"];
+
+describe("the five 2026-10-04 parishes (measured from the browser)", () => {
+  it("each is wired to the measured service with a pinned id and a stated provenance", () => {
+    expect(COUNTIES.la_calcasieu).toMatchObject({ layerUrl: "https://lak-dc-arcgis2.cppj.net/arcgis/rest/services/HubLayers/Parcels/FeatureServer/0", idField: "PIN", addrField: "PHYSICALAD" });
+    expect(COUNTIES.la_jefferson).toMatchObject({ layerUrl: "https://jpgis.jeffparish.net/server/rest/services/PAO_MAP_2025/MapServer/72", idField: "TAXROLLPAR", addrField: "PARCELADDR" });
+    expect(COUNTIES.la_jeffersondavis).toMatchObject({ layerUrl: "https://gis2.totaland.com/ArcGIS/rest/services/AEDC/JDPE_Parcels/MapServer/0", idField: "ParcelID", addrField: "par_address" });
+    expect(COUNTIES.la_stlandry).toMatchObject({ layerUrl: "https://gis2.totaland.com/ArcGIS/rest/services/StLandryParish/Parcels/MapServer/0", idField: "PARCEL_ID", addrField: "SITUS" });
+    expect(COUNTIES.la_westbatonrouge).toMatchObject({ layerUrl: "https://gis2.totaland.com/ArcGIS/rest/services/WestBatonRougeTaxAssessor/WestBatonRouge/MapServer/1", idField: "ParcelNumb", addrField: "AISAddress" });
+    for (const k of NEW5) {
+      const v = COUNTY_VERIFICATION[k];
+      expect(v.verifiedOn).toBe("2026-10-04");
+      expect(v.verifiedNote).toMatch(/Michael's browser at the planyr\.io origin, 2026-10-04/);
+    }
+    // Honest provenance: TotaLand-hosted rows say so rather than claiming to be the assessor's own server.
+    expect(COUNTY_VERIFICATION.la_jeffersondavis.verifiedNote).toMatch(/NOT the assessor's own server/);
+    expect(COUNTY_VERIFICATION.la_stlandry.verifiedNote).toMatch(/NATIONAL-PARCEL-SCHEMA/);
+  });
+
+  it("the live points the measurement recorded resolve to the right parish", () => {
+    const seats = {
+      la_calcasieu: [30.2266, -93.2174],       // Lake Charles
+      la_jeffersondavis: [30.2241, -92.6571],  // Jennings
+      la_stlandry: [30.5335, -92.0815],        // Opelousas
+      la_jefferson: [29.9569, -90.1893],       // Elmwood
+    };
+    for (const [k, [lat, lng]] of Object.entries(seats)) expect(countyIdentity(lat, lng)).toMatchObject({ status: "ok", key: k });
+  });
+
+  it("Calcasieu — the situs is PHYSICALAD; ADDRESS1/ADDRESS2 are the owner's MAILING block and never the address", () => {
+    const a = { PIN: "061008-1397-13 -000G", NAME: "SUGAR BOWL 2004 LLC", ADDRESS1: "PO BOX 1234", ADDRESS2: "LAKE CHARLES LA 70602", ASSESSMENT: "0123456", PHYSICALAD: "1200 RYAN ST", WARD: "3" };
+    expect(situsAddress(a)).toBe("1200 RYAN ST");
+    expect(ownerName(a)).toBe("SUGAR BOWL 2004 LLC");
+    expect(idAttrFor("la_calcasieu", a)).toBe("061008-1397-13 -000G");
+    // With no physical address the answer is NULL — the mailing block is never promoted.
+    expect(situsAddress({ ...a, PHYSICALAD: "" })).toBeNull();
+    expect(situsAddress({ ...a, PHYSICALAD: null })).toBeNull();
+  });
+
+  it("Jefferson — PARCELADDR is the situs; OWNER_ADDR / OWNER_AD_1 / OWNER_AD_2 / CITYSTATE / ZIP / FULLOWNERA are MAILING", () => {
+    const a = {
+      TAXROLLPAR: "0700000440", PARCELNUMB: "0700000440", OWNERNAME: "EMMERSON ASSET MANAGEMENT",
+      PARCELADDR: "123 CLEARVIEW PKWY", ADDRESSNUM: "123", ADDRESSSTR: "CLEARVIEW PKWY",
+      OWNER_ADDR: "PO BOX 99", OWNER_AD_1: "SUITE 4", OWNER_AD_2: "NEW ORLEANS LA", CITYSTATE: "NEW ORLEANS LA", ZIP: "70123", FULLOWNERA: "PO BOX 99 NEW ORLEANS LA 70123",
+      ASSESSED_V: 100000, LANDVALUE: 40000, LEGAL_DESC: "LOT 1",
+    };
+    expect(situsAddress(a)).toBe("123 CLEARVIEW PKWY");
+    expect(ownerName(a)).toBe("EMMERSON ASSET MANAGEMENT");
+    expect(idAttrFor("la_jefferson", a)).toBe("0700000440");
+    // Even when the situs is blank the mailing columns never fill the address.
+    const noSitus = { ...a, PARCELADDR: "", ADDRESSNUM: "", ADDRESSSTR: "" };
+    expect(situsAddress(noSitus)).toBeNull();
+    for (const k of ["OWNER_ADDR", "OWNER_AD_1", "OWNER_AD_2", "FULLOWNERA"]) expect(situsKey({ [k]: "PO BOX 99" })).toBeNull();
+    expect(mailingAddressValues(a)).toEqual(new Set(["PO BOX 99", "SUITE 4", "NEW ORLEANS LA", "PO BOX 99 NEW ORLEANS LA 70123"]));
+  });
+
+  it("neither the Jefferson nor the Calcasieu parcel CARD ever shows a mailing column as the address", () => {
+    const calc = { PIN: "1", NAME: "X LLC", ADDRESS1: "PO BOX 1234", ADDRESS2: "LAKE CHARLES LA 70602", PHYSICALAD: "" };
+    const jeff = { TAXROLLPAR: "1", OWNERNAME: "X LLC", PARCELADDR: "", OWNER_ADDR: "PO BOX 99", OWNER_AD_1: "STE 4", OWNER_AD_2: "NEW ORLEANS LA", FULLOWNERA: "PO BOX 99 NEW ORLEANS LA" };
+    for (const bag of [calc, jeff]) {
+      // The card's TITLE is the situs: with no situs it is null (the card falls back to what was searched),
+      // never a mailing line — and no row of the card or the panel carries a mailing value either.
+      expect(situsAddress(bag)).toBeNull();
+      for (const split of [parcelCardRows(bag, {}), parcelPanelRows(bag, {})]) {
+        for (const r of [...split.primary, ...split.more])
+          expect(String(r.value), JSON.stringify(r)).not.toMatch(/PO BOX|LAKE CHARLES LA|NEW ORLEANS LA|STE 4/);
+      }
+    }
+  });
+
+  it("Jefferson Davis — par_address is the situs and OwnerName beats OwnerName2", () => {
+    const a = { ParcelID: "221556545", OwnerName: "PARKER, RICHARD K.", OwnerName2: "CAROLYN L", LegalDescription: "LOT 4", Acreage: 0.25, par_address: "414 BROADWAY ST N", Zone_: "R1" };
+    expect(situsAddress(a)).toBe("414 BROADWAY ST N");
+    expect(ownerKey(a)).toBe("OwnerName");
+    expect(idAttrFor("la_jeffersondavis", a)).toBe("221556545");
+  });
+
+  it("St. Landry — the bare SITUS column beats SITUS_CITY / SITUS_ZIP in ANY field order", () => {
+    const base = { PARCEL_ID: "0101120288", OWNER: "BATISTE SENIC M", CTY_ROW_ID: "9", COUNTY_FIP: "22097" };
+    const inOrder = { ...base, SITUS: "117 MAIN ST S", SITUS_CITY: "OPELOUSAS", SITUS_ZIP: "70570" };
+    const reversed = { ...base, SITUS_ZIP: "70570", SITUS_CITY: "OPELOUSAS", SITUS: "117 MAIN ST S" };
+    expect(situsAddress(inOrder)).toBe("117 MAIN ST S");
+    expect(situsAddress(reversed)).toBe("117 MAIN ST S");
+    expect(ownerName(inOrder)).toBe("BATISTE SENIC M");
+    expect(idAttrFor("la_stlandry", inOrder)).toBe("0101120288");
+    // TxGIO-style composed beats decomposed is untouched.
+    expect(situsAddress({ SITUS_NUM: "0", SITUS_ADDR: "0 GRAND PKY" })).toBe("0 GRAND PKY");
+  });
+
+  it("West Baton Rouge — AISName is the owner, AISAddress the situs, AISOwnerAd/AISOwnerCi are MAILING", () => {
+    const a = { ASSESSORID: "100", PARCEL: "17", ParcelNumb: "0001234", AISName: "BROUSSARD FARMS LLC", AISOwnerAd: "PO BOX 7", AISOwnerCi: "PORT ALLEN", AISAddress: "801 RAILROAD AVE", AISStreetN: "801", AISPhysCit: "PORT ALLEN" };
+    expect(ownerName(a)).toBe("BROUSSARD FARMS LLC");
+    expect(situsAddress(a)).toBe("801 RAILROAD AVE");
+    expect(situsAddress({ ...a, AISAddress: "" })).toBeNull();
+    expect(idAttrFor("la_westbatonrouge", a)).toBe("0001234");
+    expect(situsKey({ AISOwnerAd: "PO BOX 7" })).toBeNull();
+  });
+
+  it("an id search is pinned to the measured column (detection would pick another on Jefferson)", () => {
+    const jeffFields = ["OBJECTID", "TAXROLLPAR", "PARCELNUMB", "OWNERNAME", "PARCELADDR"].map((name) => ({ name }));
+    expect(detectField(jeffFields, "id")).toBe("PARCELNUMB");                       // what detection alone would choose
+    expect(resolveSearchField(jeffFields, "id", "TAXROLLPAR", true)).toBe("TAXROLLPAR"); // the pin wins
+    expect(resolveSearchField(jeffFields, "address", "PARCELADDR", true)).toBe("PARCELADDR");
+    const calcFields = ["OBJECTID", "PIN", "NAME", "ADDRESS1", "ADDRESS2", "ASSESSMENT", "PHYSICALAD", "WARD"].map((name) => ({ name }));
+    expect(detectField(calcFields, "address")).toBe("PHYSICALAD");              // never ADDRESS1 / ADDRESS2
+  });
+});
+
+/* Jefferson's layer answered a bare point with NOTHING where a small envelope returned the parcel
+ * (measured from the browser). queryAtPoint asks a layer that declares `pointViaEnvelope` the envelope
+ * shape; every other layer keeps the point shape. */
+describe("queryAtPoint on a layer that only answers an envelope (Jefferson Parish)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const JEFF = COUNTIES.la_jefferson.layerUrl;
+  const sq = (lng, lat, h) => [[lng - h, lat - h], [lng - h, lat + h], [lng + h, lat + h], [lng + h, lat - h], [lng - h, lat - h]];
+  const stub = (features) => {
+    const calls = [];
+    vi.stubGlobal("fetch", vi.fn(async (u) => { calls.push(new URL(u)); return { ok: true, status: 200, json: async () => ({ features }) }; }));
+    return calls;
+  };
+
+  it("is declared on the Jefferson and De Soto layers only", () => {
+    expect(isPointViaEnvelopeLayerUrl(JEFF)).toBe(true);
+    expect(isPointViaEnvelopeLayerUrl(JEFF + "/")).toBe(true);
+    expect(isPointViaEnvelopeLayerUrl(COUNTIES.la_desoto.layerUrl)).toBe(true);
+    for (const k of LA_KEYS.filter((x) => x !== "la_jefferson" && x !== "la_desoto")) expect(isPointViaEnvelopeLayerUrl(COUNTIES[k].layerUrl), k).toBe(false);
+  });
+
+  it("sends an ENVELOPE (not a bare point) around the click and returns the parcel that contains it", async () => {
+    const lng = -90.1893, lat = 29.9569;
+    const near = { geometry: { rings: [sq(lng + 0.0004, lat, 0.0001)] }, attributes: { TAXROLLPAR: "NEIGHBOUR" } };
+    const hit = { geometry: { rings: [sq(lng, lat, 0.0002)] }, attributes: { TAXROLLPAR: "0700000440" } };
+    const calls = stub([near, hit]);
+    const f = await queryAtPoint(JEFF, lng, lat);
+    expect(f.attributes.TAXROLLPAR).toBe("0700000440");
+    expect(calls).toHaveLength(1);
+    const q = calls[0].searchParams;
+    expect(q.get("geometryType")).toBe("esriGeometryEnvelope");
+    const g = JSON.parse(q.get("geometry"));
+    expect(g.xmin).toBeLessThan(lng); expect(g.xmax).toBeGreaterThan(lng);
+    expect(g.ymin).toBeLessThan(lat); expect(g.ymax).toBeGreaterThan(lat);
+    expect(g.xmax - g.xmin).toBeLessThan(0.001);   // a lot-sized probe, never a neighbourhood
+    expect(g.spatialReference).toEqual({ wkid: 4326 });
+    expect(q.get("inSR")).toBe("4326");
+    expect(q.get("outSR")).toBe("4326");
+  });
+
+  it("returns null when the envelope holds nothing, and any other layer still sends a POINT", async () => {
+    stub([]);
+    expect(await queryAtPoint(JEFF, -90.2, 29.95)).toBeNull();
+    const calls = stub([]);
+    await queryAtPoint(COUNTIES.la_calcasieu.layerUrl, -93.2174, 30.2266);
+    expect(calls[0].searchParams.get("geometryType")).toBe("esriGeometryPoint");
+  });
+});
+
+
+/* NEW-1 (2026-10-06) — De Soto, Washington and West Feliciana. Found by an ArcGIS Online item search with a
+ * Louisiana bbox filter (name search missed all three), measured from Michael's Chrome at the planyr.io origin and
+ * independently re-probed from this sandbox. The attribute bags below are REAL rows from those services (long
+ * columns trimmed), including their fixed-width space padding — the shape production returns. */
+const NEW3 = ["la_desoto", "la_washington", "la_westfeliciana"];
+const pad = (v, n) => String(v).padEnd(n, " ");
+
+describe("the three 2026-10-06 parishes (De Soto, Washington, West Feliciana)", () => {
+  it("each is wired to the measured service with a pinned id and a stated first-party provenance", () => {
+    expect(COUNTIES.la_desoto).toMatchObject({ layerUrl: "https://services6.arcgis.com/pbafaqRkYgys7ElS/arcgis/rest/services/Parcels_AGOL_view/FeatureServer/0", idField: "PARCEL_ID", pinIdField: true, addrField: "Street_Name", pointViaEnvelope: true });
+    expect(COUNTIES.la_washington).toMatchObject({ layerUrl: "https://services7.arcgis.com/yE0LOKocwREqepjx/arcgis/rest/services/Parcels_Public_view_March_2024/FeatureServer/0", idField: "PARCEL_ID", pinIdField: true, addrField: "PHYSICAL_S" });
+    expect(COUNTIES.la_westfeliciana).toMatchObject({ layerUrl: "https://services5.arcgis.com/SkttgSmcq6CPonms/arcgis/rest/services/Parcels_06012022_Public/FeatureServer/14", idField: "PARCEL_ID", pinIdField: true, addrField: "Street_Nam" });
+    expect(COUNTY_VERIFICATION.la_desoto).toMatchObject({ publisher: "own", publisherName: "De Soto Parish Assessor" });
+    expect(COUNTY_VERIFICATION.la_washington).toMatchObject({ publisher: "own", publisherName: "Washington Parish Communications District (911)" });
+    expect(COUNTY_VERIFICATION.la_westfeliciana).toMatchObject({ publisher: "own", publisherName: "West Feliciana Parish Government" });
+    for (const k of NEW3) {
+      const v = COUNTY_VERIFICATION[k];
+      expect(v.verifiedOn).toBe("2026-10-06");
+      expect(v.verifiedNote).toMatch(/Michael's browser at the planyr\.io origin, 2026-10-06/);
+    }
+    // The vintage is stated, not hidden (West Feliciana is June 2022, Washington March 2024).
+    expect(COUNTY_VERIFICATION.la_westfeliciana.verifiedNote).toMatch(/JUNE 2022 vintage/);
+    expect(COUNTY_VERIFICATION.la_washington.verifiedNote).toMatch(/March 2024/);
+  });
+
+  it("the measured spread points resolve to the right parish, and the seats are inside it", () => {
+    const pts = {
+      la_desoto: [[32.038, -93.709], [31.94, -93.53], [32.18, -93.92]],            // Mansfield · mid-parish · NW
+      la_washington: [[30.791, -89.8486], [30.85, -90.15], [30.70, -90.05]],       // Bogalusa · W · S rural
+      la_westfeliciana: [[30.784, -91.377], [30.80, -91.45], [30.95, -91.30]],     // St. Francisville · W · N
+    };
+    for (const [k, list] of Object.entries(pts))
+      for (const [lat, lng] of list) expect(countyIdentity(lat, lng), `${k} @ ${lat},${lng}`).toMatchObject({ status: "ok", key: k, state: "LA" });
+  });
+
+  it("De Soto — the card never titles itself with the city/state/zip part of a split situs; mailing columns never reach it", () => {
+    // Real row, 103 Louisiana (Mansfield). Address_Number + Street_Name are the split situs; the blank-padded
+    // Physical_Address_City/State/Zip_Code siblings used to be matched by the physical-address rung.
+    const a = {
+      PARCEL_ID: "0400451500", TAX_PIN: "091213-001-25002", Owner_Name: "DESOTO HOSPITAL ASSOCIATION, INC.",
+      Owner_Address: "C/O LARRY TODD EPPLER 207 JEFFERSON ST.", Owner_CityStateZipCode: "MANSFIELD LA 71052-0000", ParcelNumber: "0400451500",
+      Address_Number: pad("103", 10), Street_Name: pad("LOUISIANA", 40), Street_Direction: "  ",
+      Physical_Address_City: pad("", 20), Physical_Address_State: pad("", 20), Physical_Address_Zip_Code: pad("", 10),
+      Legal_Description: "BLOCK 25, MANSFIELD", Assessed_Value: 125000, Ward: "1",
+    };
+    expect(ownerName(a)).toBe("DESOTO HOSPITAL ASSOCIATION, INC.");
+    expect(idAttrFor("la_desoto", a)).toBe("0400451500");          // detection alone would have taken TAX_PIN/ParcelNumber
+    expect(situsAddress(a)).toBeNull();                           // split situs: the card falls back to the searched address
+    // …and when the city IS populated it is still never the address.
+    expect(situsAddress({ ...a, Physical_Address_City: pad("MANSFIELD", 20), Physical_Address_Zip_Code: pad("71052", 10) })).toBeNull();
+    expect(situsAddress({ Physical_Address_State: "LA", Physical_Address_Zip_Code: "71052" })).toBeNull();
+    for (const split of [parcelCardRows({ ...a, Physical_Address_City: "MANSFIELD" }, {}), parcelPanelRows(a, {})])
+      for (const r of [...split.primary, ...split.more])
+        expect(String(r.value), JSON.stringify(r)).not.toMatch(/JEFFERSON ST|LARRY TODD|71052/);
+    expect(mailingAddressValues(a).has("MANSFIELD LA 71052-0000")).toBe(true);
+    expect(situsKey({ Owner_Address: "207 JEFFERSON ST." })).toBeNull();
+  });
+
+  it("Washington — PHYSICAL_A is the house NUMBER (never the title); PHYSICAL_S the street; HOUSE/HOUSEPIC never render", () => {
+    const a = {
+      PARCEL_ID: "0440465715", PHYSICAL_A: "1820", PHYSICAL_S: "SOUTH COLUMBIA ROAD", OWNER_NAME: "ROBERTS, BRITTANY", ACREAGE: 0.651733204761,
+      LEGAL_DESC: "LOT 4", HOUSE: '<img src ="M:\\house_images\\0440465715.jpg"width="400" height="200" />', HOUSEPIC: "\\\\wpaserver\\maps\\house_images\\0440465715.jpg", PARCEL_NUM: "0440465715",
+    };
+    expect(situsAddress(a)).toBeNull();                           // before the fix this read "1820"
+    expect(situsAddress({ PHYSICAL_A: "1820" })).toBeNull();
+    expect(situsAddress({ PHYSICAL_A: "1820 S COLUMBIA RD" })).toBe("1820 S COLUMBIA RD");   // a whole line still wins
+    expect(ownerName(a)).toBe("ROBERTS, BRITTANY");
+    expect(idAttrFor("la_washington", a)).toBe("0440465715");
+    // The rural rows carry a single space in both situs columns.
+    expect(situsAddress({ ...a, PHYSICAL_A: " ", PHYSICAL_S: " " })).toBeNull();
+    for (const split of [parcelCardRows(a, {}), parcelPanelRows(a, {})])
+      for (const r of [...split.primary, ...split.more]) expect(String(r.value), JSON.stringify(r)).not.toMatch(/img|wpaserver|house_images/);
+    const acres = [...parcelCardRows(a, {}).primary, ...parcelCardRows(a, {}).more].find((r) => /Acreage/.test(r.label));
+    expect(acres && String(acres.value)).toMatch(/0\.65/);
+  });
+
+  it("West Feliciana — Owner_Addr / Owner_City are MAILING; Address_Nu + Street_Nam is the split situs; Acres and Owner_Name resolve", () => {
+    const a = {
+      PARCEL_ID: "336G-068-000-020.000", Acres: 0.107469450796, Owner_Name: "TOWN OF ST. FRANCISVILLE",
+      Owner_Addr: "WATER WELL #3\r\nP. O. BOX 400", Owner_City: "ST. FRANCISVILLE LA 70775-", AISparcelN: "100002096", MappingNum: "336G-068-000-020.000",
+      Address_Nu: "4977", Street_Nam: "PARKER ST.", Street_Dir: " ", Physical_A: " ", Physical_1: " ", Physical_2: " ",
+      Legal_Desc: "0.06 ACRES, SECTION 68", Assessed_V: 3,
+    };
+    expect(ownerName(a)).toBe("TOWN OF ST. FRANCISVILLE");
+    expect(idAttrFor("la_westfeliciana", a)).toBe("336G-068-000-020.000");
+    expect(situsAddress(a)).toBeNull();                           // split situs, blank Physical_* → searched address
+    expect(situsAddress({ ...a, Physical_A: "4977 PARKER ST." })).toBe("4977 PARKER ST.");
+    for (const split of [parcelCardRows(a, {}), parcelPanelRows(a, {})])
+      for (const r of [...split.primary, ...split.more]) expect(String(r.value), JSON.stringify(r)).not.toMatch(/P\. O\. BOX 400|70775/);
+    expect(situsKey({ Owner_City: "ST. FRANCISVILLE LA 70775-" })).toBeNull();
+    expect(mailingAddressValues(a).has("ST. FRANCISVILLE LA 70775-")).toBe(true);
+  });
+
+  it("the shared-ladder change is narrow: whole-line situs columns on the older parishes read exactly as before", () => {
+    expect(situsAddress({ Physical_A: "1859 VIOLA ST" })).toBe("1859 VIOLA ST");           // St. Tammany
+    expect(situsAddress({ PHYSICALAD: "1200 RYAN ST" })).toBe("1200 RYAN ST");             // Calcasieu
+    expect(situsAddress({ SITUS_CITY: "OPELOUSAS", SITUS: "117 MAIN ST S" })).toBe("117 MAIN ST S");
+    expect(situsAddress({ SITUS_NUM: "1620" })).toBe("1620");                              // rung 0 unchanged
+  });
+
+  it("a bare-number situs on the physical-address rung must not title a card (red-proof: replays the pre-fix ladder)", () => {
+    // The pre-fix rule read PHYSICAL_A ("1820") and Physical_Address_City ("MANSFIELD") as the situs. If the guards
+    // above were removed these two assertions are the ones that go red.
+    expect(situsKey({ PHYSICAL_A: "1820", PHYSICAL_S: "SOUTH COLUMBIA ROAD" })).toBeNull();
+    expect(situsKey({ Address_Number: "103", Street_Name: "LOUISIANA", Physical_Address_City: "MANSFIELD" })).toBeNull();
+  });
+
+  it("an id search is pinned to PARCEL_ID on all three (detection would pick another column)", () => {
+    const ds = ["OBJECTID", "PARCEL_ID", "TAX_PIN", "ParcelNumber", "Owner_Name", "PIN"].map((name) => ({ name }));
+    expect(resolveSearchField(ds, "id", "PARCEL_ID", true)).toBe("PARCEL_ID");
+    expect(resolveSearchField(ds, "address", "Street_Name", true)).toBe("Street_Name");
+    const wa = ["OBJECTID", "PARCEL_ID", "PHYSICAL_A", "PHYSICAL_S", "OWNER_NAME", "PARCEL_NUM"].map((name) => ({ name }));
+    expect(resolveSearchField(wa, "id", "PARCEL_ID", true)).toBe("PARCEL_ID");
+    expect(resolveSearchField(wa, "address", "PHYSICAL_S", true)).toBe("PHYSICAL_S");
+  });
+
+  it("queryAtPoint sends an ENVELOPE to De Soto (the layer declares it) and a POINT to Washington / West Feliciana", async () => {
+    const calls = [];
+    vi.stubGlobal("fetch", vi.fn(async (u) => { calls.push(new URL(u)); return { ok: true, status: 200, json: async () => ({ features: [] }) }; }));
+    try {
+      await queryAtPoint(COUNTIES.la_desoto.layerUrl, -93.709, 32.038);
+      await queryAtPoint(COUNTIES.la_washington.layerUrl, -89.8486, 30.791);
+      await queryAtPoint(COUNTIES.la_westfeliciana.layerUrl, -91.377, 30.784);
+    } finally { vi.unstubAllGlobals(); }
+    expect(calls.map((c) => c.searchParams.get("geometryType"))).toEqual(["esriGeometryEnvelope", "esriGeometryPoint", "esriGeometryPoint"]);
   });
 });

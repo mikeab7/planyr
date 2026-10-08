@@ -31,6 +31,7 @@ import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 import { ringFloor, nextFreeBlock } from "./idBlocks.mjs";
+import { readText, existsText, pathRole, virtualText, LEDGER_DIR } from "./lib/ledger.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..");
@@ -78,9 +79,8 @@ export function maxId(text, letter) {
 export function maxAcross(repo, files, letter) {
   let max = 0;
   for (const f of files) {
-    const p = join(repo, f);
-    if (!existsSync(p)) continue;
-    const m = maxId(readFileSync(p, "utf8"), letter);
+    if (!existsText(repo, f)) continue;
+    const m = maxId(readText(repo, f), letter);
     if (m > max) max = m;
   }
   return max;
@@ -114,7 +114,7 @@ export function findDuplicateIdsIn(texts, letter) {
 
 /** findDuplicateIdsIn over the on-disk file pair for a family (missing files skipped). */
 export function findDuplicateIds(repo, files, letter) {
-  const texts = files.map((f) => join(repo, f)).filter(existsSync).map((p) => readFileSync(p, "utf8"));
+  const texts = files.filter((f) => existsText(repo, f)).map((f) => readText(repo, f));
   return findDuplicateIdsIn(texts, letter);
 }
 
@@ -190,9 +190,8 @@ export function sameFileDuplicatesIn(entries, letter) {
 /** sameFileDuplicatesIn over the on-disk pair for a family (missing files skipped). */
 export function sameFileDuplicates(repo, files, letter) {
   const entries = files
-    .map((f) => ({ file: f, path: join(repo, f) }))
-    .filter(({ path }) => existsSync(path))
-    .map(({ file, path }) => ({ file, text: readFileSync(path, "utf8") }));
+    .filter((f) => existsText(repo, f))
+    .map((f) => ({ file: f, text: readText(repo, f) }));
   return sameFileDuplicatesIn(entries, letter);
 }
 
@@ -311,7 +310,23 @@ export function assessFreshness({ sha, ageSeconds, maxAgeSeconds = DEFAULT_MAX_F
 /** Read `<ref>:<file>`. A file genuinely absent from that commit is fine (empty text). ANY other
  * failure — ENOBUFS, no such ref, git missing — is reported as `ok:false` so the caller refuses.
  * This is the B898 lesson generalised: the only tolerated "empty" is one we can explain. */
+const _refLedger = new Map();
 export function readRefFile(repo, ref, file) {
+  // NEW-1: a ref that carries a ledger/ tree serves the ledger paths as VIRTUAL text (the committed
+  // BACKLOG.md there is only a lagging generated view and must never be read as truth).
+  if (pathRole(file)) {
+    const sha = tryGit(repo, `git rev-parse ${ref}`);
+    if (sha.ok) {
+      const key = `${repo}::${sha.out.trim()}::${file}`;
+      if (!_refLedger.has(key)) {
+        let v = null;
+        try { v = virtualText(repo, file, { ref }); } catch (e) { return { ok: false, reason: `${ref}:${file} — ledger read failed: ${e.message}` }; }
+        _refLedger.set(key, v);
+      }
+      const v = _refLedger.get(key);
+      if (v != null) return { ok: true, text: v };
+    }
+  }
   const r = tryGit(repo, `git show ${ref}:${file}`);
   if (r.ok) return { ok: true, text: r.out };
   // git's two ways of saying "that ref is fine, the FILE just isn't in it" — the only tolerated empty.
@@ -434,12 +449,26 @@ function blobShas(repo, ref, files) {
  * because under-reporting is the one error that hands out a number someone else already has.
  */
 export function peerClaims(repo, files, letter, { refs, baseRef = "refs/remotes/origin/main", baseMax = 0 } = {}) {
-  const base = blobShas(repo, baseRef, files);
+  const kinds = [...new Set(files.map((f) => pathRole(f)?.kind).filter(Boolean))];
+  const withLedger = (ref) => {
+    const b = blobShas(repo, ref, files);
+    if (!b.ok) return b;
+    for (const kind of kinds) {
+      const r = tryGit(repo, `git ls-tree -r ${ref} -- ${LEDGER_DIR}/${kind}`);
+      if (!r.ok) return { ok: false, reason: r.reason };
+      for (const line of r.out.split("\n").filter(Boolean)) {
+        const m = /^\d+\s+blob\s+(\S+)\t(.+)$/.exec(line);
+        if (m && !m[2].endsWith("/_frame.md")) b.shas[m[2]] = m[1];
+      }
+    }
+    return b;
+  };
+  const base = withLedger(baseRef);
   if (!base.ok) return { ok: false, reason: `base blobs — ${base.reason}` };
   const byBlob = new Map();
   let max = 0; const ids = new Set(); const claimants = [];
   for (const ref of refs) {
-    const b = blobShas(repo, ref.name, files);
+    const b = withLedger(ref.name);
     if (!b.ok) return { ok: false, reason: `${ref.name} — ${b.reason}` };
     let refMax = 0;
     for (const [file, sha] of Object.entries(b.shas)) {

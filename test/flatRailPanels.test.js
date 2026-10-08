@@ -24,7 +24,7 @@ describe("one header row per rail panel", () => {
     expect(chrome).toContain("data-panel-actions");
     expect(chrome).toMatch(/textOverflow: "ellipsis"/);
     expect(floating).toContain("actionsRef={actionsRef}");
-    expect(src).toContain("subtitle={panelHeaderSubtitle}");
+    expect(src).toContain("panelHeaderSubtitle}"); // Parcels rework: the Parcels header drops the subtitle, every other panel keeps it
   });
   it("Yield and Drainage no longer draw a header of their own", () => {
     for (const fn of ["function YieldPanel(", "function DrainagePanel("]) {
@@ -47,9 +47,13 @@ describe("no card inside the panel", () => {
     expect(src).toContain('data-testid="yield-panel" data-flat-panel="1"');
     expect(src).toContain('data-testid="drainage-panel" data-flat-panel="1"');
   });
-  it("Analysis findings are divider rows, not tinted cards", () => {
-    expect(analysis).toContain("data-finding-row");
-    expect(analysis).not.toMatch(/border: `1px solid \$\{st\.border\}`, borderRadius: 8/);
+  it("Analysis verdict rows are a thin left bar, not tinted cards (NEW-1 redesign)", () => {
+    expect(analysis).toContain("data-check-row");
+    // the verdict row carries severity as a left bar + figure colour only — never a fill or a card border
+    const row = analysis.slice(analysis.indexOf("data-check-row"), analysis.indexOf("data-check-row") + 700);
+    expect(row).toContain("borderLeft");
+    expect(row).not.toMatch(/background:/);
+    expect(row).not.toMatch(/borderRadius/);
   });
 });
 

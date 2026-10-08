@@ -89,10 +89,13 @@ own `React.lazy` entry in the app Shell's workspace registry, measured separatel
   `data-edit-card`; the Leaflet host is `isolation: isolate` so map controls never draw over it. The PICTURE harness —
   full app, iOS keyboard + accessory bar drawn, GAP/CARD/CONTROLS/OVERLAY asserted, screenshots — is
   verify-food-ios-screens (ui-audit); verify-food-ios-keyboard is the fixture-page check. There is NO "What I had" input any more; old
-  visits' saved `what_i_had` text stays readable and is never rewritten. At phone width ratings are a
-  1-10 tap grid (`ScoreTapGrid` in ScoreMeter), desktop keeps the slider. Phone harness:
+  visits' saved `what_i_had` text stays readable and is never rewritten. Visit Food/Ambiance ratings are ONE half-step
+  slider (1-10) on every device — `lib/ratingScale.js`, `## Owner product constraints` #16 (never tap buttons); the dish score is
+  also one slider on a phone. Open forms (`data-sheet-form`) hide the "Log a visit" bar; the sheet's drag engine + release rule are
+  `BottomSheet.jsx` + `lib/bottomSheetSnap.js`; harness: verify-food-rating-and-sheet (ui-audit). Phone harness:
   verify-food-visit-phone (ui-audit) + its food-panel fixture page.
-- `components/ScoreMeter.jsx` (B1873008) — the per-dish score control (half-point, 1.0–10.0). A
+- `lib/phoneLayout.js` + `components/SideDock.jsx` (B2046224 ×4, `## Owner product constraints` #17) — a phone held SIDEWAYS (one query: landscape + short + touch) gets the place card as a RIGHT-docked side panel instead of the bottom sheet, `AppHeader`'s opt-in `singleRow` (one compact header row), and `FoodMap`'s `landscape`/`sidePanelPx` props: a pick centres its pin in the map LEFT of the card (`frameSelected`, exact on a fresh pick, only-if-hidden after a rotation), the chip stack and basemap toggle sit in the visible part, controls clear the notch. The card measures its own width and tells the map (`onSideWidthChange`) and the global help button (`bottomSheetTracker.publishSideDockWidth`) so nothing sits on its "Log a visit" bar (the bar is the LAST item and the content fills the card, so it is always on the card's bottom edge). Keyboard up: the card pins to the visual viewport like the sheet. Harness: verify-food-landscape (ui-audit; WebKit iPhone 15/SE landscape + portrait + rotation, Chromium for injected safe-area insets; red on main, green on the fix; `--live=<url>` logged out and `--signed-in=<url>` as the test account for a deployed build).
+- `components/ScoreMeter.jsx` (B1873008) — the per-dish score control (quarter-step slider, 1.0–10.0; no tap grid). A
   deliberate sibling of `VisitPanel.jsx`'s own `RatingSlider`, not a replacement — see its own
   header for why the two stayed separate.
 - `lib/foodStore.js` — the one seam to Supabase: place/visit queries, visit CRUD, the manual-

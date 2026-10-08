@@ -16,7 +16,7 @@ import { describe, it, expect } from "vitest";
 import {
   FT_PER_DEG, mercDeg, invMercDeg, lngLatToFeet, feetToLatLngPair,
   ppfToZoom, zoomToPpf, lockOffsetPx, exactContainerPoint, registrationLayoutMayHaveChanged,
-  viewValuesEqual,
+  resolvedLayoutInputs, viewValuesEqual,
 } from "../src/workspaces/site-planner/lib/mapLock.js";
 import { lngLatRingToFeet, feetToLatLng } from "../src/workspaces/site-planner/lib/arcgis.js";
 
@@ -232,6 +232,39 @@ describe("registrationLayoutMayHaveChanged — B846384's forced-layout gate", ()
   it("says yes when the overscan alone has moved — the container can resize with the canvas unchanged", () => {
     const li = { w: 800, h: 560, overscan: 107 };
     expect(registrationLayoutMayHaveChanged(li, 800, 560, 176)).toBe(true);
+  });
+});
+
+/* ⛔ NEW-1 (B2096832) — the cached "Leaflet's size is stale" verdict must be retired once `invalidateSize` has
+ * run. B846384 reused `cachedStale` while the layout inputs were unchanged; taken true once (first commit) and
+ * never cleared, EVERY later commit re-entered the resize branch — clear transform + forced layout + setView per
+ * wheel event (96 of 96 on the owner's Silvestri plan; the ~300 ms `U` frames in his perf capture). */
+describe("resolvedLayoutInputs — retiring the cached stale verdict after a re-sync (B2096832)", () => {
+  it("clears cachedStale and keeps the measured inputs", () => {
+    const li = { w: 904, h: 416, overscan: 120, cw: 1144, ch: 656, cachedStale: true };
+    expect(resolvedLayoutInputs(li)).toEqual({ w: 904, h: 416, overscan: 120, cw: 1144, ch: 656, cachedStale: false });
+  });
+
+  it("returns a NEW record (the ref is replaced, never mutated) and leaves null alone", () => {
+    const li = { w: 1, h: 2, overscan: 3, cw: 4, ch: 5, cachedStale: true };
+    expect(resolvedLayoutInputs(li)).not.toBe(li);
+    expect(li.cachedStale).toBe(true);
+    expect(resolvedLayoutInputs(null)).toBe(null);
+  });
+
+  it("does NOT make the gate skip a real change: a moved input is still re-measured", () => {
+    const li = resolvedLayoutInputs({ w: 904, h: 416, overscan: 120, cw: 1144, ch: 656, cachedStale: true });
+    expect(registrationLayoutMayHaveChanged(li, 904, 416, 120)).toBe(false);
+    expect(registrationLayoutMayHaveChanged(li, 700, 416, 120)).toBe(true);
+    expect(registrationLayoutMayHaveChanged(li, 904, 416, 200)).toBe(true);
+  });
+
+  it("is wired into the resize branch of the basemap registration effect (source guard — red on the unfixed effect)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");
+    const branch = src.slice(src.indexOf("if (sizeChanged) {"), src.indexOf("// A new gesture is happening: drop any lingering snapshot"));
+    expect(branch).toContain("invalidateSize({ animate: false, pan: false })");
+    expect(branch).toContain("geoLayoutInputsRef.current = resolvedLayoutInputs(geoLayoutInputsRef.current)");
   });
 });
 

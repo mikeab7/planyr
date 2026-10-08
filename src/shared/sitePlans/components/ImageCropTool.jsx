@@ -59,7 +59,7 @@ import {
   clampPolyPoints, normalizePolyCrop, isUsablePoly, cropKind,
   rectToPolyPoints, MIN_POLY_VERTICES, MAX_POLY_VERTICES,
   constrainOctant, nearestOnSegment, savedRectOf, savedPtsOf, isFullImagePoly,
-} from "../../../workspaces/site-planner/lib/overlayCrop.js";
+} from "../../overlay/overlayCrop.js";
 import {
   emptyHistory, pushHistory, undoHistory, redoHistory, canUndo, canRedo, scaleToSlider, sliderToScale,
 } from "../../../workspaces/site-planner/lib/cropHistory.js";
@@ -378,12 +378,14 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
     setPolyClosed(true);
     setSelectedVertex(null);
   };
-  const canCommit = mode === "poly" ? (polyClosed && isUsablePoly(polyPts, imgW, imgH)) : true;
+  // NEW-1 (B2103xxx-class, owner 2026-10-05): three points already describe a shape, so an OPEN draft is
+  // savable — Done closes the ring itself. The explicit closes (first point / Enter / double-click) stay.
+  const canCommit = mode === "poly" ? isUsablePoly(polyPts, imgW, imgH) : true;
   const nothingToReset = isFullCrop(draft, imgW, imgH) && (polyPts.length === 0 || (polyClosed && isFullImagePoly(polyPts, imgW, imgH)));
   const doneWhy = mode === "poly" && !canCommit
     ? (polyPts.length < MIN_POLY_VERTICES
-      ? `Place at least ${MIN_POLY_VERTICES} points, then close the polygon to save`
-      : (polyClosed ? "This polygon is too small to crop to" : "Close the polygon (click the first point or press Enter) to save"))
+      ? `Place at least ${MIN_POLY_VERTICES} points to save`
+      : "This polygon is too small to crop to")
     : "";
 
   useEffect(() => {
@@ -572,7 +574,7 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
         {mode === "poly" && (
           <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)" }}>
             {!polyClosed
-              ? "Click to place points (Shift: snap to 0/45/90°) · click the first point or press Enter to close"
+              ? "Click to place points (Shift: snap to 0/45/90°) · click the first point or press Enter to close, or just press Done once you have three"
               : "Click an edge to add a point · drag a point to move it · select a point and press Delete to remove it"}
           </span>
         )}

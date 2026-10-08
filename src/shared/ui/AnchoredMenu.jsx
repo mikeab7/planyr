@@ -268,6 +268,10 @@ export default function AnchoredMenu({
         ...panelStyle,
         position: "fixed",
         width,
+        // B2088384 — never wider than the screen: a 340-wide menu on a 320-wide iPhone SE ran off the
+        // right edge (its own search box with it). The placement measures the RENDERED width, so the
+        // clamp-to-viewport it already does then lands the narrower panel fully on screen.
+        maxWidth: "calc(100vw - 16px)",
         zIndex: zIndex + 1,
         left: pos ? pos.left : -9999,
         top: pos ? pos.top : 0,

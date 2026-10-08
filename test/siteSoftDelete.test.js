@@ -57,6 +57,8 @@ vi.mock("../src/workspaces/site-planner/lib/cloudSync.js", () => ({
     const had = server.rows.delete(id); server.elements.delete(id);
     return { ok: true, removed: had ? 1 : 0 };
   }),
+  // NEW-1 — the fresh read that proves a hard delete: which of these ids the table still holds.
+  cloudRowsPresent: vi.fn(async (uid, ids) => ({ ok: true, present: ids.filter((id) => server.rows.has(id)) })),
   cloudRestore: vi.fn(async (uid, id) => {
     const row = server.rows.get(id);
     if (!row) return { ok: false, restored: 0 };

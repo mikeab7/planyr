@@ -439,7 +439,8 @@
       "project_id"
     ],
     "problem_reports": [
-      "category"
+      "category",
+      "status"
     ],
     "site_plan_overlays": [
       "site_link_declined",
@@ -507,6 +508,7 @@
       "team_id"
     ],
     "schedules": [
+      "deleted_with_project",
       "team_id"
     ],
     "site_elements": [

@@ -50,6 +50,7 @@ import NoteTabKey from "./notesTabKey.js";
 import NoteListIndent from "./notesListIndent.js";
 import { enterInheritHandler } from "./notesEnterInherit.js";
 import NotePastePlain from "./notesPastePlain.js";
+import NoteTableClipboard from "./notesTableClipboard.js";
 import NoteBlockKeys from "./notesBlockKeys.js";
 import NoteSearchHighlight from "./notesSearchHighlight.js";
 import NoteTableToText from "./notesTableToText.js";
@@ -137,6 +138,23 @@ function deriveBlockSizes(doc, tr) {
  * `view.domAtPos`, and `ignoreMutation`, also unchanged, is what stops ProseMirror's mutation
  * observer from fighting that preview mid-drag). */
 const NoteTable = Table.extend({
+  /* ⛔ `keep` — "THIS ONE-COLUMN TABLE IS DATA" (NEW-1, OneNote paste). The paste path unwraps a
+   * single-column table into plain lines because that is what an Outlook signature's layout
+   * scaffolding is (`isLayoutTable`, notesPastePlain.js). A bordered one-column table — OneNote's
+   * checklist — is a real table and was being flattened with it. Set by `normalizeTableMarkup` from
+   * the clipboard's own markup, round-tripped through `data-planyr-keep-table` so copy/paste inside
+   * Notes keeps it too. Default false and absent from the stored JSON's meaning: nothing existing
+   * changes. */
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      keep: {
+        default: false,
+        parseHTML: (el) => el.hasAttribute("data-planyr-keep-table"),
+        renderHTML: (attrs) => (attrs.keep ? { "data-planyr-keep-table": "1" } : {}),
+      },
+    };
+  },
   addNodeView() {
     return ({ node, view, HTMLAttributes }) => {
       const mergedAttributes = mergeAttributes(this.options.HTMLAttributes, HTMLAttributes);
@@ -601,6 +619,10 @@ export const NOTE_EXTENSIONS = [
   // default Ctrl+V is deliberately unchanged — so the "Keep text only" option can be offered
   // afterwards, the way Word's is. See lib/notesPastePlain.js.
   NotePastePlain,
+
+  // A table already on the page copies / cuts / pastes: tab-separated text half, whole-table cut, and the
+  // "select table" command. See lib/notesTableClipboard.js (NEW-1, 2026-10-06).
+  NoteTableClipboard,
 
   // Backspace at the START of a block undoes a formatting difference before it restructures
   // anything (B36051). Registered ABOVE the default keymap so it is asked before joinBackward

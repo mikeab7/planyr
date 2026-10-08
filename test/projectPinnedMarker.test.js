@@ -1,13 +1,13 @@
-/* NEW-1 (switcher restyle) — source guards for the dropdown's group labels and pin control.
+/* NEW-1 (switcher, grouped cards) — source guards for the dropdown's NO-LABEL grouping and pin control.
  *
- * History: B<earlier NEW-1> removed the "Pinned" header and marked each pinned row with a pin icon.
- * The 2026-09-29 restyle REVERSES the icon half on purpose (owner, verbatim spec): the group LABEL
- * ("PINNED" / "RECENT") alone marks the group, NO pin icon is shown on rows at rest, and the pin is a
- * hover/focus-revealed BUTTON at the left of each row's right-hand cluster. The header-with-a-count
- * stays gone — the label carries no count.
+ * History: the #1870 restyle showed small uppercase "PINNED" / "RECENT" labels and a hover-only pin.
+ * The grouped-cards follow-up (owner-approved "Option 2b") REMOVES the labels entirely — one card holds
+ * every project, pinned first — and makes a PINNED row's pin always visible, filled in the app's green;
+ * an UNPINNED row's pin still appears only on hover/keyboard focus (never on touch: Pin/Unpin stays in
+ * the three-dot menu there).
  *
  * This is a source-string guard (this repo does not render React through a DOM library in unit
- * tests). The behavioural proof is `ui-audit/verify-project-switcher-restyle.mjs`, which drives the
+ * tests). The behavioural proof is `ui-audit/verify-project-switcher-cards.mjs`, which drives the
  * real dropdown in a headless browser.
  */
 import { describe, it, expect } from "vitest";
@@ -21,33 +21,41 @@ const code = (p) => readFileSync(resolve(here, p), "utf8")
 const crumb = code("../src/shared/ui/ProjectBreadcrumb.jsx");
 const body = crumb.split("const renderProjectRow")[1];
 
-describe("group labels", () => {
-  it("renders small PINNED and RECENT section labels (uppercase via CSS, no count)", () => {
-    expect(crumb).toMatch(/<div style=\{SECTION_LABEL\}>Pinned<\/div>/);
-    expect(crumb).toMatch(/<div style=\{SECTION_LABEL\}>Recent<\/div>/);
-    expect(crumb).toMatch(/textTransform: "uppercase"/);
-    expect(crumb).not.toMatch(/\{pinnedRows\.length\}<\/span>/);
+describe("no section labels", () => {
+  it("renders no PINNED / RECENT label, and the label style is gone", () => {
+    expect(crumb).not.toMatch(/SECTION_LABEL/);
+    expect(crumb).not.toMatch(/>Pinned<\/div>/);
+    expect(crumb).not.toMatch(/>Recent<\/div>/);
+    expect(crumb).not.toMatch(/project-group-pinned|project-group-recent/);
+  });
+  it("every project sits in ONE card: current, then pinned, then the rest", () => {
+    expect(crumb).toMatch(/data-testid="project-card"/);
+    expect(crumb).toMatch(/\[\.\.\.\(currentRow \? \[currentRow\] : \[\]\), \.\.\.pinnedRows, \.\.\.restRows\]/);
   });
 });
 
-describe("no pin icon at rest", () => {
-  it("the old always-on `{isPinned && (<span title=\"Pinned\">…<PinIcon/>)}` marker is gone", () => {
+describe("pin icon", () => {
+  it("the old always-on `{isPinned && (<span title=\"Pinned\">…<PinIcon/>)}` marker is still gone — the pin is the BUTTON", () => {
     expect(crumb).not.toMatch(/\{isPinned && \(/);
     expect(crumb).not.toMatch(/title="Pinned"/);
     expect(crumb).not.toMatch(/aria-label="Pinned"/);
   });
-  it("the only pin on a row is the hover/focus-revealed button, hidden at rest by CSS", () => {
+  it("a pinned row's pin is always visible and green; an unpinned row's is hover/focus-only and never shown on touch", () => {
     expect(body).toMatch(/className="psw-pin"/);
+    expect(body).toMatch(/data-pinned=\{isPinned \? "1" : "0"\}/);
+    expect(body).toMatch(/color: "var\(--accent-site\)"/);
     const css = readFileSync(resolve(here, "../src/index.css"), "utf8");
-    expect(css).toMatch(/\.psw-row \.psw-pin \{ opacity: 0;/);
+    expect(css).toMatch(/\.psw-row \.psw-pin\[data-pinned="0"\] \{ opacity: 0;/);
+    expect(css).not.toMatch(/\.psw-row \.psw-pin \{ opacity: 0;/);
     expect(css).toMatch(/\.psw-row:hover \.psw-pin, \.psw-row:focus-within \.psw-pin \{ opacity: 1; \}/);
+    expect(css).toMatch(/@media \(hover: none\) \{ \.psw-row \.psw-pin\[data-pinned="0"\] \{ visibility: hidden; \} \}/);
   });
 });
 
 describe("the pin button", () => {
   it("carries an aria-label, swaps Pin/Unpin, fills the icon when pinned, and does not open the project", () => {
     expect(body).toMatch(/aria-label=\{isPinned \? `Unpin \$\{p\.name\}` : `Pin \$\{p\.name\}`\}/);
-    expect(body).toMatch(/<PinIcon size=\{12\} filled=\{isPinned\} \/>/);
+    expect(body).toMatch(/<PinIcon size=\{13\} filled=\{isPinned\} \/>/);
     expect(body).toMatch(/e\.stopPropagation\(\); togglePinned\(p\.id\)/);
   });
   it("is the FIRST slot of the right cluster: pin, calendar, time, menu — in that order", () => {
@@ -60,7 +68,7 @@ describe("the pin button", () => {
     for (const k of ["SLOT_PIN", "SLOT_CAL", "SLOT_TIME", "SLOT_MENU"]) expect(crumb).toMatch(new RegExp(`const ${k} = \\{ \\.\\.\\.SLOT, width: \\d+`));
   });
   it("the calendar slot is ALWAYS rendered; only its icon is conditional", () => {
-    expect(body).toMatch(/<span data-testid=\{`project-slot-cal-\$\{p\.id\}`\} style=\{SLOT_CAL\}>\s*\{p\.scheduleProjectId != null && \(/);
+    expect(body).toMatch(/<span data-testid=\{`project-slot-cal-\$\{p\.id\}`\} style=\{SLOT_CAL\}>\s*\{resolveScheduleHint\(p, liveSchedules\) != null && \(/);
     expect(body).toMatch(/title="Has a schedule"/);
   });
 });

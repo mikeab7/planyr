@@ -25,7 +25,7 @@ import { OSM_MIN_ZOOM, MAPILLARY_MIN_ZOOM, SOIL_BEDROCK_MIN_ZOOM } from "./layer
 const PIPELINE_VECTOR_MIN_ZOOM = 13;
 import { loadTerrain } from "./terrainLazy.js";
 import {
-  isTransientStatus, dynamicLayerOptions, imageLayerOptions, featureLayerOptions, featureRetryDecision,
+  isTransientStatus, dynamicLayerOptions, imageLayerOptions, featureLayerOptions, featureBaseStyle, featureRetryDecision,
   wireRasterStatus, RASTER_STALL_MS, pointSymbolOptions, identifyCapable,
 } from "./layerRequest.js";
 import { cachedVectorLayer, cachedPipelineLayer, cachedCorridorLayer, isPointFeature } from "./vectorOverlay.js";
@@ -33,7 +33,7 @@ import { cachedVectorLayer, cachedPipelineLayer, cachedCorridorLayer, isPointFea
 // why the rest of the hover engine is deferred.
 const hoverIdentifyEnabled = (cfg) => !!(cfg && cfg.hoverIdentify);
 import { installDefaultMarkerIcon, pointToLayerFor } from "./mapSymbols.js";
-import { PIPELINE_LEGEND } from "./pipelineCommodity.js";
+import { PIPELINE_LEGEND, commodityBucketRecord } from "./pipelineCommodity.js";
 import { DEFAULT_CORRIDOR_WIDTH_FT } from "./pipelineCorridor.js";
 import { proxyServiceUrl } from "../../../shared/gis/gisProxyCore.js";
 // NEW-2 — the baked-flood-tile DECISION only (pure, a few hundred bytes). The renderer and the
@@ -137,10 +137,19 @@ function reportCacheAge(lyr, k, onStatus) {
  * Texas", exactly like every other out-of-state row). The URL comes from the registry — never inline. */
 const EIA_APPROX_INFO = "Approximate — major transmission lines only. No local gas mains or gathering lines, and geometry can be miles off.";
 const EIA_APPROX_CAVEAT = "Not a survey and not complete. Confirm with the title commitment (easements), an ALTA survey and an 811 locate — Sunshine 811 in Florida, Georgia 811 in Georgia.";
-const eiaPipelineRow = (regKey, { label, color, order, title }) => ({
+/* NEW-2 — each EIA line is drawn in the SAME commodity class the Texas RRC layer uses for that product
+ * (pipelineCommodity.js: colour, dash and weight — natural gas amber, refined/petroleum green dashed, crude
+ * violet, gas liquids red), so one product reads as one colour in every state, and none is a hydrography or
+ * flood blue. Solid strokes at the hierarchy's constraint ceiling (0.85, weight 3): the commodity is told apart by colour + dash, never by fading.
+ * `styleFn` (not a flat colour) so an opacity change re-derives the WHOLE style rather than a bare `{opacity}`. */
+const eiaPipelineRow = (regKey, { label, bucket, order, title }) => {
+  const b = commodityBucketRecord(bucket);
+  const w = Math.min(b.weight, 3); // the layer hierarchy caps a constraint line at 3 (the HVL class is 4 on the Texas layer)
+  return {
   kind: "esriFeature", label,
   source: "US EIA (via Esri U.S. Federal Datasets)",
-  url: GIS_SOURCES[regKey].serviceUrl, minZoom: 9, color, weight: 2.2, opacity: 0.8,
+  url: GIS_SOURCES[regKey].serviceUrl, minZoom: 9, color: b.color, weight: w, opacity: 0.85,
+  styleFn: (_props, opacity) => ({ color: b.color, weight: w, dashArray: b.dash || null, opacity, fill: false }),
   hoverIdentify: true, canvasIdentify: true, hoverTitle: title + " (approximate)", hoverSource: "US EIA",
   hoverFields: [{ names: ["Pipename", "PIPENAME"] }, { names: ["Operator", "Opername", "OPERATOR"] }],
   sublabel: EIA_APPROX_INFO,
@@ -152,7 +161,8 @@ const eiaPipelineRow = (regKey, { label, color, order, title }) => ({
   role: "line",
   states: ["FL", "GA"],
   group: "environmental", order,
-});
+  };
+};
 
 
 export const STATEWIDE = {
@@ -285,10 +295,10 @@ export const STATEWIDE = {
     states: ["TX"],
     group: "environmental", order: 4,
   },
-  eia_gas: eiaPipelineRow("eiaGas", { label: "Gas pipelines (approx.)", title: "Natural gas pipeline", color: "#c2410c", order: 8 }),
-  eia_petroleum: eiaPipelineRow("eiaPetroleum", { label: "Petroleum product pipelines (approx.)", title: "Petroleum product pipeline", color: "#a16207", order: 9 }),
-  eia_crude: eiaPipelineRow("eiaCrude", { label: "Crude oil pipelines (approx.)", title: "Crude oil pipeline", color: "#7c2d12", order: 10 }),
-  eia_hgl: eiaPipelineRow("eiaHgl", { label: "Gas liquids pipelines (approx.)", title: "Hydrocarbon gas liquids pipeline", color: "#be185d", order: 11 }),
+  eia_gas: eiaPipelineRow("eiaGas", { label: "Gas pipelines (approx.)", title: "Natural gas pipeline", bucket: "gas", order: 8 }),
+  eia_petroleum: eiaPipelineRow("eiaPetroleum", { label: "Petroleum product pipelines (approx.)", title: "Petroleum product pipeline", bucket: "refined", order: 9 }),
+  eia_crude: eiaPipelineRow("eiaCrude", { label: "Crude oil pipelines (approx.)", title: "Crude oil pipeline", bucket: "crude", order: 10 }),
+  eia_hgl: eiaPipelineRow("eiaHgl", { label: "Gas liquids pipelines (approx.)", title: "Hydrocarbon gas liquids pipeline", bucket: "hvl", order: 11 }),
   ccn_service: {
     // Public-data screening PHASE 1 — water & sewer CCN service areas ("who holds the
     // certificate to serve this site"). The Site Analysis Water/Sewer CCN cards drive this
@@ -368,6 +378,41 @@ export const STATEWIDE = {
     role: "line",
     states: ["TX"],
     group: "access", order: 1,
+  },
+  bts_truck_network: {
+    // B2081249 — NATIONAL. FHWA's STAA National Network (USDOT BTS National Transportation Atlas). The service ALSO holds
+    // segments listed WITHOUT national-network status (NN = 0), so the row carries its source's `where` — never draw it
+    // unfiltered. Georgia DOT publishes no truck-route service of its own; this is the federal answer for every state.
+    kind: "esriFeature", label: "Truck routes (STAA National Network)", source: "USDOT BTS — FHWA National Network",
+    url: GIS_SOURCES.ntaNationalNetwork.serviceUrl, where: GIS_SOURCES.ntaNationalNetwork.where,
+    minZoom: 11, color: "#7c2d12", weight: 2, opacity: 0.55,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "National Network route", hoverSource: "USDOT BTS",
+    hoverFields: [{ names: ["SIGN1", "ROUTEID"], label: "route" }, { names: ["AADT"], label: "AADT" }, { names: ["AADT_COM"], label: "combination trucks/day" }, { names: ["AADT_SINGL"], label: "single-unit trucks/day" }],
+    note: "The federal STAA National Network — the routes a 53-ft trailer / 80,000-lb truck may use (Interstates and the connecting highways). Data year 2018; a federal reference list, NOT a state permit or current restriction. A road missing here is not proven closed to trucks: it may be a state-designated route this file never listed. Confirm access and any turning-radius limits with the state DOT.",
+    infoCaveat: "Federal reference, data year 2018 (layer last edited April 2023). Truck counts are AADT of combination and single-unit trucks where the file carries them.",
+    role: "line", group: "access", order: 2,
+  },
+  hpms_aadt: {
+    // B2081249 — NATIONAL. FHWA HPMS 2022 traffic on the National Highway System (the data each state DOT reports to FHWA).
+    // Coexists with the Texas/Colorado state count layers: it is the FEDERAL copy on the NHS only, different vintage and
+    // method, off by default — both are offered and both say what they are.
+    kind: "esriFeature", label: "Traffic volumes (HPMS 2022, highways)", source: "USDOT BTS — FHWA HPMS",
+    url: GIS_SOURCES.hpmsAadt.serviceUrl,
+    minZoom: 11, color: "#2563eb", weight: 2, opacity: 0.55,
+    // AADT bands: grey = reported without a count · blue < 10k · indigo 10–30k · violet 30–60k · magenta 60k+
+    styleFn: (props, opacity) => {
+      const a = props && props.AADT != null ? Number(props.AADT) : NaN;
+      if (!Number.isFinite(a) || a <= 0) return { color: "#64748b", weight: 1.2, opacity: opacity * 0.8 };
+      if (a < 10000) return { color: "#0ea5e9", weight: 1.5, opacity };
+      if (a < 30000) return { color: "#2563eb", weight: 2, opacity };
+      if (a < 60000) return { color: "#7c3aed", weight: 2, opacity };
+      return { color: "#be185d", weight: 2.5, opacity };
+    },
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "Traffic volume (HPMS 2022)", hoverSource: "USDOT BTS / FHWA HPMS",
+    hoverFields: [{ names: ["AADT"], label: "AADT" }, { names: ["F_SYSTEM"], label: "HPMS functional class" }],
+    note: "FHWA HPMS 2022 average daily traffic on the NATIONAL HIGHWAY SYSTEM only — Interstates, freeways, principal arterials and the connectors. Colour = AADT: blue under 10,000 · indigo 10–30,000 · violet 30,000–60,000 · magenta over 60,000 · grey = on the system but no count reported. A road off the system has NO line here: that is a coverage gap, never low traffic. In Texas and Colorado the state's own count layer is the closer read; this is the federal copy.",
+    infoCaveat: "HPMS 2022 as published by USDOT BTS (layer edited February 2025). An access / visibility proxy, not a traffic study.",
+    role: "line", group: "access", order: 3,
   },
   bts_rail: {
     // Public-data screening PHASE 6 (access tier) — BTS/FRA rail-network lines. The Site Analysis
@@ -991,6 +1036,16 @@ export const AHJ_LAYERS = {
     note: "Georgia EPD's Hazardous Site Inventory — sites with a reportable release, at EPD's own surveyed coordinates (the July 2025 list). A Phase I ESA PRE-SCREEN, not a substitute; the Class number is EPD's.",
     role: "point", group: "environmental", order: 12,
   },
+  ga_ust: {
+    // NEW-1 (B2095744) — Georgia EPD's REGISTER of underground storage tank facilities (not a leak list; see GIS_SOURCES.ustGa).
+    kind: "esriFeature", label: "Underground storage tanks (Georgia EPD)", source: "Georgia EPD — UST Management Program",
+    url: GIS_SOURCES.ustGa.serviceUrl, states: ["GA"],
+    minZoom: 12, color: "#854d0e", weight: 2, opacity: 0.55, pointRadius: 3.5,
+    hoverIdentify: true, canvasIdentify: true, hoverTitle: "UST facility", hoverSource: "Georgia EPD",
+    hoverFields: [{ names: ["LOCATION_NAME"] }, { names: ["LOCATION_TYPE"], label: "type" }, { names: ["FACILITY_STATUS"], label: "status" }, { names: ["CITY"] }],
+    note: "Georgia EPD's register of facilities with underground storage tanks (gas stations, distributors, farms, industrial…), the October 2022 edition. A REGISTER, not a leak list: release, corrective-action and closure status are not in it. A facility beside the site is a Phase I ESA pre-screen flag — pull EPD's UST Management Program file.",
+    role: "point", group: "environmental", order: 11,
+  },
   ga_nrhp: {
     kind: "esriFeature", label: "Historic places (National Register)", source: "National Park Service — National Register of Historic Places",
     url: GIS_SOURCES.nrhp.serviceUrl, states: ["GA"],
@@ -1221,6 +1276,7 @@ export const LAYER_VINTAGE = {
   nhd_flowlines: "USGS NHD — collection date varies by area",
   // Georgia screening (NEW-1) — each stamped with the edition the provider's own layer reported on 2026-10-04.
   ga_hsi: "Georgia EPD Hazardous Site Inventory — July 2025 list (layer edited 2025-08-04)",
+  ga_ust: "Georgia EPD UST facility register — layer edited 2022-10-17",
   ga_nrhp: "NPS National Register — Esri Federal Data copy, edited 2026-10-02",
   ga_cemeteries: "USGS GNIS cemeteries — recorded sites only; no single edition date",
   ga_crit_habitat: "USFWS final critical habitat — layer edited 2026-08-31",
@@ -1228,6 +1284,8 @@ export const LAYER_VINTAGE = {
   ga_trout: "Georgia DNR trout streams — layer edited 2024-12-30",
   ga_stream_buffers: "Computed from USGS NHD + DNR trout streams + the District outline — not a surveyed buffer",
   ga_slope: "USGS 3DEP LiDAR — collection date varies by area",
+  bts_truck_network: "FHWA National Network — data year 2018 (layer edited 2023-04-03)",
+  hpms_aadt: "FHWA HPMS — data year 2022 (layer edited 2025-02-12)",
   soil_bedrock: "USDA SSURGO — survey vintage varies by county",
   coh_ww: "City of Houston GIS (test host) — current edition",
   coh_storm: "City of Houston GIS (test host) — current edition",
@@ -1803,7 +1861,7 @@ export function syncOverlayLayers(map, overlays, refs, opts = {}) {
             // disc symbology and everything else keeps the stroke-only behaviour.
             lyr.setOpacity = typeof cfg.styleFn === "function"
               ? (oo) => { try { const sf = (f) => cfg.styleFn(f && f.properties, oo); lyr._originalStyle = sf; lyr.setStyle(sf); } catch (_) {} }
-              : (oo) => { try { lyr.setStyle((f) => (isPointFeature(f) ? pointSymbolOptions(cfg, oo) : { opacity: oo })); } catch (_) {} };
+              : (oo) => { try { lyr.setStyle((f) => (isPointFeature(f) ? pointSymbolOptions(cfg, oo) : featureBaseStyle(cfg, oo))); } catch (_) {} };
             // FeatureServer GeoJSON queries get retry/backoff (NEW-5/B287): esri-leaflet
             // won't retry its own request, so a transient 5xx/blip on City ETJ or County
             // boundaries would otherwise drop the layer on a single hiccup.

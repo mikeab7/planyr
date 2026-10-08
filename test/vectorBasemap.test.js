@@ -105,3 +105,24 @@ describe("imagery grade + seam fix CSS", () => {
     expect(css).toMatch(new RegExp(`\\.leaflet-container\\.${IMAGERY_GRADE.containerClass}\\s*\\{[^}]*--aerial-gap-bg`));
   });
 });
+
+describe("no tinted roads (B2106752)", () => {
+  const NEUTRAL_RE = /^(#ffffff|rgba\(\s*(10|18),\s*(16|26),\s*(24|38),[^)]*\))$/i;
+  const NEUTRAL = { test: (c) => NEUTRAL_RE.test(c) || /^rgba\(\s*255,\s*255,\s*255,/.test(c) };
+  it("every road stroke/casing and every label colour in the style is neutral white or the dark casing/halo — no yellow/cream anywhere", () => {
+    const colours = [];
+    for (const l of style.layers) {
+      const p = l.paint || {};
+      for (const k of ["line-color", "text-color", "text-halo-color"]) if (typeof p[k] === "string") colours.push([l.id, k, p[k]]);
+    }
+    expect(colours.length).toBeGreaterThan(10);
+    const tinted = colours.filter(([, , c]) => !NEUTRAL.test(c));
+    expect(tinted).toEqual([]);
+  });
+  it("freeways rank above streets by width, not hue", () => {
+    const road = (id) => style.layers.find((l) => l.id === id).paint;
+    expect(road("road-freeway")["line-color"]).toBe(road("road-major")["line-color"]);
+    const w = (id) => road(id)["line-width"].at(-1);
+    expect(w("road-freeway")).toBeGreaterThan(w("road-major"));
+  });
+});

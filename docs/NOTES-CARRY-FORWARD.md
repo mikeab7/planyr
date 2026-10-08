@@ -1502,6 +1502,10 @@ position**.
 - **A pane's on-screen width is never a layout input for content that a view transform scales.** Anything measured on `note-mat` (`offsetWidth`) is screen-space; the page and its boxes are workspace-space.
 - **Known and not unified:** the sheet's paper margin (16 vs 40 a side) is a deliberate phone setting; it shifts the paper edge ~48 workspace-units on pages that grow/are pinned below the floor, never box widths, tables or line breaks. **Owner decision 2026-10-04: keep it thinner on phones — do not unify (CLAUDE.md constraint #14).**
 
+## When a symptom survives three narrow fixes, ask whether the mechanism should exist at all (B1815025, 2026-10-05)
+
+The Notes width-drag took FOUR rounds. B1740688 (PR #1758: content shifted instead of the boundary), B1775312 (PR #1778: gross judder from a double scroll compensation) and B1801040 (PR #1792: left-grip creep from a scroll clamped at zero on narrow pages) each fixed the symptom named and left the next one. The fourth round (PR #1805) **deleted the compensation mechanism entirely** instead of testing it harder, and the owner's own hand-drag then found nothing moving. **Lesson: when a symptom survives three narrow fixes, stop patching and ask whether the mechanism should exist at all.**
+
 ## 7 · The mat's gesture model, in one table (NEW-1/NEW-2, 2026-09-12)
 
 Four meanings now compete for one press on the note canvas. The rule reads in this order, and the
@@ -1515,6 +1519,24 @@ was, Shift or no Shift:
 | travels, no modifier | **pan** — the mat's own `scrollLeft`/`scrollTop`, one-to-one with the pointer |
 | travels, Shift held | **select** — the rubber band; every box it touches, replacing the selection |
 | starts on one of the four sheet edge grips | **resize the page** — the grip's `pointerdown` calls `preventDefault()`, which suppresses the compat `mousedown`, so `focusFromMat` never runs at all |
+
+**⛔ AND A FIFTH ROW SINCE 2026-10-06 (NEW-1 / B2156912): a plain mouse press that starts on a BOX'S CONTENT
+(table cell / header / border, picture, text) of a box that is neither selected nor being edited is DEFERRED —
+the capture-phase effect above the touch pan in `NoteEditor.jsx` takes the `pointerdown`/`mousedown` before
+ProseMirror, the box body drag and `focusFromMat` can see them, so nothing is selected on the press. Travels →
+the same pan as above (followed from the press); does not travel → the press is REPLAYED into `focusFromMat`
+unchanged (a plain click is exactly what it was). It does NOT claim: the grip / resize handles / connect dot /
+column-resize handle / page grips, controls and links, any modifier, middle button, Space, click-to-connect,
+touch, a selected box (its press is the click-in; a group still drags) or the box being edited (text
+selection). Guard: `ui-audit/verify-notes-drag-pan.mjs` (required `build` step; 21 ✗ on pre-fix main).
+- **Trap 47 — a pan arm's start point must not be a column border.** The first top-border arm pressed at the
+  table's horizontal midpoint, which in a 2-column table is the column-resize handle — correctly NOT a pan; the
+  arm reported "table border does not pan" about working code. Press at a quarter of the width.
+- **Trap 48 — a harness that clicks, clicks, then double-clicks lands a TRIPLE click.** Presses at the same
+  spot inside the multi-click window accumulate `detail`; wait out the window (~800ms) before the double-click
+  or "double-click selects a word" selects the whole paragraph.
+- **`verify-notes-free-placement` §7 "dragging a note by its BODY moves it" is red on `main` too (stored 0,0)
+  and encodes behaviour that is retired for an unselected box — left red, not weakened.**
 
 Pure decisions in `lib/notesMarquee.js` (`gestureOutcome`, `latchGesture`, `panTarget`), wiring in
 `NoteEditor.jsx`'s `beginBlankGesture`, guard in `ui-audit/verify-notes-pan.mjs` at **1191×465,
@@ -1561,3 +1583,29 @@ consecutive runs of the SAME build, so diff identities, never counts. Carried by
 - **The first layout pass measures the sheet SHORT (213 px here) and the full height lands ~140 ms later.** Anything that centres the page vertically against the first measurement is a race. `frameView({align:"top"})` is height-independent — use it for opening/Ctrl+0; `fitView` keeps centring. Phones (canvas ≤ 640) open at fit width (`openingZoom`), saved per-page view still wins.
 - **TRAP: an unthrottled run can pass on unfixed code by luck of that race** — a framing harness needs a CPU-throttled arm AND settled-state thresholds (`verify-notes-open-framing.mjs`).
 - **Standing limit:** phone text is 11 px × the opening zoom (~1.0). Readability vs whole-page-width is an owner decision (OWNER-TODO), not a bug.
+
+
+## Pasting tables: the clipboard is a bundle, and the paste can land nowhere (B2142464, 2026-10-05)
+
+- **Test with committed real-shaped clipboards** (`test/fixtures/clipboard-tables`, harness `ui-audit/verify-notes-table-paste.mjs`), never a hand-written `<table><tr><td>`. The parser was fine; every failure was routing: a picture beside the table won (handlers claimed "any image file"), an empty `<td>` became a childless cell via the spacer-trim in `tidyPastedFragment` and crashed the column repair, and armed / box-selected / nothing-focused pastes never reached ProseMirror.
+- **Desktop press 1 on a box only SELECTS it and blurs the editor** — a harness that clicks a box once and pastes is testing "paste with nothing focused", not "paste in a box" (enter with a second, spaced press). Arming blank paper is a real DOUBLE-click (a single press no longer arms).
+- **Saves are gated on a trusted user event**: a synthetic paste into a freshly loaded page stores nothing until a real press happened first.
+- **A table at the end of a box parks the caret in the doc's hidden trailing paragraph**; `keepCaretInBox` fixes it. Ask where the caret went after any block paste.
+- Chrome sanitises html written via the async clipboard API; use a `DataTransfer` for exact bytes and `navigator.clipboard.write` + real Ctrl+V only for the trusted-event route.
+
+### B2155520 — copying a table that is ALREADY on a page (2026-10-06) — the outbound half
+
+- **The reported symptom ("I can't paste a table that's already in the notebook") is mostly a COPY problem, not a paste problem.** Desktop press 1 on a box only SELECTS it and blurs the editor, so Ctrl+C/Ctrl+X reach no editor listener and the clipboard keeps its OLD contents. A harness that drags cell-to-cell inside an already-open box (focus in the editor) sees copy/paste working perfectly — that is the WRONG CASE; click the box once, then Ctrl+C. `NoteEditor.jsx` now has a window `copy`/`cut` listener for a selected box (`contentOfBoxes`).
+- **Cut of a whole table (a full cell selection) used to clear the cells and keep the table; and the emptied box is then pruned by a transaction kept OUT of undo history, so "cut → click elsewhere → Ctrl+Z" restored nothing.** The cut now removes the box in the SAME step when the table was its only content (`lib/notesTableClipboard.js`). Any future "cut leaves a box empty" path has the same trap: an empty box is pruned with `addToHistory:false` and undo cannot map back into it.
+- **A box that ENDS in a table parks the caret in its last cell**: "paste at the box's end" poured into the source table (5×5 merge). `onLoosePaste` now lands on a fresh paragraph after it.
+- **`text/plain` of a table is tab-separated now** (`clipboardTextSerializer`); the right-click Paste ▸ Keep source/Merge reads the html half with `navigator.clipboard.read()` (a refusing browser still gets the honest message).
+- **Instrument traps hit while building the harness (`ui-audit/verify-notes-table-copy-paste.mjs`):** `End` does not move the caret to the end of a box's text (click at the text's end instead); `Ctrl+A` selects the whole DOCUMENT (use a triple-click for one paragraph); a seeded column width under the 100 minimum is silently rewritten on load (use ≥ 100 or the ORIGINAL table will "differ" and look like a paste bug); `page.mouse.click(...,{clickCount:3})` is the real triple-click. The harness carries a known-good arm (plain text copy/paste) that VOIDS the run.
+- **Neighbouring harnesses that fail identically on clean main (do not blame your change):** verify-notes-context-menu 23/27, verify-notes-table-to-text 13/17, verify-notes-box-selection 81/131, verify-notes-table-select (crashes on a timeout). Measured 2026-10-06 against an unmodified build of the same commit.
+
+### B2142464 ×2 — a green live check on SYNTHETIC fixtures proved nothing (2026-10-06, owner's own machine)
+
+- **The failure:** #2077 was "verified live" by pasting this repo's own hand-modelled fixtures through a real browser. On the owner's Windows/Chrome/OneNote desktop a 6-column table nested in a bullet arrived as one paragraph per non-empty cell, empties dropped, no table. **A harness that pastes fixtures it also wrote can only prove the wiring, never the clipboard.** Fixtures flagged `"synthetic": true` in `test/fixtures/clipboard-tables/manifest.json` must be replaced by REAL captures (every type: text/html, text/plain, rtf) before anything is called verified; until then a result reads "wiring proven, real clipboards unproven".
+- **The signature to recognise:** one paragraph per non-empty cell + empty cells vanishing + no table = the browser's HTML parser stripping `tr`/`td` because the fragment had rows but **no opening `<table>` tag** (OneNote cells hold a `<p>` each; the `<p>&nbsp;</p>` of an empty cell is then trimmed as a spacer). `repairTableFragment` re-wraps such a fragment BEFORE the parse. This is a reproduced mechanism matching his symptom, **not yet confirmed against his real clipboard**.
+- **Excel's hidden helper row:** `<tr height=0 style='display:none'>` inside `<![if supportMisalignedColumns]>` parsed as a real blank bottom row. Hidden rows/cells are removed in `normalizeTableMarkup`.
+- **A single Excel cell is a 1×1 table on the clipboard** — always pasted as text (`isLayoutTable`).
+- **Tab-separated `text/plain` is the fallback** whenever the html route yields no table, and a spreadsheet grid in the text beats a picture beside it.

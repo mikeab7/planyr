@@ -188,3 +188,41 @@ GIS hosts put the map in its error state, which occupies the hint's render slot,
 non-target-origin requests locally; and the hint expires on its own a few seconds after arming, so a
 "gone" reading taken late is VOID (the case enforces a 4 s window). Results are WebKit-emulated, never
 "on device". Last run: 24/24 PASS on production; 0/24 on the pre-fix build (red-proof).
+
+## Permanent case: Food sideways — the card docks right and the pin stays in view (B2046224 ×4)
+
+`node ui-audit/verify-food-landscape.mjs <baseUrl>` (build with the Food fixture env, see `ui-audit/lib/foodFixture.mjs`): WebKit
+iPhone 15 / iPhone SE descriptors in landscape and portrait, a rotate-with-the-card-open flow, and Chromium with an INJECTED
+safe-area inset for both notch rotations (WebKit's `env(safe-area-inset-*)` is always 0 — gap #2 above — so the notch is
+emulated on Chromium and labelled so). Two things a future session would otherwise rediscover: mobile WebKit has no mouse wheel
+(`page.mouse.wheel` throws), so the card's scroller is driven directly there and by a real wheel on Chromium; and the iPhone SE has
+no notch, so its Chromium runs use a small stress inset, not 59. Last run: red on main (the bottom sheet over a two-row header,
+pin hidden after a rotation, zoom control cut off), green on the fix.
+
+## Signed in on the LIVE site, on a phone descriptor (NEW-1, 2026-10-06)
+
+Everything above runs signed out or against a stubbed backend. The signed-in half runs live too — **this environment already allows
+`planyr.io`, Supabase and holds `E2E_LOGIN_KEY`** (probed 2026-10-06; only `*.pages.dev` previews are refused by the egress proxy).
+**One sign-in path, never a second:** `ui-audit/lib/signedInSession.mjs` →
+`openSignedIn({ base, engine: "webkit", device: "iPhone 15", initScripts: [[IOS_MODEL, { kbPx, tallInner }]] })`. It signs in as
+`e2e@planyr.test` through the deploy's own `/api/auth/e2e-session`, proves it (account email + fixture row), and hands back the page.
+Things a future session would otherwise rediscover:
+- **`npx playwright install webkit` can fail once on the host-requirements check and succeed on the second run** — run it twice
+  before concluding WebKit is unavailable.
+- **The sign-in route answers 502 for ~3 minutes during every Cloudflare Pages deploy**; the helper retries 5xx for ~3.5 minutes
+  (a 404/401 is a real answer and is never retried).
+- **Every `openSignedIn` owns a whole browser** (~300 MB). A harness section that throws never closes it — sweep stragglers after
+  every section (`closeLeakedLive` in `foodIosPage.mjs` / `verify-phone-typing.mjs`) or a long run reaches 14 GB / load 100 and
+  browser launches time out.
+- **Throwaway rows:** `ui-audit/lib/liveFixtures.mjs` seeds a one-parcel/one-building plan (`zz-livechk-…`) and `cleanupLive` removes
+  it and PROVES it is gone. The `sites` table refuses a permanent delete of a live row (trash first, then delete), and a plan the app
+  still has open **re-creates itself** on the next autosave — clean up from a fresh session, never from the page that had it open.
+  Food's throwaway is one visit on a real place (`seedLive` / `cleanupLive` in `foodIosPage.mjs`).
+- **Run live harnesses ONE at a time.** Two live runs in parallel produced `Failed to fetch` on `setSession` and a flipped
+  known-answer arm (the page-containment guard had not armed yet — the harness now waits for the app's own armed flag).
+- **Live is slower than the stub by seconds, not milliseconds** (a cold Food name search ~5–10 s, the schedule grid hydrating): live
+  mode uses long waits and retries the double-click that opens a grid editor, and never reads a verdict from a half-settled page.
+- **CDP touch latency is real:** every `Input.dispatchTouchEvent` costs ~30 ms here, so a "70 ms" flick arrived as 0.33 px/ms (rule:
+  0.35). `verify-food-rating-and-sheet.mjs` now sends the moves back-to-back and ASSERTS the speed the page actually saw.
+- **Commands:** `node ui-audit/verify-phone-typing.mjs --live` · `PW_CHROME=/opt/pw-browsers/chromium node
+  ui-audit/verify-food-rating-and-sheet.mjs --live` (add `--shots=<dir>` for the keyboard-drawn pictures).

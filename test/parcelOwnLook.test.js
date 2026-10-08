@@ -232,7 +232,7 @@ describe("a lot larger than the screen is numbered where you can see it", () => 
 });
 
 describe("(b) the Leaflet layer draws exactly the placed numbers", () => {
-  it("one marker per placeable lot, zero overlapping boxes, cleared on remove", () => {
+  it("one marker per placeable lot, zero overlapping boxes, cleared on remove", async () => {
     vi.useFakeTimers();
     const feats = grid(5, 4, 120, 60).map((l, i) => ({
       feature: { id: i, properties: { QUICKREFID: l.text }, geometry: { type: "Polygon", coordinates: [l.ring.map((p) => [p.x, p.y]).concat([[l.ring[0].x, l.ring[0].y]])] } },
@@ -240,7 +240,7 @@ describe("(b) the Leaflet layer draws exactly the placed numbers", () => {
     const layer = { options: { minZoom: 14, fields: ["OBJECTID"] }, _map: null, _requestFeatures() {}, metadata: (cb) => cb(null, { fields: [{ name: "QUICKREFID" }] }), eachFeature: (fn) => feats.forEach(fn), _h: {},
       on(ev, fn) { (layer._h[ev] = layer._h[ev] || []).push(fn); return layer; }, off() { return layer; }, fire(ev) { (layer._h[ev] || []).forEach((f) => f()); } };
     const map = {
-      getZoom: () => 17, project: (ll) => ({ x: ll.lng, y: ll.lat }), getPixelBounds: () => ({ min: { x: 0, y: 0 } }), getSize: () => ({ x: 1000, y: 800 }),
+      getZoom: () => 17, project: (ll) => ({ x: ll.lng, y: ll.lat }), unproject: (p) => ({ lat: p.y, lng: p.x }), getPixelBounds: () => ({ min: { x: 0, y: 0 } }), getSize: () => ({ x: 1000, y: 800 }),
       containerPointToLatLng: (p) => ({ lat: p.y, lng: p.x }), on() {}, off() {}, removeLayer() {},
     };
     const ctl = attachLotNumbers(layer, { hint: "QUICKREFID", getObstacles: () => [] });
@@ -248,6 +248,8 @@ describe("(b) the Leaflet layer draws exactly the placed numbers", () => {
     layer._map = map;
     layer.fire("add");
     vi.advanceTimersByTime(500);
+    vi.useRealTimers(); // B2092656 ×3: the layout is a sliced job that may yield between slices (a real macrotask) — let it finish
+    for (let k = 0; k < 100 && rec.markers.length < 20; k++) await new Promise((r) => setTimeout(r, 5));
     expect(ctl.field()).toBe("QUICKREFID");
     expect(rec.markers).toHaveLength(20);
     const boxes = rec.markers.map((m) => ({ x: m.ll.lng, y: m.ll.lat, w: m.o.icon.iconSize[0], h: m.o.icon.iconSize[1] }));

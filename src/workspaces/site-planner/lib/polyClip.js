@@ -186,3 +186,230 @@ export function dissolvedParcelSqft(parcels, overlapPairs) {
     return lessExcept(sum); // degenerate/self-intersecting geometry → the honest additive sum, never a crash or false 0
   }
 }
+
+/* ───────────────────────── B2090352 — MERGE PARCELS: A REAL UNION ─────────────────────────
+ * `SitePlanner.mergeParcels` used to fuse two lots only when an edge of one had an exact reversed
+ * twin in the other (both endpoints within 0.75 ft). Six of seven realistic adjacencies were
+ * refused with "parcels don't share a boundary": a neighbour shorter than the lot beside it, one
+ * extra vertex on the common line, opposite winding, a 1 ft survey gap or overlap, a 1 ft slide.
+ *
+ * The merge is now a polygon UNION with a small morphological CLOSE (grow every ring, union, shrink
+ * back) so ordinary county-data slop fuses, and a separate CONTACT test so two lots that merely
+ * touch at a point, or are genuinely apart, are still refused — and the odd one out is NAMED.
+ *
+ *   MERGE_GAP_FT  1.5 ft  the widest gap/overlap-slop that still fuses. Each ring grows by half of
+ *                         it (+ a hair), so a gap up to ~1.5 ft closes. Far below any street, alley
+ *                         or ROW (≥ 20 ft), so two lots across a road are never joined. The price of
+ *                         the close is bounded: the merged area can exceed the dissolved area of the
+ *                         inputs by at most gap × contact length (0.75% on two 200×100 lots), which
+ *                         `mergeParcelRings` enforces and reports.
+ *   MERGE_MIN_CONTACT_FT 5 ft  how much common boundary two lots need to count as "touching". A point
+ *                         contact measures ~3 ft here (the slop distance either side of the corner), so
+ *                         corner-only neighbours stay refused.
+ */
+export const MERGE_GAP_FT = 1.5;
+export const MERGE_MIN_CONTACT_FT = 5;
+const MERGE_CLOSE_FT = MERGE_GAP_FT / 2 + 0.05;
+const MERGE_MITER = 10; // keeps a sharp convex lot corner exact through grow→shrink (≥ ~12° angles)
+const MERGE_SAMPLE_FT = 0.5;
+
+function segDist(p, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y, len2 = dx * dx + dy * dy;
+  let t = len2 ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+
+// Length of ringA's boundary that lies within `tol` of ringB's boundary (sampled along A's edges).
+function boundaryNear(ringA, ringB, tol) {
+  const nb = ringB.length;
+  const eb = [];
+  for (let i = 0; i < nb; i++) {
+    const a = ringB[i], b = ringB[(i + 1) % nb];
+    eb.push({ a, b, x0: Math.min(a.x, b.x) - tol, x1: Math.max(a.x, b.x) + tol, y0: Math.min(a.y, b.y) - tol, y1: Math.max(a.y, b.y) + tol });
+  }
+  let total = 0;
+  for (let i = 0; i < ringA.length; i++) {
+    const a = ringA[i], b = ringA[(i + 1) % ringA.length];
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    if (!len) continue;
+    const ex0 = Math.min(a.x, b.x), ex1 = Math.max(a.x, b.x), ey0 = Math.min(a.y, b.y), ey1 = Math.max(a.y, b.y);
+    const cand = eb.filter((e) => e.x1 >= ex0 && e.x0 <= ex1 && e.y1 >= ey0 && e.y0 <= ey1);
+    if (!cand.length) continue;
+    const n = Math.max(1, Math.ceil(len / MERGE_SAMPLE_FT));
+    const step = len / n;
+    for (let k = 0; k < n; k++) {
+      const t = (k + 0.5) / n;
+      const p = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+      if (cand.some((e) => segDist(p, e.a, e.b) <= tol)) total += step;
+    }
+  }
+  return total;
+}
+
+/** How much boundary two lots have in common, in feet (gap/overlap slop up to MERGE_GAP_FT counts). */
+export function ringContactFt(ringA, ringB, tol = MERGE_GAP_FT + 0.1) {
+  if (!isValidRing(ringA) || !isValidRing(ringB)) return 0;
+  return Math.max(boundaryNear(ringA, ringB, tol), boundaryNear(ringB, ringA, tol));
+}
+
+// The merge works on a MILLI-foot grid (county rings carry 3 decimals), so a lot's own corners and area survive the
+// union exactly; the 0.01 ft grid dissolvedParcelSqft uses shifts a 2,000 ft perimeter's area by ~10 sq ft.
+const MERGE_SCALE = 1000;
+const toClip = (ring) => ring.map((pt) => ({ X: Math.round(pt.x * MERGE_SCALE), Y: Math.round(pt.y * MERGE_SCALE) }));
+const fromClip = (path) => path.map((q) => ({ x: q.X / MERGE_SCALE, y: q.Y / MERGE_SCALE }));
+const GRID_FT = 1 / MERGE_SCALE;
+/* Rebuild a union outline for output. Every vertex lying within half a grid cell of an INPUT vertex becomes
+ * that input vertex exactly (the union ran on a centi-foot grid, so a corner can come back 0.004 ft off), and
+ * only coincident points and EXACTLY collinear leftovers (≤ 0.1 mm off the neighbours' chord — the
+ * debris of a removed shared edge) are dropped. A vertex the union itself CREATED (an intersection, a closed
+ * sliver's corner) is still tidied at the old ~0.1 ft tolerance, so closing jitter does not become corners —
+ * but an input corner, spike tip or curve facet is never flattened (NEW-1 amendment). */
+function tidyRing(ring, inputVerts = [], rings = []) {
+  // A kept input vertex that is exactly collinear is debris of the REMOVED shared edge only if it lies on ANOTHER lot's
+  // boundary; one sitting on a straight stretch of its own lot's edge is the county's own vertex and stays.
+  const onOtherLot = (v) => rings.some((r, k) => k !== v.ri && r.some((a, i) => segDist(v, a, r[(i + 1) % r.length]) <= 0.02));
+  const snapped = ring.map((p) => {
+    let best = null, bd = GRID_FT * 0.75;
+    for (const q of inputVerts) { const d = Math.hypot(p.x - q.x, p.y - q.y); if (d <= bd) { bd = d; best = q; } }
+    return best ? { x: best.x, y: best.y, kept: true, src: best.src, ri: best.ri } : { x: p.x, y: p.y, kept: false };
+  });
+  const dedup = [];
+  for (const p of snapped) {
+    const q = dedup[dedup.length - 1];
+    if (!q || Math.hypot(p.x - q.x, p.y - q.y) > 1e-6) dedup.push(p);
+  }
+  if (dedup.length > 1 && Math.hypot(dedup[0].x - dedup[dedup.length - 1].x, dedup[0].y - dedup[dedup.length - 1].y) <= 1e-6) dedup.pop();
+  const out = [];
+  for (let i = 0; i < dedup.length; i++) {
+    const a = dedup[(i - 1 + dedup.length) % dedup.length], b = dedup[i], c = dedup[(i + 1) % dedup.length];
+    const cr = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    const base = Math.hypot(c.x - a.x, c.y - a.y) || 1;
+    const dev = Math.abs(cr) / base;
+    if (dev > (b.kept ? 1e-4 : 0.005) || (b.kept && !onOtherLot(b))) out.push({ x: b.x, y: b.y, src: b.src, ri: b.ri });
+  }
+  return out.length >= 3 ? out : dedup.map((p) => ({ x: p.x, y: p.y, src: p.src, ri: p.ri }));
+}
+
+// The TRUE union area of the inputs as drawn — no sliver closing, and none of dissolvedParcelSqft's
+// overlap-tolerance fast path (a 1 ft overlap of two 200 ft lots sits under it and would read as additive).
+function rawUnionSqft(paths) {
+  const clip = new ClipperLib.Clipper();
+  clip.AddPaths(paths, ClipperLib.PolyType.ptSubject, true);
+  const sol = new ClipperLib.Paths();
+  clip.Execute(ClipperLib.ClipType.ctUnion, sol, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
+  let signed = 0;
+  for (const q of sol) signed += ClipperLib.Clipper.Area(q);
+  return Math.abs(signed) / (MERGE_SCALE * MERGE_SCALE);
+}
+
+/**
+ * Union a set of parcel rings into ONE outline.
+ *  ok:true  → { ring, areaSqft, dissolvedSqft, growthSqft }
+ *  ok:false → { code, message, ... } where code is
+ *    "invalid"  a ring was not a ≥3-point polygon
+ *    "apart"    the lots form more than one touching group → `groups` (index arrays, biggest first)
+ *    "hole"     the union would enclose ground that is not in the selection (an out-parcel)
+ *    "area"     the sliver-closing changed the area by more than the stated allowance (safety net)
+ * Winding-independent; partial shared edges, mid-edge corners and extra collinear points all fuse.
+ */
+export function mergeParcelRings(rings) {
+  let list = Array.isArray(rings) ? rings : [];
+  if (list.length < 2 || !list.every(isValidRing)) {
+    return { ok: false, code: "invalid", message: "Pick at least two parcels with a closed outline." };
+  }
+  // 1. Who touches whom (contact ≥ MERGE_MIN_CONTACT_FT), then the connected groups.
+  const n = list.length, parent = list.map((_, i) => i);
+  const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+  let totalContact = 0;
+  for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+    const c = ringContactFt(list[i], list[j]);
+    if (c >= MERGE_MIN_CONTACT_FT) { totalContact += c; parent[find(i)] = find(j); }
+  }
+  const byRoot = new Map();
+  for (let i = 0; i < n; i++) { const r = find(i); if (!byRoot.has(r)) byRoot.set(r, []); byRoot.get(r).push(i); }
+  const groups = [...byRoot.values()].sort((a, b) => b.length - a.length || a[0] - b[0]);
+  if (groups.length > 1) {
+    return { ok: false, code: "apart", groups, message: "Those parcels don't all touch edge-to-edge." };
+  }
+  // 2. The outline comes from the ORIGINAL rings. Plain union first — no offsetting at all.
+  // Work in a frame centred on the first lot: clipper-lib's integer range is ~1.5e9 before it falls back to
+  // emulated 128-bit maths, and a state-plane coordinate (1.4e7 ft) × 1000 is far past it — such rings came out
+  // "apart". Translating by a constant is exact, and the planner's own local-feet rings are already near zero.
+  const org = { x: Math.round(list[0][0].x), y: Math.round(list[0][0].y) };
+  const shifted = list;
+  list = shifted.map((r) => r.map((pt) => ({ x: pt.x - org.x, y: pt.y - org.y })));
+  try {
+    const paths = list.map((r) => { const p = toClip(r); if (!ClipperLib.Clipper.Orientation(p)) p.reverse(); return p; });
+    const union = (subject, clipPaths) => {
+      const c = new ClipperLib.Clipper();
+      c.AddPaths(subject, ClipperLib.PolyType.ptSubject, true);
+      if (clipPaths) c.AddPaths(clipPaths, ClipperLib.PolyType.ptClip, true);
+      const sol = new ClipperLib.Paths();
+      c.Execute(ClipperLib.ClipType.ctUnion, sol, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
+      return sol;
+    };
+    // A hole under a square foot is grid dust where two rings meet (measured: 0.00002 sq ft on a real pair), not an out-parcel.
+    const splitOH = (sol) => ({
+      outers: sol.filter((q) => ClipperLib.Clipper.Orientation(q)),
+      holes: sol.filter((q) => !ClipperLib.Clipper.Orientation(q) && Math.abs(ClipperLib.Clipper.Area(q)) / (MERGE_SCALE * MERGE_SCALE) >= 1),
+    });
+    const offsetPaths = (src, delta) => {
+      const o = new ClipperLib.ClipperOffset(MERGE_MITER, 0.25 * MERGE_SCALE);
+      o.AddPaths(src, ClipperLib.JoinType.jtMiter, ClipperLib.EndType.etClosedPolygon);
+      const out = new ClipperLib.Paths();
+      o.Execute(out, delta);
+      return out;
+    };
+    const close = (src, r) => offsetPaths(offsetPaths(src, r * MERGE_SCALE), -r * MERGE_SCALE);
+    let { outers, holes } = splitOH(union(paths));
+    if (outers.length !== 1 || holes.length) {
+      // Clipper does not always fuse two rings that share an exact edge (measured on a real Harris pair at the milli-foot
+      // grid: two outers back for a perfect twin edge). A hairline close — two grid cells, far under anything visible —
+      // overlaps them just enough to join, and UNIONING it with the untouched rings keeps every input vertex.
+      const eps = union(paths, close(paths, 2 * GRID_FT));
+      ({ outers, holes } = splitOH(eps));
+      if (outers.length !== 1 || holes.length) {
+        // Still more than one piece, or sliver holes along the contact: bring in the full gap-tolerant close, but ONLY
+        // to ADD bridging slivers (closed − what we hold, kept where within the gap tolerance of at least two lots).
+        // Original ground is never removed.
+        const closed = close(paths, MERGE_CLOSE_FT);
+        const diff = new ClipperLib.Clipper();
+        diff.AddPaths(closed, ClipperLib.PolyType.ptSubject, true);
+        diff.AddPaths(eps, ClipperLib.PolyType.ptClip, true);
+        const extra = new ClipperLib.Paths();
+        diff.Execute(ClipperLib.ClipType.ctDifference, extra, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
+        const tol = MERGE_GAP_FT + 0.1;
+        const bridges = extra.filter((q) => {
+          const pts = fromClip(q);
+          return pts.some((pt) => list.filter((r) => r.some((a, k) => segDist(pt, a, r[(k + 1) % r.length]) <= tol)).length >= 2);
+        });
+        ({ outers, holes } = splitOH(union(eps, bridges)));
+      }
+    }
+    if (outers.length !== 1) {
+      return { ok: false, code: "apart", groups: list.map((_, i) => [i]), message: "Those parcels don't all touch edge-to-edge." };
+    }
+    if (holes.length) {
+      const holeSqft = holes.reduce((s, h) => s + Math.abs(ClipperLib.Clipper.Area(h)), 0) / (MERGE_SCALE * MERGE_SCALE);
+      return { ok: false, code: "hole", holeSqft, message: "Merging these would leave a gap enclosed inside the new parcel (a lot that isn't picked sits in the middle)." };
+    }
+    const inputVerts = list.flatMap((r, ri) => r.map((pt, k) => ({ x: pt.x, y: pt.y, src: shifted[ri][k], ri })));
+    const ring = tidyRing(fromClip(outers[0]), inputVerts, list).map((pt) => (pt.src ? { x: pt.src.x, y: pt.src.y } : { x: pt.x + org.x, y: pt.y + org.y }));
+    const areaSqft = polyArea(ring);
+    const dissolvedSqft = rawUnionSqft(paths);
+    const growthSqft = areaSqft - dissolvedSqft;
+    // The safety net compares like with like — the union's own grid outline against the grid union — so the
+    // snap-back to unrounded input corners (±half a milli-foot per vertex) can never read as lost ground.
+    const checkGrowth = polyArea(fromClip(outers[0])) - dissolvedSqft;
+    const allowance = MERGE_GAP_FT * totalContact * 1.05 + 5;
+    const gridNoise = list.reduce((sm, r) => sm + r.reduce((q, a, k) => q + Math.hypot(r[(k + 1) % r.length].x - a.x, r[(k + 1) % r.length].y - a.y), 0), 0) * GRID_FT;
+    // Never give back less ground than the lots contain (float/grid noise only); growth stays bounded.
+    if (ring.length < 3 || checkGrowth > allowance || checkGrowth < -(0.5 + gridNoise)) {
+      return { ok: false, code: "area", areaSqft, dissolvedSqft, growthSqft, message: "Merging would have changed the combined area by more than survey slop allows, so nothing was merged." };
+    }
+    return { ok: true, ring, areaSqft, dissolvedSqft, growthSqft };
+  } catch {
+    return { ok: false, code: "invalid", message: "Those outlines couldn't be combined." };
+  }
+}

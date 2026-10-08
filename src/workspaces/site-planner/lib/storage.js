@@ -10,7 +10,7 @@
  */
 import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding, toMs, countJunkEntries,
   shareMirrorOf, withShareMirror, normRole } from "./siteModel.js";
-import { cloudUpsert, cloudDelete, cloudDeleteGroup, cloudHardDelete, cloudPurgeOnePlan, cloudRestore, cloudDeletedRows, cloudCheckDeleted, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile, refreshHeaderFromCloud } from "./cloudSync.js";
+import { cloudUpsert, cloudDelete, cloudDeleteGroup, cloudHardDelete, cloudRowsPresent, cloudPurgeOnePlan, cloudRestore, cloudDeletedRows, cloudCheckDeleted, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile, refreshHeaderFromCloud } from "./cloudSync.js";
 import { headerSlice } from "./headerMerge.js";
 import { reconcileGroupNames, resolveNameFor, groupKeyOf, maxStampOf, nameAuthority, renameStamp } from "./projectName.js";
 import { idbGet, idbPut, idbAvailable, idbDelete, idbDeleteByPrefix } from "./localDb.js";
@@ -780,25 +780,34 @@ export function _resetHistoryForTest() { historyMem = null; historyHydrated = fa
 // kept) by halving the per-site keep count until under budget; at most ~log2(15) re-serializes, and
 // only when actually over budget.
 const HISTORY_BYTE_BUDGET = 700 * 1024;
-function capHistoryBytes(h) {
+function capHistoryBytes(h, fullLen) {
   let keep = HISTORY_PER_SITE, out = h;
-  while (keep > 1 && JSON.stringify(out).length > HISTORY_BYTE_BUDGET) {
+  // `fullLen` — the length of `JSON.stringify(h)` when the caller already has it (writeHistoryAll does), so
+  // the first budget test does not serialise the whole ring a second time.
+  let len = Number.isFinite(fullLen) ? fullLen : JSON.stringify(out).length;
+  while (keep > 1 && len > HISTORY_BYTE_BUDGET) {
     keep = Math.floor(keep / 2);
     out = {}; for (const [id, list] of Object.entries(h)) out[id] = (list || []).slice(0, keep);
+    len = JSON.stringify(out).length;
   }
   return out;
 }
 function writeHistoryAll(h) {
   historyMem = h;                                   // in-memory ring = the synchronous source of truth (uncapped depth)
   let lsOk = false;
-  const capped = capHistoryBytes(h);                // localStorage keeps a BYTE-CAPPED mirror (the no-IndexedDB fallback)
-  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(capped)); lsOk = true; }
+  /* NEW-1 (B217540 ×2) — ONE serialisation of the full ring, reused three ways. This used to stringify it for the
+   * budget test, again for the localStorage write when under budget, and again for the IndexedDB copy — three passes
+   * over a ring that holds up to 15 whole-plan snapshots for every plan edited on the device, on EVERY snapshot
+   * (every paste / delete / count change). Same bytes out, a third of the serialising. */
+  const full = JSON.stringify(h);
+  const capped = capHistoryBytes(h, full.length); // localStorage keeps a BYTE-CAPPED mirror (the no-IndexedDB fallback)
+  try { localStorage.setItem(HISTORY_KEY, capped === h ? full : JSON.stringify(capped)); lsOk = true; }
   catch (_) { // over quota — keep only the newest few per site and retry
     try { const t = {}; for (const [id, list] of Object.entries(capped)) t[id] = (list || []).slice(0, 4); localStorage.setItem(HISTORY_KEY, JSON.stringify(t)); lsOk = true; } catch (_2) {}
   }
   // Durable, UNCAPPED copy in IndexedDB — gated until hydration so a pre-hydration partial ring can't
   // clobber the fuller stored one (initHistoryStore merges, then persists). Fire-and-forget.
-  if (historyHydrated && idbAvailable()) idbPut(HISTORY_KEY, JSON.stringify(h));
+  if (historyHydrated && idbAvailable()) idbPut(HISTORY_KEY, full);
   // Return ONLY the synchronously-VERIFIED localStorage result (B474 review #14). The idb write above is
   // fire-and-forget — idbAvailable() means "the API exists", not "the write committed" — so counting it
   // here let backupNow() (the Restore safety gate) report a backup that may not exist when localStorage is
@@ -970,19 +979,53 @@ function dropIdbBackedSrc(m) {
     s = { ...s, parcelDrawings: s.parcelDrawings.map((d) => (d && d.idbKey && isDataUrl(d.src) ? { ...d, src: null } : d)) };
   return s;
 }
+/* ⛔ NEW-1 (B217540, recurrence ×2) — THE LAST WHOLE-STORE WRITE, REMEMBERED, SO THE NEXT TWO QUESTIONS NEED NO PARSE.
+ * Every autosave asked "does this plan already exist here?" (`loadSite` — parse the entire store, migrate and
+ * normalise the plan, run the name authority over every plan) and then, after writing, read the plan back the same
+ * way to verify the write (B473 / B592). Both are answered by something this module already holds the instant it has
+ * written: the exact string it stored and the object it stored. So `writeSites` remembers `{ key, str, obj }`, and the
+ * two questions are answered from it ONLY while `localStorage` still holds exactly that string — the moment any other
+ * writer (another tab, a cloud pull, a test) has touched the key the bytes differ and the original full read runs, so
+ * the cross-tab honesty of the B473/B592 check is unchanged. It is not a cache of the plan: it is a byte-exact proof
+ * that nothing has changed since this tab wrote it, which is a STRONGER persistence check than the id-membership
+ * comparison it replaces on the single-tab path. Measured at a 3 MB store: three whole-store parses per autosave → one. */
+let lastSitesWrite = null;   // { key, str, obj }
+function rememberSitesWrite(key, str, obj) { lastSitesWrite = { key, str, obj }; }
+function lastWriteStillCurrent() {
+  const w = lastSitesWrite;
+  if (!w) return null;
+  try { return localStorage.getItem(w.key) === w.str ? w : null; } catch (_) { return null; }
+}
+/** Does this device hold a record for `id`? Identical truthiness to `!!loadSite(id)`, without the parse and the heal. */
+export function siteExistsLocally(id) {
+  if (!id) return false;
+  const w = lastWriteStillCurrent();
+  if (w && w.key === sitesKey()) return !!w.obj[id];
+  return !!readSites()[id];
+}
+/** The stored record for `id` as the persistence verifier needs it (its drawn collections). While nothing has touched
+ *  the store since THIS module wrote it, that is the object it wrote; otherwise the full `loadSite` read. */
+export function readBackSite(id) {
+  const w = lastWriteStillCurrent();
+  if (w && w.key === sitesKey() && w.obj[id]) return w.obj[id];
+  return loadSite(id);
+}
 function writeSites(obj) {
   // B474 — proactively shed IndexedDB-backed raster src so the persisted record stays small (off cap).
   const persist = {};
   for (const [id, s] of Object.entries(obj)) persist[id] = dropIdbBackedSrc(s);
-  try { localStorage.setItem(sitesKey(), JSON.stringify(persist)); return true; }
+  const key = sitesKey();
+  try { const str = JSON.stringify(persist); localStorage.setItem(key, str); rememberSitesWrite(key, str, persist); return true; }
   catch (_) {
     // Over quota anyway — shed ALL inline rasters (geometry still persists; rasters re-hydrate). B473.
     try {
       const slim = {};
       for (const [id, s] of Object.entries(persist)) slim[id] = stripDataUrls(s);
-      localStorage.setItem(sitesKey(), JSON.stringify(slim));
+      const str = JSON.stringify(slim);
+      localStorage.setItem(key, str);
+      rememberSitesWrite(key, str, slim);
       return true;
-    } catch (_2) { return false; }
+    } catch (_2) { lastSitesWrite = null; return false; }
   }
 }
 
@@ -1629,11 +1672,41 @@ async function purgeProjectFoldersFor(groupId) {
 export async function purgeDeletedProject(ids, groupId) {
   const list = (Array.isArray(ids) ? ids : [ids]).filter(Boolean);
   if (!activeUid() || !list.length) return { ok: false, purged: 0, error: "not signed in" };
-  const results = await Promise.all(list.map((id) => cloudHardDelete(activeUid(), id).catch((e) => ({ ok: false, error: (e && e.message) || "purge threw" }))));
+  const v = await hardDeleteVerified(list);
+  if (v.confirmedGone) await purgeProjectFoldersFor(groupId || list[0]);
+  return { ok: v.ok, purged: v.gone.length, error: v.error };
+}
+
+// NEW-1 — a hard delete is only a fact once a FRESH READ can no longer find the rows. This used to
+// read only `ok` off each DELETE, and `cloudHardDelete` answers `{ ok: true, removed: 0 }` for a
+// DELETE that matched nothing — so a purge the database never performed reported success: the row
+// vanished from the list with no message, came back on reload, and the folder/Drive teardown below
+// it had already run against a project that still existed. Now: every DELETE's own error is kept,
+// then ONE read asks the table which of these ids it still holds. Any that remain is a LOUD
+// failure that says so; the folder cascade runs only when every row is proven gone (or — read
+// itself failing — every DELETE positively reported a removed row, never on a zero-row answer).
+async function hardDeleteVerified(list) {
+  const uid = activeUid();
+  const results = await Promise.all(list.map((id) => cloudHardDelete(uid, id).catch((e) => ({ ok: false, error: (e && e.message) || "purge threw" }))));
   const failed = results.find((r) => r && r.ok === false);
-  const purged = results.filter((r) => r && r.ok !== false).length;
-  if (purged > 0) await purgeProjectFoldersFor(groupId || list[0]);
-  return { ok: !failed, purged, error: failed ? failed.error : null };
+  const reportedRemoved = results.every((r) => r && r.ok !== false && r.removed > 0);
+  const chk = await cloudRowsPresent(uid, list).catch((e) => ({ ok: false, present: [], error: (e && e.message) || "read threw" }));
+  const readable = !!(chk && chk.ok !== false);
+  const present = readable ? (chk.present || []) : [];
+  const gone = list.filter((id, i) => results[i] && results[i].ok !== false && (readable ? !present.includes(id) : results[i].removed > 0));
+  let error = failed ? failed.error : null;
+  if (!error && present.length) {
+    error = list.length === 1 || present.length === list.length
+      ? "It is still in your account — the permanent delete didn't take effect, so nothing was removed."
+      : `${present.length} of its ${list.length} plans are still in your account — the permanent delete only partly took effect.`;
+    reportClientEvent("purge-not-effective", "a hard delete reported no error but the rows are still in the database", { ids: present });
+  }
+  if (!error && !readable) {
+    error = "Couldn't confirm the permanent delete went through — reopen Recently deleted to check.";
+    reportClientEvent("purge-unverified", "hard delete could not be verified by a fresh read", { ids: list, error: (chk && chk.error) || "" });
+  }
+  const confirmedGone = !failed && (readable ? !present.length : reportedRemoved);
+  return { ok: !error, gone, error, confirmedGone };
 }
 
 // B1767168 (NEW-1) — permanently purge exactly ONE dead plan out of an otherwise-LIVE project: the
@@ -1696,7 +1769,7 @@ export async function purgeExpiredDeletedProjects({ days = DELETED_RETENTION_DAY
       reportClientEvent("plan-purge-skipped-live-group", "a soft-deleted plan's project still has live plans in its group — it was left in place instead of being auto-purged, since it was never offered back through the account-wide bin", { id: row.id, groupId: gid });
       continue;
     }
-    const out = await cloudHardDelete(activeUid(), row.id).catch(() => ({ ok: false }));
+    const out = await hardDeleteVerified([row.id]).catch(() => ({ ok: false }));
     if (out && out.ok) {
       purged += 1;
       if (!purgedGroups.has(gid)) { purgedGroups.add(gid); await purgeProjectFoldersFor(gid); }

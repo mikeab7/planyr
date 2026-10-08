@@ -154,7 +154,7 @@ import { CONTROL_H, FONT_SIZE } from "../shared/ui/designTokens.js";
 import { cornerClearanceFromBottom } from "../shared/ui/cornerClearance.js";
 import { safeAreaInsets } from "../shared/ui/safeAreaInsets.js";
 import { activeChromeDock } from "../shared/ui/chromeDock.js";
-import { useBottomSheetHeight } from "../shared/ui/bottomSheetTracker.js";
+import { useBottomSheetHeight, useSideDockWidth } from "../shared/ui/bottomSheetTracker.js";
 import { requestPerfCapture, perfCaptureDelivery, perfRecorderArmed } from "../shared/telemetry/perfRecorderHandle.js";
 import { SUPPRESSED_AUTOMATED } from "../shared/telemetry/clientErrors.js";
 import { buildReportContext, submitReport, queuedReportCount } from "../shared/reports/reportsStore.js";
@@ -212,6 +212,8 @@ export default function HelpReportControl({ user }) {
   // this is a module-scope signal rather than a prop (this control mounts once in the app Shell
   // and has no path down into whichever workspace's sheet is open).
   const sheetHeight = useBottomSheetHeight();
+  // B2046224 ×4 — a place card docked down the RIGHT edge (Food, phone sideways): step to its left edge.
+  const sideDockW = useSideDockWidth();
   // B1162016 — size by POINTER CAPABILITY, not viewport width (mirrors SitePlanner.jsx's own
   // `coarsePointer` state for its Properties sheet, and FoodMap.jsx's for its cluster hit
   // targets). A coarse pointer (touch, no hover) is the WCAG touch-target floor; a fine pointer
@@ -247,7 +249,8 @@ export default function HelpReportControl({ user }) {
       // the old bare constant — so the clearance always matches the box the button actually
       // renders at.
       const insets = safeAreaInsets();
-      const right = FAB_RIGHT + insets.right;
+      // the docked card's measured width already includes its own safe-area padding
+      const right = sideDockW > 0 ? FAB_RIGHT + sideDockW : FAB_RIGHT + insets.right;
       const bottom = cornerClearanceFromBottom({ right, width: fabSize, base: FAB_RIGHT + insets.bottom });
       setFabRight((prev) => (Math.abs(prev - right) > 0.5 ? right : prev));
       setFabBottom((prev) => (Math.abs(prev - bottom) > 0.5 ? bottom : prev));
@@ -268,7 +271,7 @@ export default function HelpReportControl({ user }) {
       vv?.removeEventListener("scroll", measure);
       clearInterval(id);
     };
-  }, [fabSize]);
+  }, [fabSize, sideDockW]);
 
   const closeAll = () => { setOpen(false); setTimeout(() => { setView("menu"); setDesc(""); setSubmitState(null); setCap(null); }, 200); };
 

@@ -20,6 +20,39 @@ the always-loaded core. This merges two tracks of work: the mature **Site Planne
 >   wrong number written into the backlog, a gate quietly weakened to go green). **Must be read
 >   before judging whether any change works.**
 >
+> **🧾 LEDGER — ONE FILE PER ENTRY (NEW-1, B2109728, owner-approved 2026-10-05). `BACKLOG.md` AND `VERIFICATION.md`
+> ARE NO LONGER HAND-EDITED, AND THE TWO `docs/archive/*-DONE.md` FILES NO LONGER EXIST. This section overrides every
+> older sentence in this file (and in the docs) that says to append to, move a block within, or archive from them.**
+> **WHY:** every session appended to the same spot of those two files, so on a busy day every PR invalidated every other
+> one — and GitHub's SERVER-side mergeability ignores `merge=union` (measured 2026-10-05, PRs #2022/#2023: two PRs
+> prepending a line to a `merge=union` file both read `mergeable_state: dirty`; two PRs adding different *files* read
+> clean, #2024). PR #1900 sat dirty five days over code that never clashed. Only a layout in which two entries never
+> share a file removes the conflict by construction.
+> - **Where entries live:** `ledger/backlog/<open|bug-audit|verify|later|done>/B<id>.md` and
+>   `ledger/verification/<pending|checklist|done>/V<id>.md` — each file is exactly the old block (`### B<id> — title` …).
+>   A duplicate legacy id inside one folder is `B<id>.2.md`. The prose around the entries (rules, tag legend, section
+>   headings, the checklist preamble) is `ledger/<kind>/_frame.md` — hand-edited, rarely.
+> - **File an entry:** write the new file under `…/open/` (backlog) or `…/pending/` (verification). **Edit one:** edit its
+>   file. **Lifecycle move** (Open → Verify → Done, a recurrence back to Open, a V# archived when passed):
+>   `npm run ledger -- move B<id> <state>` (a rename — edit the text in the same commit). **Never delete an entry.**
+> - **Orient cheaply:** `npm run ledger -- list open` (one heading per entry), Grep `^### B` in `ledger/backlog/open` /
+>   `…/verify`, or read `BACKLOG_OPEN.md`. The *-done folders are write-only — look up ONE id (`ledger/backlog/done/B###.md`),
+>   never read a folder wholesale. `npm run next-id` still mints (it reads the ledger; `check-mint`, the id-uniqueness tests
+>   and every other consumer go through `scripts/lib/ledger.mjs`, which also serves the old file paths as VIRTUAL text).
+> - **`BACKLOG.md` / `VERIFICATION.md` at the repo root are GENERATED VIEWS** (frame + live entries), refreshed nightly by
+>   `.github/workflows/regen-derived-docs.yml` and never edited by a branch — `scripts/generated-doc-touch-guard.mjs`
+>   FAILS THE BUILD on a PR that touches them, `docs/archive/BACKLOG-DONE.md` or `…/VERIFICATION-DONE.md` (enforced once
+>   `ledger/` is on main). They can lag the real ledger by up to a day: the entry folders are the truth.
+> - **`npm run ledger -- check`** (a CI gate) validates layout: right folder, right filename, heading id = filename id, a frame
+>   marker for every live state. `ledger render` regenerates the two views locally (never commit them).
+> - **A branch that edited the OLD files** (opened before this landed): merge `origin/main`, take main's version of the old
+>   files, then `node scripts/ledger.mjs import-legacy <merge-base> <your-branch-tip-before-the-merge>` replays your entry
+>   additions/edits/moves onto `ledger/`. (`resolve-ledgers.mjs` / `npm run safe-merge` are no longer needed for these files;
+>   they remain for `MAP.md` / `BACKLOG_OPEN.md`.)
+> - **Acceptance test:** `test/ledgerConcurrentPRs.test.js` — two concurrent PRs each add a backlog + a verification entry
+>   and merge cleanly in both orders under a GitHub-equivalent `git merge-tree`; the same two PRs against the old
+>   one-big-file layout conflict (red-proof). Never reintroduce a shared append point.
+>
 > **⛔ TOUCHING PERSISTENCE, SYNC, UNDO, OR DELETE? READ `docs/DATA.md` FIRST.** It is the single
 > place that answers who owns a fact and how it may change — the entity table, the numbered
 > invariants (each with the test that proves it), the short list of "one-answer" functions
@@ -488,7 +521,8 @@ were split out of this file.
    forgets the durable log; Retry does not.** Keep those two actions distinct — never collapse
    them into one dismissal. (See B1037952, B1048400.)
 7. **(2026-08-22) A live check runs on a throwaway duplicate of a real plan, never on one of
-   Michael's real plans** — and the session says exactly what was touched.
+   Michael's real plans** — and the session says exactly what was touched. The duplicate is
+   deleted when the check finishes, without asking (entry 15).
 8. **(2026-09-11 · SUSPENDED 2026-09-12 · RE-LANDED 2026-09-15, live-verify still PENDING) The
    canvas commits ONE framing per load.** The GOAL was never in doubt; what has changed twice is
    whether a mechanism enforces it.
@@ -568,6 +602,41 @@ were split out of this file.
     phones as you have it. No change needed there." Box widths, tables and line breaks must still be identical on
     every device (asserted by `ui-audit/verify-notes-box-width-parity.mjs`); only this margin may differ. (See
     B2078593.)
+
+15. **(2026-10-05) Test artifacts are ALWAYS cleared, never asked about.** Michael, verbatim: "stop
+    asking to clear test files, always clr." Anything a session (or the Cowork chat) created for a test
+    or live check — throwaway duplicate plans, projects, schedules or reviews, test rows, uploaded test
+    files in Library/Drive, scratch files, temporary fixtures — is deleted as soon as the check is
+    done, WITHOUT asking and with no "needs you" line or report about it. Delete-must-verify still
+    applies (confirm the item is actually gone). Boundaries: never touches Michael's real projects or
+    anything he made himself; the standing `e2e@planyr.test` fixtures the signed-in helper depends on
+    (`e2e-fixture-site` and its sibling fixture) are NOT throwaway and stay. (See B2103600.)
+
+16. **(2026-10-05) Food ratings are one slider each, 1 to 10 in half steps, and must not be replaced
+    with tap buttons, steppers or whole numbers without Michael's say-so.** A visit's Food rating and
+    its Ambiance rating are each a single slider (min 1, max 10, step 0.5), "Not rated" until touched,
+    on first visit, log-another-visit and edit-an-old-visit, phone and desktop (B626576 shipped it;
+    #1941 swapped it for a 1-10 tap grid on phones and he got whole numbers back). The scale lives in
+    `src/workspaces/food/lib/ratingScale.js`; `test/foodRatingSlider.test.js` fails if the range or step
+    changes or a tap grid/stepper returns. Ratings saved in quarter points (8.75) still display as saved.
+    (See the NEW-1 item on BACKLOG.md.)
+17. **(2026-10-05) In Food, on a phone held SIDEWAYS, the place card docks to the RIGHT as a side panel
+    (like desktop) — never the bottom sheet — and the map keeps the pin in view.** Michael, approved fix
+    ("dock the card to the side, and improve on it"): the header collapses to one row, a pick centres its
+    pin in the map to the LEFT of the card, the "Search live for more here" chip is centred in that visible
+    part, "Log a visit" stays at the card's bottom, and the notch/home-bar safe areas are respected.
+    Upright phones keep the bottom sheet; desktop keeps the rail. "Landscape phone" is one query
+    (`LANDSCAPE_PHONE_QUERY`, `src/workspaces/food/lib/phoneLayout.js`: landscape + short + touch);
+    `ui-audit/verify-food-landscape.mjs` fails if the pin is hidden or the sheet comes back. (B2046224 ×4.)
+
+18. **(2026-10-05) Combine and Split on parcels NEVER ask for a name, and the map toolbar and the Parcels panel are ONE
+    action.** Michael, verbatim: "Owner is on the fly; never block on a name" — a combine auto-names the tract
+    ("Tract A", "Tract B", …) and a split names its pieces "<name> · A", "· B"; renaming is an optional pencil afterwards,
+    never a prompt. Both operations show an Undo toast, keep the originals reachable (Restore) and never alter county data.
+    And: "if I do the split without ever coming into the left-hand menu, just from the right-hand menu, it'll still work,
+    same thing with merge" — the map's Split tool / Merge banner and the panel call the same single functions
+    (`site-planner/lib/parcelOps.js`; `test/parcelOpsParity.test.js` fails if a second implementation grows back). In the
+    Parcels table the checkbox only SELECTS rows; the eye includes/excludes a parcel from the site total. (B2134368–B2134370.)
 
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by
@@ -1489,6 +1558,20 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
   repo.) The reciprocal check lives in the Definition of Done below: before opening a PR, confirm
   nothing built contradicts `## Owner product constraints`, and say so.
 
+- **ONE SHELL, ONE TOOLBAR, ONE SWEEP (owner rule, 2026-10-05, B2090336–B2090338: "I want the frame to always work
+  regardless of the size of computer or screen")** — browser zoom and OS display scaling SHRINK the CSS viewport, so
+  "big monitor" never means "wide viewport". (1) **Any new header, tab-row or toolbar control goes through the shared
+  shell/toolbar**: the header rows live in `AppHeader` (never wrap; Row 2 is `nowrap`, every zone is handed a budget
+  measured on the row's own box), and every action row is a `PriorityToolbar` (`src/shared/ui/PriorityToolbar.jsx`, pure
+  rules in `toolbarPlan.js`) — labels drop to icons, then the lowest-priority items fold into a More menu; never a
+  second row, never clipped, never sideways scroll on desktop. Declare each item's `priority`; do not write a
+  per-module media query or a hard-coded chrome width. Use a ResizeObserver / container query on the element's own
+  box for chrome inside a resizable region, never window width. (2) **The width sweep is a required CI gate**
+  (`ui-audit/verify-width-sweep.mjs`, verdict in `ui-audit/lib/widthSweep.mjs`): a NEW MODULE ROUTE MUST BE ADDED to its
+  `ROUTES` list in the same commit, and a strip that scrolls on purpose must say why with `data-sweep-exempt="<reason>"`.
+  A control that owns a shared ref or a portaled menu must honour `render({ measuring })` (the hidden measuring copies must
+  not steal it). Phone `narrow` behaviour is unchanged by this rule.
+
 ### Definition of Done (every item)
 1. **Implemented** — the whole job, including the hard / real part (STANDING RULE #1). No diagnosis-only.
 2. **Unit tests** for any pure library touched.
@@ -1497,7 +1580,7 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
    built in this item contradicts a listed constraint, and say so in the session reply. If a
    contradiction was caught, **CONSTRAINT-CAPTURE** governs — the offending part is not built, and
    the reply names the constraint it collided with.
-5. `BACKLOG.md` updated. **Do NOT regenerate or commit `BACKLOG_OPEN.md` yourself** — the Generated-
+5. The backlog entry filed/moved under `ledger/backlog/` (see the LEDGER section — never edit `BACKLOG.md`). **Do NOT regenerate or commit `BACKLOG_OPEN.md` yourself** — the Generated-
    index touch guard rejects a PR that touches it (NEW-1, B<PENDING>, 2026-09-08); it's refreshed by
    `.github/workflows/regen-derived-docs.yml` instead. Touched yield / pond panel copy?
    **PANEL-BREVITY** applies: run `node ui-audit/panel-copy-budget.mjs` before and after, and put
