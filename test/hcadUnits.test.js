@@ -125,3 +125,34 @@ describe("findAccountRows — segment boundaries and early exit", () => {
     expect(c.n).toBeLessThan(1 + Math.ceil(enc.length / 25)); // did not read the whole file
   });
 });
+
+describe("findAccountRows — many chunks, groups straddling chunk boundaries", () => {
+  const accts = Array.from({ length: 300 }, (_, i) => String(i * 7 + 1).padStart(13, "0"));
+  const FILE = "acct\ttax_district\ttp_cd\tpct_district\tappraised_val\ttaxable_val\r\n" +
+    accts.map((a) => ["001\tI", "040\tT", "041\tT"].map((r) => `${a}\t${r}\t1.0000\t5\t0\r\n`).join("")).join("");
+  const enc = new TextEncoder().encode(FILE);
+  const entry = { method: 0, csize: enc.length, off: 0 };
+  const mk = (c) => async (_u, o) => {
+    c.n++;
+    const m = /bytes=(\d+)-(\d+)/.exec(o.headers.range);
+    const s = Number(m[1]), e = Math.min(enc.length + 29, Number(m[2]));
+    if (s === 0 && e === 63) return new Response(new Uint8Array(64), { status: 206 });
+    return new Response(enc.slice(s - 30, e - 30 + 1), { status: 206 });
+  };
+  it("finds every sampled account whatever the chunk size, and reads less than the whole file for early ones", async () => {
+    for (const seg of [60, 97, 400]) {
+      for (const i of [0, 1, 57, 150, 299]) {
+        const c = { n: 0 };
+        const rows = await findAccountRows("u", entry, accts[i], mk(c), seg);
+        expect(rows.map((r) => r.code), `seg ${seg} acct #${i}`).toEqual(["001", "040", "041"]);
+      }
+    }
+    const c = { n: 0 };
+    await findAccountRows("u", entry, accts[3], mk(c), 97);
+    expect(c.n).toBeLessThan(Math.ceil(enc.length / 97) / 2);
+  });
+  it("an account between two present ones, or past the last, is simply not found", async () => {
+    expect(await findAccountRows("u", entry, "0000000000002", mk({ n: 0 }), 97)).toEqual([]);
+    expect(await findAccountRows("u", entry, "9999999999999", mk({ n: 0 }), 97)).toEqual([]);
+  });
+});
