@@ -60,9 +60,6 @@ const WARN = "var(--warn-text)";
 
 // compact regular-weight button: the input height, control-size text, never wraps
 const btnCompact = { height: H, minWidth: 0, padding: "0 10px", fontSize: C, fontWeight: 400, lineHeight: 1, whiteSpace: "nowrap", boxShadow: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: SPACE.xs };
-const PANEL = '[data-testid="overlays-panel"][data-fine-pointer]';   // doubled attribute = out-ranks the global focus rules
-const FOCUS_CSS = `${PANEL} :is(button,input,select):focus-visible{outline:2px solid ${ACCENT};outline-offset:1px}
-${PANEL} input:not([type=range],[type=checkbox],[type=color]):focus,${PANEL} select:focus{border-color:${ACCENT} !important;box-shadow:0 0 0 3px color-mix(in srgb, ${ACCENT} 18%, transparent) !important}`;
 const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 function Ico({ children, size = 14 }) {
@@ -536,8 +533,7 @@ export default function OverlaysPanel({
       onDragOver={(e) => { if (hasFiles(e)) e.preventDefault(); }}
       onDragLeave={(e) => { if (!hasFiles(e)) return; depth.current = Math.max(0, depth.current - 1); if (depth.current === 0) setFileOver(false); }}
       onDrop={(e) => { if (!hasFiles(e)) return; e.preventDefault(); e.stopPropagation(); depth.current = 0; setFileOver(false); const fs = e.dataTransfer.files; const f = fs && fs[0]; if (f) h.onDropFile(f, fs.length); }}>
-      {/* one accent: the global focus ring is the orange --accent; inside this panel it is the Site green */}
-      <style>{FOCUS_CSS}</style>
+      {/* one accent: the global focus ring is the orange --accent; inside this panel it is the Site green (index.css, "Overlays panel focus") */}
       <div role="list" aria-label="Overlays" style={{ display: "flex", flexDirection: "column" }} onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setOver(null); }}>
         {rows.map((o) => {
           const isMap = !!o.fromMap;
