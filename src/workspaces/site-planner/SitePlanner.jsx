@@ -21713,7 +21713,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const from = (pc.combined && pc.combined.from) || [];
     const taxTable = origin.kind === "combined" ? taxTableForCombined(from, { county: restored?.county }) : (origin.kind === "county" ? taxTableFor(pc, { county: restored?.county }) : null);
     return (
-      <ParcelPage parcel={pc} name={row ? row.name : (pc.label || "Parcel")} acres={parcelNetSqft(pc) / SQFT_PER_ACRE} included={pc.active !== false}
+      <ParcelPage parcel={pc} name={row ? row.name : (pc.label || "Parcel")} unnamed={row ? !!row.unnamed : !pc.label} acres={parcelNetSqft(pc) / SQFT_PER_ACRE} included={pc.active !== false}
         origin={origin} ownerText={apprOwnerName} cadName={parcelCadName} drawnAcresOf={(p) => parcelNetSqft(p) / SQFT_PER_ACRE}
         handlers={parcelPanelH} taxTable={taxTable} taxSource={taxTable || !restored?.county || (origin.kind !== "county" && origin.kind !== "combined") ? null : { county: restored.county, lots: origin.kind === "combined" ? from : [pc], combined: origin.kind === "combined", idField: parcelIdField }} setbacks={setbacks} style={style} deedFrom={selectDeedOfGroup} idField={parcelIdField} addrField={parcelAddrField} />
     );

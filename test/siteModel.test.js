@@ -556,9 +556,12 @@ describe("Parcel split lineage (B651)", () => {
     expect(info.get("b").superseded).toBe(false);
   });
 
-  it("a street address overrides the derived Parcel-N name ON A ROOT", () => {
-    const info = parcelDisplayInfo([{ id: "p1", addr: "123 Main St", points: [] }]);
-    expect(info.get("p1").name).toBe("123 Main St");
+  it("NEW-1 (2026-10-08): a street address does NOT name a root — unnamed stays unnamed; a typed label does", () => {
+    const info = parcelDisplayInfo([{ id: "p1", addr: "123 Main St", points: [] }, { id: "p2", addr: "9 Oak", label: "Creek Tract", points: [] }]);
+    expect(info.get("p1").name).toBe("Parcel 1");
+    expect(info.get("p1").unnamed).toBe(true);
+    expect(info.get("p2").name).toBe("Creek Tract");
+    expect(info.get("p2").unnamed).toBe(false);
   });
 
   /* ⛔ B520560 — HOW A SPLIT'S PIECES ARE NAMED. Owner decision, verbatim: "number them off the
@@ -609,9 +612,9 @@ describe("Parcel split lineage (B651)", () => {
       const preFix = (p) => p.label || p.addr || null;         // the rule this replaced
       expect(preFix(parcels[1])).toBe(preFix(parcels[2]));     // …produced identical names
       const info = parcelDisplayInfo(parcels);
-      expect(info.get("p1").name).toBe("9204 Bay Area Blvd");  // the ROOT keeps its address
-      expect(info.get("a").name).toBe("9204 Bay Area Blvd A"); // the pieces do not
-      expect(info.get("b").name).toBe("9204 Bay Area Blvd B");
+      expect(info.get("p1").name).toBe("Parcel 1");            // NEW-1: the address no longer names the root
+      expect(info.get("a").name).toBe("Parcel 1A");            // …so the pieces extend the positional tag
+      expect(info.get("b").name).toBe("Parcel 1B");
       expect(info.get("a").name).not.toBe(info.get("b").name);
       expect(info.get("a").nameCollision).toBe(false);
     });

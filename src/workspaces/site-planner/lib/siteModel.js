@@ -40,7 +40,6 @@ import { DEFAULT_ROAD_CLASS, roadClassOf } from "./roadClasses.js";
 import { ensureZ, migrateBandForce } from "./zOrder.js";
 import { normCountyKey } from "../../../shared/gis/countyKeys.js";
 import { nameAuthority, renameStamp } from "./projectName.js";
-import { parcelFallbackName } from "./appraisal.js";
 import { headerSlice, mergeHeader, MERGEABLE_HEADER_KEYS } from "./headerMerge.js";
 // B927105 — the schema-version + status constants live in siteStatus.js (dependency-free) so a
 // caller that only needs a status label (doc-review/lib/reviewStore.js, siteListLight.js)
@@ -1576,7 +1575,7 @@ export function parcelDisplayInfo(parcels) {
      * The derivation below stays as the fallback for plans split before the stamp existed, whose
      * superseded parents are still on disk as `active:false` rows. */
     else if (p.splitName) res = { name: p.splitName, suffixed: true };   // depth comes from `splitDepth`
-    else if (isRoot(p)) res = { name: p.addr || parcelFallbackName(p.attrs) || `Parcel ${compute(p, new Set()).tag}`, suffixed: false }; // B2024626 — situs, else owner/legal, before a bare number
+    else if (isRoot(p)) res = { name: `Parcel ${compute(p, new Set()).tag}`, suffixed: false }; // NEW-1 (2026-10-08, owner): an unnamed lot stays UNNAMED — never derived from street, owner or legal; this positional tag is only the canvas/toast handle
     else {
       const base = nameOf(byId.get(p.parentId), seen);
       const depth = compute(p, new Set()).depth;
@@ -1623,6 +1622,7 @@ export function parcelDisplayInfo(parcels) {
       depth, lineageDepth: stampedDepth,
       superseded: (kids.get(p.id) || []).length > 0,
       name,
+      unnamed: !(p && (p.label || p.splitName)),   // nothing the owner typed (or a split/combine stamped): the list and page show a grey "Unnamed"
       suffixed: nameOf(p, new Set()).suffixed,   // does this name already end in a birth suffix?
       /* LOUD-FAILURE: a derived name cannot collide with itself (birth order is unique among
        * siblings and the chain is unique down the tree), but a name the USER typed can duplicate
