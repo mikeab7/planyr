@@ -121,6 +121,8 @@ try {
   const c0 = { x: g.boundary.cx, y: g.boundary.cy }, w0 = g.boundary.w;
   await drag({ x: g.grips[2].cx, y: g.grips[2].cy }, { x: g.grips[2].cx + 50, y: g.grips[2].cy + 40 });
   let tHide = Date.now(); g = await waitHandles(45000); console.log(`  (handles back ${g && g.boundary && g.boundary.w > 0 ? "after " + Math.round((Date.now() - tHide) / 100) / 10 + " s" : "NEVER within 45 s"} after the scale commit)`);
+  console.log("  post-scale diag:", JSON.stringify(await page.evaluate(() => { const p = document.querySelector(".leaflet-sitePlanHandles-pane"); const sv = p && p.querySelector("svg"); const b = p && p.querySelectorAll("polygon")[1]; return { editingOnMap: /Editing on map/.test(document.body.innerText), adjustPanel: /Adjust site plan/.test(document.body.innerText), svgDisplay: sv && sv.style.display, boundaryPts: b && (b.getAttribute("points") || "").slice(0, 90) }; })));
+  await shot("map-after-scale");
   const r1 = await row();
   check("corner drag scaled the whole overlay (visible outline grew; stored ft_per_px grew)", g.boundary.w > w0 * 1.15 && r1.ft_per_px > r0.ft_per_px * 1.15, `w ${Math.round(w0)}→${Math.round(g.boundary.w)}, ft/px ${Number(r0.ft_per_px).toFixed(3)}→${Number(r1.ft_per_px).toFixed(3)}`);
   check("…the VISIBLE centre stayed put on screen", near(g.boundary.cx, c0.x, 4) && near(g.boundary.cy, c0.y, 4), JSON.stringify({ c0, c1: { x: g.boundary.cx, y: g.boundary.cy } }));
@@ -139,7 +141,7 @@ try {
   await page.getByRole("button", { name: /Edit crop/ }).first().click({ timeout: 15000 }); await sleep(2000);
   await page.locator('[data-testid="crop-reset"]').first().click(); await sleep(500);
   console.log("  reset-step Done:", JSON.stringify(await page.evaluate(() => { const d = document.querySelector('[data-testid="crop-done"]'); const w = document.querySelector('[data-testid="crop-done-why"]'); return { disabled: d && d.disabled, why: w && w.innerText }; })));
-  await page.locator('[data-testid="crop-done"]').first().click(); await sleep(3500);
+  await page.evaluate(() => document.querySelector('[data-testid="crop-done"]').click()); await sleep(3500);
   await page.evaluate(async (id) => { await window.pfSupabase.from("site_plan_overlays").update({ rotation_deg: 0 }).eq("id", id); }, r0.id);
   await page.reload({ waitUntil: "load" }); // handles are armed only in-session — re-arm via the panel after a reload is not reachable for an unlinked plan, so this arm reads the saved row instead:
   const r3 = await row();
