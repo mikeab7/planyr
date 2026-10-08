@@ -1,5 +1,5 @@
 /* Parcels rework (NEW-2) — where a parcel came from, in the words the list row and the page use.
- * A real Combine result has no county attrs and no `source`, so the old rule read it as "Drawn by hand". (Goose Creek Phase II "Parcel 1" is NOT a known combine result — no combine record — and must keep reading "Drawn".) */
+ * A real Combine result has no county attrs and no `source`, so the old rule read it as "Drawn by hand". (Goose Creek Phase II "Parcel 1" WAS a combine result made before PR #2082; db/combined_madefrom_backfill_20261008.sql gave it the record. "Drawn" now needs positive evidence — otherwise no source line, B2191xxx.) */
 import { describe, it, expect } from "vitest";
 import { parcelOrigin, originKind, combinedCount, cadNameOf, ORIGIN_CHIP } from "../src/workspaces/site-planner/lib/parcelOrigin.js";
 import { parcelProvenance, provenanceLabel } from "../src/workspaces/site-planner/lib/parcelRecord.js";
@@ -39,7 +39,7 @@ describe("the other provenances, and the row's second line", () => {
     expect(parcelOrigin({ attrs: {} }).line).toBe("From the county");
   });
   it("drawn and deed", () => {
-    expect(parcelOrigin({ points: [] }).line).toBe("Drawn");
+    expect(parcelOrigin({ source: "drawn", points: [] }).line).toBe("Drawn");
     expect(parcelOrigin({ source: "deed" }).chip).toBe("From deed");
   });
   it("a typed source wins over inference", () => { expect(originKind({ source: "drawn", attrs: {} })).toBe("drawn"); });
@@ -47,5 +47,26 @@ describe("the other provenances, and the row's second line", () => {
     expect(cadNameOf("Harris County · HCAD")).toBe("Harris CAD");
     expect(cadNameOf("Fort Bend · FBCAD")).toBe("Fort Bend CAD");
     expect(cadNameOf(null)).toBeNull();
+  });
+
+  it("NEW-3: with no evidence at all there is NO source line and no chip — never a guess", () => {
+    const o = parcelOrigin({ points: [] });
+    expect(o.kind).toBe("unknown");
+    expect(o.line).toBe("");
+    expect(o.chip).toBeNull();
+  });
+  it("NEW-3: a combined parcel says 'lots' only when every source is a county lot, otherwise 'parcels'", () => {
+    const county = (n) => ({ gisKey: `oid:${n}`, attrs: { HCAD_NUM: String(n) } });
+    expect(parcelOrigin({ combined: { from: [county(1), county(2)] } }).line).toBe("Combined from 2 lots");
+    // Goose Creek Phase II Parcel 1: one drawn lot + two county lots -> 3 parcels
+    expect(parcelOrigin({ combined: { from: [{ snapName: "Parcel A" }, county(1), county(2)] } }).line).toBe("Combined from 3 parcels");
+  });
+  it("NEW-3: a piece cut from a county lot is a county lot; one cut from an unknown lot stays unknown", () => {
+    expect(originKind({ splitFrom: { from: { attrs: { A: 1 } } } })).toBe("county");
+    expect(originKind({ splitFrom: { from: { points: [] } } })).toBe("unknown");
+  });
+  it("NEW-2: the row's account is the county's HCAD account, not the OBJECTID the identify stamped", () => {
+    const pc = { acct: "634440", attrs: { OBJECTID: 634440, HCAD_NUM: "0421030000123" } };
+    expect(parcelOrigin(pc, { cadName: "Harris CAD" }).line).toBe("Harris CAD · 0421030000123");
   });
 });

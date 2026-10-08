@@ -18,13 +18,14 @@ describe("parcelProvenance — a hand-drawn lot must never read as a county reco
     expect(parcelProvenance({ attrs: { OWNER: "ACME" } })).toBe("county");
     expect(parcelProvenance({ gisKey: "harris:123" })).toBe("county");
   });
-  it("infers DRAWN for anything else — never `deed`, which is only ever stamped at promotion", () => {
-    expect(parcelProvenance({ points: ONE_ACRE })).toBe("drawn");
-    expect(parcelProvenance({})).toBe("drawn");
-    expect(parcelProvenance(null)).toBe("drawn");
+  it("says UNKNOWN for anything with no positive evidence — never `drawn`, never `deed` (B2191xxx)", () => {
+    expect(parcelProvenance({ points: ONE_ACRE })).toBe("unknown");
+    expect(parcelProvenance({})).toBe("unknown");
+    expect(parcelProvenance(null)).toBe("unknown");
+    expect(parcelProvenance({ source: "drawn" })).toBe("drawn");
   });
   it("ignores a source value that isn't one of the known three", () => {
-    expect(parcelProvenance({ source: "survey" })).toBe("drawn");
+    expect(parcelProvenance({ source: "survey" })).toBe("unknown");
     expect(parcelProvenance({ source: "survey", attrs: {} })).toBe("county");
     expect(PARCEL_SOURCES).toEqual(["county", "deed", "drawn"]);
   });

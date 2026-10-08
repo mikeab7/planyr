@@ -29,11 +29,11 @@ const sq = (x, y, id, extra = {}) => ({ id, points: [{ x, y }, { x: x + 400, y }
 const curved = (x0, y0, id) => {
   const pts = [{ x: x0, y: y0 + 600 }, { x: x0 + 800, y: y0 + 600 }, { x: x0 + 800, y: y0 + 200 }];
   for (let i = 0; i <= 60; i++) { const a = (i / 60) * Math.PI; pts.push({ x: x0 + 800 - 800 * (i / 60), y: y0 + 200 - 200 * Math.sin(a) }); }
-  return { id, points: pts, label: "Curved Lot" };
+  return { id, points: pts, label: "Curved Lot", source: "drawn" };
 };
 const mkSite = (id) => ({
   id, groupId: id, site: "ZZ Parcels Rework", name: "Plan 1", origin: { lat: 29.76, lon: -95.37 }, county: "harris",
-  parcels: [sq(0, 0, "p1", { acct: "1001", addr: "1 County Rd", attrs: { OWNER: "Smith" }, gisKey: "k1", label: "Smith Tract" }), sq(400, 0, "p2", { acct: "1002", addr: "2 County Rd", attrs: { OWNER: "Jones" }, gisKey: "k2", label: "Jones Tract" }), sq(1000, 0, "p3", { label: "Drawn Lot" }), curved(2000, 0, "p4")],
+  parcels: [sq(0, 0, "p1", { acct: "1001", addr: "1 County Rd", attrs: { OWNER: "Smith" }, gisKey: "k1", label: "Smith Tract" }), sq(400, 0, "p2", { acct: "1002", addr: "2 County Rd", attrs: { OWNER: "Jones" }, gisKey: "k2", label: "Jones Tract" }), sq(1000, 0, "p3", { label: "Drawn Lot", source: "drawn" }), curved(2000, 0, "p4")],
   els: [], measures: [], callouts: [], markups: [], settings: {}, underlay: null, updatedAt: Date.now(), status: "active", schemaVersion: 12,
 });
 
@@ -146,10 +146,14 @@ try {
   await page.locator('[data-testid="parcel-row-p4"]').click();
   await T("parcel-page").waitFor({ timeout: 8000 });
   ok("a drawn parcel says 'You drew this one'", /You drew this one/.test(await T("parcel-source").innerText()));
+  // Compact layout (B2191xxx): the sketch carries the sections; a section's own row/editor opens when it is clicked.
+  const sketchSecs = page.locator('[data-testid^="setback-sketch-section-"]');
+  await sketchSecs.first().waitFor({ timeout: 8000 });
+  const nSec = await sketchSecs.count();
+  ok(`the heavily curved lot (${(await parcelsLS()).find((p) => p.id === "p4").points.length} corners) yields a handful of sections, not dozens`, nSec >= 2 && nSec <= 6, `${nSec} sections`);
+  await sketchSecs.first().click();
   const secRows = page.locator('[data-testid="setback-section-row"]');
   await secRows.first().waitFor({ timeout: 8000 });
-  const nSec = await secRows.count();
-  ok(`the heavily curved lot (${(await parcelsLS()).find((p) => p.id === "p4").points.length} corners) yields a handful of sections, not dozens`, nSec >= 2 && nSec <= 8, `${nSec} sections`);
   await secRows.nth(0).locator("input").first().fill("55");
   await secRows.nth(0).locator("input").first().press("Enter");
   await sleep(600);

@@ -6,8 +6,11 @@
  * slots and the county tax table as `tax`. The SOURCE section is by provenance (lib/parcelOrigin.js):
  *   · combined — "Made from" the original lots + split back; never owner/account/address fields,
  *                never the word "Drawn";
- *   · county   — read-only record (owner, account, address, deed acres next to the drawn acres);
- *   · drawn / deed — "You drew this one" and ONE link that reveals the editable fields.
+ *   · county   — read-only record (owner, account, address, deed acres next to the drawn acres), read from
+ *                the county's own attribute bag (lib/appraisal.js `countyRecord`), with a "More county
+ *                fields" disclosure — there is no separate appraisal / taxes block any more;
+ *   · drawn / deed — "You drew this one" and ONE link that reveals the editable fields;
+ *   · unknown  — nothing proves where it came from: no chip, no source line, just the editable fields link.
  * Module-scope components only (MODULE-SCOPE-COMPONENTS).
  */
 import { useEffect, useRef, useState } from "react";
@@ -15,6 +18,8 @@ import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE, SPACE, CONTROL_H } from "../../../shared/ui/designTokens.js";
 import { NUM_FONT, TABULAR_NUMS } from "../../../shared/theme/typography.js";
 import { LINE, fmt, iconBtn, textBtn, LockGlyph, UnlockGlyph, MoreIcon, ZoomIcon, TrashIcon } from "./ParcelsPanel.jsx";
+import { countyRecord, apprAll } from "../lib/appraisal.js";
+import { accountOf } from "../lib/parcelOrigin.js";
 
 const eyebrow = { fontSize: FONT_SIZE.micro, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-secondary)" };
 const inputBox = { width: "100%", boxSizing: "border-box", height: CONTROL_H.lg, padding: `0 ${SPACE.lg}px`, border: LINE, borderRadius: RADIUS.sm, background: "var(--surface-field)", color: "var(--text-primary)", fontFamily: "inherit", fontSize: FONT_SIZE.control };
@@ -57,7 +62,7 @@ function MenuItem({ children, onClick, danger, testid }) {
   );
 }
 
-export default function ParcelPage({ parcel, name, acres, included, origin, ownerText, cadName, drawnAcresOf, handlers, taxTable, setbacks, style, deedFrom }) {
+export default function ParcelPage({ parcel, name, acres, included, origin, ownerText, cadName, drawnAcresOf, handlers, taxTable, setbacks, style, deedFrom, idField, addrField }) {
   const [menu, setMenu] = useState(false);
   const [addFields, setAddFields] = useState(false);
   useEffect(() => { setMenu(false); setAddFields(false); }, [parcel.id]);
@@ -72,6 +77,8 @@ export default function ParcelPage({ parcel, name, acres, included, origin, owne
   const kind = origin.kind;
   const stated = parcel.statedAcres != null && parcel.statedAcres !== "" ? Number(parcel.statedAcres) : null;
   const hasTypedFacts = !!(parcel.owner || parcel.acct || stated != null);
+  const rec = kind === "county" ? countyRecord(parcel.attrs, { acct: parcel.acct, addr: parcel.addr, idField, addrField }) : null;
+  const deedAc = rec && rec.deedAcres != null ? rec.deedAcres : stated;
 
   return (
     <div data-testid="parcel-page" data-parcel-id={parcel.id} style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
@@ -80,7 +87,7 @@ export default function ParcelPage({ parcel, name, acres, included, origin, owne
 
       <div style={{ display: "flex", alignItems: "center", gap: SPACE.md, minWidth: 0 }}>
         <div data-testid="parcel-page-name" style={{ minWidth: 0, fontSize: FONT_SIZE.display, fontWeight: 700, color: "var(--text-primary)", overflowWrap: "anywhere" }}>{name}</div>
-        <span data-testid="parcel-provenance" style={{ flex: "none", padding: "0 8px", borderRadius: RADIUS.pill, border: LINE, background: "var(--surface-page)", color: "var(--text-secondary)", fontSize: FONT_SIZE.label, fontWeight: 700, lineHeight: "20px" }}>{origin.chip}</span>
+        {origin.chip && <span data-testid="parcel-provenance" style={{ flex: "none", padding: "0 8px", borderRadius: RADIUS.pill, border: LINE, background: "var(--surface-page)", color: "var(--text-secondary)", fontSize: FONT_SIZE.label, fontWeight: 700, lineHeight: "20px" }}>{origin.chip}</span>}
         <span style={{ flex: 1 }} />
         <button type="button" style={{ ...iconBtn, color: "var(--text-secondary)" }} onClick={() => handlers.onToggleLock(parcel.id)} data-testid="parcel-page-lock" aria-pressed={!!parcel.locked}
           aria-label={parcel.locked ? "Unlock this parcel" : "Lock this parcel"}
@@ -115,7 +122,7 @@ export default function ParcelPage({ parcel, name, acres, included, origin, owne
                     <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: FONT_SIZE.control, fontWeight: 650, color: "var(--text-primary)" }}>{s.snapName || "Parcel"}</span>
                     <span style={{ flex: "none", fontSize: FONT_SIZE.control, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, color: "var(--text-primary)" }}>{fmt(handlers.acresOf(s))} AC</span>
                   </div>
-                  <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", overflowWrap: "anywhere" }}>{[s.acct, s.attrs ? ownerText(s.attrs) : s.owner].filter(Boolean).join(" · ") || "No account on file"}</div>
+                  <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", overflowWrap: "anywhere" }}>{[accountOf(s, { idField }), s.attrs ? ownerText(s.attrs) : s.owner].filter(Boolean).join(" · ") || "No account on file"}</div>
                 </div>
               ))}
             </div>
@@ -124,16 +131,29 @@ export default function ParcelPage({ parcel, name, acres, included, origin, owne
         )}
         {kind === "county" && (
           <div data-testid="parcel-county-record">
-            <Fact label="Owner">{ownerText(parcel.attrs) || parcel.owner}</Fact>
-            <Fact label="Account">{parcel.acct}</Fact>
-            <Fact label="Address">{parcel.addr}</Fact>
-            <Fact label="Deed acres">{stated != null ? <>{fmt(stated)} <span style={{ color: "var(--text-secondary)" }}>· drawn {fmt(drawnAcresOf(parcel))}</span></> : null}</Fact>
-            <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: SPACE.sm }}>{[cadName ? `Source: ${cadName}` : "Source: county appraisal district", parcel.attrs && taxYearOf(parcel.attrs) ? `tax year ${taxYearOf(parcel.attrs)}` : null].filter(Boolean).join(" · ")}</div>
+            <Fact label="Owner">{rec.owner || parcel.owner}</Fact>
+            <Fact label="Account">{rec.account}</Fact>
+            <Fact label="Address">{rec.address}</Fact>
+            <Fact label="Deed acres">{deedAc != null ? <>{fmt(deedAc)} <span style={{ color: "var(--text-secondary)" }}>· drawn {fmt(drawnAcresOf(parcel))}</span></> : null}</Fact>
+            <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: SPACE.sm }}>{[cadName ? `Source: ${cadName}` : "Source: county appraisal district", rec.taxYear ? `tax year ${rec.taxYear}` : null].filter(Boolean).join(" · ")}</div>
+            {parcel.attrs && (
+              <details data-testid="parcel-more-fields" style={{ marginTop: SPACE.sm }}>
+                <summary style={{ fontSize: FONT_SIZE.control, fontWeight: 700, color: "var(--accent-site-text, var(--text-primary))", cursor: "pointer" }}>More county fields</summary>
+                <div style={{ marginTop: SPACE.sm, maxHeight: 220, overflowY: "auto" }}>
+                  {apprAll(parcel.attrs).map((r) => (
+                    <div key={r.label} style={{ display: "flex", justifyContent: "space-between", gap: SPACE.lg, alignItems: "baseline", padding: "2px 0" }}>
+                      <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", flex: "none" }}>{r.label}</span>
+                      <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-primary)", textAlign: "right", overflowWrap: "anywhere" }}>{String(r.value)}</span>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
           </div>
         )}
-        {(kind === "drawn" || kind === "deed") && (
+        {(kind === "drawn" || kind === "deed" || kind === "unknown") && (
           <div data-testid="parcel-drawn-record">
-            <div style={{ fontSize: FONT_SIZE.control, color: "var(--text-primary)" }}>{kind === "deed" ? "Plotted from a deed." : "You drew this one."}</div>
+            {kind !== "unknown" && <div style={{ fontSize: FONT_SIZE.control, color: "var(--text-primary)" }}>{kind === "deed" ? "Plotted from a deed." : "You drew this one."}</div>}
             {kind === "deed" && parcel.deedMisclosureFt != null && (
               <div data-testid="parcel-misclosure" style={{ fontSize: FONT_SIZE.label, color: parcel.deedMisclosureFt > 1 ? "var(--warn-text)" : "var(--text-secondary)", marginTop: SPACE.xs }}>
                 {parcel.deedMisclosureFt > 1 ? "⚠ " : ""}The deed's calls close to {parcel.deedMisclosureFt}′.
@@ -141,7 +161,7 @@ export default function ParcelPage({ parcel, name, acres, included, origin, owne
             )}
             {!addFields && !hasTypedFacts ? (
               <button type="button" onClick={() => setAddFields(true)} data-testid="parcel-add-facts"
-                style={{ marginTop: SPACE.md, padding: 0, border: "none", background: "transparent", color: "var(--accent-site-text, var(--text-primary))", fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 700, cursor: "pointer", textAlign: "left" }}>+ Add owner, account and deed acres</button>
+                style={{ marginTop: kind === "unknown" ? 0 : SPACE.md, padding: 0, border: "none", background: "transparent", color: "var(--accent-site-text, var(--text-primary))", fontFamily: "inherit", fontSize: FONT_SIZE.control, fontWeight: 700, cursor: "pointer", textAlign: "left" }}>+ Add owner, account and deed acres</button>
             ) : (
               <div style={{ display: "grid", gap: SPACE.md, marginTop: SPACE.md }}>
                 <label><span style={{ ...eyebrow, display: "block", marginBottom: SPACE.xs }}>Owner</span><CommitField value={parcel.owner} placeholder="Owner of record" ariaLabel="Owner" testid="parcel-field-owner" onCommit={(v) => handlers.onField(parcel.id, "owner", v)} /></label>
@@ -187,12 +207,4 @@ function TaxTable({ data }) {
       {data.source && <div style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", marginTop: SPACE.sm }}>{data.source}{data.year ? ` · ${data.year}` : ""}</div>}
     </PageSection>
   );
-}
-
-/* A tax year, only when the county record itself carries one. */
-function taxYearOf(attrs) {
-  for (const k of Object.keys(attrs || {})) {
-    if (/^(tax_?yea?r|taxyr|tax_yr|appraisal_?year|apprYear)$/i.test(k)) { const v = String(attrs[k] ?? "").trim(); if (/^\d{4}$/.test(v)) return v; }
-  }
-  return null;
 }

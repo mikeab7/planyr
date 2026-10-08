@@ -410,6 +410,9 @@
     }
   ],
   "ownedColumns": {
+    "recovery_20261008_combined_madefrom_snapshot": [
+      "site_id"
+    ],
     "signup_attempts_log": [
       "email_domain"
     ],
