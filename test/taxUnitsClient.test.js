@@ -87,3 +87,14 @@ describe("transient answers are never cached", () => {
     expect(f).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("B2194744 — a Harris lot with NO stored acct still resolves its account from the county record", () => {
+  it("the owner's 158.20 AC lot (acct null, HCAD_NUM 0421030000129) fetches", () => {
+    const lot = { acct: null, attrs: { OBJECTID: 504281, HCAD_NUM: "0421030000129", acct_num: "0421030000129" } };
+    expect(accountOf(lot, undefined)).toBe("0421030000129"); // the planner used to pass an undefined idField
+    expect(accountOf(lot, "HCAD_NUM")).toBe("0421030000129");
+  });
+  it("never answers with the OBJECTID", () => {
+    expect(accountOf({ attrs: { OBJECTID: 634440, HCAD_NUM: "0421030000123" }, acct: "634440" }, undefined)).toBe("0421030000123");
+  });
+});

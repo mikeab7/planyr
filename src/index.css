@@ -727,6 +727,14 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
 .land-parcel-row:hover .land-row-actions,
 .land-parcel-row:focus-within .land-row-actions { opacity: 1; }
 
+/* B2194741 — the parcel row's unlocked padlock / rename pencil reveal on row hover or keyboard focus; on a
+   touch screen (no hover) they are always shown so they stay reachable. */
+.land-row-hover { opacity: 0; transition: opacity .12s; }
+.land-parcel-row:hover .land-row-hover,
+.land-parcel-row:focus-within .land-row-hover,
+.land-row-hover:focus-visible { opacity: 1; }
+@media (hover: none) { .land-row-hover { opacity: 1; } }
+
 /* card section headers */
 .sec-head:hover .sec-title { color: var(--text-primary); }
 /* Flat panels (owner NEW-1): a titled Section is a divider-separated group, not a card, so the

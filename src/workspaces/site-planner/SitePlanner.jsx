@@ -57,7 +57,8 @@ import { parkDepthForRows, parkRowsForDepth, parkFlipIsNoOp, explodeParkingBands
 import { trailerRowLabel, elementLabelHidden, labelHiddenPatch, trailerCfgPatch, drawnTrailerCfg, TRAILER_FIELD_MIN } from "./lib/trailerRows.js";
 import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale, overlayRasterKey, HIRES_CACHE_PER_OVERLAY } from "./lib/overlayPdf.js";
 import { isDwgFile, convertDwgToDxf } from "./lib/convertClient.js";
-import { uploadOverlayFile, downloadOverlayBytes, downloadOverlayDataUrl, fetchOverlayBytes, fetchOverlayDataUrl, deleteOverlayObject, MAX_BYTES as OVERLAY_MAX_BYTES } from "./lib/overlayStorage.js";
+import { uploadOverlayFile, downloadOverlayBytes, downloadOverlayDataUrl, fetchOverlayBytes, fetchOverlayDataUrl, deleteOverlayObject, probeOverlayObject, MAX_BYTES as OVERLAY_MAX_BYTES } from "./lib/overlayStorage.js";
+import { fetchSiblingPlans, foreignOverlaysFor, planForeignCopy, siblingPlansAsRefs, siblingsStillHolding, identityKey as overlayIdentityKey } from "./lib/siblingOverlays.js";
 import { ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale, SCALE_PRESETS, feetPerInchForPreset, matchScalePreset, feetPerInchFromPair, PAGE_UNITS, REAL_UNITS } from "../../shared/overlay/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, imagePointToWorld, visibleFrame, visibleCenterWorld, anchorVisibleCentre } from "../../shared/overlay/overlayPlacement.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
@@ -78,7 +79,7 @@ import { sanitizeLayerAbove, aboveFromOverlays, applyAboveOverrides, aboveSig } 
 import { BASEMAPS, SITE_PLAN_BASEMAP, IMAGERY_GRADE } from "../../shared/basemaps/basemaps.js";
 import {
   ppfToZoom, zoomToPpf, exactContainerPoint,
-  basemapWrapPoint, registrationShift, sanitizeShift, tileNwFeet, registrationLayoutMayHaveChanged, resolvedLayoutInputs,
+  basemapWrapPoint, mapBoxInset, mapBoxCenterX, registrationShift, sanitizeShift, tileNwFeet, registrationLayoutMayHaveChanged, resolvedLayoutInputs,
   hasRegisterableContainer, viewValuesEqual,
 } from "./lib/mapLock.js";
 import { overscanPx, keepBufferFor, retinaForZoom, tileWeight, tileCacheLimit } from "./lib/tileBudget.js";
@@ -134,8 +135,6 @@ const SiteAnalysis = lazy(() => import("./components/SiteAnalysis.jsx"));
 /* LAZY (B1064 tranche). The county appraisal record + the taxing-unit list render ONLY for a lot
  * that came from a county identify, and only while the Parcels panel is the open one — never at
  * first paint. Both bodies come from the same module, so they share one chunk and one load. */
-const ParcelAppraisal = lazy(() => import("./components/ParcelDataPanel.jsx").then((m) => ({ default: m.ParcelAppraisal })));
-const ParcelTaxes = lazy(() => import("./components/ParcelDataPanel.jsx").then((m) => ({ default: m.ParcelTaxes })));
 /* NEW-1 — "Set this plan's location", the way back for a plan drawn while the county GIS was down.
  * Lazy for the same reason as the panels above: a modal opened at most once per session, carrying
  * its own interactive Leaflet map, has no business on the planner's boot chunk. */
@@ -225,7 +224,7 @@ import { bestMeasurer } from "../../shared/markup/textWrap.js"; // B548818 — m
 import { CROSS_BAND_BEHIND, CROSS_BAND_FRONT } from "./lib/paintOrder.js"; // B548819 — ONE name for the cross-band command
 import { nearestRectPerimeterPoint, calloutCornerRadius } from "../../shared/markup/geometry.js";
 import { calloutDblZone } from "../../shared/markup/hitTest.js";
-import { COUNTIES, COUNTIES_MAP, countyKeyForName, resolveTaxRates, candidateCountiesForPoint, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote, displayFloorForPoint, displaySourcesForView, statewideKeysForState, statewideBackupScope, isStatewideLayerUrl, loadCountyPolygons } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, countyKeyForName, candidateCountiesForPoint, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote, displayFloorForPoint, displaySourcesForView, statewideKeysForState, statewideBackupScope, isStatewideLayerUrl, loadCountyPolygons } from "./lib/counties.js";
 import { lookupParcels } from "./lib/parcelQuery.js";
 import {
   resolveLayerUrl,
@@ -253,9 +252,10 @@ import { loadDeed, deedNow } from "./lib/deedLazy.js";
  * call site in the deed-drop handler). It is a self-contained .docx/ZIP reader that only runs
  * once someone drops a deed or survey file, so it has no business on the boot path; the same
  * treatment B1123 gave the title reader and B1042 gave the export path. */
-import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip, easementStyle, easementPatternId, encumbranceStyle, encumbrancePatternId, deedCallsShown, DEFAULT_EASE_FILL_OPACITY, DEFAULT_EASE_HATCH, ENCUMBRANCE_DEFAULT } from "./lib/easements.js";
+import { EASEMENT_TYPES, easementType, easementColor, easementLabel, easementRecordingSummary, easementArea, DEFAULT_EASEMENT_ATTRS, deriveEasementRing, buildParcelEdgeStrip, easementStyle, easementPatternId, encumbranceStyle, encumbrancePatternId, deedCallsShown, DEFAULT_EASE_FILL_OPACITY, DEFAULT_EASE_HATCH, ENCUMBRANCE_DEFAULT } from "./lib/easements.js";
 import { deedTrace, deedGapText, deedClosure, deedReaderSummary, deedQueueClosure, deedPlotWarning } from "./lib/deedGap.js";
 import { HATCH_OPTIONS, hatchSpec } from "../../shared/style/hatchPatterns.js";
+import { hatchPatternTransform, hatchAnchorFor } from "./lib/hatchAnchor.js";
 // NEW-EASE-STYLE — the ONE renderer that turns a hatch catalog spec (shared/style/hatchPatterns.js)
 // into an SVG <pattern>. MODULE-SCOPE (never defined inside SitePlanner's render body — a component
 // authored per-render is a fresh type every render, which remounts and thrashes). Used for the
@@ -273,10 +273,12 @@ import { HATCH_OPTIONS, hatchSpec } from "../../shared/style/hatchPatterns.js";
 // rescale is exactly as zoom-dependent for a pattern tile as it is for the callout arrowhead this
 // item also fixes. `patternTransform` composing a uniform `scale(labelK)` with any existing
 // rotation is safe because a uniform scale commutes with rotation.
-function HatchPatternDef({ id, hatchKey, color, washColor = color, wash = 0, lineOpacity = 0.5, labelK = 1 }) {
+// NEW-1 (hatchAnchor.js) — `anchor` pins the tile lattice to the GROUND (the render view's feet
+// origin) instead of the canvas corner, so a panel drag / resize / pan never slides the stripes.
+function HatchPatternDef({ id, hatchKey, color, washColor = color, wash = 0, lineOpacity = 0.5, labelK = 1, anchor = null }) {
   const spec = hatchSpec(hatchKey);
   const size = spec ? spec.size : 7;
-  const tf = [spec ? `rotate(${spec.rotate})` : null, labelK !== 1 ? `scale(${labelK})` : null].filter(Boolean).join(" ") || undefined;
+  const tf = hatchPatternTransform({ rotate: spec ? spec.rotate : 0, scale: labelK, anchor });
   return (
     <pattern id={id} width={size} height={size} patternUnits="userSpaceOnUse" patternTransform={tf}>
       {wash > 0 && <rect width={size} height={size} fill={washColor} opacity={wash} />}
@@ -529,7 +531,7 @@ import { resolveDraftStepBack } from "./lib/drafts.js";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { FONT_SIZE, SPACE, CONTROL_H } from "../../shared/ui/designTokens.js";
 import { parcelKey as parcelKeyOf, storedParcelKey } from "./lib/parcelIdentity.js";
-import { snapPanelWidth } from "./lib/panelWidth.js";
+import { snapPanelWidth, panelFlowWidth } from "./lib/panelWidth.js";
 import { canvasBox, nextCanvasSize, framePad, canvasEdgeLeft, EDGE_EPS } from "./lib/canvasBox.js"; // NEW-1 — the canvas box IS the element box (no 320×360 floor)
 // B845584 — the element context-menu rebuild's own 14px/1.3-stroke icon family (see that file's
 // header for why it is separate from icons.jsx's 24px/stroke-2 idiom). Two names collide with
@@ -546,7 +548,7 @@ import {
  * (see src/app/renderLoopProbe.js for why this is recorded unconditionally). The dep NAMES are what
  * make a report readable — "view=51i" is a diagnosis, "dep[0]=51i" is another character count. */
 const GEO_REG_EFFECT = "site-planner:geo-registration";
-const GEO_REG_DEPS = Object.freeze(["view.ppf", "view.offX", "view.offY", "size.w", "size.h", "origin", "geoOverscan"]);
+const GEO_REG_DEPS = Object.freeze(["view.ppf", "view.offX", "view.offY", "size.w", "size.h", "origin", "geoOverscan", "geoDockX"]);
 /* A frozen module-scope zero so the reset path cannot allocate a fresh object per call. */
 const ZERO_REG_SHIFT = Object.freeze({ dx: 0, dy: 0 });
 const PANEL_SHIFT_EFFECT = "site-planner:panel-shift";
@@ -1438,42 +1440,7 @@ const f2 = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimu
 /* --------------- county appraisal-district attribute view --------------- */
 // The curated attribute view (APPR_FIELDS / apprRows / apprAll / apprVal / findAttr)
 // now lives in ./lib/appraisal.js so the map finder's address-search info card shares
-// the exact same labelling (B233). countyAcres stays here (planner-only geometry check).
-// County stated acreage from the attributes. Prefer an explicit acres field;
-// fall back to Shape_Area (EPSG:2278 → US survey ft² → ÷43560). Returns
-// { acres, source } or null. Caller flags a ~10× gap (likely m²) rather than
-// silently "fixing" it.
-const countyAcres = (attrs) => {
-  if (!attrs) return null;
-  const keys = Object.keys(attrs);
-  const num = (k) => +attrs[k];
-  const ok = (k) => k && attrs[k] != null && attrs[k] !== "" && !isNaN(num(k)) && num(k) > 0;
-  // 1) An explicit, already-in-acres field. A CAD record often carries SEVERAL acreage
-  //    fields — total tract PLUS sub-acreages like a HOMESITE carve-out, an ag-use
-  //    portion, or an exemption acreage. A "PT TR ... (HOMESITE)" parcel can show a
-  //    ~0.5 ac homesite field beside a 17 ac total; picking the first match grabbed the
-  //    homesite and falsely flagged the geometry ~3,300% off (B166). The total tract is
-  //    always the LARGEST of these, so take the max — never a partial-tract sub-acreage.
-  //    (Belt-and-suspenders: also skip fields whose name marks them as a homesite/
-  //    exemption/improvement sub-acreage even if they happened to be larger.)
-  const isSubAcre = (k) => /(home_?site|homestead|\bhs_|hmst|exempt|imprv|improv)/i.test(k);
-  const acresKeys = keys.filter((k) => /(gis_?acres|legal_?acres|deed_?acres|calc_?acres|acreage|^acres$)/i.test(k) && ok(k));
-  const totalKeys = acresKeys.filter((k) => !isSubAcre(k));
-  const pick = (totalKeys.length ? totalKeys : acresKeys);
-  if (pick.length) { const best = pick.reduce((a, b) => (num(b) > num(a) ? b : a)); return { acres: num(best), source: best }; }
-  // 2) TxGIO statewide (the Chambers source) publishes GIS_AREA / LEGAL_AREA already in acres,
-  //    with a sibling *_UNIT field naming the unit — prefer these over the projected Shape area
-  //    so we don't misread square-metres as square-feet (the old regex matched neither, then
-  //    divided a m² value by 43560 → ~10.76× too small, flagging every correct lot as wrong).
-  const unitOf = (areaK) => { const want = (areaK + "_unit").toLowerCase(); const uk = keys.find((k) => k.toLowerCase() === want); return uk ? String(attrs[uk]) : ""; };
-  const areaAcresKey = keys.find((k) => /(gis_?area|legal_?area)$/i.test(k) && ok(k) && /acre/i.test(unitOf(k)));
-  if (areaAcresKey) return { acres: num(areaAcresKey), source: areaAcresKey };
-  // 3) Last resort: a projected Shape area. Assume EPSG:2278 US-ft² (÷43560); the caller flags a
-  //    ~10.76× gap as a likely square-metre projection rather than silently trusting it.
-  const areaKey = keys.find((k) => /(shape_?area|shape\.starea|st_area)/i.test(k) && ok(k));
-  if (areaKey) return { acres: num(areaKey) / 43560, source: areaKey, fromArea: true };
-  return null;
-};
+// the exact same labelling (B233).
 
 // B591 — collision-resistant element ids. A per-TAB salt is appended to every minted id so
 // two tabs (or a reopen after a delete) can never mint the same id, and a freshly drawn item
@@ -1750,6 +1717,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [standardsFocus, setStandardsFocus] = useState(null);
   const jumpToStandards = useCallback((key) => { setStandardsFocus(key); setLeftPanel("standards"); }, []);
   const [leftWidth, setLeftWidth] = useState(() => { try { return Math.max(240, Math.min(620, +localStorage.getItem("planarfit:leftWidth") || 320)); } catch (_) { return 320; } });
+  // NEW-2 (lib/panelWidth.js) — the room the docked panel RESERVES: `leftWidth` floored to a notch that is whole in
+  // CSS AND device px, so the canvas's left edge never re-snaps mid-drag. The leftover overlaps the canvas edge.
+  const leftOverlap = leftWidth - panelFlowWidth(leftWidth, typeof window !== "undefined" ? window.devicePixelRatio : 1);
   // B113: phone-width responsive mode. Below ~760px the fixed side rails would crush
   // the canvas to a sliver, so they OVERLAY it instead of consuming row width, and the
   // right tool palette collapses behind a toggle. matchMedia keeps it in sync with
@@ -2113,7 +2083,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      resize the basemap container mid-edit. */
   const drawableCount = els.length + markups.length + parcels.length;
   const geoWeight = tileWeight({ elementCount: drawableCount, deviceMemoryGb: typeof navigator !== "undefined" ? navigator.deviceMemory : null });
-  const geoOverscan = overscanPx({ elementCount: drawableCount, deviceMemoryGb: typeof navigator !== "undefined" ? navigator.deviceMemory : null, viewportW: size.w, viewportH: size.h });
+  /* NEW-2 (2026-10-08) — THE BASEMAP'S BOX DOES NOT MOVE WHEN A DOCKED PANEL DOES. `geoDockX` is how far the canvas's
+     left edge sits from the planner row's left (the rail plus whatever docked column is in flow — the same measured
+     edge the B837 pan compensation reads). The map container reaches left by exactly that much beyond its overscan, so
+     its LEFT edge is pinned to the row and its width is constant while a docked panel is dragged, opened or closed:
+     Leaflet is not resized, not panned, and no raster overlay is re-requested. Before, the container followed the
+     panel's edge; Leaflet can only pan by whole CSS px and the browser snaps a moving box to whole DEVICE px, so on a
+     scaled display (the owner's ≈ 2.15×) every drag step re-seated the tiles on a different device-pixel phase and
+     re-blended every tile seam, and every step re-requested FEMA's picture, whose "Zone AE" labels re-flow with the
+     extent. The cost is tiles held under the docked panel (it is opaque; the canvas clip hides them). The overscan is
+     sized off the same fixed width so it cannot change mid-drag either. */
+  const [geoDockX, setGeoDockX] = useState(0);
+  const geoDockXRef = useRef(0);
+  const geoOverscan = overscanPx({ elementCount: drawableCount, deviceMemoryGb: typeof navigator !== "undefined" ? navigator.deviceMemory : null, viewportW: size.w + geoDockX, viewportH: size.h });
+  const geoBoxInset = mapBoxInset(geoOverscan, geoDockX);
   const geoKeepBuffer = keepBufferFor({ elementCount: drawableCount, deviceMemoryGb: typeof navigator !== "undefined" ? navigator.deviceMemory : null });
   // An EXPORT pass must render the complete model whatever the view is (NEW-5's hard
   // constraint). buildExportSvg clones the LIVE svg, so it flips this off, flushes a full
@@ -2255,10 +2238,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // ancestor (see HatchPatternDef's header); `labelK` is what keeps that tile's PHYSICAL size on a
   // printed sheet independent of the live zoom at capture. Undefined patternTransform on both
   // (rot=0, labelK=1) reproduces every existing pattern byte-for-byte on screen.
-  const patHatchTf = (rotDeg) => {
-    const parts = [rotDeg ? `rotate(${rotDeg})` : null, labelK !== 1 ? `scale(${labelK})` : null].filter(Boolean);
-    return parts.length ? parts.join(" ") : undefined;
-  };
+  // NEW-1 — and every hatch is pinned to the GROUND (the render view's feet origin), never the canvas
+  // corner, so dragging/resizing a panel or panning never slides the stripes (lib/hatchAnchor.js).
+  const hatchAnchor = hatchAnchorFor(renderView, exportPass ? 1 : (typeof window !== "undefined" ? window.devicePixelRatio : 1));
+  const patHatchTf = (rotDeg) => hatchPatternTransform({ rotate: rotDeg, scale: labelK, anchor: hatchAnchor });
   const cullActive = !exportPass && shouldCull(drawableCount);
   /* VIEW-INDEPENDENT-ONCE (NEW-2). The cull rect is LATCHED: `cullRectFor` hands back the rect we
      already hold for as long as the true viewport is still comfortably inside it, and only builds
@@ -3192,7 +3175,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Site-route error 185 in `client_errors` back to 2026-07-30 (the crash lands on the `setGeoZoom`
     // dispatch inside `commit`), so it is the first place a diagnosis needs a run count and a
     // per-dependency churn verdict. See src/app/renderLoopProbe.js.
-    noteEffectRun(GEO_REG_EFFECT, GEO_REG_DEPS, [view.ppf, view.offX, view.offY, size.w, size.h, origin, geoOverscan]);
+    noteEffectRun(GEO_REG_EFFECT, GEO_REG_DEPS, [view.ppf, view.offX, view.offY, size.w, size.h, origin, geoOverscan, geoDockX]);
     const map = geoMapRef.current;
     const wrap = geoWrapRef.current;
     /* NEW-1 — every write to the wrap's gesture transform is mirrored onto the map-top host
@@ -3219,7 +3202,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // loop below. Reading `regShift` from the closure is safe (an effect always closes over the
     // current render's values) and the functional updater still guards the write itself.
     if (!map || !wrap || !origin) { commitRegShift(ZERO_REG_SHIFT); return; }
-    const fx = (size.w / 2 - view.offX) / view.ppf;
+    // NEW-2 — the map is centred on the ground under its CONTAINER's middle, which sits `geoDockX / 2` left of the
+    // canvas middle now that the container reaches under the docked column (mapLock.mapBoxCenterX).
+    const boxCx = mapBoxCenterX(size.w, geoDockX);
+    const fx = (boxCx - view.offX) / view.ppf;
     const fy = (size.h / 2 - view.offY) / view.ppf;
     const center = feetToLatLng({ x: fx, y: fy }, origin.lat, origin.lon);
     // NEW-1 — the scale is anchored at the SITE ORIGIN latitude, the same latitude the feet
@@ -3342,8 +3328,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // Fallback when there is no tile to read (aerial off, or none arrived yet): the map's own
     // projection, which is the frame every Leaflet VECTOR overlay is placed in.
     const projRef = (c) => ({
-      imgPt: basemapWrapPoint(projectAt(c), ...mapFrame(), geoOverscan),
-      drawPt: { x: size.w / 2, y: size.h / 2 },
+      imgPt: basemapWrapPoint(projectAt(c), ...mapFrame(), geoOverscan, geoDockX),
+      drawPt: { x: boxCx, y: size.h / 2 },
     });
     const syncReg = (c) => {
       try {
@@ -3412,7 +3398,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         try {
           const target = exactPt(c);
           const half = map.getSize().divideBy(2);
-          map.panBy(L.point(target.x - half.x, target.y - half.y), { animate: false, noMoveStart: true });
+          const step = L.point(target.x - half.x, target.y - half.y);
+          // NEW-2 — a pan that rounds to nothing is not issued: Leaflet would still fire `moveend`, and every raster
+          // overlay answers `moveend` by re-requesting its picture (FEMA's labels re-flow with each one). A docked
+          // panel drag lands here on every frame now that the map's box no longer moves with the panel.
+          if (Math.round(step.x) || Math.round(step.y)) map.panBy(step, { animate: false, noMoveStart: true });
         } catch (_) { try { map.setView(c, zoom, { animate: false }); } catch (_) {} }
         // Store the map's ACTUAL settled center (panBy rounds to whole pixels), so the
         // next sizeChanged test compares against reality, not the pre-round target.
@@ -3472,10 +3462,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      * (this sandbox has none either); the owner's real 2026-09-01 Richfield session — this same
      * effect running for 24 minutes of active editing, not one synthetic gesture — is the live
      * cost evidence that was missing, so this ships now under `Verify: live` (V467696). */
-    const layoutInputs = { w: size.w, h: size.h, overscan: geoOverscan };
+    const layoutInputs = { w: size.w, h: size.h, overscan: geoOverscan, dockX: geoDockX };
     const li = geoLayoutInputsRef.current;
     let cw, ch, cachedStale;
-    if (registrationLayoutMayHaveChanged(li, layoutInputs.w, layoutInputs.h, layoutInputs.overscan)) {
+    if (registrationLayoutMayHaveChanged(li, layoutInputs.w, layoutInputs.h, layoutInputs.overscan, layoutInputs.dockX)) {
       cw = wrap.clientWidth; ch = wrap.clientHeight;
       cachedStale = false;
       try {
@@ -3593,7 +3583,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      * `size.w` would put a whole pixel of slop into the view maths that
      * `ui-audit/diagnose-pointer-accuracy.mjs` asserts to a quarter of a pixel.
      */
-  }, [view.ppf, view.offX, view.offY, size.w, size.h, origin, geoOverscan]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [view.ppf, view.offX, view.offY, size.w, size.h, origin, geoOverscan, geoDockX]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => { clearTimeout(geoCommitTimer.current); if (geoGhostRef.current) { try { geoGhostRef.current.remove(); } catch (_) {} geoGhostRef.current = null; } }, []);
 
@@ -6730,24 +6720,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }, 30);
     return () => clearTimeout(t);
   }, [standardsFocus, leftPanel]);
-  // Resolve taxing jurisdictions for the selected parcel (async, graceful).
-  useEffect(() => {
-    const pc = sel?.kind === "parcel" ? parcels.find((p) => p.id === sel.id) : null;
-    if (!pc || !pc.attrs) { setTaxInfo(null); return; }
-    let live = true;
-    // NEW-1 — Harris's real rate source spatially resolves city/ISD, so it needs the parcel's own
-    // centroid (never the site origin) converted feet → lng/lat, the same conversion `jurActiveRings`
-    // uses. Missing/degenerate geometry just omits lng/lat — resolveTaxRates degrades gracefully.
-    let ll = null;
-    if (origin && pc.points?.length >= 3) {
-      const ring = pc.points.map((pt) => { const [la, ln] = feetToLatLng(pt, origin.lat, origin.lon); return [ln, la]; });
-      const c = ringCentroid(ring);
-      if (c) ll = { lng: c.lng, lat: c.lat };
-    }
-    resolveTaxRates(siteCounty, pc.attrs, ll || {}).then((r) => { if (live) setTaxInfo(r); }).catch(() => { if (live) setTaxInfo(null); });
-    return () => { live = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sel?.kind, sel?.id]);
   // The left menu opening/closing resizes the canvas; pan to compensate so the drawing doesn't
   // jump sideways (e.g. on the first element click of a session, or a panel→panel switch).
   //
@@ -6794,6 +6766,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // (an overlaid/portaled panel steals no layout width → zero delta), just without the rounding.
     const parentLeft = el.offsetParent ? el.offsetParent.getBoundingClientRect().left : 0;
     const left = canvasEdgeLeft(r.left, parentLeft);
+    // NEW-2 — the basemap box reaches left by this much, so its left edge stays pinned to the row (see `geoDockX`).
+    // Guarded: a dispatch that lands on the same number is still a dispatch (B1189).
+    if (geoDockXRef.current !== left) { geoDockXRef.current = left; setGeoDockX(left); }
     if (panelShiftRef.current == null) { panelShiftRef.current = left; return; } // seed baseline — no shift on first mount
     const delta = left - panelShiftRef.current;
     if (Math.abs(delta) > EDGE_EPS) {
@@ -6828,7 +6803,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const startLeftResize = (e) => {
     e.preventDefault();
     const startX = e.clientX, startW = leftWidth;
-    const onMove = (ev) => setLeftWidth(snapPanelWidth(startW + (ev.clientX - startX), window.devicePixelRatio)); // B2154768 — device-pixel-aligned (no sub-pixel shake)
+    const onMove = (ev) => setLeftWidth(snapPanelWidth(startW + (ev.clientX - startX), window.devicePixelRatio)); // B2154768/NEW-2 — paints at whole CSS px; the canvas edge moves in notches (leftFlowWidth)
     const onUp = () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
@@ -10012,7 +9987,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const closePoly = () => {
     if (draftPoly && draftPoly.length >= 3) {
       pushHistory();
-      const pc = { id: uid(), points: draftPoly, ...parcelDefaultStyle(settings) }; // B929: born with the user's Standards parcel defaults
+      const pc = { id: uid(), points: draftPoly, source: "drawn", ...parcelDefaultStyle(settings) }; // B929: born with the user's Standards parcel defaults · source:"drawn" is the POSITIVE evidence a Drawn label needs (B2191xxx)
       setParcels((a) => [...a, pc]);
       flashPolyWarn(draftPoly, "Parcel");
       requestFit();
@@ -10327,7 +10302,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const addRectParcel = () => {
     const w = Math.max(20, +lotW || 0), d = Math.max(20, +lotD || 0);
     pushHistory();
-    const pc = { id: uid(), points: [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: d }, { x: 0, y: d }], ...parcelDefaultStyle(settings) }; // B929
+    const pc = { id: uid(), points: [{ x: 0, y: 0 }, { x: w, y: 0 }, { x: w, y: d }, { x: 0, y: d }], source: "drawn", ...parcelDefaultStyle(settings) }; // B929
     setParcels((a) => [...a, pc]);
     requestFit();
   };
@@ -10487,6 +10462,118 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     patchOverlay(id, { crop: next }, hist);
     return true;
   };
+  /* ------------ NEW-1 — overlays flow between sibling plans of one site (lib/siblingOverlays.js) ------------
+   * Foreign rows are computed at read time from a READ-ONLY fetch of the sibling rows; nothing here ever
+   * writes a sibling plan. The panel re-reads on open, and again just before any copy. */
+  const [sibState, setSibState] = useState({ status: "idle", plans: [], error: null });
+  const sibSeq = useRef(0);
+  const sibWarned = useRef(false);
+  const groupIdOfThisPlan = () => (siteId ? (loadSite(siteId)?.groupId || null) : null);
+  const refreshSiblings = async () => {
+    const gid = groupIdOfThisPlan();
+    if (!siteId || !gid || !isCloudActive() || !supabase) { setSibState({ status: "idle", plans: [], error: null }); return { ok: true, plans: [], skipped: true }; }
+    const seq = ++sibSeq.current;
+    setSibState((s) => ({ ...s, status: "loading" }));
+    const r = await fetchSiblingPlans(supabase, gid, siteId);
+    if (seq === sibSeq.current) {
+      setSibState(r.ok ? { status: "ok", plans: r.plans, error: null } : { status: "error", plans: [], error: r.error });
+      if (!r.ok) {
+        reportClientEvent("sibling-overlays-fetch-failed", "couldn't read the sibling plans' drawings", { siteId, error: r.error });
+        if (!sibWarned.current) { sibWarned.current = true; flashWarn("⚠ Couldn't check your other plans for drawings to reuse — try reopening this panel.", 6000); }
+      } else sibWarned.current = false;
+    }
+    return r;
+  };
+  useEffect(() => { if (active && leftPanel === "references") refreshSiblings(); }, [active, leftPanel, siteId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const foreignRows = useMemo(
+    () => foreignOverlaysFor({ own: sheetOverlays, siblings: sibState.plans, selfId: siteId }),
+    [sheetOverlays, sibState.plans, siteId]);
+  // What the Overlays panel reads: hidden-style rows "added on <planName>", plus the honest fetch state.
+  const foreignOverlays = { rows: foreignRows, status: sibState.status, error: sibState.error, refresh: refreshSiblings };
+  // The eye on a foreign row. COPIES the record into THIS plan only (new id, re-framed to this plan's
+  // origin, stamped `sharedFrom`); every refusal says why and writes nothing.
+  const showingForeign = useRef(new Set());
+  const showForeignOverlay = async (row) => {
+    if (!row || showingForeign.current.has(row.key)) return; // a second press while the first is still checking must not add it twice
+    showingForeign.current.add(row.key);
+    try { await showForeignOverlayOnce(row); } finally { showingForeign.current.delete(row.key); }
+  };
+  const showForeignOverlayOnce = async (row) => {
+    const fresh = await refreshSiblings();
+    const verdict = await planForeignCopy({ foreign: row, fresh, selfOrigin: stateRef.current.origin, probe: probeOverlayObject, mint: uid });
+    if (!verdict.ok) { flashWarn(`⚠ ${verdict.message}`, 8000); return; }
+    const ov = verdict.overlay;
+    // A double press, or a copy that landed while we were checking, must not add it twice.
+    if (stateRef.current.sheetOverlays.some((x) => x && x.storageKey && overlayIdentityKey(x) === overlayIdentityKey(ov))) {
+      flashWarn(`“${ov.name}” is already on this plan.`, 3500); return;
+    }
+    pushHistory();
+    setSheetOverlays((arr) => [...arr, ov]);
+    setSel(null); setSelOverlay(ov.id); setLeftPanel("references");
+    flashWarn(`Showing “${ov.name}” from ${row.planName}.`, 3500);
+  };
+  // E2E/self-audit hook (same `window.__PLANYR_E2E` gate as the others; read-only answers + the same two
+  // actions the panel row calls — it is a driver for the live acceptance, not a second code path).
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
+    const hook = {
+      siteId: () => siteId,
+      rows: () => foreignOverlays.rows.map((r) => ({ key: r.key, planName: r.planName, name: r.overlay.name, page: r.overlay.page || 1 })),
+      status: () => ({ status: foreignOverlays.status, error: foreignOverlays.error }),
+      refresh: () => refreshSiblings(),
+      show: (key) => showForeignOverlay(foreignOverlays.rows.find((r) => r.key === key)),
+      remove: (id) => removeOverlay(id),
+      crop: (id, crop) => setOverlayCrop(id, crop), // the exact write the Crop… dialog commits through
+      duplicate: (id) => duplicateOverlay(id),
+      setPage: (id, page) => setOverlayPage(id, page),
+      own: () => stateRef.current.sheetOverlays.map((o) => ({ id: o.id, name: o.name, page: o.page || 1, x: o.x, y: o.y, crop: o.crop || null, sharedFrom: o.sharedFrom || null, storageKey: o.storageKey || null, idbKey: o.idbKey || null, hasSrc: !!o.src })),
+    };
+    window.__plannerForeign = hook;
+    return () => { if (window.__plannerForeign === hook) window.__plannerForeign = null; };
+  });
+  // Release a removed overlay's stored bytes only when NO plan references them — this site's other plans
+  // included — releasing device + cloud together or neither, and tell the user when a sibling still holds it.
+  const releaseOverlayAssets = async (o) => {
+    try {
+      // Grace window: bytes go only after the user can no longer Ctrl+Z the removal, and never if it came back.
+      await new Promise((r) => setTimeout(r, 30000));
+      if (stateRef.current.sheetOverlays.some((x) => x.id === o.id)) return;
+      await releaseOverlayAssetsNow(o);
+    } catch (e) {
+      reportClientEvent("overlay-asset-retained", "kept a source file: release check threw", { siteId, overlayId: o.id, error: (e && e.message) || "" });
+    }
+  };
+  const releaseOverlayAssetsNow = async (o) => {
+    let plans = loadSitesList();
+    let sibs = [];
+    const gid = groupIdOfThisPlan();
+    if (gid && isCloudActive() && supabase) {
+      const r = await fetchSiblingPlans(supabase, gid, siteId);
+      if (!r.ok) {
+        reportClientEvent("overlay-asset-retained", "kept a source file: couldn't read the sibling plans", { siteId, overlayId: o.id, error: r.error });
+        flashWarn("Removed from this plan. Couldn't check your other plans, so the stored file was kept.", 7000);
+        return;
+      }
+      sibs = r.plans;
+      plans = [...plans, ...siblingPlansAsRefs(sibs)];
+      setSibState({ status: "ok", plans: sibs, error: null });
+    }
+    // This plan's OWN remaining overlays hold bytes too (two pages of one PDF): count them as a holder.
+    plans = [...plans, { id: "__this-plan-remaining", sheetOverlays: stateRef.current.sheetOverlays.filter((x) => x.id !== o.id) }];
+    const assetRefs = collectAssetRefs(plans);
+    const { release, kept } = releasePlanForOverlay(assetRefs, o, siteId);
+    for (const r of release) {
+      if (r.tier === "storage") deleteOverlayObject(r.key); // cloud copy (B72 polish / B748 DWG provenance)
+      else idbDelete(r.key);                                // this device's cached raster (B474 review #23)
+    }
+    // LOUD-FAILURE: a refusal is reported, never silent — this is the line that says the bytes were KEPT.
+    if (kept.length)
+      reportClientEvent("overlay-asset-retained", "kept a source file another plan still references", {
+        siteId, overlayId: o.id, kept: kept.map((k) => ({ what: k.what, reason: k.reason, heldBy: k.heldBy })),
+      });
+    const still = siblingsStillHolding(o, sibs, siteId);
+    if (still.length) flashWarn(`Removed from ${planLabel}. Still on ${still.join(", ")}.`, 6000);
+  };
   const removeOverlay = (id) => {
     const o = sheetOverlays.find((x) => x.id === id);
     if (!o) { flashWarn("⚠ Couldn't delete that drawing — it's no longer in the list.", 5000); return; } // count-check: never a phantom no-op delete (B461)
@@ -10503,17 +10590,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      * refuses on any unknown answer (an orphaned object is recoverable; a deleted one is not).
      * The DATABASE is the authority — `db/overlay_object_release_guard.sql` refuses the delete
      * outright when a live plan still references the key, so a stale tab cannot orphan bytes. */
-    const assetRefs = collectAssetRefs(loadSitesList());
-    const { release, kept } = releasePlanForOverlay(assetRefs, o, siteId);
-    for (const r of release) {
-      if (r.tier === "storage") deleteOverlayObject(r.key); // cloud copy (B72 polish / B748 DWG provenance)
-      else idbDelete(r.key);                                // this device's cached raster (B474 review #23)
-    }
-    // LOUD-FAILURE: a refusal is reported, never silent — this is the line that says the bytes were KEPT.
-    if (kept.length)
-      reportClientEvent("overlay-asset-retained", "kept a source file another plan still references", {
-        siteId, overlayId: id, kept: kept.map((k) => ({ what: k.what, reason: k.reason, heldBy: k.heldBy })),
-      });
+    /* NEW-1 (sibling overlays) — the ref-count now ALSO spans the sibling plans of this site as the cloud
+     * holds them RIGHT NOW (an unhydrated sibling is invisible to loadSitesList), and the release waits for
+     * that answer. A failed read is an UNKNOWN answer: release NOTHING (sharedAssetRefs rule 2). */
+    releaseOverlayAssets(o);
     setSheetOverlays((arr) => arr.filter((x) => x.id !== id));
     setDeletedIds((d) => (d.includes(id) ? d : [...d, id])); // B276: tombstone the deletion so a stale/cloud copy can't resurrect it on reload/merge
     setSelOverlay((s) => (s === id ? null : s));
@@ -11010,7 +11090,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     let n = 0, slon = 0, slat = 0;
     rings.forEach((r) => r.forEach(([lon, lat]) => { slon += lon; slat += lat; n++; }));
     const lon0 = slon / n, lat0 = slat / n;
-    const pcs = rings.map((r) => ({ id: uid(), points: lngLatRingToFeet(r, lon0, lat0), ...parcelDefaultStyle(settings) })).filter((pc) => pc.points.length >= 3); // B929
+    const pcs = rings.map((r) => ({ id: uid(), points: lngLatRingToFeet(r, lon0, lat0), source: "county", ...parcelDefaultStyle(settings) })).filter((pc) => pc.points.length >= 3); // B929 · looked up from a county record
     if (!pcs.length) { setLookupErr("That record has no usable polygon geometry."); return; }
     pushHistory("import"); // NEW-7 (NEW-1) — a county-record parcel brought onto the plan
     setParcels((a) => [...a, ...pcs]);
@@ -12190,11 +12270,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       reportClientEvent("delete-outcome", "menu:parcel → no-op (stale)", { entry: "menu:parcel", result: "no-op", reason: "stale", id });
       return;
     }
+    const delName = (parcelInfo.get(id) && parcelInfo.get(id).name) || "Parcel";
     pushHistory();
     setParcels((a) => a.filter((p) => p.id !== id));
     setCombineSel((s) => s.filter((x) => x !== id));
     if (sel?.kind === "parcel" && sel.id === id) { setSel(null); setMulti([]); setDrillId(null); }
     tombstone(id);
+    pushToast({ text: `Deleted ${delName}`, action: { label: "Undo", onClick: undo } }); // B2194741
     reportClientEvent("delete-outcome", "menu:parcel → removed parcel", { entry: "menu:parcel", result: "removed", n: 1, ids: [id] });
   };
   /* ------------ dedicated canvas right-click menu (B627) ------------
@@ -12842,7 +12924,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * handlers object whose methods delegate to this render's closures, so its row list can be memoised
    * too. Every action below is a thin call into the single combine / split / restore functions. */
   const parcelCadName = cadNameOf(COUNTIES[restored?.county]?.label || null);
-  const parcelRows = useMemo(() => buildParcelRows(parcels, { cadName: parcelCadName }), [parcels, parcelCadName]);
+  const parcelIdField = (COUNTIES[restored?.county] || {}).idField || null;
+  const parcelAddrField = (COUNTIES[restored?.county] || {}).addrField || null;
+  const parcelRows = useMemo(() => buildParcelRows(parcels, { cadName: parcelCadName, idField: parcelIdField }), [parcels, parcelCadName, parcelIdField]);
   const pickedParcelIds = useMemo(() => new Set(combineSel), [combineSel]);
   const parcelSiteAcres = useMemo(() => includedAcres(parcels), [parcels]);
   const parcelActsRef = useRef({});
@@ -12865,7 +12949,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   parcelActsRef.current = {
     onSelectRow: (id) => { setCombineSel([]); setSel({ kind: "parcel", id }); },
     onPickRow: (id) => { toggleMerge(id); setSel({ kind: "parcel", id }); }, // combine-pick mode: a row click picks, exactly as it always did
-    onToggleInclude: toggleParcelActive, onToggleLock: toggleParcelLock, onToggleAllLock: toggleAllParcelsLock,
+    onToggleInclude: toggleParcelActive,
+    // B2194741 — Lock from the list / page / menu: one undo frame, and an Undo toast naming what changed.
+    onToggleLock: (id) => {
+      const pc = parcels.find((p) => p.id === id); if (!pc) return;
+      const nm = (parcelInfo.get(id) && parcelInfo.get(id).name) || "Parcel";
+      toggleParcelLock(id);
+      pushToast({ text: `${pc.locked ? "Unlocked" : "Locked"} ${nm}`, action: { label: "Undo", onClick: undo } });
+    },
+    onToggleAllLock: toggleAllParcelsLock,
     onZoom: (id) => zoomToElements([{ kind: "parcel", id }]), onRemove: removeParcelById,
     onSplit: startPanelSplit, onCancelSplit: cancelPanelSplit, onCombine: combineParcelsAction, onLockMany: lockParcelsMany,
     onRename: (id, v) => setParcelField(id, "label", v),
@@ -16141,7 +16233,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   });
   // `origin` is declared once near the top (geographic basemap state).
   // Resolve taxing jurisdictions + rate for the selected parcel (graceful-degrade).
-  const [taxInfo, setTaxInfo] = useState(null);
   // In-planner parcel identify → ADD (B383): arm identify mode, the county parcel
   // outlines light up on the aerial, and each click ADDS that lot to the plan (one or
   // many) — the same "boundaries light up, click to add" feel as the map's Select-parcels
@@ -17590,8 +17681,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      handler that reads it can only run after the frame is committed. */
   parcelChipsRef.current = parcelChips.map((p) => ({ id: p.pc.id, box: p.box }));
   // The map container is the canvas plus `geoOverscan` on every side, so a canvas-space box moves by that much.
-  lotNoInsetRef.current = geoOverscan;
-  lotNoObstaclesRef.current = () => parcelChipsRef.current.map(({ box }) => ({ x: box.x + geoOverscan, y: box.y + geoOverscan, w: box.w, h: box.h }));
+  // NEW-2 — and by `geoDockX` more on the LEFT, where the container reaches under the docked column.
+  lotNoInsetRef.current = { left: geoOverscan + geoDockX, top: geoOverscan, right: geoOverscan, bottom: geoOverscan };
+  lotNoObstaclesRef.current = () => parcelChipsRef.current.map(({ box }) => ({ x: box.x + geoOverscan + geoDockX, y: box.y + geoOverscan, w: box.w, h: box.h }));
   /* NEW-1 (2026-10-04) — the county lot numbers must keep clear of this plan's own parcel chips, which move when
    * the view settles or a parcel is added / moved / hidden WITHOUT the map firing a move. A signature of the
    * chips' boxes (not the raw `parcels` list) is the trigger, so it changes exactly when a chip does. */
@@ -17600,7 +17692,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!identifyMode) return undefined;
     const t = setTimeout(() => { const set = outlineLayersRef.current; if (set && set.relayoutLabels) set.relayoutLabels(); }, 200);
     return () => clearTimeout(t);
-  }, [identifyMode, lotNoChipSig, geoOverscan]);
+  }, [identifyMode, lotNoChipSig, geoOverscan, geoDockX]);
 
   /* NEW-3 — the MEASUREMENT summary chip.
    *
@@ -21437,6 +21529,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     pushHistory();
     setParcels((a) => a.map((p) => (p.id === pc.id ? { ...p, setbacks: setSectionSetback(parcelSetbacks(p), sec, v, p.points.length) } : p)));
   };
+  const sbAllValue = (v) => { // "Setback [N] ft · all sections" — every edge of this parcel, one undo frame
+    const pc = selParcel; if (!pc || !Number.isFinite(+v)) return;
+    pushHistory();
+    setParcels((a) => a.map((p) => (p.id === pc.id ? { ...p, setbacks: Array.from({ length: p.points.length }, () => Math.max(0, +v)) } : p)));
+  };
   const sbToggleVertex = (vertex) => {
     const pc = selParcel; if (!pc) return;
     const r = toggleBreak({ ...sectionOptsFor(pc), points: pc.points }, vertex);
@@ -21447,7 +21544,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const pc = selParcel;
     if (!pc) return null;
     const row = parcelRows.find((r) => r.id === pc.id);
-    const origin = parcelOrigin(pc, { cadName: parcelCadName });
+    const origin = parcelOrigin(pc, { cadName: parcelCadName, idField: parcelIdField });
     const fillOp = pc.fillOpacity ?? (pc.fill ? 0.12 : 0);
     const sbs = setbackLineStyle(pc, PAL.setback);
     const lineSel = (val, onChange, label) => (
@@ -21478,7 +21575,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const setbacks = secs.length ? (
       <section style={{ borderTop: BORDER_1, paddingTop: 10, marginTop: 14 }}>
         <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 6 }}>Setbacks</div>
-        <SetbackSections points={pc.points} sections={secs} selectedKey={selSectionKey} onSelect={setSelSectionKey} onSetValue={sbSectionValue} onToggleVertex={sbToggleVertex}
+        <SetbackSections points={pc.points} sections={secs} selectedKey={selSectionKey} onSelect={setSelSectionKey} onSetValue={sbSectionValue} onSetAll={sbAllValue} onToggleVertex={sbToggleVertex}
           showLine={settings.showSetback} onShowLine={(v) => setSettings((st) => ({ ...st, showSetback: v }))}
           resetLabel={`Reset to default (${settings.setback}′)`}
           onResetAll={() => { pushHistory(); setParcels((a) => a.map((p) => p.id === pc.id ? { ...p, setbacks: Array.from({ length: p.points.length }, () => +settings.setback || 0) } : p)); }}
@@ -21490,7 +21587,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return (
       <ParcelPage parcel={pc} name={row ? row.name : (pc.label || "Parcel")} acres={parcelNetSqft(pc) / SQFT_PER_ACRE} included={pc.active !== false}
         origin={origin} ownerText={apprOwnerName} cadName={parcelCadName} drawnAcresOf={(p) => parcelNetSqft(p) / SQFT_PER_ACRE}
-        handlers={parcelPanelH} taxTable={taxTable} taxSource={taxTable || !restored?.county || (origin.kind !== "county" && origin.kind !== "combined") ? null : { county: restored.county, lots: origin.kind === "combined" ? from : [pc], combined: origin.kind === "combined", idField: COUNTIES_MAP[restored.county]?.idField }} setbacks={setbacks} style={style} deedFrom={selectDeedOfGroup} />
+        handlers={parcelPanelH} taxTable={taxTable} taxSource={taxTable || !restored?.county || (origin.kind !== "county" && origin.kind !== "combined") ? null : { county: restored.county, lots: origin.kind === "combined" ? from : [pc], combined: origin.kind === "combined", idField: parcelIdField }} setbacks={setbacks} style={style} deedFrom={selectDeedOfGroup} idField={parcelIdField} addrField={parcelAddrField} />
     );
   };
   const renderPanelBody = (_pid) => (<>
@@ -22050,74 +22147,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               )}
             </Section>
           )}
-          {/* NEW-1 (B1239328) — promoted OUT of the collapsed Boundary section, to the top of the
-              selected-parcel view: a county-vs-drawn (or deed-called-vs-drawn) acreage mismatch used
-              to surface only if you opened Boundary. Both checks share one shape and read as one
-              idea (a stated number vs. what's actually drawn), so they move together. */}
+          {/* Stated-vs-measured acreage for a parcel that carries a typed deed / stated figure. The county's own
+              acreage now sits BESIDE the drawn acres inside the parcel page's county record (B2191xxx), and the
+              old Geometry check / Appraisal data / Taxes blocks that used to follow are gone. */}
           {_pid === "parcel" && pageOpen && selParcel && (() => {
             const cmp = acreageComparison(selParcel);
-            const ca = countyAcres(selParcel.attrs);
-            const hasStated = cmp.stated && cmp.measured;
-            const hasCounty = ca && ca.acres;
-            if (!hasStated && !hasCounty) return null;
+            if (!(cmp.stated && cmp.measured)) return null;
+            const [color, mark] = cmp.agreement === "match" ? ["#2f7a3e", "✓"] : cmp.agreement === "close" ? ["var(--text-secondary)", "≈"] : ["#b45309", "▲"];
             return (
               <Section>
-                {hasStated && (() => {
-                  const [color, mark] = cmp.agreement === "match" ? ["#2f7a3e", "✓"] : cmp.agreement === "close" ? ["var(--text-secondary)", "≈"] : ["#b45309", "▲"];
-                  return (
-                    <div data-testid="parcel-stated-check" style={{ fontSize: 11, color, marginBottom: hasCounty ? 8 : 0, lineHeight: 1.5 }}>
-                      <b>{mark} Stated vs measured</b> · stated {f2(cmp.stated)} AC vs {f2(cmp.measured)} AC drawn ({f0(cmp.diffFrac * 100)}% {cmp.agreement === "match" ? "match" : "off"})
-                    </div>
-                  );
-                })()}
-                {hasCounty && (() => {
-                  const mine = parcelNetSqft(selParcel) / SQFT_PER_ACRE;
-                  // A projected Shape area read as ft² but actually in m² lands ~10.76× too small; if
-                  // multiplying it back by that factor matches our geometry, treat it as m² and use the
-                  // corrected county acreage (so a correct parcel reads ✓, not a false ~900% off).
-                  const m2 = ca.fromArea && Math.abs(mine - ca.acres * 10.7639) / (ca.acres * 10.7639) < 0.12;
-                  const county = m2 ? ca.acres * 10.7639 : ca.acres;
-                  const diff = Math.abs(mine - county) / county;
-                  const [color, mark] = diff <= 0.02 ? ["#2f7a3e", "✓"] : diff <= 0.05 ? ["var(--text-secondary)", "≈"] : ["#b45309", "▲"];
-                  // NEW-2 — a split child still carries its PRE-split parent's whole-tract county
-                  // record verbatim (performSplit copies attrs onto both children; nothing re-fetches
-                  // a freshly subdivided CAD account). That is legitimate lineage, not a bad match, so
-                  // telling the user to "check calibration/projection" here is actively wrong — the
-                  // record is real, it just describes the larger tract this piece was cut from.
-                  const inheritedParent = !!selParcel.parentId;
-                  return (
-                    <div style={{ fontSize: 11, color, lineHeight: 1.5 }}>
-                      <b>{mark} Geometry check</b> · county {f2(county)} AC vs {f2(mine)} AC ({f0(diff * 100)}% {diff <= 0.02 ? "match" : "off"})
-                      {m2 && <div style={{ marginTop: 2, color: PAL.muted }}>County area field was in m² — converted to acres.</div>}
-                      {inheritedParent && diff > 0.05 && (
-                        <div style={{ marginTop: 2, color: PAL.muted }}>This county record is inherited from the parcel's pre-split parent tract — it describes the larger original tract, not this piece.</div>
-                      )}
-                      {!m2 && !inheritedParent && diff > 0.05 && <div style={{ marginTop: 2, color: PAL.muted }}>County acreage is approximate; check calibration/projection.</div>}
-                    </div>
-                  );
-                })()}
+                <div data-testid="parcel-stated-check" style={{ fontSize: 11, color, lineHeight: 1.5 }}>
+                  <b>{mark} Stated vs measured</b> · stated {f2(cmp.stated)} AC vs {f2(cmp.measured)} AC drawn ({f0(cmp.diffFrac * 100)}% {cmp.agreement === "match" ? "match" : "off"})
+                </div>
               </Section>
             );
           })()}
-          {/* Appraisal record + taxing units for the selected lot — LAZY (B1064 tranche).
-              Both bodies live in components/ParcelDataPanel.jsx and load only when a lot that
-              came from a county identify is actually selected; they used to ride the planner's
-              boot chunk for every session. NEW-5 fixed the duplicated Owner row and folded the
-              Legal blob away in the same move — see that file's header. */}
-          {_pid === "parcel" && pageOpen && selParcel && selParcel.attrs && (
-            <Section title="Appraisal data">
-              <LazyPanel name="Appraisal data" minHeight={140} label="Loading county record…">
-                <ParcelAppraisal attrs={selParcel.attrs} PAL={PAL} />
-              </LazyPanel>
-            </Section>
-          )}
-          {_pid === "parcel" && pageOpen && selParcel && selParcel.attrs && (
-            <Section title="Taxes" collapsed>
-              <LazyPanel name="Taxes" minHeight={64} label="Loading taxes…">
-                <ParcelTaxes taxInfo={taxInfo} PAL={PAL} />
-              </LazyPanel>
-            </Section>
-          )}
           {/* metrics. NEW-1 — `data-testid="yield-metrics"` marks the numbers as ONE readable
               region: the content-visibility harness compares this subtree's text before and after
               every hide, and its first cut scoped to `[data-surface="planner"]`'s parent instead,
@@ -23895,7 +23939,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               half-fixed. */}
           {origin && (
             <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 0, overflow: "hidden", pointerEvents: "none", visibility: revealed ? undefined : "hidden", background: (basemapOn && showAerial) ? "#3f3f3f" : PAL.paper }}>
-              <div ref={geoWrapRef} style={{ position: "absolute", inset: -geoOverscan, background: (basemapOn && showAerial) ? "#3f3f3f" : PAL.paper }} />
+              <div ref={geoWrapRef} style={{ position: "absolute", ...geoBoxInset, background: (basemapOn && showAerial) ? "#3f3f3f" : PAL.paper }} />
             </div>
           )}
           {/* NEW-1 — the MAP-TOP HOST: the stacking band that sits ABOVE the plan. It holds the
@@ -23907,7 +23951,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               takes a pointer event, so it can neither block a click nor steal a handle. */}
           {origin && (
             <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: CANVAS_Z.gisLine, overflow: "hidden", pointerEvents: "none", visibility: revealed ? undefined : "hidden" }}>
-              <div ref={geoTopWrapRef} style={{ position: "absolute", inset: -geoOverscan }}>
+              <div ref={geoTopWrapRef} style={{ position: "absolute", ...geoBoxInset }}>
                 <div ref={geoTopPaneRef} style={{ position: "absolute", left: 0, top: 0, width: 0, height: 0 }} />
               </div>
             </div>
@@ -24070,7 +24114,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   further down, only for an easement/encumbrance a user has actually styled)
                   are the exact same recipe. `pat-encumber` unchanged in every visible respect
                   (purple line, no wash) — see easements.js's ENCUMBRANCE_DEFAULT header. */}
-              <HatchPatternDef id="pat-encumber" hatchKey={ENCUMBRANCE_DEFAULT.hatch} color={ENCUMBRANCE_DEFAULT.stroke} wash={ENCUMBRANCE_DEFAULT.fillOpacity} lineOpacity={0.55} labelK={labelK} />
+              <HatchPatternDef id="pat-encumber" hatchKey={ENCUMBRANCE_DEFAULT.hatch} color={ENCUMBRANCE_DEFAULT.stroke} wash={ENCUMBRANCE_DEFAULT.fillOpacity} lineOpacity={0.55} labelK={labelK} anchor={hatchAnchor} />
               {/* v3 C4 — the pond's earthen berm ring: a warm-earth body at ~45% opacity + a 45°
                   hatch in a darker tone, so the embankment around a bermed pond reads as raised
                   ground distinct from the water it holds. */}
@@ -24091,7 +24135,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   now DEFAULT-only — the per-type pattern is exactly today's historic look and is
                   shared by every unedited easement of that type. */}
               {EASEMENT_TYPES.map((t) => (
-                <HatchPatternDef key={t.key} id={`pat-ease-${t.key}`} hatchKey={DEFAULT_EASE_HATCH} color={t.color} wash={DEFAULT_EASE_FILL_OPACITY} lineOpacity={0.5} labelK={labelK} />
+                <HatchPatternDef key={t.key} id={`pat-ease-${t.key}`} hatchKey={DEFAULT_EASE_HATCH} color={t.color} wash={DEFAULT_EASE_FILL_OPACITY} lineOpacity={0.5} labelK={labelK} anchor={hatchAnchor} />
               ))}
               {/* NEW-EASE-STYLE — one <pattern> per easement/encumbrance a user has actually
                   styled (colour/opacity/hatch edited in Properties). The common case — an
@@ -24099,18 +24143,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   above, so this stays cheap even on a plan with many easements. */}
               {markups.filter((m) => m.kind === "easement" && easementStyle(m).hasOverride).map((m) => {
                 const st = easementStyle(m);
-                return <HatchPatternDef key={`pat-ep-${m.id}`} id={`pat-ease-el-${m.id}`} hatchKey={st.hatch} color={st.fill} wash={st.fillOpacity} lineOpacity={0.5} labelK={labelK} />;
+                return <HatchPatternDef key={`pat-ep-${m.id}`} id={`pat-ease-el-${m.id}`} hatchKey={st.hatch} color={st.fill} wash={st.fillOpacity} lineOpacity={0.5} labelK={labelK} anchor={hatchAnchor} />;
               })}
               {markups.filter((m) => m.kind === "encumbrance" && encumbranceStyle(m).hasOverride).map((m) => {
                 const st = encumbranceStyle(m);
-                return <HatchPatternDef key={`pat-ec-${m.id}`} id={`pat-encumber-el-${m.id}`} hatchKey={st.hatch} color={st.fill} wash={st.fillOpacity} lineOpacity={0.55} labelK={labelK} />;
+                return <HatchPatternDef key={`pat-ec-${m.id}`} id={`pat-encumber-el-${m.id}`} hatchKey={st.hatch} color={st.fill} wash={st.fillOpacity} lineOpacity={0.55} labelK={labelK} anchor={hatchAnchor} />;
               })}
               {/* Closed markup hatch uses the shared catalog. Fill color remains the wash while
                   hatch color controls only the pattern, matching the two controls in Properties. */}
               {markups.filter((m) => ["rect", "ellipse", "polygon"].includes(m.kind) && m.hatch && m.hatch !== "none").map((m) => (
                 <HatchPatternDef key={`pat-mk-${m.id}`} id={`pat-markup-${m.id}`} hatchKey={m.hatch}
                   color={m.hatchColor || m.stroke || m.fill} washColor={m.fill} wash={m.fillOpacity ?? 0}
-                  lineOpacity={1} labelK={labelK} />
+                  lineOpacity={1} labelK={labelK} anchor={hatchAnchor} />
               ))}
             </defs>
 
@@ -24467,7 +24511,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <foreignObject data-export="skip" x={0} y={0} width={Math.max(1, size.w)} height={Math.max(1, size.h)} pointerEvents="none" style={{ overflow: "hidden" }}>
                     <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none",
                       transform: (regShift.dx || regShift.dy) ? `translate(${-regShift.dx}px, ${-regShift.dy}px)` : undefined }}>
-                      <div ref={geoFrontWrapRef} style={{ position: "absolute", inset: -geoOverscan }}>
+                      <div ref={geoFrontWrapRef} style={{ position: "absolute", ...geoBoxInset }}>
                         <div ref={geoFrontPaneRef} style={{ position: "absolute", left: 0, top: 0, width: 0, height: 0 }} />
                       </div>
                     </div>
@@ -26368,6 +26412,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             } : {
               width: narrow ? `min(320px, calc(100vw - ${54 + TOOLS_TAB_WIDTH_PX}px))` : leftWidth, // narrow: stop at the Tools edge tab so it never paints over the header ×/↻ (it did, at 20px of overlap)
               flex: "none", background: LEFT_PANEL_SURFACE, display: "flex", flexDirection: "column", minHeight: 0,
+              // NEW-2 (lib/panelWidth.js) — the panel paints at `leftWidth` but reserves only `leftFlowWidth` (whole
+              // notches), so the canvas edge never lands between pixel grids; the < one-notch leftover overlaps it.
+              ...(!narrow && leftOverlap > 0 ? { marginRight: -leftOverlap, position: "relative", zIndex: 3 } : null),
               ...(narrow ? { position: "absolute", left: 54, top: 0, bottom: 0, zIndex: 1100, boxShadow: "10px 0 28px rgba(0,0,0,0.35)" } : null),
             }}>
           {phoneSheetSolo && (<>
@@ -26619,7 +26666,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             );
             return (
               <Section title={`Easement · ${{ centerline: "Centerline strip", boundary: "Boundary", parceledge: "Parcel-edge strip" }[e.mode] || "Easement"}`} accent={t.color}>
-                {/* Type — shared portal popover so it never hides behind the rail / zoom rail */}
+                {/* Map label — what the map and the PDF draw. Empty = the automatic name (type + width),
+                    which keeps tracking those while no custom text is set. One undo frame per typing session. */}
+                <Field label={<b style={{ color: PAL.ink }}>Map label</b>}>
+                  <input value={e.labelOverride || ""} maxLength={120} data-testid="easement-map-label"
+                    onChange={(ev) => { const v = ev.target.value; coalesceLabelWrite(`ease-label-${e.id}`, (p) => setMarkups((a) => a.map((m) => (m.id === e.id ? withEaseRing(m, p) : m))))({ labelOverride: v }, { live: true }); }}
+                    onBlur={() => { labelSessionRef.current = null; }}
+                    placeholder={easementLabel({ ...e, labelOverride: "" })} style={txt} />
+                </Field>
                 <Field label="Type">
                   <button ref={easeTypeAnchor} style={{ ...chip, display: "flex", alignItems: "center", gap: 6 }} onClick={() => setEaseTypeMenu((o) => !o)}>
                     <span style={{ width: 9, height: 9, borderRadius: 2, background: t.color }} /> {t.label} <span style={{ color: PAL.muted }}>▾</span>
@@ -26632,17 +26686,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     ))}
                   </AnchoredMenu>
                 </Field>
-                <Field label="Holder / beneficiary"><input value={e.holder || ""} onChange={(ev) => setSelEasement({ holder: ev.target.value })} placeholder="e.g. CenterPoint" style={txt} /></Field>
                 {isStrip && <Field label="Width (ft)"><NumInput style={numInput} value={Math.round(e.width || 0)} min={1} onCommit={(n) => setSelEasement({ width: n })} /></Field>}
-                <Field label="Recording ref"><input value={e.recording || ""} onChange={(ev) => setSelEasement({ recording: ev.target.value })} placeholder="Vol/Pg or Clerk's #" style={txt} /></Field>
                 <Field label="Status">
                   <span style={{ display: "flex", gap: 5, width: 150 }}>
                     <button style={seg(e.status !== "proposed")} onClick={() => setSelEasement({ status: "existing" })}>Existing</button>
                     <button style={seg(e.status === "proposed")} onClick={() => setSelEasement({ status: "proposed" })}>Proposed</button>
                   </span>
                 </Field>
+                <Collapse sectionId="easement-recording" title="Recording details" defaultOpen={false} summary={easementRecordingSummary(e)}>
+                  <Field label="Holder / beneficiary"><input value={e.holder || ""} onChange={(ev) => setSelEasement({ holder: ev.target.value })} placeholder="e.g. CenterPoint" style={txt} /></Field>
+                  <Field label="Recording ref"><input value={e.recording || ""} onChange={(ev) => setSelEasement({ recording: ev.target.value })} placeholder="Vol/Pg or Clerk's #" style={txt} /></Field>
+                  {check("Exclusive easement", e.exclusive, "exclusive")}
+                </Collapse>
                 <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "8px 0", paddingTop: 8 }}>
-                  {check("Exclusive use", e.exclusive, "exclusive")}
                   {check("Restricts buildings", e.restrictsBuildings !== false, "restrictsBuildings")}
                   {check("Restricts paving", e.restrictsPaving === true, "restrictsPaving")}
                 </div>
@@ -26663,7 +26719,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   />
                   {est.hasOverride && <button style={{ ...chip, marginTop: 4 }} onClick={() => setSelEasement({ fill: null, stroke: null, fillOpacity: null, hatch: null })} title={`Revert to the ${t.label} type's default appearance`}>↺ Reset to type default</button>}
                 </div>
-                <Field label="Label"><input value={e.labelOverride || ""} onChange={(ev) => setSelEasement({ labelOverride: ev.target.value })} placeholder={easementLabel({ ...e, labelOverride: "" })} style={txt} /></Field>
                 {/* B620 — inline label riding the easement (distinct from the centroid caption above; double-click the
                     easement also opens this in place). inlineLabel doesn't touch the ring, so a plain spread is safe;
                     onFocus pushes one undo frame per edit. */}
@@ -29661,7 +29716,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           </div>
           {/* drag handle to resize the menu (desktop only — on phones the panel is a fixed-width overlay) */}
           {!narrow && <div onPointerDown={startLeftResize} title="Drag to resize"
-            style={{ width: 6, flex: "none", cursor: "col-resize", background: PAL.panelLine, borderRight: `1px solid ${PAL.panelLine}` }} />}
+            style={{ width: 6, flex: "none", cursor: "col-resize", background: PAL.panelLine, borderRight: `1px solid ${PAL.panelLine}`,
+              ...(leftOverlap > 0 ? { transform: `translateX(${leftOverlap}px)`, position: "relative", zIndex: 3 } : null) }} />}
           </>)}
         </div>
       </div>

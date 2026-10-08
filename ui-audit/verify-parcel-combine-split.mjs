@@ -122,7 +122,7 @@ try {
   const det = await T("parcel-made-from").innerText();
   ok("(2) Made from lists each original by name, APN and acres", /Gordon Smith Tract/.test(det) && /Kilgore Parcel/.test(det) && /Third Lot/.test(det) && /1002/.test(det) && /3\.67 AC/.test(det));
   await T("parcel-page-back").click(); await T("parcels-panel").waitFor({ timeout: 8000 });
-  ok("(2) 'Combined from 3 lots' on the row; Undo toast shown", (await T(`parcel-table-row-${tractP.id}`).innerText()).includes("Combined from 3 lots") && (await page.getByText("Combined 3 parcels into Tract A").count()) > 0);
+  ok("(2) 'Combined from 3 parcels' on the row (the sources are plain drawn lots, not county lots); Undo toast shown", (await T(`parcel-table-row-${tractP.id}`).innerText()).includes("Combined from 3 parcels") && (await page.getByText("Combined 3 parcels into Tract A").count()) > 0);
   await shot("03-tract");
   const stateA = flat(afterPanel).replace(/"from":\[[^\]]*\]/g, '"from":3');
 

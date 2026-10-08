@@ -483,8 +483,8 @@ describe("plumbing", () => {
 /* ───────────────────────────────────────── the scaling instrument's own verdict ───────────────────────────────────────── */
 import { storeScalingVerdict } from "../ui-audit/lib/storeScaling.mjs";
 describe("storeScalingVerdict (the acceptance instrument) — it can go red, and it refuses to score a run that measured the wrong program", () => {
-  const ok = (plans, kb, largest = 90, layout = { indexed: true, entries: plans + 1, legacyKB: plans * 8 }) => ({ plans, edits: 8, writeKBMedian: kb, writeKBMax: kb + 5, largestWriteKB: largest, layoutObserved: layout });
-  const blobArm = (plans, kb) => ({ plans, edits: 8, writeKBMedian: kb, writeKBMax: kb, largestWriteKB: kb, layoutObserved: { indexed: false, entries: 0, legacyKB: kb } });
+  const ok = (plans, kb, largest = 90, layout = { indexed: true, entries: plans + 1, legacyKB: plans * 8, planWrites: 6 }) => ({ plans, edits: 8, writeKBMedian: kb, writeKBMax: kb + 5, largestWriteKB: largest, layoutObserved: layout });
+  const blobArm = (plans, kb) => ({ plans, edits: 8, writeKBMedian: kb, writeKBMax: kb, largestWriteKB: kb, layoutObserved: { indexed: false, entries: 0, legacyKB: kb, planWrites: 0 } });
   const good = { plan: [ok(5, 100), ok(50, 101), ok(150, 102)], blob: [blobArm(5, 140), blobArm(50, 500), blobArm(150, 1250)] };
   it("passes when per-plan is flat and the un-split arm grows", () => { expect(storeScalingVerdict(good).pass).toBe(true); });
   it("FAILS when the per-plan arm's write grows with the library (the defect it exists to catch)", () => {

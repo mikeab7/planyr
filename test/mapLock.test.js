@@ -16,7 +16,7 @@ import { describe, it, expect } from "vitest";
 import {
   FT_PER_DEG, mercDeg, invMercDeg, lngLatToFeet, feetToLatLngPair,
   ppfToZoom, zoomToPpf, lockOffsetPx, exactContainerPoint, registrationLayoutMayHaveChanged,
-  resolvedLayoutInputs, viewValuesEqual,
+  resolvedLayoutInputs, viewValuesEqual, mapBoxInset, mapBoxCenterX, basemapWrapPoint,
 } from "../src/workspaces/site-planner/lib/mapLock.js";
 import { lngLatRingToFeet, feetToLatLng } from "../src/workspaces/site-planner/lib/arcgis.js";
 
@@ -299,5 +299,29 @@ describe("viewValuesEqual — the setView dispatch guard", () => {
     // state exactly, which is the concrete case that was silently re-triggering the registration
     // effect before this guard existed.
     expect(viewValuesEqual({ ppf: 0.35, offX: 60, offY: 60 }, { ppf: 0.35, offX: 60, offY: 60 })).toBe(true);
+  });
+});
+
+describe("NEW-2 — the basemap box reaches under the docked column so it never moves with the panel", () => {
+  it("inset: overscan on every side plus the dock on the left; a dock of 0 is the old symmetric box", () => {
+    expect(mapBoxInset(120, 0)).toEqual({ top: -120, right: -120, bottom: -120, left: -120 });
+    expect(mapBoxInset(120, 360)).toEqual({ top: -120, right: -120, bottom: -120, left: -480 });
+    expect(mapBoxInset(120, NaN).left).toBe(-120);
+  });
+  it("the box's left edge and width are constant across a panel drag (canvas left + Δ, width − Δ)", () => {
+    const box = (rowLeft, dock, w, o) => { const i = mapBoxInset(o, dock); const canvasLeft = rowLeft + dock; return { left: canvasLeft + i.left, width: w - i.left - i.right }; };
+    const a = box(0, 354, 912, 186), b = box(0, 474, 792, 186);
+    expect(b).toEqual(a);
+  });
+  it("centre in canvas px is the box middle; the wrap point carries the dock on x only", () => {
+    expect(mapBoxCenterX(900, 0)).toBe(450);
+    expect(mapBoxCenterX(900, 300)).toBe(300);
+    const p = basemapWrapPoint({ x: 500, y: 400 }, { x: 0, y: 0 }, { x: 0, y: 0 }, 100, 50);
+    expect(p).toEqual({ x: 350, y: 300 });
+  });
+  it("a change of dock alone re-reads the container", () => {
+    const li = { w: 800, h: 560, overscan: 107, dockX: 300 };
+    expect(registrationLayoutMayHaveChanged(li, 800, 560, 107, 300)).toBe(false);
+    expect(registrationLayoutMayHaveChanged(li, 800, 560, 107, 304)).toBe(true);
   });
 });

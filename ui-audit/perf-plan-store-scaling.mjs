@@ -33,7 +33,7 @@ for (const layout of ["plan", "blob"]) {
     const d = JSON.parse(readFileSync(out, "utf8"));
     const log = d.editLog || [];
     arms[layout].push({
-      plans: n, edits: log.length, layoutObserved: d.layoutObserved,
+      plans: n, edits: log.length, layoutObserved: { ...d.layoutObserved, planWrites: log.reduce((s, e) => s + (e.big?.wP || 0), 0) },
       writeKBMedian: +med(log.map((e) => (e.big?.wBytes || 0) / 1000)).toFixed(1),
       writeKBMax: +Math.max(0, ...log.map((e) => (e.big?.wBytes || 0) / 1000)).toFixed(1),
       largestWriteKB: +Math.max(0, ...log.map((e) => (e.big?.wMax || 0) / 1000)).toFixed(1),

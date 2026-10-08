@@ -63,14 +63,14 @@ const INSTRUMENT = `(() => {
   requestAnimationFrame(tick);
   /* COUNTS, not times: how many WHOLE-STORE-sized (> 500 KB) JSON.parse / JSON.stringify / localStorage.setItem calls ran. The
    * owner's ~200 ms hitch was exactly these, and a count is deterministic where a millisecond figure on a shared runner is not. */
-  const BIG = 500000; window.__big = { parse: 0, stringify: 0, set: 0, setMs: 0, wN: 0, wBytes: 0, wMax: 0, wMs: 0 };
+  const BIG = 500000; window.__big = { parse: 0, stringify: 0, set: 0, setMs: 0, wN: 0, wBytes: 0, wMax: 0, wMs: 0, wP: 0 };
   window.__bigStacks = [];
   const P = JSON.parse; JSON.parse = function (t, ...r) { if (typeof t === "string" && t.length > BIG) { window.__big.parse++; if (window.__traceParse) window.__bigStacks.push(new Error().stack.split(String.fromCharCode(10)).slice(2, 7).map((x) => x.trim().split("/assets/").pop()).join(" < ")) } return P.call(this, t, ...r); };
   const S = JSON.stringify; JSON.stringify = function (...a) { const o = S.apply(this, a); if (typeof o === "string" && o.length > BIG) window.__big.stringify++; return o; };
   /* B2165120: EVERY write to the plan store (planarfit:sites:*, history ring excluded) — count, bytes, the largest single write and the time inside setItem.
    * "An edit writes only that plan" is a statement about these, and a count/size is deterministic where a millisecond figure is not. */
-  const SI = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (typeof v === "string" && typeof k === "string" && k.startsWith("planarfit:sites:") && !k.startsWith("planarfit:sites:history:") && !k.startsWith("planarfit:sites:deltomb:")) { const t = performance.now(); try { return SI.call(this, k, v); } finally { const b = window.__big; b.wN++; b.wBytes += v.length; if (v.length > b.wMax) b.wMax = v.length; b.wMs += performance.now() - t; } } if (typeof v === "string" && v.length > BIG) { window.__big.set++; const t = performance.now(); try { return SI.call(this, k, v); } finally { window.__big.setMs += performance.now() - t; } } return SI.call(this, k, v); };
-  window.__reset = () => { window.__lt.length = 0; window.__loaf.length = 0; window.__fr.length = 0; window.__big = { parse: 0, stringify: 0, set: 0, setMs: 0, wN: 0, wBytes: 0, wMax: 0, wMs: 0 }; window.__bigStacks.length = 0; };
+  const SI = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (typeof v === "string" && typeof k === "string" && k.startsWith("planarfit:sites:") && !k.startsWith("planarfit:sites:history:") && !k.startsWith("planarfit:sites:deltomb:")) { const t = performance.now(); try { return SI.call(this, k, v); } finally { const b = window.__big; b.wN++; if (k.includes(":p:")) b.wP++; b.wBytes += v.length; if (v.length > b.wMax) b.wMax = v.length; b.wMs += performance.now() - t; } } if (typeof v === "string" && v.length > BIG) { window.__big.set++; const t = performance.now(); try { return SI.call(this, k, v); } finally { window.__big.setMs += performance.now() - t; } } return SI.call(this, k, v); };
+  window.__reset = () => { window.__lt.length = 0; window.__loaf.length = 0; window.__fr.length = 0; window.__big = { parse: 0, stringify: 0, set: 0, setMs: 0, wN: 0, wBytes: 0, wMax: 0, wMs: 0, wP: 0 }; window.__bigStacks.length = 0; };
   window.__read = () => ({ lt: window.__lt.slice(), loaf: window.__loaf.slice(), fr: window.__fr.slice(), big: { ...window.__big, setMs: +window.__big.setMs.toFixed(1), wMs: +window.__big.wMs.toFixed(1) }, stacks: window.__bigStacks.slice() });
 })();`;
 
@@ -106,7 +106,7 @@ try {
     let bytes = 0, i = 0;
     while ((STORE_PLANS ? i < STORE_PLANS : bytes < STORE_KB * 1024) && i < 600) {
       const rec = fixtureSite(readFixture(names[i % names.length]), { id: `xtra-${i}`, name: `Extra ${i}`, site: `Extra ${i}` });
-      if (PLAN_KB) for (const k of ["els", "markups", "measures", "callouts", "parcelDrawings", "sheetOverlays", "parcels"]) { while (Array.isArray(rec[k]) && rec[k].length > 1 && JSON.stringify(rec).length > PLAN_KB * 1024) rec[k] = rec[k].slice(0, Math.ceil(rec[k].length * 0.7)); }
+      if (PLAN_KB) for (const k of ["els", "markups", "measures", "callouts", "parcelDrawings", "sheetOverlays", "parcels"]) { while (Array.isArray(rec[k]) && rec[k].length > 1 && JSON.stringify(rec).length > PLAN_KB * 1024) rec[k] = rec[k].slice(0, Math.floor(rec[k].length * 0.7)); }
       rec.groupId = `xtra-g-${i}`; rec.status = rec.status || "pursuit"; rec.role = rec.role || "pursuit"; extra[rec.id] = rec; bytes += JSON.stringify(rec).length; i++;
     }
     out.store = { extraPlans: i, extraKB: Math.round(bytes / 1024), layout: LAYOUT };

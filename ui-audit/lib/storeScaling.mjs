@@ -22,8 +22,8 @@ export function storeScalingVerdict(arms, budget = {}) {
   voidIf(plan.length < MIN_SIZES || blob.length < MIN_SIZES, `needs ≥ ${MIN_SIZES} library sizes in BOTH arms (got plan ${plan.length}, blob ${blob.length})`);
   if (plan.length && blob.length) {
     voidIf(plan[plan.length - 1].plans < plan[0].plans * MIN_SPREAD, `library sizes ${plan[0].plans}…${plan[plan.length - 1].plans} are not ≥ ${MIN_SPREAD}× apart — a flat line over a narrow range proves nothing`);
-    for (const a of plan) voidIf(!(a.layoutObserved && a.layoutObserved.indexed && a.layoutObserved.entries > 0), `the "plan" arm at ${a.plans} plans did not run per-plan (observed ${JSON.stringify(a.layoutObserved)}) — it measured the wrong program`);
-    for (const a of blob) voidIf(a.layoutObserved && a.layoutObserved.indexed, `the "blob" arm at ${a.plans} plans ran per-plan — the kill switch did not hold`);
+    for (const a of plan) voidIf(!(a.layoutObserved && a.layoutObserved.indexed && a.layoutObserved.entries > 0 && a.layoutObserved.planWrites > 0), `the "plan" arm at ${a.plans} plans did not run per-plan (observed ${JSON.stringify(a.layoutObserved)}) — it measured the wrong program`);
+    for (const a of blob) voidIf(a.layoutObserved && a.layoutObserved.planWrites > 0, `the "blob" arm at ${a.plans} plans wrote per-plan entries — the kill switch did not hold`);
     for (const a of [...plan, ...blob]) voidIf((a.edits || 0) < MIN_EDITS_PER_ARM, `${a.edits || 0} edits at ${a.plans} plans — needs ≥ ${MIN_EDITS_PER_ARM}`);
   }
   if (out.void) return out;
