@@ -100,12 +100,24 @@ export function esriPolygons(geometry) {
     (signedArea(r) < 0 ? outers : holes).push(r);
   }
   const polys = outers.map((outer) => ({ outer, holes: [] }));
+  /* ⛔ Each outer's bbox and area are computed ONCE. The nesting below asks, for every hole, which outer contains it, and used to
+   * run a full point-in-ring walk of every outer (and re-derive its area) per hole — H × O × V on a city like Baytown (18 holes,
+   * thousands of vertices), the largest single step left in the share pass after the window clip (~25 ms in Node, ~46 ms in
+   * Chrome). A bbox miss cannot contain the point, so skipping it changes no answer; the choice among containing outers is
+   * still the smallest area, first one winning a tie, exactly as before. */
+  const info = polys.map((p) => {
+    let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+    for (const [x, y] of p.outer) { if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y; }
+    return { minx, miny, maxx, maxy, area: Math.abs(signedArea(p.outer)) };
+  });
   for (const h of holes) {
     let best = null, bestArea = Infinity;
-    for (const p of polys) {
-      if (!pointInRing(h[0], p.outer)) continue;
-      const a = Math.abs(signedArea(p.outer));
-      if (a < bestArea) { best = p; bestArea = a; }
+    const [hx, hy] = h[0];
+    for (let i = 0; i < polys.length; i++) {
+      const b = info[i];
+      if (hx < b.minx || hx > b.maxx || hy < b.miny || hy > b.maxy) continue;
+      if (!pointInRing(h[0], polys[i].outer)) continue;
+      if (b.area < bestArea) { best = polys[i]; bestArea = b.area; }
     }
     if (best) best.holes.push(h);
   }
@@ -174,14 +186,83 @@ export function unionAreaSqM(polys, ref) {
 
 /* Area (m²) of subject ∩ clip. Both sides are dissolved first, so overlapping subject parcels and
  * a jurisdiction published as several adjacent polygons both measure once. */
-export function intersectionAreaSqM(subject, clipPolys, ref) {
+export function intersectionAreaSqM(subject, clipPolys, ref, clipNorm) {
   if (!subject || !subject.length || !clipPolys || !clipPolys.length) return 0;
   const clip = new ClipperLib.Clipper();
   clip.AddPaths(normalizePolys(subject, ref), ClipperLib.PolyType.ptSubject, true);
-  clip.AddPaths(normalizePolys(clipPolys, ref), ClipperLib.PolyType.ptClip, true);
+  /* `clipNorm` is `normalizePolys(clipPolys, ref)` computed ONCE by a caller that intersects the same jurisdiction with several
+   * subjects (the whole site, then each parcel). Dissolving a city boundary is the expensive half of this call and its result
+   * does not depend on the subject — doing it again per parcel was most of the cost of a share. */
+  clip.AddPaths(clipNorm || normalizePolys(clipPolys, ref), ClipperLib.PolyType.ptClip, true);
   const out = new ClipperLib.Paths();
   clip.Execute(ClipperLib.ClipType.ctIntersection, out, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
   return pathsArea(out);
+}
+
+/* ═══ WINDOW CLIP — measure against the part of a jurisdiction that can matter, not the whole published polygon ═══
+ *
+ * ⛔ WHY (slow report 55807aa9). A city boundary is published whole — TxGIO's Baytown feature is 335 KB — and a share only ever
+ * asks about the ground under the site. Dissolving the whole polygon (clipper's cost is in its vertex count) for every parcel
+ * of every city on every plan open held the main thread for ~1 s. Cutting each ring to a window around the site first leaves
+ * every area UNCHANGED (the site lies strictly inside the window, so nothing it touches is removed) and makes the polygon a
+ * small fraction of its published size.
+ *
+ * The cut is Sutherland–Hodgman against an axis-aligned lon/lat rectangle. That is exact here because `toLocal` is linear in
+ * lon/lat (a straight source edge stays straight), and rings are cut INDEPENDENTLY — outer and holes — which is correct for a
+ * region defined as outer minus holes (the clip of a difference is the difference of the clips). A ring wholly outside is
+ * dropped; one that swallows the window becomes the window. The artificial edges the cut creates lie ON the window boundary,
+ * at least `padM` from the site, which is what keeps `distanceToBoundaryM` exact whenever it answers below `padM`. */
+export function siteWindow(rings, padM) {
+  let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+  for (const r of rings || []) for (const [x, y] of r || []) {
+    if (x < minx) minx = x; if (x > maxx) maxx = x;
+    if (y < miny) miny = y; if (y > maxy) maxy = y;
+  }
+  if (!Number.isFinite(minx)) return null;
+  const m = metresPerDegree((miny + maxy) / 2);
+  // 5% slack on the metre pad, and the longitude pad taken at the window's own latitude edge (cos shrinks poleward).
+  const worst = metresPerDegree(Math.max(Math.abs(miny), Math.abs(maxy)));
+  const padLat = (padM * 1.05) / m.lat, padLon = (padM * 1.05) / Math.min(m.lon, worst.lon);
+  return { minx: minx - padLon, miny: miny - padLat, maxx: maxx + padLon, maxy: maxy + padLat, padM };
+}
+
+function clipRingEdge(pts, inside, cross) {
+  const out = [];
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    const ia = inside(a), ib = inside(b);
+    if (ia) out.push(a);
+    if (ia !== ib) out.push(cross(a, b));
+  }
+  return out;
+}
+export function clipRingToWindow(ring, w) {
+  let pts = ring;
+  const atX = (x) => (a, b) => [x, a[1] + ((b[1] - a[1]) * (x - a[0])) / (b[0] - a[0])];
+  const atY = (y) => (a, b) => [a[0] + ((b[0] - a[0]) * (y - a[1])) / (b[1] - a[1]), y];
+  pts = clipRingEdge(pts, (p) => p[0] >= w.minx, atX(w.minx)); if (pts.length < 3) return null;
+  pts = clipRingEdge(pts, (p) => p[0] <= w.maxx, atX(w.maxx)); if (pts.length < 3) return null;
+  pts = clipRingEdge(pts, (p) => p[1] >= w.miny, atY(w.miny)); if (pts.length < 3) return null;
+  pts = clipRingEdge(pts, (p) => p[1] <= w.maxy, atY(w.maxy));
+  return pts.length >= 3 ? pts : null;
+}
+/* A ring entirely inside the window is returned AS IS (same array), so a small jurisdiction costs nothing. */
+const ringInside = (r, w) => { for (const [x, y] of r) if (x < w.minx || x > w.maxx || y < w.miny || y > w.maxy) return false; return true; };
+export function clipPolysToWindow(polys, w) {
+  if (!w) return polys;
+  const out = [];
+  for (const p of polys || []) {
+    if (!p || !p.outer) continue;
+    const outer = ringInside(p.outer, w) ? p.outer : clipRingToWindow(p.outer, w);
+    if (!outer) continue;
+    const holes = [];
+    for (const h of p.holes || []) {
+      const c = ringInside(h, w) ? h : clipRingToWindow(h, w);
+      if (c) holes.push(c);
+    }
+    out.push({ outer, holes });
+  }
+  return out;
 }
 
 /* Shortest distance (metres) from any subject vertex to any boundary segment of the clip set.
@@ -211,10 +292,23 @@ const ptSegDist = (v, a, b) => {
 const segSegDist = (p1, p2, q1, q2) =>
   Math.min(ptSegDist(p1, q1, q2), ptSegDist(p2, q1, q2), ptSegDist(q1, p1, p2), ptSegDist(q2, p1, p2));
 
+/* ⛔ SQUARED DISTANCES THROUGH THE INNER LOOP. This sweep is O(subject segments × boundary segments) and ran `Math.hypot` four times
+ * per surviving pair (plus once per bbox reject); comparing squares and taking ONE square root at the end returns the same number to
+ * floating-point rounding and is the difference between ~25 ms and a few ms on a windowed boundary (slow report 55807aa9). */
+const ptSegDist2 = (v, a, b) => {
+  const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+  let t = l2 ? ((v[0] - a[0]) * dx + (v[1] - a[1]) * dy) / l2 : 0;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const ex = v[0] - (a[0] + t * dx), ey = v[1] - (a[1] + t * dy);
+  return ex * ex + ey * ey;
+};
+const segSegDist2 = (p1, p2, q1, q2) =>
+  Math.min(ptSegDist2(p1, q1, q2), ptSegDist2(p2, q1, q2), ptSegDist2(q1, p1, p2), ptSegDist2(q2, p1, p2));
+
 export function distanceToBoundaryM(subject, clipPolys, ref) {
   const A = segsOf(subject, ref), B = segsOf(clipPolys, ref);
   if (!A.length || !B.length) return Infinity;
-  let best = Infinity;
+  let best2 = Infinity;
   for (const [a1, a2] of A) {
     const axmin = Math.min(a1[0], a2[0]), axmax = Math.max(a1[0], a2[0]);
     const aymin = Math.min(a1[1], a2[1]), aymax = Math.max(a1[1], a2[1]);
@@ -222,12 +316,12 @@ export function distanceToBoundaryM(subject, clipPolys, ref) {
       // bbox reject: if the boxes are already further apart than the best, the segments are too
       const dx = Math.max(0, Math.max(axmin - Math.max(b1[0], b2[0]), Math.min(b1[0], b2[0]) - axmax));
       const dy = Math.max(0, Math.max(aymin - Math.max(b1[1], b2[1]), Math.min(b1[1], b2[1]) - aymax));
-      if (Math.hypot(dx, dy) >= best) continue;
-      const d = segSegDist(a1, a2, b1, b2);
-      if (d < best) best = d;
+      if (dx * dx + dy * dy >= best2) continue;
+      const d2 = segSegDist2(a1, a2, b1, b2);
+      if (d2 < best2) best2 = d2;
     }
   }
-  return best;
+  return Math.sqrt(best2);
 }
 
 /* Total length (m) of clip boundary running within `band` metres of the subject — the only part
@@ -281,7 +375,7 @@ export function shareConfidence(toleranceM, boundaryLenM, areaSqM, max = SHARE_M
 export function areaShare(subject, clipPolys, ref, opts = {}) {
   const toleranceM = Number(opts.toleranceM) || 0;
   const totalSqM = opts.totalSqM != null ? opts.totalSqM : unionAreaSqM(subject, ref);
-  const insideSqM = intersectionAreaSqM(subject, clipPolys, ref);
+  const insideSqM = intersectionAreaSqM(subject, clipPolys, ref, opts.clipNorm);
   const distanceM = opts.skipDistance ? Infinity : distanceToBoundaryM(subject, clipPolys, ref);
   const nearLenM = toleranceM > 0 ? boundaryLengthNearM(subject, clipPolys, ref, Math.max(toleranceM, 1)) : 0;
   const conf = shareConfidence(toleranceM, nearLenM, totalSqM, opts.maxUncertainty);
