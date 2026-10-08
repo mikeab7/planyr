@@ -223,7 +223,7 @@ try {
   const chunks = await page.evaluate(() => [...document.querySelectorAll("script[src]")].map((e) => e.getAttribute("src")).filter((x) => /Food|index/.test(x)).slice(0, 3));
   console.log("served build:", JSON.stringify(build), "| scripts:", JSON.stringify(chunks));
 } catch (e) {
-  row("run aborted", false, String(e.message).split("\n")[0]);
+  row("run aborted", false, String(e.message).split("\n")[0] + " @ " + ((e.stack || "").split("\n").find((l) => l.includes("verify-food-lists-live")) || "").trim());
 } finally {
   // CLEANUP — delete ONLY what this run created, then verify it is gone (owner constraint #15). Never anything else.
   const res = await page.evaluate(async ({ names, visits, wish }) => {
