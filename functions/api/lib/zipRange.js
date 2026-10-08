@@ -34,8 +34,11 @@ export async function remoteZipEntries(url, fetchImpl = fetch) {
   return entries;
 }
 
-/** Stream an entry's lines to `onLine(line) → true to stop`. Returns { lines, bytes, stopped }. */
-export async function scanZipEntryLines(url, entry, onLine, fetchImpl = fetch) {
+/** Stream an entry as blocks of COMPLETE lines: `onBlock(text) → true to stop` (text = whole lines, each ending
+ * "\n"). Handing the caller a block rather than a line at a time is the point — a 570 MB roll is ~1.8M lines and
+ * any per-line JavaScript blows the Worker's CPU budget (Cloudflare error 1102, measured); native indexOf over a
+ * block does not. Returns { bytes, stopped }. */
+export async function scanZipEntryBlocks(url, entry, onBlock, fetchImpl = fetch) {
   const lh = new Uint8Array(await (await fetchImpl(url, { headers: { ...UA, range: `bytes=${entry.off}-${entry.off + 63}` } })).arrayBuffer());
   const start = entry.off + 30 + u16(lh, 26) + u16(lh, 28);
   const res = await fetchImpl(url, { headers: { ...UA, range: `bytes=${start}-${start + entry.csize - 1}` } });
@@ -43,15 +46,21 @@ export async function scanZipEntryLines(url, entry, onLine, fetchImpl = fetch) {
   const body = entry.method === 0 ? res.body : res.body.pipeThrough(new DecompressionStream("deflate-raw"));
   const rd = body.getReader();
   const dec = new TextDecoder();
-  let buf = "", lines = 0, bytes = 0, stopped = false;
-  outer: for (;;) {
+  let pending = "", bytes = 0, stopped = false;
+  for (;;) {
     const { value, done } = await rd.read();
-    if (value) { bytes += value.length; buf += dec.decode(value, { stream: !done }); }
-    const parts = buf.split("\n");
-    buf = done ? "" : parts.pop();
-    for (const l of parts) { lines++; if (onLine(l.replace(/\r$/, ""))) { stopped = true; break outer; } }
-    if (done) { if (buf) { lines++; if (onLine(buf.replace(/\r$/, ""))) stopped = true; } break; }
+    if (value) { bytes += value.length; pending += dec.decode(value, { stream: !done }); }
+    let block;
+    if (done) { block = pending && !pending.endsWith("\n") ? pending + "\n" : pending; pending = ""; }
+    else {
+      const L = pending.lastIndexOf("\n");
+      if (L < 0) continue;
+      block = pending.slice(0, L + 1);
+      pending = pending.slice(L + 1);
+    }
+    if (block && onBlock(block)) { stopped = true; break; }
+    if (done) break;
   }
   await rd.cancel().catch(() => {});
-  return { lines, bytes, stopped };
+  return { bytes, stopped };
 }

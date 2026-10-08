@@ -73,7 +73,10 @@ describe("lookupHarris (stubbed zip)", () => {
       if (!url.includes("/2026/")) return new Response("nope", { status: 404 });
       const m = /bytes=(-?)(\d+)-?(\d*)/.exec(opts.headers.range);
       const [s, e] = m[1] === "-" ? [Math.max(0, all.length - Number(m[2])), all.length - 1] : [Number(m[2]), Math.min(all.length - 1, Number(m[3]))];
-      return new Response(all.slice(s, e + 1), { status: 206, headers: { "content-range": `bytes ${s}-${e}/${all.length}` } });
+      const slice = all.slice(s, e + 1);
+      // deliver in 37-byte chunks so account groups and lines straddle chunk boundaries
+      const body = new ReadableStream({ start(c) { for (let i = 0; i < slice.length; i += 37) c.enqueue(slice.slice(i, i + 37)); c.close(); } });
+      return new Response(body, { status: 206, headers: { "content-range": `bytes ${s}-${e}/${all.length}` } });
     });
   }
   it("walks zip tail → entry → early-stop scan and returns the eight units", async () => {

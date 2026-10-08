@@ -12,7 +12,7 @@
  * incomplete and the table stays hidden (owner rule — a partial list understates the total).
  * Verified against HCAD's own page for acct 0591420000105: 016/040/041/042/043/044/046/640, total 1.970988.
  */
-import { remoteZipEntries, scanZipEntryLines } from "./zipRange.js";
+import { remoteZipEntries, scanZipEntryBlocks } from "./zipRange.js";
 
 export const HCAD_PDATA_URL = "https://hcad.org/hcad-online-services/pdata/";
 export const hcadZipUrl = (year) => `https://download.hcad.org/data/CAMA/${year}/Real_jur_exempt.zip`;
@@ -62,6 +62,34 @@ export function buildUnits(rows, rates) {
   return { complete: true, units, total: round6(units.reduce((s, u) => s + u.rate, 0)) };
 }
 
+/**
+ * The account's rows from jur_value.txt, found with native substring search over whole blocks (no per-line JS —
+ * a per-line parse of the ~1.8M-line prefix exceeded the Worker CPU budget, error 1102). The file is sorted by
+ * account, so an account's rows are CONTIGUOUS: reading stops as soon as a different line follows a match.
+ * Pure given `scan`.
+ */
+export async function findAccountRows(url, entry, acct, fetchImpl) {
+  const needle = `\n${acct}\t`;
+  const lines = [];
+  let seen = false, tail = "\n"; // `tail` carries the boundary newline so a match at a block start is found
+  await scanZipEntryBlocks(url, entry, (blk) => {
+    const text = tail + blk;
+    let at = text.indexOf(needle), lastEnd = -1;
+    while (at !== -1) {
+      const end = text.indexOf("\n", at + 1);
+      lines.push(text.slice(at + 1, end).replace(/\r$/, ""));
+      lastEnd = end;
+      at = text.indexOf(needle, end);
+    }
+    if (lastEnd !== -1) seen = true;
+    tail = "\n";
+    // contiguous group: stop once a non-matching line follows a hit (or a whole block passes with none after hits)
+    if (lastEnd !== -1) return lastEnd < text.length - 1;
+    return seen;
+  }, fetchImpl);
+  return lines.map(parseJurValueLine).filter(Boolean);
+}
+
 /** Latest roll year first. Tries the current year, then the previous one (a roll appears once HCAD publishes it). */
 export async function lookupHarris(acct, { years, fetchImpl = fetch } = {}) {
   const now = new Date().getUTCFullYear();
@@ -71,16 +99,10 @@ export async function lookupHarris(acct, { years, fetchImpl = fetch } = {}) {
     const url = hcadZipUrl(year);
     const entries = await remoteZipEntries(url, fetchImpl);
     if (!entries || !entries["jur_value.txt"] || !entries["jur_tax_dist_exempt_value_rate.txt"]) continue;
-    const rows = [];
-    await scanZipEntryLines(url, entries["jur_value.txt"], (line) => {
-      const r = parseJurValueLine(line);
-      if (!r) return false;
-      if (r.acct === acct) { rows.push(r); return false; }
-      return r.acct > acct; // sorted by account: past it, stop reading
-    }, fetchImpl);
+    const rows = await findAccountRows(url, entries["jur_value.txt"], acct, fetchImpl);
     if (!rows.length) { lastReason = `account ${acct} is not in the ${year} HCAD roll`; continue; }
     let text = "";
-    await scanZipEntryLines(url, entries["jur_tax_dist_exempt_value_rate.txt"], (l) => { text += l + "\n"; return false; }, fetchImpl);
+    await scanZipEntryBlocks(url, entries["jur_tax_dist_exempt_value_rate.txt"], (blk) => { text += blk; return false; }, fetchImpl);
     const built = buildUnits(rows, parseRateTable(text));
     if (built.complete) {
       return { complete: true, year, source: "Harris Central Appraisal District — taxing units & adopted rates", sourceUrl: HCAD_PDATA_URL, units: built.units, total: built.total };
