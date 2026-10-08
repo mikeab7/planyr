@@ -163,26 +163,25 @@ try {
   log(false, `aborted during ${stage}: ${String(e && e.message || e).split("\n")[0]}`);
 } finally {
   // ---- STEP 6: cleanup, always ----
-  // MEASURED TRAP: deleting while the working browser still has the plan open does NOT stick — closing that
-  // browser flushes its in-memory copy straight back into the account (a first and a second version of this step
-  // both "passed" and the row reappeared). So: close the working session FIRST, delete from a FRESH signed-in
-  // session that never opened the plan (trash → permanent delete, the same two steps the app takes), wait, then
-  // prove absence from a THIRD fresh session.
+  // MEASURED TRAPS (three versions of this step each "passed" and the row came back):
+  //  (a) deleting while the working browser still holds the plan does not stick — closing it re-uploads its copy;
+  //  (b) even from a fresh session, a PERMANENT delete is re-created within ~2 s by another already-open client
+  //      on the shared test account, because a hard delete leaves it no tombstone to see. Trashing first (the
+  //      app's own order — the DB refuses a hard delete of a live site anyway) lets every open client learn the
+  //      site is deleted; only then is the hard delete safe.
+  // So: close the working session → fresh session trashes → wait 2 min → fresh session hard-deletes → wait →
+  // a third fresh session proves absence.
   try { await s.close(); } catch (_) {}
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const step = async (fn) => { const f = await openSignedIn({ base: "https://planyr.io" }); try { return await f.page.evaluate(fn, ID); } finally { await f.close(); } };
   try {
-    await new Promise((r) => setTimeout(r, 4000));
-    const f = await openSignedIn({ base: "https://planyr.io" });
-    const r = await f.page.evaluate(async (id) => {
-      const t = await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id).select("id");
-      const d = await window.pfSupabase.from("sites").delete().eq("id", id).select("id");
-      return { trashed: (t.data || []).length, deleted: (d.data || []).length, err: (d.error && String(d.error.message)) || null };
-    }, ID);
-    await f.page.waitForTimeout(6000);
-    await f.close();
-    const g = await openSignedIn({ base: "https://planyr.io" });
-    const rows = await g.page.evaluate(async (id) => (await window.pfSupabase.from("sites").select("id").eq("id", id)).data || [], ID);
-    await g.close();
-    log(rows.length === 0, `6 · cleanup: trashed ${r.trashed}, deleted ${r.deleted}${r.err ? " (" + r.err + ")" : ""}; a third fresh signed-in session sees ${rows.length} rows for ${ID}`);
+    await sleep(4000);
+    const t = await step(async (id) => (await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id).select("id")).data || []);
+    await sleep(120000);
+    const d = await step(async (id) => { const r = await window.pfSupabase.from("sites").delete().eq("id", id).select("id"); return { n: (r.data || []).length, err: r.error && String(r.error.message) }; });
+    await sleep(90000);
+    const rows = await step(async (id) => (await window.pfSupabase.from("sites").select("id").eq("id", id)).data || []);
+    log(rows.length === 0, `6 · cleanup: trashed ${t.length}, waited 2 min, deleted ${d.n}${d.err ? " (" + d.err + ")" : ""}; 90 s later a fresh signed-in session sees ${rows.length} rows for ${ID}`);
   } catch (e) { log(false, "6 · cleanup FAILED: " + String(e && e.message || e)); }
 }
 console.log(fail ? `\n${fail} check(s) FAILED ❌` : "\nALL CHECKS PASSED ✅");
