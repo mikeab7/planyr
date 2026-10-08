@@ -68,11 +68,13 @@ export function buildUnits(rows, rates) {
  * account, so an account's rows are CONTIGUOUS: reading stops as soon as a different line follows a match.
  * Pure given `scan`.
  */
-export async function findAccountRows(url, entry, acct, fetchImpl) {
+export async function findAccountRows(url, entry, acct, fetchImpl, seg) {
   const needle = `\n${acct}\t`;
   const lines = [];
   let seen = false, tail = "\n"; // `tail` carries the boundary newline so a match at a block start is found
   await scanZipEntryBlocks(url, entry, (blk) => {
+    // sorted by account: once a block opens PAST the target with no hit yet, the account is not in this roll
+    if (!seen && /^\d{13}\t/.test(blk) && blk.slice(0, 13) > acct) return true;
     const text = tail + blk;
     let at = text.indexOf(needle), lastEnd = -1;
     while (at !== -1) {
@@ -86,7 +88,7 @@ export async function findAccountRows(url, entry, acct, fetchImpl) {
     // contiguous group: stop once a non-matching line follows a hit (or a whole block passes with none after hits)
     if (lastEnd !== -1) return lastEnd < text.length - 1;
     return seen;
-  }, fetchImpl);
+  }, fetchImpl, seg);
   return lines.map(parseJurValueLine).filter(Boolean);
 }
 
