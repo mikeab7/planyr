@@ -13,6 +13,7 @@ import { normCountyKey } from "../../../shared/gis/countyKeys.js";
 import { normalizeRenameStampForWrite } from "./projectName.js";
 import { fetchParcelSummaries, fetchElementRecency } from "./elementApi.js";
 import { cloudSitesKey } from "./activeUser.js";
+import * as planStore from "./planStore.js";
 import { headerSlice, mergeHeader, sameHeader } from "./headerMerge.js";
 import { createSiteModel } from "./siteModel.js";
 
@@ -196,14 +197,7 @@ function abandonUnownedSiteWrite(uid, id) {
   delete siteVersions[id];
   delete lastHeaderSig[id];
   try {
-    const key = cloudSitesKey(uid);
-    const raw = localStorage.getItem(key);
-    if (!raw) return;
-    const map = JSON.parse(raw) || {};
-    if (id in map) {
-      delete map[id];
-      localStorage.setItem(key, JSON.stringify(map));
-    }
+    planStore.removeOne(cloudSitesKey(uid), id);   // B2165120: that plan's entry only
   } catch (_) { /* best-effort local cleanup; the retry-suppression above is what actually matters */ }
 }
 export function cloudUpsert(uid, model) {

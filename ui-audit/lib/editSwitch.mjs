@@ -36,6 +36,11 @@ export function editSwitchVerdict(run, budget = {}) {
     /* COUNTS of whole-store-sized (> 500 KB) JSON.parse / JSON.stringify / setItem calls, worst edit and median edit */
     bigParsesMax: Math.max(0, ...log.map((e) => e.big?.parse || 0)), bigStringifiesMax: Math.max(0, ...log.map((e) => e.big?.stringify || 0)),
     bigWritesMax: Math.max(0, ...log.map((e) => e.big?.set || 0)), bigWritesMedian: med(log.map((e) => e.big?.set || 0)),
+    /* B2165120 — what an edit WRITES to the plan store, in characters: the median edit and the worst edit, plus the largest single write.
+     * Flat in the size of the library (the edited plan's entry + a ~60-char index) once plans have their own slots. */
+    writeKBMedian: r1(med(log.map((e) => (e.big?.wBytes || 0) / 1000))), writeKBMax: r1(Math.max(0, ...log.map((e) => (e.big?.wBytes || 0) / 1000))),
+    largestWriteKB: r1(Math.max(0, ...log.map((e) => (e.big?.wMax || 0) / 1000))), writeMsMedian: r1(med(log.map((e) => e.big?.wMs || 0))),
+    writeCallsMedian: med(log.map((e) => e.big?.wN || 0)),
     bigParsesTotal: log.reduce((n, e) => n + (e.big?.parse || 0), 0), bigWritesTotal: log.reduce((n, e) => n + (e.big?.set || 0), 0),
     bigSeen: log.some((e) => e.big),
     /* the first visits climb on their own (JIT, the first big plan's caches, the one-time normalisation of each seeded plan) — a
@@ -65,6 +70,8 @@ export function editSwitchVerdict(run, budget = {}) {
   check("whole-store JSON.parse calls in the WORST edit", out.bigParsesMax, budget.maxBigParsesPerEdit);
   check("whole-store JSON.stringify calls in the WORST edit", out.bigStringifiesMax, budget.maxBigStringifiesPerEdit);
   check("whole-store setItem calls in the WORST edit", out.bigWritesMax, budget.maxBigWritesPerEdit);
+  check("plan-store KB written by the WORST edit", out.writeKBMax, budget.maxWriteKBInWorstEdit);
+  check("largest single plan-store write, KB", out.largestWriteKB, budget.maxLargestWriteKB);
   if (run.allocMB != null) check("MB allocated per edit (--alloc: collected garbage included)", r1(run.allocMB / Math.max(1, log.length)), budget.maxAllocMBPerEdit);
   check("post-GC heap slope, MB per switch", out.heapSlopeMBPerSwitch, budget.maxHeapSlopeMBPerSwitch);
   check("detached DOM nodes at end", out.detachedNodes, budget.maxDetachedNodes);

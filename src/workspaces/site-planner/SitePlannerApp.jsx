@@ -550,7 +550,7 @@ export default function App({
   // so it doesn't go stale (the per-save read-modify-write in storage.js already prevents a
   // whole-store clobber; this keeps the list in sync). Only reacts to the sites keys.
   useEffect(() => {
-    const onStorage = (e) => { if (!e.key || e.key.startsWith("planarfit:sites")) refreshSites(); };
+    const onStorage = (e) => { if (!e.key || (e.key.startsWith("planarfit:sites") && !/^planarfit:sites:.*(:p:|:led$)/.test(e.key))) refreshSites(); };   // B2165120: one refresh per edit (the index write), not one per storage key
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, []);

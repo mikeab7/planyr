@@ -44,13 +44,17 @@ const EDITS = Number(argOf("--edits", 3)) || 3;
 const DPR = Number(argOf("--dpr", "2.15")) || 2.15;
 const VW = Number(argOf("--vw", 1722)), VH = Number(argOf("--vh", 700));
 const JSON_OUT = has("--json"), ASSERT = has("--assert"), PROFILE = has("--profile"), ALLOC = has("--alloc");
-const STORE_KB = Number(argOf("--store-kb", 0)) || 0;   // other plans on the device, like his 143-plan account (1.30 MB of plan JSON; localStorage read 3.88 MB)
+const STORE_KB = Number(argOf("--store-kb", 0)) || 0;
+const STORE_PLANS = Number(argOf("--store-plans", 0)) || 0;   // B2165120: library size in PLANS (the owner has 143) — the axis the per-edit cost must be flat in
+const PLAN_KB = Number(argOf("--plan-kb", 0)) || 0;           // B2165120: size each FILLER plan down to ~this many KB (his median plan is 1.9 KB; 143 plans = 1.30 MB) — the fixtures are far larger than his typical plan
+const LAYOUT = argOf("--layout", "plan");                       // "plan" = one entry per plan (the fix) · "blob" = the pre-B2165120 whole-library entry (planStore's kill switch) — same build, only this toggled   // other plans on the device, like his 143-plan account (1.30 MB of plan JSON; localStorage read 3.88 MB)
 const LABEL = argOf("--label", "run"), OUT = argOf("--out", "");
 const typeOf = new Map();   // element id → type, from the committed fixtures (the DOM carries ids only)
 const HOME = "edit-cycle-plan";   // the owner's Sylvestri plan (primary fixture, carries the IndexedDB rasters)
 
 const INSTRUMENT = `(() => {
   window.__E2E = true;
+  window.__PLANYR_LEGACY_MIRROR = "idle";   // B2165120: measure the PRODUCTION policy — the legacy-copy refresh is off the edit path (the e2e default is "sync")
   window.__lt = []; window.__loaf = []; window.__fr = [];
   try { new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__lt.push([Math.round(e.startTime), +e.duration.toFixed(1)]); }).observe({ type: "longtask", buffered: true }); } catch (_) {}
   try { new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__loaf.push({ t: Math.round(e.startTime), d: +e.duration.toFixed(1), b: +(e.blockingDuration || 0).toFixed(1), s: (e.scripts || []).map((s) => ({ fn: s.sourceFunctionName || "", inv: s.invoker || "", url: String(s.sourceURL || "").split("/").pop(), pos: s.sourceCharPosition, d: +s.duration.toFixed(1) })) }); }).observe({ type: "long-animation-frame", buffered: true }); } catch (_) {}
@@ -59,13 +63,15 @@ const INSTRUMENT = `(() => {
   requestAnimationFrame(tick);
   /* COUNTS, not times: how many WHOLE-STORE-sized (> 500 KB) JSON.parse / JSON.stringify / localStorage.setItem calls ran. The
    * owner's ~200 ms hitch was exactly these, and a count is deterministic where a millisecond figure on a shared runner is not. */
-  const BIG = 500000; window.__big = { parse: 0, stringify: 0, set: 0, setMs: 0 };
+  const BIG = 500000; window.__big = { parse: 0, stringify: 0, set: 0, setMs: 0, wN: 0, wBytes: 0, wMax: 0, wMs: 0 };
   window.__bigStacks = [];
   const P = JSON.parse; JSON.parse = function (t, ...r) { if (typeof t === "string" && t.length > BIG) { window.__big.parse++; if (window.__traceParse) window.__bigStacks.push(new Error().stack.split(String.fromCharCode(10)).slice(2, 7).map((x) => x.trim().split("/assets/").pop()).join(" < ")) } return P.call(this, t, ...r); };
   const S = JSON.stringify; JSON.stringify = function (...a) { const o = S.apply(this, a); if (typeof o === "string" && o.length > BIG) window.__big.stringify++; return o; };
-  const SI = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (typeof v === "string" && v.length > BIG) { window.__big.set++; const t = performance.now(); try { return SI.call(this, k, v); } finally { window.__big.setMs += performance.now() - t; } } return SI.call(this, k, v); };
-  window.__reset = () => { window.__lt.length = 0; window.__loaf.length = 0; window.__fr.length = 0; window.__big = { parse: 0, stringify: 0, set: 0, setMs: 0 }; window.__bigStacks.length = 0; };
-  window.__read = () => ({ lt: window.__lt.slice(), loaf: window.__loaf.slice(), fr: window.__fr.slice(), big: { ...window.__big, setMs: +window.__big.setMs.toFixed(1) }, stacks: window.__bigStacks.slice() });
+  /* B2165120: EVERY write to the plan store (planarfit:sites:*, history ring excluded) — count, bytes, the largest single write and the time inside setItem.
+   * "An edit writes only that plan" is a statement about these, and a count/size is deterministic where a millisecond figure is not. */
+  const SI = Storage.prototype.setItem; Storage.prototype.setItem = function (k, v) { if (typeof v === "string" && typeof k === "string" && k.startsWith("planarfit:sites:") && !k.startsWith("planarfit:sites:history:") && !k.startsWith("planarfit:sites:deltomb:")) { const t = performance.now(); try { return SI.call(this, k, v); } finally { const b = window.__big; b.wN++; b.wBytes += v.length; if (v.length > b.wMax) b.wMax = v.length; b.wMs += performance.now() - t; } } if (typeof v === "string" && v.length > BIG) { window.__big.set++; const t = performance.now(); try { return SI.call(this, k, v); } finally { window.__big.setMs += performance.now() - t; } } return SI.call(this, k, v); };
+  window.__reset = () => { window.__lt.length = 0; window.__loaf.length = 0; window.__fr.length = 0; window.__big = { parse: 0, stringify: 0, set: 0, setMs: 0, wN: 0, wBytes: 0, wMax: 0, wMs: 0 }; window.__bigStacks.length = 0; };
+  window.__read = () => ({ lt: window.__lt.slice(), loaf: window.__loaf.slice(), fr: window.__fr.slice(), big: { ...window.__big, setMs: +window.__big.setMs.toFixed(1), wMs: +window.__big.wMs.toFixed(1) }, stacks: window.__bigStacks.slice() });
 })();`;
 
 const pointOnEl = (page, id) => page.evaluate((elId) => {
@@ -95,15 +101,17 @@ try {
     try { const rec = fixtureSite(readFixture(fx), { id, name: `Switch ${fx}`, site: `Switch ${fx}` }); rec.groupId = id; rec.status = rec.status || "pursuit"; rec.role = rec.role || "pursuit"; extra[id] = rec; } catch (e) { out.notes.push(`fixture ${fx} unavailable: ${e.message}`); }
   }
   const OTHERS = Object.keys(extra);
-  if (STORE_KB) {
+  if (STORE_KB || STORE_PLANS) {
     const names = ["bain", "sylvestri", "richfield", "weld", "woods", "tsakiris"];
     let bytes = 0, i = 0;
-    while (bytes < STORE_KB * 1024 && i < 600) {
+    while ((STORE_PLANS ? i < STORE_PLANS : bytes < STORE_KB * 1024) && i < 600) {
       const rec = fixtureSite(readFixture(names[i % names.length]), { id: `xtra-${i}`, name: `Extra ${i}`, site: `Extra ${i}` });
+      if (PLAN_KB) for (const k of ["els", "markups", "measures", "callouts", "parcelDrawings", "sheetOverlays", "parcels"]) { while (Array.isArray(rec[k]) && rec[k].length > 1 && JSON.stringify(rec).length > PLAN_KB * 1024) rec[k] = rec[k].slice(0, Math.ceil(rec[k].length * 0.7)); }
       rec.groupId = `xtra-g-${i}`; rec.status = rec.status || "pursuit"; rec.role = rec.role || "pursuit"; extra[rec.id] = rec; bytes += JSON.stringify(rec).length; i++;
     }
-    out.store = { extraPlans: i, extraKB: Math.round(bytes / 1024) };
+    out.store = { extraPlans: i, extraKB: Math.round(bytes / 1024), layout: LAYOUT };
   }
+  if (LAYOUT === "blob") await context.addInitScript(() => { try { localStorage.setItem("planarfit:planStore:layout", "blob"); } catch (_) {} });
   await context.addInitScript((x) => { try { const k = "planarfit:sites:v1"; const cur = JSON.parse(localStorage.getItem(k) || "{}"); localStorage.setItem(k, JSON.stringify({ ...x, ...cur })); } catch (_) {} }, extra);
   await context.addInitScript(INSTRUMENT);
   await context.addInitScript(() => { window.__PLANYR_E2E = true; });
@@ -202,6 +210,9 @@ try {
     out.profileTop = [...selfTimeByFunction(profile).entries()].sort((a, b) => b[1] - a[1]).slice(0, 30).map(([k, v]) => [k, +v.toFixed(1)]);
     if (OUT) writeFileSync(OUT.replace(/\.json$/, "") + ".cpuprofile", JSON.stringify(profile));
   }
+  /* B2165120 — what layout did the app ACTUALLY run in? A run that asked for per-plan slots and silently got the whole-library entry (the headroom
+   * guard refused, a quota abort) measured the wrong program, so the verdict needs this to refuse to score it. */
+  out.layoutObserved = await page.evaluate(() => { const base = "planarfit:sites:v1"; let entries = 0; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith(base + ":p:")) entries++; } return { indexed: localStorage.getItem(base + ":idx") != null, entries, legacyKB: Math.round((localStorage.getItem(base) || "").length / 1000) }; });
   const budget = join(HERE, "perf-edit-switch.budget.json");
   out.verdict = editSwitchVerdict(out, existsSync(budget) ? JSON.parse(readFileSync(budget, "utf8")) : {});
   await context.close();
