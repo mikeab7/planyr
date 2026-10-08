@@ -1,3 +1,4 @@
+import { gestureJustEnded } from "./lib/handleGestureClock.js";
 import { Fragment, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { validateName, announceNameNotice } from "../../shared/names/nameCore.js";
 import L from "leaflet";
@@ -1773,7 +1774,8 @@ export default function MapFinder({ visible, isActive = true, overlays, setOverl
       if (selectModeRef.current) { handleClick(e.latlng, e.originalEvent ? startClickAck(e.originalEvent.clientX, e.originalEvent.clientY) : null); return; }
       // A background click (nothing else claimed it) deselects a site plan armed for editing —
       // its own image click already stops propagation before this ever runs (B848496 NEW-2).
-      if (activeOverlayIdRef.current) setActiveOverlayId(null);
+      // B2163346 — …but not the click a handle drag's own release produces (it would disarm the plan mid-edit).
+      if (activeOverlayIdRef.current && !gestureJustEnded()) setActiveOverlayId(null);
     };
     const onZoom = () => setZoom(map.getZoom());
     // Resolve the Layers-panel jurisdiction from the map's current area (B13): pick the
