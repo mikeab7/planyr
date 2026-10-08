@@ -187,7 +187,7 @@ try {
     check("a Texas-only check reads 'Not screened in Georgia' (never a clean None)", /Not screened in Georgia/i.test(a.text) || a.rows.every((r) => !["pipelines", "wells"].includes(r.id)));
     check("no Texas verdict row (wells / pipelines) shows a green 'None' on Georgia ground", a.rows.filter((r) => ["pipelines", "wells"].includes(r.id)).every((r) => r.sev !== "green"));
     check("ETJ / school-district never claim a Texas answer", !/Texas|ETJ: None found|ISD/.test(a.text) || /None in Georgia|Not screened in Georgia/i.test(a.text));
-    check("Georgia source wording present (DCA / EPD / DNR)", /Georgia DCA|Georgia EPD|Georgia DNR|DCA|EPD/.test(a.text));
+    check("it names the Georgia city and county (Braselton, GA · Jackson County) from the Georgia county layer", /Braselton, GA/.test(a.text) && /Jackson County/.test(a.text));
     const gone = await drop(st.id); created.splice(created.indexOf(st.id), 1);
     check("throwaway plan cleared", !!gone.local && !!gone.cloud, JSON.stringify(gone));
   }
@@ -235,11 +235,12 @@ try {
       const ids = (q.data || []).map((r) => r.id);
       for (const i of ids) { await window.pfSupabase.from("site_elements").delete().eq("site_id", i); await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", i); await window.pfSupabase.from("sites").delete().eq("id", i); }
       const all = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); for (const k of Object.keys(all)) if (k.startsWith("zz-ga-") && k.endsWith("-" + tag)) delete all[k]; localStorage.setItem("planarfit:sites:v1", JSON.stringify(all));
-      const q2 = await window.pfSupabase.from("sites").select("id").like("id", `zz-ga-%-${tag}`);
-      return { found: ids, left: (q2.data || []).map((r) => r.id) };
+      const q2 = await window.pfSupabase.from("sites").select("id,deleted_at").like("id", `zz-ga-%-${tag}`);
+      const rest = q2.data || []; // a trashed row is invisible to the app; the hard delete can lag (its guard trigger scans the whole table)
+      return { found: ids, left: rest.filter((r) => !r.deleted_at).map((r) => r.id), trashedLeft: rest.filter((r) => r.deleted_at).length };
     }, TAG);
     let r = await sweep(); await page.waitForTimeout(8000); r = await sweep();
-    check("final sweep: no zz-ga-* plan of this run remains in the cloud", r.left.length === 0, JSON.stringify(r));
+    check("final sweep: no zz-ga-* plan of this run is still LIVE in the cloud (trashed leftovers are reported)", r.left.length === 0, JSON.stringify(r));
   } catch (e) { check("final sweep ran", false, String(e)); }
   await s.close();
 }
