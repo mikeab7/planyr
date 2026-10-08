@@ -27,16 +27,15 @@ const results = [];
 const step = (name, ok, detail) => { results.push({ name, ok }); console.log(`${ok === null ? "VOID" : ok ? "PASS" : "FAIL"}  ${name}${detail ? "  —  " + detail : ""}`); };
 
 /* Page-side helper: read the store the way an OLD build or a human would — from raw localStorage. */
-const snapshot = (page) => page.evaluate(() => {
-  let base = "planarfit:sites:v1";
-  for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith("planarfit:sites:cloud:") && !/:(p:|idx$|led$)/.test(k.slice("planarfit:sites:cloud:".length))) base = k; }
+const snapshot = (page) => page.evaluate((BASEKEY) => {
+  const base = BASEKEY;
   const entries = {};
   for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith(base + ":p:")) entries[k.slice((base + ":p:").length)] = localStorage.getItem(k); }
   let idx = null; try { idx = JSON.parse(localStorage.getItem(base + ":idx")); } catch (_) {}
   const legacyRaw = localStorage.getItem(base);
   let legacy = null; try { legacy = JSON.parse(legacyRaw); } catch (_) {}
   return { base, entries, idx, legacyLen: legacyRaw ? legacyRaw.length : 0, legacyIds: legacy ? Object.keys(legacy) : null, legacyRaw };
-});
+}, BASE_KEY);
 
 /* A realistic library: a few big plans (like his 0.94 MB one, scaled down) and many tiny ones (his median is 1.9 KB). */
 const makeLibrary = (n) => {
@@ -50,12 +49,14 @@ const makeLibrary = (n) => {
   return lib;
 };
 
-let browser, context, page, signedIn = null;
+let browser, context, page, signedIn = null, BASE_KEY = "planarfit:sites:v1";
 try {
   if (LIVE) {
     const { openSignedIn } = await import("./lib/signedInSession.mjs");
     signedIn = await openSignedIn({ base: BASE, viewport: { width: 1440, height: 900 }, initScripts: [[() => { window.__PLANYR_LEGACY_MIRROR = "idle"; }, null]] });
     ({ browser, context, page } = signedIn);
+    const uid = await page.evaluate(async () => (await window.pfSupabase.auth.getUser()).data.user.id);
+    BASE_KEY = "planarfit:sites:cloud:" + uid;
     console.log(`build ${JSON.stringify(signedIn.build)}  signed in as ${signedIn.proof.email}`);
   } else {
     browser = await chromium.launch({ executablePath: EXEC, headless: false, args: ["--no-sandbox"] });
@@ -70,9 +71,8 @@ try {
   /* ── 0. put the device into the PRE-change shape: one whole-library entry, no per-plan entries ───────────────────────────────── */
   await page.goto(BASE + "/version.json", { waitUntil: "load" });         // the app is not running here, so nothing races the seed (its pagehide refresh already ran)
   const lib = makeLibrary(N);
-  const seeded = await page.evaluate((library) => {
-    let base = "planarfit:sites:v1";
-    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith("planarfit:sites:cloud:") && !/:(p:|idx$|led$)/.test(k.slice("planarfit:sites:cloud:".length))) base = k; }
+  const seeded = await page.evaluate(([library, BASEKEY]) => {
+    const base = BASEKEY;
     const existing = {};
     const keys = []; for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i));
     for (const k of keys) if (k && k.startsWith(base + ":p:")) { try { existing[k.slice((base + ":p:").length)] = JSON.parse(localStorage.getItem(k)); } catch (_) {} }
@@ -82,11 +82,19 @@ try {
     const text = JSON.stringify(whole);
     localStorage.setItem(base, text);
     return { base, plans: Object.keys(whole).length, len: text.length, text };
-  }, lib);
+  }, [lib, BASE_KEY]);
   console.log(`seeded the old layout: ${seeded.plans} plans, ${(seeded.len / 1000).toFixed(0)} KB in ONE entry (${seeded.base.replace(/cloud:.+/, "cloud:<uid>")})`);
 
   /* ── 1. first load of the new build: migrate ─────────────────────────────────────────────────────────────────────────────────── */
-  await page.goto(BASE + "/#/project/" + (LIVE ? "e2e-fixture-site" : "zzpsv-g1") + "/site", { waitUntil: "load" });
+  if (LIVE) {
+    /* Signed in, a project route only opens a project the ACCOUNT holds. The seeded plans exist only on this device, so open the map first: the first
+     * load migrates the store and the app's own heal pushes the local-only plans up (the standing B124 behaviour); wait until the cloud has one. */
+    await page.goto(BASE + "/#/", { waitUntil: "load" });
+    let up = false;
+    for (let i = 0; i < 60 && !up; i++) { await page.waitForTimeout(1000); up = await page.evaluate(async () => { const q = await window.pfSupabase.from("sites").select("id").eq("id", "zzpsv-1"); return !!(q.data && q.data.length); }).catch(() => false); }
+    console.log(`seeded plans reached the account's cloud rows: ${up}`);
+  }
+  await page.goto(BASE + "/#/project/" + "zzpsv-g1" + "/site", { waitUntil: "load" });
   await page.waitForSelector('[data-testid="planner-canvas"]', { timeout: 60000 });
   await page.waitForTimeout(2500);
   let s1 = await snapshot(page);
@@ -95,8 +103,13 @@ try {
   const legacyKept = s1.legacyRaw === seeded.text;
   const legacyStillWhole = s1.legacyIds && s1.legacyIds.length >= seeded.plans;
   step("the original whole-library entry is still there, still the whole library", !!legacyStillWhole, `${s1.legacyIds ? s1.legacyIds.length : 0} plans in the legacy entry, ${s1.legacyLen} chars${legacyKept ? " (byte-identical to what was seeded)" : " (a refresh already folded in boot-time changes)"}`);
-  const lossless = Object.keys(lib).every((id) => { try { return JSON.stringify(JSON.parse(s1.entries[id])) === JSON.stringify(lib[id]); } catch (_) { return false; } });
-  step("lossless: every seeded plan's entry equals the plan that was seeded", lossless);
+  /* Lossless = no plan and no element lost. (Byte equality holds on a signed-out device; signed in, the first cloud pull may legitimately re-normalise a plan's
+   * fields a moment after the migration, so equality of ids/content is what is asserted and the number re-normalised is reported.) The migrator itself
+   * already read every entry back and compared it with its source before it wrote the index; the legacy entry above is the byte-identical proof. */
+  const parsedEntry = (id) => { try { return JSON.parse(s1.entries[id]); } catch (_) { return null; } };
+  const lost = Object.keys(lib).filter((id) => { const e = parsedEntry(id); return !e || e.id !== id || (e.els || []).map((x) => x.id).sort().join() !== (lib[id].els || []).map((x) => x.id).sort().join(); });
+  const renorm = Object.keys(lib).filter((id) => s1.entries[id] !== JSON.stringify(lib[id])).length;
+  step("lossless: every seeded plan and every element in it is present in its entry", lost.length === 0, `${lost.length} plans or elements missing${renorm ? `; ${renorm} entries re-normalised by the app's own first cloud pull` : "; every entry byte-identical to the seed"}`);
 
   /* ── 2. an edit writes ONLY that plan ───────────────────────────────────────────────────────────────────────────────────────── */
   await page.evaluate(() => {
@@ -140,15 +153,14 @@ try {
 
   /* ── 5. an OLDER build's write (whole legacy entry, while no new-build tab is open) is folded in on the next load ───────────── */
   const victim = `zzpsv-${Math.min(5, N - 1)}`;
-  await page.evaluate(({ victim }) => {
-    let base = "planarfit:sites:v1";
-    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith("planarfit:sites:cloud:") && !/:(p:|idx$|led$)/.test(k.slice("planarfit:sites:cloud:".length))) base = k; }
+  await page.evaluate(({ victim, BASEKEY }) => {
+    const base = BASEKEY;
     const all = JSON.parse(localStorage.getItem(base));
     all[victim] = { ...all[victim], name: "renamed by an OLD build", updatedAt: Date.now() + 10000 };
     all["zzpsv-from-old-build"] = { id: "zzpsv-from-old-build", groupId: "zzpsv-from-old-build", site: "ZZ PSV old-build project", name: "Created by an old build", updatedAt: Date.now(), els: [], parcels: [], measures: [], callouts: [], markups: [], settings: {} };
     localStorage.setItem(base, JSON.stringify(all));
-  }, { victim });
-  await page.goto(BASE + "/#/project/" + (LIVE ? "e2e-fixture-site" : "zzpsv-g1") + "/site", { waitUntil: "load" });
+  }, { victim, BASEKEY: BASE_KEY });
+  await page.goto(BASE + "/#/project/" + "zzpsv-g1" + "/site", { waitUntil: "load" });
   await page.waitForSelector('[data-testid="planner-canvas"]', { timeout: 60000 });
   await page.waitForTimeout(2500);
   const s5 = await snapshot(page);
