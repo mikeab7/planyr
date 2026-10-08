@@ -132,6 +132,12 @@ try {
   }
 } catch (e) {
   record("harness error", false, String(e && e.message || e).slice(0, 300));
+  // Evidence for a failure: what the page was actually showing (a flake and a defect look identical in a bare timeout).
+  try {
+    const dump = await page.evaluate(() => ({ hash: location.hash, rows: document.querySelectorAll('[data-testid^="project-row-"]').length, menuOpen: !!document.querySelector('[data-testid="project-new"]'), banners: [...document.querySelectorAll('[role="alert"],[role="status"]')].map((x) => x.innerText.slice(0, 100)).filter(Boolean).slice(0, 4), crumb: (document.querySelector('[data-mode-active="true"] [data-testid="project-crumb"]') || {}).innerText }));
+    console.log("page at failure:", JSON.stringify(dump));
+    if (process.env.HARNESS_SHOT) await page.screenshot({ path: process.env.HARNESS_SHOT });
+  } catch (_) { /* best effort */ }
 } finally {
   // 4. delete the throwaway (always)
   try {
