@@ -70,3 +70,29 @@ describe("status rows read label-left / value-right (no left-gutter chip)", () =
     expect(src).toContain("calc(100vw - ${54 + TOOLS_TAB_WIDTH_PX}px)");
   });
 });
+
+describe("populated-state groups found boxed by the live check (V1421552)", () => {
+  it("Analysis's 'Who governs this site' group is divider-bounded, not a bordered card", () => {
+    const g = analysis.slice(analysis.indexOf('data-section="governs"'), analysis.indexOf('data-section="governs"') + 400);
+    expect(g).toContain("borderTop");
+    expect(g).not.toMatch(/border: "1px solid/);
+    expect(g).not.toContain("borderRadius");
+  });
+  it("Drainage's 'Assumptions: correct if needed' group is a flat divider group, not a card", () => {
+    const i = src.indexOf('data-flat-group="assumptions"');
+    expect(i).toBeGreaterThan(0);
+    const g = src.slice(i, i + 260);
+    expect(g).toContain("borderTop");
+    expect(g).not.toContain("borderRadius");
+    expect(g).not.toContain("background:");
+  });
+  it("Land's parcel-table rows are divider rows (accent rule when selected), not bordered cards", () => {
+    const rows = read("../src/workspaces/site-planner/components/ParcelsPanel.jsx");
+    const i = rows.indexOf('data-testid={`parcel-table-row-');
+    expect(i).toBeGreaterThan(0);
+    const g = rows.slice(i, i + 700);
+    expect(g).toContain("borderBottom: LINE");
+    expect(g).toContain("borderRadius: 0");
+    expect(g).not.toContain("RADIUS.md");
+  });
+});
