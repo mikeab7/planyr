@@ -34,16 +34,12 @@ describe("B1/B2 — header + status card sit above the Dimensions rows", () => {
     expect(pondBody).toContain("Drag the body to move. Drag a corner dot to reshape");
   });
 
-  it("v3 B7.3 — a pond's inner Section passes NO title (bare card) so 'DETENTION POND' isn't a double header", () => {
-    // The panel-chrome row already reads "ELEMENT · DETENTION POND" and owns the collapse chevron;
-    // the selected-element Section must not repeat the pond label as a second header. B1215682/
-    // NEW-2 generalized this same rule to every type on the phone sheet (whose full label carries
-    // no " / " qualifier the chrome's own shortened label would drop) — pond is still unconditionally
-    // `false` on both desktop and phone, it's just the first arm of a wider OR now.
-    // NEW-2/B1818257 — the shown-when-not-false text now prefers dockZoneDisplayLabel(selEl) (a
-    // compass-suffixed name like "Truck court · N" for a cross-dock building's dock-zone stack
-    // members) over the bare TYPE label, falling back to it for every other element unchanged.
-    expect(src).toContain('title={selEl.type === "pond" || bldgPanel || (phoneSheetSolo && !(TYPE[selEl.type]?.label || "").includes(" / ")) ? false : `Selected · ${dockZoneDisplayLabel(selEl) || (TYPE[selEl.type]?.label || "Element")}`}');
+  it("v3 B7.3 / NEW-1 (2026-10-08) — no element panel has a second header: the selected-element Section passes NO title", () => {
+    // The panel-chrome row is the ONE header and reads just the type name ("Detention pond",
+    // "Building" …) via propsPanelTitle; the old "Selected · <type>" inner header (and, before it, the
+    // pond's "DETENTION POND" repeat) is gone for every element type, not only the pond.
+    expect(src).not.toMatch(/`Selected · \$\{/);
+    expect(src).toMatch(/\{!multiStyleable && selEl && \(\s*<Section title=\{null\}>/);
     expect(src.includes('title={selEl.type === "pond" ? TYPE[selEl.type].label')).toBe(false);
   });
 });

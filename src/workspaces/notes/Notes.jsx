@@ -22,6 +22,7 @@
  * `purgePages`. TOMBSTONE-DELETES is unchanged in substance: the cascade is still computed
  * at delete time and every id in it is still cleared, just later and only once.
  */
+import { LockGlyph } from "../../shared/ui/LockToggle.jsx";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import AppHeader, { useNarrow } from "../../shared/ui/AppHeader.jsx";
 import PriorityToolbar from "../../shared/ui/PriorityToolbar.jsx";
@@ -1821,7 +1822,7 @@ export default function Notes({
                     }}
                   >‹ Notes</button>
                 ) : null}
-                <span aria-hidden="true" style={{ fontSize: 12.5 }}>🔒</span>
+                <LockGlyph locked size={14} />
                 <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   Read-only preview from the bin — nothing you do here changes it.
                 </span>

@@ -1,3 +1,4 @@
+import { LockGlyph } from "../../ui/LockToggle.jsx";
 /* SitePlansSection — upload a site plan (a PDF/image, usually a broker flyer), pick which
  * page IS the site plan, and place it on the map (B848496). Rendered by MapFinder above the
  * Comps list, self-contained data owner (mirrors CompsPanel's own shape: fetch on mount, list
@@ -204,12 +205,7 @@ function EyeIcon({ off }) {
   );
 }
 function LockIcon({ locked }) {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="4" y="11" width="16" height="10" rx="2" />
-      {locked ? <path d="M8 11 V7 a4 4 0 0 1 8 0 v4" /> : <path d="M8 11 V7 a4 4 0 0 1 7-2.5" />}
-    </svg>
-  );
+  return <LockGlyph locked={!!locked} size={14} />;
 }
 // NEW-5 (owner chat, 2026-09-08) — the resting card's one action button becomes this menu's
 // trigger; drawn (not the `⋯` text glyph) for the same reason ProjectBreadcrumb's own per-row

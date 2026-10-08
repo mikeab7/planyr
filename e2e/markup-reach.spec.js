@@ -155,7 +155,7 @@ test.describe("markup reachability + locked honesty (logged out)", () => {
     await panel(page).getByRole("button", { name: /Lock/ }).click();
     await expect(panel(page).getByText(/Locked —/)).toBeVisible();
     // …a 🔒 cue appears on the canvas…
-    await expect(canvas(page).getByText("🔒")).toBeVisible();
+    await expect(canvas(page).locator("[data-lock-cue]")).toBeVisible();
     await expect(selectedMk(page)).toHaveAttribute("data-mk-locked", "1");
     // …and the shape's cursor is no longer the four-arrow "move".
     const lockedCursor = await page.evaluate(() => {
