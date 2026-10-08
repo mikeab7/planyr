@@ -1529,7 +1529,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   corner-ness). ONE helper, reused by the setback chips, the side-length dims AND the vertex handles — never
   fork a second one. Display-only and re-decided every frame off the live zoom, so zooming in reveals detail.
   `polylabel.js` — pole of inaccessibility; the parcel acreage badge's anchor (always inside the ring, unlike
-  the vertex average it replaced). Guards: the repo-root `test/` suite **parcelDeclutter** + the ui-audit harness
+  the vertex average it replaced). **B2225424: a binary heap search plus a coordinate-keyed cache behind the identity WeakMap — a plan open re-seeds parcels into new arrays with the same points, and the identity cache alone paid the whole search (345–763 ms on Concept A) on every open; account + rig: `/docs/perf/PERF-PLAN-OPEN.md`; guard repo-root `test/` **polylabelPerf**.** Guards: the repo-root `test/` suite **parcelDeclutter** + the ui-audit harness
   **verify-parcel-declutter** (the Weld County curved-corner repro, with screenshots).
   **`setbackRoles.js` is the REGULATORY tier ABOVE both of those (B1191) — read it before touching how a
   setback is edited.** A zoning ordinance names FOUR setbacks (Front / Side / Street side / Rear); the two
