@@ -6,7 +6,7 @@
  * The picker can only browse what he already has (Been + Want to try); a place nobody has marked arrives by the
  * toolbar's search box or a tap on a map pin while the picker is open — the hint says so. It never mints a
  * restaurant from a typed name. */
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button, ToggleChip, SIZE } from "../../../shared/ui/controls.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
@@ -56,14 +56,19 @@ export default function ListPanel({
   const [draft, setDraft] = useState("");
   const [nameErr, setNameErr] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const committingRef = useRef(false); // Enter and the blur it causes both commit — only the first may run
   if (!list) return null;
 
   const startRename = () => { setDraft(list.name); setNameErr(null); setRenaming(true); };
   const commitRename = async () => {
-    const v = validateListName(draft, lists, list.id);
-    if (!v.ok) { setNameErr(v.message); return; }
-    if (v.name !== list.name) { const r = await onRename(list.id, v.name); if (r && r.ok === false) { setNameErr(r.message); return; } }
-    setRenaming(false); setNameErr(null);
+    if (committingRef.current) return;
+    committingRef.current = true;
+    try {
+      const v = validateListName(draft, lists, list.id);
+      if (!v.ok) { setNameErr(v.message); return; }
+      if (v.name !== list.name) { const r = await onRename(list.id, v.name); if (r && r.ok === false) { setNameErr(r.message); return; } }
+      setRenaming(false); setNameErr(null);
+    } finally { committingRef.current = false; }
   };
 
   const count = members.length;
