@@ -57,7 +57,8 @@ import { parkDepthForRows, parkRowsForDepth, parkFlipIsNoOp, explodeParkingBands
 import { trailerRowLabel, elementLabelHidden, labelHiddenPatch, trailerCfgPatch, drawnTrailerCfg, TRAILER_FIELD_MIN } from "./lib/trailerRows.js";
 import { openOverlayFile, rasterizePage, rasterizePageHiRes, isPdfFile, isDxfFile, rasterizeStoredPdf, rasterizeStoredDxf, baseRasterScale, chooseOverlayRasterScale, overlayRasterKey, HIRES_CACHE_PER_OVERLAY } from "./lib/overlayPdf.js";
 import { isDwgFile, convertDwgToDxf } from "./lib/convertClient.js";
-import { uploadOverlayFile, downloadOverlayBytes, downloadOverlayDataUrl, fetchOverlayBytes, fetchOverlayDataUrl, deleteOverlayObject, MAX_BYTES as OVERLAY_MAX_BYTES } from "./lib/overlayStorage.js";
+import { uploadOverlayFile, downloadOverlayBytes, downloadOverlayDataUrl, fetchOverlayBytes, fetchOverlayDataUrl, deleteOverlayObject, probeOverlayObject, MAX_BYTES as OVERLAY_MAX_BYTES } from "./lib/overlayStorage.js";
+import { fetchSiblingPlans, foreignOverlaysFor, planForeignCopy, siblingPlansAsRefs, siblingsStillHolding, identityKey as overlayIdentityKey } from "./lib/siblingOverlays.js";
 import { ftPerPointForScale, scaleForFtPerPoint, chooseOverlayScale, SCALE_PRESETS, feetPerInchForPreset, matchScalePreset, feetPerInchFromPair, PAGE_UNITS, REAL_UNITS } from "../../shared/overlay/overlayScale.js";
 import { solveSimilarityLSQ, applySimilarityToOverlay, scaleOverlayAbout, imagePointToWorld, visibleFrame, visibleCenterWorld, anchorVisibleCentre } from "../../shared/overlay/overlayPlacement.js";
 import { hasPrintableOverlay } from "./lib/overlayPrint.js";
@@ -10487,6 +10488,101 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     patchOverlay(id, { crop: next }, hist);
     return true;
   };
+  /* ------------ NEW-1 — overlays flow between sibling plans of one site (lib/siblingOverlays.js) ------------
+   * Foreign rows are computed at read time from a READ-ONLY fetch of the sibling rows; nothing here ever
+   * writes a sibling plan. The panel re-reads on open, and again just before any copy. */
+  const [sibState, setSibState] = useState({ status: "idle", plans: [], error: null });
+  const sibSeq = useRef(0);
+  const sibWarned = useRef(false);
+  const groupIdOfThisPlan = () => (siteId ? (loadSite(siteId)?.groupId || null) : null);
+  const refreshSiblings = async () => {
+    const gid = groupIdOfThisPlan();
+    if (!siteId || !gid || !isCloudActive() || !supabase) { setSibState({ status: "idle", plans: [], error: null }); return { ok: true, plans: [], skipped: true }; }
+    const seq = ++sibSeq.current;
+    setSibState((s) => ({ ...s, status: "loading" }));
+    const r = await fetchSiblingPlans(supabase, gid, siteId);
+    if (seq === sibSeq.current) {
+      setSibState(r.ok ? { status: "ok", plans: r.plans, error: null } : { status: "error", plans: [], error: r.error });
+      if (!r.ok) {
+        reportClientEvent("sibling-overlays-fetch-failed", "couldn't read the sibling plans' drawings", { siteId, error: r.error });
+        if (!sibWarned.current) { sibWarned.current = true; flashWarn("⚠ Couldn't check your other plans for drawings to reuse — try reopening this panel.", 6000); }
+      } else sibWarned.current = false;
+    }
+    return r;
+  };
+  useEffect(() => { if (active && leftPanel === "references") refreshSiblings(); }, [active, leftPanel, siteId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const foreignRows = useMemo(
+    () => foreignOverlaysFor({ own: sheetOverlays, siblings: sibState.plans, selfId: siteId }),
+    [sheetOverlays, sibState.plans, siteId]);
+  // What the Overlays panel reads: hidden-style rows "added on <planName>", plus the honest fetch state.
+  const foreignOverlays = { rows: foreignRows, status: sibState.status, error: sibState.error, refresh: refreshSiblings };
+  // The eye on a foreign row. COPIES the record into THIS plan only (new id, re-framed to this plan's
+  // origin, stamped `sharedFrom`); every refusal says why and writes nothing.
+  const showForeignOverlay = async (row) => {
+    if (!row) return;
+    const fresh = await refreshSiblings();
+    const verdict = await planForeignCopy({ foreign: row, fresh, selfOrigin: stateRef.current.origin, probe: probeOverlayObject, mint: uid });
+    if (!verdict.ok) { flashWarn(`⚠ ${verdict.message}`, 8000); return; }
+    const ov = verdict.overlay;
+    // A double press, or a copy that landed while we were checking, must not add it twice.
+    if (stateRef.current.sheetOverlays.some((x) => x && x.storageKey && overlayIdentityKey(x) === overlayIdentityKey(ov))) {
+      flashWarn(`“${ov.name}” is already on this plan.`, 3500); return;
+    }
+    pushHistory();
+    setSheetOverlays((arr) => [...arr, ov]);
+    setSel(null); setSelOverlay(ov.id); setLeftPanel("references");
+    flashWarn(`Showing “${ov.name}” from ${row.planName}.`, 3500);
+  };
+  // E2E/self-audit hook (same `window.__PLANYR_E2E` gate as the others; read-only answers + the same two
+  // actions the panel row calls — it is a driver for the live acceptance, not a second code path).
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
+    const hook = {
+      siteId: () => siteId,
+      rows: () => foreignOverlays.rows.map((r) => ({ key: r.key, planName: r.planName, name: r.overlay.name, page: r.overlay.page || 1 })),
+      status: () => ({ status: foreignOverlays.status, error: foreignOverlays.error }),
+      refresh: () => refreshSiblings(),
+      show: (key) => showForeignOverlay(foreignOverlays.rows.find((r) => r.key === key)),
+      remove: (id) => removeOverlay(id),
+      crop: (id, crop) => setOverlayCrop(id, crop), // the exact write the Crop… dialog commits through
+      duplicate: (id) => duplicateOverlay(id),
+      setPage: (id, page) => setOverlayPage(id, page),
+      own: () => stateRef.current.sheetOverlays.map((o) => ({ id: o.id, name: o.name, page: o.page || 1, x: o.x, y: o.y, crop: o.crop || null, sharedFrom: o.sharedFrom || null, storageKey: o.storageKey || null, idbKey: o.idbKey || null, hasSrc: !!o.src })),
+    };
+    window.__plannerForeign = hook;
+    return () => { if (window.__plannerForeign === hook) window.__plannerForeign = null; };
+  });
+  // Release a removed overlay's stored bytes only when NO plan references them — this site's other plans
+  // included — releasing device + cloud together or neither, and tell the user when a sibling still holds it.
+  const releaseOverlayAssets = async (o) => {
+    let plans = loadSitesList();
+    let sibs = [];
+    const gid = groupIdOfThisPlan();
+    if (gid && isCloudActive() && supabase) {
+      const r = await fetchSiblingPlans(supabase, gid, siteId);
+      if (!r.ok) {
+        reportClientEvent("overlay-asset-retained", "kept a source file: couldn't read the sibling plans", { siteId, overlayId: o.id, error: r.error });
+        flashWarn("Removed from this plan. Couldn't check your other plans, so the stored file was kept.", 7000);
+        return;
+      }
+      sibs = r.plans;
+      plans = [...plans, ...siblingPlansAsRefs(sibs)];
+      setSibState({ status: "ok", plans: sibs, error: null });
+    }
+    const assetRefs = collectAssetRefs(plans);
+    const { release, kept } = releasePlanForOverlay(assetRefs, o, siteId);
+    for (const r of release) {
+      if (r.tier === "storage") deleteOverlayObject(r.key); // cloud copy (B72 polish / B748 DWG provenance)
+      else idbDelete(r.key);                                // this device's cached raster (B474 review #23)
+    }
+    // LOUD-FAILURE: a refusal is reported, never silent — this is the line that says the bytes were KEPT.
+    if (kept.length)
+      reportClientEvent("overlay-asset-retained", "kept a source file another plan still references", {
+        siteId, overlayId: o.id, kept: kept.map((k) => ({ what: k.what, reason: k.reason, heldBy: k.heldBy })),
+      });
+    const still = siblingsStillHolding(o, sibs, siteId);
+    if (still.length) flashWarn(`Removed from ${planLabel}. Still on ${still.join(", ")}.`, 6000);
+  };
   const removeOverlay = (id) => {
     const o = sheetOverlays.find((x) => x.id === id);
     if (!o) { flashWarn("⚠ Couldn't delete that drawing — it's no longer in the list.", 5000); return; } // count-check: never a phantom no-op delete (B461)
@@ -10503,17 +10599,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      * refuses on any unknown answer (an orphaned object is recoverable; a deleted one is not).
      * The DATABASE is the authority — `db/overlay_object_release_guard.sql` refuses the delete
      * outright when a live plan still references the key, so a stale tab cannot orphan bytes. */
-    const assetRefs = collectAssetRefs(loadSitesList());
-    const { release, kept } = releasePlanForOverlay(assetRefs, o, siteId);
-    for (const r of release) {
-      if (r.tier === "storage") deleteOverlayObject(r.key); // cloud copy (B72 polish / B748 DWG provenance)
-      else idbDelete(r.key);                                // this device's cached raster (B474 review #23)
-    }
-    // LOUD-FAILURE: a refusal is reported, never silent — this is the line that says the bytes were KEPT.
-    if (kept.length)
-      reportClientEvent("overlay-asset-retained", "kept a source file another plan still references", {
-        siteId, overlayId: id, kept: kept.map((k) => ({ what: k.what, reason: k.reason, heldBy: k.heldBy })),
-      });
+    /* NEW-1 (sibling overlays) — the ref-count now ALSO spans the sibling plans of this site as the cloud
+     * holds them RIGHT NOW (an unhydrated sibling is invisible to loadSitesList), and the release waits for
+     * that answer. A failed read is an UNKNOWN answer: release NOTHING (sharedAssetRefs rule 2). */
+    releaseOverlayAssets(o);
     setSheetOverlays((arr) => arr.filter((x) => x.id !== id));
     setDeletedIds((d) => (d.includes(id) ? d : [...d, id])); // B276: tombstone the deletion so a stale/cloud copy can't resurrect it on reload/merge
     setSelOverlay((s) => (s === id ? null : s));
