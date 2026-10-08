@@ -60,8 +60,9 @@ const WARN = "var(--warn-text)";
 
 // compact regular-weight button: the input height, control-size text, never wraps
 const btnCompact = { height: H, minWidth: 0, padding: "0 10px", fontSize: C, fontWeight: 400, lineHeight: 1, whiteSpace: "nowrap", boxShadow: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: SPACE.xs };
-const FOCUS_CSS = `[data-testid="overlays-panel"] :is(button,input,select):focus-visible{outline:2px solid ${ACCENT};outline-offset:1px;box-shadow:none}
-[data-testid="overlays-panel"] input:not([type=range],[type=checkbox],[type=color]):focus,[data-testid="overlays-panel"] select:focus{border-color:${ACCENT} !important;box-shadow:0 0 0 3px color-mix(in srgb, ${ACCENT} 18%, transparent)}`;
+const PANEL = '[data-testid="overlays-panel"][data-fine-pointer]';   // doubled attribute = out-ranks the global focus rules
+const FOCUS_CSS = `${PANEL} :is(button,input,select):focus-visible{outline:2px solid ${ACCENT};outline-offset:1px}
+${PANEL} input:not([type=range],[type=checkbox],[type=color]):focus,${PANEL} select:focus{border-color:${ACCENT} !important;box-shadow:0 0 0 3px color-mix(in srgb, ${ACCENT} 18%, transparent) !important}`;
 const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 function Ico({ children, size = 14 }) {
