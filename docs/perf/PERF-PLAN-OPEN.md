@@ -213,3 +213,66 @@ first open 200 (baseline worst 454) · Richfield first open 560 (869) · reload 
 
 ### Data safety
 Nothing here touches a write path: the warm-up reads fetched rows and fills caches; the canvas guess is a tiny non-plan key (`planarfit:canvasGuess:v1`, window-geometry-gated); the map-mode and pin changes mount/park UI only. `ui-audit/verify-plan-switch-writes.mjs` (round 4's recorder) was re-run on the final build — see the item.
+
+## Round 6 (B2236000 ×2, 2026-10-09) — the app opened fresh on an OWNER-SIZED device, and the first switch after it
+
+**The brief.** Owner heartbeat after round 5 (build 1d74db1): the first switch after a page load still read [108, 53] while later switches sat at his floor; and the fresh load ("reload-onto-plan", 271 / 377 at 2× in round 5) still crossed 150 ms on 10/10 runs. Mid-session the owner measured a fresh load **on his own account** with a new instrument (below): three reloads onto Bolt-on, gaps over 50 ms in the first ~2.6 s: `323:372, 695:162, 863:475, 1351:132, 1939:399, 2338:152` · `266:214, 480:299, 779:233, 1011:587, 1620:109, 2025:56, 2159:453, 2612:164` · `221:216, 437:281, 726:472, 1221:130, 1796:397, 2192:160, 2578:51` — **1.5–2.2 s of stalls, worst 470–590 ms, far heavier than the rig's reading.** His device: 76 plans in `planarfit:sites:cloud:<uid>` (~1.9 MB), 30 with an element copy; the version ring `planarfit:sites:history:v1` ~3.5 MB in IndexedDB.
+
+### The instrument (two additions — the first is the reason the rig under-read him)
+1. **`--owner-store`** (`ui-audit/perf-plan-open.mjs`): before the app ever runs, a blank same-origin page fills the device store to his size — 76 plans, 30 carrying a full element copy (`ui-audit/fixtures/plan-load/device-copies.json`: the rig's own Bolt-on / Richfield device records, nothing beyond the committed row fixtures), ~1.55 MB, plus a ~3.9 MB history ring in IndexedDB and its capped localStorage mirror (newest snapshot's `sig` matches the plan, as on a real device). The rig's default store holds only plan HEADERS and a few KB of history, which is why every earlier round's reload reading sat under his. With it, the baseline reload reads **worst 1181 / 1670 ms, summed gaps 3.7 s** at 2× — the same shape as his (heavier: the rig at 2× is slower than his Chrome).
+2. **`first-switch-after-reload`**: both plans opened once (so the device holds both, as his does), the page RELOADED onto Bolt-on, then Bolt-on → Concept A → Bolt-on → Concept A scored in that page. The old `switch` scenario's "first visit" row is a rows-seed first open of Concept A (no device copy in the rig) — a different cost from his "first switch after the app opens".
+3. **`ui-audit/owner-popup-heartbeat.js`** — the owner's method, as a console snippet: planyr.io forbids framing but sends no `Cross-Origin-Opener-Policy`, so a page that `window.open`s the app without `noopener` shares its event loop and an opener-side MessageChannel heartbeat sees every gap of the popup from its first script; `perf.selfTest()` is the 200 ms known-good arm (`popup.eval`), `perf.reload()` a cache-busted reload. It is how the live check (V1660224) is measured.
+
+### Where the time was (CPU profiles resolved through the build's sourcemaps, `--owner-store`, 2×)
+| cost | where | size |
+|---|---|---|
+| **the whole library re-modelled ~5× per cold load** | `loadSitesList` → `readFresh` (a private copy of every plan) → `migrate` (full bonded heal) per plan; called by the sites state, the boot resume target (×2), the sign-in refresh, the pull refresh | tasks of 200–600 ms, ~1.4 s in all |
+| **the cloud pull re-modelled every plan ~4× more** | `pullCloud` → `mergePulledSites` (`createSiteModel` of each local copy) → `mergeSiteContent` (re-creates both copies and the result); then `writeMap` swapped in a NEW shared object for every plan even when its text was byte-identical, so the next list read re-modelled everything again | ~0.7 s + ~0.2 s |
+| the version ring at boot | `initHistoryStore` at module load: parse + `JSON.stringify` + a 3.5 MB `put` on EVERY load | ~190 ms, one task |
+| every version snapshot (a paste, a delete, a count change, the save when leaving a plan) | `writeHistoryAll`: the whole ring re-serialised, then again per halving step of the localStorage cap | ~280 ms; the first one after a load carried the cold serialisation of everything read back from IndexedDB |
+| the planner's first render on a reload | road network ~110 ms inside it, and the mount was a **default-lane** setState — React renders that in ONE task | 300–550 ms |
+
+### What shipped
+1. **`loadSitesList` remembers each plan's model** against the store's shared object for that plan (a WeakMap; planStore already keeps one object per unchanged entry), built from a private copy. Every call still returns a **fresh array of fresh top-level copies** — `refreshSites()`'s identity contract (the route effect's retry-then-"missing" verdict) is untouched; the name-authority pass and the sort still run every call. The pull's merge reads the same models. Under test the cached models are deep-frozen, so a caller that mutates a nested list fails loudly (none does — audited; `test/sitesListCache.test.js`).
+2. **`createSiteModel` remembers an element list it has PROVEN clean**: every pass is identity-preserving, so a list that comes back as the same array is a fixed point (f(x) === x) and is recognised next time (`CLEAN_ELS`). A list any pass changed is not remembered. `unionById` and the merge's tombstone filter hand back the input array when nothing changed, so a plan stays recognisable through a merge with a slim cloud header (whose element collections are always empty).
+3. **`lib/elsProof.js` carries that fact across a reload**, keyed by `__BUILD_ID__` (any deploy invalidates every proof) + the plan id + a 64-bit hash and length of the plan's exact stored entry text (`planStore.textOf`; any edit invalidates that plan's proof). Off on a dev server. ~3 KB in localStorage (TIER-BY-REBUILDABILITY deviation, stated in its header: it must be read synchronously before the first render; bounded and pruned to live ids; losing it costs one slower load, never data). `planStore.writeMap` now keeps the existing shared object when a plan's text is unchanged.
+4. **The version ring**: hydrated in an idle callback after boot (`scheduleHistoryHydration`; the ring was already race-safe for a slow open — pre-hydration writes go to the localStorage mirror only, hydration unions); re-`put` only when the localStorage seed added a snapshot IndexedDB lacks (`historySeedAddsTo`); each snapshot serialised ONCE in its life (`historyRingJson`, byte-identical to `JSON.stringify`, pre-warmed in idle slices after hydration); the localStorage cap decided on lengths and only the capped text assembled in the click; the IndexedDB copy written in idle time (flushed on pagehide / hidden). The version-history panel awaits hydration itself.
+5. **The page's FIRST planner mount waits for `warmPlanForMount`** (≤ 1.5 s ceiling): the plan's parcel anchors, road network and drive-pad outline cuts driven through the SAME steps (`lib/roadNetBuild.js`) in ~8 ms slices from the device copy, with the planner's own settings derivation (`plannerSettingsFrom`, now shared by the state initializer). In-session switches mount at once, as before. The framing reveal (constraint #8, B1574432) is inside the planner and is untouched — this only decides WHEN it mounts. **The mount is applied in `startTransition`.**
+6. **Round 5's untested hypothesis, tested:** "the first mount is one unsliced task because a `useSyncExternalStore` update forces a synchronous lane" — **refuted as the cause for the reload**: the boot mount was simply never a transition (a default-lane update renders in one task in React 18). Wrapping it in `startTransition` alone took the owner-sized reload's worst task from **346 / 371 → 186 / 209 ms** (3 runs each, same build otherwise), i.e. React DID time-slice it — no uSES de-opt fired. (In-session switches already use `startTransition` via `goPlan`, and read at the floor.)
+
+### Measured — same harness, two builds (baseline = main 8f0d69b; shipped = this change), `--cpu 2 --library 140`, **10 runs each**, worst gap per run, median / worst (ms), runs over 50 / over 150, summed gaps over 50 ms (all runs)
+| action | baseline | shipped |
+|---|---|---|
+| **reload onto a plan (app opened fresh)** | 367 / 656 (>150 10/10; sum 1570) | **175 / 255** (>150 10/10; sum 698) |
+| **reload, `--owner-store` (the owner's device size)** | 1181 / 1670 (>150 10/10; sum 3738) | **162 / 237** (>150 8/10; sum 852) |
+| **first back to the reload's plan, `--owner-store`** | 175 / 194 (>50 10/10, >150 10/10) | **45 / 73** (>50 1/10, >150 0/10) |
+| first switch after reload, `--owner-store` | 48 / 69 | 53 / 80 |
+| 2nd switch after reload, `--owner-store` | 52 / 91 | 39 / 78 |
+| first switch after reload (default store) | 49 / 102 | 51 / 81 |
+| first back after reload (default store) | 51 / 63 | 53 / 64 |
+| 2nd switch after reload (default store) | 50 / 61 | 50 / 108 |
+| cold open Bolt-on (empty profile) | 565 / 752 (sum 3029) | 357 / 413 (sum 3222) |
+| Concept A → Bolt-on (first open, fresh profile) | 131 / 159 (>150 2/10) | 109 / 132 (>150 0/10) |
+| plan → Map (first time after the app opened on a plan) | 427 / 630 (sum 2218) | 413 / 534 (sum 1679) |
+| Bolt-on → Concept A (first visit — the rig's rows-seed first open) | 112 / 180 (>150 2/10) | 115 / 211 (>150 3/10) |
+| Concept A → Bolt-on (back) | 42 / 59 | 44 / 106 |
+| Bolt-on → Concept A (revisit) | 56 / 102 | 48 / 84 |
+| back, 2nd | 47 / 93 | 47 / 81 |
+| revisit, 2nd | 45 / 114 | 43 / 120 |
+| control: no switch | 0 / 0 | 0 / 0 |
+| Grand Port → Richfield (larger plan) | pass 1: 470 / 511 · pass 2: 534 / 632 | pass 1: 498 / 723 · pass 2: 477 / 509 |
+| Richfield → Grand Port (back) | 149 / 204 · 150 / 190 | 160 / 181 · 151 / 195 |
+
+**Read in three groups.**
+- **What moved.** The fresh load: summed stalls **−56 %** on the default store and **−77 %** on the owner-sized store, worst gap 656 → 255 and 1670 → 237. The first trip back to the plan the page opened on, on an owner-sized device: 175 / 194 → **45 / 73** (the version-snapshot cost of the click). The cold open (empty profile) worst 752 → 413 and the first open of a never-drawn plan 159 → 132 moved too (the transition + the list memory).
+- **⛔ NOT MET, stated loudly.** (a) **The reload's worst gap is still over 150 ms in 10/10 runs on the default store and 8/10 on the owner-sized one** (median 175 / 162 at 2×). What remains is the planner's own first render (the `SitePlanner` component body ~80–90 ms — one component, one slice — plus GC), the first forced layout of the new page (`PriorityToolbar`'s measuring copies, ~55–90 ms of `getBoundingClientRect` = layout of the whole planner DOM), and the cloud pull's remaining merge. No hotspot over ~60 ms is left in any of them. (b) **The brief's Target-1 row as written — the `switch` scenario's "first visit" — did not move (112 / 180 → 115 / 211)**: it is a rows-seed first open of a plan the rig's device has never held, not the owner's case. The owner's case ("first switch after the app opens", both plans on the device) was **not reproduced** at ~100 ms in either rig configuration — the first switch from the reloaded plan reads at the floor on both builds; what DID reproduce, with an owner-sized device, is the first switch BACK to the reload's plan (175 → 45 median). Whether that is his ~100 ms is for his heartbeat to say (V1660224).
+- **Nothing got slower.** Every steady-state row is within its spread; the larger-plan row was re-run (pass 2) because pass 1 read 498 / 723 against 470 / 511, and pass 2 read 477 / 509 against 534 / 632 — noise.
+
+### Budgets (`byLabelCpu2`)
+reload 460 → **310** (baseline 656 / owner-store 1670 FAIL; shipped 255 / 237 pass) · first open 200 → **160** · cold open 650 → **500** (baseline 752 fails) · new: first switch after reload 110, first back after reload 110, 2nd switch after reload 130 · "revisit, 2nd" 110 → 130 — **a loosening**, stated: both builds read 114 / 120, so 110 failed on the instrument floor alone.
+
+### `loadSitesList` and B2165120's read-side follow-on
+Done here, without touching `refreshSites()`'s fresh-array contract (point 1). The remaining per-call cost is the shallow copies, the name-authority pass and the sort (a few ms for 143 plans).
+
+### Data safety
+`ui-audit/verify-plan-switch-writes.mjs` PASS on the final build (moves, layer toggles, overlay opacity and renames on two plans; reload; sign-out — every write landed, nothing written into another account's store). The history ring's stored bytes are unchanged (byte-identical serialiser, same cap rule — `test/sitesListCache.test.js` §5); IndexedDB is written later but flushed on pagehide/hidden, and `backupNow` still reports only the synchronous localStorage write. Plan records: nothing writes differently — the caches only skip recomputing an answer that is proven identical.
