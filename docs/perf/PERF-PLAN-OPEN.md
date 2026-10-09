@@ -107,3 +107,52 @@ Budgets (`perf-plan-open.budget.json`) are set at the fix plus headroom: the bas
 - **Cold page loads are unchanged** (250–400 ms) — the boot, not a switch; not in this round's scope.
 - **Not reproduced in the sandbox: the owner's single 211 ms gap.** The rig's worst back-switch gap fell from 153 to 87 and none of 10 runs reached 150. His capture is the arbiter: V1652624.
 - **"One live run didn't open the plan at all" (round 2):** per #2245 that one was a COLD mount (1 of 11 live runs never showed the canvas within 60 s; not reproduced in 8 more, nor in 5 here; #2245 prints the page state if it recurs — **not a proven defect, not ruled out**). **But the new route check in `verify-plan-open-live` found a REAL, older defect on the switch path: project A → B → back to A left the URL naming B** (planyr.io b94ffe1, and a 5fc90a1 build from before both perf rounds) — the hash round trip of the URL writer's own write set B881664's one-pass "defer" flag, which then swallowed the next switch's write. Fixed here as **B2233520** (`bootResume.routeChangeNeedsDefer`); verified in a real browser on a local build (hash follows, 3/3 hops PASS).
+
+## ⛔ Round 4 (B2233521, 2026-10-09) — the structural move was BUILT, MEASURED, and NOT SHIPPED; the owner's 50 ms bar is still not proven met
+
+**The brief:** the owner's heartbeat on db8723a read Bolt-on → Concept A 50, 119, 65 | 68, 61 and back 58, 71 | 61, 54 — the remaining cost was believed to be the planner's REMOUNT, and the move on the item was "switch plans without remounting".
+
+### First, the instrument (three findings, each would have produced a false result)
+1. **This container is faster than the last one.** On main, the rig at 1× now reads every switch UNDER 50 ms — it cannot red-proof anything. `--cpu <rate>` (CDP CPU throttling) was added and the rig calibrated against the owner's own main-build readings: **2×** reproduces them (first visit 95–129 vs his 119; back 42–58 vs his 54–71).
+2. **3× is unusable for a 50 ms bar:** Chromium's throttler pauses the main thread in slices, and a heartbeat task that straddles a pause reads as a gap with nothing behind it — a Chromium trace showed a **58 ms `onmessage` with no other event inside it**. So every run now ends with a **"control: no switch"** row (same page, same window, no switch): at 2× it reads 0 in 19 of 20 runs and one 53 ms gap in the 20th — the floor this bar sits on.
+3. **The rig's first three hops carry a rig-only cost** (Concept A has no device copy, so its rows seed draws it ~4 s in, and the view re-frames on the next activation). Two hops were added — **"back, 2nd"** and **"revisit, 2nd"** — the steady state the owner actually measures (both plans already opened once this session).
+
+### What was built
+The plan you just left stayed MOUNTED, hidden and detached from the page (a portal into a detached box, so no query/census/hit-test ever saw two planners), at most one kept; it did not re-render on app renders; it re-applied its own layer set when shown; it owned no window hook, floating panel or Alt picker while hidden. Three defects that only a hidden planner exposes were found and fixed on the way (a 0×0 box taken as the canvas size; the tile pacer dropping every queued tile of a detached map, which the blank-tile heal then cache-busted and re-downloaded; per-tile compositor layers — a 20–40 ms frame with no script when ~250 retained tiles came back at once). The owner's data-safety condition was met first: `ui-audit/verify-plan-switch-writes.mjs` (below) PASSED on it and FAILED on each of three mutants that removed a safeguard.
+
+### Why it was not shipped — same harness, same calibration (2×), 10 runs each, worst gap per run, median / worst (ms)
+| action | main (0ade8dd) | keep-alive build |
+|---|---|---|
+| Bolt-on → Concept A (first visit) | 87 / 144 | 69 / 92 |
+| Concept A → Bolt-on (back) | **36 / 40** | **77 / 100** |
+| Bolt-on → Concept A (revisit) | 43 / 62 | 42 / 66 |
+| back, 2nd | 39 / 67 | 35 / 53 |
+| revisit, 2nd | 43 / 47 | 37 / 55 |
+| control: no switch | 0 / 53 | 0 / 0 |
+| cold open Bolt-on (5 runs) | 402 / 463 | 499 / 534 |
+| Richfield → Grand Port (back, 5 runs) | 158 / 185 | 222 / 382 |
+
+The steady-state rows (the owner's case) are a wash within the instrument's floor; the first re-show, the cold load and the other project's back switch got WORSE. A re-show is not free: the outgoing planner still re-renders to deactivate, the reattached subtree is laid out and painted, and the aerial grid returns in one frame. **Round 3 had already made the remount cheap enough that keeping a second planner alive does not beat it.** Per the owner's instruction ("if you can't prove it, fall back to an approach that unmounts and say so loudly") the planner unmounts on a switch, as before.
+
+### What DID ship
+1. **A real data defect, found by the safety harness: signing out copied the plan on screen into the SIGNED-OUT device store** (`planarfit:sites:v1:p:<id>`, ~200 ms after the click, on main). `lib/saveDedupe.js` `mayWriteForAccount` — a plan opened under an account is never written into another account's or the signed-out store. DATA.md invariant 18.
+2. **A switch no longer writes the plan being left twice** (`writeIsRedundant`: the switch handler's flush, then persist-on-leave on unmount, wrote the identical record back to back; the second is skipped only while the store provably still holds the first).
+3. The instrument: `--cpu`, the 2nd-round hops, the no-switch control (`perf-plan-open.mjs`), and `verify-plan-switch-writes.mjs`.
+
+### The shipped build against main — same harness, 2×, 10 runs (5 for the adjacent rows), median / worst (ms)
+| action | main | shipped |
+|---|---|---|
+| first visit | 87 / 144 | 88 / 141 |
+| back | 36 / 40 | 37 / 76 |
+| revisit | 43 / 62 | 41 / 57 |
+| back, 2nd | 39 / 67 | 43 / 148 (5/10 runs over 50) |
+| revisit, 2nd | 43 / 47 | 39 / 84 |
+| control: no switch | 0 / 53 | 0 / 0 |
+| cold open Bolt-on / Concept A | 402 / 463 · 438 / 535 | 397 / 429 · 373 / 644 |
+| Grand Port → Richfield · back | 721 / 757 · 158 / 185 | 765 / 866 · 98 / 164 |
+**No speed claim is made for this round: the two builds are indistinguishable within the run-to-run spread** (the "back, 2nd" worst of 148 and the wide adjacent-row ranges are single runs on a shared CPU; the medians are all within a few ms). What this round changed is a write path and the instrument, not the switch's cost. The budget file is NOT tightened, because nothing measured moved; the two new steady-state rows and the control get budgets so a regression there fails.
+
+### ⛔ STILL NOT MET — stated as loudly as the rest
+- **The owner's bar is not proven met, and this round did not move the steady-state switch.** In the calibrated rig the steady-state switches on main already sit at medians of 39–43 ms with 0–1 of 10 runs over 50 — the same rate as the no-switch control. Whether that matches his machine cannot be decided here: **the arbiter is his heartbeat** on the shipped build (the item's live check).
+- **What remains over the bar in the rig is the first open of a plan the device has never drawn** (the rows seed draws it ~4 s in, in one render) **and cold loads (400–500 ms) and the larger plan's first open (≈720 ms)** — none of them a switch between two plans he already has open, and none touched here.
+- **Not to be retried without new evidence:** keeping the previous planner mounted. The table above is the reason; the safety harness is ready if someone does.

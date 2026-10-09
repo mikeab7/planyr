@@ -5,6 +5,7 @@ import { startClickAck } from "../../shared/ui/clickAck.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useProjectName, usePlanName, renameProjectChecked, renamePlanChecked } from "../../shared/names/names.js";
+import { writeIsRedundant, mayWriteForAccount } from "./lib/saveDedupe.js";
 import { loadSite, saveSite, siteExistsLocally, sitesWriteStamp, sitesWriteStillCurrent, readBackSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
 import { relTime } from "../../shared/projects/projectModel.js";
 import { collectAssetRefs, releasePlanForOverlay } from "./lib/sharedAssetRefs.js";
@@ -3924,6 +3925,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // forward reference. The first real save then writes a fully-formed record —
   // there's no need to pre-create an empty one.
   const metaRef = useRef({});
+  const openedUidRef = useRef(undefined); if (openedUidRef.current === undefined) openedUidRef.current = activeUid() || null; // B2233521 — the account this planner's plan was opened under (lib/saveDedupe.js mayWriteForAccount)
   // "saving" | "saved" | "unsaved". Initialize honestly: a brand-new site that
   // isn't in storage yet is "unsaved", an opened existing site is "saved".
   const [saveStatus, setSaveStatus] = useState(() => (loadSite(siteId) ? "saved" : "unsaved"));
@@ -4106,8 +4108,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // ~50ms (snapshotVersion's count-based sig-dedup already keeps a same-shape drag from snapshotting).
     let mirrorStamp = null;   // NEW-1 (B217540 ×3): the whole-store write the mirror made, so the settle tick can tell it is already on disk
     const writeMirror = () => {
+      if (!mayWriteForAccount(openedUidRef.current, activeUid())) { reportClientEvent("save-refused-account-changed", "an autosave ran after the account changed; not written to the other account's store", { id: siteId }); return; }
       const ok = saveSite(payload);
       mirrorStamp = ok ? sitesWriteStamp() : null;
+      lastWriteRef.current = ok ? { rec: payload, stamp: mirrorStamp } : null; // B2233521 — what a later flush of the same state may skip
       lastLocalWrite.current = Date.now();
       // B473 — VERIFY the write actually persisted by reading it back. A write that silently doesn't
       // land is exactly the owner's "I placed a bunch of stuff and it didn't save at all." If the
@@ -4143,7 +4147,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        * byte-exact check B217540 uses for the read-back; any other writer (another tab, a cloud pull) fails that proof and
        * the real write below runs exactly as it always did. A mirror that never ran or failed has no stamp, so it also falls
        * through to the real write. */
-      const okSave = mirrorStamp && sitesWriteStillCurrent(mirrorStamp) ? true : saveSite(payload, { skipHistory: true });
+      if (!mayWriteForAccount(openedUidRef.current, activeUid())) return; // B2233521 — never into another account's store
+      const mirrorHeld = !!(mirrorStamp && sitesWriteStillCurrent(mirrorStamp));
+      const okSave = mirrorHeld ? true : saveSite(payload, { skipHistory: true });
+      if (!mirrorHeld) lastWriteRef.current = okSave ? { rec: payload, stamp: sitesWriteStamp() } : null; // B2233521
       if (fresh && okSave) onSiteSaved?.();
       // Badge tracks the REAL write: local write done; when logged in, stay
       // "saving" until the cloud upsert resolves, then "saved" only if it succeeded.
@@ -4225,6 +4232,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!siteId) return;
     cloudPushWithWatchdog(siteId);
   };
+  /* B2233521 — every flush below (switch, persist-on-leave, page hide) goes through ONE save (lib/saveDedupe.js):
+   * (1) a plan opened under an account is never written into another account's store — a persist-on-leave that ran after SIGN-OUT
+   *     copied the open plan into the signed-out device store (measured: ui-audit/verify-plan-switch-writes.mjs, red on the build before);
+   * (2) a flush of exactly the record this planner last wrote, while the store still holds it, is skipped — a plan switch wrote the plan
+   *     being left twice back to back (the switch handler's flush, then persist-on-leave on unmount) and the second changed nothing. */
+  const lastWriteRef = useRef(null);
+  const saveLive = (rec) => {
+    if (!mayWriteForAccount(openedUidRef.current, activeUid())) { reportClientEvent("save-refused-account-changed", "a flush ran after the account changed; not written to the other account's store", { id: siteId }); return false; }
+    if (writeIsRedundant(lastWriteRef.current, rec, sitesWriteStillCurrent)) return true;
+    const ok = saveSite(rec);
+    lastWriteRef.current = ok ? { rec, stamp: sitesWriteStamp() } : null;
+    return ok;
+  };
   // Persist on leave; if the site is still blank and un-located, drop it instead.
   const liveRef = useRef({});
   useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, sheetOverlays, deletedIds, layerOverrides, layerAbove }; });
@@ -4257,7 +4277,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // current (possibly still-blank) canvas state onto it is a safe no-op: it neither destroys an
     // existing row nor creates a new one, and cloudUpsert's own header-signature check skips the
     // network write entirely when nothing actually changed.
-    else saveSite({ id: siteId, ...metaRef.current, ...s });
+    else saveLive({ id: siteId, ...metaRef.current, ...s });
   };
   useEffect(() => {
     if (active || !siteId) return;
@@ -4268,7 +4288,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // page is closing/navigating, so a change made just before leaving isn't lost.
   useEffect(() => {
     if (!siteId) return;
-    const flush = () => { if (deletedSelfRef.current) return; const s = liveRef.current; if (!isBlankSite(s)) saveSite({ id: siteId, ...metaRef.current, ...s }); };
+    const flush = () => { if (deletedSelfRef.current) return; const s = liveRef.current; if (!isBlankSite(s)) saveLive({ id: siteId, ...metaRef.current, ...s }); };
     const onVis = () => { if (document.visibilityState === "hidden") flush(); };
     window.addEventListener("beforeunload", flush);
     document.addEventListener("visibilitychange", onVis);
@@ -16713,7 +16733,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   metaRef.current = { site: siteLabel, name: planLabel, groupId, county: restored?.county ?? null, origin };
   // Multi-site switching: flush this site's live state first so nothing in the
   // last debounce window is lost (and a Duplicate clones the very latest edits).
-  const flushSite = () => { if (siteId && !deletedSelfRef.current && !isBlankSite(liveRef.current)) saveSite({ id: siteId, ...metaRef.current, ...liveRef.current }); };
+  const flushSite = () => { if (siteId && !deletedSelfRef.current && !isBlankSite(liveRef.current)) saveLive({ id: siteId, ...metaRef.current, ...liveRef.current }); };
   // B792 — the county stored at CREATION can be wrong (overlapping county bboxes + a
   // spatially-unscoped statewide parcel source let "waller" persist on a Fort Bend site),
   // and every consumer — the identify CAD, tax rates, the flood/easement jurisdiction
