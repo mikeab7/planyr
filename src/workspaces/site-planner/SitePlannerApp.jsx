@@ -35,7 +35,7 @@ import { nextConceptName } from "./lib/conceptName.js";
 import { reportClientEvent } from "../../shared/telemetry/clientErrors.js";
 import { recordCloudWriteFailure, readCloudWriteFailures, clearAllCloudWriteFailures, retryCloudWriteFailures, WHAT_RENAME, WHAT_STATUS, WHAT_DATES } from "../../shared/cloud/writeFailureLog.js";
 import { noteLayerContext } from "../../shared/telemetry/perfRecorderHandle.js";
-import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability, resumeTargetAfterSignIn, routeProjectJustChanged } from "./lib/bootResume.js";
+import { initialBootResolved, mayReconcileUrl, pickResumeTarget, mayWriteRouteProject, routeProjectAvailability, resumeTargetAfterSignIn, routeChangeNeedsDefer } from "./lib/bootResume.js";
 import { RADIUS } from "../../shared/ui/radius.js";
 // NEW-2(b) — a SECOND "open where I left off" pointer, entirely separate from `currentSite`
 // above: the Shell's own `planyr:lastRoute:v1` (src/app/lastRoute.js), which is what a
@@ -808,7 +808,10 @@ export default function App({
   const routeChangedThisPassRef = useRef(false);
   useEffect(() => {
     const prev = prevPidRef.current; prevPidRef.current = projectId;
-    routeChangedThisPassRef.current = routeProjectJustChanged(prev, projectId);
+    // B2225425 — the round trip of effect (2)'s OWN write is not an external route change; flagging it left the defer flag
+    // standing for the next switch, whose URL write was then skipped (see `routeChangeNeedsDefer`).
+    const ownEcho = pendingRouteWriteRef.current !== NO_PENDING_ROUTE_WRITE && projectId === pendingRouteWriteRef.current;
+    routeChangedThisPassRef.current = routeChangeNeedsDefer(prev, projectId, ownEcho);
     // B1865936 — the Map-crumb bounce: `goMap`/`leaveProject` set `userLeftProjectRef` and
     // leave `activeSiteId` alone (the Leaflet keep-alive optimization), so the URL still names
     // the just-left project until effect (2) below writes the clear. If THIS effect runs before

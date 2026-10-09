@@ -256,3 +256,22 @@ describe("routeProjectJustChanged (B881664 ×3) — the third round: a race betw
     expect(routeProjectJustChanged(undefined, "gid1")).toBe(false);
   });
 });
+
+import { routeChangeNeedsDefer } from "../src/workspaces/site-planner/lib/bootResume.js";
+describe("routeChangeNeedsDefer — the URL writer stands down only for an EXTERNAL route change (B2225425)", () => {
+  it("an outside navigation defers; the echo of our own write does not; no change never defers", () => {
+    expect(routeChangeNeedsDefer("a", "b", false)).toBe(true);
+    expect(routeChangeNeedsDefer("a", "b", true)).toBe(false);
+    expect(routeChangeNeedsDefer(undefined, "b", false)).toBe(false);
+    expect(routeChangeNeedsDefer("b", "b", false)).toBe(false);
+  });
+  it("A → B → back to A: the back switch's write is NOT swallowed by a flag left over from B's echo", () => {
+    // replay of effect (1)/(2) as measured: write B, B's echo arrives (effect 2 does not re-run on that pass), then switch to A
+    let deferFlag = false, pending = null, url = "a";
+    const effect2 = (group) => { const d = deferFlag; deferFlag = false; if (d) return; pending = group; url = group; };
+    const effect1 = (prev, now) => { const own = pending !== null && now === pending; deferFlag = routeChangeNeedsDefer(prev, now, own); if (own) pending = null; };
+    effect2("b"); effect1("a", "b");      // switch to B, its echo
+    effect2("a");                         // switch back to A
+    expect(url).toBe("a");
+  });
+});
