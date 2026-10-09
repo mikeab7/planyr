@@ -5,7 +5,7 @@
  * read NW/SE) and walks the owner's checklist on the real canvas model:
  *   (a) single-load shows rows dock · rear · ends · ends (rear and each end SEPARATE); 8 parking rows on
  *       the rear only leave both end walls untouched;
- *   (b) cross-dock shows ONE dock row ("same"); split it, give one side a buffer — only that side changes;
+ *   (b) cross-dock shows TWO dock rows (no same/split link); give one side a buffer — only that side changes;
  *   (c) a dashed picker corner adds a bump-out AT that corner, the dock line stops at it, SF and the door
  *       count change; size 70 × 60 lands on the model;
  *   (d) Trailer rows 2 → a two-band trailer zone with an aisle (stall count doubles);
@@ -92,13 +92,12 @@ try {
     ok(`[${scheme}] the end walls are untouched on the canvas model (no kid on either end)`, (await kids()).filter((k) => k.sideParkSide && k.sideParkSide !== rearSide).length === 0 && (await T("wall-row").nth(2).getByTestId("wall-chip").count()) === 0);
     ok(`[${scheme}] the parking is painted on the canvas`, (await page.locator(`[data-el-id="${park[0].id}"]`).count()) === 1);
 
-    // ---- (b) cross-dock: one "same" row, split, buffer on one side only ----
+    // ---- (b) cross-dock: each dock wall its OWN row (no same/split link); a court / buffer on one side only ----
     await openScenario(scheme, "cross", { dock: "cross", dockAxis: "x" });
-    ok(`[${scheme}] cross-dock: ONE dock row, chain toggle reads "same"`, (await rowByRole("dock").count()) === 1 && /same/.test(await T("dock-link-toggle").innerText()));
-    await addLayer(rowByRole("dock").first(), "court");
-    ok(`[${scheme}] linked: a court on BOTH dock walls`, (await kids()).filter((k) => k.truckCourt).length === 2);
-    await T("dock-link-toggle").click(); await sleep(400);
-    ok(`[${scheme}] split → two dock rows, toggle reads "split"`, (await rowByRole("dock").count()) === 2 && /split/.test(await T("dock-link-toggle").innerText()));
+    ok(`[${scheme}] cross-dock: TWO dock rows and no same/split toggle`, (await rowByRole("dock").count()) === 2 && (await T("dock-link-toggle").count()) === 0);
+    await addLayer(rowByRole("dock").nth(0), "court");
+    ok(`[${scheme}] a court on ONE dock wall only`, (await kids()).filter((k) => k.truckCourt).length === 1 && (await rowByRole("dock").nth(1).getByTestId("wall-chip").count()) === 0);
+    await addLayer(rowByRole("dock").nth(1), "court");
     await addLayer(rowByRole("dock").nth(0), "buffer");
     const bufs = (await kids()).filter((k) => k.buffer);
     ok(`[${scheme}] a buffer on ONE side only`, bufs.length === 1 && (await rowByRole("dock").nth(1).getByTestId("wall-chip").count()) === 1);

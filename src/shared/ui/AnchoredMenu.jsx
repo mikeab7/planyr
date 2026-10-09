@@ -38,6 +38,11 @@ import { MENU_LAYER_ATTR, pressBelongsToHigherMenu } from "./menuLayers.js";
  *                  (a different width-driving padding, a module's own line color); the panel is
  *                  never invisible for lack of it (B1263075/NEW-4 — see the style object below).
  *  - className   : panel className (default "menu", for the existing menu styles)
+ *  - swallowOutsidePress : opt-in. The press that DISMISSES the menu does nothing else — it is stopped in
+ *                  the capture phase (pointer/mouse/touch down AND the click that follows), so closing
+ *                  a "⋯" action menu by clicking the canvas never also deselects, deletes or drags what
+ *                  is under the pointer. Default false keeps the B1106256 pass-through (a ribbon button
+ *                  pressed while a menu is open both dismisses it AND activates).
  *  - hoverSafe   : historically opted a HOVER-opened popover (RowInfo/SourcesLegend) out of
  *                  the full-viewport click-away backdrop, which otherwise sat ON TOP of the
  *                  trigger and made a hover-opened menu's own appearance fire a spurious
@@ -60,6 +65,7 @@ export default function AnchoredMenu({
   panelStyle,
   className = "menu",
   hoverSafe = false,
+  swallowOutsidePress = false,
   children,
 }) {
   const menuRef = useRef(null);
@@ -175,10 +181,11 @@ export default function AnchoredMenu({
   // (account dropdown, project breadcrumb, rail flyouts).
   useEffect(() => {
     if (!open) return;
+    if (swallowOutsidePress) return undefined; // the swallow effect below owns Esc for this menu
     const onKey = (e) => { if (e.key === "Escape") onClose?.(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, swallowOutsidePress]);
 
   /* ⛔ B1106256 — dismiss via a document-level, CAPTURE-phase `mousedown` listener rather than a
    * full-viewport interactive backdrop element. The backdrop used to sit on TOP of every control on
@@ -225,9 +232,50 @@ export default function AnchoredMenu({
       if (pressBelongsToHigherMenu(e.target, zIndex)) return;
       onClose?.();
     };
+    if (swallowOutsidePress) return undefined; // the swallow effect below owns outside presses for this menu
     document.addEventListener("mousedown", onDown, true);
     return () => document.removeEventListener("mousedown", onDown, true);
-  }, [open, onClose, anchorRef, zIndex]);
+  }, [open, onClose, anchorRef, zIndex, swallowOutsidePress]);
+
+  /* opt-in `swallowOutsidePress` (see the prop doc): the press/Esc that dismisses this menu is consumed whole,
+   * so it triggers nothing else. Deliberately a SEPARATE effect from the pass-through dismissal above, whose
+   * B1106256 guarantee (never stop the real event) stays untouched for every other consumer. */
+  useEffect(() => {
+    if (!open || !swallowOutsidePress) return undefined;
+    // pointerdown/mousedown/touchstart are stopped here, and a one-shot capture sweep eats the matching
+    // up/click that follows (it must outlive this effect, which unmounts the moment the menu closes).
+    const outside = (e) => {
+      const panel = menuRef.current, anchor = anchorRef?.current;
+      if (panel && panel.contains(e.target)) return false;
+      if (anchor && anchor.contains(e.target)) return false;
+      return !pressBelongsToHigherMenu(e.target, zIndex);
+    };
+    const eat = (e) => { e.stopPropagation(); e.preventDefault(); };
+    const onPress = (e) => {
+      if (!outside(e)) return;
+      eat(e);
+      if (e.type !== "pointerdown") return;
+      onClose?.();
+      const sweep = ["pointerup", "mouseup", "touchend", "click"];
+      let done = false;
+      const finish = () => { if (done) return; done = true; sweep.forEach((t) => document.removeEventListener(t, onTail, true)); clearTimeout(timer); };
+      const onTail = (e2) => { eat(e2); if (e2.type === "click") finish(); };
+      const timer = setTimeout(finish, 700);
+      sweep.forEach((t) => document.addEventListener(t, onTail, true));
+    };
+    const pressTypes = ["pointerdown", "mousedown", "touchstart"];
+    const onKey = (e) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();   // Esc closes ONLY this menu — not the host's own Esc handler (e.g. the inspector)
+      onClose?.();
+    };
+    pressTypes.forEach((t) => document.addEventListener(t, onPress, true));
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      pressTypes.forEach((t) => document.removeEventListener(t, onPress, true));
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [open, onClose, anchorRef, zIndex, swallowOutsidePress]);
 
   if (!open) return null;
 

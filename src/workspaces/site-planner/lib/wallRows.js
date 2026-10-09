@@ -1,6 +1,6 @@
 /* Building panel v2 — the Loading section's per-wall rows, as pure functions.
  *
- * ONE list under the wall picker: a row per wall (or per linked dock pair), each carrying its layers
+ * ONE list under the wall picker: a row per wall, each carrying its layers
  * outward as compact chips and a dashed "+". This module owns every decision the rows make so the
  * panel is only a drawing of the answers:
  *   - which rows exist, in what order, with what badge/role word (`wallRowPlan`);
@@ -10,23 +10,20 @@
  *     the panel and the stall count all share;
  *   - the bump-out chip's corner names (`bumpEndLabel`).
  *
- * Rules the owner set (do not relitigate): the REAR wall is never grouped with the ends; END walls
- * (and the two long walls of a no-dock building) are ALWAYS separate rows — there is no link option
- * for them; only a cross-dock PAIR can be linked, and it is linked by default.
+ * Rules the owner set (do not relitigate): the REAR wall is never grouped with the ends; EVERY wall is
+ * its own row — the two dock walls of a cross-dock building too (NEW-1: the old linked "N·S dock" row and
+ * its same/split toggle are gone; a stored `dockStacksLinked` on an old plan is simply ignored).
  * No React, no DOM, no host state. */
 import { dockSidesFor, dockSideCompassLabel, compassLabelForBearing } from "./dockZones.js";
 import { WALLS, OPPOSITE_WALL } from "./loadingWalls.js";
 
 /* ------------------------------------------------------------------ rows */
 
-/** Is a cross-dock building's wall pair editing as one ("same")? Absent = linked. */
-export const dockLinked = (b) => !b || b.dockStacksLinked !== false;
-
 /**
- * The ordered rows of the wall list: dock wall(s), the rear wall (single-load only — the wall
- * opposite the dock), then each remaining wall as its own row.
- * @returns {{key:string, role:"dock"|"rear"|"ends"|"sides", sides:string[], badge:string,
- *            pair:boolean, linked:boolean}[]}
+ * The ordered rows of the wall list: the dock wall(s) — each its OWN row, a cross-dock building's two
+ * dock walls included — the rear wall (single-load only — the wall opposite the dock), then each
+ * remaining wall as its own row.
+ * @returns {{key:string, role:"dock"|"rear"|"ends"|"sides", sides:string[], badge:string}[]}
  */
 export function wallRowPlan(b) {
   const rot = (b && b.rot) || 0;
@@ -34,19 +31,15 @@ export function wallRowPlan(b) {
   const lab = (s) => dockSideCompassLabel(s, rot);
   const rows = [];
   if (dockSides.length === 2) {
-    if (dockLinked(b)) {
-      rows.push({ key: "dock", role: "dock", sides: [...dockSides], badge: dockSides.map(lab).join("·"), pair: true, linked: true });
-    } else {
-      dockSides.forEach((s) => rows.push({ key: `dock:${s}`, role: "dock", sides: [s], badge: lab(s), pair: true, linked: false }));
-    }
+    dockSides.forEach((s) => rows.push({ key: `dock:${s}`, role: "dock", sides: [s], badge: lab(s) }));
   } else if (dockSides.length === 1) {
     const rear = OPPOSITE_WALL[dockSides[0]];
-    rows.push({ key: "dock", role: "dock", sides: [dockSides[0]], badge: lab(dockSides[0]), pair: false, linked: false });
-    rows.push({ key: `rear:${rear}`, role: "rear", sides: [rear], badge: lab(rear), pair: false, linked: false });
+    rows.push({ key: "dock", role: "dock", sides: [dockSides[0]], badge: lab(dockSides[0]) });
+    rows.push({ key: `rear:${rear}`, role: "rear", sides: [rear], badge: lab(rear) });
   }
   const used = new Set(rows.flatMap((r) => r.sides));
   const role = dockSides.length ? "ends" : "sides";
-  WALLS.filter((s) => !used.has(s)).forEach((s) => rows.push({ key: `${role}:${s}`, role, sides: [s], badge: lab(s), pair: false, linked: false }));
+  WALLS.filter((s) => !used.has(s)).forEach((s) => rows.push({ key: `${role}:${s}`, role, sides: [s], badge: lab(s) }));
   return rows;
 }
 
