@@ -1183,7 +1183,9 @@ function listModelOf(shared, liveIds) {
   if (c) return c;
   /* B2236000 — across a reload, the same build modelling the same stored text gives the same answer: lib/elsProof.js remembers which plans'
    * element lists came back from the heal untouched, keyed by build + the exact entry text, so a reload does not re-prove them. */
-  const text = planStore.textOf(shared), pid = shared && shared.id;
+  /* the stored entry's own text; on a device that could not be split (one whole-library entry) there is no per-plan text, so the plan's own JSON is used —
+   * a deterministic function of its content, and `plainCopy` below reuses it rather than serialising the plan a second time */
+  const text = planStore.textOf(shared) ?? (shared && typeof shared === "object" ? planStore.jsonOf(shared) : undefined), pid = shared && shared.id;
   const proven = !!text && elsProven(pid, text);
   const r = plainCopy(shared);
   const rawEls = r && (Array.isArray(r.els) ? r.els : r.elements);

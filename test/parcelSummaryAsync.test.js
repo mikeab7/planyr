@@ -23,11 +23,19 @@ describe("summarizeParcelRowsAsync", () => {
     let t = 0, yields = 0;
     const opts = { budgetMs: 10, now: () => (t += 4), yieldFn: async () => { yields++; } };   // each site "costs" 4 ms of a 10 ms budget
     await summarizeParcelRowsAsync(library(9), opts);
-    expect(yields).toBeGreaterThanOrEqual(2);
-    expect(yields).toBeLessThanOrEqual(9);
+    expect(yields).toBeGreaterThanOrEqual(2);   // B2236000 (round 6): the unit is now one parcel PAIR, so there is no per-site upper bound
     let t2 = 0, y2 = 0;
     await summarizeParcelRowsAsync(library(9), { budgetMs: 1e9, now: () => (t2 += 1), yieldFn: async () => { y2++; } });
     expect(y2).toBe(0);
+  });
+  it("B2236000 — ONE project with many lots yields INSIDE its pair scan, and the answer is identical to the sync summary", async () => {
+    const sq = (x, y, s = 100) => [{ x, y }, { x: x + s, y }, { x: x + s, y: y + s }, { x, y: y + s }];
+    const rows = Array.from({ length: 14 }, (_, i) => ({ site_id: "big", data: { id: "p" + i, points: sq((i % 5) * 80, Math.floor(i / 5) * 80) } }));
+    let t = 0, yields = 0;
+    const got = await summarizeParcelRowsAsync(rows, { budgetMs: 10, now: () => (t += 4), yieldFn: async () => { yields++; } });
+    expect(yields).toBeGreaterThan(5);           // 91 pairs in one site — it used to be one unit
+    expect(got).toEqual(summarizeParcelRows(rows));
+    expect(got.big.acres).toBeGreaterThan(0);
   });
   it("the plan-open caller uses it, and drops a finished summary that a sign-out superseded", () => {
     const src = readFileSync(new URL("../src/workspaces/site-planner/SitePlannerApp.jsx", import.meta.url), "utf8");

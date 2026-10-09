@@ -132,19 +132,28 @@ export const PARCEL_OVERLAP_TOL = { absSqft: 10, relOfSmaller: 0.005 };
 // Returns [{ aId, bId, area }] for every pair whose intersection area clears the tolerance —
 // the safety net that catches a superseded parent + child both active (the B651 class) OR any
 // two hand-drawn lots that overlap, regardless of how the overlap arose.
-export function overlappingParcelPairs(parcels, tol = PARCEL_OVERLAP_TOL) {
+/* B2236000 (round 6) — the pair scan as STEPS (a generator that yields after each pair), so a caller off the render path — the account-wide parcel
+ * summary after a fresh load — can drive it in time slices. One project with many lots is otherwise one long task (the scan is O(lots²) clipped
+ * triangle pairs). `overlappingParcelPairs` drives the same steps to the end, so there is ONE implementation and the two cannot disagree. */
+export function* overlappingParcelPairsSteps(parcels, tol = PARCEL_OVERLAP_TOL) {
   const act = (Array.isArray(parcels) ? parcels : []).filter(
     (p) => p && p.active !== false && Array.isArray(p.points) && p.points.length >= 3);
   const out = [];
   for (let i = 0; i < act.length; i++) {
     for (let j = i + 1; j < act.length; j++) {
       const area = polyIntersectArea(act[i].points, act[j].points);
-      if (area <= 0) continue;
-      const minA = Math.min(polyArea(act[i].points), polyArea(act[j].points));
-      if (area > Math.max(tol.absSqft, tol.relOfSmaller * minA)) out.push({ aId: act[i].id, bId: act[j].id, area });
+      if (area > 0) {
+        const minA = Math.min(polyArea(act[i].points), polyArea(act[j].points));
+        if (area > Math.max(tol.absSqft, tol.relOfSmaller * minA)) out.push({ aId: act[i].id, bId: act[j].id, area });
+      }
+      yield;
     }
   }
   return out;
+}
+export function overlappingParcelPairs(parcels, tol = PARCEL_OVERLAP_TOL) {
+  const gen = overlappingParcelPairsSteps(parcels, tol);
+  for (;;) { const r = gen.next(); if (r.done) return r.value; }
 }
 
 // Clipper works on an integer grid → scale feet to centi-feet (~1/8" precision), matching pondOffset.js.
