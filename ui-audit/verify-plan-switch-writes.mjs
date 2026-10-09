@@ -41,7 +41,8 @@ import { join, extname, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { authSessionSeed, detectSupabase } from "./lib/authRemount.mjs";
 import { loadPlans, planRouteHandler } from "./lib/planOpenRig.mjs";
-import { assertMeasurable, pacedWait } from "./lib/tabTiming.mjs";
+import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { pacedWait } from "./lib/tabTiming.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const argOf = (f, d) => { const i = process.argv.indexOf(f); return i > -1 && process.argv[i + 1] && !process.argv[i + 1].startsWith("--") ? process.argv[i + 1] : d; };
@@ -142,7 +143,7 @@ async function moveAnElement(ownIds) {
   await pacedWait(page, 900);
   const target = await page.evaluate((ids) => {
     const own = new Set(ids);
-    for (const n of document.querySelectorAll("[data-el-id]")) {
+    for (const n of document.querySelectorAll("[data-el-id]")) { // el-tier: picking ONE element of this plan to drag, not a census of plan contents
       const id = n.getAttribute("data-el-id"); if (!own.has(id)) continue;
       const r = n.getBoundingClientRect(); if (r.width < 24 || r.height < 24) continue;
       const x = r.left + r.width * 0.3, y = r.top + r.height * 0.3;     // off the centre label (a press there moves the LABEL, not the element)
