@@ -162,6 +162,25 @@ export function withLockSemantics(parcels) {
   return changed ? out : parcels;
 }
 
+/* B2225425 (round 3) — THE READ NORMALIZERS, as ONE table, because there are two read paths and
+ * only one of them ran these. `createSiteModel` (the on-device copy) applies them on every read; the
+ * rows seed (`SitePlanner.refetchReplace` over `elementRows.rowsToModel`) did not. So a plan whose
+ * stored rows were not already normal — Bolt-on's 56 elements carry 6 duplicate `z`, Concept A's
+ * parcels carry the pre-NEW-5 `locked` flag with no `lockSem` — opened from the device copy in its
+ * normalized form and was then REPLACED, element for element, by the raw rows a second or two
+ * later: every element a new object, every memo and `ElNode` invalidated, a 60–100 ms re-render of
+ * the whole drawing on every open of that plan, forever (the device copy is re-normalized on each
+ * read, the rows never are). Measured on the owner's own rows; see /docs/perf/PERF-PLAN-OPEN.md
+ * round 3. The seed now runs this SAME table and commits what it changed, once, so the two copies
+ * converge. Each entry is identity-preserving on an already-normal list (no churn, no write). */
+export const READ_NORMALIZE = Object.freeze({
+  els: (list) => ensureZ(migrateBandForce(list)),
+  parcels: (list) => ensureZ(withLockSemantics(withStableParcelIds(list))),
+  markups: (list) => ensureZ(list),
+  measures: (list) => ensureZ(list),
+  callouts: (list) => ensureZ(list),
+});
+
 // B682 — every parcel MUST carry a stable `id`. The map-finder hand-off (MapFinder.computeAssembly)
 // and legacy saved sites can hold id-LESS parcels ({points, addr, acct, attrs} with no id). Two bugs
 // flow from that. (1) The acreage-chip drag matches parcels by `pc.id === draggedId`; with both
@@ -1276,7 +1295,7 @@ export function createSiteModel(p = {}, { onHeal } = {}) {
     loiDate: p.loiDate || null,
     closingDate: p.closingDate || null,
     // inputs
-    parcels: ensureZ(withLockSemantics(withStableParcelIds(parcelArr(p.parcels)))),
+    parcels: READ_NORMALIZE.parcels(parcelArr(p.parcels)),
     // placed site-plan overlays (B72): backdrop PDFs/images positioned on the map by
     // hand. Each: {id,name,src,imgW,imgH,page,pageCount,x,y,ftPerPx,rotation,opacity,locked}
     // v14 (B848736) — ALSO the one home for the aerial backdrop: a legacy `underlay` folds in
@@ -1293,10 +1312,10 @@ export function createSiteModel(p = {}, { onHeal } = {}) {
     // bonded-child heal — angle re-anchor (B363), dog-ears snapped to the host's current edge
     // (B487), wall kids re-flushed (B1038/B1039), assemblies torn across transactions re-fitted
     // (NEW-4). `normalizeBondedChildren` is the SAME function the rows read path runs.
-    els: ensureZ(migrateBandForce(normalizeBondedChildren(migrateRoads(objArr(Array.isArray(p.els) ? p.els : p.elements)), onHeal))),
-    markups: ensureZ(objArr(p.markups)),
-    measures: ensureZ(objArr(p.measures)),
-    callouts: ensureZ(objArr(p.callouts)),
+    els: READ_NORMALIZE.els(normalizeBondedChildren(migrateRoads(objArr(Array.isArray(p.els) ? p.els : p.elements)), onHeal)),
+    markups: READ_NORMALIZE.markups(objArr(p.markups)),
+    measures: READ_NORMALIZE.measures(objArr(p.measures)),
+    callouts: READ_NORMALIZE.callouts(objArr(p.callouts)),
     // Delete-tombstones (B276): ids the user DELIBERATELY deleted. The cross-copy merge
     // (mergeSiteContent) unions drawn collections by id, which would otherwise RESURRECT a
     // deleted item from a stale/other copy that still has it (the documented B126 trade-off

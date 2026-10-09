@@ -35,7 +35,11 @@ const LABEL = argOf("--label", "run"), OUT = argOf("--out", "");
 const ONLY = (argOf("--only", "") || "").split(",").filter(Boolean);
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const PROFILE = has("--profile");
-const SETTLE_MS = 5000;     // the owner's stalls all landed within ~2 s of the switch; 5 s is the window each action is scored over
+const TRACE = argOf("--trace", "");   // --trace <prefix>: a Chromium performance trace per switch hop (devtools.timeline + v8), for the non-script half of a long frame
+let traceN = 0;
+async function traceStart(page) { if (!TRACE) return false; await browser.startTracing(page, { path: `${TRACE}.${++traceN}.json`, categories: (process.env.TRACE_CATS || "devtools.timeline,toplevel,v8,disabled-by-default-v8.gc").split(",") }); return true; }
+async function traceStop(on) { if (on) await browser.stopTracing(); }
+const SETTLE_MS = Number(argOf("--settle", 6000)) || 6000;     // the window each action is scored over: 6 s, so the rows seed (the rig has no websocket; its 4 s fallback lands ~4.1–4.6 s after a switch) and its render are inside it
 if (!existsSync(join(DIST, "index.html"))) { console.error(`perf-plan-open: no build at ${DIST}`); process.exit(2); }
 
 const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".woff2": "font/woff2", ".webmanifest": "application/manifest+json", ".map": "application/json" };
@@ -57,9 +61,12 @@ const INSTRUMENT = () => {
   const ch = new MessageChannel();
   ch.port1.onmessage = () => { const t = performance.now(), g = t - window.__hb.last; window.__hb.n++; if (g > 30) window.__gaps.push([Math.round(window.__hb.last), Math.round(t), Math.round(g)]); window.__hb.last = t; ch.port2.postMessage(0); };
   ch.port2.postMessage(0);
-  try { new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__loaf.push({ t: Math.round(e.startTime), d: Math.round(e.duration), s: (e.scripts || []).map((s) => ({ inv: s.invoker || "", fn: s.sourceFunctionName || "", u: String(s.sourceURL || "").split("/").pop(), p: s.sourceCharPosition, d: Math.round(s.duration) })) }); }).observe({ type: "long-animation-frame", buffered: true }); } catch (_) {}
-  let reqs = 0; window.__rows = 0;
-  const F = window.fetch; window.fetch = function (...a) { try { if (/site_elements\?select=id/.test(String((a[0] && a[0].url) || a[0]))) window.__rows++; } catch (_) {} return F.apply(this, a); };
+  window.__lt = []; window.__tiles = [];
+  try { new PerformanceObserver((l) => { for (const e of l.getEntries()) { const m = /\/tile\/(\d+)\/(\d+)\/(\d+)/.exec(e.name); if (m) window.__tiles.push([Math.round(e.startTime), +m[1]]); } }).observe({ type: "resource", buffered: true }); } catch (_) {}
+  try { new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__lt.push([Math.round(e.startTime), Math.round(e.duration)]); }).observe({ type: "longtask", buffered: true }); } catch (_) {}
+  try { new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__loaf.push({ t: Math.round(e.startTime), d: Math.round(e.duration), rs: Math.round((e.renderStart || 0) - e.startTime), sl: Math.round((e.styleAndLayoutStart || 0) - e.startTime), sd: Math.round((e.scripts || []).reduce((a, s) => a + s.duration, 0)), fsl: Math.round((e.scripts || []).reduce((a, s) => a + (s.forcedStyleAndLayoutDuration || 0), 0)), s: (e.scripts || []).map((s) => ({ inv: s.invoker || "", fn: s.sourceFunctionName || "", u: String(s.sourceURL || "").split("/").pop(), p: s.sourceCharPosition, d: Math.round(s.duration) })) }); }).observe({ type: "long-animation-frame", buffered: true }); } catch (_) {}
+  let reqs = 0; window.__rows = 0; window.__commits = 0;
+  const F = window.fetch; window.fetch = function (...a) { try { const u = String((a[0] && a[0].url) || a[0]); if (/site_elements\?select=id/.test(u)) window.__rows++; if (/rpc\/commit_elements/.test(u)) window.__commits++; } catch (_) {} return F.apply(this, a); };
   void reqs;
 };
 
@@ -79,7 +86,7 @@ async function newRun(startPlan) {
   await assertMeasurable(page, "perf-plan-open");
   return { ctx, page };
 }
-const reading = (page) => page.evaluate(() => ({ now: performance.now(), gaps: window.__gaps.slice(), loaf: window.__loaf.slice(), rows: window.__rows }));
+const reading = (page) => page.evaluate(() => ({ now: performance.now(), gaps: window.__gaps.slice(), lt: window.__lt.slice(), tiles: window.__tiles.slice(), loaf: window.__loaf.slice(), rows: window.__rows, commits: window.__commits }));
 const named = (page, n) => page.waitForFunction((x) => (document.body.innerText || "").includes(x), n, { timeout: 60000 });
 const chip = (page, text) => page.locator("span:visible", { hasText: new RegExp(`^${text}$`) }).first();
 const pick = (page, text) => page.locator("*:visible", { hasText: new RegExp(`^${text}$`) }).last();
@@ -104,8 +111,18 @@ async function score(page, t0, label, planKey, extra = {}) {
   const r = await reading(page);
   const gaps = r.gaps.filter((g) => g[0] >= t0 - 2 && g[0] <= t0 + SETTLE_MS);
   const loaf = r.loaf.filter((f) => f.t >= t0 - 2 && f.t <= t0 + SETTLE_MS && f.d >= 50);
-  return { label, plan: planKey, feat: await features(page), maxMs: Math.max(0, ...gaps.map((g) => g[2])), gaps: gaps.map((g) => [g[0] - Math.round(t0), g[2]]), over50: gaps.filter((g) => g[2] > 50).length, sumOver50: gaps.filter((g) => g[2] > 50).reduce((s, g) => s + g[2], 0),
-    frames: loaf.map((f) => ({ at: f.t - Math.round(t0), d: f.d, scripts: f.s.filter((s) => s.d >= 20).map((s) => `${s.inv || s.fn}:${s.u}:${s.p}=${s.d}`) })), rowFetches: r.rows, ...extra };
+  /* Every main-thread gap the heartbeat saw, CLASSED (B2225425 round 3): "task" = one long task covers most of it (the longtask
+   * entry, which a visible tab reports); "queue" = no single long task — the heartbeat's message waited behind a run of short tasks
+   * (measured: ~125 aerial-tile responses arriving together, ~550 sub-6 ms tasks in 130 ms). Both are main-thread time the owner's
+   * heartbeat counts; only "task" blocks input outright (input is scheduled ahead of a posted message). Nothing is dropped. */
+  const cls = (g) => { const cov = (r.lt || []).reduce((m, [ls, ld]) => Math.max(m, Math.min(g[1], ls + ld) - Math.max(g[0], ls)), 0); return cov >= 0.7 * g[2] ? "task" : "queue"; };
+  const classed = gaps.map((g) => [g[0] - Math.round(t0), g[2], cls(g)]);
+  const over = (k) => classed.filter((g) => g[1] > 50 && (!k || g[2] === k));
+  return { label, plan: planKey, feat: await features(page), maxMs: Math.max(0, ...gaps.map((g) => g[2])), gaps: classed,
+    maxTaskMs: Math.max(0, ...classed.filter((g) => g[2] === "task").map((g) => g[1])), maxQueueMs: Math.max(0, ...classed.filter((g) => g[2] === "queue").map((g) => g[1])),
+    over50Task: over("task").length, over50Queue: over("queue").length,
+    tileReqs: (() => { const t = (r.tiles || []).filter((x) => x[0] >= t0 - 2 && x[0] <= t0 + SETTLE_MS); const by = {}; for (const [, z] of t) by[z] = (by[z] || 0) + 1; return { n: t.length, byZoom: by }; })(), over50: gaps.filter((g) => g[2] > 50).length, sumOver50: gaps.filter((g) => g[2] > 50).reduce((s, g) => s + g[2], 0),
+    frames: loaf.map((f) => ({ at: f.t - Math.round(t0), d: f.d, script: f.sd, forcedLayout: f.fsl, renderStart: f.rs, styleLayoutStart: f.sl, scripts: f.s.filter((s) => s.d >= 20).map((s) => `${s.inv || s.fn}:${s.u}:${s.p}=${s.d}`) })), rowFetches: r.rows, commits: r.commits, ...extra };
 }
 
 /* Chromium's own accounting of where main-thread time went (Performance.getMetrics, deltas over an action): script vs style-recalc vs layout, and how many of each.
@@ -128,16 +145,23 @@ async function profStop(c) {
     const e = self.get(k) || { ms: 0, cf }; e.ms += dt; self.set(k, e); });
   return [...self.entries()].sort((a, b) => b[1].ms - a[1].ms).slice(0, 18).map(([k, e]) => ({ ms: +e.ms.toFixed(1), fn: k, src: resolveCallFrame(DIST, e.cf.url, e.cf.lineNumber, e.cf.columnNumber) }));
 }
-const SCEN = {
-  /* straight onto a plan from a cold start (the route a pasted link / reload takes) */
-  async "cold-bolt-on"() {
+async function coldOpen(key, name, label) {
+  const target = plans.find((p) => p.key === key), was = plans.map((p) => p.header.updatedAt);
+  target.header.updatedAt = Date.now() + 1000;
+  try {
     const { ctx, page } = await newRun();
     const t0 = 0; const pc = await profStart(page);
     await page.goto(`${BASE}#/project/smqfy2r7pdec/site`, { waitUntil: "load" });
-    await page.locator('[data-testid="planner-canvas"]').waitFor({ timeout: 60000 }); await named(page, "Bolt-on");
-    const sc = await score(page, t0, "cold open Bolt-on", "bolt-on"); sc.profile = await profStop(pc);
+    await page.locator('[data-testid="planner-canvas"]').waitFor({ timeout: 60000 }); await named(page, name);
+    const sc = await score(page, t0, label, key); sc.profile = await profStop(pc);
     const st = await selfTest(page); await ctx.close(); return [{ ...sc, selfTestMs: st }];
-  },
+  } finally { plans.forEach((p, i) => { p.header.updatedAt = was[i]; }); }
+}
+const SCEN = {
+  /* straight onto a plan from a cold start (the route a pasted link / reload takes) */
+  async "cold-bolt-on"() { return coldOpen("bolt-on", "Bolt-on", "cold open Bolt-on"); },
+  /* B2225425 round 3 — the other plan of the pair, cold (the group route lands on the group's most recently updated plan) */
+  async "cold-concept-a"() { return coldOpen("concept-a", "Concept A", "cold open Concept A"); },
   /* Bolt-on → Concept A → Bolt-on → Concept A (the last is a plan already opened this session) */
   async "switch"() {
     const { ctx, page } = await newRun();
@@ -149,10 +173,11 @@ const SCEN = {
       await chip(page, from).click(); await pacedWait(page, 700);
       const h = await pick(page, to).elementHandle();
       const pc = await profStart(page);
+      const tr = await traceStart(page);
       const mh = await metricsStart(page);
       const t0 = await h.evaluate((el) => { const t = performance.now(); el.click(); return t; });
       await named(page, to);
-      const sc = await score(page, t0, label, key); sc.profile = await profStop(pc); sc.chromium = await metricsStop(mh);
+      const sc = await score(page, t0, label, key); await traceStop(tr); sc.profile = await profStop(pc); sc.chromium = await metricsStop(mh);
       out.push(sc);
     };
     await hop("Bolt-on", "Concept A", "Bolt-on → Concept A (first visit)", "concept-a");

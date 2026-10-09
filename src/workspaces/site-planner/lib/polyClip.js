@@ -95,9 +95,23 @@ function clipByConvex(subject, clip) {
 
 // Intersection AREA (feet²) of two simple polygons. Triangulate both, sum triangle∩triangle
 // (each a convex clip). 0 when they merely touch at an edge/vertex or are disjoint.
+// B2225425 (round 3) — memoised per ring PAIR by identity (a ring is treated as immutable here, as by every identity cache in
+// this tree: the planner replaces `points` wholesale on edit, never mutates it). `overlappingParcelPairs` re-asked every pair on
+// every plan open and again when the rows seed landed — 12–14 ms on Concept A's 16 parcels, O(n²), inside one render.
+const pairAreaCache = new WeakMap();   // ringA -> WeakMap(ringB -> area)
+const triCache = new WeakMap();        // ring -> triangles
+const trianglesOf = (ring) => { let t = triCache.get(ring); if (!t) { t = triangulate(ring); triCache.set(ring, t); } return t; };
 export function polyIntersectArea(ringA, ringB) {
   if (!Array.isArray(ringA) || !Array.isArray(ringB) || ringA.length < 3 || ringB.length < 3) return 0;
-  const ta = triangulate(ringA), tb = triangulate(ringB);
+  const hitA = pairAreaCache.get(ringA); if (hitA && hitA.has(ringB)) return hitA.get(ringB);
+  const hitB = pairAreaCache.get(ringB); if (hitB && hitB.has(ringA)) return hitB.get(ringA);
+  const sum = polyIntersectAreaUncached(ringA, ringB);
+  let m = pairAreaCache.get(ringA); if (!m) { m = new WeakMap(); pairAreaCache.set(ringA, m); }
+  m.set(ringB, sum);
+  return sum;
+}
+function polyIntersectAreaUncached(ringA, ringB) {
+  const ta = trianglesOf(ringA), tb = trianglesOf(ringB);
   let sum = 0;
   for (const t1 of ta) {
     const s = ccw(t1);

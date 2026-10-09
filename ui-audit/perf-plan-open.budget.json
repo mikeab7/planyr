@@ -1,13 +1,14 @@
 {
-  "_note": "NEW-1 / B2224000 + B2225424. Worst single main-thread gap (MessageChannel ping-gap heartbeat) in the 5 s after a plan open/switch, worst of the runs, signed-in rig + 140 filler plans (the owner has 143), the switch scored from the page-task that dispatches the click (the driver's own locator work is outside the window). Budgets = the FIXED build's measurements plus headroom for a shared runner; they fail the measured defects (polylabel: 374-544 ms before on Concept A, 65-117 after; the one-task switch render), NOT the 50 ms target, which the remaining first-render cost (SitePlanner render + commit ~75-125 ms; first-time road dissolve + pond geometry on Richfield ~350-430 ms) does not meet. targetGapMs is reported, never gating.",
+  "_note": "NEW-1 / B2224000 + B2225424 + B2225425 round 3. Worst of EVERY main-thread gap (MessageChannel ping-gap heartbeat) in the 6 s after a plan open/switch, worst of the runs, signed-in rig + 140 filler plans, the switch scored from the page task that dispatches the click. Round 3 (10 runs each, same harness, baseline vs fix): Bolt-on<->Concept A first/back/revisit worst 126/153/269 -> 63/87/84 ms (0/10 runs over 150 ms, from 1/10 and 4/10); Richfield -> Grand Port back 183 -> 82. Budgets = the fixed build plus headroom for a shared runner, so a regression of any of the four round-3 causes fails. NOT the 50 ms target: 5-9 of 10 runs per switch still cross it (the planner's remount render + commit), the cold opens (254-401) and the first-time larger plan (492-603) are unchanged. targetGapMs is reported, never gating.",
   "targetGapMs": 50,
   "maxGapMs": 350,
   "byLabel": {
     "cold open Bolt-on": 450,
-    "Bolt-on → Concept A (first visit)": 200,
-    "Concept A → Bolt-on (back)": 250,
-    "Bolt-on → Concept A (revisit)": 250,
-    "Grand Port → Richfield (larger plan)": 520,
-    "Richfield → Grand Port (back)": 260
+    "cold open Concept A": 450,
+    "Bolt-on → Concept A (first visit)": 120,
+    "Concept A → Bolt-on (back)": 150,
+    "Bolt-on → Concept A (revisit)": 150,
+    "Grand Port → Richfield (larger plan)": 700,
+    "Richfield → Grand Port (back)": 150
   }
 }

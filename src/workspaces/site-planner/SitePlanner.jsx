@@ -34,7 +34,7 @@ import { loadProfile } from "./lib/profile.js";
 import { commitElements, fetchElements, keepaliveCommit } from "./lib/elementApi.js";
 import { supabase, supabaseRest, currentAccessToken } from "./lib/supabase.js";
 import { createIdMinter, randomIdSalt } from "../../shared/ids.js";
-import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
+import { mergeSiteContent, createSiteModel, READ_NORMALIZE } from "./lib/siteModel.js";
 import { assemblyIntegrity, tearPayload, orphanPayload, unhealablePayload } from "./lib/assemblyIntegrity.js";
 import { groupCasEnabled } from "./lib/groupCas.js";
 import { bootFramingRemainingMs } from "./lib/bootFramingDeadline.js";
@@ -84,7 +84,7 @@ import {
   hasRegisterableContainer, viewValuesEqual,
 } from "./lib/mapLock.js";
 import { overscanPx, keepBufferFor, retinaForZoom, tileWeight, tileCacheLimit } from "./lib/tileBudget.js";
-import { preserveTilesAcrossSetView, announceSetView, boundTileCache, releaseLayer, throttleTilePruning, armBlankTileHeal } from "./lib/tileLifecycle.js";
+import { preserveTilesAcrossSetView, announceSetView, boundTileCache, releaseLayer, throttleTilePruning, paceTileLoads, armBlankTileHeal } from "./lib/tileLifecycle.js";
 import { buildGhost } from "./lib/ghostSnapshot.js";
 import { cullRectFor, cullToView, shouldCull } from "./lib/viewCull.js";
 /* NEW-1 — the View menu's content-visibility model. Applied ONLY at the five draw-set seams,
@@ -1946,7 +1946,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * mistake. Sparse and usually `undefined` — an untouched plan has no such key at all. */
   const hiddenGroups = settings.hidden;
 
-  const [view, setViewRaw] = useState({ ppf: 0.35, offX: 60, offY: 60 });
+  // B2225425 (round 3) — see `lastMeasuredCanvas`: start at the framing the boot framing is about to compute when this page has
+  // measured a canvas before (every plan switch); the placeholder triple otherwise (a cold page load).
+  const [view, setViewRaw] = useState(() => (lastMeasuredCanvas
+    ? framedViewFor(lastMeasuredCanvas.box, framingPoints(settings.hidden, parcels, els, restored?.sheetOverlays || []))
+    : { ppf: 0.35, offX: 60, offY: 60 }));
   /* B1574432 — A MOUNT IDENTITY, stamped on the canvas and on nothing else. Boot contains a
    * REMOUNT (`SitePlannerApp` keys this component `${activeSiteId}:${loadEpoch}` and `applyUser`
    * bumps `loadEpoch` once the cloud pull settles), and every per-mount instrument in this file —
@@ -2033,7 +2037,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // floor, and the zoom stack's own top-right-collision clamp needs the REAL height to react
   // to, not the floored one (the floored `h` made that clamp a silent no-op on exactly the
   // device it was written for — measured, not theorized).
-  const [size, setSize] = useState({ w: 800, h: 560, rawW: 800, rawH: 560 });
+  const [size, setSize] = useState(() => (lastMeasuredCanvas && lastMeasuredCanvas.box) || { w: 800, h: 560, rawW: 800, rawH: 560 }); // B2225425 — a guess; see `lastMeasuredCanvas`
   /* ⛔ B1234400 — IS `size` A REAL MEASUREMENT, OR STILL THE FALLBACK DEFAULT ABOVE?
    * Only ever set true from a measurement taken while `document.visibilityState === "visible"` —
    * see the ResizeObserver and the visibilitychange effect below, and lib/viewFramingGate.js's
@@ -2067,8 +2071,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      re-blended every tile seam, and every step re-requested FEMA's picture, whose "Zone AE" labels re-flow with the
      extent. The cost is tiles held under the docked panel (it is opaque; the canvas clip hides them). The overscan is
      sized off the same fixed width so it cannot change mid-drag either. */
-  const [geoDockX, setGeoDockX] = useState(0);
-  const geoDockXRef = useRef(0);
+  const [geoDockX, setGeoDockX] = useState(() => (lastMeasuredCanvas ? lastMeasuredCanvas.dockX : 0)); // B2225425 — a guess, re-measured below
+  const geoDockXRef = useRef(geoDockX);
   const geoOverscan = overscanPx({ elementCount: drawableCount, deviceMemoryGb: typeof navigator !== "undefined" ? navigator.deviceMemory : null, viewportW: size.w + geoDockX, viewportH: size.h });
   const geoBoxInset = mapBoxInset(geoOverscan, geoDockX);
   const geoKeepBuffer = keepBufferFor({ elementCount: drawableCount, deviceMemoryGb: typeof navigator !== "undefined" ? navigator.deviceMemory : null });
@@ -2539,7 +2543,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // CANVAS's center and not the viewport's: a docked left-rail panel (Properties included) narrows
   // the canvas but the toast used to stay centered on the whole window, which on a laptop-width
   // browser landed it directly on top of the panel it was explaining a refusal from.
-  const [toastCenterX, setToastCenterX] = useState(null);
+  const [toastCenterX, setToastCenterX] = useState(() => (lastMeasuredCanvas ? lastMeasuredCanvas.toastCx : null)); // B2225425 — a guess, re-measured on mount
   // B909 round 4 — the PERSISTENT "what changed" card after ⚡ Design pond (owner spec:
   // not a toast, stays until dismissed). null = no card. Cleared on dismiss, on Undo, or
   // implicitly replaced by the next Design pond run on any pond.
@@ -2983,6 +2987,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const bf = withTileRetry(L.tileLayer(bm.tiles, { maxNativeZoom: 13, maxZoom: 24, attribution: bm.attr, keepBuffer: Math.max(2, geoKeepBuffer + 2), crossOrigin: true }));
     preserveTilesAcrossSetView(bf); // NEW-7: a same-native-zoom commit must not wipe these
     throttleTilePruning(bf); // B854832: coalesce Leaflet's own per-tile prune into one per burst
+    paceTileLoads(bf); // B2225425: a whole grid never answers in one main-thread burst
     bf.setZIndex(0); bf.addTo(map); geoBackfillRef.current = bf;
     /* NEW-1 — CAP THE BACKFILL TOO. This layer had `preserveTilesAcrossSetView` and a keepBuffer
      * two rings LARGER than the detail layer, but no ceiling at all — so its `_tiles` map grew for
@@ -3048,6 +3053,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const t = withTileRetry(L.tileLayer(bm.tiles, { maxNativeZoom: detailMaxNative, maxZoom: 24, detectRetina: wantRetina, attribution: bm.attr, keepBuffer: geoKeepBuffer, crossOrigin: true }));
       preserveTilesAcrossSetView(t); // NEW-7: the big one — a fractional-zoom commit keeps its tiles
       throttleTilePruning(t); // B854832: coalesce Leaflet's own per-tile prune into one per burst
+      paceTileLoads(t); // B2225425: a whole grid never answers in one main-thread burst
       t.on("tileload", () => { if (geoBaseRef.current === t) setBasemapStatus("loaded"); });
       t.setZIndex(1); t.addTo(geoMapRef.current); geoBaseRef.current = t;
       // NEW-7 (4): an explicit ceiling, so a long session can't grow the tile cache without
@@ -4317,6 +4323,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * lands. That window is real and can be seconds on a heavy plan or a slow connection — see
    * the ViewMenu `elementsReady` prop for what it was silently doing to the View card. */
   const [elementsReady, setElementsReady] = useState(() => !isCloudActive());
+  const normalizeOnSeedRef = useRef(true); // B2225425 — written each render beside `planShareState`
   // Reflect an engine-assigned z back onto the canvas element so render/hit-test (byZ) and the
   // committed row's z_index + data.z all agree. One of the five collection setters by kind.
   const applyZPatch = (kind, id, patch) => {
@@ -4516,6 +4523,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setTimeout(() => { if (elSyncRef.current === eng) refetchReplace(eng); }, 5000);
       return;
     }
+    // B2225425 (round 3) — warm what the seed's render will ask first (see `warmSeedCaches`), in slices, before anything is seeded.
+    try { await warmSeedCaches(r.rows); } catch (_) { /* warming only — the render computes it itself */ }
+    if (elSyncRef.current !== eng) return;
     // Mid-gesture/mid-edit: never yank the canvas OR reconcile half-made state — defer the whole
     // replace until the interaction settles (the buffered-event drain covers per-row updates).
     if (busyRef.current) {
@@ -4615,9 +4625,44 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (post.tears.length)
       reportClientEvent("assembly-tear-detected", `a stored plan held ${post.tears.length} bonded child(ren) off their host by up to ${Math.round(post.tears[0].dist)} ft (load)`,
         { id: siteId, seam: "load", ...tearPayload(post.tears) });
+    /* B2225425 (round 3) — put the canvas in the SAME normal form the device copy opened in (the
+     * ONE `READ_NORMALIZE` table `createSiteModel` runs, plus the mount's `healDockAxes`), so a plan
+     * whose rows were never normal stops being replaced element-for-element — and re-rendered whole,
+     * 60–100 ms — on every single open. What normalizing changed is committed ONCE (below, as its own
+     * edit), after which the rows ARE normal and every later open is a no-op here. Skipped where this
+     * account may not write the plan (a teammate's view-only plan): there the canvas takes the raw
+     * rows exactly as before, because a normalization it could not commit would only be adopted
+     * straight back by the after-seed diff. */
+    const normWrite = !!normalizeOnSeedRef.current;
+    const normKeys = new Set();
+    const shown = normWrite ? { ...merged } : merged;
+    if (normWrite) {
+      // What the stored rows hold, and what the model built from them (rowsToModel already runs the road migration and the
+      // bonded heal). An element whose canvas copy is the MODEL's own object but not the row's is a read normalization — it is
+      // committed below, never adopted back over (which is what made the road migration undo itself on every open: the
+      // after-seed diff saw the migrated road differ from its row with nothing pending and put the raw row back, measured on
+      // Bolt-on's road e1455359). A fold or a pending edit substituted over the model is not ours to judge here.
+      const FIELD_KIND = { els: "el", parcels: "parcel", markups: "markup", measures: "measure", callouts: "callout" };
+      const rawOf = new Map((rows || []).filter((row) => row && !row.deleted_at).map((row) => [row.kind + ":" + row.id, row.data]));
+      for (const [field, kind] of Object.entries(FIELD_KIND)) {
+        const before = merged[field] || [];
+        let after = READ_NORMALIZE[field](before);
+        if (field === "els") after = healDockAxes(after);
+        const fromModel = new Map((model[field] || []).map((x) => [x && x.id, x]));
+        const wasMerged = new Map(before.map((x) => [x && x.id, x]));
+        for (const x of after) {
+          if (!x) continue;
+          const key = kind + ":" + x.id, raw = rawOf.get(key);
+          if (!raw || x === raw) continue;
+          const src = wasMerged.get(x.id);
+          if (src === fromModel.get(x.id)) normKeys.add(key);   // the model's own (or its normalized) copy, not a substitution
+        }
+        if (after !== before) shown[field] = after;
+      }
+    }
     const replace = (setter, val) => setter((prev) => (stableStringify(prev) === stableStringify(val) ? prev : val));
-    replace(setEls, merged.els); replace(setMarkups, merged.markups); replace(setMeasures, merged.measures);
-    replace(setCallouts, merged.callouts); replace(setParcels, merged.parcels);
+    replace(setEls, shown.els); replace(setMarkups, shown.markups); replace(setMeasures, shown.measures);
+    replace(setCallouts, shown.callouts); replace(setParcels, shown.parcels);
     // deletedIds: any id that has a LIVE row is alive by rows-canonical truth — purge it from the
     // local tombstone list so the mirror's union fold can't re-drop a row-restored element. Header-
     // side tombstones (overlays/drawings/crossSections — never element rows) pass through untouched.
@@ -4654,8 +4699,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // the dominant case (content the server has never seen); it costs nothing on an ordinary
     // reconnect/tab-wake with nothing new to seed — the fresh op id is simply never attached to a
     // row. Guard: test/opEnvelopeSeedCoverage.test.js.
+    // B2225425 (round 3) — `shown` (what the canvas now holds) with every read normalization EXEMPT from rows-canonical, so the
+    // after-seed diff commits it (B1118's shape for a heal) instead of adopting the raw row straight back. Every such element
+    // joins ONE batch, so a renumbered z never lands half-written beside the old scale. LOUD: a write made on open is reported.
+    if (normKeys.size) reportClientEvent("load-normalized-persisted", `${normKeys.size} stored element(s) were not in normal form on open — committing the normal form once`,
+      { id: siteId, count: normKeys.size, keys: [...normKeys].slice(0, 20) });
     opTrackerRef.current.beginOperation("create");
-    try { eng.reconcile(merged, { busy: false, afterSeed: true, exempt: new Set(healed.map((h) => "el:" + h.id)) }); } catch (_) {}
+    try { eng.reconcile(shown, { busy: false, afterSeed: true, exempt: new Set([...healed.map((h) => "el:" + h.id), ...normKeys]) }); } catch (_) {}
   };
   /* Plan-switch first-write loss (2026-10-06, reproduced live 3/3 on planyr.io as the test account:
    * New plan → draw a line → switch back within the engine's first seed → 0 `site_elements` rows,
@@ -6209,27 +6259,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        zoom, so the buildings he could actually see stayed squeezed into the middle of a frame built
        around two things that were not there. An extent is a picture decision, so it reads the
        visible subset; every COUNT still reads the model (see lib/hiddenContentReads.js). */
-    const pts = [];
-    visibleParcels(hiddenGroups, parcels).forEach((pc) => pts.push(...pc.points));
-    visibleEls(hiddenGroups, els).forEach((e) => pts.push(...(e.points ? e.points : elCorners(e))));
-    // B848736 — every reference counts toward the frame (the aerial backdrop always did; the
-    // gap for a hand-dropped site-plan overlay is closed here too, folded into the same list now).
-    // imagePointToWorld carries a rotated reference's corners correctly; the pinned map reference
-    // never rotates, so this is exact for it and a reasonable box for a rotated one too.
-    sheetOverlays.filter((o) => o.visible !== false).forEach((o) => {
-      pts.push(imagePointToWorld(o, 0, 0), imagePointToWorld(o, o.imgW, 0), imagePointToWorld(o, o.imgW, o.imgH), imagePointToWorld(o, 0, o.imgH));
-    });
+    // B2225425 (round 3) — the points and the view are module-scope helpers now (`framingPoints` / `framedViewFor`), shared with the
+    // planner's first render; see each one's notes (B848736: every reference counts toward the frame).
+    const pts = framingPoints(hiddenGroups, parcels, els, sheetOverlays);
     /* ⛔ "NOTHING TO FRAME" IS A FRAMING. An empty plan has no points, so the right answer IS the
        default triple — and it must mark the gate committed, or an empty plan would hang behind the
        gate until the ceiling rescued it. This is the branch that makes `ppf 0.35 off (60,60)`
        ambiguous, and the reason no check may ever treat that triple alone as a failure. */
-    if (pts.length === 0) { setView({ ppf: 0.35, offX: 60, offY: 60 }); if (framedFromRealBox) markFramed(); return; }
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    pts.forEach((p) => { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); });
-    const bw = Math.max(maxX - minX, 10), bh = Math.max(maxY - minY, 10);
-    const pad = framePad(box2.w, box2.h, 60);
-    const ppf = Math.max(1e-6, Math.min((box2.w - pad * 2) / bw, (box2.h - pad * 2) / bh));
-    setView({ ppf, offX: pad - minX * ppf + (box2.w - pad * 2 - bw * ppf) / 2, offY: pad - minY * ppf + (box2.h - pad * 2 - bh * ppf) / 2 });
+    setView(framedViewFor(box2, pts));     // an empty plan frames to the default triple (see `framedViewFor`)
     if (framedFromRealBox) markFramed();   // B1574432 — the reveal, in the same commit as the view
   }, [parcels, els, sheetOverlays, size, hiddenGroups, setView, markFramed]);
   /* The ceiling effect below is deliberately `[]`-dep'd, so it would otherwise close over the `fit`
@@ -6270,6 +6307,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        flag exists for. The RAW rect is the verdict. */
     if (!(r.width > 1 && r.height > 1)) return;
     sizeMeasuredRef.current = true;
+    lastMeasuredCanvas = { ...(lastMeasuredCanvas || { dockX: 0, toastCx: null }), box: canvasBox(r) }; // B2225425
     const { w, h } = canvasBox(r);
     setSize((sz) => nextCanvasSize(sz, r));
     const ticket = framingGate.current.framingTicket();
@@ -6741,6 +6779,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // (an overlaid/portaled panel steals no layout width → zero delta), just without the rounding.
     const parentLeft = el.offsetParent ? el.offsetParent.getBoundingClientRect().left : 0;
     const left = canvasEdgeLeft(r.left, parentLeft);
+    if (r.width > 1 && r.height > 1) lastMeasuredCanvas = { box: canvasBox(r), dockX: left, toastCx: cx }; // B2225425 — the next mount's guess
     // NEW-2 — the basemap box reaches left by this much, so its left edge stays pinned to the row (see `geoDockX`).
     // Guarded: a dispatch that lands on the same number is still a dispatch (B1189).
     if (geoDockXRef.current !== left) { geoDockXRef.current = left; setGeoDockX(left); }
@@ -21379,6 +21418,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     locked: !!(planRecord && planRecord.shareLocked),
     canLock: !!(planRecord && planRecord.teamId && (!planRecord.ownerId || planRecord.ownerId === activeUid())),
   };
+  // B2225425 (round 3) — may the rows seed commit the read normalization? Not on a plan this
+  // account cannot write (view-only for teammates and not ours): see `refetchReplace`.
+  normalizeOnSeedRef.current = !(planShareState.locked && planRecord && planRecord.ownerId && planRecord.ownerId !== activeUid());
   const [lockBusy, setLockBusy] = useState(false);
   const togglePlanLock = async () => {
     if (!siteId || lockBusy) return;
@@ -31724,6 +31766,54 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
 const ElNode = memo(function ElNode({ el, f2p, isSel, tool, settings, H, nb, dimHidden, roadNet, lf, editingCorners, roadPass = null }) {
   return renderElPx(el, f2p, isSel, tool, settings, H.startMoveEl, H.onElDouble, nb, H.startDimMove, H.onDimNumberDown, H.onElContext, dimHidden, roadNet, lf, editingCorners, roadPass);
 });
+
+/* B2225425 (round 3) — WHAT a fit-to-content framing frames, and the view it lands on: ONE derivation, used by `fit()` and by
+ * the planner's FIRST render. The points are the visible drawing plus every visible reference (B848736 — a rotated reference's
+ * corners via imagePointToWorld). An empty plan frames to the default triple: "nothing to frame" IS a framing (B1574432). */
+function framingPoints(hiddenGroups, parcels, els, sheetOverlays) {
+  const pts = [];
+  visibleParcels(hiddenGroups, parcels).forEach((pc) => pts.push(...pc.points));
+  visibleEls(hiddenGroups, els).forEach((e) => pts.push(...(e.points ? e.points : elCorners(e))));
+  (sheetOverlays || []).filter((o) => o.visible !== false).forEach((o) => {
+    pts.push(imagePointToWorld(o, 0, 0), imagePointToWorld(o, o.imgW, 0), imagePointToWorld(o, o.imgW, o.imgH), imagePointToWorld(o, 0, o.imgH));
+  });
+  return pts;
+}
+function framedViewFor(box, pts) {
+  if (!pts.length) return { ppf: 0.35, offX: 60, offY: 60 };
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  pts.forEach((p) => { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); });
+  const bw = Math.max(maxX - minX, 10), bh = Math.max(maxY - minY, 10);
+  const pad = framePad(box.w, box.h, 60);
+  const ppf = Math.max(1e-6, Math.min((box.w - pad * 2) / bw, (box.h - pad * 2) / bh));
+  return { ppf, offX: pad - minX * ppf + (box.w - pad * 2 - bw * ppf) / 2, offY: pad - minY * ppf + (box.h - pad * 2 - bh * ppf) / 2 };
+}
+/* B2225425 (round 3) — what this page last MEASURED about the canvas (its box, the docked-panel edge the basemap reaches under,
+ * the toast centre), kept across planner mounts. A plan switch remounts the planner (keyed by plan id); its first render used to
+ * run at a placeholder box and the default view, and the boot framing then re-rendered every element at the real view INSIDE the
+ * switch's commit — one of its largest single costs (measured, docs/perf/PERF-PLAN-OPEN.md round 3). Starting from the last
+ * measurement and that plan's own framing makes the first render the one that is kept. It is a GUESS, never a measurement: the
+ * boot framing still measures the REAL box and still owns the reveal (B1574432's gate is untouched — the canvas stays hidden
+ * until `fit()` runs against a measured box); it finds nothing to change when the guess was right and re-frames exactly as
+ * before when it was not (a resized window, a different panel). `sizeMeasuredRef` is NOT set from it. */
+let lastMeasuredCanvas = null;   // { box, dockX, toastCx }
+
+/* B2225425 (round 3) — the rows seed lands as ONE React update (it must: see `refetchReplace` on why a seed is never split from its
+ * reconcile), so whatever that render computes for the first time is one task. On a plan this device has never drawn, the costliest
+ * pure parts of it are the parcel acreage-badge anchors (`polylabel`, 36–43 ms on Concept A's 16 parcels) and the parcel-overlap
+ * screen (`overlappingParcelPairs`, 12–14 ms, every pair). Both are cached by content / ring identity, so they are asked HERE first,
+ * from the fetched rows, in slices, BEFORE anything is seeded — the render then finds them answered. Pure warming: nothing here
+ * writes state, and a failure only means the render computes them itself, as before. The slices yield through a MessageChannel,
+ * never a timer: a background tab clamps timers to about once a second, and the owner measures in a hidden tab. */
+const macrotask = () => new Promise((resolve) => { const ch = new MessageChannel(); ch.port1.onmessage = () => { ch.port1.close(); resolve(); }; ch.port2.postMessage(0); });
+async function warmSeedCaches(rows, budgetMs = 8) {
+  const rings = (rows || []).filter((r) => r && !r.deleted_at && r.kind === "parcel" && r.data && r.data.active !== false
+    && Array.isArray(r.data.points) && r.data.points.length >= 3).map((r) => r.data.points);
+  let t = performance.now();
+  const tick = async () => { if (performance.now() - t > budgetMs) { await macrotask(); t = performance.now(); } };
+  for (const ring of rings) { polylabel(ring); await tick(); }
+  for (let i = 0; i < rings.length; i++) for (let j = i + 1; j < rings.length; j++) { polyIntersectArea(rings[i], rings[j]); await tick(); }
+}
 
 /* ----------------------------- small UI ----------------------------- */
 function Section({ title, children, collapsed, accent }) {

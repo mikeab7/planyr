@@ -107,9 +107,10 @@ describe("B727936 (widened) · wiring — every non-gesture reconcile seam opens
       "\n  useEffect(() => {\n    if (!isCloudActive() || !siteId || !supabase) {",
     );
     const begin = body.indexOf("opTrackerRef.current.beginOperation(");
-    const reconcile = body.indexOf("eng.reconcile(merged");
+    // B2225425 (round 3): the seed now reconciles `shown` — `merged` with the read normalization applied (see refetchReplace)
+    const reconcile = body.indexOf("eng.reconcile(shown");
     expect(begin, "refetchReplace must call beginOperation before its seed reconcile").toBeGreaterThan(-1);
-    expect(reconcile, "refetchReplace must still call eng.reconcile(merged, ...)").toBeGreaterThan(-1);
+    expect(reconcile, "refetchReplace must still call eng.reconcile(shown, ...)").toBeGreaterThan(-1);
     expect(begin).toBeLessThan(reconcile);
   });
 
