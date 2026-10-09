@@ -55,8 +55,8 @@ describe("one read normalization for both read paths (the rows seed no longer re
     expect(body).toMatch(/READ_NORMALIZE\[field\]/);
     expect(body).toMatch(/eng\.reconcile\(shown, \{ busy: false, afterSeed: true, exempt: new Set\(\[\.\.\.healed\.map\(\(h\) => "el:" \+ h\.id\), \.\.\.normKeys\]\)/);
     expect(body).toMatch(/load-normalized-persisted/);
-    expect(body.indexOf("warmSeedCaches(r.rows)")).toBeGreaterThan(-1);
-    expect(body.indexOf("warmSeedCaches(r.rows)")).toBeLessThan(body.indexOf("eng.seed(rows)"));
+    expect(body.indexOf("warmSeedCaches(r.rows, 8, { settings })")).toBeGreaterThan(-1);
+    expect(body.indexOf("warmSeedCaches(r.rows, 8, { settings })")).toBeLessThan(body.indexOf("eng.seed(rows)"));
   });
 });
 

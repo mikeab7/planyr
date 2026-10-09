@@ -72,7 +72,12 @@ try {
     const mounted = await page.locator('[data-testid="planner-canvas"]').waitFor({ timeout: 30000 }).then(() => true, () => false);
     if (!mounted) { console.log("VOID  signed-in: the test account's fixture site never mounted a planner canvas (by design: no boundary, no location) — nothing was measured. Use the seeded arm; the real-data arm is the owner's own capture."); await s.close(); process.exit(2); }
     const a = await window5s(page, t0, "signed-in cold open (test-account fixture site)"); a.selfTestMs = await selfTest(page);
-    results = { "signed-in": [[a]] };
+    /* B2233521 round 5 — THE APP OPENED FRESH, signed in: reload the page that is open on the plan and score its first 6 s (every chunk, the map and the React tree cold;
+     * the session, the device copy and the cloud index warm). The heartbeat is re-armed by the init script; the window opens at the navigation. */
+    await page.reload({ waitUntil: "load" });
+    const again = await page.locator('[data-testid="planner-canvas"]').waitFor({ timeout: 60000 }).then(() => true, () => false);
+    const b = again ? await window5s(page, 0, "signed-in reload (app opened fresh)") : { label: "signed-in reload (app opened fresh)", error: "the plan never mounted a canvas after the reload" };
+    results = { "signed-in": [[a, ...(b ? [b] : [])]] };
     console.log("NOTE: the test account's fixture sites carry no boundary — this arm proves the signed-in open is not stalling, NOT that the badge-anchor path ran (use the seeded arm for that).");
   } else {
     const browser = await chromium.launch({ executablePath: process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome", headless: false, args: ["--no-sandbox"] });
@@ -110,6 +115,10 @@ try {
     await hop("Grand Port A", "Grand Port B", "live-bo", "Concept A → Bolt-on (back)");
     await hop("Grand Port B", "Grand Port A", "live-ca", "Bolt-on → Concept A (revisit)");
     out[0].selfTestMs = await selfTest(page);
+    /* B2233521 round 5 — THE APP OPENED FRESH: reload on the plan and score the first 6 s (cold chunks / map / React tree; warm device copy). */
+    await page.reload({ waitUntil: "load" });
+    const again = await page.locator('[data-testid="planner-canvas"]').waitFor({ timeout: 60000 }).then(() => true, () => false);
+    out.push(again ? await window5s(page, 0, "reload onto a plan (app opened fresh)") : { label: "reload onto a plan (app opened fresh)", error: "the plan never mounted a canvas after the reload" });
     results = { "seeded-local": [out] };
     s = { page, close: () => browser.close() };
   }

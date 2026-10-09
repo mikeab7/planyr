@@ -1168,6 +1168,13 @@ export default function App({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
+  /* B2233521 (round 5) — THE MAP MODE IS BUILT WHEN IT IS FIRST SHOWN, NOT AT BOOT. Both modes used to be mounted from the first render so that switching back never rebuilds a
+   * map; but a page that opens straight onto a PLAN (a pasted link, a reload — the usual way in) paid for a second AppHeader, the whole MapFinder, a Leaflet map, its layers
+   * panel and a pin per saved plan, hidden, inside the cold load's biggest render (~80 ms of Leaflet marker creation alone for the owner's 143 plans, measured). Once the map
+   * has been shown it STAYS mounted exactly as before (the keep-alive this comment's original author wanted); only its first mount moves — to the first time it is wanted. */
+  const mapEverRef = useRef(mode === "map");
+  if (mode === "map") mapEverRef.current = true;
+  const mapMounted = mapEverRef.current;
   return (
     <>
       {/* Map mode — AppHeader sits above MapFinder's own toolbar.
@@ -1186,6 +1193,7 @@ export default function App({
       <div data-mode="map" data-mode-active={mode === "map" ? "true" : "false"}
         aria-hidden={mode === "map" ? undefined : "true"} inert={mode === "map" ? undefined : ""}
         style={{ display: mode === "map" ? "flex" : "none", flexDirection: "column", height: "100%" }}>
+        {mapMounted && <>
         <AppHeader
           module={shellModule || "site-planner"}
           onSwitch={onShellSwitch}
@@ -1274,6 +1282,7 @@ export default function App({
             focusMissingLocations={focusMissingLocations}
           />
         </div>
+        </>}
       </div>
       {/* Plan mode — SitePlanner renders its own AppHeader (same inert/aria-hidden rule). */}
       <div data-mode="plan" data-mode-active={mode === "plan" ? "true" : "false"}

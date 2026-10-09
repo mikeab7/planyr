@@ -12,6 +12,10 @@
     "Richfield → Grand Port (back)": 150,
     "Concept A → Bolt-on (back, 2nd)": 150,
     "Bolt-on → Concept A (revisit, 2nd)": 150,
-    "control: no switch (instrument floor)": 100
+    "control: no switch (instrument floor)": 100,
+    "Concept A → Bolt-on (first open, fresh profile)": 400,
+    "reload onto a plan (app opened fresh)": 450,
+    "signed-in reload (app opened fresh)": 450,
+    "plan → Map (first time after the app opened on a plan)": 700
   }
 }

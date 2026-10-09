@@ -91,7 +91,7 @@ async function newRun(startPlan) {
   if (CPU_RATE > 1) { const c = await ctx.newCDPSession(page); await c.send("Emulation.setCPUThrottlingRate", { rate: CPU_RATE }); }
   return { ctx, page };
 }
-const reading = (page) => page.evaluate(() => ({ now: performance.now(), gaps: window.__gaps.slice(), lt: window.__lt.slice(), tiles: window.__tiles.slice(), loaf: window.__loaf.slice(), rows: window.__rows, commits: window.__commits }));
+const reading = (page) => page.evaluate(() => ({ now: performance.now(), gaps: window.__gaps.slice(), lt: window.__lt.slice(), tiles: window.__tiles.slice(), loaf: window.__loaf.slice(), rows: window.__rows, commits: window.__commits, road: window.__roadNetStats ? (() => { const n = window.__roadNetStats(), b = window.__rb || {}; const o = {}; for (const k in n) o[k] = n[k] - (b[k] || 0); return o; })() : null }));
 const named = (page, n) => page.waitForFunction((x) => (document.body.innerText || "").includes(x), n, { timeout: 60000 });
 const chip = (page, text) => page.locator("span:visible", { hasText: new RegExp(`^${text}$`) }).first();
 const pick = (page, text) => page.locator("*:visible", { hasText: new RegExp(`^${text}$`) }).last();
@@ -127,7 +127,7 @@ async function score(page, t0, label, planKey, extra = {}) {
     maxTaskMs: Math.max(0, ...classed.filter((g) => g[2] === "task").map((g) => g[1])), maxQueueMs: Math.max(0, ...classed.filter((g) => g[2] === "queue").map((g) => g[1])),
     over50Task: over("task").length, over50Queue: over("queue").length,
     tileReqs: (() => { const t = (r.tiles || []).filter((x) => x[0] >= t0 - 2 && x[0] <= t0 + SETTLE_MS); const by = {}; for (const [, z] of t) by[z] = (by[z] || 0) + 1; return { n: t.length, byZoom: by, firstMs: t.length ? Math.round(t[0][0] - t0) : null, lastMs: t.length ? Math.round(t[t.length - 1][0] - t0) : null }; })(), over50: gaps.filter((g) => g[2] > 50).length, sumOver50: gaps.filter((g) => g[2] > 50).reduce((s, g) => s + g[2], 0),
-    frames: loaf.map((f) => ({ at: f.t - Math.round(t0), d: f.d, script: f.sd, forcedLayout: f.fsl, renderStart: f.rs, styleLayoutStart: f.sl, scripts: f.s.filter((s) => s.d >= 20).map((s) => `${s.inv || s.fn}:${s.u}:${s.p}=${s.d}`) })), rowFetches: r.rows, commits: r.commits, ...extra };
+    frames: loaf.map((f) => ({ at: f.t - Math.round(t0), d: f.d, script: f.sd, forcedLayout: f.fsl, renderStart: f.rs, styleLayoutStart: f.sl, scripts: f.s.filter((s) => s.d >= 20).map((s) => `${s.inv || s.fn}:${s.u}:${s.p}=${s.d}`) })), rowFetches: r.rows, commits: r.commits, roadCaches: r.road, ...extra };
 }
 
 /* Chromium's own accounting of where main-thread time went (Performance.getMetrics, deltas over an action): script vs style-recalc vs layout, and how many of each.
@@ -155,16 +155,75 @@ async function coldOpen(key, name, label) {
   target.header.updatedAt = Date.now() + 1000;
   try {
     const { ctx, page } = await newRun();
-    const t0 = 0; const pc = await profStart(page);
+    const t0 = 0; const pc = await profStart(page); const tr = await traceStart(page);
     await page.goto(`${BASE}#/project/smqfy2r7pdec/site`, { waitUntil: "load" });
     await page.locator('[data-testid="planner-canvas"]').waitFor({ timeout: 60000 }); await named(page, name);
-    const sc = await score(page, t0, label, key); sc.profile = await profStop(pc);
+    const sc = await score(page, t0, label, key); await traceStop(tr); sc.profile = await profStop(pc);
     const st = await selfTest(page); await ctx.close(); return [{ ...sc, selfTestMs: st }];
   } finally { plans.forEach((p, i) => { p.header.updatedAt = was[i]; }); }
 }
+/* one plan switch through the header's own chips, scored from the page task that dispatches the click (shared by `switch` and `first-open`) */
+async function hopTo(page, out, from, to, label, key) {
+  await chip(page, from).click(); await pacedWait(page, 700);
+  const h = await pick(page, to).elementHandle();
+  const pc = await profStart(page);
+  const tr = await traceStart(page);
+  const mh = await metricsStart(page);
+  const t0 = await h.evaluate((el) => { window.__rb = window.__roadNetStats ? window.__roadNetStats() : null; const t = performance.now(); el.click(); return t; });
+  await named(page, to);
+  const sc = await score(page, t0, label, key); await traceStop(tr); sc.profile = await profStop(pc); sc.chromium = await metricsStop(mh);
+  out.push(sc);
+}
 const SCEN = {
+  /* B2233521 round 5 — THE FIRST OPEN OF A PLAN THIS DEVICE HAS NEVER DRAWN, by a switch in a fresh profile: land on Concept A (cold), then open Bolt-on. Bolt-on has no
+   * device copy, so its rows seed draws it in ONE render that computes its road network, metrics and parcel work for the first time (the "switch" scenario's first hop is
+   * Concept A, which is smaller and has no roads — it under-reads this). */
+  async "first-open"() {
+    const target = plans.find((p) => p.key === "concept-a"), was = plans.map((p) => p.header.updatedAt);
+    target.header.updatedAt = Date.now() + 1000;
+    try {
+      const { ctx, page } = await newRun();
+      await page.goto(`${BASE}#/project/smqfy2r7pdec/site`, { waitUntil: "load" });
+      await page.locator('[data-testid="planner-canvas"]').waitFor({ timeout: 60000 }); await named(page, "Concept A");
+      await pacedWait(page, 6000);
+      const out = [];
+      await hopTo(page, out, "Concept A", "Bolt-on", "Concept A → Bolt-on (first open, fresh profile)", "bolt-on");
+      out[0].selfTestMs = await selfTest(page); await ctx.close(); return out;
+    } finally { plans.forEach((p, i) => { p.header.updatedAt = was[i]; }); }
+  },
   /* straight onto a plan from a cold start (the route a pasted link / reload takes) */
   async "cold-bolt-on"() { return coldOpen("bolt-on", "Bolt-on", "cold open Bolt-on"); },
+  /* B2233521 round 5 — OPENING THE APP FRESH THE WAY THE OWNER DOES: not a first-ever visit but a RELOAD of a page that has been open on a plan (the device copy, the active-plan
+   * marker and the cloud index are all in storage; every JS chunk, Leaflet, the map and the React tree are cold). The page lands on the plan directly, so this is the cold
+   * load without the map-first detour the empty-profile "cold open" rows take. */
+  async "reload-onto-plan"() {
+    const { ctx, page } = await newRun();
+    await page.goto(`${BASE}#/project/smqfy2r7pdec/site`, { waitUntil: "load" });
+    await page.locator('[data-testid="planner-canvas"]').waitFor({ timeout: 60000 }); await named(page, "Bolt-on");
+    await pacedWait(page, 9000);   // let the rows seed land, the autosave write the device copy and the mirror settle
+    const pc = await profStart(page); const tr = await traceStart(page);
+    await page.reload({ waitUntil: "load" });
+    await page.locator('[data-testid="planner-canvas"]').waitFor({ timeout: 60000 }); await named(page, "Bolt-on");
+    const sc = await score(page, 0, "reload onto a plan (app opened fresh)", "bolt-on"); await traceStop(tr); sc.profile = await profStop(pc);
+    sc.selfTestMs = await selfTest(page); await ctx.close(); return [sc];
+  },
+  /* B2233521 round 5 — THE PRICE OF BUILDING THE MAP WHEN IT IS FIRST SHOWN: the app opened fresh on a plan (reload), then the Map crumb is clicked. Before round 5 the map was built
+   * hidden at boot, so this click was instant and the cost sat in the cold load; now the cost sits here, once. Scored from the page task that dispatches the click. */
+  async "open-map-after-reload"() {
+    const { ctx, page } = await newRun();
+    await page.goto(`${BASE}#/project/smqfy2r7pdec/site`, { waitUntil: "load" });
+    await page.locator('[data-testid="planner-canvas"]').waitFor({ timeout: 60000 }); await named(page, "Bolt-on");
+    await pacedWait(page, 9000);
+    await page.reload({ waitUntil: "load" });
+    await page.locator('[data-testid="planner-canvas"]').waitFor({ timeout: 60000 }); await named(page, "Bolt-on");
+    await pacedWait(page, 7000);
+    const h = await page.locator('[data-mode-active="true"] [data-testid="dashboard-crumb"]').first().elementHandle();
+    const t0 = await h.evaluate((el) => { const t = performance.now(); el.click(); return t; });
+    await page.locator('[data-mode="map"][data-mode-active="true"] .leaflet-container').first().waitFor({ timeout: 60000 });
+    const sc = await score(page, t0, "plan → Map (first time after the app opened on a plan)", "bolt-on");
+    sc.feat = sc.feat || 1;   // the map has no planner features to census — the Leaflet container above is the proof it opened
+    sc.selfTestMs = await selfTest(page); await ctx.close(); return [sc];
+  },
   /* B2225425 round 3 — the other plan of the pair, cold (the group route lands on the group's most recently updated plan) */
   async "cold-concept-a"() { return coldOpen("concept-a", "Concept A", "cold open Concept A"); },
   /* Bolt-on → Concept A → Bolt-on → Concept A (the last is a plan already opened this session) */
@@ -174,17 +233,7 @@ const SCEN = {
     await page.locator('[data-testid="planner-canvas"]').waitFor({ timeout: 60000 }); await named(page, "Bolt-on");
     await pacedWait(page, 6000);
     const out = [];
-    const hop = async (from, to, label, key) => {
-      await chip(page, from).click(); await pacedWait(page, 700);
-      const h = await pick(page, to).elementHandle();
-      const pc = await profStart(page);
-      const tr = await traceStart(page);
-      const mh = await metricsStart(page);
-      const t0 = await h.evaluate((el) => { const t = performance.now(); el.click(); return t; });
-      await named(page, to);
-      const sc = await score(page, t0, label, key); await traceStop(tr); sc.profile = await profStop(pc); sc.chromium = await metricsStop(mh);
-      out.push(sc);
-    };
+    const hop = (from, to, label, key) => hopTo(page, out, from, to, label, key);
     await hop("Bolt-on", "Concept A", "Bolt-on → Concept A (first visit)", "concept-a");
     await hop("Concept A", "Bolt-on", "Concept A → Bolt-on (back)", "bolt-on");
     await hop("Bolt-on", "Concept A", "Bolt-on → Concept A (revisit)", "concept-a");
@@ -209,13 +258,13 @@ const SCEN = {
     await chip(page, "Grand Port").click(); await pacedWait(page, 700);
     let h = await pick(page, "Richfield").elementHandle();
     let pc = await profStart(page);
-    let t0 = await h.evaluate((el) => { const t = performance.now(); el.click(); return t; });
+    let t0 = await h.evaluate((el) => { window.__rb = window.__roadNetStats ? window.__roadNetStats() : null; const t = performance.now(); el.click(); return t; });
     await chip(page, "Richfield").waitFor({ timeout: 60000 });
     let sc = await score(page, t0, "Grand Port → Richfield (larger plan)", "richfield"); sc.profile = await profStop(pc); out.push(sc);
     await chip(page, "Richfield").click(); await pacedWait(page, 700);
     h = await pick(page, "Grand Port").elementHandle();
     pc = await profStart(page);
-    t0 = await h.evaluate((el) => { const t = performance.now(); el.click(); return t; });
+    t0 = await h.evaluate((el) => { window.__rb = window.__roadNetStats ? window.__roadNetStats() : null; const t = performance.now(); el.click(); return t; });
     await chip(page, "Grand Port").waitFor({ timeout: 60000 });
     sc = await score(page, t0, "Richfield → Grand Port (back)", "bolt-on"); sc.profile = await profStop(pc); out.push(sc);
     out[0].selfTestMs = await selfTest(page); await ctx.close(); return out;

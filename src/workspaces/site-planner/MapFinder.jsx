@@ -561,6 +561,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const pendingNotesRebuildRef = useRef(null); // deferred notes-layer rebuild, same as the comps one
   const onCompClickRef = useRef(onCompClick);
   useEffect(() => { onCompClickRef.current = onCompClick; }, [onCompClick]);
+  const visibleNowRef = useRef(visible); visibleNowRef.current = visible;   // read by effects that must not re-run on a visibility flip
   const pressedRef = useRef(false);        // a pointer is currently down on the map (B64)
   const pendingRebuildRef = useRef(null);  // a saved-site rebuild deferred until pointer-up (B64)
   const pendingCompsRebuildRef = useRef(null); // ditto, but its OWN slot — sharing pendingRebuildRef
@@ -2518,9 +2519,18 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     };
     // Defer the rebuild if a press is in flight (B64); otherwise build now.
     if (pressedRef.current) { pendingRebuildRef.current = build; return; }
+    /* B2233521 (round 5) — and while this map is HIDDEN (the planner is the visible mode) a rebuild waits for the map to be shown: a pin per saved plan (Leaflet creates and adds
+     * each marker — ~80 ms at 2× for the owner's 143 plans) for a map nobody is looking at sat inside every cold load and every sites-list refresh. The newest build is the
+     * one kept (this effect re-runs on every dependency change and overwrites the slot), and the `visible` flip below runs it before paint, so the first frame of the
+     * map is complete. The layer that was already built (map shown earlier) stays up until then, exactly as before. */
+    if (!visibleNowRef.current) { pendingRebuildRef.current = build; return; }
     build();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sites, parcelSummary, activeSiteId, selectMode, showPlans, showActiveParcel, showSitesLayer, nameFilter]);
+  useLayoutEffect(() => {
+    if (!visible || pressedRef.current || !pendingRebuildRef.current) return;
+    const fn = pendingRebuildRef.current; pendingRebuildRef.current = null; fn();
+  }, [visible]);
 
   // NEW-COMPS — leasing-comp markers: a sibling layer to the site-pin one above, deliberately
   // simpler (always a flat point marker, no zoom-dependent footprint rendering — a comp has no
