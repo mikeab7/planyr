@@ -3,7 +3,7 @@
  * canvas are driven for real by e2e/building-panel-v2.spec.js. */
 import { describe, it, expect } from "vitest";
 import {
-  wallRowPlan, dockLinked, chipLabel, bumpChipLabel, addOptions, removalCount, trailerTotalDepth, trailerRowDepth, trailerSpec, trailerCfg,
+  wallRowPlan, chipLabel, bumpChipLabel, addOptions, removalCount, trailerTotalDepth, trailerRowDepth, trailerSpec, trailerCfg,
   zdAfterRowChange, zdAfterRowDepth, zdAfterAisle, clampTrailerRows, bumpEndLabel, bumpEnds, areaWithBumps, TRAILER_MAX_ROWS,
 } from "../src/workspaces/site-planner/lib/wallRows.js";
 import { wallPickerLayout } from "../src/workspaces/site-planner/lib/loadingWalls.js";
@@ -20,25 +20,25 @@ describe("wall rows — which rows exist, in what order", () => {
     expect(rows.slice(2).map((r) => r.sides.length)).toEqual([1, 1]);
     expect(new Set(rows.flatMap((r) => r.sides)).size).toBe(4);
   });
-  it("cross-dock is ONE linked row by default (absent flag = linked) and two rows once split; the ends are never linkable", () => {
-    const linked = wallRowPlan(bldg({ dock: "cross" }));
-    expect(linked.map((r) => r.role)).toEqual(["dock", "ends", "ends"]);
-    expect(linked[0]).toMatchObject({ pair: true, linked: true, sides: ["top", "bottom"] });
-    expect(linked[0].badge).toContain("·");
-    expect(dockLinked(bldg({ dock: "cross" }))).toBe(true);
-    const split = wallRowPlan(bldg({ dock: "cross", dockStacksLinked: false }));
-    expect(split.map((r) => r.role)).toEqual(["dock", "dock", "ends", "ends"]);
-    expect(split.slice(0, 2).every((r) => r.pair && !r.linked && r.sides.length === 1)).toBe(true);
-    expect(split.slice(2).every((r) => !r.pair)).toBe(true);
+  it("cross-dock: each dock wall is its OWN row (no linked pair), whatever a legacy dockStacksLinked says", () => {
+    for (const flag of [undefined, true, false]) {
+      const rows = wallRowPlan(bldg({ dock: "cross", ...(flag === undefined ? {} : { dockStacksLinked: flag }) }));
+      expect(rows.map((r) => r.role)).toEqual(["dock", "dock", "ends", "ends"]);
+      expect(rows.every((r) => r.sides.length === 1)).toBe(true);
+      expect(new Set(rows.flatMap((r) => r.sides)).size).toBe(4);
+      expect(rows.slice(0, 2).map((r) => r.sides[0]).sort()).toEqual(["bottom", "top"]);
+      expect(rows[0].badge).not.toContain("·");
+      expect(rows.some((r) => "pair" in r || "linked" in r)).toBe(false);
+    }
   });
   it("no docks: four separate `sides` rows (the two long walls are never linked either)", () => {
     const rows = wallRowPlan(bldg({ dock: "none" }));
     expect(rows.map((r) => r.role)).toEqual(["sides", "sides", "sides", "sides"]);
-    expect(rows.every((r) => r.sides.length === 1 && !r.pair)).toBe(true);
+    expect(rows.every((r) => r.sides.length === 1)).toBe(true);
   });
   it("badges are the compass letter(s) of the wall at the building's rotation (315° → dock walls read NW / SE)", () => {
     const rows = wallRowPlan(bldg({ dock: "cross", rot: 315 }));
-    expect(rows[0].badge.split("·").sort()).toEqual(["NW", "SE"]);
+    expect(rows.slice(0, 2).map((r) => r.badge).sort()).toEqual(["NW", "SE"]);
     const single = wallRowPlan(bldg({ rot: 315 }));
     expect(single[0].badge).toBe("SE");        // dock bottom wall faces 180° + 315° = 135°
     expect(single[1].badge).toBe("NW");        // the rear is the opposite wall

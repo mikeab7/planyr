@@ -6,90 +6,90 @@
   "surfaces": {
     "map-landing": {
       "light": {
-        "approvedAt": "2026-10-08",
-        "approvedCommit": "dca11fe92",
-        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
+        "approvedAt": "2026-10-09",
+        "approvedCommit": "618857de9",
+        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
       },
       "dark": {
-        "approvedAt": "2026-10-08",
-        "approvedCommit": "dca11fe92",
-        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
+        "approvedAt": "2026-10-09",
+        "approvedCommit": "618857de9",
+        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-08",
-        "approvedCommit": "dca11fe92",
-        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
+        "approvedAt": "2026-10-09",
+        "approvedCommit": "618857de9",
+        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-08",
-        "approvedCommit": "dca11fe92",
-        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
+        "approvedAt": "2026-10-09",
+        "approvedCommit": "618857de9",
+        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
       }
     },
     "site-planner-header": {
       "light": {
-        "approvedAt": "2026-10-08",
-        "approvedCommit": "dca11fe92",
-        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
+        "approvedAt": "2026-10-09",
+        "approvedCommit": "618857de9",
+        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
       },
       "dark": {
-        "approvedAt": "2026-10-08",
-        "approvedCommit": "dca11fe92",
-        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
+        "approvedAt": "2026-10-09",
+        "approvedCommit": "618857de9",
+        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-08",
-        "approvedCommit": "dca11fe92",
-        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
+        "approvedAt": "2026-10-09",
+        "approvedCommit": "618857de9",
+        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-08",
-        "approvedCommit": "dca11fe92",
-        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
+        "approvedAt": "2026-10-09",
+        "approvedCommit": "618857de9",
+        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
       }
     },
     "site-planner-left-rail": {
       "light": {
-        "approvedAt": "2026-10-08",
-        "approvedCommit": "dca11fe92",
-        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
+        "approvedAt": "2026-10-09",
+        "approvedCommit": "618857de9",
+        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
       },
       "dark": {
-        "approvedAt": "2026-10-08",
-        "approvedCommit": "dca11fe92",
-        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
+        "approvedAt": "2026-10-09",
+        "approvedCommit": "618857de9",
+        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-08",
-        "approvedCommit": "dca11fe92",
-        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
+        "approvedAt": "2026-10-09",
+        "approvedCommit": "618857de9",
+        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-08",
-        "approvedCommit": "dca11fe92",
-        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
+        "approvedAt": "2026-10-09",
+        "approvedCommit": "618857de9",
+        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
       }
     },
     "library": {
       "light": {
-        "approvedAt": "2026-10-08",
-        "approvedCommit": "dca11fe92",
-        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
+        "approvedAt": "2026-10-09",
+        "approvedCommit": "618857de9",
+        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
       },
       "dark": {
-        "approvedAt": "2026-10-08",
-        "approvedCommit": "dca11fe92",
-        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
+        "approvedAt": "2026-10-09",
+        "approvedCommit": "618857de9",
+        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-08",
-        "approvedCommit": "dca11fe92",
-        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
+        "approvedAt": "2026-10-09",
+        "approvedCommit": "618857de9",
+        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-08",
-        "approvedCommit": "dca11fe92",
-        "note": "map furniture [CI-authored by run 37846181692 on dca11fe92747429e21412318c0774504318823ca]"
+        "approvedAt": "2026-10-09",
+        "approvedCommit": "618857de9",
+        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
       }
     }
   }

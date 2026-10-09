@@ -349,6 +349,8 @@
   --hover-chrome-danger: rgba(220, 38, 38, .12);
   --scroll-thumb:        #c8cfd9;
   --scroll-thumb-hover:  #b3bcc9;
+  --rail-scroll-thumb:   #7A8494;
+  --rail-scroll-track:   #E1E6ED;
   --scroll-track-border: #F3F5F8;
   --kbd-bg:   #e7ebf1;
   --kbd-text: #565E6E;
@@ -495,6 +497,8 @@
   --hover-chrome-danger: rgba(248, 113, 113, .14);
   --scroll-thumb:        #3d4250;
   --scroll-thumb-hover:  #4c5260;
+  --rail-scroll-thumb:   #6B7384;
+  --rail-scroll-track:   #1A1D25;
   --scroll-track-border: #14161B;
   --kbd-bg:   #262A33;
   --kbd-text: #CAD0DA;
@@ -695,13 +699,17 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
 .rbtn:hover:not(:disabled):not(.on) .rbtn-hint { color: var(--chrome-text) !important; }
 
 /* NEW-1 — RIGHT TOOL RAIL (see components/RailSplit.jsx, lib/toolRailModel.js).
-   The rail's scrollbar is hidden (still scrolls by wheel / touch / keyboard) instead of taking a
-   permanent strip on the right: with the strip, every row sat closer to the left edge than the right.
+   The rail shows a THIN scrollbar whenever it overflows (always visible, not hover-only; B2237072 brought it back
+   after the first redesign hid it and nothing told the owner the rail scrolls). `scrollbar-gutter: stable` keeps
+   the strip's width reserved so rows never shift when the rail starts or stops overflowing.
    `.rail-hdr` is the ONE heading rule: label + hairline to the right edge; its margins are the model's
-   RAIL numbers (above ≈ 2× below; below a little LESS than the gap between two tools). */
-.rail-scroll { scrollbar-width: none; }
-.rail-scroll::-webkit-scrollbar { display: none; }
-.rail-hdr { display: flex; align-items: center; gap: 8px; height: 12px; line-height: 1; margin: 22px 0 4px; padding: 0 0 0 11px;
+   RAIL numbers (above ≈ 2× below; below a little LESS than the gap between two tools). Its left inset
+   (--rail-hdr-inset) puts the heading text on the icon column. */
+.rail-scroll { scrollbar-width: thin; scrollbar-color: var(--rail-scroll-thumb) var(--rail-scroll-track); scrollbar-gutter: stable; }
+.dark-scroll.rail-scroll::-webkit-scrollbar { width: 7px; }
+.dark-scroll.rail-scroll::-webkit-scrollbar-track { background: var(--rail-scroll-track); border-radius: 4px; }
+.dark-scroll.rail-scroll::-webkit-scrollbar-thumb, .dark-scroll.rail-scroll::-webkit-scrollbar-thumb:hover { background: var(--rail-scroll-thumb); border: 0; border-radius: 4px; }
+.rail-hdr { display: flex; align-items: center; gap: 8px; height: 12px; line-height: 1; margin: 22px 0 4px; padding: 0 0 0 var(--rail-hdr-inset, 7px);
   font-size: 10.5px; font-weight: 700; letter-spacing: 1.1px; text-transform: uppercase; color: var(--chrome-muted); }
 .rail-hdr::after { content: ""; flex: 1; height: 1px; background: var(--chrome-divider); }
 .rail-scroll > .rail-hdr:first-child { margin-top: 4px; }
