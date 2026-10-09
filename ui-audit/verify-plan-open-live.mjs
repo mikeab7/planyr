@@ -81,7 +81,11 @@ try {
     await ctx.addInitScript(INSTRUMENT);
     const page = await ctx.newPage(); await assertMeasurable(page, "verify-plan-open-live");
     await page.goto(`${base}/#/project/live-bo/site`, { waitUntil: "load" });
-    await page.locator('[data-testid="planner-canvas"]').waitFor({ timeout: 60000 });
+    /* LOUD-FAILURE: a canvas that never mounts is a finding about the build, not "the harness timed out" — say what the page held */
+    await page.locator('[data-testid="planner-canvas"]').waitFor({ timeout: 60000 }).catch(async (e) => {
+      const d = await page.evaluate(() => { const c = document.querySelector('[data-testid="planner-canvas"]'); return { canvas: !!c, inline: c && c.style.visibility, reveal: c && c.getAttribute("data-planner-reveal"), hash: location.hash, text: (document.body.innerText || "").replace(/\s+/g, " ").slice(0, 300), ver: null }; }).catch(() => ({}));
+      console.log("CANVAS NEVER BECAME VISIBLE:", JSON.stringify(d)); throw e;
+    });
     await pacedWait(page, 6000);
     const chip = (t) => page.locator("span:visible", { hasText: new RegExp(`^${t}$`) }).first();
     const pick = (t) => page.locator("*:visible", { hasText: new RegExp(`^${t}$`) }).last();
