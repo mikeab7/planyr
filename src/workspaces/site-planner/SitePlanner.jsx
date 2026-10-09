@@ -4523,6 +4523,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setTimeout(() => { if (elSyncRef.current === eng) refetchReplace(eng); }, 5000);
       return;
     }
+    // B2225425 (round 3) — warm what the seed's render will ask first (see `warmSeedCaches`), in slices, before anything is seeded.
+    try { await warmSeedCaches(r.rows); } catch (_) { /* warming only — the render computes it itself */ }
+    if (elSyncRef.current !== eng) return;
     // Mid-gesture/mid-edit: never yank the canvas OR reconcile half-made state — defer the whole
     // replace until the interaction settles (the buffered-event drain covers per-row updates).
     if (busyRef.current) {
@@ -31794,6 +31797,23 @@ function framedViewFor(box, pts) {
  * until `fit()` runs against a measured box); it finds nothing to change when the guess was right and re-frames exactly as
  * before when it was not (a resized window, a different panel). `sizeMeasuredRef` is NOT set from it. */
 let lastMeasuredCanvas = null;   // { box, dockX, toastCx }
+
+/* B2225425 (round 3) — the rows seed lands as ONE React update (it must: see `refetchReplace` on why a seed is never split from its
+ * reconcile), so whatever that render computes for the first time is one task. On a plan this device has never drawn, the costliest
+ * pure parts of it are the parcel acreage-badge anchors (`polylabel`, 36–43 ms on Concept A's 16 parcels) and the parcel-overlap
+ * screen (`overlappingParcelPairs`, 12–14 ms, every pair). Both are cached by content / ring identity, so they are asked HERE first,
+ * from the fetched rows, in slices, BEFORE anything is seeded — the render then finds them answered. Pure warming: nothing here
+ * writes state, and a failure only means the render computes them itself, as before. The slices yield through a MessageChannel,
+ * never a timer: a background tab clamps timers to about once a second, and the owner measures in a hidden tab. */
+const macrotask = () => new Promise((resolve) => { const ch = new MessageChannel(); ch.port1.onmessage = () => { ch.port1.close(); resolve(); }; ch.port2.postMessage(0); });
+async function warmSeedCaches(rows, budgetMs = 8) {
+  const rings = (rows || []).filter((r) => r && !r.deleted_at && r.kind === "parcel" && r.data && r.data.active !== false
+    && Array.isArray(r.data.points) && r.data.points.length >= 3).map((r) => r.data.points);
+  let t = performance.now();
+  const tick = async () => { if (performance.now() - t > budgetMs) { await macrotask(); t = performance.now(); } };
+  for (const ring of rings) { polylabel(ring); await tick(); }
+  for (let i = 0; i < rings.length; i++) for (let j = i + 1; j < rings.length; j++) { polyIntersectArea(rings[i], rings[j]); await tick(); }
+}
 
 /* ----------------------------- small UI ----------------------------- */
 function Section({ title, children, collapsed, accent }) {
