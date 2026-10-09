@@ -1358,7 +1358,7 @@ export default function ProjectBreadcrumb({
                     {q ? "No matching projects." : (warming ? "Loading projects…" : "No projects yet — start one below.")}
                   </div>
                 ) : (
-                  [...(currentRow ? [currentRow] : []), ...pinnedRows, ...restRows].map(renderProjectRow)
+                  (open ? [...(currentRow ? [currentRow] : []), ...pinnedRows, ...restRows] : []).map(renderProjectRow) /* round 5 (B2233521): the rows are only BUILT while the switcher is open — AnchoredMenu renders nothing closed, but this expression ran on every render of every header (143 rows, ~60 ms at 2× on a cold load) */
                 )}
               </div>
             </>

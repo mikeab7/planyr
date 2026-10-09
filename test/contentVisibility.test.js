@@ -285,6 +285,7 @@ describe("⛔ THE INVARIANT: this module cannot touch the model", () => {
  */
 describe("⛔ every render pass that paints for an element asks the predicate", () => {
   const planner = readFileSync(resolve(here, "../src/workspaces/site-planner/SitePlanner.jsx"), "utf8");
+  const roadNetBuild = readFileSync(resolve(here, "../src/workspaces/site-planner/lib/roadNetBuild.js"), "utf8");   // B2233521: where the dissolved network's steps now live
   /** The body of a `const <name> = useMemo(() => { … }, [deps]);` block. */
   const memoBody = (name) => {
     const i = planner.indexOf(`const ${name} = useMemo(`);
@@ -301,7 +302,10 @@ describe("⛔ every render pass that paints for an element asks the predicate", 
    * for itself. Removing this line is exactly the build the owner reported on. */
   it("roadNet — the dissolved pavement drops hidden roads, and re-renders when the map changes", () => {
     const body = memoBody("roadNet");
-    expect(body, "the dissolved road network paints hidden roads").toMatch(/elHidden\(hiddenGroups/);
+    /* round 5 (B2233521): the memo's body moved to lib/roadNetBuild.js `roadNetSteps` so the plan-open warm-up can drive the SAME steps in slices. The filter lives THERE;
+     * the memo must hand it `hiddenGroups` and re-run when it changes. */
+    expect(body, "the memo does not hand the steps the hidden groups").toMatch(/roadNetSteps\(\{[^}]*hiddenGroups/);
+    expect(roadNetBuild, "the dissolved road network paints hidden roads").toMatch(/elHidden\(hiddenGroups, x\)/);
     expect(body, "the memo cannot see a visibility change").toMatch(/\}, \[[^\]]*hiddenGroups[^\]]*\]/);
   });
 
@@ -313,7 +317,8 @@ describe("⛔ every render pass that paints for an element asks the predicate", 
 
   it("MUTATION CHECK — the sweep really does read the source it claims to", () => {
     expect(planner).toContain("const roadNet = useMemo(");
-    expect(memoBody("roadNet")).toContain("isCenterlineRoad");
+    expect(memoBody("roadNet")).toContain("roadNetSteps");
+    expect(roadNetBuild).toContain("isCenterlineRoad(x)");
   });
 });
 

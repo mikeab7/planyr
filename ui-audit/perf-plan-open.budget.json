@@ -1,5 +1,5 @@
 {
-  "_note": "NEW-1 / B2224000 + B2225424 + B2225425 round 3. Worst of EVERY main-thread gap (MessageChannel ping-gap heartbeat) in the 6 s after a plan open/switch, worst of the runs, signed-in rig + 140 filler plans, the switch scored from the page task that dispatches the click. Round 3 (10 runs each, same harness, baseline vs fix): Bolt-on<->Concept A first/back/revisit worst 126/153/269 -> 63/87/84 ms (0/10 runs over 150 ms, from 1/10 and 4/10); Richfield -> Grand Port back 183 -> 82. Budgets = the fixed build plus headroom for a shared runner, so a regression of any of the four round-3 causes fails. NOT the 50 ms target: 5-9 of 10 runs per switch still cross it (the planner's remount render + commit), the cold opens (254-401) and the first-time larger plan (492-603) are unchanged. targetGapMs is reported, never gating. Round 4 (B2233521): two steady-state rows (both plans already opened this session) and a no-switch control were added; --cpu 2 is the calibration that reproduces the owner's main-build readings (see PERF-PLAN-OPEN.md round 4). Budgets NOT tightened: the shipped round-4 build measures the same as main within noise.",
+  "_note": "NEW-1 / B2224000 + B2225424 + B2225425 round 3. Worst of EVERY main-thread gap (MessageChannel ping-gap heartbeat) in the 6 s after a plan open/switch, worst of the runs, signed-in rig + 140 filler plans, the switch scored from the page task that dispatches the click. Round 3 (10 runs each, same harness, baseline vs fix): Bolt-on<->Concept A first/back/revisit worst 126/153/269 -> 63/87/84 ms (0/10 runs over 150 ms, from 1/10 and 4/10); Richfield -> Grand Port back 183 -> 82. Budgets = the fixed build plus headroom for a shared runner, so a regression of any of the four round-3 causes fails. NOT the 50 ms target: 5-9 of 10 runs per switch still cross it (the planner's remount render + commit), the cold opens (254-401) and the first-time larger plan (492-603) are unchanged. targetGapMs is reported, never gating. Round 4 (B2233521): two steady-state rows (both plans already opened this session) and a no-switch control were added; --cpu 2 is the calibration that reproduces the owner's main-build readings (see PERF-PLAN-OPEN.md round 4). Budgets NOT tightened: the shipped round-4 build measures the same as main within noise. ROUND 5 (B2236000): `byLabelCpu2` is the budget for the 2x-throttled rig (`--cpu 2`, the calibration that reproduces the owner's main-build readings) and REPLACES `byLabel` row-for-row when the run is throttled; each is the worst of 10 runs of the shipped build plus ~20% headroom for a shared runner, so the pre-round-5 build fails first-open (worst 454 vs 200), Richfield (869 vs 560) and the reload (830 vs 460). The cold-open row is NOT improved by round 5 (median 424 -> 427) and its budget is the baseline's worst plus headroom - it is a ceiling, not an achievement. `byLabel` stays the 1x budget.",
   "targetGapMs": 50,
   "maxGapMs": 350,
   "byLabel": {
@@ -12,6 +12,25 @@
     "Richfield → Grand Port (back)": 150,
     "Concept A → Bolt-on (back, 2nd)": 150,
     "Bolt-on → Concept A (revisit, 2nd)": 150,
-    "control: no switch (instrument floor)": 100
+    "control: no switch (instrument floor)": 100,
+    "Concept A → Bolt-on (first open, fresh profile)": 400,
+    "reload onto a plan (app opened fresh)": 450,
+    "signed-in reload (app opened fresh)": 450,
+    "plan → Map (first time after the app opened on a plan)": 700
+  },
+  "byLabelCpu2": {
+    "cold open Bolt-on": 650,
+    "cold open Concept A": 650,
+    "reload onto a plan (app opened fresh)": 460,
+    "Concept A → Bolt-on (first open, fresh profile)": 200,
+    "plan → Map (first time after the app opened on a plan)": 620,
+    "Bolt-on → Concept A (first visit)": 210,
+    "Concept A → Bolt-on (back)": 110,
+    "Bolt-on → Concept A (revisit)": 110,
+    "Concept A → Bolt-on (back, 2nd)": 110,
+    "Bolt-on → Concept A (revisit, 2nd)": 110,
+    "control: no switch (instrument floor)": 100,
+    "Grand Port → Richfield (larger plan)": 560,
+    "Richfield → Grand Port (back)": 250
   }
 }
