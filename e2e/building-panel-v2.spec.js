@@ -1,5 +1,5 @@
 /* Building panel v2 (NEW-1…NEW-6) — drives the REAL inspector, logged out, no GIS.
- * One compact row per wall (rear and each end SEPARATE), per-side edits, a linked/split dock pair, bump-outs
+ * One compact row per wall (rear and each end SEPARATE), per-side edits, independent dock rows, bump-outs
  * drawn on the picker and edited from a chip, multi-row trailer parking, the folded-in bottom block, and
  * "Line weight" with no unit. Measured on the canvas, not just the panel.
  * Run: BASE_URL=http://localhost:4173 PW_CHROME=<chrome> npx playwright test e2e/building-panel-v2.spec.js --project=chromium --no-deps */
@@ -87,30 +87,58 @@ test("single-load at 315°: rows dock · rear · ends · ends — rear and each 
   await expect.poll(async () => (await park()).length).toBe(0);
 });
 
-test("cross-dock: one 'same' row; split it, give one side a buffer, only that side changes; chain links it back", async ({ page }) => {
+test("cross-dock at 315°: two independent dock rows (no same/split link); a buffer or bump-out on one wall changes only that wall", async ({ page }) => {
   const b = await boot(page);
+  await rotate(page, 315);
   await wall(page, "top").click();                                  // load the opposite wall too
   await expect.poll(async () => (await hostOf(page)).dock).toBe("cross");
-  await expect(rowByRole(page, "dock")).toHaveCount(1);
-  await expect(rowByRole(page, "rear")).toHaveCount(0);
-  const toggle = page.getByTestId("dock-link-toggle");
-  await expect(toggle).toContainText("same");
-  // linked: a court goes on BOTH walls
-  await addLayer(rowByRole(page, "dock").first(), "court");
-  await expect.poll(async () => (await kidsOf(page, b.id)).filter((k) => k.truckCourt).length).toBe(2);
-  await toggle.click();
-  await expect(toggle).toContainText("split");
+  await expect.poll(async () => Math.round((await hostOf(page)).rot)).toBe(315);
   await expect(rowByRole(page, "dock")).toHaveCount(2);
+  await expect(rowByRole(page, "rear")).toHaveCount(0);
+  await expect(page.getByTestId("dock-link-toggle")).toHaveCount(0);
   const [first, second] = [rowByRole(page, "dock").nth(0), rowByRole(page, "dock").nth(1)];
+  await expect(first.getByTestId("wall-row-badge")).not.toContainText("·");
+  await expect(first.getByTestId("bump-chip")).toBeVisible();
+  await expect(second.getByTestId("bump-chip")).toBeVisible();
+  // a court on ONE wall only
+  await addLayer(first, "court");
+  await expect.poll(async () => (await kidsOf(page, b.id)).filter((k) => k.truckCourt).length).toBe(1);
+  await expect(first.getByTestId("wall-chip")).toHaveCount(1);
+  await expect(second.getByTestId("wall-chip")).toHaveCount(0);
+  await addLayer(second, "court");
+  await expect.poll(async () => (await kidsOf(page, b.id)).filter((k) => k.truckCourt).length).toBe(2);
+  // a buffer on the first wall only
   await addLayer(first, "buffer");
   await expect.poll(async () => (await kidsOf(page, b.id)).filter((k) => k.buffer).length).toBe(1);
   await expect(first.getByTestId("wall-chip")).toHaveCount(2);
   await expect(second.getByTestId("wall-chip")).toHaveCount(1);
-  // chain again: the second wall now matches the first (buffer included), one frame
-  await toggle.click();
-  await expect(toggle).toContainText("same");
-  await expect.poll(async () => (await kidsOf(page, b.id)).filter((k) => k.buffer).length).toBe(2);
-  await expect(rowByRole(page, "dock")).toHaveCount(1);
+  // a bump-out on one wall only
+  await first.getByTestId("bump-chip").click();
+  await page.locator('[data-testid^="bump-end-"]').first().click();
+  await expect.poll(async () => (await kidsOf(page, b.id)).filter((k) => k.dogEar).length).toBe(1);
+  await expect(first.getByTestId("bump-chip")).toContainText("1");
+  await expect(second.getByTestId("bump-chip")).toContainText("none");
+});
+
+test("a plan saved with the retired dockStacksLinked flag loads as two independent rows with unchanged contents", async ({ page }) => {
+  const b = await boot(page);
+  await wall(page, "top").click();
+  await expect.poll(async () => (await hostOf(page)).dock).toBe("cross");
+  await addLayer(rowByRole(page, "dock").nth(0), "court");
+  await expect.poll(async () => (await kidsOf(page, b.id)).filter((k) => k.truckCourt).length).toBe(1);
+  await page.evaluate(() => {
+    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const site = map[Object.keys(map)[0]];
+    site.els = site.els.map((e) => (e.type === "building" && !e.dogEar ? { ...e, dockStacksLinked: true } : e));
+    localStorage.setItem("planarfit:sites:v1", JSON.stringify(map));
+  });
+  const before = (await kidsOf(page, b.id)).length;
+  await page.reload();
+  await expect(page.locator(`[data-el-id="${b.id}"]`)).toBeVisible();
+  await openProps(page, b.id);
+  await expect(rowByRole(page, "dock")).toHaveCount(2);
+  await expect(page.getByTestId("dock-link-toggle")).toHaveCount(0);
+  expect((await kidsOf(page, b.id)).length).toBe(before);
 });
 
 test("bump-outs: a dashed picker corner adds one at that corner; the dock line stops at it; SF and doors change; size 70 × 60", async ({ page }) => {
