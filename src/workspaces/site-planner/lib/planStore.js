@@ -219,6 +219,7 @@ function loadPlans(base, s) {
     if (prev && prev.raw === raw) { next.set(id, prev); continue; }
     let obj; try { obj = JSON.parse(raw); } catch (_) { obj = undefined; }
     if (!isObj(obj)) { reportClientEvent("plan-entry-unreadable", "a per-plan entry could not be read — that plan is left out of this read, not deleted", { id, len: raw.length }); continue; }
+    planJsonCache.set(obj, raw);   // B2236000 — the entry's own text IS this object's JSON (it was written by jsonOf): plainCopy / textOf reuse it
     next.set(id, { raw, obj });
   }
   s.plans = next; s.stamp = idxRaw; s.shared = null;
@@ -250,6 +251,8 @@ function plansToJson(persist) {
   for (const [id, sObj] of Object.entries(persist)) { const frag = jsonOf(sObj); if (frag !== undefined) parts.push(JSON.stringify(id) + ":" + frag); }
   return "{" + parts.join(",") + "}";
 }
+/** The exact stored text of a SHARED plan object handed out by this store (undefined when not known — e.g. blob mode). Read-only. */
+export function textOf(rec) { return rec && typeof rec === "object" ? planJsonCache.get(rec) : undefined; }
 /** A private, mutable copy of ONE stored record — what a caller that will change a record must take from a shared read. */
 export function plainCopy(rec) {
   if (!rec || typeof rec !== "object") return rec;
@@ -365,7 +368,10 @@ export function writeMap(base, next) {
     if (prev && prev.obj === rec) continue;
     const form = cfg.persistForm(rec);
     const frag = jsonOf(form);
-    if (prev && prev.raw === frag) { s.plans.set(id, { raw: frag, obj: form }); s.shared = null; continue; }
+    /* B2236000 (round 6) — the stored text is unchanged: KEEP the shared object this store already hands out (it is content-identical by
+     * construction), so everything keyed on it (the list read's model cache) still recognises the plan. Swapping in `form` made every cloud
+     * pull look like a rewrite of every plan. */
+    if (prev && prev.raw === frag) continue;
     if (!writeEntry(base, s, id, rec)) ok = false; else changed = true;
   }
   for (const id of [...s.plans.keys()]) if (!(id in next)) { del(pkey(base, id)); s.plans.delete(id); s.shared = null; changed = true; }

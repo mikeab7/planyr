@@ -47,7 +47,10 @@ describe("one read normalization for both read paths (the rows seed no longer re
   });
   it("createSiteModel runs the table itself (one implementation, not a copy)", () => {
     const src = readFileSync(new URL("../src/workspaces/site-planner/lib/siteModel.js", import.meta.url), "utf8");
-    for (const f of ["parcels", "els", "markups", "measures", "callouts"]) expect(src).toMatch(new RegExp(`${f}: READ_NORMALIZE\\.${f}\\(`));
+    for (const f of ["parcels", "markups", "measures", "callouts"]) expect(src).toMatch(new RegExp(`${f}: READ_NORMALIZE\\.${f}\\(`));
+    // B2236000 (round 6) — els go through `normalizedEls` (which remembers a list proven clean); it runs the same table entry
+    expect(src).toMatch(/els: normalizedEls\(/);
+    expect(src).toMatch(/function normalizedEls\([^)]*\) \{[\s\S]{0,800}READ_NORMALIZE\.els\(normalizeBondedChildren\(migrateRoads\(objArr\(raw\)\), onHeal\)\)/);
   });
   it("the seed commits what it normalized instead of adopting the raw row back (exempt from rows-canonical) and warms before seeding", () => {
     const sp = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");

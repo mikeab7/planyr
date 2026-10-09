@@ -7,7 +7,7 @@ import "leaflet/dist/leaflet.css";
 import { useProjectName, usePlanName, renameProjectChecked, renamePlanChecked } from "../../shared/names/names.js";
 import { writeIsRedundant, mayWriteForAccount } from "./lib/saveDedupe.js";
 import { readCanvasGuess, writeCanvasGuess, geometryOf } from "./lib/canvasGuess.js";
-import { loadSite, saveSite, siteExistsLocally, sitesWriteStamp, sitesWriteStillCurrent, readBackSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
+import { loadSite, saveSite, siteExistsLocally, sitesWriteStamp, sitesWriteStillCurrent, readBackSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, initHistoryStore, backupNow, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
 import { relTime } from "../../shared/projects/projectModel.js";
 import { collectAssetRefs, releasePlanForOverlay } from "./lib/sharedAssetRefs.js";
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
@@ -1896,7 +1896,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const stored = restored?.settings || {};
     const retired = normalizeRetiredToggles(stored);
     if (retired) console.info("[planyr] view-menu migration: restoring dock doors (the toggle was retired)", retired);
-    return { ...DEFAULT_SETTINGS, ...stored, ...(retired || {}), snap: loadSnapPref() };
+    return plannerSettingsFrom(stored, retired);
   });
   const setSnap = useCallback((on) => { saveSnapPref(on); setSettings((s) => ({ ...s, snap: on })); }, []);
   /* NEW-1 — the View menu's hidden-content map, read straight off `settings` so it persists per
@@ -16903,7 +16903,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // saved snapshots, and restore one into the canvas (which then autosaves as the newest
   // version — and the thinner state it replaces is itself snapshotted, so a restore is
   // reversible). Geometry is fully restored; any stripped backdrop image may need re-dropping.
-  const openVersionHistory = () => { setVersionList(listVersions(siteId)); setActivityTab("versions"); setVersionsOpen(true); closeHdrMenus(); };
+  const openVersionHistory = () => { setVersionList(listVersions(siteId)); initHistoryStore().then(() => setVersionList(listVersions(siteId))).catch(() => {}); /* B2236000 — the ring hydrates off the boot path; re-list once it has */ setActivityTab("versions"); setVersionsOpen(true); closeHdrMenus(); };
   // B472048 (NEW-7 · NEW-3) — the Activity tab's data, fetched lazily on first switch (not on
   // every dialog open) so opening "Version history" for its ordinary purpose costs nothing new.
   // `groupRowsIntoOperations` + `describeOperation` are the ALREADY-SHIPPED, unit-tested pure
@@ -31660,6 +31660,31 @@ async function warmRoadNet(rows, settings, tick) {
   const els = rowsToModel({}, rows).els;
   await tick();
   await warmRoadNetFromEls(els, settings, tick);
+}
+/* The planner's settings for a stored plan — ONE derivation, shared by the component's state initializer and `warmPlanForMount` (a warm-up
+ * that derived its settings differently would only miss the caches, but there is no reason to let it). */
+function plannerSettingsFrom(stored, retired) { return { ...DEFAULT_SETTINGS, ...(stored || {}), ...(retired || {}), snap: loadSnapPref() }; }
+/* ⛔ B2236000 (round 6) — WARM A PLAN BEFORE ITS PLANNER MOUNTS (the app opened fresh onto a plan). The planner's first render computes the
+ * dissolved road network, the parcel badge anchors and the drive-pad outline cuts for the first time in the page's life, inside ONE React
+ * render (one task: ~110 ms of a ~250–550 ms first render at 2× CPU on Bolt-on, more on a plan with more roads). SitePlannerApp holds the
+ * FIRST mount of the page until this has driven the same steps (lib/roadNetBuild.js — never a second implementation) in ~8 ms MessageChannel
+ * slices from the device copy, folded exactly as the planner's own state initializers fold it. The caches are by value, so the render finds
+ * every answer; a warm-up that disagrees with the render only misses. Pure warming: it writes nothing, and SitePlannerApp mounts the planner
+ * regardless once it finishes, fails, or runs past its ceiling. The boot framing and its reveal gate (constraint #8, B1574432) live inside
+ * the planner and are untouched — this only decides WHEN the planner mounts, never how it frames or reveals. */
+export async function warmPlanForMount(siteId, { budgetMs = 8 } = {}) {
+  let t = performance.now();
+  const tick = async () => { if (performance.now() - t > budgetMs) { await macrotask(); t = performance.now(); } };
+  const rec = siteId ? loadSite(siteId) : null;
+  if (!rec) return false;
+  await macrotask(); t = performance.now();
+  for (const pc of rec.parcels || []) { if (pc && pc.active !== false && Array.isArray(pc.points) && pc.points.length >= 3) { polylabel(pc.points); await tick(); } }
+  const raw = rec.els || [];
+  if (!raw.some((e) => isCenterlineRoad(e))) return true;
+  const els = pruneStrandedZones(healDockAxes(raw));
+  await tick();
+  await warmRoadNetFromEls(els, plannerSettingsFrom(rec.settings, normalizeRetiredToggles(rec.settings || {})), tick);
+  return true;
 }
 async function warmSeedCaches(rows, budgetMs = 8, { settings } = {}) {
   const rings = (rows || []).filter((r) => r && !r.deleted_at && r.kind === "parcel" && r.data && r.data.active !== false

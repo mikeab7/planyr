@@ -1223,10 +1223,32 @@ function foldAerialIntoOverlays(underlay, sheetOverlays) {
   return [migrated, ...list];
 }
 
+/* ⛔ B2236000 (round 6) — THE ELEMENT NORMALIZATION REMEMBERS A LIST IT HAS ALREADY PROVEN CLEAN. The pipeline below (road migration, the
+ * bonded-child heal, the read-normalize table) is a pure function of the element list, and every pass is identity-preserving: on a coherent
+ * list it returns THE SAME ARRAY. That is the proof a list is a fixed point (f(x) === x), so the array is remembered and the next
+ * createSiteModel handed that same array returns it without re-running the passes. Nothing approximate: a list that any pass changed is not
+ * remembered (its successor is checked on its next pass), and an array never seen is computed exactly as before. Why it matters: a plan's
+ * model is re-created many times per page load — the list read, the cloud pull's merge (`mergePulledSites` → `mergeSiteContent`, which
+ * re-creates BOTH copies and the result), every `loadSite` — and on an owner-sized device (30 plans with their drawing) each re-creation of
+ * every plan re-ran the full bonded heal: ~1 s of main-thread stalls in a fresh load at 2× CPU. Relies on the house rule that a model's
+ * collections are never mutated in place (no reader or writer does; `test/sitesListCache.test.js` deep-freezes the shared models). */
+const CLEAN_ELS = new WeakSet();
+function normalizedEls(raw, onHeal, proven) {
+  if (Array.isArray(raw) && CLEAN_ELS.has(raw)) return raw;
+  /* `proven` — the caller holds a cross-load proof (lib/elsProof.js: same build, same exact stored text) that this very list came back from
+   * these passes untouched; the list is then already the fixed point, exactly as if they had just run. */
+  if (proven && Array.isArray(raw)) { CLEAN_ELS.add(raw); return raw; }
+  const out = READ_NORMALIZE.els(normalizeBondedChildren(migrateRoads(objArr(raw)), onHeal));
+  if (Array.isArray(raw) && out === raw) CLEAN_ELS.add(out);
+  return out;
+}
+/** Is this element list one the normalization has proven clean (it came back untouched)? */
+export const elsListIsClean = (a) => Array.isArray(a) && CLEAN_ELS.has(a);
+
 /* Build / normalize a Site Model from a (possibly legacy / partial) record.
  * Additive only — never renames or drops the legacy flat fields, so it is also a
  * lossless, idempotent migration. */
-export function createSiteModel(p = {}, { onHeal } = {}) {
+export function createSiteModel(p = {}, { onHeal, provenCleanEls = false } = {}) {
   return {
     schemaVersion: SITE_MODEL_VERSION,
     // identity
@@ -1312,7 +1334,7 @@ export function createSiteModel(p = {}, { onHeal } = {}) {
     // bonded-child heal — angle re-anchor (B363), dog-ears snapped to the host's current edge
     // (B487), wall kids re-flushed (B1038/B1039), assemblies torn across transactions re-fitted
     // (NEW-4). `normalizeBondedChildren` is the SAME function the rows read path runs.
-    els: READ_NORMALIZE.els(normalizeBondedChildren(migrateRoads(objArr(Array.isArray(p.els) ? p.els : p.elements)), onHeal)),
+    els: normalizedEls(Array.isArray(p.els) ? p.els : p.elements, onHeal, provenCleanEls),
     markups: READ_NORMALIZE.markups(objArr(p.markups)),
     measures: READ_NORMALIZE.measures(objArr(p.measures)),
     callouts: READ_NORMALIZE.callouts(objArr(p.callouts)),
@@ -1366,6 +1388,12 @@ function unionById(primary, secondary) {
   };
   arr(primary).forEach(take);
   arr(secondary).forEach((it) => { if (it && it.id != null && ids.has(it.id)) return; take(it); });
+  /* B2236000 (round 6) — when ONE side contributed nothing and every item of the other was kept, in order, the union IS that side: hand back the
+   * input array itself (same items, same order — only the array's identity differs from `out`), so a model whose list was already proven clean
+   * stays recognisably so through a merge with a slim cloud header (whose element collections are always empty). */
+  const p = arr(primary), q = arr(secondary);
+  if (!q.length && out.length === p.length && Array.isArray(primary)) return primary;
+  if (!p.length && out.length === q.length && Array.isArray(secondary)) return secondary;
   return out;
 }
 
@@ -1398,7 +1426,9 @@ export function mergeSiteContent(a, b, opts) {
   // Union the tombstones from BOTH copies, then drop any tombstoned id from every unioned
   // collection so a deleted item can't be resurrected by the copy that still holds it.
   const tomb = new Set([...arr(A.deletedIds), ...arr(B.deletedIds)]);
-  const live = (list) => (tomb.size ? arr(list).filter((it) => !(it && it.id != null && tomb.has(it.id))) : arr(list));
+  /* B2236000 (round 6) — a filter that removes nothing hands back the input array itself (same items, same order), so a list already proven clean
+   * stays recognisable (siteModel's CLEAN_ELS) through a merge with a copy that only carries tombstones the list already honours. */
+  const live = (list) => { if (!tomb.size) return arr(list); const a = arr(list), out = a.filter((it) => !(it && it.id != null && tomb.has(it.id))); return out.length === a.length ? a : out; };
   const merged = {
     ...newer,
     parcels: live(unionById(newer.parcels, older.parcels)),
