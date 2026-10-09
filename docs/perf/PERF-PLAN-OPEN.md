@@ -139,7 +139,18 @@ The steady-state rows (the owner's case) are a wash within the instrument's floo
 2. **A switch no longer writes the plan being left twice** (`writeIsRedundant`: the switch handler's flush, then persist-on-leave on unmount, wrote the identical record back to back; the second is skipped only while the store provably still holds the first).
 3. The instrument: `--cpu`, the 2nd-round hops, the no-switch control (`perf-plan-open.mjs`), and `verify-plan-switch-writes.mjs`.
 
-FINAL_NUMBERS_PLACEHOLDER
+### The shipped build against main — same harness, 2×, 10 runs (5 for the adjacent rows), median / worst (ms)
+| action | main | shipped |
+|---|---|---|
+| first visit | 87 / 144 | 88 / 141 |
+| back | 36 / 40 | 37 / 76 |
+| revisit | 43 / 62 | 41 / 57 |
+| back, 2nd | 39 / 67 | 43 / 148 (5/10 runs over 50) |
+| revisit, 2nd | 43 / 47 | 39 / 84 |
+| control: no switch | 0 / 53 | 0 / 0 |
+| cold open Bolt-on / Concept A | 402 / 463 · 438 / 535 | 397 / 429 · 373 / 644 |
+| Grand Port → Richfield · back | 721 / 757 · 158 / 185 | 765 / 866 · 98 / 164 |
+**No speed claim is made for this round: the two builds are indistinguishable within the run-to-run spread** (the "back, 2nd" worst of 148 and the wide adjacent-row ranges are single runs on a shared CPU; the medians are all within a few ms). What this round changed is a write path and the instrument, not the switch's cost. The budget file is NOT tightened, because nothing measured moved; the two new steady-state rows and the control get budgets so a regression there fails.
 
 ### ⛔ STILL NOT MET — stated as loudly as the rest
 - **The owner's bar is not proven met, and this round did not move the steady-state switch.** In the calibrated rig the steady-state switches on main already sit at medians of 39–43 ms with 0–1 of 10 runs over 50 — the same rate as the no-switch control. Whether that matches his machine cannot be decided here: **the arbiter is his heartbeat** on the shipped build (the item's live check).
