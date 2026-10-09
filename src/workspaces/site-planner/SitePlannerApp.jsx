@@ -1,8 +1,6 @@
-import { lazy, memo, startTransition, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, startTransition, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import MapFinder from "./MapFinder.jsx";
 import SitePlanner from "./SitePlanner.jsx";
-import PlannerSlot from "./components/PlannerSlot.jsx";
-import { nextPlannerSlots, slotKey, slotSiteId } from "./lib/plannerKeepAlive.js";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import { defaultOverlayState } from "./lib/layers.js";
 import { testConnection, supabaseConfigured, connectionInfo } from "./lib/supabase.js";
@@ -61,10 +59,6 @@ repairSplitProjectNames(); // NEW-3 — converge any project whose plans disagre
 initHistoryStore();   // B474 — hydrate the version-history ring from IndexedDB (async, fire-and-forget); migrates the localStorage ring over once
 idbPersist();         // B474 review (#9) — ask the browser to keep our IndexedDB durable (not best-effort/evictable); it's now the version ring's home + the underlay raster's local cache
 
-/* B2233521 — a KEPT planner (the plan you just left, mounted but hidden) does not re-render when the app does: nothing it shows is on screen,
- * and every prop it reads is fresh again the moment it is shown (the show itself is a render). Only kept → kept is skipped; the render that
- * HIDES a planner (active → false, which runs its persist-on-leave) and the one that shows it again both happen. */
-const KeptPlanner = memo(SitePlanner, (a, b) => a.kept && b.kept && a.siteId === b.siteId);
 const newId = () => "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 
 // The effective project group of an active plan id (its group, or its own id for a
@@ -893,13 +887,6 @@ export default function App({
    * zoom step), so a device with many saved plans paid that parse each time. Memoised on what can change the
    * answer: the open plan, the mode, and `sites` (re-read by `refreshSites` after every store mutation). */
   const effGroup = useMemo(() => groupForPlan(activeSiteId, mode), [activeSiteId, mode, sites]);
-  /* B2233521 — the planners kept mounted (lib/plannerKeepAlive.js): the plan on screen plus the one you came from, so switching back is a
-   * show, not a rebuild. Derived during render (identity-stable, so this settles in one extra pass). */
-  const [plannerSlots, setPlannerSlots] = useState([]);
-  const curPlannerSlot = activeSiteId ? slotKey(activeSiteId, loadEpoch) : null;
-  const livePlanIds = useMemo(() => new Set((sites || []).map((x) => x && x.id).filter(Boolean)), [sites]);
-  const wantPlannerSlots = nextPlannerSlots(plannerSlots, { current: curPlannerSlot, live: livePlanIds });
-  if (wantPlannerSlots !== plannerSlots) setPlannerSlots(wantPlannerSlots);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!isActive || !mayReconcileUrl(bootResolved)) return;
@@ -1292,12 +1279,11 @@ export default function App({
       <div data-mode="plan" data-mode-active={mode === "plan" ? "true" : "false"}
         aria-hidden={mode === "plan" ? undefined : "true"} inert={mode === "plan" ? undefined : ""}
         style={{ display: mode === "plan" ? "block" : "none", height: "100%" }}>
-        {plannerSlots.map((slot) => { const cur = slot === curPlannerSlot; const id = slotSiteId(slot); return (
-          <PlannerSlot key={slot} slot={slot} visible={cur}>
-          <KeptPlanner
-            kept={!cur}
-            active={cur && mode === "plan" && isActive}
-            siteId={id}
+        {activeSiteId && (
+          <SitePlanner
+            key={`${activeSiteId}:${loadEpoch}`}
+            active={mode === "plan" && isActive}
+            siteId={activeSiteId}
             overlays={overlays}
             setOverlays={setOverlays}
             cloud={cloud}
@@ -1328,8 +1314,7 @@ export default function App({
             authControl={authControl}
             accountActive={accountActive}
           />
-          </PlannerSlot>
-        ); })}
+        )}
       </div>
       {/* NEW-1 — outside both mode divs so a status-change undo offered on the map survives
           switching into a plan before the toast's own timer runs out. */}

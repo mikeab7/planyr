@@ -369,11 +369,8 @@ export function createTilePacer({ maxInFlight = 24 } = {}) {
   function pump() {
     while (inFlight < maxInFlight && queue.length) {
       const job = queue.shift();
-      // discarded by Leaflet while it waited (pruned / layer removed): never fetch it. B2233521 — "discarded" is "Leaflet took it OUT OF ITS
-      // TILE CONTAINER" (`parentNode` null), never "not in the document": a kept planner's whole map is detached from the page while you are
-      // on another plan (lib/plannerKeepAlive.js), and reading `isConnected` dropped every tile it still had queued — they stayed unpainted,
-      // and the blank-tile heal then cache-busted and re-downloaded the whole grid the moment the plan was shown again.
-      if (job.started === false && job.tile.__pfAttached && !job.tile.parentNode) { stats.dropped++; continue; }
+      // discarded by Leaflet while it waited (pruned / layer removed): never fetch it
+      if (job.started === false && job.tile.__pfAttached && !job.tile.isConnected) { stats.dropped++; continue; }
       job.started = true;
       start(job);
     }
@@ -403,32 +400,6 @@ export function paceTileLoads(layer, pacer = _sharedPacer) {
     queueMicrotask(() => pacer.attached(tile));
     pacer.schedule(tile, url);
     return tile;
-  };
-  return layer;
-}
-
-/* ── 7. position tiles FLAT, not each on its own compositor layer (B2233521) ─────────────────────────────────────
- * Leaflet places every tile with `transform: translate3d(x, y, 0)`. A 3D transform promotes each tile `<img>` to its own compositor
- * layer — on a planner map that is 150–250 layers. They are normally created a few at a time as tiles arrive, but a KEPT planner shown
- * again (lib/plannerKeepAlive.js) brings its whole retained grid back in one frame, and handing that many layers to the compositor at once
- * is a single 20–40 ms frame with no script in it (measured in a Chromium trace of the re-show; with the tiles positioned flat the same
- * re-show read 31–43 ms on the heartbeat at 2× CPU against 53–77 ms before). This map is a slaved backdrop whose tiles never animate
- * individually (zoom/fade animation are off; a gesture moves the whole map container), so a tile gains nothing from its own layer.
- * Mechanism: after Leaflet's own `_addTile` has positioned the tile, the same position is re-expressed as `left`/`top` — exactly what
- * Leaflet itself does when 3D is unavailable (`DomUtil.setPosition`'s other branch), and `_leaflet_pos` is untouched. Tiles are positioned
- * once, when added, so nothing later re-applies the transform. A layer without the private hooks is left untouched. */
-export function flattenTilePositions(layer) {
-  if (!layer || layer.__pfFlat || typeof layer._addTile !== "function" || typeof layer._tileCoordsToKey !== "function") return layer;
-  layer.__pfFlat = true;
-  const orig = layer._addTile;
-  layer._addTile = function (coords, container) {
-    const out = orig.call(this, coords, container);
-    try {
-      const rec = this._tiles && this._tiles[this._tileCoordsToKey(coords)];
-      const el = rec && rec.el, p = el && el._leaflet_pos;
-      if (el && p) { el.style.transform = ""; el.style.left = `${p.x}px`; el.style.top = `${p.y}px`; }
-    } catch (_) { /* positioning stays Leaflet's own */ }
-    return out;
   };
   return layer;
 }

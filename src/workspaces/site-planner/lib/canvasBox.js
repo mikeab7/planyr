@@ -25,14 +25,9 @@ export function canvasBox(rect) {
   return { w: Math.max(CANVAS_MIN_PX, rawW), h: Math.max(CANVAS_MIN_PX, rawH), rawW, rawH };
 }
 
-/** Same box, or the previous one when nothing changed (a functional `setSize` bail).
- *  B2233521 — and the previous one when the rect has NO AREA AT ALL: a 0 × 0 box is not a size, it is a planner that is not laid out (hidden
- *  behind the map view with `display:none`, or a kept planner detached from the page — lib/plannerKeepAlive.js). Taking it as the size made
- *  every hide/show a resize — a re-render at a degenerate box, the basemap re-synced, a whole tile grid re-requested — for a canvas whose real
- *  size never changed. A real pane, however narrow, has area and still passes straight through. */
+/** Same box, or the previous one when nothing changed (a functional `setSize` bail). */
 export function nextCanvasSize(prev, rect) {
   const b = canvasBox(rect);
-  if (prev && !(b.rawW > 0) && !(b.rawH > 0)) return prev;
   return prev && prev.w === b.w && prev.h === b.h && prev.rawW === b.rawW && prev.rawH === b.rawH ? prev : b;
 }
 

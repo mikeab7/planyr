@@ -1,24 +1,26 @@
 #!/usr/bin/env node
-/* verify-plan-keepalive-writes — A KEPT (HIDDEN) PLANNER MAY NEVER WRITE TO THE WRONG PLAN (B2233521, owner's data-safety requirement).
+/* verify-plan-switch-writes — A PLAN SWITCH, A HIDE, A RELOAD OR A SIGN-OUT MAY NEVER WRITE TO THE WRONG PLAN OR THE WRONG STORE
+ * (B2233521, owner's data-safety requirement, 2026-10-09).
  *
- * B2233521 keeps the plan you just left MOUNTED (hidden, detached from the page — lib/plannerKeepAlive.js) so switching back is a show, not a
- * rebuild. The owner's condition, verbatim in substance: a speed win that can write to the wrong plan is not shippable. So this harness drives
+ * Written to prove a "keep the plan you left mounted, hidden" speed-up safe before it shipped. The speed-up did not earn its place on the
+ * numbers and was NOT shipped (docs/perf/PERF-PLAN-OPEN.md round 4) — but the harness found a real, older defect on the way: signing out
+ * copied the plan on screen into the SIGNED-OUT device store. It stays as the guard for every switch / save / sign-out change. It drives
  * the signed-in rig (lib/planOpenRig.mjs — the owner's real Bolt-on + Concept A rows, the real cloud-pull → rows → seed path) through
  *
- *   A (Bolt-on) edits  : move an element (real mouse drag), toggle a GIS layer (FEMA, real checkbox), change the overlay (its opacity, typed into the
- *                        Overlays panel), rename the plan (real crumb editor)
- *   switch to B        : B (Concept A) gets its OWN, different edits (another element, the Wetlands layer, another crop, another name)
- *                        — and while A is HIDDEN: two window resizes, focus/resize events, and > 7 s of wall clock so every timer a hidden
- *                        planner owns (autosave 400 ms, the 4 s rows fallback, the tile heal, the mirror) has fired at least once
- *   switch back to A   : B is now hidden; same storm of resize/timers
- *   deploy-reload      : a full page reload while B is hidden, then B is opened fresh — its edits must have survived and A's must not be on it
- *   sign-out           : signed out while a plan is hidden
+ *   A (Bolt-on) edits  : move an element (real mouse drag), toggle a GIS layer (FEMA, real checkbox), change the overlay (its opacity, typed
+ *                        into the Overlays panel), rename the plan (real crumb editor)
+ *   switch to B        : B (Concept A) gets its OWN, different edits (another element, the Wetlands layer, another opacity, another name)
+ *                        — and while A is OFF SCREEN: two window resizes, focus/resize events, and > 7 s of wall clock so every timer that
+ *                        could still write A (autosave 400 ms, the 4 s rows fallback, the mirror) has fired at least once
+ *   switch back to A   : B is now off screen; the same storm
+ *   deploy-reload      : a full page reload with B off screen, then B is opened fresh — its edits must have survived, A's must not be on it
+ *   sign-out           : signed out with one plan on screen and the other off screen
  *
  * and records EVERY write: each `commit_elements` RPC (p_site + every op), every `sites` header write (POST/PATCH body), every RPC, and every
  * on-device per-plan entry write (`<store>:p:<planId>` — parsed in the page down to name / layer set / overlay crops / the edited elements).
  *
  * VERDICTS (each named; any one fails the run):
- *   1. HIDDEN SILENCE   — while a plan is hidden, nothing writes it: no element op, no header row, no on-device entry whose content changed.
+ *   1. HIDDEN SILENCE   — while a plan is off screen, nothing writes it: no element op, no header row, no on-device entry whose content changed.
  *   2. NO CROSSOVER     — no write ever carries the OTHER plan's edit: A's rows/header/entry never hold B's name, B's layer, B's crop or B's moved
  *                         element; and the same the other way. Element ops for a plan only ever name that plan's own elements.
  *   3. EDITS LANDED     — each edit reached ITS plan (the moved element's op, the header with the layer + crop + name) — a run where an edit
@@ -26,9 +28,11 @@
  *   4. RELOAD           — after a reload, each plan's stored record holds its own edits and none of the other's.
  *   5. SIGN-OUT         — after sign-out, no element op / header row is sent, and no account plan lands in the signed-out device store.
  *
- *   xvfb-run -a node ui-audit/verify-plan-keepalive-writes.mjs --dist <dir> [--json]
+ *   xvfb-run -a node ui-audit/verify-plan-switch-writes.mjs --dist <dir> [--json]
  * Build: VITE_SUPABASE_URL=https://bootauth.supabase.co VITE_SUPABASE_ANON_KEY=dummy npx vite build --outDir <dir>
- * Red-proof: build with the kept planner's layer re-apply disabled — verdict 2 fails (B's layer set saved into A).
+ * Red-proof: the build before B2233521 FAILS verdict 5 (the open plan is written into `planarfit:sites:v1:p:<id>` ~200 ms after the
+ * sign-out click); so does this build with `mayWriteForAccount` forced true. (Against the unshipped keep-alive it also failed verdicts 1
+ * and 2 for each of the two mutants that removed its safeguards — the verdicts are general, not specific to that design.)
  */
 import { chromium } from "playwright";
 import { createServer } from "node:http";
@@ -43,7 +47,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const argOf = (f, d) => { const i = process.argv.indexOf(f); return i > -1 && process.argv[i + 1] && !process.argv[i + 1].startsWith("--") ? process.argv[i + 1] : d; };
 const DIST = argOf("--dist", join(HERE, "..", "dist"));
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
-if (!existsSync(join(DIST, "index.html"))) { console.error(`verify-plan-keepalive-writes: no build at ${DIST}`); process.exit(2); }
+if (!existsSync(join(DIST, "index.html"))) { console.error(`verify-plan-switch-writes: no build at ${DIST}`); process.exit(2); }
 const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".woff2": "font/woff2", ".webmanifest": "application/manifest+json", ".map": "application/json" };
 const server = createServer((req, res) => {
   const u = (req.url || "/").split("?")[0].split("#")[0];
@@ -54,7 +58,7 @@ const server = createServer((req, res) => {
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const BASE = `http://127.0.0.1:${server.address().port}/`;
 const SB = detectSupabase(DIST);
-if (!SB) { console.error("verify-plan-keepalive-writes: the build carries no Supabase host"); process.exit(2); }
+if (!SB) { console.error("verify-plan-switch-writes: the build carries no Supabase host"); process.exit(2); }
 
 const plans = loadPlans(["concept-a", "bolt-on"]);
 const A = plans.find((p) => p.key === "bolt-on"), B = plans.find((p) => p.key === "concept-a");
@@ -108,7 +112,7 @@ await ctx.addInitScript(authSessionSeed({ ref: SB.ref, url: SB.url }));
 await ctx.addInitScript(RECORDER);
 await ctx.addInitScript((ids) => { window.__planIds = ids; }, [A.id, B.id]);
 const page = await ctx.newPage();
-await assertMeasurable(page, "verify-plan-keepalive-writes");
+await assertMeasurable(page, "verify-plan-switch-writes");
 
 const marks = [];                                       // wall-clock windows (net requests carry wall clock; page writes carry perf time + segment)
 let seg = 0;                                            // page lifetimes: a reload starts a new performance timeline AND a new in-page log
@@ -337,7 +341,7 @@ if (process.env.KA_DUMP) for (const n of net.filter((x) => x.path.includes("comm
 const summary = { pass: !fails.length && !voids.length, fails, voids, notes, landed, counts: {
   commitsA: commitsOf(A.id).length, commitsB: commitsOf(B.id).length, headerWrites: headerWrites().length, deviceWritesA: lsw.filter((w) => w.plan === A.id).length, deviceWritesB: lsw.filter((w) => w.plan === B.id).length } };
 if (process.argv.includes("--json")) console.log(JSON.stringify(summary, null, 1));
-console.log(`\nverify-plan-keepalive-writes: ${summary.pass ? "PASS" : voids.length && !fails.length ? "VOID" : "FAIL"}`);
+console.log(`\nverify-plan-switch-writes: ${summary.pass ? "PASS" : voids.length && !fails.length ? "VOID" : "FAIL"}`);
 for (const f of fails) console.log("  ✗ " + f);
 for (const v of voids) console.log("  ? " + v);
 console.log("  counts " + JSON.stringify(summary.counts) + "  landed " + JSON.stringify(landed));
