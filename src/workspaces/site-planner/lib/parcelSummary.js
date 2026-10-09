@@ -28,10 +28,14 @@ export function summarizeParcelRows(rows) {
 // (`Response.text.then` in the owner's perfcap: a 134 ms task), and its cost is the SUM over every site on the account of an O(parcels²) overlap
 // scan — it grows with the library, not with the plan being opened. A site is the unit of work (never split: `dissolvedParcelSqft` needs the whole
 // set), so each slice is bounded by `budgetMs` plus one site. Same result as `summarizeParcelRows`, key for key.
-/* B2236000 (round 6) — a MessageChannel yield, not a timer: a background tab clamps timers to about once a second, which would stretch a sliced summary
+/* B2236000 (round 6) — never a bare timer between slices: a background tab clamps timers to about once a second, which would stretch a sliced summary
  * across minutes there. And the slice unit is now ONE PARCEL PAIR, not one site: a project with many lots made a single 75–150 ms task at 2× CPU in the
  * owner-sized rig (the pair scan is O(lots²) clipped triangle pairs), which is what remained of the fresh-load stall after the list read was fixed. */
+/* … and it waits for an IDLE moment between slices (with a ceiling, so a busy or hidden tab still finishes): measured, a MessageChannel yield resumed
+ * at once and made the summary compete with the app's own first render on a fresh load (reload worst 222 → 286 ms at 2× on the default store). The
+ * summary only feeds the map list's acreage, which nothing on a fresh load waits for. */
 const yieldMacrotask = () => new Promise((resolve) => {
+  try { if (typeof requestIdleCallback === "function") { requestIdleCallback(() => resolve(), { timeout: 1000 }); return; } } catch (_) { /* fall through */ }
   if (typeof MessageChannel === "undefined") { setTimeout(resolve, 0); return; }
   const ch = new MessageChannel(); ch.port1.onmessage = () => { ch.port1.close(); resolve(); }; ch.port2.postMessage(0);
 });
