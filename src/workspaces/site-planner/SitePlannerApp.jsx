@@ -1,6 +1,6 @@
 import { lazy, startTransition, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import MapFinder from "./MapFinder.jsx";
-import SitePlanner from "./SitePlanner.jsx";
+import SitePlanner, { warmPlanForMount } from "./SitePlanner.jsx";
 import AppHeader from "../../shared/ui/AppHeader.jsx";
 import { defaultOverlayState } from "./lib/layers.js";
 import { testConnection, supabaseConfigured, connectionInfo } from "./lib/supabase.js";
@@ -17,7 +17,7 @@ import { loadUserPrefs } from "./lib/userPrefs.js";
  * Site route's own tier (`SitePlanner.jsx` imports userPrefs statically), so these are plain
  * static edges and add no chunk. */
 const SHARE_LOADERS = { loadPrefs: loadUserPrefs, listTeams: listMyTeams };
-import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, initHistoryStore, loadSitesList, loadPlansOfGroup, renameSiteGroup, deleteSiteGroup as storageDeleteSiteGroup, repairSplitProjectNames, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount, stageLegacySite, discardLegacySite } from "./lib/storage.js";
+import { migrateOldAutosave, migrateSiteGroups, migrateScenarios, scheduleHistoryHydration, loadSitesList, loadPlansOfGroup, renameSiteGroup, deleteSiteGroup as storageDeleteSiteGroup, repairSplitProjectNames, groupOf, loadSite, saveSite, deleteSite, getCurrentSiteId, setCurrentSiteId, setActiveUser, pushSiteToCloud, pullCloud, importLegacyIntoCloud, pendingLegacyCount, stageLegacySite, discardLegacySite } from "./lib/storage.js";
 import { cloudParcelRows, cloudElementRecency } from "./lib/cloudSync.js";
 import { summarizeParcelRowsAsync } from "./lib/parcelSummary.js";
 import { summarizeElementRecency, groupRecencyMs, pickRepresentativePlan } from "./lib/siteRecency.js";
@@ -56,13 +56,14 @@ migrateOldAutosave(); // bring any legacy single-slot autosave into the site sto
 migrateSiteGroups();  // give every legacy record a site (location) group
 migrateScenarios();   // fold legacy named scenarios into Plans
 repairSplitProjectNames(); // NEW-3 — converge any project whose plans disagree on its name (idempotent; see lib/projectName.js)
-initHistoryStore();   // B474 — hydrate the version-history ring from IndexedDB (async, fire-and-forget); migrates the localStorage ring over once
+scheduleHistoryHydration();   // B2236000 (round 6) — off the boot path, after the page goes quiet. B474 — hydrate the version-history ring from IndexedDB (async, fire-and-forget); migrates the localStorage ring over once
 idbPersist();         // B474 review (#9) — ask the browser to keep our IndexedDB durable (not best-effort/evictable); it's now the version ring's home + the underlay raster's local cache
 
 const newId = () => "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
 
 // The effective project group of an active plan id (its group, or its own id for a
 // brand-new unsaved blank). null when no plan is open / we're on the map.
+const PLANNER_WARM_CEILING_MS = 1500;   // B2236000 — the longest the page's first planner mount waits for its warm-up
 const groupForPlan = (id, mode) => (mode === "plan" && id) ? (loadSite(id)?.groupId || id) : null;
 
 // Last "new project" tick already acted on (Work Item A). Module-scoped (not a ref) so it
@@ -1175,6 +1176,24 @@ export default function App({
   const mapEverRef = useRef(mode === "map");
   if (mode === "map") mapEverRef.current = true;
   const mapMounted = mapEverRef.current;
+  /* ⛔ B2236000 (round 6) — the page's FIRST planner mount waits for `warmPlanForMount` (SitePlanner.jsx: the plan's road network and parcel
+   * anchors driven in slices from the device copy), so the app opened fresh onto a plan does not pay that work inside the planner's one-task
+   * first render. Only the first mount of the page: an in-session switch mounts at once, as before (its caches are warm or it is a rows
+   * seed, which warms itself — `warmSeedCaches`). Bounded: the planner mounts when the warm-up finishes, fails, or after
+   * PLANNER_WARM_CEILING_MS, whichever comes first. The framing reveal (constraint #8) is inside the planner and unchanged. */
+  const plannerMountedOnceRef = useRef(false);
+  const [plannerWarmFor, setPlannerWarmFor] = useState(null);
+  const plannerWarmPending = !!activeSiteId && !plannerMountedOnceRef.current && plannerWarmFor !== activeSiteId;
+  if (activeSiteId && !plannerWarmPending) plannerMountedOnceRef.current = true;
+  useEffect(() => {
+    if (!plannerWarmPending) return undefined;
+    let done = false;
+    const id = activeSiteId;
+    const finish = () => { if (done) return; done = true; clearTimeout(cap); startTransition(() => setPlannerWarmFor(id)); };
+    const cap = setTimeout(finish, PLANNER_WARM_CEILING_MS);
+    warmPlanForMount(id).then(finish, finish);
+    return () => { done = true; clearTimeout(cap); };
+  }, [plannerWarmPending, activeSiteId]);
   return (
     <>
       {/* Map mode — AppHeader sits above MapFinder's own toolbar.
@@ -1288,7 +1307,7 @@ export default function App({
       <div data-mode="plan" data-mode-active={mode === "plan" ? "true" : "false"}
         aria-hidden={mode === "plan" ? undefined : "true"} inert={mode === "plan" ? undefined : ""}
         style={{ display: mode === "plan" ? "block" : "none", height: "100%" }}>
-        {activeSiteId && (
+        {activeSiteId && !plannerWarmPending && (
           <SitePlanner
             key={`${activeSiteId}:${loadEpoch}`}
             active={mode === "plan" && isActive}

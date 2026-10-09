@@ -583,7 +583,7 @@ describe("every seam that can put a child on the canvas or on the wire runs the 
     expect(store).toMatch(/function bondedHealWatch\(id\)/);
     expect(store).toMatch(/reportClientEvent\("assembly-tear-detected"/);
     expect(store).toMatch(/migrate\(rec, \{ onHeal: watch\.onHeal \}\)/);   // listens to the heal that already runs
-    expect(store).toMatch(/migrate\(r, \{ onHeal: watch\.onHeal \}\)/);     // …in the list read too
+    expect(store).toMatch(/migrate\(r, \{ onHeal: watch\.onHeal(, provenCleanEls: proven)? \}\)/);     // …in the list read too (B2236000: a cross-load proof may say the list is already clean)
     // …and the repair is WRITTEN BACK, or the next reader gets the tear again.
     expect(store).toMatch(/if \(persistHeal && wasTorn\)/);
     expect(src).toMatch(/loadSite\(siteId, \{ persistHeal: true \}\)/);

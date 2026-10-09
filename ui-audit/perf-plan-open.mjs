@@ -19,7 +19,7 @@ import { createServer } from "node:http";
 import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import { join, extname, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { authSessionSeed, cloudCacheSeed, detectSupabase } from "./lib/authRemount.mjs";
+import { authSessionSeed, cloudCacheSeed, detectSupabase, AUTH_FIXTURE } from "./lib/authRemount.mjs";
 import { loadPlans, planRouteHandler, padLibrary } from "./lib/planOpenRig.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { pacedWait } from "./lib/tabTiming.mjs";
@@ -49,6 +49,7 @@ if (!existsSync(join(DIST, "index.html"))) { console.error(`perf-plan-open: no b
 const MIME = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".woff2": "font/woff2", ".webmanifest": "application/manifest+json", ".map": "application/json" };
 const server = createServer((req, res) => {
   const u = (req.url || "/").split("?")[0].split("#")[0];
+  if (u === "/__seed") { res.writeHead(200, { "content-type": "text/html", "cache-control": "no-store" }); res.end("<!doctype html><title>seed</title>"); return; }
   let p = join(DIST, u === "/" ? "index.html" : u.replace(/^\/+/, ""));
   if (!existsSync(p) || p.endsWith("/")) p = join(DIST, "index.html");
   try { res.writeHead(200, { "content-type": MIME[extname(p)] || "application/octet-stream", "cache-control": "no-store" }); res.end(readFileSync(p)); } catch (_) { res.writeHead(404); res.end("nope"); }
@@ -81,6 +82,44 @@ const plans = padLibrary(fixturePlans, LIBRARY);
 plans.find((p) => p.key === "bolt-on").header.updatedAt = Date.now();
 const browser = await chromium.launch({ executablePath: EXEC, headless: false, args: ["--no-sandbox", "--enable-precise-memory-info"] });
 
+/* --owner-store (B2236000 round 6): fill the DEVICE store to the size the owner measured on his own Chrome (~9:40 AM Central 2026-10-09): 76 plans in
+ * `planarfit:sites:cloud:<uid>` (~1.9 MB of JSON), 30 of them carrying a full element copy, and the version-history ring `planarfit:sites:history:v1` at
+ * ~3.5 MB in IndexedDB (`planyr`/`kv`) plus its byte-capped localStorage mirror. The rig's default store holds only plan headers and a few KB of history,
+ * which is why its fresh-load reading (271/377 ms at 2x) sat far under his (worst 470–590 ms, 1.5–2.2 s of stalls in the first 2.6 s). Written on a blank
+ * same-origin page BEFORE the app ever runs, so the first boot does what his device did once (the per-plan split) and every scored load reads the result. */
+const OWNER_STORE = has("--owner-store");
+const DEVICE_COPIES = OWNER_STORE ? JSON.parse(readFileSync(join(HERE, "fixtures", "plan-load", "device-copies.json"), "utf8")) : null;
+function ownerStoreSeed(uid) {
+  const DEVICE_PLANS = 76, WITH_ELEMENTS = 30, SNAPS_PER_PLAN = 3;
+  const recs = {}; const history = {}; let full = 0;
+  const now = Date.now();
+  for (const p of plans) {
+    if (Object.keys(recs).length >= DEVICE_PLANS) break;
+    const src = p.key === "bolt-on" || p.key === "richfield" ? p.key : (p.key.startsWith("lib-") ? plans[Number(p.key.slice(4)) % fixturePlans.length].key : null);
+    const tpl = src && DEVICE_COPIES[src];
+    if (tpl && full < WITH_ELEMENTS) {
+      full++;
+      const r = { ...tpl, id: p.id, groupId: p.header.groupId || p.id, site: p.header.site, name: p.header.name, updatedAt: p.header.updatedAt || tpl.updatedAt };
+      recs[p.id] = r;
+      const sig = [r.els, r.markups, r.measures, r.callouts, r.parcels, r.sheetOverlays, r.parcelDrawings].map((a) => (a && a.length) || 0).join("/");   // storage.js sigOf: the newest snapshot matches the plan, as on a real device
+      history[p.id] = Array.from({ length: SNAPS_PER_PLAN }, (_, i) => ({ at: now - (i + 1) * 86400000, sig, buildings: 1, name: r.name, site: r.site, model: r }));
+    } else recs[p.id] = { ...p.header, id: p.id };
+  }
+  const capped = {}; for (const [id, list] of Object.entries(history)) capped[id] = list.slice(0, 1);
+  return { key: `planarfit:sites:cloud:${uid}`, blob: JSON.stringify(recs), history: JSON.stringify(history), historyLs: JSON.stringify(capped) };
+}
+async function seedOwnerStore(page) {
+  const seed = ownerStoreSeed(AUTH_FIXTURE.uid);
+  await page.goto(`${BASE}__seed`, { waitUntil: "load" });
+  const sizes = await page.evaluate(async (sd) => {
+    localStorage.setItem(sd.key, sd.blob);
+    localStorage.setItem("planarfit:sites:history:v1", sd.historyLs);
+    await new Promise((res, rej) => { const rq = indexedDB.open("planyr", 1); rq.onupgradeneeded = () => { if (!rq.result.objectStoreNames.contains("kv")) rq.result.createObjectStore("kv"); };
+      rq.onerror = () => rej(rq.error); rq.onsuccess = () => { const db = rq.result; const tx = db.transaction("kv", "readwrite"); tx.objectStore("kv").put(sd.history, "planarfit:sites:history:v1"); tx.oncomplete = () => { db.close(); res(); }; tx.onerror = () => rej(tx.error); }; });
+    return { blob: sd.blob.length, history: sd.history.length, historyLs: sd.historyLs.length };
+  }, seed);
+  if (!seedOwnerStore.said) { seedOwnerStore.said = true; process.stderr.write(`[owner-store] device blob ${(sizes.blob / 1e6).toFixed(2)} MB · history (IndexedDB) ${(sizes.history / 1e6).toFixed(2)} MB · history mirror ${(sizes.historyLs / 1e6).toFixed(2)} MB\n`); }
+}
 async function newRun(startPlan) {
   const ctx = await browser.newContext({ viewport: { width: 1722, height: 700 }, deviceScaleFactor: 2.15 });
   await ctx.route("**", planRouteHandler({ base: BASE, supabaseUrl: SB.url, plans }));
@@ -88,6 +127,7 @@ async function newRun(startPlan) {
   await ctx.addInitScript(INSTRUMENT);
   const page = await ctx.newPage();
   await assertMeasurable(page, "perf-plan-open");
+  if (OWNER_STORE) await seedOwnerStore(page);
   if (CPU_RATE > 1) { const c = await ctx.newCDPSession(page); await c.send("Emulation.setCPUThrottlingRate", { rate: CPU_RATE }); }
   return { ctx, page };
 }
@@ -205,6 +245,7 @@ const SCEN = {
     await page.reload({ waitUntil: "load" });
     await page.locator('[data-testid="planner-canvas"]').waitFor({ timeout: 60000 }); await named(page, "Bolt-on");
     const sc = await score(page, 0, "reload onto a plan (app opened fresh)", "bolt-on"); await traceStop(tr); sc.profile = await profStop(pc);
+    if (process.env.DUMP_STORAGE) process.stderr.write(JSON.stringify(await page.evaluate(() => Object.keys(localStorage).map((k) => [k, localStorage.getItem(k).length]).sort((a, b) => b[1] - a[1]).slice(0, 25))) + "\n");
     sc.selfTestMs = await selfTest(page); await ctx.close(); return [sc];
   },
   /* B2233521 round 5 — THE PRICE OF BUILDING THE MAP WHEN IT IS FIRST SHOWN: the app opened fresh on a plan (reload), then the Map crumb is clicked. Before round 5 the map was built
@@ -223,6 +264,28 @@ const SCEN = {
     const sc = await score(page, t0, "plan → Map (first time after the app opened on a plan)", "bolt-on");
     sc.feat = sc.feat || 1;   // the map has no planner features to census — the Leaflet container above is the proof it opened
     sc.selfTestMs = await selfTest(page); await ctx.close(); return [sc];
+  },
+  /* B2236000 round 6 — THE OWNER'S "FIRST SWITCH AFTER THE APP OPENS". His heartbeat: the first Bolt-on → Concept A after a page load reads ~100 ms, every later one
+   * is at his floor. The "switch" scenario's first hop cannot isolate that: Concept A has no device copy there, so the hop is a rows-seed first open (a different cost).
+   * Here both plans are opened once (so the device holds both, as his does), the page is RELOADED onto Bolt-on, and only then is the switch scored — then back, then
+   * again, so the first switch of the page life sits beside the steady state measured in the SAME page. */
+  async "first-switch-after-reload"() {
+    const { ctx, page } = await newRun();
+    await page.goto(`${BASE}#/project/smqfy2r7pdec/site`, { waitUntil: "load" });
+    await page.locator('[data-testid="planner-canvas"]').waitFor({ timeout: 60000 }); await named(page, "Bolt-on");
+    await pacedWait(page, 6000);
+    const warm = [];
+    await hopTo(page, warm, "Bolt-on", "Concept A", "warm-up", "concept-a");
+    await hopTo(page, warm, "Concept A", "Bolt-on", "warm-up", "bolt-on");
+    await pacedWait(page, 3000);
+    await page.reload({ waitUntil: "load" });
+    await page.locator('[data-testid="planner-canvas"]').waitFor({ timeout: 60000 }); await named(page, "Bolt-on");
+    await pacedWait(page, 9000);
+    const out = [];
+    await hopTo(page, out, "Bolt-on", "Concept A", "Bolt-on → Concept A (first switch after reload)", "concept-a");
+    await hopTo(page, out, "Concept A", "Bolt-on", "Concept A → Bolt-on (first back after reload)", "bolt-on");
+    await hopTo(page, out, "Bolt-on", "Concept A", "Bolt-on → Concept A (2nd switch after reload)", "concept-a");
+    out[0].selfTestMs = await selfTest(page); await ctx.close(); return out;
   },
   /* B2225425 round 3 — the other plan of the pair, cold (the group route lands on the group's most recently updated plan) */
   async "cold-concept-a"() { return coldOpen("concept-a", "Concept A", "cold open Concept A"); },
@@ -267,6 +330,7 @@ const SCEN = {
     t0 = await h.evaluate((el) => { window.__rb = window.__roadNetStats ? window.__roadNetStats() : null; const t = performance.now(); el.click(); return t; });
     await chip(page, "Grand Port").waitFor({ timeout: 60000 });
     sc = await score(page, t0, "Richfield → Grand Port (back)", "bolt-on"); sc.profile = await profStop(pc); out.push(sc);
+    if (process.env.CAPTURE_STORAGE) writeFileSync(process.env.CAPTURE_STORAGE, JSON.stringify(await page.evaluate(() => Object.fromEntries(Object.keys(localStorage).map((k) => [k, localStorage.getItem(k)])))));
     out[0].selfTestMs = await selfTest(page); await ctx.close(); return out;
   },
 };
