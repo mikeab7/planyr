@@ -276,3 +276,35 @@ Done here, without touching `refreshSites()`'s fresh-array contract (point 1). T
 
 ### Data safety
 `ui-audit/verify-plan-switch-writes.mjs` PASS on the final build (moves, layer toggles, overlay opacity and renames on two plans; reload; sign-out — every write landed, nothing written into another account's store). The history ring's stored bytes are unchanged (byte-identical serialiser, same cap rule — `test/sitesListCache.test.js` §5); IndexedDB is written later but flushed on pagehide/hidden, and `backupNow` still reports only the synchronous localStorage write. Plan records: nothing writes differently — the caches only skip recomputing an answer that is proven identical.
+
+## Round 6b (B2236000 ×3, 2026-10-09) — the owner's device never got round 6's cross-load memory
+
+**The finding.** The owner's popup heartbeat on `f13939f` passed Target 1 (first switch after a fresh load [54, 85, 62], back [55]) and roughly halved the fresh load, but each reload still carried 180–300 ms gaps, including one task around 1.0–1.2 s after navigation. `client_errors` explains why: his device logs `plan-store-migration-aborted` (reason `headroom`) on **every** load — 51 events since 2026-10-08, five during that very run. The per-plan layout split is refused (77 plans, legacy blob 1,962,425 chars, ~3.5 M chars used), so his device runs the **whole-library ("blob") layout**. In that layout `planStore.textOf` returned nothing, so round 6's cross-load proof (`elsProof`) never matched and every plan went through the full bonded heal again on each cold load. On top of that, every `blobWrite` replaced every shared plan object (which invalidated the per-plan list-model memory) and rewrote the whole ~2 MB library even when nothing had changed.
+
+**The rig was sized wrong for this, and that is now fixed.** `--owner-store` seeded headers plus drawings, but the per-plan split succeeded there, so the rig measured a layout his device does not run. It now seeds his exact sizes (77 plans, legacy length 1,962,425, other storage 1,548,432, history ring ~3.5 MB, mirror capped) plus a filler key, so the split aborts on headroom exactly as it does on his device.
+
+**What shipped (PR #2259):**
+1. `listModelOf` keys the proof on the plan's own JSON when there is no per-plan entry text (blob mode).
+2. `blobWrite` keeps the previous shared object for every plan whose JSON did not change, and skips the `setItem` when the library text is identical.
+3. The parcel-summary pair search (`overlappingParcelPairsSteps`) yields after each pair rather than only between projects. Its slices wait for idle (`requestIdleCallback`, 1 s timeout). A back-to-back MessageChannel yield was tried first; it competed with the fresh load's first render and made the default store **slower** (reload worst 222 → 286, reproduced on a re-run), so it was replaced before shipping.
+
+**Result — same harness, `--cpu 2 --library 140`, 10 runs each, worst gap median / worst (ms), main `f13939f` vs shipped:**
+
+| row | main | shipped |
+|---|---|---|
+| reload onto a plan, owner-sized (`--owner-store`) | 338 / 858 | **145 / 186** |
+| first switch after reload, owner-sized | 57 / 163 | **55 / 68** |
+| first back after reload, owner-sized | 72 / 157 | **73 / 79** |
+| 2nd switch after reload, owner-sized | — | 46 / 60 |
+| reload onto a plan, default store | 155 / 222 (re-run 175 / 286) | **141 / 172** |
+| first open, default store | 113 / 126 (re-run 122 / 164) | 107 / 134 |
+
+Budget: `byLabelCpu2` reload 310 → 230. Main fails it on both stores.
+
+**⛔ Still not met, stated loudly.** The fresh load still crosses 150 ms in 4–5 of 10 runs (worst 172–186 in the rig). What remains is:
+- the planner's own first render (~80 ms);
+- the forced layout from `PriorityToolbar`'s measuring copies;
+- single dissolve steps;
+- in blob mode, the parse of the whole ~2 MB library on every cold load and its rewrite on every real save.
+
+The last of these is structural and cannot be fixed inside this item: it disappears only when his device can be split into per-plan entries. That is **B2200385**, an owner decision (wait for B2200384's storage relief, or move the safety copy to IndexedDB to free the headroom the split needs).

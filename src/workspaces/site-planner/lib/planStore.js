@@ -268,9 +268,25 @@ function blobShared(base) {
   return { ...obj };
 }
 function blobWrite(base, obj) {
+  /* B2236000 (round 6) — a device that could not be split (the owner's: 76 plans, 2.29M characters — `plan-store-migration-aborted`, reason headroom, on
+   * every load) writes the WHOLE library on every write. Two things no longer happen when nothing changed: (1) a plan whose content equals what the
+   * current snapshot already holds keeps that SAME object (so everything keyed on it — the list read's model memory — still recognises it), and
+   * (2) a library text identical to what is stored is not written again (a cloud pull that changed nothing used to re-write all 2.3 MB). */
+  const prev = currentSnapshot();
+  const prevObj = prev && prev.key === base && (() => { try { return lsNow().getItem(base) === prev.str; } catch (_) { return false; } })() ? prev.obj : null;
   const persist = {};
-  for (const [id, x] of Object.entries(obj)) persist[id] = cfg.persistForm(x);
-  try { const str = plansToJson(persist); set(base, str); rememberSnapshot(base, str, persist); return true; }
+  for (const [id, x0] of Object.entries(obj)) {
+    let x = cfg.persistForm(x0);
+    const was = prevObj && prevObj[id];
+    if (was && was !== x && jsonOf(was) === jsonOf(x)) x = was;
+    persist[id] = x;
+  }
+  try {
+    const str = plansToJson(persist);
+    let cur = null; try { cur = lsNow().getItem(base); } catch (_) { /* unreadable: write */ }
+    if (cur !== str) set(base, str);
+    rememberSnapshot(base, str, persist); return true;
+  }
   catch (_) {
     try {
       const slim = {};

@@ -156,3 +156,37 @@ describe("(6) the cross-load clean proof", () => {
     expect(seen.size).toBe(2000);
   });
 });
+
+describe("(7) B2236000 round 6b — the whole-library layout (a device that could not be split)", () => {
+  const blobMode = () => { localStorage.setItem("planarfit:planStore:layout", "blob"); planStore._resetForTest(); };
+  it("a write of unchanged content keeps every shared object and does not rewrite the library", () => {
+    blobMode(); seed(4);
+    const base = "planarfit:sites:v1";
+    const before = planStore.readShared(base);
+    let sets = 0; const real = localStorage.setItem; localStorage.setItem = (k, v) => { if (k === base) sets++; real(k, v); };
+    try { planStore.writeMap(base, Object.fromEntries(Object.entries(before).map(([k, v]) => [k, JSON.parse(JSON.stringify(v))]))); } finally { localStorage.setItem = real; }
+    expect(sets).toBe(0);
+    const after = planStore.readShared(base);
+    for (const id of Object.keys(before)) expect(after[id]).toBe(before[id]);
+  });
+  it("a write that changes ONE plan keeps the others' objects and writes the new library", () => {
+    blobMode(); seed(4);
+    const base = "planarfit:sites:v1";
+    const before = planStore.readShared(base);
+    const next = { ...before, p1: { ...JSON.parse(JSON.stringify(before.p1)), name: "renamed" } };
+    planStore.writeMap(base, next);
+    const after = planStore.readShared(base);
+    expect(after.p1.name).toBe("renamed");
+    for (const id of ["p0", "p2", "p3"]) expect(after[id]).toBe(before[id]);
+    expect(JSON.parse(store[base]).p1.name).toBe("renamed");
+  });
+  it("the cross-load proof keys on the plan's own JSON there (there is no per-plan entry text)", async () => {
+    globalThis.__PLANYR_ELS_PROOF = true; _resetElsProofForTest();
+    try {
+      blobMode(); seed(2);
+      loadSitesList();
+      await new Promise((r) => setTimeout(r, 5));
+      expect(JSON.parse(store[ELS_PROOF_KEY]).h.p0).toBeTruthy();
+    } finally { delete globalThis.__PLANYR_ELS_PROOF; _resetElsProofForTest(); }
+  });
+});

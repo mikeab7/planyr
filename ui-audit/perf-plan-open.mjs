@@ -90,23 +90,35 @@ const browser = await chromium.launch({ executablePath: EXEC, headless: false, a
 const OWNER_STORE = has("--owner-store");
 const DEVICE_COPIES = OWNER_STORE ? JSON.parse(readFileSync(join(HERE, "fixtures", "plan-load", "device-copies.json"), "utf8")) : null;
 function ownerStoreSeed(uid) {
-  const DEVICE_PLANS = 76, WITH_ELEMENTS = 30, SNAPS_PER_PLAN = 3;
-  const recs = {}; const history = {}; let full = 0;
+  /* Sized to the owner's OWN telemetry (client_errors `plan-store-migration-aborted` from his device during his 2026-10-09 1:20 PM run, build f13939f):
+   * 77 plans, legacyLen 1,962,425 characters, usedChars 3,510,857 (so ~1.55M characters of everything else), shortBy 529,272 — which is why his device could NOT be split into per-plan entries (reason "headroom") and runs the whole-library
+   * layout on every load. The seed reproduces that: plans with a full element copy are added until the library text reaches his length. */
+  const DEVICE_PLANS = 77, TARGET_LEN = 1_962_425, OTHER_LEN = 1_548_432, HISTORY_IDB = 3_500_000, MIRROR_CAP = 700 * 1024;
+  const recs = {}; const history = {}; let len = 2, full = 0;
   const now = Date.now();
   for (const p of plans) {
     if (Object.keys(recs).length >= DEVICE_PLANS) break;
     const src = p.key === "bolt-on" || p.key === "richfield" ? p.key : (p.key.startsWith("lib-") ? plans[Number(p.key.slice(4)) % fixturePlans.length].key : null);
     const tpl = src && DEVICE_COPIES[src];
-    if (tpl && full < WITH_ELEMENTS) {
+    let r;
+    if (tpl && len < TARGET_LEN - 250_000) {
       full++;
-      const r = { ...tpl, id: p.id, groupId: p.header.groupId || p.id, site: p.header.site, name: p.header.name, updatedAt: p.header.updatedAt || tpl.updatedAt };
-      recs[p.id] = r;
+      r = { ...tpl, id: p.id, groupId: p.header.groupId || p.id, site: p.header.site, name: p.header.name, updatedAt: p.header.updatedAt || tpl.updatedAt };
       const sig = [r.els, r.markups, r.measures, r.callouts, r.parcels, r.sheetOverlays, r.parcelDrawings].map((a) => (a && a.length) || 0).join("/");   // storage.js sigOf: the newest snapshot matches the plan, as on a real device
-      history[p.id] = Array.from({ length: SNAPS_PER_PLAN }, (_, i) => ({ at: now - (i + 1) * 86400000, sig, buildings: 1, name: r.name, site: r.site, model: r }));
-    } else recs[p.id] = { ...p.header, id: p.id };
+      history[p.id] = [{ at: now - 86400000, sig, buildings: 1, name: r.name, site: r.site, model: r }];
+    } else r = { ...p.header, id: p.id };
+    recs[p.id] = r; len += JSON.stringify(p.id).length + 2 + JSON.stringify(r).length;
   }
-  const capped = {}; for (const [id, list] of Object.entries(history)) capped[id] = list.slice(0, 1);
-  return { key: `planarfit:sites:cloud:${uid}`, blob: JSON.stringify(recs), history: JSON.stringify(history), historyLs: JSON.stringify(capped) };
+  // the rest are header-only records (the device's copy of plans never drawn on it), as on his device
+  // the IndexedDB ring: older snapshots of the same plans until it is his ~3.5 MB
+  let hlen = JSON.stringify(history).length;
+  for (let d = 2; hlen < HISTORY_IDB && d < 15; d++) for (const [id, list] of Object.entries(history)) { if (hlen >= HISTORY_IDB) break; const v = { ...list[0], at: now - d * 86400000 }; list.push(v); hlen += JSON.stringify(v).length + 1; }
+  // the localStorage mirror: what the app's byte cap keeps (newest snapshot per plan, under 700 KB); the rest of his "everything else" is an inert key
+  const capped = {}; let hl = 2;
+  for (const [id, list] of Object.entries(history)) { const t = JSON.stringify(list.slice(0, 1)); if (hl + t.length > MIRROR_CAP) break; capped[id] = list.slice(0, 1); hl += t.length + id.length + 4; }
+  const filler = "x".repeat(Math.max(0, OTHER_LEN - hl - 20_000));
+  if (!ownerStoreSeed.said) { ownerStoreSeed.said = true; process.stderr.write(`[owner-store] ${Object.keys(recs).length} plans, ${full} with a drawing\n`); }
+  return { key: `planarfit:sites:cloud:${uid}`, blob: JSON.stringify(recs), history: JSON.stringify(history), historyLs: JSON.stringify(capped), filler };
 }
 async function seedOwnerStore(page) {
   const seed = ownerStoreSeed(AUTH_FIXTURE.uid);
@@ -114,6 +126,7 @@ async function seedOwnerStore(page) {
   const sizes = await page.evaluate(async (sd) => {
     localStorage.setItem(sd.key, sd.blob);
     localStorage.setItem("planarfit:sites:history:v1", sd.historyLs);
+    localStorage.setItem("rig:owner-other-storage", sd.filler);   // stands for the rest of his ~1.55M characters (an inert key the app never reads)
     await new Promise((res, rej) => { const rq = indexedDB.open("planyr", 1); rq.onupgradeneeded = () => { if (!rq.result.objectStoreNames.contains("kv")) rq.result.createObjectStore("kv"); };
       rq.onerror = () => rej(rq.error); rq.onsuccess = () => { const db = rq.result; const tx = db.transaction("kv", "readwrite"); tx.objectStore("kv").put(sd.history, "planarfit:sites:history:v1"); tx.oncomplete = () => { db.close(); res(); }; tx.onerror = () => rej(tx.error); }; });
     return { blob: sd.blob.length, history: sd.history.length, historyLs: sd.historyLs.length };
