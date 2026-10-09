@@ -283,7 +283,10 @@ try {
   }
 } finally { await browser.close(); server.close(); }
 
-const verdict = planOpenVerdict(results, existsSync(join(HERE, "perf-plan-open.budget.json")) ? JSON.parse(readFileSync(join(HERE, "perf-plan-open.budget.json"), "utf8")) : {});
+const budgetFile = existsSync(join(HERE, "perf-plan-open.budget.json")) ? JSON.parse(readFileSync(join(HERE, "perf-plan-open.budget.json"), "utf8")) : {};
+/* a throttled run is scored against the 2x budget (byLabelCpu2, B2236000): the 1x budgets are not a statement about a throttled CPU */
+const budget = CPU_RATE >= 2 && budgetFile.byLabelCpu2 ? { ...budgetFile, byLabel: { ...(budgetFile.byLabel || {}), ...budgetFile.byLabelCpu2 } } : budgetFile;
+const verdict = planOpenVerdict(results, budget);
 const doc = { label: LABEL, dist: DIST, runs: RUNS, cpuRate: CPU_RATE, results, verdict };
 if (OUT) writeFileSync(OUT, JSON.stringify(doc, null, 1));
 if (has("--json")) console.log(JSON.stringify(doc, null, 1)); else console.log(`\n${LABEL}${CPU_RATE > 1 ? ` (CPU throttled ×${CPU_RATE})` : ""}\n` + verdict.lines.join("\n"));
