@@ -5,6 +5,7 @@ import { startClickAck } from "../../shared/ui/clickAck.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useProjectName, usePlanName, renameProjectChecked, renamePlanChecked } from "../../shared/names/names.js";
+import { writeIsRedundant, mayWriteForAccount } from "./lib/saveDedupe.js";
 import { loadSite, saveSite, siteExistsLocally, sitesWriteStamp, sitesWriteStillCurrent, readBackSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
 import { relTime } from "../../shared/projects/projectModel.js";
 import { collectAssetRefs, releasePlanForOverlay } from "./lib/sharedAssetRefs.js";
@@ -84,7 +85,7 @@ import {
   hasRegisterableContainer, viewValuesEqual,
 } from "./lib/mapLock.js";
 import { overscanPx, keepBufferFor, retinaForZoom, tileWeight, tileCacheLimit } from "./lib/tileBudget.js";
-import { preserveTilesAcrossSetView, announceSetView, boundTileCache, releaseLayer, throttleTilePruning, paceTileLoads, armBlankTileHeal } from "./lib/tileLifecycle.js";
+import { preserveTilesAcrossSetView, announceSetView, boundTileCache, releaseLayer, throttleTilePruning, paceTileLoads, armBlankTileHeal, flattenTilePositions } from "./lib/tileLifecycle.js";
 import { buildGhost } from "./lib/ghostSnapshot.js";
 import { cullRectFor, cullToView, shouldCull } from "./lib/viewCull.js";
 /* NEW-1 — the View menu's content-visibility model. Applied ONLY at the five draw-set seams,
@@ -2018,6 +2019,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     });
   }, []);
   useEffect(() => {
+    if (!active) return undefined; // B2233521 — a KEPT (hidden) planner never owns a window hook; the one on screen does
     if (typeof window === "undefined") return undefined;
     const rec = viewRecRef.current;
     const hook = () => (rec && isDiagArmed(window) ? rec.snapshot() : null);
@@ -2029,7 +2031,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (rec) rec.noteEvent("planner:unmount");
       if (detach) detach();
     };
-  }, []);
+  }, [active]);
   // `w`/`h` are clamped to a sane minimum for the coordinate math; `rawW` is the TRUE
   // (unclamped) map-pane width, used only to keep the bottom furniture from overlapping
   // when a docked left panel narrows the pane below the clamp (NEW-1 / B881). `rawH` is the
@@ -2988,6 +2990,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     preserveTilesAcrossSetView(bf); // NEW-7: a same-native-zoom commit must not wipe these
     throttleTilePruning(bf); // B854832: coalesce Leaflet's own per-tile prune into one per burst
     paceTileLoads(bf); // B2225425: a whole grid never answers in one main-thread burst
+    flattenTilePositions(bf); // B2233521: one compositor layer for the grid, not one per tile
     bf.setZIndex(0); bf.addTo(map); geoBackfillRef.current = bf;
     /* NEW-1 — CAP THE BACKFILL TOO. This layer had `preserveTilesAcrossSetView` and a keepBuffer
      * two rings LARGER than the detail layer, but no ceiling at all — so its `_tiles` map grew for
@@ -3054,6 +3057,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       preserveTilesAcrossSetView(t); // NEW-7: the big one — a fractional-zoom commit keeps its tiles
       throttleTilePruning(t); // B854832: coalesce Leaflet's own per-tile prune into one per burst
       paceTileLoads(t); // B2225425: a whole grid never answers in one main-thread burst
+      flattenTilePositions(t); // B2233521: one compositor layer for the grid, not one per tile
       t.on("tileload", () => { if (geoBaseRef.current === t) setBasemapStatus("loaded"); });
       t.setZIndex(1); t.addTo(geoMapRef.current); geoBaseRef.current = t;
       // NEW-7 (4): an explicit ceiling, so a long session can't grow the tile cache without
@@ -3087,9 +3091,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      never fire on a panel toggle — only the WHEN-within-the-reveal changes, not the trigger. A timed
      fallback stays for the origin-first-land case, where the Leaflet map isn't created yet at layout-
      effect time (guard returns) and the passive map-build lands moments later. */
+  /* B2233521 — AND ONLY WHEN SOMETHING ACTUALLY RESIZED WHILE IT WAS HIDDEN. `invalidateSize` reads the container's size, which forces a
+     synchronous style + layout of the whole planner subtree inside the show — on a re-show of a KEPT planner (lib/plannerKeepAlive.js), or a
+     return from the map view, whose box never changed, that is pure cost: Leaflet's cached size is still the right one. So the cached size is
+     recorded when the planner goes inactive, and the re-sync is skipped when Leaflet still holds exactly that size and has not been told it is
+     stale. A window resize while hidden is the case that matters, and it is caught: Leaflet's own resize handler re-measures the hidden (zero)
+     box, so its cached size no longer matches and the re-sync runs exactly as before. The planner's own size changes are re-synced by the
+     registration effect below, as they always were. Reads only Leaflet's CACHED `_size` (`getSize()` would itself force the layout). */
+  const geoSizeAtHideRef = useRef(null);
   useLayoutEffect(() => {
     const map = geoMapRef.current;
-    if (!(map && active)) return;
+    if (!map) return;
+    const cached = () => (map._size && !map._sizeChanged ? { x: map._size.x, y: map._size.y } : null);
+    if (!active) { geoSizeAtHideRef.current = cached(); return; }
+    const was = geoSizeAtHideRef.current; geoSizeAtHideRef.current = null;
+    const now = cached();
+    if (was && now && was.x === now.x && was.y === now.y) return; // nothing resized while hidden — no forced layout in the show
     const sync = () => { try { map.invalidateSize(false); } catch (_) {} };
     sync(); // before paint — the re-shown aerial is correct in the first frame
     const t = setTimeout(sync, 60); // fallback: map may be built moments after origin first lands
@@ -3924,6 +3941,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // forward reference. The first real save then writes a fully-formed record —
   // there's no need to pre-create an empty one.
   const metaRef = useRef({});
+  const openedUidRef = useRef(undefined); if (openedUidRef.current === undefined) openedUidRef.current = activeUid() || null; // B2233521 — the account this planner's plan was opened under (lib/saveDedupe.js mayWriteForAccount)
   // "saving" | "saved" | "unsaved". Initialize honestly: a brand-new site that
   // isn't in storage yet is "unsaved", an opened existing site is "saved".
   const [saveStatus, setSaveStatus] = useState(() => (loadSite(siteId) ? "saved" : "unsaved"));
@@ -4106,8 +4124,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // ~50ms (snapshotVersion's count-based sig-dedup already keeps a same-shape drag from snapshotting).
     let mirrorStamp = null;   // NEW-1 (B217540 ×3): the whole-store write the mirror made, so the settle tick can tell it is already on disk
     const writeMirror = () => {
+      if (!mayWriteForAccount(openedUidRef.current, activeUid())) { reportClientEvent("save-refused-account-changed", "an autosave ran after the account changed; not written to the other account's store", { id: siteId }); return; }
       const ok = saveSite(payload);
       mirrorStamp = ok ? sitesWriteStamp() : null;
+      lastWriteRef.current = ok ? { rec: payload, stamp: mirrorStamp } : null; // B2233521 — what a later flush of the same state may skip
       lastLocalWrite.current = Date.now();
       // B473 — VERIFY the write actually persisted by reading it back. A write that silently doesn't
       // land is exactly the owner's "I placed a bunch of stuff and it didn't save at all." If the
@@ -4143,7 +4163,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        * byte-exact check B217540 uses for the read-back; any other writer (another tab, a cloud pull) fails that proof and
        * the real write below runs exactly as it always did. A mirror that never ran or failed has no stamp, so it also falls
        * through to the real write. */
-      const okSave = mirrorStamp && sitesWriteStillCurrent(mirrorStamp) ? true : saveSite(payload, { skipHistory: true });
+      if (!mayWriteForAccount(openedUidRef.current, activeUid())) return; // B2233521 — never into another account's store
+      const mirrorHeld = !!(mirrorStamp && sitesWriteStillCurrent(mirrorStamp));
+      const okSave = mirrorHeld ? true : saveSite(payload, { skipHistory: true });
+      if (!mirrorHeld) lastWriteRef.current = okSave ? { rec: payload, stamp: sitesWriteStamp() } : null; // B2233521
       if (fresh && okSave) onSiteSaved?.();
       // Badge tracks the REAL write: local write done; when logged in, stay
       // "saving" until the cloud upsert resolves, then "saved" only if it succeeded.
@@ -4225,6 +4248,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!siteId) return;
     cloudPushWithWatchdog(siteId);
   };
+  /* B2233521 — the flushes below (switch, persist-on-leave, page hide) write the LIVE state; when that is exactly the record this planner
+   * last wrote and the store still holds it, the write is skipped (lib/saveDedupe.js). A plan switch used to write the plan being left
+   * twice back to back — the switch handler's flush, then persist-on-leave — and the second write changed nothing. */
+  const lastWriteRef = useRef(null);
+  const saveLive = (rec) => {
+    if (!mayWriteForAccount(openedUidRef.current, activeUid())) { reportClientEvent("save-refused-account-changed", "a flush ran after the account changed; not written to the other account's store", { id: siteId }); return false; }
+    if (writeIsRedundant(lastWriteRef.current, rec, sitesWriteStillCurrent)) return true;
+    const ok = saveSite(rec);
+    lastWriteRef.current = ok ? { rec, stamp: sitesWriteStamp() } : null;
+    return ok;
+  };
   // Persist on leave; if the site is still blank and un-located, drop it instead.
   const liveRef = useRef({});
   useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, sheetOverlays, deletedIds, layerOverrides, layerAbove }; });
@@ -4257,7 +4291,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // current (possibly still-blank) canvas state onto it is a safe no-op: it neither destroys an
     // existing row nor creates a new one, and cloudUpsert's own header-signature check skips the
     // network write entirely when nothing actually changed.
-    else saveSite({ id: siteId, ...metaRef.current, ...s });
+    else saveLive({ id: siteId, ...metaRef.current, ...s });
   };
   useEffect(() => {
     if (active || !siteId) return;
@@ -4268,7 +4302,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // page is closing/navigating, so a change made just before leaving isn't lost.
   useEffect(() => {
     if (!siteId) return;
-    const flush = () => { if (deletedSelfRef.current) return; const s = liveRef.current; if (!isBlankSite(s)) saveSite({ id: siteId, ...metaRef.current, ...s }); };
+    const flush = () => { if (deletedSelfRef.current) return; const s = liveRef.current; if (!isBlankSite(s)) saveLive({ id: siteId, ...metaRef.current, ...s }); };
     const onVis = () => { if (document.visibilityState === "hidden") flush(); };
     window.addEventListener("beforeunload", flush);
     document.addEventListener("visibilitychange", onVis);
@@ -5784,6 +5818,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (setOverlays) setOverlays(overlaysWithOverrides(layerOverrides, layerAbove));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  /* B2233521 — AND AGAIN WHEN A KEPT PLANNER IS SHOWN. With the plan you just left kept mounted (lib/plannerKeepAlive.js), switching back
+   * to it is no longer a mount, so the restore above would not run and this plan would show — and then TRACK, below, would SAVE as its own —
+   * the layer set of the plan that was on screen in between. So when this planner becomes active and ANOTHER planner was the active one
+   * since it last was, the restore runs again (and TRACK waits for it to land, exactly as on a mount). Coming back from the map view, with
+   * no other planner in between, is deliberately untouched. Declared BEFORE the TRACK effect so it lands first in the same effect pass. */
+  const plannerTokenRef = useRef(null);
+  if (!plannerTokenRef.current) plannerTokenRef.current = { siteId };
+  const layerRestoreArmed = useRef(false);
+  useEffect(() => {
+    if (!active) return;
+    const mine = plannerTokenRef.current;
+    const another = !!activePlannerToken && activePlannerToken !== mine;
+    activePlannerToken = mine;
+    if (!layerRestoreArmed.current) { layerRestoreArmed.current = true; return; } // this mount's own restore (above) already ran
+    if (!another) return;
+    layerApplied.current = false;
+    if (setOverlays) setOverlays(overlaysWithOverrides(layerOverrides, layerAbove));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
   useEffect(() => {
     const proj = overridesFromOverlays(overlays);
     const sig = overridesSig(proj);
@@ -5885,6 +5938,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const probeRef = useRef({});
   useEffect(() => { probeRef.current = { view, size, regShift, cursorFt: cursor, cursorLL, measures }; });
   useEffect(() => {
+    if (!active) return undefined; // B2233521 — a KEPT (hidden) planner never owns a window hook; the one on screen does
     if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
     const hook = {
       get: () => ({ ...view, w: size.w, h: size.h, identityEpoch: viewIdentityEpoch.current }),
@@ -5905,7 +5959,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        code, but it is dev-gated code that EVERY performance harness here arms, so a measurement
        taken through it was measuring the instrument as much as the product (B1439). */
     return () => { if (window.__plannerView === hook) window.__plannerView = null; };
-  }, [view, size.w, size.h, setView]);
+  }, [view, size.w, size.h, setView, active]);
   /* NEW-1 — E2E/self-audit hook for the LAYER SET (same `window.__PLANYR_E2E` gate as above; never
    * runs in production). `ui-audit/boot-tail.mjs` has to build a plan that OPENS WITH N LAYERS ON,
    * because the reference fixture saves none and `defaultOverlayState()` starts every layer off —
@@ -5932,6 +5986,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       on: Object.keys(overlays || {}).filter((k) => overlays[k] && overlays[k].on),
       identityEpoch: epoch,
     });
+    if (!active) return undefined; // B2233521 — a KEPT (hidden) planner never owns the window hook
     window.__plannerLayers = hook;
     return () => { if (window.__plannerLayers === hook) window.__plannerLayers = null; };
   }, [overlays]);
@@ -7913,6 +7968,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setAltPickHiRect(node ? node.getBoundingClientRect() : null);
   }, [altPick]);
   useEffect(() => {
+    if (!active) return undefined; // B2233521 — a kept (hidden) planner never answers Alt
     const isTypingField = () => {
       const a = document.activeElement;
       return !!a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable);
@@ -7960,7 +8016,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("blur", dismiss);
     };
-  }, []);
+  }, [active]);
 
   const onBgDown = (e) => {
     if (e.button !== 0) return;
@@ -10411,6 +10467,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * still works, so every existing harness is untouched. READ-ONLY: they answer questions, they
    * change nothing — see lib/diagArm.js for why that boundary is the whole safety argument. */
   useEffect(() => {
+    if (!active) return undefined; // B2233521 — a KEPT (hidden) planner never owns a window hook; the one on screen does
     if (typeof window === "undefined") return;
     latchDiagArm(window);
     const hook = (x, y) => (isDiagArmed(window) && dblResolveRef.current ? dblResolveRef.current(x, y) : null);
@@ -10421,7 +10478,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (window.__plannerHitTarget === hook) window.__plannerHitTarget = null;
       if (window.__plannerHitWhy === why) window.__plannerHitWhy = null;
     };
-  }, []);
+  }, [active]);
 
   const addRectParcel = () => {
     const w = Math.max(20, +lotW || 0), d = Math.max(20, +lotD || 0);
@@ -10652,6 +10709,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // E2E/self-audit hook (same `window.__PLANYR_E2E` gate as the others; read-only answers + the same two
   // actions the panel row calls — it is a driver for the live acceptance, not a second code path).
   useEffect(() => {
+    if (!active) return undefined; // B2233521 — a KEPT (hidden) planner never owns a window hook; the one on screen does
     if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
     const hook = {
       siteId: () => siteId,
@@ -16687,10 +16745,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   /* B2024624 — read-only diagnostic: which outline sources the click-a-lot mode has mounted. Gated at CALL
    * time (diagArm.js), writes nothing; the acceptance for "no nationwide fan-out" reads this. */
   useEffect(() => {
+    if (!active) return undefined; // B2233521 — a KEPT (hidden) planner never owns a window hook; the one on screen does
     const hook = () => (isDiagArmed(window) && outlineLayersRef.current ? { mounted: outlineLayersRef.current.mounted() } : null);
     window.__plannerParcelOutlines = hook;
     return () => { if (window.__plannerParcelOutlines === hook) window.__plannerParcelOutlines = null; };
-  }, []);
+  }, [active]);
   // ⛔ NAMES HAVE ONE SOURCE OF TRUTH (shared/names/names.js) — `siteLabel`/`planLabel` are READ
   // from it on every render, never seeded into state (that was B1934528: a copy taken at mount that
   // every other rename door missed, patched once with a storage-event listener and now gone).
@@ -16713,7 +16772,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   metaRef.current = { site: siteLabel, name: planLabel, groupId, county: restored?.county ?? null, origin };
   // Multi-site switching: flush this site's live state first so nothing in the
   // last debounce window is lost (and a Duplicate clones the very latest edits).
-  const flushSite = () => { if (siteId && !deletedSelfRef.current && !isBlankSite(liveRef.current)) saveSite({ id: siteId, ...metaRef.current, ...liveRef.current }); };
+  const flushSite = () => { if (siteId && !deletedSelfRef.current && !isBlankSite(liveRef.current)) saveLive({ id: siteId, ...metaRef.current, ...liveRef.current }); };
   // B792 — the county stored at CREATION can be wrong (overlapping county bboxes + a
   // spatially-unscoped statewide parcel source let "waller" persist on a Fort Bend site),
   // and every consumer — the identify CAD, tax rates, the flood/easement jurisdiction
@@ -23363,6 +23422,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // headless regression assert the DISSOLVED geometry (region count, holes, curb-return radii) directly
   // instead of inferring it from pixels.
   useEffect(() => {
+    if (!active) return undefined; // B2233521 — a KEPT (hidden) planner never owns a window hook; the one on screen does
     if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
     const hook = () => ({
       regions: roadNet.regions.map((r) => ({ ids: r.ids, outer: r.region.outer, holes: r.region.holes })),
@@ -23394,13 +23454,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     });
     window.__plannerRoadNet = hook;
     return () => { if (window.__plannerRoadNet === hook) window.__plannerRoadNet = null; }; // NEW-3 — see the note on __plannerView
-  }, [roadNet, teeJunctions, driveJunctions, els]);
+  }, [roadNet, teeJunctions, driveJunctions, els, active]);
   /* NEW-1 — E2E/self-audit hook for the EXPORT SHEET (same `window.__PLANYR_E2E` gate; never runs in
      production). The measurement/export defect is invisible to any source reading — it only exists in
      the CLONE the sheet is built from — so the guard spec has to inspect the real built sheet. No dep
      array on purpose: `exportCtx()` closes over the current render, and the hook must never hand the
      sheet a stale one. */
   useEffect(() => {
+    if (!active) return undefined; // B2233521 — a KEPT (hidden) planner never owns a window hook; the one on screen does
     if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
     const hook = async (frame = null) => {
       const { createExportSheet } = await loadExportSheet();
@@ -23974,7 +24035,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         centerContent={<JurisdictionBadge badge={jurBadge} />}
         planSlot={plannerPlanCrumb}
         authControl={authControl}
-        accountActive={accountActive}
+        accountActive={accountActive && active} /* B2233521 — a kept (hidden) planner's header raises no account notices (multi-tab, …) */
         toolbarContent={plannerToolbar}
       />
 
@@ -29799,7 +29860,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       {/* NEW-1 — panels detached over the map. Portal-to-body draggable cards (FloatingPanel);
           each renders the SAME body as its docked form via renderPanelBody, so there's no
           duplicated JSX. Gated to !narrow — below the breakpoint the app is docked-only. */}
-      {!narrow && Object.keys(floating).map((id) => (
+      {active && !narrow && Object.keys(floating).map((id) => ( /* B2233521 — portaled to <body>: a hidden planner's floating panels must not stay on screen */
         <FloatingPanel key={id} title={panelTitle[id]} icon={<RailIcon id={id} size={18} />} subtitle={id === "parcel" ? null : panelHeaderSubtitle}
           actionsRef={id === "drainage" ? setFloatActionsEl : undefined} pos={floating[id]}
           onMove={(p) => moveFloating(id, p)} onDock={() => dockPanel(id)} onClose={() => closeFloating(id)}
@@ -30790,7 +30851,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           ContextMenu) but deliberately NOT that shared component: this is hover-driven, not
           click-opened, so it carries no full-screen dismiss backdrop — the canvas underneath stays
           live the whole time Alt is held. Empty canvas → altPick is null → nothing renders. */}
-      {altPick && createPortal(
+      {active && altPick && createPortal(
         <div role="listbox" aria-label="Everything under the cursor" data-testid="alt-stack-pick"
           style={{
             position: "fixed", left: altPick.x + 14, top: altPick.y + 14, zIndex: 6500,
@@ -30810,7 +30871,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         </div>,
         document.body,
       )}
-      {altPick && altPickHiRect && createPortal(
+      {active && altPick && altPickHiRect && createPortal(
         <div aria-hidden style={{
           position: "fixed", left: altPickHiRect.left - 3, top: altPickHiRect.top - 3,
           width: altPickHiRect.width + 6, height: altPickHiRect.height + 6,
@@ -31797,6 +31858,9 @@ function framedViewFor(box, pts) {
  * until `fit()` runs against a measured box); it finds nothing to change when the guess was right and re-frames exactly as
  * before when it was not (a resized window, a different panel). `sizeMeasuredRef` is NOT set from it. */
 let lastMeasuredCanvas = null;   // { box, dockX, toastCx }
+/* B2233521 — which planner instance was ACTIVE most recently (an identity token, one per mounted planner). A kept planner shown again
+ * re-applies its own map-layer set only when a DIFFERENT planner was active in between (the layer-restore effect). */
+let activePlannerToken = null;
 
 /* B2225425 (round 3) — the rows seed lands as ONE React update (it must: see `refetchReplace` on why a seed is never split from its
  * reconcile), so whatever that render computes for the first time is one task. On a plan this device has never drawn, the costliest

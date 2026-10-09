@@ -61,7 +61,7 @@ describe("one read normalization for both read paths (the rows seed no longer re
 });
 
 /* a tile stand-in: an EventTarget with the two properties the pacer reads */
-class FakeTile extends EventTarget { constructor() { super(); this.isConnected = true; this.src = ""; } }
+class FakeTile extends EventTarget { constructor() { super(); this.parentNode = {}; this.isConnected = true; this.src = ""; } }
 const settle = (t, ev = "load") => t.dispatchEvent(new Event(ev));
 
 describe("tile loads are paced (a whole grid never answers in one burst)", () => {
@@ -82,9 +82,17 @@ describe("tile loads are paced (a whole grid never answers in one burst)", () =>
     const p = createTilePacer({ maxInFlight: 1 });
     const [a, b, c] = [new FakeTile(), new FakeTile(), new FakeTile()];
     p.schedule(a, "a"); p.schedule(b, "b"); p.schedule(c, "c");
-    p.attached(b); b.isConnected = false;               // pruned before its turn
+    p.attached(b); b.parentNode = null; b.isConnected = false;   // pruned before its turn (Leaflet removed it from its tile container)
     settle(a);
     expect(b.src).toBe(""); expect(c.src).toBe("c"); expect(p.stats.dropped).toBe(1);
+  });
+  it("B2233521 — still loads a tile whose whole MAP is off the page (a kept planner), which is not a discarded tile", () => {
+    const p = createTilePacer({ maxInFlight: 1 });
+    const [a, b] = [new FakeTile(), new FakeTile()];
+    p.schedule(a, "a"); p.schedule(b, "b");
+    p.attached(b); b.isConnected = false;               // the map's box was detached; the tile is still in its tile container
+    settle(a);
+    expect(b.src).toBe("b"); expect(p.stats.dropped).toBe(0);
   });
   it("is wired to BOTH planner basemap layers", () => {
     const sp = readFileSync(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url), "utf8");

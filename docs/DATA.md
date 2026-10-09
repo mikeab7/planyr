@@ -218,6 +218,8 @@ Each is phrased as a testable sentence, followed by what proves it and its **cur
 
 ---
 
+18. **A plan opened under an account is only ever written into THAT account's device store — and a planner that is mounted but not on screen writes nothing.** (B2233521.) The store a save lands in is chosen at write time by whoever is signed in at that moment, so a flush that ran after sign-out (persist-on-leave as the planner unmounted) used to copy the open plan into the SIGNED-OUT store — measured on the build before this change, no keep-alive involved. `saveDedupe.mayWriteForAccount` gates every planner save (`saveLive`, the autosave mirror and its settle tick); a planner opened with no account (signed out, or before sign-in resolves at boot) is deliberately not gated. With the plan you just left now KEPT mounted (`plannerKeepAlive.js`, hidden and detached), three things keep it silent and its data its own: it does not re-render on app renders (`KeptPlanner`'s comparator), it re-applies its OWN layer set before the layer tracker resumes when shown again, and it owns no window hook / body-portaled panel. **✅ holds in the sandbox** — `ui-audit/verify-plan-keepalive-writes.mjs` (real edits on two plans, every cloud and device write recorded, hidden windows with resize/timer storms, a reload and a sign-out with a plan hidden): PASS on the change, FAIL on the previous build (the sign-out leak) and on each of three mutants (no layer re-apply · no render freeze · no account gate); CI half `test/plannerKeepAlive.test.js`. Live proof: the V# on B2233521.
+
 ## 3. One-answer functions
 
 The short list of questions this codebase has decided must have **exactly one** implementation,

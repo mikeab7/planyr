@@ -35,6 +35,10 @@ const LABEL = argOf("--label", "run"), OUT = argOf("--out", "");
 const ONLY = (argOf("--only", "") || "").split(",").filter(Boolean);
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const PROFILE = has("--profile");
+/* --cpu <rate>: CDP CPU throttling (B2233521). A faster container reads every switch under the owner's bar while his Chrome reads 50–120 ms on the same
+ * build, so the rig is calibrated to HIS reading on the baseline build before a fix is scored (stated in every run's output — a throttled number is not a
+ * claim about his hardware, only a way to put the same work above the same bar). */
+const CPU_RATE = Number(argOf("--cpu", 1)) || 1;
 const TRACE = argOf("--trace", "");   // --trace <prefix>: a Chromium performance trace per switch hop (devtools.timeline + v8), for the non-script half of a long frame
 let traceN = 0;
 async function traceStart(page) { if (!TRACE) return false; await browser.startTracing(page, { path: `${TRACE}.${++traceN}.json`, categories: (process.env.TRACE_CATS || "devtools.timeline,toplevel,v8,disabled-by-default-v8.gc").split(",") }); return true; }
@@ -84,6 +88,7 @@ async function newRun(startPlan) {
   await ctx.addInitScript(INSTRUMENT);
   const page = await ctx.newPage();
   await assertMeasurable(page, "perf-plan-open");
+  if (CPU_RATE > 1) { const c = await ctx.newCDPSession(page); await c.send("Emulation.setCPUThrottlingRate", { rate: CPU_RATE }); }
   return { ctx, page };
 }
 const reading = (page) => page.evaluate(() => ({ now: performance.now(), gaps: window.__gaps.slice(), lt: window.__lt.slice(), tiles: window.__tiles.slice(), loaf: window.__loaf.slice(), rows: window.__rows, commits: window.__commits }));
@@ -121,7 +126,7 @@ async function score(page, t0, label, planKey, extra = {}) {
   return { label, plan: planKey, feat: await features(page), maxMs: Math.max(0, ...gaps.map((g) => g[2])), gaps: classed,
     maxTaskMs: Math.max(0, ...classed.filter((g) => g[2] === "task").map((g) => g[1])), maxQueueMs: Math.max(0, ...classed.filter((g) => g[2] === "queue").map((g) => g[1])),
     over50Task: over("task").length, over50Queue: over("queue").length,
-    tileReqs: (() => { const t = (r.tiles || []).filter((x) => x[0] >= t0 - 2 && x[0] <= t0 + SETTLE_MS); const by = {}; for (const [, z] of t) by[z] = (by[z] || 0) + 1; return { n: t.length, byZoom: by }; })(), over50: gaps.filter((g) => g[2] > 50).length, sumOver50: gaps.filter((g) => g[2] > 50).reduce((s, g) => s + g[2], 0),
+    tileReqs: (() => { const t = (r.tiles || []).filter((x) => x[0] >= t0 - 2 && x[0] <= t0 + SETTLE_MS); const by = {}; for (const [, z] of t) by[z] = (by[z] || 0) + 1; return { n: t.length, byZoom: by, firstMs: t.length ? Math.round(t[0][0] - t0) : null, lastMs: t.length ? Math.round(t[t.length - 1][0] - t0) : null }; })(), over50: gaps.filter((g) => g[2] > 50).length, sumOver50: gaps.filter((g) => g[2] > 50).reduce((s, g) => s + g[2], 0),
     frames: loaf.map((f) => ({ at: f.t - Math.round(t0), d: f.d, script: f.sd, forcedLayout: f.fsl, renderStart: f.rs, styleLayoutStart: f.sl, scripts: f.s.filter((s) => s.d >= 20).map((s) => `${s.inv || s.fn}:${s.u}:${s.p}=${s.d}`) })), rowFetches: r.rows, commits: r.commits, ...extra };
 }
 
@@ -183,6 +188,15 @@ const SCEN = {
     await hop("Bolt-on", "Concept A", "Bolt-on → Concept A (first visit)", "concept-a");
     await hop("Concept A", "Bolt-on", "Concept A → Bolt-on (back)", "bolt-on");
     await hop("Bolt-on", "Concept A", "Bolt-on → Concept A (revisit)", "concept-a");
+    /* B2233521 — a SECOND round trip. The owner switches back and forth between two plans his device already holds; the first three hops
+     * above each carry a first-time cost of the rig (no device copy → the rows seed draws the plan ~4 s in). These two are the steady state
+     * he measured: both plans already open once this session. */
+    await hop("Concept A", "Bolt-on", "Concept A → Bolt-on (back, 2nd)", "bolt-on");
+    await hop("Bolt-on", "Concept A", "Bolt-on → Concept A (revisit, 2nd)", "concept-a");
+    /* B2233521 — THE CONTROL: the same window, the same page, NO switch. Under `--cpu` throttling the browser's own throttler pauses the
+     * main thread in slices, and a heartbeat task that straddles a pause reads as a gap with nothing behind it (measured: a 58 ms
+     * `onmessage` with no other event inside it, at ×3). This row is that floor, so no switch row is read below it. */
+    { await pacedWait(page, 700); const t0 = await page.evaluate(() => performance.now()); out.push(await score(page, t0, "control: no switch (instrument floor)", "concept-a")); }
     out[0].selfTestMs = await selfTest(page); await ctx.close(); return out;
   },
   /* a different PROJECT: Grand Port → Richfield (the larger plan) and back */
@@ -221,7 +235,7 @@ try {
 } finally { await browser.close(); server.close(); }
 
 const verdict = planOpenVerdict(results, existsSync(join(HERE, "perf-plan-open.budget.json")) ? JSON.parse(readFileSync(join(HERE, "perf-plan-open.budget.json"), "utf8")) : {});
-const doc = { label: LABEL, dist: DIST, runs: RUNS, results, verdict };
+const doc = { label: LABEL, dist: DIST, runs: RUNS, cpuRate: CPU_RATE, results, verdict };
 if (OUT) writeFileSync(OUT, JSON.stringify(doc, null, 1));
-if (has("--json")) console.log(JSON.stringify(doc, null, 1)); else console.log(`\n${LABEL}\n` + verdict.lines.join("\n"));
+if (has("--json")) console.log(JSON.stringify(doc, null, 1)); else console.log(`\n${LABEL}${CPU_RATE > 1 ? ` (CPU throttled ×${CPU_RATE})` : ""}\n` + verdict.lines.join("\n"));
 if (has("--assert") && !verdict.pass) process.exit(1);
