@@ -382,7 +382,7 @@ import { hasCrop, cropClipShapeScreen, cropTrimFeet, cropFromTrimFeet, cropKind,
 import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerialVisibility.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, dockAxisOf, healDockAxes, withDockAxis, dockSideCompassLabel } from "./lib/dockZones.js";
 import { wallPickerLayout, wallClickPatch, wallClickTitle, loadingTypeLabel, strandedBumpIds } from "./lib/loadingWalls.js";
-import { wallRowPlan, dockLinked, chipLabel, bumpChipLabel, addOptions, removalCount, KIND_NAME, TRAILER_MAX_ROWS, clampTrailerRows, trailerSpec, trailerCfg, zdAfterRowChange, zdAfterRowDepth, zdAfterAisle, bumpEnds, areaWithBumps } from "./lib/wallRows.js";
+import { wallRowPlan, chipLabel, bumpChipLabel, addOptions, removalCount, KIND_NAME, TRAILER_MAX_ROWS, clampTrailerRows, trailerSpec, trailerCfg, zdAfterRowChange, zdAfterRowDepth, zdAfterAisle, bumpEnds, areaWithBumps } from "./lib/wallRows.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors, gridLinesVisible } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent, clipSegmentToRing } from "./lib/footprintEdit.js";
 import { pondAreaLabelLine, pondAreaDeltaLine } from "./lib/pondLabelText.js";
@@ -20235,7 +20235,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   };
 
   /* ==== Building panel v2 — the per-wall rows (NEW-1…NEW-3) ====
-     The Loading section lists ONE row per wall (or per linked dock pair). Every edit here takes the
+     The Loading section lists ONE row per wall. Every edit here takes the
      row's `sides` and touches ONLY those walls — the fan-out the old panel did across every dock /
      every end wall is gone; linked dock pairs simply pass both sides. The primitives underneath are the
      ones the canvas already uses (relayoutSide, relayoutWallKids, makeDogEar…), so panel and canvas
@@ -20332,7 +20332,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     setSidewalkWidth(el, nd);       // sidewalk / buffer: grows outward, anything beyond slides with it
   };
-  // Rows of trailer parking (1–4) on a dock wall (or both of a linked pair), holding one row's depth.
+  // Rows of trailer parking (1–4) on a dock wall, holding one row's depth.
   const setTrailerRows = (b, sides, layer, rowsRaw) => {
     const rows = clampTrailerRows(rowsRaw);
     pushHistory();
@@ -20400,43 +20400,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return next;
     });
     setSel({ kind: "el", id: b.id });
-  };
-  // Link / split a cross-dock pair's stacks. Linking makes the SECOND wall match the first (stack, bump-outs and
-  // bump-out size) in one undo frame; splitting only flips the flag — each wall keeps what it has.
-  const toggleDockLink = (b) => {
-    const { dockSides } = dockSidesOf(b);
-    if (dockSides.length !== 2) return;
-    if (dockLinked(b)) { pushHistory(); setSelEl({ dockStacksLinked: false }); return; }
-    const [from, to] = dockSides;
-    pushHistory();
-    const src = stateRef.current.els;
-    const fromChain = dockChainOnSide(src, b, from), toChain = dockChainOnSide(src, b, to);
-    const fromBumps = src.filter((x) => x.attachedTo === b.id && x.dogEar && x.dogEar.side === from);
-    const toBumps = src.filter((x) => x.attachedTo === b.id && x.dogEar && x.dogEar.side === to);
-    const killed = [...killSetWithChildren(src, toChain.slice(0, 1).map((z) => z.id)), ...toBumps.map((x) => x.id)];
-    setEls((a) => {
-      let next = removeWithChildren(a, toChain.slice(0, 1).map((z) => z.id)).filter((x) => !toBumps.some((t) => t.id === x.id));
-      // bump-outs first (they set the court's clear span), same signs and size as the first wall
-      const size = fromBumps[0] ? dogEarSize(fromBumps[0].dogEar, fromBumps[0].w, fromBumps[0].h) : null;
-      next = [...next, ...fromBumps.map((x) => makeDogEar(b, to, x.dogEar.sign, size))];
-      // the stack: same layers, depths and trailer rows, rebuilt on the second wall
-      let prev = null;
-      fromChain.forEach((z, i) => {
-        let nz;
-        if (i === 0) nz = makeCourtZone(b, to);
-        else if (z.type === "trailer") nz = makeTrailerZone(b, prev);
-        else nz = makeChainZone(b, to, z.type === "road" ? "road" : z.type === "sidewalk" ? "sidewalk" : "buffer", prev);
-        const copy = {};
-        ["zd", "trailerRows", "trailerAisleFt", "travelW", "curb", "alongLen", "alongAnchor", "alongOff"].forEach((k) => { if (z[k] !== undefined) copy[k] = z[k]; });
-        nz = { ...nz, ...copy };
-        next = [...next, nz]; prev = nz;
-      });
-      next = relayoutBumpSidewalks(next, b);
-      dockSides.forEach((side) => { next = relayoutSide(next, b, side); });
-      return next;
-    });
-    tombstone(killed);
-    setSelEl({ dockStacksLinked: true });
   };
   // Bump-outs for a dock row. A corner toggle adds or removes the bump-out at that END of every wall in the row;
   // a corner added beside a bump-out the user already sized adopts that size.
@@ -26486,13 +26449,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     title="Lock in place so it can't be moved or resized by accident" onClick={() => toggleLock(b.id)}>
                     <LockGlyph locked={!!b.locked} size={16} />
                   </button>
-                  <details style={{ position: "relative" }}>
-                    <summary data-testid="building-more" style={hdrBtn} aria-label="More building actions" title="More">⋯</summary>
-                    <div style={{ position: "absolute", right: 0, top: HB + 4, zIndex: 20, minWidth: 128, padding: SPACE.xs, background: SURF_RAISED, border: BORDER_1, borderRadius: RADIUS.md, boxShadow: "0 8px 22px rgba(28,25,20,0.16)" }}>
+                  <InspectorMoreMenu testId="building-more" label="More building actions" btnStyle={hdrBtn}
+                    panelStyle={{ minWidth: 128, padding: SPACE.xs, background: SURF_RAISED, border: BORDER_1, borderRadius: RADIUS.md, boxShadow: "0 8px 22px rgba(28,25,20,0.16)" }}>
+                    {(close) => (
                       <button type="button" data-testid="building-delete" style={{ ...chip, width: "100%", border: "none", color: "var(--danger)", textAlign: "left" }}
-                        onClick={() => deleteSel(null, { entry: "panel:element" })}>Delete building</button>
-                    </div>
-                  </details>
+                        onClick={() => { close(); deleteSel(null, { entry: "panel:element" }); }}>Delete building</button>
+                    )}
+                  </InspectorMoreMenu>
                   <button type="button" data-testid="building-close" style={{ ...hdrBtn, border: "none", background: "transparent", color: "var(--text-tertiary)", fontSize: FONT_SIZE.display }} title="Close (the element stays selected; double-click it to reopen) — Esc" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); closeInspector(); }}>✕</button>
                 </div>
                 <div data-testid="building-summary" title={`${f0(hm.footprint)} SF footprint + ${hm.bumpN} bump-out${hm.bumpN === 1 ? "" : "s"} (${f0(hm.extra)} SF)`} style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", marginTop: SPACE.xs, fontVariantNumeric: TABULAR_NUMS }}>
@@ -26521,13 +26484,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 onClick={(e) => { e.stopPropagation(); toggleMarkupLock(selMarkup.id); }}>
                 <LockGlyph locked={!!selMarkup.locked} size={16} />
               </button>
-              <details style={{ position: "relative" }} onClick={(e) => e.stopPropagation()}>
-                <summary style={{ ...chip, width: 30, height: 30, padding: 0, display: "grid", placeItems: "center", listStyle: "none" }} aria-label={`More ${simpleClosedMarkupLabel.toLowerCase()} actions`}>•••</summary>
-                <div style={{ position: "absolute", right: 0, top: 34, zIndex: 20, minWidth: 112, padding: 4, background: SURF_RAISED, border: BORDER_1, borderRadius: 8, boxShadow: "0 8px 22px rgba(28,25,20,0.16)" }}>
+              <InspectorMoreMenu testId="markup-more" label={`More ${simpleClosedMarkupLabel.toLowerCase()} actions`} glyph="•••"
+                btnStyle={{ ...chip, width: 30, height: 30, padding: 0, display: "grid", placeItems: "center", listStyle: "none" }}
+                panelStyle={{ minWidth: 112, padding: 4, background: SURF_RAISED, border: BORDER_1, borderRadius: 8, boxShadow: "0 8px 22px rgba(28,25,20,0.16)" }}>
+                {(close) => (
                   <button type="button" style={{ ...chip, width: "100%", border: "none", color: PAL.danger, justifyContent: "flex-start" }}
-                    onClick={() => deleteSel(null, { entry: "panel:markup" })}>Delete {simpleClosedMarkupLabel.toLowerCase()}</button>
-                </div>
-              </details>
+                    onClick={() => { close(); deleteSel(null, { entry: "panel:markup" }); }}>Delete {simpleClosedMarkupLabel.toLowerCase()}</button>
+                )}
+              </InspectorMoreMenu>
             </>}
             {/* Explicit close. The element STAYS selected — double-click it again to reopen. On DESKTOP
                 ✕ releases the dock back to whatever panel the inspector replaced; on NARROW it closes
@@ -27677,12 +27641,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     // and door count, then ONE compact row per wall (chips for its layers, a dashed +). ----
                     const bumpSpecs = bumpSpecsOf(b);
                     const plan = wallRowPlan(b);
-                    const firstPairIdx = plan.findIndex((r) => r.pair);
-                    const wallRowsData = plan.map((r, idx) => {
+                    const wallRowsData = plan.map((r) => {
                       const isDock = r.role === "dock";
                       const mine = isDock ? bumpSpecs.filter((x) => r.sides.includes(x.side)) : [];
                       return {
-                        ...r, isDock, firstOfSplit: r.pair && !r.linked && idx === firstPairIdx,
+                        ...r, isDock,
                         layers: wallLayersOn(b, r.sides[0]),
                         bump: isDock ? {
                           n: mine.length,
@@ -27699,7 +27662,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       parkingRows: (row, n) => setEmployeeParkingRows(b, n, row.sides),
                       remove: (row, layer) => removeWallLayer(b, row.sides, layer),
                       add: (row, key) => addWallLayer(b, row.sides, key),
-                      toggleLink: () => toggleDockLink(b),
                       bumpEnd: (row, sign) => toggleBumpEnd(b, row.sides, sign),
                       bumpSize: (row, along, proj) => setBumpSize(b, row.sides, along, proj),
                       bumpRemoveAll: (row) => removeBumpsOn(b, row.sides),
@@ -32015,12 +31977,31 @@ function LoadingWallPicker({ b, bumps, onWall, onCorner }) {
   );
 }
 
-/* WallRows — Building panel v2, NEW-1/NEW-2/NEW-3. ONE compact row per wall (or per linked dock pair):
+/* NEW-2 — the inspector header's "⋯" action menu. A bare <details> never closed on an outside click or Esc;
+   this is the shared AnchoredMenu (portal, outside-click + Escape dismiss) with the dismissing press consumed
+   whole, so closing it never also deselects/deletes whatever was under the pointer. Module scope on purpose
+   (MODULE-SCOPE-COMPONENTS): it owns its own open state. */
+function InspectorMoreMenu({ testId, label, glyph = "⋯", btnStyle, panelStyle, children }) {
+  const [open, setOpen] = useState(false);
+  const anchor = useRef(null);
+  const close = useCallback(() => setOpen(false), []);
+  return (
+    <span onClick={(e) => e.stopPropagation()} style={{ display: "inline-flex" }}>
+      <button ref={anchor} type="button" data-testid={testId} aria-label={label} title="More" aria-haspopup="menu" aria-expanded={open}
+        style={btnStyle} onClick={() => setOpen((o) => !o)}>{glyph}</button>
+      <AnchoredMenu open={open} onClose={close} anchorRef={anchor} placement="below-right" gap={4} width={140} swallowOutsidePress panelStyle={panelStyle}>
+        <div data-testid={`${testId}-menu`}>{children(close)}</div>
+      </AnchoredMenu>
+    </span>
+  );
+}
+
+/* WallRows — Building panel v2, NEW-1/NEW-2/NEW-3. ONE compact row per wall (a cross-dock building's two dock walls included):
    a badge with the wall's compass letter(s) and, beside it, its role word; then the wall's layers outward
    as chips; then a dashed "+". A chip opens a small editor directly under its row (one at a time); "+"
    opens the catalog for THAT wall only. Presentational and module-scope (MODULE-SCOPE-COMPONENTS): every
    edit is a callback into SitePlanner's per-wall handlers, which take the row's `sides`. Theme tokens only.
-   rows: [{ key, role, sides, badge, pair, linked, isDock, layers:[{id,kind,depth,rows,aisle,rowDepth,index,split}],
+   rows: [{ key, role, sides, badge, isDock, layers:[{id,kind,depth,rows,aisle,rowDepth,index,split}],
             bump:{ n, ends:[{sign,label,on}], along, proj } | null }] */
 function WallRows({ rows, ops, numInput, canEditBumps }) {
   const [open, setOpen] = useState(null);          // { rowKey, id } — the one chip editor that is open
@@ -32045,8 +32026,7 @@ function WallRows({ rows, ops, numInput, canEditBumps }) {
     : row.role === "rear"
       ? { background: "transparent", color: "var(--accent-text, var(--accent))", border: "1px solid var(--accent)" }
       : { background: "var(--surface-field)", color: "var(--text-secondary)", border: BORDER_1 };
-  const roleWord = (row) => (row.role === "dock" && row.pair && row.linked ? "dock" : row.role);
-  const boxStyle = { margin: `${SPACE.sm}px 0 ${SPACE.sm}px 0`, padding: SPACE.md, borderRadius: RADIUS.sm, border: BORDER_1, background: "var(--surface-field)", display: "flex", flexDirection: "column", gap: SPACE.md };
+    const boxStyle = { margin: `${SPACE.sm}px 0 ${SPACE.sm}px 0`, padding: SPACE.md, borderRadius: RADIUS.sm, border: BORDER_1, background: "var(--surface-field)", display: "flex", flexDirection: "column", gap: SPACE.md };
 
   const editorFor = (row, layer) => {
     const isDock = row.isDock;
@@ -32145,7 +32125,7 @@ function WallRows({ rows, ops, numInput, canEditBumps }) {
             <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: SPACE.sm }}>
               <span data-testid="wall-row-head" style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: SPACE.sm, minWidth: 64 }}>
                 <span data-testid="wall-row-badge" style={{ ...badgeStyle(row), minWidth: 22, padding: "1px 5px", borderRadius: RADIUS.sm, fontSize: FONT_SIZE.micro, fontWeight: 700, textAlign: "center", lineHeight: 1.4 }}>{row.badge}</span>
-                <span data-testid="wall-row-role" style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)" }}>{roleWord(row)}</span>
+                <span data-testid="wall-row-role" style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)" }}>{row.role}</span>
               </span>
               {row.bump && (
                 <button type="button" data-testid="bump-chip" style={{ ...chipBase, ...(bumpOpen ? chipOn : null) }} onClick={() => { setMenu(null); setOpen(bumpOpen ? null : { rowKey: row.key, id: "bump" }); }}>{bumpChipLabel(row.bump.n)}</button>
@@ -32157,12 +32137,6 @@ function WallRows({ rows, ops, numInput, canEditBumps }) {
               {opts.length > 0 && (
                 <button type="button" data-testid="wall-add" aria-label={`Add a layer to the ${row.badge} wall`} title="Add a layer to this wall" style={{ ...chipBase, borderStyle: "dashed", borderColor: "var(--border-strong)", color: "var(--text-secondary)", padding: "3px 9px" }}
                   onClick={() => { setOpen(null); setMenu(menuOpen ? null : row.key); }}>＋</button>
-              )}
-              {row.pair && (row.linked || row.firstOfSplit) && (
-                <button type="button" data-testid="dock-link-toggle" aria-pressed={row.linked} style={{ ...link, textDecoration: "none", marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 3 }}
-                  title={row.linked ? "Both dock walls edit together — click to edit them separately" : "The dock walls edit separately — click to make the second wall match the first"} onClick={ops.toggleLink}>
-                  <span aria-hidden="true">⛓</span>{row.linked ? "same" : "split"}
-                </button>
               )}
             </div>
             {menuOpen && (
