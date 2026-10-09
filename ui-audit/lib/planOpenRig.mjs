@@ -75,7 +75,7 @@ export function planRouteHandler({ base, supabaseUrl, plans, onLocal, commits = 
     const p = plans.find((q) => q.id === body.p_site);
     if (!committed.has(body.p_site)) committed.set(body.p_site, new Map());
     const over = committed.get(body.p_site);
-    if (process.env.RIG_LOG_COMMITS) process.stderr.write(`[rig] commit ${body.p_site} ${(body.p_ops || []).length} ops: ${(body.p_ops || []).map((o) => o.kind + ":" + o.id + ":z" + o.z + "/" + (o.data && o.data.z) + ":" + (o.data && o.data.type) + ":" + (o.data && o.data.pts ? o.data.pts.length : "")).join(" ")}\n`);
+    if (process.env.RIG_LOG_COMMITS) process.stderr.write(`[rig] commit ${body.p_site} ${(body.p_ops || []).length} ops\n`);
     const results = (body.p_ops || []).map((op) => {
       const k = op.kind + ":" + op.id;
       const prev = over.get(k) || (p && p.rows.find((r) => r.kind === op.kind && r.id === op.id)) || null;

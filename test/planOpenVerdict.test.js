@@ -32,3 +32,22 @@ describe("planOpenVerdict", () => {
     expect(v.pass).toBe(true); expect(v.budget.targetGapMs).toBe(50);
   });
 });
+
+describe("planOpenVerdict — every gap, counted by run (B2225425 round 3)", () => {
+  it("counts the runs that crossed 50 ms and 150 ms, and splits the worst gap by cause", () => {
+    const v = planOpenVerdict({ s: [
+      run(act("a", 40, { maxTaskMs: 40, maxQueueMs: 30 })),
+      run(act("a", 160, { maxTaskMs: 60, maxQueueMs: 160 })),
+      run(act("a", 70, { maxTaskMs: 70, maxQueueMs: 20 })),
+    ] }, { maxGapMs: 500, targetGapMs: 50 });
+    const r = v.rows[0];
+    expect(r.runsOver50).toBe(2); expect(r.runsOver150).toBe(1);
+    expect(r.worstTask).toBe(70); expect(r.worstQueue).toBe(160);
+    expect(r.targetMet).toBe(false);
+    expect(v.lines[0]).toMatch(/runs >50: 2\/3, >150: 1\/3; worst task 70, queue 160/);
+  });
+  it("meets the target only when the worst gap of every run is at or under it", () => {
+    const v = planOpenVerdict({ s: [run(act("a", 50)), run(act("a", 49))] }, { maxGapMs: 500, targetGapMs: 50 });
+    expect(v.rows[0].targetMet).toBe(true);
+  });
+});

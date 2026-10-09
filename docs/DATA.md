@@ -81,6 +81,14 @@ Each is phrased as a testable sentence, followed by what proves it and its **cur
    local canvas copy unless a pending local op explains the difference; an element the server has
    *never* seen still keeps local's copy. — `elementSync.js` `reconcile()`'s `rowsWin` branch;
    `ROWS-CANONICAL-ON-SEED` in root `CLAUDE.md`; covered by `test/elementSync.test.js`. **✅ holds.**
+   **⛔ B2225425 (round 3, 2026-10-09) — A READ NORMALIZATION IS NOT A "DIVERGING LOCAL COPY".** Both read paths normalize what
+   they read (`siteModel.READ_NORMALIZE`: z de-dupe, band-force migration, lock semantics; plus the road migration and the bonded heal
+   that `rowsToModel` runs, plus the mount's `healDockAxes`) — but the after-seed diff saw the normalized canvas differ from its raw row
+   with nothing pending and ADOPTED THE RAW ROW BACK, so on every open the canvas was replaced element for element (a whole-drawing
+   re-render) and the migration undid itself (measured: Bolt-on's road `e1455359wmveej` 8 → 7 → 8 points per open). The seed now
+   applies the ONE table to what it shows and passes every key the normalization changed as `exempt` (B1118's shape for a heal), so
+   it is committed ONCE (`load-normalized-persisted`, loud) and the stored rows converge; a pending edit or a fold is never judged
+   by it. Skipped on a plan this account cannot write (view-only for teammates). Guard: `test/planOpenRound3.test.js`.
 4. **A remote tombstone is never resurrected by a local undo.** — `applySnapshot` drops buffered
    *upserts* on restore but keeps buffered *removes*. **✅ holds** (B1098).
 5. **Exactly one function answers "did this row originate from my own ACCOUNT?"** —

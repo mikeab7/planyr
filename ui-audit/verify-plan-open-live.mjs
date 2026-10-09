@@ -24,7 +24,7 @@ import { openSignedIn, FIXTURE_SITE_ID } from "./lib/signedInSession.mjs";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const base = process.argv[2] && !process.argv[2].startsWith("--") ? process.argv[2] : "https://planyr.io";
 const SIGNED_IN = process.argv.includes("--signed-in");
-const SETTLE_MS = 5000;
+const SETTLE_MS = 6000;   // B2225425 round 3: the same window as the rig (perf-plan-open), so a late task after the switch is inside it
 const budget = JSON.parse(readFileSync(join(HERE, "perf-plan-open.budget.json"), "utf8"));
 
 const INSTRUMENT = () => {
@@ -87,16 +87,24 @@ try {
     const pick = (t) => page.locator("*:visible", { hasText: new RegExp(`^${t}$`) }).last();
     const out = [];
     /* the window opens in the page task that dispatches the click, after the menu has settled — the driver's own locator work (it walks every element of the page) is outside it */
-    const hop = async (from, to, label) => {
+    /* B2225425 round 3 — "one live run didn't open the plan at all" (round 2's report) is now a NAMED outcome, never a silent timeout or a score:
+     * after the window, the URL must name the target plan and the canvas must hold its features; otherwise the action is recorded as an error
+     * that says what was clicked (VOID in the verdict). Not reproduced in 3 runs on 0841ea0 + 3 on this change; this is what makes the next one
+     * diagnosable from the output alone. */
+    const hop = async (from, to, toId, label) => {
       await chip(from).click(); await pacedWait(page, 700);
       const h = await pick(to).elementHandle();
+      const clicked = await h.evaluate((el) => `${el.tagName.toLowerCase()} "${(el.textContent || "").trim().slice(0, 40)}"`);
       const t0 = await h.evaluate((el) => { const t = performance.now(); el.click(); return t; });
-      await chip(to).waitFor({ timeout: 60000 });
-      out.push(await window5s(page, t0, label));
+      const landed = await chip(to).waitFor({ timeout: 60000 }).then(() => true, () => false);
+      const w = await window5s(page, t0, label);
+      const where = await page.evaluate(() => location.hash);
+      if (!landed || !where.includes(toId) || !(w.feat > 0)) w.error = `plan did not open: clicked ${clicked}; route ${where}; ${w.feat} features drawn${landed ? "" : "; the target chip never appeared"}`;
+      out.push(w);
     };
-    await hop("Grand Port B", "Grand Port A", "Bolt-on → Concept A (first visit)");
-    await hop("Grand Port A", "Grand Port B", "Concept A → Bolt-on (back)");
-    await hop("Grand Port B", "Grand Port A", "Bolt-on → Concept A (revisit)");
+    await hop("Grand Port B", "Grand Port A", "live-ca", "Bolt-on → Concept A (first visit)");
+    await hop("Grand Port A", "Grand Port B", "live-bo", "Concept A → Bolt-on (back)");
+    await hop("Grand Port B", "Grand Port A", "live-ca", "Bolt-on → Concept A (revisit)");
     out[0].selfTestMs = await selfTest(page);
     results = { "seeded-local": [out] };
     s = { page, close: () => browser.close() };
