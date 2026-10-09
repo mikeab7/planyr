@@ -24,7 +24,7 @@
   "byLabelCpu2": {
     "cold open Bolt-on": 500,
     "cold open Concept A": 650,
-    "reload onto a plan (app opened fresh)": 310,
+    "reload onto a plan (app opened fresh)": 230,
     "Concept A → Bolt-on (first open, fresh profile)": 160,
     "plan → Map (first time after the app opened on a plan)": 620,
     "Bolt-on → Concept A (first visit)": 210,
