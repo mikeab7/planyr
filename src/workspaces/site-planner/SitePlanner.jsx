@@ -221,7 +221,7 @@ import { remapBondRefs, carryHostRoleTags } from "./lib/bondRemap.js";
 import { SETBACK_CHIP, setbackChipPlateW, setbackChipSpawn, numEditBox } from "./lib/numEditBox.js";
 import NumEditField from "./components/NumEditField.jsx";
 import { RailSplit, RailHeading } from "./components/RailSplit.jsx";
-import { roadPill, parkingPill, buildingPill } from "./lib/toolRailModel.js";
+import { roadPill, parkingPill, buildingPill, RAIL } from "./lib/toolRailModel.js";
 import { usePalette } from "../../shared/theme/ThemeProvider.jsx";
 import { NUM_FONT, TABULAR_NUMS } from "../../shared/theme/typography.js";
 import { pickInMarquee, hasSelMod, nextSelection } from "../../shared/markup/selection.js";
@@ -19329,7 +19329,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // measured at 27px tall against Apple's 44px / Material's 48dp floor. `minHeight` (not just more
     // padding) is what actually guarantees the floor — a caret sibling overrides this padding to 0
     // (see the `▾` buttons below) and would otherwise stay tiny. Desktop is untouched.
-    padding: narrow ? "12px 10px" : "5px 4px 5px 10px", minHeight: narrow ? 44 : undefined,
+    padding: narrow ? "12px 10px" : `5px 4px 5px ${RAIL.rowPadL}px`, minHeight: narrow ? 44 : undefined,
     fontSize: FONT_SIZE.control, borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap",
     border: `1px solid ${open ? PAL.chromeMuted : "transparent"}`, fontFamily: "inherit",
     background: active ? PAL.ember : (open ? "var(--hover-chrome)" : "transparent"),
@@ -25976,7 +25976,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         {/* right-side tool rail — dark chrome. On phones it overlays the canvas
             (slide-in from the right) instead of permanently eating 168px (B113). */}
         {narrow && mobileTools && <div onClick={() => setMobileTools(false)} style={{ position: "absolute", inset: 0, order: 2, zIndex: 1200, background: "rgba(20,18,15,0.35)" }} />}
-        <div className="dark-scroll rail-scroll" style={{ width: narrow ? 200 : 168, flex: "none", order: 3, background: PAL.chrome, borderLeft: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", gap: 3, padding: "4px 11px 13px",
+        <div className="dark-scroll rail-scroll" style={{ width: narrow ? 200 : 168, flex: "none", order: 3, background: PAL.chrome, borderLeft: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", gap: 3, padding: narrow ? "4px 11px 13px" : `4px ${RAIL.padR}px 13px ${RAIL.padL}px`, "--rail-hdr-inset": narrow ? "11px" : `${RAIL.rowPadL + 1}px`,
           overflowY: "auto", minHeight: 0,
           position: narrow ? "absolute" : "relative", right: 0, top: 0, bottom: narrow ? 0 : undefined,
           zIndex: narrow ? 1205 : 30,

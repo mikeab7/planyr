@@ -81,3 +81,24 @@ describe("toolRailModel — index.css mirrors the model (they cannot drift)", as
     expect(css).toMatch(/\.rail-hdr::after \{[^}]*background: var\(--chrome-divider\)/);
   });
 });
+
+describe("toolRailModel — left inset: headings sit on the icon column; a thin scrollbar is declared", async () => {
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("../src/index.css", import.meta.url), "utf8");
+  it("heading inset = 1px row border + the row's left padding (text starts where the icons do)", () => {
+    expect(css).toMatch(/\.rail-hdr \{[^}]*padding: 0 0 0 var\(--rail-hdr-inset, 7px\)/);
+    expect(RAIL.rowPadL + 1).toBe(7);
+  });
+  it("margins moved in from 12px/22px and the right gap is small and even", () => {
+    expect(RAIL.padL + 1).toBeLessThanOrEqual(7);
+    expect(RAIL.padL + 1 + RAIL.rowPadL + 1).toBeLessThanOrEqual(15);
+    expect(RAIL.padR).toBeGreaterThan(0); expect(RAIL.padR).toBeLessThanOrEqual(8);
+  });
+  it("rail declares a thin, token-coloured scrollbar (not hidden)", () => {
+    const r = css.match(/\.rail-scroll \{([^}]*)\}/)[1];
+    expect(r).toContain("scrollbar-width: thin");
+    expect(r).toContain("var(--rail-scroll-thumb)");
+    expect(css).not.toMatch(/\.rail-scroll \{[^}]*scrollbar-width: none/);
+    expect(css.match(/--rail-scroll-thumb:/g).length).toBe(2); // light + dark
+  });
+});
