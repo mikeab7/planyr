@@ -32,9 +32,10 @@ describe("Chambers joined-layer record, no situs", () => {
     expect(rows.find((r) => r.label === "Legal").value).toBe("321 TR 20-1 C C SCHOOL");
     expect(rows.find((r) => r.label === "Acreage").value).toBe(10.6945);
   });
-  it("the stored parcel is named for its owner before 'Parcel N'", () => {
+  it("NEW-1 (2026-10-08): the stored parcel is NEVER named for its owner — unnamed stays unnamed", () => {
     const info = parcelDisplayInfo([{ id: "p1", points: [[0, 0], [1, 0], [1, 1]], addr: null, attrs: ATTRS }]);
-    expect(info.get("p1").name).toBe("BARBERS HILL EDUCATION FOUNDATION");
+    expect(info.get("p1").name).toBe("Parcel 1");   // positional handle only
+    expect(info.get("p1").unnamed).toBe(true);
   });
   it("falls back to legal, then to a number", () => {
     const { [A + "Owner_Name"]: _o, ...noOwner } = ATTRS;
