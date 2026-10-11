@@ -26,6 +26,7 @@ import { supabase } from "./supabase.js";
 import { getProfileRow, invalidateProfileRow } from "../../../shared/profile/profileRowCache.js";
 import { DEFAULT_SHARE_PREF, normalizeSharePref } from "./newProjectSharing.js";
 import { normalizeBands as normalizeXSectionBands } from "./roadCrossSection.js";
+import { normalizeLook, patchLook, validateLook } from "./parcelLook.js";
 
 const MIRROR_KEY = "planyr:userPrefs:v1";
 
@@ -39,6 +40,10 @@ export const EMPTY_PREFS = {
   // is the compose screen's "Flatten markups" toggle: false (the default) writes markups into the
   // PDF as editable Bluebeam/Acrobat annotations, true burns them into the page. Remembered per user.
   exportPrefs: { flattenMarkups: false },
+  // NEW-2 — the WORKSPACE DEFAULT for parcel boundary / setback line / dimension-label styling: one blob
+  // { boundary:{color,weightPx,dashed}, setback:{…}, labels:{show,color,sizePt} }, sparse (absent = built-in).
+  // Resolved at render under a parcel's own override (lib/parcelLook.js).
+  parcelLook: {},
 };
 
 const normalizeExportPrefs = (raw) => {
@@ -70,6 +75,7 @@ const normalize = (p) => ({
   roadCrossSectionPresets: normalizeXSectionPresets(p && p.roadCrossSectionPresets),
   sitesPanel: normalizeSitesPanel(p && p.sitesPanel),
   exportPrefs: normalizeExportPrefs(p && p.exportPrefs),
+  parcelLook: normalizeLook(p && p.parcelLook),
   planStandards: {
     parcelStyle: { ...((p && p.planStandards && p.planStandards.parcelStyle) || {}) },
     typeStyles: { ...((p && p.planStandards && p.planStandards.typeStyles) || {}) },
@@ -215,6 +221,25 @@ export function setSitesPanelPref(prefs, patch) {
 export function setExportPref(prefs, patch) {
   const p = normalize(prefs);
   return { ...p, exportPrefs: normalizeExportPrefs({ ...p.exportPrefs, ...patch }) };
+}
+
+/** Apply a pure edit to the on-device mirror ONLY — the optimistic half of a debounced account write: the
+ *  canvas re-renders from the shared snapshot at once, and the account write follows (and may be reverted). */
+export function applyPrefsLocal(reducer) {
+  const next = normalize(reducer(readMirror()));
+  writeMirror(next);
+  return next;
+}
+
+/** Set ONE field of the workspace parcel-look default (pure edit — persist it through `updatePrefs`).
+ *  `null` clears the field back to the built-in. Throws on a value the blob may not hold: the write path
+ *  must refuse out loud, never store a quietly-repaired value. */
+export function setParcelLookPref(prefs, section, field, value) {
+  const p = normalize(prefs);
+  const next = patchLook(p.parcelLook, section, field, value);
+  const problems = validateLook({ [section]: { [field]: value } });
+  if (problems.length) throw new Error(problems.join("; "));
+  return { ...p, parcelLook: next };
 }
 
 export const _normalizePrefs = normalize;

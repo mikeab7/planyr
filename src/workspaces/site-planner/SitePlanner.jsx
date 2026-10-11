@@ -196,7 +196,7 @@ import { ownerName as apprOwnerName } from "./lib/appraisal.js";
 /* LAZY (B1064 tranche a). The Standards footer renders only while the Standards panel is the
  * open one, docked or floating — never at first paint. */
 const StandardsBar = lazy(() => import("./components/StandardsBar.jsx"));
-import { loadUserPrefs, updateUserPrefs, applyPrefs, getPrefsSnapshot, subscribePrefs, setStandardPref, getStandardPref, setExportPref } from "./lib/userPrefs.js";
+import { loadUserPrefs, updateUserPrefs, applyPrefs, getPrefsSnapshot, subscribePrefs, setStandardPref, getStandardPref, setExportPref, setParcelLookPref, applyPrefsLocal } from "./lib/userPrefs.js";
 import {
   PARCEL_STD_KEYS, TYPE_STD_KEYS, MEASURE_STD_KEYS, applyAllStandards, allStandardsImpact, appliedObjectsLabel,
   EMPTY_STD_DRAFT, draftParcelValue, draftTypeValue, draftMeasureValue, withParcelDraft, withTypeDraft, withMeasureDraft,
@@ -249,7 +249,12 @@ import { apprRows, apprAll, apprVal, findAttr, situsAddress, ownerName, parcelPa
 import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { createOutlineSet } from "./lib/parcelOutlineSet.js";
 import { geocodeAddress } from "./lib/geocode.js";
-import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackLineStyle, setbackChipStyle, SETBACK_LINE } from "./lib/planStyle.js";
+import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackDashArray, setbackChipStyle, SETBACK_LINE } from "./lib/planStyle.js";
+// NEW-2 — parcel boundary / setback line / dimension-label look: resolution (parcel override → workspace default → built-in), validation, the debounced writer.
+import { resolveParcelLook, parcelPatchFor, parcelResetPatch, validateLook, ptToPx } from "./lib/parcelLook.js";
+import { createTrailingWriter } from "./lib/trailingWrite.js";
+import { persistLookBatch } from "./lib/parcelLookPersist.js";
+import ParcelStylePanel from "./components/ParcelStylePanel.jsx";
 import { byZAsc, nextZ, sortByZ, Z_GAP, withMissingZ } from "./lib/zOrder.js";
 import { reorderByZ, arrangeFlags, arrangeAcrossBands, arrangeBandFlags, calloutAtAbsoluteFront, calloutFrontForceZ } from "./lib/arrange.js";
 import { commonStyleState, selectionRingFeet } from "./lib/multiStyle.js";
@@ -18595,7 +18600,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // though it isn't wrapped in an interactive group.
   const parcelEdgeLabels = (() => {
     if (!selParcel || !selRuns) return null;
-    const dfz = dimFontPx(labelPpf) * labelK;
+    // NEW-2 — the parcel's dimension-label look: shown or not, its own colour, and a size in POINTS (null = the
+    // existing zoom-scaled "Auto"). Read from the shared prefs snapshot because the account-prefs state is declared
+    // further down this component; the component subscribes to it, so a change re-renders this.
+    const lk = resolveParcelLook(selParcel, getPrefsSnapshot().parcelLook, { parcel: PAL.parcel, setback: PAL.setback, ink: PAL.ink });
+    if (!lk.labels.show) return null;
+    const autoDfz = dimFontPx(labelPpf) * labelK;
+    const dfz = lk.labels.sizePt != null ? ptToPx(lk.labels.sizePt) * labelK : autoDfz;
+    const dimHalo = lk.labels.sizePt != null ? Math.max(2, dfz * 0.27) : 3 * dimFontScale(labelPpf);
     const locked = selParcel.locked;
     const editable = tool === "select" && !editingCorners;
     // NEW-2 — the SAME screen-space thinning the setback chips get. A curved boundary's short
@@ -18630,7 +18642,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       } : undefined;
       return (
         <text key={`pe${ri}`} data-testid="parcel-edge-dim" x={out.x} y={out.y} dy={dfz * 0.27} textAnchor="middle" fontSize={dfz}
-          fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={on ? SEL_BLUE : PAL.ink} stroke={PAL.paper} strokeWidth={3 * dimFontScale(labelPpf)}
+          fontFamily={NUM_FONT} fontVariantNumeric={TABULAR_NUMS} fill={on ? SEL_BLUE : lk.labels.color} stroke={PAL.paper} strokeWidth={dimHalo}
           paintOrder="stroke" pointerEvents={editable ? "all" : "none"} style={editable ? { cursor: locked ? "pointer" : "text" } : undefined} onPointerDown={onDown} fontWeight="600">{f0(run.lengthFt)}′</text>
       );
     });
@@ -21171,6 +21183,46 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       if (!res.ok) flashWarn(`⚠ Saved on this computer only — couldn't reach your account (${res.error}).`, 7000);
     });
   };
+  /* NEW-2 — parcel boundary / setback line / dimension-label LOOK. `lookOf(pc)` is the ONE resolver every
+     draw site and the panel read (parcel override → the user's workspace default → built-in; lib/parcelLook.js). The
+     workspace default lives in the account prefs (`parcelLook`), is applied to the on-device mirror on EVERY input
+     event (optimistic — the canvas repaints at once) and written to the account by a trailing debounce whose FINAL
+     value always lands. A failed account write REVERTS the fields it covered and says so; signed out, the mirror is
+     the store and the notice says "this computer only" (nothing to revert to). */
+  const lookTheme = { parcel: PAL.parcel, setback: PAL.setback, ink: PAL.ink };
+  const lookOf = (pc) => resolveParcelLook(pc, userPrefs.parcelLook, lookTheme);
+  const lookWriter = useRef(null);
+  const lookPrev = useRef(new Map()); // "section.field" → the value before the current burst (what a failed write reverts to)
+  const lookIo = useRef({});
+  lookIo.current = { flashWarn, uid: activeUid };
+  if (!lookWriter.current) {
+    lookWriter.current = createTrailingWriter(async (batch) => {
+      const { flashWarn: warn, uid } = lookIo.current;
+      const prev = new Map(batch.map((e) => { const k = `${e.section}.${e.field}`; return [k, lookPrev.current.get(k)]; }));
+      batch.forEach((e) => lookPrev.current.delete(`${e.section}.${e.field}`));
+      await persistLookBatch({ batch, prev, uid: uid(), updateUserPrefs, applyPrefsLocal, setParcelLookPref, warn });
+    }, 400);
+  }
+  useEffect(() => {
+    const flush = () => { lookWriter.current && lookWriter.current.flush(); };
+    const onHide = () => { if (document.visibilityState === "hidden") flush(); };
+    window.addEventListener("pagehide", flush); document.addEventListener("visibilitychange", onHide);
+    return () => { window.removeEventListener("pagehide", flush); document.removeEventListener("visibilitychange", onHide); flush(); };
+  }, []);
+  const editLookDefault = (section, field, value) => {
+    const bad = validateLook({ [section]: { [field]: value } });
+    if (bad.length) { flashWarn(`⚠ Style not changed — ${bad[0]}.`, 6000); return; }
+    const key = `${section}.${field}`;
+    if (!lookPrev.current.has(key)) lookPrev.current.set(key, ((userPrefs.parcelLook || {})[section] || {})[field] ?? null);
+    applyPrefsLocal((p) => setParcelLookPref(p, section, field, value)); // optimistic: the canvas repaints now
+    lookWriter.current.push({ section, field, value });
+  };
+  const editLookParcel = (section, field, value) => {
+    const bad = validateLook({ [section]: { [field]: value } });
+    if (bad.length) { flashWarn(`⚠ Style not changed — ${bad[0]}.`, 6000); return; }
+    const patch = parcelPatchFor(section, field, value);
+    if (patch && selParcel) setParcels((a) => a.map((p) => (p.id === selParcel.id ? { ...p, ...patch } : p)));
+  };
   // A toast that carries an Undo, for the destructive half (overwriting existing objects).
   const [stdToast, setStdToast] = useState(null); // { msg, onUndo }
   const stdToastTimer = useRef(null);
@@ -21905,29 +21957,23 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const row = parcelRows.find((r) => r.id === pc.id);
     const origin = parcelOrigin(pc, { cadName: parcelCadName, idField: parcelIdField });
     const fillOp = pc.fillOpacity ?? (pc.fill ? 0.12 : 0);
-    const sbs = setbackLineStyle(pc, PAL.setback);
-    const lineSel = (val, onChange, label) => (
-      <select value={val} aria-label={label} onChange={(e) => onChange(e.target.value)} style={{ ...numInput, width: "100%", minWidth: 0, cursor: "pointer", fontFamily: "inherit" }}>{DASH_OPTIONS}</select>
-    );
+    const themeHex = { parcel: toHex6(PAL.parcel), setback: toHex6(PAL.setback), ink: toHex6(PAL.ink) };
     const style = (
       <section data-testid="parcel-style" style={{ borderTop: BORDER_1, paddingTop: 10, marginTop: 14 }}>
-        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700 }}>Style</div>
+        <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 8 }}>Style</div>
+        <ParcelStylePanel parcel={pc} workspace={userPrefs.parcelLook} themeHex={themeHex}
+          onEditDefault={editLookDefault} onEditParcel={editLookParcel} onBeginGesture={pushHistory}
+          onResetParcel={() => { pushHistory(); setSelParcel(parcelResetPatch()); }} />
         <PairedFieldHead left="Outline" right="Fill" />
-        <PairedField label="Colour"
-          left={<span style={ROW6}><ColorField value={toHex6(pc.stroke ?? PAL.parcel)} {...colorCtl((v) => setSelParcel({ stroke: v }))} seed={COLOR_SEED} title="Outline colour" /></span>}
+        <PairedField label="Colour" left={<span />}
           right={<span style={ROW6}><ColorField value={toHex6(pc.fill ?? PARCEL_FILL_DEFAULT)} {...colorCtl((v) => setSelParcel({ fill: v }))} seed={COLOR_SEED} title="Fill colour" /></span>} />
         <PairedField label="Opacity"
           left={<PercentField value={pc.strokeOpacity ?? 1} onCommit={(v) => { pushHistory(); setSelParcel({ strokeOpacity: v }); }} inputStyle={numInput} ariaLabel="Outline opacity" />}
           right={<PercentField value={fillOp} onCommit={(v) => { pushHistory(); setSelParcel({ fillOpacity: v, fill: pc.fill ?? PARCEL_FILL_DEFAULT }); }} inputStyle={numInput} ariaLabel="Fill opacity" />} />
-        <PairedField label="Width" left={<NumInput style={{ ...numInput, width: "100%" }} value={pc.weight ?? 2} min={0.5} step={0.5} coarse={2} ariaLabel="Outline width" onCommit={(n) => { pushHistory(); setSelParcel({ weight: n }); }} />} />
-        <PairedField label="Line" left={lineSel(pc.dash || "solid", (v) => { pushHistory(); setSelParcel({ dash: v }); }, "Outline line style")} />
         <PairedFieldHead left="Setback line" right="" />
-        <PairedField label="Colour" left={<span style={ROW6}><ColorField value={toHex6(pc.sbStroke ?? PAL.setback)} {...colorCtl((v) => setSelParcel({ sbStroke: v }))} seed={COLOR_SEED} title="Setback line colour" /></span>} right={<span />} />
-        <PairedField label="Opacity" left={<PercentField value={sbs.opacity} onCommit={(v) => { pushHistory(); setSelParcel({ sbOpacity: v }); }} inputStyle={numInput} ariaLabel="Setback line opacity" />} right={<span />} />
-        <PairedField label="Width" left={<NumInput style={{ ...numInput, width: "100%" }} value={pc.sbWeight ?? SETBACK_LINE.weight} min={0.25} step={0.25} coarse={2} ariaLabel="Setback line width" onCommit={(n) => { pushHistory(); setSelParcel({ sbWeight: n }); }} />} right={<span />} />
-        <PairedField label="Line" left={lineSel(pc.sbDash || SETBACK_LINE.dash, (v) => { pushHistory(); setSelParcel({ sbDash: v }); }, "Setback line style")} right={<span />} />
-        <button type="button" data-testid="parcel-reset-style" onClick={() => { pushHistory(); setSelParcel({ stroke: null, weight: null, dash: null, strokeOpacity: null, fill: null, fillOpacity: null, sbStroke: null, sbWeight: null, sbDash: null, sbOpacity: null }); }}
-          style={{ padding: 0, border: "none", background: "transparent", color: PAL.muted, fontFamily: "inherit", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Reset style</button>
+        <PairedField label="Opacity" left={<PercentField value={pc.sbOpacity ?? 1} onCommit={(v) => { pushHistory(); setSelParcel({ sbOpacity: v }); }} inputStyle={numInput} ariaLabel="Setback line opacity" />} right={<span />} />
+        <button type="button" data-testid="parcel-reset-style" onClick={() => { pushHistory(); setSelParcel({ strokeOpacity: null, fill: null, fillOpacity: null, sbOpacity: null }); }}
+          style={{ padding: 0, border: "none", background: "transparent", color: PAL.muted, fontFamily: "inherit", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>Reset fill & opacity</button>
       </section>
     );
     const secs = pageSections && pageSections.parcelId === pc.id ? pageSections.list : [];
@@ -24201,24 +24247,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 if (!insetRingVisible(Math.min(...posSb), labelPpf)) return null;
                 const o = offsetPolygon(pc.points, sb);
                 if (!o) return null;
-                const zk = strokeZk; // B617/B880 zoom factor — hold the setback weight + dash constant relative to the drawing (NEW-1: 1 on an export pass)
                 const ring = o.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
                 // NEW-1 — the setback line's own standards (colour / weight / style), stamped at
                 // creation like the boundary's and overridable per parcel. An untouched parcel
                 // resolves to exactly the old hardcoded look (PAL.setback, 1.25, "7 6").
-                const sbs = setbackLineStyle(pc, PAL.setback);
+                // NEW-2: colour / weight / dash resolve parcel override → workspace default → built-in; the weight is
+                // SCREEN PIXELS, constant across zoom (no strokeZoom factor).
+                const lkP = lookOf(pc), lkS = lkP.setback;
+                const sbs = { stroke: lkS.color, weight: lkS.weightPx, dash: setbackDashArray(lkS.dash, lkS.weightPx), opacity: pc.sbOpacity ?? 1 };
                 // B966627 — a DEFAULTED ring (nothing stored on this parcel; drawn only because
                 // `parcelSetbacks` fell back to the project default) must not paint identically to
                 // one someone actually set. A sparser dash + a lighter stroke is the same idiom this
                 // repo already uses for "not yet confirmed" (the uncalibrated-measurement amber), and
                 // it costs no panel copy (PANEL-BREVITY: this is the canvas, not a panel sentence).
                 const explicit = parcelSetbacksExplicit(pc);
-                const dash = explicit ? sbs.dash : "2 5";
+                const dash = explicit || lkP.from.setback.dashed !== "builtin" ? sbs.dash : "2 5"; // a dash someone CHOSE (parcel or workspace default) is honoured on a defaulted ring too; the 0.65 opacity still marks it defaulted
                 // NEW-2 — CASING under the ring, on the same dash so the halo dashes with it.
-                const sbCase = strokeZoom(sbs.weight + PARCEL_CASING_W, zk);
+                const sbCase = sbs.weight + PARCEL_CASING_W;
                 return <g key={`sb${pc.id}`} opacity={explicit ? 1 : 0.65}>
-                  <polygon data-testid="setback-casing" points={ring} fill="none" stroke={PAL.lineCasing} strokeWidth={sbCase} strokeDasharray={dashZoom(dash, zk)} strokeLinejoin="round" pointerEvents="none" />
-                  <polygon data-testid="setback-ring" data-setback-explicit={explicit ? "1" : "0"} points={ring} fill="none" stroke={sbs.stroke} strokeWidth={strokeZoom(sbs.weight, zk)} strokeDasharray={dashZoom(dash, zk)} strokeOpacity={sbs.opacity} pointerEvents="none" />
+                  <polygon data-testid="setback-casing" points={ring} fill="none" stroke={PAL.lineCasing} strokeWidth={sbCase} strokeDasharray={dash} strokeLinejoin="round" pointerEvents="none" />
+                  <polygon data-testid="setback-ring" data-setback-explicit={explicit ? "1" : "0"} points={ring} fill="none" stroke={sbs.stroke} strokeWidth={sbs.weight} strokeDasharray={dash} strokeOpacity={sbs.opacity} pointerEvents="none" />
                   {/* NEW-4 — the SELECTED lot's grab band is not drawn here: it moves up into the
                       selection-chrome layer with the chips, so it isn't buried under a building
                       that sits hard against the setback line. Every other parcel keeps it here. */}
@@ -24246,8 +24294,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const removeHover = pc.id === parcelRemoveHoverId; // B598: about to be deleted in Remove mode
                 const inactive = pc.active === false; // excluded from calcs → dim + dash so it's clearly "context only" (B100)
                 const ring = pc.points.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
-                const zk = strokeZk; // NEW-1: 1 on an export pass — a parcel outline prints one weight, whatever the zoom
-                const baseW = pc.weight ?? 2; // per-parcel outline weight (authored); default 2
+                const lkB = lookOf(pc).boundary; // NEW-2: parcel override → workspace default → built-in
+                const baseW = lkB.weightPx; // screen pixels, constant across zoom (owner-locked)
                 // B619: no accent recolor on select — the property line keeps its own color; the square
                 // vertex handles carry the selection. B617: the boundary weight holds constant relative
                 // to the drawing across zoom (dominant property outline → scaled, not fixed pixels).
@@ -24267,13 +24315,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 return <g key={pc.id} data-feature={`parcel:${pc.id}`}>
                   {cased && (
                     <polygon data-testid="parcel-casing" points={ring} fill="none" stroke={PAL.lineCasing}
-                      strokeWidth={strokeZoom(((isSel) ? Math.max(3, baseW) : baseW) + PARCEL_CASING_W, zk)}
-                      strokeDasharray={dashArray(pc.dash, baseW)} strokeLinejoin="round" pointerEvents="none" />
+                      strokeWidth={((isSel) ? Math.max(3, baseW) : baseW) + PARCEL_CASING_W}
+                      strokeDasharray={dashArray(lkB.dash, baseW)} strokeLinejoin="round" pointerEvents="none" />
                   )}
                   <polygon data-testid="parcel-outline" points={ring}
                     fill={removeHover ? PAL.danger : picked ? "#2563eb" : (pcFillOp > 0 ? (pc.fill || PARCEL_FILL_DEFAULT) : "none")} fillOpacity={removeHover ? 0.16 : picked ? 0.16 : (pcFillOp > 0 ? pcFillOp : 1)} strokeOpacity={pc.strokeOpacity ?? 1}
-                    stroke={removeHover ? PAL.danger : picked ? "#2563eb" : (pc.stroke || PAL.parcel)} strokeWidth={strokeZoom((removeHover || picked || isSel) ? Math.max(3, baseW) : baseW, zk)}
-                    strokeDasharray={inactive ? "8 6" : dashArray(pc.dash, baseW)} opacity={inactive ? 0.4 : 1}
+                    stroke={removeHover ? PAL.danger : picked ? "#2563eb" : lkB.color} strokeWidth={(removeHover || picked || isSel) ? Math.max(3, baseW) : baseW}
+                    strokeDasharray={inactive ? "8 6" : dashArray(lkB.dash, baseW)} opacity={inactive ? 0.4 : 1}
                     pointerEvents="none" />
                   <polygon points={ring} fill="none" stroke="rgba(0,0,0,0.001)" strokeWidth={12} strokeLinejoin="round" pointerEvents="stroke"
                     style={{ cursor: (tool === "select" && !editingCorners) ? (pc.locked ? "default" : "move") : (tool === "parcel" && parcelMode === "remove") ? "pointer"
