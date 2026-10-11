@@ -6,14 +6,14 @@
   "surfaces": {
     "map-landing": {
       "light": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-11",
+        "approvedCommit": "f03938331",
+        "note": "B2243169: Measure's ▾ pill now shows the current mode's icon (11x7 px region at the right rail, desktop header + left-rail surfaces only) [CI-authored by run 38176679325 on f03938331082071f1bf612a024cd4ad600df8675]"
       },
       "dark": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-11",
+        "approvedCommit": "f03938331",
+        "note": "B2243169: Measure's ▾ pill now shows the current mode's icon (11x7 px region at the right rail, desktop header + left-rail surfaces only) [CI-authored by run 38176679325 on f03938331082071f1bf612a024cd4ad600df8675]"
       },
       "light--phone": {
         "approvedAt": "2026-10-09",
@@ -28,14 +28,14 @@
     },
     "site-planner-header": {
       "light": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-11",
+        "approvedCommit": "f03938331",
+        "note": "B2243169: Measure's ▾ pill now shows the current mode's icon (11x7 px region at the right rail, desktop header + left-rail surfaces only) [CI-authored by run 38176679325 on f03938331082071f1bf612a024cd4ad600df8675]"
       },
       "dark": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-11",
+        "approvedCommit": "f03938331",
+        "note": "B2243169: Measure's ▾ pill now shows the current mode's icon (11x7 px region at the right rail, desktop header + left-rail surfaces only) [CI-authored by run 38176679325 on f03938331082071f1bf612a024cd4ad600df8675]"
       },
       "light--phone": {
         "approvedAt": "2026-10-09",
@@ -50,14 +50,14 @@
     },
     "site-planner-left-rail": {
       "light": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-11",
+        "approvedCommit": "f03938331",
+        "note": "B2243169: Measure's ▾ pill now shows the current mode's icon (11x7 px region at the right rail, desktop header + left-rail surfaces only) [CI-authored by run 38176679325 on f03938331082071f1bf612a024cd4ad600df8675]"
       },
       "dark": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-11",
+        "approvedCommit": "f03938331",
+        "note": "B2243169: Measure's ▾ pill now shows the current mode's icon (11x7 px region at the right rail, desktop header + left-rail surfaces only) [CI-authored by run 38176679325 on f03938331082071f1bf612a024cd4ad600df8675]"
       },
       "light--phone": {
         "approvedAt": "2026-10-09",
@@ -72,14 +72,14 @@
     },
     "library": {
       "light": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-11",
+        "approvedCommit": "f03938331",
+        "note": "B2243169: Measure's ▾ pill now shows the current mode's icon (11x7 px region at the right rail, desktop header + left-rail surfaces only) [CI-authored by run 38176679325 on f03938331082071f1bf612a024cd4ad600df8675]"
       },
       "dark": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-11",
+        "approvedCommit": "f03938331",
+        "note": "B2243169: Measure's ▾ pill now shows the current mode's icon (11x7 px region at the right rail, desktop header + left-rail surfaces only) [CI-authored by run 38176679325 on f03938331082071f1bf612a024cd4ad600df8675]"
       },
       "light--phone": {
         "approvedAt": "2026-10-09",

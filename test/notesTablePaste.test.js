@@ -14,7 +14,7 @@ import { EditorState, TextSelection } from "@tiptap/pm/state";
 import { NOTE_EXTENSIONS } from "../src/workspaces/notes/lib/notesExtensions.js";
 import {
   parseTabular, rowsToTableHtml, tabularFromClipboard, tableRowsToText, htmlHasTable, clipboardHasTable,
-  tableOwnsClipboard, tableBoxWidth, isBorderedTable, isSingleColumn, fillEmptyCells, repairTableFragment,
+  tableOwnsClipboard, tableBoxWidth, tableShape, tableShapeOfNode, isBorderedTable, isSingleColumn, fillEmptyCells, repairTableFragment,
 } from "../src/workspaces/notes/lib/notesTablePaste.js";
 import { tidyPastedFragment, textOfNode, isLayoutTable, keepCaretInBox } from "../src/workspaces/notes/lib/notesPastePlain.js";
 
@@ -177,11 +177,46 @@ describe('"Keep text only" on a table is tab-separated rows (the stated choice)'
   });
 });
 
-describe("a new box made for a pasted table is wide enough for its columns", () => {
-  it("three columns outgrow a sticky note, but never the writing column", () => {
-    expect(tableBoxWidth({ cols: 3, current: 180 })).toBe(480);
-    expect(tableBoxWidth({ cols: 12, current: 180 })).toBe(560);
-    expect(tableBoxWidth({ cols: 1, current: 400 })).toBe(400);   // never narrows
+describe("a box made for a pasted table is wide enough for its columns (NEW-1, OneNote merged header)", () => {
+  const cellN = (text, span = 1, colwidth = null) => ({ type: "tableCell", attrs: { colspan: span, rowspan: 1, colwidth }, content: [p(text)] });
+  const rowN = (...cells) => ({ type: "tableRow", content: cells });
+  // The shape of test/fixtures/clipboard-tables/onenote-nested-in-li.html: a 3-cell merged header, each
+  // cell spanning 2 columns, over rows of 6 cells.
+  const oneNote = () => node({ type: "doc", content: [{ type: "table", content: [
+    rowN(cellN("Cross Dock", 2), cellN("Front Load", 2), cellN("Rear Load", 2)),
+    rowN(...["SF:", "Depth:", "SF:", "Depth:", "SF:", "Depth:"].map((t) => cellN(t))),
+    rowN(...["400K", "520'", "300K", "480'", "250K", "400'"].map((t) => cellN(t))),
+  ] }] }).firstChild;
+
+  it("RED-PROOF: the first row has 3 cells but the table has 6 columns", () => {
+    const t = oneNote();
+    expect(t.firstChild.childCount).toBe(3);                       // what the old rule read
+    expect(tableShapeOfNode(t).cols).toBe(6);                      // what the table really is
+  });
+  it("six columns → a box wide enough for six, not three", () => {
+    const { cols, widths } = tableShapeOfNode(oneNote());
+    const w = tableBoxWidth({ cols, widths, current: 180, sheet: 580 });
+    expect(w).toBeGreaterThanOrEqual(6 * 100);                     // never below the readable floor per column
+    expect(w).toBe(900);                                           // natural 960 + box padding, capped at the 900 table cap
+    expect(w).toBeGreaterThan(1.5 * tableBoxWidth({ cols: 3, current: 0, sheet: 580 }));   // the old 3-column read
+  });
+  it("three plain columns still outgrow a sticky note; one narrow column never narrows a wide box", () => {
+    expect(tableBoxWidth({ cols: 3, current: 180 })).toBe(504);
+    expect(tableBoxWidth({ cols: 1, current: 400 })).toBe(400);
+  });
+  it("uses the natural width, not the source's pixel widths", () => {
+    // OneNote's `width:0.9in` is not carried into colwidth; an unset column counts the default 160
+    expect(tableBoxWidth({ cols: 4, widths: [null, null, null, null], current: 0, sheet: 0 })).toBe(664);
+    // a stored width counts as stored, floored at the readable minimum
+    expect(tableBoxWidth({ cols: 2, widths: [300, 40], current: 0, sheet: 0 })).toBe(300 + 100 + 24);
+  });
+  it("a wide page lets a wide table use it; a huge table is held at the floor per column and the page grows", () => {
+    expect(tableBoxWidth({ cols: 8, current: 0, sheet: 1400 })).toBe(1304);
+    expect(tableBoxWidth({ cols: 12, current: 0, sheet: 580 })).toBe(1224);
+  });
+  it("tableShape counts merged cells and reads colwidth arrays", () => {
+    expect(tableShape([[{ colspan: 2 }, { colspan: 1 }], [{ colspan: 1 }, { colspan: 1 }, { colspan: 1 }]]).cols).toBe(3);
+    expect(tableShape([[{ colspan: 2, colwidth: [120, 80] }]]).widths).toEqual([120, 80]);
   });
 });
 

@@ -33,6 +33,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /* ---- fixtures: a rectangle of exactly `ac` acres (300 ft wide) ---- */
 let yCursor = 0; // stack the lots so none overlap (the site total is DISSOLVED: shared ground counts once)
 const rect = (i, ac) => { const x = 0, y = yCursor, w = 300, h = (ac * 43560) / w; yCursor += h + 200; return [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }]; };
+const rectAt = (x, y, ac) => { const w = 300, h = (ac * 43560) / w; return [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }]; };
 const county = (i, id, ac, acct, extra = {}) => ({ id, points: rect(i, ac), source: "county", gisKey: id, acct, ...extra });
 const drawn = (i, id, ac, label, extra = {}) => ({ id, points: rect(i, ac), source: "drawn", label, ...extra });
 const comb = (i, id, ac, label, n, extra = {}) => ({ id, points: rect(i, ac), label, combined: { from: Array.from({ length: n }, (_, k) => ({ ...county(i, id + "s" + k, ac / n, "0" + (500000 + k)), snapName: "Lot " + (k + 1) })) }, ...extra });
@@ -56,6 +57,16 @@ const FIX = [
     { id: "mo", points: rect(29, 7.77), label: "Mystery" }] },
   { tag: "one", title: "ZZ One Parcel", sections: { drawn: 1 }, rows: 1, parcels: [drawn(0, "o1", 41.5, "Parcel 1")] },
 ];
+// 8 South › Concept A, as the owner's real-data check found it (2026-10-11): one account on THREE overlapping rows, a LOCKED combined parcel
+// whose source line is "Combined from 2 parcels", and four 69.48 + an 11.86 with no source evidence that sit on top of one another — so the
+// rows add up to far more than the (dissolved) site total. KNOWN-GOOD ARM: this plan MUST show overlap; every other fixture must show none.
+const OV_BASE = 9_000_000; // far from the stacked fixtures, so nothing else touches it
+const ovCounty = (id, ac, dx, dy, extra = {}) => ({ id, points: rectAt(0 + dx, OV_BASE + dy, ac), source: "county", gisKey: id, acct: "0440520000010", ...extra });
+const ovDrawn = (id, ac, dx, dy, label) => ({ id, points: rectAt(2000 + dx, OV_BASE + dy, ac), label });
+FIX.push({ tag: "ovlp", title: "ZZ Eight South", overlap: true, sections: { county: 4, combined: 1, other: 5 }, rows: 10, longId: null, parcels: [
+  ovCounty("o1", 6.66, 0, 0), ovCounty("o2", 6.66, 40, 40), ovCounty("o3", 6.66, 80, 80), { ...county(0, "o4", 8.12, "0440520000099"), points: rectAt(0, OV_BASE + 3000, 8.12) },
+  { id: "oc", points: rectAt(4000, OV_BASE, 70), label: "Tract A", locked: true, lockSem: 2, combined: { from: [1, 2].map((k) => ({ ...drawn(0, "oc" + k, 35, "Piece " + k), snapName: "Piece " + k })) } },
+  ovDrawn("od1", 69.48, 0, 0, "Parcel 4"), ovDrawn("od2", 69.48, 0, 0, "Parcel 5"), ovDrawn("od3", 69.48, 60, 60, "Parcel 7"), ovDrawn("od4", 69.48, 0, 6000, "Parcel 8"), ovDrawn("od5", 11.86, 40, 6040, "Parcel 6")] });
 const SITES = Object.fromEntries(FIX.map((f) => { const s = mk(f.tag, f.title, f.parcels); return [s.id, s]; }));
 void yCursor;
 const WIDTHS = [240, 320, 620]; // PANEL_MIN_W · default · PANEL_MAX_W (lib/panelWidth.js)
@@ -90,7 +101,7 @@ const MEASURE = () => {
   const lum = (c) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b); };
   const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
   const textBox = (el) => { const g = document.createRange(); g.selectNodeContents(el); const rs = [...g.getClientRects()].filter((r) => r.width > 0); if (!rs.length) return null; return { l: Math.min(...rs.map((r) => r.left)), r: Math.max(...rs.map((r) => r.right)), t: Math.min(...rs.map((r) => r.top)), b: Math.max(...rs.map((r) => r.bottom)), lines: new Set(rs.map((r) => Math.round(r.top))).size }; };
-  const clipped = [], contrast = [], overlaps = [], rows = [];
+  const clipped = [], contrast = [], overlaps = [], rows = [], slots = [], outsideSlot = [], cellShared = [], wrappedSources = [];
   const check = (el, what) => {
     if (el.scrollWidth > el.clientWidth + 0.5) clipped.push(`${what}: scrollWidth ${el.scrollWidth} > clientWidth ${el.clientWidth}`);
     const cs = getComputedStyle(el); if (cs.textOverflow === "ellipsis") clipped.push(`${what}: text-overflow ellipsis`);
@@ -109,8 +120,21 @@ const MEASURE = () => {
       const r = b.getBoundingClientRect();
       boxes.forEach((t) => { if (r.left < t.r - 0.5 && r.right > t.l + 0.5 && r.top < t.b - 0.5 && r.bottom > t.t + 0.5) overlaps.push(`${b.getAttribute("data-testid")} over text in ${id}`); });
     });
+    // lines of the NAME TEXT only — the small "overlaps" tag rides inline beside it and sits a pixel higher, which is not a line
+    const nameLines = (() => { const tops = new Set(); const w = document.createTreeWalker(name, NodeFilter.SHOW_TEXT); for (let n = w.nextNode(); n; n = w.nextNode()) { if (n.parentElement.closest('[data-testid^="parcel-row-overlap-"]')) continue; const g = document.createRange(); g.selectNodeContents(n); [...g.getClientRects()].filter((r) => r.width > 0).forEach((r) => tops.add(Math.round(r.top))); } return tops.size; })();
+    const tagEl = row.querySelector(`[data-testid="parcel-row-overlap-${id}"]`);
+    const tagWrapped = (() => { if (!tagEl) return 0; let bottom = 0; const w = document.createTreeWalker(name, NodeFilter.SHOW_TEXT); for (let n = w.nextNode(); n; n = w.nextNode()) { if (n.parentElement.closest('[data-testid^="parcel-row-overlap-"]')) continue; const g = document.createRange(); g.selectNodeContents(n); [...g.getClientRects()].forEach((r) => { bottom = Math.max(bottom, r.bottom); }); } return tagEl.getBoundingClientRect().top >= bottom - 2 ? 1 : 0; })();
     const nb = textBox(name), sb = src && textBox(src);
-    rows.push({ id, h: row.getBoundingClientRect().height, nameLines: nb ? nb.lines : 0, subLines: sb ? sb.lines : 0, hasSub: !!src, hasPencil: !!row.querySelector('[data-testid^="parcel-row-pencil-"]') });
+    const eye = row.querySelector(`[data-testid="parcel-row-eye-${id}"]`), lock = row.querySelector(`[data-testid="parcel-row-lock-${id}"]`), more = row.querySelector(`[data-testid="parcel-row-more-${id}"]`);
+    const slot = eye.parentElement, sr = slot.getBoundingClientRect(), nameCell = name.closest("div[style*='flex']") || name.parentElement.parentElement;
+    slots.push({ id, l: sr.left, r: sr.right });
+    [lock, eye, more].filter(Boolean).forEach((b) => { const r = b.getBoundingClientRect(); if (r.left < sr.left - 0.5 || r.right > sr.right + 0.5 || r.top < sr.top - 0.5 || r.bottom > sr.bottom + 0.5) outsideSlot.push(`${b.getAttribute("data-testid")} outside its icon slot`); });
+    if (lock && lock.getBoundingClientRect().right > eye.getBoundingClientRect().left + 0.5) outsideSlot.push(`padlock of ${id} is not left of the eye`);
+    // the name cell holds the name button ONLY (no icon in the middle of the row) and the button uses the cell's full width
+    const nbtn = row.querySelector(`[data-testid="parcel-row-${id}"]`), cellW = nbtn.parentElement.getBoundingClientRect().width, indent = parseFloat(getComputedStyle(nbtn.parentElement).paddingLeft) || 0;
+    if (nbtn.parentElement.children.length !== 1 || nbtn.getBoundingClientRect().width < cellW - indent - 1) cellShared.push(`${id}: name block shares its cell with ${nbtn.parentElement.children.length - 1} other element(s) / ${(cellW - indent - nbtn.getBoundingClientRect().width).toFixed(1)}px narrower`);
+    if (src) { const sb2 = textBox(src); if (sb2 && sb2.lines > 1) { const c = src.cloneNode(true); c.style.cssText += ";white-space:nowrap;position:absolute;visibility:hidden;width:auto"; src.parentElement.appendChild(c); const natural = c.getBoundingClientRect().width; c.remove(); wrappedSources.push({ id, natural, avail: src.getBoundingClientRect().width, text: src.textContent }); } }
+    rows.push({ id, tagged: !!row.querySelector(`[data-testid="parcel-row-overlap-${id}"]`), h: row.getBoundingClientRect().height, nameLines: nb ? nameLines : 0, subLines: sb ? sb.lines : 0, tagWrapped, hasSub: !!src });
   });
   const groups = [...panel.querySelectorAll('[data-testid^="parcels-group-"]:not([data-testid^="parcels-group-acres-"])')].map((g) => {
     const key = g.getAttribute("data-testid").replace("parcels-group-", ""); const lab = g.firstElementChild, ac = g.querySelector('[data-testid^="parcels-group-acres-"]');
@@ -125,17 +149,24 @@ const MEASURE = () => {
     panelW: Math.round(panel.getBoundingClientRect().width),
   };
   const groupAcres = [...panel.querySelectorAll('[data-testid^="parcels-group-acres-"]')].map((e) => Number(e.textContent.replace(/,/g, "")));
-  return { clipped, contrast, overlaps, rows, groups, acresRight, groupAcres, ...detail };
+  const ovEl = panel.querySelector('[data-testid="parcels-overlap"]');
+  return { clipped, contrast, overlaps, rows, groups, acresRight, groupAcres, slots, outsideSlot, cellShared, wrappedSources, overlapText: ovEl ? ovEl.textContent : "", ...detail };
 };
 
-const openFixture = async (f, theme, width) => {
-  await page.evaluate(([t, w]) => { localStorage.setItem("planyr.theme", t); localStorage.setItem("planarfit:leftWidth", String(w)); localStorage.setItem("planarfit:currentSite:v1", "x"); }, [theme, width]);
+const openFixtureOnce = async (f, theme, width) => {
+  await page.evaluate(([t, w]) => { localStorage.setItem("planyr.theme", t); localStorage.setItem("planarfit:leftWidth", String(w)); }, [theme, width]);
   await page.evaluate((id) => localStorage.setItem("planarfit:currentSite:v1", id), "zz-pl-" + f.tag);
-  await page.goto(BASE + "/#/site-planner", { waitUntil: "load" }); await page.reload({ waitUntil: "load" }); await sleep(SIGNED ? 3000 : 1800);
-  if (!(await T("planner-canvas").isVisible().catch(() => false))) await page.getByText(f.title, { exact: false }).first().click();
+  await page.goto(BASE + "/#/site-planner", { waitUntil: "load" });
+  if (SIGNED) await seed(); // the signed-in app prunes local-only sites between loads, so re-seed right before every reload
+  await page.reload({ waitUntil: "load" }); await sleep(SIGNED ? 3000 : 1800);
+  if (!(await T("planner-canvas").isVisible().catch(() => false))) await page.getByText(f.title, { exact: false }).first().click({ timeout: 15000 });
   await T("planner-canvas").waitFor({ timeout: 25000 }); await sleep(1200);
-  await page.locator('[data-rail-tab="parcel"]').first().click();
+  await page.locator('[data-rail-tab="parcel"]').first().click({ timeout: 15000 });
   await T("parcels-panel").waitFor({ timeout: 15000 }); await sleep(500);
+};
+// A cold signed-in boot occasionally has not opened the planner yet; retry the OPEN (never the assertions) up to 3 times.
+const openFixture = async (f, theme, width) => {
+  for (let k = 1; ; k++) { try { return await openFixtureOnce(f, theme, width); } catch (e) { if (k >= 3) throw e; console.log(`  (open ${f.tag}/${theme}/${width} attempt ${k} failed: ${String(e.message).split("\n")[0]} — retrying)`); } }
 };
 
 try {
@@ -143,7 +174,7 @@ try {
   if (SIGNED) { await seed(); await page.reload({ waitUntil: "load" }); await sleep(3000); }
   await assertMeasurable(page, "verify-parcel-list-layout");
   console.log("served build", await page.evaluate(async () => (await (await fetch("/version.json", { cache: "no-store" })).json()).build));
-  for (const f of FIX) for (const theme of THEMES) for (const width of WIDTHS) {
+  for (const f of FIX.filter((x) => !process.env.ONLY || process.env.ONLY.split(",").includes(x.tag))) for (const theme of THEMES) for (const width of WIDTHS) {
     const tag = `${f.tag}/${theme}/${width}`;
     await openFixture(f, theme, width);
     if ((await page.evaluate(() => document.documentElement.getAttribute("data-theme"))) !== theme && theme === "dark") throw new Error(`VOID: ${tag} — the dark theme did not apply`);
@@ -159,13 +190,27 @@ try {
     ok(`${tag}: every acres value (${rs.length} incl. group totals) shares one right edge`, spread <= 1, `spread ${spread.toFixed(2)}px`);
     ok(`${tag}: no icon box intersects any text box`, m.overlaps.length === 0, m.overlaps.slice(0, 3).join(" | "));
     // row heights: group by (hasSub, nameLines, subLines); each type uniform, extra lines add ~1 line height
-    const types = new Map(); m.rows.forEach((r) => { const k = `${r.hasSub ? 1 : 0}/${r.nameLines}/${r.subLines}`; (types.get(k) || types.set(k, []).get(k)).push(r.h); });
+    const types = new Map(); m.rows.forEach((r) => { const k = `${r.hasSub ? 1 : 0}/${r.nameLines}/${r.subLines}/${r.tagWrapped}`; (types.get(k) || types.set(k, []).get(k)).push(r.h); });
     const nonUniform = [...types].filter(([, hs]) => Math.max(...hs) - Math.min(...hs) > 1).map(([k, hs]) => `${k}: ${Math.min(...hs).toFixed(1)}–${Math.max(...hs).toFixed(1)}`);
     ok(`${tag}: row heights are consistent within each row type (${types.size} types)`, nonUniform.length === 0, nonUniform.join(" | "));
-    const single = types.get("0/1/0");
-    if (single) { const base = single[0]; const bad = [...types].filter(([k, hs]) => { const [s, n, u] = k.split("/").map(Number); const extra = (n - 1) + (u > 1 ? u - 1 : 0); return extra > 0 && !s ? Math.abs(hs[0] - base - extra * 17) > 2 : false; }); ok(`${tag}: a wrapped name adds only whole line heights`, bad.length === 0, bad.map(([k, hs]) => `${k}=${hs[0]}`).join(" | ")); }
+    const single = types.get("0/1/0/0");
+    if (single) { const base = single[0]; const bad = [...types].filter(([k, hs]) => { const [s, n, u, tw] = k.split("/").map(Number); const extra = (n - 1) + (u > 1 ? u - 1 : 0) + tw; return extra > 0 && !s ? Math.abs(hs[0] - base - extra * 17) > 2 : false; }); ok(`${tag}: a wrapped name adds only whole line heights`, bad.length === 0, bad.map(([k, hs]) => `${k}=${hs[0]}`).join(" | ")); }
+    // TOTALS RECONCILE: the rows/groups add up to the site total PLUS the disclosed overlap — or the mismatch is a defect (owner, 2026-10-11).
     const sumAc = Number(m.fs.sumText.split(" ")[0].replace(/,/g, "")), grpAc = m.groupAcres.reduce((a, b) => a + b, 0);
-    ok(`${tag}: the summary total equals the sum of the group totals (non-overlapping fixture)`, Math.abs(sumAc - grpAc) < 0.06, `${sumAc} vs ${grpAc.toFixed(2)}`);
+    const ovAc = m.overlapText ? Number((/([\d,]+\.\d\d) AC overlap/.exec(m.overlapText) || [0, "0"])[1].replace(/,/g, "")) : 0;
+    const gap = grpAc - sumAc;
+    ok(`${tag}: group totals reconcile with the site total — a gap is DISCLOSED as "N AC overlap" (gap ${gap.toFixed(2)}, disclosed ${ovAc.toFixed(2)})`, Math.abs(gap - ovAc) < 0.06 && (gap < 0.05 || (ovAc > 0 && m.rows.some((r) => r.tagged))), `${m.fs.sumText}`);
+    if (f.overlap) { if (!(gap > 0.5)) throw new Error(`VOID: ${tag} — the overlap fixture has no overlap in the DATA (rows add to ${grpAc.toFixed(2)}, site ${sumAc}); the totals check proves nothing`); }
+    else ok(`${tag}: a plan with no overlap shows no overlap tag or note`, !m.overlapText && !m.rows.some((r) => r.tagged));
+    // ICONS: every row icon sits INSIDE the one icon slot (padlock left of the eye), the slot is the same on every row, and the name block owns its whole cell
+    const slotSpread = Math.max(...m.slots.map((s) => s.r)) - Math.min(...m.slots.map((s) => s.r)), slotSpreadL = Math.max(...m.slots.map((s) => s.l)) - Math.min(...m.slots.map((s) => s.l));
+    ok(`${tag}: every icon sits inside its row's icon slot, padlock left of the eye`, m.outsideSlot.length === 0, m.outsideSlot.slice(0, 3).join(" | "));
+    ok(`${tag}: the icon slot is the same box on every row`, slotSpread <= 1 && slotSpreadL <= 1, `${slotSpread.toFixed(1)} / ${slotSpreadL.toFixed(1)}`);
+    ok(`${tag}: nothing but the name block sits in the name cell (the source line gets the full block width)`, m.cellShared.length === 0, m.cellShared.slice(0, 3).join(" | "));
+    // a source line may wrap ONLY if it genuinely does not fit the block (natural width > available), and a short one never wraps at a comfortable width
+    const badWrap = m.wrappedSources.filter((w) => w.natural <= w.avail + 0.5);
+    ok(`${tag}: no source line wraps while it fits the name block`, badWrap.length === 0, badWrap.slice(0, 2).map((w) => `${w.id} "${w.text}" ${w.natural.toFixed(0)}≤${w.avail.toFixed(0)}`).join(" | "));
+    if (width >= 320) { const shortWrapped = m.wrappedSources.filter((w) => w.text.length <= 30); ok(`${tag}: a short source line ("Combined from 2 parcels") is one line at ${width}`, shortWrapped.length === 0, shortWrapped.map((w) => `${w.id} "${w.text}" avail ${w.avail.toFixed(0)}`).join(" | ")); }
     ok(`${tag}: the summary number is the same size as the words around it`, m.fs.num === m.fs.sum, `${m.fs.num} vs ${m.fs.sum} — "${m.fs.sumText}"`);
     ok(`${tag}: text clears 4.5:1`, m.contrast.length === 0, m.contrast.slice(0, 3).join(" | "));
     ok(`${tag}: the panel never scrolls sideways (${m.panelW}px wide)`, !m.spills);
