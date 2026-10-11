@@ -15,25 +15,52 @@
  *   e. a mostly-vertical touch swipe starting on the slider leaves the value alone.
  * KNOWN-GOOD ARM: tapping the exact centre of the "10" tick must read 10 — if not, the run is void.
  * Usage: npx vite --port 5199 & ; node ui-audit/verify-food-rating-slider.mjs [baseUrl] [--shots=dir]
+ *        node ui-audit/verify-food-rating-slider.mjs --live=https://planyr.io   (signed in as the test account via
+ *        ui-audit/lib/signedInSession.mjs; opens a place's Log-a-visit form and NEVER submits it — nothing is written)
  */
 import { chromium, devices } from "playwright";
 import { mkdirSync } from "node:fs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
+import { openSignedIn } from "./lib/signedInSession.mjs";
 
-const BASE = process.argv.find((a) => a.startsWith("http")) || "http://localhost:5199";
+const BASE = process.argv.find((a) => a.startsWith("http") && !a.startsWith("--")) || "http://localhost:5199";
 const SHOTS = (process.argv.find((a) => a.startsWith("--shots=")) || "").slice(8);
 const FIX = `${BASE}/ui-audit/fixtures/food-panel.html`;
 let failed = 0;
 const check = (id, ok, detail = "") => { if (!ok) failed++; console.log(`${ok ? "PASS" : "FAIL"}  ${id}${detail ? "  — " + detail : ""}`); };
 
-const browser = await chromium.launch(process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {});
-const ctx = await browser.newContext({ ...devices["iPhone 15"], viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
-const page = await ctx.newPage();
-const errs = []; page.on("pageerror", (e) => errs.push(e.message));
-await page.goto(FIX, { waitUntil: "domcontentloaded" });
-await page.waitForSelector('[data-testid="food-log-visit-btn"]', { timeout: 20000 });
-await assertMeasurable(page, "verify-food-rating-slider");
-await page.locator('[data-testid="food-log-visit-btn"]').tap();
+const LIVE = (process.argv.find((a) => a.startsWith("--live=")) || "").slice(7).replace(/\/$/, "");
+let browser, ctx, page, closeAll = async () => {};
+const errs = [];
+if (LIVE) {
+  const sess = await openSignedIn({ base: LIVE, device: "iPhone 15", contextOptions: { viewport: { width: 390, height: 844 } } });
+  page = sess.page; ctx = page.context(); closeAll = () => sess.close();
+  page.on("pageerror", (e) => errs.push(e.message));
+  await page.goto(`${LIVE}/#/food`, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="food-search-box"]', { timeout: 45000 });
+  await assertMeasurable(page, "verify-food-rating-slider");
+  const box = page.locator('[data-testid="food-search-box"]');
+  await box.tap(); await box.pressSequentially("dao", { delay: 40 });
+  await page.waitForSelector('[data-testid="food-search-results"] button', { timeout: 60000 });
+  await page.waitForTimeout(1200);
+  await page.locator('[data-testid="food-search-results"] button').filter({ hasText: /^DAO['’]N/i }).first().tap();
+  await page.waitForSelector('[data-testid="food-visit-panel"], [data-testid="food-bottom-sheet"]', { timeout: 20000 });
+  await page.waitForTimeout(3800);
+  // the served build, read in the SAME observation as the assertions below
+  const build = await page.evaluate(async () => (await (await fetch("/version.json", { cache: "no-store" })).json()).build);
+  console.log(`LIVE ${LIVE}  build=${build}`);
+  await page.locator('[data-testid="food-log-visit-btn"]').tap();
+} else {
+  browser = await chromium.launch(process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {});
+  ctx = await browser.newContext({ ...devices["iPhone 15"], viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  page = await ctx.newPage();
+  page.on("pageerror", (e) => errs.push(e.message));
+  await page.goto(FIX, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="food-log-visit-btn"]', { timeout: 20000 });
+  await assertMeasurable(page, "verify-food-rating-slider");
+  await page.locator('[data-testid="food-log-visit-btn"]').tap();
+  closeAll = () => browser.close();
+}
 await page.waitForSelector('[data-testid="dish-score-slider"]');
 if (SHOTS) { mkdirSync(SHOTS, { recursive: true }); }
 
@@ -117,7 +144,7 @@ for (const [name, rootSel, slSel, roSel] of sliders) {
 }
 if (SHOTS) await page.screenshot({ path: `${SHOTS}/visit-sheet.png`, fullPage: false });
 check("no page errors", errs.length === 0, errs.join(" | "));
-await browser.close();
+await closeAll();
 console.log(failed ? `\n${failed} FAILED` : "\nALL PASSED");
 process.exit(failed ? 1 : 0);
 
