@@ -661,7 +661,7 @@ were split out of this file.
     showing up like shit when it gets to the real thing": grouped by source (County lots · Combined · Drawn · Other), each
     group header carrying its ACTIVE acres; ONE summary line at body size ("174.28 AC in site · 10 of 11 active" — never a
     display-size figure, "this is a professional software"); names and source lines wrap and are NEVER ellipsised; acres in one
-    fixed column with a shared right edge; no column-heading row; the padlock exists only while locked and lives in the right-hand icon slot (left of the eye) — never in the name block; rename is a ⋯ menu item; the site total stays the TRUE (dissolved) area and overlapping parcels are DISCLOSED (a muted "overlaps" tag per row + "· N AC overlap" on the summary), never silent. A change to this list
+    fixed column with a shared right edge; no column-heading row; the padlock exists only while locked and lives in the right-hand icon slot (left of the eye) — never in the name block; rename is a ⋯ menu item; the site total stays the TRUE (dissolved) area and overlapping parcels are DISCLOSED (a muted overlap ICON in the icon slot per row — never a pill, never in the name block — and a second short muted summary line "N AC overlaps, counted once"; neither summary line wraps), never silent. A change to this list
     is judged on real-shaped data at every panel width in both themes — `ui-audit/verify-parcel-list-layout.mjs` (a required
     CI gate) — not on tidy fixtures. (B2243424.)
 
