@@ -746,7 +746,7 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
 .land-row-hover { opacity: 0; transition: opacity .12s; }
 .land-parcel-row:hover .land-row-hover,
 .land-parcel-row:focus-within .land-row-hover,
-.land-row-hover:focus-visible { opacity: 1; }
+.land-row-hover:focus-visible, .land-row-hover.is-open { opacity: 1; }
 @media (hover: none) { .land-row-hover { opacity: 1; } }
 
 /* card section headers */

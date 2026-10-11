@@ -77,7 +77,7 @@ try {
   const rowText = async (id) => (await T("parcel-table-row-" + id).innerText()).replace(/\s+/g, " ");
   ok("SCHIEL's list row reads 'Harris CAD · 0421030000123' (not the OBJECTID 634440)", /Harris CAD · 0421030000123/.test(await rowText("schiel")) && !/634440/.test(await rowText("schiel")), await rowText("schiel"));
   ok("a parcel with no evidence of origin has no 'Drawn' line", !/Drawn/.test(await rowText("p2")), await rowText("p2"));
-  ok("a parcel stamped as drawn says 'Drawn'", /Drawn/.test(await rowText("trs")), await rowText("trs"));
+  ok("a parcel stamped as drawn sits under the Drawn group (no second line)", (await T("parcel-table-row-trs").getAttribute("data-group-kind")) === "drawn" && (await T("parcel-row-source-trs").count()) === 0, await rowText("trs"));
 
   for (const [id, label] of [["schiel", "SCHIEL"], ["p2", "Parcel 2"], ["trs", "TRS 1B-10"]]) {
     await T("parcel-row-" + id).click();
