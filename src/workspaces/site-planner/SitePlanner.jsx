@@ -79,7 +79,8 @@ import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, a
 // NEW-1 — the per-site "Show above plan" twin of the four above: which GIS layers this site had
 // lifted over the site elements. Its own sparse map, so nothing about layerOverrides changes.
 import { sanitizeLayerAbove, aboveFromOverlays, applyAboveOverrides, aboveSig } from "./lib/layerPrefs.js";
-import { BASEMAPS, SITE_PLAN_BASEMAP, IMAGERY_GRADE } from "../../shared/basemaps/basemaps.js";
+import { BASEMAPS, SITE_PLAN_BASEMAP, IMAGERY_GRADE, siteStack } from "../../shared/basemaps/basemaps.js";
+import { loadRoadNamesPref, saveRoadNamesPref } from "./lib/roadNamesPref.js";
 import {
   ppfToZoom, zoomToPpf, exactContainerPoint,
   basemapWrapPoint, mapBoxInset, mapBoxCenterX, registrationShift, sanitizeShift, tileNwFeet, registrationLayoutMayHaveChanged, resolvedLayoutInputs,
@@ -3034,6 +3035,38 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // BUILD-TIME choices (see the retina note above). Re-running this effect on every zoom
     // would rebuild the tile layer and refetch the whole aerial mid-gesture.
   }, [basemapSrc, basemapOn, origin, showAerial]);
+
+  /* Road names over the aerial (NEW-1) — the SAME vector label helper and the SAME `siteStack` gate the
+   * map finder uses (one implementation, no fork). The helper adds its own Leaflet pane (z 250, pointer-
+   * events none) INSIDE this map's pane, so the labels ride the basemap's own transform through every
+   * commit (panBy / setView / panel re-centre) and sit above the aerial but under the plan SVG, so every
+   * element, markup and overlay paints over them. Mounted once per (gate, source) change — never per pan
+   * frame: `roadsOn` is a boolean off the committed zoom, so a pan re-renders nothing here.
+   * PDF-PARITY decision: the exported sheet does NOT carry the aerial's live Leaflet layers, so road
+   * names (a live layer on the same map) are likewise screen-only, matching the aerial's own export path. */
+  const [roadNamesPref, setRoadNamesPref] = useState(loadRoadNamesPref);
+  const roadNamesOpacityRef = useRef(roadNamesPref.opacity);
+  roadNamesOpacityRef.current = roadNamesPref.opacity;
+  const roadsOn = !!wantBasemapSrc(basemapOn, showAerial, basemapSrc) && roadNamesPref.on && geoZoom != null
+    && siteStack(geoZoom, { roads: true }).includes("roadNames");
+  const applyRoadNamesOpacity = () => {
+    const pane = geoMapRef.current && geoMapRef.current.getPane && geoMapRef.current.getPane("planyrVectorLabels");
+    if (pane) pane.style.opacity = String(roadNamesOpacityRef.current);
+  };
+  useEffect(() => {
+    const map = geoMapRef.current;
+    if (!map || !roadsOn) return undefined;
+    let cancelled = false, handle = null;
+    import("../../shared/basemaps/vectorLabelLayer.js").then(({ addVectorLabels }) => {
+      if (cancelled) return;
+      handle = addVectorLabels(L, map, { mode: "site", includePois: false, onStatus: applyRoadNamesOpacity });
+      applyRoadNamesOpacity();
+    }).catch((e) => console.error("SitePlanner: road names failed to load", e));
+    return () => { cancelled = true; if (handle) handle.remove(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roadsOn, origin]);
+  useEffect(() => { applyRoadNamesOpacity(); }, [roadNamesPref.opacity, roadsOn]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { saveRoadNamesPref(roadNamesPref); }, [roadNamesPref]);
 
   /* Re-sync the basemap size when the planner is (re-)shown (keep-alive show/hide) or the origin
      first lands. A resize WHILE the planner is shown (a docked panel opening/closing shrinks the
@@ -25393,6 +25426,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       // map to start over, which is exactly the dead end this tranche exists to end.
                       disabledReason: origin ? null : "This plan has no location yet — the aerial needs a real-world spot to anchor to.",
                     }}
+                    placeNames={origin ? {
+                      value: roadNamesPref.on, onChange: (on) => setRoadNamesPref((p) => ({ ...p, on })),
+                      opacity: roadNamesPref.opacity, onOpacityChange: (opacity) => setRoadNamesPref((p) => ({ ...p, opacity })),
+                    } : null}
                     gisNote={origin ? null : "GIS layers (flood, wetlands, boundaries, utilities) appear here once this plan has a location."}
                     onSetLocation={origin ? null : () => setSetLocOpen(true)}
                     /* NEW-1 — the LIVE zoom every row's gate is reported against, and the fix.
