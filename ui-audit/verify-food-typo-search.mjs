@@ -20,9 +20,16 @@ const SHOWN = 10;
 const CASES = [
   ["Carabas", /carrabba/i, true], ["Carrabas", /carrabba/i, true], ["Carrabbas", /carrabba/i, true],
   ["Carrabba's", /carrabba/i, true], ["carrab", /carrabba/i, true],
-  ["Chikfila", /chick-?\s?fil/i, false], ["Chick fil a", /chick-?\s?fil/i, false], ["Chipolte", /chipotle/i, false],
-  ["Fadis", /fadi/i, false], ["Five Guy", /five guys/i, false], ["Torchys", /torchy/i, false], ["Zoes", /zo[eë]s kitchen/i, false],
-  ["Chick-fil-A", /chick-?fil/i, false], ["Chipotle", /chipotle/i, false],
+  // NEW-1 (2026-10-11): a stray row spelled exactly like the typo ("Chik Fila", city-only "Chik-fil-a | Plano",
+  // "Whataburgr Restaurant | Irving", a far "Fadi's") must not beat the nearby real chain.
+  ["Chikfila", /chick-?\s?fil/i, true], ["Chikfilla", /chick-?\s?fil/i, true], ["Chikfil-a", /chick-?\s?fil/i, true],
+  ["Chick fil a", /chick-?\s?fil/i, true], ["Chickfila", /chick-?\s?fil/i, true], ["Chick-fil-A", /chick-?fil/i, true],
+  ["Whataburgr", /whataburger/i, true], ["Whatburger", /whataburger/i, true],
+  ["Fadis", /^fadi.s/i, true], ["Popeys", /popeyes/i, true],
+  ["Chipolte", /chipotle/i, true], ["Five Guy", /five guys/i, true], ["Torchys", /torchy/i, true], ["Zoes", /zo[eë]s kitchen/i, true],
+  ["Chipotle", /chipotle/i, true],
+  // far-exact controls: uniquely named places in Austin / Dallas, typed exactly from Katy — must still lead
+  ["Copperhead Club", /^copperhead club$/i, true], ["Stein's Bakery", /^stein's bakery$/i, true],
 ];
 let bad = 0;
 for (const [q, re, required] of CASES) {
