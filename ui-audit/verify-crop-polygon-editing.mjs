@@ -111,8 +111,12 @@ const storedCrop = () => page.evaluate((id) => {
     const q = p.matrixTransform(img.getScreenCTM());
     return { x: q.x, y: q.y };
   }, ov.id);
-  const px = await pixelAt(Math.round(client.x), Math.round(client.y));
-  const isGray = Math.abs(px[0] - 188) < 25 && Math.abs(px[1] - 200) < 25 && Math.abs(px[2] - 212) < 25;
+  // the fill is read through a blend with the basemap that settles over ~1s (a single early read measured
+  // 28/255 off one run in two) — re-read up to 6 times; it must still reach the SAME fixture colour.
+  const grayish = (q) => Math.abs(q[0] - 188) < 25 && Math.abs(q[1] - 200) < 25 && Math.abs(q[2] - 212) < 25;
+  let px = await pixelAt(Math.round(client.x), Math.round(client.y));
+  for (let i = 0; i < 6 && !grayish(px); i++) { await page.waitForTimeout(500); px = await pixelAt(Math.round(client.x), Math.round(client.y)); }
+  const isGray = grayish(px);
   check("[known-good arm] uncropped: a point inside the L reads the fixture's fill colour", isGray, JSON.stringify(px));
   if (!isGray) { console.log("  ⛔ VOID — the probe cannot see a known answer; no score reported."); await browser.close(); process.exit(2); }
 }
