@@ -80,7 +80,7 @@ function Sketch({ points, sections, selectedKey, hoverKey, editing, onSelect, on
 
 const rowStyle = (sel) => ({ display: "grid", gridTemplateColumns: "10px minmax(0, 1fr) auto", alignItems: "center", columnGap: SPACE.md, padding: `${SPACE.xs}px ${SPACE.sm}px`, borderRadius: RADIUS.sm, border: `1px solid ${sel ? "var(--accent-site)" : "transparent"}`, background: sel ? "var(--surface-selected)" : "transparent", cursor: "pointer" });
 
-export default function SetbackSections({ points, sections, selectedKey, onSelect, onSetValue, onSetAll, onToggleVertex, onResetAll, resetLabel, showLine, onShowLine, renderNum }) {
+export default function SetbackSections({ points, sections, selectedKey, onSelect, onSetValue, onSetAll, onToggleVertex, onResetAll, resetLabel, showLine, onShowLine, renderNum, collapsed }) {
   const [editing, setEditing] = useState(false);
   const [hoverKey, setHoverKey] = useState(null);
   const { common, others } = useMemo(() => summarizeSetbacks(sections), [sections]);
@@ -102,6 +102,11 @@ export default function SetbackSections({ points, sections, selectedKey, onSelec
   };
   return (
     <div data-testid="setback-sections">
+      {collapsed && (
+        <div role="alert" data-testid="setback-collapsed" style={{ marginBottom: SPACE.sm, padding: `${SPACE.xs}px ${SPACE.sm}px`, borderRadius: RADIUS.sm, border: "1px solid var(--danger)", color: "var(--danger-text, var(--text-primary))", fontSize: FONT_SIZE.control, fontWeight: 700 }}>
+          Setbacks exceed parcel — no buildable area
+        </div>
+      )}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: SPACE.lg, rowGap: SPACE.xs, marginBottom: SPACE.sm }}>
         <span data-testid="setback-all" style={{ display: "inline-flex", alignItems: "center", gap: SPACE.sm, fontSize: FONT_SIZE.control, color: "var(--text-primary)" }}>
           <span style={{ fontWeight: 700 }}>Setback</span>

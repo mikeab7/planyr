@@ -308,7 +308,7 @@ import { setbackChipRuns, setbackChipsVisible, CHIP_MIN_EDGE_PX, CHIP_MIN_SEP_PX
 // NEW-1 — the setback ring's inward offset (and the line-intersection primitive it is built on)
 // moved out of this file unchanged, so the buildable envelope a parcel's setbacks produce can be
 // proven in a unit test against real production geometry instead of only by rendering.
-import { offsetPolygon, outsetPolygon, lineIntersect } from "./lib/parcelOffset.js";
+import { offsetPolygon, outsetPolygon, lineIntersect, setbackEnvelope } from "./lib/parcelOffset.js";
 // NEW-1 — the REGULATORY tier above the two geometric ones: a zoning ordinance names four
 // setbacks (Front / Side / Street side / Rear), not fifteen digitized sides. Pure + unit-tested;
 // roles are labels over edges and never an input to a measurement, so the canonical per-edge
@@ -21936,6 +21936,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 6 }}>Setbacks</div>
         <SetbackSections points={pc.points} sections={secs} selectedKey={selSectionKey} onSelect={setSelSectionKey} onSetValue={sbSectionValue} onSetAll={sbAllValue} onToggleVertex={sbToggleVertex}
           showLine={settings.showSetback} onShowLine={(v) => setSettings((st) => ({ ...st, showSetback: v }))}
+          collapsed={setbackEnvelope(pc.points, parcelSetbacks(pc)).collapsed}
           resetLabel={`Reset to default (${settings.setback}′)`}
           onResetAll={() => { pushHistory(); setParcels((a) => a.map((p) => p.id === pc.id ? { ...p, setbacks: Array.from({ length: p.points.length }, () => +settings.setback || 0) } : p)); }}
           renderNum={(value, onCommit, ariaLabel) => <NumInput style={{ ...numInput, width: 54 }} value={value} min={0} ariaLabel={ariaLabel} onCommit={onCommit} />} />
@@ -24201,6 +24202,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 if (!insetRingVisible(Math.min(...posSb), labelPpf)) return null;
                 const o = offsetPolygon(pc.points, sb);
                 if (!o) return null;
+                // NEW-1 — LOUD FAILURE: setbacks wider than the lot leave nothing to build on; say so on the plan.
+                const gone = setbackEnvelope(pc.points, sb).collapsed;
                 const zk = strokeZk; // B617/B880 zoom factor — hold the setback weight + dash constant relative to the drawing (NEW-1: 1 on an export pass)
                 const ring = o.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
                 // NEW-1 — the setback line's own standards (colour / weight / style), stamped at
@@ -24216,7 +24219,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const dash = explicit ? sbs.dash : "2 5";
                 // NEW-2 — CASING under the ring, on the same dash so the halo dashes with it.
                 const sbCase = strokeZoom(sbs.weight + PARCEL_CASING_W, zk);
+                const goneAt = gone ? polylabel(pc.points) : null;
                 return <g key={`sb${pc.id}`} opacity={explicit ? 1 : 0.65}>
+                  {goneAt && (() => { const c = f2p(goneAt); return (
+                    <text data-testid="setback-collapsed-badge" x={c.x} y={c.y} textAnchor="middle" dominantBaseline="central" pointerEvents="none"
+                      style={{ fontSize: 12, fontWeight: 700, fill: "var(--danger-text)", paintOrder: "stroke", stroke: "var(--surface-raised)", strokeWidth: 3, strokeLinejoin: "round" }}>Setbacks exceed parcel — no buildable area</text>); })()}
                   <polygon data-testid="setback-casing" points={ring} fill="none" stroke={PAL.lineCasing} strokeWidth={sbCase} strokeDasharray={dashZoom(dash, zk)} strokeLinejoin="round" pointerEvents="none" />
                   <polygon data-testid="setback-ring" data-setback-explicit={explicit ? "1" : "0"} points={ring} fill="none" stroke={sbs.stroke} strokeWidth={strokeZoom(sbs.weight, zk)} strokeDasharray={dashZoom(dash, zk)} strokeOpacity={sbs.opacity} pointerEvents="none" />
                   {/* NEW-4 — the SELECTED lot's grab band is not drawn here: it moves up into the
