@@ -49,7 +49,7 @@ import {
   CLOUD_ARC_MIN_FT, CLOUD_ARC_STEP_FT, CLOUD_ARC_MAX_FT, CLOUD_ARC_DEFAULT_FT, CLOUD_STATUS_OPTIONS,
   clampCloudArcFt, cloudScallopPath, simplifyPath, cloudMetaDefaults,
 } from "./lib/cloudGeometry.js";
-import { EMPTY_TAP, tapTime, stepDoubleTap, pairsWithLastTap } from "./lib/doubleTap.js";
+import { EMPTY_TAP, tapTime, stepDoubleTap, pairsWithLastTap, DBLTAP_PX } from "./lib/doubleTap.js";
 import { DRAG_SLOP_PX, makeDragGate, stepDragGate, dragArmed } from "./lib/dragGate.js";
 import { GESTURE_SAVE_POLL_MS, deferSaveDecision } from "./lib/gestureSave.js";
 import { isDiagArmed, latchDiagArm } from "./lib/diagArm.js";
@@ -321,6 +321,7 @@ import { polylabel } from "./lib/polylabel.js";
 // right now. The menu is the DISCOVERABLE surface (a gesture or right-click is only ever the fast
 // path), so "every parcel action has a menu path" is a property a test asserts — not a convention.
 import { PARCEL_SURFACES, parcelMenuModel, boundaryEditHint } from "./lib/parcelActions.js";
+import { ParcelToolsMenu, MeasureMenu, MenuIcon } from "./components/RailMenus.jsx";
 // B1123 bundle-budget offset — the title reader is loaded ON DEMAND (dynamic import in
 // `runTitleExtract`). Its Claude schema + prompt are KB of string literals that minify to
 // themselves and are needed only once someone uploads a title commitment; only the tiny stored-key
@@ -784,6 +785,10 @@ const MEASURE_MODES = [["line", "Length"], ["polyline", "Polylength"], ["area", 
 const DEFAULT_ROAD_WIDTHS = "24, 26, 30, 36, 40";
 const roadWidthPresets = (settings) => (settings?.roadWidths ?? DEFAULT_ROAD_WIDTHS).split(",").map((s) => s.trim()).filter((s) => Number.isFinite(+s) && +s > 0);
 const DEFAULT_ROAD_WIDTH = roadWidthPresets(null)[0]; // "24"
+// NEW-2 — the one-line hint under each mode in Measure ▾. Each states what ACTUALLY finishes the
+// measurement (verified by e2e/measure-menu.spec.js): Enter or a double-click commits Polylength and
+// Count, Area closes on a double-click (or the first dot), Length is exactly two clicks.
+const MEASURE_HINTS = { line: "Two clicks, straight line", polyline: "Click points; double-click or Enter to finish", area: "Click corners; double-click to close", count: "Click each item; double-click or Enter to finish" };
 const measureModeLabel = (m) => { const e = MEASURE_MODES.find(([k]) => k === m); return e ? e[1] : m; };
 const MAX_DIM = 100000; // ft — sane upper clamp so a fat-fingered size can't make absurd geometry / SVG stalls
 // Relational tags that point at OTHER elements (a host building or a truck court). A copy/paste
@@ -8218,11 +8223,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (polySelfIntersects(pts)) { flashWarn(`${label} outline crosses itself — its area may be wrong. Redraw without crossing lines.`, 7000); }
     else if (polyArea(pts) < 1) { flashWarn(`${label} has almost no area — check the outline.`, 6000); }
   };
-  const finishMeasure = () => {
+  const finishMeasure = (draft = measDraft) => {
     const std = measureDefaultStyle(settings); // NEW-1 — Standards defaults, stamped at creation
-    if (measureMode === "polyline" && measDraft.length >= 2) { pushHistory(); setMeasures((m) => [...m, ...withStackZ(m, [{ id: uid(), mode: "polyline", pts: measDraft, ...std }])]); }
-    else if (measureMode === "area" && measDraft.length >= 3) { pushHistory(); setMeasures((m) => [...m, ...withStackZ(m, [{ id: uid(), mode: "area", pts: measDraft, ...std }])]); flashPolyWarn(measDraft, "Measured area"); }
-    else if (measureMode === "count" && measDraft.length >= 1) { pushHistory(); setMeasures((m) => [...m, ...withStackZ(m, [{ id: uid(), mode: "count", pts: measDraft, ...std }])]); }
+    if (measureMode === "polyline" && draft.length >= 2) { pushHistory(); setMeasures((m) => [...m, ...withStackZ(m, [{ id: uid(), mode: "polyline", pts: draft, ...std }])]); }
+    else if (measureMode === "area" && draft.length >= 3) { pushHistory(); setMeasures((m) => [...m, ...withStackZ(m, [{ id: uid(), mode: "area", pts: draft, ...std }])]); flashPolyWarn(draft, "Measured area"); }
+    else if (measureMode === "count" && draft.length >= 1) { pushHistory(); setMeasures((m) => [...m, ...withStackZ(m, [{ id: uid(), mode: "count", pts: draft, ...std }])]); }
     setMeasDraft([]);
   };
   /* NEW-1 — SPLIT ALONG AN ARBITRARY CUT. One engine, no case analysis.
@@ -10233,7 +10238,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const finishActiveDrawing = () => {
     if (traceMode && tracePts.length >= 2) { commitTrace(); return true; }
     if (tool === "split" && splitPath.length >= 2) { finishSplit(); return true; }
-    if (tool === "measure" && measDraft.length >= (measureMode === "area" ? 3 : measureMode === "count" ? 1 : 2)) { finishMeasure(); return true; }
+    if (tool === "measure" && measDraft.length >= (measureMode === "area" ? 3 : measureMode === "count" ? 1 : 2)) {
+      /* NEW-2 — the two presses of a double-click are two ordinary clicks, so the second has already
+       * dropped a point ON the first's. Take that echo back off before finishing, or a Polylength ends
+       * with a zero-length last leg, an Area with a doubled corner and a Count counts the last item
+       * twice. Only a point within the double-click's own slop of the one before it is an echo (two
+       * real items that close would be overlapping markers). */
+      const n = measDraft.length;
+      const echo = n >= 2 && dist(f2p(measDraft[n - 1]), f2p(measDraft[n - 2])) <= DBLTAP_PX;
+      const draft = echo ? measDraft.slice(0, -1) : measDraft;
+      if (draft.length >= (measureMode === "area" ? 3 : measureMode === "count" ? 1 : 2)) finishMeasure(draft);
+      else setMeasDraft(draft);
+      return true;
+    }
     if (tool === "mpolyline" && mkPoly?.pts?.length >= 2) { finishMkPoly(); return true; }
     if (tool === "mpolygon" && mkPoly?.pts?.length >= 3) { finishMkPoly(); return true; }
     if (tool === "mcloud" && mkPoly?.kind === "mcloud" && mkPoly?.pts?.length >= 3) { finishMkPoly(); return true; }
@@ -13068,7 +13085,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const parcelCadName = cadNameOf(COUNTIES[restored?.county]?.label || null);
   const parcelIdField = (COUNTIES[restored?.county] || {}).idField || null;
   const parcelAddrField = (COUNTIES[restored?.county] || {}).addrField || null;
-  const parcelRows = useMemo(() => buildParcelRows(parcels, { cadName: parcelCadName, idField: parcelIdField }), [parcels, parcelCadName, parcelIdField]);
+  const parcelRows = useMemo(() => buildParcelRows(parcels, { cadName: parcelCadName, idField: parcelIdField, overlapPairs: parcelOverlapPairs }), [parcels, parcelCadName, parcelIdField, parcelOverlapPairs]);
   const pickedParcelIds = useMemo(() => new Set(combineSel), [combineSel]);
   const parcelSiteAcres = useMemo(() => includedAcres(parcels), [parcels]);
   const parcelActsRef = useRef({});
@@ -26066,15 +26083,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <AnchoredMenu open={toolMenu} onClose={() => setToolMenu(false)} anchorRef={boundaryAnchor} placement="left" gap={0} width={272} panelStyle={menuPanel}>
               {(() => {
                 const pcm = menuParcel();
+                // THIS PARCEL is about the parcel that is actually SELECTED — a plan's only lot
+                // fills in for Delete alone (`canDelete`), as it always has.
+                const selPc = sel?.kind === "parcel" ? parcels.find((x) => x.id === sel.id) || null : null;
+                const selRow = selPc ? parcelRows.find((r) => r.id === selPc.id) : null;
                 const groups = parcelMenuModel({
                   parcelCount: parcels.length,
                   activeCount: parcels.filter((p) => p.active !== false).length,
                   hasOrigin: !!origin,
-                  selected: pcm ? { locked: !!pcm.locked, active: pcm.active, chipHidden: !!pcm.chipHidden, labelOffset: pcm.labelOffset || null } : null,
+                  selected: selPc ? { locked: !!selPc.locked, active: selPc.active, chipHidden: !!selPc.chipHidden, labelOffset: selPc.labelOffset || null, name: selRow?.name || parcelLabel(selPc.id), acres: selRow ? selRow.acres : null, color: selPc.stroke || PAL.parcel } : null,
+                  canDelete: !!pcm,
                   tool, parcelMode, mergePick, boundaryEdit,
                 });
                 // id → what it does. Every entry arms an EXISTING path; nothing here is a second
-                // implementation of an action that already lives somewhere else.
+                // implementation of an action that already lives somewhere else. The three SWITCH
+                // rows (lock / active / chip) apply in place and leave the menu OPEN.
                 const run = {
                   draw: () => selectTool("parcel"),
                   deed: () => { setToolMenu(false); setTitleErr(""); setDeedErr(""); setDeedBusy(false); setTitleOpen(true); },
@@ -26084,64 +26107,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   combine: () => { setToolMenu(false); if (mergePick) exitMergePick(); else startMergePick(); },
                   boundary: () => { setToolMenu(false); if (boundaryEdit) exitBoundaryEdit(); else startBoundaryEdit(); },
                   setbacks: () => openLandPanel(),
-                  lock: () => { if (pcm) toggleParcelLock(pcm.id); setToolMenu(false); },
-                  active: () => { if (pcm) toggleParcelActive(pcm.id); setToolMenu(false); },
-                  chip: () => { if (pcm) setParcelChipHidden(pcm.id, !pcm.chipHidden); setToolMenu(false); },
-                  chipReset: () => { if (pcm) resetParcelChipOffset(pcm.id); setToolMenu(false); },
-                  removeMode: () => startRemoveParcels(),
+                  lock: () => { if (selPc) toggleParcelLock(selPc.id); },
+                  active: () => { if (selPc) toggleParcelActive(selPc.id); },
+                  chip: () => { if (selPc) setParcelChipHidden(selPc.id, !selPc.chipHidden); },
+                  chipReset: () => { if (selPc) resetParcelChipOffset(selPc.id); setToolMenu(false); },
                   deleteSelected: () => { if (pcm) removeParcelById(pcm.id); setToolMenu(false); },
                 };
-                return groups.map((g, gi) => (
-                  <div key={g.id}>
-                    {gi > 0 && <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "5px 2px 3px" }} />}
-                    <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 5px" }}>{g.label}</div>
-                    {/* NEW-2 (B849585) — a group whose rows are ALL disabled states its reason once,
-                        here, instead of leaving it to be inferred from N silently-greyed rows. */}
-                    {g.reason && (
-                      <div data-parcel-group-reason={g.id} style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.35, padding: "0 8px 6px" }}>{g.reason}</div>
-                    )}
-                    {/* Every row is addressable by `data-parcel-action` (the uniform hook the guards
-                        and the e2e spec use). The Deed row additionally keeps its historical
-                        `boundary-menu-mb` testid — two ui-audit harnesses click it by that name.
-                        NEW-2 (B849585) — a disabled row also drops OPACITY (matching the Button/
-                        IconButton primitive's own `disabled → opacity: 0.5` in docs/DESIGN.md),
-                        never a color-token swap alone: the color-only treatment read as ordinary
-                        secondary text, indistinguishable from an enabled row at a glance. */}
-                    {g.rows.map((r) => (
-                      <button key={r.id} data-parcel-action={r.id}
-                        data-testid={r.id === "deed" ? "boundary-menu-mb" : `parcel-menu-${r.id}`} disabled={!r.enabled}
-                        title={r.enabled ? undefined : r.disabledReason}
-                        aria-pressed={r.active || undefined}
-                        style={{ ...menuItem(r.active), display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
-                          ...(r.enabled ? (r.danger ? { color: PAL.danger } : {}) : { color: PAL.disabled, ...disabledRow }) }}
-                        onClick={r.enabled ? run[r.id] : undefined}>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                          {r.id === "deed" && <ToolIcon id="deed" size={13} />}
-                          {r.label}
-                        </span>
-                        {r.detail && <span style={{ fontSize: 10.5, fontWeight: 600, color: r.enabled ? PAL.muted : PAL.disabled, whiteSpace: "nowrap" }}>{r.detail}</span>}
-                      </button>
-                    ))}
-                  </div>
-                ));
+                return <ParcelToolsMenu groups={groups} run={run} menuItem={menuItem} disabledRow={disabledRow} />;
               })()}
             </AnchoredMenu>
           </div>
 
           {/* measure with line / polyline / area / count modes — promoted to sit just below Tools (B605) */}
           <div ref={measureAnchor} style={{ position: "relative" }}>
+            {/* NEW-2 (2026-10-11) — the ▾ pill shows the REMEMBERED mode's icon (not the word), in the same
+                value-pill slot Road/Parking use, so the ▾ column stays aligned. The label arms that mode
+                directly (`measureMode` is persisted); the ▾ opens the explained list. */}
             <RailSplit icon={<ToolIcon id="measure" />} label="Measure" narrow={narrow} active={tool === "measure"}
               rowStyle={rbtn(tool === "measure", measureMenu)} onMain={() => selectTool("measure")} expanded={measureMenu}
-              mainProps={{ "aria-pressed": tool === "measure" }}
-              onCaret={() => setMeasureMenu((o) => !o)} caretLabel="Measure modes" />
+              mainProps={{ "aria-pressed": tool === "measure", title: `Measure — starts ${measureModeLabel(measureMode)}, your last mode` }}
+              onCaret={() => setMeasureMenu((o) => !o)} caretLabel={`Measure mode: ${measureModeLabel(measureMode)}`}
+              value={<MenuIcon id={measureMode} size={13} />} valueTitle={`Measure mode: ${measureModeLabel(measureMode)} · click to change`} pillTestid="rail-measure-mode-pill"
+              caretProps={{ "data-measure-mode-current": measureMode }} />
             {/* NEW-4 (B849587) — `below-right`, anchored on the WHOLE split control: the panel's
                 right edge lands under the caret's own right edge (the control actually pressed),
                 never off to the left of the entire row. */}
-            <AnchoredMenu open={measureMenu} onClose={() => setMeasureMenu(false)} anchorRef={measureAnchor} placement="below-right" width={230} panelStyle={menuPanel}>
-              <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Measure</div>
-              {MEASURE_MODES.map(([k, label]) => (
-                <button key={k} style={menuItem(tool === "measure" && measureMode === k)} onClick={() => { setMeasureMode(k); selectTool("measure"); setMeasureMenu(false); }}>{label}</button>
-              ))}
+            <AnchoredMenu open={measureMenu} onClose={() => setMeasureMenu(false)} anchorRef={measureAnchor} placement="below-right" width={296} panelStyle={menuPanel}>
+              <MeasureMenu modes={MEASURE_MODES} hints={MEASURE_HINTS} current={measureMode} menuItem={menuItem} accentSoft={PAL.accentSoft}
+                onPick={(k) => { setMeasureMode(k); selectTool("measure"); setMeasureMenu(false); }} />
             </AnchoredMenu>
           </div>
 

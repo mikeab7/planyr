@@ -31,7 +31,7 @@ async function startBlank(page) {
 }
 
 async function armMeasure(page, mode) {
-  await page.getByRole("button", { name: "Measure modes" }).click();
+  await page.getByRole("button", { name: /^Measure mode:/ }).click();
   await page.getByRole("button", { name: mode, exact: true }).click();
 }
 

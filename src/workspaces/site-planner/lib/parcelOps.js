@@ -251,8 +251,15 @@ export function deedAcresSummed(tract) {
 }
 
 /* One display row per parcel for the table — everything the row, the filter and the sort read. */
-export function buildParcelRows(parcels, { cadName = null, idField = null } = {}) {
+export function buildParcelRows(parcels, { cadName = null, idField = null, overlapPairs = null } = {}) {
+  // overlapPairs = polyClip.overlappingParcelPairs(parcels) (ACTIVE parcels only) — passed in so the planner's one scan is shared.
+  const overlapsOf = new Map();
+  for (const o of overlapPairs || []) {
+    (overlapsOf.get(o.aId) || overlapsOf.set(o.aId, []).get(o.aId)).push({ id: o.bId, sqft: o.area });
+    (overlapsOf.get(o.bId) || overlapsOf.set(o.bId, []).get(o.bId)).push({ id: o.aId, sqft: o.area });
+  }
   return parcelOutline(parcels).map(({ pc, depth, name, superseded, unnamed }) => ({
+    overlaps: overlapsOf.get(pc.id) || [],
     pc, depth, name, superseded, unnamed: !!unnamed,
     origin: parcelOrigin(pc, { cadName, idField }),
     id: pc.id,

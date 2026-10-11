@@ -194,7 +194,7 @@ test.describe("right tool rail — values, menus, states", () => {
     await expect(pill).toHaveAttribute("aria-label", "Parking type, stall 9 by 18 feet");
   });
 
-  test("Building icon draws the dock layout; the ▾ stays plain; Parcel tools / Measure / Easement stay plain ▾", async ({ page }) => {
+  test("Building icon draws the dock layout; the ▾ stays plain; Parcel tools / Easement stay plain ▾ (Measure's ▾ carries its mode icon)", async ({ page }) => {
     await open(page);
     const iconD = () => page.locator('[data-rail-split] , .rail-split').filter({ has: page.getByRole("button", { name: /^Building/ }) }).locator("svg.rbtn-icon path").evaluateAll((ps) => ps.map((p) => p.getAttribute("d")));
     const pickDock = async (label) => { await page.getByRole("button", { name: /^Dock layout/ }).click(); await page.getByRole("button", { name: label }).click(); };
@@ -204,9 +204,11 @@ test.describe("right tool rail — values, menus, states", () => {
     expect(await iconD()).toEqual(["M5 14 H11"]);
     await pickDock(/^No docks/);
     expect(await iconD()).toEqual([]);
-    for (const n of ["Parcel tools", "Measure modes", "Easement options", "Dock layout"]) {
+    for (const n of ["Parcel tools", "Easement options", "Dock layout"]) {
       await expect(page.locator(`button.rail-split-pill[aria-label^="${n}"]`)).toHaveAttribute("data-rail-pill", "plain");
     }
+    // NEW-2 (2026-10-11): Measure's ▾ is a VALUE pill whose value is the remembered mode's ICON.
+    await expect(page.locator('button.rail-split-pill[aria-label^="Measure mode:"]')).toHaveAttribute("data-rail-pill", "value");
   });
 
   test("armed = one flat shape: shared fill, no gap, no shadow, a faint divider", async ({ page }) => {

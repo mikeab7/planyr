@@ -14,7 +14,7 @@
  */
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { Button, ToggleChip, SegmentedControl, IconButton, Field, Section, MenuItem, menuPanelStyle, CONTROL_RADIUS, PAD, FONT } from "../../shared/ui/controls.jsx";
+import { Button, ToggleChip, SegmentedControl, Switch, IconButton, Field, Section, MenuItem, menuPanelStyle, CONTROL_RADIUS, PAD, FONT } from "../../shared/ui/controls.jsx";
 import { RADIUS } from "../../shared/ui/radius.js";
 import { MODULE_ACCENT } from "../../shared/ui/moduleAccent.js";
 
@@ -136,6 +136,10 @@ function GalleryBody() {
         <Specimen label="active" tokens="accent fill"><ToggleChip active>On</ToggleChip></Specimen>
       </Row>
 
+      <Row title="Switch — applies the moment it flips">
+        <Specimen label="off" tokens="--hover-ghost, --text-secondary"><Switch aria-label="Off specimen" /></Specimen>
+        <Specimen label="on" tokens="--accent, --on-accent"><Switch checked aria-label="On specimen" /></Specimen>
+      </Row>
       <Row title="IconButton — active × rest × size">
         <Specimen label="rest, 30px (default)" tokens="CONTROL_RADIUS.control"><IconButton>★</IconButton></Specimen>
         <Specimen label="active, 30px" tokens="accent fill"><IconButton active>★</IconButton></Specimen>
