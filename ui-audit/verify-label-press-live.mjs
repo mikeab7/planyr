@@ -34,6 +34,8 @@ try {
   await page.mouse.move(box.x + 420, box.y + 260, { steps: 6 }); await page.mouse.move(box.x + 560, box.y + 330, { steps: 6 });
   await page.mouse.up(); await page.keyboard.press("Escape"); await page.waitForTimeout(2500);
   // The building's on-screen box (the view does not change during a drag, so a move shows as a box shift).
+  // el-tier: the subject is the one BUILDING this run drew (an element, found by its own label), not a count of
+  // plan contents — nothing here asserts "how many features are on the plan".
   const stored = () => page.evaluate(() => {
     for (const g of document.querySelectorAll("[data-el-id]")) {
       const id = g.getAttribute("data-el-id");
