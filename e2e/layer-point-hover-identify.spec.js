@@ -202,11 +202,25 @@ async function lngLatToScreen(page, lat, lng) {
  * contour readout gives on its first move. A single scripted `mouse.move` reproduces exactly
  * that first-rest gap a real user's continuous mouse travel does not usually expose, so a hover
  * a test wants an ANSWER from — not testing the "not yet" gap itself — does the warm-up rest
- * first and the real one second. */
+ * first and the real one second.
+ *
+ * ⛔ R3 (B1857905) — a SINGLE 600ms warm-up bet against production is measurably flaky, not
+ * just theoretically: 6 of 16 repeated runs (`--repeat-each=8`, 4 workers, the real contention a
+ * full suite run creates) failed with `gis-identify-hover` never appearing inside its 8s
+ * timeout. The dynamic `import()` landing time isn't bounded by a constant — it depends on
+ * production network latency and CPU contention the test can't control, and under load it
+ * sometimes outlasts one 600ms guess. `ensureRasterHover` is idempotent (SitePlanner.jsx caches
+ * the controller in a ref once the chunk resolves and only ever builds it once), so repeating
+ * the rest costs nothing once the chunk has already landed — it is exactly the "real" rest the
+ * test wants — and gives it several more chances when it hasn't. Re-measured the same way after
+ * this change: 0 of 16. */
 async function hoverRasterAt(page, x, y) {
-  await page.mouse.move(x - 3, y - 3);
-  await page.waitForTimeout(600); // debounce (320ms) + the lazy chunk's first import
-  await page.mouse.move(x, y);
+  for (let i = 0; i < 5; i++) {
+    await page.mouse.move(x - 3 - i, y - 3 - i);
+    await page.waitForTimeout(400); // debounce (320ms) + a slice of the lazy chunk's import
+  }
+  await page.mouse.move(x, y); // land on the real target once the chunk has had several chances to load
+  await page.waitForTimeout(400);
 }
 
 /* Stub the Wetlands MapServer's metadata (?f=json) + export endpoints, leaving `/identify` for
