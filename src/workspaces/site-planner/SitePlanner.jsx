@@ -17695,13 +17695,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const bn = bldgNo.get(el.id); // B122: a standalone building shows "Building N"
       const name = bn ? `Building ${bn}` : (TYPE[el.type]?.label || "Element").split(" / ")[0];
       if (el.type === "building" && !poly && !el.dogEar) {
-        // B123: the building label is a 4-line stack — name / sf / (incl. N bump-outs) /
-        // dims. sf is its own line and sits high in the drop order (lib/labelLayout), so it
-        // survives zoom-out far longer than the dimensions; the parenthetical shows only
-        // when the building has bump-outs (whose area is folded into the on-plan sf).
+        // B123: the building label is a 3-line stack — name / sf / dims. sf is its own line and
+        // sits high in the drop order (lib/labelLayout), so it survives zoom-out far longer than
+        // the dimensions. Bump-out area is folded into the on-plan sf; NEW-1 removed the
+        // "(incl. N bump-outs)" wording from the label (it is not shown anywhere on the canvas).
         const bumps = els.filter((x) => x.attachedTo === el.id && x.dogEar);
         const ba = bumps.reduce((s, b) => s + b.w * b.h, 0);
-        lines = buildingLabelLines({ name, sqft: showAreas ? `${f0(area + ba)} SF` : null, bumpCount: bumps.length, dims: `${f0(el.w)}′ × ${f0(el.h)}′` });
+        lines = buildingLabelLines({ name, sqft: showAreas ? `${f0(area + ba)} SF` : null, dims: `${f0(el.w)}′ × ${f0(el.h)}′` });
       } else if (el.type === "trailer") {
         // B194: the trailer-parking label is TWO lines — "<stall depth>′ Trailer Parking" then
         // the trailer count. The stall depth is the per-stall trailer LENGTH (the depth a trailer
@@ -18004,8 +18004,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           // NEW-1 — keyed on the element's own id (was `${id}:label`), same lastTapRef-poison fix as
           // the dimension number: a label that overhangs its shape took press 2 of a real
           // double-click under a private key, so the pair dissolved and the record was clobbered.
-          if (isDoubleTap(e, d.el.id, wasSel)) { featureDoubleAction({ kind: "el", id: d.el.id }, e); return; }
-          setSel({ kind: "el", id: d.el.id });   // single click: select only (NEW-1)
+          // A GROUPED or LOCKED element is the one case startMoveEl does not pair a double-tap for,
+          // so the label keeps pairing it here; every other element pairs inside startMoveEl itself
+          // (same key, same wasSel) — asking twice would eat the pair.
+          if ((d.el.groupId || d.el.locked) && isDoubleTap(e, d.el.id, wasSel)) { featureDoubleAction({ kind: "el", id: d.el.id }, e); return; }
+          // NEW-2 (2026-10-11) — A PRESS ON A LABEL IS A PRESS ON ITS ELEMENT. This handler used to
+          // select and stop there, so a press that began on the sf label and dragged moved nothing
+          // (the label stops the event, and nothing else armed the move). It now hands the press to
+          // the element body's own `startMoveEl`: single click selects, drag moves (same history
+          // gate, same assembly members, same group/multi/lock/phone-pan rules), double-click opens
+          // Properties. One handler for every element type whose label this renders.
+          startMoveEl(e, d.el.id);
         } : undefined}
         onContextMenu={labelInteractive ? (e) => onElContext(e, d.el.id) : undefined}>
         {/* B875 (edit-path recurrence) — a pond label sits OVER the basin and, since #656, is

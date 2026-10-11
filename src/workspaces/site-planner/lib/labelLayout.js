@@ -363,15 +363,15 @@ export const suppressedDimIds = (dimItems, labelBoxes, pad = 2) => {
 };
 
 // B123 — the building label as a priority-ordered stack (highest priority first, matching
-// fitLines/layoutLabels which drop from the END): name → square footage → "(incl. N
-// bump-outs)" → dimensions. So on zoom-out the dimensions drop first, then the bump-out
-// note, leaving the square footage and finally just the name — i.e. the square footage
-// survives far longer than it did when the whole label just shrank. The parenthetical
-// line appears only when the building actually has bump-outs.
-export const buildingLabelLines = ({ name, sqft, bumpCount = 0, dims }) => {
+// fitLines/layoutLabels which drop from the END): name → square footage → dimensions. So on
+// zoom-out the dimensions drop first, leaving the square footage and finally just the name.
+// NEW-1 (owner, 2026-10-11): the "(incl. N bump-outs)" line is GONE for every count. The sf
+// number still folds the bump-out area in (the caller passes it); only the wording was removed,
+// and it is not moved elsewhere on the canvas. `bumpCount` is accepted and ignored so callers
+// need no change.
+export const buildingLabelLines = ({ name, sqft, dims }) => {
   const out = [name];
   if (sqft) out.push(sqft); // B121: omitted when the "Show areas" toggle is off (sqft passed null)
-  if (bumpCount > 0) out.push(`(incl. ${bumpCount} bump-out${bumpCount > 1 ? "s" : ""})`);
   if (dims) out.push(dims);
   return out;
 };
