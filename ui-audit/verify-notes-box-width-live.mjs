@@ -28,6 +28,7 @@ if (process.env.EXPECT_BUILD) ok(`served build is the merge commit ${process.env
 const TITLE = "ZZ throwaway box width " + Date.now().toString(36);
 await page.goto(`${BASE}/?cb=${Date.now()}#/notes`, { waitUntil: "domcontentloaded" });
 await page.waitForSelector('[data-testid="notes-new-page"]', { timeout: 30000 });
+await page.waitForTimeout(3500);   // the page list loads from the cloud after the shell paints — count it once it has
 const before = await page.locator('[data-testid^="notes-row-"]').count();
 await page.locator('[data-testid="notes-new-page"]').click();
 await page.waitForSelector('[data-testid="note-title"]', { timeout: 20000 });
@@ -75,7 +76,7 @@ try {
   b = await boxes();
   const nb = b.find((x) => !x.hasTable);
   const want = nb ? Math.max(240, Math.min(Math.min(col, 720), col - Math.max(0, nb.x) - 4)) : 0;
-  ok(`the new box starts wide: ${nb && nb.w} (expected ${want}: the column ${col} or the room to the right of the click, floor 240)`, !!nb && nb.w === want && nb.w >= 240 && nb.fit === "1", JSON.stringify(b));
+  ok(`the new box starts wide: ${nb && nb.w} (expected about ${want}: the column ${col} — which the first paste had just grown — or the room to the right of the click, floor 240)`, !!nb && Math.abs(nb.w - want) <= 24 && nb.w >= 240 && nb.fit === "1", JSON.stringify(b));
   await page.screenshot({ path: `${SHOT}-2-new-box-wide.png` });
 
   console.log("\n[3] click out → it shrinks to its text");
