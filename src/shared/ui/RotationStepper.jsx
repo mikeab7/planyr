@@ -25,6 +25,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { NUM_FONT, TABULAR_NUMS } from "../theme/typography.js";
+import NumberBox, { NUMBOX_INPUT_STYLE } from "./NumberBox.jsx";
 
 /** Wrap any angle into [0, 360). */
 export const normalizeDeg = (n) => (((n % 360) + 360) % 360);
@@ -56,7 +57,7 @@ const FONT = NUM_FONT;
 
 export default function RotationStepper({
   value, onCommit, onStep, disabled = false, disabledReason,
-  style, inputStyle, btnStyle, suffix = "°", "data-testid": testid,
+  style, inputStyle, btnStyle, suffix = "°", "data-testid": testid, boxed = false, boxWidth = 96,
 }) {
   const committed = Number.isFinite(value) ? value : 0;
   const [draft, setDraft] = useState(formatDeg(committed));
@@ -120,6 +121,34 @@ export default function RotationStepper({
     cursor: disabled ? "not-allowed" : "pointer", fontFamily: "inherit",
   };
   const reason = disabled && disabledReason ? disabledReason : undefined;
+
+  // Building panel v3 (NEW-2) — `boxed`: the SAME field and the SAME steps, drawn as the shared NumberBox (one bordered
+  // box: value · ° · stacked ▲▼). ▲▼ click = ±1°, Shift+click = ±0.1° (the keyboard's Shift+Arrow); wide enough for "359.4".
+  if (boxed) {
+    return (
+      <span style={{ display: "inline-flex", ...style }} title={reason}>
+        <NumberBox unit={suffix} width={boxWidth} disabled={disabled}
+          onUp={(e) => step(e && e.shiftKey ? 0.1 : 1)} onDown={(e) => step(e && e.shiftKey ? -0.1 : -1)}
+          upLabel="Rotate one degree clockwise" downLabel="Rotate one degree counterclockwise"
+          upTitle={reason || "Rotate +1° (Shift: +0.1°)"} downTitle={reason || "Rotate −1° (Shift: −0.1°)"}>
+          <input
+            data-testid={testid}
+            data-numbox-input="1"
+            style={{ ...NUMBOX_INPUT_STYLE, ...inputStyle }}
+            value={draft}
+            inputMode="decimal"
+            disabled={disabled}
+            aria-label="Rotation in degrees"
+            aria-invalid={invalid || undefined}
+            onFocus={() => { editing.current = true; }}
+            onChange={(e) => { setDraft(e.target.value); if (invalid) setInvalid(false); }}
+            onBlur={commit}
+            onKeyDown={onKeyDown}
+          />
+        </NumberBox>
+      </span>
+    );
+  }
 
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 5, ...style }} title={reason}>

@@ -248,7 +248,7 @@ import { apprRows, apprAll, apprVal, findAttr, situsAddress, ownerName, parcelPa
 import { makeParcelDisplayLayer, ADD_CURSOR, PARCEL_MINZOOM } from "./lib/parcelDisplay.js";
 import { createOutlineSet } from "./lib/parcelOutlineSet.js";
 import { geocodeAddress } from "./lib/geocode.js";
-import { TYPE, typeStyle, elStyle, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackLineStyle, setbackChipStyle, SETBACK_LINE } from "./lib/planStyle.js";
+import { TYPE, typeStyle, elStyle, WALL_PIECE_TEXT, WALL_PIECE_EDGE, parcelDefaultStyle, toHex6, byZ, zOrder, setPreviewStyleDefaults, setbackLineStyle, setbackChipStyle, SETBACK_LINE } from "./lib/planStyle.js";
 import { byZAsc, nextZ, sortByZ, Z_GAP, withMissingZ } from "./lib/zOrder.js";
 import { reorderByZ, arrangeFlags, arrangeAcrossBands, arrangeBandFlags, calloutAtAbsoluteFront, calloutFrontForceZ } from "./lib/arrange.js";
 import { commonStyleState, selectionRingFeet } from "./lib/multiStyle.js";
@@ -337,6 +337,8 @@ import ActionLink from "./components/ActionLink.jsx";
 import WatchOutChip from "./components/WatchOutChip.jsx";
 import YieldFooterDisclaimer from "./components/YieldFooterDisclaimer.jsx";
 import Collapse from "./components/Collapse.jsx";
+import NumberBox, { NUMBOX_INPUT_STYLE } from "../../shared/ui/NumberBox.jsx";
+import WallKindIcon from "./components/WallKindIcon.jsx";
 import Chip from "../../shared/ui/Chip.jsx";
 import RowInfo from "../../shared/ui/RowInfo.jsx";
 import OcrDeedTextarea from "./components/OcrDeedTextarea.jsx";
@@ -383,7 +385,7 @@ import { hasCrop, cropClipShapeScreen, cropTrimFeet, cropFromTrimFeet, cropKind,
 import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerialVisibility.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, dockAxisOf, healDockAxes, withDockAxis, dockSideCompassLabel } from "./lib/dockZones.js";
 import { wallPickerLayout, wallClickPatch, wallClickTitle, loadingTypeLabel, strandedBumpIds } from "./lib/loadingWalls.js";
-import { wallRowPlan, chipLabel, bumpChipLabel, addOptions, removalCount, KIND_NAME, TRAILER_MAX_ROWS, clampTrailerRows, trailerSpec, trailerCfg, zdAfterRowChange, zdAfterRowDepth, zdAfterAisle, bumpEnds, areaWithBumps } from "./lib/wallRows.js";
+import { wallRowPlan, chipLabel, bumpSummary, addOptions, KIND_NAME, KIND_LABEL, TRAILER_MAX_ROWS, TRAILER_MIN_ROW_DEPTH, clampTrailerRows, trailerSpec, trailerCfg, storedRowDepths, applyZonePatch, trailerPatchRows, trailerPatchRowDepth, trailerPatchAisle, zdAfterRowDepth, bumpEnds, areaWithBumps, STRIP, stripPlan, legendKinds, pieceLabel, pieceTooltip, pieceShowsIcon, wallTotalDepth, planDockPieceRemoval, applyDockPieceRemoval } from "./lib/wallRows.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors, gridLinesVisible } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent, clipSegmentToRing } from "./lib/footprintEdit.js";
 import { pondAreaLabelLine, pondAreaDeltaLine } from "./lib/pondLabelText.js";
@@ -7878,7 +7880,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const bn = buildingNumbers(els).get(el.id);
         return bn ? `Building ${bn}` : (TYPE.building?.label || "Building");
       }
-      if (el.type === "trailer") return `${f0(cfgOf(el).trailerL)}′ Trailer Parking`;
+      if (el.type === "trailer") return trailerRowLabel({ depthFt: cfgOf(el).trailerL, count: 0, rowDepths: el.points ? null : cfgOf(el).trailerRowDepths }).lines[0];
       if (el.type === "pond") {
         const areaSf = el.points ? polyArea(el.points) : Math.abs(el.w * el.h);
         return `${pondDisplayNameFor(detWithAuto(el.det), pondSplitOf(el))} ${pondAreaLabelLine(areaSf)}`;
@@ -11616,8 +11618,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     while (cur && !seen.has(cur.id)) { seen.add(cur.id); out.push(cur); cur = nextInChain(arr, cur); }
     return out;
   };
-  // The full dock-zone chain on a side (court head → outward), within `arr`.
-  const dockChainOnSide = (arr, b, side) => { const c = findCourtIn(arr, b, side); return c ? chainFromHead(arr, c) : []; };
+  // Building panel v3 — a dock wall's chain is normally rooted at its truck court, but the court's bin removes ONLY
+  // the court (and its trailer parking): the buffer / walk / road outside it stay, close in against the wall, and the
+  // innermost of them heads the chain — a stack member stamped with this `stackSide` whose inboard neighbour is gone.
+  // (Trailer parking can never head one: it opens off a court. A non-dock wall's layers carry no `noFit`.)
+  const findHeadIn = (arr, b, side) => findCourtIn(arr, b, side) || arr.find((x) => x.attachedTo === b.id && !x.points && !x.dogEar && x.noFit
+    && x.stackSide === side && !x.truckCourt && !x.forCourt && x.type !== "trailer"
+    && !arr.some((y) => y.id === x.prevZone || y.id === x.forTrailer));
+  // The full dock-zone chain on a side (head → outward), within `arr`.
+  const dockChainOnSide = (arr, b, side) => { const c = findHeadIn(arr, b, side); return c ? chainFromHead(arr, c) : []; };
   // The layout kind for layoutZoneByKind: only the trailer is special; everything else is a strip
   // (court/buffer/sidewalk/road laid flush, full wall length — a road's curbs are a render detail).
   const chainKindOf = (z) => (z.type === "trailer" || z.forCourt ? "trailer" : "strip");
@@ -11629,7 +11638,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const zones = dockChainOnSide(arr, b, side);
     if (!zones.length) return arr;
     const kinds = zones.map(chainKindOf);
-    const depths = zones.map((z, i) => zoneDepthOf(z, b, side, i));
+    // A trailer zone with its own row depths (v3) is exactly as deep as those rows + aisles say, whatever `zd` holds.
+    const depths = zones.map((z, i) => (z.type === "trailer" && storedRowDepths(z, clampTrailerRows(z.trailerRows)) ? trailerSpec(z, settings.trailerAisle).total : zoneDepthOf(z, b, side, i)));
     const courtOpts = courtBumpOpts(arr, b, side);
     // Per-zone LENGTH override. The chain still shares the court's span BY DEFAULT (the 2026-06-30
     // fix that stopped the trailer over-hanging the court), but a zone the user has actually given
@@ -11647,7 +11657,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // total depth (`zd`) is rows × row + ⌊rows / 2⌋ × aisle, and the cfg is the band · aisle · band
       // pattern `trailerStalls` already draws. One row is byte-identical to the old single strip.
       patch.set(z.id, z.type === "trailer"
-        ? { ...g, cfg: trailerCfg(z.cfg, trailerSpec({ ...z, zd: depths[i] }, settings.trailerAisle), (z.cfg && z.cfg.trailerW) || settings.trailerW || OPP_TRAILER_W) }
+        ? { ...g, cfg: trailerCfg(z.cfg, trailerSpec({ ...z, zd: depths[i] }, settings.trailerAisle), (z.cfg && z.cfg.trailerW) || settings.trailerW || OPP_TRAILER_W, side) }
         : g);
     });
     return arr.map((x) => (patch.has(x.id) ? { ...x, ...patch.get(x.id) } : x));
@@ -11655,6 +11665,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Relayout every dock side of `b` that currently carries a court.
   const relayoutAllSides = (arr, b) => {
     const sides = new Set(arr.filter((x) => x.attachedTo === b.id && x.truckCourt).map((x) => x.truckCourt.side));
+    // …and the dock walls whose court was binned but whose outer layers stayed (headed by findHeadIn).
+    dockSidesOf(b).dockSides.forEach((sd) => { if (!sides.has(sd) && findHeadIn(arr, b, sd)) sides.add(sd); });
     let next = arr; sides.forEach((s) => { next = relayoutSide(next, b, s); }); return next;
   };
   // Remove ids + anything bonded to them (legacy forCourt/forTrailer + the generic prevZone chain, so
@@ -11698,6 +11710,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // The next-zone element (index = present count) for a side, within `arr`.
   const buildNextZone = (arr, b, side) => {
     const n = stackCountIn(arr, b, side);
+    if (n === 0 && findHeadIn(arr, b, side)) return null;   // court binned, outer layers stayed: extend from "Docks & walls", not by a second court
     if (n === 0) return makeCourtZone(b, side);
     if (n === 1) { const c = findCourtIn(arr, b, side); return c ? makeTrailerZone(b, c) : null; }
     if (n === 2) { const c = findCourtIn(arr, b, side); const t = findTrailerIn(arr, c); return t ? makeBufferZone(b, t) : null; }
@@ -17705,7 +17718,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const count = poly ? estTrailers(area, tc) : trailerStalls(el.w, el.h, tc).count;
         // NEW-1 — the COUNT is the line a too-shallow row keeps (keepLine): a 50′ row used to lose its count
         // first and read as unlabelled beside the deeper row under it.
-        ({ lines, keepLine } = trailerRowLabel({ depthFt: tc.trailerL, count, est: poly, name }));
+        ({ lines, keepLine } = trailerRowLabel({ depthFt: tc.trailerL, count, est: poly, name, rowDepths: poly ? null : tc.trailerRowDepths }));
       } else {
         lines = [name];
         if (showAreas) lines.push(`${f0(area)} SF`);        // sf is an AREA line — drop with areas off
@@ -20202,26 +20215,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setEls(next);
     if (killed.length) tombstone(killed);
   };
-  // NEW-5 — pull zone `i` OUT of the dock-wall stack, and everything beyond it, on EVERY loaded wall
-  // (`removeOuterDockZone` generalised from "the outermost" to "this one and outward"). The stack is
-  // a chain, so removing a middle zone would leave the ones beyond floating off the wall; the ✕ on a
-  // row therefore always means "this and everything outside it". One undo frame, whole cascade tombstoned.
-  const removeDockZonesFrom = (b, i, sidesArg) => {
-    const dockSides = sidesArg || dockSidesOf(b).dockSides;
-    const src = stateRef.current.els;
-    const rm = [];
-    dockSides.forEach((side) => { const z = dockChainOnSide(src, b, side)[i]; if (z) rm.push(z.id); });
-    if (!rm.length) return;
-    pushHistory();
-    const killed = killSetWithChildren(src, rm);
-    setEls((a) => {
-      let next = removeWithChildren(a, rm);
-      dockSides.forEach((side) => { next = relayoutSide(next, b, side); });
-      return next;
-    });
-    tombstone([...killed]);
-    setSel({ kind: "el", id: b.id });
-  };
   /* NEW-6 — HOW MANY PARKING ROWS the non-dock walls carry, and SET it in one commit.
      The owner adds parking in bulk (sometimes eight rows), so typing 8 must lay out eight rows at once,
      not eight clicks. For each non-dock wall: no parking → build one `n` rows deep (starting beyond the
@@ -20282,10 +20275,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (dockSidesOf(b).dockSides.includes(side)) {
       return dockChainOnSide(els, b, side).map((z, i) => {
         const kind = z.truckCourt ? "court" : z.type === "trailer" ? "trailer" : z.type === "road" ? "road" : z.type === "sidewalk" ? "sidewalk" : "buffer";
-        const base = { id: z.id, ids: [z.id], kind, index: i, depth: Math.round(kind === "road" ? (z.travelW ?? Math.max(1, zoneDepthOf(z, b, side, i) - 2 * (+z.curb || CURB))) : zoneDepthOf(z, b, side, i)) };
+        const base = { id: z.id, ids: [z.id], kind, index: i, fill: elStyle(z, settings).fill, depth: Math.round(kind === "road" ? (z.travelW ?? Math.max(1, zoneDepthOf(z, b, side, i) - 2 * (+z.curb || CURB))) : zoneDepthOf(z, b, side, i)) };
         if (kind !== "trailer") return base;
         const sp = trailerSpec(z, settings.trailerAisle);
-        return { ...base, rows: sp.rows, aisle: Math.round(sp.aisle), rowDepth: Math.round(sp.rowDepth), depth: Math.round(sp.total) };
+        return { ...base, rows: sp.rows, aisle: Math.round(sp.aisle), rowDepth: Math.round(sp.rowDepth), rowDepths: sp.rowDepths.map((d) => Math.round(d)), depth: Math.round(sp.total) };
       });
     }
     const [nx, ny] = SIDE_N[side], isH = ny !== 0, sg = isH ? ny : nx;
@@ -20298,10 +20291,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const kind = x.type === "sidewalk" ? "sidewalk" : x.type === "landscape" ? "buffer" : x.type === "road" ? "road" : null;
       if (!kind) return;
       const depth = kind === "road" ? (x.travelW ?? Math.max(1, depthOfKid(x) - 2 * (+x.curb || CURB))) : depthOfKid(x);
-      out.push({ id: x.id, ids: [x.id], kind, depth: Math.round(depth), perp: perpOf(x) });
+      out.push({ id: x.id, ids: [x.id], kind, fill: elStyle(x, settings).fill, depth: Math.round(depth), perp: perpOf(x) });
     });
     if (pads.length) {
-      out.push({ id: pads[0].id, ids: pads.map((p) => p.id), kind: "parking", split: pads.length > 1,
+      out.push({ id: pads[0].id, ids: pads.map((p) => p.id), kind: "parking", fill: elStyle(pads[0], settings).fill, split: pads.length > 1,
         rows: pads.reduce((t, p) => t + (p.type === "parking" ? empSideRows(p) : 0), 0),
         depth: Math.round(pads.reduce((t, p) => t + depthOfKid(p), 0)), perp: Math.min(...pads.map(perpOf)) });
     }
@@ -20346,9 +20339,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         sides.forEach((side) => {
           const z = dockChainOnSide(next, b, side)[layer.index];
           if (!z) return;
-          const patch = z.type === "trailer" ? { zd: zdAfterRowDepth(z, nd, settings.trailerAisle) }
+          const patch = z.type === "trailer" ? { zd: zdAfterRowDepth(z, nd, settings.trailerAisle), trailerRowDepths: undefined }
             : z.type === "road" ? { travelW: nd, zd: nd + 2 * (+z.curb || CURB) } : { zd: nd };
-          next = next.map((x) => (x.id === z.id ? { ...x, ...patch } : x));
+          next = next.map((x) => (x.id === z.id ? applyZonePatch(x, patch) : x));
         });
         sides.forEach((side) => { next = relayoutSide(next, b, side); });
         return next;
@@ -20365,7 +20358,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
     setSidewalkWidth(el, nd);       // sidewalk / buffer: grows outward, anything beyond slides with it
   };
-  // Rows of trailer parking (1–4) on a dock wall, holding one row's depth.
+  // Rows of trailer parking (1–4) on a dock wall. Adding a row copies the last row's depth; removing drops the last.
   const setTrailerRows = (b, sides, layer, rowsRaw) => {
     const rows = clampTrailerRows(rowsRaw);
     pushHistory();
@@ -20374,8 +20367,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       sides.forEach((side) => {
         const z = dockChainOnSide(next, b, side)[layer.index];
         if (!z || z.type !== "trailer") return;
-        const aisle = trailerSpec(z, settings.trailerAisle).aisle;
-        next = next.map((x) => (x.id === z.id ? { ...x, trailerRows: rows, trailerAisleFt: aisle, zd: zdAfterRowChange(z, rows, settings.trailerAisle) } : x));
+        const patch = trailerPatchRows(z, rows, settings.trailerAisle);
+        next = next.map((x) => (x.id === z.id ? applyZonePatch(x, patch) : x));
+      });
+      sides.forEach((side) => { next = relayoutSide(next, b, side); });
+      return next;
+    });
+  };
+  // ONE row's depth (index 0 = row 1, the row nearest the truck court) — v3: each row can have its own.
+  const setTrailerRowDepth = (b, sides, layer, index, depthRaw) => {
+    const depth = Number(depthRaw);
+    if (!Number.isFinite(depth)) return;
+    pushHistory();
+    setEls((a) => {
+      let next = a;
+      sides.forEach((side) => {
+        const z = dockChainOnSide(next, b, side)[layer.index];
+        if (!z || z.type !== "trailer") return;
+        const patch = trailerPatchRowDepth(z, index, depth, settings.trailerAisle);
+        next = next.map((x) => (x.id === z.id ? applyZonePatch(x, patch) : x));
       });
       sides.forEach((side) => { next = relayoutSide(next, b, side); });
       return next;
@@ -20390,16 +20400,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       sides.forEach((side) => {
         const z = dockChainOnSide(next, b, side)[layer.index];
         if (!z || z.type !== "trailer") return;
-        next = next.map((x) => (x.id === z.id ? { ...x, trailerAisleFt: aisle, zd: zdAfterAisle(z, aisle, settings.trailerAisle) } : x));
+        const patch = trailerPatchAisle(z, aisle, settings.trailerAisle);
+        next = next.map((x) => (x.id === z.id ? applyZonePatch(x, patch) : x));
       });
       sides.forEach((side) => { next = relayoutSide(next, b, side); });
       return next;
     });
   };
-  // Remove a layer. A dock wall's stack is a chain, so this takes the layer AND everything outside it;
-  // any other wall loses just that layer (the layers outside it close up against what is left).
+  // Remove ONE piece (v3). Every piece outside it keeps its depth and moves in to close the gap — on a dock wall too.
+  // The one thing the code forces: trailer parking opens off its truck court, so binning the court also bins that
+  // trailer parking. Survivors are re-bonded to what is now inboard of them (planDockPieceRemoval); the wall is
+  // re-laid from its new head. One undo frame; only the removed elements are tombstoned (the survivors are edited).
   const removeWallLayer = (b, sides, layer) => {
-    if (sidesAreDock(b, sides)) { removeDockZonesFrom(b, layer.index, sides); return; }
+    if (sidesAreDock(b, sides)) {
+      const src = stateRef.current.els;
+      const plans = sides.map((side) => ({ side, plan: planDockPieceRemoval(dockChainOnSide(src, b, side), layer.index, side) })).filter((x) => x.plan);   // each wall's own chain
+      if (!plans.length) return;
+      const killed = plans.flatMap((x) => x.plan.removeIds);
+      pushHistory();
+      setEls((a) => {
+        let next = a;
+        plans.forEach(({ plan }) => { next = applyDockPieceRemoval(next, plan); });
+        sides.forEach((side) => { next = relayoutSide(next, b, side); });
+        return next;
+      });
+      tombstone(killed);
+      setSel({ kind: "el", id: b.id });
+      return;
+    }
     const side = sides[0];
     const src = stateRef.current.els;
     const killed = killSetWithChildren(src, layer.ids);
@@ -20417,11 +20445,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       let next = a;
       sides.forEach((side) => {
         const chain = dockChainOnSide(next, b, side);
-        if (key === "court") { if (chain.length) return; next = [...next, makeCourtZone(b, side)]; }
+        if (key === "court") {
+          if (chain.length && chain[0].truckCourt) return;
+          const court = makeCourtZone(b, side);
+          // A court put back in front of layers that stayed after it was binned: it becomes their head again.
+          const head = chain[0];
+          next = [...next.map((x) => (head && x.id === head.id ? { ...x, prevZone: court.id } : x)), court];
+        }
         else {
           const court = chain[0]; const outer = chain[chain.length - 1];
           if (!court || outer.type === "road") return;
           if (key === "trailer") {
+            if (!court.truckCourt) return;               // trailer parking opens off a truck court
             if (chain.some((z) => z.type === "trailer")) return;
             const tz = makeTrailerZone(b, court);
             // The layers that followed the court now follow the trailer: court → trailer → …
@@ -26462,9 +26497,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const b = selEl;
             const hm = buildingMetrics(b);
             const HB = CONTROL_H.lg;
-            const hdrBtn = { width: HB, height: HB, padding: 0, display: "grid", placeItems: "center", borderRadius: RADIUS.sm, border: BORDER_1, background: SURF_RAISED, color: "var(--text-secondary)", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.emphasis, lineHeight: 1, listStyle: "none" };
+            // Building panel v3 (NEW-1) — lock · ⋯ · ✕ are BORDERLESS icon buttons (hover wash only, via `.bldg-hdr-btn`;
+            // the lock's state still rides its glyph). The number is a small field that reads as editable.
+            const hdrBtn = { width: HB, height: HB, padding: 0, display: "grid", placeItems: "center", borderRadius: RADIUS.sm, color: "var(--text-secondary)", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.emphasis, lineHeight: 1, listStyle: "none" };
             const lockStyle = hdrBtn; // NEW-2 — greyscale: state rides the glyph's shape/weight (LockGlyph), never an accent fill
-            const numBox = { width: 34, height: HB, padding: 0, textAlign: "center", boxSizing: "border-box", fontSize: FONT_SIZE.emphasis, fontWeight: 600, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, border: BORDER_1, borderRadius: RADIUS.sm, color: "var(--text-primary)", background: "var(--surface-field)" };
+            const bldgNo = buildingNumbers(els).get(b.id);
+            const digits = Math.max(1, Math.min(3, String(bldgNo == null ? "" : bldgNo).length));
+            // Sized to its digits (≈ 24 / 32 / 40 wide), one step smaller and lighter than the "Building" title; the outline
+            // (the STRONGER border token) comes from `.bldg-num-box`, which also darkens it on hover.
+            const numBox = { width: 16 + 8 * digits, height: CONTROL_H.sm, padding: 0, textAlign: "center", boxSizing: "border-box", fontSize: FONT_SIZE.emphasis, fontWeight: 600, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, borderRadius: RADIUS.sm, color: "var(--text-primary)", flex: "none" };
             return (
               <div data-testid="building-header" style={{ padding: "2px 0 8px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: SPACE.md }}>
@@ -26474,26 +26515,27 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   <span style={{ fontSize: FONT_SIZE.display, fontWeight: 700, color: "var(--text-primary)" }}>Building</span>
                   <BuildingNumberField
                     id={b.id}
-                    value={buildingNumbers(els).get(b.id)}
+                    value={bldgNo}
+                    className="bldg-num-box"
                     style={numBox}
                     resetToken={bldgNumResetSeq}
                     onAttempt={(n) => attemptBuildingNumber(b.id, n)}
                     onCancelConflict={() => setBldgNumConflict(null)}
                   />
                   <span style={{ flex: 1 }} />
-                  <button type="button" data-testid="building-lock" style={lockStyle} aria-pressed={!!b.locked}
+                  <button type="button" data-testid="building-lock" className="bldg-hdr-btn" style={lockStyle} aria-pressed={!!b.locked}
                     aria-label={b.locked ? "Unlock — allow moving and resizing" : "Lock in place"}
                     title="Lock in place so it can't be moved or resized by accident" onClick={() => toggleLock(b.id)}>
                     <LockGlyph locked={!!b.locked} size={16} />
                   </button>
-                  <InspectorMoreMenu testId="building-more" label="More building actions" btnStyle={hdrBtn}
+                  <InspectorMoreMenu testId="building-more" label="More building actions" btnStyle={hdrBtn} btnClassName="bldg-hdr-btn"
                     panelStyle={{ minWidth: 128, padding: SPACE.xs, background: SURF_RAISED, border: BORDER_1, borderRadius: RADIUS.md, boxShadow: "0 8px 22px rgba(28,25,20,0.16)" }}>
                     {(close) => (
                       <button type="button" data-testid="building-delete" style={{ ...chip, width: "100%", border: "none", color: "var(--danger)", textAlign: "left" }}
                         onClick={() => { close(); deleteSel(null, { entry: "panel:element" }); }}>Delete building</button>
                     )}
                   </InspectorMoreMenu>
-                  <button type="button" data-testid="building-close" style={{ ...hdrBtn, border: "none", background: "transparent", color: "var(--text-tertiary)", fontSize: FONT_SIZE.display }} title="Close (the element stays selected; double-click it to reopen) — Esc" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); closeInspector(); }}>✕</button>
+                  <button type="button" data-testid="building-close" className="bldg-hdr-btn" style={{ ...hdrBtn, color: "var(--text-tertiary)", fontSize: FONT_SIZE.display }} title="Close (the element stays selected; double-click it to reopen) — Esc" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); closeInspector(); }}>✕</button>
                 </div>
                 <div data-testid="building-summary" title={`${f0(hm.footprint)} SF footprint + ${hm.bumpN} bump-out${hm.bumpN === 1 ? "" : "s"} (${f0(hm.extra)} SF)`} style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", marginTop: SPACE.xs, fontVariantNumeric: TABULAR_NUMS }}>
                   {f0(hm.total)} SF · {f0(hm.doors)} {hm.doors === 1 ? "door" : "doors"}{b.locked ? " · locked" : ""}
@@ -27637,7 +27679,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     })();
                     // ---- NEW-3 — Footprint ----
                     const footprint = (
-                      <Collapse sectionId="building-footprint" title="Footprint" defaultOpen summary={`${Math.round(footprintLength(b))} × ${Math.round(footprintDepth(b))} ft`}>
+                      <Collapse sectionId="building-footprint" title="Footprint" defaultOpen summary={`${Math.round(footprintLength(b))} × ${Math.round(footprintDepth(b))} ft`}
+                        headerRight={b.points ? null : (
+                          <button type="button" style={linkBtn} data-testid="edit-outline" title="Convert to an editable outline — angle an end wall or clip a corner (loaded walls stay straight)" onClick={() => editBuildingFootprint(b.id)}>✎ Edit outline</button>
+                        )}>
                         {b.points ? (
                           // NEW-1/B872 — an irregular building: Length/Depth become the read-only BOUNDING dims
                           // (true area is polygon-exact). A reshaped-from-rect building (footEdit) can reset;
@@ -27649,33 +27694,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                             {b.footEdit && <button style={{ ...chip, width: "100%", marginBottom: SPACE.md }} title="Discard the reshape — back to the bounding rectangle" onClick={() => resetBuildingFootprint(b.id)}>↺ Reset to rectangle</button>}
                           </>
                         ) : (
+                          // Building panel v3 (NEW-2) — one bordered box per number: value · unit · stacked ▲▼ (the shared NumberBox).
                           <>
                             <Field label="Length">
-                              <span style={ROW6}>
-                                <NumInput style={{ ...numInput, width: 58 }} value={Math.round(footprintLength(b))} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ [ax.length]: n })} />
-                                {unit("ft")}
-                                <span style={{ flex: 1 }} />
-                                <button type="button" style={linkBtn} data-testid="edit-outline" title="Convert to an editable outline — angle an end wall or clip a corner (loaded walls stay straight)" onClick={() => editBuildingFootprint(b.id)}>✎ Edit outline</button>
-                              </span>
+                              <NumInput boxed unit="ft" boxWidth={96} ariaLabel="Length" testid="footprint-length" value={Math.round(footprintLength(b))} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ [ax.length]: n })} />
                             </Field>
                             <Field label="Depth">
-                              <span style={ROW6}>
-                                <NumInput style={{ ...numInput, width: 58 }} value={Math.round(footprintDepth(b))} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ [ax.depth]: n })} />
-                                {unit("ft")}
-                              </span>
+                              <NumInput boxed unit="ft" boxWidth={96} ariaLabel="Depth" testid="footprint-depth" value={Math.round(footprintDepth(b))} min={1} max={MAX_DIM} step={1} coarse={10} onCommit={(n) => resizeSelEl({ [ax.depth]: n })} />
                             </Field>
                           </>
                         )}
                         <Field label="Rotation">
-                          <RotationStepper value={b.rot || 0} inputStyle={{ width: 68 }} disabled={!!b.locked || !!b.points}
+                          <RotationStepper boxed boxWidth={108} data-testid="footprint-rotation" value={b.rot || 0} disabled={!!b.locked || !!b.points}
                             disabledReason={b.points ? "Reset the footprint to a rectangle to rotate it" : "Unlock this element to rotate it"}
                             onCommit={(deg) => rotateSelTo(deg)}
                             onStep={(d) => rotateSelTo(normalizeDeg((b.rot || 0) + d))} />
                         </Field>
                       </Collapse>
                     );
-                    // ---- Building panel v2 — Loading: the wall picker (to scale, bump-outs drawn) beside the dock type
-                    // and door count, then ONE compact row per wall (chips for its layers, a dashed +). ----
+                    // ---- Building panel v3 — Docks & walls: the wall picker (to scale, bump-outs drawn) beside the dock type
+                    // and door count, the Bump-outs line, then ONE strip per wall (a bar of pieces, a dashed +) and a legend. ----
                     const bumpSpecs = bumpSpecsOf(b);
                     const plan = wallRowPlan(b);
                     const wallRowsData = plan.map((r) => {
@@ -27695,6 +27733,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       footEdit: !!b.footEdit,
                       depth: (row, layer, n) => setWallLayerDepth(b, row.sides, layer, n),
                       trailerRows: (row, layer, n) => setTrailerRows(b, row.sides, layer, n),
+                      trailerRowDepth: (row, layer, i, n) => setTrailerRowDepth(b, row.sides, layer, i, n),
                       trailerAisle: (row, layer, n) => setTrailerAisle(b, row.sides, layer, n),
                       parkingRows: (row, n) => setEmployeeParkingRows(b, n, row.sides),
                       remove: (row, layer) => removeWallLayer(b, row.sides, layer),
@@ -27704,7 +27743,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       bumpRemoveAll: (row) => removeBumpsOn(b, row.sides),
                     };
                     const loading = (
-                      <Collapse sectionId="building-loading" title="Loading" defaultOpen summary={`${loadingTypeLabel(b)} · ${hm.doors} ${hm.doors === 1 ? "door" : "doors"}`}>
+                      <Collapse sectionId="building-loading" title="Docks & walls" defaultOpen summary={`${loadingTypeLabel(b)} · ${hm.doors} ${hm.doors === 1 ? "door" : "doors"}`}>
                         <div style={{ display: "flex", alignItems: "center", gap: SPACE.xl }}>
                           <LoadingWallPicker b={b} bumps={bumpSpecs} onWall={(side) => applyBuildingLoading(wallClickPatch(b, side))} onCorner={(side, sign) => toggleBumpCorner(b, side, sign)} />
                           <div style={{ minWidth: 0, flex: 1 }}>
@@ -31921,7 +31960,7 @@ function AlignIcon({ dir }) {
 // true forever and this field would keep showing the PREVIOUS building's number. Reset the latch
 // the instant the bound id changes, before deciding whether to resync the draft — never rely on a
 // blur that this app's own canvas can silently withhold.
-function BuildingNumberField({ id, value, onAttempt, onCancelConflict, style, ariaLabel, resetToken }) {
+function BuildingNumberField({ id, value, onAttempt, onCancelConflict, style, className, ariaLabel, resetToken }) {
   const [draft, setDraft] = useState(String(value));
   const editing = useRef(false);
   const boundId = useRef(id);
@@ -31938,6 +31977,7 @@ function BuildingNumberField({ id, value, onAttempt, onCancelConflict, style, ar
   return (
     <input
       style={style}
+      className={className}
       value={draft}
       inputMode="numeric"
       aria-label={ariaLabel || "Building number"}
@@ -32043,14 +32083,14 @@ function LoadingWallPicker({ b, bumps, onWall, onCorner }) {
    this is the shared AnchoredMenu (portal, outside-click + Escape dismiss) with the dismissing press consumed
    whole, so closing it never also deselects/deletes whatever was under the pointer. Module scope on purpose
    (MODULE-SCOPE-COMPONENTS): it owns its own open state. */
-function InspectorMoreMenu({ testId, label, glyph = "⋯", btnStyle, panelStyle, children }) {
+function InspectorMoreMenu({ testId, label, glyph = "⋯", btnStyle, btnClassName, panelStyle, children }) {
   const [open, setOpen] = useState(false);
   const anchor = useRef(null);
   const close = useCallback(() => setOpen(false), []);
   return (
     <span onClick={(e) => e.stopPropagation()} style={{ display: "inline-flex" }}>
       <button ref={anchor} type="button" data-testid={testId} aria-label={label} title="More" aria-haspopup="menu" aria-expanded={open}
-        style={btnStyle} onClick={() => setOpen((o) => !o)}>{glyph}</button>
+        className={btnClassName} style={btnStyle} onClick={() => setOpen((o) => !o)}>{glyph}</button>
       <AnchoredMenu open={open} onClose={close} anchorRef={anchor} placement="below-right" gap={4} width={140} swallowOutsidePress panelStyle={panelStyle}>
         <div data-testid={`${testId}-menu`}>{children(close)}</div>
       </AnchoredMenu>
@@ -32058,162 +32098,240 @@ function InspectorMoreMenu({ testId, label, glyph = "⋯", btnStyle, panelStyle,
   );
 }
 
-/* WallRows — Building panel v2, NEW-1/NEW-2/NEW-3. ONE compact row per wall (a cross-dock building's two dock walls included):
-   a badge with the wall's compass letter(s) and, beside it, its role word; then the wall's layers outward
-   as chips; then a dashed "+". A chip opens a small editor directly under its row (one at a time); "+"
-   opens the catalog for THAT wall only. Presentational and module-scope (MODULE-SCOPE-COMPONENTS): every
-   edit is a callback into SitePlanner's per-wall handlers, which take the row's `sides`. Theme tokens only.
-   rows: [{ key, role, sides, badge, isDock, layers:[{id,kind,depth,rows,aisle,rowDepth,index,split}],
+/* WallRows — "Docks & walls" (Building panel v3, NEW-4). ONE strip per wall (a cross-dock building's two dock
+   walls included): a left cell (badge with the wall's compass letter(s) + its role word), then a BAR whose pieces
+   are that wall's layers outward, left → right (the building is at the left), then a dashed "+". Bar length is
+   proportional to the wall's total depth on a scale shared by every wall of this building (`stripPlan`); a piece's
+   fill IS its layer's plan colour, so the strip and the canvas always match. A piece opens ONE compact edit box
+   directly under its row (a caret points up at the piece); a legend under the last row names the kinds present.
+   Bump-outs are NOT a dock-row chip any more: one line under the wall picker (`Bump-outs n · a × p ft` + edit).
+   Presentational and module-scope (MODULE-SCOPE-COMPONENTS): every edit is a callback into SitePlanner's per-wall
+   handlers, which take the row's `sides`. Theme tokens only (the few literals live in planStyle.js).
+   rows: [{ key, role, sides, badge, isDock, layers:[{id,kind,depth,fill,rows,aisle,rowDepths,index,split}],
             bump:{ n, ends:[{sign,label,on}], along, proj } | null }] */
-function WallRows({ rows, ops, numInput, canEditBumps }) {
-  const [open, setOpen] = useState(null);          // { rowKey, id } — the one chip editor that is open
+const WALL_LEFT_W = 58;
+function WallBinGlyph() {
+  return (
+    <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" style={{ display: "block" }}>
+      <path d="M2.5 4.2h11M6.2 4.2V2.6h3.6v1.6M4 4.2l.6 9.2h6.8l.6-9.2M6.6 6.8v4.4M9.4 6.8v4.4" />
+    </svg>
+  );
+}
+function WallRows({ rows, ops, numInput: _numInput, canEditBumps }) {
+  const [open, setOpen] = useState(null);          // { rowKey, id } — the one piece whose edit box is open
   const [menu, setMenu] = useState(null);          // rowKey whose "+" catalog is open
   const [pending, setPending] = useState(null);    // { rowKey, kind } — open the layer a just-pressed "+" created
+  const [bumpOpen, setBumpOpen] = useState(false); // the bump-outs editor under the "Bump-outs" line
+  const boxRef = useRef(null);
   useEffect(() => {
     if (!pending) return;
     const row = rows.find((r) => r.key === pending.rowKey);
     const layer = row && row.layers.find((l) => l.kind === pending.kind);
     if (layer) { setOpen({ rowKey: row.key, id: layer.id }); setPending(null); }
   }, [pending, rows]);
+  // The open piece may vanish (removed, undone): close its box rather than leave it pointing at nothing.
+  useEffect(() => {
+    if (!open) return;
+    const row = rows.find((r) => r.key === open.rowKey);
+    if (!row || !row.layers.some((l) => l.id === open.id)) setOpen(null);
+  }, [open, rows]);
+  // Editor-exit contract: click-away COMMITS what is typed (blur first, then close), Escape abandons it.
+  const commitAndClose = useCallback(() => {
+    const ae = typeof document !== "undefined" ? document.activeElement : null;
+    if (ae && boxRef.current && boxRef.current.contains(ae) && typeof ae.blur === "function") ae.blur();
+    setOpen(null);
+  }, []);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => {
+      const t = e.target;
+      if (t && t.closest && (t.closest('[data-testid="wall-edit-box"]') || t.closest('[data-testid="wall-piece"]') || t.closest('[data-testid="wall-add"]'))) return;
+      commitAndClose();
+    };
+    const onKey = (e) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(null); } };
+    document.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("keydown", onKey, true);
+    return () => { document.removeEventListener("pointerdown", onDown, true); window.removeEventListener("keydown", onKey, true); };
+  }, [open, commitAndClose]);
+
   const muted = { fontSize: FONT_SIZE.label, color: "var(--text-tertiary)" };
-  const chipBase = { fontSize: FONT_SIZE.label, lineHeight: 1.2, padding: "3px 7px", borderRadius: RADIUS.sm, border: BORDER_1, background: SURF_RAISED, color: "var(--text-primary)", cursor: "pointer", fontFamily: "inherit", fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap" };
-  const chipOn = { borderColor: "var(--accent)", boxShadow: "0 0 0 1px var(--accent)" };
-  const stepBtn = (en) => ({ width: CONTROL_H.md, height: CONTROL_H.md, padding: 0, display: "grid", placeItems: "center", fontSize: FONT_SIZE.display, lineHeight: 1, fontWeight: 700, borderRadius: RADIUS.sm, border: BORDER_1, background: SURF_RAISED, color: "var(--text-primary)", fontFamily: "inherit", cursor: en ? "pointer" : "default", opacity: en ? 1 : 0.45 });
   const toggleBtn = (on) => ({ minWidth: 30, height: CONTROL_H.md, padding: "0 8px", fontSize: FONT_SIZE.control, fontWeight: 700, borderRadius: RADIUS.sm, border: on ? "1px solid var(--accent)" : BORDER_1, background: on ? "var(--accent)" : SURF_RAISED, color: on ? "var(--on-accent)" : "var(--text-primary)", fontFamily: "inherit", cursor: "pointer", whiteSpace: "nowrap" });
   const link = { padding: 0, border: "none", background: "transparent", color: "var(--accent-text, var(--accent))", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.label, fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 2 };
-  const field = (label, children) => <span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.sm }}><span style={muted}>{label}</span>{children}</span>;
-  const unit = (t) => <span style={{ ...muted, flex: "none" }}>{t}</span>;
+  const addCatalogBtn = { fontSize: FONT_SIZE.label, lineHeight: 1.2, padding: "3px 7px", borderRadius: RADIUS.sm, border: "1px dashed var(--border-strong)", background: SURF_RAISED, color: "var(--text-primary)", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" };
   const badgeStyle = (row) => row.role === "dock"
     ? { background: "var(--accent)", color: "var(--on-accent)", border: "1px solid var(--accent)" }
     : row.role === "rear"
       ? { background: "transparent", color: "var(--accent-text, var(--accent))", border: "1px solid var(--accent)" }
       : { background: "var(--surface-field)", color: "var(--text-secondary)", border: BORDER_1 };
-    const boxStyle = { margin: `${SPACE.sm}px 0 ${SPACE.sm}px 0`, padding: SPACE.md, borderRadius: RADIUS.sm, border: BORDER_1, background: "var(--surface-field)", display: "flex", flexDirection: "column", gap: SPACE.md };
+  const boxStyle = { margin: `${SPACE.sm}px 0`, padding: SPACE.md, borderRadius: RADIUS.sm, border: BORDER_1, background: "var(--surface-field)", display: "flex", flexDirection: "column", gap: SPACE.md, position: "relative" };
 
-  const editorFor = (row, layer) => {
-    const isDock = row.isDock;
-    const outer = isDock ? row.layers.length - layer.index - 1 : 0;
-    const closeBtn = <button type="button" data-testid="wall-editor-close" aria-label="Close" title="Close" onClick={() => setOpen(null)} style={{ ...link, textDecoration: "none", color: "var(--text-tertiary)", fontSize: FONT_SIZE.control }}>✕</button>;
-    const title = <span style={{ fontSize: FONT_SIZE.control, fontWeight: 700, color: "var(--text-primary)" }}>{layer.kind === "parking" ? "Car parking" : KIND_NAME[layer.kind] || "Layer"}</span>;
-    const removeLabel = isDock && outer > 0 ? "Remove + outer" : "Remove";
-    const removeLine = (
-      <span style={{ display: "flex", flexDirection: "column", gap: SPACE.xs }}>
-        <button type="button" data-testid="wall-editor-remove" style={{ ...link, alignSelf: "flex-start", color: "var(--danger-text, var(--danger))" }} onClick={() => { setOpen(null); ops.remove(row, layer); }}>{removeLabel}</button>
-        {isDock && layer.kind === "court" && <span style={muted}>Removing the court removes everything outside it.</span>}
+  const plan = stripPlan(rows);
+  const legend = legendKinds(rows);
+  const openRow = open ? rows.find((r) => r.key === open.rowKey) : null;
+  const openLayer = openRow ? openRow.layers.find((l) => l.id === open.id) : null;
+  const dockRows = rows.filter((r) => r.isDock && r.bump);
+  const bumpN = dockRows.reduce((t, r) => t + r.bump.n, 0);
+  const bumpRef = dockRows.find((r) => r.bump.n > 0) || dockRows[0];
+  const allDockSides = dockRows.flatMap((r) => r.sides);
+
+  const swatch = (layer, w = 20, h = 20) => (
+    <span aria-hidden="true" style={{ flex: "none", width: w, height: h, borderRadius: RADIUS.sm, background: layer.fill, display: "grid", placeItems: "center", boxShadow: layer.kind === "sidewalk" ? `inset 0 0 0 1px ${WALL_PIECE_EDGE}` : "none" }}>
+      <WallKindIcon kind={layer.kind} size={Math.round(Math.min(w, h) * 0.7)} />
+    </span>
+  );
+  const numField = (label, input) => <span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.sm }}><span style={muted}>{label}</span>{input}</span>;
+
+  // The one-line edit box. NO wall name, NO long title, NO total-depth text, NO close button, NO note — a swatch, the
+  // short name, the editable numbers (right-aligned) and the bin.
+  const editBox = (row, layer, caretX) => {
+    const isCourt = layer.kind === "court";
+    const binTitle = isCourt ? "Removes the truck court and its trailer parking; everything outside moves in" : "Remove — anything outside it moves in";
+    const bin = (
+      <button type="button" className="wall-bin" data-testid="wall-piece-remove" aria-label={`Remove ${KIND_LABEL[layer.kind]}`} title={binTitle}
+        onClick={() => { setOpen(null); ops.remove(row, layer); }}
+        style={{ flex: "none", width: CONTROL_H.md, height: CONTROL_H.md, padding: 0, display: "grid", placeItems: "center", border: "none", borderRadius: RADIUS.sm, background: "transparent", cursor: "pointer" }}>
+        <WallBinGlyph />
+      </button>
+    );
+    const head = (numbers) => (
+      <span style={{ display: "flex", alignItems: "center", gap: SPACE.md }}>
+        {swatch(layer)}
+        <span style={{ fontSize: FONT_SIZE.control, fontWeight: 700, color: "var(--text-primary)" }}>{KIND_LABEL[layer.kind]}</span>
+        <span style={{ flex: 1 }} />
+        {numbers}
+        {bin}
       </span>
     );
+    let body;
     if (layer.kind === "parking") {
       const en = !layer.split && !ops.footEdit;
-      return (
-        <div data-testid="wall-layer-editor" data-kind="parking" style={boxStyle}>
-          <span style={{ display: "flex", justifyContent: "space-between" }}>{title}{closeBtn}</span>
-          <span style={{ display: "flex", alignItems: "center", gap: SPACE.sm }}>
-            <span style={muted}>Rows</span>
-            <button type="button" data-testid="wall-rows-minus" aria-label="One fewer parking row" title="One fewer parking row" disabled={!en || layer.rows < 1} onClick={() => ops.parkingRows(row, layer.rows - 1)} style={stepBtn(en && layer.rows >= 1)}>－</button>
-            <NumInput style={{ ...numInput, width: 44, textAlign: "center", padding: "6px 4px" }} ariaLabel="Parking rows" value={layer.rows} min={0} max={24} step={1} onCommit={(n) => ops.parkingRows(row, n)} />
-            <button type="button" data-testid="wall-rows-plus" aria-label="One more parking row" title="One more parking row" disabled={!en} onClick={() => ops.parkingRows(row, layer.rows + 1)} style={stepBtn(en)}>＋</button>
+      body = head(numField("Rows", <NumInput boxed boxWidth={64} ariaLabel="Parking rows" testid="wall-parking-rows" value={layer.rows} min={0} max={24} step={1} onCommit={(n) => { if (en) ops.parkingRows(row, n); }} />));
+    } else if (layer.kind === "trailer") {
+      body = (
+        <>
+          {head(numField("Rows", <NumInput boxed boxWidth={64} ariaLabel="Trailer rows" testid="wall-trailer-rows" value={layer.rows} min={1} max={TRAILER_MAX_ROWS} step={1} onCommit={(n) => ops.trailerRows(row, layer, n)} />))}
+          <span style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", columnGap: SPACE.xl, rowGap: SPACE.md }}>
+            {layer.rowDepths.map((d, i) => numField(`Row ${i + 1}`, <NumInput key={i} boxed unit="ft" boxWidth={92} ariaLabel={`Trailer row ${i + 1} depth`} testid={`wall-trailer-row-${i + 1}`} value={d} min={TRAILER_MIN_ROW_DEPTH} step={1} coarse={5} onCommit={(n) => ops.trailerRowDepth(row, layer, i, n)} />))}
           </span>
-          {layer.split && <span style={muted}>This wall's parking is split into pieces — set those on the canvas.</span>}
-          {removeLine}
-        </div>
+          {layer.rows >= 2 && (
+            <span style={{ display: "flex", justifyContent: "flex-end" }}>
+              {numField("Aisle", <NumInput boxed unit="ft" boxWidth={92} ariaLabel="Aisle between trailer rows" testid="wall-trailer-aisle" value={layer.aisle} min={0} step={1} coarse={5} onCommit={(n) => ops.trailerAisle(row, layer, n)} />)}
+            </span>
+          )}
+        </>
       );
+    } else {
+      body = head(numField("Depth", <NumInput boxed unit="ft" boxWidth={92} ariaLabel="Depth" testid="wall-depth" value={layer.depth} min={1} step={1} coarse={5} onCommit={(n) => ops.depth(row, layer, n)} />));
     }
     return (
-      <div data-testid="wall-layer-editor" data-kind={layer.kind} style={boxStyle}>
-        <span style={{ display: "flex", justifyContent: "space-between" }}>{title}{closeBtn}</span>
-        <span style={{ display: "flex", alignItems: "center", gap: SPACE.sm, flexWrap: "wrap" }}>
-          {field(layer.kind === "trailer" ? "Depth (per row)" : "Depth", <>
-            <NumInput style={{ ...numInput, width: 56 }} ariaLabel="Depth" value={layer.kind === "trailer" ? layer.rowDepth : layer.depth} min={1} onCommit={(n) => ops.depth(row, layer, n)} />{unit("ft")}
-          </>)}
-        </span>
-        {layer.kind === "trailer" && (
-          <>
-            <span style={{ display: "flex", alignItems: "center", gap: SPACE.sm, flexWrap: "wrap" }}>
-              <span style={muted}>Rows</span>
-              <button type="button" data-testid="wall-trailer-rows-minus" aria-label="One fewer trailer row" title="One fewer trailer row" disabled={layer.rows <= 1} onClick={() => ops.trailerRows(row, layer, layer.rows - 1)} style={stepBtn(layer.rows > 1)}>－</button>
-              <NumInput style={{ ...numInput, width: 44, textAlign: "center", padding: "6px 4px" }} ariaLabel="Trailer rows" value={layer.rows} min={1} max={TRAILER_MAX_ROWS} step={1} onCommit={(n) => ops.trailerRows(row, layer, n)} />
-              <button type="button" data-testid="wall-trailer-rows-plus" aria-label="One more trailer row" title="One more trailer row" disabled={layer.rows >= TRAILER_MAX_ROWS} onClick={() => ops.trailerRows(row, layer, layer.rows + 1)} style={stepBtn(layer.rows < TRAILER_MAX_ROWS)}>＋</button>
-              <span data-testid="wall-trailer-total" style={muted}>{layer.rows > 1 ? `= ${layer.depth}′ deep` : ""}</span>
-            </span>
-            {layer.rows >= 2 && (
-              <span style={{ display: "flex", alignItems: "center", gap: SPACE.sm, flexWrap: "wrap" }}>
-                {field("Aisle", <><NumInput style={{ ...numInput, width: 56 }} ariaLabel="Aisle between trailer rows" value={layer.aisle} min={0} onCommit={(n) => ops.trailerAisle(row, layer, n)} />{unit("ft between rows")}</>)}
-              </span>
-            )}
-          </>
-        )}
-        {removeLine}
+      <div ref={boxRef} data-testid="wall-edit-box" data-kind={layer.kind} style={boxStyle}>
+        <span aria-hidden="true" data-testid="wall-edit-caret" style={{ position: "absolute", top: -5, left: caretX - 5, width: 8, height: 8, transform: "rotate(45deg)", background: "var(--surface-field)", borderTop: BORDER_1, borderLeft: BORDER_1 }} />
+        {body}
       </div>
     );
   };
 
-  const bumpEditor = (row) => {
-    const bp = row.bump;
-    return (
-      <div data-testid="wall-layer-editor" data-kind="bump" style={boxStyle}>
-        <span style={{ display: "flex", justifyContent: "space-between" }}>
-          <span style={{ fontSize: FONT_SIZE.control, fontWeight: 700, color: "var(--text-primary)" }}>Bump-outs</span>
-          <button type="button" data-testid="wall-editor-close" aria-label="Close" title="Close" onClick={() => setOpen(null)} style={{ ...link, textDecoration: "none", color: "var(--text-tertiary)", fontSize: FONT_SIZE.control }}>✕</button>
-        </span>
-        <span style={{ display: "flex", alignItems: "center", gap: SPACE.sm }}>
-          <span style={muted}>At</span>
-          {bp.ends.map((e) => (
-            <button key={e.sign} type="button" data-testid={`bump-end-${e.sign < 0 ? "start" : "end"}`} aria-pressed={e.on} disabled={!canEditBumps}
-              title={canEditBumps ? `${e.on ? "Remove" : "Add"} the bump-out at the ${e.label} end` : "Reset the footprint to a rectangle first — bump-outs anchor to square corners"}
-              onClick={() => ops.bumpEnd(row, e.sign)} style={{ ...toggleBtn(e.on), opacity: canEditBumps ? 1 : 0.5 }}>{e.label}</button>
+  const bumpEditor = () => (
+    <div data-testid="bump-editor" style={{ ...boxStyle, marginTop: SPACE.sm }}>
+      {dockRows.map((r) => (
+        <span key={r.key} data-wall={r.sides.join(",")} style={{ display: "flex", alignItems: "center", gap: SPACE.sm }}>
+          <span style={muted}>{dockRows.length > 1 ? `${r.badge} wall · At` : "At"}</span>
+          {r.bump.ends.map((e) => (
+            <button key={e.sign} type="button" data-testid={`bump-end-${e.sign < 0 ? "start" : "end"}`} data-wall={r.sides.join(",")} aria-pressed={e.on} disabled={!canEditBumps}
+              title={canEditBumps ? `${e.on ? "Remove" : "Add"} the bump-out at the ${e.label} end${dockRows.length > 1 ? ` of the ${r.badge} wall` : ""}` : "Reset the footprint to a rectangle first — bump-outs anchor to square corners"}
+              onClick={() => ops.bumpEnd(r, e.sign)} style={{ ...toggleBtn(e.on), opacity: canEditBumps ? 1 : 0.5 }}>{e.label}</button>
           ))}
         </span>
-        <span style={{ display: "flex", alignItems: "center", gap: SPACE.sm, flexWrap: "wrap" }}>
-          <span style={muted}>Size</span>
-          <span title="Along the dock wall"><NumInput style={{ ...numInput, width: 50 }} ariaLabel="Bump-out size along the dock wall" value={bp.along} min={1} onCommit={(n) => ops.bumpSize(row, n, bp.proj)} /></span>
-          <span style={muted}>×</span>
-          <span title="Out from the dock face"><NumInput style={{ ...numInput, width: 50 }} ariaLabel="Bump-out size out from the dock face" value={bp.proj} min={1} onCommit={(n) => ops.bumpSize(row, bp.along, n)} /></span>
-          {unit("ft")}
-        </span>
-        <button type="button" data-testid="bump-remove-all" style={{ ...link, alignSelf: "flex-start", color: "var(--danger-text, var(--danger))" }} disabled={bp.n < 1} onClick={() => { setOpen(null); ops.bumpRemoveAll(row); }}>Remove all</button>
-      </div>
-    );
-  };
+      ))}
+      <span style={{ display: "flex", alignItems: "center", gap: SPACE.sm, flexWrap: "wrap" }}>
+        <span style={muted}>Size</span>
+        <span title="Along the dock wall"><NumInput boxed boxWidth={64} ariaLabel="Bump-out size along the dock wall" value={bumpRef.bump.along} min={1} step={1} coarse={5} onCommit={(n) => ops.bumpSize({ sides: allDockSides }, n, bumpRef.bump.proj)} /></span>
+        <span style={muted}>×</span>
+        <span title="Out from the dock face"><NumInput boxed unit="ft" boxWidth={92} ariaLabel="Bump-out size out from the dock face" value={bumpRef.bump.proj} min={1} step={1} coarse={5} onCommit={(n) => ops.bumpSize({ sides: allDockSides }, bumpRef.bump.along, n)} /></span>
+        <span style={{ flex: 1 }} />
+        <button type="button" data-testid="bump-remove-all" style={{ ...link, color: "var(--danger-text, var(--danger))" }} disabled={bumpN < 1} onClick={() => { setBumpOpen(false); ops.bumpRemoveAll({ sides: allDockSides }); }}>Remove all</button>
+      </span>
+    </div>
+  );
 
   return (
     <div data-testid="wall-rows" style={{ marginTop: SPACE.xl, display: "flex", flexDirection: "column", gap: SPACE.sm }}>
+      {dockRows.length > 0 && (
+        <div data-testid="bump-line">
+          <span style={{ display: "flex", alignItems: "baseline", gap: SPACE.md }}>
+            <span data-testid="bump-summary" style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)", fontVariantNumeric: TABULAR_NUMS }}>{bumpSummary(bumpN, bumpRef.bump.along, bumpRef.bump.proj)}</span>
+            <button type="button" data-testid="bump-edit" style={link} aria-expanded={bumpOpen} onClick={() => { setOpen(null); setMenu(null); setBumpOpen((o) => !o); }}>{bumpOpen ? "done" : "edit"}</button>
+          </span>
+          {bumpOpen && bumpEditor()}
+        </div>
+      )}
       {rows.map((row) => {
         const opts = addOptions(row.isDock, row.layers);
         const menuOpen = menu === row.key;
-        const openLayer = open && open.rowKey === row.key && open.id !== "bump" ? row.layers.find((l) => l.id === open.id) : null;
-        const bumpOpen = open && open.rowKey === row.key && open.id === "bump";
+        const shown = openLayer && openRow && openRow.key === row.key ? openLayer : null;
+        const geo = plan.rows[row.key];
+        const total = geo.total;
         return (
           <div key={row.key} data-testid="wall-row" data-row={row.key} data-role={row.role} data-sides={row.sides.join(",")}>
-            <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: SPACE.sm }}>
-              <span data-testid="wall-row-head" style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: SPACE.sm, minWidth: 64 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: SPACE.sm }}>
+              <span data-testid="wall-row-head" style={{ flex: "none", width: WALL_LEFT_W, display: "inline-flex", alignItems: "center", gap: SPACE.sm }}>
                 <span data-testid="wall-row-badge" style={{ ...badgeStyle(row), minWidth: 22, padding: "1px 5px", borderRadius: RADIUS.sm, fontSize: FONT_SIZE.micro, fontWeight: 700, textAlign: "center", lineHeight: 1.4 }}>{row.badge}</span>
                 <span data-testid="wall-row-role" style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)" }}>{row.role}</span>
               </span>
-              {row.bump && (
-                <button type="button" data-testid="bump-chip" style={{ ...chipBase, ...(bumpOpen ? chipOn : null) }} onClick={() => { setMenu(null); setOpen(bumpOpen ? null : { rowKey: row.key, id: "bump" }); }}>{bumpChipLabel(row.bump.n)}</button>
+              {row.layers.length > 0 && (
+                <span data-testid="wall-strip" data-total={total} style={{ flex: "none", width: geo.barW, height: CONTROL_H.sm, display: "flex", gap: STRIP.GAP, borderRadius: 4, overflow: "hidden", background: "var(--surface-raised)", boxShadow: "0 0 0 1px var(--border-strong)" }}>
+                  {row.layers.map((l, i) => {
+                    const label = pieceLabel(l);
+                    const w = geo.pieces[i].w;
+                    const sel = !!shown && shown.id === l.id;
+                    return (
+                      <button key={l.id} type="button" className="wall-piece" data-testid="wall-piece" data-kind={l.kind} data-index={i} aria-pressed={sel} aria-label={chipLabel(l)} title={pieceTooltip(l, total)}
+                        onClick={() => { if (sel) commitAndClose(); else { setMenu(null); setBumpOpen(false); setOpen({ rowKey: row.key, id: l.id }); } }}
+                        style={{ flex: "none", width: w, height: "100%", padding: 0, border: "none", borderRadius: 0, background: l.fill, color: WALL_PIECE_TEXT, cursor: "pointer", fontFamily: "inherit",
+                          display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 3, overflow: "hidden", whiteSpace: "nowrap",
+                          fontSize: FONT_SIZE.micro, fontWeight: 600, fontVariantNumeric: TABULAR_NUMS,
+                          boxShadow: sel ? "inset 0 0 0 2px var(--accent)" : (l.kind === "sidewalk" ? `inset 0 0 0 1px ${WALL_PIECE_EDGE}` : "none") }}>
+                        {pieceShowsIcon(w, label) && <WallKindIcon kind={l.kind} size={11} />}
+                        <span>{label}</span>
+                      </button>
+                    );
+                  })}
+                </span>
               )}
-              {row.layers.map((l) => (
-                <button key={l.id} type="button" data-testid="wall-chip" data-kind={l.kind} style={{ ...chipBase, ...(openLayer && openLayer.id === l.id ? chipOn : null) }}
-                  onClick={() => { setMenu(null); setOpen(openLayer && openLayer.id === l.id ? null : { rowKey: row.key, id: l.id }); }}>{chipLabel(l)}</button>
-              ))}
               {opts.length > 0 && (
-                <button type="button" data-testid="wall-add" aria-label={`Add a layer to the ${row.badge} wall`} title="Add a layer to this wall" style={{ ...chipBase, borderStyle: "dashed", borderColor: "var(--border-strong)", color: "var(--text-secondary)", padding: "3px 9px" }}
-                  onClick={() => { setOpen(null); setMenu(menuOpen ? null : row.key); }}>＋</button>
+                <button type="button" data-testid="wall-add" aria-label={`Add a layer to the ${row.badge} wall`} title="Add a layer to this wall"
+                  style={{ flex: "none", width: CONTROL_H.sm, height: CONTROL_H.sm, padding: 0, display: "grid", placeItems: "center", fontSize: FONT_SIZE.emphasis, lineHeight: 1, borderRadius: RADIUS.sm, border: "1px dashed var(--border-strong)", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontFamily: "inherit" }}
+                  onClick={() => { setOpen(null); setBumpOpen(false); setMenu(menuOpen ? null : row.key); }}>＋</button>
               )}
             </div>
             {menuOpen && (
-              <div data-testid="wall-add-menu" style={{ display: "flex", flexWrap: "wrap", gap: SPACE.sm, margin: `${SPACE.sm}px 0` }}>
+              <div data-testid="wall-add-menu" style={{ display: "flex", flexWrap: "wrap", gap: SPACE.sm, margin: `${SPACE.sm}px 0 ${SPACE.sm}px ${WALL_LEFT_W + SPACE.sm}px` }}>
                 {opts.map((o) => (
-                  <button key={o.key} type="button" data-testid={`wall-add-${o.key}`} style={{ ...chipBase, borderStyle: "dashed" }}
+                  <button key={o.key} type="button" data-testid={`wall-add-${o.key}`} style={addCatalogBtn}
                     onClick={() => { setMenu(null); ops.add(row, o.key); setPending({ rowKey: row.key, kind: o.key }); }}>＋ {o.label}</button>
                 ))}
               </div>
             )}
-            {bumpOpen && row.bump && bumpEditor(row)}
-            {openLayer && editorFor(row, openLayer)}
+            {shown && editBox(row, shown, WALL_LEFT_W + SPACE.sm + geo.pieces[row.layers.findIndex((l) => l.id === shown.id)].x + geo.pieces[row.layers.findIndex((l) => l.id === shown.id)].w / 2)}
           </div>
         );
       })}
+      {legend.length > 0 && (
+        <div data-testid="wall-legend" style={{ display: "flex", flexWrap: "wrap", columnGap: SPACE.xl, rowGap: SPACE.xs, paddingLeft: WALL_LEFT_W + SPACE.sm, marginTop: SPACE.xs }}>
+          {legend.map((k) => {
+            const sample = rows.flatMap((r) => r.layers).find((l) => l.kind === k.kind);
+            const on = !!openLayer && openLayer.kind === k.kind;
+            return (
+              <span key={k.kind} data-testid="wall-legend-item" data-kind={k.kind} data-selected={on ? "1" : undefined} style={{ display: "inline-flex", alignItems: "center", gap: SPACE.xs, fontSize: FONT_SIZE.micro, color: "var(--text-secondary)", fontWeight: on ? 700 : 400 }}>
+                <span aria-hidden="true" style={{ width: 16, height: 14, borderRadius: 3, background: sample.fill, display: "grid", placeItems: "center", boxShadow: on ? "0 0 0 2px var(--accent)" : (k.kind === "sidewalk" ? `inset 0 0 0 1px ${WALL_PIECE_EDGE}` : "none") }}>
+                  <WallKindIcon kind={k.kind} size={10} />
+                </span>
+                {k.name}
+              </span>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -32249,7 +32367,9 @@ function LineSample({ weight }) {
 // commits (parse + clamp) on Enter or blur, never live on each keystroke.
 // `ariaLabel` names the input for a screen reader (and for a headless check) when it does NOT sit
 // behind a visible <Field> label — e.g. the Custom width… entry inside the Road flyout.
-function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse, ariaLabel, allowClear = false, forceCommit = false }) {
+/* `boxed` (Building panel v3, NEW-2) draws the field as the shared NumberBox: ONE bordered box holding the value,
+ * `unit` and a stacked ▲▼ (when `step` is set). Same commit/clamp/"Using N" logic — only the chrome changes. */
+function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse, ariaLabel, allowClear = false, forceCommit = false, boxed = false, unit: boxUnit, boxWidth, testid }) {
   const [draft, setDraft] = useState(value == null ? "" : String(value));
   /* The one-line note shown when a commit did not take the number as typed (rounded / clamped).
    * Cleared by the next keystroke — it reports THIS commit, never a stale one. */
@@ -32377,7 +32497,7 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
    * also have been rounded. */
   const note = invalidReason || altered;
   const input = (
-    <input style={style} value={draft} placeholder={placeholder} inputMode="decimal" aria-label={ariaLabel}
+    <input style={boxed ? NUMBOX_INPUT_STYLE : style} data-numbox-input={boxed ? "1" : undefined} data-testid={testid} value={draft} placeholder={placeholder} inputMode="decimal" aria-label={ariaLabel}
       aria-invalid={invalidReason ? "true" : undefined}
       /* ⛔ `aria-describedby`, not `aria-errormessage`: it is universally supported, and it also
        * carries the non-error "Using 614" note, which is not an error message at all. */
@@ -32453,6 +32573,14 @@ function NumInput({ value, onCommit, min, max, style, placeholder, step, coarse,
     </span>
   );
 
+  if (boxed) {
+    return stack(
+      <NumberBox unit={boxUnit} width={boxWidth} onUp={step != null ? (e) => nudge(e && e.shiftKey ? coarseStep : step) : undefined} onDown={step != null ? (e) => nudge(-(e && e.shiftKey ? coarseStep : step)) : undefined}
+        upTitle="Increase (↑ · Shift for a larger step)" downTitle="Decrease (↓ · Shift for a larger step)">
+        {input}
+      </NumberBox>
+    );
+  }
   if (step == null) return stack(input);
   // preventDefault on mousedown keeps the input focused so a click nudges rather than firing a
   // blur-commit on a half-typed draft first (same trick as RotationStepper's spinner).

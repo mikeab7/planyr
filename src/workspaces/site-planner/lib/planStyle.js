@@ -21,18 +21,27 @@ import { bufferPolyline } from "./metesAndBounds.js";
 // hairline). Building carries a soft drop shadow in the renderer.
 export const TYPE = {
   building: { fill: "#f3ece1", stroke: "#33302b", label: "Building", weight: 2, shadow: true },
-  paving: { fill: "#d6d1c7", stroke: "#9a9384", label: "Paving / Drive", weight: 1.25 },
-  parking: { fill: "#cdd7dd", stroke: "#7d949e", label: "Car Parking", weight: 1.25 },
+  paving: { fill: "#d5d9de", stroke: "#8f99a3", label: "Paving / Drive", weight: 1.25 },
+  parking: { fill: "#d6e5f2", stroke: "#7f9fbb", label: "Car Parking", weight: 1.25 },
   trailer: { fill: "#e3d4b2", stroke: "#b09a6c", label: "Trailer Parking", weight: 1.25, pattern: "trailer" },
   // B231 — cartographic water-body token (no wavy hatch). The fill is the EDGE tone of a
   // radial steel-teal gradient that deepens toward the center (`#2F6675`) in the renderer;
   // the outline is a constant-screen-pixel teal. `cartoWater` is the reusable style token so
   // future water/basin features inherit the same treatment. No orange — that's the Markup accent.
   pond: { fill: "#5B97A5", stroke: "#2C5D6B", label: "Detention Pond", weight: 2, cartoWater: true },
-  sidewalk: { fill: "#eceae3", stroke: "#b4b1a6", label: "Sidewalk", weight: 1, pattern: "sidewalk" },
+  sidewalk: { fill: "#f7f6f2", stroke: "#b4b1a6", label: "Sidewalk", weight: 1, pattern: "sidewalk" },
   landscape: { fill: "#bcd3a6", stroke: "#7f9a63", label: "Landscape", weight: 1, hatch: true },
-  road: { fill: "#b9b4a8", stroke: "#7c786d", label: "Road", weight: 1.25 },
+  road: { fill: "#9eabb7", stroke: "#66737f", label: "Road", weight: 1.25 },
 };
+
+/* Building panel v3 (NEW-4) — the "Docks & walls" strip. A piece is filled with its layer's PLAN colour (read from
+ * `elStyle`, so the strip and the canvas always match — including a colour the user set), so the only literals the
+ * strip owns are the ink each kind's icon is drawn in and the text/edge colours that stay legible on any of those
+ * fills in BOTH themes (the fills are pale in light and dark alike, so the text is always dark). Declared once here
+ * (this file is on the design-drift audit's drawing-surface list) so no component carries a raw hex. */
+export const WALL_KIND_INK = { court: "#4f5964", trailer: "#76643c", buffer: "#4f6b38", sidewalk: "#77746b", parking: "#3f6a8c", road: "#2f3a45" };
+export const WALL_PIECE_TEXT = "#1B1E26";
+export const WALL_PIECE_EDGE = "#d9d7cf";      // the 1-px inset edge a near-white sidewalk piece needs to read as a piece
 
 /* NEW-3 — ACCOUNT-level style defaults ("default for ALL projects").
  *

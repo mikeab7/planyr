@@ -53,7 +53,7 @@ describe("planThumbnailSvg", () => {
     const svg = planThumbnailSvg({ id: "s1", parcels: [], els: [bldgEarlier, roadLater] });
     // the road was drawn LAST (higher z), so it paints over the earlier building.
     expect(svg.indexOf("#f3ece1")).toBeGreaterThan(-1); // TYPE.building.fill
-    expect(svg.indexOf("#f3ece1")).toBeLessThan(svg.indexOf("#b9b4a8")); // TYPE.road.fill, painted after
+    expect(svg.indexOf("#f3ece1")).toBeLessThan(svg.indexOf("#9eabb7")); // TYPE.road.fill, painted after
   });
 
   it("never throws on malformed element geometry", () => {

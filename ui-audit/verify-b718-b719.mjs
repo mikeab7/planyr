@@ -24,8 +24,8 @@ const BASE = process.env.BASE_URL || "http://localhost:4173/";
 const OUT = new URL("./screens/", import.meta.url).pathname;
 mkdirSync(OUT, { recursive: true });
 
-const ROAD_FILL = "#b9b4a8";
-const ROAD_STROKE = "#7c786d";
+const ROAD_FILL = "#9eabb7";
+const ROAD_STROKE = "#66737f";
 const DEMO_ID = "verify-b718-b719";
 
 // road B — a 3-point centerline (an L), 6" curb. Used for the B718 vertex add/remove checks.

@@ -5,7 +5,7 @@
  *     non-dock ends do car parking) — the owner's "controls right on the building";
  *   • the panel's uniform "+ / −" rows (Dock zones / Car parking / Bump-outs).
  * Element types are read off the canvas by their plan-style fills:
- *   building #f3ece1 · court(paving) #d6d1c7 · trailer #e3d4b2 · buffer(landscape) #bcd3a6 · parking #cdd7dd */
+ *   building #f3ece1 · court(paving) #d5d9de · trailer #e3d4b2 · buffer(landscape) #bcd3a6 · parking #d6e5f2 */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
 const { chromium } = pw;
 import { mkdirSync } from "node:fs";
@@ -49,7 +49,7 @@ try { await page.locator('[title="Zoom to fit"]').first().click({ timeout: 5000 
 await page.waitForTimeout(500);
 
 const zones = () => page.evaluate(() => {
-  const FILL = { "#f3ece1": "building", "#d6d1c7": "court", "#e3d4b2": "trailer", "#bcd3a6": "buffer", "#cdd7dd": "parking" };
+  const FILL = { "#f3ece1": "building", "#d5d9de": "court", "#e3d4b2": "trailer", "#bcd3a6": "buffer", "#d6e5f2": "parking" };
   const out = [];
   for (const r of document.querySelectorAll("svg rect")) {
     const fill = (r.getAttribute("fill") || "").toLowerCase();
@@ -158,7 +158,7 @@ await page.screenshot({ path: OUT + "dock-zones-oncanvas.png" });
 
 // ---- D) EMPLOYEE-SIDE build-out (non-dock side): "+" walks sidewalk → parking row → MORE rows ----
 // sidewalk strips are thin (5′) and may rotate, so detect by fill with a long axis
-const swCount = () => page.evaluate(() => [...document.querySelectorAll("svg rect")].filter((r) => { const b = r.getBoundingClientRect(); return (r.getAttribute("fill") || "").toLowerCase() === "#eceae3" && Math.max(b.width, b.height) > 12; }).length);
+const swCount = () => page.evaluate(() => [...document.querySelectorAll("svg rect")].filter((r) => { const b = r.getBoundingClientRect(); return (r.getAttribute("fill") || "").toLowerCase() === "#f7f6f2" && Math.max(b.width, b.height) > 12; }).length);
 // the parking field's DEPTH is the SHORTER bbox side (it's rotated 90° on a short end)
 const parkDepth = async () => { const p = (await zones()).filter((e) => e.kind === "parking").sort((a, b) => b.w * b.h - a.w * a.h)[0]; return p ? Math.min(p.w, p.h) : 0; };
 await clickByTitle(/Add a .{0,3}sidewalk/);                  // 1st "+" → sidewalk (the one Michael lost)

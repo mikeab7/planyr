@@ -642,6 +642,32 @@ select[aria-invalid="true"]:focus, textarea[aria-invalid="true"]:focus {
   box-shadow: 0 0 0 3px var(--invalid-ring-soft);
   outline: none;
 }
+/* NumberBox (Building panel v3) — the ONE bordered number box (value · unit · ▲▼). The input inside is
+   borderless, so the FRAME carries the focus ring and the invalid state. The input-level rules above are
+   cancelled for it by SPECIFICITY (they use a `:not()` chain; so does this), not by `!important`. */
+[data-numbox] > input[data-numbox-input]:not([type="checkbox"]):not([type="range"]):not([type="color"]):focus {
+  box-shadow: none;
+  outline: none;
+  border: none !important;
+}
+[data-numbox]:focus-within { border-color: var(--accent) !important; box-shadow: 0 0 0 3px var(--focus-ring-soft); }
+[data-numbox]:has(input[aria-invalid="true"]) { border-color: var(--danger) !important; box-shadow: 0 0 0 3px var(--invalid-ring-soft); }
+[data-numbox]:hover:not(:focus-within) { border-color: var(--text-tertiary); }
+[data-numbox] [data-num-stepper] button:hover:not(:disabled) { background: var(--hover-chrome); color: var(--text-primary); }
+
+/* The building header's number box (Building panel v3): a small field that reads as editable — the stronger
+   outline always, darker on hover, an accent ring on focus (the global input focus rule). */
+.bldg-num-box { border: 1px solid var(--border-strong); background: var(--surface-field); }
+.bldg-num-box:hover:not(:focus) { border-color: var(--text-tertiary); }
+/* Borderless header icon buttons (lock · ⋯ · ✕): no box, a hover wash only. */
+.bldg-hdr-btn { border: none; background: transparent; }
+.bldg-hdr-btn:hover:not(:disabled) { background: var(--hover-chrome); color: var(--text-primary); }
+.bldg-hdr-btn.danger:hover:not(:disabled) { background: var(--hover-chrome-danger); }
+/* The wall-strip bin: muted, red on hover. */
+.wall-bin { color: var(--text-tertiary); }
+.wall-bin:hover:not(:disabled) { color: var(--danger-text, var(--danger)); background: var(--hover-chrome-danger); }
+/* A wall-strip piece: keyboard focus ring inside the bar. */
+.wall-piece:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
 
 /* B156 — pre-click hover preview on a markup (Site Planner + Document Review). A soft two-tone

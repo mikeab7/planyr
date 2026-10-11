@@ -77,8 +77,8 @@ else {
 
 // ---- Fix 2: select the LOCKED road → a blue halo cue appears (data-export skip) ----
 const roadClick = await page.evaluate(() => {
-  // the road surface path uses the road fill #b9b4a8
-  const p = [...document.querySelectorAll("svg path")].find((el) => (el.getAttribute("fill") || "").toLowerCase() === "#b9b4a8");
+  // the road surface path uses the road fill #9eabb7
+  const p = [...document.querySelectorAll("svg path")].find((el) => (el.getAttribute("fill") || "").toLowerCase() === "#9eabb7");
   if (!p || !p.getBoundingClientRect) return null;
   const b = p.getBoundingClientRect();
   return { x: b.x + b.width / 2, y: b.y + b.height / 2 };

@@ -84,7 +84,7 @@ log(under.length === 0, `no road pavement under any building${under.length ? " â
 
 // ---- 2. a drive target's outline is interrupted across the opening ------------------------------
 const outline = await page.evaluate(() => {
-  const g = [...document.querySelectorAll("svg polyline")].filter((n) => n.getAttribute("stroke") === "#9a9384");
+  const g = [...document.querySelectorAll("svg polyline")].filter((n) => n.getAttribute("stroke") === "#8f99a3");
   return { interruptedEdges: g.length, courtRect: !!document.querySelector('svg rect[stroke="none"]') };
 });
 log(outline.interruptedEdges >= 4, `drive target outline drawn as interrupted edges (${outline.interruptedEdges} segments)`);
