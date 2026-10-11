@@ -71,7 +71,7 @@ const Check = () => (
   <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" data-menu-check="1" style={{ flex: "none" }}><path d="M3.2 8.6 L6.6 12 L12.8 4.4" /></svg>
 );
 
-const fmtAcres = (a) => (Number.isFinite(a) ? `${a.toFixed(2)} ac` : "");
+const fmtAcres = (a) => (Number.isFinite(a) ? `${a.toFixed(2)} AC` : "");
 
 /**
  * PARCEL TOOLS. `groups` is `parcelMenuModel(...)`'s answer; `run` maps a row id to its handler;

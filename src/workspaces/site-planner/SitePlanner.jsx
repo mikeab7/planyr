@@ -10202,7 +10202,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const finishActiveDrawing = () => {
     if (traceMode && tracePts.length >= 2) { commitTrace(); return true; }
     if (tool === "split" && splitPath.length >= 2) { finishSplit(); return true; }
-    if (tool === "measure" && measDraft.length >= (measureMode === "area" ? 3 : measureMode === "count" ? 1 : 2)) { finishMeasure(); return true; }
+    if (tool === "measure" && measDraft.length >= (measureMode === "area" ? 3 : measureMode === "count" ? 1 : 2)) {
+      /* NEW-2 — the two presses of a double-click are two ordinary clicks, so the second has already
+       * dropped a point ON the first's. Take that echo back off before finishing, or a Polylength ends
+       * with a zero-length last leg, an Area with a doubled corner and a Count counts the last item
+       * twice. Only a point within the double-click's own slop of the one before it is an echo (two
+       * real items that close would be overlapping markers). */
+      const n = measDraft.length;
+      const echo = n >= 2 && dist(f2p(measDraft[n - 1]), f2p(measDraft[n - 2])) <= DBLTAP_PX;
+      const draft = echo ? measDraft.slice(0, -1) : measDraft;
+      if (draft.length >= (measureMode === "area" ? 3 : measureMode === "count" ? 1 : 2)) finishMeasure(draft);
+      else setMeasDraft(draft);
+      return true;
+    }
     if (tool === "mpolyline" && mkPoly?.pts?.length >= 2) { finishMkPoly(); return true; }
     if (tool === "mpolygon" && mkPoly?.pts?.length >= 3) { finishMkPoly(); return true; }
     if (tool === "mcloud" && mkPoly?.kind === "mcloud" && mkPoly?.pts?.length >= 3) { finishMkPoly(); return true; }
@@ -10334,19 +10346,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * monotonic clock `tapTime` uses, so the E2E hook (which has no event) is on one timeline with it. */
   const dblOpts = (e, x, y) => ({ anchor: gestureAnchorRef.current, at: { t: tapTime(e), x, y } });
   const onBgDouble = (e) => {
-    /* NEW-2 — the two presses of a double-click are two ordinary clicks, so the second one has already
-     * dropped a point ON the first's. Take that echo back off before finishing, otherwise a Polylength
-     * ends with a zero-length last leg, an Area with a doubled corner and a Count counts the last item
-     * twice. Only a point within the double-click's own slop of the one before it is an echo. */
-    if (tool === "measure" && measDraft.length >= 2) {
-      const [pa, pb] = [measDraft[measDraft.length - 1], measDraft[measDraft.length - 2]];
-      if (dist(f2p(pa), f2p(pb)) <= DBLTAP_PX) {
-        const trimmed = measDraft.slice(0, -1);
-        if (trimmed.length >= (measureMode === "area" ? 3 : measureMode === "count" ? 1 : 2)) finishMeasure(trimmed);
-        else setMeasDraft(trimmed);
-        return;
-      }
-    }
     if (finishActiveDrawing()) return;
     if (tool !== "select" || !e) return;
     // B1342704 — this gesture began on an add/remove control (featNode/glyphPlus/glyphMinus); the

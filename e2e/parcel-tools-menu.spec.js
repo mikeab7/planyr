@@ -237,7 +237,7 @@ test.describe("the right rail is the complete answer to 'what can I do to a parc
 
     // Header: swatch · name · acreage.
     await expect(page.locator("[data-parcel-this-name]")).not.toBeEmpty();
-    await expect(page.locator("[data-parcel-this-acres]")).toContainText(/ac$/);
+    await expect(page.locator("[data-parcel-this-acres]")).toContainText(/AC$/);
     await expect(row(page, "lock")).toContainText("Lock boundary");
     await expect(row(page, "active")).toContainText("Count in yield totals");
     await expect(row(page, "chip")).toContainText("Show acreage label");
