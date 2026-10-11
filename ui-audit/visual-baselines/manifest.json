@@ -29,13 +29,13 @@
     "site-planner-header": {
       "light": {
         "approvedAt": "2026-10-11",
-        "approvedCommit": "f03938331",
-        "note": "B2243169: Measure's ▾ pill now shows the current mode's icon (11x7 px region at the right rail, desktop header + left-rail surfaces only) [CI-authored by run 38176679325 on f03938331082071f1bf612a024cd4ad600df8675]"
+        "approvedCommit": "77acde0d",
+        "note": "Building panel v3 NEW-3: palette A default site colours paint on the demo plan (only colour-changed pixels re-captured; the rest stays CI-authored)"
       },
       "dark": {
         "approvedAt": "2026-10-11",
-        "approvedCommit": "f03938331",
-        "note": "B2243169: Measure's ▾ pill now shows the current mode's icon (11x7 px region at the right rail, desktop header + left-rail surfaces only) [CI-authored by run 38176679325 on f03938331082071f1bf612a024cd4ad600df8675]"
+        "approvedCommit": "77acde0d",
+        "note": "Building panel v3 NEW-3: palette A default site colours paint on the demo plan (only colour-changed pixels re-captured; the rest stays CI-authored)"
       },
       "light--phone": {
         "approvedAt": "2026-10-09",
@@ -51,13 +51,13 @@
     "site-planner-left-rail": {
       "light": {
         "approvedAt": "2026-10-11",
-        "approvedCommit": "f03938331",
-        "note": "B2243169: Measure's ▾ pill now shows the current mode's icon (11x7 px region at the right rail, desktop header + left-rail surfaces only) [CI-authored by run 38176679325 on f03938331082071f1bf612a024cd4ad600df8675]"
+        "approvedCommit": "77acde0d",
+        "note": "Building panel v3 NEW-3: palette A default site colours paint on the demo plan (only colour-changed pixels re-captured; the rest stays CI-authored)"
       },
       "dark": {
         "approvedAt": "2026-10-11",
-        "approvedCommit": "f03938331",
-        "note": "B2243169: Measure's ▾ pill now shows the current mode's icon (11x7 px region at the right rail, desktop header + left-rail surfaces only) [CI-authored by run 38176679325 on f03938331082071f1bf612a024cd4ad600df8675]"
+        "approvedCommit": "77acde0d",
+        "note": "Building panel v3 NEW-3: palette A default site colours paint on the demo plan (only colour-changed pixels re-captured; the rest stays CI-authored)"
       },
       "light--phone": {
         "approvedAt": "2026-10-09",
