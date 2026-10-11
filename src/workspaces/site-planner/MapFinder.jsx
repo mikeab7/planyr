@@ -56,6 +56,7 @@ import { registerChromeDock } from "../../shared/ui/chromeDock.js";
 import { cornerClearanceFromBottom } from "../../shared/ui/cornerClearance.js";
 // B848496 — site-plan overlays (upload a site plan, place it on the map, pin comps to it).
 import { useSitePlanOverlayLayers } from "./lib/useSitePlanOverlayLayers.js";
+import { calibrationAfterClick, calibrationUndo, calibrationPrompt, matchPairsOf } from "../../shared/sitePlans/lib/overlayCalibration.js";
 import { latLonToImagePoint, suggestFtPerPx, feetBetween } from "../../shared/overlay/overlayPlacement.js";
 import { overlayPlaced } from "../../shared/sitePlans/lib/sitePlanOverlays.js";
 // Reused (never a new raw hex literal) for text on the fixed COMP_ACCENT blue below — that
@@ -915,6 +916,18 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   };
 
   const [clickableOverlayId, setClickableOverlayId] = useState(null); // "pin a comp" mode, armed on one overlay
+  // NEW-7 (owner 2026-10-11) — click-by-click scale calibration for ONE site plan ("Trace a length" /
+  // "Match 2 points", started from the Adjust panel). The map only COLLECTS the clicks (every click while
+  // this is set belongs to the calibration — see the once-bound onClick) and draws them; the panel owns the
+  // inputs and the Apply, so this is plain state + three tiny setters, nothing to desync.
+  const [calibration, setCalibration] = useState(null); // { kind, id, pts: [{lat, lng}] } | null
+  const calibRef = useRef(null);
+  calibRef.current = calibration;
+  const startCalibration = (kind, id) => { setActiveOverlayId(null); setClickableOverlayId(null); setCalibration({ kind, id, pts: [] }); };
+  const clearCalibration = () => setCalibration(null);
+  const undoCalibration = () => setCalibration((c) => calibrationUndo(c));
+  const calibClickRef = useRef(null);
+  calibClickRef.current = (latlng) => setCalibration((c) => calibrationAfterClick(c, { lat: latlng.lat, lng: latlng.lng }));
   // B1167713 (NEW-2) — "pinning is optional and offered from the comp." Re-pinning an ALREADY
   // OPEN comp routes the very next overlay click into `repinCompAnchorRef` (CompsPanel's own
   // comp-update logic) instead of `onPlaceComp` (which always creates a NEW comp — see
@@ -959,7 +972,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const [rasterFailedIds, setRasterFailedIds] = useState(() => new Set());
   const onRasterUnavailable = (id) => setRasterFailedIds((s) => (s.has(id) ? s : new Set(s).add(id)));
   useSitePlanOverlayLayers(mapRef.current, visibleSitePlanOverlays, {
-    pinTargetId: clickableOverlayId, onPinClick: placeCompOnOverlay,
+    pinTargetId: clickableOverlayId, onPinClick: placeCompOnOverlay, calibrating: !!calibration,
     activeId: activeOverlayId, onSelect: selectOverlay, onCommitPlacement: commitOverlayPlacement,
     onRasterUnavailable,
   });
@@ -1419,6 +1432,37 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [compMenu]);
+  // NEW-7 — Escape leaves calibration; the clicked points are drawn on the map (drawing points in the comp
+  // accent, their map spots in a contrasting ring, joined by a line) and the cursor says "click here".
+  useEffect(() => {
+    if (!calibration) return undefined;
+    const onKey = (e) => { if (e.key === "Escape") setCalibration(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [calibration?.id, calibration?.kind]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !calibration) return undefined;
+    const g = L.layerGroup().addTo(map);
+    const pts = calibration.pts;
+    const dot = (p, fill, ring) => L.circleMarker([p.lat, p.lng], { radius: 6, color: ring, weight: 2, fillColor: fill, fillOpacity: 1, interactive: false }).addTo(g);
+    if (calibration.kind === "trace") {
+      pts.forEach((p) => dot(p, COMP_ACCENT, ON_COMP_ACCENT));
+      if (pts.length === 2) L.polyline([[pts[0].lat, pts[0].lng], [pts[1].lat, pts[1].lng]], { color: COMP_ACCENT, weight: 3, interactive: false }).addTo(g);
+    } else {
+      matchPairsOf(pts).forEach((pr) => {
+        dot(pr.from, COMP_ACCENT, ON_COMP_ACCENT);
+        if (pr.to) {
+          dot(pr.to, ON_COMP_ACCENT, COMP_ACCENT);
+          L.polyline([[pr.from.lat, pr.from.lng], [pr.to.lat, pr.to.lng]], { color: COMP_ACCENT, weight: 2, dashArray: "5 5", interactive: false }).addTo(g);
+        }
+      });
+    }
+    const el = map.getContainer();
+    const prevCursor = el.style.cursor;
+    el.style.cursor = "crosshair";
+    return () => { g.remove(); el.style.cursor = prevCursor; };
+  }, [calibration]); // eslint-disable-line react-hooks/exhaustive-deps
   // B849840/NEW-1 — Escape leaves a site plan's manipulation mode entirely (deselects/disarms),
   // distinct from overlayPlacementHandles.js's own Escape (cancel one in-flight drag and restore
   // the pre-gesture placement, then stay armed). The two never race: that in-flight handler is
@@ -1787,6 +1831,9 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       // must neither re-aim the note (select a parcel, mark a pin) nor discard it. Save / Cancel are
       // the only exits; panning and zooming still work because they are not clicks.
       if (editingNoteRef.current) return;
+      // NEW-7 — while a site plan is being calibrated EVERY map click is a calibration point (on the
+      // drawing or off it: "Match 2 points" needs both), never a deselect / parcel pick / pin.
+      if (calibRef.current) { calibClickRef.current && calibClickRef.current(e.latlng); return; }
       // NEW-1 (2026-09-08) — one armed pin, two callers, and they want different things from the
       // same click. The toolbar's "Drop a pin" is ground-first: the click MARKS the point and the
       // decide bar then asks what it is. The comps panel's armed Location cell is not a question —
@@ -4311,6 +4358,18 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
           }} />
         )}
 
+        {/* NEW-7 — the live prompt for a scale calibration, same pill the pin-a-comp mode uses. */}
+        {calibration && (
+          <div data-testid="map-calibration-prompt" style={{
+            position: "absolute", top: 10, left: "50%", transform: "translateX(-50%)", zIndex: MAP_CHROME_Z.control + 1,
+            background: COMP_ACCENT, color: ON_COMP_ACCENT, borderRadius: RADIUS.pill, padding: "6px 14px", fontSize: 12.5, fontWeight: 600,
+            display: "flex", alignItems: "center", gap: 10, maxWidth: "calc(100% - 40px)",
+          }}>
+            <span>{calibrationPrompt(calibration)}</span>
+            <button onClick={() => clearCalibration()} style={{ border: `1px solid ${ON_COMP_ACCENT}`, background: "transparent", color: ON_COMP_ACCENT, borderRadius: RADIUS.pill, width: 18, height: 18, lineHeight: "16px", padding: 0, cursor: "pointer", flex: "none" }} aria-label="Cancel">×</button>
+          </div>
+        )}
+
         {/* B948496 — "pin a comp to this plan" (a click on the plan's own rendered image) gets
             the same visible-armed-state treatment B831781 established above for a comp drop. */}
         {clickableOverlayId && (
@@ -5056,6 +5115,10 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
                     startUploadRef={startOverlayUploadRef}
                     mapHostRef={mapHostRef}
                     onAdjustOpenChange={setSitePlanAdjustOpen}
+                    calibration={calibration}
+                    onStartCalibration={startCalibration}
+                    onClearCalibration={clearCalibration}
+                    onUndoCalibration={undoCalibration}
                   />
                 </Suspense>
               </PanelErrorBoundary>

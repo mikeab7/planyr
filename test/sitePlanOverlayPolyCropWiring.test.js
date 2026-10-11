@@ -24,32 +24,22 @@ describe("rotatedImageLayer.js — ONE clip mechanism for both crop shapes", () 
   });
 });
 
-describe("SitePlansSection.jsx — a locked overlay refuses a crop edit (B1154369 never covered this control)", () => {
-  it("the Crop button is disabled while the overlay is placed and locked", () => {
-    expect(panelSrc).toMatch(/disabled=\{!o\.rasterKey \|\| \(placed && o\.locked\)\}/);
+describe("SitePlansSection.jsx — Lock never gates Edit crop (NEW-6, 2026-10-11; supersedes B1783328)", () => {
+  it("the Crop button is gated only on the image existing", () => {
+    expect(panelSrc).toMatch(/disabled=\{!o\.rasterKey\}\s*\n\s*onClick=\{onStartCrop\}/);
   });
-  it("startCrop refuses to open the tool on a locked overlay (defense in depth, not just the disabled button)", () => {
+  it("startCrop and commitCrop do not consult `locked`", () => {
     const start = panelSrc.indexOf("const startCrop = async (o) => {");
-    const body = panelSrc.slice(start, panelSrc.indexOf("};", start));
-    expect(body).toMatch(/overlayPlaced\(o\) && o\.locked/);
-  });
-  it("commitCrop also refuses a locked overlay, mirroring commitPlacement's own existing.locked guard", () => {
-    const start = panelSrc.indexOf("const commitCrop = async (crop) => {");
-    const body = panelSrc.slice(start, panelSrc.indexOf("await patchAndReload(o, { crop });", start));
-    expect(body).toMatch(/overlayPlaced\(o\) && o\.locked/);
+    expect(panelSrc.slice(start, panelSrc.indexOf("const toggleVisible", start))).not.toMatch(/\.locked/);
   });
 });
 
-describe("SitePlansSection.jsx — the crop modal fits any window (NEW-2, live test 2026-09-22)", () => {
-  it("the outer card caps itself to the viewport and scrolls rather than centering off-screen", () => {
-    const start = panelSrc.indexOf('data-testid="site-plan-crop-modal"');
-    const body = panelSrc.slice(start, panelSrc.indexOf("<ImageCropTool", start));
-    expect(body).toMatch(/maxWidth: "96vw", maxHeight: "94vh", overflowY: "auto"/);
-  });
-  it("ImageCropTool is sized off the real window, same floors as the Site tab's OverlayCropDialog", () => {
-    const start = panelSrc.indexOf('data-testid="site-plan-crop-modal"');
+describe("SitePlansSection.jsx — the crop modal is the shared, portaled CropModal (NEW-1/NEW-3, 2026-10-11)", () => {
+  it("renders through CropModal and the tool FILLS the modal", () => {
+    const start = panelSrc.indexOf('<CropModal testId="site-plan-crop-modal"');
     const body = panelSrc.slice(start, panelSrc.indexOf("onCommit={commitCrop}", start));
-    expect(body).toMatch(/maxWidth=\{Math\.max\(420, typeof window !== "undefined" \? window\.innerWidth - 80 : 900\)\}/);
-    expect(body).toMatch(/maxHeight=\{Math\.max\(320, typeof window !== "undefined" \? window\.innerHeight - 220 : 640\)\}/);
+    expect(body).toMatch(/<CropModal/);
+    expect(body).toMatch(/<ImageCropTool\s+fill/);
+    expect(body).not.toMatch(/maxWidth=\{Math\.max/);
   });
 });
