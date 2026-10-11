@@ -29,6 +29,7 @@
  */
 
 import { Fragment } from "@tiptap/pm/model";
+import { ANCHOR_BOX_PAD_X } from "./notesBoxResize.js";
 
 /** Does this HTML hold a table? Cheap and deliberately loose — it only decides who owns the paste. */
 export function htmlHasTable(html) {
@@ -234,9 +235,57 @@ export function fillEmptyCells(fragment, schema) {
   return fix(fragment);
 }
 
-/** How wide a box that has just been made FOR a pasted table should be — wide enough that three
- *  ordinary columns do not collapse to slivers, never wider than the page's writing column. */
-export function tableBoxWidth({ cols, current, column = 160, max = 560 }) {
-  const want = Math.max(1, Number(cols) || 1) * column;
-  return Math.round(Math.min(max, Math.max(Number(current) || 0, want)));
+/** ⛔ A TABLE'S REAL SHAPE: ITS COLUMN COUNT IS THE WIDEST ROW *COUNTING MERGED CELLS* (NEW-1, owner report
+ *  2026-10-11, a OneNote table with a merged "Cross Dock / Front Load / Rear Load" header, each spanning two
+ *  columns). The box was sized from the FIRST ROW'S CELL COUNT — 3 — while the table has 6 columns, so the box
+ *  came out half the width it needed and every column was squeezed to the floor.
+ *  `rows` is plain data (one array of `{ colspan, colwidth }` per row; `colwidth` is Tiptap's number-array-or-null),
+ *  so this stays engine-free. Returns `{ cols, widths }`: `widths[i]` is that column's stored width or `null`. */
+export function tableShape(rows) {
+  let cols = 0;
+  const widths = [];
+  for (const row of rows || []) {
+    let at = 0;
+    for (const cell of row || []) {
+      const span = Math.max(1, Number(cell?.colspan) || 1);
+      const cw = Array.isArray(cell?.colwidth) ? cell.colwidth : null;
+      for (let k = 0; k < span; k += 1) {
+        const w = cw && Number.isFinite(Number(cw[k])) && Number(cw[k]) > 0 ? Number(cw[k]) : null;
+        if (w != null && widths[at + k] == null) widths[at + k] = w;
+      }
+      at += span;
+    }
+    cols = Math.max(cols, at);
+  }
+  return { cols, widths: Array.from({ length: cols }, (_, i) => widths[i] ?? null) };
+}
+
+/** `tableShape` over a ProseMirror `table` node. */
+export function tableShapeOfNode(tableNode) {
+  const rows = [];
+  tableNode.forEach((row) => {
+    const cells = [];
+    row.forEach((cell) => cells.push({ colspan: cell.attrs?.colspan, colwidth: cell.attrs?.colwidth }));
+    rows.push(cells);
+  });
+  return tableShape(rows);
+}
+
+/** The widest a TABLE's box is capped at when the page is narrower than this: a six-column table on the
+ *  default narrow page would otherwise be forced to its floor. The page grows to hold it (anchorExtentX),
+ *  exactly as it does for any box that overhangs. */
+export const TABLE_BOX_CAP_MIN = 900;
+
+/** How wide a box holding a table should be — wide enough that every column shows without squeezing
+ *  (NEW-1). The table's NATURAL width, never the source's pixel widths (OneNote writes `width:0.9in` on every
+ *  cell): a column with no stored width counts `column`, one with a stored width counts that. It is capped
+ *  at the page's current width — or `TABLE_BOX_CAP_MIN` if the page is narrower — but never below what
+ *  keeps every column at the readable floor (`minCol`). Never narrows a box that is already wider. */
+export function tableBoxWidth({ cols, widths = null, current = 0, sheet = 0, column = 160, minCol = 100, cap = TABLE_BOX_CAP_MIN, pad = ANCHOR_BOX_PAD_X }) {
+  const n = Math.max(1, Math.floor(Number(cols) || 1));
+  const natural = (Array.isArray(widths) && widths.length === n
+    ? widths.reduce((a, w) => a + (Number(w) > 0 ? Math.max(Number(w), minCol) : column), 0)
+    : n * column) + pad;                       // the box's own padding + border sit OUTSIDE the table
+  const ceiling = Math.max(Number(sheet) || 0, cap, n * minCol + pad);
+  return Math.round(Math.max(Number(current) || 0, Math.min(natural, ceiling)));
 }

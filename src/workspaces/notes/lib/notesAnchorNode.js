@@ -219,6 +219,17 @@ export const NoteAnchor = Node.create({
       x: { default: 0, parseHTML: (el) => num(el.getAttribute("data-anchor-x")), renderHTML: (a) => ({ "data-anchor-x": Math.round(num(a.x)) }) },
       y: { default: 0, parseHTML: (el) => num(el.getAttribute("data-anchor-y")), renderHTML: (a) => ({ "data-anchor-y": Math.round(num(a.y)) }) },
       w: { default: ANCHOR_WIDTH, parseHTML: (el) => num(el.getAttribute("data-anchor-w"), ANCHOR_WIDTH), renderHTML: (a) => ({ "data-anchor-w": Math.round(num(a.w, ANCHOR_WIDTH)) }) },
+      /* ⛔ `fit` = THIS BOX SIZES ITSELF (NEW-2, 2026-10-11). A box the person typed into or pasted into on
+       * blank paper starts WIDE and shrinks to its words when they click out; `fit` is the one fact that
+       * says it may. It is OFF by default — every box written before this attribute existed, and every box
+       * whose width a person set by hand (`setNoteAnchorBox`, the resize commit), parses back with
+       * `fit: false` and is NEVER shrunk. It renders NOTHING when false, so a document with no
+       * self-sizing box is byte-identical through a round trip (the `h: null` / `indent` discipline). */
+      fit: {
+        default: false,
+        parseHTML: (el) => el.getAttribute("data-anchor-fit") === "1",
+        renderHTML: (a) => (a.fit ? { "data-anchor-fit": "1" } : {}),
+      },
       /* ⛔ A HEIGHT, AND `null` IS A MEANING RATHER THAN A MISSING NUMBER (NEW-PICTURE-CANVAS).
        *
        * `null` = **the content decides** — which is a text box, whose height is its words, and
@@ -294,7 +305,7 @@ export const NoteAnchor = Node.create({
        *  ⛔ THE CARET ONLY FOLLOWS INTO A BOX SOMEBODY IS GOING TO TYPE IN. Dropping a picture is
        *  not the start of a sentence, and an atom has no text position to land in anyway — asking
        *  for one puts the selection somewhere arbitrary. */
-      addNoteAnchorAt: ({ x, y, w = ANCHOR_WIDTH, h = null, content = null, aid = null }) => ({ chain, state }) => {
+      addNoteAnchorAt: ({ x, y, w = ANCHOR_WIDTH, h = null, content = null, aid = null, fit = undefined }) => ({ chain, state }) => {
         const { doc } = state;
         const tail = doc.lastChild;
         const at = tail && tail.isTextblock ? doc.content.size - tail.nodeSize : doc.content.size;
@@ -307,6 +318,9 @@ export const NoteAnchor = Node.create({
             y: Math.round(num(y)),
             w: Math.round(num(w, ANCHOR_WIDTH)),
             h: Number.isFinite(num(h, NaN)) ? Math.round(num(h)) : null,
+            /* NEW-2: a box a person types or pastes into sizes itself (starts wide, shrinks on click-out);
+             * a box made WITH content (a dropped picture) keeps the size it was given. */
+            fit: fit === undefined ? typing : !!fit,
             /* NEW-3: a caller that has to NAME the new box in the same tick (the placement commit
              * marks it selected + editing so the first tap back into it is not a stage-1 tap) passes
              * its identity in; everyone else still gets one from `ensureNoteAnchorIds`. */
@@ -423,6 +437,38 @@ export const NoteAnchor = Node.create({
         return true;
       },
 
+      /** ⛔ THE SELF-SIZING WIDTH WRITE (NEW-2): shrink on click-out / grow back when typing runs past the
+       *  edge. An ATTRIBUTE step (not a node replacement) kept OUT of the undo history: the person never
+       *  asked for it, so Ctrl+Z must undo their last EDIT, never "un-shrink" — and an attribute step maps
+       *  cleanly through the history, so undoing the typing that preceded it still works. Refuses a box
+       *  that is not self-sizing, so a caller cannot resize one somebody sized by hand. */
+      autoSizeNoteAnchor: (aid, w) => ({ tr, dispatch }) => {
+        let found = null;
+        tr.doc.descendants((n, pos) => {
+          if (found || n.type.name !== "noteAnchor") return !found;
+          if (String(n.attrs.aid || "") === String(aid)) found = { n, pos };
+          return false;
+        });
+        if (!found || !found.n.attrs.fit) return false;
+        const next = Math.round(num(w, found.n.attrs.w));
+        if (next === Math.round(num(found.n.attrs.w))) return false;
+        if (dispatch) dispatch(tr.setNodeAttribute(found.pos, "w", next).setMeta("addToHistory", false));
+        return true;
+      },
+
+      /** ⛔ WIDEN A BOX FOR WHAT WAS JUST PASTED INTO IT (NEW-1), as an attribute step kept OUT of the undo
+       *  history. A separate node-replacement step landed in its own undo group (it is not adjacent to the
+       *  pasted content), so one Ctrl+Z took back only the width and a second took out the table. This way
+       *  one Ctrl+Z still removes the paste, and a box left a little wider afterwards harms nobody. */
+      growNoteAnchorWidth: (pos, w) => ({ tr, dispatch }) => {
+        const node = tr.doc.nodeAt(pos);
+        if (!node || node.type.name !== "noteAnchor") return false;
+        const next = Math.round(num(w, node.attrs.w));
+        if (next <= Math.round(num(node.attrs.w))) return false;
+        if (dispatch) dispatch(tr.setNodeAttribute(pos, "w", next).setMeta("addToHistory", false));
+        return true;
+      },
+
       /** ⛔ THE WHOLE BOX IN ONE TRANSACTION — position AND size (NEW-PICTURE-CANVAS).
        *
        *  A west or north drag changes `x`/`y` and `w`/`h` together, and committing those as two
@@ -443,6 +489,9 @@ export const NoteAnchor = Node.create({
             y: Math.round(num(y, node.attrs.y)),
             w: Math.round(num(w, node.attrs.w)),
             h: Number.isFinite(num(h, NaN)) ? Math.round(num(h)) : null,
+            /* ⛔ A WIDTH SET BY HAND IS KEPT (NEW-2): the resize drag is the one place a person chooses a
+             * box's size, so it is also what turns self-sizing OFF. */
+            fit: false,
           }));
         }
         return true;
@@ -552,6 +601,7 @@ export const NoteAnchor = Node.create({
       dom.setAttribute("data-anchor-x", String(Math.round(num(node.attrs.x))));
       dom.setAttribute("data-anchor-y", String(Math.round(num(node.attrs.y))));
       dom.setAttribute("data-anchor-w", String(Math.round(num(node.attrs.w, ANCHOR_WIDTH))));
+      if (node.attrs.fit) dom.setAttribute("data-anchor-fit", "1");
       dom.setAttribute("data-testid", "note-anchor");
       if (node.attrs.aid) dom.setAttribute("data-anchor-id", String(node.attrs.aid));
       /* The same builder `renderHTML` uses, so the first paint and the printed sheet cannot
@@ -1059,6 +1109,7 @@ export const NoteAnchor = Node.create({
           dom.setAttribute("data-anchor-x", String(Math.round(num(next.attrs.x))));
           dom.setAttribute("data-anchor-y", String(Math.round(num(next.attrs.y))));
           dom.setAttribute("data-anchor-w", String(Math.round(num(next.attrs.w, ANCHOR_WIDTH))));
+          if (next.attrs.fit) dom.setAttribute("data-anchor-fit", "1"); else dom.removeAttribute("data-anchor-fit");
           /* ⛔ A HEIGHT THAT HAS GONE BACK TO `null` MUST CLEAR THE STYLE, not merely stop being
            * written. Leaving the last number in place is how an undone resize keeps rendering at
            * the size it was undone from — the document says one thing and the screen another,
