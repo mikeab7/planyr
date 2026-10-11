@@ -224,6 +224,15 @@ jobs:
         env:
           BASE_URL: "http://localhost:4173/"
         run: node ui-audit/verify-width-sweep.mjs
+      # Parcels list layout C (B2243424, NEW-4). Every earlier round of this list passed its own tests on tidy fixtures and
+      # looked wrong on the owner's real plans, so this measures it on plans shaped like his (Silvestri Concept D, the
+      # 11-parcel plan with a wrapping name, a 30-row stress plan, a one-parcel plan) at the narrowest / default / widest
+      # panel in light AND dark: no clipped text, one acres right edge, no icon over text, uniform row heights, summary
+      # number = body size, AA contrast. Signed out (hermetic); the same script runs signed in on live planyr.io (SIGNED_IN=1).
+      - name: Parcels list layout (no clip / one acres edge / no overlap, light + dark, every panel width — B2243424)
+        env:
+          BASE_URL: "http://localhost:4173/"
+        run: node ui-audit/verify-parcel-list-layout.mjs
       # Critical interaction lane (B1857904/B1857905, reliability programme R2). A SMALL,
       # deterministic subset of e2e/ — reused, not duplicated — wired into the required build so a
       # real interaction regression can no longer merge silently, closing the gap the reliability

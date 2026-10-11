@@ -2,7 +2,7 @@
  * and never a filter. Fixture only: invented rows, no Supabase, none of the owner's data. */
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { rankByProximity, textScore, EXACT_SCORE } from "../src/workspaces/food/lib/searchProximity.js";
+import { rankByProximity, textScore, EXACT_SCORE, nameEquivalent } from "../src/workspaces/food/lib/searchProximity.js";
 import { rankSearchCandidates } from "../src/workspaces/food/lib/searchQuality.js";
 
 const view = (lat, lon, half = 0.1) => ({ south: lat - half, north: lat + half, west: lon - half, east: lon + half });
@@ -139,5 +139,48 @@ describe("typo-tolerant name score (NEW-1)", () => {
     const torchy = [row("far", "Torchy's Tacos", 32.78, -96.8, { sim: 1 }), row("near", "Taco Bell", 29.74, -95.77, { sim: 0.5 })];
     expect(rankByProximity("Torchys", torchy, CINCO)[0].id).toBe("far");
     expect(textScore("Torchy's Tacos", torchy[0])).toBe(EXACT_SCORE);
+  });
+});
+
+/* NEW-1 (2026-10-11, B2155616 ×2) — a stray row spelled exactly like the typo must not beat the nearby real chain. */
+describe("typo-equivalent names are one comparable group", () => {
+  const CINCO = view(29.74, -95.77, 0.04);
+  const cfa = row("katy", "Chick-fil-A", 29.75, -95.76, { sim: 0.33, address: "23860 Westheimer Pkwy, Katy, TX" });
+  const strays = [
+    row("strayA", "Chik Fila", 29.9, -95.5, { sim: 0.58, address: "6175 Highway 6 N Lot 7, Houston, TX" }),
+    row("strayB", "Chik-fil-a", 33.0, -96.7, { sim: 0.44, address: "Plano, TX" }),
+  ];
+  it("Chikfila / Chikfil-a: the nearest Katy Chick-fil-A beats literal-typo strays", () => {
+    for (const q of ["Chikfila", "Chikfil-a"]) expect(rankByProximity(q, [...strays, cfa], CINCO)[0].id).toBe("katy");
+  });
+  it("Whataburgr: one edit away counts for a long query, so the Katy store beats a far corporate row", () => {
+    const rows = [row("irving", "Whataburgr Restaurant", 32.8, -96.9, { sim: 1, address: "1600 Corporate Ct, Irving, TX" }),
+      row("katy", "Whataburger", 29.75, -95.76, { sim: 0.82, address: "23540 Westheimer Pkwy, Katy, TX" })];
+    expect(rankByProximity("Whataburgr", rows, CINCO)[0].id).toBe("katy");
+  });
+  it("inside the group a city-only address and a registry name sort after a clean street address, even when nearer", () => {
+    const rows = [row("vague", "Chik-fil-a", 29.741, -95.771, { sim: 0.4, address: "Houston, TX" }),
+      row("llc", "Chik Fila", 29.742, -95.772, { sim: 0.5, address: "1 Main St, Katy, TX", isRegistryName: true }),
+      row("clean", "Chick-fil-A", 29.78, -95.8, { sim: 0.33, address: "9 Katy Fwy, Katy, TX" })];
+    expect(ids(rankByProximity("Chikfila", rows, CINCO))).toEqual(["clean", "vague", "llc"]) /* both weak rows tie → distance */;
+  });
+  it("short queries and two-edit lookalikes stay out of the group", () => {
+    expect(nameEquivalent("carrab", { name: "The Juicy Crab" })).toBe(false);
+    expect(nameEquivalent("Carabas", { name: "Caramba Street Food" })).toBe(false);
+    expect(nameEquivalent("Carabas", { name: "Carrabba's" })).toBe(true);
+    expect(nameEquivalent("pho saigon", { name: "Pho Saigon Express Kitchen Bar" })).toBe(false);
+    expect(nameEquivalent("Whataburgr", { name: "Whataburger" })).toBe(true);
+  });
+  it("Fadis: a nearby branded chain location (name starts with the query) joins the group; unbranded extensions don't", () => {
+    expect(nameEquivalent("Fadis", { name: "Fadi's Mediterranean Grill", brand: "Fadi's Mediterranean Grill" })).toBe(true);
+    expect(nameEquivalent("Fadis", { name: "Fadi's Mediterranean Grill" })).toBe(false);
+    const rows = [row("far", "Fadi's", 29.9, -95.5, { sim: 0.67, address: "10403 Katy Fwy, Houston, TX", brand: "Fadi's Mediterranean Grill" }),
+      row("katy", "Fadi's Mediterranean Grill", 29.75, -95.76, { sim: 0.67, address: "21792 Katy Fwy, Katy, TX", brand: "Fadi's Mediterranean Grill" })];
+    expect(rankByProximity("Fadis", rows, CINCO)[0].id).toBe("katy");
+  });
+  it("control: a uniquely named far place typed exactly still leads over unrelated nearby rows", () => {
+    const rows = [row("austin", "Copperhead Club", 30.24, -97.72, { sim: 1, address: "2120 E Riverside Dr, Austin, TX" }),
+      row("near", "Copper Kettle Cafe", 29.745, -95.77, { sim: 0.45, address: "1 Fry Rd, Katy, TX" })];
+    expect(rankByProximity("Copperhead Club", rows, CINCO)[0].id).toBe("austin");
   });
 });

@@ -128,6 +128,34 @@ export function textScore(query, item) {
   return item.isRegistryName ? s - REGISTRY_PENALTY : s;
 }
 
+export const GROUP_ONE_EDIT_MIN_LEN = 7; // below this a single edit is too ambiguous ("carrab" ~ "crab")
+
+/** True when the row's WHOLE name is the query up to a typo: equal once punctuation, spaces and doubled
+ *  letters are dropped ("Chik Fila", "Chik-fil-a", "Fadi's" for "Fadis"), or — for queries of
+ *  GROUP_ONE_EDIT_MIN_LEN+ squashed letters — one edit away ("Whataburger" for "Whataburgr"). NEW-1
+ *  (2026-10-11): such rows are ONE comparable group — a far-away stray spelled exactly like the typo must
+ *  not out-rank the correctly named place next door, so in-view / distance decide inside the group (owner:
+ *  "misspell something slightly and still pull up the right thing"). Deliberately WHOLE-name only: a longer
+ *  name that merely starts with the query ("Pho Saigon Express Kitchen Bar", unless the row carries a `brand`
+ *  — a chain location such as "Fadi's Mediterranean Grill" for "Fadis") or a two-edit lookalike
+ *  ("Caramba Street Food") is not the same place, so a far exact name still beats those. Address-only exact
+ *  hits are not name-equivalent. */
+export function nameEquivalent(query, item) {
+  const q = squash(query);
+  if (q.length < 2) return false;
+  const d = editDistance(q, squash(item.name));
+  if (d === 0 || (d === 1 && q.length >= GROUP_ONE_EDIT_MIN_LEN)) return true;
+  // a CHAIN location ("Fadi's Mediterranean Grill", brand set) whose name starts with the typed name
+  if (!item.brand) return false;
+  const words = norm(item.name).split(" ").filter(Boolean);
+  for (let k = 1; k < Math.min(words.length, 3); k++) if (squash(words.slice(0, k).join(" ")) === q) return true;
+  return false;
+}
+
+/** A group member that should sort after clean, street-addressed ones: a registry (LLC/Inc) name, or an
+ *  address with no street number ("Plano, TX") — the REGISTRY_PENALTY idea, applied inside the group. */
+const weakGroupRow = (item) => Boolean(item.isRegistryName) || (Boolean(item.address) && !/\d/.test(item.address));
+
 /** Sort `items` (each {lat, lon, name, address?, sim?, mine?, isRegistryName?}) nearest-first for
  *  the current `bounds`. Returns a new array; with no bounds the input order is kept. Nothing is
  *  removed. Stable: ties keep their incoming order. */
@@ -136,10 +164,13 @@ export function rankByProximity(query, items, bounds) {
   const rows = (items || []).map((item, idx) => ({
     item, idx,
     score: textScore(query, item),
+    group: nameEquivalent(query, item),
     inView: inBounds(bounds, item),
     km: center && item.lat != null && item.lon != null ? haversineKm(center, item) : Infinity,
   }));
   if (!center) return rows.map((r) => r.item);
+  // typo-equivalent names form one top group (see nameEquivalent); a real match, so never below the lead bar
+  for (const r of rows) if (r.group && r.score >= SAVED_LEAD_MIN_SCORE - 0.2) r.score = Math.max(r.score, EXACT_SCORE);
 
   // band by walking scores high → low; chained from each band's best so it stays transitive
   const byScore = [...rows].sort((a, b) => b.score - a.score);
@@ -156,6 +187,7 @@ export function rankByProximity(query, items, bounds) {
   rows.sort((a, b) =>
     (lead(a) - lead(b)) ||
     (a.band - b.band) ||
+    (a.band === 0 ? Number(weakGroupRow(a.item)) - Number(weakGroupRow(b.item)) : 0) ||
     (Number(b.inView) - Number(a.inView)) ||
     (eff(a) - eff(b) || 0) ||
     (a.idx - b.idx));

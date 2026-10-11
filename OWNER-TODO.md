@@ -34,8 +34,15 @@ Everything else is built and live. Two things only you can do (the files are att
 
 > **What I found:** I compared every stored copy of a fact in your database with where that fact really lives (read-only). Almost everything agrees. Six items (a review, an overlay, comps) are marked with a different team than the project they belong to. By your 2026-08-09 decision, sharing is decided per item (site plans only), so I did **not** change them.
 >
-> - [ ] **Decide:** should a project's reviews / overlays / comps follow the project's team, or stay private until shared on their own? (Today: they stay private. Five of the six are reviews of shared projects — Papadopoulos, 8 South ×2, Mason & Clay, Grand Port — that your teammates cannot see.)
+> - [x] ~~**Decide:** should a project's overlays / comps follow the project's team?~~ **Decided by you (2026-10-05, repeated 2026-10-11): yes — overlays and comps follow the project.** Built as B2244017: anyone who can open a shared project now sees and loads its overlays and comps. Nothing was rewritten in your data.
+> - [ ] **Still open — reviews only:** should a project's **reviews** follow the project's team too? (Today: they stay private until shared on their own. Five of the six mismatched items are reviews of shared projects — Papadopoulos, 8 South ×2, Mason & Clay, Grand Port — that your teammates still cannot see.)
 > - [x] ~~**Apply `single_source_backfill_20261004.sql`**~~ — already applied to production 2026-10-05 (checked read-only 2026-10-08). `profiles_email_sync.sql` is left to the drift-report session by your 2026-10-08 instruction.
+
+## 🖼 12 overlay links on shared plans were wiped by mistake — restore them? (B2244016)
+
+> **What happened:** when a teammate opened one of your shared plans, the app couldn't read your PDF (it lived in your private storage), mistook "not allowed" for "file deleted", and erased the link to the file — in **your** plan too. The files themselves are all still safe in storage. It's fixed now: that can't happen again, and teammates can now open your overlays.
+> Affected: Goose Creek (the Master Site Plan PDF, on 7 plans), Bain (the Willow Point PDF, on 3 plans), Richfield (2 site plans on Concept A BN). Those plans show "Couldn't load … re-add" for that overlay on any device that doesn't already have a copy.
+> - [ ] **Decide:** say "restore the overlay links" and a session puts the 12 links back (nothing else on those plans changes; the script is written and checked, not run). I did not touch them because Goose Creek and Bain are off-limits without your OK.
 
 ## ✉️ Make team invites send email — Google steps only, no new accounts (B2049312)
 

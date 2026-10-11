@@ -7,7 +7,8 @@ import "leaflet/dist/leaflet.css";
 import { useProjectName, usePlanName, renameProjectChecked, renamePlanChecked } from "../../shared/names/names.js";
 import { writeIsRedundant, mayWriteForAccount } from "./lib/saveDedupe.js";
 import { readCanvasGuess, writeCanvasGuess, geometryOf } from "./lib/canvasGuess.js";
-import { loadSite, saveSite, siteExistsLocally, sitesWriteStamp, sitesWriteStillCurrent, readBackSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, initHistoryStore, backupNow, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
+import { mayHealMissingOverlay, overlayLoadReason } from "./lib/overlayHeal.js";
+import { loadSite, saveSite, siteExistsLocally, sitesWriteStamp, sitesWriteStillCurrent, readBackSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, initHistoryStore, backupNow, backupNowVerified, historyIdbOnly, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
 import { relTime } from "../../shared/projects/projectModel.js";
 import { collectAssetRefs, releasePlanForOverlay } from "./lib/sharedAssetRefs.js";
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
@@ -79,7 +80,8 @@ import { sanitizeLayerOverrides, overridesFromOverlays, overlaysWithOverrides, a
 // NEW-1 — the per-site "Show above plan" twin of the four above: which GIS layers this site had
 // lifted over the site elements. Its own sparse map, so nothing about layerOverrides changes.
 import { sanitizeLayerAbove, aboveFromOverlays, applyAboveOverrides, aboveSig } from "./lib/layerPrefs.js";
-import { BASEMAPS, SITE_PLAN_BASEMAP, IMAGERY_GRADE } from "../../shared/basemaps/basemaps.js";
+import { BASEMAPS, SITE_PLAN_BASEMAP, IMAGERY_GRADE, siteStack } from "../../shared/basemaps/basemaps.js";
+import { loadRoadNamesPref, saveRoadNamesPref } from "./lib/roadNamesPref.js";
 import {
   ppfToZoom, zoomToPpf, exactContainerPoint,
   basemapWrapPoint, mapBoxInset, mapBoxCenterX, registrationShift, sanitizeShift, tileNwFeet, registrationLayoutMayHaveChanged, resolvedLayoutInputs,
@@ -3034,6 +3036,38 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // BUILD-TIME choices (see the retina note above). Re-running this effect on every zoom
     // would rebuild the tile layer and refetch the whole aerial mid-gesture.
   }, [basemapSrc, basemapOn, origin, showAerial]);
+
+  /* Road names over the aerial (NEW-1) — the SAME vector label helper and the SAME `siteStack` gate the
+   * map finder uses (one implementation, no fork). The helper adds its own Leaflet pane (z 250, pointer-
+   * events none) INSIDE this map's pane, so the labels ride the basemap's own transform through every
+   * commit (panBy / setView / panel re-centre) and sit above the aerial but under the plan SVG, so every
+   * element, markup and overlay paints over them. Mounted once per (gate, source) change — never per pan
+   * frame: `roadsOn` is a boolean off the committed zoom, so a pan re-renders nothing here.
+   * PDF-PARITY decision: the exported sheet does NOT carry the aerial's live Leaflet layers, so road
+   * names (a live layer on the same map) are likewise screen-only, matching the aerial's own export path. */
+  const [roadNamesPref, setRoadNamesPref] = useState(loadRoadNamesPref);
+  const roadNamesOpacityRef = useRef(roadNamesPref.opacity);
+  roadNamesOpacityRef.current = roadNamesPref.opacity;
+  const roadsOn = !!wantBasemapSrc(basemapOn, showAerial, basemapSrc) && roadNamesPref.on && geoZoom != null
+    && siteStack(geoZoom, { roads: true }).includes("roadNames");
+  const applyRoadNamesOpacity = () => {
+    const pane = geoMapRef.current && geoMapRef.current.getPane && geoMapRef.current.getPane("planyrVectorLabels");
+    if (pane) pane.style.opacity = String(roadNamesOpacityRef.current);
+  };
+  useEffect(() => {
+    const map = geoMapRef.current;
+    if (!map || !roadsOn) return undefined;
+    let cancelled = false, handle = null;
+    import("../../shared/basemaps/vectorLabelLayer.js").then(({ addVectorLabels }) => {
+      if (cancelled) return;
+      handle = addVectorLabels(L, map, { mode: "site", includePois: false, onStatus: applyRoadNamesOpacity });
+      applyRoadNamesOpacity();
+    }).catch((e) => console.error("SitePlanner: road names failed to load", e));
+    return () => { cancelled = true; if (handle) handle.remove(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roadsOn, origin]);
+  useEffect(() => { applyRoadNamesOpacity(); }, [roadNamesPref.opacity, roadsOn]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { saveRoadNamesPref(roadNamesPref); }, [roadNamesPref]);
 
   /* Re-sync the basemap size when the planner is (re-)shown (keep-alive show/hide) or the origin
      first lands. A resize WHILE the planner is shown (a docked panel opening/closing shrinks the
@@ -11006,7 +11040,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           // B784/B785 — nothing loaded → record a TERMINAL reason (was: silent infinite "Loading…"). A cloud
           // object confirmed gone (400/404) is "missing" (re-add); a transient failure is "network" (retryable).
           // With no cloud key at all (idb-only, local copy evicted) the bytes are simply gone → "missing" too.
-          const reason = key ? (res.missing ? "missing" : "network") : "missing";
+          // NEW-1 — a 400 "not found" from another account's folder is indistinguishable from an RLS
+          // refusal, so it is "denied" (never "gone") and may never heal the record (lib/overlayHeal.js).
+          const reason = overlayLoadReason({ key, missing: res.missing, uid: activeUid() });
           setOverlayLoadErr((m) => ({ ...m, [o.id]: reason }));
           // NEW-2 (B785) — a CONFIRMED-missing cloud object with no local copy: drop the dead pointer so
           // persistence + UI stop implying "it's in the cloud." Gated on isCloudActive() so a logged-out /
@@ -11018,7 +11054,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           // left a confirmed-dead cloud object (verified against production storage.objects — see
           // docs/incidents/INCIDENT-2026-08-13-shared-asset-delete.md) re-attempting the same doomed download
           // on every single load, forever, instead of healing to the honest "re-add or remove" state.
-          if (reason === "missing" && o.storageKey && isCloudActive())
+          // NEW-1 — ONLY the reader's OWN folder: the own-folder policy always admits it, so there a
+          // "not found" really means gone. Anywhere else a teammate's client would erase the owner's
+          // pointer in the owner's own shared plan (measured on production: 12 records, files intact).
+          if (reason === "missing" && mayHealMissingOverlay({ key: o.storageKey, missing: res.missing, uid: activeUid(), cloudActive: isCloudActive() }))
             setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, storageKey: null, storageMissing: true } : x)));
         } catch (_) {
           setOverlayLoadErr((m) => ({ ...m, [o.id]: "network" }));
@@ -16935,7 +16974,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
   };
   const openActivityTab = () => { setActivityTab("activity"); if (activityRows === null && !activityLoading) loadPlanActivity(); };
-  const restoreVersion = (at) => {
+  const restoreVersion = async (at) => {
     // B467/NEW-4 — Restore is a WRITE. A read-only tab (another tab is the active editor) must not be
     // able to overwrite the canvas; block it loudly with the way out.
     if (readOnly) { flashWarn("⚠ This tab is read-only — the plan is open in another tab. Take over editing here first, then restore.", 9000); return; }
@@ -16946,7 +16985,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // force a backup snapshot and confirm it actually persisted; if it couldn't (device storage full),
     // CANCEL rather than overwrite current work with no real undo.
     flushSite();
-    if (!backupNow(siteId)) {
+    if (!(historyIdbOnly() ? await backupNowVerified(siteId) : backupNow(siteId))) {   // B2200385 — on a device whose ring lives only in IndexedDB the backup is awaited, committed and read back before it is claimed
       reportClientEvent("restore-backup-failed", "pre-restore backup could not be written — restore blocked", { id: siteId, at });
       flashWarn("Couldn't back up your current version, so the restore was cancelled — your current work is safe. (Your device's storage may be full.)", 11000);
       return;
@@ -18874,7 +18913,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           // "missing" (bytes are gone) and "network" (couldn't reach storage): re-adding the same file
           // is unlikely to help since the file is fine, but retrying the same bytes forever is a dead
           // end, so this asks the user to try again with a fresh export from their CAD/PDF tool.
-          const label = (ovErr === "missing" || o.storageMissing)
+          const label = ovErr === "denied"
+            ? `Couldn't load “${o.name}” — shared file not readable from this account · click to retry`
+            : (ovErr === "missing" || o.storageMissing)
             ? `Couldn't load “${o.name}” — click to re-add the file`
             : ovErr === "render"
               ? `Couldn't render “${o.name}” — click to re-add the file`
@@ -18895,7 +18936,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             pointerEvents={tool === "select" ? "auto" : "none"}
             style={{ cursor: (tool !== "select" || editingCorners) ? "crosshair" : (ovLoading ? "default" : "pointer") }}
             onPointerDown={(e) => e.stopPropagation()}
-            onClick={ovLoading ? undefined : (e) => { e.stopPropagation(); if (ovErr === "network") retryOverlay(o.id); else reAddOverlay(o.id); }}>
+            onClick={ovLoading ? undefined : (e) => { e.stopPropagation(); if (ovErr === "network" || ovErr === "denied") retryOverlay(o.id); else reAddOverlay(o.id); }}>
             <rect x={tl.x} y={tl.y} width={w} height={h} fill="#fbf3ee" fillOpacity={0.55} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="8 5" />
             <text x={cx} y={ovLoading ? cy : cy - 8} textAnchor="middle" fontSize={13} fill={PAL.accent}>{label}</text>
             {!ovLoading && (
@@ -21886,7 +21927,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const from = (pc.combined && pc.combined.from) || [];
     const taxTable = origin.kind === "combined" ? taxTableForCombined(from, { county: restored?.county }) : (origin.kind === "county" ? taxTableFor(pc, { county: restored?.county }) : null);
     return (
-      <ParcelPage parcel={pc} name={row ? row.name : (pc.label || "Parcel")} acres={parcelNetSqft(pc) / SQFT_PER_ACRE} included={pc.active !== false}
+      <ParcelPage parcel={pc} name={row ? row.name : (pc.label || "Parcel")} unnamed={row ? !!row.unnamed : !pc.label} acres={parcelNetSqft(pc) / SQFT_PER_ACRE} included={pc.active !== false}
         origin={origin} ownerText={apprOwnerName} cadName={parcelCadName} drawnAcresOf={(p) => parcelNetSqft(p) / SQFT_PER_ACRE}
         handlers={parcelPanelH} taxTable={taxTable} taxSource={taxTable || !restored?.county || (origin.kind !== "county" && origin.kind !== "combined") ? null : { county: restored.county, lots: origin.kind === "combined" ? from : [pc], combined: origin.kind === "combined", idField: parcelIdField }} setbacks={setbacks} style={style} deedFrom={selectDeedOfGroup} idField={parcelIdField} addrField={parcelAddrField} />
     );
@@ -25393,6 +25434,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                       // map to start over, which is exactly the dead end this tranche exists to end.
                       disabledReason: origin ? null : "This plan has no location yet — the aerial needs a real-world spot to anchor to.",
                     }}
+                    placeNames={origin ? {
+                      value: roadNamesPref.on, onChange: (on) => setRoadNamesPref((p) => ({ ...p, on })),
+                      opacity: roadNamesPref.opacity, onOpacityChange: (opacity) => setRoadNamesPref((p) => ({ ...p, opacity })),
+                    } : null}
                     gisNote={origin ? null : "GIS layers (flood, wetlands, boundaries, utilities) appear here once this plan has a location."}
                     onSetLocation={origin ? null : () => setSetLocOpen(true)}
                     /* NEW-1 — the LIVE zoom every row's gate is reported against, and the fix.

@@ -980,13 +980,13 @@ export default function LayerPanel({
           `placeNamesDormant` note below is the fix, same shape as every other zoom-gated row in
           this panel (`zoomFixLine`), clickable when the host wires `onZoomTo`. Rendered here
           rather than as a layer ROW because it is not an independent overlay — it is drawn by the
-          basemap and means nothing without it. Absent on the planner surface: SitePlanner.jsx has
-          no equivalent tile layer to toggle at all, so there is nothing dishonest to fix there. */}
+          basemap and means nothing without it. The planner canvas wires it too (NEW-1): the same vector label
+          layer, device-level on/off + opacity memory (lib/roadNamesPref.js). */}
       {placeNames && !basemap.disabledReason && basemap.value !== "off" && (
         <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", marginTop: 5, fontSize: 11.5 }}>
           <input type="checkbox" checked={!!placeNames.value} onChange={(e) => placeNames.onChange(e.target.checked)} />
           <span style={{ flex: 1 }}>Road names</span>
-          <RowInfo label="Road names" sections={[{ text: "Road, highway and rail names drawn OVER the aerial by the imagery provider's transportation reference layer — part of the base layer, not a separate overlay. It does not carry city, town or landmark names — those are the separate \"City names\" row. Only visible once you're zoomed in past neighborhood scale. Use the see-through slider below to fade it, or turn it off for a clean picture of the ground." }]} />
+          <RowInfo label="Road names" sections={[{ text: "Road and highway names drawn OVER the aerial — the same labels the map finder shows; part of the base layer, not a separate overlay. It does not carry city, town or landmark names — those are the separate \"City names\" row. Only visible once you're zoomed in past neighborhood scale. Use the see-through slider below to fade it, or turn it off for a clean picture of the ground." }]} />
         </label>
       )}
       {/* B427410 (×3) — Owner, verbatim: "I kinda want road names to just be there… right now

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { handleE2eSession, safeEqual, E2E_EMAIL, E2E_USER_ID, onRequest } from "../functions/api/auth/e2e-session.js";
+import { handleE2eSession, safeEqual, callUpstream, safeUpstreamMessage, UPSTREAM_ATTEMPTS, E2E_EMAIL, E2E_USER_ID, onRequest } from "../functions/api/auth/e2e-session.js";
 
 const KEY = "k".repeat(43);
 const ENV = { E2E_LOGIN_KEY: KEY, SUPABASE_URL: "https://x.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "SERVICE-SECRET", SUPABASE_ANON_KEY: "ANON" };
@@ -24,7 +24,7 @@ function fakeSupabase({ users = {}, calls = [] } = {}) {
   });
   return fn;
 }
-const run = (r, env = ENV, f = fakeSupabase()) => handleE2eSession(r, env, { fetch: f });
+const run = (r, env = ENV, f = fakeSupabase()) => handleE2eSession(r, env, { fetch: f, sleep: async () => {} });
 
 describe("e2e-session route — closed by default", () => {
   it("no env key → 404", async () => { const r = await run(req(), { ...ENV, E2E_LOGIN_KEY: undefined }); expect(r.status).toBe(404); noCors(r); });
@@ -111,5 +111,45 @@ describe("constant-time compare", () => {
     expect(src).not.toMatch(/presented\s*[!=]==?\s*loginKey|loginKey\s*[!=]==?\s*presented/);
     expect(src).toMatch(/safeEqual\(presented, loginKey\)/);
     expect(/access-control/i.test(src.replace(/\/\*[\s\S]*?\*\//, ""))).toBe(false);
+  });
+});
+
+describe("e2e-session route — transient upstream failures (B2154049)", () => {
+  const flaky = (failures, status = 503) => {
+    let n = 0; const inner = fakeSupabase();
+    return vi.fn(async (url, init) => (url.endsWith("/admin/generate_link") && n++ < failures ? Response.json({ msg: "upstream busy" }, { status }) : inner(url, init)));
+  };
+  it("retries a transient 5xx on generate_link and still issues the session", async () => {
+    const f = flaky(2); const r = await run(req(), ENV, f);
+    expect(r.status).toBe(200); expect(f.mock.calls.filter(([u]) => u.endsWith("/admin/generate_link")).length).toBe(3);
+  });
+  it("retries a thrown network error", async () => {
+    let n = 0; const inner = fakeSupabase();
+    const f = vi.fn(async (u, i) => { if (n++ < 1) throw new TypeError("network"); return inner(u, i); });
+    expect((await run(req(), ENV, f)).status).toBe(200);
+  });
+  it("gives up after the bounded attempts and says WHY (stage, upstream status, message) — no secrets", async () => {
+    const f = flaky(99, 429); const r = await run(req(), ENV, f);
+    expect(r.status).toBe(502);
+    const j = await r.json();
+    expect(j).toMatchObject({ stage: "generate_link", upstream_status: 429, upstream_error: "upstream busy", attempts: UPSTREAM_ATTEMPTS });
+    expect(JSON.stringify(j)).not.toMatch(/SERVICE-SECRET|ANON|kkkk/);
+    expect(f).toHaveBeenCalledTimes(UPSTREAM_ATTEMPTS);
+  });
+  it("does not retry a definite 4xx (not rate-limit)", async () => {
+    const f = flaky(99, 422); await run(req(), ENV, f); expect(f).toHaveBeenCalledTimes(1);
+  });
+  it("a thrown error reports the network error name", async () => {
+    const r = await run(req(), ENV, vi.fn(async () => { throw new TypeError("x"); }));
+    expect(await r.json()).toMatchObject({ stage: "generate_link", upstream_status: null, network_error: "TypeError" });
+  });
+  it("callUpstream returns a non-JSON 502 as status with null body", async () => {
+    const r = await callUpstream(async () => new Response("<html>", { status: 502 }), "u", {}, { sleep: async () => {} });
+    expect(r).toMatchObject({ ok: false, status: 502, body: null, attempts: UPSTREAM_ATTEMPTS });
+  });
+  it("safeUpstreamMessage masks token-shaped runs and truncates", () => {
+    expect(safeUpstreamMessage({ msg: "bad eyJabc.def.ghi and " + "A".repeat(40) })).toBe("bad [jwt] and [redacted]");
+    expect(safeUpstreamMessage({ msg: "ab ".repeat(200) }).length).toBe(200);
+    expect(safeUpstreamMessage(null)).toBeNull();
   });
 });

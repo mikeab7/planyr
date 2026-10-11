@@ -109,6 +109,16 @@ export async function idbPut(key, value) {
   });
 }
 
+// B2200385 — a write that is PROVEN: committed (tx complete), then read back in a fresh transaction and compared to what was written.
+// Resolves { ok:true } or { ok:false, reason } ("unavailable" | "write" | "readback"); never throws. Used before anything is removed from
+// the small store on the strength of this copy.
+export async function idbPutVerified(key, value) {
+  if (!idb) return { ok: false, reason: "unavailable" };
+  if (!(await idbPut(key, value))) return { ok: false, reason: "write" };
+  const back = await idbGet(key);
+  return back === value ? { ok: true } : { ok: false, reason: "readback" };
+}
+
 // Remove one key. Resolves true/false; never throws.
 export async function idbDelete(key) {
   const db = await openDb();
