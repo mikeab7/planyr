@@ -33,7 +33,7 @@ export const MINE_HEAD_START_KM = 0.2;
 export const SAVED_LEAD_MIN_SCORE = 0.5; // a saved place must really match to jump the queue
 export const MIN_ADDRESS_QUERY_LEN = 8; // "a full street address" — short fragments never count as exact
 
-const norm = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const norm = (s) => (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, " ").trim();
 
 export function haversineKm(a, b) {
   const R = 6371;
@@ -51,6 +51,56 @@ export function centerOf(bounds) {
 export function inBounds(bounds, p) {
   if (!bounds || p.lat == null || p.lon == null) return false;
   return p.lat >= bounds.south && p.lat <= bounds.north && p.lon >= bounds.west && p.lon <= bounds.east;
+}
+
+/* TYPO TOLERANCE (NEW-1, 2026-10-10). The RPC's word_similarity is literal-text, so a misspelled query
+ * ("Carabas") scores 1.0 against a far-away row whose dirty stored name contains the same typo and only
+ * ~0.5-0.8 against the correctly named nearby chain — and distance only breaks ties INSIDE a band. So the
+ * client also scores a typo-tolerant name match: both sides are squashed (punctuation, spaces and doubled
+ * letters dropped — "Carrabba's" → "carabas") and the query is compared, by edit distance with
+ * transpositions, with the name's word-start windows. Zero edits scores 1.0, one edit 0.8, two (long
+ * queries only) 0.6 — so the correctly named nearby row lands in the same band as the literal-typo rows and
+ * distance then decides. It only ever RAISES a score (max with the RPC's), never lowers one. */
+const squash = (s) => norm(s).replace(/ /g, "").replace(/(.)\1+/g, "$1");
+
+/** Optimal-string-alignment distance (insert / delete / substitute / adjacent swap). */
+export function editDistance(a, b) {
+  const n = a.length, m = b.length;
+  if (!n) return m;
+  if (!m) return n;
+  let pp = null, p = Array.from({ length: m + 1 }, (_, j) => j);
+  for (let i = 1; i <= n; i++) {
+    const c = [i];
+    for (let j = 1; j <= m; j++) {
+      let v = Math.min(p[j] + 1, c[j - 1] + 1, p[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (pp && i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) v = Math.min(v, pp[j - 2] + 1);
+      c[j] = v;
+    }
+    pp = p; p = c;
+  }
+  return p[m];
+}
+
+export const FUZZY_MIN_LEN = 4; // shorter queries are too ambiguous to tolerate an edit
+export const FUZZY_TWO_EDIT_MIN_LEN = 6;
+
+/** 0–1 typo-tolerant name score (0 = no near match). */
+export function fuzzyNameScore(query, name) {
+  const q = squash(query);
+  if (q.length < FUZZY_MIN_LEN) return 0;
+  const words = norm(name).split(" ").filter(Boolean);
+  const maxD = q.length >= FUZZY_TWO_EDIT_MIN_LEN ? 2 : 1;
+  let best = Infinity;
+  // windows are whole-word runs of the name ("carabas", "carabasitalian", …), so a query is never
+  // matched against the front half of a longer word
+  for (let i = 0; i < words.length && i < 3; i++) {
+    for (let k = i + 1; k <= Math.min(words.length, i + 3); k++) {
+      const win = squash(words.slice(i, k).join(" "));
+      if (win !== q && (win.startsWith(q) || q.startsWith(win))) continue; // a plain prefix either way: the RPC score covers it
+      best = Math.min(best, editDistance(q, win));
+    }
+  }
+  return best > maxD ? 0 : 1 - 0.2 * best; // 1.0 / 0.8 / 0.6: an edit always drops a full band below a clean hit
 }
 
 /** 0–1 text score, or EXACT_SCORE for an exact name / full-address hit. `sim` (the RPC's
@@ -74,6 +124,7 @@ export function textScore(query, item) {
     const words = q.split(" ").filter((w) => w.length >= 2);
     s = words.length ? words.filter((w) => hay.includes(w)).length / words.length : 0;
   }
+  s = Math.max(s, fuzzyNameScore(query, item.name));
   return item.isRegistryName ? s - REGISTRY_PENALTY : s;
 }
 

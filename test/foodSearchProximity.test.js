@@ -102,3 +102,42 @@ describe("wiring", () => {
     expect(Number(/SEARCH_RESULT_CAP = (\d+)/.exec(store)[1])).toBeGreaterThanOrEqual(40);
   });
 });
+
+/* NEW-1 (2026-10-10): a slightly misspelled name must still put the real nearby place on top.
+ * Fixture mirrors the measured production pool for a Cinco Ranch centre (names/cities only). */
+import { fuzzyNameScore, editDistance } from "../src/workspaces/food/lib/searchProximity.js";
+describe("typo-tolerant name score (NEW-1)", () => {
+  const CINCO = view(29.74, -95.77, 0.04);
+  const FRY = row("fry", "Carrabba's Italian Grill", 29.7, -95.78, { address: "6501 S Fry Rd, Katy, TX, 77494", sim: 0.4 });
+  const field = (simFor) => [
+    row("kirby", "Carrabbas Italian Grill", 29.72, -95.42, { address: "Kirby Dr, Houston, TX", sim: 1 }),
+    row("grape", "Carrabbas Italian Grill", 32.9, -97.1, { address: "Grapevine, TX", sim: 1 }),
+    row("carabas-hou", "Carabas Italian Restaurant | Houston, TX", 29.76, -95.37, { address: "Houston, TX", sim: 1 }),
+    row("austin", "Carrabas Italian Grill", 30.27, -97.74, { address: "Austin, TX", sim: 1 }),
+    row("caramel", "Dallas Caramel Company", 33.0, -96.5, { address: "Wylie, TX", sim: 0.625 }),
+    row("chain-hou", "Carrabba's Italian Grill", 29.71, -95.55, { address: "Katy Fwy, Houston, TX", sim: simFor }),
+    { ...FRY, sim: simFor },
+  ];
+  for (const [q, sim] of [["Carabas", 0.4], ["Carrabas", 0.67], ["Carrabbas", 0.8], ["Carrabba's", 1], ["carrab", 1]]) {
+    it(`"${q}" → the nearby Carrabba's is #1`, () => {
+      expect(rankByProximity(q, field(sim), CINCO)[0].id).toBe("fry");
+    });
+  }
+  it("squashes punctuation, spaces and doubled letters; one edit sits a band below a clean hit", () => {
+    expect(fuzzyNameScore("Carabas", "Carrabba's Italian Grill")).toBe(1);
+    expect(fuzzyNameScore("Chikfila", "Chick-fil-A")).toBeCloseTo(0.8);
+    expect(fuzzyNameScore("Chipolte", "Chipotle Mexican Grill")).toBeCloseTo(0.8);
+    expect(fuzzyNameScore("Carabas", "Caramba Street Food")).toBeLessThan(0.85);
+    expect(fuzzyNameScore("zoes", "Zoës Kitchen")).toBe(1);
+  });
+  it("tolerates nothing on very short queries and ignores unrelated names", () => {
+    expect(fuzzyNameScore("tac", "Tao")).toBe(0);
+    expect(fuzzyNameScore("Carabas", "Dallas Caramel Company")).toBe(0);
+    expect(editDistance("chipolte", "chipotle")).toBe(1);
+  });
+  it("control: a correct spelling and a far exact name are unchanged", () => {
+    const torchy = [row("far", "Torchy's Tacos", 32.78, -96.8, { sim: 1 }), row("near", "Taco Bell", 29.74, -95.77, { sim: 0.5 })];
+    expect(rankByProximity("Torchys", torchy, CINCO)[0].id).toBe("far");
+    expect(textScore("Torchy's Tacos", torchy[0])).toBe(EXACT_SCORE);
+  });
+});
