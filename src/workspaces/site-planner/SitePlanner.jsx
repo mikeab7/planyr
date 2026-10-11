@@ -7,6 +7,7 @@ import "leaflet/dist/leaflet.css";
 import { useProjectName, usePlanName, renameProjectChecked, renamePlanChecked } from "../../shared/names/names.js";
 import { writeIsRedundant, mayWriteForAccount } from "./lib/saveDedupe.js";
 import { readCanvasGuess, writeCanvasGuess, geometryOf } from "./lib/canvasGuess.js";
+import { mayHealMissingOverlay, overlayLoadReason } from "./lib/overlayHeal.js";
 import { loadSite, saveSite, siteExistsLocally, sitesWriteStamp, sitesWriteStillCurrent, readBackSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, initHistoryStore, backupNow, backupNowVerified, historyIdbOnly, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
 import { relTime } from "../../shared/projects/projectModel.js";
 import { collectAssetRefs, releasePlanForOverlay } from "./lib/sharedAssetRefs.js";
@@ -11041,7 +11042,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           // B784/B785 — nothing loaded → record a TERMINAL reason (was: silent infinite "Loading…"). A cloud
           // object confirmed gone (400/404) is "missing" (re-add); a transient failure is "network" (retryable).
           // With no cloud key at all (idb-only, local copy evicted) the bytes are simply gone → "missing" too.
-          const reason = key ? (res.missing ? "missing" : "network") : "missing";
+          // NEW-1 — a 400 "not found" from another account's folder is indistinguishable from an RLS
+          // refusal, so it is "denied" (never "gone") and may never heal the record (lib/overlayHeal.js).
+          const reason = overlayLoadReason({ key, missing: res.missing, uid: activeUid() });
           setOverlayLoadErr((m) => ({ ...m, [o.id]: reason }));
           // NEW-2 (B785) — a CONFIRMED-missing cloud object with no local copy: drop the dead pointer so
           // persistence + UI stop implying "it's in the cloud." Gated on isCloudActive() so a logged-out /
@@ -11053,7 +11056,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           // left a confirmed-dead cloud object (verified against production storage.objects — see
           // docs/incidents/INCIDENT-2026-08-13-shared-asset-delete.md) re-attempting the same doomed download
           // on every single load, forever, instead of healing to the honest "re-add or remove" state.
-          if (reason === "missing" && o.storageKey && isCloudActive())
+          // NEW-1 — ONLY the reader's OWN folder: the own-folder policy always admits it, so there a
+          // "not found" really means gone. Anywhere else a teammate's client would erase the owner's
+          // pointer in the owner's own shared plan (measured on production: 12 records, files intact).
+          if (reason === "missing" && mayHealMissingOverlay({ key: o.storageKey, missing: res.missing, uid: activeUid(), cloudActive: isCloudActive() }))
             setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, storageKey: null, storageMissing: true } : x)));
         } catch (_) {
           setOverlayLoadErr((m) => ({ ...m, [o.id]: "network" }));
@@ -18920,7 +18926,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           // "missing" (bytes are gone) and "network" (couldn't reach storage): re-adding the same file
           // is unlikely to help since the file is fine, but retrying the same bytes forever is a dead
           // end, so this asks the user to try again with a fresh export from their CAD/PDF tool.
-          const label = (ovErr === "missing" || o.storageMissing)
+          const label = ovErr === "denied"
+            ? `Couldn't load “${o.name}” — shared file not readable from this account · click to retry`
+            : (ovErr === "missing" || o.storageMissing)
             ? `Couldn't load “${o.name}” — click to re-add the file`
             : ovErr === "render"
               ? `Couldn't render “${o.name}” — click to re-add the file`
@@ -18941,7 +18949,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             pointerEvents={tool === "select" ? "auto" : "none"}
             style={{ cursor: (tool !== "select" || editingCorners) ? "crosshair" : (ovLoading ? "default" : "pointer") }}
             onPointerDown={(e) => e.stopPropagation()}
-            onClick={ovLoading ? undefined : (e) => { e.stopPropagation(); if (ovErr === "network") retryOverlay(o.id); else reAddOverlay(o.id); }}>
+            onClick={ovLoading ? undefined : (e) => { e.stopPropagation(); if (ovErr === "network" || ovErr === "denied") retryOverlay(o.id); else reAddOverlay(o.id); }}>
             <rect x={tl.x} y={tl.y} width={w} height={h} fill="#fbf3ee" fillOpacity={0.55} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="8 5" />
             <text x={cx} y={ovLoading ? cy : cy - 8} textAnchor="middle" fontSize={13} fill={PAL.accent}>{label}</text>
             {!ovLoading && (
