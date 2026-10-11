@@ -149,6 +149,12 @@ async function dbl(page, x, y, label) {
     throw new Error(`${label}: point (${x}, ${y}) is outside the ${vp.width}×${vp.height} viewport — `
       + "elementsFromPoint goes silent there and the click would hit nothing (trap 18)");
   }
+  /* NEW-2 (2026-10-11): a new box STARTS WIDE, so a box just typed into still covers the paper beside it
+   * until the person leaves it. A person placing the next box does exactly that first — Escape backs out
+   * of editing and the box shrinks to its words — so the driver does too. */
+  if (await page.evaluate(() => !!document.querySelector('.planyr-anchor[data-editing="1"]'))) {
+    await page.keyboard.press("Escape"); await page.keyboard.press("Escape"); await pacedWait(page, 350);
+  }
   await page.mouse.move(x, y);
   await page.mouse.dblclick(x, y);
   await pacedWait(page, 150);

@@ -1617,3 +1617,30 @@ Found writing `ui-audit/verify-notes-touch-landing-live.mjs` (WebKit iPhone desc
 - **"The page slid" is an EXISTING BOX moving on screen — never the workspace transform.** A first draft read `note-workspace`'s `transform` before and after typing the first letter of a touch placement and reported the page sliding (+28 px, ±12 px) on a double-tap in the strip under the title. The transform changes internally while every box stays put: measured with a box already on the page, its on-screen position moved **0.0 px** in every case, and the new letter still landed within 1 px of the finger. A blank page cannot show a slide at all (nothing else to move) — the arm needs an existing box, measured by its `getBoundingClientRect()`.
 - **A phone shows ONE pane: the page, or the list.** After a page opens, the page list (and `+ Page`, and the row you right-click to delete) is hidden behind the toolbar's **Back** (`notes-mobile-back`); there are TWO `notes-new-page` buttons and `.first()` is the hidden one — filter `{ visible: true }`. A phone run's own cleanup therefore cannot reach its pages: it stranded throwaway pages on the test account three times. `ui-audit/lib/notesSweep.mjs` opens a desktop-width session AFTER the phone session closes and deletes by title.
 - **Deleting a Notes page is not deleting it: the Bin keeps it 30 days, and the app salvages stray typing.** Delete-must-verify (owner rule 15) means re-reading the **Bin** too — `notes-bin-purge-<id>` ("Delete forever") — and a placement test's lone typed "W" can outlive its page as a **"Recovered — W"** page the APP creates. `notesSweep` removes titles starting `ZZ throwaway` and exactly `Recovered — W`, and nothing else: the Bin holds other sessions' artifacts too.
+
+## Box width: a new box starts wide, a pasted table counts its MERGED columns (B2248944 / B2142464 ×3, 2026-10-11)
+
+Two owner reports, one session: a OneNote table pasted into a box a third as wide as it needed, and "new boxes start too skinny".
+
+- **Cause of the first, one line:** `widenFreshBoxForTable` sized the box from the FIRST ROW'S CELL COUNT. A OneNote table with a
+  merged header ("Cross Dock / Front Load / Rear Load", each `colspan=2`) has 3 cells in row 1 and 6 columns. `tableShape` /
+  `tableBoxWidth` (`lib/notesTablePaste.js`) now count columns with their spans, add the box's own padding (`ANCHOR_BOX_PAD_X`) and
+  run after EVERY paste that lands a table (one `uiEvent === "paste"` transaction hook, not three call sites).
+  ⛔ The old call only ran for a box the paste itself created, so a table pasted into an existing narrow box was never widened.
+- **The model:** a box made by typing or pasting on blank paper carries `fit` (`lib/notesAnchorNode.js`), starts at the column width
+  or the room to its right (floor 240, cap 720 — `anchorStartPreferred`), and on click-out shrinks to its words (`fitWidthFor`,
+  floor 96). `fit` is OFF for every legacy box and cleared by any hand resize, so a width a person chose is never touched. The
+  shrink/grow/widen writes are ATTRIBUTE steps with `addToHistory: false` (`autoSizeNoteAnchor`, `growNoteAnchorWidth`).
+  ⛔ A first version widened with a normal node-replacement step and a table paste then needed TWO Ctrl+Z (the width step is not
+  adjacent to the pasted content, so history gives it its own group) — `verify-notes-table-copy-paste` caught it.
+- **Trap — "click out" is TWO events.** Pressing another box / Escape changes `editingId`; pressing the title (or any field outside
+  the editor) only BLURS the editor and leaves `editingId` standing. Watching `editingId` alone shrank nothing on a title click.
+  Both are watched; the blur path waits a beat and re-checks focus so a node-view rebuild under a keystroke never shrinks mid-sentence.
+- **Trap — the render floor.** `fitAnchorBox` floors a RENDERED box at 160. A stored 96 rendered at 160 (stored ≠ screen) until a
+  `data-anchor-fit` box was given the smaller floor. Read the stored width AND the rendered one.
+- **Trap — a harness that places box B "beside" box A now places it INSIDE A.** Boxes start wide, so a box just typed into covers
+  the paper to its right until the person leaves it. `verify-notes-in-sheet-placement`'s `dbl()` now presses Escape first when a box
+  is being edited (a person does the same). A press on the empty part of a wide box is a press in that box — by design.
+- Guard: `ui-audit/verify-notes-box-width.mjs` (8 clipboard fixtures × 3 landings, start width on 5 page widths + zoom + right edge,
+  click-out, hand-resize kept, legacy kept, typing-past-the-edge, undo, reload; two known-good arms that VOID the run) and
+  `test/notesBoxSelfSizing.test.js` + `test/notesTablePaste.test.js`.
