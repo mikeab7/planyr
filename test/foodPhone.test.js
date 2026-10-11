@@ -144,7 +144,7 @@ describe("keyboard-aware sheet", () => {
   });
   it("every editable card is marked so the reveal shows the whole card, not just the field", () => {
     expect(read("components/DishesSection.jsx")).toMatch(/dish-edit-row" data-edit-card/);
-    expect(read("components/VisitPanel.jsx").match(/data-edit-card/g)?.length).toBeGreaterThanOrEqual(6);
+    expect(read("components/VisitPanel.jsx").match(/data-edit-card/g)?.length).toBeGreaterThanOrEqual(5); // NEW-2 (2026-10-11): "What was good" is gone
     expect(read("components/BottomSheet.jsx")).toMatch(/closest\("\[data-edit-card\]"\)/);
   });
   it("the map's own controls are confined below the sheet (B2046224 ×3: the zoom control over the sheet)", () => {

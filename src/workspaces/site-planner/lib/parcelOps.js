@@ -252,8 +252,8 @@ export function deedAcresSummed(tract) {
 
 /* One display row per parcel for the table — everything the row, the filter and the sort read. */
 export function buildParcelRows(parcels, { cadName = null, idField = null } = {}) {
-  return parcelOutline(parcels).map(({ pc, depth, name, superseded }) => ({
-    pc, depth, name, superseded,
+  return parcelOutline(parcels).map(({ pc, depth, name, superseded, unnamed }) => ({
+    pc, depth, name, superseded, unnamed: !!unnamed,
     origin: parcelOrigin(pc, { cadName, idField }),
     id: pc.id,
     acres: parcelNetSqft(pc) / SQFT_PER_ACRE,

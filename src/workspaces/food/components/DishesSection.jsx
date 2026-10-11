@@ -23,6 +23,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDraftField, useDraftStore } from "../lib/draftStore.js";
 import ScoreMeter from "./ScoreMeter.jsx";
+import CloseX from "./CloseX.jsx";
 import { formatVisitDate } from "../lib/dateFormat.js";
 import {
   dishRowsForTable, theOrderEntries, theOrderTotalCents, theOrderAsText, formatCents,
@@ -90,7 +91,7 @@ const DASHED_BORDER = "1px dashed var(--border-default)";
  * NEW-1: now carries its own "ORDER IT AGAIN?" label (previously unlabeled — nothing said what
  * the three buttons answered) and every state uses the SAME accent fill when selected (previously
  * "maybe"/"no" used a neutral fill when active, which read as though only "yes" was a real answer). */
-function OrderAgainControl({ value, onChange, isMobile }) {
+export function OrderAgainControl({ value, onChange, isMobile }) {
   const minH = isMobile ? 54 : 46;
   return (
     <div>
@@ -210,12 +211,7 @@ function DishEditRow({ initial, existingNames, openWishlistNames, onSave, onCanc
         <span style={{ fontSize: FONT_SIZE.micro, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-tertiary)" }} data-testid="dish-edit-heading">
           {initial ? "Edit dish" : "New dish"}
         </span>
-        <button
-          type="button" className="tap-target" onClick={onCancel} aria-label="Close" data-testid="dish-edit-close"
-          style={{ border: "none", background: "none", color: "var(--text-tertiary)", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: 4, minWidth: 32, minHeight: 32 }} // design-exempt: a bare close-glyph needs to read clearly with no label beside it — above FONT_SIZE.control (12) by design
-        >
-          ✕
-        </button>
+        <CloseX onClick={onCancel} label="Close" testId="dish-edit-close" size={44} />
       </div>
 
       {/* Dish name — the editor's hero field: large, transparent, no box, a 2px accent underline

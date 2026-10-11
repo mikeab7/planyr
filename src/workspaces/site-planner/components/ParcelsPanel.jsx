@@ -119,7 +119,7 @@ function ParcelRow({ row, selected, picked, pickMode, checked, handlers }) {
           onKeyDown={(e) => { if ((e.key === "Delete" || e.key === "Backspace") && !pickMode) { e.preventDefault(); e.stopPropagation(); setMenu("confirm"); } }}
           style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center", columnGap: SPACE.xs, minWidth: 0, alignSelf: "stretch", padding: `${SPACE.sm}px ${SPACE.sm}px ${SPACE.sm}px ${SPACE.xs}px`, border: "none", background: "transparent", textAlign: "left", cursor: "pointer", fontFamily: "inherit", opacity: dim ? 0.55 : 1 }}>
           <span style={{ minWidth: 0, display: "block" }}>
-            <span data-testid={`parcel-row-name-${row.id}`} style={{ display: "block", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: FONT_SIZE.emphasis, fontWeight: 650, color: "var(--text-primary)" }}>{row.name}</span>
+            <span data-testid={`parcel-row-name-${row.id}`} style={{ display: "block", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: FONT_SIZE.emphasis, fontWeight: row.unnamed ? 400 : 650, color: row.unnamed ? "var(--text-secondary)" : "var(--text-primary)" }}>{row.unnamed ? "Unnamed" : row.name}</span>
             <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: FONT_SIZE.label, color: "var(--text-secondary)" }}>{sub}</span>
           </span>
           <span style={{ minWidth: 48, textAlign: "right", fontSize: FONT_SIZE.emphasis, fontWeight: 650, color: "var(--text-primary)", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, textDecoration: row.included ? "none" : "line-through" }} data-testid={`parcel-row-acres-${row.id}`}>{fmt(row.acres)}</span>
@@ -163,7 +163,7 @@ export default function ParcelsPanel({
 
   const shown = useMemo(() => {
     const q = showFilter ? filter.trim().toLowerCase() : "";
-    return rows.filter((r) => !q || [r.name, r.apn, r.owner].some((s) => s && String(s).toLowerCase().includes(q)));
+    return rows.filter((r) => !q || [r.unnamed ? null : r.name, r.apn, r.owner].some((s) => s && String(s).toLowerCase().includes(q)));
   }, [rows, filter, showFilter]);
 
   const checkedIds = [...checked].filter((id) => liveIds.has(id));
