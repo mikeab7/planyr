@@ -143,9 +143,16 @@ describe("per-type click wiring (the pond regression, and the types the owner as
        on the basin and press 2 on the overhanging label matched nothing either way AND wiped the
        record, so a third press had nothing to pair with. One key per feature is the rule now — the
        ACTION still branches on which surface took the press. */
-    expect(SP).toMatch(/if \(isDoubleTap\(e, d\.el\.id, wasSel\)\) \{ featureDoubleAction\(\{ kind: "el", id: d\.el\.id \}, e\); return; \}/);
+    /* NEW-2 (B2249169) — the label's press now hands over to the element body's own `startMoveEl` (so a press
+       that starts on a label also DRAGS the element). The contract is unchanged, only where it is honoured:
+       startMoveEl pairs the double-tap on the element's own id for ordinary elements, and the label keeps
+       pairing it itself for the GROUPED / LOCKED case startMoveEl does not pair — never both. */
+    expect(SP).toMatch(/if \(\(d\.el\.groupId \|\| d\.el\.locked\) && isDoubleTap\(e, d\.el\.id, wasSel\)\) \{ featureDoubleAction\(\{ kind: "el", id: d\.el\.id \}, e\); return; \}/);
+    expect(SP, "a label press must start the element's own move (drag from a label)").toMatch(/startMoveEl\(e, d\.el\.id\);/);
+    expect(SP, "startMoveEl must still pair the double-tap on the element's own id").toMatch(/if \(!el\.groupId && !el\.locked && isDoubleTap\(e, id, sel\?\.kind === "el" && sel\.id === id\)\) \{/);
     expect(SP, "a pond label must not go back to a private double-tap key").not.toMatch(/isDoubleTap\(e, `\$\{d\.el\.id\}:label`/);
-    expect(SP).toMatch(/setSel\(\{ kind: "el", id: d\.el\.id \}\); *\/\/ single click: select only/);
+    // single click: select only — startMoveEl selects first and moves only past the drag gate (histOnArm)
+    expect(SP).toMatch(/setSel\(\{ kind: "el", id \}\);\s*\n\s*\/\* NEW-2 — pushHistory\(\) USED TO FIRE HERE/);
   });
 
   it("PARCEL: single click selects; a double-click opens the Parcel panel", () => {
