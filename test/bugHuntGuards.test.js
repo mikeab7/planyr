@@ -14,11 +14,14 @@ describe("bug-hunt B505–B509: the fixes still exist in source", () => {
     expect(src).toMatch(/\.catch\(\(\) => onConsumeLoad && onConsumeLoad\(\)\)/);
   });
 
-  it("B506/B507: both device-full cloud pushes have a rejection path (.catch)", () => {
-    const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
-    expect(src).toMatch(/\}\)\.catch\(\(\) => \{ setSaveStatus\("unsaved"\); setSavedToCloudOnly\(false\); setCloudSaveFailed\(true\); \}\);/); // B506
-    expect(src).toMatch(/\}\)\.catch\(\(\) => \{ setSaveNowMsg\(""\); setLocalSaveFailed\(true\); setSavedToCloudOnly\(false\); \}\);/);     // B507
-  });
+  // B506/B507's guard moved to test/saveFallbackCloud.test.js (R3, B1857905) — a source-text
+  // match on SitePlanner.jsx's two `.catch()` call sites could only ever prove the five words
+  // still appear somewhere in a 30,000-line file, never that either `.catch()` is still
+  // reachable (a `pushModelToCloud` that started swallowing its own rejections would leave the
+  // exact same source text sitting dead). The replacement drives the real `pushModelToCloud`
+  // with a mock that genuinely rejects and asserts the rejection survives the round trip — the
+  // one thing that has to hold for either handler to ever run — reusing that file's existing
+  // cloudSync mock rather than a second one.
 
   it("B508: LayerPanel relevance control uses theme tokens, not hardcoded hex", () => {
     const src = read("../src/workspaces/site-planner/components/LayerPanel.jsx");

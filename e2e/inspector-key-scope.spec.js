@@ -184,12 +184,24 @@ test.describe("a key typed in an inspector field never reaches the plan (logged 
     })).toBe(1);
   });
 
-  /* ── AND WHEN IT IS REFUSED, IT SAYS SO. A silent refusal is the old silence by another name. ─ */
+  /* ── AND WHEN IT IS REFUSED, IT SAYS SO. A silent refusal is the old silence by another name. ──
+   *
+   * ⛔ R3 (B1857905) — THIS USED TO LEAVE THE FIELD VIA ENTER, which is now a SCOPE.FIELD refusal,
+   * and B754752 deliberately made a FIELD refusal silent (`shouldHintRefusal` in lib/keyContract.js
+   * — "a focused text field consuming Delete/Backspace is CORRECT behaviour… there is nothing to
+   * explain"). Measured: a toast fired on EVERY keystroke clearing a dimension before retyping it
+   * ("click the plan, then press Delete" — a recipe for deleting the very building being edited),
+   * so the hint was retired for FIELD, not the feature this test is about. REFUSAL.CHROME is
+   * untouched and still hints ("⚠ The keyboard is still on the panel…") — reached by Tab-ing onto
+   * the Depth field's own stepper button (same leave as the "Tab moves onto the stepper" REFUSALS
+   * case two tests above, which already proves Backspace is genuinely refused here): focus lands
+   * on a `<button>`, not a text control, so scope is CHROME rather than FIELD, and the value row's
+   * own touch latch (B1188) keeps the panel owning the keyboard. */
   test("a refused Delete explains where the keystroke went", async ({ page }) => {
     await boot(page);
     const d = await depthField(page, await buildingWithProps(page));
     await d.click();
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("Tab"); // onto the Depth field's own ▲ stepper — CHROME scope, not FIELD
     await page.keyboard.press("Delete");
     await expect(page.getByText(/keyboard is still on the panel|Delete went to the box/i).first())
       .toBeVisible({ timeout: 6000 });

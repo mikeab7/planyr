@@ -68,10 +68,11 @@ jobs:
           echo "--- report ---"
           cat e2e-report.txt
 
-      # B266080 — THE DRIFT GATE. The raw suite exit code has been 1 every weekday since
-      # 2026-07-22 and will stay 1 until the 30 known-red cases in e2e/known-red.json are fixed
-      # (owner: B266081). A signal that is always red carries no information, so the JOB's
-      # verdict is now the DIFF against that committed ledger, not the raw exit code:
+      # B266080 — THE DRIFT GATE. The raw suite exit code was 1 every weekday from 2026-07-22
+      # until B266081 (the ledger's own stopping-rule item) paid the known-red debt to zero on
+      # 2026-10-11 (R3, B1857905) — e2e/known-red.json's `entries` is now `[]`. A signal that is
+      # always red carries no information, so the JOB's verdict is the DIFF against that
+      # committed ledger, not the raw exit code — unchanged now that the ledger is empty:
       #   • a failure that is not on the ledger  → NEW regression → red, named.
       #   • a ledger entry that PASSED           → the ledger is stale → red, so it must shrink.
       # The ledger is in the repo, in a diff, reviewable — not in a comment on a muted thread.
