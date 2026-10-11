@@ -54,8 +54,12 @@ function Tag({ children }) {
  * icons sit in the same narrow slot on every row (the slot is 3 icon-widths: padlock · eye · ⋯, right-aligned, so the
  * eye and ⋯ never move when the padlock is absent). There is no column-heading row; the group headers replace it. */
 const ACRES_W = 60; // fits "1,234.56" at the row's semibold figure size
-const SLOT_W = 44; // eye · ⋯ — 22 each (the padlock rides beside the name, so the slot stays this narrow)
-const COLS = `20px minmax(0, 1fr) ${ACRES_W}px ${SLOT_W}px`;
+const ICON = 20; // every row icon box
+/* The icon slot holds [padlock] · eye · ⋯ right-aligned, so the eye and ⋯ sit on one column on every row. It is two icons wide
+ * until a parcel in the list is locked; then it is three for EVERY row (never a per-row width) so the padlock has a seat LEFT of
+ * the eye — in the slot, not in the middle of the row. */
+export const slotWidth = (anyLocked) => ICON * (anyLocked ? 3 : 2);
+const colsFor = (slotW) => `20px minmax(0, 1fr) ${ACRES_W}px ${slotW}px`;
 const FIRST_LINE_H = 29; // one name line (17) + the row's 6px top/bottom padding: checkbox, acres and icons centre on the FIRST line of a wrapped row
 const FILTER_MIN_ROWS = 8; // the filter box only earns its space once the list is long
 
@@ -84,6 +88,19 @@ export function groupRows(rows) {
   }).filter((g) => g.rows.length);
 }
 
+/* Overlap disclosure (the site total is DISSOLVED — shared ground counts once — while every row and group shows its own
+ * area, so on a plan whose parcels overlap the two honestly disagree). The gap is the double-counted ground; the summary names it. */
+export function overlapAcres(rows, siteAcres) {
+  const additive = rows.filter((r) => !r.superseded && r.included).reduce((t, r) => t + r.acres, 0);
+  const gap = additive - siteAcres;
+  return gap > 0.05 ? gap : 0;
+}
+/* "Parcel 4 (12.3 ac), Tract A (1.2 ac)" for a row's hover, or "" when it overlaps nothing. */
+export function overlapNamesOf(row, byId) {
+  const list = (row.overlaps || []).map((o) => ({ ...o, other: byId.get(o.id) })).filter((o) => o.other);
+  return list.map((o) => `${rowText(o.other).label} (${fmt(o.sqft / 43560)} ac)`).join(", ");
+}
+
 /* The row's label + its optional second line. An unnamed COUNTY lot is labelled by its account (no second line — the
  * account IS the identity); a named county lot / a combined parcel says where it came from; a drawn one says nothing. */
 export function rowText(row) {
@@ -98,13 +115,13 @@ export function rowText(row) {
 /* The row's ⋯ menu (B2194741): Zoom to · Lock/Unlock · Delete. Delete is a TWO-STEP inline confirm (the same
  * arm-then-confirm shape the plan list uses) and the delete itself shows an Undo toast. Fixed-position so a scrolling
  * panel can never clip it; flips upward near the bottom edge. Module scope (MODULE-SCOPE-COMPONENTS). */
-function RowMenu({ row, handlers, open, armed, onOpen, onClose, onArm }) {
+function RowMenu({ row, handlers, open, armed, onOpen, onClose, onArm, renameable }) {
   const btnRef = useRef(null);
   const [pos, setPos] = useState(null);
   useEffect(() => {
     if (!open) { setPos(null); return undefined; }
     const r = btnRef.current && btnRef.current.getBoundingClientRect();
-    if (r) { const H = armed ? 96 : 128, up = r.bottom + H > window.innerHeight - 8; setPos({ left: Math.max(8, r.right - 168), top: up ? Math.max(8, r.top - H) : r.bottom + 2 }); }
+    if (r) { const H = armed ? 96 : renameable ? 160 : 128, up = r.bottom + H > window.innerHeight - 8; setPos({ left: Math.max(8, r.right - 168), top: up ? Math.max(8, r.top - H) : r.bottom + 2 }); }
     const off = (e) => { if (e.type === "keydown" ? e.key === "Escape" : !(e.target.closest && e.target.closest("[data-row-menu]"))) onClose(); };
     document.addEventListener("pointerdown", off); document.addEventListener("keydown", off);
     return () => { document.removeEventListener("pointerdown", off); document.removeEventListener("keydown", off); };
@@ -115,10 +132,11 @@ function RowMenu({ row, handlers, open, armed, onOpen, onClose, onArm }) {
   );
   return (
     <div data-row-menu="1" style={{ flex: "none" }}>
-      <button ref={btnRef} type="button" className={`land-row-hover${open ? " is-open" : ""}`} style={{ ...iconBtn, width: 22, height: 22 }} aria-haspopup="menu" aria-expanded={open} aria-label={`More actions for ${row.name}`} title="More" data-testid={`parcel-row-more-${row.id}`} onClick={() => (open ? onClose() : onOpen())}><MoreIcon /></button>
+      <button ref={btnRef} type="button" className={`land-row-hover${open ? " is-open" : ""}`} style={{ ...iconBtn, width: ICON, height: ICON }} aria-haspopup="menu" aria-expanded={open} aria-label={`More actions for ${row.name}`} title="More" data-testid={`parcel-row-more-${row.id}`} onClick={() => (open ? onClose() : onOpen())}><MoreIcon /></button>
       {open && pos && (
         <div role="menu" data-testid={`parcel-row-menu-${row.id}`} style={{ position: "fixed", left: pos.left, top: pos.top, zIndex: 50, width: 168, padding: SPACE.xs, border: LINE, borderRadius: RADIUS.md, background: "var(--surface-raised)", boxShadow: "var(--shadow-popover, 0 4px 14px var(--border-strong))" }}>
           {!armed && <>
+            {renameable && item("Rename", () => { onClose(); handlers.onOpenPage(row.id); }, `parcel-row-pencil-${row.id}`)}
             {item("Zoom to", () => { onClose(); handlers.onZoom(row.id); }, `parcel-row-menu-zoom-${row.id}`)}
             {item(row.locked ? "Unlock" : "Lock", () => { onClose(); handlers.onToggleLock(row.id); }, `parcel-row-menu-lock-${row.id}`)}
             {item("Delete…", onArm, `parcel-row-menu-delete-${row.id}`, true)}
@@ -137,11 +155,11 @@ function RowMenu({ row, handlers, open, armed, onOpen, onClose, onArm }) {
 /* A long account number never splits mid-digit: it drops whole onto its own line first (an inline-block), and only breaks if the column is narrower than the number itself. */
 const keepDigits = (text) => String(text).split(/(\d{6,})/).map((t, i) => (i % 2 ? <span key={i} style={{ display: "inline-block", maxWidth: "100%", overflowWrap: "anywhere" }}>{t}</span> : t));
 
-/* One row: checkbox (combine only) · name (+ source line, wraps, never cut) · acres · padlock / eye / ⋯. The name block
- * opens the parcel page. The pencil (rename, combined / split only) sits right AFTER the name text, in the name flow,
- * never over it. The padlock exists only while the parcel is locked (click = unlock, Undo toast); the eye shows on row
+/* One row: checkbox (combine only) · name (+ source line, wraps, never cut) · acres · padlock / eye / ⋯ (all in the right-hand slot). The name block
+ * opens the parcel page and uses the FULL name-block width (rename, constraint #18, is a ⋯ menu item — never an icon in the
+ * name flow). The padlock exists only while the parcel is locked (click = unlock, Undo toast); the eye shows on row
  * hover / keyboard focus and always when inactive; ⋯ on hover / focus. On touch screens both are always shown. */
-function ParcelRow({ row, selected, picked, pickMode, checked, handlers }) {
+function ParcelRow({ row, selected, picked, pickMode, checked, handlers, cols, slotW, overlapNames }) {
   const dim = !row.included || row.superseded;
   const { label, sub, muted } = rowText(row);
   const [menu, setMenu] = useState(null); // null | "menu" | "confirm"
@@ -151,7 +169,7 @@ function ParcelRow({ row, selected, picked, pickMode, checked, handlers }) {
   return (
     <div>
       <div className="land-parcel-row" data-testid={`parcel-table-row-${row.id}`} data-included={row.included ? "1" : "0"} data-group-kind={groupKeyOf(row)}
-        style={{ position: "relative", display: "grid", gridTemplateColumns: COLS, alignItems: "start", borderBottom: LINE, borderLeft: `2px solid ${selected || picked ? "var(--accent-site)" : "transparent"}`, borderRadius: 0, background: selected || picked ? "var(--surface-selected)" : "transparent" }}>
+        style={{ position: "relative", display: "grid", gridTemplateColumns: cols, alignItems: "start", borderBottom: LINE, borderLeft: `2px solid ${selected || picked ? "var(--accent-site)" : "transparent"}`, borderRadius: 0, background: selected || picked ? "var(--surface-selected)" : "transparent" }}>
         <label style={{ display: "flex", alignItems: "center", justifyContent: "center", height: FIRST_LINE_H, cursor: "pointer" }}>
           <input type="checkbox" checked={checked} onChange={() => handlers.onCheck(row.id)} aria-label={`Select ${label} to combine`} data-testid={`parcel-row-check-${row.id}`} style={{ width: 14, height: 14, margin: 0, cursor: "pointer" }} />
         </label>
@@ -160,22 +178,21 @@ function ParcelRow({ row, selected, picked, pickMode, checked, handlers }) {
             title={`${row.name}${sub ? ` — ${sub}` : ""}`}
             onKeyDown={(e) => { if ((e.key === "Delete" || e.key === "Backspace") && !pickMode) { e.preventDefault(); e.stopPropagation(); setMenu("confirm"); } }}
             style={{ flex: "1 1 auto", minWidth: 0, display: "block", padding: `${SPACE.sm}px ${SPACE.xxs}px ${SPACE.sm}px ${SPACE.xxs}px`, border: "none", background: "transparent", textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}>
-            <span data-testid={`parcel-row-name-${row.id}`} style={{ display: "block", overflowWrap: "break-word", fontSize: FONT_SIZE.emphasis, lineHeight: "17px", fontWeight: muted ? 400 : 650, color: nameColor }}>{keepDigits(label)}</span>
+            <span data-testid={`parcel-row-name-${row.id}`} style={{ display: "block", overflowWrap: "break-word", fontSize: FONT_SIZE.emphasis, lineHeight: "17px", fontWeight: muted ? 400 : 650, color: nameColor }}>{keepDigits(label)}{overlapNames && <span data-testid={`parcel-row-overlap-${row.id}`} title={`Overlaps ${overlapNames}`} style={{ display: "inline-block", marginLeft: SPACE.sm, padding: "0 5px", borderRadius: RADIUS.pill, border: LINE, color: "var(--text-secondary)", fontSize: FONT_SIZE.micro, fontWeight: 600, lineHeight: "14px", verticalAlign: "1px" }}>overlaps</span>}</span>
             {sub && <span data-testid={`parcel-row-source-${row.id}`} style={{ display: "block", overflowWrap: "break-word", fontSize: FONT_SIZE.label, lineHeight: "14px", color: "var(--text-secondary)" }}>{keepDigits(sub)}</span>}
           </button>
-          {row.locked && <button type="button" onClick={() => handlers.onToggleLock(row.id)} aria-pressed="true" data-testid={`parcel-row-lock-${row.id}`} aria-label={`Unlock ${label}`}
-            title="Locked — even Edit parcels can't change it. Click to unlock." style={{ ...iconBtn, width: 18, height: 18, color: "var(--text-secondary)" }}><LockGlyph size={13} /></button>}
-          {renameable && <button type="button" className="land-row-hover" style={{ ...iconBtn, width: 18, height: 18 }} title="Rename — opens the name field" aria-label={`Rename ${label}`} onClick={() => handlers.onOpenPage(row.id)} data-testid={`parcel-row-pencil-${row.id}`}><PencilIcon size={12} /></button>}
         </div>
         <span onClick={open} data-testid={`parcel-row-acres-${row.id}`} style={{ height: FIRST_LINE_H, display: "flex", alignItems: "center", justifyContent: "flex-end", cursor: "pointer", fontSize: FONT_SIZE.emphasis, fontWeight: 650, color: dim ? "var(--text-secondary)" : "var(--text-primary)", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, textDecoration: row.included ? "none" : "line-through", whiteSpace: "nowrap", paddingRight: SPACE.xs }}>{fmt(row.acres)}</span>
-        <span style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", width: SLOT_W, height: FIRST_LINE_H }}>
+        <span style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", width: slotW, height: FIRST_LINE_H }}>
+          {row.locked && <button type="button" onClick={() => handlers.onToggleLock(row.id)} aria-pressed="true" data-testid={`parcel-row-lock-${row.id}`} aria-label={`Unlock ${label}`}
+            title="Locked — even Edit parcels can't change it. Click to unlock." style={{ ...iconBtn, width: ICON, height: ICON, color: "var(--text-secondary)" }}><LockGlyph size={13} /></button>}
           <button type="button" className={row.included ? `land-row-hover${menu ? " is-open" : ""}` : undefined} onClick={() => handlers.onToggleInclude(row.id)} aria-pressed={row.included} data-testid={`parcel-row-eye-${row.id}`}
             aria-label={row.included ? `Make ${label} not active` : `Make ${label} active`}
             title={row.included ? "Active — counted in the site total. Click to leave it out." : "Not active — left out of the site total. Click to count it."}
-            style={{ ...iconBtn, width: 22, height: 22, color: row.included ? "var(--text-primary)" : "var(--text-secondary)" }}>
+            style={{ ...iconBtn, width: ICON, height: ICON, color: row.included ? "var(--text-primary)" : "var(--text-secondary)" }}>
             {row.included ? <EyeIcon /> : <EyeOffIcon />}
           </button>
-          <RowMenu row={row} handlers={handlers} open={menu !== null} armed={menu === "confirm"} onOpen={() => setMenu("menu")} onClose={() => setMenu(null)} onArm={() => setMenu("confirm")} />
+          <RowMenu row={row} renameable={!!renameable} handlers={handlers} open={menu !== null} armed={menu === "confirm"} onOpen={() => setMenu("menu")} onClose={() => setMenu(null)} onArm={() => setMenu("confirm")} />
         </span>
       </div>
     </div>
@@ -184,10 +201,10 @@ function ParcelRow({ row, selected, picked, pickMode, checked, handlers }) {
 
 /* A group header: small uppercase label + count on the left, the group's ACTIVE acres on the right in the SAME column
  * as the rows' acres, a rule under it. */
-function GroupHeader({ group }) {
+function GroupHeader({ group, cols }) {
   return (
-    <div data-testid={`parcels-group-${group.key}`} style={{ display: "grid", gridTemplateColumns: COLS, alignItems: "baseline", padding: `${SPACE.lg}px 0 ${SPACE.xs}px`, borderBottom: "1px solid var(--border-strong)" }}>
-      <span style={{ gridColumn: "1 / 3", paddingLeft: SPACE.xs, fontSize: FONT_SIZE.micro, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", whiteSpace: "nowrap", color: "var(--text-secondary)" }}>{group.label} · {group.count}</span>
+    <div data-testid={`parcels-group-${group.key}`} style={{ display: "grid", gridTemplateColumns: cols, alignItems: "baseline", padding: `${SPACE.lg}px 0 ${SPACE.xs}px`, borderBottom: "1px solid var(--border-strong)" }}>
+      <span style={{ gridColumn: "1 / 3", paddingLeft: SPACE.xs, fontSize: FONT_SIZE.micro, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", overflowWrap: "break-word", color: "var(--text-secondary)" }}>{group.label} · {group.count}</span>
       <span data-testid={`parcels-group-acres-${group.key}`} style={{ textAlign: "right", paddingRight: SPACE.xs, fontSize: FONT_SIZE.label, fontWeight: 600, color: "var(--text-secondary)", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap" }}>{fmt(group.activeAcres)}</span>
       <span />
     </div>
@@ -225,14 +242,18 @@ export default function ParcelsPanel({
     onRowClick: (id, picking) => { if (picking) { handlers.onPickRow(id); return; } handlers.onOpenPage(id); },
   }), [handlers]);
   // The row list only re-renders when something it shows changed — never on a pan / zoom frame.
+  const anyLocked = rows.some((r) => r.locked);
+  const slotW = slotWidth(anyLocked), cols = colsFor(slotW);
+  const byId = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
+  const overlapAc = useMemo(() => overlapAcres(rows, siteAcres), [rows, siteAcres]);
   const rowList = useMemo(() => groupRows(shown).map((g) => (
     <div key={g.key} data-testid={`parcels-section-${g.key}`}>
-      <GroupHeader group={g} />
+      <GroupHeader group={g} cols={cols} />
       {g.rows.map((row) => (
-        <ParcelRow key={row.id} row={row} selected={selectedId === row.id} picked={!!pickedIds && pickedIds.has(row.id)} pickMode={!!pickMode} checked={checked.has(row.id)} handlers={H} />
+        <ParcelRow key={row.id} row={row} selected={selectedId === row.id} picked={!!pickedIds && pickedIds.has(row.id)} pickMode={!!pickMode} checked={checked.has(row.id)} handlers={H} cols={cols} slotW={slotW} overlapNames={overlapNamesOf(row, byId)} />
       ))}
     </div>
-  )), [shown, selectedId, pickedIds, pickMode, checked, H]);
+  )), [shown, selectedId, pickedIds, pickMode, checked, H, cols, slotW, byId]);
 
   return (
     <div data-testid="parcels-panel" style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
@@ -249,6 +270,7 @@ export default function ParcelsPanel({
           <span data-testid="parcels-site-acres" style={{ fontWeight: 650, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{fmt(siteAcres)}</span> AC in site
           <span style={{ color: "var(--text-secondary)" }}> · </span>
           <span data-testid="parcels-active-count">{inCount} of {counted.length} active</span>
+          {overlapAc > 0 && <span data-testid="parcels-overlap" title="Parcels overlap, so the site total counts shared ground once while the rows add up to more. Rows marked “overlaps” show where."><span style={{ color: "var(--text-secondary)" }}> · </span>{fmt(overlapAc)} AC overlap</span>}
         </div>
       )}
 
