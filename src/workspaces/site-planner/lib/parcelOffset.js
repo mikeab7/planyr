@@ -17,6 +17,7 @@
  * component keeps its own `polyArea` for its ~30 other callers; the two rings compared here are
  * already validated (n ≥ 3), so the shared guard never fires on this path. */
 import { ringArea, pointInRing, projectOntoSegment } from "./ringMath.js";
+import { identityCache } from "./pureCache.js";
 
 /* Intersection of the infinite lines through (x1,y1)→(x2,y2) and (x3,y3)→(x4,y4), or null when
  * they are parallel (within 1e-9). */
@@ -115,4 +116,50 @@ function nearestPointOnBoundary(p, poly) {
 export function setbackRingArea(points, setbacks) {
   const ring = offsetPolygon(points || [], setbacks);
   return ring ? ringArea(ring) : 0;
+}
+
+/* NEW-1 (loud failure) — does the setback envelope still HAVE a buildable area?
+ *
+ * `offsetPolygon` never returns null for a valid lot and CLAMPS any vertex that lands outside the
+ * source back onto the boundary (B966627), so a setback larger than the lot is wide hands back a
+ * plausible-looking ring hugging the boundary — silent nonsense, not "nothing". This answers the
+ * question independently of that construction: a point is buildable when it is inside the parcel
+ * and at least edge i's setback away from every edge i. Sampled on a grid (envelopes thinner than
+ * one cell, ~1/70 of the lot's longer side, are not a place anything gets built). Pure.
+ *
+ * Returns { collapsed, reason, areaSqFt } — `reason` is "empty" (no buildable point), "degenerate"
+ * (the offset ring is missing or has no area) or null. Zero setbacks never collapse a valid lot. */
+const _envCache = identityCache();
+export function setbackEnvelope(points, setbacks) {
+  const key = Array.isArray(setbacks) ? setbacks.join(",") : String(setbacks);
+  const hit = _envCache.get(points, key);
+  if (hit) return hit;
+  return _envCache.set(points, key, computeSetbackEnvelope(points, setbacks));
+}
+function computeSetbackEnvelope(points, setbacks) {
+  const n = (points || []).length;
+  if (n < 3) return { collapsed: false, reason: null, areaSqFt: 0 };
+  const sb = (i) => (Array.isArray(setbacks) ? (Number(setbacks[i]) || 0) : (Number(setbacks) || 0));
+  let maxSb = 0;
+  for (let i = 0; i < n; i++) maxSb = Math.max(maxSb, sb(i));
+  if (!(maxSb > 0)) return { collapsed: false, reason: null, areaSqFt: ringArea(points) };
+  const ring = offsetPolygon(points, Array.isArray(setbacks) ? setbacks : sb(0));
+  const areaSqFt = ring ? ringArea(ring) : 0;
+  if (!ring || areaSqFt < 1) return { collapsed: true, reason: "degenerate", areaSqFt: 0 };
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of points) { minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x); minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y); }
+  const N = 70, dx = (maxX - minX) / N, dy = (maxY - minY) / N;
+  for (let gx = 0; gx <= N; gx++) {
+    for (let gy = 0; gy <= N; gy++) {
+      const p = { x: minX + gx * dx, y: minY + gy * dy };
+      if (!pointInRing(p, points)) continue;
+      let ok = true;
+      for (let i = 0; i < n && ok; i++) {
+        const q = projectOntoSegment(points[i], points[(i + 1) % n], p);
+        if (Math.hypot(p.x - q.x, p.y - q.y) < sb(i) - 1e-9) ok = false;
+      }
+      if (ok) return { collapsed: false, reason: null, areaSqFt };
+    }
+  }
+  return { collapsed: true, reason: "empty", areaSqFt };
 }
