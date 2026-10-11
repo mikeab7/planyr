@@ -1112,3 +1112,30 @@ html[data-notes-typing="1"] [data-testid="help-report-fab"] { display: none !imp
   border-color: var(--accent-site) !important;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-site) 18%, transparent) !important;
 }
+
+/* Food rating slider (NEW-2/NEW-3, 2026-10-11) — ONE control for Food, Ambiance and every dish score. The input box is the
+   whole tall grab target; the visible track is a slim bar drawn in its background. The thumb is --rs-thumb wide and travels
+   between ends inset by half of it, so a tick at the same inset sits exactly under the thumb centre (components/RatingSlider.jsx). */
+.food-rating-slider {
+  -webkit-appearance: none; appearance: none; display: block; width: 100%; margin: 0; padding: 0;
+  background: transparent; cursor: pointer; touch-action: pan-y; -webkit-tap-highlight-color: transparent;
+}
+.food-rating-slider:focus-visible { outline: 2px solid var(--accent-food); outline-offset: 2px; border-radius: 8px; }
+.food-rating-slider::-webkit-slider-runnable-track {
+  height: 100%; border-radius: 8px;
+  background:
+    linear-gradient(to right,
+      var(--rs-color) calc(var(--rs-thumb) / 2 + var(--rs-frac) * (100% - var(--rs-thumb))),
+      var(--border-default) calc(var(--rs-thumb) / 2 + var(--rs-frac) * (100% - var(--rs-thumb)))) center / 100% 6px no-repeat;
+}
+.food-rating-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: var(--rs-thumb); height: var(--rs-thumb); border-radius: 50%;
+  margin-top: calc((var(--rs-h) - var(--rs-thumb)) / 2);
+  background: var(--surface-page); border: 3px solid var(--rs-color); box-sizing: border-box;
+}
+.food-rating-slider::-moz-range-track { height: 6px; border-radius: 3px; background: var(--border-default); }
+.food-rating-slider::-moz-range-progress { height: 6px; border-radius: 3px; background: var(--rs-color); }
+.food-rating-slider::-moz-range-thumb {
+  width: var(--rs-thumb); height: var(--rs-thumb); border-radius: 50%; box-sizing: border-box;
+  background: var(--surface-page); border: 3px solid var(--rs-color);
+}

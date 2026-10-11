@@ -29,7 +29,7 @@ import {
   matchingOpenDishWishlist, formatScore, dishScoreTier, scoreSatisfiesQuarterStep,
 } from "../src/workspaces/food/lib/dishAggregates.js";
 import ScoreMeter, {
-  DISH_SCORE_MIN, DISH_SCORE_MAX, DISH_SCORE_STEP, DISH_SCORE_TICKS, clampScore, nudgeScore,
+  DISH_SCORE_MIN, DISH_SCORE_MAX, DISH_SCORE_STEP, DISH_SCORE_TICKS, clampScore,
 } from "../src/workspaces/food/components/ScoreMeter.jsx";
 import DishesSection from "../src/workspaces/food/components/DishesSection.jsx";
 import { roundKey, queryFor, fromElement } from "../src/workspaces/food/lib/overpass.js";
@@ -733,26 +733,22 @@ describe("VisitPanel — rating slider (not a button row) and a date field that 
     expect(panel).not.toMatch(/new Date\(\)\.toISOString\(\)\.slice\(0,\s*10\)/);
   });
 
-  it("rating is a range-slider control, step 0.5 across 1-10 (lib/ratingScale.js) — never a row of per-value buttons", () => {
+  it("rating is a range-slider control, step 0.25 across 1-10 (lib/ratingScale.js) — never a row of per-value buttons", () => {
     const panel = src("components/VisitPanel.jsx");
-    expect(panel).toMatch(/type="range"/);
-    expect(panel).toMatch(/min=\{RATING_MIN\}\s*max=\{RATING_MAX\}\s*step=\{RATING_STEP\}/);
-    expect(src("lib/ratingScale.js")).toMatch(/export const RATING_STEP = 0\.5;/);
-    // The old design this replaces: ten separate <button> elements, one per whole number.
+    const slider = src("components/RatingSlider.jsx");
+    expect(slider).toMatch(/type="range"/);
+    expect(slider).toMatch(/min=\{RATING_MIN\} max=\{RATING_MAX\} step=\{RATING_STEP\}/);
+    expect(src("lib/ratingScale.js")).toMatch(/export const RATING_STEP = 0\.25;/);
     expect(panel).not.toMatch(/role="radiogroup"/);
     expect(panel).not.toContain("RatingPicker");
-    // Exactly ONE range-input DEFINITION in the source (RatingSlider) — but rendered TWICE
-    // (Food + Ambiance, B634978) as the same reused component, never a second hand-rolled slider
-    // or per-value buttons re-added for either.
-    const rangeInputs = [...panel.matchAll(/type="range"/g)];
-    expect(rangeInputs.length).toBe(1);
-    const sliderUsages = [...panel.matchAll(/<RatingSlider /g)];
-    expect(sliderUsages.length).toBe(2);
+    // ONE range-input definition in the whole module (RatingSlider), reused by Food, Ambiance and the dish ScoreMeter.
+    expect(panel).not.toMatch(/type="range"/);
+    expect(src("components/ScoreMeter.jsx")).not.toMatch(/type="range"/);
+    expect([...panel.matchAll(/<RatingSlider /g)].length).toBe(2);
   });
 
   it("⛔ NEW (2026-08-27/28 owner block) — the slider's current value shows at NATURAL precision (9, 8.5, 8.25), never padded to a fixed decimal count", () => {
-    const panel = src("components/VisitPanel.jsx");
-    const slider = panel.slice(panel.indexOf("function RatingSlider"), panel.indexOf("function fieldStyle"));
+    const slider = src("components/RatingSlider.jsx");
     // The old `.toFixed(1)` forced a constant one decimal ("9.0") — dropped entirely, both in the
     // visible label and in the a11y valuetext. `shown` is used bare so JS's own number-to-string
     // conversion (which never pads) does the formatting.
@@ -762,8 +758,7 @@ describe("VisitPanel — rating slider (not a button row) and a date field that 
   });
 
   it("the rating stays optional — no value is committed until the slider is actually touched, and it can be cleared", () => {
-    const panel = src("components/VisitPanel.jsx");
-    const slider = panel.slice(panel.indexOf("function RatingSlider"), panel.indexOf("function fieldStyle"));
+    const slider = src("components/RatingSlider.jsx");
     // The rest position is a purely visual thumb placement, distinct from a committed value —
     // onChange(null) (Clear) is reachable, and the rest constant is never passed to onChange
     // directly from a mount-time effect (no useEffect in RatingSlider ITSELF — the panel's own
@@ -1456,8 +1451,8 @@ describe("quarter-point ratings — schema widened to numeric(4,2), CHECK loosen
     expect(sql).toMatch(/rating\s+numeric\(3,1\)\s+check/); // the original inline create, left alone
   });
 
-  it("entry is HALF-point steps again (2026-10-05 owner decision #15; the column still accepts the quarters saved in this period)", () => {
-    expect(src("lib/ratingScale.js")).toMatch(/export const RATING_STEP = 0\.5;/);
+  it("entry is QUARTER-point steps everywhere (2026-10-11 owner decision #16, superseding the 2026-10-05 half-step lock)", () => {
+    expect(src("lib/ratingScale.js")).toMatch(/export const RATING_STEP = 0\.25;/);
   });
 
   it("⛔ VisitList shows ratings at natural precision too — Number(v.rating)/Number(v.rating_ambiance), never the raw numeric(4,2) string (which would otherwise read '9.00' post-widen)", () => {
@@ -3223,82 +3218,45 @@ describe("FoodApp — saveDish never touches food_visits.rating or any visit fie
   });
 });
 
-describe("ScoreMeter — REDESIGN (NEW-1, 2026-09-28): QUARTER-point steps, minus/plus nudge buttons, a readable numeral, and the 'Not rated over a filled track' bug killed", () => {
-  it("min 1, max 10, step 0.25 — the redesign's scale change, ticks unchanged", () => {
+describe("ScoreMeter — now the shared RatingSlider (NEW-2, 2026-10-11): quarter steps, no minus/plus, one readout, one Clear", () => {
+  it("min 1, max 10, step 0.25, evenly spaced whole-number ticks 1-10", () => {
     expect(DISH_SCORE_MIN).toBe(1);
     expect(DISH_SCORE_MAX).toBe(10);
     expect(DISH_SCORE_STEP).toBe(0.25);
-    expect(DISH_SCORE_TICKS).toEqual([1, 3, 5, 7, 9, 10]);
+    expect(DISH_SCORE_TICKS).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   });
 
-  it("⛔ exactly ONE <input type=\"range\"> on EVERY device — no per-value tap grid anywhere (2026-10-05: ratings are sliders, never tap buttons)", () => {
+  it("⛔ no - / + nudge buttons, no tap grid, no range input of its own — it wraps RatingSlider", () => {
     const meter = src("components/ScoreMeter.jsx");
-    const body = meter.slice(meter.indexOf("export default function ScoreMeter"));
-    expect(body.match(/type="range"/g) || []).toHaveLength(1);
-    // The tick-label .map() renders plain <span> ticks, never a button grid.
-    const ticksMapStart = body.indexOf("DISH_SCORE_TICKS.map");
-    expect(body.slice(ticksMapStart, ticksMapStart + 300)).not.toMatch(/<button/);
-    expect(meter).not.toMatch(/ScoreTapGrid|score-tap/);
-    // Buttons: minus + plus + Clear = 3 — never one per score stop here.
-    expect((body.match(/<button/g) || []).length).toBe(3);
-    expect(meter).toMatch(/step=\{DISH_SCORE_STEP\}/);
+    expect(meter).toMatch(/<RatingSlider /);
+    expect(meter).not.toMatch(/<button|type="range"|nudgeScore|score-tap|dish-score-minus|dish-score-plus/);
   });
 
-  it("Clear sets the value back to null, matching the visit rating slider's own Clear affordance", () => {
-    const meter = src("components/ScoreMeter.jsx");
-    expect(meter).toMatch(/data-testid="dish-score-clear"/);
-    expect(meter).toMatch(/onClick=\{\(\) => onChange\(null\)\}/);
+  it("clampScore snaps to the nearest quarter point and clamps at both ends", () => {
+    expect(clampScore(8.3)).toBe(8.25);
+    expect(clampScore(11)).toBe(10);
+    expect(clampScore(0)).toBe(1);
+    expect(clampScore(5)).toBe(5);
   });
 
-  describe("clampScore / nudgeScore — pure functions, the exact math the minus/plus buttons and the slider both call", () => {
-    it("clampScore snaps to the nearest quarter point and clamps at both ends", () => {
-      expect(clampScore(8.3)).toBe(8.25);
-      expect(clampScore(11)).toBe(10);
-      expect(clampScore(0)).toBe(1);
-      expect(clampScore(5)).toBe(5);
-    });
-
-    it("⛔ PROVE IT — the minus/plus buttons move the value by EXACTLY 0.25 and clamp at 1 and 10", () => {
-      expect(nudgeScore(5, 0.25)).toBe(5.25);
-      expect(nudgeScore(5, -0.25)).toBe(4.75);
-      expect(nudgeScore(9.75, 0.25)).toBe(10); // clamp at the ceiling
-      expect(nudgeScore(10, 0.25)).toBe(10); // already at the ceiling — stays put, never overshoots
-      expect(nudgeScore(1.25, -0.25)).toBe(1); // clamp at the floor
-      expect(nudgeScore(1, -0.25)).toBe(1);
-    });
-
-    it("from an UNSET score, either nudge button ESTABLISHES a rating at the floor rather than jumping past it", () => {
-      expect(nudgeScore(null, 0.25)).toBe(DISH_SCORE_MIN);
-      expect(nudgeScore(null, -0.25)).toBe(DISH_SCORE_MIN);
-    });
-  });
-
-  describe("rendered output (react-dom/server — no DOM needed, real component code)", () => {
+  describe("rendered output (react-dom/server)", () => {
     const render = (value) => renderToStaticMarkup(createElement(ScoreMeter, { value, onChange: () => {} }));
 
-    it("⛔ THE BUG THIS KILLS — an UNSET score shows an em dash, a caption that says nothing is set, and the track in its NEUTRAL state, never the string 'Not rated' over a filled bar", () => {
+    it("an UNSET score reads 'Not rated' with a neutral (unfilled) track, and keeps the dish test ids", () => {
       const html = render(null);
-      expect(html).not.toMatch(/Not rated/);
+      expect(html).toContain("Not rated");
       expect(html).toContain('data-score-state="unset"');
-      expect(html).toContain(">—<"); // the em-dash numeral
-      expect(html).toContain("not set yet"); // the caption — never silent, never "quarter steps" while unset
-      expect(html).not.toContain("quarter steps");
-      // The thumb sits at the scale's own floor (nothing filled before it) and the track is the
-      // flat neutral colour, never the striped accent meter.
-      expect(html).toMatch(/<input[^>]*value="1"/);
-      expect(html).toContain("var(--border-default)"); // the neutral track fill
+      expect(html).toContain('data-testid="dish-score-slider"');
+      expect(html).toContain('data-testid="dish-score-meter"');
+      expect(html).not.toContain("dish-score-clear");
+      expect(html).toContain("--rs-color:var(--border-default)");
     });
 
-    it("a SET score shows a large numeral trimmed of trailing zeros, right-aligned beside '/ 10', and the 'quarter steps' caption", () => {
-      const wholeNumber = render(8);
-      expect(wholeNumber).toContain('data-score-state="set"');
-      expect(wholeNumber).toContain(">8<");
-      expect(wholeNumber).not.toContain(">8.00<");
-      expect(wholeNumber).toContain("quarter steps");
-      expect(wholeNumber).toContain("/ 10");
-
-      expect(render(8.5)).toContain(">8.5<");
-      expect(render(8.25)).toContain(">8.25<");
+    it("a SET score reads 'N / 10' at natural precision with a Clear link", () => {
+      expect(render(8)).toContain(">8 / 10<");
+      expect(render(8.5)).toContain(">8.5 / 10<");
+      expect(render(8.25)).toContain(">8.25 / 10<");
+      expect(render(8)).toContain("dish-score-clear");
     });
   });
 });
