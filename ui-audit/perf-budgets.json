@@ -315,7 +315,8 @@
         "jurisdiction",
         "appraisal",
         "localDb",
-        "countyPolygons"
+        "countyPolygons",
+        "countyKeys"
       ]
     },
     "notesRouteJsBytes": {
