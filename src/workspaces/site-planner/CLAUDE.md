@@ -320,7 +320,7 @@ deep internals are in `/docs/REFERENCE.md` (Site Model, map-layer system, Supaba
   The crop model is shared: (rect | poly, image px);
   the Site tab's "Crop…" (`components/OverlayCropDialog.jsx`, B1838704) reuses the shared
   `ImageCropTool`, clips via `cropClipShapeScreen` → an SVG `<clipPath>` (what the export clone
-  carries), and every write goes through `setOverlayCrop` (lock enforced at the write). `crop` is in
+  carries), and every write goes through `setOverlayCrop` (B2254629: Lock no longer gates crop — it only blocks direct map drags). The modal shell is the shared `CropModal` (portaled to `<body>`, B2254624). `crop` is in
   the history signature — without it a crop edit is silently not undoable.
   **`overlayOrder.js` `visibleReferenceRows(sheetOverlays, origin)` (B2217648) is what the Overlays panel and View ▾ LIST** — the map-captured snapshot (`fromMap`) on a located plan stays in the data (print fallback, calibration) but is not a row; a hand-dropped image and an origin-less snapshot always show. Any redesigned panel must read the list through it. Guards: repo-root `test/` **visibleReferenceRows** + ui-audit **verify-map-snapshot-row**.
   **`overlayOrder.js` (NEW-2) is the ONE draw-order model for placed references** — a two-BAND

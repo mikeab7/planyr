@@ -43,7 +43,7 @@ async function resolveRasterUrl(key) {
  * per overlay whose raster failed to load (permission, network, or a deleted object) — so the
  * caller can surface something legible instead of the map just silently showing nothing where
  * a plan should be (B972512-HARDENING item 4). */
-export function useSitePlanOverlayLayers(map, overlays, { pinTargetId, onPinClick, activeId, onSelect, onCommitPlacement, onRasterUnavailable } = {}) {
+export function useSitePlanOverlayLayers(map, overlays, { pinTargetId, onPinClick, activeId, onSelect, onCommitPlacement, onRasterUnavailable, calibrating } = {}) {
   const layersRef = useRef(new Map()); // overlay id -> layer handle
   const handlesRef = useRef(null);
   const cbRef = useRef({});
@@ -60,12 +60,11 @@ export function useSitePlanOverlayLayers(map, overlays, { pinTargetId, onPinClic
     if (!h) return;
     const layers = layersRef.current;
     const { overlays: ovs, activeId: aid } = stateRef.current;
-    // NEW-7 — `locked` used to gate only ARMING a click-to-select on the overlay's own image
-    // (below); an overlay locked WHILE already active kept its drag/scale/rotate handles fully
-    // live, because this lookup never re-checked the flag. Excluding a locked overlay here
-    // means the very next sync (the overlays-changed effect below already re-runs on any
-    // `locked` write) hides its handles even if nothing else about `activeId` changed.
-    const active = (ovs || []).find((o) => o.id === aid && !o.locked && o.visible !== false && overlayPlaced(o));
+    // NEW-6 (owner 2026-10-11, supersedes NEW-7's "locked excludes the handles") — Lock only blocks DIRECT
+    // drags on the map. A locked overlay is not click-selectable (see `setClickable` below), so if it is the
+    // active one it was armed on purpose from the Adjust panel's "Move / resize", and its handles show.
+    // Locking an already-armed overlay still disarms it (SitePlansSection.toggleLocked), so nothing dangles.
+    const active = (ovs || []).find((o) => o.id === aid && o.visible !== false && overlayPlaced(o));
     if (active) {
       h.show(active, active.imgW, active.imgH, {
         onLive: (placement) => {
@@ -116,7 +115,7 @@ export function useSitePlanOverlayLayers(map, overlays, { pinTargetId, onPinClic
       handle.setVisible(o.visible);
       if (pinTargetId === o.id) {
         handle.setClickable((latlng) => cbRef.current.onPinClick && cbRef.current.onPinClick(o, latlng));
-      } else if (!o.locked && !pinTargetId) {
+      } else if (!o.locked && !pinTargetId && !calibrating) { // NEW-7: while calibrating, every click belongs to the calibration
         handle.setClickable(() => cbRef.current.onSelect && cbRef.current.onSelect(o.id));
       } else {
         handle.setClickable(null);
@@ -135,7 +134,7 @@ export function useSitePlanOverlayLayers(map, overlays, { pinTargetId, onPinClic
 
     syncHandles();
     return undefined;
-  }, [map, overlays, activeId, pinTargetId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [map, overlays, activeId, pinTargetId, calibrating]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Full teardown when the map itself goes away (route switch).
   useEffect(() => () => { for (const handle of layersRef.current.values()) handle.destroy(); layersRef.current.clear(); }, [map]);

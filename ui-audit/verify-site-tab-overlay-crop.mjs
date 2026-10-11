@@ -11,7 +11,7 @@
  *   3. It is undoable (real Ctrl+Z) and redoable.
  *   4. Rotate: the clip stays WELDED to the sheet — pixel-checked at the rotated positions.
  *   5. Opacity and "Bring in front of the plan" keep the clip.
- *   6. LOCK: Crop…, Reset and the trim fields refuse; a forced click changes nothing.
+ *   6. LOCK does NOT block cropping: Crop…, Reset crop and the trim fields all still work on a locked overlay.
  *   7. EXPORT PARITY: the exported sheet (buildExportSvg, the PDF/PNG/print source) is rasterized
  *      standalone and its sheet-coloured area has the SAME triangle fill fraction as the screen.
  *   8. Rect mode + Reset crop returns the full sheet.
@@ -122,7 +122,7 @@ await page.waitForTimeout(600);
 const dlg = page.locator('[data-testid="overlay-crop-dialog"]');
 check("Crop… opens the crop tool dialog", (await dlg.count()) === 1);
 await dlg.locator("button", { hasText: "Polygon" }).click();
-{ const clr = dlg.locator("button", { hasText: "Clear polygon" }); if (await clr.isEnabled()) await clr.click(); } // an uncropped overlay opens on an empty trace (Clear is disabled — nothing to clear)
+check("an uncropped overlay opens Polygon on an EMPTY trace (no vertices placed yet)", (await dlg.locator("svg circle").count()) === 0); // (the old Clear polygon step is gone)
 await page.waitForTimeout(200);
 const box = await dlg.locator("img").first().boundingBox();
 const at = (fx, fy) => ({ x: box.x + fx * box.width, y: box.y + fy * box.height });
@@ -177,11 +177,11 @@ check("Ctrl+Shift+Z brings the polygon crop back", !!(sRedo && sRedo.crop && sRe
 /* ---- 5. Opacity + Bring in front of the plan -------------------------------------------------- */
 {
   const pct = page.locator('[data-testid="overlay-opacity-pct"]');
-  await pct.fill("50"); await pct.blur();
+  await pct.click(); await pct.fill("50"); await pct.blur(); // click first: the percent is plain text until focused (restyled panel)
   await page.waitForTimeout(300);
   const c = await clipInfo("ovA");
   check("Opacity 50% applies AND the clip is kept", c.opacity === "0.5" && c.ref === "url(#ov-crop-ovA)", JSON.stringify(c));
-  await pct.fill("100"); await pct.blur();
+  await pct.click(); await pct.fill("100"); await pct.blur();
   await page.locator('[data-testid="reference-above-ovA"]').click() // NEW-1: Draws → In front;
   await page.waitForTimeout(400);
   const c2 = await clipInfo("ovA");
@@ -192,21 +192,47 @@ check("Ctrl+Shift+Z brings the polygon crop back", !!(sRedo && sRedo.crop && sRe
   await page.waitForTimeout(300);
 }
 
-/* ---- 6. Lock refuses ------------------------------------------------------------------------- */
+/* ---- 6. Lock does NOT block cropping (owner 2026-10-11) ---------------------------------------
+ * Lock only stops moving/resizing by direct drag. Crop…, Reset crop and the trim fields keep working on a
+ * locked overlay, and the crop is still written to storage. */
 {
-  const before = JSON.stringify((await stored("ovA")).crop);
+  const before = (await stored("ovA")).crop;
+  check("[precondition] a polygon crop is stored before locking", !!(before && before.kind === "poly"), JSON.stringify(before));
   await page.locator('[data-testid="reference-row-ovA"] [data-testid="reference-lock-ovA"]').click();
   await waitStored("ovA", (s) => s && s.locked);
   await page.waitForTimeout(300);
-  check("locked: Crop… is disabled", await page.locator('[data-testid="overlay-crop-open"]').isDisabled());
-  check("locked: Reset crop is disabled", await page.locator('[data-testid="overlay-crop-reset"]').isDisabled());
-  await page.locator('[data-testid="overlay-crop-reset"]').click({ force: true }).catch(() => {});
-  await page.locator('[data-testid="overlay-crop-open"]').click({ force: true }).catch(() => {});
-  await page.waitForTimeout(400);
-  check("locked: a forced click on Reset / Crop… changes nothing and opens nothing",
-    JSON.stringify((await stored("ovA")).crop) === before && (await page.locator('[data-testid="overlay-crop-dialog"]').count()) === 0);
+  check("locked: Crop… stays ENABLED", await page.locator('[data-testid="overlay-crop-open"]').isEnabled());
+  check("locked: Reset crop stays ENABLED", await page.locator('[data-testid="overlay-crop-reset"]').isEnabled());
+  // Reset crop on the locked overlay clears the polygon crop
+  await page.locator('[data-testid="overlay-crop-reset"]').click();
+  const sLR = await waitStored("ovA", (s) => s && !s.crop);
+  check("locked: Reset crop clears the crop on the locked overlay", !!(sLR && sLR.locked && !sLR.crop) && !(await clipInfo("ovA")).hasClip, JSON.stringify(sLR));
+  // Crop… opens, and a trim field edit is written to the locked overlay
+  await page.locator('[data-testid="overlay-crop-open"]').click(); await page.waitForTimeout(500);
+  const ld = page.locator('[data-testid="overlay-crop-dialog"]');
+  check("locked: Crop… opens the crop tool", (await ld.count()) === 1);
+  const lf = ld.locator('input[aria-label="Crop Left edge"]');
+  check("locked: the trim fields are enabled", await lf.isEnabled());
+  await lf.fill("150");
+  const sL = await waitStored("ovA", (s) => s && s.crop && s.crop.kind === "rect" && s.crop.x === 150);
+  check("locked: a trim field edit writes a rect crop to the locked overlay", !!(sL && sL.locked && sL.crop && sL.crop.kind === "rect" && sL.crop.x === 150), JSON.stringify(sL));
+  await ld.locator("button", { hasText: "Done" }).click(); await page.waitForTimeout(400);
+  check("locked: Done closes the dialog and the crop stays applied (rect clipPath)", (await ld.count()) === 0 && (await clipInfo("ovA")).shape === "rect");
+  // …and lock itself still holds for placement: the lock toggle state is untouched by cropping
+  check("locked: the overlay is still locked after cropping (lock only guards move/resize)", !!(await stored("ovA")).locked);
+  // restore the polygon crop (the export-parity leg below needs it) and unlock
   await page.locator('[data-testid="reference-row-ovA"] [data-testid="reference-lock-ovA"]').click();
   await waitStored("ovA", (s) => s && !s.locked);
+  // redraw the triangle through the tool (rect-cropped overlay -> Polygon starts an empty open draw)
+  await page.locator('[data-testid="overlay-crop-open"]').click(); await page.waitForTimeout(500);
+  const rd = page.locator('[data-testid="overlay-crop-dialog"]');
+  await rd.locator("button", { hasText: "Polygon" }).click(); await page.waitForTimeout(200);
+  const rb = await rd.locator("img").first().boundingBox();
+  for (const [fx, fy] of [[0.1, 0.1], [0.9, 0.1], [0.5, 0.9]]) { await page.mouse.click(rb.x + fx * rb.width, rb.y + fy * rb.height); await page.waitForTimeout(300); }
+  await page.mouse.click(rb.x + 0.1 * rb.width, rb.y + 0.1 * rb.height); await page.waitForTimeout(300);
+  await rd.locator("button", { hasText: "Done" }).click(); await page.waitForTimeout(400);
+  const sFin = await waitStored("ovA", (s) => s && s.crop && s.crop.kind === "poly");
+  check("[setup] the triangle polygon crop is back for the export-parity leg", !!(sFin && sFin.crop && sFin.crop.kind === "poly" && sFin.crop.pts.length === 3), JSON.stringify(sFin && sFin.crop));
 }
 
 /* ---- 7. Export parity ------------------------------------------------------------------------ */
