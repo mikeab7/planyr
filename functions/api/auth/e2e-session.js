@@ -39,6 +39,48 @@ export async function safeEqual(a, b) {
   return diff === 0;
 }
 
+/* Upstream calls (B2154049). A bare 502 hid WHY a sign-in failed, and one transient blip failed the whole
+ * sign-in. So: retry network errors / timeouts / 429 / 5xx with a short backoff (3 attempts), and on final
+ * failure report the stage, the upstream status and a sanitised upstream error message — never a token,
+ * key, or the raw body. */
+export const UPSTREAM_ATTEMPTS = 3;
+const retryable = (status) => status === 429 || status >= 500;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+export async function callUpstream(doFetch, url, init, deps = {}) {
+  const wait = deps.sleep || sleep;
+  let last = { ok: false, status: 0, body: null, attempts: 0, netError: null };
+  for (let attempt = 1; attempt <= UPSTREAM_ATTEMPTS; attempt++) {
+    try {
+      const res = await doFetch(url, { ...init, signal: AbortSignal.timeout(10000) });
+      const body = await res.json().catch(() => null);
+      last = { ok: res.ok, status: res.status, body, attempts: attempt, netError: null };
+      if (res.ok || !retryable(res.status)) return last;
+    } catch (e) {
+      last = { ok: false, status: 0, body: null, attempts: attempt, netError: (e && e.name) || "Error" };
+    }
+    if (attempt < UPSTREAM_ATTEMPTS) await wait(400 * 3 ** (attempt - 1));
+  }
+  return last;
+}
+
+/* Safe, bounded description of an upstream error body: only the well-known message fields, truncated,
+ * with anything token/key-shaped (JWT or long opaque run) masked. */
+export function safeUpstreamMessage(body) {
+  if (!body || typeof body !== "object") return null;
+  const raw = body.msg || body.message || body.error_description || body.error || body.error_code;
+  if (typeof raw !== "string") return null;
+  return raw.replace(/eyJ[\w-]+\.[\w-]+\.[\w-]*/g, "[jwt]").replace(/[A-Za-z0-9_-]{32,}/g, "[redacted]").slice(0, 200);
+}
+
+function upstreamFailure(stage, r) {
+  return reply(502, {
+    error: stage === "generate_link" ? "could not issue link" : "could not exchange link",
+    stage, upstream_status: r.status || null, upstream_error: safeUpstreamMessage(r.body),
+    network_error: r.netError || undefined, attempts: r.attempts,
+  });
+}
+
 const log = (ok, reason, request) => {
   // No secrets, no body, no key material — only the outcome and where it came from.
   try { console.log(JSON.stringify({ evt: "e2e-session", ok, reason, ip: request.headers.get("cf-connecting-ip") || null, ts: new Date().toISOString() })); } catch (_) { /* logging must never break the route */ }
@@ -60,27 +102,25 @@ export async function handleE2eSession(request, env, deps = {}) {
 
   try {
     // 1) Admin generate_link for the FIXED email. Never sends an email. The body is a constant.
-    const gen = await doFetch(`${base}/auth/v1/admin/generate_link`, {
+    const gen = await callUpstream(doFetch, `${base}/auth/v1/admin/generate_link`, {
       method: "POST",
       headers: { apikey: service, authorization: `Bearer ${service}`, "content-type": "application/json" },
       body: JSON.stringify({ type: "magiclink", email: E2E_EMAIL }),
-      signal: AbortSignal.timeout(10000),
-    });
-    const g = await gen.json().catch(() => null);
+    }, deps);
+    const g = gen.body;
     const hashed = g && (g.hashed_token || (g.properties && g.properties.hashed_token));
-    if (!gen.ok || !hashed) { log(false, `generate_link-${gen.status}`, request); return reply(502, { error: "could not issue link" }); }
+    if (!gen.ok || !hashed) { log(false, `generate_link-${gen.status}`, request); return upstreamFailure("generate_link", gen); }
     // PIN CHECK 1 — before anything is exchanged.
     if (g.id !== E2E_USER_ID || String(g.email || "").toLowerCase() !== E2E_EMAIL) { log(false, "pin-mismatch-link", request); return reply(403, { error: "account pin mismatch" }); }
 
     // 2) Exchange the token hash for a session. /verify is not captcha-gated (measured 2026-10-04).
-    const ver = await doFetch(`${base}/auth/v1/verify`, {
+    const ver = await callUpstream(doFetch, `${base}/auth/v1/verify`, {
       method: "POST",
       headers: { apikey: anon, "content-type": "application/json" },
       body: JSON.stringify({ type: "magiclink", token_hash: hashed }),
-      signal: AbortSignal.timeout(10000),
-    });
-    const s = await ver.json().catch(() => null);
-    if (!ver.ok || !s || !s.access_token || !s.refresh_token) { log(false, `verify-${ver.status}`, request); return reply(502, { error: "could not exchange link" }); }
+    }, deps);
+    const s = ver.body;
+    if (!ver.ok || !s || !s.access_token || !s.refresh_token) { log(false, `verify-${ver.status}`, request); return upstreamFailure("verify", ver); }
     // PIN CHECK 2 — the session we are about to hand out must be the test account's.
     if (!s.user || s.user.id !== E2E_USER_ID || String(s.user.email || "").toLowerCase() !== E2E_EMAIL) { log(false, "pin-mismatch-session", request); return reply(403, { error: "account pin mismatch" }); }
 
@@ -91,7 +131,7 @@ export async function handleE2eSession(request, env, deps = {}) {
     });
   } catch (_) {
     log(false, "exception", request);
-    return reply(502, { error: "upstream failure" });
+    return reply(502, { error: "upstream failure", stage: "worker" });
   }
 }
 
