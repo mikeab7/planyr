@@ -8,7 +8,7 @@ import { useProjectName, usePlanName, renameProjectChecked, renamePlanChecked } 
 import { writeIsRedundant, mayWriteForAccount } from "./lib/saveDedupe.js";
 import { readCanvasGuess, writeCanvasGuess, geometryOf } from "./lib/canvasGuess.js";
 import { mayHealMissingOverlay, overlayLoadReason } from "./lib/overlayHeal.js";
-import { loadSite, saveSite, siteExistsLocally, sitesWriteStamp, sitesWriteStillCurrent, readBackSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, initHistoryStore, backupNow, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
+import { loadSite, saveSite, siteExistsLocally, sitesWriteStamp, sitesWriteStillCurrent, readBackSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, initHistoryStore, backupNow, backupNowVerified, historyIdbOnly, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
 import { relTime } from "../../shared/projects/projectModel.js";
 import { collectAssetRefs, releasePlanForOverlay } from "./lib/sharedAssetRefs.js";
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
@@ -16941,7 +16941,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     }
   };
   const openActivityTab = () => { setActivityTab("activity"); if (activityRows === null && !activityLoading) loadPlanActivity(); };
-  const restoreVersion = (at) => {
+  const restoreVersion = async (at) => {
     // B467/NEW-4 — Restore is a WRITE. A read-only tab (another tab is the active editor) must not be
     // able to overwrite the canvas; block it loudly with the way out.
     if (readOnly) { flashWarn("⚠ This tab is read-only — the plan is open in another tab. Take over editing here first, then restore.", 9000); return; }
@@ -16952,7 +16952,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // force a backup snapshot and confirm it actually persisted; if it couldn't (device storage full),
     // CANCEL rather than overwrite current work with no real undo.
     flushSite();
-    if (!backupNow(siteId)) {
+    if (!(historyIdbOnly() ? await backupNowVerified(siteId) : backupNow(siteId))) {   // B2200385 — on a device whose ring lives only in IndexedDB the backup is awaited, committed and read back before it is claimed
       reportClientEvent("restore-backup-failed", "pre-restore backup could not be written — restore blocked", { id: siteId, at });
       flashWarn("Couldn't back up your current version, so the restore was cancelled — your current work is safe. (Your device's storage may be full.)", 11000);
       return;

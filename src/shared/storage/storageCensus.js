@@ -47,7 +47,9 @@ export const LOCAL_CLASSES = [
   {
     id: "history", label: "Version history", rebuild: REBUILD.IDB_MIRROR, reclaimable: false,
     // Mirrored into IndexedDB by storage.js — but that write is FIRE-AND-FORGET, so on any given
-    // device the localStorage copy may be the only one. Never reclaimable. (B474 review #14.)
+    // device the localStorage copy may be the only one. Never RECLAIMABLE (this class is never bulk-dropped). The one sanctioned
+    // removal is storage.relocateHistoryToIdb (B2200385): it drops the localStorage copy only after the IndexedDB copy was
+    // written, read back and compared, and records `planarfit:sites:history:idbonly`.
     match: (k) => has(k, "planarfit:sites:history"),
   },
   {

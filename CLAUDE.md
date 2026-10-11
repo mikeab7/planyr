@@ -657,7 +657,15 @@ were split out of this file.
 
 19. **(2026-10-08) Unnamed lots stay unnamed.** Michael: "Do not derive a name from street address, owner or legal description." A parcel with no name the owner typed shows a grey "Unnamed" in the list and on its page (source line unchanged) and its name field stays empty. Never re-add a derived name (`parcelFallbackName`, `addr`) to `parcelDisplayInfo` or the Parcels UI. Combine's "Tract A" and split's "<name> · A" (entry 18) still count as named. (B2194745.)
 
-20. **(2026-10-11, decided 2026-10-05) A project's OVERLAYS and COMPS follow the project's sharing; REVIEWS do not (still undecided).**
+20. **(2026-10-11) The Parcels list is LAYOUT C and stays calm.** Michael chose it from a mockup, after saying the list "keeps
+    showing up like shit when it gets to the real thing": grouped by source (County lots · Combined · Drawn · Other), each
+    group header carrying its ACTIVE acres; ONE summary line at body size ("174.28 AC in site · 10 of 11 active" — never a
+    display-size figure, "this is a professional software"); names and source lines wrap and are NEVER ellipsised; acres in one
+    fixed column with a shared right edge; no column-heading row; the padlock exists only while locked. A change to this list
+    is judged on real-shaped data at every panel width in both themes — `ui-audit/verify-parcel-list-layout.mjs` (a required
+    CI gate) — not on tidy fixtures. (B2243424.)
+
+21. **(2026-10-11, decided 2026-10-05) A project's OVERLAYS and COMPS follow the project's sharing; REVIEWS do not (still undecided).**
     Michael, 2026-10-11: "if I share a site with someone, they should have access to all the overlays that I have as a default."
     And 2026-10-05: "if I have a project, like an individual site, and there's like comps attached to it or overlays, those should
     all be visible." Anyone who can open a shared, live plan can see and load every overlay on it (Site tab `sheetOverlays` files
