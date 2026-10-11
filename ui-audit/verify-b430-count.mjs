@@ -69,7 +69,7 @@ async function run() {
   else { fail("Measure button not found"); await browser.close(); return summarize(); }
 
   // 4. Open Measure dropdown via the ▾ arrow button next to Measure
-  const chevron = page.locator('button[aria-label="Measure modes"]');
+  const chevron = page.locator('button[aria-label^="Measure mode:"]');
   if (await chevron.count()) {
     await chevron.click();
     await page.waitForTimeout(300);

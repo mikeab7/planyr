@@ -349,6 +349,25 @@ export const MenuTrigger = forwardRef(function MenuTrigger({
   );
 });
 
+/* Switch — an on/off toggle that applies the moment it is flipped (a setting, not a pending choice).
+ * `role="switch"` + `aria-checked`; the caller labels it (`aria-label` / `aria-labelledby`). Compact
+ * (28×16) so it sits at the right of a menu row; flat track in the accent when ON, the field-border
+ * grey when OFF; the knob is `--on-accent` on, `--text-secondary` off (never a faded grey). */
+export const Switch = forwardRef(function Switch({ checked = false, accent = "var(--accent)", onAccent = "var(--on-accent)", disabled = false, decorative = false, style, ...rest }, ref) {
+  const box = {
+    position: "relative", display: "inline-block", width: 28, height: 16, flex: "none", padding: 0, borderRadius: CONTROL_RADIUS.pill, boxSizing: "border-box",
+    border: `1px solid ${checked ? accent : "var(--border-strong, var(--border-default))"}`, background: checked ? accent : "var(--hover-ghost)",
+    ...(disabled ? { opacity: 0.5 } : {}),
+  };
+  const knob = <span aria-hidden="true" style={{ position: "absolute", top: 2, left: checked ? 14 : 2, width: 10, height: 10, borderRadius: CONTROL_RADIUS.pill, background: checked ? onAccent : "var(--text-secondary)", transition: "left .12s" }} />;
+  // `decorative`: the switch is only the PICTURE of a state whose real control is the enclosing row
+  // (a `role="switch"` button) — a button inside a button is invalid, so it renders a plain span.
+  if (decorative) return <span ref={ref} aria-hidden="true" style={{ ...box, ...style }} {...rest}>{knob}</span>;
+  return (
+    <button ref={ref} type="button" role="switch" aria-checked={!!checked} disabled={disabled} style={{ ...box, cursor: disabled ? "default" : "pointer", ...style }} {...rest}>{knob}</button>
+  );
+});
+
 /* Menu primitives — a token-only flyout panel + item (the Site Planner menuPanel/menuItem). */
 export const menuPanelStyle = { background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: CONTROL_RADIUS.panel, boxShadow: "0 16px 44px rgba(0,0,0,0.22), 0 3px 10px rgba(0,0,0,0.1)", padding: 6 };
 // NEW-2 (B849585) — `disabled` gets a real, unmistakable treatment (opacity, matching Button's/

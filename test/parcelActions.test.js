@@ -31,11 +31,12 @@ const GESTURE_OR_RIGHT_CLICK_ONLY = ["boundary", "chip", "chipReset", "deleteSel
  */
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
 const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
+const menuSrc = read("../src/workspaces/site-planner/components/RailMenus.jsx"); // NEW-1: the menu's render half
 
 /* A plan with plenty of everything, so nothing is gated off by accident. */
 const rich = {
   parcelCount: 3, activeCount: 3, hasOrigin: true,
-  selected: { locked: false, active: true, chipHidden: false, labelOffset: { x: 20, y: 5 } },
+  selected: { locked: false, active: true, chipHidden: false, labelOffset: { x: 20, y: 5 }, name: "Parcel 1", acres: 12.345, color: "#2563eb" },
   tool: "select", parcelMode: "add", mergePick: false, boundaryEdit: false,
 };
 
@@ -57,8 +58,11 @@ describe("the inventory is the contract", () => {
   });
 
   it("carries the actions the report named as MISSING from the rail", () => {
-    // These four are the report, verbatim: Remove, Combine/Merge, setbacks, boundary editing.
-    for (const id of ["removeMode", "combine", "setbacks", "boundary"]) {
+    // The report, verbatim: Remove, Combine/Merge, setbacks, boundary editing. "Remove parcels —
+    // click to delete" was dropped from the menu by the owner (2026-10-11): Delete parcel on a
+    // selected parcel is the menu's way to remove one, and the Parcel tool's own banner keeps the
+    // click-to-delete mode.
+    for (const id of ["deleteSelected", "combine", "setbacks", "boundary"]) {
       expect(parcelAction(id), `${id} is not in the inventory`).toBeTruthy();
     }
   });
@@ -81,17 +85,35 @@ describe("the inventory is the contract", () => {
 });
 
 describe("the menu reads in the order the work happens", () => {
-  it("groups come out create → modify → remove", () => {
-    expect(parcelMenuModel(rich).map((g) => g.id)).toEqual(["create", "modify", "remove"]);
+  it("groups come out add land → edit → this parcel → delete", () => {
+    expect(parcelMenuModel(rich).map((g) => g.id)).toEqual(["create", "modify", "this", "remove"]);
+    expect(parcelMenuModel(rich).map((g) => g.label)).toEqual(["Add land", "Edit", "This parcel", ""]);
   });
 
-  it("create holds Draw and Deed; modify holds Split, Combine and boundary editing; remove holds the deletes", () => {
-    const g = Object.fromEntries(parcelMenuModel(rich).map((x) => [x.id, x.rows.map((r) => r.id)]));
-    expect(g.create).toEqual(expect.arrayContaining(["draw", "deed"]));
-    expect(g.modify).toEqual(expect.arrayContaining(["split", "combine", "boundary"]));
-    expect(g.remove).toEqual(expect.arrayContaining(["removeMode", "deleteSelected"]));
-    // and nothing has leaked across the create/remove line
-    expect(g.create).not.toEqual(expect.arrayContaining(["removeMode", "deleteSelected"]));
+  it("Add land is Draw · Pick county lots · From a deed · Find by address, in that order, with the owner's hints", () => {
+    const g = parcelMenuModel(rich).find((x) => x.id === "create");
+    expect(g.rows.map((r) => [r.id, r.label, r.hint])).toEqual([
+      ["draw", "Draw a parcel", "Click its corners on the map"],
+      ["identify", "Pick county lots", "Click lots to add them"],
+      ["deed", "From a deed", "Type the metes and bounds calls"],
+      ["address", "Find by address", null],
+    ]);
+  });
+
+  it("Edit holds exactly Split, Combine, Edit corners; Delete parcel stands alone, last, with no heading", () => {
+    const g = Object.fromEntries(parcelMenuModel(rich).map((x) => [x.id, x]));
+    expect(g.modify.rows.map((r) => r.label)).toEqual(["Split", "Combine", "Edit corners"]);
+    expect(g.remove.rows.map((r) => r.id)).toEqual(["deleteSelected"]);
+    expect(g.remove.label).toBe("");
+    expect(g.remove.rows[0].label).toBe("Delete parcel");
+    expect(g.remove.rows[0].detail).toBe("Del");
+    expect(PARCEL_ACTIONS.find((a) => a.id === "removeMode")).toBeUndefined(); // owner decision 2026-10-11
+  });
+
+  it("every row has an icon (16px stroke set) except the switches/Land link, which the header+switch carry", () => {
+    for (const r of parcelMenuModel(rich).flatMap((g) => g.rows).filter((x) => x.kind !== "switch" && x.id !== "setbacks" && x.id !== "chipReset")) {
+      expect(r.icon, `${r.id} has no icon`).toBeTruthy();
+    }
   });
 
   it("drops an empty group rather than rendering a bare header", () => {
@@ -105,7 +127,7 @@ describe("gating: a row a plan can't use is VISIBLE and disabled, with the reaso
 
   it("an empty plan still SHOWS Split / Combine / boundary / Remove — disabled, never hidden", () => {
     const empty = { ...rich, parcelCount: 0, activeCount: 0, selected: null };
-    for (const id of ["split", "combine", "boundary", "removeMode", "setbacks"]) {
+    for (const id of ["split", "combine", "boundary", "deleteSelected"]) {
       const r = rowIn(empty, id);
       expect(r, `${id} vanished on an empty plan`).toBeTruthy();
       expect(r.enabled).toBe(false);
@@ -137,14 +159,28 @@ describe("gating: a row a plan can't use is VISIBLE and disabled, with the reaso
     expect(rowIn(bare, "deed").enabled).toBe(true);
   });
 
-  it("the selection-scoped rows disable (not vanish) with nothing selected", () => {
+  it("THIS PARCEL is absent with nothing selected; Delete parcel stays, disabled with its reason", () => {
     const none = { ...rich, selected: null };
-    for (const id of ["lock", "active", "chip", "deleteSelected"]) {
-      const r = rowIn(none, id);
-      expect(r, `${id} vanished`).toBeTruthy();
-      expect(r.enabled).toBe(false);
-      expect(r.disabledReason).toMatch(/select a parcel/i);
-    }
+    const groups = parcelMenuModel(none);
+    expect(groups.map((g) => g.id)).not.toContain("this");
+    for (const id of ["lock", "active", "chip", "chipReset", "setbacks"]) expect(rowIn(none, id), `${id} should be absent`).toBeUndefined();
+    const del = rowIn(none, "deleteSelected");
+    expect(del, "Delete parcel vanished").toBeTruthy();
+    expect(del.enabled).toBe(false);
+    expect(del.disabledReason).toMatch(/select a parcel/i);
+  });
+
+  it("a plan's only lot still lets Delete reach it unselected (canDelete), without opening THIS PARCEL", () => {
+    const one = { ...rich, selected: null, parcelCount: 1, canDelete: true };
+    expect(rowIn(one, "deleteSelected").enabled).toBe(true);
+    expect(parcelMenuModel(one).map((g) => g.id)).not.toContain("this");
+  });
+
+  it("THIS PARCEL carries the selected parcel's colour swatch, name and acreage", () => {
+    const g = parcelMenuModel(rich).find((x) => x.id === "this");
+    expect(g.header).toEqual({ name: "Parcel 1", acres: 12.345, color: "#2563eb" });
+    expect(g.rows.map((r) => r.id)).toEqual(["lock", "active", "chip", "chipReset", "setbacks"]);
+    expect(g.rows.find((r) => r.id === "setbacks").detail).toBe("Land ›");
   });
 
   it("Reset label position is the ONE row that hides — it means nothing until the label was dragged", () => {
@@ -154,6 +190,7 @@ describe("gating: a row a plan can't use is VISIBLE and disabled, with the reaso
 
   it("the delete row reads as dangerous", () => {
     expect(rowIn(rich, "deleteSelected").danger).toBe(true);
+    expect(rowIn(rich, "deleteSelected").label).toBe("Delete parcel");
     expect(rowIn(rich, "draw").danger).toBe(false);
   });
 });
@@ -164,8 +201,8 @@ describe("a row reads as the mode you are IN", () => {
   it("Draw mode lights Draw, not Remove", () => {
     expect(active({ ...rich, tool: "parcel", parcelMode: "add" })).toEqual(["draw"]);
   });
-  it("Remove mode lights Remove, not Draw", () => {
-    expect(active({ ...rich, tool: "parcel", parcelMode: "remove" })).toEqual(["removeMode"]);
+  it("the Parcel tool's click-to-delete sub-mode lights nothing — it has no menu row any more", () => {
+    expect(active({ ...rich, tool: "parcel", parcelMode: "remove" })).toEqual([]);
   });
   it("the cut tool lights Split; merge pick lights Combine; boundary edit lights Edit boundary", () => {
     expect(active({ ...rich, tool: "split" })).toEqual(["split"]);
@@ -177,21 +214,30 @@ describe("a row reads as the mode you are IN", () => {
   });
 });
 
-describe("toggling rows say what the click will DO", () => {
-  const label = (state, id) => parcelMenuModel(state).flatMap((g) => g.rows).find((r) => r.id === id).label;
+describe("the three SWITCHES carry one fixed label and their state in the switch", () => {
+  const row = (state, id) => parcelMenuModel(state).flatMap((g) => g.rows).find((r) => r.id === id);
   const withSel = (patch) => ({ ...rich, selected: { ...rich.selected, ...patch } });
 
-  it("Lock ↔ Unlock", () => {
-    expect(label(withSel({ locked: false }), "lock")).toMatch(/^Lock/);
-    expect(label(withSel({ locked: true }), "lock")).toMatch(/^Unlock/);
+  it("Lock boundary: ON = locked", () => {
+    expect(row(withSel({ locked: false }), "lock")).toMatchObject({ label: "Lock boundary", kind: "switch", checked: false });
+    expect(row(withSel({ locked: true }), "lock")).toMatchObject({ label: "Lock boundary", checked: true });
   });
-  it("Hide ↔ Show acreage label", () => {
-    expect(label(withSel({ chipHidden: false }), "chip")).toMatch(/^Hide/);
-    expect(label(withSel({ chipHidden: true }), "chip")).toMatch(/^Show/);
+  it("Count in yield totals: ON = included — today's 'Exclude from yield totals' INVERTED, same stored flag", () => {
+    expect(row(withSel({ active: true }), "active")).toMatchObject({ label: "Count in yield totals", kind: "switch", checked: true });
+    expect(row(withSel({ active: undefined }), "active").checked).toBe(true); // missing = active
+    expect(row(withSel({ active: false }), "active").checked).toBe(false);
   });
-  it("include ↔ exclude from the yield totals", () => {
-    expect(label(withSel({ active: true }), "active")).toMatch(/exclude/i);
-    expect(label(withSel({ active: false }), "active")).toMatch(/count/i);
+  it("Show acreage label: ON = visible — the inverse of chipHidden", () => {
+    expect(row(withSel({ chipHidden: false }), "chip")).toMatchObject({ label: "Show acreage label", kind: "switch", checked: true });
+    expect(row(withSel({ chipHidden: true }), "chip").checked).toBe(false);
+  });
+  it("toggling a switch leaves the menu OPEN (its handler never calls setToolMenu(false))", () => {
+    const run = (src.match(/const run = \{[\s\S]*?\n\s*\};/) || [""])[0];
+    for (const id of ["lock", "active", "chip"]) {
+      const line = (run.match(new RegExp(`\\b${id}:[^\\n]*`)) || [""])[0];
+      expect(line, `${id} handler missing`).toBeTruthy();
+      expect(line, `${id} must not close the menu`).not.toMatch(/setToolMenu\(false\)/);
+    }
   });
 });
 
@@ -231,7 +277,8 @@ describe("wiring: the render site reaches every row (a model nothing calls is wo
 
   it("SitePlanner builds the flyout from parcelMenuModel — not from a hand-written list", () => {
     expect(src).toMatch(/parcelMenuModel\(\{/);
-    expect(src).toMatch(/data-parcel-action=\{r\.id\}/);
+    expect(menuSrc).toMatch(/"data-parcel-action": r\.id/);
+    expect(src).toMatch(/<ParcelToolsMenu groups=\{groups\}/);
   });
 
   it("every inventory id has a handler in the render site's `run` map", () => {
@@ -243,7 +290,9 @@ describe("wiring: the render site reaches every row (a model nothing calls is wo
 
   it("the handlers arm the EXISTING paths rather than reimplementing them", () => {
     expect(menu).toMatch(/combine:[^\n]*startMergePick\(\)/);
-    expect(menu).toMatch(/removeMode:[^\n]*startRemoveParcels\(\)/);
+    // Click-to-delete mode is no longer a menu row, but it must stay reachable from the Parcel tool's banner.
+    expect(src).toMatch(/onClick=\{\(\) => \{ setDraftPoly\(null\); setParcelMode\("remove"\); \}\}/);
+    expect(src).toMatch(/const startRemoveParcels = /);
     expect(menu).toMatch(/deleteSelected:[^\n]*removeParcelById/);
     expect(menu).toMatch(/boundary:[^\n]*startBoundaryEdit\(\)/);
     expect(menu).toMatch(/chip:[^\n]*setParcelChipHidden/);
@@ -258,12 +307,12 @@ describe("wiring: the render site reaches every row (a model nothing calls is wo
   });
 
   it("a disabled row has no click handler at all (it explains itself instead)", () => {
-    expect(src).toMatch(/onClick=\{r\.enabled \? run\[r\.id\] : undefined\}/);
-    expect(src).toMatch(/title=\{r\.enabled \? undefined : r\.disabledReason\}/);
+    expect(menuSrc).toMatch(/onClick=\{r\.enabled \? run\[r\.id\] : undefined\}/);
+    expect(menuSrc).toMatch(/title: r\.enabled \? undefined : r\.disabledReason/);
   });
 
   it("the Deed row keeps the testid two ui-audit harnesses click it by", () => {
-    expect(src).toMatch(/r\.id === "deed" \? "boundary-menu-mb"/);
+    expect(menuSrc).toMatch(/r\.id === "deed" \? "boundary-menu-mb"/);
   });
 });
 

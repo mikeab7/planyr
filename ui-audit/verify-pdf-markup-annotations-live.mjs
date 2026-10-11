@@ -48,7 +48,7 @@ await page.keyboard.press("Shift+P");
 for (const [fx, fy] of [[0.30, 0.30], [0.46, 0.30], [0.46, 0.46]]) { await page.mouse.click(...P(fx, fy)); await page.waitForTimeout(100); }
 await page.mouse.dblclick(...P(0.30, 0.46)); await page.waitForTimeout(600);
 await page.getByRole("button", { name: /^Select V$/ }).click();
-await page.getByRole("button", { name: "Measure modes" }).click();
+await page.getByRole("button", { name: /^Measure mode:/ }).click();
 await page.getByRole("button", { name: "Length", exact: true }).click();
 await page.mouse.click(...P(0.30, 0.62)); await page.mouse.click(...P(0.46, 0.62)); await page.waitForTimeout(600);
 await page.getByRole("button", { name: /^Select V$/ }).click();

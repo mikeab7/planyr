@@ -33,11 +33,14 @@ export const PARCEL_SURFACES = {
   panel: { id: "panel", name: "Land", owns: "attributes" },
 };
 
-/* Group order IS the order the work happens: create → modify → remove. */
+/* Group order IS the order the work happens: add → edit → this parcel's switches → delete.
+ * (NEW-1, owner-approved "A · Sorted list", 2026-10-11.) `this` only exists while a parcel is
+ * selected; `delete` has no heading — it sits after a divider at the bottom. */
 export const PARCEL_GROUPS = [
   { id: "create", label: "Add land" },
-  { id: "modify", label: "Change a parcel" },
-  { id: "remove", label: "Remove" },
+  { id: "modify", label: "Edit" },
+  { id: "this", label: "This parcel" },
+  { id: "remove", label: "" },
 ];
 
 /* ---------------------------------------------------------------------------------------------
@@ -45,8 +48,11 @@ export const PARCEL_GROUPS = [
  *
  *   id        stable key; the render site maps it to a handler
  *   group     which section of the menu it belongs to
- *   label     menu wording; `altLabel` + `altWhen` when the row toggles (see `rowLabel`)
- *   detail    the "in Land →" / shortcut hint shown right-aligned, or null
+ *   label     menu wording
+ *   hint      the one-line secondary text under the label, or absent
+ *   icon      key into the menu's 16px stroke icon set (components/ParcelToolsMenu.jsx)
+ *   detail    the right-aligned "Land ›" / "Del" hint, or null
+ *   kind      "switch" → the row is an on/off setting; `on(p)` is its state for the selected parcel
  *
  * WHERE ELSE each one is reachable — the rule the owner set is that a gesture or a right-click may
  * stay as the FAST path but may never be the ONLY path, and these are the entries that were:
@@ -55,41 +61,46 @@ export const PARCEL_GROUPS = [
  *   chip ............. right-click a parcel · right-click the acreage label
  *   chipReset ........ right-click a parcel
  *   deleteSelected ... right-click a parcel · the Delete key
- *   removeMode ....... the Parcel tool's own banner · the Land tab's per-row remove (hover)
  *   lock ............. Land tab's selected-parcel Boundary section · per-row (hover) · header "Lock all"
  *   active ........... Land tab's selected-parcel Boundary section · per-row Active checkbox
  *   draw / identify / address ... also the Land tab's ＋ icon (NEW-1, B1239328 — Split moved OFF the
  *   Land tab entirely; it and Combine live here only now)
+ *   remove-by-clicking ... the Parcel tool's own banner (Draw / Remove) — NOT a menu row any more:
+ *   the owner dropped "Remove parcels — click to delete" from this menu (2026-10-11); Delete parcel
+ *   on a selected parcel is the menu's way to remove one. `startRemoveParcels` and the banner stay.
  * That list is PROSE on purpose: it is provenance with no runtime consumer, and shipping it as
  * string data cost real bytes in the Site route's bundle for nothing. `test/parcelActions.test.js`
  * states the gesture-only set itself and asserts each member has a row.
+ *
+ * A SWITCH row keeps ONE fixed label and shows its state in the switch — "Count in yield totals" is
+ * today's "Exclude from yield totals" INVERTED (ON = included = `active !== false`, the same stored
+ * flag); "Show acreage label" is the inverse of `chipHidden`.
  * ------------------------------------------------------------------------------------------- */
 export const PARCEL_ACTIONS = [
   // ---- create -------------------------------------------------------------------------------
-  { id: "draw", group: "create", label: "Draw new parcel" },
-  { id: "deed", group: "create", label: "Deed / Title — metes & bounds…" },
-  { id: "identify", group: "create", label: "Click a lot on the map", detail: "county records" },
-  { id: "address", group: "create", label: "Add by address…" },
-  // ---- modify -------------------------------------------------------------------------------
-  { id: "split", group: "modify", label: "Split a parcel" },
-  { id: "combine", group: "modify", label: "Combine parcels" },
-  { id: "boundary", group: "modify", label: "Edit boundary corners" },
-  { id: "setbacks", group: "modify", label: "Setbacks & parcel settings", detail: "in Land →" },
-  // A toggling row says what the NEXT click will do: `altLabel` shows when `altWhen` holds.
-  { id: "lock", group: "modify", label: "Lock boundary", altLabel: "Unlock boundary", altWhen: (p) => !!p.locked },
-  { id: "active", group: "modify", label: "Exclude from yield totals", altLabel: "Count in yield totals", altWhen: (p) => p.active === false },
-  { id: "chip", group: "modify", label: "Hide acreage label", altLabel: "Show acreage label", altWhen: (p) => !!p.chipHidden },
-  { id: "chipReset", group: "modify", label: "Reset label position" },
-  // ---- remove -------------------------------------------------------------------------------
-  { id: "removeMode", group: "remove", label: "Remove parcels — click to delete" },
-  { id: "deleteSelected", group: "remove", label: "Delete this parcel", detail: "Del", danger: true },
+  { id: "draw", group: "create", icon: "draw", label: "Draw a parcel", hint: "Click its corners on the map" },
+  { id: "identify", group: "create", icon: "identify", label: "Pick county lots", hint: "Click lots to add them" },
+  { id: "deed", group: "create", icon: "deed", label: "From a deed", hint: "Type the metes and bounds calls" },
+  { id: "address", group: "create", icon: "address", label: "Find by address" },
+  // ---- edit ---------------------------------------------------------------------------------
+  { id: "split", group: "modify", icon: "split", label: "Split" },
+  { id: "combine", group: "modify", icon: "combine", label: "Combine" },
+  { id: "boundary", group: "modify", icon: "boundary", label: "Edit corners" },
+  // ---- this parcel --------------------------------------------------------------------------
+  { id: "lock", group: "this", kind: "switch", label: "Lock boundary", on: (p) => !!p.locked },
+  { id: "active", group: "this", kind: "switch", label: "Count in yield totals", on: (p) => p.active !== false },
+  { id: "chip", group: "this", kind: "switch", label: "Show acreage label", on: (p) => !p.chipHidden },
+  { id: "chipReset", group: "this", label: "Reset label position" },
+  { id: "setbacks", group: "this", label: "Setbacks and settings", detail: "Land ›" },
+  // ---- delete -------------------------------------------------------------------------------
+  { id: "deleteSelected", group: "remove", icon: "trash", label: "Delete parcel", detail: "Del", danger: true },
 ];
 
 /* A row that needs a selected parcel is SHOWN but disabled when nothing is selected, so the
- * capability stays visible (that is the whole point of this menu) — never hidden, which is how
- * an action becomes undiscoverable again. The one exception is `chipReset`, which is meaningless
- * unless the label has actually been dragged somewhere. */
-const NEEDS_SELECTION = ["lock", "active", "chip", "chipReset", "deleteSelected"];
+ * capability stays visible (that is the whole point of this menu) — never hidden. The `this`
+ * group is the exception NEW-1 asked for: it only exists while a parcel is selected, and
+ * `chipReset` inside it is meaningless unless the label has actually been dragged somewhere. */
+const NEEDS_SELECTION = ["lock", "active", "chip", "chipReset", "setbacks", "deleteSelected"];
 
 /**
  * The menu, decided.
@@ -98,23 +109,28 @@ const NEEDS_SELECTION = ["lock", "active", "chip", "chipReset", "deleteSelected"
  *   parcelCount      how many parcels exist in the plan
  *   activeCount      how many are active (inactive parcels never merge — B170)
  *   hasOrigin        the plan is georeferenced (county identify / address lookup need it)
- *   selected         the selected parcel, or null: { locked, active, chipHidden, labelOffset }
+ *   selected         the selected parcel, or null: { locked, active, chipHidden, labelOffset, name, acres, color }
+ *   canDelete        a parcel exists to delete (defaults to `!!selected`; the render site also
+ *                    passes true for a plan's only lot, which Delete has always reached unselected)
  *   tool             the live tool id
  *   parcelMode       "add" | "remove" (the Parcel tool's sub-mode)
  *   mergePick        click-to-pick merge mode is armed
  *   boundaryEdit     boundary-editing mode is armed
- * @returns {Array<{id,label,rows}>} groups in create → modify → remove order; empty groups dropped.
+ * @returns {Array<{id,label,rows,reason,header?}>} groups in add → edit → this parcel → delete order;
+ *   empty groups dropped. The `this` group exists only with a selected parcel and carries `header`
+ *   ({name, acres, color}) for its swatch · name · acreage line.
  */
 export function parcelMenuModel(state = {}) {
   const s = {
     parcelCount: 0, activeCount: 0, hasOrigin: false, selected: null,
-    tool: "select", parcelMode: "add", mergePick: false, boundaryEdit: false, ...state,
+    tool: "select", parcelMode: "add", mergePick: false, boundaryEdit: false, canDelete: null, ...state,
   };
   const sel = s.selected || null;
   const hasParcels = s.parcelCount >= 1;
 
   // enabled + why-not, per row. `null` reason means "enabled".
   const gate = (id) => {
+    if (id === "deleteSelected" && !sel && s.canDelete) return null;
     if (NEEDS_SELECTION.includes(id) && !sel) return "Select a parcel first";
     switch (id) {
       case "identify":
@@ -123,7 +139,6 @@ export function parcelMenuModel(state = {}) {
       case "split":
       case "boundary":
       case "setbacks":
-      case "removeMode":
         return hasParcels ? null : "No parcels in this plan yet";
       // NEW-1 (B1239328) — gated on parcelCount, NOT activeCount. This is the ONLY place Combine
       // can be armed now that the Land tab's own looser-gated "⧉ Merge" button is gone, and
@@ -142,7 +157,6 @@ export function parcelMenuModel(state = {}) {
   const isActive = (id) => {
     switch (id) {
       case "draw": return s.tool === "parcel" && s.parcelMode === "add";
-      case "removeMode": return s.tool === "parcel" && s.parcelMode === "remove";
       case "split": return s.tool === "split";
       case "combine": return !!s.mergePick;
       case "boundary": return !!s.boundaryEdit;
@@ -151,11 +165,16 @@ export function parcelMenuModel(state = {}) {
   };
 
   const rowFor = (a) => {
+    if (a.group === "this" && !sel) return null; // the whole section exists only for a selected parcel
     if (a.id === "chipReset" && !(sel && sel.labelOffset)) return null; // meaningless until dragged
     const reason = gate(a.id);
     return {
       id: a.id,
-      label: a.altLabel && sel && a.altWhen(sel) ? a.altLabel : a.label,
+      label: a.label,
+      hint: a.hint || null,
+      icon: a.icon || null,
+      kind: a.kind || "action",
+      checked: a.kind === "switch" && sel ? !!a.on(sel) : null,
       detail: a.detail || null,
       enabled: !reason,
       disabledReason: reason,
@@ -181,7 +200,9 @@ export function parcelMenuModel(state = {}) {
   return PARCEL_GROUPS
     .map((g) => {
       const rows = PARCEL_ACTIONS.filter((a) => a.group === g.id).map(rowFor).filter(Boolean);
-      return { id: g.id, label: g.label, rows, reason: groupReason(rows) };
+      const out = { id: g.id, label: g.label, rows, reason: g.id === "remove" ? null : groupReason(rows) }; // the lone Delete row explains itself in its own title
+      if (g.id === "this" && sel) out.header = { name: sel.name || "This parcel", acres: Number.isFinite(sel.acres) ? sel.acres : null, color: sel.color || null };
+      return out;
     })
     .filter((g) => g.rows.length > 0);
 }

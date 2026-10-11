@@ -655,6 +655,11 @@ were split out of this file.
     (`site-planner/lib/parcelOps.js`; `test/parcelOpsParity.test.js` fails if a second implementation grows back). In the
     Parcels table the checkbox only SELECTS rows; the eye includes/excludes a parcel from the site total. (B2134368–B2134370.)
 
+19. **(2026-10-11) The Parcel tools ▾ menu has NO "Remove parcels — click to delete" row.** Michael approved "A · Sorted list"
+    with exactly two changes: the second heading reads EDIT, and the "Delete by clicking" line is removed. Removing a parcel from
+    the menu is the red "Delete parcel" row on a SELECTED parcel; the click-to-delete mode stays reachable only from the Parcel
+    tool's own ✕ Remove banner button. Do not put a click-to-delete row back. (B2243168.)
+
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by
 Michael (industrial developer, Dallas/Houston). It is becoming a multi-workspace

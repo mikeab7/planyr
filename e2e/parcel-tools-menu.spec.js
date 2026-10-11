@@ -87,6 +87,13 @@ function outlinePoint(page, i, what) {
     return [Math.round(s.x), Math.round(s.y)];
   }, { i, what });
 }
+/* Select the (first) parcel by clicking inside it — THIS PARCEL only exists for a selected parcel (NEW-1, 2026-10-11). */
+async function selectParcel(page, i = 0) {
+  await page.keyboard.press("Escape");
+  const at = await outlinePoint(page, i, "edge"); // a parcel is picked on its outline (its fill is off)
+  await page.mouse.click(...at);
+  await page.waitForTimeout(150);
+}
 const outlineCount = (page) => page.getByTestId("parcel-outline").count();
 
 test.describe("the right rail is the complete answer to 'what can I do to a parcel'", () => {
@@ -105,20 +112,26 @@ test.describe("the right rail is the complete answer to 'what can I do to a parc
     await boot(page);
     await openMenu(page);
     // The three that were already there, plus the ones the owner found missing.
-    for (const id of ["draw", "deed", "identify", "address", "split", "combine", "boundary", "setbacks", "lock", "active", "chip", "removeMode", "deleteSelected"]) {
+    for (const id of ["draw", "deed", "identify", "address", "split", "combine", "boundary", "deleteSelected"]) {
       await expect(row(page, id), `"${id}" is not in the Parcel tools menu`).toBeVisible();
     }
-    // Document order IS the reading order: create rows before modify rows before remove rows.
+    // THIS PARCEL only exists while a parcel is selected — a blank plan has none of it.
+    for (const id of ["setbacks", "lock", "active", "chip"]) await expect(row(page, id)).toHaveCount(0);
+    // "Remove parcels — click to delete" is gone from the menu (owner decision, 2026-10-11).
+    await expect(row(page, "removeMode")).toHaveCount(0);
+    // Document order IS the reading order: add land → edit → delete.
     const order = await page.locator("[data-parcel-action]").evaluateAll((els) => els.map((e) => e.getAttribute("data-parcel-action")));
     expect(order.indexOf("draw")).toBeLessThan(order.indexOf("split"));
-    expect(order.indexOf("split")).toBeLessThan(order.indexOf("removeMode"));
-    expect(order.indexOf("boundary")).toBeLessThan(order.indexOf("removeMode"));
+    expect(order.indexOf("split")).toBeLessThan(order.indexOf("deleteSelected"));
+    expect(order.indexOf("boundary")).toBeLessThan(order.indexOf("deleteSelected"));
+    // The headings read exactly ADD LAND / EDIT.
+    await expect(page.locator('[data-parcel-group="modify"] .rail-menu-hdr')).toHaveText("Edit");
   });
 
   test("an action a blank plan can't use is VISIBLE and says why — never hidden", async ({ page }) => {
     await boot(page);
     await openMenu(page);
-    for (const id of ["split", "combine", "boundary", "removeMode"]) {
+    for (const id of ["split", "combine", "boundary", "deleteSelected"]) {
       await expect(row(page, id)).toBeVisible();
       await expect(row(page, id)).toBeDisabled();
       expect(await row(page, id).getAttribute("title"), `${id} is disabled with no reason`).toBeTruthy();
@@ -126,19 +139,22 @@ test.describe("the right rail is the complete answer to 'what can I do to a parc
     // Draw + Deed always work — a blank plan has to be able to start one.
     await expect(row(page, "draw")).toBeEnabled();
     await expect(row(page, "deed")).toBeEnabled();
-    // The two GIS-backed create rows are gated on a georeferenced plan (their live click is the V#).
-    await expect(row(page, "identify")).toBeDisabled();
-    await expect(row(page, "address")).toBeDisabled();
+    // The two GIS-backed create rows are gated on a georeferenced plan (their live click is the V#);
+    // the gate itself is asserted in test/parcelActions.test.js (a boot through the map toolbar is
+    // already georeferenced, so enabled/disabled here depends on how the plan was started).
+    await expect(row(page, "identify")).toBeVisible();
+    await expect(row(page, "address")).toBeVisible();
   });
 
-  test("Draw and Remove both run from the menu, end to end", async ({ page }) => {
+  test("Draw runs from the menu, and the Parcel tool's own banner still removes by clicking", async ({ page }) => {
     await boot(page);
     await drawParcel(page, 240, 150, 430, 300);
     expect((await readModel(page)).total).toBe(1);
 
-    // REMOVE — the action that had no entry point in the rail at all.
+    // Click-to-delete is no longer a menu row; it stays reachable from the Parcel tool's banner.
     const at = await outlinePoint(page, 0, "centre");
-    await pick(page, "removeMode");
+    await pick(page, "draw");
+    await page.getByRole("button", { name: /Remove$/ }).first().click();
     await expect(page.getByText(/click a parcel to delete it/i)).toBeVisible();
     await page.mouse.click(...at);                   // inside the parcel
     await expect.poll(() => readModel(page).then((m) => m.total)).toBe(0);
@@ -184,10 +200,9 @@ test.describe("the right rail is the complete answer to 'what can I do to a parc
     const banner = page.getByTestId("boundary-edit-banner");
     await expect(banner).toBeVisible();
 
-    // A drawn parcel arrives LOCKED, and a locked boundary has no editable path. The banner must
-    // say that instead of teaching gestures it would then swallow — and carry the way out.
-    await expect(banner).toContainText(/locked/i);
-    await banner.getByTestId("boundary-edit-unlock").click();
+    // Lock is off by default now (Parcels rework NEW-5), so a drawn parcel is editable straight away. If
+    // a parcel IS locked the banner must say so and carry the way out instead of teaching gestures
+    // it would swallow (that branch is asserted in test/parcelActions.test.js).
     await expect.poll(() => readModel(page).then((m) => m.parcels[0].locked)).toBe(false);
 
     // Now it TEACHES the three gestures rather than hiding them in a tooltip.
@@ -195,6 +210,8 @@ test.describe("the right rail is the complete answer to 'what can I do to a parc
     await expect(banner).toContainText(/shift-click/i);
 
     // And the gesture it teaches works: Shift-click an edge inserts a corner.
+    // NOTE (2026-10-11): this last step already fails on main before NEW-1 (measured on an unmodified
+    // build) — the corner-insert gesture drifted from this spec's coordinates; not touched here.
     const mid = await outlinePoint(page, 0, "edge");  // midpoint of the first boundary edge
     await page.mouse.move(...mid);                    // reveals the insert dot
     await page.waitForTimeout(200);
@@ -212,34 +229,48 @@ test.describe("the right rail is the complete answer to 'what can I do to a parc
     await expect(page.getByTestId("boundary-edit-banner")).toBeHidden();
   });
 
-  test("the label and state rows that used to be right-click-only run from the menu", async ({ page }) => {
+  test("THIS PARCEL: header + three switches that flip in place and leave the menu open", async ({ page }) => {
     await boot(page);
     await drawParcel(page, 240, 150, 430, 300);
-
-    await pick(page, "chip");                                  // hide the acreage label
-    await expect.poll(() => readModel(page).then((m) => m.parcels[0].chipHidden)).toBe(true);
+    await selectParcel(page);
     await openMenu(page);
-    await expect(row(page, "chip")).toContainText(/show acreage label/i); // the row says what the next click does
+
+    // Header: swatch · name · acreage.
+    await expect(page.locator("[data-parcel-this-name]")).not.toBeEmpty();
+    await expect(page.locator("[data-parcel-this-acres]")).toContainText(/ac$/);
+    await expect(row(page, "lock")).toContainText("Lock boundary");
+    await expect(row(page, "active")).toContainText("Count in yield totals");
+    await expect(row(page, "chip")).toContainText("Show acreage label");
+
+    // Show acreage label: ON → OFF → ON, menu stays open.
+    await expect(row(page, "chip")).toHaveAttribute("aria-checked", "true");
+    await row(page, "chip").click();
+    await expect.poll(() => readModel(page).then((m) => m.parcels[0].chipHidden)).toBe(true);
+    await expect(row(page, "chip")).toBeVisible();
+    await expect(row(page, "chip")).toHaveAttribute("aria-checked", "false");
     await row(page, "chip").click();
     await expect.poll(() => readModel(page).then((m) => m.parcels[0].chipHidden)).toBe(false);
 
-    // A drawn parcel starts LOCKED, so the row reads "Unlock" and the first click unlocks it.
-    await openMenu(page);
-    await expect(row(page, "lock")).toContainText(/unlock/i);
-    await row(page, "lock").click();
-    await expect.poll(() => readModel(page).then((m) => m.parcels[0].locked)).toBe(false);
-    await openMenu(page);
-    await expect(row(page, "lock")).toContainText(/^Lock/i);
+    // Lock boundary: OFF by default → ON → OFF.
+    await expect(row(page, "lock")).toHaveAttribute("aria-checked", "false"); // off by default now
     await row(page, "lock").click();
     await expect.poll(() => readModel(page).then((m) => m.parcels[0].locked)).toBe(true);
+    await expect(row(page, "lock")).toHaveAttribute("aria-checked", "true");
+    await row(page, "lock").click();
+    await expect.poll(() => readModel(page).then((m) => m.parcels[0].locked)).toBe(false);
 
-    await pick(page, "active");
+    // Count in yield totals: ON (included) → OFF writes active:false (the same stored flag).
+    await expect(row(page, "active")).toHaveAttribute("aria-checked", "true");
+    await row(page, "active").click();
     await expect.poll(() => readModel(page).then((m) => m.parcels[0].active)).toBe(false);
+    await expect(row(page, "active")).toHaveAttribute("aria-checked", "false");
+    await expect(row(page, "draw")).toBeVisible(); // still open after three toggles
   });
 
-  test("Delete this parcel runs from the menu", async ({ page }) => {
+  test("Delete parcel (the red bottom row) deletes the selected parcel", async ({ page }) => {
     await boot(page);
     await drawParcel(page, 240, 150, 430, 300);
+    await selectParcel(page);
     await pick(page, "deleteSelected");
     await expect.poll(() => readModel(page).then((m) => m.total)).toBe(0);
   });
@@ -247,6 +278,7 @@ test.describe("the right rail is the complete answer to 'what can I do to a parc
   test("setbacks are one step from the right rail, and the Land panel points back", async ({ page }) => {
     await boot(page);
     await drawParcel(page, 240, 150, 430, 300);
+    await selectParcel(page);
 
     // Right rail → the Land panel (Parcels rework: the list; a parcel's own page carries the sections-based setbacks).
     await pick(page, "setbacks");

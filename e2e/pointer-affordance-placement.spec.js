@@ -185,7 +185,7 @@ test.describe("NEW-1 (B1253248) — placement mode owns the cursor and the press
     const box = await canvas(page).boundingBox();
 
     // Draw a first Length measurement, M1 (mirrors drawLengthMeasure in drawKinds.js).
-    await page.getByRole("button", { name: "Measure modes" }).click();
+    await page.getByRole("button", { name: /^Measure mode:/ }).click();
     await page.getByRole("button", { name: "Length", exact: true }).click();
     const my = box.y + box.height * 0.62;
     const m1x0 = box.x + box.width * 0.30, m1x1 = box.x + box.width * 0.46;
@@ -198,7 +198,7 @@ test.describe("NEW-1 (B1253248) — placement mode owns the cursor and the press
     // THE REPORTED CASE: start a SECOND Length measurement (still in the Measure tool — B910 says
     // that alone should be enough to grab M1 — but this click is MID-DRAFT: the first point of a
     // brand-new measurement is already down).
-    await page.getByRole("button", { name: "Measure modes" }).click();
+    await page.getByRole("button", { name: /^Measure mode:/ }).click();
     await page.getByRole("button", { name: "Length", exact: true }).click();
     const startX = box.x + box.width * 0.30, startY = box.y + box.height * 0.80;
     await page.mouse.click(startX, startY);
