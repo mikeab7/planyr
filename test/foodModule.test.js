@@ -1472,16 +1472,13 @@ describe("'What was good' — a liked-dishes shortlist, separate from 'What I ha
     expect(sql).toContain("alter table public.food_visits add column if not exists what_was_good text;");
   });
 
-  it("the form has a SEPARATE 'What was good' field, sitting directly under 'What I had' — never merged into it", () => {
+  it("NEW-2 (2026-10-11): the form no longer asks for 'What was good' — saved text is never rewritten and is still shown read-only", () => {
     const panel = src("components/VisitPanel.jsx");
-    const whatIHadIdx = panel.indexOf("What I had");
-    const whatWasGoodIdx = panel.indexOf("What was good");
-    expect(whatIHadIdx).toBeGreaterThan(-1);
-    expect(whatWasGoodIdx).toBeGreaterThan(whatIHadIdx);
-    expect(panel).toMatch(/placeholder="The hamachi, the agedashi…"/);
-    expect(panel).toMatch(/what_was_good: whatWasGood \|\| null,/);
-    // Genuinely a separate field — never appended onto what_i_had's own value.
-    expect(panel).not.toMatch(/whatIHad \+ .*whatWasGood/);
+    const formBody = panel.slice(panel.indexOf("function VisitForm("), panel.indexOf("function Chip("));
+    expect(formBody).not.toMatch(/What was good/);
+    expect(formBody).not.toMatch(/visit-highlights-input/);
+    expect(formBody).not.toMatch(/what_was_good/); // the submit payload omits it, so an edit's update never touches the saved column
+    expect(panel).toMatch(/\{visit\.what_was_good && <div[^>]*>Good \{visit\.what_was_good\}<\/div>\}/); // read-only on the visit card
   });
 
   it("⛔ RENAMED to 'Order again' (NEW-2, owner: 'the thing he opens the app for while standing at the door') — still every past visit's what_was_good, still rendered ABOVE Past visits, but now DEDUPED and explicitly newest-first, not a plain join", () => {
@@ -1611,7 +1608,6 @@ describe("B668194 — a successful visit save clears the form; a failed one keep
     expect(resetBlock).toMatch(/setCost\(""\);/);
     expect(resetBlock).toMatch(/setVisitedOn\(""\);/);
     expect(resetBlock).toMatch(/setDishRows\(/); // NEW-1: the dish drafts reset too (the old "What I had" box is gone)
-    expect(resetBlock).toMatch(/setWhatWasGood\(""\);/);
     expect(resetBlock).toMatch(/setNotes\(""\);/);
     expect(resetBlock).toMatch(/setWouldReturn\(null\);/);
   });
@@ -1620,7 +1616,7 @@ describe("B668194 — a successful visit save clears the form; a failed one keep
     const panel = src("components/VisitPanel.jsx");
     // The reset calls appear exactly once each, all inside the `if (saved)` block (checked above)
     // — not duplicated at the top of submit() where they'd run before the save even resolves.
-    for (const setter of ["setRating(null)", "setCost(\"\")", "setWhatWasGood(\"\")"]) {
+    for (const setter of ["setRating(null)", "setCost(\"\")"]) {
       const count = panel.split(setter).length - 1;
       expect(count).toBe(1);
     }
@@ -1656,14 +1652,9 @@ describe("B668195 — no emoji glyphs in the food map view controls (plain text 
 
   it("the ✕ close glyph is explicitly out of scope and stays", () => {
     const panel = src("components/VisitPanel.jsx");
-    expect(panel).toContain("✕");
-    // Still the Close button specifically, not the glyph having moved somewhere unrelated — the
-    // window is the close button's own JSX element (aria-label="Close" up to its closing tag),
-    // not a fixed character count (NEW-2 widened the button's own style block, which a fixed-200
-    // window doesn't account for).
-    const startIdx = panel.indexOf('aria-label="Close"');
-    const closeBtn = panel.slice(startIdx, panel.indexOf("</button>", startIdx));
-    expect(closeBtn).toContain("✕");
+    // NEW-4 (2026-10-11): the glyph now lives in the ONE shared CloseX component, which the panel header renders as "Close".
+    expect(src("components/CloseX.jsx")).toContain("✕");
+    expect(panel).toMatch(/<CloseX onClick=\{onClose\} label="Close" testId="food-panel-close"/);
   });
 
   it("button padding was widened where an emoji was removed, so tap targets don't shrink", () => {
@@ -2208,7 +2199,7 @@ describe("BottomSheet.jsx — a generic drag-to-resize primitive, content-agnost
 
   it("the drag handle's own hit area is at least 44 CSS px tall", () => {
     const handleBlock = sheet.slice(sheet.indexOf('data-testid="food-sheet-drag-handle"'), sheet.indexOf('data-testid="food-sheet-drag-handle"') + 400);
-    expect(handleBlock).toMatch(/minHeight:\s*44/);
+    expect(handleBlock).toMatch(/minHeight:\s*(44|56)/); // NEW-5 (2026-10-11): 56
   });
 
   it("never renders a full-viewport backdrop — the map above the sheet must stay directly interactive (no scrim to swallow its pan gesture)", () => {
@@ -2474,7 +2465,6 @@ describe("VisitPanel — edit a past visit: reuses VisitForm, opens via card tap
     expect(formBody).toMatch(/useDraftField\(draftKey, "ratingAmbiance", \(\) => \(initial\?\.rating_ambiance != null \? Number\(initial\.rating_ambiance\) : null\)\)/);
     expect(formBody).toMatch(/useDraftField\(draftKey, "cost", \(\) => \(initial\?\.cost != null \? String\(initial\.cost\) : ""\)\)/);
     expect(formBody).not.toMatch(/useState\(\(\) => initial\?\.what_i_had/); // NEW-1: no editable "What I had"; the saved text is shown read-only
-    expect(formBody).toMatch(/useDraftField\(draftKey, "whatWasGood", \(\) => initial\?\.what_was_good \|\| ""\)/);
     expect(formBody).toMatch(/useDraftField\(draftKey, "notes", \(\) => initial\?\.notes \|\| ""\)/);
     expect(formBody).toMatch(/useDraftField\(draftKey, "wouldReturn", \(\) => initial\?\.would_return \?\? null\)/);
   });
@@ -2553,9 +2543,11 @@ describe("VisitPanel — Header (block 1): wrapping name, category · city, a ta
     expect(headerBlock).toMatch(/target="_blank" rel="noopener noreferrer"/);
   });
 
-  it("close is a circular icon button (border-radius 50%, >=44px), not a bare glyph floating in the corner", () => {
-    expect(headerBlock).toMatch(/borderRadius:\s*"50%"/);
-    expect(headerBlock).toMatch(/width:\s*44,\s*height:\s*44,\s*minWidth:\s*44,\s*minHeight:\s*44/);
+  it("close is a PLAIN X (no circle) with a >=44px touch target — NEW-4 (2026-10-11): one X style across /food (components/CloseX.jsx)", () => {
+    expect(headerBlock).toMatch(/<CloseX /);
+    const x = src("components/CloseX.jsx");
+    expect(x).not.toMatch(/borderRadius/);
+    expect(x).toMatch(/size = 44/);
   });
 
   it("the selection-tie accent dot (B634976) survives the rebuild", () => {

@@ -117,6 +117,8 @@ import { formatCategory, formatAddress, formatCityFromAddress } from "../lib/for
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import ScoreMeter from "./ScoreMeter.jsx";
+import CloseX from "./CloseX.jsx";
+import { OrderAgainControl } from "./DishesSection.jsx";
 import RatingSlider from "./RatingSlider.jsx";
 import { RATING_MAX } from "../lib/ratingScale.js";
 import { cleanDraftDishes, newDraftDish } from "../lib/draftDishes.js";
@@ -161,6 +163,9 @@ function fieldStyle() {
     width: "100%", boxSizing: "border-box", padding: "9px 10px", borderRadius: 8,
     border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-primary)",
     font: "inherit", fontSize: 13, minHeight: 40,
+    // NEW-3: a text or date field (the iOS date control above all) has an intrinsic minimum width wider than a narrow flex/label cell and
+    // pushes its row past the screen edge — let it shrink to the cell and never exceed it.
+    minWidth: 0, maxWidth: "100%", display: "block",
   };
 }
 
@@ -177,7 +182,7 @@ function DraftDishes({ rows, setRows, isMobile }) {
       <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-secondary)" }}>Dishes</div>
       {rows.map((r, i) => (
         <div key={r.key} data-testid="visit-dish-row" data-edit-card="" style={{
-          display: "flex", flexDirection: "column", gap: 8, padding: "10px 10px 12px", borderRadius: RADIUS.lg,
+          display: "flex", flexDirection: "column", gap: 8, padding: "10px 10px 12px", borderRadius: RADIUS.lg, minWidth: 0,
           border: "1px solid var(--border-default)", background: "var(--surface-page)",
         }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -189,14 +194,11 @@ function DraftDishes({ rows, setRows, isMobile }) {
               style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX, minHeight: 44 }}
             />
             {rows.length > 1 && (
-              <button type="button" onClick={() => setRows((rs) => rs.filter((x) => x.key !== r.key))}
-                aria-label={`Remove dish ${i + 1}`} data-testid="visit-dish-remove"
-                style={{ flex: "0 0 auto", minWidth: 44, minHeight: 44, border: "none", background: "none", color: "var(--text-tertiary)", cursor: "pointer", fontSize: INPUT_FONT_PX }}>
-                ✕
-              </button>
+              <CloseX onClick={() => setRows((rs) => rs.filter((x) => x.key !== r.key))} label={`Remove dish ${i + 1}`} testId="visit-dish-remove" />
             )}
           </div>
           <ScoreMeter value={r.score} onChange={(score) => update(r.key, { score })} label="Dish score" isMobile={isMobile} />
+          <OrderAgainControl value={r.order_again ?? null} onChange={(order_again) => update(r.key, { order_again })} isMobile={isMobile} />
         </div>
       ))}
       <button type="button" onClick={() => setRows((rs) => [...rs, newDraftDish()])} data-testid="visit-dish-add"
@@ -233,7 +235,6 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, submitLabel 
   // the edit form and never rewritten (see the header's "WHAT I HAD" note).
   const [dishRows, setDishRows] = useDraftField(draftKey, "dishRows", () => (initial ? [] : [newDraftDish()]));
   const [dishError, setDishError] = useState(null);
-  const [whatWasGood, setWhatWasGood] = useDraftField(draftKey, "whatWasGood", () => initial?.what_was_good || "");
   const [notes, setNotes] = useDraftField(draftKey, "notes", () => initial?.notes || "");
   const [wouldReturn, setWouldReturn] = useDraftField(draftKey, "wouldReturn", () => initial?.would_return ?? null);
 
@@ -244,7 +245,6 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, submitLabel 
       rating_ambiance: ratingAmbiance,
       cost: cost === "" ? null : Number(cost),
       visited_on: visitedOn || null,
-      what_was_good: whatWasGood || null,
       notes: notes || null,
       would_return: wouldReturn,
     };
@@ -263,7 +263,6 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, submitLabel 
       setCost("");
       setVisitedOn("");
       setDishRows(initial ? [] : [newDraftDish()]);
-      setWhatWasGood("");
       setNotes("");
       setWouldReturn(null);
       // NEW-1 (2026-08-27 owner block) — the SAME confirmed-save gate B668194 already uses for
@@ -273,9 +272,9 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, submitLabel 
     }
   };
 
-  const groupLabel = { display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-secondary)" };
+  const groupLabel = { display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "var(--text-secondary)", minWidth: 0 };
   return (
-    <form onSubmit={submit} data-sheet-form="" style={{ display: "flex", flexDirection: "column", gap: 10, padding: "10px 16px 0" }}>
+    <form onSubmit={submit} data-sheet-form="" style={{ display: "flex", flexDirection: "column", gap: 10, padding: "10px 16px 0", minWidth: 0, maxWidth: "100%", boxSizing: "border-box" }}>
       {!initial && <DraftDishes rows={dishRows} setRows={setDishRows} isMobile={isMobile} />}
       {dishError && <div role="alert" data-testid="visit-dish-error" style={{ fontSize: 12, color: "var(--danger-text, var(--danger))" }}>{dishError}</div>}
       {initial?.what_i_had && (
@@ -309,10 +308,6 @@ function VisitForm({ onSubmit, onCancel, pending, onSaved, initial, submitLabel 
           )}
         </div>
         <input type="date" value={visitedOn} onChange={(e) => setVisitedOn(e.target.value)} {...noAutofill("visit-day")} data-testid="visit-date-input" style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX }} />
-      </label>
-      <label data-edit-card="" style={groupLabel}>
-        What was good
-        <input type="text" value={whatWasGood} onChange={(e) => setWhatWasGood(e.target.value)} placeholder="The hamachi, the agedashi…" {...noAutofill("visit-highlights")} data-testid="visit-highlights-input" style={{ ...fieldStyle(), fontSize: INPUT_FONT_PX }} />
       </label>
       <label data-edit-card="" style={groupLabel}>
         Cost
@@ -396,7 +391,7 @@ function PanelHeader({ manualNameEditable, manualName, onManualNameChange, name,
   const formattedAddress = formatAddress(address);
   const mapsUrl = directionsUrl(lat, lon);
   return (
-    <div data-edit-card={manualNameEditable ? "" : undefined} style={{ padding: "14px 16px 8px" }}>
+    <div data-edit-card={manualNameEditable ? "" : undefined} data-sheet-grab="" style={{ padding: "14px 16px 8px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
         {manualNameEditable ? (
           <input
@@ -418,16 +413,7 @@ function PanelHeader({ manualNameEditable, manualName, onManualNameChange, name,
             </div>
           </div>
         )}
-        <button
-          type="button" onClick={onClose} aria-label="Close" data-testid="food-panel-close"
-          style={{
-            flex: "0 0 auto", width: 44, height: 44, minWidth: 44, minHeight: 44, borderRadius: "50%",
-            border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)",
-            display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: 15, padding: 0,
-          }}
-        >
-          ✕
-        </button>
+        <CloseX onClick={onClose} label="Close" testId="food-panel-close" />
       </div>
       {categoryLine && <div style={{ marginTop: 3, marginLeft: 17, fontSize: 13, color: "var(--text-secondary)" }}>{categoryLine}</div>}
       {formattedAddress && mapsUrl && (

@@ -66,6 +66,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { heightForSnap, resolveRelease, releaseVelocity, dragBounds, clampDragHeight } from "../lib/bottomSheetSnap.js";
 import { currentKeyboardInset, visualViewportBox } from "../lib/keyboardInset.js";
+import { reportSheetSideways } from "../lib/foodStore.js";
 import { publishBottomSheetHeight } from "../../../shared/ui/bottomSheetTracker.js";
 
 const TOP_INSET = 64; // px of the map always left visible above the sheet, even at "full"
@@ -101,7 +102,11 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
   const didMountRef = useRef(false);
   const selfScrollRef = useRef(false); // true between a reveal's own scrollTop write and the scroll event it fires
   const foreignScrollAtRef = useRef(0); // when something other than a reveal last scrolled the content
-  const onContentScroll = useCallback(() => {
+  const onContentScroll = useCallback((e) => {
+    // NEW-3: nothing in this sheet may ever scroll SIDEWAYS. iOS scrolls an overflow:hidden box to reveal a focused field,
+    // which reads as the whole sheet sliding left/right — put it straight back and leave a record if it ever happens.
+    const box = e?.currentTarget;
+    if (box && box.scrollLeft !== 0) { reportSheetSideways({ scrollLeft: Math.round(box.scrollLeft), sw: box.scrollWidth, cw: box.clientWidth }); box.scrollLeft = 0; }
     if (selfScrollRef.current) { selfScrollRef.current = false; return; }
     foreignScrollAtRef.current = performance.now();
   }, []);
@@ -132,6 +137,7 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
   // handle short, so the last strip of content always had to scroll (B2046224 ×3: a dropped pin's
   // name field got a scroll area barely taller than itself).
   const handleRef = useRef(null);
+  const sheetRef = useRef(null);
   const handleHeight = () => handleRef.current?.offsetHeight ?? 0;
   // The content's OWN height (the inner wrapper), never the scroller's scrollHeight: a scroller
   // reports max(content, its own box), so once the sheet had been pulled taller than its content the
@@ -297,7 +303,12 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
     // would throw away what was typed (measured on main: a 150 px pull down with a dish half-typed
     // closed the whole place).
     const canDismiss = !kbOpen && !formOpen();
-    dragRef.current = { startY: y, startHeight: heightRef.current, stops, canDismiss, kb: kbOpen, samples: [{ t: performance.now(), y }], ...extra };
+    // The height the sheet is DRAWN at right now — mid-transition it is not yet the target in heightRef, and starting from the
+    // target made a grab during the settle animation jump (NEW-5).
+    const drawn = sheetRef.current?.getBoundingClientRect().height;
+    const startHeight = Number.isFinite(drawn) && drawn > 0 ? drawn : heightRef.current;
+    heightRef.current = startHeight;
+    dragRef.current = { startY: y, startHeight, stops, canDismiss, kb: kbOpen, samples: [{ t: performance.now(), y }], ...extra };
     setDragging(true);
   }, [targetFor, kbOpen]);
   const moveDrag = useCallback((y) => {
@@ -361,30 +372,43 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
   useEffect(() => {
     const box = contentRef.current;
     if (!box) return undefined;
-    const SLOP = 4;
+    const SLOP = 6;
+    const TOP_EPS = 2; // a list scrolled by a hair (iOS leaves fractional scrollTop) still counts as "at its top"
+    const stopsNow = () => ({ peek: targetFor("peek"), half: targetFor("half"), full: targetFor("full") });
     const onStart = (e) => {
       touchRef.current = null;
       if (e.touches.length !== 1 || dragRef.current || kbOpen) return;
       if (e.target.closest?.('input[type="range"], [data-no-sheet-drag]')) return;
-      touchRef.current = { y0: e.touches[0].clientY, mode: "pending", startScroll: box.scrollTop };
+      const t0 = e.touches[0];
+      // A press on the sheet's HEADER (marked data-sheet-grab) is a grab like the handle: it moves the sheet either way.
+      touchRef.current = { x0: t0.clientX, y0: t0.clientY, mode: "pending", grab: !!e.target.closest?.("[data-sheet-grab]") };
+    };
+    // Which way may the sheet still move? up = taller than now, down = shorter (or closed when allowed).
+    const canMove = (up, grab) => {
+      const stops = stopsNow();
+      const top = Math.max(stops.peek, stops.half, stops.full);
+      const cur = heightRef.current;
+      const lowest = formOpen() ? stops.peek : 0;
+      if (up) return cur < top - 2;
+      return cur > lowest + 2 && (grab || box.scrollTop <= TOP_EPS);
     };
     const onMove = (e) => {
       const t = touchRef.current;
       if (!t || e.touches.length !== 1) return;
-      const y = e.touches[0].clientY;
+      const { clientX: x, clientY: y } = e.touches[0];
       if (t.mode === "pending") {
-        const dy = y - t.y0;
-        if (Math.abs(dy) < SLOP) return;
-        const stops = { peek: targetFor("peek"), half: targetFor("half"), full: targetFor("full") };
-        const top = Math.max(stops.peek, stops.half, stops.full);
-        const cur = heightRef.current;
-        const up = dy < 0;
-        const lowest = formOpen() ? stops.peek : 0;
-        if (up && cur < top - 2) t.mode = "sheet";
-        else if (!up && box.scrollTop <= 0 && cur > lowest + 2) t.mode = "sheet";
-        else t.mode = "scroll";
+        const dy = y - t.y0, dx = x - t.x0;
+        if (Math.max(Math.abs(dy), Math.abs(dx)) < SLOP) return;
+        // A sideways-dominant finger is never the sheet's (the content is pan-y only, so it simply goes nowhere).
+        if (Math.abs(dx) > Math.abs(dy)) { t.mode = "ignore"; return; }
+        t.mode = canMove(dy < 0, t.grab) ? "sheet" : "scroll";
         if (t.mode === "sheet") beginDrag(t.y0, { touch: true });
+      } else if (t.mode === "scroll") {
+        // Standard nested-scroll hand-off: a list that has been scrolled back up to its top, with the finger still pulling down,
+        // continues as a sheet drag from where the finger is NOW (no jump).
+        if (y > (t.lastY ?? t.y0) && box.scrollTop <= TOP_EPS && canMove(false, false)) { t.mode = "sheet"; beginDrag(y, { touch: true }); }
       }
+      t.lastY = y;
       if (t.mode === "sheet" && dragRef.current?.touch) {
         if (e.cancelable) e.preventDefault();
         moveDrag(y);
@@ -424,6 +448,7 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
     >
     <style>{TYPING_CSS + FORM_OPEN_CSS}</style>
     <div
+      ref={sheetRef}
       data-testid="food-bottom-sheet"
       data-food-sheet=""
       data-typing={typing ? "" : undefined}
@@ -451,12 +476,12 @@ export default function BottomSheet({ open, onDismiss, initialSnap = "half", pee
         onPointerCancel={onHandlePointerEnd}
         style={{
           flex: "0 0 auto", display: "flex", justifyContent: "center", alignItems: "center",
-          height: 22, minHeight: 44, cursor: "grab", touchAction: "none",
+          height: 22, minHeight: 56, cursor: "grab", touchAction: "none",
         }}
       >
         <span aria-hidden="true" style={{ width: 36, height: 4, borderRadius: 999, background: "var(--border-strong, var(--border-default))" }} />
       </div>
-      <div ref={contentRef} onScroll={onContentScroll} style={{ flex: 1, minHeight: 0, overflowY: "auto", overscrollBehavior: "contain" }}>
+      <div ref={contentRef} onScroll={onContentScroll} style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", overscrollBehavior: "contain", touchAction: "pan-y" }}>
         <div ref={innerRef} style={{ display: "flow-root" }}>{children}</div>
       </div>
     </div>
