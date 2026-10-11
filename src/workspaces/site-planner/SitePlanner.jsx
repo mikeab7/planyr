@@ -13055,7 +13055,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const parcelCadName = cadNameOf(COUNTIES[restored?.county]?.label || null);
   const parcelIdField = (COUNTIES[restored?.county] || {}).idField || null;
   const parcelAddrField = (COUNTIES[restored?.county] || {}).addrField || null;
-  const parcelRows = useMemo(() => buildParcelRows(parcels, { cadName: parcelCadName, idField: parcelIdField }), [parcels, parcelCadName, parcelIdField]);
+  const parcelRows = useMemo(() => buildParcelRows(parcels, { cadName: parcelCadName, idField: parcelIdField, overlapPairs: parcelOverlapPairs }), [parcels, parcelCadName, parcelIdField, parcelOverlapPairs]);
   const pickedParcelIds = useMemo(() => new Set(combineSel), [combineSel]);
   const parcelSiteAcres = useMemo(() => includedAcres(parcels), [parcels]);
   const parcelActsRef = useRef({});

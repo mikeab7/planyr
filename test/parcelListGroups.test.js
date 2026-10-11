@@ -45,3 +45,38 @@ describe("parcel list layout C", () => {
     expect(src).not.toMatch(/parcels-active-head/);
   });
 });
+
+import { overlapAcres, overlapNamesOf, slotWidth } from "../src/workspaces/site-planner/components/ParcelsPanel.jsx";
+import { overlappingParcelPairs } from "../src/workspaces/site-planner/lib/polyClip.js";
+
+describe("parcel list — overlap disclosure (owner real-data check 2026-10-11)", () => {
+  const box = (id, x, y, extra = {}) => ({ id, points: [{ x, y }, { x: x + 400, y }, { x: x + 400, y: y + 400 }, { x, y: y + 400 }], source: "drawn", label: id, ...extra });
+  it("rows carry who they overlap; the gap between the rows and the dissolved site total is the disclosed overlap", () => {
+    const parcels = [box("A", 0, 0), box("B", 200, 200), box("C", 5000, 0)];
+    const rows = buildParcelRows(parcels, { overlapPairs: overlappingParcelPairs(parcels) });
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    expect(byId.get("A").overlaps.map((o) => o.id)).toEqual(["B"]);
+    expect(byId.get("B").overlaps.map((o) => o.id)).toEqual(["A"]);
+    expect(byId.get("C").overlaps).toEqual([]);
+    expect(overlapNamesOf(byId.get("A"), byId)).toMatch(/^B \(\d+\.\d\d ac\)$/);
+    const additive = rows.reduce((t, r) => t + r.acres, 0);
+    const overlapSq = 200 * 200; // the shared corner
+    expect(overlapAcres(rows, additive - overlapSq / 43560)).toBeCloseTo(overlapSq / 43560, 4);
+  });
+  it("no overlap, no disclosure — a few hundredths of dust never shows", () => {
+    const rows = buildParcelRows([box("A", 0, 0), box("C", 5000, 0)], { overlapPairs: [] });
+    expect(overlapAcres(rows, rows.reduce((t, r) => t + r.acres, 0))).toBe(0);
+    expect(overlapAcres(rows, rows.reduce((t, r) => t + r.acres, 0) - 0.01)).toBe(0);
+  });
+  it("the icon slot is one width for the whole list: two icons, three once anything is locked", () => {
+    expect(slotWidth(false)).toBeLessThan(slotWidth(true));
+    expect(slotWidth(true) - slotWidth(false)).toBe(20);
+  });
+  it("source guard: the padlock is rendered inside the icon slot, never in the name cell; rename is a menu item", () => {
+    const src = readFileSync("src/workspaces/site-planner/components/ParcelsPanel.jsx", "utf8");
+    const slotAt = src.indexOf("width: slotW"), lockAt = src.indexOf("parcel-row-lock-"), nameCellAt = src.indexOf("paddingLeft: row.depth");
+    expect(lockAt).toBeGreaterThan(slotAt);
+    expect(slotAt).toBeGreaterThan(nameCellAt);
+    expect(src).toMatch(/item\("Rename"/);
+  });
+});
