@@ -20,7 +20,7 @@ export const NUMBOX_INPUT_STYLE = {
 
 export default function NumberBox({ children, unit, onUp, onDown, upLabel = "Increase", downLabel = "Decrease", upTitle, downTitle, disabled = false, width = 76, style, testid }) {
   const stepBtn = (label, title, onClick, glyph) => (
-    <button type="button" tabIndex={-1} disabled={disabled} aria-label={label} title={title}
+    <button type="button" disabled={disabled} aria-label={label} title={title}
       onMouseDown={(e) => e.preventDefault()} onClick={onClick}
       style={{ flex: "1 1 0", minHeight: 0, width: "100%", padding: 0, display: "grid", placeItems: "center", border: "none", background: "transparent",
         color: "var(--text-secondary)", fontSize: FONT_SIZE.micro, lineHeight: 1, fontFamily: "inherit", cursor: disabled ? "not-allowed" : "pointer" }}>{glyph}</button>
