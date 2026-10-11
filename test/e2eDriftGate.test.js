@@ -219,14 +219,16 @@ describe("the REAL Playwright reporter shape (captured fixture)", () => {
   });
 
   it("produces exactly the id shape the committed ledger uses", () => {
-    // RE-PINNED 2026-08-08 (B276449 fixed flood-district-scoping:133, so the previous capture aged
-    // out — see the fixture's own $comment). Now aimed at the external-GIS family, which is the
-    // whole of the local-lane ledger and the least likely to be fixed from a sandbox with no egress.
+    // RE-PINNED 2026-10-11 (R3, B1857905 — the previous capture aged out exactly as this test's own
+    // failure message warns: the two ids pinned here, both in layer-point-hover-identify.spec.js,
+    // are the last two rows e2e/known-red.json carried and both are now fixed — see that file's
+    // own $comment for the account. The fixture was re-captured from a real run of the SAME spec
+    // file against the current build: 0 failures, matching the ledger's own local lane (now empty).
+    // An EMPTY exact-equality is still the id-shape pin this test exists to be: if a future change
+    // to collectCases ever produced a spurious or malformed failing id, this goes red precisely
+    // because it is pinned to a literal array, not a count.
     const failing = cases.filter((c) => c.status === "failed").map((c) => c.id);
-    expect(failing).toEqual([
-      "e2e/layer-point-hover-identify.spec.js:315 › electric layer point symbols + hover identify (NEW-1/NEW-2) › hovering a RASTER-painted layer identifies it through the service",
-      "e2e/layer-point-hover-identify.spec.js:345 › electric layer point symbols + hover identify (NEW-1/NEW-2) › an unreachable identify service says so, briefly — never a hanging spinner",
-    ]);
+    expect(failing).toEqual([]);
   });
 
   it("reads a PASSING case too — the status mapping is exercised in both directions", () => {
@@ -234,9 +236,12 @@ describe("the REAL Playwright reporter shape (captured fixture)", () => {
     // by this guard at all. A collector that mislabelled a pass would have gone unnoticed, and
     // the gate's stale-entry half — the one that makes the ledger shrink — runs entirely on
     // passes.
+    // R3 (B1857905): line number re-pinned from 217 to 264 — the fixture was re-captured after two
+    // new tests (transmission-line hover, ambient-hover-silence) were added earlier in this spec
+    // file, which shifted every line number below them; the test itself is unchanged.
     const passed = cases.filter((c) => c.status === "passed").map((c) => c.id);
     expect(passed).toContain(
-      "e2e/layer-point-hover-identify.spec.js:217 › electric layer point symbols + hover identify (NEW-1/NEW-2) › substation POINTS paint as circleMarkers, never a broken default marker",
+      "e2e/layer-point-hover-identify.spec.js:264 › electric layer point symbols + hover identify (NEW-1/NEW-2) › substation POINTS paint as circleMarkers, never a broken default marker",
     );
   });
 

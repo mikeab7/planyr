@@ -67,7 +67,9 @@ describe("(2) the confirmed-dead-storageKey heal fires whether or not the record
     expect(healBody).not.toMatch(/&&\s*!o\.idbKey/);
   });
   it("still requires a confirmed-missing reason, a real storageKey, and an active cloud session", () => {
-    expect(healBody).toMatch(/reason === "missing" && o\.storageKey && isCloudActive\(\)/);
+    // NEW-1 (B2244016) — the three conditions now live in mayHealMissingOverlay (lib/overlayHeal.js,
+    // test/overlayHealGuard.test.js), which ALSO requires the key to sit in the reader's own folder.
+    expect(healBody).toMatch(/reason === "missing" && mayHealMissingOverlay\(\{ key: o\.storageKey, missing: res\.missing, uid: activeUid\(\), cloudActive: isCloudActive\(\) \}\)/);
   });
 
   // ⛔ MUTATION CHECK — the PRE-FIX guard, which is exactly what left the Woods Road overlay

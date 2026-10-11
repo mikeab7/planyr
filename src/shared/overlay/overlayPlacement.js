@@ -320,17 +320,47 @@ export function anchorVisibleCentre(o0, patch) {
 }
 
 /** GEO half — apply `patch` (ftPerPx / rotationDeg) to placement-bearing overlay `o0`, then move the
- * anchor (centerLat/centerLon) so the VISIBLE centre keeps its lat/lon. Returns the full next overlay. */
-export function anchorVisibleCentreGeo(o0, patch) {
-  const c = visibleCenterPx(o0);
-  const before = imagePointToLatLon(o0, o0.imgW, o0.imgH, c.x, c.y);
+ * anchor (centerLat/centerLon) so the image point (px, py) keeps its lat/lon. Returns the full next
+ * overlay. The pivot generalisation of `anchorVisibleCentreGeo` (NEW-7: a traced length scales about the
+ * traced segment's midpoint, so what the person measured stays put on the map). */
+export function anchorImagePointGeo(o0, px, py, patch) {
+  const before = imagePointToLatLon(o0, o0.imgW, o0.imgH, px, py);
   let o1 = { ...o0, ...patch };
   if (!before) return o1;
   // Two passes: grid convergence depends (very slightly) on the anchor, which the first pass moves.
   for (let i = 0; i < 2; i++) {
-    const after = imagePointToLatLon(o1, o1.imgW, o1.imgH, c.x, c.y);
+    const after = imagePointToLatLon(o1, o1.imgW, o1.imgH, px, py);
     if (!after) return o1;
     o1 = { ...o1, centerLat: o1.centerLat + (before.lat - after.lat), centerLon: o1.centerLon + (before.lon - after.lon) };
   }
   return o1;
+}
+
+/** GEO half — apply `patch` to `o0`, then move the anchor so the VISIBLE centre keeps its lat/lon. */
+export function anchorVisibleCentreGeo(o0, patch) {
+  const c = visibleCenterPx(o0);
+  return anchorImagePointGeo(o0, c.x, c.y, patch);
+}
+
+/** GEO half (NEW-7, "Match 2 points") — fit the placement so each drawing point lands on its map spot.
+ * `pairs` = [{ img: {x, y} (image px), ll: {lat, lon} }], 2 or more. Solved as a similarity (uniform scale +
+ * rotation + shift, never a flip) in the placement's own State Plane frame, exactly the frame
+ * `imagePointToLatLon` maps through, so the result round-trips: feeding the returned placement back through
+ * `imagePointToLatLon` lands each img point on its ll (exactly for 2 pairs, best-fit for more).
+ * Returns { centerLat, centerLon, ftPerPx, rotationDeg, residualFt } or null (fewer than 2 distinct points). */
+export function alignOverlayGeo(o, pairs) {
+  if (!validPlacement(o) || !(o.imgW > 0) || !(o.imgH > 0) || !Array.isArray(pairs) || pairs.length < 2) return null;
+  const { toGrid, toProject } = projectorsFor(o.centerLat, o.centerLon);
+  const fit = solveSimilarityLSQ(pairs.map(({ img, ll }) => {
+    const g = toGrid(ll.lat, ll.lon);
+    return { from: { x: img.x - o.imgW / 2, y: img.y - o.imgH / 2 }, to: { x: g.x, y: -g.y } }; // both y-down
+  }));
+  if (!fit || !(fit.scale > 0)) return null;
+  const T = fit.apply({ x: 0, y: 0 });                      // the image centre, in the y-down grid frame
+  const centre = toProject({ x: T.x, y: -T.y });
+  const conv = gridConvergenceDeg(centre.lat, centre.lon);  // rotationDeg = gridRotation + convergence
+  return {
+    centerLat: centre.lat, centerLon: centre.lon, ftPerPx: fit.scale,
+    rotationDeg: normalizeDeg(fit.rotDeg + (conv == null ? 0 : conv)), residualFt: fit.residual,
+  };
 }

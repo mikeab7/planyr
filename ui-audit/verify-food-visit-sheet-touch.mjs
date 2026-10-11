@@ -168,7 +168,7 @@ try {
     let s = await sheetState(page);
     await ts.drag(s.x, s.handleY, s.handleY + 300, { ms: 600 }); await sleep(600);
     s = await sheetState(page);
-    await ts.drag(s.x, s.handleY, s.handleY - 70, { ms: 70, steps: 5 }); await sleep(600); // a short, fast flick
+    await ts.drag(s.x, s.handleY, s.handleY - 70, { ms: 20, steps: 2 }); await sleep(600); // a short, fast flick (few steps: remote CDP latency would otherwise slow it below flick speed)
     const a = await sheetState(page);
     check("5h a short fast flick up moves to the next stop", a.h > s.h + 40, `${s.h} -> ${a.h}`);
     await ctx.close();

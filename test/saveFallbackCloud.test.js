@@ -4,9 +4,23 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // (underlay/sheetOverlays/parcelDrawings) so geometry still persists, and (2) the cloud save must never
 // be blocked by a local failure — pushModelToCloud ships the LIVE model (not a re-read of the failed
 // store). Mock the cloud layer so the push is observable without a network.
+//
+// B506/B507 (R3, B1857905) — this mock is also what lets the describe block near the bottom of this
+// file EXECUTE the rejection path SitePlanner.jsx's two device-full `.catch()` handlers depend on,
+// rather than grepping for their source text (test/bugHuntGuards.test.js used to do that; see this
+// file's own header for why that check moved here). `cloudUpsertThrows` flips `cloudUpsert` from its
+// normal resolve-with-`{ok:true}` behaviour to a genuine rejection, so a test can prove
+// `pushModelToCloud` propagates it instead of swallowing it — the one thing a source-text match could
+// never tell apart from a `.catch(() => ({ok:false}))` added INSIDE `pushModelToCloud` that would make
+// SitePlanner.jsx's own `.catch()` permanently unreachable.
+let cloudUpsertThrows = false;
 const upserts = [];
 vi.mock("../src/workspaces/site-planner/lib/cloudSync.js", () => ({
-  cloudUpsert: vi.fn(async (uid, model) => { upserts.push({ uid, model }); return { ok: true }; }),
+  cloudUpsert: vi.fn(async (uid, model) => {
+    if (cloudUpsertThrows) throw new Error("network error — simulated for B506/B507");
+    upserts.push({ uid, model });
+    return { ok: true };
+  }),
   cloudDelete: vi.fn(async () => ({ ok: true })),
   cloudList: vi.fn(async () => []),
   clearSiteVersions: vi.fn(),
@@ -86,6 +100,44 @@ describe("B473 — device-full degrades gracefully + the cloud save is never blo
     const r = await pushModelToCloud({ els: [bld("a")] });
     expect(r.ok).toBe(false);
     expect(upserts.length).toBe(0);
+  });
+});
+
+/* B506/B507 (R3, B1857905) — EXECUTED coverage for the device-full cloud-push rejection path, in
+ * place of test/bugHuntGuards.test.js's old source-text match on SitePlanner.jsx's two
+ * `.catch(() => { set…Failed(true); … })` call sites. Those call sites both do the exact same
+ * thing — pushModelToCloud(payload).then(r => …).catch(() => { surface the honest failure }) — so
+ * what actually has to be TRUE for either `.catch()` to matter is that `pushModelToCloud` really
+ * propagates a rejection rather than resolving `{ok:false}` for every failure (the earlier "rejects
+ * a model with no id" test above proves the id-check path resolves, not rejects — this is the OTHER
+ * path, where the underlying `cloudUpsert` call itself throws). A source-text grep can only confirm
+ * the five words ".catch(() => { setXFailed(true)" still appear somewhere in a 30,000-line file; it
+ * cannot tell a live `.catch()` apart from one some future change makes unreachable by having
+ * `pushModelToCloud` swallow the error one layer down. This drives the real function with a mock
+ * that genuinely throws and asserts the rejection survives the trip through `pushModelToCloud`,
+ * `createSiteModel`, and back out — the one thing that has to hold for SitePlanner.jsx's own
+ * `.catch()` handlers to ever run. */
+describe("B506/B507 — a genuinely rejecting cloud push survives the trip through pushModelToCloud", () => {
+  beforeEach(() => { upserts.length = 0; cloudUpsertThrows = false; setActiveUser(null); });
+
+  it("cloudUpsert throwing propagates as a REJECTED promise, not a resolved {ok:false}", async () => {
+    mockLocalStorage();
+    setActiveUser("u5");
+    cloudUpsertThrows = true;
+    await expect(pushModelToCloud({ id: "s5", els: [bld("a")] })).rejects.toThrow(/network error/);
+    expect(upserts.length).toBe(0); // the throw happened before cloudUpsert could record anything
+  });
+
+  it("once cloudUpsert stops throwing, the SAME model id pushes clean (the failure was transient)", async () => {
+    mockLocalStorage();
+    setActiveUser("u5");
+    cloudUpsertThrows = true;
+    await expect(pushModelToCloud({ id: "s5", els: [bld("a")] })).rejects.toThrow();
+    cloudUpsertThrows = false;
+    const r = await pushModelToCloud({ id: "s5", els: [bld("a")] });
+    expect(r.ok).toBe(true);
+    expect(upserts.length).toBe(1);
+    expect(upserts[0].model.id).toBe("s5");
   });
 });
 

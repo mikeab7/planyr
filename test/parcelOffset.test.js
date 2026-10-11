@@ -136,3 +136,28 @@ describe("outsetPolygon (the selection-outline halo geometry, B848720)", () => {
     expect(Math.max(...ys)).toBeCloseTo(304, 1);
   });
 });
+
+import { setbackEnvelope } from "../src/workspaces/site-planner/lib/parcelOffset.js";
+describe("setbackEnvelope — loud collapse detection (NEW-1)", () => {
+  const LOT = [{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 300 }, { x: 0, y: 300 }]; // 100 ft wide
+  it("a sane setback leaves a buildable area", () => {
+    const r = setbackEnvelope(LOT, 25);
+    expect(r.collapsed).toBe(false);
+    expect(r.areaSqFt).toBeCloseTo(50 * 250, 0);
+  });
+  it("zero setbacks never collapse", () => expect(setbackEnvelope(LOT, 0).collapsed).toBe(false));
+  it("setbacks wider than the lot (60 ft each side of a 100 ft lot) collapse", () => {
+    expect(setbackEnvelope(LOT, 60).collapsed).toBe(true);
+  });
+  it("exactly consuming the width is empty", () => expect(setbackEnvelope(LOT, 50).collapsed).toBe(true));
+  it("per-edge: one big side leaves room, two opposing big sides do not", () => {
+    expect(setbackEnvelope(LOT, [10, 10, 10, 80]).collapsed).toBe(false);
+    expect(setbackEnvelope(LOT, [10, 60, 10, 60]).collapsed).toBe(true);
+  });
+  it("a curved (densified) frontage is judged on the real curve, not one straight line", () => {
+    const arc = [];
+    for (let k = 0; k <= 24; k++) { const a = Math.PI * (k / 24); arc.push({ x: 150 - 150 * Math.cos(a), y: 150 * Math.sin(a) }); }
+    expect(setbackEnvelope(arc, 25).collapsed).toBe(false);
+    expect(setbackEnvelope(arc, 140).collapsed).toBe(true);
+  });
+});

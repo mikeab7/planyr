@@ -86,7 +86,7 @@ export async function drawBuilding(page, box, { plan = "Concept A", expect: n = 
 }
 
 export async function drawLengthMeasure(page, box, { plan = "Concept A", expect: n = 1 } = {}) {
-  await page.getByRole("button", { name: "Measure modes" }).click();
+  await page.getByRole("button", { name: /^Measure mode:/ }).click();
   await page.getByRole("button", { name: "Length", exact: true }).click();
   const y = box.y + box.height * 0.62;
   await page.mouse.click(box.x + box.width * 0.30, y);

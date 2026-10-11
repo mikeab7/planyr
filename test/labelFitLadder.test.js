@@ -28,7 +28,7 @@ const LABELS = {
   short: ["Pond"],
   reflowable: ["Detention Pond", { parts: ["footprint 6.11 AC", "266,354 SF"], sep: " · ", keep: 1 }],
   plainWide: ["A Very Long Element Name Indeed", "1,234,567 SF", "1,400′ × 900′"],
-  fourLine: ["Building 12", "584,231 SF", "(incl. 4 bump-outs)", "516′ × 1,107′"],
+  fourLine: ["Building 12", "584,231 SF", "Cross-dock, 4 doors", "516′ × 1,107′"],
 };
 const bbox = (r) => { let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity; for (const p of r) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); } return { x0, x1, y0, y1 }; };
 const centroid = (r) => { let a = 0, cx = 0, cy = 0; for (let i = 0; i < r.length; i++) { const p = r[i], q = r[(i + 1) % r.length]; const f = p.x * q.y - q.x * p.y; a += f; cx += (p.x + q.x) * f; cy += (p.y + q.y) * f; } a /= 2; return { x: cx / (6 * a), y: cy / (6 * a) }; };

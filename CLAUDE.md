@@ -661,9 +661,24 @@ were split out of this file.
     showing up like shit when it gets to the real thing": grouped by source (County lots · Combined · Drawn · Other), each
     group header carrying its ACTIVE acres; ONE summary line at body size ("174.28 AC in site · 10 of 11 active" — never a
     display-size figure, "this is a professional software"); names and source lines wrap and are NEVER ellipsised; acres in one
-    fixed column with a shared right edge; no column-heading row; the padlock exists only while locked. A change to this list
+    fixed column with a shared right edge; no column-heading row; the padlock exists only while locked and lives in the right-hand icon slot (left of the eye) — never in the name block; rename is a ⋯ menu item; the site total stays the TRUE (dissolved) area and overlapping parcels are DISCLOSED (a muted overlap ICON in the icon slot per row — never a pill, never in the name block — and a second short muted summary line "N AC overlaps, counted once"; neither summary line wraps), never silent. A change to this list
     is judged on real-shaped data at every panel width in both themes — `ui-audit/verify-parcel-list-layout.mjs` (a required
     CI gate) — not on tidy fixtures. (B2243424.)
+
+21. **(2026-10-11, decided 2026-10-05) A project's OVERLAYS and COMPS follow the project's sharing; REVIEWS do not (still undecided).**
+    Michael, 2026-10-11: "if I share a site with someone, they should have access to all the overlays that I have as a default."
+    And 2026-10-05: "if I have a project, like an individual site, and there's like comps attached to it or overlays, those should
+    all be visible." Anyone who can open a shared, live plan can see and load every overlay on it (Site tab `sheetOverlays` files
+    included), and anyone who can read a project can read its Map/Comps overlays, their rasters and its comps. Visibility is
+    DERIVED by additive SELECT policies (`site-planner/db/project_follow_sharing.sql`) — never by rewriting `team_id` columns, never
+    a data migration. This AMENDS the 2026-08-09 "sharing is decided per item, site plans only" rule for overlays and comps only.
+    Review visibility stays exactly as it is. Unshared stays private; the `guard_team_share` trigger is untouched. And: a failed
+    overlay download outside the reader's own storage folder may never erase the record's pointer (`lib/overlayHeal.js`). (B2244016, B2244017.)
+
+22. **(2026-10-11) The Parcel tools ▾ menu has NO "Remove parcels — click to delete" row.** Michael approved "A · Sorted list"
+    with exactly two changes: the second heading reads EDIT, and the "Delete by clicking" line is removed. Removing a parcel from
+    the menu is the red "Delete parcel" row on a SELECTED parcel; the click-to-delete mode stays reachable only from the Parcel
+    tool's own ✕ Remove banner button. Do not put a click-to-delete row back. (B2243168.)
 
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by

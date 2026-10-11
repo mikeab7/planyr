@@ -7,6 +7,7 @@ import "leaflet/dist/leaflet.css";
 import { useProjectName, usePlanName, renameProjectChecked, renamePlanChecked } from "../../shared/names/names.js";
 import { writeIsRedundant, mayWriteForAccount } from "./lib/saveDedupe.js";
 import { readCanvasGuess, writeCanvasGuess, geometryOf } from "./lib/canvasGuess.js";
+import { mayHealMissingOverlay, overlayLoadReason } from "./lib/overlayHeal.js";
 import { loadSite, saveSite, siteExistsLocally, sitesWriteStamp, sitesWriteStillCurrent, readBackSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, initHistoryStore, backupNow, backupNowVerified, historyIdbOnly, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
 import { relTime } from "../../shared/projects/projectModel.js";
 import { collectAssetRefs, releasePlanForOverlay } from "./lib/sharedAssetRefs.js";
@@ -48,7 +49,7 @@ import {
   CLOUD_ARC_MIN_FT, CLOUD_ARC_STEP_FT, CLOUD_ARC_MAX_FT, CLOUD_ARC_DEFAULT_FT, CLOUD_STATUS_OPTIONS,
   clampCloudArcFt, cloudScallopPath, simplifyPath, cloudMetaDefaults,
 } from "./lib/cloudGeometry.js";
-import { EMPTY_TAP, tapTime, stepDoubleTap, pairsWithLastTap } from "./lib/doubleTap.js";
+import { EMPTY_TAP, tapTime, stepDoubleTap, pairsWithLastTap, DBLTAP_PX } from "./lib/doubleTap.js";
 import { DRAG_SLOP_PX, makeDragGate, stepDragGate, dragArmed } from "./lib/dragGate.js";
 import { GESTURE_SAVE_POLL_MS, deferSaveDecision } from "./lib/gestureSave.js";
 import { isDiagArmed, latchDiagArm } from "./lib/diagArm.js";
@@ -307,7 +308,7 @@ import { setbackChipRuns, setbackChipsVisible, CHIP_MIN_EDGE_PX, CHIP_MIN_SEP_PX
 // NEW-1 — the setback ring's inward offset (and the line-intersection primitive it is built on)
 // moved out of this file unchanged, so the buildable envelope a parcel's setbacks produce can be
 // proven in a unit test against real production geometry instead of only by rendering.
-import { offsetPolygon, outsetPolygon, lineIntersect } from "./lib/parcelOffset.js";
+import { offsetPolygon, outsetPolygon, lineIntersect, setbackEnvelope } from "./lib/parcelOffset.js";
 // NEW-1 — the REGULATORY tier above the two geometric ones: a zoning ordinance names four
 // setbacks (Front / Side / Street side / Rear), not fifteen digitized sides. Pure + unit-tested;
 // roles are labels over edges and never an input to a measurement, so the canonical per-edge
@@ -320,6 +321,7 @@ import { polylabel } from "./lib/polylabel.js";
 // right now. The menu is the DISCOVERABLE surface (a gesture or right-click is only ever the fast
 // path), so "every parcel action has a menu path" is a property a test asserts — not a convention.
 import { PARCEL_SURFACES, parcelMenuModel, boundaryEditHint } from "./lib/parcelActions.js";
+import { ParcelToolsMenu, MeasureMenu, MenuIcon } from "./components/RailMenus.jsx";
 // B1123 bundle-budget offset — the title reader is loaded ON DEMAND (dynamic import in
 // `runTitleExtract`). Its Claude schema + prompt are KB of string literals that minify to
 // themselves and are needed only once someone uploads a title commitment; only the tiny stored-key
@@ -781,6 +783,10 @@ const MEASURE_MODES = [["line", "Length"], ["polyline", "Polylength"], ["area", 
 const DEFAULT_ROAD_WIDTHS = "24, 26, 30, 36, 40";
 const roadWidthPresets = (settings) => (settings?.roadWidths ?? DEFAULT_ROAD_WIDTHS).split(",").map((s) => s.trim()).filter((s) => Number.isFinite(+s) && +s > 0);
 const DEFAULT_ROAD_WIDTH = roadWidthPresets(null)[0]; // "24"
+// NEW-2 — the one-line hint under each mode in Measure ▾. Each states what ACTUALLY finishes the
+// measurement (verified by e2e/measure-menu.spec.js): Enter or a double-click commits Polylength and
+// Count, Area closes on a double-click (or the first dot), Length is exactly two clicks.
+const MEASURE_HINTS = { line: "Two clicks, straight line", polyline: "Click points; double-click or Enter to finish", area: "Click corners; double-click to close", count: "Click each item; double-click or Enter to finish" };
 const measureModeLabel = (m) => { const e = MEASURE_MODES.find(([k]) => k === m); return e ? e[1] : m; };
 const MAX_DIM = 100000; // ft — sane upper clamp so a fat-fingered size can't make absurd geometry / SVG stalls
 // Relational tags that point at OTHER elements (a host building or a truck court). A copy/paste
@@ -8215,11 +8221,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (polySelfIntersects(pts)) { flashWarn(`${label} outline crosses itself — its area may be wrong. Redraw without crossing lines.`, 7000); }
     else if (polyArea(pts) < 1) { flashWarn(`${label} has almost no area — check the outline.`, 6000); }
   };
-  const finishMeasure = () => {
+  const finishMeasure = (draft = measDraft) => {
     const std = measureDefaultStyle(settings); // NEW-1 — Standards defaults, stamped at creation
-    if (measureMode === "polyline" && measDraft.length >= 2) { pushHistory(); setMeasures((m) => [...m, ...withStackZ(m, [{ id: uid(), mode: "polyline", pts: measDraft, ...std }])]); }
-    else if (measureMode === "area" && measDraft.length >= 3) { pushHistory(); setMeasures((m) => [...m, ...withStackZ(m, [{ id: uid(), mode: "area", pts: measDraft, ...std }])]); flashPolyWarn(measDraft, "Measured area"); }
-    else if (measureMode === "count" && measDraft.length >= 1) { pushHistory(); setMeasures((m) => [...m, ...withStackZ(m, [{ id: uid(), mode: "count", pts: measDraft, ...std }])]); }
+    if (measureMode === "polyline" && draft.length >= 2) { pushHistory(); setMeasures((m) => [...m, ...withStackZ(m, [{ id: uid(), mode: "polyline", pts: draft, ...std }])]); }
+    else if (measureMode === "area" && draft.length >= 3) { pushHistory(); setMeasures((m) => [...m, ...withStackZ(m, [{ id: uid(), mode: "area", pts: draft, ...std }])]); flashPolyWarn(draft, "Measured area"); }
+    else if (measureMode === "count" && draft.length >= 1) { pushHistory(); setMeasures((m) => [...m, ...withStackZ(m, [{ id: uid(), mode: "count", pts: draft, ...std }])]); }
     setMeasDraft([]);
   };
   /* NEW-1 — SPLIT ALONG AN ARBITRARY CUT. One engine, no case analysis.
@@ -10230,7 +10236,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const finishActiveDrawing = () => {
     if (traceMode && tracePts.length >= 2) { commitTrace(); return true; }
     if (tool === "split" && splitPath.length >= 2) { finishSplit(); return true; }
-    if (tool === "measure" && measDraft.length >= (measureMode === "area" ? 3 : measureMode === "count" ? 1 : 2)) { finishMeasure(); return true; }
+    if (tool === "measure" && measDraft.length >= (measureMode === "area" ? 3 : measureMode === "count" ? 1 : 2)) {
+      /* NEW-2 — the two presses of a double-click are two ordinary clicks, so the second has already
+       * dropped a point ON the first's. Take that echo back off before finishing, or a Polylength ends
+       * with a zero-length last leg, an Area with a doubled corner and a Count counts the last item
+       * twice. Only a point within the double-click's own slop of the one before it is an echo (two
+       * real items that close would be overlapping markers). */
+      const n = measDraft.length;
+      const echo = n >= 2 && dist(f2p(measDraft[n - 1]), f2p(measDraft[n - 2])) <= DBLTAP_PX;
+      const draft = echo ? measDraft.slice(0, -1) : measDraft;
+      if (draft.length >= (measureMode === "area" ? 3 : measureMode === "count" ? 1 : 2)) finishMeasure(draft);
+      else setMeasDraft(draft);
+      return true;
+    }
     if (tool === "mpolyline" && mkPoly?.pts?.length >= 2) { finishMkPoly(); return true; }
     if (tool === "mpolygon" && mkPoly?.pts?.length >= 3) { finishMkPoly(); return true; }
     if (tool === "mcloud" && mkPoly?.kind === "mcloud" && mkPoly?.pts?.length >= 3) { finishMkPoly(); return true; }
@@ -11039,7 +11057,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           // B784/B785 — nothing loaded → record a TERMINAL reason (was: silent infinite "Loading…"). A cloud
           // object confirmed gone (400/404) is "missing" (re-add); a transient failure is "network" (retryable).
           // With no cloud key at all (idb-only, local copy evicted) the bytes are simply gone → "missing" too.
-          const reason = key ? (res.missing ? "missing" : "network") : "missing";
+          // NEW-1 — a 400 "not found" from another account's folder is indistinguishable from an RLS
+          // refusal, so it is "denied" (never "gone") and may never heal the record (lib/overlayHeal.js).
+          const reason = overlayLoadReason({ key, missing: res.missing, uid: activeUid() });
           setOverlayLoadErr((m) => ({ ...m, [o.id]: reason }));
           // NEW-2 (B785) — a CONFIRMED-missing cloud object with no local copy: drop the dead pointer so
           // persistence + UI stop implying "it's in the cloud." Gated on isCloudActive() so a logged-out /
@@ -11051,7 +11071,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           // left a confirmed-dead cloud object (verified against production storage.objects — see
           // docs/incidents/INCIDENT-2026-08-13-shared-asset-delete.md) re-attempting the same doomed download
           // on every single load, forever, instead of healing to the honest "re-add or remove" state.
-          if (reason === "missing" && o.storageKey && isCloudActive())
+          // NEW-1 — ONLY the reader's OWN folder: the own-folder policy always admits it, so there a
+          // "not found" really means gone. Anywhere else a teammate's client would erase the owner's
+          // pointer in the owner's own shared plan (measured on production: 12 records, files intact).
+          if (reason === "missing" && mayHealMissingOverlay({ key: o.storageKey, missing: res.missing, uid: activeUid(), cloudActive: isCloudActive() }))
             setSheetOverlays((arr) => arr.map((x) => (x.id === o.id ? { ...x, storageKey: null, storageMissing: true } : x)));
         } catch (_) {
           setOverlayLoadErr((m) => ({ ...m, [o.id]: "network" }));
@@ -13049,7 +13072,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const parcelCadName = cadNameOf(COUNTIES[restored?.county]?.label || null);
   const parcelIdField = (COUNTIES[restored?.county] || {}).idField || null;
   const parcelAddrField = (COUNTIES[restored?.county] || {}).addrField || null;
-  const parcelRows = useMemo(() => buildParcelRows(parcels, { cadName: parcelCadName, idField: parcelIdField }), [parcels, parcelCadName, parcelIdField]);
+  const parcelRows = useMemo(() => buildParcelRows(parcels, { cadName: parcelCadName, idField: parcelIdField, overlapPairs: parcelOverlapPairs }), [parcels, parcelCadName, parcelIdField, parcelOverlapPairs]);
   const pickedParcelIds = useMemo(() => new Set(combineSel), [combineSel]);
   const parcelSiteAcres = useMemo(() => includedAcres(parcels), [parcels]);
   const parcelActsRef = useRef({});
@@ -17689,13 +17712,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const bn = bldgNo.get(el.id); // B122: a standalone building shows "Building N"
       const name = bn ? `Building ${bn}` : (TYPE[el.type]?.label || "Element").split(" / ")[0];
       if (el.type === "building" && !poly && !el.dogEar) {
-        // B123: the building label is a 4-line stack — name / sf / (incl. N bump-outs) /
-        // dims. sf is its own line and sits high in the drop order (lib/labelLayout), so it
-        // survives zoom-out far longer than the dimensions; the parenthetical shows only
-        // when the building has bump-outs (whose area is folded into the on-plan sf).
+        // B123: the building label is a 3-line stack — name / sf / dims. sf is its own line and
+        // sits high in the drop order (lib/labelLayout), so it survives zoom-out far longer than
+        // the dimensions. Bump-out area is folded into the on-plan sf; NEW-1 removed the
+        // "(incl. N bump-outs)" wording from the label (it is not shown anywhere on the canvas).
         const bumps = els.filter((x) => x.attachedTo === el.id && x.dogEar);
         const ba = bumps.reduce((s, b) => s + b.w * b.h, 0);
-        lines = buildingLabelLines({ name, sqft: showAreas ? `${f0(area + ba)} SF` : null, bumpCount: bumps.length, dims: `${f0(el.w)}′ × ${f0(el.h)}′` });
+        lines = buildingLabelLines({ name, sqft: showAreas ? `${f0(area + ba)} SF` : null, dims: `${f0(el.w)}′ × ${f0(el.h)}′` });
       } else if (el.type === "trailer") {
         // B194: the trailer-parking label is TWO lines — "<stall depth>′ Trailer Parking" then
         // the trailer count. The stall depth is the per-stall trailer LENGTH (the depth a trailer
@@ -17998,8 +18021,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           // NEW-1 — keyed on the element's own id (was `${id}:label`), same lastTapRef-poison fix as
           // the dimension number: a label that overhangs its shape took press 2 of a real
           // double-click under a private key, so the pair dissolved and the record was clobbered.
-          if (isDoubleTap(e, d.el.id, wasSel)) { featureDoubleAction({ kind: "el", id: d.el.id }, e); return; }
-          setSel({ kind: "el", id: d.el.id });   // single click: select only (NEW-1)
+          // A GROUPED or LOCKED element is the one case startMoveEl does not pair a double-tap for,
+          // so the label keeps pairing it here; every other element pairs inside startMoveEl itself
+          // (same key, same wasSel) — asking twice would eat the pair.
+          if ((d.el.groupId || d.el.locked) && isDoubleTap(e, d.el.id, wasSel)) { featureDoubleAction({ kind: "el", id: d.el.id }, e); return; }
+          // NEW-2 (2026-10-11) — A PRESS ON A LABEL IS A PRESS ON ITS ELEMENT. This handler used to
+          // select and stop there, so a press that began on the sf label and dragged moved nothing
+          // (the label stops the event, and nothing else armed the move). It now hands the press to
+          // the element body's own `startMoveEl`: single click selects, drag moves (same history
+          // gate, same assembly members, same group/multi/lock/phone-pan rules), double-click opens
+          // Properties. One handler for every element type whose label this renders.
+          startMoveEl(e, d.el.id);
         } : undefined}
         onContextMenu={labelInteractive ? (e) => onElContext(e, d.el.id) : undefined}>
         {/* B875 (edit-path recurrence) — a pond label sits OVER the basin and, since #656, is
@@ -18907,7 +18939,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           // "missing" (bytes are gone) and "network" (couldn't reach storage): re-adding the same file
           // is unlikely to help since the file is fine, but retrying the same bytes forever is a dead
           // end, so this asks the user to try again with a fresh export from their CAD/PDF tool.
-          const label = (ovErr === "missing" || o.storageMissing)
+          const label = ovErr === "denied"
+            ? `Couldn't load “${o.name}” — shared file not readable from this account · click to retry`
+            : (ovErr === "missing" || o.storageMissing)
             ? `Couldn't load “${o.name}” — click to re-add the file`
             : ovErr === "render"
               ? `Couldn't render “${o.name}” — click to re-add the file`
@@ -18928,7 +18962,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             pointerEvents={tool === "select" ? "auto" : "none"}
             style={{ cursor: (tool !== "select" || editingCorners) ? "crosshair" : (ovLoading ? "default" : "pointer") }}
             onPointerDown={(e) => e.stopPropagation()}
-            onClick={ovLoading ? undefined : (e) => { e.stopPropagation(); if (ovErr === "network") retryOverlay(o.id); else reAddOverlay(o.id); }}>
+            onClick={ovLoading ? undefined : (e) => { e.stopPropagation(); if (ovErr === "network" || ovErr === "denied") retryOverlay(o.id); else reAddOverlay(o.id); }}>
             <rect x={tl.x} y={tl.y} width={w} height={h} fill="#fbf3ee" fillOpacity={0.55} stroke={PAL.accent} strokeWidth={1.5} strokeDasharray="8 5" />
             <text x={cx} y={ovLoading ? cy : cy - 8} textAnchor="middle" fontSize={13} fill={PAL.accent}>{label}</text>
             {!ovLoading && (
@@ -21911,6 +21945,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700, marginBottom: 6 }}>Setbacks</div>
         <SetbackSections points={pc.points} sections={secs} selectedKey={selSectionKey} onSelect={setSelSectionKey} onSetValue={sbSectionValue} onSetAll={sbAllValue} onToggleVertex={sbToggleVertex}
           showLine={settings.showSetback} onShowLine={(v) => setSettings((st) => ({ ...st, showSetback: v }))}
+          collapsed={setbackEnvelope(pc.points, parcelSetbacks(pc)).collapsed}
           resetLabel={`Reset to default (${settings.setback}′)`}
           onResetAll={() => { pushHistory(); setParcels((a) => a.map((p) => p.id === pc.id ? { ...p, setbacks: Array.from({ length: p.points.length }, () => +settings.setback || 0) } : p)); }}
           renderNum={(value, onCommit, ariaLabel) => <NumInput style={{ ...numInput, width: 54 }} value={value} min={0} ariaLabel={ariaLabel} onCommit={onCommit} />} />
@@ -24176,6 +24211,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 if (!insetRingVisible(Math.min(...posSb), labelPpf)) return null;
                 const o = offsetPolygon(pc.points, sb);
                 if (!o) return null;
+                // NEW-1 — LOUD FAILURE: setbacks wider than the lot leave nothing to build on; say so on the plan.
+                const gone = setbackEnvelope(pc.points, sb).collapsed;
                 const zk = strokeZk; // B617/B880 zoom factor — hold the setback weight + dash constant relative to the drawing (NEW-1: 1 on an export pass)
                 const ring = o.map((p) => `${f2p(p).x},${f2p(p).y}`).join(" ");
                 // NEW-1 — the setback line's own standards (colour / weight / style), stamped at
@@ -24191,7 +24228,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 const dash = explicit ? sbs.dash : "2 5";
                 // NEW-2 — CASING under the ring, on the same dash so the halo dashes with it.
                 const sbCase = strokeZoom(sbs.weight + PARCEL_CASING_W, zk);
+                const goneAt = gone ? polylabel(pc.points) : null;
                 return <g key={`sb${pc.id}`} opacity={explicit ? 1 : 0.65}>
+                  {goneAt && (() => { const c = f2p(goneAt); return (
+                    <text data-testid="setback-collapsed-badge" x={c.x} y={c.y} textAnchor="middle" dominantBaseline="central" pointerEvents="none"
+                      style={{ fontSize: 12, fontWeight: 700, fill: "var(--danger-text)", paintOrder: "stroke", stroke: "var(--surface-raised)", strokeWidth: 3, strokeLinejoin: "round" }}>Setbacks exceed parcel — no buildable area</text>); })()}
                   <polygon data-testid="setback-casing" points={ring} fill="none" stroke={PAL.lineCasing} strokeWidth={sbCase} strokeDasharray={dashZoom(dash, zk)} strokeLinejoin="round" pointerEvents="none" />
                   <polygon data-testid="setback-ring" data-setback-explicit={explicit ? "1" : "0"} points={ring} fill="none" stroke={sbs.stroke} strokeWidth={strokeZoom(sbs.weight, zk)} strokeDasharray={dashZoom(dash, zk)} strokeOpacity={sbs.opacity} pointerEvents="none" />
                   {/* NEW-4 — the SELECTED lot's grab band is not drawn here: it moves up into the
@@ -26023,15 +26064,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             <AnchoredMenu open={toolMenu} onClose={() => setToolMenu(false)} anchorRef={boundaryAnchor} placement="left" gap={0} width={272} panelStyle={menuPanel}>
               {(() => {
                 const pcm = menuParcel();
+                // THIS PARCEL is about the parcel that is actually SELECTED — a plan's only lot
+                // fills in for Delete alone (`canDelete`), as it always has.
+                const selPc = sel?.kind === "parcel" ? parcels.find((x) => x.id === sel.id) || null : null;
+                const selRow = selPc ? parcelRows.find((r) => r.id === selPc.id) : null;
                 const groups = parcelMenuModel({
                   parcelCount: parcels.length,
                   activeCount: parcels.filter((p) => p.active !== false).length,
                   hasOrigin: !!origin,
-                  selected: pcm ? { locked: !!pcm.locked, active: pcm.active, chipHidden: !!pcm.chipHidden, labelOffset: pcm.labelOffset || null } : null,
+                  selected: selPc ? { locked: !!selPc.locked, active: selPc.active, chipHidden: !!selPc.chipHidden, labelOffset: selPc.labelOffset || null, name: selRow?.name || parcelLabel(selPc.id), acres: selRow ? selRow.acres : null, color: selPc.stroke || PAL.parcel } : null,
+                  canDelete: !!pcm,
                   tool, parcelMode, mergePick, boundaryEdit,
                 });
                 // id → what it does. Every entry arms an EXISTING path; nothing here is a second
-                // implementation of an action that already lives somewhere else.
+                // implementation of an action that already lives somewhere else. The three SWITCH
+                // rows (lock / active / chip) apply in place and leave the menu OPEN.
                 const run = {
                   draw: () => selectTool("parcel"),
                   deed: () => { setToolMenu(false); setTitleErr(""); setDeedErr(""); setDeedBusy(false); setTitleOpen(true); },
@@ -26041,64 +26088,34 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   combine: () => { setToolMenu(false); if (mergePick) exitMergePick(); else startMergePick(); },
                   boundary: () => { setToolMenu(false); if (boundaryEdit) exitBoundaryEdit(); else startBoundaryEdit(); },
                   setbacks: () => openLandPanel(),
-                  lock: () => { if (pcm) toggleParcelLock(pcm.id); setToolMenu(false); },
-                  active: () => { if (pcm) toggleParcelActive(pcm.id); setToolMenu(false); },
-                  chip: () => { if (pcm) setParcelChipHidden(pcm.id, !pcm.chipHidden); setToolMenu(false); },
-                  chipReset: () => { if (pcm) resetParcelChipOffset(pcm.id); setToolMenu(false); },
-                  removeMode: () => startRemoveParcels(),
+                  lock: () => { if (selPc) toggleParcelLock(selPc.id); },
+                  active: () => { if (selPc) toggleParcelActive(selPc.id); },
+                  chip: () => { if (selPc) setParcelChipHidden(selPc.id, !selPc.chipHidden); },
+                  chipReset: () => { if (selPc) resetParcelChipOffset(selPc.id); setToolMenu(false); },
                   deleteSelected: () => { if (pcm) removeParcelById(pcm.id); setToolMenu(false); },
                 };
-                return groups.map((g, gi) => (
-                  <div key={g.id}>
-                    {gi > 0 && <div style={{ borderTop: `1px solid ${PAL.panelLine}`, margin: "5px 2px 3px" }} />}
-                    <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 5px" }}>{g.label}</div>
-                    {/* NEW-2 (B849585) — a group whose rows are ALL disabled states its reason once,
-                        here, instead of leaving it to be inferred from N silently-greyed rows. */}
-                    {g.reason && (
-                      <div data-parcel-group-reason={g.id} style={{ fontSize: 10.5, color: PAL.muted, lineHeight: 1.35, padding: "0 8px 6px" }}>{g.reason}</div>
-                    )}
-                    {/* Every row is addressable by `data-parcel-action` (the uniform hook the guards
-                        and the e2e spec use). The Deed row additionally keeps its historical
-                        `boundary-menu-mb` testid — two ui-audit harnesses click it by that name.
-                        NEW-2 (B849585) — a disabled row also drops OPACITY (matching the Button/
-                        IconButton primitive's own `disabled → opacity: 0.5` in docs/DESIGN.md),
-                        never a color-token swap alone: the color-only treatment read as ordinary
-                        secondary text, indistinguishable from an enabled row at a glance. */}
-                    {g.rows.map((r) => (
-                      <button key={r.id} data-parcel-action={r.id}
-                        data-testid={r.id === "deed" ? "boundary-menu-mb" : `parcel-menu-${r.id}`} disabled={!r.enabled}
-                        title={r.enabled ? undefined : r.disabledReason}
-                        aria-pressed={r.active || undefined}
-                        style={{ ...menuItem(r.active), display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10,
-                          ...(r.enabled ? (r.danger ? { color: PAL.danger } : {}) : { color: PAL.disabled, ...disabledRow }) }}
-                        onClick={r.enabled ? run[r.id] : undefined}>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                          {r.id === "deed" && <ToolIcon id="deed" size={13} />}
-                          {r.label}
-                        </span>
-                        {r.detail && <span style={{ fontSize: 10.5, fontWeight: 600, color: r.enabled ? PAL.muted : PAL.disabled, whiteSpace: "nowrap" }}>{r.detail}</span>}
-                      </button>
-                    ))}
-                  </div>
-                ));
+                return <ParcelToolsMenu groups={groups} run={run} menuItem={menuItem} disabledRow={disabledRow} />;
               })()}
             </AnchoredMenu>
           </div>
 
           {/* measure with line / polyline / area / count modes — promoted to sit just below Tools (B605) */}
           <div ref={measureAnchor} style={{ position: "relative" }}>
+            {/* NEW-2 (2026-10-11) — the ▾ pill shows the REMEMBERED mode's icon (not the word), in the same
+                value-pill slot Road/Parking use, so the ▾ column stays aligned. The label arms that mode
+                directly (`measureMode` is persisted); the ▾ opens the explained list. */}
             <RailSplit icon={<ToolIcon id="measure" />} label="Measure" narrow={narrow} active={tool === "measure"}
               rowStyle={rbtn(tool === "measure", measureMenu)} onMain={() => selectTool("measure")} expanded={measureMenu}
-              mainProps={{ "aria-pressed": tool === "measure" }}
-              onCaret={() => setMeasureMenu((o) => !o)} caretLabel="Measure modes" />
+              mainProps={{ "aria-pressed": tool === "measure", title: `Measure — starts ${measureModeLabel(measureMode)}, your last mode` }}
+              onCaret={() => setMeasureMenu((o) => !o)} caretLabel={`Measure mode: ${measureModeLabel(measureMode)}`}
+              value={<MenuIcon id={measureMode} size={13} />} valueTitle={`Measure mode: ${measureModeLabel(measureMode)} · click to change`} pillTestid="rail-measure-mode-pill"
+              caretProps={{ "data-measure-mode-current": measureMode }} />
             {/* NEW-4 (B849587) — `below-right`, anchored on the WHOLE split control: the panel's
                 right edge lands under the caret's own right edge (the control actually pressed),
                 never off to the left of the entire row. */}
-            <AnchoredMenu open={measureMenu} onClose={() => setMeasureMenu(false)} anchorRef={measureAnchor} placement="below-right" width={230} panelStyle={menuPanel}>
-              <div style={{ fontSize: 10.5, color: PAL.muted, textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700, padding: "4px 8px 6px" }}>Measure</div>
-              {MEASURE_MODES.map(([k, label]) => (
-                <button key={k} style={menuItem(tool === "measure" && measureMode === k)} onClick={() => { setMeasureMode(k); selectTool("measure"); setMeasureMenu(false); }}>{label}</button>
-              ))}
+            <AnchoredMenu open={measureMenu} onClose={() => setMeasureMenu(false)} anchorRef={measureAnchor} placement="below-right" width={296} panelStyle={menuPanel}>
+              <MeasureMenu modes={MEASURE_MODES} hints={MEASURE_HINTS} current={measureMode} menuItem={menuItem} accentSoft={PAL.accentSoft}
+                onPick={(k) => { setMeasureMode(k); selectTool("measure"); setMeasureMenu(false); }} />
             </AnchoredMenu>
           </div>
 

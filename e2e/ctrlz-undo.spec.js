@@ -61,16 +61,6 @@ function calloutCount(page) {
   });
 }
 
-// Raw (unfallback-resolved) fillOpacity on the first building — undefined until explicitly set.
-function rawBuildingFillOpacity(page) {
-  return page.evaluate(() => {
-    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
-    const site = map[Object.keys(map)[0]] || {};
-    const b = (site.els || []).find((e) => e.type === "building");
-    return b ? b.fillOpacity : undefined;
-  });
-}
-
 // Drag a building rectangle; returns its approximate CENTER in client px (matches click-behavior.spec.js).
 async function drawBuilding(page) {
   const box = await canvas(page).boundingBox();
@@ -93,15 +83,65 @@ async function openProperties(page, cx, cy) {
   await expect(panel(page)).toBeVisible();
 }
 
+// Read the logged-out site model's first CLOUD markup's raw fillOpacity straight from
+// localStorage (on-disk truth) — companion to rawBuildingFillOpacity above.
+function rawCloudFillOpacity(page) {
+  return page.evaluate(() => {
+    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const site = map[Object.keys(map)[0]] || {};
+    const m = (site.markups || []).find((x) => x.kind === "cloud");
+    return m ? m.fillOpacity : undefined;
+  });
+}
+
+// Place and finish a markup CLOUD shape (closes on Enter once ≥3 points are down) — the one
+// closed markup kind whose Fill opacity is still a literal <input type="range"> (SitePlanner.jsx
+// ~26783: "rect"/"ellipse"/"polygon" are `simpleClosedMarkup` and moved to the PercentField
+// stepper, same as a building). Returns its approximate centroid in client px, for the
+// double-click-to-open-Properties gesture `openProperties` already does for a building.
+async function drawCloud(page) {
+  const box = await canvas(page).boundingBox();
+  await page.keyboard.press("c"); // bare C selects the Cloud tool (tool-mcloud)
+  for (const [px, py] of PTS) await page.mouse.click(box.x + px, box.y + py);
+  await page.keyboard.press("Enter"); // finishes the path — mkMinPts("cloud") is 3, PTS has 5
+  await expect.poll(() => page.evaluate(() => {
+    const map = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}");
+    const site = map[Object.keys(map)[0]] || {};
+    return (site.markups || []).filter((m) => m.kind === "cloud").length;
+  })).toBeGreaterThanOrEqual(1);
+  const cx = Math.round(box.x + PTS.reduce((s, p) => s + p[0], 0) / PTS.length);
+  const cy = Math.round(box.y + PTS.reduce((s, p) => s + p[1], 0) / PTS.length);
+  return { cx, cy };
+}
+
 test.describe("Ctrl+Z reliability while the Fill-opacity slider holds focus (B746/V258)", () => {
+  /* ⛔ R3 (B1857905) — THIS TEST USED TO DRAW A BUILDING. A building's Fill opacity control is
+   * `PercentField`/`NumInput` (SitePlanner.jsx ~31774/~32215) — a plain text
+   * `<input aria-label="Fill opacity">` with an arrow-key stepper, not an `<input type="range">`
+   * — confirmed against the real Properties panel's accessibility tree (no `range` input appears
+   * anywhere in it). Measured directly: Ctrl+Z while that field holds focus does NOT reach the
+   * app's global undo, and that is CORRECT, current, deliberate behaviour, not a regression —
+   * `keyScopeVerdict` (lib/keyContract.js) classifies a plain text input as `SCOPE.FIELD`, and a
+   * FIELD deliberately refuses undo/redo so Ctrl+Z stays the box's own native text-undo (the
+   * exact rule this file's OWN sibling test two cases below already asserts for a callout's text
+   * editor). Only `SCOPE.SLIDER` — a literal `input[type=range]` — carries B746/V258's exception
+   * ("a slider has no native undo to consume"), and a slider still exists, for a CLOSED markup
+   * that is NOT `simpleClosedMarkup` — concretely, a "cloud" revision-cloud shape
+   * (SitePlanner.jsx ~26783). So the control this test is actually about was never removed from
+   * the product, only from the BUILDING panel; the repair below re-targets the one remaining
+   * SLIDER-scoped instance instead of asserting a FIELD-scoped contract the product no longer
+   * has for a building. */
   test("drag the Fill-opacity slider, then Ctrl+Z WITHOUT deselecting still undoes it", async ({ page }) => {
     const errors = [];
     page.on("pageerror", (e) => errors.push(String(e)));
     await startBlank(page);
-    const { cx, cy } = await drawBuilding(page);
+    const { cx, cy } = await drawCloud(page);
     await openProperties(page, cx, cy);
 
-    const slider = panel(page).locator('input[type="range"]');
+    // A cloud's Properties panel carries TWO range inputs (overall "Opacity" and this field's own
+    // "Fill opacity") — scope to the row whose own label names it, the same way a human would find
+    // the right control by reading the panel.
+    const slider = panel(page).locator('div[data-field-group="1"]').filter({ hasText: "Fill opacity" }).locator('input[type="range"]');
     await expect(slider).toBeVisible();
 
     // Change the slider's value with the keyboard (native range behavior) — this leaves focus ON
@@ -111,12 +151,12 @@ test.describe("Ctrl+Z reliability while the Fill-opacity slider holds focus (B74
     // Arrow presses — under parallel-worker load, consecutive keydowns can outrun React's
     // re-render and drop a step, making the test itself flaky.
     await slider.focus();
-    const beforeRaw = await rawBuildingFillOpacity(page); // undefined — nothing explicitly set yet
+    const beforeRaw = await rawCloudFillOpacity(page); // undefined — nothing explicitly set yet
     const displayed = parseFloat(await slider.inputValue());
-    const key = displayed > 0.5 ? "Home" : "End"; // jump to the opposite end, safely inside [0.1, 1]
+    const key = displayed > 0.5 ? "Home" : "End"; // jump to the opposite end, safely inside [0, 1]
     await page.keyboard.press(key);
-    await expect.poll(() => rawBuildingFillOpacity(page)).not.toBe(beforeRaw);
-    const changedRaw = await rawBuildingFillOpacity(page);
+    await expect.poll(() => rawCloudFillOpacity(page)).not.toBe(beforeRaw);
+    const changedRaw = await rawCloudFillOpacity(page);
 
     // Before the fix: the global Ctrl+Z handler saw document.activeElement === this <input> and
     // silently returned without ever calling undo(). Focus is still on the slider here — nothing
@@ -138,17 +178,17 @@ test.describe("Ctrl+Z reliability while the Fill-opacity slider holds focus (B74
      * was intentional and correct.
      *
      * Measured on the real app before rewriting these lines: after the undo the stored value is
-     * back to its original, the building is STILL SELECTED (47 handles, unchanged across the whole
-     * sequence), the slider is still mounted, and "Nothing selected" never appears. So the
-     * assertions now say that — the undo ran AND the selection survived. */
-    await expect.poll(() => rawBuildingFillOpacity(page)).toBe(beforeRaw);
+     * back to its original, the shape is STILL SELECTED, the slider is still mounted, and
+     * "Nothing selected" never appears. So the assertions now say that — the undo ran AND the
+     * selection survived. */
+    await expect.poll(() => rawCloudFillOpacity(page)).toBe(beforeRaw);
     await expect(panel(page)).toBeVisible();
     await expect(page.getByText(/Nothing selected/i)).toHaveCount(0);
     await expect(slider).toHaveCount(1);
 
     // Redo (Ctrl+Shift+Z) brings the change back.
     await page.keyboard.press("Control+Shift+Z");
-    await expect.poll(() => rawBuildingFillOpacity(page)).toBe(changedRaw);
+    await expect.poll(() => rawCloudFillOpacity(page)).toBe(changedRaw);
 
     expect(errors, errors.join("\n")).toEqual([]);
   });

@@ -38,7 +38,7 @@
               "title": "substation POINTS paint as circleMarkers, never a broken default marker",
               "ok": true,
               "file": "layer-point-hover-identify.spec.js",
-              "line": 217,
+              "line": 264,
               "tests": [
                 {
                   "status": "expected",
@@ -54,7 +54,7 @@
               "title": "hovering a SUBSTATION names it — and moving off dismisses the readout",
               "ok": true,
               "file": "layer-point-hover-identify.spec.js",
-              "line": 256,
+              "line": 303,
               "tests": [
                 {
                   "status": "expected",
@@ -70,7 +70,7 @@
               "title": "a REDACTED substation still says what KIND of thing it is",
               "ok": true,
               "file": "layer-point-hover-identify.spec.js",
-              "line": 281,
+              "line": 328,
               "tests": [
                 {
                   "status": "expected",
@@ -86,7 +86,7 @@
               "title": "hovering a TRANSMISSION LINE names it with its voltage and owner",
               "ok": true,
               "file": "layer-point-hover-identify.spec.js",
-              "line": 298,
+              "line": 345,
               "tests": [
                 {
                   "status": "expected",
@@ -100,31 +100,47 @@
             },
             {
               "title": "hovering a RASTER-painted layer identifies it through the service",
-              "ok": false,
+              "ok": true,
               "file": "layer-point-hover-identify.spec.js",
-              "line": 315,
+              "line": 365,
               "tests": [
                 {
-                  "status": "unexpected",
+                  "status": "expected",
                   "results": [
                     {
-                      "status": "failed"
+                      "status": "passed"
                     }
                   ]
                 }
               ]
             },
             {
-              "title": "an unreachable identify service says so, briefly — never a hanging spinner",
-              "ok": false,
+              "title": "hovering EMPTY ground with a raster layer on shows nothing — no Checking…, no flash of failure text",
+              "ok": true,
               "file": "layer-point-hover-identify.spec.js",
-              "line": 345,
+              "line": 404,
               "tests": [
                 {
-                  "status": "unexpected",
+                  "status": "expected",
                   "results": [
                     {
-                      "status": "failed"
+                      "status": "passed"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "title": "resting over bare ground with a raster layer on never even flashes 'Checking…'",
+              "ok": true,
+              "file": "layer-point-hover-identify.spec.js",
+              "line": 420,
+              "tests": [
+                {
+                  "status": "expected",
+                  "results": [
+                    {
+                      "status": "passed"
                     }
                   ]
                 }
@@ -134,7 +150,7 @@
               "title": "the hover readout renders in the light theme",
               "ok": true,
               "file": "layer-point-hover-identify.spec.js",
-              "line": 373,
+              "line": 522,
               "tests": [
                 {
                   "status": "expected",
@@ -150,7 +166,7 @@
               "title": "the hover readout renders in the dark theme",
               "ok": true,
               "file": "layer-point-hover-identify.spec.js",
-              "line": 373,
+              "line": 522,
               "tests": [
                 {
                   "status": "expected",
@@ -162,35 +178,49 @@
                 }
               ]
             }
+          ],
+          "suites": [
+            {
+              "title": "the floodplain layer is excluded from the cursor-rest identify",
+              "file": "layer-point-hover-identify.spec.js",
+              "specs": [
+                {
+                  "title": "hovering with FEMA flood zones on opens no readout and never asks the FEMA service",
+                  "ok": true,
+                  "file": "layer-point-hover-identify.spec.js",
+                  "line": 451,
+                  "tests": [
+                    {
+                      "status": "expected",
+                      "results": [
+                        {
+                          "status": "passed"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "title": "with FEMA AND Wetlands both on, hovering a wetlands feature still reports it",
+                  "ok": true,
+                  "file": "layer-point-hover-identify.spec.js",
+                  "line": 483,
+                  "tests": [
+                    {
+                      "status": "expected",
+                      "results": [
+                        {
+                          "status": "passed"
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
           ]
         }
       ]
     }
-  ],
-  "$comment": [
-    "CAPTURED FROM A REAL `npx playwright test --reporter=json` RUN. Only the bulky per-result",
-    "payloads (stdout, errors, attachments, durations) were dropped; every structural fact the gate",
-    "depends on is exactly as Playwright emitted it:",
-    "  · config.rootDir is the ABSOLUTE testDir, and spec.file is relative to IT;",
-    "  · the top-level suite of each file has title === file, and must be skipped or",
-    "    the filename appears twice in the id;",
-    "  · a passing case reports test.status \"expected\" / result.status \"passed\", a failing one",
-    "    \"unexpected\" / \"failed\", and a skipped one \"skipped\".",
-    "B266086: the first cut of collectCases() was written against a fixture somebody invented and",
-    "got the first two wrong, so every id it produced missed the ledger. A fixture you invented can",
-    "only confirm what you already believed. This one is real.",
-    "",
-    "RE-CAPTURED 2026-08-08 BY B276448-B276450, for the SECOND time and for the same good reason:",
-    "the ledger shrank past the capture. B267537 re-captured against flood-district-scoping:133 and",
-    "wrote, in this very comment, \"when THAT is fixed, re-capture from a real run rather than editing",
-    "this file by hand\". B276449 has now fixed it, so that instruction was followed literally — this",
-    "is a fresh --reporter=json run, not an edit of the old one.",
-    "",
-    "THIS CAPTURE IS DELIBERATELY AIMED AT THE MOST DURABLE ROWS ON THE LEDGER. Its two failures,",
-    "layer-point-hover-identify.spec.js:315 and :345, are the local lane in its ENTIRETY, and they are",
-    "the external-GIS family: they reach a host this sandbox blocks outbound, so they are the last",
-    "rows anybody will fix from here and the least likely to age this fixture out again. It also",
-    "carries seven PASSING cases, so the status mapping is exercised in both directions — including",
-    "four rows the ci lane marks INTERMITTENT, which pass here exactly as that marker predicts."
   ]
 }
