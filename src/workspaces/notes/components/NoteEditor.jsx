@@ -38,14 +38,14 @@ import { TextSelection } from "@tiptap/pm/state";
 import { contentOfBoxes } from "../lib/notesTableClipboard.js";
 import { noteExtensions, EMPTY_DOC } from "../lib/notesExtensions.js";
 import { ANCHOR_MIN_HEIGHT, anchorExtent, anchorExtentLeft, anchorExtentTop, anchorExtentX, anchorPosAtSelection, fitAnchorBox, nextAnchorSpot, placeAnchor } from "../lib/notesAnchorNode.js";
-import { ANCHOR_WIDTH } from "../lib/notesBoxResize.js";
-import { tableOwnsClipboard, tableBoxWidth } from "../lib/notesTablePaste.js";
+import { ANCHOR_WIDTH, ANCHOR_FIT_MIN, ANCHOR_START_MIN, anchorStartPreferred, fitWidthFor, growWidthFor } from "../lib/notesBoxResize.js";
+import { tableOwnsClipboard, tableBoxWidth, tableShapeOfNode } from "../lib/notesTablePaste.js";
 import { edgePoint as arrowEdgePoint } from "../lib/notesArrows.js";
 import {
   isBlankDoublePress, BLANK_DBLTAP_TOUCH_PX, isTouchPointerType, isCoarsePointerDevice, touchBoxOrigin,
   isTextInsertInputType,
 } from "../lib/notesBlankPaper.js";
-import { MIGRATED_BOX_WIDTH, migrateFlowBody, migrateSketchesToBoxes } from "../lib/notesFlowMigration.js";
+import { migrateFlowBody, migrateSketchesToBoxes } from "../lib/notesFlowMigration.js";
 import {
   applyMarquee, boxesInMarquee, latchGesture, marqueeRect, moveSelection, nudgeDelta,
   toggleSelection,
@@ -911,26 +911,64 @@ const CLIPBOARD_BODY = (
   </>
 );
 
-/** ⛔ A BOX MADE FOR A PASTED TABLE IS WIDE ENOUGH FOR ITS COLUMNS (NEW-1). A new box starts a
- *  sticky-note wide; three table columns in that collapse to slivers behind a horizontal scroll.
- *  Called right after a paste into a box this paste itself created: finds the box the caret is in,
- *  and if it now holds a table, widens it to the table's column count (the same writing-column cap
- *  "Insert table" uses). Never touches a box that already existed. */
-function widenFreshBoxForTable(editor) {
+/** ⛔ A BOX THAT HOLDS A PASTED TABLE IS WIDE ENOUGH FOR ITS COLUMNS (NEW-1, owner report 2026-10-11).
+ *  Run after ANY paste that lands a table — blank paper, a selected box, an existing narrow box, the caret
+ *  inside a box (all four reach here through the one "paste" transaction hook below). It finds the box the
+ *  caret is in and widens it to the NATURAL width of the widest table it holds (`tableBoxWidth`: columns are
+ *  counted WITH their merged cells — the first version counted the first row's cells, so a OneNote table with
+ *  a three-cell merged header over six columns got a box half the width it needed). It never NARROWS a box,
+ *  and the page grows to hold the result exactly as it does for any box that overhangs. */
+function widenBoxForTable(editor, sheetWidth = 0) {
   try {
     if (!editor || editor.isDestroyed) return;
     const { $from } = editor.state.selection;
     for (let d = $from.depth; d > 0; d -= 1) {
       const node = $from.node(d);
       if (node.type.name !== "noteAnchor") continue;
-      let cols = 0;
-      node.descendants((n) => { if (n.type.name === "table") cols = Math.max(cols, n.firstChild ? n.firstChild.childCount : 0); return cols === 0; });
-      if (!cols) return;
-      const w = tableBoxWidth({ cols, current: node.attrs.w, max: MIGRATED_BOX_WIDTH });
-      if (w > (node.attrs.w || 0)) editor.commands.setNoteAnchorWidth($from.before(d), w);
+      const cur = Math.round(Number(node.attrs.w) || 0);
+      let want = cur;
+      node.descendants((n) => {
+        if (n.type.name !== "table") return true;
+        const { cols, widths } = tableShapeOfNode(n);
+        if (cols) want = Math.max(want, tableBoxWidth({ cols, widths, current: cur, sheet: sheetWidth }));
+        return false;
+      });
+      if (want > cur) editor.commands.growNoteAnchorWidth($from.before(d), want);
       return;
     }
   } catch (_) { /* a missed widening is cosmetic: the table is already in the box and scrolls */ }
+}
+
+/** ⛔ A BOX'S UNWRAPPED WIDTH, MEASURED (NEW-2). Lets the box be as wide as its content likes for one
+ *  synchronous read and puts the width straight back — no paint happens in between, and the node view's own
+ *  `update` never sees it. Returns the border-box width in unscaled document pixels (the canvas zoom is
+ *  divided out), or `null` when the box has no element yet. */
+function measureNaturalBoxWidth(root, aid) {
+  const el = root?.querySelector?.(`.planyr-anchor[data-anchor-id="${String(aid).replace(/"/g, '\\"')}"]`);
+  if (!el) return null;
+  const prev = el.style.width;
+  const scale = el.getBoundingClientRect().width / (el.offsetWidth || 1) || 1;
+  el.style.width = "max-content";
+  const w = el.getBoundingClientRect().width / scale;
+  el.style.width = prev;
+  return w;
+}
+
+/** The self-sizing box with this id, as `{ node, pos }` — or null (not found / not self-sizing). */
+function findFitBox(editor, aid) {
+  let hit = null;
+  editor.state.doc.forEach((node, pos) => {
+    if (!hit && node.type.name === "noteAnchor" && String(node.attrs.aid || "") === String(aid) && node.attrs.fit) hit = { node, pos };
+  });
+  return hit;
+}
+
+/** Does this box hold anything that gives it a width? An EMPTY box keeps today's rule (it is pruned, not sized). */
+function boxHasContent(node) {
+  if ((node.textContent || "").trim()) return true;
+  let any = false;
+  node.descendants((n) => { if (["table", "noteImage", "noteAttachment"].includes(n.type.name)) any = true; return !any; });
+  return any;
 }
 
 const PASTE_ICONS = {
@@ -2234,13 +2272,15 @@ const NoteEditor = forwardRef(function NoteEditor({
       if (!landed) {
         const { x, y } = nextAnchorSpot(editor.state.doc);
         fresh = `a${Date.now().toString(36)}p${Math.floor(Math.random() * 1e6).toString(36)}`;
-        editor.commands.addNoteAnchorAt({ x, y, w: ANCHOR_WIDTH, aid: fresh });
+        const colW = editor.view.dom.offsetWidth;
+        const startW = placeAnchor({ x, y, width: colW, preferred: anchorStartPreferred(colW), minWidth: ANCHOR_START_MIN }).w;
+        editor.commands.addNoteAnchorAt({ x, y, w: startW, aid: fresh });
         setSelection(new Set([fresh]));
         setEditingId(fresh);
       }
       if (!editor.view.hasFocus()) editor.view.focus();
       pasteClipboardIntoEditor(html, text, e);
-      if (fresh) widenFreshBoxForTable(editor);
+      widenBoxForTable(editor, sheetWidthRef.current);
     };
     window.addEventListener("paste", onLoosePaste, { capture: true });
     return () => window.removeEventListener("paste", onLoosePaste, { capture: true });
@@ -2371,7 +2411,7 @@ const NoteEditor = forwardRef(function NoteEditor({
        * tables stay tables, the paste-options chip appears, the three paste modes apply. */
       if (!commitPendingPlace()) return;
       pasteClipboardIntoEditor(html, text, e);
-      widenFreshBoxForTable(editor);
+      widenBoxForTable(editor, sheetWidthRef.current);
     };
     /* ⛔ TEXT THAT ARRIVES WITHOUT A PRINTABLE KEYDOWN (NEW-1, iOS review). Predictive-bar taps,
      * QuickPath swipe, dictation, emoji (`key.length` 2) and IME composition report `Unidentified`
@@ -2463,7 +2503,9 @@ const NoteEditor = forwardRef(function NoteEditor({
      * not the box's top-left — lands under the fingertip (NEW-1, 2026-10-04; see `touchBoxOrigin`).
      * Desktop keeps the corner-at-the-click rule its acceptance test pins. */
     if (touch) ({ x: tapX, y: tapY } = touchBoxOrigin({ x: tapX, y: tapY, lineH, fontPx }));
-    const point = placeAnchor({ x: tapX, y: tapY, width: dom.offsetWidth });
+    /* ⛔ A NEW BOX STARTS WIDE (NEW-2): the text column's width, or the room to the right of the press if
+     * that is less, never below a usable line (`ANCHOR_START_MIN`). It shrinks to its words on click-out. */
+    const point = placeAnchor({ x: tapX, y: tapY, width: dom.offsetWidth, preferred: anchorStartPreferred(dom.offsetWidth), minWidth: ANCHOR_START_MIN });
     /* ⛔ A PRESS ARMS A CARET. IT DOES NOT CREATE ANYTHING (NEW-8, owner report 2026-09-08:
      * *"just because I click outside of the page, it shouldn't automatically open the page up to
      * it. Only once I actually type something. And also, if I click somewhere and then don't type
@@ -2547,6 +2589,83 @@ const NoteEditor = forwardRef(function NoteEditor({
   const [editingId, setEditingId] = useState(null);
   const editingRef = useRef(null);
   editingRef.current = editingId;
+
+  /* ═══ A BOX SIZES ITSELF: STARTS WIDE, SHRINKS TO ITS WORDS ON CLICK-OUT (NEW-2, 2026-10-11) ═══
+   *
+   * ⛔ THE OWNER'S WORDS: new boxes should start "much wider, so typing and pasting have room", and
+   * "if the content doesn't use that width, the box shrinks to fit its text when he clicks out".
+   * Only a box that carries `fit` (made by typing or pasting on blank paper — see `addNoteAnchorAt`) ever
+   * does this; a box whose width a person set by hand, and every box from before the attribute existed,
+   * is NEVER touched. The decisions are pure (`fitWidthFor` / `growWidthFor`); this is only the wiring.
+   *
+   * ⛔ THE WRITE IS NOT AN UNDO STEP (`autoSizeNoteAnchor` sets `addToHistory: false`): Ctrl+Z undoes what
+   * the person did, never the app's tidy-up. ⛔ AND IT ONLY EVER SHRINKS ON CLICK-OUT — content wider than
+   * the box (a long unbroken line, a wide table) leaves the box exactly as it is. */
+  const settleBox = useCallback((aid) => {
+    if (!aid || !editor || editor.isDestroyed) return;
+    const hit = findFitBox(editor, aid);
+    if (!hit || !boxHasContent(hit.node)) return;
+    const w = fitWidthFor({ current: hit.node.attrs.w, natural: measureNaturalBoxWidth(noteRootRef.current, aid) });
+    if (w != null) editor.commands.autoSizeNoteAnchor(aid, w);
+  }, [editor]);
+  /* Two ways out of a box: another box / Escape / a press elsewhere changes `editingId`; a press on the
+   * title (or any field outside the editor) only BLURS the editor and leaves `editingId` standing — so both
+   * are watched. The blur path waits a beat and re-checks focus, so a node view that rebuilds itself under a
+   * keystroke (a blur that is not a person leaving) never shrinks a box mid-sentence. */
+  const prevEditingRef = useRef(null);
+  useEffect(() => {
+    const prev = prevEditingRef.current;
+    prevEditingRef.current = editingId;
+    if (prev && prev !== editingId) settleBox(prev);
+  }, [editingId, settleBox]);
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return undefined;
+    let t = null;
+    const onBlur = () => {
+      const aid = editingRef.current;
+      if (!aid) return;
+      clearTimeout(t);
+      t = setTimeout(() => { if (!editor.isDestroyed && !editor.view.hasFocus()) settleBox(aid); }, 120);
+    };
+    editor.on("blur", onBlur);
+    return () => { clearTimeout(t); editor.off("blur", onBlur); };
+  }, [editor, settleBox]);
+
+  /* ⛔ RE-ENTERING DOES NOT RE-EXPAND; TYPING PAST THE EDGE DOES. A shrunk box stays shrunk while it is
+   * edited, until a keystroke would make its text wrap — then it grows back to the width a new box starts
+   * at, BEFORE the wrap, so the words never reflow into a one-letter column. Cheap by construction: a box
+   * already at least start-wide never measures. */
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return undefined;
+    const onEditorUpdate = () => {
+      const id = editingRef.current;
+      if (!id || editor.isDestroyed) return;
+      const hit = findFitBox(editor, id);
+      if (!hit) return;
+      const cur = Math.round(Number(hit.node.attrs.w) || 0);
+      const colW = editor.view.dom.offsetWidth;
+      const start = placeAnchor({ x: hit.node.attrs.x, y: 0, width: colW, preferred: anchorStartPreferred(colW), minWidth: ANCHOR_START_MIN }).w;
+      if (cur >= start) return;
+      const w = growWidthFor({ current: cur, natural: measureNaturalBoxWidth(noteRootRef.current, id), start });
+      if (w != null) editor.commands.autoSizeNoteAnchor(id, w);
+    };
+    editor.on("update", onEditorUpdate);
+    return () => editor.off("update", onEditorUpdate);
+  }, [editor]);
+
+  /* ⛔ EVERY PASTE THAT LANDS A TABLE WIDENS ITS BOX (NEW-1) — one hook for every landing: blank paper, a
+   * selected box, an existing narrow box, the caret in a box. Microtask, so the pasted slice (and, for a
+   * paste that made the box, the box itself) is in the document first; the width change joins the paste's own
+   * undo group (an attribute step kept out of the history), so one Ctrl+Z still takes the table out. */
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return undefined;
+    const onTx = ({ transaction }) => {
+      if (!transaction?.docChanged || transaction.getMeta("uiEvent") !== "paste") return;
+      queueMicrotask(() => widenBoxForTable(editor, sheetWidthRef.current));
+    };
+    editor.on("transaction", onTx);
+    return () => editor.off("transaction", onTx);
+  }, [editor]);
   const [band, setBand] = useState(null);          // the rubber band, in DOCUMENT space
   const selRef = useRef(selection);
   selRef.current = selection;
@@ -4316,7 +4435,11 @@ const NoteEditor = forwardRef(function NoteEditor({
          * off the end of the sheet landing under the Outline panel) from the scroller-era, when the pane
          * WAS the page; the canvas is unbounded and pannable now, and the STORED width is the person's
          * intent (this function's own header says so). No `hostWidth` = "unmeasured — never guess". */
-        const fit = fitAnchorBox({ x, w });
+        /* ⛔ A SELF-SIZING BOX (`data-anchor-fit`) MAY RENDER NARROWER THAN THE 160 PLACEMENT FLOOR (NEW-2): the
+         * floor protects a box somebody placed near the margin from being crushed; a box that has just
+         * shrunk to its words is the opposite case. Hand-sized and legacy boxes keep the 160 floor. */
+        const minWidth = el.getAttribute("data-anchor-fit") === "1" ? ANCHOR_FIT_MIN : undefined;
+        const fit = fitAnchorBox({ x, w, minWidth });
         if (Math.round(parseFloat(el.style.width)) !== fit.w) el.style.width = `${fit.w}px`;
         if (Math.round(parseFloat(el.style.left)) !== fit.x) el.style.left = `${fit.x}px`;
         return { x: fit.x, w: fit.w, y: parseFloat(el.style.top) || 0, height: el.offsetHeight };

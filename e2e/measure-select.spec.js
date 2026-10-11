@@ -33,7 +33,7 @@ async function startBlank(page) {
 
 // Arm the Measure tool in a specific mode via the Measure ▾ menu.
 async function armMeasure(page, mode) {
-  await page.getByRole("button", { name: "Measure modes" }).click();
+  await page.getByRole("button", { name: /^Measure mode:/ }).click();
   await page.getByRole("button", { name: mode, exact: true }).click();
 }
 
