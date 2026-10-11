@@ -28,14 +28,14 @@
     },
     "site-planner-header": {
       "light": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-11",
+        "approvedCommit": "9a3ca736",
+        "note": "Building panel v3 NEW-3: palette A default site colours now paint on the demo plan"
       },
       "dark": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-11",
+        "approvedCommit": "9a3ca736",
+        "note": "Building panel v3 NEW-3: palette A default site colours now paint on the demo plan"
       },
       "light--phone": {
         "approvedAt": "2026-10-09",
@@ -50,14 +50,14 @@
     },
     "site-planner-left-rail": {
       "light": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-11",
+        "approvedCommit": "9a3ca736",
+        "note": "Building panel v3 NEW-3: palette A default site colours now paint on the demo plan"
       },
       "dark": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-11",
+        "approvedCommit": "9a3ca736",
+        "note": "Building panel v3 NEW-3: palette A default site colours now paint on the demo plan"
       },
       "light--phone": {
         "approvedAt": "2026-10-09",
