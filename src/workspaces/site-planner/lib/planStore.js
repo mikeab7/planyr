@@ -57,14 +57,27 @@ function lsUsedChars() {
   try { for (let i = 0; i < l.length; i++) { const k = l.key(i); if (k == null) continue; n += k.length + ((l.getItem(k) || "").length); } } catch (_) {}
   return n;
 }
+/* B2200385 — the real cap is engine-specific and not queryable (Chromium accepts ~5.2M characters; the iPhone failures in `client_errors` threw
+ * "quota" although the 5.2M pre-check had passed). A quota failure brackets it: the store accepted `usedAtFail` characters and refused one
+ * more write of `tried`. Remember the UPPER end for the rest of this page load so a retry never re-attempts a copy that cannot fit. */
+let learnedCapHi = Infinity;
+export function _learnedCap() { return learnedCapHi; }
+function lsInventory(top = 8) {
+  const rows = [], l = lsNow();
+  try { for (let i = 0; i < l.length; i++) { const k = l.key(i); if (k == null) continue; rows.push([k.length > 48 ? k.slice(0, 45) + "…" : k, k.length + ((l.getItem(k) || "").length)]); } } catch (_) {}
+  rows.sort((a, b) => b[1] - a[1]);
+  return { keys: rows.length, top: rows.slice(0, top).map(([k, n]) => k + "=" + n).join(" · ") };
+}
 export const MIRROR_QUIET_MS = 15000;      // mirror once edits have been quiet this long…
 export const MIRROR_MAX_WAIT_MS = 120000;  // …and never let the older copy fall further behind than this
 const IDX = ":idx", LED = ":led", PFX = ":p:";
 export const LAYOUT_SWITCH = "planarfit:planStore:layout";   // = "blob" → run the un-split layout (kill switch / harness A-B lever)
 
-const cfg = { persistForm: (x) => x, slim: (x) => x, merge: null, onForeignMerge: null };
+const cfg = { persistForm: (x) => x, slim: (x) => x, merge: null, onForeignMerge: null, makeRoom: null };
 /** storage.js injects the model-aware pieces: `persistForm(rec)` (drop IndexedDB-backed rasters), `slim(rec)` (the over-quota
- *  retry: shed every inline raster), `merge(mine, theirs)` (mergeSiteContent) and `onForeignMerge()` (announce on the sites channel). */
+ *  retry: shed every inline raster), `merge(mine, theirs)` (mergeSiteContent), `onForeignMerge()` (announce on the sites channel) and
+ *  `makeRoom({ base, reason, shortBy })` (B2200385 — async: free localStorage that is PROVEN safe to free, resolve `{ freedChars }`; called at
+ *  most once per store per page load when the split is refused for room, after which the split is retried). */
 export function configure(c) {
   Object.assign(cfg, c || {});
   if (cfg.merge) for (const [base, s] of states) if (s.reconcilePending) { s.reconcilePending = false; reconcileLegacy(base); }
@@ -123,19 +136,23 @@ function migrate(base, s, legacyRaw) {
    * characters (measured), and a device that is already most of the way there (the owner's was 3.88 MB used) would "fit" the copy by a hair and then
    * be one edit from "storage full". So the split is refused, before writing anything, unless it leaves real room afterwards. This is NOT an error:
    * the store keeps the old layout, unchanged, and the numbers are reported so the next step is data-driven. */
-  const cap = lsCapChars();
-  if (cap !== Infinity) {
-    const used = lsUsedChars(), need = legacyRaw.length + ids.length * (base.length + 12) + 600;
-    if (used + need + HEADROOM_AFTER_CHARS > cap) {
-      reportClientEvent("plan-store-migration-aborted", "not enough free room beside the original to split the store safely — staying on the original (nothing was changed)", { reason: "headroom", plans: ids.length, legacyLen: legacyRaw.length, usedChars: used, needChars: need, capChars: cap, shortBy: used + need + HEADROOM_AFTER_CHARS - cap });
-      return false;
-    }
+  const cap = Math.min(lsCapChars(), learnedCapHi);
+  const used0 = lsUsedChars(), need = legacyRaw.length + ids.length * (base.length + 12) + 600;
+  const inv = () => lsInventory();
+  if (cap !== Infinity && used0 + need + HEADROOM_AFTER_CHARS > cap) {
+    const shortBy = used0 + need + HEADROOM_AFTER_CHARS - cap;
+    s.lastAbort = { reason: "headroom", shortBy };
+    reportClientEvent("plan-store-migration-aborted", "not enough free room beside the original to split the store safely — staying on the original (nothing was changed)", { reason: "headroom", plans: ids.length, legacyLen: legacyRaw.length, usedChars: used0, needChars: need, capChars: cap, shortBy, ...(learnedCapHi !== Infinity ? { learnedCapHi } : {}), afterRoom: !!s.roomDone, ...inv() });
+    return false;
   }
   const created = [];               // keys THIS attempt created (so an abort removes only those)
   const want = new Map();           // id → the text the entry must hold when we are done
+  let tried = 0;                    // size of the write in flight — if it is refused, the cap lies between "used so far" and "used so far + tried"
+  const put = (k, v) => { tried = k.length + v.length; set(k, v); };
   const abort = (reason, extra) => {
     for (const k of created) del(k);
-    reportClientEvent("plan-store-migration-aborted", "per-plan copy did not complete — staying on the legacy store (nothing was changed or lost)", { reason, plans: ids.length, legacyLen: legacyRaw.length, ...(extra || {}) });
+    s.lastAbort = { reason, shortBy: (extra && extra.shortBy) || 0, structural: !!(extra && extra.structural) };
+    reportClientEvent("plan-store-migration-aborted", "per-plan copy did not complete — staying on the legacy store (nothing was changed or lost)", { reason, plans: ids.length, legacyLen: legacyRaw.length, afterRoom: !!s.roomDone, ...(extra || {}) });
     return false;
   };
   try {
@@ -147,7 +164,7 @@ function migrate(base, s, legacyRaw) {
       if (prior != null && prior !== frag) {                    // an entry left by an interrupted attempt / another tab: keep the NEWER, never destroy
         try { if (toMs(JSON.parse(prior).updatedAt) > toMs(src[id].updatedAt)) text = prior; } catch (_) {}
       }
-      if (prior !== text) { set(k, text); if (prior == null) created.push(k); }
+      if (prior !== text) { put(k, text); if (prior == null) created.push(k); }
       want.set(id, text);
     }
     for (const [id, text] of want) {                            // READ EVERY ONE BACK and compare with the source
@@ -156,15 +173,27 @@ function migrate(base, s, legacyRaw) {
       if (text === JSON.stringify(src[id]) && JSON.stringify(JSON.parse(back)) !== JSON.stringify(src[id])) return abort("roundtrip-mismatch", { id });
     }
     const led = { sig: sigOf(legacyRaw), len: legacyRaw.length, ids, at: Date.now() };
-    set(base + LED, JSON.stringify(led)); created.push(base + LED);
+    put(base + LED, JSON.stringify(led)); created.push(base + LED);
     const idx = { v: 1, ok: true, gen: uniq(), stale: false, mig: { at: Date.now(), count: ids.length, len: legacyRaw.length, ms: Date.now() - t0 } };
-    set(idxKeyOf(base), JSON.stringify(idx));
+    put(idxKeyOf(base), JSON.stringify(idx));
     if (get(idxKeyOf(base)) !== JSON.stringify(idx)) { del(idxKeyOf(base)); return abort("index-readback"); }
   } catch (e) {
+    const isQuota = !!e && /quota/i.test(String(e.name || e.message));
+    if (isQuota) {
+      /* B2200385 — MEASURE the refusal before the cleanup changes the numbers. `usedAtFail` is exactly what the store held when this write was
+       * refused; the real cap is in (usedAtFail, usedAtFail + tried]. `structural` = even an EMPTY origin could not hold the original and a full
+       * copy — no amount of freeing other keys can help, only moving the original (a different decision, B2200384). */
+      const usedAtFail = lsUsedChars(), capHi = usedAtFail + tried;
+      learnedCapHi = Math.min(learnedCapHi, capHi);
+      const structural = 2 * legacyRaw.length + 600 > capHi;
+      const shortBy = used0 + need + HEADROOM_AFTER_CHARS - capHi;   // AT LEAST this short (capHi is the upper end of the bracket)
+      del(idxKeyOf(base));
+      return abort("quota", { error: String((e && e.message) || e).slice(0, 120), usedChars: used0, needChars: need, capChars: lsCapChars(), usedAtFail, capHiChars: capHi, shortByAtLeast: shortBy, structural, shortBy: Math.max(0, shortBy), ...inv() });
+    }
     del(idxKeyOf(base));
-    return abort(e && /quota/i.test(String(e.name || e.message)) ? "quota" : "error", { error: String((e && e.message) || e).slice(0, 120) });
+    return abort("error", { error: String((e && e.message) || e).slice(0, 120) });
   }
-  reportClientEvent("plan-store-migrated", "device store split into one entry per plan (the original entry was kept untouched)", { plans: ids.length, legacyLen: legacyRaw.length, ms: Date.now() - t0 });
+  reportClientEvent("plan-store-migrated", "device store split into one entry per plan (the original entry was kept untouched)", { plans: ids.length, legacyLen: legacyRaw.length, ms: Date.now() - t0, usedChars: used0, afterRoom: !!s.roomDone, ...(s.roomFreed ? { freedChars: s.roomFreed } : {}) });
   return true;
 }
 
@@ -203,8 +232,35 @@ function ensureMode(base) {
     s.mode = "plan"; touchIdx(base, s, { stale: true }); s.hasIdx = !!get(idxKeyOf(base)); return s;
   }
   if (migrate(base, s, legacy)) { s.mode = "plan"; s.hasIdx = true; s.booted = true; s.plans = new Map(); s.stamp = null; }
-  else { s.mode = "blob"; s.blobFails++; }
+  else { s.mode = "blob"; s.blobFails++; askForRoom(base, s); }
   return s;
+}
+
+/* B2200385 — when the split is refused for ROOM (headroom, or the copy itself hit the browser's quota), ask storage.js to free localStorage that is
+ * proven safe to free (the version-history mirror once IndexedDB holds a verified identical copy; re-fetchable caches), then run the split again
+ * in the same page load. At most once per store per page load; every outcome is reported; the legacy entry and the per-plan entries are never
+ * touched by this. A structurally impossible fit (even an empty origin could not hold two copies) is not retried — it is reported as such. */
+function askForRoom(base, s) {
+  const a = s.lastAbort;
+  if (!cfg.makeRoom || s.roomAsked || !a || (a.reason !== "headroom" && a.reason !== "quota")) return;
+  s.roomAsked = true;
+  if (a.structural) { reportClientEvent("plan-store-room-none", "this device's storage cannot hold the original library and a full copy even if every other key were removed — only moving the original (B2200384) could change that", { reason: a.reason, structural: true, learnedCapHi }); return; }
+  const ls = s.ls;
+  Promise.resolve().then(() => cfg.makeRoom({ base, reason: a.reason, shortBy: a.shortBy })).then((res) => {
+    if (states.get(base) !== s || s.ls !== ls) return;            // the store instance was replaced under us (test isolation / a reset)
+    s.roomDone = true; s.roomFreed = (res && res.freedChars) || 0;
+    if (!res || !(res.freedChars > 0)) { reportClientEvent("plan-store-room-none", "no localStorage could be freed safely — the split stays refused", { base: base.slice(0, 40), reason: a.reason, shortBy: a.shortBy, ...(res || {}) }); return; }
+    retryMigration(base);
+  }).catch((e) => reportClientEvent("plan-store-room-failed", "making room for the per-plan split failed — nothing was changed", { error: String((e && e.message) || e).slice(0, 120) }));
+}
+/** Run the split again for a store that was left on the legacy layout this page load (only if it is still on it and unchanged by anyone else). */
+export function retryMigration(base) {
+  const s = states.get(base);
+  if (!s || s.mode !== "blob") return s ? s.mode : null;
+  s.mode = null; s.shared = null;
+  const r = ensureMode(base);
+  if (r.mode === "plan") { r.shared = null; r.plans = new Map(); r.stamp = null; }
+  return r.mode;
 }
 
 /* ================================ plan-mode reads ================================ */
@@ -406,7 +462,7 @@ export function describe(base) {
   let idx = null; try { idx = JSON.parse(get(idxKeyOf(base))); } catch (_) {}
   return { mode: s.mode, hasIdx: s.hasIdx, idx, entries: listEntryIds(base).length };
 }
-export function _resetForTest() { for (const s of states.values()) { clearTimeout(s.quietTimer); clearTimeout(s.maxTimer); } states.clear(); clearSnapshot(); }
+export function _resetForTest() { for (const s of states.values()) { clearTimeout(s.quietTimer); clearTimeout(s.maxTimer); } states.clear(); clearSnapshot(); learnedCapHi = Infinity; }
 
 /* ================================ mixed builds: fold an older tab's whole-blob write back in ================================ */
 /** If the legacy entry no longer matches what we last wrote / agreed on, an older build (or a hand edit) wrote it: reconcile PER PLAN. */

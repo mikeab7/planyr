@@ -16,7 +16,7 @@ import { createSiteModel, migrate, mergeSiteContent, contentCount, isBuilding, t
 import { cloudUpsert, cloudDelete, cloudDeleteGroup, cloudHardDelete, cloudRowsPresent, cloudPurgeOnePlan, cloudRestore, cloudDeletedRows, cloudCheckDeleted, cloudList, clearSiteVersions, keepaliveCloudPush, fetchSiteForReconcile, refreshHeaderFromCloud } from "./cloudSync.js";
 import { headerSlice } from "./headerMerge.js";
 import { reconcileGroupNames, resolveNameFor, groupKeyOf, maxStampOf, nameAuthority, renameStamp } from "./projectName.js";
-import { idbGet, idbPut, idbAvailable, idbDelete, idbDeleteByPrefix } from "./localDb.js";
+import { idbGet, idbPut, idbPutVerified, idbAvailable, idbDelete, idbDeleteByPrefix } from "./localDb.js";
 import { idbKeysReleasableOnPlanDelete, idbKeysHeldByOtherPlans } from "./sharedAssetRefs.js";
 import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
 import { DELETED_RETENTION_DAYS, wasProjectFreshlyMinted } from "../../../shared/projects/projectModel.js";
@@ -771,7 +771,7 @@ const historyAll = () => {
   return historyMem;
 };
 // Reset hook for tests that drive the IndexedDB path (mirrors `_recentlyDeleted`). Not used by the app.
-export function _resetHistoryForTest() { historyMem = null; historyHydrated = false; historyLS = null; }
+export function _resetHistoryForTest() { historyMem = null; historyHydrated = false; historyLS = null; historyIdbFailed = false; pendingHistoryIdb = null; }
 // B473 — bound the version ring by BYTES, not just HISTORY_PER_SITE, so it can't creep back to ~MB
 // and crowd the ~5MB localStorage cap (the pressure that made saves fail). Thins uniformly (newest
 // kept) by halving the per-site keep count until under budget; at most ~log2(15) re-serializes, and
@@ -828,8 +828,26 @@ function historyKeepFor(parts) {
   while (keep > 1 && len > HISTORY_BYTE_BUDGET) { keep = Math.floor(keep / 2); len = ringLen(parts, keep); }
   return keep;
 }
+/* B2200385 — HISTORY LIVES IN INDEXEDDB ONLY, ON A DEVICE THAT NEEDS THE ROOM. The localStorage copy of the ring (up to HISTORY_BYTE_BUDGET, ~0.7M
+ * characters) duplicates what IndexedDB already holds, and on a device already near the browser's cap it is the room the per-plan split needs.
+ * `relocateHistoryToIdb` drops it ONLY after the IndexedDB copy is written, read back and compared entry for entry, and only then sets this flag
+ * (a tiny localStorage key, so every tab and every reload agrees). While the flag is set AND IndexedDB is healthy the ring is not mirrored to
+ * localStorage; the moment IndexedDB is unavailable or a write to it fails, the mirror resumes (the B126 net never has fewer copies than before).
+ * Reverting to an older build is safe: it seeds from an empty localStorage ring and then merges the full ring out of the same IndexedDB key. */
+const HISTORY_IDB_ONLY_KEY = "planarfit:sites:history:idbonly";
+let historyIdbFailed = false;           // an IndexedDB write failed this page load → fall back to the localStorage mirror until a write succeeds
+export const historyIdbOnly = () => { try { return localStorage.getItem(HISTORY_IDB_ONLY_KEY) === "1"; } catch (_) { return false; } };
+const historyIdbOnlyActive = () => historyIdbOnly() && idbAvailable() && !historyIdbFailed;
 function writeHistoryAll(h) {
   historyMem = h;                                   // in-memory ring = the synchronous source of truth (uncapped depth)
+  if (historyIdbOnlyActive()) {
+    /* No localStorage mirror. The durable copy is the (verified-on-failure) IndexedDB write; a snapshot taken before hydration waits for it
+     * (flushHistoryIdb hydrates first, so the fuller stored ring is merged in before anything is written over it). Returns true only for
+     * the claim that is true: the snapshot is in the in-memory ring and its IndexedDB write is queued — callers that GATE a destructive action
+     * on a backup (Restore) use `backupNowVerified`, which waits for a committed, read-back copy. */
+    queueHistoryIdbWrite();
+    return true;
+  }
   let lsOk = false;
   /* NEW-1 (B217540 ×2) / B2236000 (round 6) — each snapshot is serialised once in its life (`snapText`); the localStorage mirror's byte cap is
    * decided on lengths, and only the CAPPED text is assembled here, in the caller's task. The uncapped text for IndexedDB is assembled when it
@@ -842,7 +860,7 @@ function writeHistoryAll(h) {
   }
   // Durable, UNCAPPED copy in IndexedDB — gated until hydration so a pre-hydration partial ring can't
   // clobber the fuller stored one (initHistoryStore merges, then persists). Fire-and-forget.
-  if (historyHydrated && idbAvailable()) queueHistoryIdbWrite();
+  if (historyHydrated && idbAvailable() && !historyIdbFailed) queueHistoryIdbWrite();
   // Return ONLY the synchronously-VERIFIED localStorage result (B474 review #14). The idb write above is
   // fire-and-forget — idbAvailable() means "the API exists", not "the write committed" — so counting it
   // here let backupNow() (the Restore safety gate) report a backup that may not exist when localStorage is
@@ -860,7 +878,20 @@ let pendingHistoryIdb = null, historyIdbTimer = null, historyIdbHooked = false;
 function flushHistoryIdb() {
   if (historyIdbTimer) { try { (typeof cancelIdleCallback === "function" && historyIdbTimer.idle) ? cancelIdleCallback(historyIdbTimer.id) : clearTimeout(historyIdbTimer.id); } catch (_) {} historyIdbTimer = null; }
   const due = pendingHistoryIdb; pendingHistoryIdb = null;
-  if (due && historyMem) idbPut(HISTORY_KEY, historyRingJson(historyMem));   // the ring as it is NOW (coalesced: the newest state wins)
+  if (due && historyMem && historyIdbOnly() && !historyHydrated) {           // idb-only before hydration: merge the stored ring FIRST, then write
+    initHistoryStore().then(() => { pendingHistoryIdb = true; flushHistoryIdb(); });
+    return;
+  }
+  if (due && historyMem) {
+    const text = historyRingJson(historyMem);                                // the ring as it is NOW (coalesced: the newest state wins)
+    if (!historyIdbOnly()) { idbPut(HISTORY_KEY, text); return; }
+    idbPut(HISTORY_KEY, text).then((ok) => {
+      if (ok) { historyIdbFailed = false; return; }
+      historyIdbFailed = true;                                               // fall back to the localStorage mirror NOW, loudly
+      reportClientEvent("history-idb-write-failed", "the version-history copy in IndexedDB could not be written — the localStorage mirror resumes", { ringChars: text.length });
+      try { writeHistoryAll(historyMem); } catch (_) {}
+    });
+  }
 }
 function queueHistoryIdbWrite() {
   pendingHistoryIdb = true;
@@ -1025,6 +1056,80 @@ export function getVersion(id, at) {
 }
 export function clearHistory(id) { const all = historyAll(); if (id && id in all) { delete all[id]; writeHistoryAll(all); } }
 
+/* ---- B2200385 — move the history ring's localStorage copy into IndexedDB, PROVEN, to make room for the per-plan split ---------------------------
+ * Resolves { ok, freedChars, reason? }. Nothing is removed unless: IndexedDB is available · the merged ring (localStorage seed ∪ stored IndexedDB
+ * copy) was WRITTEN, COMMITTED and READ BACK byte-for-byte · every snapshot the localStorage copy holds is present, identical, in the IndexedDB
+ * copy (or has legitimately aged out of a full per-site list) · the idb-only flag was written. Any failure keeps the localStorage copy exactly as it
+ * was and says why. */
+export async function relocateHistoryToIdb() {
+  const fail = (reason, extra) => { reportClientEvent("history-relocate-skipped", "the version-history copy in localStorage was kept (" + reason + ")", { reason, ...(extra || {}) }); return { ok: false, freedChars: 0, reason }; };
+  if (!idbAvailable()) return fail("no-idb");
+  let lsRaw = null; try { lsRaw = localStorage.getItem(HISTORY_KEY); } catch (_) { return fail("ls-unreadable"); }
+  if (lsRaw == null) {                               // nothing duplicated to drop; make sure the mode is recorded only if IndexedDB can hold the ring
+    return { ok: true, freedChars: 0, reason: "no-ls-copy" };
+  }
+  let lsRing; try { lsRing = JSON.parse(lsRaw) || {}; } catch (_) { return fail("ls-copy-unreadable"); }
+  await initHistoryStore();
+  if (!historyHydrated || historyIdbFailed) return fail("hydrate");
+  try { const cur = await idbGet(HISTORY_KEY); if (cur) historyMem = mergeHistory(historyMem, JSON.parse(cur) || {}); }   // another tab may have added snapshots since hydration: never write over them
+  catch (_) { return fail("idb-unparseable"); }
+  const text = historyRingJson(historyMem);
+  const w = await idbPutVerified(HISTORY_KEY, text);
+  if (!w.ok) return fail("idb-" + w.reason);
+  let stored; try { stored = JSON.parse(await idbGet(HISTORY_KEY)) || {}; } catch (_) { return fail("idb-unparseable"); }
+  for (const [id, list] of Object.entries(lsRing)) {
+    const there = Array.isArray(stored[id]) ? stored[id] : [];
+    const byAt = new Map(there.map((v) => [v && v.at, v]));
+    const oldest = there.length ? Math.min(...there.map((v) => (v && v.at) || 0)) : Infinity;
+    for (const v of Array.isArray(list) ? list : []) {
+      if (!v) continue;
+      const twin = byAt.get(v.at);
+      if (twin) { if (JSON.stringify(twin) !== JSON.stringify(v)) return fail("entry-differs", { id }); continue; }
+      if (there.length >= HISTORY_PER_SITE && (v.at || 0) < oldest) continue;   // aged out of a full per-site list by newer snapshots — the ring's own cap
+      return fail("entry-missing", { id });
+    }
+  }
+  try { localStorage.setItem(HISTORY_IDB_ONLY_KEY, "1"); } catch (_) { return fail("flag-unwritable"); }
+  try { localStorage.removeItem(HISTORY_KEY); } catch (_) { try { localStorage.removeItem(HISTORY_IDB_ONLY_KEY); } catch (_2) {} return fail("ls-remove"); }
+  historyIdbFailed = false;
+  return { ok: true, freedChars: HISTORY_KEY.length + lsRaw.length };
+}
+/** The Restore gate in a verified form: the backup is written to the durable store and READ BACK before it is claimed. Same answers as `backupNow`
+ *  on a device that still mirrors the ring in localStorage; on an idb-only device it waits for the committed, compared copy (it never claims one
+ *  it has not seen). */
+export async function backupNowVerified(id) {
+  if (!id) return false;
+  if (!historyIdbOnly()) return backupNow(id);
+  const cur = loadSite(id);
+  if (!cur) return true;
+  if (!contentCount(cur)) return true;
+  if (!idbAvailable() || historyIdbFailed) return snapshotVersion(cur, { force: true }) === true;   // degraded: the localStorage mirror resumed
+  await initHistoryStore();
+  if (snapshotVersion(cur, { force: true }) !== true) return false;
+  if (pendingHistoryIdb) { pendingHistoryIdb = null; if (historyIdbTimer) { try { (typeof cancelIdleCallback === "function" && historyIdbTimer.idle) ? cancelIdleCallback(historyIdbTimer.id) : clearTimeout(historyIdbTimer.id); } catch (_) {} historyIdbTimer = null; } }
+  const text = historyRingJson(historyMem);
+  const w = await idbPutVerified(HISTORY_KEY, text);
+  if (w.ok) return true;
+  historyIdbFailed = true;
+  reportClientEvent("history-idb-write-failed", "the pre-restore backup could not be verified in IndexedDB — the localStorage mirror resumes", { reason: w.reason });
+  try { return writeHistoryAll(historyMem) === true; } catch (_) { return false; }
+}
+/** planStore's make-room hook (B2200385): free localStorage that is PROVEN safe to free, in order, only as far as needed. Resolves { freedChars, steps }. */
+export async function makeRoomForPlanStore({ reason, shortBy } = {}) {
+  const steps = []; let freed = 0;
+  const h = await relocateHistoryToIdb();
+  steps.push("history:" + (h.ok ? "moved" : h.reason) + ":" + h.freedChars); freed += h.freedChars || 0;
+  if (freed < (shortBy || 0)) {                       // still short → re-fetchable caches (rebuild source declared in the storage census)
+    try {
+      const { reclaimLocalStorage } = await import("../../../shared/storage/storageReclaim.js");
+      const r = reclaimLocalStorage(localStorage, { limitBytes: Math.max(0, (shortBy || 0) - freed) });
+      steps.push("mapdata:" + r.removedKeys + ":" + r.freedBytes); freed += r.freedBytes;
+    } catch (e) { steps.push("mapdata:error"); }
+  }
+  reportClientEvent("plan-store-room-made", "freed localStorage that is safely duplicated or re-fetchable, to make room for the per-plan split", { reason, shortByBefore: shortBy, freedChars: freed, enough: freed >= (shortBy || 0), steps: steps.join(" · ") });
+  return { freedChars: freed, steps };
+}
+
 export const storage = {
   async list(prefix = "") {
     const keys = [];
@@ -1098,6 +1203,7 @@ const writeSites = (map) => planStore.writeMap(sitesKey(), map);
 const writeSite = (id, rec) => planStore.writeOne(sitesKey(), id, rec);
 const removeSite = (id) => planStore.removeOne(sitesKey(), id);
 planStore.configure({
+  makeRoom: (a) => makeRoomForPlanStore(a),
   persistForm: dropIdbBackedSrc,
   slim: stripDataUrls,
   merge: (mine, theirs) => {
