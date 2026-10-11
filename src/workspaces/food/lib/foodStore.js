@@ -118,6 +118,25 @@ export function reportAddressSearchError(error, now = Date.now()) {
   } catch (_) { return Promise.resolve(false); }
 }
 
+let _lastSidewaysReport = 0;
+/** NEW-3 (2026-10-11): the visit sheet's own content box was ever pushed sideways (scrollLeft != 0). The sheet puts it
+ *  straight back, and this records that it happened — once a minute at most — so a recurrence on his phone leaves a row
+ *  (the cause could not be reproduced in the sandbox: no Apple WebKit). Same client + table as reportBrowseError. */
+export function reportSheetSideways(detail, now = Date.now()) {
+  try {
+    if (now - _lastSidewaysReport < 60000) return Promise.resolve(false);
+    _lastSidewaysReport = now;
+    if (!supabase) return Promise.resolve(false);
+    const row = {
+      build: typeof __BUILD_ID__ !== "undefined" ? __BUILD_ID__ : "dev",
+      module: "food", source: "food:sheet-sideways", message: `visit sheet pushed sideways: ${JSON.stringify(detail || {})}`.slice(0, 500),
+      url: typeof location !== "undefined" ? location.href : null,
+      user_agent: typeof navigator !== "undefined" ? navigator.userAgent : null,
+    };
+    return Promise.resolve(supabase.from("client_errors").insert(row)).then((r) => !(r && r.error), () => false);
+  } catch (_) { return Promise.resolve(false); }
+}
+
 export async function searchPlacesByName(query, center, signal) {
   if (!supabase || !query || !query.trim()) return { data: [], error: null };
   const args = {

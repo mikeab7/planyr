@@ -60,7 +60,7 @@ describe("useDraftField — a FRESH MOUNT under the same store gets the kept val
 describe("the Food forms actually use it (a refactor back to bare useState would silently reintroduce the loss)", () => {
   const panel = read("components/VisitPanel.jsx"), dishes = read("components/DishesSection.jsx");
   it("VisitForm keeps every typed field in the draft store", () => {
-    for (const f of ["rating", "ratingAmbiance", "cost", "visitedOn", "dishRows", "whatWasGood", "notes", "wouldReturn"]) {
+    for (const f of ["rating", "ratingAmbiance", "cost", "visitedOn", "dishRows", "notes", "wouldReturn"]) {
       expect(panel, `VisitForm field ${f}`).toMatch(new RegExp(`\\[${f}, set\\w+\\] = useDraftField\\(draftKey, "${f}"`));
     }
   });

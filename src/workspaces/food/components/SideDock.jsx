@@ -127,7 +127,7 @@ export default function SideDock({ children, onWidthChange }) {
       }}
     >
       <style>{TYPING_CSS + FORM_OPEN_CSS + NARROW_CARD_CSS}</style>
-      <div ref={scrollRef} data-testid="food-side-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", overscrollBehavior: "contain", WebkitOverflowScrolling: "touch" }}>
+      <div ref={scrollRef} data-testid="food-side-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden", overscrollBehavior: "contain", touchAction: "pan-y", WebkitOverflowScrolling: "touch" }}>
         <div style={{ minHeight: "100%", display: "flex", flexDirection: "column", containerType: "inline-size", containerName: "food-dock" }}>{children}</div>
       </div>
     </div>

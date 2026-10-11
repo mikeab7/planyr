@@ -24,7 +24,9 @@
  *   ... s.page ...; console.log(s.build, s.proof);  await s.close();
  */
 import { chromium, webkit, devices } from "@playwright/test";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
 
 export const FIXTURE_SITE_ID = "e2e-fixture-site";
 export const TEST_ACCOUNT_EMAIL = "e2e@planyr.test";
@@ -33,13 +35,53 @@ export const TEST_ACCOUNT_EMAIL = "e2e@planyr.test";
 export function routeFailure(status, body) {
   if (status === 404) return "e2e-session route answered 404 — E2E_LOGIN_KEY is not set (or is wrong) on that deploy";
   if (status === 405) return "e2e-session route answered 405 (wrong method)";
-  if (status !== 200) return `e2e-session route answered ${status}${body && body.error ? " — " + body.error : ""}`;
+  if (status !== 200) {
+    const why = body && [body.error, body.stage && `stage ${body.stage}`, body.upstream_status && `upstream ${body.upstream_status}`, body.upstream_error, body.network_error].filter(Boolean).join(", ");
+    return `e2e-session route answered ${status}${why ? " — " + why : ""}`;
+  }
   if (!body || !body.access_token || !body.refresh_token) return "e2e-session route answered 200 without tokens";
   return null;
 }
 
+/* SESSION CACHE (B2154049): minting a fresh sign-in per check hammers Supabase admin generate_link and was
+ * the load that coincided with the 502 stretches. The test account's session is cached on disk (mode 0600,
+ * tokens only ever in this file — never printed) and reused: supabase-js refreshes it on setSession, and the
+ * refreshed pair is written back. The route is only called when there is no usable cache. */
+export const sessionCachePath = () => process.env.E2E_SESSION_CACHE || join(tmpdir(), "planyr-e2e-session.json");
+
+/** Pure: is this cached record worth trying? (shape + a refresh token; expiry is handled by the refresh.) */
+export function cacheUsable(c, nowSec = Math.floor(Date.now() / 1000)) {
+  return !!(c && typeof c.access_token === "string" && typeof c.refresh_token === "string" && c.user_email === TEST_ACCOUNT_EMAIL
+    && (!c.saved_at || nowSec - c.saved_at < 50 * 24 * 3600));
+}
+export function readSessionCache(path = sessionCachePath()) {
+  try { const c = JSON.parse(readFileSync(path, "utf8")); return cacheUsable(c) ? c : null; } catch { return null; }
+}
+export function writeSessionCache(tok, path = sessionCachePath()) {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ access_token: tok.access_token, refresh_token: tok.refresh_token, user_email: TEST_ACCOUNT_EMAIL, saved_at: Math.floor(Date.now() / 1000) }), { mode: 0o600 });
+  } catch { /* a cache that cannot be written only costs a fresh sign-in next time */ }
+}
+
+/** Try the cached session on this page; true only if it is live AND is the test account. Refreshed tokens are written back. */
+async function tryCachedSession(page) {
+  const c = readSessionCache();
+  if (!c) return false;
+  await page.waitForFunction(() => !!window.pfSupabase, null, { timeout: 20000 });
+  const out = await page.evaluate(async (t) => {
+    const { data, error } = await window.pfSupabase.auth.setSession({ access_token: t.access_token, refresh_token: t.refresh_token });
+    const ses = data && data.session;
+    return error || !ses ? { ok: false } : { ok: ses.user && ses.user.email, access_token: ses.access_token, refresh_token: ses.refresh_token };
+  }, c).catch(() => ({ ok: false }));
+  if (out.ok !== TEST_ACCOUNT_EMAIL) return false;
+  writeSessionCache(out);
+  return true;
+}
+
 /** Sign the page in via the key route. Returns the proof object; throws with the exact error. */
 export async function signInViaRoute(page, key) {
+  if (await tryCachedSession(page)) return;
   // The route intermittently answers 5xx (a 502 for ~3 min during every Pages deploy, measured 2026-10-06); retry those only — a 404/401 is a real answer.
   let r;
   for (let attempt = 0; attempt < 14; attempt++) {
@@ -63,6 +105,7 @@ export async function signInViaRoute(page, key) {
     await page.waitForTimeout(2000);
   }
   if (set) throw new Error("signedInSession: setSession failed — " + set);
+  writeSessionCache(r.body);
 }
 
 /** Proof only a signed-in owner can produce: the auth user's email + the fixture site row. */
