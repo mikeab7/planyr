@@ -42,7 +42,11 @@ begin
     if not v_owned then
       raise exception 'That site plan is not yours to move.' using errcode = '42501';
     else
-      raise exception 'This site plan changed elsewhere — reload before moving it again.' using errcode = '40001';
+      -- ⛔ 2026-10-11 OUTAGE: NEVER 40001/40P01. PostgREST treats 40001 (serialization_failure) as retryable and
+      -- re-runs the transaction forever inside one request, so every conflicting call pinned a pool connection
+      -- until the pool hit 10/10 and planyr.io went down for every user (6:05-6:31 PM CT). PT409 is a PostgREST
+      -- custom code -> HTTP 409, error.code 'PT409'. Mirrors what production already runs.
+      raise exception 'This site plan changed elsewhere — reload before moving it again.' using errcode = 'PT409';
     end if;
   end if;
 

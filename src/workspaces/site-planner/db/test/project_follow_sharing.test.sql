@@ -18,9 +18,8 @@ declare
   x uuid := '00000000-0000-4000-8000-00000b224403';
   t uuid; t3 uuid;
   k1 text; k2 text; k3 text; kx text; ko text; rk1 text; rk2 text; rk5 text;
-  r1 uuid; r2 uuid; r5 uuid; c1 uuid; c2 uuid; cx uuid; rv text := 'b2244017-test-review-private';
+  r1 uuid; r2 uuid; r5 uuid; c1 uuid; c2 uuid; cx uuid; rv text := 'b2244017-test-review-private'; rvo text := 'b2244017-test-review-own';
   n int; rep text := ''; passed int := 0; failed int := 0;
-  procedure_dummy int;
 begin
   insert into auth.users (id, instance_id, aud, role, email, created_at, updated_at) values
     (o, '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated', 'b2244017-o@test.invalid', now(), now()),
@@ -62,10 +61,10 @@ begin
     ('b2244017pg', m, t3,   'B2244017 Proj2', 'graft', jsonb_build_object('groupId', 'b2244017g2'));
   update public.sites set deleted_at = now() where id = 'b2244017p3';
 
-  insert into public.doc_reviews (id, user_id, title, data) values (rv, o, 'B2244017 private review', '{}'::jsonb);
-  insert into public.site_plan_overlays (user_id, team_id, project_id, page, img_w, img_h, raster_key) values (o, null, 'b2244017p1', 1, 10, 10, rk1) returning id into r1;
-  insert into public.site_plan_overlays (user_id, team_id, project_id, page, img_w, img_h, raster_key) values (o, null, 'b2244017p2', 1, 10, 10, rk2) returning id into r2;
-  insert into public.site_plan_overlays (user_id, team_id, project_id, page, img_w, img_h, raster_key) values (o, t,    null,         1, 10, 10, rk5) returning id into r5;
+  insert into public.doc_reviews (id, user_id, title, data) values (rv, o, 'B2244017 private review', '{}'::jsonb), (rvo, o, 'B2244017 source review', '{}'::jsonb);
+  insert into public.site_plan_overlays (user_id, team_id, project_id, review_id, page, img_w, img_h, raster_key) values (o, null, 'b2244017p1', rvo, 1, 10, 10, rk1) returning id into r1;
+  insert into public.site_plan_overlays (user_id, team_id, project_id, review_id, page, img_w, img_h, raster_key) values (o, null, 'b2244017p2', rvo, 1, 10, 10, rk2) returning id into r2;
+  insert into public.site_plan_overlays (user_id, team_id, project_id, review_id, page, img_w, img_h, raster_key) values (o, t,    null,         rvo, 1, 10, 10, rk5) returning id into r5;
   -- ATTACK (B2244018): M's own overlay shared with T, naming O's PRIVATE raster and O's PRIVATE review.
   insert into public.site_plan_overlays (user_id, team_id, project_id, review_id, page, img_w, img_h, raster_key) values (m, t, null, rv, 1, 10, 10, rk2);
   insert into public.comps (user_id, team_id, project_id, comp_type, comp_date, anchor_kind, lat, lon, land_price, land_size_value, land_size_unit)
@@ -80,8 +79,6 @@ begin
   -- (inlined; plpgsql has no closures)
   <<checks>>
   declare
-    procedure_names text[];
-    function_dummy int;
   begin
     -- ===== M (teammate on shared P1) =====
     execute format('set local role authenticated; set local request.jwt.claims = %L', json_build_object('sub', m, 'role', 'authenticated')::text);
@@ -144,7 +141,7 @@ begin
         where ref.id = p_project and s.deleted_at is null
           and (s.user_id = auth.uid() or (s.team_id is not null and public.is_team_member(s.team_id)))) $f$;
     execute format('set local role authenticated; set local request.jwt.claims = %L', json_build_object('sub', m, 'role', 'authenticated')::text);
-    select count(*) into n from storage.objects where name in (k3, kx);
+    select count(*) into n from storage.objects where name in (k3, kx, ko);
     if n > 0 then passed := passed+1; rep := rep||'PASS M1 mutation caught: without the bin + origin checks, checks 8/9 go red ('||n||' leaked)'||E'\n'; else failed := failed+1; rep := rep||'FAIL M1 weakened file guard not detected — checks 8/9 are vacuous'||E'\n'; end if;
     execute 'reset role';
     execute format('set local role authenticated; set local request.jwt.claims = %L', json_build_object('sub', x, 'role', 'authenticated')::text);
