@@ -44,7 +44,11 @@ import { withResolvedCounties } from "../lib/overlayCompCounty.js";
 import { notifyCompsChanged } from "../../comps/lib/compsChanged.js";
 import { uploadOverlayRaster, downloadOverlayRasterUrl } from "../lib/overlayRasterStorage.js";
 import ImageCropTool from "./ImageCropTool.jsx";
+import CropModal from "./CropModal.jsx";
 import { hasCrop } from "../../overlay/overlayCrop.js";
+import { planSetScale, planTrace, planMatch, setScaleBlock, currentFeetPerInch } from "../lib/overlayScaleGeo.js";
+import { matchPairsOf, calibrationReady, calibrationPrompt } from "../lib/overlayCalibration.js";
+import { SCALE_PRESETS, feetPerInchForPreset, matchScalePreset, feetPerInchFromPair, PAGE_UNITS, REAL_UNITS } from "../../overlay/overlayScale.js";
 import {
   OVERLAY_RASTER_BASE_DPI, OVERLAY_RASTER_MAX_LONG_EDGE_PX, OVERLAY_RASTER_JPEG_QUALITY,
   OVERLAY_THUMB_MAX_LONG_EDGE_PX, OVERLAY_THUMB_JPEG_QUALITY, cappedRasterDims,
@@ -417,10 +421,102 @@ function OverlayRow({
  * footer sat right where the FAB was measured to land. Declaring
  * `data-canvas-corner="site-plan-adjust"` is the whole fix — no coordinate math of our own,
  * the FAB reads our rendered box and floats clear of it, per that module's own contract. */
+/* NEW-7 (owner 2026-10-11) — SCALE, from the Adjust panel: the same three equal actions the Site tab's Overlays
+ * panel has ("Set scale", "Trace a length", "Match 2 points"), shown whether or not the plan is already scaled and
+ * whether or not it is locked (Lock only stops dragging it on the map). Module scope on purpose
+ * (MODULE-SCOPE-COMPONENTS). "Set scale" is local (a preset or a typed scale, applied the moment it is chosen);
+ * the other two are click-by-click on the map — `calib` is the map's live click state for THIS plan, and the
+ * inputs they need (the real length / Apply) live here. One column of three full-width buttons: the labels do not
+ * fit three-across in this panel's width, and a 2 + 1 split is the shape the Overlays redesign ruled out. */
+const SCALE_BUTTONS = [
+  ["set", "Set scale", "Pick a standard scale or type your own"],
+  ["trace", "Trace a length", "Click two ends of a known dimension on the drawing, then enter its real length"],
+  ["match", "Match 2 points", "Click a point on the drawing then its spot on the map; repeat for 2+ pairs, then Apply (moves, rotates & scales)"],
+];
+const fmtFeetPerInch = (v) => `1″ = ${Math.round(v * 100) / 100}′`;
+function OverlayScaleSection({ o, calib, scaleMsg, onSetScale, onPick, onCancel, onUndo, onApplyTrace, onApplyMatch }) {
+  const [setOpen, setSetOpen] = useState(false);
+  const [custom, setCustom] = useState("");
+  const [traceText, setTraceText] = useState("");
+  const [traceUnit, setTraceUnit] = useState("ft");
+  const setBlock = setScaleBlock(o);
+  const cur = currentFeetPerInch(o);
+  const matched = cur ? matchScalePreset(cur) : null;
+  const selVal = custom !== "" ? "custom" : (matched ? matched.id : "custom");
+  const pairs = calib && calib.kind === "match" ? matchPairsOf(calib.pts).filter((p) => p.from && p.to).length : 0;
+  const tool = calib ? calib.kind : (setOpen ? "set" : null);
+  const applyCustom = () => { const fpi = feetPerInchFromPair({ pageVal: "1", pageUnit: "in", realVal: custom, realUnit: "ft" }); if (fpi) onSetScale(fpi); };
+  return (
+    <div data-testid="site-plan-adjust-scale" style={{ marginBottom: 12 }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
+        <span style={{ fontSize: FONT_SIZE.control, fontWeight: 600, color: "var(--text-primary)" }}>Scale</span>
+        <span data-testid="site-plan-adjust-scale-now" style={{ ...metaText, fontWeight: 600 }}>{cur ? fmtFeetPerInch(cur) : `${Math.round(o.ftPerPx * 100) / 100} ft per pixel`}</span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 4 }}>
+        {SCALE_BUTTONS.map(([k, label, title]) => {
+          const off = k === "set" && !!setBlock;
+          return (
+            <Button key={k} size="sm" variant="ghost" disabled={off} data-testid={`site-plan-scale-${k}`} aria-pressed={tool === k}
+              style={{ ...ACTION_BTN_STYLE, width: "100%", ...(tool === k ? { borderColor: "var(--accent)" } : {}) }}
+              title={off ? setBlock : title}
+              onClick={() => { if (k === "set") { onCancel(); setSetOpen((v) => !v); } else { setSetOpen(false); onPick(k); } }}>{label}</Button>
+          );
+        })}
+      </div>
+
+      {tool === "set" && (
+        <div data-testid="site-plan-scale-set-tools" style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 6 }}>
+          <select aria-label="Scale" data-testid="site-plan-scale-preset" style={{ ...inputStyle, width: "100%" }} value={selVal}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === "custom") { setCustom(cur ? String(Math.round(cur * 100) / 100) : "40"); return; }
+              setCustom("");
+              const p = SCALE_PRESETS.find((x) => x.id === v);
+              if (p) onSetScale(feetPerInchForPreset(p));
+            }}>
+            <optgroup label="Engineering">{SCALE_PRESETS.filter((p) => p.group === "Engineering").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</optgroup>
+            <optgroup label="Architectural">{SCALE_PRESETS.filter((p) => p.group === "Architectural").map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}</optgroup>
+            <option value="custom">Custom…</option>
+          </select>
+          {selVal === "custom" && (
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={metaText}>1 inch on the page =</span>
+              <input aria-label="Feet per page inch" data-testid="site-plan-scale-custom" style={{ ...inputStyle, width: 64 }} value={custom} placeholder="feet"
+                onChange={(e) => setCustom(e.target.value)} onBlur={applyCustom} onKeyDown={(e) => { if (e.key === "Enter") applyCustom(); }} />
+              <span style={metaText}>ft</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {calib && (
+        <div data-testid="site-plan-scale-calib" style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+          <span style={{ ...metaText, color: "var(--text-primary)" }}>{calibrationPrompt(calib)}</span>
+          {calib.kind === "trace" && calib.pts.length === 2 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <input aria-label="Real length" data-testid="site-plan-scale-trace-length" style={{ ...inputStyle, width: 70 }} value={traceText} placeholder="length" autoFocus
+                onChange={(e) => setTraceText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") onApplyTrace(traceText, traceUnit); }} />
+              <select aria-label="Unit" style={inputStyle} value={traceUnit} onChange={(e) => setTraceUnit(e.target.value)}>{REAL_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}</select>
+            </div>
+          )}
+          {calib.kind === "match" && <span style={metaText}>{pairs} {pairs === 1 ? "pair" : "pairs"} ready{pairs >= 3 ? " · best fit" : ""}</span>}
+          <div style={{ display: "flex", gap: 4 }}>
+            <Button size="sm" data-testid="site-plan-scale-apply" disabled={!calibrationReady(calib)}
+              onClick={() => (calib.kind === "trace" ? onApplyTrace(traceText, traceUnit) : onApplyMatch())}>Apply</Button>
+            <Button size="sm" variant="ghost" data-testid="site-plan-scale-undo" disabled={!calib.pts.length} onClick={onUndo}>Undo point</Button>
+            <Button size="sm" variant="ghost" data-testid="site-plan-scale-cancel" onClick={onCancel}>Cancel</Button>
+          </div>
+        </div>
+      )}
+      {scaleMsg && <div data-testid="site-plan-scale-msg" role="status" style={{ ...metaText, marginTop: 6, color: scaleMsg.tone === "error" ? "var(--danger)" : "var(--text-primary)" }}>{scaleMsg.text}</div>}
+    </div>
+  );
+}
+
 function SitePlanAdjustPanel({
   o, isActive, onActivate, onDeactivate,
   onSetOpacity, onOpacityCommit, onSetRotation, onToggleVisible, onToggleLocked, onStartCrop,
-  teams, onShareTeam, isOwner, onClose,
+  teams, onShareTeam, isOwner, onClose, scale,
 }) {
   // B1134753 NEW-20 — "rotation needs a way to type an exact value." `null` = not editing (show
   // the live stored value); a string while the field has focus, so a half-typed "12." isn't
@@ -512,6 +608,9 @@ function SitePlanAdjustPanel({
           </div>
         )}
 
+        {/* NEW-7 — Scale: reachable whether or not the plan is scaled, and whether or not it is locked. */}
+        {placed && scale && <OverlayScaleSection o={o} {...scale} />}
+
         {/* B972512-HARDENING item 8 — sharing is a deliberate, POST-placement action, gated on
             `placed` so a half-set-up plan (still at its auto-suggested default position) can
             never appear on a teammate's map before its owner has actually positioned it. */}
@@ -530,17 +629,19 @@ function SitePlanAdjustPanel({
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", paddingTop: 6, borderTop: "1px solid var(--border-default)" }}>
           {/* Move/resize's own label now doubles as its exit — clicking it again while active
               stops editing, which is what the old overflow menu's "Stop editing" row did. */}
-          <Button size="sm" variant={isActive ? "primary" : "ghost"} disabled={placed && o.locked}
-            onClick={() => (isActive ? onDeactivate() : onActivate())} style={ACTION_BTN_STYLE}
-            title={placed && o.locked ? "Locked — unlock to move or resize" : (sizeFt || undefined)}>
+          {/* NEW-6 — pressing this is an explicit "I want to move/resize it", so it works on a locked
+              plan too; only a direct drag on the map is blocked while locked. */}
+          <Button size="sm" variant={isActive ? "primary" : "ghost"}
+            onClick={() => (isActive ? onDeactivate() : onActivate())} style={ACTION_BTN_STYLE} data-testid="site-plan-adjust-move"
+            title={sizeFt || undefined}>
             <MoveIcon />{isActive ? "Editing on map" : placed ? "Move / resize" : "Place on map"}
           </Button>
-          {/* NEW-1 (B1783328) — the lock never gated this control (B1154369 only closed the map
-              handles + the rotation field), so a locked overlay's crop was still editable. Same
-              disabled/title pattern as the Move/resize button above. */}
-          <ToggleChip active={hasCrop(o)} disabled={!o.rasterKey || (placed && o.locked)}
-            onClick={onStartCrop} style={{ ...ACTION_BTN_STYLE, opacity: !o.rasterKey || (placed && o.locked) ? 0.5 : 1, cursor: !o.rasterKey || (placed && o.locked) ? "not-allowed" : "pointer" }}
-            title={placed && o.locked ? "Locked — unlock to crop" : !o.rasterKey ? "This plan doesn't have an image yet" : hasCrop(o) ? "Already cropped — edit or reset it" : undefined}>
+          {/* NEW-6 (owner 2026-10-11, supersedes B1783328) — Lock only stops the plan being moved or
+              resized by dragging it directly on the map. Crop is never gated by it, so a locked plan
+              can still be cropped (and its scale set, below). */}
+          <ToggleChip active={hasCrop(o)} disabled={!o.rasterKey}
+            onClick={onStartCrop} data-testid="site-plan-adjust-crop" style={{ ...ACTION_BTN_STYLE, opacity: !o.rasterKey ? 0.5 : 1, cursor: !o.rasterKey ? "not-allowed" : "pointer" }}
+            title={!o.rasterKey ? "This plan doesn't have an image yet" : hasCrop(o) ? "Already cropped — edit or reset it" : undefined}>
             <CropIcon />{hasCrop(o) ? "Edit crop" : "Crop…"}
           </ToggleChip>
         </div>
@@ -561,6 +662,8 @@ export default function SitePlansSection({
   onStopPinOnOverlay, pinningOverlayId,
   commitPlacementRef, dropIntakeRef, onRejectFile, onCompPositionsChanged, rasterFailedIds,
   zoomBelowGate, onZoomToOverlay,
+  // NEW-7 — the map's live click state for the scale calibration + its three setters (MapFinder owns the clicks).
+  calibration = null, onStartCalibration, onClearCalibration, onUndoCalibration,
   // B1167712-B1167714 (NEW-1/2/3, owner decision 2026-09-07 — "we really shouldn't even show
   // site plans... they should just be attached to comps") — this no longer renders a standalone
   // list. `focusedProjectId`/`focusedCompId` name the comp currently open in the Comps rail (see
@@ -644,6 +747,8 @@ export default function SitePlansSection({
   const notifiedRef = useRef(onOverlaysChange);
   notifiedRef.current = onOverlaysChange;
   const overlaysRef = useRef(overlays);
+  const activeIdRef = useRef(activeOverlayId); // NEW-6: read by commitPlacement (stable ref, current at commit time)
+  activeIdRef.current = activeOverlayId;
   overlaysRef.current = overlays;
   const compsChangedRef = useRef(onCompPositionsChanged);
   compsChangedRef.current = onCompPositionsChanged;
@@ -749,14 +854,18 @@ export default function SitePlansSection({
   // recompute its lat/lon under the NEW placement, and write both the overlay and every comp
   // position through commitOverlayPlacementWithComps, a single-transaction RPC (comps.update is
   // owner-only RLS, so a plain client-side update would silently no-op on a teammate's pin).
-  const commitPlacement = (id, placement) => serialized(id, async () => {
+  const commitPlacement = (id, placement, opts) => serialized(id, async () => {
     const existing = overlaysRef.current.find((o) => o.id === id);
     if (!existing) return;
     // NEW-7 — defense in depth: every UI entry point into a placement change (the map handles,
     // the numeric Rotation field) is gated on `locked` at the control, but the write itself must
     // refuse too, so a stale closure or a future caller can never move/resize/rotate a plan the
     // owner explicitly locked.
-    if (existing.locked) { console.warn("[sitePlanOverlays] commitPlacement refused — overlay is locked:", id); return; }
+    // NEW-6 — a locked plan refuses a placement write UNLESS the person explicitly asked for it: they
+    // armed it with "Move / resize" in this panel (it is then the active overlay — a locked plan is
+    // not click-selectable, so that is the only way it becomes active), or the caller says `explicit`
+    // (a scale change from the Adjust panel). A direct drag on the map never reaches here for a locked plan.
+    if (existing.locked && !(opts && opts.explicit) && activeIdRef.current !== id) { console.warn("[sitePlanOverlays] commitPlacement refused — overlay is locked:", id); return; }
     const next = { ...existing, ...placement };
     setOverlays((list) => { const l = list.map((o) => (o.id === id ? next : o)); notifiedRef.current?.(l); return l; });
 
@@ -905,6 +1014,10 @@ export default function SitePlansSection({
     };
     return () => { if (dropIntakeRef) dropIntakeRef.current = null; };
   }, [dropIntakeRef]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // NEW-7 — a calibration belongs to an open Adjust panel: closing the panel (or this section going inactive) ends it.
+  useEffect(() => { if (calibration && (!open || !adjustOpen)) onClearCalibration?.(); }, [open, adjustOpen, calibration]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [scaleMsg, setScaleMsg] = useState(null); // { id, tone: "ok"|"error", text } — the last scale action's outcome
 
   if (!open) return null;
 
@@ -1128,19 +1241,37 @@ export default function SitePlansSection({
   // patchAndReload path opacity/visible/locked use, which never touches pinned comps.
   const setRotation = (o, rotationDeg) => commitPlacement(o.id, { rotationDeg });
 
+  // NEW-7 — scale actions. Every one commits through the SAME placement write a corner drag uses (so pinned comps
+  // follow), with `explicit: true`: choosing a scale action in this panel is an intentional act, so a LOCKED plan
+  // takes it — Lock only blocks dragging on the map.
+  const applyScalePlan = async (o, planned, okText) => {
+    if (planned.error) { setScaleMsg({ id: o.id, tone: "error", text: planned.error }); return false; }
+    await commitPlacement(o.id, planned.patch, { explicit: true });
+    setScaleMsg({ id: o.id, tone: "ok", text: okText });
+    return true;
+  };
+  const setScaleFromPanel = (o, fpi) => applyScalePlan(o, planSetScale(o, fpi), `Scale set to ${fmtFeetPerInch(fpi)}`);
+  const applyTrace = async (o, text, unit) => {
+    if (!calibration || calibration.id !== o.id) return;
+    if (await applyScalePlan(o, planTrace(o, calibration.pts[0], calibration.pts[1], text, unit), "Scale set from the traced length")) onClearCalibration?.();
+  };
+  const applyMatch = async (o) => {
+    if (!calibration || calibration.id !== o.id) return;
+    const planned = planMatch(o, matchPairsOf(calibration.pts).filter((p) => p.from && p.to));
+    const off = planned.residualFt;
+    const text = planned.error ? "" : `Matched ${planned.pairs} pairs${off > 1 ? ` — the points are off by about ${Math.round(off)} ft at best` : ""}`;
+    if (await applyScalePlan(o, planned, text)) onClearCalibration?.();
+  };
+
   // ---- crop (B1134754 NEW-21), for an ALREADY-PLACED overlay -------------------------------
   // A crop never moves the placement transform (see site_plan_overlays_crop.sql's header), so
   // it commits through the plain patchAndReload path — never commitPlacement — and never
   // recomputes a pinned comp's position. (`cropTarget` state itself is declared near the top of
   // the component, above the `if (!open) return null` early return — see that declaration.)
-  // NEW-1 (B1783328) — B1154369 closed the map handles + the rotation field but never checked
-  // this control, so a locked overlay's crop stayed editable end to end. Refused at BOTH the
-  // entry point (the tool never opens on a locked overlay, matching the button's own `disabled`)
-  // and the commit (defense in depth, same shape as `commitPlacement`'s `existing.locked` guard —
-  // never trust a disabled control alone to keep every future caller honest).
+  // NEW-6 (owner 2026-10-11) — Lock gates ONLY direct map drags. It used to block this too
+  // (B1783328); the owner reversed that, so neither the entry point nor the commit checks `locked`.
   const startCrop = async (o) => {
     if (!o.rasterKey) return;
-    if (overlayPlaced(o) && o.locked) { console.warn("[sitePlanOverlays] startCrop refused — overlay is locked:", o.id); return; }
     setPanelError(null);
     const src = await downloadOverlayRasterUrl(o.rasterKey);
     if (!src) { setPanelError("Couldn't load this plan's image to crop it — reload and try again."); return; }
@@ -1148,7 +1279,6 @@ export default function SitePlansSection({
   };
   const commitCrop = async (crop) => {
     const o = cropTarget && cropTarget.overlay;
-    if (o && overlayPlaced(o) && o.locked) { console.warn("[sitePlanOverlays] commitCrop refused — overlay is locked:", o.id); setCropTarget(null); return; }
     setCropTarget(null);
     if (!o) return;
     await patchAndReload(o, { crop });
@@ -1503,33 +1633,17 @@ export default function SitePlansSection({
       </div>
     )}
 
-    {/* B1134754 NEW-21 — cropping an ALREADY-PLACED overlay. A simple centered overlay (this
-        panel has no existing modal primitive) rather than a second bespoke crop surface. */}
+    {/* B1134754 NEW-21 — cropping an ALREADY-PLACED overlay. NEW-1/NEW-3 (owner 2026-10-11): the shared
+        `CropModal` — portaled to <body> so no map control can paint over it, and sized to the window with the
+        crop tool filling everything under the title. */}
     {cropTarget && (
-      <div data-testid="site-plan-crop-modal" style={{
-        position: "fixed", inset: 0, zIndex: 2000, background: "rgba(0,0,0,0.35)", // design-exempt: modal backdrop scrim — no backdrop-color token exists repo-wide yet
-        display: "flex", alignItems: "center", justifyContent: "center",
-      }} onPointerDown={(e) => { if (e.target === e.currentTarget) setCropTarget(null); }}>
-        <div style={{
-          background: "var(--surface-raised)", border: "1px solid var(--border-default)", borderRadius: RADIUS.lg, padding: 14,
-          boxShadow: "0 8px 32px rgba(0,0,0,0.35)", // design-exempt: no shadow-color token yet repo-wide (matches model/FindReplaceBar.jsx's own popPanel precedent)
-          maxWidth: "96vw", maxHeight: "94vh", overflowY: "auto",
-        }}>
-          <div style={{ fontSize: FONT_SIZE.control, fontWeight: 600, marginBottom: 8, color: "var(--text-primary)" }}>
-            Crop “{cropTarget.overlay.docTitle || "this site plan"}”
-          </div>
-          {/* NEW-2 (2026-09-22 live test) — a fixed 720×520 default viewport centred on a short
-              window (e.g. 1191×521) pushed the shape-toggle row above y=0 and the Done/Cancel row
-              past the bottom, with nothing to scroll to reach either. Same fix as the Site tab's
-              OverlayCropDialog: size the tool's viewport off the real window, with the same floors. */}
-          <ImageCropTool
-            src={cropTarget.src} imgW={cropTarget.overlay.imgW} imgH={cropTarget.overlay.imgH} crop={cropTarget.overlay.crop}
-            maxWidth={Math.max(420, typeof window !== "undefined" ? window.innerWidth - 80 : 900)}
-            maxHeight={Math.max(320, typeof window !== "undefined" ? window.innerHeight - 220 : 640)}
-            onCommit={commitCrop} onCancel={() => setCropTarget(null)}
-          />
-        </div>
-      </div>
+      <CropModal testId="site-plan-crop-modal" title={`Crop “${cropTarget.overlay.docTitle || "this site plan"}”`} onCancel={() => setCropTarget(null)}>
+        <ImageCropTool
+          fill
+          src={cropTarget.src} imgW={cropTarget.overlay.imgW} imgH={cropTarget.overlay.imgH} crop={cropTarget.overlay.crop}
+          onCommit={commitCrop} onCancel={() => setCropTarget(null)}
+        />
+      </CropModal>
     )}
 
     {/* B1310209 (NEW-2, owner decision 2026-09-07) — the Adjust panel is DOCKED to the map, not
@@ -1540,7 +1654,9 @@ export default function SitePlansSection({
         plain ref MapFinder attaches to that element — by the time a user can press "Adjust" the
         map has long since mounted, so reading `.current` at render time (rather than mirroring it
         into state) is safe. */}
-    {adjustOpen && focusedOverlay && mapHostRef?.current && createPortal(
+    {/* NEW-2 — the Adjust panel steps aside while the crop editor is up (its open/closed state is kept, so it
+        comes back exactly as it was after Done or Cancel). */}
+    {adjustOpen && !cropTarget && focusedOverlay && mapHostRef?.current && createPortal(
       <SitePlanAdjustPanel o={focusedOverlay}
         isActive={activeOverlayId === focusedOverlay.id && overlayPlaced(focusedOverlay)}
         onActivate={async () => {
@@ -1558,6 +1674,16 @@ export default function SitePlansSection({
         onStartCrop={() => startCrop(focusedOverlay)}
         onToggleVisible={() => toggleVisible(focusedOverlay)}
         onToggleLocked={() => toggleLocked(focusedOverlay)}
+        scale={{
+          calib: calibration && calibration.id === focusedOverlay.id ? calibration : null,
+          scaleMsg: scaleMsg && scaleMsg.id === focusedOverlay.id ? scaleMsg : null,
+          onSetScale: (fpi) => setScaleFromPanel(focusedOverlay, fpi),
+          onPick: (kind) => { setScaleMsg(null); onStartCalibration?.(kind, focusedOverlay.id); },
+          onCancel: () => { setScaleMsg(null); onClearCalibration?.(); },
+          onUndo: () => onUndoCalibration?.(),
+          onApplyTrace: (text, unit) => applyTrace(focusedOverlay, text, unit),
+          onApplyMatch: () => applyMatch(focusedOverlay),
+        }}
         teams={teams}
         onShareTeam={(teamId) => shareOverlay(focusedOverlay, teamId)}
         isOwner={focusedOverlay.userId === currentUserId}

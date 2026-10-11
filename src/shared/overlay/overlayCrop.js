@@ -222,6 +222,38 @@ export function nearestOnSegment(p, a, b) {
   return { x: a[0] + abx * t, y: a[1] + aby * t, t };
 }
 
+// ---- Right-click point editing (NEW-4) --------------------------------------------------------
+// Pure so the crop tool's context menu and the unit tests share one rule. All points are image px.
+// Index of the ring edge (i → i+1, wrapping) nearest to `p`, by true point-to-segment distance.
+export function nearestEdgeIndex(pts, p) {
+  if (!Array.isArray(pts) || pts.length < 2 || !p) return -1;
+  let best = -1, bestD = Infinity;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    const n = nearestOnSegment(p, a, b);
+    const d = Math.hypot(p[0] - n.x, p[1] - n.y);
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return best;
+}
+// "Add control point" — the new vertex lands EXACTLY on `p` (not projected onto the edge), spliced
+// between the two vertices of the nearest edge. Returns the same array untouched when it cannot
+// (no usable edge, or already at MAX_POLY_VERTICES).
+export function addPointAtNearestEdge(pts, p, max = MAX_POLY_VERTICES) {
+  if (!Array.isArray(pts) || pts.length >= max) return pts;
+  const i = nearestEdgeIndex(pts, p);
+  if (i < 0) return pts;
+  const next = pts.slice();
+  next.splice(i + 1, 0, [p[0], p[1]]);
+  return next;
+}
+export const canDeletePoint = (pts) => Array.isArray(pts) && pts.length > MIN_POLY_VERTICES;
+// "Delete point" — refuses (returns the same array) at the MIN_POLY_VERTICES floor.
+export function deletePointAt(pts, idx) {
+  if (!canDeletePoint(pts) || !(idx >= 0 && idx < pts.length)) return pts;
+  return pts.filter((_, i) => i !== idx);
+}
+
 // Reversible, one-step conversions between the two shapes. Pure projections only — the CALLER
 // (ImageCropTool) is what keeps each shape's own last-drawn value alive across a mode toggle by
 // holding both drafts in state rather than deriving one from the other on every switch.
@@ -356,15 +388,13 @@ export function cropClipShapeScreen(o, tl, ftPerPx, ftPerPxY, rppf) {
 }
 
 // Whether the Site-tab panel may edit this overlay's crop, and if not, the plain reason — the ONE
-// predicate the panel button, the trim fields and the commit itself all ask, so a locked overlay
-// refuses the edit at the write, not only by greying a button (B1154369: a lock that only greyed
-// its control failed to stop movement). The pinned map capture is excluded because it exports
+// predicate the panel button, the trim fields and the commit itself all ask. The pinned map capture is excluded because it exports
 // through its own synthesized aerial path, not the cloned `<image>`, so a crop there would draw
 // on screen and silently not print (PDF-PARITY).
 export function cropEditBlock(o) {
   if (!o) return "This overlay is no longer on the plan";
   if (o.fromMap) return "The map capture can't be cropped";
-  if (o.locked) return "Unlock this overlay to crop it";
+  // NEW-6 (owner 2026-10-11) — Lock only stops direct move/resize drags on the map; it never gates a crop.
   if (!o.src || !(o.imgW > 0) || !(o.imgH > 0)) return "Load the drawing first to crop it";
   return null;
 }
