@@ -96,6 +96,17 @@ export function listProjects() {
   }
 }
 
+/* NEW-2 (library record-only sites) — the "tracked" (record-only) sites, which listProjects() above leaves out on
+ * purpose. Exposed separately so a surface that must reach EVERY document (the Library) can ask for them by name
+ * instead of loosening the pursuit filter every other "pick a project" surface relies on. */
+export function listTrackedProjects() {
+  try {
+    return groupProjects(loadSiteSummaries().filter((s) => roleOf(s) === "tracked"));
+  } catch (_) {
+    return [];
+  }
+}
+
 /* THE PROJECT LIST CHANGED — one signal, every surface (B482 ×2).
  *
  * A same-tab localStorage write fires NO native `storage` event, so a warm that lands in one
