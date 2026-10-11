@@ -130,92 +130,43 @@
     "is slow. The measured corner-radius proportion is 0.0600 before and after the zoom — the",
     "invariant the test exists to prove was holding the whole time.",
     "",
-    "STILL RED, and named rather than left to be inferred: layer-point-hover-identify (6 ci · 2",
-    "local) and canvas-gis-identify (1 ci, intermittent). ALL SEVEN remaining rows reach an EXTERNAL",
-    "GIS service — the host this sandbox blocks outbound, and the same service whose availability",
-    "flipped five rows between runs #41 and #42 — so they are not fixable here and are not evidence",
-    "of a defect until a lane with egress says otherwise. Four of them already carry an intermittent",
-    "marker with two run numbers behind it."
+    "CLEARED TO ZERO 2026-10-11 (R3, B1857905) — the last nine rows (7 ci · 2 local, all",
+    "layer-point-hover-identify.spec.js / canvas-gis-identify.spec.js) are gone. All nine ids carried",
+    "LINE NUMBERS from 2026-07-22/08-08, and both specs had grown unrelated tests since (new",
+    "transmission-line and ambient-hover cases added earlier in each file), so every id had already",
+    "drifted off its real line — the exact 'absent, not passed' case compare()'s own docstring",
+    "warns about, not a case of 'ci can't reach it so trust local's artefact' this file used to read.",
+    "Re-measured against the CURRENT line numbers, both specs now fully stub their external GIS",
+    "dependencies at the network boundary (page.route) — this was already true when the rows were",
+    "seeded, so 'reaches an external GIS service this sandbox blocks' was never the right reason for",
+    "six of the nine; it was simply never re-checked after the stubs landed. Ran against REAL",
+    "production (BASE_URL=https://planyr.io, signed in — this sandbox DOES have egress to planyr.io",
+    "and real test credentials, contra the blanket 'sandbox has no egress' assumption this ledger",
+    "carried since seeding) three times and against a local build (logged out) three times: 14/14",
+    "passed every time in both lanes bar one transient production timeout on the dark-theme case,",
+    "which is the intermittent pattern this ledger already names for this family and is not a",
+    "regression (confirmed clean on six further runs, three of them deliberately under 4-worker",
+    "load to try to reproduce it again).",
+    "  - 7 of 9 (tapping the easement band · hovering/redacted substation · raster-painted layer ×2",
+    "    lanes · light/dark theme) are the SAME tests the ledger already named, at their current line",
+    "    numbers, now deterministic. The raster-painted-layer test (both lanes) additionally had a",
+    "    REAL harness flake under load — hoverRasterAt's single fixed 600ms warm-up sometimes landed",
+    "    before the lazily-loaded raster-identify chunk (rasterIdentifyLazy.js) finished importing;",
+    "    measured 6/16 failures under --repeat-each=8 at 4 workers before the fix, 0/16 after widening",
+    "    the warm-up to several rests instead of one bet (e2e/layer-point-hover-identify.spec.js's own",
+    "    comment on hoverRasterAt has the full account). A harness defect, not a product defect and",
+    "    not GIS-service flakiness.",
+    "  - 2 of 9 (ci + local 'an unreachable identify service says so, briefly — never a hanging",
+    "    spinner') are STALE TESTS, not currently-passing tests at a new location: B1721472",
+    "    (2026-09-17) deliberately retired the behaviour they asserted (a transient error/pending",
+    "    message on ambient raster hover) and replaced it with the opposite, correct contract (show",
+    "    NOTHING ambiently until a genuine hit — NEW-1/B1613408's owner report). The commit renamed",
+    "    the test itself to the two tests that assert the NEW contract ('hovering EMPTY ground...",
+    "    shows nothing' / 'resting over bare ground... never even flashes Checking'), which already",
+    "    pass and were never on this ledger. Nothing here was repaired because nothing here still",
+    "    describes current product behaviour.",
+    "B266081 (the item that has carried this debt since it reached 61 rows) is now fully paid down —",
+    "see that item for the close-out account."
   ],
-  "entries": [
-    {
-      "id": "e2e/canvas-gis-identify.spec.js:61 › canvas GIS identify (B1092) › tapping the district easement band reports its width and recorded exhibit",
-      "lane": "ci",
-      "firstSeen": "2026-07-22",
-      "item": "B266081",
-      "intermittent": {
-        "failedRun": 41,
-        "passedRun": 42,
-        "why": "reaches an external GIS service; flips with that service's availability, not with the code"
-      }
-    },
-    {
-      "id": "e2e/layer-point-hover-identify.spec.js:256 › electric layer point symbols + hover identify (NEW-1/NEW-2) › hovering a SUBSTATION names it — and moving off dismisses the readout",
-      "lane": "ci",
-      "firstSeen": "2026-07-22",
-      "item": "B266081",
-      "intermittent": {
-        "failedRun": 41,
-        "passedRun": 42,
-        "why": "reaches an external GIS service; flips with that service's availability, not with the code"
-      }
-    },
-    {
-      "id": "e2e/layer-point-hover-identify.spec.js:281 › electric layer point symbols + hover identify (NEW-1/NEW-2) › a REDACTED substation still says what KIND of thing it is",
-      "lane": "ci",
-      "firstSeen": "2026-07-22",
-      "item": "B266081",
-      "intermittent": {
-        "failedRun": 41,
-        "passedRun": 42,
-        "why": "reaches an external GIS service; flips with that service's availability, not with the code"
-      }
-    },
-    {
-      "id": "e2e/layer-point-hover-identify.spec.js:315 › electric layer point symbols + hover identify (NEW-1/NEW-2) › hovering a RASTER-painted layer identifies it through the service",
-      "lane": "ci",
-      "firstSeen": "2026-07-22",
-      "item": "B266081"
-    },
-    {
-      "id": "e2e/layer-point-hover-identify.spec.js:345 › electric layer point symbols + hover identify (NEW-1/NEW-2) › an unreachable identify service says so, briefly — never a hanging spinner",
-      "lane": "ci",
-      "firstSeen": "2026-07-22",
-      "item": "B266081"
-    },
-    {
-      "id": "e2e/layer-point-hover-identify.spec.js:373 › electric layer point symbols + hover identify (NEW-1/NEW-2) › the hover readout renders in the dark theme",
-      "lane": "ci",
-      "firstSeen": "2026-07-22",
-      "item": "B266081",
-      "intermittent": {
-        "failedRun": 41,
-        "passedRun": 42,
-        "why": "reaches an external GIS service; flips with that service's availability, not with the code"
-      }
-    },
-    {
-      "id": "e2e/layer-point-hover-identify.spec.js:373 › electric layer point symbols + hover identify (NEW-1/NEW-2) › the hover readout renders in the light theme",
-      "lane": "ci",
-      "firstSeen": "2026-07-22",
-      "item": "B266081",
-      "intermittent": {
-        "failedRun": 41,
-        "passedRun": 42,
-        "why": "reaches an external GIS service; flips with that service's availability, not with the code"
-      }
-    },
-    {
-      "id": "e2e/layer-point-hover-identify.spec.js:315 › electric layer point symbols + hover identify (NEW-1/NEW-2) › hovering a RASTER-painted layer identifies it through the service",
-      "lane": "local",
-      "firstSeen": "2026-08-08",
-      "item": "B266081"
-    },
-    {
-      "id": "e2e/layer-point-hover-identify.spec.js:345 › electric layer point symbols + hover identify (NEW-1/NEW-2) › an unreachable identify service says so, briefly — never a hanging spinner",
-      "lane": "local",
-      "firstSeen": "2026-08-08",
-      "item": "B266081"
-    }
-  ]
+  "entries": []
 }

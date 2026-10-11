@@ -1,10 +1,10 @@
 # Reliability programme (R0–R9) — status and durable brief
 
-> **Read this file when picking up reliability-programme work (R3 onward).** It exists so the
-> next session does not have to rediscover what R0/R1/R2 already measured, and so the full R3–R9
-> scope survives even though only R0–R2 have shipped. Cross-referenced from `BACKLOG.md`
+> **Read this file when picking up reliability-programme work (R4 onward).** It exists so the
+> next session does not have to rediscover what R0/R1/R2/R3 already measured, and so the full
+> R4–R9 scope survives even though only R0–R3 have shipped. Cross-referenced from the ledger
 > (**B1857904** — R1, shipped 2026-09-22/23; **B1923456** — R2, shipped 2026-09-27;
-> **B1857905** — R3–R9, recorded and not started).
+> **B1857905** — R3 shipped 2026-10-11, R4–R9 recorded and not started).
 
 ## What this is
 
@@ -202,25 +202,96 @@ again. `checkRequiredContracts()` itself mutation-proven at the unit level too.
 Full evidence, file list, and verification commands are on **B1923456** in
 `docs/archive/BACKLOG-DONE.md`.
 
-## Stage gate for R3 — what must be true before it starts
+## R3 — retire known-red + source-assertion triage: **SHIPPED 2026-10-11 (B1857905)**
 
-R3 (retire the known-red GIS-identify family + source-assertion triage) is now unblocked — R2's
-critical lane exists. It additionally inherits the two newly-found stale cases above. Per the
-brief's own sequencing, R3/R4 can proceed in parallel; R5 has no hard dependency on R2/R3; R7 can
-begin on a small stable leaf now that R2 has landed; R8 is gated on R2's interaction protections
-existing, which they now do.
+R0 refresh before starting confirmed a clean base: fetched `origin/main`, fast-forwarded one commit
+(PR #2266, e2e-session reliability — zero file overlap with this stage), and a subagent check of
+all six then-open PRs found none touching any file this stage would touch.
+
+**1. The two stale cases R2 excluded are repaired, not just un-excluded.** Both were genuinely
+stale — their underlying product behaviour had moved, and the fix was to retarget each test at the
+CURRENT instance of the exact contract it was written to prove, never to restore removed UI:
+- `ctrlz-undo.spec.js:97` — a building's Fill opacity is a `PercentField`/`NumInput` text field now
+  (deliberately `SCOPE.FIELD` per `lib/keyContract.js`, so Ctrl+Z while it holds focus is correctly
+  refused — B754752's own rule, not a regression). The ONE remaining `SCOPE.SLIDER` instance of
+  Fill opacity is a markup CLOUD shape's (`input[type="range"]`, the one closed-markup kind that
+  isn't `simpleClosedMarkup`); the test now draws a cloud instead of a building and otherwise keeps
+  its original drag/Ctrl+Z/redo assertions unchanged.
+- `inspector-key-scope.spec.js:188` — leaving the Depth field via Enter keeps `SCOPE.FIELD`, which
+  B754752 deliberately silenced (no toast — "a focused text field consuming Delete/Backspace is
+  correct behaviour"). Leaving via Tab onto the field's own ▲ stepper lands on `SCOPE.CHROME`
+  instead (focus on a `<button>`, value-row touch latch still active), which still hints — same
+  safety property, a setup the current product still narrates.
+
+Both repairs **mutation-proven**: a disposable one-line change restoring the old (now-wrong)
+behaviour made each test fail for exactly the reason it should; reverted, each passes again. Both
+exclusions removed from `playwright.critical.config.js` (`grepInvert` deleted entirely) and
+`e2e/critical-contracts.json`'s header updated; the restored full lane (both files' every test, not
+just the one contract case) ran green 4/4 times.
+
+**2. `e2e/known-red.json` cleared to zero** (was 7 `ci` + 2 `local`). The finding that mattered:
+every one of the nine ids carried a line number from its 2026-07-22/08-08 seeding, and both owning
+spec files (`layer-point-hover-identify.spec.js`, `canvas-gis-identify.spec.js`) had since grown
+unrelated tests earlier in the file — so every id had drifted off its real line, `compare()`'s own
+documented "absent, not passed" case, not a confirmed-still-red external-GIS row. Re-measured
+against current line numbers: both specs already fully stub their GIS dependencies at the network
+boundary. Ran 3× against real signed-in production (this sandbox has real test credentials and
+real egress to planyr.io — correcting a "no egress" assumption the ledger carried since seeding)
+and 3× against a logged-out local build: 14/14 green every time, one transient production timeout
+on a theme-hover case that did not reproduce across six further confirmation runs. Disposition per
+case:
+- **7 of 9** are the same tests, now deterministic at their current lines. One (raster-painted-layer
+  hover, both lanes) also had a genuine harness flake fixed in the same pass: `hoverRasterAt`'s
+  single fixed 600ms warm-up sometimes lost the race against the lazily-loaded raster-identify
+  chunk under load — measured 6/16 failures at `--repeat-each=8`/4 workers before, 0/16 after
+  widening the warm-up to several rests; mutation-proven the same way as above.
+- **2 of 9** ("an unreachable identify service says so, briefly") are stale tests, not repaired:
+  B1721472 (2026-09-17) deliberately retired that exact behaviour and replaced it with the correct
+  opposite contract, renaming the test itself to its two successor tests (already green, never on
+  the ledger).
+
+Close-out account on **B266081** (moved to Done). `test/e2eDriftGate.test.js`'s captured fixture
+(`test/fixtures/playwright-report.sample.json`) re-captured from a real current run so its own
+pinned assertions match reality; two tests there that hardcoded the old failing ids/line numbers
+updated to match.
+
+**3. `test/bugHuntGuards.test.js`'s B506/B507 source-text proxy replaced with executed coverage.**
+A regex match on SitePlanner.jsx's two `.catch()` call sites could only prove five words still
+appear somewhere in a 30,000-line file — never that either `.catch()` is still reachable. Added to
+`test/saveFallbackCloud.test.js` (reusing its existing `cloudSync.js` mock, no second mock built): a
+test that makes the mocked `cloudUpsert` genuinely throw and asserts `pushModelToCloud` propagates
+the rejection rather than swallowing it — the one precondition that has to hold for either
+`.catch()` handler to ever run. Mutation-proven: a one-line defensive `.catch()` added inside
+`pushModelToCloud` (simulating the exact regression this guards against) failed both new tests;
+reverted, both pass.
+
+**Housekeeping found along the way:** the `post-merge-regen` git hook (fired by this stage's own
+`git merge origin/main`) silently staged a locally-regenerated `MAP.md`/`BACKLOG_OPEN.md` — both
+branch-forbidden by the Generated-index touch guard. Restored to committed `HEAD` before this
+stage's changes were staged; neither ships in this diff.
+
+**Verification run on the final head:** `npx vitest run` — 1138 files / 22,196 tests, 0 failed
+(the one pre-fix failure, `resolveLedgers.test.js`, was the `MAP.md` artifact above, not a code
+defect — green once reverted). `node scripts/ci-parity.mjs` run in full against the final head
+(see that run's own log for gate-by-gate results).
+
+## Stage gate for R4 — what must be true before it starts
+
+R4 (persistence/async interleaving coverage) and R5 (hook-warning gate) remain `Blocker: scope` —
+genuine multi-session work, not touched by R3. R7 can begin on a small stable leaf now that R2/R3
+have landed; R8 is gated on R2's interaction protections existing, which they now do.
 
 **Do not start** (until their own stated preconditions hold): planner state extraction (R6 — gated
 on B217540 per the existing decomposition plan), persistence engine rewrites, scheduler build
 migration (R8's actual build-entry work — its precondition is now clear, but the work itself is
 still unstarted), schema changes, production data mutation, or a React upgrade.
 
-## R3–R9 — recorded, not started
+## R4–R9 — recorded, not started
 
 The full original brief is preserved below verbatim so no detail is lost between sessions. Treat
 its file paths, line-count figures, and "reviewed commit" references as a **2026-09-20 snapshot**,
 superseded by whatever a fresh R0-style check measures at the start of whichever session picks up
-R3 — the brief says this about itself ("Refresh changed facts only; do not restart a broad
+R4 — the brief says this about itself ("Refresh changed facts only; do not restart a broad
 architecture audit").
 
 <details>
