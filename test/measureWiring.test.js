@@ -38,7 +38,7 @@ describe("NEW-1: measurements are styled through the ONE resolver, on every mode
     expect(SP).toMatch(/mode: "line", pts: \[measDraft\[0\], sp\], \.\.\.measureDefaultStyle\(settings\)/);
     expect(SP).toMatch(/const std = measureDefaultStyle\(settings\);/);
     ["polyline", "area", "count"].forEach((mode) => {
-      expect(SP).toMatch(new RegExp(`mode: "${mode}", pts: measDraft, \\.\\.\\.std`));
+      expect(SP).toMatch(new RegExp(`mode: "${mode}", pts: (?:measDraft|draft), \\.\\.\\.std`));
     });
   });
   it("the properties panel edits the full style through the SHARED colour control", () => {

@@ -17,13 +17,14 @@ import { fileURLToPath } from "node:url";
 const read = (p) => readFileSync(fileURLToPath(new URL(p, import.meta.url)), "utf8");
 const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
 const actions = read("../src/workspaces/site-planner/lib/parcelActions.js");
+const menuSrc = read("../src/workspaces/site-planner/components/RailMenus.jsx");
 
 // The Deed/Title row's handler, in the flyout's id → handler map.
 const deedRun = (src.match(/\n\s*deed:\s*\(\)\s*=>[^\n]*/) || [])[0];
 
 describe("B570 — Deed / Title (metes & bounds) tool lives in the Parcel tools menu", () => {
   it("the Parcel tools menu has the Deed / Title entry and it opens the existing modal", () => {
-    expect(actions).toMatch(/id: "deed"[^\n]*Deed \/ Title/);
+    expect(actions).toMatch(/id: "deed"[^\n]*From a deed/);
     expect(deedRun).toBeTruthy();
     expect(deedRun).toMatch(/setTitleOpen\(true\)/);   // opens the reader/plotter
     expect(deedRun).toMatch(/setTitleErr\(""\)/);       // clears any stale error first
@@ -31,12 +32,12 @@ describe("B570 — Deed / Title (metes & bounds) tool lives in the Parcel tools 
   });
 
   it("renders the deed glyph (not a blank icon)", () => {
-    expect(src).toMatch(/r\.id === "deed" && <ToolIcon id="deed"/);
-    expect(src).toMatch(/\bdeed:\s*<>/); // the ICON_PATHS entry still exists
+    expect(actions).toMatch(/id: "deed"[^\n]*icon: "deed"/);
+    expect(menuSrc).toMatch(/\bdeed:\s*<>/); // the menu's icon set still has the glyph
   });
 
   it("keeps the testid the ui-audit harnesses click it by", () => {
-    expect(src).toMatch(/r\.id === "deed" \? "boundary-menu-mb"/);
+    expect(menuSrc).toMatch(/r\.id === "deed" \? "boundary-menu-mb"/);
   });
 
   it("is a launcher (opens the modal), not a tool mode", () => {
@@ -46,8 +47,8 @@ describe("B570 — Deed / Title (metes & bounds) tool lives in the Parcel tools 
   it("the rail group is labelled 'Parcel tools' and keeps Draw + Split", () => {
     expect(src).toMatch(/icon=\{<ToolIcon id="parcel" \/>\} label=\{PARCEL_SURFACES\.rail\.name\}/);
     expect(actions).toMatch(/rail: \{ id: "rail", name: "Parcel tools"/);
-    expect(actions).toMatch(/id: "draw"[^\n]*Draw new parcel/);
-    expect(actions).toMatch(/id: "split"[^\n]*Split a parcel/);
+    expect(actions).toMatch(/id: "draw"[^\n]*Draw a parcel/);
+    expect(actions).toMatch(/id: "split"[^\n]*Split"/);
   });
 
   it("the old standalone rail launcher is gone (folded into the menu)", () => {

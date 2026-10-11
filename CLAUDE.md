@@ -675,6 +675,11 @@ were split out of this file.
     Review visibility stays exactly as it is. Unshared stays private; the `guard_team_share` trigger is untouched. And: a failed
     overlay download outside the reader's own storage folder may never erase the record's pointer (`lib/overlayHeal.js`). (B2244016, B2244017.)
 
+22. **(2026-10-11) The Parcel tools ▾ menu has NO "Remove parcels — click to delete" row.** Michael approved "A · Sorted list"
+    with exactly two changes: the second heading reads EDIT, and the "Delete by clicking" line is removed. Removing a parcel from
+    the menu is the red "Delete parcel" row on a SELECTED parcel; the click-to-delete mode stays reachable only from the Parcel
+    tool's own ✕ Remove banner button. Do not put a click-to-delete row back. (B2243168.)
+
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by
 Michael (industrial developer, Dallas/Houston). It is becoming a multi-workspace
