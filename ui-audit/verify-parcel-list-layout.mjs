@@ -69,22 +69,24 @@ FIX.push({ tag: "ovlp", title: "ZZ Eight South", overlap: true, sections: { coun
   ovDrawn("od1", 69.48, 0, 0, "Parcel 4"), ovDrawn("od2", 69.48, 0, 0, "Parcel 5"), ovDrawn("od3", 69.48, 60, 60, "Parcel 7"), ovDrawn("od4", 69.48, 0, 6000, "Parcel 8"), ovDrawn("od5", 11.86, 40, 6040, "Parcel 6")] });
 const SITES = Object.fromEntries(FIX.map((f) => { const s = mk(f.tag, f.title, f.parcels); return [s.id, s]; }));
 void yCursor;
-const WIDTHS = [240, 320, 620]; // PANEL_MIN_W · default · PANEL_MAX_W (lib/panelWidth.js)
+const WIDTHS = process.env.WIDTHS ? process.env.WIDTHS.split(",").map(Number) : [240, 320, 620]; // PANEL_MIN_W · default · PANEL_MAX_W (lib/panelWidth.js)
 const THEMES = ["light", "dark"];
 
 const errors = [];
 let browser, ctx, page, UID = null;
 async function seed() {
   if (SIGNED) {
+    await page.waitForFunction(() => !!(window.pfSupabase && window.pfSupabase.auth), null, { timeout: 30000 }); // a cold reload has no client yet
     UID = await page.evaluate(async () => (await window.pfSupabase.auth.getUser()).data.user.id);
     await page.evaluate(([uid, sites]) => { localStorage.setItem("planarfit:sites:cloud:" + uid, JSON.stringify(sites)); }, [UID, SITES]);
   }
 }
 if (SIGNED) {
-  const s = await openSignedIn({ base: BASE }); browser = s.browser; ctx = s.context; page = s.page;
+  const s = await openSignedIn({ base: BASE, ignoreDefaultArgs: ["--hide-scrollbars"] }); browser = s.browser; ctx = s.context; page = s.page;
 } else {
   const exe = existsSync(chromium.executablePath()) ? undefined : "/opt/pw-browsers/chromium";
-  browser = await chromium.launch({ executablePath: exe, args: ["--no-sandbox"] });
+  // REAL scrollbars: headless Chromium hides them, which is how a few-px overflow that only exists beside a classic (Windows) scrollbar was invisible here
+  browser = await chromium.launch({ executablePath: exe, args: ["--no-sandbox"], ignoreDefaultArgs: ["--hide-scrollbars"] });
   ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   page = await ctx.newPage();
   await page.addInitScript((sites) => { try { if (!localStorage.getItem("zz-pl-seeded")) { localStorage.setItem("planarfit:sites:v1", JSON.stringify(sites)); localStorage.setItem("zz-pl-seeded", "1"); } } catch (_) {} }, SITES);
@@ -101,6 +103,7 @@ const MEASURE = () => {
   const lum = (c) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b); };
   const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
   const textBox = (el) => { const g = document.createRange(); g.selectNodeContents(el); const rs = [...g.getClientRects()].filter((r) => r.width > 0); if (!rs.length) return null; return { l: Math.min(...rs.map((r) => r.left)), r: Math.max(...rs.map((r) => r.right)), t: Math.min(...rs.map((r) => r.top)), b: Math.max(...rs.map((r) => r.bottom)), lines: new Set(rs.map((r) => Math.round(r.top))).size }; };
+  const nameBtnPure = (row, id) => { const b = row.querySelector(`[data-testid="parcel-row-${id}"]`); const bad = [...b.querySelectorAll("[data-testid]")].filter((e) => !/^parcel-row-(name|source)-/.test(e.getAttribute("data-testid"))); return bad.length ? `${id}: name block holds ${bad.map((e) => e.getAttribute("data-testid")).join(",")} besides name + source` : ""; };
   const clipped = [], contrast = [], overlaps = [], rows = [], slots = [], outsideSlot = [], cellShared = [], wrappedSources = [];
   const check = (el, what) => {
     if (el.scrollWidth > el.clientWidth + 0.5) clipped.push(`${what}: scrollWidth ${el.scrollWidth} > clientWidth ${el.clientWidth}`);
@@ -122,19 +125,21 @@ const MEASURE = () => {
     });
     // lines of the NAME TEXT only — the small "overlaps" tag rides inline beside it and sits a pixel higher, which is not a line
     const nameLines = (() => { const tops = new Set(); const w = document.createTreeWalker(name, NodeFilter.SHOW_TEXT); for (let n = w.nextNode(); n; n = w.nextNode()) { if (n.parentElement.closest('[data-testid^="parcel-row-overlap-"]')) continue; const g = document.createRange(); g.selectNodeContents(n); [...g.getClientRects()].filter((r) => r.width > 0).forEach((r) => tops.add(Math.round(r.top))); } return tops.size; })();
-    const tagEl = row.querySelector(`[data-testid="parcel-row-overlap-${id}"]`);
-    const tagWrapped = (() => { if (!tagEl) return 0; let bottom = 0; const w = document.createTreeWalker(name, NodeFilter.SHOW_TEXT); for (let n = w.nextNode(); n; n = w.nextNode()) { if (n.parentElement.closest('[data-testid^="parcel-row-overlap-"]')) continue; const g = document.createRange(); g.selectNodeContents(n); [...g.getClientRects()].forEach((r) => { bottom = Math.max(bottom, r.bottom); }); } return tagEl.getBoundingClientRect().top >= bottom - 2 ? 1 : 0; })();
     const nb = textBox(name), sb = src && textBox(src);
     const eye = row.querySelector(`[data-testid="parcel-row-eye-${id}"]`), lock = row.querySelector(`[data-testid="parcel-row-lock-${id}"]`), more = row.querySelector(`[data-testid="parcel-row-more-${id}"]`);
+    const ovIcon = row.querySelector(`[data-testid="parcel-row-overlap-${id}"]`);
     const slot = eye.parentElement, sr = slot.getBoundingClientRect(), nameCell = name.closest("div[style*='flex']") || name.parentElement.parentElement;
     slots.push({ id, l: sr.left, r: sr.right });
-    [lock, eye, more].filter(Boolean).forEach((b) => { const r = b.getBoundingClientRect(); if (r.left < sr.left - 0.5 || r.right > sr.right + 0.5 || r.top < sr.top - 0.5 || r.bottom > sr.bottom + 0.5) outsideSlot.push(`${b.getAttribute("data-testid")} outside its icon slot`); });
+    if (ovIcon && !slot.contains(ovIcon)) outsideSlot.push(`overlap marker of ${id} is not in the icon slot`);
+    if (ovIcon && ovIcon.getBoundingClientRect().right > (lock || eye).getBoundingClientRect().left + 0.5) outsideSlot.push(`overlap marker of ${id} is not left of the padlock / eye`);
+    if (nameBtnPure(row, id)) cellShared.push(nameBtnPure(row, id));
+    [lock, eye, more, ovIcon].filter(Boolean).forEach((b) => { const r = b.getBoundingClientRect(); if (r.left < sr.left - 0.5 || r.right > sr.right + 0.5 || r.top < sr.top - 0.5 || r.bottom > sr.bottom + 0.5) outsideSlot.push(`${b.getAttribute("data-testid")} outside its icon slot`); });
     if (lock && lock.getBoundingClientRect().right > eye.getBoundingClientRect().left + 0.5) outsideSlot.push(`padlock of ${id} is not left of the eye`);
     // the name cell holds the name button ONLY (no icon in the middle of the row) and the button uses the cell's full width
     const nbtn = row.querySelector(`[data-testid="parcel-row-${id}"]`), cellW = nbtn.parentElement.getBoundingClientRect().width, indent = parseFloat(getComputedStyle(nbtn.parentElement).paddingLeft) || 0;
     if (nbtn.parentElement.children.length !== 1 || nbtn.getBoundingClientRect().width < cellW - indent - 1) cellShared.push(`${id}: name block shares its cell with ${nbtn.parentElement.children.length - 1} other element(s) / ${(cellW - indent - nbtn.getBoundingClientRect().width).toFixed(1)}px narrower`);
     if (src) { const sb2 = textBox(src); if (sb2 && sb2.lines > 1) { const c = src.cloneNode(true); c.style.cssText += ";white-space:nowrap;position:absolute;visibility:hidden;width:auto"; src.parentElement.appendChild(c); const natural = c.getBoundingClientRect().width; c.remove(); wrappedSources.push({ id, natural, avail: src.getBoundingClientRect().width, text: src.textContent }); } }
-    rows.push({ id, tagged: !!row.querySelector(`[data-testid="parcel-row-overlap-${id}"]`), h: row.getBoundingClientRect().height, nameLines: nb ? nameLines : 0, subLines: sb ? sb.lines : 0, tagWrapped, hasSub: !!src });
+    rows.push({ id, tagged: !!row.querySelector(`[data-testid="parcel-row-overlap-${id}"]`), h: row.getBoundingClientRect().height, nameLines: nb ? nameLines : 0, subLines: sb ? sb.lines : 0, hasSub: !!src });
   });
   const groups = [...panel.querySelectorAll('[data-testid^="parcels-group-"]:not([data-testid^="parcels-group-acres-"])')].map((g) => {
     const key = g.getAttribute("data-testid").replace("parcels-group-", ""); const lab = g.firstElementChild, ac = g.querySelector('[data-testid^="parcels-group-acres-"]');
@@ -150,7 +155,15 @@ const MEASURE = () => {
   };
   const groupAcres = [...panel.querySelectorAll('[data-testid^="parcels-group-acres-"]')].map((e) => Number(e.textContent.replace(/,/g, "")));
   const ovEl = panel.querySelector('[data-testid="parcels-overlap"]');
-  return { clipped, contrast, overlaps, rows, groups, acresRight, groupAcres, slots, outsideSlot, cellShared, wrappedSources, overlapText: ovEl ? ovEl.textContent : "", ...detail };
+  const lineCount = (el) => { const tops = new Set(); const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT); for (let n = w.nextNode(); n; n = w.nextNode()) { const g = document.createRange(); g.selectNodeContents(n); [...g.getClientRects()].filter((r) => r.width > 0).forEach((r) => tops.add(Math.round(r.top))); } return tops.size; };
+  const summaryLines = ["parcels-summary-line", "parcels-overlap"].map((id) => { const e = panel.querySelector(`[data-testid="${id}"]`); return e ? { id, lines: lineCount(e), text: e.textContent.trim() } : null; }).filter(Boolean);
+  // the nearest scrolling ancestor = the panel body: nothing may poke past its right edge (the owner's 403 vs 400)
+  let body = panel.parentElement; while (body && !/(auto|scroll)/.test(getComputedStyle(body).overflowX + getComputedStyle(body).overflowY)) body = body.parentElement;
+  body = body || document.scrollingElement;
+  const lim = body.getBoundingClientRect().left + body.clientLeft + body.clientWidth;
+  const offenders = [...body.querySelectorAll("*")].filter((e) => { const cs = getComputedStyle(e); return cs.position !== "fixed" && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().right > lim + 0.5; }).slice(0, 3).map((e) => `${e.tagName.toLowerCase()}[${e.getAttribute("data-testid") || e.className || ""}] +${(e.getBoundingClientRect().right - lim).toFixed(1)}`);
+  const bodyOverflow = { sw: body.scrollWidth, cw: body.clientWidth, offenders };
+  return { clipped, contrast, overlaps, rows, groups, acresRight, groupAcres, slots, outsideSlot, cellShared, wrappedSources, overlapText: ovEl ? ovEl.textContent : "", summaryLines, bodyOverflow, ...detail };
 };
 
 const openFixtureOnce = async (f, theme, width) => {
@@ -190,11 +203,12 @@ try {
     ok(`${tag}: every acres value (${rs.length} incl. group totals) shares one right edge`, spread <= 1, `spread ${spread.toFixed(2)}px`);
     ok(`${tag}: no icon box intersects any text box`, m.overlaps.length === 0, m.overlaps.slice(0, 3).join(" | "));
     // row heights: group by (hasSub, nameLines, subLines); each type uniform, extra lines add ~1 line height
-    const types = new Map(); m.rows.forEach((r) => { const k = `${r.hasSub ? 1 : 0}/${r.nameLines}/${r.subLines}/${r.tagWrapped}`; (types.get(k) || types.set(k, []).get(k)).push(r.h); });
+    // a row's kind is (group, lines) only — overlap / lock state is deliberately NOT part of it: a marker may never change a row's height
+    const types = new Map(); m.rows.forEach((r) => { const k = `${r.hasSub ? 1 : 0}/${r.nameLines}/${r.subLines}`; (types.get(k) || types.set(k, []).get(k)).push(r.h); });
     const nonUniform = [...types].filter(([, hs]) => Math.max(...hs) - Math.min(...hs) > 1).map(([k, hs]) => `${k}: ${Math.min(...hs).toFixed(1)}–${Math.max(...hs).toFixed(1)}`);
     ok(`${tag}: row heights are consistent within each row type (${types.size} types)`, nonUniform.length === 0, nonUniform.join(" | "));
-    const single = types.get("0/1/0/0");
-    if (single) { const base = single[0]; const bad = [...types].filter(([k, hs]) => { const [s, n, u, tw] = k.split("/").map(Number); const extra = (n - 1) + (u > 1 ? u - 1 : 0) + tw; return extra > 0 && !s ? Math.abs(hs[0] - base - extra * 17) > 2 : false; }); ok(`${tag}: a wrapped name adds only whole line heights`, bad.length === 0, bad.map(([k, hs]) => `${k}=${hs[0]}`).join(" | ")); }
+    const single = types.get("0/1/0");
+    if (single) { const base = single[0]; const bad = [...types].filter(([k, hs]) => { const [s, n, u] = k.split("/").map(Number); const extra = (n - 1) + (u > 1 ? u - 1 : 0); return extra > 0 && !s ? Math.abs(hs[0] - base - extra * 17) > 2 : false; }); ok(`${tag}: a wrapped name adds only whole line heights`, bad.length === 0, bad.map(([k, hs]) => `${k}=${hs[0]}`).join(" | ")); }
     // TOTALS RECONCILE: the rows/groups add up to the site total PLUS the disclosed overlap — or the mismatch is a defect (owner, 2026-10-11).
     const sumAc = Number(m.fs.sumText.split(" ")[0].replace(/,/g, "")), grpAc = m.groupAcres.reduce((a, b) => a + b, 0);
     const ovAc = m.overlapText ? Number((/([\d,]+\.\d\d) AC overlap/.exec(m.overlapText) || [0, "0"])[1].replace(/,/g, "")) : 0;
@@ -214,6 +228,8 @@ try {
     ok(`${tag}: the summary number is the same size as the words around it`, m.fs.num === m.fs.sum, `${m.fs.num} vs ${m.fs.sum} — "${m.fs.sumText}"`);
     ok(`${tag}: text clears 4.5:1`, m.contrast.length === 0, m.contrast.slice(0, 3).join(" | "));
     ok(`${tag}: the panel never scrolls sideways (${m.panelW}px wide)`, !m.spills);
+    ok(`${tag}: the panel BODY has no horizontal overflow (scrollWidth ${m.bodyOverflow.sw} vs clientWidth ${m.bodyOverflow.cw})`, m.bodyOverflow.sw <= m.bodyOverflow.cw + 0.5 && m.bodyOverflow.offenders.length === 0, m.bodyOverflow.offenders.join(" | "));
+    if (width >= 320) ok(`${tag}: no summary line wraps at ${width} (${m.summaryLines.map((s) => s.lines).join("+")} lines)`, m.summaryLines.length >= 1 && m.summaryLines.every((s) => s.lines === 1), m.summaryLines.map((s) => `${s.id}: "${s.text}" ×${s.lines}`).join(" | "));
     if (SHOTS) await T("parcels-panel").screenshot({ path: `${SHOTS}/${tag.replace(/\//g, "-")}.png` });
   }
   // eye/⋯ reveal contract on the Silvestri-shaped plan: hidden at rest, shown on hover; inactive eye always shown.
