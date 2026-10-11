@@ -7,6 +7,9 @@
  *     and total excursion from the first frame,
  *   · the two never move relative to each other (zero drift: element.x − tile.x is constant),
  *   · no hop on release (the first frames after pointerup equal the last frame of the drag).
+ *   · NEW-1 (B2206704–B2206706): on EVERY frame the corner furniture (north arrow, Scaled badge, coordinate chip, scale bar, help,
+ *     zoom stack) lies fully inside the visible map pane and never touches the panel or its grip — judged against
+ *     MEASURED rects, not the app's own arithmetic (ui-audit/lib/furnitureFrames.mjs).
  * KNOWN-GOOD ARM (DRIVER-SCROLL §6): a reading with NO drag at all (idle frames) must report zero
  * movement on any build; if it does not, the instrument is broken and the run is VOID.
  *
@@ -22,6 +25,7 @@ import { assertMeasurable } from "./lib/tabTiming.mjs";
 import { fixtureSeed } from "./lib/planFixture.mjs";
 import { readFixture } from "./lib/fixtureSeeding.mjs";
 import { frameStats } from "./lib/frameStats.mjs";
+import { readFurnitureFrame, judgeFurniture } from "./lib/furnitureFrames.mjs";
 import { decodePng } from "./lib/pngDiff.mjs";
 import { pixelDelta, sampleLine, lineDelta, lineVariety, estimateShiftX } from "./lib/pixelSteady.mjs";
 import { execFile } from "node:child_process";
@@ -59,7 +63,7 @@ const startRec = () => {
     const R = window.__rec; if (!R.run) return;
     const e = R.el.getBoundingClientRect(), t = R.tile ? R.tile.getBoundingClientRect() : null;
     const p = document.querySelector('[data-testid="left-menu-panel"]')?.getBoundingClientRect();
-    R.frames.push({ ex: e.left, ey: e.top, ew: e.width, tx: t && t.left, ty: t && t.top, tw: t && t.width, pr: p ? p.right : 0, T: performance.now() });
+    R.frames.push({ ex: e.left, ey: e.top, ew: e.width, tx: t && t.left, ty: t && t.top, tw: t && t.width, pr: p ? p.right : 0, T: performance.now(), fur: window.__readFur() });
     requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
@@ -90,12 +94,16 @@ function judge(label, frames, releaseAt, { dragged }) {
   if (s.hasTile) ok(s.relDrift <= TOL, `drawing and aerial never move against each other (max relative drift ${s.relDrift.toFixed(2)})`);
   ok(s.sizeMax <= TOL, `drawing and tile keep their size (max size change ${s.sizeMax.toFixed(2)})`);
   if (dragged) ok(s.releaseHop <= TOL, `no hop on release (${s.releaseHop.toFixed(2)})`);
+  // NEW-1 (B2206704–B2206706) — the corner furniture, every frame. Known-good arms: the north arrow, scale bar and zoom stack always exist.
+  const fv = judgeFurniture(frames.map((f) => f.fur), { requireObserved: ["north", "scale-bar", "zoom"] });
+  ok(fv.violations.length === 0, `corner furniture stays inside the visible pane on all ${frames.length} frames${fv.violations.length ? ` — ${fv.violations.length} violation(s), first: ${fv.violations[0]}` : ` (${[...fv.observed].join(", ")})`}`);
   return s;
 }
 
 for (const win of PIXELS_ONLY ? [] : WINDOWS) {
   const ctx = await browser.newContext({ viewport: { width: win.w, height: win.h }, deviceScaleFactor: win.dpr });
   await ctx.addInitScript(seed);
+  await ctx.addInitScript(`window.__readFur = ${readFurnitureFrame.toString()};`);
   await ctx.addInitScript(() => { try { localStorage.setItem("planarfit:leftWidth", "300"); } catch (_) {} });
   const page = await ctx.newPage();
   await assertMeasurable(page, "verify-panel-resize-steady");
@@ -103,6 +111,7 @@ for (const win of PIXELS_ONLY ? [] : WINDOWS) {
   page.on("pageerror", (e) => errors.push(String(e)));
   await page.goto(`${BASE}#/project/verify-panel-steady/site`, { waitUntil: "load" });
   await page.waitForTimeout(3000);
+  await page.mouse.move(Math.round(win.w * 0.62), Math.round(win.h * 0.55)); // wake the coordinate chip (it exists only while the cursor is over the map)
   const tag = `${win.w}×${win.h}@${win.dpr}x`;
   for (const tab of win.w === 1440 && win.dpr === 1 ? TABS : ["parcel"]) {
     await page.evaluate((id) => document.querySelector(`[data-rail-tab="${id}"]`)?.click(), tab);

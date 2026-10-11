@@ -81,6 +81,14 @@ Each is phrased as a testable sentence, followed by what proves it and its **cur
    local canvas copy unless a pending local op explains the difference; an element the server has
    *never* seen still keeps local's copy. — `elementSync.js` `reconcile()`'s `rowsWin` branch;
    `ROWS-CANONICAL-ON-SEED` in root `CLAUDE.md`; covered by `test/elementSync.test.js`. **✅ holds.**
+   **⛔ B2225425 (round 3, 2026-10-09) — A READ NORMALIZATION IS NOT A "DIVERGING LOCAL COPY".** Both read paths normalize what
+   they read (`siteModel.READ_NORMALIZE`: z de-dupe, band-force migration, lock semantics; plus the road migration and the bonded heal
+   that `rowsToModel` runs, plus the mount's `healDockAxes`) — but the after-seed diff saw the normalized canvas differ from its raw row
+   with nothing pending and ADOPTED THE RAW ROW BACK, so on every open the canvas was replaced element for element (a whole-drawing
+   re-render) and the migration undid itself (measured: Bolt-on's road `e1455359wmveej` 8 → 7 → 8 points per open). The seed now
+   applies the ONE table to what it shows and passes every key the normalization changed as `exempt` (B1118's shape for a heal), so
+   it is committed ONCE (`load-normalized-persisted`, loud) and the stored rows converge; a pending edit or a fold is never judged
+   by it. Skipped on a plan this account cannot write (view-only for teammates). Guard: `test/planOpenRound3.test.js`.
 4. **A remote tombstone is never resurrected by a local undo.** — `applySnapshot` drops buffered
    *upserts* on restore but keeps buffered *removes*. **✅ holds** (B1098).
 5. **Exactly one function answers "did this row originate from my own ACCOUNT?"** —
@@ -209,6 +217,8 @@ Each is phrased as a testable sentence, followed by what proves it and its **cur
 17. **A plan's device copy is the per-plan entry; the legacy whole-library entry is only a lagging mirror — and no write may make the mirror authoritative again, or an older tab's write get lost.** (B2165120.) An edit writes one plan entry + a ~60-byte index and NEVER the library (`test/planStore.test.js` §2, red-proofed against the un-split layout; `ui-audit/perf-plan-store-scaling.mjs` in a real browser). Migration is a verified copy that leaves the original untouched (§1, §3, §4 of that suite); an older build's write to the legacy entry is folded in per plan with no edit lost or reverted (§5); a revert to the old code still loads every plan and every post-migration edit once the mirror has run (§6), and the debt is recorded on disk (`idx.stale`) if a tab died before it did. **✅ holds in the sandbox; live proof: V1619488.** **⛔ KNOWN COST, STATED:** the split needs the library's size again in free localStorage next to the kept original, and the browser cap is ~5.2M characters — a device already near it is refused (reason `headroom`) and keeps the old layout until room is made (B2200385).
 
 ---
+
+18. **A plan opened under an account is only ever written into THAT account's device store.** (B2233521.) The store a save lands in is chosen at write time by whoever is signed in at that moment, so a flush that ran after sign-out (persist-on-leave as the planner unmounted) copied the open plan into the SIGNED-OUT store, where the next signed-out visitor of that browser would find it — measured, `ui-audit/verify-plan-switch-writes.mjs` FAILS on the build before. `saveDedupe.mayWriteForAccount` gates every planner save (`saveLive` — switch flush, persist-on-leave, page-hide flush — and the autosave mirror + settle tick). A planner opened with NO account (signed out, or before sign-in resolves at boot) is deliberately not gated: the boot path mounts before auth resolves, and refusing there could stop a live planner saving at all. **✅ holds in the sandbox** (that harness: PASS on the change, FAIL on the build before and with the gate forced open; CI half `test/planSwitchSaves.test.js`). Live proof: V1652976 (B2233872).
 
 ## 3. One-answer functions
 

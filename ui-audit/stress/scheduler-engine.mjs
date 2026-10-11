@@ -1240,22 +1240,30 @@ export function crossScheduleLabel(schedule) {
 
 // B1873360 — MasterView's "Group by project" sections: keyed by projId (never the bare schedule
 // name — two schedules can share one), ordered by owner label / schedule name / projId as a
-// stable tiebreak. VERBATIM mirror of public/sequence/index.html. `rows` are MasterView row
+// stable tiebreak; NEW-1 (2026-10-08) an optional `order` (project group ids, the owner's order) ranks
+// project groups first. VERBATIM mirror of public/sequence/index.html. `rows` are MasterView row
 // objects carrying `projId`, `projOwnerLabel`, `projName` (bare) and `projLabel` (qualified).
-export function groupRowsByProject(rows) {
+export function groupRowsByProject(rows, order) {
+  const rank = new Map();
+  if (Array.isArray(order)) order.forEach((id, i) => { if (!rank.has(String(id))) rank.set(String(id), i); });
   const groups = new Map();
   rows.forEach(t => {
     if (!groups.has(t.projId)) groups.set(t.projId, []);
     groups.get(t.projId).push(t);
   });
   return [...groups.entries()]
-    .map(([projId, gRows]) => ({
-      projId, gRows,
-      ownerLabel: gRows[0].projOwnerLabel || "",
-      name: gRows[0].projName || "",
-      label: gRows[0].projLabel || "",
-    }))
+    .map(([projId, gRows]) => {
+      const siteId = gRows[0].projSiteId != null ? gRows[0].projSiteId : null;
+      return {
+        projId, gRows, siteId,
+        rank: siteId != null && rank.has(String(siteId)) ? rank.get(String(siteId)) : Infinity,
+        ownerLabel: gRows[0].projOwnerLabel || "",
+        name: gRows[0].projName || "",
+        label: gRows[0].projLabel || "",
+      };
+    })
     .sort((a, b) =>
+      (a.rank !== b.rank ? (a.rank < b.rank ? -1 : 1) : 0) ||
       a.ownerLabel.localeCompare(b.ownerLabel) ||
       a.name.localeCompare(b.name) ||
       String(a.projId).localeCompare(String(b.projId)));

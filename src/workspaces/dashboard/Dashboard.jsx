@@ -75,7 +75,7 @@ import { groupProjectsByGroupId, pipelineCounts, goingQuiet, recentProjects } fr
 import { summarizeScheduleHealth } from "./lib/scheduleHealth.js";
 import { needsAttentionList } from "./lib/needsAttentionList.js";
 import { pursuitsTable, quietDaysByGroupFromRows } from "./lib/pursuitsList.js";
-import { orderedIds, moveProject, buildSavedOrder } from "../../shared/projects/projectOrder.js";
+import { planProjectMove } from "../../shared/projects/projectOrder.js";
 import { loadProjectOrder, saveProjectOrder } from "./lib/dashboardProjectOrderPrefs.js";
 import { buildSinceLastHereFeed } from "./lib/sinceLastHereFeed.js";
 import { spanWords } from "./lib/dashboardDates.js";
@@ -352,11 +352,8 @@ export default function Dashboard({ onShellSwitch, authControl, accountActive, u
   };
   const moveProjectInOrder = (groupId, dest) => {
     if (!orderReady) return; // the saved order hasn't loaded yet — a move now would overwrite it blind
-    const today = [...projects].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-    const full = orderedIds(today, projectOrder);
-    const next = moveProject(full, pursuitsRows.map((r) => r.groupId), groupId, dest);
-    if (next.every((id, i) => id === full[i])) return;
-    applyProjectOrder(buildSavedOrder(next));
+    const next = planProjectMove(projects, projectOrder, groupId, dest, pursuitsRows.map((r) => r.groupId));
+    if (next) applyProjectOrder(next);
   };
 
   const cardData = useMemo(() => ({

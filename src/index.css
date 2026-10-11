@@ -349,6 +349,8 @@
   --hover-chrome-danger: rgba(220, 38, 38, .12);
   --scroll-thumb:        #c8cfd9;
   --scroll-thumb-hover:  #b3bcc9;
+  --rail-scroll-thumb:   #7A8494;
+  --rail-scroll-track:   #E1E6ED;
   --scroll-track-border: #F3F5F8;
   --kbd-bg:   #e7ebf1;
   --kbd-text: #565E6E;
@@ -495,6 +497,8 @@
   --hover-chrome-danger: rgba(248, 113, 113, .14);
   --scroll-thumb:        #3d4250;
   --scroll-thumb-hover:  #4c5260;
+  --rail-scroll-thumb:   #6B7384;
+  --rail-scroll-track:   #1A1D25;
   --scroll-track-border: #14161B;
   --kbd-bg:   #262A33;
   --kbd-text: #CAD0DA;
@@ -695,13 +699,17 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
 .rbtn:hover:not(:disabled):not(.on) .rbtn-hint { color: var(--chrome-text) !important; }
 
 /* NEW-1 — RIGHT TOOL RAIL (see components/RailSplit.jsx, lib/toolRailModel.js).
-   The rail's scrollbar is hidden (still scrolls by wheel / touch / keyboard) instead of taking a
-   permanent strip on the right: with the strip, every row sat closer to the left edge than the right.
+   The rail shows a THIN scrollbar whenever it overflows (always visible, not hover-only; B2237072 brought it back
+   after the first redesign hid it and nothing told the owner the rail scrolls). `scrollbar-gutter: stable` keeps
+   the strip's width reserved so rows never shift when the rail starts or stops overflowing.
    `.rail-hdr` is the ONE heading rule: label + hairline to the right edge; its margins are the model's
-   RAIL numbers (above ≈ 2× below; below a little LESS than the gap between two tools). */
-.rail-scroll { scrollbar-width: none; }
-.rail-scroll::-webkit-scrollbar { display: none; }
-.rail-hdr { display: flex; align-items: center; gap: 8px; height: 12px; line-height: 1; margin: 22px 0 4px; padding: 0 0 0 11px;
+   RAIL numbers (above ≈ 2× below; below a little LESS than the gap between two tools). Its left inset
+   (--rail-hdr-inset) puts the heading text on the icon column. */
+.rail-scroll { scrollbar-width: thin; scrollbar-color: var(--rail-scroll-thumb) var(--rail-scroll-track); scrollbar-gutter: stable; }
+.dark-scroll.rail-scroll::-webkit-scrollbar { width: 7px; }
+.dark-scroll.rail-scroll::-webkit-scrollbar-track { background: var(--rail-scroll-track); border-radius: 4px; }
+.dark-scroll.rail-scroll::-webkit-scrollbar-thumb, .dark-scroll.rail-scroll::-webkit-scrollbar-thumb:hover { background: var(--rail-scroll-thumb); border: 0; border-radius: 4px; }
+.rail-hdr { display: flex; align-items: center; gap: 8px; height: 12px; line-height: 1; margin: 22px 0 4px; padding: 0 0 0 var(--rail-hdr-inset, 7px);
   font-size: 10.5px; font-weight: 700; letter-spacing: 1.1px; text-transform: uppercase; color: var(--chrome-muted); }
 .rail-hdr::after { content: ""; flex: 1; height: 1px; background: var(--chrome-divider); }
 .rail-scroll > .rail-hdr:first-child { margin-top: 4px; }
@@ -1091,4 +1099,43 @@ html[data-notes-typing="1"] [data-testid="help-report-fab"] { display: none !imp
 /* B2086368 — the Library's file-row delete ✕ (and its confirm buttons) is a full 44 px touch target on a coarse pointer. */
 @media (pointer: coarse) {
   .trash-del { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+}
+
+/* Overlays panel focus (B2215024): ONE accent in that panel — the global focus rules above use the orange
+   --accent; here they are the Site green. The doubled attribute out-ranks the global !important border rule. */
+[data-testid="overlays-panel"][data-fine-pointer] :is(button, input, select):focus-visible {
+  outline: 2px solid var(--accent-site);
+  outline-offset: 1px;
+}
+[data-testid="overlays-panel"][data-fine-pointer] input:not([type="range"], [type="checkbox"], [type="color"]):focus,
+[data-testid="overlays-panel"][data-fine-pointer] select:focus {
+  border-color: var(--accent-site) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-site) 18%, transparent) !important;
+}
+
+/* Food rating slider (NEW-2/NEW-3, 2026-10-11) — ONE control for Food, Ambiance and every dish score. The input box is the
+   whole tall grab target; the visible track is a slim bar drawn in its background. The thumb is --rs-thumb wide and travels
+   between ends inset by half of it, so a tick at the same inset sits exactly under the thumb centre (components/RatingSlider.jsx). */
+.food-rating-slider {
+  -webkit-appearance: none; appearance: none; display: block; width: 100%; margin: 0; padding: 0;
+  background: transparent; cursor: pointer; touch-action: pan-y; -webkit-tap-highlight-color: transparent;
+}
+.food-rating-slider:focus-visible { outline: 2px solid var(--accent-food); outline-offset: 2px; border-radius: 8px; }
+.food-rating-slider::-webkit-slider-runnable-track {
+  height: 100%; border-radius: 8px;
+  background:
+    linear-gradient(to right,
+      var(--rs-color) calc(var(--rs-thumb) / 2 + var(--rs-frac) * (100% - var(--rs-thumb))),
+      var(--border-default) calc(var(--rs-thumb) / 2 + var(--rs-frac) * (100% - var(--rs-thumb)))) center / 100% 6px no-repeat;
+}
+.food-rating-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; width: var(--rs-thumb); height: var(--rs-thumb); border-radius: 50%;
+  margin-top: calc((var(--rs-h) - var(--rs-thumb)) / 2);
+  background: var(--surface-page); border: 3px solid var(--rs-color); box-sizing: border-box;
+}
+.food-rating-slider::-moz-range-track { height: 6px; border-radius: 3px; background: var(--border-default); }
+.food-rating-slider::-moz-range-progress { height: 6px; border-radius: 3px; background: var(--rs-color); }
+.food-rating-slider::-moz-range-thumb {
+  width: var(--rs-thumb); height: var(--rs-thumb); border-radius: 50%; box-sizing: border-box;
+  background: var(--surface-page); border: 3px solid var(--rs-color);
 }

@@ -107,3 +107,20 @@ export function moveProject(fullIds, visibleIds, id, dest) {
 export function buildSavedOrder(ids, now = Date.now()) {
   return { ids: [...ids], at: now };
 }
+
+/** TODAY'S order — the fallback beneath his saved order: alphabetical by name. ONE implementation for
+ * every surface that lists projects in his order (the Dashboard's Pursuits card, the Task Report). */
+export function byNameToday(projects) {
+  return [...(projects || [])].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+}
+
+/** The whole move, start to finish, for ANY surface: the order to persist after moving `id` to
+ * `dest`, or null when nothing would change. `projects` is every project that exists (`{groupId,
+ * name, createdAt}`), `saved` the loaded order, `visibleIds` the ids that surface shows, in its
+ * display order. The Dashboard and the Task Report both call this — never a second move path. */
+export function planProjectMove(projects, saved, id, dest, visibleIds, now = Date.now()) {
+  const full = orderedIds(byNameToday(projects), saved);
+  const next = moveProject(full, visibleIds, id, dest);
+  if (next.length === full.length && next.every((x, i) => x === full[i])) return null;
+  return buildSavedOrder(next, now);
+}

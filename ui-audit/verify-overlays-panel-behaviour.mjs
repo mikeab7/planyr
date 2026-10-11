@@ -151,7 +151,7 @@ async function menuPick(page, id, label) {
   ok((await rot()) === "0", `undo steps back through each rotation (6 undos → ${await rot()})`);
 
   // ---- opacity ----------------------------------------------------------------------------------
-  const pct = page.locator('[data-testid="overlay-opacity-pct"]'); await pct.fill("40"); await pct.blur(); await page.waitForTimeout(250);
+  const pct = page.locator('[data-testid="overlay-opacity-pct"]'); await pct.click(); await pct.fill("40"); await pct.blur(); await page.waitForTimeout(250);
   ok((await stored(page)).find((o) => o.id === "a1").opacity === 0.4, "opacity % writes the overlay");
 
   // ---- Set scale preset: ratio changes; reload keeps it ------------------------------------------

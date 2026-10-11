@@ -2,7 +2,7 @@
  *
  * Seeds a THROWAWAY site (one building) through the app's own local-cache path, opens its Building
  * inspector in LIGHT then DARK, and walks every section: header (number · lock · ⋯ · ✕ · summary), the Loading wall
- * picker at a non-zero rotation (picker labels vs the painted aprons), the dock stack, 8 typed parking
+ * picker at a non-zero rotation (picker labels vs the painted aprons), the per-wall rows, 8 typed parking
  * rows, Structure folding, and outline width 4 / opacity 50 (drawn, then in the export clone). Writes a
  * panel screenshot per theme when SHOTS_DIR is set. The throwaway is ALWAYS deleted and confirmed gone
  * (owner constraint 15). KNOWN-GOOD ARM: the run is VOID unless the untouched header reports "Building 1".
@@ -59,7 +59,7 @@ try {
     const num = await T("building-header").getByRole("textbox", { name: "Building number" }).inputValue();
     ok(`[${scheme}] known-good: header reads Building with number 1`, num === "1");
     if (num !== "1") throw new Error("VOID run — the instrument did not see the header");
-    ok(`[${scheme}] summary line, no Pin / Delete element row`, /SF · (Cross-dock|Single-load)/.test(await T("building-summary").innerText()) && (await page.getByRole("button", { name: /Pin|Delete element/ }).count()) === 0);
+    ok(`[${scheme}] summary line, no Pin / Delete element row`, /SF · \d+ doors?/.test(await T("building-summary").innerText()) && (await page.getByRole("button", { name: /Pin|Delete element/ }).count()) === 0);
     ok(`[${scheme}] four sections present, Structure closed`, (await page.getByRole("button", { name: /^.*Footprint/ }).count()) > 0 && (await page.getByRole("button", { name: /Structure/ }).getAttribute("aria-expanded")) === "false");
 
     // rotation 45 → picker labels follow; click walls; canvas agrees
@@ -67,15 +67,16 @@ try {
     await rot.fill("45"); await rot.press("Enter");
     await waitFor(async () => Math.round((await bldg())?.rot || 0) === 45);
     ok(`[${scheme}] picker labels at rot 45: top NE, bottom SW`, (await wall("top").getAttribute("data-compass")) === "NE" && (await wall("bottom").getAttribute("data-compass")) === "SW");
-    await T("add-dock-zone").click(); await sleep(500);
+    { const dock = page.locator('[data-testid="wall-row"][data-role="dock"]').first(); await dock.getByTestId("wall-add").click(); await T("wall-add-court").click(); await sleep(500); }   // Building panel v2: a court on both linked walls
     ok(`[${scheme}] canvas aprons NE + SW agree with the picker (cross-dock)`, JSON.stringify(await apronCompass()) === JSON.stringify(["NE", "SW"]), JSON.stringify(await apronCompass()));
     await wall("bottom").click(); await sleep(600);
-    ok(`[${scheme}] click SW wall → single-load NE; picker says "NE wall"`, (await T("loading-walls-label").innerText()) === "NE wall" && (await bldg()).dock === "single");
+    ok(`[${scheme}] click SW wall → single-load NE; picker says NE is the loaded wall`, JSON.stringify(await page.locator('[data-testid="loading-wall-picker"] [data-loaded="1"]').evaluateAll((n) => n.map((g) => g.getAttribute("data-compass")))) === '["NE"]' && (await bldg()).dock === "single");
     await wall("top").click(); await wall("top").click(); await sleep(600);   // unload, then reload the NE wall
     await wall("bottom").click(); await sleep(600);
     ok(`[${scheme}] second wall click re-loads opposite wall → cross-dock`, (await bldg()).dock === "cross" || (await T("loading-type").innerText()) === "Cross-dock");
     // parking rows 8
-    const rows = T("end-parking-row").locator("input").first();
+    { const rear = page.locator('[data-testid="wall-row"][data-role="ends"]').first(); await rear.getByTestId("wall-add").click(); await T("wall-add-parking").click(); }
+    const rows = page.getByLabel("Parking rows");
     await rows.fill("8"); await rows.press("Enter"); await sleep(800);
     await rows.evaluate((el) => el.blur());
     const park = (await kids()).filter((k) => k.type === "parking" && k.sideParkSide);
@@ -83,7 +84,7 @@ try {
     ok(`[${scheme}] 8 typed parking rows laid out (${park.length} wall(s), depth ${rowsDone})`, park.length > 0 && (await rows.inputValue()) === "8");
     await page.screenshot({ path: SHOTS ? `${SHOTS}/${scheme}-canvas.png` : undefined }).catch(() => {});
     // outline width/opacity
-    const w = page.getByLabel("Outline width"); await w.fill("4"); await w.press("Enter");
+    const w = page.getByLabel("Line weight"); await w.fill("4"); await w.press("Enter");
     const o = page.getByLabel("Outline opacity"); await o.fill("50"); await o.press("Enter");
     await waitFor(async () => (await bldg())?.strokeWidth === 4 && (await bldg())?.strokeOpacity === 0.5);
     if (SHOTS) await T("property-panel").screenshot({ path: `${SHOTS}/${scheme}-panel.png` }).catch(() => {});

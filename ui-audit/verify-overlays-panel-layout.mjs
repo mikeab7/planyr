@@ -11,10 +11,17 @@
  *   · no horizontal overflow — the panel's scroll box and the panel root never scroll sideways
  *   · nothing pokes out — every descendant's box sits inside the panel root's box
  *   · no clipped text — no element's content is wider than its own box (buttons, labels, inputs, sub-lines)
- *   · EXACTLY TWO text sizes — the set of computed font sizes on text-bearing elements is ⊆ {12px, 10.5px}
+ *   · THE TYPE SPEC — every visible text-bearing element's computed (font-size, font-weight) is one of
+ *     (control,400) · (control,500 — the row NAME only) · (label,600 — uppercase section labels only) · (label,400);
+ *     anything else (a 700, a 600 button, a third size) fails
+ *   · ONE ACCENT — no text colour, fill, border or accent-color in the panel resolves to the orange `--accent`
+ *   · THE SCALE GROUP is ONE row of equal buttons or ONE column of equal full-width buttons — never 2 + 1 —
+ *     at 240 / 300 / 400 / 520 / 620, docked and floating
+ *   · THE OPEN ROW FITS — at a 1366×768 laptop, docked, the open PDF row through "Knock out white paper"
+ *     is on screen without scrolling
  *   · every control is reachable — each button / input / select has a box, and a hit test at its centre (after
  *     scrolling it into its scroll box) lands on it
- *   · the three scale buttons are the SAME size (the owner: "same size, same weight, no primary styling")
+ *   · the scale buttons are the SAME size, weight and fill
  *   · the control census — every control the spec names is present for the variant (PDF · image-unscaled ·
  *     DXF-assumed · map capture)
  *
@@ -70,7 +77,10 @@ const measure = (floating) => {
   const rr = root.getBoundingClientRect();
   const scroller = root.closest("[data-panel-body]") || (floating ? root.closest('[data-testid="floating-panel-references"]') : null) || root.parentElement;
   const facts = { rootW: Math.round(rr.width), scrollerOverflow: scroller ? scroller.scrollWidth - scroller.clientWidth : 0, rootOverflow: root.scrollWidth - root.clientWidth,
-    poke: [], clipped: [], unreachable: [], sizes: {}, scaleBtns: [], scaleRows: 0 };
+    poke: [], clipped: [], unreachable: [], sizes: {}, scaleBtns: [], scaleRows: 0, badPairs: [], orange: [] };
+  const probe = document.createElement("i"); probe.style.cssText = "position:absolute;color:var(--accent);background:var(--accent)"; root.appendChild(probe);
+  const orange = getComputedStyle(probe).color; probe.remove();
+  facts.orangeRef = orange;
   const all = [root, ...root.querySelectorAll("*")];
   const sizes = {};
   for (const el of all) {
@@ -83,7 +93,7 @@ const measure = (floating) => {
     // nothing pokes out of the root's box (a 1px border / focus ring tolerance)
     if (r.left < rr.left - 1 || r.right > rr.right + 1) facts.poke.push(`${name} [${Math.round(r.left - rr.left)}..${Math.round(r.right - rr.left)}] of ${Math.round(rr.width)}`);
     // clipped text: content wider than the box that holds it
-    if (el.scrollWidth > el.clientWidth + 1 && !["INPUT", "SELECT", "svg"].includes(el.tagName) && cs.display !== "inline" && el.clientWidth > 0) facts.clipped.push(`${name} content ${el.scrollWidth} > box ${el.clientWidth}`);
+    if (el.scrollWidth > el.clientWidth + 1 && cs.textOverflow !== "ellipsis" && !["INPUT", "SELECT", "svg"].includes(el.tagName) && cs.display !== "inline" && el.clientWidth > 0) facts.clipped.push(`${name} content ${el.scrollWidth} > box ${el.clientWidth}`);
     if (el.tagName === "INPUT" && el.type !== "checkbox" && el.type !== "range" && el.type !== "file") {
       // an input whose own text is wider than its box is clipped too
       if (el.scrollWidth > el.clientWidth + 1) facts.clipped.push(`${name} input text ${el.scrollWidth} > ${el.clientWidth}`);
@@ -91,7 +101,18 @@ const measure = (floating) => {
     // font sizes of anything that directly holds text
     const own = Array.from(el.childNodes).some((n) => n.nodeType === 3 && n.textContent.trim());
     const textInput = (el.tagName === "INPUT" && !["checkbox", "range", "file", "radio"].includes(el.type)) || el.tagName === "SELECT";
-    if (own || textInput) { const k = cs.fontSize; sizes[k] = (sizes[k] || 0) + 1; (facts.sizeWho = facts.sizeWho || {})[k] = ((facts.sizeWho || {})[k] || []).concat(name).slice(0, 4); }
+    if (own || textInput) {
+      const k = cs.fontSize; sizes[k] = (sizes[k] || 0) + 1; (facts.sizeWho = facts.sizeWho || {})[k] = ((facts.sizeWho || {})[k] || []).concat(name).slice(0, 4);
+      const pair = `${cs.fontSize}/${cs.fontWeight}`;
+      const isName = el.getAttribute("data-testid") === "overlay-row-name";
+      const isSection = cs.textTransform === "uppercase";
+      const ok = pair === "12px/400" || (pair === "12px/500" && isName) || (pair === "10.5px/600" && isSection) || (pair === "10.5px/400" && !isSection);
+      if (!ok) facts.badPairs.push(`${name} ${pair}${isSection ? " (section label)" : ""}`);
+    }
+    // ONE ACCENT: nothing may resolve to the orange --accent (text colour, fill, border, accent-color)
+    for (const [prop, val] of [["color", own || textInput ? cs.color : null], ["background", cs.backgroundColor], ["border", cs.borderTopColor !== "rgba(0, 0, 0, 0)" && parseFloat(cs.borderTopWidth) > 0 ? cs.borderTopColor : null], ["accent-color", cs.accentColor]]) {
+      if (val && val === orange) facts.orange.push(`${name} ${prop}`);
+    }
     if (["BUTTON", "INPUT", "SELECT"].includes(el.tagName) && el.type !== "file") {
       el.scrollIntoView({ block: "nearest", inline: "nearest" });
       const q = el.getBoundingClientRect();
@@ -105,6 +126,10 @@ const measure = (floating) => {
     const bs = Array.from(g.children).map((b) => { const q = b.getBoundingClientRect(); return { w: +q.width.toFixed(1), h: +q.height.toFixed(1), top: Math.round(q.top), fw: getComputedStyle(b).fontWeight, bg: getComputedStyle(b).backgroundColor, fs: getComputedStyle(b).fontSize }; });
     facts.scaleBtns = bs;
     facts.scaleRows = new Set(bs.map((b) => b.top)).size;
+    const per = {}; for (const b of bs) per[b.top] = (per[b.top] || 0) + 1;
+    facts.scaleRowCounts = Object.values(per);
+    facts.scaleLayout = g.getAttribute("data-layout");
+    facts.groupW = Math.round(g.getBoundingClientRect().width);
   }
   facts.testids = Array.from(root.querySelectorAll("[data-testid]")).map((n) => n.getAttribute("data-testid"));
   facts.text = root.innerText;
@@ -116,7 +141,9 @@ const BREAK_CSS = `
   [data-testid="overlay-rotation-row"]{flex-wrap:nowrap!important}
   [data-testid="overlay-opacity-pct"]{width:300px!important}
   [data-testid="overlay-crop-shape"]{font-size:14px!important}
-  [data-testid="overlay-scale-trace"]{white-space:nowrap!important;overflow:hidden!important;width:46px!important}`;
+  [data-testid="overlay-scale-trace"]{white-space:nowrap!important;overflow:hidden!important;width:46px!important}
+  [data-testid="overlay-row-name"]{font-weight:700!important}
+  [data-testid="overlay-scale-match"]{color:var(--accent)!important}`;
 
 const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
 let fail = 0, void_ = false;
@@ -149,7 +176,25 @@ async function run(surface, { w, vw = 1440, vh = 1000, floating = false, phone =
     }
     if (BROKEN) await page.addStyleTag({ content: BREAK_CSS });
     await page.waitForTimeout(300);
+    // FOCUS must be green too: focus each control in turn and read its ring / border
+    const focusOrange = await page.evaluate(() => {
+      const root = document.querySelector('[data-testid="overlays-panel"]');
+      if (!root) return [];
+      const probe = document.createElement("i"); probe.style.cssText = "color:var(--accent)"; root.appendChild(probe);
+      const o = getComputedStyle(probe).color; probe.remove();
+      const bad = [];
+      for (const el of root.querySelectorAll("button,input:not([type=file]),select")) {
+        if (el.disabled || !el.getBoundingClientRect().width) continue;
+        el.focus({ focusVisible: true });
+        const cs = getComputedStyle(el);
+        const seen = [cs.outlineColor, cs.borderTopColor, cs.boxShadow].join(" ");
+        if (seen.includes(o) || /rgba\(194, 65, 12/.test(seen)) bad.push(el.getAttribute("data-testid") || el.getAttribute("aria-label") || el.tagName);
+        el.blur();
+      }
+      return bad;
+    });
     const m = await page.evaluate(measure, floating);
+    m.focusOrange = focusOrange;
     const tag = `${surface} · ${v.label}`;
     if (m.missing) { log(false, `${tag}: Overlays panel not found`); await ctx.close(); continue; }
     if (errs.length) log(false, `${tag}: page error ${errs[0].slice(0, 90)}`);
@@ -160,6 +205,9 @@ async function run(surface, { w, vw = 1440, vh = 1000, floating = false, phone =
     log(m.clipped.length === 0, `${tag}: no clipped text${m.clipped.length ? " — " + m.clipped.slice(0, 3).join("; ") : ""}`);
     const sz = Object.keys(m.sizes).sort();
     log(sz.length <= 2 && sz.every((s) => s === "12px" || s === "10.5px"), `${tag}: only two text sizes (${sz.join(", ")}${sz.length > 2 || sz.some((x) => x !== "12px" && x !== "10.5px") ? " — " + JSON.stringify(m.sizeWho) : ""})`);
+    log(m.badPairs.length === 0, `${tag}: every text is an allowed (size, weight) pair${m.badPairs.length ? " — " + m.badPairs.slice(0, 4).join("; ") : ""}`);
+    log(m.focusOrange.length === 0, `${tag}: focus ring / border is never orange${m.focusOrange.length ? " — " + m.focusOrange.slice(0, 4).join("; ") : ""}`);
+    log(m.orange.length === 0 && !!m.orangeRef, `${tag}: no orange accent anywhere (ref ${m.orangeRef})${m.orange.length ? " — " + m.orange.slice(0, 4).join("; ") : ""}`);
     log(m.unreachable.length === 0, `${tag}: every control reachable${m.unreachable.length ? " — " + m.unreachable.slice(0, 3).join("; ") : ""}`);
     for (const id of v.must) log(m.testids.includes(id), `${tag}: has ${id}`);
     for (const id of v.mustNot || []) log(!m.testids.includes(id), `${tag}: correctly has NO ${id}`);
@@ -169,18 +217,56 @@ async function run(surface, { w, vw = 1440, vh = 1000, floating = false, phone =
       log(m.scaleBtns.every((b) => Math.abs(b.w - s0.w) <= 1 && Math.abs(b.h - s0.h) <= 1 && b.fw === s0.fw && b.bg === s0.bg && b.fs === s0.fs),
         `${tag}: the scale buttons are identical in size, weight and fill (${m.scaleBtns.length} × ${s0.w}×${s0.h}, ${m.scaleBtns.length === 3 ? m.scaleRows + " row(s)" : ""})`);
     }
+    if (m.scaleBtns.length >= 2) {
+      const counts = m.scaleRowCounts, n = m.scaleBtns.length;
+      const oneRow = counts.length === 1 && counts[0] === n;
+      const oneCol = counts.length === n && counts.every((c) => c === 1) && m.scaleBtns.every((b) => Math.abs(b.w - m.groupW) <= 1);
+      log(oneRow || oneCol, `${tag}: scale group is ${oneRow ? "one row" : oneCol ? "one full-width column" : "NEITHER (" + counts.join("+") + ")"} — never ${n === 3 ? "2 + 1" : "a split"}`);
+    }
     if (!/^(Width|ft wide)/m.test(m.text)) log(!/\bWidth\b/.test(m.text), `${tag}: no Width box and no sheet-width readout`);
     if (surface === "docked 620" && v.id === "pdf1") {
       // the known-good arm: this reading is clean on ANY build, or the instrument is void
       if (fail > before) void_ = true;
     }
-    if (process.env.SHOTS) await page.screenshot({ path: `${OUT}overlays-panel-${surface.replace(/\W+/g, "-")}-${v.id}.png` });
+    if (process.env.SHOTS) {
+      await page.screenshot({ path: `${OUT}overlays-panel-${surface.replace(/\W+/g, "-")}-${v.id}.png` });
+      await page.locator('[data-testid="overlays-panel"]').screenshot({ path: `${OUT}overlays-panel-only-${surface.replace(/\W+/g, "-")}-${v.id}.png` }).catch(() => {});
+    }
     await ctx.close();
   }
 }
 
-for (const w of [240, 400, 620]) await run(`docked ${w}`, { w });
-for (const w of [240, 400, 620]) await run(`floating ${w}`, { w, floating: true });
+
+/* THE OPEN ROW FITS: on a laptop-sized window, docked, the open PDF row — through "Knock out white paper" —
+ * is on screen with no scrolling. Read BEFORE anything scrolls it into view. */
+async function fitCheck() {
+  for (const w of [300, 400]) {
+    const ctx = await browser.newContext({ viewport: { width: 1366, height: 768 }, deviceScaleFactor: 1 });
+    await ctx.addInitScript(seedFor(w, "pdf1"));
+    const page = await ctx.newPage();
+    await assertMeasurable(page, "verify-overlays-panel-layout");
+    await page.goto(`${BASE}#/project/S/site`, { waitUntil: "load" });
+    await page.waitForTimeout(3200);
+    await openPanel(page, { phone: false });
+    if (BROKEN) await page.addStyleTag({ content: BREAK_CSS });
+    await page.waitForTimeout(300);
+    const f = await page.evaluate(() => {
+      const root = document.querySelector('[data-testid="overlays-panel"]');
+      const lab = Array.from(root.querySelectorAll("label")).find((l) => /Knock out white paper/.test(l.textContent));
+      const sc = root.closest("[data-panel-body]") || root.parentElement;
+      const sr = sc.getBoundingClientRect();
+      return { bottom: lab ? lab.getBoundingClientRect().bottom : null, viewBottom: Math.min(innerHeight, sr.bottom), scrolled: sc.scrollTop };
+    });
+    log(f.bottom != null && f.scrolled === 0 && f.bottom <= f.viewBottom, `fit 1366×768 docked ${w}: open row ends at ${f.bottom == null ? "?" : Math.round(f.bottom)} within the visible panel (${Math.round(f.viewBottom)}), unscrolled`);
+    if (process.env.SHOTS) await page.screenshot({ path: `${OUT}overlays-panel-fit-${w}.png` });
+    await ctx.close();
+  }
+}
+
+const WIDTHS = process.env.WIDTHS ? process.env.WIDTHS.split(",").map(Number) : [240, 300, 400, 520, 620];
+for (const w of WIDTHS) await run(`docked ${w}`, { w });
+for (const w of WIDTHS) await run(`floating ${w}`, { w, floating: true });
+await fitCheck();
 await run("phone 390×844", { w: 320, vw: 390, vh: 844, phone: true });
 await run("phone 360×640", { w: 320, vw: 360, vh: 640, phone: true });
 await browser.close();

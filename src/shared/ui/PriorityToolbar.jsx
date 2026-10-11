@@ -65,13 +65,27 @@ function menuRowsOf(it) {
   return [];
 }
 
+/* B2225425 — measured widths by (toolbar name, device pixel ratio, item signature); written only once web fonts have settled, so a
+ * cached width is never a fallback-font width. Bounded: a toolbar's signature changes with a label or badge, so old keys age out. */
+const WIDTH_CACHE = new Map();
+const WIDTH_CACHE_MAX = 64;
+const _set = WIDTH_CACHE.set.bind(WIDTH_CACHE);
+WIDTH_CACHE.set = (k, v) => { if (WIDTH_CACHE.size >= WIDTH_CACHE_MAX && !WIDTH_CACHE.has(k)) WIDTH_CACHE.delete(WIDTH_CACHE.keys().next().value); return _set(k, v); };
+const fontsSettled = () => { try { return typeof document !== "undefined" && (!document.fonts || document.fonts.status === "loaded"); } catch (_) { return false; } };
+/** The signature of everything that can change a measured width — ONE derivation for the cache key and the re-measure trigger. */
+export const sigOf = (items) => (items || []).filter(Boolean).map((it) => `${it.id}|${it.label || ""}|${it.badge ?? ""}|${it.ghost ? 1 : 0}`).join("§");
+export function _resetToolbarWidthCache() { WIDTH_CACHE.clear(); }
+
 export default function PriorityToolbar({ name, items, gap = TOOLBAR_GAP, moreLabel = "More actions", style, budget: budgetProp, align = "center", settled = true }) {
   const ctx = useContext(ToolbarBudgetContext);
   const rootRef = useRef(null);
   const measureRef = useRef(null);
   const moreRef = useRef(null);
   const [own, setOwn] = useState(null);           // own-parent measurement when no provider
-  const [widths, setWidths] = useState({});       // id -> { full, icon }
+  // B2225425 (round 3) — a toolbar REMOUNTED with the same items (every plan switch remounts the planner's) starts from the widths
+  // already measured for them, so it needs no measuring layer and no forced layout inside the switch's commit (16–37 ms measured).
+  const cacheKey = (sig) => `${name || ""}§${typeof window !== "undefined" ? window.devicePixelRatio : 1}§${sig}`;
+  const [widths, setWidths] = useState(() => WIDTH_CACHE.get(cacheKey(sigOf(items))) || {});       // id -> { full, icon }
   const [step, setStep] = useState(0);
   const stepRef = useRef(0);
   const [open, setOpen] = useState(false);
@@ -86,13 +100,13 @@ export default function PriorityToolbar({ name, items, gap = TOOLBAR_GAP, moreLa
     collapsible: it.collapsible !== false && !!(it.onSelect || it.menuRows || it.renderMenu),
   })), [items]);
   // a signature of everything that can change a measured width — re-measure when it moves
-  const sig = norm.map((it) => `${it.id}|${it.label || ""}|${it.badge ?? ""}|${it.ghost ? 1 : 0}`).join("§");
+  const sig = sigOf(norm);
 
   /* ---- measure the hidden copies (layout effect: before paint, so a plan never flashes a wrong bar) ----
    * The measuring layer exists ONLY for the commit in which `measuredSig !== sig` (first mount, an item's label or
    * badge changing, web fonts arriving) and is unmounted again straight after: a permanent hidden duplicate of every
    * control would be invisible to the eye but not to selectors, the control-signature crawl or a screen reader. */
-  const [measuredSig, setMeasuredSig] = useState(null);
+  const [measuredSig, setMeasuredSig] = useState(() => (WIDTH_CACHE.has(cacheKey(sig)) ? sig : null));
   const measure = useCallback(() => {
     const layer = measureRef.current;
     if (!layer) return;
@@ -102,6 +116,7 @@ export default function PriorityToolbar({ name, items, gap = TOOLBAR_GAP, moreLa
       const [id, mode] = el.getAttribute("data-m").split("::");
       (next[id] = next[id] || {})[mode] = el.getBoundingClientRect().width;
     }
+    if (fontsSettled()) WIDTH_CACHE.set(cacheKey(layer.getAttribute("data-sig") || ""), next);
     setWidths((prev) => {
       const same = Object.keys(next).length === Object.keys(prev).length && Object.keys(next).every((k) => prev[k] && Math.abs((prev[k].full ?? 0) - (next[k].full ?? 0)) < 0.5 && Math.abs((prev[k].icon ?? 0) - (next[k].icon ?? 0)) < 0.5);
       return same ? prev : next;
@@ -110,7 +125,8 @@ export default function PriorityToolbar({ name, items, gap = TOOLBAR_GAP, moreLa
   const layerShown = measuredSig !== sig && !narrow;
   useLayoutEffect(() => { if (layerShown) { measure(); setMeasuredSig(sig); } }, [layerShown, sig, measure]);
   // web fonts changing a label's width is the one thing a one-shot measurement can miss: measure again when they land
-  useEffect(() => { try { document.fonts && document.fonts.ready && document.fonts.ready.then(() => setMeasuredSig(null)); } catch (_) { /* optional */ } }, []);
+  // (only when they had NOT landed yet at mount — re-measuring on every mount for fonts that arrived long ago was a forced layout per plan switch)
+  useEffect(() => { try { if (!fontsSettled() && document.fonts && document.fonts.ready) document.fonts.ready.then(() => setMeasuredSig(null)); } catch (_) { /* optional */ } }, []);
 
   /* ---- no provider: the budget is this toolbar's own parent box ----------------------------------- */
   useLayoutEffect(() => {
@@ -212,7 +228,7 @@ export default function PriorityToolbar({ name, items, gap = TOOLBAR_GAP, moreLa
       )}
       {/* measuring layer — see header. Never visible, never focusable, never read by assistive tech. */}
       {layerShown && (
-        <div ref={measureRef} aria-hidden="true" inert="" data-toolbar-measure=""
+        <div ref={measureRef} aria-hidden="true" inert="" data-toolbar-measure="" data-sig={sig}
           style={{ position: "absolute", left: 0, top: 0, height: 0, overflow: "hidden", visibility: "hidden", pointerEvents: "none", display: "flex", width: "max-content", alignItems: "center", gap }}>
           {norm.map((it) => (
             <span key={it.id} style={{ display: "inline-flex", flex: "none" }}>

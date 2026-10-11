@@ -161,6 +161,25 @@ export function withLockSemantics(parcels) {
   return changed ? out : parcels;
 }
 
+/* B2225425 (round 3) — THE READ NORMALIZERS, as ONE table, because there are two read paths and
+ * only one of them ran these. `createSiteModel` (the on-device copy) applies them on every read; the
+ * rows seed (`SitePlanner.refetchReplace` over `elementRows.rowsToModel`) did not. So a plan whose
+ * stored rows were not already normal — Bolt-on's 56 elements carry 6 duplicate `z`, Concept A's
+ * parcels carry the pre-NEW-5 `locked` flag with no `lockSem` — opened from the device copy in its
+ * normalized form and was then REPLACED, element for element, by the raw rows a second or two
+ * later: every element a new object, every memo and `ElNode` invalidated, a 60–100 ms re-render of
+ * the whole drawing on every open of that plan, forever (the device copy is re-normalized on each
+ * read, the rows never are). Measured on the owner's own rows; see /docs/perf/PERF-PLAN-OPEN.md
+ * round 3. The seed now runs this SAME table and commits what it changed, once, so the two copies
+ * converge. Each entry is identity-preserving on an already-normal list (no churn, no write). */
+export const READ_NORMALIZE = Object.freeze({
+  els: (list) => ensureZ(migrateBandForce(list)),
+  parcels: (list) => ensureZ(withLockSemantics(withStableParcelIds(list))),
+  markups: (list) => ensureZ(list),
+  measures: (list) => ensureZ(list),
+  callouts: (list) => ensureZ(list),
+});
+
 // B682 — every parcel MUST carry a stable `id`. The map-finder hand-off (MapFinder.computeAssembly)
 // and legacy saved sites can hold id-LESS parcels ({points, addr, acct, attrs} with no id). Two bugs
 // flow from that. (1) The acreage-chip drag matches parcels by `pc.id === draggedId`; with both
@@ -1203,10 +1222,32 @@ function foldAerialIntoOverlays(underlay, sheetOverlays) {
   return [migrated, ...list];
 }
 
+/* ⛔ B2236000 (round 6) — THE ELEMENT NORMALIZATION REMEMBERS A LIST IT HAS ALREADY PROVEN CLEAN. The pipeline below (road migration, the
+ * bonded-child heal, the read-normalize table) is a pure function of the element list, and every pass is identity-preserving: on a coherent
+ * list it returns THE SAME ARRAY. That is the proof a list is a fixed point (f(x) === x), so the array is remembered and the next
+ * createSiteModel handed that same array returns it without re-running the passes. Nothing approximate: a list that any pass changed is not
+ * remembered (its successor is checked on its next pass), and an array never seen is computed exactly as before. Why it matters: a plan's
+ * model is re-created many times per page load — the list read, the cloud pull's merge (`mergePulledSites` → `mergeSiteContent`, which
+ * re-creates BOTH copies and the result), every `loadSite` — and on an owner-sized device (30 plans with their drawing) each re-creation of
+ * every plan re-ran the full bonded heal: ~1 s of main-thread stalls in a fresh load at 2× CPU. Relies on the house rule that a model's
+ * collections are never mutated in place (no reader or writer does; `test/sitesListCache.test.js` deep-freezes the shared models). */
+const CLEAN_ELS = new WeakSet();
+function normalizedEls(raw, onHeal, proven) {
+  if (Array.isArray(raw) && CLEAN_ELS.has(raw)) return raw;
+  /* `proven` — the caller holds a cross-load proof (lib/elsProof.js: same build, same exact stored text) that this very list came back from
+   * these passes untouched; the list is then already the fixed point, exactly as if they had just run. */
+  if (proven && Array.isArray(raw)) { CLEAN_ELS.add(raw); return raw; }
+  const out = READ_NORMALIZE.els(normalizeBondedChildren(migrateRoads(objArr(raw)), onHeal));
+  if (Array.isArray(raw) && out === raw) CLEAN_ELS.add(out);
+  return out;
+}
+/** Is this element list one the normalization has proven clean (it came back untouched)? */
+export const elsListIsClean = (a) => Array.isArray(a) && CLEAN_ELS.has(a);
+
 /* Build / normalize a Site Model from a (possibly legacy / partial) record.
  * Additive only — never renames or drops the legacy flat fields, so it is also a
  * lossless, idempotent migration. */
-export function createSiteModel(p = {}, { onHeal } = {}) {
+export function createSiteModel(p = {}, { onHeal, provenCleanEls = false } = {}) {
   return {
     schemaVersion: SITE_MODEL_VERSION,
     // identity
@@ -1275,7 +1316,7 @@ export function createSiteModel(p = {}, { onHeal } = {}) {
     loiDate: p.loiDate || null,
     closingDate: p.closingDate || null,
     // inputs
-    parcels: ensureZ(withLockSemantics(withStableParcelIds(parcelArr(p.parcels)))),
+    parcels: READ_NORMALIZE.parcels(parcelArr(p.parcels)),
     // placed site-plan overlays (B72): backdrop PDFs/images positioned on the map by
     // hand. Each: {id,name,src,imgW,imgH,page,pageCount,x,y,ftPerPx,rotation,opacity,locked}
     // v14 (B848736) — ALSO the one home for the aerial backdrop: a legacy `underlay` folds in
@@ -1292,10 +1333,10 @@ export function createSiteModel(p = {}, { onHeal } = {}) {
     // bonded-child heal — angle re-anchor (B363), dog-ears snapped to the host's current edge
     // (B487), wall kids re-flushed (B1038/B1039), assemblies torn across transactions re-fitted
     // (NEW-4). `normalizeBondedChildren` is the SAME function the rows read path runs.
-    els: ensureZ(migrateBandForce(normalizeBondedChildren(migrateRoads(objArr(Array.isArray(p.els) ? p.els : p.elements)), onHeal))),
-    markups: ensureZ(objArr(p.markups)),
-    measures: ensureZ(objArr(p.measures)),
-    callouts: ensureZ(objArr(p.callouts)),
+    els: normalizedEls(Array.isArray(p.els) ? p.els : p.elements, onHeal, provenCleanEls),
+    markups: READ_NORMALIZE.markups(objArr(p.markups)),
+    measures: READ_NORMALIZE.measures(objArr(p.measures)),
+    callouts: READ_NORMALIZE.callouts(objArr(p.callouts)),
     // Delete-tombstones (B276): ids the user DELIBERATELY deleted. The cross-copy merge
     // (mergeSiteContent) unions drawn collections by id, which would otherwise RESURRECT a
     // deleted item from a stale/other copy that still has it (the documented B126 trade-off
@@ -1346,6 +1387,12 @@ function unionById(primary, secondary) {
   };
   arr(primary).forEach(take);
   arr(secondary).forEach((it) => { if (it && it.id != null && ids.has(it.id)) return; take(it); });
+  /* B2236000 (round 6) — when ONE side contributed nothing and every item of the other was kept, in order, the union IS that side: hand back the
+   * input array itself (same items, same order — only the array's identity differs from `out`), so a model whose list was already proven clean
+   * stays recognisably so through a merge with a slim cloud header (whose element collections are always empty). */
+  const p = arr(primary), q = arr(secondary);
+  if (!q.length && out.length === p.length && Array.isArray(primary)) return primary;
+  if (!p.length && out.length === q.length && Array.isArray(secondary)) return secondary;
   return out;
 }
 
@@ -1378,7 +1425,9 @@ export function mergeSiteContent(a, b, opts) {
   // Union the tombstones from BOTH copies, then drop any tombstoned id from every unioned
   // collection so a deleted item can't be resurrected by the copy that still holds it.
   const tomb = new Set([...arr(A.deletedIds), ...arr(B.deletedIds)]);
-  const live = (list) => (tomb.size ? arr(list).filter((it) => !(it && it.id != null && tomb.has(it.id))) : arr(list));
+  /* B2236000 (round 6) — a filter that removes nothing hands back the input array itself (same items, same order), so a list already proven clean
+   * stays recognisable (siteModel's CLEAN_ELS) through a merge with a copy that only carries tombstones the list already honours. */
+  const live = (list) => { if (!tomb.size) return arr(list); const a = arr(list), out = a.filter((it) => !(it && it.id != null && tomb.has(it.id))); return out.length === a.length ? a : out; };
   const merged = {
     ...newer,
     parcels: live(unionById(newer.parcels, older.parcels)),

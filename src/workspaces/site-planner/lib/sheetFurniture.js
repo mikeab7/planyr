@@ -32,7 +32,7 @@ export const r2 = (n) => Number(Number(n).toPrecision(6));
 // Preferred round distances (ft) the spec calls out, plus a few smaller/larger steps
 // that only get picked at extreme zoom so the bar never becomes absurd or runs off
 // the frame.
-const NICE_FEET = [10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000];
+export const NICE_FEET = [10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 5000];
 
 // Pick the round real-world distance whose bar best fills a target width without
 // exceeding a hard ceiling (so it can never run off the edge). `ftPerUnit` = feet
@@ -117,21 +117,37 @@ function chromeCardColors(pal = {}) {
   return { fill: pal.plateFill || PLATE_FILL, line: pal.panelLine || PANEL_LINE_FALLBACK };
 }
 
+// NEW-3 (B2206704–B2206706) — HOW MUCH ROOM THE END LABEL NEEDS, ESTIMATED WITHOUT A DOM. Digits are ~0.6 em in
+// the sans stack the plate uses, a thousands comma ~0.28 em; anything else (a unit word) is treated as a
+// wide letter. Deliberately a hair pessimistic: the end label is centred on the bar's last tick, so the
+// plate has to carry half of it past the tick PLUS a visible margin, and a label that kisses the plate's
+// right edge reads as "crowding" at the far-out zooms (0 / 2,500 / 5,000 FEET) the owner flagged.
+export function labelWidthEm(str) {
+  let w = 0;
+  for (const ch of String(str)) w += /[0-9]/.test(ch) ? 0.6 : /[,. ]/.test(ch) ? 0.28 : 0.66;
+  return w;
+}
+// The margin between the END label's right edge and the plate's right border, in units of the label font size.
+export const SCALE_END_MARGIN_EM = 1.0;
+
 // Graphic scale bar drawn with its plate top-left at the local origin. Alternating
 // black/white segments, tick marks at 0 / midpoint / max with numbers centered
 // directly under their ticks, a "FEET" unit label, on a legibility plate.
-// Returns { markup, plateW, plateH }.
+// Returns { markup, plateW, plateH, padL, padR }. The bar's own length is `lengthU` and never
+// changes; only the plate's padding grows so the end label has room (NEW-3).
 export function scaleBarPlate({ lengthU, feet, m, pal = {}, fmtFeet = (n) => String(Math.round(n)) }) {
   const ink = pal.ink || "#2c2a26";
   const muted = pal.muted || "#8a8473";
   const { fill: plate, line } = chromeCardColors(pal);
   const seg = lengthU / 4;
-  const padX = Math.max(m.pad, m.fs * 1.4); // room for the end labels to overhang the bar
+  const padL = Math.max(m.pad, m.fs * 1.4); // room for the start label to overhang the bar
+  // The end label is centred on the last tick: half of it hangs past the bar, then a clear margin to the border.
+  const padR = Math.max(padL, (labelWidthEm(fmtTick(feet, fmtFeet)) / 2 + SCALE_END_MARGIN_EM) * m.fs);
   const barTop = m.pad, barBot = barTop + m.barTh;
   const tickBot = barBot + m.tickLen;
   const numBase = tickBot + m.fs; // numbers sit directly under their ticks
   const unitBase = numBase + m.unitFs * 1.25; // "FEET" under the numbers
-  const plateW = lengthU + 2 * padX;
+  const plateW = lengthU + padL + padR;
   const plateH = unitBase + m.pad * 0.4;
   const ticks = [0, lengthU / 2, lengthU];
   const labels = [0, feet / 2, feet];
@@ -141,15 +157,15 @@ export function scaleBarPlate({ lengthU, feet, m, pal = {}, fmtFeet = (n) => Str
   // dark-mode `ink` (also light, so it stays legible against a themed plate) and the two would
   // read as nearly the same tone, erasing the alternation the bar exists to show.
   for (let i = 0; i < 4; i++)
-    s += `<rect x="${r2(padX + seg * i)}" y="${r2(barTop)}" width="${r2(seg)}" height="${r2(m.barTh)}" fill="${i % 2 ? plate : ink}" stroke="${ink}" stroke-width="${r2(m.segStroke)}"/>`;
+    s += `<rect x="${r2(padL + seg * i)}" y="${r2(barTop)}" width="${r2(seg)}" height="${r2(m.barTh)}" fill="${i % 2 ? plate : ink}" stroke="${ink}" stroke-width="${r2(m.segStroke)}"/>`;
   ticks.forEach((t) => {
-    s += `<line x1="${r2(padX + t)}" y1="${r2(barBot)}" x2="${r2(padX + t)}" y2="${r2(tickBot)}" stroke="${ink}" stroke-width="${r2(m.segStroke)}"/>`;
+    s += `<line x1="${r2(padL + t)}" y1="${r2(barBot)}" x2="${r2(padL + t)}" y2="${r2(tickBot)}" stroke="${ink}" stroke-width="${r2(m.segStroke)}"/>`;
   });
   ticks.forEach((t, i) => {
-    s += `<text x="${r2(padX + t)}" y="${r2(numBase)}" text-anchor="middle" font-size="${r2(m.fs)}" font-weight="500" fill="${ink}">${esc(fmtTick(labels[i], fmtFeet))}</text>`;
+    s += `<text x="${r2(padL + t)}" y="${r2(numBase)}" text-anchor="middle" font-size="${r2(m.fs)}" font-weight="500" fill="${ink}">${esc(fmtTick(labels[i], fmtFeet))}</text>`;
   });
-  s += `<text x="${r2(padX + lengthU / 2)}" y="${r2(unitBase)}" text-anchor="middle" font-size="${r2(m.unitFs)}" letter-spacing="${r2(m.unitFs * 0.2)}" fill="${muted}">FEET</text>`;
-  return { markup: s, plateW, plateH };
+  s += `<text x="${r2(padL + lengthU / 2)}" y="${r2(unitBase)}" text-anchor="middle" font-size="${r2(m.unitFs)}" letter-spacing="${r2(m.unitFs * 0.2)}" fill="${muted}">FEET</text>`;
+  return { markup: s, plateW, plateH, padL, padR };
 }
 
 // Compact "Buildings" inset (B1934529; two-column layout NEW-1/B2118784) — one line per building plus a

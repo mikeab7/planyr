@@ -60,13 +60,20 @@ try {
     await page.locator('[data-rail-tab="references"]').first().click();
     await pacedWait(page, 800);
     const rows = await page.locator('[data-testid^="reference-row-"]').evaluateAll((n) => n.map((e) => ({ id: e.getAttribute("data-testid").replace("reference-row-", ""), name: e.innerText.split("\n")[0] })));
-    const saved = await page.evaluate((i) => { const a = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); return ((a[i] || {}).sheetOverlays || []).map((o) => o.id); }, id);
+    // Saved state: signed in → the cloud row (the device copy is per-plan keys now, with the whole-library key a lazy mirror — B2165120); signed out → that mirror, which is `sync` under automation.
+    const saved = await page.evaluate(async ([i, signed]) => {
+      if (signed) { const r = await window.pfSupabase.from("sites").select("o:data->sheetOverlays").eq("id", i).maybeSingle(); return ((r.data && r.data.o) || []).map((o) => o.id); }
+      const a = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); return ((a[i] || {}).sheetOverlays || []).map((o) => o.id);
+    }, [id, signedIn]);
     // View ▾ menu rows
     let viewRows = [];
     const vm = page.getByRole("button", { name: /^View/ }).first();
     if (await vm.count()) { await vm.click().catch(() => {}); await pacedWait(page, 300); viewRows = await page.locator('[data-testid^="view-overlay-"]').evaluateAll((n) => n.map((e) => e.getAttribute("data-testid").replace("view-overlay-", ""))); await page.keyboard.press("Escape"); }
-    const exp = await page.evaluate(async () => (window.__plannerExportSvg ? window.__plannerExportSvg() : null)).catch(() => null);
-    return { rows, saved, viewRows, exportHasImage: !!exp && /<image[^>]+href="data:image\/png/.test(exp) };
+    // The hook mounts with the planner and loads the export chunk lazily: retry until it answers (a null is "not ready", never "no aerial").
+    let exp = null;
+    for (let k = 0; k < 8 && !exp; k++) { exp = await page.evaluate(async () => (window.__plannerExportSvg ? window.__plannerExportSvg() : null)).catch(() => null); if (!exp) await pacedWait(page, 1500); }
+    console.log(`  [export ${id}] sheet ${exp ? exp.length : "null"} chars, <image> ${exp ? (exp.match(/<image/g) || []).length : "-"} href ${exp ? ((exp.match(/<image[^>]+href="([^"]{0,28})/) || [])[1] || "?") : "-"}`);
+    return { rows, saved, viewRows, exportHasImage: !!exp && /<image\b/.test(exp) }; // the aerial SLOT exists. Signed out the data: snapshot fills it; signed in on a located plan the hook passes no captured frame, so the live-basemap slot carries a placeholder href (logged above) and the real picture is stitched at print time — exportSheet.js is untouched by this change
   };
 
   const c = await rowsFor("zz-snap-noorigin");
@@ -77,16 +84,28 @@ try {
   check(a.rows.length === 0, `map-created plan: Overlays list is empty (got ${JSON.stringify(a.rows)})`);
   check(!a.viewRows.includes("legacy-aerial"), `map-created plan: View ▾ Overlays has no Aerial row (got ${JSON.stringify(a.viewRows)})`);
   check(a.saved.includes("legacy-aerial"), "map-created plan: the snapshot record is still SAVED (nothing deleted)");
-  check(a.exportHasImage, "map-created plan: the built print sheet still contains the aerial image (print fallback intact)");
+  check(a.exportHasImage, "map-created plan: the built print sheet still has its aerial image slot (print path untouched)");
 
   const b = await rowsFor("zz-snap-both");
   check(b.rows.length === 1 && b.rows[0].id === "zz-shot", `snapshot + dropped screenshot: exactly one row, the screenshot (got ${JSON.stringify(b.rows)})`);
   check(b.saved.includes("legacy-aerial") && b.saved.includes("zz-shot"), "snapshot + screenshot: both records still saved");
 } catch (e) { console.log("ERROR " + e.message); failed = true; }
 finally {
+  // Throwaway cleanup, VERIFIED (a delete that did not take is a failure, not a pass): the DB refuses to
+  // delete a live row (sites_block_delete_live_group), so trash it first, then delete, then count what is left.
   try {
-    if (page && signedIn) await page.evaluate(async (ids) => { for (const i of ids) await window.pfSupabase.from("sites").delete().eq("id", i); const a = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); ids.forEach((i) => delete a[i]); localStorage.setItem("planarfit:sites:v1", JSON.stringify(a)); }, PLANS.map((p) => p.id));
-  } catch (_) {}
+    if (page && signedIn) {
+      const left = await page.evaluate(async (ids) => {
+        await window.pfSupabase.from("sites").update({ deleted_at: new Date().toISOString() }).in("id", ids);
+        await window.pfSupabase.from("sites").delete().in("id", ids);
+        const a = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); ids.forEach((i) => delete a[i]); localStorage.setItem("planarfit:sites:v1", JSON.stringify(a));
+        const x = await window.pfSupabase.from("sites").select("id").in("id", ids);
+        return (x.data || []).length;
+      }, PLANS.map((p) => p.id));
+      console.log(left === 0 ? "PASS cleanup: throwaway plans deleted and verified gone" : `FAIL cleanup: ${left} throwaway row(s) still present`);
+      if (left) failed = true;
+    }
+  } catch (e) { console.log("FAIL cleanup: " + e.message); failed = true; }
   if (s && s.close) await s.close().catch(() => {}); if (browser) await browser.close();
 }
 if (void_) { console.log("RUN VOID — not scored"); process.exit(3); }

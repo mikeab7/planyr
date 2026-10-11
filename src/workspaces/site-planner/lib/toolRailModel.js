@@ -89,6 +89,9 @@ export const RAIL = Object.freeze({
   hdrMarginTop: 22,  // visible white space ABOVE a heading is this + flexGap (+ ink insets)
   hdrMarginBottom: 4,
   hdrFirstMarginTop: 4,
+  padL: 5,           // rail padding, left of every row (pill edge sits padL + 1px border from the rail's outer edge)
+  padR: 6,           // rail padding, right of every row (before the scrollbar strip)
+  rowPadL: 6,        // a row's own left padding (icon sits padL + 1 + rowPadL from the border)
 });
 
 /** Ink-to-ink white space (px) around a heading, plus the tool-to-tool reference. */

@@ -134,3 +134,20 @@ describe("the ⋯ menu (source order — it is a portal)", () => {
     expect(menu).toMatch(/anchorRef\.current\.focus\(\)/);
   });
 });
+
+describe("the look spec (owner, 2026-10-08) — source guards; the measured proof is verify-overlays-panel-layout", () => {
+  const src = readFileSync("src/workspaces/site-planner/components/OverlaysPanel.jsx", "utf8");
+  it("has no bold-700 text and no orange accent", () => {
+    expect(src).not.toMatch(/fontWeight:\s*(700|650|800|"bold")/);
+    expect(src).not.toMatch(/var\(--accent\)/);
+    expect(src).not.toMatch(/var\(--accent,/);
+  });
+  it("decides the scale group from a measurement, not an auto-fit grid", () => {
+    expect(src).toContain("ResizeObserver");
+    expect(src).not.toMatch(/repeat\(auto-fit/);
+  });
+  it("shows the opacity as plain text ('85%') in one input, with no separate % span", () => {
+    const html = render([pdf()], "pdf1");
+    expect(html).toMatch(/data-testid="overlay-opacity-pct"[^>]*value="100%"/);
+  });
+});

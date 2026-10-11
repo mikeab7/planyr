@@ -5,7 +5,9 @@ import { startClickAck } from "../../shared/ui/clickAck.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { useProjectName, usePlanName, renameProjectChecked, renamePlanChecked } from "../../shared/names/names.js";
-import { loadSite, saveSite, siteExistsLocally, sitesWriteStamp, sitesWriteStillCurrent, readBackSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, backupNow, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
+import { writeIsRedundant, mayWriteForAccount } from "./lib/saveDedupe.js";
+import { readCanvasGuess, writeCanvasGuess, geometryOf } from "./lib/canvasGuess.js";
+import { loadSite, saveSite, siteExistsLocally, sitesWriteStamp, sitesWriteStillCurrent, readBackSite, deleteSite, loadSitesList, isCloudActive, activeUid, pushSiteToCloud, pushModelToCloud, keepaliveFlushSite, listVersions, getVersion, initHistoryStore, backupNow, reconcileSiteFromCloud, refreshPlanHeaderFromCloud, headerBaseOf, advanceHeaderBase, listDeletedPlansInGroup, restoreDeletedProject, purgeOnePlanFromLiveGroup } from "./lib/storage.js";
 import { relTime } from "../../shared/projects/projectModel.js";
 import { collectAssetRefs, releasePlanForOverlay } from "./lib/sharedAssetRefs.js";
 import { idbGet, idbPut, idbDelete, idbAvailable } from "./lib/localDb.js";
@@ -34,7 +36,7 @@ import { loadProfile } from "./lib/profile.js";
 import { commitElements, fetchElements, keepaliveCommit } from "./lib/elementApi.js";
 import { supabase, supabaseRest, currentAccessToken } from "./lib/supabase.js";
 import { createIdMinter, randomIdSalt } from "../../shared/ids.js";
-import { mergeSiteContent, createSiteModel } from "./lib/siteModel.js";
+import { mergeSiteContent, createSiteModel, READ_NORMALIZE } from "./lib/siteModel.js";
 import { assemblyIntegrity, tearPayload, orphanPayload, unhealablePayload } from "./lib/assemblyIntegrity.js";
 import { groupCasEnabled } from "./lib/groupCas.js";
 import { bootFramingRemainingMs } from "./lib/bootFramingDeadline.js";
@@ -84,7 +86,7 @@ import {
   hasRegisterableContainer, viewValuesEqual,
 } from "./lib/mapLock.js";
 import { overscanPx, keepBufferFor, retinaForZoom, tileWeight, tileCacheLimit } from "./lib/tileBudget.js";
-import { preserveTilesAcrossSetView, announceSetView, boundTileCache, releaseLayer, throttleTilePruning, armBlankTileHeal } from "./lib/tileLifecycle.js";
+import { preserveTilesAcrossSetView, announceSetView, boundTileCache, releaseLayer, throttleTilePruning, paceTileLoads, armBlankTileHeal } from "./lib/tileLifecycle.js";
 import { buildGhost } from "./lib/ghostSnapshot.js";
 import { cullRectFor, cullToView, shouldCull } from "./lib/viewCull.js";
 /* NEW-1 — the View menu's content-visibility model. Applied ONLY at the five draw-set seams,
@@ -219,7 +221,7 @@ import { remapBondRefs, carryHostRoleTags } from "./lib/bondRemap.js";
 import { SETBACK_CHIP, setbackChipPlateW, setbackChipSpawn, numEditBox } from "./lib/numEditBox.js";
 import NumEditField from "./components/NumEditField.jsx";
 import { RailSplit, RailHeading } from "./components/RailSplit.jsx";
-import { roadPill, parkingPill, buildingPill } from "./lib/toolRailModel.js";
+import { roadPill, parkingPill, buildingPill, RAIL } from "./lib/toolRailModel.js";
 import { usePalette } from "../../shared/theme/ThemeProvider.jsx";
 import { NUM_FONT, TABULAR_NUMS } from "../../shared/theme/typography.js";
 import { pickInMarquee, hasSelMod, nextSelection } from "../../shared/markup/selection.js";
@@ -341,9 +343,10 @@ import { pondInspectorChips, POND_CHIP_DEFS, pondGroupSummary, POND_FLOOD_NOTES,
 import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, buildingNumberHolder, renumberBuilding, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, parcelSplitNames, lineageConflicts } from "./lib/siteModel.js";
-import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, rectContainsPoint, polygonEdges, polygonContainsPoint, weldCoverPolygon, roadRadiusConflicts, fitRoadCorners, cardinalTeePoint, roadBearingDeg, roadEdgeCrossing } from "./lib/roadGeometry.js";
-import { dissolveRings, clipPolylineOutside, clusterIds, regionPathD, regionEdgeSegments, polylinesPathD, rectOutlineCutSegments, polygonOutlineCutSegments } from "./lib/roadNetwork.js";
+import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, rectContainsPoint, polygonEdges, polygonContainsPoint, roadRadiusConflicts, fitRoadCorners, cardinalTeePoint, roadBearingDeg, roadEdgeCrossing } from "./lib/roadGeometry.js";
+import { regionPathD, polylinesPathD, rectOutlineCutSegments, polygonOutlineCutSegments } from "./lib/roadNetwork.js";
 import { driveJunctionsOf, teeJunctionsOf } from "./lib/roadJunctions.js";
+import { roadNetSteps, driveSteps, weldJunctionsOf, warmRoadNetFromEls } from "./lib/roadNetBuild.js";
 import {
   roundaboutDiameterFor, roundaboutBandFor,
   normalizeRoundaboutD, roundaboutIslandArea,
@@ -355,7 +358,7 @@ import {
   SQFT_PER_ACRE, rot2, elCorners, polyArea, ringOf, carStalls, trailerStalls, estStalls, estTrailers,
   CURB, CURB_6, CURB_12, curbWidthOf, curbEdgesOf, isCenterlineRoad, roadCurbWidth,
   roadDefaultRadius, roadDenseCenterline, roadStripRing, roadStripArea, roadCurbLines,
-  TEE_COINCIDE_FT, roadJunctionVerticesOf, roundaboutsForSite, driveJunctionCurbStripes,
+  roadJunctionVerticesOf, roundaboutsForSite,
 } from "./lib/siteGeometry.js";
 import { siteMetrics } from "./lib/siteMetrics.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide,
@@ -378,7 +381,8 @@ import { scaledPatch } from "./lib/overlayPanelModel.js";
 import { hasCrop, cropClipShapeScreen, cropTrimFeet, cropFromTrimFeet, cropKind, cropEditBlock, normalizeCropShape, recropForRaster } from "../../shared/overlay/overlayCrop.js";
 import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerialVisibility.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, dockAxisOf, healDockAxes, withDockAxis, dockSideCompassLabel } from "./lib/dockZones.js";
-import { wallPickerLayout, wallClickPatch, wallClickTitle, loadingSummary, loadingTypeLabel, loadedWallsLabel, strandedBumpIds, bumpOutCap } from "./lib/loadingWalls.js";
+import { wallPickerLayout, wallClickPatch, wallClickTitle, loadingTypeLabel, strandedBumpIds } from "./lib/loadingWalls.js";
+import { wallRowPlan, chipLabel, bumpChipLabel, addOptions, removalCount, KIND_NAME, TRAILER_MAX_ROWS, clampTrailerRows, trailerSpec, trailerCfg, zdAfterRowChange, zdAfterRowDepth, zdAfterAisle, bumpEnds, areaWithBumps } from "./lib/wallRows.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors, gridLinesVisible } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent, clipSegmentToRing } from "./lib/footprintEdit.js";
 import { pondAreaLabelLine, pondAreaDeltaLine } from "./lib/pondLabelText.js";
@@ -511,6 +515,7 @@ import { planCombine, planSplit, planRestoreCombined, planRestoreSplit, included
 import ParcelsPanel from "./components/ParcelsPanel.jsx";
 import { overlappingParcelPairs, dissolvedParcelSqft, polyIntersectArea, mergeParcelRings } from "./lib/polyClip.js";
 import { screenFurniturePlates, calibBadgePlacement, canvasPillBottom, mapChromeCardStyle } from "./lib/sheetFurniture.js";
+import { MAP_CORNER_PX, MAP_CORNER_GAP_PX, paneInsetFor, cornerGroupWidth, cursorChipFit } from "./lib/mapCorners.js";
 // B765985 — pure, dependency-free (safe on the boot path): the explicit engineering-scale math
 // the compose screen's frame-locking and fit-check use.
 import { scaleLabel, frameFootprintForScale, checkScaleFits } from "./lib/printScale.js";
@@ -1340,49 +1345,6 @@ const ROAD_FLAG_LABEL_PPF = 0.5;
 // driveJunctionsOf (B955/NEW-1, plus its DRIVE_RETURN_SEED / BUILDING_CLEAR_FT / buildingRunLimit
 // helpers) moved to ./lib/roadJunctions.js — see that module's header (B1703666 — geometric
 // detection, not just a stored driveTee flag) and this file's `driveJunctions` useMemo below.
-// B960/NEW-2 — road↔road END-TO-END weld junctions for the seamless-weld render. A weld = one
-// road's ENDPOINT coincident with ANOTHER road's ENDPOINT (a plain weld or the two ends of a loop),
-// as opposed to a tee (endpoint on an interior vertex, handled by teeJunctionsOf). Each such join
-// otherwise shows a seam — two flat end caps butting, each drawing its back-of-curb edge stroke
-// across the join. Returns [{ ids, P, cover }] with an opaque cover patch (weldCoverPolygon) that
-// unifies the pavement. Pure over (els); memoized at the call site.
-const roadOuterHalf = (el) => Math.max(0, (+el.travelW || 0) / 2) + roadCurbWidth(el); // centerline → back-of-curb
-function weldJunctionsOf(els) {
-  const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo);
-  const armAt = (R, ei) => {                                         // road R's endpoint ei → { dir(neighbor→P), halfW }
-    const P = R.pts[ei];
-    const nb = R.pts[ei === 0 ? 1 : R.pts.length - 2];
-    return { dir: { x: P.x - nb.x, y: P.y - nb.y }, halfW: roadOuterHalf(R) };
-  };
-  const out = [];
-  const seen = new Set();
-  for (let a = 0; a < roads.length; a++) {
-    const A = roads[a];
-    for (const aei of [0, A.pts.length - 1]) {
-      const PA = A.pts[aei];
-      // gather every OTHER endpoint (incl. A's own other end for a loop close) coincident with PA
-      const arms = [armAt(A, aei)];
-      const members = [`${A.id}:${aei}`];
-      for (let b = 0; b < roads.length; b++) {
-        const B = roads[b];
-        for (const bei of [0, B.pts.length - 1]) {
-          if (B.id === A.id && bei === aei) continue;
-          if (Math.hypot(B.pts[bei].x - PA.x, B.pts[bei].y - PA.y) <= TEE_COINCIDE_FT) {
-            arms.push(armAt(B, bei));
-            members.push(`${B.id}:${bei}`);
-          }
-        }
-      }
-      if (arms.length < 2) continue;
-      const key = [...members].sort().join("|");                    // dedupe: found once per member endpoint
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const cover = weldCoverPolygon({ x: PA.x, y: PA.y }, arms);
-      if (cover) out.push({ ids: members.map((m) => m.split(":")[0]), P: { x: PA.x, y: PA.y }, cover });
-    }
-  }
-  return out;
-}
 // True length (ft) of a centerline road = its tessellated centerline length.
 const roadCenterlineLength = (el, settings, sharpAt) => {
   const dense = roadDenseCenterline(el, settings, sharpAt);
@@ -1934,7 +1896,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const stored = restored?.settings || {};
     const retired = normalizeRetiredToggles(stored);
     if (retired) console.info("[planyr] view-menu migration: restoring dock doors (the toggle was retired)", retired);
-    return { ...DEFAULT_SETTINGS, ...stored, ...(retired || {}), snap: loadSnapPref() };
+    return plannerSettingsFrom(stored, retired);
   });
   const setSnap = useCallback((on) => { saveSnapPref(on); setSettings((s) => ({ ...s, snap: on })); }, []);
   /* NEW-1 — the View menu's hidden-content map, read straight off `settings` so it persists per
@@ -1944,7 +1906,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * mistake. Sparse and usually `undefined` — an untouched plan has no such key at all. */
   const hiddenGroups = settings.hidden;
 
-  const [view, setViewRaw] = useState({ ppf: 0.35, offX: 60, offY: 60 });
+  // B2225425 (round 3) — see `lastMeasuredCanvas`: start at the framing the boot framing is about to compute when this page has
+  // measured a canvas before (every plan switch); the placeholder triple otherwise (a cold page load).
+  const [view, setViewRaw] = useState(() => (lastMeasuredCanvas
+    ? framedViewFor(lastMeasuredCanvas.box, framingPoints(settings.hidden, parcels, els, restored?.sheetOverlays || []))
+    : { ppf: 0.35, offX: 60, offY: 60 }));
   /* B1574432 — A MOUNT IDENTITY, stamped on the canvas and on nothing else. Boot contains a
    * REMOUNT (`SitePlannerApp` keys this component `${activeSiteId}:${loadEpoch}` and `applyUser`
    * bumps `loadEpoch` once the cloud pull settles), and every per-mount instrument in this file —
@@ -2031,7 +1997,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // floor, and the zoom stack's own top-right-collision clamp needs the REAL height to react
   // to, not the floored one (the floored `h` made that clamp a silent no-op on exactly the
   // device it was written for — measured, not theorized).
-  const [size, setSize] = useState({ w: 800, h: 560, rawW: 800, rawH: 560 });
+  const [size, setSize] = useState(() => (lastMeasuredCanvas && lastMeasuredCanvas.box) || { w: 800, h: 560, rawW: 800, rawH: 560 }); // B2225425 — a guess; see `lastMeasuredCanvas`
   /* ⛔ B1234400 — IS `size` A REAL MEASUREMENT, OR STILL THE FALLBACK DEFAULT ABOVE?
    * Only ever set true from a measurement taken while `document.visibilityState === "visible"` —
    * see the ResizeObserver and the visibilitychange effect below, and lib/viewFramingGate.js's
@@ -2065,8 +2031,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      re-blended every tile seam, and every step re-requested FEMA's picture, whose "Zone AE" labels re-flow with the
      extent. The cost is tiles held under the docked panel (it is opaque; the canvas clip hides them). The overscan is
      sized off the same fixed width so it cannot change mid-drag either. */
-  const [geoDockX, setGeoDockX] = useState(0);
-  const geoDockXRef = useRef(0);
+  const [geoDockX, setGeoDockX] = useState(() => (lastMeasuredCanvas ? lastMeasuredCanvas.dockX : 0)); // B2225425 — a guess, re-measured below
+  const geoDockXRef = useRef(geoDockX);
   const geoOverscan = overscanPx({ elementCount: drawableCount, deviceMemoryGb: typeof navigator !== "undefined" ? navigator.deviceMemory : null, viewportW: size.w + geoDockX, viewportH: size.h });
   const geoBoxInset = mapBoxInset(geoOverscan, geoDockX);
   const geoKeepBuffer = keepBufferFor({ elementCount: drawableCount, deviceMemoryGb: typeof navigator !== "undefined" ? navigator.deviceMemory : null });
@@ -2439,7 +2405,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const [lotD, setLotD] = useState(800);
 
   const [typeMenu, setTypeMenu] = useState(null); // {id, x, y} screen coords for change-type popup
-  const [layerMenu, setLayerMenu] = useState(null); // B495: which "Add layer ▾" chooser is open ("dock" | "nondock")
   // NEW-1 — a typed building number that is already taken by another building, parked here
   // until the user picks Swap / Shift / Cancel in the Properties panel. `{ id, n, holderId }`.
   const [bldgNumConflict, setBldgNumConflict] = useState(null);
@@ -2538,7 +2503,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // CANVAS's center and not the viewport's: a docked left-rail panel (Properties included) narrows
   // the canvas but the toast used to stay centered on the whole window, which on a laptop-width
   // browser landed it directly on top of the panel it was explaining a refusal from.
-  const [toastCenterX, setToastCenterX] = useState(null);
+  const [toastCenterX, setToastCenterX] = useState(() => (lastMeasuredCanvas ? lastMeasuredCanvas.toastCx : null)); // B2225425 — a guess, re-measured on mount
   // B909 round 4 — the PERSISTENT "what changed" card after ⚡ Design pond (owner spec:
   // not a toast, stays until dismissed). null = no card. Cleared on dismiss, on Undo, or
   // implicitly replaced by the next Design pond run on any pond.
@@ -2982,6 +2947,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const bf = withTileRetry(L.tileLayer(bm.tiles, { maxNativeZoom: 13, maxZoom: 24, attribution: bm.attr, keepBuffer: Math.max(2, geoKeepBuffer + 2), crossOrigin: true }));
     preserveTilesAcrossSetView(bf); // NEW-7: a same-native-zoom commit must not wipe these
     throttleTilePruning(bf); // B854832: coalesce Leaflet's own per-tile prune into one per burst
+    paceTileLoads(bf); // B2225425: a whole grid never answers in one main-thread burst
     bf.setZIndex(0); bf.addTo(map); geoBackfillRef.current = bf;
     /* NEW-1 — CAP THE BACKFILL TOO. This layer had `preserveTilesAcrossSetView` and a keepBuffer
      * two rings LARGER than the detail layer, but no ceiling at all — so its `_tiles` map grew for
@@ -3047,6 +3013,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const t = withTileRetry(L.tileLayer(bm.tiles, { maxNativeZoom: detailMaxNative, maxZoom: 24, detectRetina: wantRetina, attribution: bm.attr, keepBuffer: geoKeepBuffer, crossOrigin: true }));
       preserveTilesAcrossSetView(t); // NEW-7: the big one — a fractional-zoom commit keeps its tiles
       throttleTilePruning(t); // B854832: coalesce Leaflet's own per-tile prune into one per burst
+      paceTileLoads(t); // B2225425: a whole grid never answers in one main-thread burst
       t.on("tileload", () => { if (geoBaseRef.current === t) setBasemapStatus("loaded"); });
       t.setZIndex(1); t.addTo(geoMapRef.current); geoBaseRef.current = t;
       // NEW-7 (4): an explicit ceiling, so a long session can't grow the tile cache without
@@ -3917,6 +3884,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // forward reference. The first real save then writes a fully-formed record —
   // there's no need to pre-create an empty one.
   const metaRef = useRef({});
+  const openedUidRef = useRef(undefined); if (openedUidRef.current === undefined) openedUidRef.current = activeUid() || null; // B2233521 — the account this planner's plan was opened under (lib/saveDedupe.js mayWriteForAccount)
   // "saving" | "saved" | "unsaved". Initialize honestly: a brand-new site that
   // isn't in storage yet is "unsaved", an opened existing site is "saved".
   const [saveStatus, setSaveStatus] = useState(() => (loadSite(siteId) ? "saved" : "unsaved"));
@@ -4099,8 +4067,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // ~50ms (snapshotVersion's count-based sig-dedup already keeps a same-shape drag from snapshotting).
     let mirrorStamp = null;   // NEW-1 (B217540 ×3): the whole-store write the mirror made, so the settle tick can tell it is already on disk
     const writeMirror = () => {
+      if (!mayWriteForAccount(openedUidRef.current, activeUid())) { reportClientEvent("save-refused-account-changed", "an autosave ran after the account changed; not written to the other account's store", { id: siteId }); return; }
       const ok = saveSite(payload);
       mirrorStamp = ok ? sitesWriteStamp() : null;
+      lastWriteRef.current = ok ? { rec: payload, stamp: mirrorStamp } : null; // B2233521 — what a later flush of the same state may skip
       lastLocalWrite.current = Date.now();
       // B473 — VERIFY the write actually persisted by reading it back. A write that silently doesn't
       // land is exactly the owner's "I placed a bunch of stuff and it didn't save at all." If the
@@ -4136,7 +4106,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        * byte-exact check B217540 uses for the read-back; any other writer (another tab, a cloud pull) fails that proof and
        * the real write below runs exactly as it always did. A mirror that never ran or failed has no stamp, so it also falls
        * through to the real write. */
-      const okSave = mirrorStamp && sitesWriteStillCurrent(mirrorStamp) ? true : saveSite(payload, { skipHistory: true });
+      if (!mayWriteForAccount(openedUidRef.current, activeUid())) return; // B2233521 — never into another account's store
+      const mirrorHeld = !!(mirrorStamp && sitesWriteStillCurrent(mirrorStamp));
+      const okSave = mirrorHeld ? true : saveSite(payload, { skipHistory: true });
+      if (!mirrorHeld) lastWriteRef.current = okSave ? { rec: payload, stamp: sitesWriteStamp() } : null; // B2233521
       if (fresh && okSave) onSiteSaved?.();
       // Badge tracks the REAL write: local write done; when logged in, stay
       // "saving" until the cloud upsert resolves, then "saved" only if it succeeded.
@@ -4218,6 +4191,19 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!siteId) return;
     cloudPushWithWatchdog(siteId);
   };
+  /* B2233521 — every flush below (switch, persist-on-leave, page hide) goes through ONE save (lib/saveDedupe.js):
+   * (1) a plan opened under an account is never written into another account's store — a persist-on-leave that ran after SIGN-OUT
+   *     copied the open plan into the signed-out device store (measured: ui-audit/verify-plan-switch-writes.mjs, red on the build before);
+   * (2) a flush of exactly the record this planner last wrote, while the store still holds it, is skipped — a plan switch wrote the plan
+   *     being left twice back to back (the switch handler's flush, then persist-on-leave on unmount) and the second changed nothing. */
+  const lastWriteRef = useRef(null);
+  const saveLive = (rec) => {
+    if (!mayWriteForAccount(openedUidRef.current, activeUid())) { reportClientEvent("save-refused-account-changed", "a flush ran after the account changed; not written to the other account's store", { id: siteId }); return false; }
+    if (writeIsRedundant(lastWriteRef.current, rec, sitesWriteStillCurrent)) return true;
+    const ok = saveSite(rec);
+    lastWriteRef.current = ok ? { rec, stamp: sitesWriteStamp() } : null;
+    return ok;
+  };
   // Persist on leave; if the site is still blank and un-located, drop it instead.
   const liveRef = useRef({});
   useEffect(() => { liveRef.current = { parcels, els, measures, callouts, markups, settings, sheetOverlays, deletedIds, layerOverrides, layerAbove }; });
@@ -4250,7 +4236,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // current (possibly still-blank) canvas state onto it is a safe no-op: it neither destroys an
     // existing row nor creates a new one, and cloudUpsert's own header-signature check skips the
     // network write entirely when nothing actually changed.
-    else saveSite({ id: siteId, ...metaRef.current, ...s });
+    else saveLive({ id: siteId, ...metaRef.current, ...s });
   };
   useEffect(() => {
     if (active || !siteId) return;
@@ -4261,7 +4247,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // page is closing/navigating, so a change made just before leaving isn't lost.
   useEffect(() => {
     if (!siteId) return;
-    const flush = () => { if (deletedSelfRef.current) return; const s = liveRef.current; if (!isBlankSite(s)) saveSite({ id: siteId, ...metaRef.current, ...s }); };
+    const flush = () => { if (deletedSelfRef.current) return; const s = liveRef.current; if (!isBlankSite(s)) saveLive({ id: siteId, ...metaRef.current, ...s }); };
     const onVis = () => { if (document.visibilityState === "hidden") flush(); };
     window.addEventListener("beforeunload", flush);
     document.addEventListener("visibilitychange", onVis);
@@ -4316,6 +4302,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
    * lands. That window is real and can be seconds on a heavy plan or a slow connection — see
    * the ViewMenu `elementsReady` prop for what it was silently doing to the View card. */
   const [elementsReady, setElementsReady] = useState(() => !isCloudActive());
+  const normalizeOnSeedRef = useRef(true); // B2225425 — written each render beside `planShareState`
   // Reflect an engine-assigned z back onto the canvas element so render/hit-test (byZ) and the
   // committed row's z_index + data.z all agree. One of the five collection setters by kind.
   const applyZPatch = (kind, id, patch) => {
@@ -4515,6 +4502,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       setTimeout(() => { if (elSyncRef.current === eng) refetchReplace(eng); }, 5000);
       return;
     }
+    // B2225425 (round 3) — warm what the seed's render will ask first (see `warmSeedCaches`), in slices, before anything is seeded.
+    try { await warmSeedCaches(r.rows, 8, { settings }); } catch (_) { /* warming only — the render computes it itself */ }
+    if (elSyncRef.current !== eng) return;
     // Mid-gesture/mid-edit: never yank the canvas OR reconcile half-made state — defer the whole
     // replace until the interaction settles (the buffered-event drain covers per-row updates).
     if (busyRef.current) {
@@ -4614,9 +4604,44 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (post.tears.length)
       reportClientEvent("assembly-tear-detected", `a stored plan held ${post.tears.length} bonded child(ren) off their host by up to ${Math.round(post.tears[0].dist)} ft (load)`,
         { id: siteId, seam: "load", ...tearPayload(post.tears) });
+    /* B2225425 (round 3) — put the canvas in the SAME normal form the device copy opened in (the
+     * ONE `READ_NORMALIZE` table `createSiteModel` runs, plus the mount's `healDockAxes`), so a plan
+     * whose rows were never normal stops being replaced element-for-element — and re-rendered whole,
+     * 60–100 ms — on every single open. What normalizing changed is committed ONCE (below, as its own
+     * edit), after which the rows ARE normal and every later open is a no-op here. Skipped where this
+     * account may not write the plan (a teammate's view-only plan): there the canvas takes the raw
+     * rows exactly as before, because a normalization it could not commit would only be adopted
+     * straight back by the after-seed diff. */
+    const normWrite = !!normalizeOnSeedRef.current;
+    const normKeys = new Set();
+    const shown = normWrite ? { ...merged } : merged;
+    if (normWrite) {
+      // What the stored rows hold, and what the model built from them (rowsToModel already runs the road migration and the
+      // bonded heal). An element whose canvas copy is the MODEL's own object but not the row's is a read normalization — it is
+      // committed below, never adopted back over (which is what made the road migration undo itself on every open: the
+      // after-seed diff saw the migrated road differ from its row with nothing pending and put the raw row back, measured on
+      // Bolt-on's road e1455359). A fold or a pending edit substituted over the model is not ours to judge here.
+      const FIELD_KIND = { els: "el", parcels: "parcel", markups: "markup", measures: "measure", callouts: "callout" };
+      const rawOf = new Map((rows || []).filter((row) => row && !row.deleted_at).map((row) => [row.kind + ":" + row.id, row.data]));
+      for (const [field, kind] of Object.entries(FIELD_KIND)) {
+        const before = merged[field] || [];
+        let after = READ_NORMALIZE[field](before);
+        if (field === "els") after = healDockAxes(after);
+        const fromModel = new Map((model[field] || []).map((x) => [x && x.id, x]));
+        const wasMerged = new Map(before.map((x) => [x && x.id, x]));
+        for (const x of after) {
+          if (!x) continue;
+          const key = kind + ":" + x.id, raw = rawOf.get(key);
+          if (!raw || x === raw) continue;
+          const src = wasMerged.get(x.id);
+          if (src === fromModel.get(x.id)) normKeys.add(key);   // the model's own (or its normalized) copy, not a substitution
+        }
+        if (after !== before) shown[field] = after;
+      }
+    }
     const replace = (setter, val) => setter((prev) => (stableStringify(prev) === stableStringify(val) ? prev : val));
-    replace(setEls, merged.els); replace(setMarkups, merged.markups); replace(setMeasures, merged.measures);
-    replace(setCallouts, merged.callouts); replace(setParcels, merged.parcels);
+    replace(setEls, shown.els); replace(setMarkups, shown.markups); replace(setMeasures, shown.measures);
+    replace(setCallouts, shown.callouts); replace(setParcels, shown.parcels);
     // deletedIds: any id that has a LIVE row is alive by rows-canonical truth — purge it from the
     // local tombstone list so the mirror's union fold can't re-drop a row-restored element. Header-
     // side tombstones (overlays/drawings/crossSections — never element rows) pass through untouched.
@@ -4653,8 +4678,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // the dominant case (content the server has never seen); it costs nothing on an ordinary
     // reconnect/tab-wake with nothing new to seed — the fresh op id is simply never attached to a
     // row. Guard: test/opEnvelopeSeedCoverage.test.js.
+    // B2225425 (round 3) — `shown` (what the canvas now holds) with every read normalization EXEMPT from rows-canonical, so the
+    // after-seed diff commits it (B1118's shape for a heal) instead of adopting the raw row straight back. Every such element
+    // joins ONE batch, so a renumbered z never lands half-written beside the old scale. LOUD: a write made on open is reported.
+    if (normKeys.size) reportClientEvent("load-normalized-persisted", `${normKeys.size} stored element(s) were not in normal form on open — committing the normal form once`,
+      { id: siteId, count: normKeys.size, keys: [...normKeys].slice(0, 20) });
     opTrackerRef.current.beginOperation("create");
-    try { eng.reconcile(merged, { busy: false, afterSeed: true, exempt: new Set(healed.map((h) => "el:" + h.id)) }); } catch (_) {}
+    try { eng.reconcile(shown, { busy: false, afterSeed: true, exempt: new Set([...healed.map((h) => "el:" + h.id), ...normKeys]) }); } catch (_) {}
   };
   /* Plan-switch first-write loss (2026-10-06, reproduced live 3/3 on planyr.io as the test account:
    * New plan → draw a line → switch back within the engine's first seed → 0 `site_elements` rows,
@@ -6208,27 +6238,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        zoom, so the buildings he could actually see stayed squeezed into the middle of a frame built
        around two things that were not there. An extent is a picture decision, so it reads the
        visible subset; every COUNT still reads the model (see lib/hiddenContentReads.js). */
-    const pts = [];
-    visibleParcels(hiddenGroups, parcels).forEach((pc) => pts.push(...pc.points));
-    visibleEls(hiddenGroups, els).forEach((e) => pts.push(...(e.points ? e.points : elCorners(e))));
-    // B848736 — every reference counts toward the frame (the aerial backdrop always did; the
-    // gap for a hand-dropped site-plan overlay is closed here too, folded into the same list now).
-    // imagePointToWorld carries a rotated reference's corners correctly; the pinned map reference
-    // never rotates, so this is exact for it and a reasonable box for a rotated one too.
-    sheetOverlays.filter((o) => o.visible !== false).forEach((o) => {
-      pts.push(imagePointToWorld(o, 0, 0), imagePointToWorld(o, o.imgW, 0), imagePointToWorld(o, o.imgW, o.imgH), imagePointToWorld(o, 0, o.imgH));
-    });
+    // B2225425 (round 3) — the points and the view are module-scope helpers now (`framingPoints` / `framedViewFor`), shared with the
+    // planner's first render; see each one's notes (B848736: every reference counts toward the frame).
+    const pts = framingPoints(hiddenGroups, parcels, els, sheetOverlays);
     /* ⛔ "NOTHING TO FRAME" IS A FRAMING. An empty plan has no points, so the right answer IS the
        default triple — and it must mark the gate committed, or an empty plan would hang behind the
        gate until the ceiling rescued it. This is the branch that makes `ppf 0.35 off (60,60)`
        ambiguous, and the reason no check may ever treat that triple alone as a failure. */
-    if (pts.length === 0) { setView({ ppf: 0.35, offX: 60, offY: 60 }); if (framedFromRealBox) markFramed(); return; }
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    pts.forEach((p) => { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); });
-    const bw = Math.max(maxX - minX, 10), bh = Math.max(maxY - minY, 10);
-    const pad = framePad(box2.w, box2.h, 60);
-    const ppf = Math.max(1e-6, Math.min((box2.w - pad * 2) / bw, (box2.h - pad * 2) / bh));
-    setView({ ppf, offX: pad - minX * ppf + (box2.w - pad * 2 - bw * ppf) / 2, offY: pad - minY * ppf + (box2.h - pad * 2 - bh * ppf) / 2 });
+    setView(framedViewFor(box2, pts));     // an empty plan frames to the default triple (see `framedViewFor`)
     if (framedFromRealBox) markFramed();   // B1574432 — the reveal, in the same commit as the view
   }, [parcels, els, sheetOverlays, size, hiddenGroups, setView, markFramed]);
   /* The ceiling effect below is deliberately `[]`-dep'd, so it would otherwise close over the `fit`
@@ -6269,6 +6286,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
        flag exists for. The RAW rect is the verdict. */
     if (!(r.width > 1 && r.height > 1)) return;
     sizeMeasuredRef.current = true;
+    lastMeasuredCanvas = { ...(lastMeasuredCanvas || { dockX: 0, toastCx: null }), box: canvasBox(r) }; // B2225425
     const { w, h } = canvasBox(r);
     setSize((sz) => nextCanvasSize(sz, r));
     const ticket = framingGate.current.framingTicket();
@@ -6740,6 +6758,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // (an overlaid/portaled panel steals no layout width → zero delta), just without the rounding.
     const parentLeft = el.offsetParent ? el.offsetParent.getBoundingClientRect().left : 0;
     const left = canvasEdgeLeft(r.left, parentLeft);
+    if (r.width > 1 && r.height > 1) { lastMeasuredCanvas = { box: canvasBox(r), dockX: left, toastCx: cx }; persistCanvasGuess(lastMeasuredCanvas); } // B2225425 — the next mount's guess (round 5: and the next page load's)
     // NEW-2 — the basemap box reaches left by this much, so its left edge stays pinned to the row (see `geoDockX`).
     // Guarded: a dispatch that lands on the same number is still a dispatch (B1189).
     if (geoDockXRef.current !== left) { geoDockXRef.current = left; setGeoDockX(left); }
@@ -11307,10 +11326,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Bump-out box geometry (dogEarGeom) + the size-by-wall helper (dogEarSize) are pure, in
   // lib/dogEar.js (B362). `de` carries the corner (side/sign) and, once resized, its stored
   // span along the wall + projection (`along`/`proj`); absent → the 55′×60′ default.
-  const makeDogEar = (b, side, sign) => ({
-    id: uid(), type: "building", ...dogEarGeom(b, { side, sign }),
-    attachedTo: b.id, noFit: true, noLabel: true, dock: "none", dogEar: { side, sign },
-  });
+  // `size` ({along, proj}) is optional: a corner added beside a bump-out the user already sized adopts it.
+  const makeDogEar = (b, side, sign, size) => {
+    const de = size && size.along > 0 && size.proj > 0 ? { side, sign, along: size.along, proj: size.proj } : { side, sign };
+    return {
+      id: uid(), type: "building", ...dogEarGeom(b, de),
+      attachedTo: b.id, noFit: true, noLabel: true, dock: "none", dogEar: de,
+    };
+  };
   // Re-anchor a dog-ear to the building corner when the building is resized: slides to the
   // new corner / dock face and re-derives the host angle, while KEEPING its size — the
   // user's if it was resized (B362), else the 55′×60′ default.
@@ -11474,8 +11497,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const zoneIndexOf = (el) => (el.truckCourt ? 0 : el.forCourt ? 1 : 2);
   // The min / max stack depth across a building's dock sides (the "+"/"−" operate on
   // the whole set as a unit, so the min level advances together and the max peels off).
-  const dockStackLevel = (b) => { const { dockSides } = dockSidesOf(b); return dockSides.length ? Math.min(...dockSides.map((s) => stackCountIn(els, b, s))) : 0; };
-  const dockStackMax = (b) => { const { dockSides } = dockSidesOf(b); return dockSides.length ? Math.max(...dockSides.map((s) => stackCountIn(els, b, s))) : 0; };
   // The dock side a stack zone belongs to (court carries it; trailer/buffer inherit via their chain).
   const zoneSideOf = (arr, z) => {
     if (!z) return null;
@@ -11589,8 +11610,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const patch = new Map();
     zones.forEach((z, i) => {
       const g = layoutZoneByKind(b, side, i, depths, kinds, { ...courtOpts, alongs, anchors, offs });
+      // NEW-3 (Building panel v2) — a trailer zone may carry 1–4 rows: rows / aisle ride the zone, the
+      // total depth (`zd`) is rows × row + ⌊rows / 2⌋ × aisle, and the cfg is the band · aisle · band
+      // pattern `trailerStalls` already draws. One row is byte-identical to the old single strip.
       patch.set(z.id, z.type === "trailer"
-        ? { ...g, cfg: { ...(z.cfg || {}), trailerW: (z.cfg && z.cfg.trailerW) || settings.trailerW || OPP_TRAILER_W, trailerL: depths[i], trailerAisle: 0, single: true } }
+        ? { ...g, cfg: trailerCfg(z.cfg, trailerSpec({ ...z, zd: depths[i] }, settings.trailerAisle), (z.cfg && z.cfg.trailerW) || settings.trailerW || OPP_TRAILER_W) }
         : g);
     });
     return arr.map((x) => (patch.has(x.id) ? { ...x, ...patch.get(x.id) } : x));
@@ -11646,21 +11670,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (n === 2) { const c = findCourtIn(arr, b, side); const t = findTrailerIn(arr, c); return t ? makeBufferZone(b, t) : null; }
     return null; // full default sequence (appended layers come via the "Add layer" chooser)
   };
-  // "+" — grow the building's dock apron outward by one ring: add the NEXT outward zone to
-  // EVERY dock side that isn't full (each side adds its own next: court → trailer → buffer).
-  // Per-side (not min-level), so an uneven building is never stuck adding courts.
-  const addDockZone = (b) => {
-    const { dockSides } = dockSidesOf(b);
-    if (!dockSides.length || dockSides.every((s) => stackCountIn(els, b, s) >= MAX_DOCK_ZONES)) return;
-    pushHistory();
-    setEls((a) => {
-      let next = a;
-      dockSides.forEach((side) => { if (stackCountIn(next, b, side) < MAX_DOCK_ZONES) { const z = buildNextZone(next, b, side); if (z) next = [...next, z]; } });
-      dockSides.forEach((side) => { next = relayoutSide(next, b, side); });
-      return next;
-    });
-    setSel({ kind: "el", id: b.id });
-  };
   // Remove the outermost zone on ONE dock side (the on-canvas per-side "−"): peel the LAST element of
   // the chain (an appended road/landscape first, then buffer → trailer → court). removeFeature
   // cascades children + re-lays the side.
@@ -11684,18 +11693,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       maxOut = Math.max(maxOut, c + half);
     });
     return maxOut;
-  };
-  // Which catalog layers the chooser may offer on `side` of `b` (catalog keys, sensible order).
-  // Dock sides: only append a landscape buffer / road BEYOND the court→trailer→buffer stack (and only
-  // once that stack exists); a road is terminal. Non-dock sides: sidewalk / parking / landscape / road.
-  const layersForSide = (b, side) => {
-    const { dockSides } = dockSidesOf(b);
-    if (dockSides.includes(side)) {
-      const chain = dockChainOnSide(els, b, side);
-      if (!chain.length || chain[chain.length - 1].type === "road") return []; // need a court; road is terminal
-      return ["buffer", "road"];
-    }
-    return ["sidewalk", "parking", "buffer", "road"];
   };
   // Append catalog layer `key` as a new OUTERMOST layer on `side`. Dock sides extend the relayout
   // chain (noFit, prevZone); non-dock sides place an ordinary wall-kid flush beyond the outermost
@@ -11733,16 +11730,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     });
     setSel({ kind: "el", id: b.id });
   };
-  // The layers the chooser may offer across a GROUP of sides (dock or non-dock), de-duplicated and in
-  // catalog order; plus a fan-out adder that applies a chosen layer to every eligible side at once.
-  const layersForSides = (b, sides) => {
-    const order = ["sidewalk", "parking", "buffer", "road"];
-    const set = new Set(); sides.forEach((s) => layersForSide(b, s).forEach((k) => set.add(k)));
-    return order.filter((k) => set.has(k));
-  };
-  const addLayerToSides = (b, sides, key) => sides.forEach((s) => { if (layersForSide(b, s).includes(key)) addLayerOnSide(b, s, key); });
-  // True if ANY / the given dock side can still grow / shrink (for enabling the +/− controls).
-  const dockCanAdd = (b) => { const { dockSides } = dockSidesOf(b); return dockSides.some((s) => stackCountIn(els, b, s) < MAX_DOCK_ZONES); };
   // NEW-2 (B1818257) — the single-side sibling of setZoneDepthAll: a cross-dock building's two
   // truck courts (one per dock side) are independent site elements bonded via `truckCourt.side`
   // (they always have been — `findCourtIn` is already keyed on `side`), but every edit path used
@@ -12110,10 +12097,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const relayoutBumpSidewalks = (arr, b, sideRef = b) => relayoutWallKids(arr, b, sideRef);
   // Add dog-ears at the given corners; re-lay the perpendicular sidewalks to the full building
   // side and pull the truck court in to the clear face between the new bump-outs (B492).
-  const placeDogEars = (b, corners) => {
+  const placeDogEars = (b, corners, sizeFor) => {
     if (!corners.length) return;
     pushHistory();
-    const newDe = corners.map(([side, sign]) => makeDogEar(b, side, sign));
+    const newDe = corners.map(([side, sign]) => makeDogEar(b, side, sign, sizeFor ? sizeFor(side) : undefined));
     setEls((a) => {
       let next = relayoutBumpSidewalks([...a, ...newDe], b);
       new Set(corners.map(([side]) => side)).forEach((side) => { next = relayoutSide(next, b, side); });
@@ -12129,6 +12116,20 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return relayoutSide(next, b, de.dogEar.side);
     });
   };
+  // Remove several dog-ears in ONE undo frame (the wall rows' Bump-outs chip / the picker's corner click).
+  const removeDogEarsMany = (b, des) => {
+    if (!des.length) return;
+    pushHistory();
+    const ids = new Set(des.map((de) => de.id));
+    const killed = els.filter((x) => ids.has(x.id) || ids.has(x.forCourt)).map((x) => x.id);
+    setEls((a) => {
+      let next = relayoutBumpSidewalks(a.filter((x) => !ids.has(x.id) && !ids.has(x.forCourt)), b);
+      new Set(des.map((de) => de.dogEar.side)).forEach((side) => { next = relayoutSide(next, b, side); });
+      return next;
+    });
+    tombstone(killed);
+    setSel({ kind: "el", id: b.id });
+  };
   // Dog-ears at both corners of every dock side (skipping any already present). Bulk placer —
   // the right-click menu's "Add bump-outs (…)" action, which deliberately places every missing
   // corner in one click.
@@ -12138,20 +12139,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const corners = [];
     dockSides.forEach((s) => [1, -1].forEach((sign) => { if (!have.has(`${s}${sign}`)) corners.push([s, sign]); }));
     placeDogEars(b, corners);
-  };
-  // NEW-3/B872 — the Properties panel's Bump-outs [−]/[＋] stepper used to wrap the ALL-OR-NOTHING
-  // add/remove above, so one press of [−] (titled "Remove all bump-outs") took the count straight
-  // to 0 while its sibling rows (Dock zones, Car parking) step one unit per click — an affordance
-  // lie the owner caught by reading the button's own title. These two make Bump-outs a REAL stepper:
-  // one corner per press, same as every other row in this list.
-  const addOneDogEar = (b) => {
-    const { dockSides } = dockSidesOf(b);
-    const have = new Set(els.filter((x) => x.attachedTo === b.id && x.dogEar).map((x) => `${x.dogEar.side}${x.dogEar.sign}`));
-    for (const s of dockSides) for (const sign of [1, -1]) if (!have.has(`${s}${sign}`)) return placeDogEars(b, [[s, sign]]);
-  };
-  const removeOneDogEar = (b) => {
-    const de = els.find((x) => x.attachedTo === b.id && x.dogEar);
-    if (de) removeDogEar(b, de);
   };
   // Which building side a bonded kid hugs. Trust an explicit tag; else infer it
   // from the kid's position (so legacy / untagged strips are still recognised).
@@ -16705,7 +16692,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   metaRef.current = { site: siteLabel, name: planLabel, groupId, county: restored?.county ?? null, origin };
   // Multi-site switching: flush this site's live state first so nothing in the
   // last debounce window is lost (and a Duplicate clones the very latest edits).
-  const flushSite = () => { if (siteId && !deletedSelfRef.current && !isBlankSite(liveRef.current)) saveSite({ id: siteId, ...metaRef.current, ...liveRef.current }); };
+  const flushSite = () => { if (siteId && !deletedSelfRef.current && !isBlankSite(liveRef.current)) saveLive({ id: siteId, ...metaRef.current, ...liveRef.current }); };
   // B792 — the county stored at CREATION can be wrong (overlapping county bboxes + a
   // spatially-unscoped statewide parcel source let "waller" persist on a Fort Bend site),
   // and every consumer — the identify CAD, tax rates, the flood/easement jurisdiction
@@ -16916,7 +16903,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // saved snapshots, and restore one into the canvas (which then autosaves as the newest
   // version — and the thinner state it replaces is itself snapshotted, so a restore is
   // reversible). Geometry is fully restored; any stripped backdrop image may need re-dropping.
-  const openVersionHistory = () => { setVersionList(listVersions(siteId)); setActivityTab("versions"); setVersionsOpen(true); closeHdrMenus(); };
+  const openVersionHistory = () => { setVersionList(listVersions(siteId)); initHistoryStore().then(() => setVersionList(listVersions(siteId))).catch(() => {}); /* B2236000 — the ring hydrates off the boot path; re-list once it has */ setActivityTab("versions"); setVersionsOpen(true); closeHdrMenus(); };
   // B472048 (NEW-7 · NEW-3) — the Activity tab's data, fetched lazily on first switch (not on
   // every dialog open) so opening "Version history" for its ordinary purpose costs nothing new.
   // `groupRowsIntoOperations` + `describeOperation` are the ALREADY-SHIPPED, unit-tested pure
@@ -19342,7 +19329,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // measured at 27px tall against Apple's 44px / Material's 48dp floor. `minHeight` (not just more
     // padding) is what actually guarantees the floor — a caret sibling overrides this padding to 0
     // (see the `▾` buttons below) and would otherwise stay tiny. Desktop is untouched.
-    padding: narrow ? "12px 10px" : "5px 4px 5px 10px", minHeight: narrow ? 44 : undefined,
+    padding: narrow ? "12px 10px" : `5px 4px 5px ${RAIL.rowPadL}px`, minHeight: narrow ? 44 : undefined,
     fontSize: FONT_SIZE.control, borderRadius: 8, cursor: "pointer", whiteSpace: "nowrap",
     border: `1px solid ${open ? PAL.chromeMuted : "transparent"}`, fontFamily: "inherit",
     background: active ? PAL.ember : (open ? "var(--hover-chrome)" : "transparent"),
@@ -20186,8 +20173,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // (`removeOuterDockZone` generalised from "the outermost" to "this one and outward"). The stack is
   // a chain, so removing a middle zone would leave the ones beyond floating off the wall; the ✕ on a
   // row therefore always means "this and everything outside it". One undo frame, whole cascade tombstoned.
-  const removeDockZonesFrom = (b, i) => {
-    const { dockSides } = dockSidesOf(b);
+  const removeDockZonesFrom = (b, i, sidesArg) => {
+    const dockSides = sidesArg || dockSidesOf(b).dockSides;
     const src = stateRef.current.els;
     const rm = [];
     dockSides.forEach((side) => { const z = dockChainOnSide(src, b, side)[i]; if (z) rm.push(z.id); });
@@ -20202,20 +20189,6 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     tombstone([...killed]);
     setSel({ kind: "el", id: b.id });
   };
-  // NEW-5 — a zone's depth by its place in the OUTWARD chain (0 = truck court … then any appended
-  // layer), across every loaded wall. `setZoneDepthAll` is keyed on the three preset zones; the panel's
-  // list also carries appended layers (a landscape buffer behind the buffer, a road), so it is chain-indexed.
-  const setChainZoneDepthAll = (b, i, newDepth) => {
-    const { dockSides } = dockSidesOf(b);
-    const nd = Math.max(1, Math.round(newDepth));
-    pushHistory();
-    setEls((a) => {
-      let next = a;
-      dockSides.forEach((side) => { const z = dockChainOnSide(next, b, side)[i]; if (z) next = next.map((x) => (x.id === z.id ? { ...x, zd: nd } : x)); });
-      dockSides.forEach((side) => { next = relayoutSide(next, b, side); });
-      return next;
-    });
-  };
   /* NEW-6 — HOW MANY PARKING ROWS the non-dock walls carry, and SET it in one commit.
      The owner adds parking in bulk (sometimes eight rows), so typing 8 must lay out eight rows at once,
      not eight clicks. For each non-dock wall: no parking → build one `n` rows deep (starting beyond the
@@ -20224,13 +20197,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      been split into pieces cannot be set by number (there is no single band to resize) — it is left
      alone and SAID so, never silently skipped (LOUD-FAILURE). */
   const MAX_EMP_PARK_ROWS = 24;
-  const empParkRowsOn = (b, side) => sideParkPadsOn(b, side).reduce((t, p) => t + (p.type === "parking" ? empSideRows(p) : 0), 0);
-  const empParkRows = (b) => carEndsSides(b).reduce((m, s) => Math.max(m, empParkRowsOn(b, s)), 0);
-  const setEmployeeParkingRows = (b, nRaw) => {
+  const setEmployeeParkingRows = (b, nRaw, sidesArg) => {
     const n = Math.max(0, Math.min(MAX_EMP_PARK_ROWS, Math.round(Number(nRaw))));
     if (!Number.isFinite(n)) return;
     if (b.footEdit) { flashWarn("Reset the footprint to a rectangle to set end-wall parking (an angled end wall would misplace it).", 5000); return; }
-    const sides = carEndsSides(b);
+    const sides = sidesArg || carEndsSides(b);
     if (!sides.length) return;
     const src = stateRef.current.els;
     let next = src, killIds = [], skipped = 0, changed = false;
@@ -20257,29 +20228,227 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (!changed) return;
     pushHistory();
     if (killIds.length) { const k = new Set(killIds); next = next.filter((x) => !k.has(x.id)); }
-    setEls(relayoutWallKids(next, b));
+    // A buffer / road beyond the parking follows the parking's new depth (it is flush, not derived).
+    setEls(sides.reduce((acc, side) => repackFlushBeyond(acc, b, side), relayoutWallKids(next, b)));
     if (killIds.length) tombstone(killIds);
     setSel({ kind: "el", id: b.id });
   };
-  // NEW-6 — the end-wall sidewalks (one per non-dock wall that has one) and the verbs on them as ONE row.
-  const endSidewalks = (b) => carEndsSides(b).map((s) => empSideSidewalk(b, s)).filter(Boolean);
-  const setEndSidewalkWidth = (b, n) => {
-    const sws = endSidewalks(b); if (!sws.length) return;
-    pushHistory();
-    sws.forEach((sw) => setSidewalkWidth(sw, n, { history: false }));
+
+  /* ==== Building panel v2 — the per-wall rows (NEW-1…NEW-3) ====
+     The Loading section lists ONE row per wall. Every edit here takes the
+     row's `sides` and touches ONLY those walls — the fan-out the old panel did across every dock /
+     every end wall is gone; linked dock pairs simply pass both sides. The primitives underneath are the
+     ones the canvas already uses (relayoutSide, relayoutWallKids, makeDogEar…), so panel and canvas
+     cannot disagree. */
+  // The bump-outs of a building as {id, side, sign, along, proj} (feet) — the real geometry, not a count.
+  const bumpSpecsOf = (b) => els.filter((x) => x.attachedTo === b.id && x.dogEar && isDogEarSide(x.dogEar.side))
+    .map((x) => ({ id: x.id, side: x.dogEar.side, sign: x.dogEar.sign, ...dogEarSize(x.dogEar, x.w, x.h) }));
+  // A wall's layers outward, as chip descriptors. Dock walls read the court → trailer → … chain; any other wall
+  // reads its sidewalk, parking (one layer, however many rows) and flush buffer / road, nearest the wall first.
+  const wallLayersOn = (b, side) => {
+    if (dockSidesOf(b).dockSides.includes(side)) {
+      return dockChainOnSide(els, b, side).map((z, i) => {
+        const kind = z.truckCourt ? "court" : z.type === "trailer" ? "trailer" : z.type === "road" ? "road" : z.type === "sidewalk" ? "sidewalk" : "buffer";
+        const base = { id: z.id, ids: [z.id], kind, index: i, depth: Math.round(kind === "road" ? (z.travelW ?? Math.max(1, zoneDepthOf(z, b, side, i) - 2 * (+z.curb || CURB))) : zoneDepthOf(z, b, side, i)) };
+        if (kind !== "trailer") return base;
+        const sp = trailerSpec(z, settings.trailerAisle);
+        return { ...base, rows: sp.rows, aisle: Math.round(sp.aisle), rowDepth: Math.round(sp.rowDepth), depth: Math.round(sp.total) };
+      });
+    }
+    const [nx, ny] = SIDE_N[side], isH = ny !== 0, sg = isH ? ny : nx;
+    const perpOf = (x) => { const l = rot2(x.cx - b.cx, x.cy - b.cy, -b.rot); return sg * (isH ? l.y : l.x); };
+    const depthOfKid = (x) => { const e = hostAxisExtents(b, x); return isH ? e.dimBY : e.dimBX; };
+    const pads = sideParkPadsOn(b, side);
+    const padIds = new Set(pads.map((p) => p.id));
+    const out = [];
+    els.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && !padIds.has(x.id) && sideOfKid(b, x) === side).forEach((x) => {
+      const kind = x.type === "sidewalk" ? "sidewalk" : x.type === "landscape" ? "buffer" : x.type === "road" ? "road" : null;
+      if (!kind) return;
+      const depth = kind === "road" ? (x.travelW ?? Math.max(1, depthOfKid(x) - 2 * (+x.curb || CURB))) : depthOfKid(x);
+      out.push({ id: x.id, ids: [x.id], kind, depth: Math.round(depth), perp: perpOf(x) });
+    });
+    if (pads.length) {
+      out.push({ id: pads[0].id, ids: pads.map((p) => p.id), kind: "parking", split: pads.length > 1,
+        rows: pads.reduce((t, p) => t + (p.type === "parking" ? empSideRows(p) : 0), 0),
+        depth: Math.round(pads.reduce((t, p) => t + depthOfKid(p), 0)), perp: Math.min(...pads.map(perpOf)) });
+    }
+    return out.sort((a, c) => a.perp - c.perp).map(({ perp: _p, ...l }, i) => ({ ...l, index: i }));
   };
-  const addEndSidewalks = (b) => {
-    if (b.footEdit) { flashWarn("Reset the footprint to a rectangle to add end-wall layers (an angled end wall would misplace them).", 5000); return; }
-    pushHistory();
-    carEndsSides(b).forEach((s) => addSidewalkSide(b, s, { history: false }));
+  // Re-pack the FLUSH layers (buffer / road) of a non-dock wall against what is inside them. A sidewalk and a
+  // parking field are derived by relayoutWallKids; a buffer / road is placed flush when added and does not
+  // move on its own, so a change to the layers inside it (parking rows, a removed sidewalk) closes here.
+  // Returns the SAME array when nothing moves (no dirty churn).
+  const repackFlushBeyond = (arr, b, side) => {
+    const [nx, ny] = SIDE_N[side], isH = ny !== 0, sg = isH ? ny : nx;
+    const kids = arr.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && !x.truckCourt && !x.forCourt && !x.forTrailer && !x.prevZone && sideOfKid(b, x) === side);
+    const local = (x) => rot2(x.cx - b.cx, x.cy - b.cy, -b.rot);
+    const perp = (x) => { const l = local(x); return sg * (isH ? l.y : l.x); };
+    const depth = (x) => { const e = hostAxisExtents(b, x); return isH ? e.dimBY : e.dimBX; };
+    const flush = (x) => (x.type === "landscape" && !x.sidewalkSide) || x.type === "road";
+    let run = (isH ? b.h : b.w) / 2;
+    const moves = new Map();
+    kids.slice().sort((a, c) => perp(a) - perp(c)).forEach((x) => {
+      const d = depth(x);
+      if (flush(x)) {
+        const want = run + d / 2, l = local(x);
+        if (Math.abs(perp(x) - want) > 0.01) {
+          const off = rot2(isH ? l.x : sg * want, isH ? sg * want : l.y, b.rot);
+          moves.set(x.id, { cx: b.cx + off.x, cy: b.cy + off.y });
+        }
+      }
+      run += d;
+    });
+    return moves.size ? arr.map((x) => (moves.has(x.id) ? { ...x, ...moves.get(x.id) } : x)) : arr;
   };
-  const removeEndSidewalks = (b) => {
-    const sws = endSidewalks(b); if (!sws.length) return;
+  // Is every side in `sides` a loaded dock wall?
+  const sidesAreDock = (b, sides) => { const ds = dockSidesOf(b).dockSides; return sides.length > 0 && sides.every((s) => ds.includes(s)); };
+  // Type a layer's DEPTH (a trailer's is ONE row's depth; a road's is its travel width).
+  const setWallLayerDepth = (b, sides, layer, nRaw) => {
+    const nd = Math.max(1, Math.round(Number(nRaw)));
+    if (!Number.isFinite(nd)) return;
+    if (sidesAreDock(b, sides)) {
+      pushHistory();
+      setEls((a) => {
+        let next = a;
+        sides.forEach((side) => {
+          const z = dockChainOnSide(next, b, side)[layer.index];
+          if (!z) return;
+          const patch = z.type === "trailer" ? { zd: zdAfterRowDepth(z, nd, settings.trailerAisle) }
+            : z.type === "road" ? { travelW: nd, zd: nd + 2 * (+z.curb || CURB) } : { zd: nd };
+          next = next.map((x) => (x.id === z.id ? { ...x, ...patch } : x));
+        });
+        sides.forEach((side) => { next = relayoutSide(next, b, side); });
+        return next;
+      });
+      return;
+    }
+    const el = els.find((x) => x.id === layer.id);
+    if (!el) return;
+    if (layer.kind === "road") {
+      pushHistory();
+      setSidewalkWidth(el, nd + 2 * (+el.curb || CURB), { history: false });
+      setEls((a) => a.map((x) => (x.id === el.id ? { ...x, travelW: nd } : x)));
+      return;
+    }
+    setSidewalkWidth(el, nd);       // sidewalk / buffer: grows outward, anything beyond slides with it
+  };
+  // Rows of trailer parking (1–4) on a dock wall, holding one row's depth.
+  const setTrailerRows = (b, sides, layer, rowsRaw) => {
+    const rows = clampTrailerRows(rowsRaw);
     pushHistory();
+    setEls((a) => {
+      let next = a;
+      sides.forEach((side) => {
+        const z = dockChainOnSide(next, b, side)[layer.index];
+        if (!z || z.type !== "trailer") return;
+        const aisle = trailerSpec(z, settings.trailerAisle).aisle;
+        next = next.map((x) => (x.id === z.id ? { ...x, trailerRows: rows, trailerAisleFt: aisle, zd: zdAfterRowChange(z, rows, settings.trailerAisle) } : x));
+      });
+      sides.forEach((side) => { next = relayoutSide(next, b, side); });
+      return next;
+    });
+  };
+  const setTrailerAisle = (b, sides, layer, aisleRaw) => {
+    const aisle = Math.max(0, Math.round(Number(aisleRaw)));
+    if (!Number.isFinite(aisle)) return;
+    pushHistory();
+    setEls((a) => {
+      let next = a;
+      sides.forEach((side) => {
+        const z = dockChainOnSide(next, b, side)[layer.index];
+        if (!z || z.type !== "trailer") return;
+        next = next.map((x) => (x.id === z.id ? { ...x, trailerAisleFt: aisle, zd: zdAfterAisle(z, aisle, settings.trailerAisle) } : x));
+      });
+      sides.forEach((side) => { next = relayoutSide(next, b, side); });
+      return next;
+    });
+  };
+  // Remove a layer. A dock wall's stack is a chain, so this takes the layer AND everything outside it;
+  // any other wall loses just that layer (the layers outside it close up against what is left).
+  const removeWallLayer = (b, sides, layer) => {
+    if (sidesAreDock(b, sides)) { removeDockZonesFrom(b, layer.index, sides); return; }
+    const side = sides[0];
     const src = stateRef.current.els;
-    const killed = killSetWithChildren(src, sws.map((x) => x.id));
-    setEls((a) => relayoutWallKids(relayoutAllSides(removeWithChildren(a, sws.map((x) => x.id)), b), b)); // parking pulls back flush against the wall (NEW-3)
+    const killed = killSetWithChildren(src, layer.ids);
+    pushHistory();
+    setEls((a) => repackFlushBeyond(relayoutWallKids(relayoutAllSides(removeWithChildren(a, layer.ids), b), b), b, side));
     tombstone([...killed]);
+    setSel({ kind: "el", id: b.id });
+  };
+  // Add a layer from the "+" catalog to THESE walls only; a new layer is opened for editing by the caller.
+  const addWallLayer = (b, sides, key) => {
+    if (b.footEdit && !sidesAreDock(b, sides)) { flashWarn("Reset the footprint to a rectangle to add end-wall layers (an angled end wall would misplace them).", 5000); return; }
+    if (!sidesAreDock(b, sides)) { addLayerOnSide(b, sides[0], key); return; }
+    pushHistory();
+    setEls((a) => {
+      let next = a;
+      sides.forEach((side) => {
+        const chain = dockChainOnSide(next, b, side);
+        if (key === "court") { if (chain.length) return; next = [...next, makeCourtZone(b, side)]; }
+        else {
+          const court = chain[0]; const outer = chain[chain.length - 1];
+          if (!court || outer.type === "road") return;
+          if (key === "trailer") {
+            if (chain.some((z) => z.type === "trailer")) return;
+            const tz = makeTrailerZone(b, court);
+            // The layers that followed the court now follow the trailer: court → trailer → …
+            next = [...next.map((x) => (x.prevZone === court.id ? { ...x, prevZone: tz.id } : x)), tz];
+          } else next = [...next, makeChainZone(b, side, key, outer)];
+        }
+        next = relayoutSide(next, b, side);
+      });
+      return next;
+    });
+    setSel({ kind: "el", id: b.id });
+  };
+  // Bump-outs for a dock row. A corner toggle adds or removes the bump-out at that END of every wall in the row;
+  // a corner added beside a bump-out the user already sized adopts that size.
+  const toggleBumpEnd = (b, sides, sign) => {
+    if (b.footEdit) { flashWarn("Reset the footprint to a rectangle first — bump-outs anchor to square corners.", 5000); return; }
+    const have = els.filter((x) => x.attachedTo === b.id && x.dogEar && sides.includes(x.dogEar.side) && x.dogEar.sign === sign);
+    if (have.length === sides.length) { removeDogEarsMany(b, have); return; }
+    const missing = sides.filter((s) => !have.some((x) => x.dogEar.side === s));
+    const sized = els.find((x) => x.attachedTo === b.id && x.dogEar && sides.includes(x.dogEar.side));
+    const size = sized ? dogEarSize(sized.dogEar, sized.w, sized.h) : null;
+    placeDogEars(b, missing.map((s) => [s, sign]), () => size);
+  };
+  // The wall picker's dashed corner: add the bump-out there, or remove the one that is there.
+  const toggleBumpCorner = (b, side, sign) => {
+    if (b.footEdit) { flashWarn("Reset the footprint to a rectangle first — bump-outs anchor to square corners.", 5000); return; }
+    const de = els.find((x) => x.attachedTo === b.id && x.dogEar && x.dogEar.side === side && x.dogEar.sign === sign);
+    if (de) { removeDogEarsMany(b, [de]); return; }
+    const sized = els.find((x) => x.attachedTo === b.id && x.dogEar && x.dogEar.side === side);
+    const size = sized ? dogEarSize(sized.dogEar, sized.w, sized.h) : null;
+    placeDogEars(b, [[side, sign]], () => size);
+  };
+  // Size [along] × [out] for every bump-out on these walls, in one frame.
+  const setBumpSize = (b, sides, alongRaw, projRaw) => {
+    const along = Math.max(1, Math.round(Number(alongRaw))), proj = Math.max(1, Math.round(Number(projRaw)));
+    if (!Number.isFinite(along) || !Number.isFinite(proj)) return;
+    pushHistory();
+    setEls((a) => {
+      let next = a.map((x) => {
+        if (x.attachedTo !== b.id || !x.dogEar || !sides.includes(x.dogEar.side)) return x;
+        const de = { ...x.dogEar, along, proj };
+        return { ...x, dogEar: de, ...dogEarGeom(b, de) };
+      });
+      next = relayoutBumpSidewalks(next, b);
+      sides.forEach((side) => { next = relayoutSide(next, b, side); });
+      return next;
+    });
+  };
+  const removeBumpsOn = (b, sides) => removeDogEarsMany(b, els.filter((x) => x.attachedTo === b.id && x.dogEar && sides.includes(x.dogEar.side)));
+  // The numbers the Building header and Loading summary quote, from the SAME helpers the canvas draws with:
+  // the footprint plus its bump-outs, and the dock-door count that drops by the doors a bump-out displaces
+  // (the very `dockDoorRun` the canvas uses — panel and canvas cannot disagree).
+  const buildingMetrics = (b) => {
+    const bumps = els.filter((x) => x.attachedTo === b.id && x.dogEar);
+    const area = areaWithBumps(buildingSqft(b), bumps);
+    const grd = resolveGridSettings(b, settings);
+    const gg = computeBuildingGrid({ length: footprintLength(b), depth: footprintDepth(b), dock: b.dock || "cross", grid: grd });
+    const lenOffsets = gg.lengthLines.map((l) => l.at);
+    const doors = dockSidesFor(b).dockSides.reduce((sum, s) => sum + dockDoorRun(b, s, bumps, lenOffsets, grd).doors.length, 0);
+    return { ...area, bumpN: bumps.length, doors, grd, gg };
   };
   // NEW-7 — does this building carry any per-building column-grid override? (The panel no longer
   // edits them, but a plan saved with one must not hide it.) `resetBuildingGridOverrides` clears them.
@@ -20888,12 +21057,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // the building's Appearance, the pond's, the parking Display group and the generic Properties section.
   const strokeOpacityCell = curStyle ? <PercentField value={curStyle.strokeOpacity} min={0} onCommit={(v) => { pushHistory(); setSelEl({ strokeOpacity: v }); }} inputStyle={numInput} ariaLabel="Outline opacity" /> : null;
   const fillOpacityCell = curStyle ? <PercentField value={curStyle.fillOpacity} min={10} onCommit={(v) => { pushHistory(); setSelEl({ fillOpacity: v }); }} inputStyle={numInput} ariaLabel="Fill opacity" /> : null;
+  // "Line weight" (NEW-5) — never a unit: the stacked ▲▼ NumInput, then a short live line whose thickness tracks it.
   const strokeWidthRow = curStyle ? (
-    <PairedField label="Width"
-      left={<span style={{ display: "flex", alignItems: "center", gap: SPACE.xxs, minWidth: 0 }}>
-        <NumInput style={{ ...numInput, width: "100%", minWidth: 0 }} value={curStyle.strokeWidth} min={0.5} max={12} step={0.5} coarse={2} ariaLabel="Outline width"
+    <PairedField label="Line weight"
+      left={<span style={{ display: "flex", alignItems: "center", gap: SPACE.md, minWidth: 0 }}>
+        <NumInput style={{ ...numInput, width: 46, minWidth: 0 }} value={curStyle.strokeWidth} min={0.5} max={12} step={0.5} coarse={2} ariaLabel="Line weight"
           onCommit={(n) => { pushHistory(); setSelEl({ strokeWidth: Math.max(0.5, Math.min(12, n)) }); }} />
-        <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", flex: "none" }}>px</span>
+        <LineSample weight={curStyle.strokeWidth} />
       </span>}
     />
   ) : null;
@@ -21190,6 +21360,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     locked: !!(planRecord && planRecord.shareLocked),
     canLock: !!(planRecord && planRecord.teamId && (!planRecord.ownerId || planRecord.ownerId === activeUid())),
   };
+  // B2225425 (round 3) — may the rows seed commit the read normalization? Not on a plan this
+  // account cannot write (view-only for teammates and not ours): see `refetchReplace`.
+  normalizeOnSeedRef.current = !(planShareState.locked && planRecord && planRecord.ownerId && planRecord.ownerId !== activeUid());
   const [lockBusy, setLockBusy] = useState(false);
   const togglePlanLock = async () => {
     if (!siteId || lockBusy) return;
@@ -22605,9 +22778,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     <NumInput style={{ ...numInput, width: 44 }} ariaLabel={`${TYPE[k].label.split(" / ")[0]} outline opacity (%)`} value={Math.round((st.strokeOpacity ?? 1) * 100)} min={0} max={100} step={5}
                       onCommit={(n) => draftTypeStd(k, { strokeOpacity: Math.max(0, Math.min(100, Math.round(n))) / 100 })} />
                     <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)" }}>%</span>
-                    <NumInput style={{ ...numInput, width: 44 }} ariaLabel={`${TYPE[k].label.split(" / ")[0]} outline width (px)`} value={st.strokeWidth ?? st.weight ?? 1} min={0.5} max={12} step={0.5} coarse={2}
+                    <NumInput style={{ ...numInput, width: 44 }} ariaLabel={`${TYPE[k].label.split(" / ")[0]} line weight`} value={st.strokeWidth ?? st.weight ?? 1} min={0.5} max={12} step={0.5} coarse={2}
                       onCommit={(n) => draftTypeStd(k, { strokeWidth: Math.max(0.5, Math.min(12, n)) })} />
-                    <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)" }}>px</span>
                   </div>
                 </div>
               );
@@ -22878,148 +23050,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // through the intersection, and no second translucent fill stacking on the first. See roadNetwork.js
   // for why every patch-based attempt (B953…B1006) had to fail on topologies it wasn't tuned for.
   const roadNet = useMemo(() => {
-    /* ⛔ B1788912 (NEW-1) — THE COMPOSITE'S ORDERING RULE, stated per NO-ONE-OWNS-A-COMPOSITE
-       (/CLAUDE.md): a dissolved road network is ONE painted region built from several roads that
-       may each carry a DIFFERENT creation-order `z` now that elements stack Bluebeam-style instead
-       of by type. One region needs one paint position, so a single scalar has to stand in for the
-       whole cluster — see `zKey` below for which one and why. (The old `bandForceOf` exclusion —
-       a road forced out of its type band painted its own strip instead of joining the dissolve —
-       is gone with the type-band rule itself; every centerline road is a network member again,
-       even a lone one, exactly as it was before that escape hatch existed.) */
-    /* ⛔ NEW-1 — HIDDEN ROADS LEAVE THE DISSOLVED NETWORK, AND THIS ONE FILTER IS THE WHOLE DEFECT.
-     *
-     * The owner unchecked Roads in the View panel, the banner said "6 groups hidden", and the roads
-     * were still on the drawing as grey ribbons. `drawEls` was filtered correctly — every road's own
-     * `[data-el-id]` node left the canvas — but a road's PAVEMENT is not drawn by the road. It is
-     * drawn ONCE per connected cluster, here, from a memo over `els` that no visibility filter ever
-     * reached. Hiding removed the hit target and the label and left the ink.
-     *
-     * ⚠ THIS IS NOT THE CULL, AND IT MUST NOT BECOME THE CULL. `roadNet` reads `els` rather than
-     * `drawEls` on purpose (see `elNeighbors` above): a road scrolled off screen still shapes the
-     * curb return of one that is on screen, so culling here would change the drawn geometry. HIDING
-     * is a different statement — a hidden road contributes nothing at all, including its junctions —
-     * so it is filtered, and the two filters stay distinct. */
-    const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo && !elHidden(hiddenGroups, x));
-    if (!roads.length) return { regions: [], stripes: new Map(), outlineCuts: new Map(), memberIds: new Set(), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
-    const byId = new Map(roads.map((r) => [r.id, r]));
-    const strip = new Map(roads.map((r) => [r.id, roadStripRing(r, settings, sharpFor(r), roundabouts.trims.get(r.id))]));
-    // Extra pavement contributed by each junction, indexed by the road that owns the junction.
-    const extra = new Map(roads.map((r) => [r.id, []]));
-    // Stripe-only cutters: regions that must INTERRUPT a curb stripe without adding pavement. The one
-    // case is the through road's near face-of-curb stripe, which otherwise draws a curb line straight
-    // across the throat between the two returns — the strip of the side road only covers the middle of
-    // that span, so clipping against pavement alone leaves a stub under each return.
-    const stripeCut = [];
-    const pairs = [];
-    const addExtra = (id, polys) => { const a = extra.get(id); if (a) for (const p of polys || []) if (p && p.length >= 3) a.push(p); };
-    for (const tj of teeJunctions) {
-      /* A junction between two roads is only a junction while BOTH are on the drawing. `addExtra`
-       * already no-ops for a hidden side road (it has no `extra` entry), but `stripeCut` below is
-       * unconditional — leave it in and a visible road's curb stripe is interrupted by a road that
-       * is not there, which reads as a gap in the kerb for no visible reason. */
-      if (!byId.has(tj.sideId) || !byId.has(tj.throughId)) continue;
-      addExtra(tj.sideId, tj.geom.wedges);
-      pairs.push([tj.sideId, tj.throughId]);
-      const G = byId.get(tj.throughId), n = tj.geom.nTee, [t1, t2] = tj.geom.throughTangents || [];
-      const depth = G ? roadOuterHalf(G) : 0;                 // back-of-curb → centerline: near stripe only
-      if (t1 && t2 && n && depth > 0) stripeCut.push([t1, t2, { x: t2.x - n.x * depth, y: t2.y - n.y * depth }, { x: t1.x - n.x * depth, y: t1.y - n.y * depth }]);
-    }
-    for (const dj of driveJunctions) addExtra(dj.sideId, dj.geom.wedges);   // target is a rect element, not a road
-    /* 2026-09-22 — the pad a road tees into is SUBTRACTED from that road's cluster (see
-       dissolveRings' `subtract`): the road's pavement ends at the court face instead of running
-       under (now: over) the court. Map<roadId, [pad rings]>, pad rings in world feet. */
-    const padRingOf = (T) => {
-      if (!T) return null;
-      if (Array.isArray(T.points) && T.points.length >= 3) return T.points;
-      if (typeof T.cx === "number" && T.w > 0 && T.h > 0) return rectEdges(T.cx, T.cy, T.w, T.h, T.rot || 0).map((e) => e.a);
-      return null;
-    };
-    const padCut = new Map();
-    for (const dj of driveJunctions) {
-      const ring = padRingOf((els || []).find((e) => e.id === dj.targetId));
-      if (!ring) continue;
-      if (!padCut.has(dj.sideId)) padCut.set(dj.sideId, []);
-      padCut.get(dj.sideId).push(ring);
-    }
-    // NEW-5 — a roundabout's circulatory sectors + its curb returns are ADDITIVE pavement in exactly
-    // the same sense a tee's wedges are, so they go through the SAME union: one region, one
-    // continuous curb outline, and the central island falls out as a genuine PolyTree hole.
-    for (const [rid, polys] of roundabouts.extraById) addExtra(rid, polys);
-    for (const p of roundabouts.pairs) pairs.push(p);   // every leg clusters with its circle
-    for (const wj of weldJunctions) {
-      addExtra(wj.ids[0], [wj.cover]);
-      for (let i = 1; i < wj.ids.length; i++) pairs.push([wj.ids[0], wj.ids[i]]);
-    }
-    /* A pair naming a road that is hidden is not a connection any more — drop it rather than let it
-     * chain two visible clusters together through something nobody can see. */
-    const cluster = clusterIds(roads.map((r) => r.id), pairs.filter(([a, b]) => byId.has(a) && byId.has(b)));
-    const groups = new Map();
-    for (const r of roads) {
-      const k = cluster.get(r.id);
-      if (!groups.has(k)) groups.set(k, []);
-      groups.get(k).push(r.id);
-    }
-    const regions = [];
-    const fullRegions = [];
-    const stripes = new Map();
-    for (const ids of groups.values()) {
-      const parts = [];
-      for (const id of ids) { const s = strip.get(id); if (s && s.length >= 3) parts.push(s); parts.push(...extra.get(id)); }
-      // Style from the WIDEST member (its surface reads as the merged pavement) — the same rule the
-      // weld cover already used.
-      const styleEl = ids.map((id) => byId.get(id)).filter(Boolean).sort((a, b) => roadOuterHalf(b) - roadOuterHalf(a))[0];
-      /* ⛔ B1788912 (NEW-1) — THE COMPOSITE'S ORDERING RULE: a cluster paints at its NEWEST member's
-         `z` — the MAX, not the min. Stated and chosen, not incidental (a MIN reading was harmless
-         before this, since every road shared one type-band tier regardless of `zKey`; it stopped
-         being harmless the moment `zKey` became the cluster's actual paint position among every
-         other element). MAX matches the rest of the feature: "whatever you draw — or connect —
-         last is on top." Connecting a new road segment to an older one is itself a fresh act, and
-         the fused pavement should read as current with it, not sink to whichever member happens to
-         be oldest. The trade, named rather than hidden: welding a brand-new road onto an old one
-         can pull that old segment's ink up above something drawn in between (a network is one
-         region, so it cannot paint "part new, part old") — the general cost NO-ONE-OWNS-A-COMPOSITE
-         warns every composite carries, and no scalar choice here removes it. */
-      const zKey = Math.max(...ids.map((id) => byId.get(id)?.z ?? 0));
-      // The cluster's pads (drive targets of any member) are cut out of the painted region; the
-      // UNCUT dissolve is kept only to interrupt the pad's own outline across the mouth (below).
-      const subtract = ids.flatMap((id) => padCut.get(id) || []);
-      const full = dissolveRings(parts);
-      const painted = subtract.length ? dissolveRings(parts, { subtract }) : full;
-      for (const region of painted) regions.push({ region, styleEl, zKey, ids, edge: regionEdgeSegments(region, subtract) });
-      for (const region of full) fullRegions.push({ region, ids });
-      // A road's inner curb stripes are trimmed against the OTHER pavement in its cluster, so a stripe
-      // ends where it runs into the junction instead of drawing a curb straight through the intersection.
-      for (const id of ids) {
-        const others = [];
-        for (const oid of ids) { if (oid === id) continue; const s = strip.get(oid); if (s && s.length >= 3) others.push(s); }
-        for (const oid of ids) others.push(...extra.get(oid));
-        others.push(...stripeCut);
-        others.push(...(padCut.get(id) || []));   // a curb stripe stops at the court face too
-        const clipped = roadCurbLines(byId.get(id), settings, sharpFor(byId.get(id)), roundabouts.trims.get(id)).flatMap((cl) => clipPolylineOutside(cl, others));
-        // NEW-1 — a road ending at a drive junction (a paving/parking pad edge) left its inner
-        // face-of-curb stripe clipped dead right at the fillet's own tangent point: the straight
-        // body carried its curb detail, the curb-return fillet carried none, so the two painted as
-        // visibly different treatments of what PR 1763 already proved is one continuous dissolved
-        // surface — a seam of decoration, not of geometry. `driveJunctionCurbStripes`
-        // (siteGeometry.js) continues the same line around the return; see its header.
-        const filletStripes = driveJunctionCurbStripes(driveJunctions.filter((dj) => dj.sideId === id), roadCurbWidth(byId.get(id)));
-        stripes.set(id, [...clipped, ...filletStripes]);
-      }
-    }
-    regions.sort((a, b) => a.zKey - b.zKey);
-    // NEW-4 — a road that TEES INTO A RECT (a parking field, a truck court) leaves that rect's own
-    // outline drawn straight across the drive opening: the owner's screenshot, and the same defect the
-    // road↔road case already fixed, one layer out. A junction reads as one continuous curb around the
-    // entrance, never a line ruled across it. Road↔road dissolves because both sides are pavement; a
-    // court is a different element with its own fill, so instead of merging we INTERRUPT the target's
-    // outline where the drive's pavement crosses it. Map<targetId, cutter rings>.
-    const outlineCuts = new Map();
-    for (const dj of driveJunctions) {
-      const cutters = fullRegions.filter((r) => r.ids.includes(dj.sideId)).map((r) => r.region.outer).filter(Boolean);
-      if (!cutters.length) continue;
-      outlineCuts.set(dj.targetId, [...(outlineCuts.get(dj.targetId) || []), ...cutters]);
-    }
-    return { regions, stripes, outlineCuts, memberIds: new Set(roads.map((r) => r.id)), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
+    /* the body is lib/roadNetBuild.js `roadNetSteps` (round 5, B2233521) — the SAME steps the plan-open warm-up drives in slices; hidden roads are filtered THERE (`elHidden(hiddenGroups, x)`) */
+    return driveSteps(roadNetSteps({ els, settings, hiddenGroups, teeJunctions, driveJunctions, weldJunctions, sharpFor, roadJunctionVerts, roundabouts }));
   }, [els, settings, teeJunctions, driveJunctions, weldJunctions, sharpFor, roadJunctionVerts, roundabouts, hiddenGroups]);
   /* VIEW-INDEPENDENT-ONCE (NEW-2). The dissolved network's SVG path data and per-cluster style were
      built inside the render's `roadNet.regions.map(…)`, so a 60-move pan rebuilt them 187 times —
@@ -23681,7 +23713,26 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // right-anchored scale bar on the same row? Pure decision in sheetFurniture.js: when they'd
   // meet the badge is lifted to its own row above the bar (and its width capped). `calibBadgeW`
   // is measured below; 0 until then → never raised.
-  const calibPlace = calibBadgePlacement({ paneW, badgeW: calibBadgeW, scaleBarW: furnPlates.scaleBar.plateW, scaleBarH: furnPlates.scaleBar.plateH, row: FURNITURE_ROW });
+  // NEW-1 (B2206704–B2206706) — THE LEFT-ANCHORED FURNITURE (north arrow, calibration badge, coordinate chip, the Standards toast)
+  // IS POSITIONED AGAINST THE VISIBLE MAP PANE, NOT THE CANVAS BOX. A docked left panel PAINTS `leftOverlap` px wider than
+  // the room it reserves (lib/panelWidth.js), so the canvas box reaches left under its right edge; `paneInset` is exactly that
+  // overlap, so `left: paneInset + margin` is the panel's own painted edge + margin on every frame of a drag.
+  const paneInset = paneInsetFor({ narrow, docked: !!leftPanel, overlap: leftOverlap });
+  const visPaneW = paneW - paneInset; // the visible pane — what every width decision below must be made against
+  // NEW-2 (B2206704–B2206706) — desktop bottom-right corner group: scale bar · help · zoom stack on one baseline, owned by ONE flex
+  // container (rendered with the zoom stack below). Phone keeps its own vertical arrangement. The zoom/help button size is the
+  // same `zb` size the stack renders at.
+  const cornerBtn = coarsePointer ? 35 : CONTROL_H.lg;
+  const cornerGroupW = narrow ? 0 : cornerGroupWidth({ scaleBarW: furnPlates.scaleBar.plateW, helpW: cornerBtn, zoomW: cornerBtn });
+  const cursorFit = narrow ? { show: false, maxWidth: 0 } : cursorChipFit({ visW: visPaneW, groupW: cornerGroupW });
+  const calibPlace = calibBadgePlacement({
+    paneW: visPaneW, badgeW: calibBadgeW,
+    // Desktop: the thing to clear on the right is the whole corner group (scale bar + help + zoom) — which stands
+    // MAP_CORNER_PX off the right edge and, being taller than the badge's band, is clear only horizontally.
+    scaleBarW: narrow ? furnPlates.scaleBar.plateW : cornerGroupW, scaleBarH: furnPlates.scaleBar.plateH,
+    sbRight: narrow ? 14 : MAP_CORNER_PX, zoomRight: narrow ? 14 : MAP_CORNER_PX, zoomW: narrow ? 30 : cornerBtn * 2 + MAP_CORNER_GAP_PX,
+    row: FURNITURE_ROW,
+  });
   // Measure the badge's natural width. The ref sits on the LABEL span, whose `scrollWidth`
   // reports the FULL text width even after the pill caps + ellipsis-truncates it — so raising
   // the badge (which applies the cap) can never feed back and shrink this measurement into an
@@ -25102,9 +25153,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 dangerouslySetInnerHTML={{ __html: p.markup }} />
             );
             return (
-              <div data-export="skip" style={{ position: "absolute", left: 0, right: 0, bottom: 0, top: 0, pointerEvents: "none", zIndex: MAP_CHROME_Z.furniture }}>
-                <div data-testid="north-arrow-plate" style={{ position: "absolute", left: 14, bottom: FURNITURE_ROW }}>{plate(furn.north)}</div>
-                <div data-testid="scale-bar-plate" style={{ position: "absolute", right: 14, bottom: FURNITURE_ROW }}>{plate(furn.scaleBar)}</div>
+              <div data-export="skip" data-testid="map-furniture-frame" style={{ position: "absolute", left: paneInset, right: 0, bottom: 0, top: 0, pointerEvents: "none", zIndex: MAP_CHROME_Z.furniture }}>
+                <div data-testid="north-arrow-plate" data-map-furniture="north" style={{ position: "absolute", left: narrow ? 14 : MAP_CORNER_PX, bottom: FURNITURE_ROW }}>{plate(furn.north)}</div>
+                {/* Phone only: desktop's scale bar lives in the bottom-right corner group (rendered with the zoom stack). */}
+                {narrow && <div data-testid="scale-bar-plate" data-map-furniture="scale-bar" style={{ position: "absolute", right: 14, bottom: FURNITURE_ROW }}>{plate(furn.scaleBar)}</div>}
               </div>
             );
           })()}
@@ -25119,7 +25171,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               Behaviour is untouched: same 7s life, same single undo frame. */}
           {stdToast && (
             <div data-testid="standards-apply-toast" style={{
-              position: "absolute", left: 14, zIndex: 8, maxWidth: "min(340px, calc(100% - 28px))",
+              position: "absolute", left: paneInset + 14, zIndex: 8, maxWidth: `min(340px, calc(100% - ${paneInset + 28}px))`,
               bottom: canvasPillBottom({ northH: furnPlates.north.plateH, scaleBarH: furnPlates.scaleBar.plateH, calibBottom: calibrationState ? calibPlace.bottom : null, row: FURNITURE_ROW }),
               background: PAL.accent, color: "var(--on-accent)", padding: "8px 14px", borderRadius: 99,
               fontSize: 12.5, fontWeight: 600, boxShadow: "0 8px 28px rgba(0,0,0,0.3)",
@@ -25531,9 +25583,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             const dividerH = Math.round(chrome.fontSize + 2);
             return (
               <div onClick={warn && mapRef ? () => { setShowAerial(true); setLeftPanel("references"); setSelOverlay(mapRef.id); setOvCalib({ id: mapRef.id, kind: "trace", pts: [] }); } : undefined}
-                data-testid="calibration-badge"
+                data-testid="calibration-badge" data-map-furniture="calibration"
                 style={{
-                  position: "absolute", left: calibPlace.left, bottom: calibPlace.bottom, maxWidth: badgeMaxW,
+                  position: "absolute", left: calibPlace.left + paneInset, bottom: calibPlace.bottom, maxWidth: badgeMaxW,
                   display: "flex", alignItems: "center", gap: 8,
                   background: chrome.background, border: `${chrome.borderWidth}px solid ${chrome.borderColor}`, borderRadius: chrome.borderRadius,
                   padding: "5px 11px", fontSize: chrome.fontSize,
@@ -25626,14 +25678,13 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               floor: FURNITURE_ROW + furnPlates.scaleBar.plateH + 2,
               topReserve: narrow ? TOOLS_TAB_RESERVE_PX : undefined,
             });
-            return (
-              <>
-              {/* data-canvas-corner: read by the shared help/report control (shared/ui/
-                  cornerClearance.js) so it can clear this stack when — and only when — it
-                  genuinely reaches the true viewport corner (narrow width; on desktop the
-                  docked tool rail insets this pane away from that corner, so the measured
-                  rect naturally stops overlapping and this stack is ignored for free). */}
-              <div data-export="skip" data-canvas-corner="zoom-stack" style={{ position: "absolute", right: 14, bottom: zoomBottom, display: "flex", flexDirection: "column", borderRadius: 9, overflow: "hidden", boxShadow: "0 4px 14px rgba(0,0,0,0.18)", zIndex: MAP_CHROME_Z.control }}>
+            const dockSlot = (
+              <div data-export="skip" data-canvas-dock-slot="planner" data-map-furniture="help" style={narrow ? { position: "absolute", right: 14 + zb.width + 8, bottom: zoomBottom, zIndex: MAP_CHROME_Z.control } : { position: "relative", pointerEvents: "auto", flex: "none", zIndex: MAP_CHROME_Z.control }}>
+                <div ref={helpDockRef} data-canvas-dock="planner" data-dock-size={zb.width} />
+              </div>
+            );
+            const zoomStack = (
+              <div data-export="skip" data-canvas-corner="zoom-stack" data-testid="zoom-stack" data-map-furniture="zoom" style={{ position: narrow ? "absolute" : "relative", ...(narrow ? { right: 14, bottom: zoomBottom } : { pointerEvents: "auto", flex: "none" }), display: "flex", flexDirection: "column", borderRadius: 9, overflow: "hidden", boxShadow: "0 4px 14px rgba(0,0,0,0.18)", zIndex: MAP_CHROME_Z.control }}>
                 <button className="gbtn" aria-label="Zoom in" title="Zoom in" style={{ ...zb, borderRadius: 0 }} onClick={() => zoomBy(1.25)}>＋</button>
                 <button className="gbtn" aria-label="Zoom out" title="Zoom out" style={{ ...zb, borderTop: "none", borderRadius: 0 }} onClick={() => zoomBy(1 / 1.25)}>－</button>
                 <button className="gbtn" aria-label="Zoom to fit" title="Zoom to fit" style={{ ...zb, borderTop: "none", borderRadius: 0 }} onClick={fit}>⤢</button>
@@ -25644,27 +25695,29 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     to fold into one. See that file's own B1231280/B1231281 header note for the
                     capture-at-open mechanics and the one-press-vs-two tradeoff this removal makes. */}
               </div>
-              {/* NEW-B# (owner, 2026-09-07) — dock anchor for the global Help/Report control
-                  (shared/ui/chromeDock.js). Sits on the SAME `bottom: zoomBottom` row as the zoom
-                  stack, offset left by its known column width (`zb.width`) plus an 8px gap — the
-                  zoom stack's own `data-canvas-corner="zoom-stack"` div is left untouched by this
-                  addition on purpose (see the header note above). It becomes a genuine furniture
-                  item INSIDE this pane instead of separate `position:fixed` app chrome.
-                  `data-export="skip"` so it never rides a PDF/PNG export clone (PDF-PARITY: it
-                  isn't part of the plan).
-                  ⛔ SUPERSEDED (NEW-4, phone-chrome-parity pass) — this used to say the docked
-                  button renders at its own fixed 44×44/30×30 (B1162016) "never shrunk to this
-                  stack's 30px zb rows, which would breach the deliberate B1176976 tap-target
-                  minimum." Two controls sharing one corner at two different sizes read as a
-                  mismatch (owner decision), so `data-dock-size` publishes THIS stack's own
-                  pointer-driven size (`zb.width` — 35 on a coarse pointer, 30 on a fine one) and
-                  HelpReportControl.jsx reads it when docked here, sizing itself to match instead
-                  of its own standalone floor. The B1176976 44px tap-target minimum still governs
-                  every OTHER (floating, undocked) rendering of that control — this is a
-                  deliberately narrower exception, made explicit rather than silently generalised. */}
-              <div data-export="skip" data-canvas-dock-slot="planner" style={{ position: "absolute", right: 14 + zb.width + 8, bottom: zoomBottom, zIndex: MAP_CHROME_Z.control }}>
-                <div ref={helpDockRef} data-canvas-dock="planner" data-dock-size={zb.width} />
-              </div>
+            );
+            return (
+              <>
+              {/* NEW-2 (B2206704–B2206706) — ON DESKTOP ONE CONTAINER OWNS THE BOTTOM-RIGHT CORNER: scale bar · help · zoom stack, in that
+                  order, on a shared baseline, MAP_CORNER_PX off the pane's bottom and right edges (the same small margin the
+                  bottom-left group keeps). Order and spacing are flex's job, so the three cannot overlap by construction, and the
+                  container is a child of the canvas box, so it can never reach the right Tools rail or the left panel. The
+                  container itself takes no presses (`pointerEvents: none`); the help slot and the zoom stack opt back in.
+                  On a phone (`narrow`) the three keep their own absolute positions exactly as before (the phone harnesses own
+                  that arrangement), and the scale bar stays in the furniture frame above. */}
+              {!narrow && (
+                <div data-export="skip" data-testid="map-corner-br" data-map-furniture="corner-br"
+                  style={{ position: "absolute", right: MAP_CORNER_PX, bottom: MAP_CORNER_PX, display: "flex", alignItems: "flex-end", gap: MAP_CORNER_GAP_PX, pointerEvents: "none", zIndex: MAP_CHROME_Z.control }}>
+                  <div data-testid="scale-bar-plate" data-map-furniture="scale-bar" style={{ flex: "none" }}>
+                    <svg width={furnPlates.scaleBar.plateW} height={furnPlates.scaleBar.plateH} viewBox={`0 0 ${furnPlates.scaleBar.plateW} ${furnPlates.scaleBar.plateH}`}
+                      fontFamily="Inter, system-ui, sans-serif" style={{ display: "block", overflow: "visible" }}
+                      dangerouslySetInnerHTML={{ __html: furnPlates.scaleBar.markup }} />
+                  </div>
+                  {dockSlot}
+                  {zoomStack}
+                </div>
+              )}
+              {narrow && (<>{zoomStack}{dockSlot}</>)}
               </>
             );
           })()}
@@ -25847,9 +25900,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               — passive, decorative telemetry, not a control and not a safety-relevant state
               (unlike the calibration badge). Hiding it here is strictly better than letting it
               render invisibly behind a FAB, which is what it did before this fix. */}
-          {!narrow && (
+          {!narrow && cursorFit.show && (
             <CursorChip ll={cursorLL} el={cursorEl} prop={cursorProp}
-              style={{ bottom: 8, left: 10, maxWidth: "calc(100% - 20px)" }} />
+              style={{ bottom: MAP_CORNER_PX, left: paneInset + MAP_CORNER_PX, maxWidth: cursorFit.maxWidth }} />
           )}
         </div>
 
@@ -25886,7 +25939,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         {/* right-side tool rail — dark chrome. On phones it overlays the canvas
             (slide-in from the right) instead of permanently eating 168px (B113). */}
         {narrow && mobileTools && <div onClick={() => setMobileTools(false)} style={{ position: "absolute", inset: 0, order: 2, zIndex: 1200, background: "rgba(20,18,15,0.35)" }} />}
-        <div className="dark-scroll rail-scroll" style={{ width: narrow ? 200 : 168, flex: "none", order: 3, background: PAL.chrome, borderLeft: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", gap: 3, padding: "4px 11px 13px",
+        <div className="dark-scroll rail-scroll" style={{ width: narrow ? 200 : 168, flex: "none", order: 3, background: PAL.chrome, borderLeft: `1px solid ${PAL.chromeLine}`, display: "flex", flexDirection: "column", gap: 3, padding: narrow ? "4px 11px 13px" : `4px ${RAIL.padR}px 13px ${RAIL.padL}px`, "--rail-hdr-inset": narrow ? "11px" : `${RAIL.rowPadL + 1}px`,
           overflowY: "auto", minHeight: 0,
           position: narrow ? "absolute" : "relative", right: 0, top: 0, bottom: narrow ? 0 : undefined,
           zIndex: narrow ? 1205 : 30,
@@ -26370,7 +26423,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             // on-canvas label stays display-only); its conflict dialog is rendered by the body below.
             // The old "📌 Pin" chip at the bottom is this padlock now (the owner did not know what Pin was).
             const b = selEl;
-            const props = effectiveBuildingProps(b, buildingSqft(b), buildingRules);
+            const hm = buildingMetrics(b);
             const HB = CONTROL_H.lg;
             const hdrBtn = { width: HB, height: HB, padding: 0, display: "grid", placeItems: "center", borderRadius: RADIUS.sm, border: BORDER_1, background: SURF_RAISED, color: "var(--text-secondary)", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.emphasis, lineHeight: 1, listStyle: "none" };
             const lockStyle = hdrBtn; // NEW-2 — greyscale: state rides the glyph's shape/weight (LockGlyph), never an accent fill
@@ -26396,17 +26449,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     title="Lock in place so it can't be moved or resized by accident" onClick={() => toggleLock(b.id)}>
                     <LockGlyph locked={!!b.locked} size={16} />
                   </button>
-                  <details style={{ position: "relative" }}>
-                    <summary data-testid="building-more" style={hdrBtn} aria-label="More building actions" title="More">⋯</summary>
-                    <div style={{ position: "absolute", right: 0, top: HB + 4, zIndex: 20, minWidth: 128, padding: SPACE.xs, background: SURF_RAISED, border: BORDER_1, borderRadius: RADIUS.md, boxShadow: "0 8px 22px rgba(28,25,20,0.16)" }}>
+                  <InspectorMoreMenu testId="building-more" label="More building actions" btnStyle={hdrBtn}
+                    panelStyle={{ minWidth: 128, padding: SPACE.xs, background: SURF_RAISED, border: BORDER_1, borderRadius: RADIUS.md, boxShadow: "0 8px 22px rgba(28,25,20,0.16)" }}>
+                    {(close) => (
                       <button type="button" data-testid="building-delete" style={{ ...chip, width: "100%", border: "none", color: "var(--danger)", textAlign: "left" }}
-                        onClick={() => deleteSel(null, { entry: "panel:element" })}>Delete building</button>
-                    </div>
-                  </details>
+                        onClick={() => { close(); deleteSel(null, { entry: "panel:element" }); }}>Delete building</button>
+                    )}
+                  </InspectorMoreMenu>
                   <button type="button" data-testid="building-close" style={{ ...hdrBtn, border: "none", background: "transparent", color: "var(--text-tertiary)", fontSize: FONT_SIZE.display }} title="Close (the element stays selected; double-click it to reopen) — Esc" aria-label="Close properties" onClick={(e) => { e.stopPropagation(); closeInspector(); }}>✕</button>
                 </div>
-                <div data-testid="building-summary" style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", marginTop: SPACE.xs, fontVariantNumeric: TABULAR_NUMS }}>
-                  {f0(buildingSqft(b))} SF · {loadingSummary(b)} · {props.clearHeight.value}′ clear{b.locked ? " · locked" : ""}
+                <div data-testid="building-summary" title={`${f0(hm.footprint)} SF footprint + ${hm.bumpN} bump-out${hm.bumpN === 1 ? "" : "s"} (${f0(hm.extra)} SF)`} style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", marginTop: SPACE.xs, fontVariantNumeric: TABULAR_NUMS }}>
+                  {f0(hm.total)} SF · {f0(hm.doors)} {hm.doors === 1 ? "door" : "doors"}{b.locked ? " · locked" : ""}
                 </div>
               </div>
             );
@@ -26431,13 +26484,14 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 onClick={(e) => { e.stopPropagation(); toggleMarkupLock(selMarkup.id); }}>
                 <LockGlyph locked={!!selMarkup.locked} size={16} />
               </button>
-              <details style={{ position: "relative" }} onClick={(e) => e.stopPropagation()}>
-                <summary style={{ ...chip, width: 30, height: 30, padding: 0, display: "grid", placeItems: "center", listStyle: "none" }} aria-label={`More ${simpleClosedMarkupLabel.toLowerCase()} actions`}>•••</summary>
-                <div style={{ position: "absolute", right: 0, top: 34, zIndex: 20, minWidth: 112, padding: 4, background: SURF_RAISED, border: BORDER_1, borderRadius: 8, boxShadow: "0 8px 22px rgba(28,25,20,0.16)" }}>
+              <InspectorMoreMenu testId="markup-more" label={`More ${simpleClosedMarkupLabel.toLowerCase()} actions`} glyph="•••"
+                btnStyle={{ ...chip, width: 30, height: 30, padding: 0, display: "grid", placeItems: "center", listStyle: "none" }}
+                panelStyle={{ minWidth: 112, padding: 4, background: SURF_RAISED, border: BORDER_1, borderRadius: 8, boxShadow: "0 8px 22px rgba(28,25,20,0.16)" }}>
+                {(close) => (
                   <button type="button" style={{ ...chip, width: "100%", border: "none", color: PAL.danger, justifyContent: "flex-start" }}
-                    onClick={() => deleteSel(null, { entry: "panel:markup" })}>Delete {simpleClosedMarkupLabel.toLowerCase()}</button>
-                </div>
-              </details>
+                    onClick={() => { close(); deleteSel(null, { entry: "panel:markup" }); }}>Delete {simpleClosedMarkupLabel.toLowerCase()}</button>
+                )}
+              </InspectorMoreMenu>
             </>}
             {/* Explicit close. The element STAYS selected — double-click it again to reopen. On DESKTOP
                 ✕ releases the dock back to whatever panel the inspector replaced; on NARROW it closes
@@ -26503,11 +26557,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   />
                 )}
                 {caps.includes("strokeWidth") && (
-                  <PairedField label="Width"
-                    left={<span style={{ display: "flex", alignItems: "center", gap: SPACE.xxs, minWidth: 0, flexWrap: "wrap" }}>
-                      <NumInput style={{ ...numInput, width: "100%", minWidth: 0 }} value={props.strokeWidth.mixed ? null : props.strokeWidth.value} placeholder="—" min={0.5} max={12} step={0.5} coarse={2}
-                        ariaLabel="Outline width" onCommit={(n) => applyMultiStyle({ strokeWidth: Math.max(0.5, Math.min(12, n)) })} />
-                      <span style={{ fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", flex: "none" }}>px</span>
+                  <PairedField label="Line weight"
+                    left={<span style={{ display: "flex", alignItems: "center", gap: SPACE.md, minWidth: 0, flexWrap: "wrap" }}>
+                      <NumInput style={{ ...numInput, width: 46, minWidth: 0 }} value={props.strokeWidth.mixed ? null : props.strokeWidth.value} placeholder="—" min={0.5} max={12} step={0.5} coarse={2}
+                        ariaLabel="Line weight" onCommit={(n) => applyMultiStyle({ strokeWidth: Math.max(0.5, Math.min(12, n)) })} />
+                      {!props.strokeWidth.mixed && <LineSample weight={props.strokeWidth.value} />}
                       {props.strokeWidth.mixed && <span style={mixNote}>Mixed</span>}
                     </span>}
                   />
@@ -27513,53 +27567,11 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const props = effectiveBuildingProps(b, sf, buildingRules);
                     const { dockSides } = dockSidesOf(b);
                     const noDock = dockSides.length === 0;
-                    const bumpN = els.filter((x) => x.attachedTo === b.id && x.dogEar).length;
-                    const endSides = carEndsSides(b);
-                    const sidewalks = endSidewalks(b);
-                    const parkRows = empParkRows(b);
+                    const hm = buildingMetrics(b);
                     const txtPrimary = "var(--text-primary)", txtSecondary = "var(--text-secondary)", txtTertiary = "var(--text-tertiary)";
-                    const subHdr = { fontSize: FONT_SIZE.label, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: txtSecondary };
                     const muted = { fontSize: FONT_SIZE.label, color: txtTertiary };
                     const unit = (t) => <span style={{ ...muted, flex: "none" }}>{t}</span>;
                     const resetBtn = { ...chip, padding: "2px 6px", fontSize: FONT_SIZE.micro, color: "var(--accent-text, var(--accent))", marginLeft: 2 };
-                    const stepBtn = (on) => ({ width: CONTROL_H.md, height: CONTROL_H.md, padding: 0, display: "grid", placeItems: "center", fontSize: FONT_SIZE.display, lineHeight: 1, fontWeight: 700, borderRadius: RADIUS.sm, border: BORDER_1, background: SURF_RAISED, color: txtPrimary, fontFamily: "inherit", cursor: on ? "pointer" : "default", opacity: on ? 1 : 0.45 });
-                    const xBtn = (title, onClick, testid) => (
-                      <button type="button" data-testid={testid} title={title} aria-label={title} onClick={onClick}
-                        style={{ flex: "none", width: CONTROL_H.sm, height: CONTROL_H.md, padding: 0, border: "none", background: "transparent", color: txtTertiary, cursor: "pointer", fontSize: FONT_SIZE.control, lineHeight: 1, fontFamily: "inherit" }}>✕</button>
-                    );
-                    const xGap = <span style={{ flex: "none", width: CONTROL_H.sm }} />;
-                    // One row of an outward stack: "1  Label        [ctl] unit  ✕".
-                    const stackRow = ({ key, idx, label, control, onRemove, removeTitle, testid }) => (
-                      <div key={key} data-testid={testid} style={{ display: "flex", alignItems: "center", gap: SPACE.md, marginBottom: SPACE.sm }}>
-                        <span style={{ flex: "none", width: 12, textAlign: "right", ...muted, fontVariantNumeric: TABULAR_NUMS }}>{idx}</span>
-                        <span style={{ flex: 1, minWidth: 0, fontSize: FONT_SIZE.control, color: txtPrimary }}>{label}</span>
-                        {control}
-                        {onRemove ? xBtn(removeTitle, onRemove, testid ? `${testid}-remove` : undefined) : xGap}
-                      </div>
-                    );
-                    const addLine = (children) => <div style={{ display: "flex", alignItems: "center", gap: SPACE.xs, margin: `${SPACE.xs}px 0 ${SPACE.md}px 20px` }}>{children}</div>;
-                    const addLink = { ...linkBtn, fontSize: FONT_SIZE.control, textDecoration: "none", fontWeight: 600 };
-                    const layerChip = { fontSize: FONT_SIZE.control, padding: "4px 8px", borderRadius: RADIUS.sm, border: BORDER_1, background: SURF_RAISED, color: txtPrimary, cursor: "pointer", fontFamily: "inherit" };
-                    // "+ Add layer ▾" for a group of walls — the existing catalog (buffer / sidewalk / parking / road).
-                    const layerChooserRow = (groupKey, sides) => {
-                      const opts = sides.length ? layersForSides(b, sides) : [];
-                      if (!opts.length) return null;
-                      const open = layerMenu === groupKey;
-                      return (
-                        <div>
-                          {addLine(<button type="button" data-testid={`add-layer-${groupKey}`} style={addLink} title="Pick a specific outward layer to add" onClick={() => setLayerMenu(open ? null : groupKey)}>+ Add layer ▾</button>)}
-                          {open && (
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: SPACE.sm, margin: `0 0 ${SPACE.md}px 20px` }}>
-                              {opts.map((k) => (
-                                <button key={k} type="button" style={layerChip}
-                                  title={`Add ${ZONE_CATALOG[k].label.toLowerCase()} on ${sides.length > 1 ? "every" : "this"} ${groupKey === "dock" ? "dock" : "non-dock"} side`}
-                                  onClick={() => { addLayerToSides(b, sides, k); setLayerMenu(null); }}>＋ {ZONE_CATALOG[k].label}</button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    };
                     // ---- NEW-2 — building-number conflict: plain-English options WITH their outcomes ----
                     const conflict = bldgNumConflict && bldgNumConflict.id === b.id && els.some((e) => e.id === bldgNumConflict.holderId) ? bldgNumConflict : null;
                     const conflictDialog = conflict && (() => {
@@ -27618,114 +27630,65 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                           </>
                         )}
                         <Field label="Rotation">
-                          <RotationStepper value={b.rot || 0} disabled={!!b.locked || !!b.points}
+                          <RotationStepper value={b.rot || 0} inputStyle={{ width: 68 }} disabled={!!b.locked || !!b.points}
                             disabledReason={b.points ? "Reset the footprint to a rectangle to rotate it" : "Unlock this element to rotate it"}
                             onCommit={(deg) => rotateSelTo(deg)}
                             onStep={(d) => rotateSelTo(normalizeDeg((b.rot || 0) + d))} />
                         </Field>
                       </Collapse>
                     );
-                    // ---- NEW-4/5/6 — Loading: wall picker, dock-wall stack, end-wall stack, bump-outs ----
-                    const chains = dockSides.map((s) => dockChainOnSide(els, b, s));
-                    const longest = chains.reduce((m, c) => (c.length > m.length ? c : m), []);
-                    const stackLevel = dockStackLevel(b);
-                    const nextPreset = !noDock && stackLevel < MAX_DOCK_ZONES ? DOCK_ZONES[stackLevel] : null;
-                    const chainLabel = (z, i) => (i === 0 ? ZONE_CATALOG.court.label : z.type === "trailer" ? ZONE_CATALOG.trailer.label : z.type === "landscape" ? ZONE_CATALOG.buffer.label : z.type === "road" ? ZONE_CATALOG.road.label : z.type === "sidewalk" ? ZONE_CATALOG.sidewalk.label : ((TYPE[z.type]?.label || "Layer").split(" / ")[0]));
-                    const chainDepth = (z, i) => { const side = dockSides.find((s) => dockChainOnSide(els, b, s)[i]); return side ? Math.round(zoneDepthOf(dockChainOnSide(els, b, side)[i], b, side, i)) : 0; };
-                    const dockStack = noDock ? (
-                      <div style={{ ...muted, lineHeight: 1.4, marginTop: SPACE.xs }}>No walls loaded — click a wall above to load it, then stack the truck court, trailer parking and buffer outside it.</div>
-                    ) : (
-                      <div data-testid="dock-wall-stack" style={{ marginTop: SPACE.xl }}>
-                        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", margin: `0 0 ${SPACE.md}px` }}>
-                          <span style={subHdr}>Outside the dock walls</span>
-                          {dockSides.length > 1 && <span style={muted}>both sides</span>}
-                        </div>
-                        {longest.map((z, i) => stackRow({
-                          key: z.id, idx: i + 1, label: chainLabel(z, i), testid: `dock-zone-row-${i}`,
-                          control: (<>
-                            <NumInput style={{ ...numInput, width: 52 }} value={chainDepth(z, i)} min={1} onCommit={(n) => setChainZoneDepthAll(b, i, n)} />
-                            {unit("ft")}
-                          </>),
-                          onRemove: () => removeDockZonesFrom(b, i),
-                          removeTitle: i === longest.length - 1 ? `Remove the ${chainLabel(z, i).toLowerCase()}` : `Remove the ${chainLabel(z, i).toLowerCase()} and everything outside it`,
-                        }))}
-                        {nextPreset ? (
-                          layersForSides(b, dockSides).length ? addLine(<>
-                            <button type="button" data-testid="add-dock-zone" style={addLink} disabled={!dockCanAdd(b)} title="Extend every dock wall out by one zone" onClick={() => addDockZone(b)}>+ {ZONE_CATALOG[nextPreset.key].label}</button>
-                            <button type="button" data-testid="add-layer-dock" style={addLink} title="Pick a specific outward layer to add" onClick={() => setLayerMenu(layerMenu === "dock" ? null : "dock")}>▾</button>
-                          </>) : addLine(<button type="button" data-testid="add-dock-zone" style={addLink} onClick={() => addDockZone(b)}>+ {ZONE_CATALOG[nextPreset.key].label}</button>)
-                        ) : null}
-                        {nextPreset && layerMenu === "dock" && (
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: SPACE.sm, margin: `0 0 ${SPACE.md}px 20px` }}>
-                            {layersForSides(b, dockSides).map((k) => (
-                              <button key={k} type="button" style={layerChip} title={`Add ${ZONE_CATALOG[k].label.toLowerCase()} on every dock side`}
-                                onClick={() => { addLayerToSides(b, dockSides, k); setLayerMenu(null); }}>＋ {ZONE_CATALOG[k].label}</button>
-                            ))}
-                          </div>
-                        )}
-                        {!nextPreset && layerChooserRow("dock", dockSides)}
-                      </div>
-                    );
-                    const endSwTitle = sidewalks.length > 1 ? "Remove the sidewalks (parking pulls back to the wall)" : "Remove the sidewalk (parking pulls back to the wall)";
-                    const endStack = endSides.length ? (
-                      <div data-testid="end-wall-stack" style={{ marginTop: SPACE.xl }}>
-                        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", margin: `0 0 ${SPACE.md}px` }}>
-                          <span style={subHdr}>{noDock ? "Outside the walls" : dockSides.length === 1 ? "Outside the rear & end walls" : "Outside the end walls"}</span>
-                          {endSides.length > 1 && <span style={muted}>both sides</span>}
-                        </div>
-                        {sidewalks.length ? stackRow({
-                          key: "sw", idx: 1, label: "Sidewalk", testid: "end-sidewalk-row",
-                          control: (<>
-                            <NumInput style={{ ...numInput, width: 52 }} value={Math.round(swThick(sidewalks[0]))} min={1} onCommit={(n) => setEndSidewalkWidth(b, n)} />
-                            {unit("ft")}
-                          </>),
-                          onRemove: () => removeEndSidewalks(b), removeTitle: endSwTitle,
-                        }) : addLine(<button type="button" data-testid="add-end-sidewalk" style={addLink} disabled={!!b.footEdit} title={b.footEdit ? "Reset the footprint to a rectangle first" : "Add a sidewalk along the end walls"} onClick={() => addEndSidewalks(b)}>+ Sidewalk</button>)}
-                        {stackRow({
-                          key: "pk", idx: sidewalks.length ? 2 : 1, label: "Parking rows", testid: "end-parking-row",
-                          control: (<>
-                            <button type="button" data-testid="park-rows-minus" disabled={parkRows < 1 || !!b.footEdit} aria-label="One fewer parking row" title="One fewer parking row" onClick={() => setEmployeeParkingRows(b, parkRows - 1)} style={stepBtn(parkRows >= 1 && !b.footEdit)}>－</button>
-                            <NumInput style={{ ...numInput, width: 40, textAlign: "center", padding: "6px 4px" }} ariaLabel="Parking rows" value={parkRows} min={0} max={MAX_EMP_PARK_ROWS} step={1} onCommit={(n) => setEmployeeParkingRows(b, n)} />
-                            <button type="button" data-testid="park-rows-plus" disabled={!!b.footEdit} aria-label="One more parking row" title={b.footEdit ? "Reset the footprint to a rectangle to add end-wall parking" : "One more parking row"} onClick={() => setEmployeeParkingRows(b, parkRows + 1)} style={stepBtn(!b.footEdit)}>＋</button>
-                          </>),
-                          onRemove: parkRows > 0 ? () => setEmployeeParkingRows(b, 0) : null, removeTitle: "Clear all parking rows",
-                        })}
-                        {layerChooserRow("nondock", endSides)}
-                      </div>
-                    ) : null;
-                    const bumpRow = !noDock && (
-                      <div style={{ display: "flex", alignItems: "center", gap: SPACE.md, margin: `${SPACE.xl}px 0 ${SPACE.sm}px` }}>
-                        <span style={{ flex: 1, fontSize: FONT_SIZE.control, color: txtPrimary }}>Corner bump-outs</span>
-                        <button type="button" data-testid="bump-minus" disabled={bumpN < 1} aria-label="Remove one bump-out" title="Remove one bump-out" onClick={bumpN > 0 ? () => removeOneDogEar(b) : undefined} style={stepBtn(bumpN > 0)}>－</button>
-                        <span style={{ minWidth: 14, textAlign: "center", fontSize: FONT_SIZE.control, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, color: bumpN ? txtPrimary : txtTertiary }}>{bumpN}</span>
-                        {(() => { const on = !b.footEdit && bumpN < bumpOutCap(b); return (
-                          <button type="button" data-testid="bump-plus" disabled={!on} aria-label="Add one bump-out"
-                            title={b.footEdit ? "Reset the footprint to a rectangle first — bump-outs anchor to square corners" : bumpN >= bumpOutCap(b) ? "Two bump-outs per loaded wall is the most" : `Add one dock-corner bump-out · ${DOGEAR_W}′×${DOGEAR_D}′`}
-                            onClick={on ? () => addOneDogEar(b) : undefined} style={stepBtn(on)}>＋</button>
-                        ); })()}
-                      </div>
-                    );
+                    // ---- Building panel v2 — Loading: the wall picker (to scale, bump-outs drawn) beside the dock type
+                    // and door count, then ONE compact row per wall (chips for its layers, a dashed +). ----
+                    const bumpSpecs = bumpSpecsOf(b);
+                    const plan = wallRowPlan(b);
+                    const wallRowsData = plan.map((r) => {
+                      const isDock = r.role === "dock";
+                      const mine = isDock ? bumpSpecs.filter((x) => r.sides.includes(x.side)) : [];
+                      return {
+                        ...r, isDock,
+                        layers: wallLayersOn(b, r.sides[0]),
+                        bump: isDock ? {
+                          n: mine.length,
+                          ends: bumpEnds(r.sides[0], b.rot || 0).map((e) => ({ ...e, on: r.sides.every((s) => bumpSpecs.some((x) => x.side === s && x.sign === e.sign)) })),
+                          along: Math.round(mine[0] ? mine[0].along : DOGEAR_W), proj: Math.round(mine[0] ? mine[0].proj : DOGEAR_D),
+                        } : null,
+                      };
+                    });
+                    const wallOps = {
+                      footEdit: !!b.footEdit,
+                      depth: (row, layer, n) => setWallLayerDepth(b, row.sides, layer, n),
+                      trailerRows: (row, layer, n) => setTrailerRows(b, row.sides, layer, n),
+                      trailerAisle: (row, layer, n) => setTrailerAisle(b, row.sides, layer, n),
+                      parkingRows: (row, n) => setEmployeeParkingRows(b, n, row.sides),
+                      remove: (row, layer) => removeWallLayer(b, row.sides, layer),
+                      add: (row, key) => addWallLayer(b, row.sides, key),
+                      bumpEnd: (row, sign) => toggleBumpEnd(b, row.sides, sign),
+                      bumpSize: (row, along, proj) => setBumpSize(b, row.sides, along, proj),
+                      bumpRemoveAll: (row) => removeBumpsOn(b, row.sides),
+                    };
                     const loading = (
-                      <Collapse sectionId="building-loading" title="Loading" defaultOpen summary={loadingSummary(b)}>
+                      <Collapse sectionId="building-loading" title="Loading" defaultOpen summary={`${loadingTypeLabel(b)} · ${hm.doors} ${hm.doors === 1 ? "door" : "doors"}`}>
                         <div style={{ display: "flex", alignItems: "center", gap: SPACE.xl }}>
-                          <LoadingWallPicker b={b} onWall={(side) => applyBuildingLoading(wallClickPatch(b, side))} />
+                          <LoadingWallPicker b={b} bumps={bumpSpecs} onWall={(side) => applyBuildingLoading(wallClickPatch(b, side))} onCorner={(side, sign) => toggleBumpCorner(b, side, sign)} />
                           <div style={{ minWidth: 0, flex: 1 }}>
                             <div data-testid="loading-type" style={{ fontSize: FONT_SIZE.emphasis, fontWeight: 600, color: txtPrimary }}>{loadingTypeLabel(b)}</div>
-                            <div data-testid="loading-walls-label" style={{ fontSize: FONT_SIZE.control, color: txtPrimary, marginTop: SPACE.xxs }}>{loadedWallsLabel(b) || "No walls loaded"}</div>
-                            <div style={{ ...muted, fontSize: FONT_SIZE.micro, lineHeight: 1.4, marginTop: SPACE.md }}>Click a wall to load or unload it. The plan turns with Rotation.</div>
+                            <div data-testid="loading-doors" style={{ fontSize: FONT_SIZE.control, color: txtPrimary, marginTop: SPACE.xxs }}>{noDock ? "No dock doors" : `${f0(hm.doors)} dock ${hm.doors === 1 ? "door" : "doors"}`}</div>
+                            <div style={{ ...muted, fontSize: FONT_SIZE.micro, lineHeight: 1.4, marginTop: SPACE.md }}>Click a wall to load or unload it. Click a dashed corner to add a bump-out.</div>
                           </div>
                         </div>
-                        {dockStack}
-                        {endStack}
-                        {bumpRow}
+                        <WallRows key={b.id} rows={wallRowsData} ops={wallOps} numInput={numInput} canEditBumps={!b.footEdit} />
                       </Collapse>
                     );
                     // ---- NEW-7 — Structure (closed by default); the column grid is edited ONLY in Standards ----
                     const autoBoth = !props.clearHeight.overridden && !props.slab.overridden;
                     const autoLink = (title) => <button type="button" style={{ ...linkBtn, fontSize: FONT_SIZE.micro, marginLeft: 2 }} title={title} onClick={() => jumpToStandards("building")}>auto</button>;
+                    // NEW-4 — Pad elevation lives here now (it fed the floodplain-fill screen from a bare row under the readout).
+                    const fmS = settings.floodMitigation || {};
+                    const padAuto = effectivePadElev({ ...b, padElevFt: null }, { padFfeFt: Number.isFinite(fmS.padFfeFt) ? fmS.padFfeFt : null, dockDropFt: Number.isFinite(fmS.dockDropFt) ? fmS.dockDropFt : 4 });
+                    const gsum = hm.gg.summary;
                     const structure = (
                       <Collapse sectionId="building-structure" title="Structure" defaultOpen={false}
-                        summary={`${props.clearHeight.value}′ clear · ${props.slab.value}″ slab${autoBoth ? " · auto" : ""}`}>
+                        summary={`${props.clearHeight.value}′ clear · ${props.slab.value}″ slab${autoBoth ? " · auto" : ""} · pad ${b.padElevFt != null ? `${f1(b.padElevFt)}′` : "auto"}`}>
                         <Field label="Clear height">
                           <span style={ROW4}>
                             <NumInput style={{ ...numInput, width: 52 }} value={props.clearHeight.value} min={1} onCommit={(n) => { pushHistory(); setSelEl({ clearHeightOverride: n }); }} />
@@ -27744,13 +27707,17 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                               : autoLink("Automatic by size — change the rule in Standards → Buildings")}
                           </span>
                         </Field>
+                        <PadElevRow value={b.padElevFt} auto={padAuto} numInput={numInput} resetBtn={resetBtn} muted={muted}
+                          info="Feeds the floodplain-mitigation fill screen (ft NAVD88); blank = the plan's pad FFE."
+                          onCommit={(v) => { pushHistory(); setSelEl({ padElevFt: v }); }} />
                         {hasGridOverrides(b) && (
                           <div data-testid="grid-overrides-note" style={{ ...muted, fontSize: FONT_SIZE.micro, margin: `${SPACE.xs}px 0` }}>
                             Grid overrides set on this building · <button type="button" style={{ ...linkBtn, fontSize: FONT_SIZE.micro }} onClick={resetBuildingGridOverrides}>reset</button>
                           </div>
                         )}
-                        <div style={{ ...muted, fontSize: FONT_SIZE.micro, marginTop: SPACE.sm }}>
-                          Column grid lives in <button type="button" style={{ ...linkBtn, fontSize: FONT_SIZE.micro }} onClick={() => jumpToStandards("building")}>Standards → Buildings ↗</button>
+                        <div data-testid="grid-line" style={{ ...muted, fontSize: FONT_SIZE.micro, marginTop: SPACE.sm, fontVariantNumeric: TABULAR_NUMS }}>
+                          {gsum ? <>Grid {gsum.lengthTyp}′ × {gsum.depthTyp}′ typ{gsum.speedBay ? <> · speed bay {gsum.speedBay}′</> : ""} · {gsum.lengthCount} × {gsum.depthCount} bays · </> : "Grid · "}
+                          <button type="button" style={{ ...linkBtn, fontSize: FONT_SIZE.micro }} onClick={() => jumpToStandards("building")}>Standards ↗</button>
                         </div>
                       </Collapse>
                     );
@@ -27765,10 +27732,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                         <PairedField label="Opacity" left={strokeOpacityCell} right={fillOpacityCell} />
                         {strokeWidthRow}
                         <div style={{ display: "flex", gap: SPACE.sm, marginTop: SPACE.md, alignItems: "center" }}>
-                          <button type="button" style={chip} onClick={setStyleDefault} title="Use these colors, opacity and outline width for every new building">Set as default</button>
+                          <button type="button" style={chip} onClick={setStyleDefault} title="Use these colors, opacity and line weight for every new building">Set as default</button>
                           <button type="button" style={chip} onClick={clearElStyle} title="Revert this element to the type default">Reset</button>
-                          <span style={{ flex: 1 }} />
-                          <button type="button" style={linkBtn} onClick={() => jumpToStandards("colors")} title="New buildings start from Standards → Colors">Standards ↗</button>
                         </div>
                       </Collapse>
                     );
@@ -27943,7 +27908,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               })()}
               {/* Car parking's own Footprint/Stalls readout is now the spec-sheet's stat strip
                   (B1790016 NEW-1) — excluded here so it isn't rendered twice. */}
-              {selEl.type !== "pond" && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (() => {
+              {selEl.type !== "pond" && !bldgPanel && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (() => {
                 const poly = !!selEl.points;
                 const area = isCenterlineRoad(selEl) ? roadStripArea(selEl, settings, sharpFor(selEl), roundTrim(selEl), roundabouts.areaById.get(selEl.id)) : poly ? polyArea(selEl.points) : selEl.w * selEl.h;
                 return (
@@ -27983,7 +27948,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   dock drop; everything else at slab FF). Inline editor + Auto chip.
                   Car parking renders its own copy inside the Grading and elevation spec-sheet
                   section above (B1790016 NEW-1) — excluded here so it isn't rendered twice. */}
-              {FM_FILL_TYPES.has(selEl.type) && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (() => {
+              {FM_FILL_TYPES.has(selEl.type) && !bldgPanel && !(selEl.type === "parking" && (!selEl.points || selEl.footEdit)) && (() => {
                 const fmS = settings.floodMitigation || {};
                 const drop = Number.isFinite(fmS.dockDropFt) ? fmS.dockDropFt : 4;
                 const auto = effectivePadElev({ ...selEl, padElevFt: null }, { padFfeFt: Number.isFinite(fmS.padFfeFt) ? fmS.padFfeFt : null, dockDropFt: drop });
@@ -31603,6 +31568,95 @@ const ElNode = memo(function ElNode({ el, f2p, isSel, tool, settings, H, nb, dim
   return renderElPx(el, f2p, isSel, tool, settings, H.startMoveEl, H.onElDouble, nb, H.startDimMove, H.onDimNumberDown, H.onElContext, dimHidden, roadNet, lf, editingCorners, roadPass);
 });
 
+/* B2225425 (round 3) — WHAT a fit-to-content framing frames, and the view it lands on: ONE derivation, used by `fit()` and by
+ * the planner's FIRST render. The points are the visible drawing plus every visible reference (B848736 — a rotated reference's
+ * corners via imagePointToWorld). An empty plan frames to the default triple: "nothing to frame" IS a framing (B1574432). */
+function framingPoints(hiddenGroups, parcels, els, sheetOverlays) {
+  const pts = [];
+  visibleParcels(hiddenGroups, parcels).forEach((pc) => pts.push(...pc.points));
+  visibleEls(hiddenGroups, els).forEach((e) => pts.push(...(e.points ? e.points : elCorners(e))));
+  (sheetOverlays || []).filter((o) => o.visible !== false).forEach((o) => {
+    pts.push(imagePointToWorld(o, 0, 0), imagePointToWorld(o, o.imgW, 0), imagePointToWorld(o, o.imgW, o.imgH), imagePointToWorld(o, 0, o.imgH));
+  });
+  return pts;
+}
+function framedViewFor(box, pts) {
+  if (!pts.length) return { ppf: 0.35, offX: 60, offY: 60 };
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  pts.forEach((p) => { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); });
+  const bw = Math.max(maxX - minX, 10), bh = Math.max(maxY - minY, 10);
+  const pad = framePad(box.w, box.h, 60);
+  const ppf = Math.max(1e-6, Math.min((box.w - pad * 2) / bw, (box.h - pad * 2) / bh));
+  return { ppf, offX: pad - minX * ppf + (box.w - pad * 2 - bw * ppf) / 2, offY: pad - minY * ppf + (box.h - pad * 2 - bh * ppf) / 2 };
+}
+/* B2225425 (round 3) — what this page last MEASURED about the canvas (its box, the docked-panel edge the basemap reaches under,
+ * the toast centre), kept across planner mounts. A plan switch remounts the planner (keyed by plan id); its first render used to
+ * run at a placeholder box and the default view, and the boot framing then re-rendered every element at the real view INSIDE the
+ * switch's commit — one of its largest single costs (measured, docs/perf/PERF-PLAN-OPEN.md round 3). Starting from the last
+ * measurement and that plan's own framing makes the first render the one that is kept. It is a GUESS, never a measurement: the
+ * boot framing still measures the REAL box and still owns the reveal (B1574432's gate is untouched — the canvas stays hidden
+ * until `fit()` runs against a measured box); it finds nothing to change when the guess was right and re-frames exactly as
+ * before when it was not (a resized window, a different panel). `sizeMeasuredRef` is NOT set from it. */
+/* B2233521 (round 5) — THE SAME GUESS, ACROSS PAGE LOADS (lib/canvasGuess.js owns the rule and the why): the last full measurement is remembered with the window geometry it was
+ * taken in and offered as this page's first guess only when the window is the same size and pixel ratio. Still a guess — the boot framing measures the real box and owns the reveal. */
+const safeStorage = () => { try { return typeof localStorage === "undefined" ? null : localStorage; } catch (_) { return null; } };
+const initialCanvasGuess = readCanvasGuess(safeStorage(), geometryOf(typeof window === "undefined" ? null : window));
+let persistedGuessSig = initialCanvasGuess ? initialCanvasGuess.sig : null;
+let lastMeasuredCanvas = initialCanvasGuess ? initialCanvasGuess.guess : null;   // { box, dockX, toastCx }
+const persistCanvasGuess = (m) => { persistedGuessSig = writeCanvasGuess(safeStorage(), geometryOf(typeof window === "undefined" ? null : window), m, persistedGuessSig); };
+
+/* B2225425 (round 3) — the rows seed lands as ONE React update (it must: see `refetchReplace` on why a seed is never split from its
+ * reconcile), so whatever that render computes for the first time is one task. On a plan this device has never drawn, the costliest
+ * pure parts of it are the parcel acreage-badge anchors (`polylabel`, 36–43 ms on Concept A's 16 parcels) and the parcel-overlap
+ * screen (`overlappingParcelPairs`, 12–14 ms, every pair). Both are cached by content / ring identity, so they are asked HERE first,
+ * from the fetched rows, in slices, BEFORE anything is seeded — the render then finds them answered. Pure warming: nothing here
+ * writes state, and a failure only means the render computes them itself, as before. The slices yield through a MessageChannel,
+ * never a timer: a background tab clamps timers to about once a second, and the owner measures in a hidden tab. */
+const macrotask = () => new Promise((resolve) => { const ch = new MessageChannel(); ch.port1.onmessage = () => { ch.port1.close(); resolve(); }; ch.port2.postMessage(0); });
+/* B2233521 (round 5) — warm the DISSOLVED ROAD NETWORK the same way (the seed's render asks for it first, and it is the largest first-time cost on a plan with roads:
+ * Bolt-on ~130 ms, Richfield ~330 ms at 2× CPU, one task). The rows are folded to elements exactly as the seed will fold them, and the memo's own steps (lib/roadNetBuild.js)
+ * are driven in slices; the by-value caches in roadNetwork.js are what carries the answer across to the render. */
+async function warmRoadNet(rows, settings, tick) {
+  const live = (rows || []).filter((r) => r && !r.deleted_at && r.kind === "el" && r.data);
+  if (!live.some((r) => isCenterlineRoad(r.data))) return;
+  const els = rowsToModel({}, rows).els;
+  await tick();
+  await warmRoadNetFromEls(els, settings, tick);
+}
+/* The planner's settings for a stored plan — ONE derivation, shared by the component's state initializer and `warmPlanForMount` (a warm-up
+ * that derived its settings differently would only miss the caches, but there is no reason to let it). */
+function plannerSettingsFrom(stored, retired) { return { ...DEFAULT_SETTINGS, ...(stored || {}), ...(retired || {}), snap: loadSnapPref() }; }
+/* ⛔ B2236000 (round 6) — WARM A PLAN BEFORE ITS PLANNER MOUNTS (the app opened fresh onto a plan). The planner's first render computes the
+ * dissolved road network, the parcel badge anchors and the drive-pad outline cuts for the first time in the page's life, inside ONE React
+ * render (one task: ~110 ms of a ~250–550 ms first render at 2× CPU on Bolt-on, more on a plan with more roads). SitePlannerApp holds the
+ * FIRST mount of the page until this has driven the same steps (lib/roadNetBuild.js — never a second implementation) in ~8 ms MessageChannel
+ * slices from the device copy, folded exactly as the planner's own state initializers fold it. The caches are by value, so the render finds
+ * every answer; a warm-up that disagrees with the render only misses. Pure warming: it writes nothing, and SitePlannerApp mounts the planner
+ * regardless once it finishes, fails, or runs past its ceiling. The boot framing and its reveal gate (constraint #8, B1574432) live inside
+ * the planner and are untouched — this only decides WHEN the planner mounts, never how it frames or reveals. */
+export async function warmPlanForMount(siteId, { budgetMs = 8 } = {}) {
+  let t = performance.now();
+  const tick = async () => { if (performance.now() - t > budgetMs) { await macrotask(); t = performance.now(); } };
+  const rec = siteId ? loadSite(siteId) : null;
+  if (!rec) return false;
+  await macrotask(); t = performance.now();
+  for (const pc of rec.parcels || []) { if (pc && pc.active !== false && Array.isArray(pc.points) && pc.points.length >= 3) { polylabel(pc.points); await tick(); } }
+  const raw = rec.els || [];
+  if (!raw.some((e) => isCenterlineRoad(e))) return true;
+  const els = pruneStrandedZones(healDockAxes(raw));
+  await tick();
+  await warmRoadNetFromEls(els, plannerSettingsFrom(rec.settings, normalizeRetiredToggles(rec.settings || {})), tick);
+  return true;
+}
+async function warmSeedCaches(rows, budgetMs = 8, { settings } = {}) {
+  const rings = (rows || []).filter((r) => r && !r.deleted_at && r.kind === "parcel" && r.data && r.data.active !== false
+    && Array.isArray(r.data.points) && r.data.points.length >= 3).map((r) => r.data.points);
+  let t = performance.now();
+  const tick = async () => { if (performance.now() - t > budgetMs) { await macrotask(); t = performance.now(); } };
+  for (const ring of rings) { polylabel(ring); await tick(); }
+  for (let i = 0; i < rings.length; i++) for (let j = i + 1; j < rings.length; j++) { polyIntersectArea(rings[i], rings[j]); await tick(); }  if (settings) await warmRoadNet(rows, settings, tick);
+}
+
 /* ----------------------------- small UI ----------------------------- */
 function Section({ title, children, collapsed, accent }) {
   const [open, setOpen] = useState(!collapsed);
@@ -31895,14 +31949,20 @@ function withoutStyleOverrides(e) { const r = { ...e }; STYLE_OVERRIDE_KEYS.forE
 // draws it. Labels are positioned on the rotated frame but the text itself never rotates. A wall is a
 // real button (role/tab/Enter/Space) with a wide invisible hit line so a 3px wall is still easy to hit.
 // Module scope per MODULE-SCOPE-COMPONENTS; theme tokens only.
-function LoadingWallPicker({ b, onWall }) {
-  const L = wallPickerLayout(b);
+function LoadingWallPicker({ b, bumps, onWall, onCorner }) {
+  const L = wallPickerLayout(b, { bumps });
   const loaded = new Set(dockSidesFor(b).dockSides);
   const poly = L.corners.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const pts = (arr) => arr.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
   const a = L.arrow;
   return (
     <svg data-testid="loading-wall-picker" width={L.width} height={L.height} viewBox={`0 0 ${L.width} ${L.height}`} role="group" aria-label="Loading walls" style={{ flex: "none", display: "block" }}>
+      {/* The building, to scale, then each bump-out filled and outlined like the building (it IS building). */}
       <polygon points={poly} fill="var(--surface-field)" stroke="none" />
+      {L.bumps.filter((x) => x.existing).map((x) => (
+        <polygon key={x.key} data-testid="picker-bump" data-bump={x.key} points={pts(x.poly)} fill="var(--surface-field)" stroke="var(--border-strong)" strokeWidth={1} pointerEvents="none" />
+      ))}
+      <polygon points={poly} fill="none" stroke="var(--border-strong)" strokeWidth={1} pointerEvents="none" />
       {L.walls.map((w) => {
         const on = loaded.has(w.side);
         const act = () => onWall(w.side);
@@ -31911,10 +31971,26 @@ function LoadingWallPicker({ b, onWall }) {
             aria-label={`${w.label} wall — ${on ? "loaded" : "not loaded"}`} style={{ cursor: "pointer", outline: "none" }}
             onClick={act} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); act(); } }}>
             <title>{wallClickTitle(b, w.side)}</title>
-            <line x1={w.x1} y1={w.y1} x2={w.x2} y2={w.y2} stroke="transparent" strokeWidth={14} strokeLinecap="round" />
-            <line x1={w.x1} y1={w.y1} x2={w.x2} y2={w.y2} stroke={on ? "var(--accent)" : "var(--border-strong)"} strokeWidth={on ? 5 : 3} strokeLinecap="round" pointerEvents="none" />
+            <line x1={w.x1} y1={w.y1} x2={w.x2} y2={w.y2} stroke="transparent" strokeWidth={14} strokeLinecap="butt" />
+            {/* The dock line runs only along the CLEAR face between bump-outs, butt-capped so it stops exactly at one. */}
+            <line data-testid="picker-wall-line" x1={on ? w.clear.x1 : w.x1} y1={on ? w.clear.y1 : w.y1} x2={on ? w.clear.x2 : w.x2} y2={on ? w.clear.y2 : w.y2}
+              stroke={on ? "var(--accent)" : "var(--border-strong)"} strokeWidth={on ? 5 : 3} strokeLinecap="butt" pointerEvents="none" />
             <text x={w.lx} y={w.ly} textAnchor="middle" dominantBaseline="central" fontSize={FONT_SIZE.micro} fontWeight={on ? 700 : 600}
               fill={on ? "var(--accent-text, var(--accent))" : "var(--text-secondary)"} pointerEvents="none" style={{ userSelect: "none" }}>{w.label}</text>
+          </g>
+        );
+      })}
+      {/* Empty corners of a loaded wall: a dashed footprint of the bump-out; click to add. An existing one removes. */}
+      {L.bumps.map((x) => {
+        const act = () => onCorner(x.side, x.sign);
+        const end = bumpEnds(x.side, b.rot || 0).find((e) => e.sign === x.sign);
+        const title = x.existing ? `Remove the ${dockSideCompassLabel(x.side, b.rot || 0)} wall's ${end?.label || ""} bump-out` : `Add a bump-out at the ${dockSideCompassLabel(x.side, b.rot || 0)} wall's ${end?.label || ""} end`;
+        return (
+          <g key={`hit-${x.key}`} data-testid={x.existing ? "picker-bump-hit" : "picker-corner-add"} data-corner={x.key} role="button" tabIndex={0} aria-label={title}
+            style={{ cursor: "pointer", outline: "none" }} onClick={act} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); act(); } }}>
+            <title>{title}</title>
+            {!x.existing && <polygon points={pts(x.poly)} fill="none" stroke="var(--accent)" strokeWidth={1} strokeDasharray="2 2" />}
+            <circle cx={x.cx} cy={x.cy} r={7} fill="transparent" />
           </g>
         );
       })}
@@ -31922,6 +31998,213 @@ function LoadingWallPicker({ b, onWall }) {
         <path d={`M${a.x} ${a.box.y0 + 1} L${a.x + 4.5} ${a.box.y0 + 10} L${a.x} ${a.box.y0 + 7.5} L${a.x - 4.5} ${a.box.y0 + 10} Z`} fill="var(--text-secondary)" />
         <text x={a.x} y={a.box.y1 - 1.5} textAnchor="middle" fontSize={FONT_SIZE.micro} fontWeight={700} fill="var(--text-secondary)">N</text>
       </g>
+    </svg>
+  );
+}
+
+/* NEW-2 — the inspector header's "⋯" action menu. A bare <details> never closed on an outside click or Esc;
+   this is the shared AnchoredMenu (portal, outside-click + Escape dismiss) with the dismissing press consumed
+   whole, so closing it never also deselects/deletes whatever was under the pointer. Module scope on purpose
+   (MODULE-SCOPE-COMPONENTS): it owns its own open state. */
+function InspectorMoreMenu({ testId, label, glyph = "⋯", btnStyle, panelStyle, children }) {
+  const [open, setOpen] = useState(false);
+  const anchor = useRef(null);
+  const close = useCallback(() => setOpen(false), []);
+  return (
+    <span onClick={(e) => e.stopPropagation()} style={{ display: "inline-flex" }}>
+      <button ref={anchor} type="button" data-testid={testId} aria-label={label} title="More" aria-haspopup="menu" aria-expanded={open}
+        style={btnStyle} onClick={() => setOpen((o) => !o)}>{glyph}</button>
+      <AnchoredMenu open={open} onClose={close} anchorRef={anchor} placement="below-right" gap={4} width={140} swallowOutsidePress panelStyle={panelStyle}>
+        <div data-testid={`${testId}-menu`}>{children(close)}</div>
+      </AnchoredMenu>
+    </span>
+  );
+}
+
+/* WallRows — Building panel v2, NEW-1/NEW-2/NEW-3. ONE compact row per wall (a cross-dock building's two dock walls included):
+   a badge with the wall's compass letter(s) and, beside it, its role word; then the wall's layers outward
+   as chips; then a dashed "+". A chip opens a small editor directly under its row (one at a time); "+"
+   opens the catalog for THAT wall only. Presentational and module-scope (MODULE-SCOPE-COMPONENTS): every
+   edit is a callback into SitePlanner's per-wall handlers, which take the row's `sides`. Theme tokens only.
+   rows: [{ key, role, sides, badge, isDock, layers:[{id,kind,depth,rows,aisle,rowDepth,index,split}],
+            bump:{ n, ends:[{sign,label,on}], along, proj } | null }] */
+function WallRows({ rows, ops, numInput, canEditBumps }) {
+  const [open, setOpen] = useState(null);          // { rowKey, id } — the one chip editor that is open
+  const [menu, setMenu] = useState(null);          // rowKey whose "+" catalog is open
+  const [pending, setPending] = useState(null);    // { rowKey, kind } — open the layer a just-pressed "+" created
+  useEffect(() => {
+    if (!pending) return;
+    const row = rows.find((r) => r.key === pending.rowKey);
+    const layer = row && row.layers.find((l) => l.kind === pending.kind);
+    if (layer) { setOpen({ rowKey: row.key, id: layer.id }); setPending(null); }
+  }, [pending, rows]);
+  const muted = { fontSize: FONT_SIZE.label, color: "var(--text-tertiary)" };
+  const chipBase = { fontSize: FONT_SIZE.label, lineHeight: 1.2, padding: "3px 7px", borderRadius: RADIUS.sm, border: BORDER_1, background: SURF_RAISED, color: "var(--text-primary)", cursor: "pointer", fontFamily: "inherit", fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap" };
+  const chipOn = { borderColor: "var(--accent)", boxShadow: "0 0 0 1px var(--accent)" };
+  const stepBtn = (en) => ({ width: CONTROL_H.md, height: CONTROL_H.md, padding: 0, display: "grid", placeItems: "center", fontSize: FONT_SIZE.display, lineHeight: 1, fontWeight: 700, borderRadius: RADIUS.sm, border: BORDER_1, background: SURF_RAISED, color: "var(--text-primary)", fontFamily: "inherit", cursor: en ? "pointer" : "default", opacity: en ? 1 : 0.45 });
+  const toggleBtn = (on) => ({ minWidth: 30, height: CONTROL_H.md, padding: "0 8px", fontSize: FONT_SIZE.control, fontWeight: 700, borderRadius: RADIUS.sm, border: on ? "1px solid var(--accent)" : BORDER_1, background: on ? "var(--accent)" : SURF_RAISED, color: on ? "var(--on-accent)" : "var(--text-primary)", fontFamily: "inherit", cursor: "pointer", whiteSpace: "nowrap" });
+  const link = { padding: 0, border: "none", background: "transparent", color: "var(--accent-text, var(--accent))", cursor: "pointer", fontFamily: "inherit", fontSize: FONT_SIZE.label, fontWeight: 600, textDecoration: "underline", textUnderlineOffset: 2 };
+  const field = (label, children) => <span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.sm }}><span style={muted}>{label}</span>{children}</span>;
+  const unit = (t) => <span style={{ ...muted, flex: "none" }}>{t}</span>;
+  const badgeStyle = (row) => row.role === "dock"
+    ? { background: "var(--accent)", color: "var(--on-accent)", border: "1px solid var(--accent)" }
+    : row.role === "rear"
+      ? { background: "transparent", color: "var(--accent-text, var(--accent))", border: "1px solid var(--accent)" }
+      : { background: "var(--surface-field)", color: "var(--text-secondary)", border: BORDER_1 };
+    const boxStyle = { margin: `${SPACE.sm}px 0 ${SPACE.sm}px 0`, padding: SPACE.md, borderRadius: RADIUS.sm, border: BORDER_1, background: "var(--surface-field)", display: "flex", flexDirection: "column", gap: SPACE.md };
+
+  const editorFor = (row, layer) => {
+    const isDock = row.isDock;
+    const outer = isDock ? row.layers.length - layer.index - 1 : 0;
+    const closeBtn = <button type="button" data-testid="wall-editor-close" aria-label="Close" title="Close" onClick={() => setOpen(null)} style={{ ...link, textDecoration: "none", color: "var(--text-tertiary)", fontSize: FONT_SIZE.control }}>✕</button>;
+    const title = <span style={{ fontSize: FONT_SIZE.control, fontWeight: 700, color: "var(--text-primary)" }}>{layer.kind === "parking" ? "Car parking" : KIND_NAME[layer.kind] || "Layer"}</span>;
+    const removeLabel = isDock && outer > 0 ? "Remove + outer" : "Remove";
+    const removeLine = (
+      <span style={{ display: "flex", flexDirection: "column", gap: SPACE.xs }}>
+        <button type="button" data-testid="wall-editor-remove" style={{ ...link, alignSelf: "flex-start", color: "var(--danger-text, var(--danger))" }} onClick={() => { setOpen(null); ops.remove(row, layer); }}>{removeLabel}</button>
+        {isDock && layer.kind === "court" && <span style={muted}>Removing the court removes everything outside it.</span>}
+      </span>
+    );
+    if (layer.kind === "parking") {
+      const en = !layer.split && !ops.footEdit;
+      return (
+        <div data-testid="wall-layer-editor" data-kind="parking" style={boxStyle}>
+          <span style={{ display: "flex", justifyContent: "space-between" }}>{title}{closeBtn}</span>
+          <span style={{ display: "flex", alignItems: "center", gap: SPACE.sm }}>
+            <span style={muted}>Rows</span>
+            <button type="button" data-testid="wall-rows-minus" aria-label="One fewer parking row" title="One fewer parking row" disabled={!en || layer.rows < 1} onClick={() => ops.parkingRows(row, layer.rows - 1)} style={stepBtn(en && layer.rows >= 1)}>－</button>
+            <NumInput style={{ ...numInput, width: 44, textAlign: "center", padding: "6px 4px" }} ariaLabel="Parking rows" value={layer.rows} min={0} max={24} step={1} onCommit={(n) => ops.parkingRows(row, n)} />
+            <button type="button" data-testid="wall-rows-plus" aria-label="One more parking row" title="One more parking row" disabled={!en} onClick={() => ops.parkingRows(row, layer.rows + 1)} style={stepBtn(en)}>＋</button>
+          </span>
+          {layer.split && <span style={muted}>This wall's parking is split into pieces — set those on the canvas.</span>}
+          {removeLine}
+        </div>
+      );
+    }
+    return (
+      <div data-testid="wall-layer-editor" data-kind={layer.kind} style={boxStyle}>
+        <span style={{ display: "flex", justifyContent: "space-between" }}>{title}{closeBtn}</span>
+        <span style={{ display: "flex", alignItems: "center", gap: SPACE.sm, flexWrap: "wrap" }}>
+          {field(layer.kind === "trailer" ? "Depth (per row)" : "Depth", <>
+            <NumInput style={{ ...numInput, width: 56 }} ariaLabel="Depth" value={layer.kind === "trailer" ? layer.rowDepth : layer.depth} min={1} onCommit={(n) => ops.depth(row, layer, n)} />{unit("ft")}
+          </>)}
+        </span>
+        {layer.kind === "trailer" && (
+          <>
+            <span style={{ display: "flex", alignItems: "center", gap: SPACE.sm, flexWrap: "wrap" }}>
+              <span style={muted}>Rows</span>
+              <button type="button" data-testid="wall-trailer-rows-minus" aria-label="One fewer trailer row" title="One fewer trailer row" disabled={layer.rows <= 1} onClick={() => ops.trailerRows(row, layer, layer.rows - 1)} style={stepBtn(layer.rows > 1)}>－</button>
+              <NumInput style={{ ...numInput, width: 44, textAlign: "center", padding: "6px 4px" }} ariaLabel="Trailer rows" value={layer.rows} min={1} max={TRAILER_MAX_ROWS} step={1} onCommit={(n) => ops.trailerRows(row, layer, n)} />
+              <button type="button" data-testid="wall-trailer-rows-plus" aria-label="One more trailer row" title="One more trailer row" disabled={layer.rows >= TRAILER_MAX_ROWS} onClick={() => ops.trailerRows(row, layer, layer.rows + 1)} style={stepBtn(layer.rows < TRAILER_MAX_ROWS)}>＋</button>
+              <span data-testid="wall-trailer-total" style={muted}>{layer.rows > 1 ? `= ${layer.depth}′ deep` : ""}</span>
+            </span>
+            {layer.rows >= 2 && (
+              <span style={{ display: "flex", alignItems: "center", gap: SPACE.sm, flexWrap: "wrap" }}>
+                {field("Aisle", <><NumInput style={{ ...numInput, width: 56 }} ariaLabel="Aisle between trailer rows" value={layer.aisle} min={0} onCommit={(n) => ops.trailerAisle(row, layer, n)} />{unit("ft between rows")}</>)}
+              </span>
+            )}
+          </>
+        )}
+        {removeLine}
+      </div>
+    );
+  };
+
+  const bumpEditor = (row) => {
+    const bp = row.bump;
+    return (
+      <div data-testid="wall-layer-editor" data-kind="bump" style={boxStyle}>
+        <span style={{ display: "flex", justifyContent: "space-between" }}>
+          <span style={{ fontSize: FONT_SIZE.control, fontWeight: 700, color: "var(--text-primary)" }}>Bump-outs</span>
+          <button type="button" data-testid="wall-editor-close" aria-label="Close" title="Close" onClick={() => setOpen(null)} style={{ ...link, textDecoration: "none", color: "var(--text-tertiary)", fontSize: FONT_SIZE.control }}>✕</button>
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: SPACE.sm }}>
+          <span style={muted}>At</span>
+          {bp.ends.map((e) => (
+            <button key={e.sign} type="button" data-testid={`bump-end-${e.sign < 0 ? "start" : "end"}`} aria-pressed={e.on} disabled={!canEditBumps}
+              title={canEditBumps ? `${e.on ? "Remove" : "Add"} the bump-out at the ${e.label} end` : "Reset the footprint to a rectangle first — bump-outs anchor to square corners"}
+              onClick={() => ops.bumpEnd(row, e.sign)} style={{ ...toggleBtn(e.on), opacity: canEditBumps ? 1 : 0.5 }}>{e.label}</button>
+          ))}
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: SPACE.sm, flexWrap: "wrap" }}>
+          <span style={muted}>Size</span>
+          <span title="Along the dock wall"><NumInput style={{ ...numInput, width: 50 }} ariaLabel="Bump-out size along the dock wall" value={bp.along} min={1} onCommit={(n) => ops.bumpSize(row, n, bp.proj)} /></span>
+          <span style={muted}>×</span>
+          <span title="Out from the dock face"><NumInput style={{ ...numInput, width: 50 }} ariaLabel="Bump-out size out from the dock face" value={bp.proj} min={1} onCommit={(n) => ops.bumpSize(row, bp.along, n)} /></span>
+          {unit("ft")}
+        </span>
+        <button type="button" data-testid="bump-remove-all" style={{ ...link, alignSelf: "flex-start", color: "var(--danger-text, var(--danger))" }} disabled={bp.n < 1} onClick={() => { setOpen(null); ops.bumpRemoveAll(row); }}>Remove all</button>
+      </div>
+    );
+  };
+
+  return (
+    <div data-testid="wall-rows" style={{ marginTop: SPACE.xl, display: "flex", flexDirection: "column", gap: SPACE.sm }}>
+      {rows.map((row) => {
+        const opts = addOptions(row.isDock, row.layers);
+        const menuOpen = menu === row.key;
+        const openLayer = open && open.rowKey === row.key && open.id !== "bump" ? row.layers.find((l) => l.id === open.id) : null;
+        const bumpOpen = open && open.rowKey === row.key && open.id === "bump";
+        return (
+          <div key={row.key} data-testid="wall-row" data-row={row.key} data-role={row.role} data-sides={row.sides.join(",")}>
+            <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: SPACE.sm }}>
+              <span data-testid="wall-row-head" style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: SPACE.sm, minWidth: 64 }}>
+                <span data-testid="wall-row-badge" style={{ ...badgeStyle(row), minWidth: 22, padding: "1px 5px", borderRadius: RADIUS.sm, fontSize: FONT_SIZE.micro, fontWeight: 700, textAlign: "center", lineHeight: 1.4 }}>{row.badge}</span>
+                <span data-testid="wall-row-role" style={{ fontSize: FONT_SIZE.label, color: "var(--text-secondary)" }}>{row.role}</span>
+              </span>
+              {row.bump && (
+                <button type="button" data-testid="bump-chip" style={{ ...chipBase, ...(bumpOpen ? chipOn : null) }} onClick={() => { setMenu(null); setOpen(bumpOpen ? null : { rowKey: row.key, id: "bump" }); }}>{bumpChipLabel(row.bump.n)}</button>
+              )}
+              {row.layers.map((l) => (
+                <button key={l.id} type="button" data-testid="wall-chip" data-kind={l.kind} style={{ ...chipBase, ...(openLayer && openLayer.id === l.id ? chipOn : null) }}
+                  onClick={() => { setMenu(null); setOpen(openLayer && openLayer.id === l.id ? null : { rowKey: row.key, id: l.id }); }}>{chipLabel(l)}</button>
+              ))}
+              {opts.length > 0 && (
+                <button type="button" data-testid="wall-add" aria-label={`Add a layer to the ${row.badge} wall`} title="Add a layer to this wall" style={{ ...chipBase, borderStyle: "dashed", borderColor: "var(--border-strong)", color: "var(--text-secondary)", padding: "3px 9px" }}
+                  onClick={() => { setOpen(null); setMenu(menuOpen ? null : row.key); }}>＋</button>
+              )}
+            </div>
+            {menuOpen && (
+              <div data-testid="wall-add-menu" style={{ display: "flex", flexWrap: "wrap", gap: SPACE.sm, margin: `${SPACE.sm}px 0` }}>
+                {opts.map((o) => (
+                  <button key={o.key} type="button" data-testid={`wall-add-${o.key}`} style={{ ...chipBase, borderStyle: "dashed" }}
+                    onClick={() => { setMenu(null); ops.add(row, o.key); setPending({ rowKey: row.key, kind: o.key }); }}>＋ {o.label}</button>
+                ))}
+              </div>
+            )}
+            {bumpOpen && row.bump && bumpEditor(row)}
+            {openLayer && editorFor(row, openLayer)}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* PadElevRow — the Pad elevation row, now in Structure (NEW-4). Blank = automatic; a small ⓘ shows the
+   floodplain-fill explanation on demand instead of an always-on paragraph. */
+function PadElevRow({ value, auto, info, onCommit, numInput, resetBtn, muted }) {
+  const [showInfo, setShowInfo] = useState(false);
+  return (
+    <>
+      <Field label="Pad elev.">
+        <span style={ROW4}>
+          <NumInput allowClear style={{ ...numInput, width: 64 }} ariaLabel="Pad elevation (ft NAVD88)" value={value ?? ""} placeholder={auto != null ? `auto ${f1(auto)}` : "auto"} onCommit={(n) => onCommit(Number.isFinite(n) ? n : null)} />
+          {value != null && <button type="button" data-testid="pad-elev-auto" title="Back to automatic (slab FF, dock zones minus the dock drop)" onClick={() => onCommit(null)} style={resetBtn}>auto ↺</button>}
+          <button type="button" data-testid="pad-elev-info" aria-expanded={showInfo} aria-label="What is pad elevation for?" title="What is pad elevation for?" onClick={() => setShowInfo((v) => !v)}
+            style={{ width: 16, height: 16, padding: 0, borderRadius: RADIUS.pill, border: BORDER_1, background: SURF_RAISED, color: "var(--text-secondary)", fontSize: FONT_SIZE.micro, fontWeight: 700, lineHeight: 1, cursor: "pointer", fontFamily: "inherit", flex: "none" }}>i</button>
+        </span>
+      </Field>
+      {showInfo && <div data-testid="pad-elev-note" style={{ ...muted, fontSize: FONT_SIZE.micro, lineHeight: 1.45, margin: `0 0 ${SPACE.sm}px` }}>{info}</div>}
+    </>
+  );
+}
+// LineSample — the Line weight row's live sample: a short line whose thickness tracks the value.
+function LineSample({ weight }) {
+  const w = Math.max(0.5, Math.min(12, Number(weight) || 1));
+  return (
+    <svg data-testid="line-weight-sample" width={36} height={14} viewBox="0 0 36 14" aria-hidden="true" style={{ flex: "none", display: "block" }}>
+      <line x1={2} y1={7} x2={34} y2={7} stroke="var(--text-primary)" strokeWidth={w} strokeLinecap="butt" />
     </svg>
   );
 }

@@ -308,7 +308,7 @@ export function collapseRingSpikes(ring, opts = {}) {
  * Returns [{ outer, holes: [ring…] }, …] — one entry per resulting region, holes separated so a caller
  * can emit an even-odd path. Returns [] for no valid input; on any clipper failure it degrades to the
  * input rings as separate regions (a visible but honest fallback — never a blank canvas). */
-function dissolveRingsUncached(rings, opts = {}) {
+function* dissolveRingsUncachedSteps(rings, opts = {}) {
   const valid = (rings || []).filter(isRing);
   if (!valid.length) return [];
   if (valid.length === 1 && !(opts.subtract && opts.subtract.length)) return [{ outer: collapseRingSpikes(valid[0].map((p) => ({ x: p.x, y: p.y }))), holes: [] }];
@@ -329,9 +329,12 @@ function dissolveRingsUncached(rings, opts = {}) {
     }
     const merged = new ClipperLib.Paths();
     clip.Execute(ClipperLib.ClipType.ctUnion, merged, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
+    yield;   // round 5 — a slice boundary for the plan-open warm-up (the sync driver ignores it)
     // Re-union the closed result so holes/outers come back as a proper PolyTree.
     const clip2 = new ClipperLib.Clipper();
-    clip2.AddPaths(closePaths(merged, close), ClipperLib.PolyType.ptSubject, true);
+    const closed = closePaths(merged, close);
+    yield;
+    clip2.AddPaths(closed, ClipperLib.PolyType.ptSubject, true);
     /* 2026-09-22 — `opts.subtract`: rings the pavement must END AT rather than run into. A road that
      * tees into a paving pad / truck court used to keep its strip (its overshoot past the face, its
      * flat end cap, the wedge's tangent cusp) and rely on the PAD painting over all of it — which
@@ -350,24 +353,27 @@ function dissolveRingsUncached(rings, opts = {}) {
     }
     const tree = new ClipperLib.PolyTree();
     clip2.Execute(subtract.length ? ClipperLib.ClipType.ctDifference : ClipperLib.ClipType.ctUnion, tree, ClipperLib.PolyFillType.pftNonZero, ClipperLib.PolyFillType.pftNonZero);
+    yield;
     const out = [];
     // Walk the PolyTree so holes stay attached to the region that owns them (a road loop encircling
     // an island is a real case: the pond loop road). Depth 0/2/4… are outers, 1/3/5… are holes.
-    const walk = (node) => {
+    const walk = function* (node) {
       for (const child of node.Childs()) {
         if (child.IsHole()) continue;
         const outer = collapseRingSpikes(fromPath(child.Contour()));
+        yield;
         const holes = [];
         for (const h of child.Childs()) {
           if (!h.IsHole()) continue;
           const hr = collapseRingSpikes(fromPath(h.Contour()));
           if (hr.length >= 3 && ringArea(hr) >= RING_MICRO_AREA_FLOOR_SQFT) holes.push(hr);
-          walk(h); // an island inside the hole is its own region
+          yield;
+          yield* walk(h); // an island inside the hole is its own region
         }
         if (outer.length >= 3 && ringArea(outer) >= RING_MICRO_AREA_FLOOR_SQFT) out.push({ outer, holes });
       }
     };
-    walk(tree);
+    yield* walk(tree);
     // An empty result is honest when a subtract was asked for (pavement wholly inside the pad);
     // otherwise it is a clipper failure and the inputs are shown as-is rather than a blank canvas.
     return out.length || subtract.length ? out : valid.map((r) => ({ outer: r, holes: [] }));
@@ -396,21 +402,28 @@ function dissolveRingsUncached(rings, opts = {}) {
  * road, is a different key and is recomputed. Returned arrays are SHARED and read-only, like every memo in this
  * tree (B236592); both consumers only measure them or map them to a path string. */
 const ringsSig = (rs) => (Array.isArray(rs) ? rs.map(pointsSignature).join(";") : "-");
-const dissolveCache = boundedCache(48);
-const clipCache = boundedCache(400);
+const dissolveCache = boundedCache(200);   // round 5: was 48 — a plan the size of Richfield dissolves ~2 entries per cluster, and a clear at the cap would throw a warm-up away
+const clipCache = boundedCache(800);
 export const roadNetworkStats = { dissolveCalls: 0, dissolveHits: 0, clipCalls: 0, clipHits: 0 };
 export function resetRoadNetworkCaches() {
-  dissolveCache.clear(); clipCache.clear();
+  dissolveCache.clear(); clipCache.clear(); surfaceRingCache.clear();
   roadNetworkStats.dissolveCalls = roadNetworkStats.dissolveHits = roadNetworkStats.clipCalls = roadNetworkStats.clipHits = 0;
 }
 
-export function dissolveRings(rings, opts = {}) {
+/* B2233521 (round 5) — the dissolve as STEPS: the same body, with a `yield;` between its units of work (the union, the morphological close, the final tree, each ring's spike
+ * collapse). `dissolveRings` below drives it to completion in one go, so every existing caller is byte-for-byte what it was; the plan-open warm-up drives it through
+ * `yield*` in ~8 ms slices, so one cluster's dissolve (150 ms at 2× on Richfield) no longer has to be one task. */
+export function* dissolveRingsSteps(rings, opts = {}) {
   roadNetworkStats.dissolveCalls++;
   const close = Number.isFinite(opts.close) ? opts.close : "d";
   const key = `${close}#${ringsSig(rings)}#${ringsSig(opts.subtract)}`;
   const hit = dissolveCache.get(key);
   if (hit) { roadNetworkStats.dissolveHits++; return hit; }
-  return dissolveCache.set(key, dissolveRingsUncached(rings, opts));
+  return dissolveCache.set(key, yield* dissolveRingsUncachedSteps(rings, opts));
+}
+export function dissolveRings(rings, opts = {}) {
+  const gen = dissolveRingsSteps(rings, opts);
+  for (;;) { const r = gen.next(); if (r.done) return r.value; }
 }
 
 export function clipPolylineOutside(line, rings) {
@@ -486,9 +499,21 @@ function clipAgainst(line, near, whole) {
  * silently dropped road surface). Pure: world feet in, world feet out. Unit-tested
  * (test/roadSurfaceJoin.test.js — the angle sweep + every adjacent case the item names). */
 export const ROAD_JOIN_MITER_LIMIT = 2;    // matches this repo's existing ClipperOffset convention (pondOffset.js's MITER)
+/* B2233521 (round 5) — BY-VALUE CACHE. The same road's ring was offset by clipper up to three times per render (the dissolved network's memo, `siteMetrics`' paved-area
+ * pass, and the road's own ElNode) and once more per edit for every untouched road; on a plan this device has never drawn it is ~40 ms of the first render, ~90 ms on
+ * Richfield. Keyed on the exact points (a ten-thousandth of a foot, `pointsSignature`) plus the width, so a road that really moved is a different key. The returned
+ * ring is SHARED and read-only like every memo here (all callers measure it, path-string it or hand it to the dissolve). `null` results are cached too (a degenerate
+ * road is degenerate every time). */
+const surfaceRingCache = boundedCache(400);
 export function roadSurfaceRing(pts, width) {
   const clean = (pts || []).filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y));
   if (clean.length < 2 || !(width > 0)) return null;
+  const key = `${width}#${pointsSignature(clean)}`;
+  const hit = surfaceRingCache.get(key);
+  if (hit !== undefined) return hit;
+  return surfaceRingCache.set(key, roadSurfaceRingUncached(clean, width));
+}
+function roadSurfaceRingUncached(clean, width) {
   try {
     const path = toPath(clean);
     const co = new ClipperLib.ClipperOffset(ROAD_JOIN_MITER_LIMIT, CLEAN_DELTA);

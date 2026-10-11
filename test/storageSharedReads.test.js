@@ -169,6 +169,8 @@ describe("wiring", () => {
     const { fileURLToPath } = await import("node:url");
     const src = readFileSync(fileURLToPath(new URL("../src/workspaces/site-planner/SitePlanner.jsx", import.meta.url)), "utf8");
     expect(src).toContain("mirrorStamp = ok ? sitesWriteStamp() : null;");
-    expect(src).toContain("const okSave = mirrorStamp && sitesWriteStillCurrent(mirrorStamp) ? true : saveSite(payload, { skipHistory: true });");
+    // B2233521 — the same skip, with the verdict named so the duplicate-flush skip (lib/saveDedupe.js) can record the write it made
+    expect(src).toContain("const mirrorHeld = !!(mirrorStamp && sitesWriteStillCurrent(mirrorStamp));");
+    expect(src).toContain("const okSave = mirrorHeld ? true : saveSite(payload, { skipHistory: true });");
   });
 });

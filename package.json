@@ -72,6 +72,7 @@
     "perf:editcycle": "xvfb-run -a --server-args=\"-screen 0 1800x1000x24\" node ui-audit/perf-edit-cycle.mjs --cycles 10 --store-kb 1300 --assert",
     "perf:planstore": "xvfb-run -a --server-args=\"-screen 0 1800x1000x24\" node ui-audit/perf-plan-store-scaling.mjs --sizes 5,50,150 --plan-kb 8 --edits 3 --switches 4 --assert",
     "perf:editswitch": "xvfb-run -a --server-args=\"-screen 0 1800x1000x24\" node ui-audit/perf-edit-switch.mjs --switches 12 --edits 3 --store-plans 143 --plan-kb 8 --assert",
+    "perf:planopen": "xvfb-run -a --server-args=\"-screen 0 1800x1000x24\" node ui-audit/perf-plan-open.mjs",
     "perf:jurisdictionswitch": "xvfb-run -a --server-args=\"-screen 0 1800x1000x24\" node ui-audit/perf-jurisdiction-switch.mjs --assert"
   },
   "dependencies": {

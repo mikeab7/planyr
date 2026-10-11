@@ -22,6 +22,10 @@ import { ScheduleCenter, ScheduleActions } from "./components/ScheduleToolbar.js
 import { planScheduleHintSync } from "../../shared/schedule/scheduleLinkHints.js";
 import { publishLiveSchedules } from "../../shared/schedule/liveScheduleIndex.js";
 import { allProjectNames } from "../../shared/names/names.js";
+import { orderedIds, byNameToday, planProjectMove } from "../../shared/projects/projectOrder.js";
+import { loadProjectOrder, saveProjectOrder, onProjectOrderChanged } from "../dashboard/lib/dashboardProjectOrderPrefs.js";
+import { fetchSiteSummaries } from "../dashboard/lib/dashboardSitesFetch.js";
+import { groupProjectsByGroupId } from "../dashboard/lib/dashboardPipeline.js";
 import { listProjects, warmProjectsIfEmpty, suggestNameMatch, onProjectsChanged } from "../../shared/projects/projects.js";
 import { resolveControlledId } from "../../shared/projects/projectModel.js";
 import LinkSchedulePanel from "./components/LinkSchedulePanel.jsx";
@@ -433,6 +437,77 @@ export default function Scheduler({
     post({ type: "planar:site-names", names: allProjectNames() });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, navConfirmed, siteProjects]);
+
+  // NEW-1 (2026-10-08, amends B2210992) — the Task Report's project groups follow the SAME saved order the
+  // Dashboard's Pursuits card uses (shared/projects/projectOrder.js + profiles.prefs.dashboardProjectOrder).
+  // The shell owns it — it has the account, the saved order and the project list — and the embedded page
+  // only DISPLAYS it: the shell pushes `planar:project-order` (every project's group id in his order), and
+  // the page asks for a move with `planar:project-order-move`; the shell does the move through the one
+  // shared `planProjectMove`, saves it, and pushes the result back. No second order store, no second move.
+  const orderRef = useRef(null);       // the loaded { ids, at } or null (never positioned anything)
+  const groupsRef = useRef([]);        // every project that exists: { groupId, name, createdAt }
+  const orderLoadedAtRef = useRef(0);
+  const [orderView, setOrderView] = useState({ ids: null, error: null });
+  const publishOrder = useCallback((error = null) => {
+    const groups = groupsRef.current;
+    setOrderView({ ids: groups.length ? orderedIds(byNameToday(groups), orderRef.current) : null, error });
+  }, []);
+  const loadOrder = useCallback(async () => {
+    try {
+      const [{ order }, rows] = await Promise.all([loadProjectOrder(userId), fetchSiteSummaries()]);
+      orderRef.current = order;
+      groupsRef.current = groupProjectsByGroupId(rows, {});
+      orderLoadedAtRef.current = Date.now();
+      publishOrder(null);
+    } catch (e) {
+      reportClientEvent("task-report-order-load-failed", e?.message || "project order load failed", {});
+    }
+  }, [userId, publishOrder]);
+  // Load on mount, and again (at most once a minute) whenever the tab comes back to the front, so a project
+  // created elsewhere is placed by the same "new project on top" rule.
+  useEffect(() => {
+    if (!isActive || Date.now() - orderLoadedAtRef.current < 60000) return;
+    loadOrder();
+  }, [isActive, loadOrder]);
+  // A reorder made on the Dashboard (or here) on this device — adopt it live.
+  useEffect(() => onProjectOrderChanged((next) => {
+    if (!next) return;
+    orderRef.current = next;
+    publishOrder(null);
+  }), [publishOrder]);
+  const pushProjectOrder = useCallback(() => {
+    post({ type: "planar:project-order", ids: orderView.ids, canOrder: !!(orderView.ids && orderView.ids.length), error: orderView.error });
+  }, [orderView]);
+  useEffect(() => {
+    if (!ready && !navConfirmed) return;
+    pushProjectOrder();
+  }, [ready, navConfirmed, pushProjectOrder]);
+  const applyReportOrder = useCallback((next) => {
+    orderRef.current = next;
+    publishOrder(null);
+    saveProjectOrder(userId, next).then((res) => {
+      if (!res.ok) publishOrder(res.error || "save failed"); // kept on screen, shown with a Retry — never silent
+    });
+  }, [userId, publishOrder]);
+  useEffect(() => {
+    const onOrderMsg = (e) => {
+      if (e.origin !== window.location.origin) return;
+      const m = e.data;
+      if (!m || m.source !== "planar-seq") return;
+      if (m.type === "planar:project-order-request") { pushProjectOrder(); return; }
+      if (m.type === "planar:project-order-retry") { if (orderRef.current) applyReportOrder(orderRef.current); return; }
+      if (m.type !== "planar:project-order-move" || typeof m.groupId !== "string") return;
+      if (!orderLoadedAtRef.current) return; // the saved order hasn't loaded yet — a move now would overwrite it blind
+      const dest = m.dest && m.dest.to ? { to: m.dest.to === "bottom" ? "bottom" : "top" }
+        : (m.dest && Number.isInteger(m.dest.index) ? { index: m.dest.index } : null);
+      if (!dest) return;
+      const visible = Array.isArray(m.visibleIds) ? m.visibleIds.filter((x) => typeof x === "string") : [];
+      const next = planProjectMove(groupsRef.current, orderRef.current, m.groupId, dest, visible);
+      if (next) applyReportOrder(next);
+    };
+    window.addEventListener("message", onOrderMsg);
+    return () => window.removeEventListener("message", onOrderMsg);
+  }, [pushProjectOrder, applyReportOrder]);
 
   // B1161792 (NEW-1) — apply a pending "jump to this task" request once the iframe is ready.
   // `scheduleTaskIntent.token` makes a repeat click on the SAME task re-fire (Shell stamps a

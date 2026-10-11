@@ -123,6 +123,8 @@ const LABEL_H = 10;
 const LABEL_GAP = 6;  // clear space between a wall and the label's near edge
 const ARROW_BOX = (W) => ({ x0: W - 17, y0: 2, x1: W - 2, y1: 21 }); // the fixed north arrow's corner
 const MIN_ASPECT = 0.25; // a very long thin building still gets a clickable short wall
+const MIN_BUMP_PX = 4;   // a bump-out on a huge building stays a visible, clickable square
+const DEFAULT_BUMP = { along: 55, proj: 60 }; // = dogEar.js DOGEAR_W × DOGEAR_D (kept literal: this module stays leaf-light)
 
 const rotPt = (x, y, deg) => {
   const t = (deg * Math.PI) / 180, c = Math.cos(t), s = Math.sin(t);
@@ -130,46 +132,98 @@ const rotPt = (x, y, deg) => {
 };
 
 /**
- * Lay out the picker's SVG, in its own `width × height` box.
- * @param {{rot?:number,w?:number,h?:number}} b  the building (only its angle and aspect matter)
+ * Lay out the picker's SVG, in its own `width × height` box. The building is drawn TO SCALE (its
+ * Length × Depth aspect, turned by `b.rot`) and every corner bump-out is drawn from the same
+ * geometry the canvas uses: at the END of its dock wall, inside the wall's length, projecting OUT past
+ * the dock face. Empty corners of each LOADED wall get a dashed footprint (the click target that adds
+ * one). Each wall's `clear` segment is the face between its bump-outs — the dock line is drawn on that
+ * and nowhere else, so it never runs into a bump-out.
+ *
+ * @param b  the building ({rot, w, h, …})
+ * @param opts.bumps  its existing bump-outs as [{id, side, sign, along, proj}] (feet; absent → 55 × 60)
  * @returns {{
- *   width:number, height:number, cx:number, cy:number, scale:number,
+ *   width:number, height:number, cx:number, cy:number, scale:number, k:number,   // k = px per foot
  *   corners:number[][],            // the rotated rectangle, clockwise from its top-left
  *   walls:{side:string, x1:number,y1:number,x2:number,y2:number, lx:number,ly:number,
- *          label:string, bearing:number}[],   // label centre (lx,ly) — draw upright text there
- *   arrow:{x:number,y:number,box:object}      // the fixed north arrow
+ *          label:string, bearing:number, clear:{x1:number,y1:number,x2:number,y2:number}}[],
+ *   bumps:{key:string, id:string|null, side:string, sign:number, existing:boolean, poly:number[][], cx:number, cy:number}[],
+ *   arrow:{x:number,y:number,box:object}
  * }}
  */
-export function wallPickerLayout(b, { width = 112, height = 106 } = {}) {
+export function wallPickerLayout(b, { width = 128, height = 118, bumps = [] } = {}) {
   const rot = ((Number((b && b.rot) || 0) % 360) + 360) % 360;
   const bw = Math.max(1, Number(b && b.w) || 1), bh = Math.max(1, Number(b && b.h) || 1);
   const mx = Math.max(bw, bh);
   const aw = Math.max(MIN_ASPECT, bw / mx), ah = Math.max(MIN_ASPECT, bh / mx);
   const cx = width / 2, cy = height / 2;
   const keep = ARROW_BOX(width);
+  const loadedSides = dockSidesFor(b || {}).dockSides;
+  const existing = (bumps || []).filter((x) => x && LOCAL_NORMAL[x.side] && (x.sign === 1 || x.sign === -1));
 
   const build = (R) => {
     const hw = aw * R, hh = ah * R;
-    const corners = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([x, y]) => { const [rx, ry] = rotPt(x, y, rot); return [cx + rx, cy + ry]; });
+    const k = (2 * R) / mx;                                  // px per foot
+    const toScreen = (x, y) => { const [rx, ry] = rotPt(x, y, rot); return [cx + rx, cy + ry]; };
+    const corners = [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([x, y]) => toScreen(x, y));
+    // The bump-out boxes in the building's local frame: along the wall at its end, out past the face.
+    const bumpBox = (side, sign, along, proj) => {
+      const horiz = side === "top" || side === "bottom";
+      const wallPx = horiz ? hw * 2 : hh * 2;
+      const a = Math.max(MIN_BUMP_PX, Math.min(wallPx, (Number(along) > 0 ? Number(along) : DEFAULT_BUMP.along) * k));
+      const p = Math.max(MIN_BUMP_PX, (Number(proj) > 0 ? Number(proj) : DEFAULT_BUMP.proj) * k);
+      const [nx, ny] = LOCAL_NORMAL[side];
+      let pts;
+      if (horiz) {
+        const x0 = sign < 0 ? -hw : hw - a, x1 = sign < 0 ? -hw + a : hw;
+        const y0 = ny < 0 ? -hh - p : hh, y1 = ny < 0 ? -hh : hh + p;
+        pts = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+      } else {
+        const y0 = sign < 0 ? -hh : hh - a, y1 = sign < 0 ? -hh + a : hh;
+        const x0 = nx < 0 ? -hw - p : hw, x1 = nx < 0 ? -hw : hw + p;
+        pts = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+      }
+      return { a, p, local: pts, poly: pts.map(([x, y]) => toScreen(x, y)) };
+    };
+    const have = new Set(existing.map((x) => `${x.side}${x.sign}`));
+    const sizeOnSide = (side) => existing.find((x) => x.side === side) || DEFAULT_BUMP;
+    const bumpList = [
+      ...existing.map((x) => ({ key: `${x.side}${x.sign}`, id: x.id || null, side: x.side, sign: x.sign, existing: true, ...bumpBox(x.side, x.sign, x.along, x.proj) })),
+      ...loadedSides.flatMap((side) => [-1, 1].filter((sign) => !have.has(`${side}${sign}`)).map((sign) => {
+        const sz = sizeOnSide(side);
+        return { key: `${side}${sign}`, id: null, side, sign, existing: false, ...bumpBox(side, sign, sz.along, sz.proj) };
+      })),
+    ].map((x) => ({ ...x, cx: x.poly.reduce((s, p) => s + p[0], 0) / 4, cy: x.poly.reduce((s, p) => s + p[1], 0) / 4 }));
     const walls = WALLS.map((side) => {
       const [nx0, ny0] = LOCAL_NORMAL[side];
-      const half = ny0 !== 0 ? hh : hw;                       // half-extent along this wall's normal
-      const ends = ny0 !== 0 ? [[-hw, ny0 * hh], [hw, ny0 * hh]] : [[nx0 * hw, -hh], [nx0 * hw, hh]];
-      const [a, bb] = ends.map(([x, y]) => { const [rx, ry] = rotPt(x, y, rot); return [cx + rx, cy + ry]; });
+      const horiz = ny0 !== 0;
+      const half = horiz ? hh : hw;                           // half-extent along this wall's normal
+      const halfLen = horiz ? hw : hh;                        // half the wall's own length
+      // The wall's end points, and the CLEAR face between the bump-outs on it (butt-capped by the caller).
+      const edge = (t0, t1) => (horiz ? [[t0, ny0 * hh], [t1, ny0 * hh]] : [[nx0 * hw, t0], [nx0 * hw, t1]]);
+      const startBump = bumpList.find((x) => x.existing && x.side === side && x.sign < 0);
+      const endBump = bumpList.find((x) => x.existing && x.side === side && x.sign > 0);
+      const t0 = -halfLen + (startBump ? startBump.a : 0), t1 = halfLen - (endBump ? endBump.a : 0);
+      const [a, bb] = edge(-halfLen, halfLen).map(([x, y]) => toScreen(x, y));
+      const [c0, c1] = edge(Math.min(t0, t1), Math.max(t0, t1)).map(([x, y]) => toScreen(x, y));
       const [nx, ny] = rotPt(nx0, ny0, rot);                  // the outward normal on screen
       const extent = Math.abs(nx) * LABEL_W / 2 + Math.abs(ny) * LABEL_H / 2; // box half-size along the normal
-      const off = half + LABEL_GAP + extent;                  // label CENTRE distance from the building centre
+      // A bump-out (existing or the dashed one) that leaves less than a label's width of bare wall pushes the label past it.
+      const sideBumps = bumpList.filter((x) => x.side === side);
+      const crowded = sideBumps.length && (halfLen * 2 - sideBumps.reduce((s, x) => s + x.a, 0)) < LABEL_W + 4;
+      const off = half + LABEL_GAP + extent + (crowded ? Math.max(...sideBumps.map((x) => x.p)) : 0); // label CENTRE distance from the building centre
       return {
         side, x1: a[0], y1: a[1], x2: bb[0], y2: bb[1],
+        clear: { x1: c0[0], y1: c0[1], x2: c1[0], y2: c1[1] },
         lx: cx + nx * off, ly: cy + ny * off,
         label: dockSideCompassLabel(side, rot), bearing: dockSideBearing(side, rot),
       };
     });
-    return { corners, walls };
+    return { corners, walls, bumps: bumpList, k };
   };
-  const fits = ({ corners, walls }) => {
+  const fits = ({ corners, walls, bumps: bl }) => {
     const inside = (x, y) => x >= 2 && x <= width - 2 && y >= 2 && y <= height - 2;
     if (!corners.every(([x, y]) => inside(x, y))) return false;
+    if (!bl.every((x) => x.poly.every(([px, py]) => inside(px, py)))) return false;
     return walls.every((w) => {
       const x0 = w.lx - LABEL_W / 2, x1 = w.lx + LABEL_W / 2, y0 = w.ly - LABEL_H / 2, y1 = w.ly + LABEL_H / 2;
       if (!inside(x0, y0) || !inside(x1, y1)) return false;
@@ -178,7 +232,7 @@ export function wallPickerLayout(b, { width = 112, height = 106 } = {}) {
   };
   let R = 46, laid = build(R);
   while (R > 8 && !fits(laid)) { R -= 1; laid = build(R); }
-  return { width, height, cx, cy, scale: R, corners: laid.corners, walls: laid.walls, arrow: { x: (keep.x0 + keep.x1) / 2, y: (keep.y0 + keep.y1) / 2, box: keep } };
+  return { width, height, cx, cy, scale: R, k: laid.k, corners: laid.corners, walls: laid.walls, bumps: laid.bumps, arrow: { x: (keep.x0 + keep.x1) / 2, y: (keep.y0 + keep.y1) / 2, box: keep } };
 }
 
 export { compassLabelForBearing };

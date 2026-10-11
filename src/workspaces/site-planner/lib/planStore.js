@@ -219,6 +219,7 @@ function loadPlans(base, s) {
     if (prev && prev.raw === raw) { next.set(id, prev); continue; }
     let obj; try { obj = JSON.parse(raw); } catch (_) { obj = undefined; }
     if (!isObj(obj)) { reportClientEvent("plan-entry-unreadable", "a per-plan entry could not be read — that plan is left out of this read, not deleted", { id, len: raw.length }); continue; }
+    planJsonCache.set(obj, raw);   // B2236000 — the entry's own text IS this object's JSON (it was written by jsonOf): plainCopy / textOf reuse it
     next.set(id, { raw, obj });
   }
   s.plans = next; s.stamp = idxRaw; s.shared = null;
@@ -250,6 +251,8 @@ function plansToJson(persist) {
   for (const [id, sObj] of Object.entries(persist)) { const frag = jsonOf(sObj); if (frag !== undefined) parts.push(JSON.stringify(id) + ":" + frag); }
   return "{" + parts.join(",") + "}";
 }
+/** The exact stored text of a SHARED plan object handed out by this store (undefined when not known — e.g. blob mode). Read-only. */
+export function textOf(rec) { return rec && typeof rec === "object" ? planJsonCache.get(rec) : undefined; }
 /** A private, mutable copy of ONE stored record — what a caller that will change a record must take from a shared read. */
 export function plainCopy(rec) {
   if (!rec || typeof rec !== "object") return rec;
@@ -265,9 +268,25 @@ function blobShared(base) {
   return { ...obj };
 }
 function blobWrite(base, obj) {
+  /* B2236000 (round 6) — a device that could not be split (the owner's: 76 plans, 2.29M characters — `plan-store-migration-aborted`, reason headroom, on
+   * every load) writes the WHOLE library on every write. Two things no longer happen when nothing changed: (1) a plan whose content equals what the
+   * current snapshot already holds keeps that SAME object (so everything keyed on it — the list read's model memory — still recognises it), and
+   * (2) a library text identical to what is stored is not written again (a cloud pull that changed nothing used to re-write all 2.3 MB). */
+  const prev = currentSnapshot();
+  const prevObj = prev && prev.key === base && (() => { try { return lsNow().getItem(base) === prev.str; } catch (_) { return false; } })() ? prev.obj : null;
   const persist = {};
-  for (const [id, x] of Object.entries(obj)) persist[id] = cfg.persistForm(x);
-  try { const str = plansToJson(persist); set(base, str); rememberSnapshot(base, str, persist); return true; }
+  for (const [id, x0] of Object.entries(obj)) {
+    let x = cfg.persistForm(x0);
+    const was = prevObj && prevObj[id];
+    if (was && was !== x && jsonOf(was) === jsonOf(x)) x = was;
+    persist[id] = x;
+  }
+  try {
+    const str = plansToJson(persist);
+    let cur = null; try { cur = lsNow().getItem(base); } catch (_) { /* unreadable: write */ }
+    if (cur !== str) set(base, str);
+    rememberSnapshot(base, str, persist); return true;
+  }
   catch (_) {
     try {
       const slim = {};
@@ -365,7 +384,10 @@ export function writeMap(base, next) {
     if (prev && prev.obj === rec) continue;
     const form = cfg.persistForm(rec);
     const frag = jsonOf(form);
-    if (prev && prev.raw === frag) { s.plans.set(id, { raw: frag, obj: form }); s.shared = null; continue; }
+    /* B2236000 (round 6) — the stored text is unchanged: KEEP the shared object this store already hands out (it is content-identical by
+     * construction), so everything keyed on it (the list read's model cache) still recognises the plan. Swapping in `form` made every cloud
+     * pull look like a rewrite of every plan. */
+    if (prev && prev.raw === frag) continue;
     if (!writeEntry(base, s, id, rec)) ok = false; else changed = true;
   }
   for (const id of [...s.plans.keys()]) if (!(id in next)) { del(pkey(base, id)); s.plans.delete(id); s.shared = null; changed = true; }

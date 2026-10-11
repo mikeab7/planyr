@@ -443,6 +443,69 @@ begin
 end;
 $$;
 
+-- ── NEW-1 (2026-10-10, typo search): the pool must hold the NEARBY correct rows too. ───────────────────
+-- Ordering the p_cap pool by similarity alone let a misspelled query ("Carabas") fill it with far rows whose
+-- dirty stored name matches the typo, pushing the real nearby chain row to ~30th of 60 (and off the end for
+-- worse typos). With a centre, the pool is now the top-p_cap by similarity PLUS the 40 nearest candidates
+-- within 100 km (same 0.3 threshold), de-duplicated; the client ranker (searchProximity.js) orders them.
+-- Without a centre the behaviour is unchanged. Distance is computed only for candidates inside the
+-- 100 km ring (st_dwithin on the geography index), so the NEW-1 perf property above is kept.
+create or replace function public.food_places_search_by_name_fast(
+  p_query text, p_cap integer default 15,
+  p_center_lat double precision default null, p_center_lon double precision default null
+)
+returns table (
+  id text, name text, lat double precision, lon double precision,
+  category text, cuisine text, address text, brand text,
+  source text, source_licence text, metro text, sim real, distance_km double precision
+)
+language plpgsql stable
+set search_path = public, pg_temp
+as $$
+#variable_conflict use_column
+declare
+  v_q text := lower(p_query);
+  v_cap integer := greatest(1, p_cap);
+  v_pt extensions.geography;
+begin
+  perform set_config('pg_trgm.word_similarity_threshold', '0.3', true);
+  if p_center_lat is not null and p_center_lon is not null then
+    v_pt := extensions.st_setsrid(extensions.st_makepoint(p_center_lon, p_center_lat), 4326)::extensions.geography;
+  end if;
+  return query
+  with cand as materialized (
+    select f.id, word_similarity(v_q, lower(f.name)) as sim
+    from public.food_places f
+    where v_q <% lower(f.name)
+  ),
+  cut as (select min(t.sim) as s from (select c0.sim from cand c0 order by c0.sim desc limit v_cap) t),
+  near as (
+    select c.id from cand c join public.food_places f on f.id = c.id
+    where v_pt is not null and extensions.st_dwithin(f.geom, v_pt, 100000)
+    order by extensions.st_distance(f.geom, v_pt) asc
+    limit 40
+  ),
+  top as (
+    select c.id, c.sim from cand c join public.food_places f on f.id = c.id cross join cut
+    where c.sim >= cut.s
+    order by c.sim desc,
+      case when v_pt is null then null else extensions.st_distance(f.geom, v_pt) end asc nulls last, f.name asc
+    limit v_cap
+  ),
+  pool as (
+    select t.id, t.sim from top t
+    union
+    select c.id, c.sim from cand c join near n on n.id = c.id
+  )
+  select f.id, f.name, f.lat, f.lon, f.category, f.cuisine, f.address, f.brand, f.source, f.source_licence, f.metro,
+    p.sim,
+    case when v_pt is null then null else extensions.st_distance(f.geom, v_pt) / 1000.0 end as distance_km
+  from pool p
+  join public.food_places f on f.id = p.id
+  order by p.sim desc, distance_km asc nulls last, f.name asc;
+end;
+$$;
+
 -- The public wrapper now reads the fast body (same columns, same address exclusion, same grants).
 create or replace function public.food_places_search_by_name(
   p_query text, p_cap integer default 15,

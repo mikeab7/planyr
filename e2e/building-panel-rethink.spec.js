@@ -4,7 +4,7 @@
  * typed in bulk, Structure folding, and the new outline width/opacity (drawn, persisted, exported).
  * Run: BASE_URL=http://localhost:4173 PW_CHROME=<chrome> npx playwright test e2e/building-panel-rethink.spec.js --project=chromium --no-deps */
 import { test, expect } from "@playwright/test";
-import { armPlannerHooks } from "./helpers.js";
+import { armPlannerHooks, panelPlus } from "./helpers.js";
 import { canvas, startBlank } from "./drawKinds.js";
 
 const buildings = (page) => page.evaluate(() => {
@@ -35,6 +35,8 @@ async function openProps(page, id) {
   await expect(page.getByTestId("building-header")).toBeVisible();
 }
 const wall = (page, side) => page.locator(`[data-testid="loading-wall-picker"] [data-wall="${side}"]`);
+/* which compass walls the picker says are loaded (the wall list no longer repeats them in words) */
+const loadedWalls = (page) => page.locator('[data-testid="loading-wall-picker"] [data-loaded="1"]').evaluateAll((n) => n.map((g) => g.getAttribute("data-compass")).sort());
 const rotate = async (page, deg) => {
   const f = page.getByText("Rotation", { exact: true }).locator("xpath=..").locator("input").first();
   await f.fill(String(deg)); await f.press("Enter");
@@ -62,7 +64,7 @@ test("header: inline number, lock, ⋯ menu, summary line, no Pin/Delete-element
   const [b] = await buildings(page);
   await openProps(page, b.id);
   await expect(page.getByTestId("building-header").getByRole("textbox", { name: "Building number" })).toHaveValue("1");
-  await expect(page.getByTestId("building-summary")).toContainText(/SF · Single-load .* · \d+′ clear/);
+  await expect(page.getByTestId("building-summary")).toContainText(/SF · \d+ doors?/);
   await expect(page.getByRole("button", { name: /Pin|Delete element/ })).toHaveCount(0);
   await page.getByTestId("building-lock").click();
   await expect.poll(() => buildings(page).then((x) => !!x[0].locked)).toBe(true);
@@ -107,19 +109,19 @@ test("wall picker at a non-zero rotation: labels, clicks and the painted aprons 
   await expect(wall(page, "top")).toHaveAttribute("data-compass", "NE");
   await expect(wall(page, "bottom")).toHaveAttribute("data-compass", "SW");
   // single on the bottom wall → SW; the canvas paints the apron toward SW
-  await expect(page.getByTestId("loading-walls-label")).toHaveText("SW wall");
+  await expect.poll(() => loadedWalls(page)).toEqual(["SW"]);
   await expect.poll(() => paintedApronCompass(page, b.id)).toEqual(["SW"]);
   // click the opposite wall → cross-dock NE & SW
   await wall(page, "top").click();
   await expect.poll(() => buildings(page).then((x) => x[0].dock)).toBe("cross");
   await expect(page.getByTestId("loading-type")).toHaveText("Cross-dock");
   // add a truck court so the canvas has something to paint on both walls, then move the loading
-  await page.getByTestId("add-dock-zone").click();
+  await panelPlus(page, "Dock zones").click();
   await expect.poll(() => paintedApronCompass(page, b.id)).toEqual(["NE", "SW"]);
   // click a wall on the OTHER axis → the whole pair moves, still cross (never an L)
   await wall(page, "left").click();
   await expect.poll(() => buildings(page).then((x) => x[0].dockAxis)).toBe("y");
-  await expect(page.getByTestId("loading-walls-label")).toHaveText("NW & SE walls");
+  await expect.poll(() => loadedWalls(page)).toEqual(["NW", "SE"]);
   // unload one wall → single on the other; unload that → none
   await wall(page, "left").click();
   await expect.poll(() => buildings(page).then((x) => x[0].dock)).toBe("single");
@@ -131,53 +133,55 @@ test("wall picker at a non-zero rotation: labels, clicks and the painted aprons 
   await expect.poll(() => buildings(page).then((x) => x[0].dock)).toBe("single");
 });
 
-test("dock stack: add zones, edit a depth, ✕ removes that zone and everything beyond", async ({ page }) => {
+test("dock row: add layers with the +, edit a depth in the chip's editor, Remove takes that layer and everything outside it", async ({ page }) => {
   await startBlank(page);
   await drawBldg(page, 200, 260, 620, 400);
   await expect.poll(() => buildings(page).then((b) => b.length)).toBe(1);
   const [b] = await buildings(page);
   await openProps(page, b.id);
-  for (let i = 0; i < 3; i++) await page.getByTestId("add-dock-zone").click({ trial: false }).catch(() => {});
-  await expect(page.getByTestId("dock-zone-row-2")).toBeVisible();
-  const depth = page.getByTestId("dock-zone-row-1").locator("input").first();
+  const dock = page.locator('[data-testid="wall-row"][data-role="dock"]').first();
+  for (const key of ["court", "trailer", "buffer"]) { await dock.getByTestId("wall-add").click(); await page.getByTestId(`wall-add-${key}`).click(); }
+  await expect(dock.getByTestId("wall-chip")).toHaveCount(3);
+  await dock.getByTestId("wall-chip").nth(1).click();                       // the trailer chip opens its editor
+  const depth = page.getByLabel("Depth", { exact: true });
   await depth.fill("70"); await depth.press("Enter");
   await expect.poll(async () => (await kids(page, b.id)).find((k) => k.type === "trailer")?.zd).toBe(70);
-  await page.getByTestId("dock-zone-row-1-remove").click();
-  await expect(page.getByTestId("dock-zone-row-1")).toHaveCount(0);
-  await expect(page.getByTestId("dock-zone-row-0")).toBeVisible();
+  await page.getByTestId("wall-editor-remove").click();                      // trailer + the buffer outside it
+  await expect(dock.getByTestId("wall-chip")).toHaveCount(1);
   expect((await kids(page, b.id)).filter((k) => k.truckCourt || k.forCourt || k.forTrailer).length).toBe(1);
 });
 
-test("end walls: typing 8 parking rows lays out 8 rows in one commit; ✕ clears; Structure folds", async ({ page }) => {
+test("rear wall: typing 8 parking rows lays out 8 rows in one commit; Remove clears; Structure folds", async ({ page }) => {
   await startBlank(page);
   await drawBldg(page, 200, 260, 620, 400);
   await expect.poll(() => buildings(page).then((b) => b.length)).toBe(1);
   const [b] = await buildings(page);
   await openProps(page, b.id);
-  const rows = page.getByTestId("end-parking-row").locator("input").first();
+  const rear = page.locator('[data-testid="wall-row"][data-role="rear"]');
+  await rear.getByTestId("wall-add").click(); await page.getByTestId("wall-add-parking").click();
+  const rows = page.getByLabel("Parking rows");
   await rows.fill("8"); await rows.press("Enter");
   await expect(rows).toHaveValue("8");
   const park = async () => (await kids(page, b.id)).filter((k) => k.type === "parking" && k.sideParkSide);
   await expect.poll(async () => (await park()).length).toBeGreaterThan(0);
-  const p0 = (await park())[0];
-  // 8 rows: 8 stall rows + ceil(8/2) aisles
+  // 8 rows: 8 stall rows + ceil(8/2) aisles (poll — the add lands one row first, the typed 8 replaces it)
   const cfg = await page.evaluate(() => { const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); const s = m[Object.keys(m)[0]] || {}; return s.settings || {}; });
   const sd = cfg.stallDepth ?? 18, ai = cfg.aisle ?? 24;
-  expect(Math.round(p0.h)).toBe(8 * sd + 4 * ai);
+  await expect.poll(async () => Math.round((await park())[0].h)).toBe(8 * sd + 4 * ai);
   // one commit: a single undo takes all of it back (blur the field first — Enter keeps focus, and a focused field owns Ctrl+Z)
   await rows.evaluate((el) => el.blur());
   await page.keyboard.press("Control+z");
-  await expect.poll(async () => (await park()).length).toBe(0);
+  await expect.poll(async () => Math.round((await park())[0].h)).toBe(sd + ai);           // back to the one row the + added
   await page.keyboard.press("Control+Shift+z");
-  await expect.poll(async () => (await park()).length).toBeGreaterThan(0);
-  await page.getByTestId("end-parking-row-remove").click();
+  await expect.poll(async () => Math.round((await park())[0].h)).toBe(8 * sd + 4 * ai);
+  await page.getByTestId("wall-editor-remove").click();
   await expect.poll(async () => (await park()).length).toBe(0);
   // Structure is closed by default and summarises; opening shows the rows and the Standards pointer
   const structure = page.getByRole("button", { name: /Structure/ });
   await expect(structure).toHaveAttribute("aria-expanded", "false");
-  await expect(structure).toContainText(/′ clear · \d+″ slab · auto/);
+  await expect(structure).toContainText(/′ clear · \d+″ slab · auto · pad auto/);
   await structure.click();
-  await expect(page.getByText("Column grid lives in")).toBeVisible();
+  await expect(page.getByTestId("grid-line")).toContainText("Standards ↗");
   await expect(page.getByText("Speed bay (ft)")).toHaveCount(0);
 });
 
@@ -189,7 +193,7 @@ test("outline width / opacity: drawn, survives reload, carried by the export", a
   await expect.poll(() => buildings(page).then((b) => b.length)).toBe(2);
   const [b1, b2] = await buildings(page);
   await openProps(page, b1.id);
-  const w = page.getByLabel("Outline width"); await w.fill("4"); await w.press("Enter");
+  const w = page.getByLabel("Line weight"); await w.fill("4"); await w.press("Enter");
   const o = page.getByLabel("Outline opacity"); await o.fill("50"); await o.press("Enter");
   await expect.poll(() => buildings(page).then((x) => x.find((e) => e.id === b1.id).strokeWidth)).toBe(4);
   await expect.poll(() => buildings(page).then((x) => x.find((e) => e.id === b1.id).strokeOpacity)).toBe(0.5);

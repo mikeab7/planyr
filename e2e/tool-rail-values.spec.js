@@ -63,7 +63,9 @@ const measure = (page) => page.evaluate(() => {
       ruleRight: hb.right, color: getComputedStyle(h).color, afterBg: getComputedStyle(h, "::after").backgroundColor,
     };
   });
-  return { railLeft: rr.left + 1 /* the rail's own 1px border */, railRight: rr.right, railW: rr.width, scrollable: r.scrollHeight > r.clientHeight, splits, plain, heads, rows: rows.length };
+  const scrollbarW = r.offsetWidth - r.clientWidth - r.clientLeft;
+  const icons = [...r.querySelectorAll("svg.rbtn-icon")].map((i) => i.getBoundingClientRect().left);
+  return { railOuterLeft: rr.left, scrollbarW, iconLefts: icons, sbStyle: { width: getComputedStyle(r).scrollbarWidth, color: getComputedStyle(r).scrollbarColor }, railLeft: rr.left + 1 /* the rail's own 1px border */, railRight: rr.right - scrollbarW, railW: rr.width, scrollable: r.scrollHeight > r.clientHeight, splits, plain, heads, rows: rows.length };
 });
 
 for (const theme of ["light", "dark"]) {
@@ -101,15 +103,26 @@ for (const theme of ["light", "dark"]) {
           expect(hs[0]).toBeGreaterThanOrEqual(26); expect(hs[0]).toBeLessThanOrEqual(30);
           for (const s of m.splits) expect(s.gapBetween).toBeLessThanOrEqual(0.5);
 
-          // 4 — equal margins left and right (no scrollbar strip)
+          // 4 — the brief's margins: pills start ~6px from the rail's outer edge (was 12), icons ~13px (was ~22),
+          //     rows end a small even gap (6px) before the scrollbar strip, and every row ends at the same x
           const row = m.plain[0];
-          expect(Math.abs((row.left - m.railLeft) - (m.railRight - row.right)), "left/right margin of a row").toBeLessThanOrEqual(0.5);
+          expect(row.left - m.railOuterLeft, "pill starts nearer the left edge than the old 12px").toBeLessThanOrEqual(7);
+          expect(Math.min(...m.iconLefts) - m.railOuterLeft, "icons sit nearer the left edge than the old ~22px").toBeLessThanOrEqual(15);
+          expect(m.railRight - row.right, "even gap before the scrollbar strip").toBeCloseTo(RAIL.padR, 0);
+          for (const p of m.plain) expect(Math.abs(p.right - row.right), `${p.name}: rows end on one x`).toBeLessThanOrEqual(0.5);
+          // 4b — a visible thin scrollbar exactly when the rail overflows (token-coloured, always on)
+          if (m.scrollable) {
+            expect(m.scrollbarW, "overflowing rail shows a scrollbar strip").toBeGreaterThan(3);
+            expect(m.scrollbarW).toBeLessThanOrEqual(12);
+          }
+          expect(m.sbStyle.width).toBe("thin");
+          expect(m.sbStyle.color).not.toMatch(/^auto$/);
 
           // 5 — headings: Tools · Site elements · Markup; the rule runs to the right edge; above > below
           expect(m.heads.map((h) => h.text.toLowerCase())).toEqual(["tools", "site elements", "markup"]);
           const model = headingInkGaps();
           m.heads.forEach((h, i) => {
-            expect(h.ruleRight).toBeCloseTo(m.railRight - 11, 0);
+            expect(h.ruleRight).toBeCloseTo(m.railRight - RAIL.padR, 0);
             expect(Math.abs(h.textLeft - h.iconLeft), `${h.text}: heading text lines up with the icon column`).toBeLessThanOrEqual(1);
             expect(h.below).toBeCloseTo(RAIL.flexGap + RAIL.hdrMarginBottom, 0);
             if (i === 0) { expect(h.above).toBeNull(); return; }

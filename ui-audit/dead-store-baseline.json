@@ -1,6 +1,6 @@
 {
   "note": "Frozen count of assigned-but-never-used locals per file. May only DECREASE — see ui-audit/dead-store-audit.mjs.",
-  "total": 64,
+  "total": 62,
   "files": {
     "src/shared/files/fileFacts.js": 1,
     "src/shared/files/matchLineFit.js": 1,
@@ -10,7 +10,7 @@
     "src/shared/ui/ProjectBreadcrumb.jsx": 1,
     "src/workspaces/doc-review/lib/pdf.js": 1,
     "src/workspaces/doc-review/lib/reviewStore.js": 4,
-    "src/workspaces/site-planner/SitePlanner.jsx": 37,
+    "src/workspaces/site-planner/SitePlanner.jsx": 35,
     "src/workspaces/site-planner/SitePlannerApp.jsx": 1,
     "src/workspaces/site-planner/components/PondSection.jsx": 1,
     "src/workspaces/site-planner/lib/cloudSync.js": 3,

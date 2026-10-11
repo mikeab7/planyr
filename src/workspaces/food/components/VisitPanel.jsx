@@ -117,11 +117,11 @@ import { formatCategory, formatAddress, formatCityFromAddress } from "../lib/for
 import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import ScoreMeter from "./ScoreMeter.jsx";
-import { RATING_MIN, RATING_MAX, RATING_STEP, RATING_SLIDER_REST } from "../lib/ratingScale.js";
+import RatingSlider from "./RatingSlider.jsx";
+import { RATING_MAX } from "../lib/ratingScale.js";
 import { cleanDraftDishes, newDraftDish } from "../lib/draftDishes.js";
 import { noAutofill } from "../lib/noAutofill.js";
 import { createDraftStore, DraftStoreContext, useDraftStore, useDraftField } from "../lib/draftStore.js";
-import { useScrollSafeSlider } from "../lib/sliderScrollGuard.js";
 
 // var(--accent-food) — a real DOM/CSS element (unlike FoodMap's canvas-drawn pin, which must use
 // the literal hex because a 2D canvas context has no cascade to resolve var() against), so this
@@ -153,64 +153,8 @@ function useIsMobile() {
 // iOS Safari zooms the whole page when a field under 16 px takes focus — on a phone that shoves the
 // sheet sideways and the form out of view. Fields in the visit form are therefore 16 px.
 const INPUT_FONT_PX = 16; // design-exempt: iOS Safari's focus-zoom threshold — below 16 px the page zooms on every field tap
-// The scale lives in lib/ratingScale.js (one place; test/foodRatingSlider.test.js pins it).
-const RATING_TICKS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-
-/* THE RATING CONTROL (Food and Ambiance, every entry point, phone and desktop): ONE native range
- * slider, 1 to 10 in HALF-POINT steps, "Not rated" until touched. ⛔ PRODUCT DECISION (owner,
- * 2026-10-05, CLAUDE.md "Owner product constraints" #16): never replaced with tap buttons, a
- * stepper or whole numbers. History: B626576 shipped it; B2057920 (PR 1941) swapped it for a 1-10 tap
- * grid + quarter nudges on phones ("ratings are hard to set with a thumb") and he got whole numbers
- * back — he wants the slider. A saved quarter-point rating (8.75, from the quarter-step period)
- * still displays as saved: the label reads the stored value, only the thumb sits on the nearest half. */
-export function RatingSlider({ value, onChange, label, isMobile = false }) {
-  const active = value != null;
-  const shown = active ? value : RATING_SLIDER_REST;
-  const color = colorForRating(shown) || "var(--accent-food)";
-  const scrollGuard = useScrollSafeSlider(value, onChange); // a vertical swipe that starts on the slider scrolls the card and leaves the rating alone
-  return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
-        <span
-          aria-live="polite"
-          style={{
-            fontSize: 18, fontWeight: 700, lineHeight: 1,
-            color: active ? textColorForRating(shown) : "var(--text-tertiary)",
-            background: active ? color : "transparent", borderRadius: 6,
-            padding: active ? "2px 8px" : 0,
-          }}
-        >
-          {active ? `${shown} / ${RATING_MAX}` : "Not rated"}
-        </span>
-        {active && (
-          <button type="button" onClick={() => onChange(null)} style={{
-            border: "none", background: "none", color: "var(--text-tertiary)", cursor: "pointer",
-            font: "inherit", fontSize: 11.5, padding: 0, textDecoration: "underline",
-          }}>
-            Clear
-          </button>
-        )}
-      </div>
-      <input
-        type="range" min={RATING_MIN} max={RATING_MAX} step={RATING_STEP}
-        value={shown} onChange={(e) => onChange(Number(e.target.value))}
-        aria-label={label} aria-valuetext={active ? `${shown} out of ${RATING_MAX}` : "not rated"}
-        data-testid="rating-slider" {...scrollGuard}
-        style={{ width: "100%", accentColor: color, cursor: "pointer", height: isMobile ? 40 : undefined, margin: 0 }}
-      />
-      <div aria-hidden="true" style={{ position: "relative", height: 12, marginTop: 1 }}>
-        {RATING_TICKS.map((t) => (
-          <span key={t} style={{
-            position: "absolute", left: `${((t - RATING_MIN) / (RATING_MAX - RATING_MIN)) * 100}%`,
-            transform: "translateX(-50%)", fontSize: FONT_SIZE.micro, color: "var(--text-tertiary)",
-          }}>
-            {t}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
+// The scale lives in lib/ratingScale.js; the control in components/RatingSlider.jsx (one component for Food, Ambiance and dish scores).
+export { RatingSlider };
 
 function fieldStyle() {
   return {

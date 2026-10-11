@@ -42,8 +42,16 @@ const INPUT_STYLE = {
  *  - onSave(note)    → { data, error }  (parent calls insertMapNote/updateMapNote)
  *  - onDelete(id)    → { error }        (parent calls deleteMapNote — SOFT)
  *  - onClose()
+ *  - targetLabel     { kind, text } — WHAT the note is attached to, by name (a saved site, a parcel's
+ *                    address or account, a pin's coordinates). Replaces the old bare "On a parcel",
+ *                    which left an owner on a phone unable to tell where the note was going.
+ *  - compact         true while the on-screen keyboard is up: the Cancel / Save row moves up beside the
+ *                    target name and the text box shrinks, so card AND target both fit in the sliver of
+ *                    map the keyboard leaves. Same controls, same test ids — only their position moves.
+ *  - maxHeight       px cap from the parent (map height minus keyboard); the card scrolls inside it
+ *                    and the text box shrinks, so the thing being annotated stays visible above it.
  */
-export default function MapNoteEditor({ note, onSave, onDelete, onClose }) {
+export default function MapNoteEditor({ note, onSave, onDelete, onClose, targetLabel = null, maxHeight = null, compact = false }) {
   const [title, setTitle] = useState(note?.title || "");
   const [body, setBody] = useState(note?.body || "");
   const [busy, setBusy] = useState(false);
@@ -85,6 +93,36 @@ export default function MapNoteEditor({ note, onSave, onDelete, onClose }) {
     } catch (e) { setErr(e?.message || String(e)); } finally { setBusy(false); }
   };
 
+  // The action buttons are one fragment used in ONE of two places (bottom row, or — compact — the
+  // header), so there is never a second copy of the Save / Cancel / Delete wiring.
+  const actions = (
+    <>
+          {!isNew && (
+            <Button variant="ghost" onClick={() => setConfirmDel(true)} disabled={busy} data-testid="map-note-delete"
+              title="Delete this note" style={{ color: "var(--danger-text)" }}>
+              Delete
+            </Button>
+          )}
+          <span style={{ flex: 1 }} />
+          <Button variant="ghost" onClick={() => onClose?.()} disabled={busy}>Cancel</Button>
+          <Button variant="primary" onClick={save} disabled={busy || problems.length > 0}
+            accent="var(--accent-notes)" onAccent="var(--on-accent-notes)"
+            data-testid="map-note-save"
+            title={problems.length ? problems[0] : `Save ${mapNoteHeadline(draft)}`}>
+            {busy ? "Saving…" : "Save"}
+          </Button>
+            </>
+  );
+  const confirmRow = (
+    <div style={{ display: "flex", alignItems: "center", gap: SPACE.sm }}>
+          <span style={{ flex: 1, fontSize: FONT_SIZE.control, color: "var(--danger-text)" }}>Delete this note?</span>
+          <Button variant="ghost" onClick={() => setConfirmDel(false)} disabled={busy}>Keep it</Button>
+          <Button variant="danger" onClick={confirmRemove} disabled={busy} data-testid="map-note-delete-confirm">
+            {busy ? "Deleting…" : "Delete"}
+          </Button>
+        </div>
+  );
+
   return (
     <div
       data-testid="map-note-editor"
@@ -98,17 +136,31 @@ export default function MapNoteEditor({ note, onSave, onDelete, onClose }) {
         background: "var(--surface-raised)", color: "var(--text-primary)",
         border: "1px solid var(--border-default)", borderRadius: RADIUS.lg,
         boxShadow: "0 10px 30px rgba(28,25,20,0.22)", // design-exempt: shadow tint, matches the map's other floating panels (ContextMenu)
-        padding: SPACE.xl,
+        padding: compact ? SPACE.md : SPACE.xl,
+        ...(compact ? { gap: SPACE.xs } : null),
+        ...(maxHeight ? { maxHeight, overflowY: "auto", overscrollBehavior: "contain" } : null),
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: SPACE.sm }}>
         <span style={{ width: SPACE.sm, height: SPACE.sm, borderRadius: RADIUS.pill, background: "var(--accent-notes)", flex: "none" }} />
-        <span style={{ flex: 1, fontSize: FONT_SIZE.label, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-secondary)" }}>
-          {isNew ? "New note" : "Note"}
+        {!compact && (
+          <span style={{ flex: 1, fontSize: FONT_SIZE.label, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-secondary)" }}>
+            {isNew ? "New note" : "Note"}
+          </span>
+        )}
+        <span
+          data-testid="map-note-target"
+          data-target-kind={targetLabel?.kind || note?.anchor?.kind || ""}
+          title={targetLabel?.text ? `On ${targetLabel.text}` : undefined}
+          style={{ fontSize: FONT_SIZE.control, fontWeight: 600, color: "var(--text-primary)", minWidth: 0, maxWidth: compact ? "46%" : "70%", flex: compact ? "1 1 auto" : undefined, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+        >
+          {targetLabel?.text
+            ? `On ${targetLabel.text}`
+            : (note?.anchor?.kind === "parcel" ? "On a parcel" : "Dropped pin")}
         </span>
-        <span style={{ fontSize: FONT_SIZE.micro, color: "var(--text-secondary)" }}>
-          {note?.anchor?.kind === "parcel" ? "On a parcel" : "Dropped pin"}
-        </span>
+        {compact && !confirmDel && (
+          <span style={{ display: "flex", alignItems: "center", gap: SPACE.sm, flex: "none" }}>{actions}</span>
+        )}
       </div>
 
       <input
@@ -125,11 +177,11 @@ export default function MapNoteEditor({ note, onSave, onDelete, onClose }) {
         value={body}
         onChange={(e) => setBody(e.target.value)}
         maxLength={NOTE_BODY_MAX}
-        rows={5}
+        rows={compact ? 2 : maxHeight && maxHeight < 360 ? 3 : 5}
         placeholder="Type your note…"
         aria-label="Note text"
         data-testid="map-note-body"
-        style={{ ...INPUT_STYLE, resize: "vertical", minHeight: 84, lineHeight: 1.45 }}
+        style={{ ...INPUT_STYLE, resize: "vertical", minHeight: compact ? 44 : maxHeight && maxHeight < 360 ? 56 : 84, lineHeight: 1.45 }}
       />
 
       {err && (
@@ -145,30 +197,9 @@ export default function MapNoteEditor({ note, onSave, onDelete, onClose }) {
           defect, and exactly the class LOUD-FAILURE exists to prevent. Replacing the whole row means
           the second click can only ever land on a control that belongs to the confirm step itself. */}
       {confirmDel ? (
-        <div style={{ display: "flex", alignItems: "center", gap: SPACE.sm }}>
-          <span style={{ flex: 1, fontSize: FONT_SIZE.control, color: "var(--danger-text)" }}>Delete this note?</span>
-          <Button variant="ghost" onClick={() => setConfirmDel(false)} disabled={busy}>Keep it</Button>
-          <Button variant="danger" onClick={confirmRemove} disabled={busy} data-testid="map-note-delete-confirm">
-            {busy ? "Deleting…" : "Delete"}
-          </Button>
-        </div>
-      ) : (
-        <div style={{ display: "flex", alignItems: "center", gap: SPACE.sm }}>
-          {!isNew && (
-            <Button variant="ghost" onClick={() => setConfirmDel(true)} disabled={busy} data-testid="map-note-delete"
-              title="Delete this note" style={{ color: "var(--danger-text)" }}>
-              Delete
-            </Button>
-          )}
-          <span style={{ flex: 1 }} />
-          <Button variant="ghost" onClick={() => onClose?.()} disabled={busy}>Cancel</Button>
-          <Button variant="primary" onClick={save} disabled={busy || problems.length > 0}
-            accent="var(--accent-notes)" onAccent="var(--on-accent-notes)"
-            data-testid="map-note-save"
-            title={problems.length ? problems[0] : `Save ${mapNoteHeadline(draft)}`}>
-            {busy ? "Saving…" : "Save"}
-          </Button>
-        </div>
+        confirmRow
+      ) : compact ? null : (
+        <div style={{ display: "flex", alignItems: "center", gap: SPACE.sm }}>{actions}</div>
       )}
     </div>
   );

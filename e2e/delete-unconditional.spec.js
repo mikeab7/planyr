@@ -19,7 +19,7 @@
  *   • DELETE AFTER UNDO. `applySnapshot` cleared `sel` but not `multi`, leaving the same dead key.
  */
 import { test, expect } from "@playwright/test";
-import { openModule } from "./helpers.js";
+import { openModule, panelPlus } from "./helpers.js";
 
 /* The persisted (logged-out) site model — on-disk truth, so it doubles as the reload assertion. */
 function readModel(page) {
@@ -107,10 +107,8 @@ test.describe("delete is unconditional and never silent (logged out)", () => {
     await select(page, b);
     await page.getByRole("button", { name: /^Properties$/ }).first().click();
     // Give it bonded children (each feature row is "label · [－] count [＋]"; the ＋ is its last button).
-    // Old "Car parking ＋" walked sidewalk → parking rows; the end-wall stack now has "+ Sidewalk" and a Parking rows stepper.
-    const plus = (label) => (label === "Car parking"
-      ? { click: async () => { const sw = page.getByTestId("add-end-sidewalk"); if (await sw.count()) await sw.click(); else await page.getByTestId("park-rows-plus").click(); } }
-      : page.getByTestId({ "Dock zones": "add-dock-zone", "Bump-outs": "bump-plus" }[label]));
+    // The Loading rows (Building panel v2): see panelPlus in e2e/helpers.js.
+    const plus = (label) => panelPlus(page, label);
     for (const label of ["Dock zones", "Car parking"]) { await plus(label).click(); await page.waitForTimeout(400); }
     await expect.poll(() => readModel(page).then((m) => m.els.length)).toBeGreaterThan(2);
     const before = await readModel(page);

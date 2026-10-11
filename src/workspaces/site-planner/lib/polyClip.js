@@ -95,9 +95,23 @@ function clipByConvex(subject, clip) {
 
 // Intersection AREA (feet²) of two simple polygons. Triangulate both, sum triangle∩triangle
 // (each a convex clip). 0 when they merely touch at an edge/vertex or are disjoint.
+// B2225425 (round 3) — memoised per ring PAIR by identity (a ring is treated as immutable here, as by every identity cache in
+// this tree: the planner replaces `points` wholesale on edit, never mutates it). `overlappingParcelPairs` re-asked every pair on
+// every plan open and again when the rows seed landed — 12–14 ms on Concept A's 16 parcels, O(n²), inside one render.
+const pairAreaCache = new WeakMap();   // ringA -> WeakMap(ringB -> area)
+const triCache = new WeakMap();        // ring -> triangles
+const trianglesOf = (ring) => { let t = triCache.get(ring); if (!t) { t = triangulate(ring); triCache.set(ring, t); } return t; };
 export function polyIntersectArea(ringA, ringB) {
   if (!Array.isArray(ringA) || !Array.isArray(ringB) || ringA.length < 3 || ringB.length < 3) return 0;
-  const ta = triangulate(ringA), tb = triangulate(ringB);
+  const hitA = pairAreaCache.get(ringA); if (hitA && hitA.has(ringB)) return hitA.get(ringB);
+  const hitB = pairAreaCache.get(ringB); if (hitB && hitB.has(ringA)) return hitB.get(ringA);
+  const sum = polyIntersectAreaUncached(ringA, ringB);
+  let m = pairAreaCache.get(ringA); if (!m) { m = new WeakMap(); pairAreaCache.set(ringA, m); }
+  m.set(ringB, sum);
+  return sum;
+}
+function polyIntersectAreaUncached(ringA, ringB) {
+  const ta = trianglesOf(ringA), tb = trianglesOf(ringB);
   let sum = 0;
   for (const t1 of ta) {
     const s = ccw(t1);
@@ -118,19 +132,28 @@ export const PARCEL_OVERLAP_TOL = { absSqft: 10, relOfSmaller: 0.005 };
 // Returns [{ aId, bId, area }] for every pair whose intersection area clears the tolerance —
 // the safety net that catches a superseded parent + child both active (the B651 class) OR any
 // two hand-drawn lots that overlap, regardless of how the overlap arose.
-export function overlappingParcelPairs(parcels, tol = PARCEL_OVERLAP_TOL) {
+/* B2236000 (round 6) — the pair scan as STEPS (a generator that yields after each pair), so a caller off the render path — the account-wide parcel
+ * summary after a fresh load — can drive it in time slices. One project with many lots is otherwise one long task (the scan is O(lots²) clipped
+ * triangle pairs). `overlappingParcelPairs` drives the same steps to the end, so there is ONE implementation and the two cannot disagree. */
+export function* overlappingParcelPairsSteps(parcels, tol = PARCEL_OVERLAP_TOL) {
   const act = (Array.isArray(parcels) ? parcels : []).filter(
     (p) => p && p.active !== false && Array.isArray(p.points) && p.points.length >= 3);
   const out = [];
   for (let i = 0; i < act.length; i++) {
     for (let j = i + 1; j < act.length; j++) {
       const area = polyIntersectArea(act[i].points, act[j].points);
-      if (area <= 0) continue;
-      const minA = Math.min(polyArea(act[i].points), polyArea(act[j].points));
-      if (area > Math.max(tol.absSqft, tol.relOfSmaller * minA)) out.push({ aId: act[i].id, bId: act[j].id, area });
+      if (area > 0) {
+        const minA = Math.min(polyArea(act[i].points), polyArea(act[j].points));
+        if (area > Math.max(tol.absSqft, tol.relOfSmaller * minA)) out.push({ aId: act[i].id, bId: act[j].id, area });
+      }
+      yield;
     }
   }
   return out;
+}
+export function overlappingParcelPairs(parcels, tol = PARCEL_OVERLAP_TOL) {
+  const gen = overlappingParcelPairsSteps(parcels, tol);
+  for (;;) { const r = gen.next(); if (r.done) return r.value; }
 }
 
 // Clipper works on an integer grid → scale feet to centi-feet (~1/8" precision), matching pondOffset.js.

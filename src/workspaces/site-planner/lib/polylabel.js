@@ -19,6 +19,13 @@
  */
 
 const cache = new WeakMap();
+/* Identity is the cheap hit (a render that holds the same array). It MISSES whenever the ring is rebuilt with identical coordinates — and a plan
+ * open/switch re-seeds every parcel from its rows (new arrays, same points), so the identity cache alone paid the whole search again on every
+ * open and every revisit (NEW-1, B2224000). The second tier is keyed by the COORDINATES, so identical geometry is answered without a search no
+ * matter which array carries it. Bounded (FIFO) — a long session across many plans cannot grow it without limit. */
+const byContent = new Map();
+const CONTENT_CACHE_MAX = 512;
+const ringKey = (ring) => { let k = String(ring.length); for (const p of ring) k += `|${p.x},${p.y}`; return k; };
 
 // Squared distance from point p to segment a→b.
 function seg2(p, a, b) {
@@ -90,6 +97,8 @@ function search(ring, precision, dist, useCache) {
   if (!Array.isArray(ring) || ring.length < 3) return null;
   const cached = useCache ? cache.get(ring) : null;
   if (cached && precision == null) return cached;
+  const key = useCache && precision == null ? ringKey(ring) : null;
+  if (key !== null) { const hit = byContent.get(key); if (hit) { cache.set(ring, hit); return hit; } }
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const p of ring) {
@@ -105,15 +114,30 @@ function search(ring, precision, dist, useCache) {
 
   // Seed a coarse grid, then refine the most promising cell first (best-first quadtree search).
   let best = cellOf(centre.x, centre.y, 0, ring, dist);
-  const queue = [];
-  const push = (c) => { queue.push(c); };
+  /* A binary MAX-heap on `max` (ties: earliest pushed first, so the answer is deterministic). The first version rescanned the whole queue on every
+   * pop (O(queue) per step): a long thin strip has a FLAT ridge, so every cell along its spine stays above the incumbent until it is refined to
+   * `prec`, the queue runs to thousands, and the rescan made two 83 × 1,705 ft parcels cost ~155 ms each — 416 ms for Concept A's 16 parcels,
+   * all inside one React render on every plan open (NEW-1, B2224000). Same search, same stop rule; only the pop is O(log n). */
+  const heap = []; let seq = 0;
+  const before = (a, b) => a.max > b.max || (a.max === b.max && a.seq < b.seq);
+  const push = (c) => {
+    c.seq = seq++; let i = heap.length; heap.push(c);
+    while (i > 0) { const p = (i - 1) >> 1; if (!before(c, heap[p])) break; heap[i] = heap[p]; i = p; }
+    heap[i] = c;
+  };
   const popBest = () => {
-    let bi = 0;
-    for (let i = 1; i < queue.length; i++) if (queue[i].max > queue[bi].max) bi = i;
-    const c = queue[bi];
-    queue[bi] = queue[queue.length - 1];
-    queue.pop();
-    return c;
+    const top = heap[0], last = heap.pop();
+    if (heap.length) {
+      let i = 0; const n = heap.length;
+      for (;;) {
+        let k = 2 * i + 1; if (k >= n) break;
+        if (k + 1 < n && before(heap[k + 1], heap[k])) k++;
+        if (!before(heap[k], last)) break;
+        heap[i] = heap[k]; i = k;
+      }
+      heap[i] = last;
+    }
+    return top;
   };
   const half = cellSize / 2;
   for (let x = minX; x < maxX; x += cellSize) {
@@ -121,7 +145,7 @@ function search(ring, precision, dist, useCache) {
   }
 
   let guard = 20000;                       // hard bound: a pathological ring can never spin forever
-  while (queue.length && guard-- > 0) {
+  while (heap.length && guard-- > 0) {
     const c = popBest();
     if (c.d > best.d) best = c;
     if (c.max - best.d <= prec) continue;  // this branch can no longer beat the incumbent
@@ -133,6 +157,9 @@ function search(ring, precision, dist, useCache) {
   }
 
   const out = best.d > 0 ? { x: best.x, y: best.y } : centre;
-  if (useCache && precision == null) cache.set(ring, out);
+  if (useCache && precision == null) {
+    cache.set(ring, out);
+    if (key !== null) { if (byContent.size >= CONTENT_CACHE_MAX) byContent.delete(byContent.keys().next().value); byContent.set(key, out); }
+  }
   return out;
 }

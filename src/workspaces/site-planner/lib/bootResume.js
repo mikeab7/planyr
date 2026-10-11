@@ -189,3 +189,13 @@ export function resumeTargetAfterSignIn({ routeProjectId, currentId, plansOfGrou
 export function routeProjectJustChanged(prevProjectId, projectId) {
   return prevProjectId !== undefined && prevProjectId !== projectId;
 }
+
+/* B2225425 (round 3, found by the plan-open live harness) — WHEN must the URL writer (effect 2) stand down for the route reconcile
+ * (effect 1)? Only for a route change that came from OUTSIDE — never for the round trip of the writer's OWN last write. The echo of
+ * our own hash write is a route change too, and flagging it left the one-pass "defer" flag standing (effect 2 does not re-run on
+ * that pass: its own inputs did not change), so it was consumed by the NEXT switch's write instead, which was then skipped:
+ * project A → project B → back to A left the URL naming B for good (measured on planyr.io b94ffe1, and on builds before both perf
+ * rounds). `ownEcho` = the incoming route is exactly what the writer last asked for. Pure. */
+export function routeChangeNeedsDefer(prevProjectId, projectId, ownEcho) {
+  return routeProjectJustChanged(prevProjectId, projectId) && !ownEcho;
+}
