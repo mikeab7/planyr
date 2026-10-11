@@ -24,7 +24,10 @@ import { listFolders } from "../lib/folders.js";
 import { listRecents } from "../../../shared/recents/recentDocs.js";
 import { listReviews, listDeletedReviews } from "../../doc-review/lib/reviewStore.js";
 import { useReviewTrash, TrashNotice, UndoToast, RecentlyDeletedList, DeleteButton } from "./ReviewTrash.jsx";
-import { listProjects as listLocalProjects } from "../../../shared/projects/projects.js";
+import { listProjects as listLocalProjects, listTrackedProjects } from "../../../shared/projects/projects.js";
+import { useProjectNames } from "../../../shared/names/names.js";
+import { reportClientEvent } from "../../../shared/telemetry/clientErrors.js";
+import { trackedSitesWithFiles, rowFileProblem } from "../lib/trackedSites.js";
 import { liveProjectIds } from "../../../shared/projects/docProjectLiveness.js";
 import { FONT_SIZE } from "../../../shared/ui/designTokens.js";
 import { RADIUS } from "../../../shared/ui/radius.js";
@@ -64,11 +67,11 @@ function TypeTag({ doc }) {
   );
 }
 
-export function FileCard({ pin, doc, missing = !doc, projectName, when, onOpen, onUnpin, trash }) {
+export function FileCard({ pin, doc, missing = !doc, projectName, when, onOpen, onUnpin, trash, opening = false }) {
   const title = doc ? (doc.title || doc.item || "Untitled drawing") : (pin?.label || "Missing drawing");
   return (
     <div style={{ ...cardBase, cursor: "default" }}>
-      <button onClick={missing ? undefined : onOpen} disabled={missing} title={missing ? undefined : "Open in Review"}
+      <button onClick={missing ? undefined : onOpen} disabled={missing} aria-busy={opening || undefined} title={missing ? undefined : "Open in Review"}
         style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 9, textAlign: "left", border: "none", background: "transparent", padding: 0, fontFamily: "inherit", cursor: missing ? "default" : "pointer" }}>
         <span aria-hidden style={{ flex: "none", color: "var(--accent-library-text)" }}>📄</span>
         <span style={{ minWidth: 0 }}>
@@ -78,8 +81,11 @@ export function FileCard({ pin, doc, missing = !doc, projectName, when, onOpen, 
           <span style={{ display: "block", fontSize: 10.5, color: missing ? "var(--danger-text)" : "var(--text-tertiary)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {missing
               ? (doc ? "Can't open this — its project has been deleted." : "Can't find this drawing anymore — it may have been deleted.")
-              : [projectName, doc.discipline, when].filter(Boolean).join(" · ")}
+              : opening ? "Opening…" : [projectName, doc.discipline, when].filter(Boolean).join(" · ")}
           </span>
+          {!missing && !opening && rowFileProblem(doc) && (
+            <span data-testid="row-file-problem" style={{ display: "block", fontSize: 10.5, color: "var(--danger-text)", marginTop: 2 }}>{rowFileProblem(doc)}</span>
+          )}
         </span>
       </button>
       {onUnpin && <button onClick={onUnpin} title="Unpin" style={starBtn}>★</button>}
@@ -107,16 +113,19 @@ function FolderCard({ pin, label, projectName, onOpen, onUnpin }) {
 }
 
 /* One Unfiled row: the file (opens in Review) + a "Move to project…" picker that files it for real. */
-export function UnfiledCard({ doc, projects = [], busy = false, onOpen, onMove, onHistory, trash }) {
+export function UnfiledCard({ doc, projects = [], busy = false, onOpen, onMove, onHistory, trash, opening = false }) {
   const title = doc.title || doc.sfile || doc.item || "Untitled file";
   return (
     <div data-testid="unfiled-row" data-review-id={doc.id} style={{ ...cardBase, cursor: "default", flexWrap: "wrap" }}>
-      <button onClick={onOpen} title="Open in Review"
+      <button onClick={onOpen} aria-busy={opening || undefined} title="Open in Review"
         style={{ flex: "1 1 160px", minWidth: 0, display: "flex", alignItems: "center", gap: 9, textAlign: "left", border: "none", background: "transparent", padding: 0, fontFamily: "inherit", cursor: "pointer", color: "inherit" }}>
         <span aria-hidden style={{ flex: "none", color: "var(--accent-library-text)" }}>📄</span>
         <span style={{ minWidth: 0 }}>
           <span style={{ display: "block", fontSize: FONT_SIZE.emphasis, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}<TypeTag doc={doc} /></span>
-          <span style={{ display: "block", fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", marginTop: 2 }}>{[doc.discipline, fmtWhen(Date.parse(doc.updated_at || "") || 0)].filter(Boolean).join(" · ")}</span>
+          <span style={{ display: "block", fontSize: FONT_SIZE.label, color: "var(--text-tertiary)", marginTop: 2 }}>{opening ? "Opening…" : [doc.discipline, fmtWhen(Date.parse(doc.updated_at || "") || 0)].filter(Boolean).join(" · ")}</span>
+          {!opening && rowFileProblem(doc) && (
+            <span data-testid="row-file-problem" style={{ display: "block", fontSize: FONT_SIZE.label, color: "var(--danger-text)", marginTop: 2 }}>{rowFileProblem(doc)}</span>
+          )}
         </span>
       </button>
       {onHistory && <button onClick={onHistory} title="Version history — see earlier saved versions" data-testid="library-version-history"
@@ -152,11 +161,18 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
   // the check resolves, and stays empty on a failed/inconclusive check — fail OPEN, same as the
   // Dashboard card, never hide a pin/recent on a maybe.
   const [deadProjectIds, setDeadProjectIds] = useState(new Set());
+  // NEW-1 — a click is never silent. `opening` = the row whose Open was just pressed (it says "Opening…"); if the
+  // route has not left the Library a few seconds later, `openNote` says so out loud and the miss is recorded.
+  const [opening, setOpening] = useState(null);
+  const [openNote, setOpenNote] = useState(null);
 
   // Local, instant; the per-user cloud cache feeds it.
   let projects = [];
   try { projects = listLocalProjects(); } catch (_) { projects = []; }
-  const projName = (id) => { const p = projects.find((x) => x.id === id); return p ? p.name : ""; };
+  // NEW-2: a tracked (record-only) site is not in `projects`, so its files used to show NO project name. The names
+  // selector reads every role (the one source of truth for a project's name) and re-renders on a rename.
+  const nameOf = useProjectNames();
+  const projName = (id) => { const p = projects.find((x) => x.id === id); return p ? p.name : (nameOf(id) || ""); };
 
   useEffect(() => {
     if (!active) return; // keep-alive: reload pins/recents/names each time Home comes back on screen
@@ -198,8 +214,26 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
   const openHistory = (id) => { const doc = byId.get(id); onOpenHistory?.(doc || { id, project_id: null }); }; // B2034128
   const openDoc = (id, fallbackProjectId) => {
     const doc = byId.get(id);
+    setOpenNote(null); setOpening({ id, at: Date.now() });
     onOpenFile?.(doc || { id, project_id: fallbackProjectId || null });
   };
+  useEffect(() => {
+    if (!opening) return;
+    if (!active) { setOpening(null); return; }   // the route left the Library — the open worked
+    const t = setTimeout(() => {
+      const d = byId.get(opening.id);
+      const label = (d && (d.title || d.sfile || d.item)) || "that file";
+      setOpenNote(`“${label}” did not open — nothing happened. Click it again; if it still does not open, it is being recorded so it can be fixed.`);
+      reportClientEvent("library-open-no-response", `Open in Review pressed, route still on the Library after 3s`, { id: opening.id, hasFile: !!(d && d.sfile), project: (d && (d.project_id || d.projectId)) || null });
+      setOpening(null);
+    }, 3000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opening, active]);
+  // NEW-1 — never paint rows that are about to move: the "Recently deleted" chip arrives after the lists and used to
+  // shove every row down while a hand was already on its way to one. Rows wait for the first full read (with a ceiling
+  // so a hung read cannot blank the page).
+  useEffect(() => { const t = setTimeout(() => setLoading(false), 8000); return () => clearTimeout(t); }, []);
 
   // B1340368 — check liveness for every project id this screen's pins/recents actually
   // reference, once `reviews` has resolved them to real project ids (pins/recents alone only
@@ -237,6 +271,7 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
     .filter((r) => r.doc && !projectIsDead(docProject(r.doc, r.projectId)))
     .slice(0, 10);
   const unfiled = unfiledRows(reviews);
+  const trackedSites = trackedSitesWithFiles(listTrackedProjects(), reviews);
   const nothingSaved = !pinnedFolders.length && !pinnedFiles.length && !recentCards.length && !unfiled.length;
   const moveUnfiled = async (doc, pid) => {
     const proj = projects.find((p) => p.id === pid);
@@ -273,6 +308,13 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
           </div>
         ) : (<>
 
+        {loading && (
+          <div role="status" data-testid="library-home-loading" style={{ margin: "26px 2px 4px", color: "var(--text-secondary)", fontSize: 13 }}>Loading your files…</div>
+        )}
+        {openNote && (
+          <div role="alert" data-testid="library-open-note" style={{ margin: "10px 2px 0", fontSize: FONT_SIZE.control, color: "var(--danger-text)" }}>{openNote}</div>
+        )}
+
         {nothingSaved && !loading && (
           <div style={{ margin: "26px 2px 4px", color: "var(--text-secondary)", fontSize: 13, lineHeight: 1.6 }}>
             <b style={{ color: "var(--text-primary)", fontSize: 15 }}>Your Library home</b>
@@ -283,7 +325,7 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
           </div>
         )}
 
-        {(pinnedFolders.length > 0 || pinnedFiles.length > 0) && (
+        {!loading && (pinnedFolders.length > 0 || pinnedFiles.length > 0) && (
           <>
             <SectionHead>Pinned</SectionHead>
             {pinnedFolders.length > 0 && (
@@ -302,7 +344,7 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
                 <div key={`file:${p.id}`} style={{ marginBottom: 6 }}>
                   <FileCard pin={p} doc={doc} missing={!doc || projectIsDead(pid)} projectName={projName(pid)}
                     when={doc ? fmtWhen(Date.parse(doc.updated_at || "") || 0) : ""}
-                    onOpen={() => openDoc(p.id, p.projectId)}
+                    onOpen={() => openDoc(p.id, p.projectId)} opening={opening?.id === p.id}
                     onUnpin={() => removePin(uid, { type: "file", id: p.id })} />
                 </div>
               );
@@ -310,19 +352,19 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
           </>
         )}
 
-        {recentCards.length > 0 && (
+        {!loading && recentCards.length > 0 && (
           <>
             <SectionHead>Recent</SectionHead>
             {recentCards.map((r) => (
               <div key={`recent:${r.id}`} style={{ marginBottom: 6 }}>
                 <FileCard doc={r.doc} projectName={projName(docProject(r.doc, r.projectId))}
-                  when={fmtWhen(r.openedAt)} onOpen={() => openDoc(r.id, r.projectId)} trash={rowTrash(r.id)} />
+                  when={fmtWhen(r.openedAt)} onOpen={() => openDoc(r.id, r.projectId)} opening={opening?.id === r.id} trash={rowTrash(r.id)} />
               </div>
             ))}
           </>
         )}
 
-        {(unfiled.length > 0 || moveNote) && (
+        {!loading && (unfiled.length > 0 || moveNote) && (
           <>
             <SectionHead>Unfiled</SectionHead>
             {moveNote && <div role={moveNote.ok ? "status" : "alert"} data-testid="unfiled-note" style={{ fontSize: FONT_SIZE.control, margin: "0 2px 8px", color: moveNote.ok ? "var(--text-secondary)" : "var(--danger-text)" }}>{moveNote.text}</div>}
@@ -334,7 +376,7 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
             {unfiled.map((d) => (
               <div key={`unfiled:${d.id}`} style={{ marginBottom: 6 }}>
                 <UnfiledCard doc={d} projects={projects} busy={moving === d.id}
-                  onOpen={() => openDoc(d.id, null)} onMove={(pid) => moveUnfiled(d, pid)} onHistory={onOpenHistory ? () => openHistory(d.id) : undefined} trash={rowTrash(d.id)} />
+                  onOpen={() => openDoc(d.id, null)} opening={opening?.id === d.id} onMove={(pid) => moveUnfiled(d, pid)} onHistory={onOpenHistory ? () => openHistory(d.id) : undefined} trash={rowTrash(d.id)} />
               </div>
             ))}
           </>
@@ -359,6 +401,28 @@ export default function LibraryHome({ uid = null, active = true, onOpenFile, onO
               </button>
             ))}
           </div>
+        )}
+
+        {trackedSites.length > 0 && (
+          <>
+            <SectionHead>Record-only sites</SectionHead>
+            <div style={{ fontSize: FONT_SIZE.control, color: "var(--text-secondary)", margin: "0 2px 8px" }}>
+              Sites that hold records (comps, flyers, notes) but no plan, so they are not in the project list. Their files live here.
+            </div>
+            <div data-testid="library-tracked-sites" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 8 }}>
+              {trackedSites.map((s) => (
+                <button key={s.id} data-testid="library-tracked-site" data-site-id={s.id} onClick={() => onPickProject?.(s.id)} title="Open this site's files" style={cardBase}>
+                  <span aria-hidden style={{ flex: "none", width: 26, height: 26, borderRadius: 7, display: "grid", placeItems: "center", background: "var(--hover-ghost)", border: "1px solid var(--border-default)", color: "var(--text-primary)", fontSize: 12, fontWeight: 800 }}>
+                    {(s.name || "S").trim().charAt(0).toUpperCase()}
+                  </span>
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{ display: "block", fontSize: 12.5, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</span>
+                    <span style={{ display: "block", fontSize: 10.5, color: "var(--text-tertiary)", marginTop: 1 }}>{s.count} file{s.count === 1 ? "" : "s"}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </>
         )}
 
         <div style={{ marginTop: 22, padding: "9px 12px", borderRadius: 9, border: "1.5px dashed var(--border-default)", color: "var(--text-tertiary)", fontSize: 11.5, textAlign: "center" }}>
