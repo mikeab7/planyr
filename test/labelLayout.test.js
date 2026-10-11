@@ -60,15 +60,13 @@ describe("labelLayout — shared label level-of-detail + collision engine (B121)
     expect(layoutLabels(null).size).toBe(0);
   });
 
-  it("buildingLabelLines (B123): name → sf → (incl. N bump-outs) → dims; parenthetical only with bump-outs", () => {
-    expect(buildingLabelLines({ name: "Building 1", sqft: "198,000 SF", bumpCount: 2, dims: "300′ × 638′" }))
-      .toEqual(["Building 1", "198,000 SF", "(incl. 2 bump-outs)", "300′ × 638′"]);
-    expect(buildingLabelLines({ name: "Building 3", sqft: "90,000 SF", bumpCount: 0, dims: "300′ × 300′" }))
-      .toEqual(["Building 3", "90,000 SF", "300′ × 300′"]); // no parenthetical line when no bump-outs
-    expect(buildingLabelLines({ name: "Building 2", sqft: "50,000 SF", bumpCount: 1, dims: "200′ × 250′" })[2])
-      .toBe("(incl. 1 bump-out)"); // singular
-    // Drop order: feeding the stack to the LOD keeps name + sf and drops the dimensions
-    // (and the parenthetical) first — so square footage outlives the dimensions on zoom-out.
+  it("buildingLabelLines (B123, NEW-1): name → sf → dims; NO bump-out wording at any count", () => {
+    for (const n of [0, 1, 2, 7]) {
+      const out = buildingLabelLines({ name: "Building 1", sqft: "198,000 SF", bumpCount: n, dims: "300′ × 638′" });
+      expect(out).toEqual(["Building 1", "198,000 SF", "300′ × 638′"]);
+      expect(out.join(" ")).not.toMatch(/bump|incl/i); // singular, plural and many all gone
+    }
+    // Drop order: feeding the stack to the LOD keeps name + sf and drops the dimensions first.
     const stack = buildingLabelLines({ name: "Building 1", sqft: "198,000 SF", bumpCount: 2, dims: "300′ × 638′" });
     expect(fitLines(stack, 10, 25)).toEqual(["Building 1", "198,000 SF"]);
   });
@@ -310,6 +308,6 @@ describe("labelLayout — shared label level-of-detail + collision engine (B121)
     expect(buildingLabelLines({ name: "Building 1", sqft: null, bumpCount: 0, dims: "300′ × 638′" }))
       .toEqual(["Building 1", "300′ × 638′"]);          // name + dims, no sf line
     expect(buildingLabelLines({ name: "Building 2", sqft: undefined, bumpCount: 2, dims: "200′ × 250′" }))
-      .toEqual(["Building 2", "(incl. 2 bump-outs)", "200′ × 250′"]); // bump note kept, sf dropped
+      .toEqual(["Building 2", "200′ × 250′"]); // sf dropped, no bump note
   });
 });

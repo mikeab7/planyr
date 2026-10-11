@@ -70,7 +70,9 @@ describe("parcel list — overlap disclosure (owner real-data check 2026-10-11)"
   });
   it("the icon slot is one width for the whole list: two icons, three once anything is locked", () => {
     expect(slotWidth(false)).toBeLessThan(slotWidth(true));
-    expect(slotWidth(true) - slotWidth(false)).toBe(20);
+    // one seat per marker kind, the same width each: padlock seat === overlap seat
+    expect(slotWidth(true, false) - slotWidth(false, false)).toBe(slotWidth(false, true) - slotWidth(false, false));
+    expect(slotWidth(true, true)).toBeGreaterThan(slotWidth(true, false));
   });
   it("source guard: the padlock is rendered inside the icon slot, never in the name cell; rename is a menu item", () => {
     const src = readFileSync("src/workspaces/site-planner/components/ParcelsPanel.jsx", "utf8");
@@ -78,5 +80,11 @@ describe("parcel list — overlap disclosure (owner real-data check 2026-10-11)"
     expect(lockAt).toBeGreaterThan(slotAt);
     expect(slotAt).toBeGreaterThan(nameCellAt);
     expect(src).toMatch(/item\("Rename"/);
+    // the overlap marker is an icon in the slot — never a pill/text in the name block (it would add a line and push the name)
+    const ovAt = src.indexOf("parcel-row-overlap-");
+    expect(ovAt).toBeGreaterThan(slotAt);
+    expect(src).not.toMatch(/>overlaps<\/span>/);
+    expect(src).toMatch(/AC overlaps, counted once/);
+    expect(src).toMatch(/parcels-summary-line/);
   });
 });
