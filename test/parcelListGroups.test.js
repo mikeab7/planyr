@@ -40,6 +40,8 @@ describe("parcel list layout C", () => {
     expect(src).not.toMatch(/textOverflow:\s*"ellipsis"/);
     expect(src).not.toMatch(/font-display/);
     expect(src).toMatch(/AC in site/);
+    expect(src).not.toMatch(/marginLeft: row\.depth/); // a split piece's indent must not shift the acres column
+    expect(src).toMatch(/paddingLeft: row\.depth/);
     expect(src).not.toMatch(/parcels-active-head/);
   });
 });

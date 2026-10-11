@@ -108,7 +108,7 @@ try {
   const eye = await box(T("parcel-row-eye-p1"));
   ok("no column heading row (no 'Active' / 'Acres' heading)", (await T("parcels-active-head").count()) === 0 && (await T("parcels-panel").getByText(/^Acres$/i).count()) === 0);
   const chk = await box(T("parcel-row-check-p1")), nm = await box(T("parcel-row-p1")), ac = await box(T("parcel-row-acres-p1"));
-  ok("checkbox, name, acres and eye share one centre line", chk && nm && ac && eye && [chk, nm, ac].every((b) => Math.abs(b.cy - eye.cy) <= 3), `${[chk, nm, ac, eye].map((b) => b && b.cy.toFixed(1))}`);
+  ok("checkbox, acres and eye share one centre line (the name block may be taller: it carries the source line)", chk && nm && ac && eye && [chk, ac].every((b) => Math.abs(b.cy - eye.cy) <= 3), `${[chk, nm, ac, eye].map((b) => b && b.cy.toFixed(1))}`);
   const l1 = await T("parcel-row-p1").innerText(), l3 = await T("parcel-row-p3").innerText();
   ok("county row's second line reads '<CAD> · <account>'", /Harris CAD · 1001/.test(l1), JSON.stringify(l1));
   ok("drawn row has no second line (its group header says Drawn)", (await T("parcel-row-source-p3").count()) === 0 && (await T("parcels-group-drawn").count()) === 1, JSON.stringify(l3));

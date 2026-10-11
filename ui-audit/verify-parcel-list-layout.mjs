@@ -31,7 +31,8 @@ const ok = (name, cond, extra = "") => { results.push({ name, pass: !!cond }); c
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* ---- fixtures: a rectangle of exactly `ac` acres (300 ft wide) ---- */
-const rect = (i, ac) => { const x = (i % 6) * 700, y = Math.floor(i / 6) * 2400, w = 300, h = (ac * 43560) / w; return [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }]; };
+let yCursor = 0; // stack the lots so none overlap (the site total is DISSOLVED: shared ground counts once)
+const rect = (i, ac) => { const x = 0, y = yCursor, w = 300, h = (ac * 43560) / w; yCursor += h + 200; return [{ x, y }, { x: x + w, y }, { x: x + w, y: y + h }, { x, y: y + h }]; };
 const county = (i, id, ac, acct, extra = {}) => ({ id, points: rect(i, ac), source: "county", gisKey: id, acct, ...extra });
 const drawn = (i, id, ac, label, extra = {}) => ({ id, points: rect(i, ac), source: "drawn", label, ...extra });
 const comb = (i, id, ac, label, n, extra = {}) => ({ id, points: rect(i, ac), label, combined: { from: Array.from({ length: n }, (_, k) => ({ ...county(i, id + "s" + k, ac / n, "0" + (500000 + k)), snapName: "Lot " + (k + 1) })) }, ...extra });
@@ -56,6 +57,7 @@ const FIX = [
   { tag: "one", title: "ZZ One Parcel", sections: { drawn: 1 }, rows: 1, parcels: [drawn(0, "o1", 41.5, "Parcel 1")] },
 ];
 const SITES = Object.fromEntries(FIX.map((f) => { const s = mk(f.tag, f.title, f.parcels); return [s.id, s]; }));
+void yCursor;
 const WIDTHS = [240, 320, 620]; // PANEL_MIN_W · default · PANEL_MAX_W (lib/panelWidth.js)
 const THEMES = ["light", "dark"];
 
@@ -122,7 +124,8 @@ const MEASURE = () => {
     spills: panel.scrollWidth > panel.clientWidth + 0.5,
     panelW: Math.round(panel.getBoundingClientRect().width),
   };
-  return { clipped, contrast, overlaps, rows, groups, acresRight, ...detail };
+  const groupAcres = [...panel.querySelectorAll('[data-testid^="parcels-group-acres-"]')].map((e) => Number(e.textContent.replace(/,/g, "")));
+  return { clipped, contrast, overlaps, rows, groups, acresRight, groupAcres, ...detail };
 };
 
 const openFixture = async (f, theme, width) => {
@@ -161,6 +164,8 @@ try {
     ok(`${tag}: row heights are consistent within each row type (${types.size} types)`, nonUniform.length === 0, nonUniform.join(" | "));
     const single = types.get("0/1/0");
     if (single) { const base = single[0]; const bad = [...types].filter(([k, hs]) => { const [s, n, u] = k.split("/").map(Number); const extra = (n - 1) + (u > 1 ? u - 1 : 0); return extra > 0 && !s ? Math.abs(hs[0] - base - extra * 17) > 2 : false; }); ok(`${tag}: a wrapped name adds only whole line heights`, bad.length === 0, bad.map(([k, hs]) => `${k}=${hs[0]}`).join(" | ")); }
+    const sumAc = Number(m.fs.sumText.split(" ")[0].replace(/,/g, "")), grpAc = m.groupAcres.reduce((a, b) => a + b, 0);
+    ok(`${tag}: the summary total equals the sum of the group totals (non-overlapping fixture)`, Math.abs(sumAc - grpAc) < 0.06, `${sumAc} vs ${grpAc.toFixed(2)}`);
     ok(`${tag}: the summary number is the same size as the words around it`, m.fs.num === m.fs.sum, `${m.fs.num} vs ${m.fs.sum} — "${m.fs.sumText}"`);
     ok(`${tag}: text clears 4.5:1`, m.contrast.length === 0, m.contrast.slice(0, 3).join(" | "));
     ok(`${tag}: the panel never scrolls sideways (${m.panelW}px wide)`, !m.spills);

@@ -56,6 +56,7 @@ function Tag({ children }) {
 const ACRES_W = 60; // fits "1,234.56" at the row's semibold figure size
 const SLOT_W = 44; // eye · ⋯ — 22 each (the padlock rides beside the name, so the slot stays this narrow)
 const COLS = `20px minmax(0, 1fr) ${ACRES_W}px ${SLOT_W}px`;
+const FIRST_LINE_H = 29; // one name line (17) + the row's 6px top/bottom padding: checkbox, acres and icons centre on the FIRST line of a wrapped row
 const FILTER_MIN_ROWS = 8; // the filter box only earns its space once the list is long
 
 export const GROUPS = [
@@ -133,6 +134,9 @@ function RowMenu({ row, handlers, open, armed, onOpen, onClose, onArm }) {
   );
 }
 
+/* A long account number never splits mid-digit: it drops whole onto its own line first (an inline-block), and only breaks if the column is narrower than the number itself. */
+const keepDigits = (text) => String(text).split(/(\d{6,})/).map((t, i) => (i % 2 ? <span key={i} style={{ display: "inline-block", maxWidth: "100%", overflowWrap: "anywhere" }}>{t}</span> : t));
+
 /* One row: checkbox (combine only) · name (+ source line, wraps, never cut) · acres · padlock / eye / ⋯. The name block
  * opens the parcel page. The pencil (rename, combined / split only) sits right AFTER the name text, in the name flow,
  * never over it. The padlock exists only while the parcel is locked (click = unlock, Undo toast); the eye shows on row
@@ -145,28 +149,28 @@ function ParcelRow({ row, selected, picked, pickMode, checked, handlers }) {
   const open = () => handlers.onRowClick(row.id, pickMode);
   const nameColor = dim || muted ? "var(--text-secondary)" : "var(--text-primary)";
   return (
-    <div style={{ marginLeft: row.depth * SPACE.xl }}>
+    <div>
       <div className="land-parcel-row" data-testid={`parcel-table-row-${row.id}`} data-included={row.included ? "1" : "0"} data-group-kind={groupKeyOf(row)}
-        style={{ position: "relative", display: "grid", gridTemplateColumns: COLS, alignItems: "center", borderBottom: LINE, borderLeft: `2px solid ${selected || picked ? "var(--accent-site)" : "transparent"}`, borderRadius: 0, background: selected || picked ? "var(--surface-selected)" : "transparent" }}>
-        <label style={{ display: "flex", alignItems: "center", justifyContent: "center", alignSelf: "stretch", cursor: "pointer" }}>
-          <input type="checkbox" checked={checked} onChange={() => handlers.onCheck(row.id)} aria-label={`Select ${row.name} to combine`} data-testid={`parcel-row-check-${row.id}`} style={{ width: 14, height: 14, margin: 0, cursor: "pointer" }} />
+        style={{ position: "relative", display: "grid", gridTemplateColumns: COLS, alignItems: "start", borderBottom: LINE, borderLeft: `2px solid ${selected || picked ? "var(--accent-site)" : "transparent"}`, borderRadius: 0, background: selected || picked ? "var(--surface-selected)" : "transparent" }}>
+        <label style={{ display: "flex", alignItems: "center", justifyContent: "center", height: FIRST_LINE_H, cursor: "pointer" }}>
+          <input type="checkbox" checked={checked} onChange={() => handlers.onCheck(row.id)} aria-label={`Select ${label} to combine`} data-testid={`parcel-row-check-${row.id}`} style={{ width: 14, height: 14, margin: 0, cursor: "pointer" }} />
         </label>
-        <div style={{ display: "flex", alignItems: "center", minWidth: 0, alignSelf: "stretch" }}>
+        <div style={{ display: "flex", alignItems: "center", minWidth: 0, alignSelf: "stretch", paddingLeft: row.depth * SPACE.xl }}>
           <button type="button" onClick={open} aria-pressed={pickMode ? picked : undefined} data-testid={`parcel-row-${row.id}`}
             title={`${row.name}${sub ? ` — ${sub}` : ""}`}
             onKeyDown={(e) => { if ((e.key === "Delete" || e.key === "Backspace") && !pickMode) { e.preventDefault(); e.stopPropagation(); setMenu("confirm"); } }}
             style={{ flex: "1 1 auto", minWidth: 0, display: "block", padding: `${SPACE.sm}px ${SPACE.xxs}px ${SPACE.sm}px ${SPACE.xxs}px`, border: "none", background: "transparent", textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}>
-            <span data-testid={`parcel-row-name-${row.id}`} style={{ display: "block", overflowWrap: "break-word", fontSize: FONT_SIZE.emphasis, lineHeight: "17px", fontWeight: muted ? 400 : 650, color: nameColor }}>{label}</span>
-            {sub && <span data-testid={`parcel-row-source-${row.id}`} style={{ display: "block", overflowWrap: "break-word", fontSize: FONT_SIZE.label, lineHeight: "14px", color: "var(--text-secondary)" }}>{sub}</span>}
+            <span data-testid={`parcel-row-name-${row.id}`} style={{ display: "block", overflowWrap: "break-word", fontSize: FONT_SIZE.emphasis, lineHeight: "17px", fontWeight: muted ? 400 : 650, color: nameColor }}>{keepDigits(label)}</span>
+            {sub && <span data-testid={`parcel-row-source-${row.id}`} style={{ display: "block", overflowWrap: "break-word", fontSize: FONT_SIZE.label, lineHeight: "14px", color: "var(--text-secondary)" }}>{keepDigits(sub)}</span>}
           </button>
-          {row.locked && <button type="button" onClick={() => handlers.onToggleLock(row.id)} aria-pressed="true" data-testid={`parcel-row-lock-${row.id}`} aria-label={`Unlock ${row.name}`}
+          {row.locked && <button type="button" onClick={() => handlers.onToggleLock(row.id)} aria-pressed="true" data-testid={`parcel-row-lock-${row.id}`} aria-label={`Unlock ${label}`}
             title="Locked — even Edit parcels can't change it. Click to unlock." style={{ ...iconBtn, width: 18, height: 18, color: "var(--text-secondary)" }}><LockGlyph size={13} /></button>}
-          {renameable && <button type="button" className="land-row-hover" style={{ ...iconBtn, width: 18, height: 18 }} title="Rename — opens the name field" aria-label={`Rename ${row.name}`} onClick={() => handlers.onOpenPage(row.id)} data-testid={`parcel-row-pencil-${row.id}`}><PencilIcon size={12} /></button>}
+          {renameable && <button type="button" className="land-row-hover" style={{ ...iconBtn, width: 18, height: 18 }} title="Rename — opens the name field" aria-label={`Rename ${label}`} onClick={() => handlers.onOpenPage(row.id)} data-testid={`parcel-row-pencil-${row.id}`}><PencilIcon size={12} /></button>}
         </div>
-        <span onClick={open} data-testid={`parcel-row-acres-${row.id}`} style={{ alignSelf: "stretch", display: "flex", alignItems: "center", justifyContent: "flex-end", cursor: "pointer", fontSize: FONT_SIZE.emphasis, fontWeight: 650, color: dim ? "var(--text-secondary)" : "var(--text-primary)", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, textDecoration: row.included ? "none" : "line-through", whiteSpace: "nowrap", paddingRight: SPACE.xs }}>{fmt(row.acres)}</span>
-        <span style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", width: SLOT_W }}>
+        <span onClick={open} data-testid={`parcel-row-acres-${row.id}`} style={{ height: FIRST_LINE_H, display: "flex", alignItems: "center", justifyContent: "flex-end", cursor: "pointer", fontSize: FONT_SIZE.emphasis, fontWeight: 650, color: dim ? "var(--text-secondary)" : "var(--text-primary)", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, textDecoration: row.included ? "none" : "line-through", whiteSpace: "nowrap", paddingRight: SPACE.xs }}>{fmt(row.acres)}</span>
+        <span style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", width: SLOT_W, height: FIRST_LINE_H }}>
           <button type="button" className={row.included ? `land-row-hover${menu ? " is-open" : ""}` : undefined} onClick={() => handlers.onToggleInclude(row.id)} aria-pressed={row.included} data-testid={`parcel-row-eye-${row.id}`}
-            aria-label={row.included ? `Make ${row.name} not active` : `Make ${row.name} active`}
+            aria-label={row.included ? `Make ${label} not active` : `Make ${label} active`}
             title={row.included ? "Active — counted in the site total. Click to leave it out." : "Not active — left out of the site total. Click to count it."}
             style={{ ...iconBtn, width: 22, height: 22, color: row.included ? "var(--text-primary)" : "var(--text-secondary)" }}>
             {row.included ? <EyeIcon /> : <EyeOffIcon />}
