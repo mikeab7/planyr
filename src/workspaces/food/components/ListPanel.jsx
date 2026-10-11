@@ -6,6 +6,7 @@
  * The picker can only browse what he already has (Been + Want to try); a place nobody has marked arrives by the
  * toolbar's search box or a tap on a map pin while the picker is open — the hint says so. It never mints a
  * restaurant from a typed name. */
+import CloseX from "./CloseX.jsx";
 import { useRef, useState } from "react";
 import { Button, ToggleChip, SIZE } from "../../../shared/ui/controls.jsx";
 import { RADIUS } from "../../../shared/ui/radius.js";
@@ -40,10 +41,14 @@ function Row({ rec, action, actionLabel, actionTestId, onToggleWant, onOpen }) {
         {rec.name}
       </button>
       <StatusControl status={rec.status} onToggleWant={onToggleWant} />
-      <button type="button" onClick={action} aria-label={`${actionLabel} ${rec.name}`} data-testid={actionTestId}
-        style={{ flex: "none", minWidth: 44, minHeight: 44, border: "none", background: "transparent", cursor: "pointer", font: "inherit", fontSize: FONT_SIZE.emphasis, fontWeight: 700, color: "var(--text-secondary)" }}>
-        {actionLabel === "Add" ? "+ Add" : "✕"}
-      </button>
+      {actionLabel === "Add" ? (
+        <button type="button" onClick={action} aria-label={`${actionLabel} ${rec.name}`} data-testid={actionTestId}
+          style={{ flex: "none", minWidth: 44, minHeight: 44, border: "none", background: "transparent", cursor: "pointer", font: "inherit", fontSize: FONT_SIZE.emphasis, fontWeight: 700, color: "var(--text-secondary)" }}>
+          + Add
+        </button>
+      ) : (
+        <CloseX onClick={action} label={`${actionLabel} ${rec.name}`} testId={actionTestId} />
+      )}
     </div>
   );
 }
