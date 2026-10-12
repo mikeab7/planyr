@@ -67,7 +67,7 @@ test("single-load at 315°: rows dock · rear · ends · ends — rear and each 
   // rear: add car parking, then type 8 rows
   const rear = rowByRole(page, "rear");
   await addLayer(rear, "parking");
-  await expect(page.getByTestId("wall-layer-editor")).toBeVisible();     // adding opens the new layer's editor
+  await expect(page.getByTestId("wall-edit-box")).toBeVisible();     // adding opens the new layer's edit box
   const rows8 = page.getByLabel("Parking rows");
   await rows8.fill("8"); await rows8.press("Enter");
   const park = async () => (await kidsOf(page, b.id)).filter((k) => k.type === "parking" && k.sideParkSide);
@@ -78,7 +78,7 @@ test("single-load at 315°: rows dock · rear · ends · ends — rear and each 
   const std = await page.evaluate(() => { const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); const s = m[Object.keys(m)[0]] || {}; return s.settings || {}; });
   await expect.poll(async () => Math.round((await park())[0].h)).toBe(8 * (std.stallDepth ?? 18) + 4 * (std.aisle ?? 24));
   // the two end walls carry nothing
-  for (const r of [rows.nth(2), rows.nth(3)]) await expect(r.getByTestId("wall-chip")).toHaveCount(0);
+  for (const r of [rows.nth(2), rows.nth(3)]) await expect(r.getByTestId("wall-piece")).toHaveCount(0);
   // one commit: a single undo takes all the typed rows back at once (to the single row the + added), the next removes it
   await rows8.evaluate((el) => el.blur());
   await page.keyboard.press("Control+z");
@@ -98,26 +98,25 @@ test("cross-dock at 315°: two independent dock rows (no same/split link); a buf
   await expect(page.getByTestId("dock-link-toggle")).toHaveCount(0);
   const [first, second] = [rowByRole(page, "dock").nth(0), rowByRole(page, "dock").nth(1)];
   await expect(first.getByTestId("wall-row-badge")).not.toContainText("·");
-  await expect(first.getByTestId("bump-chip")).toBeVisible();
-  await expect(second.getByTestId("bump-chip")).toBeVisible();
+  await expect(page.getByTestId("bump-summary")).toHaveText("Bump-outs none");      // ONE bump-outs line, not a chip per dock row
   // a court on ONE wall only
   await addLayer(first, "court");
   await expect.poll(async () => (await kidsOf(page, b.id)).filter((k) => k.truckCourt).length).toBe(1);
-  await expect(first.getByTestId("wall-chip")).toHaveCount(1);
-  await expect(second.getByTestId("wall-chip")).toHaveCount(0);
+  await expect(first.getByTestId("wall-piece")).toHaveCount(1);
+  await expect(second.getByTestId("wall-piece")).toHaveCount(0);
   await addLayer(second, "court");
   await expect.poll(async () => (await kidsOf(page, b.id)).filter((k) => k.truckCourt).length).toBe(2);
   // a buffer on the first wall only
   await addLayer(first, "buffer");
   await expect.poll(async () => (await kidsOf(page, b.id)).filter((k) => k.buffer).length).toBe(1);
-  await expect(first.getByTestId("wall-chip")).toHaveCount(2);
-  await expect(second.getByTestId("wall-chip")).toHaveCount(1);
+  await expect(first.getByTestId("wall-piece")).toHaveCount(2);
+  await expect(second.getByTestId("wall-piece")).toHaveCount(1);
   // a bump-out on one wall only
-  await first.getByTestId("bump-chip").click();
-  await page.locator('[data-testid^="bump-end-"]').first().click();
+  await page.getByTestId("bump-edit").click();
+  await page.locator(`[data-testid^="bump-end-"][data-wall="${await first.getAttribute("data-sides")}"]`).first().click();
   await expect.poll(async () => (await kidsOf(page, b.id)).filter((k) => k.dogEar).length).toBe(1);
-  await expect(first.getByTestId("bump-chip")).toContainText("1");
-  await expect(second.getByTestId("bump-chip")).toContainText("none");
+  await expect(page.getByTestId("bump-summary")).toContainText("Bump-outs 1");
+  expect((await kidsOf(page, b.id)).find((k) => k.dogEar).dogEar.side).toBe(await first.getAttribute("data-sides"));
 });
 
 test("a plan saved with the retired dockStacksLinked flag loads as two independent rows with unchanged contents", async ({ page }) => {
@@ -163,8 +162,8 @@ test("bump-outs: a dashed picker corner adds one at that corner; the dock line s
   expect(Number(txt.match(/([\d,]+) SF/)[1].replace(/,/g, ""))).toBeGreaterThan(sf0);
   expect(Number(txt.match(/(\d+) doors?/)[1])).toBeLessThan(doors0);
   // chip → editor: size 70 × 60 lands on the canvas model
-  await page.getByTestId("bump-chip").click();
-  await expect(page.getByTestId("bump-chip")).toContainText("Bump-outs 1");
+  await page.getByTestId("bump-edit").click();
+  await expect(page.getByTestId("bump-summary")).toContainText("Bump-outs 1");
   const along = page.getByLabel("Bump-out size along the dock wall"), out = page.getByLabel("Bump-out size out from the dock face");
   await along.fill("70"); await along.press("Enter");
   await out.fill("60"); await out.press("Enter");
@@ -183,9 +182,9 @@ test("trailer parking: rows 2 → two stall bands with an aisle, total = 2 × ro
   const dock = rowByRole(page, "dock").first();
   await addLayer(dock, "court");
   await addLayer(dock, "trailer");
-  await expect(page.getByTestId("wall-layer-editor")).toHaveAttribute("data-kind", "trailer");
-  await expect(page.getByTestId("wall-trailer-total")).toHaveText("");
-  await page.getByTestId("wall-trailer-rows-plus").click();
+  await expect(page.getByTestId("wall-edit-box")).toHaveAttribute("data-kind", "trailer");
+  const rowsField = page.getByLabel("Trailer rows");
+  await rowsField.fill("2"); await rowsField.press("Enter");
   const tz = async () => (await kidsOf(page, b.id)).find((k) => k.type === "trailer");
   await expect.poll(async () => (await tz()).trailerRows).toBe(2);
   const t = await tz();
@@ -194,8 +193,7 @@ test("trailer parking: rows 2 → two stall bands with an aisle, total = 2 × ro
   expect(t.cfg.trailerAisle).toBe(60);
   expect(t.cfg.trailerL).toBe(50);
   expect(Math.round(t.h)).toBe(160);
-  await expect(page.getByTestId("wall-trailer-total")).toHaveText("= 160′ deep");
-  await expect(dock.getByTestId("wall-chip").filter({ hasText: "Trailer ×2" })).toHaveCount(1);
+  await expect(dock.getByTestId("wall-piece").filter({ hasText: "×2" })).toHaveCount(1);
   await expect(page.getByLabel("Aisle between trailer rows")).toHaveValue("60");
   // the canvas label reads the stall count of BOTH rows
   await expect(canvas(page)).toContainText(/\d+ trailers/);

@@ -129,7 +129,7 @@ await page.screenshot({ path: OUT + "b492-bumps.png" });
 // ---- 2) editable truck-court length: select a court, type a new length ----
 const csel = await page.evaluate(() => {
   const r = [...document.querySelectorAll("svg rect")].map((x) => ({ x, f: (x.getAttribute("fill") || "").toLowerCase() }))
-    .filter((o) => o.f === "#d6d1c7").map((o) => o.x).sort((p, q) => p.getBoundingClientRect().y - q.getBoundingClientRect().y)[0];
+    .filter((o) => o.f === "#d5d9de").map((o) => o.x).sort((p, q) => p.getBoundingClientRect().y - q.getBoundingClientRect().y)[0];
   if (!r) return null; const b = r.getBoundingClientRect(); return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
 });
 if (csel) { await page.mouse.click(csel.x, csel.y); await page.waitForTimeout(400); }
