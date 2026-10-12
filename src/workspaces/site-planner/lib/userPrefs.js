@@ -35,10 +35,12 @@ import {
   getStandardPref,
   setSitesPanelPref,
   setExportPref,
+  setParcelLookPref,
+  applyPrefsLocal,
   _normalizePrefs,
 } from "./userPrefsStore.js";
 
-export { EMPTY_PREFS, readMirror, getPrefsSnapshot, subscribePrefs, setStandardPref, getStandardPref, setSitesPanelPref, setExportPref, _normalizePrefs };
+export { EMPTY_PREFS, readMirror, getPrefsSnapshot, subscribePrefs, setStandardPref, getStandardPref, setSitesPanelPref, setExportPref, setParcelLookPref, applyPrefsLocal, _normalizePrefs };
 
 /** Publish the plan-style half into the style resolver so every surface picks it up at once. */
 export function applyPrefs(prefs) {

@@ -154,7 +154,7 @@ export function ToggleChip({ active = false, accent = "var(--accent)", onAccent 
  * `--on-accent-*`, never a bare colour). Options: { key, label, title?, testid? }. */
 // nestedIn(8, 2) — the concentric inner radius for a segment inside the md shell (= RADIUS.sm, 6).
 const SEGMENT_RADIUS = 6;
-export function SegmentedControl({ options, value, onChange, accent = "var(--accent)", onAccent = "var(--on-accent)", style, ...rest }) {
+export function SegmentedControl({ options, value, onChange, accent = "var(--accent)", onAccent = "var(--on-accent)", style, segmentStyle, ...rest }) {
   return (
     <div role="group" style={{
       display: "inline-flex", flex: "none", boxSizing: "border-box", height: SIZE.md.height, padding: 1,
@@ -164,11 +164,11 @@ export function SegmentedControl({ options, value, onChange, accent = "var(--acc
         const on = o.key === value;
         return (
           <button
-            key={o.key} type="button" onClick={() => onChange(o.key)} aria-pressed={on} title={o.title} data-testid={o.testid}
+            key={o.key} type="button" onClick={() => onChange(o.key)} aria-pressed={on} title={o.title} data-testid={o.testid} disabled={!!o.disabled}
             style={{
-              border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: FONT.md, fontWeight: on ? 700 : 600,
+              border: "none", cursor: o.disabled ? "default" : "pointer", opacity: o.disabled ? 0.5 : 1, fontFamily: "inherit", fontSize: FONT.md, fontWeight: on ? 700 : 600,
               height: "100%", padding: "0 12px", borderRadius: SEGMENT_RADIUS,
-              background: on ? accent : "transparent", color: on ? onAccent : "var(--text-primary)",
+              background: on ? accent : "transparent", color: on ? onAccent : "var(--text-primary)", ...segmentStyle,
             }}
           >
             {o.label}

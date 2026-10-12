@@ -680,6 +680,15 @@ were split out of this file.
     the menu is the red "Delete parcel" row on a SELECTED parcel; the click-to-delete mode stays reachable only from the Parcel
     tool's own ✕ Remove banner button. Do not put a click-to-delete row back. (B2243168.)
 
+23. **(2026-10-11) Parcel & setback styling is three objects, one default + one override, and weight is SCREEN PIXELS.** Only the
+    parcel boundary, the setback line and the dimension labels are styleable (colour via the full native picker — any hex; weight
+    1–6; dashed on/off; labels show · colour · size 8–16 pt). **Weight is screen pixels, constant across zoom** — a 2 px line stays
+    2 px at any zoom; the boundary and setback ring never take a zoom factor. Resolution is parcel override → the user's workspace
+    default (`profiles.prefs.parcelLook`, private) → built-in; "reset to workspace default" clears the override. A failed write
+    reverts and says so — never a change that looks applied but isn't saved. **Out, do not build:** style presets, a no-build band,
+    buildable-envelope styling, a swatch palette, a dash-pattern picker. The per-side label toggle waits on edge grouping (B2254145).
+    (B2254144.)
+
 ## What Planyr is
 A proprietary, TestFit-style web app for industrial real estate site work, built by
 Michael (industrial developer, Dallas/Houston). It is becoming a multi-workspace

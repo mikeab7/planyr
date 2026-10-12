@@ -346,9 +346,9 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     //  Appearance Collapse replaces its slot in the shared Properties section but the section stays for
     //  every other type, so 33 → 35 and 34 → 36.)
     expect(src).toMatch(/const colorCtl = \(apply, hist = true, commit = null\) => \(\{\s*\n\s*pick: livePick\(apply, hist, commit\),/);
-    expect((src.match(/\{\.\.\.colorCtl\(\(v\) =>/g) || []).length).toBe(34); // Parcels rework: the parcel Boundary section (5 colour controls) became the page's Style grid (4)
+    expect((src.match(/\{\.\.\.colorCtl\(\(v\) =>/g) || []).length).toBe(32); // Parcels rework: the parcel Boundary section (5 colour controls) became the page's Style grid (4); NEW-2: the outline + setback colours moved into the native-picker ParcelStylePanel (-2), only the Fill colour stays a ColorField here
     expect((src.match(/pick=\{livePick\(\(v\) =>/g) || []).length).toBe(1);
-    expect((src.match(/<ColorField /g) || []).length).toBe(35);
+    expect((src.match(/<ColorField /g) || []).length).toBe(33);
     // A swatch click is a DISCRETE commit: exactly one undo frame, then the color is recorded.
     expect(src).toMatch(/onSwatch: \(v\) => \{ if \(hist\) pushHistory\(\); apply\(v\); pushRecent\(v\);/);
     // NEW-4 (bug) — the wheel picks LIVE, so `change` fires for EVERY shade the cursor crosses.
@@ -428,26 +428,22 @@ describe("markup hit-area / callout padding / live color picker (B155 open-path 
     expect(src).not.toMatch(/el\.type === "road" \? strokeZoom\(/);
   });
 
-  it("B880: the setback ring scales weight+dash with zoom (B617 sibling) and drops when its inset goes sub-pixel", () => {
+  it("B880 (amended NEW-2): the setback ring drops when its inset goes sub-pixel; its WEIGHT + DASH are screen pixels, constant across zoom", () => {
     const src = read("../src/workspaces/site-planner/SitePlanner.jsx");
-    // the pure zoom helpers are imported from the dedicated lib
+    // the pure zoom helpers are still imported (other strokes — markup lines, easement spines — still use dashZoom)
     expect(src).toMatch(/import \{ dashZoom, insetRingVisible \} from "\.\/lib\/lineZoom\.js";/);
     // sub-pixel-inset suppression guards the setback map (kills the garbled double-line on zoom-out)
     // NEW-1 (V481(f)): on `labelPpf`, not `view.ppf` — the same sub-pixel rule, evaluated at the
     // SHEET's scale on an export pass so a wide-zoom PDF can't silently lose the setback ring.
     expect(src).toMatch(/if \(!insetRingVisible\(Math\.min\(\.\.\.posSb\), labelPpf\)\) return null;/);
-    // the visible dashed ring uses strokeZoom + dashZoom — NOT a fixed 1.25px / "7 6".
-    // NEW-1: the colour / weight / dash are no longer hardcoded either — they resolve through
-    // setbackLineStyle (the parcel's own setback standards over the theme default), and the zoom
-    // helpers still wrap the result, so B880's behaviour is unchanged.
-    expect(src).toMatch(/const sbs = setbackLineStyle\(pc, PAL\.setback\);/);
-    // B966627 — the DASH is still zk-scaled through `dashZoom`, but its source is now `dash`, a
-    // local that reads `sbs.dash` when the parcel has its own setbacks and a sparser pattern when
-    // the ring is only ever drawn because of the silent project-default fallback (LOUD-FAILURE:
-    // a defaulted ring must not paint identically to one the user actually set).
+    // OWNER-LOCKED (NEW-2, parcel & setback styling): weight is SCREEN PIXELS, constant across zoom — the old
+    // B617 zoom-scaled `strokeZoom(...)` / `dashZoom(...)` on this ring is deliberately GONE. Colour / weight /
+    // dash resolve through `lookOf` (parcel override → workspace default → built-in).
+    expect(src).toMatch(/const lkP = lookOf\(pc\), lkS = lkP\.setback;/);
+    // B966627 — a defaulted ring still paints sparser than one someone set (LOUD-FAILURE).
     expect(src).toMatch(/const explicit = parcelSetbacksExplicit\(pc\);/);
-    expect(src).toMatch(/const dash = explicit \? sbs\.dash : "2 5";/);
-    expect(src).toMatch(/stroke=\{sbs\.stroke\} strokeWidth=\{strokeZoom\(sbs\.weight, zk\)\} strokeDasharray=\{dashZoom\(dash, zk\)\}/);
+    expect(src).toMatch(/const dash = explicit \|\| lkP\.from\.setback\.dashed !== "builtin" \? sbs\.dash : "2 5";/);
+    expect(src).toMatch(/stroke=\{sbs\.stroke\} strokeWidth=\{sbs\.weight\} strokeDasharray=\{dash\}/);
     expect(src).not.toMatch(/strokeWidth=\{1\.25\} strokeDasharray="7 6"/);
     // the B617-sibling dashes fold through dashZoom too (markup source, easement/deed spines)
     expect(src).toMatch(/da = dashZoom\(dashArray\(m\.dash, sw\), zk\)/);
