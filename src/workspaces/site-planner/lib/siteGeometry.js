@@ -97,6 +97,33 @@ export function trailerStalls(w, h, s) {
     const bands = perRow > 0 ? [{ y: 0, depth: h, n: perRow }] : [];
     return { count: perRow, bands, aisles: [], cols: perRow, tw, tl };
   }
+  // Building panel v3 (NEW-5) — each row may carry its OWN depth (`trailerRowDepths`, row 1 nearest the court).
+  // Same band · aisle · band pattern (one aisle per facing PAIR), each band at its own depth; the stall count
+  // per band does not depend on depth. Absent / fewer than two entries ⇒ the uniform path below, untouched.
+  const rd = Array.isArray(s.trailerRowDepths) ? s.trailerRowDepths.map(Number).filter((d) => Number.isFinite(d) && d > 0) : [];
+  if (rd.length >= 2) {
+    const EPS = 1e-6;
+    const bandsV = [], aislesV = [];
+    let y = 0, countV = 0;
+    for (let i = 0; i < rd.length; i++) {
+      if (y + rd[i] > h + EPS) break;
+      bandsV.push({ y, depth: rd[i], n: perRow });
+      countV += perRow;
+      y += rd[i];
+      if (i % 2 === 0 && i + 1 < rd.length) {          // the aisle between a facing pair — only if the second row fits too
+        if (y + ai + rd[i + 1] > h + EPS) break;
+        aislesV.push({ y0: y, y1: y + ai });
+        y += ai;
+      }
+    }
+    // `trailerFlip`: on a TOP / RIGHT wall the element's local y=0 edge is the OUTER one, so mirror the bands —
+    // row 1 is always the row nearest the truck court.
+    if (s.trailerFlip) {
+      bandsV.forEach((b) => { b.y = h - b.y - b.depth; });
+      aislesV.forEach((a) => { const y0 = h - a.y1, y1 = h - a.y0; a.y0 = y0; a.y1 = y1; });
+    }
+    return { count: countV, bands: bandsV, aisles: aislesV, cols: perRow, tw, tl };
+  }
   const mod = tl * 2 + ai;
   // Same freeze guard as carStalls: 0 trailer-length + 0 aisle would loop forever.
   if (!(mod > 0)) return { count: 0, bands: [], aisles: [], cols: perRow, tw, tl };

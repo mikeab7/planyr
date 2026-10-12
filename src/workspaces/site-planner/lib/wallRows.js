@@ -1,14 +1,17 @@
-/* Building panel v2 — the Loading section's per-wall rows, as pure functions.
+/* Building panel v2/v3 — the "Docks & walls" section's per-wall rows, as pure functions.
  *
- * ONE list under the wall picker: a row per wall, each carrying its layers
- * outward as compact chips and a dashed "+". This module owns every decision the rows make so the
- * panel is only a drawing of the answers:
+ * ONE list under the wall picker: a row per wall, each carrying its layers outward as ONE strip of
+ * pieces (v3; v2 drew wrapping chips) and a dashed "+". This module owns every decision the rows make
+ * so the panel is only a drawing of the answers:
  *   - which rows exist, in what order, with what badge/role word (`wallRowPlan`);
- *   - what each chip says (`chipLabel`) and what the "+" may offer on THAT wall (`addOptions`);
- *   - what removing a layer takes with it (`removalCount`);
- *   - the trailer-parking row/aisle depth arithmetic (`trailerTotalDepth` …) the canvas relayout,
- *     the panel and the stall count all share;
- *   - the bump-out chip's corner names (`bumpEndLabel`).
+ *   - what each piece says (`pieceLabel` / `pieceTooltip`), how wide it and its bar are on a scale
+ *     shared by every wall of the building (`stripPlan`), and the legend (`legendKinds`);
+ *   - what the "+" may offer on THAT wall (`addOptions`) and what removing a piece does
+ *     (`planDockPieceRemoval`: ONLY that piece — everything outside it moves in — plus, forced by the
+ *     bond, a truck court's trailer parking);
+ *   - the trailer-parking row/aisle depth arithmetic (`trailerTotalDepth` …, and v3's per-row depths
+ *     `trailerRowDepths`) the canvas relayout, the panel and the stall count all share;
+ *   - the bump-out corner names (`bumpEndLabel`).
  *
  * Rules the owner set (do not relitigate): the REAR wall is never grouped with the ends; EVERY wall is
  * its own row — the two dock walls of a cross-dock building too (NEW-1: the old linked "N·S dock" row and
@@ -62,8 +65,87 @@ export function chipLabel(layer) {
   return `${name} ${ft(layer.depth)}`;
 }
 
-/** The first chip of a dock row: `Bump-outs 2` · `Bump-outs none`. */
-export const bumpChipLabel = (n) => `Bump-outs ${n > 0 ? n : "none"}`;
+/** The bump-outs line under the wall picker (v3): `Bump-outs 2 · 55 × 30 ft`, or `Bump-outs none`. */
+export function bumpSummary(n, along, proj) {
+  if (!(n > 0)) return "Bump-outs none";
+  return `Bump-outs ${n} · ${Math.round(along)} × ${Math.round(proj)} ft`;
+}
+
+/* ------------------------------------------------------------------ strip (Building panel v3) */
+
+/** Every wall is ONE strip: a bar of pieces, building at the left, layers outward left → right. All
+ *  widths are layout guidance in CSS px (never shown to the user). */
+export const STRIP = { FULL: 156, FLOOR: 48, MIN_PIECE: 18, GAP: 1, ICON_BASE: 16, ICON_PER_CHAR: 6 };
+/** Legend / kind order. */
+export const KIND_ORDER = ["court", "trailer", "buffer", "sidewalk", "parking", "road"];
+
+/** A piece's text: `135′` for a depth layer, `×2` for a row count (car parking always; trailer parking from two rows). */
+export function pieceLabel(layer) {
+  if (layer.kind === "parking") return `×${Math.round(layer.rows || 0)}`;
+  if (layer.kind === "trailer" && (layer.rows || 1) > 1) return `×${layer.rows}`;
+  return ft(layer.depth);
+}
+/** A wall's total depth: Σ its layers' depths (a trailer's is its whole zone, a road's its travel width). */
+export const wallTotalDepth = (layers) => (layers || []).reduce((t, l) => t + (Number(l.depth) || 0), 0);
+/** The piece tooltip: `Truck court 135′ · wall total 339′` (a row-count piece names its rows and depth). */
+export function pieceTooltip(layer, total) {
+  const name = KIND_NAME[layer.kind] || "Layer";
+  const head = layer.kind === "parking" || (layer.kind === "trailer" && (layer.rows || 1) > 1)
+    ? `${name} ${pieceLabel(layer)} (${ft(layer.depth)})` : `${name} ${ft(layer.depth)}`;
+  return `${head} · wall total ${ft(total)}`;
+}
+/** Does a piece of width `w` have room for its icon before its value? (the mockup's rule: 16 + 6 × label length) */
+export const pieceShowsIcon = (w, label) => w >= STRIP.ICON_BASE + STRIP.ICON_PER_CHAR * String(label).length;
+
+/** Split `avail` across pieces by depth with every piece at least MIN_PIECE: fixed-min pieces first, the rest
+ *  shared by depth (water-filling, so a thin layer next to a deep one never reads as a sliver). */
+function splitByDepth(depths, avail) {
+  const n = depths.length;
+  const d = depths.map((x) => Math.max(1, Number(x) || 0));
+  const w = new Array(n).fill(0), fixed = new Array(n).fill(false);
+  let remaining = avail;
+  for (let pass = 0; pass <= n; pass++) {
+    const free = d.map((_, i) => i).filter((i) => !fixed[i]);
+    if (!free.length) break;
+    const sum = free.reduce((t, i) => t + d[i], 0);
+    const low = free.filter((i) => (remaining * d[i]) / sum < STRIP.MIN_PIECE);
+    if (!low.length) { free.forEach((i) => { w[i] = (remaining * d[i]) / sum; }); break; }
+    low.forEach((i) => { w[i] = STRIP.MIN_PIECE; fixed[i] = true; remaining -= STRIP.MIN_PIECE; });
+  }
+  return w;
+}
+
+/**
+ * The strips' geometry, on ONE scale for every wall of the building.
+ * @param {{key:string, layers:{depth:number}[]}[]} rows
+ * @returns {{maxTotal:number, rows:Record<string,{total:number, barW:number, pieces:{x:number,w:number}[]}>}}
+ *   bar length ∝ the wall's total depth (deepest wall = FULL, a shallow one never under FLOOR, and never so short
+ *   a piece falls under MIN_PIECE); an empty wall has no bar (barW 0).
+ */
+export function stripPlan(rows) {
+  const totals = rows.map((r) => wallTotalDepth(r.layers));
+  const maxTotal = Math.max(0, ...totals);
+  const out = {};
+  rows.forEach((r, i) => {
+    const n = r.layers.length;
+    if (!n) { out[r.key] = { total: 0, barW: 0, pieces: [] }; return; }
+    const needs = n * STRIP.MIN_PIECE + (n - 1) * STRIP.GAP;
+    const prop = maxTotal > 0 ? (STRIP.FULL * totals[i]) / maxTotal : STRIP.FULL;
+    const barW = Math.round(Math.max(needs, Math.min(STRIP.FULL, Math.max(STRIP.FLOOR, prop))) * 100) / 100;
+    const widths = splitByDepth(r.layers.map((l) => l.depth), barW - (n - 1) * STRIP.GAP);
+    let x = 0;
+    const pieces = widths.map((w) => { const piece = { x: Math.round(x * 100) / 100, w: Math.round(w * 100) / 100 }; x += w + STRIP.GAP; return piece; });
+    out[r.key] = { total: totals[i], barW, pieces };
+  });
+  return { maxTotal, rows: out };
+}
+
+/** The kinds present on this building, in legend order (Court, Trailer, Buffer, Walk, Parking, Road). */
+export function legendKinds(rows) {
+  const present = new Set();
+  rows.forEach((r) => (r.layers || []).forEach((l) => present.add(l.kind)));
+  return KIND_ORDER.filter((k) => present.has(k)).map((k) => ({ kind: k, name: KIND_LABEL[k] }));
+}
 
 /**
  * What the dashed "+" offers on THIS wall.
@@ -73,11 +155,16 @@ export const bumpChipLabel = (n) => `Bump-outs ${n > 0 ? n : "none"}`;
  */
 export function addOptions(isDock, layers) {
   const kinds = layers.map((l) => l.kind);
-  if (kinds[kinds.length - 1] === "road") return [];
   const opt = (k) => ({ key: k, label: KIND_NAME[k] });
+  const terminal = kinds[kinds.length - 1] === "road";
+  // v3: a dock wall whose court was binned (buffer / walk / road stayed) can take the court back at its head — that
+  // is inboard of everything, so even a wall ending in a road may add it. Trailer parking opens off a court, so it
+  // is only offered once there is one.
+  if (isDock && kinds.length && !kinds.includes("court")) return terminal ? [opt("court")] : [opt("court"), opt("buffer"), opt("sidewalk"), opt("road")];
+  if (terminal) return [];                                       // a Road is terminal
   const out = [];
   if (isDock) {
-    if (!kinds.includes("court")) return [opt("court")];       // everything else stacks outside a court
+    if (!kinds.length) return [opt("court")];                   // an empty dock wall starts with its court
     if (!kinds.includes("trailer")) out.push(opt("trailer"));
     out.push(opt("buffer"), opt("sidewalk"), opt("road"));
     return out;
@@ -90,12 +177,61 @@ export function addOptions(isDock, layers) {
 }
 
 /**
- * How many layers a Remove takes, counting from `index` outward. On a dock wall the stack is a
- * chain (a layer cannot float off the wall), so Remove takes the layer AND everything outside it;
- * on any other wall it takes just that layer.
+ * How many layers a Remove takes. v3: ONLY the piece itself on every wall — dock walls included — and the
+ * layers outside it keep their depth and close in. (The one bond the code forces — a truck court's trailer
+ * parking goes with it — is `planDockPieceRemoval`'s, because it needs the elements, not the count.)
  */
-export function removalCount(isDock, layers, index) {
-  return isDock ? Math.max(0, layers.length - index) : 1;
+export function removalCount() {
+  return 1;
+}
+
+/**
+ * Remove ONE piece from a dock wall's chain and say how the rest re-bonds, as data (pure).
+ * @param {object[]} chain  the wall's zone ELEMENTS, head (court) → outward
+ * @param {number} index    the piece to remove
+ * @param {string} side     the wall ("top" | …) — stamped on a layer that becomes the new head
+ * @returns {{removeIds:string[], patches:{id:string, set:object, drop:string[]}[], court:boolean}|null}
+ *   removeIds: the piece, plus — when it is a truck court — the trailer parking that opens off it;
+ *   patches: survivors whose inboard neighbour changed (`prevZone` re-pointed to the nearest SURVIVING layer
+ *   inboard, `null` + `stackSide` when it now sits against the wall; a legacy `forTrailer` naming a removed
+ *   layer is dropped). Survivors keep their depth (`zd` is untouched), so the caller's relayout closes the gap.
+ */
+export function planDockPieceRemoval(chain, index, side) {
+  const gone = chain && chain[index];
+  if (!gone) return null;
+  const remove = new Set([gone.id]);
+  const isCourt = !!gone.truckCourt;
+  if (isCourt) chain.forEach((z) => { if (z.forCourt === gone.id || z.type === "trailer") remove.add(z.id); });
+  const patches = [];
+  let pred = null;
+  chain.forEach((z, i) => {
+    if (remove.has(z.id)) return;
+    const oldPred = i > 0 ? chain[i - 1] : null;
+    if ((oldPred ? oldPred.id : null) !== (pred ? pred.id : null)) {
+      const set = { prevZone: pred ? pred.id : null };
+      if (!pred) set.stackSide = side;
+      const drop = [];
+      if (z.forTrailer && remove.has(z.forTrailer)) drop.push("forTrailer");
+      if (z.forCourt && remove.has(z.forCourt)) drop.push("forCourt");
+      patches.push({ id: z.id, set, drop });
+    }
+    pred = z;
+  });
+  return { removeIds: [...remove], patches, court: isCourt };
+}
+
+/** Apply a `planDockPieceRemoval` plan to an element list (pure; same array when it names nothing present). */
+export function applyDockPieceRemoval(els, plan) {
+  if (!plan) return els;
+  const gone = new Set(plan.removeIds);
+  const byId = new Map(plan.patches.map((p) => [p.id, p]));
+  return els.filter((x) => !gone.has(x.id)).map((x) => {
+    const p = byId.get(x.id);
+    if (!p) return x;
+    const next = { ...x, ...p.set };
+    p.drop.forEach((k) => { delete next[k]; });
+    return next;
+  });
 }
 
 /* ------------------------------------------------------------------ trailer rows */
@@ -110,40 +246,101 @@ export function trailerTotalDepth(rows, rowDepth, aisle) {
   const r = clampTrailerRows(rows);
   return r * rowDepth + Math.floor(r / 2) * Math.max(0, aisle || 0);
 }
+/** The same total when each row has its OWN depth (v3): Σ row depths + ⌊rows / 2⌋ × aisle. */
+export function trailerTotalDepthOf(rowDepths, aisle) {
+  const d = Array.isArray(rowDepths) ? rowDepths : [];
+  return d.reduce((s, x) => s + (Number(x) || 0), 0) + Math.floor(d.length / 2) * Math.max(0, aisle || 0);
+}
 /** The inverse: one row's depth given the zone's total depth. Never below the stall minimum. */
 export function trailerRowDepth(total, rows, aisle) {
   const r = clampTrailerRows(rows);
   if (r === 1) return total;                       // one row IS the zone — never second-guess a typed depth
   return Math.max(TRAILER_MIN_ROW_DEPTH, (total - Math.floor(r / 2) * Math.max(0, aisle || 0)) / r);
 }
-/** A trailer zone's resolved shape: rows (1–4), aisle between rows, per-row depth, total depth. */
+/** A zone's stored per-row depths (`trailerRowDepths`, row 1 nearest the court), resolved to `rows` entries —
+ *  padded with the last depth / truncated — or null when absent or unusable (⇒ every row uses the single depth). */
+export function storedRowDepths(zone, rows) {
+  const raw = zone && zone.trailerRowDepths;
+  if (!Array.isArray(raw) || !raw.length) return null;
+  const nums = raw.map(Number);
+  if (!nums.every((n) => Number.isFinite(n) && n > 0)) return null;
+  const out = nums.slice(0, rows).map((n) => Math.max(TRAILER_MIN_ROW_DEPTH, n));
+  while (out.length < rows) out.push(out[out.length - 1]);
+  return out;
+}
+/** A trailer zone's resolved shape: rows (1–4), aisle between rows, per-row depth(s), total depth.
+ *  `rowDepths` always has `rows` entries; `custom` says they came from `trailerRowDepths`. */
 export function trailerSpec(zone, defaultAisle = 60) {
   const rows = clampTrailerRows(zone && zone.trailerRows);
   const aisleRaw = Number(zone && zone.trailerAisleFt);
   const aisle = Number.isFinite(aisleRaw) && aisleRaw >= 0 ? aisleRaw : (Number.isFinite(defaultAisle) ? defaultAisle : 60);
+  const given = storedRowDepths(zone, rows);
+  if (given) return { rows, aisle, rowDepth: given[0], rowDepths: given, total: trailerTotalDepthOf(given, aisle), custom: true };
   const total = Number(zone && zone.zd) > 0 ? Number(zone.zd) : 50;
   const rowDepth = trailerRowDepth(total, rows, aisle);
-  return { rows, aisle, rowDepth, total: rows > 1 ? trailerTotalDepth(rows, rowDepth, aisle) : total };
+  return { rows, aisle, rowDepth, rowDepths: Array.from({ length: rows }, () => rowDepth), total: rows > 1 ? trailerTotalDepth(rows, rowDepth, aisle) : total, custom: false };
 }
 /** The `cfg` the trailer element draws with, for a spec: a single row is the flush "single" strip, two or
- *  more are `trailerStalls`' double-loaded bands with the drive aisle between. */
-export function trailerCfg(prevCfg, spec, trailerW) {
-  return { ...(prevCfg || {}), trailerW, trailerL: spec.rowDepth, trailerAisle: spec.rows > 1 ? spec.aisle : 0, single: spec.rows === 1 };
+ *  more are `trailerStalls`' double-loaded bands with the drive aisle between. `side` (v3) lets a zone with
+ *  its own row depths keep row 1 against the court on a top / right wall, where the element's local y=0
+ *  edge is the outer one. */
+export function trailerCfg(prevCfg, spec, trailerW, side) {
+  const cfg = { ...(prevCfg || {}), trailerW, trailerL: spec.rowDepth, trailerAisle: spec.rows > 1 ? spec.aisle : 0, single: spec.rows === 1 };
+  if (spec.custom && spec.rows > 1) {
+    cfg.trailerRowDepths = spec.rowDepths.slice();
+    if (side === "top" || side === "right") cfg.trailerFlip = true; else delete cfg.trailerFlip;
+  } else { delete cfg.trailerRowDepths; delete cfg.trailerFlip; }
+  return cfg;
 }
-/** The total depth (`zd`) to store after changing the row count, holding one row's depth. */
-export function zdAfterRowChange(zone, nextRows, defaultAisle = 60) {
+/** Apply a zone patch where `undefined` means "drop that key" (so an absent `trailerRowDepths` stays absent). */
+export function applyZonePatch(el, patch) {
+  const next = { ...el, ...patch };
+  Object.keys(patch).forEach((k) => { if (patch[k] === undefined) delete next[k]; });
+  return next;
+}
+const roundFt = (n) => Math.round(Number(n) * 100) / 100;
+const allEqual = (a) => a.every((x) => x === a[0]);
+/** The zone patch after changing the ROW COUNT (1–4). Adding a row copies the last row's depth; removing
+ *  drops the last. A zone with a single depth for every row keeps holding that one depth (today's rule). */
+export function trailerPatchRows(zone, nextRows, defaultAisle = 60) {
   const cur = trailerSpec(zone, defaultAisle);
-  return trailerTotalDepth(nextRows, cur.rowDepth, cur.aisle);
+  const rows = clampTrailerRows(nextRows);
+  if (cur.custom) {
+    const depths = cur.rowDepths.slice(0, rows);
+    while (depths.length < rows) depths.push(depths[depths.length - 1]);
+    return { trailerRows: rows, trailerAisleFt: cur.aisle, trailerRowDepths: depths, zd: trailerTotalDepthOf(depths, cur.aisle) };
+  }
+  return { trailerRows: rows, trailerAisleFt: cur.aisle, trailerRowDepths: undefined, zd: trailerTotalDepth(rows, cur.rowDepth, cur.aisle) };
 }
-/** The total depth to store after typing one row's depth. */
+/** The zone patch after typing ONE row's depth (index 0 = row 1, nearest the court). */
+export function trailerPatchRowDepth(zone, index, depth, defaultAisle = 60) {
+  const cur = trailerSpec(zone, defaultAisle);
+  const i = Math.max(0, Math.min(cur.rows - 1, Math.round(Number(index)) || 0));
+  const depths = cur.rowDepths.slice();
+  depths[i] = Math.max(TRAILER_MIN_ROW_DEPTH, roundFt(depth));
+  if (allEqual(depths)) {                          // every row alike again ⇒ back to the single-depth form
+    return { trailerRows: cur.rows, trailerAisleFt: cur.aisle, trailerRowDepths: undefined, zd: trailerTotalDepth(cur.rows, depths[0], cur.aisle) };
+  }
+  return { trailerRows: cur.rows, trailerAisleFt: cur.aisle, trailerRowDepths: depths, zd: trailerTotalDepthOf(depths, cur.aisle) };
+}
+/** The zone patch after typing the aisle between facing rows. */
+export function trailerPatchAisle(zone, aisle, defaultAisle = 60) {
+  const cur = trailerSpec(zone, defaultAisle);
+  const a = Math.max(0, roundFt(aisle));
+  return { trailerAisleFt: a, zd: cur.custom ? trailerTotalDepthOf(cur.rowDepths, a) : trailerTotalDepth(cur.rows, cur.rowDepth, a) };
+}
+/** The total depth (`zd`) to store after changing the row count, holding the row depth(s). */
+export function zdAfterRowChange(zone, nextRows, defaultAisle = 60) {
+  return trailerPatchRows(zone, nextRows, defaultAisle).zd;
+}
+/** The total depth to store after typing one depth for EVERY row. */
 export function zdAfterRowDepth(zone, rowDepth, defaultAisle = 60) {
   const cur = trailerSpec(zone, defaultAisle);
   return trailerTotalDepth(cur.rows, Math.max(TRAILER_MIN_ROW_DEPTH, rowDepth), cur.aisle);
 }
 /** The total depth to store after typing the aisle between rows. */
 export function zdAfterAisle(zone, aisle, defaultAisle = 60) {
-  const cur = trailerSpec(zone, defaultAisle);
-  return trailerTotalDepth(cur.rows, cur.rowDepth, Math.max(0, aisle));
+  return trailerPatchAisle(zone, aisle, defaultAisle).zd;
 }
 
 /* ------------------------------------------------------------------ bump-outs */

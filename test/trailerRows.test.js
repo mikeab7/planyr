@@ -27,6 +27,11 @@ const SRC = readFileSync(join(ROOT, "src/workspaces/site-planner/SitePlanner.jsx
 const STD = { trailerW: 12, trailerL: 53, trailerAisle: 60 };
 
 describe("NEW-1 — the count is the line a shallow row keeps", () => {
+  it("v3: rows of different depth are named each; equal rows read exactly as before", () => {
+    expect(trailerRowLabel({ depthFt: 60, count: 40, rowDepths: [60, 55] }).lines[0]).toBe("60/55′ Trailer Parking");
+    expect(trailerRowLabel({ depthFt: 50, count: 40, rowDepths: [50, 50] }).lines[0]).toBe("50′ Trailer Parking");
+    expect(trailerRowLabel({ depthFt: 50, count: 40 }).lines[0]).toBe("50′ Trailer Parking");
+  });
   it("trailerRowLabel authors name then count and points keepLine at the count", () => {
     const l = trailerRowLabel({ depthFt: 53, count: 119 });
     expect(l.lines).toEqual(["53′ Trailer Parking", "119 trailers"]);

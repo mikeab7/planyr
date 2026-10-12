@@ -6,7 +6,7 @@
  *   B264 — per-plan delete (inline confirm), never the last plan.
  * Seeds a plan with two separate elements (a building + a parking field), boots the
  * planner logged-out, and drives the SVG canvas + header menus.
- * Plan-style fills: building #f3ece1 · parking #cdd7dd */
+ * Plan-style fills: building #f3ece1 · parking #d6e5f2 */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
 const { chromium } = pw;
 import { mkdirSync } from "node:fs";
@@ -97,20 +97,20 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
 
   // --- B262: a plain drag flush onto a neighbour must NOT bond them ---
   await fit();
-  let b = await centerOf("#f3ece1"), p = await centerOf("#cdd7dd");
+  let b = await centerOf("#f3ece1"), p = await centerOf("#d6e5f2");
   log(!!b && !!p, `two separate elements present (building ${!!b}, parking ${!!p})`);
   // drag the building toward the parking (flush), then drag it back away; parking must stay put
-  const pBefore = await centerOf("#cdd7dd");
+  const pBefore = await centerOf("#d6e5f2");
   await drag(b, { x: p.x - 140, y: p.y });           // building snaps flush near parking
   b = await centerOf("#f3ece1");
   await drag(b, { x: b.x - 220, y: b.y - 120 });      // pull the building away again
-  const pAfter = await centerOf("#cdd7dd");
+  const pAfter = await centerOf("#d6e5f2");
   const parkMoved = Math.hypot(pAfter.x - pBefore.x, pAfter.y - pBefore.y);
   log(parkMoved < 8, `B262 flush drag did NOT bond — parking stayed put while building moved away (parking Δ=${parkMoved.toFixed(1)}px)`);
 
   // --- B261: Group two elements → move as one unit → ungroup ---
   await fit();
-  b = await centerOf("#f3ece1"); p = await centerOf("#cdd7dd");
+  b = await centerOf("#f3ece1"); p = await centerOf("#d6e5f2");
   await page.keyboard.press("Escape"); await page.waitForTimeout(150); // clear any selection
   await shiftClick(b); await shiftClick(p);
   const grpBtn = await clickByTitle(/Group the selected items/);
@@ -122,9 +122,9 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
 
   // move the group as one unit: click empty, then drag the building — BOTH should move
   await page.keyboard.press("Escape"); await page.waitForTimeout(150);
-  const b0 = await centerOf("#f3ece1"), p0 = await centerOf("#cdd7dd");
+  const b0 = await centerOf("#f3ece1"), p0 = await centerOf("#d6e5f2");
   await drag(b0, { x: b0.x + 60, y: b0.y + 90 });
-  const b1 = await centerOf("#f3ece1"), p1 = await centerOf("#cdd7dd");
+  const b1 = await centerOf("#f3ece1"), p1 = await centerOf("#d6e5f2");
   const bMoved = Math.hypot(b1.x - b0.x, b1.y - b0.y), pMoved = Math.hypot(p1.x - p0.x, p1.y - p0.y);
   log(bMoved > 30 && pMoved > 30, `B261 dragging one member moved the WHOLE group (building Δ=${bMoved.toFixed(0)}px, parking Δ=${pMoved.toFixed(0)}px)`);
 
@@ -134,9 +134,9 @@ const browser = await chromium.launch({ executablePath: EXEC, args: ["--no-sandb
   const unBtn = await clickByTitle(/Ungroup/);
   log(!!unBtn && !(await hasGroupBox()), `B261 Ungroup removes the group box (clicked "${unBtn}")`);
   await page.keyboard.press("Escape"); await page.waitForTimeout(150);
-  const ub0 = await centerOf("#f3ece1"), up0 = await centerOf("#cdd7dd");
+  const ub0 = await centerOf("#f3ece1"), up0 = await centerOf("#d6e5f2");
   await drag(ub0, { x: ub0.x - 70, y: ub0.y });
-  const up1 = await centerOf("#cdd7dd");
+  const up1 = await centerOf("#d6e5f2");
   log(Math.hypot(up1.x - up0.x, up1.y - up0.y) < 8, "B261 after Ungroup, members move independently again");
 
   await page.screenshot({ path: OUT + "b261-groups.png" });

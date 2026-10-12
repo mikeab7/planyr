@@ -24,10 +24,13 @@ const num = (v) => (typeof v === "number" ? v : typeof v === "string" && v.trim(
 
 /* The two-line label and which line survives a shallow strip. Line 0 is the stall depth + name, line 1 the
  * count; `keepLine: 1` tells the label engine the count is the last line it may drop. */
-export function trailerRowLabel({ depthFt, count, est = false, name = "Trailer Parking" } = {}) {
+export function trailerRowLabel({ depthFt, count, est = false, name = "Trailer Parking", rowDepths = null } = {}) {
   const f0 = (n) => Math.round(n).toLocaleString(); // the same rounding SitePlanner's own f0 uses
+  // Building panel v3 — a zone whose rows differ in depth names each ("60/55′ Trailer Parking"); equal rows read as before.
+  const mixed = Array.isArray(rowDepths) && rowDepths.length > 1 && rowDepths.some((d) => Math.round(d) !== Math.round(rowDepths[0]));
+  const depthText = mixed ? `${rowDepths.map((d) => f0(d)).join("/")}′` : `${f0(depthFt)}′`;
   return {
-    lines: [`${f0(depthFt)}′ ${name}`, `${f0(count)} trailers${est ? " (est)" : ""}`],
+    lines: [`${depthText} ${name}`, `${f0(count)} trailers${est ? " (est)" : ""}`],
     keepLine: 1,
   };
 }

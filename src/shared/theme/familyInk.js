@@ -91,13 +91,13 @@ export const CALLOUT_DEFAULT_FILL = "#fffbe8";
  * is complete, so a new element type cannot be added without this list noticing. */
 export const ELEMENT_DEFAULT_PAINT = {
   building:  ["#f3ece1", "#33302b"],
-  paving:    ["#d6d1c7", "#9a9384"],
-  parking:   ["#cdd7dd", "#7d949e"],
+  paving:    ["#d5d9de", "#8f99a3"],
+  parking:   ["#d6e5f2", "#7f9fbb"],
   trailer:   ["#e3d4b2", "#b09a6c"],
   pond:      ["#5B97A5", "#2C5D6B"],
-  sidewalk:  ["#eceae3", "#b4b1a6"],
+  sidewalk:  ["#f7f6f2", "#b4b1a6"],
   landscape: ["#bcd3a6", "#7f9a63"],
-  road:      ["#b9b4a8", "#7c786d"],
+  road:      ["#9eabb7", "#66737f"],
 };
 
 /** "#rgb" / "#rrggbb" → [r, g, b] 0..255. Returns null for anything else (a var(), a named
