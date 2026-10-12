@@ -3,7 +3,7 @@
  * plus "Send behind buildings" for markups). Seeds a plan with three separated buildings
  * (distinct sizes so DOM order = z order is readable), a parking field (band-isolation check),
  * and a markup rect. Boots the planner logged-out and drives the real SVG canvas + menus.
- * Building fill #f3ece1 · parking #cdd7dd · markup stroke #7c3aed. Run on preview :4173. */
+ * Building fill #f3ece1 · parking #d6e5f2 · markup stroke #7c3aed. Run on preview :4173. */
 import pw from "/opt/node22/lib/node_modules/playwright/index.js";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 const { chromium } = pw;
@@ -108,7 +108,7 @@ log(clickedBack && ranksOf(bs)[0] === 2, `menu "Send to Back" sent b2 to the bot
 // --- 4: band isolation — parking never re-ordered relative to buildings (its band always paints first) ---
 const parkBeforeBuildings = await page.evaluate(() => {
   const rects = [...document.querySelectorAll('svg rect')];
-  const park = rects.findIndex((r) => (r.getAttribute('fill') || '').toLowerCase() === '#cdd7dd');
+  const park = rects.findIndex((r) => (r.getAttribute('fill') || '').toLowerCase() === '#d6e5f2');
   const firstB = rects.findIndex((r) => (r.getAttribute('fill') || '').toLowerCase() === '#f3ece1');
   return park >= 0 && firstB >= 0 && park < firstB;
 });

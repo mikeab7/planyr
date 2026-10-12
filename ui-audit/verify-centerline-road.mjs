@@ -21,7 +21,7 @@ const BASE = process.env.BASE_URL || "http://localhost:4173/";
 const OUT = new URL("./screens/", import.meta.url).pathname;
 mkdirSync(OUT, { recursive: true });
 
-const ROAD_FILL = "#b9b4a8";
+const ROAD_FILL = "#9eabb7";
 const DEMO_ID = "verify-centerline-road";
 
 // road A — legacy rotated-rect road (200′ long × 25′ cross = 24′ travel + 0.5′ curb each side).
@@ -74,7 +74,7 @@ const log = (ok, msg) => { console.log((ok ? "✓ " : "✗ ") + msg); if (!ok) f
 // ---- 1. both roads render (legacy migrated + centerline) — no crash ----
 const roadGeom = await page.evaluate((fill) => {
   const paths = [...document.querySelectorAll("svg path")].filter((p) => (p.getAttribute("fill") || "").toLowerCase() === fill);
-  const polylines = [...document.querySelectorAll("svg polyline")].filter((p) => (p.getAttribute("stroke") || "").toLowerCase() === "#7c786d");
+  const polylines = [...document.querySelectorAll("svg polyline")].filter((p) => (p.getAttribute("stroke") || "").toLowerCase() === "#66737f");
   return { strips: paths.length, curbPolylines: polylines.length };
 }, ROAD_FILL);
 log(roadGeom.strips >= 2, `both roads render a centerline strip (found ${roadGeom.strips} road surfaces; legacy rect MIGRATED + centerline)`);

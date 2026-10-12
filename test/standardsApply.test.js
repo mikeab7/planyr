@@ -346,7 +346,7 @@ describe("the Standards draft", () => {
     const d = withTypeDraft(EMPTY_STD_DRAFT, "building", { fill: "#ff0000" });
     expect(draftHasType(d, "building", "fill")).toBe(true);
     expect(draftTypeValue(d, "building", "fill", "#f3ece1")).toBe("#ff0000");
-    expect(draftTypeValue(d, "parking", "fill", "#cdd7dd")).toBe("#cdd7dd");
+    expect(draftTypeValue(d, "parking", "fill", "#d6e5f2")).toBe("#d6e5f2");
     expect(draftDirty(d, committedParcel, committedType)).toBe(true);
   });
   it("never mutates the draft it was handed (Discard restores by dropping it)", () => {

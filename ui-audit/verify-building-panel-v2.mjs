@@ -89,18 +89,18 @@ try {
     await rows.evaluate((el) => el.blur());
     const park = (await kids()).filter((k) => k.type === "parking" && k.sideParkSide);
     ok(`[${scheme}] 8 parking rows on the REAR only (${park.map((p) => p.sideParkSide).join(",")})`, park.length === 1 && park[0].sideParkSide === rearSide);
-    ok(`[${scheme}] the end walls are untouched on the canvas model (no kid on either end)`, (await kids()).filter((k) => k.sideParkSide && k.sideParkSide !== rearSide).length === 0 && (await T("wall-row").nth(2).getByTestId("wall-chip").count()) === 0);
+    ok(`[${scheme}] the end walls are untouched on the canvas model (no kid on either end)`, (await kids()).filter((k) => k.sideParkSide && k.sideParkSide !== rearSide).length === 0 && (await T("wall-row").nth(2).getByTestId("wall-piece").count()) === 0);
     ok(`[${scheme}] the parking is painted on the canvas`, (await page.locator(`[data-el-id="${park[0].id}"]`).count()) === 1);
 
     // ---- (b) cross-dock: each dock wall its OWN row (no same/split link); a court / buffer on one side only ----
     await openScenario(scheme, "cross", { dock: "cross", dockAxis: "x" });
     ok(`[${scheme}] cross-dock: TWO dock rows and no same/split toggle`, (await rowByRole("dock").count()) === 2 && (await T("dock-link-toggle").count()) === 0);
     await addLayer(rowByRole("dock").nth(0), "court");
-    ok(`[${scheme}] a court on ONE dock wall only`, (await kids()).filter((k) => k.truckCourt).length === 1 && (await rowByRole("dock").nth(1).getByTestId("wall-chip").count()) === 0);
+    ok(`[${scheme}] a court on ONE dock wall only`, (await kids()).filter((k) => k.truckCourt).length === 1 && (await rowByRole("dock").nth(1).getByTestId("wall-piece").count()) === 0);
     await addLayer(rowByRole("dock").nth(1), "court");
     await addLayer(rowByRole("dock").nth(0), "buffer");
     const bufs = (await kids()).filter((k) => k.buffer);
-    ok(`[${scheme}] a buffer on ONE side only`, bufs.length === 1 && (await rowByRole("dock").nth(1).getByTestId("wall-chip").count()) === 1);
+    ok(`[${scheme}] a buffer on ONE side only`, bufs.length === 1 && (await rowByRole("dock").nth(1).getByTestId("wall-piece").count()) === 1);
     if (SHOTS) await T("property-panel").screenshot({ path: `${SHOTS}/${scheme}-split.png` }).catch(() => {});
 
     // ---- (c) bump-out from a dashed picker corner ----
@@ -114,7 +114,7 @@ try {
     ok(`[${scheme}] the dock line stops at the bump-out (butt cap, shorter than a bare wall)`, lens[0] < lens[lens.length - 1] && (await T("picker-wall-line").first().getAttribute("stroke-linecap")) === "butt", JSON.stringify(lens.map((x) => Math.round(x))));
     const sf1 = await summary();
     ok(`[${scheme}] header SF grew (${sf0.sf} → ${sf1.sf}) and the door count fell (${sf0.doors} → ${sf1.doors})`, sf1.sf > sf0.sf && sf1.doors < sf0.doors);
-    await T("bump-chip").click();
+    await T("bump-edit").click();
     const along = page.getByLabel("Bump-out size along the dock wall"), out = page.getByLabel("Bump-out size out from the dock face");
     await along.fill("70"); await along.press("Enter"); await out.fill("60"); await out.press("Enter"); await sleep(900);
     const de2 = (await kids()).find((k) => k.dogEar);
@@ -128,11 +128,11 @@ try {
     await addLayer(rowByRole("dock").first(), "trailer");
     const stalls = async () => Number(((await T("planner-canvas").textContent()).match(/(\d+) trailers/) || [])[1]);
     const n1 = await waitFor(stalls);
-    await T("wall-trailer-rows-plus").click(); await sleep(900);
+    { const rf = page.getByLabel("Trailer rows"); await rf.fill("2"); await rf.press("Enter"); await sleep(900); }
     const tz = (await kids()).find((k) => k.type === "trailer");
     const n2 = await waitFor(async () => { const n = await stalls(); return n && n !== n1 ? n : 0; });
     ok(`[${scheme}] Trailer rows 2: zone = 2 × 50 + 60 aisle, two bands on the canvas (${n1} → ${n2} stalls)`, tz && tz.trailerRows === 2 && Math.round(tz.zd) === 160 && tz.cfg.single === false && n2 === 2 * n1);
-    ok(`[${scheme}] the chip reads "Trailer ×2" and the editor shows the total depth`, /Trailer ×2/.test(await rowByRole("dock").first().innerText()) && /160′ deep/.test(await T("wall-trailer-total").innerText()));
+    ok(`[${scheme}] the strip piece reads "×2" and the edit box carries the rows and the aisle`, /×2/.test(await rowByRole("dock").first().innerText()) && (await page.getByLabel("Aisle between trailer rows").inputValue()) === "60");
     if (SHOTS) await T("property-panel").screenshot({ path: `${SHOTS}/${scheme}-trailer.png` }).catch(() => {});
 
     // ---- (e)/(f) no px; the bottom block is gone; Pad elev. in Structure ----

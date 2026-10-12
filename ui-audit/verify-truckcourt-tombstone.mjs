@@ -70,7 +70,7 @@ const tombsOf = (m) => (m && m.deletedIds) || [];
 
 // Fill-based zone rects on the canvas (same palette verify-dock-zones uses).
 const zones = () => page.evaluate(() => {
-  const FILL = { "#f3ece1": "building", "#d6d1c7": "court", "#e3d4b2": "trailer", "#bcd3a6": "buffer" };
+  const FILL = { "#f3ece1": "building", "#d5d9de": "court", "#e3d4b2": "trailer", "#bcd3a6": "buffer" };
   const out = [];
   for (const r of document.querySelectorAll("svg rect")) {
     const fill = (r.getAttribute("fill") || "").toLowerCase();
