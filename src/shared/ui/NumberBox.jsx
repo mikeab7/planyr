@@ -14,7 +14,7 @@ import { NUM_FONT, TABULAR_NUMS } from "../theme/typography.js";
  * already target. Module scope; theme tokens only. */
 export const NUMBOX_INPUT_STYLE = {
   flex: "1 1 auto", minWidth: 0, width: "100%", height: "100%", boxSizing: "border-box", padding: "0 4px 0 6px", margin: 0,
-  border: "none", borderRadius: 0, background: "transparent", color: "var(--text-primary)", textAlign: "right",
+  border: "none", borderRadius: "inherit", background: "transparent", color: "var(--text-primary)", textAlign: "right",
   fontSize: FONT_SIZE.control, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS,
 };
 
