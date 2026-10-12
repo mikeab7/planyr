@@ -56,7 +56,9 @@ const pointsAttr = (pts) => pts.map((p) => `${p.x},${p.y}`).join(" ");
  * overlay's own rendered image). `destroy()` tears everything down. */
 export function createPlacementHandles(map) {
   const pane = ensurePane(map);
-  const svg = svgEl("svg", { width: 0, height: 0, style: "position:absolute; left:0; top:0; overflow:visible; pointer-events:none;" });
+  // 1x1, never 0x0: a zero-size outer <svg> disables rendering of everything inside it (SVG spec), so the
+  // frame, grips and readout were never painted even though the invisible grips still answered presses.
+  const svg = svgEl("svg", { width: 1, height: 1, style: "position:absolute; left:0; top:0; overflow:visible; pointer-events:none;" });
   pane.appendChild(svg);
 
   const moveHit = svgEl("polygon", { fill: "transparent", style: "cursor:grab; pointer-events:auto;" });
