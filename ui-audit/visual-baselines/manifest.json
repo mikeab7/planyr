@@ -6,90 +6,90 @@
   "surfaces": {
     "map-landing": {
       "light": {
-        "approvedAt": "2026-10-11",
-        "approvedCommit": "16062028a",
-        "note": "Building panel v3 NEW-3: palette A default site colours paint on the demo plan (parcel fill, tag colours); rendered by CI [CI-authored by run 38184402956 on 16062028a95cecf360d215450a8550521319bf1d]"
+        "approvedAt": "2026-10-12",
+        "approvedCommit": "a05d7896f",
+        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
       },
       "dark": {
-        "approvedAt": "2026-10-11",
-        "approvedCommit": "16062028a",
-        "note": "Building panel v3 NEW-3: palette A default site colours paint on the demo plan (parcel fill, tag colours); rendered by CI [CI-authored by run 38184402956 on 16062028a95cecf360d215450a8550521319bf1d]"
+        "approvedAt": "2026-10-12",
+        "approvedCommit": "a05d7896f",
+        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-12",
+        "approvedCommit": "a05d7896f",
+        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-12",
+        "approvedCommit": "a05d7896f",
+        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
       }
     },
     "site-planner-header": {
       "light": {
-        "approvedAt": "2026-10-11",
-        "approvedCommit": "16062028a",
-        "note": "Building panel v3 NEW-3: palette A default site colours paint on the demo plan (parcel fill, tag colours); rendered by CI [CI-authored by run 38184402956 on 16062028a95cecf360d215450a8550521319bf1d]"
+        "approvedAt": "2026-10-12",
+        "approvedCommit": "a05d7896f",
+        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
       },
       "dark": {
-        "approvedAt": "2026-10-11",
-        "approvedCommit": "16062028a",
-        "note": "Building panel v3 NEW-3: palette A default site colours paint on the demo plan (parcel fill, tag colours); rendered by CI [CI-authored by run 38184402956 on 16062028a95cecf360d215450a8550521319bf1d]"
+        "approvedAt": "2026-10-12",
+        "approvedCommit": "a05d7896f",
+        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-12",
+        "approvedCommit": "a05d7896f",
+        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-12",
+        "approvedCommit": "a05d7896f",
+        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
       }
     },
     "site-planner-left-rail": {
       "light": {
-        "approvedAt": "2026-10-11",
-        "approvedCommit": "16062028a",
-        "note": "Building panel v3 NEW-3: palette A default site colours paint on the demo plan (parcel fill, tag colours); rendered by CI [CI-authored by run 38184402956 on 16062028a95cecf360d215450a8550521319bf1d]"
+        "approvedAt": "2026-10-12",
+        "approvedCommit": "a05d7896f",
+        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
       },
       "dark": {
-        "approvedAt": "2026-10-11",
-        "approvedCommit": "16062028a",
-        "note": "Building panel v3 NEW-3: palette A default site colours paint on the demo plan (parcel fill, tag colours); rendered by CI [CI-authored by run 38184402956 on 16062028a95cecf360d215450a8550521319bf1d]"
+        "approvedAt": "2026-10-12",
+        "approvedCommit": "a05d7896f",
+        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-12",
+        "approvedCommit": "a05d7896f",
+        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-12",
+        "approvedCommit": "a05d7896f",
+        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
       }
     },
     "library": {
       "light": {
-        "approvedAt": "2026-10-11",
-        "approvedCommit": "16062028a",
-        "note": "Building panel v3 NEW-3: palette A default site colours paint on the demo plan (parcel fill, tag colours); rendered by CI [CI-authored by run 38184402956 on 16062028a95cecf360d215450a8550521319bf1d]"
+        "approvedAt": "2026-10-12",
+        "approvedCommit": "a05d7896f",
+        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
       },
       "dark": {
-        "approvedAt": "2026-10-11",
-        "approvedCommit": "16062028a",
-        "note": "Building panel v3 NEW-3: palette A default site colours paint on the demo plan (parcel fill, tag colours); rendered by CI [CI-authored by run 38184402956 on 16062028a95cecf360d215450a8550521319bf1d]"
+        "approvedAt": "2026-10-12",
+        "approvedCommit": "a05d7896f",
+        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
       },
       "light--phone": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-12",
+        "approvedCommit": "a05d7896f",
+        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
       },
       "dark--phone": {
-        "approvedAt": "2026-10-09",
-        "approvedCommit": "618857de9",
-        "note": "B2237072: right tool rail now shows a thin scrollbar, a tighter left edge and headings on the icon column [CI-authored by run 37954133443 on 618857de904ddc542eb11ddf3e10e3ded946a428]"
+        "approvedAt": "2026-10-12",
+        "approvedCommit": "a05d7896f",
+        "note": "B2254144: parcel boundary and setback line now draw at constant screen-pixel weight (owner-locked), so the demo plan's parcel outline in the Site Planner surfaces changes slightly [CI-authored by run 38188407586 on a05d7896f123879330d35e0dbbb8124741412572]"
       }
     }
   }
