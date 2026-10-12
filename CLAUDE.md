@@ -1597,6 +1597,8 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
      term**. Pure core unit-tested in `test/recomputeProbe.test.js`, the fixes in
      `test/pureCache.test.js`.
 
+- **NO-RETRYABLE-ERRCODE** — **No SQL function may raise errcode `40001` or `40P01`; a business-rule refusal uses a PostgREST custom code (`PT409` → HTTP 409).** PostgREST retries those two codes forever inside one request, so on 2026-10-11 a version-conflict raise pinned every pool connection and took planyr.io down for every user (6:05–6:31 PM CT). Guard: `test/noRetryableErrcode.test.js`.
+
 - **CONSTRAINT-CAPTURE** — **When Michael states or corrects a product constraint in chat, the
   session that hears it writes it into `## Owner product constraints` IN THE SAME SESSION, before
   doing the work it was dispatched for.** Not "later," not "filed for a follow-up" — a constraint

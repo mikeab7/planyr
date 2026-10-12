@@ -110,7 +110,7 @@ export async function fetchOverlayCompPoints(overlayId) {
  * moves too even though `comps` update is normally owner-only RLS. `compPositions` is
  * `[{id, lat, lon}, ...]`, already computed client-side (the projection math lives in
  * overlayPlacement.js, not duplicated here). `expectedVersion` is the version-guard (item 7) — the
- * version this client last saw for the overlay; the RPC refuses (40001) if it's stale. Returns
+ * version this client last saw for the overlay; the RPC refuses (PT409 — HTTP 409; formerly 40001, see the outage note in site_plan_overlays_comp_sync.sql) if it's stale. Returns
  * `{ movedCount, version, conflict, error }` — on conflict, `version` is absent and the caller
  * should reload to pick up whatever actually landed. */
 export async function commitOverlayPlacementWithComps(overlayId, placement, compPositions, expectedVersion) {
@@ -123,7 +123,7 @@ export async function commitOverlayPlacementWithComps(overlayId, placement, comp
     p_expected_version: Number.isFinite(expectedVersion) ? expectedVersion : 1,
   });
   if (error) {
-    if (String(error.code || "") === "40001") {
+    if (["PT409", "40001"].includes(String(error.code || ""))) { // PT409 since the 2026-10-11 outage; 40001 kept for an old RPC
       return { movedCount: 0, conflict: true, error: new Error("This site plan changed elsewhere — showing the latest version instead.") };
     }
     return { movedCount: 0, error };

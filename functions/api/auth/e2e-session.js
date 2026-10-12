@@ -9,8 +9,9 @@
  *      from a browser (and a preflight gets no Access-Control-Allow-*).
  *   2. Disabled unless env.E2E_LOGIN_KEY is set AND >= 32 chars: 404, as if the route did not exist.
  *      A missing or wrong key (header `x-e2e-login-key`, never the URL) gets the SAME 404.
- *   3. The account is a CONSTANT in code (E2E_EMAIL + pinned E2E_USER_ID). The request body is never
- *      read, so nothing a caller sends can choose the account. The resolved user id is checked
+ *   3. The account is a CONSTANT in code (E2E_EMAIL + pinned E2E_USER_ID, or — by the `x-e2e-account:
+ *      teammate` header — the second pinned test account, B2244017). The request body is never read, so
+ *      nothing a caller sends can name an account outside those two. The resolved user id is checked
  *      against the pin BEFORE a session is issued, and the issued session's user again before return.
  *   4. The service-role key stays server-side; it, the magic-link token and the login key are never
  *      returned or logged. Only the test account's own tokens leave this function.
@@ -19,6 +20,17 @@
 
 export const E2E_EMAIL = "e2e@planyr.test";
 export const E2E_USER_ID = "a96e544f-8537-45cf-81a2-007965fbc04c";
+/* B2244017 — a SECOND pinned test account, the teammate half of a two-account sharing check. It is
+ * chosen by the `x-e2e-account: teammate` HEADER (never the body, which is still never read), and it is
+ * a constant exactly like the first: an unknown header value is a 404, the same as no key, so the set of
+ * accounts this door can open is these two and nothing a caller sends can widen it. The account owns
+ * nothing and is on no team except the throwaway one a check creates (and deletes). */
+export const E2E_TEAMMATE_EMAIL = "e2e-teammate@planyr.test";
+export const E2E_TEAMMATE_USER_ID = "e2e7ea4a-0b5f-4c1e-9d2a-224401700001";
+export const E2E_ACCOUNTS = Object.freeze({
+  primary: Object.freeze({ email: E2E_EMAIL, id: E2E_USER_ID }),
+  teammate: Object.freeze({ email: E2E_TEAMMATE_EMAIL, id: E2E_TEAMMATE_USER_ID }),
+});
 export const MIN_KEY_LEN = 32;
 
 const HEADERS = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" };
@@ -95,6 +107,10 @@ export async function handleE2eSession(request, env, deps = {}) {
   const presented = request.headers.get("x-e2e-login-key") || "";
   if (!(await safeEqual(presented, loginKey))) { log(false, "bad-key", request); return notFound(); }
 
+  const which = (request.headers.get("x-e2e-account") || "primary").trim();
+  const acct = Object.prototype.hasOwnProperty.call(E2E_ACCOUNTS, which) ? E2E_ACCOUNTS[which] : null;
+  if (!acct) { log(false, "unknown-account", request); return notFound(); }
+
   // From here the caller holds the key. Misconfiguration is reported plainly (no secrets in it).
   const base = String(env.SUPABASE_URL || "").replace(/\/+$/, "");
   const service = env.SUPABASE_SERVICE_ROLE_KEY, anon = env.SUPABASE_ANON_KEY;
@@ -105,13 +121,13 @@ export async function handleE2eSession(request, env, deps = {}) {
     const gen = await callUpstream(doFetch, `${base}/auth/v1/admin/generate_link`, {
       method: "POST",
       headers: { apikey: service, authorization: `Bearer ${service}`, "content-type": "application/json" },
-      body: JSON.stringify({ type: "magiclink", email: E2E_EMAIL }),
+      body: JSON.stringify({ type: "magiclink", email: acct.email }),
     }, deps);
     const g = gen.body;
     const hashed = g && (g.hashed_token || (g.properties && g.properties.hashed_token));
     if (!gen.ok || !hashed) { log(false, `generate_link-${gen.status}`, request); return upstreamFailure("generate_link", gen); }
     // PIN CHECK 1 — before anything is exchanged.
-    if (g.id !== E2E_USER_ID || String(g.email || "").toLowerCase() !== E2E_EMAIL) { log(false, "pin-mismatch-link", request); return reply(403, { error: "account pin mismatch" }); }
+    if (g.id !== acct.id || String(g.email || "").toLowerCase() !== acct.email) { log(false, "pin-mismatch-link", request); return reply(403, { error: "account pin mismatch" }); }
 
     // 2) Exchange the token hash for a session. /verify is not captcha-gated (measured 2026-10-04).
     const ver = await callUpstream(doFetch, `${base}/auth/v1/verify`, {
@@ -122,7 +138,7 @@ export async function handleE2eSession(request, env, deps = {}) {
     const s = ver.body;
     if (!ver.ok || !s || !s.access_token || !s.refresh_token) { log(false, `verify-${ver.status}`, request); return upstreamFailure("verify", ver); }
     // PIN CHECK 2 — the session we are about to hand out must be the test account's.
-    if (!s.user || s.user.id !== E2E_USER_ID || String(s.user.email || "").toLowerCase() !== E2E_EMAIL) { log(false, "pin-mismatch-session", request); return reply(403, { error: "account pin mismatch" }); }
+    if (!s.user || s.user.id !== acct.id || String(s.user.email || "").toLowerCase() !== acct.email) { log(false, "pin-mismatch-session", request); return reply(403, { error: "account pin mismatch" }); }
 
     log(true, "issued", request);
     return reply(200, {

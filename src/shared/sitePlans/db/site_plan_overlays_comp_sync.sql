@@ -84,8 +84,8 @@ grant execute on function public.site_plan_overlay_comp_points(uuid) to authenti
 -- placement fields. Multiple live sessions on the same plan are the owner's own stated, common
 -- case ("3 here"); without this, two overlapping drags silently last-write-wins with no signal
 -- to either side. Distinguishes "not yours to move" (42501, unchanged) from "changed elsewhere,
--- reload first" (40001 — Postgres' own serialization_failure code, the closest standard fit for
--- an optimistic-concurrency conflict) so the client can tell a permissions problem from a race.
+-- reload first" (PT409 — a PostgREST custom code, HTTP 409; it WAS 40001, which PostgREST retries
+-- forever and which took production down on 2026-10-11 — never use 40001/40P01 here) so the client can tell a permissions problem from a race.
 drop function if exists public.commit_site_plan_overlay_placement(uuid, double precision, double precision, double precision, double precision, jsonb);
 
 create or replace function public.commit_site_plan_overlay_placement(
@@ -124,7 +124,11 @@ begin
     if not v_owned then
       raise exception 'That site plan is not yours to move.' using errcode = '42501';
     else
-      raise exception 'This site plan changed elsewhere — reload before moving it again.' using errcode = '40001';
+      -- ⛔ 2026-10-11 OUTAGE: NEVER 40001/40P01. PostgREST treats 40001 (serialization_failure) as retryable and
+      -- re-runs the transaction forever inside one request, so every conflicting call pinned a pool connection
+      -- until the pool hit 10/10 and planyr.io went down for every user (6:05-6:31 PM CT). PT409 is a PostgREST
+      -- custom code -> HTTP 409, error.code 'PT409'. Mirrors what production already runs.
+      raise exception 'This site plan changed elsewhere — reload before moving it again.' using errcode = 'PT409';
     end if;
   end if;
 

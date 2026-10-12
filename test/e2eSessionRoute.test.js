@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { handleE2eSession, safeEqual, callUpstream, safeUpstreamMessage, UPSTREAM_ATTEMPTS, E2E_EMAIL, E2E_USER_ID, onRequest } from "../functions/api/auth/e2e-session.js";
+import { handleE2eSession, safeEqual, callUpstream, safeUpstreamMessage, UPSTREAM_ATTEMPTS, E2E_EMAIL, E2E_USER_ID, E2E_TEAMMATE_EMAIL, E2E_TEAMMATE_USER_ID, E2E_ACCOUNTS, onRequest } from "../functions/api/auth/e2e-session.js";
 
 const KEY = "k".repeat(43);
 const ENV = { E2E_LOGIN_KEY: KEY, SUPABASE_URL: "https://x.supabase.co", SUPABASE_SERVICE_ROLE_KEY: "SERVICE-SECRET", SUPABASE_ANON_KEY: "ANON" };
@@ -151,5 +151,35 @@ describe("e2e-session route — transient upstream failures (B2154049)", () => {
     expect(safeUpstreamMessage({ msg: "bad eyJabc.def.ghi and " + "A".repeat(40) })).toBe("bad [jwt] and [redacted]");
     expect(safeUpstreamMessage({ msg: "ab ".repeat(200) }).length).toBe(200);
     expect(safeUpstreamMessage(null)).toBeNull();
+  });
+});
+
+describe("e2e-session route — the second pinned test account (B2244017)", () => {
+  const withMate = () => fakeSupabase({ users: { "e2e-teammate@planyr.test": { id: E2E_TEAMMATE_USER_ID, email: E2E_TEAMMATE_EMAIL } } });
+  it("x-e2e-account: teammate → the teammate's session, pinned", async () => {
+    const calls = [];
+    const f = fakeSupabase({ calls, users: { [E2E_TEAMMATE_EMAIL]: { id: E2E_TEAMMATE_USER_ID, email: E2E_TEAMMATE_EMAIL } } });
+    const r = await run(req({ headers: { "x-e2e-account": "teammate" } }), ENV, f);
+    expect(r.status).toBe(200); noCors(r);
+    expect((await r.json()).user).toEqual({ id: E2E_TEAMMATE_USER_ID, email: E2E_TEAMMATE_EMAIL });
+    expect(calls[0].body.email).toBe(E2E_TEAMMATE_EMAIL);
+  });
+  it("no header → still the primary test account", async () => {
+    const r = await run(req(), ENV, withMate()); expect((await r.json()).user.id).toBe(E2E_USER_ID);
+  });
+  it("any other header value (incl. prototype keys) → 404, upstream never contacted", async () => {
+    for (const v of ["michael", "admin", "__proto__", "constructor", "toString", "Teammate", "primary,teammate"]) {
+      const f = withMate(); const r = await run(req({ headers: { "x-e2e-account": v } }), ENV, f);
+      expect(r.status).toBe(404); expect(f).not.toHaveBeenCalled();
+    }
+  });
+  it("a teammate request whose upstream resolves to someone else is refused by the pin", async () => {
+    const f = fakeSupabase({ users: { [E2E_TEAMMATE_EMAIL]: { id: "michael-id", email: E2E_TEAMMATE_EMAIL } } });
+    const r = await run(req({ headers: { "x-e2e-account": "teammate" } }), ENV, f); expect(r.status).toBe(403);
+  });
+  it("the account table is frozen and holds exactly the two test accounts", () => {
+    expect(Object.isFrozen(E2E_ACCOUNTS)).toBe(true);
+    expect(Object.keys(E2E_ACCOUNTS).sort()).toEqual(["primary", "teammate"]);
+    for (const a of Object.values(E2E_ACCOUNTS)) expect(a.email).toMatch(/@planyr\.test$/);
   });
 });

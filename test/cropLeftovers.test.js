@@ -7,18 +7,18 @@ const tool = readFileSync("src/shared/sitePlans/components/ImageCropTool.jsx", "
 const planner = readFileSync("src/workspaces/site-planner/SitePlanner.jsx", "utf8");
 
 describe("crop tool leftovers", () => {
-  it("Done carries the other shape whenever the person put one there (B2066224)", () => {
-    expect(tool).toMatch(/const otherShapes = \(\) =>/);
-    expect(tool).toMatch(/polySeedRef/);
-    // the dormant polygon is no longer gated on the overlay having had one before the tool opened
-    expect(tool).not.toMatch(/initialPtsRef\.current && !isFullImagePoly\(polyPts, imgW, imgH\)\s*\n\s*\? normalizePolyCrop/);
+  it("Done saves ONLY the active mode's shape — no hidden rectangle/polygon rides along (NEW-5, supersedes B2066224)", () => {
+    expect(tool).not.toMatch(/otherShapes|polySeedRef|dormant/);
+    expect(tool).not.toContain("is kept too");
+    expect(tool).not.toContain("crop-keeps-other");
   });
   it("Enter closes a drafting polygon even with a toolbar button focused (B2066225)", () => {
     expect(tool).toMatch(/k === "Enter" && tag === "BUTTON" && !\(mode === "poly" && !polyClosed\)/);
   });
-  it("Reset to full page precedes Clear polygon so it never moves between modes (B2066226)", () => {
-    expect(tool.indexOf('data-testid="crop-reset"')).toBeGreaterThan(0);
-    expect(tool.indexOf('data-testid="crop-reset"')).toBeLessThan(tool.indexOf('data-testid="crop-clear-polygon"'));
+  it("ONE reset action: Reset to full page; no separate Clear polygon (NEW-5, supersedes B2066226)", () => {
+    expect(tool).toContain('data-testid="crop-reset"');
+    expect(tool).not.toContain("crop-clear-polygon");
+    expect(tool).not.toContain("Clear polygon");
   });
   it("the panel carries ONE Crop entry (B2066227's second, row-level button was retired by the Overlays redesign — owner: one crop control)", () => {
     const panel = readFileSync("src/workspaces/site-planner/components/OverlaysPanel.jsx", "utf8");
