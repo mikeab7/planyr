@@ -45,7 +45,11 @@ const openPlan = async (page, harness) => {
     if ((await page.evaluate(() => window.__plannerForeign && window.__plannerForeign.siteId()).catch(() => null)) === A) break;
     await pacedWait(page, 1000);
   }
-  await page.getByTestId("planner-canvas").first().waitFor({ state: "visible", timeout: 30000 });
+  await page.getByTestId("planner-canvas").first().waitFor({ state: "visible", timeout: 30000 }).catch(async (e) => {
+    const body = (await page.locator("body").innerText().catch(() => "")).slice(0, 400).replace(/\n/g, " | ");
+    await page.screenshot({ path: `/tmp/claude-0/${harness.replace(/[^a-z-]/gi, "_")}.png` }).catch(() => {});
+    throw new Error(`${harness}: planner never opened — url ${page.url()} — screen: ${body} (${e.message.split("\n")[0]})`);
+  });
   const cur = await page.evaluate(() => window.__plannerForeign && window.__plannerForeign.siteId());
   if (cur !== A) throw new Error(`${harness}: opened ${cur}, wanted ${A}`);
   await pacedWait(page, 1500);
@@ -54,7 +58,9 @@ const openPlan = async (page, harness) => {
 const F = (page, fn, ...args) => page.evaluate(([f, a]) => (window.__plannerForeign ? window.__plannerForeign[f](...a) : null), [fn, args]);
 const until = async (page, fn, what, ms = 60000) => { const t0 = Date.now(); for (;;) { const v = await fn(); if (v) return v; if (Date.now() - t0 > ms) throw new Error("timed out: " + what); await pacedWait(page, 500); } };
 const dbOverlays = (page) => page.evaluate(async (i) => { const r = await window.pfSupabase.from("sites").select("o:data->sheetOverlays").eq("id", i).maybeSingle(); return r.error ? { error: r.error.message } : (r.data ? r.data.o || [] : null); }, A);
-const canRead = (page, k) => page.evaluate(async (kk) => { const r = await window.pfSupabase.storage.from("doc-review-files").download(kk); return !r.error && !!r.data; }, k);
+// Asks the SERVER (a signed URL is issued only for an object the caller's storage RLS admits) — a plain
+// download can be answered from the browser's HTTP cache, which made a revoked read look still-granted.
+const canRead = (page, k) => page.evaluate(async (kk) => { const r = await window.pfSupabase.storage.from("doc-review-files").createSignedUrl(kk, 30); return !r.error && !!(r.data && r.data.signedUrl); }, k);
 const sees = (page, table, id) => page.evaluate(async ([t, i]) => { const r = await window.pfSupabase.from(t).select("id").eq("id", i); return (r.data || []).length; }, [table, id]);
 const share = (page, team) => page.evaluate(async ([g, t]) => { const r = await window.pfSupabase.rpc("set_project_team_state", { p_group_id: g, p_team_id: t }); return r.error ? "ERR " + r.error.message : r.data && r.data.outcome; }, [A, team]);
 
@@ -134,16 +140,25 @@ finally {
           await new Promise((r) => setTimeout(r, 1500));
         }
         if (k) { const r = await sb.storage.from("doc-review-files").remove([k]); out.storage = r.error ? String(r.error.message) : "removed"; }
-        if (t) { await sb.from("team_members").delete().eq("team_id", t); const d = await sb.from("teams").delete().eq("id", t); out.team = d.error ? String(d.error.message) : "deleted"; }
+        if (t) {
+          // ORDER MATTERS: deleting a team needs the caller to still be its admin, and team_members has no FK to
+          // teams (no cascade). So: drop the teammate, delete the team while still admin, then leave it.
+          const me = (await sb.auth.getUser()).data.user.id;
+          await sb.from("team_members").delete().eq("team_id", t).neq("user_id", me);
+          const d = await sb.from("teams").delete({ count: "exact" }).eq("id", t);
+          await sb.from("team_members").delete().eq("team_id", t).eq("user_id", me);
+          out.team = d.error ? String(d.error.message) : (d.count === 1 ? "deleted" : `NOT deleted (${d.count} rows)`);
+          out.teamLeft = ((await sb.rpc("list_my_teams")).data || []).filter((x) => x.id === t).length;
+        }
         for (const s of ["planarfit:sites:v1", "planarfit:sites:history:v1"]) { try { const o = JSON.parse(localStorage.getItem(s) || "{}"); delete o[id]; localStorage.setItem(s, JSON.stringify(o)); } catch (_) {} }
         localStorage.removeItem("planarfit:currentSite:v1");
         out.sitesLeft = ((await sb.from("sites").select("id").eq("id", id)).data || []).length;
         out.compsLeft = c ? ((await sb.from("comps").select("id").eq("id", c)).data || []).length : 0;
-        out.fileLeft = k ? !(await sb.storage.from("doc-review-files").download(k)).error : false;
+        out.fileLeft = k ? !(await sb.storage.from("doc-review-files").createSignedUrl(k, 30)).error : false; // a download can be served from the HTTP cache
         return out;
       }, [A, key, teamId, compId]);
       console.log("cleanup:", JSON.stringify(gone));
-      if (gone.sitesLeft || gone.compsLeft || gone.fileLeft) failed = true;
+      if (gone.sitesLeft || gone.compsLeft || gone.fileLeft || gone.teamLeft || (teamId && gone.team !== "deleted")) failed = true;
     }
   } catch (e) { console.error("cleanup ERROR", e.message); failed = true; }
   if (mate) await mate.close().catch(() => {});
