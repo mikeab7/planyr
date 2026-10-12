@@ -661,7 +661,7 @@ were split out of this file.
     showing up like shit when it gets to the real thing": grouped by source (County lots · Combined · Drawn · Other), each
     group header carrying its ACTIVE acres; ONE summary line at body size ("174.28 AC in site · 10 of 11 active" — never a
     display-size figure, "this is a professional software"); names and source lines wrap and are NEVER ellipsised; acres in one
-    fixed column with a shared right edge; no column-heading row; the padlock exists only while locked and lives in the right-hand icon slot (left of the eye) — never in the name block; rename is a ⋯ menu item; the site total stays the TRUE (dissolved) area and overlapping parcels are DISCLOSED (a muted "overlaps" tag per row + "· N AC overlap" on the summary), never silent. A change to this list
+    fixed column with a shared right edge; no column-heading row; the padlock exists only while locked and lives in the right-hand icon slot (left of the eye) — never in the name block; rename is a ⋯ menu item; the site total stays the TRUE (dissolved) area and overlapping parcels are DISCLOSED (a muted overlap ICON in the icon slot per row — never a pill, never in the name block — and a second short muted summary line "N AC overlaps, counted once"; neither summary line wraps), never silent. A change to this list
     is judged on real-shaped data at every panel width in both themes — `ui-audit/verify-parcel-list-layout.mjs` (a required
     CI gate) — not on tidy fixtures. (B2243424.)
 
@@ -1587,6 +1587,8 @@ rules are binding shorthand, not optional style. (Full-text home so briefs stay 
      which asserts every registered memo still exists and that **no dep array carries a raw view
      term**. Pure core unit-tested in `test/recomputeProbe.test.js`, the fixes in
      `test/pureCache.test.js`.
+
+- **NO-RETRYABLE-ERRCODE** — **No SQL function may raise errcode `40001` or `40P01`; a business-rule refusal uses a PostgREST custom code (`PT409` → HTTP 409).** PostgREST retries those two codes forever inside one request, so on 2026-10-11 a version-conflict raise pinned every pool connection and took planyr.io down for every user (6:05–6:31 PM CT). Guard: `test/noRetryableErrcode.test.js`.
 
 - **CONSTRAINT-CAPTURE** — **When Michael states or corrects a product constraint in chat, the
   session that hears it writes it into `## Owner product constraints` IN THE SAME SESSION, before

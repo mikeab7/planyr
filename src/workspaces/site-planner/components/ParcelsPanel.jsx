@@ -33,6 +33,7 @@ export const MoreIcon = () => <Ico><circle cx="5" cy="12" r="1.2" /><circle cx="
 export const PencilIcon = ({ size }) => <Ico size={size}><path d="M4 20h4L19 9l-4-4L4 16v4z" /><path d="M13.5 6.5l4 4" /></Ico>;
 export const SplitIcon = () => <Ico><path d="M4 4l16 16" /><rect x="3" y="3" width="18" height="18" rx="2" /></Ico>;
 export const CloseIcon = () => <Ico size={14}><path d="M6 6l12 12M18 6L6 18" /></Ico>;
+export const OverlapIcon = () => <Ico size={14}><rect x="3" y="3" width="12" height="12" rx="2" /><rect x="9" y="9" width="12" height="12" rx="2" /></Ico>;
 export const TrashIcon = () => <Ico><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></Ico>;
 
 export const iconBtn = {
@@ -53,12 +54,12 @@ function Tag({ children }) {
  * grid — check · name block · acres · actions — so the acres of every group line up on a single right edge and the
  * icons sit in the same narrow slot on every row (the slot is 3 icon-widths: padlock · eye · ⋯, right-aligned, so the
  * eye and ⋯ never move when the padlock is absent). There is no column-heading row; the group headers replace it. */
-const ACRES_W = 60; // fits "1,234.56" at the row's semibold figure size
-const ICON = 20; // every row icon box
-/* The icon slot holds [padlock] · eye · ⋯ right-aligned, so the eye and ⋯ sit on one column on every row. It is two icons wide
- * until a parcel in the list is locked; then it is three for EVERY row (never a per-row width) so the padlock has a seat LEFT of
- * the eye — in the slot, not in the middle of the row. */
-export const slotWidth = (anyLocked) => ICON * (anyLocked ? 3 : 2);
+const ACRES_W = 58; // fits "1,234.56" at the row's semibold figure size
+const ICON = 18; // every row icon box
+/* The icon slot holds [overlap marker] · [padlock] · eye · ⋯ right-aligned, so the eye and ⋯ sit on one column on every row. It is two
+ * icons wide, plus one seat for the padlock once any parcel in the list is locked and one for the overlap marker once any parcel
+ * overlaps another — wider for EVERY row (never a per-row width), so a marker has a seat in the slot, never in the name block. */
+export const slotWidth = (anyLocked, anyOverlap = false) => ICON * (2 + (anyLocked ? 1 : 0) + (anyOverlap ? 1 : 0));
 const colsFor = (slotW) => `20px minmax(0, 1fr) ${ACRES_W}px ${slotW}px`;
 const FIRST_LINE_H = 29; // one name line (17) + the row's 6px top/bottom padding: checkbox, acres and icons centre on the FIRST line of a wrapped row
 const FILTER_MIN_ROWS = 8; // the filter box only earns its space once the list is long
@@ -178,12 +179,14 @@ function ParcelRow({ row, selected, picked, pickMode, checked, handlers, cols, s
             title={`${row.name}${sub ? ` — ${sub}` : ""}`}
             onKeyDown={(e) => { if ((e.key === "Delete" || e.key === "Backspace") && !pickMode) { e.preventDefault(); e.stopPropagation(); setMenu("confirm"); } }}
             style={{ flex: "1 1 auto", minWidth: 0, display: "block", padding: `${SPACE.sm}px ${SPACE.xxs}px ${SPACE.sm}px ${SPACE.xxs}px`, border: "none", background: "transparent", textAlign: "left", cursor: "pointer", fontFamily: "inherit" }}>
-            <span data-testid={`parcel-row-name-${row.id}`} style={{ display: "block", overflowWrap: "break-word", fontSize: FONT_SIZE.emphasis, lineHeight: "17px", fontWeight: muted ? 400 : 650, color: nameColor }}>{keepDigits(label)}{overlapNames && <span data-testid={`parcel-row-overlap-${row.id}`} title={`Overlaps ${overlapNames}`} style={{ display: "inline-block", marginLeft: SPACE.sm, padding: "0 5px", borderRadius: RADIUS.pill, border: LINE, color: "var(--text-secondary)", fontSize: FONT_SIZE.micro, fontWeight: 600, lineHeight: "14px", verticalAlign: "1px" }}>overlaps</span>}</span>
+            <span data-testid={`parcel-row-name-${row.id}`} style={{ display: "block", overflowWrap: "break-word", fontSize: FONT_SIZE.emphasis, lineHeight: "17px", fontWeight: muted ? 400 : 650, color: nameColor }}>{keepDigits(label)}</span>
             {sub && <span data-testid={`parcel-row-source-${row.id}`} style={{ display: "block", overflowWrap: "break-word", fontSize: FONT_SIZE.label, lineHeight: "14px", color: "var(--text-secondary)" }}>{keepDigits(sub)}</span>}
           </button>
         </div>
-        <span onClick={open} data-testid={`parcel-row-acres-${row.id}`} style={{ height: FIRST_LINE_H, display: "flex", alignItems: "center", justifyContent: "flex-end", cursor: "pointer", fontSize: FONT_SIZE.emphasis, fontWeight: 650, color: dim ? "var(--text-secondary)" : "var(--text-primary)", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, textDecoration: row.included ? "none" : "line-through", whiteSpace: "nowrap", paddingRight: SPACE.xs }}>{fmt(row.acres)}</span>
+        <span onClick={open} data-testid={`parcel-row-acres-${row.id}`} style={{ height: FIRST_LINE_H, display: "flex", alignItems: "center", justifyContent: "flex-end", cursor: "pointer", fontSize: FONT_SIZE.emphasis, fontWeight: 650, color: dim ? "var(--text-secondary)" : "var(--text-primary)", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, textDecoration: row.included ? "none" : "line-through", whiteSpace: "nowrap", paddingRight: SPACE.xxs }}>{fmt(row.acres)}</span>
         <span style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", width: slotW, height: FIRST_LINE_H }}>
+          {overlapNames && <span role="img" tabIndex={0} aria-label={`Overlaps ${overlapNames}`} title={`Overlaps ${overlapNames}`} data-testid={`parcel-row-overlap-${row.id}`}
+            style={{ width: ICON, height: ICON, flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)", cursor: "default" }}><OverlapIcon /></span>}
           {row.locked && <button type="button" onClick={() => handlers.onToggleLock(row.id)} aria-pressed="true" data-testid={`parcel-row-lock-${row.id}`} aria-label={`Unlock ${label}`}
             title="Locked — even Edit parcels can't change it. Click to unlock." style={{ ...iconBtn, width: ICON, height: ICON, color: "var(--text-secondary)" }}><LockGlyph size={13} /></button>}
           <button type="button" className={row.included ? `land-row-hover${menu ? " is-open" : ""}` : undefined} onClick={() => handlers.onToggleInclude(row.id)} aria-pressed={row.included} data-testid={`parcel-row-eye-${row.id}`}
@@ -205,7 +208,7 @@ function GroupHeader({ group, cols }) {
   return (
     <div data-testid={`parcels-group-${group.key}`} style={{ display: "grid", gridTemplateColumns: cols, alignItems: "baseline", padding: `${SPACE.lg}px 0 ${SPACE.xs}px`, borderBottom: "1px solid var(--border-strong)" }}>
       <span style={{ gridColumn: "1 / 3", paddingLeft: SPACE.xs, fontSize: FONT_SIZE.micro, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", overflowWrap: "break-word", color: "var(--text-secondary)" }}>{group.label} · {group.count}</span>
-      <span data-testid={`parcels-group-acres-${group.key}`} style={{ textAlign: "right", paddingRight: SPACE.xs, fontSize: FONT_SIZE.label, fontWeight: 600, color: "var(--text-secondary)", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap" }}>{fmt(group.activeAcres)}</span>
+      <span data-testid={`parcels-group-acres-${group.key}`} style={{ textAlign: "right", paddingRight: SPACE.xxs, fontSize: FONT_SIZE.label, fontWeight: 600, color: "var(--text-secondary)", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, whiteSpace: "nowrap" }}>{fmt(group.activeAcres)}</span>
       <span />
     </div>
   );
@@ -243,7 +246,8 @@ export default function ParcelsPanel({
   }), [handlers]);
   // The row list only re-renders when something it shows changed — never on a pan / zoom frame.
   const anyLocked = rows.some((r) => r.locked);
-  const slotW = slotWidth(anyLocked), cols = colsFor(slotW);
+  const anyOverlap = rows.some((r) => !r.superseded && r.included && (r.overlaps || []).length > 0);
+  const slotW = slotWidth(anyLocked, anyOverlap), cols = colsFor(slotW);
   const byId = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
   const overlapAc = useMemo(() => overlapAcres(rows, siteAcres), [rows, siteAcres]);
   const rowList = useMemo(() => groupRows(shown).map((g) => (
@@ -256,7 +260,7 @@ export default function ParcelsPanel({
   )), [shown, selectedId, pickedIds, pickMode, checked, H, cols, slotW, byId]);
 
   return (
-    <div data-testid="parcels-panel" style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+    <div data-testid="parcels-panel" style={{ display: "flex", flexDirection: "column", minWidth: 0, maxWidth: "100%", overflowX: "clip" }}>
       {splitMode ? (
         <div data-testid="parcels-split-header" style={{ display: "flex", alignItems: "center", gap: SPACE.lg, padding: `${SPACE.md}px 0 ${SPACE.lg}px` }}>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -267,10 +271,12 @@ export default function ParcelsPanel({
         </div>
       ) : (
         <div data-testid="parcels-summary" style={{ padding: `${SPACE.xs}px 0 ${SPACE.xs}px`, fontSize: FONT_SIZE.control, color: "var(--text-primary)" }}>
-          <span data-testid="parcels-site-acres" style={{ fontWeight: 650, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{fmt(siteAcres)}</span> AC in site
-          <span style={{ color: "var(--text-secondary)" }}> · </span>
-          <span data-testid="parcels-active-count">{inCount} of {counted.length} active</span>
-          {overlapAc > 0 && <span data-testid="parcels-overlap" title="Parcels overlap, so the site total counts shared ground once while the rows add up to more. Rows marked “overlaps” show where."><span style={{ color: "var(--text-secondary)" }}> · </span>{fmt(overlapAc)} AC overlap</span>}
+          <div data-testid="parcels-summary-line">
+            <span data-testid="parcels-site-acres" style={{ fontWeight: 650, fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS }}>{fmt(siteAcres)}</span> AC in site
+            <span style={{ color: "var(--text-secondary)" }}> · </span>
+            <span data-testid="parcels-active-count">{inCount} of {counted.length} active</span>
+          </div>
+          {overlapAc > 0 && <div data-testid="parcels-overlap" title="Parcels overlap, so the site total counts shared ground once while the rows add up to more. Rows marked with the overlap icon show where." style={{ color: "var(--text-secondary)" }}>{fmt(overlapAc)} AC overlaps, counted once</div>}
         </div>
       )}
 

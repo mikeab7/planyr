@@ -51,8 +51,8 @@ describe("cropClipShapeScreen", () => {
 
 describe("cropEditBlock — the ONE lock/eligibility predicate (asked by the panel AND by the write)", () => {
   it("an ordinary loaded overlay may be cropped", () => expect(cropEditBlock(base)).toBeNull());
-  it("a LOCKED overlay refuses, with a plain reason", () => {
-    expect(cropEditBlock({ ...base, locked: true })).toMatch(/Unlock/);
+  it("a LOCKED overlay may still be cropped — Lock only blocks direct map drags (NEW-6, 2026-10-11)", () => {
+    expect(cropEditBlock({ ...base, locked: true })).toBeNull();
   });
   it("the pinned map capture refuses (it prints via its own aerial path — a crop would not export)", () => {
     expect(cropEditBlock({ ...base, fromMap: true })).toMatch(/map capture/);

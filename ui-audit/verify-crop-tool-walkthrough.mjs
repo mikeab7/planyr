@@ -74,7 +74,7 @@ const openCrop = async () => {
 };
 const imgBox = () => dlg.locator("img").first().boundingBox();
 const viewBox = () => dlg.locator("img").first().evaluate((img) => { const r = img.parentElement.parentElement.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
-const pct = async () => parseInt(await dlg.locator('[data-testid="crop-zoom-pct"]').textContent(), 10);
+const pct = async () => parseInt(await dlg.locator('[data-testid="crop-zoom-100"]').textContent(), 10);
 const vertexCount = () => dlg.locator('[data-testid^="crop-poly-vertex-"]').count();
 // screen position of an IMAGE FRACTION, read from the image's own live box — valid at any pan/zoom
 const at = async (fx, fy) => { const b = await imgBox(); return { x: b.x + fx * b.width, y: b.y + fy * b.height }; };
