@@ -85,6 +85,11 @@ describe("parcel list — overlap disclosure (owner real-data check 2026-10-11)"
     expect(ovAt).toBeGreaterThan(slotAt);
     expect(src).not.toMatch(/>overlaps<\/span>/);
     expect(src).toMatch(/AC overlaps, counted once/);
+    // FIXED COLUMNS: seats are rendered for the whole list (not per row) and the slot is left-aligned, so an icon never shifts when
+    // a neighbour seat is empty (the 8 South Tract A report)
+    expect(src).toMatch(/seatLock && <span/);
+    expect(src).toMatch(/seatOverlap && <span/);
+    expect(src).toMatch(/justifyContent: "flex-start", width: slotW/);
     expect(src).toMatch(/parcels-summary-line/);
   });
 });

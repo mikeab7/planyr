@@ -16,6 +16,8 @@ import { RADIUS } from "../../../shared/ui/radius.js";
 import { FONT_SIZE, SPACE, CONTROL_H } from "../../../shared/ui/designTokens.js";
 import { NUM_FONT, TABULAR_NUMS } from "../../../shared/theme/typography.js";
 import { LockGlyph as SharedLockGlyph } from "../../../shared/ui/LockToggle.jsx";
+import { isDiagArmed } from "../lib/diagArm.js";
+import { measureListOverflow } from "../lib/parcelListOverflow.js";
 
 export const LINE = "1px solid var(--border-default)";
 export const fmt = (n) => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -59,7 +61,8 @@ const ICON = 18; // every row icon box
 /* The icon slot holds [overlap marker] · [padlock] · eye · ⋯ right-aligned, so the eye and ⋯ sit on one column on every row. It is two
  * icons wide, plus one seat for the padlock once any parcel in the list is locked and one for the overlap marker once any parcel
  * overlaps another — wider for EVERY row (never a per-row width), so a marker has a seat in the slot, never in the name block. */
-export const slotWidth = (anyLocked, anyOverlap = false) => ICON * (2 + (anyLocked ? 1 : 0) + (anyOverlap ? 1 : 0));
+const SLOT_PAD = 6; // breathing room between the acres figure and the first icon seat
+export const slotWidth = (anyLocked, anyOverlap = false) => SLOT_PAD + ICON * (2 + (anyLocked ? 1 : 0) + (anyOverlap ? 1 : 0));
 const colsFor = (slotW) => `20px minmax(0, 1fr) ${ACRES_W}px ${slotW}px`;
 const FIRST_LINE_H = 29; // one name line (17) + the row's 6px top/bottom padding: checkbox, acres and icons centre on the FIRST line of a wrapped row
 const FILTER_MIN_ROWS = 8; // the filter box only earns its space once the list is long
@@ -160,7 +163,7 @@ const keepDigits = (text) => String(text).split(/(\d{6,})/).map((t, i) => (i % 2
  * opens the parcel page and uses the FULL name-block width (rename, constraint #18, is a ⋯ menu item — never an icon in the
  * name flow). The padlock exists only while the parcel is locked (click = unlock, Undo toast); the eye shows on row
  * hover / keyboard focus and always when inactive; ⋯ on hover / focus. On touch screens both are always shown. */
-function ParcelRow({ row, selected, picked, pickMode, checked, handlers, cols, slotW, overlapNames }) {
+function ParcelRow({ row, selected, picked, pickMode, checked, handlers, cols, slotW, overlapNames, seatLock, seatOverlap }) {
   const dim = !row.included || row.superseded;
   const { label, sub, muted } = rowText(row);
   const [menu, setMenu] = useState(null); // null | "menu" | "confirm"
@@ -184,11 +187,11 @@ function ParcelRow({ row, selected, picked, pickMode, checked, handlers, cols, s
           </button>
         </div>
         <span onClick={open} data-testid={`parcel-row-acres-${row.id}`} style={{ height: FIRST_LINE_H, display: "flex", alignItems: "center", justifyContent: "flex-end", cursor: "pointer", fontSize: FONT_SIZE.emphasis, fontWeight: 650, color: dim ? "var(--text-secondary)" : "var(--text-primary)", fontFamily: NUM_FONT, fontVariantNumeric: TABULAR_NUMS, textDecoration: row.included ? "none" : "line-through", whiteSpace: "nowrap", paddingRight: SPACE.xxs }}>{fmt(row.acres)}</span>
-        <span style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", width: slotW, height: FIRST_LINE_H }}>
-          {overlapNames && <span role="img" tabIndex={0} aria-label={`Overlaps ${overlapNames}`} title={`Overlaps ${overlapNames}`} data-testid={`parcel-row-overlap-${row.id}`}
-            style={{ width: ICON, height: ICON, flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)", cursor: "default" }}><OverlapIcon /></span>}
-          {row.locked && <button type="button" onClick={() => handlers.onToggleLock(row.id)} aria-pressed="true" data-testid={`parcel-row-lock-${row.id}`} aria-label={`Unlock ${label}`}
-            title="Locked — even Edit parcels can't change it. Click to unlock." style={{ ...iconBtn, width: ICON, height: ICON, color: "var(--text-secondary)" }}><LockGlyph size={13} /></button>}
+        <span data-testid={`parcel-row-slot-${row.id}`} style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", width: slotW, height: FIRST_LINE_H, boxSizing: "border-box", paddingLeft: SLOT_PAD }}>
+          {seatOverlap && <span style={{ width: ICON, height: ICON, flex: "none", display: "inline-flex" }}>{overlapNames && <span role="img" tabIndex={0} aria-label={`Overlaps ${overlapNames}`} title={`Overlaps ${overlapNames}`} data-testid={`parcel-row-overlap-${row.id}`}
+            style={{ width: ICON, height: ICON, flex: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", color: "var(--text-secondary)", cursor: "default" }}><OverlapIcon /></span>}</span>}
+          {seatLock && <span style={{ width: ICON, height: ICON, flex: "none", display: "inline-flex" }}>{row.locked && <button type="button" onClick={() => handlers.onToggleLock(row.id)} aria-pressed="true" data-testid={`parcel-row-lock-${row.id}`} aria-label={`Unlock ${label}`}
+            title="Locked — even Edit parcels can't change it. Click to unlock." style={{ ...iconBtn, width: ICON, height: ICON, color: "var(--text-secondary)" }}><LockGlyph size={13} /></button>}</span>}
           <button type="button" className={row.included ? `land-row-hover${menu ? " is-open" : ""}` : undefined} onClick={() => handlers.onToggleInclude(row.id)} aria-pressed={row.included} data-testid={`parcel-row-eye-${row.id}`}
             aria-label={row.included ? `Make ${label} not active` : `Make ${label} active`}
             title={row.included ? "Active — counted in the site total. Click to leave it out." : "Not active — left out of the site total. Click to count it."}
@@ -217,6 +220,12 @@ function GroupHeader({ group, cols }) {
 export default function ParcelsPanel({
   rows, siteAcres, addMenu, splitMode, selectedId, pickMode, pickedIds, combinePreview, handlers,
 }) {
+  // READ-ONLY, armed-only (?planyrDiag=1): `window.__parcelListOverflow()` names whatever pokes past the panel body's right edge.
+  const rootRef = useRef(null);
+  useEffect(() => {
+    window.__parcelListOverflow = () => (isDiagArmed() ? measureListOverflow(rootRef.current) : null);
+    return () => { delete window.__parcelListOverflow; };
+  }, []);
   const [filter, setFilter] = useState("");
   const [checked, setChecked] = useState(() => new Set());
 
@@ -254,13 +263,13 @@ export default function ParcelsPanel({
     <div key={g.key} data-testid={`parcels-section-${g.key}`}>
       <GroupHeader group={g} cols={cols} />
       {g.rows.map((row) => (
-        <ParcelRow key={row.id} row={row} selected={selectedId === row.id} picked={!!pickedIds && pickedIds.has(row.id)} pickMode={!!pickMode} checked={checked.has(row.id)} handlers={H} cols={cols} slotW={slotW} overlapNames={overlapNamesOf(row, byId)} />
+        <ParcelRow key={row.id} row={row} selected={selectedId === row.id} picked={!!pickedIds && pickedIds.has(row.id)} pickMode={!!pickMode} checked={checked.has(row.id)} handlers={H} cols={cols} slotW={slotW} overlapNames={overlapNamesOf(row, byId)} seatLock={anyLocked} seatOverlap={anyOverlap} />
       ))}
     </div>
-  )), [shown, selectedId, pickedIds, pickMode, checked, H, cols, slotW, byId]);
+  )), [shown, selectedId, pickedIds, pickMode, checked, H, cols, slotW, byId, anyLocked, anyOverlap]);
 
   return (
-    <div data-testid="parcels-panel" style={{ display: "flex", flexDirection: "column", minWidth: 0, maxWidth: "100%", overflowX: "clip" }}>
+    <div ref={rootRef} data-testid="parcels-panel" style={{ display: "flex", flexDirection: "column", minWidth: 0, maxWidth: "100%", overflowX: "clip" }}>
       {splitMode ? (
         <div data-testid="parcels-split-header" style={{ display: "flex", alignItems: "center", gap: SPACE.lg, padding: `${SPACE.md}px 0 ${SPACE.lg}px` }}>
           <div style={{ flex: 1, minWidth: 0 }}>

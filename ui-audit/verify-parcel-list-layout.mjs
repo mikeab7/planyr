@@ -26,6 +26,7 @@ const BASE = (process.env.BASE_URL || "http://localhost:4173").replace(/\/$/, ""
 const SHOTS = process.env.SHOTS_DIR || "";
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 const SIGNED = !!process.env.SIGNED_IN;
+const DPR = Number(process.env.DPR || 2.15); // the owner's measured device pixel ratio
 const results = [];
 const ok = (name, cond, extra = "") => { results.push({ name, pass: !!cond }); console.log(`${cond ? "PASS" : "FAIL"} — ${name}${extra ? "  ::  " + extra : ""}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -66,7 +67,7 @@ const ovDrawn = (id, ac, dx, dy, label) => ({ id, points: rectAt(2000 + dx, OV_B
 FIX.push({ tag: "ovlp", title: "ZZ Eight South", overlap: true, sections: { county: 4, combined: 1, other: 5 }, rows: 10, longId: null, parcels: [
   ovCounty("o1", 6.66, 0, 0), ovCounty("o2", 6.66, 40, 40), ovCounty("o3", 6.66, 80, 80), { ...county(0, "o4", 8.12, "0440520000099"), points: rectAt(0, OV_BASE + 3000, 8.12) },
   { id: "oc", points: rectAt(4000, OV_BASE, 70), label: "Tract A", locked: true, lockSem: 2, combined: { from: [1, 2].map((k) => ({ ...drawn(0, "oc" + k, 35, "Piece " + k), snapName: "Piece " + k })) } },
-  ovDrawn("od1", 69.48, 0, 0, "Parcel 4"), ovDrawn("od2", 69.48, 0, 0, "Parcel 5"), ovDrawn("od3", 69.48, 60, 60, "Parcel 7"), ovDrawn("od4", 69.48, 0, 6000, "Parcel 8"), ovDrawn("od5", 11.86, 40, 6040, "Parcel 6")] });
+  ovDrawn("od1", 69.48, 0, 0, "Parcel 4"), ovDrawn("od2", 69.48, 0, 0, "Parcel 5"), ovDrawn("od3", 69.48, 2000, 60, "Parcel 7"), ovDrawn("od4", 69.48, 0, 6000, "Parcel 8"), ovDrawn("od5", 11.86, 40, 6040, "Parcel 6")] });
 const SITES = Object.fromEntries(FIX.map((f) => { const s = mk(f.tag, f.title, f.parcels); return [s.id, s]; }));
 void yCursor;
 const WIDTHS = process.env.WIDTHS ? process.env.WIDTHS.split(",").map(Number) : [240, 320, 620]; // PANEL_MIN_W · default · PANEL_MAX_W (lib/panelWidth.js)
@@ -82,12 +83,12 @@ async function seed() {
   }
 }
 if (SIGNED) {
-  const s = await openSignedIn({ base: BASE, ignoreDefaultArgs: ["--hide-scrollbars"] }); browser = s.browser; ctx = s.context; page = s.page;
+  const s = await openSignedIn({ base: BASE, ignoreDefaultArgs: ["--hide-scrollbars"], contextOptions: { deviceScaleFactor: DPR } }); browser = s.browser; ctx = s.context; page = s.page;
 } else {
   const exe = existsSync(chromium.executablePath()) ? undefined : "/opt/pw-browsers/chromium";
   // REAL scrollbars: headless Chromium hides them, which is how a few-px overflow that only exists beside a classic (Windows) scrollbar was invisible here
   browser = await chromium.launch({ executablePath: exe, args: ["--no-sandbox"], ignoreDefaultArgs: ["--hide-scrollbars"] });
-  ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: DPR }); // the owner's panel notches by DEVICE pixel (lib/panelWidth.js) — a dpr-1 rig cannot see that
   page = await ctx.newPage();
   await page.addInitScript((sites) => { try { if (!localStorage.getItem("zz-pl-seeded")) { localStorage.setItem("planarfit:sites:v1", JSON.stringify(sites)); localStorage.setItem("zz-pl-seeded", "1"); } } catch (_) {} }, SITES);
 }
@@ -104,6 +105,7 @@ const MEASURE = () => {
   const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
   const textBox = (el) => { const g = document.createRange(); g.selectNodeContents(el); const rs = [...g.getClientRects()].filter((r) => r.width > 0); if (!rs.length) return null; return { l: Math.min(...rs.map((r) => r.left)), r: Math.max(...rs.map((r) => r.right)), t: Math.min(...rs.map((r) => r.top)), b: Math.max(...rs.map((r) => r.bottom)), lines: new Set(rs.map((r) => Math.round(r.top))).size }; };
   const nameBtnPure = (row, id) => { const b = row.querySelector(`[data-testid="parcel-row-${id}"]`); const bad = [...b.querySelectorAll("[data-testid]")].filter((e) => !/^parcel-row-(name|source)-/.test(e.getAttribute("data-testid"))); return bad.length ? `${id}: name block holds ${bad.map((e) => e.getAttribute("data-testid")).join(",")} besides name + source` : ""; };
+  const iconLefts = { overlap: [], lock: [], eye: [], more: [] };
   const clipped = [], contrast = [], overlaps = [], rows = [], slots = [], outsideSlot = [], cellShared = [], wrappedSources = [];
   const check = (el, what) => {
     if (el.scrollWidth > el.clientWidth + 0.5) clipped.push(`${what}: scrollWidth ${el.scrollWidth} > clientWidth ${el.clientWidth}`);
@@ -133,6 +135,7 @@ const MEASURE = () => {
     if (ovIcon && !slot.contains(ovIcon)) outsideSlot.push(`overlap marker of ${id} is not in the icon slot`);
     if (ovIcon && ovIcon.getBoundingClientRect().right > (lock || eye).getBoundingClientRect().left + 0.5) outsideSlot.push(`overlap marker of ${id} is not left of the padlock / eye`);
     if (nameBtnPure(row, id)) cellShared.push(nameBtnPure(row, id));
+    if (ovIcon) iconLefts.overlap.push({ id, l: ovIcon.getBoundingClientRect().left }); if (lock) iconLefts.lock.push({ id, l: lock.getBoundingClientRect().left }); iconLefts.eye.push({ id, l: eye.getBoundingClientRect().left }); iconLefts.more.push({ id, l: more.getBoundingClientRect().left });
     [lock, eye, more, ovIcon].filter(Boolean).forEach((b) => { const r = b.getBoundingClientRect(); if (r.left < sr.left - 0.5 || r.right > sr.right + 0.5 || r.top < sr.top - 0.5 || r.bottom > sr.bottom + 0.5) outsideSlot.push(`${b.getAttribute("data-testid")} outside its icon slot`); });
     if (lock && lock.getBoundingClientRect().right > eye.getBoundingClientRect().left + 0.5) outsideSlot.push(`padlock of ${id} is not left of the eye`);
     // the name cell holds the name button ONLY (no icon in the middle of the row) and the button uses the cell's full width
@@ -163,7 +166,7 @@ const MEASURE = () => {
   const lim = body.getBoundingClientRect().left + body.clientLeft + body.clientWidth;
   const offenders = [...body.querySelectorAll("*")].filter((e) => { const cs = getComputedStyle(e); return cs.position !== "fixed" && e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().right > lim + 0.5; }).slice(0, 3).map((e) => `${e.tagName.toLowerCase()}[${e.getAttribute("data-testid") || e.className || ""}] +${(e.getBoundingClientRect().right - lim).toFixed(1)}`);
   const bodyOverflow = { sw: body.scrollWidth, cw: body.clientWidth, offenders };
-  return { clipped, contrast, overlaps, rows, groups, acresRight, groupAcres, slots, outsideSlot, cellShared, wrappedSources, overlapText: ovEl ? ovEl.textContent : "", summaryLines, bodyOverflow, ...detail };
+  return { clipped, contrast, overlaps, rows, groups, acresRight, groupAcres, slots, outsideSlot, cellShared, wrappedSources, overlapText: ovEl ? ovEl.textContent : "", summaryLines, bodyOverflow, iconLefts, ...detail };
 };
 
 const openFixtureOnce = async (f, theme, width) => {
@@ -219,6 +222,9 @@ try {
     // ICONS: every row icon sits INSIDE the one icon slot (padlock left of the eye), the slot is the same on every row, and the name block owns its whole cell
     const slotSpread = Math.max(...m.slots.map((s) => s.r)) - Math.min(...m.slots.map((s) => s.r)), slotSpreadL = Math.max(...m.slots.map((s) => s.l)) - Math.min(...m.slots.map((s) => s.l));
     ok(`${tag}: every icon sits inside its row's icon slot, padlock left of the eye`, m.outsideSlot.length === 0, m.outsideSlot.slice(0, 3).join(" | "));
+    // FIXED COLUMNS: every icon of a kind has the SAME left edge on every row (a locked row's overlap icon must not shift left)
+    const colSpread = Object.entries(m.iconLefts).map(([k, a]) => [k, a.length ? Math.max(...a.map((x) => x.l)) - Math.min(...a.map((x) => x.l)) : 0, a.length]);
+    ok(`${tag}: each icon kind sits in ONE column down the list (${colSpread.filter((c) => c[2]).map((c) => `${c[0]}×${c[2]}`).join(" ")})`, colSpread.every((c) => c[1] <= 1), colSpread.filter((c) => c[1] > 1).map((c) => `${c[0]} spread ${c[1].toFixed(1)}`).join(" | "));
     ok(`${tag}: the icon slot is the same box on every row`, slotSpread <= 1 && slotSpreadL <= 1, `${slotSpread.toFixed(1)} / ${slotSpreadL.toFixed(1)}`);
     ok(`${tag}: nothing but the name block sits in the name cell (the source line gets the full block width)`, m.cellShared.length === 0, m.cellShared.slice(0, 3).join(" | "));
     // a source line may wrap ONLY if it genuinely does not fit the block (natural width > available), and a short one never wraps at a comfortable width
@@ -228,6 +234,8 @@ try {
     ok(`${tag}: the summary number is the same size as the words around it`, m.fs.num === m.fs.sum, `${m.fs.num} vs ${m.fs.sum} — "${m.fs.sumText}"`);
     ok(`${tag}: text clears 4.5:1`, m.contrast.length === 0, m.contrast.slice(0, 3).join(" | "));
     ok(`${tag}: the panel never scrolls sideways (${m.panelW}px wide)`, !m.spills);
+    const diag = await page.evaluate(() => { try { sessionStorage.setItem("planyr:diag", "1"); } catch (_) {} return window.__parcelListOverflow ? window.__parcelListOverflow() : undefined; });
+    ok(`${tag}: the armed self-report window.__parcelListOverflow() answers and agrees (known-good arm for the overflow instrument)`, !!diag && Array.isArray(diag.offenders) && diag.scrollWidth <= diag.clientWidth + 0.5 && diag.offenders.length === 0, String(JSON.stringify(diag)).slice(0, 220));
     ok(`${tag}: the panel BODY has no horizontal overflow (scrollWidth ${m.bodyOverflow.sw} vs clientWidth ${m.bodyOverflow.cw})`, m.bodyOverflow.sw <= m.bodyOverflow.cw + 0.5 && m.bodyOverflow.offenders.length === 0, m.bodyOverflow.offenders.join(" | "));
     if (width >= 320) ok(`${tag}: no summary line wraps at ${width} (${m.summaryLines.map((s) => s.lines).join("+")} lines)`, m.summaryLines.length >= 1 && m.summaryLines.every((s) => s.lines === 1), m.summaryLines.map((s) => `${s.id}: "${s.text}" ×${s.lines}`).join(" | "));
     if (SHOTS) await T("parcels-panel").screenshot({ path: `${SHOTS}/${tag.replace(/\//g, "-")}.png` });
