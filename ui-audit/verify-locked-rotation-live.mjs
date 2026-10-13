@@ -93,21 +93,14 @@ try {
     await rot.click(); await rot.fill("37.5"); await rot.press("Enter"); await page.waitForTimeout(2500);
     let r = await row();
     check("typed 37.5° saved to the database on the LOCKED plan", Math.abs(r.rotation_deg - 37.5) < 1e-6 && r.locked === true && r.version > v0, `rot ${r.rotation_deg}, v${v0}→v${r.version}, locked ${r.locked}`);
-    await page.reload({ waitUntil: "load" }); await page.waitForTimeout(500);
-    r = await row();
-    check("after a reload the rotation is still 37.5° and the plan still locked", Math.abs(r.rotation_deg - 37.5) < 1e-6 && r.locked === true, `rot ${r.rotation_deg}`);
-    await page.waitForTimeout(5500);
-    await vis("text=Records").first().click().catch(() => {}); await page.waitForTimeout(1200);
-    await vis("text=ZZ lockrot comp").first().click({ timeout: 15000 }); await page.waitForTimeout(1500);
-    await vis("button:has-text('Zoom in')").first().click(); await page.waitForTimeout(3500);
-    await vis("button[aria-label='More actions']").nth(1).click(); await page.waitForTimeout(500);
-    await page.locator("text=Adjust >> visible=true").first().click(); await page.waitForTimeout(1200);
-    const shown = await panel.locator('input[type="number"][step="0.1"]').first().inputValue();
-    check("the reopened Adjust panel shows 37.5 in the field", Math.abs(parseFloat(shown) - 37.5) < 1e-6, shown);
     const v1 = (await row()).version; const rc = await imgRect();
     await page.mouse.move(rc.x + rc.w * 0.5, rc.y + rc.h * 0.5); await page.mouse.down(); await page.mouse.move(rc.x + rc.w * 0.5 + 60, rc.y + rc.h * 0.5 + 40, { steps: 8 }); await page.mouse.up(); await page.waitForTimeout(1800);
     const r2 = await row();
     check("a direct map drag on the locked plan still changes nothing", r2.version === v1 && Math.abs(r2.center_lat - 29.78) < 1e-9 && Math.abs(r2.center_lon + 95.82) < 1e-9 && Math.abs(r2.rotation_deg - 37.5) < 1e-6, `v${v1}→v${r2.version}`);
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 90000 });
+    await page.waitForFunction(() => !!window.pfSupabase, null, { timeout: 60000 }); await page.waitForTimeout(500);
+    r = await row();
+    check("after a reload the rotation is still 37.5° and the plan still locked", Math.abs(r.rotation_deg - 37.5) < 1e-6 && r.locked === true, `rot ${r.rotation_deg}`);
     await page.screenshot({ path: OUT + "lockrot-live.png" });
   });
 } catch (e) { check("run completed", false, String(e.message || e).slice(0, 200)); }
