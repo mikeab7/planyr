@@ -582,15 +582,13 @@ function SitePlanAdjustPanel({
         </div>
 
         {/* NEW-4 — the quieter, compact block right below it: rotation is set once, so it reads
-            smaller and lighter than Opacity above rather than sharing its weight. Read-only while
-            locked (B1154369 — do NOT undo: this already presents as "0° · locked — unlock to
-            rotate", which shipped and is right). */}
+            smaller and lighter than Opacity above rather than sharing its weight. NEW-1 (2026-10-12): typed
+            rotation works on a LOCKED plan too — Lock only blocks a direct drag on the map. This
+            supersedes B1154369's old "read-only while locked / do NOT undo" note. */}
         {placed && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
             <span style={metaText}>Rotation</span>
-            {o.locked ? (
-              <span style={metaText}>{Math.round((o.rotationDeg || 0) * 10) / 10}° · locked — unlock to rotate</span>
-            ) : (
+            {(
               <>
                 <input type="number" step={0.1}
                   value={rotDraft != null ? rotDraft : Math.round((o.rotationDeg || 0) * 10) / 10}
@@ -857,10 +855,10 @@ export default function SitePlansSection({
   const commitPlacement = (id, placement, opts) => serialized(id, async () => {
     const existing = overlaysRef.current.find((o) => o.id === id);
     if (!existing) return;
-    // NEW-7 — defense in depth: every UI entry point into a placement change (the map handles,
-    // the numeric Rotation field) is gated on `locked` at the control, but the write itself must
-    // refuse too, so a stale closure or a future caller can never move/resize/rotate a plan the
-    // owner explicitly locked.
+    // NEW-7 — defense in depth: every DIRECT-DRAG entry point into a placement change (the map
+    // handles) is gated on `locked`, and the write itself refuses too, so a stale closure or a future
+    // caller can never drag-move/resize/rotate a plan the owner locked. Panel actions (typed rotation,
+    // scale, Move / resize) pass `explicit`.
     // NEW-6 — a locked plan refuses a placement write UNLESS the person explicitly asked for it: they
     // armed it with "Move / resize" in this panel (it is then the active overlay — a locked plan is
     // not click-selectable, so that is the only way it becomes active), or the caller says `explicit`
@@ -1239,7 +1237,7 @@ export default function SitePlansSection({
   // Rotation is a PLACEMENT field (it moves any pinned comp's derived position), so it goes
   // through the same atomic commit the map's own rotate handle uses — never the plain
   // patchAndReload path opacity/visible/locked use, which never touches pinned comps.
-  const setRotation = (o, rotationDeg) => commitPlacement(o.id, { rotationDeg });
+  const setRotation = (o, rotationDeg) => commitPlacement(o.id, { rotationDeg }, { explicit: true }); // typed in the panel → allowed on a locked plan
 
   // NEW-7 — scale actions. Every one commits through the SAME placement write a corner drag uses (so pinned comps
   // follow), with `explicit: true`: choosing a scale action in this panel is an intentional act, so a LOCKED plan

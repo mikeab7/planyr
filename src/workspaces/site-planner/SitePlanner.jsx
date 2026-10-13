@@ -10861,7 +10861,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setOvAlignBase(null);
     const o = sheetOverlays.find((x) => x.id === id);
     if (!o) return;
-    if (o.locked) { flashWarn("⚠ That drawing is locked — unlock it to align.", 4000); return; } // refuse a locked overlay, with a reason
+    // NEW-1 (2026-10-12): Lock only blocks a direct drag on the map — this is a panel action, so it works on a locked overlay.
     const list = onlyParcel ? [onlyParcel] : parcels;
     let best = null;
     list.forEach((pc) => (pc.points || []).forEach((a, i) => {
@@ -22059,7 +22059,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   const sizeOverlayToView = (id) => {
     const o = sheetOverlays.find((x) => x.id === id);
     if (!o || o.fromMap) return;
-    if (o.locked) { flashWarn("⚠ Unlock this overlay to resize it.", 4000); return; }
+    // Lock only blocks a direct drag on the map; "Size to view" is a panel action and works on a locked overlay.
     const f = Math.max(0.01, ((size.w / view.ppf) * 0.6) / Math.max(1, o.imgW));
     const vc = p2fStatic(size.w / 2, size.h / 2);
     patchOverlay(id, { ftPerPx: f, x: vc.x - (o.imgW * f) / 2, y: vc.y - (o.imgH * f) / 2, unscaled: true });
