@@ -38,6 +38,7 @@ const OVERLAY = {
   review: '[data-testid="review-drop-outline"]',
 };
 let fails = 0, vacuous = true;
+const NAV = LIVE ? 7000 : 1200; // a lazy workspace chunk over the real network needs far longer than a local preview
 const ok = (c, m) => { console.log(`${c ? "✅" : "❌"} ${m}`); if (!c) fails++; };
 
 /** Fire one DragEvent at the element under (x, y), or at `window`; returns defaultPrevented. */
@@ -101,20 +102,20 @@ async function armMatrix(page, name, overlay) {
   }
   const consoleErrors = [];
   page.on("pageerror", (e) => consoleErrors.push(String(e)));
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(LIVE ? 4000 : 1500);
   await assertMeasurable(page, "verify-file-drag-overlays");
 
   // ---- MAP (portfolio, "Select a project") ----
-  await page.evaluate(() => { location.hash = "#/site"; }); await page.waitForTimeout(1200);
+  await page.evaluate(() => { location.hash = "#/site"; }); await page.waitForTimeout(NAV);
   await armMatrix(page, "Map", OVERLAY.map);
 
   // ---- REVIEW ----
-  await page.evaluate(() => { location.hash = "#/markup"; }); await page.waitForTimeout(1200);
+  await page.evaluate(() => { location.hash = "#/markup"; }); await page.waitForTimeout(NAV);
   await armMatrix(page, "Review", OVERLAY.review);
 
   // ---- LIBRARY ----
   const libHash = LIVE ? "#/library" : "#/library";
-  await page.evaluate((h) => { location.hash = h; }, libHash); await page.waitForTimeout(1500);
+  await page.evaluate((h) => { location.hash = h; }, libHash); await page.waitForTimeout(NAV);
   const hasOverlayView = await (async () => { await raise(page); const v = await up(page, OVERLAY.library); await fire(page, "dragleave", { relatedNull: true }); await settle(page, 400); return v; })();
   if (hasOverlayView) await armMatrix(page, "Library", OVERLAY.library);
   else console.log("ℹ Library: no project open here (home / signed-out) — overlay arms skipped; drop arms below still run");
@@ -130,15 +131,15 @@ async function armMatrix(page, name, overlay) {
   }
 
   // ---- view switch: raise on the Map, move to Library, back — nothing stuck anywhere ----
-  await page.evaluate(() => { location.hash = "#/site"; }); await page.waitForTimeout(800);
+  await page.evaluate(() => { location.hash = "#/site"; }); await page.waitForTimeout(NAV);
   await raise(page);
-  await page.evaluate(() => { location.hash = "#/library"; }); await page.waitForTimeout(700);
+  await page.evaluate(() => { location.hash = "#/library"; }); await page.waitForTimeout(NAV);
   ok(!(await up(page, OVERLAY.map)) && !(await up(page, OVERLAY.library)), "view switch mid-drag: no overlay left up in the new view");
-  await page.evaluate(() => { location.hash = "#/site"; }); await page.waitForTimeout(700);
+  await page.evaluate(() => { location.hash = "#/site"; }); await page.waitForTimeout(NAV);
   ok(!(await up(page, OVERLAY.map)), "…and the Map's overlay is not waiting for me when I come back");
 
   // ---- genuine drop onto the Map still reaches the site-plan intake (no regression) ----
-  await page.evaluate(() => { location.hash = "#/site"; }); await page.waitForTimeout(800);
+  await page.evaluate(() => { location.hash = "#/site"; }); await page.waitForTimeout(NAV);
   await raise(page);
   const mapDrop = await fire(page, "drop");
   await settle(page, 400);
