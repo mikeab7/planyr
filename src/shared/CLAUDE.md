@@ -34,7 +34,7 @@ into every consumer. Root rules in `/CLAUDE.md`; deep detail in `/docs/REFERENCE
   knowing before you cite them as working:** `scaleFactor.js` (B290250) and, outside the deed path,
   the multi-zone engine — the site-planner's proximity screen still measures every screening distance
   through the Texas cone, which over-reports Colorado by **1.93%** (B290247).
-- `files/` — `chunkedUpload.js` (any-size chunked Drive upload via /api/uploads/* — pure chunk
+- `files/` — `fileDrag.js` (B2258464/B2258465) is THE file-drag tracker: armed once at app boot, it cancels the browser's default for any Files `dragover`/`drop` (so a dropped file is never opened/downloaded anywhere) and owns "is a file being dragged over the window" for every drop overlay (`useFileDragActive(visible)`; cleared by leave-window/drop/dragend/Esc/blur/mouse/pointer/hashchange/watchdog). Never add a per-pane enter/leave depth counter, and gate a window-level drop handler on the ACTIVE workspace, not just a mode (hidden workspaces stay mounted). Guard: repo-root `test/` **fileDragGuard**; ui-audit **verify-file-drag-overlays**. `chunkedUpload.js` (any-size chunked Drive upload via /api/uploads/* — pure chunk
   math + the retry/resume loop, B409 rework) + `uploadQueue.js` (the upload-tray queue model).
   `middleTruncate.js` — split a label into head + a PINNED tail, so a list of names that differ only
   at the end ("… - p1" … "- p32") stays readable when it doesn't fit; plain CSS ellipsis cuts exactly

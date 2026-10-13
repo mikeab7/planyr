@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo, useId, memo, Fragment, lazy, Suspense, useSyncExternalStore } from "react";
+import { useFileDragActive } from "../../shared/files/fileDrag.js";
 import { flushSync, createPortal } from "react-dom";
 import ContextMenu from "../../shared/ui/ContextMenu.jsx";
 import { startClickAck } from "../../shared/ui/clickAck.js";
@@ -2339,6 +2340,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // exit (the old currentTarget===target guard missed that case). Refs, not state — read via
   // .current inside the window listeners with no stale-closure risk; forced to 0 on drop/reset.
   const canvasDragDepth = useRef(0);
+  // NEW-2: the shared file-drag tracker is the authority on "a file is being dragged right now". The local
+  // hover flags below only say WHERE; they are forced back to false the moment the tracker clears (leave
+  // the window, a drop that failed, Escape, blur, view change…), so a missed dragleave can never strand one.
+  const fileDragOn = useFileDragActive(true);
+  useEffect(() => {
+    if (fileDragOn) return;
+    canvasDragDepth.current = 0;
+    setCanvasDropOver(false);
+    setDeedDrag(false);
+  }, [fileDragOn]);
   // B556 — a DELIBERATE delete must leave a tombstone (`deletedIds`), the same invariant
   // removeOverlay/B276 already follow. WITHOUT it two things break: (1) the B459 thin-clobber guard
   // sees ≥2 items vanish with no tombstone to explain them and FALSELY rejects the save as an
@@ -24019,7 +24030,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           onDragEnter={(e) => { if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return; e.preventDefault(); canvasDragDepth.current += 1; setCanvasDropOver(true); }}
           onDragOver={(e) => { if (Array.from(e.dataTransfer?.types || []).includes("Files")) e.preventDefault(); }}
           onDragLeave={(e) => { if (!Array.from(e.dataTransfer?.types || []).includes("Files")) return; canvasDragDepth.current = Math.max(0, canvasDragDepth.current - 1); if (canvasDragDepth.current === 0) setCanvasDropOver(false); }}
-          onDrop={(e) => { canvasDragDepth.current = 0; setCanvasDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || isDxfFile(f) || isDwgFile(f) || (f.type || "").startsWith("image/"))) { e.preventDefault(); if (fs.length > 1) flashWarn("Added the first file — one site-plan overlay is placed at a time.", 6000); addOverlayFile(f); } }}>
+          onDrop={(e) => { canvasDragDepth.current = 0; setCanvasDropOver(false); const fs = e.dataTransfer?.files; const f = fs?.[0]; if (f && (isPdfFile(f) || isDxfFile(f) || isDwgFile(f) || (f.type || "").startsWith("image/"))) { e.preventDefault(); if (fs.length > 1) flashWarn("Added the first file — one site-plan overlay is placed at a time.", 6000); addOverlayFile(f); } else if (f) { e.preventDefault(); flashWarn(`Couldn't add “${f.name}” — drop a PDF, DXF, DWG or image.`, 6000); } }}>
           {/* geographic basemap + shared overlay layers, beneath the SVG. Pure
               backdrop (pointer-events off) — the SVG above handles interaction. */}
           {/* When the aerial is ON, the backdrop is a neutral mid-dark gray so the
@@ -24058,7 +24069,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
               (B445; depth-counter + non-obscuring fill B736). pointerEvents:none so it never
               blocks map interaction; a translucent accent wash (both themes) keeps existing
               geometry visible under it; sits above the SVG (zIndex 1) so the cue reads clearly. */}
-          {canvasDropOver && (
+          {canvasDropOver && fileDragOn && (
             <div data-export="skip" style={{ position: "absolute", inset: 0, zIndex: 50, pointerEvents: "none", border: `2.5px dashed ${PAL.accent}`, background: `color-mix(in srgb, ${PAL.accent} 18%, transparent)`, display: "grid", placeItems: "center" }}>
               <span style={{ background: SURF_RAISED, color: PAL.ink, fontWeight: 700, fontSize: 14, padding: "10px 20px", borderRadius: 999, border: `1px solid ${PAL.accent}`, boxShadow: "0 4px 16px rgba(0,0,0,0.18)" }}>Drop site plan to place it on the map</span>
             </div>
@@ -29999,7 +30010,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                 onDragOver={(e) => { e.preventDefault(); setDeedDrag(true); }}
                 onDragLeave={() => setDeedDrag(false)}
                 onDrop={(e) => { e.preventDefault(); setDeedDrag(false); readDeeds(e.dataTransfer.files); }}
-                style={{ border: `1.5px dashed ${deedDrag ? PAL.accent : PAL.panelLine}`, background: deedDrag ? "rgba(124,58,237,0.06)" : "transparent", borderRadius: 10, padding: "13px 12px", textAlign: "center", cursor: deedBusy ? "default" : "pointer", marginBottom: 10 }}>
+                style={{ border: `1.5px dashed ${deedDrag && fileDragOn ? PAL.accent : PAL.panelLine}`, background: deedDrag && fileDragOn ? "rgba(124,58,237,0.06)" : "transparent", borderRadius: 10, padding: "13px 12px", textAlign: "center", cursor: deedBusy ? "default" : "pointer", marginBottom: 10 }}>
                 <div style={{ fontSize: 12.5, fontWeight: 600, color: PAL.ink }}>{deedBusy ? "Reading…" : "Drop a deed file here, or click to choose"}</div>
                 <div style={{ fontSize: 11, color: PAL.muted, marginTop: 3, lineHeight: 1.4 }}>Word (.doc / .docx), PDF, or text (.txt) — drop one or several; bearings, distances, curves, and save-and-except are read automatically.</div>
                 {deedName && !deedBusy && <div style={{ fontSize: 11, color: PAL.purple, marginTop: 4, fontFamily: MONO_FONT, wordBreak: "break-all" }}>📄 {deedName}</div>}
