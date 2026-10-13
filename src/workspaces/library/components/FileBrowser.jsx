@@ -19,6 +19,7 @@
  */
 import { subscribeLibraryChanged } from "../../../shared/library/libraryChanged.js";
 import { docKindOf } from "../../doc-review/docEditor/docKind.js";
+import { useFileDragActive, isFileDrag, markDropHandled, dropWasHandled } from "../../../shared/files/fileDrag.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchProjects, fetchReviews, fetchFileFacts, fileNewReview,
@@ -108,7 +109,11 @@ export default function FileBrowser({
   const [openCats, setOpenCats] = useState(() => loadIdSet(CATS_OPEN_KEY)); // Set of open categories
   const [searchQ, setSearchQ] = useState("");               // type-to-filter (B702)
   const [sort, setSort] = useState(() => { try { return localStorage.getItem(SORT_KEY) || "recency"; } catch (_) { return "recency"; } });
-  const [dropOver, setDropOver] = useState(false);
+  const rootRef = useRef(null);
+  // ONE shared file-drag tracker (NEW-2): the overlay shows while a file is really being dragged over
+  // the window and this view is the visible one — never a per-pane enter/leave counter that can strand.
+  const dropOver = useFileDragActive(isActive);
+  const [dropNotice, setDropNotice] = useState(null);       // a drop that could not be taken — named, never silent (NEW-1)
   const [queue, setQueue] = useState([]);
   const [refileSel, setRefileSel] = useState({});          // fileId -> { category, discipline }
   const [share, setShare] = useState({});                  // fileId -> { status, url, error }
@@ -125,10 +130,6 @@ export default function FileBrowser({
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
   const reqRef = useRef(0);
-  // Whole-pane drop target (B699): a DEPTH COUNTER, not a naive dragleave — entering any
-  // child fires enter/leave pairs, and the naive `currentTarget === target` check made the
-  // highlight flicker. The counter only clears when every enter has matched a leave.
-  const dragDepth = useRef(0);
   // B1205297 — a queue item parked at QUEUE_STATUS.DUPLICATE keeps the (targetFolderId, opts)
   // its processItem() call was made with here, so the Replace/Keep-both button can re-run the
   // EXACT SAME routing decision with a resolved dupChoice, instead of re-deriving it.
@@ -148,24 +149,6 @@ export default function FileBrowser({
   // list ignores those filters, so leaving it up would make the click look dead. `node` is a
   // fresh object on every tree click, so re-filtering always fires this.
   useEffect(() => { setShowDeleted(false); }, [node, showHolding, searchQ, selectedFolderId]);
-
-  // A cancelled drag (Esc, or an OS-file drag released outside the window — which fires
-  // NO drop/dragend in the page) would strand the depth counter above zero and pin the
-  // overlay on; so would an element unmounting under the cursor mid-drag (its dragleave
-  // never fires). Reset on window-level drag end / drop, AND when the drag leaves the
-  // window itself (dragleave with no relatedTarget) — the counter self-heals (B699).
-  useEffect(() => {
-    const reset = () => { dragDepth.current = 0; setDropOver(false); };
-    const onWinLeave = (e) => { if (e.relatedTarget == null) reset(); };
-    window.addEventListener("dragend", reset);
-    window.addEventListener("drop", reset);
-    window.addEventListener("dragleave", onWinLeave);
-    return () => {
-      window.removeEventListener("dragend", reset);
-      window.removeEventListener("drop", reset);
-      window.removeEventListener("dragleave", onWinLeave);
-    };
-  }, []);
 
   const refresh = async () => {
     if (!signedIn) return;
@@ -471,7 +454,11 @@ export default function FileBrowser({
   const dropTargetFolder = () => (folderMode ? (selectedFolderId || null) : null);
 
   const ingest = async (fileList, targetFolderId = null, opts = undefined) => {
-    if (!projectId && !cross && !orgScope) return; // drop gated until a project/scope is chosen (no auto-guess)
+    const names = Array.from(fileList || []).map((f) => f?.name).filter(Boolean);
+    if (!projectId && !cross && !orgScope) { // drop gated until a project/scope is chosen (no auto-guess) — but never silently
+      if (names.length) setDropNotice(`Couldn't add ${names.length === 1 ? `“${names[0]}”` : `${names.length} files`} — ${signedIn ? "pick a project first, then drop again" : "sign in and open a project first"}.`);
+      return;
+    }
     const items = makeQueueItems(fileList);
     if (!items.length) return;
     setQueue((q) => [...items, ...q]);
@@ -489,7 +476,11 @@ export default function FileBrowser({
    * auto-file-by-title-block path. An explicit target (folder-row drop / selected folder)
    * still wins for the whole drop, same as B686/B687. */
   const ingestFolder = async (allFiles, targetFolderId = null) => {
-    if (!projectId && !cross && !orgScope) return;
+    if (!projectId && !cross && !orgScope) {
+      const n = (allFiles || []).length;
+      if (n) setDropNotice(`Couldn't add ${n} file${n === 1 ? "" : "s"} from that folder — ${signedIn ? "pick a project first, then drop again" : "sign in and open a project first"}.`);
+      return;
+    }
     const { accepted, skipped } = partitionAccepted(allFiles);
     if (!accepted.length) { setFolderNote(skipped.length ? { filed: 0, skipped: skipped.length } : null); return; }
     // No explicit target + no published tree rows (still loading) → classic auto-file for
@@ -537,15 +528,31 @@ export default function FileBrowser({
 
   const onDrop = (e) => {
     e.preventDefault(); e.stopPropagation();
-    dragDepth.current = 0; setDropOver(false);
+    markDropHandled(e);
     dropInto(dropTargetFolder(), e.dataTransfer);
   };
+
+  // A drop ANYWHERE on the Library view (header, rail gutter, empty space) goes through the same
+  // path as the Upload button — otherwise the browser's own drop action runs and Chrome downloads
+  // the file (NEW-1). Window-level so it covers what the pane's own handler never sees; skipped
+  // when a pane/row already took it, and when another view is the one showing.
+  const dropAnywhereRef = useRef(null);
+  dropAnywhereRef.current = (e) => {
+    if (!isActive || dropWasHandled(e) || !isFileDrag(e)) return;
+    markDropHandled(e);
+    dropInto(dropTargetFolder(), e.dataTransfer);
+  };
+  useEffect(() => {
+    const h = (e) => dropAnywhereRef.current?.(e);
+    window.addEventListener("drop", h);
+    return () => window.removeEventListener("drop", h);
+  }, []);
 
   // The folder rail's rows route their drops here (registered up through the parent):
   // a row drop targets THAT folder explicitly; the "All files" row (null) is the auto path.
   const treeDropImpl = useRef(null);
   treeDropImpl.current = (folderId, e) => {
-    dragDepth.current = 0; setDropOver(false);
+    markDropHandled(e);
     dropInto(folderId || null, e.dataTransfer);
   };
   useEffect(() => { registerTreeDrop?.((folderId, e) => treeDropImpl.current?.(folderId, e)); }, [registerTreeDrop]);
@@ -626,14 +633,23 @@ export default function FileBrowser({
     refresh();
   };
 
+  // A refused drop is named wherever the browser is showing — including the two empty states below (NEW-1).
+  const dropNoticeNode = dropNotice ? (
+    <div role="alert" data-testid="library-drop-notice" style={{ margin: "8px 14px 0", padding: "7px 10px", borderRadius: RADIUS.sm, display: "flex", alignItems: "center", gap: 8,
+      border: "1px solid var(--warn-border)", background: "var(--warn-bg)", color: "var(--warn-text)", fontSize: 11.5, lineHeight: 1.45 }}>
+      <span style={{ flex: 1 }}>{dropNotice}</span>
+      <button onClick={() => setDropNotice(null)} title="Dismiss" style={{ flex: "none", border: "none", background: "transparent", color: "var(--warn-text)", cursor: "pointer", fontSize: 13, fontWeight: 700, padding: 2 }}>✕</button>
+    </div>
+  ) : null;
+
   // ---- empty / no-project states ------------------------------------------
   if (!signedIn) {
-    return <Centered title="Sign in to see your files"
-      body="Document files live in your account (sign in from the Site Planner). Until then, open a PDF directly to mark it up." />;
+    return <>{dropNoticeNode}<Centered title="Sign in to see your files"
+      body="Document files live in your account (sign in from the Site Planner). Until then, open a PDF directly to mark it up." /></>;
   }
   if (!projectId && !cross && !orgScope) {
-    return <Centered title="Pick a project to see its files"
-      body="Choose a project from the breadcrumb above to open its file browser. (Dropping a file needs a project so it never has to guess where it belongs.)" />;
+    return <>{dropNoticeNode}<Centered title="Pick a project to see its files"
+      body="Choose a project from the breadcrumb above to open its file browser. (Dropping a file needs a project so it never has to guess where it belongs.)" /></>;
   }
 
   const holdingCount = holding.length;
@@ -651,9 +667,9 @@ export default function FileBrowser({
 
   return (
     <div
-      onDragEnter={(e) => { if (!hasFilesDrag(e)) return; e.preventDefault(); dragDepth.current += 1; setDropOver(true); }}
+      ref={rootRef}
+      onDragEnter={(e) => { if (hasFilesDrag(e)) e.preventDefault(); }}
       onDragOver={(e) => { if (hasFilesDrag(e)) e.preventDefault(); }}
-      onDragLeave={(e) => { if (!hasFilesDrag(e)) return; dragDepth.current = Math.max(0, dragDepth.current - 1); if (dragDepth.current === 0) setDropOver(false); }}
       onDrop={onDrop}
       style={{ flex: 1, display: "flex", minHeight: 0, position: "relative", background: "var(--surface-page)", fontFamily: "system-ui, sans-serif" }}>
 
@@ -810,6 +826,7 @@ export default function FileBrowser({
         )}
 
         {/* non-PDF download — in-flight + honest failure (B685; never a dead click) */}
+        {dropNoticeNode}
         {dlNotice && (
           <div style={{ flex: "none", margin: "8px 12px 0", padding: "7px 10px", borderRadius: 7, display: "flex", alignItems: "center", gap: 8,
             border: `1px solid ${dlNotice.error ? "var(--warn-border)" : "var(--border-default)"}`,
@@ -941,7 +958,7 @@ export default function FileBrowser({
       {/* drop-anywhere overlay hint — the pill names the REAL target: the hovered folder row
           (rail drop), else the selected folder, else the auto-file path. */}
       {dropOver && (
-        <div style={{ position: "absolute", inset: 0, pointerEvents: "none", border: "2.5px dashed var(--accent-library)", borderRadius: 4, background: "rgba(14,116,144,0.06)", display: "grid", placeItems: "center" }}>
+        <div data-testid="library-drop-overlay" style={{ position: "absolute", inset: 0, pointerEvents: "none", border: "2.5px dashed var(--accent-library)", borderRadius: 4, background: "rgba(14,116,144,0.06)", display: "grid", placeItems: "center" }}>
           <span style={{ background: "var(--surface-raised)", color: "var(--text-primary)", fontWeight: 700, fontSize: 13, padding: "8px 16px", borderRadius: 999, border: "1px solid var(--border-default)" }}>
             Drop to file into {treeDragTarget || dropFolderLabel || (cross ? "the matched project" : orgScope ? "Organization" : (projName(projectId) || "this project"))}
           </span>

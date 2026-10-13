@@ -1,4 +1,5 @@
 import { Fragment, lazy, memo, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useFileDragActive, isFileDrag, markDropHandled } from "../../shared/files/fileDrag.js";
 import { gestureJustEnded } from "./lib/handleGestureClock.js";
 import { validateName, announceNameNotice } from "../../shared/names/nameCore.js";
 import L from "leaflet";
@@ -1072,34 +1073,27 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   // or the schedule's row drag — none of which use the browser's HTML5 Drag and Drop API, so
   // none of them can trip this gate.
   const dropIntakeRef = useRef(null); // set by SitePlansSection; called with (fileList, dropPlacement)
-  const [fileDragActive, setFileDragActive] = useState(false);
-  const fileDragDepth = useRef(0); // dragenter/dragleave fire per element crossed, not per drag — a counter avoids flicker
+  // NEW-2: the overlay follows the ONE shared file-drag tracker (cleared by every end-of-drag path,
+  // incl. leaving the window, a failed drop, Escape, blur, a view change) and shows only while the
+  // portfolio map is the visible view — no per-element enter/leave counter to strand.
+  // ⛔ `visible` is only the map↔plan MODE inside the Site workspace; the workspace itself stays mounted
+  // behind display:none, so it must ALSO be the active workspace — otherwise this window-level handler
+  // swallowed every file dropped on the Library/Review/Notes and routed it into the site-plan intake
+  // (NEW-1/NEW-2: the Map pill and the Library overlay "appearing together").
+  const dropLive = !!(visible && isActive);
+  const fileDragActive = useFileDragActive(dropLive);
   const onRejectDroppedFile = (name, reason) => setErr(`Couldn't add "${name}" — ${reason}.`);
 
   useEffect(() => {
-    const isFileDrag = (e) => e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
-    const onDragEnter = (e) => {
-      if (!visible || !isFileDrag(e)) return;
-      e.preventDefault();
-      fileDragDepth.current += 1;
-      setFileDragActive(true);
-    };
     const onDragOver = (e) => {
-      if (!visible || !isFileDrag(e)) return;
+      if (!dropLive || !isFileDrag(e)) return;
       e.preventDefault(); // the whole point — without this the browser navigates the tab to the file
       e.dataTransfer.dropEffect = "copy";
     };
-    const onDragLeave = (e) => {
-      if (!visible || !isFileDrag(e)) return;
-      e.preventDefault();
-      fileDragDepth.current = Math.max(0, fileDragDepth.current - 1);
-      if (fileDragDepth.current === 0) setFileDragActive(false);
-    };
     const onDrop = (e) => {
-      if (!visible || !isFileDrag(e)) return;
+      if (!dropLive || !isFileDrag(e)) return;
       e.preventDefault(); // stop the tab-navigation gotcha on the actual drop too, not just dragover
-      fileDragDepth.current = 0;
-      setFileDragActive(false);
+      markDropHandled(e);
       const files = e.dataTransfer.files;
       if (!files || !files.length) return;
       // B850016 (NEW-11) — dropping a file is a direct enough action that the Comps tab should
@@ -1117,17 +1111,13 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       if (m) { const ll = m.mouseEventToLatLng(e); dropPlacement = { lat: ll.lat, lng: ll.lng }; }
       dropIntakeRef.current && dropIntakeRef.current(files, dropPlacement);
     };
-    window.addEventListener("dragenter", onDragEnter);
     window.addEventListener("dragover", onDragOver);
-    window.addEventListener("dragleave", onDragLeave);
     window.addEventListener("drop", onDrop);
     return () => {
-      window.removeEventListener("dragenter", onDragEnter);
       window.removeEventListener("dragover", onDragOver);
-      window.removeEventListener("dragleave", onDragLeave);
       window.removeEventListener("drop", onDrop);
     };
-  }, [visible, sitesPanelOpen]);
+  }, [dropLive, sitesPanelOpen]);
 
   // NEW-COMPS/NEW-2 — a comp pin just dropped or an existing comp's marker just got clicked: the
   // Comps tab is what should be showing to act on it, wherever the rail happened to be pointed.

@@ -6,6 +6,7 @@
  * zoom. Lazy-loaded by the shell.
  */
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useFileDragActive } from "../../shared/files/fileDrag.js";
 import { FONT_SIZE, SPACE } from "../../shared/ui/designTokens.js";
 import { loadPdf, renderInto, extractPageItems } from "./lib/pdf.js";
 import { ocgLayerList, deriveLayerVisibility } from "./lib/ocg.js";
@@ -428,6 +429,7 @@ export default function DocReview({
   const [docFile, setDocFile] = useState(null);
   // Close (NEW-1): the editor reports unsaved edits up; Close asks Save / Discard / Cancel when there are any.
   const narrow = useNarrow(); // phone width: the toolbar strip scrolls sideways, so Close also gets its own always-visible bar
+  const fileDrag = useFileDragActive(isActive && !narrow); // file being dragged over Review (desktop only), Review visible
   const [closePrompt, setClosePrompt] = useState(null); // null | "ask" | "saving"
   const [docNoticeRec, setDocNoticeRec] = useState({ tab: null, msg: "" }); // NEW-2: a status line belongs to the TAB that produced it
   const setDocNotice = (msg, tab = curIdRef.current) => setDocNoticeRec({ tab, msg }); // one-line outcome carried across the open that follows a "save as new"
@@ -452,8 +454,8 @@ export default function DocReview({
   const syncRef = useRef(null);       // the account-sync controller (null signed out) — tabs follow the account, see lib/tabSync.js
   const localAtRef = useRef(0);       // when THIS device last changed the tab set (last change wins)
   const lastSigRef = useRef(null);
-  const [fileDrag, setFileDrag] = useState(false); // a file is being dragged over Review (desktop) — the drop outline shows only then
-  const dragDepth = useRef(0);
+  // A file is being dragged over Review (desktop) — the drop outline shows only then, and only while Review
+  // is the visible workspace. The shared tracker (NEW-2) clears it on every end-of-drag path; no per-pane counter.
   const setDirtyFor = useCallback((id, d) => setDirtyMap((m) => (!!m[id] === !!d ? m : { ...m, [id]: !!d })), []);
   const docDirty = !!dirtyMap[reviewId];
   const setDocDirty = (d) => setDirtyFor(curIdRef.current, d);
@@ -2605,11 +2607,7 @@ export default function DocReview({
   ) : null;
 
   return (
-    <div data-testid="doc-review-root" style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}
-      onDragEnter={(e) => { if (!narrow && e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files")) { dragDepth.current += 1; setFileDrag(true); } }}
-      onDragLeave={() => { if (dragDepth.current > 0 && --dragDepth.current === 0) setFileDrag(false); }}
-      onDrop={() => { dragDepth.current = 0; setFileDrag(false); }}
-      onDragEnd={() => { dragDepth.current = 0; setFileDrag(false); }}>
+    <div data-testid="doc-review-root" style={{ height: "100%", display: "flex", flexDirection: "column", background: PAL.paper, position: "relative" }}>
       {fileDrag && <div data-testid="review-drop-outline" aria-hidden="true" style={{ position: "absolute", inset: SPACE.sm, zIndex: 35, pointerEvents: "none", border: "2px dashed var(--accent-review, var(--accent))", borderRadius: RADIUS.md }} />}
       <AppHeader
         module={shellModule || "doc-review"}
@@ -2736,7 +2734,7 @@ export default function DocReview({
       {docFile ? null : !pdfRef.current ? (
         // NEW-1 (2026-10-04) — with no tab open Review is BLANK: no heading, no buttons, no sheet index. Open… in the
         // toolbar is the way in. Desktop drag-and-drop still opens a file; its outline shows only while a file is dragged over.
-        <div data-testid="review-blank" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); setFileDrag(false); openFile(e.dataTransfer.files?.[0]); }}
+        <div data-testid="review-blank" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); openFile(e.dataTransfer.files?.[0]); }}
           style={{ flex: 1, position: "relative", minHeight: 0 }}>
           {openingOverlay}
         </div>
