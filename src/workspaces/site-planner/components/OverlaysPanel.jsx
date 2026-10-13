@@ -237,7 +237,7 @@ function PlacementSection({ o, plan, calib, calibMsg, locked, h, pageFocusTick }
     if (k === "trace") h.onTrace(o.id); else h.onMatch(o.id);
   };
   const group = plan.scaleButtons.length ? (
-    <ScaleGroup buttons={plan.scaleButtons} active={mine ? (mine.kind === "align" ? "match" : mine.kind) : null} disabled={locked} why="Unlock this overlay to change its scale" onPick={pick} />
+    <ScaleGroup buttons={plan.scaleButtons} active={mine ? (mine.kind === "align" ? "match" : mine.kind) : null} onPick={pick} />
   ) : null;
   const pairs = mine && mine.kind === "align" ? Math.floor(mine.pts.length / 2) : 0;
   return (
@@ -285,12 +285,12 @@ function PlacementSection({ o, plan, calib, calibMsg, locked, h, pageFocusTick }
       {plan.rotate && (
         <div data-testid="overlay-rotation-row" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: `${SPACE.xs}px ${SPACE.md}px` }}>
           <span style={{ ...valueStyle, color: "var(--text-secondary)" }}>Rotation</span>
-          <DegStepper value={o.rotation || 0} disabled={locked} reason="Unlock this overlay to rotate it"
+          <DegStepper value={o.rotation || 0}
             onCommit={(deg) => h.onPatch(o.id, { rotation: deg })} onStep={(d) => h.onPatch(o.id, { rotation: normalizeDeg((o.rotation || 0) + d) })} />
           <span style={{ display: "inline-flex", gap: SPACE.sm }}>
-            <Button variant="ghost" size="md" disabled={locked} style={{ ...btnCompact, padding: "0 8px" }} aria-label="Rotate 90 degrees anticlockwise" title="Rotate 90° anticlockwise" data-testid="overlay-rot-ccw90"
+            <Button variant="ghost" size="md" style={{ ...btnCompact, padding: "0 8px" }} aria-label="Rotate 90 degrees anticlockwise" title="Rotate 90° anticlockwise" data-testid="overlay-rot-ccw90"
               onClick={() => h.onPatch(o.id, { rotation: normalizeDeg((o.rotation || 0) - 90) })}><RotL />90°</Button>
-            <Button variant="ghost" size="md" disabled={locked} style={{ ...btnCompact, padding: "0 8px" }} aria-label="Rotate 90 degrees clockwise" title="Rotate 90° clockwise" data-testid="overlay-rot-cw90"
+            <Button variant="ghost" size="md" style={{ ...btnCompact, padding: "0 8px" }} aria-label="Rotate 90 degrees clockwise" title="Rotate 90° clockwise" data-testid="overlay-rot-cw90"
               onClick={() => h.onPatch(o.id, { rotation: normalizeDeg((o.rotation || 0) + 90) })}><RotR />90°</Button>
           </span>
         </div>
@@ -408,10 +408,10 @@ function RowMenu({ open, anchorRef, o, flags, hidden, hasParcel, isMap, onClose,
         {it(locked ? "Unlock" : "Lock in place", () => h.onPatch(o.id, { locked: !locked }))}
         {it(hidden ? "Show" : "Hide", () => h.onToggleHide(o))}
         {it("Zoom to", () => h.onZoomTo(o.id))}
-        {it("Size to view", () => h.onSizeToView(o.id), { disabled: isMap || locked, title: isMap ? "The map capture is already to scale" : locked ? "Unlock to resize" : undefined })}
+        {it("Size to view", () => h.onSizeToView(o.id), { disabled: isMap, title: isMap ? "The map capture is already to scale" : undefined })}
         {it("Copy", () => h.onCopy(o.id), { disabled: isMap, title: isMap ? "The map capture can't be copied — it is pinned to this plan" : undefined })}
         {it("Duplicate", () => h.onDuplicate(o.id), { disabled: isMap, title: isMap ? "The map capture can't be duplicated — it is pinned to this plan" : undefined })}
-        {it("Align to parcel edge", () => h.onAlignEdge(o.id), { disabled: locked || !hasParcel || isMap, title: isMap ? "The map capture is already to scale" : locked ? "Unlock to align" : !hasParcel ? "Draw or load a parcel first" : "Click a parcel edge to snap this overlay parallel to it" })}
+        {it("Align to parcel edge", () => h.onAlignEdge(o.id), { disabled: !hasParcel || isMap, title: isMap ? "The map capture is already to scale" : !hasParcel ? "Draw or load a parcel first" : "Click a parcel edge to snap this overlay parallel to it" })}
         {it("Move up", () => h.onStep(o.id, 1), { disabled: flags.atFront })}
         {it("Move down", () => h.onStep(o.id, -1), { disabled: flags.atBack })}
         <div style={{ borderTop: LINE, margin: `${SPACE.xs}px 0` }} />
