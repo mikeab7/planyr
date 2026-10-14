@@ -280,10 +280,13 @@ test.describe("the right rail is the complete answer to 'what can I do to a parc
     await drawParcel(page, 240, 150, 430, 300);
     await selectParcel(page);
 
-    // Right rail → the Land panel (Parcels rework: the list; a parcel's own page carries the sections-based setbacks).
+    // Right rail → "Properties" opens THE SELECTED PARCEL'S PAGE, setbacks included (NEW-1, 2026-10-14 — it
+    // used to land on the parcel LIST, which is how the owner ended up unable to find setbacks at all).
     await pick(page, "setbacks");
-    await expect(page.getByTestId("parcels-panel")).toBeVisible();
-    // …and the panel carries its own Add / Edit buttons now (the old "Parcel tools →" line is gone).
+    await expect(page.getByTestId("parcel-page")).toBeVisible();
+    await expect(page.getByTestId("setback-all").locator("input")).toBeVisible();
+    // …and the page points back to the list, which carries its own Add / Edit buttons.
+    await page.getByTestId("parcel-page-back").click();
     await expect(page.getByTestId("parcels-edit-btn")).toBeVisible();
   });
 });

@@ -91,7 +91,7 @@ export const PARCEL_ACTIONS = [
   { id: "active", group: "this", kind: "switch", label: "Count in yield totals", on: (p) => p.active !== false },
   { id: "chip", group: "this", kind: "switch", label: "Show acreage label", on: (p) => !p.chipHidden },
   { id: "chipReset", group: "this", label: "Reset label position" },
-  { id: "setbacks", group: "this", label: "Setbacks and settings", detail: "Land ›" },
+  { id: "setbacks", group: "this", label: "Properties", hint: "Setbacks, style and record", detail: "Land ›" }, // opens THIS parcel's page (NEW-1, 2026-10-14)
   // ---- delete -------------------------------------------------------------------------------
   { id: "deleteSelected", group: "remove", icon: "trash", label: "Delete parcel", detail: "Del", danger: true },
 ];

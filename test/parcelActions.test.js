@@ -268,7 +268,10 @@ describe("the two-sided 'Parcel' collision is resolved", () => {
     // Parcels rework (NEW-1): the "Draw, split, combine… Parcel tools →" line is gone; the panel carries its own Add / Edit buttons.
     expect(src).not.toMatch(/data-testid="land-to-parcel-tools"/);
     expect(src).toMatch(/data-testid="land-add-btn"/);                // panel → add flows
-    expect(src).toMatch(/setbacks:\s*\(\)\s*=>\s*openLandPanel\(\)/); // rail → panel (setbacks)
+    // rail → panel: the "This parcel" row opens THAT parcel's page in the Land panel (NEW-1, 2026-10-14 —
+    // it used to open the LIST, which is half of why the owner could not find setbacks); the bare panel
+    // is still the fallback when nothing is selected.
+    expect(src).toMatch(/setbacks:\s*\(\)\s*=>\s*\{\s*if \(selPc\) openParcelPage\(selPc\.id\);\s*else openLandPanel\(\);\s*\}/);
   });
 });
 
