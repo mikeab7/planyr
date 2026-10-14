@@ -327,6 +327,7 @@ import { polylabel } from "./lib/polylabel.js";
 // right now. The menu is the DISCOVERABLE surface (a gesture or right-click is only ever the fast
 // path), so "every parcel action has a menu path" is a property a test asserts — not a convention.
 import { PARCEL_SURFACES, parcelMenuModel, boundaryEditHint } from "./lib/parcelActions.js";
+import { parcelAtPoint } from "./lib/parcelAtPoint.js";
 import { ParcelToolsMenu, MeasureMenu, MenuIcon } from "./components/RailMenus.jsx";
 // B1123 bundle-budget offset — the title reader is loaded ON DEMAND (dynamic import in
 // `runTitleExtract`). Its Claude schema + prompt are KB of string literals that minify to
@@ -6641,10 +6642,25 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // NEW-1 — the parcel peer of openInspector: a parcel's inspector IS the Parcel panel (a list+detail
   // destination), so a double-click on a lot docks that. A deliberate open ends any takeover memo, the
   // same as a rail click. B556 phone guard: on a narrow screen with nothing docked, a tap only selects.
-  const openParcelPanel = () => {
-    if (narrow && !leftPanelRef.current) return;
+  /* NEW-1 (parcel properties unreachable, 2026-10-14) — THE one way into a parcel's own page
+   * (record · setbacks · style). The Parcels rework (B2179968) gave a lot a PAGE, but the entry
+   * points kept calling the pre-rework "dock the Land panel" helper, which shows the LIST: a map
+   * double-click, the Parcel tools "Setbacks and settings" row and a map click with the list open
+   * all landed on the list, and the page was reachable only by clicking a row's name. Every entry
+   * point now calls THIS. A deliberate open shows the page on a phone too (B556's "a tap only
+   * selects" is about a SINGLE tap, which never comes here). Opening a page is read-only: it
+   * selects, never arms a boundary edit, so a parcel stays put outside Edit parcels. */
+  const openParcelPage = (id) => {
+    if (!parcels.some((p) => p.id === id)) return false;
+    setCombineSel([]);
+    setSel({ kind: "parcel", id });
+    setSelSectionKey(null);
+    setParcelPageId(id);
+    setToolMenu(false);
     setDockMemo(null);
     setLeftPanel("parcel");
+    if (narrow) setMobileTools(false);
+    return true;
   };
   /* NEW-2 — THE ONE THING A DOUBLE-CLICK DOES, for every feature family.
    *
@@ -6697,12 +6713,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return true;
     }
     if (t.kind === "parcel") {
-      const pc = parcels.find((p) => p.id === t.id);
-      if (!pc) return false;                                        // NEW-5: lock only guards Edit parcels — a locked parcel still selects / opens
-      setSel({ kind: "parcel", id: t.id });
-      setCombineSel([]);
-      openParcelPanel();
-      return true;
+      // NEW-5: lock only guards Edit parcels — a locked parcel still selects / opens its page.
+      return openParcelPage(t.id);
     }
     return false;
   };
@@ -8094,6 +8106,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // direct consequence DRAGGING the map no longer wipes the selection or closes the inspector
       // out from under you. A genuine background CLICK still deselects and still closes the
       // inspector: that behaviour is intended and unchanged, only its timing moved.
+      // NEW-1 (2026-10-14) — the touch twin of `onBgDouble`'s interior-lot fallback: a phone may not
+      // synthesise a native dblclick, so two quick taps on empty land inside a lot pair here too.
+      { const it = interiorParcelTarget(fp); if (it && isDoubleTap(e, `parcel-in:${it.id}`, true)) { openParcelPage(it.id); return; } }
       setPanning(true);
       // B735: tag a plain background press so a genuine TAP on empty canvas (tiny travel) clears the
       // merge selection in onUp, while a real pan (larger travel) leaves it untouched. Not in merge-
@@ -10406,7 +10421,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // mid-gesture re-render can retarget the native dblclick clean outside the control's own node
     // (see ACTION_ATTR's header in featureTarget.js), so per-node stopPropagation alone can't do it.
     if (gestureActionRef.current) return;
-    featureDoubleAction(resolveDoubleClickTarget(hitStackAt(e.clientX, e.clientY), dblOpts(e, e.clientX, e.clientY)), e);
+    // NEW-1 (2026-10-14) — no feature under the pointer: a double-click on empty land inside a lot is
+    // about THAT lot (lib/parcelAtPoint.js). Only asked when the stack resolved to nothing, so every
+    // feature drawn on the lot still wins its own double-click.
+    const t = resolveDoubleClickTarget(hitStackAt(e.clientX, e.clientY), dblOpts(e, e.clientX, e.clientY));
+    featureDoubleAction(t || interiorParcelTarget(p2f(e.clientX, e.clientY)), e);
+  };
+  const interiorParcelTarget = (fp) => {
+    if (mergePick || identifyMode) return null;
+    const id = parcelAtPoint(drawParcels, fp, { skip: supersededParcelIds });
+    return id ? { kind: "parcel", id } : null;
   };
   /* ⛔ B233153 — E2E/self-audit hook for the DOUBLE-CLICK RESOLUTION (same `window.__PLANYR_E2E`
    * gate as the hooks above; never runs in production, nulled on unmount like its neighbours).
@@ -12409,6 +12433,10 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     e.stopPropagation();
     setSel({ kind: "parcel", id });
     setCombineSel([]); // B735: a plain click is a fresh single-select — drop any accumulated merge picks
+    // NEW-1 (2026-10-14) — with the Land panel already showing, a click shows THIS lot's page (the
+    // panel follows what you point at). With it closed a click only selects (B750: the rail never
+    // swings open on a single click); a double-click opens it.
+    if (leftPanelRef.current === "parcel") { setParcelPageId(id); setSelSectionKey(null); }
     // NEW-5 (Parcels rework) — A BOUNDARY MOVES ONLY INSIDE "EDIT PARCELS". Outside it a press selects
     // and a drag PANS the map, so a stray click or drag can never nudge land; inside it a locked
     // parcel is untouchable too (Lock now means "even Edit parcels can't touch it").
@@ -13139,7 +13167,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     onRestoreCombined: restoreCombinedOriginals, onRestoreSplit: restoreSplitOriginal,
     acresOf: (pc) => parcelNetSqft(pc) / SQFT_PER_ACRE,
     // Parcels rework: a row opens the parcel's own page; Edit parcels is the ONLY way a boundary changes.
-    onOpenPage: (id) => { setCombineSel([]); setSel({ kind: "parcel", id }); setSelSectionKey(null); setParcelPageId(id); },
+    onOpenPage: (id) => { openParcelPage(id); },
     onBack: () => { setParcelPageId(null); setSelSectionKey(null); },
     onEditParcels: () => { setParcelPageId(null); startBoundaryEdit(); },
     onDelete: (id) => { setParcelPageId(null); setSel({ kind: "parcel", id }); deleteParcelById(id); },
@@ -26181,7 +26209,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   split: () => selectTool("split"),
                   combine: () => { setToolMenu(false); if (mergePick) exitMergePick(); else startMergePick(); },
                   boundary: () => { setToolMenu(false); if (boundaryEdit) exitBoundaryEdit(); else startBoundaryEdit(); },
-                  setbacks: () => openLandPanel(),
+                  setbacks: () => { if (selPc) openParcelPage(selPc.id); else openLandPanel(); },
                   lock: () => { if (selPc) toggleParcelLock(selPc.id); },
                   active: () => { if (selPc) toggleParcelActive(selPc.id); },
                   chip: () => { if (selPc) setParcelChipHidden(selPc.id, !selPc.chipHidden); },
@@ -30277,6 +30305,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
 
       {parcelMenu && (
         <ContextMenu x={parcelMenu.x} y={parcelMenu.y} onClose={() => setParcelMenu(null)} width={196} zIndex={1998} className="menu" panelStyle={menuPanel}>
+          <button style={{ ...menuItem(false), fontWeight: 650 }} data-testid="parcel-menu-properties" onClick={() => { const id = parcelMenu.id; setParcelMenu(null); if (id) openParcelPage(id); }}>Properties</button>
+          <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />
           <button style={{ ...menuItem(false), opacity: combineSel.length >= 2 ? 1 : 0.5, cursor: combineSel.length >= 2 ? "pointer" : "default" }} disabled={combineSel.length < 2} onClick={() => { mergeParcels(); setParcelMenu(null); }}>Merge parcels ({combineSel.length})</button>
           <button style={menuItem(false)} onClick={() => { setCombineSel([]); setParcelMenu(null); }}>Clear selection</button>
           <div style={{ borderTop: `1px solid ${PAL.panelLine}`, marginTop: 4, paddingTop: 4 }} />

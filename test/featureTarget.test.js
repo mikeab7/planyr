@@ -395,7 +395,8 @@ describe("source guard — the render must keep stamping what the resolver reads
    * resolution nobody experiences — green while the gesture is broken, which is this file's whole
    * subject. Both call sites go through `dblOpts`, and that is pinned here. */
   it("the hook and the real dblclick handler resolve through the SAME options", () => {
-    expect(SP).toMatch(/featureDoubleAction\(resolveDoubleClickTarget\(hitStackAt\(e\.clientX, e\.clientY\), dblOpts\(e, e\.clientX, e\.clientY\)\), e\)/);
+    // B2264880 — the root's answer is held in `t` so an empty-stack double-click can fall back to the lot under the point.
+    expect(SP).toMatch(/const t = resolveDoubleClickTarget\(hitStackAt\(e\.clientX, e\.clientY\), dblOpts\(e, e\.clientX, e\.clientY\)\);\s*\n\s*featureDoubleAction\(t \|\| interiorParcelTarget\(/);
     expect(SP).toMatch(/const dblOpts = \(e, x, y\) =>/);
     expect((SP.match(/dblOpts\(/g) || []).length).toBe(2); // exactly the two resolution call sites
   });

@@ -155,10 +155,13 @@ describe("per-type click wiring (the pond regression, and the types the owner as
     expect(SP).toMatch(/setSel\(\{ kind: "el", id \}\);\s*\n\s*\/\* NEW-2 — pushHistory\(\) USED TO FIRE HERE/);
   });
 
-  it("PARCEL: single click selects; a double-click opens the Parcel panel", () => {
+  it("PARCEL: single click selects; a double-click opens the parcel's page", () => {
     expect(SP).toMatch(/if \(isDoubleTap\(e, `parcel:\$\{id\}`, sel\?\.kind === "parcel" && sel\.id === id\)\) \{[\s\S]{0,240}featureDoubleAction\(\{ kind: "parcel", id \}, e\);/);
-    expect(SP).toMatch(/const openParcelPanel = \(\) => \{/);
-    expect(SP).toMatch(/t\.kind === "parcel"[\s\S]{0,400}openParcelPanel\(\);/);
+    // B2264880 — the double-click opens the parcel's own PAGE (record · setbacks · style) through the ONE
+    // entry point every other way in uses; the old list-only `openParcelPanel` is gone.
+    expect(SP).toMatch(/const openParcelPage = \(id\) => \{/);
+    expect(SP).toMatch(/t\.kind === "parcel"[\s\S]{0,400}openParcelPage\(t\.id\);/);
+    expect(SP).not.toMatch(/openParcelPanel/);
   });
 
   /* ⛔ NEW-2 — THE CONTRACT HAS ONE IMPLEMENTATION NOW, AND THAT IS THE POINT OF THIS CASE.
@@ -208,7 +211,8 @@ describe("per-type click wiring (the pond regression, and the types the owner as
      * chrome needs (see lib/featureTarget.js). The stack read is unchanged and still comes first. */
     // B1342704 widened the gap: an early return swallows a gesture that began on an on-shape
     // add/remove control (`gestureActionRef.current`), ahead of the resolution call below.
-    expect(SP).toMatch(/const onBgDouble = \(e\) => \{[\s\S]{0,800}featureDoubleAction\(resolveDoubleClickTarget\(hitStackAt\(e\.clientX, e\.clientY\), dblOpts\(e, e\.clientX, e\.clientY\)\), e\);/);
+    // B2264880 — resolved into `t` first, so a double-click on empty land inside a lot can fall back to that lot.
+    expect(SP).toMatch(/const onBgDouble = \(e\) => \{[\s\S]{0,1100}const t = resolveDoubleClickTarget\(hitStackAt\(e\.clientX, e\.clientY\), dblOpts\(e, e\.clientX, e\.clientY\)\);\s*\n\s*featureDoubleAction\(t \|\| interiorParcelTarget\(p2f\(e\.clientX, e\.clientY\)\), e\);/);
     expect(SP, "a double-click mid-draw must still finish the shape, exactly like Enter").toMatch(/const onBgDouble = \(e\) => \{\s*\n\s*if \(finishActiveDrawing\(\)\) return;/);
     expect(SP, "the root resolver must use the browser's own hit-test, never a second geometric one").toMatch(/document\.elementsFromPoint\(x, y\)/);
     // Every family the resolver can name must actually be stamped on the render, or a double-click
