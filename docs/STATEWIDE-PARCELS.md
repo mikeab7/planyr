@@ -1293,5 +1293,10 @@ Count check: 18 + 3 + 4 + 1 + 4 = **30** unwired, and 34 wired = 64.
 `Cadastral/MS_Parcels_August_2024` on gis.mississippi.edu is ONE service with the West half as layer 1 and the East half as layer 2 (same 55
 fields, `CNTYNAME`), so each county pins its layer + `scopeWhere` (the Idaho shape). 24 counties wired (DeSoto keeps its own). All new blocked
 hosts go through `/gis-proxy` (sandbox cannot read their CORS); Arkansas statewide was moved onto it too. **Tennessee:** the Comptroller layer
-omits Shelby and Chester (`excludedCounties`), Germantown and Collierville are city-scoped. **Honest gaps** (no reachable public source): Shelby,
-Chester, Dunklin/Pemiscot/New Madrid/Butler/Ripley MO, Fulton KY — see B2289169. Live check: `ui-audit/verify-memphis-radius-live.mjs` (V1720784).
+omits Shelby and Chester (`excludedCounties` — a composite is never routed a county it excludes). **Shelby (×2, 2026-10-15) — a RETRACTED
+"no public source":** the Shelby County Assessor of Property's own `CERTParcel` service is on `scgis.shelbycountytn.gov` (NOT the
+Cloudflare-challenged `gis.` viewer), token-free, countywide incl. Germantown/Collierville with owners; wired as `tn_shelby` through
+`/gis-proxy` (the old Germantown/Collierville city scopes were folded in). Found by a pass-2 AGOL search — the item is registered by the City of
+Millington, not the county, which is why a county-org search missed it. **Honest gaps** (no reachable public source): Chester,
+Dunklin/Pemiscot/New Madrid/Butler/Ripley MO, Fulton KY — see B2289169. Live check: `ui-audit/verify-memphis-radius-live.mjs` (all 71 counties ×
+both lot-picking flows; V1720784).

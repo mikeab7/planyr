@@ -18,7 +18,7 @@ beforeAll(async () => {
 });
 
 /* The honest gaps: no public parcel service exists (or none Planyr may reach) — each must SAY so. */
-const NO_SOURCE = new Set(["TN:Shelby County", "TN:Chester County", "KY:Fulton County", "MO:Butler County", "MO:Dunklin County",
+const NO_SOURCE = new Set(["TN:Chester County", "KY:Fulton County", "MO:Butler County", "MO:Dunklin County",
   "MO:New Madrid County", "MO:Pemiscot County", "MO:Ripley County"]);
 // A centroid can fall just across a line on the simplified asset; these were nudged to a point the asset agrees on.
 const NUDGE = { "MO:Dunklin County": [36.30, -90.05] };
@@ -77,20 +77,24 @@ describe("Mississippi — one pinned MARIS layer per county", () => {
   });
 });
 
-describe("Tennessee — the statewide layer's two holes say so", () => {
-  it("Shelby (Memphis) and Chester report no parcel data; Tipton/Fayette ride the statewide layer", () => {
-    const memphis = countyIdentity(35.1495, -90.049);
-    expect(memphis).toMatchObject({ status: "no-source", name: "Shelby County" });
-    expect(noParcelSourceNote(memphis)).toMatch(/Shelby County — no parcel data/);
+describe("Tennessee — Shelby on the Assessor's own countywide service; Chester says it has no data", () => {
+  it("Shelby (Memphis, Germantown, Collierville, Bartlett, Millington) resolves to tn_shelby, never the statewide layer", () => {
+    for (const p of [[35.1495, -90.049], [35.03, -89.95], [35.0868, -89.81], [35.042, -89.664], [35.205, -89.87], [35.34, -89.90]]) {
+      expect(countyIdentity(...p), String(p)).toMatchObject({ status: "ok", key: "tn_shelby", name: "Shelby County" });
+    }
+    expect(COUNTIES.tn_shelby.layerUrl).toMatch(/^\/gis-proxy\/scgis\.shelbycountytn\.gov\/.*CERTParcel\/MapServer\/0$/);
+    expect(ALLOWED_HOSTS.has("scgis.shelbycountytn.gov")).toBe(true);
+    expect(COUNTIES.tn_shelby.idField).toBe("PARCELID");
+  });
+  it("Chester reports no parcel data; Tipton rides the statewide layer", () => {
+    const chester = countyIdentity(35.4398, -88.6420);
+    expect(chester).toMatchObject({ status: "no-source", name: "Chester County" });
+    expect(noParcelSourceNote(chester)).toMatch(/Chester County — no parcel data/);
     expect(countyIdentity(35.564, -89.6495).statewideKey).toBe("tn_statewide");
   });
-  it("Germantown and Collierville (inside Shelby) are city-scoped sources with the town's own layer", () => {
-    expect(countyIdentity(35.0868, -89.81)).toMatchObject({ status: "ok", key: "tn_germantown" });
-    expect(countyIdentity(35.042, -89.664)).toMatchObject({ status: "ok", key: "tn_collierville" });
-    expect(COUNTIES_MAP.tn_germantown.cityScoped).toBe(true);
-    expect(COUNTIES_MAP.tn_collierville.cityScoped).toBe(true);
-    // a Memphis point just west of Germantown is NOT Germantown
-    expect(countyIdentity(35.1, -89.95).key ?? null).toBeNull();
+  it("the owner-less Germantown/Collierville city scopes are gone (folded into tn_shelby)", () => {
+    expect(COUNTIES_MAP.tn_germantown).toBeUndefined();
+    expect(COUNTIES_MAP.tn_collierville).toBeUndefined();
   });
 });
 
@@ -101,18 +105,21 @@ describe("Arkansas statewide is relayed, and its host is allow-listed", () => {
   });
 });
 
-/* NEW-1 (Memphis radius ×2) — the owner's report: a Shelby click in the map's lot picker. A county a composite declares
- * excluded must not be routed to that composite at all (a slow/dead statewide layer would otherwise turn the honest gap
- * into an outage message). RED on the merged B2289168 code, which returned ["tn_statewide"] for every one of these. */
-describe("excluded counties are not routed to the statewide layer that excludes them", () => {
+/* NEW-1 (Memphis radius ×2) — the owner's report: a Shelby click in the map's lot picker ("No parcel right there").
+ * RED on the merged B2289168 code: every Shelby point below returned ["tn_statewide"] — a layer that holds none of Shelby. Now
+ * Shelby routes to its own Assessor source, and a county a composite declares excluded (Chester) is routed nowhere, so a
+ * slow/dead statewide layer can never turn its honest gap into an outage message. */
+describe("the owner's case: Shelby clicks reach Shelby's source; an excluded county is not routed to the composite", () => {
   const SHELBY = [["airport east (owner's screenshot)", 35.03, -89.95], ["Getwell / Shelby Dr", 35.02, -89.92],
     ["downtown Memphis", 35.1495, -90.049], ["Bartlett", 35.205, -89.87], ["Millington", 35.34, -89.90]];
-  it.each(SHELBY)("Shelby — %s: no candidate, the county gap sentence", (_l, lat, lng) => {
-    expect(candidateCountiesForPoint(lat, lng)).toEqual([]);
-    expect(noParcelSourceNote(countyIdentity(lat, lng))).toBe("Shelby County — no parcel data wired here yet.");
+  it.each(SHELBY)("Shelby — %s: routed to tn_shelby, never tn_statewide", (_l, lat, lng) => {
+    const c = candidateCountiesForPoint(lat, lng);
+    expect(c[0]).toBe("tn_shelby");
+    expect(c).not.toContain("tn_statewide");
   });
-  it("Chester (Henderson TN): no candidate", () => {
+  it("Chester (Henderson TN): no candidate, the county gap sentence", () => {
     expect(candidateCountiesForPoint(35.4398, -88.6420)).toEqual([]);
+    expect(noParcelSourceNote(countyIdentity(35.4398, -88.6420))).toBe("Chester County — no parcel data wired here yet.");
   });
   it("a covered TN county (Tipton) still routes to the statewide layer", () => {
     expect(candidateCountiesForPoint(35.564, -89.6495)).toContain("tn_statewide");

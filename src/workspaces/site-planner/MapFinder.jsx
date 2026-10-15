@@ -3129,6 +3129,15 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     window.__mapParcelDisplay = hook;
     return () => { if (window.__mapParcelDisplay === hook) window.__mapParcelDisplay = null; };
   }, []);
+  /* NEW-1 (Memphis radius ×2) — READ-ONLY: the lots Select parcels is holding, as the app holds them (county key, the id the
+   * card shows, the attribute bag, the WGS84 rings). The live audit reads owner / parcel id / acreage from HERE rather than
+   * guessing from network traffic. Answers only under automation, checked at CALL time; writes nothing. */
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const hook = () => (window.__PLANYR_E2E ? selectedRef.current.map((x) => ({ county: x.county, acct: x.acct, addr: x.addr, attrs: x.attrs, rings: x.rings })) : null);
+    window.__mapSelectedParcels = hook;
+    return () => { if (window.__mapSelectedParcels === hook) window.__mapSelectedParcels = null; };
+  }, []);
   const clearDisplays = () => {
     wantedDisplaysRef.current = null;
     snapshotsWarmedRef.current.clear();

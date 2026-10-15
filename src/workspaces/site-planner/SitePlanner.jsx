@@ -16449,6 +16449,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // tool. A re-click on a just-added lot toggles it back off.
   const [identifyMode, setIdentifyMode] = useState(false);
   const [identifyRes, setIdentifyRes] = useState(null); // {busy} | {added,attrs,rings,ring,lng,lat,addr} | {removed,addr} | {already,addr} | {error}
+  /* NEW-1 (Memphis radius ×2) — READ-ONLY: the identify-and-add path's last answer, for the live audit (owner / parcel id / rings
+   * as the app received them). Answers only under automation, checked at CALL time; writes nothing. */
+  const identifyResRef = useRef(null);
+  identifyResRef.current = identifyRes;
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const hook = () => (window.__PLANYR_E2E ? identifyResRef.current : null);
+    window.__plannerIdentifyResult = hook;
+    return () => { if (window.__plannerIdentifyResult === hook) window.__plannerIdentifyResult = null; };
+  }, []);
   const [identAdded, setIdentAdded] = useState(0); // lots added this identify session (for the status row)
   const [addrQuery, setAddrQuery] = useState(""); // B384: the "Add by address" text field in the ＋ Add parcel menu
   const [addrBusy, setAddrBusy] = useState(false); // geocode in flight
@@ -22391,7 +22401,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </>
                 )}
                 {identifyRes && (
-                  <div style={{ marginTop: identifyMode ? 8 : 0, background: "var(--planner-raised)", border: "1px solid var(--planner-border)", borderRadius: 8, padding: "8px 10px", fontSize: 11.5 }}>
+                  <div data-testid="identify-result" style={{ marginTop: identifyMode ? 8 : 0, background: "var(--planner-raised)", border: "1px solid var(--planner-border)", borderRadius: 8, padding: "8px 10px", fontSize: 11.5 }}>
                     {identifyRes.busy ? <span style={{ color: PAL.muted }}>{identifyRes.geo ? "Finding address…" : "Querying county GIS…"}</span>
                       : identifyRes.error ? <span style={{ color: PAL.warn }}>{identifyRes.error}</span>
                       : identifyRes.removed ? <span style={{ color: PAL.muted }}>Removed {identifyRes.addr || "that lot"} from the plan — click it again to re-add.</span>
