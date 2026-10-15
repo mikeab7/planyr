@@ -1127,6 +1127,15 @@ html[data-notes-typing="1"] [data-testid="help-report-fab"] { display: none !imp
   .trash-del { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
 }
 
+/* Library file row ⋯ (NEW-2): shown on hover / keyboard focus / while its menu is open; ALWAYS shown (and a full
+ * touch target) on a coarse pointer, where there is no right-click. visibility, not opacity — no fades. */
+.file-row .file-kebab { visibility: hidden; }
+.file-row:hover .file-kebab, .file-row:focus-within .file-kebab, .file-row[data-menu-open] .file-kebab { visibility: visible; }
+.file-row .file-kebab:hover { background: var(--hover-menu); }
+@media (pointer: coarse) {
+  .file-row .file-kebab { visibility: visible; min-width: 44px; min-height: 44px; }
+}
+
 /* Overlays panel focus (B2215024): ONE accent in that panel — the global focus rules above use the orange
    --accent; here they are the Site green. The doubled attribute out-ranks the global !important border rule. */
 [data-testid="overlays-panel"][data-fine-pointer] :is(button, input, select):focus-visible {

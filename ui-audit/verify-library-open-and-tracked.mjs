@@ -128,9 +128,11 @@ try {
     ok("opening it uses the ordinary project route", (await page.evaluate(() => location.hash)).includes(TRK), await page.evaluate(() => location.hash));
     await page.waitForSelector("text=Broker flyer", { timeout: 15000 }).catch(() => {});
     ok("its flyer is listed in the project file view", (await page.locator("text=Broker flyer").count()) >= 1);
-    const del = page.locator('[data-testid="trash-delete"]').first();
-    ok("the flyer carries the ordinary delete control", (await del.count()) >= 1);
-    await del.click(); await page.locator('[data-testid="trash-confirm"]').click(); await page.waitForTimeout(1200);
+    const flyerRow = page.locator('[data-testid="library-file-row"]', { hasText: "Broker flyer" }).first();
+    await flyerRow.click({ button: "right" }); // the file row's context menu (B2268417) replaced the inline ✕
+    const del = page.locator('[data-testid="file-menu-delete"]').first();
+    ok("the flyer's row menu carries the ordinary delete item", (await del.count()) >= 1);
+    await del.click(); await page.waitForTimeout(1200);
     ok("deleting it sent a deleted_at PATCH for the flyer only", wire.some((w) => w.table === "doc_reviews" && w.method === "PATCH" && /id=eq\.flyer/.test(w.url) && (w.body || "").includes("deleted_at")) && !!dbRow("flyer").deleted_at);
     await ctx.close();
   }
