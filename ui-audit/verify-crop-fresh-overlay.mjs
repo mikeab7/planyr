@@ -22,7 +22,7 @@ mkdirSync(OUT, { recursive: true });
 const BASE = process.env.BASE_URL || "http://localhost:4173/";
 const EXEC = process.env.PW_CHROME || "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
 const PDF = process.env.PDF_FILE || new URL("../test/fixtures/site-plan-crop/multipage-3p.pdf", import.meta.url).pathname;
-const ROUNDS = +(process.env.ROUNDS || 4);
+const ROUNDS = +(process.env.ROUNDS || 5);
 
 let fail = 0;
 const check = (name, ok, extra = "") => { console.log(`  ${ok ? "✓" : "✗"} ${name}${extra ? ` — ${extra}` : ""}`); if (!ok) fail++; };
@@ -57,11 +57,24 @@ const hitInside = (sel) => page.evaluate((sel) => {
 }, sel);
 const pct = async () => parseInt(await page.locator('[data-testid="crop-zoom-100"]').textContent(), 10);
 const knownIds = new Set();
+// At Fit, every grip / vertex must ANSWER TO ITSELF (nothing — the floating toolbar included — sits on top of it).
+const gripsAnswer = (sel) => page.evaluate((sel) => {
+  const out = [];
+  for (const el of document.querySelectorAll(`[data-testid="overlay-crop-dialog"] ${sel}`)) {
+    const r = el.getBoundingClientRect(); const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    if (!(top && (top === el || el.contains(top)))) out.push(`${el.getAttribute("data-testid")} → ${top ? (top.getAttribute("data-testid") || top.tagName) : "nothing"}`);
+    else { const t = document.querySelector('[data-testid="overlay-crop-dialog"] [data-testid="crop-toolbar"]').getBoundingClientRect();
+      if (r.right > t.left && r.left < t.right && r.bottom > t.top && r.top < t.bottom) out.push(`${el.getAttribute("data-testid")} overlaps the toolbar box`); }
+  }
+  return { n: document.querySelectorAll(`[data-testid="overlay-crop-dialog"] ${sel}`).length, covered: out };
+}, sel);
 
 let armOk = null;
 for (let round = 1; round <= ROUNDS; round++) {
-  const throttled = round >= 3;
-  console.log(`\n— round ${round}${throttled ? " (6x CPU throttle)" : ""} —`);
+  const throttled = round === 3 || round === 4;
+  const shortWin = round === 5;
+  await page.setViewportSize(shortWin ? { width: 1440, height: 520 } : { width: 1440, height: 900 });
+  console.log(`\n— round ${round}${throttled ? " (6x CPU throttle)" : ""}${shortWin ? " (short 520px-tall window)" : ""} —`);
   await cdp.send("Emulation.setCPUThrottlingRate", { rate: throttled ? 6 : 1 });
   await page.locator('[data-testid="left-menu-panel"] input[type="file"][accept="application/pdf,image/*,.dxf,.dwg"]').setInputFiles(PDF);
   // The FIRST instant a new row exists: open it, then press Crop the instant it's enabled. No settle, no reload.
@@ -112,6 +125,8 @@ for (let round = 1; round <= ROUNDS; round++) {
     const h = await hitInside(sel); if (h !== "ok") covered.push(`${sel}: ${h}`);
   }
   check(`round ${round}: no control is covered by anything else`, covered.length === 0, covered.join(" | "));
+  { const g = await gripsAnswer('[data-testid^="crop-handle-"]');
+    check(`round ${round}: at Fit all 8 rectangle grips answer to themselves (the toolbar covers none)`, g.n === 8 && g.covered.length === 0, `${g.n} grips; ${g.covered.join(" | ")}`); }
   const p0 = await pct();
   check(`round ${round}: the zoom readout is a real number`, Number.isFinite(p0) && p0 > 0, String(p0));
   await page.locator('[data-testid="crop-zoom-in"]').click(); await page.waitForTimeout(150);
@@ -126,14 +141,20 @@ for (let round = 1; round <= ROUNDS; round++) {
   check(`round ${round}: Polygon answers`, (await page.locator('[data-testid="crop-mode-poly"]').getAttribute("aria-pressed")) === "true");
   const cv = await page.locator('[data-testid="crop-canvas"]').boundingBox();
   const at = (fx, fy) => [cv.x + cv.width * fx, cv.y + cv.height * fy];
-  for (const [fx, fy] of [[0.4, 0.3], [0.6, 0.3], [0.6, 0.6]]) { const [x, y] = at(fx, fy); await page.mouse.click(x, y); await page.waitForTimeout(60); }
+  await page.locator('[data-testid="crop-zoom-fit"]').click(); await page.waitForTimeout(150);
+  // a ring that hugs the BOTTOM edge of the sheet (incl. its bottom-centre) — the points the pill used to sit on
+  const im = await page.locator('[data-testid="crop-canvas"] img').boundingBox();
+  const onImg = (fx, fy) => [im.x + im.width * fx, im.y + im.height * fy];
+  for (const [fx, fy] of [[0.1, 0.5], [0.9, 0.5], [0.9, 0.99], [0.5, 0.995], [0.1, 0.99]]) { const [x, y] = onImg(fx, fy); await page.mouse.click(x, y); await page.waitForTimeout(60); }
   await page.keyboard.press("Enter"); await page.waitForTimeout(150);
-  check(`round ${round}: three clicks + Enter close a polygon (three vertices)`, (await page.locator('[data-testid^="crop-poly-vertex-"]').count()) === 3);
+  check(`round ${round}: five clicks along the bottom edge + Enter close a polygon (five vertices)`, (await page.locator('[data-testid^="crop-poly-vertex-"]').count()) === 5);
+  { const g = await gripsAnswer('[data-testid^="crop-poly-vertex-"]');
+    check(`round ${round}: at Fit every polygon vertex (incl. bottom-centre) answers to itself`, g.n === 5 && g.covered.length === 0, `${g.n} vertices; ${g.covered.join(" | ")}`); }
   if (round === 1) await page.screenshot({ path: OUT + "crop-fresh-poly.png" });
   await page.locator('[data-testid="crop-undo"]').click(); await page.waitForTimeout(120);
   check(`round ${round}: Undo answers (the ring re-opens)`, (await page.locator('[data-testid^="crop-poly-vertex-"]').count()) === 0);
   await page.locator('[data-testid="crop-redo"]').click(); await page.waitForTimeout(120);
-  check(`round ${round}: Redo answers`, (await page.locator('[data-testid^="crop-poly-vertex-"]').count()) === 3);
+  check(`round ${round}: Redo answers`, (await page.locator('[data-testid^="crop-poly-vertex-"]').count()) === 5);
   check(`round ${round}: Reset is enabled once something is drawn`, await page.locator('[data-testid="crop-reset"]').isEnabled());
 
   if (round % 2 === 1) {
