@@ -1414,6 +1414,26 @@ function healSrc(chosen, other) {
   });
 }
 
+/* NEW-1 (follow-on to B2244016) — A NON-NULL `storageKey` BEATS A HEAL FLAG IN EVERY MERGE DIRECTION.
+ * `unionById` is newer-copy-wins per overlay id, so a device copy still carrying the old heal
+ * (`storageKey: null, storageMissing: true`) with the newer stamp erased a restored cloud pointer on
+ * the next save — measured on production 2026-10-15 (plan open → version bump → key gone again, every
+ * time). A heal is a statement that a fresh check found the object gone; it may never outvote a record
+ * that still names one. When the chosen copy is healed and the other copy holds a key for the same id,
+ * the key (and a clear heal flag) is carried back; the next fetch re-checks, so a truly-gone object is
+ * simply healed again by a fresh confirmed-missing answer (lib/overlayHeal.js). */
+function healPointer(chosen, other) {
+  const otherById = {};
+  for (const o of arr(other)) if (o && o.id != null && typeof o.storageKey === "string" && o.storageKey && !o.storageMissing) otherById[o.id] = o;
+  return arr(chosen).map((n) => {
+    if (n && n.id != null && !n.storageKey && n.storageMissing) {
+      const o = otherById[n.id];
+      if (o) return { ...n, storageKey: o.storageKey, storageMissing: false };
+    }
+    return n;
+  });
+}
+
 // Reconcile two copies of the SAME site without ever dropping drawn work: scalar/meta
 // fields come from the NEWER copy; every drawn collection is UNIONED by id, so a
 // building (or markup, parcel, measure, overlay, cross-section) in EITHER copy survives.
@@ -1439,7 +1459,7 @@ export function mergeSiteContent(a, b, opts) {
     markups: live(unionById(newer.markups, older.markups)),
     measures: live(unionById(newer.measures, older.measures)),
     callouts: live(unionById(newer.callouts, older.callouts)),
-    sheetOverlays: live(healSrc(unionById(newer.sheetOverlays, older.sheetOverlays), older.sheetOverlays)),
+    sheetOverlays: live(healPointer(healSrc(unionById(newer.sheetOverlays, older.sheetOverlays), older.sheetOverlays), older.sheetOverlays)),
     parcelDrawings: live(healSrc(unionById(newer.parcelDrawings, older.parcelDrawings), older.parcelDrawings)),
     elevation: { crossSections: live(unionById(
       newer.elevation && newer.elevation.crossSections,
