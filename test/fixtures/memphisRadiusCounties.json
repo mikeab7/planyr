@@ -1,0 +1,508 @@
+{
+ "center": {
+  "name": "Shelby County courthouse, downtown Memphis",
+  "lat": 35.1495,
+  "lng": -90.049
+ },
+ "radiusMiles": 100,
+ "source": "Esri USA_Counties_Generalized_Boundaries (Census TIGER-derived), server-side esriSRUnit_StatuteMile distance query, run 2026-10-15; points are county centroids",
+ "counties": [
+  {
+   "state": "AR",
+   "name": "Arkansas County",
+   "fips": "05001",
+   "lat": 34.2913,
+   "lng": -91.3679
+  },
+  {
+   "state": "AR",
+   "name": "Clay County",
+   "fips": "05021",
+   "lat": 36.3651,
+   "lng": -90.409
+  },
+  {
+   "state": "AR",
+   "name": "Craighead County",
+   "fips": "05031",
+   "lat": 35.8359,
+   "lng": -90.6353
+  },
+  {
+   "state": "AR",
+   "name": "Crittenden County",
+   "fips": "05035",
+   "lat": 35.2128,
+   "lng": -90.3031
+  },
+  {
+   "state": "AR",
+   "name": "Cross County",
+   "fips": "05037",
+   "lat": 35.2949,
+   "lng": -90.7693
+  },
+  {
+   "state": "AR",
+   "name": "Desha County",
+   "fips": "05041",
+   "lat": 33.8368,
+   "lng": -91.2454
+  },
+  {
+   "state": "AR",
+   "name": "Greene County",
+   "fips": "05055",
+   "lat": 36.1239,
+   "lng": -90.5572
+  },
+  {
+   "state": "AR",
+   "name": "Independence County",
+   "fips": "05063",
+   "lat": 35.7423,
+   "lng": -91.5671
+  },
+  {
+   "state": "AR",
+   "name": "Jackson County",
+   "fips": "05067",
+   "lat": 35.6018,
+   "lng": -91.2139
+  },
+  {
+   "state": "AR",
+   "name": "Lawrence County",
+   "fips": "05075",
+   "lat": 36.0459,
+   "lng": -91.1094
+  },
+  {
+   "state": "AR",
+   "name": "Lee County",
+   "fips": "05077",
+   "lat": 34.7846,
+   "lng": -90.7766
+  },
+  {
+   "state": "AR",
+   "name": "Lonoke County",
+   "fips": "05085",
+   "lat": 34.7578,
+   "lng": -91.8865
+  },
+  {
+   "state": "AR",
+   "name": "Mississippi County",
+   "fips": "05093",
+   "lat": 35.7623,
+   "lng": -90.0525
+  },
+  {
+   "state": "AR",
+   "name": "Monroe County",
+   "fips": "05095",
+   "lat": 34.678,
+   "lng": -91.1969
+  },
+  {
+   "state": "AR",
+   "name": "Phillips County",
+   "fips": "05107",
+   "lat": 34.4379,
+   "lng": -90.8427
+  },
+  {
+   "state": "AR",
+   "name": "Poinsett County",
+   "fips": "05111",
+   "lat": 35.5759,
+   "lng": -90.6643
+  },
+  {
+   "state": "AR",
+   "name": "Prairie County",
+   "fips": "05117",
+   "lat": 34.8353,
+   "lng": -91.5485
+  },
+  {
+   "state": "AR",
+   "name": "Randolph County",
+   "fips": "05121",
+   "lat": 36.3403,
+   "lng": -91.0316
+  },
+  {
+   "state": "AR",
+   "name": "Sharp County",
+   "fips": "05135",
+   "lat": 36.1602,
+   "lng": -91.4842
+  },
+  {
+   "state": "AR",
+   "name": "St. Francis County",
+   "fips": "05123",
+   "lat": 35.0234,
+   "lng": -90.7428
+  },
+  {
+   "state": "AR",
+   "name": "White County",
+   "fips": "05145",
+   "lat": 35.2607,
+   "lng": -91.7432
+  },
+  {
+   "state": "AR",
+   "name": "Woodruff County",
+   "fips": "05147",
+   "lat": 35.1886,
+   "lng": -91.2386
+  },
+  {
+   "state": "KY",
+   "name": "Fulton County",
+   "fips": "21075",
+   "lat": 36.5526,
+   "lng": -89.1734
+  },
+  {
+   "state": "MO",
+   "name": "Butler County",
+   "fips": "29023",
+   "lat": 36.7134,
+   "lng": -90.4114
+  },
+  {
+   "state": "MO",
+   "name": "Dunklin County",
+   "fips": "29069",
+   "lat": 36.2705,
+   "lng": -90.0936
+  },
+  {
+   "state": "MO",
+   "name": "New Madrid County",
+   "fips": "29143",
+   "lat": 36.5958,
+   "lng": -89.6534
+  },
+  {
+   "state": "MO",
+   "name": "Pemiscot County",
+   "fips": "29155",
+   "lat": 36.2121,
+   "lng": -89.7878
+  },
+  {
+   "state": "MO",
+   "name": "Ripley County",
+   "fips": "29181",
+   "lat": 36.6484,
+   "lng": -90.8673
+  },
+  {
+   "state": "MS",
+   "name": "Alcorn County",
+   "fips": "28003",
+   "lat": 34.8875,
+   "lng": -88.5694
+  },
+  {
+   "state": "MS",
+   "name": "Benton County",
+   "fips": "28009",
+   "lat": 34.8234,
+   "lng": -89.1795
+  },
+  {
+   "state": "MS",
+   "name": "Bolivar County",
+   "fips": "28011",
+   "lat": 33.8002,
+   "lng": -90.8788
+  },
+  {
+   "state": "MS",
+   "name": "Calhoun County",
+   "fips": "28013",
+   "lat": 33.9395,
+   "lng": -89.3322
+  },
+  {
+   "state": "MS",
+   "name": "Chickasaw County",
+   "fips": "28017",
+   "lat": 33.925,
+   "lng": -88.9414
+  },
+  {
+   "state": "MS",
+   "name": "Coahoma County",
+   "fips": "28027",
+   "lat": 34.2339,
+   "lng": -90.6024
+  },
+  {
+   "state": "MS",
+   "name": "DeSoto County",
+   "fips": "28033",
+   "lat": 34.8809,
+   "lng": -89.9898
+  },
+  {
+   "state": "MS",
+   "name": "Grenada County",
+   "fips": "28043",
+   "lat": 33.7724,
+   "lng": -89.7969
+  },
+  {
+   "state": "MS",
+   "name": "Itawamba County",
+   "fips": "28057",
+   "lat": 34.284,
+   "lng": -88.3547
+  },
+  {
+   "state": "MS",
+   "name": "Lafayette County",
+   "fips": "28071",
+   "lat": 34.3636,
+   "lng": -89.4804
+  },
+  {
+   "state": "MS",
+   "name": "Lee County",
+   "fips": "28081",
+   "lat": 34.2964,
+   "lng": -88.6725
+  },
+  {
+   "state": "MS",
+   "name": "Leflore County",
+   "fips": "28083",
+   "lat": 33.5547,
+   "lng": -90.2977
+  },
+  {
+   "state": "MS",
+   "name": "Marshall County",
+   "fips": "28093",
+   "lat": 34.77,
+   "lng": -89.4972
+  },
+  {
+   "state": "MS",
+   "name": "Panola County",
+   "fips": "28107",
+   "lat": 34.3706,
+   "lng": -89.9476
+  },
+  {
+   "state": "MS",
+   "name": "Pontotoc County",
+   "fips": "28115",
+   "lat": 34.2301,
+   "lng": -89.0316
+  },
+  {
+   "state": "MS",
+   "name": "Prentiss County",
+   "fips": "28117",
+   "lat": 34.6244,
+   "lng": -88.5084
+  },
+  {
+   "state": "MS",
+   "name": "Quitman County",
+   "fips": "28119",
+   "lat": 34.2573,
+   "lng": -90.2875
+  },
+  {
+   "state": "MS",
+   "name": "Sunflower County",
+   "fips": "28133",
+   "lat": 33.6069,
+   "lng": -90.5868
+  },
+  {
+   "state": "MS",
+   "name": "Tallahatchie County",
+   "fips": "28135",
+   "lat": 33.9525,
+   "lng": -90.1753
+  },
+  {
+   "state": "MS",
+   "name": "Tate County",
+   "fips": "28137",
+   "lat": 34.6584,
+   "lng": -89.9435
+  },
+  {
+   "state": "MS",
+   "name": "Tippah County",
+   "fips": "28139",
+   "lat": 34.7761,
+   "lng": -88.8994
+  },
+  {
+   "state": "MS",
+   "name": "Tishomingo County",
+   "fips": "28141",
+   "lat": 34.747,
+   "lng": -88.2308
+  },
+  {
+   "state": "MS",
+   "name": "Tunica County",
+   "fips": "28143",
+   "lat": 34.655,
+   "lng": -90.3719
+  },
+  {
+   "state": "MS",
+   "name": "Union County",
+   "fips": "28145",
+   "lat": 34.4971,
+   "lng": -88.9952
+  },
+  {
+   "state": "MS",
+   "name": "Yalobusha County",
+   "fips": "28161",
+   "lat": 34.0314,
+   "lng": -89.709
+  },
+  {
+   "state": "TN",
+   "name": "Carroll County",
+   "fips": "47017",
+   "lat": 35.9765,
+   "lng": -88.4485
+  },
+  {
+   "state": "TN",
+   "name": "Chester County",
+   "fips": "47023",
+   "lat": 35.4269,
+   "lng": -88.6135
+  },
+  {
+   "state": "TN",
+   "name": "Crockett County",
+   "fips": "47033",
+   "lat": 35.8176,
+   "lng": -89.1392
+  },
+  {
+   "state": "TN",
+   "name": "Dyer County",
+   "fips": "47045",
+   "lat": 36.06,
+   "lng": -89.4132
+  },
+  {
+   "state": "TN",
+   "name": "Fayette County",
+   "fips": "47047",
+   "lat": 35.201,
+   "lng": -89.4154
+  },
+  {
+   "state": "TN",
+   "name": "Gibson County",
+   "fips": "47053",
+   "lat": 36.0004,
+   "lng": -88.9315
+  },
+  {
+   "state": "TN",
+   "name": "Hardeman County",
+   "fips": "47069",
+   "lat": 35.2116,
+   "lng": -88.9943
+  },
+  {
+   "state": "TN",
+   "name": "Hardin County",
+   "fips": "47071",
+   "lat": 35.2048,
+   "lng": -88.1862
+  },
+  {
+   "state": "TN",
+   "name": "Haywood County",
+   "fips": "47075",
+   "lat": 35.5877,
+   "lng": -89.2841
+  },
+  {
+   "state": "TN",
+   "name": "Henderson County",
+   "fips": "47077",
+   "lat": 35.659,
+   "lng": -88.3838
+  },
+  {
+   "state": "TN",
+   "name": "Lake County",
+   "fips": "47095",
+   "lat": 36.3359,
+   "lng": -89.4944
+  },
+  {
+   "state": "TN",
+   "name": "Lauderdale County",
+   "fips": "47097",
+   "lat": 35.7626,
+   "lng": -89.6311
+  },
+  {
+   "state": "TN",
+   "name": "Madison County",
+   "fips": "47113",
+   "lat": 35.6131,
+   "lng": -88.8353
+  },
+  {
+   "state": "TN",
+   "name": "McNairy County",
+   "fips": "47109",
+   "lat": 35.1826,
+   "lng": -88.5649
+  },
+  {
+   "state": "TN",
+   "name": "Obion County",
+   "fips": "47131",
+   "lat": 36.3577,
+   "lng": -89.1467
+  },
+  {
+   "state": "TN",
+   "name": "Shelby County",
+   "fips": "47157",
+   "lat": 35.1946,
+   "lng": -89.8992
+  },
+  {
+   "state": "TN",
+   "name": "Tipton County",
+   "fips": "47167",
+   "lat": 35.5022,
+   "lng": -89.7366
+  },
+  {
+   "state": "TN",
+   "name": "Weakley County",
+   "fips": "47183",
+   "lat": 36.2993,
+   "lng": -88.7138
+  }
+ ]
+}
