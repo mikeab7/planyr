@@ -91,7 +91,8 @@ const ok = (name, cond, extra = "") => { results.push({ name, pass: !!cond }); c
 // LIVE=<https://planyr.io> [WANT_BUILD=<prefix>]: same assertions against the deployed app, signed in as the test
 // account (ui-audit/lib/signedInSession.mjs). The fixture is imported into THIS browser context only — never a real plan.
 const LIVE = process.env.LIVE || "";
-const live = LIVE ? await openSignedIn({ base: LIVE, viewport: { width: 1000, height: 800 } }) : null;
+const ANON = !!process.env.ANON;   // LIVE + ANON=1: deployed bundle, no sign-in (fixture is local either way)
+const live = LIVE && !ANON ? await openSignedIn({ base: LIVE, viewport: { width: 1000, height: 800 } }) : null;
 const browser = live ? live.page.context().browser() : await chromium.launch({ executablePath: EXEC, args: ["--no-sandbox"] });
 const SIDES = ["Top", "Right", "Bottom", "Left"];
 
@@ -100,7 +101,7 @@ for (const theme of THEMES) {
   if (live) await page.setViewportSize({ width: 1000, height: 800 });
   page.on("dialog", d => d.accept());
   await page.addInitScript(t => { try { localStorage.setItem("planyr:theme", t); } catch {} }, theme);
-  await page.goto(live ? LIVE + "/sequence/" : URL_, { waitUntil: "domcontentloaded", timeout: 60000 });
+  await page.goto(LIVE ? LIVE + "/sequence/" : URL_, { waitUntil: "domcontentloaded", timeout: 60000 });
   await page.waitForSelector("[data-task-row]", { timeout: 40000 });
   await assertMeasurable(page, "verify-grid-row-outline");
   await page.locator('[data-testid="open-history-desktop"]').click();
@@ -112,9 +113,9 @@ for (const theme of THEMES) {
   await page.locator('.hdr-view button:has-text("Grid")').click();
   await pacedWait(page, 600);
   await page.waitForSelector('[data-grid-scroll="1"]');
-  if (live) {   // build read IN THE SAME CALL as the assertions that follow (AGENT-RULES)
+  if (LIVE) {   // build read IN THE SAME CALL as the assertions that follow (AGENT-RULES)
     const build = await page.evaluate(() => fetch("/version.json", { cache: "no-store" }).then(r => r.json()));
-    console.log("signed in as", live.proof.email, "| build", JSON.stringify(build));
+    console.log("signed in as", live ? live.proof.email : "(anonymous)", "| build", JSON.stringify(build));
     if (process.env.WANT_BUILD) ok(`served build matches ${process.env.WANT_BUILD}`, JSON.stringify(build).includes(process.env.WANT_BUILD));
   }
   await page.evaluate(t => { if (t === "dark") document.documentElement.setAttribute("data-theme", "dark"); }, theme);
