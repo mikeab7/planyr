@@ -27,7 +27,11 @@ import {
   purgeExpiredDeleted, loadReview, getShareLink, DISCIPLINES,
   downloadFromDrive, downloadSource,
 } from "../../doc-review/lib/reviewStore.js";
-import { useReviewTrash, TrashNotice, UndoToast, RecentlyDeletedList, DeleteButton, FileTypeIcon } from "./ReviewTrash.jsx";
+import { useReviewTrash, TrashNotice, UndoToast, RecentlyDeletedList, FileTypeIcon } from "./ReviewTrash.jsx";
+import ContextMenu from "../../../shared/ui/ContextMenu.jsx";
+import { menuPanelStyle, MenuItem } from "../../../shared/ui/controls.jsx";
+import { FILE_MOVE_TYPE, isFileMoveDrag, readFileMoveId, moveDecision, disciplineForMove, applyOptimisticFolder, fileMenuItems } from "../lib/fileMove.js";
+import { renameReviewTitle } from "../lib/renameFile.js";
 import { toFactsRow, mergeFactsIntoReviews, findDuplicateReview, isRapidRepeatUpload } from "../../doc-review/lib/fileIndex.js";
 import { fileWarn } from "../../doc-review/lib/sourceState.js";
 import { fileReviewIntoProject } from "../lib/fileIntoProject.js";
@@ -129,6 +133,10 @@ export default function FileBrowser({
   // confirmation instead of calling downloadFile directly, so the file only reaches disk on the
   // banner's own explicit Download click.
   const [pendingDl, setPendingDl] = useState(null);         // the file row awaiting an explicit Download click
+  const [fileMenu, setFileMenu] = useState(null);         // { f, x, y } — the row's right-click / ⋯ menu (NEW-2)
+  const [renaming, setRenaming] = useState(null);         // { id, value } — inline title edit on the row
+  const [movePick, setMovePick] = useState(null);         // { id, folderId } — the "Move to…" picker open under a row
+  const [moving, setMoving] = useState({});               // fileId -> true while a move is in flight
   const fileInputRef = useRef(null);
   const folderInputRef = useRef(null);
   const reqRef = useRef(0);
@@ -535,6 +543,7 @@ export default function FileBrowser({
   };
 
   const onDrop = (e) => {
+    if (isFileMoveDrag(e.dataTransfer)) { e.preventDefault(); return; } // an in-app file row dropped on the pane itself: nothing to ingest
     e.preventDefault(); e.stopPropagation();
     markDropHandled(e);
     dropInto(dropTargetFolder(), e.dataTransfer);
@@ -561,6 +570,12 @@ export default function FileBrowser({
   const treeDropImpl = useRef(null);
   treeDropImpl.current = (folderId, e) => {
     markDropHandled(e);
+    if (isFileMoveDrag(e.dataTransfer)) { // an in-app file row dropped on a folder → the ONE move path (NEW-1)
+      const id = readFileMoveId(e.dataTransfer);
+      const f = id && facts.find((x) => x.id === id);
+      if (f && folderId) moveFileToFolder(f, folderId); // "All files" (null) refuses: nothing happens
+      return;
+    }
     dropInto(folderId || null, e.dataTransfer);
   };
   useEffect(() => { registerTreeDrop?.((folderId, e) => treeDropImpl.current?.(folderId, e)); }, [registerTreeDrop]);
@@ -606,7 +621,7 @@ export default function FileBrowser({
     } catch (e) { setDlNotice({ name: label, error: (e && e.message) || "Couldn’t download this file." }); }
   };
   // Delete / undo / restore / delete-forever: ONE implementation, shared with the no-project Home (ReviewTrash.jsx, B2086368).
-  const { pendingDel, setPendingDel, pendingPurge, setPendingPurge, delNotice, setDelNotice, undoDel, setUndoDel, del, undoDelete, restoreRow, purgeRow } =
+  const { pendingPurge, setPendingPurge, delNotice, setDelNotice, undoDel, setUndoDel, del, undoDelete, restoreRow, purgeRow } =
     useReviewTrash({ titleOf: (id) => (reviews.find((x) => x.id === id) || {}).title, refresh: () => refresh() });
   // Share-by-link: outward-facing, so confirm first, then mint a link. driveKey lives on the
   // review's sources (not the file-fact row), so load the record on demand.
@@ -664,6 +679,59 @@ export default function FileBrowser({
     }
   };
 
+  // NEW-1 — move ONE file to a folder: drag onto a tree row OR "Move to…". Both end here, in the SAME
+  // `fileReviewIntoProject` the File picker uses (record + file_facts + Drive bytes — one placement rule).
+  // Optimistic: the row leaves/arrives at once; a failure snaps it back and names the file + the error.
+  const moveFileToFolder = async (f, folderId) => {
+    if (moving[f.id]) return;
+    const hasTree = folderMode && folderRows.length > 0;
+    const cur = placedFolder.get(f.id) || f.folderId || null;
+    const dec = moveDecision({ targetFolderId: folderId, currentFolderId: cur, folderRows });
+    if (!hasTree || dec.action !== "move") { if (dec.action === "noop") setMovePick((m) => (m && m.id === f.id ? null : m)); return; }
+    const folder = folderRows.find((r) => r.id === folderId);
+    const label = f.title || f.item || "this file";
+    const pid = f.projectId || projectId;
+    const { next, restore } = applyOptimisticFolder(reviews, f.id, folderId);
+    setReviews(next);
+    setMovePick(null);
+    setMoving((m) => ({ ...m, [f.id]: true }));
+    try {
+      const res = await fileReviewIntoProject({ f, projectId: pid, projectName: projName(pid), discipline: disciplineForMove(f, folder), folderId });
+      if (!res.ok) { setReviews((rs) => restore(rs)); setMoveNotice(`Couldn't move "${label}" — ${res.error}. It's back where it was.`); return; }
+      setMoveNotice(res.notice || null);
+      refresh();
+    } catch (e) { // LOUD-FAILURE: never a silent snap-back
+      setReviews((rs) => restore(rs));
+      setMoveNotice(`Couldn't move "${label}" — ${(e && e.message) || "unexpected error"}. It's back where it was.`);
+    } finally {
+      setMoving((m) => { const n = { ...m }; delete n[f.id]; return n; });
+    }
+  };
+  // NEW-2 — inline rename of the stored title (the one source every list/header/pin reads). Enter / click-away
+  // commit, Escape abandons the typed text (EDITOR-EXIT-CONTRACT, text class). Empty is refused with a notice.
+  const commitRename = async (f) => {
+    const r = renaming;
+    if (!r || r.id !== f.id) return;
+    setRenaming(null);
+    if (!r.value.trim()) { setMoveNotice(`A name can't be empty — "${f.title || "this file"}" kept its name.`); return; }
+    if (r.value.trim() === (f.title || "")) return;
+    const res = await renameReviewTitle(f.id, r.value);
+    if (!res.ok) setMoveNotice(`Couldn't rename "${f.title || "this file"}" — ${res.error}`);
+    refresh();
+  };
+  const openFileMenu = (f, x, y) => setFileMenu({ f, x, y });
+  const runMenuAction = (id, f) => {
+    const spatial = isSpatial(f);
+    if (id === "open" || (id === "place" && spatial)) open(f);
+    else if (id === "download") setPendingDl(f);
+    else if (id === "move") setMovePick({ id: f.id, folderId: placedFolder.get(f.id) || f.folderId || null });
+    else if (id === "rename") setRenaming({ id: f.id, value: f.title || f.item || "" });
+    else if (id === "share") { if (!share[f.id]) startShare(f.id); }
+    else if (id === "versions") openHistory(f);
+    else if (id === "pin") onTogglePinFile?.(f);
+    else if (id === "delete") del(f.id);
+  };
+
   // A refused drop is named wherever the browser is showing — including the two empty states below (NEW-1).
   const dropNoticeNode = dropNotice ? (
     <div role="alert" data-testid="library-drop-notice" style={{ margin: "8px 14px 0", padding: "7px 10px", borderRadius: RADIUS.sm, display: "flex", alignItems: "center", gap: 8,
@@ -695,6 +763,7 @@ export default function FileBrowser({
   // modes are unmistakable ("Filing into 02. Electric" vs. "auto-file drawings by title block").
   const dropFolderRow = folderMode && selectedFolderId ? folderRows.find((r) => r.id === selectedFolderId) : null;
   const dropFolderLabel = dropFolderRow ? displayLabel(dropFolderRow.name) : null;
+  const canDrag = folderMode && folderRows.length > 0; // a file row drags onto a tree folder (touch uses ⋯ › Move to…)
 
   return (
     <div
@@ -849,7 +918,7 @@ export default function FileBrowser({
         {pendingDl && (
           <div style={{ flex: "none", margin: "8px 12px 0", padding: "7px 10px", borderRadius: RADIUS.sm, display: "flex", alignItems: "center", gap: 8,
             border: "1px solid var(--border-default)", background: "var(--surface-raised)", color: "var(--text-secondary)", fontSize: FONT_SIZE.control, lineHeight: 1.45 }}>
-            <span style={{ flex: 1 }}>“{pendingDl.sourceFile || pendingDl.title || pendingDl.item || "This file"}” isn’t a PDF, so it can’t be previewed here.</span>
+            <span style={{ flex: 1 }}>“{pendingDl.sourceFile || pendingDl.title || pendingDl.item || "This file"}” {isPdfFile(pendingDl) || isDocFile(pendingDl) ? "will be saved to this device." : "isn’t a PDF, so it can’t be previewed here."}</span>
             <button onClick={() => { const f = pendingDl; setPendingDl(null); downloadFile(f); }}
               style={{ flex: "none", padding: "4px 9px", fontSize: FONT_SIZE.control, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-primary)" }}>Download</button>
             <button onClick={() => setPendingDl(null)} title="Cancel" style={{ flex: "none", border: "none", background: "transparent", color: "var(--text-secondary)", cursor: "pointer", fontSize: FONT_SIZE.emphasis, fontWeight: 700, padding: 2 }}>✕</button>
@@ -918,8 +987,28 @@ export default function FileBrowser({
             const docRow = isDocFile(f);
             const ext = (String(f.sourceFile || "").match(/\.([a-z0-9]+)$/i) || [])[1];
             return (
-              <div key={f.id} style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", marginBottom: 6, background: "var(--surface-raised)" }}>
+              <div key={f.id} className="file-row" data-testid="library-file-row" data-review-id={f.id} data-menu-open={fileMenu && fileMenu.f.id === f.id ? "1" : undefined}
+                tabIndex={0}
+                draggable={canDrag && !renaming}
+                onDragStart={canDrag ? (e) => { e.dataTransfer.setData(FILE_MOVE_TYPE, f.id); e.dataTransfer.setData("text/plain", f.title || f.item || ""); e.dataTransfer.effectAllowed = "move"; } : undefined}
+                onContextMenu={(e) => { if (e.target.closest && e.target.closest("input,textarea,select")) return; e.preventDefault(); openFileMenu(f, e.clientX, e.clientY); }}
+                onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget) return; // keys inside the row's own controls/inputs are theirs
+                  if (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) { e.preventDefault(); const r = e.currentTarget.getBoundingClientRect(); openFileMenu(f, r.left + 24, r.bottom - 6); }
+                }}
+                style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", marginBottom: 6, background: "var(--surface-raised)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                  {renaming && renaming.id === f.id ? (
+                    <span style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 9 }}>
+                      <FileTypeIcon kind={f.kind} />
+                      <input autoFocus data-testid="library-rename-input" aria-label={`Rename ${f.title || "file"}`} value={renaming.value}
+                        onFocus={(e) => e.target.select()}
+                        onChange={(e) => setRenaming({ id: f.id, value: e.target.value })}
+                        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitRename(f); } else if (e.key === "Escape") { e.stopPropagation(); setRenaming(null); } }}
+                        onBlur={() => commitRename(f)}
+                        style={{ flex: 1, minWidth: 0, fontSize: 12.5, fontWeight: 600, fontFamily: "inherit", padding: "3px 7px", borderRadius: RADIUS.md, border: "1px solid var(--accent-library)", background: "var(--surface-page)", color: "var(--text-primary)", outline: "none" }} />
+                    </span>
+                  ) : (
                   <button onClick={() => open(f)} title={pdfRow ? "Open to review / mark up" : docRow ? "Open in the document editor" : "Not a PDF — click for a Download option"}
                     style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 9, textAlign: "left", border: "none", background: "transparent", cursor: "pointer", padding: 0, fontFamily: "inherit" }}>
                     <FileTypeIcon kind={f.kind} />
@@ -939,6 +1028,7 @@ export default function FileBrowser({
                       </span>
                     </span>
                   </button>
+                  )}
                   {onTogglePinFile && (
                     <button onClick={() => onTogglePinFile(f)}
                       title={pinnedFileIds && pinnedFileIds.has(f.id) ? "Unpin from the Library home" : "Pin to the Library home"}
@@ -949,17 +1039,19 @@ export default function FileBrowser({
                   )}
                   {pdfRow && spatial && !mapped && <button onClick={() => onOpenReview && open(f)} title="Open to place this drawing on the map"
                     style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Place</button>}
-                  {onOpenHistory && (pdfRow || docRow) && <button onClick={() => openHistory(f)} title="Version history — see earlier saved versions" data-testid="library-version-history"
-                    style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Versions</button>}
-                  <button onClick={() => (share[f.id] ? closeShare(f.id) : startShare(f.id))} title="Get a shareable link"
-                    style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--border-default)", background: share[f.id] ? "var(--hover-menu)" : "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Share</button>
-                  <DeleteButton id={f.id} armed={pendingDel === f.id} label={f.title || f.item || f.sfile || "file"} onArm={setPendingDel} onCancel={() => setPendingDel(null)} onConfirm={del} />
+                  <button className="file-kebab" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openFileMenu(f, r.left, r.bottom); }}
+                    aria-label={`More actions for ${f.title || f.item || "file"}`} aria-haspopup="menu" data-testid="library-file-kebab" title="More actions"
+                    style={{ flex: "none", border: "none", background: "transparent", cursor: "pointer", color: "var(--text-secondary)", fontSize: FONT_SIZE.display, fontWeight: 700, lineHeight: 1, padding: "2px 7px", borderRadius: RADIUS.md }}>⋯</button>
                 </div>
                 {/* re-file (re-assign category/subcategory) — inline, never auto-guesses */}
                 {(needs || refileSel[f.id]) && (
                   <RefileRow value={refileSel[f.id]} discipline={f.discipline}
                     choices={folderMode ? folderChoices(folderRows) : null} folderId={refileTarget(f).folderId} busy={!!refiling[f.id]}
                     onChange={(v) => setRefileSel((s) => ({ ...s, [f.id]: v }))} onFile={() => doRefile(f)} />
+                )}
+                {movePick && movePick.id === f.id && folderMode && (
+                  <MoveRow choices={folderChoices(folderRows)} folderId={movePick.folderId} currentId={placedFolder.get(f.id) || f.folderId || null} busy={!!moving[f.id]}
+                    onChange={(v) => setMovePick({ id: f.id, folderId: v })} onMove={() => moveFileToFolder(f, movePick.folderId)} onCancel={() => setMovePick(null)} />
                 )}
                 {/* share-by-link — inline, two-step (confirm → link); failure never silent */}
                 {share[f.id] && (
@@ -984,6 +1076,13 @@ export default function FileBrowser({
         <input ref={(el) => { folderInputRef.current = el; if (el) el.webkitdirectory = true; }}
           type="file" multiple style={{ display: "none" }} onChange={onPickFolder} />
       </div>
+
+      {fileMenu && (() => {
+        const f = fileMenu.f;
+        const items = fileMenuItems({ pdfRow: isPdfFile(f), docRow: isDocFile(f), spatial: isSpatial(f), mapped: onMap(f), pinned: !!(pinnedFileIds && pinnedFileIds.has(f.id)),
+          canPin: !!onTogglePinFile, canHistory: !!onOpenHistory, canMove: folderMode && folderRows.length > 0 });
+        return <FileRowMenu x={fileMenu.x} y={fileMenu.y} title={f.title || f.item || "file"} items={items} onClose={() => setFileMenu(null)} onPick={(id) => { setFileMenu(null); runMenuAction(id, f); }} />;
+      })()}
 
       <UndoToast undo={undoDel} onUndo={undoDelete} onDismiss={() => setUndoDel(null)} />
 
@@ -1016,6 +1115,61 @@ function TreeRow({ label, count, active, indent, bold, caret, onCaret, onClick }
   );
 }
 
+/* The ONE folder <select> (tree order, indented) — the File row and the "Move to…" row both render it, so the list
+ * is built in exactly one place (`folderChoices`). `currentId` marks where the file already is. */
+function FolderPicker({ choices, value, currentId = null, onChange, ariaLabel, testId, ctl }) {
+  return (
+    <select value={value || ""} onChange={(e) => onChange(e.target.value)} aria-label={ariaLabel} data-testid={testId}
+      style={{ ...ctl, flex: "1 1 160px", minWidth: 140, maxWidth: "100%" }} title="The folder this document is filed into">
+      <option value="">Pick a folder…</option>
+      {choices.map((c) => <option key={c.id} value={c.id}>{"\u00A0\u00A0".repeat(c.depth)}{c.name}{c.id === currentId ? " (current)" : ""}</option>)}
+    </select>
+  );
+}
+
+/* "Move to…" — the inline picker under a row (NEW-1b): the same FolderPicker the File row uses, current folder
+ * pre-selected and marked. Confirming runs the one move path. */
+function MoveRow({ choices, folderId, currentId, busy, onChange, onMove, onCancel }) {
+  const ctl = { fontSize: 11, fontFamily: "inherit", border: "1px solid var(--border-default)", borderRadius: 8, padding: "3px 5px", color: "var(--text-primary)", background: "var(--surface-page)" };
+  const same = !folderId || folderId === currentId;
+  return (
+    <div data-testid="library-move-row" onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onCancel(); } }}
+      style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 7, paddingTop: 7, borderTop: "1px solid var(--border-default)", flexWrap: "wrap" }}>
+      <span style={{ fontSize: 10.5, color: "var(--text-secondary)", fontWeight: 700, flex: "none" }}>Move to:</span>
+      <FolderPicker choices={choices} value={folderId} currentId={currentId} onChange={onChange} ariaLabel="Folder to move into" testId="library-move-folder" ctl={ctl} />
+      <button onClick={onMove} disabled={busy || same} data-testid="library-move-confirm" title={same ? "Pick a different folder" : "Move this file"}
+        style={{ flex: "none", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: busy || same ? "default" : "pointer", borderRadius: RADIUS.md, border: "1px solid var(--accent-library)", background: "var(--accent-library)", color: "var(--on-accent-library)", padding: "3px 11px" }}>{busy ? "Moving…" : "Move"}</button>
+      <button onClick={onCancel} style={miniBtn}>Cancel</button>
+    </div>
+  );
+}
+
+/* The file row's context menu — the shared ContextMenu primitive (portal, viewport-aware, Escape / outside-click
+ * close) plus roving focus: the first item takes focus, ↑/↓ move, Enter/Space activate (native buttons). */
+function FileRowMenu({ x, y, title, items, onClose, onPick }) {
+  const ref = useRef(null);
+  useEffect(() => { const b = ref.current && ref.current.querySelector('[role="menuitem"]'); if (b) b.focus(); }, []);
+  const onKeyDown = (e) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
+    e.preventDefault();
+    const els = Array.from(ref.current.querySelectorAll('[role="menuitem"]'));
+    const i = els.indexOf(document.activeElement);
+    const n = e.key === "Home" ? 0 : e.key === "End" ? els.length - 1 : (i + (e.key === "ArrowDown" ? 1 : -1) + els.length) % els.length;
+    els[n]?.focus();
+  };
+  return (
+    <ContextMenu x={x} y={y} onClose={onClose} minWidth={210} zIndex={5000} className="" role="menu" ariaLabel={`Actions for ${title}`} testId="library-file-menu" panelStyle={menuPanelStyle}>
+      <div ref={ref} onKeyDown={onKeyDown}>
+        <div style={{ padding: "4px 10px 6px", fontSize: 11, fontWeight: 700, color: "var(--text-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 260 }}>{title}</div>
+        {items.map((it, i) => it.sep
+          ? <div key={`sep${i}`} role="separator" style={{ height: 1, margin: "4px 6px", background: "var(--border-default)" }} />
+          : <MenuItem key={it.id} role="menuitem" data-testid={it.id === "versions" ? "library-version-history" : `file-menu-${it.id}`} onClick={() => onPick(it.id)}
+              style={it.danger ? { color: "var(--danger-text)" } : undefined}>{it.label}</MenuItem>)}
+      </div>
+    </ContextMenu>
+  );
+}
+
 /* Re-file a file: pick a category + discipline (subcategory). A NEW subcategory can be
  * typed, not just chosen. Never auto-guesses. */
 function RefileRow({ value = {}, discipline, choices = null, folderId = null, busy = false, onChange, onFile }) {
@@ -1030,11 +1184,7 @@ function RefileRow({ value = {}, discipline, choices = null, folderId = null, bu
       <input list="dr-disciplines" value={value.discipline ?? discipline ?? ""} placeholder="Discipline…"
         onChange={(e) => onChange({ ...value, discipline: e.target.value, folderId: undefined })} style={{ ...ctl, flex: 1, minWidth: 90 }} title="Subcategory (type a new one if needed)" />
       {choices && choices.length > 0 && (
-        <select value={folderId || ""} onChange={(e) => onChange({ ...value, folderId: e.target.value })} aria-label="Folder to file into" data-testid="library-refile-folder"
-          style={{ ...ctl, flex: "1 1 160px", minWidth: 140, maxWidth: "100%" }} title="The folder this document is filed into">
-          <option value="">Pick a folder…</option>
-          {choices.map((c) => <option key={c.id} value={c.id}>{"\u00A0\u00A0".repeat(c.depth)}{c.name}</option>)}
-        </select>
+        <FolderPicker choices={choices} value={folderId} onChange={(v) => onChange({ ...value, folderId: v })} ariaLabel="Folder to file into" testId="library-refile-folder" ctl={ctl} />
       )}
       <datalist id="dr-disciplines">{DISCIPLINES.map((d) => <option key={d} value={d} />)}</datalist>
       <button onClick={onFile} disabled={busy || (choices && choices.length > 0 && !folderId)} title={busy ? "Filing…" : choices && choices.length > 0 && !folderId ? "Pick a folder first" : "File this document"} style={{ flex: "none", opacity: busy ? 0.6 : 1, fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--accent-library)", background: "var(--accent-library)", color: "var(--on-accent-library)", padding: "3px 11px" }}>{busy ? "Filing…" : "File"}</button>
