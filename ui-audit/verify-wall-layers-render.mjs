@@ -96,7 +96,9 @@ async function judge(tag) {
 
 try {
   const scheme = "light", id = idOf(scheme, "main"); ALL_IDS.push(id);
-  const seeded = { [id]: mkSite(id, siteName(scheme, "main"), { dock: "single", dockAxis: "y", dockSide: "right", rot: 0 }) };
+  // seeded as a pair, exactly like verify-building-panel-v2 (a lone seeded site does not resolve as a project route)
+  const id2 = idOf(scheme, "spare"); ALL_IDS.push(id2);
+  const seeded = { [id]: mkSite(id, siteName(scheme, "main"), { dock: "single", dockAxis: "y", dockSide: "right", rot: 0 }), [id2]: mkSite(id2, siteName(scheme, "spare"), { dock: "single", dockAxis: "x", dockSide: "bottom" }) };
   await page.evaluate(([uid, all]) => { localStorage.setItem("planarfit:sites:cloud:" + uid, JSON.stringify(all)); localStorage.setItem("planarfit:currentSite:v1", Object.keys(all)[0]); }, [UID, seeded]);
   await openScenario(scheme, "main", {});
   const roles = await page.locator('[data-testid="wall-row"]').evaluateAll((n) => n.map((r) => r.getAttribute("data-role")));
