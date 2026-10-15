@@ -1148,7 +1148,18 @@ function MoveRow({ choices, folderId, currentId, busy, onChange, onMove, onCance
  * close) plus roving focus: the first item takes focus, ↑/↓ move, Enter/Space activate (native buttons). */
 function FileRowMenu({ x, y, title, items, onClose, onPick }) {
   const ref = useRef(null);
-  useEffect(() => { const b = ref.current && ref.current.querySelector('[role="menuitem"]'); if (b) b.focus(); }, []);
+  // ContextMenu keeps its panel `visibility:hidden` until it has measured + placed it, and a hidden element cannot take
+  // focus — so focus the first item once the panel is visible (a frame later), not at mount.
+  useEffect(() => {
+    let raf = 0, tries = 0;
+    const go = () => {
+      const b = ref.current && ref.current.querySelector('[role="menuitem"]');
+      if (b) { b.focus(); if (document.activeElement === b) return; }
+      if (tries++ < 20) raf = requestAnimationFrame(go);
+    };
+    raf = requestAnimationFrame(go);
+    return () => cancelAnimationFrame(raf);
+  }, []);
   const onKeyDown = (e) => {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
     e.preventDefault();
