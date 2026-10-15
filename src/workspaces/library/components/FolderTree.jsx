@@ -24,6 +24,7 @@ const TEMPLATE_FOLDER_COUNT = countTemplate(FOLDER_TEMPLATE);
 import { loadIdSet, saveIdSet, pruneSet } from "../../../shared/ui/persistedSet.js";
 import { relTime } from "../../../shared/projects/projectModel.js";
 import ContextMenu from "../../../shared/ui/ContextMenu.jsx";
+import { isFileMoveDrag } from "../lib/fileMove.js";
 
 /* Per-project remembered expansion (B-item: tree opens collapsed, not with every
  * category flung open). One key per project so switching projects can't bleed state. */
@@ -334,12 +335,12 @@ export default function FolderTree({
            * row is STILL the current target (the ref mirror) and only when the pointer
            * really left this row's subtree (child spans can't flicker it). */
           onDragEnter={onFileDrop ? (e) => {
-            if (!hasFilesDrag(e)) return;
+            if (!hasFilesDrag(e) && !isFileMoveDrag(e.dataTransfer)) return; // OS files OR an in-app file row (NEW-1)
             e.preventDefault();
             if (dropTargetRef.current !== node.id) setDropTarget(node.id, displayLabel(node.name));
           } : undefined}
           onDragOver={onFileDrop ? (e) => {
-            if (!hasFilesDrag(e)) return;
+            if (!hasFilesDrag(e) && !isFileMoveDrag(e.dataTransfer)) return;
             e.preventDefault(); e.stopPropagation();
             if (dropTargetRef.current !== node.id) setDropTarget(node.id, displayLabel(node.name));
           } : undefined}
@@ -440,12 +441,12 @@ export default function FolderTree({
           <div
             onClick={() => onSelect?.(null)}
             onDragEnter={onFileDrop ? (e) => {
-              if (!hasFilesDrag(e)) return;
+              if (!hasFilesDrag(e) || isFileMoveDrag(e.dataTransfer)) return; // an in-app file row is refused here (NEW-1)
               e.preventDefault();
               if (dropTargetRef.current !== null) setDropTarget(null, "All files — auto-sort (a folder keeps its own layout)");
             } : undefined}
             onDragOver={onFileDrop ? (e) => {
-              if (!hasFilesDrag(e)) return;
+              if (!hasFilesDrag(e) || isFileMoveDrag(e.dataTransfer)) return;
               e.preventDefault(); e.stopPropagation();
               if (dropTargetRef.current !== null) setDropTarget(null, "All files — auto-sort (a folder keeps its own layout)");
             } : undefined}
