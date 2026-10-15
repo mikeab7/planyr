@@ -42,7 +42,10 @@ import { byCountyKey, countyKeySet, normCountyKey } from "../../../shared/gis/co
  * county geometry. See cityScopes.js's own header for why this is a genuine resolution tier, not a
  * config line: a county whose only real parcel source covers just one city inside it cannot be
  * expressed at county granularity without silently misrouting every OTHER place in that county. */
-import { cityScopeAnswer } from "./cityScopes.js";
+import { cityScopeAnswer, CITY_SCOPE_COUNTIES } from "./cityScopes.js";
+// Re-exported for the admin coverage map: it must reach this data THROUGH counties.js (already in its chunk) — a direct
+// dynamic import of cityScopes.js from the admin chunk becomes its own shared chunk and breaches the Site-route allowlist.
+export { CITY_SCOPE_COUNTIES };
 import { PARCEL_VECTOR_MINZOOM } from "./parcelDisplayZoom.js";
 
 export { loadCountyPolygons, countyPolygonsReady };

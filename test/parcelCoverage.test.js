@@ -4,9 +4,10 @@ import {
   COUNTIES, COUNTIES_MAP, countyKeyForName, statewideKeysForState, isStatewideLayerUrl,
 } from "../src/workspaces/site-planner/lib/counties.js";
 import { setCountyPolygons } from "../src/workspaces/site-planner/lib/countyPolygons.js";
+import { CITY_SCOPE_COUNTIES } from "../src/workspaces/site-planner/lib/cityScopes.js";
 import { COUNTY_VERIFICATION } from "../src/workspaces/site-planner/lib/countiesProvenance.js";
 import {
-  buildCoverage, classifySourceKind, countyDisplayName, totalLine, PUBLISHERS,
+  buildCoverage, classifySourceKind, countyDisplayName, totalLine, countyDetail, openRequestsFor, PUBLISHERS,
 } from "../src/workspaces/admin/lib/parcelCoverage.js";
 import { buildCountyPaths } from "../src/workspaces/admin/lib/countyMapGeometry.js";
 
@@ -14,6 +15,7 @@ const payload = JSON.parse(fs.readFileSync(new URL("../public/geo/county-polygon
 const live = () => ({
   countiesMap: COUNTIES_MAP, counties: COUNTIES, keyForName: countyKeyForName,
   statewideKeysForState, isStatewideUrl: isStatewideLayerUrl, verification: COUNTY_VERIFICATION,
+  cityScopes: CITY_SCOPE_COUNTIES,
 });
 const rowFor = (cov, state, name) => cov.rows.find((r) => r.state === state && r.name === name);
 
@@ -24,17 +26,83 @@ beforeAll(async () => {
 });
 
 describe("parcel coverage join (NEW-1)", () => {
-  it("every literal registry key joins exactly one polygon or is listed as not drawn", () => {
+  it("every literal registry key joins exactly one polygon or a city scope places it — nothing is left over", () => {
     const literal = Object.keys(COUNTIES_MAP).filter((k) => !COUNTIES_MAP[k].statewide);
     const joined = new Map();
     for (const r of cov.rows) if (r.wired && r.key && literal.includes(r.key)) joined.set(r.key, (joined.get(r.key) || 0) + 1);
     expect(cov.ambiguous).toEqual([]);
+    const placed = new Set(cov.rows.flatMap((r) => r.cityParcels.map((c) => c.key)));
     for (const k of literal) {
       const n = joined.get(k) || 0;
-      expect(n === 1 || (n === 0 && cov.notDrawn.includes(k)), `${k}: joined ${n}`).toBe(true);
+      expect(n === 1 || (n === 0 && placed.has(k)), `${k}: joined ${n}`).toBe(true);
     }
-    // the only entries with no county outline are city-scoped ones (a city is not a county)
-    for (const k of cov.notDrawn) expect(COUNTIES_MAP[k].cityScoped, k).toBeTruthy();
+    // NEW-3: the four city-level sources used to be listed under the map as "wired entries not drawn"; they now paint
+    expect(cov.unplaced).toEqual([]);
+    expect(cov).not.toHaveProperty("notDrawn");
+  });
+
+  it("NEW-3: every city-scoped registry entry declares the counties it sits in, and each exists in the roster", () => {
+    const cityKeys = Object.keys(COUNTIES_MAP).filter((k) => COUNTIES_MAP[k].cityScoped);
+    expect(CITY_SCOPE_COUNTIES.map((c) => c.key).sort()).toEqual(cityKeys.sort());
+    for (const sc of CITY_SCOPE_COUNTIES) {
+      expect(sc.counties.length, sc.key).toBeGreaterThan(0);
+      for (const name of sc.counties) {
+        expect(payload.counties.some((c) => c.state === sc.state && c.name.replace(/ County$/, "") === name), `${sc.key}: ${name}`).toBe(true);
+      }
+    }
+  });
+
+  it("NEW-3: Detroit, Sioux Falls, Kansas City and Independence render on their counties", () => {
+    const cityKeysOn = (state, name) => rowFor(cov, state, name).cityParcels.map((c) => c.key).sort();
+    expect(cityKeysOn("MI", "Wayne County")).toEqual(["mi_detroit"]);
+    expect(cityKeysOn("SD", "Minnehaha County")).toEqual(["sd_siouxfalls"]);
+    expect(cityKeysOn("MO", "Jackson County")).toEqual(["mo_independence", "mo_kansascity"]);
+    expect(cityKeysOn("MO", "Clay County")).toEqual(["mo_kansascity"]);
+    expect(cityKeysOn("MO", "Platte County")).toEqual(["mo_kansascity"]);
+    // a county with no source of its own but a city one is painted as city-level only — not "wired"
+    for (const [st, nm] of [["MI", "Wayne County"], ["MO", "Jackson County"]]) {
+      expect(rowFor(cov, st, nm)).toMatchObject({ wired: false, cityOnly: true, kind: null });
+      expect(rowFor(cov, st, nm).cityKind).toBeTruthy();
+    }
+    // a county that already has its own source keeps it (Sioux Falls fills a hole in Minnehaha's)
+    expect(rowFor(cov, "SD", "Minnehaha County")).toMatchObject({ wired: true, cityOnly: false, kind: "own" });
+  });
+
+  it("NEW-3: the summary still adds up with city-level counties counted apart", () => {
+    const t = cov.totals;
+    expect(Object.values(t.byKind).reduce((a, b) => a + b, 0)).toBe(t.counties);
+    expect(t.cityOnly).toBe(cov.rows.filter((r) => r.cityOnly).length);
+    expect(t.cityOnly).toBe(2); // Wayne MI, Jackson MO
+    expect(totalLine(t)).toContain("Plus 2 with city-level parcels only");
+    // wiring counts are what they were before the city sources were placed
+    expect(t.counties).toBe(cov.rows.filter((r) => r.wired).length);
+  });
+
+  it("NEW-2: the details card knows everything the registry carries about a county", () => {
+    const live = () => ({ countiesMap: COUNTIES_MAP, counties: COUNTIES, verification: COUNTY_VERIFICATION });
+    const harris = countyDetail(rowFor(cov, "TX", "Harris"), live());
+    expect(harris).toMatchObject({ title: "Harris County, TX", kindWord: "County's own server", wired: true, registryKey: "harris" });
+    expect(harris.layerUrl).toMatch(/^https:\/\//);
+    expect(harris.host).toBeTruthy();
+    expect(harris.fields.map((f) => f[0])).toContain("Parcel ID field");
+    const wayne = countyDetail(rowFor(cov, "MI", "Wayne County"), live());
+    expect(wayne).toMatchObject({ wired: false, kindWord: "City-level parcels only", registryKey: null });
+    expect(wayne.cityParcels[0]).toMatchObject({ cityName: "Detroit", registryKey: "mi_detroit" });
+    expect(wayne.cityParcels[0].layerUrl).toMatch(/Detroit_MP_Parcel/);
+    const dead = countyDetail(cov.rows.find((r) => !r.wired && !r.cityOnly), live());
+    expect(dead).toMatchObject({ wired: false, kindWord: "Not wired", layerUrl: null, cityParcels: [] });
+  });
+
+  it("NEW-2: an open County-requests row is matched to its county by state + name, wired ones are not", () => {
+    const reqs = [
+      { county_key: "tarrant", county_label: "Tarrant County", state: "TX", family: "detention", request_count: 3, wired: false },
+      { county_key: "co_larimer", county_label: "Larimer County", state: "CO", family: "easement", request_count: 1, wired: false },
+      { county_key: "harris", county_label: "Harris County", state: "TX", family: "detention", request_count: 9, wired: true },
+    ];
+    expect(openRequestsFor(rowFor(cov, "TX", "Tarrant"), reqs)).toHaveLength(1);
+    expect(openRequestsFor(rowFor(cov, "CO", "Larimer"), reqs)).toHaveLength(1);
+    expect(openRequestsFor(rowFor(cov, "TX", "Harris"), reqs)).toEqual([]); // wired = not open
+    expect(openRequestsFor(rowFor(cov, "TX", "Tarrant"), undefined)).toEqual([]);
   });
 
   it("Louisiana keys join their parish polygons", () => {
