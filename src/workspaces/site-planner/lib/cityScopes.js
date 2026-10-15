@@ -191,6 +191,7 @@ const CITY_SCOPES = [
     key: "mi_detroit",
     name: "Detroit",
     state: "MI",
+    counties: ["Wayne"],
     bbox: [42.2550, -83.2877, 42.4504, -82.9103], // [minLat, minLng, maxLat, maxLng]
     outer: DETROIT_OUTER,
     holes: [DETROIT_HOLE],
@@ -199,6 +200,7 @@ const CITY_SCOPES = [
     key: "sd_siouxfalls",
     name: "Sioux Falls",
     state: "SD",
+    counties: ["Minnehaha"],
     bbox: [43.4643, -96.8488, 43.6381, -96.5981],
     outer: SIOUXFALLS_OUTER,
     holes: SIOUXFALLS_HOLES,
@@ -210,6 +212,7 @@ const CITY_SCOPES = [
     // part of the resolution test (see this module's own header). The ring test is the same
     // county-agnostic point-in-polygon check as every other scope here.
     state: "MO",
+    counties: ["Jackson", "Clay", "Platte"], // the three whose control points are verified (see header); display metadata only
     bbox: [38.8243, -94.7653, 39.3562, -94.3854],
     outer: KANSASCITY_OUTER,
     holes: KANSASCITY_HOLES,
@@ -218,11 +221,17 @@ const CITY_SCOPES = [
     key: "mo_independence",
     name: "Independence",
     state: "MO",
+    counties: ["Jackson"],
     bbox: [39.0176, -94.4814, 39.1398, -94.2159],
     outer: INDEPENDENCE_OUTER,
     holes: [],
   },
 ];
+
+/* NEW-3 (admin coverage map) — WHICH COUNTIES EACH CITY SOURCE SITS IN, as DISPLAY metadata for the admin coverage map (never part of
+ * the resolution test above, which is county-agnostic). One row per scope: its registry key, the city's name, its
+ * state and the bare county names it lies in. A new scope MUST declare `counties` (test/parcelCoverage.test.js). */
+export const CITY_SCOPE_COUNTIES = CITY_SCOPES.map((s) => ({ key: s.key, name: s.name, state: s.state, counties: s.counties || [] }));
 
 /* The city-scoped keys this module can resolve to — `counties.js` uses this to require every one
  * of them to carry `cityScoped: true` on its `COUNTIES_MAP` entry (test-guarded), rather than
