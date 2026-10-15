@@ -2,13 +2,16 @@
  * used to be clipped dead at a drive junction's own tangent point, so the straight body carried
  * its curb detail and the curb-return fillet carried none, reading as two distinct painted
  * surfaces even though PR 1763 already proved the dissolved pavement is one continuous shape.
- * `insetArcTowardCenter` / `extendInsetTowardSideTangent` / `driveJunctionCurbStripes`
+ * `insetArcTowardCenter` / `returnArcStripe` / `driveJunctionCurbStripes`
  * (siteGeometry.js) continue the stripe around the fillet instead. Pure geometry — asserted here
  * without a browser; the live paint is verified by ui-audit/verify-road-junction-cleanup.mjs's
- * sibling harness. */
+ * sibling harness.
+ *
+ * B1783376 ×3: the continuation used to be lengthened 3 ft along the arc's last CHORD (which tilts half a tessellation step off the straight edge — the jog at
+ * the tangent). It is now a TRUE-CIRCLE arc that starts exactly on the straight stripe's line and is oriented side-road end first. */
 import { describe, it, expect } from "vitest";
 import {
-  insetArcTowardCenter, extendInsetTowardSideTangent, driveJunctionCurbStripes, STRIPE_OVERLAP_FT,
+  insetArcTowardCenter, returnArcStripe, driveJunctionCurbStripes, RETURN_STRIPE_STEP_DEG,
 } from "../src/workspaces/site-planner/lib/siteGeometry.js";
 
 // A clean quarter-circle arc of radius R centred at `c`, swept from `a0` to `a0+da` — the same
@@ -64,39 +67,44 @@ describe("insetArcTowardCenter", () => {
   });
 });
 
-describe("extendInsetTowardSideTangent", () => {
-  it("extends the END of the polyline nearest the side tangent, by STRIPE_OVERLAP_FT, along its own local tangent", () => {
-    const pts = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 20, y: 0 }];
-    const sideTan = { x: 21, y: 0 }; // just past the LAST point
-    const out = extendInsetTowardSideTangent(pts, sideTan);
-    expect(out.length).toBe(4);
-    const tail = out[out.length - 1];
-    expect(tail.x).toBeCloseTo(20 + STRIPE_OVERLAP_FT, 6);
-    expect(tail.y).toBeCloseTo(0, 6);
-    // the original points are untouched, in order
-    expect(out.slice(0, 3)).toEqual(pts);
+describe("returnArcStripe — the face of curb around a return, as the true circle it is", () => {
+  // a fillet in the corner at (10,10): centre (0,0), R 10 — the grass side; the pavement (and the corner) are OUTSIDE the circle
+  const R = 10, c = { x: 0, y: 0 }, corner = { x: 10, y: 10 };
+  const fillet = arcOf(c, R, 0, Math.PI / 2, 15);   // 6° chords, as rayFillet tessellates
+  const heading = (a, b) => Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI;
+  it("sits a curb-width OUTSIDE the circle (on the pavement side) at every point, and starts/ends radially off the arc's own tangent points", () => {
+    const s = returnArcStripe(fillet, corner, 0.5);
+    for (const p of s) expect(Math.hypot(p.x - c.x, p.y - c.y)).toBeCloseTo(R + 0.5, 9);
+    expect(s[0].x).toBeCloseTo(R + 0.5, 9); expect(s[0].y).toBeCloseTo(0, 9);                       // the tangent point (10,0), pushed straight off the straight edge x = 10
+    expect(s[s.length - 1].x).toBeCloseTo(0, 9); expect(s[s.length - 1].y).toBeCloseTo(R + 0.5, 9);
   });
-
-  it("extends the START of the polyline when the side tangent is nearer the first point", () => {
-    const pts = [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 20, y: 0 }];
-    const sideTan = { x: -1, y: 0 }; // just before the FIRST point
-    const out = extendInsetTowardSideTangent(pts, sideTan);
-    expect(out.length).toBe(4);
-    const head = out[0];
-    expect(head.x).toBeCloseTo(0 - STRIPE_OVERLAP_FT, 6);
-    expect(head.y).toBeCloseTo(0, 6);
-    expect(out.slice(1)).toEqual(pts);
+  it("is tessellated finely enough that its END chords sit within a degree of the straight edges' headings", () => {
+    const s = returnArcStripe(fillet, corner, 0.5);
+    expect(RETURN_STRIPE_STEP_DEG).toBeLessThanOrEqual(2);
+    // the straight edge at the first end runs along +y at x = 10.5 (heading 90°); the first chord is half a step off it
+    expect(Math.abs(heading(s[0], s[1]) - 90)).toBeLessThanOrEqual(RETURN_STRIPE_STEP_DEG / 2 + 1e-6);
+    expect(Math.abs(heading(s[0], s[1]) - 90)).toBeLessThan(1);
+    // the old stripe (the 6° tessellation, offset) was 3° off at the same place
+    const old = insetArcTowardCenter(fillet, 0.5);
+    expect(Math.abs(heading(old[0], old[1]) - heading({ x: 0, y: 0 }, { x: 0, y: 1 }))).toBeGreaterThan(1);
   });
-
-  it("is a no-op when given no side tangent or too short a polyline", () => {
-    const pts = [{ x: 0, y: 0 }, { x: 10, y: 0 }];
-    expect(extendInsetTowardSideTangent(pts, null)).toBe(pts);
-    expect(extendInsetTowardSideTangent([{ x: 0, y: 0 }], { x: 1, y: 1 })).toEqual([{ x: 0, y: 0 }]);
+  it("keeps the arc's own direction and handles either winding", () => {
+    const fwd = returnArcStripe(fillet, corner, 0.5), rev = returnArcStripe(fillet.slice().reverse(), corner, 0.5);
+    expect(rev[0].x).toBeCloseTo(fwd[fwd.length - 1].x, 9); expect(rev[0].y).toBeCloseTo(fwd[fwd.length - 1].y, 9);
+    for (const p of rev) expect(Math.hypot(p.x - c.x, p.y - c.y)).toBeCloseTo(R + 0.5, 9);
+  });
+  it("falls back to the chord offset when the points are not a circle, and returns null for no corner / degenerate input", () => {
+    const wobble = fillet.map((p, i) => (i === 7 ? { x: p.x + 0.4, y: p.y } : p));
+    const s = returnArcStripe(wobble, corner, 0.5);
+    expect(s && s.length).toBe(wobble.length);                  // chord offset: one point per input point
+    expect(returnArcStripe(fillet, null, 0.5)).toBeNull();
+    expect(returnArcStripe([c], corner, 0.5)).toBeNull();
+    expect(returnArcStripe(fillet, corner, 0)).toBeNull();
   });
 });
 
 describe("driveJunctionCurbStripes — the render-layer entry point", () => {
-  it("produces one continuation polyline per fillet arc, each overlapping its own side tangent", () => {
+  it("produces one polyline per fillet arc, each ORIENTED side-road end first and with NO overlap lengthening", () => {
     const c1 = { x: 0, y: 0 }, R1 = 20;
     const c2 = { x: 100, y: 0 }, R2 = 20;
     const arcA = arcOf(c1, R1, Math.PI, Math.PI * 1.5);
@@ -105,22 +113,26 @@ describe("driveJunctionCurbStripes — the render-layer entry point", () => {
       sideId: "roadA",
       geom: {
         returns: [arcA, arcB],
-        // sideTangents nearest each arc's OWN last point, as teeGeometry's own convention pairs them
-        sideTangents: [arcA[arcA.length - 1], arcB[arcB.length - 1]],
+        corners: [{ x: -20, y: -20 }, { x: 120, y: -20 }],
+        // the side tangent of arcA is its FIRST point, arcB's its LAST — so the builder must flip arcA to put the side end first
+        sideTangents: [arcA[0], arcB[arcB.length - 1]],
       },
     };
     const out = driveJunctionCurbStripes([dj], 0.5);
     expect(out.length).toBe(2);
-    for (const line of out) {
+    out.forEach((line, k) => {
       expect(line.length).toBeGreaterThanOrEqual(2);
-    }
+      const st = dj.geom.sideTangents[k];
+      expect(Math.hypot(line[0].x - st.x, line[0].y - st.y)).toBeCloseTo(0.5, 6);                    // a curb-width off the side tangent, radially
+      expect(Math.hypot(line[line.length - 1].x - st.x, line[line.length - 1].y - st.y)).toBeGreaterThan(5);
+    });
   });
 
   it("returns nothing for an empty junction list, or a non-positive curb width", () => {
     expect(driveJunctionCurbStripes([], 0.5)).toEqual([]);
     expect(driveJunctionCurbStripes(undefined, 0.5)).toEqual([]);
     const arc = arcOf({ x: 0, y: 0 }, 10, 0, 1);
-    const dj = { sideId: "r", geom: { returns: [arc], sideTangents: [arc[arc.length - 1]] } };
+    const dj = { sideId: "r", geom: { returns: [arc], corners: [{ x: 10, y: 10 }], sideTangents: [arc[arc.length - 1]] } };
     expect(driveJunctionCurbStripes([dj], 0)).toEqual([]);
   });
 });

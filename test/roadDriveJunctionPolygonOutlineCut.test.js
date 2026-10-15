@@ -172,7 +172,7 @@ describe("B1613152 — the polygon render branch wires the cut in (source guard,
     expect(i, "polygon element branch not found — has it moved or been reverted?").toBeGreaterThan(-1);
     const block = src.slice(i, i + 1400);
     expect(block).toMatch(/const outlineCut = roadNet && roadNet\.outlineCuts \? roadNet\.outlineCuts\.get\(el\.id\) : null;/);
-    expect(block).toMatch(/polygonOutlineCutSegments\(el, outlineCut\)/);
+    expect(block).toMatch(/polygonOutlineCutSegments\(el, outlineCut, roadNet\.mouths && roadNet\.mouths\.get\(el\.id\)\)/);
   });
 
   it("the polygon's own full-path stroke is suppressed exactly when a cut is active (never drawn twice)", () => {

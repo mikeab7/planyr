@@ -356,7 +356,8 @@ import { classifyWseSource, classifyVerified } from "./lib/provenance.js";
 import { formatAge } from "./lib/gisCache.js";
 import { buildingNumbers, buildingNumberHolder, renumberBuilding, isBuilding, roadTravelWidth, bondedChildRot, roadStripBBox, rectRoadEndpoints, parcelOutline, parcelDisplayInfo, parcelSplitNames, lineageConflicts } from "./lib/siteModel.js";
 import { roadCenterline, projectToRoadCenterline, roadMinRadius, insertRoadVertex, removeRoadVertex, canRemoveRoadVertex, curbStrokePx, findRoadConnect, planRoadConnect, fixRoadRadii, teeGeometry, rectEdges, nearestRectEdge, rectContainsPoint, polygonEdges, polygonContainsPoint, roadRadiusConflicts, fitRoadCorners, cardinalTeePoint, roadBearingDeg, roadEdgeCrossing } from "./lib/roadGeometry.js";
-import { regionPathD, polylinesPathD, rectOutlineCutSegments, polygonOutlineCutSegments } from "./lib/roadNetwork.js";
+import { regionPathD, polylinesPathD, rectOutlineCutSegments, polygonOutlineCutSegments, rectBandOutlineCutPolylines, curbBandPieces } from "./lib/roadNetwork.js";
+import { splitEdgeByOwner } from "./lib/roadDeco.js";
 import { driveJunctionsOf, teeJunctionsOf } from "./lib/roadJunctions.js";
 import { roadNetSteps, driveSteps, weldJunctionsOf, warmRoadNetFromEls } from "./lib/roadNetBuild.js";
 import {
@@ -23275,6 +23276,22 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     /* the body is lib/roadNetBuild.js `roadNetSteps` (round 5, B2233521) — the SAME steps the plan-open warm-up drives in slices; hidden roads are filtered THERE (`elHidden(hiddenGroups, x)`) */
     return driveSteps(roadNetSteps({ els, settings, hiddenGroups, teeJunctions, driveJunctions, weldJunctions, sharpFor, roadJunctionVerts, roundabouts }));
   }, [els, settings, teeJunctions, driveJunctions, weldJunctions, sharpFor, roadJunctionVerts, roundabouts, hiddenGroups]);
+  /* NEW-1 (B1783376 ×3) — the cluster's OUTLINE is one path in the WIDEST road's style, but each road's face-of-curb stripes are drawn in that road's OWN (this
+   * file's stripe pass), so a drive narrower than — or styled differently from — the trunk it joins had its arc outline and its arc stripe in two different weights /
+   * colours: the owner's "the right-hand arc is crisper/heavier than the straight edge". When the roads of a cluster do not all share one edge style, each piece of the
+   * outline is stroked in the style of the road that OWNS it (`splitEdgeByOwner`); when they do, nothing changes (one path). Model + settings only — never the view
+   * (VIEW-INDEPENDENT-ONCE) — so a pan or a zoom does not re-split. Per region: `null`, or the owning roads' `{ id, el, st, lines }`. */
+  const roadEdgeOwners = useMemo(
+    () => roadNet.regions.map(({ styleEl, edge, members, ownerRings }) => {
+      if (!styleEl || !edge || !ownerRings) return null;
+      const edgeKey = (el) => { const s = elStyle(el, settings); return `${s.stroke}|${s.strokeOpacity}|${s.strokeWidthSet ?? ""}|${roadCurbWidth(el)}`; };
+      if (!(members || []).some((m) => edgeKey(m) !== edgeKey(styleEl))) return null;
+      const memberById = new Map((members || []).map((m) => [m.id, m]));
+      const byOwner = splitEdgeByOwner(edge, ownerRings);
+      return byOwner.size ? [...byOwner].map(([id, lines]) => { const el = memberById.get(id) || styleEl; return { id, el, st: elStyle(el, settings), lines }; }) : null;
+    }),
+    [roadNet, settings],
+  );
   /* VIEW-INDEPENDENT-ONCE (NEW-2). The dissolved network's SVG path data and per-cluster style were
      built inside the render's `roadNet.regions.map(…)`, so a 60-move pan rebuilt them 187 times —
      561 `regionPathD` calls and 37 ms on the reference plan, the second-ranked violation the
@@ -23283,14 +23300,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
      re-deriving it. Keyed on `f2p` rather than `view`: the paths ARE in pixels, and `f2p`'s
      identity is exactly "the view a coordinate is baked at", which is what they depend on. */
   const roadRegionPaths = useMemo(
-    () => roadNet.regions.map(({ region, styleEl, ids, edge }) => ({
+    () => roadNet.regions.map(({ region, styleEl, ids, edge }, ri) => ({
       ids,
       d: regionPathD(region, f2p),
       edgeD: edge ? polylinesPathD(edge, f2p) : null,
+      edges: roadEdgeOwners[ri] ? roadEdgeOwners[ri].map((o) => ({ id: o.id, el: o.el, st: o.st, d: polylinesPathD(o.lines, f2p) })).filter((e) => e.d) : null,
       st: styleEl ? elStyle(styleEl, settings) : typeStyle("road", settings),
       ppf: f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x,
     })),
-    [roadNet, f2p, settings],
+    [roadNet, roadEdgeOwners, f2p, settings],
   );
   /* B1788912 (NEW-1) — the road-network composite's own JSX, factored out of the old fixed
      `road-network-layer` block so each cluster can take its place in `elPaintItems`'s unified
@@ -23308,9 +23326,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       <g key={`rn${i}-${r.ids[0]}`} data-road-cluster={r.ids.join(",")} pointerEvents="none">
         <path data-testid="road-network-surface" data-export="road-network" d={r.d} fillRule="evenodd"
           fill={r.st.fill} fillOpacity={r.st.fillOpacity ?? 1} stroke="none" />
-        <path data-testid="road-network-edge" d={r.edgeD || r.d} fillRule="evenodd" fill="none"
-          stroke={r.st.stroke} strokeOpacity={r.st.strokeOpacity} strokeWidth={r.st.strokeWidthSet ?? curbStrokePx(roadCurbWidth(styleEl || {}), r.ppf, CURB_STROKE_MIN_PX * labelK)}
-          strokeLinejoin="round" />
+        {r.edges ? r.edges.map((e) => (
+          <path key={`edge-${e.id}`} data-testid="road-network-edge" data-edge-road={e.id} d={e.d} fillRule="evenodd" fill="none"
+            stroke={e.st.stroke} strokeOpacity={e.st.strokeOpacity} strokeWidth={e.st.strokeWidthSet ?? curbStrokePx(roadCurbWidth(e.el || {}), r.ppf, CURB_STROKE_MIN_PX * labelK)}
+            strokeLinejoin="round" />
+        )) : (
+          <path data-testid="road-network-edge" data-edge-road={styleEl ? styleEl.id : undefined} d={r.edgeD || r.d} fillRule="evenodd" fill="none"
+            stroke={r.st.stroke} strokeOpacity={r.st.strokeOpacity} strokeWidth={r.st.strokeWidthSet ?? curbStrokePx(roadCurbWidth(styleEl || {}), r.ppf, CURB_STROKE_MIN_PX * labelK)}
+            strokeLinejoin="round" />
+        )}
         {/* NEW-5 — the CENTRAL ISLAND: a real hole in the dissolved region, not a disc drawn on
             top, so the landscaped surface shows THROUGH it — painted with this region's own group. */}
         {islands.map(({ node, geom }, gi) => (geom.island ? (
@@ -31123,7 +31147,7 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
     // straight edge cutting a bevel across the curb-return wedge. See polygonOutlineCutSegments's
     // own header (roadNetwork.js) for why an un-cut polygon edge reads as a truncated arc.
     const outlineCut = roadNet && roadNet.outlineCuts ? roadNet.outlineCuts.get(el.id) : null;
-    const outlineCutSegs = outlineCut ? polygonOutlineCutSegments(el, outlineCut) : null;
+    const outlineCutSegs = outlineCut ? polygonOutlineCutSegments(el, outlineCut, roadNet.mouths && roadNet.mouths.get(el.id)) : null;
     // B157: in expansion mode paint the two zones with distinct fills — the whole (expanded)
     // shape in the "added" tint, then the existing basin painted on top. The existing basin
     // keeps the cartographic water gradient by default (a normal pond looks unchanged); the
@@ -31493,7 +31517,7 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
     // lines projecting out over bare aerial, and — because outlineCut also blanks the plain rect's own
     // stroke above — the field's real edge missing entirely. Same counter-rotate the pond baseline
     // ghost and the stage contours already apply for exactly this reason.
-    const segs = rectOutlineCutSegments(el, outlineCut);
+    const segs = rectOutlineCutSegments(el, outlineCut, roadNet.mouths && roadNet.mouths.get(el.id));
     if (segs.length) parts.push(
       <g key="olcut" transform={`rotate(${-(el.rot || 0)} ${c.x} ${c.y})`} data-testid="rect-outline-cut" data-el-id={el.id}>
         {segs.map((seg, i) => (
@@ -31519,13 +31543,28 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
    * why an SVG <pattern> was tried first and MEASURED as a real (if small) visible shift, and
    * why the gate is on the LABEL frame (px / lfK) so an export decides at the sheet's scale
    * rather than at whatever zoom the canvas happened to be sitting at. */
+  /* NEW-1 (B1783376 ×3) — a stall-row band's outline rect starts exactly at the field's FACE, so on a field a drive tees into the row nearest the entrance drew its
+   * top edge straight across the drive's mouth. When this field's outline is interrupted (`outlineCut`), each band's outline is interrupted the same way (the pieces
+   * are world feet with the rotation baked in, so the group counter-rotates exactly like `rect-outline-cut`); otherwise it is the plain rect, byte for byte. */
+  const bandOutline = (key, band, plain) => {
+    if (!outlineCut) return plain;
+    const chains = rectBandOutlineCutPolylines(el, band, outlineCut, roadNet.mouths && roadNet.mouths.get(el.id));
+    return (
+      <g key={`${key}cut`} transform={`rotate(${-(el.rot || 0)} ${c.x} ${c.y})`} data-testid="band-outline-cut" data-el-id={el.id}>
+        {chains.map((ch, k) => (
+          <polyline key={k} points={ch.map((q) => { const sp = f2p(q); return `${sp.x},${sp.y}`; }).join(" ")} fill="none" stroke={st.stroke} strokeWidth={0.75} strokeLinecap="butt" pointerEvents="none" />
+        ))}
+      </g>
+    );
+  };
   if (el.type === "parking") {
     const cs = carStalls(el.w, el.h, cfgOf(el));
     const collapse = !stallStripesExplicit(cs.pitch * ppf, lfK);
     const segs = [];
     cs.bands.forEach((b, i) => {
       const bandW = b.n * b.pitch;
-      parts.push(<rect key={`b${i}`} x={tl.x} y={tl.y + b.y * ppf} width={bandW * ppf} height={b.depth * ppf} fill="none" stroke={st.stroke} strokeWidth={0.75} />);
+      parts.push(bandOutline(`b${i}`, { x: 0, y: b.y, w: bandW, h: b.depth },
+        <rect key={`b${i}`} x={tl.x} y={tl.y + b.y * ppf} width={bandW * ppf} height={b.depth * ppf} fill="none" stroke={st.stroke} strokeWidth={0.75} />));
       const lean = b.dir * b.slantDx; // angled stalls lean toward their aisle
       for (let k = 1; k < b.n; k++) {
         const x = tl.x + k * b.pitch * ppf;
@@ -31544,7 +31583,8 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
     const segs = [];
     ts.bands.forEach((b, i) => {
       const bandW = b.n * ts.tw;
-      parts.push(<rect key={`tb${i}`} x={tl.x} y={tl.y + b.y * ppf} width={bandW * ppf} height={b.depth * ppf} fill="none" stroke={st.stroke} strokeWidth={0.75} />);
+      parts.push(bandOutline(`tb${i}`, { x: 0, y: b.y, w: bandW, h: b.depth },
+        <rect key={`tb${i}`} x={tl.x} y={tl.y + b.y * ppf} width={bandW * ppf} height={b.depth * ppf} fill="none" stroke={st.stroke} strokeWidth={0.75} />));
       for (let k = 1; k < b.n; k++) {
         const x = tl.x + k * ts.tw * ppf;
         const seg = [x, tl.y + b.y * ppf, x, tl.y + (b.y + b.depth) * ppf];
@@ -31564,7 +31604,16 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
     const x = e.axis === "x" ? (e.sign > 0 ? tl.x + w : tl.x - cpx) : tl.x;
     const y = e.axis === "y" ? (e.sign > 0 ? tl.y + h : tl.y - cpx) : tl.y;
     const bw = e.axis === "x" ? cpx : w, bh = e.axis === "y" ? cpx : h;
-    parts.push(<rect key={`curb${i}`} x={x} y={y} width={bw} height={bh} fill="#aeb4bd" fillOpacity={0.9} stroke={st.stroke} strokeWidth={0.6} />);
+    // NEW-1 (B1783376 ×3) — a drive's mouth is a CURB CUT: the band is interrupted where the drive meets the field (otherwise its stroke ruled a line across the mouth)
+    const mouths = outlineCut && roadNet.mouths ? roadNet.mouths.get(el.id) : null;
+    if (!mouths || !mouths.length) {
+      parts.push(<rect key={`curb${i}`} x={x} y={y} width={bw} height={bh} fill="#aeb4bd" fillOpacity={0.9} stroke={st.stroke} strokeWidth={0.6} />);
+      return;
+    }
+    curbBandPieces(el, mouths, e.axis, e.sign).forEach(([a, b], k) => {
+      const px = e.axis === "y" ? { x: x + a * ppf, width: (b - a) * ppf } : { x, width: bw }, py = e.axis === "x" ? { y: y + a * ppf, height: (b - a) * ppf } : { y, height: bh };
+      parts.push(<rect key={`curb${i}p${k}`} data-testid="curb-band-piece" {...px} {...py} fill="#aeb4bd" fillOpacity={0.9} stroke={st.stroke} strokeWidth={0.6} />);
+    });
   });
   if (el.type === "building" && (settings.showDocks || settings.showGrid)) {
     // Structural column grid + dock doors (B568/B569). The grid is built in building-LOCAL

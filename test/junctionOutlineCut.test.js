@@ -139,7 +139,7 @@ describe("the outline-cut group counter-rotates, so the composed transform is th
   });
 
   it("the outline-cut polylines are wrapped in rotate(-el.rot) — NOT pushed bare into parts", () => {
-    const i = src.indexOf("const segs = rectOutlineCutSegments(el, outlineCut);");
+    const i = src.indexOf("const segs = rectOutlineCutSegments(el, outlineCut, ");   // + the drive mouths (B1783376 ×3)
     expect(i, "rectOutlineCutSegments call site not found — has the outline-cut render moved or been reverted?").toBeGreaterThan(-1);
     const block = src.slice(i, i + 700);
     expect(block).toMatch(/<g key="olcut" transform=\{`rotate\(\$\{-\(el\.rot \|\| 0\)\} \$\{c\.x\} \$\{c\.y\}\)`\}/);
