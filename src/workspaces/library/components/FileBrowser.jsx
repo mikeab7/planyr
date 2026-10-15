@@ -621,7 +621,7 @@ export default function FileBrowser({
     } catch (e) { setDlNotice({ name: label, error: (e && e.message) || "Couldn’t download this file." }); }
   };
   // Delete / undo / restore / delete-forever: ONE implementation, shared with the no-project Home (ReviewTrash.jsx, B2086368).
-  const { pendingDel, setPendingDel, pendingPurge, setPendingPurge, delNotice, setDelNotice, undoDel, setUndoDel, del, undoDelete, restoreRow, purgeRow } =
+  const { pendingPurge, setPendingPurge, delNotice, setDelNotice, undoDel, setUndoDel, del, undoDelete, restoreRow, purgeRow } =
     useReviewTrash({ titleOf: (id) => (reviews.find((x) => x.id === id) || {}).title, refresh: () => refresh() });
   // Share-by-link: outward-facing, so confirm first, then mint a link. driveKey lives on the
   // review's sources (not the file-fact row), so load the record on demand.
@@ -1041,7 +1041,7 @@ export default function FileBrowser({
                     style={{ flex: "none", fontSize: 10.5, fontFamily: "inherit", fontWeight: 600, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--border-default)", background: "var(--surface-page)", color: "var(--text-secondary)", padding: "3px 8px" }}>Place</button>}
                   <button className="file-kebab" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); openFileMenu(f, r.left, r.bottom); }}
                     aria-label={`More actions for ${f.title || f.item || "file"}`} aria-haspopup="menu" data-testid="library-file-kebab" title="More actions"
-                    style={{ flex: "none", border: "none", background: "transparent", cursor: "pointer", color: "var(--text-secondary)", fontSize: 16, fontWeight: 700, lineHeight: 1, padding: "2px 7px", borderRadius: RADIUS.md }}>⋯</button>
+                    style={{ flex: "none", border: "none", background: "transparent", cursor: "pointer", color: "var(--text-secondary)", fontSize: FONT_SIZE.display, fontWeight: 700, lineHeight: 1, padding: "2px 7px", borderRadius: RADIUS.md }}>⋯</button>
                 </div>
                 {/* re-file (re-assign category/subcategory) — inline, never auto-guesses */}
                 {(needs || refileSel[f.id]) && (
