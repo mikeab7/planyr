@@ -394,7 +394,7 @@ import { hasCrop, cropClipShapeScreen, cropEditBlock, normalizeCropShape, recrop
 import { isAerialVisible, withAerialVisible, wantBasemapSrc } from "./lib/aerialVisibility.js";
 import { DOCK_ZONES, MAX_DOCK_ZONES, ZONE_CATALOG, zoneDepthDefaults, catalogDepthDefault, layoutZoneByKind, usableCourtSpan, zoneAlongSpan, anchoredAlongSpan, boxExtentAlong, resizedZoneAlongFit, dockSidesFor, footprintDepth, footprintLength, footprintAxes, strandedZoneIds, pruneStrandedZones, dockAxisOf, healDockAxes, withDockAxis, dockSideCompassLabel } from "./lib/dockZones.js";
 import { wallPickerLayout, wallClickPatch, wallClickTitle, loadingTypeLabel, strandedBumpIds } from "./lib/loadingWalls.js";
-import { wallRowPlan, chipLabel, bumpSummary, addOptions, KIND_NAME, KIND_LABEL, TRAILER_MAX_ROWS, TRAILER_MIN_ROW_DEPTH, clampTrailerRows, trailerSpec, trailerCfg, storedRowDepths, applyZonePatch, trailerPatchRows, trailerPatchRowDepth, trailerPatchAisle, zdAfterRowDepth, bumpEnds, areaWithBumps, STRIP, stripPlan, legendKinds, pieceLabel, pieceTooltip, pieceShowsIcon, wallTotalDepth, planDockPieceRemoval, applyDockPieceRemoval } from "./lib/wallRows.js";
+import { wallRowPlan, chipLabel, bumpSummary, addOptions, KIND_NAME, KIND_LABEL, TRAILER_MAX_ROWS, TRAILER_MIN_ROW_DEPTH, clampTrailerRows, trailerSpec, trailerCfg, storedRowDepths, applyZonePatch, trailerPatchRows, trailerPatchRowDepth, trailerPatchAisle, zdAfterRowDepth, bumpEnds, areaWithBumps, STRIP, stripPlan, legendKinds, pieceLabel, pieceTooltip, pieceShowsIcon, wallTotalDepth, planDockPieceRemoval, applyDockPieceRemoval, planTrailerRowAdd, inheritExtentFields, resolveLayerExtent, layerExtentPatch } from "./lib/wallRows.js";
 import { computeBuildingGrid, resolveGridSettings, placeDockDoors, gridLinesVisible } from "./lib/buildingGrid.js";
 import { convertBuildingToPolygon, dockLineAt, dockEdgeLine, projectOntoLine, frameBBox, translateDockLines, dockSegExtent, clipSegmentToRing } from "./lib/footprintEdit.js";
 import { pondAreaLabelLine, pondAreaDeltaLine } from "./lib/pondLabelText.js";
@@ -11665,6 +11665,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // anchor is measured against (every outward zone anchors against the court's resolved span).
     return { along: fit.along, alongShift: fit.shift, faceAlong: usable, faceShift: shift };
   };
+  // The along-wall frame a dock wall's layers are measured in (wallRows.js extent helpers): the court's resolved span
+  // (what a plain layer tracks), its centre shift, and the whole wall.
+  const wallExtentCtx = (arr, b, side) => { const o = courtBumpOpts(arr, b, side); return { chainAlong: o.along, chainShift: o.alongShift, fullAlong: (side === "top" || side === "bottom") ? b.w : b.h }; };
   /* ---- Generic outward-stack chain (B495). The dock sequence (court → trailer → buffer) plus any
      menu-appended layers (landscape buffer / road) form ONE linked list rooted at the wall, bonded
      by the generic `prevZone` id. `nextInChain` follows `prevZone` first and FALLS BACK to the legacy
@@ -11775,6 +11778,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // The next-zone element (index = present count) for a side, within `arr`.
   const buildNextZone = (arr, b, side) => {
     const n = stackCountIn(arr, b, side);
+    if (dockChainOnSide(arr, b, side).length > n && n > 0) return null;   // repeat trailer rows / appended layers: extend from "Docks & walls", never fork the chain
     if (n === 0 && findHeadIn(arr, b, side)) return null;   // court binned, outer layers stayed: extend from "Docks & walls", not by a second court
     if (n === 0) return makeCourtZone(b, side);
     if (n === 1) { const c = findCourtIn(arr, b, side); return c ? makeTrailerZone(b, c) : null; }
@@ -11822,7 +11826,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
         const chain = dockChainOnSide(a, b, side);
         const outer = chain[chain.length - 1];
         if (!outer || outer.type === "road") return a;          // need a court; nothing behind a road
-        return relayoutSide([...a, makeChainZone(b, side, key, outer)], b, side);
+        return relayoutSide([...a, { ...makeChainZone(b, side, key, outer), ...inheritExtentFields(outer, chain.length === 1, wallExtentCtx(a, b, side)) }], b, side);
       });
       setSel({ kind: "el", id: b.id });
       return;
@@ -20362,7 +20366,8 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (dockSidesOf(b).dockSides.includes(side)) {
       return dockChainOnSide(els, b, side).map((z, i) => {
         const kind = z.truckCourt ? "court" : z.type === "trailer" ? "trailer" : z.type === "road" ? "road" : z.type === "sidewalk" ? "sidewalk" : "buffer";
-        const base = { id: z.id, ids: [z.id], kind, index: i, fill: elStyle(z, settings).fill, depth: Math.round(kind === "road" ? (z.travelW ?? Math.max(1, zoneDepthOf(z, b, side, i) - 2 * (+z.curb || CURB))) : zoneDepthOf(z, b, side, i)) };
+        const ext = i > 0 ? (() => { const cx = wallExtentCtx(els, b, side), r = resolveLayerExtent(z, false, cx); return { len: Math.round(r.along), max: Math.round(cx.fullAlong), full: !(z.alongLen > 0), anchor: (Number(z.alongAnchor) === 1 ? 1 : Number(z.alongAnchor) === -1 ? -1 : 0), centred: Math.abs(r.shift - cx.chainShift) < 0.5 }; })() : null;
+        const base = { id: z.id, ids: [z.id], kind, index: i, extent: ext, fill: elStyle(z, settings).fill, depth: Math.round(kind === "road" ? (z.travelW ?? Math.max(1, zoneDepthOf(z, b, side, i) - 2 * (+z.curb || CURB))) : zoneDepthOf(z, b, side, i)) };
         if (kind !== "trailer") return base;
         const sp = trailerSpec(z, settings.trailerAisle);
         return { ...base, rows: sp.rows, aisle: Math.round(sp.aisle), rowDepth: Math.round(sp.rowDepth), rowDepths: sp.rowDepths.map((d) => Math.round(d)), depth: Math.round(sp.total) };
@@ -20446,6 +20451,24 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return;
     }
     setSidewalkWidth(el, nd);       // sidewalk / buffer: grows outward, anything beyond slides with it
+  };
+  // A dock-wall layer's LENGTH / POSITION along the wall (edit box): `{ len }` types a length (the layer keeps the end it
+  // was held from), `{ align }` pins its start / centre / end to the court's span, `{ full: true }` hands it back to
+  // tracking the court. Touches ONLY that layer — its neighbours keep their own extents.
+  const setWallLayerExtent = (b, sides, layer, change) => {
+    if (!sidesAreDock(b, sides) || layer.index < 1) return;
+    pushHistory();
+    setEls((a) => {
+      let next = a;
+      sides.forEach((side) => {
+        const z = dockChainOnSide(next, b, side)[layer.index];
+        if (!z) return;
+        const patch = layerExtentPatch(z, change, wallExtentCtx(next, b, side));
+        next = next.map((x) => (x.id === z.id ? applyZonePatch(x, patch) : x));
+        next = relayoutSide(next, b, side);
+      });
+      return next;
+    });
   };
   // Rows of trailer parking (1–4) on a dock wall. Adding a row copies the last row's depth; removing drops the last.
   const setTrailerRows = (b, sides, layer, rowsRaw) => {
@@ -20546,11 +20569,18 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
           if (!court || outer.type === "road") return;
           if (key === "trailer") {
             if (!court.truckCourt) return;               // trailer parking opens off a truck court
-            if (chain.some((z) => z.type === "trailer")) return;
-            const tz = makeTrailerZone(b, court);
-            // The layers that followed the court now follow the trailer: court → trailer → …
-            next = [...next.map((x) => (x.prevZone === court.id ? { ...x, prevZone: tz.id } : x)), tz];
-          } else next = [...next, makeChainZone(b, side, key, outer)];
+            if (!chain.some((z) => z.type === "trailer")) {
+              const tz = makeTrailerZone(b, court);
+              // The layers that followed the court now follow the trailer: court → trailer → …
+              next = [...next.map((x) => (x.prevZone === court.id ? { ...x, prevZone: tz.id } : x)), tz];
+            } else {
+              // A second (third…) row of trailer parking: its own piece at the outer end, at the standard trailer depth,
+              // running the length / position of the layer just inboard of it (planTrailerRowAdd). Each row keeps its own.
+              const add = planTrailerRowAdd(chain, { standardDepth: zoneDepthDefaults(settings)[1], trailerW: settings.trailerW || OPP_TRAILER_W, side, ctx: wallExtentCtx(next, b, side) });
+              if (!add) return;
+              next = [...next, baseZone(b, add.fields)];
+            }
+          } else next = [...next, { ...makeChainZone(b, side, key, outer), ...inheritExtentFields(outer, chain.length === 1, wallExtentCtx(next, b, side)) }];
         }
         next = relayoutSide(next, b, side);
       });
@@ -27854,6 +27884,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                     const wallOps = {
                       footEdit: !!b.footEdit,
                       depth: (row, layer, n) => setWallLayerDepth(b, row.sides, layer, n),
+                      extent: (row, layer, change) => setWallLayerExtent(b, row.sides, layer, change),
                       trailerRows: (row, layer, n) => setTrailerRows(b, row.sides, layer, n),
                       trailerRowDepth: (row, layer, i, n) => setTrailerRowDepth(b, row.sides, layer, i, n),
                       trailerAisle: (row, layer, n) => setTrailerAisle(b, row.sides, layer, n),
@@ -32345,10 +32376,26 @@ function WallRows({ rows, ops, numInput: _numInput, canEditBumps }) {
     } else {
       body = head(numField("Depth", <NumInput boxed unit="ft" boxWidth={92} ariaLabel="Depth" testid="wall-depth" value={layer.depth} min={1} step={1} coarse={5} onCommit={(n) => ops.depth(row, layer, n)} />));
     }
+    const ex = layer.extent;
+    const alignBtn = (a, label) => (
+      <button key={a} type="button" data-testid={`wall-align-${a < 0 ? "start" : a > 0 ? "end" : "centre"}`} aria-pressed={!ex.full && ex.anchor === a && (a !== 0 || ex.centred)} style={toggleBtn(!ex.full && ex.anchor === a && (a !== 0 || ex.centred))}
+        title={a < 0 ? "Run from the start of the wall" : a > 0 ? "Run from the end of the wall" : "Centre on the wall"} onClick={() => ops.extent(row, layer, { align: a })}>{label}</button>
+    );
+    const extentRow = ex ? (
+      <span data-testid="wall-extent" style={{ display: "flex", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end", columnGap: SPACE.xl, rowGap: SPACE.md }}>
+        {numField("Length", <NumInput boxed unit="ft" boxWidth={92} ariaLabel="Length along the wall" testid="wall-extent-len" value={ex.len} min={1} max={ex.max} step={1} coarse={10} onCommit={(n) => ops.extent(row, layer, { len: n })} />)}
+        <span style={{ display: "inline-flex", alignItems: "center", gap: SPACE.sm }}>
+          <span style={muted}>Align</span>
+          {alignBtn(-1, "Start")}{alignBtn(0, "Centre")}{alignBtn(1, "End")}
+        </span>
+        <button type="button" data-testid="wall-extent-full" style={{ ...link, opacity: ex.full ? 0.5 : 1 }} disabled={ex.full} title="Run the full length of the truck court" onClick={() => ops.extent(row, layer, { full: true })}>Full length</button>
+      </span>
+    ) : null;
     return (
       <div ref={boxRef} data-testid="wall-edit-box" data-kind={layer.kind} style={boxStyle}>
         <span aria-hidden="true" data-testid="wall-edit-caret" style={{ position: "absolute", top: -5, left: caretX - 5, width: 8, height: 8, transform: "rotate(45deg)", background: "var(--surface-field)", borderTop: BORDER_1, borderLeft: BORDER_1 }} />
         {body}
+        {extentRow}
       </div>
     );
   };

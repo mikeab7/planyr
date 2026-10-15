@@ -17,7 +17,7 @@
  * its own row — the two dock walls of a cross-dock building too (NEW-1: the old linked "N·S dock" row and
  * its same/split toggle are gone; a stored `dockStacksLinked` on an old plan is simply ignored).
  * No React, no DOM, no host state. */
-import { dockSidesFor, dockSideCompassLabel, compassLabelForBearing } from "./dockZones.js";
+import { dockSidesFor, dockSideCompassLabel, compassLabelForBearing, anchoredAlongSpan, normalizeAlongAnchor } from "./dockZones.js";
 import { WALLS, OPPOSITE_WALL } from "./loadingWalls.js";
 
 /* ------------------------------------------------------------------ rows */
@@ -165,7 +165,7 @@ export function addOptions(isDock, layers) {
   const out = [];
   if (isDock) {
     if (!kinds.length) return [opt("court")];                   // an empty dock wall starts with its court
-    if (!kinds.includes("trailer")) out.push(opt("trailer"));
+    out.push(opt("trailer"));                                   // trailer rows repeat — a second / third row is always on offer
     out.push(opt("buffer"), opt("sidewalk"), opt("road"));
     return out;
   }
@@ -235,6 +235,56 @@ export function applyDockPieceRemoval(els, plan) {
 }
 
 /* ------------------------------------------------------------------ trailer rows */
+
+/* ---- Along-wall extent of a layer (its LENGTH and POSITION along the wall).
+ * A dock-wall layer outside the court tracks the court's span by default; `alongLen` + `alongAnchor` + `alongOff`
+ * (dockZones.anchoredAlongSpan) let it run shorter / sit elsewhere. These helpers are the one place the panel and the
+ * "+" decide what a layer's extent is, so a NEW layer can inherit it and an edit can change it. `ctx` =
+ * { chainAlong, chainShift, fullAlong }: the court's resolved span (what a plain layer tracks) and the whole wall. */
+
+/** A layer's resolved { along, shift } — exactly what `layoutZoneByKind` will draw. The head (court) IS the chain span. */
+export function resolveLayerExtent(el, isHead, ctx) {
+  if (isHead || !el) return { along: ctx.chainAlong, shift: ctx.chainShift || 0 };
+  return anchoredAlongSpan({ stored: el.alongLen, anchor: el.alongAnchor, off: el.alongOff, chainAlong: ctx.chainAlong, chainShift: ctx.chainShift || 0, fullAlong: ctx.fullAlong });
+}
+/** The extent fields a NEW layer takes from the layer immediately before it (the one it sits outside of): the same
+ *  length AND position along the wall. A previous layer that simply tracks the court (or is the court) hands over
+ *  nothing — the new layer tracks it too, so it keeps following bump-out and building changes. Depth is never copied. */
+export function inheritExtentFields(prev, isHead, ctx) {
+  const r = resolveLayerExtent(prev, isHead, ctx);
+  const sameLen = Math.abs(r.along - ctx.chainAlong) < 0.01, sameAt = Math.abs(r.shift - (ctx.chainShift || 0)) < 0.01;
+  if (sameLen && sameAt) return {};
+  return { alongLen: Math.round(r.along * 100) / 100, alongAnchor: 0, alongOff: Math.round((r.shift - (ctx.chainShift || 0)) * 100) / 100 };
+}
+/** The zone patch (`undefined` drops a key) after editing ONE layer's extent: a typed length keeps the layer's anchor
+ *  (a layer pulled in from one end keeps that end), an align (-1 start · 0 centre · 1 end) pins that end of the court's
+ *  span, and `full` hands the layer back to tracking the court. Only that layer's keys — never a neighbour's. */
+export function layerExtentPatch(el, { len, align, full } = {}, ctx) {
+  const clear = { alongLen: undefined, alongAnchor: undefined, alongOff: undefined };
+  if (full) return clear;
+  const cur = resolveLayerExtent(el, false, ctx);
+  const cap = Math.max(1, Number(ctx.fullAlong) || Number(ctx.chainAlong) || 1);
+  const length = len == null ? cur.along : Math.max(1, Math.min(cap, Math.round(Number(len))));
+  const anchor = align == null ? normalizeAlongAnchor(el && el.alongAnchor) : normalizeAlongAnchor(align);
+  const off = align == null ? (Number(el && el.alongOff) || 0) : 0;
+  if (align == null && Math.abs(length - ctx.chainAlong) < 0.01) return clear;                      // typed the court's own length ⇒ track the court again
+  if (anchor === 0 && Math.abs(off) < 0.01 && Math.abs(length - ctx.chainAlong) < 0.01) return clear;
+  return { alongLen: length, alongAnchor: anchor, alongOff: off };
+}
+
+/** Another trailer row on a dock wall, as the fields of a new chain element — or null when the wall can't take one
+ *  (no truck court at its head, or it ends in a Road, which is terminal). The row is its own piece, bonded to the
+ *  OUTERMOST layer (`prevZone`, like a Walk or Road). Its DEPTH is the standard trailer depth (never copied from a
+ *  neighbour); its LENGTH and POSITION along the wall are the layer immediately before it. No `forCourt` — that bond
+ *  names a court's FIRST trailer parking; a repeat row is found by walking the chain. */
+export function planTrailerRowAdd(chain, { standardDepth, trailerW, side, ctx }) {
+  const c = chain || [];
+  const court = c[0], outer = c[c.length - 1];
+  if (!court || !court.truckCourt || !outer || outer.type === "road") return null;
+  const depth = Math.max(TRAILER_MIN_ROW_DEPTH, roundFt(Number(standardDepth) > 0 ? standardDepth : 50));
+  return { depth, fields: { type: "trailer", prevZone: outer.id, stackSide: side, noFit: true, zd: depth,
+    cfg: { trailerW, trailerL: depth, trailerAisle: 0, single: true }, ...(ctx ? inheritExtentFields(outer, c.length === 1, ctx) : {}) } };
+}
 
 export const TRAILER_MAX_ROWS = 4;
 export const TRAILER_MIN_ROW_DEPTH = 8;
