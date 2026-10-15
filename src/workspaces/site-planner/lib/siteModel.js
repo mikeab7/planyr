@@ -28,7 +28,7 @@
  */
 
 import { dogEarGeom, dogEarSize, isDogEarSide,
-  wallStripBox, wallKidBox, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost,
+  wallStripBox, wallStripBoxFor, isFlushWallLayer, inboardReach, wallKidBox, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost,
   sideOfBondedBox, localToWorld, sidewalkSpanForBumps, sideParkAlongRun, sideParkStack,
   SIDE_PARK_PIN_TOL_FT } from "./dogEar.js";
 import { isBuilding } from "../../../shared/projects/projectModel.js";
@@ -387,7 +387,7 @@ function normalizeWallKids(list, onHeal) {
   // The strip a parking row on `side` of `host` has to clear (first one wins, as on the canvas).
   const stripFor = (host, side) => els.find((x) => {
     const h = hostOf(x);
-    return h && h.id === host.id && WALL_STRIP_TYPES.has(x.type) && sideOf(h, x) === side;
+    return h && h.id === host.id && WALL_STRIP_TYPES.has(x.type) && !isFlushWallLayer(x) && sideOf(h, x) === side;
   });
   const stripDepthFor = (host, side) => {
     const strip = stripFor(host, side);
@@ -425,7 +425,11 @@ function normalizeWallKids(list, onHeal) {
     const depth = isVert ? dimBX : dimBY;
     let box;
     if (WALL_STRIP_TYPES.has(e.type)) {
-      box = wallStripBox(host, side, bumpsOfHost(els, host), depth);
+      // A flush layer (a buffer added through the wall strip) starts where the layers inboard of it end.
+      const inner = isFlushWallLayer(e)
+        ? inboardReach(host, side, els.filter((k) => k !== e && hostOf(k) === host && !isFlushWallLayer(k) && sideOf(host, k) === side))
+        : 0;
+      box = wallStripBoxFor(host, side, bumpsOfHost(els, host), depth, e, inner);
     } else {
       const gap = gapById.has(e.id) ? gapById.get(e.id) : stripDepthFor(host, side);
       const cur = wallKidAlong(host, side, e);            // along-wall position + run kept verbatim
@@ -581,7 +585,7 @@ export function normalizeOrphanWallPads(list, onHeal, { mintId = null } = {}) {
     // Anything ALREADY tagged on this wall is part of the same stack and shares the ordering.
     const tagged = els.filter((x) => x && !x.points && x.sideParkSide === side && !isStackMember(x)
       && x.attachedTo === host.id && finiteBoxEl(x));
-    const strip = els.find((x) => x && !x.points && WALL_STRIP_TYPES.has(x.type) && !isStackMember(x)
+    const strip = els.find((x) => x && !x.points && WALL_STRIP_TYPES.has(x.type) && !isFlushWallLayer(x) && !isStackMember(x)
       && x.attachedTo === host.id && finiteBoxEl(x) && (x.sidewalkSide || sideOfBondedBox(host, x)) === side);
     const stripDepth = strip ? (isVert ? hostAxisExtents(host, strip).dimBX : hostAxisExtents(host, strip).dimBY) : 0;
     const span = sidewalkSpanForBumps(host, side, bumpsOfHost(els, host));
@@ -1057,7 +1061,7 @@ export function normalizeHostRuns(list, onHeal) {
     const res = sideParkAlongRun({ cur, span, stamp: e.sideParkFit || null, pinAllowed: false, tol: HOST_RUN_TOL_FT });
     if (!res.stale) continue;                                     // only the impossible case is healed
     const isVert = side === "left" || side === "right";
-    const strip = els.find((x) => x && !x.points && WALL_STRIP_TYPES.has(x.type) && !isStackMember(x)
+    const strip = els.find((x) => x && !x.points && WALL_STRIP_TYPES.has(x.type) && !isFlushWallLayer(x) && !isStackMember(x)
       && x.attachedTo === host.id && finiteBoxEl(x) && (x.sidewalkSide || sideOfBondedBox(host, x)) === side);
     const stripDepth = strip ? (isVert ? hostAxisExtents(host, strip).dimBX : hostAxisExtents(host, strip).dimBY) : 0;
     // NEW-1 — an exploded field is a STACK on this wall: clear the strip plus everything inboard.

@@ -374,7 +374,7 @@ import {
 } from "./lib/siteGeometry.js";
 import { siteMetrics } from "./lib/siteMetrics.js";
 import { DOGEAR_W, DOGEAR_D, dogEarGeom, dogEarSize, sidewalkSpanForBumps, isDogEarSide,
-  wallStripBox, wallKidBox, wallKidPerp, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost, sideParkAlongRun,
+  wallStripBox, wallStripBoxFor, isFlushWallLayer, inboardReach, wallKidBox, wallKidPerp, wallKidAlong, hostAxisExtents, ownExtents, bumpsOfHost, sideParkAlongRun,
   sideParkStack } from "./lib/dogEar.js";
 import { CURB_TYPES as COST_CURB_TYPES, CURB_TYPE_META, roadCurbType, roadCurbedSides, roadPanWidth, roadQuantities, costRollup } from "./lib/costTakeoff.js";
 import {
@@ -11449,7 +11449,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       const b = el && a.find((x) => x.id === el.attachedTo);
       // NEW-3 — deleting the sidewalk pulls the side parking back FLUSH against the wall (its
       // clearance is derived from whatever strip is actually there, so removing one closes the gap).
-      if (b && b.type === "building" && !b.dogEar) next = relayoutWallKids(relayoutAllSides(next, b), b);
+      if (b && b.type === "building" && !b.dogEar) next = ["top", "bottom", "left", "right"].reduce((acc, sd) => repackFlushBeyond(acc, b, sd), relayoutWallKids(relayoutAllSides(next, b), b));
       return next;
     });
     tombstone([...killed]);
@@ -11477,7 +11477,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     return sideParkStack(b, name, pads, 0).map((r) => r.el);   // one ordering, shared with the refit
   };
   const sideParkingOn = (b, name) => sideParkPadsOn(b, name)[0] || null;
-  const sidewalkOnSide = (b, name) => els.find((x) => isWallStrip(x) && !x.points && x.attachedTo === b.id && sideOfKid(b, x) === name);
+  const sidewalkOnSide = (b, name) => els.find((x) => isWallStrip(x) && !isFlushWallLayer(x) && !x.points && x.attachedTo === b.id && sideOfKid(b, x) === name);
   // Add a 5′ sidewalk flush against a building side, full wall length. If pads
   // (paving/parking) already sit on that side, push them out by the sidewalk's
   // thickness so they stay flush beyond it.
@@ -11489,14 +11489,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const out = outwardUnit(b, name);
     // Side-parking rows are excluded: relayoutWallKids re-derives their distance out from the wall
     // against the just-added strip, so hand-shifting them here would push them out twice (NEW-3).
-    const shift = new Set(els.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && !x.sideParkSide && !isWallStrip(x) && sideOfKid(b, x) === name).map((x) => x.id));
+    const shift = new Set(els.filter((x) => x.attachedTo === b.id && !x.points && !x.dogEar && !x.sideParkSide && (!isWallStrip(x) || isFlushWallLayer(x)) && sideOfKid(b, x) === name).map((x) => x.id));
     if (history) pushHistory();
     setEls((a) => relayoutWallKids([...a.map((x) => shift.has(x.id) ? { ...x, cx: x.cx + out.x * SIDEWALK_W, cy: x.cy + out.y * SIDEWALK_W } : x), sw], b));
     setSel({ kind: "el", id: b.id });
   };
   const addParkingRowSide = (b, name) => {
     if (sideParkingOn(b, name)) return;
-    addBuildingEls([makeParkingRowEl(b, name, 1)], b.id);
+    pushHistory();
+    setEls((a) => repackFlushBeyond(relayoutWallKids([...a, makeParkingRowEl(b, name, 1)], b), b, name));
+    setSel({ kind: "el", id: b.id });
   };
   // The new side-parking field for wall `name`, `rows` stall rows deep (1 = the classic one row +
   // aisle). Pure over the current `els` (the sidewalk already on the wall sets how far out it starts).
@@ -11892,7 +11894,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // Employee / non-dock side build-out (B246): "+" walks sidewalk → first parking row → MORE rows;
   // "−" reverses (rows → remove parking → remove sidewalk). Mirrors the dock stack for the parking
   // side, and brings the sidewalk back into the flow (it was dropped in the B242 redesign).
-  const empSideSidewalk = (b, side) => els.find((x) => x.attachedTo === b.id && isWallStrip(x) && !x.points && sideOfKid(b, x) === side);
+  const empSideSidewalk = (b, side) => els.find((x) => x.attachedTo === b.id && isWallStrip(x) && !isFlushWallLayer(x) && !x.points && sideOfKid(b, x) === side);
   // The pad the ladder acts on: the OUTERMOST one on the wall. With a single un-exploded field
   // that is the field itself (unchanged behaviour); with an exploded set it is the last piece, so
   // "+"/"−" walk the stack outward/inward exactly like the dock-zone LIFO next door.
@@ -12111,7 +12113,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const { cross, dimBX, dimBY } = hostAxisExtents(b, sw);
     const isVert = side === "left" || side === "right";
     const depth = isVert ? dimBX : dimBY;                // thickness: perpendicular to the wall
-    const box = wallStripBox(b, side, bumpsOfHost(arr, b), depth);
+    const box = wallStripBoxFor(b, side, bumpsOfHost(arr, b), depth, sw, isFlushWallLayer(sw) ? inboardReach(b, side, arr.filter((k) => k !== sw && k.attachedTo === b.id && !k.dogEar && !k.noFit && !isFlushWallLayer(k) && (isWallStrip(k) || isSideParkPad(k, b)) && sideOfKid(b, k) === side)) : 0);
     const off = rot2(box.lx, box.ly, b.rot);
     return { ...sw, ...ownExtents(cross, box.dimBX, box.dimBY), cx: b.cx + off.x, cy: b.cy + off.y };
   };
@@ -12153,7 +12155,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     // The strip (if any) each parking row has to clear, keyed by side — resolved from the array
     // being built, so a just-added / just-deleted / just-widened sidewalk is already reflected.
     const stripBySide = {};
-    arr.forEach((x) => { if (ownedWallStrip(x, b)) { const s = swSideOn(sideRef, x); if (!stripBySide[s]) stripBySide[s] = x; } });
+    arr.forEach((x) => { if (ownedWallStrip(x, b) && !isFlushWallLayer(x)) { const s = swSideOn(sideRef, x); if (!stripBySide[s]) stripBySide[s] = x; } });
     /* NEW-1 — a wall's side parking may be an exploded STACK (stall row | drive aisle | stall row),
        so each piece clears the strip PLUS everything stacked inboard of it. One shared derivation
        with the load-time heal (lib/dogEar `sideParkStack`); a single un-exploded field still
@@ -20398,7 +20400,9 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     const flush = (x) => (x.type === "landscape" && !x.sidewalkSide) || x.type === "road";
     let run = (isH ? b.h : b.w) / 2;
     const moves = new Map();
-    kids.slice().sort((a, c) => perp(a) - perp(c)).forEach((x) => {
+    // Derived layers (sidewalk, parking) keep their place; flush layers (buffer, road) pack beyond ALL of them.
+    const byPerp = (a, c) => perp(a) - perp(c);
+    [...kids.filter((x) => !flush(x)).sort(byPerp), ...kids.filter(flush).sort(byPerp)].forEach((x) => {
       const d = depth(x);
       if (flush(x)) {
         const want = run + d / 2, l = local(x);
