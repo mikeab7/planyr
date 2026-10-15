@@ -1132,11 +1132,13 @@ export function createExportSheet(ctx) {
        the PDF as native annotations by exportPDF. Everything else (aerial, GIS, parcels, buildings,
        furniture) stays page content. The preview never passes `annotate`, so it still shows the markups. */
     let annotationSet = null;
+    let annotationsKeptInPage = 0; // NEW-1 — annotations stacked behind page content stay in the picture (see annotationExtract)
     if (annotate) {
       const [{ extractMarkupAnnotations }, { buildAnnotations }] = await Promise.all([import("./annotationExtract.js"), import("./pdfAnnotations.js")]);
       const mctx = document.createElement("canvas").getContext("2d");
       const measureText = (str, font) => { mctx.font = font; return mctx.measureText(str).width; };
-      const { descriptors, patterns } = extractMarkupAnnotations(built.clone, { markups, callouts, measures, f2p, measureText });
+      const { descriptors, patterns, flattened } = extractMarkupAnnotations(built.clone, { markups, callouts, measures, f2p, measureText });
+      annotationsKeptInPage = flattened.length;
       // clone user units → PDF points: the nested <svg> is fitted "meet" into the plan box, then the page
       // unit (page.w units across wIn inches) converts to points; PDF y runs up, so it flips.
       const [vx, vy, vw, vh] = built.clone.getAttribute("viewBox").split(/[\s,]+/).map(parseFloat);
@@ -1164,7 +1166,7 @@ export function createExportSheet(ctx) {
         : "Concept site plan — planning-level estimates, not a survey.",
       pal: { ...PAL, paper: "#ffffff" }, // white sheet — the cream PAL.paper is a screen-only page colour
     });
-    return { sheetSvg, layout, aerialDropped, overlaysDropped, annotationSet };
+    return { sheetSvg, layout, aerialDropped, overlaysDropped, annotationSet, annotationsKeptInPage };
   };
 
   // NEW-1 (2026-10-05) — `flattenMarkups` (the compose screen's "Flatten markups" toggle). TRUE keeps the
@@ -1178,7 +1180,7 @@ export function createExportSheet(ctx) {
     try {
       const composed = await buildComposedSheet(paper, orient, includeOverlay, includeMapLayers, scaleLabelText, preparedBy, includeMetricsBand, pageOverride, includeBuildingsTable, !flattenMarkups);
       if (!composed) { alert("Nothing to export yet — add a parcel or some elements first."); return; }
-      const { sheetSvg, layout, aerialDropped, overlaysDropped, annotationSet } = composed;
+      const { sheetSvg, layout, aerialDropped, overlaysDropped, annotationSet, annotationsKeptInPage = 0 } = composed;
       mark("composed sheet");
       // Rasterize the composed sheet at high DPI. The browser renders the SVG exactly as it
       // appears on screen (fills, filters, the inlined aerial), so the PDF is pixel-faithful.
@@ -1205,6 +1207,11 @@ export function createExportSheet(ctx) {
         if (annotationSet && annotationSet.degraded.length) {
           try { console.debug("[pdf] annotation notes:", annotationSet.degraded); } catch (_) {}
           flashWarn(`⚠ ${annotationSet.degraded.length} markup detail${annotationSet.degraded.length === 1 ? " was" : "s were"} simplified in the editable PDF (it looks the same, but may not edit exactly like a native Bluebeam markup). Turn on “Flatten markups” for an exact picture.`, 9000);
+        }
+        // NEW-1 — LOUD-FAILURE: a markup stacked behind the plan can't be a PDF markup (those always paint over
+        // the page), so it was printed into the picture in its true place. Say so instead of leaving it looking editable.
+        if (annotationsKeptInPage > 0) {
+          flashWarn(`⚠ ${annotationsKeptInPage} markup${annotationsKeptInPage === 1 ? " sits" : "s sit"} behind the plan, so ${annotationsKeptInPage === 1 ? "it was" : "they were"} printed into the page to keep the stacking order (not editable in Bluebeam).`, 9000);
         }
         const aEl = document.createElement("a");
         aEl.href = URL.createObjectURL(new Blob([pdf], { type: "application/pdf" }));
