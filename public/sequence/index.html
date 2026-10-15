@@ -321,7 +321,12 @@ select.ei { cursor: pointer; }
 .pin-edge-r.pin-on::after { left:0;  background:linear-gradient(to right, var(--bd2), transparent); }
 .drow { display: flex; border-bottom: 1px solid var(--bd); border-left: 2px solid transparent;
   position: absolute; left: 0; right: 0; }
-.drow:hover { box-shadow: inset 0 1px 0 #94a3b8, inset 0 -1px 0 #94a3b8; }
+/* NEW-1 (selected/hovered row outline) — the top + bottom line is drawn ON EACH CELL (a ::before inside
+   it), not as a row-level inset shadow: the pinned ID / TASK cells paint an opaque background over the row's
+   own shadow, so the old line started at START and stopped short of the frozen columns. */
+.drow:hover > [data-col-key]::before, .drow[data-row-sel] > [data-col-key]::before {
+  content:""; position:absolute; left:0; right:0; top:0; bottom:0; pointer-events:none; z-index:1;
+  border-top:1px solid #94a3b8; border-bottom:1px solid #94a3b8; }
 /* A full-cell hover-revealed overlay does NOT work here: :hover is true for the ENTIRE mousedown
    (the cursor always enters the row before it can press), so gating pointer-events on :hover still
    swallows every ordinary click on the ID cell — proved live: it silently broke the pre-existing
@@ -13858,9 +13863,11 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
           const isExpandedParent = task.hasChildren && task.isExpanded;
           const rowBg = task.__rvMover ? "#fff8ee" : task.__rvTarget ? "#f3f0ff" : (task.rowColor || (isExpandedParent ? (ri%2?"#f8fafc":"var(--bg)") : (displayHealth==="red"?"#ffdfdf":displayHealth==="yellow"?"#fff7b9":displayHealth==="green"?"#d6fae2":displayHealth==="paused"?"#f3f4f6":ri%2?"#f8fafc":"var(--bg)")));
           return (
-            <div key={task.id} className="drow" data-task-row={task.id}
+            <div key={task.id} className="drow" data-task-row={task.id} data-row-sel={(isFocused && !hasRange) ? "1" : undefined}
               style={{top:ri*ROW_H, height:ROW_H,
-                borderLeft: isFocused ? "2px solid var(--blue)" : (task.__rvTarget ? "2px solid var(--amber)" : "2px solid transparent"),
+                // the selected row's blue accent is drawn on the FIRST cell (it sticks with the pinned columns
+                // at every scroll position) — a border on the row itself scrolls away with the row.
+                borderLeft: task.__rvTarget ? "2px solid var(--amber)" : "2px solid transparent",
                 background: rowBg}}>
               {(task.__rvTarget || task.__rvPending !== undefined) ? <span onMouseDown={task.__rvPending!==undefined ? (e=>{e.stopPropagation(); review && review.pick(task.__rvPending);}) : undefined} title={task.__rvPending!==undefined ? "Review this update" : "Being reviewed"} style={{position:"absolute",left:3,top:"50%",transform:"translateY(-50%)",width:7,height:7,borderRadius:"50%",background:"var(--amber)",boxShadow:"0 0 0 2.5px #eef2ff",zIndex:7,cursor:task.__rvPending!==undefined?"pointer":"default"}}/> : null}
               {task.__rvMover ? <span style={{position:"absolute",right:6,top:"50%",transform:"translateY(-50%)",fontSize:10,fontWeight:600,color:"var(--amber)",background:"#fff3d6",border:"1px solid #f0c98a",padding:"0 5px",borderRadius:9,zIndex:7,pointerEvents:"none"}}>{task.__rvMover>=0?"+":""}{task.__rvMover}d</span> : null}
@@ -13885,7 +13892,7 @@ function GridView({tasks, succMap, updateTask, deleteTask, getTaskName, proj, se
                     color: cfmt?.color || undefined,
                     borderRight: (selected && hasRange) ? GRID_LINE_RANGE : GRID_LINE,
                     borderBottom: (selected && hasRange) ? GRID_LINE_RANGE : GRID_LINE,
-                    boxShadow: selShadow(ri, ci, selected, active),
+                    boxShadow: [selShadow(ri, ci, selected, active), (isFocused && c === orderedCols[0]) ? "inset 2px 0 0 0 var(--blue)" : "none"].filter(x => x !== "none").join(",") || "none",
                     userSelect: isDraggingCells.current ? "none" : "auto",
                     cursor: isDraggingCells.current ? "crosshair" : "default",
                     // NEW-1 — a pinned cell paints its own opaque look (row colour, then any range / cell fill on top)
