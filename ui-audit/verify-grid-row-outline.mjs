@@ -101,15 +101,31 @@ for (const theme of THEMES) {
   if (live) await page.setViewportSize({ width: 1000, height: 800 });
   page.on("dialog", d => d.accept());
   await page.addInitScript(t => { try { localStorage.setItem("planyr:theme", t); } catch {} }, theme);
-  await page.goto(LIVE ? LIVE + "/sequence/" : URL_, { waitUntil: "domcontentloaded", timeout: 60000 });
+  if (live) {
+    // B2285440 — the test account has NO live schedules (the Schedule shows its empty state, which has no header and so
+    // no history/import button). So in LIVE mode the fixture is served to the page by answering the schedule READS
+    // (index + rows) in the browser; every WRITE to those tables is aborted, so nothing is ever stored on the account.
+    const FX_ROW = { id: 1, user_id: "fixture", team_id: null, linked_site_id: null, linked_site_name: null, name: "Grid Lines Fixture", data: fixture.projects[1], rev: 1, deleted_at: null, created_at: "2026-01-01T00:00:00Z", updated_at: "2026-01-01T00:00:00Z" };
+    const FX_IDX = { user_id: "fixture", team_id: null, n_pid: 2, n_tid: { 1: 1000 }, last_active_by_site: {}, settings: {}, migration_flags: { aPid: 1, view: "grid", section: "projects", _v6: true, _v7: true, _v8: true }, rev: 1, rows_authoritative: true };
+    await page.route(/\/rest\/v1\/(schedules|schedule_account_index)(\?|$)/, route => {
+      const req = route.request();
+      if (req.method() !== "GET") return route.abort();
+      const single = /pgrst\.object/.test(req.headers()["accept"] || "");
+      const body = /schedule_account_index/.test(req.url()) ? (single ? FX_IDX : [FX_IDX]) : [FX_ROW];
+      return route.fulfill({ status: 200, contentType: single ? "application/vnd.pgrst.object+json" : "application/json", body: JSON.stringify(body) });
+    });
+  }
+  await page.goto(live ? LIVE + "/sequence/" : URL_, { waitUntil: "domcontentloaded", timeout: 60000 });
   await page.waitForSelector("[data-task-row]", { timeout: 40000 });
   await assertMeasurable(page, "verify-grid-row-outline");
-  await page.locator('[data-testid="open-history-desktop"]').click();
-  await pacedWait(page, 250);
-  await page.setInputFiles('input[type="file"][accept=".json"]', { name: "f.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(fixture)) });
-  await pacedWait(page, 700);
-  await page.locator('[data-testid="history-panel"] button:has-text("Close")').click();
-  await pacedWait(page, 1500);
+  if (!live) {
+    await page.locator('[data-testid="open-history-desktop"]').click();
+    await pacedWait(page, 250);
+    await page.setInputFiles('input[type="file"][accept=".json"]', { name: "f.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(fixture)) });
+    await pacedWait(page, 700);
+    await page.locator('[data-testid="history-panel"] button:has-text("Close")').click();
+    await pacedWait(page, 1500);
+  }
   await page.locator('.hdr-view button:has-text("Grid")').click();
   await pacedWait(page, 600);
   await page.waitForSelector('[data-grid-scroll="1"]');
