@@ -5739,7 +5739,7 @@ const colLabel = c => COL_LABELS[c.k] || c.l || c.k;
 // date cascade.
 const formulaColToColDef = fc => ({ k: fc.k, l: fc.l || "Formula", w: fc.w || 130, e: false, t: "formula", formula: fc.formula || "" });
 const effectiveColsOf = proj => (formulaColsOf(proj).length ? [...COLS, ...formulaColsOf(proj).map(formulaColToColDef)] : COLS);
-const activeEffectiveCols = d => effectiveColsOf(d && d.projects ? d.projects[d.aPid] : null);
+const activeEffectiveCols = d => effectiveColsOf(activeProjectOf(d));
 
 // ── B583 — Formula-engine host glue ───────────────────────────────────────────
 // Bridges the scheduler's task records to the pure engine (window.PlanyrFormula,
@@ -8281,7 +8281,25 @@ function persistViewState(prev, next) {
 // snapshot. editProjId always resets to null (never resurrected). A guard keeps aPid pointing at a
 // REAL project — a stale per-tab id surviving a delete on another device, or an import that swapped
 // in a different project set entirely, falls back to the document's own aPid, then to its first
-// project, so nothing downstream ever reads data.projects[data.aPid] as undefined.
+// project, so nothing downstream ever reads the active project as undefined.
+// B2285440 — THE ONE ACCESSOR for "which schedule is active". The document can legitimately hold no
+// active schedule: an account whose every schedule was deleted (rows soft-deleted, index row still
+// there, stale aPid in the index's view flags), or a per-tab aPid that outlived a delete on another
+// device. ~8 render paths used to read the active project straight off the projects map bare, so ANY such document crashed
+// the view ("This view failed to load"). Everything that needs the active schedule asks these two;
+// they never throw and never write. pickActivePid keeps `preferred` when it is real, else the first
+// real schedule, else null (the caller shows the visible empty state — nothing is created or deleted).
+function pickActivePid(projects, preferred) {
+  if (!projects || typeof projects !== "object") return null;
+  if (preferred != null && projects[preferred]) return preferred;
+  const first = Object.values(projects).find(p => p && typeof p === "object" && p.id != null);
+  return first ? first.id : null;
+}
+function activeProjectOf(d) {
+  if (!d || typeof d !== "object" || !d.projects) return null;
+  const p = d.aPid != null ? d.projects[d.aPid] : null;
+  return p && typeof p === "object" ? p : null;
+}
 function resolveViewState(d) {
   if (!d || typeof d !== "object") return d;
   const tab = loadTabView();
@@ -8290,8 +8308,7 @@ function resolveViewState(d) {
   VIEW_TAB_KEYS.forEach(k => { patch[k] = Object.prototype.hasOwnProperty.call(tab, k) ? tab[k] : d[k]; });
   VIEW_PREF_KEYS.forEach(k => { patch[k] = Object.prototype.hasOwnProperty.call(prefs, k) ? prefs[k] : d[k]; });
   if (d.projects && (patch.aPid == null || !d.projects[patch.aPid])) {
-    const fallback = d.projects[d.aPid] ? d.projects[d.aPid] : Object.values(d.projects)[0];
-    patch.aPid = fallback ? fallback.id : null;
+    patch.aPid = pickActivePid(d.projects, d.aPid);   // B2285440 — null (not a dangling id) when there is no schedule at all
   }
   const tabPatch = {};   VIEW_TAB_KEYS.forEach(k => { tabPatch[k] = patch[k]; });
   const prefsPatch = {}; VIEW_PREF_KEYS.forEach(k => { prefsPatch[k] = patch[k]; });
@@ -10532,6 +10549,15 @@ function App() {
   // picker drives THIS app's projects (Goose Creek, Grand Port, …) — not the Site
   // Planner's. Same-origin, so messages are targeted to window.location.origin.
   const inShell = typeof window !== "undefined" && window.self !== window.top;
+  // B2285440 — a per-tab aPid that points at a schedule that no longer exists (deleted on another device)
+  // is repointed at a real one. aPid is VIEW state (stripped from every save — see stripViewState), so this
+  // is a view move, never a data write. With NO schedule at all there is nothing to point at: the render
+  // below shows the empty state instead.
+  useEffect(() => {
+    if (!data) return;
+    const pid = pickActivePid(data.projects, data.aPid);
+    if (pid != null && pid !== data.aPid) setData(d => (d && d.aPid !== pid) ? { ...d, aPid: pid } : d);
+  }, [data && data.aPid, data && data.projects]);
   const navSigRef = useRef("");
   useEffect(() => {
     if (!inShell || !data) return;
@@ -10844,7 +10870,7 @@ function App() {
     return () => window.removeEventListener("message", onCmd);
   }, [inShell, data, reviewOpen, reviewRows, reviewIdx, saveStatus]);
 
-  const proj = data?.projects[data?.aPid];
+  const proj = activeProjectOf(data);
 
   const flatTasks = useMemo(() => {
     if (!proj) return [];
@@ -11032,6 +11058,16 @@ function App() {
 
   if (!data) return (
     <div style={{height:"100vh",background:"#ffffff",display:"flex",alignItems:"center",justifyContent:"center",color:"#e6a817",fontFamily:"'Inter',system-ui,sans-serif",fontSize:14,letterSpacing:".1em"}}>LOADING...</div>
+  );
+
+  // B2285440 — no active schedule (every schedule deleted, or none yet): a visible, honest empty state,
+  // never a crash. Nothing is written until the person presses the button.
+  if (!proj) return (
+    <div data-schedule-empty="1" style={{height:"100vh",background:"var(--bg)",color:"var(--txt)",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:12,fontFamily:"'Inter',system-ui,sans-serif",textAlign:"center",padding:24}}>
+      <div style={{fontSize:16,fontWeight:700}}>No schedules yet</div>
+      <div style={{fontSize:13,maxWidth:360,lineHeight:1.5}}>This account has no schedule to show. Create one to start planning — nothing has been removed.</div>
+      <button onClick={() => addProject()} style={{cursor:"pointer",fontFamily:"inherit",fontSize:13,fontWeight:600,background:"var(--accent)",color:"var(--on-accent,#fff)",border:"none",borderRadius:6,padding:"8px 16px"}}>New schedule</button>
+    </div>
   );
 
   const setHoverZone = zone => { hoverZoneRef.current = zone; };
@@ -11565,7 +11601,7 @@ function App() {
       {settingsOpen    && <SettingsPanel    data={data} setData={setData} onClose={()=>setSettingsOpen(false)} openFile={openFile} fileLinked={fileLinked} initialSection={settingsSection} onOpenMeetingCalendars={()=>setMeetingCalOpen(true)} />}
       {meetingCalOpen  && <MeetingCalendarsModal
         projName={proj?.name}
-        bodies={(data.projects && data.projects[data.aPid] && data.projects[data.aPid].meetingBodies) || []}
+        bodies={(activeProjectOf(data) || {}).meetingBodies || []}
         otherSchedules={otherScheduleMeetingBodies(data, data.aPid)}
         onChange={next => setData(d => {
           const p = d.projects && d.projects[d.aPid];
@@ -11784,8 +11820,8 @@ function ProjDropdown({data, setData, addProject, setProjCtx, breadcrumb=false})
   }, [open]);
   useEffect(() => { if (editingId !== null) setTimeout(()=>editRef.current?.focus(),0); }, [editingId]);
 
-  const cur = data.projects[data.aPid];
-  const dot = HEALTH[projHealth(cur)].dot;
+  const cur = activeProjectOf(data);
+  const dot = HEALTH[cur ? projHealth(cur) : "gray"].dot;
 
   return (
     <>
@@ -16369,7 +16405,7 @@ function SettingsPanel({data, setData, onClose, openFile, fileLinked, initialSec
               External decision bodies (city council, P&amp;Z, commissioners court) whose approvals only happen on a cadence — stored per project. Edited in their own window.
             </div>
             <button className="btn" onClick={()=>{ onOpenMeetingCalendars && onOpenMeetingCalendars(); onClose(); }} style={{fontSize:11,padding:"5px 11px"}}>
-              {(() => { const n = ((data.projects && data.projects[data.aPid] && data.projects[data.aPid].meetingBodies) || []).length; return n ? `Open Meeting calendars (${n}) ↗` : "Set up Meeting calendars ↗"; })()}
+              {(() => { const n = ((activeProjectOf(data) || {}).meetingBodies || []).length; return n ? `Open Meeting calendars (${n}) ↗` : "Set up Meeting calendars ↗"; })()}
             </button>
           </div>
         )}
