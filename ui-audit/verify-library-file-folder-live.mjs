@@ -5,10 +5,12 @@
  * NOT under Design. Cleans up its own throwaway rows (own rows, RLS) and re-asks the database that none remain.
  * KNOWN-GOOD ARM: the dropped file must really reach Needs filing (else the probe cannot see the thing it tests).
  * Run: E2E_LOGIN_KEY=… node ui-audit/verify-library-file-folder-live.mjs [https://planyr.io]   (key never printed) */
-import { openSignedIn, FIXTURE_SITE_ID } from "./lib/signedInSession.mjs";
+import { openSignedIn } from "./lib/signedInSession.mjs";
+import { LIVE_PREFIX, seedThrowawayPlan, cleanupLive } from "./lib/liveFixtures.mjs";
 import { assertMeasurable } from "./lib/tabTiming.mjs";
 
 const BASE = process.argv[2] || "https://planyr.io";
+const PROJECT = `${LIVE_PREFIX}v1688016-${Date.now().toString(36)}`; // a THROWAWAY project, never the fixture or a real one
 const TOKEN = "zzv1688016" + Date.now().toString(36);
 const pdfBuf = (() => {
   const s1 = `BT /F1 20 Tf 60 700 Td (${TOKEN}) Tj ET`;
@@ -30,25 +32,29 @@ try {
   await assertMeasurable(page, "verify-library-file-folder-live");
   const build = (await page.evaluate(() => fetch("/version.json", { cache: "no-store" }).then((r) => r.json()))).build;
   console.log(`served build: ${build}  account: ${s.proof.email}`);
-  await page.goto(`${BASE}/#/project/${FIXTURE_SITE_ID}/library`, { waitUntil: "load" });
-  await page.waitForSelector('[data-testid="library-unified"], [data-testid="library-root"]', { timeout: 40000 });
-  await settle(page, 3000);
-  await page.waitForSelector('[data-testid="folder-tree"]', { timeout: 40000 });
-  await page.locator('input[type=file]:not([webkitdirectory])').first().setInputFiles({ name: `${TOKEN}.pdf`, mimeType: "application/pdf", buffer: pdfBuf });
+  await seedThrowawayPlan(page, PROJECT);
+  await page.goto(`${BASE}/#/project/${PROJECT}/library`, { waitUntil: "load" });
+  await page.waitForSelector('[data-testid="folder-tree"]', { timeout: 60000 });
+  await settle(page, 2500);
+  if (!(await page.locator('[data-testid="folder-row"]').count())) { // a fresh project has no tree yet: create the standard one, as an owner would
+    await page.getByRole("button", { name: /Create the standard/i }).first().click();
+    await page.waitForSelector('[data-testid="folder-row"]', { timeout: 60000 });
+  }
+  await settle(page, 2500);
+  await page.locator('[data-testid="library-unified"] input[type=file]:not([webkitdirectory])').first().setInputFiles({ name: `${TOKEN}.pdf`, mimeType: "application/pdf", buffer: pdfBuf });
   // KNOWN-GOOD ARM: the tray must show Needs filing for our file
   const tray = page.locator(`text=${TOKEN}.pdf`).first();
   await tray.waitFor({ timeout: 90000 });
-  await page.waitForFunction((t) => /Needs filing/i.test(document.body.innerText) && document.body.innerText.includes(t), TOKEN, { timeout: 90000 }).catch(() => {});
+  await page.waitForFunction((t) => /Needs filing — confirm a discipline/.test(document.body.innerText) && document.body.innerText.includes(t), TOKEN, { timeout: 90000 }).catch(() => {});
   const bodyHas = (re) => page.evaluate((r) => new RegExp(r, "i").test(document.body.innerText), re);
   ok("KNOWN-GOOD ARM: the tray shows 'Needs filing' for the dropped file", await bodyHas("Needs filing — confirm a discipline"));
   const q = await page.evaluate(async (t) => { const r = await window.pfSupabase.from("doc_reviews").select("id").ilike("title", `%${t}%`); return r.data || []; }, TOKEN);
   reviewId = q[0] && q[0].id;
   if (!reviewId) throw new Error("void run — the throwaway never reached doc_reviews");
   // open the Needs filing view
-  const holdBtn = page.getByText(/^Needs filing/).first();
+  const holdBtn = page.locator('button[title^="Files that couldn\'t be confidently classified"]').first();
   await holdBtn.click().catch(() => {});
   await settle(page);
-  const row = page.locator("div", { has: page.locator(`text=${TOKEN}`) }).filter({ has: page.locator('[data-testid="library-refile-folder"]') }).last();
   const picker = page.locator('[data-testid="library-refile-folder"]').first();
   ok("File row has a folder picker", (await picker.count()) === 1);
   const fileBtn = page.getByRole("button", { name: /^File$/ }).first();
@@ -66,10 +72,12 @@ try {
   await page.waitForSelector('[data-testid="folder-tree"]', { timeout: 40000 });
   await settle(page, 3000);
   const rec = await page.evaluate(async (id) => { const r = await window.pfSupabase.from("doc_reviews").select("data").eq("id", id).single(); return r.data && r.data.data; }, reviewId);
-  const rows = await page.evaluate(async (pid) => { const r = await window.pfSupabase.from("project_folders").select("id,name,parent_id").eq("project_id", pid); return r.data || []; }, FIXTURE_SITE_ID);
+  const rows = await page.evaluate(async (pid) => { const r = await window.pfSupabase.from("project_folders").select("id,name,parent_id").eq("project_id", pid); return r.data || []; }, PROJECT);
   const chosen = rows.find((r) => r.id === (rec && rec.folderId));
   ok("record stores the picked folderId (Survey & Legal Descriptions)", !!chosen && /Survey & Legal/.test(chosen.name), chosen ? chosen.name : "no folderId on record");
   const clickRow = async (re) => { await page.locator('[data-testid="folder-row"]').filter({ hasText: re }).first().click(); await settle(page, 1200); };
+  await page.locator('[data-testid="folder-row"]').filter({ hasText: /02\. Land/ }).first().locator('[aria-label="Expand"]').click();
+  await settle(page, 600);
   await clickRow(/Survey & Legal/);
   ok("after reload the file is listed in Land › Survey & Legal Descriptions", await bodyHas(TOKEN));
   await clickRow(/04\. Design/);
@@ -87,6 +95,9 @@ try {
     }, reviewId).catch(() => "unknown");
     ok("cleanup: throwaway review removed (verified)", left === 0, `rows left: ${left}`);
   }
+  const pf = await page.evaluate(async (pid) => { await window.pfSupabase.from("project_folders").delete().eq("project_id", pid); return ((await window.pfSupabase.from("project_folders").select("id").eq("project_id", pid)).data || []).length; }, PROJECT).catch(() => "unknown");
+  const cl = await cleanupLive(page, { planId: PROJECT }).catch((e) => ({ errors: [String(e)], left: {} }));
+  ok("cleanup: throwaway project + its folders removed (verified)", pf === 0 && cl.left.site === 0, `folders left: ${pf}, project left: ${cl.left.site}, errors: ${(cl.errors || []).join("; ") || "none"}`);
   await s.close();
 }
 console.log(failures ? `\n${failures} FAILURE(S)` : "\nALL PASS");
