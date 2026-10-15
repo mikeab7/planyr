@@ -15,13 +15,16 @@ const rec = { id: ID, groupId: ID, site: "ZZ print stacking live", name: "ZZ pri
 
 const s = await openSignedIn({ base });
 const page = s.page;
-let ok = false;
+let ok = false, KEY = null;
 try {
   await assertMeasurable(page, "verify-print-stacking-live");
   const served = await page.evaluate(() => fetch("/version.json").then((r) => r.json()));
   console.log("served build:", JSON.stringify(served), "| harness-reported:", JSON.stringify(s.build));
   await page.evaluate(() => { window.__PLANYR_E2E = true; });
-  await page.evaluate(([id, r]) => { const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); m[id] = r; localStorage.setItem("planarfit:sites:v1", JSON.stringify(m)); localStorage.setItem("planarfit:currentSite:v1", id); }, [ID, rec]);
+  // signed in, the device store is per account: planarfit:sites:cloud:<uid>
+  const uid = await page.evaluate(async () => (await window.pfSupabase.auth.getUser()).data.user.id);
+  KEY = "planarfit:sites:cloud:" + uid;
+  await page.evaluate(([k, id, r]) => { const m = JSON.parse(localStorage.getItem(k) || "{}"); m[id] = r; localStorage.setItem(k, JSON.stringify(m)); localStorage.setItem("planarfit:currentSite:v1", id); }, [KEY, ID, rec]);
   await page.addInitScript(() => { window.__PLANYR_E2E = true; });
   await page.goto(base + "/#/site"); await page.reload();
   const canvas = page.getByTestId("planner-canvas");
@@ -44,8 +47,17 @@ try {
   console.log(ok ? "PASS" : "FAIL");
 } catch (e) { console.error("ERROR", e.message); }
 finally {
-  // always clear the throwaway: local record + (if it was pushed) the cloud row via the app's own client
-  try { await page.evaluate(async (id) => { const m = JSON.parse(localStorage.getItem("planarfit:sites:v1") || "{}"); delete m[id]; localStorage.setItem("planarfit:sites:v1", JSON.stringify(m)); if (window.pfSupabase) { const r = await window.pfSupabase.from("sites").delete().eq("id", id); console.log("cloud delete", JSON.stringify(r.error || "ok")); } }, ID); } catch (e) { console.error("cleanup", e.message); }
+  // always clear the throwaway: the device record, then the cloud row (the server refuses a delete until the row is in the trash)
+  try {
+    const left = await page.evaluate(async ([k, id]) => {
+      if (k) { const m = JSON.parse(localStorage.getItem(k) || "{}"); delete m[id]; localStorage.setItem(k, JSON.stringify(m)); }
+      const sb = window.pfSupabase;
+      await sb.from("sites").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+      await sb.from("sites").delete().eq("id", id);
+      return (await sb.from("sites").select("id").eq("id", id)).data;
+    }, [KEY, ID]);
+    console.log("throwaway cleared:", JSON.stringify(left) === "[]");
+  } catch (e) { console.error("cleanup", e.message); }
   await s.close();
 }
 process.exit(ok ? 0 : 1);
