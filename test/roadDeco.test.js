@@ -12,7 +12,7 @@ import { describe, it, expect } from "vitest";
 import { teeJunctionsOf, driveJunctionsOf } from "../src/workspaces/site-planner/lib/roadJunctions.js";
 import { junctionMouthCuts } from "../src/workspaces/site-planner/lib/roadDeco.js";
 import { roadNetInputs, roadNetSteps, driveSteps } from "../src/workspaces/site-planner/lib/roadNetBuild.js";
-import { insetArcTowardCorner, insetArcTowardCenter, teeJunctionCurbStripes, driveJunctionCurbStripes, extendBothEnds, TEE_STRIPE_OVERLAP_FT } from "../src/workspaces/site-planner/lib/siteGeometry.js";
+import { insetArcTowardCorner, insetArcTowardCenter, teeJunctionCurbStripes, driveJunctionCurbStripes } from "../src/workspaces/site-planner/lib/siteGeometry.js";
 
 const road = (id, pts, w = 34) => ({ id, type: "road", pts, vtx: pts.map(() => ({})), travelW: w, curb: 0.5, roadClass: "local" });
 const P = (x, y) => ({ x, y });
@@ -25,13 +25,20 @@ describe("junctionMouthCuts", () => {
   const tees = teeJunctionsOf(els, {});
   const cuts = junctionMouthCuts({ teeJunctions: tees, driveJunctions: [], byId: new Map(els.map((e) => [e.id, e])) });
 
-  it("cuts the SIDE road at the throat: from the node out to where its returns leave its edges", () => {
-    const [cut] = cuts.side.get("S");
-    const b = bbox(cut);
-    const tangentDist = Math.max(...tees[0].geom.gaps.filter((g) => g.a === 2 || g.b === 2).map((g) => Math.abs((g.a === 2 ? g.tanA : g.tanB).y)));
-    expect(Math.abs(b.y0)).toBeGreaterThanOrEqual(tangentDist - 1e-6);   // reaches the tangent points ...
-    expect(Math.abs(b.y0)).toBeLessThan(tangentDist + 3);                // ... and not a good deal past them
-    expect(b.x0).toBeLessThan(-17.5); expect(b.x1).toBeGreaterThan(17.5);   // wider than the strip, so the difference leaves nothing of it
+  it("cuts the SIDE road's stripes at the throat: ONE half-width bar per return, each ending exactly at ITS OWN tangent", () => {
+    const sides = cuts.side.get("S");
+    expect(sides.length).toBe(2);                                          // one per return — not one bar ending at the farther of the two
+    const tangentDist = tees[0].geom.gaps.filter((g) => g.a === 2 || g.b === 2).map((g) => Math.abs((g.a === 2 ? g.tanA : g.tanB).y));
+    sides.forEach((cut) => {
+      const b = bbox(cut);
+      expect(tangentDist.some((d) => Math.abs(Math.abs(b.y0) - d) < 1e-6), "the bar reaches its own tangent point, no further").toBe(true);
+    });
+    // each bar covers ONE side of the road (its own return's), so it can never cut the other side's stripe
+    expect(sides.map((c) => Math.sign(bbox(c).x0 + bbox(c).x1)).sort()).toEqual([-1, 1]);
+    // the full-width cut the band fills honour is unchanged: wider than the strip both ways, reaching the farther tangent
+    const [whole] = cuts.all.get("S");
+    expect(bbox(whole).x0).toBeLessThan(-17.5); expect(bbox(whole).x1).toBeGreaterThan(17.5);
+    expect(Math.abs(bbox(whole).y0)).toBeGreaterThanOrEqual(Math.max(...tangentDist) - 1e-6);
   });
   it("cuts the THROUGH road across the throat span only, full width", () => {
     const [cut] = cuts.all.get("G");
@@ -88,7 +95,7 @@ describe("the face-of-curb stripe around a return", () => {
     expect(insetArcTowardCorner(circle, null, 0.5)).toBeNull();
     expect(arc.length).toBeGreaterThan(1);
   });
-  it("a tee gives the SIDE road one stripe per return, a curb-width inside the pavement, lengthened along each straight edge", () => {
+  it("a tee gives the SIDE road one stripe per return, a curb-width inside the pavement, oriented side-road end first and starting EXACTLY on the straight stripe", () => {
     const els = [road("G", [P(-300, 0), P(0, 0), P(300, 0)]), road("S", [P(0, -250), P(0, 0)])];
     const tees = teeJunctionsOf(els, {});
     const stripes = teeJunctionCurbStripes(tees, 0.5);
@@ -99,15 +106,18 @@ describe("the face-of-curb stripe around a return", () => {
       const toCorner = (p) => Math.hypot(p.x - g.corner.x, p.y - g.corner.y);
       const arcMid = g.arc[Math.floor(g.arc.length / 2)];
       expect(toCorner(mid)).toBeLessThan(toCorner(arcMid));                 // nearer the corner than the arc itself = inside the pavement
-      // each end is lengthened by TEE_STRIPE_OVERLAP_FT along the straight edge
-      expect(Math.hypot(l[0].x - l[1].x, l[0].y - l[1].y)).toBeCloseTo(TEE_STRIPE_OVERLAP_FT, 3);
-      expect(Math.hypot(l[l.length - 1].x - l[l.length - 2].x, l[l.length - 1].y - l[l.length - 2].y)).toBeCloseTo(TEE_STRIPE_OVERLAP_FT, 3);
+      // no overlap lengthening any more: the first point is the side tangent pushed a curb-width inside the side road's edge (x = ±17.5 → stripe x = ±17)
+      const sideTan = g.a === 2 ? g.tanA : g.tanB;
+      expect(Math.hypot(l[0].x - sideTan.x, l[0].y - sideTan.y)).toBeCloseTo(0.5, 6);
+      expect(Math.abs(l[0].x)).toBeCloseTo(17, 6);
+      // and the far end is the through road's stripe line (y = -17) at the through tangent's own x
+      const thruTan = g.a === 2 ? g.tanB : g.tanA, last = l[l.length - 1];
+      expect(last.y).toBeCloseTo(-17, 6); expect(last.x).toBeCloseTo(thruTan.x, 6);
     }
   });
-  it("a tee with no return (R = 0) or an empty list yields nothing; extendBothEnds is a no-op on a point", () => {
+  it("a tee with no return (R = 0) or an empty list yields nothing", () => {
     expect(teeJunctionCurbStripes([], 0.5)).toEqual([]);
     expect(teeJunctionCurbStripes([{ geom: { gaps: [{ a: 0, b: 2, R: 0, arc: [P(0, 0)], corner: P(0, 0) }] } }], 0.5)).toEqual([]);
-    expect(extendBothEnds([P(0, 0)], 3)).toEqual([P(0, 0)]);
   });
   it("a drive's stripes sit on the pavement side when the junction carries its corners, and keep the old choice when it does not", () => {
     const dj = driveJunctionsOf([pad, road("S", [P(0, -300), P(0, 10)])], {});
