@@ -23360,7 +23360,12 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     if (typeof window === "undefined" || !window.__PLANYR_E2E) return;
     const hook = () => ({
       regions: roadNet.regions.map((r) => ({ ids: r.ids, outer: r.region.outer, holes: r.region.holes })),
-      tees: teeJunctions.map((t) => ({ sideId: t.sideId, throughId: t.throughId, R: t.geom.R, wedges: t.geom.wedges.length, returns: t.geom.returns.map((a) => a.length) })),
+      tees: teeJunctions.map((t) => ({ sideId: t.sideId, throughId: t.throughId, R: t.geom.R, wedges: t.geom.wedges.length, returns: t.geom.returns.map((a) => a.length), cornerR: t.geom.gaps.map((g) => g.R), arcs: t.geom.gaps.map((g) => (g.a === 2 || g.b === 2) && g.R > 0 ? g.arc.map((p) => ({ x: p.x, y: p.y })) : null) })),
+      /* NEW-1/NEW-2 (2026-10-15) — what the junction-paint acceptance reads: where each road's decoration may paint (`deco`, rings in world feet) and the
+         trimmed face-of-curb stripes (`stripes`), against the dissolved `regions` above. */
+      roads: (els || []).filter((e) => isCenterlineRoad(e) && !e.attachedTo).map((e) => ({ id: e.id, pts: e.pts.map((p) => ({ x: p.x, y: p.y })) })),   // AFTER the load-time cleanup — what the geometry is really built from
+      deco: [...(roadNet.decoDomains || [])].map(([id, rings]) => ({ id, rings })),
+      stripes: [...(roadNet.stripes || [])].map(([id, lines]) => ({ id, lines })),
       // B<NEW-1> (2026-09-18) — the fillet's own CORNERS and TANGENT ARCS ride along too, so a live
       // harness can measure whether a curb return SURVIVED the dissolve rather than only that one was
       // requested. Six rounds of this item shipped green because every check read the requested arc
@@ -23369,7 +23374,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       // wedge angle phi stands exactly R/sin(phi/2) - R off its own corner). Read-only, same
       // `window.__PLANYR_E2E` gate as everything else in this hook, never in production.
       drives: driveJunctions.map((d) => ({
-        sideId: d.sideId, targetId: d.targetId, kind: d.kind, R: d.geom.R, wedges: d.geom.wedges.length,
+        sideId: d.sideId, targetId: d.targetId, kind: d.kind, R: d.geom.R, wedges: d.geom.wedges.length, cornerR: (d.geom.returns || []).map(() => d.geom.R),
         corners: d.geom.corners, throughTangents: d.geom.throughTangents, sideTangents: d.geom.sideTangents,
         returns: d.geom.returns.map((a) => a.map((p) => ({ x: p.x, y: p.y }))),
       })),
@@ -31192,6 +31197,14 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
     const ppf = (f2p({ x: 1, y: 0 }).x - f2p({ x: 0, y: 0 }).x);
     const ring = roadStripRing(el, settings, sharpFor(el), roadNet && roadNet.trims ? roadNet.trims.get(el.id) : undefined);
     const dPath = ring.length >= 3 ? ring.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z" : null;
+    /* NEW-1 (2026-10-15) — WHERE THIS ROAD'S DECORATION MAY PAINT. The strip ring is the right bound for the road's own hit target and (outside the
+       network) its own fill, but not for decoration: a tinted band bounded by the strip ends on the strip's straight edge exactly where the untinted curb
+       return begins — a line between the road and the curve. `roadNet.decoDomains` (roadDeco.js) is the strip with the junction throats cut out; a road
+       with no junction has no entry and keeps its plain strip. An EMPTY list means the whole strip is throat: nothing decorative paints. */
+    const decoRings = roadNet && roadNet.decoDomains ? roadNet.decoDomains.get(el.id) : undefined;
+    const decoD = decoRings
+      ? (decoRings.length ? decoRings.map((rg) => rg.map((p, i) => { const q = f2p(p); return `${i ? "L" : "M"}${q.x},${q.y}`; }).join(" ") + "Z").join(" ") : null)
+      : dPath;
     const stroke = st.stroke; // B619: no accent recolor on select — blue vertex handles cue the selection
     const rparts = [];
     // NEW-1/NEW-2 — a road that belongs to the dissolved network (every centerline road does, even a
@@ -31231,7 +31244,7 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
         // by the blue vertex handles (B619), so no on-select weight bump here.
         rparts.push(<path key="edge" d={dPath} fill="none" stroke={stroke} strokeWidth={curbStrokePx(roadCurbWidth(el), ppf, CURB_STROKE_MIN_PX * lfK)} />);
       }
-      if (texFill) rparts.push(<path key="tex" d={dPath} fill={texFill} stroke="none" pointerEvents="none" />);
+      if (texFill && decoD) rparts.push(<path key="tex" d={decoD} fill={texFill} fillRule="evenodd" stroke="none" pointerEvents="none" />);
       // NEW-1/NEW-3 — any road carrying an xsection at all (even the dialog's own single-band
       // wrapper — `xsectionFromRoad`) reaches this block now; a REAL designed section (2+ bands,
       // `hasXSection`) additionally gets band fills + lane markings. Pulling the outer gate back from
@@ -31292,16 +31305,29 @@ function renderElPx(el, f2p, isSel, tool, settings, startMoveEl, onElDouble, nb,
           const laneMarks = bandStripeMarksWithWidth(el.xsection)
             .filter((m) => m.minBandFt * ppf >= XSEC_STRIPE_MIN_PX)
             .map((m, i) => drawSeam(m.atOffset, `xm${i}`, m.style)).filter(Boolean);
-          if (bandFillsIn.length || laneMarks.length) {
+          if (decoD && (bandFillsIn.length || laneMarks.length)) {
             rparts.push(
               <g key="xsec" clipPath={`url(#${clipId})`}>
-                <clipPath id={clipId}><path d={dPath} /></clipPath>
+                <clipPath id={clipId}><path d={decoD} clipRule="evenodd" /></clipPath>
                 {bandFillsIn}
                 {laneMarks}
               </g>,
             );
           }
-          if (bandFillsOut.length) rparts.push(<g key="xsecOut">{bandFillsOut}</g>);
+          /* NEW-1 — an OUTSIDE-curb band (sidewalk / parkway / ditch) is not pavement: it must not paint over the dissolved surface it runs into at a junction
+             (it ran on to the node, over the through road and the curb returns). Clip it to everything EXCEPT its cluster's region. */
+          const outRegion = inNetwork ? roadNet.regions.find((rr) => rr.ids.includes(el.id)) : null;
+          const outRegionD = outRegion ? regionPathD(outRegion.region, f2p) : null;
+          if (bandFillsOut.length) {
+            rparts.push(outRegionD
+              ? (
+                <g key="xsecOut" clipPath={`url(#xsout-${el.id})`}>
+                  <clipPath id={`xsout-${el.id}`}><path d={`M-1000000,-1000000H1000000V1000000H-1000000Z ${outRegionD}`} clipRule="evenodd" /></clipPath>
+                  {bandFillsOut}
+                </g>
+              )
+              : <g key="xsecOut">{bandFillsOut}</g>);
+          }
         }
 
         // NEW-1 (owner report, 2026-08-26 — "id like to designate the ROW to like a 100' row should be

@@ -71,15 +71,40 @@ export const roadTangentNoise = (el) => Math.max(VERTEX_NOISE_FT, (+(el && el.tr
  * of straight arm, the bend began at ~12 ft, and the wedge left a spike of pavement outside the
  * road. The arm's honest straight run ends at the neighbouring corner's arc ENTRY. `sharpAt` are
  * this road's own junction nodes (rendered as hard corners, so they take no tangent). */
+export const STRAIGHT_THROUGH_DEG = 3;   // a vertex that turns the road less than this renders NO corner — the arm runs on through it
+export const SOFT_BEND_DEG = 15;         // a bend up to this is MILD: the arm's HARD run stops at it, its SOFT run (the fallback reach) runs on past it
 export function armStraightRun(el, i, step, settings, sharpAt) {
   const pts = el.pts || [];
   const run = roadRunFrom(pts, i, step, roadTangentNoise(el));
   const j = i + step;
-  if (j <= 0 || j >= pts.length - 1) return run;                    // the leg runs to a road END
-  const row = roadCornerRadii(pts, el.vtx, { defaultRadius: roadDefaultRadius(el, settings), sharpAt }).find((r) => r.i === j);
-  const T = row && Number.isFinite(row.rendered) && row.tanHalf > 0 ? row.rendered * row.tanHalf : 0;
-  const leg = Math.hypot(pts[j].x - pts[i].x, pts[j].y - pts[i].y);
-  return { ...run, dist: Math.max(0, Math.min(run.dist, leg - T)) };
+  if (j <= 0 || j >= pts.length - 1) return { ...run, soft: run.dist };   // the leg runs to a road END
+  const rows = roadCornerRadii(pts, el.vtx, { defaultRadius: roadDefaultRadius(el, settings), sharpAt });
+  /* ⛔ NEW-2 (2026-10-15) — the arm is straight until a vertex that RENDERS A CORNER, not until the next vertex.
+   * The cap used to be `leg − T` for the IMMEDIATELY adjacent interior vertex, so a collinear vertex or a
+   * leftover connect vertex a few feet from the tee node (T = 0, nothing drawn there) capped the run at that
+   * few feet: shorter than the side road's half-width, `nodeJunction`'s `tMax` hit 0 on that one corner and the
+   * tee got a curb return on one side and a SQUARE corner on the other. Walk on through every vertex that turns
+   * the road by under `STRAIGHT_THROUGH_DEG` (that includes another road's tee node on a straight trunk — it
+   * renders no corner of its own); stop at a real bend (its arc entry, as before).
+   *   `dist`  — the HARD run: stops at the first bend. What a return may ordinarily reach along.
+   *   `soft`  — the run past MILD bends (≤ SOFT_BEND_DEG): `nodeJunction`'s fallback so a short stub before a mild bend shrinks
+   *             the return instead of deleting it. A sharp bend (the 57° Goose Creek spike) ends both. */
+  let acc = 0, hard = null, soft = null;
+  for (let k = j; ; k += step) {
+    acc += Math.hypot(pts[k].x - pts[k - step].x, pts[k].y - pts[k - step].y);
+    if (k <= 0 || k >= pts.length - 1) { if (hard == null) hard = run.dist; soft = run.dist; break; }   // ran to the road's end
+    const d1 = { x: pts[k].x - pts[k - step].x, y: pts[k].y - pts[k - step].y };
+    const d2 = { x: pts[k + step].x - pts[k].x, y: pts[k + step].y - pts[k].y };
+    const l1 = Math.hypot(d1.x, d1.y), l2 = Math.hypot(d2.x, d2.y);
+    const turnDeg = l1 > 1e-9 && l2 > 1e-9 ? (Math.acos(Math.max(-1, Math.min(1, (d1.x * d2.x + d1.y * d2.y) / (l1 * l2)))) * 180) / Math.PI : 0;
+    if (turnDeg < STRAIGHT_THROUGH_DEG) continue;
+    const row = rows.find((r) => r.i === k);
+    const T = row && Number.isFinite(row.rendered) && row.tanHalf > 0 ? row.rendered * row.tanHalf : 0;
+    const cand = Math.max(0, Math.min(run.dist, acc - T));
+    if (hard == null) hard = cand;
+    if (turnDeg > SOFT_BEND_DEG) { soft = cand; break; }
+  }
+  return { ...run, dist: hard, soft: Math.max(hard, soft) };
 }
 
 export const DRIVE_RETURN_SEED = { parking: 15, truckcourt: 24 }; // B1005 — tidy default; teeGeometry caps the return REACH to R itself, so a small seed reads as a rounded corner. Editable up per-junction for a real WB-62 turn.
@@ -215,7 +240,10 @@ export function driveJunctionsOf(els, settings) {
       throughAvailNeg: Math.max(0, Math.min(edgeRunNeg, obstacle.neg)),
       sideAvail: Math.max(0, sideRun.dist - insideRunFt),
     });
-    if (geom) out.push({ sideId: S.id, targetId: T.id, kind, geom });
+    if (geom) {
+      const sL = Math.hypot(sideDir.x, sideDir.y) || 1;
+      out.push({ sideId: S.id, targetId: T.id, kind, geom, junctionPt: { x: junctionPt.x, y: junctionPt.y }, sideU: { x: sideDir.x / sL, y: sideDir.y / sL }, halfS: roadOuterHalf(S) });
+    }
   }
   return out;
 }
@@ -237,6 +265,11 @@ export function teeNodeIndicesOf(els) {
     for (const ei of [0, S.pts.length - 1]) {
       const hit = teeTargetPointOf(roads, S, S.pts[ei]);
       if (!hit) continue;
+      /* ⛔ NEW-2 — REAL vertices only. A virtual tee (`teeTargetPointOf` splicing the projected point into a LOCAL copy)
+       * reports `gvi` in the SPLICED copy's index space; recorded here it named whatever real vertex happened to sit at
+       * that number, so an unrelated bend was treated as a hard node (no tangent charged) — and `roadJunctionVerticesOf`
+       * (vertex-only `teeTargetOf`) never flattens a virtual node anyway, so the two maps disagreed. */
+      if (hit.pts !== hit.G.pts) continue;
       if (!nodes.has(hit.G.id)) nodes.set(hit.G.id, new Set());
       nodes.get(hit.G.id).add(hit.gvi);
     }
@@ -257,7 +290,9 @@ export function teeJunctionsOf(els, settings) {
       const sideRun = armStraightRun(S, ei, ei === 0 ? 1 : -1, settings, nodes.get(S.id));   // into the side road's body
       const sideDir = { x: sideRun.far.x - P.x, y: sideRun.far.y - P.y };
       const Gel = gPts === G.pts ? G : { ...G, pts: gPts };
-      const backRun = armStraightRun(Gel, gvi, -1, settings, nodes.get(G.id)), fwdRun = armStraightRun(Gel, gvi, 1, settings, nodes.get(G.id));
+      // the node set is in REAL-vertex index space; a virtual splice at `gvi` shifts every real vertex from `gvi` on by one
+      const gSharp = nodes.get(G.id) && gPts !== G.pts ? new Set([...nodes.get(G.id)].map((k) => (k >= gvi ? k + 1 : k))) : nodes.get(G.id);
+      const backRun = armStraightRun(Gel, gvi, -1, settings, gSharp), fwdRun = armStraightRun(Gel, gvi, 1, settings, gSharp);
       const a = backRun.far, b = fwdRun.far;
       const din = { x: P.x - a.x, y: P.y - a.y }, dout = { x: b.x - P.x, y: b.y - P.y };  // through tangents at the vertex
       const li = Math.hypot(din.x, din.y) || 1, lo = Math.hypot(dout.x, dout.y) || 1;
@@ -281,9 +316,9 @@ export function teeJunctionsOf(els, settings) {
         // welded to — the junction has to round that corner too, so `roundOwnCorner` is always on here.
         node: { x: P.x, y: P.y }, R, flatDeg: 178, roundOwnCorner: true,
         arms: [
-          { dir: { x: a.x - P.x, y: a.y - P.y }, half: halfG, avail: Math.min(backRun.dist, teeObstacle.neg), road: G.id, deep: halfG > 0.01 ? Math.min(halfG * 0.5, 12) : 0 },
-          { dir: { x: b.x - P.x, y: b.y - P.y }, half: halfG, avail: Math.min(fwdRun.dist, teeObstacle.pos), road: G.id, deep: halfG > 0.01 ? Math.min(halfG * 0.5, 12) : 0 },
-          { dir: sideDir, half: halfS + Math.max(0, flare), avail: sideRun.dist, road: S.id, deep: Math.max(1, Math.min(halfS * 0.5, 12)) },
+          { dir: { x: a.x - P.x, y: a.y - P.y }, half: halfG, avail: Math.min(backRun.dist, teeObstacle.neg), soft: Math.min(backRun.soft, teeObstacle.neg), road: G.id, deep: halfG > 0.01 ? Math.min(halfG * 0.5, 12) : 0 },
+          { dir: { x: b.x - P.x, y: b.y - P.y }, half: halfG, avail: Math.min(fwdRun.dist, teeObstacle.pos), soft: Math.min(fwdRun.soft, teeObstacle.pos), road: G.id, deep: halfG > 0.01 ? Math.min(halfG * 0.5, 12) : 0 },
+          { dir: sideDir, half: halfS + Math.max(0, flare), avail: sideRun.dist, soft: sideRun.soft, road: S.id, deep: Math.max(1, Math.min(halfS * 0.5, 12)) },
         ],
       });
       if (!nj) continue;
@@ -294,6 +329,8 @@ export function teeJunctionsOf(els, settings) {
       const geom = {
         R: nj.R, wedges: nj.wedges, returns: nj.gaps.map((g) => g.arc), corners: nj.corners,
         throughTangents, nTee: nOpenT, gaps: nj.gaps,
+        // NEW-1 (2026-10-15) — what `roadDeco.junctionMouthCuts` needs to end a road's band fills where the returns begin
+        sideU: (() => { const L = Math.hypot(sideDir.x, sideDir.y) || 1; return { x: sideDir.x / L, y: sideDir.y / L }; })(), halfG, halfS,
         throatWidth: throughTangents.length === 2 ? Math.hypot(throughTangents[0].x - throughTangents[1].x, throughTangents[0].y - throughTangents[1].y) : 0,
       };
       out.push({ sideId: S.id, throughId: G.id, T: { x: P.x, y: P.y }, geom });
