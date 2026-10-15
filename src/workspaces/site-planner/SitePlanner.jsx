@@ -234,7 +234,7 @@ import { bestMeasurer } from "../../shared/markup/textWrap.js"; // B548818 — m
 import { CROSS_BAND_BEHIND, CROSS_BAND_FRONT } from "./lib/paintOrder.js"; // B548819 — ONE name for the cross-band command
 import { nearestRectPerimeterPoint, calloutCornerRadius } from "../../shared/markup/geometry.js";
 import { calloutDblZone } from "../../shared/markup/hitTest.js";
-import { COUNTIES, COUNTIES_MAP, countyKeyForName, candidateCountiesForPoint, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote, displayFloorForPoint, displaySourcesForView, statewideKeysForState, statewideBackupScope, isStatewideLayerUrl, loadCountyPolygons } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, countyKeyForName, candidateCountiesForPoint, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote, ensureCountyGeometryAt, displayFloorForPoint, displaySourcesForView, statewideKeysForState, statewideBackupScope, isStatewideLayerUrl, loadCountyPolygons } from "./lib/counties.js";
 import { lookupParcels } from "./lib/parcelQuery.js";
 import {
   resolveLayerUrl,
@@ -16449,6 +16449,16 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
   // tool. A re-click on a just-added lot toggles it back off.
   const [identifyMode, setIdentifyMode] = useState(false);
   const [identifyRes, setIdentifyRes] = useState(null); // {busy} | {added,attrs,rings,ring,lng,lat,addr} | {removed,addr} | {already,addr} | {error}
+  /* NEW-1 (Memphis radius ×2) — READ-ONLY: the identify-and-add path's last answer, for the live audit (owner / parcel id / rings
+   * as the app received them). Answers only under automation, checked at CALL time; writes nothing. */
+  const identifyResRef = useRef(null);
+  identifyResRef.current = identifyRes;
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const hook = () => (window.__PLANYR_E2E ? identifyResRef.current : null);
+    window.__plannerIdentifyResult = hook;
+    return () => { if (window.__plannerIdentifyResult === hook) window.__plannerIdentifyResult = null; };
+  }, []);
   const [identAdded, setIdentAdded] = useState(0); // lots added this identify session (for the status row)
   const [addrQuery, setAddrQuery] = useState(""); // B384: the "Add by address" text field in the ＋ Add parcel menu
   const [addrBusy, setAddrBusy] = useState(false); // geocode in flight
@@ -16657,6 +16667,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setTimeout(() => { if (!settled && tok === identifyTok.current) { setJurInfo(null); setIdentifyRes({ busy: true }); } }, 0);
     try {
       const [lat, lng] = feetToLatLng(fp, origin.lat, origin.lon);
+      await ensureCountyGeometryAt(lat, lng); // NEW-1 (Memphis radius ×2) — name the county even on an early click
       // NEW-1 (parcel routing) — candidates for THIS point, not the site's frozen county.
       const { candidates } = await candidatesAtPoint(lat, lng);
       if (tok !== identifyTok.current) return;
@@ -22390,7 +22401,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
                   </>
                 )}
                 {identifyRes && (
-                  <div style={{ marginTop: identifyMode ? 8 : 0, background: "var(--planner-raised)", border: "1px solid var(--planner-border)", borderRadius: 8, padding: "8px 10px", fontSize: 11.5 }}>
+                  <div data-testid="identify-result" style={{ marginTop: identifyMode ? 8 : 0, background: "var(--planner-raised)", border: "1px solid var(--planner-border)", borderRadius: 8, padding: "8px 10px", fontSize: 11.5 }}>
                     {identifyRes.busy ? <span style={{ color: PAL.muted }}>{identifyRes.geo ? "Finding address…" : "Querying county GIS…"}</span>
                       : identifyRes.error ? <span style={{ color: PAL.warn }}>{identifyRes.error}</span>
                       : identifyRes.removed ? <span style={{ color: PAL.muted }}>Removed {identifyRes.addr || "that lot"} from the plan — click it again to re-add.</span>

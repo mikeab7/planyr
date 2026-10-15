@@ -2149,22 +2149,19 @@ const COUNTIES_RAW = {
     idField: "Name", addrField: "SitusAddress",
     help: "City of Independence parcels (city GIS, Esri-hosted) — searches are limited to the city limits, not all of Jackson County. Search by parcel APN or a site address.",
   },
-  /* NEW-1 (Memphis radius) — Germantown and Collierville, TN: city-scoped because Shelby County has no countywide
-   * open source (see cityScopes.js). MEASURED LIVE from this sandbox 2026-10-15: Germantown 16,107 polygons (extent
-   * -89.846,35.025 to -89.732,35.123), point 35.0868,-89.81 → PARCELID "G0231   00121C", Acres 0.98; Collierville 20,249
-   * polygons, point 35.042,-89.664 → OWNPARCELID "C0244   00853", STATEDAREA 0.052 ac. Both layers carry the parcel ID
-   * and acreage ONLY — there is NO owner or situs column, so the card shows those as absent, never blank-as-zero. */
-  tn_germantown: {
-    state: "TN", label: "City of Germantown, TN",
-    layerUrl: "https://services5.arcgis.com/LnfZzt7NtPrHmp5p/arcgis/rest/services/Parcels_Corlim/FeatureServer/0",
-    idField: "PARCELID",
-    help: "City of Germantown parcels (city GIS, Esri-hosted) — searches are limited to the city limits, not all of Shelby County. Parcel ID and acreage only; no owner is published.",
-  },
-  tn_collierville: {
-    state: "TN", label: "Town of Collierville, TN",
-    layerUrl: "https://services1.arcgis.com/sRmcNvrTVX9Y0AgX/arcgis/rest/services/Certified_Parcels/FeatureServer/0",
-    idField: "OWNPARCELID",
-    help: "Town of Collierville certified parcels (town GIS, Esri-hosted) — searches are limited to the town limits, not all of Shelby County. Parcel ID and acreage only; no owner is published.",
+  /* NEW-1 (Memphis radius ×2) — SHELBY COUNTY, TN, countywide, on the Shelby County ASSESSOR OF PROPERTY's own certified
+   * parcel service (`CERTParcel`, copyright "Shelby County Assessor of Property, Memphis, TN"). It is on the county's
+   * `scgis.` server — NOT the Cloudflare-challenged `gis.shelbycountytn.gov` viewer B2289169 ruled out — and answers
+   * token-free. This build sandbox's egress refuses the host, so it is relayed through `/gis-proxy` (allow-listed) and was
+   * MEASURED THROUGH THE PR PREVIEW'S RELAY 2026-10-15: MapServer, Map/Query/Data, maxRecordCount 1000, TAXYR 2026; points
+   * airport-east 35.03,-89.95 → 073088  00221 LIBERTY STREET MEMPHIS PARTNERS (54.79 ac); downtown → 002021  00001 COUNTY
+   * OF SHELBY; Bartlett, Millington, Lakeland, Germantown (G0231   00121C) and Collierville (C0244   00853) all answer with
+   * owner + situs. It covers Germantown and Collierville WITH owners, so their owner-less city scopes were folded in. */
+  tn_shelby: {
+    state: "TN", label: "Shelby County, TN",
+    layerUrl: "/gis-proxy/scgis.shelbycountytn.gov/serverhigh/rest/services/Parcel/CERTParcel/MapServer/0",
+    idField: "PARCELID", addrField: "PAR_ADDR1",
+    help: "Shelby County Assessor of Property certified parcels (county GIS) — covers Memphis, Bartlett, Germantown, Collierville, Lakeland, Arlington, Millington and the unincorporated county. Search by parcel ID or a site address.",
   },
 };
 
@@ -2907,7 +2904,8 @@ const COUNTIES_MAP_RAW = {
   tn_statewide: {
     // Covers 86 of 95 counties (9 use non-state assessment systems and are excluded).
     // NEW-1: MEASURED 2026-10-15 — 0 features at 7 interior points in Shelby and in Chester (7/7 in the other 16
-    // Memphis-radius TN counties). Declared so those two report "no parcel data" instead of a silent empty layer.
+    // Memphis-radius TN counties). Declared so neither is routed here: Shelby has its own Assessor source (tn_shelby);
+    // Chester reports "no parcel data" instead of a silent empty layer.
     excludedCounties: ["Shelby", "Chester"],
     state: "TN", center: [35.9, -86.4], zoom: 7, mapServer: null, statewide: true,
     layerUrl: "https://services1.arcgis.com/YuVBSS7Y1of2Qud1/arcgis/rest/services/Tennessee_Property_Boundaries_Public_Use/FeatureServer/0",
@@ -3193,17 +3191,10 @@ const COUNTIES_MAP_RAW = {
     cityScoped: true,
     mapServer: null, layerUrl: COUNTIES.mo_independence.layerUrl,
   },
-  tn_germantown: {
-    state: "TN", center: [35.0868, -89.81], zoom: 12,
-    bbox: [35.0287, -89.8456, 35.1209, -89.7353],
-    cityScoped: true,
-    mapServer: null, layerUrl: COUNTIES.tn_germantown.layerUrl,
-  },
-  tn_collierville: {
-    state: "TN", center: [35.042, -89.664], zoom: 12,
-    bbox: [34.9947, -89.7596, 35.1108, -89.6409],
-    cityScoped: true,
-    mapServer: null, layerUrl: COUNTIES.tn_collierville.layerUrl,
+  tn_shelby: {
+    state: "TN", center: [35.18, -89.89], zoom: 10,
+    bbox: [34.98, -90.33, 35.43, -89.62],
+    mapServer: null, layerUrl: COUNTIES.tn_shelby.layerUrl,
   },
 };
 
@@ -3479,7 +3470,19 @@ export const statewideKeysForState = (state) =>
 let _countyEntriesMemo = null;
 const countyEntries = () => _countyEntriesMemo || (_countyEntriesMemo = Object.entries(COUNTIES_MAP));
 
+/* NEW-1 (Memphis radius ×2) — a statewide composite that DECLARES the resolved county excluded (`excludedCounties`) cannot
+ * answer for it, so it is never a candidate there, on ANY routing path below. Before this a Shelby County click still queried
+ * Tennessee's statewide layer, which holds none of Shelby: harmless while it answered, but a slow or dead layer turned the
+ * honest county answer into "the parcel server isn't responding". Near a county line the polygon is only picking a side, so
+ * the composite is kept there (it genuinely covers the neighbour). */
 export function candidateCountiesForPoint(lat, lng) {
+  const keys = candidateCountiesRaw(lat, lng);
+  const id = countyIdentity(lat, lng);
+  if (!id.name || id.nearEdge) return keys;
+  return keys.filter((k) => !statewideExcludesCounty(k, id.name));
+}
+
+function candidateCountiesRaw(lat, lng) {
   const entries = countyEntries();
   const within = entries
     .filter(([, c]) => { const b = c.bbox; return b && lat >= b[0] && lat <= b[2] && lng >= b[1] && lng <= b[3]; })
@@ -3738,6 +3741,15 @@ export function countyForView(lat, lng) {
  * reports its own county in its attributes.
  *
  * Pure. */
+/* NEW-1 (Memphis radius) — does statewide composite `key` declare county `name` (as the polygon asset spells it, with or
+ * without its designation) as one it does NOT cover? The ONE answer `countyIdentity` and `candidateCountiesForPoint` share. */
+export function statewideExcludesCounty(key, name) {
+  const ex = COUNTIES_MAP[key] && COUNTIES_MAP[key].excludedCounties;
+  if (!ex || !name) return false;
+  const slug = (n) => String(n || "").toLowerCase().replace(COUNTY_DESIGNATION_RE, "").replace(/[^a-z]/g, "");
+  return ex.some((e) => slug(e) === slug(name));
+}
+
 export function countyIdentity(lat, lng) {
   // City scope first (B1583296) — a point inside Detroit is a real, sourced answer, not a county
   // fallback. Everywhere else in Wayne County (or any other point) falls through unchanged to the
@@ -3762,15 +3774,21 @@ export function countyIdentity(lat, lng) {
    * (`excludedCounties`, county names as the polygon asset spells them minus the designation). Those counties must
    * say "no parcel data", not borrow the statewide layer's cover and then silently return nothing: Tennessee's
    * Comptroller layer omits Shelby and Chester (measured 0 features at 7 interior points each). */
-  const slug = (n) => String(n || "").toLowerCase().replace(COUNTY_DESIGNATION_RE, "").replace(/[^a-z]/g, "");
-  const sw = ans.state === "TX" ? [] : statewideKeysForState(ans.state).filter((k) => {
-    const ex = COUNTIES_MAP[k] && COUNTIES_MAP[k].excludedCounties;
-    return !(ex && ex.some((e) => slug(e) === slug(ans.name)));
-  });
+  const sw = ans.state === "TX" ? [] : statewideKeysForState(ans.state).filter((k) => !statewideExcludesCounty(k, ans.name));
   return {
     status: "no-source", key: null, name: ans.name, state: ans.state, nearEdge: !!ans.nearEdge,
     ...(sw.length ? { statewideKey: sw[0] } : {}),
   };
+}
+
+/* NEW-1 (Memphis radius ×2) — a click that lands before the nationwide county polygons are resident cannot name its
+ * county: `countyIdentity` answers `pending`, `noParcelSourceNote` has nothing to say, and every lot-picking flow fell
+ * back to "No parcel right there — zoom in…", blaming the user's aim for a gap in coverage. Every flow that picks a lot
+ * awaits this first; it is a cached promise (instant once loaded) and never throws — a failed load leaves the old
+ * behaviour, which is already LOUD inside `loadCountyPolygons`. */
+export async function ensureCountyGeometryAt(lat, lng) {
+  if (countyIdentity(lat, lng).status !== "pending") return;
+  try { await loadCountyPolygons(); } catch (_e) { /* reported by loadCountyPolygons */ }
 }
 
 /* The owner-facing sentence for a resolved county with no parcel source, or null when there is

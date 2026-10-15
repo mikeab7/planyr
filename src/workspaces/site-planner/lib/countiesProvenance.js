@@ -623,17 +623,11 @@ export const COUNTY_VERIFICATION = {
     verifiedOn: "2026-09-10",
     verifiedNote: "VERIFIED LIVE from this sandbox: 68,993 parcel polygons, count query 289ms, esriGeometryPolygon. Attribute-light by design (id + acreage only, no owner/situs/value on this layer).",
   },
-  tn_germantown: {
+  tn_shelby: {
     publisher: "own",
-    publisherName: "City of Germantown, TN (GIS)",
+    publisherName: "Shelby County, TN — Assessor of Property (CERTParcel, scgis.shelbycountytn.gov)",
     verifiedOn: "2026-10-15",
-    verifiedNote: "VERIFIED LIVE from this sandbox: 16,107 parcel polygons, esriGeometryPolygon, edited 2026-06; point 35.0868,-89.81 returned PARCELID G0231   00121C with Acres 0.98. City-scoped (Shelby County has no countywide open source). No owner/situs column is published.",
-  },
-  tn_collierville: {
-    publisher: "own",
-    publisherName: "Town of Collierville, TN (GIS)",
-    verifiedOn: "2026-10-15",
-    verifiedNote: "VERIFIED LIVE from this sandbox: 20,249 parcel polygons, esriGeometryPolygon, edited 2026-06; point 35.042,-89.664 returned OWNPARCELID C0244   00853 with STATEDAREA 0.052. City-scoped (Shelby County has no countywide open source). No owner/situs column is published.",
+    verifiedNote: "Host refused by this sandbox's egress; MEASURED THROUGH THE PR PREVIEW'S /gis-proxy RELAY: MapServer layer 0 'Parcel', description 'Shelby County Assessor of Property Parcels', copyright Shelby County Assessor of Property; token-free; maxRecordCount 1000; TAXYR 2026. Seven points across the county (Memphis airport-east + downtown, Bartlett, Millington, Lakeland, Germantown, Collierville) each returned PARCELID + OWNER + PAR_ADDR1.",
   },
   mo_platte: {
     publisher: "third-party",
