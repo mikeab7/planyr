@@ -93,7 +93,7 @@ try {
     ok(`[${scheme}] a stripe follows every curb return, inside the pavement (${arcs.filter(Boolean).length} returns)`, v3.length === 0, JSON.stringify(v3));
 
     // the picture: scene A at working zoom
-    await page.evaluate(() => window.__plannerView && window.__plannerView.centerOn(0, -40, 0.5));
+    await page.evaluate(() => window.__plannerView && window.__plannerView.centerOn(0, -40, 3));
     await sleep(900);
     const dom = await page.evaluate(() => {
       const all = [...document.querySelectorAll('[data-testid="planner-canvas"] *')];
