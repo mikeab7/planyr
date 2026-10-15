@@ -1284,3 +1284,14 @@ on.**
 
 Count check: 18 + 3 + 4 + 1 + 4 = **30** unwired, and 34 wired = 64.
 
+
+
+## Memphis 100-mile radius (NEW-1 / B2289168, 2026-10-15)
+
+71 counties computed by a server-side 100-statute-mile distance query from downtown Memphis (list and edge bands on B2289168; fixture
+`test/fixtures/memphisRadiusCounties.json`). **Mississippi correction:** the "two half-state services, shape-mismatch" row above is superseded —
+`Cadastral/MS_Parcels_August_2024` on gis.mississippi.edu is ONE service with the West half as layer 1 and the East half as layer 2 (same 55
+fields, `CNTYNAME`), so each county pins its layer + `scopeWhere` (the Idaho shape). 24 counties wired (DeSoto keeps its own). All new blocked
+hosts go through `/gis-proxy` (sandbox cannot read their CORS); Arkansas statewide was moved onto it too. **Tennessee:** the Comptroller layer
+omits Shelby and Chester (`excludedCounties`), Germantown and Collierville are city-scoped. **Honest gaps** (no reachable public source): Shelby,
+Chester, Dunklin/Pemiscot/New Madrid/Butler/Ripley MO, Fulton KY — see B2289169. Live check: `ui-audit/verify-memphis-radius-live.mjs` (V1720784).
