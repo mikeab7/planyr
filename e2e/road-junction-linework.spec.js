@@ -126,6 +126,14 @@ test.describe("NEW-1 — a drive entering a pad has ONE continuous curb line per
       const m = mouthDarkness(await shot(page), view, 2, drive);
       expect(m.excess, `a line is stroked across the drive mouth (face ${m.lMin.toFixed(1)}…${m.lMax.toFixed(1)} vs fills ${m.lRoad.toFixed(1)} / ${m.lPad.toFixed(1)})`).toBeLessThanOrEqual(sc.maxExcess ?? MAX_EXCESS);
     });
+    test(`${sc.name} — in pixels, nothing is stroked across the drive mouth (dark theme)`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme: "dark" });
+      const net = await open(page, sc.els());
+      const drive = net.drives[0];
+      const view = await zoomTo(page, { x: mouthCentre(drive).x, y: mouthCentre(drive).y }, 8);
+      const m = mouthDarkness(await shot(page), view, 2, drive);
+      expect(m.excess, `a line is stroked across the drive mouth in the dark theme (face ${m.lMin.toFixed(1)}…${m.lMax.toFixed(1)} vs fills ${m.lRoad.toFixed(1)} / ${m.lPad.toFixed(1)}; mins ${m.mins.join(",")})`).toBeLessThanOrEqual(sc.maxExcess ?? MAX_EXCESS);
+    });
   }
 
   test("the same, in the dark theme", async ({ page }) => {

@@ -23335,6 +23335,15 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
             stroke={r.st.stroke} strokeOpacity={r.st.strokeOpacity} strokeWidth={r.st.strokeWidthSet ?? curbStrokePx(roadCurbWidth(styleEl || {}), r.ppf, CURB_STROKE_MIN_PX * labelK)}
             strokeLinejoin="round" />
         )}
+        {/* NEW-1 (B1783376 ×3) — the SEAM BRIDGE. The pavement is cut away where a pad begins, so the drive's fill and the pad's fill meet on ONE shared edge; two
+            antialiased fills abutting on a slanted edge each cover only part of the pixel and the background shows through the rest (a faint dark hairline in the dark
+            theme). A hairline of the pavement's own fill along the mouth — between the two curb-return tangents, nowhere else — closes it. Opaque fills only: a translucent
+            one would double up where the bridge overlaps it. */}
+        {(roadNet.seams || []).filter((sm) => r.ids.includes(sm.sideId) && (r.st.fillOpacity ?? 1) >= 1).map((sm, si) => {
+          const a = f2p(sm.a), b = f2p(sm.b);
+          return <path key={`seam${si}-${sm.sideId}`} data-testid="road-mouth-seam" data-export="road-network" d={`M${a.x},${a.y}L${b.x},${b.y}`}
+            fill="none" stroke={r.st.fill} strokeWidth={1.25} strokeLinecap="butt" />;
+        })}
         {/* NEW-5 — the CENTRAL ISLAND: a real hole in the dissolved region, not a disc drawn on
             top, so the landscaped surface shows THROUGH it — painted with this region's own group. */}
         {islands.map(({ node, geom }, gi) => (geom.island ? (

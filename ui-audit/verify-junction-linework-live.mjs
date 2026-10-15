@@ -70,7 +70,12 @@ async function openScenario(scheme) {
   await page.getByTestId("planner-canvas").waitFor({ timeout: 25000 });
   await sleep(2500);
   await assertMeasurable(page, "verify-junction-linework-live");
-  await page.waitForFunction(() => { const n = window.__plannerRoadNet && window.__plannerRoadNet(); return n && n.drives.length >= 5 && n.tees.length >= 2; }, null, { timeout: 25000 }).catch(() => {});
+  const hookReady = () => page.waitForFunction(() => { const n = typeof window.__plannerRoadNet === "function" && window.__plannerRoadNet(); return n && n.drives.length >= 5 && n.tees.length >= 2; }, null, { timeout: 30000 });
+  try { await hookReady(); } catch (e) {                                          // the hook is armed at mount: one reload with the flag set, then say what the page showed
+    await page.reload({ waitUntil: "load" });
+    await page.getByTestId("planner-canvas").waitFor({ timeout: 25000 }).catch(() => {});
+    await hookReady().catch(async () => { throw new Error("planner hook never ready — " + (await page.evaluate(() => `hook=${typeof window.__plannerRoadNet} canvas=${!!document.querySelector('[data-testid=planner-canvas]')} body=${document.body.innerText.slice(0, 160).replace(/\s+/g, " ")}`))); });
+  }
   return id;
 }
 async function zoomTo(at, ppf) {
@@ -110,7 +115,9 @@ try {
       // the picture, close in on the junction
       const view = await zoomTo(mouthCentre(drive), 8);
       const img = decodePng(await page.getByTestId("planner-canvas").screenshot());
+      const view2 = await page.evaluate(() => window.__plannerView.get());
       const m = mouthDarkness(img, view, 2, drive);
+      if (m.excess > MAX_EXCESS) console.log("  debug cols:", JSON.stringify(m.mins), "view", JSON.stringify(view), "after", JSON.stringify(view2));
       ok(`${tag}: no line across the drive mouth (face ${m.lMin.toFixed(1)}…${m.lMax.toFixed(1)} vs fills ${m.lRoad.toFixed(1)} / ${m.lPad.toFixed(1)}; excess ${m.excess.toFixed(1)})`, m.excess <= MAX_EXCESS);
       if (SHOTS) await page.getByTestId("planner-canvas").screenshot({ path: `${SHOTS}/${scheme}-${sc.key}.png` }).catch(() => {});
     }
@@ -118,7 +125,7 @@ try {
     // outline vs stripes, per road — in the DOM, on the deployed build
     const styles = await page.evaluate(() => {
       const read = (n) => ({ stroke: n.getAttribute("stroke"), width: n.getAttribute("stroke-width"), opacity: n.getAttribute("stroke-opacity") });
-      return ["P-S", "O-S", "R-S", "V-S", "M-S", "M-T", "T-S", "T-G"].map((id) => ({ id, edge: (() => { const e = document.querySelector(`[data-testid="road-network-edge"][data-edge-road="${id}"]`); return e ? read(e) : null; })(), stripes: [...document.querySelectorAll(`[data-road-deco="${id}"] polyline`)].map(read) }));
+      return ["P-S", "O-S", "R-S", "V-S", "M-S", "M-T", "T-S", "T-G"].map((id) => ({ id, edge: (() => { const e = document.querySelector(`[data-testid="road-network-edge"][data-edge-road="${id}"]`) || (document.querySelector(`[data-road-cluster~="${id}"], [data-road-cluster*="${id}"]`) || document).querySelector('[data-testid="road-network-edge"]'); return e ? read(e) : null; })(), stripes: [...document.querySelectorAll(`[data-road-deco="${id}"] polyline`)].map(read) }));
     });
     for (const r of styles) {
       const same = r.edge && r.stripes.length && r.stripes.every((x) => x.stroke === r.edge.stroke && x.width === r.edge.width && x.opacity === r.edge.opacity);
