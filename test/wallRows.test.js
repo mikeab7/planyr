@@ -59,10 +59,11 @@ describe("chips and the + catalog", () => {
     expect(bumpSummary(3, 55.4, 30)).toBe("Bump-outs 3 · 55 × 30 ft");
   });
   const keys = (isDock, kinds) => addOptions(isDock, kinds.map((kind) => ({ kind }))).map((o) => o.key);
-  it("a dock wall offers a court only when it has none, a trailer only when none, and nothing after a road", () => {
+  it("a dock wall offers a court only when it has none, a trailer ROW whenever a court is there (rows repeat), and nothing after a road", () => {
     expect(keys(true, [])).toEqual(["court"]);
     expect(keys(true, ["court"])).toEqual(["trailer", "buffer", "sidewalk", "road"]);
-    expect(keys(true, ["court", "trailer"])).toEqual(["buffer", "sidewalk", "road"]);
+    expect(keys(true, ["court", "trailer"])).toEqual(["trailer", "buffer", "sidewalk", "road"]);   // NEW-1: a second row of trailer parking
+    expect(keys(true, ["court", "trailer", "trailer"])).toEqual(["trailer", "buffer", "sidewalk", "road"]);
     expect(keys(true, ["court", "trailer", "road"])).toEqual([]);
   });
   it("any other wall offers sidewalk / car parking only when it has none, plus buffer and road; nothing after a road", () => {
