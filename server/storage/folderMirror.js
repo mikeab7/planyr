@@ -15,6 +15,7 @@
  */
 import { folderReconcilePlan, planIsEmpty } from "./folderReconcile.js";
 import { resolveDrawingTarget } from "../../src/shared/folders/folderTree.js";
+import { resolvePlacement } from "../../src/shared/folders/filingTarget.js";
 
 // Path-safe slug matching functions/api/files.js, so the folder tree and filed documents share
 // one project root in Drive (Planyr/<uid>/project-<slug>/…).
@@ -235,12 +236,14 @@ export async function migrateFilesToTree({ userId, projectId, client, store, idS
  * refile flow — a "needs filing" PDF confirmed as Civil must have its Drive bytes follow the
  * decision; the stored key keeps the original discipline forever, so the caller passes the
  * confirmed one). In place by file id — name/share/read-back untouched. Never throws. */
-export async function moveKeyToTree({ userId, projectId, planyrKey, discipline, client, store, idStore } = {}) {
+export async function moveKeyToTree({ userId, projectId, planyrKey, discipline, folderId = null, client, store, idStore } = {}) {
   if (!projectId || !planyrKey) return { ok: false, error: "Missing projectId or planyrKey." };
   try {
     const rows = await store.list(projectId);
     if (!rows) return { ok: false, error: "Couldn't read the folder index." };
-    const target = resolveDrawingTarget(rows, discipline);
+    // ONE placement rule shared with the Library list (shared/folders/filingTarget.js): the explicit folder
+    // the owner picked wins; the discipline resolver is only the fallback for a file with no explicit folder.
+    const target = resolvePlacement(rows, { folderId, discipline });
     const targetId = target && target.driveFolderId;
     if (!targetId) return { ok: true, skipped: true }; // tree not mirrored yet → nothing to move to
     const driveId = await idStore.get(`${userId}/${planyrKey}`);

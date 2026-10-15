@@ -211,6 +211,22 @@ const ACTIVE_ALWAYS = new Set([
   QUEUE_STATUS.DUPLICATE,
 ]);
 
+/* Reconcile the session-only upload tray against what the server now says (NEW-2): a row parked at
+ * NEEDS_FILING whose review is no longer waiting to be filed becomes DONE, so the bar and the "Needs filing"
+ * view can never disagree about one document. `needsById` maps reviewId → still-needs-filing, for every
+ * review the Library currently holds; an id it doesn't know (not loaded yet / deleted) is left alone.
+ * Returns the SAME array when nothing changed (cheap setState bail-out). */
+export function reconcileQueueWithFacts(queue, needsById, now = Date.now()) {
+  let changed = false;
+  const out = (queue || []).map((it) => {
+    if (it.status !== QUEUE_STATUS.NEEDS_FILING || !it.reviewId || !needsById || !needsById.has(it.reviewId)) return it;
+    if (needsById.get(it.reviewId)) return it;
+    changed = true;
+    return { ...it, status: QUEUE_STATUS.DONE, filedAt: now };
+  });
+  return changed ? out : queue;
+}
+
 // A DONE item that just landed and is still inside its confirmation beat.
 function withinBeat(item, now, beatMs) {
   return item.status === QUEUE_STATUS.DONE && item.filedAt != null && (now - item.filedAt) < beatMs;

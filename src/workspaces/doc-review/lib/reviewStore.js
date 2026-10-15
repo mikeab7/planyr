@@ -600,7 +600,7 @@ export async function unfileReviewsForDeletedProject(groupId) {
 // only the filing fields, and re-upserts; the work layer + sources are untouched. (The
 // stored object path doesn't move — storageKey already encodes the prior location and
 // stays valid; re-pathing the bytes is a backend-tranche nicety, not needed to re-file.)
-export async function refileReview(id, { projectId = null, project = "", discipline, item, orgScope = false } = {}) {
+export async function refileReview(id, { projectId = null, project = "", discipline, item, orgScope = false, folderId = null } = {}) {
   if (!(await cloudReady())) return { ok: false, error: "Sign in to file documents." };
   const rec = await loadReview(id);
   if (!rec) return { ok: false, error: "Review not found." };
@@ -625,6 +625,10 @@ export async function refileReview(id, { projectId = null, project = "", discipl
     : { ...rec, projectId: projectId || null, project: project || "", orgScope: false };
   if (discipline) next.discipline = discipline;
   if (item) next.item = item;
+  // The owner's explicit folder pick is stored on the record (same field a folder drop writes, B686) so the
+  // Library list honours it; a refile with NO pick clears a stale one — the new decision supersedes the old.
+  // (null, not delete: the write merges UNDER the stored record, so a deleted key would resurrect the old pick.)
+  next.folderId = folderId ? String(folderId) : null;
   return upsertReview({ ...next, updatedAt: Date.now() });
 }
 

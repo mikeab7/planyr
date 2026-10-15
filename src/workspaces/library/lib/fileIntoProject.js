@@ -7,8 +7,8 @@ import { refileReview, upsertFileFacts, loadReview } from "../../doc-review/lib/
 import { toFactsRow } from "../../doc-review/lib/fileIndex.js";
 import { moveDriveFileToFolder } from "./folders.js";
 
-export async function fileReviewIntoProject({ f, projectId, projectName = "", discipline, category }) {
-  const res = await refileReview(f.id, { projectId, project: projectName, discipline });
+export async function fileReviewIntoProject({ f, projectId, projectName = "", discipline, category, folderId = null }) {
+  const res = await refileReview(f.id, { projectId, project: projectName, discipline, folderId });
   if (!res || !res.ok) return { ok: false, error: (res && res.error) || "the save failed" };
   let notice = "";
   // Preserve the REAL upload filename (B685): source_file is what isPdfFile reads to decide open-in-Review vs. download.
@@ -19,7 +19,7 @@ export async function fileReviewIntoProject({ f, projectId, projectName = "", di
     const rec = await loadReview(f.id);
     const keys = ((rec && rec.sources) || []).map((s) => s && s.driveKey).filter(Boolean);
     for (const k of keys) {
-      const mv = await moveDriveFileToFolder(projectId, k, discipline);
+      const mv = await moveDriveFileToFolder(projectId, k, discipline, folderId);
       if (mv && mv.ok === false) { notice = `Filed as ${discipline}, but the Google Drive copy couldn't be moved (${mv.error || "move failed"}) — it stays in its old folder.`; break; }
     }
   } catch (_) {

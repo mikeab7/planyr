@@ -35,14 +35,15 @@ import { buildFilingPlan } from "../../../shared/files/disciplineSplit.js";
 import { splitPdfByPlan } from "../../doc-review/lib/pdfSplit.js";
 import {
   buildFileFacts, deriveTree, browseFiles, holdingArea, CATEGORIES,
-  categoryOf, subcategoryOf, stateOf, FILE_STATES, onMap, isReference, isSpatial,
+  categoryOf, categoryFor, subcategoryOf, stateOf, FILE_STATES, onMap, isReference, isSpatial,
   searchFiles, sortFiles, SORTS,
 } from "../../../shared/files/fileFacts.js";
 import {
   resolveDrawingTarget, subtreeIds, displayLabel, matchDropPathToFolder,
 } from "../../../shared/folders/folderTree.js";
+import { resolvePlacement, folderChoices, refileDefault, disciplineForCategory } from "../../../shared/folders/filingTarget.js";
 import {
-  QUEUE_STATUS, makeQueueItems, splitQueue, runPool,
+  QUEUE_STATUS, makeQueueItems, splitQueue, runPool, reconcileQueueWithFacts,
   dropItemsToEntries, flattenEntries, partitionAccepted, isPdfName, fileRelDirs,
 } from "../../../shared/files/uploadQueue.js";
 import { loadIdSet, saveIdSet } from "../../../shared/ui/persistedSet.js";
@@ -115,6 +116,7 @@ export default function FileBrowser({
   const dropOver = useFileDragActive(isActive);
   const [dropNotice, setDropNotice] = useState(null);       // a drop that could not be taken — named, never silent (NEW-1)
   const [queue, setQueue] = useState([]);
+  const [refiling, setRefiling] = useState({});            // fileId -> true while a File is in flight
   const [refileSel, setRefileSel] = useState({});          // fileId -> { category, discipline }
   const [share, setShare] = useState({});                  // fileId -> { status, url, error }
   const [loadNotice, setLoadNotice] = useState(null);      // a refresh FAILED — keeping the last loaded list (NEW-F5)
@@ -208,6 +210,12 @@ export default function FileBrowser({
 
   const tree = useMemo(() => deriveTree(facts, { includeSuperseded: showSuperseded }), [facts, showSuperseded]);
   const holding = useMemo(() => holdingArea(facts), [facts]);
+  // NEW-2 — the bottom tray's "Needs filing" row is session state, the view above is server state: reconcile them
+  // whenever the facts change so filing a document (File button, Review, a folder drop) clears its tray row.
+  useEffect(() => {
+    const needsById = new Map(facts.map((x) => [x.id, stateOf(x) === FILE_STATES.NEEDS_FILING]));
+    setQueue((q) => reconcileQueueWithFacts(q, needsById));
+  }, [facts]);
   const filed = useMemo(() => facts.filter((f) => stateOf(f) !== FILE_STATES.NEEDS_FILING).length, [facts]);
 
   // Folder mode: place every filed fact into the real tree (superseded → 02. Archive) — one
@@ -220,8 +228,8 @@ export default function FileBrowser({
       if (stateOf(f) === FILE_STATES.NEEDS_FILING) continue; // holding-area files aren't in the tree
       // Explicit folder pick wins (B686): the file sits in the folder the user dropped it into,
       // overriding the discipline-derived placement (as long as that folder still exists).
-      if (f.folderId && byId.has(f.folderId)) { m.set(f.id, f.folderId); continue; }
-      const t = resolveDrawingTarget(folderRows, f.discipline, { archive: stateOf(f) === FILE_STATES.SUPERSEDED });
+      if (f.folderId && byId.has(f.folderId)) { m.set(f.id, f.folderId); continue; } // (same rule as resolvePlacement; kept for the byId guard)
+      const t = resolvePlacement(folderRows, { folderId: f.folderId, discipline: f.discipline, archive: stateOf(f) === FILE_STATES.SUPERSEDED });
       if (t) m.set(f.id, t.row.id);
     }
     return m;
@@ -615,22 +623,45 @@ export default function FileBrowser({
       setShare((s) => ({ ...s, [f.id]: r.ok ? { status: "done", url: r.url } : { status: "error", error: r.error || "Couldn’t create a link." } }));
     } catch (e) { setShare((s) => ({ ...s, [f.id]: { status: "error", error: (e && e.message) || "Couldn’t create a link." } })); }
   };
-  const doRefile = async (f) => {
+  // The folder the File row targets: the owner's explicit pick, else the category/discipline suggestion (null =
+  // nothing honest to suggest, so the owner must pick). ONE function for the row and the click, so they can't drift.
+  const refileTarget = (f) => {
     const sel = refileSel[f.id] || {};
+    const discipline = (sel.discipline ?? f.discipline ?? "").trim();
+    const d = refileDefault(folderRows, { discipline, item: f.item, title: f.title, category: sel.category || "" }, categoryFor);
+    const folderId = sel.folderId !== undefined ? (sel.folderId || null) : (d.row ? d.row.id : null);
+    return { sel, category: d.category, suggested: d.row, folderId };
+  };
+  const doRefile = async (f) => {
+    if (refiling[f.id]) return;
+    const { sel, category, folderId } = refileTarget(f);
+    const hasTree = folderMode && folderRows.length > 0;
+    if (hasTree && !folderId) { setMoveNotice(`Pick a folder for "${f.title || "this file"}" first — nothing was changed.`); return; }
     // Normalize a typed discipline onto the canonical list case-insensitively ("civil" →
     // "Civil") so a typo/case variant can't mint a duplicate subcategory node in the tree;
     // a genuinely new name still passes through untouched (concurrent sheet-title batch).
-    const typed = (sel.discipline || f.discipline || "Civil").trim();
+    // An unclassified file filed under a category takes that category's discipline (Surveys → Survey).
+    const own = (sel.discipline || f.discipline || "").trim();
+    const typed = (own && own !== "Other" ? own : disciplineForCategory(category) || own || "Civil");
     const discipline = DISCIPLINES.find((d) => d.toLowerCase() === typed.toLowerCase()) || typed;
     const pid = f.projectId || projectId;
-    const res = await fileReviewIntoProject({ f, projectId: pid, projectName: projName(pid), discipline, category: sel.category });
-    if (!res.ok) { // R2 - a failed refile writes NOTHING to the index, and says so
-      setMoveNotice(`Couldn't file "${f.title || "this file"}" — ${res.error}. Nothing was changed.`);
-      return;
+    setRefiling((r) => ({ ...r, [f.id]: true }));
+    try {
+      const res = await fileReviewIntoProject({ f, projectId: pid, projectName: projName(pid), discipline, category: sel.category || category || undefined, folderId: hasTree ? folderId : null });
+      if (!res.ok) { // R2 - a failed refile writes NOTHING to the index, and says so
+        setMoveNotice(`Couldn't file "${f.title || "this file"}" — ${res.error}. Nothing was changed.`);
+        return;
+      }
+      if (res.notice) setMoveNotice(res.notice);
+      setRefileSel((s) => { const n = { ...s }; delete n[f.id]; return n; });
+      // Same tick as the server write: the tray row for this document is no longer "Needs filing" (NEW-2).
+      setQueue((q) => reconcileQueueWithFacts(q, new Map([[f.id, false]])));
+      refresh();
+    } catch (e) { // LOUD-FAILURE: an unhandled rejection used to look like "it did something" and then nothing
+      setMoveNotice(`Couldn't file "${f.title || "this file"}" — ${(e && e.message) || "unexpected error"}. Nothing was changed.`);
+    } finally {
+      setRefiling((r) => { const n = { ...r }; delete n[f.id]; return n; });
     }
-    if (res.notice) setMoveNotice(res.notice);
-    setRefileSel((s) => { const n = { ...s }; delete n[f.id]; return n; });
-    refresh();
   };
 
   // A refused drop is named wherever the browser is showing — including the two empty states below (NEW-1).
@@ -927,6 +958,7 @@ export default function FileBrowser({
                 {/* re-file (re-assign category/subcategory) — inline, never auto-guesses */}
                 {(needs || refileSel[f.id]) && (
                   <RefileRow value={refileSel[f.id]} discipline={f.discipline}
+                    choices={folderMode ? folderChoices(folderRows) : null} folderId={refileTarget(f).folderId} busy={!!refiling[f.id]}
                     onChange={(v) => setRefileSel((s) => ({ ...s, [f.id]: v }))} onFile={() => doRefile(f)} />
                 )}
                 {/* share-by-link — inline, two-step (confirm → link); failure never silent */}
@@ -986,19 +1018,26 @@ function TreeRow({ label, count, active, indent, bold, caret, onCaret, onClick }
 
 /* Re-file a file: pick a category + discipline (subcategory). A NEW subcategory can be
  * typed, not just chosen. Never auto-guesses. */
-function RefileRow({ value = {}, discipline, onChange, onFile }) {
+function RefileRow({ value = {}, discipline, choices = null, folderId = null, busy = false, onChange, onFile }) {
   const ctl = { fontSize: 11, fontFamily: "inherit", border: "1px solid var(--border-default)", borderRadius: 8, padding: "3px 5px", color: "var(--text-primary)", background: "var(--surface-page)" };
   return (
     <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 7, paddingTop: 7, borderTop: "1px solid var(--border-default)", flexWrap: "wrap" }}>
       <span style={{ fontSize: 10.5, color: "var(--warn-text)", fontWeight: 700, flex: "none" }}>File as:</span>
-      <select value={value.category || ""} onChange={(e) => onChange({ ...value, category: e.target.value })} style={{ ...ctl, flex: "none" }} title="Category (top-level folder)">
+      <select value={value.category || ""} onChange={(e) => onChange({ ...value, category: e.target.value, folderId: undefined })} style={{ ...ctl, flex: "none" }} title="Category (top-level folder)">
         <option value="">Auto</option>
         {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
       </select>
       <input list="dr-disciplines" value={value.discipline ?? discipline ?? ""} placeholder="Discipline…"
-        onChange={(e) => onChange({ ...value, discipline: e.target.value })} style={{ ...ctl, flex: 1, minWidth: 90 }} title="Subcategory (type a new one if needed)" />
+        onChange={(e) => onChange({ ...value, discipline: e.target.value, folderId: undefined })} style={{ ...ctl, flex: 1, minWidth: 90 }} title="Subcategory (type a new one if needed)" />
+      {choices && choices.length > 0 && (
+        <select value={folderId || ""} onChange={(e) => onChange({ ...value, folderId: e.target.value })} aria-label="Folder to file into" data-testid="library-refile-folder"
+          style={{ ...ctl, flex: "1 1 160px", minWidth: 140, maxWidth: "100%" }} title="The folder this document is filed into">
+          <option value="">Pick a folder…</option>
+          {choices.map((c) => <option key={c.id} value={c.id}>{"\u00A0\u00A0".repeat(c.depth)}{c.name}</option>)}
+        </select>
+      )}
       <datalist id="dr-disciplines">{DISCIPLINES.map((d) => <option key={d} value={d} />)}</datalist>
-      <button onClick={onFile} title="File this document" style={{ flex: "none", fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--accent-library)", background: "var(--accent-library)", color: "var(--on-accent-library)", padding: "3px 11px" }}>File</button>
+      <button onClick={onFile} disabled={busy || (choices && choices.length > 0 && !folderId)} title={busy ? "Filing…" : choices && choices.length > 0 && !folderId ? "Pick a folder first" : "File this document"} style={{ flex: "none", opacity: busy ? 0.6 : 1, fontSize: 11, fontFamily: "inherit", fontWeight: 700, cursor: "pointer", borderRadius: RADIUS.md, border: "1px solid var(--accent-library)", background: "var(--accent-library)", color: "var(--on-accent-library)", padding: "3px 11px" }}>{busy ? "Filing…" : "File"}</button>
     </div>
   );
 }

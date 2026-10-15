@@ -201,7 +201,7 @@ export async function syncFoldersToDrive(projectId, { onProgress } = {}) {
 /* Move ONE stored file's Drive bytes to the tree folder of an EXPLICIT discipline (the refile
  * flow — the stored key keeps its original discipline forever, so the confirmed one is passed).
  * 404/503 → skipped (Drive off); tree not mirrored → server reports skipped. Never throws. */
-export async function moveDriveFileToFolder(projectId, planyrKey, discipline) {
+export async function moveDriveFileToFolder(projectId, planyrKey, discipline, folderId = null) {
   if (!supabase) return { ok: false, skipped: true, error: "Cloud not configured." };
   const token = await authToken();
   if (!token) return { ok: false, skipped: true, error: "Not signed in." };
@@ -209,7 +209,7 @@ export async function moveDriveFileToFolder(projectId, planyrKey, discipline) {
     const resp = await fetch("/api/folders", {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-      body: JSON.stringify({ action: "file-move", projectId, planyrKey, discipline }),
+      body: JSON.stringify({ action: "file-move", projectId, planyrKey, discipline, ...(folderId ? { folderId } : {}) }),
     });
     if (resp.status === 404 || resp.status === 503) return { ok: false, skipped: true, error: "Drive not enabled yet." };
     let jr = {}; try { jr = await resp.json(); } catch (_) { /* keep */ }
