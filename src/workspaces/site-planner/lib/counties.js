@@ -802,6 +802,161 @@ const COUNTIES_RAW = {
     idField: "PARNO", addrField: "SITEADD",
     help: "DeSoto County parcels (county GIS, Esri-hosted). Search by parcel number or a site address.",
   },
+  /* NEW-1 (Memphis 100-mile radius, 2026-10-15) — the 24 Mississippi counties inside the radius other than DeSoto
+   * (which keeps its own, fresher county service above). SOURCE: MARIS (Mississippi Automated Resource Information
+   * System, MDEQ-funded) statewide cadastral, service Cadastral/MS_Parcels_August_2024 on gis.mississippi.edu — ONE
+   * service, TWO layers by half of the state (1 = West, 2 = East), identical 55-field schema (PARNO, OWNNAME, SITEADD,
+   * TAXACRES, GISACRES, CNTYNAME, LANDVAL, TOTVAL …). Each county below pins the layer that holds it and is scoped by
+   * CNTYNAME (upper-case, e.g. 'TATE'), the Idaho shape: `sharedLayerUrlConflicts()` requires distinct scopes.
+   * MEASURED through this PR's Cloudflare preview of /gis-proxy (the sandbox itself cannot reach gis.mississippi.edu):
+   * a point query at every one of these 24 county interiors returned a parcel from the pinned layer carrying the
+   * matching CNTYNAME; none returned from the other half. Routed through the gis-proxy because the host's CORS
+   * header could not be read from the sandbox — the relay never depends on it (V# in VERIFICATION). Supersedes the
+   * "two half-state services, shape-mismatch" finding in docs/STATEWIDE-PARCELS.md: a per-county pin IS expressible. */
+  ms_yalobusha: {
+    state: "MS", label: "Yalobusha County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='YALOBUSHA'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, West half) — searches are limited to Yalobusha County. Search by parcel number or a site address.",
+  },
+  ms_union: {
+    state: "MS", label: "Union County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='UNION'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Union County. Search by parcel number or a site address.",
+  },
+  ms_tunica: {
+    state: "MS", label: "Tunica County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='TUNICA'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, West half) — searches are limited to Tunica County. Search by parcel number or a site address.",
+  },
+  ms_tishomingo: {
+    state: "MS", label: "Tishomingo County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='TISHOMINGO'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Tishomingo County. Search by parcel number or a site address.",
+  },
+  ms_tippah: {
+    state: "MS", label: "Tippah County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='TIPPAH'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Tippah County. Search by parcel number or a site address.",
+  },
+  ms_tate: {
+    state: "MS", label: "Tate County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='TATE'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, West half) — searches are limited to Tate County. Search by parcel number or a site address.",
+  },
+  ms_tallahatchie: {
+    state: "MS", label: "Tallahatchie County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='TALLAHATCHIE'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, West half) — searches are limited to Tallahatchie County. Search by parcel number or a site address.",
+  },
+  ms_sunflower: {
+    state: "MS", label: "Sunflower County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='SUNFLOWER'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, West half) — searches are limited to Sunflower County. Search by parcel number or a site address.",
+  },
+  ms_quitman: {
+    state: "MS", label: "Quitman County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='QUITMAN'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, West half) — searches are limited to Quitman County. Search by parcel number or a site address.",
+  },
+  ms_prentiss: {
+    state: "MS", label: "Prentiss County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='PRENTISS'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Prentiss County. Search by parcel number or a site address.",
+  },
+  ms_pontotoc: {
+    state: "MS", label: "Pontotoc County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='PONTOTOC'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Pontotoc County. Search by parcel number or a site address.",
+  },
+  ms_panola: {
+    state: "MS", label: "Panola County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='PANOLA'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, West half) — searches are limited to Panola County. Search by parcel number or a site address.",
+  },
+  ms_marshall: {
+    state: "MS", label: "Marshall County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='MARSHALL'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Marshall County. Search by parcel number or a site address.",
+  },
+  ms_leflore: {
+    state: "MS", label: "Leflore County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='LEFLORE'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, West half) — searches are limited to Leflore County. Search by parcel number or a site address.",
+  },
+  ms_lee: {
+    state: "MS", label: "Lee County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='LEE'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Lee County. Search by parcel number or a site address.",
+  },
+  ms_lafayette: {
+    state: "MS", label: "Lafayette County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='LAFAYETTE'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Lafayette County. Search by parcel number or a site address.",
+  },
+  ms_itawamba: {
+    state: "MS", label: "Itawamba County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='ITAWAMBA'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Itawamba County. Search by parcel number or a site address.",
+  },
+  ms_grenada: {
+    state: "MS", label: "Grenada County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='GRENADA'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, West half) — searches are limited to Grenada County. Search by parcel number or a site address.",
+  },
+  ms_coahoma: {
+    state: "MS", label: "Coahoma County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='COAHOMA'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, West half) — searches are limited to Coahoma County. Search by parcel number or a site address.",
+  },
+  ms_chickasaw: {
+    state: "MS", label: "Chickasaw County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='CHICKASAW'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Chickasaw County. Search by parcel number or a site address.",
+  },
+  ms_calhoun: {
+    state: "MS", label: "Calhoun County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='CALHOUN'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Calhoun County. Search by parcel number or a site address.",
+  },
+  ms_bolivar: {
+    state: "MS", label: "Bolivar County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='BOLIVAR'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, West half) — searches are limited to Bolivar County. Search by parcel number or a site address.",
+  },
+  ms_benton: {
+    state: "MS", label: "Benton County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='BENTON'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Benton County. Search by parcel number or a site address.",
+  },
+  ms_alcorn: {
+    state: "MS", label: "Alcorn County, MS",
+    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
+    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='ALCORN'",
+    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Alcorn County. Search by parcel number or a site address.",
+  },
   /* ⛔ MS HINDS — DELIBERATELY NOT WIRED, correcting the dispatch. The given URL
    * (services8.arcgis.com/dXKNoCSoFLBzx24o/.../Parcels/FeatureServer/0) is published by a Jackson
    * State University student account (`J00937011@students.jsums.edu_OneJSU`), not the county, and
@@ -1984,6 +2139,23 @@ const COUNTIES_RAW = {
     idField: "Name", addrField: "SitusAddress",
     help: "City of Independence parcels (city GIS, Esri-hosted) — searches are limited to the city limits, not all of Jackson County. Search by parcel APN or a site address.",
   },
+  /* NEW-1 (Memphis radius) — Germantown and Collierville, TN: city-scoped because Shelby County has no countywide
+   * open source (see cityScopes.js). MEASURED LIVE from this sandbox 2026-10-15: Germantown 16,107 polygons (extent
+   * -89.846,35.025 to -89.732,35.123), point 35.0868,-89.81 → PARCELID "G0231   00121C", Acres 0.98; Collierville 20,249
+   * polygons, point 35.042,-89.664 → OWNPARCELID "C0244   00853", STATEDAREA 0.052 ac. Both layers carry the parcel ID
+   * and acreage ONLY — there is NO owner or situs column, so the card shows those as absent, never blank-as-zero. */
+  tn_germantown: {
+    state: "TN", label: "City of Germantown, TN",
+    layerUrl: "https://services5.arcgis.com/LnfZzt7NtPrHmp5p/arcgis/rest/services/Parcels_Corlim/FeatureServer/0",
+    idField: "PARCELID",
+    help: "City of Germantown parcels (city GIS, Esri-hosted) — searches are limited to the city limits, not all of Shelby County. Parcel ID and acreage only; no owner is published.",
+  },
+  tn_collierville: {
+    state: "TN", label: "Town of Collierville, TN",
+    layerUrl: "https://services1.arcgis.com/sRmcNvrTVX9Y0AgX/arcgis/rest/services/Certified_Parcels/FeatureServer/0",
+    idField: "OWNPARCELID",
+    help: "Town of Collierville certified parcels (town GIS, Esri-hosted) — searches are limited to the town limits, not all of Shelby County. Parcel ID and acreage only; no owner is published.",
+  },
 };
 
 /* The counties whose full parcel fabric is snapshot-cached to Google Drive (B629) so the map keeps
@@ -2453,7 +2625,12 @@ const COUNTIES_MAP_RAW = {
     // Verify: live — gis.arkansas.gov is blocked in this build environment; shipped on the
     // strength of the official item's cached schema/feature count (docs/STATEWIDE-PARCELS.md).
     state: "AR", center: [34.9, -92.4], zoom: 7, mapServer: null, statewide: true,
-    layerUrl: "https://gis.arkansas.gov/arcgis/rest/services/FEATURESERVICES/Planning_Cadastre/FeatureServer/6",
+    // NEW-1 (Memphis radius, 2026-10-15): now relayed through /gis-proxy — measured through this PR's Cloudflare preview
+    // (the sandbox cannot reach gis.arkansas.gov directly): layer 6 PARCEL_POLYGON_CAMP, Query capability, maxRecordCount
+    // 200, and a point query inside each of the 22 Arkansas counties in the Memphis 100-mile radius returned a real
+    // parcel (ownername, parcelid, adrlabel populated). The relay removes the unmeasured-CORS risk the Verify: live note
+    // above carried.
+    layerUrl: "/gis-proxy/gis.arkansas.gov/arcgis/rest/services/FEATURESERVICES/Planning_Cadastre/FeatureServer/6",
   },
   /* NEW-1 (2026-09-08) — CALIFORNIA and RHODE ISLAND, both of which this repo had on record as
    * `no-free-source` with `Candidate: none found`, and both of which are REAL. The doc's own
@@ -2719,6 +2896,9 @@ const COUNTIES_MAP_RAW = {
   },
   tn_statewide: {
     // Covers 86 of 95 counties (9 use non-state assessment systems and are excluded).
+    // NEW-1: MEASURED 2026-10-15 — 0 features at 7 interior points in Shelby and in Chester (7/7 in the other 16
+    // Memphis-radius TN counties). Declared so those two report "no parcel data" instead of a silent empty layer.
+    excludedCounties: ["Shelby", "Chester"],
     state: "TN", center: [35.9, -86.4], zoom: 7, mapServer: null, statewide: true,
     layerUrl: "https://services1.arcgis.com/YuVBSS7Y1of2Qud1/arcgis/rest/services/Tennessee_Property_Boundaries_Public_Use/FeatureServer/0",
   },
@@ -2806,6 +2986,30 @@ const COUNTIES_MAP_RAW = {
   or_clackamas: { state: "OR", center: [45.3573, -122.6068], zoom: 9, bbox: [44.95, -122.85, 45.55, -121.75], mapServer: null, layerUrl: COUNTIES.or_clackamas.layerUrl },
   ky_jefferson: { state: "KY", center: [38.2527, -85.7585], zoom: 10, bbox: [38.05, -85.95, 38.40, -85.45], mapServer: null, layerUrl: COUNTIES.ky_jefferson.layerUrl },
   ms_desoto: { state: "MS", center: [34.8259, -89.9926], zoom: 10, bbox: [34.62, -90.18, 35.00, -89.65], mapServer: null, layerUrl: COUNTIES.ms_desoto.layerUrl },
+  ms_yalobusha: { state: "MS", center: [34.0314, -89.709], zoom: 10, bbox: [33.84, -89.96, 34.23, -89.48], mapServer: null, layerUrl: COUNTIES.ms_yalobusha.layerUrl, scopeWhere: "CNTYNAME='YALOBUSHA'" },
+  ms_union: { state: "MS", center: [34.4971, -88.9952], zoom: 10, bbox: [34.34, -89.27, 34.64, -88.69], mapServer: null, layerUrl: COUNTIES.ms_union.layerUrl, scopeWhere: "CNTYNAME='UNION'" },
+  ms_tunica: { state: "MS", center: [34.655, -90.3719], zoom: 10, bbox: [34.4, -90.62, 34.92, -90.17], mapServer: null, layerUrl: COUNTIES.ms_tunica.layerUrl, scopeWhere: "CNTYNAME='TUNICA'" },
+  ms_tishomingo: { state: "MS", center: [34.747, -88.2308], zoom: 10, bbox: [34.44, -88.38, 35.03, -88.06], mapServer: null, layerUrl: COUNTIES.ms_tishomingo.layerUrl, scopeWhere: "CNTYNAME='TISHOMINGO'" },
+  ms_tippah: { state: "MS", center: [34.7761, -88.8994], zoom: 10, bbox: [34.57, -89.11, 35.03, -88.68], mapServer: null, layerUrl: COUNTIES.ms_tippah.layerUrl, scopeWhere: "CNTYNAME='TIPPAH'" },
+  ms_tate: { state: "MS", center: [34.6584, -89.9435], zoom: 10, bbox: [34.53, -90.27, 34.81, -89.63], mapServer: null, layerUrl: COUNTIES.ms_tate.layerUrl, scopeWhere: "CNTYNAME='TATE'" },
+  ms_tallahatchie: { state: "MS", center: [33.9525, -90.1753], zoom: 10, bbox: [33.66, -90.48, 34.2, -89.9], mapServer: null, layerUrl: COUNTIES.ms_tallahatchie.layerUrl, scopeWhere: "CNTYNAME='TALLAHATCHIE'" },
+  ms_sunflower: { state: "MS", center: [33.6069, -90.5868], zoom: 10, bbox: [33.25, -90.79, 34.02, -90.42], mapServer: null, layerUrl: COUNTIES.ms_sunflower.layerUrl, scopeWhere: "CNTYNAME='SUNFLOWER'" },
+  ms_quitman: { state: "MS", center: [34.2573, -90.2875], zoom: 10, bbox: [34.05, -90.48, 34.55, -90.1], mapServer: null, layerUrl: COUNTIES.ms_quitman.layerUrl, scopeWhere: "CNTYNAME='QUITMAN'" },
+  ms_prentiss: { state: "MS", center: [34.6244, -88.5084], zoom: 10, bbox: [34.44, -88.76, 34.79, -88.29], mapServer: null, layerUrl: COUNTIES.ms_prentiss.layerUrl, scopeWhere: "CNTYNAME='PRENTISS'" },
+  ms_pontotoc: { state: "MS", center: [34.2301, -89.0316], zoom: 10, bbox: [34.05, -89.27, 34.41, -88.79], mapServer: null, layerUrl: COUNTIES.ms_pontotoc.layerUrl, scopeWhere: "CNTYNAME='PONTOTOC'" },
+  ms_panola: { state: "MS", center: [34.3706, -89.9476], zoom: 10, bbox: [34.13, -90.23, 34.6, -89.69], mapServer: null, layerUrl: COUNTIES.ms_panola.layerUrl, scopeWhere: "CNTYNAME='PANOLA'" },
+  ms_marshall: { state: "MS", center: [34.77, -89.4972], zoom: 10, bbox: [34.47, -89.75, 35.03, -89.21], mapServer: null, layerUrl: COUNTIES.ms_marshall.layerUrl, scopeWhere: "CNTYNAME='MARSHALL'" },
+  ms_leflore: { state: "MS", center: [33.5547, -90.2977], zoom: 10, bbox: [33.22, -90.48, 33.85, -90.06], mapServer: null, layerUrl: COUNTIES.ms_leflore.layerUrl, scopeWhere: "CNTYNAME='LEFLORE'" },
+  ms_lee: { state: "MS", center: [34.2964, -88.6725], zoom: 10, bbox: [34.05, -88.85, 34.55, -88.5], mapServer: null, layerUrl: COUNTIES.ms_lee.layerUrl, scopeWhere: "CNTYNAME='LEE'" },
+  ms_lafayette: { state: "MS", center: [34.3636, -89.4804], zoom: 10, bbox: [34.14, -89.75, 34.6, -89.21], mapServer: null, layerUrl: COUNTIES.ms_lafayette.layerUrl, scopeWhere: "CNTYNAME='LAFAYETTE'" },
+  ms_itawamba: { state: "MS", center: [34.284, -88.3547], zoom: 10, bbox: [34.06, -88.57, 34.5, -88.12], mapServer: null, layerUrl: COUNTIES.ms_itawamba.layerUrl, scopeWhere: "CNTYNAME='ITAWAMBA'" },
+  ms_grenada: { state: "MS", center: [33.7724, -89.7969], zoom: 10, bbox: [33.65, -90.16, 33.93, -89.47], mapServer: null, layerUrl: COUNTIES.ms_grenada.layerUrl, scopeWhere: "CNTYNAME='GRENADA'" },
+  ms_coahoma: { state: "MS", center: [34.2339, -90.6024], zoom: 10, bbox: [33.96, -90.98, 34.56, -90.37], mapServer: null, layerUrl: COUNTIES.ms_coahoma.layerUrl, scopeWhere: "CNTYNAME='COAHOMA'" },
+  ms_chickasaw: { state: "MS", center: [33.925, -88.9414], zoom: 10, bbox: [33.71, -89.21, 34.11, -88.68], mapServer: null, layerUrl: COUNTIES.ms_chickasaw.layerUrl, scopeWhere: "CNTYNAME='CHICKASAW'" },
+  ms_calhoun: { state: "MS", center: [33.9395, -89.3322], zoom: 10, bbox: [33.69, -89.54, 34.2, -89.1], mapServer: null, layerUrl: COUNTIES.ms_calhoun.layerUrl, scopeWhere: "CNTYNAME='CALHOUN'" },
+  ms_bolivar: { state: "MS", center: [33.8002, -90.8788], zoom: 10, bbox: [33.51, -91.26, 34.16, -90.63], mapServer: null, layerUrl: COUNTIES.ms_bolivar.layerUrl, scopeWhere: "CNTYNAME='BOLIVAR'" },
+  ms_benton: { state: "MS", center: [34.8234, -89.1795], zoom: 10, bbox: [34.56, -89.37, 35.03, -88.98], mapServer: null, layerUrl: COUNTIES.ms_benton.layerUrl, scopeWhere: "CNTYNAME='BENTON'" },
+  ms_alcorn: { state: "MS", center: [34.8875, -88.5694], zoom: 10, bbox: [34.73, -88.84, 35.04, -88.32], mapServer: null, layerUrl: COUNTIES.ms_alcorn.layerUrl, scopeWhere: "CNTYNAME='ALCORN'" },
   ok_oklahoma: { state: "OK", center: [35.4676, -97.5164], zoom: 10, bbox: [35.20, -97.83, 35.65, -97.20], mapServer: null, layerUrl: COUNTIES.ok_oklahoma.layerUrl },
   ok_tulsa: { state: "OK", center: [36.1540, -95.9928], zoom: 10, bbox: [35.95, -96.20, 36.35, -95.70], mapServer: null, layerUrl: COUNTIES.ok_tulsa.layerUrl },
   la_eastbatonrouge: { state: "LA", center: [30.4515, -91.1871], zoom: 10, bbox: [30.30, -91.35, 30.70, -90.85], mapServer: null, layerUrl: COUNTIES.la_eastbatonrouge.layerUrl },
@@ -3001,6 +3205,18 @@ const COUNTIES_MAP_RAW = {
     bbox: [39.0176, -94.4814, 39.1398, -94.2159],
     cityScoped: true,
     mapServer: null, layerUrl: COUNTIES.mo_independence.layerUrl,
+  },
+  tn_germantown: {
+    state: "TN", center: [35.0868, -89.81], zoom: 12,
+    bbox: [35.0287, -89.8456, 35.1209, -89.7353],
+    cityScoped: true,
+    mapServer: null, layerUrl: COUNTIES.tn_germantown.layerUrl,
+  },
+  tn_collierville: {
+    state: "TN", center: [35.042, -89.664], zoom: 12,
+    bbox: [34.9947, -89.7596, 35.1108, -89.6409],
+    cityScoped: true,
+    mapServer: null, layerUrl: COUNTIES.tn_collierville.layerUrl,
   },
 };
 
@@ -3555,7 +3771,15 @@ export function countyIdentity(lat, lng) {
    * claim) but the identity now names the covering layer so `noParcelSourceNote` stays silent.
    * Texas is excluded on purpose: its statewide layer is the derived fallback behind every TX county
    * row, and a TX county that still reaches here keeps its gap sentence. */
-  const sw = ans.state === "TX" ? [] : statewideKeysForState(ans.state);
+  /* NEW-1 (Memphis radius) — a statewide layer that is NOT actually statewide declares the counties it leaves out
+   * (`excludedCounties`, county names as the polygon asset spells them minus the designation). Those counties must
+   * say "no parcel data", not borrow the statewide layer's cover and then silently return nothing: Tennessee's
+   * Comptroller layer omits Shelby and Chester (measured 0 features at 7 interior points each). */
+  const slug = (n) => String(n || "").toLowerCase().replace(COUNTY_DESIGNATION_RE, "").replace(/[^a-z]/g, "");
+  const sw = ans.state === "TX" ? [] : statewideKeysForState(ans.state).filter((k) => {
+    const ex = COUNTIES_MAP[k] && COUNTIES_MAP[k].excludedCounties;
+    return !(ex && ex.some((e) => slug(e) === slug(ans.name)));
+  });
   return {
     status: "no-source", key: null, name: ans.name, state: ans.state, nearEdge: !!ans.nearEdge,
     ...(sw.length ? { statewideKey: sw[0] } : {}),
