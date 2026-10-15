@@ -91,7 +91,28 @@ export function extractMarkupAnnotations(clone, ctx) {
   const patterns = {};
   const descriptors = [];
   const nodes = Array.from(clone.querySelectorAll("[data-feature]"));
+  /* NEW-1 (print ignores send-to-back) — A PDF ANNOTATION ALWAYS PAINTS ABOVE THE PAGE. A markup the user
+     sent behind the plan (or any annotation that sits under a building, court, parcel, placed drawing…)
+     lifted out of the page would therefore jump on top of everything it was behind. Only annotations that
+     paint AFTER the last piece of page content form the top of the stack and may be lifted; every other one
+     stays in the clone and is printed into the page, exactly where the canvas shows it. This also keeps
+     relative order intact: a flattened annotation is always beneath every lifted one, as it was on screen. */
+  const lastContent = Array.from(clone.querySelectorAll("[data-feature],[data-overlay-id],[data-gis-front-band]")).filter((n) => {
+    const key = n.getAttribute("data-feature");
+    if (key == null) return true; // a placed drawing / the lifted GIS band is page content
+    const colon = key.indexOf(":");
+    const fam = key.slice(0, colon), fid = key.slice(colon + 1);
+    if (fam === "callout" || fam === "measure") return false;
+    // DELIBERATE DEVIATION (stated, not accidental): parcel outline / chip nodes paint after on-top markups on the
+    // canvas, so counting them would pin EVERY markup into the page and end editable markups altogether. They are
+    // thin linework, and this export has always put a lifted annotation over them; solid site content is what counts.
+    if (fam === "parcel") return false;
+    if (fam === "markup") { const m = markups.find((x) => x && String(x.id) === fid); return !(m && ANNOTATION_KINDS.includes(m.kind)); }
+    return true;
+  }).pop() || null;
+  const flattened = [];
   for (const node of nodes) {
+    if (lastContent && node !== lastContent && !(node.compareDocumentPosition(lastContent) & 2 /* PRECEDING */) && isAnnotationKey(node, markups)) { flattened.push(node.getAttribute("data-feature")); continue; }
     const key = node.getAttribute("data-feature") || "";
     const colon = key.indexOf(":");
     const family = key.slice(0, colon), id = key.slice(colon + 1);
@@ -130,5 +151,16 @@ export function extractMarkupAnnotations(clone, ctx) {
       });
     }
   }
-  return { descriptors, patterns };
+  return { descriptors, patterns, flattened };
+}
+
+/* Is this feature node an annotation-class object (the kind that would otherwise be lifted)? */
+function isAnnotationKey(node, markups) {
+  const key = node.getAttribute("data-feature") || "";
+  const colon = key.indexOf(":");
+  const fam = key.slice(0, colon), id = key.slice(colon + 1);
+  if (fam === "callout" || fam === "measure") return true;
+  if (fam !== "markup") return false;
+  const m = (markups || []).find((x) => x && String(x.id) === id);
+  return !!(m && ANNOTATION_KINDS.includes(m.kind));
 }

@@ -23403,7 +23403,21 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
       return built && built.clone ? built.clone.outerHTML : null;
     };
     window.__plannerExportSvg = hook;
-    return () => { if (window.__plannerExportSvg === hook) window.__plannerExportSvg = null; }; // NEW-3 — see the note on __plannerView
+    /* NEW-1 (print ignores send-to-back) — the REAL editable-PDF composition (the default "Flatten markups" OFF
+       path): which annotations became native PDF annotations (they paint ABOVE the page) and which stayed in the
+       page picture. Read-only; same gate. */
+    const composedHook = async () => {
+      const { createExportSheet } = await loadExportSheet();
+      const c = await createExportSheet(exportCtx()).buildComposedSheet("letter", "landscape", true, true, "", "", true, null, true, true);
+      if (!c) return null;
+      return {
+        sheetSvg: c.sheetSvg,
+        liftedIds: (c.annotationSet?.annots || []).length,
+        keptInPage: c.annotationsKeptInPage || 0,
+      };
+    };
+    window.__plannerExportComposed = composedHook;
+    return () => { if (window.__plannerExportSvg === hook) window.__plannerExportSvg = null; if (window.__plannerExportComposed === composedHook) window.__plannerExportComposed = null; }; // NEW-3 — see the note on __plannerView
   });
   // One markup → its SVG node. Extracted from the old inline map so it can paint in both passes. A
   // plain render helper invoked via .map(renderMarkupNode) — NOT a component, so no remount concern.
