@@ -144,6 +144,18 @@ const publishedButUnprobed =
 /* The four counties whose OWN parcel service is live-verified share one help shape too. */
 const ownHelp = (source, idKind) => `${source}. Search by ${idKind} or a site address.`;
 
+/* NEW-1 (Memphis radius) — the 24 MARIS-served Mississippi counties, as one compact table so the Site route pays for
+ * data, not 24 copies of prose. Row: [key slug, county name, MARIS layer (1 West / 2 East), centre lat, lng, padded bbox]. */
+const MARIS_SVC = "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/";
+const MS_MARIS_ROWS = [["yalobusha","Yalobusha",1,34.031,-89.709,[33.84,-89.96,34.23,-89.48]],["union","Union",2,34.497,-88.995,[34.34,-89.27,34.64,-88.69]],["tunica","Tunica",1,34.655,-90.372,[34.4,-90.62,34.92,-90.17]],["tishomingo","Tishomingo",2,34.747,-88.231,[34.44,-88.38,35.03,-88.06]],["tippah","Tippah",2,34.776,-88.899,[34.57,-89.11,35.03,-88.68]],["tate","Tate",1,34.658,-89.943,[34.53,-90.27,34.81,-89.63]],["tallahatchie","Tallahatchie",1,33.953,-90.175,[33.66,-90.48,34.2,-89.9]],["sunflower","Sunflower",1,33.607,-90.587,[33.25,-90.79,34.02,-90.42]],["quitman","Quitman",1,34.257,-90.288,[34.05,-90.48,34.55,-90.1]],["prentiss","Prentiss",2,34.624,-88.508,[34.44,-88.76,34.79,-88.29]],["pontotoc","Pontotoc",2,34.23,-89.032,[34.05,-89.27,34.41,-88.79]],["panola","Panola",1,34.371,-89.948,[34.13,-90.23,34.6,-89.69]],["marshall","Marshall",2,34.77,-89.497,[34.47,-89.75,35.03,-89.21]],["leflore","Leflore",1,33.555,-90.298,[33.22,-90.48,33.85,-90.06]],["lee","Lee",2,34.296,-88.672,[34.05,-88.85,34.55,-88.5]],["lafayette","Lafayette",2,34.364,-89.48,[34.14,-89.75,34.6,-89.21]],["itawamba","Itawamba",2,34.284,-88.355,[34.06,-88.57,34.5,-88.12]],["grenada","Grenada",1,33.772,-89.797,[33.65,-90.16,33.93,-89.47]],["coahoma","Coahoma",1,34.234,-90.602,[33.96,-90.98,34.56,-90.37]],["chickasaw","Chickasaw",2,33.925,-88.941,[33.71,-89.21,34.11,-88.68]],["calhoun","Calhoun",2,33.939,-89.332,[33.69,-89.54,34.2,-89.1]],["bolivar","Bolivar",1,33.8,-90.879,[33.51,-91.26,34.16,-90.63]],["benton","Benton",2,34.823,-89.179,[34.56,-89.37,35.03,-88.98]],["alcorn","Alcorn",2,34.887,-88.569,[34.73,-88.84,35.04,-88.32]]];
+const msMarisRaw = () => Object.fromEntries(MS_MARIS_ROWS.map(([k, n, ly]) => ["ms_" + k, {
+  state: "MS", label: n + " County, MS", layerUrl: MARIS_SVC + ly, idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='" + n.toUpperCase() + "'",
+  help: "Mississippi statewide parcels (MARIS / MDEQ, " + (ly === 1 ? "West" : "East") + " half) — searches are limited to " + n + " County. Search by parcel number or a site address.",
+}]));
+const msMarisMap = () => Object.fromEntries(MS_MARIS_ROWS.map(([k, n, ly, la, ln, bb]) => ["ms_" + k, {
+  state: "MS", center: [la, ln], zoom: 10, bbox: bb, mapServer: null, layerUrl: MARIS_SVC + ly, scopeWhere: "CNTYNAME='" + n.toUpperCase() + "'",
+}]));
+
 const COUNTIES_RAW = {
   harris: {
     state: "TX",
@@ -951,12 +963,7 @@ const COUNTIES_RAW = {
     idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='BENTON'",
     help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Benton County. Search by parcel number or a site address.",
   },
-  ms_alcorn: {
-    state: "MS", label: "Alcorn County, MS",
-    layerUrl: "/gis-proxy/gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2",
-    idField: "PARNO", addrField: "SITEADD", scopeWhere: "CNTYNAME='ALCORN'",
-    help: "Mississippi statewide parcels (MARIS / MDEQ, East half) — searches are limited to Alcorn County. Search by parcel number or a site address.",
-  },
+  ...msMarisRaw(),
   /* ⛔ MS HINDS — DELIBERATELY NOT WIRED, correcting the dispatch. The given URL
    * (services8.arcgis.com/dXKNoCSoFLBzx24o/.../Parcels/FeatureServer/0) is published by a Jackson
    * State University student account (`J00937011@students.jsums.edu_OneJSU`), not the county, and
@@ -2986,30 +2993,7 @@ const COUNTIES_MAP_RAW = {
   or_clackamas: { state: "OR", center: [45.3573, -122.6068], zoom: 9, bbox: [44.95, -122.85, 45.55, -121.75], mapServer: null, layerUrl: COUNTIES.or_clackamas.layerUrl },
   ky_jefferson: { state: "KY", center: [38.2527, -85.7585], zoom: 10, bbox: [38.05, -85.95, 38.40, -85.45], mapServer: null, layerUrl: COUNTIES.ky_jefferson.layerUrl },
   ms_desoto: { state: "MS", center: [34.8259, -89.9926], zoom: 10, bbox: [34.62, -90.18, 35.00, -89.65], mapServer: null, layerUrl: COUNTIES.ms_desoto.layerUrl },
-  ms_yalobusha: { state: "MS", center: [34.0314, -89.709], zoom: 10, bbox: [33.84, -89.96, 34.23, -89.48], mapServer: null, layerUrl: COUNTIES.ms_yalobusha.layerUrl, scopeWhere: "CNTYNAME='YALOBUSHA'" },
-  ms_union: { state: "MS", center: [34.4971, -88.9952], zoom: 10, bbox: [34.34, -89.27, 34.64, -88.69], mapServer: null, layerUrl: COUNTIES.ms_union.layerUrl, scopeWhere: "CNTYNAME='UNION'" },
-  ms_tunica: { state: "MS", center: [34.655, -90.3719], zoom: 10, bbox: [34.4, -90.62, 34.92, -90.17], mapServer: null, layerUrl: COUNTIES.ms_tunica.layerUrl, scopeWhere: "CNTYNAME='TUNICA'" },
-  ms_tishomingo: { state: "MS", center: [34.747, -88.2308], zoom: 10, bbox: [34.44, -88.38, 35.03, -88.06], mapServer: null, layerUrl: COUNTIES.ms_tishomingo.layerUrl, scopeWhere: "CNTYNAME='TISHOMINGO'" },
-  ms_tippah: { state: "MS", center: [34.7761, -88.8994], zoom: 10, bbox: [34.57, -89.11, 35.03, -88.68], mapServer: null, layerUrl: COUNTIES.ms_tippah.layerUrl, scopeWhere: "CNTYNAME='TIPPAH'" },
-  ms_tate: { state: "MS", center: [34.6584, -89.9435], zoom: 10, bbox: [34.53, -90.27, 34.81, -89.63], mapServer: null, layerUrl: COUNTIES.ms_tate.layerUrl, scopeWhere: "CNTYNAME='TATE'" },
-  ms_tallahatchie: { state: "MS", center: [33.9525, -90.1753], zoom: 10, bbox: [33.66, -90.48, 34.2, -89.9], mapServer: null, layerUrl: COUNTIES.ms_tallahatchie.layerUrl, scopeWhere: "CNTYNAME='TALLAHATCHIE'" },
-  ms_sunflower: { state: "MS", center: [33.6069, -90.5868], zoom: 10, bbox: [33.25, -90.79, 34.02, -90.42], mapServer: null, layerUrl: COUNTIES.ms_sunflower.layerUrl, scopeWhere: "CNTYNAME='SUNFLOWER'" },
-  ms_quitman: { state: "MS", center: [34.2573, -90.2875], zoom: 10, bbox: [34.05, -90.48, 34.55, -90.1], mapServer: null, layerUrl: COUNTIES.ms_quitman.layerUrl, scopeWhere: "CNTYNAME='QUITMAN'" },
-  ms_prentiss: { state: "MS", center: [34.6244, -88.5084], zoom: 10, bbox: [34.44, -88.76, 34.79, -88.29], mapServer: null, layerUrl: COUNTIES.ms_prentiss.layerUrl, scopeWhere: "CNTYNAME='PRENTISS'" },
-  ms_pontotoc: { state: "MS", center: [34.2301, -89.0316], zoom: 10, bbox: [34.05, -89.27, 34.41, -88.79], mapServer: null, layerUrl: COUNTIES.ms_pontotoc.layerUrl, scopeWhere: "CNTYNAME='PONTOTOC'" },
-  ms_panola: { state: "MS", center: [34.3706, -89.9476], zoom: 10, bbox: [34.13, -90.23, 34.6, -89.69], mapServer: null, layerUrl: COUNTIES.ms_panola.layerUrl, scopeWhere: "CNTYNAME='PANOLA'" },
-  ms_marshall: { state: "MS", center: [34.77, -89.4972], zoom: 10, bbox: [34.47, -89.75, 35.03, -89.21], mapServer: null, layerUrl: COUNTIES.ms_marshall.layerUrl, scopeWhere: "CNTYNAME='MARSHALL'" },
-  ms_leflore: { state: "MS", center: [33.5547, -90.2977], zoom: 10, bbox: [33.22, -90.48, 33.85, -90.06], mapServer: null, layerUrl: COUNTIES.ms_leflore.layerUrl, scopeWhere: "CNTYNAME='LEFLORE'" },
-  ms_lee: { state: "MS", center: [34.2964, -88.6725], zoom: 10, bbox: [34.05, -88.85, 34.55, -88.5], mapServer: null, layerUrl: COUNTIES.ms_lee.layerUrl, scopeWhere: "CNTYNAME='LEE'" },
-  ms_lafayette: { state: "MS", center: [34.3636, -89.4804], zoom: 10, bbox: [34.14, -89.75, 34.6, -89.21], mapServer: null, layerUrl: COUNTIES.ms_lafayette.layerUrl, scopeWhere: "CNTYNAME='LAFAYETTE'" },
-  ms_itawamba: { state: "MS", center: [34.284, -88.3547], zoom: 10, bbox: [34.06, -88.57, 34.5, -88.12], mapServer: null, layerUrl: COUNTIES.ms_itawamba.layerUrl, scopeWhere: "CNTYNAME='ITAWAMBA'" },
-  ms_grenada: { state: "MS", center: [33.7724, -89.7969], zoom: 10, bbox: [33.65, -90.16, 33.93, -89.47], mapServer: null, layerUrl: COUNTIES.ms_grenada.layerUrl, scopeWhere: "CNTYNAME='GRENADA'" },
-  ms_coahoma: { state: "MS", center: [34.2339, -90.6024], zoom: 10, bbox: [33.96, -90.98, 34.56, -90.37], mapServer: null, layerUrl: COUNTIES.ms_coahoma.layerUrl, scopeWhere: "CNTYNAME='COAHOMA'" },
-  ms_chickasaw: { state: "MS", center: [33.925, -88.9414], zoom: 10, bbox: [33.71, -89.21, 34.11, -88.68], mapServer: null, layerUrl: COUNTIES.ms_chickasaw.layerUrl, scopeWhere: "CNTYNAME='CHICKASAW'" },
-  ms_calhoun: { state: "MS", center: [33.9395, -89.3322], zoom: 10, bbox: [33.69, -89.54, 34.2, -89.1], mapServer: null, layerUrl: COUNTIES.ms_calhoun.layerUrl, scopeWhere: "CNTYNAME='CALHOUN'" },
-  ms_bolivar: { state: "MS", center: [33.8002, -90.8788], zoom: 10, bbox: [33.51, -91.26, 34.16, -90.63], mapServer: null, layerUrl: COUNTIES.ms_bolivar.layerUrl, scopeWhere: "CNTYNAME='BOLIVAR'" },
-  ms_benton: { state: "MS", center: [34.8234, -89.1795], zoom: 10, bbox: [34.56, -89.37, 35.03, -88.98], mapServer: null, layerUrl: COUNTIES.ms_benton.layerUrl, scopeWhere: "CNTYNAME='BENTON'" },
-  ms_alcorn: { state: "MS", center: [34.8875, -88.5694], zoom: 10, bbox: [34.73, -88.84, 35.04, -88.32], mapServer: null, layerUrl: COUNTIES.ms_alcorn.layerUrl, scopeWhere: "CNTYNAME='ALCORN'" },
+  ...msMarisMap(),
   ok_oklahoma: { state: "OK", center: [35.4676, -97.5164], zoom: 10, bbox: [35.20, -97.83, 35.65, -97.20], mapServer: null, layerUrl: COUNTIES.ok_oklahoma.layerUrl },
   ok_tulsa: { state: "OK", center: [36.1540, -95.9928], zoom: 10, bbox: [35.95, -96.20, 36.35, -95.70], mapServer: null, layerUrl: COUNTIES.ok_tulsa.layerUrl },
   la_eastbatonrouge: { state: "LA", center: [30.4515, -91.1871], zoom: 10, bbox: [30.30, -91.35, 30.70, -90.85], mapServer: null, layerUrl: COUNTIES.la_eastbatonrouge.layerUrl },
