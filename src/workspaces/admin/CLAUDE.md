@@ -101,3 +101,13 @@ parcel-coverage verify script under the repo's ui-audit folder.
 
 <!-- Keep this pointer current: if you rename/move/delete a key file in this folder, update the
      lines above in the same commit. The doc-pointer-audit check fails CI on a stale reference. -->
+
+**Parcel coverage map, interaction pass (B2270992–B2270994, 2026-10-15).** A plain wheel / two-finger scroll over the map is the PAGE's —
+the map zooms only on Ctrl/Cmd+wheel (a pinch), +/−, or a touch pinch (`lib/coverageMapInteraction.js`: `wheelIntent`, `wheelZoomFactor`,
+`isTap`, `placeNear`, `mapHeightCap`); its height is capped to what is left under the header + legend. Hover = a tooltip at the cursor; a
+zero-movement click/tap opens a details card (`parcelCoverage.countyDetail` / `openRequestsFor`; pointer capture is taken only once a press
+becomes a drag, so a click keeps its own target). City-level sources are placed on the county they sit in (the city-scope module's `counties` →
+`cityParcels` / `cityOnly`, counted apart in `totals.cityOnly`); anything unplaceable logs to the console, never the page. Guards: repo-root
+`test/` **coverageMapInteraction**, **parcelCoverage**; ui-audit **verify-admin-parcel-coverage** (local, real Chromium) and
+**verify-admin-parcel-coverage-live** (deployed build, mocked `is_admin`, V1696128).
+
