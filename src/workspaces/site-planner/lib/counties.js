@@ -3546,7 +3546,13 @@ export function candidateCountiesForPoint(lat, lng) {
    * by it, and those two keep returning exactly `["nv_statewide"]` / `["oh_statewide"]`. Michigan
    * has no composite, so Taylor and Livonia correctly return NOTHING — and `noParcelSourceNote`
    * turns that into the county-naming sentence at every call site. */
-  if (identity.status === "no-source" && !identity.nearEdge) return statewideFor(identity.state);
+  /* NEW-1 (Memphis radius ×2) — a composite that DECLARES this county excluded (`excludedCounties`) cannot answer for
+   * it, so it is not a candidate either. Before this, a Shelby County click still queried Tennessee's statewide layer
+   * (which holds none of Shelby): a healthy answer only cost a round trip, but a slow or dead layer turned the honest
+   * "Shelby County — no parcel data wired here yet" into "the parcel server isn't responding". */
+  if (identity.status === "no-source" && !identity.nearEdge) {
+    return statewideFor(identity.state).filter((k) => !statewideExcludesCounty(k, identity.name));
+  }
 
   if (!within.length) {
     /* The geometry may know the county even when no bbox matched — Conroe and Texas City are
@@ -3735,6 +3741,15 @@ export function countyForView(lat, lng) {
  * reports its own county in its attributes.
  *
  * Pure. */
+/* NEW-1 (Memphis radius) — does statewide composite `key` declare county `name` (as the polygon asset spells it, with or
+ * without its designation) as one it does NOT cover? The ONE answer `countyIdentity` and `candidateCountiesForPoint` share. */
+export function statewideExcludesCounty(key, name) {
+  const ex = COUNTIES_MAP[key] && COUNTIES_MAP[key].excludedCounties;
+  if (!ex || !name) return false;
+  const slug = (n) => String(n || "").toLowerCase().replace(COUNTY_DESIGNATION_RE, "").replace(/[^a-z]/g, "");
+  return ex.some((e) => slug(e) === slug(name));
+}
+
 export function countyIdentity(lat, lng) {
   // City scope first (B1583296) — a point inside Detroit is a real, sourced answer, not a county
   // fallback. Everywhere else in Wayne County (or any other point) falls through unchanged to the
@@ -3759,15 +3774,21 @@ export function countyIdentity(lat, lng) {
    * (`excludedCounties`, county names as the polygon asset spells them minus the designation). Those counties must
    * say "no parcel data", not borrow the statewide layer's cover and then silently return nothing: Tennessee's
    * Comptroller layer omits Shelby and Chester (measured 0 features at 7 interior points each). */
-  const slug = (n) => String(n || "").toLowerCase().replace(COUNTY_DESIGNATION_RE, "").replace(/[^a-z]/g, "");
-  const sw = ans.state === "TX" ? [] : statewideKeysForState(ans.state).filter((k) => {
-    const ex = COUNTIES_MAP[k] && COUNTIES_MAP[k].excludedCounties;
-    return !(ex && ex.some((e) => slug(e) === slug(ans.name)));
-  });
+  const sw = ans.state === "TX" ? [] : statewideKeysForState(ans.state).filter((k) => !statewideExcludesCounty(k, ans.name));
   return {
     status: "no-source", key: null, name: ans.name, state: ans.state, nearEdge: !!ans.nearEdge,
     ...(sw.length ? { statewideKey: sw[0] } : {}),
   };
+}
+
+/* NEW-1 (Memphis radius ×2) — a click that lands before the nationwide county polygons are resident cannot name its
+ * county: `countyIdentity` answers `pending`, `noParcelSourceNote` has nothing to say, and every lot-picking flow fell
+ * back to "No parcel right there — zoom in…", blaming the user's aim for a gap in coverage. Every flow that picks a lot
+ * awaits this first; it is a cached promise (instant once loaded) and never throws — a failed load leaves the old
+ * behaviour, which is already LOUD inside `loadCountyPolygons`. */
+export async function ensureCountyGeometryAt(lat, lng) {
+  if (countyIdentity(lat, lng).status !== "pending") return;
+  try { await loadCountyPolygons(); } catch (_e) { /* reported by loadCountyPolygons */ }
 }
 
 /* The owner-facing sentence for a resolved county with no parcel source, or null when there is

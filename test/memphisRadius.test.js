@@ -100,3 +100,21 @@ describe("Arkansas statewide is relayed, and its host is allow-listed", () => {
     expect(ALLOWED_HOSTS.has("gis.arkansas.gov")).toBe(true);
   });
 });
+
+/* NEW-1 (Memphis radius ×2) — the owner's report: a Shelby click in the map's lot picker. A county a composite declares
+ * excluded must not be routed to that composite at all (a slow/dead statewide layer would otherwise turn the honest gap
+ * into an outage message). RED on the merged B2289168 code, which returned ["tn_statewide"] for every one of these. */
+describe("excluded counties are not routed to the statewide layer that excludes them", () => {
+  const SHELBY = [["airport east (owner's screenshot)", 35.03, -89.95], ["Getwell / Shelby Dr", 35.02, -89.92],
+    ["downtown Memphis", 35.1495, -90.049], ["Bartlett", 35.205, -89.87], ["Millington", 35.34, -89.90]];
+  it.each(SHELBY)("Shelby — %s: no candidate, the county gap sentence", (_l, lat, lng) => {
+    expect(candidateCountiesForPoint(lat, lng)).toEqual([]);
+    expect(noParcelSourceNote(countyIdentity(lat, lng))).toBe("Shelby County — no parcel data wired here yet.");
+  });
+  it("Chester (Henderson TN): no candidate", () => {
+    expect(candidateCountiesForPoint(35.4398, -88.6420)).toEqual([]);
+  });
+  it("a covered TN county (Tipton) still routes to the statewide layer", () => {
+    expect(candidateCountiesForPoint(35.564, -89.6495)).toContain("tn_statewide");
+  });
+});

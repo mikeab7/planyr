@@ -234,7 +234,7 @@ import { bestMeasurer } from "../../shared/markup/textWrap.js"; // B548818 — m
 import { CROSS_BAND_BEHIND, CROSS_BAND_FRONT } from "./lib/paintOrder.js"; // B548819 — ONE name for the cross-band command
 import { nearestRectPerimeterPoint, calloutCornerRadius } from "../../shared/markup/geometry.js";
 import { calloutDblZone } from "../../shared/markup/hitTest.js";
-import { COUNTIES, COUNTIES_MAP, countyKeyForName, candidateCountiesForPoint, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote, displayFloorForPoint, displaySourcesForView, statewideKeysForState, statewideBackupScope, isStatewideLayerUrl, loadCountyPolygons } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, countyKeyForName, candidateCountiesForPoint, STATEWIDE_KEYS, countyIdentity, noParcelSourceNote, ensureCountyGeometryAt, displayFloorForPoint, displaySourcesForView, statewideKeysForState, statewideBackupScope, isStatewideLayerUrl, loadCountyPolygons } from "./lib/counties.js";
 import { lookupParcels } from "./lib/parcelQuery.js";
 import {
   resolveLayerUrl,
@@ -16657,6 +16657,7 @@ export default function SitePlanner({ active = true, siteId = null, overlays, se
     setTimeout(() => { if (!settled && tok === identifyTok.current) { setJurInfo(null); setIdentifyRes({ busy: true }); } }, 0);
     try {
       const [lat, lng] = feetToLatLng(fp, origin.lat, origin.lon);
+      await ensureCountyGeometryAt(lat, lng); // NEW-1 (Memphis radius ×2) — name the county even on an early click
       // NEW-1 (parcel routing) — candidates for THIS point, not the site's frozen county.
       const { candidates } = await candidatesAtPoint(lat, lng);
       if (tok !== identifyTok.current) return;

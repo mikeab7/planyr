@@ -4,7 +4,7 @@ import { gestureJustEnded } from "./lib/handleGestureClock.js";
 import { validateName, announceNameNotice } from "../../shared/names/nameCore.js";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState, statewideBackupScope, displayFloorForView } from "./lib/counties.js";
+import { COUNTIES, COUNTIES_MAP, candidateCountiesForPoint, countyForView, countyKeyForName, STATEWIDE_KEYS, SNAPSHOT_COUNTIES, isStatewideLayerUrl, trimLayerUrl, loadCountyPolygons, countyIdentity, noParcelSourceNote, ensureCountyGeometryAt, countyBboxIntersectsView, displaySourcesForView, statewideKeysForState, statewideBackupScope, displayFloorForView } from "./lib/counties.js";
 import { landingView, milesBetween, CLUSTER_RADIUS_MI, locatedPoints } from "./lib/landingView.js";
 import { decideTargetOf, orderVerbs, verbLabel } from "./lib/decideBar.js";
 import { addLocateControl } from "../../shared/map/locateControl.js";
@@ -3377,6 +3377,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const snapshotHitAt = (lng, lat) => snapshotHitAtLib(lng, lat, SNAPSHOT_COUNTIES);
 
   const handleClick = async (latlng, ack = null) => {
+    await ensureCountyGeometryAt(latlng.lat, latlng.lng); // NEW-1 (Memphis radius ×2) — name the county even on an early click
     // Auto-route: figure out which configured county/counties could contain this
     // point, then identify against each one's CAD service and use whatever answers.
     // No county pre-selection required; a border straddle queries both and we take
@@ -3526,6 +3527,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     // B545: when called from a search, `tok` is that search's generation; a newer search makes
     // this one stale, so we neither apply its parcelInfo NOR add its (now-wrong) parcel.
     const live = () => tok == null || tok === addrTokRef.current;
+    await ensureCountyGeometryAt(latlng.lat, latlng.lng); // NEW-1 (Memphis radius ×2)
     const { candidates, realPrimaries } = resolveCandidates(latlng);
     /* ⛔ B1597232 — A COVERAGE GAP IS NOT AN OUTAGE, AND THIS IS THE SURFACE THE WAYNE COUNTY REPORT
      * CAME IN THROUGH ("search the address, let the automatic lot lookup run"). With no candidates
