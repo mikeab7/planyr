@@ -21,6 +21,12 @@ export const ALLOWED_HOSTS = new Set([
   "www.sgrcmaps.com", // Southern Georgia Regional Commission — Tift + 10 sibling GA counties
   "mgrcmaps.org", // Middle Georgia Regional Commission
   "maps.crc.ga.gov", // Coastal Regional Commission (not yet wired to a county)
+  /* NEW-1 (Memphis 100-mile radius) — hosts this build sandbox's egress blocks, so their CORS could not be
+   * read from here; relayed server-side so the app never depends on their ACAO header. */
+  "maps.memphistn.gov", // City of Memphis GIS — hosts the Shelby County Assessor parcel basemap
+  "gis.shelbycountytn.gov", // Shelby County TN government GIS (Assessor_Parcel)
+  "gis.mississippi.edu", // MARIS (Mississippi Automated Resource Information System) statewide cadastral
+  "gis.arkansas.gov", // Arkansas GIS Office statewide parcel layer
 ]);
 
 const UPSTREAM_TIMEOUT_MS = 20000;

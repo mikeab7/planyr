@@ -105,6 +105,7 @@ import { idAttrFor } from "./lib/parcelQuery.js";
 const ParcelInfoCard = lazy(() => import("./components/ParcelInfoCard.jsx"));
 import { PanelErrorBoundary } from "./components/LazyPanel.jsx";
 import { makeParcelDisplayLayer, makeSnapshotLayer, parcelDisplayIsImageOnly, PARCEL_MINZOOM, ADD_CURSOR, REMOVE_CURSOR } from "./lib/parcelDisplay.js";
+import { parcelNoticeMayRaise, isLiveDisplayLayer, countyOutageMessage } from "./lib/parcelOutageGate.js"; // NEW-1 — one rule for "may a parcel banner be raised right now"
 import { layerInDrawRange } from "./lib/parcelDisplayZoom.js"; // V1475200 — the hang-guard may only arm while a layer is inside the zoom range it can draw in
 import { siteBoundaryInfo, siteDrawParcels } from "./lib/siteBoundary.js";
 import { skipWhileHidden } from "./lib/hiddenRenderGate.js";
@@ -2811,6 +2812,21 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
   const SLOW_DISPLAY_NOTICE_MS = 2500;
   const [slowDisplayKeys, setSlowDisplayKeys] = useState(() => new Set());
   const [outlineFloor, setOutlineFloor] = useState(PARCEL_MINZOOM); // NEW-2 — the zoom the outlines in THIS view start at (a dense statewide source declares a higher one)
+  /* NEW-1 — the ONE gate every parcel outage / "slow" banner passes (see lib/parcelOutageGate.js): Select parcels is on,
+   * the reporting layer is still a live display, and it is inside the zoom range it can draw in. A layer's hang / slow
+   * timers outlive the layer (turning the tool off removes it, not its timers), so they ask this when they FIRE. */
+  const parcelNoticeAllowed = (fl) => parcelNoticeMayRaise({
+    selectMode: selectModeRef.current,
+    layerLive: isLiveDisplayLayer(displaysRef.current, fl),
+    inDrawRange: layerInDrawRange(fl),
+  });
+  /* NEW-1 — a banner raised by a parcel source belongs to the parcel tool: when the tool ends, so does it. Retracts only
+   * the exact text this ref set (an unrelated message, e.g. an address-search failure, is left alone). */
+  const retractSourceNotice = () => {
+    const n = sourceNoticeRef.current;
+    if (n && errRef.current === n.message) setErr("");
+    sourceNoticeRef.current = null;
+  };
   const markDisplaySlow = (key, slow) => {
     setSlowDisplayKeys((prev) => {
       if (prev.has(key) === slow) return prev; // no-op — never a fresh Set (and a render) for nothing
@@ -2951,7 +2967,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         if (everDrew || slowTimer) return;
         slowTimer = setTimeout(() => {
           slowTimer = null;
-          if (displaysRef.current[key] === fl && sourceNoticeStillPlausible(displayNoticeShape(key))) markDisplaySlow(key, true);
+          if (parcelNoticeAllowed(fl) && sourceNoticeStillPlausible(displayNoticeShape(key))) markDisplaySlow(key, true);
         }, SLOW_DISPLAY_NOTICE_MS);
       };
       const onDrew = () => { everDrew = true; clearSlowTimer(); markDisplaySlow(key, false); };
@@ -2961,6 +2977,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       // banner, silently overwrites the correct message with a less accurate one.
       const onFail = () => {
         clearSlowTimer(); markDisplaySlow(key, false);
+        if (!parcelNoticeAllowed(fl)) return; // NEW-1 — tool off / layer gone / below its draw range: silence
         if (CLIENT_SNAPSHOT_COUNTIES.some((c) => downDisplaysRef.current.has(c) && getSnapshot(c))) return;
         // NEW-1 — the composite is scoped to one STATE (txgio_statewide → TX, co_statewide → CO);
         // don't say "statewide" is slow while the view has since moved to the other one.
@@ -2978,7 +2995,15 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     const stopTimer = () => { if (timer) { clearTimeout(timer); timer = null; } };
     const clearSlowTimer = () => { if (slowTimer) { clearTimeout(slowTimer); slowTimer = null; } };
     const markDown = () => {
-      if (settled) return; settled = true; stopTimer(); clearSlowTimer(); markDisplaySlow(key, false);
+      if (settled) return;
+      // NEW-1 — a timer armed while the tool was on can fire after it was turned off (or after the view left this
+      // county): the layer is already gone, so there is nothing to pull, record or announce. Retire quietly.
+      if (!parcelNoticeAllowed(fl)) {
+        // Gone (tool off / layer removed) → retire for good. Merely below its draw range → leave it armed-able for zoom-in.
+        if (!(selectModeRef.current && isLiveDisplayLayer(displaysRef.current, fl))) { settled = true; stopTimer(); clearSlowTimer(); markDisplaySlow(key, false); }
+        return;
+      }
+      settled = true; stopTimer(); clearSlowTimer(); markDisplaySlow(key, false);
       // A real county's outline request hung/errored → pull the dead layer (so the map
       // stops spinning), record the host as failing so CLICKS skip it too, and rely on
       // the TxGIO statewide outlines for this area (keep what you SEE == what you can
@@ -3007,7 +3032,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
       // county in view; never let it clobber that message with the generic one (the same
       // ordering problem the statewide handler above guards against).
       if (CLIENT_SNAPSHOT_COUNTIES.some((c) => downDisplaysRef.current.has(c) && getSnapshot(c))) return;
-      setSourceNotice({ county: key }, "That county's parcel server is slow right now — showing statewide outlines; clicking a lot still adds it.");
+      setSourceNotice({ county: key }, countyOutageMessage(statewideKeysForState(COUNTIES_MAP[key] && COUNTIES_MAP[key].state).length > 0));
     };
     // Arm the hang-timer only once a request to the host is actually in flight, so we
     // never false-flag a county just because we're zoomed out below the outline zoom
@@ -3029,7 +3054,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
         if (!settled && !slowTimer) {
           slowTimer = setTimeout(() => {
             slowTimer = null;
-            if (displaysRef.current[key] === fl && sourceNoticeStillPlausible(displayNoticeShape(key))) markDisplaySlow(key, true);
+            if (parcelNoticeAllowed(fl) && sourceNoticeStillPlausible(displayNoticeShape(key))) markDisplaySlow(key, true);
           }, SLOW_DISPLAY_NOTICE_MS);
         }
       });
@@ -3116,6 +3141,7 @@ function MapFinder({ visible, isActive = true, overlays, setOverlays, layerStatu
     });
     displaysRef.current = {};
     displaySrcRef.current = {};
+    retractSourceNotice(); // NEW-1 — the tool is off; a parcel-source banner must not outlive it
     // B1427664 — every layer is gone, so nothing is "still loading" until select mode reopens
     // them fresh; leaving stale keys here would light the tip immediately on re-entry.
     setSlowDisplayKeys((prev) => (prev.size ? new Set() : prev));
