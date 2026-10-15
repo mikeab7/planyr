@@ -87,6 +87,10 @@ const FIT_MAX = 8;
 // Fit leaves this much room round the picture: the canvas is full-bleed in the dialog now (NEW-1, 2026-10-15), so a grip
 // sitting on the picture's own edge would otherwise be half outside the clipped dialog and lose half its grab area.
 const FIT_PAD = 16;
+// Fit also keeps the picture (and so every grip on its edge) ABOVE the floating toolbar: the pill's height + its offset from
+// the bottom + a small gap. Without it the pill sat on the bottom-centre edge grip at Fit (owner, live, 2026-10-15). Pan / zoom
+// by hand may still put things under the pill — that is fine; only the framed view is promised clear.
+const FIT_BOTTOM_RESERVE = { fill: 72, compact: 56 };
 const KEY_PAN_PX = 80; // one arrow-key press; Shift = four steps
 const ZOOM_STEP = 1.25; // the +/- buttons and keys
 
@@ -205,7 +209,7 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
   // crop shapes above are stored in image px and never read it, which is what makes panning and
   // zooming unable to move a crop relative to the picture (VIEW-INDEPENDENT-ONCE in spirit — the
   // shape's own geometry has no view term).
-  const [view, setView] = useState(() => fitView(imgW, imgH, VIEW_W, VIEW_H, { pad: FIT_PAD, min: K_MIN, max: FIT_MAX, mode: "page" }));
+  const [view, setView] = useState(() => fitView(imgW, imgH, VIEW_W, VIEW_H - (fill ? FIT_BOTTOM_RESERVE.fill : FIT_BOTTOM_RESERVE.compact), { pad: FIT_PAD, min: K_MIN, max: FIT_MAX, mode: "page" }));
   const userMovedRef = useRef(false); // true once the user zooms/pans by hand; Fit resets it
   const [handTool, setHandTool] = useState(false); // NEW-3: the on-screen Pan tool (left-drag pans)
   const [spaceDown, setSpaceDown] = useState(false);
@@ -575,7 +579,7 @@ export default function ImageCropTool({ src, imgW, imgH, crop, onCommit, onCance
       beginPan(e);
     }
   };
-  const fitNow = () => fitView(imgW, imgH, VIEW_W, VIEW_H, { pad: FIT_PAD, min: K_MIN, max: FIT_MAX, mode: "page" });
+  const fitNow = () => fitView(imgW, imgH, VIEW_W, VIEW_H - (fill ? FIT_BOTTOM_RESERVE.fill : FIT_BOTTOM_RESERVE.compact), { pad: FIT_PAD, min: K_MIN, max: FIT_MAX, mode: "page" });
   const doFit = () => { userMovedRef.current = false; setView(fitNow()); };
   const do100 = () => { userMovedRef.current = true; setView((v) => zoomAround(v, 1 / v.scale, VIEW_W / 2, VIEW_H / 2, K_MIN, K_MAX)); };
   const zoomBy = (f) => { userMovedRef.current = true; setView((v) => zoomAround(v, f, VIEW_W / 2, VIEW_H / 2, K_MIN, K_MAX)); };

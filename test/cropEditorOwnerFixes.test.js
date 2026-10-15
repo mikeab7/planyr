@@ -185,3 +185,10 @@ describe("NEW-7 — scale is reachable from the Adjust site plan panel", () => {
     expect(mf).toMatch(/calibrating: !!calibration/);
   });
 });
+
+describe("Fit keeps the picture clear of the floating toolbar (owner live defect, 2026-10-15)", () => {
+  it("both Fit paths (initial and Fit) reserve the pill's height at the bottom", () => {
+    expect(tool).toMatch(/const FIT_BOTTOM_RESERVE = \{ fill: \d+, compact: \d+ \}/);
+    expect((tool.match(/VIEW_H - \(fill \? FIT_BOTTOM_RESERVE\.fill : FIT_BOTTOM_RESERVE\.compact\)/g) || []).length).toBe(2);
+  });
+});

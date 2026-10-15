@@ -103,8 +103,10 @@ check("tab is foreground", await page.evaluate(() => document.visibilityState ==
   const v = await viewBox(), b = await imgBox();
   await page.screenshot({ path: OUT + "crop-walk-1-open.png" });
   const wShare = b.width / v.w, hShare = b.height / v.h;
-  check("NEW-5: a landscape sheet fills the crop window (one dimension ≥ 95% of it, the other ≥ 85%)",
-    Math.max(wShare, hShare) >= 0.95 && Math.min(wShare, hShare) >= 0.85, JSON.stringify({ view: [v.w | 0, v.h | 0], img: [b.width | 0, b.height | 0], wShare: +wShare.toFixed(2), hShare: +hShare.toFixed(2) }));
+  // 2026-10-15: Fit now keeps the whole sheet (and every edge grip) ABOVE the floating toolbar, so the height-limited dimension is
+  // ~87% rather than 95% — the sheet is still shown big, both dimensions ≥ 80%.
+  check("NEW-5: a landscape sheet fills the crop window (the larger share ≥ 85%, the other ≥ 80%)",
+    Math.max(wShare, hShare) >= 0.85 && Math.min(wShare, hShare) >= 0.80, JSON.stringify({ view: [v.w | 0, v.h | 0], img: [b.width | 0, b.height | 0], wShare: +wShare.toFixed(2), hShare: +hShare.toFixed(2) }));
   const dv = await dlg.evaluate((el) => { const c = el.firstElementChild.getBoundingClientRect(); return { w: c.width, h: c.height, vw: innerWidth, vh: innerHeight }; });
   check("NEW-5: the dialog itself takes most of the window (≥ 90% wide, ≥ 88% tall)", dv.w >= dv.vw * 0.9 && dv.h >= dv.vh * 0.88, JSON.stringify(dv));
 }
