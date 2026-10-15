@@ -8,8 +8,9 @@ import {
   roadNetworkStats, dissolveRingsSteps, clipPolylineOutside, clusterIds, regionEdgeSegments, rectOutlineCutSegments, polygonOutlineCutSegments,
 } from "./roadNetwork.js";
 import { teeJunctionsOf, driveJunctionsOf } from "./roadJunctions.js";
+import { junctionMouthCuts, stripeRunsNearOutline } from "./roadDeco.js";
 import {
-  isCenterlineRoad, roadCurbWidth, roadStripRing, roadCurbLines, TEE_COINCIDE_FT, roadJunctionVerticesOf, roundaboutsForSite, driveJunctionCurbStripes,
+  isCenterlineRoad, roadCurbWidth, roadStripRing, roadCurbLines, TEE_COINCIDE_FT, roadJunctionVerticesOf, roundaboutsForSite, driveJunctionCurbStripes, teeJunctionCurbStripes,
 } from "./siteGeometry.js";
 
 // B960/NEW-2 — road↔road END-TO-END weld junctions for the seamless-weld render. A weld = one
@@ -87,7 +88,7 @@ export function* roadNetSteps(inp) {
    * is a different statement — a hidden road contributes nothing at all, including its junctions —
    * so it is filtered, and the two filters stay distinct. */
   const roads = (els || []).filter((x) => isCenterlineRoad(x) && !x.attachedTo && !elHidden(hiddenGroups, x));
-  if (!roads.length) return { regions: [], stripes: new Map(), outlineCuts: new Map(), memberIds: new Set(), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
+  if (!roads.length) return { regions: [], stripes: new Map(), outlineCuts: new Map(), memberIds: new Set(), decoDomains: new Map(), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
   const byId = new Map(roads.map((r) => [r.id, r]));
   const strip = new Map();
   for (const r of roads) { strip.set(r.id, roadStripRing(r, settings, sharpFor(r), roundabouts.trims.get(r.id))); yield; }
@@ -129,6 +130,8 @@ export function* roadNetSteps(inp) {
     if (!padCut.has(dj.sideId)) padCut.set(dj.sideId, []);
     padCut.get(dj.sideId).push(ring);
   }
+  /* NEW-1 (2026-10-15) — where each road's decoration ENDS at a junction (roadDeco.js). Computed here because the stripes below honour the side-road cuts too. */
+  const mouth = junctionMouthCuts({ teeJunctions: teeJunctions.filter((tj) => byId.has(tj.sideId) && byId.has(tj.throughId)), driveJunctions, byId });
   // NEW-5 — a roundabout's circulatory sectors + its curb returns are ADDITIVE pavement in exactly
   // the same sense a tee's wedges are, so they go through the SAME union: one region, one
   // continuous curb outline, and the central island falls out as a genuine PolyTree hole.
@@ -183,6 +186,10 @@ export function* roadNetSteps(inp) {
       for (const oid of ids) others.push(...extra.get(oid));
       others.push(...stripeCut);
       others.push(...(padCut.get(id) || []));   // a curb stripe stops at the court face too
+      /* NEW-1 — and a SIDE road's own face-of-curb stripes end where its returns leave its edges (the throat cut). Left to run on, the straight stripe
+       * carried along the strip edge THROUGH the interior of the merged pavement beside the fillet — a line between the road's body and its curve. The
+       * return's own inset stripe (below) takes over from that point. (A through road's far stripe is NOT in this set — it runs on across the mouth.) */
+      others.push(...(mouth.side.get(id) || []));
       const clipped = roadCurbLines(byId.get(id), settings, sharpFor(byId.get(id)), roundabouts.trims.get(id)).flatMap((cl) => clipPolylineOutside(cl, others));
       // NEW-1 — a road ending at a drive junction (a paving/parking pad edge) left its inner
       // face-of-curb stripe clipped dead right at the fillet's own tangent point: the straight
@@ -191,11 +198,27 @@ export function* roadNetSteps(inp) {
       // surface — a seam of decoration, not of geometry. `driveJunctionCurbStripes`
       // (siteGeometry.js) continues the same line around the return; see its header.
       const filletStripes = driveJunctionCurbStripes(driveJunctions.filter((dj) => dj.sideId === id), roadCurbWidth(byId.get(id)));
-      stripes.set(id, [...clipped, ...filletStripes]);
+      // NEW-1 (2026-10-15) — and the same continuation around a road-to-ROAD tee's returns (the stripe used to stop dead at the fillet)
+      const fullRings = full.flatMap((q) => [q.outer, ...q.holes]);
+      const cwId = roadCurbWidth(byId.get(id));
+      const teeStripes = teeJunctionCurbStripes(teeJunctions.filter((tj) => tj.sideId === id && byId.has(tj.throughId)), cwId);
+      // a return's stripe belongs a curb-width inside the pavement's OUTLINE — keep only the runs that do (see stripeRunsNearOutline)
+      const returnStripes = [...filletStripes, ...teeStripes].flatMap((l) => stripeRunsNearOutline(l, fullRings, cwId));
+      stripes.set(id, [...clipped, ...returnStripes]);
       yield;
     }
   }
   regions.sort((a, b) => a.zKey - b.zKey);
+  /* NEW-1 (2026-10-15) — WHERE EACH ROAD'S DECORATION MAY PAINT (see roadDeco.js): the road's own strip with the junction throats (and any pad it ends at)
+   * taken out. Only roads that actually have a cut or a pad get an entry; every other road keeps its plain strip ring. Rings in world feet, evenodd. */
+  const decoDomains = new Map();
+  for (const r of roads) {
+    const s = strip.get(r.id);
+    const cut = [...(mouth.all.get(r.id) || []), ...(padCut.get(r.id) || [])];
+    if (!cut.length || !s || s.length < 3) continue;
+    const dom = yield* dissolveRingsSteps([s], { subtract: cut });
+    decoDomains.set(r.id, dom.flatMap((d) => [d.outer, ...d.holes]));
+  }
   // NEW-4 — a road that TEES INTO A RECT (a parking field, a truck court) leaves that rect's own
   // outline drawn straight across the drive opening: the owner's screenshot, and the same defect the
   // road↔road case already fixed, one layer out. A junction reads as one continuous curb around the
@@ -208,7 +231,7 @@ export function* roadNetSteps(inp) {
     if (!cutters.length) continue;
     outlineCuts.set(dj.targetId, [...(outlineCuts.get(dj.targetId) || []), ...cutters]);
   }
-  return { regions, stripes, outlineCuts, memberIds: new Set(roads.map((r) => r.id)), junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
+  return { regions, stripes, outlineCuts, memberIds: new Set(roads.map((r) => r.id)), decoDomains, junctionVerts: roadJunctionVerts, trims: roundabouts.trims, roundabouts: roundabouts.geoms };
 }
 export const driveSteps = (gen) => { for (;;) { const r = gen.next(); if (r.done) return r.value; } };
 

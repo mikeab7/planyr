@@ -324,11 +324,64 @@ export function driveJunctionCurbStripes(driveJunctionsForRoad, curbWidth) {
   for (const dj of driveJunctionsForRoad || []) {
     const sideTans = (dj.geom && dj.geom.sideTangents) || [];
     const returns = (dj.geom && dj.geom.returns) || [];
+    const corners = (dj.geom && dj.geom.corners) || [];
     for (let k = 0; k < returns.length; k++) {
-      const inset = insetArcTowardCenter(returns[k], curbWidth);
+      // NEW-1 (2026-10-15) — the face-of-curb stripe sits INSIDE the pavement. On a curb RETURN the arc's centre is
+      // out in the grass, so "toward the centre" (the shorter offset) put it a curb-width OUTSIDE the pavement — a
+      // one-curb jog against the straight stripe either side. The corner (where the two straight edges would meet)
+      // is on the PAVEMENT side of the arc, so offset toward it. A caller with no corner keeps the old choice.
+      const inset = corners[k] ? insetArcTowardCorner(returns[k], corners[k], curbWidth) : insetArcTowardCenter(returns[k], curbWidth);
       if (!inset) continue;
       const extended = extendInsetTowardSideTangent(inset, sideTans[k]);
       if (extended && extended.length >= 2) out.push(extended);
+    }
+  }
+  return out;
+}
+/* The curb return's inset toward the PAVEMENT: whichever of the two ±`dist` offsets of `arc` has its middle point
+ * nearer `corner` (the point where the two straight curb lines the fillet joins would meet — always on the pavement
+ * side of a return, whatever the winding). */
+export function insetArcTowardCorner(arc, corner, dist) {
+  if (!Array.isArray(arc) || arc.length < 2 || !(dist > 0) || !corner) return null;
+  const a = offsetPolyline(arc, dist), b = offsetPolyline(arc, -dist);
+  const ok = (l) => Array.isArray(l) && l.length >= 2;
+  if (!ok(a)) return ok(b) ? b : null;
+  if (!ok(b)) return a;
+  const mid = (l) => l[Math.floor(l.length / 2)];
+  const da = Math.hypot(mid(a).x - corner.x, mid(a).y - corner.y), db = Math.hypot(mid(b).x - corner.x, mid(b).y - corner.y);
+  return da <= db ? a : b;
+}
+/* Extend BOTH ends of a polyline `ft` further along their own end tangents. */
+export function extendBothEnds(pts, ft) {
+  if (!Array.isArray(pts) || pts.length < 2 || !(ft > 0)) return pts;
+  const out = pts.slice();
+  const dir = (p, q) => { const L = Math.hypot(q.x - p.x, q.y - p.y) || 1; return { x: (q.x - p.x) / L, y: (q.y - p.y) / L }; };
+  const d0 = dir(pts[1], pts[0]), dN = dir(pts[pts.length - 2], pts[pts.length - 1]);
+  out.unshift({ x: pts[0].x + d0.x * ft, y: pts[0].y + d0.y * ft });
+  out.push({ x: pts[pts.length - 1].x + dN.x * ft, y: pts[pts.length - 1].y + dN.y * ft });
+  return out;
+}
+/* NEW-1 (2026-10-15) — the same continuation for a road-to-ROAD tee. `nodeJunction`'s corners next to the SIDE arm
+ * (`gaps` whose `a` or `b` is arm 2) each get a return; the side road's face-of-curb stripe is clipped dead against
+ * the wedge, and the through road's near stripe is cut across the throat, so each ended in a stub at the fillet.
+ * The inset arc joins the two. Both ends are lengthened by `TEE_STRIPE_OVERLAP_FT` (the wedge's own overshoot cap is
+ * 6 ft) so it overlaps whatever length of the straight stripe the clip left — collinear, so the overlap is invisible. */
+export const TEE_STRIPE_OVERLAP_FT = 6.5;
+export function teeJunctionCurbStripes(teeJunctionsForSide, curbWidth) {
+  const out = [];
+  for (const tj of teeJunctionsForSide || []) {
+    for (const g of (tj.geom && tj.geom.gaps) || []) {
+      if (!(g.a === 2 || g.b === 2) || !(g.R > 0) || !Array.isArray(g.arc) || g.arc.length < 2) continue;
+      const inset = insetArcTowardCorner(g.arc, g.corner, curbWidth);
+      if (!inset) continue;
+      /* Each end continues along the STRAIGHT EDGE it is tangent to — the line from the corner through the tangent point — not along the last chord of the
+       * tessellated arc, which tilts a few degrees off it and would leave a sliver off the straight stripe at 6 ft out. */
+      const dirFrom = (tan) => { const L = Math.hypot(tan.x - g.corner.x, tan.y - g.corner.y) || 1; return { x: (tan.x - g.corner.x) / L, y: (tan.y - g.corner.y) / L }; };
+      const ext = (end, tan) => { const d = dirFrom(tan); return { x: end.x + d.x * TEE_STRIPE_OVERLAP_FT, y: end.y + d.y * TEE_STRIPE_OVERLAP_FT }; };
+      const first = inset[0], last = inset[inset.length - 1];
+      const dist = (p, q) => Math.hypot(p.x - q.x, p.y - q.y);
+      const firstIsA = dist(first, g.tanA) <= dist(first, g.tanB);
+      out.push([ext(first, firstIsA ? g.tanA : g.tanB), ...inset, ext(last, firstIsA ? g.tanB : g.tanA)]);
     }
   }
   return out;
