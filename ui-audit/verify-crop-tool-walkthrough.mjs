@@ -120,7 +120,7 @@ check("tab is foreground", await page.evaluate(() => document.visibilityState ==
 }
 
 /* ---- NEW-3: on-screen zoom and pan controls exist ---------------------------------------------- */
-for (const id of ["crop-zoom-out", "crop-zoom-in", "crop-zoom-slider", "crop-zoom-fit", "crop-zoom-100", "crop-pan-tool", "crop-undo", "crop-redo"]) {
+for (const id of ["crop-zoom-out", "crop-zoom-in", "crop-zoom-fit", "crop-zoom-100", "crop-pan-tool", "crop-undo", "crop-redo"]) {
   check(`control present: ${id}`, (await dlg.locator(`[data-testid="${id}"]`).count()) === 1);
 }
 check("NEW-4: Undo and Redo are visible buttons, both disabled before any edit",
@@ -241,7 +241,7 @@ check("polygon saved (kind poly, 6 points)", !!s2 && s2.kind === "poly" && s2.pt
 await openCrop();
 await dlg.locator("button", { hasText: "Rectangle" }).click();
 await page.waitForTimeout(150);
-check("NEW-2: in Rectangle mode the button says 'Reset to full page' and is ENABLED (a polygon is still saved)", await dlg.locator('[data-testid="crop-reset"]').isEnabled());
+check("NEW-2: in Rectangle mode Reset is ENABLED (a polygon is still saved)", await dlg.locator('[data-testid="crop-reset"]').isEnabled());
 await dlg.locator('[data-testid="crop-reset"]').click(); await page.waitForTimeout(150);
 await dlg.locator("button", { hasText: "Polygon" }).click(); await page.waitForTimeout(150);
 check("NEW-2: switching to Polygon after the Reset shows the full-page quad, not the old 6-point polygon", (await vertexCount()) === 4);

@@ -424,7 +424,7 @@ check("the poly crop survives a Rectangle<->Polygon round trip unchanged", !!(af
   await page.mouse.move(dragFrom.x + rib.width * 0.3, dragFrom.y + rib.height * 0.3, { steps: 8 });
   await page.mouse.up();
   await page.waitForTimeout(150);
-  check("[setup] the rect draft is no longer the full page after dragging it", await d.locator("button", { hasText: "Reset to full page" }).isEnabled());
+  check("[setup] the rect draft is no longer the full page after dragging it", await d.locator('[data-testid="crop-reset"]').isEnabled());
   await d.locator("button", { hasText: "Done" }).click();
   await page.waitForTimeout(300);
   const afterRealRectSave = await storedCrop();
@@ -473,7 +473,7 @@ box = await imgBox();
 for (const [fx, fy] of [[0.3, 0.3], [0.7, 0.3], [0.7, 0.7]]) { const p = at(fx, fy); await page.mouse.click(p.x, p.y); await page.waitForTimeout(80); }
 { const p = at(0.3, 0.3); await page.mouse.click(p.x, p.y); await page.waitForTimeout(150); } // close on the first vertex
 check("[setup] a real 3-vertex polygon drawn and closed", (await vertexCount()) === 3, `count=${await vertexCount()}`);
-await d.locator("button", { hasText: "Reset to full page" }).click();
+await d.locator('[data-testid="crop-reset"]').click();
 await page.waitForTimeout(150);
 await d.locator("button", { hasText: "Done" }).click();
 await page.waitForTimeout(300);

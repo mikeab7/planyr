@@ -92,7 +92,7 @@ try {
     await page.waitForTimeout(1500);
     const p = await page.evaluate((lp) => {
       const m = document.querySelector('[data-testid="site-plan-crop-modal"]'); const topIn = (x, y) => { const e = document.elementFromPoint(x, y); return !!(e && e.closest('[data-testid="site-plan-crop-modal"]')); };
-      const tb = m.querySelector('[data-testid="crop-toolbar"]'), ft = m.querySelector('[data-testid="crop-footer"]'), cv = m.querySelector('[data-testid="crop-canvas"]'), sh = m.firstElementChild;
+      const tb = m.querySelector('[data-testid="crop-toolbar"]'), ft = m.querySelector('[data-testid="crop-header"]'), cv = m.querySelector('[data-testid="crop-canvas"]'), sh = m.firstElementChild;
       const cen = (el) => Array.from(el.children).filter((c) => c.getBoundingClientRect().width > 0).map((c) => { const b = c.getBoundingClientRect(); return Math.round(b.top + b.height / 2); });
       const spread = (a) => Math.max(...a) - Math.min(...a); const r = tb.getBoundingClientRect();
       return { tb: topIn(r.left + 30, r.top + r.height / 2), layers: topIn(lp.x, lp.y), corner: topIn(window.innerWidth - 20, 20), body: m.parentElement === document.body, adjust: !!document.querySelector('[data-testid="site-plan-adjust-panel"]'),
@@ -103,7 +103,7 @@ try {
     if (!p.tb) throw new Error("VOID arm");
     check("'Imagery & layers' does not paint over the modal; corner under the modal too", p.layers && p.corner);
     check("modal portaled to <body>; Adjust panel not on screen while cropping", p.body && !p.adjust);
-    check("one toolbar line, one footer line, one zoom readout on the 100% control, canvas ≥ 80% of the modal", p.tbSpread <= 3 && p.ftSpread <= 3 && p.pct === 0 && /^\d+%$/.test(p.zoomTxt) && p.frac >= 0.8, JSON.stringify({ tb: p.tbSpread, ft: p.ftSpread, frac: +p.frac.toFixed(2), z: p.zoomTxt }));
+    check("one toolbar line, one header row, one zoom readout on the 100% control, canvas ≥ 80% of the modal", p.tbSpread <= 3 && p.ftSpread <= 3 && p.pct === 0 && /^\d+%$/.test(p.zoomTxt) && p.frac >= 0.8, JSON.stringify({ tb: p.tbSpread, ft: p.ftSpread, frac: +p.frac.toFixed(2), z: p.zoomTxt }));
     await page.screenshot({ path: OUT + "crop-live-modal.png" });
     await page.locator('[data-testid="site-plan-crop-modal"] button', { hasText: "Cancel" }).click();
     await page.waitForTimeout(800);
