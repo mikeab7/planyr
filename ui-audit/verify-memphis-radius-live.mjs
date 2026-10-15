@@ -135,7 +135,10 @@ async function flowA(arm) {
     const build = await stamp();
     if (got && got.kind === "lot") {
       // The lot as the app holds it (read-only hook); the wire is only the fallback for a build without the hook.
-      const held = await page.evaluate(() => (window.__mapSelectedParcels ? window.__mapSelectedParcels() : null)).catch(() => null);
+      // The outline is painted at once from the display layer (B441 optimistic highlight) and the record is rebuilt when the
+      // county's point identify answers — on a slow host (Arkansas) that is seconds later. Wait for the identified record.
+      const heldNow = () => page.evaluate(() => (window.__mapSelectedParcels ? window.__mapSelectedParcels() : null)).catch(() => null);
+      const held = await waitFor(async () => { const h = await heldNow(); const x = h && h[h.length - 1]; return x && (x.acct || idOf(x.attrs)) ? h : null; }, 20000) || await heldNow();
       const h = held && held[held.length - 1];
       const lot = h ? { id: h.acct || idOf(h.attrs), owner: ownerOf(h.attrs), acres: ringsAcres({ rings: h.rings }, { wkid: 4326 }), layer: h.county } : lotFromWire(since);
       const acresShown = /\bac\b/i.test(got.sm);
