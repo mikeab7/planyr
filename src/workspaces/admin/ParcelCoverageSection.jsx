@@ -41,18 +41,17 @@ let wheelHintShown = false; // "Use Ctrl + scroll to zoom" is shown the first ti
  * shared chunks, which then load on a plain Site route and breach the Site-route allowlist. A dynamic
  * import leaves the registry in the chunk the planner already ships it in. */
 async function loadRegistry() {
-  const [c, poly, prov, city] = await Promise.all([
+  const [c, poly, prov] = await Promise.all([
     import("../site-planner/lib/counties.js"),
     import("../site-planner/lib/countyPolygons.js"),
     import("../site-planner/lib/countiesProvenance.js"),
-    import("../site-planner/lib/cityScopes.js"),
   ]);
   return {
     setCountyPolygons: poly.setCountyPolygons,
     registry: {
       countiesMap: c.COUNTIES_MAP, counties: c.COUNTIES, keyForName: c.countyKeyForName,
       statewideKeysForState: c.statewideKeysForState, isStatewideUrl: c.isStatewideLayerUrl,
-      verification: prov.COUNTY_VERIFICATION, cityScopes: city.CITY_SCOPE_COUNTIES,
+      verification: prov.COUNTY_VERIFICATION, cityScopes: c.CITY_SCOPE_COUNTIES,
     },
   };
 }
