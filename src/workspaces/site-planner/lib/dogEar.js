@@ -124,6 +124,44 @@ export function wallStripBox(b, side, bumps = [], depth) {
   return { ...wallKidBox(b, side, { depth, gap: 0, ...span }), ...span };
 }
 
+/* NEW-1 (wall layers) — a landscape BUFFER added to a wall through the Docks & walls strip is a FLUSH LAYER: it sits
+ * beyond whatever is inboard of it (sidewalk, parking), so only its length ALONG the wall is derived. Treating it as
+ * a wall strip snapped it flush to the wall, on top of the sidewalk — the panel listed Walk + Buffer, the canvas
+ * drew only the buffer. A landscape strip that names its wall (`sidewalkSide`) is the legacy kind and stays derived. */
+export const isFlushWallLayer = (x) => !!x && x.type === "landscape" && !x.sidewalkSide && !x.noFit;
+
+/* The derived box of a wall strip. A flush layer keeps its CURRENT perpendicular position (the caller repacks it
+ * beyond what is inboard); everything else is flush to the wall as before. */
+export function wallStripBoxFor(b, side, bumps, depth, kid, minInner = 0) {
+  const box = wallStripBox(b, side, bumps, depth);
+  if (!isFlushWallLayer(kid) || !Number.isFinite(kid.cx) || !Number.isFinite(kid.cy)) return box;
+  const l = rot2(kid.cx - b.cx, kid.cy - b.cy, -(b.rot || 0));
+  const isVert = side === "left" || side === "right";
+  const [nx, ny] = SIDE_N[side];
+  const sg = isVert ? nx : ny;
+  // `minInner` = how far from the host centre the layers inboard of it reach (the wall face at least): a
+  // flush layer that sits inside that is pushed out to start there — never pulled in, never left on top of them.
+  const want = sg * (isVert ? l.x : l.y), floor = (isVert ? b.w : b.h) / 2;
+  const perp = Math.max(want, Math.max(floor, minInner) + depth / 2);
+  return isVert ? { ...box, lx: sg * perp } : { ...box, ly: sg * perp };
+}
+
+/* How far from the host centre the DERIVED layers inboard of a flush layer reach on `side` (the wall face when
+ * there are none). `others` = the bonded kids of the host the caller already knows are not flush layers. */
+export function inboardReach(b, side, others) {
+  const isVert = side === "left" || side === "right";
+  const [nx, ny] = SIDE_N[side];
+  const sg = isVert ? nx : ny;
+  let reach = (isVert ? b.w : b.h) / 2;
+  for (const k of others) {
+    if (!k || k.points || !Number.isFinite(k.cx) || !Number.isFinite(k.cy)) continue;
+    const l = rot2(k.cx - b.cx, k.cy - b.cy, -(b.rot || 0));
+    const { dimBX, dimBY } = hostAxisExtents(b, k);
+    reach = Math.max(reach, sg * (isVert ? l.x : l.y) + (isVert ? dimBX : dimBY) / 2);
+  }
+  return reach;
+}
+
 /* ---- NEW-1/NEW-2: a wall's side parking is a STACK, not a single field ------------------------
  *
  * Exploding a parking field ("Split rows/aisles") replaces ONE 60 ft double-loaded module with
